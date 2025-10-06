@@ -1,0 +1,33 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>{% block title %}📋 Конструктор акта{% endblock %}</title>
+
+    <!-- CSS -->
+    <link rel="stylesheet" href="{{ url_for('static', path='/css/main.css') }}">
+    <link rel="stylesheet" href="{{ url_for('static', path='/css/tree.css') }}">
+    <link rel="stylesheet" href="{{ url_for('static', path='/css/table.css') }}">
+    <link rel="stylesheet" href="{{ url_for('static', path='/css/preview.css') }}">
+
+    {% block extra_css %}{% endblock %}
+</head>
+<body>
+    {% include 'components/header.html' %}
+
+    <div class="container">
+        {% block content %}{% endblock %}
+    </div>
+
+    <!-- JavaScript -->
+    <script src="{{ url_for('static', path='/js/state.js') }}"></script>
+    <script src="{{ url_for('static', path='/js/tree.js') }}"></script>
+    <script src="{{ url_for('static', path='/js/table.js') }}"></script>
+    <script src="{{ url_for('static', path='/js/preview.js') }}"></script>
+    <script src="{{ url_for('static', path='/js/api.js') }}"></script>
+    <script src="{{ url_for('static', path='/js/main.js') }}"></script>
+
+    {% block extra_js %}{% endblock %}
+</body>
+</html>

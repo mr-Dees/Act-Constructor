@@ -1,0 +1,116 @@
+.table-section {
+    margin: 30px 0;
+    padding: 25px;
+    background: #f8f9fa;
+    border-radius: 15px;
+}
+
+.table-section h3 {
+    color: #667eea;
+    margin-bottom: 15px;
+}
+
+.editable-table {
+    width: 100%;
+    border-collapse: collapse;
+    background: white;
+    border-radius: 10px;
+    overflow: hidden;
+    box-shadow: 0 2px 8px rgba(0,0,0,0.1);
+    table-layout: auto; /* Автоматическое распределение ширины */
+}
+
+.editable-table th,
+.editable-table td {
+    border: 1px solid #dee2e6;
+    padding: 12px;
+    text-align: left;
+    position: relative;
+    min-width: 80px; /* Увеличена минимальная ширина */
+    min-height: 40px;
+    word-wrap: break-word;
+    overflow-wrap: break-word;
+}
+
+.editable-table th {
+    background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+    color: white;
+    font-weight: bold;
+    cursor: col-resize;
+}
+
+.editable-table td {
+    cursor: cell;
+}
+
+.editable-table td.selected,
+.editable-table th.selected {
+    background: #e7f3ff;
+    outline: 2px solid #667eea;
+}
+
+.editable-table th.selected {
+    background: linear-gradient(135deg, #5568d3 0%, #6a3f8f 100%);
+}
+
+.editable-table td.editing {
+    padding: 0;
+}
+
+.editable-table td.editing input {
+    width: 100%;
+    height: 100%;
+    border: none;
+    padding: 12px;
+    font-family: inherit;
+    font-size: inherit;
+    box-sizing: border-box;
+}
+
+/* Объединенные ячейки */
+.editable-table td[colspan],
+.editable-table td[rowspan] {
+    background: #f8f9fa;
+    vertical-align: top;
+}
+
+/* Объединенные ячейки занимают больше места для текста */
+.editable-table td[colspan] {
+    width: auto;
+    max-width: none;
+}
+
+.editable-table td[rowspan] {
+    height: auto;
+    max-height: none;
+}
+
+.resize-handle {
+    position: absolute;
+    right: 0;
+    top: 0;
+    width: 5px;
+    height: 100%;
+    cursor: col-resize;
+    background: transparent;
+    z-index: 10;
+}
+
+.resize-handle:hover {
+    background: rgba(255,255,255,0.3);
+}
+
+.row-resize-handle {
+    position: absolute;
+    bottom: 0;
+    left: 0;
+    width: 100%;
+    height: 5px;
+    cursor: row-resize;
+    background: transparent;
+    z-index: 10;
+}
+
+.row-resize-handle:hover {
+    background: rgba(0,0,0,0.1);
+}

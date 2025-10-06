@@ -1,0 +1,54 @@
+UI_for_EP_v_KAP/
+├── app/
+│   ├── __init__.py
+│   ├── main.py
+│   ├── api/
+│   │   ├── __init__.py
+│   │   └── v1/
+│   │       ├── __init__.py
+│   │       ├── routes.py
+│   │       └── endpoints/
+│   │           ├── __init__.py
+│   │           └── acts.py
+│   ├── core/
+│   │   ├── __init__.py
+│   │   └── config.py
+│   ├── formatters/
+│   │   ├── __init__.py
+│   │   ├── base.py
+│   │   └── text_formatter.py
+│   ├── schemas/
+│   │   ├── __init__.py
+│   │   └── act.py
+│   └── services/
+│       ├── __init__.py
+│       ├── act_service.py
+│       └── storage_service.py
+├── DB/
+│   └── acts/
+│       └── (здесь будут сохраняться файлы актов)
+├── templates/
+│   └── constructor.html
+├── static/
+│   └── css/
+│       └── (CSS файлы)
+├── requirements.txt
+└── .env
+
+
+
+Браузер открывает http://localhost:8000/
+          ↓
+    app/main.py (@app.get("/"))
+          ↓
+    templates/constructor.html
+          ↓
+JavaScript отправляет POST /api/v1/save
+          ↓
+    app/api/v1/routes.py (prefix="/api/v1")
+          ↓
+    app/api/v1/endpoints/acts.py (@router.post("/save"))
+          ↓
+    app/services/act_service.py
+          ↓
+    DB/acts/act_20251002_151700.txt

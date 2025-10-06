@@ -1,0 +1,35 @@
+{% extends "base.html" %}
+
+{% block title %}📋 Конструктор акта{% endblock %}
+
+{% block content %}
+<div class="content">
+    <!-- Шаг 1: Структура документа -->
+    <div id="step1" class="step-content">
+        <div class="two-columns">
+            {% include 'components/tree_panel.html' %}
+            {% include 'components/preview_panel.html' %}
+        </div>
+    </div>
+
+    <!-- Шаг 2: Таблицы -->
+    <div id="step2" class="step-content hidden">
+        <h2>✏️ Используйте:</h2>
+        <ul style="color: #666; margin-bottom: 20px; line-height: 2;">
+            <li><strong>Клик на ячейку</strong> для выбора (Ctrl+клик для выбора нескольких)</li>
+            <li><strong>Наведение на правую границу заголовка</strong> для изменения ширины колонки</li>
+            <li><strong>Наведение на нижнюю границу ячейки</strong> для изменения высоты строки</li>
+            <li><strong>Двойной клик</strong> на заголовок или содержание для редактирования текста</li>
+            <li><strong>ПКМ на ячейке</strong> для объединения/разделения ячеек</li>
+        </ul>
+        <div id="tablesContainer"></div>
+        <div class="action-buttons">
+            <button id="backBtn" class="btn btn-secondary">← Назад</button>
+            <button id="generateBtn" class="btn btn-primary">🚀 Сформировать акт</button>
+        </div>
+    </div>
+</div>
+
+<!-- Контекстное меню -->
+{% include 'components/context_menu.html' %}
+{% endblock %}

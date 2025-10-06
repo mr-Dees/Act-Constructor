@@ -1,0 +1,67 @@
+.tree-container {
+    background: white;
+    padding: 20px;
+    border-radius: 10px;
+    max-height: 600px;
+    overflow-y: auto;
+}
+
+.tree {
+    list-style: none;
+}
+
+.tree-item {
+    margin: 8px 0;
+    padding: 12px;
+    background: #f8f9fa;
+    border-radius: 8px;
+    cursor: pointer;
+    transition: all 0.3s;
+    user-select: none;
+}
+
+.tree-item:hover {
+    background: #e9ecef;
+    transform: translateX(5px);
+}
+
+.tree-item.selected {
+    background: #667eea;
+    color: white;
+}
+
+.tree-item.protected {
+    background: #fff3cd;
+    border-left: 4px solid #ffc107;
+}
+
+.tree-item .tree-label {
+    display: inline-block;
+    padding: 5px 10px;
+}
+
+.tree-item.editing .tree-label {
+    background: white;
+    border: 2px solid #667eea;
+    border-radius: 4px;
+    outline: none;
+}
+
+.tree-children {
+    list-style: none;
+    margin-left: 30px;
+    padding-left: 15px;
+    border-left: 2px solid #dee2e6;
+}
+
+.toggle-icon {
+    display: inline-block;
+    width: 20px;
+    margin-right: 5px;
+    cursor: pointer;
+    user-select: none;
+}
+
+.tree-item.collapsed > .tree-children {
+    display: none;
+}
