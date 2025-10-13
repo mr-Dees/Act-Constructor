@@ -3,6 +3,7 @@
     padding: 25px;
     background: #f8f9fa;
     border-radius: 15px;
+    overflow: visible;
 }
 
 .table-section h3 {
@@ -15,9 +16,11 @@
     border-collapse: collapse;
     background: white;
     border-radius: 10px;
-    overflow: hidden;
+    overflow: visible;
     box-shadow: 0 2px 8px rgba(0,0,0,0.1);
-    table-layout: auto; /* Автоматическое распределение ширины */
+    table-layout: auto;
+    margin: 10px;
+    width: calc(100% - 20px);
 }
 
 .editable-table th,
@@ -26,10 +29,13 @@
     padding: 12px;
     text-align: left;
     position: relative;
-    min-width: 80px; /* Увеличена минимальная ширина */
+    min-width: 50px;
+    max-width: 500px;
     min-height: 40px;
+    max-height: 200px;
     word-wrap: break-word;
     overflow-wrap: break-word;
+    height: 40px;
 }
 
 .editable-table th {
@@ -37,6 +43,8 @@
     color: white;
     font-weight: bold;
     cursor: col-resize;
+    position: relative;
+    height: 45px;
 }
 
 .editable-table td {
@@ -46,7 +54,8 @@
 .editable-table td.selected,
 .editable-table th.selected {
     background: #e7f3ff;
-    outline: 2px solid #667eea;
+    outline: 3px solid #667eea;
+    outline-offset: 2px;
 }
 
 .editable-table th.selected {
@@ -55,16 +64,21 @@
 
 .editable-table td.editing {
     padding: 0;
+    height: 40px;
 }
 
 .editable-table td.editing input {
-    width: 100%;
-    height: 100%;
+    width: calc(100% - 6px);
+    height: 40px;
     border: none;
     padding: 12px;
     font-family: inherit;
     font-size: inherit;
     box-sizing: border-box;
+    outline: none;
+    background: transparent;
+    margin: 0;
+    min-height: 40px;
 }
 
 /* Объединенные ячейки */
@@ -74,7 +88,6 @@
     vertical-align: top;
 }
 
-/* Объединенные ячейки занимают больше места для текста */
 .editable-table td[colspan] {
     width: auto;
     max-width: none;
@@ -87,30 +100,106 @@
 
 .resize-handle {
     position: absolute;
-    right: 0;
+    right: -5px;
     top: 0;
-    width: 5px;
+    width: 8px;
     height: 100%;
     cursor: col-resize;
     background: transparent;
-    z-index: 10;
+    z-index: 20;
+    opacity: 0;
+    transition: all 0.2s ease;
+    border-right: 2px solid transparent;
 }
 
 .resize-handle:hover {
-    background: rgba(255,255,255,0.3);
+    background: rgba(102, 126, 234, 0.35);
+    border-right: 3px solid #667eea !important;
+    box-shadow: 0 0 8px rgba(102, 126, 234, 0.4);
+    right: -6px;
+    width: 10px;
+    opacity: 1;
 }
 
 .row-resize-handle {
     position: absolute;
-    bottom: 0;
+    bottom: -5px;
     left: 0;
     width: 100%;
-    height: 5px;
+    height: 8px;
     cursor: row-resize;
     background: transparent;
-    z-index: 10;
+    z-index: 20;
+    opacity: 0;
+    transition: all 0.2s ease;
+    border-bottom: 2px solid transparent;
 }
 
 .row-resize-handle:hover {
-    background: rgba(0,0,0,0.1);
+    background: rgba(102, 126, 234, 0.35);
+    border-bottom: 3px solid #667eea !important;
+    box-shadow: 0 0 8px rgba(102, 126, 234, 0.4);
+    bottom: -6px;
+    height: 10px;
+    opacity: 1;
+}
+
+/* Показать ручки при наведении на ячейку */
+.editable-table td:hover .resize-handle,
+.editable-table th:hover .resize-handle {
+    opacity: 1;
+    background: rgba(102, 126, 234, 0.2);
+    border-right-color: rgba(102, 126, 234, 0.6);
+}
+
+.editable-table td:hover .row-resize-handle,
+.editable-table th:hover .row-resize-handle {
+    opacity: 1;
+    background: rgba(102, 126, 234, 0.2);
+    border-bottom-color: rgba(102, 126, 234, 0.6);
+}
+
+/* Предотвратить конфликты с ручками */
+.editable-table td:hover,
+.editable-table th:hover {
+    position: relative;
+    z-index: 10;
+    box-shadow: inset 0 0 0 1px rgba(102, 126, 234, 0.1);
+}
+
+/* Убрать ручки во время редактирования */
+.editable-table td.editing .resize-handle,
+.editable-table td.editing .row-resize-handle {
+    display: none;
+}
+
+.editable-table.resizing {
+    user-select: none;
+}
+
+.editable-table.resizing * {
+    pointer-events: none;
+}
+
+.editable-table.resizing .resize-handle,
+.editable-table.resizing .row-resize-handle {
+    pointer-events: auto;
+}
+
+/* Базовая видимость ручек */
+.editable-table th .resize-handle,
+.editable-table td .resize-handle,
+.editable-table th .row-resize-handle,
+.editable-table td .row-resize-handle {
+    opacity: 0.2;
+}
+
+/* Полная видимость при наведении */
+.editable-table th:hover .resize-handle,
+.editable-table td:hover .resize-handle,
+.editable-table th:hover .row-resize-handle,
+.editable-table td:hover .row-resize-handle,
+.resize-handle:hover,
+.row-resize-handle:hover {
+    opacity: 1;
 }

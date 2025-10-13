@@ -1,7 +1,6 @@
 """Эндпоинты для работы с актами."""
 
 from fastapi import APIRouter
-
 from app.schemas.act import ActDataSchema, ActSaveResponse
 from app.services.act_service import ActService
 
@@ -9,7 +8,6 @@ router = APIRouter()
 
 # Инициализация сервиса
 act_service = ActService()
-
 
 @router.post("/save", response_model=ActSaveResponse)
 async def save_act(data: ActDataSchema):
@@ -22,8 +20,7 @@ async def save_act(data: ActDataSchema):
     Returns:
         Результат сохранения с путем к файлу
     """
-    return act_service.save_act(data.dict())
-
+    return act_service.save_act(data.model_dump())
 
 @router.get("/history")
 async def get_acts_history():
@@ -35,3 +32,16 @@ async def get_acts_history():
     """
     acts = act_service.get_act_history()
     return {"acts": acts}
+
+@router.post("/generate", response_model=ActSaveResponse)
+async def generate_act(data: ActDataSchema):
+    """
+    Генерирует и сохраняет акт (алиас для save_act).
+
+    Args:
+        data: Валидированные данные акта
+
+    Returns:
+        Результат сохранения с путем к файлу
+    """
+    return act_service.save_act(data.model_dump())

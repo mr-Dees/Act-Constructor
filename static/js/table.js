@@ -38,38 +38,37 @@ class TableManager {
 
         table.rows.forEach((row, rowIndex) => {
             const tr = document.createElement('tr');
+
             row.cells.forEach((cell, colIndex) => {
-                if (cell.merged) return; // Пропустить объединенные
+                if (cell.merged) return;
 
                 const cellEl = document.createElement(cell.isHeader ? 'th' : 'td');
                 cellEl.textContent = cell.content;
 
                 if (cell.colspan > 1) {
                     cellEl.colSpan = cell.colspan;
-                    cellEl.style.width = 'auto'; // Позволить ячейке растягиваться
                 }
+
                 if (cell.rowspan > 1) {
                     cellEl.rowSpan = cell.rowspan;
-                    cellEl.style.height = 'auto'; // Позволить ячейке растягиваться по высоте
                 }
 
                 cellEl.dataset.row = rowIndex;
                 cellEl.dataset.col = colIndex;
                 cellEl.dataset.tableId = table.id;
 
-                // Добавить ручки изменения размера
-                if (cell.isHeader) {
-                    const resizeHandle = document.createElement('div');
-                    resizeHandle.className = 'resize-handle';
-                    cellEl.appendChild(resizeHandle);
+                // Добавить ручки изменения размера для всех ячеек
+                const resizeHandle = document.createElement('div');
+                resizeHandle.className = 'resize-handle';
+                cellEl.appendChild(resizeHandle);
 
-                    const rowResizeHandle = document.createElement('div');
-                    rowResizeHandle.className = 'row-resize-handle';
-                    cellEl.appendChild(rowResizeHandle);
-                }
+                const rowResizeHandle = document.createElement('div');
+                rowResizeHandle.className = 'row-resize-handle';
+                cellEl.appendChild(rowResizeHandle);
 
                 tr.appendChild(cellEl);
             });
+
             tableEl.appendChild(tr);
         });
 

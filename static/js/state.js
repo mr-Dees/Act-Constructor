@@ -13,11 +13,11 @@ const AppState = {
             id: 'root',
             label: 'Акт',
             children: [
-                { id: '1', label: 'Основание для составления акта', protected: true, children: [], tableIds: [] },
-                { id: '2', label: 'Сведения о земельном участке', protected: true, children: [], tableIds: [] },
-                { id: '3', label: 'Сведения об объекте капитального строительства', protected: true, children: [], tableIds: [] },
-                { id: '4', label: 'Сведения о лицах', protected: true, children: [], tableIds: [] },
-                { id: '5', label: 'Сведения о результатах', protected: true, children: [], tableIds: [] }
+                { id: '1', label: 'Основание для составления акта', protected: true, children: [], tableIds: [], content: '' },
+                { id: '2', label: 'Сведения о земельном участке', protected: true, children: [], tableIds: [], content: '' },
+                { id: '3', label: 'Сведения об объекте капитального строительства', protected: true, children: [], tableIds: [], content: '' },
+                { id: '4', label: 'Сведения о лицах', protected: true, children: [], tableIds: [], content: '' },
+                { id: '5', label: 'Сведения о результатах', protected: true, children: [], tableIds: [], content: '' }
             ]
         };
         return this.treeData;
@@ -122,7 +122,8 @@ const AppState = {
             id: newId,
             label: label,
             children: [],
-            tableIds: [] // Массив для хранения ID таблиц
+            tableIds: [], // Массив для хранения ID таблиц
+            content: ''
         };
 
         if (isChild) {

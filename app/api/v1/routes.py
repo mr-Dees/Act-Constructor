@@ -10,5 +10,6 @@ api_router = APIRouter()
 # Подключаем эндпоинты работы с актами
 api_router.include_router(
     acts.router,
+    prefix="/acts",
     tags=["acts"]
 )

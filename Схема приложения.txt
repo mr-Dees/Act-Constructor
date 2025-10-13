@@ -28,10 +28,26 @@ UI_for_EP_v_KAP/
 │   └── acts/
 │       └── (здесь будут сохраняться файлы актов)
 ├── templates/
-│   └── constructor.html
+│   ├── base.html
+│   ├── constructor.html
+│   └── components/
+│       ├── header.html
+│       ├── tree_panel.html
+│       ├── preview_panel.html
+│       └── context_menu.html
 ├── static/
-│   └── css/
-│       └── (CSS файлы)
+│   ├── css/
+│   │   ├── main.css
+│   │   ├── tree.css
+│   │   ├── table.css
+│   │   └── preview.css
+│   └── js/
+│       ├── state.js
+│       ├── tree.js
+│       ├── content.js
+│       ├── preview.js
+│       ├── api.js
+│       └── main.js
 ├── requirements.txt
 └── .env
 
