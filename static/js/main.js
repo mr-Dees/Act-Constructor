@@ -4,15 +4,16 @@ class App {
     static init() {
         // Инициализация состояния
         AppState.initializeTree();
-
-        // Генерировать нумерацию при инициализации
         AppState.generateNumbering();
+
+        // Инициализация хранилища размеров таблиц между шагами
+        if (!AppState.tableUISizes) AppState.tableUISizes = {}; // { [tableId]: { cellSizes: {[row-col]: {width,height}}, colWidths: number[], rowHeights: number[] } }
 
         // Рендер дерева
         treeManager.render();
 
-        // Обновить предпросмотр
-        PreviewManager.update();
+        // Обновить предпросмотр (на шаге 1 всегда резать текст до 30 символов)
+        PreviewManager.update({previewTrim: 30});
 
         // Навигация между шагами
         this.setupNavigation();
@@ -37,12 +38,9 @@ class App {
         generateBtn.addEventListener('click', async () => {
             generateBtn.disabled = true;
             generateBtn.textContent = '⏳ Генерация...';
-
             const success = await APIClient.generateAct();
-
             generateBtn.disabled = false;
             generateBtn.textContent = '🚀 Сформировать акт';
-
             if (success) {
                 alert('✅ Акт успешно сформирован!');
             }
@@ -74,23 +72,21 @@ class App {
         });
 
         const currentContent = document.getElementById(`step${stepNum}`);
-        if (currentContent) {
-            currentContent.classList.remove('hidden');
-        }
+        if (currentContent) currentContent.classList.remove('hidden');
 
         // Если переходим на шаг 2, отрендерить пункты с таблицами
         if (stepNum === 2) {
             ItemsRenderer.renderAll();
         }
 
-        // Обновить предпросмотр
+        // На шаге 1 — предпросмотр с усечением текста до 30 символов
         if (stepNum === 1) {
-            PreviewManager.update();
+            PreviewManager.update({previewTrim: 30});
         }
     }
 }
 
-// Новый класс для рендеринга пунктов на шаге 2
+// Рендер на шаге 2 с сохранением/восстановлением размеров
 class ItemsRenderer {
     static renderAll() {
         const container = document.getElementById('itemsContainer');
@@ -109,8 +105,17 @@ class ItemsRenderer {
             });
         }
 
-        // После рендера - подключить события таблиц
+        // После рендера - подключить события таблиц и восстановить размеры
         this.attachTableEvents();
+
+        // Восстановить UI размеры после рендера, если есть сохранённые
+        setTimeout(() => {
+            document.querySelectorAll('.table-section').forEach(section => {
+                const tableId = section.dataset.tableId;
+                const tableEl = section.querySelector('.editable-table');
+                this.applyPersistedSizes(tableId, tableEl);
+            });
+        }, 0);
     }
 
     static renderItem(node, level) {
@@ -125,8 +130,8 @@ class ItemsRenderer {
         const title = document.createElement('h' + Math.min(level + 1, 6));
         title.className = 'item-title';
         title.textContent = node.label;
-        header.appendChild(title);
 
+        header.appendChild(title);
         itemDiv.appendChild(header);
 
         // Контент пункта (текстовое поле)
@@ -139,7 +144,6 @@ class ItemsRenderer {
         textarea.value = node.content || '';
         textarea.rows = 3;
 
-        // Сохранение контента при изменении
         textarea.addEventListener('change', () => {
             node.content = textarea.value;
         });
@@ -183,43 +187,52 @@ class ItemsRenderer {
         const section = document.createElement('div');
         section.className = 'table-section';
         section.dataset.tableId = table.id;
-
         const tableEl = document.createElement('table');
         tableEl.className = 'editable-table';
 
+        // Определить максимальное количество колонок (с учетом colspan)
+        let maxCols = 0;
+        table.rows.forEach(row => {
+            let colCount = 0;
+            row.cells.forEach(cell => {
+                if (!cell.merged) {
+                    colCount += (cell.colspan || 1);
+                }
+            });
+            maxCols = Math.max(maxCols, colCount);
+        });
+
         table.rows.forEach((row, rowIndex) => {
             const tr = document.createElement('tr');
-
             row.cells.forEach((cell, colIndex) => {
                 if (cell.merged) return; // Пропустить объединенные
-
                 const cellEl = document.createElement(cell.isHeader ? 'th' : 'td');
                 cellEl.textContent = cell.content;
-
-                if (cell.colspan > 1) {
-                    cellEl.colSpan = cell.colspan;
-                }
-
-                if (cell.rowspan > 1) {
-                    cellEl.rowSpan = cell.rowspan;
-                }
-
+                if (cell.colspan > 1) cellEl.colSpan = cell.colspan;
+                if (cell.rowspan > 1) cellEl.rowSpan = cell.rowspan;
                 cellEl.dataset.row = rowIndex;
                 cellEl.dataset.col = colIndex;
                 cellEl.dataset.tableId = table.id;
 
-                // Добавить ручки изменения размера для всех ячеек
-                const resizeHandle = document.createElement('div');
-                resizeHandle.className = 'resize-handle';
-                cellEl.appendChild(resizeHandle);
+                // Определить, является ли это последней видимой колонкой
+                const colspan = cell.colspan || 1;
+                const cellEndCol = colIndex + colspan - 1;
+                const isLastColumn = (cellEndCol === maxCols - 1);
 
+                // Добавить правую ручку изменения размера только если это НЕ последняя колонка
+                if (!isLastColumn) {
+                    const resizeHandle = document.createElement('div');
+                    resizeHandle.className = 'resize-handle';
+                    cellEl.appendChild(resizeHandle);
+                }
+
+                // Нижняя ручка изменения размера строк (всегда добавляем)
                 const rowResizeHandle = document.createElement('div');
                 rowResizeHandle.className = 'row-resize-handle';
                 cellEl.appendChild(rowResizeHandle);
 
                 tr.appendChild(cellEl);
             });
-
             tableEl.appendChild(tr);
         });
 
@@ -237,10 +250,7 @@ class ItemsRenderer {
                 if (e.target.classList.contains('resize-handle') ||
                     e.target.classList.contains('row-resize-handle')) return;
 
-                if (!e.ctrlKey) {
-                    tableManager.clearSelection();
-                }
-
+                if (!e.ctrlKey) tableManager.clearSelection();
                 tableManager.selectCell(cell);
             });
 
@@ -255,14 +265,10 @@ class ItemsRenderer {
             cell.addEventListener('contextmenu', (e) => {
                 if (e.target.classList.contains('resize-handle') ||
                     e.target.classList.contains('row-resize-handle')) return;
-
                 e.preventDefault();
-
-                // Если ячейка не выделена и нет других выделенных - выделить её
                 if (!cell.classList.contains('selected') && tableManager.selectedCells.length === 0) {
                     tableManager.selectCell(cell);
                 }
-
                 ContextMenuManager.show(e.clientX, e.clientY, null, 'cell');
             });
         });
@@ -286,6 +292,7 @@ class ItemsRenderer {
         });
     }
 
+    // Редактирование ячейки
     static startEditingCell(cellEl) {
         const originalContent = cellEl.textContent;
         cellEl.classList.add('editing');
@@ -293,6 +300,7 @@ class ItemsRenderer {
         const input = document.createElement('input');
         input.type = 'text';
         input.value = originalContent;
+
         cellEl.textContent = '';
         cellEl.appendChild(input);
         input.focus();
@@ -307,40 +315,64 @@ class ItemsRenderer {
             const row = parseInt(cellEl.dataset.row);
             const col = parseInt(cellEl.dataset.col);
             const table = AppState.tables[tableId];
+
             if (table && table.rows[row] && table.rows[row].cells[col]) {
                 table.rows[row].cells[col].content = newValue;
             }
         };
 
-        input.addEventListener('blur', finishEditing, { once: true });
+        input.addEventListener('blur', finishEditing, {once: true});
         input.addEventListener('keydown', (e) => {
             if (e.key === 'Enter') {
                 e.preventDefault();
                 input.blur();
-            }
-            if (e.key === 'Escape') {
+            } else if (e.key === 'Escape') {
+                e.preventDefault();
                 cellEl.textContent = originalContent;
                 cellEl.classList.remove('editing');
             }
-        }, { once: true });
+        }, {once: true});
     }
 
+    // Ресайз колонки с компенсацией соседней колонки справа
     static startColumnResize(e) {
         const cell = e.target.parentElement;
         const table = cell.closest('table');
+        const section = table.closest('.table-section');
         const startX = e.clientX;
         const startWidth = cell.offsetWidth;
         const colIndex = parseInt(cell.dataset.col);
 
+        // Найти следующую видимую колонку справа для компенсации
+        const allRows = table.querySelectorAll('tr');
+        const firstRow = allRows[0];
+        const firstRowCells = firstRow.querySelectorAll('td, th');
+
+        let nextColIndex = null;
+        let nextCell = null;
+        let nextStartWidth = 0;
+
+        // Найти следующую колонку (не объединенную с текущей)
+        for (let i = 0; i < firstRowCells.length; i++) {
+            const testCell = firstRowCells[i];
+            const testColIndex = parseInt(testCell.dataset.col);
+            if (testColIndex > colIndex) {
+                nextColIndex = testColIndex;
+                nextCell = testCell;
+                nextStartWidth = testCell.offsetWidth;
+                break;
+            }
+        }
+
         // Ограничения
-        const minWidth = 50;
-        const maxWidth = 500;
+        const minWidth = 80;
+        const maxWidth = 800;
 
         document.body.style.cursor = 'col-resize';
         document.body.style.userSelect = 'none';
         table.classList.add('resizing');
 
-        // Создать визуальную подсказку
+        // Визуальная линия
         const resizeLine = document.createElement('div');
         resizeLine.style.position = 'fixed';
         resizeLine.style.top = '0';
@@ -352,47 +384,78 @@ class ItemsRenderer {
         resizeLine.style.left = e.clientX + 'px';
         document.body.appendChild(resizeLine);
 
-        let currentWidth = startWidth;
-
-        const onMouseMove = (e) => {
-            const diff = e.clientX - startX;
+        const onMouseMove = (ev) => {
+            const diff = ev.clientX - startX;
             let newWidth = startWidth + diff;
 
-            // Применить ограничения
+            // Ограничить текущую колонку
             newWidth = Math.max(minWidth, Math.min(maxWidth, newWidth));
-            currentWidth = newWidth;
 
-            // Обновить положение линии
+            // Если есть следующая колонка, компенсировать изменение
+            let nextNewWidth = nextStartWidth;
+            if (nextColIndex !== null && nextCell) {
+                // Вычислить новую ширину следующей колонки (уменьшить на столько, на сколько увеличилась текущая)
+                const actualDiff = newWidth - startWidth;
+                nextNewWidth = nextStartWidth - actualDiff;
+
+                // Если следующая колонка станет слишком узкой, ограничить текущую
+                if (nextNewWidth < minWidth) {
+                    nextNewWidth = minWidth;
+                    newWidth = startWidth + (nextStartWidth - minWidth);
+                }
+
+                // Если следующая колонка станет слишком широкой
+                if (nextNewWidth > maxWidth) {
+                    nextNewWidth = maxWidth;
+                    newWidth = startWidth + (nextStartWidth - maxWidth);
+                }
+            }
+
+            // Обновить позицию линии
             resizeLine.style.left = (startX + (newWidth - startWidth)) + 'px';
 
-            // Найти все ячейки в этой колонке (включая объединенные)
-            const allRows = table.querySelectorAll('tr');
+            // Применить новую ширину к текущей колонке
             allRows.forEach(row => {
                 const cellsInRow = row.querySelectorAll('td, th');
-                let currentColIndex = 0;
-
                 cellsInRow.forEach(rowCell => {
                     const cellColIndex = parseInt(rowCell.dataset.col);
                     const colspan = rowCell.colSpan || 1;
 
-                    // Если ячейка начинается в изменяемой колонке или охватывает её
-                    if (cellColIndex === colIndex ||
-                        (cellColIndex < colIndex && cellColIndex + colspan > colIndex)) {
-
-                        // Если это объединенная ячейка, пропорционально изменить ширину
-                        if (colspan > 1 && cellColIndex < colIndex) {
-                            // Частичное изменение для объединенной ячейки
-                            const currentCellWidth = rowCell.offsetWidth;
-                            const widthPerColumn = currentCellWidth / colspan;
-                            const newCellWidth = currentCellWidth + (newWidth - startWidth);
-                            rowCell.style.width = Math.max(minWidth * colspan, Math.min(maxWidth * colspan, newCellWidth)) + 'px';
-                        } else {
-                            // Обычная ячейка в этой колонке
-                            rowCell.style.width = newWidth + 'px';
-                        }
+                    if (cellColIndex === colIndex) {
+                        // Текущая изменяемая колонка
+                        rowCell.style.width = newWidth + 'px';
+                        rowCell.style.minWidth = newWidth + 'px';
+                        rowCell.style.maxWidth = newWidth + 'px';
+                        rowCell.style.wordBreak = 'normal';
+                        rowCell.style.overflowWrap = 'anywhere';
+                    } else if (cellColIndex < colIndex && (cellColIndex + colspan > colIndex)) {
+                        // Объединенная ячейка, перекрывающая текущую колонку
+                        const currentCellWidth = rowCell.offsetWidth;
+                        const delta = (newWidth - startWidth);
+                        const newCellWidth = currentCellWidth + delta;
+                        rowCell.style.width = newCellWidth + 'px';
+                        rowCell.style.minWidth = newCellWidth + 'px';
+                        rowCell.style.maxWidth = newCellWidth + 'px';
+                        rowCell.style.wordBreak = 'normal';
+                        rowCell.style.overflowWrap = 'anywhere';
+                    } else if (nextColIndex !== null && cellColIndex === nextColIndex) {
+                        // Следующая колонка - компенсировать изменение
+                        rowCell.style.width = nextNewWidth + 'px';
+                        rowCell.style.minWidth = nextNewWidth + 'px';
+                        rowCell.style.maxWidth = nextNewWidth + 'px';
+                        rowCell.style.wordBreak = 'normal';
+                        rowCell.style.overflowWrap = 'anywhere';
+                    } else if (nextColIndex !== null && cellColIndex < nextColIndex && (cellColIndex + colspan > nextColIndex)) {
+                        // Объединенная ячейка, перекрывающая следующую колонку
+                        const currentCellWidth = rowCell.offsetWidth;
+                        const delta = (nextNewWidth - nextStartWidth);
+                        const newCellWidth = currentCellWidth + delta;
+                        rowCell.style.width = newCellWidth + 'px';
+                        rowCell.style.minWidth = newCellWidth + 'px';
+                        rowCell.style.maxWidth = newCellWidth + 'px';
+                        rowCell.style.wordBreak = 'normal';
+                        rowCell.style.overflowWrap = 'anywhere';
                     }
-
-                    currentColIndex += colspan;
                 });
             });
         };
@@ -404,12 +467,19 @@ class ItemsRenderer {
             document.body.removeChild(resizeLine);
             document.removeEventListener('mousemove', onMouseMove);
             document.removeEventListener('mouseup', onMouseUp);
+
+            // Сохранить размеры в AppState.tableUISizes
+            if (section) {
+                const tableId = section.dataset.tableId;
+                ItemsRenderer.persistTableSizes(tableId, table);
+            }
         };
 
         document.addEventListener('mousemove', onMouseMove);
         document.addEventListener('mouseup', onMouseUp);
     }
 
+    // Ресайз строки
     static startRowResize(e) {
         const cell = e.target.parentElement;
         const row = cell.parentElement;
@@ -418,15 +488,13 @@ class ItemsRenderer {
         const startHeight = row.offsetHeight;
         const rowIndex = parseInt(cell.dataset.row);
 
-        // Ограничения
-        const minHeight = 30;
-        const maxHeight = 200;
+        const minHeight = 28;
+        const maxHeight = 600;
 
         document.body.style.cursor = 'row-resize';
         document.body.style.userSelect = 'none';
         table.classList.add('resizing');
 
-        // Создать визуальную подсказку
         const resizeLine = document.createElement('div');
         resizeLine.style.position = 'fixed';
         resizeLine.style.left = '0';
@@ -438,48 +506,36 @@ class ItemsRenderer {
         resizeLine.style.top = e.clientY + 'px';
         document.body.appendChild(resizeLine);
 
-        let currentHeight = startHeight;
-
-        const onMouseMove = (e) => {
-            const diff = e.clientY - startY;
+        const onMouseMove = (ev) => {
+            const diff = ev.clientY - startY;
             let newHeight = startHeight + diff;
-
-            // Применить ограничения
             newHeight = Math.max(minHeight, Math.min(maxHeight, newHeight));
-            currentHeight = newHeight;
 
-            // Обновить положение линии
             resizeLine.style.top = (startY + (newHeight - startHeight)) + 'px';
 
-            // Найти все строки, которые затрагиваются этим изменением
             const allRows = table.querySelectorAll('tr');
-            allRows.forEach((tableRow, index) => {
+            allRows.forEach((tableRow) => {
                 const cellsInRow = tableRow.querySelectorAll('td, th');
-
                 cellsInRow.forEach(rowCell => {
                     const cellRowIndex = parseInt(rowCell.dataset.row);
                     const rowspan = rowCell.rowSpan || 1;
 
-                    // Если ячейка начинается в изменяемой строке или охватывает её
-                    if (cellRowIndex === rowIndex ||
-                        (cellRowIndex < rowIndex && cellRowIndex + rowspan > rowIndex)) {
-
-                        if (rowspan > 1 && cellRowIndex < rowIndex) {
-                            // Пропорциональное изменение для объединенной по строкам ячейки
-                            const currentCellHeight = rowCell.offsetHeight;
-                            const heightPerRow = currentCellHeight / rowspan;
-                            const newCellHeight = currentCellHeight + (newHeight - startHeight);
-                            rowCell.style.height = Math.max(minHeight * rowspan, Math.min(maxHeight * rowspan, newCellHeight)) + 'px';
-                        } else if (cellRowIndex === rowIndex) {
-                            // Ячейка в изменяемой строке
-                            rowCell.style.height = newHeight + 'px';
-                        }
+                    if (cellRowIndex === rowIndex) {
+                        rowCell.style.height = newHeight + 'px';
+                        rowCell.style.minHeight = newHeight + 'px';
+                    } else if (cellRowIndex < rowIndex && (cellRowIndex + rowspan > rowIndex)) {
+                        // объединенная по строкам ячейка - добавляем дельту одной строки
+                        const currentCellHeight = rowCell.offsetHeight;
+                        const delta = (newHeight - startHeight);
+                        const newCellHeight = currentCellHeight + delta;
+                        rowCell.style.height = Math.max(minHeight * rowspan, Math.min(maxHeight * rowspan, newCellHeight)) + 'px';
+                        rowCell.style.minHeight = Math.max(minHeight * rowspan, Math.min(maxHeight * rowspan, newCellHeight)) + 'px';
                     }
                 });
             });
 
-            // Изменить высоту самой строки
             row.style.height = newHeight + 'px';
+            row.style.minHeight = newHeight + 'px';
         };
 
         const onMouseUp = () => {
@@ -489,17 +545,82 @@ class ItemsRenderer {
             document.body.removeChild(resizeLine);
             document.removeEventListener('mousemove', onMouseMove);
             document.removeEventListener('mouseup', onMouseUp);
+
+            const section = table.closest('.table-section');
+            if (section) {
+                const tableId = section.dataset.tableId;
+                ItemsRenderer.persistTableSizes(tableId, table);
+            }
         };
 
         document.addEventListener('mousemove', onMouseMove);
         document.addEventListener('mouseup', onMouseUp);
     }
 
+    // Сохранение UI размеров в AppState.tableUISizes[tableId]
+    static persistTableSizes(tableId, tableElement) {
+        if (!tableId || !tableElement) return;
+        if (!AppState.tableUISizes) AppState.tableUISizes = {};
+
+        const sizes = {};
+        tableElement.querySelectorAll('th, td').forEach(cell => {
+            const row = cell.dataset.row;
+            const col = cell.dataset.col;
+            if (row == null || col == null) return;
+
+            const key = `${row}-${col}`;
+            sizes[key] = {
+                width: cell.style.width || '',
+                height: cell.style.height || '',
+                minWidth: cell.style.minWidth || '',
+                minHeight: cell.style.minHeight || '',
+                wordBreak: cell.style.wordBreak || '',
+                overflowWrap: cell.style.overflowWrap || ''
+            };
+        });
+
+        AppState.tableUISizes[tableId] = {
+            cellSizes: sizes
+        };
+    }
+
+    // Применение сохранённых размеров
+    static applyPersistedSizes(tableId, tableElement) {
+        if (!tableId || !tableElement) return;
+
+        const saved = AppState.tableUISizes && AppState.tableUISizes[tableId];
+        if (!saved || !saved.cellSizes) return;
+
+        tableElement.querySelectorAll('th, td').forEach(cell => {
+            const row = cell.dataset.row;
+            const col = cell.dataset.col;
+            if (row == null || col == null) return;
+
+            const key = `${row}-${col}`;
+            const s = saved.cellSizes[key];
+
+            if (s) {
+                if (s.width) cell.style.width = s.width;
+                if (s.height) cell.style.height = s.height;
+                if (s.minWidth) cell.style.minWidth = s.minWidth;
+                if (s.minHeight) cell.style.minHeight = s.minHeight;
+                cell.style.wordBreak = s.wordBreak || 'normal';
+                cell.style.overflowWrap = s.overflowWrap || 'anywhere';
+            } else {
+                // Значения по умолчанию
+                cell.style.minWidth = '80px';
+                cell.style.minHeight = '28px';
+                cell.style.wordBreak = 'normal';
+                cell.style.overflowWrap = 'anywhere';
+            }
+        });
+    }
+
+    // Вспомогательные для контекстного меню
     static preserveTableSizes(tableElement) {
         const sizes = {};
-
-        // Сохранить размеры колонок
         const cells = tableElement.querySelectorAll('th, td');
+
         cells.forEach(cell => {
             const row = cell.dataset.row;
             const col = cell.dataset.col;
@@ -507,7 +628,11 @@ class ItemsRenderer {
 
             sizes[key] = {
                 width: cell.style.width || '',
-                height: cell.style.height || ''
+                height: cell.style.height || '',
+                minWidth: cell.style.minWidth || '',
+                minHeight: cell.style.minHeight || '',
+                wordBreak: cell.style.wordBreak || '',
+                overflowWrap: cell.style.overflowWrap || ''
             };
         });
 
@@ -524,12 +649,12 @@ class ItemsRenderer {
             const key = `${row}-${col}`;
 
             if (sizes[key]) {
-                if (sizes[key].width) {
-                    cell.style.width = sizes[key].width;
-                }
-                if (sizes[key].height) {
-                    cell.style.height = sizes[key].height;
-                }
+                if (sizes[key].width) cell.style.width = sizes[key].width;
+                if (sizes[key].height) cell.style.height = sizes[key].height;
+                if (sizes[key].minWidth) cell.style.minWidth = sizes[key].minWidth;
+                if (sizes[key].minHeight) cell.style.minHeight = sizes[key].minHeight;
+                cell.style.wordBreak = sizes[key].wordBreak || 'normal';
+                cell.style.overflowWrap = sizes[key].overflowWrap || 'anywhere';
             }
         });
     }
@@ -545,13 +670,11 @@ class ContextMenuManager {
         this.menu = document.getElementById('contextMenu');
         this.cellMenu = document.getElementById('cellContextMenu');
 
-        // Закрытие при клике вне меню
         document.addEventListener('click', () => {
             this.hide();
         });
 
-        // Обработчики для пунктов меню дерева
-        this.menu.querySelectorAll('.context-menu-item').forEach(item => {
+        this.menu?.querySelectorAll('.context-menu-item').forEach(item => {
             item.addEventListener('click', (e) => {
                 e.stopPropagation();
                 const action = item.dataset.action;
@@ -560,17 +683,13 @@ class ContextMenuManager {
             });
         });
 
-        // Обработчики для пунктов меню ячеек
-        this.cellMenu.querySelectorAll('.context-menu-item').forEach(item => {
+        this.cellMenu?.querySelectorAll('.context-menu-item').forEach(item => {
             item.addEventListener('click', (e) => {
                 e.stopPropagation();
                 const action = item.dataset.action;
-
-                // Проверить, не заблокирован ли пункт
                 if (item.classList.contains('disabled')) {
                     return;
                 }
-
                 this.handleCellAction(action);
                 this.hide();
             });
@@ -579,77 +698,52 @@ class ContextMenuManager {
 
     static show(x, y, nodeId, type) {
         this.hide();
-
         const menu = type === 'cell' ? this.cellMenu : this.menu;
         this.currentNodeId = nodeId;
 
-        // Для контекстного меню ячеек - управление доступностью пунктов
         if (type === 'cell') {
             const selectedCellsCount = tableManager.selectedCells.length;
-
-            const mergeCellsItem = this.cellMenu.querySelector('[data-action="merge-cells"]');
-            const unmergeCellItem = this.cellMenu.querySelector('[data-action="unmerge-cell"]');
+            const mergeCellsItem = this.cellMenu?.querySelector('[data-action="merge-cells"]');
+            const unmergeCellItem = this.cellMenu?.querySelector('[data-action="unmerge-cell"]');
 
             if (mergeCellsItem) {
-                if (selectedCellsCount < 2) {
-                    mergeCellsItem.classList.add('disabled');
-                } else {
-                    mergeCellsItem.classList.remove('disabled');
-                }
+                if (selectedCellsCount < 2) mergeCellsItem.classList.add('disabled');
+                else mergeCellsItem.classList.remove('disabled');
             }
 
             if (unmergeCellItem) {
                 if (selectedCellsCount === 1) {
                     const cell = tableManager.selectedCells[0];
                     const isMerged = cell.colSpan > 1 || cell.rowSpan > 1;
-                    if (isMerged) {
-                        unmergeCellItem.classList.remove('disabled');
-                    } else {
-                        unmergeCellItem.classList.add('disabled');
-                    }
+                    if (isMerged) unmergeCellItem.classList.remove('disabled');
+                    else unmergeCellItem.classList.add('disabled');
                 } else {
                     unmergeCellItem.classList.add('disabled');
                 }
             }
         }
 
-        // Показать меню временно за пределами экрана для измерения
+        if (!menu) return;
+
         menu.style.left = '-9999px';
         menu.style.top = '-9999px';
         menu.classList.remove('hidden');
 
-        // Получить размеры после рендера
         setTimeout(() => {
             const menuRect = menu.getBoundingClientRect();
             const menuWidth = menuRect.width;
             const menuHeight = menuRect.height;
-
-            // Размеры окна
             const viewportWidth = window.innerWidth || document.documentElement.clientWidth;
             const viewportHeight = window.innerHeight || document.documentElement.clientHeight;
 
             let finalX = x;
             let finalY = y;
 
-            // Проверка по горизонтали
-            if (finalX + menuWidth > viewportWidth) {
-                finalX = x - menuWidth;
-            }
+            if (finalX + menuWidth > viewportWidth) finalX = x - menuWidth;
+            if (finalX < 0) finalX = 10;
+            if (finalY + menuHeight > viewportHeight) finalY = y - menuHeight;
+            if (finalY < 0) finalY = 10;
 
-            if (finalX < 0) {
-                finalX = 10;
-            }
-
-            // Проверка по вертикали
-            if (finalY + menuHeight > viewportHeight) {
-                finalY = y - menuHeight;
-            }
-
-            if (finalY < 0) {
-                finalY = 10;
-            }
-
-            // Установить финальную позицию
             menu.style.left = finalX + 'px';
             menu.style.top = finalY + 'px';
         }, 1);
@@ -668,66 +762,60 @@ class ContextMenuManager {
         if (!node) return;
 
         switch (action) {
-            case 'add-child':
+            case 'add-child': {
                 const childResult = AppState.addNode(nodeId, 'Новый подпункт', true);
                 if (childResult.success) {
                     treeManager.render();
-                    PreviewManager.update();
-                    // Перерендерить шаг 2 если мы на нем
-                    if (AppState.currentStep === 2) {
-                        ItemsRenderer.renderAll();
-                    }
+                    PreviewManager.update({previewTrim: 30});
+                    if (AppState.currentStep === 2) ItemsRenderer.renderAll();
                 } else {
                     alert('❌ ' + childResult.reason);
                 }
                 break;
+            }
 
-            case 'add-sibling':
+            case 'add-sibling': {
                 const siblingResult = AppState.addNode(nodeId, 'Новый пункт', false);
                 if (siblingResult.success) {
                     treeManager.render();
-                    PreviewManager.update();
-                    if (AppState.currentStep === 2) {
-                        ItemsRenderer.renderAll();
-                    }
+                    PreviewManager.update({previewTrim: 30});
+                    if (AppState.currentStep === 2) ItemsRenderer.renderAll();
                 } else {
                     alert('❌ ' + siblingResult.reason);
                 }
                 break;
+            }
 
-            case 'add-table':
+            case 'add-table': {
                 const tableResult = AppState.addTableToNode(nodeId);
                 if (tableResult.success) {
                     treeManager.render();
-                    PreviewManager.update();
-                    if (AppState.currentStep === 2) {
-                        ItemsRenderer.renderAll();
-                    }
+                    PreviewManager.update({previewTrim: 30});
+                    if (AppState.currentStep === 2) ItemsRenderer.renderAll();
                 } else {
                     alert('❌ ' + tableResult.reason);
                 }
                 break;
+            }
 
-            case 'delete':
+            case 'delete': {
                 if (node.protected) {
                     alert('❌ Этот пункт защищен от удаления');
                     return;
                 }
-
                 if (confirm('Удалить этот пункт?')) {
                     AppState.deleteNode(nodeId);
                     treeManager.render();
-                    PreviewManager.update();
-                    if (AppState.currentStep === 2) {
-                        ItemsRenderer.renderAll();
-                    }
+                    PreviewManager.update({previewTrim: 30});
+                    if (AppState.currentStep === 2) ItemsRenderer.renderAll();
                 }
                 break;
+            }
         }
     }
 
     static handleCellAction(action) {
-        // Сохранить размеры перед операцией
+        // Сохранить текущие размеры до операции
         let tableSizes = {};
         if (tableManager.selectedCells.length > 0) {
             const table = tableManager.selectedCells[0].closest('table');
@@ -735,39 +823,44 @@ class ContextMenuManager {
         }
 
         switch (action) {
-            case 'merge-cells':
+            case 'merge-cells': {
                 tableManager.mergeCells();
                 if (AppState.currentStep === 2) {
                     ItemsRenderer.renderAll();
                     // Восстановить размеры после рендера
                     setTimeout(() => {
                         const tables = document.querySelectorAll('.editable-table');
-                        tables.forEach(table => {
-                            ItemsRenderer.applyTableSizes(table, tableSizes);
+                        tables.forEach(tbl => {
+                            ItemsRenderer.applyTableSizes(tbl, tableSizes);
+                            const section = tbl.closest('.table-section');
+                            if (section) ItemsRenderer.persistTableSizes(section.dataset.tableId, tbl);
                         });
-                    }, 100);
+                    }, 50);
                 } else {
                     tableManager.renderAll();
                 }
-                PreviewManager.update();
+                PreviewManager.update({previewTrim: 30});
                 break;
+            }
 
-            case 'unmerge-cell':
+            case 'unmerge-cell': {
                 tableManager.unmergeCells();
                 if (AppState.currentStep === 2) {
                     ItemsRenderer.renderAll();
-                    // Восстановить размеры после рендера
                     setTimeout(() => {
                         const tables = document.querySelectorAll('.editable-table');
-                        tables.forEach(table => {
-                            ItemsRenderer.applyTableSizes(table, tableSizes);
+                        tables.forEach(tbl => {
+                            ItemsRenderer.applyTableSizes(tbl, tableSizes);
+                            const section = tbl.closest('.table-section');
+                            if (section) ItemsRenderer.persistTableSizes(section.dataset.tableId, tbl);
                         });
-                    }, 100);
+                    }, 50);
                 } else {
                     tableManager.renderAll();
                 }
-                PreviewManager.update();
+                PreviewManager.update({previewTrim: 30});
                 break;
+            }
         }
     }
 }

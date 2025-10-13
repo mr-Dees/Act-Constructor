@@ -1,9 +1,11 @@
+/* Секция таблицы: запрещаем визуальный выход за края и включаем скролл при переполнении */
 .table-section {
     margin: 30px 0;
     padding: 25px;
     background: #f8f9fa;
     border-radius: 15px;
-    overflow: visible;
+    overflow: hidden;              /* было visible — из‑за этого таблица «вылезала» */
+    position: relative;
 }
 
 .table-section h3 {
@@ -11,40 +13,48 @@
     margin-bottom: 15px;
 }
 
+/* Базовая таблица: фиксированная раскладка, без внешних отступов, ширина не больше контейнера */
 .editable-table {
     width: 100%;
+    min-width: 100%;               /* не сжимать меньше секции, если есть фиксированные колонки */
+    max-width: 100%;               /* критично, чтобы не выйти за пределы родителя */
     border-collapse: collapse;
     background: white;
     border-radius: 10px;
     overflow: visible;
     box-shadow: 0 2px 8px rgba(0,0,0,0.1);
-    table-layout: auto;
-    margin: 10px;
-    width: calc(100% - 20px);
+    table-layout: fixed;           /* фиксированная раскладка — убирает «распирание» содержимым */
+    margin: 0;                     /* убираем calc(100% - 20px) и внешние отступы, они выталкивали */
+    /* width: calc(100% - 20px); */
 }
 
+/* Ячейки: явные минимумы, корректный перенос без «по слогам», контроль overflow */
 .editable-table th,
 .editable-table td {
     border: 1px solid #dee2e6;
     padding: 12px;
     text-align: left;
     position: relative;
-    min-width: 50px;
-    max-width: 500px;
-    min-height: 40px;
-    max-height: 200px;
+    min-width: 80px;
+    max-width: 800px;
+    min-height: 28px;
+    max-height: 600px;
     word-wrap: break-word;
-    overflow-wrap: break-word;
-    height: 40px;
+    word-break: normal;            /* не дробить слова на слоги */
+    overflow-wrap: anywhere;       /* переносить по границам слов/символов без «слогов» */
+    white-space: normal;
+    height: auto;                  /* не фиксировать постоянную высоту, даст расти по контенту */
+    box-sizing: border-box;
 }
 
+/* Шапка — курсор для ресайза оставляем, но убираем избыточную высоту */
 .editable-table th {
     background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
     color: white;
     font-weight: bold;
     cursor: col-resize;
     position: relative;
-    height: 45px;
+    height: auto;
 }
 
 .editable-table td {
@@ -64,21 +74,25 @@
 
 .editable-table td.editing {
     padding: 0;
-    height: 40px;
+    height: auto;
 }
 
+/* Встроенный инпут: оставляем отступ снизу для доступа к нижней ручке */
 .editable-table td.editing input {
-    width: calc(100% - 6px);
-    height: 40px;
+    /* width: calc(100% - 6px); */
+    width: 100%;
+    height: auto;
     border: none;
-    padding: 12px;
+    /* padding: 12px; */
+    padding: 10px 12px 18px 12px;
     font-family: inherit;
     font-size: inherit;
     box-sizing: border-box;
     outline: none;
     background: transparent;
     margin: 0;
-    min-height: 40px;
+    min-height: 28px;
+    display: block;
 }
 
 /* Объединенные ячейки */
@@ -98,6 +112,7 @@
     max-height: none;
 }
 
+/* Ручка изменения ширины справа от ячейки, поверх инпута */
 .resize-handle {
     position: absolute;
     right: -5px;
@@ -106,10 +121,11 @@
     height: 100%;
     cursor: col-resize;
     background: transparent;
-    z-index: 20;
+    z-index: 30;
     opacity: 0;
     transition: all 0.2s ease;
     border-right: 2px solid transparent;
+    pointer-events: auto;          /* важно для доступности, даже в editing */
 }
 
 .resize-handle:hover {
@@ -121,6 +137,7 @@
     opacity: 1;
 }
 
+/* Ручка изменения высоты снизу ячейки, поверх инпута */
 .row-resize-handle {
     position: absolute;
     bottom: -5px;
@@ -129,10 +146,11 @@
     height: 8px;
     cursor: row-resize;
     background: transparent;
-    z-index: 20;
+    z-index: 30;
     opacity: 0;
     transition: all 0.2s ease;
     border-bottom: 2px solid transparent;
+    pointer-events: auto;
 }
 
 .row-resize-handle:hover {
@@ -152,11 +170,23 @@
     border-right-color: rgba(102, 126, 234, 0.6);
 }
 
+/*
 .editable-table td:hover .row-resize-handle,
 .editable-table th:hover .row-resize-handle {
     opacity: 1;
     background: rgba(102, 126, 234, 0.2);
     border-bottom-color: rgba(102, 126, 234, 0.6);
+}
+*/
+ /* Hover-подсветка ручек */
+.resize-handle:hover,
+.row-resize-handle:hover,
+.editable-table td:hover .resize-handle,
+.editable-table td:hover .row-resize-handle,
+.editable-table th:hover .resize-handle,
+.editable-table th:hover .row-resize-handle {
+  opacity: 1;
+  background: rgba(102, 126, 234, 0.2);
 }
 
 /* Предотвратить конфликты с ручками */
@@ -202,4 +232,19 @@
 .resize-handle:hover,
 .row-resize-handle:hover {
     opacity: 1;
+}
+
+/* Враппер для горизонтального скролла таблицы, чтобы всегда оставаться в пределах секции */
+.table-section .table-scroll {
+  width: 100%;
+  overflow-x: auto;              /* включаем горизонтальную прокрутку вместо переполнения */
+  overflow-y: hidden;
+}
+
+/* Дополнительно предотвращаем выход тени/ручек за пределы секции */
+.table-section::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
 }
