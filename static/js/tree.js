@@ -1,4 +1,5 @@
 // Управление деревом структуры
+
 class TreeManager {
     constructor(containerId) {
         this.container = document.getElementById(containerId);
@@ -56,18 +57,27 @@ class TreeManager {
         label.contentEditable = false;
         li.appendChild(label);
 
-        // Иконка таблицы для узлов типа table
+        // Иконка для узлов типа table и textblock (нельзя удалить при редактировании)
         if (node.type === 'table') {
             const tableIcon = document.createElement('span');
             tableIcon.className = 'table-icon';
             tableIcon.textContent = '📊';
             tableIcon.style.marginLeft = '5px';
+            tableIcon.contentEditable = false; // Запретить редактирование иконки
             li.appendChild(tableIcon);
+        } else if (node.type === 'textblock') {
+            const textBlockIcon = document.createElement('span');
+            textBlockIcon.className = 'textblock-icon';
+            textBlockIcon.textContent = '📝';
+            textBlockIcon.style.marginLeft = '5px';
+            textBlockIcon.contentEditable = false; // Запретить редактирование иконки
+            li.classList.add('textblock-node');
+            li.appendChild(textBlockIcon);
         }
 
         // Двойной клик для редактирования
-        // Разрешено редактировать: таблицы и обычные пункты (кроме protected)
-        const canEdit = node.type === 'table' || !node.protected;
+        // Разрешено редактировать: таблицы, текстовые блоки и обычные пункты (кроме protected)
+        const canEdit = node.type === 'table' || node.type === 'textblock' || !node.protected;
 
         if (canEdit) {
             label.addEventListener('dblclick', (e) => {
@@ -115,9 +125,15 @@ class TreeManager {
 
     startEditing(labelElement, node) {
         const item = labelElement.closest('.tree-item');
-
         item.classList.add('editing');
         labelElement.contentEditable = true;
+
+        // Для таблиц и текстовых блоков показываем кастомное название или пустое
+        if (node.type === 'table' || node.type === 'textblock') {
+            const currentLabel = node.customLabel || '';
+            labelElement.textContent = currentLabel;
+        }
+
         labelElement.focus();
 
         // Выделить текст
@@ -130,23 +146,50 @@ class TreeManager {
         const finishEditing = () => {
             labelElement.contentEditable = false;
             item.classList.remove('editing');
+
             const newLabel = labelElement.textContent.trim();
 
-            if (newLabel && newLabel !== node.label) {
-                node.label = newLabel;
-                // Для таблиц не нужна перенумерация, для обычных пунктов - нужна
-                if (node.type !== 'table') {
-                    AppState.generateNumbering();
+            if (node.type === 'table' || node.type === 'textblock') {
+                // Логика для таблиц и текстовых блоков
+                if (newLabel) {
+                    // Сохраняем кастомное название
+                    node.customLabel = newLabel;
+                    node.label = newLabel;
+                } else {
+                    // Если пустое - удаляем кастомное название, вернется дефолтное
+                    delete node.customLabel;
+                    node.label = node.number || (node.type === 'table' ? 'Таблица' : 'Текстовый блок');
                 }
-                // ВАЖНО: Перерендерить дерево для отображения обновленной нумерации
+
+                // Перегенерировать нумерацию
+                AppState.generateNumbering();
+
+                // Обновить отображение с иконкой
+                labelElement.textContent = node.label;
+
+                // Перерендерить дерево для отображения иконки
                 treeManager.render();
                 PreviewManager.update();
-            } else if (!newLabel) {
-                labelElement.textContent = node.label;
+
+            } else {
+                // Логика для обычных пунктов
+                if (newLabel && newLabel !== node.label) {
+                    node.label = newLabel;
+
+                    // Для обычных пунктов нужна перенумерация
+                    AppState.generateNumbering();
+
+                    // Перерендерить дерево для отображения обновленной нумерации
+                    treeManager.render();
+                    PreviewManager.update();
+
+                } else if (!newLabel) {
+                    labelElement.textContent = node.label;
+                }
             }
         };
 
-        labelElement.addEventListener('blur', finishEditing, { once: true });
+        labelElement.addEventListener('blur', finishEditing, {once: true});
         labelElement.addEventListener('keydown', (e) => {
             if (e.key === 'Enter') {
                 e.preventDefault();
@@ -156,7 +199,7 @@ class TreeManager {
                 labelElement.textContent = node.label;
                 labelElement.blur();
             }
-        }, { once: true });
+        }, {once: true});
     }
 }
 

@@ -74,9 +74,15 @@ class App {
         const currentContent = document.getElementById(`step${stepNum}`);
         if (currentContent) currentContent.classList.remove('hidden');
 
-        // Если переходим на шаг 2, отрендерить пункты с таблицами
+        // Если переходим на шаг 2
         if (stepNum === 2) {
+            // Инициализировать глобальную панель инструментов
+            textBlockManager.initGlobalToolbar();
+            // Рендерить пункты с таблицами и текстовыми блоками
             ItemsRenderer.renderAll();
+        } else {
+            // На шаге 1 скрыть панель
+            textBlockManager.hideToolbar();
         }
 
         // На шаге 1 — предпросмотр с усечением текста до 30 символов
@@ -128,6 +134,16 @@ class ItemsRenderer {
             if (table) {
                 const tableSection = this.renderTable(table, node);
                 itemDiv.appendChild(tableSection);
+            }
+            return itemDiv;
+        }
+
+        // Если это текстовый блок - рендерим только текстовый блок (БЕЗ заголовка)
+        if (node.type === 'textblock') {
+            const textBlock = AppState.textBlocks[node.textBlockId];
+            if (textBlock) {
+                const textBlockSection = textBlockManager.createTextBlockElement(textBlock, node);
+                itemDiv.appendChild(textBlockSection);
             }
             return itemDiv;
         }
@@ -972,6 +988,24 @@ class ContextMenuManager {
                     if (AppState.currentStep === 2) ItemsRenderer.renderAll();
                 } else {
                     alert('❌ ' + tableResult.reason);
+                }
+                break;
+            }
+
+            case 'add-textblock': {
+                // Запретить добавление текстового блока к таблице или текстовому блоку
+                if (node.type === 'table' || node.type === 'textblock') {
+                    alert('❌ Нельзя добавить текстовый блок к таблице или другому текстовому блоку');
+                    return;
+                }
+
+                const textBlockResult = AppState.addTextBlockToNode(nodeId);
+                if (textBlockResult.success) {
+                    treeManager.render();
+                    PreviewManager.update({previewTrim: 30});
+                    if (AppState.currentStep === 2) ItemsRenderer.renderAll();
+                } else {
+                    alert('❌ ' + textBlockResult.reason);
                 }
                 break;
             }

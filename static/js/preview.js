@@ -36,6 +36,30 @@ class PreviewManager {
                 return;
             }
 
+            // Обработка текстовых блоков с заголовком в превью
+            if (node.type === 'textblock') {
+                const textBlock = AppState.textBlocks[node.textBlockId];
+                if (textBlock) {
+                    parts.push(`<div class="preview-textblock-title">${node.label}</div>`);
+
+                    // Извлечь текст без HTML тегов
+                    const tempDiv = document.createElement('div');
+                    tempDiv.innerHTML = textBlock.content || '';
+                    let textContent = tempDiv.textContent || tempDiv.innerText || '';
+
+                    if (previewTrim && textContent.length > previewTrim) {
+                        textContent = textContent.substring(0, previewTrim) + '...';
+                    }
+
+                    if (textContent) {
+                        parts.push(`<div class="preview-textblock-content">${textContent}</div>`);
+                    } else {
+                        parts.push(`<div class="preview-textblock-content"><em>Пустой блок</em></div>`);
+                    }
+                }
+                return parts.join('');
+            }
+
             // Заголовок пункта
             const heading = document.createElement(`h${Math.min(level + 1, 4)}`);
             heading.textContent = child.label;

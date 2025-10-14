@@ -1,6 +1,8 @@
 """Форматер для текстового представления актов."""
 
-from typing import Dict, List
+import html
+from typing import Dict
+
 from app.formatters.base import BaseFormatter
 
 
@@ -33,93 +35,125 @@ class TextFormatter(BaseFormatter):
 
         return "\n\n".join(result)
 
-    def _format_table(self, table_data: Dict) -> str:
+    def _format_item(self, item: Dict, level: int = 0) -> str:
         """
-        Форматирует таблицу с учетом объединенных ячеек.
-
-        Args:
-            table_data: Словарь с данными таблицы
-
-        Returns:
-            Отформатированная таблица
-        """
-        lines = []
-        lines.append(f"Таблица {table_data.get('rows', 0)}x{table_data.get('cols', 0)}:")
-
-        # Заголовки
-        headers = table_data.get('headers', [])
-        if headers:
-            lines.append("  " + " | ".join(str(h) for h in headers))
-            lines.append("  " + "-" * (len(" | ".join(str(h) for h in headers))))
-
-        # Данные с учетом объединенных ячеек
-        merged = table_data.get('mergedCells', {})
-        for i, row in enumerate(table_data.get('data', [])):
-            row_text = []
-            for j, cell in enumerate(row):
-                if not self._is_cell_hidden(merged, i, j):
-                    merge_info = merged.get(f"{i}-{j}", {})
-                    cell_str = str(cell) if cell else ""
-                    if merge_info:
-                        rowspan = merge_info.get('rowspan', 1)
-                        colspan = merge_info.get('colspan', 1)
-                        cell_str += f" [объединена: {rowspan}x{colspan}]"
-                    row_text.append(cell_str)
-
-            lines.append("  " + " | ".join(row_text))
-
-        return "\n".join(lines)
-
-    def _is_cell_hidden(self, merged_cells: Dict, row: int, col: int) -> bool:
-        """
-        Проверяет, скрыта ли ячейка из-за объединения.
-
-        Args:
-            merged_cells: Словарь объединенных ячеек
-            row: Номер строки
-            col: Номер колонки
-
-        Returns:
-            True если ячейка скрыта, иначе False
-        """
-        for key, merge in merged_cells.items():
-            merge_row, merge_col = map(int, key.split('-'))
-            rowspan = merge.get('rowspan', 1)
-            colspan = merge.get('colspan', 1)
-
-            if (row >= merge_row and row < merge_row + rowspan and
-                    col >= merge_col and col < merge_col + colspan and
-                    not (row == merge_row and col == merge_col)):
-                return True
-        return False
-
-    def _format_item(self, item: Dict) -> str:
-        """
-        Рекурсивно форматирует пункт акта.
+        Форматирует пункт акта.
 
         Args:
             item: Словарь с данными пункта
+            level: Уровень вложенности
 
         Returns:
             Отформатированный пункт
         """
         lines = []
+        indent = "  " * level
 
-        lines.append(f"{item['number']}. {item['title']}")
+        # Заголовок пункта
+        title = item.get('title', '')
+        if title:
+            lines.append(f"{indent}{title}")
 
-        if item.get('content'):
-            lines.append(f"   {item['content']}")
+        # Содержание пункта
+        content = item.get('content', '')
+        if content:
+            lines.append(f"{indent}{content}")
 
-        # Таблицы внутри пункта
+        # Таблицы в пункте
         if item.get('tables'):
-            lines.append("")
             for table_data in item['tables']:
-                lines.append(self._format_table(table_data))
+                lines.append(f"{indent}=== Таблица ===")
+                lines.append(self._format_table(table_data, level))
 
-        # Рекурсивная обработка подпунктов
+        # Текстовые блоки в пункте
+        if item.get('textBlocks'):
+            for textblock_data in item['textBlocks']:
+                lines.append(f"{indent}=== Текстовый блок ===")
+                lines.append(self._format_textblock(textblock_data, level))
+
+        # Подпункты
         if item.get('children'):
             for child in item['children']:
-                lines.append("")
-                lines.append(self._format_item(child))
+                lines.append(self._format_item(child, level + 1))
 
         return "\n".join(lines)
+
+    def _format_table(self, table_data: Dict, level: int = 0) -> str:
+        """
+        Форматирует таблицу с учетом объединенных ячеек.
+
+        Args:
+            table_data: Словарь с данными таблицы
+            level: Уровень вложенности
+
+        Returns:
+            Отформатированная таблица
+        """
+        lines = []
+        indent = "  " * level
+
+        rows = table_data.get('rows', [])
+        if not rows:
+            return f"{indent}[Пустая таблица]"
+
+        # Вычислить максимальную ширину для каждой колонки
+        max_cols = max(len(row) for row in rows) if rows else 0
+        col_widths = [0] * max_cols
+
+        for row in rows:
+            for col_idx, cell in enumerate(row):
+                if col_idx < max_cols:
+                    content = str(cell.get('content', ''))
+                    col_widths[col_idx] = max(col_widths[col_idx], len(content))
+
+        # Рендер таблицы
+        for row_idx, row in enumerate(rows):
+            row_parts = []
+            for col_idx, cell in enumerate(row):
+                if col_idx < max_cols:
+                    content = str(cell.get('content', '')).ljust(col_widths[col_idx])
+                    row_parts.append(content)
+
+            lines.append(f"{indent}| {' | '.join(row_parts)} |")
+
+            # Разделитель после заголовка
+            if row_idx == 0:
+                separator_parts = ['-' * width for width in col_widths]
+                lines.append(f"{indent}|-{'-|-'.join(separator_parts)}-|")
+
+        return "\n".join(lines)
+
+    def _format_textblock(self, textblock_data: Dict, level: int = 0) -> str:
+        """
+        Форматирует текстовый блок.
+
+        Args:
+            textblock_data: Словарь с данными текстового блока
+            level: Уровень вложенности
+
+        Returns:
+            Отформатированный текстовый блок
+        """
+        indent = "  " * level
+        content = textblock_data.get('content', '')
+
+        # Удаляем HTML теги для текстового представления
+        clean_content = html.unescape(content)
+        clean_content = clean_content.replace('<br>', '\n')
+        clean_content = ''.join(char for char in clean_content if char.isprintable() or char in '\n\t ')
+
+        formatting = textblock_data.get('formatting', {})
+        alignment = formatting.get('alignment', 'left')
+
+        lines = clean_content.split('\n')
+        formatted_lines = []
+
+        for line in lines:
+            if alignment == 'center':
+                formatted_lines.append(f"{indent}{line.center(80)}")
+            elif alignment == 'right':
+                formatted_lines.append(f"{indent}{line.rjust(80)}")
+            else:
+                formatted_lines.append(f"{indent}{line}")
+
+        return "\n".join(formatted_lines)

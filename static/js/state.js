@@ -1,8 +1,10 @@
 // Глобальное состояние приложения
+
 const AppState = {
     currentStep: 1,
     treeData: null,
     tables: {},
+    textBlocks: {}, // Новое хранилище текстовых блоков
     selectedNode: null,
     selectedCells: [],
 
@@ -33,36 +35,41 @@ const AppState = {
         if (!node.children) return;
 
         node.children.forEach((child, index) => {
-            // Пропускаем таблицы при нумерации основных пунктов
+            // Пропускаем таблицы и текстовые блоки при нумерации основных пунктов
             if (child.type === 'table') {
-                // Нумерация таблицы внутри родительского пункта
                 const parentTables = node.children.filter(c => c.type === 'table');
                 const tableIndex = parentTables.indexOf(child) + 1;
-
-                // Храним номер отдельно для внутреннего учета
                 child.number = `Таблица ${tableIndex}`;
 
-                // Если пользователь не задал кастомное название, используем дефолтное
                 if (!child.customLabel) {
                     child.label = child.number;
                 } else {
-                    // Используем кастомное название пользователя
+                    child.label = child.customLabel;
+                }
+                return;
+            }
+
+            // Обработка текстовых блоков
+            if (child.type === 'textblock') {
+                const parentTextBlocks = node.children.filter(c => c.type === 'textblock');
+                const textBlockIndex = parentTextBlocks.indexOf(child) + 1;
+                child.number = `Текстовый блок ${textBlockIndex}`;
+
+                if (!child.customLabel) {
+                    child.label = child.number;
+                } else {
                     child.label = child.customLabel;
                 }
                 return;
             }
 
             const number = prefix ? `${prefix}.${index + 1}` : `${index + 1}`;
-
-            // Извлечь базовое название (без старого номера)
             const baseLabelMatch = child.label.match(/^[\d.]+\s+(.+)$/);
             const baseLabel = baseLabelMatch ? baseLabelMatch[1] : child.label;
 
-            // Сохранить номер и обновить label
             child.number = number;
             child.label = `${number}. ${baseLabel}`;
 
-            // Рекурсивно для детей
             if (child.children && child.children.length > 0) {
                 this.generateNumbering(child, number);
             }
@@ -98,16 +105,19 @@ const AppState = {
                 const num = child.label.match(/^(\d+)\./);
                 return num && parseInt(num[1]) === 6;
             });
+
             if (hasCustomFirstLevel) {
                 return {
                     allowed: false,
                     reason: 'Можно добавить только один дополнительный пункт первого уровня (пункт 6)'
                 };
             }
+
             const nodeIndex = parent.children.findIndex(n => n.id === nodeId);
             if (nodeIndex !== parent.children.length - 1) {
                 return {allowed: false, reason: 'Новый пункт первого уровня можно добавить только в конец списка'};
             }
+            return {allowed: true};
         }
         return {allowed: true};
     },
@@ -180,15 +190,26 @@ const AppState = {
         const parent = this.findParentNode(nodeId);
         if (parent && parent.children) {
             const node = this.findNodeById(nodeId);
+
             // Если удаляется пункт с таблицами, удаляем и таблицы
             if (node && node.type === 'item' && node.children) {
                 node.children.filter(c => c.type === 'table').forEach(tableNode => {
                     delete this.tables[tableNode.tableId];
                 });
+                // Удаление текстовых блоков
+                node.children.filter(c => c.type === 'textblock').forEach(textBlockNode => {
+                    delete this.textBlocks[textBlockNode.textBlockId];
+                });
             }
+
             // Если удаляется таблица
             if (node && node.type === 'table' && node.tableId) {
                 delete this.tables[node.tableId];
+            }
+
+            // Если удаляется текстовый блок
+            if (node && node.type === 'textblock' && node.textBlockId) {
+                delete this.textBlocks[node.textBlockId];
             }
 
             parent.children = parent.children.filter(n => n.id !== nodeId);
@@ -212,6 +233,7 @@ const AppState = {
         const node = this.findNodeById(nodeId);
         if (!node) return {success: false, reason: 'Узел не найден'};
         if (node.type === 'table') return {success: false, reason: 'Нельзя добавить таблицу к таблице'};
+        if (node.type === 'textblock') return {success: false, reason: 'Нельзя добавить таблицу к текстовому блоку'};
 
         // Проверка ограничения (максимум 10 таблиц)
         if (!node.children) node.children = [];
@@ -272,11 +294,64 @@ const AppState = {
         return {success: true, table: table, tableNode: tableNode};
     },
 
+    // Добавление текстового блока к узлу
+    addTextBlockToNode(nodeId) {
+        const node = this.findNodeById(nodeId);
+        if (!node) return {success: false, reason: 'Узел не найден'};
+        if (node.type === 'table') return {success: false, reason: 'Нельзя добавить текстовый блок к таблице'};
+        if (node.type === 'textblock') return {
+            success: false,
+            reason: 'Нельзя добавить текстовый блок к текстовому блоку'
+        };
+
+        // Проверка ограничения (максимум 10 текстовых блоков)
+        if (!node.children) node.children = [];
+        const textBlocksCount = node.children.filter(c => c.type === 'textblock').length;
+        if (textBlocksCount >= 10) {
+            return {
+                success: false,
+                reason: 'Достигнуто максимальное количество текстовых блоков (10) для этого пункта'
+            };
+        }
+
+        const textBlockId = `textblock_${Date.now()}`;
+
+        // Создание узла текстового блока
+        const textBlockNode = {
+            id: `${nodeId}_textblock_${Date.now()}`,
+            label: 'Текстовый блок',
+            type: 'textblock',
+            textBlockId: textBlockId,
+            parentId: nodeId
+        };
+
+        node.children.push(textBlockNode);
+
+        // Создание структуры текстового блока
+        const textBlock = {
+            id: textBlockId,
+            nodeId: textBlockNode.id,
+            content: '',
+            formatting: {
+                bold: false,
+                italic: false,
+                underline: false,
+                fontSize: 14,
+                alignment: 'left'
+            }
+        };
+
+        this.textBlocks[textBlockId] = textBlock;
+        this.generateNumbering();
+        return {success: true, textBlock: textBlock, textBlockNode: textBlockNode};
+    },
+
     // Экспорт данных для API
     exportData() {
         return {
             tree: this.treeData,
-            tables: this.tables
+            tables: this.tables,
+            textBlocks: this.textBlocks
         };
     }
 };

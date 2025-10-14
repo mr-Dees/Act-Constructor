@@ -78,4 +78,21 @@
 .table-icon {
     display: inline-block;
     margin-left: 5px;
+    font-style: normal;
 }
+
+.tree-item.textblock-node {
+    font-style: italic;
+    color: #667eea;
+}
+
+.tree-item.textblock-node .tree-label {
+    font-weight: 500;
+}
+
+.textblock-icon {
+    display: inline-block;
+    margin-left: 5px;
+    font-style: normal;
+}
+

@@ -1,6 +1,7 @@
 """Pydantic схемы для валидации данных актов."""
 
 from typing import List, Dict, Optional
+
 from pydantic import BaseModel, Field
 
 
@@ -22,32 +23,49 @@ class TableSchema(BaseModel):
     )
 
 
+class TextBlockFormattingSchema(BaseModel):
+    """Схема форматирования текстового блока."""
+    bold: bool = False
+    italic: bool = False
+    underline: bool = False
+    fontSize: int = 14
+    alignment: str = "left"
+
+
+class TextBlockSchema(BaseModel):
+    """Схема текстового блока."""
+    id: str = Field(description="ID текстового блока")
+    nodeId: str = Field(description="ID узла дерева")
+    content: str = Field(default="", description="Содержимое текстового блока")
+    formatting: TextBlockFormattingSchema = Field(
+        default_factory=TextBlockFormattingSchema,
+        description="Настройки форматирования"
+    )
+
+
 class ActItemSchema(BaseModel):
     """Схема пункта акта."""
     number: str = Field(description="Номер пункта")
     title: str = Field(description="Заголовок пункта")
     content: Optional[str] = Field(None, description="Содержание пункта")
     tables: List[TableSchema] = Field(default_factory=list, description="Таблицы в пункте")
-    children: List['ActItemSchema'] = Field(
-        default_factory=list,
-        description="Подпункты"
-    )
+    textBlocks: List[TextBlockSchema] = Field(default_factory=list, description="Текстовые блоки в пункте")
+    children: List['ActItemSchema'] = Field(default_factory=list, description="Подпункты")
 
 
 class ActDataSchema(BaseModel):
-    """Полная схема данных акта."""
-    tablesBefore: List[TableSchema] = Field(
-        default_factory=list,
-        description="Таблицы перед пунктом 1"
-    )
-    items: List[ActItemSchema] = Field(
-        default_factory=list,
-        description="Пункты акта"
-    )
+    """Полная схема акта."""
+    tree: Dict = Field(description="Дерево структуры акта")
+    tables: Dict[str, TableSchema] = Field(default_factory=dict, description="Словарь таблиц")
+    textBlocks: Dict[str, TextBlockSchema] = Field(default_factory=dict, description="Словарь текстовых блоков")
 
 
 class ActSaveResponse(BaseModel):
-    """Схема ответа при сохранении акта."""
+    """Ответ при сохранении акта."""
     status: str
     message: str
     filename: str
+
+
+# Обновление forward references для рекурсивной схемы
+ActItemSchema.model_rebuild()

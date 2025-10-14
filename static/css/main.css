@@ -407,3 +407,130 @@ body {
     outline: none;
     padding: 5px 10px;
 }
+
+
+/* Стили для текстовых блоков */
+/* Глобальная панель инструментов для текстовых блоков */
+.textblock-toolbar-global {
+    position: sticky;
+    top: 0;
+    z-index: 100;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 12px 16px;
+    background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+    border-radius: 8px;
+    margin-bottom: 20px;
+    box-shadow: 0 4px 12px rgba(102, 126, 234, 0.3);
+    transition: all 0.3s ease;
+}
+
+.textblock-toolbar-global.hidden {
+    display: none;
+}
+
+.toolbar-label {
+    color: white;
+    font-weight: 600;
+    font-size: 14px;
+    margin-right: 8px;
+}
+
+.toolbar-btn {
+    padding: 6px 12px;
+    background: rgba(255, 255, 255, 0.9);
+    border: none;
+    border-radius: 4px;
+    cursor: pointer;
+    font-size: 14px;
+    font-weight: 600;
+    transition: all 0.2s;
+    color: #333;
+}
+
+.toolbar-btn:hover {
+    background: white;
+    transform: translateY(-1px);
+    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.15);
+}
+
+.toolbar-btn:active {
+    transform: translateY(0);
+    background: #667eea;
+    color: white;
+}
+
+.toolbar-separator {
+    color: rgba(255, 255, 255, 0.5);
+    font-size: 18px;
+    margin: 0 4px;
+}
+
+.toolbar-select {
+    padding: 6px 10px;
+    border: none;
+    border-radius: 4px;
+    background: rgba(255, 255, 255, 0.9);
+    cursor: pointer;
+    font-size: 14px;
+    font-weight: 500;
+    color: #333;
+}
+
+.toolbar-select:hover {
+    background: white;
+}
+
+.toolbar-select:focus {
+    outline: 2px solid white;
+    outline-offset: 2px;
+}
+
+/* Стили для текстовых блоков на шаге 2 (БЕЗ заголовка) */
+.textblock-section {
+    margin: 15px 0;
+    padding: 0;
+    border: none;
+    background: transparent;
+}
+
+.textblock-editor {
+    min-height: 100px;
+    padding: 15px;
+    border: 2px solid #e0e0e0;
+    border-radius: 6px;
+    background: white;
+    font-size: 14px;
+    line-height: 1.6;
+    outline: none;
+    transition: all 0.2s;
+}
+
+.textblock-editor:focus {
+    border-color: #667eea;
+    box-shadow: 0 0 0 3px rgba(102, 126, 234, 0.1);
+}
+
+.textblock-editor:empty:before {
+    content: 'Начните вводить текст...';
+    color: #999;
+    font-style: italic;
+}
+
+/* Стили для предпросмотра текстовых блоков */
+.preview-textblock-title {
+    font-weight: 600;
+    color: #667eea;
+    margin: 8px 0 4px 0;
+}
+
+.preview-textblock-content {
+    color: #555;
+    font-size: 13px;
+    line-height: 1.5;
+    padding: 4px 0;
+    border-left: 3px solid #667eea;
+    padding-left: 10px;
+    margin-bottom: 8px;
+}
