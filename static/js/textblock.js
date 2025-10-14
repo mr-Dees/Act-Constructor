@@ -18,10 +18,10 @@ class TextBlockManager {
         toolbar.id = 'globalTextBlockToolbar';
         toolbar.className = 'textblock-toolbar-global hidden';
         toolbar.innerHTML = `
-            <div class="toolbar-label">Форматирование текста:</div>
-            <button class="toolbar-btn" data-action="bold" title="Жирный"><b>B</b></button>
-            <button class="toolbar-btn" data-action="italic" title="Курсив"><i>I</i></button>
-            <button class="toolbar-btn" data-action="underline" title="Подчеркнутый"><u>U</u></button>
+            <div class="toolbar-label">📝 Форматирование текста:</div>
+            <button class="toolbar-btn" data-action="bold" title="Жирный (Ctrl+B)"><b>Ж</b></button>
+            <button class="toolbar-btn" data-action="italic" title="Курсив (Ctrl+I)"><i>К</i></button>
+            <button class="toolbar-btn" data-action="underline" title="Подчёркнутый (Ctrl+U)"><u>П</u></button>
             <span class="toolbar-separator">|</span>
             <button class="toolbar-btn" data-action="justifyLeft" title="По левому краю">⬅</button>
             <button class="toolbar-btn" data-action="justifyCenter" title="По центру">↔</button>
@@ -40,14 +40,8 @@ class TextBlockManager {
             </select>
         `;
 
-        // Вставить панель в начало контейнера шага 2
-        const step2Container = document.getElementById('step2');
-        if (step2Container) {
-            const itemsContainer = document.getElementById('itemsContainer');
-            if (itemsContainer) {
-                step2Container.insertBefore(toolbar, itemsContainer);
-            }
-        }
+        // Добавляем в body вместо контейнера шага
+        document.body.appendChild(toolbar);
 
         this.globalToolbar = toolbar;
         this.attachToolbarEvents();

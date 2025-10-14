@@ -418,21 +418,21 @@ body {
     padding: 5px 10px;
 }
 
-
-/* Стили для текстовых блоков */
 /* Глобальная панель инструментов для текстовых блоков */
 .textblock-toolbar-global {
-    position: sticky;
-    top: 0;
-    z-index: 100;
+    position: fixed;
+    top: 170px; /* Под шапкой (шапка примерно 120-140px высотой) */
+    left: 0;
+    right: 0;
+    z-index: 999; /* Чуть ниже шапки (шапка z-index: 1000) */
     display: flex;
     align-items: center;
     gap: 8px;
     padding: 12px 16px;
     background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-    border-radius: 8px;
-    margin-bottom: 20px;
-    box-shadow: 0 4px 12px rgba(102, 126, 234, 0.3);
+    border-radius: 0; /* Убираем скругление для полной ширины */
+    margin: 0; /* Убираем отступы */
+    box-shadow: 0 4px 12px rgba(102, 126, 234, 0.4);
     transition: all 0.3s ease;
 }
 
