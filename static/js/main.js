@@ -181,19 +181,19 @@ class ItemsRenderer {
         header.appendChild(title);
         itemDiv.appendChild(header);
 
-        // Контент пункта (текстовое поле)
-        const contentDiv = document.createElement('div');
-        contentDiv.className = 'item-content';
-        const textarea = document.createElement('textarea');
-        textarea.className = 'item-textarea';
-        textarea.placeholder = 'Введите текст для этого пункта...';
-        textarea.value = node.content || '';
-        textarea.rows = 3;
-        textarea.addEventListener('change', () => {
-            node.content = textarea.value;
-        });
-        contentDiv.appendChild(textarea);
-        itemDiv.appendChild(contentDiv);
+        // // Контент пункта (текстовое поле)
+        // const contentDiv = document.createElement('div');
+        // contentDiv.className = 'item-content';
+        // const textarea = document.createElement('textarea');
+        // textarea.className = 'item-textarea';
+        // textarea.placeholder = 'Введите текст для этого пункта...';
+        // textarea.value = node.content || '';
+        // textarea.rows = 3;
+        // textarea.addEventListener('change', () => {
+        //     node.content = textarea.value;
+        // });
+        // contentDiv.appendChild(textarea);
+        // itemDiv.appendChild(contentDiv);
 
         // Дочерние элементы (рекурсивно) - включая таблицы
         if (node.children && node.children.length > 0) {
