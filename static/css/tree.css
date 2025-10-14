@@ -65,3 +65,17 @@
 .tree-item.collapsed > .tree-children {
     display: none;
 }
+
+.tree-item.table-node {
+    font-style: italic;
+    color: #667eea;
+}
+
+.tree-item.table-node .tree-label {
+    font-weight: 500;
+}
+
+.table-icon {
+    display: inline-block;
+    margin-left: 5px;
+}

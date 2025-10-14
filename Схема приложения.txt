@@ -44,7 +44,7 @@ UI_for_EP_v_KAP/
 │   └── js/
 │       ├── state.js
 │       ├── tree.js
-│       ├── content.js
+│       ├── table.js
 │       ├── preview.js
 │       ├── api.js
 │       └── main.js

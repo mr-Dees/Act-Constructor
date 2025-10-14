@@ -1,34 +1,39 @@
 {% extends "base.html" %}
 
 {% block content %}
-<div class="constructor-container">
-    <!-- Шаг 1: Построение структуры -->
+    <!-- Шаг 1: Создание структуры -->
     <div id="step1" class="step-content">
         <div class="panels">
-            <div class="tree-panel">
-                {% include 'components/tree_panel.html' %}
-            </div>
-            <div class="preview-panel">
-                {% include 'components/preview_panel.html' %}
-            </div>
+            {% include 'components/tree_panel.html' %}
+            {% include 'components/preview_panel.html' %}
         </div>
         <div class="step-actions">
-            <button id="nextBtn" class="btn btn-primary">➡️ Далее</button>
+            <button id="nextBtn" class="btn btn-primary">Далее: Заполнение →</button>
         </div>
     </div>
 
-    <!-- Шаг 2: Заполнение полей -->
+    <!-- Шаг 2: Заполнение данных -->
     <div id="step2" class="step-content hidden">
-        <div class="items-container" id="itemsContainer">
-            <!-- Здесь будут отображаться пункты с их содержимым -->
+        <!-- Блок с инструкцией -->
+        <div class="help-panel">
+            <h3 class="help-title">📋 Как пользоваться редактором</h3>
+            <div class="help-content">
+                <ul class="help-list">
+                    <li><strong>Текстовые блоки:</strong> заполните содержимое каждого пункта в текстовых полях</li>
+                    <li><strong>Редактирование заголовков:</strong> двойной клик по заголовку пункта или таблицы для изменения названия</li>
+                    <li><strong>Таблицы:</strong> кликните по ячейке для редактирования (двойной клик открывает поле ввода)</li>
+                    <li><strong>Изменение размеров:</strong> наведите на край ячейки и перетащите для изменения ширины столбца или высоты строки</li>
+                    <li><strong>Объединение ячеек:</strong> выделите несколько ячеек зажав Ctrl/Cmd и кликая по ним, затем нажмите ПКМ → Объединить ячейки</li>
+                </ul>
+            </div>
         </div>
+
+        <div id="itemsContainer" class="items-container"></div>
         <div class="step-actions">
-            <button id="backBtn" class="btn btn-secondary">⬅️ Назад</button>
-            <button id="generateBtn" class="btn btn-success">🚀 Сформировать акт</button>
+            <button id="backBtn" class="btn btn-secondary">← Назад к структуре</button>
+            <button id="generateBtn" class="btn btn-success">Сгенерировать акт ✓</button>
         </div>
     </div>
-</div>
 
-<!-- Контекстные меню -->
-{% include 'components/context_menu.html' %}
+    {% include 'components/context_menu.html' %}
 {% endblock %}

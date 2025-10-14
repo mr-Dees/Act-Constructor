@@ -91,7 +91,6 @@ class ItemsRenderer {
     static renderAll() {
         const container = document.getElementById('itemsContainer');
         if (!container) return;
-
         container.innerHTML = '';
 
         // Очистить выделение таблиц
@@ -123,13 +122,45 @@ class ItemsRenderer {
         itemDiv.className = `item-block level-${level}`;
         itemDiv.dataset.nodeId = node.id;
 
+        // Если это таблица - рендерим только таблицу
+        if (node.type === 'table') {
+            const table = AppState.tables[node.tableId];
+            if (table) {
+                const tableSection = this.renderTable(table, node);
+                itemDiv.appendChild(tableSection);
+            }
+            return itemDiv;
+        }
+
         // Заголовок пункта
         const header = document.createElement('div');
         header.className = 'item-header';
-
         const title = document.createElement('h' + Math.min(level + 1, 6));
         title.className = 'item-title';
         title.textContent = node.label;
+        title.contentEditable = false;
+
+        // Двойной клик для редактирования (только для не-protected пунктов)
+        if (!node.protected) {
+            let clickCount = 0;
+            let clickTimer = null;
+
+            title.addEventListener('click', (e) => {
+                clickCount++;
+
+                if (clickCount === 1) {
+                    clickTimer = setTimeout(() => {
+                        clickCount = 0;
+                    }, 300);
+                } else if (clickCount === 2) {
+                    clearTimeout(clickTimer);
+                    clickCount = 0;
+                    this.startEditingItemTitle(title, node);
+                }
+            });
+
+            title.style.cursor = 'pointer';
+        }
 
         header.appendChild(title);
         itemDiv.appendChild(header);
@@ -137,46 +168,25 @@ class ItemsRenderer {
         // Контент пункта (текстовое поле)
         const contentDiv = document.createElement('div');
         contentDiv.className = 'item-content';
-
         const textarea = document.createElement('textarea');
         textarea.className = 'item-textarea';
         textarea.placeholder = 'Введите текст для этого пункта...';
         textarea.value = node.content || '';
         textarea.rows = 3;
-
         textarea.addEventListener('change', () => {
             node.content = textarea.value;
         });
-
         contentDiv.appendChild(textarea);
         itemDiv.appendChild(contentDiv);
 
-        // Таблицы пункта
-        if (node.tableIds && node.tableIds.length > 0) {
-            const tablesDiv = document.createElement('div');
-            tablesDiv.className = 'item-tables';
-
-            node.tableIds.forEach(tableId => {
-                const table = AppState.tables[tableId];
-                if (table) {
-                    const tableSection = this.renderTable(table, node);
-                    tablesDiv.appendChild(tableSection);
-                }
-            });
-
-            itemDiv.appendChild(tablesDiv);
-        }
-
-        // Дочерние пункты (рекурсивно)
+        // Дочерние элементы (рекурсивно) - включая таблицы
         if (node.children && node.children.length > 0) {
             const childrenDiv = document.createElement('div');
             childrenDiv.className = 'item-children';
-
             node.children.forEach(child => {
-                const childElement = this.renderItem(child, level + 1);
+                const childElement = this.renderItem(child, child.type === 'table' ? level : level + 1);
                 childrenDiv.appendChild(childElement);
             });
-
             itemDiv.appendChild(childrenDiv);
         }
 
@@ -187,6 +197,36 @@ class ItemsRenderer {
         const section = document.createElement('div');
         section.className = 'table-section';
         section.dataset.tableId = table.id;
+
+        // Заголовок таблицы (редактируемый через двойной клик)
+        const tableTitle = document.createElement('h4');
+        tableTitle.className = 'table-title';
+        tableTitle.contentEditable = false;
+        tableTitle.textContent = node.label || 'Таблица';
+        tableTitle.style.marginBottom = '10px';
+        tableTitle.style.fontWeight = 'bold';
+        tableTitle.style.cursor = 'pointer';
+
+        // Двойной клик для редактирования заголовка таблицы
+        let clickCount = 0;
+        let clickTimer = null;
+
+        tableTitle.addEventListener('click', (e) => {
+            clickCount++;
+
+            if (clickCount === 1) {
+                clickTimer = setTimeout(() => {
+                    clickCount = 0;
+                }, 300);
+            } else if (clickCount === 2) {
+                clearTimeout(clickTimer);
+                clickCount = 0;
+                this.startEditingTableTitle(tableTitle, node);
+            }
+        });
+
+        section.appendChild(tableTitle);
+
         const tableEl = document.createElement('table');
         tableEl.className = 'editable-table';
 
@@ -206,6 +246,7 @@ class ItemsRenderer {
             const tr = document.createElement('tr');
             row.cells.forEach((cell, colIndex) => {
                 if (cell.merged) return; // Пропустить объединенные
+
                 const cellEl = document.createElement(cell.isHeader ? 'th' : 'td');
                 cellEl.textContent = cell.content;
                 if (cell.colspan > 1) cellEl.colSpan = cell.colspan;
@@ -238,6 +279,132 @@ class ItemsRenderer {
 
         section.appendChild(tableEl);
         return section;
+    }
+
+    // Новый метод для редактирования заголовка пункта на шаге 2
+    static startEditingItemTitle(titleElement, node) {
+        if (titleElement.classList.contains('editing')) return;
+
+        titleElement.classList.add('editing');
+        titleElement.contentEditable = true;
+
+        // Извлечь только текст без нумерации
+        const labelMatch = node.label.match(/^[\d.]+\s+(.+)$/);
+        const baseLabel = labelMatch ? labelMatch[1] : node.label;
+
+        // Показать только базовое название для редактирования
+        titleElement.textContent = baseLabel;
+        titleElement.focus();
+
+        // Выделить весь текст
+        const range = document.createRange();
+        range.selectNodeContents(titleElement);
+        const sel = window.getSelection();
+        sel.removeAllRanges();
+        sel.addRange(range);
+
+        const finishEditing = () => {
+            titleElement.contentEditable = false;
+            titleElement.classList.remove('editing');
+            const newBaseLabel = titleElement.textContent.trim();
+
+            if (newBaseLabel && newBaseLabel !== baseLabel) {
+                // Обновить только базовое название, сохранив структуру номера
+                const numberMatch = node.label.match(/^([\d.]+)\s+/);
+                if (numberMatch) {
+                    node.label = numberMatch[1] + ' ' + newBaseLabel;
+                } else {
+                    node.label = newBaseLabel;
+                }
+
+                // Перегенерировать нумерацию (она восстановит правильный номер)
+                AppState.generateNumbering();
+
+                // Обновить отображение с новым label
+                titleElement.textContent = node.label;
+
+                // Обновить дерево и превью
+                treeManager.render();
+                PreviewManager.update();
+            } else if (!newBaseLabel) {
+                // Если пустой - вернуть полное старое значение
+                titleElement.textContent = node.label;
+            } else {
+                // Если не изменилось - вернуть полное значение
+                titleElement.textContent = node.label;
+            }
+        };
+
+        titleElement.addEventListener('blur', finishEditing, { once: true });
+
+        titleElement.addEventListener('keydown', (e) => {
+            if (e.key === 'Enter') {
+                e.preventDefault();
+                titleElement.blur();
+            }
+            if (e.key === 'Escape') {
+                titleElement.textContent = node.label;
+                titleElement.blur();
+            }
+        }, { once: true });
+    }
+
+    static startEditingTableTitle(titleElement, node) {
+        if (titleElement.classList.contains('editing')) return;
+
+        titleElement.classList.add('editing');
+        titleElement.contentEditable = true;
+
+        // Показываем кастомное название, если есть, иначе пустое поле
+        const currentLabel = node.customLabel || '';
+        titleElement.textContent = currentLabel;
+        titleElement.focus();
+
+        // Выделить весь текст
+        const range = document.createRange();
+        range.selectNodeContents(titleElement);
+        const sel = window.getSelection();
+        sel.removeAllRanges();
+        sel.addRange(range);
+
+        const finishEditing = () => {
+            titleElement.contentEditable = false;
+            titleElement.classList.remove('editing');
+
+            const newLabel = titleElement.textContent.trim();
+            if (newLabel) {
+                // Сохраняем кастомное название
+                node.customLabel = newLabel;
+                node.label = newLabel;
+            } else {
+                // Если пустое - удаляем кастомное название, вернется дефолтное
+                delete node.customLabel;
+                node.label = node.number || 'Таблица';
+            }
+
+            // Перегенерировать нумерацию (обновит node.number под капотом)
+            AppState.generateNumbering();
+
+            // Обновить отображение
+            titleElement.textContent = node.label;
+
+            // Обновить дерево и превью
+            treeManager.render();
+            PreviewManager.update();
+        };
+
+        titleElement.addEventListener('blur', finishEditing, { once: true });
+        titleElement.addEventListener('keydown', (e) => {
+            if (e.key === 'Enter') {
+                e.preventDefault();
+                titleElement.blur();
+            }
+            if (e.key === 'Escape') {
+                // Отменить редактирование
+                titleElement.textContent = node.label;
+                titleElement.blur();
+            }
+        }, { once: true });
     }
 
     static attachTableEvents() {
@@ -757,12 +924,17 @@ class ContextMenuManager {
     static handleTreeAction(action) {
         const nodeId = this.currentNodeId;
         if (!nodeId) return;
-
         const node = AppState.findNodeById(nodeId);
         if (!node) return;
 
         switch (action) {
             case 'add-child': {
+                // Запретить добавление дочерних элементов к таблицам
+                if (node.type === 'table') {
+                    alert('❌ Нельзя добавить дочерний пункт к таблице');
+                    return;
+                }
+
                 const childResult = AppState.addNode(nodeId, 'Новый подпункт', true);
                 if (childResult.success) {
                     treeManager.render();
@@ -787,6 +959,12 @@ class ContextMenuManager {
             }
 
             case 'add-table': {
+                // Запретить добавление таблицы к таблице
+                if (node.type === 'table') {
+                    alert('❌ Нельзя добавить таблицу к таблице');
+                    return;
+                }
+
                 const tableResult = AppState.addTableToNode(nodeId);
                 if (tableResult.success) {
                     treeManager.render();
@@ -803,6 +981,7 @@ class ContextMenuManager {
                     alert('❌ Этот пункт защищен от удаления');
                     return;
                 }
+
                 if (confirm('Удалить этот пункт?')) {
                     AppState.deleteNode(nodeId);
                     treeManager.render();
