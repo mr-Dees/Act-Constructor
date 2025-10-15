@@ -17,6 +17,7 @@ UI_for_EP_v_KAP/
 │   │   ├── __init__.py
 │   │   ├── base.py
 │   │   └── text_formatter.py
+│   │   └── docx_formatter.py
 │   ├── schemas/
 │   │   ├── __init__.py
 │   │   └── act.py

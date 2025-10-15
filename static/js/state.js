@@ -435,13 +435,123 @@ const AppState = {
         return {success: true, violation: violation, violationNode: violationNode};
     },
 
-    // Экспорт данных для API
+    // Экспортирует данные для отправки на бэкенд (Формат Pydantic схемы)
     exportData() {
+        // Рекурсивно обходим дерево и сериализуем узлы
+        const serializeNode = (node) => {
+            const serialized = {
+                id: node.id,
+                label: node.label,
+                type: node.type || 'item',
+                protected: node.protected || false
+            };
+
+            // Добавляем специфичные поля для разных типов
+            if (node.type === 'table' && node.tableId) {
+                serialized.tableId = node.tableId;
+            } else if (node.type === 'textblock' && node.textBlockId) {
+                serialized.textBlockId = node.textBlockId;
+            } else if (node.type === 'violation' && node.violationId) {
+                serialized.violationId = node.violationId;
+            } else {
+                // Для обычных пунктов добавляем content
+                serialized.content = node.content || '';
+            }
+
+            // Добавляем кастомные поля
+            if (node.customLabel) {
+                serialized.customLabel = node.customLabel;
+            }
+            if (node.number) {
+                serialized.number = node.number;
+            }
+
+            // Рекурсивно обрабатываем дочерние элементы
+            if (node.children && node.children.length > 0) {
+                serialized.children = node.children.map(child => serializeNode(child));
+            } else {
+                serialized.children = [];
+            }
+
+            return serialized;
+        };
+
+        // Сериализуем таблицы
+        const serializedTables = {};
+        for (const tableId in this.tables) {
+            const table = this.tables[tableId];
+            serializedTables[tableId] = {
+                id: table.id,
+                nodeId: table.nodeId,
+                rows: table.rows.map(row => ({
+                    cells: row.cells.map(cell => ({
+                        content: cell.content || '',
+                        isHeader: cell.isHeader || false,
+                        colspan: cell.colspan || 1,
+                        rowspan: cell.rowspan || 1,
+                        merged: cell.merged || false
+                    }))
+                })),
+                colWidths: table.colWidths || []
+            };
+        }
+
+        // Сериализуем текстовые блоки
+        const serializedTextBlocks = {};
+        for (const textBlockId in this.textBlocks) {
+            const textBlock = this.textBlocks[textBlockId];
+            serializedTextBlocks[textBlockId] = {
+                id: textBlock.id,
+                nodeId: textBlock.nodeId,
+                content: textBlock.content || '',
+                formatting: {
+                    bold: textBlock.formatting?.bold || false,
+                    italic: textBlock.formatting?.italic || false,
+                    underline: textBlock.formatting?.underline || false,
+                    fontSize: textBlock.formatting?.fontSize || 14,
+                    alignment: textBlock.formatting?.alignment || 'left'
+                }
+            };
+        }
+
+        // Сериализуем нарушения
+        const serializedViolations = {};
+        for (const violationId in this.violations) {
+            const violation = this.violations[violationId];
+            serializedViolations[violationId] = {
+                id: violation.id,
+                nodeId: violation.nodeId,
+                violated: violation.violated || '',
+                established: violation.established || '',
+                descriptionList: {
+                    enabled: violation.descriptionList?.enabled || false,
+                    items: violation.descriptionList?.items || []
+                },
+                additionalText: {
+                    enabled: violation.additionalText?.enabled || false,
+                    content: violation.additionalText?.content || ''
+                },
+                reasons: {
+                    enabled: violation.reasons?.enabled || false,
+                    content: violation.reasons?.content || ''
+                },
+                consequences: {
+                    enabled: violation.consequences?.enabled || false,
+                    content: violation.consequences?.content || ''
+                },
+                responsible: {
+                    enabled: violation.responsible?.enabled || false,
+                    content: violation.responsible?.content || ''
+                }
+            };
+        }
+
+        // Формируем итоговую структуру
         return {
-            tree: this.treeData,
-            tables: this.tables,
-            textBlocks: this.textBlocks,
-            violations: this.violations
+            tree: serializeNode(this.treeData),
+            tables: serializedTables,
+            textBlocks: serializedTextBlocks,
+            violations: serializedViolations
         };
     }
 };

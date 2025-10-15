@@ -1,24 +1,21 @@
-// Главный файл приложения
-
+/**
+ * Главный класс приложения
+ */
 class App {
     static init() {
-        // Инициализация состояния
         AppState.initializeTree();
         AppState.generateNumbering();
 
-        // Инициализация хранилища размеров таблиц между шагами
-        if (!AppState.tableUISizes) AppState.tableUISizes = {}; // { [tableId]: { cellSizes: {[row-col]: {width,height}}, colWidths: number[], rowHeights: number[] } }
+        // Инициализация хранилища размеров таблиц
+        if (!AppState.tableUISizes) {
+            AppState.tableUISizes = {};
+        }
 
-        // Рендер дерева
         treeManager.render();
+        setTimeout(() => PreviewManager.update('previewTrim'), 30);
 
-        // Обновить предпросмотр (на шаге 1 всегда резать текст до 30 символов)
-        PreviewManager.update({previewTrim: 30});
-
-        // Навигация между шагами
         this.setupNavigation();
-
-        // Контекстное меню
+        this.setupFormatMenu();
         ContextMenuManager.init();
     }
 
@@ -27,38 +24,220 @@ class App {
         const backBtn = document.getElementById('backBtn');
         const generateBtn = document.getElementById('generateBtn');
 
-        nextBtn.addEventListener('click', () => {
-            this.goToStep(2);
-        });
+        if (nextBtn) {
+            nextBtn.addEventListener('click', () => this.goToStep(2));
+        }
 
-        backBtn.addEventListener('click', () => {
-            this.goToStep(1);
-        });
+        backBtn.addEventListener('click', () => this.goToStep(1));
 
+        // Обработчик кнопки сохранения с поддержкой множественных форматов
         generateBtn.addEventListener('click', async () => {
+            const selectedFormats = this.getSelectedFormats();
+
+            if (selectedFormats.length === 0) {
+                alert('Пожалуйста, выберите хотя бы один формат для сохранения');
+                return;
+            }
+
+            const validationResult = this.validateActData();
+            if (!validationResult.valid) {
+                alert(validationResult.message);
+                return;
+            }
+
+            // Синхронизация данных из DOM в AppState
+            ItemsRenderer.syncDataToState();
+
             generateBtn.disabled = true;
-            generateBtn.textContent = '⏳ Генерация...';
-            const success = await APIClient.generateAct();
+            const originalText = generateBtn.textContent;
+
+            let successCount = 0;
+            let errorCount = 0;
+
+            // Последовательное сохранение во всех выбранных форматах
+            for (const format of selectedFormats) {
+                generateBtn.textContent = `Сохранение ${format.toUpperCase()}...`;
+
+                try {
+                    const success = await APIClient.generateAct(format);
+                    if (success) {
+                        successCount++;
+                    } else {
+                        errorCount++;
+                    }
+                } catch (error) {
+                    console.error(`Ошибка при сохранении ${format}:`, error);
+                    errorCount++;
+                }
+            }
+
             generateBtn.disabled = false;
-            generateBtn.textContent = '🚀 Сформировать акт';
-            if (success) {
-                alert('✅ Акт успешно сформирован!');
+            generateBtn.textContent = originalText;
+
+            // Итоговое сообщение
+            if (successCount > 0 && errorCount === 0) {
+                alert(`✅ Успешно сохранено в ${successCount} формат(ах)!`);
+            } else if (successCount > 0 && errorCount > 0) {
+                alert(`⚠️ Сохранено: ${successCount}, Ошибок: ${errorCount}`);
+            } else {
+                alert('❌ Не удалось сохранить акт');
             }
         });
 
-        // Клик по шагам в заголовке
+        // Клик по шагам в header
         document.querySelectorAll('.step').forEach(step => {
             step.addEventListener('click', () => {
                 const stepNum = parseInt(step.dataset.step);
                 this.goToStep(stepNum);
             });
         });
+
+        // Горячая клавиша Ctrl+S для сохранения
+        document.addEventListener('keydown', (e) => {
+            if ((e.ctrlKey || e.metaKey) && e.key === 's') {
+                e.preventDefault();
+                if (AppState.currentStep === 2) {
+                    generateBtn.click();
+                }
+            }
+        });
     }
 
+    /**
+     * Настройка выпадающего меню выбора форматов
+     */
+    static setupFormatMenu() {
+        const dropdownBtn = document.getElementById('formatDropdownBtn');
+        const formatMenu = document.getElementById('formatMenu');
+        const generateBtn = document.getElementById('generateBtn');
+
+        if (!dropdownBtn || !formatMenu) return;
+
+        // Открытие/закрытие меню с умным позиционированием
+        dropdownBtn.addEventListener('click', (e) => {
+            e.stopPropagation();
+
+            if (formatMenu.classList.contains('hidden')) {
+                // Определяем, где больше места - сверху или снизу
+                const buttonRect = dropdownBtn.getBoundingClientRect();
+                const viewportHeight = window.innerHeight;
+                const spaceBelow = viewportHeight - buttonRect.bottom;
+                const spaceAbove = buttonRect.top;
+
+                // Если снизу мало места, но сверху достаточно - показываем сверху
+                if (spaceBelow < 200 && spaceAbove > 200) {
+                    formatMenu.style.bottom = 'calc(100% + 8px)';
+                    formatMenu.style.top = 'auto';
+                } else {
+                    // Иначе показываем снизу (на случай если захотите переключиться обратно)
+                    formatMenu.style.top = 'calc(100% + 8px)';
+                    formatMenu.style.bottom = 'auto';
+                }
+            }
+
+            formatMenu.classList.toggle('hidden');
+            dropdownBtn.classList.toggle('active');
+        });
+
+        // Закрытие меню при клике вне его
+        document.addEventListener('click', (e) => {
+            if (!formatMenu.contains(e.target) && e.target !== dropdownBtn) {
+                formatMenu.classList.add('hidden');
+                dropdownBtn.classList.remove('active');
+            }
+        });
+
+        // Обновление индикатора при изменении чекбоксов
+        const checkboxes = formatMenu.querySelectorAll('input[type="checkbox"]');
+        checkboxes.forEach(checkbox => {
+            checkbox.addEventListener('change', () => {
+                this.updateFormatIndicator();
+            });
+        });
+
+        // Предотвращение закрытия меню при клике на чекбокс
+        formatMenu.addEventListener('click', (e) => {
+            e.stopPropagation();
+        });
+
+        // Инициализация индикатора
+        this.updateFormatIndicator();
+    }
+
+    /**
+     * Получение массива выбранных форматов
+     * @returns {string[]} Массив выбранных форматов (например, ['txt', 'docx'])
+     */
+    static getSelectedFormats() {
+        const checkboxes = document.querySelectorAll('#formatMenu input[type="checkbox"]:checked');
+        return Array.from(checkboxes).map(cb => cb.value);
+    }
+
+    /**
+     * Обновление визуального индикатора выбранных форматов на кнопке
+     */
+    static updateFormatIndicator() {
+        const generateBtn = document.getElementById('generateBtn');
+        const dropdownBtn = document.getElementById('formatDropdownBtn'); // Добавлено
+        const selectedFormats = this.getSelectedFormats();
+
+        if (selectedFormats.length > 0) {
+            const formatsText = selectedFormats.map(f => f.toUpperCase()).join(' + ');
+
+            // Убираем индикатор с основной кнопки
+            generateBtn.removeAttribute('data-formats');
+            generateBtn.classList.remove('has-formats');
+
+            // Добавляем индикатор на стрелочку
+            dropdownBtn.setAttribute('data-formats', formatsText);
+            dropdownBtn.classList.add('has-formats');
+            dropdownBtn.title = `Выбрано: ${formatsText}`;
+
+            generateBtn.title = `Сохранить в форматах: ${formatsText}`;
+        } else {
+            // Убираем индикаторы
+            generateBtn.removeAttribute('data-formats');
+            generateBtn.classList.remove('has-formats');
+            dropdownBtn.removeAttribute('data-formats');
+            dropdownBtn.classList.remove('has-formats');
+
+            generateBtn.title = 'Выберите хотя бы один формат';
+            dropdownBtn.title = 'Выбрать форматы';
+        }
+    }
+
+    /**
+     * Валидация данных акта перед сохранением
+     * @returns {{valid: boolean, message: string}}
+     */
+    static validateActData() {
+        if (!AppState.treeData || !AppState.treeData.children) {
+            return {valid: false, message: 'Структура акта пуста'};
+        }
+
+        if (AppState.treeData.children.length === 0) {
+            return {valid: false, message: 'Добавьте хотя бы один раздел в акт'};
+        }
+
+        // Проверка таблиц
+        for (const tableId in AppState.tables) {
+            const table = AppState.tables[tableId];
+            if (!table.rows || table.rows.length === 0) {
+                return {valid: false, message: `Таблица ${tableId} пуста`};
+            }
+        }
+
+        return {valid: true, message: 'OK'};
+    }
+
+    /**
+     * Переключение между шагами
+     * @param {number} stepNum - Номер шага (1 или 2)
+     */
     static goToStep(stepNum) {
         AppState.currentStep = stepNum;
 
-        // Обновить активный шаг в заголовке
+        // Обновление активного шага в header
         document.querySelectorAll('.step').forEach(step => {
             step.classList.remove('active');
             if (parseInt(step.dataset.step) === stepNum) {
@@ -66,43 +245,46 @@ class App {
             }
         });
 
-        // Показать нужный контент
+        // Скрытие всех шагов
         document.querySelectorAll('.step-content').forEach(content => {
             content.classList.add('hidden');
         });
 
+        // Показ текущего шага
         const currentContent = document.getElementById(`step${stepNum}`);
-        if (currentContent) currentContent.classList.remove('hidden');
+        if (currentContent) {
+            currentContent.classList.remove('hidden');
+        }
 
-        // Если переходим на шаг 2
+        // Шаг 2: инициализация панелей редактирования
         if (stepNum === 2) {
-            // Инициализировать глобальную панель инструментов
             textBlockManager.initGlobalToolbar();
-            // Рендерить пункты с таблицами и текстовыми блоками
             ItemsRenderer.renderAll();
         } else {
-            // На шаге 1 скрыть панель
             textBlockManager.hideToolbar();
         }
 
-        // На шаге 1 — предпросмотр с усечением текста до 30 символов
+        // Шаг 1: обновление превью
         if (stepNum === 1) {
-            PreviewManager.update({previewTrim: 30});
+            setTimeout(() => PreviewManager.update('previewTrim'), 30);
         }
     }
 }
 
-// Рендер на шаге 2 с сохранением/восстановлением размеров
+/**
+ * Рендерер элементов акта на шаге 2
+ */
 class ItemsRenderer {
+    /**
+     * Рендер всех элементов дерева
+     */
     static renderAll() {
         const container = document.getElementById('itemsContainer');
         if (!container) return;
-        container.innerHTML = '';
 
-        // Очистить выделение таблиц
+        container.innerHTML = '';
         tableManager.clearSelection();
 
-        // Рендерим все пункты первого уровня и их детей
         if (AppState.treeData && AppState.treeData.children) {
             AppState.treeData.children.forEach(item => {
                 const itemElement = this.renderItem(item, 1);
@@ -110,10 +292,10 @@ class ItemsRenderer {
             });
         }
 
-        // После рендера - подключить события таблиц и восстановить размеры
+        // Привязка событий к таблицам и UI элементам
         this.attachTableEvents();
 
-        // Восстановить UI размеры после рендера, если есть сохранённые
+        // Восстановление сохранённых размеров ячеек таблиц
         setTimeout(() => {
             document.querySelectorAll('.table-section').forEach(section => {
                 const tableId = section.dataset.tableId;
@@ -123,51 +305,57 @@ class ItemsRenderer {
         }, 0);
     }
 
+    /**
+     * Рекурсивный рендер элемента дерева
+     * @param {Object} node - Узел дерева
+     * @param {number} level - Уровень вложенности
+     * @returns {HTMLElement}
+     */
     static renderItem(node, level) {
         const itemDiv = document.createElement('div');
         itemDiv.className = `item-block level-${level}`;
         itemDiv.dataset.nodeId = node.id;
 
-        // Если это таблица - рендерим только таблицу
+        // Рендер таблицы
         if (node.type === 'table') {
             const table = AppState.tables[node.tableId];
             if (table) {
                 const tableSection = this.renderTable(table, node);
                 itemDiv.appendChild(tableSection);
+                return itemDiv;
             }
-            return itemDiv;
         }
 
-        // Если это текстовый блок - рендерим только текстовый блок (БЕЗ заголовка)
+        // Рендер текстового блока
         if (node.type === 'textblock') {
             const textBlock = AppState.textBlocks[node.textBlockId];
             if (textBlock) {
                 const textBlockSection = textBlockManager.createTextBlockElement(textBlock, node);
                 itemDiv.appendChild(textBlockSection);
+                return itemDiv;
             }
-            return itemDiv;
         }
 
-        // НОВОЕ: Если это нарушение - рендерим только нарушение
+        // Рендер нарушения
         if (node.type === 'violation') {
             const violation = AppState.violations[node.violationId];
             if (violation) {
                 const violationSection = violationManager.createViolationElement(violation, node);
                 itemDiv.appendChild(violationSection);
+                return itemDiv;
             }
-            return itemDiv;
         }
 
-        // Остальной код для обычных пунктов...
+        // Заголовок обычного элемента
         const header = document.createElement('div');
         header.className = 'item-header';
 
-        const title = document.createElement('h' + Math.min(level + 1, 6));
+        const title = document.createElement(`h${Math.min(level + 1, 6)}`);
         title.className = 'item-title';
         title.textContent = node.label;
         title.contentEditable = false;
 
-        // Двойной клик для редактирования (только для не-protected пунктов)
+        // Редактирование заголовка по двойному клику (не для защищённых элементов)
         if (!node.protected) {
             let clickCount = 0;
             let clickTimer = null;
@@ -184,13 +372,14 @@ class ItemsRenderer {
                     this.startEditingItemTitle(title, node);
                 }
             });
+
             title.style.cursor = 'pointer';
         }
 
         header.appendChild(title);
         itemDiv.appendChild(header);
 
-        // Дочерние элементы (рекурсивно) - включая таблицы, текстовые блоки и нарушения
+        // Дочерние элементы
         if (node.children && node.children.length > 0) {
             const childrenDiv = document.createElement('div');
             childrenDiv.className = 'item-children';
@@ -209,27 +398,31 @@ class ItemsRenderer {
         return itemDiv;
     }
 
+    /**
+     * Рендер таблицы
+     * @param {Object} table - Данные таблицы
+     * @param {Object} node - Узел дерева
+     * @returns {HTMLElement}
+     */
     static renderTable(table, node) {
         const section = document.createElement('div');
         section.className = 'table-section';
         section.dataset.tableId = table.id;
 
-        // Заголовок таблицы (редактируемый через двойной клик)
+        // Заголовок таблицы (редактируемый по двойному клику)
         const tableTitle = document.createElement('h4');
         tableTitle.className = 'table-title';
         tableTitle.contentEditable = false;
-        tableTitle.textContent = node.label || 'Таблица';
+        tableTitle.textContent = node.label;
         tableTitle.style.marginBottom = '10px';
         tableTitle.style.fontWeight = 'bold';
         tableTitle.style.cursor = 'pointer';
 
-        // Двойной клик для редактирования заголовка таблицы
         let clickCount = 0;
         let clickTimer = null;
 
         tableTitle.addEventListener('click', (e) => {
             clickCount++;
-
             if (clickCount === 1) {
                 clickTimer = setTimeout(() => {
                     clickCount = 0;
@@ -243,10 +436,11 @@ class ItemsRenderer {
 
         section.appendChild(tableTitle);
 
+        // Создание HTML таблицы
         const tableEl = document.createElement('table');
         tableEl.className = 'editable-table';
 
-        // Определить максимальное количество колонок (с учетом colspan)
+        // Вычисление максимального количества колонок с учётом colspan
         let maxCols = 0;
         table.rows.forEach(row => {
             let colCount = 0;
@@ -258,38 +452,46 @@ class ItemsRenderer {
             maxCols = Math.max(maxCols, colCount);
         });
 
+        // Рендер строк и ячеек
         table.rows.forEach((row, rowIndex) => {
             const tr = document.createElement('tr');
+
             row.cells.forEach((cell, colIndex) => {
-                if (cell.merged) return; // Пропустить объединенные
+                if (cell.merged) return;
 
                 const cellEl = document.createElement(cell.isHeader ? 'th' : 'td');
                 cellEl.textContent = cell.content;
-                if (cell.colspan > 1) cellEl.colSpan = cell.colspan;
-                if (cell.rowspan > 1) cellEl.rowSpan = cell.rowspan;
+
+                if (cell.colspan > 1) {
+                    cellEl.colSpan = cell.colspan;
+                }
+                if (cell.rowspan > 1) {
+                    cellEl.rowSpan = cell.rowspan;
+                }
+
                 cellEl.dataset.row = rowIndex;
                 cellEl.dataset.col = colIndex;
                 cellEl.dataset.tableId = table.id;
 
-                // Определить, является ли это последней видимой колонкой
+                // Ручки изменения размера только для некрайних колонок
                 const colspan = cell.colspan || 1;
                 const cellEndCol = colIndex + colspan - 1;
-                const isLastColumn = (cellEndCol === maxCols - 1);
+                const isLastColumn = cellEndCol >= maxCols - 1;
 
-                // Добавить правую ручку изменения размера только если это НЕ последняя колонка
                 if (!isLastColumn) {
                     const resizeHandle = document.createElement('div');
                     resizeHandle.className = 'resize-handle';
                     cellEl.appendChild(resizeHandle);
                 }
 
-                // Нижняя ручка изменения размера строк (всегда добавляем)
+                // Ручка изменения высоты строки
                 const rowResizeHandle = document.createElement('div');
                 rowResizeHandle.className = 'row-resize-handle';
                 cellEl.appendChild(rowResizeHandle);
 
                 tr.appendChild(cellEl);
             });
+
             tableEl.appendChild(tr);
         });
 
@@ -297,22 +499,24 @@ class ItemsRenderer {
         return section;
     }
 
-    // Новый метод для редактирования заголовка пункта на шаге 2
+    /**
+     * Редактирование заголовка элемента
+     * @param {HTMLElement} titleElement - DOM элемент заголовка
+     * @param {Object} node - Узел дерева
+     */
     static startEditingItemTitle(titleElement, node) {
         if (titleElement.classList.contains('editing')) return;
 
         titleElement.classList.add('editing');
         titleElement.contentEditable = true;
 
-        // Извлечь только текст без нумерации
+        // Извлекаем базовую метку без нумерации
         const labelMatch = node.label.match(/^[\d.]+\s+(.+)$/);
         const baseLabel = labelMatch ? labelMatch[1] : node.label;
 
-        // Показать только базовое название для редактирования
         titleElement.textContent = baseLabel;
         titleElement.focus();
 
-        // Выделить весь текст
         const range = document.createRange();
         range.selectNodeContents(titleElement);
         const sel = window.getSelection();
@@ -322,37 +526,32 @@ class ItemsRenderer {
         const finishEditing = () => {
             titleElement.contentEditable = false;
             titleElement.classList.remove('editing');
+
             const newBaseLabel = titleElement.textContent.trim();
 
             if (newBaseLabel && newBaseLabel !== baseLabel) {
-                // Обновить только базовое название, сохранив структуру номера
-                const numberMatch = node.label.match(/^([\d.]+)\s+/);
+                // Сохраняем нумерацию
+                const numberMatch = node.label.match(/^([\d.]+\s+)/);
                 if (numberMatch) {
-                    node.label = numberMatch[1] + ' ' + newBaseLabel;
+                    node.label = numberMatch[1] + newBaseLabel;
                 } else {
                     node.label = newBaseLabel;
                 }
 
-                // Перегенерировать нумерацию (она восстановит правильный номер)
                 AppState.generateNumbering();
-
-                // Обновить отображение с новым label
                 titleElement.textContent = node.label;
-
-                // Обновить дерево и превью
                 treeManager.render();
                 PreviewManager.update();
             } else if (!newBaseLabel) {
-                // Если пустой - вернуть полное старое значение
+                // Пустая метка - возвращаем исходную
                 titleElement.textContent = node.label;
             } else {
-                // Если не изменилось - вернуть полное значение
+                // Без изменений
                 titleElement.textContent = node.label;
             }
         };
 
-        titleElement.addEventListener('blur', finishEditing, { once: true });
-
+        titleElement.addEventListener('blur', finishEditing, {once: true});
         titleElement.addEventListener('keydown', (e) => {
             if (e.key === 'Enter') {
                 e.preventDefault();
@@ -362,21 +561,26 @@ class ItemsRenderer {
                 titleElement.textContent = node.label;
                 titleElement.blur();
             }
-        }, { once: true });
+        }, {once: true});
     }
 
+    /**
+     * Редактирование заголовка таблицы
+     * @param {HTMLElement} titleElement - DOM элемент заголовка
+     * @param {Object} node - Узел дерева
+     */
     static startEditingTableTitle(titleElement, node) {
         if (titleElement.classList.contains('editing')) return;
 
         titleElement.classList.add('editing');
         titleElement.contentEditable = true;
 
-        // Показываем кастомное название, если есть, иначе пустое поле
-        const currentLabel = node.customLabel || '';
+        // Показываем текущую кастомную метку или стандартную
+        const currentLabel = node.customLabel || node.label;
         titleElement.textContent = currentLabel;
+
         titleElement.focus();
 
-        // Выделить весь текст
         const range = document.createRange();
         range.selectNodeContents(titleElement);
         const sel = window.getSelection();
@@ -388,75 +592,84 @@ class ItemsRenderer {
             titleElement.classList.remove('editing');
 
             const newLabel = titleElement.textContent.trim();
+
             if (newLabel) {
-                // Сохраняем кастомное название
                 node.customLabel = newLabel;
                 node.label = newLabel;
             } else {
-                // Если пустое - удаляем кастомное название, вернется дефолтное
+                // Если пусто, вернуться к автогенерируемому
                 delete node.customLabel;
-                node.label = node.number || 'Таблица';
+                node.label = `${node.number || ''} Таблица ${node.number || ''}`;
             }
 
-            // Перегенерировать нумерацию (обновит node.number под капотом)
             AppState.generateNumbering();
-
-            // Обновить отображение
             titleElement.textContent = node.label;
-
-            // Обновить дерево и превью
             treeManager.render();
             PreviewManager.update();
         };
 
-        titleElement.addEventListener('blur', finishEditing, { once: true });
+        titleElement.addEventListener('blur', finishEditing, {once: true});
         titleElement.addEventListener('keydown', (e) => {
             if (e.key === 'Enter') {
                 e.preventDefault();
                 titleElement.blur();
             }
             if (e.key === 'Escape') {
-                // Отменить редактирование
                 titleElement.textContent = node.label;
                 titleElement.blur();
             }
-        }, { once: true });
+        }, {once: true});
     }
 
+    /**
+     * Привязка событий к ячейкам таблиц
+     */
     static attachTableEvents() {
         const container = document.getElementById('itemsContainer');
         if (!container) return;
 
-        // Выбор ячеек
+        // События ячеек
         container.querySelectorAll('td, th').forEach(cell => {
+            // Клик для выделения
             cell.addEventListener('click', (e) => {
                 if (e.target.classList.contains('resize-handle') ||
-                    e.target.classList.contains('row-resize-handle')) return;
+                    e.target.classList.contains('row-resize-handle')) {
+                    return;
+                }
 
-                if (!e.ctrlKey) tableManager.clearSelection();
+                if (!e.ctrlKey) {
+                    tableManager.clearSelection();
+                }
                 tableManager.selectCell(cell);
             });
 
             // Двойной клик для редактирования
             cell.addEventListener('dblclick', (e) => {
                 if (e.target.classList.contains('resize-handle') ||
-                    e.target.classList.contains('row-resize-handle')) return;
+                    e.target.classList.contains('row-resize-handle')) {
+                    return;
+                }
                 this.startEditingCell(cell);
             });
 
-            // Правый клик для контекстного меню (НЕ сбрасывать выделение)
+            // Контекстное меню
             cell.addEventListener('contextmenu', (e) => {
                 if (e.target.classList.contains('resize-handle') ||
-                    e.target.classList.contains('row-resize-handle')) return;
+                    e.target.classList.contains('row-resize-handle')) {
+                    return;
+                }
+
                 e.preventDefault();
+
                 if (!cell.classList.contains('selected') && tableManager.selectedCells.length === 0) {
                     tableManager.selectCell(cell);
                 }
+
                 ContextMenuManager.show(e.clientX, e.clientY, null, 'cell');
             });
         });
 
-        // Изменение размера колонок
+        // Ручки изменения ширины колонок
         container.querySelectorAll('.resize-handle').forEach(handle => {
             handle.addEventListener('mousedown', (e) => {
                 e.preventDefault();
@@ -465,7 +678,7 @@ class ItemsRenderer {
             });
         });
 
-        // Изменение размера строк
+        // Ручки изменения высоты строк
         container.querySelectorAll('.row-resize-handle').forEach(handle => {
             handle.addEventListener('mousedown', (e) => {
                 e.preventDefault();
@@ -475,7 +688,10 @@ class ItemsRenderer {
         });
     }
 
-    // Редактирование ячейки
+    /**
+     * Редактирование содержимого ячейки
+     * @param {HTMLElement} cellEl - DOM элемент ячейки
+     */
     static startEditingCell(cellEl) {
         const originalContent = cellEl.textContent;
         cellEl.classList.add('editing');
@@ -483,7 +699,6 @@ class ItemsRenderer {
         const input = document.createElement('input');
         input.type = 'text';
         input.value = originalContent;
-
         cellEl.textContent = '';
         cellEl.appendChild(input);
         input.focus();
@@ -493,15 +708,18 @@ class ItemsRenderer {
             cellEl.textContent = newValue;
             cellEl.classList.remove('editing');
 
-            // Обновить в состоянии
+            // ВАЖНО: Обновление данных в AppState
             const tableId = cellEl.dataset.tableId;
             const row = parseInt(cellEl.dataset.row);
             const col = parseInt(cellEl.dataset.col);
-            const table = AppState.tables[tableId];
 
+            const table = AppState.tables[tableId];
             if (table && table.rows[row] && table.rows[row].cells[col]) {
                 table.rows[row].cells[col].content = newValue;
             }
+
+            // Обновляем превью
+            PreviewManager.update();
         };
 
         input.addEventListener('blur', finishEditing, {once: true});
@@ -517,7 +735,10 @@ class ItemsRenderer {
         }, {once: true});
     }
 
-    // Ресайз колонки с компенсацией соседней колонки справа
+    /**
+     * Изменение ширины колонки
+     * @param {MouseEvent} e - Событие мыши
+     */
     static startColumnResize(e) {
         const cell = e.target.parentElement;
         const table = cell.closest('table');
@@ -526,7 +747,7 @@ class ItemsRenderer {
         const startWidth = cell.offsetWidth;
         const colIndex = parseInt(cell.dataset.col);
 
-        // Найти следующую видимую колонку справа для компенсации
+        // Найти следующую колонку
         const allRows = table.querySelectorAll('tr');
         const firstRow = allRows[0];
         const firstRowCells = firstRow.querySelectorAll('td, th');
@@ -535,7 +756,6 @@ class ItemsRenderer {
         let nextCell = null;
         let nextStartWidth = 0;
 
-        // Найти следующую колонку (не объединенную с текущей)
         for (let i = 0; i < firstRowCells.length; i++) {
             const testCell = firstRowCells[i];
             const testColIndex = parseInt(testCell.dataset.col);
@@ -547,7 +767,6 @@ class ItemsRenderer {
             }
         }
 
-        // Ограничения
         const minWidth = 80;
         const maxWidth = 800;
 
@@ -555,7 +774,7 @@ class ItemsRenderer {
         document.body.style.userSelect = 'none';
         table.classList.add('resizing');
 
-        // Визуальная линия
+        // Линия ресайза
         const resizeLine = document.createElement('div');
         resizeLine.style.position = 'fixed';
         resizeLine.style.top = '0';
@@ -564,40 +783,32 @@ class ItemsRenderer {
         resizeLine.style.backgroundColor = '#667eea';
         resizeLine.style.zIndex = '9999';
         resizeLine.style.pointerEvents = 'none';
-        resizeLine.style.left = e.clientX + 'px';
+        resizeLine.style.left = `${e.clientX}px`;
         document.body.appendChild(resizeLine);
 
         const onMouseMove = (ev) => {
             const diff = ev.clientX - startX;
             let newWidth = startWidth + diff;
-
-            // Ограничить текущую колонку
             newWidth = Math.max(minWidth, Math.min(maxWidth, newWidth));
 
-            // Если есть следующая колонка, компенсировать изменение
             let nextNewWidth = nextStartWidth;
             if (nextColIndex !== null && nextCell) {
-                // Вычислить новую ширину следующей колонки (уменьшить на столько, на сколько увеличилась текущая)
                 const actualDiff = newWidth - startWidth;
                 nextNewWidth = nextStartWidth - actualDiff;
 
-                // Если следующая колонка станет слишком узкой, ограничить текущую
                 if (nextNewWidth < minWidth) {
                     nextNewWidth = minWidth;
                     newWidth = startWidth + (nextStartWidth - minWidth);
                 }
-
-                // Если следующая колонка станет слишком широкой
                 if (nextNewWidth > maxWidth) {
                     nextNewWidth = maxWidth;
                     newWidth = startWidth + (nextStartWidth - maxWidth);
                 }
             }
 
-            // Обновить позицию линии
-            resizeLine.style.left = (startX + (newWidth - startWidth)) + 'px';
+            resizeLine.style.left = `${startX + (newWidth - startWidth)}px`;
 
-            // Применить новую ширину к текущей колонке
+            // Применить размеры ко всем ячейкам в колонках
             allRows.forEach(row => {
                 const cellsInRow = row.querySelectorAll('td, th');
                 cellsInRow.forEach(rowCell => {
@@ -605,37 +816,34 @@ class ItemsRenderer {
                     const colspan = rowCell.colSpan || 1;
 
                     if (cellColIndex === colIndex) {
-                        // Текущая изменяемая колонка
-                        rowCell.style.width = newWidth + 'px';
-                        rowCell.style.minWidth = newWidth + 'px';
-                        rowCell.style.maxWidth = newWidth + 'px';
+                        rowCell.style.width = `${newWidth}px`;
+                        rowCell.style.minWidth = `${newWidth}px`;
+                        rowCell.style.maxWidth = `${newWidth}px`;
                         rowCell.style.wordBreak = 'normal';
                         rowCell.style.overflowWrap = 'anywhere';
-                    } else if (cellColIndex < colIndex && (cellColIndex + colspan > colIndex)) {
-                        // Объединенная ячейка, перекрывающая текущую колонку
+                    } else if (cellColIndex < colIndex && cellColIndex + colspan > colIndex) {
+                        // Ячейка с colspan, которая накрывает текущую колонку
                         const currentCellWidth = rowCell.offsetWidth;
-                        const delta = (newWidth - startWidth);
+                        const delta = newWidth - startWidth;
                         const newCellWidth = currentCellWidth + delta;
-                        rowCell.style.width = newCellWidth + 'px';
-                        rowCell.style.minWidth = newCellWidth + 'px';
-                        rowCell.style.maxWidth = newCellWidth + 'px';
+                        rowCell.style.width = `${newCellWidth}px`;
+                        rowCell.style.minWidth = `${newCellWidth}px`;
+                        rowCell.style.maxWidth = `${newCellWidth}px`;
                         rowCell.style.wordBreak = 'normal';
                         rowCell.style.overflowWrap = 'anywhere';
                     } else if (nextColIndex !== null && cellColIndex === nextColIndex) {
-                        // Следующая колонка - компенсировать изменение
-                        rowCell.style.width = nextNewWidth + 'px';
-                        rowCell.style.minWidth = nextNewWidth + 'px';
-                        rowCell.style.maxWidth = nextNewWidth + 'px';
+                        rowCell.style.width = `${nextNewWidth}px`;
+                        rowCell.style.minWidth = `${nextNewWidth}px`;
+                        rowCell.style.maxWidth = `${nextNewWidth}px`;
                         rowCell.style.wordBreak = 'normal';
                         rowCell.style.overflowWrap = 'anywhere';
-                    } else if (nextColIndex !== null && cellColIndex < nextColIndex && (cellColIndex + colspan > nextColIndex)) {
-                        // Объединенная ячейка, перекрывающая следующую колонку
+                    } else if (nextColIndex !== null && cellColIndex < nextColIndex && cellColIndex + colspan > nextColIndex) {
                         const currentCellWidth = rowCell.offsetWidth;
-                        const delta = (nextNewWidth - nextStartWidth);
+                        const delta = nextNewWidth - nextStartWidth;
                         const newCellWidth = currentCellWidth + delta;
-                        rowCell.style.width = newCellWidth + 'px';
-                        rowCell.style.minWidth = newCellWidth + 'px';
-                        rowCell.style.maxWidth = newCellWidth + 'px';
+                        rowCell.style.width = `${newCellWidth}px`;
+                        rowCell.style.minWidth = `${newCellWidth}px`;
+                        rowCell.style.maxWidth = `${newCellWidth}px`;
                         rowCell.style.wordBreak = 'normal';
                         rowCell.style.overflowWrap = 'anywhere';
                     }
@@ -648,10 +856,11 @@ class ItemsRenderer {
             document.body.style.userSelect = '';
             table.classList.remove('resizing');
             document.body.removeChild(resizeLine);
+
             document.removeEventListener('mousemove', onMouseMove);
             document.removeEventListener('mouseup', onMouseUp);
 
-            // Сохранить размеры в AppState.tableUISizes
+            // Сохранение размеров в AppState
             if (section) {
                 const tableId = section.dataset.tableId;
                 ItemsRenderer.persistTableSizes(tableId, table);
@@ -662,7 +871,10 @@ class ItemsRenderer {
         document.addEventListener('mouseup', onMouseUp);
     }
 
-    // Ресайз строки
+    /**
+     * Изменение высоты строки
+     * @param {MouseEvent} e - Событие мыши
+     */
     static startRowResize(e) {
         const cell = e.target.parentElement;
         const row = cell.parentElement;
@@ -686,7 +898,7 @@ class ItemsRenderer {
         resizeLine.style.backgroundColor = '#667eea';
         resizeLine.style.zIndex = '9999';
         resizeLine.style.pointerEvents = 'none';
-        resizeLine.style.top = e.clientY + 'px';
+        resizeLine.style.top = `${e.clientY}px`;
         document.body.appendChild(resizeLine);
 
         const onMouseMove = (ev) => {
@@ -694,31 +906,30 @@ class ItemsRenderer {
             let newHeight = startHeight + diff;
             newHeight = Math.max(minHeight, Math.min(maxHeight, newHeight));
 
-            resizeLine.style.top = (startY + (newHeight - startHeight)) + 'px';
+            resizeLine.style.top = `${startY + (newHeight - startHeight)}px`;
 
             const allRows = table.querySelectorAll('tr');
-            allRows.forEach((tableRow) => {
+            allRows.forEach(tableRow => {
                 const cellsInRow = tableRow.querySelectorAll('td, th');
                 cellsInRow.forEach(rowCell => {
                     const cellRowIndex = parseInt(rowCell.dataset.row);
                     const rowspan = rowCell.rowSpan || 1;
 
                     if (cellRowIndex === rowIndex) {
-                        rowCell.style.height = newHeight + 'px';
-                        rowCell.style.minHeight = newHeight + 'px';
-                    } else if (cellRowIndex < rowIndex && (cellRowIndex + rowspan > rowIndex)) {
-                        // объединенная по строкам ячейка - добавляем дельту одной строки
+                        rowCell.style.height = `${newHeight}px`;
+                        rowCell.style.minHeight = `${newHeight}px`;
+                    } else if (cellRowIndex < rowIndex && cellRowIndex + rowspan > rowIndex) {
                         const currentCellHeight = rowCell.offsetHeight;
-                        const delta = (newHeight - startHeight);
+                        const delta = newHeight - startHeight;
                         const newCellHeight = currentCellHeight + delta;
-                        rowCell.style.height = Math.max(minHeight * rowspan, Math.min(maxHeight * rowspan, newCellHeight)) + 'px';
-                        rowCell.style.minHeight = Math.max(minHeight * rowspan, Math.min(maxHeight * rowspan, newCellHeight)) + 'px';
+                        rowCell.style.height = `${Math.max(minHeight * rowspan, Math.min(maxHeight * rowspan, newCellHeight))}px`;
+                        rowCell.style.minHeight = `${Math.max(minHeight * rowspan, Math.min(maxHeight * rowspan, newCellHeight))}px`;
                     }
                 });
             });
 
-            row.style.height = newHeight + 'px';
-            row.style.minHeight = newHeight + 'px';
+            row.style.height = `${newHeight}px`;
+            row.style.minHeight = `${newHeight}px`;
         };
 
         const onMouseUp = () => {
@@ -726,6 +937,7 @@ class ItemsRenderer {
             document.body.style.userSelect = '';
             table.classList.remove('resizing');
             document.body.removeChild(resizeLine);
+
             document.removeEventListener('mousemove', onMouseMove);
             document.removeEventListener('mouseup', onMouseUp);
 
@@ -740,16 +952,24 @@ class ItemsRenderer {
         document.addEventListener('mouseup', onMouseUp);
     }
 
-    // Сохранение UI размеров в AppState.tableUISizes[tableId]
+    /**
+     * Сохранение размеров ячеек таблицы в AppState.tableUISizes[tableId]
+     * @param {string} tableId - ID таблицы
+     * @param {HTMLElement} tableElement - DOM элемент таблицы
+     */
     static persistTableSizes(tableId, tableElement) {
         if (!tableId || !tableElement) return;
-        if (!AppState.tableUISizes) AppState.tableUISizes = {};
+
+        if (!AppState.tableUISizes) {
+            AppState.tableUISizes = {};
+        }
 
         const sizes = {};
+
         tableElement.querySelectorAll('th, td').forEach(cell => {
             const row = cell.dataset.row;
             const col = cell.dataset.col;
-            if (row == null || col == null) return;
+            if (row === null || col === null) return;
 
             const key = `${row}-${col}`;
             sizes[key] = {
@@ -767,7 +987,11 @@ class ItemsRenderer {
         };
     }
 
-    // Применение сохранённых размеров
+    /**
+     * Применение сохранённых размеров к таблице
+     * @param {string} tableId - ID таблицы
+     * @param {HTMLElement} tableElement - DOM элемент таблицы
+     */
     static applyPersistedSizes(tableId, tableElement) {
         if (!tableId || !tableElement) return;
 
@@ -777,7 +1001,7 @@ class ItemsRenderer {
         tableElement.querySelectorAll('th, td').forEach(cell => {
             const row = cell.dataset.row;
             const col = cell.dataset.col;
-            if (row == null || col == null) return;
+            if (row === null || col === null) return;
 
             const key = `${row}-${col}`;
             const s = saved.cellSizes[key];
@@ -790,7 +1014,6 @@ class ItemsRenderer {
                 cell.style.wordBreak = s.wordBreak || 'normal';
                 cell.style.overflowWrap = s.overflowWrap || 'anywhere';
             } else {
-                // Значения по умолчанию
                 cell.style.minWidth = '80px';
                 cell.style.minHeight = '28px';
                 cell.style.wordBreak = 'normal';
@@ -799,7 +1022,11 @@ class ItemsRenderer {
         });
     }
 
-    // Вспомогательные для контекстного меню
+    /**
+     * Сохранение текущих размеров таблицы
+     * @param {HTMLElement} tableElement - DOM элемент таблицы
+     * @returns {Object} Объект с размерами ячеек
+     */
     static preserveTableSizes(tableElement) {
         const sizes = {};
         const cells = tableElement.querySelectorAll('th, td');
@@ -822,10 +1049,16 @@ class ItemsRenderer {
         return sizes;
     }
 
+    /**
+     * Применение размеров к таблице
+     * @param {HTMLElement} tableElement - DOM элемент таблицы
+     * @param {Object} sizes - Объект с размерами ячеек
+     */
     static applyTableSizes(tableElement, sizes) {
         if (!sizes) return;
 
         const cells = tableElement.querySelectorAll('th, td');
+
         cells.forEach(cell => {
             const row = cell.dataset.row;
             const col = cell.dataset.col;
@@ -841,9 +1074,98 @@ class ItemsRenderer {
             }
         });
     }
+
+    /**
+     * Синхронизация данных из DOM обратно в AppState перед сохранением
+     */
+    static syncDataToState() {
+        // Синхронизация таблиц
+        document.querySelectorAll('.table-section').forEach(section => {
+            const tableId = section.dataset.tableId;
+            const table = AppState.tables[tableId];
+            if (!table) return;
+
+            const tableEl = section.querySelector('.editable-table');
+            if (!tableEl) return;
+
+            const rows = tableEl.querySelectorAll('tr');
+
+            rows.forEach((tr, rowIndex) => {
+                const cells = tr.querySelectorAll('td, th');
+
+                cells.forEach((cell, cellIndex) => {
+                    const row = parseInt(cell.dataset.row);
+                    const col = parseInt(cell.dataset.col);
+
+                    if (table.rows[row] && table.rows[row].cells[col]) {
+                        table.rows[row].cells[col].content = cell.textContent.trim();
+                    }
+                });
+            });
+        });
+
+        // Синхронизация текстовых блоков
+        document.querySelectorAll('.text-block-section').forEach(section => {
+            const textBlockId = section.dataset.textBlockId;
+            const textBlock = AppState.textBlocks[textBlockId];
+            if (!textBlock) return;
+
+            const editor = section.querySelector('.text-block-editor');
+            if (editor) {
+                textBlock.content = editor.innerHTML;
+            }
+        });
+
+        // Синхронизация нарушений
+        document.querySelectorAll('.violation-section').forEach(section => {
+            const violationId = section.dataset.violationId;
+            const violation = AppState.violations[violationId];
+            if (!violation) return;
+
+            // Синхронизация полей нарушения
+            const violatedInput = section.querySelector('input[data-field="violated"]');
+            if (violatedInput) {
+                violation.violated = violatedInput.value;
+            }
+
+            const establishedInput = section.querySelector('textarea[data-field="established"]');
+            if (establishedInput) {
+                violation.established = establishedInput.value;
+            }
+
+            // Синхронизация описаний
+            const descItems = section.querySelectorAll('.violation-desc-item');
+            if (descItems.length > 0) {
+                violation.descriptionList.items = Array.from(descItems).map(item => item.value);
+            }
+
+            // Дополнительные поля
+            const additionalTextArea = section.querySelector('textarea[data-field="additionalText"]');
+            if (additionalTextArea && violation.additionalText) {
+                violation.additionalText.content = additionalTextArea.value;
+            }
+
+            const reasonsArea = section.querySelector('textarea[data-field="reasons"]');
+            if (reasonsArea && violation.reasons) {
+                violation.reasons.content = reasonsArea.value;
+            }
+
+            const consequencesArea = section.querySelector('textarea[data-field="consequences"]');
+            if (consequencesArea && violation.consequences) {
+                violation.consequences.content = consequencesArea.value;
+            }
+
+            const responsibleArea = section.querySelector('textarea[data-field="responsible"]');
+            if (responsibleArea && violation.responsible) {
+                violation.responsible.content = responsibleArea.value;
+            }
+        });
+    }
 }
 
-// Контекстное меню
+/**
+ * Менеджер контекстного меню
+ */
 class ContextMenuManager {
     static menu = null;
     static cellMenu = null;
@@ -853,10 +1175,10 @@ class ContextMenuManager {
         this.menu = document.getElementById('contextMenu');
         this.cellMenu = document.getElementById('cellContextMenu');
 
-        document.addEventListener('click', () => {
-            this.hide();
-        });
+        // Закрытие меню при клике вне его
+        document.addEventListener('click', () => this.hide());
 
+        // Обработка пунктов меню дерева
         this.menu?.querySelectorAll('.context-menu-item').forEach(item => {
             item.addEventListener('click', (e) => {
                 e.stopPropagation();
@@ -866,13 +1188,12 @@ class ContextMenuManager {
             });
         });
 
+        // Обработка пунктов меню ячеек
         this.cellMenu?.querySelectorAll('.context-menu-item').forEach(item => {
             item.addEventListener('click', (e) => {
                 e.stopPropagation();
                 const action = item.dataset.action;
-                if (item.classList.contains('disabled')) {
-                    return;
-                }
+                if (item.classList.contains('disabled')) return;
                 this.handleCellAction(action);
                 this.hide();
             });
@@ -881,25 +1202,34 @@ class ContextMenuManager {
 
     static show(x, y, nodeId, type) {
         this.hide();
+
         const menu = type === 'cell' ? this.cellMenu : this.menu;
         this.currentNodeId = nodeId;
 
         if (type === 'cell') {
             const selectedCellsCount = tableManager.selectedCells.length;
+
+            // Управление доступностью пунктов меню
             const mergeCellsItem = this.cellMenu?.querySelector('[data-action="merge-cells"]');
             const unmergeCellItem = this.cellMenu?.querySelector('[data-action="unmerge-cell"]');
 
             if (mergeCellsItem) {
-                if (selectedCellsCount < 2) mergeCellsItem.classList.add('disabled');
-                else mergeCellsItem.classList.remove('disabled');
+                if (selectedCellsCount < 2) {
+                    mergeCellsItem.classList.add('disabled');
+                } else {
+                    mergeCellsItem.classList.remove('disabled');
+                }
             }
 
             if (unmergeCellItem) {
                 if (selectedCellsCount === 1) {
                     const cell = tableManager.selectedCells[0];
                     const isMerged = cell.colSpan > 1 || cell.rowSpan > 1;
-                    if (isMerged) unmergeCellItem.classList.remove('disabled');
-                    else unmergeCellItem.classList.add('disabled');
+                    if (isMerged) {
+                        unmergeCellItem.classList.remove('disabled');
+                    } else {
+                        unmergeCellItem.classList.add('disabled');
+                    }
                 } else {
                     unmergeCellItem.classList.add('disabled');
                 }
@@ -908,6 +1238,7 @@ class ContextMenuManager {
 
         if (!menu) return;
 
+        // Позиционирование меню
         menu.style.left = '-9999px';
         menu.style.top = '-9999px';
         menu.classList.remove('hidden');
@@ -916,19 +1247,26 @@ class ContextMenuManager {
             const menuRect = menu.getBoundingClientRect();
             const menuWidth = menuRect.width;
             const menuHeight = menuRect.height;
+
             const viewportWidth = window.innerWidth || document.documentElement.clientWidth;
             const viewportHeight = window.innerHeight || document.documentElement.clientHeight;
 
             let finalX = x;
             let finalY = y;
 
-            if (finalX + menuWidth > viewportWidth) finalX = x - menuWidth;
+            // Коррекция, если меню выходит за границы
+            if (finalX + menuWidth > viewportWidth) {
+                finalX = x - menuWidth;
+            }
             if (finalX < 0) finalX = 10;
-            if (finalY + menuHeight > viewportHeight) finalY = y - menuHeight;
+
+            if (finalY + menuHeight > viewportHeight) {
+                finalY = y - menuHeight;
+            }
             if (finalY < 0) finalY = 10;
 
-            menu.style.left = finalX + 'px';
-            menu.style.top = finalY + 'px';
+            menu.style.left = `${finalX}px`;
+            menu.style.top = `${finalY}px`;
         }, 1);
     }
 
@@ -940,141 +1278,144 @@ class ContextMenuManager {
     static handleTreeAction(action) {
         const nodeId = this.currentNodeId;
         if (!nodeId) return;
+
         const node = AppState.findNodeById(nodeId);
         if (!node) return;
 
         switch (action) {
-            case 'add-child': {
-                // Запретить добавление дочерних элементов к таблицам
+            case 'add-child':
                 if (node.type === 'table') {
-                    alert('❌ Нельзя добавить дочерний пункт к таблице');
+                    alert('Нельзя добавить дочерний элемент к таблице');
                     return;
                 }
 
-                const childResult = AppState.addNode(nodeId, 'Новый подпункт', true);
+                const childResult = AppState.addNode(nodeId, '', true);
                 if (childResult.success) {
                     treeManager.render();
-                    PreviewManager.update({previewTrim: 30});
-                    if (AppState.currentStep === 2) ItemsRenderer.renderAll();
+                    PreviewManager.update('previewTrim', 30);
+                    if (AppState.currentStep === 2) {
+                        ItemsRenderer.renderAll();
+                    }
                 } else {
-                    alert('❌ ' + childResult.reason);
+                    alert(childResult.reason);
                 }
                 break;
-            }
 
-            case 'add-sibling': {
-                const siblingResult = AppState.addNode(nodeId, 'Новый пункт', false);
+            case 'add-sibling':
+                const siblingResult = AppState.addNode(nodeId, '', false);
                 if (siblingResult.success) {
                     treeManager.render();
-                    PreviewManager.update({previewTrim: 30});
-                    if (AppState.currentStep === 2) ItemsRenderer.renderAll();
+                    PreviewManager.update('previewTrim', 30);
+                    if (AppState.currentStep === 2) {
+                        ItemsRenderer.renderAll();
+                    }
                 } else {
-                    alert('❌ ' + siblingResult.reason);
+                    alert(siblingResult.reason);
                 }
                 break;
-            }
 
-            case 'add-table': {
-                // Запретить добавление таблицы к таблице
+            case 'add-table':
                 if (node.type === 'table') {
-                    alert('❌ Нельзя добавить таблицу к таблице');
+                    alert('Нельзя добавить таблицу к таблице');
                     return;
                 }
 
                 const tableResult = AppState.addTableToNode(nodeId);
                 if (tableResult.success) {
                     treeManager.render();
-                    PreviewManager.update({previewTrim: 30});
-                    if (AppState.currentStep === 2) ItemsRenderer.renderAll();
+                    PreviewManager.update('previewTrim', 30);
+                    if (AppState.currentStep === 2) {
+                        ItemsRenderer.renderAll();
+                    }
                 } else {
-                    alert('❌ ' + tableResult.reason);
+                    alert(tableResult.reason);
                 }
                 break;
-            }
 
-            case 'add-textblock': {
-                // Запретить добавление текстового блока к таблице или текстовому блоку
+            case 'add-textblock':
                 if (node.type === 'table' || node.type === 'textblock') {
-                    alert('❌ Нельзя добавить текстовый блок к таблице или другому текстовому блоку');
+                    alert('Нельзя добавить текстовый блок к таблице или текстовому блоку');
                     return;
                 }
 
                 const textBlockResult = AppState.addTextBlockToNode(nodeId);
                 if (textBlockResult.success) {
                     treeManager.render();
-                    PreviewManager.update({previewTrim: 30});
-                    if (AppState.currentStep === 2) ItemsRenderer.renderAll();
+                    PreviewManager.update('previewTrim', 30);
+                    if (AppState.currentStep === 2) {
+                        ItemsRenderer.renderAll();
+                    }
                 } else {
-                    alert('❌ ' + textBlockResult.reason);
+                    alert(textBlockResult.reason);
                 }
                 break;
-            }
 
-            case 'add-violation': {
-                // Запретить добавление нарушения к таблице, текстовому блоку или другому нарушению
+            case 'add-violation':
                 if (node.type === 'table' || node.type === 'textblock' || node.type === 'violation') {
-                    alert('❌ Нельзя добавить нарушение к таблице, текстовому блоку или другому нарушению');
+                    alert('Нельзя добавить нарушение к таблице, текстовому блоку или нарушению');
                     return;
                 }
 
                 const violationResult = AppState.addViolationToNode(nodeId);
                 if (violationResult.success) {
                     treeManager.render();
-                    PreviewManager.update({previewTrim: 30});
-                    if (AppState.currentStep === 2) ItemsRenderer.renderAll();
+                    PreviewManager.update('previewTrim', 30);
+                    if (AppState.currentStep === 2) {
+                        ItemsRenderer.renderAll();
+                    }
                 } else {
-                    alert('❌ ' + violationResult.reason);
+                    alert(violationResult.reason);
                 }
                 break;
-            }
 
-            case 'delete': {
+            case 'delete':
                 if (node.protected) {
-                    alert('❌ Этот пункт защищен от удаления');
+                    alert('Этот элемент защищен от удаления');
                     return;
                 }
 
-                if (confirm('Удалить этот пункт?')) {
+                if (confirm('Удалить элемент?')) {
                     AppState.deleteNode(nodeId);
                     treeManager.render();
-                    PreviewManager.update({previewTrim: 30});
-                    if (AppState.currentStep === 2) ItemsRenderer.renderAll();
+                    PreviewManager.update('previewTrim', 30);
+                    if (AppState.currentStep === 2) {
+                        ItemsRenderer.renderAll();
+                    }
                 }
                 break;
-            }
         }
     }
 
     static handleCellAction(action) {
-        // Сохранить текущие размеры до операции
-        let tableSizes = {};
+        let tableSizes;
+
         if (tableManager.selectedCells.length > 0) {
             const table = tableManager.selectedCells[0].closest('table');
             tableSizes = ItemsRenderer.preserveTableSizes(table);
         }
 
         switch (action) {
-            case 'merge-cells': {
+            case 'merge-cells':
                 tableManager.mergeCells();
                 if (AppState.currentStep === 2) {
                     ItemsRenderer.renderAll();
-                    // Восстановить размеры после рендера
                     setTimeout(() => {
                         const tables = document.querySelectorAll('.editable-table');
                         tables.forEach(tbl => {
                             ItemsRenderer.applyTableSizes(tbl, tableSizes);
                             const section = tbl.closest('.table-section');
-                            if (section) ItemsRenderer.persistTableSizes(section.dataset.tableId, tbl);
+                            if (section) {
+                                ItemsRenderer.persistTableSizes(section.dataset.tableId, tbl);
+                            }
                         });
                     }, 50);
                 } else {
                     tableManager.renderAll();
+                    PreviewManager.update('previewTrim', 30);
                 }
-                PreviewManager.update({previewTrim: 30});
                 break;
-            }
 
-            case 'unmerge-cell': {
+            case 'unmerge-cell':
                 tableManager.unmergeCells();
                 if (AppState.currentStep === 2) {
                     ItemsRenderer.renderAll();
@@ -1083,20 +1424,19 @@ class ContextMenuManager {
                         tables.forEach(tbl => {
                             ItemsRenderer.applyTableSizes(tbl, tableSizes);
                             const section = tbl.closest('.table-section');
-                            if (section) ItemsRenderer.persistTableSizes(section.dataset.tableId, tbl);
+                            if (section) {
+                                ItemsRenderer.persistTableSizes(section.dataset.tableId, tbl);
+                            }
                         });
                     }, 50);
                 } else {
                     tableManager.renderAll();
+                    PreviewManager.update('previewTrim', 30);
                 }
-                PreviewManager.update({previewTrim: 30});
                 break;
-            }
         }
     }
 }
 
-// Запуск приложения при загрузке
-document.addEventListener('DOMContentLoaded', () => {
-    App.init();
-});
+// Инициализация приложения при загрузке DOM
+document.addEventListener('DOMContentLoaded', () => App.init());

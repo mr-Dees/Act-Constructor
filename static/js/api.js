@@ -1,11 +1,23 @@
-// Взаимодействие с API
-
+/**
+ * Клиент для взаимодействия с API
+ */
 class APIClient {
-    static async generateAct() {
+    /**
+     * Генерирует и сохраняет акт на сервере
+     * @param {string} format - Формат файла ('txt' или 'docx')
+     * @returns {Promise<boolean>} - Успешность операции
+     */
+    static async generateAct(format = 'txt') {
         const data = AppState.exportData();
 
+        // Валидация формата
+        if (!['txt', 'docx'].includes(format)) {
+            console.error('Неподдерживаемый формат:', format);
+            format = 'txt';
+        }
+
         try {
-            const response = await fetch('/api/v1/acts/generate', {
+            const response = await fetch(`/api/v1/acts/generate?fmt=${format}`, {
                 method: 'POST',
                 headers: {
                     'Content-Type': 'application/json'
@@ -20,22 +32,37 @@ class APIClient {
 
             const result = await response.json();
 
-            // Показать успешное сообщение
-            alert(`Акт успешно сохранён: ${result.filename}`);
+            // Показать успешное сообщение с форматом
+            alert(`✅ Акт успешно сохранён в формате ${format.toUpperCase()}: ${result.filename}`);
 
+            if (confirm('Хотите скачать файл?')) {
+                this.downloadFile(result.filename);
+            }
             return true;
+
         } catch (error) {
             console.error('Ошибка при генерации акта:', error);
-            alert(`Произошла ошибка при генерации акта: ${error.message}`);
+            alert(`❌ Произошла ошибка при генерации акта: ${error.message}`);
             return false;
         }
     }
 
-    static async saveAct() {
+    /**
+     * Сохраняет акт на сервере
+     * @param {string} format - Формат файла ('txt' или 'docx')
+     * @returns {Promise<Object>} - Результат сохранения
+     */
+    static async saveAct(format = 'txt') {
         const data = AppState.exportData();
 
+        // Валидация формата
+        if (!['txt', 'docx'].includes(format)) {
+            console.error('Неподдерживаемый формат:', format);
+            format = 'txt';
+        }
+
         try {
-            const response = await fetch('/api/v1/acts/save', {
+            const response = await fetch(`/api/v1/acts/save?fmt=${format}`, {
                 method: 'POST',
                 headers: {
                     'Content-Type': 'application/json'
@@ -50,12 +77,17 @@ class APIClient {
 
             const result = await response.json();
             return result;
+
         } catch (error) {
             console.error('Ошибка при сохранении акта:', error);
             throw error;
         }
     }
 
+    /**
+     * Получает историю сохраненных актов
+     * @returns {Promise<Array>} - Список файлов актов
+     */
     static async getHistory() {
         try {
             const response = await fetch('/api/v1/acts/history');
@@ -66,9 +98,23 @@ class APIClient {
 
             const data = await response.json();
             return data.acts;
+
         } catch (error) {
             console.error('Ошибка при получении истории:', error);
             return [];
         }
+    }
+
+    /**
+     * Скачивает сгенерированный файл
+     * @param {string} filename - Имя файла
+     */
+    static async downloadFile(filename) {
+        const link = document.createElement('a');
+        link.href = `/${filename}`;
+        link.download = filename.split('/').pop();
+        document.body.appendChild(link);
+        link.click();
+        document.body.removeChild(link);
     }
 }

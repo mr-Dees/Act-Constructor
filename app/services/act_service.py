@@ -1,9 +1,11 @@
 """Бизнес-логика работы с актами."""
 
 from typing import Dict
+
+from app.formatters.docx_formatter import DocxFormatter
 from app.formatters.text_formatter import TextFormatter
-from app.services.storage_service import StorageService
 from app.schemas.act import ActSaveResponse
+from app.services.storage_service import StorageService
 
 
 class ActService:
@@ -11,28 +13,42 @@ class ActService:
 
     def __init__(self):
         """Инициализация сервиса актов."""
-        self.formatter = TextFormatter()
+        self.text_formatter = TextFormatter()
+        self.docx_formatter = DocxFormatter()
         self.storage = StorageService()
 
-    def save_act(self, data: Dict) -> ActSaveResponse:
+    def save_act(self, data: Dict, fmt: str = "txt") -> ActSaveResponse:
         """
-        Сохраняет акт в хранилище.
+        Сохраняет акт в хранилище в выбранном формате.
 
         Args:
             data: Данные акта
+            fmt: Формат файла ('txt' или 'docx')
 
         Returns:
             Результат сохранения
-        """
-        # Форматируем данные в текст
-        formatted_text = self.formatter.format(data)
 
-        # Сохраняем в файл
-        filename = self.storage.save(formatted_text, prefix="act")
+        Raises:
+            ValueError: Если указан неподдерживаемый формат
+        """
+        filename = ""
+
+        if fmt == "txt":
+            # Форматируем данные в текст
+            formatted_text = self.text_formatter.format(data)
+            # Сохраняем в файл
+            filename = self.storage.save(formatted_text, prefix="act", extension="txt")
+        elif fmt == "docx":
+            # Форматируем данные в документ DOCX
+            formatted_doc = self.docx_formatter.format(data)
+            # Сохраняем документ
+            filename = self.storage.save_docx(formatted_doc, prefix="act")
+        else:
+            raise ValueError(f"Неподдерживаемый формат: {fmt}. Используйте 'txt' или 'docx'.")
 
         return ActSaveResponse(
             status="success",
-            message="Акт успешно сохранён",
+            message=f"Акт успешно сохранён в формате {fmt.upper()}",
             filename=filename
         )
 

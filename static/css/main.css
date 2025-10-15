@@ -544,3 +544,152 @@ body {
     padding-left: 10px;
     margin-bottom: 8px;
 }
+
+/* === Split Button для сохранения === */
+.save-button-group {
+    position: relative;
+    display: inline-flex;
+}
+
+.save-main-btn {
+    border-radius: 10px 0 0 10px;
+    border-right: 1px solid rgba(255, 255, 255, 0.3);
+    padding-right: 30px;
+}
+
+.save-dropdown-btn {
+    border-radius: 0 10px 10px 0;
+    padding: 15px 12px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    min-width: auto;
+    border-left: 1px solid rgba(255, 255, 255, 0.3);
+    position: relative; /* Добавлено для позиционирования индикатора */
+}
+
+.save-dropdown-btn svg {
+    transition: transform 0.3s;
+}
+
+.save-dropdown-btn.active svg {
+    transform: rotate(180deg);
+}
+
+/* Выпадающее меню форматов */
+.format-menu {
+    position: absolute;
+    bottom: calc(100% + 8px);
+    right: 0;
+    background: white;
+    border: 1px solid #ddd;
+    border-radius: 12px;
+    box-shadow: 0 8px 24px rgba(0, 0, 0, 0.15);
+    z-index: 1000;
+    min-width: 280px;
+    overflow: hidden;
+    animation: slideUp 0.2s ease-out;
+}
+
+@keyframes slideUp {
+    from {
+        opacity: 0;
+        transform: translateY(10px);
+    }
+    to {
+        opacity: 1;
+        transform: translateY(0);
+    }
+}
+
+.format-menu.hidden {
+    display: none;
+}
+
+.format-menu-header {
+    padding: 12px 16px;
+    background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+    color: white;
+    font-weight: 600;
+    font-size: 0.95em;
+    border-bottom: 1px solid #e0e0e0;
+}
+
+.format-menu-item {
+    display: flex;
+    align-items: center;
+    padding: 14px 16px;
+    cursor: pointer;
+    transition: background 0.2s;
+    border-bottom: 1px solid #f0f0f0;
+    gap: 12px;
+}
+
+.format-menu-item:last-child {
+    border-bottom: none;
+}
+
+.format-menu-item:hover {
+    background: #f8f9ff;
+}
+
+.format-menu-item input[type="checkbox"] {
+    width: 18px;
+    height: 18px;
+    cursor: pointer;
+    accent-color: #667eea;
+    flex-shrink: 0;
+}
+
+.format-label {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    flex: 1;
+}
+
+.format-icon {
+    font-size: 1.4em;
+    flex-shrink: 0;
+}
+
+.format-name {
+    font-weight: 600;
+    color: #333;
+    min-width: 50px;
+}
+
+.format-desc {
+    color: #666;
+    font-size: 0.85em;
+}
+
+/* Индикатор выбранных форматов - ЗАФИКСИРОВАН НАД СТРЕЛОЧКОЙ */
+.save-main-btn.has-formats::after {
+    display: none; /* Старый индикатор отключён */
+}
+
+.save-dropdown-btn::before {
+    content: '';
+    display: none;
+}
+
+.save-dropdown-btn.has-formats::before {
+    content: attr(data-formats);
+    display: block;
+    position: absolute;
+    top: -10px;
+    left: 50%;
+    transform: translateX(-50%);
+    background: #ff6b6b;
+    color: white;
+    font-size: 0.65em;
+    padding: 3px 8px;
+    border-radius: 12px;
+    font-weight: bold;
+    white-space: nowrap;
+    box-shadow: 0 2px 8px rgba(255, 107, 107, 0.4);
+    z-index: 10;
+    pointer-events: none; /* Чтобы не мешал кликам */
+}
+
