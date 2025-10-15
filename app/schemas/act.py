@@ -1,5 +1,4 @@
 """Pydantic схемы для валидации данных актов."""
-
 from typing import List, Dict, Optional
 
 from pydantic import BaseModel, Field
@@ -39,25 +38,76 @@ class TextBlockSchema(BaseModel):
     content: str = Field(default="", description="Содержимое текстового блока")
     formatting: TextBlockFormattingSchema = Field(
         default_factory=TextBlockFormattingSchema,
-        description="Настройки форматирования"
+        description="Форматирование текста"
+    )
+
+
+# НОВОЕ: Схемы для нарушений
+class ViolationDescriptionListSchema(BaseModel):
+    """Схема буллитного списка описаний."""
+    enabled: bool = False
+    items: List[str] = Field(default_factory=list)
+
+
+class ViolationOptionalFieldSchema(BaseModel):
+    """Схема опционального текстового поля."""
+    enabled: bool = False
+    content: str = ""
+
+
+class ViolationSchema(BaseModel):
+    """Схема нарушения."""
+    id: str = Field(description="ID нарушения")
+    nodeId: str = Field(description="ID узла дерева")
+    violated: str = Field(default="", description="Текст для 'Нарушено'")
+    established: str = Field(default="", description="Текст для 'Установлено'")
+    descriptionList: ViolationDescriptionListSchema = Field(
+        default_factory=ViolationDescriptionListSchema,
+        description="Список описаний"
+    )
+    additionalText: ViolationOptionalFieldSchema = Field(
+        default_factory=ViolationOptionalFieldSchema,
+        description="Дополнительный текст"
+    )
+    reasons: ViolationOptionalFieldSchema = Field(
+        default_factory=ViolationOptionalFieldSchema,
+        description="Причины"
+    )
+    consequences: ViolationOptionalFieldSchema = Field(
+        default_factory=ViolationOptionalFieldSchema,
+        description="Последствия"
+    )
+    responsible: ViolationOptionalFieldSchema = Field(
+        default_factory=ViolationOptionalFieldSchema,
+        description="Ответственные"
     )
 
 
 class ActItemSchema(BaseModel):
-    """Схема пункта акта."""
-    number: str = Field(description="Номер пункта")
-    title: str = Field(description="Заголовок пункта")
-    content: Optional[str] = Field(None, description="Содержание пункта")
-    tables: List[TableSchema] = Field(default_factory=list, description="Таблицы в пункте")
-    textBlocks: List[TextBlockSchema] = Field(default_factory=list, description="Текстовые блоки в пункте")
-    children: List['ActItemSchema'] = Field(default_factory=list, description="Подпункты")
+    """Схема пункта акта (рекурсивная)."""
+    id: str
+    label: str
+    type: str = "item"
+    content: Optional[str] = ""
+    protected: Optional[bool] = False
+    children: List['ActItemSchema'] = Field(default_factory=list)
+    tableId: Optional[str] = None
+    textBlockId: Optional[str] = None
+    violationId: Optional[str] = None  # НОВОЕ
 
 
 class ActDataSchema(BaseModel):
-    """Полная схема акта."""
+    """Полная схема данных акта."""
     tree: Dict = Field(description="Дерево структуры акта")
-    tables: Dict[str, TableSchema] = Field(default_factory=dict, description="Словарь таблиц")
-    textBlocks: Dict[str, TextBlockSchema] = Field(default_factory=dict, description="Словарь текстовых блоков")
+    tables: Dict[str, Dict] = Field(default_factory=dict, description="Таблицы")
+    textBlocks: Dict[str, TextBlockSchema] = Field(
+        default_factory=dict,
+        description="Текстовые блоки"
+    )
+    violations: Dict[str, ViolationSchema] = Field(  # НОВОЕ
+        default_factory=dict,
+        description="Нарушения"
+    )
 
 
 class ActSaveResponse(BaseModel):
@@ -67,5 +117,5 @@ class ActSaveResponse(BaseModel):
     filename: str
 
 
-# Обновление forward references для рекурсивной схемы
+# Обновляем forward refs для рекурсивной схемы
 ActItemSchema.model_rebuild()

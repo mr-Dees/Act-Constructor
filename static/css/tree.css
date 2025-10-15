@@ -66,6 +66,7 @@
     display: none;
 }
 
+/* Стили для таблиц */
 .tree-item.table-node {
     font-style: italic;
     color: #667eea;
@@ -81,6 +82,7 @@
     font-style: normal;
 }
 
+/* Стили для текстовых блоков */
 .tree-item.textblock-node {
     font-style: italic;
     color: #667eea;
@@ -96,3 +98,18 @@
     font-style: normal;
 }
 
+/* НОВОЕ: Стили для нарушений */
+.tree-item.violation-node {
+    font-style: italic;
+    color: #667eea;
+}
+
+.tree-item.violation-node .tree-label {
+    font-weight: 500;
+}
+
+.violation-icon {
+    display: inline-block;
+    margin-left: 5px;
+    font-style: normal;
+}

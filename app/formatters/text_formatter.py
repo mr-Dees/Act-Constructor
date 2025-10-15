@@ -71,6 +71,16 @@ class TextFormatter(BaseFormatter):
                 lines.append(f"{indent}=== Текстовый блок ===")
                 lines.append(self._format_textblock(textblock_data, level))
 
+        # Если это нарушение
+        if item.get('type') == 'violation' and item.get('violationId'):
+            violation_data = self.data.get('violations', {}).get(item['violationId'])
+            if violation_data:
+                lines.append(indent + "=== НАРУШЕНИЕ ===")
+                formatted_violation = self._format_violation(violation_data)
+                for line in formatted_violation.split('\n'):
+                    lines.append(indent + line)
+            return "\n".join(lines)
+
         # Подпункты
         if item.get('children'):
             for child in item['children']:
@@ -157,3 +167,61 @@ class TextFormatter(BaseFormatter):
                 formatted_lines.append(f"{indent}{line}")
 
         return "\n".join(formatted_lines)
+
+    def _format_violation(self, violation_data: Dict) -> str:
+        """
+        Форматирует нарушение.
+
+        Args:
+            violation_data: Словарь с данными нарушения
+
+        Returns:
+            Отформатированное нарушение
+        """
+        lines = []
+
+        lines.append("┌─────────────────────────────────────────────┐")
+        lines.append("│ НАРУШЕНО                                    │")
+        lines.append("└─────────────────────────────────────────────┘")
+        if violation_data.get('violated'):
+            lines.append(violation_data['violated'])
+        lines.append("")
+
+        lines.append("┌─────────────────────────────────────────────┐")
+        lines.append("│ УСТАНОВЛЕНО                                 │")
+        lines.append("└─────────────────────────────────────────────┘")
+        if violation_data.get('established'):
+            lines.append(violation_data['established'])
+        lines.append("")
+
+        desc_list = violation_data.get('descriptionList', {})
+        if desc_list.get('enabled') and desc_list.get('items'):
+            for item in desc_list['items']:
+                if item.strip():
+                    lines.append(f"  • {item}")
+            lines.append("")
+
+        add_text = violation_data.get('additionalText', {})
+        if add_text.get('enabled') and add_text.get('content'):
+            lines.append(add_text['content'])
+            lines.append("")
+
+        reasons = violation_data.get('reasons', {})
+        if reasons.get('enabled') and reasons.get('content'):
+            lines.append("Причины:")
+            lines.append(reasons['content'])
+            lines.append("")
+
+        consequences = violation_data.get('consequences', {})
+        if consequences.get('enabled') and consequences.get('content'):
+            lines.append("Последствия:")
+            lines.append(consequences['content'])
+            lines.append("")
+
+        responsible = violation_data.get('responsible', {})
+        if responsible.get('enabled') and responsible.get('content'):
+            lines.append("Ответственный за решение проблем:")
+            lines.append(responsible['content'])
+            lines.append("")
+
+        return "\n".join(lines)

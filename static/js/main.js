@@ -148,9 +148,20 @@ class ItemsRenderer {
             return itemDiv;
         }
 
-        // Заголовок пункта
+        // НОВОЕ: Если это нарушение - рендерим только нарушение
+        if (node.type === 'violation') {
+            const violation = AppState.violations[node.violationId];
+            if (violation) {
+                const violationSection = violationManager.createViolationElement(violation, node);
+                itemDiv.appendChild(violationSection);
+            }
+            return itemDiv;
+        }
+
+        // Остальной код для обычных пунктов...
         const header = document.createElement('div');
         header.className = 'item-header';
+
         const title = document.createElement('h' + Math.min(level + 1, 6));
         title.className = 'item-title';
         title.textContent = node.label;
@@ -163,7 +174,6 @@ class ItemsRenderer {
 
             title.addEventListener('click', (e) => {
                 clickCount++;
-
                 if (clickCount === 1) {
                     clickTimer = setTimeout(() => {
                         clickCount = 0;
@@ -174,35 +184,25 @@ class ItemsRenderer {
                     this.startEditingItemTitle(title, node);
                 }
             });
-
             title.style.cursor = 'pointer';
         }
 
         header.appendChild(title);
         itemDiv.appendChild(header);
 
-        // // Контент пункта (текстовое поле)
-        // const contentDiv = document.createElement('div');
-        // contentDiv.className = 'item-content';
-        // const textarea = document.createElement('textarea');
-        // textarea.className = 'item-textarea';
-        // textarea.placeholder = 'Введите текст для этого пункта...';
-        // textarea.value = node.content || '';
-        // textarea.rows = 3;
-        // textarea.addEventListener('change', () => {
-        //     node.content = textarea.value;
-        // });
-        // contentDiv.appendChild(textarea);
-        // itemDiv.appendChild(contentDiv);
-
-        // Дочерние элементы (рекурсивно) - включая таблицы
+        // Дочерние элементы (рекурсивно) - включая таблицы, текстовые блоки и нарушения
         if (node.children && node.children.length > 0) {
             const childrenDiv = document.createElement('div');
             childrenDiv.className = 'item-children';
+
             node.children.forEach(child => {
-                const childElement = this.renderItem(child, child.type === 'table' ? level : level + 1);
+                const childElement = this.renderItem(
+                    child,
+                    (child.type === 'table' || child.type === 'textblock' || child.type === 'violation') ? level : level + 1
+                );
                 childrenDiv.appendChild(childElement);
             });
+
             itemDiv.appendChild(childrenDiv);
         }
 
@@ -1006,6 +1006,24 @@ class ContextMenuManager {
                     if (AppState.currentStep === 2) ItemsRenderer.renderAll();
                 } else {
                     alert('❌ ' + textBlockResult.reason);
+                }
+                break;
+            }
+
+            case 'add-violation': {
+                // Запретить добавление нарушения к таблице, текстовому блоку или другому нарушению
+                if (node.type === 'table' || node.type === 'textblock' || node.type === 'violation') {
+                    alert('❌ Нельзя добавить нарушение к таблице, текстовому блоку или другому нарушению');
+                    return;
+                }
+
+                const violationResult = AppState.addViolationToNode(nodeId);
+                if (violationResult.success) {
+                    treeManager.render();
+                    PreviewManager.update({previewTrim: 30});
+                    if (AppState.currentStep === 2) ItemsRenderer.renderAll();
+                } else {
+                    alert('❌ ' + violationResult.reason);
                 }
                 break;
             }

@@ -73,11 +73,19 @@ class TreeManager {
             textBlockIcon.contentEditable = false; // Запретить редактирование иконки
             li.classList.add('textblock-node');
             li.appendChild(textBlockIcon);
+        } else if (node.type === 'violation') {
+            const violationIcon = document.createElement('span');
+            violationIcon.className = 'violation-icon';
+            violationIcon.textContent = '⚠️';
+            violationIcon.style.marginLeft = '5px';
+            violationIcon.contentEditable = false; // Запретить редактирование иконки
+            li.classList.add('violation-node');
+            li.appendChild(violationIcon);
         }
 
         // Двойной клик для редактирования
-        // Разрешено редактировать: таблицы, текстовые блоки и обычные пункты (кроме protected)
-        const canEdit = node.type === 'table' || node.type === 'textblock' || !node.protected;
+        // Разрешено редактировать: таблицы, текстовые блоки, нарушения и обычные пункты (кроме protected)
+        const canEdit = node.type === 'table' || node.type === 'textblock' || node.type === 'violation' || !node.protected;
 
         if (canEdit) {
             label.addEventListener('dblclick', (e) => {
@@ -128,8 +136,8 @@ class TreeManager {
         item.classList.add('editing');
         labelElement.contentEditable = true;
 
-        // Для таблиц и текстовых блоков показываем кастомное название или пустое
-        if (node.type === 'table' || node.type === 'textblock') {
+        // Для таблиц, текстовых блоков и нарушений показываем кастомное название или пустое
+        if (node.type === 'table' || node.type === 'textblock' || node.type === 'violation') {
             const currentLabel = node.customLabel || '';
             labelElement.textContent = currentLabel;
         }
@@ -149,8 +157,8 @@ class TreeManager {
 
             const newLabel = labelElement.textContent.trim();
 
-            if (node.type === 'table' || node.type === 'textblock') {
-                // Логика для таблиц и текстовых блоков
+            if (node.type === 'table' || node.type === 'textblock' || node.type === 'violation') {
+                // Логика для таблиц, текстовых блоков и нарушений
                 if (newLabel) {
                     // Сохраняем кастомное название
                     node.customLabel = newLabel;
@@ -158,19 +166,19 @@ class TreeManager {
                 } else {
                     // Если пустое - удаляем кастомное название, вернется дефолтное
                     delete node.customLabel;
-                    node.label = node.number || (node.type === 'table' ? 'Таблица' : 'Текстовый блок');
+                    node.label = node.number ||
+                        (node.type === 'table' ? 'Таблица' :
+                         node.type === 'textblock' ? 'Текстовый блок' :
+                         'Нарушение');
                 }
 
                 // Перегенерировать нумерацию
                 AppState.generateNumbering();
-
                 // Обновить отображение с иконкой
                 labelElement.textContent = node.label;
-
                 // Перерендерить дерево для отображения иконки
                 treeManager.render();
                 PreviewManager.update();
-
             } else {
                 // Логика для обычных пунктов
                 if (newLabel && newLabel !== node.label) {

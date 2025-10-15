@@ -4,7 +4,8 @@ const AppState = {
     currentStep: 1,
     treeData: null,
     tables: {},
-    textBlocks: {}, // Новое хранилище текстовых блоков
+    textBlocks: {},
+    violations: {}, // НОВОЕ: хранилище для "Нарушено/Установлено"
     selectedNode: null,
     selectedCells: [],
 
@@ -54,7 +55,19 @@ const AppState = {
                 const parentTextBlocks = node.children.filter(c => c.type === 'textblock');
                 const textBlockIndex = parentTextBlocks.indexOf(child) + 1;
                 child.number = `Текстовый блок ${textBlockIndex}`;
+                if (!child.customLabel) {
+                    child.label = child.number;
+                } else {
+                    child.label = child.customLabel;
+                }
+                return;
+            }
 
+            // НОВОЕ: Обработка нарушений
+            if (child.type === 'violation') {
+                const parentViolations = node.children.filter(c => c.type === 'violation');
+                const violationIndex = parentViolations.indexOf(child) + 1;
+                child.number = `Нарушение ${violationIndex}`;
                 if (!child.customLabel) {
                     child.label = child.number;
                 } else {
@@ -66,7 +79,6 @@ const AppState = {
             const number = prefix ? `${prefix}.${index + 1}` : `${index + 1}`;
             const baseLabelMatch = child.label.match(/^[\d.]+\s+(.+)$/);
             const baseLabel = baseLabelMatch ? baseLabelMatch[1] : child.label;
-
             child.number = number;
             child.label = `${number}. ${baseLabel}`;
 
@@ -196,9 +208,15 @@ const AppState = {
                 node.children.filter(c => c.type === 'table').forEach(tableNode => {
                     delete this.tables[tableNode.tableId];
                 });
+
                 // Удаление текстовых блоков
                 node.children.filter(c => c.type === 'textblock').forEach(textBlockNode => {
                     delete this.textBlocks[textBlockNode.textBlockId];
+                });
+
+                // НОВОЕ: Удаление нарушений
+                node.children.filter(c => c.type === 'violation').forEach(violationNode => {
+                    delete this.violations[violationNode.violationId];
                 });
             }
 
@@ -210,6 +228,11 @@ const AppState = {
             // Если удаляется текстовый блок
             if (node && node.type === 'textblock' && node.textBlockId) {
                 delete this.textBlocks[node.textBlockId];
+            }
+
+            // НОВОЕ: Если удаляется нарушение
+            if (node && node.type === 'violation' && node.violationId) {
+                delete this.violations[node.violationId];
             }
 
             parent.children = parent.children.filter(n => n.id !== nodeId);
@@ -234,6 +257,7 @@ const AppState = {
         if (!node) return {success: false, reason: 'Узел не найден'};
         if (node.type === 'table') return {success: false, reason: 'Нельзя добавить таблицу к таблице'};
         if (node.type === 'textblock') return {success: false, reason: 'Нельзя добавить таблицу к текстовому блоку'};
+        if (node.type === 'violation') return {success: false, reason: 'Нельзя добавить таблицу к нарушению'};
 
         // Проверка ограничения (максимум 10 таблиц)
         if (!node.children) node.children = [];
@@ -303,6 +327,7 @@ const AppState = {
             success: false,
             reason: 'Нельзя добавить текстовый блок к текстовому блоку'
         };
+        if (node.type === 'violation') return {success: false, reason: 'Нельзя добавить текстовый блок к нарушению'};
 
         // Проверка ограничения (максимум 10 текстовых блоков)
         if (!node.children) node.children = [];
@@ -346,12 +371,77 @@ const AppState = {
         return {success: true, textBlock: textBlock, textBlockNode: textBlockNode};
     },
 
+    // НОВОЕ: Добавление нарушения к узлу
+    addViolationToNode(nodeId) {
+        const node = this.findNodeById(nodeId);
+        if (!node) return {success: false, reason: 'Узел не найден'};
+        if (node.type === 'table') return {success: false, reason: 'Нельзя добавить нарушение к таблице'};
+        if (node.type === 'textblock') return {success: false, reason: 'Нельзя добавить нарушение к текстовому блоку'};
+        if (node.type === 'violation') return {success: false, reason: 'Нельзя добавить нарушение к нарушению'};
+
+        // Проверка ограничения (максимум 10 нарушений)
+        if (!node.children) node.children = [];
+        const violationsCount = node.children.filter(c => c.type === 'violation').length;
+        if (violationsCount >= 10) {
+            return {
+                success: false,
+                reason: 'Достигнуто максимальное количество нарушений (10) для этого пункта'
+            };
+        }
+
+        const violationId = `violation_${Date.now()}`;
+
+        // Создание узла нарушения
+        const violationNode = {
+            id: `${nodeId}_violation_${Date.now()}`,
+            label: 'Нарушение',
+            type: 'violation',
+            violationId: violationId,
+            parentId: nodeId
+        };
+
+        node.children.push(violationNode);
+
+        // Создание структуры нарушения
+        const violation = {
+            id: violationId,
+            nodeId: violationNode.id,
+            violated: '', // Текст для "Нарушено"
+            established: '', // Текст для "Установлено"
+            descriptionList: {
+                enabled: false,
+                items: [] // массив строк
+            },
+            additionalText: {
+                enabled: false,
+                content: ''
+            },
+            reasons: {
+                enabled: false,
+                content: ''
+            },
+            consequences: {
+                enabled: false,
+                content: ''
+            },
+            responsible: {
+                enabled: false,
+                content: ''
+            }
+        };
+
+        this.violations[violationId] = violation;
+        this.generateNumbering();
+        return {success: true, violation: violation, violationNode: violationNode};
+    },
+
     // Экспорт данных для API
     exportData() {
         return {
             tree: this.treeData,
             tables: this.tables,
-            textBlocks: this.textBlocks
+            textBlocks: this.textBlocks,
+            violations: this.violations
         };
     }
 };
