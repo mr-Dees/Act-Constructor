@@ -11,7 +11,7 @@ class APIClient {
         const data = AppState.exportData();
 
         // Валидация формата
-        if (!['txt', 'docx'].includes(format)) {
+        if (!['txt', 'docx', 'md'].includes(format)) {
             console.error('Неподдерживаемый формат:', format);
             format = 'txt';
         }
@@ -56,7 +56,7 @@ class APIClient {
         const data = AppState.exportData();
 
         // Валидация формата
-        if (!['txt', 'docx'].includes(format)) {
+        if (!['txt', 'docx', 'md'].includes(format)) {
             console.error('Неподдерживаемый формат:', format);
             format = 'txt';
         }
@@ -110,11 +110,25 @@ class APIClient {
      * @param {string} filename - Имя файла
      */
     static async downloadFile(filename) {
-        const link = document.createElement('a');
-        link.href = `/${filename}`;
-        link.download = filename.split('/').pop();
-        document.body.appendChild(link);
-        link.click();
-        document.body.removeChild(link);
+        try {
+            const response = await fetch(`/api/v1/acts/download/${filename}`);
+
+            if (!response.ok) {
+                throw new Error('Ошибка при скачивании файла');
+            }
+
+            const blob = await response.blob();
+            const url = window.URL.createObjectURL(blob);
+            const a = document.createElement('a');
+            a.href = url;
+            a.download = filename;
+            document.body.appendChild(a);
+            a.click();
+            window.URL.revokeObjectURL(url);
+            document.body.removeChild(a);
+        } catch (error) {
+            console.error('Ошибка при скачивании:', error);
+            throw error;
+        }
     }
 }

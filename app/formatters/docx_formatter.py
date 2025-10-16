@@ -24,7 +24,6 @@ class HTMLToDocxParser(HTMLParser):
 
     def handle_starttag(self, tag, attrs):
         """Обработка открывающих тегов."""
-        # Сохраняем текущий буфер перед изменением стиля
         self._flush_buffer()
 
         if tag in ['b', 'strong']:
@@ -39,7 +38,6 @@ class HTMLToDocxParser(HTMLParser):
 
     def handle_endtag(self, tag):
         """Обработка закрывающих тегов."""
-        # Сохраняем текущий буфер перед изменением стиля
         self._flush_buffer()
 
         if tag in ['b', 'strong']:
@@ -50,7 +48,6 @@ class HTMLToDocxParser(HTMLParser):
             self.underline = False
         elif tag in ['p', 'div']:
             self._flush_buffer()
-            # Не добавляем перенос строки, чтобы избежать лишних пустых строк
 
     def handle_data(self, data):
         """Обработка текстовых данных."""
@@ -61,7 +58,7 @@ class HTMLToDocxParser(HTMLParser):
         """Сбрасывает буфер текста в paragraph с текущим форматированием."""
         if self.text_buffer:
             text = ''.join(self.text_buffer)
-            if text.strip() or text.isspace():  # Сохраняем пробелы
+            if text.strip() or text.isspace():
                 run = self.paragraph.add_run(text)
                 run.bold = self.bold
                 run.italic = self.italic
@@ -122,10 +119,12 @@ class DocxFormatter(BaseFormatter):
             item: Словарь с данными пункта
             level: Уровень вложенности (для заголовков)
         """
-        # ИСПРАВЛЕНИЕ: Заголовок пункта отображается для ВСЕХ элементов (удалена проверка protected)
+        # Заголовок пункта отображается для всех элементов кроме textblock и violation
         label = item.get('label', '')
-        if label:
-            heading_level = min(level, 9)  # DOCX поддерживает до 9 уровней
+        item_type = item.get('type', 'item')
+
+        if label and item_type not in ['textblock', 'violation']:
+            heading_level = min(level, 9)
             doc.add_heading(label, level=heading_level)
 
         # Текстовое содержание пункта
@@ -158,74 +157,74 @@ class DocxFormatter(BaseFormatter):
 
     def _add_table(self, doc: Document, table_data: Dict):
         """
-        Добавляет таблицу в документ.
+        Добавляет таблицу в документ с учетом объединенных ячеек.
 
         Args:
             doc: Документ DOCX
-            table_data: Словарь с данными таблицы (rows с cells)
+            table_data: Словарь с данными таблицы (rows)
         """
-        # ИСПРАВЛЕНИЕ: Используем 'rows' вместо 'headers' и 'data'
         rows = table_data.get('rows', [])
 
         if not rows:
             doc.add_paragraph('[Пустая таблица]')
             return
 
-        # Преобразуем rows для создания таблицы
-        # Сначала создаем матрицу ячеек с учетом merged
-        display_rows = []
+        # Вычисляем размерность таблицы с учетом colspan
         max_cols = 0
-
         for row in rows:
             cells = row.get('cells', [])
-            display_row = []
+            col_count = 0
             for cell in cells:
                 if not cell.get('merged', False):
-                    display_row.append({
-                        'content': cell.get('content', ''),
-                        'isHeader': cell.get('isHeader', False),
-                        'colspan': cell.get('colspan', 1),
-                        'rowspan': cell.get('rowspan', 1)
-                    })
-            if display_row:
-                display_rows.append(display_row)
-                max_cols = max(max_cols, len(display_row))
+                    col_count += cell.get('colspan', 1)
+            max_cols = max(max_cols, col_count)
 
-        if not display_rows or max_cols == 0:
+        if max_cols == 0:
             doc.add_paragraph('[Пустая таблица]')
             return
 
+        num_rows = len(rows)
+
         # Создаем таблицу
-        num_rows = len(display_rows)
         table = doc.add_table(rows=num_rows, cols=max_cols)
         table.style = 'Table Grid'
 
         # Заполняем таблицу
-        for row_idx, display_row in enumerate(display_rows):
-            for col_idx, cell_data in enumerate(display_row):
-                if col_idx < max_cols:
-                    cell = table.cell(row_idx, col_idx)
-                    cell.text = str(cell_data['content'])
+        for row_idx, row in enumerate(rows):
+            cells = row.get('cells', [])
+            col_idx = 0
 
-                    # Жирный шрифт для заголовков
-                    if cell_data['isHeader']:
-                        for paragraph in cell.paragraphs:
-                            for run in paragraph.runs:
-                                run.bold = True
+            for cell_data in cells:
+                if cell_data.get('merged', False):
+                    continue
 
-                    # Обработка объединения ячеек
-                    rowspan = cell_data['rowspan']
-                    colspan = cell_data['colspan']
+                if col_idx >= max_cols:
+                    break
 
-                    if rowspan > 1 or colspan > 1:
-                        try:
-                            end_row = min(row_idx + rowspan - 1, num_rows - 1)
-                            end_col = min(col_idx + colspan - 1, max_cols - 1)
-                            end_cell = table.cell(end_row, end_col)
-                            cell.merge(end_cell)
-                        except Exception:
-                            # Игнорируем ошибки слияния
-                            pass
+                cell = table.cell(row_idx, col_idx)
+                cell.text = str(cell_data.get('content', ''))
+
+                # Жирный шрифт для заголовков
+                if cell_data.get('isHeader', False):
+                    for paragraph in cell.paragraphs:
+                        for run in paragraph.runs:
+                            run.bold = True
+
+                # Обработка объединения ячеек
+                rowspan = cell_data.get('rowspan', 1)
+                colspan = cell_data.get('colspan', 1)
+
+                if rowspan > 1 or colspan > 1:
+                    try:
+                        end_row = min(row_idx + rowspan - 1, num_rows - 1)
+                        end_col = min(col_idx + colspan - 1, max_cols - 1)
+                        end_cell = table.cell(end_row, end_col)
+                        cell.merge(end_cell)
+                    except Exception:
+                        pass
+
+                # Переходим к следующей колонке с учетом colspan
+                col_idx += colspan
 
         # Добавляем отступ после таблицы
         doc.add_paragraph()
@@ -244,66 +243,71 @@ class DocxFormatter(BaseFormatter):
         if not content:
             return
 
-        # Создаем параграф
-        paragraph = doc.add_paragraph()
+        # Обрабатываем HTML с сохранением переносов строк
+        content_with_breaks = re.sub(r'<br\s*/?>', '|||LINEBREAK|||', content)
+        content_with_breaks = re.sub(r'</p>', '|||LINEBREAK|||', content_with_breaks)
+        content_with_breaks = re.sub(r'</div>', '|||LINEBREAK|||', content_with_breaks)
 
-        # Применяем выравнивание
-        alignment = formatting.get('alignment', 'left')
-        if alignment == 'center':
-            paragraph.alignment = WD_PARAGRAPH_ALIGNMENT.CENTER
-        elif alignment == 'right':
-            paragraph.alignment = WD_PARAGRAPH_ALIGNMENT.RIGHT
-        elif alignment == 'justify':
-            paragraph.alignment = WD_PARAGRAPH_ALIGNMENT.JUSTIFY
-        else:
-            paragraph.alignment = WD_PARAGRAPH_ALIGNMENT.LEFT
+        # Разбиваем по маркерам переноса
+        paragraphs_content = content_with_breaks.split('|||LINEBREAK|||')
 
-        # ИСПРАВЛЕНИЕ: Парсим HTML и применяем форматирование через runs
-        # Очищаем content от лишних тегов, сохраняя форматирование
-        cleaned_content = content.strip()
+        for para_content in paragraphs_content:
+            para_content = para_content.strip()
+            if not para_content:
+                continue
 
-        # Парсим HTML
-        parser = HTMLToDocxParser(paragraph)
-        try:
-            parser.feed(cleaned_content)
-            parser.close()
-        except Exception:
-            # Если парсинг не удался, добавляем текст как есть, удалив теги
-            clean_text = re.sub(r'<[^>]+>', '', cleaned_content)
-            paragraph.add_run(clean_text)
+            # Создаем параграф
+            paragraph = doc.add_paragraph()
 
-        # Применяем базовое форматирование из formatting к первому run
-        # (это будет работать как fallback, если HTML не содержит форматирования)
-        if paragraph.runs:
-            first_run = paragraph.runs[0]
+            # Применяем выравнивание
+            alignment = formatting.get('alignment', 'left')
+            if alignment == 'center':
+                paragraph.alignment = WD_PARAGRAPH_ALIGNMENT.CENTER
+            elif alignment == 'right':
+                paragraph.alignment = WD_PARAGRAPH_ALIGNMENT.RIGHT
+            elif alignment == 'justify':
+                paragraph.alignment = WD_PARAGRAPH_ALIGNMENT.JUSTIFY
+            else:
+                paragraph.alignment = WD_PARAGRAPH_ALIGNMENT.LEFT
 
-            if formatting.get('bold', False):
+            # Парсим HTML и применяем форматирование через runs
+            parser = HTMLToDocxParser(paragraph)
+            try:
+                parser.feed(para_content)
+                parser.close()
+            except Exception:
+                clean_text = re.sub(r'<[^>]+>', '', para_content)
+                paragraph.add_run(clean_text)
+
+            # Применяем базовое форматирование из formatting
+            if paragraph.runs:
+                if formatting.get('bold', False):
+                    for run in paragraph.runs:
+                        if not run.bold:
+                            run.bold = True
+
+                if formatting.get('italic', False):
+                    for run in paragraph.runs:
+                        if not run.italic:
+                            run.italic = True
+
+                if formatting.get('underline', False):
+                    for run in paragraph.runs:
+                        if not run.underline:
+                            run.underline = True
+
+                font_size = formatting.get('fontSize', 14)
                 for run in paragraph.runs:
-                    run.bold = True
-
-            if formatting.get('italic', False):
-                for run in paragraph.runs:
-                    run.italic = True
-
-            if formatting.get('underline', False):
-                for run in paragraph.runs:
-                    run.underline = True
-
-            font_size = formatting.get('fontSize', 14)
-            for run in paragraph.runs:
-                run.font.size = Pt(font_size)
+                    run.font.size = Pt(font_size)
 
     def _add_violation(self, doc: Document, violation_data: Dict):
         """
-        Добавляет блок нарушения в документ.
+        Добавляет блок нарушения в документ БЕЗ заголовка "НАРУШЕНИЕ".
 
         Args:
             doc: Документ DOCX
             violation_data: Словарь с данными нарушения
         """
-        # Заголовок секции нарушения
-        doc.add_heading('НАРУШЕНИЕ', level=3)
-
         # Секция "Нарушено"
         violated = violation_data.get('violated', '')
         if violated:
@@ -323,7 +327,8 @@ class DocxFormatter(BaseFormatter):
         if desc_list.get('enabled', False):
             items = desc_list.get('items', [])
             if items:
-                doc.add_paragraph('Описание:', style='Heading 4')
+                p = doc.add_paragraph()
+                p.add_run('Описание:').bold = True
                 for item in items:
                     if item.strip():
                         doc.add_paragraph(item, style='List Bullet')

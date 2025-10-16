@@ -62,9 +62,12 @@ class TextFormatter(BaseFormatter):
         lines = []
         indent = "  " * level
 
-        # ИСПРАВЛЕНИЕ: Заголовок пункта отображается для ВСЕХ элементов (удалена проверка protected)
+        # Заголовок пункта
         label = item.get('label', '')
-        if label:
+        item_type = item.get('type', 'item')
+
+        # Пропускаем заголовки для textblock и violation
+        if label and item_type not in ['textblock', 'violation']:
             lines.append(f"{indent}{label}")
             lines.append(f"{indent}{'-' * len(label)}")
 
@@ -106,81 +109,87 @@ class TextFormatter(BaseFormatter):
 
     def _format_table(self, table_data: Dict, level: int = 0) -> str:
         """
-        Форматирует таблицу с учетом объединенных ячеек.
+        Форматирует таблицу с учетом объединенных ячеек и colspan.
 
         Args:
             table_data: Словарь с данными таблицы
-            level: Уровень вложенности
+            level: Уровень вложенности (только для text_formatter)
 
         Returns:
             Отформатированная таблица
         """
         lines = []
-        indent = "  " * level
+        indent = "  " * level  # Только для text_formatter, для markdown используйте ""
 
-        # ИСПРАВЛЕНИЕ: Используем 'rows' вместо 'headers' и 'data'
         rows = table_data.get('rows', [])
 
         if not rows:
-            return f"{indent}[Пустая таблица]"
+            return f"{indent}[Пустая таблица]"  # Для markdown: "*[Пустая таблица]*"
 
-        # Преобразуем rows в формат для отображения
-        display_rows = []
+        # Строим матрицу отображения с учетом merged и colspan
+        display_matrix = []
+        max_cols = 0
+
         for row in rows:
             cells = row.get('cells', [])
             display_row = []
-            for cell in cells:
-                # Пропускаем объединенные ячейки
-                if not cell.get('merged', False):
-                    display_row.append(cell.get('content', ''))
-            if display_row:  # Добавляем только непустые строки
-                display_rows.append(display_row)
 
-        if not display_rows:
+            for cell in cells:
+                if not cell.get('merged', False):
+                    content = str(cell.get('content', ''))
+                    colspan = cell.get('colspan', 1)
+
+                    # Добавляем содержимое в первую ячейку
+                    display_row.append(content)
+
+                    # Для остальных колонок в colspan добавляем пустые ячейки
+                    for _ in range(colspan - 1):
+                        display_row.append('')
+
+            if display_row:
+                display_matrix.append(display_row)
+                max_cols = max(max_cols, len(display_row))
+
+        if not display_matrix or max_cols == 0:
             return f"{indent}[Пустая таблица]"
 
+        # Выравниваем все строки до max_cols
+        for row in display_matrix:
+            while len(row) < max_cols:
+                row.append('')
+
+        # Для text_formatter - ASCII таблица
         # Вычисляем ширину колонок
-        max_cols = max(len(row) for row in display_rows)
         col_widths = [0] * max_cols
-
-        for row in display_rows:
+        for row in display_matrix:
             for col_idx, cell_text in enumerate(row):
-                if col_idx < max_cols:
-                    col_widths[col_idx] = max(col_widths[col_idx], len(str(cell_text)))
+                col_widths[col_idx] = max(col_widths[col_idx], len(str(cell_text)))
 
-        # Функция для отрисовки разделителя
         def draw_separator():
             parts = ['-' * (width + 2) for width in col_widths]
             return f"{indent}+{'+'.join(parts)}+"
 
-        # Функция для отрисовки строки
         def draw_row(row):
             row_parts = []
             for col_idx in range(max_cols):
-                if col_idx < len(row):
-                    cell_text = str(row[col_idx])
-                else:
-                    cell_text = ''
+                cell_text = str(row[col_idx]) if col_idx < len(row) else ''
                 row_parts.append(f" {cell_text.ljust(col_widths[col_idx])} ")
             return f"{indent}|{'|'.join(row_parts)}|"
 
-        # Отрисовка таблицы
         lines.append(draw_separator())
 
-        for idx, row in enumerate(display_rows):
+        for idx, row in enumerate(display_matrix):
             lines.append(draw_row(row))
-            # Добавляем разделитель после первой строки (заголовок)
             if idx == 0:
                 lines.append(draw_separator())
 
-        # Добавляем финальный разделитель
         lines.append(draw_separator())
 
         return "\n".join(lines)
 
     def _format_textblock(self, textblock_data: Dict, level: int = 0) -> str:
         """
-        Форматирует текстовый блок.
+        Форматирует текстовый блок с учетом переносов строк и выравнивания.
 
         Args:
             textblock_data: Словарь с данными текстового блока
@@ -196,36 +205,67 @@ class TextFormatter(BaseFormatter):
         if not content:
             return ""
 
-        # ИСПРАВЛЕНИЕ: Полная очистка HTML-тегов для текстового формата
+        # Полная очистка HTML с сохранением переносов строк
         clean_content = html.unescape(content)
 
-        # Замена HTML тегов на текстовые эквиваленты
-        clean_content = re.sub(r'<br\s*/?>', '\n', clean_content)  # <br> -> перенос строки
-        clean_content = re.sub(r'<p[^>]*>', '', clean_content)  # Удаляем открывающие <p>
-        clean_content = re.sub(r'</p>', '\n', clean_content)  # </p> -> перенос строки
-        clean_content = re.sub(r'<div[^>]*>', '', clean_content)  # Удаляем открывающие <div>
-        clean_content = re.sub(r'</div>', '\n', clean_content)  # </div> -> перенос строки
-        clean_content = re.sub(r'<[^>]+>', '', clean_content)  # Удаляем все остальные теги
+        # Сохраняем переносы строк
+        clean_content = re.sub(r'<br\s*/?>', '\n', clean_content)
+        clean_content = re.sub(r'</p>', '\n', clean_content)
+        clean_content = re.sub(r'</div>', '\n', clean_content)
 
-        # Убираем множественные переносы строк
-        clean_content = re.sub(r'\n\s*\n+', '\n\n', clean_content)
+        # Удаляем открывающие теги
+        clean_content = re.sub(r'<p[^>]*>', '', clean_content)
+        clean_content = re.sub(r'<div[^>]*>', '', clean_content)
+
+        # Удаляем все остальные теги
+        clean_content = re.sub(r'<[^>]+>', '', clean_content)
+
+        # Не убираем одиночные переносы, только множественные
+        clean_content = re.sub(r'\n\n+', '\n\n', clean_content)
         clean_content = clean_content.strip()
 
+        # Применяем выравнивание с учетом переносов
         lines = clean_content.split('\n')
         alignment = formatting.get('alignment', 'left')
 
         formatted_lines = []
+        max_width = 80 - len(indent)
+
         for line in lines:
             if not line.strip():
                 formatted_lines.append("")
                 continue
 
-            if alignment == 'center':
-                formatted_lines.append(f"{indent}{line.center(80)}")
-            elif alignment == 'right':
-                formatted_lines.append(f"{indent}{line.rjust(80)}")
-            else:
-                formatted_lines.append(f"{indent}{line}")
+            # Переносим длинные строки
+            words = line.split()
+            current_line = []
+            current_length = 0
+
+            for word in words:
+                word_len = len(word)
+                if current_length + word_len + len(current_line) <= max_width:
+                    current_line.append(word)
+                    current_length += word_len
+                else:
+                    if current_line:
+                        line_text = ' '.join(current_line)
+                        if alignment == 'center':
+                            formatted_lines.append(f"{indent}{line_text.center(max_width)}")
+                        elif alignment == 'right':
+                            formatted_lines.append(f"{indent}{line_text.rjust(max_width)}")
+                        else:
+                            formatted_lines.append(f"{indent}{line_text}")
+                    current_line = [word]
+                    current_length = word_len
+
+            if current_line:
+                line_text = ' '.join(current_line)
+                if alignment == 'center':
+                    formatted_lines.append(f"{indent}{line_text.center(max_width)}")
+                elif alignment == 'right':
+                    formatted_lines.append(f"{indent}{line_text.rjust(max_width)}")
+                else:
+                    formatted_lines.append(f"{indent}{line_text}")
 
         return "\n".join(formatted_lines)
 
@@ -241,28 +281,16 @@ class TextFormatter(BaseFormatter):
         """
         lines = []
 
-        lines.append("╔" + "═" * 78 + "╗")
-        lines.append("║" + "НАРУШЕНИЕ".center(78) + "║")
-        lines.append("╚" + "═" * 78 + "╝")
-        lines.append("")
-
-        # Нарушено
         violated = violation_data.get('violated', '')
         if violated:
-            lines.append("┌─ Нарушено " + "─" * 66 + "┐")
-            lines.append(f"│ {violated.ljust(76)} │")
-            lines.append("└" + "─" * 78 + "┘")
+            lines.append("Нарушено: " + violated)
             lines.append("")
 
-        # Установлено
         established = violation_data.get('established', '')
         if established:
-            lines.append("┌─ Установлено " + "─" * 63 + "┐")
-            lines.append(f"│ {established.ljust(76)} │")
-            lines.append("└" + "─" * 78 + "┘")
+            lines.append("Установлено: " + established)
             lines.append("")
 
-        # Список описаний
         desc_list = violation_data.get('descriptionList', {})
         if desc_list.get('enabled', False):
             items = desc_list.get('items', [])
@@ -273,7 +301,6 @@ class TextFormatter(BaseFormatter):
                         lines.append(f"  • {item}")
                 lines.append("")
 
-        # Дополнительный текст
         additional_text = violation_data.get('additionalText', {})
         if additional_text.get('enabled', False):
             content = additional_text.get('content', '')
@@ -281,7 +308,6 @@ class TextFormatter(BaseFormatter):
                 lines.append(content)
                 lines.append("")
 
-        # Причины
         reasons = violation_data.get('reasons', {})
         if reasons.get('enabled', False):
             content = reasons.get('content', '')
@@ -289,7 +315,6 @@ class TextFormatter(BaseFormatter):
                 lines.append(f"Причины: {content}")
                 lines.append("")
 
-        # Последствия
         consequences = violation_data.get('consequences', {})
         if consequences.get('enabled', False):
             content = consequences.get('content', '')
@@ -297,7 +322,6 @@ class TextFormatter(BaseFormatter):
                 lines.append(f"Последствия: {content}")
                 lines.append("")
 
-        # Ответственные
         responsible = violation_data.get('responsible', {})
         if responsible.get('enabled', False):
             content = responsible.get('content', '')

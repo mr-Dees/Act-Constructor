@@ -45,23 +45,18 @@
             </button>
 
             <!-- Выпадающее меню форматов -->
-            <div id="formatMenu" class="format-menu hidden">
-                <div class="format-menu-header">Выберите форматы:</div>
-                <label class="format-menu-item">
-                    <input type="checkbox" id="format-txt" value="txt" checked>
-                    <span class="format-label">
-                        <span class="format-icon">📄</span>
-                        <span class="format-name">TXT</span>
-                        <span class="format-desc">Текстовый файл</span>
-                    </span>
+            <div id="formatMenu" class="format-dropdown-menu hidden">
+                <label class="format-option">
+                    <input type="checkbox" value="txt" checked>
+                    <span>TXT</span>
                 </label>
-                <label class="format-menu-item">
-                    <input type="checkbox" id="format-docx" value="docx">
-                    <span class="format-label">
-                        <span class="format-icon">📘</span>
-                        <span class="format-name">DOCX</span>
-                        <span class="format-desc">Microsoft Word</span>
-                    </span>
+                <label class="format-option">
+                    <input type="checkbox" value="md">
+                    <span>Markdown</span>
+                </label>
+                <label class="format-option">
+                    <input type="checkbox" value="docx">
+                    <span>DOCX</span>
                 </label>
             </div>
         </div>
