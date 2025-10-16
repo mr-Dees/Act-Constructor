@@ -30,69 +30,61 @@ class App {
 
         backBtn.addEventListener('click', () => this.goToStep(1));
 
-        // Обработчик кнопки сохранения с поддержкой множественных форматов
+        // ИСПРАВЛЕННЫЙ обработчик - передаем ВСЕ форматы сразу
         generateBtn.addEventListener('click', async () => {
             const selectedFormats = this.getSelectedFormats();
 
             if (selectedFormats.length === 0) {
-                alert('Пожалуйста, выберите хотя бы один формат для сохранения');
+                alert('Выберите хотя бы один формат для сохранения');
                 return;
             }
 
+            // Валидация данных
             const validationResult = this.validateActData();
             if (!validationResult.valid) {
                 alert(validationResult.message);
                 return;
             }
 
-            // Синхронизация данных из DOM в AppState
+            // Синхронизируем DOM с AppState
             ItemsRenderer.syncDataToState();
 
+            // Блокируем кнопку на время операции
             generateBtn.disabled = true;
             const originalText = generateBtn.textContent;
+            generateBtn.textContent = '⏳ Создаём акты...';
 
-            let successCount = 0;
-            let errorCount = 0;
+            try {
+                // ГЛАВНОЕ ИЗМЕНЕНИЕ: передаем весь массив форматов ОДНИМ вызовом
+                const success = await APIClient.generateAct(selectedFormats);
 
-            // Последовательное сохранение во всех выбранных форматах
-            for (const format of selectedFormats) {
-                generateBtn.textContent = `Сохранение ${format.toUpperCase()}...`;
+                // Результат уже отображен через систему уведомлений в api.js
+                // Не нужны дополнительные alert'ы
 
-                try {
-                    const success = await APIClient.generateAct(format);
-                    if (success) {
-                        successCount++;
-                    } else {
-                        errorCount++;
-                    }
-                } catch (error) {
-                    console.error(`Ошибка при сохранении ${format}:`, error);
-                    errorCount++;
-                }
-            }
-
-            generateBtn.disabled = false;
-            generateBtn.textContent = originalText;
-
-            // Итоговое сообщение
-            if (successCount > 0 && errorCount === 0) {
-                alert(`✅ Успешно сохранено в ${successCount} формат(ах)!`);
-            } else if (successCount > 0 && errorCount > 0) {
-                alert(`⚠️ Сохранено: ${successCount}, Ошибок: ${errorCount}`);
-            } else {
-                alert('❌ Не удалось сохранить акт');
+            } catch (error) {
+                console.error('Критическая ошибка:', error);
+                APIClient.showNotification(
+                    'Критическая ошибка',
+                    `Произошла непредвиденная ошибка: ${error.message}`,
+                    'error'
+                );
+            } finally {
+                // Восстанавливаем кнопку
+                generateBtn.disabled = false;
+                generateBtn.textContent = originalText;
             }
         });
 
-        // Клик по шагам в header
-        document.querySelectorAll('.step').forEach(step => {
+        // Навигация по шагам через клик на заголовки
+        const header = document.querySelector('.header');
+        header.querySelectorAll('.step').forEach(step => {
             step.addEventListener('click', () => {
                 const stepNum = parseInt(step.dataset.step);
                 this.goToStep(stepNum);
             });
         });
 
-        // Горячая клавиша Ctrl+S для сохранения
+        // Ctrl+S для быстрого сохранения
         document.addEventListener('keydown', (e) => {
             if ((e.ctrlKey || e.metaKey) && e.key === 's') {
                 e.preventDefault();

@@ -1,7 +1,5 @@
 """Эндпоинты для работы с актами."""
 
-from pathlib import Path
-
 from fastapi import APIRouter, Query, HTTPException
 from fastapi.responses import FileResponse
 
@@ -57,7 +55,7 @@ async def download_act(filename: str):
         HTTPException: Если файл не найден
     """
     try:
-        file_path = Path(settings.ACTS_STORAGE_PATH) / filename
+        file_path = settings.storage_dir / filename
 
         if not file_path.exists():
             raise HTTPException(status_code=404, detail="Файл не найден")
@@ -76,6 +74,7 @@ async def download_act(filename: str):
             media_type=media_type,
             filename=filename
         )
+
     except HTTPException:
         raise
     except Exception as e:

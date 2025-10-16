@@ -31,7 +31,7 @@ class StorageService:
             extension: Расширение файла
 
         Returns:
-            Относительный путь к сохраненному файлу
+            Имя файла (без пути)
         """
         timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
         filename = f"{prefix}_{timestamp}.{extension}"
@@ -40,8 +40,8 @@ class StorageService:
         with open(filepath, 'w', encoding='utf-8') as f:
             f.write(content)
 
-        # Возвращаем относительный путь
-        return str(filepath.relative_to(settings.base_dir))
+        # Возвращаем только имя файла
+        return filename
 
     def save_docx(self, document: Document, prefix: str = "act") -> str:
         """
@@ -52,7 +52,7 @@ class StorageService:
             prefix: Префикс имени файла
 
         Returns:
-            Относительный путь к сохраненному файлу
+            Имя файла (без пути)
         """
         timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
         filename = f"{prefix}_{timestamp}.docx"
@@ -60,8 +60,8 @@ class StorageService:
 
         document.save(str(filepath))
 
-        # Возвращаем относительный путь
-        return str(filepath.relative_to(settings.base_dir))
+        # Возвращаем только имя файла
+        return filename
 
     def get_all_acts(self) -> list[Path]:
         """
@@ -73,6 +73,7 @@ class StorageService:
         txt_files = list(self.storage_dir.glob("act_*.txt"))
         docx_files = list(self.storage_dir.glob("act_*.docx"))
         all_files = txt_files + docx_files
+
         return sorted(all_files, reverse=True)
 
     def read(self, filename: str) -> str:
@@ -89,7 +90,6 @@ class StorageService:
             FileNotFoundError: Если файл не найден
         """
         filepath = self.storage_dir / filename
-
         if not filepath.exists():
             raise FileNotFoundError(f"Файл {filename} не найден")
 
@@ -110,7 +110,6 @@ class StorageService:
             PermissionError: Если недостаточно прав для удаления
         """
         filepath = self.storage_dir / filename
-
         if not filepath.exists():
             return False
 
