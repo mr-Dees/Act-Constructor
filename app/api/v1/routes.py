@@ -2,14 +2,14 @@
 
 from fastapi import APIRouter
 
-from app.api.v1.endpoints import acts
+from app.api.v1.endpoints import act_operations
 
 # Создаем роутер только для API эндпоинтов
 api_router = APIRouter()
 
 # Подключаем эндпоинты работы с актами
 api_router.include_router(
-    acts.router,
-    prefix="/acts",
-    tags=["acts"]
+    act_operations.router,
+    prefix="/act_operations",
+    tags=["act_operations"]
 )

@@ -9,14 +9,15 @@ UI_for_EP_v_KAP/
 │   │       ├── routes.py
 │   │       └── endpoints/
 │   │           ├── __init__.py
-│   │           └── acts.py
+│   │           └── act_operations.py
 │   ├── core/
 │   │   ├── __init__.py
 │   │   └── config.py
 │   ├── formatters/
 │   │   ├── __init__.py
-│   │   ├── base.py
-│   │   └── text_formatter.py
+│   │   ├── base_formatter.py
+│   │   ├── text_formatter.py
+│   │   ├── markdown_formatter.py
 │   │   └── docx_formatter.py
 │   ├── schemas/
 │   │   ├── __init__.py
@@ -54,21 +55,3 @@ UI_for_EP_v_KAP/
 │       └── main.js
 ├── requirements.txt
 └── .env
-
-
-
-Браузер открывает http://localhost:8000/
-          ↓
-    app/main.py (@app.get("/"))
-          ↓
-    templates/constructor.html
-          ↓
-JavaScript отправляет POST /api/v1/save
-          ↓
-    app/api/v1/routes.py (prefix="/api/v1")
-          ↓
-    app/api/v1/endpoints/acts.py (@router.post("/save"))
-          ↓
-    app/services/act_service.py
-          ↓
-    DB/acts/act_20251002_151700.txt

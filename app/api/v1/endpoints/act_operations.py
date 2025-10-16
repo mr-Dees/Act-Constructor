@@ -16,7 +16,7 @@ act_service = ActService()
 settings = Settings()
 
 
-@router.post("/save", response_model=ActSaveResponse)
+@router.post("/save_act", response_model=ActSaveResponse)
 async def save_act(
         data: ActDataSchema,
         fmt: str = Query("txt", enum=["txt", "md", "docx"], description="Формат сохранения (txt, md или docx)")
@@ -95,29 +95,3 @@ async def get_acts_history():
         return {"acts": acts, "count": len(acts)}
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Ошибка получения истории: {str(e)}")
-
-
-@router.post("/generate", response_model=ActSaveResponse)
-async def generate_act(
-        data: ActDataSchema,
-        fmt: str = Query("txt", enum=["txt", "md", "docx"], description="Формат сохранения")
-):
-    """
-    Генерирует и сохраняет акт (алиас для save_act).
-
-    Args:
-        data: Валидированные данные акта
-        fmt: Формат файла ('txt', 'md' или 'docx')
-
-    Returns:
-        Результат сохранения с путем к файлу
-
-    Raises:
-        HTTPException: При ошибке валидации или генерации
-    """
-    try:
-        return act_service.save_act(data.model_dump(), fmt=fmt)
-    except ValueError as e:
-        raise HTTPException(status_code=400, detail=str(e))
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Ошибка генерации акта: {str(e)}")

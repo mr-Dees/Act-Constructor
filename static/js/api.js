@@ -17,7 +17,7 @@ class APIClient {
         }
 
         try {
-            const response = await fetch(`/api/v1/acts/generate?fmt=${format}`, {
+            const response = await fetch(`/api/v1/act_operations/save_act?fmt=${format}`, {
                 method: 'POST',
                 headers: {
                     'Content-Type': 'application/json'
@@ -62,7 +62,7 @@ class APIClient {
         }
 
         try {
-            const response = await fetch(`/api/v1/acts/save?fmt=${format}`, {
+            const response = await fetch(`/api/v1/act_operations/save?fmt=${format}`, {
                 method: 'POST',
                 headers: {
                     'Content-Type': 'application/json'
@@ -90,7 +90,7 @@ class APIClient {
      */
     static async getHistory() {
         try {
-            const response = await fetch('/api/v1/acts/history');
+            const response = await fetch('/api/v1/act_operations/history');
 
             if (!response.ok) {
                 throw new Error(`HTTP error! status: ${response.status}`);
@@ -111,7 +111,7 @@ class APIClient {
      */
     static async downloadFile(filename) {
         try {
-            const response = await fetch(`/api/v1/acts/download/${filename}`);
+            const response = await fetch(`/api/v1/act_operations/download/${filename}`);
 
             if (!response.ok) {
                 throw new Error('Ошибка при скачивании файла');

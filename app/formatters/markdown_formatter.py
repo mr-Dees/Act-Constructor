@@ -4,7 +4,7 @@ import html
 import re
 from typing import Dict
 
-from app.formatters.base import BaseFormatter
+from app.formatters.base_formatter import BaseFormatter
 
 
 class MarkdownFormatter(BaseFormatter):

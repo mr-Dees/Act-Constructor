@@ -8,7 +8,7 @@ from docx import Document
 from docx.enum.text import WD_PARAGRAPH_ALIGNMENT
 from docx.shared import Pt
 
-from app.formatters.base import BaseFormatter
+from app.formatters.base_formatter import BaseFormatter
 
 
 class HTMLToDocxParser(HTMLParser):
