@@ -1,6 +1,5 @@
 """Форматер для создания актов в формате DOCX."""
 
-import re
 from html.parser import HTMLParser
 from typing import Dict
 
@@ -25,45 +24,47 @@ class HTMLToDocxParser(HTMLParser):
     def handle_starttag(self, tag, attrs):
         """Обработка открывающих тегов."""
         self._flush_buffer()
-
         if tag in ['b', 'strong']:
             self.bold = True
         elif tag in ['i', 'em']:
             self.italic = True
         elif tag == 'u':
             self.underline = True
-        elif tag == 'br':
-            self._flush_buffer()
-            self.paragraph.add_run('\n')
 
     def handle_endtag(self, tag):
         """Обработка закрывающих тегов."""
         self._flush_buffer()
-
         if tag in ['b', 'strong']:
             self.bold = False
         elif tag in ['i', 'em']:
             self.italic = False
         elif tag == 'u':
             self.underline = False
-        elif tag in ['p', 'div']:
-            self._flush_buffer()
 
     def handle_data(self, data):
-        """Обработка текстовых данных."""
-        if data:
-            self.text_buffer.append(data)
+        """Обработка текстового содержимого."""
+        self.text_buffer.append(data)
 
     def _flush_buffer(self):
-        """Сбрасывает буфер текста в paragraph с текущим форматированием."""
-        if self.text_buffer:
-            text = ''.join(self.text_buffer)
-            if text.strip() or text.isspace():
-                run = self.paragraph.add_run(text)
+        """Сбросить буфер текста в run."""
+        if not self.text_buffer:
+            return
+
+        text = ''.join(self.text_buffer)
+        self.text_buffer = []
+
+        # Обрабатываем переносы строк
+        lines = text.split('\n')
+        for i, line in enumerate(lines):
+            if line:  # Добавляем только непустые строки
+                run = self.paragraph.add_run(line)
                 run.bold = self.bold
                 run.italic = self.italic
                 run.underline = self.underline
-            self.text_buffer = []
+
+            # Добавляем перенос строки между частями (кроме последней)
+            if i < len(lines) - 1:
+                self.paragraph.add_run('\n')
 
     def close(self):
         """Завершение парсинга."""
@@ -243,62 +244,29 @@ class DocxFormatter(BaseFormatter):
         if not content:
             return
 
-        # Обрабатываем HTML с сохранением переносов строк
-        content_with_breaks = re.sub(r'<br\s*/?>', '|||LINEBREAK|||', content)
-        content_with_breaks = re.sub(r'</p>', '|||LINEBREAK|||', content_with_breaks)
-        content_with_breaks = re.sub(r'</div>', '|||LINEBREAK|||', content_with_breaks)
+        # Создаем параграф
+        paragraph = doc.add_paragraph()
 
-        # Разбиваем по маркерам переноса
-        paragraphs_content = content_with_breaks.split('|||LINEBREAK|||')
+        # Применяем выравнивание
+        alignment = formatting.get('alignment', 'left')
+        if alignment == 'center':
+            paragraph.alignment = WD_PARAGRAPH_ALIGNMENT.CENTER
+        elif alignment == 'right':
+            paragraph.alignment = WD_PARAGRAPH_ALIGNMENT.RIGHT
+        elif alignment == 'justify':
+            paragraph.alignment = WD_PARAGRAPH_ALIGNMENT.JUSTIFY
+        else:
+            paragraph.alignment = WD_PARAGRAPH_ALIGNMENT.LEFT
 
-        for para_content in paragraphs_content:
-            para_content = para_content.strip()
-            if not para_content:
-                continue
+        # Парсим HTML и добавляем в параграф
+        parser = HTMLToDocxParser(paragraph)
+        parser.feed(content)
+        parser.close()
 
-            # Создаем параграф
-            paragraph = doc.add_paragraph()
-
-            # Применяем выравнивание
-            alignment = formatting.get('alignment', 'left')
-            if alignment == 'center':
-                paragraph.alignment = WD_PARAGRAPH_ALIGNMENT.CENTER
-            elif alignment == 'right':
-                paragraph.alignment = WD_PARAGRAPH_ALIGNMENT.RIGHT
-            elif alignment == 'justify':
-                paragraph.alignment = WD_PARAGRAPH_ALIGNMENT.JUSTIFY
-            else:
-                paragraph.alignment = WD_PARAGRAPH_ALIGNMENT.LEFT
-
-            # Парсим HTML и применяем форматирование через runs
-            parser = HTMLToDocxParser(paragraph)
-            try:
-                parser.feed(para_content)
-                parser.close()
-            except Exception:
-                clean_text = re.sub(r'<[^>]+>', '', para_content)
-                paragraph.add_run(clean_text)
-
-            # Применяем базовое форматирование из formatting
-            if paragraph.runs:
-                if formatting.get('bold', False):
-                    for run in paragraph.runs:
-                        if not run.bold:
-                            run.bold = True
-
-                if formatting.get('italic', False):
-                    for run in paragraph.runs:
-                        if not run.italic:
-                            run.italic = True
-
-                if formatting.get('underline', False):
-                    for run in paragraph.runs:
-                        if not run.underline:
-                            run.underline = True
-
-                font_size = formatting.get('fontSize', 14)
-                for run in paragraph.runs:
-                    run.font.size = Pt(font_size)
+        # Применяем размер шрифта ко всем runs в параграфе
+        font_size = formatting.get('fontSize', 14)
+        for run in paragraph.runs:
+            run.font.size = Pt(font_size)
 
     def _add_violation(self, doc: Document, violation_data: Dict):
         """

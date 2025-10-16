@@ -38,26 +38,38 @@ class PreviewManager {
 
             // Обработка текстовых блоков с заголовком в превью
             if (node.type === 'textblock') {
-                const textBlock = AppState.textBlocks[node.textBlockId];
+                const textBlock = AppState.textBlocks[child.textBlockId];
                 if (textBlock) {
-                    parts.push(`<div class="preview-textblock-title">${node.label}</div>`);
+                    const textBlockDiv = document.createElement('div');
+                    textBlockDiv.className = 'preview-textblock';
 
-                    // Извлечь текст без HTML тегов
+                    const title = document.createElement('div');
+                    title.className = 'preview-textblock-title';
+                    title.textContent = child.label;
+                    textBlockDiv.appendChild(title);
+
+                    const content = document.createElement('div');
+                    content.className = 'preview-textblock-content';
+
+                    // ИСПРАВЛЕНИЕ: корректное отображение HTML с переносами
                     const tempDiv = document.createElement('div');
-                    tempDiv.innerHTML = textBlock.content || '';
-                    let textContent = tempDiv.textContent || tempDiv.innerText || '';
+                    tempDiv.innerHTML = textBlock.content;
 
-                    if (previewTrim && textContent.length > previewTrim) {
-                        textContent = textContent.substring(0, previewTrim) + '...';
+                    // Применяем сохраненное форматирование
+                    if (textBlock.formatting?.fontSize) {
+                        content.style.fontSize = `${textBlock.formatting.fontSize}px`;
+                    }
+                    if (textBlock.formatting?.alignment) {
+                        content.style.textAlign = textBlock.formatting.alignment;
                     }
 
-                    if (textContent) {
-                        parts.push(`<div class="preview-textblock-content">${textContent}</div>`);
-                    } else {
-                        parts.push(`<div class="preview-textblock-content"><em>Пустой блок</em></div>`);
-                    }
+                    // Используем innerHTML для сохранения форматирования
+                    content.innerHTML = textBlock.content || '<em>Пусто</em>';
+
+                    textBlockDiv.appendChild(content);
+                    container.appendChild(textBlockDiv);
                 }
-                return parts.join('');
+                return;
             }
 
             // Обработка нарушений - ТЕКСТОВЫЙ ФОРМАТ

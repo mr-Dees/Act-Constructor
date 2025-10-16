@@ -1,5 +1,3 @@
-// Управление текстовыми блоками
-
 class TextBlockManager {
     constructor() {
         this.selectedTextBlock = null;
@@ -7,25 +5,24 @@ class TextBlockManager {
         this.activeEditor = null;
     }
 
-    // Инициализация глобальной панели инструментов
+    /**
+     * Инициализация глобального тулбара
+     */
     initGlobalToolbar() {
-        // Проверяем, есть ли уже панель
-        if (document.getElementById('globalTextBlockToolbar')) {
-            return;
-        }
+        if (document.getElementById('globalTextBlockToolbar')) return;
 
         const toolbar = document.createElement('div');
         toolbar.id = 'globalTextBlockToolbar';
         toolbar.className = 'textblock-toolbar-global hidden';
         toolbar.innerHTML = `
-            <div class="toolbar-label">📝 Форматирование текста:</div>
-            <button class="toolbar-btn" data-action="bold" title="Жирный (Ctrl+B)"><b>Ж</b></button>
-            <button class="toolbar-btn" data-action="italic" title="Курсив (Ctrl+I)"><i>К</i></button>
+            <div class="toolbar-label">Форматирование текста:</div>
+            <button class="toolbar-btn" data-action="bold" title="Жирный (Ctrl+B)"><strong>Ж</strong></button>
+            <button class="toolbar-btn" data-action="italic" title="Курсив (Ctrl+I)"><em>К</em></button>
             <button class="toolbar-btn" data-action="underline" title="Подчёркнутый (Ctrl+U)"><u>П</u></button>
             <span class="toolbar-separator">|</span>
-            <button class="toolbar-btn" data-action="justifyLeft" title="По левому краю">⬅</button>
-            <button class="toolbar-btn" data-action="justifyCenter" title="По центру">↔</button>
-            <button class="toolbar-btn" data-action="justifyRight" title="По правому краю">➡</button>
+            <button class="toolbar-btn" data-action="justifyLeft" title="По левому краю">◧</button>
+            <button class="toolbar-btn" data-action="justifyCenter" title="По центру">▥</button>
+            <button class="toolbar-btn" data-action="justifyRight" title="По правому краю">◨</button>
             <span class="toolbar-separator">|</span>
             <select class="toolbar-select" id="fontSizeSelect">
                 <option value="10">10px</option>
@@ -40,102 +37,112 @@ class TextBlockManager {
             </select>
         `;
 
-        // Добавляем в body вместо контейнера шага
         document.body.appendChild(toolbar);
-
         this.globalToolbar = toolbar;
         this.attachToolbarEvents();
     }
 
-    // Привязка событий к кнопкам панели
+    /**
+     * Привязка событий к тулбару
+     */
     attachToolbarEvents() {
         if (!this.globalToolbar) return;
 
-        // Обработка кнопок форматирования
+        // Кнопки форматирования
         this.globalToolbar.querySelectorAll('.toolbar-btn').forEach(btn => {
             btn.addEventListener('click', (e) => {
                 e.preventDefault();
                 const action = btn.dataset.action;
+
                 if (this.activeEditor) {
                     this.activeEditor.focus();
                     document.execCommand(action);
 
-                    // Сохранить изменения в состоянии
+                    // Сохраняем контент
                     const textBlockId = this.activeEditor.dataset.textBlockId;
                     const textBlock = AppState.textBlocks[textBlockId];
                     if (textBlock) {
                         textBlock.content = this.activeEditor.innerHTML;
                     }
+
+                    // Обновляем превью
+                    PreviewManager.update();
                 }
             });
         });
 
-        // Обработка выбора размера шрифта
+        // Размер шрифта
         const fontSizeSelect = this.globalToolbar.querySelector('#fontSizeSelect');
         if (fontSizeSelect) {
             fontSizeSelect.addEventListener('change', (e) => {
                 if (this.activeEditor) {
-                    this.activeEditor.focus();
-                    this.activeEditor.style.fontSize = e.target.value + 'px';
+                    const newSize = parseInt(e.target.value);
+                    this.activeEditor.style.fontSize = `${newSize}px`;
 
                     const textBlockId = this.activeEditor.dataset.textBlockId;
                     const textBlock = AppState.textBlocks[textBlockId];
                     if (textBlock) {
-                        textBlock.formatting.fontSize = parseInt(e.target.value);
+                        textBlock.formatting.fontSize = newSize;
                         textBlock.content = this.activeEditor.innerHTML;
                     }
+
+                    PreviewManager.update();
                 }
             });
         }
     }
 
-    // Показать панель инструментов
+    /**
+     * Показать тулбар
+     */
     showToolbar() {
         if (this.globalToolbar) {
             this.globalToolbar.classList.remove('hidden');
         }
     }
 
-    // Скрыть панель инструментов
+    /**
+     * Скрыть тулбар
+     */
     hideToolbar() {
         if (this.globalToolbar) {
             this.globalToolbar.classList.add('hidden');
         }
     }
 
-    // Создание элемента текстового блока для рендеринга на шаге 2 (БЕЗ заголовка)
+    /**
+     * Создать элемент текстового блока
+     */
     createTextBlockElement(textBlock, node) {
         const section = document.createElement('div');
         section.className = 'textblock-section';
         section.dataset.textBlockId = textBlock.id;
 
-        // Редактор текста (БЕЗ заголовка на шаге 2)
+        // Редактор
         const editor = document.createElement('div');
         editor.className = 'textblock-editor';
-        editor.contentEditable = true;
+        editor.contentEditable = 'true';
         editor.dataset.textBlockId = textBlock.id;
         editor.innerHTML = textBlock.content || '';
 
-        // Применить форматирование
+        // Применяем форматирование
         this.applyFormatting(editor, textBlock.formatting);
 
-        // События фокуса
+        // Focus - показываем тулбар и синхронизируем select
         editor.addEventListener('focus', () => {
             this.activeEditor = editor;
             this.showToolbar();
 
-            // Установить текущий размер шрифта в селект
             const fontSizeSelect = document.getElementById('fontSizeSelect');
             if (fontSizeSelect) {
-                fontSizeSelect.value = textBlock.formatting.fontSize || 14;
+                fontSizeSelect.value = textBlock.formatting?.fontSize || 14;
             }
         });
 
+        // Blur - скрываем тулбар с задержкой
         editor.addEventListener('blur', () => {
-            // Сохранить при потере фокуса
             textBlock.content = editor.innerHTML;
 
-            // Скрыть панель через небольшую задержку (чтобы клик по кнопке успел сработать)
             setTimeout(() => {
                 if (document.activeElement !== editor &&
                     !this.globalToolbar?.contains(document.activeElement)) {
@@ -145,25 +152,39 @@ class TextBlockManager {
             }, 200);
         });
 
-        // Сохранение изменений при вводе (debounced)
+        // Input - автосохранение с debounce
         let saveTimeout;
         editor.addEventListener('input', () => {
             clearTimeout(saveTimeout);
             saveTimeout = setTimeout(() => {
                 textBlock.content = editor.innerHTML;
+                PreviewManager.update();
             }, 500);
         });
 
-        section.appendChild(editor);
+        // Обработка Enter для создания <br>
+        editor.addEventListener('keydown', (e) => {
+            if (e.key === 'Enter') {
+                e.preventDefault();
+                document.execCommand('insertHTML', false, '<br><br>');
 
+                textBlock.content = editor.innerHTML;
+                PreviewManager.update();
+            }
+        });
+
+        section.appendChild(editor);
         return section;
     }
 
-    // Применение форматирования к редактору
+    /**
+     * Применить форматирование к редактору
+     */
     applyFormatting(editor, formatting) {
         if (formatting.fontSize) {
-            editor.style.fontSize = formatting.fontSize + 'px';
+            editor.style.fontSize = `${formatting.fontSize}px`;
         }
+
         if (formatting.alignment) {
             editor.style.textAlign = formatting.alignment;
         }

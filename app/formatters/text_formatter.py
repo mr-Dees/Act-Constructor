@@ -205,69 +205,42 @@ class TextFormatter(BaseFormatter):
         if not content:
             return ""
 
-        # Полная очистка HTML с сохранением переносов строк
-        clean_content = html.unescape(content)
+        # Заменяем <br> на переносы строк ПЕРЕД очисткой HTML
+        clean_content = content.replace('<br>', '\n').replace('<br/>', '\n').replace('<br />', '\n')
 
-        # Сохраняем переносы строк
-        clean_content = re.sub(r'<br\s*/?>', '\n', clean_content)
-        clean_content = re.sub(r'</p>', '\n', clean_content)
-        clean_content = re.sub(r'</div>', '\n', clean_content)
-
-        # Удаляем открывающие теги
-        clean_content = re.sub(r'<p[^>]*>', '', clean_content)
-        clean_content = re.sub(r'<div[^>]*>', '', clean_content)
-
-        # Удаляем все остальные теги
+        # Очищаем HTML-теги
         clean_content = re.sub(r'<[^>]+>', '', clean_content)
 
-        # Не убираем одиночные переносы, только множественные
-        clean_content = re.sub(r'\n\n+', '\n\n', clean_content)
-        clean_content = clean_content.strip()
+        # Декодируем HTML-сущности
+        clean_content = html.unescape(clean_content)
 
-        # Применяем выравнивание с учетом переносов
+        # Применяем отступы к каждой строке
         lines = clean_content.split('\n')
+        formatted_lines = [f"{indent}{line}" for line in lines]
+
+        # Добавляем метаданные о форматировании
+        result = []
+
+        font_size = formatting.get('fontSize', 14)
         alignment = formatting.get('alignment', 'left')
 
-        formatted_lines = []
-        max_width = 80 - len(indent)
+        # Комментарий о настройках форматирования
+        if font_size != 14 or alignment != 'left':
+            meta = []
+            if font_size != 14:
+                meta.append(f"размер шрифта: {font_size}px")
+            if alignment == 'center':
+                meta.append("выравнивание: по центру")
+            elif alignment == 'right':
+                meta.append("выравнивание: по правому краю")
+            elif alignment == 'justify':
+                meta.append("выравнивание: по ширине")
 
-        for line in lines:
-            if not line.strip():
-                formatted_lines.append("")
-                continue
+            result.append(f"{indent}[{', '.join(meta)}]")
 
-            # Переносим длинные строки
-            words = line.split()
-            current_line = []
-            current_length = 0
+        result.extend(formatted_lines)
 
-            for word in words:
-                word_len = len(word)
-                if current_length + word_len + len(current_line) <= max_width:
-                    current_line.append(word)
-                    current_length += word_len
-                else:
-                    if current_line:
-                        line_text = ' '.join(current_line)
-                        if alignment == 'center':
-                            formatted_lines.append(f"{indent}{line_text.center(max_width)}")
-                        elif alignment == 'right':
-                            formatted_lines.append(f"{indent}{line_text.rjust(max_width)}")
-                        else:
-                            formatted_lines.append(f"{indent}{line_text}")
-                    current_line = [word]
-                    current_length = word_len
-
-            if current_line:
-                line_text = ' '.join(current_line)
-                if alignment == 'center':
-                    formatted_lines.append(f"{indent}{line_text.center(max_width)}")
-                elif alignment == 'right':
-                    formatted_lines.append(f"{indent}{line_text.rjust(max_width)}")
-                else:
-                    formatted_lines.append(f"{indent}{line_text}")
-
-        return "\n".join(formatted_lines)
+        return "\n".join(result)
 
     def _format_violation(self, violation_data: Dict) -> str:
         """

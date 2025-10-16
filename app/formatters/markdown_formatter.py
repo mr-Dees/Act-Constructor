@@ -183,36 +183,44 @@ class MarkdownFormatter(BaseFormatter):
         if not content:
             return ""
 
-        clean_content = html.unescape(content)
+        # Заменяем <br> на двойной пробел + перенос (Markdown hard break)
+        clean_content = content.replace('<br>', '  \n').replace('<br/>', '  \n').replace('<br />', '  \n')
 
-        # Преобразуем HTML форматирование в Markdown
+        # Конвертируем HTML форматирование в Markdown
         clean_content = re.sub(r'<(?:b|strong)>(.+?)</(?:b|strong)>', r'**\1**', clean_content, flags=re.DOTALL)
         clean_content = re.sub(r'<(?:i|em)>(.+?)</(?:i|em)>', r'*\1*', clean_content, flags=re.DOTALL)
-        clean_content = re.sub(r'<u>(.+?)</u>', r'_\1_', clean_content, flags=re.DOTALL)
+        clean_content = re.sub(r'<u>(.+?)</u>', r'<u>\1</u>', clean_content,
+                               flags=re.DOTALL)  # Markdown не поддерживает underline нативно
 
-        # Сохраняем переносы строк
-        clean_content = re.sub(r'<br\s*/?>', '\n', clean_content)
-        clean_content = re.sub(r'</p>', '\n\n', clean_content)
-        clean_content = re.sub(r'</div>', '\n\n', clean_content)
-
-        # Удаляем открывающие теги
-        clean_content = re.sub(r'<p[^>]*>', '', clean_content)
-        clean_content = re.sub(r'<div[^>]*>', '', clean_content)
-
-        # Удаляем все остальные теги
+        # Удаляем остальные HTML-теги
         clean_content = re.sub(r'<[^>]+>', '', clean_content)
 
-        clean_content = re.sub(r'\n\n+', '\n\n', clean_content)
-        clean_content = clean_content.strip()
+        # Декодируем HTML-сущности
+        clean_content = html.unescape(clean_content)
 
-        # Применяем выравнивание
+        # Добавляем метаданные о форматировании
+        result = []
+
+        font_size = formatting.get('fontSize', 14)
         alignment = formatting.get('alignment', 'left')
-        if alignment == 'center':
-            clean_content = f'<div align="center">\n\n{clean_content}\n\n</div>'
-        elif alignment == 'right':
-            clean_content = f'<div align="right">\n\n{clean_content}\n\n</div>'
 
-        return clean_content
+        if font_size != 14 or alignment != 'left':
+            meta = []
+            if font_size != 14:
+                meta.append(f"размер шрифта {font_size}px")
+            if alignment == 'center':
+                meta.append("выравнивание по центру")
+            elif alignment == 'right':
+                meta.append("выравнивание справа")
+            elif alignment == 'justify':
+                meta.append("выравнивание по ширине")
+
+            result.append(f"<!-- {', '.join(meta)} -->")
+            result.append("")
+
+        result.append(clean_content)
+
+        return "\n".join(result)
 
     def _format_violation(self, violation_data: Dict) -> str:
         """
