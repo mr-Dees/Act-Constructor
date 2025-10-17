@@ -1281,7 +1281,7 @@ class ContextMenuManager {
                     return;
                 }
 
-                const childResult = AppState.addNode(nodeId, '', true);
+                const childResult = AppState.addNode(nodeId, 'Новый пункт', true);  // <- изменить пустую строку на 'Новый пункт'
                 if (childResult.success) {
                     treeManager.render();
                     PreviewManager.update('previewTrim', 30);
@@ -1294,7 +1294,7 @@ class ContextMenuManager {
                 break;
 
             case 'add-sibling':
-                const siblingResult = AppState.addNode(nodeId, '', false);
+                const siblingResult = AppState.addNode(nodeId, 'Новый пункт', false);  // <- изменить пустую строку на 'Новый пункт'
                 if (siblingResult.success) {
                     treeManager.render();
                     PreviewManager.update('previewTrim', 30);

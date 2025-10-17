@@ -36,12 +36,11 @@ const AppState = {
         if (!node.children) return;
 
         node.children.forEach((child, index) => {
-            // Пропускаем таблицы и текстовые блоки при нумерации основных пунктов
+            // Для таблиц - нумеровать только среди таблиц
             if (child.type === 'table') {
                 const parentTables = node.children.filter(c => c.type === 'table');
                 const tableIndex = parentTables.indexOf(child) + 1;
                 child.number = `Таблица ${tableIndex}`;
-
                 if (!child.customLabel) {
                     child.label = child.number;
                 } else {
@@ -50,7 +49,7 @@ const AppState = {
                 return;
             }
 
-            // Обработка текстовых блоков
+            // Для текстовых блоков - нумеровать только среди текстовых блоков
             if (child.type === 'textblock') {
                 const parentTextBlocks = node.children.filter(c => c.type === 'textblock');
                 const textBlockIndex = parentTextBlocks.indexOf(child) + 1;
@@ -63,7 +62,7 @@ const AppState = {
                 return;
             }
 
-            // НОВОЕ: Обработка нарушений
+            // Для нарушений - нумеровать только среди нарушений
             if (child.type === 'violation') {
                 const parentViolations = node.children.filter(c => c.type === 'violation');
                 const violationIndex = parentViolations.indexOf(child) + 1;
@@ -76,12 +75,20 @@ const AppState = {
                 return;
             }
 
-            const number = prefix ? `${prefix}.${index + 1}` : `${index + 1}`;
-            const baseLabelMatch = child.label.match(/^[\d.]+\s+(.+)$/);
+            // Для обычных пунктов (type === 'item' или undefined) - считать только item-элементы
+            const itemChildren = node.children.filter(c => !c.type || c.type === 'item');
+            const itemIndex = itemChildren.indexOf(child);
+
+            if (itemIndex === -1) return; // Если не найден в списке item-элементов, пропустить
+
+            const number = prefix ? `${prefix}.${itemIndex + 1}` : `${itemIndex + 1}`;
+            const baseLabelMatch = child.label.match(/^[\d.]+\s*(.*)$/);
             const baseLabel = baseLabelMatch ? baseLabelMatch[1] : child.label;
+
             child.number = number;
             child.label = `${number}. ${baseLabel}`;
 
+            // Рекурсивно обрабатываем детей
             if (child.children && child.children.length > 0) {
                 this.generateNumbering(child, number);
             }
@@ -166,10 +173,10 @@ const AppState = {
         const newId = Date.now().toString();
         const newNode = {
             id: newId,
-            label: label,
+            label: label || 'Новый пункт',
             children: [],
             content: '',
-            type: 'item' // Обычный пункт
+            type: 'item'
         };
 
         if (isChild) {

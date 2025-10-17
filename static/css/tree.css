@@ -35,6 +35,13 @@
     border-left: 4px solid #ffc107;
 }
 
+.tree-item.protected.selected {
+    background: #fff3cd;
+    font-weight: bold;
+    color: #8e6d11;
+    border-left: 4px solid #ffc107;
+}
+
 .tree-item .tree-label {
     display: inline-block;
     padding: 5px 10px;
