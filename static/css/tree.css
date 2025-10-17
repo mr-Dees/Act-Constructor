@@ -1,9 +1,10 @@
 .tree-container {
-    background: white;
-    padding: 20px;
-    border-radius: 10px;
-    max-height: 600px;
-    overflow-y: auto;
+    background: var(--bg-primary);
+    padding: var(--spacing-lg);
+    border-radius: var(--radius-md);
+    border: 1px solid var(--border);
+    box-shadow: var(--shadow-sm);
+    overflow-y: auto; /* Прокрутка при переполнении */
 }
 
 .tree {
@@ -11,103 +12,96 @@
 }
 
 .tree-item {
-    margin: 8px 0;
-    padding: 12px;
-    background: #f8f9fa;
-    border-radius: 8px;
+    margin: 0.375rem 0;
+    padding: 0.5625rem 0.75rem;
+    background: var(--bg-secondary);
+    border-radius: var(--radius);
+    border: 1px solid var(--border-light);
     cursor: pointer;
-    transition: all 0.3s;
+    transition: all 0.15s ease;
     user-select: none;
-    color: #333;
-    box-shadow: 0 2px 4px rgba(0, 0, 0, 0.2);
+    color: var(--text-primary);
+    font-size: 0.875rem;
+    box-shadow: var(--shadow-xs);
 }
 
 .tree-item:hover {
-    background: #e9ecef;
-    transform: translateX(5px);
-    /* НОВОЕ: Усиленная тень при наведении */
-    box-shadow: 0 4px 8px rgba(0, 0, 0, 0.12);
+    background: var(--bg-tertiary);
+    border-color: var(--border-medium);
+    box-shadow: var(--shadow-sm);
 }
 
-/* Единый стиль выделения для всех элементов */
 .tree-item.selected {
-    background: #667eea !important;
+    background: var(--primary) !important;
     color: white !important;
-    /* НОВОЕ: Более выразительная тень для выделенного элемента */
-    box-shadow: 0 4px 12px rgba(102, 126, 234, 0.3) !important;
+    border-color: var(--primary) !important;
+    box-shadow: var(--shadow-md) !important;
 }
 
-/* Единый стиль для родительских элементов в иерархии */
 .tree-item.parent-selected {
-    background: rgba(102, 126, 234, 0.4) !important;
-    color: #333 !important;
-    /* НОВОЕ: Средняя тень для родительских элементов */
-    box-shadow: 0 3px 8px rgba(102, 126, 234, 0.2) !important;
+    background: var(--primary-subtle) !important;
+    color: var(--text-primary) !important;
+    border-color: #aab9dc !important;
+    box-shadow: var(--shadow-xs) !important;
 }
 
-/* Дочерние элементы выделенных родителей должны сохранять свой цвет */
 .tree-item.selected .tree-item:not(.selected):not(.parent-selected),
 .tree-item.parent-selected .tree-item:not(.selected):not(.parent-selected) {
-    color: #333 !important;
+    color: var(--text-primary) !important;
 }
 
-/* Явно указываем цвет для label внутри невыделенных дочерних элементов */
 .tree-item.selected .tree-item:not(.selected):not(.parent-selected) .tree-label,
 .tree-item.parent-selected .tree-item:not(.selected):not(.parent-selected) .tree-label {
-    color: #333 !important;
+    color: var(--text-primary) !important;
 }
 
-/* Защищенные элементы - только цвет фона и бордер */
 .tree-item.protected {
-    background: #fff3cd;
-    border-left: 4px solid #ffc107;
-    color: #333;
-    box-shadow: 0 2px 4px rgba(255, 193, 7, 0.15);
+    background: #fff8e8;
+    border-left: 0.1875rem solid var(--warning);
+    color: var(--text-primary);
 }
 
-/* Защищенные элементы при выделении - единый стиль */
 .tree-item.protected.selected {
-    background: #667eea !important;
+    background: var(--primary) !important;
     color: white !important;
-    border-left: 4px solid #ffc107;
-    box-shadow: 0 4px 12px rgba(102, 126, 234, 0.3) !important;
+    border-left: 0.1875rem solid var(--warning);
 }
 
-/* Защищенные родительские элементы */
 .tree-item.protected.parent-selected {
-    background: rgba(102, 126, 234, 0.4) !important;
-    color: #333 !important;
-    border-left: 4px solid #ffc107;
-    box-shadow: 0 3px 8px rgba(102, 126, 234, 0.2) !important;
+    background: var(--primary-subtle) !important;
+    color: var(--text-primary) !important;
+    border-left: 0.1875rem solid var(--warning);
 }
 
 .tree-item .tree-label {
     display: inline-block;
-    padding: 5px 10px;
+    padding: 0.1875rem 0.4375rem;
 }
 
 .tree-item.editing .tree-label {
-    background: white;
-    border: 2px solid #667eea;
-    border-radius: 4px;
+    background: var(--bg-primary);
+    border: 2px solid var(--primary);
+    border-radius: var(--radius-sm);
     outline: none;
-    color: #333 !important;
+    color: var(--text-primary) !important;
 }
 
 .tree-children {
     list-style: none;
-    margin-left: 30px;
-    padding-left: 15px;
-    border-left: 2px solid #dee2e6;
-    margin-top: 8px;
+    margin-left: 1.25rem;
+    padding-left: 0.75rem;
+    border-left: 2px solid var(--border-light);
+    margin-top: 0.375rem;
 }
 
 .toggle-icon {
     display: inline-block;
-    width: 20px;
-    margin-right: 5px;
+    width: 1.125rem;
+    margin-right: 0.375rem;
     cursor: pointer;
     user-select: none;
+    font-size: 0.8125rem;
+    opacity: 0.7;
 }
 
 .tree-item.collapsed > .tree-children {
@@ -115,11 +109,14 @@
 }
 
 .tree-item.table-node {
-    font-style: italic;
+    font-style: normal;
 }
 
 .tree-item.table-node:not(.selected):not(.parent-selected) {
-    color: #667eea;
+    color: var(--accent);
+    border-left-color: var(--accent);
+    border-left-width: 0.1875rem;
+    font-weight: 500;
 }
 
 .tree-item.table-node .tree-label {
@@ -128,16 +125,21 @@
 
 .table-icon {
     display: inline-block;
-    margin-left: 5px;
+    margin-left: 0.375rem;
     font-style: normal;
+    opacity: 0.7;
+    font-size: 0.8125rem;
 }
 
 .tree-item.textblock-node {
-    font-style: italic;
+    font-style: normal;
 }
 
 .tree-item.textblock-node:not(.selected):not(.parent-selected) {
-    color: #667eea;
+    color: var(--primary-light);
+    border-left-color: var(--primary-light);
+    border-left-width: 0.1875rem;
+    font-weight: 500;
 }
 
 .tree-item.textblock-node .tree-label {
@@ -146,16 +148,21 @@
 
 .textblock-icon {
     display: inline-block;
-    margin-left: 5px;
+    margin-left: 0.375rem;
     font-style: normal;
+    opacity: 0.7;
+    font-size: 0.8125rem;
 }
 
 .tree-item.violation-node {
-    font-style: italic;
+    font-style: normal;
 }
 
 .tree-item.violation-node:not(.selected):not(.parent-selected) {
-    color: #667eea;
+    color: var(--error);
+    border-left-color: var(--error);
+    border-left-width: 0.1875rem;
+    font-weight: 500;
 }
 
 .tree-item.violation-node .tree-label {
@@ -164,6 +171,8 @@
 
 .violation-icon {
     display: inline-block;
-    margin-left: 5px;
+    margin-left: 0.375rem;
     font-style: normal;
+    opacity: 0.7;
+    font-size: 0.8125rem;
 }

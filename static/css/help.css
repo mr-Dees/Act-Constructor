@@ -1,0 +1,186 @@
+/* ==================== КНОПКА ПОМОЩИ ==================== */
+.help-button {
+    position: absolute;
+    left: 1em;
+    top: 50%;
+    transform: translateY(-50%);
+    background: rgba(255, 255, 255, 0.1);
+    border: 0.0625em solid rgba(255, 255, 255, 0.3);
+    border-radius: 0.5em;
+    padding: 0.5em 0.75em;
+    cursor: pointer;
+    transition: all 0.3s ease;
+    color: white;
+    display: flex;
+    align-items: center;
+    gap: 0.375em;
+    z-index: 1000;
+    font-size: 1em;
+}
+
+.help-button:hover {
+    background: rgba(255, 255, 255, 0.2);
+    transform: translateY(-50%) scale(1.05);
+    box-shadow: 0 0.25em 0.75em rgba(0, 0, 0, 0.3);
+}
+
+.lightbulb-icon {
+    font-size: 1.3em;
+    display: inline-block;
+    line-height: 1;
+}
+
+/* ==================== МОДАЛЬНОЕ ОКНО ==================== */
+.help-modal {
+    position: fixed;
+    top: 0;
+    left: 0;
+    width: 100%;
+    height: 100%;
+    background: rgba(0, 0, 0, 0.6);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    z-index: 10000;
+    backdrop-filter: blur(0.25em);
+    animation: fadeIn 0.3s ease;
+}
+
+.help-modal.hidden {
+    display: none;
+}
+
+@keyframes fadeIn {
+    from {
+        opacity: 0;
+    }
+    to {
+        opacity: 1;
+    }
+}
+
+.help-modal-content {
+    background: white;
+    border-radius: 0.75em;
+    max-width: 43.75em;
+    width: 90%;
+    max-height: 80vh;
+    display: flex;
+    flex-direction: column;
+    box-shadow: 0 0.625em 2.5em rgba(0, 0, 0, 0.3);
+    animation: slideDown 0.3s ease;
+}
+
+@keyframes slideDown {
+    from {
+        transform: translateY(-3.125em);
+        opacity: 0;
+    }
+    to {
+        transform: translateY(0);
+        opacity: 1;
+    }
+}
+
+.help-modal-header {
+    padding: 1.25em 1.5em;
+    border-bottom: 0.0625em solid #e0e0e0;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    /* ВЕРТИКАЛЬНЫЙ градиент для заголовка */
+    background: linear-gradient(to bottom, #667eea 0%, #764ba2 100%);
+    color: white;
+    border-radius: 0.75em 0.75em 0 0;
+}
+
+.help-modal-header h3 {
+    margin: 0;
+    font-size: 1.25em;
+    font-weight: 600;
+}
+
+.help-modal-close {
+    background: none;
+    border: none;
+    font-size: 1.75em;
+    cursor: pointer;
+    color: white;
+    line-height: 1;
+    padding: 0;
+    width: 2em;
+    height: 2em;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    border-radius: 0.25em;
+    transition: background 0.2s;
+}
+
+.help-modal-close:hover {
+    background: rgba(255, 255, 255, 0.2);
+}
+
+.help-modal-body {
+    padding: 1.5em;
+    overflow-y: auto;
+    color: #333;
+    line-height: 1.6;
+}
+
+.help-modal-body h4 {
+    color: #667eea;
+    margin-top: 1.25em;
+    margin-bottom: 0.625em;
+    font-size: 1em;
+}
+
+.help-modal-body h4:first-child {
+    margin-top: 0;
+}
+
+.help-modal-body ul {
+    margin: 0.625em 0;
+    padding-left: 1.5em;
+}
+
+.help-modal-body li {
+    margin: 0.5em 0;
+}
+
+.help-modal-body strong {
+    color: #764ba2;
+}
+
+.help-modal-body code {
+    background: #f5f5f5;
+    padding: 0.125em 0.375em;
+    border-radius: 0.1875em;
+    font-family: 'Courier New', monospace;
+    font-size: 0.8125em;
+}
+
+/* ==================== АДАПТИВНОСТЬ ==================== */
+@media (max-width: 768px) {
+    .help-button {
+        left: 0.625em;
+        padding: 0.375em 0.625em;
+    }
+
+    .lightbulb-icon {
+        font-size: 1.25em;
+    }
+
+    .help-modal-content {
+        width: 95%;
+        max-height: 90vh;
+    }
+
+    .help-modal-header {
+        padding: 1em 1.25em;
+    }
+
+    .help-modal-body {
+        padding: 1.25em;
+    }
+}

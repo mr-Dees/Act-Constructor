@@ -17,6 +17,7 @@ class App {
         this.setupNavigation();
         this.setupFormatMenu();
         ContextMenuManager.init();
+        HelpManager.init();
     }
 
     static setupNavigation() {
@@ -259,6 +260,10 @@ class App {
         // Шаг 1: обновление превью
         if (stepNum === 1) {
             setTimeout(() => PreviewManager.update('previewTrim'), 30);
+        }
+
+        if (typeof HelpManager !== 'undefined') {
+            HelpManager.updateTooltip();
         }
     }
 }

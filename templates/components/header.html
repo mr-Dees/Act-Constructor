@@ -1,7 +1,29 @@
 <div class="header">
-    <h1>📋 Конструктор акта</h1>
-    <div class="steps">
-        <div class="step active" data-step="1">👁️ Формирование структуры</div>
-        <div class="step" data-step="2">✏️ Заполнение структуры</div>
+    <!-- Кнопка инструкций с иконкой лампочки -->
+    <button id="helpBtn" class="help-button" title="Инструкция">
+        <span class="lightbulb-icon">💡</span>
+    </button>
+
+    <!-- Контейнер для кнопок шагов -->
+    <div class="steps-container">
+        <div class="step active" data-step="1">
+            <span class="step-text">Составление структуры акта</span>
+        </div>
+        <div class="step" data-step="2">
+            <span class="step-text">Заполнение данных</span>
+        </div>
+    </div>
+</div>
+
+<!-- Модальное окно с инструкциями -->
+<div id="helpModal" class="help-modal hidden">
+    <div class="help-modal-content">
+        <div class="help-modal-header">
+            <h3 id="helpModalTitle">Инструкция</h3>
+            <button class="help-modal-close" onclick="HelpManager.hide()">&times;</button>
+        </div>
+        <div class="help-modal-body" id="helpModalBody">
+            <!-- Контент будет загружен динамически -->
+        </div>
     </div>
 </div>

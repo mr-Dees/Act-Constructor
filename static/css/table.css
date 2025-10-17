@@ -1,104 +1,113 @@
-/* Секция таблицы: запрещаем визуальный выход за края и включаем скролл при переполнении */
 .table-section {
-    margin: 30px 0;
-    padding: 25px;
-    background: #f8f9fa;
-    border-radius: 15px;
-    overflow: hidden;              /* было visible — из‑за этого таблица «вылезала» */
+    margin: var(--spacing-lg) 0;
+    padding: var(--spacing-lg);
+    background: var(--bg-primary);
+    border-radius: var(--radius-md);
+    overflow: hidden;
     position: relative;
+    border: 1px solid var(--border);
+    box-shadow: var(--shadow-sm);
 }
 
 .table-section h3 {
-    color: #667eea;
-    margin-bottom: 15px;
+    color: var(--text-primary);
+    margin-bottom: var(--spacing-md);
+    font-size: 0.9375rem;
+    font-weight: 600;
 }
 
-/* Базовая таблица: фиксированная раскладка, без внешних отступов, ширина не больше контейнера */
 .editable-table {
     width: 100%;
-    min-width: 100%;               /* не сжимать меньше секции, если есть фиксированные колонки */
-    max-width: 100%;               /* критично, чтобы не выйти за пределы родителя */
+    min-width: 100%;
+    max-width: 100%;
     border-collapse: collapse;
-    background: white;
-    border-radius: 10px;
+    background: var(--bg-primary);
+    border-radius: var(--radius);
     overflow: visible;
-    box-shadow: 0 2px 8px rgba(0,0,0,0.1);
-    table-layout: fixed;           /* фиксированная раскладка — убирает «распирание» содержимым */
-    margin: 0;                     /* убираем calc(100% - 20px) и внешние отступы, они выталкивали */
-    /* width: calc(100% - 20px); */
+    box-shadow: var(--shadow-xs);
+    table-layout: fixed;
+    margin: 0;
+    border: 2px solid var(--border-medium);
 }
 
-/* Ячейки: явные минимумы, корректный перенос без «по слогам», контроль overflow */
 .editable-table th,
 .editable-table td {
-    border: 1px solid #dee2e6;
-    padding: 12px;
+    border: 1px solid var(--border-medium);
+    padding: 0.625rem 0.75rem;
     text-align: left;
     position: relative;
-    min-width: 80px;
-    max-width: 800px;
-    min-height: 28px;
-    max-height: 600px;
+    min-width: 5rem;
+    max-width: 50rem;
+    min-height: 2.25rem;
+    max-height: 37.5rem;
     word-wrap: break-word;
-    word-break: normal;            /* не дробить слова на слоги */
-    overflow-wrap: anywhere;       /* переносить по границам слов/символов без «слогов» */
+    word-break: normal;
+    overflow-wrap: anywhere;
     white-space: normal;
-    height: auto;                  /* не фиксировать постоянную высоту, даст расти по контенту */
+    height: auto;
     box-sizing: border-box;
+    font-size: 0.875rem;
+    line-height: 1.5;
 }
 
-/* Шапка — курсор для ресайза оставляем, но убираем избыточную высоту */
 .editable-table th {
-    background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+    background: linear-gradient(135deg, #748fca 0%, #9d7cb8 100%);
     color: white;
-    font-weight: bold;
+    font-weight: 600;
     cursor: col-resize;
     position: relative;
     height: auto;
 }
 
+.editable-table th:hover {
+    background: linear-gradient(135deg, #6a81ba 0%, #9170ab 100%);
+}
+
 .editable-table td {
     cursor: cell;
+    background: var(--bg-primary);
+}
+
+.editable-table td:hover {
+    background: var(--gray-50);
 }
 
 .editable-table td.selected,
 .editable-table th.selected {
-    background: #e7f3ff;
-    outline: 3px solid #667eea;
-    outline-offset: 2px;
+    background: var(--primary-subtle);
+    outline: 2px solid var(--primary);
+    outline-offset: -2px;
 }
 
 .editable-table th.selected {
-    background: linear-gradient(135deg, #5568d3 0%, #6a3f8f 100%);
+    background: linear-gradient(135deg, #6579b5 0%, #8b6aa5 100%);
 }
 
 .editable-table td.editing {
     padding: 0;
     height: auto;
+    background: var(--bg-primary);
 }
 
-/* Встроенный инпут: оставляем отступ снизу для доступа к нижней ручке */
 .editable-table td.editing input {
-    /* width: calc(100% - 6px); */
     width: 100%;
     height: auto;
     border: none;
-    /* padding: 12px; */
-    padding: 10px 12px 18px 12px;
+    padding: 0.625rem 0.75rem 1.125rem 0.75rem;
     font-family: inherit;
     font-size: inherit;
     box-sizing: border-box;
     outline: none;
     background: transparent;
     margin: 0;
-    min-height: 28px;
+    min-height: 2.25rem;
     display: block;
+    color: var(--text-primary);
 }
 
-/* Объединенные ячейки */
 .editable-table td[colspan],
 .editable-table td[rowspan] {
-    background: #f8f9fa;
+    background: var(--bg-secondary);
     vertical-align: top;
 }
 
@@ -112,92 +121,74 @@
     max-height: none;
 }
 
-/* Ручка изменения ширины справа от ячейки, поверх инпута */
 .resize-handle {
     position: absolute;
-    right: -5px;
+    right: -0.3125rem;
     top: 0;
-    width: 8px;
+    width: 0.5rem;
     height: 100%;
     cursor: col-resize;
     background: transparent;
     z-index: 30;
     opacity: 0;
-    transition: all 0.2s ease;
+    transition: all 0.15s ease;
     border-right: 2px solid transparent;
-    pointer-events: auto;          /* важно для доступности, даже в editing */
+    pointer-events: auto;
 }
 
 .resize-handle:hover {
-    background: rgba(102, 126, 234, 0.35);
-    border-right: 3px solid #667eea !important;
-    box-shadow: 0 0 8px rgba(102, 126, 234, 0.4);
-    right: -6px;
-    width: 10px;
+    background: rgba(91, 111, 168, 0.3);
+    border-right: 2px solid var(--primary) !important;
+    right: -0.3125rem;
+    width: 0.5rem;
     opacity: 1;
 }
 
-/* Ручка изменения высоты снизу ячейки, поверх инпута */
 .row-resize-handle {
     position: absolute;
-    bottom: -5px;
+    bottom: -0.3125rem;
     left: 0;
     width: 100%;
-    height: 8px;
+    height: 0.5rem;
     cursor: row-resize;
     background: transparent;
     z-index: 30;
     opacity: 0;
-    transition: all 0.2s ease;
+    transition: all 0.15s ease;
     border-bottom: 2px solid transparent;
     pointer-events: auto;
 }
 
 .row-resize-handle:hover {
-    background: rgba(102, 126, 234, 0.35);
-    border-bottom: 3px solid #667eea !important;
-    box-shadow: 0 0 8px rgba(102, 126, 234, 0.4);
-    bottom: -6px;
-    height: 10px;
+    background: rgba(91, 111, 168, 0.3);
+    border-bottom: 2px solid var(--primary) !important;
+    bottom: -0.3125rem;
+    height: 0.5rem;
     opacity: 1;
 }
 
-/* Показать ручки при наведении на ячейку */
 .editable-table td:hover .resize-handle,
 .editable-table th:hover .resize-handle {
-    opacity: 1;
-    background: rgba(102, 126, 234, 0.2);
-    border-right-color: rgba(102, 126, 234, 0.6);
+    opacity: 0.6;
+    background: rgba(91, 111, 168, 0.2);
+    border-right-color: rgba(91, 111, 168, 0.6);
 }
 
-/*
-.editable-table td:hover .row-resize-handle,
-.editable-table th:hover .row-resize-handle {
-    opacity: 1;
-    background: rgba(102, 126, 234, 0.2);
-    border-bottom-color: rgba(102, 126, 234, 0.6);
-}
-*/
- /* Hover-подсветка ручек */
 .resize-handle:hover,
 .row-resize-handle:hover,
 .editable-table td:hover .resize-handle,
 .editable-table td:hover .row-resize-handle,
 .editable-table th:hover .resize-handle,
 .editable-table th:hover .row-resize-handle {
-  opacity: 1;
-  background: rgba(102, 126, 234, 0.2);
+    opacity: 1;
 }
 
-/* Предотвратить конфликты с ручками */
 .editable-table td:hover,
 .editable-table th:hover {
     position: relative;
     z-index: 10;
-    box-shadow: inset 0 0 0 1px rgba(102, 126, 234, 0.1);
 }
 
-/* Убрать ручки во время редактирования */
 .editable-table td.editing .resize-handle,
 .editable-table td.editing .row-resize-handle {
     display: none;
@@ -216,35 +207,8 @@
     pointer-events: auto;
 }
 
-/* Базовая видимость ручек */
-.editable-table th .resize-handle,
-.editable-table td .resize-handle,
-.editable-table th .row-resize-handle,
-.editable-table td .row-resize-handle {
-    opacity: 0.2;
-}
-
-/* Полная видимость при наведении */
-.editable-table th:hover .resize-handle,
-.editable-table td:hover .resize-handle,
-.editable-table th:hover .row-resize-handle,
-.editable-table td:hover .row-resize-handle,
-.resize-handle:hover,
-.row-resize-handle:hover {
-    opacity: 1;
-}
-
-/* Враппер для горизонтального скролла таблицы, чтобы всегда оставаться в пределах секции */
 .table-section .table-scroll {
-  width: 100%;
-  overflow-x: auto;              /* включаем горизонтальную прокрутку вместо переполнения */
-  overflow-y: hidden;
-}
-
-/* Дополнительно предотвращаем выход тени/ручек за пределы секции */
-.table-section::after {
-  content: '';
-  position: absolute;
-  inset: 0;
-  pointer-events: none;
+    width: 100%;
+    overflow-x: auto;
+    overflow-y: hidden;
 }

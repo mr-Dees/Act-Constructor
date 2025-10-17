@@ -3,34 +3,32 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>{% block title %}📋 Конструктор акта{% endblock %}</title>
+    <title>{% block title %}Конструктор актов{% endblock %}</title>
 
     <!-- CSS -->
-    <link rel="stylesheet" href="{{ url_for('static', path='/css/main.css') }}">
-    <link rel="stylesheet" href="{{ url_for('static', path='/css/tree.css') }}">
-    <link rel="stylesheet" href="{{ url_for('static', path='/css/table.css') }}">
-    <link rel="stylesheet" href="{{ url_for('static', path='/css/preview.css') }}">
-    <link rel="stylesheet" href="{{ url_for('static', path='/css/violation.css') }}">
+    <link rel="stylesheet" href="/static/css/main.css">
+    <link rel="stylesheet" href="/static/css/tree.css">
+    <link rel="stylesheet" href="/static/css/table.css">
+    <link rel="stylesheet" href="/static/css/violation.css">
+    <link rel="stylesheet" href="/static/css/preview.css">
+    <link rel="stylesheet" href="/static/css/help.css">
 
     {% block extra_css %}{% endblock %}
 </head>
 <body>
     {% include 'components/header.html' %}
 
-    <div class="container">
-        {% block content %}{% endblock %}
-    </div>
+    {% block content %}{% endblock %}
 
     <!-- JavaScript -->
-    <script src="{{ url_for('static', path='/js/state.js') }}"></script>
-    <script src="{{ url_for('static', path='/js/tree.js') }}"></script>
-    <script src="{{ url_for('static', path='/js/table.js') }}"></script>
-    <script src="{{ url_for('static', path='/js/preview.js') }}"></script>
-    <script src="{{ url_for('static', path='/js/api.js') }}"></script>
-    <script src="{{ url_for('static', path='/js/main.js') }}"></script>
-    <script src="{{ url_for('static', path='/js/textblock.js') }}"></script>
-    <script src="{{ url_for('static', path='/js/violation.js') }}"></script>
-
-    {% block extra_js %}{% endblock %}
+    <script src="/static/js/state.js"></script>
+    <script src="/static/js/tree.js"></script>
+    <script src="/static/js/table.js"></script>
+    <script src="/static/js/textblock.js"></script>
+    <script src="/static/js/violation.js"></script>
+    <script src="/static/js/preview.js"></script>
+    <script src="/static/js/api.js"></script>
+    <script src="/static/js/help.js"></script>
+    <script src="/static/js/main.js"></script>
 </body>
 </html>
