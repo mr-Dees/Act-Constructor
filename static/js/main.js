@@ -31,7 +31,7 @@ class App {
 
         backBtn.addEventListener('click', () => this.goToStep(1));
 
-        // ИСПРАВЛЕННЫЙ обработчик - передаем ВСЕ форматы сразу
+        // Передаем в обработчик ВСЕ форматы сразу
         generateBtn.addEventListener('click', async () => {
             const selectedFormats = this.getSelectedFormats();
 
@@ -56,12 +56,8 @@ class App {
             generateBtn.textContent = '⏳ Создаём акты...';
 
             try {
-                // ГЛАВНОЕ ИЗМЕНЕНИЕ: передаем весь массив форматов ОДНИМ вызовом
+                // Передаем весь массив форматов ОДНИМ вызовом
                 const success = await APIClient.generateAct(selectedFormats);
-
-                // Результат уже отображен через систему уведомлений в api.js
-                // Не нужны дополнительные alert'ы
-
             } catch (error) {
                 console.error('Критическая ошибка:', error);
                 APIClient.showNotification(
@@ -313,46 +309,41 @@ class ItemsRenderer {
         itemDiv.className = `item-block level-${level}`;
         itemDiv.dataset.nodeId = node.id;
 
-        // Рендер таблицы
         if (node.type === 'table') {
             const table = AppState.tables[node.tableId];
             if (table) {
                 const tableSection = this.renderTable(table, node);
                 itemDiv.appendChild(tableSection);
-                return itemDiv;
             }
+            return itemDiv;
         }
 
-        // Рендер текстового блока
         if (node.type === 'textblock') {
             const textBlock = AppState.textBlocks[node.textBlockId];
             if (textBlock) {
                 const textBlockSection = textBlockManager.createTextBlockElement(textBlock, node);
                 itemDiv.appendChild(textBlockSection);
-                return itemDiv;
             }
+            return itemDiv;
         }
 
-        // Рендер нарушения
         if (node.type === 'violation') {
             const violation = AppState.violations[node.violationId];
             if (violation) {
                 const violationSection = violationManager.createViolationElement(violation, node);
                 itemDiv.appendChild(violationSection);
-                return itemDiv;
             }
+            return itemDiv;
         }
 
-        // Заголовок обычного элемента
+        // Обычный заголовок элемента
         const header = document.createElement('div');
         header.className = 'item-header';
 
         const title = document.createElement(`h${Math.min(level + 1, 6)}`);
         title.className = 'item-title';
         title.textContent = node.label;
-        title.contentEditable = false;
 
-        // Редактирование заголовка по двойному клику (не для защищённых элементов)
         if (!node.protected) {
             let clickCount = 0;
             let clickTimer = null;
@@ -497,96 +488,122 @@ class ItemsRenderer {
     }
 
     /**
-     * Редактирование заголовка элемента
+     * Начало редактирования заголовка элемента (на шаге 2)
      * @param {HTMLElement} titleElement - DOM элемент заголовка
      * @param {Object} node - Узел дерева
      */
     static startEditingItemTitle(titleElement, node) {
-        if (titleElement.classList.contains('editing')) return;
+        if (titleElement.classList.contains('editing')) {
+            return;
+        }
 
         titleElement.classList.add('editing');
-        titleElement.contentEditable = true;
+        titleElement.contentEditable = 'true';
 
-        // Извлекаем базовую метку без нумерации
-        const labelMatch = node.label.match(/^[\d.]+\s+(.+)$/);
+        // Извлекаем текст без нумерации для редактирования
+        const labelMatch = node.label.match(/^\d+(?:\.\d+)*\.\s*(.+)$/);
         const baseLabel = labelMatch ? labelMatch[1] : node.label;
+        const originalLabel = node.label;
 
         titleElement.textContent = baseLabel;
         titleElement.focus();
 
+        // Выделяем весь текст
         const range = document.createRange();
         range.selectNodeContents(titleElement);
         const sel = window.getSelection();
         sel.removeAllRanges();
         sel.addRange(range);
 
-        const finishEditing = () => {
-            titleElement.contentEditable = false;
+        const finishEditing = (cancel = false) => {
+            titleElement.contentEditable = 'false';
             titleElement.classList.remove('editing');
+
+            if (cancel) {
+                titleElement.textContent = originalLabel;
+                return;
+            }
 
             const newBaseLabel = titleElement.textContent.trim();
 
             if (newBaseLabel && newBaseLabel !== baseLabel) {
-                // Сохраняем нумерацию
-                const numberMatch = node.label.match(/^([\d.]+\s+)/);
+                // Сохраняем нумерацию, если она была
+                const numberMatch = node.label.match(/^(\d+(?:\.\d+)*\.)\s*/);
                 if (numberMatch) {
-                    node.label = numberMatch[1] + newBaseLabel;
+                    node.label = numberMatch[1] + ' ' + newBaseLabel;
                 } else {
                     node.label = newBaseLabel;
                 }
-
                 AppState.generateNumbering();
                 titleElement.textContent = node.label;
                 treeManager.render();
                 PreviewManager.update();
             } else if (!newBaseLabel) {
-                // Пустая метка - возвращаем исходную
-                titleElement.textContent = node.label;
+                // Возвращаем старую метку, если новая пустая
+                titleElement.textContent = originalLabel;
             } else {
-                // Без изменений
                 titleElement.textContent = node.label;
             }
         };
 
-        titleElement.addEventListener('blur', finishEditing, {once: true});
-        titleElement.addEventListener('keydown', (e) => {
+        const blurHandler = () => {
+            finishEditing(false);
+        };
+
+        const keydownHandler = (e) => {
             if (e.key === 'Enter') {
                 e.preventDefault();
-                titleElement.blur();
+                e.stopPropagation();
+                titleElement.removeEventListener('blur', blurHandler);
+                titleElement.removeEventListener('keydown', keydownHandler);
+                finishEditing(false);
+            } else if (e.key === 'Escape') {
+                e.preventDefault();
+                e.stopPropagation();
+                titleElement.removeEventListener('blur', blurHandler);
+                titleElement.removeEventListener('keydown', keydownHandler);
+                finishEditing(true);
             }
-            if (e.key === 'Escape') {
-                titleElement.textContent = node.label;
-                titleElement.blur();
-            }
-        }, {once: true});
+        };
+
+        titleElement.addEventListener('blur', blurHandler);
+        titleElement.addEventListener('keydown', keydownHandler);
     }
 
     /**
-     * Редактирование заголовка таблицы
-     * @param {HTMLElement} titleElement - DOM элемент заголовка
-     * @param {Object} node - Узел дерева
+     * Начало редактирования заголовка таблицы (на шаге 2)
+     * @param {HTMLElement} titleElement - DOM элемент заголовка таблицы
+     * @param {Object} node - Узел дерева таблицы
      */
     static startEditingTableTitle(titleElement, node) {
-        if (titleElement.classList.contains('editing')) return;
+        if (titleElement.classList.contains('editing')) {
+            return;
+        }
 
         titleElement.classList.add('editing');
-        titleElement.contentEditable = true;
+        titleElement.contentEditable = 'true';
 
-        // Показываем текущую кастомную метку или стандартную
         const currentLabel = node.customLabel || node.label;
-        titleElement.textContent = currentLabel;
+        const originalLabel = currentLabel;
 
+        titleElement.textContent = currentLabel;
         titleElement.focus();
 
+        // Выделяем весь текст
         const range = document.createRange();
         range.selectNodeContents(titleElement);
         const sel = window.getSelection();
         sel.removeAllRanges();
         sel.addRange(range);
 
-        const finishEditing = () => {
-            titleElement.contentEditable = false;
+        const finishEditing = (cancel = false) => {
+            titleElement.contentEditable = 'false';
             titleElement.classList.remove('editing');
+
+            if (cancel) {
+                titleElement.textContent = originalLabel;
+                return;
+            }
 
             const newLabel = titleElement.textContent.trim();
 
@@ -594,9 +611,9 @@ class ItemsRenderer {
                 node.customLabel = newLabel;
                 node.label = newLabel;
             } else {
-                // Если пусто, вернуться к автогенерируемому
+                // Если пустая строка, удаляем customLabel
                 delete node.customLabel;
-                node.label = `${node.number || ''} Таблица ${node.number || ''}`;
+                node.label = node.number || originalLabel;
             }
 
             AppState.generateNumbering();
@@ -605,17 +622,28 @@ class ItemsRenderer {
             PreviewManager.update();
         };
 
-        titleElement.addEventListener('blur', finishEditing, {once: true});
-        titleElement.addEventListener('keydown', (e) => {
+        const blurHandler = () => {
+            finishEditing(false);
+        };
+
+        const keydownHandler = (e) => {
             if (e.key === 'Enter') {
                 e.preventDefault();
-                titleElement.blur();
+                e.stopPropagation();
+                titleElement.removeEventListener('blur', blurHandler);
+                titleElement.removeEventListener('keydown', keydownHandler);
+                finishEditing(false);
+            } else if (e.key === 'Escape') {
+                e.preventDefault();
+                e.stopPropagation();
+                titleElement.removeEventListener('blur', blurHandler);
+                titleElement.removeEventListener('keydown', keydownHandler);
+                finishEditing(true);
             }
-            if (e.key === 'Escape') {
-                titleElement.textContent = node.label;
-                titleElement.blur();
-            }
-        }, {once: true});
+        };
+
+        titleElement.addEventListener('blur', blurHandler);
+        titleElement.addEventListener('keydown', keydownHandler);
     }
 
     /**
@@ -686,50 +714,79 @@ class ItemsRenderer {
     }
 
     /**
-     * Редактирование содержимого ячейки
+     * Начало редактирования ячейки таблицы
      * @param {HTMLElement} cellEl - DOM элемент ячейки
      */
     static startEditingCell(cellEl) {
         const originalContent = cellEl.textContent;
         cellEl.classList.add('editing');
 
-        const input = document.createElement('input');
-        input.type = 'text';
-        input.value = originalContent;
+        // Создаем textarea вместо input для поддержки многострочного текста
+        const textarea = document.createElement('textarea');
+        textarea.value = originalContent;
+        textarea.style.width = '100%';
+        textarea.style.height = '100%';
+        textarea.style.minHeight = '28px';
+        textarea.style.border = 'none';
+        textarea.style.outline = 'none';
+        textarea.style.resize = 'none';
+        textarea.style.padding = '4px';
+        textarea.style.fontFamily = 'inherit';
+        textarea.style.fontSize = 'inherit';
+
         cellEl.textContent = '';
-        cellEl.appendChild(input);
-        input.focus();
+        cellEl.appendChild(textarea);
+        textarea.focus();
 
-        const finishEditing = () => {
-            const newValue = input.value.trim();
-            cellEl.textContent = newValue;
-            cellEl.classList.remove('editing');
+        const finishEditing = (cancel = false) => {
+            if (cancel) {
+                cellEl.textContent = originalContent;
+            } else {
+                const newValue = textarea.value.trim();
+                cellEl.textContent = newValue;
 
-            // ВАЖНО: Обновление данных в AppState
-            const tableId = cellEl.dataset.tableId;
-            const row = parseInt(cellEl.dataset.row);
-            const col = parseInt(cellEl.dataset.col);
+                // Обновляем данные в AppState
+                const tableId = cellEl.dataset.tableId;
+                const row = parseInt(cellEl.dataset.row);
+                const col = parseInt(cellEl.dataset.col);
 
-            const table = AppState.tables[tableId];
-            if (table && table.rows[row] && table.rows[row].cells[col]) {
-                table.rows[row].cells[col].content = newValue;
+                const table = AppState.tables[tableId];
+                if (table && table.rows[row] && table.rows[row].cells[col]) {
+                    table.rows[row].cells[col].content = newValue;
+                }
+
+                PreviewManager.update();
             }
 
-            // Обновляем превью
-            PreviewManager.update();
+            cellEl.classList.remove('editing');
         };
 
-        input.addEventListener('blur', finishEditing, {once: true});
-        input.addEventListener('keydown', (e) => {
-            if (e.key === 'Enter') {
+        const blurHandler = () => {
+            finishEditing(false);
+        };
+
+        const keydownHandler = (e) => {
+            if (e.key === 'Enter' && !e.shiftKey) {
+                // Enter без Shift - завершить редактирование
                 e.preventDefault();
-                input.blur();
+                e.stopPropagation();
+                textarea.removeEventListener('blur', blurHandler);
+                textarea.removeEventListener('keydown', keydownHandler);
+                finishEditing(false);
+            } else if (e.key === 'Enter' && e.shiftKey) {
+                // Shift+Enter - разрешаем перенос строки (не делаем preventDefault)
+                e.stopPropagation();
             } else if (e.key === 'Escape') {
                 e.preventDefault();
-                cellEl.textContent = originalContent;
-                cellEl.classList.remove('editing');
+                e.stopPropagation();
+                textarea.removeEventListener('blur', blurHandler);
+                textarea.removeEventListener('keydown', keydownHandler);
+                finishEditing(true);
             }
-        }, {once: true});
+        };
+
+        textarea.addEventListener('blur', blurHandler);
+        textarea.addEventListener('keydown', keydownHandler);
     }
 
     /**

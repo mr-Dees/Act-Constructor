@@ -42,6 +42,7 @@ UI_for_EP_v_KAP/
 │   │   ├── main.css
 │   │   ├── tree.css
 │   │   ├── table.css
+│   │   ├── help.css
 │   │   ├── violation.css
 │   │   └── preview.css
 │   └── js/
@@ -52,6 +53,7 @@ UI_for_EP_v_KAP/
 │       ├── violation.js
 │       ├── preview.js
 │       ├── api.js
+│       ├── help.js
 │       └── main.js
 ├── requirements.txt
 └── .env

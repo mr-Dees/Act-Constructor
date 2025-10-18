@@ -164,13 +164,41 @@ class TextBlockManager {
 
         // Обработка Enter для создания <br>
         editor.addEventListener('keydown', (e) => {
-            if (e.key === 'Enter') {
+            if (e.key === 'Enter' && e.shiftKey) {
+                // Shift+Enter - перенос строки
                 e.preventDefault();
                 document.execCommand('insertHTML', false, '<br><br>');
-
                 textBlock.content = editor.innerHTML;
                 PreviewManager.update();
             }
+            else if (e.key === 'Enter') {
+                // Enter - принять и завершить редактирование
+                e.preventDefault();
+                textBlock.content = editor.innerHTML;
+                PreviewManager.update();
+                editor.blur();
+            }
+            // Обработка Escape для выхода
+            else if (e.key === 'Escape') {
+                e.preventDefault();
+                e.stopPropagation();
+                editor.blur();
+            }
+
+            // if (e.key === 'Enter') {
+            //     e.preventDefault();
+            //     document.execCommand('insertHTML', false, '<br><br>');
+            //
+            //     textBlock.content = editor.innerHTML;
+            //     PreviewManager.update();
+            // }
+            //
+            // // Обработка Escape для выхода
+            // if (e.key === 'Escape') {
+            //     e.preventDefault();
+            //     e.stopPropagation();
+            //     editor.blur();
+            // }
         });
 
         section.appendChild(editor);

@@ -41,7 +41,6 @@ class TableManager {
         const tableEl = document.createElement('table');
         tableEl.className = 'editable-table';
 
-        // Определить максимальное количество колонок
         let maxCols = 0;
         table.rows.forEach(row => {
             let colCount = 0;
@@ -57,20 +56,32 @@ class TableManager {
             const tr = document.createElement('tr');
             row.cells.forEach((cell, colIndex) => {
                 if (cell.merged) return;
+
                 const cellEl = document.createElement(cell.isHeader ? 'th' : 'td');
-                cellEl.textContent = cell.content;
+
+                // ИСПРАВЛЕНИЕ: Правильно отображаем многострочный контент
+                if (cell.content) {
+                    const lines = cell.content.split('\n');
+                    lines.forEach((line, index) => {
+                        const textNode = document.createTextNode(line);
+                        cellEl.appendChild(textNode);
+                        if (index < lines.length - 1) {
+                            cellEl.appendChild(document.createElement('br'));
+                        }
+                    });
+                }
+
                 if (cell.colspan > 1) cellEl.colSpan = cell.colspan;
                 if (cell.rowspan > 1) cellEl.rowSpan = cell.rowspan;
+
                 cellEl.dataset.row = rowIndex;
                 cellEl.dataset.col = colIndex;
                 cellEl.dataset.tableId = table.id;
 
-                // Определить, является ли это последней видимой колонкой
                 const colspan = cell.colspan || 1;
                 const cellEndCol = colIndex + colspan - 1;
-                const isLastColumn = (cellEndCol === maxCols - 1);
+                const isLastColumn = cellEndCol >= maxCols - 1;
 
-                // Добавить правую ручку только если это НЕ последняя колонка
                 if (!isLastColumn) {
                     const resizeHandle = document.createElement('div');
                     resizeHandle.className = 'resize-handle';
@@ -146,41 +157,80 @@ class TableManager {
         const originalContent = cell.textContent;
         cell.classList.add('editing');
 
-        const input = document.createElement('input');
-        input.type = 'text';
-        input.value = originalContent;
-        cell.textContent = '';
-        cell.appendChild(input);
-        input.focus();
+        // ИСПРАВЛЕНИЕ: Используем textarea вместо input для поддержки многострочного текста
+        const textarea = document.createElement('textarea');
+        textarea.className = 'cell-editor';
+        textarea.value = originalContent;
 
-        const finishEditing = () => {
-            const newValue = input.value.trim();
-            cell.textContent = newValue;
+        cell.textContent = '';
+        cell.appendChild(textarea);
+        textarea.focus();
+
+        // Автоматически подстраиваем высоту
+        const adjustHeight = () => {
+            textarea.style.height = 'auto';
+            textarea.style.height = textarea.scrollHeight + 'px';
+        };
+        adjustHeight();
+        textarea.addEventListener('input', adjustHeight);
+
+        const finishEditing = (cancel = false) => {
+            const newValue = cancel ? originalContent : textarea.value;
+
+            // ИСПРАВЛЕНИЕ: Правильно отображаем многострочный текст
+            cell.textContent = '';
+
+            // Создаем элементы для отображения с переносами строк
+            const lines = newValue.split('\n');
+            lines.forEach((line, index) => {
+                const textNode = document.createTextNode(line);
+                cell.appendChild(textNode);
+                if (index < lines.length - 1) {
+                    cell.appendChild(document.createElement('br'));
+                }
+            });
+
             cell.classList.remove('editing');
 
-            // Обновить в состоянии
-            const tableId = cell.dataset.tableId;
-            const row = parseInt(cell.dataset.row);
-            const col = parseInt(cell.dataset.col);
-            const table = AppState.tables[tableId];
+            if (!cancel) {
+                const tableId = cell.dataset.tableId;
+                const row = parseInt(cell.dataset.row);
+                const col = parseInt(cell.dataset.col);
+                const table = AppState.tables[tableId];
 
-            if (table && table.rows[row] && table.rows[row].cells[col]) {
-                table.rows[row].cells[col].content = newValue;
+                if (table && table.rows[row] && table.rows[row].cells[col]) {
+                    table.rows[row].cells[col].content = newValue;
+                    PreviewManager.update();
+                }
             }
         };
 
-        input.addEventListener('blur', finishEditing, {once: true});
+        const blurHandler = () => {
+            finishEditing(false);
+        };
 
-        input.addEventListener('keydown', (e) => {
-            if (e.key === 'Enter') {
+        const keydownHandler = (e) => {
+            if (e.key === 'Enter' && e.shiftKey) {
+                // Shift+Enter - новая строка (по умолчанию работает)
+                e.stopPropagation();
+            } else if (e.key === 'Enter' && !e.shiftKey) {
+                // Enter без Shift - ПРИНЯТЬ и завершить редактирование
                 e.preventDefault();
-                input.blur();
+                textarea.removeEventListener('blur', blurHandler);
+                textarea.removeEventListener('keydown', keydownHandler);
+                finishEditing(false); // false = сохранить изменения
+            } else if (e.key === 'Escape') {
+                // Escape - ОТМЕНИТЬ и завершить редактирование
+                e.preventDefault();
+                e.stopPropagation();
+                textarea.removeEventListener('blur', blurHandler);
+                textarea.removeEventListener('keydown', keydownHandler);
+                finishEditing(true); // true = отменить изменения
             }
-            if (e.key === 'Escape') {
-                cell.textContent = originalContent;
-                cell.classList.remove('editing');
-            }
-        }, {once: true});
+        };
+
+        textarea.addEventListener('blur', blurHandler);
+        textarea.addEventListener('keydown', keydownHandler);
     }
 
     static startColumnResize(e) {

@@ -10,17 +10,16 @@ class ViolationManager {
         section.className = 'violation-section';
         section.dataset.violationId = violation.id;
 
-        // Контейнер с двумя колонками
         const columnsContainer = document.createElement('div');
         columnsContainer.className = 'violation-columns';
 
-        // Левая колонка - "Нарушено"
+        // Колонка "Нарушено"
         const violatedColumn = document.createElement('div');
         violatedColumn.className = 'violation-column';
 
         const violatedLabel = document.createElement('div');
         violatedLabel.className = 'violation-label';
-        violatedLabel.textContent = 'Нарушено';
+        violatedLabel.textContent = 'Нарушено:';
         violatedColumn.appendChild(violatedLabel);
 
         const violatedTextarea = document.createElement('textarea');
@@ -28,30 +27,36 @@ class ViolationManager {
         violatedTextarea.placeholder = 'Опишите нарушение...';
         violatedTextarea.value = violation.violated || '';
         violatedTextarea.rows = 4;
-        violatedTextarea.addEventListener('input', () => {
-            violation.violated = violatedTextarea.value;
+
+        // ИСПРАВЛЕНИЕ: Добавляем обработку клавиш
+        this.setupTextareaHandlers(violatedTextarea, (value) => {
+            violation.violated = value;
             PreviewManager.update();
         });
+
         violatedColumn.appendChild(violatedTextarea);
 
-        // Правая колонка - "Установлено"
+        // Колонка "Установлено"
         const establishedColumn = document.createElement('div');
         establishedColumn.className = 'violation-column';
 
         const establishedLabel = document.createElement('div');
         establishedLabel.className = 'violation-label';
-        establishedLabel.textContent = 'Установлено';
+        establishedLabel.textContent = 'Установлено:';
         establishedColumn.appendChild(establishedLabel);
 
         const establishedTextarea = document.createElement('textarea');
         establishedTextarea.className = 'violation-textarea';
-        establishedTextarea.placeholder = 'Опишите установленные факты...';
+        establishedTextarea.placeholder = 'Опишите установленное...';
         establishedTextarea.value = violation.established || '';
         establishedTextarea.rows = 4;
-        establishedTextarea.addEventListener('input', () => {
-            violation.established = establishedTextarea.value;
+
+        // ИСПРАВЛЕНИЕ: Добавляем обработку клавиш
+        this.setupTextareaHandlers(establishedTextarea, (value) => {
+            violation.established = value;
             PreviewManager.update();
         });
+
         establishedColumn.appendChild(establishedTextarea);
 
         columnsContainer.appendChild(violatedColumn);
@@ -62,54 +67,20 @@ class ViolationManager {
         const optionalFieldsContainer = document.createElement('div');
         optionalFieldsContainer.className = 'violation-optional-fields';
 
-        // 1. Список описаний (буллитный)
         optionalFieldsContainer.appendChild(
-            this.createOptionalField(
-                violation,
-                'descriptionList',
-                'Расшифровка описания',
-                'list'
-            )
+            this.createOptionalField(violation, 'descriptionList', 'Описание перечнем', 'list')
         );
-
-        // 2. Дополнительный текст (без заголовка)
         optionalFieldsContainer.appendChild(
-            this.createOptionalField(
-                violation,
-                'additionalText',
-                null,
-                'text'
-            )
+            this.createOptionalField(violation, 'additionalText', 'Дополнительный текст', 'text')
         );
-
-        // 3. Причины
         optionalFieldsContainer.appendChild(
-            this.createOptionalField(
-                violation,
-                'reasons',
-                'Причины',
-                'text'
-            )
+            this.createOptionalField(violation, 'reasons', 'Причины', 'text')
         );
-
-        // 4. Последствия
         optionalFieldsContainer.appendChild(
-            this.createOptionalField(
-                violation,
-                'consequences',
-                'Последствия',
-                'text'
-            )
+            this.createOptionalField(violation, 'consequences', 'Последствия', 'text')
         );
-
-        // 5. Ответственные
         optionalFieldsContainer.appendChild(
-            this.createOptionalField(
-                violation,
-                'responsible',
-                'Ответственный за решение проблем',
-                'text'
-            )
+            this.createOptionalField(violation, 'responsible', 'Ответственные', 'text')
         );
 
         section.appendChild(optionalFieldsContainer);
@@ -117,19 +88,53 @@ class ViolationManager {
         return section;
     }
 
+    setupTextareaHandlers(textarea, onUpdate) {
+        let originalValue = textarea.value;
+
+        const handleInput = () => {
+            onUpdate(textarea.value);
+        };
+
+        const handleKeyDown = (e) => {
+            if (e.key === 'Enter' && e.shiftKey) {
+                // Shift+Enter - новая строка (по умолчанию работает)
+                e.stopPropagation();
+            } else if (e.key === 'Enter' && !e.shiftKey) {
+                // Enter без Shift - ПРИНЯТЬ изменения и убрать фокус
+                e.preventDefault();
+                textarea.blur(); // Сохраняет текущее значение
+            } else if (e.key === 'Escape') {
+                // ESC - ОТМЕНИТЬ изменения и убрать фокус
+                e.preventDefault();
+                e.stopPropagation();
+                textarea.value = originalValue;
+                onUpdate(originalValue); // Восстанавливаем старое значение
+                textarea.blur();
+            }
+        };
+
+        const handleFocus = () => {
+            originalValue = textarea.value;
+        };
+
+        textarea.addEventListener('input', handleInput);
+        textarea.addEventListener('keydown', handleKeyDown);
+        textarea.addEventListener('focus', handleFocus);
+    }
+
     // Создание опционального поля
     createOptionalField(violation, fieldName, label, type) {
         const fieldContainer = document.createElement('div');
         fieldContainer.className = 'violation-optional-field';
 
-        // Чекбокс для включения/выключения
         const checkboxContainer = document.createElement('div');
         checkboxContainer.className = 'violation-field-toggle';
 
         const checkbox = document.createElement('input');
         checkbox.type = 'checkbox';
-        checkbox.id = `${violation.id}_${fieldName}`;
+        checkbox.id = `${violation.id}-${fieldName}`;
         checkbox.checked = violation[fieldName].enabled;
+
         checkbox.addEventListener('change', () => {
             violation[fieldName].enabled = checkbox.checked;
             contentContainer.style.display = checkbox.checked ? 'block' : 'none';
@@ -138,24 +143,21 @@ class ViolationManager {
 
         const checkboxLabel = document.createElement('label');
         checkboxLabel.htmlFor = checkbox.id;
-        checkboxLabel.textContent = label || 'Дополнительное поле';
+        checkboxLabel.textContent = label;
         checkboxLabel.className = 'violation-field-label';
 
         checkboxContainer.appendChild(checkbox);
         checkboxContainer.appendChild(checkboxLabel);
         fieldContainer.appendChild(checkboxContainer);
 
-        // Контейнер для содержимого поля
         const contentContainer = document.createElement('div');
         contentContainer.className = 'violation-field-content';
         contentContainer.style.display = violation[fieldName].enabled ? 'block' : 'none';
 
         if (type === 'list') {
-            // Буллитный список
             const listContainer = document.createElement('div');
             listContainer.className = 'violation-list-container';
 
-            // Кнопка добавления пункта
             const addButton = document.createElement('button');
             addButton.className = 'violation-list-add-btn';
             addButton.textContent = '+ Добавить пункт';
@@ -164,22 +166,23 @@ class ViolationManager {
                 this.renderList(listContainer, violation, fieldName);
                 PreviewManager.update();
             });
-            contentContainer.appendChild(addButton);
 
+            contentContainer.appendChild(addButton);
             contentContainer.appendChild(listContainer);
             this.renderList(listContainer, violation, fieldName);
-
         } else if (type === 'text') {
-            // Текстовое поле
             const textarea = document.createElement('textarea');
             textarea.className = 'violation-textarea';
-            textarea.placeholder = label ? `Введите ${label.toLowerCase()}...` : 'Введите текст...';
+            textarea.placeholder = label ? `Введите ${label.toLowerCase()}...` : '...';
             textarea.value = violation[fieldName].content || '';
             textarea.rows = 3;
-            textarea.addEventListener('input', () => {
-                violation[fieldName].content = textarea.value;
+
+            // ИСПРАВЛЕНИЕ: Добавляем обработку клавиш
+            this.setupTextareaHandlers(textarea, (value) => {
+                violation[fieldName].content = value;
                 PreviewManager.update();
             });
+
             contentContainer.appendChild(textarea);
         }
 
@@ -200,9 +203,30 @@ class ViolationManager {
             input.className = 'violation-list-input';
             input.value = item;
             input.placeholder = `Пункт ${index + 1}`;
+
+            let originalValue = item;
+
             input.addEventListener('input', () => {
                 violation[fieldName].items[index] = input.value;
                 PreviewManager.update();
+            });
+
+            // ИСПРАВЛЕНИЕ: Добавляем обработку клавиш для list items
+            input.addEventListener('keydown', (e) => {
+                if (e.key === 'Enter') {
+                    e.preventDefault();
+                    input.blur();
+                } else if (e.key === 'Escape') {
+                    e.preventDefault();
+                    input.value = originalValue;
+                    violation[fieldName].items[index] = originalValue;
+                    input.blur();
+                    PreviewManager.update();
+                }
+            });
+
+            input.addEventListener('focus', () => {
+                originalValue = input.value;
             });
 
             const deleteBtn = document.createElement('button');
