@@ -91,14 +91,12 @@ class TreeManager {
             toggle.textContent = li.classList.contains('collapsed') ? '▶' : '▼';
         });
 
-        // Label - всегда можно редактировать (кроме protected)
         const label = document.createElement('span');
         label.className = 'tree-label';
         label.textContent = node.label;
         label.contentEditable = false;
         li.appendChild(label);
 
-        // Иконки для разных типов
         if (node.type === 'table') {
             const tableIcon = document.createElement('span');
             tableIcon.className = 'table-icon';
@@ -124,15 +122,57 @@ class TreeManager {
             li.appendChild(violationIcon);
         }
 
-        // ИСПРАВЛЕНИЕ: Разрешаем редактирование для всех типов, кроме protected
+        // Функция для обработки Ctrl+Click с учетом header
+        const handleCtrlClick = () => {
+            this.selectNode(li);
+            if (typeof App !== 'undefined' && AppState.currentStep === 1) {
+                const targetNodeId = node.id;
+                App.goToStep(2);
+
+                requestAnimationFrame(() => {
+                    requestAnimationFrame(() => {
+                        setTimeout(() => {
+                            const itemsContainer = document.getElementById('itemsContainer');
+                            if (!itemsContainer) return;
+
+                            const targetElement = itemsContainer.querySelector(`[data-node-id="${targetNodeId}"]`);
+                            if (targetElement) {
+                                const header = document.querySelector('.header');
+                                const headerHeight = header ? header.offsetHeight : 60;
+
+                                const elementRect = targetElement.getBoundingClientRect();
+                                const absoluteElementTop = elementRect.top + window.pageYOffset;
+                                const scrollToPosition = absoluteElementTop - headerHeight - 20;
+
+                                window.scrollTo({
+                                    top: scrollToPosition,
+                                    behavior: 'smooth'
+                                });
+
+                                targetElement.classList.add('highlight-flash');
+                                setTimeout(() => {
+                                    targetElement.classList.remove('highlight-flash');
+                                }, 2000);
+                            }
+                        }, 100);
+                    });
+                });
+            }
+        };
+
         if (!node.protected) {
             let clickCount = 0;
             let clickTimer = null;
 
             label.addEventListener('click', (e) => {
                 e.stopPropagation();
-                clickCount++;
 
+                if (e.ctrlKey || e.metaKey) {
+                    handleCtrlClick();
+                    return;
+                }
+
+                clickCount++;
                 if (clickCount === 1) {
                     clickTimer = setTimeout(() => {
                         clickCount = 0;
@@ -149,6 +189,12 @@ class TreeManager {
         } else {
             label.addEventListener('click', (e) => {
                 e.stopPropagation();
+
+                if (e.ctrlKey || e.metaKey) {
+                    handleCtrlClick();
+                    return;
+                }
+
                 this.selectNode(li);
             });
         }
@@ -160,7 +206,14 @@ class TreeManager {
                 e.target.classList.contains('violation-icon')) {
                 return;
             }
+
             e.stopPropagation();
+
+            if (e.ctrlKey || e.metaKey) {
+                handleCtrlClick();
+                return;
+            }
+
             this.selectNode(li);
         });
 

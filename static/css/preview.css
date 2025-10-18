@@ -6,6 +6,7 @@
     border: 1px solid var(--border);
     font-size: 0.9375rem;
     overflow-y: auto;
+    box-shadow: var(--shadow-sm);
 }
 
 .preview h1 {
