@@ -128,7 +128,6 @@ body {
     display: flex;
     gap: 1.5em;
     align-items: center;
-    margin-right: 50px;
 }
 
 .steps {
