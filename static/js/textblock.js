@@ -162,7 +162,7 @@ class TextBlockManager {
             }, 500);
         });
 
-        // Обработка Enter для создания <br>
+        // Обработка клавиш
         editor.addEventListener('keydown', (e) => {
             if (e.key === 'Enter' && e.shiftKey) {
                 // Shift+Enter - перенос строки
