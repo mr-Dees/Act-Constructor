@@ -76,7 +76,7 @@ UI_for_EP_v_KAP/
 │   │   │   │   └── help-media.css
 │   │   │   ├── buttons/
 │   │   │   │   ├── buttons-base.css
-│   │   │   │   ├── buttons-action-buttons.css
+│   │   │   │   ├── buttons-action.css
 │   │   │   │   └── buttons-save-group.css
 │   │   │   ├── items/
 │   │   │   │   ├── items-base.css
@@ -92,14 +92,13 @@ UI_for_EP_v_KAP/
 │   │   │   ├── notifications/
 │   │   │   │   ├── notifications-base.css
 │   │   │   │   ├── notifications-types.css
-│   │   │   │   ├── notifications-content.css
-│   │   │   │   └── notifications-animations.css
+│   │   │   │   └── notifications-content.css
 │   │   │   └── dialog/
 │   │   │       ├── dialog-overlay.css
-│   │   │       ├── dialog-dialog.css
+│   │   │       ├── dialog.css
 │   │   │       └── dialog-buttons.css
 │   │   └── utilities/
-│   │       └── utilities-helpers.css
+│   │       └── helpers.css
 │   └── js/
 │       ├── state.js
 │       ├── tree.js
