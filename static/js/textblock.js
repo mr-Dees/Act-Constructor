@@ -1,19 +1,34 @@
+/**
+ * Менеджер для управления текстовыми блоками
+ * Отвечает за создание, редактирование и форматирование текстовых блоков в документе
+ */
 class TextBlockManager {
+    /**
+     * Создаёт экземпляр TextBlockManager
+     */
     constructor() {
+        // Текущий выбранный текстовый блок
         this.selectedTextBlock = null;
+        // Ссылка на глобальную панель инструментов форматирования
         this.globalToolbar = null;
+        // Активный редактор, в котором идёт редактирование
         this.activeEditor = null;
     }
 
     /**
-     * Инициализация глобального тулбара
+     * Инициализирует глобальную панель инструментов для форматирования текста
+     * Создаёт элемент тулбара с кнопками форматирования и добавляет его в DOM
      */
     initGlobalToolbar() {
+        // Проверяем, не создан ли уже тулбар
         if (document.getElementById('globalTextBlockToolbar')) return;
 
+        // Создаём контейнер тулбара
         const toolbar = document.createElement('div');
         toolbar.id = 'globalTextBlockToolbar';
         toolbar.className = 'textblock-toolbar-global hidden';
+
+        // Заполняем тулбар элементами управления форматированием
         toolbar.innerHTML = `
             <div class="toolbar-label">Форматирование текста:</div>
             <button class="toolbar-btn" data-action="bold" title="Жирный (Ctrl+B)"><strong>Ж</strong></button>
@@ -37,48 +52,65 @@ class TextBlockManager {
             </select>
         `;
 
+        // Добавляем тулбар на страницу
         document.body.appendChild(toolbar);
+
+        // Сохраняем ссылку на созданный тулбар
         this.globalToolbar = toolbar;
+
+        // Подключаем обработчики событий к элементам тулбара
         this.attachToolbarEvents();
     }
 
     /**
-     * Привязка событий к тулбару
+     * Привязывает обработчики событий к элементам панели инструментов
+     * Настраивает кнопки форматирования и выбор размера шрифта
      */
     attachToolbarEvents() {
+        // Проверяем наличие тулбара
         if (!this.globalToolbar) return;
 
-        // Кнопки форматирования
+        // Обработчики для кнопок форматирования (жирный, курсив, выравнивание)
         this.globalToolbar.querySelectorAll('.toolbar-btn').forEach(btn => {
             btn.addEventListener('click', (e) => {
                 e.preventDefault();
+
+                // Получаем действие форматирования из атрибута кнопки
                 const action = btn.dataset.action;
 
+                // Применяем форматирование к активному редактору
                 if (this.activeEditor) {
+                    // Возвращаем фокус в редактор
                     this.activeEditor.focus();
+
+                    // Выполняем команду форматирования
                     document.execCommand(action);
 
-                    // Сохраняем контент
+                    // Сохраняем изменённый контент в состояние приложения
                     const textBlockId = this.activeEditor.dataset.textBlockId;
                     const textBlock = AppState.textBlocks[textBlockId];
                     if (textBlock) {
                         textBlock.content = this.activeEditor.innerHTML;
                     }
 
-                    // Обновляем превью
+                    // Обновляем предпросмотр документа
                     PreviewManager.update();
                 }
             });
         });
 
-        // Размер шрифта
+        // Обработчик для выбора размера шрифта
         const fontSizeSelect = this.globalToolbar.querySelector('#fontSizeSelect');
         if (fontSizeSelect) {
             fontSizeSelect.addEventListener('change', (e) => {
                 if (this.activeEditor) {
+                    // Получаем выбранный размер шрифта
                     const newSize = parseInt(e.target.value);
+
+                    // Применяем размер к редактору
                     this.activeEditor.style.fontSize = `${newSize}px`;
 
+                    // Сохраняем изменения в состояние
                     const textBlockId = this.activeEditor.dataset.textBlockId;
                     const textBlock = AppState.textBlocks[textBlockId];
                     if (textBlock) {
@@ -86,6 +118,7 @@ class TextBlockManager {
                         textBlock.content = this.activeEditor.innerHTML;
                     }
 
+                    // Обновляем предпросмотр
                     PreviewManager.update();
                 }
             });
@@ -93,7 +126,7 @@ class TextBlockManager {
     }
 
     /**
-     * Показать тулбар
+     * Показывает панель инструментов форматирования
      */
     showToolbar() {
         if (this.globalToolbar) {
@@ -102,7 +135,7 @@ class TextBlockManager {
     }
 
     /**
-     * Скрыть тулбар
+     * Скрывает панель инструментов форматирования
      */
     hideToolbar() {
         if (this.globalToolbar) {
@@ -111,38 +144,50 @@ class TextBlockManager {
     }
 
     /**
-     * Создать элемент текстового блока
+     * Создаёт DOM-элемент текстового блока с редактором
+     *
+     * @param {Object} textBlock - Объект текстового блока из состояния приложения
+     * @param {Object} node - Узел дерева документа, к которому привязан блок
+     * @returns {HTMLElement} Готовый DOM-элемент секции с редактором
      */
     createTextBlockElement(textBlock, node) {
+        // Создаём контейнер для текстового блока
         const section = document.createElement('div');
         section.className = 'textblock-section';
         section.dataset.textBlockId = textBlock.id;
 
-        // Редактор
+        // Создаём редактор с поддержкой contentEditable
         const editor = document.createElement('div');
         editor.className = 'textblock-editor';
         editor.contentEditable = 'true';
         editor.dataset.textBlockId = textBlock.id;
         editor.innerHTML = textBlock.content || '';
 
-        // Применяем форматирование
+        // Применяем сохранённое форматирование к редактору
         this.applyFormatting(editor, textBlock.formatting);
 
-        // Focus - показываем тулбар и синхронизируем select
+        // Обработчик фокуса - показываем тулбар и синхронизируем настройки
         editor.addEventListener('focus', () => {
+            // Запоминаем активный редактор
             this.activeEditor = editor;
+
+            // Показываем тулбар
             this.showToolbar();
 
+            // Синхронизируем выбранный размер шрифта с тулбаром
             const fontSizeSelect = document.getElementById('fontSizeSelect');
             if (fontSizeSelect) {
                 fontSizeSelect.value = textBlock.formatting?.fontSize || 14;
             }
         });
 
-        // Blur - скрываем тулбар с задержкой
+        // Обработчик потери фокуса - сохраняем изменения и скрываем тулбар
         editor.addEventListener('blur', () => {
+            // Сохраняем контент
             textBlock.content = editor.innerHTML;
 
+            // Скрываем тулбар с небольшой задержкой
+            // Задержка нужна, чтобы успеть обработать клик по кнопкам тулбара
             setTimeout(() => {
                 if (document.activeElement !== editor &&
                     !this.globalToolbar?.contains(document.activeElement)) {
@@ -152,71 +197,67 @@ class TextBlockManager {
             }, 200);
         });
 
-        // Input - автосохранение с debounce
+        // Обработчик ввода - автоматическое сохранение с задержкой (debounce)
         let saveTimeout;
         editor.addEventListener('input', () => {
+            // Отменяем предыдущий таймер сохранения
             clearTimeout(saveTimeout);
+
+            // Запускаем новый таймер - сохранение через 500мс после последнего ввода
             saveTimeout = setTimeout(() => {
                 textBlock.content = editor.innerHTML;
                 PreviewManager.update();
             }, 500);
         });
 
-        // Обработка клавиш
+        // Обработчик нажатий клавиш для специальных действий
         editor.addEventListener('keydown', (e) => {
+            // Shift+Enter - добавить двойной перенос строки
             if (e.key === 'Enter' && e.shiftKey) {
-                // Shift+Enter - перенос строки
                 e.preventDefault();
                 document.execCommand('insertHTML', false, '<br><br>');
                 textBlock.content = editor.innerHTML;
                 PreviewManager.update();
             }
+            // Enter - сохранить и завершить редактирование
             else if (e.key === 'Enter') {
-                // Enter - принять и завершить редактирование
                 e.preventDefault();
                 textBlock.content = editor.innerHTML;
                 PreviewManager.update();
                 editor.blur();
             }
-            // Обработка Escape для выхода
+            // Escape - выйти из редактора без дополнительных действий
             else if (e.key === 'Escape') {
                 e.preventDefault();
                 e.stopPropagation();
                 editor.blur();
             }
-
-            // if (e.key === 'Enter') {
-            //     e.preventDefault();
-            //     document.execCommand('insertHTML', false, '<br><br>');
-            //
-            //     textBlock.content = editor.innerHTML;
-            //     PreviewManager.update();
-            // }
-            //
-            // // Обработка Escape для выхода
-            // if (e.key === 'Escape') {
-            //     e.preventDefault();
-            //     e.stopPropagation();
-            //     editor.blur();
-            // }
         });
 
+        // Добавляем редактор в контейнер секции
         section.appendChild(editor);
+
         return section;
     }
 
     /**
-     * Применить форматирование к редактору
+     * Применяет сохранённое форматирование к элементу редактора
+     *
+     * @param {HTMLElement} editor - DOM-элемент редактора
+     * @param {Object} formatting - Объект с настройками форматирования
      */
     applyFormatting(editor, formatting) {
+        // Применяем размер шрифта, если задан
         if (formatting.fontSize) {
             editor.style.fontSize = `${formatting.fontSize}px`;
         }
 
+        // Применяем выравнивание текста, если задано
         if (formatting.alignment) {
             editor.style.textAlign = formatting.alignment;
         }
     }
 }
 
+// Создаём глобальный экземпляр менеджера текстовых блоков
 const textBlockManager = new TextBlockManager();

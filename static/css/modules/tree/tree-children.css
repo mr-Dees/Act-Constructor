@@ -1,0 +1,24 @@
+/*
+ * Вложенные элементы дерева
+ * Стили для отображения иерархии дочерних узлов
+ */
+
+/* Список дочерних элементов */
+.tree-children {
+    list-style: none;
+    margin-left: 1.25rem;
+    padding-left: 0.75rem;
+    border-left: 2px solid var(--border-light);
+    margin-top: 0.375rem;
+}
+
+/* Иконка переключения видимости дочерних элементов */
+.toggle-icon {
+    display: inline-block;
+    width: 1.125rem;
+    margin-right: 0.375rem;
+    cursor: pointer;
+    user-select: none;
+    font-size: 0.8125rem;
+    opacity: 0.7;
+}

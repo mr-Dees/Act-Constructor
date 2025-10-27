@@ -1,4 +1,9 @@
-"""Форматер для Markdown представления актов."""
+"""
+Форматер для Markdown представления актов.
+
+Преобразует структуру акта в формат Markdown с поддержкой
+заголовков, таблиц, списков и базового форматирования текста.
+"""
 
 import html
 import re
@@ -8,10 +13,16 @@ from app.formatters.base_formatter import BaseFormatter
 
 
 class MarkdownFormatter(BaseFormatter):
-    """Форматер для преобразования структуры акта в формат Markdown."""
+    """
+    Форматер для преобразования структуры акта в формат Markdown.
+
+    Создает документ, совместимый с различными Markdown-процессорами,
+    с использованием синтаксиса для заголовков, таблиц и форматирования.
+    """
 
     def __init__(self):
-        """Инициализация Markdown форматера."""
+        """Инициализация Markdown форматера с пустыми хранилищами."""
+        # Хранилища для быстрого доступа к связанным сущностям
         self.violations = {}
         self.textBlocks = {}
         self.tables = {}
@@ -21,26 +32,31 @@ class MarkdownFormatter(BaseFormatter):
         Форматирует данные акта в Markdown.
 
         Args:
-            data: Словарь с данными акта
+            data: Словарь с данными акта:
+                - tree: древовидная структура
+                - tables: словарь таблиц
+                - textBlocks: словарь текстовых блоков
+                - violations: словарь нарушений
 
         Returns:
-            Отформатированный текст акта в Markdown
+            str: Отформатированный текст акта в Markdown
         """
         result = []
 
-        # Сохраняем ссылки на вложенные структуры
+        # Сохраняем ссылки на вложенные структуры для доступа при рекурсии
         self.violations = data.get('violations', {})
         self.textBlocks = data.get('textBlocks', {})
         self.tables = data.get('tables', {})
 
-        # Заголовок
+        # Главный заголовок (# - уровень 1)
         result.append("# АКТ")
         result.append("")
 
-        # Обработка дерева структуры
+        # Обработка дерева структуры акта
         tree = data.get('tree', {})
         root_children = tree.get('children', [])
 
+        # Рекурсивная обработка каждого пункта верхнего уровня (начиная с ##)
         for item in root_children:
             result.append(self._format_item(item, level=2))
 
@@ -48,40 +64,40 @@ class MarkdownFormatter(BaseFormatter):
 
     def _format_item(self, item: Dict, level: int = 2) -> str:
         """
-        Рекурсивно форматирует пункт акта в Markdown.
+        Рекурсивно форматирует пункт акта в Markdown с учетом вложенности.
 
         Args:
-            item: Словарь с данными пункта
+            item: Словарь с данными пункта (узла дерева)
             level: Уровень заголовка (2-6 для ##-######)
 
         Returns:
-            Отформатированный пункт
+            str: Отформатированный пункт со всеми дочерними элементами
         """
         lines = []
 
-        # Заголовок пункта
+        # Извлечение метаданных пункта
         label = item.get('label', '')
         item_type = item.get('type', 'item')
 
-        # Пропускаем заголовки для textblock, violation и table
+        # Заголовок пункта (кроме textblock, violation, table)
         if label and item_type not in ['textblock', 'violation', 'table']:
-            heading_level = min(level, 6)
+            heading_level = min(level, 6)  # Markdown поддерживает до 6 уровней
             heading_prefix = '#' * heading_level
             lines.append(f"{heading_prefix} {label}")
             lines.append("")
 
-        # Для таблиц выводим label как обычный текст
+        # Для таблиц выводим label как обычный текст (не заголовок)
         elif label and item_type == 'table':
             lines.append(label)
             lines.append("")
 
-        # Текстовое содержание
+        # Текстовое содержание пункта
         content = item.get('content', '')
         if content:
             lines.append(content)
             lines.append("")
 
-        # Обработка таблицы
+        # Обработка связанной таблицы
         table_id = item.get('tableId')
         if table_id and table_id in self.tables:
             table_data = self.tables[table_id]
@@ -102,7 +118,7 @@ class MarkdownFormatter(BaseFormatter):
             lines.append(self._format_violation(violation_data))
             lines.append("")
 
-        # Рекурсивная обработка дочерних элементов
+        # Рекурсивная обработка дочерних элементов (увеличиваем уровень)
         children = item.get('children', [])
         for child in children:
             lines.append(self._format_item(child, level + 1))
@@ -113,20 +129,22 @@ class MarkdownFormatter(BaseFormatter):
         """
         Форматирует таблицу в Markdown с учетом объединенных ячеек.
 
+        Создает таблицу в синтаксисе Markdown (pipe tables).
+        Обрабатывает colspan путем добавления пустых ячеек.
+
         Args:
-            table_data: Словарь с данными таблицы
+            table_data: Словарь с данными таблицы (rows с cells)
 
         Returns:
-            Отформатированная таблица в Markdown
+            str: Таблица в формате Markdown
         """
         lines = []
-
         rows = table_data.get('rows', [])
 
         if not rows:
             return "*[Пустая таблица]*"
 
-        # Строим матрицу с учетом merged и colspan
+        # Построение матрицы отображения с учетом merged и colspan
         display_matrix = []
         max_cols = 0
 
@@ -135,14 +153,16 @@ class MarkdownFormatter(BaseFormatter):
             display_row = []
 
             for cell in cells:
+                # Пропускаем объединенные ячейки (уже обработаны)
                 if not cell.get('merged', False):
+                    # Экранирование pipe символов в содержимом
                     content = str(cell.get('content', '')).replace('|', '\\|')
                     colspan = cell.get('colspan', 1)
 
                     # Первая ячейка получает содержимое
                     display_row.append(content)
 
-                    # Остальные ячейки в colspan - пустые
+                    # Остальные ячейки в colspan - пустые (для имитации объединения)
                     for _ in range(colspan - 1):
                         display_row.append('')
 
@@ -153,14 +173,17 @@ class MarkdownFormatter(BaseFormatter):
         if not display_matrix or max_cols == 0:
             return "*[Пустая таблица]*"
 
-        # Выравниваем строки
+        # Выравнивание всех строк до максимальной ширины
         for row in display_matrix:
             while len(row) < max_cols:
                 row.append('')
 
-        # Формируем Markdown таблицу
+        # Формирование таблицы в Markdown синтаксисе
         for idx, row in enumerate(display_matrix):
+            # Строка данных с разделителями pipes
             lines.append('| ' + ' | '.join(row) + ' |')
+
+            # После первой строки (заголовок) добавляем разделитель
             if idx == 0:
                 separator = '|' + '|'.join([' --- ' for _ in range(max_cols)]) + '|'
                 lines.append(separator)
@@ -169,13 +192,16 @@ class MarkdownFormatter(BaseFormatter):
 
     def _format_textblock(self, textblock_data: Dict) -> str:
         """
-        Форматирует текстовый блок в Markdown с учетом форматирования.
+        Форматирует текстовый блок с конвертацией HTML в Markdown.
+
+        Преобразует HTML-теги форматирования в Markdown-синтаксис,
+        обрабатывает переносы строк и добавляет метаданные.
 
         Args:
-            textblock_data: Словарь с данными текстового блока
+            textblock_data: Словарь с содержимым и параметрами форматирования
 
         Returns:
-            Отформатированный текстовый блок
+            str: Отформатированный текстовый блок в Markdown
         """
         content = textblock_data.get('content', '')
         formatting = textblock_data.get('formatting', {})
@@ -183,24 +209,44 @@ class MarkdownFormatter(BaseFormatter):
         if not content:
             return ""
 
-        # Заменяем <br> на двойной пробел + перенос (Markdown hard break)
-        clean_content = content.replace('<br>', '  \n').replace('<br/>', '  \n').replace('<br />', '  \n')
+        # Замена <br> на hard break Markdown (два пробела + перенос)
+        clean_content = content.replace('<br>', '  \n')
+        clean_content = clean_content.replace('<br/>', '  \n')
+        clean_content = clean_content.replace('<br />', '  \n')
 
-        # Конвертируем HTML форматирование в Markdown
-        clean_content = re.sub(r'<(?:b|strong)>(.+?)</(?:b|strong)>', r'**\1**', clean_content, flags=re.DOTALL)
-        clean_content = re.sub(r'<(?:i|em)>(.+?)</(?:i|em)>', r'*\1*', clean_content, flags=re.DOTALL)
-        clean_content = re.sub(r'<u>(.+?)</u>', r'<u>\1</u>', clean_content,
-                               flags=re.DOTALL)  # Markdown не поддерживает underline нативно
+        # Конвертация HTML форматирования в Markdown
+        # <b>, <strong> -> **текст**
+        clean_content = re.sub(
+            r'<(?:b|strong)>(.+?)</(?:b|strong)>',
+            r'**\1**',
+            clean_content,
+            flags=re.DOTALL
+        )
 
-        # Удаляем остальные HTML-теги
+        # <i>, <em> -> *текст*
+        clean_content = re.sub(
+            r'<(?:i|em)>(.+?)</(?:i|em)>',
+            r'*\1*',
+            clean_content,
+            flags=re.DOTALL
+        )
+
+        # <u> -> текст (Markdown не поддерживает underline нативно)
+        clean_content = re.sub(
+            r'<u>(.+?)</u>',
+            r'\1',
+            clean_content,
+            flags=re.DOTALL
+        )
+
+        # Удаление остальных HTML-тегов
         clean_content = re.sub(r'<[^>]+>', '', clean_content)
 
-        # Декодируем HTML-сущности
+        # Декодирование HTML-сущностей (&nbsp;, &lt;, и т.д.)
         clean_content = html.unescape(clean_content)
 
-        # Добавляем метаданные о форматировании
+        # Добавление метаданных о форматировании (если отличается от default)
         result = []
-
         font_size = formatting.get('fontSize', 14)
         alignment = formatting.get('alignment', 'left')
 
@@ -215,35 +261,47 @@ class MarkdownFormatter(BaseFormatter):
             elif alignment == 'justify':
                 meta.append("выравнивание по ширине")
 
+            # Комментарий HTML в Markdown для сохранения информации о форматировании
             result.append(f"<!-- {', '.join(meta)} -->")
             result.append("")
 
         result.append(clean_content)
-
         return "\n".join(result)
 
     def _format_violation(self, violation_data: Dict) -> str:
         """
-        Форматирует нарушение в Markdown.
+        Форматирует нарушение в Markdown с жирными заголовками секций.
+
+        Структура:
+        - **Нарушено:** <текст>
+        - **Установлено:** <текст>
+        - **Описание:** <буллитный список>
+        - Дополнительный текст
+        - **Причины:** <текст>
+        - **Последствия:** <текст>
+        - **Ответственные:** <текст>
 
         Args:
             violation_data: Словарь с данными нарушения
 
         Returns:
-            Отформатированное нарушение
+            str: Отформатированное нарушение в Markdown
         """
         lines = []
 
+        # Секция "Нарушено" с жирным выделением
         violated = violation_data.get('violated', '')
         if violated:
             lines.append(f"**Нарушено:** {violated}")
             lines.append("")
 
+        # Секция "Установлено" с жирным выделением
         established = violation_data.get('established', '')
         if established:
             lines.append(f"**Установлено:** {established}")
             lines.append("")
 
+        # Список описаний (Markdown unordered list)
         desc_list = violation_data.get('descriptionList', {})
         if desc_list.get('enabled', False):
             items = desc_list.get('items', [])
@@ -251,9 +309,11 @@ class MarkdownFormatter(BaseFormatter):
                 lines.append("**Описание:**")
                 for item in items:
                     if item.strip():
+                        # Markdown буллитный список (dash)
                         lines.append(f"- {item}")
                 lines.append("")
 
+        # Дополнительный текст (без заголовка)
         additional_text = violation_data.get('additionalText', {})
         if additional_text.get('enabled', False):
             content = additional_text.get('content', '')
@@ -261,6 +321,7 @@ class MarkdownFormatter(BaseFormatter):
                 lines.append(content)
                 lines.append("")
 
+        # Причины нарушения
         reasons = violation_data.get('reasons', {})
         if reasons.get('enabled', False):
             content = reasons.get('content', '')
@@ -268,6 +329,7 @@ class MarkdownFormatter(BaseFormatter):
                 lines.append(f"**Причины:** {content}")
                 lines.append("")
 
+        # Последствия нарушения
         consequences = violation_data.get('consequences', {})
         if consequences.get('enabled', False):
             content = consequences.get('content', '')
@@ -275,6 +337,7 @@ class MarkdownFormatter(BaseFormatter):
                 lines.append(f"**Последствия:** {content}")
                 lines.append("")
 
+        # Ответственные лица
         responsible = violation_data.get('responsible', {})
         if responsible.get('enabled', False):
             content = responsible.get('content', '')

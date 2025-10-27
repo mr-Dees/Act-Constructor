@@ -1,0 +1,59 @@
+/*
+ * Базовые стили для элементов списка
+ * Карточки с содержимым пунктов документа и их визуальные эффекты
+ */
+
+/* Контейнер для всех элементов */
+.items-container {
+    max-width: 100%;
+    width: 100%;
+    margin: 0 auto;
+}
+
+/* Карточка отдельного элемента */
+.item-block {
+    background: var(--bg-primary);
+    padding: var(--spacing-lg);
+    border-radius: var(--radius-md);
+    margin-bottom: var(--spacing-sm);
+    border: 1px solid var(--border);
+    border-left: 0.1875rem solid var(--primary);
+    overflow: visible;
+    transition: border-color 0.2s ease, box-shadow 0.2s ease;
+    box-shadow: var(--shadow-sm);
+}
+
+/* Подсветка элемента при наведении */
+.item-block:hover {
+    border-left-color: var(--primary-hover);
+    box-shadow: var(--shadow-md);
+}
+
+/* Анимация мигающей подсветки элемента */
+.item-block.highlight-flash {
+    animation: highlight-flash 1.5s ease-in-out;
+    border-radius: 8px;
+    position: relative;
+    z-index: 10;
+}
+
+/* Эффект свечения при подсветке */
+.item-block.highlight-flash::before {
+    content: '';
+    position: absolute;
+    top: -4px;
+    left: -4px;
+    right: -4px;
+    bottom: -4px;
+    border-radius: 10px;
+    background: linear-gradient(
+            135deg,
+            rgba(102, 126, 234, 0.1) 0%,
+            rgba(102, 126, 234, 0.05) 50%,
+            rgba(102, 126, 234, 0.1) 100%
+    );
+    opacity: 0;
+    pointer-events: none;
+    z-index: -1;
+    animation: highlight-glow 2.5s cubic-bezier(0.4, 0.0, 0.2, 1);
+}

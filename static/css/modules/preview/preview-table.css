@@ -1,0 +1,28 @@
+/*
+ * Таблицы в предпросмотре
+ * Стили для отображения табличных данных в документе
+ */
+
+/* Таблица в области предпросмотра */
+.preview table {
+    width: 100%;
+    border-collapse: collapse;
+    margin: var(--spacing) 0;
+    border: 1px solid var(--border);
+    font-size: 0.875rem;
+}
+
+/* Ячейки таблицы */
+.preview table th,
+.preview table td {
+    border: 1px solid var(--border);
+    padding: 0.5rem;
+    text-align: left;
+}
+
+/* Заголовки таблицы */
+.preview table th {
+    background: var(--bg-tertiary);
+    font-weight: 600;
+    color: var(--text-primary);
+}

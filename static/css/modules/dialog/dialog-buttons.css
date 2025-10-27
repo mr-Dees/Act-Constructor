@@ -1,0 +1,10 @@
+/*
+ * Кнопки диалоговых окон
+ * Стили для кнопок подтверждения и отмены в модальных окнах
+ */
+
+.dialog-buttons {
+    display: flex;
+    gap: var(--spacing);
+    justify-content: center;
+}

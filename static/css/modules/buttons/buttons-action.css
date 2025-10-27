@@ -1,0 +1,20 @@
+/*
+ * Контейнеры для кнопок действий
+ * Управляет размещением кнопок в интерфейсе
+ */
+
+/* Общий контейнер для кнопок действий */
+.action-buttons {
+    display: flex;
+    gap: var(--spacing);
+    margin-top: var(--spacing-xl);
+    justify-content: center;
+}
+
+/* Контейнер для кнопок навигации между шагами */
+.step-actions {
+    display: flex;
+    gap: var(--spacing);
+    margin-top: var(--spacing-xl);
+    justify-content: center;
+}

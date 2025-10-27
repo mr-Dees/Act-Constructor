@@ -1,0 +1,53 @@
+/*
+ * Опциональные поля нарушений
+ * Дополнительные поля с возможностью включения через чекбоксы
+ */
+
+/* Секция опциональных полей */
+.violation-optional-fields {
+    border-top: 1px solid var(--border);
+    padding-top: var(--spacing-md);
+    margin-top: var(--spacing-md);
+}
+
+/* Контейнер опционального поля */
+.violation-optional-field {
+    margin-bottom: var(--spacing-md);
+}
+
+/* Переключатель видимости поля */
+.violation-field-toggle {
+    display: flex;
+    align-items: center;
+    margin-bottom: 0.625rem;
+    cursor: pointer;
+}
+
+/* Чекбокс включения поля */
+.violation-field-toggle input[type="checkbox"] {
+    margin-right: 0.625rem;
+    width: 1.125rem;
+    height: 1.125rem;
+    cursor: pointer;
+    accent-color: var(--primary);
+}
+
+/* Метка опционального поля */
+.violation-field-label {
+    font-weight: 500;
+    color: var(--text-secondary);
+    cursor: pointer;
+    user-select: none;
+    font-size: 0.875rem;
+}
+
+/* Подсветка метки при наведении */
+.violation-field-toggle:hover .violation-field-label {
+    color: var(--primary);
+}
+
+/* Содержимое опционального поля */
+.violation-field-content {
+    margin-left: 1.75rem;
+    animation: fadeIn 0.2s ease-in;
+}

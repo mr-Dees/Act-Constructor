@@ -1,0 +1,43 @@
+/*
+ * Стили диалогового окна
+ * Модальное окно с иконкой, заголовком и сообщением
+ */
+
+/* Контейнер диалогового окна */
+.custom-dialog {
+    background: var(--bg-primary);
+    border-radius: var(--radius-xl);
+    padding: var(--spacing-2xl);
+    max-width: 27.5rem;
+    width: 90%;
+    box-shadow: var(--shadow-xl);
+    animation: scaleIn 0.25s cubic-bezier(0.4, 0, 0.2, 1);
+    border: 1px solid var(--border);
+}
+
+/* Иконка в диалоговом окне */
+.dialog-icon {
+    font-size: 3rem;
+    text-align: center;
+    margin-bottom: var(--spacing-lg);
+    color: var(--primary);
+}
+
+/* Заголовок диалогового окна */
+.dialog-title {
+    font-size: 1.125rem;
+    font-weight: 600;
+    color: var(--text-primary);
+    text-align: center;
+    margin-bottom: var(--spacing-sm);
+    letter-spacing: -0.01em;
+}
+
+/* Текст сообщения */
+.dialog-message {
+    font-size: 0.9375rem;
+    color: var(--text-secondary);
+    text-align: center;
+    line-height: 1.6;
+    margin-bottom: var(--spacing-xl);
+}

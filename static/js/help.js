@@ -1,7 +1,12 @@
 /**
  * Менеджер системы помощи и инструкций
+ * Управляет отображением инструкций для пользователя на разных этапах работы с приложением
  */
 class HelpManager {
+    /**
+     * Словарь инструкций для каждого шага работы с конструктором актов
+     * Ключ - номер шага, значение - объект с заголовком и HTML-содержимым инструкции
+     */
     static instructions = {
         1: {
             title: 'Инструкция: Шаг 1 - Составление структуры акта',
@@ -77,64 +82,74 @@ class HelpManager {
     };
 
     /**
-     * Инициализация менеджера помощи
+     * Инициализирует менеджер помощи и устанавливает обработчики событий
+     * Привязывает открытие модального окна к кнопке помощи и настраивает способы закрытия
      */
     static init() {
+        // Получаем элементы DOM для работы с модальным окном
         const helpBtn = document.getElementById('helpBtn');
         const modal = document.getElementById('helpModal');
 
+        // Прерываем инициализацию, если обязательные элементы отсутствуют
         if (!helpBtn || !modal) {
             console.error('HelpManager: не найдены необходимые элементы');
             return;
         }
 
-        // Клик по кнопке помощи
+        // Устанавливаем обработчик открытия модального окна по клику на кнопку помощи
         helpBtn.addEventListener('click', () => {
             this.show();
         });
 
-        // Закрытие по клику на фон
+        // Устанавливаем обработчик закрытия модального окна при клике на затемнённый фон
         modal.addEventListener('click', (e) => {
             if (e.target === modal) {
                 this.hide();
             }
         });
 
-        // Закрытие по Escape
+        // Устанавливаем обработчик закрытия модального окна по нажатию клавиши Escape
         document.addEventListener('keydown', (e) => {
             if (e.key === 'Escape' && !modal.classList.contains('hidden')) {
                 this.hide();
             }
         });
 
-        // Обновление подсказки при смене шага
+        // Устанавливаем начальную подсказку для кнопки помощи
         this.updateTooltip();
     }
 
     /**
-     * Показать модальное окно с инструкцией для текущего шага
+     * Открывает модальное окно с инструкцией для текущего шага работы
+     * Загружает содержимое инструкции из словаря instructions на основе текущего шага
      */
     static show() {
+        // Определяем текущий шаг из глобального состояния приложения
         const currentStep = AppState.currentStep || 1;
         const instruction = this.instructions[currentStep];
 
+        // Проверяем наличие инструкции для текущего шага
         if (!instruction) {
             console.error('HelpManager: инструкция не найдена для шага', currentStep);
             return;
         }
 
+        // Получаем элементы модального окна для заполнения контентом
         const modal = document.getElementById('helpModal');
         const title = document.getElementById('helpModalTitle');
         const body = document.getElementById('helpModalBody');
 
+        // Заполняем модальное окно заголовком и содержимым инструкции
         title.textContent = instruction.title;
         body.innerHTML = instruction.content;
 
+        // Отображаем модальное окно на экране
         modal.classList.remove('hidden');
     }
 
     /**
-     * Скрыть модальное окно
+     * Скрывает модальное окно с инструкцией
+     * Добавляет класс hidden для визуального скрытия модального окна
      */
     static hide() {
         const modal = document.getElementById('helpModal');
@@ -142,18 +157,25 @@ class HelpManager {
     }
 
     /**
-     * Обновить подсказку кнопки в зависимости от текущего шага
+     * Обновляет текст всплывающей подсказки кнопки помощи в соответствии с текущим шагом
+     * Вызывается при инициализации и при смене шага работы с приложением
      */
     static updateTooltip() {
         const helpBtn = document.getElementById('helpBtn');
+
+        // Прерываем выполнение, если кнопка помощи отсутствует
         if (!helpBtn) return;
 
+        // Определяем текущий шаг из глобального состояния приложения
         const currentStep = AppState.currentStep || 1;
+
+        // Словарь названий шагов для формирования подсказки
         const stepNames = {
             1: 'Составление структуры акта',
             2: 'Заполнение данных'
         };
 
+        // Устанавливаем текст подсказки с указанием номера и названия текущего шага
         helpBtn.title = `Инструкция: Шаг ${currentStep} - ${stepNames[currentStep]}`;
     }
 }

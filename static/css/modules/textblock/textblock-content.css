@@ -1,0 +1,45 @@
+/*
+ * Область редактируемого текстового контента
+ * Редактируемый блок с форматированием для текстовых элементов
+ */
+
+/* Контейнер текстового блока */
+.textblock-content {
+    padding: 0.75rem 1rem;
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    background: var(--bg-primary);
+    min-height: 5rem;
+    font-family: inherit;
+    font-size: 0.9375rem;
+    line-height: 1.6;
+    color: var(--text-primary);
+    transition: all 0.2s ease;
+}
+
+/* Подсветка границы при наведении */
+.textblock-content:hover {
+    border-color: var(--border-medium);
+}
+
+/* Акцент при фокусе на текстовом блоке */
+.textblock-content:focus {
+    outline: none;
+    border-color: var(--primary);
+    box-shadow: 0 0 0 0.1875rem var(--primary-subtle);
+}
+
+/* Курсор для редактируемого блока */
+.textblock-content[contenteditable="true"] {
+    cursor: text;
+}
+
+/* Отступ между абзацами */
+.textblock-content p {
+    margin-bottom: 0.5rem;
+}
+
+/* Убираем отступ у последнего абзаца */
+.textblock-content p:last-child {
+    margin-bottom: 0;
+}

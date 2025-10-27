@@ -1,0 +1,103 @@
+/*
+ * Группа кнопок сохранения с выпадающим меню форматов
+ * Комбинированная кнопка с основным действием и выбором форматов
+ */
+
+/* Контейнер группы кнопок сохранения */
+.save-button-group {
+    position: relative;
+    display: inline-flex;
+}
+
+/* Основная кнопка сохранения */
+.save-main-btn {
+    border-top-right-radius: 0;
+    border-bottom-right-radius: 0;
+    border-right: 1px solid rgba(255, 255, 255, 0.3);
+}
+
+/* Кнопка открытия выпадающего меню форматов */
+.save-dropdown-btn {
+    padding: 0.625rem 0.75rem;
+    border-top-left-radius: 0;
+    border-bottom-left-radius: 0;
+    min-width: auto;
+    position: relative;
+}
+
+/* Активное состояние кнопки меню */
+.save-dropdown-btn.active {
+    background: #469463;
+}
+
+/* Подсказка с количеством выбранных форматов */
+.save-dropdown-btn.has-formats::before {
+    content: attr(data-formats);
+    position: absolute;
+    bottom: 100%;
+    left: 50%;
+    transform: translateX(-50%);
+    background: var(--text-primary);
+    color: white;
+    padding: 0.25rem 0.5rem;
+    border-radius: var(--radius-sm);
+    font-size: 0.6875rem;
+    white-space: nowrap;
+    margin-bottom: 0.25rem;
+    pointer-events: none;
+    opacity: 0;
+    transition: opacity 0.2s ease;
+}
+
+/* Показ подсказки при наведении */
+.save-dropdown-btn.has-formats:hover::before {
+    opacity: 1;
+}
+
+/* Выпадающее меню выбора форматов */
+.format-dropdown-menu {
+    position: absolute;
+    background: var(--bg-primary);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    box-shadow: var(--shadow-lg);
+    padding: 0.5rem;
+    min-width: 160px;
+    z-index: 1001;
+    right: 0;
+}
+
+/* Скрытое состояние меню */
+.format-dropdown-menu.hidden {
+    display: none;
+}
+
+/* Элемент выбора формата */
+.format-option {
+    display: flex;
+    align-items: center;
+    padding: 0.5rem 0.75rem;
+    cursor: pointer;
+    border-radius: var(--radius-sm);
+    transition: background 0.15s ease;
+    user-select: none;
+}
+
+/* Подсветка при наведении на формат */
+.format-option:hover {
+    background: var(--bg-tertiary);
+}
+
+/* Чекбокс выбора формата */
+.format-option input[type="checkbox"] {
+    margin-right: 0.625rem;
+    cursor: pointer;
+    accent-color: var(--success);
+}
+
+/* Название формата */
+.format-option span {
+    font-size: 0.875rem;
+    color: var(--text-primary);
+    font-weight: 500;
+}

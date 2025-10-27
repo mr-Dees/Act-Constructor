@@ -1,0 +1,44 @@
+/*
+ * Панели для дерева элементов и предпросмотра
+ * Организует рабочее пространство конструктора
+ */
+
+.panels {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: var(--spacing-lg);
+    flex: 1;
+    min-height: 0;
+}
+
+/* Общие стили для обеих панелей */
+.tree-panel,
+.preview-panel {
+    background: var(--bg-secondary);
+    padding: var(--spacing-xl);
+    border-radius: var(--radius-lg);
+    border: 1px solid var(--border);
+    box-shadow: var(--shadow-sm);
+    display: flex;
+    flex-direction: column;
+    height: 100%;
+    overflow: hidden;
+}
+
+/* Заголовки панелей */
+.tree-panel h2,
+.preview-panel h2 {
+    color: var(--text-primary);
+    margin-bottom: var(--spacing-md);
+    font-size: 1.125rem;
+    font-weight: 600;
+    flex-shrink: 0;
+}
+
+/* Прокручиваемые области внутри панелей */
+.tree-container,
+.preview {
+    flex: 1;
+    overflow-y: auto;
+    min-height: 0;
+}

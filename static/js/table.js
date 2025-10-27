@@ -1,12 +1,25 @@
-// Управление таблицами
-
+/**
+ * Класс для управления таблицами в редакторе
+ * Обрабатывает рендеринг, редактирование, изменение размеров и объединение ячеек
+ */
 class TableManager {
+    /**
+     * Создаёт экземпляр менеджера таблиц
+     * @param {string} containerId - ID контейнера для отображения таблиц
+     */
     constructor(containerId) {
+        // DOM-элемент контейнера
         this.container = document.getElementById(containerId);
+        // Массив выбранных ячеек
         this.selectedCells = [];
+        // Флаг процесса изменения размеров
         this.isResizing = false;
     }
 
+    /**
+     * Отрисовывает все таблицы из состояния приложения
+     * Очищает контейнер и создаёт новые элементы для каждой таблицы
+     */
     renderAll() {
         this.container.innerHTML = '';
         Object.values(AppState.tables).forEach(table => {
@@ -16,6 +29,11 @@ class TableManager {
         this.attachEventListeners();
     }
 
+    /**
+     * Создаёт секцию для таблицы с заголовком и скролл-контейнером
+     * @param {Object} table - Данные таблицы
+     * @returns {HTMLElement} DOM-элемент секции таблицы
+     */
     createTableSection(table) {
         const section = document.createElement('div');
         section.className = 'table-section';
@@ -26,10 +44,9 @@ class TableManager {
         title.textContent = node ? node.label : 'Таблица';
         section.appendChild(title);
 
-        // Враппер для скролла — предотвращает выход таблицы за пределы секции
+        // Контейнер со скроллом для предотвращения выхода таблицы за границы
         const scroll = document.createElement('div');
         scroll.className = 'table-scroll';
-
         const tableEl = this.createTableElement(table);
         scroll.appendChild(tableEl);
         section.appendChild(scroll);
@@ -37,10 +54,16 @@ class TableManager {
         return section;
     }
 
+    /**
+     * Создаёт HTML-элемент таблицы с обработкой объединённых ячеек
+     * @param {Object} table - Данные таблицы
+     * @returns {HTMLElement} DOM-элемент таблицы
+     */
     createTableElement(table) {
         const tableEl = document.createElement('table');
         tableEl.className = 'editable-table';
 
+        // Вычисление максимального количества колонок с учётом colspan
         let maxCols = 0;
         table.rows.forEach(row => {
             let colCount = 0;
@@ -59,7 +82,7 @@ class TableManager {
 
                 const cellEl = document.createElement(cell.isHeader ? 'th' : 'td');
 
-                // ИСПРАВЛЕНИЕ: Правильно отображаем многострочный контент
+                // Корректное отображение многострочного контента
                 if (cell.content) {
                     const lines = cell.content.split('\n');
                     lines.forEach((line, index) => {
@@ -78,6 +101,7 @@ class TableManager {
                 cellEl.dataset.col = colIndex;
                 cellEl.dataset.tableId = table.id;
 
+                // Добавление ручки изменения ширины колонки (кроме последней колонки)
                 const colspan = cell.colspan || 1;
                 const cellEndCol = colIndex + colspan - 1;
                 const isLastColumn = cellEndCol >= maxCols - 1;
@@ -88,6 +112,7 @@ class TableManager {
                     cellEl.appendChild(resizeHandle);
                 }
 
+                // Ручка изменения высоты строки
                 const rowResizeHandle = document.createElement('div');
                 rowResizeHandle.className = 'row-resize-handle';
                 cellEl.appendChild(rowResizeHandle);
@@ -100,23 +125,29 @@ class TableManager {
         return tableEl;
     }
 
+    /**
+     * Подключает обработчики событий ко всем ячейкам и ручкам изменения размеров
+     * Обрабатывает клики, двойные клики, контекстное меню и изменение размеров
+     */
     attachEventListeners() {
-        // Выбор и редактирование — без изменений, но важная деталь:
-        // в CSS ручки имеют z-index и pointer-events: auto, поэтому остаются доступны.
+        // Обработка кликов по ячейкам
         this.container.querySelectorAll('td, th').forEach(cell => {
             cell.addEventListener('click', (e) => {
                 if (e.target.classList.contains('resize-handle') ||
                     e.target.classList.contains('row-resize-handle')) return;
+
                 if (!e.ctrlKey) this.clearSelection();
                 this.selectCell(cell);
             });
 
+            // Двойной клик запускает режим редактирования
             cell.addEventListener('dblclick', (e) => {
                 if (e.target.classList.contains('resize-handle') ||
                     e.target.classList.contains('row-resize-handle')) return;
                 this.startEditing(cell);
             });
 
+            // Контекстное меню для дополнительных операций
             cell.addEventListener('contextmenu', (e) => {
                 e.preventDefault();
                 if (this.selectedCells.length === 0) this.selectCell(cell);
@@ -124,7 +155,7 @@ class TableManager {
             });
         });
 
-        // Колонки
+        // Обработчики изменения ширины колонок
         this.container.querySelectorAll('.resize-handle').forEach(handle => {
             handle.addEventListener('mousedown', (e) => {
                 e.preventDefault();
@@ -132,7 +163,7 @@ class TableManager {
             });
         });
 
-        // Строки
+        // Обработчики изменения высоты строк
         this.container.querySelectorAll('.row-resize-handle').forEach(handle => {
             handle.addEventListener('mousedown', (e) => {
                 e.preventDefault();
@@ -141,32 +172,43 @@ class TableManager {
         });
     }
 
+    /**
+     * Добавляет ячейку в список выбранных
+     * @param {HTMLElement} cell - DOM-элемент ячейки
+     */
     selectCell(cell) {
         cell.classList.add('selected');
         this.selectedCells.push(cell);
         AppState.selectedCells = this.selectedCells;
     }
 
+    /**
+     * Снимает выделение со всех ячеек
+     */
     clearSelection() {
         this.selectedCells.forEach(cell => cell.classList.remove('selected'));
         this.selectedCells = [];
         AppState.selectedCells = [];
     }
 
+    /**
+     * Запускает режим редактирования ячейки
+     * Создаёт textarea для многострочного ввода текста
+     * @param {HTMLElement} cell - DOM-элемент ячейки
+     */
     startEditing(cell) {
         const originalContent = cell.textContent;
         cell.classList.add('editing');
 
-        // ИСПРАВЛЕНИЕ: Используем textarea вместо input для поддержки многострочного текста
+        // Используем textarea для поддержки многострочного текста
         const textarea = document.createElement('textarea');
         textarea.className = 'cell-editor';
         textarea.value = originalContent;
-
         cell.textContent = '';
         cell.appendChild(textarea);
         textarea.focus();
 
-        // Автоматически подстраиваем высоту
+        // Автоматическая подстройка высоты под контент
         const adjustHeight = () => {
             textarea.style.height = 'auto';
             textarea.style.height = textarea.scrollHeight + 'px';
@@ -174,13 +216,15 @@ class TableManager {
         adjustHeight();
         textarea.addEventListener('input', adjustHeight);
 
+        /**
+         * Завершает редактирование и сохраняет изменения
+         * @param {boolean} [cancel=false] - True для отмены изменений
+         */
         const finishEditing = (cancel = false) => {
             const newValue = cancel ? originalContent : textarea.value;
-
-            // ИСПРАВЛЕНИЕ: Правильно отображаем многострочный текст
             cell.textContent = '';
 
-            // Создаем элементы для отображения с переносами строк
+            // Создание элементов для корректного отображения переносов строк
             const lines = newValue.split('\n');
             lines.forEach((line, index) => {
                 const textNode = document.createTextNode(line);
@@ -192,6 +236,7 @@ class TableManager {
 
             cell.classList.remove('editing');
 
+            // Сохранение в состояние
             if (!cancel) {
                 const tableId = cell.dataset.tableId;
                 const row = parseInt(cell.dataset.row);
@@ -211,21 +256,21 @@ class TableManager {
 
         const keydownHandler = (e) => {
             if (e.key === 'Enter' && e.shiftKey) {
-                // Shift+Enter - новая строка (по умолчанию работает)
+                // Shift+Enter - добавление новой строки
                 e.stopPropagation();
             } else if (e.key === 'Enter' && !e.shiftKey) {
-                // Enter без Shift - ПРИНЯТЬ и завершить редактирование
+                // Enter - сохранение и выход из редактирования
                 e.preventDefault();
                 textarea.removeEventListener('blur', blurHandler);
                 textarea.removeEventListener('keydown', keydownHandler);
-                finishEditing(false); // false = сохранить изменения
+                finishEditing(false);
             } else if (e.key === 'Escape') {
-                // Escape - ОТМЕНИТЬ и завершить редактирование
+                // Escape - отмена изменений
                 e.preventDefault();
                 e.stopPropagation();
                 textarea.removeEventListener('blur', blurHandler);
                 textarea.removeEventListener('keydown', keydownHandler);
-                finishEditing(true); // true = отменить изменения
+                finishEditing(true);
             }
         };
 
@@ -233,6 +278,11 @@ class TableManager {
         textarea.addEventListener('keydown', keydownHandler);
     }
 
+    /**
+     * Запускает процесс изменения ширины колонки
+     * Создаёт визуальную линию и обрабатывает перемещение мыши
+     * @param {MouseEvent} e - Событие mousedown на ручке изменения размера
+     */
     static startColumnResize(e) {
         const cell = e.target.parentElement;
         const table = cell.closest('table');
@@ -241,9 +291,8 @@ class TableManager {
         const startWidth = cell.offsetWidth;
         const colIndex = parseInt(cell.dataset.col);
 
-        // Пересчёт суммарной ширины колонок для вычисления максимального ограничения
+        // Вычисление текущих ширин колонок
         const allRows = table.querySelectorAll('tr');
-        // Берём первую строку как эталонную по числу видимых колонок
         const firstRowCells = allRows[0].querySelectorAll('td, th');
         let colWidths = [];
         firstRowCells.forEach((cell, idx) => {
@@ -257,7 +306,7 @@ class TableManager {
         document.body.style.userSelect = 'none';
         table.classList.add('resizing');
 
-        // Вспомогательная линия
+        // Визуальная линия для отображения новой позиции границы
         const resizeLine = document.createElement('div');
         resizeLine.style.position = 'fixed';
         resizeLine.style.top = '0';
@@ -269,25 +318,30 @@ class TableManager {
         resizeLine.style.left = e.clientX + 'px';
         document.body.appendChild(resizeLine);
 
-        // Рассчитываем максимально допустимую ширину для изменения чтобы не вылезать за scrollContainer
+        /**
+         * Вычисляет максимально допустимую ширину колонки
+         * @returns {number} Максимальная ширина в пикселях
+         */
         const getMaxAllowedWidth = () => {
-            const scrollWidth = scrollContainer.offsetWidth; // видимая ширина секции
+            const scrollWidth = scrollContainer.offsetWidth;
             let otherColsTotal = 0;
             colWidths.forEach((w, idx) => {
                 if (idx !== colIndex) otherColsTotal += w;
             });
-            // Не даём ширине превышать (scrollWidth - сумма прочих колонок), но с учётом minWidth
             return Math.max(minWidth, Math.min(maxWidth, scrollWidth - otherColsTotal));
         };
 
         const onMouseMove = (ev) => {
             const diff = ev.clientX - startX;
-            let newWidth = startWidth + diff; // тянем правую границу
+            let newWidth = startWidth + diff;
             const allowed = getMaxAllowedWidth();
+
             if (newWidth > allowed) newWidth = allowed;
             newWidth = Math.max(minWidth, Math.min(maxWidth, newWidth));
+
             resizeLine.style.left = (startX + (newWidth - startWidth)) + 'px';
 
+            // Применение новой ширины ко всем ячейкам колонки
             allRows.forEach(row => {
                 const cellsInRow = row.querySelectorAll('td, th');
                 cellsInRow.forEach(rowCell => {
@@ -309,6 +363,7 @@ class TableManager {
             document.removeEventListener('mousemove', onMouseMove);
             document.removeEventListener('mouseup', onMouseUp);
 
+            // Сохранение размеров таблицы
             const section = table.closest('.table-section');
             if (section) {
                 const tableId = section.dataset.tableId;
@@ -320,6 +375,10 @@ class TableManager {
         document.addEventListener('mouseup', onMouseUp);
     }
 
+    /**
+     * Запускает процесс изменения высоты строки
+     * @param {MouseEvent} e - Событие mousedown на ручке изменения размера
+     */
     startRowResize(e) {
         const cell = e.target.parentElement;
         const startY = e.clientY;
@@ -339,10 +398,14 @@ class TableManager {
         document.addEventListener('mouseup', onMouseUp);
     }
 
+    /**
+     * Объединяет выбранные ячейки в одну
+     * Проверяет корректность выделенной области и объединяет содержимое
+     */
     mergeCells() {
         if (this.selectedCells.length < 2) return;
 
-        // Получить координаты выбранных ячеек
+        // Получение координат всех выбранных ячеек
         const coords = this.selectedCells.map(cell => ({
             row: parseInt(cell.dataset.row),
             col: parseInt(cell.dataset.col),
@@ -350,7 +413,7 @@ class TableManager {
             cell: cell
         }));
 
-        // Все ячейки должны быть из одной таблицы
+        // Проверка: все ячейки должны быть из одной таблицы
         const tableId = coords[0].tableId;
         if (!coords.every(c => c.tableId === tableId)) {
             alert('Можно объединять только ячейки из одной таблицы');
@@ -360,7 +423,7 @@ class TableManager {
         const table = AppState.tables[tableId];
         if (!table) return;
 
-        // Проверка: ни одна из выбранных ячеек не должна быть уже объединенной
+        // Проверка: ни одна ячейка не должна быть уже объединённой
         for (let coord of coords) {
             const cellData = table.rows[coord.row].cells[coord.col];
             if (cellData.colspan > 1 || cellData.rowspan > 1) {
@@ -369,7 +432,7 @@ class TableManager {
             }
         }
 
-        // Найти минимальные и максимальные координаты
+        // Определение границ выделенной области
         const minRow = Math.min(...coords.map(c => c.row));
         const maxRow = Math.max(...coords.map(c => c.row));
         const minCol = Math.min(...coords.map(c => c.col));
@@ -378,14 +441,14 @@ class TableManager {
         const rowspan = maxRow - minRow + 1;
         const colspan = maxCol - minCol + 1;
 
-        // Проверка: должны быть выбраны ВСЕ ячейки прямоугольной области
+        // Проверка: должна быть выбрана полная прямоугольная область
         const expectedCellsCount = rowspan * colspan;
         if (this.selectedCells.length !== expectedCellsCount) {
             alert('Можно объединять только полную прямоугольную или квадратную область ячеек');
             return;
         }
 
-        // Проверка: все ячейки в прямоугольнике должны быть выбраны
+        // Проверка: все ячейки прямоугольника должны быть выбраны
         const selectedSet = new Set(coords.map(c => `${c.row}-${c.col}`));
         for (let r = minRow; r <= maxRow; r++) {
             for (let c = minCol; c <= maxCol; c++) {
@@ -396,7 +459,7 @@ class TableManager {
             }
         }
 
-        // Дополнительная проверка: убедиться, что в выделенной области нет merged ячеек
+        // Проверка на уже объединённые ячейки в области
         for (let r = minRow; r <= maxRow; r++) {
             for (let c = minCol; c <= maxCol; c++) {
                 if (table.rows[r].cells[c].merged) {
@@ -406,12 +469,12 @@ class TableManager {
             }
         }
 
-        // Установить colspan и rowspan для первой ячейки
+        // Установка параметров объединения для первой ячейки
         const firstCell = table.rows[minRow].cells[minCol];
         firstCell.colspan = colspan;
         firstCell.rowspan = rowspan;
 
-        // Объединить содержимое всех ячеек
+        // Объединение содержимого всех ячеек
         let mergedContent = [];
         for (let r = minRow; r <= maxRow; r++) {
             for (let c = minCol; c <= maxCol; c++) {
@@ -423,7 +486,7 @@ class TableManager {
         }
         firstCell.content = mergedContent.join(' ');
 
-        // Пометить остальные ячейки как объединенные
+        // Пометка остальных ячеек как объединённых
         for (let r = minRow; r <= maxRow; r++) {
             for (let c = minCol; c <= maxCol; c++) {
                 if (r !== minRow || c !== minCol) {
@@ -435,6 +498,10 @@ class TableManager {
         this.clearSelection();
     }
 
+    /**
+     * Разделяет объединённую ячейку
+     * Восстанавливает все ячейки в исходное состояние
+     */
     unmergeCells() {
         if (this.selectedCells.length !== 1) return;
 
@@ -448,7 +515,7 @@ class TableManager {
 
         const cellData = table.rows[row].cells[col];
 
-        // Проверить, что ячейка действительно объединена
+        // Проверка: ячейка должна быть объединённой
         if (cellData.colspan <= 1 && cellData.rowspan <= 1) {
             return;
         }
@@ -456,14 +523,15 @@ class TableManager {
         const rowspan = cellData.rowspan || 1;
         const colspan = cellData.colspan || 1;
 
-        // Восстановить все ячейки
+        // Восстановление всех ячеек
         for (let r = row; r < row + rowspan; r++) {
             for (let c = col; c < col + colspan; c++) {
                 if (table.rows[r] && table.rows[r].cells[c]) {
                     table.rows[r].cells[c].merged = false;
                     table.rows[r].cells[c].colspan = 1;
                     table.rows[r].cells[c].rowspan = 1;
-                    // Очистить содержимое всех кроме первой
+
+                    // Очистка содержимого всех ячеек кроме первой
                     if (r !== row || c !== col) {
                         table.rows[r].cells[c].content = '';
                     }
@@ -475,4 +543,5 @@ class TableManager {
     }
 }
 
+/** Глобальный экземпляр менеджера таблиц */
 const tableManager = new TableManager('tablesContainer');

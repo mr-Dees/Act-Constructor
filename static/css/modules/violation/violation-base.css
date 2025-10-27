@@ -1,0 +1,67 @@
+/*
+ * Базовые стили для секции нарушений
+ * Структура и оформление блока с описанием нарушения
+ */
+
+/* Контейнер секции нарушения */
+.violation-section {
+    margin: var(--spacing-lg) 0;
+    padding: var(--spacing-lg);
+    border: 1px solid var(--border);
+    border-left: 0.1875rem solid var(--primary);
+    border-radius: var(--radius-md);
+    background-color: var(--bg-secondary);
+}
+
+/* Сетка для двух колонок полей */
+.violation-columns {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: var(--spacing-lg);
+    margin-bottom: var(--spacing-lg);
+}
+
+/* Отдельная колонка */
+.violation-column {
+    display: flex;
+    flex-direction: column;
+}
+
+/* Метка поля ввода */
+.violation-label {
+    font-weight: 600;
+    font-size: 0.8125rem;
+    margin-bottom: 0.5rem;
+    color: var(--text-secondary);
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+}
+
+/* Многострочное текстовое поле */
+.violation-textarea {
+    width: 100%;
+    padding: 0.6875rem 0.875rem;
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    font-family: inherit;
+    font-size: 0.875rem;
+    resize: vertical;
+    min-height: 5rem;
+    max-height: 25rem;
+    background-color: var(--bg-primary);
+    transition: all 0.2s ease;
+    color: var(--text-primary);
+    line-height: 1.5;
+}
+
+/* Подсветка границы при наведении */
+.violation-textarea:hover {
+    border-color: var(--border-medium);
+}
+
+/* Акцент при фокусе на поле */
+.violation-textarea:focus {
+    outline: none;
+    border-color: var(--primary);
+    box-shadow: 0 0 0 0.1875rem var(--primary-subtle);
+}

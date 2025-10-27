@@ -1,0 +1,80 @@
+/*
+ * Модальное окно справки
+ * Полноэкранное окно с инструкциями по использованию приложения
+ */
+
+/* Оверлей модального окна справки */
+.help-modal {
+    position: fixed;
+    top: 0;
+    left: 0;
+    width: 100%;
+    height: 100%;
+    background: rgba(0, 0, 0, 0.6);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    z-index: 10000;
+    backdrop-filter: blur(0.25em);
+    animation: fadeIn 0.3s ease;
+}
+
+/* Скрытое состояние модального окна */
+.help-modal.hidden {
+    display: none;
+}
+
+/* Контейнер содержимого справки */
+.help-modal-content {
+    background: white;
+    border-radius: 0.75em;
+    max-width: 43.75em;
+    width: 90%;
+    max-height: 80vh;
+    display: flex;
+    flex-direction: column;
+    box-shadow: 0 0.625em 2.5em rgba(0, 0, 0, 0.3);
+    animation: slideDown 0.3s ease;
+}
+
+/* Шапка модального окна */
+.help-modal-header {
+    padding: 1.25em 1.5em;
+    border-bottom: 0.0625em solid #e0e0e0;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    background: linear-gradient(to bottom, #748fca 0%, #9d7cb8 100%);
+    color: white;
+    border-radius: 0.75em 0.75em 0 0;
+}
+
+/* Заголовок справки */
+.help-modal-header h3 {
+    margin: 0;
+    font-size: 1.25em;
+    font-weight: 600;
+}
+
+/* Кнопка закрытия модального окна */
+.help-modal-close {
+    background: none;
+    border: none;
+    font-size: 1.75em;
+    cursor: pointer;
+    color: white;
+    line-height: 1;
+    padding: 0;
+    width: 2em;
+    height: 2em;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    border-radius: 0.25em;
+    transition: background 0.2s;
+}
+
+/* Подсветка кнопки закрытия при наведении */
+.help-modal-close:hover {
+    background: rgba(255, 255, 255, 0.2);
+}

@@ -1,0 +1,82 @@
+/*
+ * Состояния ячеек таблицы
+ * Стили для выделенных, редактируемых и объединенных ячеек
+ */
+
+/* Выделенная ячейка */
+.editable-table td.selected,
+.editable-table th.selected {
+    background: var(--primary-subtle);
+    outline: 2px solid var(--primary);
+    outline-offset: -2px;
+}
+
+/* Выделенный заголовок */
+.editable-table th.selected {
+    background: linear-gradient(135deg, #6579b5 0%, #8b6aa5 100%);
+}
+
+/* Ячейка в режиме редактирования */
+.editable-table td.editing {
+    padding: 0;
+    height: auto;
+    background: var(--bg-primary);
+}
+
+/* Поле ввода в режиме редактирования */
+.editable-table td.editing input {
+    width: 100%;
+    height: auto;
+    border: none;
+    padding: 0.625rem 0.75rem 1.125rem 0.75rem;
+    font-family: inherit;
+    font-size: inherit;
+    box-sizing: border-box;
+    outline: none;
+    background: transparent;
+    margin: 0;
+    min-height: 2.25rem;
+    display: block;
+    color: var(--text-primary);
+}
+
+/* Объединенные ячейки */
+.editable-table td[colspan],
+.editable-table td[rowspan] {
+    background: var(--bg-secondary);
+    vertical-align: top;
+}
+
+/* Ячейка с объединением колонок */
+.editable-table td[colspan] {
+    width: auto;
+    max-width: none;
+}
+
+/* Ячейка с объединением строк */
+.editable-table td[rowspan] {
+    height: auto;
+    max-height: none;
+}
+
+/* Скрытие хендлов изменения размера при редактировании */
+.editable-table td.editing .resize-handle,
+.editable-table td.editing .row-resize-handle {
+    display: none;
+}
+
+/* Таблица в режиме изменения размеров */
+.editable-table.resizing {
+    user-select: none;
+}
+
+/* Блокировка взаимодействия при изменении размеров */
+.editable-table.resizing * {
+    pointer-events: none;
+}
+
+/* Хендлы остаются активными при изменении размеров */
+.editable-table.resizing .resize-handle,
+.editable-table.resizing .row-resize-handle {
+    pointer-events: auto;
+}

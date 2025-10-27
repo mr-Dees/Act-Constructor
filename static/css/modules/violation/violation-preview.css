@@ -1,0 +1,30 @@
+/*
+ * Предпросмотр нарушения
+ * Стили для отображения нарушения в области предпросмотра документа
+ */
+
+/* Контейнер нарушения в предпросмотре */
+.preview-violation {
+    margin: 0.5rem 0;
+    padding: 0.625rem 0;
+    font-size: 0.875rem;
+    line-height: 1.6;
+    color: var(--text-primary);
+}
+
+/* Строка информации о нарушении */
+.preview-violation-line {
+    margin: 0.25rem 0;
+    color: var(--text-primary);
+}
+
+/* Выделенный текст в строке */
+.preview-violation-line strong {
+    color: var(--text-primary);
+    font-weight: 600;
+}
+
+/* Обычный текст в строке */
+.preview-violation-line span {
+    color: var(--text-secondary);
+}

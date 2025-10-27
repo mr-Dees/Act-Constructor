@@ -1,0 +1,32 @@
+/*
+ * Основной контейнер приложения
+ * Определяет область контента под шапкой
+ */
+
+.container {
+    max-width: 95vw;
+    width: 95vw;
+    margin: 0 auto 1.25vh auto;
+    background: var(--bg-primary);
+    border-radius: var(--radius-xl);
+    box-shadow: var(--shadow-xl);
+    overflow: visible;
+    /* Высота с учетом фиксированной шапки */
+    min-height: calc(100vh - max(var(--header-height), var(--header-min-height)) - 2.5vh);
+}
+
+/* Внутренняя область контента */
+.content {
+    padding: var(--spacing-xl);
+    height: calc(100vh - max(var(--header-height), var(--header-min-height)) - 2.5vh);
+    display: flex;
+    flex-direction: column;
+}
+
+/* Область контента текущего шага */
+.step-content {
+    padding: var(--spacing-lg);
+    height: 100%;
+    display: flex;
+    flex-direction: column;
+}

@@ -1,0 +1,74 @@
+/*
+ * Хендлы изменения размеров таблицы
+ * Элементы для изменения ширины колонок и высоты строк
+ */
+
+/* Хендл изменения ширины колонки */
+.resize-handle {
+    position: absolute;
+    right: -0.3125rem;
+    top: 0;
+    width: 0.5rem;
+    height: 100%;
+    cursor: col-resize;
+    background: transparent;
+    z-index: 30;
+    opacity: 0;
+    transition: all 0.15s ease;
+    border-right: 2px solid transparent;
+    pointer-events: auto;
+}
+
+/* Подсветка хендла колонки при наведении */
+.resize-handle:hover {
+    background: rgba(91, 111, 168, 0.3);
+    border-right: 2px solid var(--primary) !important;
+    right: -0.3125rem;
+    width: 0.5rem;
+    opacity: 1;
+    cursor: col-resize !important;
+}
+
+/* Хендл изменения высоты строки */
+.row-resize-handle {
+    position: absolute;
+    bottom: -0.3125rem;
+    left: 0;
+    width: 100%;
+    height: 0.5rem;
+    cursor: row-resize;
+    background: transparent;
+    z-index: 30;
+    opacity: 0;
+    transition: all 0.15s ease;
+    border-bottom: 2px solid transparent;
+    pointer-events: auto;
+}
+
+/* Подсветка хендла строки при наведении */
+.row-resize-handle:hover {
+    background: rgba(91, 111, 168, 0.3);
+    border-bottom: 2px solid var(--primary) !important;
+    bottom: -0.3125rem;
+    height: 0.5rem;
+    opacity: 1;
+    cursor: row-resize !important;
+}
+
+/* Видимость хендлов при наведении на ячейку */
+.editable-table td:hover .resize-handle,
+.editable-table th:hover .resize-handle {
+    opacity: 0.6;
+    background: rgba(91, 111, 168, 0.2);
+    border-right-color: rgba(91, 111, 168, 0.6);
+}
+
+/* Полная видимость хендлов при прямом наведении */
+.resize-handle:hover,
+.row-resize-handle:hover,
+.editable-table td:hover .resize-handle,
+.editable-table td:hover .row-resize-handle,
+.editable-table th:hover .resize-handle,
+.editable-table th:hover .row-resize-handle {
+    opacity: 1;
+}

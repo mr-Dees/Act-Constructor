@@ -1,0 +1,107 @@
+/*
+ * Список элементов нарушения
+ * Динамический список с возможностью добавления и удаления элементов
+ */
+
+/* Кнопка добавления элемента в список */
+.violation-list-add-btn {
+    background: var(--primary);
+    color: white;
+    border: none;
+    padding: 0.5rem 1.125rem;
+    border-radius: var(--radius);
+    cursor: pointer;
+    font-size: 0.8125rem;
+    font-weight: 500;
+    margin-bottom: 0.625rem;
+    transition: all 0.2s ease;
+    box-shadow: var(--shadow-xs);
+}
+
+/* Подсветка кнопки добавления при наведении */
+.violation-list-add-btn:hover {
+    background: var(--primary-hover);
+    box-shadow: var(--shadow-sm);
+}
+
+/* Эффект нажатия кнопки */
+.violation-list-add-btn:active {
+    transform: translateY(1px);
+}
+
+/* Контейнер списка элементов */
+.violation-list-container {
+    margin-top: 0.625rem;
+}
+
+/* Отдельный элемент списка */
+.violation-list-item {
+    display: flex;
+    align-items: center;
+    gap: 0.625rem;
+    margin-bottom: 0.625rem;
+}
+
+/* Маркер элемента списка */
+.violation-list-item::before {
+    content: '•';
+    font-size: 1.125rem;
+    color: var(--primary);
+    font-weight: bold;
+    line-height: 1;
+}
+
+/* Поле ввода элемента списка */
+.violation-list-input {
+    flex: 1;
+    padding: 0.625rem 0.75rem;
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    font-family: inherit;
+    font-size: 0.875rem;
+    background-color: var(--bg-primary);
+    transition: all 0.2s ease;
+    color: var(--text-primary);
+}
+
+/* Подсветка границы при наведении */
+.violation-list-input:hover {
+    border-color: var(--border-medium);
+}
+
+/* Акцент при фокусе на поле */
+.violation-list-input:focus {
+    outline: none;
+    border-color: var(--primary);
+    box-shadow: 0 0 0 0.1875rem var(--primary-subtle);
+}
+
+/* Кнопка удаления элемента списка */
+.violation-list-delete-btn {
+    width: 2rem;
+    height: 2rem;
+    border: none;
+    background-color: var(--error);
+    color: white;
+    border-radius: var(--radius);
+    cursor: pointer;
+    font-size: 1.125rem;
+    line-height: 1;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    transition: all 0.2s ease;
+    flex-shrink: 0;
+    box-shadow: var(--shadow-xs);
+}
+
+/* Затемнение кнопки удаления при наведении */
+.violation-list-delete-btn:hover {
+    background-color: #b54545;
+    box-shadow: var(--shadow-sm);
+}
+
+/* Эффект нажатия кнопки удаления */
+.violation-list-delete-btn:active {
+    transform: scale(0.95);
+}

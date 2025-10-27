@@ -1,0 +1,22 @@
+/*
+ * Уровни вложенности элементов
+ * Визуальное отображение иерархии через отступы и цвета
+ */
+
+/* Второй уровень вложенности */
+.item-block.level-2 {
+    margin-left: 1.25rem;
+    border-left-color: var(--primary-light);
+}
+
+/* Третий уровень вложенности */
+.item-block.level-3 {
+    margin-left: 2.5rem;
+    border-left-color: var(--accent);
+}
+
+/* Четвертый уровень вложенности */
+.item-block.level-4 {
+    margin-left: 3.75rem;
+    border-left-color: var(--secondary);
+}

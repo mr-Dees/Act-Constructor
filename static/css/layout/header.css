@@ -1,0 +1,73 @@
+/*
+ * Стили для шапки приложения
+ * Содержит заголовок и навигацию по шагам
+ */
+
+.header {
+    background: linear-gradient(to right, #748fca 0%, #9d7cb8 100%);
+    color: white;
+    padding: var(--spacing-lg) var(--spacing-2xl);
+    position: fixed;
+    top: 0;
+    left: 0;
+    right: 0;
+    z-index: 1000;
+    box-shadow: var(--shadow-md);
+    display: flex;
+    flex-direction: column;
+    justify-content: center;
+    align-items: center;
+}
+
+/* Основной заголовок */
+.header h1 {
+    font-size: 1.75rem;
+    font-weight: 700;
+    letter-spacing: -0.02em;
+    margin-bottom: var(--spacing);
+    text-shadow: 0 2px 4px rgba(0, 0, 0, 0.15);
+    text-align: center;
+}
+
+/* Контейнер для шагов навигации */
+.steps-container {
+    display: flex;
+    gap: 1.5em;
+    align-items: center;
+}
+
+/* Список шагов */
+.steps {
+    display: flex;
+    justify-content: center;
+    gap: var(--spacing);
+}
+
+/* Элемент шага */
+.step {
+    padding: 0.5rem 1.125rem;
+    background: rgba(255, 255, 255, 0.18);
+    border: 1px solid rgba(255, 255, 255, 0.3);
+    border-radius: var(--radius);
+    font-weight: 500;
+    font-size: 0.875rem;
+    cursor: pointer;
+    transition: all 0.2s ease;
+    color: white;
+}
+
+/* Состояние при наведении */
+.step:hover {
+    background: rgba(255, 255, 255, 0.25);
+    border-color: rgba(255, 255, 255, 0.4);
+    transform: translateY(-1px);
+    box-shadow: var(--shadow-sm);
+}
+
+/* Активный шаг */
+.step.active {
+    background: var(--bg-primary);
+    color: var(--primary);
+    border-color: var(--bg-primary);
+    box-shadow: var(--shadow-sm);
+}

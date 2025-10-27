@@ -1,0 +1,136 @@
+/*
+ * Базовые стили редактируемых таблиц
+ * Структура и оформление таблиц с возможностью редактирования
+ */
+
+/* Секция таблицы с заголовком */
+.table-section {
+    margin: var(--spacing-lg) 0;
+    padding: var(--spacing-lg);
+    background: var(--bg-primary);
+    border-radius: var(--radius-md);
+    overflow: hidden;
+    position: relative;
+    border: 1px solid var(--border);
+    box-shadow: var(--shadow-sm);
+}
+
+/* Заголовок секции таблицы */
+.table-section h3 {
+    color: var(--text-primary);
+    margin-bottom: var(--spacing-md);
+    font-size: 0.9375rem;
+    font-weight: 600;
+}
+
+/* Основная таблица с фиксированной разметкой */
+.editable-table {
+    width: 100%;
+    min-width: 100%;
+    max-width: 100%;
+    border-collapse: collapse;
+    background: var(--bg-primary);
+    border-radius: var(--radius);
+    overflow: visible;
+    box-shadow: var(--shadow-xs);
+    table-layout: fixed;
+    margin: 0;
+    border: 2px solid var(--border-medium);
+}
+
+/* Общие стили ячеек таблицы */
+.editable-table th,
+.editable-table td {
+    border: 1px solid var(--border-medium);
+    padding: 0.625rem 0.75rem;
+    text-align: left;
+    position: relative;
+    min-width: 5rem;
+    max-width: 50rem;
+    min-height: 2.25rem;
+    max-height: 37.5rem;
+    word-wrap: break-word;
+    word-break: normal;
+    overflow-wrap: anywhere;
+    white-space: normal;
+    height: auto;
+    box-sizing: border-box;
+    font-size: 0.875rem;
+    line-height: 1.5;
+}
+
+/* Заголовки колонок таблицы */
+.editable-table th {
+    background: linear-gradient(135deg, #748fca 0%, #9d7cb8 100%);
+    color: white;
+    font-weight: 600;
+    cursor: col-resize;
+    position: relative;
+    height: auto;
+}
+
+/* Затемнение заголовка при наведении */
+.editable-table th:hover {
+    background: linear-gradient(135deg, #6a81ba 0%, #9170ab 100%);
+}
+
+/* Ячейки данных таблицы */
+.editable-table td {
+    cursor: cell;
+    background: var(--bg-primary);
+}
+
+/* Подсветка ячейки при наведении */
+.editable-table td:hover {
+    background: var(--gray-50);
+}
+
+/* Контейнер с горизонтальной прокруткой */
+.table-section .table-scroll {
+    width: 100%;
+    overflow-x: auto;
+    overflow-y: hidden;
+}
+
+/* Контейнер таблицы с видимым переполнением */
+.editable-table-container {
+    overflow: visible;
+    position: relative;
+    padding: 0.625rem;
+}
+
+/* Плавный переход для всех ячеек */
+.editable-table td,
+.editable-table th {
+    transition: all 0.15s ease;
+}
+
+/* Увеличение z-index при наведении */
+.editable-table td:hover,
+.editable-table th:hover {
+    position: relative;
+    z-index: 10;
+}
+
+/* Контейнер таблиц внутри элемента */
+.item-tables {
+    margin-top: var(--spacing-md);
+    padding: 0 0.625rem;
+    overflow: visible;
+}
+
+/* Секция таблицы внутри элемента */
+.item-tables .table-section {
+    margin: var(--spacing-md) 0;
+    padding: var(--spacing-lg);
+    background: var(--bg-secondary);
+    border-radius: var(--radius-md);
+    border: 1px solid var(--border-light);
+    overflow: visible;
+    box-shadow: var(--shadow-xs);
+}
+
+/* Уменьшенный размер шрифта для вложенных таблиц */
+.item-tables .editable-table {
+    font-size: 0.875rem;
+}

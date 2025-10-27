@@ -1,0 +1,41 @@
+/*
+ * Содержимое элемента списка
+ * Текстовые области для ввода и контейнеры дочерних элементов
+ */
+
+/* Область содержимого элемента */
+.item-content {
+    margin-bottom: var(--spacing-md);
+}
+
+/* Многострочное текстовое поле */
+.item-textarea {
+    width: 100%;
+    padding: 0.6875rem 0.875rem;
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    font-family: inherit;
+    font-size: 0.9375rem;
+    resize: vertical;
+    min-height: 5rem;
+    transition: all 0.2s ease;
+    background: var(--bg-primary);
+    color: var(--text-primary);
+}
+
+/* Подсветка границы при наведении */
+.item-textarea:hover {
+    border-color: var(--border-medium);
+}
+
+/* Акцент при фокусе на поле */
+.item-textarea:focus {
+    outline: none;
+    border-color: var(--primary);
+    box-shadow: 0 0 0 0.1875rem var(--primary-subtle);
+}
+
+/* Контейнер для вложенных дочерних элементов */
+.item-children {
+    margin-top: var(--spacing-md);
+}

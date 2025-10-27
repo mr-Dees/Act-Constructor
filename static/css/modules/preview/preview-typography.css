@@ -1,14 +1,9 @@
-.preview {
-    background: var(--bg-primary);
-    padding: var(--spacing-xl);
-    border-radius: var(--radius-md);
-    font-family: 'Times New Roman', Georgia, serif;
-    border: 1px solid var(--border);
-    font-size: 0.9375rem;
-    overflow-y: auto;
-    box-shadow: var(--shadow-sm);
-}
+/*
+ * Типографика в предпросмотре
+ * Стили текстовых элементов для имитации документа
+ */
 
+/* Главный заголовок документа */
 .preview h1 {
     text-align: center;
     margin-bottom: var(--spacing-lg);
@@ -17,6 +12,7 @@
     font-weight: 700;
 }
 
+/* Заголовок второго уровня */
 .preview h2 {
     margin-top: var(--spacing-lg);
     margin-bottom: var(--spacing-sm);
@@ -25,6 +21,7 @@
     font-weight: 600;
 }
 
+/* Заголовок третьего уровня */
 .preview h3 {
     margin-top: var(--spacing-md);
     margin-bottom: var(--spacing-xs);
@@ -33,6 +30,7 @@
     font-weight: 600;
 }
 
+/* Заголовок четвертого уровня */
 .preview h4 {
     margin-top: var(--spacing);
     margin-bottom: var(--spacing-xs);
@@ -41,6 +39,7 @@
     font-weight: 600;
 }
 
+/* Абзацы текста */
 .preview p {
     margin-bottom: var(--spacing-sm);
     line-height: 1.6;
@@ -48,33 +47,14 @@
     color: var(--text-primary);
 }
 
-.preview table {
-    width: 100%;
-    border-collapse: collapse;
-    margin: var(--spacing) 0;
-    border: 1px solid var(--border);
-    font-size: 0.875rem;
-}
-
-.preview table th,
-.preview table td {
-    border: 1px solid var(--border);
-    padding: 0.5rem;
-    text-align: left;
-}
-
-.preview table th {
-    background: var(--bg-tertiary);
-    font-weight: 600;
-    color: var(--text-primary);
-}
-
+/* Нумерованные и маркированные списки */
 .preview ol,
 .preview ul {
     margin-left: 1.5rem;
     margin-bottom: var(--spacing-sm);
 }
 
+/* Элементы списков */
 .preview li {
     margin-bottom: var(--spacing-xs);
     line-height: 1.6;

@@ -1,0 +1,25 @@
+/*
+ * Оверлей для диалоговых окон
+ * Затемненный фон, блокирующий взаимодействие с основным контентом
+ */
+
+/* Полноэкранная подложка диалогового окна */
+.custom-dialog-overlay {
+    position: fixed;
+    top: 0;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    background: rgba(26, 32, 44, 0.5);
+    backdrop-filter: blur(4px);
+    z-index: 9999;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    animation: fadeIn 0.2s ease-out;
+}
+
+/* Скрытое состояние оверлея */
+.custom-dialog-overlay.hidden {
+    display: none;
+}

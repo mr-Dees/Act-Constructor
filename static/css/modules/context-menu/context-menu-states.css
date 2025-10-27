@@ -1,0 +1,17 @@
+/*
+ * Состояния контекстного меню
+ * Управляет видимостью и доступностью пунктов меню
+ */
+
+/* Недоступный пункт меню */
+.context-menu-item.disabled {
+    opacity: 0.4;
+    cursor: not-allowed;
+    pointer-events: none;
+    color: var(--text-tertiary);
+}
+
+/* Скрытое состояние меню */
+.context-menu.hidden {
+    display: none;
+}

@@ -1,0 +1,99 @@
+/*
+ * Базовые стили кнопок
+ * Определяет общие и вариативные стили для кнопок приложения
+ */
+
+/* Базовый класс для всех кнопок */
+.btn {
+    padding: 0.625rem 1.5rem;
+    border: none;
+    border-radius: var(--radius);
+    font-size: 0.9375rem;
+    font-weight: 500;
+    cursor: pointer;
+    transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
+    box-shadow: var(--shadow-sm);
+    display: inline-flex;
+    align-items: center;
+    gap: 0.5rem;
+}
+
+/* Эффект при наведении */
+.btn:hover {
+    box-shadow: var(--shadow-md);
+    transform: translateY(-1px);
+}
+
+/* Эффект при нажатии */
+.btn:active {
+    transform: translateY(0);
+}
+
+/* Основная кнопка с акцентным цветом */
+.btn-primary {
+    background: var(--primary);
+    color: white;
+}
+
+.btn-primary:hover {
+    background: var(--primary-hover);
+}
+
+/* Вторичная кнопка с нейтральным стилем */
+.btn-secondary {
+    background: var(--bg-tertiary);
+    color: var(--text-primary);
+    border: 1px solid var(--border);
+}
+
+.btn-secondary:hover {
+    background: var(--gray-200);
+    border-color: var(--border-medium);
+}
+
+/* Кнопка успешного действия */
+.btn-success {
+    background: var(--success);
+    color: white;
+}
+
+.btn-success:hover {
+    background: #469463;
+}
+
+/* Кнопки для диалоговых окон */
+.dialog-btn {
+    padding: 0.625rem 1.5rem;
+    border: none;
+    border-radius: var(--radius);
+    font-size: 0.9375rem;
+    font-weight: 500;
+    cursor: pointer;
+    transition: all 0.2s ease;
+    box-shadow: var(--shadow-sm);
+}
+
+.dialog-btn:hover {
+    box-shadow: var(--shadow-md);
+}
+
+/* Основная кнопка диалога */
+.dialog-btn-primary {
+    background: var(--primary);
+    color: white;
+}
+
+.dialog-btn-primary:hover {
+    background: var(--primary-hover);
+}
+
+/* Вторичная кнопка диалога */
+.dialog-btn-secondary {
+    background: var(--bg-tertiary);
+    color: var(--text-primary);
+    border: 1px solid var(--border);
+}
+
+.dialog-btn-secondary:hover {
+    background: var(--gray-200);
+}

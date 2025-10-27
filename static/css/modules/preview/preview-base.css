@@ -1,0 +1,16 @@
+/*
+ * Базовые стили области предпросмотра
+ * Отображение документа с форматированием как в финальном файле
+ */
+
+/* Контейнер предпросмотра документа */
+.preview {
+    background: var(--bg-primary);
+    padding: var(--spacing-xl);
+    border-radius: var(--radius-md);
+    font-family: 'Times New Roman', Georgia, serif;
+    border: 1px solid var(--border);
+    font-size: 0.9375rem;
+    overflow-y: auto;
+    box-shadow: var(--shadow-sm);
+}

@@ -1,0 +1,74 @@
+/*
+ * Глобальные CSS-переменные
+ * Определяет цветовую схему, размеры и отступы для всего приложения
+ */
+
+:root {
+    /* Основная цветовая палитра */
+    --primary: #5b6fa8;
+    --primary-hover: #4a5d8a;
+    --primary-light: #7890c7;
+    --primary-subtle: #dfe6f5;
+    --secondary: #6b7a99;
+    --accent: #4a9ab6;
+
+    /* Статусные цвета */
+    --success: #52a876;
+    --warning: #d89849;
+    --error: #c75555;
+
+    /* Градации серого */
+    --gray-50: #f8fafb;
+    --gray-100: #f1f3f6;
+    --gray-200: #e4e7ec;
+    --gray-300: #cfd4dc;
+    --gray-400: #9ba3b3;
+    --gray-500: #6b7280;
+    --gray-600: #4a5568;
+    --gray-700: #2d3748;
+    --gray-800: #1a202c;
+    --gray-900: #0f1419;
+
+    /* Фоновые цвета */
+    --bg-primary: #ffffff;
+    --bg-secondary: #f8fafb;
+    --bg-tertiary: #f1f3f6;
+
+    /* Цвета границ */
+    --border-light: #e8ebf0;
+    --border: #d4d9e2;
+    --border-medium: #bdc4d1;
+
+    /* Цвета текста для обеспечения контрастности */
+    --text-primary: #1a202c;
+    --text-secondary: #4a5568;
+    --text-tertiary: #9ba3b3;
+
+    /* Тени для создания глубины элементов */
+    --shadow-xs: 0 1px 3px 0 rgba(0, 0, 0, 0.08);
+    --shadow-sm: 0 2px 6px 0 rgba(0, 0, 0, 0.12), 0 1px 3px -1px rgba(0, 0, 0, 0.1);
+    --shadow: 0 4px 10px -1px rgba(0, 0, 0, 0.14), 0 2px 6px -2px rgba(0, 0, 0, 0.12);
+    --shadow-md: 0 8px 16px -2px rgba(0, 0, 0, 0.16), 0 4px 8px -2px rgba(0, 0, 0, 0.12);
+    --shadow-lg: 0 12px 28px -4px rgba(0, 0, 0, 0.18), 0 6px 14px -4px rgba(0, 0, 0, 0.14);
+    --shadow-xl: 0 20px 40px -8px rgba(0, 0, 0, 0.22);
+
+    /* Радиусы скругления углов */
+    --radius-sm: 0.375rem;
+    --radius: 0.5rem;
+    --radius-md: 0.625rem;
+    --radius-lg: 0.75rem;
+    --radius-xl: 1rem;
+
+    /* Размеры отступов в rem для адаптивности */
+    --spacing-xs: 0.375rem;
+    --spacing-sm: 0.625rem;
+    --spacing: 0.875rem;
+    --spacing-md: 1rem;
+    --spacing-lg: 1.25rem;
+    --spacing-xl: 1.5rem;
+    --spacing-2xl: 2rem;
+
+    /* Высота шапки с учетом минимального значения */
+    --header-height: 9vh;
+    --header-min-height: 80px;
+}

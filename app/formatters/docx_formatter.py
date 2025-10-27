@@ -1,4 +1,9 @@
-"""Форматер для создания актов в формате DOCX."""
+"""
+Форматер для создания актов в формате DOCX.
+
+Преобразует структуру акта в документ Microsoft Word
+с поддержкой таблиц, форматирования и иерархии.
+"""
 
 from html.parser import HTMLParser
 from typing import Dict
@@ -11,19 +16,43 @@ from app.formatters.base_formatter import BaseFormatter
 
 
 class HTMLToDocxParser(HTMLParser):
-    """Парсер HTML для преобразования в форматирование DOCX."""
+    """
+    Парсер HTML для преобразования в форматирование DOCX.
+
+    Обрабатывает базовые HTML-теги (b, i, u) и конвертирует
+    их в соответствующие run-объекты python-docx с форматированием.
+    """
 
     def __init__(self, paragraph):
+        """
+        Инициализация парсера.
+
+        Args:
+            paragraph: Объект параграфа python-docx для добавления runs
+        """
         super().__init__()
-        self.paragraph = paragraph
+        self.paragraph = paragraph  # Целевой параграф
+
+        # Флаги активного форматирования
         self.bold = False
         self.italic = False
         self.underline = False
+
+        # Буфер для накопления текста
         self.text_buffer = []
 
     def handle_starttag(self, tag, attrs):
-        """Обработка открывающих тегов."""
+        """
+        Обработка открывающих HTML-тегов.
+
+        Args:
+            tag: Имя тега (например, 'b', 'i', 'u')
+            attrs: Атрибуты тега (не используются)
+        """
+        # Сбрасываем буфер перед сменой форматирования
         self._flush_buffer()
+
+        # Активация флагов форматирования
         if tag in ['b', 'strong']:
             self.bold = True
         elif tag in ['i', 'em']:
@@ -32,8 +61,16 @@ class HTMLToDocxParser(HTMLParser):
             self.underline = True
 
     def handle_endtag(self, tag):
-        """Обработка закрывающих тегов."""
+        """
+        Обработка закрывающих HTML-тегов.
+
+        Args:
+            tag: Имя закрывающего тега
+        """
+        # Сбрасываем буфер перед сменой форматирования
         self._flush_buffer()
+
+        # Деактивация флагов форматирования
         if tag in ['b', 'strong']:
             self.bold = False
         elif tag in ['i', 'em']:
@@ -42,14 +79,25 @@ class HTMLToDocxParser(HTMLParser):
             self.underline = False
 
     def handle_data(self, data):
-        """Обработка текстового содержимого."""
+        """
+        Обработка текстового содержимого между тегами.
+
+        Args:
+            data: Текстовое содержимое
+        """
+        # Накапливаем текст в буфере
         self.text_buffer.append(data)
 
     def _flush_buffer(self):
-        """Сбросить буфер текста в run."""
+        """
+        Сбрасывает накопленный текст в run с текущим форматированием.
+
+        Обрабатывает переносы строк внутри текста.
+        """
         if not self.text_buffer:
             return
 
+        # Объединяем весь накопленный текст
         text = ''.join(self.text_buffer)
         self.text_buffer = []
 
@@ -57,6 +105,7 @@ class HTMLToDocxParser(HTMLParser):
         lines = text.split('\n')
         for i, line in enumerate(lines):
             if line:  # Добавляем только непустые строки
+                # Создаем run с текущим форматированием
                 run = self.paragraph.add_run(line)
                 run.bold = self.bold
                 run.italic = self.italic
@@ -67,16 +116,23 @@ class HTMLToDocxParser(HTMLParser):
                 self.paragraph.add_run('\n')
 
     def close(self):
-        """Завершение парсинга."""
+        """Завершение парсинга, сброс оставшегося буфера."""
         self._flush_buffer()
         super().close()
 
 
 class DocxFormatter(BaseFormatter):
-    """Форматер для преобразования структуры акта в документ DOCX."""
+    """
+    Форматер для преобразования структуры акта в документ DOCX.
+
+    Рекурсивно обходит дерево структуры акта и создает
+    документ Word с заголовками, таблицами, текстовыми блоками
+    и блоками нарушений.
+    """
 
     def __init__(self):
-        """Инициализация форматера DOCX."""
+        """Инициализация форматера с пустыми хранилищами."""
+        # Хранилища для быстрого доступа к связанным сущностям
         self.violations = {}
         self.textBlocks = {}
         self.tables = {}
@@ -86,19 +142,24 @@ class DocxFormatter(BaseFormatter):
         Форматирует данные акта в документ DOCX.
 
         Args:
-            data: Словарь с данными акта
+            data: Словарь с данными акта:
+                - tree: древовидная структура
+                - tables: словарь таблиц
+                - textBlocks: словарь текстовых блоков
+                - violations: словарь нарушений
 
         Returns:
-            Документ Document (python-docx)
+            Document: Объект документа python-docx
         """
+        # Создание нового документа Word
         doc = Document()
 
-        # Сохраняем ссылки на violations, textBlocks и tables для доступа при рекурсии
+        # Сохраняем ссылки на сущности для доступа при рекурсии
         self.violations = data.get('violations', {})
         self.textBlocks = data.get('textBlocks', {})
         self.tables = data.get('tables', {})
 
-        # Главный заголовок акта
+        # Добавление главного заголовка акта по центру
         heading = doc.add_heading('Акт', level=0)
         heading.alignment = WD_PARAGRAPH_ALIGNMENT.CENTER
 
@@ -106,6 +167,7 @@ class DocxFormatter(BaseFormatter):
         tree = data.get('tree', {})
         root_children = tree.get('children', [])
 
+        # Рекурсивная обработка каждого пункта верхнего уровня
         for item in root_children:
             self._add_item(doc, item, level=1)
 
@@ -116,16 +178,17 @@ class DocxFormatter(BaseFormatter):
         Рекурсивно добавляет пункт акта в документ.
 
         Args:
-            doc: Документ DOCX
-            item: Словарь с данными пункта
-            level: Уровень вложенности (для заголовков)
+            doc: Документ DOCX для добавления элементов
+            item: Словарь с данными пункта (узла дерева)
+            level: Уровень вложенности для заголовков (1-9)
         """
-        # Заголовок пункта отображается для всех элементов кроме textblock и violation
+        # Извлечение метаданных пункта
         label = item.get('label', '')
         item_type = item.get('type', 'item')
 
+        # Заголовок пункта (кроме textblock и violation)
         if label and item_type not in ['textblock', 'violation']:
-            heading_level = min(level, 9)
+            heading_level = min(level, 9)  # Ограничение уровня Word
             doc.add_heading(label, level=heading_level)
 
         # Текстовое содержание пункта
@@ -165,17 +228,17 @@ class DocxFormatter(BaseFormatter):
             table_data: Словарь с данными таблицы (rows)
         """
         rows = table_data.get('rows', [])
-
         if not rows:
             doc.add_paragraph('[Пустая таблица]')
             return
 
-        # Вычисляем размерность таблицы с учетом colspan
+        # Вычисление максимальной ширины таблицы с учетом colspan
         max_cols = 0
         for row in rows:
             cells = row.get('cells', [])
             col_count = 0
             for cell in cells:
+                # Пропускаем объединенные ячейки
                 if not cell.get('merged', False):
                     col_count += cell.get('colspan', 1)
             max_cols = max(max_cols, col_count)
@@ -186,22 +249,24 @@ class DocxFormatter(BaseFormatter):
 
         num_rows = len(rows)
 
-        # Создаем таблицу
+        # Создание таблицы с сеткой
         table = doc.add_table(rows=num_rows, cols=max_cols)
         table.style = 'Table Grid'
 
-        # Заполняем таблицу
+        # Заполнение таблицы данными
         for row_idx, row in enumerate(rows):
             cells = row.get('cells', [])
             col_idx = 0
 
             for cell_data in cells:
+                # Пропускаем объединенные ячейки (уже обработаны)
                 if cell_data.get('merged', False):
                     continue
 
                 if col_idx >= max_cols:
                     break
 
+                # Заполнение ячейки
                 cell = table.cell(row_idx, col_idx)
                 cell.text = str(cell_data.get('content', ''))
 
@@ -211,23 +276,27 @@ class DocxFormatter(BaseFormatter):
                         for run in paragraph.runs:
                             run.bold = True
 
-                # Обработка объединения ячеек
+                # Обработка объединения ячеек (rowspan/colspan)
                 rowspan = cell_data.get('rowspan', 1)
                 colspan = cell_data.get('colspan', 1)
 
                 if rowspan > 1 or colspan > 1:
                     try:
+                        # Вычисление конечной ячейки для объединения
                         end_row = min(row_idx + rowspan - 1, num_rows - 1)
                         end_col = min(col_idx + colspan - 1, max_cols - 1)
                         end_cell = table.cell(end_row, end_col)
+
+                        # Объединение ячеек
                         cell.merge(end_cell)
                     except Exception:
+                        # Игнорируем ошибки объединения
                         pass
 
-                # Переходим к следующей колонке с учетом colspan
+                # Переход к следующей колонке с учетом colspan
                 col_idx += colspan
 
-        # Добавляем отступ после таблицы
+        # Отступ после таблицы
         doc.add_paragraph()
 
     def _add_textblock(self, doc: Document, textblock_data: Dict):
@@ -244,26 +313,28 @@ class DocxFormatter(BaseFormatter):
         if not content:
             return
 
-        # Создаем параграф
+        # Создание параграфа
         paragraph = doc.add_paragraph()
 
-        # Применяем выравнивание
+        # Применение выравнивания текста
         alignment = formatting.get('alignment', 'left')
-        if alignment == 'center':
-            paragraph.alignment = WD_PARAGRAPH_ALIGNMENT.CENTER
-        elif alignment == 'right':
-            paragraph.alignment = WD_PARAGRAPH_ALIGNMENT.RIGHT
-        elif alignment == 'justify':
-            paragraph.alignment = WD_PARAGRAPH_ALIGNMENT.JUSTIFY
-        else:
-            paragraph.alignment = WD_PARAGRAPH_ALIGNMENT.LEFT
+        alignment_map = {
+            'center': WD_PARAGRAPH_ALIGNMENT.CENTER,
+            'right': WD_PARAGRAPH_ALIGNMENT.RIGHT,
+            'justify': WD_PARAGRAPH_ALIGNMENT.JUSTIFY,
+            'left': WD_PARAGRAPH_ALIGNMENT.LEFT
+        }
+        paragraph.alignment = alignment_map.get(
+            alignment,
+            WD_PARAGRAPH_ALIGNMENT.LEFT
+        )
 
-        # Парсим HTML и добавляем в параграф
+        # Парсинг HTML и добавление в параграф с форматированием
         parser = HTMLToDocxParser(paragraph)
         parser.feed(content)
         parser.close()
 
-        # Применяем размер шрифта ко всем runs в параграфе
+        # Применение размера шрифта ко всем runs в параграфе
         font_size = formatting.get('fontSize', 14)
         for run in paragraph.runs:
             run.font.size = Pt(font_size)
@@ -271,6 +342,15 @@ class DocxFormatter(BaseFormatter):
     def _add_violation(self, doc: Document, violation_data: Dict):
         """
         Добавляет блок нарушения в документ БЕЗ заголовка "НАРУШЕНИЕ".
+
+        Структура блока:
+        - Нарушено: <текст>
+        - Установлено: <текст>
+        - Описание: <буллитный список>
+        - Дополнительный текст
+        - Причины: <текст>
+        - Последствия: <текст>
+        - Ответственные: <текст>
 
         Args:
             doc: Документ DOCX
@@ -290,13 +370,16 @@ class DocxFormatter(BaseFormatter):
             p.add_run('Установлено: ').bold = True
             p.add_run(established)
 
-        # Список описаний
+        # Список описаний (буллитный)
         desc_list = violation_data.get('descriptionList', {})
         if desc_list.get('enabled', False):
             items = desc_list.get('items', [])
             if items:
+                # Заголовок списка
                 p = doc.add_paragraph()
                 p.add_run('Описание:').bold = True
+
+                # Элементы списка
                 for item in items:
                     if item.strip():
                         doc.add_paragraph(item, style='List Bullet')
@@ -335,5 +418,5 @@ class DocxFormatter(BaseFormatter):
                 p.add_run('Ответственные: ').bold = True
                 p.add_run(content)
 
-        # Добавляем отступ после нарушения
+        # Отступ после блока нарушения
         doc.add_paragraph()

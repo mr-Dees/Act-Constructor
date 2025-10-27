@@ -1,4 +1,9 @@
-"""Форматер для текстового представления актов."""
+"""
+Форматер для текстового представления актов.
+
+Преобразует структуру акта в простой текстовый формат (plain text)
+с ASCII-таблицами и отступами для иерархии.
+"""
 
 import html
 import re
@@ -8,41 +13,52 @@ from app.formatters.base_formatter import BaseFormatter
 
 
 class TextFormatter(BaseFormatter):
-    """Форматер для преобразования структуры акта в текстовый формат."""
+    """
+    Форматер для преобразования структуры акта в текстовый формат.
+
+    Создает читаемое текстовое представление с использованием
+    ASCII-графики для таблиц и отступов для передачи структуры.
+    """
 
     def __init__(self):
-        """Инициализация текстового форматера."""
+        """Инициализация текстового форматера с пустыми хранилищами."""
+        # Хранилища для быстрого доступа к связанным сущностям
         self.violations = {}
         self.textBlocks = {}
         self.tables = {}
 
     def format(self, data: Dict) -> str:
         """
-        Форматирует данные акта в текст.
+        Форматирует данные акта в plain text.
 
         Args:
-            data: Словарь с данными акта
+            data: Словарь с данными акта:
+                - tree: древовидная структура
+                - tables: словарь таблиц
+                - textBlocks: словарь текстовых блоков
+                - violations: словарь нарушений
 
         Returns:
-            Отформатированный текст акта
+            str: Отформатированный текст акта
         """
         result = []
 
-        # Сохраняем ссылки на вложенные структуры
+        # Сохраняем ссылки на вложенные структуры для доступа при рекурсии
         self.violations = data.get('violations', {})
         self.textBlocks = data.get('textBlocks', {})
         self.tables = data.get('tables', {})
 
-        # Заголовок
+        # Заголовок документа с декоративным обрамлением
         result.append("=" * 80)
         result.append("АКТ".center(80))
         result.append("=" * 80)
         result.append("")
 
-        # Обработка дерева структуры
+        # Обработка дерева структуры акта
         tree = data.get('tree', {})
         root_children = tree.get('children', [])
 
+        # Рекурсивная обработка каждого пункта верхнего уровня
         for item in root_children:
             result.append(self._format_item(item, level=0))
 
@@ -50,34 +66,35 @@ class TextFormatter(BaseFormatter):
 
     def _format_item(self, item: Dict, level: int = 0) -> str:
         """
-        Рекурсивно форматирует пункт акта.
+        Рекурсивно форматирует пункт акта с учетом вложенности.
 
         Args:
-            item: Словарь с данными пункта
-            level: Уровень вложенности
+            item: Словарь с данными пункта (узла дерева)
+            level: Уровень вложенности (используется для отступов)
 
         Returns:
-            Отформатированный пункт
+            str: Отформатированный пункт со всеми дочерними элементами
         """
         lines = []
+        # Отступ зависит от уровня вложенности (каждый уровень = 2 пробела)
         indent = "  " * level
 
-        # Заголовок пункта
+        # Извлечение метаданных пункта
         label = item.get('label', '')
         item_type = item.get('type', 'item')
 
-        # Пропускаем заголовки для textblock и violation
+        # Заголовок пункта с подчеркиванием (кроме textblock и violation)
         if label and item_type not in ['textblock', 'violation']:
             lines.append(f"{indent}{label}")
             lines.append(f"{indent}{'-' * len(label)}")
 
-        # Текстовое содержание
+        # Текстовое содержание пункта
         content = item.get('content', '')
         if content:
             lines.append(f"{indent}{content}")
             lines.append("")
 
-        # Обработка таблицы
+        # Обработка связанной таблицы
         table_id = item.get('tableId')
         if table_id and table_id in self.tables:
             table_data = self.tables[table_id]
@@ -96,6 +113,8 @@ class TextFormatter(BaseFormatter):
         if violation_id and violation_id in self.violations:
             violation_data = self.violations[violation_id]
             formatted_violation = self._format_violation(violation_data)
+
+            # Применяем отступ к каждой строке нарушения
             for line in formatted_violation.split('\n'):
                 lines.append(f"{indent}{line}")
             lines.append("")
@@ -109,24 +128,26 @@ class TextFormatter(BaseFormatter):
 
     def _format_table(self, table_data: Dict, level: int = 0) -> str:
         """
-        Форматирует таблицу с учетом объединенных ячеек и colspan.
+        Форматирует таблицу в ASCII-графику с учетом объединения ячеек.
+
+        Создает псевдографическую таблицу с рамками и разделителями.
+        Обрабатывает colspan (объединение колонок).
 
         Args:
-            table_data: Словарь с данными таблицы
-            level: Уровень вложенности (только для text_formatter)
+            table_data: Словарь с данными таблицы (rows с cells)
+            level: Уровень вложенности для отступов
 
         Returns:
-            Отформатированная таблица
+            str: ASCII-таблица с рамками
         """
         lines = []
-        indent = "  " * level  # Только для text_formatter, для markdown используйте ""
+        indent = "  " * level
 
         rows = table_data.get('rows', [])
-
         if not rows:
-            return f"{indent}[Пустая таблица]"  # Для markdown: "*[Пустая таблица]*"
+            return f"{indent}[Пустая таблица]"
 
-        # Строим матрицу отображения с учетом merged и colspan
+        # Построение матрицы отображения с учетом merged и colspan
         display_matrix = []
         max_cols = 0
 
@@ -135,6 +156,7 @@ class TextFormatter(BaseFormatter):
             display_row = []
 
             for cell in cells:
+                # Пропускаем объединенные ячейки (уже обработаны)
                 if not cell.get('merged', False):
                     content = str(cell.get('content', ''))
                     colspan = cell.get('colspan', 1)
@@ -153,50 +175,60 @@ class TextFormatter(BaseFormatter):
         if not display_matrix or max_cols == 0:
             return f"{indent}[Пустая таблица]"
 
-        # Выравниваем все строки до max_cols
+        # Выравнивание всех строк до максимальной ширины
         for row in display_matrix:
             while len(row) < max_cols:
                 row.append('')
 
-        # Для text_formatter - ASCII таблица
-        # Вычисляем ширину колонок
+        # Вычисление ширины колонок на основе содержимого
         col_widths = [0] * max_cols
         for row in display_matrix:
             for col_idx, cell_text in enumerate(row):
-                col_widths[col_idx] = max(col_widths[col_idx], len(str(cell_text)))
+                col_widths[col_idx] = max(
+                    col_widths[col_idx],
+                    len(str(cell_text))
+                )
 
         def draw_separator():
+            """Создает горизонтальный разделитель таблицы."""
             parts = ['-' * (width + 2) for width in col_widths]
             return f"{indent}+{'+'.join(parts)}+"
 
         def draw_row(row):
+            """Создает строку таблицы с содержимым ячеек."""
             row_parts = []
             for col_idx in range(max_cols):
                 cell_text = str(row[col_idx]) if col_idx < len(row) else ''
+                # Выравнивание по левому краю с padding
                 row_parts.append(f" {cell_text.ljust(col_widths[col_idx])} ")
             return f"{indent}|{'|'.join(row_parts)}|"
 
-        lines.append(draw_separator())
+        # Построение ASCII-таблицы
+        lines.append(draw_separator())  # Верхняя граница
 
         for idx, row in enumerate(display_matrix):
             lines.append(draw_row(row))
+            # Разделитель после заголовка (первой строки)
             if idx == 0:
                 lines.append(draw_separator())
 
-        lines.append(draw_separator())
+        lines.append(draw_separator())  # Нижняя граница
 
         return "\n".join(lines)
 
     def _format_textblock(self, textblock_data: Dict, level: int = 0) -> str:
         """
-        Форматирует текстовый блок с учетом переносов строк и выравнивания.
+        Форматирует текстовый блок с очисткой HTML и применением отступов.
+
+        Обрабатывает переносы строк, удаляет HTML-теги,
+        декодирует HTML-сущности и добавляет метаданные о форматировании.
 
         Args:
-            textblock_data: Словарь с данными текстового блока
-            level: Уровень вложенности
+            textblock_data: Словарь с содержимым и параметрами форматирования
+            level: Уровень вложенности для отступов
 
         Returns:
-            Отформатированный текстовый блок
+            str: Отформатированный текстовый блок
         """
         indent = "  " * level
         content = textblock_data.get('content', '')
@@ -205,26 +237,26 @@ class TextFormatter(BaseFormatter):
         if not content:
             return ""
 
-        # Заменяем <br> на переносы строк ПЕРЕД очисткой HTML
-        clean_content = content.replace('<br>', '\n').replace('<br/>', '\n').replace('<br />', '\n')
+        # Замена <br> на переносы строк ПЕРЕД очисткой HTML
+        clean_content = content.replace('<br>', '\n')
+        clean_content = clean_content.replace('<br/>', '\n')
+        clean_content = clean_content.replace('<br />', '\n')
 
-        # Очищаем HTML-теги
+        # Удаление всех HTML-тегов
         clean_content = re.sub(r'<[^>]+>', '', clean_content)
 
-        # Декодируем HTML-сущности
+        # Декодирование HTML-сущностей (&nbsp;, &lt;, и т.д.)
         clean_content = html.unescape(clean_content)
 
-        # Применяем отступы к каждой строке
+        # Применение отступов к каждой строке
         lines = clean_content.split('\n')
         formatted_lines = [f"{indent}{line}" for line in lines]
 
-        # Добавляем метаданные о форматировании
+        # Добавление метаданных о форматировании (если отличается от default)
         result = []
-
         font_size = formatting.get('fontSize', 14)
         alignment = formatting.get('alignment', 'left')
 
-        # Комментарий о настройках форматирования
         if font_size != 14 or alignment != 'left':
             meta = []
             if font_size != 14:
@@ -236,34 +268,46 @@ class TextFormatter(BaseFormatter):
             elif alignment == 'justify':
                 meta.append("выравнивание: по ширине")
 
+            # Комментарий о форматировании в квадратных скобках
             result.append(f"{indent}[{', '.join(meta)}]")
 
         result.extend(formatted_lines)
-
         return "\n".join(result)
 
     def _format_violation(self, violation_data: Dict) -> str:
         """
-        Форматирует нарушение.
+        Форматирует нарушение с всеми секциями.
+
+        Структура:
+        - Нарушено: <текст>
+        - Установлено: <текст>
+        - Описание: <буллитный список>
+        - Дополнительный текст
+        - Причины: <текст>
+        - Последствия: <текст>
+        - Ответственные: <текст>
 
         Args:
             violation_data: Словарь с данными нарушения
 
         Returns:
-            Отформатированное нарушение
+            str: Отформатированное нарушение
         """
         lines = []
 
+        # Секция "Нарушено"
         violated = violation_data.get('violated', '')
         if violated:
             lines.append("Нарушено: " + violated)
             lines.append("")
 
+        # Секция "Установлено"
         established = violation_data.get('established', '')
         if established:
             lines.append("Установлено: " + established)
             lines.append("")
 
+        # Список описаний (буллитный)
         desc_list = violation_data.get('descriptionList', {})
         if desc_list.get('enabled', False):
             items = desc_list.get('items', [])
@@ -271,9 +315,11 @@ class TextFormatter(BaseFormatter):
                 lines.append("Описание:")
                 for item in items:
                     if item.strip():
+                        # Unicode маркер для буллитного списка
                         lines.append(f"  • {item}")
                 lines.append("")
 
+        # Дополнительный текст
         additional_text = violation_data.get('additionalText', {})
         if additional_text.get('enabled', False):
             content = additional_text.get('content', '')
@@ -281,6 +327,7 @@ class TextFormatter(BaseFormatter):
                 lines.append(content)
                 lines.append("")
 
+        # Причины нарушения
         reasons = violation_data.get('reasons', {})
         if reasons.get('enabled', False):
             content = reasons.get('content', '')
@@ -288,6 +335,7 @@ class TextFormatter(BaseFormatter):
                 lines.append(f"Причины: {content}")
                 lines.append("")
 
+        # Последствия нарушения
         consequences = violation_data.get('consequences', {})
         if consequences.get('enabled', False):
             content = consequences.get('content', '')
@@ -295,6 +343,7 @@ class TextFormatter(BaseFormatter):
                 lines.append(f"Последствия: {content}")
                 lines.append("")
 
+        # Ответственные лица
         responsible = violation_data.get('responsible', {})
         if responsible.get('enabled', False):
             content = responsible.get('content', '')

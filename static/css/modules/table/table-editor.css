@@ -1,0 +1,23 @@
+/*
+ * Редактор ячеек таблицы
+ * Многострочное текстовое поле для редактирования содержимого ячеек
+ */
+
+/* Текстовая область для редактирования ячейки */
+.editable-table td.editing textarea.cell-editor {
+    width: 100%;
+    height: auto;
+    min-height: 2.25rem;
+    border: none;
+    padding: 0.625rem 0.75rem;
+    font-family: inherit;
+    font-size: inherit;
+    box-sizing: border-box;
+    outline: none;
+    background: transparent;
+    margin: 0;
+    display: block;
+    color: var(--text-primary);
+    resize: none;
+    overflow: hidden;
+}

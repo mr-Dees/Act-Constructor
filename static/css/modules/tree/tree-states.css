@@ -1,0 +1,67 @@
+/*
+ * Состояния элементов дерева
+ * Стили для выбранных, защищенных и редактируемых элементов
+ */
+
+/* Выбранный элемент */
+.tree-item.selected {
+    background: var(--primary) !important;
+    color: white !important;
+    border-color: var(--primary) !important;
+    box-shadow: var(--shadow-md) !important;
+}
+
+/* Родительский элемент выбранного узла */
+.tree-item.parent-selected {
+    background: var(--primary-subtle) !important;
+    color: var(--text-primary) !important;
+    border-color: #aab9dc !important;
+    box-shadow: var(--shadow-xs) !important;
+}
+
+/* Сброс стилей для дочерних невыбранных элементов */
+.tree-item.selected .tree-item:not(.selected):not(.parent-selected),
+.tree-item.parent-selected .tree-item:not(.selected):not(.parent-selected) {
+    color: var(--text-primary) !important;
+}
+
+/* Цвет меток невыбранных дочерних элементов */
+.tree-item.selected .tree-item:not(.selected):not(.parent-selected) .tree-label,
+.tree-item.parent-selected .tree-item:not(.selected):not(.parent-selected) .tree-label {
+    color: var(--text-primary) !important;
+}
+
+/* Защищенный элемент */
+.tree-item.protected {
+    background: #fff8e8;
+    border-left: 0.1875rem solid var(--warning);
+    color: var(--text-primary);
+}
+
+/* Выбранный защищенный элемент */
+.tree-item.protected.selected {
+    background: var(--primary) !important;
+    color: white !important;
+    border-left: 0.1875rem solid var(--warning);
+}
+
+/* Родительский защищенный элемент */
+.tree-item.protected.parent-selected {
+    background: var(--primary-subtle) !important;
+    color: var(--text-primary) !important;
+    border-left: 0.1875rem solid var(--warning);
+}
+
+/* Элемент в режиме редактирования */
+.tree-item.editing .tree-label {
+    background: var(--bg-primary);
+    border: 2px solid var(--primary);
+    border-radius: var(--radius-sm);
+    outline: none;
+    color: var(--text-primary) !important;
+}
+
+/* Скрытие дочерних элементов свернутого узла */
+.tree-item.collapsed > .tree-children {
+    display: none;
+}

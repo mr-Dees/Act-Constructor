@@ -1,53 +1,74 @@
 /**
  * Главный класс приложения
+ * Отвечает за инициализацию и управление всем приложением
  */
 class App {
+    /**
+     * Инициализация приложения
+     * Вызывается при загрузке страницы
+     */
     static init() {
+        // Создаем начальную структуру дерева
         AppState.initializeTree();
+        // Генерируем нумерацию для всех элементов
         AppState.generateNumbering();
 
-        // Инициализация хранилища размеров таблиц
+        // Создаем хранилище для размеров таблиц, если его еще нет
         if (!AppState.tableUISizes) {
             AppState.tableUISizes = {};
         }
 
+        // Отрисовываем дерево в левой панели
         treeManager.render();
+        // Обновляем превью с небольшой задержкой для корректного рендера
         setTimeout(() => PreviewManager.update('previewTrim'), 30);
 
+        // Настраиваем навигацию между шагами
         this.setupNavigation();
+        // Настраиваем меню выбора форматов
         this.setupFormatMenu();
+        // Инициализируем контекстное меню
         ContextMenuManager.init();
+        // Инициализируем систему подсказок
         HelpManager.init();
     }
 
+    /**
+     * Настройка навигации между шагами и обработчиков кнопок
+     */
     static setupNavigation() {
+        // Получаем элементы кнопок
         const nextBtn = document.getElementById('nextBtn');
         const backBtn = document.getElementById('backBtn');
         const generateBtn = document.getElementById('generateBtn');
 
+        // Кнопка "Далее" - переход ко второму шагу
         if (nextBtn) {
             nextBtn.addEventListener('click', () => this.goToStep(2));
         }
 
+        // Кнопка "Назад" - возврат к первому шагу
         backBtn.addEventListener('click', () => this.goToStep(1));
 
-        // Передаем в обработчик ВСЕ форматы сразу
+        // Кнопка "Сохранить" - генерация документов
         generateBtn.addEventListener('click', async () => {
+            // Получаем выбранные форматы
             const selectedFormats = this.getSelectedFormats();
 
+            // Проверяем, что выбран хотя бы один формат
             if (selectedFormats.length === 0) {
                 alert('Выберите хотя бы один формат для сохранения');
                 return;
             }
 
-            // Валидация данных
+            // Проверяем данные акта на корректность
             const validationResult = this.validateActData();
             if (!validationResult.valid) {
                 alert(validationResult.message);
                 return;
             }
 
-            // Синхронизируем DOM с AppState
+            // Сохраняем данные из DOM обратно в AppState
             ItemsRenderer.syncDataToState();
 
             // Блокируем кнопку на время операции
@@ -56,9 +77,10 @@ class App {
             generateBtn.textContent = '⏳ Создаём акты...';
 
             try {
-                // Передаем весь массив форматов ОДНИМ вызовом
+                // Отправляем запрос на создание актов во всех выбранных форматах
                 const success = await APIClient.generateAct(selectedFormats);
             } catch (error) {
+                // Показываем ошибку, если что-то пошло не так
                 console.error('Критическая ошибка:', error);
                 APIClient.showNotification(
                     'Критическая ошибка',
@@ -66,13 +88,13 @@ class App {
                     'error'
                 );
             } finally {
-                // Восстанавливаем кнопку
+                // Возвращаем кнопку в исходное состояние
                 generateBtn.disabled = false;
                 generateBtn.textContent = originalText;
             }
         });
 
-        // Навигация по шагам через клик на заголовки
+        // Клик по заголовкам шагов для быстрой навигации
         const header = document.querySelector('.header');
         header.querySelectorAll('.step').forEach(step => {
             step.addEventListener('click', () => {
@@ -81,10 +103,11 @@ class App {
             });
         });
 
-        // Ctrl+S для быстрого сохранения
+        // Горячая клавиша Ctrl+S для быстрого сохранения
         document.addEventListener('keydown', (e) => {
             if ((e.ctrlKey || e.metaKey) && e.key === 's') {
                 e.preventDefault();
+                // Сохраняем только если находимся на втором шаге
                 if (AppState.currentStep === 2) {
                     generateBtn.click();
                 }
@@ -100,35 +123,37 @@ class App {
         const formatMenu = document.getElementById('formatMenu');
         const generateBtn = document.getElementById('generateBtn');
 
+        // Если элементы не найдены - выходим
         if (!dropdownBtn || !formatMenu) return;
 
-        // Открытие/закрытие меню с умным позиционированием
+        // Открытие/закрытие меню по клику на кнопку
         dropdownBtn.addEventListener('click', (e) => {
             e.stopPropagation();
 
+            // Умное позиционирование меню
             if (formatMenu.classList.contains('hidden')) {
-                // Определяем, где больше места - сверху или снизу
+                // Определяем доступное пространство сверху и снизу
                 const buttonRect = dropdownBtn.getBoundingClientRect();
                 const viewportHeight = window.innerHeight;
                 const spaceBelow = viewportHeight - buttonRect.bottom;
                 const spaceAbove = buttonRect.top;
 
-                // Если снизу мало места, но сверху достаточно - показываем сверху
+                // Показываем меню сверху, если снизу недостаточно места
                 if (spaceBelow < 200 && spaceAbove > 200) {
                     formatMenu.style.bottom = 'calc(100% + 8px)';
                     formatMenu.style.top = 'auto';
                 } else {
-                    // Иначе показываем снизу (на случай если захотите переключиться обратно)
                     formatMenu.style.top = 'calc(100% + 8px)';
                     formatMenu.style.bottom = 'auto';
                 }
             }
 
+            // Переключаем видимость меню
             formatMenu.classList.toggle('hidden');
             dropdownBtn.classList.toggle('active');
         });
 
-        // Закрытие меню при клике вне его
+        // Закрываем меню при клике вне его
         document.addEventListener('click', (e) => {
             if (!formatMenu.contains(e.target) && e.target !== dropdownBtn) {
                 formatMenu.classList.add('hidden');
@@ -136,7 +161,7 @@ class App {
             }
         });
 
-        // Обновление индикатора при изменении чекбоксов
+        // Обновляем индикатор при изменении чекбоксов
         const checkboxes = formatMenu.querySelectorAll('input[type="checkbox"]');
         checkboxes.forEach(checkbox => {
             checkbox.addEventListener('change', () => {
@@ -144,17 +169,17 @@ class App {
             });
         });
 
-        // Предотвращение закрытия меню при клике на чекбокс
+        // Предотвращаем закрытие меню при клике на чекбоксы
         formatMenu.addEventListener('click', (e) => {
             e.stopPropagation();
         });
 
-        // Инициализация индикатора
+        // Показываем начальное состояние индикатора
         this.updateFormatIndicator();
     }
 
     /**
-     * Получение массива выбранных форматов
+     * Получение списка выбранных форматов
      * @returns {string[]} Массив выбранных форматов (например, ['txt', 'docx'])
      */
     static getSelectedFormats() {
@@ -163,28 +188,29 @@ class App {
     }
 
     /**
-     * Обновление визуального индикатора выбранных форматов на кнопке
+     * Обновление визуального индикатора выбранных форматов
      */
     static updateFormatIndicator() {
         const generateBtn = document.getElementById('generateBtn');
-        const dropdownBtn = document.getElementById('formatDropdownBtn'); // Добавлено
+        const dropdownBtn = document.getElementById('formatDropdownBtn');
         const selectedFormats = this.getSelectedFormats();
 
         if (selectedFormats.length > 0) {
+            // Формируем текст с выбранными форматами
             const formatsText = selectedFormats.map(f => f.toUpperCase()).join(' + ');
 
             // Убираем индикатор с основной кнопки
             generateBtn.removeAttribute('data-formats');
             generateBtn.classList.remove('has-formats');
 
-            // Добавляем индикатор на стрелочку
+            // Добавляем индикатор на кнопку выпадающего меню
             dropdownBtn.setAttribute('data-formats', formatsText);
             dropdownBtn.classList.add('has-formats');
             dropdownBtn.title = `Выбрано: ${formatsText}`;
 
             generateBtn.title = `Сохранить в форматах: ${formatsText}`;
         } else {
-            // Убираем индикаторы
+            // Убираем все индикаторы
             generateBtn.removeAttribute('data-formats');
             generateBtn.classList.remove('has-formats');
             dropdownBtn.removeAttribute('data-formats');
@@ -196,19 +222,21 @@ class App {
     }
 
     /**
-     * Валидация данных акта перед сохранением
-     * @returns {{valid: boolean, message: string}}
+     * Проверка данных акта перед сохранением
+     * @returns {{valid: boolean, message: string}} Результат валидации
      */
     static validateActData() {
+        // Проверяем наличие структуры дерева
         if (!AppState.treeData || !AppState.treeData.children) {
             return {valid: false, message: 'Структура акта пуста'};
         }
 
+        // Проверяем, что добавлен хотя бы один раздел
         if (AppState.treeData.children.length === 0) {
             return {valid: false, message: 'Добавьте хотя бы один раздел в акт'};
         }
 
-        // Проверка таблиц
+        // Проверяем, что все таблицы заполнены
         for (const tableId in AppState.tables) {
             const table = AppState.tables[tableId];
             if (!table.rows || table.rows.length === 0) {
@@ -220,13 +248,14 @@ class App {
     }
 
     /**
-     * Переключение между шагами
+     * Переключение между шагами приложения
      * @param {number} stepNum - Номер шага (1 или 2)
      */
     static goToStep(stepNum) {
+        // Сохраняем текущий шаг
         AppState.currentStep = stepNum;
 
-        // Обновление активного шага в header
+        // Обновляем активный шаг в заголовке
         document.querySelectorAll('.step').forEach(step => {
             step.classList.remove('active');
             if (parseInt(step.dataset.step) === stepNum) {
@@ -234,18 +263,18 @@ class App {
             }
         });
 
-        // Скрытие всех шагов
+        // Скрываем все шаги
         document.querySelectorAll('.step-content').forEach(content => {
             content.classList.add('hidden');
         });
 
-        // Показ текущего шага
+        // Показываем нужный шаг
         const currentContent = document.getElementById(`step${stepNum}`);
         if (currentContent) {
             currentContent.classList.remove('hidden');
         }
 
-        // Шаг 2: инициализация панелей редактирования
+        // На втором шаге показываем панели редактирования
         if (stepNum === 2) {
             textBlockManager.initGlobalToolbar();
             ItemsRenderer.renderAll();
@@ -253,11 +282,12 @@ class App {
             textBlockManager.hideToolbar();
         }
 
-        // Шаг 1: обновление превью
+        // На первом шаге обновляем превью
         if (stepNum === 1) {
             setTimeout(() => PreviewManager.update('previewTrim'), 30);
         }
 
+        // Обновляем подсказки
         if (typeof HelpManager !== 'undefined') {
             HelpManager.updateTooltip();
         }
@@ -265,19 +295,23 @@ class App {
 }
 
 /**
- * Рендерер элементов акта на шаге 2
+ * Менеджер отрисовки элементов на втором шаге
+ * Отвечает за рендеринг таблиц, текстовых блоков и нарушений
  */
 class ItemsRenderer {
     /**
-     * Рендер всех элементов дерева
+     * Отрисовка всех элементов дерева
      */
     static renderAll() {
         const container = document.getElementById('itemsContainer');
         if (!container) return;
 
+        // Очищаем контейнер
         container.innerHTML = '';
+        // Снимаем выделение с ячеек таблиц
         tableManager.clearSelection();
 
+        // Отрисовываем все элементы из дерева
         if (AppState.treeData && AppState.treeData.children) {
             AppState.treeData.children.forEach(item => {
                 const itemElement = this.renderItem(item, 1);
@@ -285,10 +319,10 @@ class ItemsRenderer {
             });
         }
 
-        // Привязка событий к таблицам и UI элементам
+        // Привязываем события к таблицам
         this.attachTableEvents();
 
-        // Восстановление сохранённых размеров ячеек таблиц
+        // Восстанавливаем сохраненные размеры ячеек
         setTimeout(() => {
             document.querySelectorAll('.table-section').forEach(section => {
                 const tableId = section.dataset.tableId;
@@ -299,16 +333,18 @@ class ItemsRenderer {
     }
 
     /**
-     * Рекурсивный рендер элемента дерева
+     * Рекурсивная отрисовка элемента дерева
      * @param {Object} node - Узел дерева
      * @param {number} level - Уровень вложенности
-     * @returns {HTMLElement}
+     * @returns {HTMLElement} Созданный DOM элемент
      */
     static renderItem(node, level) {
+        // Создаем контейнер для элемента
         const itemDiv = document.createElement('div');
         itemDiv.className = `item-block level-${level}`;
         itemDiv.dataset.nodeId = node.id;
 
+        // Отрисовка таблицы
         if (node.type === 'table') {
             const table = AppState.tables[node.tableId];
             if (table) {
@@ -318,6 +354,7 @@ class ItemsRenderer {
             return itemDiv;
         }
 
+        // Отрисовка текстового блока
         if (node.type === 'textblock') {
             const textBlock = AppState.textBlocks[node.textBlockId];
             if (textBlock) {
@@ -327,6 +364,7 @@ class ItemsRenderer {
             return itemDiv;
         }
 
+        // Отрисовка нарушения
         if (node.type === 'violation') {
             const violation = AppState.violations[node.violationId];
             if (violation) {
@@ -336,7 +374,7 @@ class ItemsRenderer {
             return itemDiv;
         }
 
-        // Обычный заголовок элемента
+        // Отрисовка обычного заголовка
         const header = document.createElement('div');
         header.className = 'item-header';
 
@@ -344,17 +382,21 @@ class ItemsRenderer {
         title.className = 'item-title';
         title.textContent = node.label;
 
+        // Добавляем возможность редактирования незащищенных элементов
         if (!node.protected) {
             let clickCount = 0;
             let clickTimer = null;
 
+            // Обработка двойного клика для редактирования
             title.addEventListener('click', (e) => {
                 clickCount++;
                 if (clickCount === 1) {
+                    // Ждем второй клик
                     clickTimer = setTimeout(() => {
                         clickCount = 0;
                     }, 300);
                 } else if (clickCount === 2) {
+                    // Двойной клик - начинаем редактирование
                     clearTimeout(clickTimer);
                     clickCount = 0;
                     this.startEditingItemTitle(title, node);
@@ -367,12 +409,13 @@ class ItemsRenderer {
         header.appendChild(title);
         itemDiv.appendChild(header);
 
-        // Дочерние элементы
+        // Отрисовка дочерних элементов
         if (node.children && node.children.length > 0) {
             const childrenDiv = document.createElement('div');
             childrenDiv.className = 'item-children';
 
             node.children.forEach(child => {
+                // Для таблиц и блоков не увеличиваем уровень
                 const childElement = this.renderItem(
                     child,
                     (child.type === 'table' || child.type === 'textblock' || child.type === 'violation') ? level : level + 1
@@ -387,17 +430,17 @@ class ItemsRenderer {
     }
 
     /**
-     * Рендер таблицы
+     * Отрисовка таблицы
      * @param {Object} table - Данные таблицы
      * @param {Object} node - Узел дерева
-     * @returns {HTMLElement}
+     * @returns {HTMLElement} Созданный элемент таблицы
      */
     static renderTable(table, node) {
         const section = document.createElement('div');
         section.className = 'table-section';
         section.dataset.tableId = table.id;
 
-        // Заголовок таблицы (редактируемый по двойному клику)
+        // Создаем заголовок таблицы
         const tableTitle = document.createElement('h4');
         tableTitle.className = 'table-title';
         tableTitle.contentEditable = false;
@@ -409,6 +452,7 @@ class ItemsRenderer {
         let clickCount = 0;
         let clickTimer = null;
 
+        // Обработка двойного клика для редактирования заголовка
         tableTitle.addEventListener('click', (e) => {
             clickCount++;
             if (clickCount === 1) {
@@ -424,11 +468,11 @@ class ItemsRenderer {
 
         section.appendChild(tableTitle);
 
-        // Создание HTML таблицы
+        // Создаем HTML таблицу
         const tableEl = document.createElement('table');
         tableEl.className = 'editable-table';
 
-        // Вычисление максимального количества колонок с учётом colspan
+        // Вычисляем максимальное количество колонок с учетом объединенных ячеек
         let maxCols = 0;
         table.rows.forEach(row => {
             let colCount = 0;
@@ -440,16 +484,19 @@ class ItemsRenderer {
             maxCols = Math.max(maxCols, colCount);
         });
 
-        // Рендер строк и ячеек
+        // Отрисовываем строки и ячейки
         table.rows.forEach((row, rowIndex) => {
             const tr = document.createElement('tr');
 
             row.cells.forEach((cell, colIndex) => {
+                // Пропускаем объединенные ячейки
                 if (cell.merged) return;
 
+                // Создаем ячейку (th или td)
                 const cellEl = document.createElement(cell.isHeader ? 'th' : 'td');
                 cellEl.textContent = cell.content;
 
+                // Устанавливаем colspan и rowspan
                 if (cell.colspan > 1) {
                     cellEl.colSpan = cell.colspan;
                 }
@@ -457,11 +504,12 @@ class ItemsRenderer {
                     cellEl.rowSpan = cell.rowspan;
                 }
 
+                // Сохраняем координаты ячейки
                 cellEl.dataset.row = rowIndex;
                 cellEl.dataset.col = colIndex;
                 cellEl.dataset.tableId = table.id;
 
-                // Ручки изменения размера только для некрайних колонок
+                // Добавляем ручку изменения ширины для некрайних колонок
                 const colspan = cell.colspan || 1;
                 const cellEndCol = colIndex + colspan - 1;
                 const isLastColumn = cellEndCol >= maxCols - 1;
@@ -472,7 +520,7 @@ class ItemsRenderer {
                     cellEl.appendChild(resizeHandle);
                 }
 
-                // Ручка изменения высоты строки
+                // Добавляем ручку изменения высоты строки
                 const rowResizeHandle = document.createElement('div');
                 rowResizeHandle.className = 'row-resize-handle';
                 cellEl.appendChild(rowResizeHandle);
@@ -488,11 +536,12 @@ class ItemsRenderer {
     }
 
     /**
-     * Начало редактирования заголовка элемента (на шаге 2)
-     * @param {HTMLElement} titleElement - DOM элемент заголовка
+     * Начало редактирования заголовка элемента
+     * @param {HTMLElement} titleElement - Элемент заголовка
      * @param {Object} node - Узел дерева
      */
     static startEditingItemTitle(titleElement, node) {
+        // Если уже редактируется - выходим
         if (titleElement.classList.contains('editing')) {
             return;
         }
@@ -500,8 +549,8 @@ class ItemsRenderer {
         titleElement.classList.add('editing');
         titleElement.contentEditable = 'true';
 
-        // Извлекаем текст без нумерации для редактирования
-        const labelMatch = node.label.match(/^\d+(?:\.\d+)*\.\s*(.+)$/);
+        // Извлекаем текст без нумерации
+        const labelMatch = node.label.match(/^\\d+(?:\\.\\d+)*\\.\\s*(.+)$/);
         const baseLabel = labelMatch ? labelMatch[1] : node.label;
         const originalLabel = node.label;
 
@@ -515,6 +564,10 @@ class ItemsRenderer {
         sel.removeAllRanges();
         sel.addRange(range);
 
+        /**
+         * Завершение редактирования
+         * @param {boolean} cancel - Отменить изменения
+         */
         const finishEditing = (cancel = false) => {
             titleElement.contentEditable = 'false';
             titleElement.classList.remove('editing');
@@ -527,8 +580,8 @@ class ItemsRenderer {
             const newBaseLabel = titleElement.textContent.trim();
 
             if (newBaseLabel && newBaseLabel !== baseLabel) {
-                // Сохраняем нумерацию, если она была
-                const numberMatch = node.label.match(/^(\d+(?:\.\d+)*\.)\s*/);
+                // Сохраняем нумерацию
+                const numberMatch = node.label.match(/^(\\d+(?:\\.\\d+)*\\.)\\s*/);
                 if (numberMatch) {
                     node.label = numberMatch[1] + ' ' + newBaseLabel;
                 } else {
@@ -539,25 +592,29 @@ class ItemsRenderer {
                 treeManager.render();
                 PreviewManager.update();
             } else if (!newBaseLabel) {
-                // Возвращаем старую метку, если новая пустая
+                // Возвращаем старую метку если новая пустая
                 titleElement.textContent = originalLabel;
             } else {
                 titleElement.textContent = node.label;
             }
         };
 
+        // Завершение редактирования при потере фокуса
         const blurHandler = () => {
             finishEditing(false);
         };
 
+        // Обработка клавиш
         const keydownHandler = (e) => {
             if (e.key === 'Enter') {
+                // Enter - сохранить
                 e.preventDefault();
                 e.stopPropagation();
                 titleElement.removeEventListener('blur', blurHandler);
                 titleElement.removeEventListener('keydown', keydownHandler);
                 finishEditing(false);
             } else if (e.key === 'Escape') {
+                // Escape - отменить
                 e.preventDefault();
                 e.stopPropagation();
                 titleElement.removeEventListener('blur', blurHandler);
@@ -571,11 +628,12 @@ class ItemsRenderer {
     }
 
     /**
-     * Начало редактирования заголовка таблицы (на шаге 2)
-     * @param {HTMLElement} titleElement - DOM элемент заголовка таблицы
+     * Начало редактирования заголовка таблицы
+     * @param {HTMLElement} titleElement - Элемент заголовка таблицы
      * @param {Object} node - Узел дерева таблицы
      */
     static startEditingTableTitle(titleElement, node) {
+        // Если уже редактируется - выходим
         if (titleElement.classList.contains('editing')) {
             return;
         }
@@ -596,6 +654,10 @@ class ItemsRenderer {
         sel.removeAllRanges();
         sel.addRange(range);
 
+        /**
+         * Завершение редактирования
+         * @param {boolean} cancel - Отменить изменения
+         */
         const finishEditing = (cancel = false) => {
             titleElement.contentEditable = 'false';
             titleElement.classList.remove('editing');
@@ -608,10 +670,11 @@ class ItemsRenderer {
             const newLabel = titleElement.textContent.trim();
 
             if (newLabel) {
+                // Сохраняем новое название
                 node.customLabel = newLabel;
                 node.label = newLabel;
             } else {
-                // Если пустая строка, удаляем customLabel
+                // Удаляем кастомное название если пустое
                 delete node.customLabel;
                 node.label = node.number || originalLabel;
             }
@@ -622,10 +685,12 @@ class ItemsRenderer {
             PreviewManager.update();
         };
 
+        // Завершение редактирования при потере фокуса
         const blurHandler = () => {
             finishEditing(false);
         };
 
+        // Обработка клавиш
         const keydownHandler = (e) => {
             if (e.key === 'Enter') {
                 e.preventDefault();
@@ -653,22 +718,24 @@ class ItemsRenderer {
         const container = document.getElementById('itemsContainer');
         if (!container) return;
 
-        // События ячеек
+        // Обрабатываем все ячейки таблиц
         container.querySelectorAll('td, th').forEach(cell => {
-            // Клик для выделения
+            // Клик для выделения ячейки
             cell.addEventListener('click', (e) => {
+                // Игнорируем клики на ручки изменения размера
                 if (e.target.classList.contains('resize-handle') ||
                     e.target.classList.contains('row-resize-handle')) {
                     return;
                 }
 
+                // Без Ctrl - снимаем выделение с других ячеек
                 if (!e.ctrlKey) {
                     tableManager.clearSelection();
                 }
                 tableManager.selectCell(cell);
             });
 
-            // Двойной клик для редактирования
+            // Двойной клик для редактирования содержимого
             cell.addEventListener('dblclick', (e) => {
                 if (e.target.classList.contains('resize-handle') ||
                     e.target.classList.contains('row-resize-handle')) {
@@ -677,7 +744,7 @@ class ItemsRenderer {
                 this.startEditingCell(cell);
             });
 
-            // Контекстное меню
+            // Контекстное меню правой кнопкой мыши
             cell.addEventListener('contextmenu', (e) => {
                 if (e.target.classList.contains('resize-handle') ||
                     e.target.classList.contains('row-resize-handle')) {
@@ -686,6 +753,7 @@ class ItemsRenderer {
 
                 e.preventDefault();
 
+                // Выделяем ячейку, если она еще не выделена
                 if (!cell.classList.contains('selected') && tableManager.selectedCells.length === 0) {
                     tableManager.selectCell(cell);
                 }
@@ -694,7 +762,7 @@ class ItemsRenderer {
             });
         });
 
-        // Ручки изменения ширины колонок
+        // Обработка ручек изменения ширины колонок
         container.querySelectorAll('.resize-handle').forEach(handle => {
             handle.addEventListener('mousedown', (e) => {
                 e.preventDefault();
@@ -703,7 +771,7 @@ class ItemsRenderer {
             });
         });
 
-        // Ручки изменения высоты строк
+        // Обработка ручек изменения высоты строк
         container.querySelectorAll('.row-resize-handle').forEach(handle => {
             handle.addEventListener('mousedown', (e) => {
                 e.preventDefault();
@@ -714,14 +782,14 @@ class ItemsRenderer {
     }
 
     /**
-     * Начало редактирования ячейки таблицы
-     * @param {HTMLElement} cellEl - DOM элемент ячейки
+     * Начало редактирования содержимого ячейки
+     * @param {HTMLElement} cellEl - Элемент ячейки
      */
     static startEditingCell(cellEl) {
         const originalContent = cellEl.textContent;
         cellEl.classList.add('editing');
 
-        // Создаем textarea вместо input для поддержки многострочного текста
+        // Создаем textarea для многострочного ввода
         const textarea = document.createElement('textarea');
         textarea.value = originalContent;
         textarea.style.width = '100%';
@@ -738,6 +806,10 @@ class ItemsRenderer {
         cellEl.appendChild(textarea);
         textarea.focus();
 
+        /**
+         * Завершение редактирования
+         * @param {boolean} cancel - Отменить изменения
+         */
         const finishEditing = (cancel = false) => {
             if (cancel) {
                 cellEl.textContent = originalContent;
@@ -761,22 +833,25 @@ class ItemsRenderer {
             cellEl.classList.remove('editing');
         };
 
+        // Завершение редактирования при потере фокуса
         const blurHandler = () => {
             finishEditing(false);
         };
 
+        // Обработка клавиш
         const keydownHandler = (e) => {
             if (e.key === 'Enter' && !e.shiftKey) {
-                // Enter без Shift - завершить редактирование
+                // Enter без Shift - сохранить
                 e.preventDefault();
                 e.stopPropagation();
                 textarea.removeEventListener('blur', blurHandler);
                 textarea.removeEventListener('keydown', keydownHandler);
                 finishEditing(false);
             } else if (e.key === 'Enter' && e.shiftKey) {
-                // Shift+Enter - разрешаем перенос строки (не делаем preventDefault)
+                // Shift+Enter - перенос строки
                 e.stopPropagation();
             } else if (e.key === 'Escape') {
+                // Escape - отменить
                 e.preventDefault();
                 e.stopPropagation();
                 textarea.removeEventListener('blur', blurHandler);
@@ -790,7 +865,7 @@ class ItemsRenderer {
     }
 
     /**
-     * Изменение ширины колонки
+     * Начало изменения ширины колонки
      * @param {MouseEvent} e - Событие мыши
      */
     static startColumnResize(e) {
@@ -801,7 +876,7 @@ class ItemsRenderer {
         const startWidth = cell.offsetWidth;
         const colIndex = parseInt(cell.dataset.col);
 
-        // Найти следующую колонку
+        // Находим следующую колонку для синхронного изменения размера
         const allRows = table.querySelectorAll('tr');
         const firstRow = allRows[0];
         const firstRowCells = firstRow.querySelectorAll('td, th');
@@ -821,14 +896,16 @@ class ItemsRenderer {
             }
         }
 
+        // Ограничения размеров
         const minWidth = 80;
         const maxWidth = 800;
 
+        // Устанавливаем курсор и блокируем выделение текста
         document.body.style.cursor = 'col-resize';
         document.body.style.userSelect = 'none';
         table.classList.add('resizing');
 
-        // Линия ресайза
+        // Создаем вертикальную линию для визуализации изменения размера
         const resizeLine = document.createElement('div');
         resizeLine.style.position = 'fixed';
         resizeLine.style.top = '0';
@@ -840,6 +917,9 @@ class ItemsRenderer {
         resizeLine.style.left = `${e.clientX}px`;
         document.body.appendChild(resizeLine);
 
+        /**
+         * Обработка движения мыши
+         */
         const onMouseMove = (ev) => {
             const diff = ev.clientX - startX;
             let newWidth = startWidth + diff;
@@ -847,9 +927,11 @@ class ItemsRenderer {
 
             let nextNewWidth = nextStartWidth;
             if (nextColIndex !== null && nextCell) {
+                // Вычисляем новую ширину соседней колонки
                 const actualDiff = newWidth - startWidth;
                 nextNewWidth = nextStartWidth - actualDiff;
 
+                // Проверяем ограничения для соседней колонки
                 if (nextNewWidth < minWidth) {
                     nextNewWidth = minWidth;
                     newWidth = startWidth + (nextStartWidth - minWidth);
@@ -860,9 +942,10 @@ class ItemsRenderer {
                 }
             }
 
+            // Обновляем позицию линии
             resizeLine.style.left = `${startX + (newWidth - startWidth)}px`;
 
-            // Применить размеры ко всем ячейкам в колонках
+            // Применяем размеры ко всем ячейкам в колонках
             allRows.forEach(row => {
                 const cellsInRow = row.querySelectorAll('td, th');
                 cellsInRow.forEach(rowCell => {
@@ -870,13 +953,14 @@ class ItemsRenderer {
                     const colspan = rowCell.colSpan || 1;
 
                     if (cellColIndex === colIndex) {
+                        // Изменяемая колонка
                         rowCell.style.width = `${newWidth}px`;
                         rowCell.style.minWidth = `${newWidth}px`;
                         rowCell.style.maxWidth = `${newWidth}px`;
                         rowCell.style.wordBreak = 'normal';
                         rowCell.style.overflowWrap = 'anywhere';
                     } else if (cellColIndex < colIndex && cellColIndex + colspan > colIndex) {
-                        // Ячейка с colspan, которая накрывает текущую колонку
+                        // Ячейка с colspan, которая накрывает изменяемую колонку
                         const currentCellWidth = rowCell.offsetWidth;
                         const delta = newWidth - startWidth;
                         const newCellWidth = currentCellWidth + delta;
@@ -886,12 +970,14 @@ class ItemsRenderer {
                         rowCell.style.wordBreak = 'normal';
                         rowCell.style.overflowWrap = 'anywhere';
                     } else if (nextColIndex !== null && cellColIndex === nextColIndex) {
+                        // Соседняя колонка
                         rowCell.style.width = `${nextNewWidth}px`;
                         rowCell.style.minWidth = `${nextNewWidth}px`;
                         rowCell.style.maxWidth = `${nextNewWidth}px`;
                         rowCell.style.wordBreak = 'normal';
                         rowCell.style.overflowWrap = 'anywhere';
                     } else if (nextColIndex !== null && cellColIndex < nextColIndex && cellColIndex + colspan > nextColIndex) {
+                        // Ячейка с colspan, которая накрывает соседнюю колонку
                         const currentCellWidth = rowCell.offsetWidth;
                         const delta = nextNewWidth - nextStartWidth;
                         const newCellWidth = currentCellWidth + delta;
@@ -905,7 +991,11 @@ class ItemsRenderer {
             });
         };
 
+        /**
+         * Завершение изменения размера
+         */
         const onMouseUp = () => {
+            // Восстанавливаем состояние
             document.body.style.cursor = '';
             document.body.style.userSelect = '';
             table.classList.remove('resizing');
@@ -914,7 +1004,7 @@ class ItemsRenderer {
             document.removeEventListener('mousemove', onMouseMove);
             document.removeEventListener('mouseup', onMouseUp);
 
-            // Сохранение размеров в AppState
+            // Сохраняем размеры в AppState
             if (section) {
                 const tableId = section.dataset.tableId;
                 ItemsRenderer.persistTableSizes(tableId, table);
@@ -926,7 +1016,7 @@ class ItemsRenderer {
     }
 
     /**
-     * Изменение высоты строки
+     * Начало изменения высоты строки
      * @param {MouseEvent} e - Событие мыши
      */
     static startRowResize(e) {
@@ -937,13 +1027,16 @@ class ItemsRenderer {
         const startHeight = row.offsetHeight;
         const rowIndex = parseInt(cell.dataset.row);
 
+        // Ограничения размеров
         const minHeight = 28;
         const maxHeight = 600;
 
+        // Устанавливаем курсор и блокируем выделение текста
         document.body.style.cursor = 'row-resize';
         document.body.style.userSelect = 'none';
         table.classList.add('resizing');
 
+        // Создаем горизонтальную линию для визуализации изменения размера
         const resizeLine = document.createElement('div');
         resizeLine.style.position = 'fixed';
         resizeLine.style.left = '0';
@@ -955,13 +1048,18 @@ class ItemsRenderer {
         resizeLine.style.top = `${e.clientY}px`;
         document.body.appendChild(resizeLine);
 
+        /**
+         * Обработка движения мыши
+         */
         const onMouseMove = (ev) => {
             const diff = ev.clientY - startY;
             let newHeight = startHeight + diff;
             newHeight = Math.max(minHeight, Math.min(maxHeight, newHeight));
 
+            // Обновляем позицию линии
             resizeLine.style.top = `${startY + (newHeight - startHeight)}px`;
 
+            // Применяем размеры ко всем ячейкам в строке
             const allRows = table.querySelectorAll('tr');
             allRows.forEach(tableRow => {
                 const cellsInRow = tableRow.querySelectorAll('td, th');
@@ -970,9 +1068,11 @@ class ItemsRenderer {
                     const rowspan = rowCell.rowSpan || 1;
 
                     if (cellRowIndex === rowIndex) {
+                        // Изменяемая строка
                         rowCell.style.height = `${newHeight}px`;
                         rowCell.style.minHeight = `${newHeight}px`;
                     } else if (cellRowIndex < rowIndex && cellRowIndex + rowspan > rowIndex) {
+                        // Ячейка с rowspan, которая накрывает изменяемую строку
                         const currentCellHeight = rowCell.offsetHeight;
                         const delta = newHeight - startHeight;
                         const newCellHeight = currentCellHeight + delta;
@@ -982,11 +1082,16 @@ class ItemsRenderer {
                 });
             });
 
+            // Применяем высоту к самой строке
             row.style.height = `${newHeight}px`;
             row.style.minHeight = `${newHeight}px`;
         };
 
+        /**
+         * Завершение изменения размера
+         */
         const onMouseUp = () => {
+            // Восстанавливаем состояние
             document.body.style.cursor = '';
             document.body.style.userSelect = '';
             table.classList.remove('resizing');
@@ -995,6 +1100,7 @@ class ItemsRenderer {
             document.removeEventListener('mousemove', onMouseMove);
             document.removeEventListener('mouseup', onMouseUp);
 
+            // Сохраняем размеры в AppState
             const section = table.closest('.table-section');
             if (section) {
                 const tableId = section.dataset.tableId;
@@ -1007,7 +1113,7 @@ class ItemsRenderer {
     }
 
     /**
-     * Сохранение размеров ячеек таблицы в AppState.tableUISizes[tableId]
+     * Сохранение размеров ячеек таблицы в AppState
      * @param {string} tableId - ID таблицы
      * @param {HTMLElement} tableElement - DOM элемент таблицы
      */
@@ -1020,6 +1126,7 @@ class ItemsRenderer {
 
         const sizes = {};
 
+        // Собираем размеры всех ячеек
         tableElement.querySelectorAll('th, td').forEach(cell => {
             const row = cell.dataset.row;
             const col = cell.dataset.col;
@@ -1036,13 +1143,14 @@ class ItemsRenderer {
             };
         });
 
+        // Сохраняем в глобальное хранилище
         AppState.tableUISizes[tableId] = {
             cellSizes: sizes
         };
     }
 
     /**
-     * Применение сохранённых размеров к таблице
+     * Применение сохраненных размеров к таблице
      * @param {string} tableId - ID таблицы
      * @param {HTMLElement} tableElement - DOM элемент таблицы
      */
@@ -1052,6 +1160,7 @@ class ItemsRenderer {
         const saved = AppState.tableUISizes && AppState.tableUISizes[tableId];
         if (!saved || !saved.cellSizes) return;
 
+        // Применяем сохраненные размеры к ячейкам
         tableElement.querySelectorAll('th, td').forEach(cell => {
             const row = cell.dataset.row;
             const col = cell.dataset.col;
@@ -1061,6 +1170,7 @@ class ItemsRenderer {
             const s = saved.cellSizes[key];
 
             if (s) {
+                // Применяем сохраненные стили
                 if (s.width) cell.style.width = s.width;
                 if (s.height) cell.style.height = s.height;
                 if (s.minWidth) cell.style.minWidth = s.minWidth;
@@ -1068,6 +1178,7 @@ class ItemsRenderer {
                 cell.style.wordBreak = s.wordBreak || 'normal';
                 cell.style.overflowWrap = s.overflowWrap || 'anywhere';
             } else {
+                // Устанавливаем размеры по умолчанию
                 cell.style.minWidth = '80px';
                 cell.style.minHeight = '28px';
                 cell.style.wordBreak = 'normal';
@@ -1130,10 +1241,11 @@ class ItemsRenderer {
     }
 
     /**
-     * Синхронизация данных из DOM обратно в AppState перед сохранением
+     * Синхронизация данных из DOM обратно в AppState
+     * Вызывается перед сохранением документа
      */
     static syncDataToState() {
-        // Синхронизация таблиц
+        // Синхронизация содержимого таблиц
         document.querySelectorAll('.table-section').forEach(section => {
             const tableId = section.dataset.tableId;
             const table = AppState.tables[tableId];
@@ -1170,13 +1282,13 @@ class ItemsRenderer {
             }
         });
 
-        // Синхронизация нарушений
+        // Синхронизация данных нарушений
         document.querySelectorAll('.violation-section').forEach(section => {
             const violationId = section.dataset.violationId;
             const violation = AppState.violations[violationId];
             if (!violation) return;
 
-            // Синхронизация полей нарушения
+            // Синхронизация основных полей
             const violatedInput = section.querySelector('input[data-field="violated"]');
             if (violatedInput) {
                 violation.violated = violatedInput.value;
@@ -1187,13 +1299,13 @@ class ItemsRenderer {
                 violation.established = establishedInput.value;
             }
 
-            // Синхронизация описаний
+            // Синхронизация списка описаний
             const descItems = section.querySelectorAll('.violation-desc-item');
             if (descItems.length > 0) {
                 violation.descriptionList.items = Array.from(descItems).map(item => item.value);
             }
 
-            // Дополнительные поля
+            // Синхронизация дополнительных полей
             const additionalTextArea = section.querySelector('textarea[data-field="additionalText"]');
             if (additionalTextArea && violation.additionalText) {
                 violation.additionalText.content = additionalTextArea.value;
@@ -1219,20 +1331,25 @@ class ItemsRenderer {
 
 /**
  * Менеджер контекстного меню
+ * Управляет показом и обработкой контекстных меню
  */
 class ContextMenuManager {
+    // Ссылки на элементы меню
     static menu = null;
     static cellMenu = null;
     static currentNodeId = null;
 
+    /**
+     * Инициализация менеджера контекстных меню
+     */
     static init() {
         this.menu = document.getElementById('contextMenu');
         this.cellMenu = document.getElementById('cellContextMenu');
 
-        // Закрытие меню при клике вне его
+        // Закрываем меню при клике в любом месте страницы
         document.addEventListener('click', () => this.hide());
 
-        // Обработка пунктов меню дерева
+        // Привязываем обработчики для меню дерева
         this.menu?.querySelectorAll('.context-menu-item').forEach(item => {
             item.addEventListener('click', (e) => {
                 e.stopPropagation();
@@ -1242,11 +1359,12 @@ class ContextMenuManager {
             });
         });
 
-        // Обработка пунктов меню ячеек
+        // Привязываем обработчики для меню ячеек
         this.cellMenu?.querySelectorAll('.context-menu-item').forEach(item => {
             item.addEventListener('click', (e) => {
                 e.stopPropagation();
                 const action = item.dataset.action;
+                // Игнорируем заблокированные пункты
                 if (item.classList.contains('disabled')) return;
                 this.handleCellAction(action);
                 this.hide();
@@ -1254,19 +1372,27 @@ class ContextMenuManager {
         });
     }
 
+    /**
+     * Показ контекстного меню
+     * @param {number} x - Координата X
+     * @param {number} y - Координата Y
+     * @param {string} nodeId - ID узла дерева
+     * @param {string} type - Тип меню ('cell' или обычное)
+     */
     static show(x, y, nodeId, type) {
         this.hide();
 
         const menu = type === 'cell' ? this.cellMenu : this.menu;
         this.currentNodeId = nodeId;
 
+        // Настройка меню для ячеек
         if (type === 'cell') {
             const selectedCellsCount = tableManager.selectedCells.length;
 
-            // Управление доступностью пунктов меню
             const mergeCellsItem = this.cellMenu?.querySelector('[data-action="merge-cells"]');
             const unmergeCellItem = this.cellMenu?.querySelector('[data-action="unmerge-cell"]');
 
+            // Объединение доступно только для нескольких ячеек
             if (mergeCellsItem) {
                 if (selectedCellsCount < 2) {
                     mergeCellsItem.classList.add('disabled');
@@ -1275,6 +1401,7 @@ class ContextMenuManager {
                 }
             }
 
+            // Разъединение доступно только для объединенных ячеек
             if (unmergeCellItem) {
                 if (selectedCellsCount === 1) {
                     const cell = tableManager.selectedCells[0];
@@ -1292,11 +1419,12 @@ class ContextMenuManager {
 
         if (!menu) return;
 
-        // Позиционирование меню
+        // Временное позиционирование для измерения размеров
         menu.style.left = '-9999px';
         menu.style.top = '-9999px';
         menu.classList.remove('hidden');
 
+        // Умное позиционирование с учетом границ экрана
         setTimeout(() => {
             const menuRect = menu.getBoundingClientRect();
             const menuWidth = menuRect.width;
@@ -1308,7 +1436,7 @@ class ContextMenuManager {
             let finalX = x;
             let finalY = y;
 
-            // Коррекция, если меню выходит за границы
+            // Корректируем позицию, если меню выходит за границы
             if (finalX + menuWidth > viewportWidth) {
                 finalX = x - menuWidth;
             }
@@ -1324,11 +1452,18 @@ class ContextMenuManager {
         }, 1);
     }
 
+    /**
+     * Скрытие всех контекстных меню
+     */
     static hide() {
         if (this.menu) this.menu.classList.add('hidden');
         if (this.cellMenu) this.cellMenu.classList.add('hidden');
     }
 
+    /**
+     * Обработка действий меню дерева
+     * @param {string} action - Тип действия
+     */
     static handleTreeAction(action) {
         const nodeId = this.currentNodeId;
         if (!nodeId) return;
@@ -1338,12 +1473,13 @@ class ContextMenuManager {
 
         switch (action) {
             case 'add-child':
+                // Добавление дочернего элемента
                 if (node.type === 'table') {
                     alert('Нельзя добавить дочерний элемент к таблице');
                     return;
                 }
 
-                const childResult = AppState.addNode(nodeId, 'Новый пункт', true);  // <- изменить пустую строку на 'Новый пункт'
+                const childResult = AppState.addNode(nodeId, 'Новый пункт', true);
                 if (childResult.success) {
                     treeManager.render();
                     PreviewManager.update('previewTrim', 30);
@@ -1356,7 +1492,8 @@ class ContextMenuManager {
                 break;
 
             case 'add-sibling':
-                const siblingResult = AppState.addNode(nodeId, 'Новый пункт', false);  // <- изменить пустую строку на 'Новый пункт'
+                // Добавление элемента на том же уровне
+                const siblingResult = AppState.addNode(nodeId, 'Новый пункт', false);
                 if (siblingResult.success) {
                     treeManager.render();
                     PreviewManager.update('previewTrim', 30);
@@ -1369,6 +1506,7 @@ class ContextMenuManager {
                 break;
 
             case 'add-table':
+                // Добавление таблицы
                 if (node.type === 'table') {
                     alert('Нельзя добавить таблицу к таблице');
                     return;
@@ -1387,6 +1525,7 @@ class ContextMenuManager {
                 break;
 
             case 'add-textblock':
+                // Добавление текстового блока
                 if (node.type === 'table' || node.type === 'textblock') {
                     alert('Нельзя добавить текстовый блок к таблице или текстовому блоку');
                     return;
@@ -1405,6 +1544,7 @@ class ContextMenuManager {
                 break;
 
             case 'add-violation':
+                // Добавление нарушения
                 if (node.type === 'table' || node.type === 'textblock' || node.type === 'violation') {
                     alert('Нельзя добавить нарушение к таблице, текстовому блоку или нарушению');
                     return;
@@ -1423,6 +1563,7 @@ class ContextMenuManager {
                 break;
 
             case 'delete':
+                // Удаление элемента
                 if (node.protected) {
                     alert('Этот элемент защищен от удаления');
                     return;
@@ -1440,9 +1581,14 @@ class ContextMenuManager {
         }
     }
 
+    /**
+     * Обработка действий меню ячеек
+     * @param {string} action - Тип действия
+     */
     static handleCellAction(action) {
         let tableSizes;
 
+        // Сохраняем размеры таблицы перед изменением
         if (tableManager.selectedCells.length > 0) {
             const table = tableManager.selectedCells[0].closest('table');
             tableSizes = ItemsRenderer.preserveTableSizes(table);
@@ -1450,9 +1596,11 @@ class ContextMenuManager {
 
         switch (action) {
             case 'merge-cells':
+                // Объединение ячеек
                 tableManager.mergeCells();
                 if (AppState.currentStep === 2) {
                     ItemsRenderer.renderAll();
+                    // Восстанавливаем размеры после перерисовки
                     setTimeout(() => {
                         const tables = document.querySelectorAll('.editable-table');
                         tables.forEach(tbl => {
@@ -1470,9 +1618,11 @@ class ContextMenuManager {
                 break;
 
             case 'unmerge-cell':
+                // Разъединение ячеек
                 tableManager.unmergeCells();
                 if (AppState.currentStep === 2) {
                     ItemsRenderer.renderAll();
+                    // Восстанавливаем размеры после перерисовки
                     setTimeout(() => {
                         const tables = document.querySelectorAll('.editable-table');
                         tables.forEach(tbl => {
@@ -1492,5 +1642,5 @@ class ContextMenuManager {
     }
 }
 
-// Инициализация приложения при загрузке DOM
+// Запуск приложения при загрузке DOM
 document.addEventListener('DOMContentLoaded', () => App.init());

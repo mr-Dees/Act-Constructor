@@ -1,0 +1,34 @@
+/*
+ * Типы уведомлений
+ * Цветовая дифференциация для разных статусов сообщений
+ */
+
+/* Уведомление об успешном действии */
+.notification.success {
+    border-left-color: var(--success);
+}
+
+/* Уведомление об ошибке */
+.notification.error {
+    border-left-color: var(--error);
+}
+
+/* Информационное уведомление */
+.notification.info {
+    border-left-color: var(--accent);
+}
+
+/* Иконка успешного уведомления */
+.notification.success .notification-icon {
+    color: var(--success);
+}
+
+/* Иконка уведомления об ошибке */
+.notification.error .notification-icon {
+    color: var(--error);
+}
+
+/* Иконка информационного уведомления */
+.notification.info .notification-icon {
+    color: var(--accent);
+}

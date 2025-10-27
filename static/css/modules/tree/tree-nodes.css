@@ -1,0 +1,85 @@
+/*
+ * Типы узлов дерева
+ * Специальные стили для разных типов элементов документа
+ */
+
+/* Узел таблицы */
+.tree-item.table-node {
+    font-style: normal;
+}
+
+/* Цветовая идентификация узла таблицы */
+.tree-item.table-node:not(.selected):not(.parent-selected) {
+    color: var(--accent);
+    border-left-color: var(--accent);
+    border-left-width: 0.1875rem;
+    font-weight: 500;
+}
+
+/* Выделение метки узла таблицы */
+.tree-item.table-node .tree-label {
+    font-weight: 500;
+}
+
+/* Иконка таблицы */
+.table-icon {
+    display: inline-block;
+    margin-left: 0.375rem;
+    font-style: normal;
+    opacity: 0.7;
+    font-size: 0.8125rem;
+}
+
+/* Узел текстового блока */
+.tree-item.textblock-node {
+    font-style: normal;
+}
+
+/* Цветовая идентификация узла текстового блока */
+.tree-item.textblock-node:not(.selected):not(.parent-selected) {
+    color: var(--primary-light);
+    border-left-color: var(--primary-light);
+    border-left-width: 0.1875rem;
+    font-weight: 500;
+}
+
+/* Выделение метки узла текстового блока */
+.tree-item.textblock-node .tree-label {
+    font-weight: 500;
+}
+
+/* Иконка текстового блока */
+.textblock-icon {
+    display: inline-block;
+    margin-left: 0.375rem;
+    font-style: normal;
+    opacity: 0.7;
+    font-size: 0.8125rem;
+}
+
+/* Узел нарушения */
+.tree-item.violation-node {
+    font-style: normal;
+}
+
+/* Цветовая идентификация узла нарушения */
+.tree-item.violation-node:not(.selected):not(.parent-selected) {
+    color: var(--error);
+    border-left-color: var(--error);
+    border-left-width: 0.1875rem;
+    font-weight: 500;
+}
+
+/* Выделение метки узла нарушения */
+.tree-item.violation-node .tree-label {
+    font-weight: 500;
+}
+
+/* Иконка нарушения */
+.violation-icon {
+    display: inline-block;
+    margin-left: 0.375rem;
+    font-style: normal;
+    opacity: 0.7;
+    font-size: 0.8125rem;
+}

@@ -1,0 +1,38 @@
+/*
+ * Кнопка вызова справки
+ * Плавающая кнопка в шапке приложения для открытия модального окна помощи
+ */
+
+/* Кнопка справки с иконкой лампочки */
+.help-button {
+    position: absolute;
+    left: var(--spacing-lg);
+    top: 50%;
+    transform: translateY(-50%);
+    background: rgba(255, 255, 255, 0.1);
+    border: 0.0625em solid rgba(255, 255, 255, 0.3);
+    border-radius: 0.5em;
+    padding: 0.65em 0.75em;
+    cursor: pointer;
+    transition: all 0.3s ease;
+    color: white;
+    display: flex;
+    align-items: center;
+    gap: 0.375em;
+    z-index: 1000;
+    font-size: 1em;
+}
+
+/* Эффект при наведении на кнопку */
+.help-button:hover {
+    background: rgba(255, 255, 255, 0.2);
+    transform: translateY(-50%) scale(1.05);
+    box-shadow: 0 0.25em 0.75em rgba(0, 0, 0, 0.3);
+}
+
+/* Иконка лампочки */
+.lightbulb-icon {
+    font-size: 1.3em;
+    display: inline-block;
+    line-height: 1;
+}
