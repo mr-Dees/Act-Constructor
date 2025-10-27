@@ -40,11 +40,66 @@ UI_for_EP_v_KAP/
 ├── static/
 │   ├── css/
 │   │   ├── main.css
-│   │   ├── tree.css
-│   │   ├── table.css
-│   │   ├── help.css
-│   │   ├── violation.css
-│   │   └── preview.css
+│   │   ├── base/
+│   │   │   ├── base-variables.css
+│   │   │   ├── base-reset.css
+│   │   │   └── base-animations.css
+│   │   ├── layout/
+│   │   │   ├── layout-container.css
+│   │   │   ├── layout-header.css
+│   │   │   ├── layout-two-columns.css
+│   │   │   └── layout-panels.css
+│   │   ├── modules/
+│   │   │   ├── tree/
+│   │   │   │   ├── tree-base.css
+│   │   │   │   ├── tree-states.css
+│   │   │   │   ├── tree-nodes.css
+│   │   │   │   └── tree-children.css
+│   │   │   ├── table/
+│   │   │   │   ├── table-base.css
+│   │   │   │   ├── table-states.css
+│   │   │   │   ├── table-resize.css
+│   │   │   │   └── table-editor.css
+│   │   │   ├── violation/
+│   │   │   │   ├── violation-base.css
+│   │   │   │   ├── violation-fields.css
+│   │   │   │   ├── violation-list.css
+│   │   │   │   └── violation-preview.css
+│   │   │   ├── preview/
+│   │   │   │   ├── preview-base.css
+│   │   │   │   ├── preview-typography.css
+│   │   │   │   └── preview-table.css
+│   │   │   ├── help/
+│   │   │   │   ├── help-button.css
+│   │   │   │   ├── help-modal.css
+│   │   │   │   ├── help-content.css
+│   │   │   │   └── help-media.css
+│   │   │   ├── buttons/
+│   │   │   │   ├── buttons-base.css
+│   │   │   │   ├── buttons-action-buttons.css
+│   │   │   │   └── buttons-save-group.css
+│   │   │   ├── items/
+│   │   │   │   ├── items-base.css
+│   │   │   │   ├── items-levels.css
+│   │   │   │   ├── items-header.css
+│   │   │   │   └── items-content.css
+│   │   │   ├── textblock/
+│   │   │   │   ├── textblock-toolbar.css
+│   │   │   │   └── textblock-content.css
+│   │   │   ├── context-menu/
+│   │   │   │   ├── context-menu-base.css
+│   │   │   │   └── context-menu-states.css
+│   │   │   ├── notifications/
+│   │   │   │   ├── notifications-base.css
+│   │   │   │   ├── notifications-types.css
+│   │   │   │   ├── notifications-content.css
+│   │   │   │   └── notifications-animations.css
+│   │   │   └── dialog/
+│   │   │       ├── dialog-overlay.css
+│   │   │       ├── dialog-dialog.css
+│   │   │       └── dialog-buttons.css
+│   │   └── utilities/
+│   │       └── utilities-helpers.css
 │   └── js/
 │       ├── state.js
 │       ├── tree.js
