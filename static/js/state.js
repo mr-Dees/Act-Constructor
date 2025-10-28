@@ -492,9 +492,9 @@ const AppState = {
                 enabled: false,
                 items: []
             },
-            additionalText: {
+            additionalContent: {
                 enabled: false,
-                content: ''
+                items: []
             },
             reasons: {
                 enabled: false,
@@ -614,9 +614,9 @@ const AppState = {
                     enabled: violation.descriptionList?.enabled || false,
                     items: violation.descriptionList?.items || []
                 },
-                additionalText: {
-                    enabled: violation.additionalText?.enabled || false,
-                    content: violation.additionalText?.content || ''
+                additionalContent: {
+                    enabled: violation.additionalContent?.enabled || false,
+                    items: violation.additionalContent?.items || []
                 },
                 reasons: {
                     enabled: violation.reasons?.enabled || false,

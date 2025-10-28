@@ -112,6 +112,40 @@ class ViolationOptionalFieldSchema(BaseModel):
     content: str = ""
 
 
+class ViolationContentItemSchema(BaseModel):
+    """
+    Универсальный элемент дополнительного контента.
+
+    Attributes:
+        id: Уникальный идентификатор элемента
+        type: Тип элемента ('case', 'image', 'freeText')
+        content: Текстовое содержимое (для case и freeText)
+        url: URL изображения (для image)
+        caption: Подпись изображения (для image)
+        filename: Имя файла (для image)
+        order: Порядок отображения
+    """
+    id: str = Field(description="ID элемента")
+    type: str = Field(description="Тип: case, image, freeText")
+    content: str = Field(default="", description="Текстовое содержимое")
+    url: str = Field(default="", description="URL изображения")
+    caption: str = Field(default="", description="Подпись изображения")
+    filename: str = Field(default="", description="Имя файла")
+    order: int = Field(default=0, description="Порядок")
+
+
+class ViolationAdditionalContentSchema(BaseModel):
+    """
+    Коллекция дополнительного контента нарушения.
+
+    Attributes:
+        enabled: Включена ли секция
+        items: Список всех элементов в порядке добавления
+    """
+    enabled: bool = False
+    items: List[ViolationContentItemSchema] = Field(default_factory=list)
+
+
 class ViolationSchema(BaseModel):
     """
     Схема нарушения со всеми полями.
@@ -135,9 +169,9 @@ class ViolationSchema(BaseModel):
         default_factory=ViolationDescriptionListSchema,
         description="Список описаний"
     )
-    additionalText: ViolationOptionalFieldSchema = Field(
-        default_factory=ViolationOptionalFieldSchema,
-        description="Дополнительный текст"
+    additionalContent: ViolationAdditionalContentSchema = Field(
+        default_factory=ViolationAdditionalContentSchema,
+        description="Дополнительный контент"
     )
     reasons: ViolationOptionalFieldSchema = Field(
         default_factory=ViolationOptionalFieldSchema,

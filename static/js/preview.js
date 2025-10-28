@@ -133,12 +133,31 @@ class PreviewManager {
                         }
                     }
 
-                    // Дополнительный текст (пометка)
-                    if (violation.additionalText.enabled && violation.additionalText.content) {
-                        const additionalLine = document.createElement('div');
-                        additionalLine.className = 'preview-violation-line';
-                        additionalLine.innerHTML = `Пометка: ${truncate(violation.additionalText.content)}`;
-                        violationDiv.appendChild(additionalLine);
+                    // Дополнительный контент
+                    if (violation.additionalContent && violation.additionalContent.enabled) {
+                        const items = violation.additionalContent.items || [];
+
+                        items.forEach((item) => {
+                            const itemType = item.type;
+
+                            if (itemType === 'case' && item.content.trim()) {
+                                const caseLine = document.createElement('div');
+                                caseLine.className = 'preview-violation-line';
+                                caseLine.innerHTML = `Кейс: ${truncate(item.content, 50)}`;
+                                violationDiv.appendChild(caseLine);
+                            } else if (itemType === 'image') {
+                                const imageLine = document.createElement('div');
+                                imageLine.className = 'preview-violation-line';
+                                const caption = item.caption ? ` - ${truncate(item.caption, 30)}` : '';
+                                imageLine.innerHTML = `Изображение: ${truncate(item.filename, 30)}${caption}`;
+                                violationDiv.appendChild(imageLine);
+                            } else if (itemType === 'freeText' && item.content.trim()) {
+                                const textLine = document.createElement('div');
+                                textLine.className = 'preview-violation-line';
+                                textLine.innerHTML = `Текст: ${truncate(item.content, 50)}`;
+                                violationDiv.appendChild(textLine);
+                            }
+                        });
                     }
 
                     // Причины нарушения

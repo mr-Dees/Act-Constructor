@@ -5,12 +5,14 @@
 с поддержкой таблиц, форматирования и иерархии.
 """
 
+import base64
 from html.parser import HTMLParser
+from io import BytesIO
 from typing import Dict
 
 from docx import Document
 from docx.enum.text import WD_PARAGRAPH_ALIGNMENT
-from docx.shared import Pt
+from docx.shared import Inches, Pt
 
 from app.formatters.base_formatter import BaseFormatter
 
@@ -384,12 +386,58 @@ class DocxFormatter(BaseFormatter):
                     if item.strip():
                         doc.add_paragraph(item, style='List Bullet')
 
-        # Дополнительный текст
-        additional_text = violation_data.get('additionalText', {})
-        if additional_text.get('enabled', False):
-            content = additional_text.get('content', '')
-            if content:
-                doc.add_paragraph(content)
+        # Дополнительный контент
+        additional_content = violation_data.get('additionalContent', {})
+        if additional_content.get('enabled', False):
+            items = additional_content.get('items', [])
+
+            for item in items:
+                item_type = item.get('type')
+
+                if item_type == 'case':
+                    content = item.get('content', '')
+                    if content:
+                        p = doc.add_paragraph()
+                        p.add_run('Кейс: ').bold = True
+                        p.add_run(content)
+
+                elif item_type == 'image':
+                    url = item.get('url', '')
+                    caption = item.get('caption', '')
+                    filename = item.get('filename', '')
+
+                    if url and url.startswith('data:image'):
+                        try:
+                            # Декодируем base64
+                            header, encoded = url.split(',', 1)
+                            image_data = base64.b64decode(encoded)
+                            image_stream = BytesIO(image_data)
+
+                            # Добавляем изображение
+                            doc.add_picture(image_stream, width=Inches(4))
+
+                            # Подпись под изображением
+                            if caption:
+                                p = doc.add_paragraph(caption)
+                                p.alignment = WD_PARAGRAPH_ALIGNMENT.CENTER
+                                for run in p.runs:
+                                    run.italic = True
+                                    run.font.size = Pt(10)
+                        except Exception as e:
+                            # Если не удалось декодировать, просто имя файла
+                            p = doc.add_paragraph(f"Изображение: {filename}")
+                            if caption:
+                                p.add_run(f" - {caption}")
+                    else:
+                        # Если нет URL или не base64
+                        p = doc.add_paragraph(f"Изображение: {filename}")
+                        if caption:
+                            p.add_run(f" - {caption}")
+
+                elif item_type == 'freeText':
+                    content = item.get('content', '')
+                    if content:
+                        doc.add_paragraph(content)
 
         # Причины
         reasons = violation_data.get('reasons', {})

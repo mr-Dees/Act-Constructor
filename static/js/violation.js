@@ -79,7 +79,7 @@ class ViolationManager {
             this.createOptionalField(violation, 'descriptionList', 'Описание перечнем', 'list')
         );
         optionalFieldsContainer.appendChild(
-            this.createOptionalField(violation, 'additionalText', 'Дополнительный текст', 'text')
+            this.createAdditionalContentField(violation)
         );
         optionalFieldsContainer.appendChild(
             this.createOptionalField(violation, 'reasons', 'Причины', 'text')
@@ -216,6 +216,308 @@ class ViolationManager {
         fieldContainer.appendChild(contentContainer);
         return fieldContainer;
     }
+
+    /**
+     * Создает расширяемую секцию дополнительного контента
+     * @param {Object} violation - Объект нарушения
+     * @returns {HTMLElement} Контейнер с подсущностями
+     */
+    /**
+     * Создает расширяемую секцию дополнительного контента
+     */
+    createAdditionalContentField(violation) {
+        const fieldContainer = document.createElement('div');
+        fieldContainer.className = 'violation-optional-field violation-additional-content';
+
+        // Чекбокс для включения секции
+        const checkboxContainer = document.createElement('div');
+        checkboxContainer.className = 'violation-field-toggle';
+
+        const checkbox = document.createElement('input');
+        checkbox.type = 'checkbox';
+        checkbox.id = `${violation.id}-additionalContent`;
+        checkbox.checked = violation.additionalContent.enabled;
+        checkbox.addEventListener('change', () => {
+            violation.additionalContent.enabled = checkbox.checked;
+            contentContainer.style.display = checkbox.checked ? 'block' : 'none';
+            PreviewManager.update();
+        });
+
+        const checkboxLabel = document.createElement('label');
+        checkboxLabel.htmlFor = checkbox.id;
+        checkboxLabel.textContent = 'Дополнительный контент';
+        checkboxLabel.className = 'violation-field-label';
+
+        checkboxContainer.appendChild(checkbox);
+        checkboxContainer.appendChild(checkboxLabel);
+        fieldContainer.appendChild(checkboxContainer);
+
+        // Контейнер содержимого
+        const contentContainer = document.createElement('div');
+        contentContainer.className = 'violation-field-content additional-content-wrapper';
+        contentContainer.style.display = violation.additionalContent.enabled ? 'block' : 'none';
+
+        // Панель кнопок добавления (фиксированная вверху)
+        const buttonsPanel = document.createElement('div');
+        buttonsPanel.className = 'additional-content-buttons';
+
+        const addCaseBtn = document.createElement('button');
+        addCaseBtn.className = 'violation-list-add-btn';
+        addCaseBtn.textContent = '+ Кейс';
+        addCaseBtn.addEventListener('click', () => {
+            this.addContentItem(violation, 'case', contentContainer);
+        });
+
+        const addImageBtn = document.createElement('button');
+        addImageBtn.className = 'violation-list-add-btn';
+        addImageBtn.textContent = '+ Изображение';
+
+        const fileInput = document.createElement('input');
+        fileInput.type = 'file';
+        fileInput.accept = 'image/*';
+        fileInput.style.display = 'none';
+        addImageBtn.addEventListener('click', () => fileInput.click());
+
+        fileInput.addEventListener('change', (e) => {
+            const file = e.target.files[0];
+            if (!file) return;
+
+            const reader = new FileReader();
+            reader.onload = (event) => {
+                this.addContentItem(violation, 'image', contentContainer, {
+                    url: event.target.result,
+                    filename: file.name
+                });
+            };
+            reader.readAsDataURL(file);
+            fileInput.value = '';
+        });
+
+        const addTextBtn = document.createElement('button');
+        addTextBtn.className = 'violation-list-add-btn';
+        addTextBtn.textContent = '+ Текст';
+        addTextBtn.addEventListener('click', () => {
+            this.addContentItem(violation, 'freeText', contentContainer);
+        });
+
+        buttonsPanel.appendChild(addCaseBtn);
+        buttonsPanel.appendChild(addImageBtn);
+        buttonsPanel.appendChild(fileInput);
+        buttonsPanel.appendChild(addTextBtn);
+        contentContainer.appendChild(buttonsPanel);
+
+        // Контейнер для элементов (в порядке добавления)
+        const itemsContainer = document.createElement('div');
+        itemsContainer.className = 'additional-content-items';
+        itemsContainer.dataset.violationId = violation.id;
+        contentContainer.appendChild(itemsContainer);
+
+        // Рендерим существующие элементы
+        this.renderContentItems(violation, itemsContainer);
+
+        fieldContainer.appendChild(contentContainer);
+        return fieldContainer;
+    }
+
+    /**
+     * Добавляет элемент контента в массив
+     */
+    addContentItem(violation, type, container, extraData = {}) {
+        const newItem = {
+            id: `${type}_${Date.now()}`,
+            type: type,
+            content: '',
+            url: extraData.url || '',
+            caption: '',
+            filename: extraData.filename || '',
+            order: violation.additionalContent.items.length
+        };
+
+        violation.additionalContent.items.push(newItem);
+
+        const itemsContainer = container.querySelector('.additional-content-items');
+        this.renderContentItems(violation, itemsContainer);
+        PreviewManager.update();
+    }
+
+    /**
+     * Отрисовывает все элементы в порядке добавления
+     */
+    renderContentItems(violation, container) {
+        container.innerHTML = '';
+
+        violation.additionalContent.items.forEach((item, index) => {
+            let itemElement;
+
+            if (item.type === 'case') {
+                itemElement = this.createCaseElement(violation, item, index);
+            } else if (item.type === 'image') {
+                itemElement = this.createImageElement(violation, item, index);
+            } else if (item.type === 'freeText') {
+                itemElement = this.createFreeTextElement(violation, item, index);
+            }
+
+            if (itemElement) {
+                container.appendChild(itemElement);
+            }
+        });
+    }
+
+    /**
+     * Создает элемент кейса
+     */
+    createCaseElement(violation, item, index) {
+        const wrapper = document.createElement('div');
+        wrapper.className = 'content-item-wrapper';
+
+        const label = document.createElement('div');
+        label.className = 'content-item-label';
+        label.textContent = `Кейс ${this.getTypeIndex(violation.additionalContent.items, 'case', index)}`;
+
+        const itemDiv = document.createElement('div');
+        itemDiv.className = 'content-item';
+
+        const textarea = document.createElement('textarea');
+        textarea.className = 'violation-textarea';
+        textarea.placeholder = 'Описание кейса';
+        textarea.value = item.content;
+        textarea.rows = 3;
+
+        textarea.addEventListener('input', () => {
+            item.content = textarea.value;
+            PreviewManager.update();
+        });
+
+        const deleteBtn = document.createElement('button');
+        deleteBtn.className = 'violation-list-delete-btn';
+        deleteBtn.textContent = '×';
+        deleteBtn.title = 'Удалить';
+        deleteBtn.addEventListener('click', () => {
+            violation.additionalContent.items.splice(index, 1);
+            const container = wrapper.parentElement;
+            this.renderContentItems(violation, container);
+            PreviewManager.update();
+        });
+
+        itemDiv.appendChild(textarea);
+        itemDiv.appendChild(deleteBtn);
+        wrapper.appendChild(label);
+        wrapper.appendChild(itemDiv);
+
+        return wrapper;
+    }
+
+    /**
+     * Создает элемент изображения
+     */
+    createImageElement(violation, item, index) {
+        const wrapper = document.createElement('div');
+        wrapper.className = 'content-item-wrapper';
+
+        const label = document.createElement('div');
+        label.className = 'content-item-label';
+        label.textContent = `Изображение ${this.getTypeIndex(violation.additionalContent.items, 'image', index)}`;
+
+        const itemDiv = document.createElement('div');
+        itemDiv.className = 'image-item';
+
+        const img = document.createElement('img');
+        img.src = item.url;
+        img.alt = item.caption || item.filename;
+        img.className = 'image-preview';
+
+        const filenameDiv = document.createElement('div');
+        filenameDiv.className = 'image-filename';
+        filenameDiv.textContent = item.filename;
+
+        const captionInput = document.createElement('input');
+        captionInput.type = 'text';
+        captionInput.className = 'violation-list-input';
+        captionInput.placeholder = 'Подпись к изображению';
+        captionInput.value = item.caption;
+        captionInput.addEventListener('input', () => {
+            item.caption = captionInput.value;
+            PreviewManager.update();
+        });
+
+        const deleteBtn = document.createElement('button');
+        deleteBtn.className = 'violation-list-delete-btn';
+        deleteBtn.textContent = '×';
+        deleteBtn.title = 'Удалить';
+        deleteBtn.addEventListener('click', () => {
+            violation.additionalContent.items.splice(index, 1);
+            const container = wrapper.parentElement;
+            this.renderContentItems(violation, container);
+            PreviewManager.update();
+        });
+
+        itemDiv.appendChild(img);
+        itemDiv.appendChild(filenameDiv);
+        itemDiv.appendChild(captionInput);
+        itemDiv.appendChild(deleteBtn);
+        wrapper.appendChild(label);
+        wrapper.appendChild(itemDiv);
+
+        return wrapper;
+    }
+
+    /**
+     * Создает элемент произвольного текста
+     */
+    createFreeTextElement(violation, item, index) {
+        const wrapper = document.createElement('div');
+        wrapper.className = 'content-item-wrapper';
+
+        const label = document.createElement('div');
+        label.className = 'content-item-label';
+        label.textContent = `Текст ${this.getTypeIndex(violation.additionalContent.items, 'freeText', index)}`;
+
+        const itemDiv = document.createElement('div');
+        itemDiv.className = 'content-item';
+
+        const textarea = document.createElement('textarea');
+        textarea.className = 'violation-textarea';
+        textarea.placeholder = 'Произвольный текст';
+        textarea.value = item.content;
+        textarea.rows = 4;
+
+        textarea.addEventListener('input', () => {
+            item.content = textarea.value;
+            PreviewManager.update();
+        });
+
+        const deleteBtn = document.createElement('button');
+        deleteBtn.className = 'violation-list-delete-btn';
+        deleteBtn.textContent = '×';
+        deleteBtn.title = 'Удалить';
+        deleteBtn.addEventListener('click', () => {
+            violation.additionalContent.items.splice(index, 1);
+            const container = wrapper.parentElement;
+            this.renderContentItems(violation, container);
+            PreviewManager.update();
+        });
+
+        itemDiv.appendChild(textarea);
+        itemDiv.appendChild(deleteBtn);
+        wrapper.appendChild(label);
+        wrapper.appendChild(itemDiv);
+
+        return wrapper;
+    }
+
+    /**
+     * Получает порядковый номер элемента по типу
+     */
+    getTypeIndex(items, type, currentIndex) {
+        let count = 0;
+        for (let i = 0; i <= currentIndex; i++) {
+            if (items[i].type === type) {
+                count++;
+            }
+        }
+        return count;
+    }
+
 
     /**
      * Отрисовывает маркированный список элементов

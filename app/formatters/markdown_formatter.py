@@ -313,13 +313,34 @@ class MarkdownFormatter(BaseFormatter):
                         lines.append(f"- {item}")
                 lines.append("")
 
-        # Дополнительный текст (без заголовка)
-        additional_text = violation_data.get('additionalText', {})
-        if additional_text.get('enabled', False):
-            content = additional_text.get('content', '')
-            if content:
-                lines.append(content)
-                lines.append("")
+        # Дополнительный контент
+        additional_content = violation_data.get('additionalContent', {})
+        if additional_content.get('enabled', False):
+            items = additional_content.get('items', [])
+
+            for item in items:
+                item_type = item.get('type')
+
+                if item_type == 'case':
+                    content = item.get('content', '')
+                    if content:
+                        lines.append(f"**Кейс:** {content}")
+                        lines.append("")
+
+                elif item_type == 'image':
+                    caption = item.get('caption', '')
+                    filename = item.get('filename', '')
+                    if caption:
+                        lines.append(f"*{filename}* - {caption}")
+                    else:
+                        lines.append(f"*{filename}*")
+                    lines.append("")
+
+                elif item_type == 'freeText':
+                    content = item.get('content', '')
+                    if content:
+                        lines.append(content)
+                        lines.append("")
 
         # Причины нарушения
         reasons = violation_data.get('reasons', {})
