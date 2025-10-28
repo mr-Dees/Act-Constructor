@@ -137,25 +137,35 @@ class PreviewManager {
                     if (violation.additionalContent && violation.additionalContent.enabled) {
                         const items = violation.additionalContent.items || [];
 
+                        // Вычисляем номера для последовательных кейсов
+                        let caseNumber = 1;
+                        let imageNumber = 1;
+                        let textNumber = 1;
+
                         items.forEach((item) => {
                             const itemType = item.type;
 
                             if (itemType === 'case' && item.content.trim()) {
                                 const caseLine = document.createElement('div');
                                 caseLine.className = 'preview-violation-line';
-                                caseLine.innerHTML = `Кейс: ${truncate(item.content, 50)}`;
+                                caseLine.innerHTML = `Кейс ${caseNumber}: ${truncate(item.content, 50)}`;
                                 violationDiv.appendChild(caseLine);
+                                caseNumber++;
                             } else if (itemType === 'image') {
                                 const imageLine = document.createElement('div');
                                 imageLine.className = 'preview-violation-line';
                                 const caption = item.caption ? ` - ${truncate(item.caption, 30)}` : '';
-                                imageLine.innerHTML = `Изображение: ${truncate(item.filename, 30)}${caption}`;
+                                imageLine.innerHTML = `Изображение ${imageNumber}: ${truncate(item.filename, 30)}${caption}`;
                                 violationDiv.appendChild(imageLine);
+                                caseNumber = 1;
+                                imageNumber++;
                             } else if (itemType === 'freeText' && item.content.trim()) {
                                 const textLine = document.createElement('div');
                                 textLine.className = 'preview-violation-line';
-                                textLine.innerHTML = `Текст: ${truncate(item.content, 50)}`;
+                                textLine.innerHTML = `Текст ${textNumber}: ${truncate(item.content, 50)}`;
                                 violationDiv.appendChild(textLine);
+                                caseNumber = 1;
+                                textNumber++;
                             }
                         });
                     }

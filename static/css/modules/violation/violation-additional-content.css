@@ -8,7 +8,7 @@
     margin-top: var(--spacing-md);
 }
 
-/* Панель кнопок добавления (фиксированная) */
+/* Панель кнопок добавления */
 .additional-content-buttons {
     display: flex;
     gap: var(--spacing-sm);
@@ -27,33 +27,92 @@
     gap: var(--spacing-md);
 }
 
-/* Обертка одного элемента (с меткой типа) */
+/* Обертка одного элемента - БЛОЧЕК */
 .content-item-wrapper {
-    border: 1px solid var(--border);
-    border-radius: var(--radius);
+    border: 2px solid var(--border);
+    border-radius: var(--radius-md);
     overflow: hidden;
     background-color: var(--bg-primary);
-    box-shadow: var(--shadow-xs);
+    box-shadow: var(--shadow-sm);
+    cursor: grab;
+    transition: all 0.2s ease;
 }
 
-/* Метка типа элемента (Кейс, Изображение, Текст) */
+.content-item-wrapper:hover {
+    border-color: var(--primary);
+    box-shadow: var(--shadow);
+}
+
+.content-item-wrapper:active {
+    cursor: grabbing;
+}
+
+.content-item-wrapper.dragging {
+    opacity: 0.4;
+    transform: scale(0.98);
+    border-color: var(--primary);
+}
+
+/* Метка типа элемента */
 .content-item-label {
     padding: var(--spacing-sm) var(--spacing-md);
-    background-color: var(--primary-subtle);
-    color: var(--text-secondary);
-    font-size: 0.75rem;
+    background: linear-gradient(135deg, var(--primary-subtle) 0%, var(--bg-tertiary) 100%);
+    color: var(--text-primary);
+    font-size: 0.8125rem;
     font-weight: 600;
     text-transform: uppercase;
     letter-spacing: 0.05em;
-    border-bottom: 1px solid var(--border-light);
+    border-bottom: 1px solid var(--border);
+    display: flex;
+    align-items: center;
+    gap: var(--spacing-xs);
+    user-select: none;
 }
 
-/* Контейнер содержимого элемента (кейс или текст) */
+/* Иконка перетаскивания */
+.drag-handle-inline {
+    color: var(--primary);
+    font-size: 1rem;
+    line-height: 1;
+    cursor: grab;
+    opacity: 0.5;
+    transition: opacity 0.2s;
+}
+
+.content-item-wrapper:hover .drag-handle-inline {
+    opacity: 1;
+}
+
+/* Миниатюра при перетаскивании */
+.drag-miniature {
+    display: flex;
+    align-items: center;
+    gap: var(--spacing-sm);
+    padding: var(--spacing-sm) var(--spacing-md);
+    background-color: var(--primary);
+    color: white;
+    border-radius: var(--radius);
+    font-size: 0.875rem;
+    font-weight: 600;
+    box-shadow: var(--shadow-lg);
+    white-space: nowrap;
+}
+
+.drag-miniature-icon {
+    font-size: 1.25rem;
+}
+
+.drag-miniature-label {
+    font-weight: 600;
+}
+
+/* Содержимое элемента */
 .content-item {
     padding: var(--spacing-md);
     display: flex;
     gap: var(--spacing-sm);
     align-items: flex-start;
+    background-color: var(--bg-primary);
 }
 
 /* Textarea внутри элемента занимает всё доступное пространство */
@@ -76,6 +135,7 @@
     flex-direction: column;
     gap: var(--spacing-sm);
     position: relative;
+    background-color: var(--bg-primary);
 }
 
 /* Превью изображения */

@@ -342,37 +342,87 @@ class ViolationManager {
 
     /**
      * Отрисовывает все элементы в порядке добавления
+     * Вычисляет нумерацию для последовательных кейсов
      */
     renderContentItems(violation, container) {
         container.innerHTML = '';
+
+        // Вычисляем нумерацию для последовательных кейсов
+        const itemsWithNumbers = this.calculateCaseNumbers(violation.additionalContent.items);
 
         violation.additionalContent.items.forEach((item, index) => {
             let itemElement;
 
             if (item.type === 'case') {
-                itemElement = this.createCaseElement(violation, item, index);
+                const caseNumber = itemsWithNumbers[index];
+                itemElement = this.createCaseElement(violation, item, index, caseNumber);
             } else if (item.type === 'image') {
-                itemElement = this.createImageElement(violation, item, index);
+                const imageNumber = this.getTypeSequentialNumber(violation.additionalContent.items, 'image', index);
+                itemElement = this.createImageElement(violation, item, index, imageNumber);
             } else if (item.type === 'freeText') {
-                itemElement = this.createFreeTextElement(violation, item, index);
+                const textNumber = this.getTypeSequentialNumber(violation.additionalContent.items, 'freeText', index);
+                itemElement = this.createFreeTextElement(violation, item, index, textNumber);
             }
 
             if (itemElement) {
+                // Добавляем drag-and-drop атрибуты
+                itemElement.draggable = true;
+                itemElement.dataset.itemIndex = index;
+
+                // Обработчики перетаскивания
+                itemElement.addEventListener('dragstart', (e) => this.handleDragStart(e, violation, index, item));
+                itemElement.addEventListener('dragover', (e) => this.handleDragOver(e));
+                itemElement.addEventListener('drop', (e) => this.handleDrop(e, violation, index, container));
+                itemElement.addEventListener('dragend', (e) => this.handleDragEnd(e));
+
                 container.appendChild(itemElement);
             }
         });
     }
 
     /**
-     * Создает элемент кейса
+     * Получает порядковый номер элемента определенного типа (не прерываемый)
      */
-    createCaseElement(violation, item, index) {
+    getTypeSequentialNumber(items, type, currentIndex) {
+        let count = 0;
+        for (let i = 0; i <= currentIndex; i++) {
+            if (items[i].type === type) {
+                count++;
+            }
+        }
+        return count;
+    }
+
+    /**
+     * Вычисляет номера для кейсов (сброс нумерации при прерывании)
+     */
+    calculateCaseNumbers(items) {
+        const numbers = new Array(items.length).fill(null);
+        let currentCaseNumber = 1;
+
+        items.forEach((item, index) => {
+            if (item.type === 'case') {
+                numbers[index] = currentCaseNumber;
+                currentCaseNumber++;
+            } else {
+                // Сбрасываем нумерацию при встрече не-кейса
+                currentCaseNumber = 1;
+            }
+        });
+
+        return numbers;
+    }
+
+    /**
+     * Создает элемент кейса с нумерацией
+     */
+    createCaseElement(violation, item, index, caseNumber) {
         const wrapper = document.createElement('div');
         wrapper.className = 'content-item-wrapper';
 
         const label = document.createElement('div');
         label.className = 'content-item-label';
-        label.textContent = `Кейс ${this.getTypeIndex(violation.additionalContent.items, 'case', index)}`;
+        label.innerHTML = `<span class="drag-handle-inline">⋮⋮</span> Кейс ${caseNumber}`;
 
         const itemDiv = document.createElement('div');
         itemDiv.className = 'content-item';
@@ -408,15 +458,15 @@ class ViolationManager {
     }
 
     /**
-     * Создает элемент изображения
+     * Создает элемент изображения с нумерацией
      */
-    createImageElement(violation, item, index) {
+    createImageElement(violation, item, index, imageNumber) {
         const wrapper = document.createElement('div');
         wrapper.className = 'content-item-wrapper';
 
         const label = document.createElement('div');
         label.className = 'content-item-label';
-        label.textContent = `Изображение ${this.getTypeIndex(violation.additionalContent.items, 'image', index)}`;
+        label.innerHTML = `<span class="drag-handle-inline">⋮⋮</span> Изображение ${imageNumber}`;
 
         const itemDiv = document.createElement('div');
         itemDiv.className = 'image-item';
@@ -462,15 +512,15 @@ class ViolationManager {
     }
 
     /**
-     * Создает элемент произвольного текста
+     * Создает элемент произвольного текста с нумерацией
      */
-    createFreeTextElement(violation, item, index) {
+    createFreeTextElement(violation, item, index, textNumber) {
         const wrapper = document.createElement('div');
         wrapper.className = 'content-item-wrapper';
 
         const label = document.createElement('div');
         label.className = 'content-item-label';
-        label.textContent = `Текст ${this.getTypeIndex(violation.additionalContent.items, 'freeText', index)}`;
+        label.innerHTML = `<span class="drag-handle-inline">⋮⋮</span> Текст ${textNumber}`;
 
         const itemDiv = document.createElement('div');
         itemDiv.className = 'content-item';
@@ -582,6 +632,116 @@ class ViolationManager {
             itemContainer.appendChild(deleteBtn);
             container.appendChild(itemContainer);
         });
+    }
+
+    /**
+     * Обработчик начала перетаскивания с созданием миниатюры
+     */
+    handleDragStart(e, violation, index, item) {
+        const wrapper = e.currentTarget;
+        wrapper.classList.add('dragging');
+        e.dataTransfer.effectAllowed = 'move';
+        e.dataTransfer.setData('text/plain', index);
+
+        // Создаем миниатюру
+        const miniature = this.createDragMiniature(item, index, violation.additionalContent.items);
+        miniature.style.position = 'absolute';
+        miniature.style.top = '-1000px';
+        miniature.id = 'drag-miniature-temp';
+        document.body.appendChild(miniature);
+        e.dataTransfer.setDragImage(miniature, 20, 20);
+
+        // Удаляем миниатюру после начала перетаскивания
+        setTimeout(() => {
+            const temp = document.getElementById('drag-miniature-temp');
+            if (temp) temp.remove();
+        }, 0);
+    }
+
+    /**
+     * Создает миниатюру элемента для drag-and-drop
+     */
+    createDragMiniature(item, index, allItems) {
+        const miniature = document.createElement('div');
+        miniature.className = 'drag-miniature';
+
+        let label = '';
+        let icon = '';
+
+        if (item.type === 'case') {
+            const caseNumbers = this.calculateCaseNumbers(allItems);
+            const caseNumber = caseNumbers[index];
+            icon = '📋';
+            label = `Кейс ${caseNumber}`;
+        } else if (item.type === 'image') {
+            const imageNumber = this.getTypeSequentialNumber(allItems, 'image', index);
+            icon = '🖼️';
+            label = `Изображение ${imageNumber}`;
+        } else if (item.type === 'freeText') {
+            const textNumber = this.getTypeSequentialNumber(allItems, 'freeText', index);
+            icon = '📝';
+            label = `Текст ${textNumber}`;
+        }
+
+        miniature.innerHTML = `<span class="drag-miniature-icon">${icon}</span><span class="drag-miniature-label">${label}</span>`;
+
+        return miniature;
+    }
+
+    /**
+     * Обработчик перемещения над элементом
+     */
+    handleDragOver(e) {
+        e.preventDefault();
+        e.dataTransfer.dropEffect = 'move';
+
+        const draggingElement = document.querySelector('.dragging');
+        if (!draggingElement) return;
+
+        const currentElement = e.target.closest('.content-item-wrapper');
+        if (!currentElement || currentElement === draggingElement) return;
+
+        const container = currentElement.parentElement;
+        const allItems = [...container.querySelectorAll('.content-item-wrapper')];
+        const draggingIndex = allItems.indexOf(draggingElement);
+        const currentIndex = allItems.indexOf(currentElement);
+
+        if (draggingIndex < currentIndex) {
+            currentElement.after(draggingElement);
+        } else {
+            currentElement.before(draggingElement);
+        }
+    }
+
+    /**
+     * Обработчик сброса элемента
+     */
+    handleDrop(e, violation, targetIndex, container) {
+        e.preventDefault();
+        e.stopPropagation();
+
+        // Получаем все элементы в текущем порядке
+        const allWrappers = [...container.querySelectorAll('.content-item-wrapper')];
+
+        // Создаем новый массив items в визуальном порядке
+        const newItems = allWrappers.map(wrapper => {
+            const oldIndex = parseInt(wrapper.dataset.itemIndex);
+            return violation.additionalContent.items[oldIndex];
+        });
+
+        // Заменяем массив items новым упорядоченным массивом
+        violation.additionalContent.items = newItems;
+
+        // Перерисовываем с обновленными индексами
+        this.renderContentItems(violation, container);
+        PreviewManager.update();
+    }
+
+    /**
+     * Обработчик окончания перетаскивания
+     */
+    handleDragEnd(e) {
+        e.target.classList.remove('dragging');
     }
 }
 

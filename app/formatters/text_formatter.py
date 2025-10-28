@@ -324,16 +324,21 @@ class TextFormatter(BaseFormatter):
         if additional_content.get('enabled', False):
             items = additional_content.get('items', [])
 
+            # Вычисляем номера кейсов
+            case_number = 1
+
             for item in items:
                 item_type = item.get('type')
 
                 if item_type == 'case':
                     content = item.get('content', '')
                     if content:
-                        lines.append(f"Кейс: {content}")
+                        lines.append(f"Кейс {case_number}: {content}")
                         lines.append("")
+                        case_number += 1
 
                 elif item_type == 'image':
+                    case_number = 1
                     caption = item.get('caption', '')
                     filename = item.get('filename', '')
                     if caption:
@@ -343,6 +348,7 @@ class TextFormatter(BaseFormatter):
                     lines.append("")
 
                 elif item_type == 'freeText':
+                    case_number = 1
                     content = item.get('content', '')
                     if content:
                         lines.append(content)

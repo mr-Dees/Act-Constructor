@@ -391,6 +391,9 @@ class DocxFormatter(BaseFormatter):
         if additional_content.get('enabled', False):
             items = additional_content.get('items', [])
 
+            # Вычисляем номера кейсов
+            case_number = 1
+
             for item in items:
                 item_type = item.get('type')
 
@@ -398,10 +401,12 @@ class DocxFormatter(BaseFormatter):
                     content = item.get('content', '')
                     if content:
                         p = doc.add_paragraph()
-                        p.add_run('Кейс: ').bold = True
+                        p.add_run(f'Кейс {case_number}: ').bold = True
                         p.add_run(content)
+                        case_number += 1
 
                 elif item_type == 'image':
+                    case_number = 1
                     url = item.get('url', '')
                     caption = item.get('caption', '')
                     filename = item.get('filename', '')
@@ -435,6 +440,7 @@ class DocxFormatter(BaseFormatter):
                             p.add_run(f" - {caption}")
 
                 elif item_type == 'freeText':
+                    case_number = 1
                     content = item.get('content', '')
                     if content:
                         doc.add_paragraph(content)
