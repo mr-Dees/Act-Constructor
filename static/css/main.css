@@ -31,6 +31,7 @@
 @import 'modules/violation/violation-fields.css';
 @import 'modules/violation/violation-list.css';
 @import 'modules/violation/violation-preview.css';
+@import 'modules/violation/violation-additional-content.css';
 
 /* Модуль предпросмотра */
 @import 'modules/preview/preview-base.css';

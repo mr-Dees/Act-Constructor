@@ -5,6 +5,8 @@
 class ViolationManager {
     constructor() {
         this.selectedViolation = null;
+        // Переменная для отслеживания последней позиции при drag
+        this.lastDragOverIndex = null;
     }
 
     /**
@@ -78,20 +80,25 @@ class ViolationManager {
         optionalFieldsContainer.appendChild(
             this.createOptionalField(violation, 'descriptionList', 'Описание перечнем', 'list')
         );
+
         optionalFieldsContainer.appendChild(
             this.createAdditionalContentField(violation)
         );
+
         optionalFieldsContainer.appendChild(
             this.createOptionalField(violation, 'reasons', 'Причины', 'text')
         );
+
         optionalFieldsContainer.appendChild(
             this.createOptionalField(violation, 'consequences', 'Последствия', 'text')
         );
+
         optionalFieldsContainer.appendChild(
             this.createOptionalField(violation, 'responsible', 'Ответственные', 'text')
         );
 
         section.appendChild(optionalFieldsContainer);
+
         return section;
     }
 
@@ -186,7 +193,6 @@ class ViolationManager {
             const addButton = document.createElement('button');
             addButton.className = 'violation-list-add-btn';
             addButton.textContent = '+ Добавить пункт';
-
             addButton.addEventListener('click', () => {
                 violation[fieldName].items.push('');
                 this.renderList(listContainer, violation, fieldName);
@@ -222,9 +228,6 @@ class ViolationManager {
      * @param {Object} violation - Объект нарушения
      * @returns {HTMLElement} Контейнер с подсущностями
      */
-    /**
-     * Создает расширяемую секцию дополнительного контента
-     */
     createAdditionalContentField(violation) {
         const fieldContainer = document.createElement('div');
         fieldContainer.className = 'violation-optional-field violation-additional-content';
@@ -237,6 +240,7 @@ class ViolationManager {
         checkbox.type = 'checkbox';
         checkbox.id = `${violation.id}-additionalContent`;
         checkbox.checked = violation.additionalContent.enabled;
+
         checkbox.addEventListener('change', () => {
             violation.additionalContent.enabled = checkbox.checked;
             contentContainer.style.display = checkbox.checked ? 'block' : 'none';
@@ -257,59 +261,29 @@ class ViolationManager {
         contentContainer.className = 'violation-field-content additional-content-wrapper';
         contentContainer.style.display = violation.additionalContent.enabled ? 'block' : 'none';
 
-        // Панель кнопок добавления (фиксированная вверху)
-        const buttonsPanel = document.createElement('div');
-        buttonsPanel.className = 'additional-content-buttons';
-
-        const addCaseBtn = document.createElement('button');
-        addCaseBtn.className = 'violation-list-add-btn';
-        addCaseBtn.textContent = '+ Кейс';
-        addCaseBtn.addEventListener('click', () => {
-            this.addContentItem(violation, 'case', contentContainer);
-        });
-
-        const addImageBtn = document.createElement('button');
-        addImageBtn.className = 'violation-list-add-btn';
-        addImageBtn.textContent = '+ Изображение';
-
-        const fileInput = document.createElement('input');
-        fileInput.type = 'file';
-        fileInput.accept = 'image/*';
-        fileInput.style.display = 'none';
-        addImageBtn.addEventListener('click', () => fileInput.click());
-
-        fileInput.addEventListener('change', (e) => {
-            const file = e.target.files[0];
-            if (!file) return;
-
-            const reader = new FileReader();
-            reader.onload = (event) => {
-                this.addContentItem(violation, 'image', contentContainer, {
-                    url: event.target.result,
-                    filename: file.name
-                });
-            };
-            reader.readAsDataURL(file);
-            fileInput.value = '';
-        });
-
-        const addTextBtn = document.createElement('button');
-        addTextBtn.className = 'violation-list-add-btn';
-        addTextBtn.textContent = '+ Текст';
-        addTextBtn.addEventListener('click', () => {
-            this.addContentItem(violation, 'freeText', contentContainer);
-        });
-
-        buttonsPanel.appendChild(addCaseBtn);
-        buttonsPanel.appendChild(addImageBtn);
-        buttonsPanel.appendChild(fileInput);
-        buttonsPanel.appendChild(addTextBtn);
-        contentContainer.appendChild(buttonsPanel);
-
-        // Контейнер для элементов (в порядке добавления)
+        // Контейнер для элементов
         const itemsContainer = document.createElement('div');
         itemsContainer.className = 'additional-content-items';
         itemsContainer.dataset.violationId = violation.id;
+
+        // Обработчик контекстного меню
+        itemsContainer.addEventListener('contextmenu', (e) => {
+            e.preventDefault();
+            e.stopPropagation();
+
+            // Проверяем, клик по элементу или по пустой области
+            const clickedWrapper = e.target.closest('.content-item-wrapper');
+
+            if (clickedWrapper) {
+                // Показываем меню удаления
+                const itemIndex = Array.from(itemsContainer.children).indexOf(clickedWrapper);
+                this.showContentItemDeleteMenu(e, violation, itemsContainer, itemIndex);
+            } else {
+                // Показываем меню добавления
+                this.showContentItemAddMenu(e, violation, contentContainer);
+            }
+        });
+
         contentContainer.appendChild(itemsContainer);
 
         // Рендерим существующие элементы
@@ -317,6 +291,236 @@ class ViolationManager {
 
         fieldContainer.appendChild(contentContainer);
         return fieldContainer;
+    }
+
+    /**
+     * Показывает контекстное меню для добавления элемента
+     */
+    showContentItemAddMenu(event, violation, contentContainer) {
+        const existingMenu = document.querySelector('.violation-context-menu');
+        if (existingMenu) {
+            existingMenu.remove();
+        }
+
+        const menu = document.createElement('div');
+        menu.className = 'violation-context-menu';
+        menu.style.cssText = `
+            position: fixed;
+            left: ${event.clientX}px;
+            top: ${event.clientY}px;
+            background: white;
+            border: 1px solid var(--border);
+            border-radius: var(--radius);
+            box-shadow: var(--shadow-lg);
+            z-index: 10000;
+            min-width: 180px;
+            padding: 4px 0;
+        `;
+
+        const menuItems = [
+            {label: '📝 Добавить кейс', action: 'case'},
+            {label: '🖼️ Добавить изображение', action: 'image'},
+            {label: '📄 Добавить текст', action: 'text'}
+        ];
+
+        // Определяем позицию вставки
+        const itemsContainer = contentContainer.querySelector('.additional-content-items');
+        const insertIndex = this.calculateInsertPosition(event, itemsContainer);
+
+        menuItems.forEach(item => {
+            const menuItem = document.createElement('div');
+            menuItem.className = 'violation-context-menu-item';
+            menuItem.textContent = item.label;
+            menuItem.style.cssText = `
+                padding: 8px 16px;
+                cursor: pointer;
+                transition: background-color 0.2s;
+            `;
+
+            menuItem.addEventListener('mouseenter', () => {
+                menuItem.style.backgroundColor = 'var(--primary-subtle)';
+            });
+
+            menuItem.addEventListener('mouseleave', () => {
+                menuItem.style.backgroundColor = 'transparent';
+            });
+
+            menuItem.addEventListener('click', () => {
+                this.handleContentItemAdd(violation, item.action, contentContainer, insertIndex);
+                menu.remove();
+            });
+
+            menu.appendChild(menuItem);
+        });
+
+        document.body.appendChild(menu);
+
+        const closeMenu = (e) => {
+            if (!menu.contains(e.target)) {
+                menu.remove();
+                document.removeEventListener('click', closeMenu);
+            }
+        };
+
+        setTimeout(() => {
+            document.addEventListener('click', closeMenu);
+        }, 0);
+    }
+
+    /**
+     * Показывает контекстное меню для удаления элемента
+     */
+    showContentItemDeleteMenu(event, violation, itemsContainer, itemIndex) {
+        const existingMenu = document.querySelector('.violation-context-menu');
+        if (existingMenu) {
+            existingMenu.remove();
+        }
+
+        const menu = document.createElement('div');
+        menu.className = 'violation-context-menu';
+        menu.style.cssText = `
+            position: fixed;
+            left: ${event.clientX}px;
+            top: ${event.clientY}px;
+            background: white;
+            border: 1px solid var(--border);
+            border-radius: var(--radius);
+            box-shadow: var(--shadow-lg);
+            z-index: 10000;
+            min-width: 150px;
+            padding: 4px 0;
+        `;
+
+        const deleteItem = document.createElement('div');
+        deleteItem.className = 'violation-context-menu-item delete';
+        deleteItem.textContent = '🗑️ Удалить';
+        deleteItem.style.cssText = `
+            padding: 8px 16px;
+            cursor: pointer;
+            color: var(--danger, #dc3545);
+            transition: background-color 0.2s;
+        `;
+
+        deleteItem.addEventListener('mouseenter', () => {
+            deleteItem.style.backgroundColor = 'rgba(220, 53, 69, 0.1)';
+        });
+
+        deleteItem.addEventListener('mouseleave', () => {
+            deleteItem.style.backgroundColor = 'transparent';
+        });
+
+        deleteItem.addEventListener('click', () => {
+            violation.additionalContent.items.splice(itemIndex, 1);
+            this.renderContentItems(violation, itemsContainer);
+            PreviewManager.update();
+            menu.remove();
+        });
+
+        menu.appendChild(deleteItem);
+        document.body.appendChild(menu);
+
+        const closeMenu = (e) => {
+            if (!menu.contains(e.target)) {
+                menu.remove();
+                document.removeEventListener('click', closeMenu);
+            }
+        };
+
+        setTimeout(() => {
+            document.addEventListener('click', closeMenu);
+        }, 0);
+    }
+
+    /**
+     * Вычисляет позицию вставки на основе координат клика
+     */
+    calculateInsertPosition(event, container) {
+        const wrappers = Array.from(container.querySelectorAll('.content-item-wrapper'));
+        if (wrappers.length === 0) {
+            return 0;
+        }
+
+        const clickY = event.clientY;
+
+        for (let i = 0; i < wrappers.length; i++) {
+            const wrapperRect = wrappers[i].getBoundingClientRect();
+            const wrapperMiddle = wrapperRect.top + wrapperRect.height / 2;
+
+            if (clickY < wrapperMiddle) {
+                return i;
+            }
+        }
+        return wrappers.length;
+    }
+
+    /**
+     * Обрабатывает действие добавления элемента с указанной позицией
+     */
+    handleContentItemAdd(violation, action, contentContainer, insertIndex) {
+        switch (action) {
+            case 'case':
+                this.addContentItemAtPosition(violation, 'case', contentContainer, insertIndex);
+                break;
+            case 'image':
+                this.triggerImageUploadAtPosition(violation, contentContainer, insertIndex);
+                break;
+            case 'text':
+                this.addContentItemAtPosition(violation, 'freeText', contentContainer, insertIndex);
+                break;
+        }
+    }
+
+    /**
+     * Добавляет элемент контента в указанную позицию
+     */
+    addContentItemAtPosition(violation, type, container, insertIndex, extraData = {}) {
+        const newItem = {
+            id: `${type}_${Date.now()}`,
+            type: type,
+            content: '',
+            url: extraData.url || '',
+            caption: '',
+            filename: extraData.filename || '',
+            order: insertIndex
+        };
+
+        violation.additionalContent.items.splice(insertIndex, 0, newItem);
+
+        violation.additionalContent.items.forEach((item, idx) => {
+            item.order = idx;
+        });
+
+        const itemsContainer = container.querySelector('.additional-content-items');
+        this.renderContentItems(violation, itemsContainer);
+        PreviewManager.update();
+    }
+
+    /**
+     * Инициирует выбор файла изображения с указанием позиции
+     */
+    triggerImageUploadAtPosition(violation, container, insertIndex) {
+        const fileInput = document.createElement('input');
+        fileInput.type = 'file';
+        fileInput.accept = 'image/*';
+        fileInput.style.display = 'none';
+
+        fileInput.addEventListener('change', (e) => {
+            const file = e.target.files[0];
+            if (!file) return;
+
+            const reader = new FileReader();
+            reader.onload = (event) => {
+                this.addContentItemAtPosition(violation, 'image', container, insertIndex, {
+                    url: event.target.result,
+                    filename: file.name
+                });
+            };
+            reader.readAsDataURL(file);
+        });
+
+        document.body.appendChild(fileInput);
+        fileInput.click();
+        document.body.removeChild(fileInput);
     }
 
     /**
@@ -371,13 +575,18 @@ class ViolationManager {
 
                 // Обработчики перетаскивания
                 itemElement.addEventListener('dragstart', (e) => this.handleDragStart(e, violation, index, item));
-                itemElement.addEventListener('dragover', (e) => this.handleDragOver(e));
+                itemElement.addEventListener('dragover', (e) => this.handleDragOver(e, violation, container));
+                itemElement.addEventListener('dragenter', (e) => this.handleDragEnter(e));
+                itemElement.addEventListener('dragleave', (e) => this.handleDragLeave(e));
                 itemElement.addEventListener('drop', (e) => this.handleDrop(e, violation, index, container));
-                itemElement.addEventListener('dragend', (e) => this.handleDragEnd(e));
+                itemElement.addEventListener('dragend', (e) => this.handleDragEnd(e, container));
 
                 container.appendChild(itemElement);
             }
         });
+
+        // Сбрасываем последний индекс
+        this.lastDragOverIndex = null;
     }
 
     /**
@@ -422,7 +631,7 @@ class ViolationManager {
 
         const label = document.createElement('div');
         label.className = 'content-item-label';
-        label.innerHTML = `<span class="drag-handle-inline">⋮⋮</span> Кейс ${caseNumber}`;
+        label.innerHTML = `⋮⋮ Кейс ${caseNumber}`;
 
         const itemDiv = document.createElement('div');
         itemDiv.className = 'content-item';
@@ -438,19 +647,7 @@ class ViolationManager {
             PreviewManager.update();
         });
 
-        const deleteBtn = document.createElement('button');
-        deleteBtn.className = 'violation-list-delete-btn';
-        deleteBtn.textContent = '×';
-        deleteBtn.title = 'Удалить';
-        deleteBtn.addEventListener('click', () => {
-            violation.additionalContent.items.splice(index, 1);
-            const container = wrapper.parentElement;
-            this.renderContentItems(violation, container);
-            PreviewManager.update();
-        });
-
         itemDiv.appendChild(textarea);
-        itemDiv.appendChild(deleteBtn);
         wrapper.appendChild(label);
         wrapper.appendChild(itemDiv);
 
@@ -466,15 +663,21 @@ class ViolationManager {
 
         const label = document.createElement('div');
         label.className = 'content-item-label';
-        label.innerHTML = `<span class="drag-handle-inline">⋮⋮</span> Изображение ${imageNumber}`;
+        label.innerHTML = `⋮⋮ Изображение ${imageNumber}`;
 
         const itemDiv = document.createElement('div');
         itemDiv.className = 'image-item';
+
+        // Контейнер с фиксированной высотой для изображения
+        const imgContainer = document.createElement('div');
+        imgContainer.className = 'image-preview-container';
 
         const img = document.createElement('img');
         img.src = item.url;
         img.alt = item.caption || item.filename;
         img.className = 'image-preview';
+
+        imgContainer.appendChild(img);
 
         const filenameDiv = document.createElement('div');
         filenameDiv.className = 'image-filename';
@@ -485,26 +688,16 @@ class ViolationManager {
         captionInput.className = 'violation-list-input';
         captionInput.placeholder = 'Подпись к изображению';
         captionInput.value = item.caption;
+
         captionInput.addEventListener('input', () => {
             item.caption = captionInput.value;
             PreviewManager.update();
         });
 
-        const deleteBtn = document.createElement('button');
-        deleteBtn.className = 'violation-list-delete-btn';
-        deleteBtn.textContent = '×';
-        deleteBtn.title = 'Удалить';
-        deleteBtn.addEventListener('click', () => {
-            violation.additionalContent.items.splice(index, 1);
-            const container = wrapper.parentElement;
-            this.renderContentItems(violation, container);
-            PreviewManager.update();
-        });
-
-        itemDiv.appendChild(img);
+        itemDiv.appendChild(imgContainer);
         itemDiv.appendChild(filenameDiv);
         itemDiv.appendChild(captionInput);
-        itemDiv.appendChild(deleteBtn);
+
         wrapper.appendChild(label);
         wrapper.appendChild(itemDiv);
 
@@ -520,7 +713,7 @@ class ViolationManager {
 
         const label = document.createElement('div');
         label.className = 'content-item-label';
-        label.innerHTML = `<span class="drag-handle-inline">⋮⋮</span> Текст ${textNumber}`;
+        label.innerHTML = `⋮⋮ Текст ${textNumber}`;
 
         const itemDiv = document.createElement('div');
         itemDiv.className = 'content-item';
@@ -536,19 +729,7 @@ class ViolationManager {
             PreviewManager.update();
         });
 
-        const deleteBtn = document.createElement('button');
-        deleteBtn.className = 'violation-list-delete-btn';
-        deleteBtn.textContent = '×';
-        deleteBtn.title = 'Удалить';
-        deleteBtn.addEventListener('click', () => {
-            violation.additionalContent.items.splice(index, 1);
-            const container = wrapper.parentElement;
-            this.renderContentItems(violation, container);
-            PreviewManager.update();
-        });
-
         itemDiv.appendChild(textarea);
-        itemDiv.appendChild(deleteBtn);
         wrapper.appendChild(label);
         wrapper.appendChild(itemDiv);
 
@@ -567,7 +748,6 @@ class ViolationManager {
         }
         return count;
     }
-
 
     /**
      * Отрисовывает маркированный список элементов
@@ -621,7 +801,6 @@ class ViolationManager {
             const deleteBtn = document.createElement('button');
             deleteBtn.className = 'violation-list-delete-btn';
             deleteBtn.textContent = '×';
-
             deleteBtn.addEventListener('click', () => {
                 violation[fieldName].items.splice(index, 1);
                 this.renderList(container, violation, fieldName);
@@ -640,6 +819,7 @@ class ViolationManager {
     handleDragStart(e, violation, index, item) {
         const wrapper = e.currentTarget;
         wrapper.classList.add('dragging');
+
         e.dataTransfer.effectAllowed = 'move';
         e.dataTransfer.setData('text/plain', index);
 
@@ -649,6 +829,7 @@ class ViolationManager {
         miniature.style.top = '-1000px';
         miniature.id = 'drag-miniature-temp';
         document.body.appendChild(miniature);
+
         e.dataTransfer.setDragImage(miniature, 20, 20);
 
         // Удаляем миниатюру после начала перетаскивания
@@ -656,6 +837,9 @@ class ViolationManager {
             const temp = document.getElementById('drag-miniature-temp');
             if (temp) temp.remove();
         }, 0);
+
+        // Сбрасываем последний индекс при начале перетаскивания
+        this.lastDragOverIndex = null;
     }
 
     /**
@@ -683,15 +867,21 @@ class ViolationManager {
             label = `Текст ${textNumber}`;
         }
 
-        miniature.innerHTML = `<span class="drag-miniature-icon">${icon}</span><span class="drag-miniature-label">${label}</span>`;
-
+        miniature.innerHTML = `${icon} ${label}`;
         return miniature;
     }
 
     /**
-     * Обработчик перемещения над элементом
+     * Обработчик входа в зону элемента
      */
-    handleDragOver(e) {
+    handleDragEnter(e) {
+        e.preventDefault();
+    }
+
+    /**
+     * Обработчик перемещения над элементом с физическим перемещением
+     */
+    handleDragOver(e, violation, container) {
         e.preventDefault();
         e.dataTransfer.dropEffect = 'move';
 
@@ -699,28 +889,57 @@ class ViolationManager {
         if (!draggingElement) return;
 
         const currentElement = e.target.closest('.content-item-wrapper');
-        if (!currentElement || currentElement === draggingElement) return;
+        if (!currentElement || currentElement === draggingElement) {
+            return;
+        }
 
-        const container = currentElement.parentElement;
-        const allItems = [...container.querySelectorAll('.content-item-wrapper')];
-        const draggingIndex = allItems.indexOf(draggingElement);
-        const currentIndex = allItems.indexOf(currentElement);
+        // Получаем границы текущего элемента
+        const rect = currentElement.getBoundingClientRect();
+        const mouseY = e.clientY;
+        const elementMiddle = rect.top + rect.height / 2;
 
-        if (draggingIndex < currentIndex) {
-            currentElement.after(draggingElement);
+        // Определяем, в какую половину элемента попал курсор
+        const isTopHalf = mouseY < elementMiddle;
+
+        // Получаем индекс текущего элемента
+        const allWrappers = [...container.querySelectorAll('.content-item-wrapper')];
+        const currentIndex = allWrappers.indexOf(currentElement);
+
+        // Проверяем, изменилась ли позиция с последнего вызова
+        const targetPosition = isTopHalf ? currentIndex : currentIndex + 1;
+
+        if (this.lastDragOverIndex === targetPosition) {
+            return; // Позиция не изменилась, не делаем ничего
+        }
+
+        this.lastDragOverIndex = targetPosition;
+
+        // Физически перемещаем элемент в DOM
+        if (isTopHalf) {
+            container.insertBefore(draggingElement, currentElement);
         } else {
-            currentElement.before(draggingElement);
+            container.insertBefore(draggingElement, currentElement.nextSibling);
         }
     }
 
     /**
-     * Обработчик сброса элемента
+     * Обработчик выхода курсора из зоны элемента
+     */
+    handleDragLeave(e) {
+        // Оставляем пустым, визуальное перемещение происходит в handleDragOver
+    }
+
+    /**
+     * Обработчик сброса элемента - фиксирует новый порядок в данных
      */
     handleDrop(e, violation, targetIndex, container) {
         e.preventDefault();
         e.stopPropagation();
 
-        // Получаем все элементы в текущем порядке
+        const draggingElement = document.querySelector('.dragging');
+        if (!draggingElement) return;
+
+        // Получаем все элементы в текущем визуальном порядке
         const allWrappers = [...container.querySelectorAll('.content-item-wrapper')];
 
         // Создаем новый массив items в визуальном порядке
@@ -740,8 +959,17 @@ class ViolationManager {
     /**
      * Обработчик окончания перетаскивания
      */
-    handleDragEnd(e) {
+    handleDragEnd(e, container) {
         e.target.classList.remove('dragging');
+
+        // Удаляем все индикаторы перетаскивания
+        const allWrappers = container.querySelectorAll('.content-item-wrapper');
+        allWrappers.forEach(w => {
+            w.classList.remove('drag-over-top', 'drag-over-bottom');
+        });
+
+        // Сбрасываем последний индекс
+        this.lastDragOverIndex = null;
     }
 }
 
