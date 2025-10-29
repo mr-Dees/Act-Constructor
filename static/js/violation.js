@@ -9,7 +9,6 @@ class ViolationManager {
         this.lastDragOverIndex = null;
         // Хранилище активных violation для быстрого доступа
         this.activeViolations = new Map();
-
         // Настраиваем глобальный обработчик вставки
         this.setupPasteHandler();
     }
@@ -465,6 +464,9 @@ class ViolationManager {
         const itemsContainer = document.createElement('div');
         itemsContainer.className = 'additional-content-items';
         itemsContainer.dataset.violationId = violation.id;
+
+        // Настраиваем Drag and Drop для файлов
+        this.setupFileDragAndDrop(itemsContainer, violation, contentContainer);
 
         // Обработчик контекстного меню
         itemsContainer.addEventListener('contextmenu', (e) => {
@@ -1170,6 +1172,125 @@ class ViolationManager {
 
         // Сбрасываем последний индекс
         this.lastDragOverIndex = null;
+    }
+
+    /**
+     * Настраивает обработчики Drag and Drop для файлов изображений
+     * @param {HTMLElement} itemsContainer - Контейнер для элементов
+     * @param {Object} violation - Объект нарушения
+     * @param {HTMLElement} contentContainer - Родительский контейнер
+     */
+    setupFileDragAndDrop(itemsContainer, violation, contentContainer) {
+        // Счетчик для отслеживания входов/выходов (для вложенных элементов)
+        let dragCounter = 0;
+
+        // Обработчик входа файла в зону
+        itemsContainer.addEventListener('dragenter', (e) => {
+            e.preventDefault();
+            e.stopPropagation();
+
+            dragCounter++;
+
+            // Проверяем, что это файлы, а не наши внутренние элементы
+            if (e.dataTransfer.types.includes('Files')) {
+                itemsContainer.classList.add('drag-over-file');
+                console.log('File drag enter, counter:', dragCounter);
+            }
+        });
+
+        // Обработчик перемещения над зоной
+        itemsContainer.addEventListener('dragover', (e) => {
+            e.preventDefault();
+            e.stopPropagation();
+
+            // Проверяем, что это файлы
+            if (e.dataTransfer.types.includes('Files')) {
+                e.dataTransfer.dropEffect = 'copy';
+            }
+        });
+
+        // Обработчик выхода из зоны
+        itemsContainer.addEventListener('dragleave', (e) => {
+            e.preventDefault();
+            e.stopPropagation();
+
+            dragCounter--;
+
+            // Убираем подсветку только когда действительно покинули контейнер
+            if (dragCounter === 0) {
+                itemsContainer.classList.remove('drag-over-file');
+                console.log('File drag leave, counter:', dragCounter);
+            }
+        });
+
+        // Обработчик сброса файла
+        itemsContainer.addEventListener('drop', (e) => {
+            e.preventDefault();
+            e.stopPropagation();
+
+            // Сбрасываем состояние
+            dragCounter = 0;
+            itemsContainer.classList.remove('drag-over-file');
+
+            console.log('File dropped');
+
+            // Получаем файлы
+            const files = e.dataTransfer.files;
+            if (!files || files.length === 0) {
+                console.log('No files in drop event');
+                return;
+            }
+
+            console.log('Files count:', files.length);
+
+            // Обрабатываем каждый файл
+            let addedCount = 0;
+            for (let i = 0; i < files.length; i++) {
+                const file = files[i];
+
+                console.log('Processing file:', file.name, file.type);
+
+                // Проверяем, что это изображение
+                if (!file.type.startsWith('image/')) {
+                    console.log('Skipping non-image file:', file.type);
+                    continue;
+                }
+
+                // Читаем изображение
+                const reader = new FileReader();
+                reader.onload = (event) => {
+                    console.log('Image loaded:', file.name);
+
+                    // Добавляем изображение в конец списка
+                    this.addContentItem(violation, 'image', contentContainer, {
+                        url: event.target.result,
+                        filename: file.name
+                    });
+
+                    addedCount++;
+
+                    // Показываем уведомление для последнего файла
+                    if (addedCount === files.length || i === files.length - 1) {
+                        const message = addedCount === 1
+                            ? '✓ Изображение добавлено'
+                            : `✓ Добавлено изображений: ${addedCount}`;
+                        this.showNotification(message, 'success');
+                    }
+                };
+
+                reader.onerror = (error) => {
+                    console.error('Error reading file:', file.name, error);
+                };
+
+                reader.readAsDataURL(file);
+            }
+
+            if (addedCount === 0) {
+                this.showNotification('✗ Не найдено изображений для добавления', 'error');
+            }
+        });
+
+        console.log('File drag and drop handlers registered for violation:', violation.id);
     }
 }
 

@@ -19,13 +19,40 @@
     border-radius: var(--radius);
     background-color: var(--bg-secondary, #f8f9fa);
     position: relative;
-    transition: border-color 0.2s ease, background-color 0.2s ease;
+    transition: border-color 0.2s ease, background-color 0.2s ease, transform 0.2s ease;
     align-items: stretch;
 }
 
 .additional-content-items:hover {
     border-color: var(--primary);
     background-color: var(--primary-subtle, rgba(79, 70, 229, 0.05));
+}
+
+/* Состояние при перетаскивании файла */
+.additional-content-items.drag-over-file {
+    border-color: var(--primary);
+    border-width: 3px;
+    background-color: var(--primary-subtle, rgba(79, 70, 229, 0.15));
+    transform: scale(1.01);
+    box-shadow: 0 0 20px rgba(79, 70, 229, 0.3);
+}
+
+.additional-content-items.drag-over-file::before {
+    content: '📎 Перетащите изображения сюда';
+    position: absolute;
+    top: 50%;
+    left: 50%;
+    transform: translate(-50%, -50%);
+    color: var(--primary);
+    font-size: 1.125rem;
+    font-weight: 700;
+    pointer-events: none;
+    z-index: 1;
+    background: white;
+    padding: 16px 32px;
+    border-radius: var(--radius-md);
+    box-shadow: 0 4px 12px rgba(79, 70, 229, 0.2);
+    white-space: nowrap;
 }
 
 /* Подсказка для пустого контейнера */
@@ -40,6 +67,11 @@
     font-style: italic;
     pointer-events: none;
     font-weight: 500;
+}
+
+/* Скрываем подсказку при drag over */
+.additional-content-items.drag-over-file:empty::after {
+    display: none;
 }
 
 /* Элемент контента с быстрыми переходами */
