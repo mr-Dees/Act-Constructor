@@ -7,6 +7,199 @@ class ViolationManager {
         this.selectedViolation = null;
         // Переменная для отслеживания последней позиции при drag
         this.lastDragOverIndex = null;
+        // Хранилище активных violation для быстрого доступа
+        this.activeViolations = new Map();
+
+        // Настраиваем глобальный обработчик вставки
+        this.setupPasteHandler();
+    }
+
+    /**
+     * Настраивает глобальный обработчик вставки изображений из буфера обмена
+     */
+    setupPasteHandler() {
+        document.addEventListener('paste', async (e) => {
+            console.log('Paste event triggered');
+
+            // Получаем данные из буфера обмена
+            const items = e.clipboardData?.items;
+            if (!items) {
+                console.log('No clipboard items');
+                return;
+            }
+
+            // Проверяем, находимся ли мы внутри контейнера дополнительного контента
+            let targetContainer = null;
+            let violationId = null;
+
+            // Ищем ближайший контейнер дополнительного контента
+            const activeElement = document.activeElement;
+            const additionalContentWrapper = activeElement?.closest('.additional-content-wrapper') ||
+                document.querySelector('.additional-content-wrapper');
+
+            if (additionalContentWrapper) {
+                targetContainer = additionalContentWrapper;
+                const itemsContainer = targetContainer.querySelector('.additional-content-items');
+                violationId = itemsContainer?.dataset.violationId;
+            }
+
+            // Если не нашли активный контейнер, ищем любой видимый
+            if (!targetContainer) {
+                const visibleWrappers = document.querySelectorAll('.additional-content-wrapper');
+                for (const wrapper of visibleWrappers) {
+                    if (wrapper.style.display !== 'none') {
+                        targetContainer = wrapper;
+                        const itemsContainer = wrapper.querySelector('.additional-content-items');
+                        violationId = itemsContainer?.dataset.violationId;
+                        break;
+                    }
+                }
+            }
+
+            if (!targetContainer || !violationId) {
+                console.log('No active additional content container found');
+                return;
+            }
+
+            console.log('Found container for violation:', violationId);
+
+            // Ищем изображение в буфере
+            for (let i = 0; i < items.length; i++) {
+                const item = items[i];
+
+                console.log('Clipboard item type:', item.type);
+
+                // Проверяем, что это изображение
+                if (item.type.indexOf('image') !== -1) {
+                    e.preventDefault();
+
+                    console.log('Image found in clipboard');
+
+                    // Получаем файл изображения
+                    const file = item.getAsFile();
+                    if (!file) {
+                        console.log('Could not get file from clipboard');
+                        continue;
+                    }
+
+                    console.log('Image file:', file.name, file.type, file.size);
+
+                    // Читаем изображение как Data URL
+                    const reader = new FileReader();
+                    reader.onload = (event) => {
+                        console.log('Image loaded, adding to violation');
+
+                        // Получаем violation из хранилища
+                        const violation = this.activeViolations.get(violationId);
+                        if (!violation) {
+                            console.error('Violation not found in storage:', violationId);
+                            return;
+                        }
+
+                        // Генерируем имя файла
+                        const timestamp = Date.now();
+                        const extension = file.type.split('/')[1] || 'png';
+                        const filename = `pasted_image_${timestamp}.${extension}`;
+
+                        console.log('Adding image with filename:', filename);
+
+                        // Добавляем изображение в конец списка
+                        this.addContentItem(violation, 'image', targetContainer, {
+                            url: event.target.result,
+                            filename: filename
+                        });
+
+                        console.log('Image added successfully');
+
+                        // Показываем уведомление
+                        this.showNotification('✓ Изображение добавлено из буфера обмена', 'success');
+                    };
+
+                    reader.onerror = (error) => {
+                        console.error('Error reading image:', error);
+                        this.showNotification('✗ Ошибка при чтении изображения', 'error');
+                    };
+
+                    reader.readAsDataURL(file);
+                    break; // Обрабатываем только первое изображение
+                }
+            }
+        });
+
+        console.log('Paste handler registered');
+    }
+
+    /**
+     * Показывает уведомление пользователю
+     * @param {string} message - Текст уведомления
+     * @param {string} type - Тип уведомления ('success', 'error', 'info')
+     */
+    showNotification(message, type = 'info') {
+        // Удаляем предыдущие уведомления
+        const existingNotifications = document.querySelectorAll('.paste-notification');
+        existingNotifications.forEach(n => n.remove());
+
+        // Создаем элемент уведомления
+        const notification = document.createElement('div');
+        notification.className = 'paste-notification';
+        notification.textContent = message;
+
+        const bgColor = type === 'success' ? '#10b981' : type === 'error' ? '#ef4444' : '#3b82f6';
+
+        notification.style.cssText = `
+            position: fixed;
+            top: 20px;
+            right: 20px;
+            padding: 14px 24px;
+            background-color: ${bgColor};
+            color: white;
+            border-radius: 8px;
+            box-shadow: 0 4px 12px rgba(0, 0, 0, 0.2);
+            z-index: 10000;
+            font-size: 0.9375rem;
+            font-weight: 600;
+            animation: slideInNotification 0.3s ease;
+            pointer-events: none;
+        `;
+
+        // Добавляем анимацию если еще нет
+        if (!document.querySelector('#paste-notification-styles')) {
+            const style = document.createElement('style');
+            style.id = 'paste-notification-styles';
+            style.textContent = `
+                @keyframes slideInNotification {
+                    from {
+                        transform: translateX(400px);
+                        opacity: 0;
+                    }
+                    to {
+                        transform: translateX(0);
+                        opacity: 1;
+                    }
+                }
+                @keyframes slideOutNotification {
+                    from {
+                        transform: translateX(0);
+                        opacity: 1;
+                    }
+                    to {
+                        transform: translateX(400px);
+                        opacity: 0;
+                    }
+                }
+            `;
+            document.head.appendChild(style);
+        }
+
+        document.body.appendChild(notification);
+
+        // Удаляем уведомление через 2.5 секунды
+        setTimeout(() => {
+            notification.style.animation = 'slideOutNotification 0.3s ease';
+            setTimeout(() => {
+                notification.remove();
+            }, 300);
+        }, 2500);
     }
 
     /**
@@ -232,6 +425,10 @@ class ViolationManager {
         const fieldContainer = document.createElement('div');
         fieldContainer.className = 'violation-optional-field violation-additional-content';
 
+        // Регистрируем violation в хранилище для быстрого доступа
+        this.activeViolations.set(violation.id, violation);
+        console.log('Registered violation:', violation.id);
+
         // Чекбокс для включения секции
         const checkboxContainer = document.createElement('div');
         checkboxContainer.className = 'violation-field-toggle';
@@ -260,6 +457,9 @@ class ViolationManager {
         const contentContainer = document.createElement('div');
         contentContainer.className = 'violation-field-content additional-content-wrapper';
         contentContainer.style.display = violation.additionalContent.enabled ? 'block' : 'none';
+
+        // Делаем контейнер focusable для перехвата Ctrl+V
+        contentContainer.setAttribute('tabindex', '0');
 
         // Контейнер для элементов
         const itemsContainer = document.createElement('div');
