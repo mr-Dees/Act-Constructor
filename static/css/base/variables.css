@@ -71,4 +71,6 @@
     /* Высота шапки с учетом минимального значения */
     --header-height: 9vh;
     --header-min-height: 80px;
+
+    --danger: #dc3545;
 }

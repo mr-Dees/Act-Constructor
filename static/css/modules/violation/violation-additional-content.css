@@ -195,6 +195,7 @@
     align-items: center;
     justify-content: center;
     flex-shrink: 0;
+    cursor: inherit;
 }
 
 /* Превью изображения с фиксированными размерами */
@@ -208,6 +209,13 @@
     border-radius: var(--radius-sm);
     background-color: var(--gray-50, #f9fafb);
     flex-shrink: 0;
+    /* Запрещаем взаимодействие с изображением */
+    pointer-events: none;
+    user-select: none;
+    -webkit-user-drag: none;
+    -moz-user-select: none;
+    -webkit-user-select: none;
+    -ms-user-select: none;
 }
 
 /* Имя файла изображения */
@@ -261,4 +269,13 @@
 
 .violation-context-menu-item:active {
     background-color: var(--primary-subtle, rgba(79, 70, 229, 0.2));
+}
+
+/* Стиль для пункта удаления */
+.violation-context-menu-item.delete {
+    color: var(--error, #dc3545);
+}
+
+.violation-context-menu-item.delete:hover {
+    background-color: rgba(220, 53, 69, 0.1);
 }
