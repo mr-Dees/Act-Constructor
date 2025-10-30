@@ -407,6 +407,7 @@ class ViolationManager {
 
         // Регистрируем violation в хранилище для быстрого доступа
         this.activeViolations.set(violation.id, violation);
+        console.log('Registered violation:', violation.id);
 
         // Чекбокс для включения секции
         const checkboxContainer = document.createElement('div');
@@ -424,6 +425,7 @@ class ViolationManager {
             // Если выключаем - сбрасываем активный контейнер
             if (!checkbox.checked && this.currentActiveContainer === contentContainer) {
                 this.currentActiveContainer = null;
+                console.log('Container deactivated via checkbox');
             }
 
             PreviewManager.update();
@@ -451,17 +453,28 @@ class ViolationManager {
         itemsContainer.className = 'additional-content-items';
         itemsContainer.dataset.violationId = violation.id;
 
-        // Отслеживаем вход мыши в контейнер
-        itemsContainer.addEventListener('mouseenter', () => {
+        // Отслеживаем вход мыши в ВЕСЬ contentContainer (не только itemsContainer)
+        // Это более надежно, так как работает даже при перерисовке
+        contentContainer.addEventListener('mouseenter', () => {
             if (violation.additionalContent.enabled) {
                 this.currentActiveContainer = contentContainer;
+                console.log('Mouse entered content container, activated for paste/drop');
             }
         });
 
-        // Отслеживаем выход мыши из контейнера
-        itemsContainer.addEventListener('mouseleave', () => {
+        // Отслеживаем выход мыши из ВСЕГО contentContainer
+        contentContainer.addEventListener('mouseleave', () => {
             if (this.currentActiveContainer === contentContainer) {
                 this.currentActiveContainer = null;
+                console.log('Mouse left content container, deactivated for paste/drop');
+            }
+        });
+
+        // Также отслеживаем движение мыши для дополнительной надежности
+        contentContainer.addEventListener('mousemove', () => {
+            if (violation.additionalContent.enabled && this.currentActiveContainer !== contentContainer) {
+                this.currentActiveContainer = contentContainer;
+                console.log('Mouse move detected, container reactivated');
             }
         });
 
@@ -659,6 +672,38 @@ class ViolationManager {
     }
 
     /**
+     * Добавляет элемент контента в массив (в конец)
+     */
+    addContentItem(violation, type, container, extraData = {}) {
+        const newItem = {
+            id: `${type}_${Date.now()}`,
+            type: type,
+            content: '',
+            url: extraData.url || '',
+            caption: '',
+            filename: extraData.filename || '',
+            order: violation.additionalContent.items.length
+        };
+
+        violation.additionalContent.items.push(newItem);
+
+        const itemsContainer = container.querySelector('.additional-content-items');
+
+        // Сохраняем текущее состояние активности
+        const wasActive = this.currentActiveContainer === container;
+
+        this.renderContentItems(violation, itemsContainer);
+
+        // Восстанавливаем активность после перерисовки
+        if (wasActive) {
+            this.currentActiveContainer = container;
+            console.log('Restored active container after adding item');
+        }
+
+        PreviewManager.update();
+    }
+
+    /**
      * Добавляет элемент контента в указанную позицию
      */
     addContentItemAtPosition(violation, type, container, insertIndex, extraData = {}) {
@@ -679,7 +724,18 @@ class ViolationManager {
         });
 
         const itemsContainer = container.querySelector('.additional-content-items');
+
+        // Сохраняем текущее состояние активности
+        const wasActive = this.currentActiveContainer === container;
+
         this.renderContentItems(violation, itemsContainer);
+
+        // Восстанавливаем активность после перерисовки
+        if (wasActive) {
+            this.currentActiveContainer = container;
+            console.log('Restored active container after adding item at position');
+        }
+
         PreviewManager.update();
     }
 
@@ -1174,88 +1230,101 @@ class ViolationManager {
     setupFileDragAndDrop(itemsContainer, violation, contentContainer) {
         // Счетчик для отслеживания входов/выходов (для вложенных элементов)
         let dragCounter = 0;
-        // Флаг для определения внутреннего перетаскивания
-        let isInternalDrag = false;
-
-        // Отслеживаем начало внутреннего перетаскивания
-        itemsContainer.addEventListener('dragstart', (e) => {
-            // Проверяем, что это наш элемент
-            if (e.target.classList.contains('content-item-wrapper')) {
-                isInternalDrag = true;
-            }
-        }, true); // true для фазы захвата
+        // Флаг активного файлового drag
+        let isFileDragActive = false;
 
         // Обработчик входа файла в зону
         itemsContainer.addEventListener('dragenter', (e) => {
-            // Игнорируем внутреннее перетаскивание
-            if (isInternalDrag) {
+            // Проверяем, что это НЕ внутренний элемент
+            const hasFiles = e.dataTransfer && e.dataTransfer.types && e.dataTransfer.types.includes('Files');
+            const hasTextPlain = e.dataTransfer && e.dataTransfer.types && e.dataTransfer.types.includes('text/plain');
+
+            // Если есть только text/plain и нет Files - это наш внутренний drag
+            if (hasTextPlain && !hasFiles) {
+                console.log('Internal drag detected in dragenter - ignoring');
                 return;
             }
 
-            e.preventDefault();
-            e.stopPropagation();
+            // Не предотвращаем по умолчанию для внутренних элементов
+            if (hasFiles) {
+                e.preventDefault();
+                e.stopPropagation();
 
-            dragCounter++;
-
-            // Проверяем, что это файлы, а не наши внутренние элементы
-            if (e.dataTransfer.types.includes('Files')) {
+                dragCounter++;
+                isFileDragActive = true;
                 itemsContainer.classList.add('drag-over-file');
+                console.log('File drag enter, counter:', dragCounter);
             }
         });
 
         // Обработчик перемещения над зоной
         itemsContainer.addEventListener('dragover', (e) => {
-            // Игнорируем внутреннее перетаскивание
-            if (isInternalDrag) {
+            // Проверяем тип перетаскивания
+            const hasFiles = e.dataTransfer && e.dataTransfer.types && e.dataTransfer.types.includes('Files');
+            const hasTextPlain = e.dataTransfer && e.dataTransfer.types && e.dataTransfer.types.includes('text/plain');
+
+            // Если это внутренний drag - не обрабатываем
+            if (hasTextPlain && !hasFiles) {
                 return;
             }
 
-            e.preventDefault();
-            e.stopPropagation();
-
             // Проверяем, что это файлы
-            if (e.dataTransfer.types.includes('Files')) {
+            if (hasFiles) {
+                e.preventDefault();
+                e.stopPropagation();
                 e.dataTransfer.dropEffect = 'copy';
             }
         });
 
         // Обработчик выхода из зоны
         itemsContainer.addEventListener('dragleave', (e) => {
-            // Игнорируем внутреннее перетаскивание
-            if (isInternalDrag) {
+            // Проверяем тип перетаскивания
+            const hasFiles = e.dataTransfer && e.dataTransfer.types && e.dataTransfer.types.includes('Files');
+            const hasTextPlain = e.dataTransfer && e.dataTransfer.types && e.dataTransfer.types.includes('text/plain');
+
+            // Если это внутренний drag - не обрабатываем
+            if (hasTextPlain && !hasFiles) {
                 return;
             }
 
-            e.preventDefault();
-            e.stopPropagation();
+            if (hasFiles) {
+                e.preventDefault();
+                e.stopPropagation();
 
-            dragCounter--;
+                dragCounter--;
 
-            // Убираем подсветку только когда действительно покинули контейнер
-            if (dragCounter === 0) {
-                itemsContainer.classList.remove('drag-over-file');
+                // Убираем подсветку только когда действительно покинули контейнер
+                if (dragCounter === 0) {
+                    itemsContainer.classList.remove('drag-over-file');
+                    isFileDragActive = false;
+                    console.log('File drag leave, counter:', dragCounter);
+                }
             }
         });
 
         // Обработчик сброса файла
         itemsContainer.addEventListener('drop', (e) => {
-            // Если это внутреннее перетаскивание - не обрабатываем
-            if (isInternalDrag) {
-                return;
+            console.log('Drop event triggered');
+
+            // Проверяем, есть ли файлы в событии
+            const files = e.dataTransfer && e.dataTransfer.files;
+
+            // Если нет файлов - это внутренний drop
+            if (!files || files.length === 0) {
+                console.log('Internal drop (no files) - ignoring file handler');
+                return; // Не сбрасываем состояние, это сделает handleDrop
             }
 
+            // Это файловый drop - обрабатываем
             e.preventDefault();
             e.stopPropagation();
 
             // Сбрасываем состояние
             dragCounter = 0;
+            isFileDragActive = false;
             itemsContainer.classList.remove('drag-over-file');
 
-            // Получаем файлы
-            const files = e.dataTransfer.files;
-            if (!files || files.length === 0) {
-                return;
-            }
+            console.log('File dropped, files count:', files.length);
 
             // Обрабатываем каждый файл
             let addedCount = 0;
@@ -1264,10 +1333,13 @@ class ViolationManager {
             // Сначала фильтруем только изображения
             for (let i = 0; i < files.length; i++) {
                 const file = files[i];
+                console.log('Processing file:', file.name, file.type);
 
                 // Проверяем, что это изображение
                 if (file.type.startsWith('image/')) {
                     imageFiles.push(file);
+                } else {
+                    console.log('Skipping non-image file:', file.type);
                 }
             }
 
@@ -1276,10 +1348,13 @@ class ViolationManager {
                 return;
             }
 
+            console.log('Total image files to process:', imageFiles.length);
+
             // Теперь обрабатываем все изображения
             imageFiles.forEach((file, idx) => {
                 const reader = new FileReader();
                 reader.onload = (event) => {
+                    console.log('Image loaded:', file.name);
 
                     // Добавляем изображение в конец списка
                     this.addContentItem(violation, 'image', contentContainer, {
@@ -1288,6 +1363,7 @@ class ViolationManager {
                     });
 
                     addedCount++;
+                    console.log('Added image', addedCount, 'of', imageFiles.length);
 
                     // Показываем уведомление для последнего файла
                     if (addedCount === imageFiles.length) {
@@ -1300,21 +1376,34 @@ class ViolationManager {
 
                 reader.onerror = (error) => {
                     console.error('Error reading file:', file.name, error);
+                    this.showNotification(`✗ Ошибка при чтении ${file.name}`, 'error');
                 };
 
                 reader.readAsDataURL(file);
             });
         });
 
-        // Обработчик окончания перетаскивания
-        itemsContainer.addEventListener('dragend', (e) => {
-            // Сбрасываем флаг внутреннего перетаскивания
-            if (e.target.classList.contains('content-item-wrapper')) {
-                isInternalDrag = false;
+        // Дополнительная защита: сбрасываем состояние при любом завершении drag
+        const resetDragState = () => {
+            if (isFileDragActive) {
+                console.log('Resetting file drag state');
                 dragCounter = 0;
+                isFileDragActive = false;
                 itemsContainer.classList.remove('drag-over-file');
             }
-        }, true); // true для фазы захвата
+        };
+
+        itemsContainer.addEventListener('dragend', resetDragState);
+
+        // Сброс при потере фокуса или других событиях
+        document.addEventListener('drop', (e) => {
+            // Если drop произошел вне нашего контейнера
+            if (!itemsContainer.contains(e.target)) {
+                resetDragState();
+            }
+        });
+
+        console.log('File drag and drop handlers registered for violation:', violation.id);
     }
 }
 

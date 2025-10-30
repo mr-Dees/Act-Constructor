@@ -6,6 +6,7 @@
 /* Обертка всего дополнительного контента */
 .additional-content-wrapper {
     margin-top: var(--spacing-md);
+    position: relative;
 }
 
 /* Контейнер всех элементов */
@@ -35,6 +36,7 @@
     background-color: var(--primary-subtle, rgba(79, 70, 229, 0.15));
     transform: scale(1.01);
     box-shadow: 0 0 20px rgba(79, 70, 229, 0.3);
+    pointer-events: auto;
 }
 
 .additional-content-items.drag-over-file::before {
@@ -72,6 +74,11 @@
 /* Скрываем подсказку при drag over */
 .additional-content-items.drag-over-file:empty::after {
     display: none;
+}
+
+/* Контейнер элемента не должен перехватывать события при файловом drag */
+.additional-content-items.drag-over-file .content-item-wrapper {
+    pointer-events: none;
 }
 
 /* Элемент контента с быстрыми переходами */
