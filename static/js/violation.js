@@ -34,19 +34,22 @@ class ViolationManager {
     }
 
     /**
-     * Настраивает глобальный обработчик вставки изображений из буфера обмена
+     * Настраивает глобальный обработчик вставки изображений и текста из буфера обмена
      */
     setupPasteHandler() {
         document.addEventListener('paste', async (e) => {
+            console.log('Paste event triggered');
 
             // Проверяем, есть ли текущий активный контейнер
             if (!this.currentActiveContainer) {
+                console.log('No active container - mouse is outside');
                 return;
             }
 
             // Получаем данные из буфера обмена
             const items = e.clipboardData?.items;
             if (!items) {
+                console.log('No clipboard items');
                 return;
             }
 
@@ -55,45 +58,61 @@ class ViolationManager {
             const violationId = itemsContainer?.dataset.violationId;
 
             if (!violationId) {
+                console.log('No violation ID found');
                 return;
             }
 
-            // Ищем изображение в буфере
+            console.log('Found container for violation:', violationId);
+
+            // Получаем violation из хранилища
+            const violation = this.activeViolations.get(violationId);
+            if (!violation) {
+                console.error('Violation not found in storage:', violationId);
+                return;
+            }
+
+            let hasImage = false;
+            let imageItem = null;
+            let textItem = null;
+
+            // Сначала определяем, что есть в буфере
             for (let i = 0; i < items.length; i++) {
                 const item = items[i];
+                console.log('Clipboard item type:', item.type);
 
-                // Проверяем, что это изображение
                 if (item.type.indexOf('image') !== -1) {
-                    e.preventDefault();
+                    hasImage = true;
+                    imageItem = item;
+                } else if (item.type === 'text/plain') {
+                    textItem = item;
+                }
+            }
 
-                    // Получаем файл изображения
-                    const file = item.getAsFile();
-                    if (!file) {
-                        continue;
-                    }
+            // Обрабатываем изображение если есть
+            if (hasImage && imageItem) {
+                e.preventDefault();
+                console.log('Image found in clipboard');
 
-                    // Читаем изображение как Data URL
+                const file = imageItem.getAsFile();
+                if (file) {
+                    console.log('Image file:', file.name, file.type, file.size);
+
                     const reader = new FileReader();
                     reader.onload = (event) => {
-                        // Получаем violation из хранилища
-                        const violation = this.activeViolations.get(violationId);
-                        if (!violation) {
-                            console.error('Violation not found in storage:', violationId);
-                            return;
-                        }
+                        console.log('Image loaded, adding to violation');
 
-                        // Генерируем имя файла
                         const timestamp = Date.now();
                         const extension = file.type.split('/')[1] || 'png';
                         const filename = `pasted_image_${timestamp}.${extension}`;
 
-                        // Добавляем изображение в конец списка
+                        console.log('Adding image with filename:', filename);
+
                         this.addContentItem(violation, 'image', targetContainer, {
                             url: event.target.result,
                             filename: filename
                         });
 
-                        // Показываем уведомление
+                        console.log('Image added successfully');
                         this.showNotification('✓ Изображение добавлено из буфера обмена', 'success');
                     };
 
@@ -103,10 +122,82 @@ class ViolationManager {
                     };
 
                     reader.readAsDataURL(file);
-                    break; // Обрабатываем только первое изображение
                 }
             }
+            // Обрабатываем текст только если нет изображения
+            else if (textItem) {
+                console.log('No image, checking for text');
+
+                textItem.getAsString((text) => {
+                    const textContent = text.trim();
+                    console.log('Text found in clipboard:', textContent.substring(0, 100));
+                    console.log('First 10 chars codes:', Array.from(textContent.substring(0, 10)).map(c => c.charCodeAt(0)));
+
+                    if (textContent) {
+                        e.preventDefault();
+
+                        // Определяем тип: кейс или текст
+                        // Используем простую проверку через toLowerCase и startsWith
+                        const normalizedText = textContent.toLowerCase();
+                        const startsWithCase = normalizedText.startsWith('кейс');
+
+                        console.log('Starts with case test result:', startsWithCase);
+                        console.log('Test string start:', textContent.substring(0, 10));
+
+                        let type, content, message;
+                        if (startsWithCase) {
+                            type = 'case';
+                            // Убираем "кейс" (4 символа) и затем номер с разделителем
+                            content = textContent
+                                .substring(4)  // Убираем первые 4 символа ("кейс")
+                                .replace(/^\s*\d+\s*[.:\-–—]?\s*/, '')  // Убираем пробелы, цифры и разделители
+                                .trim();
+                            message = '✓ Кейс добавлен из буфера обмена';
+                            console.log('Detected as CASE, cleaned content:', content.substring(0, 50));
+                        } else {
+                            type = 'freeText';
+                            content = textContent;
+                            message = '✓ Текст добавлен из буфера обмена';
+                            console.log('Detected as TEXT');
+                        }
+
+                        // Создаем элемент
+                        const newItem = {
+                            id: `${type}_${Date.now()}`,
+                            type: type,
+                            content: content,
+                            url: '',
+                            caption: '',
+                            filename: '',
+                            order: violation.additionalContent.items.length
+                        };
+
+                        violation.additionalContent.items.push(newItem);
+
+                        const itemsContainer = targetContainer.querySelector('.additional-content-items');
+
+                        // Сохраняем текущее состояние активности
+                        const wasActive = this.currentActiveContainer === targetContainer;
+
+                        this.renderContentItems(violation, itemsContainer);
+
+                        // Восстанавливаем активность после перерисовки
+                        if (wasActive) {
+                            this.currentActiveContainer = targetContainer;
+                        }
+
+                        PreviewManager.update();
+
+                        // Показываем уведомление
+                        this.showNotification(message, 'success');
+                    }
+                });
+            } else {
+                console.log('No image or text in clipboard');
+            }
         });
+
+        console.log('Paste handler registered');
     }
 
     /**
@@ -740,26 +831,50 @@ class ViolationManager {
     }
 
     /**
-     * Инициирует выбор файла изображения с указанием позиции
+     * Инициирует выбор файлов изображений с указанием позиции
      */
     triggerImageUploadAtPosition(violation, container, insertIndex) {
         const fileInput = document.createElement('input');
         fileInput.type = 'file';
         fileInput.accept = 'image/*';
+        fileInput.multiple = true; // Разрешаем выбор нескольких файлов
         fileInput.style.display = 'none';
 
         fileInput.addEventListener('change', (e) => {
-            const file = e.target.files[0];
-            if (!file) return;
+            const files = e.target.files;
+            if (!files || files.length === 0) return;
 
-            const reader = new FileReader();
-            reader.onload = (event) => {
-                this.addContentItemAtPosition(violation, 'image', container, insertIndex, {
-                    url: event.target.result,
-                    filename: file.name
-                });
-            };
-            reader.readAsDataURL(file);
+            console.log(`Selected ${files.length} file(s)`);
+
+            let addedCount = 0;
+            // Обрабатываем каждый файл
+            Array.from(files).forEach((file, idx) => {
+                const reader = new FileReader();
+                reader.onload = (event) => {
+                    // Добавляем изображения последовательно с увеличением позиции
+                    this.addContentItemAtPosition(violation, 'image', container, insertIndex + idx, {
+                        url: event.target.result,
+                        filename: file.name
+                    });
+
+                    addedCount++;
+                    console.log(`Added image ${addedCount} of ${files.length}`);
+
+                    // Показываем уведомление после последнего файла
+                    if (addedCount === files.length) {
+                        const message = files.length === 1
+                            ? '✓ Изображение добавлено'
+                            : `✓ Добавлено изображений: ${files.length}`;
+                        this.showNotification(message, 'success');
+                    }
+                };
+
+                reader.onerror = (error) => {
+                    console.error('Error reading file:', file.name, error);
+                };
+
+                reader.readAsDataURL(file);
+            });
         });
 
         document.body.appendChild(fileInput);
