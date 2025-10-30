@@ -5,67 +5,6 @@
 class APIClient {
 
     /**
-     * Показывает уведомление в правом верхнем углу
-     * @param {string} title - Заголовок уведомления
-     * @param {string} message - Текст уведомления
-     * @param {string} type - Тип уведомления ('success', 'error', 'info')
-     * @param {number} duration - Длительность показа в мс (0 = не скрывать автоматически)
-     */
-    static showNotification(title, message, type = 'info', duration = 5000) {
-        // Получаем существующий контейнер или создаем новый
-        // Это позволяет показывать несколько уведомлений одновременно
-        let container = document.querySelector('.notification-container');
-        if (!container) {
-            container = document.createElement('div');
-            container.className = 'notification-container';
-            document.body.appendChild(container);
-        }
-
-        // Определяем соответствие типов уведомлений их эмодзи-иконкам
-        const icons = {
-            success: '✅',
-            error: '❌',
-            info: 'ℹ️'
-        };
-
-        // Формируем HTML-структуру уведомления
-        const notification = document.createElement('div');
-        notification.className = `notification ${type}`;
-        notification.innerHTML = `
-            <div class="notification-icon">${icons[type] || icons.info}</div>
-            <div class="notification-content">
-                <div class="notification-title">${title}</div>
-                <div class="notification-message">${message}</div>
-            </div>
-            <button class="notification-close">×</button>
-        `;
-
-        // Навешиваем обработчик на кнопку закрытия
-        // Анимация hiding запускается перед удалением для плавности
-        const closeBtn = notification.querySelector('.notification-close');
-        closeBtn.addEventListener('click', () => {
-            notification.classList.add('hiding');
-            // Даем время на завершение CSS-анимации перед удалением из DOM
-            setTimeout(() => notification.remove(), 300);
-        });
-
-        // Добавляем уведомление в контейнер
-        container.appendChild(notification);
-
-        // Если задана длительность, настраиваем автоматическое скрытие
-        // duration = 0 означает, что уведомление нужно закрывать только вручную
-        if (duration > 0) {
-            setTimeout(() => {
-                // Проверяем, что элемент еще в DOM (мог быть закрыт вручную)
-                if (notification.parentElement) {
-                    notification.classList.add('hiding');
-                    setTimeout(() => notification.remove(), 300);
-                }
-            }, duration);
-        }
-    }
-
-    /**
      * Показывает кастомный диалог подтверждения
      * Используется вместо стандартного confirm() для единообразия UI
      * @param {string} title - Заголовок
@@ -125,11 +64,7 @@ class APIClient {
         const validFormats = formatList.filter(fmt => ['txt', 'docx', 'md'].includes(fmt));
         if (validFormats.length === 0) {
             console.error('Нет валидных форматов:', formatList);
-            this.showNotification(
-                'Ошибка форматов',
-                'Не выбраны валидные форматы для сохранения',
-                'error'
-            );
+            Notifications.error('Не выбраны валидные форматы для сохранения');
             return false;
         }
 
@@ -183,28 +118,13 @@ class APIClient {
                     .map(r => r.format.toUpperCase())
                     .join(', ');
 
-                this.showNotification(
-                    '✨ Акты успешно созданы',
-                    `Создано ${successCount} файл(ов): ${formatsList}`,
-                    'success',
-                    7000
-                );
+                Notifications.success(`Создано ${successCount} файл(ов): ${formatsList}`, 7000);
             } else if (successCount > 0 && errorCount > 0) {
                 // Частичный успех - некоторые форматы созданы, некоторые с ошибками
-                this.showNotification(
-                    '⚠️ Создано с ошибками',
-                    `Успешно: ${successCount}, Ошибок: ${errorCount}`,
-                    'info',
-                    7000
-                );
+                Notifications.info(`Успешно: ${successCount}, Ошибок: ${errorCount}`, 7000);
             } else {
                 // Полный провал - ни один файл не создан
-                this.showNotification(
-                    '❌ Ошибка создания',
-                    `Не удалось создать файлы. Проверьте консоль.`,
-                    'error',
-                    7000
-                );
+                Notifications.error('Не удалось создать файлы. Проверьте консоль.', 7000);
             }
 
             // Детальные ошибки выводим только в консоль, чтобы не перегружать UI
@@ -247,19 +167,9 @@ class APIClient {
 
                     // Показываем итоговое уведомление о скачивании
                     if (downloadedCount === successCount) {
-                        this.showNotification(
-                            '📥 Все файлы скачаны',
-                            `Успешно скачано ${downloadedCount} файл(ов)`,
-                            'success',
-                            3000
-                        );
+                        Notifications.success(`Успешно скачано ${downloadedCount} файл(ов)`, 3000);
                     } else {
-                        this.showNotification(
-                            '⚠️ Скачивание завершено',
-                            `Скачано: ${downloadedCount}, Ошибок: ${downloadErrors}`,
-                            'info',
-                            5000
-                        );
+                        Notifications.info(`Скачано: ${downloadedCount}, Ошибок: ${downloadErrors}`, 5000);
                     }
                 } else {
                     console.log('📋 Файлы созданы, скачивание отклонено пользователем');
@@ -271,12 +181,7 @@ class APIClient {
         } catch (error) {
             // Обработка критических ошибок всего процесса генерации
             console.error('❌ Критическая ошибка при генерации актов:', error);
-            this.showNotification(
-                'Критическая ошибка',
-                `Произошла ошибка: ${error.message}`,
-                'error',
-                8000
-            );
+            Notifications.error(`Произошла ошибка: ${error.message}`, 8000);
             return false;
         }
     }
@@ -333,17 +238,9 @@ class APIClient {
                 // Это нужно для массового скачивания, когда не хотим множество уведомлений
                 if (showUIErrors) {
                     if (response.status === 404) {
-                        this.showNotification(
-                            'Файл не найден',
-                            `Файл "${filename}" не найден на сервере`,
-                            'error'
-                        );
+                        Notifications.error(`Файл "${filename}" не найден на сервере`);
                     } else {
-                        this.showNotification(
-                            'Ошибка скачивания',
-                            `Ошибка сервера: ${response.status} ${response.statusText}`,
-                            'error'
-                        );
+                        Notifications.error(`Ошибка сервера: ${response.status} ${response.statusText}`);
                     }
                 }
 
@@ -386,11 +283,7 @@ class APIClient {
 
             // Показываем ошибку в UI только если это запрошено
             if (showUIErrors) {
-                this.showNotification(
-                    'Ошибка скачивания',
-                    `Не удалось скачать "${filename}". Проверьте консоль для деталей.`,
-                    'error'
-                );
+                Notifications.error(`Не удалось скачать "${filename}". Проверьте консоль для деталей.`);
             }
 
             // Пробрасываем ошибку дальше для обработки в вызывающем коде

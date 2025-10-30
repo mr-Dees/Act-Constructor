@@ -30,13 +30,13 @@
 @import 'modules/violation/violation-base.css';
 @import 'modules/violation/violation-fields.css';
 @import 'modules/violation/violation-list.css';
-@import 'modules/violation/violation-preview.css';
 @import 'modules/violation/violation-additional-content.css';
 
 /* Модуль предпросмотра */
 @import 'modules/preview/preview-base.css';
 @import 'modules/preview/preview-typography.css';
 @import 'modules/preview/preview-table.css';
+@import 'modules/preview/preview-violation.css';
 
 /* Модуль справки */
 @import 'modules/help/help-button.css';

@@ -101,15 +101,23 @@ UI_for_EP_v_KAP/
 │   │   └── utilities/
 │   │       └── helpers.css
 │   └── js/
-│       ├── state.js
+│       ├── main.js
 │       ├── tree.js
 │       ├── table.js
 │       ├── textblock.js
-│       ├── violation.js
+│       ├── state.js
 │       ├── preview.js
 │       ├── api.js
 │       ├── help.js
-│       └── main.js
+│       └── violation
+│           ├── violation-init.js
+│           ├── violation-core.js
+│           ├── violation-context-menu.js
+│           ├── violation-additional-content.js
+│           ├── violation-drag-drop.js
+│           ├── violation-file-upload.js
+│           ├── violation-paste.js
+│           └── violation-rendering.js
 ├── requirements.txt
 └── .env
 
