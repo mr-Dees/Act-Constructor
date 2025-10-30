@@ -134,7 +134,7 @@
 /* Эффект при перетаскивании - плавный и элегантный */
 .content-item-wrapper.dragging {
     opacity: 0.7;
-    transform: scale(1.04) rotate(1deg);
+    transform: scale(1.06);
     box-shadow: 0 16px 32px rgba(79, 70, 229, 0.25);
     border-color: var(--primary);
     z-index: 1000;

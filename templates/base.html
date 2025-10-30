@@ -16,24 +16,26 @@
     {% block content %}{% endblock %}
 
     <!-- JavaScript -->
+    <script src="/static/js/main.js"></script>
     <!-- Система уведомлений -->
-    <script src="{{ url_for('static', path='js/notifications.js') }}"></script>
+    <script src="/static/js/notifications.js"></script>
+    <!-- Единый модуль контекстного меню -->
+    <script src="/static/js/context-menu.js"></script>
 
+    <script src="/static/js/api.js"></script>
     <script src="/static/js/state.js"></script>
+    <script src="/static/js/help.js"></script>
+    <script src="/static/js/preview.js"></script>
+
     <script src="/static/js/tree.js"></script>
     <script src="/static/js/table.js"></script>
     <script src="/static/js/textblock.js"></script>
-    <script src="/static/js/preview.js"></script>
-    <script src="/static/js/api.js"></script>
-    <script src="/static/js/help.js"></script>
-    <script src="/static/js/main.js"></script>
 
     <!-- Основной класс и базовые методы -->
     <script src="/static/js/violation/violation-core.js"></script>
     <!-- Расширения функциональности -->
     <script src="/static/js/violation/violation-paste.js"></script>
     <script src="/static/js/violation/violation-additional-content.js"></script>
-    <script src="/static/js/violation/violation-context-menu.js"></script>
     <script src="/static/js/violation/violation-rendering.js"></script>
     <script src="/static/js/violation/violation-drag-drop.js"></script>
     <script src="/static/js/violation/violation-file-upload.js"></script>

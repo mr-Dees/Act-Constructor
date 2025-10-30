@@ -102,6 +102,8 @@ UI_for_EP_v_KAP/
 │   │       └── helpers.css
 │   └── js/
 │       ├── main.js
+│       ├── notifications.js
+│       ├── context-menu.js
 │       ├── tree.js
 │       ├── table.js
 │       ├── textblock.js
@@ -112,7 +114,6 @@ UI_for_EP_v_KAP/
 │       └── violation
 │           ├── violation-init.js
 │           ├── violation-core.js
-│           ├── violation-context-menu.js
 │           ├── violation-additional-content.js
 │           ├── violation-drag-drop.js
 │           ├── violation-file-upload.js
@@ -120,10 +121,3 @@ UI_for_EP_v_KAP/
 │           └── violation-rendering.js
 ├── requirements.txt
 └── .env
-
-У меня в блоке нарушения есть опциональная сущность дополнительный контент.
-
-Сейчас все логика реализована, но нужно удалить кнопки и сделать добавление контента через контекстное меню. Удаление блока так же, сделать через ПКМ.
-
-Учти что у меня уже есть html под контекстные окна и в целом есть логика как хранить файлы.
-Опирайся на это и реализуй нужный функционал

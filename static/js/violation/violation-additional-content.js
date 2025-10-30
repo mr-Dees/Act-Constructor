@@ -94,7 +94,7 @@ Object.assign(ViolationManager.prototype, {
         // Настраиваем Drag and Drop для файлов
         this.setupFileDragAndDrop(itemsContainer, violation, contentContainer);
 
-        // Обработчик контекстного меню
+        // Обработчик контекстного меню - используем новый ContextMenuManager
         itemsContainer.addEventListener('contextmenu', (e) => {
             e.preventDefault();
             e.stopPropagation();
@@ -105,12 +105,22 @@ Object.assign(ViolationManager.prototype, {
             // Проверяем, клик по элементу или по пустой области
             const clickedWrapper = e.target.closest('.content-item-wrapper');
 
+            // Используем новый единый ContextMenuManager
             if (clickedWrapper) {
-                // Получаем реальный ID элемента из dataset
                 const itemId = clickedWrapper.dataset.itemId;
-                this.showContextMenu(e, violation, contentContainer, itemId, insertPosition);
+                ContextMenuManager.show(e.clientX, e.clientY, null, 'violation', {
+                    violation,
+                    contentContainer,
+                    itemId,
+                    insertPosition
+                });
             } else {
-                this.showContextMenu(e, violation, contentContainer, null, insertPosition);
+                ContextMenuManager.show(e.clientX, e.clientY, null, 'violation', {
+                    violation,
+                    contentContainer,
+                    itemId: null,
+                    insertPosition
+                });
             }
         });
 
