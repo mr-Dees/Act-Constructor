@@ -20,7 +20,7 @@
     border-radius: var(--radius);
     background-color: var(--bg-secondary, #f8f9fa);
     position: relative;
-    transition: border-color 0.2s ease, background-color 0.2s ease, transform 0.2s ease;
+    transition: border-color 0.9s ease, background-color 0.3s ease, transform 0.3s ease;
     align-items: stretch;
 }
 
@@ -81,7 +81,33 @@
     pointer-events: none;
 }
 
-/* Элемент контента с быстрыми переходами */
+/* Минималистичный индикатор позиции вставки - тонкая подсветка */
+.insert-indicator {
+    height: 8px;
+    background: transparent;
+    position: relative;
+    margin: 4px 0;
+    transition: all 0.9s cubic-bezier(0.4, 0, 0.2, 1);
+    pointer-events: none;
+}
+
+.insert-indicator::before {
+    content: '';
+    position: absolute;
+    left: 0;
+    right: 0;
+    top: 50%;
+    height: 2px;
+    background: linear-gradient(90deg,
+    transparent 0%,
+    rgba(79, 70, 229, 0.3) 20%,
+    rgba(79, 70, 229, 0.3) 80%,
+    transparent 100%);
+    transform: translateY(-50%);
+    border-radius: 2px;
+}
+
+/* Элемент контента с максимально плавными переходами */
 .content-item-wrapper {
     border: 2px solid var(--border);
     border-radius: var(--radius-md);
@@ -90,29 +116,30 @@
     box-shadow: var(--shadow-sm);
     cursor: grab;
     min-height: 80px;
-    transition: all 0.15s ease;
-    will-change: transform, box-shadow;
+    transition: all 0.9s cubic-bezier(0.25, 0.46, 0.45, 0.94);
+    will-change: transform, box-shadow, opacity;
     position: relative;
 }
 
 .content-item-wrapper:hover {
     border-color: var(--primary);
-    box-shadow: 0 6px 16px rgba(0, 0, 0, 0.12);
-    transform: translateY(-2px);
+    box-shadow: 0 8px 20px rgba(0, 0, 0, 0.12);
+    transform: translateY(-3px);
 }
 
 .content-item-wrapper:active {
     cursor: grabbing;
 }
 
-/* Эффект при перетаскивании - полупрозрачность и масштабирование */
+/* Эффект при перетаскивании - плавный и элегантный */
 .content-item-wrapper.dragging {
-    opacity: 0.6;
-    transform: scale(1.065);
-    box-shadow: 0 12px 24px rgba(79, 70, 229, 0.3);
+    opacity: 0.7;
+    transform: scale(1.04) rotate(1deg);
+    box-shadow: 0 16px 32px rgba(79, 70, 229, 0.25);
     border-color: var(--primary);
     z-index: 1000;
     cursor: grabbing;
+    transition: all 0.3s cubic-bezier(0.34, 1.56, 0.64, 1);
 }
 
 /* Метка типа элемента */
@@ -129,6 +156,7 @@
     align-items: center;
     gap: var(--spacing-xs);
     user-select: none;
+    transition: background 0.3s ease;
 }
 
 /* Иконка перетаскивания */
@@ -138,14 +166,15 @@
     line-height: 1;
     cursor: grab;
     opacity: 0.5;
-    transition: opacity 0.2s;
+    transition: opacity 0.3s ease, transform 0.3s ease;
 }
 
 .content-item-wrapper:hover .drag-handle-inline {
     opacity: 1;
+    transform: scale(1.1);
 }
 
-/* Миниатюра при перетаскивании с большей заметностью */
+/* Миниатюра при перетаскивании */
 .drag-miniature {
     display: flex;
     align-items: center;
@@ -176,6 +205,7 @@
     gap: var(--spacing-sm);
     align-items: flex-start;
     background-color: var(--bg-primary);
+    transition: background-color 0.3s ease;
 }
 
 /* Textarea внутри элемента занимает всё доступное пространство */
@@ -183,6 +213,7 @@
     flex: 1;
     min-height: 60px;
     width: 100%;
+    transition: border-color 0.3s ease, box-shadow 0.3s ease;
 }
 
 /* Для изображений */
@@ -192,6 +223,7 @@
     flex-direction: column;
     gap: var(--spacing-sm);
     background-color: var(--bg-primary);
+    transition: background-color 0.3s ease;
 }
 
 /* Контейнер для превью изображения с фиксированной высотой */
@@ -203,6 +235,11 @@
     justify-content: center;
     flex-shrink: 0;
     cursor: inherit;
+    transition: transform 0.3s ease;
+}
+
+.content-item-wrapper:hover .image-preview-container {
+    transform: scale(1.02);
 }
 
 /* Превью изображения с фиксированными размерами */
@@ -216,6 +253,7 @@
     border-radius: var(--radius-sm);
     background-color: var(--gray-50, #f9fafb);
     flex-shrink: 0;
+    transition: border-color 0.3s ease;
     /* Запрещаем взаимодействие с изображением */
     pointer-events: none;
     user-select: none;
@@ -232,6 +270,7 @@
     font-style: italic;
     word-break: break-all;
     padding: var(--spacing-xs) 0;
+    transition: color 0.3s ease;
 }
 
 /* Поле ввода подписи к изображению */
@@ -242,13 +281,14 @@
     border-radius: var(--radius);
     font-family: inherit;
     font-size: 0.875rem;
-    transition: border-color 0.2s ease;
+    transition: border-color 0.3s ease, box-shadow 0.3s ease, transform 0.3s ease;
 }
 
 .image-item .violation-list-input:focus {
     outline: none;
     border-color: var(--primary);
     box-shadow: 0 0 0 3px var(--primary-subtle, rgba(79, 70, 229, 0.1));
+    transform: translateY(-1px);
 }
 
 /* Стили контекстного меню */
@@ -258,12 +298,24 @@
     border-radius: var(--radius);
     box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
     overflow: hidden;
+    animation: menuFadeIn 0.2s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+@keyframes menuFadeIn {
+    from {
+        opacity: 0;
+        transform: scale(0.95) translateY(-10px);
+    }
+    to {
+        opacity: 1;
+        transform: scale(1) translateY(0);
+    }
 }
 
 .violation-context-menu-item {
     padding: 10px 16px;
     cursor: pointer;
-    transition: background-color 0.2s;
+    transition: background-color 0.2s ease, transform 0.2s ease;
     font-size: 0.875rem;
     display: flex;
     align-items: center;
@@ -272,10 +324,12 @@
 
 .violation-context-menu-item:hover {
     background-color: var(--primary-subtle, rgba(79, 70, 229, 0.1));
+    transform: translateX(4px);
 }
 
 .violation-context-menu-item:active {
     background-color: var(--primary-subtle, rgba(79, 70, 229, 0.2));
+    transform: translateX(2px);
 }
 
 /* Стиль для пункта удаления */

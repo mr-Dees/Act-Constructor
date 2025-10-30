@@ -11,10 +11,10 @@ class ViolationManager {
         this.activeViolations = new Map();
         // Текущий активный контейнер для paste (только когда мышь внутри)
         this.currentActiveContainer = null;
-
+        // Позиция курсора для вставки (null означает конец списка)
+        this.cursorInsertPosition = null;
         // Настраиваем глобальный обработчик вставки
         this.setupPasteHandler();
-
         // Настраиваем обработчик ESC для сброса активной зоны
         this.setupEscapeHandler();
     }
@@ -27,6 +27,7 @@ class ViolationManager {
             if (e.key === 'Escape') {
                 if (this.currentActiveContainer) {
                     this.currentActiveContainer = null;
+                    this.cursorInsertPosition = null;
                     this.showNotification('ℹ Активная зона сброшена', 'info');
                 }
             }
@@ -38,18 +39,14 @@ class ViolationManager {
      */
     setupPasteHandler() {
         document.addEventListener('paste', async (e) => {
-            console.log('Paste event triggered');
-
             // Проверяем, есть ли текущий активный контейнер
             if (!this.currentActiveContainer) {
-                console.log('No active container - mouse is outside');
                 return;
             }
 
             // Получаем данные из буфера обмена
             const items = e.clipboardData?.items;
             if (!items) {
-                console.log('No clipboard items');
                 return;
             }
 
@@ -58,11 +55,8 @@ class ViolationManager {
             const violationId = itemsContainer?.dataset.violationId;
 
             if (!violationId) {
-                console.log('No violation ID found');
                 return;
             }
-
-            console.log('Found container for violation:', violationId);
 
             // Получаем violation из хранилища
             const violation = this.activeViolations.get(violationId);
@@ -71,6 +65,11 @@ class ViolationManager {
                 return;
             }
 
+            // Определяем позицию вставки на основе положения курсора
+            const insertIndex = this.cursorInsertPosition !== null
+                ? this.cursorInsertPosition
+                : violation.additionalContent.items.length;
+
             let hasImage = false;
             let imageItem = null;
             let textItem = null;
@@ -78,7 +77,6 @@ class ViolationManager {
             // Сначала определяем, что есть в буфере
             for (let i = 0; i < items.length; i++) {
                 const item = items[i];
-                console.log('Clipboard item type:', item.type);
 
                 if (item.type.indexOf('image') !== -1) {
                     hasImage = true;
@@ -91,28 +89,20 @@ class ViolationManager {
             // Обрабатываем изображение если есть
             if (hasImage && imageItem) {
                 e.preventDefault();
-                console.log('Image found in clipboard');
 
                 const file = imageItem.getAsFile();
                 if (file) {
-                    console.log('Image file:', file.name, file.type, file.size);
-
                     const reader = new FileReader();
                     reader.onload = (event) => {
-                        console.log('Image loaded, adding to violation');
-
                         const timestamp = Date.now();
                         const extension = file.type.split('/')[1] || 'png';
                         const filename = `pasted_image_${timestamp}.${extension}`;
 
-                        console.log('Adding image with filename:', filename);
-
-                        this.addContentItem(violation, 'image', targetContainer, {
+                        this.addContentItemAtPosition(violation, 'image', targetContainer, insertIndex, {
                             url: event.target.result,
                             filename: filename
                         });
 
-                        console.log('Image added successfully');
                         this.showNotification('✓ Изображение добавлено из буфера обмена', 'success');
                     };
 
@@ -126,78 +116,44 @@ class ViolationManager {
             }
             // Обрабатываем текст только если нет изображения
             else if (textItem) {
-                console.log('No image, checking for text');
 
                 textItem.getAsString((text) => {
                     const textContent = text.trim();
-                    console.log('Text found in clipboard:', textContent.substring(0, 100));
-                    console.log('First 10 chars codes:', Array.from(textContent.substring(0, 10)).map(c => c.charCodeAt(0)));
 
                     if (textContent) {
                         e.preventDefault();
 
                         // Определяем тип: кейс или текст
-                        // Используем простую проверку через toLowerCase и startsWith
                         const normalizedText = textContent.toLowerCase();
                         const startsWithCase = normalizedText.startsWith('кейс');
 
-                        console.log('Starts with case test result:', startsWithCase);
-                        console.log('Test string start:', textContent.substring(0, 10));
-
                         let type, content, message;
+
                         if (startsWithCase) {
                             type = 'case';
                             // Убираем "кейс" (4 символа) и затем номер с разделителем
                             content = textContent
-                                .substring(4)  // Убираем первые 4 символа ("кейс")
-                                .replace(/^\s*\d+\s*[.:\-–—]?\s*/, '')  // Убираем пробелы, цифры и разделители
+                                .substring(4)
+                                .replace(/^\s*\d+\s*[.:\-–—]?\s*/, '')
                                 .trim();
                             message = '✓ Кейс добавлен из буфера обмена';
-                            console.log('Detected as CASE, cleaned content:', content.substring(0, 50));
                         } else {
                             type = 'freeText';
                             content = textContent;
                             message = '✓ Текст добавлен из буфера обмена';
-                            console.log('Detected as TEXT');
                         }
 
-                        // Создаем элемент
-                        const newItem = {
-                            id: `${type}_${Date.now()}`,
-                            type: type,
-                            content: content,
-                            url: '',
-                            caption: '',
-                            filename: '',
-                            order: violation.additionalContent.items.length
-                        };
-
-                        violation.additionalContent.items.push(newItem);
-
-                        const itemsContainer = targetContainer.querySelector('.additional-content-items');
-
-                        // Сохраняем текущее состояние активности
-                        const wasActive = this.currentActiveContainer === targetContainer;
-
-                        this.renderContentItems(violation, itemsContainer);
-
-                        // Восстанавливаем активность после перерисовки
-                        if (wasActive) {
-                            this.currentActiveContainer = targetContainer;
-                        }
+                        // Добавляем элемент в определенную позицию
+                        this.addContentItemAtPosition(violation, type, targetContainer, insertIndex, {
+                            content: content
+                        });
 
                         PreviewManager.update();
-
-                        // Показываем уведомление
                         this.showNotification(message, 'success');
                     }
                 });
-            } else {
-                console.log('No image or text in clipboard');
             }
         });
-
-        console.log('Paste handler registered');
     }
 
     /**
@@ -248,6 +204,7 @@ class ViolationManager {
                         opacity: 1;
                     }
                 }
+                
                 @keyframes slideOutNotification {
                     from {
                         transform: translateX(0);
@@ -335,6 +292,7 @@ class ViolationManager {
 
         columnsContainer.appendChild(violatedColumn);
         columnsContainer.appendChild(establishedColumn);
+
         section.appendChild(columnsContainer);
 
         // Контейнер для дополнительных опциональных полей
@@ -466,7 +424,6 @@ class ViolationManager {
             contentContainer.appendChild(addButton);
             contentContainer.appendChild(listContainer);
             this.renderList(listContainer, violation, fieldName);
-
         } else if (type === 'text') {
             const textarea = document.createElement('textarea');
             textarea.className = 'violation-textarea';
@@ -498,7 +455,6 @@ class ViolationManager {
 
         // Регистрируем violation в хранилище для быстрого доступа
         this.activeViolations.set(violation.id, violation);
-        console.log('Registered violation:', violation.id);
 
         // Чекбокс для включения секции
         const checkboxContainer = document.createElement('div');
@@ -516,7 +472,7 @@ class ViolationManager {
             // Если выключаем - сбрасываем активный контейнер
             if (!checkbox.checked && this.currentActiveContainer === contentContainer) {
                 this.currentActiveContainer = null;
-                console.log('Container deactivated via checkbox');
+                this.cursorInsertPosition = null;
             }
 
             PreviewManager.update();
@@ -544,49 +500,56 @@ class ViolationManager {
         itemsContainer.className = 'additional-content-items';
         itemsContainer.dataset.violationId = violation.id;
 
-        // Отслеживаем вход мыши в ВЕСЬ contentContainer (не только itemsContainer)
-        // Это более надежно, так как работает даже при перерисовке
+        // Отслеживаем вход мыши в contentContainer
         contentContainer.addEventListener('mouseenter', () => {
             if (violation.additionalContent.enabled) {
                 this.currentActiveContainer = contentContainer;
-                console.log('Mouse entered content container, activated for paste/drop');
             }
         });
 
-        // Отслеживаем выход мыши из ВСЕГО contentContainer
+        // Отслеживаем выход мыши из contentContainer
         contentContainer.addEventListener('mouseleave', () => {
             if (this.currentActiveContainer === contentContainer) {
                 this.currentActiveContainer = null;
-                console.log('Mouse left content container, deactivated for paste/drop');
+                this.cursorInsertPosition = null;
+                // Удаляем индикатор при выходе мыши
+                const indicators = itemsContainer.querySelectorAll('.insert-indicator');
+                indicators.forEach(ind => ind.remove());
             }
         });
 
-        // Также отслеживаем движение мыши для дополнительной надежности
-        contentContainer.addEventListener('mousemove', () => {
-            if (violation.additionalContent.enabled && this.currentActiveContainer !== contentContainer) {
-                this.currentActiveContainer = contentContainer;
-                console.log('Mouse move detected, container reactivated');
+        // Отслеживаем движение мыши для определения позиции курсора
+        contentContainer.addEventListener('mousemove', (e) => {
+            if (violation.additionalContent.enabled && this.currentActiveContainer === contentContainer) {
+                // Вычисляем позицию курсора относительно элементов
+                const position = this.calculateCursorPosition(e, itemsContainer);
+                this.cursorInsertPosition = position;
+
+                // Визуализируем позицию вставки
+                this.updateInsertIndicator(itemsContainer, position);
             }
         });
 
         // Настраиваем Drag and Drop для файлов
         this.setupFileDragAndDrop(itemsContainer, violation, contentContainer);
 
-        // Обработчик контекстного меню (ЕДИНОЕ МЕНЮ)
+        // Обработчик контекстного меню
         itemsContainer.addEventListener('contextmenu', (e) => {
             e.preventDefault();
             e.stopPropagation();
+
+            // Вычисляем позицию для вставки на основе клика
+            const insertPosition = this.calculateCursorPosition(e, itemsContainer);
 
             // Проверяем, клик по элементу или по пустой области
             const clickedWrapper = e.target.closest('.content-item-wrapper');
 
             if (clickedWrapper) {
-                // Показываем меню с опцией удаления
-                const itemIndex = Array.from(itemsContainer.children).indexOf(clickedWrapper);
-                this.showContextMenu(e, violation, contentContainer, itemIndex);
+                // Получаем реальный ID элемента из dataset
+                const itemId = clickedWrapper.dataset.itemId;
+                this.showContextMenu(e, violation, contentContainer, itemId, insertPosition);
             } else {
-                // Показываем меню без опции удаления
-                this.showContextMenu(e, violation, contentContainer, null);
+                this.showContextMenu(e, violation, contentContainer, null, insertPosition);
             }
         });
 
@@ -600,13 +563,87 @@ class ViolationManager {
     }
 
     /**
+     * Вычисляет позицию курсора для вставки элементов
+     * @param {Event} event - Событие мыши
+     * @param {HTMLElement} container - Контейнер с элементами
+     * @returns {number} Индекс позиции для вставки
+     */
+    calculateCursorPosition(event, container) {
+        const wrappers = Array.from(container.querySelectorAll('.content-item-wrapper'));
+
+        if (wrappers.length === 0) {
+            return 0;
+        }
+
+        const clickY = event.clientY;
+
+        for (let i = 0; i < wrappers.length; i++) {
+            const wrapperRect = wrappers[i].getBoundingClientRect();
+            const wrapperTop = wrapperRect.top;
+            const wrapperBottom = wrapperRect.bottom;
+            const wrapperHeight = wrapperRect.height;
+
+            // Делим элемент на три зоны: верхняя треть, средняя треть, нижняя треть
+            const topThird = wrapperTop + wrapperHeight / 3;
+            const bottomThird = wrapperTop + (wrapperHeight * 2) / 3;
+
+            if (clickY < topThird) {
+                // Курсор в верхней трети элемента - вставляем перед ним
+                return i;
+            } else if (clickY >= topThird && clickY < bottomThird) {
+                // Курсор в средней трети - вставляем перед элементом
+                return i;
+            } else if (clickY >= bottomThird && clickY <= wrapperBottom) {
+                // Курсор в нижней трети - вставляем после элемента
+                return i + 1;
+            }
+        }
+
+        // Если курсор ниже всех элементов - вставляем в конец
+        return wrappers.length;
+    }
+
+    /**
+     * Визуализирует индикатор места вставки
+     * @param {HTMLElement} container - Контейнер с элементами
+     * @param {number} position - Позиция для вставки
+     */
+    updateInsertIndicator(container, position) {
+        // Удаляем предыдущие индикаторы
+        const oldIndicators = container.querySelectorAll('.insert-indicator');
+        oldIndicators.forEach(ind => ind.remove());
+
+        const wrappers = Array.from(container.querySelectorAll('.content-item-wrapper'));
+
+        if (wrappers.length === 0) {
+            return;
+        }
+
+        // Создаем индикатор
+        const indicator = document.createElement('div');
+        indicator.className = 'insert-indicator';
+
+        if (position === 0) {
+            // Вставка в начало
+            container.insertBefore(indicator, wrappers[0]);
+        } else if (position >= wrappers.length) {
+            // Вставка в конец
+            container.appendChild(indicator);
+        } else {
+            // Вставка между элементами
+            container.insertBefore(indicator, wrappers[position]);
+        }
+    }
+
+    /**
      * Показывает универсальное контекстное меню
      * @param {Event} event - Событие контекстного меню
      * @param {Object} violation - Объект нарушения
      * @param {HTMLElement} contentContainer - Контейнер содержимого
-     * @param {number|null} itemIndex - Индекс элемента для удаления (null если клик по пустой области)
+     * @param {string|null} itemId - ID элемента для удаления (null если клик по пустой области)
+     * @param {number} insertPosition - Позиция для вставки новых элементов
      */
-    showContextMenu(event, violation, contentContainer, itemIndex) {
+    showContextMenu(event, violation, contentContainer, itemId, insertPosition) {
         // Удаляем существующее меню, если оно есть
         const existingMenu = document.querySelector('.violation-context-menu');
         if (existingMenu) {
@@ -616,21 +653,19 @@ class ViolationManager {
         const menu = document.createElement('div');
         menu.className = 'violation-context-menu';
         menu.style.cssText = `
-        position: fixed;
-        left: ${event.clientX}px;
-        top: ${event.clientY}px;
-        background: white;
-        border: 1px solid var(--border);
-        border-radius: var(--radius);
-        box-shadow: var(--shadow-lg);
-        z-index: 10000;
-        min-width: 200px;
-        padding: 4px 0;
-    `;
+            position: fixed;
+            left: ${event.clientX}px;
+            top: ${event.clientY}px;
+            background: white;
+            border: 1px solid var(--border);
+            border-radius: var(--radius);
+            box-shadow: var(--shadow-lg);
+            z-index: 10000;
+            min-width: 200px;
+            padding: 4px 0;
+        `;
 
-        // Определяем позицию вставки для новых элементов
         const itemsContainer = contentContainer.querySelector('.additional-content-items');
-        const insertIndex = this.calculateInsertPosition(event, itemsContainer);
 
         // Пункты меню для добавления
         const addMenuItems = [
@@ -645,11 +680,11 @@ class ViolationManager {
             menuItem.className = 'violation-context-menu-item';
             menuItem.textContent = item.label;
             menuItem.style.cssText = `
-            padding: 8px 16px;
-            cursor: pointer;
-            transition: background-color 0.2s;
-            font-size: 0.875rem;
-        `;
+                padding: 8px 16px;
+                cursor: pointer;
+                transition: background-color 0.2s;
+                font-size: 0.875rem;
+            `;
 
             menuItem.addEventListener('mouseenter', () => {
                 menuItem.style.backgroundColor = 'var(--primary-subtle)';
@@ -660,7 +695,7 @@ class ViolationManager {
             });
 
             menuItem.addEventListener('click', () => {
-                this.handleContentItemAdd(violation, item.action, contentContainer, insertIndex);
+                this.handleContentItemAdd(violation, item.action, contentContainer, insertPosition);
                 menu.remove();
             });
 
@@ -668,14 +703,14 @@ class ViolationManager {
         });
 
         // Если клик был по элементу, добавляем разделитель и опцию удаления
-        if (itemIndex !== null) {
+        if (itemId !== null) {
             // Разделитель
             const separator = document.createElement('div');
             separator.style.cssText = `
-            height: 1px;
-            background-color: var(--border);
-            margin: 4px 0;
-        `;
+                height: 1px;
+                background-color: var(--border);
+                margin: 4px 0;
+            `;
             menu.appendChild(separator);
 
             // Пункт удаления
@@ -683,12 +718,12 @@ class ViolationManager {
             deleteItem.className = 'violation-context-menu-item delete';
             deleteItem.textContent = '🗑️ Удалить';
             deleteItem.style.cssText = `
-            padding: 8px 16px;
-            cursor: pointer;
-            color: var(--danger, #dc3545);
-            transition: background-color 0.2s;
-            font-size: 0.875rem;
-        `;
+                padding: 8px 16px;
+                cursor: pointer;
+                color: var(--danger, #dc3545);
+                transition: background-color 0.2s;
+                font-size: 0.875rem;
+            `;
 
             deleteItem.addEventListener('mouseenter', () => {
                 deleteItem.style.backgroundColor = 'rgba(220, 53, 69, 0.1)';
@@ -699,9 +734,21 @@ class ViolationManager {
             });
 
             deleteItem.addEventListener('click', () => {
-                violation.additionalContent.items.splice(itemIndex, 1);
-                this.renderContentItems(violation, itemsContainer);
-                PreviewManager.update();
+                // Находим элемент по ID и удаляем его
+                const itemIndex = violation.additionalContent.items.findIndex(item => item.id === itemId);
+
+                if (itemIndex !== -1) {
+                    violation.additionalContent.items.splice(itemIndex, 1);
+
+                    // Обновляем order для всех оставшихся элементов
+                    violation.additionalContent.items.forEach((item, idx) => {
+                        item.order = idx;
+                    });
+
+                    this.renderContentItems(violation, itemsContainer);
+                    PreviewManager.update();
+                }
+
                 menu.remove();
             });
 
@@ -724,29 +771,11 @@ class ViolationManager {
     }
 
     /**
-     * Вычисляет позицию вставки на основе координат клика
-     */
-    calculateInsertPosition(event, container) {
-        const wrappers = Array.from(container.querySelectorAll('.content-item-wrapper'));
-        if (wrappers.length === 0) {
-            return 0;
-        }
-
-        const clickY = event.clientY;
-
-        for (let i = 0; i < wrappers.length; i++) {
-            const wrapperRect = wrappers[i].getBoundingClientRect();
-            const wrapperMiddle = wrapperRect.top + wrapperRect.height / 2;
-
-            if (clickY < wrapperMiddle) {
-                return i;
-            }
-        }
-        return wrappers.length;
-    }
-
-    /**
      * Обрабатывает действие добавления элемента с указанной позицией
+     * @param {Object} violation - Объект нарушения
+     * @param {string} action - Тип действия ('case', 'image', 'text')
+     * @param {HTMLElement} contentContainer - Контейнер содержимого
+     * @param {number} insertIndex - Позиция для вставки
      */
     handleContentItemAdd(violation, action, contentContainer, insertIndex) {
         switch (action) {
@@ -763,53 +792,28 @@ class ViolationManager {
     }
 
     /**
-     * Добавляет элемент контента в массив (в конец)
-     */
-    addContentItem(violation, type, container, extraData = {}) {
-        const newItem = {
-            id: `${type}_${Date.now()}`,
-            type: type,
-            content: '',
-            url: extraData.url || '',
-            caption: '',
-            filename: extraData.filename || '',
-            order: violation.additionalContent.items.length
-        };
-
-        violation.additionalContent.items.push(newItem);
-
-        const itemsContainer = container.querySelector('.additional-content-items');
-
-        // Сохраняем текущее состояние активности
-        const wasActive = this.currentActiveContainer === container;
-
-        this.renderContentItems(violation, itemsContainer);
-
-        // Восстанавливаем активность после перерисовки
-        if (wasActive) {
-            this.currentActiveContainer = container;
-            console.log('Restored active container after adding item');
-        }
-
-        PreviewManager.update();
-    }
-
-    /**
      * Добавляет элемент контента в указанную позицию
+     * @param {Object} violation - Объект нарушения
+     * @param {string} type - Тип элемента ('case', 'image', 'freeText')
+     * @param {HTMLElement} container - Контейнер содержимого
+     * @param {number} insertIndex - Позиция для вставки
+     * @param {Object} extraData - Дополнительные данные элемента
      */
     addContentItemAtPosition(violation, type, container, insertIndex, extraData = {}) {
         const newItem = {
-            id: `${type}_${Date.now()}`,
+            id: `${type}_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`,
             type: type,
-            content: '',
+            content: extraData.content || '',
             url: extraData.url || '',
             caption: '',
             filename: extraData.filename || '',
             order: insertIndex
         };
 
+        // Вставляем элемент в нужную позицию
         violation.additionalContent.items.splice(insertIndex, 0, newItem);
 
+        // Обновляем порядок всех элементов
         violation.additionalContent.items.forEach((item, idx) => {
             item.order = idx;
         });
@@ -824,7 +828,6 @@ class ViolationManager {
         // Восстанавливаем активность после перерисовки
         if (wasActive) {
             this.currentActiveContainer = container;
-            console.log('Restored active container after adding item at position');
         }
 
         PreviewManager.update();
@@ -832,24 +835,27 @@ class ViolationManager {
 
     /**
      * Инициирует выбор файлов изображений с указанием позиции
+     * @param {Object} violation - Объект нарушения
+     * @param {HTMLElement} container - Контейнер содержимого
+     * @param {number} insertIndex - Позиция для вставки
      */
     triggerImageUploadAtPosition(violation, container, insertIndex) {
         const fileInput = document.createElement('input');
         fileInput.type = 'file';
         fileInput.accept = 'image/*';
-        fileInput.multiple = true; // Разрешаем выбор нескольких файлов
+        fileInput.multiple = true;
         fileInput.style.display = 'none';
 
         fileInput.addEventListener('change', (e) => {
             const files = e.target.files;
             if (!files || files.length === 0) return;
 
-            console.log(`Selected ${files.length} file(s)`);
-
             let addedCount = 0;
+
             // Обрабатываем каждый файл
             Array.from(files).forEach((file, idx) => {
                 const reader = new FileReader();
+
                 reader.onload = (event) => {
                     // Добавляем изображения последовательно с увеличением позиции
                     this.addContentItemAtPosition(violation, 'image', container, insertIndex + idx, {
@@ -858,7 +864,6 @@ class ViolationManager {
                     });
 
                     addedCount++;
-                    console.log(`Added image ${addedCount} of ${files.length}`);
 
                     // Показываем уведомление после последнего файла
                     if (addedCount === files.length) {
@@ -883,29 +888,10 @@ class ViolationManager {
     }
 
     /**
-     * Добавляет элемент контента в массив
-     */
-    addContentItem(violation, type, container, extraData = {}) {
-        const newItem = {
-            id: `${type}_${Date.now()}`,
-            type: type,
-            content: '',
-            url: extraData.url || '',
-            caption: '',
-            filename: extraData.filename || '',
-            order: violation.additionalContent.items.length
-        };
-
-        violation.additionalContent.items.push(newItem);
-
-        const itemsContainer = container.querySelector('.additional-content-items');
-        this.renderContentItems(violation, itemsContainer);
-        PreviewManager.update();
-    }
-
-    /**
      * Отрисовывает все элементы в порядке добавления
      * Вычисляет нумерацию для последовательных кейсов
+     * @param {Object} violation - Объект нарушения
+     * @param {HTMLElement} container - Контейнер для элементов
      */
     renderContentItems(violation, container) {
         container.innerHTML = '';
@@ -928,9 +914,12 @@ class ViolationManager {
             }
 
             if (itemElement) {
+                // Добавляем ID элемента в dataset для корректного удаления
+                itemElement.dataset.itemId = item.id;
+                itemElement.dataset.itemIndex = index;
+
                 // Добавляем drag-and-drop атрибуты
                 itemElement.draggable = true;
-                itemElement.dataset.itemIndex = index;
 
                 // Обработчики перетаскивания
                 itemElement.addEventListener('dragstart', (e) => this.handleDragStart(e, violation, index, item));
@@ -950,6 +939,10 @@ class ViolationManager {
 
     /**
      * Получает порядковый номер элемента определенного типа (не прерываемый)
+     * @param {Array} items - Массив элементов
+     * @param {string} type - Тип элемента
+     * @param {number} currentIndex - Текущий индекс
+     * @returns {number} Порядковый номер
      */
     getTypeSequentialNumber(items, type, currentIndex) {
         let count = 0;
@@ -963,6 +956,8 @@ class ViolationManager {
 
     /**
      * Вычисляет номера для кейсов (сброс нумерации при прерывании)
+     * @param {Array} items - Массив элементов
+     * @returns {Array} Массив с номерами кейсов
      */
     calculateCaseNumbers(items) {
         const numbers = new Array(items.length).fill(null);
@@ -983,6 +978,11 @@ class ViolationManager {
 
     /**
      * Создает элемент кейса с нумерацией
+     * @param {Object} violation - Объект нарушения
+     * @param {Object} item - Данные элемента
+     * @param {number} index - Индекс элемента
+     * @param {number} caseNumber - Номер кейса
+     * @returns {HTMLElement} Элемент кейса
      */
     createCaseElement(violation, item, index, caseNumber) {
         const wrapper = document.createElement('div');
@@ -1015,6 +1015,11 @@ class ViolationManager {
 
     /**
      * Создает элемент изображения с нумерацией
+     * @param {Object} violation - Объект нарушения
+     * @param {Object} item - Данные элемента
+     * @param {number} index - Индекс элемента
+     * @param {number} imageNumber - Номер изображения
+     * @returns {HTMLElement} Элемент изображения
      */
     createImageElement(violation, item, index, imageNumber) {
         const wrapper = document.createElement('div');
@@ -1036,7 +1041,7 @@ class ViolationManager {
         img.alt = item.caption || item.filename;
         img.className = 'image-preview';
 
-        // ВАЖНО: Запрещаем перетаскивание самого изображения
+        // Запрещаем перетаскивание самого изображения
         img.draggable = false;
         img.style.pointerEvents = 'none';
         img.style.userSelect = 'none';
@@ -1070,6 +1075,11 @@ class ViolationManager {
 
     /**
      * Создает элемент произвольного текста с нумерацией
+     * @param {Object} violation - Объект нарушения
+     * @param {Object} item - Данные элемента
+     * @param {number} index - Индекс элемента
+     * @param {number} textNumber - Номер текстового блока
+     * @returns {HTMLElement} Элемент текста
      */
     createFreeTextElement(violation, item, index, textNumber) {
         const wrapper = document.createElement('div');
@@ -1098,19 +1108,6 @@ class ViolationManager {
         wrapper.appendChild(itemDiv);
 
         return wrapper;
-    }
-
-    /**
-     * Получает порядковый номер элемента по типу
-     */
-    getTypeIndex(items, type, currentIndex) {
-        let count = 0;
-        for (let i = 0; i <= currentIndex; i++) {
-            if (items[i].type === type) {
-                count++;
-            }
-        }
-        return count;
     }
 
     /**
@@ -1179,13 +1176,17 @@ class ViolationManager {
 
     /**
      * Обработчик начала перетаскивания с созданием миниатюры
+     * @param {Event} e - Событие dragstart
+     * @param {Object} violation - Объект нарушения
+     * @param {number} index - Индекс перетаскиваемого элемента
+     * @param {Object} item - Данные элемента
      */
     handleDragStart(e, violation, index, item) {
         const wrapper = e.currentTarget;
         wrapper.classList.add('dragging');
 
         e.dataTransfer.effectAllowed = 'move';
-        e.dataTransfer.setData('text/plain', index);
+        e.dataTransfer.setData('text/plain', item.id);
 
         // Создаем миниатюру
         const miniature = this.createDragMiniature(item, index, violation.additionalContent.items);
@@ -1208,6 +1209,10 @@ class ViolationManager {
 
     /**
      * Создает миниатюру элемента для drag-and-drop
+     * @param {Object} item - Данные элемента
+     * @param {number} index - Индекс элемента
+     * @param {Array} allItems - Все элементы
+     * @returns {HTMLElement} Миниатюра
      */
     createDragMiniature(item, index, allItems) {
         const miniature = document.createElement('div');
@@ -1237,13 +1242,17 @@ class ViolationManager {
 
     /**
      * Обработчик входа в зону элемента
+     * @param {Event} e - Событие dragenter
      */
     handleDragEnter(e) {
         e.preventDefault();
     }
 
     /**
-     * Обработчик перемещения над элементом с физическим перемещением
+     * Обработчик перемещения над элементом с плавным визуальным перемещением
+     * @param {Event} e - Событие dragover
+     * @param {Object} violation - Объект нарушения
+     * @param {HTMLElement} container - Контейнер элементов
      */
     handleDragOver(e, violation, container) {
         e.preventDefault();
@@ -1288,6 +1297,7 @@ class ViolationManager {
 
     /**
      * Обработчик выхода курсора из зоны элемента
+     * @param {Event} e - Событие dragleave
      */
     handleDragLeave(e) {
         // Оставляем пустым, визуальное перемещение происходит в handleDragOver
@@ -1295,6 +1305,10 @@ class ViolationManager {
 
     /**
      * Обработчик сброса элемента - фиксирует новый порядок в данных
+     * @param {Event} e - Событие drop
+     * @param {Object} violation - Объект нарушения
+     * @param {number} targetIndex - Индекс целевого элемента
+     * @param {HTMLElement} container - Контейнер элементов
      */
     handleDrop(e, violation, targetIndex, container) {
         e.preventDefault();
@@ -1306,22 +1320,30 @@ class ViolationManager {
         // Получаем все элементы в текущем визуальном порядке
         const allWrappers = [...container.querySelectorAll('.content-item-wrapper')];
 
-        // Создаем новый массив items в визуальном порядке
+        // Создаем новый массив items в визуальном порядке по ID
         const newItems = allWrappers.map(wrapper => {
-            const oldIndex = parseInt(wrapper.dataset.itemIndex);
-            return violation.additionalContent.items[oldIndex];
-        });
+            const itemId = wrapper.dataset.itemId;
+            return violation.additionalContent.items.find(item => item.id === itemId);
+        }).filter(item => item !== undefined);
 
         // Заменяем массив items новым упорядоченным массивом
         violation.additionalContent.items = newItems;
 
+        // Обновляем order для всех элементов
+        violation.additionalContent.items.forEach((item, idx) => {
+            item.order = idx;
+        });
+
         // Перерисовываем с обновленными индексами
         this.renderContentItems(violation, container);
+
         PreviewManager.update();
     }
 
     /**
      * Обработчик окончания перетаскивания
+     * @param {Event} e - Событие dragend
+     * @param {HTMLElement} container - Контейнер элементов
      */
     handleDragEnd(e, container) {
         e.target.classList.remove('dragging');
@@ -1356,7 +1378,6 @@ class ViolationManager {
 
             // Если есть только text/plain и нет Files - это наш внутренний drag
             if (hasTextPlain && !hasFiles) {
-                console.log('Internal drag detected in dragenter - ignoring');
                 return;
             }
 
@@ -1364,11 +1385,9 @@ class ViolationManager {
             if (hasFiles) {
                 e.preventDefault();
                 e.stopPropagation();
-
                 dragCounter++;
                 isFileDragActive = true;
                 itemsContainer.classList.add('drag-over-file');
-                console.log('File drag enter, counter:', dragCounter);
             }
         });
 
@@ -1388,6 +1407,10 @@ class ViolationManager {
                 e.preventDefault();
                 e.stopPropagation();
                 e.dataTransfer.dropEffect = 'copy';
+
+                // Вычисляем позицию для вставки файлов
+                const position = this.calculateCursorPosition(e, itemsContainer);
+                this.cursorInsertPosition = position;
             }
         });
 
@@ -1405,41 +1428,41 @@ class ViolationManager {
             if (hasFiles) {
                 e.preventDefault();
                 e.stopPropagation();
-
                 dragCounter--;
 
                 // Убираем подсветку только когда действительно покинули контейнер
                 if (dragCounter === 0) {
                     itemsContainer.classList.remove('drag-over-file');
                     isFileDragActive = false;
-                    console.log('File drag leave, counter:', dragCounter);
+                    this.cursorInsertPosition = null;
                 }
             }
         });
 
         // Обработчик сброса файла
         itemsContainer.addEventListener('drop', (e) => {
-            console.log('Drop event triggered');
-
             // Проверяем, есть ли файлы в событии
             const files = e.dataTransfer && e.dataTransfer.files;
 
             // Если нет файлов - это внутренний drop
             if (!files || files.length === 0) {
-                console.log('Internal drop (no files) - ignoring file handler');
-                return; // Не сбрасываем состояние, это сделает handleDrop
+                return;
             }
 
             // Это файловый drop - обрабатываем
             e.preventDefault();
             e.stopPropagation();
 
+            // Определяем позицию вставки
+            const insertPosition = this.cursorInsertPosition !== null
+                ? this.cursorInsertPosition
+                : violation.additionalContent.items.length;
+
             // Сбрасываем состояние
             dragCounter = 0;
             isFileDragActive = false;
             itemsContainer.classList.remove('drag-over-file');
-
-            console.log('File dropped, files count:', files.length);
+            this.cursorInsertPosition = null;
 
             // Обрабатываем каждый файл
             let addedCount = 0;
@@ -1448,13 +1471,10 @@ class ViolationManager {
             // Сначала фильтруем только изображения
             for (let i = 0; i < files.length; i++) {
                 const file = files[i];
-                console.log('Processing file:', file.name, file.type);
 
                 // Проверяем, что это изображение
                 if (file.type.startsWith('image/')) {
                     imageFiles.push(file);
-                } else {
-                    console.log('Skipping non-image file:', file.type);
                 }
             }
 
@@ -1463,22 +1483,19 @@ class ViolationManager {
                 return;
             }
 
-            console.log('Total image files to process:', imageFiles.length);
-
             // Теперь обрабатываем все изображения
             imageFiles.forEach((file, idx) => {
                 const reader = new FileReader();
-                reader.onload = (event) => {
-                    console.log('Image loaded:', file.name);
 
-                    // Добавляем изображение в конец списка
-                    this.addContentItem(violation, 'image', contentContainer, {
+                reader.onload = (event) => {
+
+                    // Добавляем изображение в рассчитанную позицию
+                    this.addContentItemAtPosition(violation, 'image', contentContainer, insertPosition + idx, {
                         url: event.target.result,
                         filename: file.name
                     });
 
                     addedCount++;
-                    console.log('Added image', addedCount, 'of', imageFiles.length);
 
                     // Показываем уведомление для последнего файла
                     if (addedCount === imageFiles.length) {
@@ -1501,10 +1518,10 @@ class ViolationManager {
         // Дополнительная защита: сбрасываем состояние при любом завершении drag
         const resetDragState = () => {
             if (isFileDragActive) {
-                console.log('Resetting file drag state');
                 dragCounter = 0;
                 isFileDragActive = false;
                 itemsContainer.classList.remove('drag-over-file');
+                this.cursorInsertPosition = null;
             }
         };
 
@@ -1517,8 +1534,6 @@ class ViolationManager {
                 resetDragState();
             }
         });
-
-        console.log('File drag and drop handlers registered for violation:', violation.id);
     }
 }
 
