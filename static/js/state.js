@@ -28,17 +28,41 @@ const AppState = {
             id: 'root',
             label: 'Акт',
             children: [
-                {id: '1', label: 'Основание для составления акта', protected: true, children: [], content: ''},
-                {id: '2', label: 'Сведения о земельном участке', protected: true, children: [], content: ''},
                 {
-                    id: '3',
-                    label: 'Сведения об объекте капитального строительства',
+                    id: '1',
+                    label: 'Информация о процессе, клиентском пути',
                     protected: true,
                     children: [],
                     content: ''
                 },
-                {id: '4', label: 'Сведения о лицах', protected: true, children: [], content: ''},
-                {id: '5', label: 'Сведения о результатах', protected: true, children: [], content: ''}
+                {
+                    id: '2',
+                    label: 'Оценка качества проверенного процесса / сценария процесса / потока работ',
+                    protected: true,
+                    children: [],
+                    content: ''
+                },
+                {
+                    id: '3',
+                    label: 'Примененные технологии',
+                    protected: true,
+                    children: [],
+                    content: ''
+                },
+                {
+                    id: '4',
+                    label: 'Основные выводы',
+                    protected: true,
+                    children: [],
+                    content: ''
+                },
+                {
+                    id: '5',
+                    label: 'Результаты проверки',
+                    protected: true,
+                    children: [],
+                    content: ''
+                }
             ]
         };
         return this.treeData;

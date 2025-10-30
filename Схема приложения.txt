@@ -101,7 +101,7 @@ UI_for_EP_v_KAP/
 │   │   └── utilities/
 │   │       └── helpers.css
 │   └── js/
-│       ├── main.js
+│       ├── app.js
 │       ├── notifications.js
 │       ├── context-menu.js
 │       ├── tree.js
@@ -111,7 +111,12 @@ UI_for_EP_v_KAP/
 │       ├── preview.js
 │       ├── api.js
 │       ├── help.js
-│       └── violation
+│       ├── items/
+│       │   ├── items-editing.js
+│       │   ├── items-renderer.js
+│       │   ├── items-table-events.js
+│       │   └── items-table-sizes.js
+│       └── violation/
 │           ├── violation-init.js
 │           ├── violation-core.js
 │           ├── violation-additional-content.js
