@@ -60,15 +60,9 @@ class PreviewManager {
             if (child.type === 'textblock') {
                 const textBlock = AppState.textBlocks[child.textBlockId];
 
-                if (textBlock) {
+                if (textBlock && textBlock.content && textBlock.content.trim()) {
                     const textBlockDiv = document.createElement('div');
                     textBlockDiv.className = 'preview-textblock';
-
-                    // Заголовок текстового блока
-                    const title = document.createElement('div');
-                    title.className = 'preview-textblock-title';
-                    title.textContent = child.label;
-                    textBlockDiv.appendChild(title);
 
                     // Содержимое с сохранением HTML-форматирования
                     const content = document.createElement('div');
@@ -84,7 +78,7 @@ class PreviewManager {
                     }
 
                     // Вставляем HTML-контент (поддерживает жирный, курсив, подчеркивание и переносы строк)
-                    content.innerHTML = textBlock.content || 'Пусто';
+                    content.innerHTML = textBlock.content;
                     textBlockDiv.appendChild(content);
                     container.appendChild(textBlockDiv);
                 }
