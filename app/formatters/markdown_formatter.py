@@ -127,37 +127,37 @@ class MarkdownFormatter(BaseFormatter):
 
     def _format_table(self, table_data: Dict) -> str:
         """
-        Форматирует таблицу в Markdown с учетом объединенных ячеек.
+        Форматирует таблицу в Markdown с матричной структурой grid.
 
         Создает таблицу в синтаксисе Markdown (pipe tables).
-        Обрабатывает colspan путем добавления пустых ячеек.
+        Обрабатывает объединение ячеек (colSpan/rowSpan) путем добавления пустых ячеек.
 
         Args:
-            table_data: Словарь с данными таблицы (rows с cells)
+            table_data: Словарь с данными таблицы (grid)
 
         Returns:
             str: Таблица в формате Markdown
         """
         lines = []
-        rows = table_data.get('rows', [])
 
-        if not rows:
+        # Получаем матричную структуру таблицы
+        grid = table_data.get('grid', [])
+
+        if not grid or len(grid) == 0:
             return "*[Пустая таблица]*"
 
-        # Построение матрицы отображения с учетом merged и colspan
+        # Построение матрицы отображения (игнорируем spanned ячейки)
         display_matrix = []
         max_cols = 0
 
-        for row in rows:
-            cells = row.get('cells', [])
+        for row_data in grid:
             display_row = []
-
-            for cell in cells:
-                # Пропускаем объединенные ячейки (уже обработаны)
-                if not cell.get('merged', False):
+            for cell_data in row_data:
+                # Пропускаем spanned ячейки
+                if not cell_data.get('isSpanned', False):
                     # Экранирование pipe символов в содержимом
-                    content = str(cell.get('content', '')).replace('|', '\\|')
-                    colspan = cell.get('colspan', 1)
+                    content = str(cell_data.get('content', '')).replace('|', '\\|')
+                    colspan = cell_data.get('colSpan', 1)
 
                     # Первая ячейка получает содержимое
                     display_row.append(content)

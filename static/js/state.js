@@ -1,27 +1,30 @@
 /**
- * Глобальное состояние приложения
- * Хранит всю информацию о структуре акта, таблицах и текстовых блоках
+ * Глобальное состояние приложения.
+ * Централизованное хранилище всей информации о структуре акта, включая
+ * древовидную иерархию пунктов, таблицы, текстовые блоки и нарушения.
+ * Обеспечивает CRUD-операции и валидацию структуры документа.
  */
 const AppState = {
-    // Текущий шаг конструктора
+    // Текущий шаг в процессе конструирования документа
     currentStep: 1,
-    // Дерево структуры документа
+    // Древовидная структура документа с иерархией пунктов
     treeData: null,
-    // Хранилище таблиц по ID
+    // Хранилище таблиц с матричной структурой, индексированное по ID
     tables: {},
-    // Хранилище текстовых блоков по ID
+    // Хранилище текстовых блоков с форматированием, индексированное по ID
     textBlocks: {},
-    // Хранилище нарушений (Нарушено/Установлено)
+    // Хранилище нарушений (Нарушено/Установлено), индексированное по ID
     violations: {},
-    // Текущий выбранный узел дерева
+    // Текущий выбранный узел в дереве документа
     selectedNode: null,
-    // Массив выбранных ячеек таблицы
+    // Массив выбранных ячеек таблицы для операций объединения/разделения
     selectedCells: [],
 
     /**
-     * Инициализирует базовую структуру дерева документа
-     * Создаёт корневой элемент с 5 защищёнными разделами первого уровня
-     * @returns {Object} Инициализированное дерево документа
+     * Инициализирует базовую структуру дерева документа с защищенными разделами.
+     * Создает стандартные разделы акта: информация о процессе, оценка качества,
+     * технологии, выводы и результаты проверки.
+     * @returns {Object} Корневой узел дерева документа
      */
     initializeTree() {
         this.treeData = {
@@ -69,20 +72,22 @@ const AppState = {
     },
 
     /**
-     * Генерирует автоматическую нумерацию для всех узлов дерева
-     * Обрабатывает разные типы элементов: пункты, таблицы, текстовые блоки и нарушения
-     * @param {Object} [node=this.treeData] - Узел для обработки
-     * @param {string} [prefix=''] - Префикс нумерации (например, "1.2")
+     * Генерирует иерархическую нумерацию для всех узлов дерева.
+     * Обрабатывает разные типы узлов: обычные пункты (1.1, 1.2.3), таблицы,
+     * текстовые блоки и нарушения. Поддерживает пользовательские метки.
+     * @param {Object} node - Узел для обработки (по умолчанию корень)
+     * @param {string} prefix - Префикс нумерации для текущего уровня
      */
     generateNumbering(node = this.treeData, prefix = '') {
         if (!node.children) return;
 
         node.children.forEach((child, index) => {
-            // Нумерация таблиц - только среди таблиц
+            // Нумерация таблиц в рамках родительского узла
             if (child.type === 'table') {
                 const parentTables = node.children.filter(c => c.type === 'table');
                 const tableIndex = parentTables.indexOf(child) + 1;
                 child.number = `Таблица ${tableIndex}`;
+                // Используем пользовательскую метку, если она задана
                 if (!child.customLabel) {
                     child.label = child.number;
                 } else {
@@ -91,7 +96,7 @@ const AppState = {
                 return;
             }
 
-            // Нумерация текстовых блоков - только среди текстовых блоков
+            // Нумерация текстовых блоков в рамках родительского узла
             if (child.type === 'textblock') {
                 const parentTextBlocks = node.children.filter(c => c.type === 'textblock');
                 const textBlockIndex = parentTextBlocks.indexOf(child) + 1;
@@ -104,7 +109,7 @@ const AppState = {
                 return;
             }
 
-            // Нумерация нарушений - только среди нарушений
+            // Нумерация нарушений в рамках родительского узла
             if (child.type === 'violation') {
                 const parentViolations = node.children.filter(c => c.type === 'violation');
                 const violationIndex = parentViolations.indexOf(child) + 1;
@@ -117,19 +122,21 @@ const AppState = {
                 return;
             }
 
-            // Нумерация обычных пунктов (type === 'item' или undefined)
+            // Нумерация обычных пунктов с иерархической структурой (1, 1.1, 1.1.1)
             const itemChildren = node.children.filter(c => !c.type || c.type === 'item');
             const itemIndex = itemChildren.indexOf(child);
-
             if (itemIndex === -1) return;
 
+            // Формируем номер: для корневого уровня "1", для вложенных "1.1"
             const number = prefix ? `${prefix}.${itemIndex + 1}` : `${itemIndex + 1}`;
+            // Извлекаем базовую метку без старой нумерации
             const baseLabelMatch = child.label.match(/^[\d.]+\s*(.*)$/);
             const baseLabel = baseLabelMatch ? baseLabelMatch[1] : child.label;
+
             child.number = number;
             child.label = `${number}. ${baseLabel}`;
 
-            // Рекурсивная обработка дочерних элементов
+            // Рекурсивно обрабатываем дочерние узлы
             if (child.children && child.children.length > 0) {
                 this.generateNumbering(child, number);
             }
@@ -137,11 +144,11 @@ const AppState = {
     },
 
     /**
-     * Вычисляет глубину узла в дереве
-     * @param {string} nodeId - ID узла для проверки
-     * @param {Object} [node=this.treeData] - Узел начала поиска
-     * @param {number} [depth=0] - Текущая глубина
-     * @returns {number} Глубина узла или -1, если узел не найден
+     * Вычисляет глубину узла в дереве (расстояние от корня).
+     * @param {string} nodeId - ID искомого узла
+     * @param {Object} node - Узел для начала поиска (по умолчанию корень)
+     * @param {number} depth - Текущая глубина
+     * @returns {number} Глубина узла или -1 если не найден
      */
     getNodeDepth(nodeId, node = this.treeData, depth = 0) {
         if (node.id === nodeId) return depth;
@@ -155,10 +162,10 @@ const AppState = {
     },
 
     /**
-     * Проверяет возможность добавления дочернего элемента
-     * Максимальная глубина - 4 уровня (*.*.*.*)
+     * Проверяет возможность добавления дочернего узла с учетом ограничения вложенности.
+     * Максимальная глубина: 4 уровня (*.*.*.*)
      * @param {string} parentId - ID родительского узла
-     * @returns {Object} Результат проверки: {allowed: boolean, reason?: string}
+     * @returns {Object} Объект с флагом allowed и причиной отказа
      */
     canAddChild(parentId) {
         const depth = this.getNodeDepth(parentId);
@@ -169,14 +176,17 @@ const AppState = {
     },
 
     /**
-     * Проверяет возможность добавления соседнего элемента на первом уровне
-     * Разрешён только один дополнительный пункт первого уровня (пункт 6)
-     * @param {string} nodeId - ID узла, рядом с которым добавляется новый
-     * @returns {Object} Результат проверки: {allowed: boolean, reason?: string}
+     * Проверяет возможность добавления соседнего узла (sibling).
+     * Для первого уровня разрешен только один дополнительный пункт (6-й) в конце списка.
+     * @param {string} nodeId - ID узла, после которого добавляется новый
+     * @returns {Object} Объект с флагом allowed и причиной отказа
      */
     canAddSibling(nodeId) {
         const parent = this.findParentNode(nodeId);
+
+        // Специальная логика для первого уровня (дети root)
         if (parent && parent.id === 'root') {
+            // Проверяем наличие пользовательского пункта 6
             const hasCustomFirstLevel = parent.children.some(child => {
                 const num = child.label.match(/^(\d+)\./);
                 return num && parseInt(num[1]) === 6;
@@ -189,19 +199,22 @@ const AppState = {
                 };
             }
 
+            // Новый пункт можно добавить только в конец
             const nodeIndex = parent.children.findIndex(n => n.id === nodeId);
             if (nodeIndex !== parent.children.length - 1) {
                 return {allowed: false, reason: 'Новый пункт первого уровня можно добавить только в конец списка'};
             }
+
             return {allowed: true};
         }
+
         return {allowed: true};
     },
 
     /**
-     * Находит узел по его ID в дереве
+     * Рекурсивно ищет узел по ID в дереве.
      * @param {string} id - ID искомого узла
-     * @param {Object} [node=this.treeData] - Узел начала поиска
+     * @param {Object} node - Узел для начала поиска (по умолчанию корень)
      * @returns {Object|null} Найденный узел или null
      */
     findNodeById(id, node = this.treeData) {
@@ -216,17 +229,18 @@ const AppState = {
     },
 
     /**
-     * Добавляет новый узел в дерево
-     * @param {string} parentId - ID родительского узла
-     * @param {string} label - Название нового узла
-     * @param {boolean} [isChild=true] - Добавить как дочерний (true) или соседний (false) элемент
-     * @returns {Object} Результат операции: {success: boolean, node?: Object, reason?: string}
+     * Добавляет новый узел в дерево как дочерний или соседний элемент.
+     * Выполняет валидацию ограничений вложенности и обновляет нумерацию.
+     * @param {string} parentId - ID родительского узла (для дочернего) или узла-соседа
+     * @param {string} label - Метка нового узла
+     * @param {boolean} isChild - true для дочернего узла, false для соседнего
+     * @returns {Object} Результат операции с success и причиной отказа
      */
     addNode(parentId, label, isChild = true) {
         const parent = this.findNodeById(parentId);
         if (!parent) return {success: false, reason: 'Родительский узел не найден'};
 
-        // Проверка ограничений на добавление
+        // Проверка ограничений перед добавлением
         if (isChild) {
             const canAdd = this.canAddChild(parentId);
             if (!canAdd.allowed) {
@@ -239,6 +253,7 @@ const AppState = {
             }
         }
 
+        // Создаем новый узел с уникальным ID на основе timestamp
         const newId = Date.now().toString();
         const newNode = {
             id: newId,
@@ -248,6 +263,7 @@ const AppState = {
             type: 'item'
         };
 
+        // Вставка в дерево
         if (isChild) {
             if (!parent.children) parent.children = [];
             parent.children.push(newNode);
@@ -264,9 +280,9 @@ const AppState = {
     },
 
     /**
-     * Находит родительский узел для заданного узла
-     * @param {string} nodeId - ID узла, для которого ищется родитель
-     * @param {Object} [parent=this.treeData] - Узел начала поиска
+     * Находит родительский узел для указанного узла.
+     * @param {string} nodeId - ID узла, родителя которого нужно найти
+     * @param {Object} parent - Узел для начала поиска (по умолчанию корень)
      * @returns {Object|null} Родительский узел или null
      */
     findParentNode(nodeId, parent = this.treeData) {
@@ -281,58 +297,61 @@ const AppState = {
     },
 
     /**
-     * Удаляет узел из дерева
-     * При удалении также удаляются все связанные таблицы, текстовые блоки и нарушения
+     * Удаляет узел из дерева и все связанные данные (таблицы, текстовые блоки, нарушения).
+     * Рекурсивно очищает дочерние элементы и обновляет нумерацию.
      * @param {string} nodeId - ID удаляемого узла
-     * @returns {boolean} True, если удаление успешно
+     * @returns {boolean} true при успешном удалении
      */
     deleteNode(nodeId) {
         const parent = this.findParentNode(nodeId);
         if (parent && parent.children) {
             const node = this.findNodeById(nodeId);
 
-            // Удаление связанных данных при удалении пункта с дочерними элементами
+            // Рекурсивная очистка данных для обычных пунктов
             if (node && node.type === 'item' && node.children) {
+                // Удаляем все таблицы из дочерних элементов
                 node.children.filter(c => c.type === 'table').forEach(tableNode => {
                     delete this.tables[tableNode.tableId];
                 });
-
+                // Удаляем все текстовые блоки из дочерних элементов
                 node.children.filter(c => c.type === 'textblock').forEach(textBlockNode => {
                     delete this.textBlocks[textBlockNode.textBlockId];
                 });
-
+                // Удаляем все нарушения из дочерних элементов
                 node.children.filter(c => c.type === 'violation').forEach(violationNode => {
                     delete this.violations[violationNode.violationId];
                 });
             }
 
-            // Удаление отдельной таблицы
+            // Удаление таблицы из хранилища
             if (node && node.type === 'table' && node.tableId) {
                 delete this.tables[node.tableId];
             }
 
-            // Удаление отдельного текстового блока
+            // Удаление текстового блока из хранилища
             if (node && node.type === 'textblock' && node.textBlockId) {
                 delete this.textBlocks[node.textBlockId];
             }
 
-            // Удаление отдельного нарушения
+            // Удаление нарушения из хранилища
             if (node && node.type === 'violation' && node.violationId) {
                 delete this.violations[node.violationId];
             }
 
+            // Удаляем узел из дерева
             parent.children = parent.children.filter(n => n.id !== nodeId);
             this.generateNumbering();
             return true;
         }
+
         return false;
     },
 
     /**
-     * Обновляет название узла
+     * Обновляет метку узла и перегенерирует нумерацию всего дерева.
      * @param {string} nodeId - ID узла
-     * @param {string} newLabel - Новое название
-     * @returns {boolean} True, если обновление успешно
+     * @param {string} newLabel - Новая метка
+     * @returns {boolean} true при успешном обновлении
      */
     updateNodeLabel(nodeId, newLabel) {
         const node = this.findNodeById(nodeId);
@@ -345,29 +364,32 @@ const AppState = {
     },
 
     /**
-     * Добавляет таблицу к узлу дерева
+     * Добавляет таблицу к узлу дерева с матричной grid-структурой.
+     * Создает таблицу с заголовками и пустыми ячейками данных.
+     * Ограничение: максимум 10 таблиц на один пункт.
      * @param {string} nodeId - ID узла, к которому добавляется таблица
-     * @param {number} [rows=3] - Количество строк данных (без заголовка)
-     * @param {number} [cols=3] - Количество колонок
-     * @returns {Object} Результат: {success: boolean, table?: Object, tableNode?: Object, reason?: string}
+     * @param {number} rows - Количество строк данных (без заголовка)
+     * @param {number} cols - Количество колонок
+     * @returns {Object} Результат с флагом success и созданными объектами
      */
     addTableToNode(nodeId, rows = 3, cols = 3) {
         const node = this.findNodeById(nodeId);
         if (!node) return {success: false, reason: 'Узел не найден'};
+
+        // Валидация типа узла
         if (node.type === 'table') return {success: false, reason: 'Нельзя добавить таблицу к таблице'};
         if (node.type === 'textblock') return {success: false, reason: 'Нельзя добавить таблицу к текстовому блоку'};
         if (node.type === 'violation') return {success: false, reason: 'Нельзя добавить таблицу к нарушению'};
 
-        // Проверка лимита - максимум 10 таблиц на узел
+        // Проверка лимита таблиц
         if (!node.children) node.children = [];
         const tablesCount = node.children.filter(c => c.type === 'table').length;
         if (tablesCount >= 10) {
             return {success: false, reason: 'Достигнуто максимальное количество таблиц (10) для этого пункта'};
         }
 
-        const tableId = `table_${Date.now()}`;
-
         // Создание узла таблицы в дереве
+        const tableId = `table_${Date.now()}`;
         const tableNode = {
             id: `${nodeId}_table_${Date.now()}`,
             label: 'Таблица',
@@ -375,41 +397,49 @@ const AppState = {
             tableId: tableId,
             parentId: nodeId
         };
+
         node.children.push(tableNode);
 
-        // Создание структуры данных таблицы
+        // Создание матричной структуры таблицы (grid)
+        const grid = [];
+
+        // Строка заголовков с дефолтными названиями колонок
+        const headerRow = [];
+        for (let c = 0; c < cols; c++) {
+            headerRow.push({
+                content: `Колонка ${c + 1}`,
+                isHeader: true,
+                colSpan: 1,
+                rowSpan: 1,
+                originRow: 0,
+                originCol: c
+            });
+        }
+        grid.push(headerRow);
+
+        // Строки с пустыми ячейками данных
+        for (let r = 1; r <= rows; r++) {
+            const dataRow = [];
+            for (let c = 0; c < cols; c++) {
+                dataRow.push({
+                    content: '',
+                    isHeader: false,
+                    colSpan: 1,
+                    rowSpan: 1,
+                    originRow: r,
+                    originCol: c
+                });
+            }
+            grid.push(dataRow);
+        }
+
+        // Создание объекта таблицы с шириной колонок по умолчанию
         const table = {
             id: tableId,
             nodeId: tableNode.id,
-            rows: [],
+            grid: grid,
             colWidths: new Array(cols).fill(100)
         };
-
-        // Строка заголовков
-        const headerRow = {cells: []};
-        for (let i = 0; i < cols; i++) {
-            headerRow.cells.push({
-                content: `Колонка ${i + 1}`,
-                isHeader: true,
-                colspan: 1,
-                rowspan: 1
-            });
-        }
-        table.rows.push(headerRow);
-
-        // Строки с данными
-        for (let r = 0; r < rows; r++) {
-            const row = {cells: []};
-            for (let c = 0; c < cols; c++) {
-                row.cells.push({
-                    content: '',
-                    isHeader: false,
-                    colspan: 1,
-                    rowspan: 1
-                });
-            }
-            table.rows.push(row);
-        }
 
         this.tables[tableId] = table;
         this.generateNumbering();
@@ -417,13 +447,16 @@ const AppState = {
     },
 
     /**
-     * Добавляет текстовый блок к узлу дерева
+     * Добавляет текстовый блок к узлу дерева с поддержкой форматирования.
+     * Ограничение: максимум 10 текстовых блоков на один пункт.
      * @param {string} nodeId - ID узла, к которому добавляется текстовый блок
-     * @returns {Object} Результат: {success: boolean, textBlock?: Object, textBlockNode?: Object, reason?: string}
+     * @returns {Object} Результат с флагом success и созданными объектами
      */
     addTextBlockToNode(nodeId) {
         const node = this.findNodeById(nodeId);
         if (!node) return {success: false, reason: 'Узел не найден'};
+
+        // Валидация типа узла
         if (node.type === 'table') return {success: false, reason: 'Нельзя добавить текстовый блок к таблице'};
         if (node.type === 'textblock') return {
             success: false,
@@ -431,7 +464,7 @@ const AppState = {
         };
         if (node.type === 'violation') return {success: false, reason: 'Нельзя добавить текстовый блок к нарушению'};
 
-        // Проверка лимита - максимум 10 текстовых блоков на узел
+        // Проверка лимита текстовых блоков
         if (!node.children) node.children = [];
         const textBlocksCount = node.children.filter(c => c.type === 'textblock').length;
         if (textBlocksCount >= 10) {
@@ -441,9 +474,8 @@ const AppState = {
             };
         }
 
-        const textBlockId = `textblock_${Date.now()}`;
-
         // Создание узла текстового блока в дереве
+        const textBlockId = `textblock_${Date.now()}`;
         const textBlockNode = {
             id: `${nodeId}_textblock_${Date.now()}`,
             label: 'Текстовый блок',
@@ -451,9 +483,10 @@ const AppState = {
             textBlockId: textBlockId,
             parentId: nodeId
         };
+
         node.children.push(textBlockNode);
 
-        // Создание структуры текстового блока
+        // Создание объекта текстового блока с дефолтным форматированием
         const textBlock = {
             id: textBlockId,
             nodeId: textBlockNode.id,
@@ -473,18 +506,23 @@ const AppState = {
     },
 
     /**
-     * Добавляет блок нарушения к узлу дерева
+     * Добавляет нарушение к узлу дерева с полной структурой полей.
+     * Поддерживает описание нарушения, дополнительный контент (кейсы, изображения, текст),
+     * причины, последствия и ответственное лицо.
+     * Ограничение: максимум 10 нарушений на один пункт.
      * @param {string} nodeId - ID узла, к которому добавляется нарушение
-     * @returns {Object} Результат: {success: boolean, violation?: Object, violationNode?: Object, reason?: string}
+     * @returns {Object} Результат с флагом success и созданными объектами
      */
     addViolationToNode(nodeId) {
         const node = this.findNodeById(nodeId);
         if (!node) return {success: false, reason: 'Узел не найден'};
+
+        // Валидация типа узла
         if (node.type === 'table') return {success: false, reason: 'Нельзя добавить нарушение к таблице'};
         if (node.type === 'textblock') return {success: false, reason: 'Нельзя добавить нарушение к текстовому блоку'};
         if (node.type === 'violation') return {success: false, reason: 'Нельзя добавить нарушение к нарушению'};
 
-        // Проверка лимита - максимум 10 нарушений на узел
+        // Проверка лимита нарушений
         if (!node.children) node.children = [];
         const violationsCount = node.children.filter(c => c.type === 'violation').length;
         if (violationsCount >= 10) {
@@ -494,9 +532,8 @@ const AppState = {
             };
         }
 
-        const violationId = `violation_${Date.now()}`;
-
         // Создание узла нарушения в дереве
+        const violationId = `violation_${Date.now()}`;
         const violationNode = {
             id: `${nodeId}_violation_${Date.now()}`,
             label: 'Нарушение',
@@ -504,31 +541,32 @@ const AppState = {
             violationId: violationId,
             parentId: nodeId
         };
+
         node.children.push(violationNode);
 
-        // Создание структуры нарушения
+        // Создание объекта нарушения с полной структурой опциональных полей
         const violation = {
             id: violationId,
             nodeId: violationNode.id,
-            violated: '',
-            established: '',
-            descriptionList: {
+            violated: '',                    // Поле "Нарушено"
+            established: '',                 // Поле "Установлено"
+            descriptionList: {               // Список описаний (метрики)
                 enabled: false,
                 items: []
             },
-            additionalContent: {
+            additionalContent: {             // Дополнительный контент (кейсы, изображения, текст)
                 enabled: false,
                 items: []
             },
-            reasons: {
+            reasons: {                       // Причины нарушения
                 enabled: false,
                 content: ''
             },
-            consequences: {
+            consequences: {                  // Последствия нарушения
                 enabled: false,
                 content: ''
             },
-            responsible: {
+            responsible: {                   // Ответственное лицо
                 enabled: false,
                 content: ''
             }
@@ -540,13 +578,14 @@ const AppState = {
     },
 
     /**
-     * Экспортирует данные для отправки на бэкенд
-     * Сериализует дерево, таблицы, текстовые блоки и нарушения в формат Pydantic схемы
-     * @returns {Object} Полная структура данных документа
+     * Экспортирует полное состояние приложения для отправки на бэкенд.
+     * Сериализует дерево документа, таблицы, текстовые блоки и нарушения
+     * в JSON-совместимую структуру с сохранением всех связей и форматирования.
+     * @returns {Object} Сериализованные данные документа
      */
     exportData() {
         /**
-         * Рекурсивно сериализует узел дерева
+         * Рекурсивно сериализует узел дерева со всеми дочерними элементами.
          * @param {Object} node - Узел для сериализации
          * @returns {Object} Сериализованный узел
          */
@@ -558,7 +597,7 @@ const AppState = {
                 protected: node.protected || false
             };
 
-            // Специфичные поля для разных типов узлов
+            // Добавляем специфичные для типа поля
             if (node.type === 'table' && node.tableId) {
                 serialized.tableId = node.tableId;
             } else if (node.type === 'textblock' && node.textBlockId) {
@@ -569,6 +608,7 @@ const AppState = {
                 serialized.content = node.content || '';
             }
 
+            // Сохраняем пользовательские метки и номера
             if (node.customLabel) {
                 serialized.customLabel = node.customLabel;
             }
@@ -577,7 +617,7 @@ const AppState = {
                 serialized.number = node.number;
             }
 
-            // Рекурсивная обработка дочерних элементов
+            // Рекурсивно обрабатываем дочерние элементы
             if (node.children && node.children.length > 0) {
                 serialized.children = node.children.map(child => serializeNode(child));
             } else {
@@ -587,27 +627,30 @@ const AppState = {
             return serialized;
         };
 
-        // Сериализация таблиц
+        // Сериализация таблиц с полной матричной структурой
         const serializedTables = {};
         for (const tableId in this.tables) {
             const table = this.tables[tableId];
             serializedTables[tableId] = {
                 id: table.id,
                 nodeId: table.nodeId,
-                rows: table.rows.map(row => ({
-                    cells: row.cells.map(cell => ({
+                grid: table.grid.map(row =>
+                    row.map(cell => ({
                         content: cell.content || '',
                         isHeader: cell.isHeader || false,
-                        colspan: cell.colspan || 1,
-                        rowspan: cell.rowspan || 1,
-                        merged: cell.merged || false
+                        colSpan: cell.colSpan || 1,
+                        rowSpan: cell.rowSpan || 1,
+                        isSpanned: cell.isSpanned || false,
+                        spanOrigin: cell.spanOrigin || null,
+                        originRow: cell.originRow,
+                        originCol: cell.originCol
                     }))
-                })),
+                ),
                 colWidths: table.colWidths || []
             };
         }
 
-        // Сериализация текстовых блоков
+        // Сериализация текстовых блоков с настройками форматирования
         const serializedTextBlocks = {};
         for (const textBlockId in this.textBlocks) {
             const textBlock = this.textBlocks[textBlockId];
@@ -625,7 +668,7 @@ const AppState = {
             };
         }
 
-        // Сериализация нарушений
+        // Сериализация нарушений со всеми опциональными полями
         const serializedViolations = {};
         for (const violationId in this.violations) {
             const violation = this.violations[violationId];
@@ -657,7 +700,7 @@ const AppState = {
             };
         }
 
-        // Формирование итоговой структуры
+        // Возвращаем полную структуру данных для экспорта
         return {
             tree: serializeNode(this.treeData),
             tables: serializedTables,

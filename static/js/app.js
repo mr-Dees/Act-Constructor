@@ -10,7 +10,6 @@ class App {
     static init() {
         // Создаем начальную структуру дерева
         AppState.initializeTree();
-
         // Генерируем нумерацию для всех элементов
         AppState.generateNumbering();
 
@@ -27,13 +26,11 @@ class App {
 
         // Настраиваем навигацию между шагами
         this.setupNavigation();
-
         // Настраиваем меню выбора форматов
         this.setupFormatMenu();
 
         // Инициализируем контекстное меню
         ContextMenuManager.init();
-
         // Инициализируем систему подсказок
         HelpManager.init();
     }
@@ -62,15 +59,28 @@ class App {
 
             // Проверяем, что выбран хотя бы один формат
             if (selectedFormats.length === 0) {
-                alert('Выберите хотя бы один формат для сохранения');
+                Notifications.error('Выберите хотя бы один формат для сохранения', 3000);
                 return;
             }
 
             // Проверяем данные акта на корректность
             const validationResult = this.validateActData();
             if (!validationResult.valid) {
-                alert(validationResult.message);
+                Notifications.error(validationResult.message, 3000);
                 return;
+            }
+
+            // Проверяем шапки таблиц (критическая ошибка)
+            const headerCheckResult = this.checkTableHeaders();
+            if (!headerCheckResult.valid) {
+                Notifications.error(headerCheckResult.message, 4000);
+                return;
+            }
+
+            // Проверяем данные таблиц (только предупреждение)
+            const dataCheckResult = this.checkTableData();
+            if (!dataCheckResult.valid) {
+                Notifications.show(dataCheckResult.message, 'info', 4000);
             }
 
             // Сохраняем данные из DOM обратно в AppState
@@ -87,10 +97,9 @@ class App {
             } catch (error) {
                 // Показываем ошибку, если что-то пошло не так
                 console.error('Критическая ошибка:', error);
-                APIClient.showNotification(
-                    'Критическая ошибка',
+                Notifications.error(
                     `Произошла непредвиденная ошибка: ${error.message}`,
-                    'error'
+                    3000
                 );
             } finally {
                 // Возвращаем кнопку в исходное состояние
@@ -239,15 +248,176 @@ class App {
             return {valid: false, message: 'Добавьте хотя бы один раздел в акт'};
         }
 
-        // Проверяем, что все таблицы заполнены
+        return {valid: true, message: 'OK'};
+    }
+
+    /**
+     * Проверка заполненности шапок таблиц (первый row с isHeader: true)
+     * Это критическая проверка - блокирует сохранение при ошибке
+     *
+     * @returns {{valid: boolean, message: string}} Результат валидации
+     */
+    static checkTableHeaders() {
+        const emptyHeaders = [];
+
+        // Проходимся по всем таблицам в AppState
         for (const tableId in AppState.tables) {
             const table = AppState.tables[tableId];
-            if (!table.rows || table.rows.length === 0) {
-                return {valid: false, message: `Таблица ${tableId} пуста`};
+
+            // Проверяем наличие grid
+            if (!table.grid || !Array.isArray(table.grid) || table.grid.length === 0) {
+                continue;
+            }
+
+            // Находим первую строку с заголовками
+            const headerRow = table.grid.find(row => {
+                return row.some(cell => cell.isHeader === true);
+            });
+
+            // Если нет строки с заголовками - пропускаем
+            if (!headerRow) {
+                continue;
+            }
+
+            // Проверяем, что каждый заголовок заполнен
+            for (const cell of headerRow) {
+                // Пропускаем spanned ячейки
+                if (cell.isSpanned) {
+                    continue;
+                }
+
+                // Проверяем, что это действительно заголовок
+                if (cell.isHeader && (!cell.content || !cell.content.trim())) {
+                    // Пытаемся найти название таблицы в дереве
+                    let tableName = `Таблица ${tableId}`;
+                    const foundNode = this._findNodeByTableId(AppState.treeData, tableId);
+                    if (foundNode) {
+                        tableName = foundNode.label || tableName;
+                    }
+
+                    emptyHeaders.push(`• ${tableName}`);
+                    break; // Переходим к следующей таблице
+                }
             }
         }
 
+        if (emptyHeaders.length > 0) {
+            return {
+                valid: false,
+                message: `Не заполнены заголовки таблиц:\n${emptyHeaders.join('\n')}\n\nЗаполните все заголовки перед сохранением.`
+            };
+        }
+
         return {valid: true, message: 'OK'};
+    }
+
+    /**
+     * Проверка заполненности данных в таблицах (все строки кроме заголовков)
+     * Это предупреждение - не блокирует сохранение, только выводит уведомление
+     *
+     * @returns {{valid: boolean, message: string}} Результат проверки
+     */
+    static checkTableData() {
+        const emptyDataTables = [];
+
+        // Проходимся по всем таблицам в AppState
+        for (const tableId in AppState.tables) {
+            const table = AppState.tables[tableId];
+
+            // Проверяем наличие grid
+            if (!table.grid || !Array.isArray(table.grid) || table.grid.length === 0) {
+                continue;
+            }
+
+            // Найдем индекс первой строки заголовков
+            let headerRowIndex = -1;
+            for (let i = 0; i < table.grid.length; i++) {
+                if (table.grid[i].some(cell => cell.isHeader === true)) {
+                    headerRowIndex = i;
+                    break;
+                }
+            }
+
+            // Если нет заголовков - все строки считаются данными
+            const dataStartIndex = headerRowIndex >= 0 ? headerRowIndex + 1 : 0;
+
+            // Если данных нет (только заголовок) - пропускаем
+            if (dataStartIndex >= table.grid.length) {
+                continue;
+            }
+
+            // Проверяем, есть ли содержимое в строках данных
+            let hasData = false;
+
+            for (let i = dataStartIndex; i < table.grid.length; i++) {
+                const row = table.grid[i];
+
+                for (const cell of row) {
+                    // Пропускаем spanned ячейки
+                    if (cell.isSpanned) {
+                        continue;
+                    }
+
+                    // Если найдено хотя бы какое-то содержимое - таблица не пуста
+                    if (cell.content && cell.content.trim()) {
+                        hasData = true;
+                        break;
+                    }
+                }
+
+                if (hasData) break;
+            }
+
+            // Если данные не найдены, добавляем в список
+            if (!hasData) {
+                // Пытаемся найти название таблицы в дереве
+                let tableName = `Таблица ${tableId}`;
+                const foundNode = this._findNodeByTableId(AppState.treeData, tableId);
+                if (foundNode) {
+                    tableName = foundNode.label || tableName;
+                }
+
+                emptyDataTables.push(`• ${tableName}`);
+            }
+        }
+
+        if (emptyDataTables.length > 0) {
+            return {
+                valid: false,
+                message: `⚠️ Найдены таблицы без данных:\n${emptyDataTables.join('\n')}\n\nВы можете продолжить сохранение.`
+            };
+        }
+
+        return {valid: true, message: 'OK'};
+    }
+
+    /**
+     * Вспомогательный метод для поиска узла таблицы в дереве по tableId
+     * Рекурсивно обходит дерево в поиске узла с заданным tableId
+     *
+     * @param {Object} node - Узел для поиска
+     * @param {string} tableId - ID таблицы
+     * @returns {Object|null} Найденный узел или null
+     */
+    static _findNodeByTableId(node, tableId) {
+        if (!node) return null;
+
+        // Проверяем текущий узел
+        if (node.tableId === tableId) {
+            return node;
+        }
+
+        // Рекурсивно проходимся по дочерним узлам
+        if (node.children && Array.isArray(node.children)) {
+            for (const child of node.children) {
+                const found = this._findNodeByTableId(child, tableId);
+                if (found) {
+                    return found;
+                }
+            }
+        }
+
+        return null;
     }
 
     /**

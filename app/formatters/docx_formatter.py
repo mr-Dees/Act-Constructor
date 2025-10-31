@@ -2,7 +2,9 @@
 Форматер для создания актов в формате DOCX.
 
 Преобразует структуру акта в документ Microsoft Word
-с поддержкой таблиц, форматирования и иерархии.
+с поддержкой таблиц, форматирования текста и иерархической структуры.
+Обрабатывает все типы элементов: обычные пункты, таблицы с объединенными ячейками,
+текстовые блоки с HTML-форматированием и блоки нарушений с изображениями.
 """
 
 import base64
@@ -21,8 +23,10 @@ class HTMLToDocxParser(HTMLParser):
     """
     Парсер HTML для преобразования в форматирование DOCX.
 
-    Обрабатывает базовые HTML-теги (b, i, u) и конвертирует
-    их в соответствующие run-объекты python-docx с форматированием.
+    Обрабатывает базовые HTML-теги (b/strong, i/em, u) и конвертирует
+    их в соответствующие run-объекты python-docx с применением
+    жирного начертания, курсива и подчеркивания.
+    Корректно обрабатывает переносы строк (\n).
     """
 
     def __init__(self, paragraph):
@@ -30,31 +34,27 @@ class HTMLToDocxParser(HTMLParser):
         Инициализация парсера.
 
         Args:
-            paragraph: Объект параграфа python-docx для добавления runs
+            paragraph: Объект параграфа python-docx для добавления форматированных runs
         """
         super().__init__()
-        self.paragraph = paragraph  # Целевой параграф
-
-        # Флаги активного форматирования
+        self.paragraph = paragraph
+        # Флаги текущего состояния форматирования
         self.bold = False
         self.italic = False
         self.underline = False
-
-        # Буфер для накопления текста
+        # Буфер для накопления текста перед добавлением в run
         self.text_buffer = []
 
     def handle_starttag(self, tag, attrs):
         """
         Обработка открывающих HTML-тегов.
+        Сбрасывает буфер и устанавливает флаги форматирования.
 
         Args:
-            tag: Имя тега (например, 'b', 'i', 'u')
+            tag: Имя тега (b, i, u и т.д.)
             attrs: Атрибуты тега (не используются)
         """
-        # Сбрасываем буфер перед сменой форматирования
         self._flush_buffer()
-
-        # Активация флагов форматирования
         if tag in ['b', 'strong']:
             self.bold = True
         elif tag in ['i', 'em']:
@@ -65,14 +65,12 @@ class HTMLToDocxParser(HTMLParser):
     def handle_endtag(self, tag):
         """
         Обработка закрывающих HTML-тегов.
+        Сбрасывает буфер и снимает флаги форматирования.
 
         Args:
-            tag: Имя закрывающего тега
+            tag: Имя закрывающегося тега
         """
-        # Сбрасываем буфер перед сменой форматирования
         self._flush_buffer()
-
-        # Деактивация флагов форматирования
         if tag in ['b', 'strong']:
             self.bold = False
         elif tag in ['i', 'em']:
@@ -83,30 +81,28 @@ class HTMLToDocxParser(HTMLParser):
     def handle_data(self, data):
         """
         Обработка текстового содержимого между тегами.
+        Добавляет текст в буфер для последующего форматирования.
 
         Args:
             data: Текстовое содержимое
         """
-        # Накапливаем текст в буфере
         self.text_buffer.append(data)
 
     def _flush_buffer(self):
         """
         Сбрасывает накопленный текст в run с текущим форматированием.
-
-        Обрабатывает переносы строк внутри текста.
+        Корректно обрабатывает переносы строк, разбивая текст на части.
         """
         if not self.text_buffer:
             return
 
-        # Объединяем весь накопленный текст
         text = ''.join(self.text_buffer)
         self.text_buffer = []
 
-        # Обрабатываем переносы строк
+        # Разбиваем текст по переносам строк
         lines = text.split('\n')
         for i, line in enumerate(lines):
-            if line:  # Добавляем только непустые строки
+            if line:
                 # Создаем run с текущим форматированием
                 run = self.paragraph.add_run(line)
                 run.bold = self.bold
@@ -118,7 +114,10 @@ class HTMLToDocxParser(HTMLParser):
                 self.paragraph.add_run('\n')
 
     def close(self):
-        """Завершение парсинга, сброс оставшегося буфера."""
+        """
+        Завершение парсинга HTML.
+        Сбрасывает оставшийся буфер и вызывает родительский close().
+        """
         self._flush_buffer()
         super().close()
 
@@ -127,14 +126,17 @@ class DocxFormatter(BaseFormatter):
     """
     Форматер для преобразования структуры акта в документ DOCX.
 
-    Рекурсивно обходит дерево структуры акта и создает
-    документ Word с заголовками, таблицами, текстовыми блоками
-    и блоками нарушений.
+    Рекурсивно обходит древовидную структуру акта и создает
+    документ Microsoft Word с заголовками различных уровней,
+    таблицами с объединенными ячейками, текстовыми блоками
+    с HTML-форматированием и блоками нарушений с изображениями.
     """
 
     def __init__(self):
-        """Инициализация форматера с пустыми хранилищами."""
-        # Хранилища для быстрого доступа к связанным сущностям
+        """
+        Инициализация форматера с пустыми хранилищами для сущностей.
+        Хранилища заполняются при вызове format() из входных данных.
+        """
         self.violations = {}
         self.textBlocks = {}
         self.tables = {}
@@ -144,32 +146,30 @@ class DocxFormatter(BaseFormatter):
         Форматирует данные акта в документ DOCX.
 
         Args:
-            data: Словарь с данными акта:
-                - tree: древовидная структура
-                - tables: словарь таблиц
-                - textBlocks: словарь текстовых блоков
-                - violations: словарь нарушений
+            data: Словарь с данными акта, содержащий:
+                - tree: древовидная структура документа
+                - tables: словарь таблиц по ID
+                - textBlocks: словарь текстовых блоков по ID
+                - violations: словарь нарушений по ID
 
         Returns:
-            Document: Объект документа python-docx
+            Document: Объект документа python-docx, готовый для сохранения
         """
-        # Создание нового документа Word
         doc = Document()
 
-        # Сохраняем ссылки на сущности для доступа при рекурсии
+        # Сохраняем ссылки на сущности для использования в _add_item
         self.violations = data.get('violations', {})
         self.textBlocks = data.get('textBlocks', {})
         self.tables = data.get('tables', {})
 
-        # Добавление главного заголовка акта по центру
+        # Создаем главный заголовок документа
         heading = doc.add_heading('Акт', level=0)
         heading.alignment = WD_PARAGRAPH_ALIGNMENT.CENTER
 
-        # Обработка дерева структуры акта
+        # Обработка дерева структуры акта (рекурсивно)
         tree = data.get('tree', {})
         root_children = tree.get('children', [])
 
-        # Рекурсивная обработка каждого пункта верхнего уровня
         for item in root_children:
             self._add_item(doc, item, level=1)
 
@@ -178,22 +178,24 @@ class DocxFormatter(BaseFormatter):
     def _add_item(self, doc: Document, item: Dict, level: int = 1):
         """
         Рекурсивно добавляет пункт акта в документ.
+        Обрабатывает заголовок, содержимое, связанные сущности (таблицы, текстовые блоки,
+        нарушения) и дочерние элементы.
 
         Args:
             doc: Документ DOCX для добавления элементов
-            item: Словарь с данными пункта (узла дерева)
-            level: Уровень вложенности для заголовков (1-9)
+            item: Словарь с данными пункта (label, type, content, children и т.д.)
+            level: Уровень вложенности для определения размера заголовков (1-9)
         """
-        # Извлечение метаданных пункта
         label = item.get('label', '')
         item_type = item.get('type', 'item')
 
-        # Заголовок пункта (кроме textblock и violation)
+        # Добавляем заголовок пункта (кроме текстовых блоков и нарушений)
         if label and item_type not in ['textblock', 'violation']:
-            heading_level = min(level, 9)  # Ограничение уровня Word
+            # Ограничиваем уровень заголовка до 9 (максимум в Word)
+            heading_level = min(level, 9)
             doc.add_heading(label, level=heading_level)
 
-        # Текстовое содержание пункта
+        # Добавляем текстовое содержание пункта
         content = item.get('content', '')
         if content:
             doc.add_paragraph(content)
@@ -204,7 +206,7 @@ class DocxFormatter(BaseFormatter):
             table_data = self.tables[table_id]
             self._add_table(doc, table_data)
 
-        # Обработка текстового блока
+        # Обработка текстового блока с форматированием
         textblock_id = item.get('textBlockId')
         if textblock_id and textblock_id in self.textBlocks:
             textblock_data = self.textBlocks[textblock_id]
@@ -216,98 +218,96 @@ class DocxFormatter(BaseFormatter):
             violation_data = self.violations[violation_id]
             self._add_violation(doc, violation_data)
 
-        # Рекурсивная обработка дочерних элементов
+        # Рекурсивная обработка дочерних элементов с увеличением уровня
         children = item.get('children', [])
         for child in children:
             self._add_item(doc, child, level + 1)
 
     def _add_table(self, doc: Document, table_data: Dict):
         """
-        Добавляет таблицу в документ с учетом объединенных ячеек.
+        Добавляет таблицу в документ с матричной grid-структурой.
+        Обрабатывает объединенные ячейки (colspan/rowspan) и применяет
+        жирное начертание к заголовкам.
 
         Args:
             doc: Документ DOCX
-            table_data: Словарь с данными таблицы (rows)
+            table_data: Словарь с данными таблицы, содержащий:
+                - grid: двумерный массив ячеек с содержимым и метаданными
         """
-        rows = table_data.get('rows', [])
-        if not rows:
+        # Получаем матричную структуру таблицы
+        grid = table_data.get('grid', [])
+
+        # Проверка на пустую таблицу
+        if not grid or len(grid) == 0:
             doc.add_paragraph('[Пустая таблица]')
             return
 
-        # Вычисление максимальной ширины таблицы с учетом colspan
-        max_cols = 0
-        for row in rows:
-            cells = row.get('cells', [])
-            col_count = 0
-            for cell in cells:
-                # Пропускаем объединенные ячейки
-                if not cell.get('merged', False):
-                    col_count += cell.get('colspan', 1)
-            max_cols = max(max_cols, col_count)
+        num_rows = len(grid)
+        num_cols = len(grid[0]) if grid else 0
 
-        if max_cols == 0:
+        if num_cols == 0:
             doc.add_paragraph('[Пустая таблица]')
             return
 
-        num_rows = len(rows)
-
-        # Создание таблицы с сеткой
-        table = doc.add_table(rows=num_rows, cols=max_cols)
+        # Создание таблицы с сеткой Word
+        table = doc.add_table(rows=num_rows, cols=num_cols)
         table.style = 'Table Grid'
 
-        # Заполнение таблицы данными
-        for row_idx, row in enumerate(rows):
-            cells = row.get('cells', [])
-            col_idx = 0
+        # Отслеживаем уже обработанные объединения для избежания дублирования
+        processed_merges = set()
 
-            for cell_data in cells:
-                # Пропускаем объединенные ячейки (уже обработаны)
-                if cell_data.get('merged', False):
+        # Заполнение таблицы данными из grid-структуры
+        for row_idx, row_data in enumerate(grid):
+            for col_idx, cell_data in enumerate(row_data):
+                # Пропускаем ячейки, поглощенные объединением
+                if cell_data.get('isSpanned', False):
                     continue
 
-                if col_idx >= max_cols:
-                    break
-
-                # Заполнение ячейки
+                # Заполнение содержимого ячейки
                 cell = table.cell(row_idx, col_idx)
                 cell.text = str(cell_data.get('content', ''))
 
-                # Жирный шрифт для заголовков
+                # Применяем жирное начертание к заголовкам
                 if cell_data.get('isHeader', False):
                     for paragraph in cell.paragraphs:
                         for run in paragraph.runs:
                             run.bold = True
 
-                # Обработка объединения ячеек (rowspan/colspan)
-                rowspan = cell_data.get('rowspan', 1)
-                colspan = cell_data.get('colspan', 1)
+                # Обработка объединения ячеек (rowSpan/colSpan)
+                rowspan = cell_data.get('rowSpan', 1)
+                colspan = cell_data.get('colSpan', 1)
 
                 if rowspan > 1 or colspan > 1:
-                    try:
-                        # Вычисление конечной ячейки для объединения
-                        end_row = min(row_idx + rowspan - 1, num_rows - 1)
-                        end_col = min(col_idx + colspan - 1, max_cols - 1)
-                        end_cell = table.cell(end_row, end_col)
+                    merge_key = (row_idx, col_idx)
+                    if merge_key not in processed_merges:
+                        try:
+                            # Вычисление конечной ячейки для объединения с защитой от выхода за границы
+                            end_row = min(row_idx + rowspan - 1, num_rows - 1)
+                            end_col = min(col_idx + colspan - 1, num_cols - 1)
+                            end_cell = table.cell(end_row, end_col)
 
-                        # Объединение ячеек
-                        cell.merge(end_cell)
-                    except Exception:
-                        # Игнорируем ошибки объединения
-                        pass
+                            # Объединение диапазона ячеек
+                            cell.merge(end_cell)
+                            processed_merges.add(merge_key)
+                        except Exception as e:
+                            # Логируем ошибку, но продолжаем обработку документа
+                            print(f"Ошибка объединения ячеек [{row_idx},{col_idx}]: {e}")
 
-                # Переход к следующей колонке с учетом colspan
-                col_idx += colspan
-
-        # Отступ после таблицы
+        # Добавляем пустой параграф для отступа после таблицы
         doc.add_paragraph()
 
     def _add_textblock(self, doc: Document, textblock_data: Dict):
         """
-        Добавляет текстовый блок с форматированием в документ.
+        Добавляет текстовый блок с HTML-форматированием в документ.
+        Парсит HTML-содержимое (b, i, u теги) и применяет форматирование
+        к runs. Также применяет выравнивание и размер шрифта.
 
         Args:
             doc: Документ DOCX
-            textblock_data: Словарь с содержимым и параметрами форматирования
+            textblock_data: Словарь с данными текстового блока:
+                - content: HTML-содержимое
+                - formatting: объект с параметрами форматирования
+                  (alignment, fontSize, bold, italic, underline)
         """
         content = textblock_data.get('content', '')
         formatting = textblock_data.get('formatting', {})
@@ -315,10 +315,9 @@ class DocxFormatter(BaseFormatter):
         if not content:
             return
 
-        # Создание параграфа
         paragraph = doc.add_paragraph()
 
-        # Применение выравнивания текста
+        # Применение выравнивания текста (left, center, right, justify)
         alignment = formatting.get('alignment', 'left')
         alignment_map = {
             'center': WD_PARAGRAPH_ALIGNMENT.CENTER,
@@ -326,37 +325,34 @@ class DocxFormatter(BaseFormatter):
             'justify': WD_PARAGRAPH_ALIGNMENT.JUSTIFY,
             'left': WD_PARAGRAPH_ALIGNMENT.LEFT
         }
-        paragraph.alignment = alignment_map.get(
-            alignment,
-            WD_PARAGRAPH_ALIGNMENT.LEFT
-        )
+        paragraph.alignment = alignment_map.get(alignment, WD_PARAGRAPH_ALIGNMENT.LEFT)
 
-        # Парсинг HTML и добавление в параграф с форматированием
+        # Парсинг HTML и добавление в параграф с форматированием через runs
         parser = HTMLToDocxParser(paragraph)
         parser.feed(content)
         parser.close()
 
-        # Применение размера шрифта ко всем runs в параграфе
+        # Применение размера шрифта ко всем runs параграфа
         font_size = formatting.get('fontSize', 14)
         for run in paragraph.runs:
             run.font.size = Pt(font_size)
 
     def _add_violation(self, doc: Document, violation_data: Dict):
         """
-        Добавляет блок нарушения в документ БЕЗ заголовка "НАРУШЕНИЕ".
-
-        Структура блока:
-        - Нарушено: <текст>
-        - Установлено: <текст>
-        - Описание: <буллитный список>
-        - Дополнительный текст
-        - Причины: <текст>
-        - Последствия: <текст>
-        - Ответственные: <текст>
+        Добавляет блок нарушения в документ с полной структурой полей.
+        Включает: нарушено, установлено, список описаний, дополнительный контент
+        (кейсы, изображения, текст), причины, последствия, ответственных.
 
         Args:
             doc: Документ DOCX
-            violation_data: Словарь с данными нарушения
+            violation_data: Словарь с данными нарушения, содержащий:
+                - violated: что нарушено
+                - established: что установлено
+                - descriptionList: список описаний (метрики)
+                - additionalContent: дополнительный контент (кейсы, изображения, текст)
+                - reasons: причины нарушения
+                - consequences: последствия
+                - responsible: ответственные лица
         """
         # Секция "Нарушено"
         violated = violation_data.get('violated', '')
@@ -372,31 +368,29 @@ class DocxFormatter(BaseFormatter):
             p.add_run('Установлено: ').bold = True
             p.add_run(established)
 
-        # Список описаний (буллитный)
+        # Список описаний (метрик) с маркированным списком
         desc_list = violation_data.get('descriptionList', {})
         if desc_list.get('enabled', False):
             items = desc_list.get('items', [])
             if items:
-                # Заголовок списка
                 p = doc.add_paragraph()
                 p.add_run('Описание:').bold = True
 
-                # Элементы списка
                 for item in items:
                     if item.strip():
                         doc.add_paragraph(item, style='List Bullet')
 
-        # Дополнительный контент
+        # Дополнительный контент (кейсы, изображения, свободный текст)
         additional_content = violation_data.get('additionalContent', {})
         if additional_content.get('enabled', False):
             items = additional_content.get('items', [])
 
-            # Вычисляем номера кейсов
+            # Счетчик для нумерации последовательных кейсов
             case_number = 1
-
             for item in items:
                 item_type = item.get('type')
 
+                # Обработка кейсов с автонумерацией
                 if item_type == 'case':
                     content = item.get('content', '')
                     if content:
@@ -405,23 +399,22 @@ class DocxFormatter(BaseFormatter):
                         p.add_run(content)
                         case_number += 1
 
+                # Обработка изображений с декодированием base64
                 elif item_type == 'image':
-                    case_number = 1
+                    case_number = 1  # Сброс счетчика кейсов при изображении
                     url = item.get('url', '')
                     caption = item.get('caption', '')
                     filename = item.get('filename', '')
 
+                    # Попытка вставить изображение из data URL
                     if url and url.startswith('data:image'):
                         try:
-                            # Декодируем base64
                             header, encoded = url.split(',', 1)
                             image_data = base64.b64decode(encoded)
                             image_stream = BytesIO(image_data)
-
-                            # Добавляем изображение
                             doc.add_picture(image_stream, width=Inches(4))
 
-                            # Подпись под изображением
+                            # Добавляем подпись с центрированием и курсивом
                             if caption:
                                 p = doc.add_paragraph(caption)
                                 p.alignment = WD_PARAGRAPH_ALIGNMENT.CENTER
@@ -429,23 +422,24 @@ class DocxFormatter(BaseFormatter):
                                     run.italic = True
                                     run.font.size = Pt(10)
                         except Exception as e:
-                            # Если не удалось декодировать, просто имя файла
+                            # Fallback: добавляем текстовую ссылку на изображение
                             p = doc.add_paragraph(f"Изображение: {filename}")
                             if caption:
                                 p.add_run(f" - {caption}")
                     else:
-                        # Если нет URL или не base64
+                        # Если URL не является data URL, добавляем текстовую ссылку
                         p = doc.add_paragraph(f"Изображение: {filename}")
                         if caption:
                             p.add_run(f" - {caption}")
 
+                # Обработка свободного текста
                 elif item_type == 'freeText':
-                    case_number = 1
+                    case_number = 1  # Сброс счетчика кейсов при свободном тексте
                     content = item.get('content', '')
                     if content:
                         doc.add_paragraph(content)
 
-        # Причины
+        # Опциональное поле "Причины"
         reasons = violation_data.get('reasons', {})
         if reasons.get('enabled', False):
             content = reasons.get('content', '')
@@ -454,7 +448,7 @@ class DocxFormatter(BaseFormatter):
                 p.add_run('Причины: ').bold = True
                 p.add_run(content)
 
-        # Последствия
+        # Опциональное поле "Последствия"
         consequences = violation_data.get('consequences', {})
         if consequences.get('enabled', False):
             content = consequences.get('content', '')
@@ -463,7 +457,7 @@ class DocxFormatter(BaseFormatter):
                 p.add_run('Последствия: ').bold = True
                 p.add_run(content)
 
-        # Ответственные лица
+        # Опциональное поле "Ответственные лица"
         responsible = violation_data.get('responsible', {})
         if responsible.get('enabled', False):
             content = responsible.get('content', '')
@@ -472,5 +466,5 @@ class DocxFormatter(BaseFormatter):
                 p.add_run('Ответственные: ').bold = True
                 p.add_run(content)
 
-        # Отступ после блока нарушения
+        # Добавляем пустой параграф для отступа после блока нарушения
         doc.add_paragraph()

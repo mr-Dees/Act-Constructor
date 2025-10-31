@@ -5,47 +5,54 @@ Pydantic схемы для валидации данных актов.
 таблицы, текстовые блоки, нарушения и древовидную структуру.
 """
 
-from typing import List, Dict, Optional
+from typing import List, Dict, Optional, Any
 
 from pydantic import BaseModel, Field
 
 
-class MergedCell(BaseModel):
+class TableCellSchema(BaseModel):
     """
-    Информация об объединенной ячейке таблицы.
+    Схема ячейки таблицы с матричной структурой.
 
     Attributes:
-        rowspan: Количество объединенных строк
-        colspan: Количество объединенных столбцов
+        content: Содержимое ячейки
+        isHeader: Является ли ячейка заголовком
+        colSpan: Количество объединенных колонок
+        rowSpan: Количество объединенных строк
+        isSpanned: Является ли ячейка частью объединения
+        spanOrigin: Координаты главной ячейки объединения
+        originRow: Исходная строка ячейки
+        originCol: Исходная колонка ячейки
     """
-    rowspan: int = 1
-    colspan: int = 1
+    content: str = Field(default="", description="Содержимое ячейки")
+    isHeader: bool = Field(default=False, description="Заголовок")
+    colSpan: int = Field(default=1, description="Colspan")
+    rowSpan: int = Field(default=1, description="Rowspan")
+    isSpanned: bool = Field(default=False, description="Часть объединения")
+    spanOrigin: Optional[Dict[str, int]] = Field(default=None, description="Координаты главной ячейки")
+    originRow: Optional[int] = Field(default=None, description="Исходная строка")
+    originCol: Optional[int] = Field(default=None, description="Исходная колонка")
 
 
 class TableSchema(BaseModel):
     """
-    Схема таблицы с заголовками и данными.
+    Схема таблицы с матричной структурой.
 
     Attributes:
-        rows: Количество строк (должно быть положительным)
-        cols: Количество колонок (должно быть положительным)
-        headers: Список заголовков колонок
-        data: Двумерный массив данных таблицы
-        mergedCells: Словарь объединенных ячеек (ключ: 'row-col')
+        id: Уникальный идентификатор таблицы
+        nodeId: ID узла дерева
+        grid: Матрица ячеек (двумерный массив)
+        colWidths: Массив ширин колонок
     """
-    rows: int = Field(gt=0, description="Количество строк")
-    cols: int = Field(gt=0, description="Количество колонок")
-    headers: List[str] = Field(
+    id: str = Field(description="ID таблицы")
+    nodeId: str = Field(description="ID узла дерева")
+    grid: List[List[TableCellSchema]] = Field(
         default_factory=list,
-        description="Заголовки колонок"
+        description="Матрица ячеек"
     )
-    data: List[List[str]] = Field(
+    colWidths: List[int] = Field(
         default_factory=list,
-        description="Данные таблицы"
-    )
-    mergedCells: Dict[str, MergedCell] = Field(
-        default_factory=dict,
-        description="Объединенные ячейки (ключ: 'row-col')"
+        description="Ширины колонок"
     )
 
 
@@ -156,7 +163,7 @@ class ViolationSchema(BaseModel):
         violated: Текст для секции 'Нарушено'
         established: Текст для секции 'Установлено'
         descriptionList: Список описаний нарушения
-        additionalText: Дополнительный текст
+        additionalContent: Дополнительный контент
         reasons: Причины нарушения
         consequences: Последствия нарушения
         responsible: Ответственные лица
@@ -229,7 +236,7 @@ class ActDataSchema(BaseModel):
         violations: Словарь нарушений (ключ: ID нарушения)
     """
     tree: Dict = Field(description="Дерево структуры акта")
-    tables: Dict[str, Dict] = Field(
+    tables: Dict[str, Any] = Field(
         default_factory=dict,
         description="Таблицы"
     )

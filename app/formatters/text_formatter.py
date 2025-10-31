@@ -128,13 +128,13 @@ class TextFormatter(BaseFormatter):
 
     def _format_table(self, table_data: Dict, level: int = 0) -> str:
         """
-        Форматирует таблицу в ASCII-графику с учетом объединения ячеек.
+        Форматирует таблицу в ASCII-графику с матричной структурой grid.
 
         Создает псевдографическую таблицу с рамками и разделителями.
-        Обрабатывает colspan (объединение колонок).
+        Обрабатывает объединение ячеек (colSpan/rowSpan).
 
         Args:
-            table_data: Словарь с данными таблицы (rows с cells)
+            table_data: Словарь с данными таблицы (grid)
             level: Уровень вложенности для отступов
 
         Returns:
@@ -143,23 +143,23 @@ class TextFormatter(BaseFormatter):
         lines = []
         indent = "  " * level
 
-        rows = table_data.get('rows', [])
-        if not rows:
+        # Получаем матричную структуру таблицы
+        grid = table_data.get('grid', [])
+
+        if not grid or len(grid) == 0:
             return f"{indent}[Пустая таблица]"
 
-        # Построение матрицы отображения с учетом merged и colspan
+        # Построение матрицы отображения (игнорируем spanned ячейки)
         display_matrix = []
         max_cols = 0
 
-        for row in rows:
-            cells = row.get('cells', [])
+        for row_data in grid:
             display_row = []
-
-            for cell in cells:
-                # Пропускаем объединенные ячейки (уже обработаны)
-                if not cell.get('merged', False):
-                    content = str(cell.get('content', ''))
-                    colspan = cell.get('colspan', 1)
+            for cell_data in row_data:
+                # Пропускаем spanned ячейки
+                if not cell_data.get('isSpanned', False):
+                    content = str(cell_data.get('content', ''))
+                    colspan = cell_data.get('colSpan', 1)
 
                     # Добавляем содержимое в первую ячейку
                     display_row.append(content)
@@ -184,10 +184,7 @@ class TextFormatter(BaseFormatter):
         col_widths = [0] * max_cols
         for row in display_matrix:
             for col_idx, cell_text in enumerate(row):
-                col_widths[col_idx] = max(
-                    col_widths[col_idx],
-                    len(str(cell_text))
-                )
+                col_widths[col_idx] = max(col_widths[col_idx], len(str(cell_text)))
 
         def draw_separator():
             """Создает горизонтальный разделитель таблицы."""
