@@ -1,0 +1,85 @@
+/* Стили для элемента во время перетаскивания */
+.tree-item.dragging {
+    opacity: 0.4;
+    cursor: move;
+}
+
+/* Индикатор вставки перед элементом - линия располагается по центру промежутка */
+.tree-item.drop-before {
+    position: relative;
+}
+
+.tree-item.drop-before::before {
+    content: '';
+    position: absolute;
+    top: 0;
+    left: 0;
+    right: 0;
+    height: 4px;
+    background-color: var(--primary, #007bff);
+    border-radius: 2px;
+    z-index: 1000;
+    transform: translateY(-50%);
+    animation: dropIndicatorPulse 0.8s ease-in-out infinite;
+}
+
+/* Индикатор вставки после элемента - линия располагается по центру промежутка */
+.tree-item.drop-after {
+    position: relative;
+}
+
+.tree-item.drop-after::after {
+    content: '';
+    position: absolute;
+    bottom: 0;
+    left: 0;
+    right: 0;
+    height: 4px;
+    background-color: var(--primary, #007bff);
+    border-radius: 2px;
+    z-index: 1000;
+    transform: translateY(50%);
+    animation: dropIndicatorPulse 0.8s ease-in-out infinite;
+}
+
+/* Индикатор вставки как дочерний элемент */
+.tree-item.drop-child {
+    background-color: rgba(0, 123, 255, 0.1);
+    border: 2px dashed var(--primary, #007bff);
+    border-radius: 4px;
+    position: relative;
+}
+
+.tree-item.drop-child::before {
+    content: '↳ Вставить внутрь';
+    position: absolute;
+    right: 8px;
+    top: 50%;
+    transform: translateY(-50%);
+    font-size: 0.75rem;
+    color: var(--primary, #007bff);
+    font-weight: 600;
+    background-color: white;
+    padding: 2px 6px;
+    border-radius: 3px;
+    z-index: 1001;
+    pointer-events: none;
+}
+
+/* Стили для перетаскиваемых элементов */
+.tree-item[draggable="true"] {
+    cursor: grab;
+}
+
+.tree-item[draggable="true"]:active {
+    cursor: grabbing;
+}
+
+/* Отключаем перетаскивание для защищенных элементов */
+.tree-item.protected {
+    cursor: default !important;
+}
+
+.tree-item.protected[draggable="true"] {
+    cursor: not-allowed !important;
+}

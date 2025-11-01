@@ -13,7 +13,7 @@
     }
 }
 
-/* Выезд справа */
+/* Выезд справа для уведомлений */
 @keyframes slideInRight {
     from {
         opacity: 0;
@@ -37,7 +37,7 @@
     }
 }
 
-/* Масштабирование с появлением */
+/* Масштабирование с появлением для окна сохранения */
 @keyframes scaleIn {
     from {
         opacity: 0;
@@ -49,7 +49,7 @@
     }
 }
 
-/* Опускание сверху */
+/* Опускание сверху для кнопки подсказки */
 @keyframes slideDown {
     from {
         transform: translateY(-3.125em);
@@ -61,7 +61,7 @@
     }
 }
 
-/* Эффект подсветки с миганием */
+/* Эффект подсветки с миганием при перемещении через ctrl+click */
 @keyframes highlight-flash {
     0% {
         background-color: transparent;
@@ -85,7 +85,7 @@
     }
 }
 
-/* Эффект светящегося пульсирования */
+/* Эффект светящегося пульсирования при перемещении через ctrl+click */
 @keyframes highlight-glow {
     0% {
         opacity: 0;
@@ -109,7 +109,7 @@
     }
 }
 
-/* Появление контекстного меню */
+/* Появление контекстного меню в нарушениях */
 @keyframes menuFadeIn {
     from {
         opacity: 0;
@@ -118,5 +118,17 @@
     to {
         opacity: 1;
         transform: scale(1) translateY(0);
+    }
+}
+
+/* Анимация пульсации для Drag & Drop в дереве элементов */
+@keyframes dropIndicatorPulse {
+    0%, 100% {
+        opacity: 1;
+        box-shadow: 0 0 0 0 rgba(0, 123, 255, 0.7);
+    }
+    50% {
+        opacity: 0.8;
+        box-shadow: 0 0 8px 2px rgba(0, 123, 255, 0.4);
     }
 }

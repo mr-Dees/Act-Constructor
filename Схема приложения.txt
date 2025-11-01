@@ -53,6 +53,7 @@ UI_for_EP_v_KAP/
 │   │   │   ├── tree/
 │   │   │   │   ├── tree-base.css
 │   │   │   │   ├── tree-states.css
+│   │   │   │   ├── tree-drag-drop.css
 │   │   │   │   ├── tree-nodes.css
 │   │   │   │   └── tree-children.css
 │   │   │   ├── table/
@@ -102,14 +103,17 @@ UI_for_EP_v_KAP/
 │   │       └── helpers.css
 │   └── js/
 │       ├── app.js
+│       ├── api.js
 │       ├── notifications.js
 │       ├── context-menu.js
-│       ├── tree.js
 │       ├── textblock.js
 │       ├── state.js
 │       ├── preview.js
-│       ├── api.js
 │       ├── help.js
+│       ├── tree/
+│       │   ├── tree-core.js
+│       │   ├── tree-drag-drop.js
+│       │   └── tree-renderer.js
 │       ├── table/
 │       │   ├── table-core.js
 │       │   ├── table-cells-operations.js

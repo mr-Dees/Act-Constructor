@@ -16,6 +16,7 @@
 
 /* Модуль дерева элементов */
 @import 'modules/tree/tree-base.css';
+@import 'modules/tree/tree-drag-drop.css';
 @import 'modules/tree/tree-states.css';
 @import 'modules/tree/tree-nodes.css';
 @import 'modules/tree/tree-children.css';

@@ -186,4 +186,92 @@ class ItemsTitleEditing {
         titleElement.addEventListener('blur', blurHandler);
         titleElement.addEventListener('keydown', keydownHandler);
     }
+
+    /**
+     * Запускает режим редактирования заголовка узла дерева.
+     * Универсальный метод для редактирования любых типов узлов в дереве.
+     * @param {HTMLElement} labelElement - DOM-элемент метки узла
+     * @param {Object} node - Узел дерева
+     * @param {TreeManager} treeManager - Экземпляр менеджера дерева
+     */
+    static startEditingTreeNode(labelElement, node, treeManager) {
+        const item = labelElement.closest('.tree-item');
+        if (item.classList.contains('editing')) return;
+
+        item.classList.add('editing');
+        labelElement.contentEditable = true;
+        treeManager.editingElement = labelElement;
+
+        const originalLabel = node.label;
+
+        if (node.type === 'table' || node.type === 'textblock' || node.type === 'violation') {
+            const currentLabel = node.customLabel || node.label;
+            labelElement.textContent = currentLabel;
+        }
+
+        labelElement.focus();
+        const range = document.createRange();
+        range.selectNodeContents(labelElement);
+        const sel = window.getSelection();
+        sel.removeAllRanges();
+        sel.addRange(range);
+
+        const finishEditing = (cancel = false) => {
+            labelElement.contentEditable = false;
+            item.classList.remove('editing');
+            treeManager.editingElement = null;
+
+            if (cancel) {
+                labelElement.textContent = originalLabel;
+                return;
+            }
+
+            const newLabel = labelElement.textContent.trim();
+
+            if (node.type === 'table' || node.type === 'textblock' || node.type === 'violation') {
+                if (newLabel && newLabel !== node.label) {
+                    node.customLabel = newLabel;
+                    node.label = newLabel;
+                } else if (!newLabel) {
+                    delete node.customLabel;
+                    node.label = node.number || originalLabel;
+                    AppState.generateNumbering();
+                    labelElement.textContent = node.label;
+                }
+                treeManager.render();
+                PreviewManager.update();
+            } else {
+                if (newLabel && newLabel !== originalLabel) {
+                    node.label = newLabel;
+                    AppState.generateNumbering();
+                    treeManager.render();
+                    PreviewManager.update();
+                } else if (!newLabel) {
+                    labelElement.textContent = originalLabel;
+                } else {
+                    labelElement.textContent = node.label;
+                }
+            }
+        };
+
+        const blurHandler = () => finishEditing(false);
+        const keydownHandler = (e) => {
+            if (e.key === 'Enter') {
+                e.preventDefault();
+                e.stopPropagation();
+                labelElement.removeEventListener('blur', blurHandler);
+                labelElement.removeEventListener('keydown', keydownHandler);
+                finishEditing(false);
+            } else if (e.key === 'Escape') {
+                e.preventDefault();
+                e.stopPropagation();
+                labelElement.removeEventListener('blur', blurHandler);
+                labelElement.removeEventListener('keydown', keydownHandler);
+                finishEditing(true);
+            }
+        };
+
+        labelElement.addEventListener('blur', blurHandler);
+        labelElement.addEventListener('keydown', keydownHandler);
+    }
 }

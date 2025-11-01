@@ -229,6 +229,23 @@ const AppState = {
     },
 
     /**
+     * Находит родительский узел для указанного узла.
+     * @param {string} nodeId - ID узла, родителя которого нужно найти
+     * @param {Object} parent - Узел для начала поиска (по умолчанию корень)
+     * @returns {Object|null} Родительский узел или null
+     */
+    findParentNode(nodeId, parent = this.treeData) {
+        if (parent.children) {
+            for (let child of parent.children) {
+                if (child.id === nodeId) return parent;
+                const found = this.findParentNode(nodeId, child);
+                if (found) return found;
+            }
+        }
+        return null;
+    },
+
+    /**
      * Добавляет новый узел в дерево как дочерний или соседний элемент.
      * Выполняет валидацию ограничений вложенности и обновляет нумерацию.
      * @param {string} parentId - ID родительского узла (для дочернего) или узла-соседа
@@ -277,23 +294,6 @@ const AppState = {
 
         this.generateNumbering();
         return {success: true, node: newNode};
-    },
-
-    /**
-     * Находит родительский узел для указанного узла.
-     * @param {string} nodeId - ID узла, родителя которого нужно найти
-     * @param {Object} parent - Узел для начала поиска (по умолчанию корень)
-     * @returns {Object|null} Родительский узел или null
-     */
-    findParentNode(nodeId, parent = this.treeData) {
-        if (parent.children) {
-            for (let child of parent.children) {
-                if (child.id === nodeId) return parent;
-                const found = this.findParentNode(nodeId, child);
-                if (found) return found;
-            }
-        }
-        return null;
     },
 
     /**
@@ -348,18 +348,157 @@ const AppState = {
     },
 
     /**
-     * Обновляет метку узла и перегенерирует нумерацию всего дерева.
-     * @param {string} nodeId - ID узла
-     * @param {string} newLabel - Новая метка
-     * @returns {boolean} true при успешном обновлении
+     * Вычисляет максимальную глубину поддерева от узла (учитываются только пункты, не информационные элементы)
+     * @param {Object} node - Узел для проверки
+     * @returns {number} Максимальная глубина поддерева
      */
-    updateNodeLabel(nodeId, newLabel) {
-        const node = this.findNodeById(nodeId);
-        if (node) {
-            node.label = newLabel;
-            this.generateNumbering();
-            return true;
+    getSubtreeDepth(node) {
+        if (!node.children || node.children.length === 0) {
+            return 0;
         }
+
+        let maxDepth = 0;
+        for (const child of node.children) {
+            // Игнорируем информационные элементы при подсчете глубины
+            if (child.type === 'table' || child.type === 'textblock' || child.type === 'violation') {
+                continue;
+            }
+
+            const childDepth = this.getSubtreeDepth(child);
+            maxDepth = Math.max(maxDepth, childDepth + 1);
+        }
+
+        return maxDepth;
+    },
+
+    /**
+     * Перемещает узел в дереве на новую позицию.
+     * @param {string} draggedNodeId - ID перемещаемого узла
+     * @param {string} targetNodeId - ID целевого узла
+     * @param {string} position - Позиция вставки: 'before', 'after', 'child'
+     * @returns {Object} Результат операции с флагом success и причиной отказа
+     */
+    moveNode(draggedNodeId, targetNodeId, position) {
+        if (draggedNodeId === targetNodeId) {
+            return {success: false, reason: 'Нельзя переместить узел в самого себя'};
+        }
+
+        const draggedNode = this.findNodeById(draggedNodeId);
+        const targetNode = this.findNodeById(targetNodeId);
+        const draggedParent = this.findParentNode(draggedNodeId);
+
+        if (!draggedNode || !targetNode || !draggedParent) {
+            return {success: false, reason: 'Узел не найден'};
+        }
+
+        if (draggedNode.protected) {
+            return {success: false, reason: 'Нельзя перемещать защищенный элемент'};
+        }
+
+        if (this.isDescendant(targetNode, draggedNode)) {
+            return {success: false, reason: 'Нельзя переместить узел внутрь своего потомка'};
+        }
+
+        // Проверка глубины вложенности только для обычных пунктов
+        const isDraggedInformational = draggedNode.type === 'table' ||
+            draggedNode.type === 'textblock' ||
+            draggedNode.type === 'violation';
+
+        if (!isDraggedInformational) {
+            let targetDepth;
+
+            if (position === 'child') {
+                // При вставке как child - глубина целевого узла + 1
+                targetDepth = this.getNodeDepth(targetNodeId);
+            } else {
+                // При вставке before/after - глубина родителя целевого узла
+                const targetParent = this.findParentNode(targetNodeId);
+                if (targetParent) {
+                    targetDepth = this.getNodeDepth(targetParent.id);
+                } else {
+                    targetDepth = 0;
+                }
+            }
+
+            const draggedSubtreeDepth = this.getSubtreeDepth(draggedNode);
+            const resultingDepth = targetDepth + 1 + draggedSubtreeDepth;
+
+            if (resultingDepth > 4) {
+                return {
+                    success: false,
+                    reason: `Перемещение приведет к превышению максимальной вложенности (${resultingDepth} > 4 уровней)`
+                };
+            }
+        }
+
+        // Проверка для первого уровня
+        const targetParent = this.findParentNode(targetNodeId);
+        if (position !== 'child' && targetParent && targetParent.id === 'root') {
+            if (draggedParent.id !== 'root') {
+                const hasCustomFirstLevel = targetParent.children.some(child => {
+                    const num = child.label.match(/^(\d+)\./);
+                    return num && parseInt(num[1]) === 6;
+                });
+
+                if (hasCustomFirstLevel) {
+                    return {
+                        success: false,
+                        reason: 'На первом уровне уже есть дополнительный пункт (6)'
+                    };
+                }
+            }
+        }
+
+        // Удаляем узел из старого родителя
+        draggedParent.children = draggedParent.children.filter(n => n.id !== draggedNodeId);
+
+        // Вставляем узел на новое место
+        let newParent;
+        let insertIndex;
+
+        if (position === 'child') {
+            newParent = targetNode;
+            if (!newParent.children) newParent.children = [];
+            newParent.children.push(draggedNode);
+        } else if (position === 'before') {
+            newParent = targetParent;
+            insertIndex = newParent.children.findIndex(n => n.id === targetNodeId);
+            newParent.children.splice(insertIndex, 0, draggedNode);
+        } else if (position === 'after') {
+            newParent = targetParent;
+            insertIndex = newParent.children.findIndex(n => n.id === targetNodeId);
+            newParent.children.splice(insertIndex + 1, 0, draggedNode);
+        }
+
+        if (draggedNode.parentId) {
+            draggedNode.parentId = newParent.id;
+        }
+
+        this.generateNumbering();
+
+        return {success: true, node: draggedNode};
+    },
+
+    /**
+     * Проверяет, является ли node потомком possibleAncestor.
+     * @param {Object} node - Проверяемый узел
+     * @param {Object} possibleAncestor - Возможный предок
+     * @returns {boolean} true, если node является потомком possibleAncestor
+     */
+    isDescendant(node, possibleAncestor) {
+        if (!possibleAncestor.children || possibleAncestor.children.length === 0) {
+            return false;
+        }
+
+        for (const child of possibleAncestor.children) {
+            if (child.id === node.id) {
+                return true;
+            }
+            if (this.isDescendant(node, child)) {
+                return true;
+            }
+        }
+
         return false;
     },
 
