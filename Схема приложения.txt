@@ -105,17 +105,18 @@ UI_for_EP_v_KAP/
 │       ├── notifications.js
 │       ├── context-menu.js
 │       ├── tree.js
-│       ├── table.js
 │       ├── textblock.js
 │       ├── state.js
 │       ├── preview.js
 │       ├── api.js
 │       ├── help.js
+│       ├── table/
+│       │   ├── table-core.js
+│       │   ├── table-cells-operations.js
+│       │   └── table-sizes.js
 │       ├── items/
-│       │   ├── items-editing.js
-│       │   ├── items-renderer.js
-│       │   ├── items-table-events.js
-│       │   └── items-table-sizes.js
+│       │   ├── items-title-editing.js
+│       │   └── items-renderer.js
 │       └── violation/
 │           ├── violation-init.js
 │           ├── violation-core.js

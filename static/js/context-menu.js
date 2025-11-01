@@ -603,7 +603,7 @@ class ContextMenuManager {
         // Сохраняем текущие размеры таблицы перед операцией
         if (tableManager.selectedCells.length > 0) {
             const table = tableManager.selectedCells[0].closest('table');
-            tableSizes = ItemsTableSizes.preserveTableSizes(table);
+            tableSizes = tableManager.preserveTableSizes(table);
         }
 
         switch (action) {
@@ -617,10 +617,10 @@ class ContextMenuManager {
                     setTimeout(() => {
                         const tables = document.querySelectorAll('.editable-table');
                         tables.forEach(tbl => {
-                            ItemsTableSizes.applyTableSizes(tbl, tableSizes);
+                            tableManager.applyTableSizes(tbl, tableSizes);
                             const section = tbl.closest('.table-section');
                             if (section) {
-                                ItemsTableSizes.persistTableSizes(section.dataset.tableId, tbl);
+                                tableManager.persistTableSizes(section.dataset.tableId, tbl);
                             }
                         });
                     }, 50);
@@ -640,10 +640,10 @@ class ContextMenuManager {
                     setTimeout(() => {
                         const tables = document.querySelectorAll('.editable-table');
                         tables.forEach(tbl => {
-                            ItemsTableSizes.applyTableSizes(tbl, tableSizes);
+                            tableManager.applyTableSizes(tbl, tableSizes);
                             const section = tbl.closest('.table-section');
                             if (section) {
-                                ItemsTableSizes.persistTableSizes(section.dataset.tableId, tbl);
+                                tableManager.persistTableSizes(section.dataset.tableId, tbl);
                             }
                         });
                     }, 50);

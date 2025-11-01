@@ -1,5 +1,5 @@
 /**
- * Менеджер отрисовки элементов на втором шаге конструктора.
+ * Менеджер отрисовки элементов.
  * Координирует рендеринг всех типов элементов документа: обычных пунктов,
  * таблиц, текстовых блоков и нарушений. Обеспечивает синхронизацию данных
  * между DOM и глобальным состоянием приложения.
@@ -29,14 +29,14 @@ class ItemsRenderer {
         }
 
         // Привязываем обработчики событий к таблицам
-        ItemsTableEvents.attachTableEvents();
+        tableManager.attachEventListeners();
 
         // Восстанавливаем персистентные размеры ячеек таблиц после рендеринга DOM
         setTimeout(() => {
             document.querySelectorAll('.table-section').forEach(section => {
                 const tableId = section.dataset.tableId;
                 const tableEl = section.querySelector('.editable-table');
-                ItemsTableSizes.applyPersistedSizes(tableId, tableEl);
+                tableManager.applyPersistedSizes(tableId, tableEl);
             });
         }, 0);
     }
@@ -110,7 +110,7 @@ class ItemsRenderer {
                     // Двойной клик зафиксирован - начинаем редактирование
                     clearTimeout(clickTimer);
                     clickCount = 0;
-                    ItemsEditing.startEditingItemTitle(title, node);
+                    ItemsTitleEditing.startEditingItemTitle(title, node);
                 }
             });
 
@@ -175,7 +175,7 @@ class ItemsRenderer {
             } else if (clickCount === 2) {
                 clearTimeout(clickTimer);
                 clickCount = 0;
-                ItemsEditing.startEditingTableTitle(tableTitle, node);
+                ItemsTitleEditing.startEditingTableTitle(tableTitle, node);
             }
         });
 

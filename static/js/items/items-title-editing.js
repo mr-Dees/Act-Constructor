@@ -1,10 +1,8 @@
 /**
- * Модуль для редактирования элементов документа.
- * Обеспечивает inline-редактирование заголовков пунктов, названий таблиц
- * и содержимого ячеек таблиц с поддержкой многострочного ввода.
- * Поддерживает горячие клавиши: Enter для сохранения, Escape для отмены.
+ * Модуль для редактирования заголовков элементов документа.
+ * Обеспечивает inline-редактирование заголовков пунктов, названий таблиц.
  */
-class ItemsEditing {
+class ItemsTitleEditing {
     /**
      * Запускает режим редактирования заголовка обычного пункта документа.
      * Извлекает базовую метку без нумерации, позволяет отредактировать,
@@ -187,94 +185,5 @@ class ItemsEditing {
 
         titleElement.addEventListener('blur', blurHandler);
         titleElement.addEventListener('keydown', keydownHandler);
-    }
-
-    /**
-     * Запускает режим редактирования содержимого ячейки таблицы.
-     * Создает textarea для многострочного ввода с поддержкой Shift+Enter для переноса строк.
-     * Сохраняет изменения в матричную grid-структуру таблицы в AppState.
-     * @param {HTMLElement} cellEl - DOM-элемент ячейки таблицы
-     */
-    static startEditingCell(cellEl) {
-        const originalContent = cellEl.textContent;
-        cellEl.classList.add('editing');
-
-        // Создаем textarea для многострочного редактирования
-        const textarea = document.createElement('textarea');
-        textarea.value = originalContent;
-        textarea.style.width = '100%';
-        textarea.style.height = '100%';
-        textarea.style.minHeight = '28px';
-        textarea.style.border = 'none';
-        textarea.style.outline = 'none';
-        textarea.style.resize = 'none';
-        textarea.style.padding = '4px';
-        textarea.style.fontFamily = 'inherit';
-        textarea.style.fontSize = 'inherit';
-
-        cellEl.textContent = '';
-        cellEl.appendChild(textarea);
-        textarea.focus();
-
-        /**
-         * Завершает редактирование ячейки и сохраняет или отменяет изменения.
-         * Обновляет содержимое в матричной grid-структуре таблицы.
-         * @param {boolean} cancel - Если true, отменяет изменения
-         */
-        const finishEditing = (cancel = false) => {
-            if (cancel) {
-                cellEl.textContent = originalContent;
-            } else {
-                const newValue = textarea.value.trim();
-                cellEl.textContent = newValue;
-
-                // Обновляем данные в матричной grid-структуре таблицы
-                const tableId = cellEl.dataset.tableId;
-                const row = parseInt(cellEl.dataset.row);
-                const col = parseInt(cellEl.dataset.col);
-                const table = AppState.tables[tableId];
-
-                // Проверяем существование ячейки в grid и что она не поглощена объединением
-                if (table && table.grid && table.grid[row] && table.grid[row][col]) {
-                    if (!table.grid[row][col].isSpanned) {
-                        table.grid[row][col].content = newValue;
-                    }
-                }
-
-                PreviewManager.update();
-            }
-
-            cellEl.classList.remove('editing');
-        };
-
-        // Сохранение при потере фокуса
-        const blurHandler = () => {
-            finishEditing(false);
-        };
-
-        // Обработка горячих клавиш
-        const keydownHandler = (e) => {
-            if (e.key === 'Enter' && !e.shiftKey) {
-                // Enter без Shift - сохранить и выйти из редактирования
-                e.preventDefault();
-                e.stopPropagation();
-                textarea.removeEventListener('blur', blurHandler);
-                textarea.removeEventListener('keydown', keydownHandler);
-                finishEditing(false);
-            } else if (e.key === 'Enter' && e.shiftKey) {
-                // Shift+Enter - перенос строки внутри ячейки
-                e.stopPropagation();
-            } else if (e.key === 'Escape') {
-                // Escape - отменить изменения
-                e.preventDefault();
-                e.stopPropagation();
-                textarea.removeEventListener('blur', blurHandler);
-                textarea.removeEventListener('keydown', keydownHandler);
-                finishEditing(true);
-            }
-        };
-
-        textarea.addEventListener('blur', blurHandler);
-        textarea.addEventListener('keydown', keydownHandler);
     }
 }
