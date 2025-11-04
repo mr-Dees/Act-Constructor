@@ -107,9 +107,13 @@ UI_for_EP_v_KAP/
 │       ├── notifications.js
 │       ├── context-menu.js
 │       ├── textblock.js
-│       ├── state.js
 │       ├── preview.js
 │       ├── help.js
+│       ├── state/
+│       │   ├── state-core.js
+│       │   ├── state-content.js
+│       │   ├── state-validation.js
+│       │   └── state-tree.js
 │       ├── tree/
 │       │   ├── tree-core.js
 │       │   ├── tree-drag-drop.js

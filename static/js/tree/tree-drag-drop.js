@@ -73,6 +73,26 @@ class TreeDragDrop {
     }
 
     /**
+     * Проверяет, может ли целевой узел принять перетаскиваемый узел как дочерний
+     */
+    canAcceptAsChild(targetNode, draggedNode) {
+        // Информационные элементы не могут иметь детей
+        if (targetNode.type === 'table' || targetNode.type === 'textblock' || targetNode.type === 'violation') {
+            return false;
+        }
+
+        // Если перетаскиваем информационный элемент, проверяем что целевой узел - это его текущий родитель
+        // или другой обычный пункт (item)
+        if (draggedNode.type === 'table' || draggedNode.type === 'textblock' || draggedNode.type === 'violation') {
+            // Информационные элементы могут быть детьми любых обычных пунктов
+            return true;
+        }
+
+        // Для обычных пунктов - стандартная логика
+        return true;
+    }
+
+    /**
      * Обработчик перемещения над элементами
      */
     handleDragOver(e) {
@@ -91,7 +111,7 @@ class TreeDragDrop {
         const targetNodeId = treeItem.dataset.nodeId;
         const targetNode = AppState.findNodeById(targetNodeId);
 
-        if (AppState.isDescendant(this.draggedNode, targetNode)) {
+        if (AppState.isDescendant(targetNode, this.draggedNode)) {
             this.clearDropZone();
             return;
         }
@@ -110,19 +130,31 @@ class TreeDragDrop {
         let position = null;
         let dropZoneClass = null;
 
-        // Уменьшаем зоны before/after до 20% каждая, child занимает 60%
-        // Это делает вставку между элементами более приоритетной
-        if (relativeY < labelHeight * 0.2) {
-            // Верхние 20% label - before
+        // Проверяем, может ли целевой узел принять перетаскиваемый как дочерний
+        const canBeChild = this.canAcceptAsChild(targetNode, this.draggedNode);
+
+        // Для информационных элементов, если мы наводим на их родителя,
+        // всегда предлагаем вставку как child
+        const draggedParent = AppState.findParentNode(this.draggedNode.id);
+        const isDraggedInformational = this.draggedNode.type === 'table' ||
+            this.draggedNode.type === 'textblock' ||
+            this.draggedNode.type === 'violation';
+
+        if (isDraggedInformational && draggedParent && draggedParent.id === targetNode.id) {
+            // Перетаскиваем информационный элемент на его текущего родителя
+            position = 'child';
+            dropZoneClass = 'drop-child';
+        } else if (relativeY < labelHeight * 0.15) {
+            // Верхние 15% label - before (уменьшено с 20%)
             position = 'before';
             dropZoneClass = 'drop-before';
-        } else if (relativeY > labelHeight * 0.8) {
-            // Нижние 20% label - after
+        } else if (relativeY > labelHeight * 0.85) {
+            // Нижние 15% label - after (уменьшено с 20%)
             position = 'after';
             dropZoneClass = 'drop-after';
         } else {
-            // Средние 60% - child, если возможно
-            if (targetNode.type !== 'table' && targetNode.type !== 'textblock' && targetNode.type !== 'violation') {
+            // Средние 70% - child, если возможно (увеличено с 60%)
+            if (canBeChild) {
                 position = 'child';
                 dropZoneClass = 'drop-child';
             } else {
