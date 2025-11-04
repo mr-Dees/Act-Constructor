@@ -106,7 +106,7 @@ UI_for_EP_v_KAP/
 │       ├── api.js
 │       ├── notifications.js
 │       ├── context-menu.js
-│       ├── textblock.js
+│       ├── textblock-core.js
 │       ├── preview.js
 │       ├── help.js
 │       ├── state/
@@ -135,3 +135,174 @@ UI_for_EP_v_KAP/
 │           └── violation-rendering.js
 ├── requirements.txt
 └── .env
+
+
+
+
+
+
+У меня есть сервис со следующей структурой:
+UI_for_EP_v_KAP/
+├── app/
+│   ├── __init__.py
+│   ├── main.py
+│   ├── api/
+│   │   ├── __init__.py
+│   │   └── v1/
+│   │       ├── __init__.py
+│   │       ├── routes.py
+│   │       └── endpoints/
+│   │           ├── __init__.py
+│   │           └── act_operations.py
+│   ├── core/
+│   │   ├── __init__.py
+│   │   └── config.py
+│   ├── formatters/
+│   │   ├── __init__.py
+│   │   ├── base_formatter.py
+│   │   ├── text_formatter.py
+│   │   ├── markdown_formatter.py
+│   │   └── docx_formatter.py
+│   ├── schemas/
+│   │   ├── __init__.py
+│   │   └── act.py
+│   └── services/
+│       ├── __init__.py
+│       ├── act_service.py
+│       └── storage_service.py
+├── DB/
+│   └── acts/
+│       └── (здесь будут сохраняться файлы актов)
+├── templates/
+│   ├── base.html
+│   ├── constructor.html
+│   └── components/
+│       ├── header.html
+│       ├── tree_panel.html
+│       ├── preview_panel.html
+│       └── context_menu.html
+├── static/
+│   ├── css/
+│   │   ├── main.css
+│   │   ├── base/
+│   │   │   ├── base-variables.css
+│   │   │   ├── base-reset.css
+│   │   │   └── base-animations.css
+│   │   ├── layout/
+│   │   │   ├── layout-container.css
+│   │   │   ├── layout-header.css
+│   │   │   ├── layout-two-columns.css
+│   │   │   └── layout-panels.css
+│   │   ├── modules/
+│   │   │   ├── tree/
+│   │   │   │   ├── tree-base.css
+│   │   │   │   ├── tree-states.css
+│   │   │   │   ├── tree-drag-drop.css
+│   │   │   │   ├── tree-nodes.css
+│   │   │   │   └── tree-children.css
+│   │   │   ├── table/
+│   │   │   │   ├── table-base.css
+│   │   │   │   ├── table-states.css
+│   │   │   │   ├── table-resize.css
+│   │   │   │   └── table-editor.css
+│   │   │   ├── violation/
+│   │   │   │   ├──violation-additional-content.css
+│   │   │   │   ├── violation-base.css
+│   │   │   │   ├── violation-fields.css
+│   │   │   │   ├── violation-list.css
+│   │   │   │   └── violation-preview.css
+│   │   │   ├── preview/
+│   │   │   │   ├── preview-base.css
+│   │   │   │   ├── preview-typography.css
+│   │   │   │   └── preview-table.css
+│   │   │   ├── help/
+│   │   │   │   ├── help-button.css
+│   │   │   │   ├── help-modal.css
+│   │   │   │   ├── help-content.css
+│   │   │   │   └── help-media.css
+│   │   │   ├── buttons/
+│   │   │   │   ├── buttons-base.css
+│   │   │   │   ├── buttons-action.css
+│   │   │   │   └── buttons-save-group.css
+│   │   │   ├── items/
+│   │   │   │   ├── items-base.css
+│   │   │   │   ├── items-levels.css
+│   │   │   │   ├── items-header.css
+│   │   │   │   └── items-content.css
+│   │   │   ├── textblock/
+│   │   │   │   ├── textblock-toolbar.css
+│   │   │   │   └── textblock-content.css
+│   │   │   ├── context-menu/
+│   │   │   │   ├── context-menu-base.css
+│   │   │   │   └── context-menu-states.css
+│   │   │   ├── notifications/
+│   │   │   │   ├── notifications-base.css
+│   │   │   │   ├── notifications-types.css
+│   │   │   │   └── notifications-content.css
+│   │   │   └── dialog/
+│   │   │       ├── dialog-overlay.css
+│   │   │       ├── dialog.css
+│   │   │       └── dialog-buttons.css
+│   │   └── utilities/
+│   │       └── helpers.css
+│   └── js/
+│       ├── app.js
+│       ├── api.js
+│       ├── notifications.js
+│       ├── context-menu.js
+│       ├── textblock-core.js
+│       ├── preview.js
+│       ├── help.js
+│       ├── state/
+│       │   ├── state-core.js
+│       │   ├── state-content.js
+│       │   ├── state-validation.js
+│       │   └── state-tree.js
+│       ├── tree/
+│       │   ├── tree-core.js
+│       │   ├── tree-drag-drop.js
+│       │   └── tree-renderer.js
+│       ├── table/
+│       │   ├── table-core.js
+│       │   ├── table-cells-operations.js
+│       │   └── table-sizes.js
+│       ├── items/
+│       │   ├── items-title-editing.js
+│       │   └── items-renderer.js
+│       └── violation/
+│           ├── violation-init.js
+│           ├── violation-core.js
+│           ├── violation-additional-content.js
+│           ├── violation-drag-drop.js
+│           ├── violation-file-upload.js
+│           ├── violation-paste.js
+│           └── violation-rendering.js
+├── requirements.txt
+└── .env
+
+В моем проекте есть 2 патерна:
+Делегирующие методы в core:
+// Делегирующие методы для операций с ячейками
+/**
+ * Снимает выделение со всех ячеек.
+ * Делегирует выполнение в TableCellsOperations.
+ */
+clearSelection() {
+    this.cellsOps.clearSelection();
+}
+
+Расширения класса core:
+// Расширение ViolationManager
+Object.assign(ViolationManager.prototype, {
+    /**
+     * Обработчик начала перетаскивания с созданием миниатюры
+     * @param {Event} e - Событие dragstart
+     * @param {Object} violation - Объект нарушения
+     * @param {number} index - Индекс перетаскиваемого элемента
+     * @param {Object} item - Данные элемента
+     */
+    handleDragStart(e, violation, index, item) {
+
+Так же есть менеджер уведомлений и менеджер контекстного меню
+
+Скажи, можно ли декомпозировать этот модуль:
