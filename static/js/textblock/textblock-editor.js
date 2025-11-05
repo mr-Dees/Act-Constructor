@@ -59,6 +59,7 @@ Object.assign(TextBlockManager.prototype, {
         editor.addEventListener('blur', () => this.handleEditorBlur(editor, textBlock));
         editor.addEventListener('input', () => this.handleEditorInput(editor, textBlock));
         editor.addEventListener('keydown', (e) => this.handleEditorKeydown(e, editor, textBlock));
+        editor.addEventListener('paste', (e) => this.handleEditorPaste(e, editor, textBlock));
         editor.addEventListener('mouseup', () => this.handleSelectionChange());
         editor.addEventListener('keyup', () => this.handleSelectionChange());
     },
@@ -99,6 +100,23 @@ Object.assign(TextBlockManager.prototype, {
             textBlock.content = editor.innerHTML;
             PreviewManager.update();
         }, 500);
+    },
+
+    /**
+     * Обработчик вставки текста - удаляет все стили перед вставкой
+     */
+    handleEditorPaste(e, editor, textBlock) {
+        e.preventDefault();
+
+        // Получаем чистый текст из буфера обмена
+        const text = e.clipboardData.getData('text/plain');
+
+        // Вставляем только чистый текст без форматирования
+        document.execCommand('insertText', false, text);
+
+        // Сохраняем изменения
+        const textBlockId = editor.dataset.textBlockId;
+        this.saveContent(textBlockId, editor.innerHTML);
     },
 
     /**
