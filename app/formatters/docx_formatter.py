@@ -479,7 +479,12 @@ class DocxFormatter(BaseFormatter):
                             header, encoded = url.split(',', 1)
                             image_data = base64.b64decode(encoded)
                             image_stream = BytesIO(image_data)
-                            doc.add_picture(image_stream, width=Inches(4))
+
+                            # Создаем параграф для изображения и центрируем его
+                            img_paragraph = doc.add_paragraph()
+                            img_paragraph.alignment = WD_PARAGRAPH_ALIGNMENT.CENTER
+                            img_run = img_paragraph.add_run()
+                            img_run.add_picture(image_stream, width=Inches(4))
 
                             # Добавляем подпись с центрированием и курсивом
                             if caption:
