@@ -1,0 +1,228 @@
+/**
+ * Стили для гиперссылок и сносок в текстовых блоках
+ */
+
+/* Общие стили для ссылок и сносок */
+.text-link,
+.text-footnote {
+    position: relative;
+    background-color: rgba(91, 111, 168, 0.08);
+    color: var(--primary);
+    padding: 0.125rem 0.25rem;
+    border-radius: 0.1875rem;
+    cursor: pointer;
+    transition: all 0.2s ease;
+    text-decoration: none;
+    border-bottom: 1px dotted var(--primary);
+}
+
+/* Эффект при наведении */
+.text-link:hover,
+.text-footnote:hover {
+    background-color: rgba(91, 111, 168, 0.15);
+    border-bottom-style: solid;
+}
+
+/* Отличительный цвет для сносок */
+.text-footnote {
+    background-color: rgba(74, 154, 182, 0.08);
+    color: var(--accent);
+    border-bottom-color: var(--accent);
+}
+
+.text-footnote:hover {
+    background-color: rgba(74, 154, 182, 0.15);
+}
+
+/* Кастомный tooltip */
+.link-footnote-tooltip {
+    position: fixed;
+    background: var(--gray-800);
+    color: white;
+    padding: 0.5rem 0.75rem;
+    border-radius: var(--radius-sm);
+    font-size: 0.8125rem;
+    line-height: 1.4;
+    max-width: 20rem;
+    word-break: break-word;
+    z-index: 9999;
+    pointer-events: none;
+    box-shadow: var(--shadow-md);
+    animation: tooltipFadeIn 0.15s ease;
+}
+
+@keyframes tooltipFadeIn {
+    from {
+        opacity: 0;
+        transform: translateY(-0.25rem);
+    }
+    to {
+        opacity: 1;
+        transform: translateY(0);
+    }
+}
+
+/* Popup для редактирования */
+.link-footnote-popup {
+    position: fixed;
+    background: var(--bg-primary);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-md);
+    box-shadow: var(--shadow-lg);
+    min-width: 20rem;
+    max-width: 26rem;
+    z-index: 10000;
+    animation: popupFadeIn 0.2s ease;
+}
+
+@keyframes popupFadeIn {
+    from {
+        opacity: 0;
+        transform: translateY(-0.5rem);
+    }
+    to {
+        opacity: 1;
+        transform: translateY(0);
+    }
+}
+
+/* Шапка popup */
+.link-footnote-popup-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 0.75rem;
+    border-bottom: 1px solid var(--border-light);
+    background: var(--bg-secondary);
+    border-radius: var(--radius-md) var(--radius-md) 0 0;
+}
+
+/* Метка типа (Ссылка/Сноска) */
+.link-footnote-popup-label {
+    font-size: 0.8125rem;
+    font-weight: 600;
+    color: var(--text-primary);
+}
+
+/* Кнопка удаления (корзина) */
+.popup-delete-btn {
+    background: transparent;
+    border: none;
+    color: var(--text-secondary);
+    font-size: 1.125rem;
+    cursor: pointer;
+    padding: 0.25rem 0.375rem;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    border-radius: var(--radius-sm);
+    transition: all 0.15s ease;
+}
+
+.popup-delete-btn:hover {
+    background: rgba(199, 85, 85, 0.1);
+    color: var(--error);
+    transform: scale(1.1);
+}
+
+/* Содержимое popup */
+.link-footnote-popup-content {
+    padding: 0.75rem;
+    display: flex;
+    flex-direction: column;
+    gap: 0.75rem;
+}
+
+/* Поле ввода */
+.popup-field {
+    display: flex;
+    flex-direction: column;
+    gap: 0.375rem;
+}
+
+/* Метка поля */
+.popup-field-label {
+    font-size: 0.75rem;
+    font-weight: 600;
+    color: var(--text-secondary);
+    text-transform: uppercase;
+    letter-spacing: 0.025em;
+}
+
+/* Текстовое поле для отображаемого текста */
+.link-footnote-popup-text-input {
+    width: 100%;
+    padding: 0.5rem;
+    border: 1px solid var(--border);
+    border-radius: var(--radius-sm);
+    font-family: inherit;
+    font-size: 0.875rem;
+    color: var(--text-primary);
+    background: var(--bg-primary);
+    transition: all 0.15s ease;
+}
+
+.link-footnote-popup-text-input:focus {
+    outline: none;
+    border-color: var(--primary);
+    box-shadow: 0 0 0 0.1875rem var(--primary-subtle);
+}
+
+/* Редактируемое поле для URL/сноски */
+.link-footnote-popup-input {
+    width: 100%;
+    padding: 0.5rem;
+    border: 1px solid var(--border);
+    border-radius: var(--radius-sm);
+    font-family: inherit;
+    font-size: 0.875rem;
+    line-height: 1.4;
+    color: var(--text-primary);
+    background: var(--bg-primary);
+    resize: vertical;
+    min-height: 3rem;
+    transition: all 0.15s ease;
+}
+
+.link-footnote-popup-input:focus {
+    outline: none;
+    border-color: var(--primary);
+    box-shadow: 0 0 0 0.1875rem var(--primary-subtle);
+}
+
+.link-footnote-popup-input::placeholder,
+.link-footnote-popup-text-input::placeholder {
+    color: var(--text-tertiary);
+}
+
+/* Скроллбар для textarea */
+.link-footnote-popup-input::-webkit-scrollbar {
+    width: 0.375rem;
+}
+
+.link-footnote-popup-input::-webkit-scrollbar-track {
+    background: var(--bg-tertiary);
+    border-radius: var(--radius-sm);
+}
+
+.link-footnote-popup-input::-webkit-scrollbar-thumb {
+    background: var(--border-medium);
+    border-radius: var(--radius-sm);
+}
+
+.link-footnote-popup-input::-webkit-scrollbar-thumb:hover {
+    background: var(--gray-500);
+}
+
+/* Стили для редактора с ссылками/сносками */
+.textblock-editor .text-link,
+.textblock-editor .text-footnote {
+    user-select: text;
+}
+
+/* Адаптация для предпросмотра */
+.preview-content .text-link,
+.preview-content .text-footnote {
+    cursor: default;
+    pointer-events: none;
+}

@@ -59,6 +59,7 @@
 /* Модуль текстовых блоков */
 @import 'modules/textblock/textblock-toolbar.css';
 @import 'modules/textblock/textblock-content.css';
+@import 'modules/textblock/textblock-links-footnotes.css';
 
 /* Модуль контекстного меню */
 @import 'modules/context-menu/context-menu-base.css';

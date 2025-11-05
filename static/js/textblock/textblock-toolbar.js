@@ -58,6 +58,17 @@ Object.assign(TextBlockManager.prototype, {
             <div class="toolbar-separator"></div>
             
             <div class="toolbar-group">
+                <button class="toolbar-btn" data-command="createLink" title="Добавить гиперссылку (Ctrl+K)">
+                    🔗
+                </button>
+                <button class="toolbar-btn" data-command="createFootnote" title="Добавить сноску">
+                    📑
+                </button>
+            </div>
+            
+            <div class="toolbar-separator"></div>
+            
+            <div class="toolbar-group">
                 <button class="toolbar-btn" data-command="removeFormat" title="Очистить форматирование">
                     ✕
                 </button>
@@ -80,7 +91,16 @@ Object.assign(TextBlockManager.prototype, {
             btn.addEventListener('click', (e) => {
                 e.preventDefault();
                 const command = btn.dataset.command;
-                this.execCommand(command);
+
+                // Специальная обработка для ссылок и сносок
+                if (command === 'createLink') {
+                    this.createOrEditLink();
+                } else if (command === 'createFootnote') {
+                    this.createOrEditFootnote();
+                } else {
+                    this.execCommand(command);
+                }
+
                 this.updateToolbarState();
             });
         });

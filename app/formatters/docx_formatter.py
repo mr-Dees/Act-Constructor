@@ -20,7 +20,7 @@ from app.formatters.base_formatter import BaseFormatter
 
 
 class HTMLToDocxParser(HTMLParser):
-    """Парсер HTML с поддержкой div-блоков и inline-форматирования"""
+    """Парсер HTML с поддержкой div-блоков, inline-форматирования, гиперссылок и сносок"""
 
     def __init__(self, paragraph):
         super().__init__()
@@ -33,6 +33,16 @@ class HTMLToDocxParser(HTMLParser):
         self.alignment = None
         self.text_buffer = []
         self.in_div = False
+
+        # Для ссылок
+        self.in_link = False
+        self.link_url = None
+        self.link_text = []
+
+        # Для сносок
+        self.in_footnote = False
+        self.footnote_text = None
+        self.footnote_content = []
 
     def handle_starttag(self, tag, attrs):
         if tag == 'br':
@@ -51,8 +61,23 @@ class HTMLToDocxParser(HTMLParser):
             self.strike = True
         elif tag in ['span', 'div']:
             attrs_dict = dict(attrs)
-            style_dict = self._parse_style(attrs_dict.get('style', ''))
 
+            # Обработка гиперссылок
+            if 'data-link-url' in attrs_dict:
+                self.in_link = True
+                self.link_url = attrs_dict['data-link-url']
+                self.link_text = []
+                return
+
+            # Обработка сносок
+            if 'data-footnote-text' in attrs_dict:
+                self.in_footnote = True
+                self.footnote_text = attrs_dict['data-footnote-text']
+                self.footnote_content = []
+                return
+
+            # Обработка стилей
+            style_dict = self._parse_style(attrs_dict.get('style', ''))
             if 'font-size' in style_dict:
                 size_str = style_dict['font-size'].replace('px', '').strip()
                 try:
@@ -83,6 +108,42 @@ class HTMLToDocxParser(HTMLParser):
         elif tag in ['s', 'strike', 'del']:
             self.strike = False
         elif tag == 'span':
+            # Обработка закрытия гиперссылки
+            if self.in_link:
+                link_text = ''.join(self.link_text)
+                # Формат markdown: [текст](url)
+                run = self.paragraph.add_run(f'[{link_text}]({self.link_url})')
+                run.bold = self.bold
+                run.italic = self.italic
+                run.underline = self.underline
+                if self.strike:
+                    run.font.strike = True
+                if self.font_size:
+                    run.font.size = Pt(self.font_size)
+
+                self.in_link = False
+                self.link_url = None
+                self.link_text = []
+                return
+
+            # Обработка закрытия сноски
+            if self.in_footnote:
+                footnote_content = ''.join(self.footnote_content)
+                # Формат markdown: текст^[сноска]
+                run = self.paragraph.add_run(f'{footnote_content}^[{self.footnote_text}]')
+                run.bold = self.bold
+                run.italic = self.italic
+                run.underline = self.underline
+                if self.strike:
+                    run.font.strike = True
+                if self.font_size:
+                    run.font.size = Pt(self.font_size)
+
+                self.in_footnote = False
+                self.footnote_text = None
+                self.footnote_content = []
+                return
+
             self.font_size = None
         elif tag == 'div':
             # После div добавляем перенос строки
@@ -92,10 +153,24 @@ class HTMLToDocxParser(HTMLParser):
 
     def handle_data(self, data):
         # Игнорируем пустые строки между тегами
-        if data.strip():
-            self.text_buffer.append(data)
+        if not data.strip():
+            return
+
+        # Если внутри ссылки - собираем текст отдельно
+        if self.in_link:
+            self.link_text.append(data)
+            return
+
+        # Если внутри сноски - собираем текст отдельно
+        if self.in_footnote:
+            self.footnote_content.append(data)
+            return
+
+        # Обычная обработка
+        self.text_buffer.append(data)
 
     def _parse_style(self, style_string):
+        """Парсит CSS-строку стилей"""
         styles = {}
         if not style_string:
             return styles
@@ -108,6 +183,7 @@ class HTMLToDocxParser(HTMLParser):
         return styles
 
     def _flush_buffer(self):
+        """Сбрасывает текстовый буфер в run с текущим форматированием"""
         if not self.text_buffer:
             return
 
@@ -130,6 +206,7 @@ class HTMLToDocxParser(HTMLParser):
             run.font.size = Pt(self.font_size)
 
     def close(self):
+        """Завершает парсинг"""
         self._flush_buffer()
         super().close()
 

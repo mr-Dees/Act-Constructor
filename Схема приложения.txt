@@ -62,13 +62,13 @@ UI_for_EP_v_KAP/
 │   │   │   │   ├── table-resize.css
 │   │   │   │   └── table-editor.css
 │   │   │   ├── violation/
-│   │   │   │   ├──violation-additional-content.css
+│   │   │   │   ├── violation-additional-content.css
 │   │   │   │   ├── violation-base.css
 │   │   │   │   ├── violation-fields.css
-│   │   │   │   ├── violation-list.css
-│   │   │   │   └── violation-preview.css
+│   │   │   │   └── violation-list.css
 │   │   │   ├── preview/
 │   │   │   │   ├── preview-base.css
+│   │   │   │   ├── preview-violation.css
 │   │   │   │   ├── preview-typography.css
 │   │   │   │   └── preview-table.css
 │   │   │   ├── help/
@@ -87,6 +87,7 @@ UI_for_EP_v_KAP/
 │   │   │   │   └── items-content.css
 │   │   │   ├── textblock/
 │   │   │   │   ├── textblock-toolbar.css
+│   │   │   │   ├── textblock-links-footnotes.css
 │   │   │   │   └── textblock-content.css
 │   │   │   ├── context-menu/
 │   │   │   │   ├── context-menu-base.css
@@ -106,9 +107,14 @@ UI_for_EP_v_KAP/
 │       ├── api.js
 │       ├── notifications.js
 │       ├── context-menu.js
-│       ├── textblock-core.js
 │       ├── preview.js
 │       ├── help.js
+│       ├── textblock/
+│       │   ├── textblock-core.js
+│       │   ├── textblock-editor.js
+│       │   ├── textblock-formatting.js
+│       │   ├── textblock-toolbar.js
+│       │   └── textblock-links-footnotes.js
 │       ├── state/
 │       │   ├── state-core.js
 │       │   ├── state-content.js
@@ -206,13 +212,13 @@ UI_for_EP_v_KAP/
 │   │   │   │   ├── table-resize.css
 │   │   │   │   └── table-editor.css
 │   │   │   ├── violation/
-│   │   │   │   ├──violation-additional-content.css
+│   │   │   │   ├── violation-additional-content.css
 │   │   │   │   ├── violation-base.css
 │   │   │   │   ├── violation-fields.css
-│   │   │   │   ├── violation-list.css
-│   │   │   │   └── violation-preview.css
+│   │   │   │   └── violation-list.css
 │   │   │   ├── preview/
 │   │   │   │   ├── preview-base.css
+│   │   │   │   ├── preview-violation.css
 │   │   │   │   ├── preview-typography.css
 │   │   │   │   └── preview-table.css
 │   │   │   ├── help/
@@ -231,6 +237,7 @@ UI_for_EP_v_KAP/
 │   │   │   │   └── items-content.css
 │   │   │   ├── textblock/
 │   │   │   │   ├── textblock-toolbar.css
+│   │   │   │   ├── textblock-links-footnotes.css
 │   │   │   │   └── textblock-content.css
 │   │   │   ├── context-menu/
 │   │   │   │   ├── context-menu-base.css
@@ -250,9 +257,14 @@ UI_for_EP_v_KAP/
 │       ├── api.js
 │       ├── notifications.js
 │       ├── context-menu.js
-│       ├── textblock-core.js
 │       ├── preview.js
 │       ├── help.js
+│       ├── textblock/
+│       │   ├── textblock-core.js
+│       │   ├── textblock-editor.js
+│       │   ├── textblock-formatting.js
+│       │   ├── textblock-toolbar.js
+│       │   └── textblock-links-footnotes.js
 │       ├── state/
 │       │   ├── state-core.js
 │       │   ├── state-content.js
