@@ -238,6 +238,89 @@ Object.assign(TextBlockManager.prototype, {
     },
 
     /**
+     * Включает режим inline-редактирования по двойному клику
+     */
+    enableInlineEditing(element) {
+        const isLink = element.classList.contains('text-link');
+        const originalText = element.textContent;
+
+        // Добавляем класс для визуального эффекта
+        element.classList.add('editing-mode');
+
+        // Делаем элемент редактируемым
+        element.contentEditable = 'true';
+
+        // Фокусируемся и выделяем весь текст
+        setTimeout(() => {
+            element.focus();
+
+            // Выделяем весь текст
+            const range = document.createRange();
+            range.selectNodeContents(element);
+            const selection = window.getSelection();
+            selection.removeAllRanges();
+            selection.addRange(range);
+        }, 0);
+
+        // Функция завершения редактирования
+        const finishEditing = (save = true) => {
+            if (!element.classList.contains('editing-mode')) return;
+
+            element.classList.remove('editing-mode');
+            element.contentEditable = 'false';
+
+            if (save) {
+                const newText = element.textContent.trim();
+
+                if (!newText) {
+                    // Если текст пустой, восстанавливаем оригинальный
+                    element.textContent = originalText;
+                } else {
+                    // Сохраняем изменения
+                    if (this.activeEditor) {
+                        const textBlockId = this.activeEditor.dataset.textBlockId;
+                        this.saveContent(textBlockId, this.activeEditor.innerHTML);
+                    }
+                }
+            } else {
+                // Отмена - восстанавливаем оригинальный текст
+                element.textContent = originalText;
+            }
+
+            // Убираем фокус
+            element.blur();
+
+            // Удаляем обработчики
+            document.removeEventListener('click', outsideClickHandler);
+            document.removeEventListener('keydown', keyHandler);
+        };
+
+        // Обработчик клика вне элемента
+        const outsideClickHandler = (e) => {
+            if (!element.contains(e.target)) {
+                finishEditing(true);
+            }
+        };
+
+        // Обработчик клавиш
+        const keyHandler = (e) => {
+            if (e.key === 'Enter' && !e.shiftKey) {
+                e.preventDefault();
+                finishEditing(true);
+            } else if (e.key === 'Escape') {
+                e.preventDefault();
+                finishEditing(false);
+            }
+        };
+
+        // Добавляем обработчики с небольшой задержкой
+        setTimeout(() => {
+            document.addEventListener('click', outsideClickHandler);
+            document.addEventListener('keydown', keyHandler);
+        }, 100);
+    },
+
+    /**
      * Находит родительский элемент ссылки
      */
     findParentLink(node) {
@@ -332,21 +415,21 @@ Object.assign(TextBlockManager.prototype, {
         const popup = document.createElement('div');
         popup.className = 'link-footnote-popup';
         popup.innerHTML = `
-            <div class="link-footnote-popup-header">
-                <span class="link-footnote-popup-label">${isLink ? '🔗 Ссылка' : '📑 Сноска'}</span>
-                <button class="popup-delete-btn" title="Удалить">🗑️</button>
+        <div class="link-footnote-popup-header">
+            <span class="link-footnote-popup-label">${isLink ? '🔗 Ссылка' : '📑 Сноска'}</span>
+            <button class="popup-delete-btn" title="Удалить">🗑️</button>
+        </div>
+        <div class="link-footnote-popup-content">
+            <div class="popup-field">
+                <label class="popup-field-label">Отображаемый текст:</label>
+                <input type="text" class="link-footnote-popup-text-input" value="${this.escapeHtml(displayText)}">
             </div>
-            <div class="link-footnote-popup-content">
-                <div class="popup-field">
-                    <label class="popup-field-label">Отображаемый текст:</label>
-                    <input type="text" class="link-footnote-popup-text-input" value="${this.escapeHtml(displayText)}">
-                </div>
-                <div class="popup-field">
-                    <label class="popup-field-label">${isLink ? 'URL:' : 'Текст сноски:'}</label>
-                    <textarea class="link-footnote-popup-input" rows="3">${this.escapeHtml(content)}</textarea>
-                </div>
+            <div class="popup-field">
+                <label class="popup-field-label">${isLink ? 'URL:' : 'Текст сноски:'}</label>
+                <textarea class="link-footnote-popup-input" rows="3">${this.escapeHtml(content)}</textarea>
             </div>
-        `;
+        </div>
+    `;
 
         document.body.appendChild(popup);
 
@@ -456,9 +539,27 @@ Object.assign(TextBlockManager.prototype, {
         // Сохраняем ссылку на popup
         this.currentPopup = popup;
 
-        // Закрываем popup при клике вне его
-        const closeHandler = (e) => {
+        // Переменная для отслеживания начала выделения внутри popup
+        let selectionStartedInside = false;
+
+        // Обработчик начала выделения (mousedown)
+        popup.addEventListener('mousedown', (e) => {
+            selectionStartedInside = true;
+        });
+
+        // Обработчик глобального mousedown для отслеживания начала выделения вне popup
+        const globalMouseDownHandler = (e) => {
             if (!popup.contains(e.target)) {
+                selectionStartedInside = false;
+            }
+        };
+
+        document.addEventListener('mousedown', globalMouseDownHandler);
+
+        // Обработчик клика - закрываем только если клик полностью вне popup
+        const clickHandler = (e) => {
+            // Если клик произошел вне popup и выделение не началось внутри
+            if (!popup.contains(e.target) && !selectionStartedInside) {
                 // Пытаемся сохранить изменения перед закрытием
                 const textChanged = textInput.value.trim() !== displayText;
                 const valueChanged = textarea.value.trim() !== content;
@@ -468,13 +569,37 @@ Object.assign(TextBlockManager.prototype, {
                 }
 
                 this.hideLinkFootnotePopup();
-                document.removeEventListener('click', closeHandler);
+                document.removeEventListener('click', clickHandler);
+                document.removeEventListener('mousedown', globalMouseDownHandler);
+            }
+
+            // Сбрасываем флаг после обработки клика
+            selectionStartedInside = false;
+        };
+
+        // Добавляем обработчик клика с небольшой задержкой
+        setTimeout(() => {
+            document.addEventListener('click', clickHandler);
+        }, 0);
+
+        // Глобальный обработчик Escape для закрытия popup
+        const escapeHandler = (e) => {
+            if (e.key === 'Escape') {
+                this.hideLinkFootnotePopup();
+                document.removeEventListener('keydown', escapeHandler);
+                document.removeEventListener('click', clickHandler);
+                document.removeEventListener('mousedown', globalMouseDownHandler);
             }
         };
 
-        setTimeout(() => {
-            document.addEventListener('click', closeHandler);
-        }, 0);
+        document.addEventListener('keydown', escapeHandler);
+
+        // Сохраняем обработчики для очистки при закрытии
+        popup._cleanupHandlers = () => {
+            document.removeEventListener('keydown', escapeHandler);
+            document.removeEventListener('click', clickHandler);
+            document.removeEventListener('mousedown', globalMouseDownHandler);
+        };
     },
 
     /**
@@ -482,6 +607,11 @@ Object.assign(TextBlockManager.prototype, {
      */
     hideLinkFootnotePopup() {
         if (this.currentPopup) {
+            // Очищаем обработчики событий
+            if (this.currentPopup._cleanupHandlers) {
+                this.currentPopup._cleanupHandlers();
+            }
+
             this.currentPopup.remove();
             this.currentPopup = null;
         }
@@ -580,6 +710,9 @@ Object.assign(TextBlockManager.prototype, {
             if (element._mouseleaveHandler) {
                 element.removeEventListener('mouseleave', element._mouseleaveHandler);
             }
+            if (element._dblclickHandler) {
+                element.removeEventListener('dblclick', element._dblclickHandler);
+            }
 
             // Обработчик контекстного меню (ПКМ)
             element._contextmenuHandler = (e) => {
@@ -588,8 +721,18 @@ Object.assign(TextBlockManager.prototype, {
                 this.showLinkFootnotePopup(element, e.clientX, e.clientY);
             };
 
+            // Обработчик двойного клика (ЛКМ x2)
+            element._dblclickHandler = (e) => {
+                e.preventDefault();
+                e.stopPropagation();
+                this.enableInlineEditing(element);
+            };
+
             // Обработчик наведения для tooltip
             element._mouseenterHandler = (e) => {
+                // Не показываем tooltip в режиме редактирования
+                if (element.classList.contains('editing-mode')) return;
+
                 this.tooltipTimeout = setTimeout(() => {
                     this.showTooltip(element, e);
                 }, 700);
@@ -602,6 +745,7 @@ Object.assign(TextBlockManager.prototype, {
 
             // Привязываем обработчики
             element.addEventListener('contextmenu', element._contextmenuHandler);
+            element.addEventListener('dblclick', element._dblclickHandler);
             element.addEventListener('mouseenter', element._mouseenterHandler);
             element.addEventListener('mouseleave', element._mouseleaveHandler);
         });
