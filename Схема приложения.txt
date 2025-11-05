@@ -106,9 +106,13 @@ UI_for_EP_v_KAP/
 │       ├── app.js
 │       ├── api.js
 │       ├── notifications.js
-│       ├── context-menu.js
 │       ├── preview.js
 │       ├── help.js
+│       ├── state/
+│       │   ├── context-menu-core.js
+│       │   ├── context-menu-tree.js
+│       │   ├── context-menu-table.js
+│       │   └── context-menu-violation.js
 │       ├── textblock/
 │       │   ├── textblock-core.js
 │       │   ├── textblock-editor.js
@@ -256,9 +260,13 @@ UI_for_EP_v_KAP/
 │       ├── app.js
 │       ├── api.js
 │       ├── notifications.js
-│       ├── context-menu.js
 │       ├── preview.js
 │       ├── help.js
+│       ├── state/
+│       │   ├── context-menu-core.js
+│       │   ├── context-menu-tree.js
+│       │   ├── context-menu-table.js
+│       │   └── context-menu-violation.js
 │       ├── textblock/
 │       │   ├── textblock-core.js
 │       │   ├── textblock-editor.js
