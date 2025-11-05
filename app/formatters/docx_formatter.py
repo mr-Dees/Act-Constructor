@@ -20,104 +20,116 @@ from app.formatters.base_formatter import BaseFormatter
 
 
 class HTMLToDocxParser(HTMLParser):
-    """
-    Парсер HTML для преобразования в форматирование DOCX.
-
-    Обрабатывает базовые HTML-теги (b/strong, i/em, u) и конвертирует
-    их в соответствующие run-объекты python-docx с применением
-    жирного начертания, курсива и подчеркивания.
-    Корректно обрабатывает переносы строк (\n).
-    """
+    """Парсер HTML с поддержкой div-блоков и inline-форматирования"""
 
     def __init__(self, paragraph):
-        """
-        Инициализация парсера.
-
-        Args:
-            paragraph: Объект параграфа python-docx для добавления форматированных runs
-        """
         super().__init__()
         self.paragraph = paragraph
-        # Флаги текущего состояния форматирования
         self.bold = False
         self.italic = False
         self.underline = False
-        # Буфер для накопления текста перед добавлением в run
+        self.strike = False
+        self.font_size = None
+        self.alignment = None
         self.text_buffer = []
+        self.in_div = False
 
     def handle_starttag(self, tag, attrs):
-        """
-        Обработка открывающих HTML-тегов.
-        Сбрасывает буфер и устанавливает флаги форматирования.
+        if tag == 'br':
+            return
 
-        Args:
-            tag: Имя тега (b, i, u и т.д.)
-            attrs: Атрибуты тега (не используются)
-        """
+        # Сбрасываем буфер перед изменением стиля
         self._flush_buffer()
+
         if tag in ['b', 'strong']:
             self.bold = True
         elif tag in ['i', 'em']:
             self.italic = True
         elif tag == 'u':
             self.underline = True
+        elif tag in ['s', 'strike', 'del']:
+            self.strike = True
+        elif tag in ['span', 'div']:
+            attrs_dict = dict(attrs)
+            style_dict = self._parse_style(attrs_dict.get('style', ''))
+
+            if 'font-size' in style_dict:
+                size_str = style_dict['font-size'].replace('px', '').strip()
+                try:
+                    self.font_size = int(size_str)
+                except ValueError:
+                    pass
+
+            if 'text-align' in style_dict:
+                self.alignment = style_dict['text-align']
+
+            if tag == 'div':
+                self.in_div = True
 
     def handle_endtag(self, tag):
-        """
-        Обработка закрывающих HTML-тегов.
-        Сбрасывает буфер и снимает флаги форматирования.
+        if tag == 'br':
+            self._flush_buffer()
+            self.paragraph.add_run('\n')
+            return
 
-        Args:
-            tag: Имя закрывающегося тега
-        """
         self._flush_buffer()
+
         if tag in ['b', 'strong']:
             self.bold = False
         elif tag in ['i', 'em']:
             self.italic = False
         elif tag == 'u':
             self.underline = False
+        elif tag in ['s', 'strike', 'del']:
+            self.strike = False
+        elif tag == 'span':
+            self.font_size = None
+        elif tag == 'div':
+            # После div добавляем перенос строки
+            self.paragraph.add_run('\n')
+            self.in_div = False
+            self.alignment = None
 
     def handle_data(self, data):
-        """
-        Обработка текстового содержимого между тегами.
-        Добавляет текст в буфер для последующего форматирования.
+        # Игнорируем пустые строки между тегами
+        if data.strip():
+            self.text_buffer.append(data)
 
-        Args:
-            data: Текстовое содержимое
-        """
-        self.text_buffer.append(data)
+    def _parse_style(self, style_string):
+        styles = {}
+        if not style_string:
+            return styles
+
+        for item in style_string.split(';'):
+            if ':' in item:
+                prop, value = item.split(':', 1)
+                styles[prop.strip()] = value.strip()
+
+        return styles
 
     def _flush_buffer(self):
-        """
-        Сбрасывает накопленный текст в run с текущим форматированием.
-        Корректно обрабатывает переносы строк, разбивая текст на части.
-        """
         if not self.text_buffer:
             return
 
         text = ''.join(self.text_buffer)
         self.text_buffer = []
 
-        # Разбиваем текст по переносам строк
-        lines = text.split('\n')
-        for i, line in enumerate(lines):
-            if line:
-                # Создаем run с текущим форматированием
-                run = self.paragraph.add_run(line)
-                run.bold = self.bold
-                run.italic = self.italic
-                run.underline = self.underline
+        if not text.strip():
+            return
 
-            # Добавляем перенос строки между частями (кроме последней)
-            if i < len(lines) - 1:
-                self.paragraph.add_run('\n')
+        # Создаем run с форматированием
+        run = self.paragraph.add_run(text)
+        run.bold = self.bold
+        run.italic = self.italic
+        run.underline = self.underline
+
+        if self.strike:
+            run.font.strike = True
+
+        if self.font_size:
+            run.font.size = Pt(self.font_size)
 
     def close(self):
-        """
-        Завершение парсинга HTML.
-        Сбрасывает оставшийся буфер и вызывает родительский close().
-        """
         self._flush_buffer()
         super().close()
 
@@ -299,15 +311,13 @@ class DocxFormatter(BaseFormatter):
     def _add_textblock(self, doc: Document, textblock_data: Dict):
         """
         Добавляет текстовый блок с HTML-форматированием в документ.
-        Парсит HTML-содержимое (b, i, u теги) и применяет форматирование
-        к runs. Также применяет выравнивание и размер шрифта.
+        Обрабатывает div-блоки с разным выравниванием и inline-стили.
 
         Args:
             doc: Документ DOCX
             textblock_data: Словарь с данными текстового блока:
-                - content: HTML-содержимое
-                - formatting: объект с параметрами форматирования
-                  (alignment, fontSize, bold, italic, underline)
+                - content: HTML-содержимое с div/span и inline-стилями
+                - formatting: базовые параметры (fontSize, alignment)
         """
         content = textblock_data.get('content', '')
         formatting = textblock_data.get('formatting', {})
@@ -315,27 +325,84 @@ class DocxFormatter(BaseFormatter):
         if not content:
             return
 
-        paragraph = doc.add_paragraph()
+        # Очищаем контент
+        content = content.strip()
 
-        # Применение выравнивания текста (left, center, right, justify)
-        alignment = formatting.get('alignment', 'left')
+        # Разбиваем по div-блокам
+        import re
+
+        # Простое разделение по div
+        div_pattern = r'<div[^>]*>.*?</div>'
+        div_matches = list(re.finditer(div_pattern, content, re.DOTALL))
+
+        if not div_matches:
+            # Нет div-блоков, обрабатываем как один параграф
+            blocks = [{'content': content, 'alignment': formatting.get('alignment', 'left')}]
+        else:
+            blocks = []
+            last_end = 0
+
+            for match in div_matches:
+                # Контент до div
+                if match.start() > last_end:
+                    pre_content = content[last_end:match.start()].strip()
+                    if pre_content:
+                        blocks.append({'content': pre_content, 'alignment': formatting.get('alignment', 'left')})
+
+                # Извлекаем контент и стиль div
+                div_html = match.group(0)
+                div_content_match = re.search(r'<div[^>]*>(.*?)</div>', div_html, re.DOTALL)
+                if div_content_match:
+                    div_content = div_content_match.group(1).strip()
+
+                    # Извлекаем text-align
+                    style_match = re.search(r'style=["\']([^"\']*)["\']', div_html)
+                    alignment = formatting.get('alignment', 'left')
+                    if style_match:
+                        style_str = style_match.group(1)
+                        align_match = re.search(r'text-align:\s*([^;]+)', style_str)
+                        if align_match:
+                            alignment = align_match.group(1).strip()
+
+                    blocks.append({'content': div_content, 'alignment': alignment})
+
+                last_end = match.end()
+
+            # Контент после последнего div
+            if last_end < len(content):
+                post_content = content[last_end:].strip()
+                if post_content:
+                    blocks.append({'content': post_content, 'alignment': formatting.get('alignment', 'left')})
+
+        # Маппинг выравнивания
         alignment_map = {
             'center': WD_PARAGRAPH_ALIGNMENT.CENTER,
             'right': WD_PARAGRAPH_ALIGNMENT.RIGHT,
             'justify': WD_PARAGRAPH_ALIGNMENT.JUSTIFY,
             'left': WD_PARAGRAPH_ALIGNMENT.LEFT
         }
-        paragraph.alignment = alignment_map.get(alignment, WD_PARAGRAPH_ALIGNMENT.LEFT)
 
-        # Парсинг HTML и добавление в параграф с форматированием через runs
-        parser = HTMLToDocxParser(paragraph)
-        parser.feed(content)
-        parser.close()
+        # Создаем параграфы для каждого блока
+        for block in blocks:
+            if not block['content']:
+                continue
 
-        # Применение размера шрифта ко всем runs параграфа
-        font_size = formatting.get('fontSize', 14)
-        for run in paragraph.runs:
-            run.font.size = Pt(font_size)
+            paragraph = doc.add_paragraph()
+            paragraph.alignment = alignment_map.get(block['alignment'], WD_PARAGRAPH_ALIGNMENT.LEFT)
+
+            # Парсинг HTML
+            parser = HTMLToDocxParser(paragraph)
+            parser.feed(block['content'])
+            parser.close()
+
+            # Применение базового размера шрифта
+            base_font_size = formatting.get('fontSize', 14)
+            for run in paragraph.runs:
+                if not run.font.size:
+                    run.font.size = Pt(base_font_size)
+
+        # Пустой параграф после блока
+        doc.add_paragraph()
 
     def _add_violation(self, doc: Document, violation_data: Dict):
         """

@@ -1,10 +1,106 @@
-/*
- * Область редактируемого текстового контента
- * Редактируемый блок с форматированием для текстовых элементов
- */
+/* Тулбар */
+.textblock-toolbar-global {
+    position: fixed;
+    top: 60px;
+    left: 50%;
+    transform: translateX(-50%);
+    background: var(--bg-primary);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    padding: 0.5rem 0.75rem;
+    box-shadow: 0 0.125rem 0.75rem rgba(0, 0, 0, 0.1);
+    display: flex;
+    align-items: center;
+    gap: 0.25rem;
+    z-index: 1000;
+    transition: opacity 0.2s ease;
+}
 
-/* Контейнер текстового блока */
-.textblock-content {
+.textblock-toolbar-global.hidden {
+    opacity: 0;
+    pointer-events: none;
+}
+
+/* Группы кнопок */
+.toolbar-group {
+    display: flex;
+    align-items: center;
+    gap: 0.125rem;
+}
+
+/* Разделитель */
+.toolbar-separator {
+    width: 1px;
+    height: 1.5rem;
+    background: var(--border);
+    margin: 0 0.25rem;
+}
+
+/* Кнопки */
+.toolbar-btn {
+    width: 2rem;
+    height: 2rem;
+    border: 1px solid transparent;
+    background: transparent;
+    border-radius: calc(var(--radius) * 0.75);
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 0.875rem;
+    color: var(--text-primary);
+    transition: all 0.15s ease;
+}
+
+.toolbar-btn:hover {
+    background: var(--bg-secondary);
+    border-color: var(--border-medium);
+}
+
+.toolbar-btn.active {
+    background: var(--primary-subtle);
+    border-color: var(--primary);
+    color: var(--primary);
+}
+
+.toolbar-btn:active {
+    transform: scale(0.95);
+}
+
+/* Select элементы */
+.toolbar-select {
+    height: 2rem;
+    padding: 0 0.5rem;
+    border: 1px solid var(--border);
+    border-radius: calc(var(--radius) * 0.75);
+    background: var(--bg-primary);
+    font-size: 0.8125rem;
+    color: var(--text-primary);
+    cursor: pointer;
+    transition: all 0.15s ease;
+}
+
+.toolbar-select:hover {
+    border-color: var(--border-medium);
+}
+
+.toolbar-select:focus {
+    outline: none;
+    border-color: var(--primary);
+    box-shadow: 0 0 0 0.125rem var(--primary-subtle);
+}
+
+#fontSizeSelect {
+    width: 4.375rem;
+}
+
+/* Секция текстового блока */
+.textblock-section {
+    margin-bottom: 0.75rem;
+}
+
+/* Редактор текстового блока */
+.textblock-editor {
     padding: 0.75rem 1rem;
     border: 1px solid var(--border);
     border-radius: var(--radius);
@@ -12,34 +108,63 @@
     min-height: 5rem;
     font-family: inherit;
     font-size: 0.9375rem;
-    line-height: 1.6;
+    line-height: 1.5;
     color: var(--text-primary);
     transition: all 0.2s ease;
+    cursor: text;
 }
 
 /* Подсветка границы при наведении */
-.textblock-content:hover {
+.textblock-editor:hover {
     border-color: var(--border-medium);
 }
 
-/* Акцент при фокусе на текстовом блоке */
-.textblock-content:focus {
+/* Акцент при фокусе */
+.textblock-editor:focus {
     outline: none;
     border-color: var(--primary);
     box-shadow: 0 0 0 0.1875rem var(--primary-subtle);
 }
 
-/* Курсор для редактируемого блока */
-.textblock-content[contenteditable="true"] {
-    cursor: text;
-}
-
-/* Отступ между абзацами */
-.textblock-content p {
+/* Отступы между абзацами */
+.textblock-editor p {
     margin-bottom: 0.5rem;
 }
 
-/* Убираем отступ у последнего абзаца */
-.textblock-content p:last-child {
+.textblock-editor p:last-child {
     margin-bottom: 0;
+}
+
+/* Форматированный текст */
+.textblock-editor strong,
+.textblock-editor b {
+    font-weight: 600;
+}
+
+.textblock-editor em,
+.textblock-editor i {
+    font-style: italic;
+}
+
+.textblock-editor u {
+    text-decoration: underline;
+}
+
+.textblock-editor s,
+.textblock-editor strike {
+    text-decoration: line-through;
+}
+
+/* Переносы строк */
+.textblock-editor br {
+    display: block;
+    content: "";
+    margin: 0.25rem 0;
+}
+
+/* Placeholder для пустого редактора */
+.textblock-editor:empty:before {
+    content: attr(data-placeholder);
+    color: var(--text-tertiary);
+    pointer-events: none;
 }

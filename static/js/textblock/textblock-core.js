@@ -1,19 +1,19 @@
 /**
  * Менеджер для управления текстовыми блоками
- * Отвечает за создание, редактирование и форматирование текстовых блоков в документе
+ * Современный подход с поддержкой расширенного форматирования как в Word
  */
 class TextBlockManager {
-    /**
-     * Создаёт экземпляр TextBlockManager
-     */
     constructor() {
         this.selectedTextBlock = null;
         this.globalToolbar = null;
         this.activeEditor = null;
+
+        // Конфигурация доступных размеров шрифта
+        this.fontSizes = [8, 9, 10, 11, 12, 14, 16, 18, 20, 22, 24, 26, 28, 36, 48, 72];
     }
 
     /**
-     * Показывает панель инструментов форматирования
+     * Показывает панель инструментов
      */
     showToolbar() {
         if (this.globalToolbar) {
@@ -22,7 +22,7 @@ class TextBlockManager {
     }
 
     /**
-     * Скрывает панель инструментов форматирования
+     * Скрывает панель инструментов
      */
     hideToolbar() {
         if (this.globalToolbar) {
@@ -32,7 +32,6 @@ class TextBlockManager {
 
     /**
      * Устанавливает активный редактор
-     * @param {HTMLElement} editor - Элемент редактора
      */
     setActiveEditor(editor) {
         this.activeEditor = editor;
@@ -47,8 +46,6 @@ class TextBlockManager {
 
     /**
      * Получает текстовый блок по ID
-     * @param {string} textBlockId - ID текстового блока
-     * @returns {Object|null} Объект текстового блока или null
      */
     getTextBlock(textBlockId) {
         return AppState.textBlocks[textBlockId] || null;
@@ -56,8 +53,6 @@ class TextBlockManager {
 
     /**
      * Сохраняет контент текстового блока
-     * @param {string} textBlockId - ID текстового блока
-     * @param {string} content - HTML-контент
      */
     saveContent(textBlockId, content) {
         const textBlock = this.getTextBlock(textBlockId);
@@ -68,15 +63,42 @@ class TextBlockManager {
     }
 
     /**
-     * Обновляет форматирование текстового блока
-     * @param {string} textBlockId - ID текстового блока
-     * @param {Object} formatting - Объект с настройками форматирования
+     * Выполняет команду форматирования
      */
-    updateFormatting(textBlockId, formatting) {
-        const textBlock = this.getTextBlock(textBlockId);
-        if (textBlock) {
-            Object.assign(textBlock.formatting, formatting);
-            PreviewManager.update();
+    execCommand(command, value = null) {
+        if (!this.activeEditor) return false;
+
+        this.activeEditor.focus();
+
+        const result = document.execCommand(command, false, value);
+
+        if (result) {
+            const textBlockId = this.activeEditor.dataset.textBlockId;
+            this.saveContent(textBlockId, this.activeEditor.innerHTML);
+        }
+
+        return result;
+    }
+
+    /**
+     * Проверяет состояние команды форматирования
+     */
+    queryCommandState(command) {
+        try {
+            return document.queryCommandState(command);
+        } catch (e) {
+            return false;
+        }
+    }
+
+    /**
+     * Получает значение команды
+     */
+    queryCommandValue(command) {
+        try {
+            return document.queryCommandValue(command);
+        } catch (e) {
+            return '';
         }
     }
 }

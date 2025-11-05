@@ -1,12 +1,9 @@
 /**
- * Расширение TextBlockManager для работы с редактором
+ * Расширение для работы с редактором
  */
 Object.assign(TextBlockManager.prototype, {
     /**
      * Создаёт DOM-элемент текстового блока с редактором
-     * @param {Object} textBlock - Объект текстового блока из состояния приложения
-     * @param {Object} node - Узел дерева документа, к которому привязан блок
-     * @returns {HTMLElement} Готовый DOM-элемент секции с редактором
      */
     createTextBlockElement(textBlock, node) {
         const section = document.createElement('div');
@@ -21,14 +18,13 @@ Object.assign(TextBlockManager.prototype, {
 
     /**
      * Создаёт элемент редактора
-     * @param {Object} textBlock - Объект текстового блока
-     * @returns {HTMLElement} Элемент редактора
      */
     createEditor(textBlock) {
         const editor = document.createElement('div');
         editor.className = 'textblock-editor';
         editor.contentEditable = 'true';
         editor.dataset.textBlockId = textBlock.id;
+        editor.dataset.placeholder = 'Введите текст...';
         editor.innerHTML = textBlock.content || '';
 
         this.applyFormatting(editor, textBlock.formatting);
@@ -38,32 +34,46 @@ Object.assign(TextBlockManager.prototype, {
     },
 
     /**
+     * Применяет форматирование к редактору
+     */
+    applyFormatting(editor, formatting) {
+        if (formatting.fontSize) {
+            editor.style.fontSize = `${formatting.fontSize}px`;
+        }
+        if (formatting.alignment) {
+            const alignmentMap = {
+                'left': 'left',
+                'center': 'center',
+                'right': 'right',
+                'justify': 'justify'
+            };
+            editor.style.textAlign = alignmentMap[formatting.alignment] || 'left';
+        }
+    },
+
+    /**
      * Привязывает обработчики событий к редактору
-     * @param {HTMLElement} editor - Элемент редактора
-     * @param {Object} textBlock - Объект текстового блока
      */
     attachEditorEvents(editor, textBlock) {
         editor.addEventListener('focus', () => this.handleEditorFocus(editor, textBlock));
         editor.addEventListener('blur', () => this.handleEditorBlur(editor, textBlock));
         editor.addEventListener('input', () => this.handleEditorInput(editor, textBlock));
         editor.addEventListener('keydown', (e) => this.handleEditorKeydown(e, editor, textBlock));
+        editor.addEventListener('mouseup', () => this.handleSelectionChange());
+        editor.addEventListener('keyup', () => this.handleSelectionChange());
     },
 
     /**
      * Обработчик фокуса редактора
-     * @param {HTMLElement} editor - Элемент редактора
-     * @param {Object} textBlock - Объект текстового блока
      */
     handleEditorFocus(editor, textBlock) {
         this.setActiveEditor(editor);
         this.showToolbar();
-        this.syncToolbar(textBlock);
+        this.updateToolbarState();
     },
 
     /**
-     * Обработчик потери фокуса редактора
-     * @param {HTMLElement} editor - Элемент редактора
-     * @param {Object} textBlock - Объект текстового блока
+     * Обработчик потери фокуса
      */
     handleEditorBlur(editor, textBlock) {
         textBlock.content = editor.innerHTML;
@@ -78,9 +88,7 @@ Object.assign(TextBlockManager.prototype, {
     },
 
     /**
-     * Обработчик ввода в редакторе с debounce
-     * @param {HTMLElement} editor - Элемент редактора
-     * @param {Object} textBlock - Объект текстового блока
+     * Обработчик ввода с debounce
      */
     handleEditorInput(editor, textBlock) {
         if (editor.saveTimeout) {
@@ -94,26 +102,49 @@ Object.assign(TextBlockManager.prototype, {
     },
 
     /**
-     * Обработчик нажатий клавиш в редакторе
-     * @param {KeyboardEvent} e - Событие клавиатуры
-     * @param {HTMLElement} editor - Элемент редактора
-     * @param {Object} textBlock - Объект текстового блока
+     * Обработчик клавиш
      */
     handleEditorKeydown(e, editor, textBlock) {
+        // Обработка горячих клавиш
+        if (e.ctrlKey || e.metaKey) {
+            switch (e.key.toLowerCase()) {
+                case 'b':
+                    e.preventDefault();
+                    this.execCommand('bold');
+                    this.updateToolbarState();
+                    break;
+                case 'i':
+                    e.preventDefault();
+                    this.execCommand('italic');
+                    this.updateToolbarState();
+                    break;
+                case 'u':
+                    e.preventDefault();
+                    this.execCommand('underline');
+                    this.updateToolbarState();
+                    break;
+            }
+        }
+
+        // Shift+Enter - двойной перенос
         if (e.key === 'Enter' && e.shiftKey) {
             e.preventDefault();
-            document.execCommand('insertHTML', false, '<br><br>');
-            textBlock.content = editor.innerHTML;
-            PreviewManager.update();
-        } else if (e.key === 'Enter') {
-            e.preventDefault();
-            textBlock.content = editor.innerHTML;
-            PreviewManager.update();
-            editor.blur();
-        } else if (e.key === 'Escape') {
+            this.execCommand('insertHTML', '<br><br>');
+        }
+        // Escape - выход
+        else if (e.key === 'Escape') {
             e.preventDefault();
             e.stopPropagation();
             editor.blur();
+        }
+    },
+
+    /**
+     * Обработчик изменения выделения
+     */
+    handleSelectionChange() {
+        if (this.activeEditor) {
+            this.updateToolbarState();
         }
     }
 });

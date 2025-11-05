@@ -61,17 +61,11 @@ class TextBlockFormattingSchema(BaseModel):
     Схема форматирования текстового блока.
 
     Attributes:
-        bold: Применить жирное начертание
-        italic: Применить курсивное начертание
-        underline: Применить подчеркивание
-        fontSize: Размер шрифта в пунктах
+        fontSize: Базовый размер шрифта в пикселях
         alignment: Выравнивание текста (left/center/right/justify)
     """
-    bold: bool = False
-    italic: bool = False
-    underline: bool = False
-    fontSize: int = 14
-    alignment: str = "left"
+    fontSize: int = Field(default=14, description="Базовый размер шрифта")
+    alignment: str = Field(default="left", description="Выравнивание")
 
 
 class TextBlockSchema(BaseModel):
@@ -81,15 +75,15 @@ class TextBlockSchema(BaseModel):
     Attributes:
         id: Уникальный идентификатор текстового блока
         nodeId: ID узла дерева, к которому привязан блок
-        content: Содержимое блока (может содержать HTML)
-        formatting: Параметры форматирования текста
+        content: HTML-содержимое блока с inline-форматированием
+        formatting: Базовые параметры форматирования текста
     """
     id: str = Field(description="ID текстового блока")
     nodeId: str = Field(description="ID узла дерева")
-    content: str = Field(default="", description="Содержимое текстового блока")
+    content: str = Field(default="", description="HTML-содержимое")
     formatting: TextBlockFormattingSchema = Field(
         default_factory=TextBlockFormattingSchema,
-        description="Форматирование текста"
+        description="Базовое форматирование"
     )
 
 
