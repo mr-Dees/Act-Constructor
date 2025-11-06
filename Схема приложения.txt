@@ -112,6 +112,7 @@ UI_for_EP_v_KAP/
 │       │   ├── context-menu-core.js
 │       │   ├── context-menu-tree.js
 │       │   ├── context-menu-table.js
+│       │   ├── context-menu-links-footnotes.js
 │       │   └── context-menu-violation.js
 │       ├── textblock/
 │       │   ├── textblock-core.js
@@ -266,6 +267,7 @@ UI_for_EP_v_KAP/
 │       │   ├── context-menu-core.js
 │       │   ├── context-menu-tree.js
 │       │   ├── context-menu-table.js
+│       │   ├── context-menu-links-footnotes.js
 │       │   └── context-menu-violation.js
 │       ├── textblock/
 │       │   ├── textblock-core.js
