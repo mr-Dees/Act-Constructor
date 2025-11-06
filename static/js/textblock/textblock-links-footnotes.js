@@ -2,9 +2,6 @@
  * Расширение TextBlockManager для работы с гиперссылками и сносками
  */
 
-/**
- * Добавляем новые методы в TextBlockManager
- */
 Object.assign(TextBlockManager.prototype, {
     /**
      * Текущий активный popup и tooltip
@@ -54,6 +51,7 @@ Object.assign(TextBlockManager.prototype, {
         if (isEditing) {
             // Обновляем существующую ссылку
             existingLink.setAttribute('data-link-url', url);
+            this.attachLinkFootnoteHandlers();
         } else {
             // Убираем пробелы в конце выделенного текста
             const trailingSpaces = selectedText.match(/\s+$/);
@@ -78,6 +76,9 @@ Object.assign(TextBlockManager.prototype, {
             // Заменяем выделение на ссылку
             range.deleteContents();
             range.insertNode(linkSpan);
+
+            // Применяем форматирование от окружающего текста
+            this.inheritFormattingToElement(linkSpan);
 
             // Добавляем обратно пробелы, которые были в конце
             let spaceNode = null;
@@ -115,14 +116,14 @@ Object.assign(TextBlockManager.prototype, {
             range.collapse(true);
             selection.removeAllRanges();
             selection.addRange(range);
+
+            // Обновляем обработчики событий
+            this.attachLinkFootnoteHandlers();
         }
 
         // Сохраняем изменения
         const textBlockId = this.activeEditor.dataset.textBlockId;
         this.saveContent(textBlockId, this.activeEditor.innerHTML);
-
-        // Обновляем обработчики событий
-        this.attachLinkFootnoteHandlers();
     },
 
     /**
@@ -166,6 +167,7 @@ Object.assign(TextBlockManager.prototype, {
         if (isEditing) {
             // Обновляем существующую сноску
             existingFootnote.setAttribute('data-footnote-text', noteText);
+            this.attachLinkFootnoteHandlers();
         } else {
             // Убираем пробелы в конце выделенного текста
             const trailingSpaces = selectedText.match(/\s+$/);
@@ -190,6 +192,9 @@ Object.assign(TextBlockManager.prototype, {
             // Заменяем выделение на сноску
             range.deleteContents();
             range.insertNode(footnoteSpan);
+
+            // Применяем форматирование от окружающего текста
+            this.inheritFormattingToElement(footnoteSpan);
 
             // Добавляем обратно пробелы, которые были в конце
             let spaceNode = null;
@@ -227,21 +232,20 @@ Object.assign(TextBlockManager.prototype, {
             range.collapse(true);
             selection.removeAllRanges();
             selection.addRange(range);
+
+            // Обновляем обработчики событий
+            this.attachLinkFootnoteHandlers();
         }
 
         // Сохраняем изменения
         const textBlockId = this.activeEditor.dataset.textBlockId;
         this.saveContent(textBlockId, this.activeEditor.innerHTML);
-
-        // Обновляем обработчики событий
-        this.attachLinkFootnoteHandlers();
     },
 
     /**
      * Включает режим inline-редактирования по двойному клику
      */
     enableInlineEditing(element) {
-        const isLink = element.classList.contains('text-link');
         const originalText = element.textContent;
 
         // Добавляем класс для визуального эффекта
@@ -357,7 +361,7 @@ Object.assign(TextBlockManager.prototype, {
     },
 
     /**
-     * Удаляет ссылку или сноску, сохраняя текст и контролируя пробелы
+     * Удаляет ссылку или сноску, сохраняя только размер шрифта
      */
     removeLinkOrFootnote(element) {
         if (!element) return;
@@ -365,6 +369,10 @@ Object.assign(TextBlockManager.prototype, {
         const text = element.textContent;
         const prevNode = element.previousSibling;
         const nextNode = element.nextSibling;
+
+        // Получаем только размер шрифта элемента перед удалением
+        const computedStyle = window.getComputedStyle(element);
+        const fontSize = computedStyle.fontSize;
 
         // Проверяем окружение элемента
         const hasPrevText = prevNode && prevNode.nodeType === 3 && prevNode.textContent.trim();
@@ -385,8 +393,17 @@ Object.assign(TextBlockManager.prototype, {
             replacementText = replacementText + ' ';
         }
 
-        const textNode = document.createTextNode(replacementText);
-        element.parentNode.replaceChild(textNode, element);
+        // Создаем span только с размером шрифта
+        const formattedSpan = document.createElement('span');
+        formattedSpan.textContent = replacementText;
+
+        // Применяем только размер шрифта
+        if (fontSize) {
+            formattedSpan.style.fontSize = fontSize;
+        }
+
+        // Заменяем ссылку/сноску на span только с fontSize
+        element.parentNode.replaceChild(formattedSpan, element);
 
         // Сохраняем изменения
         if (this.activeEditor) {
@@ -415,33 +432,31 @@ Object.assign(TextBlockManager.prototype, {
         const popup = document.createElement('div');
         popup.className = 'link-footnote-popup';
         popup.innerHTML = `
-        <div class="link-footnote-popup-header">
-            <span class="link-footnote-popup-label">${isLink ? '🔗 Ссылка' : '📑 Сноска'}</span>
-            <button class="popup-delete-btn" title="Удалить">🗑️</button>
-        </div>
-        <div class="link-footnote-popup-content">
-            <div class="popup-field">
-                <label class="popup-field-label">Отображаемый текст:</label>
-                <input type="text" class="link-footnote-popup-text-input" value="${this.escapeHtml(displayText)}">
+            <div class="link-footnote-popup-header">
+                <span class="link-footnote-popup-label">${isLink ? '🔗 Ссылка' : '📑 Сноска'}</span>
+                <button class="popup-delete-btn" title="Удалить">🗑️</button>
             </div>
-            <div class="popup-field">
-                <label class="popup-field-label">${isLink ? 'URL:' : 'Текст сноски:'}</label>
-                <textarea class="link-footnote-popup-input" rows="3">${this.escapeHtml(content)}</textarea>
+            <div class="link-footnote-popup-content">
+                <div class="popup-field">
+                    <label class="popup-field-label">Отображаемый текст:</label>
+                    <input type="text" class="link-footnote-popup-text-input" value="${this.escapeHtml(displayText)}">
+                </div>
+                <div class="popup-field">
+                    <label class="popup-field-label">${isLink ? 'URL:' : 'Текст сноски:'}</label>
+                    <textarea class="link-footnote-popup-input" rows="3">${this.escapeHtml(content)}</textarea>
+                </div>
             </div>
-        </div>
-    `;
+        `;
 
         document.body.appendChild(popup);
 
-        // Позиционируем popup по координатам ПКМ
-        const popupRect = popup.getBoundingClientRect();
-
+        // Позиционируем popup
         let left = x;
         let top = y;
 
-        // Проверяем границы экрана
         const viewportWidth = window.innerWidth;
         const viewportHeight = window.innerHeight;
+        const popupRect = popup.getBoundingClientRect();
 
         if (left + popupRect.width > viewportWidth) {
             left = viewportWidth - popupRect.width - 10;
@@ -504,7 +519,7 @@ Object.assign(TextBlockManager.prototype, {
             return true;
         };
 
-        // Обработчик Enter в текстовом поле - переход к textarea
+        // Обработчики клавиш
         textInput.addEventListener('keydown', (e) => {
             if (e.key === 'Enter') {
                 e.preventDefault();
@@ -516,7 +531,6 @@ Object.assign(TextBlockManager.prototype, {
             }
         });
 
-        // Обработчик Enter в textarea - сохранение
         textarea.addEventListener('keydown', (e) => {
             if (e.key === 'Enter' && !e.shiftKey) {
                 e.preventDefault();
@@ -529,25 +543,22 @@ Object.assign(TextBlockManager.prototype, {
             }
         });
 
-        // Кнопка удаления (корзина)
+        // Кнопка удаления
         popup.querySelector('.popup-delete-btn').addEventListener('click', (e) => {
             e.stopPropagation();
             this.hideLinkFootnotePopup();
             this.removeLinkOrFootnote(element);
         });
 
-        // Сохраняем ссылку на popup
         this.currentPopup = popup;
 
-        // Переменная для отслеживания начала выделения внутри popup
+        // Управление закрытием popup
         let selectionStartedInside = false;
 
-        // Обработчик начала выделения (mousedown)
         popup.addEventListener('mousedown', (e) => {
             selectionStartedInside = true;
         });
 
-        // Обработчик глобального mousedown для отслеживания начала выделения вне popup
         const globalMouseDownHandler = (e) => {
             if (!popup.contains(e.target)) {
                 selectionStartedInside = false;
@@ -556,11 +567,8 @@ Object.assign(TextBlockManager.prototype, {
 
         document.addEventListener('mousedown', globalMouseDownHandler);
 
-        // Обработчик клика - закрываем только если клик полностью вне popup
         const clickHandler = (e) => {
-            // Если клик произошел вне popup и выделение не началось внутри
             if (!popup.contains(e.target) && !selectionStartedInside) {
-                // Пытаемся сохранить изменения перед закрытием
                 const textChanged = textInput.value.trim() !== displayText;
                 const valueChanged = textarea.value.trim() !== content;
 
@@ -573,16 +581,13 @@ Object.assign(TextBlockManager.prototype, {
                 document.removeEventListener('mousedown', globalMouseDownHandler);
             }
 
-            // Сбрасываем флаг после обработки клика
             selectionStartedInside = false;
         };
 
-        // Добавляем обработчик клика с небольшой задержкой
         setTimeout(() => {
             document.addEventListener('click', clickHandler);
         }, 0);
 
-        // Глобальный обработчик Escape для закрытия popup
         const escapeHandler = (e) => {
             if (e.key === 'Escape') {
                 this.hideLinkFootnotePopup();
@@ -594,7 +599,6 @@ Object.assign(TextBlockManager.prototype, {
 
         document.addEventListener('keydown', escapeHandler);
 
-        // Сохраняем обработчики для очистки при закрытии
         popup._cleanupHandlers = () => {
             document.removeEventListener('keydown', escapeHandler);
             document.removeEventListener('click', clickHandler);
@@ -607,7 +611,6 @@ Object.assign(TextBlockManager.prototype, {
      */
     hideLinkFootnotePopup() {
         if (this.currentPopup) {
-            // Очищаем обработчики событий
             if (this.currentPopup._cleanupHandlers) {
                 this.currentPopup._cleanupHandlers();
             }
@@ -621,7 +624,6 @@ Object.assign(TextBlockManager.prototype, {
      * Показывает кастомный tooltip при наведении
      */
     showTooltip(element, event) {
-        // Скрываем предыдущий tooltip
         this.hideTooltip();
 
         const isLink = element.classList.contains('text-link');
@@ -631,21 +633,18 @@ Object.assign(TextBlockManager.prototype, {
 
         if (!content) return;
 
-        // Создаем tooltip
         const tooltip = document.createElement('div');
         tooltip.className = 'link-footnote-tooltip';
         tooltip.textContent = content;
 
         document.body.appendChild(tooltip);
 
-        // Позиционируем tooltip относительно элемента
         const rect = element.getBoundingClientRect();
         const tooltipRect = tooltip.getBoundingClientRect();
 
         let left = rect.left + (rect.width / 2) - (tooltipRect.width / 2);
         let top = rect.bottom + 8;
 
-        // Проверяем границы экрана
         const viewportWidth = window.innerWidth;
         const viewportHeight = window.innerHeight;
 
@@ -695,12 +694,11 @@ Object.assign(TextBlockManager.prototype, {
     attachLinkFootnoteHandlers() {
         if (!this.activeEditor) return;
 
-        // Находим все ссылки и сноски
         const links = this.activeEditor.querySelectorAll('.text-link');
         const footnotes = this.activeEditor.querySelectorAll('.text-footnote');
 
         [...links, ...footnotes].forEach(element => {
-            // Удаляем старые обработчики (если есть)
+            // Удаляем старые обработчики
             if (element._contextmenuHandler) {
                 element.removeEventListener('contextmenu', element._contextmenuHandler);
             }
@@ -730,7 +728,6 @@ Object.assign(TextBlockManager.prototype, {
 
             // Обработчик наведения для tooltip
             element._mouseenterHandler = (e) => {
-                // Не показываем tooltip в режиме редактирования
                 if (element.classList.contains('editing-mode')) return;
 
                 this.tooltipTimeout = setTimeout(() => {
@@ -748,6 +745,12 @@ Object.assign(TextBlockManager.prototype, {
             element.addEventListener('dblclick', element._dblclickHandler);
             element.addEventListener('mouseenter', element._mouseenterHandler);
             element.addEventListener('mouseleave', element._mouseleaveHandler);
+
+            // Предотвращаем случайное редактирование
+            element.addEventListener('click', (e) => {
+                e.preventDefault();
+                e.stopPropagation();
+            }, true);
         });
     }
 });
@@ -759,4 +762,9 @@ const originalHandleEditorFocus = TextBlockManager.prototype.handleEditorFocus;
 TextBlockManager.prototype.handleEditorFocus = function (editor, textBlock) {
     originalHandleEditorFocus.call(this, editor, textBlock);
     this.attachLinkFootnoteHandlers();
+
+    // Применяем форматирование к существующим ссылкам и сноскам при загрузке
+    setTimeout(() => {
+        this.applyFormattingToNewNodes(editor);
+    }, 100);
 };

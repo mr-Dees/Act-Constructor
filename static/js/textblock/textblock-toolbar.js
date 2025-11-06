@@ -90,6 +90,7 @@ Object.assign(TextBlockManager.prototype, {
         this.globalToolbar.querySelectorAll('.toolbar-btn[data-command]').forEach(btn => {
             btn.addEventListener('click', (e) => {
                 e.preventDefault();
+                e.stopPropagation();
                 const command = btn.dataset.command;
 
                 // Специальная обработка для ссылок и сносок
@@ -101,6 +102,13 @@ Object.assign(TextBlockManager.prototype, {
                     this.execCommand(command);
                 }
 
+                // Возвращаем фокус в редактор
+                if (this.activeEditor) {
+                    this.activeEditor.focus();
+                    // Применяем форматирование к элементам
+                    this.applyFormattingToNewNodes(this.activeEditor);
+                }
+
                 this.updateToolbarState();
             });
         });
@@ -109,24 +117,46 @@ Object.assign(TextBlockManager.prototype, {
         const fontSizeSelect = this.globalToolbar.querySelector('#fontSizeSelect');
         if (fontSizeSelect) {
             fontSizeSelect.addEventListener('change', (e) => {
+                e.preventDefault();
+                e.stopPropagation();
                 this.applyFontSize(parseInt(e.target.value));
+                if (this.activeEditor) {
+                    this.activeEditor.focus();
+                    this.applyFormattingToNewNodes(this.activeEditor);
+                }
+                this.updateToolbarState();
             });
         }
     },
 
     /**
-     * Применяет размер шрифта к выделенному тексту или всему блоку
+     * Применяет размер шрифта к выделенному тексту, элементам или всему блоку
      */
     applyFontSize(fontSize) {
         if (!this.activeEditor) return;
 
         this.activeEditor.focus();
-
         const selection = window.getSelection();
 
+        // Если есть выделение
         if (selection && !selection.isCollapsed && selection.rangeCount > 0) {
-            // Применяем к выделенному тексту
-            this.execCommand('fontSize', '7'); // Используем временное значение
+            const range = selection.getRangeAt(0);
+
+            // Проверяем, находимся ли мы в ссылке или сноске
+            const parentLink = this.findParentLink(range.commonAncestorContainer);
+            const parentFootnote = this.findParentFootnote(range.commonAncestorContainer);
+
+            if (parentLink || parentFootnote) {
+                const element = parentLink || parentFootnote;
+                element.style.fontSize = `${fontSize}px`;
+
+                const textBlockId = this.activeEditor.dataset.textBlockId;
+                this.saveContent(textBlockId, this.activeEditor.innerHTML);
+                return;
+            }
+
+            // Применяем ко всему выделению через execCommand
+            this.execCommand('fontSize', '7');
 
             // Заменяем font tags на span с точным размером
             const fontTags = this.activeEditor.querySelectorAll('font[size="7"]');
@@ -137,7 +167,7 @@ Object.assign(TextBlockManager.prototype, {
                 font.parentNode.replaceChild(span, font);
             });
         } else {
-            // Применяем ко всему блоку
+            // Применяем ко всему блоку редактора
             this.activeEditor.style.fontSize = `${fontSize}px`;
         }
 
@@ -154,8 +184,17 @@ Object.assign(TextBlockManager.prototype, {
         // Обновляем состояние кнопок форматирования
         this.globalToolbar.querySelectorAll('.toolbar-btn[data-command]').forEach(btn => {
             const command = btn.dataset.command;
-            const isActive = this.queryCommandState(command);
-            btn.classList.toggle('active', isActive);
+
+            if (command === 'createLink' || command === 'createFootnote' || command === 'removeFormat') {
+                return; // Эти кнопки не имеют активного состояния
+            }
+
+            try {
+                const isActive = document.queryCommandState(command);
+                btn.classList.toggle('active', isActive);
+            } catch (e) {
+                btn.classList.remove('active');
+            }
         });
 
         // Обновляем размер шрифта
@@ -166,7 +205,7 @@ Object.assign(TextBlockManager.prototype, {
      * Обновляет выбранный размер шрифта в select
      */
     updateFontSizeSelect() {
-        const fontSizeSelect = this.globalToolbar.querySelector('#fontSizeSelect');
+        const fontSizeSelect = this.globalToolbar?.querySelector('#fontSizeSelect');
         if (!fontSizeSelect) return;
 
         const selection = window.getSelection();
@@ -177,7 +216,7 @@ Object.assign(TextBlockManager.prototype, {
             const container = range.commonAncestorContainer;
             const element = container.nodeType === 3 ? container.parentElement : container;
 
-            if (element && this.activeEditor.contains(element)) {
+            if (element && this.activeEditor?.contains(element)) {
                 const computedSize = window.getComputedStyle(element).fontSize;
                 fontSize = parseInt(computedSize);
             }

@@ -34,24 +34,6 @@ Object.assign(TextBlockManager.prototype, {
     },
 
     /**
-     * Применяет форматирование к редактору
-     */
-    applyFormatting(editor, formatting) {
-        if (formatting.fontSize) {
-            editor.style.fontSize = `${formatting.fontSize}px`;
-        }
-        if (formatting.alignment) {
-            const alignmentMap = {
-                'left': 'left',
-                'center': 'center',
-                'right': 'right',
-                'justify': 'justify'
-            };
-            editor.style.textAlign = alignmentMap[formatting.alignment] || 'left';
-        }
-    },
-
-    /**
      * Привязывает обработчики событий к редактору
      */
     attachEditorEvents(editor, textBlock) {
@@ -71,6 +53,10 @@ Object.assign(TextBlockManager.prototype, {
         this.setActiveEditor(editor);
         this.showToolbar();
         this.updateToolbarState();
+        this.attachLinkFootnoteHandlers();
+
+        // Применяем форматирование к ссылкам и сноскам при фокусе
+        this.applyFormattingToNewNodes(editor);
     },
 
     /**
@@ -98,6 +84,10 @@ Object.assign(TextBlockManager.prototype, {
 
         editor.saveTimeout = setTimeout(() => {
             textBlock.content = editor.innerHTML;
+
+            // Применяем форматирование к новым ссылкам и сноскам
+            this.applyFormattingToNewNodes(editor);
+
             PreviewManager.update();
         }, 500);
     },
@@ -140,6 +130,10 @@ Object.assign(TextBlockManager.prototype, {
                     e.preventDefault();
                     this.execCommand('underline');
                     this.updateToolbarState();
+                    break;
+                case 'k':
+                    e.preventDefault();
+                    this.createOrEditLink();
                     break;
             }
         }
