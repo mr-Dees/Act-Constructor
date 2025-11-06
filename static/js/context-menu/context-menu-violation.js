@@ -1,28 +1,36 @@
 /**
- * Расширение ContextMenuManager для операций с нарушениями
+ * Обработчик контекстного меню для нарушений
  */
-class ViolationContextMenu extends ContextMenuManager {
-    static show(x, y, options = {}) {
+class ViolationContextMenu {
+    constructor() {
+        this.currentMenu = null;
+    }
+
+    show(x, y, params = {}) {
         const {
             violation,
             contentContainer,
             itemId = null,
             insertPosition = 0
-        } = options;
+        } = params;
 
-        const existingMenu = document.querySelector('.violation-context-menu');
-        if (existingMenu) existingMenu.remove();
+        // Добавляем проверку на обязательные параметры
+        if (!violation || !contentContainer) {
+            console.error('ViolationContextMenu: violation и contentContainer обязательны');
+            return;
+        }
 
-        const menu = this.createMenu(violation, contentContainer, itemId, insertPosition);
-        menu.style.left = `${x}px`;
-        menu.style.top = `${y}px`;
+        this.removeExistingMenu();
 
-        document.body.appendChild(menu);
-        this.positionMenu(menu, x, y);
-        this.violationMenu = menu;
+        this.currentMenu = this.createMenu(violation, contentContainer, itemId, insertPosition);
+        this.currentMenu.style.left = `${x}px`;
+        this.currentMenu.style.top = `${y}px`;
+
+        document.body.appendChild(this.currentMenu);
+        ContextMenuManager.positionMenu(this.currentMenu, x, y);
     }
 
-    static createMenu(violation, contentContainer, itemId, insertPosition) {
+    createMenu(violation, contentContainer, itemId, insertPosition) {
         const menu = document.createElement('div');
         menu.className = 'violation-context-menu';
         menu.style.cssText = `
@@ -46,7 +54,8 @@ class ViolationContextMenu extends ContextMenuManager {
         addItems.forEach(item => {
             menu.appendChild(this.createMenuItem(item.label, () => {
                 this.handleAddContent(violation, item.action, contentContainer, insertPosition);
-                menu.remove();
+                this.removeExistingMenu();
+                ContextMenuManager.hide();
             }));
         });
 
@@ -54,14 +63,15 @@ class ViolationContextMenu extends ContextMenuManager {
             menu.appendChild(this.createSeparator());
             menu.appendChild(this.createMenuItem('🗑️ Удалить', () => {
                 this.handleDelete(violation, itemId, contentContainer);
-                menu.remove();
+                this.removeExistingMenu();
+                ContextMenuManager.hide();
             }, true));
         }
 
         return menu;
     }
 
-    static createMenuItem(label, clickHandler, isDanger = false) {
+    createMenuItem(label, clickHandler, isDanger = false) {
         const item = document.createElement('div');
         item.className = 'violation-context-menu-item';
         item.textContent = label;
@@ -72,6 +82,7 @@ class ViolationContextMenu extends ContextMenuManager {
             cursor: pointer;
             transition: background-color 0.2s;
             font-size: 0.875rem;
+            user-select: none;
             ${dangerColor}
         `;
 
@@ -92,31 +103,56 @@ class ViolationContextMenu extends ContextMenuManager {
         return item;
     }
 
-    static createSeparator() {
+    createSeparator() {
         const separator = document.createElement('div');
         separator.style.cssText = 'height: 1px; background-color: var(--border, #e0e0e0); margin: 4px 0;';
         return separator;
     }
 
-    static handleAddContent(violation, action, contentContainer, insertPosition) {
+    handleAddContent(violation, action, contentContainer, insertPosition) {
         if (!violation || !contentContainer) return;
 
         const actions = {
-            case: () => violationManager?.addContentItemAtPosition?.(violation, 'case', contentContainer, insertPosition),
-            image: () => violationManager?.triggerImageUploadAtPosition?.(violation, contentContainer, insertPosition),
-            text: () => violationManager?.addContentItemAtPosition?.(violation, 'freeText', contentContainer, insertPosition)
+            case: () => {
+                violationManager?.addContentItemAtPosition?.(
+                    violation,
+                    'case',
+                    contentContainer,
+                    insertPosition
+                );
+            },
+            image: () => {
+                violationManager?.triggerImageUploadAtPosition?.(
+                    violation,
+                    contentContainer,
+                    insertPosition
+                );
+            },
+            text: () => {
+                violationManager?.addContentItemAtPosition?.(
+                    violation,
+                    'freeText',
+                    contentContainer,
+                    insertPosition
+                );
+            }
         };
 
         actions[action]?.();
     }
 
-    static handleDelete(violation, itemId, contentContainer) {
+    handleDelete(violation, itemId, contentContainer) {
         if (!violation || !itemId || !contentContainer) return;
 
-        const itemIndex = violation.additionalContent.items.findIndex(item => item.id === itemId);
+        const itemIndex = violation.additionalContent.items.findIndex(
+            item => item.id === itemId
+        );
+
         if (itemIndex === -1) return;
 
         violation.additionalContent.items.splice(itemIndex, 1);
+
+        // Переиндексируем order
         violation.additionalContent.items.forEach((item, idx) => {
             item.order = idx;
         });
@@ -127,5 +163,12 @@ class ViolationContextMenu extends ContextMenuManager {
         }
 
         PreviewManager?.update?.();
+    }
+
+    removeExistingMenu() {
+        if (this.currentMenu) {
+            this.currentMenu.remove();
+            this.currentMenu = null;
+        }
     }
 }

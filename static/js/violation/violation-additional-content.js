@@ -105,23 +105,15 @@ Object.assign(ViolationManager.prototype, {
             // Проверяем, клик по элементу или по пустой области
             const clickedWrapper = e.target.closest('.content-item-wrapper');
 
+            const options = {
+                violation,
+                contentContainer,
+                itemId: clickedWrapper ? clickedWrapper.dataset.itemId : null,
+                insertPosition
+            };
+
             // Используем новый единый ContextMenuManager
-            if (clickedWrapper) {
-                const itemId = clickedWrapper.dataset.itemId;
-                ContextMenuManager.show(e.clientX, e.clientY, null, 'violation', {
-                    violation,
-                    contentContainer,
-                    itemId,
-                    insertPosition
-                });
-            } else {
-                ContextMenuManager.show(e.clientX, e.clientY, null, 'violation', {
-                    violation,
-                    contentContainer,
-                    itemId: null,
-                    insertPosition
-                });
-            }
+            ContextMenuManager.show(e.clientX, e.clientY, null, 'violation', options);
         });
 
         contentContainer.appendChild(itemsContainer);

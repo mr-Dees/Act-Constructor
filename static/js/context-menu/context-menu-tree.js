@@ -1,25 +1,33 @@
 /**
- * Расширение ContextMenuManager для операций с деревом
+ * Обработчик контекстного меню для дерева
  */
-class TreeContextMenu extends ContextMenuManager {
-    static initHandlers(menu) {
-        menu.querySelectorAll('.context-menu-item').forEach(item => {
+class TreeContextMenu {
+    constructor(menu) {
+        this.menu = menu;
+        this.initHandlers();
+    }
+
+    initHandlers() {
+        this.menu.querySelectorAll('.context-menu-item').forEach(item => {
             item.addEventListener('click', (e) => {
                 e.stopPropagation();
+
+                if (item.classList.contains('disabled')) return;
+
                 const action = item.dataset.action;
                 this.handleAction(action);
-                this.hide();
+                ContextMenuManager.hide();
             });
         });
     }
 
-    static show(x, y, nodeId) {
-        if (!this.menu) return;
-        this.positionMenu(this.menu, x, y);
+    show(x, y, params = {}) {
+        const {nodeId} = params;
+        ContextMenuManager.positionMenu(this.menu, x, y);
     }
 
-    static handleAction(action) {
-        const nodeId = this.currentNodeId;
+    handleAction(action) {
+        const nodeId = ContextMenuManager.currentNodeId;
         if (!nodeId) return;
 
         const node = AppState.findNodeById(nodeId);
@@ -47,7 +55,7 @@ class TreeContextMenu extends ContextMenuManager {
         }
     }
 
-    static handleAddChild(node, nodeId) {
+    handleAddChild(node, nodeId) {
         if (node.type === 'table') {
             alert('Нельзя добавлять дочерние элементы к таблице');
             return;
@@ -61,7 +69,7 @@ class TreeContextMenu extends ContextMenuManager {
         }
     }
 
-    static handleAddSibling(node, nodeId) {
+    handleAddSibling(node, nodeId) {
         const result = AppState.addNode(nodeId, '', false);
         if (result.success) {
             this.updateTreeViews();
@@ -70,7 +78,7 @@ class TreeContextMenu extends ContextMenuManager {
         }
     }
 
-    static handleAddTable(node, nodeId) {
+    handleAddTable(node, nodeId) {
         if (node.type === 'table') {
             alert('Нельзя добавлять таблицу к таблице');
             return;
@@ -84,7 +92,7 @@ class TreeContextMenu extends ContextMenuManager {
         }
     }
 
-    static handleAddTextBlock(node, nodeId) {
+    handleAddTextBlock(node, nodeId) {
         if (node.type === 'table' || node.type === 'textblock') {
             alert('Нельзя добавлять текстовый блок к этому элементу');
             return;
@@ -98,7 +106,7 @@ class TreeContextMenu extends ContextMenuManager {
         }
     }
 
-    static handleAddViolation(node, nodeId) {
+    handleAddViolation(node, nodeId) {
         if (node.type === 'table' || node.type === 'textblock' || node.type === 'violation') {
             alert('Нельзя добавлять нарушение к этому элементу');
             return;
@@ -112,7 +120,7 @@ class TreeContextMenu extends ContextMenuManager {
         }
     }
 
-    static handleDelete(node, nodeId) {
+    handleDelete(node, nodeId) {
         if (node.protected) {
             alert('Нельзя удалить защищенный элемент');
             return;
@@ -124,7 +132,7 @@ class TreeContextMenu extends ContextMenuManager {
         }
     }
 
-    static updateTreeViews() {
+    updateTreeViews() {
         treeManager.render();
         PreviewManager.update('previewTrim', 30);
         if (AppState.currentStep === 2) {

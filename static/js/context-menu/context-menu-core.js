@@ -1,22 +1,29 @@
 /**
  * Core менеджер контекстных меню
- * Содержит общую логику и делегирует специфичные операции
+ * Координирует работу специфичных менеджеров
  */
 class ContextMenuManager {
     static menu = null;
     static cellMenu = null;
-    static violationMenu = null;
     static currentNodeId = null;
     static activeMenuType = null;
+    static isInitialized = false;
+
+    // Регистрируем обработчики для каждого типа меню
+    static handlers = {
+        tree: null,
+        cell: null,
+        violation: null
+    };
 
     static init() {
+        if (this.isInitialized) return;
+        this.isInitialized = true;
+
         this.menu = document.getElementById('contextMenu');
         this.cellMenu = document.getElementById('cellContextMenu');
 
-        // Единый обработчик для закрытия меню
         this.attachGlobalClickHandler();
-
-        // Делегируем инициализацию специфичным менеджерам
         this.initializeMenuHandlers();
     }
 
@@ -30,13 +37,13 @@ class ContextMenuManager {
     }
 
     static initializeMenuHandlers() {
-        // Делегируем инициализацию обработчиков
         if (this.menu) {
-            TreeContextMenu.initHandlers(this.menu);
+            this.handlers.tree = new TreeContextMenu(this.menu);
         }
         if (this.cellMenu) {
-            CellContextMenu.initHandlers(this.cellMenu);
+            this.handlers.cell = new CellContextMenu(this.cellMenu);
         }
+        this.handlers.violation = new ViolationContextMenu();
     }
 
     static show(x, y, nodeId, type, options = {}) {
@@ -44,28 +51,21 @@ class ContextMenuManager {
         this.currentNodeId = nodeId;
         this.activeMenuType = type;
 
-        // Делегируем показ нужному менеджеру
-        switch (type) {
-            case 'tree':
-                TreeContextMenu.show(x, y, nodeId);
-                break;
-            case 'cell':
-                CellContextMenu.show(x, y, nodeId);
-                break;
-            case 'violation':
-                ViolationContextMenu.show(x, y, options);
-                break;
+        const handler = this.handlers[type];
+        if (handler) {
+            // Все обработчики получают одинаковые параметры
+            handler.show(x, y, {nodeId, ...options});
         }
     }
 
     static positionMenu(menu, x, y) {
         if (!menu) return;
 
-        menu.style.left = '-9999px';
-        menu.style.top = '-9999px';
+        menu.style.left = x + 'px';
+        menu.style.top = y + 'px';
         menu.classList.remove('hidden');
 
-        setTimeout(() => {
+        requestAnimationFrame(() => {
             const menuRect = menu.getBoundingClientRect();
             const viewportWidth = window.innerWidth || document.documentElement.clientWidth;
             const viewportHeight = window.innerHeight || document.documentElement.clientHeight;
@@ -85,16 +85,16 @@ class ContextMenuManager {
 
             menu.style.left = `${finalX}px`;
             menu.style.top = `${finalY}px`;
-        }, 1);
+        });
     }
 
     static hide() {
         if (this.menu) this.menu.classList.add('hidden');
         if (this.cellMenu) this.cellMenu.classList.add('hidden');
+        if (this.handlers.violation) {
+            this.handlers.violation.removeExistingMenu();
+        }
 
-        document.querySelectorAll('.violation-context-menu').forEach(m => m.remove());
-
-        this.violationMenu = null;
         this.activeMenuType = null;
     }
 }

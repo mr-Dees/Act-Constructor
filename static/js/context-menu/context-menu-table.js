@@ -1,31 +1,37 @@
 /**
- * Расширение ContextMenuManager для операций с ячейками таблицы
+ * Обработчик контекстного меню для ячеек таблицы
  */
-class CellContextMenu extends ContextMenuManager {
-    static initHandlers(menu) {
-        menu.querySelectorAll('.context-menu-item').forEach(item => {
+class CellContextMenu {
+    constructor(menu) {
+        this.menu = menu;
+        this.initHandlers();
+    }
+
+    initHandlers() {
+        this.menu.querySelectorAll('.context-menu-item').forEach(item => {
             item.addEventListener('click', (e) => {
                 e.stopPropagation();
+
                 if (item.classList.contains('disabled')) return;
 
                 const action = item.dataset.action;
                 this.handleAction(action);
-                this.hide();
+                ContextMenuManager.hide();
             });
         });
     }
 
-    static show(x, y, nodeId) {
-        if (!this.cellMenu) return;
+    show(x, y, params = {}) {
+        if (!this.menu) return;
 
         this.updateMenuState();
-        this.positionMenu(this.cellMenu, x, y);
+        ContextMenuManager.positionMenu(this.menu, x, y);
     }
 
-    static updateMenuState() {
+    updateMenuState() {
         const selectedCount = tableManager.selectedCells.length;
-        const mergeItem = this.cellMenu.querySelector('[data-action="merge-cells"]');
-        const unmergeItem = this.cellMenu.querySelector('[data-action="unmerge-cell"]');
+        const mergeItem = this.menu.querySelector('[data-action="merge-cells"]');
+        const unmergeItem = this.menu.querySelector('[data-action="unmerge-cell"]');
 
         if (mergeItem) {
             mergeItem.classList.toggle('disabled', selectedCount < 2);
@@ -42,7 +48,7 @@ class CellContextMenu extends ContextMenuManager {
         }
     }
 
-    static handleAction(action) {
+    handleAction(action) {
         const tableSizes = this.saveTableSizes();
 
         switch (action) {
@@ -57,14 +63,14 @@ class CellContextMenu extends ContextMenuManager {
         }
     }
 
-    static saveTableSizes() {
+    saveTableSizes() {
         if (tableManager.selectedCells.length === 0) return {};
 
         const table = tableManager.selectedCells[0].closest('table');
         return tableManager.preserveTableSizes(table);
     }
 
-    static restoreTableSizes(tableSizes) {
+    restoreTableSizes(tableSizes) {
         if (AppState.currentStep === 2) {
             ItemsRenderer.renderAll();
 
