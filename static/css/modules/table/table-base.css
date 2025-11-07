@@ -134,3 +134,241 @@
 .item-tables .editable-table {
     font-size: 0.875rem;
 }
+
+.context-menu-separator {
+    height: 1px;
+    background-color: #e0e0e0;
+    margin: 4px 0;
+}
+
+/* Tooltip для контекстного меню */
+.context-menu-tooltip {
+    position: fixed;
+    background: #2c3e50;
+    color: #fff;
+    padding: 8px 12px;
+    border-radius: 4px;
+    font-size: 13px;
+    white-space: nowrap;
+    z-index: 10001;
+    pointer-events: none;
+    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.2);
+    animation: tooltipFadeIn 0.15s ease-out;
+}
+
+@keyframes tooltipFadeIn {
+    from {
+        opacity: 0;
+        transform: translateX(-5px);
+    }
+    to {
+        opacity: 1;
+        transform: translateX(0);
+    }
+}
+
+/* Базовые классы для типов подсветки */
+.highlight-error {
+    position: relative;
+}
+
+.highlight-insert {
+    position: relative;
+}
+
+.highlight-warning {
+    position: relative;
+}
+
+/* Подсветка границ для вставки (зеленая) */
+.highlight-border-top.highlight-insert::before,
+.highlight-border-top:not(.highlight-error):not(.highlight-warning)::before {
+    content: '';
+    position: absolute;
+    top: -2px;
+    left: 0;
+    right: 0;
+    height: 4px;
+    background: #2ecc71;
+    z-index: 10;
+    animation: borderPulse 0.8s ease-in-out infinite;
+    box-shadow: 0 0 8px rgba(46, 204, 113, 0.6);
+}
+
+.highlight-border-bottom.highlight-insert::after,
+.highlight-border-bottom:not(.highlight-error):not(.highlight-warning)::after {
+    content: '';
+    position: absolute;
+    bottom: -2px;
+    left: 0;
+    right: 0;
+    height: 4px;
+    background: #2ecc71;
+    z-index: 10;
+    animation: borderPulse 0.8s ease-in-out infinite;
+    box-shadow: 0 0 8px rgba(46, 204, 113, 0.6);
+}
+
+.highlight-border-left.highlight-insert::before,
+.highlight-border-left:not(.highlight-error):not(.highlight-warning)::before {
+    content: '';
+    position: absolute;
+    left: -2px;
+    top: 0;
+    bottom: 0;
+    width: 4px;
+    background: #2ecc71;
+    z-index: 10;
+    animation: borderPulse 0.8s ease-in-out infinite;
+    box-shadow: 0 0 8px rgba(46, 204, 113, 0.6);
+}
+
+.highlight-border-right.highlight-insert::after,
+.highlight-border-right:not(.highlight-error):not(.highlight-warning)::after {
+    content: '';
+    position: absolute;
+    right: -2px;
+    top: 0;
+    bottom: 0;
+    width: 4px;
+    background: #2ecc71;
+    z-index: 10;
+    animation: borderPulse 0.8s ease-in-out infinite;
+    box-shadow: 0 0 8px rgba(46, 204, 113, 0.6);
+}
+
+/* Подсветка границ для удаления (желто-оранжевая) */
+.highlight-border-top.highlight-warning::before {
+    content: '';
+    position: absolute;
+    top: -2px;
+    left: 0;
+    right: 0;
+    height: 4px;
+    background: #f39c12;
+    z-index: 10;
+    animation: borderPulse 0.8s ease-in-out infinite;
+    box-shadow: 0 0 8px rgba(243, 156, 18, 0.6);
+}
+
+.highlight-border-bottom.highlight-warning::after {
+    content: '';
+    position: absolute;
+    bottom: -2px;
+    left: 0;
+    right: 0;
+    height: 4px;
+    background: #f39c12;
+    z-index: 10;
+    animation: borderPulse 0.8s ease-in-out infinite;
+    box-shadow: 0 0 8px rgba(243, 156, 18, 0.6);
+}
+
+.highlight-border-left.highlight-warning::before {
+    content: '';
+    position: absolute;
+    left: -2px;
+    top: 0;
+    bottom: 0;
+    width: 4px;
+    background: #f39c12;
+    z-index: 10;
+    animation: borderPulse 0.8s ease-in-out infinite;
+    box-shadow: 0 0 8px rgba(243, 156, 18, 0.6);
+}
+
+.highlight-border-right.highlight-warning::after {
+    content: '';
+    position: absolute;
+    right: -2px;
+    top: 0;
+    bottom: 0;
+    width: 4px;
+    background: #f39c12;
+    z-index: 10;
+    animation: borderPulse 0.8s ease-in-out infinite;
+    box-shadow: 0 0 8px rgba(243, 156, 18, 0.6);
+}
+
+/* Подсветка границ для ошибок (красная) */
+.highlight-border-top.highlight-error::before {
+    content: '';
+    position: absolute;
+    top: -2px;
+    left: 0;
+    right: 0;
+    height: 4px;
+    background: #e74c3c;
+    z-index: 10;
+    animation: borderPulseError 0.6s ease-in-out 3;
+    box-shadow: 0 0 8px rgba(231, 76, 60, 0.6);
+}
+
+.highlight-border-bottom.highlight-error::after {
+    content: '';
+    position: absolute;
+    bottom: -2px;
+    left: 0;
+    right: 0;
+    height: 4px;
+    background: #e74c3c;
+    z-index: 10;
+    animation: borderPulseError 0.6s ease-in-out 3;
+    box-shadow: 0 0 8px rgba(231, 76, 60, 0.6);
+}
+
+.highlight-border-left.highlight-error::before {
+    content: '';
+    position: absolute;
+    left: -2px;
+    top: 0;
+    bottom: 0;
+    width: 4px;
+    background: #e74c3c;
+    z-index: 10;
+    animation: borderPulseError 0.6s ease-in-out 3;
+    box-shadow: 0 0 8px rgba(231, 76, 60, 0.6);
+}
+
+.highlight-border-right.highlight-error::after {
+    content: '';
+    position: absolute;
+    right: -2px;
+    top: 0;
+    bottom: 0;
+    width: 4px;
+    background: #e74c3c;
+    z-index: 10;
+    animation: borderPulseError 0.6s ease-in-out 3;
+    box-shadow: 0 0 8px rgba(231, 76, 60, 0.6);
+}
+
+/* Анимации */
+@keyframes borderPulse {
+    0%, 100% {
+        opacity: 1;
+    }
+    50% {
+        opacity: 0.6;
+    }
+}
+
+@keyframes borderPulseError {
+    0%, 100% {
+        opacity: 1;
+    }
+    50% {
+        opacity: 0.5;
+    }
+}
+
+/* Стили для неактивных пунктов меню */
+.context-menu-item.disabled {
+    color: #95a5a6;
+    cursor: not-allowed;
+    opacity: 0.6;
+}
+
+.context-menu-item.disabled:hover {
+    background-color: #f8f9fa;
+}

@@ -71,9 +71,12 @@ class TableManager {
 
                 e.preventDefault();
 
-                if (!cell.classList.contains('selected') && this.selectedCells.length === 0) {
+                // Если нет выделенных ячеек или текущая ячейка не входит в выделение - выбираем её
+                if (this.selectedCells.length === 0 || !this.selectedCells.includes(cell)) {
+                    this.cellsOps.clearSelection();
                     this.cellsOps.selectCell(cell);
                 }
+                // Иначе сохраняем текущее множественное выделение
 
                 ContextMenuManager.show(e.clientX, e.clientY, null, 'cell');
             });
