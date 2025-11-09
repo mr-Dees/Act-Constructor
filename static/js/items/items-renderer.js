@@ -165,7 +165,6 @@ class ItemsRenderer {
         let clickCount = 0;
         let clickTimer = null;
 
-        // Обработка двойного клика для редактирования заголовка таблицы
         tableTitle.addEventListener('click', (e) => {
             clickCount++;
             if (clickCount === 1) {
@@ -217,14 +216,14 @@ class ItemsRenderer {
                 const cellEndCol = colIndex + colspan - 1;
                 const isLastColumn = cellEndCol >= numCols - 1;
 
-                // Добавляем ручку изменения ширины для некрайних колонок
-                if (!isLastColumn) {
+                // ИЗМЕНЕНО: добавляем ручку изменения ширины ТОЛЬКО для заголовков (isHeader)
+                if (cellData.isHeader && !isLastColumn) {
                     const resizeHandle = document.createElement('div');
                     resizeHandle.className = 'resize-handle';
                     cellEl.appendChild(resizeHandle);
                 }
 
-                // Добавляем ручку изменения высоты строки
+                // Добавляем ручку изменения высоты строки для всех ячеек
                 const rowResizeHandle = document.createElement('div');
                 rowResizeHandle.className = 'row-resize-handle';
                 cellEl.appendChild(rowResizeHandle);

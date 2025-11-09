@@ -2,6 +2,7 @@
  * Изменение размеров ячеек таблиц.
  * Обрабатывает интерактивное изменение ширины колонок и высоты строк с визуализацией.
  * Сохраняет размеры в AppState для восстановления после перерисовки.
+ * Использует относительные единицы (%) для адаптивности.
  */
 class TableSizes {
     constructor(tableManager) {
@@ -13,6 +14,7 @@ class TableSizes {
      * Начало изменения ширины колонки.
      * Синхронно изменяет ширину текущей и соседней колонки (компенсация).
      * Учитывает ячейки с colspan, которые перекрывают изменяемые колонки.
+     * Использует проценты для адаптивности к размеру экрана.
      * @param {MouseEvent} e - событие mousedown на ручке изменения размера
      */
     startColumnResize(e) {
@@ -20,10 +22,19 @@ class TableSizes {
         const table = cell.closest('table');
         const section = table.closest('.table-section');
         const startX = e.clientX;
-        const startWidth = cell.offsetWidth;
+
+        // Определяем последнюю колонку, которую покрывает эта ячейка
         const colIndex = parseInt(cell.dataset.col);
+        const colspan = cell.colSpan || 1;
+        const lastColIndex = colIndex + colspan - 1;
+
+        // Получаем текущую ширину таблицы для расчета процентов
+        const tableWidth = table.offsetWidth;
+        const startWidth = cell.offsetWidth;
+        const startWidthPercent = (startWidth / tableWidth) * 100;
 
         // Поиск следующей колонки для компенсирующего изменения ширины
+        // Ищем колонку ПОСЛЕ последней колонки объединения
         const allRows = table.querySelectorAll('tr');
         const firstRow = allRows[0];
         const firstRowCells = firstRow.querySelectorAll('td, th');
@@ -31,21 +42,25 @@ class TableSizes {
         let nextColIndex = null;
         let nextCell = null;
         let nextStartWidth = 0;
+        let nextStartWidthPercent = 0;
 
         for (let i = 0; i < firstRowCells.length; i++) {
             const testCell = firstRowCells[i];
             const testColIndex = parseInt(testCell.dataset.col);
-            if (testColIndex > colIndex) {
+            if (testColIndex > lastColIndex) {
                 nextColIndex = testColIndex;
                 nextCell = testCell;
                 nextStartWidth = testCell.offsetWidth;
+                nextStartWidthPercent = (nextStartWidth / tableWidth) * 100;
                 break;
             }
         }
 
-        // Ограничения размеров колонок
-        const minWidth = 80;
-        const maxWidth = 800;
+        // Ограничения размеров колонок в процентах от ширины таблицы
+        const minWidthPx = 80;
+        const maxWidthPx = tableWidth * 0.8;
+        const minWidthPercent = (minWidthPx / tableWidth) * 100;
+        const maxWidthPercent = 80;
 
         // Визуальная индикация процесса изменения размера
         document.body.style.cursor = 'col-resize';
@@ -70,67 +85,72 @@ class TableSizes {
          */
         const onMouseMove = (ev) => {
             const diff = ev.clientX - startX;
-            let newWidth = startWidth + diff;
-            newWidth = Math.max(minWidth, Math.min(maxWidth, newWidth));
+            const diffPercent = (diff / tableWidth) * 100;
 
-            let nextNewWidth = nextStartWidth;
+            let newWidthPercent = startWidthPercent + diffPercent;
+            newWidthPercent = Math.max(minWidthPercent * colspan, Math.min(maxWidthPercent, newWidthPercent));
+
+            let nextNewWidthPercent = nextStartWidthPercent;
             if (nextColIndex !== null && nextCell) {
-                const actualDiff = newWidth - startWidth;
-                nextNewWidth = nextStartWidth - actualDiff;
+                const actualDiffPercent = newWidthPercent - startWidthPercent;
+                nextNewWidthPercent = nextStartWidthPercent - actualDiffPercent;
 
                 // Проверка ограничений для соседней колонки
-                if (nextNewWidth < minWidth) {
-                    nextNewWidth = minWidth;
-                    newWidth = startWidth + (nextStartWidth - minWidth);
+                const nextColspan = nextCell.colSpan || 1;
+                if (nextNewWidthPercent < minWidthPercent * nextColspan) {
+                    nextNewWidthPercent = minWidthPercent * nextColspan;
+                    newWidthPercent = startWidthPercent + (nextStartWidthPercent - nextNewWidthPercent);
                 }
-                if (nextNewWidth > maxWidth) {
-                    nextNewWidth = maxWidth;
-                    newWidth = startWidth + (nextStartWidth - maxWidth);
+                if (nextNewWidthPercent > maxWidthPercent) {
+                    nextNewWidthPercent = maxWidthPercent;
+                    newWidthPercent = startWidthPercent + (nextStartWidthPercent - maxWidthPercent);
                 }
             }
 
             // Обновление позиции визуальной линии
-            resizeLine.style.left = `${startX + (newWidth - startWidth)}px`;
+            const newWidthPx = (newWidthPercent / 100) * tableWidth;
+            resizeLine.style.left = `${startX + (newWidthPx - startWidth)}px`;
 
             // Применение размеров ко всем строкам таблицы
             allRows.forEach(row => {
                 const cellsInRow = row.querySelectorAll('td, th');
                 cellsInRow.forEach(rowCell => {
                     const cellColIndex = parseInt(rowCell.dataset.col);
-                    const colspan = rowCell.colSpan || 1;
+                    const cellColspan = rowCell.colSpan || 1;
+                    const cellLastColIndex = cellColIndex + cellColspan - 1;
 
-                    if (cellColIndex === colIndex) {
-                        // Изменяемая колонка
-                        rowCell.style.width = `${newWidth}px`;
-                        rowCell.style.minWidth = `${newWidth}px`;
-                        rowCell.style.maxWidth = `${newWidth}px`;
+                    if (cellColIndex === colIndex && cellLastColIndex === lastColIndex) {
+                        // Изменяемая ячейка (точное совпадение диапазона)
+                        rowCell.style.width = `${newWidthPercent}%`;
+                        rowCell.style.minWidth = `${minWidthPx * colspan}px`;
+                        rowCell.style.maxWidth = 'none';
                         rowCell.style.wordBreak = 'normal';
                         rowCell.style.overflowWrap = 'anywhere';
-                    } else if (cellColIndex < colIndex && cellColIndex + colspan > colIndex) {
-                        // Ячейка с colspan, перекрывающая изменяемую колонку
-                        const currentCellWidth = rowCell.offsetWidth;
-                        const delta = newWidth - startWidth;
-                        const newCellWidth = currentCellWidth + delta;
-                        rowCell.style.width = `${newCellWidth}px`;
-                        rowCell.style.minWidth = `${newCellWidth}px`;
-                        rowCell.style.maxWidth = `${newCellWidth}px`;
+                    } else if (cellColIndex <= colIndex && cellLastColIndex >= lastColIndex) {
+                        // Ячейка с большим colspan, включающая изменяемый диапазон
+                        const currentCellWidthPercent = (rowCell.offsetWidth / tableWidth) * 100;
+                        const deltaPercent = newWidthPercent - startWidthPercent;
+                        const newCellWidthPercent = currentCellWidthPercent + deltaPercent;
+                        rowCell.style.width = `${newCellWidthPercent}%`;
+                        rowCell.style.minWidth = `${minWidthPx * cellColspan}px`;
+                        rowCell.style.maxWidth = 'none';
                         rowCell.style.wordBreak = 'normal';
                         rowCell.style.overflowWrap = 'anywhere';
                     } else if (nextColIndex !== null && cellColIndex === nextColIndex) {
                         // Соседняя колонка с компенсирующим изменением
-                        rowCell.style.width = `${nextNewWidth}px`;
-                        rowCell.style.minWidth = `${nextNewWidth}px`;
-                        rowCell.style.maxWidth = `${nextNewWidth}px`;
+                        rowCell.style.width = `${nextNewWidthPercent}%`;
+                        rowCell.style.minWidth = `${minWidthPx * cellColspan}px`;
+                        rowCell.style.maxWidth = 'none';
                         rowCell.style.wordBreak = 'normal';
                         rowCell.style.overflowWrap = 'anywhere';
-                    } else if (nextColIndex !== null && cellColIndex < nextColIndex && cellColIndex + colspan > nextColIndex) {
+                    } else if (nextColIndex !== null && cellColIndex < nextColIndex && cellLastColIndex >= nextColIndex) {
                         // Ячейка с colspan, перекрывающая соседнюю колонку
-                        const currentCellWidth = rowCell.offsetWidth;
-                        const delta = nextNewWidth - nextStartWidth;
-                        const newCellWidth = currentCellWidth + delta;
-                        rowCell.style.width = `${newCellWidth}px`;
-                        rowCell.style.minWidth = `${newCellWidth}px`;
-                        rowCell.style.maxWidth = `${newCellWidth}px`;
+                        const currentCellWidthPercent = (rowCell.offsetWidth / tableWidth) * 100;
+                        const deltaPercent = nextNewWidthPercent - nextStartWidthPercent;
+                        const newCellWidthPercent = currentCellWidthPercent + deltaPercent;
+                        rowCell.style.width = `${newCellWidthPercent}%`;
+                        rowCell.style.minWidth = `${minWidthPx * cellColspan}px`;
+                        rowCell.style.maxWidth = 'none';
                         rowCell.style.wordBreak = 'normal';
                         rowCell.style.overflowWrap = 'anywhere';
                     }
@@ -165,15 +185,21 @@ class TableSizes {
     /**
      * Начало изменения высоты строки.
      * Учитывает ячейки с rowspan, которые перекрывают изменяемую строку.
+     * ИСПРАВЛЕНО: изолированное изменение высоты только для затрагиваемых ячеек.
      * @param {MouseEvent} e - событие mousedown на ручке изменения размера
      */
     startRowResize(e) {
         const cell = e.target.parentElement;
-        const row = cell.parentElement;
         const table = cell.closest('table');
         const startY = e.clientY;
-        const startHeight = row.offsetHeight;
+
+        // Определяем диапазон строк, которые покрывает эта ячейка
         const rowIndex = parseInt(cell.dataset.row);
+        const rowspan = cell.rowSpan || 1;
+        const lastRowIndex = rowIndex + rowspan - 1;
+
+        // Получаем начальную высоту ТОЛЬКО этой ячейки
+        const startHeight = cell.offsetHeight;
 
         // Ограничения размеров строк
         const minHeight = 28;
@@ -196,44 +222,103 @@ class TableSizes {
         resizeLine.style.top = `${e.clientY}px`;
         document.body.appendChild(resizeLine);
 
+        // Собираем информацию обо всех ячейках, которые нужно изменять
+        const allRows = table.querySelectorAll('tr');
+        const affectedCells = new Map(); // Map<HTMLElement, {startHeight: number, rowspan: number}>
+
+        // Находим все ячейки, которые пересекаются с изменяемым диапазоном строк
+        allRows.forEach(tableRow => {
+            const cellsInRow = tableRow.querySelectorAll('td, th');
+            cellsInRow.forEach(rowCell => {
+                const cellRowIndex = parseInt(rowCell.dataset.row);
+                const cellRowspan = rowCell.rowSpan || 1;
+                const cellLastRowIndex = cellRowIndex + cellRowspan - 1;
+
+                // Проверяем, пересекается ли ячейка с изменяемым диапазоном
+                const isAffected = (
+                    // Ячейка начинается в диапазоне
+                    (cellRowIndex >= rowIndex && cellRowIndex <= lastRowIndex) ||
+                    // Ячейка заканчивается в диапазоне
+                    (cellLastRowIndex >= rowIndex && cellLastRowIndex <= lastRowIndex) ||
+                    // Ячейка полностью охватывает диапазон
+                    (cellRowIndex < rowIndex && cellLastRowIndex > lastRowIndex)
+                );
+
+                if (isAffected && !affectedCells.has(rowCell)) {
+                    affectedCells.set(rowCell, {
+                        startHeight: rowCell.offsetHeight,
+                        rowspan: cellRowspan,
+                        rowIndex: cellRowIndex,
+                        lastRowIndex: cellLastRowIndex
+                    });
+                }
+            });
+        });
+
         /**
          * Обработка движения мыши - изменение высоты строки в реальном времени.
-         * Применяет размеры с учетом ограничений и ячеек с rowspan.
+         * ИСПРАВЛЕНО: применяем изменение только к конкретной ячейке и её зависимым.
          */
         const onMouseMove = (ev) => {
             const diff = ev.clientY - startY;
             let newHeight = startHeight + diff;
-            newHeight = Math.max(minHeight, Math.min(maxHeight, newHeight));
+
+            // Применяем ограничения с учетом rowspan исходной ячейки
+            newHeight = Math.max(minHeight * rowspan, Math.min(maxHeight * rowspan, newHeight));
 
             // Обновление позиции визуальной линии
             resizeLine.style.top = `${startY + (newHeight - startHeight)}px`;
 
-            // Применение размеров ко всем ячейкам таблицы
-            const allRows = table.querySelectorAll('tr');
-            allRows.forEach(tableRow => {
-                const cellsInRow = tableRow.querySelectorAll('td, th');
-                cellsInRow.forEach(rowCell => {
-                    const cellRowIndex = parseInt(rowCell.dataset.row);
-                    const rowspan = rowCell.rowSpan || 1;
+            // Рассчитываем дельту изменения
+            const delta = newHeight - startHeight;
 
-                    if (cellRowIndex === rowIndex) {
-                        // Изменяемая строка
-                        rowCell.style.height = `${newHeight}px`;
-                        rowCell.style.minHeight = `${newHeight}px`;
-                    } else if (cellRowIndex < rowIndex && cellRowIndex + rowspan > rowIndex) {
-                        // Ячейка с rowspan, перекрывающая изменяемую строку
-                        const currentCellHeight = rowCell.offsetHeight;
-                        const delta = newHeight - startHeight;
-                        const newCellHeight = currentCellHeight + delta;
-                        rowCell.style.height = `${Math.max(minHeight * rowspan, Math.min(maxHeight * rowspan, newCellHeight))}px`;
-                        rowCell.style.minHeight = `${Math.max(minHeight * rowspan, Math.min(maxHeight * rowspan, newCellHeight))}px`;
-                    }
-                });
+            // Применяем изменения только к затронутым ячейкам
+            affectedCells.forEach((info, rowCell) => {
+                const cellRowIndex = info.rowIndex;
+                const cellLastRowIndex = info.lastRowIndex;
+                const cellRowspan = info.rowspan;
+
+                if (cellRowIndex === rowIndex && cellLastRowIndex === lastRowIndex) {
+                    // Это точно наша изменяемая ячейка
+                    rowCell.style.height = `${newHeight}px`;
+                    rowCell.style.minHeight = `${newHeight}px`;
+                } else if (cellRowIndex <= rowIndex && cellLastRowIndex >= lastRowIndex) {
+                    // Ячейка с большим rowspan, полностью включающая изменяемый диапазон
+                    // Увеличиваем её на ту же дельту
+                    const newCellHeight = info.startHeight + delta;
+                    const constrainedHeight = Math.max(
+                        minHeight * cellRowspan,
+                        Math.min(maxHeight * cellRowspan, newCellHeight)
+                    );
+                    rowCell.style.height = `${constrainedHeight}px`;
+                    rowCell.style.minHeight = `${constrainedHeight}px`;
+                } else if (cellRowIndex >= rowIndex && cellRowIndex <= lastRowIndex) {
+                    // Ячейка начинается внутри изменяемого диапазона
+                    // Пропорционально изменяем её высоту
+                    const overlap = Math.min(cellLastRowIndex, lastRowIndex) - cellRowIndex + 1;
+                    const proportion = overlap / rowspan;
+                    const cellDelta = delta * proportion;
+                    const newCellHeight = info.startHeight + cellDelta;
+                    const constrainedHeight = Math.max(
+                        minHeight * cellRowspan,
+                        Math.min(maxHeight * cellRowspan, newCellHeight)
+                    );
+                    rowCell.style.height = `${constrainedHeight}px`;
+                    rowCell.style.minHeight = `${constrainedHeight}px`;
+                } else if (cellLastRowIndex >= rowIndex && cellLastRowIndex <= lastRowIndex) {
+                    // Ячейка заканчивается внутри изменяемого диапазона
+                    const overlap = cellLastRowIndex - Math.max(cellRowIndex, rowIndex) + 1;
+                    const proportion = overlap / rowspan;
+                    const cellDelta = delta * proportion;
+                    const newCellHeight = info.startHeight + cellDelta;
+                    const constrainedHeight = Math.max(
+                        minHeight * cellRowspan,
+                        Math.min(maxHeight * cellRowspan, newCellHeight)
+                    );
+                    rowCell.style.height = `${constrainedHeight}px`;
+                    rowCell.style.minHeight = `${constrainedHeight}px`;
+                }
             });
-
-            // Применение высоты к самому элементу строки
-            row.style.height = `${newHeight}px`;
-            row.style.minHeight = `${newHeight}px`;
         };
 
         /**
@@ -264,6 +349,7 @@ class TableSizes {
     /**
      * Сохранение размеров всех ячеек таблицы в AppState.
      * Используется для восстановления размеров после перерисовки.
+     * Сохраняет ширину в процентах для адаптивности.
      * @param {string} tableId - ID таблицы
      * @param {HTMLElement} tableElement - DOM-элемент таблицы
      */
@@ -275,6 +361,7 @@ class TableSizes {
         }
 
         const sizes = {};
+        const tableWidth = tableElement.offsetWidth;
 
         // Сбор размеров со всех ячеек по координатам
         tableElement.querySelectorAll('th, td').forEach(cell => {
@@ -283,8 +370,22 @@ class TableSizes {
             if (row === null || col === null) return;
 
             const key = `${row}-${col}`;
+
+            // Извлекаем процентную ширину, если она задана
+            let widthValue = cell.style.width;
+            if (widthValue && widthValue.includes('%')) {
+                widthValue = widthValue;
+            } else if (widthValue && widthValue.includes('px')) {
+                const widthPx = parseFloat(widthValue);
+                widthValue = `${(widthPx / tableWidth) * 100}%`;
+            } else if (cell.offsetWidth) {
+                widthValue = `${(cell.offsetWidth / tableWidth) * 100}%`;
+            } else {
+                widthValue = '';
+            }
+
             sizes[key] = {
-                width: cell.style.width || '',
+                width: widthValue,
                 height: cell.style.height || '',
                 minWidth: cell.style.minWidth || '',
                 minHeight: cell.style.minHeight || '',
@@ -347,14 +448,28 @@ class TableSizes {
     preserveTableSizes(tableElement) {
         const sizes = {};
         const cells = tableElement.querySelectorAll('th, td');
+        const tableWidth = tableElement.offsetWidth;
 
         cells.forEach(cell => {
             const row = cell.dataset.row;
             const col = cell.dataset.col;
             const key = `${row}-${col}`;
 
+            // Извлекаем процентную ширину
+            let widthValue = cell.style.width;
+            if (widthValue && widthValue.includes('%')) {
+                widthValue = widthValue;
+            } else if (widthValue && widthValue.includes('px')) {
+                const widthPx = parseFloat(widthValue);
+                widthValue = `${(widthPx / tableWidth) * 100}%`;
+            } else if (cell.offsetWidth) {
+                widthValue = `${(cell.offsetWidth / tableWidth) * 100}%`;
+            } else {
+                widthValue = '';
+            }
+
             sizes[key] = {
-                width: cell.style.width || '',
+                width: widthValue,
                 height: cell.style.height || '',
                 minWidth: cell.style.minWidth || '',
                 minHeight: cell.style.minHeight || '',

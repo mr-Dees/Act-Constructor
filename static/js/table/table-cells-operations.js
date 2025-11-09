@@ -246,6 +246,57 @@ class TableCellsOperations {
     }
 
     /**
+     * Перераспределение ширины колонок для сохранения 100%.
+     * Вызывается после вставки/удаления колонок.
+     * @param {Object} table - Таблица из AppState
+     */
+    _redistributeColumnWidths(table) {
+        if (!table || !table.grid || !table.grid[0]) return;
+
+        const numCols = table.grid[0].length;
+
+        // Равномерное распределение: каждая колонка получает одинаковый процент
+        const equalWidthPercent = 100 / numCols;
+
+        // Обновляем colWidths в таблице (если используется)
+        if (table.colWidths) {
+            table.colWidths = new Array(numCols).fill(equalWidthPercent);
+        }
+
+        // Сохраняем новые размеры в AppState для применения при рендеринге
+        if (!AppState.tableUISizes) {
+            AppState.tableUISizes = {};
+        }
+
+        const sizes = {};
+
+        // Создаем запись размеров для каждой ячейки
+        for (let r = 0; r < table.grid.length; r++) {
+            for (let c = 0; c < table.grid[r].length; c++) {
+                const cellData = table.grid[r][c];
+                if (cellData.isSpanned) continue;
+
+                const key = `${r}-${c}`;
+                const colspan = cellData.colSpan || 1;
+                const widthPercent = equalWidthPercent * colspan;
+
+                sizes[key] = {
+                    width: `${widthPercent}%`,
+                    height: '',
+                    minWidth: '80px',
+                    minHeight: '28px',
+                    wordBreak: 'normal',
+                    overflowWrap: 'anywhere'
+                };
+            }
+        }
+
+        AppState.tableUISizes[table.id] = {
+            cellSizes: sizes
+        };
+    }
+
+    /**
      * Вставка новой колонки слева от текущей колонки выбранной ячейки.
      * Если текущая колонка - часть объединения, вставляет слева от всего объединения.
      * Верхняя ячейка новой колонки становится заголовком.
@@ -307,8 +358,8 @@ class TableCellsOperations {
             }
         }
 
-        // Пересчитываем colWidths
-        this._recalculateColumnWidths(table);
+        // КЛЮЧЕВОЕ ИЗМЕНЕНИЕ: перераспределяем ширину колонок
+        this._redistributeColumnWidths(table);
 
         this.clearSelection();
         ItemsRenderer.renderAll();
@@ -341,7 +392,6 @@ class TableCellsOperations {
         }
 
         // Также проверяем, не является ли текущая колонка частью объединения из левых колонок
-        // и если да, используем конец того объединения
         for (let r = 0; r < table.grid.length; r++) {
             for (let c = 0; c < colIndex; c++) {
                 const cellData = table.grid[r][c];
@@ -398,8 +448,8 @@ class TableCellsOperations {
             }
         }
 
-        // Пересчитываем colWidths
-        this._recalculateColumnWidths(table);
+        // КЛЮЧЕВОЕ ИЗМЕНЕНИЕ: перераспределяем ширину колонок
+        this._redistributeColumnWidths(table);
 
         this.clearSelection();
         ItemsRenderer.renderAll();
@@ -525,10 +575,8 @@ class TableCellsOperations {
             }
         }
 
-        // Пересчитываем colWidths
-        if (table.colWidths && table.colWidths.length > colIndex) {
-            table.colWidths.splice(colIndex, 1);
-        }
+        // КЛЮЧЕВОЕ ИЗМЕНЕНИЕ: перераспределяем ширину колонок
+        this._redistributeColumnWidths(table);
 
         this.clearSelection();
         ItemsRenderer.renderAll();
@@ -656,19 +704,13 @@ class TableCellsOperations {
 
     /**
      * Пересчет ширины колонок при вставке/удалении.
-     * Распределяет ширину равномерно среди всех колонок.
+     * УСТАРЕВШИЙ МЕТОД - теперь используется _redistributeColumnWidths
+     * Оставлен для обратной совместимости.
      * @param {Object} table - Таблица, для которой пересчитываются размеры
      */
     _recalculateColumnWidths(table) {
-        const numCols = table.grid[0] ? table.grid[0].length : 0;
-
-        if (numCols === 0) return;
-
-        // Если colWidths не инициализирован или его размер не совпадает
-        if (!table.colWidths || table.colWidths.length !== numCols) {
-            // Распределяем ширину поровну: каждая колонка по 100px
-            table.colWidths = new Array(numCols).fill(100);
-        }
+        // Перенаправляем на новый метод
+        this._redistributeColumnWidths(table);
     }
 
     /**
