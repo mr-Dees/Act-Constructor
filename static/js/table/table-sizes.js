@@ -23,10 +23,9 @@ class TableSizes {
         const section = table.closest('.table-section');
         const startX = e.clientX;
 
-        // Определяем последнюю колонку, которую покрывает эта ячейка
+        // Определяем колонку, которую изменяем (для colspan берем первую колонку)
         const colIndex = parseInt(cell.dataset.col);
-        const colspan = cell.colSpan || 1;
-        const lastColIndex = colIndex + colspan - 1;
+        const rowIndex = parseInt(cell.dataset.row);
 
         // Получаем текущую ширину таблицы для расчета процентов
         const tableWidth = table.offsetWidth;
@@ -34,31 +33,29 @@ class TableSizes {
         const startWidthPercent = (startWidth / tableWidth) * 100;
 
         // Поиск следующей колонки для компенсирующего изменения ширины
-        // Ищем колонку ПОСЛЕ последней колонки объединения
         const allRows = table.querySelectorAll('tr');
-        const firstRow = allRows[0];
-        const firstRowCells = firstRow.querySelectorAll('td, th');
 
-        let nextColIndex = null;
+        // ИСПРАВЛЕНИЕ: ищем следующую колонку на основе реальной структуры grid
+        // Используем первую строку для определения всех колонок
+        let nextColIndex = colIndex + 1;
         let nextCell = null;
         let nextStartWidth = 0;
         let nextStartWidthPercent = 0;
 
-        for (let i = 0; i < firstRowCells.length; i++) {
-            const testCell = firstRowCells[i];
-            const testColIndex = parseInt(testCell.dataset.col);
-            if (testColIndex > lastColIndex) {
-                nextColIndex = testColIndex;
-                nextCell = testCell;
-                nextStartWidth = testCell.offsetWidth;
-                nextStartWidthPercent = (nextStartWidth / tableWidth) * 100;
-                break;
-            }
+        // Находим ячейку в той же строке справа
+        const currentRow = allRows[rowIndex];
+        const cellsInCurrentRow = Array.from(currentRow.querySelectorAll('td, th'));
+        const currentCellIndex = cellsInCurrentRow.indexOf(cell);
+
+        if (currentCellIndex >= 0 && currentCellIndex < cellsInCurrentRow.length - 1) {
+            nextCell = cellsInCurrentRow[currentCellIndex + 1];
+            nextColIndex = parseInt(nextCell.dataset.col);
+            nextStartWidth = nextCell.offsetWidth;
+            nextStartWidthPercent = (nextStartWidth / tableWidth) * 100;
         }
 
         // Ограничения размеров колонок в процентах от ширины таблицы
         const minWidthPx = 80;
-        const maxWidthPx = tableWidth * 0.8;
         const minWidthPercent = (minWidthPx / tableWidth) * 100;
         const maxWidthPercent = 80;
 
@@ -81,24 +78,23 @@ class TableSizes {
 
         /**
          * Обработка движения мыши - изменение ширины колонок в реальном времени.
-         * Применяет размеры с учетом ограничений и компенсации соседней колонки.
+         * ИСПРАВЛЕНО: правильный расчет для ячеек с colspan и их дочерних ячеек.
          */
         const onMouseMove = (ev) => {
             const diff = ev.clientX - startX;
             const diffPercent = (diff / tableWidth) * 100;
 
             let newWidthPercent = startWidthPercent + diffPercent;
-            newWidthPercent = Math.max(minWidthPercent * colspan, Math.min(maxWidthPercent, newWidthPercent));
+            newWidthPercent = Math.max(minWidthPercent, Math.min(maxWidthPercent, newWidthPercent));
 
             let nextNewWidthPercent = nextStartWidthPercent;
-            if (nextColIndex !== null && nextCell) {
+            if (nextCell) {
                 const actualDiffPercent = newWidthPercent - startWidthPercent;
                 nextNewWidthPercent = nextStartWidthPercent - actualDiffPercent;
 
                 // Проверка ограничений для соседней колонки
-                const nextColspan = nextCell.colSpan || 1;
-                if (nextNewWidthPercent < minWidthPercent * nextColspan) {
-                    nextNewWidthPercent = minWidthPercent * nextColspan;
+                if (nextNewWidthPercent < minWidthPercent) {
+                    nextNewWidthPercent = minWidthPercent;
                     newWidthPercent = startWidthPercent + (nextStartWidthPercent - nextNewWidthPercent);
                 }
                 if (nextNewWidthPercent > maxWidthPercent) {
@@ -111,45 +107,22 @@ class TableSizes {
             const newWidthPx = (newWidthPercent / 100) * tableWidth;
             resizeLine.style.left = `${startX + (newWidthPx - startWidth)}px`;
 
-            // Применение размеров ко всем строкам таблицы
+            // ИСПРАВЛЕНИЕ: применяем размеры только к ячейкам в той же колонке
             allRows.forEach(row => {
                 const cellsInRow = row.querySelectorAll('td, th');
                 cellsInRow.forEach(rowCell => {
                     const cellColIndex = parseInt(rowCell.dataset.col);
-                    const cellColspan = rowCell.colSpan || 1;
-                    const cellLastColIndex = cellColIndex + cellColspan - 1;
 
-                    if (cellColIndex === colIndex && cellLastColIndex === lastColIndex) {
-                        // Изменяемая ячейка (точное совпадение диапазона)
+                    // Изменяем только ячейки, которые начинаются с той же колонки
+                    if (cellColIndex === colIndex) {
                         rowCell.style.width = `${newWidthPercent}%`;
-                        rowCell.style.minWidth = `${minWidthPx * colspan}px`;
+                        rowCell.style.minWidth = `${minWidthPx}px`;
                         rowCell.style.maxWidth = 'none';
                         rowCell.style.wordBreak = 'normal';
                         rowCell.style.overflowWrap = 'anywhere';
-                    } else if (cellColIndex <= colIndex && cellLastColIndex >= lastColIndex) {
-                        // Ячейка с большим colspan, включающая изменяемый диапазон
-                        const currentCellWidthPercent = (rowCell.offsetWidth / tableWidth) * 100;
-                        const deltaPercent = newWidthPercent - startWidthPercent;
-                        const newCellWidthPercent = currentCellWidthPercent + deltaPercent;
-                        rowCell.style.width = `${newCellWidthPercent}%`;
-                        rowCell.style.minWidth = `${minWidthPx * cellColspan}px`;
-                        rowCell.style.maxWidth = 'none';
-                        rowCell.style.wordBreak = 'normal';
-                        rowCell.style.overflowWrap = 'anywhere';
-                    } else if (nextColIndex !== null && cellColIndex === nextColIndex) {
-                        // Соседняя колонка с компенсирующим изменением
+                    } else if (nextCell && cellColIndex === nextColIndex) {
                         rowCell.style.width = `${nextNewWidthPercent}%`;
-                        rowCell.style.minWidth = `${minWidthPx * cellColspan}px`;
-                        rowCell.style.maxWidth = 'none';
-                        rowCell.style.wordBreak = 'normal';
-                        rowCell.style.overflowWrap = 'anywhere';
-                    } else if (nextColIndex !== null && cellColIndex < nextColIndex && cellLastColIndex >= nextColIndex) {
-                        // Ячейка с colspan, перекрывающая соседнюю колонку
-                        const currentCellWidthPercent = (rowCell.offsetWidth / tableWidth) * 100;
-                        const deltaPercent = nextNewWidthPercent - nextStartWidthPercent;
-                        const newCellWidthPercent = currentCellWidthPercent + deltaPercent;
-                        rowCell.style.width = `${newCellWidthPercent}%`;
-                        rowCell.style.minWidth = `${minWidthPx * cellColspan}px`;
+                        rowCell.style.minWidth = `${minWidthPx}px`;
                         rowCell.style.maxWidth = 'none';
                         rowCell.style.wordBreak = 'normal';
                         rowCell.style.overflowWrap = 'anywhere';
@@ -411,6 +384,24 @@ class TableSizes {
 
         const saved = AppState.tableUISizes && AppState.tableUISizes[tableId];
         if (!saved || !saved.cellSizes) return;
+
+        const tableData = AppState.tables[tableId];
+        const currentNumCols = tableData?.grid?.[0]?.length || 0;
+
+        // ВАЛИДАЦИЯ: проверяем, что количество колонок совпадает
+        // Если не совпадает - не применяем размеры (они устаревшие)
+        const savedCols = new Set();
+        for (const key in saved.cellSizes) {
+            const [, col] = key.split('-').map(Number);
+            savedCols.add(col);
+        }
+
+        const maxSavedCol = Math.max(...Array.from(savedCols));
+        if (maxSavedCol >= currentNumCols) {
+            // Размеры устарели, не применяем их
+            console.warn(`Размеры для таблицы ${tableId} устарели (сохранено ${maxSavedCol + 1} колонок, текущих ${currentNumCols})`);
+            return;
+        }
 
         // Применение сохраненных размеров к ячейкам по координатам
         tableElement.querySelectorAll('th, td').forEach(cell => {

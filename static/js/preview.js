@@ -41,12 +41,15 @@ class PreviewManager {
         node.children.forEach(child => {
             // Рендеринг таблицы
             if (child.type === 'table') {
-                const tableTitle = document.createElement('h4');
-                tableTitle.textContent = child.label;
-                tableTitle.style.fontWeight = 'bold';
-                tableTitle.style.marginTop = '1rem';
-                tableTitle.style.marginBottom = '0.5rem';
-                container.appendChild(tableTitle);
+                // ИСПРАВЛЕНИЕ: показываем название только если customLabel не пустая строка
+                if (child.customLabel !== '') {
+                    const tableTitle = document.createElement('h4');
+                    tableTitle.textContent = child.label;
+                    tableTitle.style.fontWeight = 'bold';
+                    tableTitle.style.marginTop = '1rem';
+                    tableTitle.style.marginBottom = '0.5rem';
+                    container.appendChild(tableTitle);
+                }
 
                 if (AppState.tables[child.tableId]) {
                     const table = this.createPreviewTable(AppState.tables[child.tableId], previewTrim);

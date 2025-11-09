@@ -37,7 +37,8 @@ Object.assign(AppState, {
             label: 'Таблица',
             type: 'table',
             tableId: tableId,
-            parentId: nodeId
+            parentId: nodeId,
+            protected: false
         };
 
         node.children.push(tableNode);
@@ -80,12 +81,50 @@ Object.assign(AppState, {
             id: tableId,
             nodeId: tableNode.id,
             grid: grid,
-            colWidths: new Array(cols).fill(100)
+            colWidths: new Array(cols).fill(100),
+            protected: false
         };
 
         this.tables[tableId] = table;
         this.generateNumbering();
         return {success: true, table: table, tableNode: tableNode};
+    },
+
+    /**
+     * Удаляет таблицу из узла дерева.
+     * Проверяет защищенность перед удалением.
+     * @param {string} tableNodeId - ID узла таблицы
+     * @returns {Object} Результат с флагом success
+     */
+    removeTable(tableNodeId) {
+        const tableNode = this.findNodeById(tableNodeId);
+        if (!tableNode || tableNode.type !== 'table') {
+            return {success: false, reason: 'Таблица не найдена'};
+        }
+
+        // Проверка на защищенность
+        if (tableNode.protected) {
+            return {success: false, reason: 'Эта таблица защищена от удаления'};
+        }
+
+        const table = this.tables[tableNode.tableId];
+        if (table && table.protected) {
+            return {success: false, reason: 'Эта таблица защищена от удаления'};
+        }
+
+        const parent = this.findParentNode(tableNodeId);
+        if (!parent) return {success: false, reason: 'Родительский узел не найден'};
+
+        // Удаляем узел из дерева
+        parent.children = parent.children.filter(child => child.id !== tableNodeId);
+
+        // Удаляем таблицу из хранилища
+        if (tableNode.tableId && this.tables[tableNode.tableId]) {
+            delete this.tables[tableNode.tableId];
+        }
+
+        this.generateNumbering();
+        return {success: true};
     },
 
     /**

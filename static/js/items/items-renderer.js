@@ -153,32 +153,37 @@ class ItemsRenderer {
         section.className = 'table-section';
         section.dataset.tableId = table.id;
 
-        // Создаем редактируемый заголовок таблицы
-        const tableTitle = document.createElement('h4');
-        tableTitle.className = 'table-title';
-        tableTitle.contentEditable = false;
-        tableTitle.textContent = node.label;
-        tableTitle.style.marginBottom = '10px';
-        tableTitle.style.fontWeight = 'bold';
-        tableTitle.style.cursor = 'pointer';
+        // ИСПРАВЛЕНИЕ: проверяем customLabel на пустую строку
+        const shouldShowTitle = node.customLabel !== '';
 
-        let clickCount = 0;
-        let clickTimer = null;
+        // Создаем редактируемый заголовок таблицы только если он не пустой
+        if (shouldShowTitle) {
+            const tableTitle = document.createElement('h4');
+            tableTitle.className = 'table-title';
+            tableTitle.contentEditable = false;
+            tableTitle.textContent = node.label;
+            tableTitle.style.marginBottom = '10px';
+            tableTitle.style.fontWeight = 'bold';
+            tableTitle.style.cursor = 'pointer';
 
-        tableTitle.addEventListener('click', (e) => {
-            clickCount++;
-            if (clickCount === 1) {
-                clickTimer = setTimeout(() => {
+            let clickCount = 0;
+            let clickTimer = null;
+
+            tableTitle.addEventListener('click', (e) => {
+                clickCount++;
+                if (clickCount === 1) {
+                    clickTimer = setTimeout(() => {
+                        clickCount = 0;
+                    }, 300);
+                } else if (clickCount === 2) {
+                    clearTimeout(clickTimer);
                     clickCount = 0;
-                }, 300);
-            } else if (clickCount === 2) {
-                clearTimeout(clickTimer);
-                clickCount = 0;
-                ItemsTitleEditing.startEditingTableTitle(tableTitle, node);
-            }
-        });
+                    ItemsTitleEditing.startEditingTableTitle(tableTitle, node);
+                }
+            });
 
-        section.appendChild(tableTitle);
+            section.appendChild(tableTitle);
+        }
 
         // Создаем HTML-таблицу
         const tableEl = document.createElement('table');
@@ -216,7 +221,7 @@ class ItemsRenderer {
                 const cellEndCol = colIndex + colspan - 1;
                 const isLastColumn = cellEndCol >= numCols - 1;
 
-                // ИЗМЕНЕНО: добавляем ручку изменения ширины ТОЛЬКО для заголовков (isHeader)
+                // Добавляем ручку изменения ширины ТОЛЬКО для заголовков (isHeader)
                 if (cellData.isHeader && !isLastColumn) {
                     const resizeHandle = document.createElement('div');
                     resizeHandle.className = 'resize-handle';
@@ -236,6 +241,57 @@ class ItemsRenderer {
 
         section.appendChild(tableEl);
         return section;
+    }
+
+    /**
+     * Перерисовка только конкретной таблицы (оптимизация).
+     * @param {string} tableId - ID таблицы для перерисовки
+     */
+    static renderSingleTable(tableId) {
+        const section = document.querySelector(`.table-section[data-table-id="${tableId}"]`);
+        if (!section) {
+            // Если секция не найдена, делаем полную перерисовку
+            this.renderAll();
+            return;
+        }
+
+        const table = AppState.tables[tableId];
+        if (!table) return;
+
+        // Находим узел таблицы в дереве
+        const findNodeById = (id, node = AppState.treeData) => {
+            if (node.id === id) return node;
+            if (node.children) {
+                for (let child of node.children) {
+                    const found = findNodeById(id, child);
+                    if (found) return found;
+                }
+            }
+            return null;
+        };
+
+        const tableNode = findNodeById(table.nodeId);
+        if (!tableNode) return;
+
+        // Сохраняем размеры перед перерисовкой
+        const savedSizes = tableManager.preserveTableSizes(section.querySelector('.editable-table'));
+
+        // Перерисовываем только эту таблицу
+        const newTableSection = this.renderTable(table, tableNode);
+        section.replaceWith(newTableSection);
+
+        // Привязываем обработчики событий
+        tableManager.attachEventListeners();
+
+        // Восстанавливаем размеры
+        setTimeout(() => {
+            const newSection = document.querySelector(`.table-section[data-table-id="${tableId}"]`);
+            if (newSection) {
+                const tableEl = newSection.querySelector('.editable-table');
+                tableManager.applyTableSizes(tableEl, savedSizes);
+                tableManager.persistTableSizes(tableId, tableEl);
+            }
+        }, 0);
     }
 
     /**

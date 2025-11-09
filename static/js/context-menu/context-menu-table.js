@@ -478,7 +478,6 @@ class CellContextMenu {
     handleAction(action) {
         const selectedCount = tableManager.selectedCells.length;
 
-        // Валидация перед выполнением действия
         if (selectedCount === 0) {
             Notifications.error('Выберите ячейку');
             return;
@@ -490,6 +489,7 @@ class CellContextMenu {
         const colIndex = parseInt(cell.dataset.col);
         const table = AppState.tables[tableId];
 
+        // Валидация действий
         switch (action) {
             case 'merge-cells':
                 if (selectedCount < 2) {
@@ -565,68 +565,93 @@ class CellContextMenu {
                 break;
         }
 
-        // Выполняем действие
-        const tableSizes = this.saveTableSizes();
+        // КРИТИЧЕСКОЕ ИЗМЕНЕНИЕ: сохраняем размеры ТОЛЬКО для операций без изменения колонок
+        const columnsChanging = ['insert-col-left', 'insert-col-right', 'delete-col'].includes(action);
+        const tableSizes = columnsChanging ? null : this.saveTableSizes();
 
+        // Выполняем действие
         switch (action) {
             case 'merge-cells':
                 tableManager.mergeCells();
                 this.restoreTableSizes(tableSizes);
-                // Уведомление НЕ показываем - оно выводится внутри mergeCells()
                 break;
             case 'unmerge-cell':
                 tableManager.unmergeCells();
                 this.restoreTableSizes(tableSizes);
-                // Уведомление НЕ показываем - оно выводится внутри unmergeCells()
                 break;
             case 'insert-row-above':
                 tableManager.cellsOps.insertRowAbove();
-                this.restoreTableSizes({});
+                this.restoreTableSizes(tableSizes);
                 Notifications.success('Строка добавлена');
                 break;
             case 'insert-row-below':
                 tableManager.cellsOps.insertRowBelow();
-                this.restoreTableSizes({});
+                this.restoreTableSizes(tableSizes);
                 Notifications.success('Строка добавлена');
                 break;
             case 'insert-col-left':
                 tableManager.cellsOps.insertColumnLeft();
-                this.restoreTableSizes({});
+                this.restoreTableSizes(null); // НЕ восстанавливаем старые размеры
                 Notifications.success('Колонка добавлена');
                 break;
             case 'insert-col-right':
                 tableManager.cellsOps.insertColumnRight();
-                this.restoreTableSizes({});
+                this.restoreTableSizes(null); // НЕ восстанавливаем старые размеры
                 Notifications.success('Колонка добавлена');
                 break;
             case 'delete-row':
                 tableManager.cellsOps.deleteRow();
-                this.restoreTableSizes({});
+                this.restoreTableSizes(tableSizes);
                 Notifications.success('Строка удалена');
                 break;
             case 'delete-col':
                 tableManager.cellsOps.deleteColumn();
-                this.restoreTableSizes({});
+                this.restoreTableSizes(null); // НЕ восстанавливаем старые размеры
                 Notifications.success('Колонка удалена');
                 break;
         }
     }
 
+    /**
+     * Сохраняет размеры ВСЕХ таблиц перед операцией
+     */
     saveTableSizes() {
-        if (tableManager.selectedCells.length === 0) return {};
-        const table = tableManager.selectedCells[0].closest('table');
-        return tableManager.preserveTableSizes(table);
+        const allTableSizes = {};
+
+        document.querySelectorAll('.table-section').forEach(section => {
+            const tableId = section.dataset.tableId;
+            const tableEl = section.querySelector('.editable-table');
+            if (tableEl && tableId) {
+                allTableSizes[tableId] = tableManager.preserveTableSizes(tableEl);
+            }
+        });
+
+        return allTableSizes;
     }
 
-    restoreTableSizes(tableSizes) {
+    /**
+     * Восстанавливает размеры ВСЕХ таблиц после операции
+     * @param {Object|null} allTableSizes - Сохраненные размеры (null = не восстанавливать из снапшота)
+     */
+    restoreTableSizes(allTableSizes) {
         if (AppState.currentStep === 2) {
             ItemsRenderer.renderAll();
+
             setTimeout(() => {
-                document.querySelectorAll('.editable-table').forEach(tbl => {
-                    tableManager.applyTableSizes(tbl, tableSizes);
-                    const section = tbl.closest('.table-section');
-                    if (section) {
-                        tableManager.persistTableSizes(section.dataset.tableId, tbl);
+                document.querySelectorAll('.table-section').forEach(section => {
+                    const tableId = section.dataset.tableId;
+                    const tableEl = section.querySelector('.editable-table');
+
+                    if (tableEl && tableId) {
+                        if (allTableSizes && allTableSizes[tableId]) {
+                            // Применяем размеры из снапшота (для операций без изменения колонок)
+                            tableManager.applyTableSizes(tableEl, allTableSizes[tableId]);
+                            tableManager.persistTableSizes(tableId, tableEl);
+                        } else {
+                            // Применяем размеры из AppState (для операций с изменением колонок)
+                            // Эти размеры уже установлены методом _redistributeColumnWidths
+                            tableManager.applyPersistedSizes(tableId, tableEl);
+                        }
                     }
                 });
             }, 50);
