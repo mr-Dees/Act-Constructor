@@ -13,6 +13,41 @@ class TableManager {
         this.cellsOps = new TableCellsOperations(this);
         // Модуль изменения размеров (ширина колонок, высота строк)
         this.sizes = new TableSizes(this);
+
+        // Инициализация глобальных обработчиков
+        this.initGlobalHandlers();
+    }
+
+    /**
+     * Инициализация глобальных обработчиков событий.
+     * Обрабатывает клики вне таблицы и нажатие Escape для снятия выделения.
+     */
+    initGlobalHandlers() {
+        // Обработчик кликов вне таблицы
+        document.addEventListener('click', (e) => {
+            // Проверяем, что клик НЕ по ячейке таблицы и НЕ по контекстному меню
+            const isTableCell = e.target.closest('td, th');
+            const isContextMenu = e.target.closest('.context-menu, #cellContextMenu');
+            const isResizeHandle = e.target.classList.contains('resize-handle') ||
+                e.target.classList.contains('row-resize-handle');
+
+            if (!isTableCell && !isContextMenu && !isResizeHandle) {
+                // Клик вне таблицы - снимаем выделение
+                this.clearSelection();
+            }
+        });
+
+        // Обработчик нажатия Escape
+        document.addEventListener('keydown', (e) => {
+            if (e.key === 'Escape') {
+                // Снимаем выделение с ячеек
+                this.clearSelection();
+                // Скрываем контекстное меню
+                if (typeof ContextMenuManager !== 'undefined') {
+                    ContextMenuManager.hide();
+                }
+            }
+        });
     }
 
     /**
@@ -45,6 +80,9 @@ class TableManager {
                     return;
                 }
 
+                // Добавляем stopPropagation для предотвращения всплытия к document
+                e.stopPropagation();
+
                 if (!e.ctrlKey) {
                     this.cellsOps.clearSelection();
                 }
@@ -70,6 +108,8 @@ class TableManager {
                 }
 
                 e.preventDefault();
+                // Предотвращаем всплытие события
+                e.stopPropagation();
 
                 // Если нет выделенных ячеек или текущая ячейка не входит в выделение - выбираем её
                 if (this.selectedCells.length === 0 || !this.selectedCells.includes(cell)) {
