@@ -627,6 +627,309 @@ const AppState = {
     },
 
     /**
+     * Создает таблицу регулярного риска.
+     * @private
+     * @param {string} nodeId - ID узла, к которому добавляется таблица
+     * @returns {Object} Результат с флагом success и созданными объектами
+     */
+    _createRegularRiskTable(nodeId) {
+        const node = this.findNodeById(nodeId);
+        if (!node) return {success: false, reason: 'Узел не найден'};
+
+        // Валидация типа узла
+        if (node.type === 'table') return {success: false, reason: 'Нельзя добавить таблицу к таблице'};
+        if (node.type === 'textblock') return {success: false, reason: 'Нельзя добавить таблицу к текстовому блоку'};
+        if (node.type === 'violation') return {success: false, reason: 'Нельзя добавить таблицу к нарушению'};
+
+        // Проверка лимита таблиц
+        if (!node.children) node.children = [];
+        const tablesCount = node.children.filter(c => c.type === 'table').length;
+        if (tablesCount >= 10) {
+            return {success: false, reason: 'Достигнуто максимальное количество таблиц (10) для этого пункта'};
+        }
+
+        // Создание узла таблицы в дереве
+        const tableId = `table_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
+        const tableLabel = 'Выявленные инциденты регулярного риска';
+
+        const tableNode = {
+            id: `${nodeId}_table_${Date.now()}_${Math.random().toString(36).substr(2, 5)}`,
+            label: tableLabel,
+            type: 'table',
+            tableId: tableId,
+            parentId: nodeId,
+            protected: true,  // ИЗМЕНЕНО: теперь защищена
+            customLabel: tableLabel
+        };
+
+        node.children.push(tableNode);
+
+        // Создание матричной структуры таблицы (grid)
+        const grid = [];
+
+        // Строка заголовков
+        const headerRow = [
+            {
+                content: 'Код процесса (номер-название)',
+                isHeader: true,
+                colSpan: 1,
+                rowSpan: 1,
+                originRow: 0,
+                originCol: 0
+            },
+            {
+                content: 'Клиентский путь (номер-название)',
+                isHeader: true,
+                colSpan: 1,
+                rowSpan: 1,
+                originRow: 0,
+                originCol: 1
+            },
+            {
+                content: 'Наименование нормативно-правового акта (НПА), который был нарушен',
+                isHeader: true,
+                colSpan: 1,
+                rowSpan: 1,
+                originRow: 0,
+                originCol: 2
+            },
+            {
+                content: 'Статья/пункт НПА',
+                isHeader: true,
+                colSpan: 1,
+                rowSpan: 1,
+                originRow: 0,
+                originCol: 3
+            },
+            {
+                content: 'Пункт, статья, название нормативного документа (КоАП/ФЗ и пр.), в соответствии с которыми к Банку могут быть применены санкции, с указанием суммы штрафа (min/max) согласно формулировок нормативного документа',
+                isHeader: true,
+                colSpan: 1,
+                rowSpan: 1,
+                originRow: 0,
+                originCol: 4
+            },
+            {
+                content: 'Нефинансовые последствия/санкция к должностному лицу',
+                isHeader: true,
+                colSpan: 1,
+                rowSpan: 1,
+                originRow: 0,
+                originCol: 5
+            }
+        ];
+        grid.push(headerRow);
+
+        // Строки с пустыми ячейками данных (2 строки)
+        for (let r = 1; r <= 2; r++) {
+            const dataRow = [];
+            for (let c = 0; c < 6; c++) {
+                dataRow.push({
+                    content: '',
+                    isHeader: false,
+                    colSpan: 1,
+                    rowSpan: 1,
+                    originRow: r,
+                    originCol: c
+                });
+            }
+            grid.push(dataRow);
+        }
+
+        // Создание объекта таблицы с шириной колонок
+        const table = {
+            id: tableId,
+            nodeId: tableNode.id,
+            grid: grid,
+            colWidths: [150, 150, 200, 120, 250, 180],
+            protected: true  // ИЗМЕНЕНО: теперь защищена
+        };
+
+        this.tables[tableId] = table;
+        return {success: true, table: table, tableNode: tableNode};
+    },
+
+    _createOperationalRiskTable(nodeId) {
+        const node = this.findNodeById(nodeId);
+        if (!node) return {success: false, reason: 'Узел не найден'};
+
+        // Валидация типа узла
+        if (node.type === 'table') return {success: false, reason: 'Нельзя добавить таблицу к таблице'};
+        if (node.type === 'textblock') return {success: false, reason: 'Нельзя добавить таблицу к текстовому блоку'};
+        if (node.type === 'violation') return {success: false, reason: 'Нельзя добавить таблицу к нарушению'};
+
+        // Проверка лимита таблиц
+        if (!node.children) node.children = [];
+        const tablesCount = node.children.filter(c => c.type === 'table').length;
+        if (tablesCount >= 10) {
+            return {success: false, reason: 'Достигнуто максимальное количество таблиц (10) для этого пункта'};
+        }
+
+        // Создание узла таблицы в дереве
+        const tableId = `table_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
+        const tableLabel = 'Выявленные отклонения с признаками операционного риска';
+
+        const tableNode = {
+            id: `${nodeId}_table_${Date.now()}_${Math.random().toString(36).substr(2, 5)}`,
+            label: tableLabel,
+            type: 'table',
+            tableId: tableId,
+            parentId: nodeId,
+            protected: true,  // ИЗМЕНЕНО: теперь защищена
+            customLabel: tableLabel
+        };
+
+        node.children.push(tableNode);
+
+        // Создание сложной шапки (всего 6 колонок)
+        const grid = [];
+
+        // ПЕРВАЯ СТРОКА ШАПКИ (row 0)
+        const headerRow1 = [
+            {
+                content: 'ОР',
+                isHeader: true,
+                colSpan: 1,
+                rowSpan: 1,
+                originRow: 0,
+                originCol: 0
+            },
+            {
+                content: 'Отклонения с признаками операционного риска (далее - ОР)',
+                isHeader: true,
+                colSpan: 5,
+                rowSpan: 1,
+                originRow: 0,
+                originCol: 1
+            },
+            {
+                content: '',
+                isHeader: true,
+                colSpan: 1,
+                rowSpan: 1,
+                isSpanned: true,
+                spanOrigin: {row: 0, col: 1},
+                originRow: 0,
+                originCol: 2
+            },
+            {
+                content: '',
+                isHeader: true,
+                colSpan: 1,
+                rowSpan: 1,
+                isSpanned: true,
+                spanOrigin: {row: 0, col: 1},
+                originRow: 0,
+                originCol: 3
+            },
+            {
+                content: '',
+                isHeader: true,
+                colSpan: 1,
+                rowSpan: 1,
+                isSpanned: true,
+                spanOrigin: {row: 0, col: 1},
+                originRow: 0,
+                originCol: 4
+            },
+            {
+                content: '',
+                isHeader: true,
+                colSpan: 1,
+                rowSpan: 1,
+                isSpanned: true,
+                spanOrigin: {row: 0, col: 1},
+                originRow: 0,
+                originCol: 5
+            }
+        ];
+        grid.push(headerRow1);
+
+        // ВТОРАЯ СТРОКА ШАПКИ (row 1)
+        const headerRow2 = [
+            {
+                content: 'Код процесса',
+                isHeader: true,
+                colSpan: 1,
+                rowSpan: 1,
+                originRow: 1,
+                originCol: 0
+            },
+            {
+                content: 'Блок - владелец процесса',
+                isHeader: true,
+                colSpan: 1,
+                rowSpan: 1,
+                originRow: 1,
+                originCol: 1
+            },
+            {
+                content: 'Тип рискового события (уровень 2)',
+                isHeader: true,
+                colSpan: 1,
+                rowSpan: 1,
+                originRow: 1,
+                originCol: 2
+            },
+            {
+                content: 'Оценка суммы события, руб',
+                isHeader: true,
+                colSpan: 1,
+                rowSpan: 1,
+                originRow: 1,
+                originCol: 3
+            },
+            {
+                content: 'Подтип и сумма последствия',
+                isHeader: true,
+                colSpan: 2,
+                rowSpan: 1,
+                originRow: 1,
+                originCol: 4
+            },
+            {
+                content: '',
+                isHeader: true,
+                colSpan: 1,
+                rowSpan: 1,
+                isSpanned: true,
+                spanOrigin: {row: 1, col: 4},
+                originRow: 1,
+                originCol: 5
+            }
+        ];
+        grid.push(headerRow2);
+
+        // Добавляем 2 строки данных (всего 6 колонок)
+        for (let r = 2; r < 4; r++) {
+            const dataRow = [];
+            for (let c = 0; c < 6; c++) {
+                dataRow.push({
+                    content: '',
+                    isHeader: false,
+                    colSpan: 1,
+                    rowSpan: 1,
+                    originRow: r,
+                    originCol: c
+                });
+            }
+            grid.push(dataRow);
+        }
+
+        // Создание объекта таблицы с шириной колонок (6 колонок)
+        const table = {
+            id: tableId,
+            nodeId: tableNode.id,
+            grid: grid,
+            colWidths: [120, 150, 180, 150, 150, 150],
+            protected: true  // ИЗМЕНЕНО: теперь защищена
+        };
+
+        this.tables[tableId] = table;
+        return {success: true, table: table, tableNode: tableNode};
+    },
+
+    /**
      * Рекурсивно ищет узел по ID в дереве.
      * @param {string} id - ID искомого узла
      * @param {Object} node - Узел для начала поиска (по умолчанию корень)

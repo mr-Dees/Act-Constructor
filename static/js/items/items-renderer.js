@@ -153,14 +153,13 @@ class ItemsRenderer {
             tableTitle.contentEditable = false;
             tableTitle.textContent = node.label;
             tableTitle.style.marginBottom = '10px';
+            tableTitle.style.fontWeight = 'normal';  // Обычный шрифт
+            tableTitle.style.textDecoration = 'underline';  // Подчеркнутый
 
-            // ИСПРАВЛЕНИЕ: подчеркиваем название защищенной таблицы, а не жирное
+            // Меняем курсор в зависимости от типа таблиц
             if (table.protected) {
-                tableTitle.style.fontWeight = 'normal';  // Обычный шрифт
-                tableTitle.style.textDecoration = 'underline';  // Подчеркнутый
                 tableTitle.style.cursor = 'default';
             } else {
-                tableTitle.style.fontWeight = 'bold';  // Жирный для незащищенных
                 tableTitle.style.cursor = 'pointer';
             }
 

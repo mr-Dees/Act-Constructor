@@ -40,8 +40,14 @@ class TreeContextMenu {
             case 'add-sibling':
                 this.handleAddSibling(node, nodeId);
                 break;
-            case 'add-table':
-                this.handleAddTable(node, nodeId);
+            case 'add-regular-table':
+                this.handleAddTable(node, nodeId, 'regular');
+                break;
+            case 'add-regular-risk-table':
+                this.handleAddTable(node, nodeId, 'regular-risk');
+                break;
+            case 'add-operational-risk-table':
+                this.handleAddTable(node, nodeId, 'operational-risk');
                 break;
             case 'add-textblock':
                 this.handleAddTextBlock(node, nodeId);
@@ -78,13 +84,37 @@ class TreeContextMenu {
         }
     }
 
-    handleAddTable(node, nodeId) {
+    handleAddTable(node, nodeId, tableType = 'regular') {
         if (node.type === 'table') {
             alert('Нельзя добавлять таблицу к таблице');
             return;
         }
 
-        const result = AppState.addTableToNode(nodeId);
+        let result;
+
+        switch (tableType) {
+            case 'regular':
+                // Стандартная таблица 3x3
+                result = AppState.addTableToNode(nodeId);
+                break;
+            case 'regular-risk':
+                // Таблица регулярного риска
+                result = AppState._createRegularRiskTable(nodeId);
+                if (result.success) {
+                    AppState.generateNumbering();
+                }
+                break;
+            case 'operational-risk':
+                // Таблица операционного риска
+                result = AppState._createOperationalRiskTable(nodeId);
+                if (result.success) {
+                    AppState.generateNumbering();
+                }
+                break;
+            default:
+                result = AppState.addTableToNode(nodeId);
+        }
+
         if (result.success) {
             this.updateTreeViews();
         } else {

@@ -74,3 +74,41 @@
 .violation-context-menu-item.delete:hover {
     background-color: rgba(220, 53, 69, 0.1);
 }
+
+/* Стили для подменю */
+.context-menu-submenu {
+    position: relative;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+}
+
+.submenu-arrow {
+    margin-left: 0.5rem;
+    font-size: 0.75rem;
+    color: var(--text-tertiary);
+}
+
+.context-submenu {
+    position: absolute;
+    left: 100%;
+    top: -0.375rem;
+    margin-left: 0.25rem;
+    background: var(--bg-primary);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-md);
+    box-shadow: var(--shadow-lg);
+    min-width: 16rem;
+    padding: 0.375rem;
+    z-index: 10001;
+}
+
+.context-submenu.hidden {
+    display: none;
+}
+
+.context-menu-separator {
+    height: 1px;
+    background: var(--border);
+    margin: 0.375rem 0;
+}
