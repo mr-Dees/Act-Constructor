@@ -419,6 +419,214 @@ const AppState = {
     },
 
     /**
+     * Создает таблицу метрик для подпункта пункта 5.
+     * @private
+     * @param {string} nodeId - ID узла, к которому добавляется таблица
+     * @param {string} nodeNumber - Номер узла (например, "5.1")
+     * @returns {Object} Результат с флагом success и созданными объектами
+     */
+    _createMetricsTable(nodeId, nodeNumber) {
+        const node = this.findNodeById(nodeId);
+        if (!node) return {success: false, reason: 'Узел не найден'};
+
+        // Валидация типа узла
+        if (node.type === 'table') return {success: false, reason: 'Нельзя добавить таблицу к таблице'};
+        if (node.type === 'textblock') return {success: false, reason: 'Нельзя добавить таблицу к текстовому блоку'};
+        if (node.type === 'violation') return {success: false, reason: 'Нельзя добавить таблицу к нарушению'};
+
+        // Проверка лимита таблиц
+        if (!node.children) node.children = [];
+        const tablesCount = node.children.filter(c => c.type === 'table').length;
+        if (tablesCount >= 10) {
+            return {success: false, reason: 'Достигнуто максимальное количество таблиц (10) для этого пункта'};
+        }
+
+        // Создание узла таблицы в дереве
+        const tableId = `table_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
+        const tableLabel = `Объем выявленных отклонений (В метриках) по ${nodeNumber}`;
+
+        const tableNode = {
+            id: `${nodeId}_table_${Date.now()}_${Math.random().toString(36).substr(2, 5)}`,
+            label: tableLabel,
+            type: 'table',
+            tableId: tableId,
+            parentId: nodeId,
+            protected: true,  // ИСПРАВЛЕНИЕ 1: таблица защищена
+            customLabel: tableLabel,
+            isMetricsTable: true  // Маркер таблицы метрик
+        };
+
+        // ИСПРАВЛЕНИЕ 2: вставляем таблицу в начало списка дочерних элементов
+        node.children.unshift(tableNode);
+
+        // Создание сложной шапки как в пункте 4
+        const grid = [];
+
+        // Первая строка шапки с объединенными ячейками
+        const headerRow1 = [
+            {
+                content: 'Код метрики',
+                isHeader: true,
+                colSpan: 1,
+                rowSpan: 2,
+                originRow: 0,
+                originCol: 0
+            },
+            {
+                content: 'Наименование метрики',
+                isHeader: true,
+                colSpan: 1,
+                rowSpan: 2,
+                originRow: 0,
+                originCol: 1
+            },
+            {
+                content: 'Количество клиентов / элементов, ед.',
+                isHeader: true,
+                colSpan: 2,
+                rowSpan: 1,
+                originRow: 0,
+                originCol: 2
+            },
+            {
+                content: '',
+                isHeader: true,
+                colSpan: 1,
+                rowSpan: 1,
+                isSpanned: true,
+                spanOrigin: {row: 0, col: 2},
+                originRow: 0,
+                originCol: 3
+            },
+            {
+                content: 'Сумма, руб.',
+                isHeader: true,
+                colSpan: 1,
+                rowSpan: 2,
+                originRow: 0,
+                originCol: 4
+            },
+            {
+                content: 'Код БП',
+                isHeader: true,
+                colSpan: 1,
+                rowSpan: 2,
+                originRow: 0,
+                originCol: 5
+            },
+            {
+                content: 'Пункт / подпункт акта',
+                isHeader: true,
+                colSpan: 1,
+                rowSpan: 2,
+                originRow: 0,
+                originCol: 6
+            }
+        ];
+        grid.push(headerRow1);
+
+        // Вторая строка шапки (для разделения на ФЛ и ЮЛ)
+        const headerRow2 = [
+            {
+                content: '',
+                isHeader: true,
+                colSpan: 1,
+                rowSpan: 1,
+                isSpanned: true,
+                spanOrigin: {row: 0, col: 0},
+                originRow: 1,
+                originCol: 0
+            },
+            {
+                content: '',
+                isHeader: true,
+                colSpan: 1,
+                rowSpan: 1,
+                isSpanned: true,
+                spanOrigin: {row: 0, col: 1},
+                originRow: 1,
+                originCol: 1
+            },
+            {
+                content: 'ФЛ',
+                isHeader: true,
+                colSpan: 1,
+                rowSpan: 1,
+                originRow: 1,
+                originCol: 2
+            },
+            {
+                content: 'ЮЛ',
+                isHeader: true,
+                colSpan: 1,
+                rowSpan: 1,
+                originRow: 1,
+                originCol: 3
+            },
+            {
+                content: '',
+                isHeader: true,
+                colSpan: 1,
+                rowSpan: 1,
+                isSpanned: true,
+                spanOrigin: {row: 0, col: 4},
+                originRow: 1,
+                originCol: 4
+            },
+            {
+                content: '',
+                isHeader: true,
+                colSpan: 1,
+                rowSpan: 1,
+                isSpanned: true,
+                spanOrigin: {row: 0, col: 5},
+                originRow: 1,
+                originCol: 5
+            },
+            {
+                content: '',
+                isHeader: true,
+                colSpan: 1,
+                rowSpan: 1,
+                isSpanned: true,
+                spanOrigin: {row: 0, col: 6},
+                originRow: 1,
+                originCol: 6
+            }
+        ];
+        grid.push(headerRow2);
+
+        // Добавляем 2 строки данных
+        for (let r = 2; r < 4; r++) {
+            const dataRow = [];
+            for (let c = 0; c < 7; c++) {
+                dataRow.push({
+                    content: '',
+                    isHeader: false,
+                    colSpan: 1,
+                    rowSpan: 1,
+                    originRow: r,
+                    originCol: c
+                });
+            }
+            grid.push(dataRow);
+        }
+
+        // Создание объекта таблицы с шириной колонок
+        const table = {
+            id: tableId,
+            nodeId: tableNode.id,
+            grid: grid,
+            colWidths: [80, 200, 100, 100, 120, 80, 120],
+            protected: true,  // ИСПРАВЛЕНИЕ 1: таблица защищена
+            isMetricsTable: true  // Маркер таблицы метрик
+        };
+
+        this.tables[tableId] = table;
+        return {success: true, table: table, tableNode: tableNode};
+    },
+
+    /**
      * Рекурсивно ищет узел по ID в дереве.
      * @param {string} id - ID искомого узла
      * @param {Object} node - Узел для начала поиска (по умолчанию корень)

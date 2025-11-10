@@ -145,15 +145,15 @@ class TreeDragDrop {
             position = 'child';
             dropZoneClass = 'drop-child';
         } else if (relativeY < labelHeight * 0.15) {
-            // Верхние 15% label - before (уменьшено с 20%)
+            // Верхние 15% label - before
             position = 'before';
             dropZoneClass = 'drop-before';
         } else if (relativeY > labelHeight * 0.85) {
-            // Нижние 15% label - after (уменьшено с 20%)
+            // Нижние 15% label - after
             position = 'after';
             dropZoneClass = 'drop-after';
         } else {
-            // Средние 70% - child, если возможно (увеличено с 60%)
+            // Средние 70% - child, если возможно
             if (canBeChild) {
                 position = 'child';
                 dropZoneClass = 'drop-child';
@@ -219,8 +219,9 @@ class TreeDragDrop {
 
     /**
      * Обработчик сброса элемента
+     * ИСПРАВЛЕНО: добавлен await для асинхронного вызова moveNode
      */
-    handleDrop(e) {
+    async handleDrop(e) {
         e.preventDefault();
         e.stopPropagation();
 
@@ -229,7 +230,8 @@ class TreeDragDrop {
             return;
         }
 
-        const result = AppState.moveNode(
+        // КРИТИЧЕСКОЕ ИСПРАВЛЕНИЕ: await для асинхронного метода
+        const result = await AppState.moveNode(
             this.draggedNode.id,
             this.dropTargetNode.id,
             this.dropPosition
@@ -246,10 +248,13 @@ class TreeDragDrop {
                 Notifications.success('Элемент успешно перемещен');
             }
         } else {
-            if (typeof Notifications !== 'undefined') {
-                Notifications.error(result.reason || 'Не удалось переместить элемент');
-            } else {
-                alert(result.reason || 'Не удалось переместить элемент');
+            // Не показываем ошибку, если пользователь отменил действие
+            if (!result.cancelled) {
+                if (typeof Notifications !== 'undefined') {
+                    Notifications.error(result.reason || 'Не удалось переместить элемент');
+                } else {
+                    alert(result.reason || 'Не удалось переместить элемент');
+                }
             }
         }
 

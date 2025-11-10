@@ -70,11 +70,37 @@ Object.assign(AppState, {
             child.number = number;
             child.label = `${number}. ${baseLabel}`;
 
+            // НОВАЯ ЛОГИКА: обновляем названия таблиц метрик для дочерних элементов пункта 5
+            if (node.id === '5' && number.startsWith('5.')) {
+                this.updateMetricsTableLabel(child.id);
+            }
+
             // Рекурсивно обрабатываем дочерние узлы
             if (child.children && child.children.length > 0) {
                 this.generateNumbering(child, number);
             }
         });
+    },
+
+    /**
+     * Обновляет название таблицы метрик после изменения номера узла.
+     * @param {string} nodeId - ID узла, для которого нужно обновить таблицу
+     */
+    updateMetricsTableLabel(nodeId) {
+        const node = this.findNodeById(nodeId);
+        if (!node || !node.children) return;
+
+        // Ищем таблицу метрик среди дочерних элементов
+        const metricsTableNode = node.children.find(child =>
+            child.type === 'table' && child.isMetricsTable === true
+        );
+
+        if (metricsTableNode && node.number) {
+            // Обновляем название таблицы
+            const newLabel = `Объем выявленных отклонений (В метриках) по ${node.number}`;
+            metricsTableNode.label = newLabel;
+            metricsTableNode.customLabel = newLabel;
+        }
     },
 
     /**
@@ -125,6 +151,23 @@ Object.assign(AppState, {
         }
 
         this.generateNumbering();
+
+        // НОВАЯ ЛОГИКА: автоматическое создание таблицы метрик
+        // Проверяем, является ли новый узел дочерним элементом пункта 5 на первом уровне вложенности
+        const parentNode = isChild ? parent : this.findParentNode(parentId);
+        if (parentNode && parentNode.id === '5') {
+            // Это дочерний элемент пункта 5
+            // Ищем номер созданного узла
+            const nodeNumber = newNode.number;
+            if (nodeNumber && nodeNumber.startsWith('5.')) {
+                // Создаем таблицу метрик
+                const result = this._createMetricsTable(newNode.id, nodeNumber);
+                if (result.success) {
+                    this.generateNumbering(); // Перенумеруем после добавления таблицы
+                }
+            }
+        }
+
         return {success: true, node: newNode};
     },
 
@@ -181,12 +224,13 @@ Object.assign(AppState, {
 
     /**
      * Перемещает узел в дереве на новую позицию.
+     * ИСПРАВЛЕНО: возвращает Promise для корректной обработки диалога
      * @param {string} draggedNodeId - ID перемещаемого узла
      * @param {string} targetNodeId - ID целевого узла
      * @param {string} position - Позиция вставки: 'before', 'after', 'child'
-     * @returns {Object} Результат операции с флагом success и причиной отказа
+     * @returns {Promise<Object>} Результат операции с флагом success и причиной отказа
      */
-    moveNode(draggedNodeId, targetNodeId, position) {
+    async moveNode(draggedNodeId, targetNodeId, position) {
         if (draggedNodeId === targetNodeId) {
             return {success: false, reason: 'Нельзя переместить узел в самого себя'};
         }
@@ -207,6 +251,52 @@ Object.assign(AppState, {
             return {success: false, reason: 'Нельзя переместить узел внутрь своего потомка'};
         }
 
+        // ИСПРАВЛЕНИЕ 3: проверка на таблицу метрик для ЛЮБОГО перемещения
+        const hasMetricsTable = draggedNode.children && draggedNode.children.some(
+            child => child.type === 'table' && child.isMetricsTable === true
+        );
+
+        // Определяем нового родителя после перемещения
+        let newParent;
+        if (position === 'child') {
+            newParent = targetNode;
+        } else {
+            newParent = this.findParentNode(targetNodeId);
+        }
+
+        // Проверяем, останется ли узел дочерним элементом пункта 5 на первом уровне
+        const willStayUnder5FirstLevel = newParent && newParent.id === '5';
+
+        // ИСПРАВЛЕНИЕ 3: если есть таблица метрик и перемещение уведет узел из-под пункта 5
+        if (hasMetricsTable && !willStayUnder5FirstLevel) {
+            const confirmed = await new Promise((resolve) => {
+                DialogManager.show({
+                    title: 'Удаление таблицы метрик',
+                    message: 'При перемещении этого пункта таблица метрик будет удалена. Продолжить?',
+                    icon: '⚠️',
+                    confirmText: 'Да, переместить',
+                    cancelText: 'Отмена',
+                    onConfirm: () => resolve(true),
+                    onCancel: () => resolve(false)
+                });
+            });
+
+            if (!confirmed) {
+                return {success: false, reason: 'Перемещение отменено пользователем', cancelled: true};
+            }
+
+            // Удаляем таблицу метрик
+            const metricsTableNode = draggedNode.children.find(
+                child => child.type === 'table' && child.isMetricsTable === true
+            );
+            if (metricsTableNode) {
+                delete this.tables[metricsTableNode.tableId];
+                draggedNode.children = draggedNode.children.filter(
+                    child => child.id !== metricsTableNode.id
+                );
+            }
+        }
+
         // Проверка глубины вложенности только для обычных пунктов
         const isDraggedInformational = draggedNode.type === 'table' ||
             draggedNode.type === 'textblock' ||
@@ -216,10 +306,8 @@ Object.assign(AppState, {
             let targetDepth;
 
             if (position === 'child') {
-                // При вставке как child - глубина целевого узла + 1
                 targetDepth = this.getNodeDepth(targetNodeId);
             } else {
-                // При вставке before/after - глубина родителя целевого узла
                 const targetParent = this.findParentNode(targetNodeId);
                 if (targetParent) {
                     targetDepth = this.getNodeDepth(targetParent.id);
@@ -242,13 +330,10 @@ Object.assign(AppState, {
         // Проверка для первого уровня
         const targetParent = this.findParentNode(targetNodeId);
 
-        // Если перемещаем НА первый уровень (targetParent === root)
         if (position !== 'child' && targetParent && targetParent.id === 'root') {
-            // Если элемент уже на первом уровне, разрешаем перемещение
             if (draggedParent.id === 'root') {
                 // Можно перемещать в пределах первого уровня
             } else {
-                // Перемещаем с другого уровня на первый
                 const hasCustomFirstLevel = targetParent.children.some(child => {
                     const num = child.label.match(/^(\d+)\./);
                     return num && parseInt(num[1]) === 6;
@@ -261,18 +346,15 @@ Object.assign(AppState, {
                     };
                 }
 
-                // Разрешаем вставку только после пункта 5 (в конец)
                 const targetNum = targetNode.label.match(/^(\d+)\./);
                 if (targetNum) {
                     const targetNumber = parseInt(targetNum[1]);
-                    // Для before: можем вставить только перед пунктом 6 (если он есть)
                     if (position === 'before' && targetNumber !== 6) {
                         return {
                             success: false,
                             reason: 'Новый пункт первого уровня можно добавить только в конец списка (после пункта 5)'
                         };
                     }
-                    // Для after: можем вставить только после пункта 5
                     if (position === 'after' && targetNumber !== 5) {
                         return {
                             success: false,
@@ -287,19 +369,15 @@ Object.assign(AppState, {
         draggedParent.children = draggedParent.children.filter(n => n.id !== draggedNodeId);
 
         // Вставляем узел на новое место
-        let newParent;
         let insertIndex;
 
         if (position === 'child') {
-            newParent = targetNode;
             if (!newParent.children) newParent.children = [];
             newParent.children.push(draggedNode);
         } else if (position === 'before') {
-            newParent = targetParent;
             insertIndex = newParent.children.findIndex(n => n.id === targetNodeId);
             newParent.children.splice(insertIndex, 0, draggedNode);
         } else if (position === 'after') {
-            newParent = targetParent;
             insertIndex = newParent.children.findIndex(n => n.id === targetNodeId);
             newParent.children.splice(insertIndex + 1, 0, draggedNode);
         }
@@ -310,6 +388,40 @@ Object.assign(AppState, {
 
         this.generateNumbering();
 
+        // НОВАЯ ЛОГИКА: создаем таблицу метрик если узел попал под пункт 5 на первый уровень
+        if (newParent.id === '5' && draggedNode.number && draggedNode.number.startsWith('5.')) {
+            // Проверяем, нет ли уже таблицы метрик
+            const hasTable = draggedNode.children && draggedNode.children.some(
+                child => child.type === 'table' && child.isMetricsTable === true
+            );
+
+            if (!hasTable) {
+                const result = this._createMetricsTable(draggedNode.id, draggedNode.number);
+                if (result.success) {
+                    this.generateNumbering();
+                }
+            } else {
+                // Если таблица уже есть, просто обновляем её название
+                this.updateMetricsTableLabel(draggedNode.id);
+            }
+        }
+
         return {success: true, node: draggedNode};
+    },
+
+    /**
+     * Проверяет, является ли узел дочерним элементом пункта 5 на первом уровне вложенности.
+     * @param {string} nodeId - ID проверяемого узла
+     * @returns {boolean} true, если узел является дочерним элементом пункта 5 первого уровня
+     */
+    isDirectChildOf5(nodeId) {
+        const node = this.findNodeById(nodeId);
+        if (!node) return false;
+
+        const parent = this.findParentNode(nodeId);
+        if (!parent || parent.id !== '5') return false;
+
+        // Проверяем, что узел находится на первом уровне вложенности (его номер начинается с "5.")
+        return node.number && node.number.match(/^5\.\d+$/);
     }
 });
