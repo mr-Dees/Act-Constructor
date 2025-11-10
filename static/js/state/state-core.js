@@ -572,6 +572,10 @@ const AppState = {
                 responsible: {
                     enabled: violation.responsible?.enabled || false,
                     content: violation.responsible?.content || ''
+                },
+                recommendations: {
+                    enabled: violation.recommendations?.enabled || false,
+                    content: violation.recommendations?.content || ''
                 }
             };
         }

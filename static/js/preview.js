@@ -197,6 +197,14 @@ class PreviewManager {
                         violationDiv.appendChild(responsibleLine);
                     }
 
+                    // Рекомендации (опциональное поле)
+                    if (violation.recommendations.enabled && violation.recommendations.content) {
+                        const recommendationsLine = document.createElement('div');
+                        recommendationsLine.className = 'preview-violation-line';
+                        recommendationsLine.innerHTML = `Рекомендации: ${truncate(violation.recommendations.content)}`;
+                        violationDiv.appendChild(recommendationsLine);
+                    }
+
                     container.appendChild(violationDiv);
                 }
 

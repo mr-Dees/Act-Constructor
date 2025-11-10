@@ -103,7 +103,7 @@ class ViolationOptionalFieldSchema(BaseModel):
     """
     Схема опционального текстового поля нарушения.
 
-    Используется для причин, последствий, ответственных лиц и др.
+    Используется для причин, последствий, рекомендаций, ответственных лиц и др.
 
     Attributes:
         enabled: Включено ли поле в документ
@@ -161,6 +161,7 @@ class ViolationSchema(BaseModel):
         reasons: Причины нарушения
         consequences: Последствия нарушения
         responsible: Ответственные лица
+        recommendations: Рекомендации по устранению
     """
     id: str = Field(description="ID нарушения")
     nodeId: str = Field(description="ID узла дерева")
@@ -185,6 +186,10 @@ class ViolationSchema(BaseModel):
     responsible: ViolationOptionalFieldSchema = Field(
         default_factory=ViolationOptionalFieldSchema,
         description="Ответственные"
+    )
+    recommendations: ViolationOptionalFieldSchema = Field(
+        default_factory=ViolationOptionalFieldSchema,
+        description="Рекомендации"
     )
 
 
