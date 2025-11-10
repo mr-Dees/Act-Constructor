@@ -103,19 +103,10 @@ Object.assign(AppState, {
         }
     },
 
-    /**
-     * Добавляет новый узел в дерево как дочерний или соседний элемент.
-     * Выполняет валидацию ограничений вложенности и обновляет нумерацию.
-     * @param {string} parentId - ID родительского узла (для дочернего) или узла-соседа
-     * @param {string} label - Метка нового узла
-     * @param {boolean} isChild - true для дочернего узла, false для соседнего
-     * @returns {Object} Результат операции с success и причиной отказа
-     */
     addNode(parentId, label, isChild = true) {
         const parent = this.findNodeById(parentId);
         if (!parent) return {success: false, reason: 'Родительский узел не найден'};
 
-        // Проверка ограничений перед добавлением
         if (isChild) {
             const canAdd = this.canAddChild(parentId);
             if (!canAdd.allowed) {
@@ -128,7 +119,6 @@ Object.assign(AppState, {
             }
         }
 
-        // Создаем новый узел с уникальным ID на основе timestamp
         const newId = Date.now().toString();
         const newNode = {
             id: newId,
@@ -138,7 +128,6 @@ Object.assign(AppState, {
             type: 'item'
         };
 
-        // Вставка в дерево
         if (isChild) {
             if (!parent.children) parent.children = [];
             parent.children.push(newNode);
@@ -152,74 +141,59 @@ Object.assign(AppState, {
 
         this.generateNumbering();
 
-        // НОВАЯ ЛОГИКА: автоматическое создание таблицы метрик
-        // Проверяем, является ли новый узел дочерним элементом пункта 5 на первом уровне вложенности
-        const parentNode = isChild ? parent : this.findParentNode(parentId);
-        if (parentNode && parentNode.id === '5') {
-            // Это дочерний элемент пункта 5
-            // Ищем номер созданного узла
-            const nodeNumber = newNode.number;
-            if (nodeNumber && nodeNumber.startsWith('5.')) {
-                // Создаем таблицу метрик
-                const result = this._createMetricsTable(newNode.id, nodeNumber);
-                if (result.success) {
-                    this.generateNumbering(); // Перенумеруем после добавления таблицы
-                }
-            }
-        }
-
         return {success: true, node: newNode};
     },
 
     /**
-     * Удаляет узел из дерева и все связанные данные (таблицы, текстовые блоки, нарушения).
-     * Рекурсивно очищает дочерние элементы и обновляет нумерацию.
-     * @param {string} nodeId - ID удаляемого узла
-     * @returns {boolean} true при успешном удалении
+     * Удаляет узел из дерева и все связанные данные.
+     * Автоматически очищает таблицы метрик при удалении таблиц рисков.
+     * @param {string} nodeId - ID узла для удаления
+     * @returns {boolean} true если узел успешно удален
      */
     deleteNode(nodeId) {
-        const parent = this.findParentNode(nodeId);
-        if (parent && parent.children) {
-            const node = this.findNodeById(nodeId);
+        const node = this.findNodeById(nodeId);
+        if (!node) return false;
 
-            // Рекурсивная очистка данных для обычных пунктов
-            if (node && node.type === 'item' && node.children) {
-                // Удаляем все таблицы из дочерних элементов
-                node.children.filter(c => c.type === 'table').forEach(tableNode => {
-                    delete this.tables[tableNode.tableId];
-                });
-                // Удаляем все текстовые блоки из дочерних элементов
-                node.children.filter(c => c.type === 'textblock').forEach(textBlockNode => {
-                    delete this.textBlocks[textBlockNode.textBlockId];
-                });
-                // Удаляем все нарушения из дочерних элементов
-                node.children.filter(c => c.type === 'violation').forEach(violationNode => {
-                    delete this.violations[violationNode.violationId];
-                });
+        // НОВОЕ: Проверяем, является ли узел таблицей риска
+        let isRiskTable = false;
+        if (node.type === 'table' && node.tableId) {
+            const table = this.tables[node.tableId];
+            if (table && (table.isRegularRiskTable || table.isOperationalRiskTable)) {
+                isRiskTable = true;
             }
-
-            // Удаление таблицы из хранилища
-            if (node && node.type === 'table' && node.tableId) {
-                delete this.tables[node.tableId];
-            }
-
-            // Удаление текстового блока из хранилища
-            if (node && node.type === 'textblock' && node.textBlockId) {
-                delete this.textBlocks[node.textBlockId];
-            }
-
-            // Удаление нарушения из хранилища
-            if (node && node.type === 'violation' && node.violationId) {
-                delete this.violations[node.violationId];
-            }
-
-            // Удаляем узел из дерева
-            parent.children = parent.children.filter(n => n.id !== nodeId);
-            this.generateNumbering();
-            return true;
         }
 
-        return false;
+        // Удаление связанных данных
+        if (node.type === 'table' && node.tableId) {
+            delete this.tables[node.tableId];
+            delete this.tableUISizes?.[node.tableId];
+        } else if (node.type === 'textblock' && node.textBlockId) {
+            delete this.textBlocks[node.textBlockId];
+        } else if (node.type === 'violation' && node.violationId) {
+            delete this.violations[node.violationId];
+        }
+
+        // Рекурсивное удаление дочерних элементов
+        if (node.children) {
+            const childrenToDelete = [...node.children];
+            for (const child of childrenToDelete) {
+                this.deleteNode(child.id);
+            }
+        }
+
+        // Удаление узла из родительского массива children
+        const parent = this.findParentNode(nodeId);
+        if (parent && parent.children) {
+            parent.children = parent.children.filter(child => child.id !== nodeId);
+        }
+
+        // НОВОЕ: Если удалили таблицу риска, очищаем таблицы метрик
+        if (isRiskTable) {
+            this._cleanupMetricsTablesAfterRiskTableDeleted(nodeId);
+        }
+
+        this.generateNumbering();
+        return true;
     },
 
     /**

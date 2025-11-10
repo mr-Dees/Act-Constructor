@@ -35,6 +35,7 @@ const AppState = {
                     id: '1',
                     label: 'Информация о процессе, клиентском пути',
                     protected: true,
+                    deletable: false,
                     children: [],
                     content: ''
                 },
@@ -42,6 +43,7 @@ const AppState = {
                     id: '2',
                     label: 'Оценка качества проверенного процесса / сценария процесса / потока работ',
                     protected: true,
+                    deletable: false,
                     children: [],
                     content: ''
                 },
@@ -49,6 +51,7 @@ const AppState = {
                     id: '3',
                     label: 'Примененные технологии',
                     protected: true,
+                    deletable: false,
                     children: [],
                     content: ''
                 },
@@ -56,6 +59,7 @@ const AppState = {
                     id: '4',
                     label: 'Основные выводы',
                     protected: true,
+                    deletable: false,
                     children: [],
                     content: ''
                 },
@@ -63,6 +67,7 @@ const AppState = {
                     id: '5',
                     label: 'Результаты проверки',
                     protected: true,
+                    deletable: false,
                     children: [],
                     content: ''
                 }
@@ -87,7 +92,7 @@ const AppState = {
             'Количество проверенных экземпляров области проверки процесса, шт',
             'Общее количество отклонений, шт',
             'Уровень отклонений, %'
-        ], true);
+        ], true, false, '');
 
         // Таблица 1 для пункта 3: Инструменты обработки данных
         this._createSimpleTable('3', 2, 4, [
@@ -95,7 +100,7 @@ const AppState = {
             'Методы/технологии',
             'Среда/инструменты',
             'Tag'
-        ], true, 'Инструменты обработки данных');
+        ], true, false, 'Инструменты обработки данных');
 
         // Таблица 2 для пункта 3: Источники данных
         this._createSimpleTable('3', 2, 4, [
@@ -103,7 +108,7 @@ const AppState = {
             'Источник',
             'База данных',
             'Tag'
-        ], true, 'Источники данных');
+        ], true, false, 'Источники данных');
 
         // Таблица 3 для пункта 3: Репозитории по процессу
         this._createSimpleTable('3', 2, 6, [
@@ -113,10 +118,7 @@ const AppState = {
             'Ссылка на описание бизнес требований и постановку задач',
             'Контактное лицо по вопросам к коду',
             'Комментарий к коду'
-        ], true, 'Репозитории по процессу');
-
-        // Таблица для пункта 4: Объем выявленных отклонений (со сложной шапкой)
-        this._createComplexHeaderTable('4', 'Объем выявленных отклонений');
+        ], true, false, 'Репозитории по процессу');
     },
 
     /**
@@ -127,10 +129,11 @@ const AppState = {
      * @param {number} cols - Количество колонок
      * @param {Array<string>} headers - Массив названий заголовков колонок
      * @param {boolean} protected - Защищена ли таблица от удаления
+     * @param {boolean} deletable - Можно ли удалить таблицу
      * @param {string} label - Название таблицы (пустая строка = таблица без названия)
      * @returns {Object} Результат с флагом success и созданными объектами
      */
-    _createSimpleTable(nodeId, rows, cols, headers = [], protected = false, label = '') {
+    _createSimpleTable(nodeId, rows, cols, headers = [], protected = false, deletable = true, label = '') {
         const node = this.findNodeById(nodeId);
         if (!node) return {success: false, reason: 'Узел не найден'};
 
@@ -150,19 +153,20 @@ const AppState = {
         const tableId = `table_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
         const tableNode = {
             id: `${nodeId}_table_${Date.now()}_${Math.random().toString(36).substr(2, 5)}`,
-            label: label || 'Таблица',  // Используем переданное название или дефолтное
+            label: label || 'Таблица',
             type: 'table',
             tableId: tableId,
             parentId: nodeId,
-            protected: protected
+            protected: protected,
+            deletable: deletable
         };
 
-        // КРИТИЧЕСКИ ВАЖНО: если label пустая строка, устанавливаем customLabel
+        // Если label пустая строка, устанавливаем customLabel
         if (label === '') {
-            tableNode.label = 'Таблица';  // Временное название для нумерации
-            tableNode.customLabel = '';   // Пустая кастомная метка = скрыть название
+            tableNode.label = 'Таблица';
+            tableNode.customLabel = '';
         } else if (label) {
-            tableNode.customLabel = label; // Сохраняем кастомное название
+            tableNode.customLabel = label;
         }
 
         node.children.push(tableNode);
@@ -170,7 +174,7 @@ const AppState = {
         // Создание матричной структуры таблицы (grid)
         const grid = [];
 
-        // Строка заголовков с пользовательскими или дефолтными названиями
+        // Строка заголовков
         const headerRow = [];
         for (let c = 0; c < cols; c++) {
             const headerText = headers[c] || `Колонка ${c + 1}`;
@@ -201,13 +205,14 @@ const AppState = {
             grid.push(dataRow);
         }
 
-        // Создание объекта таблицы с шириной колонок по умолчанию
+        // Создание объекта таблицы
         const table = {
             id: tableId,
             nodeId: tableNode.id,
             grid: grid,
             colWidths: new Array(cols).fill(100),
-            protected: protected
+            protected: protected,
+            deletable: deletable
         };
 
         this.tables[tableId] = table;
@@ -411,7 +416,8 @@ const AppState = {
             nodeId: tableNode.id,
             grid: grid,
             colWidths: [80, 200, 100, 100, 120, 80, 120],
-            protected: true
+            editable: false,
+            protected: false
         };
 
         this.tables[tableId] = table;
@@ -420,6 +426,7 @@ const AppState = {
 
     /**
      * Создает таблицу метрик для подпункта пункта 5.
+     * Таблица защищена от изменения структуры, но может быть удалена.
      * @private
      * @param {string} nodeId - ID узла, к которому добавляется таблица
      * @param {string} nodeNumber - Номер узла (например, "5.1")
@@ -451,35 +458,20 @@ const AppState = {
             type: 'table',
             tableId: tableId,
             parentId: nodeId,
-            protected: true,  // ИСПРАВЛЕНИЕ 1: таблица защищена
+            protected: true,      // Защита от drag&drop
+            deletable: true,      // Можно удалить через контекстное меню
             customLabel: tableLabel,
-            isMetricsTable: true  // Маркер таблицы метрик
+            isMetricsTable: true
         };
 
-        // ИСПРАВЛЕНИЕ 2: вставляем таблицу в начало списка дочерних элементов
         node.children.unshift(tableNode);
 
-        // Создание сложной шапки как в пункте 4
+        // Создание сложной шапки
         const grid = [];
 
-        // Первая строка шапки с объединенными ячейками
         const headerRow1 = [
-            {
-                content: 'Код метрики',
-                isHeader: true,
-                colSpan: 1,
-                rowSpan: 2,
-                originRow: 0,
-                originCol: 0
-            },
-            {
-                content: 'Наименование метрики',
-                isHeader: true,
-                colSpan: 1,
-                rowSpan: 2,
-                originRow: 0,
-                originCol: 1
-            },
+            {content: 'Код метрики', isHeader: true, colSpan: 1, rowSpan: 2, originRow: 0, originCol: 0},
+            {content: 'Наименование метрики', isHeader: true, colSpan: 1, rowSpan: 2, originRow: 0, originCol: 1},
             {
                 content: 'Количество клиентов / элементов, ед.',
                 isHeader: true,
@@ -498,34 +490,12 @@ const AppState = {
                 originRow: 0,
                 originCol: 3
             },
-            {
-                content: 'Сумма, руб.',
-                isHeader: true,
-                colSpan: 1,
-                rowSpan: 2,
-                originRow: 0,
-                originCol: 4
-            },
-            {
-                content: 'Код БП',
-                isHeader: true,
-                colSpan: 1,
-                rowSpan: 2,
-                originRow: 0,
-                originCol: 5
-            },
-            {
-                content: 'Пункт / подпункт акта',
-                isHeader: true,
-                colSpan: 1,
-                rowSpan: 2,
-                originRow: 0,
-                originCol: 6
-            }
+            {content: 'Сумма, руб.', isHeader: true, colSpan: 1, rowSpan: 2, originRow: 0, originCol: 4},
+            {content: 'Код БП', isHeader: true, colSpan: 1, rowSpan: 2, originRow: 0, originCol: 5},
+            {content: 'Пункт / подпункт акта', isHeader: true, colSpan: 1, rowSpan: 2, originRow: 0, originCol: 6}
         ];
         grid.push(headerRow1);
 
-        // Вторая строка шапки (для разделения на ФЛ и ЮЛ)
         const headerRow2 = [
             {
                 content: '',
@@ -547,22 +517,8 @@ const AppState = {
                 originRow: 1,
                 originCol: 1
             },
-            {
-                content: 'ФЛ',
-                isHeader: true,
-                colSpan: 1,
-                rowSpan: 1,
-                originRow: 1,
-                originCol: 2
-            },
-            {
-                content: 'ЮЛ',
-                isHeader: true,
-                colSpan: 1,
-                rowSpan: 1,
-                originRow: 1,
-                originCol: 3
-            },
+            {content: 'ФЛ', isHeader: true, colSpan: 1, rowSpan: 1, originRow: 1, originCol: 2},
+            {content: 'ЮЛ', isHeader: true, colSpan: 1, rowSpan: 1, originRow: 1, originCol: 3},
             {
                 content: '',
                 isHeader: true,
@@ -596,30 +552,23 @@ const AppState = {
         ];
         grid.push(headerRow2);
 
-        // Добавляем 2 строки данных
         for (let r = 2; r < 4; r++) {
             const dataRow = [];
             for (let c = 0; c < 7; c++) {
-                dataRow.push({
-                    content: '',
-                    isHeader: false,
-                    colSpan: 1,
-                    rowSpan: 1,
-                    originRow: r,
-                    originCol: c
-                });
+                dataRow.push({content: '', isHeader: false, colSpan: 1, rowSpan: 1, originRow: r, originCol: c});
             }
             grid.push(dataRow);
         }
 
-        // Создание объекта таблицы с шириной колонок
+        // Создание объекта таблицы
         const table = {
             id: tableId,
             nodeId: tableNode.id,
             grid: grid,
             colWidths: [80, 200, 100, 100, 120, 80, 120],
-            protected: true,  // ИСПРАВЛЕНИЕ 1: таблица защищена
-            isMetricsTable: true  // Маркер таблицы метрик
+            protected: true,     // Защита от изменения структуры (добавление/удаление строк/колонок)
+            deletable: true,     // Можно удалить таблицу
+            isMetricsTable: true
         };
 
         this.tables[tableId] = table;
@@ -627,7 +576,266 @@ const AppState = {
     },
 
     /**
+     * Создает главную таблицу "Объем выявленных отклонений" для пункта 5.
+     * Таблица защищена от изменения структуры, но может быть удалена.
+     * @private
+     * @returns {Object} Результат с флагом success
+     */
+    _createMainMetricsTable() {
+        const node5 = this.findNodeById('5');
+        if (!node5) return {success: false, reason: 'Пункт 5 не найден'};
+
+        // Проверяем, нет ли уже такой таблицы
+        const existingTable = node5.children && node5.children.find(
+            child => child.type === 'table' && child.isMainMetricsTable === true
+        );
+        if (existingTable) {
+            return {success: true, message: 'Таблица уже существует'};
+        }
+
+        if (!node5.children) node5.children = [];
+
+        const tableId = `table_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
+        const tableLabel = 'Объем выявленных отклонений';
+
+        const tableNode = {
+            id: `5_table_${Date.now()}_${Math.random().toString(36).substr(2, 5)}`,
+            label: tableLabel,
+            type: 'table',
+            tableId: tableId,
+            parentId: '5',
+            protected: true,          // Защита от drag&drop
+            deletable: true,          // Можно удалить через контекстное меню
+            customLabel: tableLabel,
+            isMainMetricsTable: true
+        };
+
+        node5.children.unshift(tableNode);
+
+        const grid = [];
+
+        const headerRow1 = [
+            {content: 'Код метрики', isHeader: true, colSpan: 1, rowSpan: 2, originRow: 0, originCol: 0},
+            {content: 'Наименование метрики', isHeader: true, colSpan: 1, rowSpan: 2, originRow: 0, originCol: 1},
+            {
+                content: 'Количество клиентов / элементов, ед.',
+                isHeader: true,
+                colSpan: 2,
+                rowSpan: 1,
+                originRow: 0,
+                originCol: 2
+            },
+            {
+                content: '',
+                isHeader: true,
+                colSpan: 1,
+                rowSpan: 1,
+                isSpanned: true,
+                spanOrigin: {row: 0, col: 2},
+                originRow: 0,
+                originCol: 3
+            },
+            {content: 'Сумма, руб.', isHeader: true, colSpan: 1, rowSpan: 2, originRow: 0, originCol: 4},
+            {content: 'Код БП', isHeader: true, colSpan: 1, rowSpan: 2, originRow: 0, originCol: 5},
+            {content: 'Пункт / подпункт акта', isHeader: true, colSpan: 1, rowSpan: 2, originRow: 0, originCol: 6}
+        ];
+        grid.push(headerRow1);
+
+        const headerRow2 = [
+            {
+                content: '',
+                isHeader: true,
+                colSpan: 1,
+                rowSpan: 1,
+                isSpanned: true,
+                spanOrigin: {row: 0, col: 0},
+                originRow: 1,
+                originCol: 0
+            },
+            {
+                content: '',
+                isHeader: true,
+                colSpan: 1,
+                rowSpan: 1,
+                isSpanned: true,
+                spanOrigin: {row: 0, col: 1},
+                originRow: 1,
+                originCol: 1
+            },
+            {content: 'ФЛ', isHeader: true, colSpan: 1, rowSpan: 1, originRow: 1, originCol: 2},
+            {content: 'ЮЛ', isHeader: true, colSpan: 1, rowSpan: 1, originRow: 1, originCol: 3},
+            {
+                content: '',
+                isHeader: true,
+                colSpan: 1,
+                rowSpan: 1,
+                isSpanned: true,
+                spanOrigin: {row: 0, col: 4},
+                originRow: 1,
+                originCol: 4
+            },
+            {
+                content: '',
+                isHeader: true,
+                colSpan: 1,
+                rowSpan: 1,
+                isSpanned: true,
+                spanOrigin: {row: 0, col: 5},
+                originRow: 1,
+                originCol: 5
+            },
+            {
+                content: '',
+                isHeader: true,
+                colSpan: 1,
+                rowSpan: 1,
+                isSpanned: true,
+                spanOrigin: {row: 0, col: 6},
+                originRow: 1,
+                originCol: 6
+            }
+        ];
+        grid.push(headerRow2);
+
+        for (let r = 2; r < 4; r++) {
+            const dataRow = [];
+            for (let c = 0; c < 7; c++) {
+                dataRow.push({content: '', isHeader: false, colSpan: 1, rowSpan: 1, originRow: r, originCol: c});
+            }
+            grid.push(dataRow);
+        }
+
+        const table = {
+            id: tableId,
+            nodeId: tableNode.id,
+            grid: grid,
+            colWidths: [80, 200, 100, 100, 120, 80, 120],
+            protected: true,           // Защита от изменения структуры
+            deletable: true,           // Можно удалить таблицу
+            isMainMetricsTable: true
+        };
+
+        this.tables[tableId] = table;
+        return {success: true, table: table, tableNode: tableNode};
+    },
+
+    /**
+     * Находит все узлы с таблицами рисков (регулярного или операционного) в поддереве.
+     * @param {Object} node - Корневой узел для поиска
+     * @returns {Array} Массив узлов с таблицами рисков
+     */
+    _findRiskTablesInSubtree(node) {
+        let riskTables = [];
+
+        if (node.children) {
+            for (const child of node.children) {
+                if (child.type === 'table' && child.tableId) {
+                    const table = this.tables[child.tableId];
+                    if (table && (table.isRegularRiskTable || table.isOperationalRiskTable)) {
+                        riskTables.push(child);
+                    }
+                }
+                // Рекурсивно ищем в дочерних элементах
+                riskTables = riskTables.concat(this._findRiskTablesInSubtree(child));
+            }
+        }
+
+        return riskTables;
+    },
+
+    /**
+     * Обновляет таблицы метрик после создания таблицы риска.
+     * Создает таблицы метрик для соответствующих пунктов 5.* и пункта 5.
+     * @param {string} nodeId - ID узла, в котором создана таблица риска
+     */
+    _updateMetricsTablesAfterRiskTableCreated(nodeId) {
+        const node = this.findNodeById(nodeId);
+        if (!node) return;
+
+        // Находим ближайший родительский узел первого уровня под пунктом 5
+        let ancestorNode = node;
+        let parentNode = this.findParentNode(ancestorNode.id);
+
+        // Ищем узел с номером вида "5.X" (дочерний пункт 5)
+        while (parentNode && parentNode.id !== '5') {
+            ancestorNode = parentNode;
+            parentNode = this.findParentNode(ancestorNode.id);
+        }
+
+        // Если нашли узел под пунктом 5
+        if (parentNode && parentNode.id === '5' && ancestorNode.number && ancestorNode.number.match(/^5\.\d+$/)) {
+            // Создаем таблицу метрик для пункта 5.X, если её нет
+            const hasMetricsTable = ancestorNode.children && ancestorNode.children.some(
+                child => child.type === 'table' && child.isMetricsTable === true
+            );
+
+            if (!hasMetricsTable) {
+                this._createMetricsTable(ancestorNode.id, ancestorNode.number);
+            }
+        }
+
+        // Создаем главную таблицу метрик для пункта 5, если её нет
+        this._createMainMetricsTable();
+
+        this.generateNumbering();
+    },
+
+    /**
+     * Проверяет и удаляет таблицы метрик, если нет таблиц рисков.
+     * @param {string} deletedNodeId - ID удаленного узла с таблицей риска
+     */
+    _cleanupMetricsTablesAfterRiskTableDeleted(deletedNodeId) {
+        // Находим все узлы первого уровня под пунктом 5
+        const node5 = this.findNodeById('5');
+        if (!node5 || !node5.children) return;
+
+        // Проверяем каждый пункт 5.X
+        const firstLevelNodes = node5.children.filter(child =>
+            child.type === 'item' && child.number && child.number.match(/^5\.\d+$/)
+        );
+
+        for (const firstLevelNode of firstLevelNodes) {
+            // Ищем таблицы рисков в поддереве этого узла
+            const riskTables = this._findRiskTablesInSubtree(firstLevelNode);
+
+            // Если таблиц рисков нет, удаляем таблицу метрик
+            if (riskTables.length === 0) {
+                const metricsTableNode = firstLevelNode.children && firstLevelNode.children.find(
+                    child => child.type === 'table' && child.isMetricsTable === true
+                );
+
+                if (metricsTableNode) {
+                    delete this.tables[metricsTableNode.tableId];
+                    firstLevelNode.children = firstLevelNode.children.filter(
+                        child => child.id !== metricsTableNode.id
+                    );
+                }
+            }
+        }
+
+        // Проверяем, есть ли хоть одна таблица риска во всем пункте 5
+        const allRiskTables = this._findRiskTablesInSubtree(node5);
+
+        // Если таблиц рисков нет вообще, удаляем главную таблицу метрик из пункта 5
+        if (allRiskTables.length === 0) {
+            const mainMetricsTableNode = node5.children && node5.children.find(
+                child => child.type === 'table' && child.isMainMetricsTable === true
+            );
+
+            if (mainMetricsTableNode) {
+                delete this.tables[mainMetricsTableNode.tableId];
+                node5.children = node5.children.filter(
+                    child => child.id !== mainMetricsTableNode.id
+                );
+            }
+        }
+
+        this.generateNumbering();
+    },
+
+    /**
      * Создает таблицу регулярного риска.
+     * Таблица защищена от изменения структуры, но может быть удалена.
      * @private
      * @param {string} nodeId - ID узла, к которому добавляется таблица
      * @returns {Object} Результат с флагом success и созданными объектами
@@ -658,7 +866,8 @@ const AppState = {
             type: 'table',
             tableId: tableId,
             parentId: nodeId,
-            protected: true,  // ИЗМЕНЕНО: теперь защищена
+            protected: true,       // Защита от drag&drop
+            deletable: true,       // Можно удалить через контекстное меню
             customLabel: tableLabel
         };
 
@@ -693,14 +902,7 @@ const AppState = {
                 originRow: 0,
                 originCol: 2
             },
-            {
-                content: 'Статья/пункт НПА',
-                isHeader: true,
-                colSpan: 1,
-                rowSpan: 1,
-                originRow: 0,
-                originCol: 3
-            },
+            {content: 'Статья/пункт НПА', isHeader: true, colSpan: 1, rowSpan: 1, originRow: 0, originCol: 3},
             {
                 content: 'Пункт, статья, название нормативного документа (КоАП/ФЗ и пр.), в соответствии с которыми к Банку могут быть применены санкции, с указанием суммы штрафа (min/max) согласно формулировок нормативного документа',
                 isHeader: true,
@@ -724,14 +926,7 @@ const AppState = {
         for (let r = 1; r <= 2; r++) {
             const dataRow = [];
             for (let c = 0; c < 6; c++) {
-                dataRow.push({
-                    content: '',
-                    isHeader: false,
-                    colSpan: 1,
-                    rowSpan: 1,
-                    originRow: r,
-                    originCol: c
-                });
+                dataRow.push({content: '', isHeader: false, colSpan: 1, rowSpan: 1, originRow: r, originCol: c});
             }
             grid.push(dataRow);
         }
@@ -742,13 +937,22 @@ const AppState = {
             nodeId: tableNode.id,
             grid: grid,
             colWidths: [150, 150, 200, 120, 250, 180],
-            protected: true  // ИЗМЕНЕНО: теперь защищена
+            protected: true,          // Защита от изменения структуры
+            deletable: true,          // Можно удалить таблицу
+            isRegularRiskTable: true
         };
 
         this.tables[tableId] = table;
         return {success: true, table: table, tableNode: tableNode};
     },
 
+    /**
+     * Создает таблицу операционного риска со сложной шапкой.
+     * Таблица защищена от изменения структуры, но может быть удалена.
+     * @private
+     * @param {string} nodeId - ID узла, к которому добавляется таблица
+     * @returns {Object} Результат с флагом success и созданными объектами
+     */
     _createOperationalRiskTable(nodeId) {
         const node = this.findNodeById(nodeId);
         if (!node) return {success: false, reason: 'Узел не найден'};
@@ -775,7 +979,8 @@ const AppState = {
             type: 'table',
             tableId: tableId,
             parentId: nodeId,
-            protected: true,  // ИЗМЕНЕНО: теперь защищена
+            protected: true,       // Защита от drag&drop
+            deletable: true,       // Можно удалить через контекстное меню
             customLabel: tableLabel
         };
 
@@ -786,14 +991,7 @@ const AppState = {
 
         // ПЕРВАЯ СТРОКА ШАПКИ (row 0)
         const headerRow1 = [
-            {
-                content: 'ОР',
-                isHeader: true,
-                colSpan: 1,
-                rowSpan: 1,
-                originRow: 0,
-                originCol: 0
-            },
+            {content: 'ОР', isHeader: true, colSpan: 1, rowSpan: 1, originRow: 0, originCol: 0},
             {
                 content: 'Отклонения с признаками операционного риска (далее - ОР)',
                 isHeader: true,
@@ -847,22 +1045,8 @@ const AppState = {
 
         // ВТОРАЯ СТРОКА ШАПКИ (row 1)
         const headerRow2 = [
-            {
-                content: 'Код процесса',
-                isHeader: true,
-                colSpan: 1,
-                rowSpan: 1,
-                originRow: 1,
-                originCol: 0
-            },
-            {
-                content: 'Блок - владелец процесса',
-                isHeader: true,
-                colSpan: 1,
-                rowSpan: 1,
-                originRow: 1,
-                originCol: 1
-            },
+            {content: 'Код процесса', isHeader: true, colSpan: 1, rowSpan: 1, originRow: 1, originCol: 0},
+            {content: 'Блок - владелец процесса', isHeader: true, colSpan: 1, rowSpan: 1, originRow: 1, originCol: 1},
             {
                 content: 'Тип рискового события (уровень 2)',
                 isHeader: true,
@@ -871,22 +1055,8 @@ const AppState = {
                 originRow: 1,
                 originCol: 2
             },
-            {
-                content: 'Оценка суммы события, руб',
-                isHeader: true,
-                colSpan: 1,
-                rowSpan: 1,
-                originRow: 1,
-                originCol: 3
-            },
-            {
-                content: 'Подтип и сумма последствия',
-                isHeader: true,
-                colSpan: 2,
-                rowSpan: 1,
-                originRow: 1,
-                originCol: 4
-            },
+            {content: 'Оценка суммы события, руб', isHeader: true, colSpan: 1, rowSpan: 1, originRow: 1, originCol: 3},
+            {content: 'Подтип и сумма последствия', isHeader: true, colSpan: 2, rowSpan: 1, originRow: 1, originCol: 4},
             {
                 content: '',
                 isHeader: true,
@@ -900,18 +1070,11 @@ const AppState = {
         ];
         grid.push(headerRow2);
 
-        // Добавляем 2 строки данных (всего 6 колонок)
+        // Добавляем 2 строки данных (всего 6 колонок: 0,1,2,3,4,5)
         for (let r = 2; r < 4; r++) {
             const dataRow = [];
             for (let c = 0; c < 6; c++) {
-                dataRow.push({
-                    content: '',
-                    isHeader: false,
-                    colSpan: 1,
-                    rowSpan: 1,
-                    originRow: r,
-                    originCol: c
-                });
+                dataRow.push({content: '', isHeader: false, colSpan: 1, rowSpan: 1, originRow: r, originCol: c});
             }
             grid.push(dataRow);
         }
@@ -922,7 +1085,9 @@ const AppState = {
             nodeId: tableNode.id,
             grid: grid,
             colWidths: [120, 150, 180, 150, 150, 150],
-            protected: true  // ИЗМЕНЕНО: теперь защищена
+            protected: true,              // Защита от изменения структуры
+            deletable: true,              // Можно удалить таблицу
+            isOperationalRiskTable: true
         };
 
         this.tables[tableId] = table;

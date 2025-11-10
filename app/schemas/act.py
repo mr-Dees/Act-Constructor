@@ -43,6 +43,8 @@ class TableSchema(BaseModel):
         nodeId: ID узла дерева
         grid: Матрица ячеек (двумерный массив)
         colWidths: Массив ширин колонок
+        protected: Защищена ли таблица от перемещения и изменения структуры
+        deletable: Можно ли удалить таблицу (работает независимо от protected)
     """
     id: str = Field(description="ID таблицы")
     nodeId: str = Field(description="ID узла дерева")
@@ -53,6 +55,14 @@ class TableSchema(BaseModel):
     colWidths: List[int] = Field(
         default_factory=list,
         description="Ширины колонок"
+    )
+    protected: bool = Field(
+        default=False,
+        description="Защита от перемещения и изменения структуры (добавление/удаление строк/колонок)"
+    )
+    deletable: bool = Field(
+        default=True,
+        description="Разрешено ли удаление таблицы (true = можно удалить, false = нельзя удалить)"
     )
 
 
@@ -205,21 +215,31 @@ class ActItemSchema(BaseModel):
         label: Отображаемый текст узла (номер пункта + название)
         type: Тип узла (item/textblock/violation/table)
         content: Текстовое содержимое пункта
-        protected: Защищен ли узел от удаления
+        protected: Защищен ли узел от удаления и перемещения
+        deletable: Можно ли удалить узел (работает независимо от protected)
         children: Список дочерних узлов
         tableId: ID привязанной таблицы
         textBlockId: ID привязанного текстового блока
         violationId: ID привязанного нарушения
+        customLabel: Пользовательская метка узла
+        number: Номер узла в иерархии
+        isMetricsTable: Является ли узел таблицей метрик
+        isMainMetricsTable: Является ли узел главной таблицей метрик
     """
     id: str
     label: str
     type: str = "item"
     content: Optional[str] = ""
     protected: Optional[bool] = False
+    deletable: Optional[bool] = True
     children: List['ActItemSchema'] = Field(default_factory=list)
     tableId: Optional[str] = None
     textBlockId: Optional[str] = None
     violationId: Optional[str] = None
+    customLabel: Optional[str] = None
+    number: Optional[str] = None
+    isMetricsTable: Optional[bool] = False
+    isMainMetricsTable: Optional[bool] = False
 
 
 class ActDataSchema(BaseModel):

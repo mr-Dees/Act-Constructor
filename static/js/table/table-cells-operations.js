@@ -8,6 +8,11 @@ class TableCellsOperations {
         this.tableManager = tableManager;
     }
 
+    /**
+     * Начинает редактирование содержимого ячейки.
+     * Создает textarea для ввода текста с поддержкой Shift+Enter для многострочного ввода.
+     * @param {HTMLElement} cellEl - DOM-элемент ячейки
+     */
     startEditingCell(cellEl) {
         const originalContent = cellEl.textContent;
         cellEl.classList.add('editing');
@@ -78,6 +83,10 @@ class TableCellsOperations {
         textarea.addEventListener('keydown', keydownHandler);
     }
 
+    /**
+     * Вставляет новую строку выше выбранной ячейки.
+     * Учитывает объединенные ячейки и запрещает вставку выше заголовка.
+     */
     insertRowAbove() {
         if (this.tableManager.selectedCells.length === 0) return;
 
@@ -148,6 +157,10 @@ class TableCellsOperations {
         PreviewManager.update();
     }
 
+    /**
+     * Вставляет новую строку ниже выбранной ячейки.
+     * Учитывает объединенные ячейки для корректной вставки.
+     */
     insertRowBelow() {
         if (this.tableManager.selectedCells.length === 0) return;
 
@@ -221,7 +234,9 @@ class TableCellsOperations {
     }
 
     /**
-     * ИСПРАВЛЕННЫЙ МЕТОД: Полностью пересоздает размеры при изменении структуры колонок
+     * Перераспределяет ширину колонок равномерно после изменения структуры.
+     * Полностью пересоздает размеры при изменении количества колонок.
+     * @param {Object} table - Объект таблицы из AppState
      */
     _redistributeColumnWidths(table) {
         if (!table || !table.grid || !table.grid[0]) return;
@@ -267,6 +282,10 @@ class TableCellsOperations {
         };
     }
 
+    /**
+     * Вставляет новую колонку слева от выбранной ячейки.
+     * Учитывает объединенные ячейки и сохраняет флаг заголовка для новых ячеек.
+     */
     insertColumnLeft() {
         if (this.tableManager.selectedCells.length === 0) return;
 
@@ -276,6 +295,12 @@ class TableCellsOperations {
         const table = AppState.tables[tableId];
 
         if (!table || !table.grid) return;
+
+        // Проверка protected
+        if (table.protected === true) {
+            Notifications.error('Структуру этой таблицы нельзя изменять');
+            return;
+        }
 
         colIndex = this._findColumnStartOfSpan(table, colIndex);
 
@@ -325,6 +350,10 @@ class TableCellsOperations {
         PreviewManager.update();
     }
 
+    /**
+     * Вставляет новую колонку справа от выбранной ячейки.
+     * Учитывает объединенные ячейки и сохраняет флаг заголовка для новых ячеек.
+     */
     insertColumnRight() {
         if (this.tableManager.selectedCells.length === 0) return;
 
@@ -334,6 +363,12 @@ class TableCellsOperations {
         const table = AppState.tables[tableId];
 
         if (!table || !table.grid) return;
+
+        // Проверка protected
+        if (table.protected === true) {
+            Notifications.error('Структуру этой таблицы нельзя изменять');
+            return;
+        }
 
         let insertColIndex = colIndex + 1;
         for (let r = 0; r < table.grid.length; r++) {
@@ -402,6 +437,10 @@ class TableCellsOperations {
         PreviewManager.update();
     }
 
+    /**
+     * Удаляет выбранную строку из таблицы.
+     * Проверяет защиту заголовков и наличие объединенных ячеек.
+     */
     deleteRow() {
         if (this.tableManager.selectedCells.length === 0) return;
 
@@ -415,21 +454,18 @@ class TableCellsOperations {
         // Проверка: запрещаем удаление строки заголовков
         const isHeaderRow = table.grid[rowIndex].some(c => c.isHeader === true);
         if (isHeaderRow) {
-            // Уведомление показывается в handleAction, здесь просто выходим
             return;
         }
 
         // Проверяем наличие объединенных ячеек в строке
         const hasMergedCells = this._rowHasAnyMergedCells(table, rowIndex);
         if (hasMergedCells) {
-            // Уведомление показывается в handleAction, здесь просто выходим
             return;
         }
 
         // Проверяем, что в таблице остается хотя бы одна строка данных
         const headerRowCount = table.grid.filter(row => row.some(c => c.isHeader === true)).length;
         if (table.grid.length - headerRowCount <= 1) {
-            // Уведомление показывается в handleAction, здесь просто выходим
             return;
         }
 
@@ -463,6 +499,10 @@ class TableCellsOperations {
         PreviewManager.update();
     }
 
+    /**
+     * Удаляет выбранную колонку из таблицы.
+     * Проверяет минимальное количество колонок и наличие объединенных ячеек.
+     */
     deleteColumn() {
         if (this.tableManager.selectedCells.length === 0) return;
 
@@ -473,16 +513,20 @@ class TableCellsOperations {
 
         if (!table || !table.grid) return;
 
+        // Проверка protected
+        if (table.protected === true) {
+            Notifications.error('Структуру этой таблицы нельзя изменять');
+            return;
+        }
+
         // Проверяем минимальное количество колонок
         if (table.grid[0].length <= 1) {
-            // Уведомление показывается в handleAction, здесь просто выходим
             return;
         }
 
         // Проверяем наличие объединенных ячеек в колонке
         const hasMergedCells = this._columnHasAnyMergedCells(table, colIndex);
         if (hasMergedCells) {
-            // Уведомление показывается в handleAction, здесь просто выходим
             return;
         }
 
@@ -519,6 +563,12 @@ class TableCellsOperations {
         PreviewManager.update();
     }
 
+    /**
+     * Находит начальную строку для вставки с учетом объединенных ячеек
+     * @param {Object} table - Объект таблицы
+     * @param {number} rowIndex - Индекс текущей строки
+     * @returns {number} Индекс начальной строки
+     */
     _findRowStartOfSpan(table, rowIndex) {
         for (let r = 0; r < rowIndex; r++) {
             for (let c = 0; c < table.grid[r].length; c++) {
@@ -534,6 +584,12 @@ class TableCellsOperations {
         return rowIndex;
     }
 
+    /**
+     * Находит начальную колонку для вставки с учетом объединенных ячеек
+     * @param {Object} table - Объект таблицы
+     * @param {number} colIndex - Индекс текущей колонки
+     * @returns {number} Индекс начальной колонки
+     */
     _findColumnStartOfSpan(table, colIndex) {
         for (let r = 0; r < table.grid.length; r++) {
             for (let c = 0; c < colIndex; c++) {
@@ -549,6 +605,12 @@ class TableCellsOperations {
         return colIndex;
     }
 
+    /**
+     * Проверяет наличие объединенных ячеек в строке
+     * @param {Object} table - Объект таблицы
+     * @param {number} rowIndex - Индекс строки
+     * @returns {boolean} true если есть объединенные ячейки
+     */
     _rowHasAnyMergedCells(table, rowIndex) {
         for (let c = 0; c < table.grid[rowIndex].length; c++) {
             const cellData = table.grid[rowIndex][c];
@@ -560,6 +622,12 @@ class TableCellsOperations {
         return false;
     }
 
+    /**
+     * Проверяет наличие объединенных ячеек в колонке
+     * @param {Object} table - Объект таблицы
+     * @param {number} colIndex - Индекс колонки
+     * @returns {boolean} true если есть объединенные ячейки
+     */
     _columnHasAnyMergedCells(table, colIndex) {
         for (let r = 0; r < table.grid.length; r++) {
             const cellData = table.grid[r][colIndex];
@@ -571,6 +639,15 @@ class TableCellsOperations {
         return false;
     }
 
+    /**
+     * Проверяет возможность объединения ячеек разных типов
+     * @param {Object} table - Объект таблицы
+     * @param {number} minRow - Минимальный индекс строки
+     * @param {number} maxRow - Максимальный индекс строки
+     * @param {number} minCol - Минимальный индекс колонки
+     * @param {number} maxCol - Максимальный индекс колонки
+     * @returns {boolean} true если можно объединять
+     */
     _canMergeCellsAcrossTypes(table, minRow, maxRow, minCol, maxCol) {
         let hasHeader = false;
         let hasData = false;
@@ -591,22 +668,37 @@ class TableCellsOperations {
         return !(hasHeader && hasData);
     }
 
+    /**
+     * Пересчитывает ширину колонок (алиас для _redistributeColumnWidths)
+     * @param {Object} table - Объект таблицы
+     */
     _recalculateColumnWidths(table) {
         this._redistributeColumnWidths(table);
     }
 
+    /**
+     * Выделяет ячейку
+     * @param {HTMLElement} cell - DOM-элемент ячейки
+     */
     selectCell(cell) {
         cell.classList.add('selected');
         this.tableManager.selectedCells.push(cell);
         AppState.selectedCells = this.tableManager.selectedCells;
     }
 
+    /**
+     * Снимает выделение со всех ячеек
+     */
     clearSelection() {
         this.tableManager.selectedCells.forEach(cell => cell.classList.remove('selected'));
         this.tableManager.selectedCells = [];
         AppState.selectedCells = [];
     }
 
+    /**
+     * Объединяет выбранные ячейки в одну.
+     * Проверяет прямоугольность выделения и совместимость типов ячеек.
+     */
     mergeCells() {
         if (this.tableManager.selectedCells.length < 2) return;
 
@@ -625,6 +717,12 @@ class TableCellsOperations {
 
         const table = AppState.tables[tableId];
         if (!table) return;
+
+        // Проверка protected
+        if (table.protected === true) {
+            Notifications.error('Структуру этой таблицы нельзя изменять');
+            return;
+        }
 
         for (let coord of coords) {
             const cellData = table.grid[coord.row][coord.col];
@@ -702,7 +800,7 @@ class TableCellsOperations {
     /**
      * Разделение объединенной ячейки на отдельные ячейки.
      * Восстанавливает grid-структуру, создавая пустые ячейки на месте spanned.
-     * ИСПРАВЛЕНО: сохраняет флаг isHeader для ячеек заголовка.
+     * Сохраняет флаг isHeader для ячеек заголовка.
      */
     unmergeCells() {
         if (this.tableManager.selectedCells.length !== 1) return;
@@ -714,6 +812,12 @@ class TableCellsOperations {
 
         const table = AppState.tables[tableId];
         if (!table) return;
+
+        // Проверка protected
+        if (table.protected === true) {
+            Notifications.error('Структуру этой таблицы нельзя изменять');
+            return;
+        }
 
         const cellData = table.grid[row][col];
 
@@ -741,7 +845,7 @@ class TableCellsOperations {
                         // Создание новых пустых ячеек с сохранением флага заголовка
                         table.grid[r][c] = {
                             content: '',
-                            isHeader: isHeaderCell,  // ← ИСПРАВЛЕНИЕ: наследуем флаг заголовка
+                            isHeader: isHeaderCell,  // Наследуем флаг заголовка
                             colSpan: 1,
                             rowSpan: 1,
                             originRow: r,

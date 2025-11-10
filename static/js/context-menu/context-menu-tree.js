@@ -1,5 +1,6 @@
 /**
- * Обработчик контекстного меню для дерева
+ * Обработчик контекстного меню для дерева.
+ * Управляет добавлением элементов, таблиц, текстовых блоков, нарушений и удалением узлов.
  */
 class TreeContextMenu {
     constructor(menu) {
@@ -7,6 +8,9 @@ class TreeContextMenu {
         this.initHandlers();
     }
 
+    /**
+     * Инициализирует обработчики событий для пунктов меню.
+     */
     initHandlers() {
         this.menu.querySelectorAll('.context-menu-item').forEach(item => {
             item.addEventListener('click', (e) => {
@@ -21,11 +25,21 @@ class TreeContextMenu {
         });
     }
 
+    /**
+     * Показывает контекстное меню в указанных координатах.
+     * @param {number} x - Координата X
+     * @param {number} y - Координата Y
+     * @param {Object} params - Параметры (nodeId и др.)
+     */
     show(x, y, params = {}) {
         const {nodeId} = params;
         ContextMenuManager.positionMenu(this.menu, x, y);
     }
 
+    /**
+     * Обрабатывает выбранное действие из меню.
+     * @param {string} action - Тип действия
+     */
     handleAction(action) {
         const nodeId = ContextMenuManager.currentNodeId;
         if (!nodeId) return;
@@ -61,6 +75,11 @@ class TreeContextMenu {
         }
     }
 
+    /**
+     * Добавляет дочерний элемент к узлу.
+     * @param {Object} node - Узел дерева
+     * @param {string} nodeId - ID узла
+     */
     handleAddChild(node, nodeId) {
         if (node.type === 'table') {
             alert('Нельзя добавлять дочерние элементы к таблице');
@@ -75,6 +94,11 @@ class TreeContextMenu {
         }
     }
 
+    /**
+     * Добавляет соседний элемент к узлу.
+     * @param {Object} node - Узел дерева
+     * @param {string} nodeId - ID узла
+     */
     handleAddSibling(node, nodeId) {
         const result = AppState.addNode(nodeId, '', false);
         if (result.success) {
@@ -84,6 +108,12 @@ class TreeContextMenu {
         }
     }
 
+    /**
+     * Добавляет таблицу к узлу.
+     * @param {Object} node - Узел дерева
+     * @param {string} nodeId - ID узла
+     * @param {string} tableType - Тип таблицы ('regular', 'regular-risk', 'operational-risk')
+     */
     handleAddTable(node, nodeId, tableType = 'regular') {
         if (node.type === 'table') {
             alert('Нельзя добавлять таблицу к таблице');
@@ -94,21 +124,22 @@ class TreeContextMenu {
 
         switch (tableType) {
             case 'regular':
-                // Стандартная таблица 3x3
                 result = AppState.addTableToNode(nodeId);
                 break;
             case 'regular-risk':
-                // Таблица регулярного риска
                 result = AppState._createRegularRiskTable(nodeId);
                 if (result.success) {
                     AppState.generateNumbering();
+                    // Обновляем таблицы метрик после создания таблицы риска
+                    AppState._updateMetricsTablesAfterRiskTableCreated(nodeId);
                 }
                 break;
             case 'operational-risk':
-                // Таблица операционного риска
                 result = AppState._createOperationalRiskTable(nodeId);
                 if (result.success) {
                     AppState.generateNumbering();
+                    // Обновляем таблицы метрик после создания таблицы риска
+                    AppState._updateMetricsTablesAfterRiskTableCreated(nodeId);
                 }
                 break;
             default:
@@ -122,6 +153,11 @@ class TreeContextMenu {
         }
     }
 
+    /**
+     * Добавляет текстовый блок к узлу.
+     * @param {Object} node - Узел дерева
+     * @param {string} nodeId - ID узла
+     */
     handleAddTextBlock(node, nodeId) {
         if (node.type === 'table' || node.type === 'textblock') {
             alert('Нельзя добавлять текстовый блок к этому элементу');
@@ -136,6 +172,11 @@ class TreeContextMenu {
         }
     }
 
+    /**
+     * Добавляет нарушение к узлу.
+     * @param {Object} node - Узел дерева
+     * @param {string} nodeId - ID узла
+     */
     handleAddViolation(node, nodeId) {
         if (node.type === 'table' || node.type === 'textblock' || node.type === 'violation') {
             alert('Нельзя добавлять нарушение к этому элементу');
@@ -150,9 +191,17 @@ class TreeContextMenu {
         }
     }
 
+    /**
+     * Удаляет узел из дерева.
+     * Проверяет флаг deletable для возможности удаления.
+     * @param {Object} node - Узел дерева
+     * @param {string} nodeId - ID узла
+     */
     handleDelete(node, nodeId) {
-        if (node.protected) {
-            alert('Нельзя удалить защищенный элемент');
+        // Проверка возможности удаления через флаг deletable
+        // Флаг deletable работает независимо от protected
+        if (node.deletable === false) {
+            alert('Этот элемент нельзя удалить');
             return;
         }
 
@@ -162,6 +211,9 @@ class TreeContextMenu {
         }
     }
 
+    /**
+     * Обновляет все представления дерева и предпросмотр.
+     */
     updateTreeViews() {
         treeManager.render();
         PreviewManager.update('previewTrim', 30);

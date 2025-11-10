@@ -38,7 +38,8 @@ Object.assign(AppState, {
             type: 'table',
             tableId: tableId,
             parentId: nodeId,
-            protected: false
+            protected: false,
+            deletable: true
         };
 
         node.children.push(tableNode);
@@ -82,7 +83,8 @@ Object.assign(AppState, {
             nodeId: tableNode.id,
             grid: grid,
             colWidths: new Array(cols).fill(100),
-            protected: false
+            protected: false,
+            deletable: true
         };
 
         this.tables[tableId] = table;
@@ -102,7 +104,6 @@ Object.assign(AppState, {
             return {success: false, reason: 'Таблица не найдена'};
         }
 
-        // Проверка на защищенность
         if (tableNode.protected) {
             return {success: false, reason: 'Эта таблица защищена от удаления'};
         }
@@ -115,15 +116,22 @@ Object.assign(AppState, {
         const parent = this.findParentNode(tableNodeId);
         if (!parent) return {success: false, reason: 'Родительский узел не найден'};
 
-        // Удаляем узел из дерева
+        // Проверяем, является ли это таблицей риска
+        const isRiskTable = table && (table.isRegularRiskTable || table.isOperationalRiskTable);
+
         parent.children = parent.children.filter(child => child.id !== tableNodeId);
 
-        // Удаляем таблицу из хранилища
         if (tableNode.tableId && this.tables[tableNode.tableId]) {
             delete this.tables[tableNode.tableId];
         }
 
         this.generateNumbering();
+
+        // Если удалили таблицу риска, проверяем необходимость удаления таблиц метрик
+        if (isRiskTable) {
+            this._cleanupMetricsTablesAfterRiskTableDeleted(tableNodeId);
+        }
+
         return {success: true};
     },
 
