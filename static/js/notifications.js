@@ -1,12 +1,13 @@
 /**
  * Централизованная система уведомлений
- * Управляет всплывающими сообщениями в приложении
+ * Управляет всплывающими сообщениями в приложении с поддержкой группировки повторяющихся
  */
 
 class NotificationManager {
     constructor() {
         this.container = null;
         this.notifications = new Map();
+        this.messageCache = new Map(); // Кеш для отслеживания повторяющихся сообщений
         this.init();
     }
 
@@ -14,7 +15,6 @@ class NotificationManager {
      * Инициализирует контейнер для уведомлений
      */
     init() {
-        // Проверяем, есть ли уже контейнер
         this.container = document.querySelector('.notification-container');
 
         if (!this.container) {
@@ -32,9 +32,39 @@ class NotificationManager {
      * @returns {string} ID уведомления
      */
     show(message, type = 'info', duration = 2500) {
+        const cacheKey = `${type}:${message}`;
+
+        // Проверяем, есть ли уже такое же уведомление
+        if (this.messageCache.has(cacheKey)) {
+            const existingData = this.messageCache.get(cacheKey);
+            const existingNotification = this.notifications.get(existingData.id);
+
+            if (existingNotification) {
+                // Увеличиваем счетчик
+                existingData.count++;
+
+                // Обновляем бейдж со счетчиком
+                this.updateCounter(existingNotification, existingData.count);
+
+                // Продлеваем время жизни уведомления
+                clearTimeout(existingData.timer);
+                const extendedDuration = duration + (existingData.count * 400); // +400мс за каждое повторение
+
+                existingData.timer = setTimeout(() => {
+                    this.hide(existingData.id);
+                    this.messageCache.delete(cacheKey);
+                }, extendedDuration);
+
+                return existingData.id;
+            } else {
+                // Кеш устарел, очищаем
+                this.messageCache.delete(cacheKey);
+            }
+        }
+
+        // Создаем новое уведомление
         const id = `notification_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
 
-        // Создаем элемент уведомления
         const notification = document.createElement('div');
         notification.className = `notification ${type}`;
         notification.dataset.notificationId = id;
@@ -56,6 +86,13 @@ class NotificationManager {
 
         notification.appendChild(content);
 
+        // Счетчик повторений (изначально скрыт)
+        const counter = document.createElement('span');
+        counter.className = 'notification-counter';
+        counter.style.display = 'none';
+        counter.textContent = '2';
+        notification.appendChild(counter);
+
         // Кнопка закрытия
         const closeButton = document.createElement('button');
         closeButton.className = 'notification-close';
@@ -63,6 +100,7 @@ class NotificationManager {
         closeButton.setAttribute('aria-label', 'Закрыть уведомление');
         closeButton.addEventListener('click', () => {
             this.hide(id);
+            this.messageCache.delete(cacheKey);
         });
         notification.appendChild(closeButton);
 
@@ -71,13 +109,43 @@ class NotificationManager {
         this.notifications.set(id, notification);
 
         // Автоматическое удаление
+        let timer = null;
         if (duration > 0) {
-            setTimeout(() => {
+            timer = setTimeout(() => {
                 this.hide(id);
+                this.messageCache.delete(cacheKey);
             }, duration);
         }
 
+        // Сохраняем в кеш для отслеживания повторений
+        this.messageCache.set(cacheKey, {
+            id: id,
+            count: 1,
+            timer: timer
+        });
+
         return id;
+    }
+
+    /**
+     * Обновляет счетчик повторений в уведомлении
+     * @param {HTMLElement} notification - Элемент уведомления
+     * @param {number} count - Количество повторений
+     */
+    updateCounter(notification, count) {
+        const counter = notification.querySelector('.notification-counter');
+        if (counter) {
+            counter.textContent = count;
+            if (count > 1) {
+                counter.style.display = 'flex';
+
+                // Небольшая анимация при обновлении
+                counter.style.transform = 'scale(1.3)';
+                setTimeout(() => {
+                    counter.style.transform = 'scale(1)';
+                }, 150);
+            }
+        }
     }
 
     /**
@@ -88,16 +156,14 @@ class NotificationManager {
         const notification = this.notifications.get(id);
         if (!notification) return;
 
-        // Добавляем класс для анимации исчезновения
         notification.classList.add('hiding');
 
-        // Удаляем элемент после завершения анимации
         setTimeout(() => {
             if (notification.parentNode) {
                 notification.parentNode.removeChild(notification);
             }
             this.notifications.delete(id);
-        }, 250); // Длительность анимации из CSS
+        }, 250);
     }
 
     /**
@@ -107,6 +173,7 @@ class NotificationManager {
         this.notifications.forEach((_, id) => {
             this.hide(id);
         });
+        this.messageCache.clear();
     }
 
     /**

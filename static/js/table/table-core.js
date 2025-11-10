@@ -62,7 +62,7 @@ class TableManager {
         });
         this.attachEventListeners();
     }
-
+    
     /**
      * Привязка обработчиков событий к ячейкам и ручкам изменения размеров.
      * Обрабатывает клики, двойные клики, контекстное меню и начало resize-операций.
@@ -90,10 +90,17 @@ class TableManager {
                 this.cellsOps.selectCell(cell);
             });
 
-            // Двойной клик - начало редактирования содержимого
+            // Двойной клик для редактирования ячейки
             cell.addEventListener('dblclick', (e) => {
-                if (e.target.classList.contains('resize-handle') ||
-                    e.target.classList.contains('row-resize-handle')) {
+                const tableId = cell.dataset.tableId;
+                const table = AppState.tables[tableId];
+
+                // ПРОВЕРКА: блокируем редактирование заголовков защищенных таблиц
+                const isProtectedTable = table && table.protected === true;
+                const isHeaderCell = cell.tagName.toLowerCase() === 'th';
+
+                if (isProtectedTable && isHeaderCell) {
+                    Notifications.info('Заголовки защищенной таблицы нельзя редактировать');
                     return;
                 }
 
@@ -108,7 +115,6 @@ class TableManager {
                 }
 
                 e.preventDefault();
-                // Предотвращаем всплытие события
                 e.stopPropagation();
 
                 // Если нет выделенных ячеек или текущая ячейка не входит в выделение - выбираем её
@@ -116,27 +122,28 @@ class TableManager {
                     this.cellsOps.clearSelection();
                     this.cellsOps.selectCell(cell);
                 }
-                // Иначе сохраняем текущее множественное выделение
 
                 ContextMenuManager.show(e.clientX, e.clientY, null, 'cell');
             });
         });
 
-        // Обработка ручек изменения ширины колонок
+        // ИСПРАВЛЕНИЕ: Обработка ручек изменения ширины колонок
         container.querySelectorAll('.resize-handle').forEach(handle => {
             handle.addEventListener('mousedown', (e) => {
                 e.preventDefault();
                 e.stopPropagation();
-                this.startColumnResize(e);
+                // КРИТИЧЕСКОЕ ИСПРАВЛЕНИЕ: делегируем к модулю sizes
+                this.sizes.startColumnResize(e);
             });
         });
 
-        // Обработка ручек изменения высоты строк
+        // ИСПРАВЛЕНИЕ: Обработка ручек изменения высоты строк
         container.querySelectorAll('.row-resize-handle').forEach(handle => {
             handle.addEventListener('mousedown', (e) => {
                 e.preventDefault();
                 e.stopPropagation();
-                this.startRowResize(e);
+                // КРИТИЧЕСКОЕ ИСПРАВЛЕНИЕ: делегируем к модулю sizes
+                this.sizes.startRowResize(e);
             });
         });
     }

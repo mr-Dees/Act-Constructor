@@ -140,36 +140,39 @@ class ItemsRenderer {
         return itemDiv;
     }
 
-    /**
-     * Отрисовка таблицы с матричной grid-структурой.
-     * Создает HTML-таблицу с поддержкой объединенных ячеек (colspan/rowspan),
-     * редактируемым заголовком и ручками изменения размеров.
-     * @param {Object} table - Данные таблицы с grid-структурой
-     * @param {Object} node - Узел дерева, связанный с таблицей
-     * @returns {HTMLElement} Созданный элемент секции таблицы
-     */
     static renderTable(table, node) {
         const section = document.createElement('div');
         section.className = 'table-section';
         section.dataset.tableId = table.id;
 
-        // ИСПРАВЛЕНИЕ: проверяем customLabel на пустую строку
         const shouldShowTitle = node.customLabel !== '';
 
-        // Создаем редактируемый заголовок таблицы только если он не пустой
         if (shouldShowTitle) {
             const tableTitle = document.createElement('h4');
             tableTitle.className = 'table-title';
             tableTitle.contentEditable = false;
             tableTitle.textContent = node.label;
             tableTitle.style.marginBottom = '10px';
-            tableTitle.style.fontWeight = 'bold';
-            tableTitle.style.cursor = 'pointer';
+
+            // ИСПРАВЛЕНИЕ: подчеркиваем название защищенной таблицы, а не жирное
+            if (table.protected) {
+                tableTitle.style.fontWeight = 'normal';  // Обычный шрифт
+                tableTitle.style.textDecoration = 'underline';  // Подчеркнутый
+                tableTitle.style.cursor = 'default';
+            } else {
+                tableTitle.style.fontWeight = 'bold';  // Жирный для незащищенных
+                tableTitle.style.cursor = 'pointer';
+            }
 
             let clickCount = 0;
             let clickTimer = null;
 
             tableTitle.addEventListener('click', (e) => {
+                if (table.protected) {
+                    Notifications.info('Название защищенной таблицы нельзя редактировать');
+                    return;
+                }
+
                 clickCount++;
                 if (clickCount === 1) {
                     clickTimer = setTimeout(() => {
@@ -185,25 +188,24 @@ class ItemsRenderer {
             section.appendChild(tableTitle);
         }
 
-        // Создаем HTML-таблицу
         const tableEl = document.createElement('table');
         tableEl.className = 'editable-table';
 
+        if (table.protected) {
+            tableEl.classList.add('protected-table');
+        }
+
         const numCols = table.grid[0] ? table.grid[0].length : 0;
 
-        // Отрисовываем строки и ячейки с учетом матричной структуры
         table.grid.forEach((rowData, rowIndex) => {
             const tr = document.createElement('tr');
 
             rowData.forEach((cellData, colIndex) => {
-                // Пропускаем ячейки, поглощенные объединением (spanned)
                 if (cellData.isSpanned) return;
 
-                // Создаем ячейку: заголовочную (th) или обычную (td)
                 const cellEl = document.createElement(cellData.isHeader ? 'th' : 'td');
                 cellEl.textContent = cellData.content || '';
 
-                // Устанавливаем атрибуты для объединенных ячеек
                 if (cellData.colSpan > 1) {
                     cellEl.colSpan = cellData.colSpan;
                 }
@@ -211,24 +213,23 @@ class ItemsRenderer {
                     cellEl.rowSpan = cellData.rowSpan;
                 }
 
-                // Сохраняем координаты ячейки для последующих операций
                 cellEl.dataset.row = rowIndex;
                 cellEl.dataset.col = colIndex;
                 cellEl.dataset.tableId = table.id;
 
-                // Определяем, является ли ячейка последней в строке (с учетом colspan)
+                // УДАЛЕНО: больше не стилизуем заголовки ячеек
+                // Заголовки остаются с обычным стилем (жирный шрифт из CSS)
+
                 const colspan = cellData.colSpan || 1;
                 const cellEndCol = colIndex + colspan - 1;
                 const isLastColumn = cellEndCol >= numCols - 1;
 
-                // Добавляем ручку изменения ширины ТОЛЬКО для заголовков (isHeader)
                 if (cellData.isHeader && !isLastColumn) {
                     const resizeHandle = document.createElement('div');
                     resizeHandle.className = 'resize-handle';
                     cellEl.appendChild(resizeHandle);
                 }
 
-                // Добавляем ручку изменения высоты строки для всех ячеек
                 const rowResizeHandle = document.createElement('div');
                 rowResizeHandle.className = 'row-resize-handle';
                 cellEl.appendChild(rowResizeHandle);

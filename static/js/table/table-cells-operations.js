@@ -88,14 +88,22 @@ class TableCellsOperations {
 
         if (!table || !table.grid) return;
 
+        // КРИТИЧЕСКАЯ ПРОВЕРКА: запрещаем вставку выше заголовка
         const isHeaderRow = table.grid[rowIndex].some(c => c.isHeader === true);
         if (isHeaderRow) {
             Notifications.error('Нельзя добавить строку выше заголовка таблицы');
             return;
         }
 
+        // ДОПОЛНИТЕЛЬНАЯ ПРОВЕРКА: если текущая строка часть объединения с заголовком
         rowIndex = this._findRowStartOfSpan(table, rowIndex);
+        const targetRowIsHeader = table.grid[rowIndex].some(c => c.isHeader === true);
+        if (targetRowIsHeader) {
+            Notifications.error('Нельзя добавить строку выше заголовка таблицы');
+            return;
+        }
 
+        // Новая строка с пустыми ячейками
         const newRow = [];
         const numCols = table.grid[0].length;
 
@@ -110,8 +118,10 @@ class TableCellsOperations {
             });
         }
 
+        // Вставляем новую строку в grid
         table.grid.splice(rowIndex, 0, newRow);
 
+        // Обновляем originRow для всех ячеек ниже
         for (let r = rowIndex + 1; r < table.grid.length; r++) {
             for (let c = 0; c < table.grid[r].length; c++) {
                 if (table.grid[r][c].originRow !== undefined) {
@@ -120,6 +130,7 @@ class TableCellsOperations {
             }
         }
 
+        // Обновляем rowSpan для ячеек с объединением
         for (let r = 0; r < rowIndex; r++) {
             for (let c = 0; c < table.grid[r].length; c++) {
                 const cellData = table.grid[r][c];
@@ -401,24 +412,28 @@ class TableCellsOperations {
 
         if (!table || !table.grid) return;
 
+        // Проверка: запрещаем удаление строки заголовков
         const isHeaderRow = table.grid[rowIndex].some(c => c.isHeader === true);
         if (isHeaderRow) {
-            Notifications.error('Нельзя удалить строку заголовков');
+            // Уведомление показывается в handleAction, здесь просто выходим
             return;
         }
 
+        // Проверяем наличие объединенных ячеек в строке
         const hasMergedCells = this._rowHasAnyMergedCells(table, rowIndex);
         if (hasMergedCells) {
-            Notifications.error('Нельзя удалить строку с объединенными ячейками. Сначала разъедините их.');
+            // Уведомление показывается в handleAction, здесь просто выходим
             return;
         }
 
+        // Проверяем, что в таблице остается хотя бы одна строка данных
         const headerRowCount = table.grid.filter(row => row.some(c => c.isHeader === true)).length;
         if (table.grid.length - headerRowCount <= 1) {
-            Notifications.error('Таблица должна содержать хотя бы одну строку данных');
+            // Уведомление показывается в handleAction, здесь просто выходим
             return;
         }
 
+        // Уменьшаем rowSpan для ячеек, которые охватывают удаляемую строку
         for (let r = 0; r < rowIndex; r++) {
             for (let c = 0; c < table.grid[r].length; c++) {
                 const cellData = table.grid[r][c];
@@ -431,8 +446,10 @@ class TableCellsOperations {
             }
         }
 
+        // Удаляем строку
         table.grid.splice(rowIndex, 1);
 
+        // Обновляем originRow для всех ячеек ниже
         for (let r = rowIndex; r < table.grid.length; r++) {
             for (let c = 0; c < table.grid[r].length; c++) {
                 if (table.grid[r][c].originRow !== undefined) {
@@ -456,17 +473,20 @@ class TableCellsOperations {
 
         if (!table || !table.grid) return;
 
+        // Проверяем минимальное количество колонок
         if (table.grid[0].length <= 1) {
-            Notifications.error('Таблица должна содержать хотя бы одну колонку');
+            // Уведомление показывается в handleAction, здесь просто выходим
             return;
         }
 
+        // Проверяем наличие объединенных ячеек в колонке
         const hasMergedCells = this._columnHasAnyMergedCells(table, colIndex);
         if (hasMergedCells) {
-            Notifications.error('Нельзя удалить колонку с объединенными ячейками. Сначала разъедините их.');
+            // Уведомление показывается в handleAction, здесь просто выходим
             return;
         }
 
+        // Уменьшаем colSpan для ячеек, которые охватывают удаляемую колонку
         for (let r = 0; r < table.grid.length; r++) {
             for (let c = 0; c < colIndex; c++) {
                 const cellData = table.grid[r][c];
@@ -479,10 +499,12 @@ class TableCellsOperations {
             }
         }
 
+        // Удаляем колонку из всех строк
         for (let r = 0; r < table.grid.length; r++) {
             table.grid[r].splice(colIndex, 1);
         }
 
+        // Обновляем originCol для всех ячеек справа
         for (let r = 0; r < table.grid.length; r++) {
             for (let c = colIndex; c < table.grid[r].length; c++) {
                 if (table.grid[r][c].originCol !== undefined) {
@@ -677,6 +699,11 @@ class TableCellsOperations {
         Notifications.success('Ячейки объединены');
     }
 
+    /**
+     * Разделение объединенной ячейки на отдельные ячейки.
+     * Восстанавливает grid-структуру, создавая пустые ячейки на месте spanned.
+     * ИСПРАВЛЕНО: сохраняет флаг isHeader для ячеек заголовка.
+     */
     unmergeCells() {
         if (this.tableManager.selectedCells.length !== 1) return;
 
@@ -690,6 +717,7 @@ class TableCellsOperations {
 
         const cellData = table.grid[row][col];
 
+        // Проверка наличия объединения
         if (cellData.colSpan <= 1 && cellData.rowSpan <= 1) {
             return;
         }
@@ -697,16 +725,23 @@ class TableCellsOperations {
         const rowspan = cellData.rowSpan || 1;
         const colspan = cellData.colSpan || 1;
 
+        // КРИТИЧЕСКИ ВАЖНО: сохраняем флаг isHeader из исходной ячейки
+        const isHeaderCell = cellData.isHeader || false;
+
+        // Восстановление всех ячеек в области объединения
         for (let r = row; r < row + rowspan; r++) {
             for (let c = col; c < col + colspan; c++) {
                 if (table.grid[r] && table.grid[r][c]) {
                     if (r === row && c === col) {
+                        // Главная ячейка - сброс colspan/rowspan, но сохраняем isHeader
                         table.grid[r][c].colSpan = 1;
                         table.grid[r][c].rowSpan = 1;
+                        // isHeader остается без изменений
                     } else {
+                        // Создание новых пустых ячеек с сохранением флага заголовка
                         table.grid[r][c] = {
                             content: '',
-                            isHeader: false,
+                            isHeader: isHeaderCell,  // ← ИСПРАВЛЕНИЕ: наследуем флаг заголовка
                             colSpan: 1,
                             rowSpan: 1,
                             originRow: r,

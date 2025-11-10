@@ -55,3 +55,33 @@
     background: var(--bg-tertiary);
     color: var(--text-primary);
 }
+
+/* Счетчик повторений уведомления */
+.notification-counter {
+    flex-shrink: 0;
+    background: var(--accent);
+    color: white;
+    border-radius: 50%;
+    width: 1.375rem;
+    height: 1.375rem;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 0.6875rem;
+    font-weight: 600;
+    margin-left: 0.25rem;
+    transition: transform 0.15s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+/* Цвет счетчика для разных типов уведомлений */
+.notification.success .notification-counter {
+    background: var(--success);
+}
+
+.notification.error .notification-counter {
+    background: var(--error);
+}
+
+.notification.info .notification-counter {
+    background: var(--accent);
+}

@@ -74,6 +74,23 @@
     background: linear-gradient(135deg, #6a81ba 0%, #9170ab 100%);
 }
 
+/* Стили для заголовков защищенных таблиц */
+.protected-table th.protected-header {
+    font-weight: normal !important;
+    text-decoration: underline;
+    background-color: #f9f9f9;
+}
+
+/* Курсор для незащищенных заголовков */
+.editable-table th:not(.protected-header) {
+    cursor: text;
+}
+
+/* Курсор для защищенных заголовков */
+.protected-table th.protected-header {
+    cursor: default;
+}
+
 /* Ячейки данных таблицы */
 .editable-table td {
     cursor: cell;

@@ -38,8 +38,24 @@ class CellContextMenu {
     }
 
     updateMenuState() {
-        // Все пункты всегда активны - валидация перенесена в handleAction
         const selectedCount = tableManager.selectedCells.length;
+
+        // Проверка защищенности таблицы и типа выбранной строки
+        let isProtectedTable = false;
+        let isHeaderRowSelected = false;
+
+        if (selectedCount > 0) {
+            const cell = tableManager.selectedCells[0];
+            const tableId = cell.dataset.tableId;
+            const table = AppState.tables[tableId];
+            isProtectedTable = table && table.protected === true;
+
+            // Проверяем, выбрана ли ячейка заголовка
+            const rowIndex = parseInt(cell.dataset.row);
+            if (table && table.grid && table.grid[rowIndex]) {
+                isHeaderRowSelected = table.grid[rowIndex].some(c => c.isHeader === true);
+            }
+        }
 
         // Unmerge только если выбрана одна ячейка и она объединена
         const unmergeItem = this.menu.querySelector('[data-action="unmerge-cell"]');
@@ -47,10 +63,62 @@ class CellContextMenu {
             if (selectedCount === 1) {
                 const cell = tableManager.selectedCells[0];
                 const isMerged = cell.colSpan > 1 || cell.rowSpan > 1;
-                unmergeItem.classList.toggle('disabled', !isMerged);
+                unmergeItem.classList.toggle('disabled', !isMerged || isProtectedTable);
             } else {
                 unmergeItem.classList.add('disabled');
             }
+        }
+
+        // Отключаем "Вставить строку выше" для ячеек заголовка
+        const insertRowAboveItem = this.menu.querySelector('[data-action="insert-row-above"]');
+        if (insertRowAboveItem) {
+            if (isHeaderRowSelected) {
+                insertRowAboveItem.classList.add('disabled');
+            } else {
+                insertRowAboveItem.classList.remove('disabled');
+            }
+        }
+
+        // НОВОЕ: Отключаем "Удалить строку" для ячеек заголовка
+        const deleteRowItem = this.menu.querySelector('[data-action="delete-row"]');
+        if (deleteRowItem) {
+            if (isHeaderRowSelected) {
+                deleteRowItem.classList.add('disabled');
+            } else {
+                deleteRowItem.classList.remove('disabled');
+            }
+        }
+
+        // Отключаем запрещенные действия для защищенных таблиц
+        if (isProtectedTable) {
+            const protectedForbiddenActions = [
+                'merge-cells',
+                'insert-col-left',
+                'insert-col-right',
+                'delete-col'
+            ];
+
+            protectedForbiddenActions.forEach(action => {
+                const item = this.menu.querySelector(`[data-action="${action}"]`);
+                if (item) {
+                    item.classList.add('disabled');
+                }
+            });
+        } else {
+            // Убираем disabled для незащищенных таблиц
+            const allActions = [
+                'merge-cells',
+                'insert-col-left',
+                'insert-col-right',
+                'delete-col'
+            ];
+
+            allActions.forEach(action => {
+                const item = this.menu.querySelector(`[data-action="${action}"]`);
+                if (item) {
+                    item.classList.remove('disabled');
+                }
+            });
         }
     }
 
@@ -489,40 +557,58 @@ class CellContextMenu {
         const colIndex = parseInt(cell.dataset.col);
         const table = AppState.tables[tableId];
 
+        // НОВОЕ: проверка защищенности таблицы
+        const isProtectedTable = table && table.protected === true;
+
+        // НОВОЕ: список запрещенных действий для защищенных таблиц
+        const protectedTableForbiddenActions = [
+            'merge-cells',
+            'unmerge-cell',
+            'insert-col-left',
+            'insert-col-right',
+            'delete-col'
+        ];
+
+        // НОВОЕ: блокируем запрещенные действия для защищенных таблиц
+        if (isProtectedTable && protectedTableForbiddenActions.includes(action)) {
+            Notifications.error('Эта таблица защищена. Разрешены только операции со строками.');
+            return; // КРИТИЧЕСКИ ВАЖНО: останавливаем выполнение
+        }
+
         // Валидация действий
         switch (action) {
             case 'merge-cells':
                 if (selectedCount < 2) {
                     Notifications.error('Выберите минимум 2 ячейки для объединения');
-                    return;
+                    return; // Останавливаем выполнение
                 }
                 if (!this._canMergeCells()) {
                     Notifications.error('Нельзя объединять ячейки заголовка с ячейками данных');
-                    return;
+                    return; // Останавливаем выполнение
                 }
                 break;
 
             case 'unmerge-cell':
                 if (selectedCount !== 1) {
                     Notifications.error('Выберите одну ячейку для разъединения');
-                    return;
+                    return; // Останавливаем выполнение
                 }
                 const isMerged = cell.colSpan > 1 || cell.rowSpan > 1;
                 if (!isMerged) {
                     Notifications.info('Ячейка не объединена');
-                    return;
+                    return; // Останавливаем выполнение
                 }
                 break;
 
             case 'insert-row-above':
                 if (selectedCount !== 1) {
                     Notifications.error('Выберите одну ячейку');
-                    return;
+                    return; // Останавливаем выполнение
                 }
                 const isHeaderRow = table.grid[rowIndex].some(c => c.isHeader === true);
                 if (isHeaderRow) {
                     Notifications.error('Нельзя вставить строку выше заголовка таблицы');
-                    return;
+                    return; // Останавливаем выполнение
                 }
                 break;
 
@@ -531,41 +617,52 @@ class CellContextMenu {
             case 'insert-col-right':
                 if (selectedCount !== 1) {
                     Notifications.error('Выберите одну ячейку');
-                    return;
+                    return; // Останавливаем выполнение
                 }
                 break;
 
             case 'delete-row':
                 if (selectedCount !== 1) {
                     Notifications.error('Выберите одну ячейку');
-                    return;
+                    return; // Останавливаем выполнение
                 }
                 const isHeader = table.grid[rowIndex].some(c => c.isHeader === true);
                 if (isHeader) {
                     Notifications.error('Нельзя удалить строку заголовков');
-                    return;
+                    return; // Останавливаем выполнение
                 }
                 const rowHasMerged = this._rowHasAnyMergedCellsStrict(table, rowIndex);
                 if (rowHasMerged) {
                     Notifications.error('Строка содержит объединенные ячейки. Сначала разъедините их.');
-                    return;
+                    return; // Останавливаем выполнение
+                }
+                // НОВАЯ ПРОВЕРКА: проверяем, что остается хотя бы одна строка данных
+                const headerRowCount = table.grid.filter(row => row.some(c => c.isHeader === true)).length;
+                if (table.grid.length - headerRowCount <= 1) {
+                    Notifications.error('Таблица должна содержать хотя бы одну строку данных');
+                    return; // Останавливаем выполнение
                 }
                 break;
 
             case 'delete-col':
                 if (selectedCount !== 1) {
                     Notifications.error('Выберите одну ячейку');
-                    return;
+                    return; // Останавливаем выполнение
+                }
+                // НОВАЯ ПРОВЕРКА: проверяем минимальное количество колонок ПЕРЕД проверкой объединений
+                if (table.grid[0].length <= 1) {
+                    Notifications.error('Таблица должна содержать хотя бы одну колонку');
+                    return; // Останавливаем выполнение
                 }
                 const colHasMerged = this._columnHasAnyMergedCellsStrict(table, colIndex);
                 if (colHasMerged) {
                     Notifications.error('Колонка содержит объединенные ячейки. Сначала разъедините их.');
-                    return;
+                    return; // Останавливаем выполнение
                 }
                 break;
         }
 
-        // КРИТИЧЕСКОЕ ИЗМЕНЕНИЕ: сохраняем размеры ТОЛЬКО для операций без изменения колонок
+        // Сохраняем размеры ТОЛЬКО для операций без изменения колонок
         const columnsChanging = ['insert-col-left', 'insert-col-right', 'delete-col'].includes(action);
         const tableSizes = columnsChanging ? null : this.saveTableSizes();
 
@@ -574,10 +671,12 @@ class CellContextMenu {
             case 'merge-cells':
                 tableManager.mergeCells();
                 this.restoreTableSizes(tableSizes);
+                // Уведомление выводится внутри mergeCells()
                 break;
             case 'unmerge-cell':
                 tableManager.unmergeCells();
                 this.restoreTableSizes(tableSizes);
+                // Уведомление выводится внутри unmergeCells()
                 break;
             case 'insert-row-above':
                 tableManager.cellsOps.insertRowAbove();
@@ -591,12 +690,12 @@ class CellContextMenu {
                 break;
             case 'insert-col-left':
                 tableManager.cellsOps.insertColumnLeft();
-                this.restoreTableSizes(null); // НЕ восстанавливаем старые размеры
+                this.restoreTableSizes(null);
                 Notifications.success('Колонка добавлена');
                 break;
             case 'insert-col-right':
                 tableManager.cellsOps.insertColumnRight();
-                this.restoreTableSizes(null); // НЕ восстанавливаем старые размеры
+                this.restoreTableSizes(null);
                 Notifications.success('Колонка добавлена');
                 break;
             case 'delete-row':
@@ -606,7 +705,7 @@ class CellContextMenu {
                 break;
             case 'delete-col':
                 tableManager.cellsOps.deleteColumn();
-                this.restoreTableSizes(null); // НЕ восстанавливаем старые размеры
+                this.restoreTableSizes(null);
                 Notifications.success('Колонка удалена');
                 break;
         }
