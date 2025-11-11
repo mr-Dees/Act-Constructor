@@ -1,52 +1,61 @@
 {% extends "base.html" %}
 
 {% block content %}
-<!-- Шаг 1: Конструктор -->
+<!-- Шаг 1: Конструктор структуры акта -->
 <div id="step1" class="step-content">
     <div class="panels">
+        <!-- Панель дерева элементов -->
         {% include "components/tree_panel.html" %}
+
+        <!-- Панель предпросмотра -->
         {% include "components/preview_panel.html" %}
     </div>
 </div>
 
-<!-- Шаг 2: Заполнение данных -->
+<!-- Шаг 2: Заполнение содержимого элементов -->
 <div id="step2" class="step-content hidden">
-    <!-- Контейнер элементов -->
+    <!-- Контейнер для редактирования элементов акта -->
     <div id="itemsContainer" class="items-container"></div>
 
-    <!-- Кнопки навигации -->
+    <!-- Панель навигации и сохранения -->
     <div class="step-actions">
         <button id="backBtn" class="btn btn-secondary">◄ Назад</button>
 
-        <!-- Split button для сохранения -->
+        <!-- Группа кнопок сохранения с выбором форматов -->
         <div class="save-button-group">
             <button id="generateBtn" class="btn btn-success save-main-btn">
                 Сохранить акт
             </button>
-            <button id="formatDropdownBtn" class="btn btn-success save-dropdown-btn" title="Выбрать форматы">
+            <button id="formatDropdownBtn"
+                    class="btn btn-success save-dropdown-btn"
+                    title="Выбрать форматы экспорта"
+                    aria-label="Выбрать форматы экспорта"
+                    aria-expanded="false">
                 <svg width="12" height="12" viewBox="0 0 12 12" fill="none" xmlns="http://www.w3.org/2000/svg">
-                    <path d="M2 4L6 8L10 4" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+                    <path d="M2 4L6 8L10 4" stroke="currentColor" stroke-width="2" stroke-linecap="round"
+                          stroke-linejoin="round"/>
                 </svg>
             </button>
 
-            <!-- Выпадающее меню форматов -->
-            <div id="formatMenu" class="format-dropdown-menu hidden">
+            <!-- Выпадающее меню выбора форматов экспорта -->
+            <div id="formatMenu" class="format-dropdown-menu hidden" role="menu">
                 <label class="format-option">
                     <input type="checkbox" value="txt" checked>
-                    <span>TXT</span>
+                    <span>Текст (TXT)</span>
                 </label>
                 <label class="format-option">
                     <input type="checkbox" value="md">
-                    <span>Markdown</span>
+                    <span>Markdown (MD)</span>
                 </label>
                 <label class="format-option">
                     <input type="checkbox" value="docx">
-                    <span>DOCX</span>
+                    <span>Word (DOCX)</span>
                 </label>
             </div>
         </div>
     </div>
 </div>
 
+<!-- Контекстные меню (подключаются в конце страницы) -->
 {% include "components/context_menu.html" %}
 {% endblock %}

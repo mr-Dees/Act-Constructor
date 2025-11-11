@@ -1,29 +1,42 @@
-<div class="header">
-    <!-- Кнопка инструкций с иконкой лампочки -->
-    <button id="helpBtn" class="help-button" title="Инструкция">
+<header class="header">
+    <!-- Кнопка справки -->
+    <button id="helpBtn"
+            class="help-button"
+            title="Показать инструкцию"
+            aria-label="Показать инструкцию">
         <span class="lightbulb-icon">💡</span>
     </button>
 
-    <!-- Контейнер для кнопок шагов -->
-    <div class="steps-container">
-        <div class="step active" data-step="1">
+    <!-- Индикатор текущего шага -->
+    <div class="steps-container" role="tablist">
+        <div class="step active"
+             data-step="1"
+             role="tab"
+             aria-selected="true">
             <span class="step-text">Формирование структуры</span>
         </div>
-        <div class="step" data-step="2" style="padding: 8px 38px 8px 38px;">
+        <div class="step"
+             data-step="2"
+             role="tab"
+             aria-selected="false"
+             style="padding: 8px 38px;">
             <span class="step-text">Заполнение данных</span>
         </div>
     </div>
-</div>
+</header>
 
-<!-- Модальное окно с инструкциями -->
-<div id="helpModal" class="help-modal hidden">
+<!-- Модальное окно справки -->
+<div id="helpModal" class="help-modal hidden" role="dialog" aria-labelledby="helpModalTitle">
     <div class="help-modal-content">
         <div class="help-modal-header">
             <h3 id="helpModalTitle">Инструкция</h3>
-            <button class="help-modal-close" onclick="HelpManager.hide()">&times;</button>
+            <button class="help-modal-close"
+                    onclick="HelpManager.hide()"
+                    aria-label="Закрыть">&times;
+            </button>
         </div>
         <div class="help-modal-body" id="helpModalBody">
-            <!-- Контент будет загружен динамически -->
+            <!-- Контент загружается динамически через JavaScript -->
         </div>
     </div>
 </div>

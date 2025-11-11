@@ -5,43 +5,45 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>{% block title %}Конструктор актов{% endblock %}</title>
 
-    <!-- CSS -->
+    <!-- Основные стили -->
     <link rel="stylesheet" href="/static/css/main.css">
 
+    <!-- Дополнительные стили страницы -->
     {% block extra_css %}{% endblock %}
 </head>
 <body>
+    <!-- Шапка приложения -->
     {% include 'components/header.html' %}
 
+    <!-- Основной контент страницы -->
     {% block content %}{% endblock %}
 
-    <!-- JavaScript -->
+    <!-- Базовые утилиты -->
     <script src="/static/js/dialog.js"></script>
     <script src="/static/js/app.js"></script>
     <script src="/static/js/api.js"></script>
-    <!-- Система уведомлений -->
     <script src="/static/js/notifications.js"></script>
-    <!-- Подсказка по сервису -->
     <script src="/static/js/help.js"></script>
+
     <!-- Контекстное меню -->
     <script src="/static/js/context-menu/context-menu-core.js"></script>
     <script src="/static/js/context-menu/context-menu-tree.js"></script>
-    <script src="/static/js/context-menu/context-menu-table.js"></script>
+    <script src="/static/js/context-menu/context-menu-cells.js"></script>
     <script src="/static/js/context-menu/context-menu-violation.js"></script>
     <script src="/static/js/context-menu/context-menu-links-footnotes.js"></script>
 
-    <!-- Состояние элементов -->
+    <!-- Управление состоянием -->
     <script src="/static/js/state/state-core.js"></script>
     <script src="/static/js/state/state-validation.js"></script>
     <script src="/static/js/state/state-tree.js"></script>
     <script src="/static/js/state/state-content.js"></script>
 
-    <!-- Дерево элементов -->
+    <!-- Дерево структуры -->
     <script src="/static/js/tree/tree-drag-drop.js"></script>
     <script src="/static/js/tree/tree-renderer.js"></script>
     <script src="/static/js/tree/tree-core.js"></script>
 
-    <!-- Элементы акта -->
+    <!-- Элементы документа -->
     <script src="/static/js/items/items-title-editing.js"></script>
     <script src="/static/js/items/items-renderer.js"></script>
 
@@ -50,7 +52,7 @@
     <script src="/static/js/table/table-sizes.js"></script>
     <script src="/static/js/table/table-core.js"></script>
 
-    <!-- Окно предпросмотра -->
+    <!-- Предпросмотр -->
     <script src="/static/js/preview.js"></script>
 
     <!-- Текстовые блоки -->
@@ -68,5 +70,8 @@
     <script src="/static/js/violation/violation-drag-drop.js"></script>
     <script src="/static/js/violation/violation-file-upload.js"></script>
     <script src="/static/js/violation/violation-init.js"></script>
+
+    <!-- Дополнительные скрипты страницы -->
+    {% block extra_js %}{% endblock %}
 </body>
 </html>
