@@ -7,7 +7,7 @@
 
 import html
 import re
-from typing import Dict
+from typing import Dict, List
 
 from app.formatters.base_formatter import BaseFormatter
 
@@ -20,12 +20,18 @@ class TextFormatter(BaseFormatter):
     ASCII-графики для таблиц и отступов для передачи структуры.
     """
 
+    # Константы для настройки форматирования
+    HEADER_WIDTH = 80
+    INDENT_SIZE = 2
+    DEFAULT_FONT_SIZE = 14
+    DEFAULT_ALIGNMENT = 'left'
+
     def __init__(self):
         """Инициализация текстового форматера с пустыми хранилищами."""
         # Хранилища для быстрого доступа к связанным сущностям
-        self.violations = {}
-        self.textBlocks = {}
-        self.tables = {}
+        self.violations: Dict = {}
+        self.textBlocks: Dict = {}
+        self.tables: Dict = {}
 
     def format(self, data: Dict) -> str:
         """
@@ -49,9 +55,9 @@ class TextFormatter(BaseFormatter):
         self.tables = data.get('tables', {})
 
         # Заголовок документа с декоративным обрамлением
-        result.append("=" * 80)
-        result.append("АКТ".center(80))
-        result.append("=" * 80)
+        result.append("=" * self.HEADER_WIDTH)
+        result.append("АКТ".center(self.HEADER_WIDTH))
+        result.append("=" * self.HEADER_WIDTH)
         result.append("")
 
         # Обработка дерева структуры акта
@@ -76,8 +82,7 @@ class TextFormatter(BaseFormatter):
             str: Отформатированный пункт со всеми дочерними элементами
         """
         lines = []
-        # Отступ зависит от уровня вложенности (каждый уровень = 2 пробела)
-        indent = "  " * level
+        indent = " " * (self.INDENT_SIZE * level)
 
         # Извлечение метаданных пункта
         label = item.get('label', '')
@@ -97,23 +102,19 @@ class TextFormatter(BaseFormatter):
         # Обработка связанной таблицы
         table_id = item.get('tableId')
         if table_id and table_id in self.tables:
-            table_data = self.tables[table_id]
-            lines.append(self._format_table(table_data, level))
+            lines.append(self._format_table(self.tables[table_id], level))
             lines.append("")
 
         # Обработка текстового блока
         textblock_id = item.get('textBlockId')
         if textblock_id and textblock_id in self.textBlocks:
-            textblock_data = self.textBlocks[textblock_id]
-            lines.append(self._format_textblock(textblock_data, level))
+            lines.append(self._format_textblock(self.textBlocks[textblock_id], level))
             lines.append("")
 
         # Обработка нарушения
         violation_id = item.get('violationId')
         if violation_id and violation_id in self.violations:
-            violation_data = self.violations[violation_id]
-            formatted_violation = self._format_violation(violation_data)
-
+            formatted_violation = self._format_violation(self.violations[violation_id])
             # Применяем отступ к каждой строке нарушения
             for line in formatted_violation.split('\n'):
                 lines.append(f"{indent}{line}")
@@ -140,85 +141,97 @@ class TextFormatter(BaseFormatter):
         Returns:
             str: ASCII-таблица с рамками
         """
-        lines = []
-        indent = "  " * level
-
-        # Получаем матричную структуру таблицы
+        indent = " " * (self.INDENT_SIZE * level)
         grid = table_data.get('grid', [])
 
-        if not grid or len(grid) == 0:
+        if not grid:
             return f"{indent}[Пустая таблица]"
 
-        # Построение матрицы отображения (игнорируем spanned ячейки)
+        # Построение матрицы отображения
+        display_matrix = self._build_display_matrix(grid)
+
+        if not display_matrix:
+            return f"{indent}[Пустая таблица]"
+
+        # Вычисление ширины колонок
+        col_widths = self._calculate_column_widths(display_matrix)
+
+        # Построение ASCII-таблицы
+        lines = []
+        separator = self._draw_separator(col_widths, indent)
+
+        lines.append(separator)  # Верхняя граница
+
+        for idx, row in enumerate(display_matrix):
+            lines.append(self._draw_row(row, col_widths, indent))
+            # Разделитель после заголовка (первой строки)
+            if idx == 0:
+                lines.append(separator)
+
+        lines.append(separator)  # Нижняя граница
+
+        return "\n".join(lines)
+
+    def _build_display_matrix(self, grid: List[List[Dict]]) -> List[List[str]]:
+        """Строит матрицу отображения из grid-структуры"""
         display_matrix = []
         max_cols = 0
 
         for row_data in grid:
             display_row = []
             for cell_data in row_data:
-                # Пропускаем spanned ячейки
-                if not cell_data.get('isSpanned', False):
-                    content = str(cell_data.get('content', ''))
-                    colspan = cell_data.get('colSpan', 1)
+                if cell_data.get('isSpanned', False):
+                    continue
 
-                    # Добавляем содержимое в первую ячейку
-                    display_row.append(content)
+                content = str(cell_data.get('content', ''))
+                colspan = cell_data.get('colSpan', 1)
 
-                    # Для остальных колонок в colspan добавляем пустые ячейки
-                    for _ in range(colspan - 1):
-                        display_row.append('')
+                display_row.append(content)
+                # Пустые ячейки для colspan
+                for _ in range(colspan - 1):
+                    display_row.append('')
 
             if display_row:
                 display_matrix.append(display_row)
                 max_cols = max(max_cols, len(display_row))
 
-        if not display_matrix or max_cols == 0:
-            return f"{indent}[Пустая таблица]"
-
-        # Выравнивание всех строк до максимальной ширины
+        # Выравнивание всех строк
         for row in display_matrix:
             while len(row) < max_cols:
                 row.append('')
 
-        # Вычисление ширины колонок на основе содержимого
-        col_widths = [0] * max_cols
-        for row in display_matrix:
+        return display_matrix
+
+    def _calculate_column_widths(self, matrix: List[List[str]]) -> List[int]:
+        """Вычисляет оптимальную ширину колонок"""
+        if not matrix:
+            return []
+
+        num_cols = len(matrix[0])
+        col_widths = [0] * num_cols
+
+        for row in matrix:
             for col_idx, cell_text in enumerate(row):
                 col_widths[col_idx] = max(col_widths[col_idx], len(str(cell_text)))
 
-        def draw_separator():
-            """Создает горизонтальный разделитель таблицы."""
-            parts = ['-' * (width + 2) for width in col_widths]
-            return f"{indent}+{'+'.join(parts)}+"
+        return col_widths
 
-        def draw_row(row):
-            """Создает строку таблицы с содержимым ячеек."""
-            row_parts = []
-            for col_idx in range(max_cols):
-                cell_text = str(row[col_idx]) if col_idx < len(row) else ''
-                # Выравнивание по левому краю с padding
-                row_parts.append(f" {cell_text.ljust(col_widths[col_idx])} ")
-            return f"{indent}|{'|'.join(row_parts)}|"
+    def _draw_separator(self, col_widths: List[int], indent: str) -> str:
+        """Создает горизонтальный разделитель таблицы"""
+        parts = ['-' * (width + 2) for width in col_widths]
+        return f"{indent}+{'+'.join(parts)}+"
 
-        # Построение ASCII-таблицы
-        lines.append(draw_separator())  # Верхняя граница
-
-        for idx, row in enumerate(display_matrix):
-            lines.append(draw_row(row))
-            # Разделитель после заголовка (первой строки)
-            if idx == 0:
-                lines.append(draw_separator())
-
-        lines.append(draw_separator())  # Нижняя граница
-
-        return "\n".join(lines)
+    def _draw_row(self, row: List[str], col_widths: List[int], indent: str) -> str:
+        """Создает строку таблицы с содержимым ячеек"""
+        row_parts = []
+        for col_idx, width in enumerate(col_widths):
+            cell_text = str(row[col_idx]) if col_idx < len(row) else ''
+            row_parts.append(f" {cell_text.ljust(width)} ")
+        return f"{indent}|{'|'.join(row_parts)}|"
 
     def _format_textblock(self, textblock_data: Dict, level: int = 0) -> str:
         """
         Форматирует текстовый блок с очисткой HTML и применением отступов.
-
-        Обрабатывает переносы строк, удаляет HTML-теги,
-        декодирует HTML-сущности и добавляет метаданные о форматировании.
 
         Args:
             textblock_data: Словарь с содержимым и параметрами форматирования
@@ -227,62 +240,62 @@ class TextFormatter(BaseFormatter):
         Returns:
             str: Отформатированный текстовый блок
         """
-        indent = "  " * level
+        indent = " " * (self.INDENT_SIZE * level)
         content = textblock_data.get('content', '')
-        formatting = textblock_data.get('formatting', {})
 
         if not content:
             return ""
 
-        # Замена <br> на переносы строк ПЕРЕД очисткой HTML
-        clean_content = content.replace('<br>', '\n')
-        clean_content = clean_content.replace('<br/>', '\n')
-        clean_content = clean_content.replace('<br />', '\n')
+        formatting = textblock_data.get('formatting', {})
 
-        # Удаление всех HTML-тегов
-        clean_content = re.sub(r'<[^>]+>', '', clean_content)
-
-        # Декодирование HTML-сущностей (&nbsp;, &lt;, и т.д.)
-        clean_content = html.unescape(clean_content)
+        # Очистка HTML
+        clean_content = self._clean_html(content)
 
         # Применение отступов к каждой строке
         lines = clean_content.split('\n')
         formatted_lines = [f"{indent}{line}" for line in lines]
 
-        # Добавление метаданных о форматировании (если отличается от default)
+        # Добавление метаданных о форматировании
         result = []
-        font_size = formatting.get('fontSize', 14)
-        alignment = formatting.get('alignment', 'left')
-
-        if font_size != 14 or alignment != 'left':
-            meta = []
-            if font_size != 14:
-                meta.append(f"размер шрифта: {font_size}px")
-            if alignment == 'center':
-                meta.append("выравнивание: по центру")
-            elif alignment == 'right':
-                meta.append("выравнивание: по правому краю")
-            elif alignment == 'justify':
-                meta.append("выравнивание: по ширине")
-
-            # Комментарий о форматировании в квадратных скобках
+        meta = self._build_formatting_meta(formatting)
+        if meta:
             result.append(f"{indent}[{', '.join(meta)}]")
 
         result.extend(formatted_lines)
         return "\n".join(result)
 
+    def _clean_html(self, content: str) -> str:
+        """Очищает HTML-теги и декодирует сущности"""
+        # Замена <br> на переносы строк
+        clean_content = re.sub(r'<br\s*/?>', '\n', content, flags=re.IGNORECASE)
+
+        # Удаление всех HTML-тегов
+        clean_content = re.sub(r'<[^>]+>', '', clean_content)
+
+        # Декодирование HTML-сущностей
+        return html.unescape(clean_content)
+
+    def _build_formatting_meta(self, formatting: Dict) -> List[str]:
+        """Создает список метаданных о форматировании"""
+        meta = []
+        font_size = formatting.get('fontSize', self.DEFAULT_FONT_SIZE)
+        alignment = formatting.get('alignment', self.DEFAULT_ALIGNMENT)
+
+        if font_size != self.DEFAULT_FONT_SIZE:
+            meta.append(f"размер шрифта: {font_size}px")
+
+        if alignment == 'center':
+            meta.append("выравнивание: по центру")
+        elif alignment == 'right':
+            meta.append("выравнивание: по правому краю")
+        elif alignment == 'justify':
+            meta.append("выравнивание: по ширине")
+
+        return meta
+
     def _format_violation(self, violation_data: Dict) -> str:
         """
         Форматирует нарушение с всеми секциями.
-
-        Структура:
-        - Нарушено: <текст>
-        - Установлено: <текст>
-        - Описание: <буллитный список>
-        - Дополнительный текст
-        - Причины: <текст>
-        - Последствия: <текст>
-        - Ответственные: <текст>
 
         Args:
             violation_data: Словарь с данными нарушения
@@ -292,87 +305,94 @@ class TextFormatter(BaseFormatter):
         """
         lines = []
 
-        # Секция "Нарушено"
-        violated = violation_data.get('violated', '')
-        if violated:
-            lines.append("Нарушено: " + violated)
-            lines.append("")
+        # Основные секции
+        self._add_labeled_section(lines, "Нарушено", violation_data.get('violated', ''))
+        self._add_labeled_section(lines, "Установлено", violation_data.get('established', ''))
 
-        # Секция "Установлено"
-        established = violation_data.get('established', '')
-        if established:
-            lines.append("Установлено: " + established)
-            lines.append("")
-
-        # Список описаний (буллитный)
-        desc_list = violation_data.get('descriptionList', {})
-        if desc_list.get('enabled', False):
-            items = desc_list.get('items', [])
-            if items:
-                lines.append("Описание:")
-                for item in items:
-                    if item.strip():
-                        # Unicode маркер для буллитного списка
-                        lines.append(f"  • {item}")
-                lines.append("")
+        # Список описаний
+        self._add_description_list(lines, violation_data.get('descriptionList', {}))
 
         # Дополнительный контент
-        additional_content = violation_data.get('additionalContent', {})
-        if additional_content.get('enabled', False):
-            items = additional_content.get('items', [])
+        self._add_additional_content(lines, violation_data.get('additionalContent', {}))
 
-            # Вычисляем номера кейсов
-            case_number = 1
-
-            for item in items:
-                item_type = item.get('type')
-
-                if item_type == 'case':
-                    content = item.get('content', '')
-                    if content:
-                        lines.append(f"Кейс {case_number}: {content}")
-                        lines.append("")
-                        case_number += 1
-
-                elif item_type == 'image':
-                    case_number = 1
-                    caption = item.get('caption', '')
-                    filename = item.get('filename', '')
-                    if caption:
-                        lines.append(f"Изображение: {filename} - {caption}")
-                    else:
-                        lines.append(f"Изображение: {filename}")
-                    lines.append("")
-
-                elif item_type == 'freeText':
-                    case_number = 1
-                    content = item.get('content', '')
-                    if content:
-                        lines.append(content)
-                        lines.append("")
-
-        # Причины нарушения
-        reasons = violation_data.get('reasons', {})
-        if reasons.get('enabled', False):
-            content = reasons.get('content', '')
-            if content:
-                lines.append(f"Причины: {content}")
-                lines.append("")
-
-        # Последствия нарушения
-        consequences = violation_data.get('consequences', {})
-        if consequences.get('enabled', False):
-            content = consequences.get('content', '')
-            if content:
-                lines.append(f"Последствия: {content}")
-                lines.append("")
-
-        # Ответственные лица
-        responsible = violation_data.get('responsible', {})
-        if responsible.get('enabled', False):
-            content = responsible.get('content', '')
-            if content:
-                lines.append(f"Ответственные: {content}")
-                lines.append("")
+        # Опциональные поля
+        self._add_labeled_section(lines, "Причины", violation_data.get('reasons', {}))
+        self._add_labeled_section(lines, "Последствия", violation_data.get('consequences', {}))
+        self._add_labeled_section(lines, "Ответственные", violation_data.get('responsible', {}))
 
         return "\n".join(lines)
+
+    def _add_labeled_section(self, lines: List[str], label: str, data):
+        """Добавляет секцию с меткой"""
+        if isinstance(data, dict):
+            if not data.get('enabled', False):
+                return
+            content = data.get('content', '')
+        else:
+            content = data
+
+        if content:
+            lines.append(f"{label}: {content}")
+            lines.append("")
+
+    def _add_description_list(self, lines: List[str], desc_list: Dict):
+        """Добавляет список описаний с маркерами"""
+        if not desc_list.get('enabled', False):
+            return
+
+        items = desc_list.get('items', [])
+        if not items:
+            return
+
+        lines.append("Описание:")
+        for item in items:
+            if item.strip():
+                lines.append(f"  • {item}")
+        lines.append("")
+
+    def _add_additional_content(self, lines: List[str], additional_content: Dict):
+        """Добавляет дополнительный контент"""
+        if not additional_content.get('enabled', False):
+            return
+
+        items = additional_content.get('items', [])
+        case_number = 1
+
+        for item in items:
+            item_type = item.get('type')
+
+            if item_type == 'case':
+                case_number = self._add_case(lines, item, case_number)
+            elif item_type == 'image':
+                self._add_image(lines, item)
+                case_number = 1
+            elif item_type == 'freeText':
+                self._add_free_text(lines, item)
+                case_number = 1
+
+    def _add_case(self, lines: List[str], item: Dict, case_number: int) -> int:
+        """Добавляет кейс с номером"""
+        content = item.get('content', '')
+        if content:
+            lines.append(f"Кейс {case_number}: {content}")
+            lines.append("")
+            return case_number + 1
+        return case_number
+
+    def _add_image(self, lines: List[str], item: Dict):
+        """Добавляет ссылку на изображение"""
+        caption = item.get('caption', '')
+        filename = item.get('filename', '')
+
+        if caption:
+            lines.append(f"Изображение: {filename} - {caption}")
+        else:
+            lines.append(f"Изображение: {filename}")
+        lines.append("")
+
+    def _add_free_text(self, lines: List[str], item: Dict):
+        """Добавляет свободный текст"""
+        content = item.get('content', '')
+        if content:
+            lines.append(content)
+            lines.append("")

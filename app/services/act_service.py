@@ -5,7 +5,7 @@
 экспорта актов в различные форматы.
 """
 
-from typing import Dict
+from typing import Dict, Literal
 
 from app.formatters.docx_formatter import DocxFormatter
 from app.formatters.markdown_formatter import MarkdownFormatter
@@ -22,17 +22,26 @@ class ActService:
     в разных форматах и получения истории документов.
     """
 
-    def __init__(self):
-        """Инициализация сервиса с форматерами и хранилищем."""
+    def __init__(self, storage: StorageService = None):
+        """
+        Инициализация сервиса с форматерами и хранилищем.
+
+        Args:
+            storage: Сервис хранения файлов. Если None, создается новый экземпляр.
+        """
         # Инициализация форматеров для разных выходных форматов
         self.text_formatter = TextFormatter()
         self.markdown_formatter = MarkdownFormatter()
         self.docx_formatter = DocxFormatter()
 
         # Инициализация сервиса работы с файлами
-        self.storage = StorageService()
+        self.storage = storage or StorageService()
 
-    def save_act(self, data: Dict, fmt: str = "txt") -> ActSaveResponse:
+    def save_act(
+            self,
+            data: Dict,
+            fmt: Literal["txt", "md", "docx"] = "txt"
+    ) -> ActSaveResponse:
         """
         Сохраняет акт в хранилище в выбранном формате.
 
@@ -52,36 +61,34 @@ class ActService:
         Raises:
             ValueError: Если указан неподдерживаемый формат
         """
-        filename = ""
+        # Маппинг форматов на форматеры и расширения
+        format_handlers = {
+            "txt": (self.text_formatter, "txt"),
+            "md": (self.markdown_formatter, "md"),
+            "docx": (self.docx_formatter, "docx")
+        }
 
-        if fmt == "txt":
-            # Экспорт в plain text
-            formatted_text = self.text_formatter.format(data)
-            filename = self.storage.save(
-                formatted_text,
-                prefix="act",
-                extension="txt"
-            )
-
-        elif fmt == "md":
-            # Экспорт в Markdown
-            formatted_markdown = self.markdown_formatter.format(data)
-            filename = self.storage.save(
-                formatted_markdown,
-                prefix="act",
-                extension="md"
-            )
-
-        elif fmt == "docx":
-            # Экспорт в Microsoft Word
-            formatted_doc = self.docx_formatter.format(data)
-            filename = self.storage.save_docx(formatted_doc, prefix="act")
-
-        else:
-            # Неподдерживаемый формат
+        if fmt not in format_handlers:
             raise ValueError(
                 f"Неподдерживаемый формат: {fmt}. "
                 f"Используйте 'txt', 'md' или 'docx'."
+            )
+
+        formatter, extension = format_handlers[fmt]
+
+        # Форматирование данных
+        formatted_content = formatter.format(data)
+
+        # Сохранение в зависимости от формата
+        if fmt == "docx":
+            # Для DOCX используем специальный метод
+            filename = self.storage.save_docx(formatted_content, prefix="act")
+        else:
+            # Для текстовых форматов используем обычный метод
+            filename = self.storage.save(
+                formatted_content,
+                prefix="act",
+                extension=extension
             )
 
         # Формирование успешного ответа

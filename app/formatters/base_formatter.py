@@ -6,7 +6,9 @@
 """
 
 from abc import ABC, abstractmethod
-from typing import Any
+from typing import Union
+
+from docx import Document
 
 
 class BaseFormatter(ABC):
@@ -18,18 +20,20 @@ class BaseFormatter(ABC):
     """
 
     @abstractmethod
-    def format(self, data: Any) -> str:
+    def format(self, data: dict) -> Union[str, Document]:
         """
-        Форматирует данные акта в строковое представление.
+        Форматирует данные акта в целевое представление.
 
         Этот метод должен быть переопределен в дочерних классах
         для реализации конкретной логики форматирования.
 
         Args:
-            data: Данные акта для форматирования (обычно словарь)
+            data: Данные акта для форматирования (словарь с деревом, таблицами и т.д.)
 
         Returns:
-            str: Отформатированная строка в целевом формате
+            Union[str, Document]: Отформатированный результат.
+                Строка для текстовых форматов (txt, md),
+                Document для бинарных форматов (docx).
 
         Raises:
             NotImplementedError: Если метод не переопределен

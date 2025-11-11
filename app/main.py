@@ -11,10 +11,7 @@ from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 
 from app.api.v1.routes import api_router as api_v1_router
-from app.core.config import settings
-
-# Инициализация Jinja2 для рендеринга HTML-шаблонов
-templates = Jinja2Templates(directory=str(settings.templates_dir))
+from app.core.config import Settings
 
 
 def create_app() -> FastAPI:
@@ -23,6 +20,7 @@ def create_app() -> FastAPI:
 
     Выполняет следующие действия:
     - Создает приложение с метаданными из настроек
+    - Проверяет и создает необходимые директории
     - Монтирует статические файлы (CSS, JS, изображения)
     - Регистрирует маршрут главной страницы
     - Подключает API роутеры с префиксом версии
@@ -30,6 +28,13 @@ def create_app() -> FastAPI:
     Returns:
         FastAPI: Полностью сконфигурированное приложение
     """
+    # Инициализация настроек и проверка директорий
+    settings = Settings()
+    settings.ensure_directories()
+
+    # Инициализация Jinja2 для рендеринга HTML-шаблонов
+    templates = Jinja2Templates(directory=str(settings.templates_dir))
+
     # Создание FastAPI приложения с базовыми настройками
     app = FastAPI(
         title=settings.app_title,
@@ -37,7 +42,7 @@ def create_app() -> FastAPI:
         description="API для создания и управления актами"
     )
 
-    # Подключение статических файлов (Доступны по URL /static/*)
+    # Подключение статических файлов (доступны по URL /static/*)
     app.mount(
         "/static",
         StaticFiles(directory=str(settings.static_dir)),
@@ -75,6 +80,9 @@ app = create_app()
 if __name__ == "__main__":
     # Запуск сервера разработки
     import uvicorn
+
+    # Получение настроек для параметров сервера
+    settings = Settings()
 
     uvicorn.run(
         # Настройки сервера

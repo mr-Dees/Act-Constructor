@@ -5,9 +5,9 @@ Pydantic схемы для валидации данных актов.
 таблицы, текстовые блоки, нарушения и древовидную структуру.
 """
 
-from typing import List, Dict, Optional, Any
+from typing import List, Dict, Optional, Any, Literal
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 
 
 class TableCellSchema(BaseModel):
@@ -17,8 +17,8 @@ class TableCellSchema(BaseModel):
     Attributes:
         content: Содержимое ячейки
         isHeader: Является ли ячейка заголовком
-        colSpan: Количество объединенных колонок
-        rowSpan: Количество объединенных строк
+        colSpan: Количество объединенных колонок (минимум 1)
+        rowSpan: Количество объединенных строк (минимум 1)
         isSpanned: Является ли ячейка частью объединения
         spanOrigin: Координаты главной ячейки объединения
         originRow: Исходная строка ячейки
@@ -26,12 +26,12 @@ class TableCellSchema(BaseModel):
     """
     content: str = Field(default="", description="Содержимое ячейки")
     isHeader: bool = Field(default=False, description="Заголовок")
-    colSpan: int = Field(default=1, description="Colspan")
-    rowSpan: int = Field(default=1, description="Rowspan")
+    colSpan: int = Field(default=1, ge=1, description="Colspan")
+    rowSpan: int = Field(default=1, ge=1, description="Rowspan")
     isSpanned: bool = Field(default=False, description="Часть объединения")
     spanOrigin: Optional[Dict[str, int]] = Field(default=None, description="Координаты главной ячейки")
-    originRow: Optional[int] = Field(default=None, description="Исходная строка")
-    originCol: Optional[int] = Field(default=None, description="Исходная колонка")
+    originRow: Optional[int] = Field(default=None, ge=0, description="Исходная строка")
+    originCol: Optional[int] = Field(default=None, ge=0, description="Исходная колонка")
 
 
 class TableSchema(BaseModel):
@@ -42,7 +42,7 @@ class TableSchema(BaseModel):
         id: Уникальный идентификатор таблицы
         nodeId: ID узла дерева
         grid: Матрица ячеек (двумерный массив)
-        colWidths: Массив ширин колонок
+        colWidths: Массив ширин колонок в пикселях
         protected: Защищена ли таблица от перемещения и изменения структуры
         deletable: Можно ли удалить таблицу (работает независимо от protected)
     """
@@ -54,16 +54,24 @@ class TableSchema(BaseModel):
     )
     colWidths: List[int] = Field(
         default_factory=list,
-        description="Ширины колонок"
+        description="Ширины колонок в пикселях"
     )
     protected: bool = Field(
         default=False,
-        description="Защита от перемещения и изменения структуры (добавление/удаление строк/колонок)"
+        description="Защита от перемещения и изменения структуры"
     )
     deletable: bool = Field(
         default=True,
-        description="Разрешено ли удаление таблицы (true = можно удалить, false = нельзя удалить)"
+        description="Разрешено ли удаление таблицы"
     )
+
+    @field_validator("colWidths")
+    @classmethod
+    def validate_col_widths(cls, v: List[int]) -> List[int]:
+        """Проверка, что все ширины положительные."""
+        if any(width <= 0 for width in v):
+            raise ValueError("Ширины колонок должны быть положительными")
+        return v
 
 
 class TextBlockFormattingSchema(BaseModel):
@@ -71,11 +79,19 @@ class TextBlockFormattingSchema(BaseModel):
     Схема форматирования текстового блока.
 
     Attributes:
-        fontSize: Базовый размер шрифта в пикселях
-        alignment: Выравнивание текста (left/center/right/justify)
+        fontSize: Базовый размер шрифта в пикселях (8-72)
+        alignment: Выравнивание текста
     """
-    fontSize: int = Field(default=14, description="Базовый размер шрифта")
-    alignment: str = Field(default="left", description="Выравнивание")
+    fontSize: int = Field(
+        default=14,
+        ge=8,
+        le=72,
+        description="Базовый размер шрифта"
+    )
+    alignment: Literal["left", "center", "right", "justify"] = Field(
+        default="left",
+        description="Выравнивание"
+    )
 
 
 class TextBlockSchema(BaseModel):
@@ -129,7 +145,7 @@ class ViolationContentItemSchema(BaseModel):
 
     Attributes:
         id: Уникальный идентификатор элемента
-        type: Тип элемента ('case', 'image', 'freeText')
+        type: Тип элемента
         content: Текстовое содержимое (для case и freeText)
         url: URL изображения (для image)
         caption: Подпись изображения (для image)
@@ -137,12 +153,12 @@ class ViolationContentItemSchema(BaseModel):
         order: Порядок отображения
     """
     id: str = Field(description="ID элемента")
-    type: str = Field(description="Тип: case, image, freeText")
+    type: Literal["case", "image", "freeText"] = Field(description="Тип элемента")
     content: str = Field(default="", description="Текстовое содержимое")
     url: str = Field(default="", description="URL изображения")
     caption: str = Field(default="", description="Подпись изображения")
     filename: str = Field(default="", description="Имя файла")
-    order: int = Field(default=0, description="Порядок")
+    order: int = Field(default=0, ge=0, description="Порядок")
 
 
 class ViolationAdditionalContentSchema(BaseModel):
@@ -213,7 +229,7 @@ class ActItemSchema(BaseModel):
     Attributes:
         id: Уникальный идентификатор узла
         label: Отображаемый текст узла (номер пункта + название)
-        type: Тип узла (item/textblock/violation/table)
+        type: Тип узла
         content: Текстовое содержимое пункта
         protected: Защищен ли узел от удаления и перемещения
         deletable: Можно ли удалить узел (работает независимо от protected)
@@ -228,7 +244,7 @@ class ActItemSchema(BaseModel):
     """
     id: str
     label: str
-    type: str = "item"
+    type: Literal["item", "textblock", "violation", "table"] = "item"
     content: Optional[str] = ""
     protected: Optional[bool] = False
     deletable: Optional[bool] = True
@@ -274,11 +290,11 @@ class ActSaveResponse(BaseModel):
     Ответ API при сохранении акта.
 
     Attributes:
-        status: Статус операции (success/error)
+        status: Статус операции
         message: Сообщение о результате
         filename: Имя созданного файла
     """
-    status: str
+    status: Literal["success", "error"]
     message: str
     filename: str
 

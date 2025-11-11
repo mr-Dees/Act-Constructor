@@ -8,9 +8,10 @@
 """
 
 import base64
+import re
 from html.parser import HTMLParser
 from io import BytesIO
-from typing import Dict
+from typing import Dict, List, Tuple, Optional
 
 from docx import Document
 from docx.enum.text import WD_PARAGRAPH_ALIGNMENT
@@ -29,22 +30,22 @@ class HTMLToDocxParser(HTMLParser):
         self.italic = False
         self.underline = False
         self.strike = False
-        self.font_size = None
-        self.alignment = None
-        self.text_buffer = []
+        self.font_size: Optional[int] = None
+        self.alignment: Optional[str] = None
+        self.text_buffer: List[str] = []
         self.in_div = False
 
         # Для ссылок
         self.in_link = False
-        self.link_url = None
-        self.link_text = []
+        self.link_url: Optional[str] = None
+        self.link_text: List[str] = []
 
         # Для сносок
         self.in_footnote = False
-        self.footnote_text = None
-        self.footnote_content = []
+        self.footnote_text: Optional[str] = None
+        self.footnote_content: List[str] = []
 
-    def handle_starttag(self, tag, attrs):
+    def handle_starttag(self, tag: str, attrs: List[Tuple[str, str]]):
         if tag == 'br':
             return
 
@@ -91,7 +92,7 @@ class HTMLToDocxParser(HTMLParser):
             if tag == 'div':
                 self.in_div = True
 
-    def handle_endtag(self, tag):
+    def handle_endtag(self, tag: str):
         if tag == 'br':
             self._flush_buffer()
             self.paragraph.add_run('\n')
@@ -110,38 +111,12 @@ class HTMLToDocxParser(HTMLParser):
         elif tag == 'span':
             # Обработка закрытия гиперссылки
             if self.in_link:
-                link_text = ''.join(self.link_text)
-                # Формат markdown: [текст](url)
-                run = self.paragraph.add_run(f'[{link_text}]({self.link_url})')
-                run.bold = self.bold
-                run.italic = self.italic
-                run.underline = self.underline
-                if self.strike:
-                    run.font.strike = True
-                if self.font_size:
-                    run.font.size = Pt(self.font_size)
-
-                self.in_link = False
-                self.link_url = None
-                self.link_text = []
+                self._add_link()
                 return
 
             # Обработка закрытия сноски
             if self.in_footnote:
-                footnote_content = ''.join(self.footnote_content)
-                # Формат markdown: текст^[сноска]
-                run = self.paragraph.add_run(f'{footnote_content}^[{self.footnote_text}]')
-                run.bold = self.bold
-                run.italic = self.italic
-                run.underline = self.underline
-                if self.strike:
-                    run.font.strike = True
-                if self.font_size:
-                    run.font.size = Pt(self.font_size)
-
-                self.in_footnote = False
-                self.footnote_text = None
-                self.footnote_content = []
+                self._add_footnote()
                 return
 
             self.font_size = None
@@ -151,7 +126,7 @@ class HTMLToDocxParser(HTMLParser):
             self.in_div = False
             self.alignment = None
 
-    def handle_data(self, data):
+    def handle_data(self, data: str):
         # Игнорируем пустые строки между тегами
         if not data.strip():
             return
@@ -169,7 +144,7 @@ class HTMLToDocxParser(HTMLParser):
         # Обычная обработка
         self.text_buffer.append(data)
 
-    def _parse_style(self, style_string):
+    def _parse_style(self, style_string: str) -> Dict[str, str]:
         """Парсит CSS-строку стилей"""
         styles = {}
         if not style_string:
@@ -195,6 +170,10 @@ class HTMLToDocxParser(HTMLParser):
 
         # Создаем run с форматированием
         run = self.paragraph.add_run(text)
+        self._apply_formatting(run)
+
+    def _apply_formatting(self, run):
+        """Применяет текущее форматирование к run"""
         run.bold = self.bold
         run.italic = self.italic
         run.underline = self.underline
@@ -204,6 +183,26 @@ class HTMLToDocxParser(HTMLParser):
 
         if self.font_size:
             run.font.size = Pt(self.font_size)
+
+    def _add_link(self):
+        """Добавляет гиперссылку в markdown-формате"""
+        link_text = ''.join(self.link_text)
+        run = self.paragraph.add_run(f'[{link_text}]({self.link_url})')
+        self._apply_formatting(run)
+
+        self.in_link = False
+        self.link_url = None
+        self.link_text = []
+
+    def _add_footnote(self):
+        """Добавляет сноску в markdown-формате"""
+        footnote_content = ''.join(self.footnote_content)
+        run = self.paragraph.add_run(f'{footnote_content}^[{self.footnote_text}]')
+        self._apply_formatting(run)
+
+        self.in_footnote = False
+        self.footnote_text = None
+        self.footnote_content = []
 
     def close(self):
         """Завершает парсинг"""
@@ -221,14 +220,27 @@ class DocxFormatter(BaseFormatter):
     с HTML-форматированием и блоками нарушений с изображениями.
     """
 
+    # Константы для настройки форматирования
+    MAX_HEADING_LEVEL = 9
+    DEFAULT_IMAGE_WIDTH = Inches(4)
+    CAPTION_FONT_SIZE = Pt(10)
+
+    # Маппинг выравнивания CSS -> Word
+    ALIGNMENT_MAP = {
+        'center': WD_PARAGRAPH_ALIGNMENT.CENTER,
+        'right': WD_PARAGRAPH_ALIGNMENT.RIGHT,
+        'justify': WD_PARAGRAPH_ALIGNMENT.JUSTIFY,
+        'left': WD_PARAGRAPH_ALIGNMENT.LEFT
+    }
+
     def __init__(self):
         """
         Инициализация форматера с пустыми хранилищами для сущностей.
         Хранилища заполняются при вызове format() из входных данных.
         """
-        self.violations = {}
-        self.textBlocks = {}
-        self.tables = {}
+        self.violations: Dict = {}
+        self.textBlocks: Dict = {}
+        self.tables: Dict = {}
 
     def format(self, data: Dict) -> Document:
         """
@@ -280,8 +292,7 @@ class DocxFormatter(BaseFormatter):
 
         # Добавляем заголовок пункта (кроме текстовых блоков и нарушений)
         if label and item_type not in ['textblock', 'violation']:
-            # Ограничиваем уровень заголовка до 9 (максимум в Word)
-            heading_level = min(level, 9)
+            heading_level = min(level, self.MAX_HEADING_LEVEL)
             doc.add_heading(label, level=heading_level)
 
         # Добавляем текстовое содержание пункта
@@ -292,20 +303,17 @@ class DocxFormatter(BaseFormatter):
         # Обработка связанной таблицы
         table_id = item.get('tableId')
         if table_id and table_id in self.tables:
-            table_data = self.tables[table_id]
-            self._add_table(doc, table_data)
+            self._add_table(doc, self.tables[table_id])
 
         # Обработка текстового блока с форматированием
         textblock_id = item.get('textBlockId')
         if textblock_id and textblock_id in self.textBlocks:
-            textblock_data = self.textBlocks[textblock_id]
-            self._add_textblock(doc, textblock_data)
+            self._add_textblock(doc, self.textBlocks[textblock_id])
 
         # Обработка нарушения
         violation_id = item.get('violationId')
         if violation_id and violation_id in self.violations:
-            violation_data = self.violations[violation_id]
-            self._add_violation(doc, violation_data)
+            self._add_violation(doc, self.violations[violation_id])
 
         # Рекурсивная обработка дочерних элементов с увеличением уровня
         children = item.get('children', [])
@@ -320,35 +328,29 @@ class DocxFormatter(BaseFormatter):
 
         Args:
             doc: Документ DOCX
-            table_data: Словарь с данными таблицы, содержащий:
-                - grid: двумерный массив ячеек с содержимым и метаданными
+            table_data: Словарь с данными таблицы, содержащий grid
         """
-        # Получаем матричную структуру таблицы
         grid = table_data.get('grid', [])
 
         # Проверка на пустую таблицу
-        if not grid or len(grid) == 0:
+        if not grid or not grid[0]:
             doc.add_paragraph('[Пустая таблица]')
             return
 
         num_rows = len(grid)
-        num_cols = len(grid[0]) if grid else 0
-
-        if num_cols == 0:
-            doc.add_paragraph('[Пустая таблица]')
-            return
+        num_cols = len(grid[0])
 
         # Создание таблицы с сеткой Word
         table = doc.add_table(rows=num_rows, cols=num_cols)
         table.style = 'Table Grid'
 
-        # Отслеживаем уже обработанные объединения для избежания дублирования
+        # Отслеживаем уже обработанные объединения
         processed_merges = set()
 
-        # Заполнение таблицы данными из grid-структуры
+        # Заполнение таблицы данными
         for row_idx, row_data in enumerate(grid):
             for col_idx, cell_data in enumerate(row_data):
-                # Пропускаем ячейки, поглощенные объединением
+                # Пропускаем поглощенные ячейки
                 if cell_data.get('isSpanned', False):
                     continue
 
@@ -362,28 +364,42 @@ class DocxFormatter(BaseFormatter):
                         for run in paragraph.runs:
                             run.bold = True
 
-                # Обработка объединения ячеек (rowSpan/colSpan)
-                rowspan = cell_data.get('rowSpan', 1)
-                colspan = cell_data.get('colSpan', 1)
+                # Обработка объединения ячеек
+                self._merge_cells(
+                    table, cell, cell_data,
+                    row_idx, col_idx,
+                    num_rows, num_cols,
+                    processed_merges
+                )
 
-                if rowspan > 1 or colspan > 1:
-                    merge_key = (row_idx, col_idx)
-                    if merge_key not in processed_merges:
-                        try:
-                            # Вычисление конечной ячейки для объединения с защитой от выхода за границы
-                            end_row = min(row_idx + rowspan - 1, num_rows - 1)
-                            end_col = min(col_idx + colspan - 1, num_cols - 1)
-                            end_cell = table.cell(end_row, end_col)
-
-                            # Объединение диапазона ячеек
-                            cell.merge(end_cell)
-                            processed_merges.add(merge_key)
-                        except Exception as e:
-                            # Логируем ошибку, но продолжаем обработку документа
-                            print(f"Ошибка объединения ячеек [{row_idx},{col_idx}]: {e}")
-
-        # Добавляем пустой параграф для отступа после таблицы
+        # Добавляем пустой параграф после таблицы
         doc.add_paragraph()
+
+    def _merge_cells(
+            self, table, cell, cell_data: Dict,
+            row_idx: int, col_idx: int,
+            num_rows: int, num_cols: int,
+            processed_merges: set
+    ):
+        """Обрабатывает объединение ячеек таблицы"""
+        rowspan = cell_data.get('rowSpan', 1)
+        colspan = cell_data.get('colSpan', 1)
+
+        if rowspan > 1 or colspan > 1:
+            merge_key = (row_idx, col_idx)
+            if merge_key not in processed_merges:
+                try:
+                    # Вычисление конечной ячейки с защитой от выхода за границы
+                    end_row = min(row_idx + rowspan - 1, num_rows - 1)
+                    end_col = min(col_idx + colspan - 1, num_cols - 1)
+                    end_cell = table.cell(end_row, end_col)
+
+                    # Объединение диапазона ячеек
+                    cell.merge(end_cell)
+                    processed_merges.add(merge_key)
+                except Exception as e:
+                    # Логируем ошибку, но продолжаем
+                    print(f"Ошибка объединения ячеек [{row_idx},{col_idx}]: {e}")
 
     def _add_textblock(self, doc: Document, textblock_data: Dict):
         """
@@ -392,72 +408,14 @@ class DocxFormatter(BaseFormatter):
 
         Args:
             doc: Документ DOCX
-            textblock_data: Словарь с данными текстового блока:
-                - content: HTML-содержимое с div/span и inline-стилями
-                - formatting: базовые параметры (fontSize, alignment)
+            textblock_data: Словарь с content и formatting
         """
-        content = textblock_data.get('content', '')
-        formatting = textblock_data.get('formatting', {})
-
+        content = textblock_data.get('content', '').strip()
         if not content:
             return
 
-        # Очищаем контент
-        content = content.strip()
-
-        # Разбиваем по div-блокам
-        import re
-
-        # Простое разделение по div
-        div_pattern = r'<div[^>]*>.*?</div>'
-        div_matches = list(re.finditer(div_pattern, content, re.DOTALL))
-
-        if not div_matches:
-            # Нет div-блоков, обрабатываем как один параграф
-            blocks = [{'content': content, 'alignment': formatting.get('alignment', 'left')}]
-        else:
-            blocks = []
-            last_end = 0
-
-            for match in div_matches:
-                # Контент до div
-                if match.start() > last_end:
-                    pre_content = content[last_end:match.start()].strip()
-                    if pre_content:
-                        blocks.append({'content': pre_content, 'alignment': formatting.get('alignment', 'left')})
-
-                # Извлекаем контент и стиль div
-                div_html = match.group(0)
-                div_content_match = re.search(r'<div[^>]*>(.*?)</div>', div_html, re.DOTALL)
-                if div_content_match:
-                    div_content = div_content_match.group(1).strip()
-
-                    # Извлекаем text-align
-                    style_match = re.search(r'style=["\']([^"\']*)["\']', div_html)
-                    alignment = formatting.get('alignment', 'left')
-                    if style_match:
-                        style_str = style_match.group(1)
-                        align_match = re.search(r'text-align:\s*([^;]+)', style_str)
-                        if align_match:
-                            alignment = align_match.group(1).strip()
-
-                    blocks.append({'content': div_content, 'alignment': alignment})
-
-                last_end = match.end()
-
-            # Контент после последнего div
-            if last_end < len(content):
-                post_content = content[last_end:].strip()
-                if post_content:
-                    blocks.append({'content': post_content, 'alignment': formatting.get('alignment', 'left')})
-
-        # Маппинг выравнивания
-        alignment_map = {
-            'center': WD_PARAGRAPH_ALIGNMENT.CENTER,
-            'right': WD_PARAGRAPH_ALIGNMENT.RIGHT,
-            'justify': WD_PARAGRAPH_ALIGNMENT.JUSTIFY,
-            'left': WD_PARAGRAPH_ALIGNMENT.LEFT
-        }
+        formatting = textblock_data.get('formatting', {})
+        blocks = self._parse_div_blocks(content, formatting)
 
         # Создаем параграфы для каждого блока
         for block in blocks:
@@ -465,7 +423,10 @@ class DocxFormatter(BaseFormatter):
                 continue
 
             paragraph = doc.add_paragraph()
-            paragraph.alignment = alignment_map.get(block['alignment'], WD_PARAGRAPH_ALIGNMENT.LEFT)
+            paragraph.alignment = self.ALIGNMENT_MAP.get(
+                block['alignment'],
+                WD_PARAGRAPH_ALIGNMENT.LEFT
+            )
 
             # Парсинг HTML
             parser = HTMLToDocxParser(paragraph)
@@ -481,139 +442,190 @@ class DocxFormatter(BaseFormatter):
         # Пустой параграф после блока
         doc.add_paragraph()
 
+    def _parse_div_blocks(self, content: str, formatting: Dict) -> List[Dict]:
+        """Разбивает HTML-контент на блоки по div-элементам"""
+        div_pattern = r'<div[^>]*>.*?</div>'
+        div_matches = list(re.finditer(div_pattern, content, re.DOTALL))
+
+        if not div_matches:
+            return [{'content': content, 'alignment': formatting.get('alignment', 'left')}]
+
+        blocks = []
+        last_end = 0
+        default_alignment = formatting.get('alignment', 'left')
+
+        for match in div_matches:
+            # Контент до div
+            if match.start() > last_end:
+                pre_content = content[last_end:match.start()].strip()
+                if pre_content:
+                    blocks.append({'content': pre_content, 'alignment': default_alignment})
+
+            # Извлекаем контент и стиль div
+            div_html = match.group(0)
+            div_content = self._extract_div_content(div_html)
+            alignment = self._extract_div_alignment(div_html, default_alignment)
+
+            if div_content:
+                blocks.append({'content': div_content, 'alignment': alignment})
+
+            last_end = match.end()
+
+        # Контент после последнего div
+        if last_end < len(content):
+            post_content = content[last_end:].strip()
+            if post_content:
+                blocks.append({'content': post_content, 'alignment': default_alignment})
+
+        return blocks
+
+    def _extract_div_content(self, div_html: str) -> str:
+        """Извлекает содержимое из div-тега"""
+        match = re.search(r'<div[^>]*>(.*?)</div>', div_html, re.DOTALL)
+        return match.group(1).strip() if match else ''
+
+    def _extract_div_alignment(self, div_html: str, default: str) -> str:
+        """Извлекает text-align из style атрибута div"""
+        style_match = re.search(r'style=["\']([^"\']*)["\']', div_html)
+        if not style_match:
+            return default
+
+        style_str = style_match.group(1)
+        align_match = re.search(r'text-align:\s*([^;]+)', style_str)
+        return align_match.group(1).strip() if align_match else default
+
     def _add_violation(self, doc: Document, violation_data: Dict):
         """
         Добавляет блок нарушения в документ с полной структурой полей.
-        Включает: нарушено, установлено, список описаний, дополнительный контент
-        (кейсы, изображения, текст), причины, последствия, ответственных.
+        Включает: нарушено, установлено, список описаний, дополнительный контент,
+        причины, последствия, ответственных.
 
         Args:
             doc: Документ DOCX
-            violation_data: Словарь с данными нарушения, содержащий:
-                - violated: что нарушено
-                - established: что установлено
-                - descriptionList: список описаний (метрики)
-                - additionalContent: дополнительный контент (кейсы, изображения, текст)
-                - reasons: причины нарушения
-                - consequences: последствия
-                - responsible: ответственные лица
+            violation_data: Словарь с данными нарушения
         """
         # Секция "Нарушено"
-        violated = violation_data.get('violated', '')
-        if violated:
-            p = doc.add_paragraph()
-            p.add_run('Нарушено: ').bold = True
-            p.add_run(violated)
+        self._add_labeled_field(doc, 'Нарушено', violation_data.get('violated', ''))
 
         # Секция "Установлено"
-        established = violation_data.get('established', '')
-        if established:
-            p = doc.add_paragraph()
-            p.add_run('Установлено: ').bold = True
-            p.add_run(established)
+        self._add_labeled_field(doc, 'Установлено', violation_data.get('established', ''))
 
-        # Список описаний (метрик) с маркированным списком
-        desc_list = violation_data.get('descriptionList', {})
-        if desc_list.get('enabled', False):
-            items = desc_list.get('items', [])
-            if items:
-                p = doc.add_paragraph()
-                p.add_run('Описание:').bold = True
+        # Список описаний (метрик)
+        self._add_description_list(doc, violation_data.get('descriptionList', {}))
 
-                for item in items:
-                    if item.strip():
-                        doc.add_paragraph(item, style='List Bullet')
+        # Дополнительный контент
+        self._add_additional_content(doc, violation_data.get('additionalContent', {}))
 
-        # Дополнительный контент (кейсы, изображения, свободный текст)
-        additional_content = violation_data.get('additionalContent', {})
-        if additional_content.get('enabled', False):
-            items = additional_content.get('items', [])
+        # Опциональные поля
+        self._add_labeled_field(doc, 'Причины', violation_data.get('reasons', {}))
+        self._add_labeled_field(doc, 'Последствия', violation_data.get('consequences', {}))
+        self._add_labeled_field(doc, 'Ответственные', violation_data.get('responsible', {}))
 
-            # Счетчик для нумерации последовательных кейсов
-            case_number = 1
-            for item in items:
-                item_type = item.get('type')
-
-                # Обработка кейсов с автонумерацией
-                if item_type == 'case':
-                    content = item.get('content', '')
-                    if content:
-                        p = doc.add_paragraph()
-                        p.add_run(f'Кейс {case_number}: ').bold = True
-                        p.add_run(content)
-                        case_number += 1
-
-                # Обработка изображений с декодированием base64
-                elif item_type == 'image':
-                    case_number = 1  # Сброс счетчика кейсов при изображении
-                    url = item.get('url', '')
-                    caption = item.get('caption', '')
-                    filename = item.get('filename', '')
-
-                    # Попытка вставить изображение из data URL
-                    if url and url.startswith('data:image'):
-                        try:
-                            header, encoded = url.split(',', 1)
-                            image_data = base64.b64decode(encoded)
-                            image_stream = BytesIO(image_data)
-
-                            # Создаем параграф для изображения и центрируем его
-                            img_paragraph = doc.add_paragraph()
-                            img_paragraph.alignment = WD_PARAGRAPH_ALIGNMENT.CENTER
-                            img_run = img_paragraph.add_run()
-                            img_run.add_picture(image_stream, width=Inches(4))
-
-                            # Добавляем подпись с центрированием и курсивом
-                            if caption:
-                                p = doc.add_paragraph(caption)
-                                p.alignment = WD_PARAGRAPH_ALIGNMENT.CENTER
-                                for run in p.runs:
-                                    run.italic = True
-                                    run.font.size = Pt(10)
-                        except Exception as e:
-                            # Fallback: добавляем текстовую ссылку на изображение
-                            p = doc.add_paragraph(f"Изображение: {filename}")
-                            if caption:
-                                p.add_run(f" - {caption}")
-                    else:
-                        # Если URL не является data URL, добавляем текстовую ссылку
-                        p = doc.add_paragraph(f"Изображение: {filename}")
-                        if caption:
-                            p.add_run(f" - {caption}")
-
-                # Обработка свободного текста
-                elif item_type == 'freeText':
-                    case_number = 1  # Сброс счетчика кейсов при свободном тексте
-                    content = item.get('content', '')
-                    if content:
-                        doc.add_paragraph(content)
-
-        # Опциональное поле "Причины"
-        reasons = violation_data.get('reasons', {})
-        if reasons.get('enabled', False):
-            content = reasons.get('content', '')
-            if content:
-                p = doc.add_paragraph()
-                p.add_run('Причины: ').bold = True
-                p.add_run(content)
-
-        # Опциональное поле "Последствия"
-        consequences = violation_data.get('consequences', {})
-        if consequences.get('enabled', False):
-            content = consequences.get('content', '')
-            if content:
-                p = doc.add_paragraph()
-                p.add_run('Последствия: ').bold = True
-                p.add_run(content)
-
-        # Опциональное поле "Ответственные лица"
-        responsible = violation_data.get('responsible', {})
-        if responsible.get('enabled', False):
-            content = responsible.get('content', '')
-            if content:
-                p = doc.add_paragraph()
-                p.add_run('Ответственные: ').bold = True
-                p.add_run(content)
-
-        # Добавляем пустой параграф для отступа после блока нарушения
+        # Пустой параграф после блока
         doc.add_paragraph()
+
+    def _add_labeled_field(self, doc: Document, label: str, data):
+        """Добавляет поле с меткой (если данные не пусты)"""
+        # Обработка опциональных полей с enabled флагом
+        if isinstance(data, dict):
+            if not data.get('enabled', False):
+                return
+            content = data.get('content', '')
+        else:
+            content = data
+
+        if content:
+            p = doc.add_paragraph()
+            p.add_run(f'{label}: ').bold = True
+            p.add_run(content)
+
+    def _add_description_list(self, doc: Document, desc_list: Dict):
+        """Добавляет список описаний с маркерами"""
+        if not desc_list.get('enabled', False):
+            return
+
+        items = desc_list.get('items', [])
+        if not items:
+            return
+
+        p = doc.add_paragraph()
+        p.add_run('Описание:').bold = True
+
+        for item in items:
+            if item.strip():
+                doc.add_paragraph(item, style='List Bullet')
+
+    def _add_additional_content(self, doc: Document, additional_content: Dict):
+        """Добавляет дополнительный контент (кейсы, изображения, текст)"""
+        if not additional_content.get('enabled', False):
+            return
+
+        items = additional_content.get('items', [])
+        case_number = 1
+
+        for item in items:
+            item_type = item.get('type')
+
+            if item_type == 'case':
+                case_number = self._add_case(doc, item, case_number)
+            elif item_type == 'image':
+                self._add_image(doc, item)
+                case_number = 1  # Сброс счетчика
+            elif item_type == 'freeText':
+                self._add_free_text(doc, item)
+                case_number = 1  # Сброс счетчика
+
+    def _add_case(self, doc: Document, item: Dict, case_number: int) -> int:
+        """Добавляет кейс с номером"""
+        content = item.get('content', '')
+        if content:
+            p = doc.add_paragraph()
+            p.add_run(f'Кейс {case_number}: ').bold = True
+            p.add_run(content)
+            return case_number + 1
+        return case_number
+
+    def _add_image(self, doc: Document, item: Dict):
+        """Добавляет изображение из base64 data URL"""
+        url = item.get('url', '')
+        caption = item.get('caption', '')
+        filename = item.get('filename', '')
+
+        if url and url.startswith('data:image'):
+            try:
+                # Декодирование base64
+                header, encoded = url.split(',', 1)
+                image_data = base64.b64decode(encoded)
+                image_stream = BytesIO(image_data)
+
+                # Вставка изображения с центрированием
+                img_paragraph = doc.add_paragraph()
+                img_paragraph.alignment = WD_PARAGRAPH_ALIGNMENT.CENTER
+                img_run = img_paragraph.add_run()
+                img_run.add_picture(image_stream, width=self.DEFAULT_IMAGE_WIDTH)
+
+                # Подпись с центрированием и курсивом
+                if caption:
+                    p = doc.add_paragraph(caption)
+                    p.alignment = WD_PARAGRAPH_ALIGNMENT.CENTER
+                    for run in p.runs:
+                        run.italic = True
+                        run.font.size = self.CAPTION_FONT_SIZE
+            except Exception as e:
+                # Fallback: текстовая ссылка
+                self._add_image_fallback(doc, filename, caption)
+        else:
+            # Если URL не data URL
+            self._add_image_fallback(doc, filename, caption)
+
+    def _add_image_fallback(self, doc: Document, filename: str, caption: str):
+        """Добавляет текстовую ссылку на изображение при ошибке"""
+        p = doc.add_paragraph(f"Изображение: {filename}")
+        if caption:
+            p.add_run(f" - {caption}")
+
+    def _add_free_text(self, doc: Document, item: Dict):
+        """Добавляет свободный текст"""
+        content = item.get('content', '')
+        if content:
+            doc.add_paragraph(content)

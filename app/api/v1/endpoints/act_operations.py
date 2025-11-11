@@ -1,10 +1,13 @@
 """
 Эндпоинты для работы с актами.
 
-Предоставляет HTTP API для сохранения актов и скачивания файлов
+Предоставляет HTTP API для сохранения актов в различных форматах
+и скачивания сохраненных файлов.
 """
 
-from fastapi import APIRouter, Query, HTTPException
+from typing import Literal
+
+from fastapi import APIRouter, Query, HTTPException, Depends
 from fastapi.responses import FileResponse
 
 from app.core.config import Settings
@@ -14,35 +17,39 @@ from app.services.act_service import ActService
 # Создание роутера для операций с актами
 router = APIRouter()
 
-# Инициализация сервиса и настроек
-act_service = ActService()
-settings = Settings()
+
+def get_settings() -> Settings:
+    """Dependency для получения настроек приложения."""
+    return Settings()
+
+
+def get_act_service() -> ActService:
+    """Dependency для получения сервиса работы с актами."""
+    return ActService()
 
 
 @router.post("/save_act", response_model=ActSaveResponse)
 async def save_act(
         data: ActDataSchema,
-        fmt: str = Query(
+        fmt: Literal["txt", "md", "docx"] = Query(
             "txt",
-            enum=["txt", "md", "docx"],
             description="Формат сохранения файла"
-        )
-):
+        ),
+        act_service: ActService = Depends(get_act_service)
+) -> ActSaveResponse:
     """
     Сохраняет структуру акта в указанном формате.
 
-    Принимает данные акта (дерево структуры, таблицы, текстовые блоки,
-    нарушения) и экспортирует их в выбранный формат файла.
-
     Args:
-        data: Валидированные данные акта согласно схеме ActDataSchema
-        fmt: Формат экспорта ('txt', 'md' или 'docx')
+        data: Данные акта (дерево структуры, таблицы, текстовые блоки, нарушения)
+        fmt: Формат экспорта - 'txt', 'md' или 'docx'
+        act_service: Сервис для работы с актами (injected)
 
     Returns:
-        ActSaveResponse: Результат операции с именем файла
+        Результат операции с именем сохраненного файла
 
     Raises:
-        HTTPException: При ошибке валидации (400) или сохранения (500)
+        HTTPException: 400 при ошибке валидации, 500 при ошибке сохранения
     """
     try:
         # Конвертируем Pydantic модель в словарь и передаем в сервис
@@ -59,18 +66,22 @@ async def save_act(
 
 
 @router.get("/download/{filename}")
-async def download_act(filename: str):
+async def download_act(
+        filename: str,
+        settings: Settings = Depends(get_settings)
+) -> FileResponse:
     """
     Скачивает сохраненный файл акта.
 
     Args:
-        filename: Имя файла для скачивания (без пути)
+        filename: Имя файла для скачивания
+        settings: Настройки приложения (injected)
 
     Returns:
-        FileResponse: Файл для скачивания с корректным MIME-типом
+        Файл для скачивания с корректным MIME-типом
 
     Raises:
-        HTTPException: Если файл не найден (404) или ошибка доступа (500)
+        HTTPException: 404 если файл не найден, 500 при ошибке доступа
     """
     try:
         # Формируем полный путь к файлу
@@ -98,9 +109,6 @@ async def download_act(filename: str):
             media_type=media_type,
             filename=filename
         )
-    except HTTPException:
-        # Пробрасываем HTTP исключения без изменений
-        raise
     except Exception as e:
         # Обрабатываем непредвиденные ошибки
         raise HTTPException(
