@@ -1,6 +1,6 @@
 /**
- * Модуль drag-and-drop для дерева элементов
- * Обеспечивает перетаскивание узлов внутри дерева с визуальными индикаторами
+ * Модуль drag-and-drop для дерева элементов.
+ * Обеспечивает перетаскивание узлов внутри дерева с визуальными индикаторами.
  */
 class TreeDragDrop {
     constructor(manager) {
@@ -13,7 +13,7 @@ class TreeDragDrop {
     }
 
     /**
-     * Инициализация drag-and-drop для дерева
+     * Инициализация drag-and-drop для дерева.
      */
     init() {
         this.manager.container.addEventListener('dragstart', this.handleDragStart.bind(this));
@@ -26,7 +26,7 @@ class TreeDragDrop {
     }
 
     /**
-     * Делает все незащищенные элементы перетаскиваемыми
+     * Делает все незащищенные элементы перетаскиваемыми.
      */
     enableDraggableItems() {
         const observer = new MutationObserver(() => {
@@ -46,7 +46,8 @@ class TreeDragDrop {
     }
 
     /**
-     * Обработчик начала перетаскивания
+     * Обработчик начала перетаскивания.
+     * Блокирует перетаскивание узлов с таблицами рисков в поддереве.
      */
     handleDragStart(e) {
         const treeItem = e.target.closest('.tree-item');
@@ -57,6 +58,17 @@ class TreeDragDrop {
 
         if (!node || node.protected) {
             e.preventDefault();
+            return;
+        }
+
+        // НОВАЯ ПРОВЕРКА: запрещаем перетаскивание узлов с таблицами рисков
+        if (this._hasRiskTablesInSubtree(node)) {
+            e.preventDefault();
+            if (typeof Notifications !== 'undefined') {
+                Notifications.error('Нельзя перемещать блоки, содержащие таблицы рисков');
+            } else {
+                alert('Нельзя перемещать блоки, содержащие таблицы рисков');
+            }
             return;
         }
 
@@ -73,7 +85,33 @@ class TreeDragDrop {
     }
 
     /**
-     * Проверяет, может ли целевой узел принять перетаскиваемый узел как дочерний
+     * Проверяет наличие таблиц рисков в узле и его поддереве.
+     * @param {Object} node - Узел для проверки
+     * @returns {boolean} true если найдены таблицы рисков
+     */
+    _hasRiskTablesInSubtree(node) {
+        // Если узел сам является таблицей риска
+        if (node.type === 'table' && node.tableId) {
+            const table = AppState.tables[node.tableId];
+            if (table && (table.isRegularRiskTable || table.isOperationalRiskTable)) {
+                return true;
+            }
+        }
+
+        // Рекурсивно проверяем дочерние элементы
+        if (node.children && node.children.length > 0) {
+            for (const child of node.children) {
+                if (this._hasRiskTablesInSubtree(child)) {
+                    return true;
+                }
+            }
+        }
+
+        return false;
+    }
+
+    /**
+     * Проверяет, может ли целевой узел принять перетаскиваемый узел как дочерний.
      */
     canAcceptAsChild(targetNode, draggedNode) {
         // Информационные элементы не могут иметь детей
@@ -93,7 +131,7 @@ class TreeDragDrop {
     }
 
     /**
-     * Обработчик перемещения над элементами
+     * Обработчик перемещения над элементами.
      */
     handleDragOver(e) {
         if (!this.draggedNode) return;
@@ -173,7 +211,7 @@ class TreeDragDrop {
     }
 
     /**
-     * Обновляет визуальный индикатор зоны сброса
+     * Обновляет визуальный индикатор зоны сброса.
      */
     updateDropZone(targetElement, dropZoneClass, position, targetNode) {
         if (this.currentDropZone === targetElement && this.dropPosition === position) {
@@ -189,7 +227,7 @@ class TreeDragDrop {
     }
 
     /**
-     * Очищает визуальные индикаторы зоны сброса
+     * Очищает визуальные индикаторы зоны сброса.
      */
     clearDropZone() {
         if (this.currentDropZone) {
@@ -201,7 +239,7 @@ class TreeDragDrop {
     }
 
     /**
-     * Обработчик ухода курсора с элемента
+     * Обработчик ухода курсора с элемента.
      */
     handleDragLeave(e) {
         const treeItem = e.target.closest('.tree-item');
@@ -218,8 +256,8 @@ class TreeDragDrop {
     }
 
     /**
-     * Обработчик сброса элемента
-     * ИСПРАВЛЕНО: добавлен await для асинхронного вызова moveNode
+     * Обработчик сброса элемента.
+     * Использует await для асинхронного вызова moveNode.
      */
     async handleDrop(e) {
         e.preventDefault();
@@ -230,7 +268,6 @@ class TreeDragDrop {
             return;
         }
 
-        // КРИТИЧЕСКОЕ ИСПРАВЛЕНИЕ: await для асинхронного метода
         const result = await AppState.moveNode(
             this.draggedNode.id,
             this.dropTargetNode.id,
@@ -262,14 +299,14 @@ class TreeDragDrop {
     }
 
     /**
-     * Обработчик завершения перетаскивания
+     * Обработчик завершения перетаскивания.
      */
     handleDragEnd(e) {
         this.cleanup();
     }
 
     /**
-     * Очищает все состояния и визуальные эффекты
+     * Очищает все состояния и визуальные эффекты.
      */
     cleanup() {
         if (this.draggedElement) {
