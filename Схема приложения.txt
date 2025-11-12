@@ -115,6 +115,11 @@ Act Constructor/
 │       ├── items/
 │       │   ├── items-renderer.js
 │       │   └── items-title-editing.js
+│       ├── preview/
+│       │   ├── tree-core.js
+│       │   ├── preview-table-renderer.js
+│       │   ├── preview-textblock-renderer.js
+│       │   └── preview-violation-renderer.js
 │       ├── state/
 │       │   ├── state-content.js
 │       │   ├── state-core.js
@@ -145,11 +150,11 @@ Act Constructor/
 │       ├── act-validator.js
 │       ├── api.js
 │       ├── app.js
+│       ├── app-config
 │       ├── dialog.js
 │       ├── format-menu-manager.js
 │       ├── help.js
 │       ├── navigation-manager.js
-│       ├── notifications.js
-│       └── preview.js
+│       └── notifications.js
 ├── requirements.txt
 └── .env

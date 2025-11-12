@@ -13,7 +13,7 @@
 </head>
 <body>
     <!-- Шапка приложения -->
-    {% include 'components/header.html' %}
+    {% include 'header.html' %}
 
     <!-- Основной контент страницы -->
     {% block content %}{% endblock %}
@@ -79,6 +79,10 @@
     <script src="/static/js/violation/violation-drag-drop.js"></script>
     <script src="/static/js/violation/violation-file-upload.js"></script>
     <script src="/static/js/violation/violation-init.js"></script>
+
+    <!-- Информация подсказок -->
+    {% include 'help/step1.html' %}
+    {% include 'help/step2.html' %}
 
     <!-- Дополнительные скрипты страницы -->
     {% block extra_js %}{% endblock %}

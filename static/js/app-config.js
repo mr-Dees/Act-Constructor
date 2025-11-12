@@ -15,10 +15,6 @@ class AppConfig {
         // Максимальный уровень вложенности заголовков (h1-h4)
         maxHeadingLevel: 4,
 
-        // Задержка перед обновлением предпросмотра (мс)
-        // (не используется после перехода на requestAnimationFrame)
-        minimalDelay: 30,
-
         // Настройки обрезки текста для разных типов контента
         trimLengths: {
             // Базовое значение (используется если не указано специфичное)
@@ -34,16 +30,10 @@ class AppConfig {
 
     /**
      * Настройки валидации данных
+     * TODO: Добавить настройки валидации при работе с модулем
      */
     static validation = {
-        messages: {
-            emptyStructure: 'Структура акта пуста',
-            noSections: 'Добавьте хотя бы один раздел в акт',
-            emptyHeadersPrefix: 'Не заполнены заголовки таблиц:',
-            emptyHeadersSuffix: '\n\nЗаполните все заголовки перед сохранением.',
-            emptyDataPrefix: '⚠️ Найдены таблицы без данных:',
-            emptyDataSuffix: '\n\nВы можете продолжить сохранение.'
-        }
+        // Здесь будут настройки валидации
     };
 
     /**
@@ -83,11 +73,35 @@ class AppConfig {
     static notifications = {
         // Длительности показа уведомлений (мс)
         duration: {
-            error: 3000,
+            error: 5000,
             warning: 4000,
-            info: 4000,
-            success: 7000,
-            longSuccess: 7000
+            info: 3000,
+            success: 2000,
+            longSuccess: 6000
+        },
+
+        // Анимация
+        animation: {
+            // Длительность анимации скрытия
+            hidingDuration: 250,
+            // Длительность анимации счетчика
+            counterScaleDuration: 150
+        },
+
+        // Группировка повторяющихся уведомлений
+        grouping: {
+            // Статус активности
+            enabled: true,
+            // Дополнительное время за каждое повторение (мс)
+            extensionPerRepeat: 500
+        },
+
+        // Иконки для типов уведомлений
+        icons: {
+            success: '✓',
+            error: '✗',
+            info: 'ℹ',
+            warning: '⚠'
         },
 
         // Сообщения
@@ -95,6 +109,37 @@ class AppConfig {
             noFormatsSelected: 'Выберите хотя бы один формат для сохранения',
             savingInProgress: '⏳ Создаём акты...',
             unexpectedError: (error) => `Произошла непредвиденная ошибка: ${error}`
+        }
+    };
+
+    /**
+     * Настройки системы помощи
+     */
+    static help = {
+        // ID DOM-элементов
+        elements: {
+            helpBtn: 'helpBtn',
+            modal: 'helpModal',
+            modalTitle: 'helpModalTitle',
+            modalBody: 'helpModalBody'
+        },
+
+        // ID контейнеров с инструкциями
+        contentIds: {
+            1: 'help-step-1-content',
+            2: 'help-step-2-content'
+        },
+
+        // Названия шагов для подсказок
+        stepNames: {
+            1: 'Составление структуры акта',
+            2: 'Заполнение данных'
+        },
+
+        // Заголовки инструкций
+        titles: {
+            1: 'Инструкция: Шаг 1 - Составление структуры акта',
+            2: 'Инструкция: Шаг 2 - Заполнение данных'
         }
     };
 
