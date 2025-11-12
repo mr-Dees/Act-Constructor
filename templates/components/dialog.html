@@ -1,0 +1,19 @@
+<!--
+    Шаблон диалогового окна
+
+    Используется DialogManager для создания модальных окон подтверждения.
+    Не включается напрямую в страницу - создается динамически через JavaScript.
+-->
+<template id="dialog-template">
+    <div class="custom-dialog-overlay">
+        <div class="custom-dialog">
+            <div class="dialog-icon"></div>
+            <h3 class="dialog-title"></h3>
+            <p class="dialog-message"></p>
+            <div class="dialog-buttons">
+                <button class="btn btn-secondary dialog-cancel"></button>
+                <button class="btn btn-primary dialog-confirm"></button>
+            </div>
+        </div>
+    </div>
+</template>

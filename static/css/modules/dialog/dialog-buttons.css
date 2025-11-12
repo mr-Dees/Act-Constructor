@@ -1,10 +1,52 @@
 /*
  * Кнопки диалоговых окон
- * Стили для кнопок подтверждения и отмены в модальных окнах
+ *
+ * Стили для кнопок подтверждения и отмены в модальных окнах.
+ * Расширяет базовые стили кнопок для специфичных нужд диалогов.
  */
 
+/* Контейнер кнопок диалога */
 .dialog-buttons {
     display: flex;
     gap: var(--spacing);
     justify-content: center;
+    flex-wrap: wrap;
+}
+
+/* Кнопки внутри диалога используют базовый .btn */
+.dialog-buttons .btn {
+    min-width: 7rem;
+    flex: 1;
+    max-width: 12rem;
+}
+
+/* Переопределение для уменьшения тени в диалогах */
+.dialog-buttons .btn {
+    box-shadow: var(--shadow-xs);
+}
+
+.dialog-buttons .btn:hover:not(:disabled) {
+    box-shadow: var(--shadow-sm);
+}
+
+/* Дополнительные стили для первичной кнопки диалога */
+.dialog-buttons .btn-primary {
+    /* Можно добавить специфичные стили если нужно */
+}
+
+/* Дополнительные стили для вторичной кнопки диалога */
+.dialog-buttons .btn-secondary {
+    /* Можно добавить специфичные стили если нужно */
+}
+
+/* Адаптив для узких экранов */
+@media (max-width: 480px) {
+    .dialog-buttons {
+        flex-direction: column-reverse;
+    }
+
+    .dialog-buttons .btn {
+        width: 100%;
+        max-width: none;
+    }
 }

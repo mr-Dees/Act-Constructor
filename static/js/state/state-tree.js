@@ -241,28 +241,29 @@ Object.assign(AppState, {
         // Проверяем, останется ли узел дочерним элементом пункта 5 на первом уровне
         const willStayUnder5FirstLevel = newParent && newParent.id === '5';
 
-        // ИСПРАВЛЕНИЕ 3: если есть таблица метрик и перемещение уведет узел из-под пункта 5
+        // Если есть таблица метрик и перемещение уведет узел из-под пункта 5
         if (hasMetricsTable && !willStayUnder5FirstLevel) {
-            const confirmed = await new Promise((resolve) => {
-                DialogManager.show({
-                    title: 'Удаление таблицы метрик',
-                    message: 'При перемещении этого пункта таблица метрик будет удалена. Продолжить?',
-                    icon: '⚠️',
-                    confirmText: 'Да, переместить',
-                    cancelText: 'Отмена',
-                    onConfirm: () => resolve(true),
-                    onCancel: () => resolve(false)
-                });
+            const confirmed = await DialogManager.show({
+                title: 'Удаление таблицы метрик',
+                message: 'При перемещении этого пункта таблица метрик будет удалена. Продолжить?',
+                icon: '⚠️',
+                confirmText: 'Да, переместить',
+                cancelText: 'Отмена'
             });
 
             if (!confirmed) {
-                return {success: false, reason: 'Перемещение отменено пользователем', cancelled: true};
+                return {
+                    success: false,
+                    reason: 'Перемещение отменено пользователем',
+                    cancelled: true
+                };
             }
 
             // Удаляем таблицу метрик
             const metricsTableNode = draggedNode.children.find(
                 child => child.type === 'table' && child.isMetricsTable === true
             );
+
             if (metricsTableNode) {
                 delete this.tables[metricsTableNode.tableId];
                 draggedNode.children = draggedNode.children.filter(

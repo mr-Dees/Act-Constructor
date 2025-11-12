@@ -1,6 +1,8 @@
 /*
  * Базовые стили кнопок
- * Определяет общие и вариативные стили для кнопок приложения
+ *
+ * Определяет общие стили для всех кнопок приложения.
+ * Предоставляет базовые варианты: primary, secondary, success.
  */
 
 /* Базовый класс для всех кнопок */
@@ -15,7 +17,11 @@
     box-shadow: var(--shadow-sm);
     display: inline-flex;
     align-items: center;
+    justify-content: center;
     gap: 0.5rem;
+    text-align: center;
+    line-height: 1;
+    white-space: nowrap;
 }
 
 /* Эффект при наведении */
@@ -29,13 +35,25 @@
     transform: translateY(0);
 }
 
+/* Отключенное состояние */
+.btn:disabled {
+    opacity: 0.6;
+    cursor: not-allowed;
+    transform: none;
+}
+
+.btn:disabled:hover {
+    box-shadow: var(--shadow-sm);
+    transform: none;
+}
+
 /* Основная кнопка с акцентным цветом */
 .btn-primary {
     background: var(--primary);
     color: white;
 }
 
-.btn-primary:hover {
+.btn-primary:hover:not(:disabled) {
     background: var(--primary-hover);
 }
 
@@ -46,7 +64,7 @@
     border: 1px solid var(--border);
 }
 
-.btn-secondary:hover {
+.btn-secondary:hover:not(:disabled) {
     background: var(--gray-200);
     border-color: var(--border-medium);
 }
@@ -57,43 +75,6 @@
     color: white;
 }
 
-.btn-success:hover {
+.btn-success:hover:not(:disabled) {
     background: #469463;
-}
-
-/* Кнопки для диалоговых окон */
-.dialog-btn {
-    padding: 0.625rem 1.5rem;
-    border: none;
-    border-radius: var(--radius);
-    font-size: 0.9375rem;
-    font-weight: 500;
-    cursor: pointer;
-    transition: all 0.2s ease;
-    box-shadow: var(--shadow-sm);
-}
-
-.dialog-btn:hover {
-    box-shadow: var(--shadow-md);
-}
-
-/* Основная кнопка диалога */
-.dialog-btn-primary {
-    background: var(--primary);
-    color: white;
-}
-
-.dialog-btn-primary:hover {
-    background: var(--primary-hover);
-}
-
-/* Вторичная кнопка диалога */
-.dialog-btn-secondary {
-    background: var(--bg-tertiary);
-    color: var(--text-primary);
-    border: 1px solid var(--border);
-}
-
-.dialog-btn-secondary:hover {
-    background: var(--gray-200);
 }

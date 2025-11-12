@@ -1,6 +1,8 @@
 /*
  * Стили диалогового окна
+ *
  * Модальное окно с иконкой, заголовком и сообщением
+ * для подтверждения действий пользователя.
  */
 
 /* Контейнер диалогового окна */
@@ -9,10 +11,11 @@
     border-radius: var(--radius-xl);
     padding: var(--spacing-2xl);
     max-width: 27.5rem;
-    width: 90%;
+    width: 100%;
     box-shadow: var(--shadow-xl);
     animation: scaleIn 0.25s cubic-bezier(0.4, 0, 0.2, 1);
     border: 1px solid var(--border);
+    position: relative;
 }
 
 /* Иконка в диалоговом окне */
@@ -20,7 +23,8 @@
     font-size: 3rem;
     text-align: center;
     margin-bottom: var(--spacing-lg);
-    color: var(--primary);
+    line-height: 1;
+    user-select: none;
 }
 
 /* Заголовок диалогового окна */
@@ -31,6 +35,7 @@
     text-align: center;
     margin-bottom: var(--spacing-sm);
     letter-spacing: -0.01em;
+    line-height: 1.4;
 }
 
 /* Текст сообщения */
@@ -40,4 +45,26 @@
     text-align: center;
     line-height: 1.6;
     margin-bottom: var(--spacing-xl);
+}
+
+/* Адаптив для мобильных устройств */
+@media (max-width: 480px) {
+    .custom-dialog {
+        padding: var(--spacing-xl);
+        max-width: 100%;
+        margin: var(--spacing);
+    }
+
+    .dialog-icon {
+        font-size: 2.5rem;
+        margin-bottom: var(--spacing);
+    }
+
+    .dialog-title {
+        font-size: 1rem;
+    }
+
+    .dialog-message {
+        font-size: 0.875rem;
+    }
 }

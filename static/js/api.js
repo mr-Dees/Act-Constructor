@@ -1,95 +1,49 @@
 /**
  * Клиент для взаимодействия с API
- * Обрабатывает все запросы к серверу
+ *
+ * Обрабатывает все HTTP-запросы к серверу для работы с актами.
+ * Предоставляет методы для генерации и скачивания файлов актов.
  */
 class APIClient {
-
     /**
-     * Показывает кастомный диалог подтверждения
-     * Используется вместо стандартного confirm() для единообразия UI
-     * @param {string} title - Заголовок
-     * @param {string} message - Сообщение
-     * @param {string} confirmText - Текст кнопки подтверждения
-     * @param {string} cancelText - Текст кнопки отмены
-     * @returns {Promise<boolean>} - true если подтверждено
-     */
-    static showConfirmDialog(title, message, confirmText = 'Да', cancelText = 'Нет') {
-        return new Promise((resolve) => {
-            // Создаем оверлей с диалогом поверх основного контента
-            const overlay = document.createElement('div');
-            overlay.className = 'custom-dialog-overlay';
-            overlay.innerHTML = `
-                <div class="custom-dialog">
-                    <div class="dialog-icon">📥</div>
-                    <div class="dialog-title">${title}</div>
-                    <div class="dialog-message">${message}</div>
-                    <div class="dialog-buttons">
-                        <button class="dialog-btn dialog-btn-primary" data-action="confirm">${confirmText}</button>
-                        <button class="dialog-btn dialog-btn-secondary" data-action="cancel">${cancelText}</button>
-                    </div>
-                </div>
-            `;
-
-            // Обрабатываем клики по кнопкам и оверлею
-            // Клик по оверлею (вне диалога) закрывает его как отмену
-            overlay.addEventListener('click', (e) => {
-                const action = e.target.dataset.action;
-                if (action === 'confirm') {
-                    overlay.remove();
-                    resolve(true);
-                } else if (action === 'cancel' || e.target === overlay) {
-                    overlay.remove();
-                    resolve(false);
-                }
-            });
-
-            document.body.appendChild(overlay);
-        });
-    }
-
-    /**
-     * Генерирует и сохраняет акты на сервере (поддерживает множественные форматы)
-     * Основной метод создания файлов актов - может создать несколько форматов за раз
+     * Генерирует и сохраняет акты на сервере
+     *
+     * Поддерживает создание нескольких форматов за один вызов.
+     * Автоматически предлагает скачать созданные файлы.
+     *
      * @param {string|string[]} formats - Формат или массив форматов ('txt', 'md', 'docx')
-     * @returns {Promise<boolean>} - Успешность операции
+     * @returns {Promise<boolean>} true если хотя бы один файл создан успешно
      */
     static async generateAct(formats = 'txt') {
-        // Получаем данные текущего состояния приложения
         const data = AppState.exportData();
-
-        // Приводим форматы к единому формату массива для единообразной обработки
         const formatList = Array.isArray(formats) ? formats : [formats];
 
         // Фильтруем только поддерживаемые форматы
-        const validFormats = formatList.filter(fmt => ['txt', 'docx', 'md'].includes(fmt));
+        const validFormats = formatList.filter(fmt =>
+            ['txt', 'docx', 'md'].includes(fmt)
+        );
+
         if (validFormats.length === 0) {
-            console.error('Нет валидных форматов:', formatList);
             Notifications.error('Не выбраны валидные форматы для сохранения');
             return false;
         }
 
-        console.log(`🔄 Начинаем генерацию ${validFormats.length} актов в форматах: ${validFormats.join(', ')}`);
-
-        // Массив для накопления результатов по каждому формату
         const results = [];
         let successCount = 0;
         let errorCount = 0;
 
         try {
             // Последовательно создаем файлы всех форматов
-            // Промежуточные уведомления не показываем для улучшения UX
             for (const format of validFormats) {
                 try {
-                    console.log(`📝 Генерируем акт в формате ${format.toUpperCase()}...`);
-
-                    // Отправляем POST-запрос на сервер для создания файла
-                    const response = await fetch(`/api/v1/act_operations/save_act?fmt=${format}`, {
-                        method: 'POST',
-                        headers: {
-                            'Content-Type': 'application/json'
-                        },
-                        body: JSON.stringify(data)
-                    });
+                    const response = await fetch(
+                        `/api/v1/act_operations/save_act?fmt=${format}`,
+                        {
+                            method: 'POST',
+                            headers: {'Content-Type': 'application/json'},
+                            body: JSON.stringify(data)
+                        }
+                    );
 
                     if (!response.ok) {
                         const errorText = await response.text();
@@ -97,171 +51,155 @@ class APIClient {
                     }
 
                     const result = await response.json();
-                    results.push({format, filename: result.filename, success: true});
+                    results.push({
+                        format,
+                        filename: result.filename,
+                        success: true
+                    });
                     successCount++;
 
-                    console.log(`✅ Акт ${format.toUpperCase()} успешно создан: ${result.filename}`);
-
                 } catch (error) {
-                    console.error(`❌ Ошибка при создании акта ${format.toUpperCase()}:`, error);
-                    results.push({format, error: error.message, success: false});
+                    results.push({
+                        format,
+                        error: error.message,
+                        success: false
+                    });
                     errorCount++;
                 }
             }
 
-            // Показываем единое итоговое уведомление после всех операций
-            // Это улучшает UX и не загромождает экран множественными уведомлениями
-            if (successCount > 0 && errorCount === 0) {
-                // Все файлы созданы успешно
-                const formatsList = results
-                    .filter(r => r.success)
-                    .map(r => r.format.toUpperCase())
-                    .join(', ');
+            // Показываем итоговое уведомление
+            this._showGenerationResults(successCount, errorCount, results);
 
-                Notifications.success(`Создано ${successCount} файл(ов): ${formatsList}`, 7000);
-            } else if (successCount > 0 && errorCount > 0) {
-                // Частичный успех - некоторые форматы созданы, некоторые с ошибками
-                Notifications.info(`Успешно: ${successCount}, Ошибок: ${errorCount}`, 7000);
-            } else {
-                // Полный провал - ни один файл не создан
-                Notifications.error('Не удалось создать файлы. Проверьте консоль.', 7000);
-            }
-
-            // Детальные ошибки выводим только в консоль, чтобы не перегружать UI
-            if (errorCount > 0) {
-                console.group('❌ Детали ошибок:');
-                results.filter(r => !r.success).forEach(r => {
-                    console.error(`${r.format.toUpperCase()}: ${r.error}`);
-                });
-                console.groupEnd();
-            }
-
-            // Предлагаем скачать все успешно созданные файлы
-            // Спрашиваем один раз для всех файлов, чтобы не досаждать пользователю
+            // Предлагаем скачать успешно созданные файлы
             if (successCount > 0) {
-                const shouldDownload = await this.showConfirmDialog(
-                    'Скачать созданные файлы?',
-                    `Было успешно создано ${successCount} файл(ов). Хотите скачать их сейчас?`,
-                    'Скачать все',
-                    'Не нужно'
-                );
-
-                if (shouldDownload) {
-                    console.log(`📥 Пользователь запросил скачивание ${successCount} файлов`);
-
-                    let downloadedCount = 0;
-                    let downloadErrors = 0;
-
-                    // Последовательно скачиваем все успешно созданные файлы
-                    for (const result of results.filter(r => r.success)) {
-                        try {
-                            // Передаем false чтобы не показывать промежуточные ошибки в UI
-                            await this.downloadFile(result.filename, false);
-                            downloadedCount++;
-                            console.log(`✅ Файл ${result.filename} успешно скачан`);
-                        } catch (error) {
-                            downloadErrors++;
-                            console.error(`❌ Ошибка при скачивании ${result.filename}:`, error);
-                        }
-                    }
-
-                    // Показываем итоговое уведомление о скачивании
-                    if (downloadedCount === successCount) {
-                        Notifications.success(`Успешно скачано ${downloadedCount} файл(ов)`, 3000);
-                    } else {
-                        Notifications.info(`Скачано: ${downloadedCount}, Ошибок: ${downloadErrors}`, 5000);
-                    }
-                } else {
-                    console.log('📋 Файлы созданы, скачивание отклонено пользователем');
-                }
+                await this._handleDownloadPrompt(results, successCount);
             }
 
             return successCount > 0;
 
         } catch (error) {
-            // Обработка критических ошибок всего процесса генерации
-            console.error('❌ Критическая ошибка при генерации актов:', error);
             Notifications.error(`Произошла ошибка: ${error.message}`, 8000);
             return false;
         }
     }
 
     /**
-     * Скачивает сгенерированный файл без дополнительных уведомлений
-     * @param {string} filename - Имя файла
-     * @param {boolean} showUIErrors - Показывать ошибки в UI (по умолчанию false)
+     * Показывает результаты генерации файлов
+     * @private
+     * @param {number} successCount - Количество успешно созданных файлов
+     * @param {number} errorCount - Количество ошибок
+     * @param {Array} results - Массив результатов
      */
-    static async downloadFile(filename, showUIErrors = false) {
-        try {
-            console.log(`📥 Начинаем скачивание файла: ${filename}`);
+    static _showGenerationResults(successCount, errorCount, results) {
+        if (successCount > 0 && errorCount === 0) {
+            const formatsList = results
+                .filter(r => r.success)
+                .map(r => r.format.toUpperCase())
+                .join(', ');
+            Notifications.success(
+                `Создано ${successCount} файл(ов): ${formatsList}`,
+                7000
+            );
+        } else if (successCount > 0 && errorCount > 0) {
+            Notifications.info(
+                `Успешно: ${successCount}, Ошибок: ${errorCount}`,
+                7000
+            );
+        } else {
+            Notifications.error('Не удалось создать файлы', 7000);
+        }
+    }
 
-            // Запрашиваем файл с сервера
-            const response = await fetch(`/api/v1/act_operations/download/${filename}`);
+    /**
+     * Обрабатывает предложение скачать созданные файлы
+     * @private
+     * @param {Array} results - Массив результатов генерации
+     * @param {number} successCount - Количество успешно созданных файлов
+     */
+    static async _handleDownloadPrompt(results, successCount) {
+        const shouldDownload = await DialogManager.show({
+            title: 'Скачать созданные файлы?',
+            message: `Было успешно создано ${successCount} файл(ов). Хотите скачать их сейчас?`,
+            icon: '📥',
+            confirmText: 'Скачать все',
+            cancelText: 'Не нужно'
+        });
+
+        if (shouldDownload) {
+            await this._downloadAllFiles(results);
+        }
+    }
+
+    /**
+     * Скачивает все успешно созданные файлы
+     * @private
+     * @param {Array} results - Массив результатов генерации
+     */
+    static async _downloadAllFiles(results) {
+        let downloadedCount = 0;
+        let downloadErrors = 0;
+
+        for (const result of results.filter(r => r.success)) {
+            try {
+                await this.downloadFile(result.filename);
+                downloadedCount++;
+            } catch (error) {
+                downloadErrors++;
+            }
+        }
+
+        // Показываем итоговое уведомление о скачивании
+        if (downloadedCount === results.filter(r => r.success).length) {
+            Notifications.success(
+                `Успешно скачано ${downloadedCount} файл(ов)`,
+                3000
+            );
+        } else {
+            Notifications.info(
+                `Скачано: ${downloadedCount}, Ошибок: ${downloadErrors}`,
+                5000
+            );
+        }
+    }
+
+    /**
+     * Скачивает сгенерированный файл
+     *
+     * @param {string} filename - Имя файла для скачивания
+     * @throws {Error} При ошибке скачивания
+     */
+    static async downloadFile(filename) {
+        try {
+            const response = await fetch(
+                `/api/v1/act_operations/download/${filename}`
+            );
 
             if (!response.ok) {
-                // Собираем детальную информацию об ошибке для отладки
-                const errorDetails = {
-                    status: response.status,
-                    statusText: response.statusText,
-                    url: response.url,
-                    filename: filename
-                };
-
-                console.error('❌ Детальная информация об ошибке скачивания:', errorDetails);
-
-                // Показываем ошибки в UI только если это явно запрошено
-                // Это нужно для массового скачивания, когда не хотим множество уведомлений
-                if (showUIErrors) {
-                    if (response.status === 404) {
-                        Notifications.error(`Файл "${filename}" не найден на сервере`);
-                    } else {
-                        Notifications.error(`Ошибка сервера: ${response.status} ${response.statusText}`);
-                    }
+                if (response.status === 404) {
+                    throw new Error(`Файл "${filename}" не найден на сервере`);
                 }
-
-                throw new Error(`Ошибка скачивания: ${response.status} ${response.statusText}`);
+                throw new Error(
+                    `Ошибка сервера: ${response.status} ${response.statusText}`
+                );
             }
 
-            console.log(`📦 Получаем blob для файла: ${filename}`);
             const blob = await response.blob();
 
-            console.log(`📦 Размер файла: ${blob.size} байт, тип: ${blob.type}`);
-
             // Создаем временную ссылку для инициации скачивания
-            // Это стандартный способ скачивания файлов через JavaScript
             const url = window.URL.createObjectURL(blob);
             const a = document.createElement('a');
             a.href = url;
             a.download = filename;
 
-            // Добавляем элемент в DOM, кликаем по нему и сразу удаляем
-            // Это необходимо для корректной работы скачивания в большинстве браузеров
             document.body.appendChild(a);
             a.click();
 
-            // Освобождаем память, занятую blob URL
+            // Освобождаем память
             window.URL.revokeObjectURL(url);
             document.body.removeChild(a);
 
-            console.log(`✅ Файл успешно скачан: ${filename}`);
-
         } catch (error) {
-            // Собираем расширенную информацию об ошибке для отладки
-            const detailedError = {
-                message: error.message,
-                filename: filename,
-                timestamp: new Date().toISOString(),
-                userAgent: navigator.userAgent
-            };
-
-            console.error('❌ Подробная ошибка скачивания:', detailedError);
-
-            // Показываем ошибку в UI только если это запрошено
-            if (showUIErrors) {
-                Notifications.error(`Не удалось скачать "${filename}". Проверьте консоль для деталей.`);
-            }
-
-            // Пробрасываем ошибку дальше для обработки в вызывающем коде
             throw error;
         }
     }

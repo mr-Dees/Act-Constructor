@@ -1,6 +1,8 @@
 /*
  * Оверлей для диалоговых окон
+ *
  * Затемненный фон, блокирующий взаимодействие с основным контентом
+ * во время отображения модальных окон.
  */
 
 /* Полноэкранная подложка диалогового окна */
@@ -12,14 +14,30 @@
     bottom: 0;
     background: rgba(26, 32, 44, 0.5);
     backdrop-filter: blur(4px);
+    -webkit-backdrop-filter: blur(4px);
     z-index: 9999;
     display: flex;
     align-items: center;
     justify-content: center;
     animation: fadeIn 0.2s ease-out;
+    padding: var(--spacing-lg);
 }
 
-/* Скрытое состояние оверлея */
+/* Скрытое состояние с плавным исчезновением */
 .custom-dialog-overlay.hidden {
-    display: none;
+    animation: fadeOut 0.2s ease-out forwards;
+}
+
+@keyframes fadeOut {
+    from {
+        opacity: 1;
+    }
+    to {
+        opacity: 0;
+    }
+}
+
+/* Предотвращение прокрутки фона при открытом диалоге */
+body.dialog-open {
+    overflow: hidden;
 }
