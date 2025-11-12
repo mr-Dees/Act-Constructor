@@ -1,10 +1,17 @@
 /*
  * Таблицы в предпросмотре
- * Стили для отображения табличных данных в документе
+ *
+ * Стили для отображения табличных данных в документе.
  */
 
+/* Обертка таблицы с горизонтальной прокруткой */
+.preview-table-wrapper {
+    margin-bottom: 1.5rem;
+    overflow-x: auto;
+}
+
 /* Таблица в области предпросмотра */
-.preview table {
+.preview-table {
     width: 100%;
     border-collapse: collapse;
     margin: var(--spacing) 0;
@@ -13,16 +20,36 @@
 }
 
 /* Ячейки таблицы */
-.preview table th,
-.preview table td {
+.preview-table th,
+.preview-table td {
     border: 1px solid var(--border);
     padding: 0.5rem;
     text-align: left;
 }
 
 /* Заголовки таблицы */
-.preview table th {
+.preview-table-header {
     background: var(--bg-tertiary);
     font-weight: 600;
     color: var(--text-primary);
+}
+
+/* Название таблицы */
+.preview-table-title {
+    font-weight: normal;
+    text-decoration: underline;
+    margin-top: var(--spacing);
+    margin-bottom: var(--spacing-sm);
+    color: var(--text-secondary);
+}
+
+/* Пустая таблица */
+.preview-table-empty {
+    opacity: 0.6;
+}
+
+.preview-table-empty-cell {
+    text-align: center;
+    font-style: italic;
+    color: var(--text-tertiary);
 }

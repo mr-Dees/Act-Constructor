@@ -34,7 +34,8 @@ class App {
     static _initializeManagers() {
         treeManager.render();
 
-        setTimeout(() => PreviewManager.update('previewTrim'), 30);
+        // Ждем завершения рендеринга DOM перед обновлением превью
+        requestAnimationFrame(() => PreviewManager.update());
 
         ContextMenuManager.init();
         HelpManager.init();
