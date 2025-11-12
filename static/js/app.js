@@ -57,7 +57,7 @@ class App {
      */
     static _setupGlobalKeyboardShortcuts() {
         document.addEventListener('keydown', (e) => {
-            if ((e.ctrlKey || e.metaKey) && e.key === 's') {
+            if ((e.ctrlKey || e.metaKey) && e.code === AppConfig.hotkeys.save.code) {
                 e.preventDefault();
                 if (AppState.currentStep === 2) {
                     const generateBtn = document.getElementById('generateBtn');
@@ -112,7 +112,7 @@ class App {
             ItemsRenderer.renderAll();
         } else {
             textBlockManager.hideToolbar();
-            setTimeout(() => PreviewManager.update('previewTrim'), 30);
+            requestAnimationFrame(() => PreviewManager.update('previewTrim'));
         }
     }
 }

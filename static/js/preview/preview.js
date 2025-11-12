@@ -7,16 +7,6 @@
  */
 class PreviewManager {
     /**
-     * Конфигурация предпросмотра
-     * @private
-     */
-    static config = {
-        defaultTrimLength: 30,
-        maxHeadingLevel: 4,
-        minimalDelay: 30
-    };
-
-    /**
      * Обновляет содержимое панели предпросмотра
      *
      * @param {Object|string} options - Настройки отображения или строка 'previewTrim' для обратной совместимости
@@ -24,10 +14,10 @@ class PreviewManager {
     static update(options = {}) {
         // Обратная совместимость со старым API
         if (typeof options === 'string') {
-            options = {previewTrim: this.config.defaultTrimLength};
+            options = {previewTrim: AppConfig.preview.defaultTrimLength};
         }
 
-        const {previewTrim = this.config.defaultTrimLength} = options;
+        const {previewTrim = AppConfig.preview.defaultTrimLength} = options;
 
         // Используем requestAnimationFrame вместо setTimeout для лучшей производительности
         requestAnimationFrame(() => {
@@ -169,7 +159,7 @@ class PreviewManager {
      * @private
      */
     static _renderHeading(child, container, level) {
-        const headingLevel = Math.min(level + 1, this.config.maxHeadingLevel);
+        const headingLevel = Math.min(level + 1, AppConfig.preview.maxHeadingLevel);
         const heading = document.createElement(`h${headingLevel}`);
         heading.textContent = child.label;
         container.appendChild(heading);

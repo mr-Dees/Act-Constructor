@@ -1,48 +1,51 @@
 /**
  * Рендерер текстовых блоков для предпросмотра
  *
- * Создает отформатированные текстовые блоки
- * с сохранением HTML-разметки и стилей.
+ * Создает HTML-представление текстовых блоков с сохранением
+ * форматирования и стилей.
  */
 class PreviewTextBlockRenderer {
     /**
-     * Создает текстовый блок для предпросмотра
+     * Создает элемент текстового блока
      *
      * @param {Object} textBlock - Данные текстового блока
-     * @returns {HTMLElement}
+     * @returns {HTMLElement} Элемент текстового блока
      */
     static create(textBlock) {
-        const wrapper = document.createElement('div');
-        wrapper.className = 'preview-textblock';
-
+        const container = this._createContainer();
         const content = this._createContent(textBlock);
-        wrapper.appendChild(content);
 
-        return wrapper;
+        container.appendChild(content);
+        return container;
     }
 
     /**
-     * Создает контент с форматированием
+     * Создает контейнер текстового блока
      * @private
-     * @param {Object} textBlock - Данные блока
-     * @returns {HTMLElement}
+     */
+    static _createContainer() {
+        const container = document.createElement('div');
+        container.className = 'preview-textblock';
+        return container;
+    }
+
+    /**
+     * Создает элемент содержимого с форматированием
+     * @private
      */
     static _createContent(textBlock) {
         const content = document.createElement('div');
         content.className = 'preview-textblock-content';
 
         this._applyFormatting(content, textBlock.formatting);
-
         content.innerHTML = textBlock.content;
 
         return content;
     }
 
     /**
-     * Применяет настройки форматирования
+     * Применяет форматирование к элементу
      * @private
-     * @param {HTMLElement} element - Элемент контента
-     * @param {Object} formatting - Настройки форматирования
      */
     static _applyFormatting(element, formatting) {
         if (!formatting) return;

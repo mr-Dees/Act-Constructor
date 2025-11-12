@@ -9,16 +9,16 @@ class PreviewViolationRenderer {
      * Создает элемент нарушения
      *
      * @param {Object} violation - Данные нарушения
-     * @param {number} previewTrim - Максимальная длина текста
+     * @param {number} [previewTrim] - Максимальная длина текста (по умолчанию из конфига)
      * @returns {HTMLElement} Элемент нарушения
      */
-    static create(violation, previewTrim) {
+    static create(violation, previewTrim = AppConfig.preview.defaultTrimLength) {
         const container = this._createContainer();
 
-        this._renderBasicInfo(container, violation);
+        this._renderBasicInfo(container, violation, previewTrim);
         this._renderDescriptionList(container, violation);
-        this._renderAdditionalContent(container, violation);
-        this._renderOptionalFields(container, violation);
+        this._renderAdditionalContent(container, violation, previewTrim);
+        this._renderOptionalFields(container, violation, previewTrim);
 
         return container;
     }
@@ -37,9 +37,12 @@ class PreviewViolationRenderer {
      * Рендерит базовую информацию
      * @private
      */
-    static _renderBasicInfo(container, violation) {
-        this._addLine(container, 'Нарушено', violation.violated);
-        this._addLine(container, 'Установлено', violation.established);
+    static _renderBasicInfo(container, violation, previewTrim) {
+        // Используем меньшую длину для критичных полей (половина от основного)
+        const shortTrim = Math.floor(previewTrim / 2);
+
+        this._addLine(container, 'Нарушено', violation.violated, shortTrim);
+        this._addLine(container, 'Установлено', violation.established, shortTrim);
     }
 
     /**
@@ -62,14 +65,14 @@ class PreviewViolationRenderer {
      * Рендерит дополнительный контент
      * @private
      */
-    static _renderAdditionalContent(container, violation) {
+    static _renderAdditionalContent(container, violation, previewTrim) {
         if (!violation.additionalContent?.enabled) return;
 
         const items = violation.additionalContent.items || [];
         const counters = {case: 1, image: 1, text: 1};
 
         items.forEach(item => {
-            this._renderContentItem(container, item, counters);
+            this._renderContentItem(container, item, counters, previewTrim);
         });
     }
 
@@ -77,7 +80,7 @@ class PreviewViolationRenderer {
      * Рендерит элемент дополнительного контента
      * @private
      */
-    static _renderContentItem(container, item, counters) {
+    static _renderContentItem(container, item, counters, previewTrim) {
         const handlers = {
             'case': this._renderCase,
             'image': this._renderImage,
@@ -86,7 +89,7 @@ class PreviewViolationRenderer {
 
         const handler = handlers[item.type];
         if (handler) {
-            handler.call(this, container, item, counters);
+            handler.call(this, container, item, counters, previewTrim);
         }
     }
 
@@ -94,14 +97,17 @@ class PreviewViolationRenderer {
      * Рендерит кейс
      * @private
      */
-    static _renderCase(container, item, counters) {
+    static _renderCase(container, item, counters, previewTrim) {
         if (!item.content?.trim()) return;
+
+        // Для кейсов используем увеличенную длину (в 1.5 раза больше)
+        const extendedTrim = Math.floor(previewTrim * 1.5);
 
         this._addLine(
             container,
             `Кейс ${counters.case}`,
             item.content,
-            50
+            extendedTrim
         );
         counters.case++;
         counters.image = 1;
@@ -112,9 +118,9 @@ class PreviewViolationRenderer {
      * Рендерит изображение
      * @private
      */
-    static _renderImage(container, item, counters) {
-        const caption = item.caption ? ` - ${this._trim(item.caption, 30)}` : '';
-        const text = `${this._trim(item.filename, 30)}${caption}`;
+    static _renderImage(container, item, counters, previewTrim) {
+        const caption = item.caption ? ` - ${this._trim(item.caption, previewTrim)}` : '';
+        const text = `${this._trim(item.filename, previewTrim)}${caption}`;
 
         this._addLine(container, `Изображение ${counters.image}`, text);
         counters.image++;
@@ -125,14 +131,17 @@ class PreviewViolationRenderer {
      * Рендерит свободный текст
      * @private
      */
-    static _renderFreeText(container, item, counters) {
+    static _renderFreeText(container, item, counters, previewTrim) {
         if (!item.content?.trim()) return;
+
+        // Для свободного текста используем увеличенную длину
+        const extendedTrim = Math.floor(previewTrim * 1.5);
 
         this._addLine(
             container,
             `Текст ${counters.text}`,
             item.content,
-            50
+            extendedTrim
         );
         counters.text++;
         counters.case = 1;
@@ -142,7 +151,10 @@ class PreviewViolationRenderer {
      * Рендерит опциональные поля
      * @private
      */
-    static _renderOptionalFields(container, violation) {
+    static _renderOptionalFields(container, violation, previewTrim) {
+        // Для опциональных полей используем меньшую длину
+        const shortTrim = Math.floor(previewTrim / 2);
+
         const fields = [
             ['reasons', 'Причины'],
             ['consequences', 'Последствия'],
@@ -153,7 +165,7 @@ class PreviewViolationRenderer {
         fields.forEach(([key, label]) => {
             const field = violation[key];
             if (field?.enabled && field?.content) {
-                this._addLine(container, label, field.content);
+                this._addLine(container, label, field.content, shortTrim);
             }
         });
     }
@@ -162,16 +174,22 @@ class PreviewViolationRenderer {
      * Добавляет строку информации
      * @private
      */
-    static _addLine(container, label, text, maxLength = 15) {
+    static _addLine(container, label, text, maxLength = null) {
+        // Если maxLength не указан, используем значение по умолчанию из конфига
+        const trimLength = maxLength ?? AppConfig.preview.defaultTrimLength;
+
         const line = document.createElement('div');
         line.className = 'preview-violation-line';
-        line.innerHTML = `${label}: ${this._trim(text, maxLength)}`;
+        line.innerHTML = `${label}: ${this._trim(text, trimLength)}`;
         container.appendChild(line);
     }
 
     /**
-     * Обрезает текст
+     * Обрезает текст до указанной длины
      * @private
+     * @param {string} text - Исходный текст
+     * @param {number} maxLength - Максимальная длина
+     * @returns {string} Обрезанный текст
      */
     static _trim(text, maxLength) {
         if (!text) return '—';

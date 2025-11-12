@@ -20,7 +20,7 @@ class APIClient {
 
         // Фильтруем только поддерживаемые форматы
         const validFormats = formatList.filter(fmt =>
-            ['txt', 'docx', 'md'].includes(fmt)
+            AppConfig.api.supportedFormats.includes(fmt)
         );
 
         if (validFormats.length === 0) {
@@ -37,7 +37,7 @@ class APIClient {
             for (const format of validFormats) {
                 try {
                     const response = await fetch(
-                        `/api/v1/act_operations/save_act?fmt=${format}`,
+                        `${AppConfig.api.endpoints.saveAct}?fmt=${format}`,
                         {
                             method: 'POST',
                             headers: {'Content-Type': 'application/json'},
@@ -79,7 +79,10 @@ class APIClient {
             return successCount > 0;
 
         } catch (error) {
-            Notifications.error(`Произошла ошибка: ${error.message}`, 8000);
+            Notifications.error(
+                `Произошла ошибка: ${error.message}`,
+                AppConfig.notifications.duration.longSuccess
+            );
             return false;
         }
     }
@@ -99,15 +102,18 @@ class APIClient {
                 .join(', ');
             Notifications.success(
                 `Создано ${successCount} файл(ов): ${formatsList}`,
-                7000
+                AppConfig.notifications.duration.longSuccess
             );
         } else if (successCount > 0 && errorCount > 0) {
             Notifications.info(
                 `Успешно: ${successCount}, Ошибок: ${errorCount}`,
-                7000
+                AppConfig.notifications.duration.longSuccess
             );
         } else {
-            Notifications.error('Не удалось создать файлы', 7000);
+            Notifications.error(
+                'Не удалось создать файлы',
+                AppConfig.notifications.duration.longSuccess
+            );
         }
     }
 
@@ -153,12 +159,12 @@ class APIClient {
         if (downloadedCount === results.filter(r => r.success).length) {
             Notifications.success(
                 `Успешно скачано ${downloadedCount} файл(ов)`,
-                3000
+                AppConfig.notifications.duration.success
             );
         } else {
             Notifications.info(
                 `Скачано: ${downloadedCount}, Ошибок: ${downloadErrors}`,
-                5000
+                AppConfig.notifications.duration.info
             );
         }
     }
@@ -172,7 +178,7 @@ class APIClient {
     static async downloadFile(filename) {
         try {
             const response = await fetch(
-                `/api/v1/act_operations/download/${filename}`
+                `${AppConfig.api.endpoints.downloadFile}/${filename}`
             );
 
             if (!response.ok) {

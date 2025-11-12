@@ -62,28 +62,41 @@ class NavigationManager {
 
         // Валидация форматов
         if (selectedFormats.length === 0) {
-            Notifications.error('Выберите хотя бы один формат для сохранения', 3000);
+            Notifications.error(
+                'Выберите хотя бы один формат для сохранения',
+                AppConfig.notifications.duration.error
+            );
             return;
         }
 
         // Валидация структуры акта
         const validationResult = ActValidator.validateStructure();
         if (!validationResult.valid) {
-            Notifications.error(validationResult.message, 3000);
+            Notifications.error(
+                validationResult.message,
+                AppConfig.notifications.duration.error
+            );
             return;
         }
 
         // Критическая проверка заголовков таблиц
         const headerCheckResult = ActValidator.checkTableHeaders();
         if (!headerCheckResult.valid) {
-            Notifications.error(headerCheckResult.message, 4000);
+            Notifications.error(
+                headerCheckResult.message,
+                AppConfig.notifications.duration.warning
+            );
             return;
         }
 
         // Предупреждение о пустых таблицах
         const dataCheckResult = ActValidator.checkTableData();
         if (!dataCheckResult.valid) {
-            Notifications.show(dataCheckResult.message, 'info', 4000);
+            Notifications.show(
+                dataCheckResult.message,
+                'info',
+                AppConfig.notifications.duration.warning
+            );
         }
 
         // Синхронизация данных из DOM
@@ -109,7 +122,7 @@ class NavigationManager {
         } catch (error) {
             Notifications.error(
                 `Произошла непредвиденная ошибка: ${error.message}`,
-                3000
+                AppConfig.notifications.duration.error
             );
         } finally {
             button.disabled = false;

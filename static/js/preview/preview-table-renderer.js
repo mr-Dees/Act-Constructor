@@ -9,10 +9,10 @@ class PreviewTableRenderer {
      * Создает элемент таблицы для предпросмотра
      *
      * @param {Object} tableData - Данные таблицы из состояния
-     * @param {number} previewTrim - Максимальная длина текста
+     * @param {number} [previewTrim] - Максимальная длина текста (по умолчанию из конфига)
      * @returns {HTMLElement} Контейнер с таблицей
      */
-    static create(tableData, previewTrim) {
+    static create(tableData, previewTrim = AppConfig.preview.defaultTrimLength) {
         const wrapper = this._createWrapper();
         const table = this._createTable(tableData, previewTrim);
 
@@ -129,8 +129,11 @@ class PreviewTableRenderer {
     }
 
     /**
-     * Обрезает текст
+     * Обрезает текст до указанной длины
      * @private
+     * @param {string} text - Исходный текст
+     * @param {number} maxLength - Максимальная длина
+     * @returns {string} Обрезанный текст
      */
     static _trimText(text, maxLength) {
         const str = text.toString();

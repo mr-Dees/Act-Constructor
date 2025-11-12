@@ -11,18 +11,18 @@ class DialogManager {
      * @param {Object} options - Параметры диалога
      * @param {string} options.title - Заголовок диалога
      * @param {string} options.message - Текст сообщения
-     * @param {string} [options.icon='⚠️'] - Иконка (эмодзи)
-     * @param {string} [options.confirmText='Да'] - Текст кнопки подтверждения
-     * @param {string} [options.cancelText='Отмена'] - Текст кнопки отмены
+     * @param {string} [options.icon] - Иконка (эмодзи)
+     * @param {string} [options.confirmText] - Текст кнопки подтверждения
+     * @param {string} [options.cancelText] - Текст кнопки отмены
      * @returns {Promise<boolean>} Promise, который резолвится true при подтверждении, false при отмене
      */
     static show(options) {
         const {
-            title = 'Подтверждение',
-            message = 'Вы уверены?',
-            icon = '⚠️',
-            confirmText = 'Да',
-            cancelText = 'Отмена'
+            title = AppConfig.dialog.defaultTitle,
+            message = AppConfig.dialog.defaultMessage,
+            icon = AppConfig.dialog.defaultIcon,
+            confirmText = AppConfig.dialog.defaultConfirmText,
+            cancelText = AppConfig.dialog.defaultCancelText
         } = options;
 
         return new Promise((resolve) => {
@@ -179,7 +179,7 @@ class DialogManager {
             overlay.classList.add('hidden');
             setTimeout(() => {
                 overlay.remove();
-            }, 200);
+            }, AppConfig.dialog.closeDelay);
         }
     }
 }
