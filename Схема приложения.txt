@@ -104,6 +104,9 @@ UI_for_EP_v_KAP/
 │   │       └── helpers.css
 │   └── js/
 │       ├── app.js
+│       ├── act-validator.js
+│       ├── format-menu-manager.js
+│       ├── navigation-manager.js
 │       ├── api.js
 │       ├── dialog.js
 │       ├── notifications.js
