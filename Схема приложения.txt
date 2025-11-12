@@ -1,152 +1,155 @@
-UI_for_EP_v_KAP/
+Act Constructor/
 ├── app/
-│   ├── __init__.py
-│   ├── main.py
 │   ├── api/
 │   │   ├── __init__.py
 │   │   └── v1/
+│   │       ├── endpoints/
+│   │       │   ├── __init__.py
+│   │       │   └── act_operations.py
 │   │       ├── __init__.py
-│   │       ├── routes.py
-│   │       └── endpoints/
-│   │           ├── __init__.py
-│   │           └── act_operations.py
+│   │       └── routes.py
 │   ├── core/
 │   │   ├── __init__.py
 │   │   └── config.py
 │   ├── formatters/
 │   │   ├── __init__.py
 │   │   ├── base_formatter.py
-│   │   ├── text_formatter.py
+│   │   ├── docx_formatter.py
 │   │   ├── markdown_formatter.py
-│   │   └── docx_formatter.py
+│   │   └── text_formatter.py
 │   ├── schemas/
 │   │   ├── __init__.py
 │   │   └── act.py
-│   └── services/
-│       ├── __init__.py
-│       ├── act_service.py
-│       └── storage_service.py
+│   ├── services/
+│   │   ├── __init__.py
+│   │   ├── act_service.py
+│   │   └── storage_service.py
+│   ├── __init__.py
+│   └── main.py
+│
 ├── DB/
 │   └── acts/
 │       └── (здесь будут сохраняться файлы актов)
+│
 ├── templates/
+│   ├── components/
+│   │   ├── context_menu.html
+│   │   ├── dialog.html
+│   │   ├── header.html
+│   │   ├── preview_panel.html
+│   │   └── tree_panel.html
 │   ├── base.html
-│   ├── constructor.html
-│   └── components/
-│       ├── header.html
-│       ├── tree_panel.html
-│       ├── preview_panel.html
-│       └── context_menu.html
+│   └── constructor.html
 ├── static/
 │   ├── css/
-│   │   ├── main.css
 │   │   ├── base/
-│   │   │   ├── variables.css
+│   │   │   ├── animations.css
 │   │   │   ├── reset.css
-│   │   │   └── animations.css
+│   │   │   └── variables.css
 │   │   ├── layout/
 │   │   │   ├── container.css
 │   │   │   ├── header.css
-│   │   │   ├── two-columns.css
-│   │   │   └── panels.css
+│   │   │   ├── panels.css
+│   │   │   └── two-columns.css
 │   │   ├── modules/
-│   │   │   ├── tree/
-│   │   │   │   ├── tree-base.css
-│   │   │   │   ├── tree-states.css
-│   │   │   │   ├── tree-drag-drop.css
-│   │   │   │   ├── tree-nodes.css
-│   │   │   │   └── tree-children.css
-│   │   │   ├── table/
-│   │   │   │   ├── table-base.css
-│   │   │   │   ├── table-states.css
-│   │   │   │   ├── table-resize.css
-│   │   │   │   └── table-editor.css
-│   │   │   ├── violation/
-│   │   │   │   ├── violation-additional-content.css
-│   │   │   │   ├── violation-base.css
-│   │   │   │   ├── violation-fields.css
-│   │   │   │   └── violation-list.css
-│   │   │   ├── preview/
-│   │   │   │   ├── preview-base.css
-│   │   │   │   ├── preview-violation.css
-│   │   │   │   ├── preview-typography.css
-│   │   │   │   └── preview-table.css
-│   │   │   ├── help/
-│   │   │   │   ├── help-button.css
-│   │   │   │   ├── help-modal.css
-│   │   │   │   ├── help-content.css
-│   │   │   │   └── help-media.css
 │   │   │   ├── buttons/
-│   │   │   │   ├── buttons-base.css
 │   │   │   │   ├── buttons-action.css
+│   │   │   │   ├── buttons-base.css
 │   │   │   │   └── buttons-save-group.css
-│   │   │   ├── items/
-│   │   │   │   ├── items-base.css
-│   │   │   │   ├── items-levels.css
-│   │   │   │   ├── items-header.css
-│   │   │   │   └── items-content.css
-│   │   │   ├── textblock/
-│   │   │   │   ├── textblock-toolbar.css
-│   │   │   │   ├── textblock-links-footnotes.css
-│   │   │   │   └── textblock-content.css
 │   │   │   ├── context-menu/
 │   │   │   │   ├── context-menu-base.css
 │   │   │   │   └── context-menu-states.css
+│   │   │   ├── dialog/
+│   │   │   │   ├── dialog.css
+│   │   │   │   ├── dialog-buttons.css
+│   │   │   │   └── dialog-overlay.css
+│   │   │   ├── help/
+│   │   │   │   ├── help-button.css
+│   │   │   │   ├── help-content.css
+│   │   │   │   ├── help-media.css
+│   │   │   │   └── help-modal.css
+│   │   │   ├── items/
+│   │   │   │   ├── items-base.css
+│   │   │   │   ├── items-content.css
+│   │   │   │   ├── items-header.css
+│   │   │   │   └── items-levels.css
 │   │   │   ├── notifications/
 │   │   │   │   ├── notifications-base.css
-│   │   │   │   ├── notifications-types.css
-│   │   │   │   └── notifications-content.css
-│   │   │   └── dialog/
-│   │   │       ├── dialog-overlay.css
-│   │   │       ├── dialog.css
-│   │   │       └── dialog-buttons.css
-│   │   └── utilities/
-│   │       └── helpers.css
+│   │   │   │   ├── notifications-content.css
+│   │   │   │   └── notifications-types.css
+│   │   │   ├── preview/
+│   │   │   │   ├── preview-base.css
+│   │   │   │   ├── preview-table.css
+│   │   │   │   ├── preview-typography.css
+│   │   │   │   └── preview-violation.css
+│   │   │   ├── table/
+│   │   │   │   ├── table-base.css
+│   │   │   │   ├── table-editor.css
+│   │   │   │   ├── table-resize.css
+│   │   │   │   └── table-states.css
+│   │   │   ├── textblock/
+│   │   │   │   ├── textblock-content.css
+│   │   │   │   ├── textblock-links-footnotes.css
+│   │   │   │   └── textblock-toolbar.css
+│   │   │   ├── tree/
+│   │   │   │   ├── tree-base.css
+│   │   │   │   ├── tree-children.css
+│   │   │   │   ├── tree-drag-drop.css
+│   │   │   │   ├── tree-nodes.css
+│   │   │   │   └── tree-states.css
+│   │   │   └── violation/
+│   │   │       ├── violation-additional-content.css
+│   │   │       ├── violation-base.css
+│   │   │       ├── violation-fields.css
+│   │   │       └── violation-list.css
+│   │   ├── utilities/
+│   │   │   └── helpers.css
+│   │   └── main.css
 │   └── js/
-│       ├── app.js
-│       ├── act-validator.js
-│       ├── format-menu-manager.js
-│       ├── navigation-manager.js
-│       ├── api.js
-│       ├── dialog.js
-│       ├── notifications.js
-│       ├── preview.js
-│       ├── help.js
 │       ├── state/
-│       │   ├── context-menu-core.js
-│       │   ├── context-menu-tree.js
 │       │   ├── context-menu-cells.js
+│       │   ├── context-menu-core.js
 │       │   ├── context-menu-links-footnotes.js
+│       │   ├── context-menu-tree.js
 │       │   └── context-menu-violation.js
+│       ├── items/
+│       │   ├── items-renderer.js
+│       │   └── items-title-editing.js
+│       ├── state/
+│       │   ├── state-content.js
+│       │   ├── state-core.js
+│       │   ├── state-tree.js
+│       │   └── state-validation.js
+│       ├── table/
+│       │   ├── table-cells-operations.js
+│       │   ├── table-core.js
+│       │   └── table-sizes.js
 │       ├── textblock/
 │       │   ├── textblock-core.js
 │       │   ├── textblock-editor.js
 │       │   ├── textblock-formatting.js
-│       │   ├── textblock-toolbar.js
-│       │   └── textblock-links-footnotes.js
-│       ├── state/
-│       │   ├── state-core.js
-│       │   ├── state-content.js
-│       │   ├── state-validation.js
-│       │   └── state-tree.js
+│       │   ├── textblock-links-footnotes.js
+│       │   └── textblock-toolbar.js
 │       ├── tree/
 │       │   ├── tree-core.js
 │       │   ├── tree-drag-drop.js
 │       │   └── tree-renderer.js
-│       ├── table/
-│       │   ├── table-core.js
-│       │   ├── table-cells-operations.js
-│       │   └── table-sizes.js
-│       ├── items/
-│       │   ├── items-title-editing.js
-│       │   └── items-renderer.js
-│       └── violation/
-│           ├── violation-init.js
-│           ├── violation-core.js
-│           ├── violation-additional-content.js
-│           ├── violation-drag-drop.js
-│           ├── violation-file-upload.js
-│           ├── violation-paste.js
-│           └── violation-rendering.js
+│       ├── violation/
+│       │   ├── violation-additional-content.js
+│       │   ├── violation-core.js
+│       │   ├── violation-drag-drop.js
+│       │   ├── violation-file-upload.js
+│       │   ├── violation-init.js
+│       │   ├── violation-paste.js
+│       │   └── violation-rendering.js
+│       ├── act-validator.js
+│       ├── api.js
+│       ├── app.js
+│       ├── dialog.js
+│       ├── format-menu-manager.js
+│       ├── help.js
+│       ├── navigation-manager.js
+│       ├── notifications.js
+│       └── preview.js
 ├── requirements.txt
 └── .env
