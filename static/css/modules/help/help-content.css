@@ -1,14 +1,38 @@
 /*
  * Содержимое модального окна справки
- * Стили для текста, списков и информационных панелей
+ *
+ * Стили для текста, списков и информационных панелей.
+ * Область с прокруткой для длинного содержимого.
  */
 
-/* Основная область содержимого справки */
+/* Основная область содержимого справки - прокручиваемая */
 .help-modal-body {
     padding: 1.5em;
     overflow-y: auto;
+    overflow-x: hidden;
     color: #333;
     line-height: 1.6;
+    flex: 1;
+    min-height: 0;
+}
+
+/* Кастомный скроллбар для WebKit браузеров */
+.help-modal-body::-webkit-scrollbar {
+    width: 0.5em;
+}
+
+.help-modal-body::-webkit-scrollbar-track {
+    background: var(--bg-secondary);
+    border-radius: 0 0 0.75em 0;
+}
+
+.help-modal-body::-webkit-scrollbar-thumb {
+    background: var(--gray-300);
+    border-radius: 0.25em;
+}
+
+.help-modal-body::-webkit-scrollbar-thumb:hover {
+    background: var(--gray-400);
 }
 
 /* Заголовки разделов */
@@ -22,6 +46,16 @@
 /* Первый заголовок без отступа сверху */
 .help-modal-body h4:first-child {
     margin-top: 0;
+}
+
+/* Последний элемент без отступа снизу для избежания лишнего пространства */
+.help-modal-body > *:last-child {
+    margin-bottom: 0;
+}
+
+/* Абзацы текста */
+.help-modal-body p {
+    margin: 0.625em 0;
 }
 
 /* Списки инструкций */
