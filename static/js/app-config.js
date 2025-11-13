@@ -30,10 +30,16 @@ class AppConfig {
 
     /**
      * Настройки валидации данных
-     * TODO: Добавить настройки валидации при работе с модулем
      */
     static validation = {
-        // Здесь будут настройки валидации
+        messages: {
+            emptyStructure: 'Структура акта пуста',
+            noSections: 'Добавьте хотя бы один раздел в акт',
+            emptyHeadersPrefix: 'Не заполнены заголовки таблиц:',
+            emptyHeadersSuffix: '\n\nЗаполните все заголовки перед сохранением.',
+            emptyDataPrefix: '⚠️ Найдены таблицы без данных:',
+            emptyDataSuffix: '\n\nВы можете продолжить сохранение.'
+        }
     };
 
     /**
@@ -109,6 +115,37 @@ class AppConfig {
             noFormatsSelected: 'Выберите хотя бы один формат для сохранения',
             savingInProgress: '⏳ Создаём акты...',
             unexpectedError: (error) => `Произошла непредвиденная ошибка: ${error}`
+        }
+    };
+
+    /**
+     * Настройки системы помощи
+     */
+    static help = {
+        // ID DOM-элементов
+        elements: {
+            helpBtn: 'helpBtn',
+            modal: 'helpModal',
+            modalTitle: 'helpModalTitle',
+            modalBody: 'helpModalBody'
+        },
+
+        // ID контейнеров с инструкциями
+        contentIds: {
+            1: 'help-step-1-content',
+            2: 'help-step-2-content'
+        },
+
+        // Названия шагов для подсказок
+        stepNames: {
+            1: 'Составление структуры акта',
+            2: 'Заполнение данных'
+        },
+
+        // Заголовки инструкций
+        titles: {
+            1: 'Инструкция: Шаг 1 - Составление структуры акта',
+            2: 'Инструкция: Шаг 2 - Заполнение данных'
         }
     };
 
