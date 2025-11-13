@@ -1,20 +1,18 @@
 /**
- * Модуль структурных ограничений дерева
+ * Структурные валидации и ограничения дерева
  *
- * Проверяет технические ограничения операций с деревом:
- * глубину вложенности, возможность добавления узлов, отношения между узлами.
- * НЕ проверяет бизнес-правила и качество данных (это в ActValidator).
+ * Проверяет глубину, возможность добавления дочерних/соседних узлов,
+ * отношения "родитель-потомок". НЕ содержит бизнес-логики.
  */
-
-Object.assign(AppState, {
+const ValidationCore = {
     /**
      * Вычисляет глубину узла в дереве
      * @param {string} nodeId - ID искомого узла
-     * @param {Object} [node=this.treeData] - Узел для начала поиска
+     * @param {Object} [node=AppState.treeData] - Узел для начала поиска
      * @param {number} [depth=0] - Текущая глубина
      * @returns {number} Глубина узла или -1 если не найден
      */
-    getNodeDepth(nodeId, node = this.treeData, depth = 0) {
+    getNodeDepth(nodeId, node = AppState.treeData, depth = 0) {
         if (node.id === nodeId) return depth;
 
         if (!node.children) return -1;
@@ -52,7 +50,7 @@ Object.assign(AppState, {
      * @returns {Object} Результат с флагом allowed и причиной отказа
      */
     canAddSibling(nodeId) {
-        const parent = this.findParentNode(nodeId);
+        const parent = AppState.findParentNode(nodeId);
 
         if (parent?.id === 'root') {
             return this._validateFirstLevelSiblingAddition(parent, nodeId);
@@ -71,7 +69,7 @@ Object.assign(AppState, {
     _validateFirstLevelSiblingAddition(parent, nodeId) {
         const hasCustomFirstLevel = parent.children.some(child => {
             const num = child.label.match(/^(\d+)\./);
-            return num && parseInt(num[1]) === 6;
+            return num && parseInt(num) === 6;
         });
 
         if (hasCustomFirstLevel) {
@@ -140,4 +138,4 @@ Object.assign(AppState, {
 
         return false;
     }
-});
+};

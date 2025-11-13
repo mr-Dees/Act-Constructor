@@ -17,11 +17,15 @@ Object.assign(AppState, {
         const node = this.findNodeById(nodeId);
         if (!node) return {success: false, reason: AppConfig.tree.validation.nodeNotFound};
 
-        const validation = this._validateTableAddition(node);
+        const validation = this._validateContentAddition(
+            node,
+            'table',
+            AppConfig.content.limits.tablesPerNode
+        );
         if (!validation.success) return validation;
 
         const tableId = this._generateId('table');
-        const tableNode = this._createTableNode(nodeId, tableId, '', false, true);
+        const tableNode = this._createContentNode(nodeId, tableId, 'table', '', false, true);
 
         node.children.push(tableNode);
 
@@ -106,11 +110,15 @@ Object.assign(AppState, {
         const node = this.findNodeById(nodeId);
         if (!node) return {success: false, reason: AppConfig.tree.validation.nodeNotFound};
 
-        const validation = this._validateTextBlockAddition(node);
+        const validation = this._validateContentAddition(
+            node,
+            'textblock',
+            AppConfig.content.limits.textBlocksPerNode
+        );
         if (!validation.success) return validation;
 
         const textBlockId = this._generateId('textblock');
-        const textBlockNode = this._createTextBlockNode(nodeId, textBlockId);
+        const textBlockNode = this._createContentNode(nodeId, textBlockId, 'textblock');
 
         node.children.push(textBlockNode);
 
@@ -123,33 +131,81 @@ Object.assign(AppState, {
     },
 
     /**
-     * Валидирует возможность добавления текстового блока
+     * Добавляет нарушение к узлу
+     * @param {string} nodeId - ID узла для добавления
+     * @returns {Object} Результат создания нарушения
+     */
+    addViolationToNode(nodeId) {
+        const node = this.findNodeById(nodeId);
+        if (!node) return {success: false, reason: AppConfig.tree.validation.nodeNotFound};
+
+        const validation = this._validateContentAddition(
+            node,
+            'violation',
+            AppConfig.content.limits.violationsPerNode
+        );
+        if (!validation.success) return validation;
+
+        const violationId = this._generateId('violation');
+        const violationNode = this._createContentNode(nodeId, violationId, 'violation');
+
+        node.children.push(violationNode);
+
+        const violation = this._createViolationObject(violationId, violationNode.id);
+
+        this.violations[violationId] = violation;
+        this.generateNumbering();
+
+        return {success: true, violation, violationNode};
+    },
+
+    /**
+     * Валидирует возможность добавления контента к узлу
      * @private
      * @param {Object} node - Проверяемый узел
+     * @param {string} contentType - Тип контента ('table', 'textblock', 'violation')
+     * @param {number} limit - Максимальное количество элементов данного типа
      * @returns {Object} Результат валидации
      */
-    _validateTextBlockAddition(node) {
+    _validateContentAddition(node, contentType, limit) {
         const errors = AppConfig.content.errors;
 
+        // Маппинг типов контента на читаемые названия
+        const typeNames = {
+            table: 'таблицу',
+            textblock: 'текстовый блок',
+            violation: 'нарушение'
+        };
+
+        const typeName = typeNames[contentType];
+
+        // Проверка типа узла - нельзя добавлять к информационным элементам
         if (node.type === 'table') {
-            return {success: false, reason: errors.cannotAddToTable.replace('{type}', 'текстовый блок')};
+            return {success: false, reason: errors.cannotAddToTable.replace('{type}', typeName)};
         }
         if (node.type === 'textblock') {
-            return {success: false, reason: errors.cannotAddToTextBlock.replace('{type}', 'текстовый блок')};
+            return {success: false, reason: errors.cannotAddToTextBlock.replace('{type}', typeName)};
         }
         if (node.type === 'violation') {
-            return {success: false, reason: errors.cannotAddToViolation.replace('{type}', 'текстовый блок')};
+            return {success: false, reason: errors.cannotAddToViolation.replace('{type}', typeName)};
         }
 
+        // Проверка лимитов
         if (!node.children) node.children = [];
 
-        const textBlocksCount = node.children.filter(c => c.type === 'textblock').length;
-        const limit = AppConfig.content.limits.textBlocksPerNode;
+        const existingCount = node.children.filter(c => c.type === contentType).length;
 
-        if (textBlocksCount >= limit) {
+        if (existingCount >= limit) {
+            // Маппинг типов на названия для сообщений о лимитах
+            const limitNames = {
+                table: 'таблиц',
+                textblock: 'текстовых блоков',
+                violation: 'нарушений'
+            };
+
             return {
                 success: false,
-                reason: errors.limitReached('текстовых блоков', limit)
+                reason: errors.limitReached(limitNames[contentType], limit)
             };
         }
 
@@ -157,20 +213,49 @@ Object.assign(AppState, {
     },
 
     /**
-     * Создает узел текстового блока
+     * Создает узел контента для дерева (универсальная фабрика)
      * @private
-     * @param {string} parentId - ID родителя
-     * @param {string} textBlockId - ID текстового блока
-     * @returns {Object} Узел текстового блока
+     * @param {string} parentId - ID родительского узла
+     * @param {string} contentId - ID контента (tableId/textBlockId/violationId)
+     * @param {string} type - Тип узла ('table', 'textblock', 'violation')
+     * @param {string} [label=''] - Название узла
+     * @param {boolean} [protected=false] - Защита от перемещения
+     * @param {boolean} [deletable=true] - Возможность удаления
+     * @returns {Object} Узел контента
      */
-    _createTextBlockNode(parentId, textBlockId) {
-        return {
-            id: `${parentId}_textblock_${Date.now()}`,
-            label: AppConfig.tree.labels.textBlock,
-            type: 'textblock',
-            textBlockId,
-            parentId
+    _createContentNode(parentId, contentId, type, label = '', protected = false, deletable = true) {
+        // Маппинг типов на названия по умолчанию из конфига
+        const defaultLabels = {
+            table: AppConfig.tree.labels.table,
+            textblock: AppConfig.tree.labels.textBlock,
+            violation: AppConfig.tree.labels.violation
         };
+
+        // Маппинг типов на названия свойств ID
+        const idProps = {
+            table: 'tableId',
+            textblock: 'textBlockId',
+            violation: 'violationId'
+        };
+
+        const node = {
+            id: `${parentId}_${type}_${Date.now()}`,
+            label: label || defaultLabels[type],
+            type,
+            [idProps[type]]: contentId,
+            parentId,
+            protected,
+            deletable
+        };
+
+        // Обработка кастомных названий
+        if (label === '') {
+            node.customLabel = '';
+        } else if (label) {
+            node.customLabel = label;
+        }
+
+        return node;
     },
 
     /**
@@ -194,82 +279,6 @@ Object.assign(AppState, {
                 fontSize: defaults.fontSize,
                 alignment: defaults.alignment
             }
-        };
-    },
-
-    /**
-     * Добавляет нарушение к узлу
-     * @param {string} nodeId - ID узла для добавления
-     * @returns {Object} Результат создания нарушения
-     */
-    addViolationToNode(nodeId) {
-        const node = this.findNodeById(nodeId);
-        if (!node) return {success: false, reason: AppConfig.tree.validation.nodeNotFound};
-
-        const validation = this._validateViolationAddition(node);
-        if (!validation.success) return validation;
-
-        const violationId = this._generateId('violation');
-        const violationNode = this._createViolationNode(nodeId, violationId);
-
-        node.children.push(violationNode);
-
-        const violation = this._createViolationObject(violationId, violationNode.id);
-
-        this.violations[violationId] = violation;
-        this.generateNumbering();
-
-        return {success: true, violation, violationNode};
-    },
-
-    /**
-     * Валидирует возможность добавления нарушения
-     * @private
-     * @param {Object} node - Проверяемый узел
-     * @returns {Object} Результат валидации
-     */
-    _validateViolationAddition(node) {
-        const errors = AppConfig.content.errors;
-
-        if (node.type === 'table') {
-            return {success: false, reason: errors.cannotAddToTable.replace('{type}', 'нарушение')};
-        }
-        if (node.type === 'textblock') {
-            return {success: false, reason: errors.cannotAddToTextBlock.replace('{type}', 'нарушение')};
-        }
-        if (node.type === 'violation') {
-            return {success: false, reason: errors.cannotAddToViolation.replace('{type}', 'нарушение')};
-        }
-
-        if (!node.children) node.children = [];
-
-        const violationsCount = node.children.filter(c => c.type === 'violation').length;
-        const limit = AppConfig.content.limits.violationsPerNode;
-
-        if (violationsCount >= limit) {
-            return {
-                success: false,
-                reason: errors.limitReached('нарушений', limit)
-            };
-        }
-
-        return {success: true};
-    },
-
-    /**
-     * Создает узел нарушения
-     * @private
-     * @param {string} parentId - ID родителя
-     * @param {string} violationId - ID нарушения
-     * @returns {Object} Узел нарушения
-     */
-    _createViolationNode(parentId, violationId) {
-        return {
-            id: `${parentId}_violation_${Date.now()}`,
-            label: AppConfig.tree.labels.violation,
-            type: 'violation',
-            violationId,
-            parentId
         };
     },
 
@@ -324,23 +333,27 @@ Object.assign(AppState, {
         const node = this.findNodeById(nodeId);
         if (!node) return {success: false, reason: AppConfig.tree.validation.nodeNotFound};
 
-        const validation = this._validateTableAddition(node);
+        const validation = this._validateContentAddition(
+            node,
+            'table',
+            AppConfig.content.limits.tablesPerNode
+        );
         if (!validation.success) return validation;
 
         const tableId = this._generateId('table');
         const tableLabel = `Объем выявленных отклонений (В метриках) по ${nodeNumber}`;
 
-        const tableNode = {
-            id: `${nodeId}_table_${Date.now()}`,
-            label: tableLabel,
-            type: 'table',
+        const tableNode = this._createContentNode(
+            nodeId,
             tableId,
-            parentId: nodeId,
-            protected: true,
-            deletable: true,
-            customLabel: tableLabel,
-            isMetricsTable: true
-        };
+            'table',
+            tableLabel,
+            true,
+            true
+        );
+
+        // Добавляем специфичные флаги после создания базового узла
+        tableNode.isMetricsTable = true;
 
         node.children.unshift(tableNode);
 
@@ -482,17 +495,17 @@ Object.assign(AppState, {
         const tableId = this._generateId('table');
         const tableLabel = 'Объем выявленных отклонений';
 
-        const tableNode = {
-            id: `5_table_${Date.now()}`,
-            label: tableLabel,
-            type: 'table',
+        const tableNode = this._createContentNode(
+            '5',
             tableId,
-            parentId: '5',
-            protected: true,
-            deletable: true,
-            customLabel: tableLabel,
-            isMainMetricsTable: true
-        };
+            'table',
+            tableLabel,
+            true,
+            true
+        );
+
+        // Добавляем специфичный флаг
+        tableNode.isMainMetricsTable = true;
 
         node5.children.unshift(tableNode);
 
@@ -626,22 +639,24 @@ Object.assign(AppState, {
         const node = this.findNodeById(nodeId);
         if (!node) return {success: false, reason: AppConfig.tree.validation.nodeNotFound};
 
-        const validation = this._validateTableAddition(node);
+        const validation = this._validateContentAddition(
+            node,
+            'table',
+            AppConfig.content.limits.tablesPerNode
+        );
         if (!validation.success) return validation;
 
         const preset = AppConfig.content.tablePresets.regularRisk;
         const tableId = this._generateId('table');
 
-        const tableNode = {
-            id: `${nodeId}_table_${Date.now()}`,
-            label: preset.label,
-            type: 'table',
+        const tableNode = this._createContentNode(
+            nodeId,
             tableId,
-            parentId: nodeId,
-            protected: true,
-            deletable: true,
-            customLabel: preset.label
-        };
+            'table',
+            preset.label,
+            true,
+            true
+        );
 
         node.children.push(tableNode);
 
@@ -671,22 +686,24 @@ Object.assign(AppState, {
         const node = this.findNodeById(nodeId);
         if (!node) return {success: false, reason: AppConfig.tree.validation.nodeNotFound};
 
-        const validation = this._validateTableAddition(node);
+        const validation = this._validateContentAddition(
+            node,
+            'table',
+            AppConfig.content.limits.tablesPerNode
+        );
         if (!validation.success) return validation;
 
         const preset = AppConfig.content.tablePresets.operationalRisk;
         const tableId = this._generateId('table');
 
-        const tableNode = {
-            id: `${nodeId}_table_${Date.now()}`,
-            label: preset.label,
-            type: 'table',
+        const tableNode = this._createContentNode(
+            nodeId,
             tableId,
-            parentId: nodeId,
-            protected: true,
-            deletable: true,
-            customLabel: preset.label
-        };
+            'table',
+            preset.label,
+            true,
+            true
+        );
 
         node.children.push(tableNode);
 

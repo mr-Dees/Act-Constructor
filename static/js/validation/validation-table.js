@@ -1,63 +1,15 @@
 /**
- * Валидатор данных акта
+ * Валидация таблиц
  *
- * Проверяет корректность структуры акта, заполненность данных,
- * соблюдение бизнес-правил перед сохранением документа.
- * Не изменяет состояние, только анализирует его.
+ * Проверяет заполненность заголовков, наличие строк данных,
+ * корректность структуры таблиц.
  */
-class ActValidator {
+const ValidationTable = {
     /**
-     * Выполняет полную валидацию акта перед сохранением
-     * @returns {Object} Результат валидации с массивом ошибок и предупреждений
-     */
-    static validateAll() {
-        const errors = [];
-        const warnings = [];
-
-        const structureCheck = this.validateStructure();
-        if (!structureCheck.valid) {
-            errors.push(structureCheck.message);
-        }
-
-        const headersCheck = this.checkTableHeaders();
-        if (!headersCheck.valid) {
-            errors.push(headersCheck.message);
-        }
-
-        const dataCheck = this.checkTableData();
-        if (!dataCheck.valid) {
-            warnings.push(dataCheck.message);
-        }
-
-        return {
-            valid: errors.length === 0,
-            errors,
-            warnings,
-            canProceed: errors.length === 0
-        };
-    }
-
-    /**
-     * Проверка базовой структуры акта
+     * Проверяет заполненность заголовков всех таблиц
      * @returns {Object} Результат валидации
      */
-    static validateStructure() {
-        if (!AppState.treeData?.children) {
-            return {valid: false, message: 'Структура акта пуста'};
-        }
-
-        if (AppState.treeData.children.length === 0) {
-            return {valid: false, message: 'Добавьте хотя бы один раздел в акт'};
-        }
-
-        return {valid: true, message: 'OK'};
-    }
-
-    /**
-     * Проверка заполненности заголовков таблиц (критическая)
-     * @returns {Object} Результат проверки
-     */
-    static checkTableHeaders() {
+    validateHeaders() {
         const emptyHeaders = [];
 
         for (const tableId in AppState.tables) {
@@ -70,7 +22,7 @@ class ActValidator {
 
             if (this._hasEmptyHeaders(headerRow)) {
                 const tableName = this._getTableName(tableId);
-                emptyHeaders.push(`• ${tableName}`);
+                emptyHeaders.push(`-  ${tableName}`);
             }
         }
 
@@ -82,13 +34,13 @@ class ActValidator {
         }
 
         return {valid: true, message: 'OK'};
-    }
+    },
 
     /**
-     * Проверка заполненности данных таблиц (предупреждение)
-     * @returns {Object} Результат проверки
+     * Проверяет наличие данных в таблицах
+     * @returns {Object} Результат проверки (предупреждение)
      */
-    static checkTableData() {
+    validateData() {
         const emptyDataTables = [];
 
         for (const tableId in AppState.tables) {
@@ -103,7 +55,7 @@ class ActValidator {
 
             if (!this._hasDataInRows(table.grid, dataStartIndex)) {
                 const tableName = this._getTableName(tableId);
-                emptyDataTables.push(`• ${tableName}`);
+                emptyDataTables.push(`-  ${tableName}`);
             }
         }
 
@@ -115,60 +67,60 @@ class ActValidator {
         }
 
         return {valid: true, message: 'OK'};
-    }
+    },
 
     /**
-     * Проверка наличия валидной grid-структуры
+     * Проверяет наличие валидной grid-структуры
      * @private
      * @param {Object} table - Объект таблицы
      * @returns {boolean} Есть ли валидная grid
      */
-    static _hasValidGrid(table) {
+    _hasValidGrid(table) {
         return table.grid && Array.isArray(table.grid) && table.grid.length > 0;
-    }
+    },
 
     /**
-     * Поиск строки с заголовками
+     * Находит строку с заголовками
      * @private
      * @param {Array} grid - Матрица таблицы
      * @returns {Array|null} Строка заголовков или null
      */
-    static _findHeaderRow(grid) {
+    _findHeaderRow(grid) {
         return grid.find(row => row.some(cell => cell.isHeader === true));
-    }
+    },
 
     /**
-     * Поиск индекса строки с заголовками
+     * Находит индекс строки с заголовками
      * @private
      * @param {Array} grid - Матрица таблицы
      * @returns {number} Индекс строки или -1
      */
-    static _findHeaderRowIndex(grid) {
+    _findHeaderRowIndex(grid) {
         return grid.findIndex(row => row.some(cell => cell.isHeader === true));
-    }
+    },
 
     /**
-     * Проверка наличия пустых заголовков
+     * Проверяет наличие пустых заголовков
      * @private
      * @param {Array} headerRow - Строка заголовков
      * @returns {boolean} Есть ли пустые заголовки
      */
-    static _hasEmptyHeaders(headerRow) {
+    _hasEmptyHeaders(headerRow) {
         return headerRow.some(cell =>
             !cell.isSpanned &&
             cell.isHeader &&
             (!cell.content || !cell.content.trim())
         );
-    }
+    },
 
     /**
-     * Проверка наличия данных в строках
+     * Проверяет наличие данных в строках
      * @private
      * @param {Array} grid - Матрица таблицы
      * @param {number} startIndex - Индекс начала данных
      * @returns {boolean} Есть ли данные
      */
-    static _hasDataInRows(grid, startIndex) {
+    _hasDataInRows(grid, startIndex) {
         for (let i = startIndex; i < grid.length; i++) {
             for (const cell of grid[i]) {
                 if (!cell.isSpanned && cell.content?.trim()) {
@@ -177,27 +129,27 @@ class ActValidator {
             }
         }
         return false;
-    }
+    },
 
     /**
-     * Получение названия таблицы из дерева
+     * Получает название таблицы из дерева
      * @private
      * @param {string} tableId - ID таблицы
      * @returns {string} Название таблицы
      */
-    static _getTableName(tableId) {
+    _getTableName(tableId) {
         const foundNode = this._findNodeByTableId(AppState.treeData, tableId);
         return foundNode?.label || `Таблица ${tableId}`;
-    }
+    },
 
     /**
-     * Рекурсивный поиск узла таблицы в дереве
+     * Рекурсивно ищет узел таблицы в дереве
      * @private
      * @param {Object} node - Узел для поиска
      * @param {string} tableId - ID таблицы
      * @returns {Object|null} Найденный узел или null
      */
-    static _findNodeByTableId(node, tableId) {
+    _findNodeByTableId(node, tableId) {
         if (!node) return null;
 
         if (node.tableId === tableId) return node;
@@ -211,4 +163,4 @@ class ActValidator {
 
         return null;
     }
-}
+};

@@ -133,8 +133,8 @@ Object.assign(AppState, {
         };
 
         const validation = isChild
-            ? this.canAddChild(parentId)
-            : this.canAddSibling(parentId);
+            ? ValidationCore.canAddChild(parentId)
+            : ValidationCore.canAddSibling(parentId);
 
         if (!validation.allowed) {
             return {success: false, reason: validation.reason};
@@ -372,7 +372,7 @@ Object.assign(AppState, {
             };
         }
 
-        if (this.isDescendant(targetNode, draggedNode)) {
+        if (ValidationCore.isDescendant(targetNode, draggedNode)) {
             return {
                 success: false,
                 reason: AppConfig.tree.validation.cannotMoveToDescendant
@@ -461,7 +461,7 @@ Object.assign(AppState, {
         if (isInformational) return {success: true};
 
         const targetDepth = this._calculateTargetDepth(targetNode, targetNodeId, position);
-        const draggedSubtreeDepth = this.getSubtreeDepth(draggedNode);
+        const draggedSubtreeDepth = ValidationCore.getSubtreeDepth(draggedNode);
         const resultingDepth = targetDepth + 1 + draggedSubtreeDepth;
 
         if (resultingDepth > AppConfig.tree.maxDepth) {
@@ -484,11 +484,11 @@ Object.assign(AppState, {
      */
     _calculateTargetDepth(targetNode, targetNodeId, position) {
         if (position === 'child') {
-            return this.getNodeDepth(targetNodeId);
+            return ValidationCore.getNodeDepth(targetNodeId);
         }
 
         const targetParent = this.findParentNode(targetNodeId);
-        return targetParent ? this.getNodeDepth(targetParent.id) : 0;
+        return targetParent ? ValidationCore.getNodeDepth(targetParent.id) : 0;
     },
 
     /**

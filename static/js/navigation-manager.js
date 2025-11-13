@@ -70,7 +70,7 @@ class NavigationManager {
         }
 
         // Валидация структуры акта
-        const validationResult = ActValidator.validateStructure();
+        const validationResult = ValidationAct.validateStructure();
         if (!validationResult.valid) {
             Notifications.error(
                 validationResult.message,
