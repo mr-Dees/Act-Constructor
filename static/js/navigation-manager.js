@@ -80,7 +80,7 @@ class NavigationManager {
         }
 
         // Критическая проверка заголовков таблиц
-        const headerCheckResult = ActValidator.checkTableHeaders();
+        const headerCheckResult = ValidationTable.validateHeaders();
         if (!headerCheckResult.valid) {
             Notifications.error(
                 headerCheckResult.message,
@@ -90,7 +90,7 @@ class NavigationManager {
         }
 
         // Предупреждение о пустых таблицах
-        const dataCheckResult = ActValidator.checkTableData();
+        const dataCheckResult = ValidationTable.validateData();
         if (!dataCheckResult.valid) {
             Notifications.show(
                 dataCheckResult.message,

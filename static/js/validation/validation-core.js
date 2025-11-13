@@ -1,141 +1,140 @@
 /**
- * Структурные валидации и ограничения дерева
+ * Ядро системы валидации
  *
- * Проверяет глубину, возможность добавления дочерних/соседних узлов,
- * отношения "родитель-потомок". НЕ содержит бизнес-логики.
+ * Содержит базовые утилиты, общие интерфейсы и вспомогательные функции
+ * для всех модулей валидации. Обеспечивает единообразие API.
  */
 const ValidationCore = {
     /**
-     * Вычисляет глубину узла в дереве
-     * @param {string} nodeId - ID искомого узла
-     * @param {Object} [node=AppState.treeData] - Узел для начала поиска
-     * @param {number} [depth=0] - Текущая глубина
-     * @returns {number} Глубина узла или -1 если не найден
-     */
-    getNodeDepth(nodeId, node = AppState.treeData, depth = 0) {
-        if (node.id === nodeId) return depth;
-
-        if (!node.children) return -1;
-
-        for (const child of node.children) {
-            const found = this.getNodeDepth(nodeId, child, depth + 1);
-            if (found !== -1) return found;
-        }
-
-        return -1;
-    },
-
-    /**
-     * Проверяет возможность добавления дочернего узла
-     * @param {string} parentId - ID родительского узла
-     * @returns {Object} Результат с флагом allowed и причиной отказа
-     */
-    canAddChild(parentId) {
-        const depth = this.getNodeDepth(parentId);
-        const maxDepth = AppConfig.tree.maxDepth;
-
-        if (depth >= maxDepth) {
-            return {
-                allowed: false,
-                reason: AppConfig.tree.validation.maxDepthExceeded(maxDepth)
-            };
-        }
-
-        return {allowed: true};
-    },
-
-    /**
-     * Проверяет возможность добавления соседнего узла
-     * @param {string} nodeId - ID узла для добавления рядом
-     * @returns {Object} Результат с флагом allowed и причиной отказа
-     */
-    canAddSibling(nodeId) {
-        const parent = AppState.findParentNode(nodeId);
-
-        if (parent?.id === 'root') {
-            return this._validateFirstLevelSiblingAddition(parent, nodeId);
-        }
-
-        return {allowed: true};
-    },
-
-    /**
-     * Валидирует добавление sibling на первом уровне
-     * @private
-     * @param {Object} parent - Родительский узел (root)
-     * @param {string} nodeId - ID узла-соседа
+     * Создает успешный результат валидации
+     * @param {string} [message='OK'] - Сообщение (опционально)
      * @returns {Object} Результат валидации
      */
-    _validateFirstLevelSiblingAddition(parent, nodeId) {
-        const hasCustomFirstLevel = parent.children.some(child => {
-            const num = child.label.match(/^(\d+)\./);
-            return num && parseInt(num) === 6;
-        });
-
-        if (hasCustomFirstLevel) {
-            return {
-                allowed: false,
-                reason: AppConfig.tree.validation.maxCustomSections(
-                    AppConfig.tree.maxCustomFirstLevelSections
-                )
-            };
-        }
-
-        const nodeIndex = parent.children.findIndex(n => n.id === nodeId);
-        if (nodeIndex !== parent.children.length - 1) {
-            return {
-                allowed: false,
-                reason: AppConfig.tree.validation.firstLevelOnlyAtEnd
-            };
-        }
-
-        return {allowed: true};
+    success(message = 'OK') {
+        return {
+            valid: true,
+            success: true,
+            allowed: true,
+            message,
+            reason: message
+        };
     },
 
     /**
-     * Вычисляет максимальную глубину поддерева
-     * @param {Object} node - Корневой узел поддерева
-     * @returns {number} Максимальная глубина
+     * Создает неуспешный результат валидации
+     * @param {string} message - Сообщение об ошибке
+     * @returns {Object} Результат валидации
      */
-    getSubtreeDepth(node) {
-        if (!node.children?.length) return 0;
-
-        let maxDepth = 0;
-
-        for (const child of node.children) {
-            if (this._isInformationalNode(child)) continue;
-
-            const childDepth = this.getSubtreeDepth(child);
-            maxDepth = Math.max(maxDepth, childDepth + 1);
-        }
-
-        return maxDepth;
+    failure(message) {
+        return {
+            valid: false,
+            success: false,
+            allowed: false,
+            message,
+            reason: message
+        };
     },
 
     /**
-     * Проверяет, является ли узел информационным элементом
-     * @private
+     * Проверяет, существует ли узел
+     * @param {Object|null} node - Проверяемый узел
+     * @returns {Object} Результат валидации
+     */
+    validateNodeExists(node) {
+        if (!node) {
+            return this.failure(AppConfig.tree.validation.nodeNotFound);
+        }
+        return this.success();
+    },
+
+    /**
+     * Проверяет, находится ли значение в допустимом диапазоне
+     * @param {number} value - Проверяемое значение
+     * @param {number} min - Минимум
+     * @param {number} max - Максимум
+     * @param {string} fieldName - Название поля для сообщения
+     * @returns {Object} Результат валидации
+     */
+    validateRange(value, min, max, fieldName) {
+        if (value < min || value > max) {
+            return this.failure(
+                `${fieldName} должно быть в диапазоне ${min}-${max}`
+            );
+        }
+        return this.success();
+    },
+
+    /**
+     * Проверяет, что строка не пуста
+     * @param {string} value - Проверяемая строка
+     * @param {string} fieldName - Название поля для сообщения
+     * @returns {Object} Результат валидации
+     */
+    validateNotEmpty(value, fieldName) {
+        if (!value || !value.trim()) {
+            return this.failure(`${fieldName} не может быть пустым`);
+        }
+        return this.success();
+    },
+
+    /**
+     * Проверяет, что массив не пустой
+     * @param {Array} array - Проверяемый массив
+     * @param {string} fieldName - Название поля для сообщения
+     * @returns {Object} Результат валидации
+     */
+    validateArrayNotEmpty(array, fieldName) {
+        if (!array || !Array.isArray(array) || array.length === 0) {
+            return this.failure(`${fieldName} не может быть пустым`);
+        }
+        return this.success();
+    },
+
+    /**
+     * Проверяет лимит количества элементов
+     * @param {number} current - Текущее количество
+     * @param {number} limit - Максимальное количество
+     * @param {string} itemName - Название элементов для сообщения
+     * @returns {Object} Результат валидации
+     */
+    validateLimit(current, limit, itemName) {
+        if (current >= limit) {
+            return this.failure(
+                AppConfig.content.errors.limitReached(itemName, limit)
+            );
+        }
+        return this.success();
+    },
+
+    /**
+     * Объединяет результаты нескольких валидаций
+     * @param {...Object} results - Результаты валидаций
+     * @returns {Object} Объединенный результат
+     */
+    combine(...results) {
+        const failures = results.filter(r => !r.valid && !r.success && !r.allowed);
+
+        if (failures.length === 0) {
+            return this.success();
+        }
+
+        const messages = failures.map(f => f.message || f.reason).filter(Boolean);
+        return this.failure(messages.join('\n'));
+    },
+
+    /**
+     * Проверяет, что узел имеет допустимый тип
      * @param {Object} node - Проверяемый узел
-     * @returns {boolean} true если это информационный элемент
+     * @param {Array<string>} allowedTypes - Разрешенные типы
+     * @param {string} operation - Описание операции для сообщения
+     * @returns {Object} Результат валидации
      */
-    _isInformationalNode(node) {
-        return ['table', 'textblock', 'violation'].includes(node.type);
-    },
-
-    /**
-     * Проверяет, является ли узел потомком другого узла
-     * @param {Object} node - Проверяемый узел
-     * @param {Object} possibleAncestor - Возможный предок
-     * @returns {boolean} true если node является потомком possibleAncestor
-     */
-    isDescendant(node, possibleAncestor) {
-        if (!possibleAncestor.children?.length) return false;
-
-        for (const child of possibleAncestor.children) {
-            if (child.id === node.id) return true;
-            if (this.isDescendant(node, child)) return true;
+    validateNodeType(node, allowedTypes, operation) {
+        if (!allowedTypes.includes(node.type)) {
+            return this.failure(
+                `Нельзя ${operation} для узла типа "${node.type}"`
+            );
         }
-
-        return false;
+        return this.success();
     }
 };

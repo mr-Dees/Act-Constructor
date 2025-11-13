@@ -149,7 +149,7 @@ class TreeDragDrop {
         const targetNodeId = treeItem.dataset.nodeId;
         const targetNode = AppState.findNodeById(targetNodeId);
 
-        if (ValidationCore.isDescendant(targetNode, this.draggedNode)) {
+        if (ValidationTree.isDescendant(targetNode, this.draggedNode)) {
             this.clearDropZone();
             return;
         }

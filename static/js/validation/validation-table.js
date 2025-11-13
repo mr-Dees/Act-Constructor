@@ -27,13 +27,11 @@ const ValidationTable = {
         }
 
         if (emptyHeaders.length > 0) {
-            return {
-                valid: false,
-                message: `Не заполнены заголовки таблиц:\n${emptyHeaders.join('\n')}\n\nЗаполните все заголовки перед сохранением.`
-            };
+            const message = `Не заполнены заголовки таблиц:\n${emptyHeaders.join('\n')}Заполните все заголовки перед сохранением.`;
+            return ValidationCore.failure(message);
         }
 
-        return {valid: true, message: 'OK'};
+        return ValidationCore.success();
     },
 
     /**
@@ -60,13 +58,11 @@ const ValidationTable = {
         }
 
         if (emptyDataTables.length > 0) {
-            return {
-                valid: false,
-                message: `⚠️ Найдены таблицы без данных:\n${emptyDataTables.join('\n')}\n\nВы можете продолжить сохранение.`
-            };
+            const message = `⚠️ Найдены таблицы без данных:}\n${emptyDataTables.join('\n')}Вы можете продолжить сохранение.`;
+            return ValidationCore.failure(message);
         }
 
-        return {valid: true, message: 'OK'};
+        return ValidationCore.success();
     },
 
     /**

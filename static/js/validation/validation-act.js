@@ -10,13 +10,18 @@ const ValidationAct = {
      */
     validateStructure() {
         if (!AppState.treeData?.children) {
-            return {valid: false, message: 'Структура акта пуста'};
+            return ValidationCore.failure('Структура акта пуста');
         }
 
-        if (AppState.treeData.children.length === 0) {
-            return {valid: false, message: 'Добавьте хотя бы один раздел в акт'};
+        const validation = ValidationCore.validateArrayNotEmpty(
+            AppState.treeData.children,
+            'Разделы акта'
+        );
+
+        if (!validation.valid) {
+            return ValidationCore.failure('Добавьте хотя бы один раздел в акт');
         }
 
-        return {valid: true, message: 'OK'};
+        return ValidationCore.success();
     }
 };

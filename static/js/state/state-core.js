@@ -3,7 +3,7 @@
  *
  * Содержит базовые свойства состояния, инициализацию дерева,
  * методы поиска узлов и экспорта данных.
- * Делегирует специализированные операции модулям StateContent, StateTree и StateValidation.
+ * Делегирует специализированные операции модулям StateContent, StateTree и ValidationTree.
  */
 const AppState = {
     /**
@@ -139,9 +139,15 @@ const AppState = {
      */
     _createSimpleTable(nodeId, rows, cols, headers = [], protected = false, deletable = true, label = '') {
         const node = this.findNodeById(nodeId);
-        if (!node) return {success: false, reason: AppConfig.tree.validation.nodeNotFound};
+        if (!node) {
+            return {
+                success: false,
+                reason: AppConfig.tree.validation.nodeNotFound
+            };
+        }
 
-        const validation = this._validateTableAddition(node);
+        // Используем валидацию из ValidationTree
+        const validation = ValidationTree.canAddContent(node, 'table');
         if (!validation.success) return validation;
 
         const tableId = this._generateId('table');
@@ -155,40 +161,6 @@ const AppState = {
         this.tables[tableId] = table;
 
         return {success: true, table, tableNode};
-    },
-
-    /**
-     * Валидирует возможность добавления таблицы к узлу
-     * @private
-     * @param {Object} node - Проверяемый узел
-     * @returns {Object} Результат валидации
-     */
-    _validateTableAddition(node) {
-        const typeErrors = AppConfig.content.errors;
-
-        if (node.type === 'table') {
-            return {success: false, reason: typeErrors.cannotAddToTable.replace('{type}', 'таблицу')};
-        }
-        if (node.type === 'textblock') {
-            return {success: false, reason: typeErrors.cannotAddToTextBlock.replace('{type}', 'таблицу')};
-        }
-        if (node.type === 'violation') {
-            return {success: false, reason: typeErrors.cannotAddToViolation.replace('{type}', 'таблицу')};
-        }
-
-        if (!node.children) node.children = [];
-
-        const tablesCount = node.children.filter(c => c.type === 'table').length;
-        const limit = AppConfig.content.limits.tablesPerNode;
-
-        if (tablesCount >= limit) {
-            return {
-                success: false,
-                reason: typeErrors.limitReached('таблиц', limit)
-            };
-        }
-
-        return {success: true};
     },
 
     /**

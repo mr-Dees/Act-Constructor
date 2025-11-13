@@ -3,6 +3,7 @@
  *
  * Управляет созданием и удалением таблиц, текстовых блоков и нарушений.
  * Обрабатывает специальные типы таблиц: метрики, регулярные и операционные риски.
+ * Делегирует валидацию модулю ValidationTree.
  */
 
 Object.assign(AppState, {
@@ -15,13 +16,9 @@ Object.assign(AppState, {
      */
     addTableToNode(nodeId, rows = 3, cols = 3) {
         const node = this.findNodeById(nodeId);
-        if (!node) return {success: false, reason: AppConfig.tree.validation.nodeNotFound};
 
-        const validation = this._validateContentAddition(
-            node,
-            'table',
-            AppConfig.content.limits.tablesPerNode
-        );
+        // Используем валидацию из ValidationTree
+        const validation = ValidationTree.canAddContent(node, 'table');
         if (!validation.success) return validation;
 
         const tableId = this._generateId('table');
@@ -79,10 +76,12 @@ Object.assign(AppState, {
         }
 
         const parent = this.findParentNode(tableNodeId);
-        if (!parent) return {
-            success: false,
-            reason: AppConfig.tree.validation.parentNotFound
-        };
+        if (!parent) {
+            return {
+                success: false,
+                reason: AppConfig.tree.validation.parentNotFound
+            };
+        }
 
         const isRiskTable = table && (table.isRegularRiskTable || table.isOperationalRiskTable);
 
@@ -108,13 +107,9 @@ Object.assign(AppState, {
      */
     addTextBlockToNode(nodeId) {
         const node = this.findNodeById(nodeId);
-        if (!node) return {success: false, reason: AppConfig.tree.validation.nodeNotFound};
 
-        const validation = this._validateContentAddition(
-            node,
-            'textblock',
-            AppConfig.content.limits.textBlocksPerNode
-        );
+        // Используем валидацию из ValidationTree
+        const validation = ValidationTree.canAddContent(node, 'textblock');
         if (!validation.success) return validation;
 
         const textBlockId = this._generateId('textblock');
@@ -137,13 +132,9 @@ Object.assign(AppState, {
      */
     addViolationToNode(nodeId) {
         const node = this.findNodeById(nodeId);
-        if (!node) return {success: false, reason: AppConfig.tree.validation.nodeNotFound};
 
-        const validation = this._validateContentAddition(
-            node,
-            'violation',
-            AppConfig.content.limits.violationsPerNode
-        );
+        // Используем валидацию из ValidationTree
+        const validation = ValidationTree.canAddContent(node, 'violation');
         if (!validation.success) return validation;
 
         const violationId = this._generateId('violation');
@@ -157,59 +148,6 @@ Object.assign(AppState, {
         this.generateNumbering();
 
         return {success: true, violation, violationNode};
-    },
-
-    /**
-     * Валидирует возможность добавления контента к узлу
-     * @private
-     * @param {Object} node - Проверяемый узел
-     * @param {string} contentType - Тип контента ('table', 'textblock', 'violation')
-     * @param {number} limit - Максимальное количество элементов данного типа
-     * @returns {Object} Результат валидации
-     */
-    _validateContentAddition(node, contentType, limit) {
-        const errors = AppConfig.content.errors;
-
-        // Маппинг типов контента на читаемые названия
-        const typeNames = {
-            table: 'таблицу',
-            textblock: 'текстовый блок',
-            violation: 'нарушение'
-        };
-
-        const typeName = typeNames[contentType];
-
-        // Проверка типа узла - нельзя добавлять к информационным элементам
-        if (node.type === 'table') {
-            return {success: false, reason: errors.cannotAddToTable.replace('{type}', typeName)};
-        }
-        if (node.type === 'textblock') {
-            return {success: false, reason: errors.cannotAddToTextBlock.replace('{type}', typeName)};
-        }
-        if (node.type === 'violation') {
-            return {success: false, reason: errors.cannotAddToViolation.replace('{type}', typeName)};
-        }
-
-        // Проверка лимитов
-        if (!node.children) node.children = [];
-
-        const existingCount = node.children.filter(c => c.type === contentType).length;
-
-        if (existingCount >= limit) {
-            // Маппинг типов на названия для сообщений о лимитах
-            const limitNames = {
-                table: 'таблиц',
-                textblock: 'текстовых блоков',
-                violation: 'нарушений'
-            };
-
-            return {
-                success: false,
-                reason: errors.limitReached(limitNames[contentType], limit)
-            };
-        }
-
-        return {success: true};
     },
 
     /**
@@ -331,13 +269,9 @@ Object.assign(AppState, {
      */
     _createMetricsTable(nodeId, nodeNumber) {
         const node = this.findNodeById(nodeId);
-        if (!node) return {success: false, reason: AppConfig.tree.validation.nodeNotFound};
 
-        const validation = this._validateContentAddition(
-            node,
-            'table',
-            AppConfig.content.limits.tablesPerNode
-        );
+        // Используем валидацию из ValidationTree
+        const validation = ValidationTree.canAddContent(node, 'table');
         if (!validation.success) return validation;
 
         const tableId = this._generateId('table');
@@ -480,7 +414,12 @@ Object.assign(AppState, {
      */
     _createMainMetricsTable() {
         const node5 = this.findNodeById('5');
-        if (!node5) return {success: false, reason: AppConfig.tree.validation.nodeNotFound};
+        if (!node5) {
+            return {
+                success: false,
+                reason: AppConfig.tree.validation.nodeNotFound
+            };
+        }
 
         const existingTable = node5.children?.find(
             child => child.type === 'table' && child.isMainMetricsTable === true
@@ -637,13 +576,9 @@ Object.assign(AppState, {
      */
     _createRegularRiskTable(nodeId) {
         const node = this.findNodeById(nodeId);
-        if (!node) return {success: false, reason: AppConfig.tree.validation.nodeNotFound};
 
-        const validation = this._validateContentAddition(
-            node,
-            'table',
-            AppConfig.content.limits.tablesPerNode
-        );
+        // Используем валидацию из ValidationTree
+        const validation = ValidationTree.canAddContent(node, 'table');
         if (!validation.success) return validation;
 
         const preset = AppConfig.content.tablePresets.regularRisk;
@@ -684,13 +619,9 @@ Object.assign(AppState, {
      */
     _createOperationalRiskTable(nodeId) {
         const node = this.findNodeById(nodeId);
-        if (!node) return {success: false, reason: AppConfig.tree.validation.nodeNotFound};
 
-        const validation = this._validateContentAddition(
-            node,
-            'table',
-            AppConfig.content.limits.tablesPerNode
-        );
+        // Используем валидацию из ValidationTree
+        const validation = ValidationTree.canAddContent(node, 'table');
         if (!validation.success) return validation;
 
         const preset = AppConfig.content.tablePresets.operationalRisk;
