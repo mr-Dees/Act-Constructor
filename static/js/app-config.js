@@ -136,37 +136,6 @@ class AppConfig {
     };
 
     /**
-     * Настройки системы помощи
-     */
-    static help = {
-        // ID DOM-элементов
-        elements: {
-            helpBtn: 'helpBtn',
-            modal: 'helpModal',
-            modalTitle: 'helpModalTitle',
-            modalBody: 'helpModalBody'
-        },
-
-        // ID контейнеров с инструкциями
-        contentIds: {
-            1: 'help-step-1-content',
-            2: 'help-step-2-content'
-        },
-
-        // Названия шагов для подсказок
-        stepNames: {
-            1: 'Составление структуры акта',
-            2: 'Заполнение данных'
-        },
-
-        // Заголовки инструкций
-        titles: {
-            1: 'Инструкция: Шаг 1 - Составление структуры акта',
-            2: 'Инструкция: Шаг 2 - Заполнение данных'
-        }
-    };
-
-    /**
      * Настройки дерева документа
      */
     static tree = {

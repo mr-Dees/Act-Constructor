@@ -106,7 +106,7 @@ Act Constructor/
 │   │   │   └── helpers.css
 │   │   └── main.css
 │   └── js/
-│       ├── state/
+│       ├── context-menu/
 │       │   ├── context-menu-cells.js
 │       │   ├── context-menu-core.js
 │       │   ├── context-menu-links-footnotes.js
@@ -116,15 +116,14 @@ Act Constructor/
 │       │   ├── items-renderer.js
 │       │   └── items-title-editing.js
 │       ├── preview/
-│       │   ├── tree-core.js
+│       │   ├── preview.js
 │       │   ├── preview-table-renderer.js
 │       │   ├── preview-textblock-renderer.js
 │       │   └── preview-violation-renderer.js
 │       ├── state/
 │       │   ├── state-content.js
 │       │   ├── state-core.js
-│       │   ├── state-tree.js
-│       │   └── state-validation.js
+│       │   └── state-tree.js
 │       ├── table/
 │       │   ├── table-cells-operations.js
 │       │   ├── table-core.js
@@ -139,6 +138,12 @@ Act Constructor/
 │       │   ├── tree-core.js
 │       │   ├── tree-drag-drop.js
 │       │   └── tree-renderer.js
+│       ├── validation/
+│       │   ├── validation.js
+│       │   ├── validation-act.js
+│       │   ├── validation-core.js
+│       │   ├── validation-table.js
+│       │   └── validation-tree.js
 │       ├── violation/
 │       │   ├── violation-additional-content.js
 │       │   ├── violation-core.js
@@ -147,10 +152,9 @@ Act Constructor/
 │       │   ├── violation-init.js
 │       │   ├── violation-paste.js
 │       │   └── violation-rendering.js
-│       ├── act-validator.js
 │       ├── api.js
 │       ├── app.js
-│       ├── app-config
+│       ├── app-config.js
 │       ├── dialog.js
 │       ├── format-menu-manager.js
 │       ├── help.js
