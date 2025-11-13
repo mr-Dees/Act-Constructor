@@ -1,13 +1,45 @@
 /**
  * Валидатор данных акта
  *
- * Проверяет корректность структуры акта, заполненность таблиц
- * и другие критерии перед сохранением документа.
+ * Проверяет корректность структуры акта, заполненность данных,
+ * соблюдение бизнес-правил перед сохранением документа.
+ * Не изменяет состояние, только анализирует его.
  */
 class ActValidator {
     /**
+     * Выполняет полную валидацию акта перед сохранением
+     * @returns {Object} Результат валидации с массивом ошибок и предупреждений
+     */
+    static validateAll() {
+        const errors = [];
+        const warnings = [];
+
+        const structureCheck = this.validateStructure();
+        if (!structureCheck.valid) {
+            errors.push(structureCheck.message);
+        }
+
+        const headersCheck = this.checkTableHeaders();
+        if (!headersCheck.valid) {
+            errors.push(headersCheck.message);
+        }
+
+        const dataCheck = this.checkTableData();
+        if (!dataCheck.valid) {
+            warnings.push(dataCheck.message);
+        }
+
+        return {
+            valid: errors.length === 0,
+            errors,
+            warnings,
+            canProceed: errors.length === 0
+        };
+    }
+
+    /**
      * Проверка базовой структуры акта
-     * @returns {{valid: boolean, message: string}} Результат валидации
+     * @returns {Object} Результат валидации
      */
     static validateStructure() {
         if (!AppState.treeData?.children) {
@@ -23,7 +55,7 @@ class ActValidator {
 
     /**
      * Проверка заполненности заголовков таблиц (критическая)
-     * @returns {{valid: boolean, message: string}} Результат проверки
+     * @returns {Object} Результат проверки
      */
     static checkTableHeaders() {
         const emptyHeaders = [];
@@ -54,7 +86,7 @@ class ActValidator {
 
     /**
      * Проверка заполненности данных таблиц (предупреждение)
-     * @returns {{valid: boolean, message: string}} Результат проверки
+     * @returns {Object} Результат проверки
      */
     static checkTableData() {
         const emptyDataTables = [];

@@ -1,94 +1,111 @@
 /**
- * Модуль валидации операций с деревом документа.
- * Проверяет ограничения вложенности, лимиты элементов и правила добавления узлов.
+ * Модуль структурных ограничений дерева
+ *
+ * Проверяет технические ограничения операций с деревом:
+ * глубину вложенности, возможность добавления узлов, отношения между узлами.
+ * НЕ проверяет бизнес-правила и качество данных (это в ActValidator).
  */
 
-// Расширение AppState методами валидации
 Object.assign(AppState, {
     /**
-     * Вычисляет глубину узла в дереве (расстояние от корня).
+     * Вычисляет глубину узла в дереве
      * @param {string} nodeId - ID искомого узла
-     * @param {Object} node - Узел для начала поиска (по умолчанию корень)
-     * @param {number} depth - Текущая глубина
+     * @param {Object} [node=this.treeData] - Узел для начала поиска
+     * @param {number} [depth=0] - Текущая глубина
      * @returns {number} Глубина узла или -1 если не найден
      */
     getNodeDepth(nodeId, node = this.treeData, depth = 0) {
         if (node.id === nodeId) return depth;
-        if (node.children) {
-            for (let child of node.children) {
-                const found = this.getNodeDepth(nodeId, child, depth + 1);
-                if (found !== -1) return found;
-            }
+
+        if (!node.children) return -1;
+
+        for (const child of node.children) {
+            const found = this.getNodeDepth(nodeId, child, depth + 1);
+            if (found !== -1) return found;
         }
+
         return -1;
     },
 
     /**
-     * Проверяет возможность добавления дочернего узла с учетом ограничения вложенности.
-     * Максимальная глубина: 4 уровня (*.*.*.*)
+     * Проверяет возможность добавления дочернего узла
      * @param {string} parentId - ID родительского узла
-     * @returns {Object} Объект с флагом allowed и причиной отказа
+     * @returns {Object} Результат с флагом allowed и причиной отказа
      */
     canAddChild(parentId) {
         const depth = this.getNodeDepth(parentId);
-        if (depth >= 4) {
-            return {allowed: false, reason: 'Достигнута максимальная вложенность (4 уровня: *.*.*.*)'};
+        const maxDepth = AppConfig.tree.maxDepth;
+
+        if (depth >= maxDepth) {
+            return {
+                allowed: false,
+                reason: AppConfig.tree.validation.maxDepthExceeded(maxDepth)
+            };
         }
+
         return {allowed: true};
     },
 
     /**
-     * Проверяет возможность добавления соседнего узла (sibling).
-     * Для первого уровня разрешен только один дополнительный пункт (6-й) в конце списка.
-     * @param {string} nodeId - ID узла, после которого добавляется новый
-     * @returns {Object} Объект с флагом allowed и причиной отказа
+     * Проверяет возможность добавления соседнего узла
+     * @param {string} nodeId - ID узла для добавления рядом
+     * @returns {Object} Результат с флагом allowed и причиной отказа
      */
     canAddSibling(nodeId) {
         const parent = this.findParentNode(nodeId);
 
-        // Специальная логика для первого уровня (дети root)
-        if (parent && parent.id === 'root') {
-            // Проверяем наличие пользовательского пункта 6
-            const hasCustomFirstLevel = parent.children.some(child => {
-                const num = child.label.match(/^(\d+)\./);
-                return num && parseInt(num[1]) === 6;
-            });
-
-            if (hasCustomFirstLevel) {
-                return {
-                    allowed: false,
-                    reason: 'Можно добавить только один дополнительный пункт первого уровня (пункт 6)'
-                };
-            }
-
-            // Новый пункт можно добавить только в конец
-            const nodeIndex = parent.children.findIndex(n => n.id === nodeId);
-            if (nodeIndex !== parent.children.length - 1) {
-                return {allowed: false, reason: 'Новый пункт первого уровня можно добавить только в конец списка'};
-            }
-
-            return {allowed: true};
+        if (parent?.id === 'root') {
+            return this._validateFirstLevelSiblingAddition(parent, nodeId);
         }
 
         return {allowed: true};
     },
 
     /**
-     * Вычисляет максимальную глубину поддерева от узла (учитываются только пункты, не информационные элементы)
-     * @param {Object} node - Узел для проверки
-     * @returns {number} Максимальная глубина поддерева
+     * Валидирует добавление sibling на первом уровне
+     * @private
+     * @param {Object} parent - Родительский узел (root)
+     * @param {string} nodeId - ID узла-соседа
+     * @returns {Object} Результат валидации
      */
-    getSubtreeDepth(node) {
-        if (!node.children || node.children.length === 0) {
-            return 0;
+    _validateFirstLevelSiblingAddition(parent, nodeId) {
+        const hasCustomFirstLevel = parent.children.some(child => {
+            const num = child.label.match(/^(\d+)\./);
+            return num && parseInt(num[1]) === 6;
+        });
+
+        if (hasCustomFirstLevel) {
+            return {
+                allowed: false,
+                reason: AppConfig.tree.validation.maxCustomSections(
+                    AppConfig.tree.maxCustomFirstLevelSections
+                )
+            };
         }
 
+        const nodeIndex = parent.children.findIndex(n => n.id === nodeId);
+        if (nodeIndex !== parent.children.length - 1) {
+            return {
+                allowed: false,
+                reason: AppConfig.tree.validation.firstLevelOnlyAtEnd
+            };
+        }
+
+        return {allowed: true};
+    },
+
+    /**
+     * Вычисляет максимальную глубину поддерева
+     * @param {Object} node - Корневой узел поддерева
+     * @returns {number} Максимальная глубина
+     */
+    getSubtreeDepth(node) {
+        if (!node.children?.length) return 0;
+
         let maxDepth = 0;
+
         for (const child of node.children) {
-            // Игнорируем информационные элементы при подсчете глубины
-            if (child.type === 'table' || child.type === 'textblock' || child.type === 'violation') {
-                continue;
-            }
+            if (this._isInformationalNode(child)) continue;
 
             const childDepth = this.getSubtreeDepth(child);
             maxDepth = Math.max(maxDepth, childDepth + 1);
@@ -98,23 +115,27 @@ Object.assign(AppState, {
     },
 
     /**
-     * Проверяет, является ли node потомком possibleAncestor.
+     * Проверяет, является ли узел информационным элементом
+     * @private
+     * @param {Object} node - Проверяемый узел
+     * @returns {boolean} true если это информационный элемент
+     */
+    _isInformationalNode(node) {
+        return ['table', 'textblock', 'violation'].includes(node.type);
+    },
+
+    /**
+     * Проверяет, является ли узел потомком другого узла
      * @param {Object} node - Проверяемый узел
      * @param {Object} possibleAncestor - Возможный предок
-     * @returns {boolean} true, если node является потомком possibleAncestor
+     * @returns {boolean} true если node является потомком possibleAncestor
      */
     isDescendant(node, possibleAncestor) {
-        if (!possibleAncestor.children || possibleAncestor.children.length === 0) {
-            return false;
-        }
+        if (!possibleAncestor.children?.length) return false;
 
         for (const child of possibleAncestor.children) {
-            if (child.id === node.id) {
-                return true;
-            }
-            if (this.isDescendant(node, child)) {
-                return true;
-            }
+            if (child.id === node.id) return true;
+            if (this.isDescendant(node, child)) return true;
         }
 
         return false;
