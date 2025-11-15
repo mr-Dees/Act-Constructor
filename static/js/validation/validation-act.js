@@ -6,7 +6,7 @@
 const ValidationAct = {
     /**
      * Проверяет наличие хотя бы одного раздела в структуре акта
-     * @returns {Object} Результат валидации
+     * @returns {Object} Результат валидации с полями valid, message, isWarning
      */
     validateStructure() {
         if (!AppState.treeData?.children) {

@@ -1,6 +1,8 @@
 /**
- * Модуль drag-and-drop для дерева элементов.
+ * Модуль drag-and-drop для дерева элементов
+ *
  * Обеспечивает перетаскивание узлов внутри дерева с визуальными индикаторами.
+ * Поддерживает валидацию перемещений и запрет на перетаскивание узлов с таблицами рисков.
  */
 class TreeDragDrop {
     constructor(manager) {
@@ -13,7 +15,8 @@ class TreeDragDrop {
     }
 
     /**
-     * Инициализация drag-and-drop для дерева.
+     * Инициализация drag-and-drop для дерева
+     * Привязывает обработчики событий и активирует перетаскивание для доступных элементов
      */
     init() {
         this.manager.container.addEventListener('dragstart', this.handleDragStart.bind(this));
@@ -26,7 +29,8 @@ class TreeDragDrop {
     }
 
     /**
-     * Делает все незащищенные элементы перетаскиваемыми.
+     * Делает все незащищенные элементы перетаскиваемыми
+     * Использует MutationObserver для динамического обновления атрибутов
      */
     enableDraggableItems() {
         const observer = new MutationObserver(() => {
@@ -46,8 +50,9 @@ class TreeDragDrop {
     }
 
     /**
-     * Обработчик начала перетаскивания.
-     * Блокирует перетаскивание узлов с таблицами рисков в поддереве.
+     * Обработчик начала перетаскивания
+     * Блокирует перетаскивание защищенных узлов и узлов с таблицами рисков в поддереве
+     * @param {DragEvent} e - Событие dragstart
      */
     handleDragStart(e) {
         const treeItem = e.target.closest('.tree-item');
@@ -61,14 +66,10 @@ class TreeDragDrop {
             return;
         }
 
-        // НОВАЯ ПРОВЕРКА: запрещаем перетаскивание узлов с таблицами рисков
+        // Запрещаем перетаскивание узлов с таблицами рисков
         if (this._hasRiskTablesInSubtree(node)) {
             e.preventDefault();
-            if (typeof Notifications !== 'undefined') {
-                Notifications.error('Нельзя перемещать блоки, содержащие таблицы рисков');
-            } else {
-                alert('Нельзя перемещать блоки, содержащие таблицы рисков');
-            }
+            Notifications.error('Нельзя перемещать блоки, содержащие таблицы рисков');
             return;
         }
 
@@ -85,7 +86,8 @@ class TreeDragDrop {
     }
 
     /**
-     * Проверяет наличие таблиц рисков в узле и его поддереве.
+     * Проверяет наличие таблиц рисков в узле и его поддереве
+     * @private
      * @param {Object} node - Узел для проверки
      * @returns {boolean} true если найдены таблицы рисков
      */
@@ -99,7 +101,7 @@ class TreeDragDrop {
         }
 
         // Рекурсивно проверяем дочерние элементы
-        if (node.children && node.children.length > 0) {
+        if (node.children?.length) {
             for (const child of node.children) {
                 if (this._hasRiskTablesInSubtree(child)) {
                     return true;
@@ -111,7 +113,10 @@ class TreeDragDrop {
     }
 
     /**
-     * Проверяет, может ли целевой узел принять перетаскиваемый узел как дочерний.
+     * Проверяет, может ли целевой узел принять перетаскиваемый узел как дочерний
+     * @param {Object} targetNode - Целевой узел
+     * @param {Object} draggedNode - Перетаскиваемый узел
+     * @returns {boolean} true если может принять как дочерний
      */
     canAcceptAsChild(targetNode, draggedNode) {
         // Информационные элементы не могут иметь детей
@@ -119,19 +124,14 @@ class TreeDragDrop {
             return false;
         }
 
-        // Если перетаскиваем информационный элемент, проверяем что целевой узел - это его текущий родитель
-        // или другой обычный пункт (item)
-        if (draggedNode.type === 'table' || draggedNode.type === 'textblock' || draggedNode.type === 'violation') {
-            // Информационные элементы могут быть детьми любых обычных пунктов
-            return true;
-        }
-
-        // Для обычных пунктов - стандартная логика
+        // Информационные элементы могут быть детьми любых обычных пунктов
         return true;
     }
 
     /**
-     * Обработчик перемещения над элементами.
+     * Обработчик перемещения курсора над элементами
+     * Определяет зону сброса и отображает визуальные индикаторы
+     * @param {DragEvent} e - Событие dragover
      */
     handleDragOver(e) {
         if (!this.draggedNode) return;
@@ -149,7 +149,7 @@ class TreeDragDrop {
         const targetNodeId = treeItem.dataset.nodeId;
         const targetNode = AppState.findNodeById(targetNodeId);
 
-        if (ValidationTree.isDescendant(targetNode, this.draggedNode)) {
+        if (TreeUtils.isDescendant(targetNode, this.draggedNode)) {
             this.clearDropZone();
             return;
         }
@@ -171,12 +171,9 @@ class TreeDragDrop {
         // Проверяем, может ли целевой узел принять перетаскиваемый как дочерний
         const canBeChild = this.canAcceptAsChild(targetNode, this.draggedNode);
 
-        // Для информационных элементов, если мы наводим на их родителя,
-        // всегда предлагаем вставку как child
+        // Для информационных элементов при наведении на их родителя всегда предлагаем вставку как child
         const draggedParent = AppState.findParentNode(this.draggedNode.id);
-        const isDraggedInformational = this.draggedNode.type === 'table' ||
-            this.draggedNode.type === 'textblock' ||
-            this.draggedNode.type === 'violation';
+        const isDraggedInformational = ['table', 'textblock', 'violation'].includes(this.draggedNode.type);
 
         if (isDraggedInformational && draggedParent && draggedParent.id === targetNode.id) {
             // Перетаскиваем информационный элемент на его текущего родителя
@@ -211,7 +208,11 @@ class TreeDragDrop {
     }
 
     /**
-     * Обновляет визуальный индикатор зоны сброса.
+     * Обновляет визуальный индикатор зоны сброса
+     * @param {HTMLElement} targetElement - Элемент-цель
+     * @param {string} dropZoneClass - CSS-класс зоны сброса
+     * @param {string} position - Позиция ('before', 'after', 'child')
+     * @param {Object} targetNode - Узел-цель
      */
     updateDropZone(targetElement, dropZoneClass, position, targetNode) {
         if (this.currentDropZone === targetElement && this.dropPosition === position) {
@@ -227,7 +228,7 @@ class TreeDragDrop {
     }
 
     /**
-     * Очищает визуальные индикаторы зоны сброса.
+     * Очищает визуальные индикаторы зоны сброса
      */
     clearDropZone() {
         if (this.currentDropZone) {
@@ -239,7 +240,9 @@ class TreeDragDrop {
     }
 
     /**
-     * Обработчик ухода курсора с элемента.
+     * Обработчик ухода курсора с элемента
+     * Очищает индикаторы если курсор покинул границы элемента
+     * @param {DragEvent} e - Событие dragleave
      */
     handleDragLeave(e) {
         const treeItem = e.target.closest('.tree-item');
@@ -256,8 +259,9 @@ class TreeDragDrop {
     }
 
     /**
-     * Обработчик сброса элемента.
-     * Использует await для асинхронного вызова moveNode.
+     * Обработчик сброса элемента
+     * Выполняет перемещение узла с валидацией и обновлением UI
+     * @param {DragEvent} e - Событие drop
      */
     async handleDrop(e) {
         e.preventDefault();
@@ -274,24 +278,18 @@ class TreeDragDrop {
             this.dropPosition
         );
 
-        if (result.success) {
+        if (result.valid) {
             this.manager.render();
             PreviewManager.update('previewTrim', 30);
             if (AppState.currentStep === 2) {
                 ItemsRenderer.renderAll();
             }
 
-            if (typeof Notifications !== 'undefined') {
-                Notifications.success('Элемент успешно перемещен');
-            }
+            Notifications.success('Элемент успешно перемещен');
         } else {
-            // Не показываем ошибку, если пользователь отменил действие
-            if (!result.cancelled) {
-                if (typeof Notifications !== 'undefined') {
-                    Notifications.error(result.reason || 'Не удалось переместить элемент');
-                } else {
-                    alert(result.reason || 'Не удалось переместить элемент');
-                }
+            // Показываем ошибку если есть сообщение
+            if (result.message) {
+                Notifications.error(result.message);
             }
         }
 
@@ -299,14 +297,16 @@ class TreeDragDrop {
     }
 
     /**
-     * Обработчик завершения перетаскивания.
+     * Обработчик завершения перетаскивания
+     * Очищает состояние независимо от результата операции
+     * @param {DragEvent} e - Событие dragend
      */
     handleDragEnd(e) {
         this.cleanup();
     }
 
     /**
-     * Очищает все состояния и визуальные эффекты.
+     * Очищает все состояния и визуальные эффекты
      */
     cleanup() {
         if (this.draggedElement) {

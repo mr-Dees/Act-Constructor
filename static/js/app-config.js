@@ -6,6 +6,16 @@
  */
 class AppConfig {
     /**
+     * Типы узлов дерева документа
+     */
+    static nodeTypes = {
+        ITEM: 'item',
+        TABLE: 'table',
+        TEXTBLOCK: 'textblock',
+        VIOLATION: 'violation'
+    };
+
+    /**
      * Настройки предпросмотра документа
      */
     static preview = {
@@ -100,7 +110,8 @@ class AppConfig {
         messages: {
             noFormatsSelected: 'Выберите хотя бы один формат для сохранения',
             savingInProgress: '⏳ Создаём акты...',
-            unexpectedError: (error) => `Произошла непредвиденная ошибка: ${error}`
+            unexpectedError: (error) => `Произошла непредвиденная ошибка: ${error}`,
+            initializationError: (module, error) => `Ошибка инициализации ${module}: ${error}`
         }
     };
 
@@ -211,6 +222,20 @@ class AppConfig {
             limitReached: (type, limit) => `Достигнуто максимальное количество ${type} (${limit}) для этого пункта`,
             protectedFromDeletion: 'Эта таблица защищена от удаления',
             notFound: (type) => `${type} не найден`
+        },
+
+        // Названия типов контента для сообщений
+        typeNames: {
+            [AppConfig.nodeTypes?.TABLE || 'table']: 'таблицу',
+            [AppConfig.nodeTypes?.TEXTBLOCK || 'textblock']: 'текстовый блок',
+            [AppConfig.nodeTypes?.VIOLATION || 'violation']: 'нарушение'
+        },
+
+        // Названия для лимитов (множественное число)
+        limitNames: {
+            [AppConfig.nodeTypes?.TABLE || 'table']: 'таблиц',
+            [AppConfig.nodeTypes?.TEXTBLOCK || 'textblock']: 'текстовых блоков',
+            [AppConfig.nodeTypes?.VIOLATION || 'violation']: 'нарушений'
         },
 
         // Предустановленные таблицы

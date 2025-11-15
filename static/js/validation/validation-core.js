@@ -8,30 +8,39 @@ const ValidationCore = {
     /**
      * Создает успешный результат валидации
      * @param {string} [message='OK'] - Сообщение (опционально)
-     * @returns {Object} Результат валидации
+     * @returns {Object} Результат валидации с полями valid, message, isWarning
      */
     success(message = 'OK') {
         return {
             valid: true,
-            success: true,
-            allowed: true,
             message,
-            reason: message
+            isWarning: false
         };
     },
 
     /**
      * Создает неуспешный результат валидации
      * @param {string} message - Сообщение об ошибке
-     * @returns {Object} Результат валидации
+     * @returns {Object} Результат валидации с полями valid, message, isWarning
      */
     failure(message) {
         return {
             valid: false,
-            success: false,
-            allowed: false,
             message,
-            reason: message
+            isWarning: false
+        };
+    },
+
+    /**
+     * Создает результат-предупреждение (не блокирует операцию)
+     * @param {string} message - Сообщение-предупреждение
+     * @returns {Object} Результат валидации с флагом isWarning
+     */
+    warning(message) {
+        return {
+            valid: false,
+            message,
+            isWarning: true
         };
     },
 
@@ -112,14 +121,25 @@ const ValidationCore = {
      * @returns {Object} Объединенный результат
      */
     combine(...results) {
-        const failures = results.filter(r => !r.valid && !r.success && !r.allowed);
+        const failures = results.filter(r => !r.valid);
 
         if (failures.length === 0) {
             return this.success();
         }
 
-        const messages = failures.map(f => f.message || f.reason).filter(Boolean);
-        return this.failure(messages.join('\n'));
+        // Разделяем ошибки и предупреждения
+        const errors = failures.filter(f => !f.isWarning);
+        const warnings = failures.filter(f => f.isWarning);
+
+        // Если есть хоть одна ошибка, возвращаем ошибку
+        if (errors.length > 0) {
+            const messages = errors.map(f => f.message).filter(Boolean);
+            return this.failure(messages.join('\n'));
+        }
+
+        // Иначе возвращаем предупреждение
+        const messages = warnings.map(f => f.message).filter(Boolean);
+        return this.warning(messages.join('\n'));
     },
 
     /**

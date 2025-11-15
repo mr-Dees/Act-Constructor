@@ -123,23 +123,20 @@ Object.assign(AppState, {
      * @param {string} parentId - ID родительского узла
      * @param {string} label - Название нового узла
      * @param {boolean} [isChild=true] - Добавить как дочерний элемент или sibling
-     * @returns {Object} Результат создания узла
+     * @returns {Object} Результат создания узла с полями valid, message
      */
     addNode(parentId, label, isChild = true) {
         const parent = this.findNodeById(parentId);
         if (!parent) {
-            return {
-                success: false,
-                reason: AppConfig.tree.validation.parentNotFound
-            };
+            return ValidationCore.failure(AppConfig.tree.validation.parentNotFound);
         }
 
         const validation = isChild
             ? ValidationTree.canAddChild(parentId)
             : ValidationTree.canAddSibling(parentId);
 
-        if (!validation.allowed) {
-            return {success: false, reason: validation.reason};
+        if (!validation.valid) {
+            return validation;
         }
 
         const newNode = this._createNewNode(label);
@@ -151,7 +148,7 @@ Object.assign(AppState, {
         }
 
         this.generateNumbering();
-        return {success: true, node: newNode};
+        return ValidationCore.success();
     },
 
     /**
@@ -280,41 +277,28 @@ Object.assign(AppState, {
      * @param {string} draggedNodeId - ID перемещаемого узла
      * @param {string} targetNodeId - ID целевого узла
      * @param {string} position - Позиция: 'before', 'after', 'child'
-     * @returns {Promise<Object>} Результат операции
+     * @returns {Promise<Object>} Результат операции с полями valid, message
      */
     async moveNode(draggedNodeId, targetNodeId, position) {
         if (draggedNodeId === targetNodeId) {
-            return {
-                success: false,
-                reason: AppConfig.tree.validation.cannotMoveToSelf
-            };
+            return ValidationCore.failure(AppConfig.tree.validation.cannotMoveToSelf);
         }
 
         const nodes = this._getNodesForMove(draggedNodeId, targetNodeId);
-        if (!nodes.valid) return {success: false, reason: nodes.reason};
+        if (!nodes.valid) return ValidationCore.failure(nodes.reason);
 
         const {draggedNode, targetNode, draggedParent} = nodes;
 
         const validation = this._validateMove(draggedNode, targetNode, position);
-        if (!validation.success) return validation;
+        if (!validation.valid) return validation;
 
         const newParent = this._determineNewParent(targetNode, targetNodeId, position);
 
-        const metricsCheck = await this._checkMetricsTableDeletion(
-            draggedNode,
-            newParent
-        );
+        const metricsCheck = await this._checkMetricsTableDeletion(draggedNode, newParent);
+        if (!metricsCheck.valid) return metricsCheck;
 
-        if (!metricsCheck.success) return metricsCheck;
-
-        const depthCheck = this._checkDepthConstraints(
-            draggedNode,
-            targetNode,
-            targetNodeId,
-            position
-        );
-
-        if (!depthCheck.success) return depthCheck;
+        const depthCheck = this._checkDepthConstraints(draggedNode, targetNode, targetNodeId, position);
+        if (!depthCheck.valid) return depthCheck;
 
         const firstLevelCheck = this._checkFirstLevelConstraints(
             draggedNode,
@@ -323,8 +307,7 @@ Object.assign(AppState, {
             targetNodeId,
             position
         );
-
-        if (!firstLevelCheck.success) return firstLevelCheck;
+        if (!firstLevelCheck.valid) return firstLevelCheck;
 
         this._performMove(draggedNode, draggedParent, newParent, targetNode, targetNodeId, position);
         this.generateNumbering();
@@ -333,7 +316,7 @@ Object.assign(AppState, {
             this._handleMetricsTableForNode(draggedNode);
         }
 
-        return {success: true, node: draggedNode};
+        return ValidationCore.success();
     },
 
     /**
@@ -368,20 +351,14 @@ Object.assign(AppState, {
      */
     _validateMove(draggedNode, targetNode, position) {
         if (draggedNode.protected) {
-            return {
-                success: false,
-                reason: AppConfig.tree.validation.cannotMoveProtected
-            };
+            return ValidationCore.failure(AppConfig.tree.validation.cannotMoveProtected);
         }
 
-        if (ValidationTree.isDescendant(targetNode, draggedNode)) {
-            return {
-                success: false,
-                reason: AppConfig.tree.validation.cannotMoveToDescendant
-            };
+        if (TreeUtils.isDescendant(targetNode, draggedNode)) {
+            return ValidationCore.failure(AppConfig.tree.validation.cannotMoveToDescendant);
         }
 
-        return {success: true};
+        return ValidationCore.success();
     },
 
     /**
@@ -393,9 +370,7 @@ Object.assign(AppState, {
      * @returns {Object} Новый родительский узел
      */
     _determineNewParent(targetNode, targetNodeId, position) {
-        return position === 'child'
-            ? targetNode
-            : this.findParentNode(targetNodeId);
+        return position === 'child' ? targetNode : this.findParentNode(targetNodeId);
     },
 
     /**
@@ -410,25 +385,21 @@ Object.assign(AppState, {
             child => child.type === 'table' && child.isMetricsTable === true
         );
 
-        if (!hasMetricsTable) return {success: true};
+        if (!hasMetricsTable) return ValidationCore.success();
 
         const willStayUnder5FirstLevel = newParent && newParent.id === '5';
-        if (willStayUnder5FirstLevel) return {success: true};
+        if (willStayUnder5FirstLevel) return ValidationCore.success();
 
         const confirmed = await DialogManager.show(
             AppConfig.content.dialogs.deleteMetricsTable
         );
 
         if (!confirmed) {
-            return {
-                success: false,
-                reason: 'Перемещение отменено пользователем',
-                cancelled: true
-            };
+            return ValidationCore.failure('Перемещение отменено пользователем');
         }
 
         this._removeMetricsTable(draggedNode);
-        return {success: true};
+        return ValidationCore.success();
     },
 
     /**
@@ -460,20 +431,19 @@ Object.assign(AppState, {
      */
     _checkDepthConstraints(draggedNode, targetNode, targetNodeId, position) {
         const isInformational = ['table', 'textblock', 'violation'].includes(draggedNode.type);
-        if (isInformational) return {success: true};
+        if (isInformational) return ValidationCore.success();
 
         const targetDepth = this._calculateTargetDepth(targetNode, targetNodeId, position);
-        const draggedSubtreeDepth = ValidationTree.getSubtreeDepth(draggedNode);
+        const draggedSubtreeDepth = TreeUtils.getSubtreeDepth(draggedNode);
         const resultingDepth = targetDepth + 1 + draggedSubtreeDepth;
 
         if (resultingDepth > AppConfig.tree.maxDepth) {
-            return {
-                success: false,
-                reason: `Перемещение приведет к превышению максимальной вложенности (${resultingDepth} > ${AppConfig.tree.maxDepth} уровней)`
-            };
+            return ValidationCore.failure(
+                `Перемещение приведет к превышению максимальной вложенности (${resultingDepth} > ${AppConfig.tree.maxDepth} уровней)`
+            );
         }
 
-        return {success: true};
+        return ValidationCore.success();
     },
 
     /**
@@ -486,11 +456,11 @@ Object.assign(AppState, {
      */
     _calculateTargetDepth(targetNode, targetNodeId, position) {
         if (position === 'child') {
-            return ValidationTree.getNodeDepth(targetNodeId);
+            return TreeUtils.getNodeDepth(targetNodeId);
         }
 
         const targetParent = this.findParentNode(targetNodeId);
-        return targetParent ? ValidationTree.getNodeDepth(targetParent.id) : 0;
+        return targetParent ? TreeUtils.getNodeDepth(targetParent.id) : 0;
     },
 
     /**
@@ -504,12 +474,12 @@ Object.assign(AppState, {
      * @returns {Object} Результат проверки
      */
     _checkFirstLevelConstraints(draggedNode, draggedParent, targetNode, targetNodeId, position) {
-        if (position === 'child') return {success: true};
+        if (position === 'child') return ValidationCore.success();
 
         const targetParent = this.findParentNode(targetNodeId);
-        if (!targetParent || targetParent.id !== 'root') return {success: true};
+        if (!targetParent || targetParent.id !== 'root') return ValidationCore.success();
 
-        if (draggedParent.id === 'root') return {success: true};
+        if (draggedParent.id === 'root') return ValidationCore.success();
 
         const hasCustomFirstLevel = targetParent.children.some(child => {
             const num = child.label.match(/^(\d+)\./);
@@ -517,26 +487,20 @@ Object.assign(AppState, {
         });
 
         if (hasCustomFirstLevel) {
-            return {
-                success: false,
-                reason: 'На первом уровне уже есть дополнительный пункт (6)'
-            };
+            return ValidationCore.failure('На первом уровне уже есть дополнительный пункт (6)');
         }
 
         const targetNum = targetNode.label.match(/^(\d+)\./);
-        if (!targetNum) return {success: true};
+        if (!targetNum) return ValidationCore.success();
 
         const targetNumber = parseInt(targetNum[1]);
 
         if ((position === 'before' && targetNumber !== 6) ||
             (position === 'after' && targetNumber !== 5)) {
-            return {
-                success: false,
-                reason: AppConfig.tree.validation.firstLevelOnlyAtEnd
-            };
+            return ValidationCore.failure(AppConfig.tree.validation.firstLevelOnlyAtEnd);
         }
 
-        return {success: true};
+        return ValidationCore.success();
     },
 
     /**
@@ -578,7 +542,7 @@ Object.assign(AppState, {
 
         if (!hasTable) {
             const result = this._createMetricsTable(node.id, node.number);
-            if (result.success) {
+            if (result.valid) {
                 this.generateNumbering();
             }
         } else {

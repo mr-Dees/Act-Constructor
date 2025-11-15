@@ -12,14 +12,13 @@ Object.assign(AppState, {
      * @param {string} nodeId - ID узла для добавления
      * @param {number} rows - Количество строк данных (без заголовка)
      * @param {number} cols - Количество колонок
-     * @returns {Object} Результат создания таблицы
+     * @returns {Object} Результат создания таблицы с полями valid, message
      */
     addTableToNode(nodeId, rows = 3, cols = 3) {
         const node = this.findNodeById(nodeId);
 
-        // Используем валидацию из ValidationTree
-        const validation = ValidationTree.canAddContent(node, 'table');
-        if (!validation.success) return validation;
+        const validation = ValidationTree.canAddContent(node, AppConfig.nodeTypes.TABLE);
+        if (!validation.valid) return validation;
 
         const tableId = this._generateId('table');
         const tableNode = this._createContentNode(nodeId, tableId, 'table', '', false, true);
@@ -33,15 +32,10 @@ Object.assign(AppState, {
         this.tables[tableId] = table;
         this.generateNumbering();
 
-        return {success: true, table, tableNode};
+        return ValidationCore.success();
     },
 
-    /**
-     * Генерирует заголовки по умолчанию
-     * @private
-     * @param {number} cols - Количество колонок
-     * @returns {Array<string>} Массив заголовков
-     */
+    /** @private */
     _generateDefaultHeaders(cols) {
         return Array.from({length: cols}, (_, i) => `Колонка ${i + 1}`);
     },
@@ -49,38 +43,26 @@ Object.assign(AppState, {
     /**
      * Удаляет таблицу из узла дерева
      * @param {string} tableNodeId - ID узла таблицы
-     * @returns {Object} Результат удаления
+     * @returns {Object} Результат удаления с полями valid, message
      */
     removeTable(tableNodeId) {
         const tableNode = this.findNodeById(tableNodeId);
         if (!tableNode || tableNode.type !== 'table') {
-            return {
-                success: false,
-                reason: AppConfig.content.errors.notFound('Таблица')
-            };
+            return ValidationCore.failure(AppConfig.content.errors.notFound('Таблица'));
         }
 
         if (tableNode.protected) {
-            return {
-                success: false,
-                reason: AppConfig.content.errors.protectedFromDeletion
-            };
+            return ValidationCore.failure(AppConfig.content.errors.protectedFromDeletion);
         }
 
         const table = this.tables[tableNode.tableId];
         if (table?.protected) {
-            return {
-                success: false,
-                reason: AppConfig.content.errors.protectedFromDeletion
-            };
+            return ValidationCore.failure(AppConfig.content.errors.protectedFromDeletion);
         }
 
         const parent = this.findParentNode(tableNodeId);
         if (!parent) {
-            return {
-                success: false,
-                reason: AppConfig.tree.validation.parentNotFound
-            };
+            return ValidationCore.failure(AppConfig.tree.validation.parentNotFound);
         }
 
         const isRiskTable = table && (table.isRegularRiskTable || table.isOperationalRiskTable);
@@ -97,20 +79,19 @@ Object.assign(AppState, {
             this._cleanupMetricsTablesAfterRiskTableDeleted(tableNodeId);
         }
 
-        return {success: true};
+        return ValidationCore.success();
     },
 
     /**
      * Добавляет текстовый блок к узлу
      * @param {string} nodeId - ID узла для добавления
-     * @returns {Object} Результат создания текстового блока
+     * @returns {Object} Результат создания с полями valid, message
      */
     addTextBlockToNode(nodeId) {
         const node = this.findNodeById(nodeId);
 
-        // Используем валидацию из ValidationTree
-        const validation = ValidationTree.canAddContent(node, 'textblock');
-        if (!validation.success) return validation;
+        const validation = ValidationTree.canAddContent(node, AppConfig.nodeTypes.TEXTBLOCK);
+        if (!validation.valid) return validation;
 
         const textBlockId = this._generateId('textblock');
         const textBlockNode = this._createContentNode(nodeId, textBlockId, 'textblock');
@@ -122,20 +103,19 @@ Object.assign(AppState, {
         this.textBlocks[textBlockId] = textBlock;
         this.generateNumbering();
 
-        return {success: true, textBlock, textBlockNode};
+        return ValidationCore.success();
     },
 
     /**
      * Добавляет нарушение к узлу
      * @param {string} nodeId - ID узла для добавления
-     * @returns {Object} Результат создания нарушения
+     * @returns {Object} Результат создания с полями valid, message
      */
     addViolationToNode(nodeId) {
         const node = this.findNodeById(nodeId);
 
-        // Используем валидацию из ValidationTree
-        const validation = ValidationTree.canAddContent(node, 'violation');
-        if (!validation.success) return validation;
+        const validation = ValidationTree.canAddContent(node, AppConfig.nodeTypes.VIOLATION);
+        if (!validation.valid) return validation;
 
         const violationId = this._generateId('violation');
         const violationNode = this._createContentNode(nodeId, violationId, 'violation');
@@ -147,29 +127,17 @@ Object.assign(AppState, {
         this.violations[violationId] = violation;
         this.generateNumbering();
 
-        return {success: true, violation, violationNode};
+        return ValidationCore.success();
     },
 
-    /**
-     * Создает узел контента для дерева (универсальная фабрика)
-     * @private
-     * @param {string} parentId - ID родительского узла
-     * @param {string} contentId - ID контента (tableId/textBlockId/violationId)
-     * @param {string} type - Тип узла ('table', 'textblock', 'violation')
-     * @param {string} [label=''] - Название узла
-     * @param {boolean} [protected=false] - Защита от перемещения
-     * @param {boolean} [deletable=true] - Возможность удаления
-     * @returns {Object} Узел контента
-     */
+    /** @private */
     _createContentNode(parentId, contentId, type, label = '', protected = false, deletable = true) {
-        // Маппинг типов на названия по умолчанию из конфига
         const defaultLabels = {
             table: AppConfig.tree.labels.table,
             textblock: AppConfig.tree.labels.textBlock,
             violation: AppConfig.tree.labels.violation
         };
 
-        // Маппинг типов на названия свойств ID
         const idProps = {
             table: 'tableId',
             textblock: 'textBlockId',
@@ -186,7 +154,6 @@ Object.assign(AppState, {
             deletable
         };
 
-        // Обработка кастомных названий
         if (label === '') {
             node.customLabel = '';
         } else if (label) {
@@ -196,13 +163,7 @@ Object.assign(AppState, {
         return node;
     },
 
-    /**
-     * Создает объект текстового блока
-     * @private
-     * @param {string} textBlockId - ID текстового блока
-     * @param {string} nodeId - ID узла
-     * @returns {Object} Объект текстового блока
-     */
+    /** @private */
     _createTextBlockObject(textBlockId, nodeId) {
         const defaults = AppConfig.content.defaults;
 
@@ -220,13 +181,7 @@ Object.assign(AppState, {
         };
     },
 
-    /**
-     * Создает объект нарушения с полной структурой
-     * @private
-     * @param {string} violationId - ID нарушения
-     * @param {string} nodeId - ID узла
-     * @returns {Object} Объект нарушения
-     */
+    /** @private */
     _createViolationObject(violationId, nodeId) {
         return {
             id: violationId,
@@ -260,33 +215,17 @@ Object.assign(AppState, {
         };
     },
 
-    /**
-     * Создает таблицу метрик для пункта 5.*
-     * @private
-     * @param {string} nodeId - ID узла
-     * @param {string} nodeNumber - Номер узла
-     * @returns {Object} Результат создания
-     */
+    /** @private */
     _createMetricsTable(nodeId, nodeNumber) {
         const node = this.findNodeById(nodeId);
 
-        // Используем валидацию из ValidationTree
-        const validation = ValidationTree.canAddContent(node, 'table');
-        if (!validation.success) return validation;
+        const validation = ValidationTree.canAddContent(node, AppConfig.nodeTypes.TABLE);
+        if (!validation.valid) return validation;
 
         const tableId = this._generateId('table');
         const tableLabel = `Объем выявленных отклонений (В метриках) по ${nodeNumber}`;
 
-        const tableNode = this._createContentNode(
-            nodeId,
-            tableId,
-            'table',
-            tableLabel,
-            true,
-            true
-        );
-
-        // Добавляем специфичные флаги после создания базового узла
+        const tableNode = this._createContentNode(nodeId, tableId, 'table', tableLabel, true, true);
         tableNode.isMetricsTable = true;
 
         node.children.unshift(tableNode);
@@ -305,14 +244,10 @@ Object.assign(AppState, {
         };
 
         this.tables[tableId] = table;
-        return {success: true, table, tableNode};
+        return ValidationCore.success();
     },
 
-    /**
-     * Создает grid для таблицы метрик
-     * @private
-     * @returns {Array} Grid-структура
-     */
+    /** @private */
     _createMetricsGrid() {
         const grid = [];
 
@@ -400,25 +335,17 @@ Object.assign(AppState, {
         grid.push(headerRow2);
 
         for (let r = 2; r < 4; r++) {
-            const dataRow = this._createDataRow(r, 7);
-            grid.push(dataRow);
+            grid.push(this._createDataRow(r, 7));
         }
 
         return grid;
     },
 
-    /**
-     * Создает главную таблицу метрик для пункта 5
-     * @private
-     * @returns {Object} Результат создания
-     */
+    /** @private */
     _createMainMetricsTable() {
         const node5 = this.findNodeById('5');
         if (!node5) {
-            return {
-                success: false,
-                reason: AppConfig.tree.validation.nodeNotFound
-            };
+            return ValidationCore.failure(AppConfig.tree.validation.nodeNotFound);
         }
 
         const existingTable = node5.children?.find(
@@ -426,7 +353,7 @@ Object.assign(AppState, {
         );
 
         if (existingTable) {
-            return {success: true, message: 'Таблица уже существует'};
+            return ValidationCore.success('Таблица уже существует');
         }
 
         if (!node5.children) node5.children = [];
@@ -434,16 +361,7 @@ Object.assign(AppState, {
         const tableId = this._generateId('table');
         const tableLabel = 'Объем выявленных отклонений';
 
-        const tableNode = this._createContentNode(
-            '5',
-            tableId,
-            'table',
-            tableLabel,
-            true,
-            true
-        );
-
-        // Добавляем специфичный флаг
+        const tableNode = this._createContentNode('5', tableId, 'table', tableLabel, true, true);
         tableNode.isMainMetricsTable = true;
 
         node5.children.unshift(tableNode);
@@ -462,15 +380,10 @@ Object.assign(AppState, {
         };
 
         this.tables[tableId] = table;
-        return {success: true, table, tableNode};
+        return ValidationCore.success();
     },
 
-    /**
-     * Находит все таблицы рисков в поддереве
-     * @private
-     * @param {Object} node - Корневой узел
-     * @returns {Array} Массив узлов таблиц рисков
-     */
+    /** @private */
     _findRiskTablesInSubtree(node) {
         let riskTables = [];
 
@@ -489,11 +402,7 @@ Object.assign(AppState, {
         return riskTables;
     },
 
-    /**
-     * Обновляет таблицы метрик после создания таблицы риска
-     * @private
-     * @param {string} nodeId - ID узла с таблицей риска
-     */
+    /** @private */
     _updateMetricsTablesAfterRiskTableCreated(nodeId) {
         const node = this.findNodeById(nodeId);
         if (!node) return;
@@ -520,11 +429,7 @@ Object.assign(AppState, {
         this.generateNumbering();
     },
 
-    /**
-     * Очищает таблицы метрик после удаления таблицы риска
-     * @private
-     * @param {string} deletedNodeId - ID удаленного узла
-     */
+    /** @private */
     _cleanupMetricsTablesAfterRiskTableDeleted(deletedNodeId) {
         const node5 = this.findNodeById('5');
         if (!node5?.children) return;
@@ -568,30 +473,17 @@ Object.assign(AppState, {
         this.generateNumbering();
     },
 
-    /**
-     * Создает таблицу регулярного риска
-     * @private
-     * @param {string} nodeId - ID узла
-     * @returns {Object} Результат создания
-     */
+    /** @private */
     _createRegularRiskTable(nodeId) {
         const node = this.findNodeById(nodeId);
 
-        // Используем валидацию из ValidationTree
-        const validation = ValidationTree.canAddContent(node, 'table');
-        if (!validation.success) return validation;
+        const validation = ValidationTree.canAddContent(node, AppConfig.nodeTypes.TABLE);
+        if (!validation.valid) return validation;
 
         const preset = AppConfig.content.tablePresets.regularRisk;
         const tableId = this._generateId('table');
 
-        const tableNode = this._createContentNode(
-            nodeId,
-            tableId,
-            'table',
-            preset.label,
-            true,
-            true
-        );
+        const tableNode = this._createContentNode(nodeId, tableId, 'table', preset.label, true, true);
 
         node.children.push(tableNode);
 
@@ -608,33 +500,20 @@ Object.assign(AppState, {
         };
 
         this.tables[tableId] = table;
-        return {success: true, table, tableNode};
+        return ValidationCore.success();
     },
 
-    /**
-     * Создает таблицу операционного риска
-     * @private
-     * @param {string} nodeId - ID узла
-     * @returns {Object} Результат создания
-     */
+    /** @private */
     _createOperationalRiskTable(nodeId) {
         const node = this.findNodeById(nodeId);
 
-        // Используем валидацию из ValidationTree
-        const validation = ValidationTree.canAddContent(node, 'table');
-        if (!validation.success) return validation;
+        const validation = ValidationTree.canAddContent(node, AppConfig.nodeTypes.TABLE);
+        if (!validation.valid) return validation;
 
         const preset = AppConfig.content.tablePresets.operationalRisk;
         const tableId = this._generateId('table');
 
-        const tableNode = this._createContentNode(
-            nodeId,
-            tableId,
-            'table',
-            preset.label,
-            true,
-            true
-        );
+        const tableNode = this._createContentNode(nodeId, tableId, 'table', preset.label, true, true);
 
         node.children.push(tableNode);
 
@@ -651,14 +530,10 @@ Object.assign(AppState, {
         };
 
         this.tables[tableId] = table;
-        return {success: true, table, tableNode};
+        return ValidationCore.success();
     },
 
-    /**
-     * Создает grid для таблицы операционного риска
-     * @private
-     * @returns {Array} Grid-структура
-     */
+    /** @private */
     _createOperationalRiskGrid() {
         const grid = [];
 
@@ -742,8 +617,7 @@ Object.assign(AppState, {
         grid.push(headerRow2);
 
         for (let r = 2; r < 4; r++) {
-            const dataRow = this._createDataRow(r, 6);
-            grid.push(dataRow);
+            grid.push(this._createDataRow(r, 6));
         }
 
         return grid;

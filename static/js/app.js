@@ -9,9 +9,25 @@ class App {
      * Инициализация приложения при загрузке страницы
      */
     static init() {
-        this._initializeState();
-        this._initializeManagers();
-        this._setupEventHandlers();
+        try {
+            this._initializeState();
+        } catch (err) {
+            Notifications.error(`Ошибка инициализации состояния: ${err.message}`);
+            throw err;
+        }
+
+        try {
+            this._initializeManagers();
+        } catch (err) {
+            Notifications.error(`Ошибка инициализации менеджеров: ${err.message}`);
+            // продолжим работу, приложение частично работоспособно
+        }
+
+        try {
+            this._setupEventHandlers();
+        } catch (err) {
+            Notifications.error(`Ошибка настройки событий: ${err.message}`);
+        }
     }
 
     /**
@@ -32,13 +48,30 @@ class App {
      * @private
      */
     static _initializeManagers() {
-        treeManager.render();
+        // Оборачиваем каждый блок в try/catch для "graceful degrade"
+        try {
+            treeManager.render();
+        } catch (err) {
+            Notifications.error('Ошибка инициализации дерева: ' + err.message);
+        }
 
-        // Ждем завершения рендеринга DOM перед обновлением превью
-        requestAnimationFrame(() => PreviewManager.update());
+        try {
+            requestAnimationFrame(() => PreviewManager.update());
+        } catch (err) {
+            Notifications.error('Ошибка инициализации PreviewManager: ' + err.message);
+        }
 
-        ContextMenuManager.init();
-        HelpManager.init();
+        try {
+            ContextMenuManager.init();
+        } catch (err) {
+            Notifications.error('Ошибка инициализации ContextMenuManager: ' + err.message);
+        }
+
+        try {
+            HelpManager.init();
+        } catch (err) {
+            Notifications.error('Ошибка инициализации HelpManager: ' + err.message);
+        }
     }
 
     /**
@@ -46,9 +79,23 @@ class App {
      * @private
      */
     static _setupEventHandlers() {
-        NavigationManager.setup();
-        FormatMenuManager.setup();
-        this._setupGlobalKeyboardShortcuts();
+        try {
+            NavigationManager.setup();
+        } catch (err) {
+            Notifications.error('Ошибка NavigationManager: ' + err.message);
+        }
+
+        try {
+            FormatMenuManager.setup();
+        } catch (err) {
+            Notifications.error('Ошибка FormatMenuManager: ' + err.message);
+        }
+
+        try {
+            this._setupGlobalKeyboardShortcuts();
+        } catch (err) {
+            Notifications.error('Ошибка инициализации горячих клавиш: ' + err.message);
+        }
     }
 
     /**
@@ -57,7 +104,7 @@ class App {
      */
     static _setupGlobalKeyboardShortcuts() {
         document.addEventListener('keydown', (e) => {
-            if ((e.ctrlKey || e.metaKey) && e.code === AppConfig.hotkeys.save.code) {
+            if ((e.ctrlKey || e.metaKey) && e.code === AppConfig.hotkeys.save.key) {
                 e.preventDefault();
                 if (AppState.currentStep === 2) {
                     const generateBtn = document.getElementById('generateBtn');

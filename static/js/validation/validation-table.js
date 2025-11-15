@@ -7,7 +7,7 @@
 const ValidationTable = {
     /**
      * Проверяет заполненность заголовков всех таблиц
-     * @returns {Object} Результат валидации
+     * @returns {Object} Результат валидации с полями valid, message, isWarning
      */
     validateHeaders() {
         const emptyHeaders = [];
@@ -27,7 +27,7 @@ const ValidationTable = {
         }
 
         if (emptyHeaders.length > 0) {
-            const message = `Не заполнены заголовки таблиц:\n${emptyHeaders.join('\n')}Заполните все заголовки перед сохранением.`;
+            const message = `Не заполнены заголовки таблиц:\n${emptyHeaders.join('\n')}\nЗаполните все заголовки перед сохранением.`;
             return ValidationCore.failure(message);
         }
 
@@ -58,8 +58,8 @@ const ValidationTable = {
         }
 
         if (emptyDataTables.length > 0) {
-            const message = `⚠️ Найдены таблицы без данных:}\n${emptyDataTables.join('\n')}Вы можете продолжить сохранение.`;
-            return ValidationCore.failure(message);
+            const message = `⚠️ Найдены таблицы без данных:\n${emptyDataTables.join('\n')}\nВы можете продолжить сохранение.`;
+            return ValidationCore.warning(message);
         }
 
         return ValidationCore.success();
@@ -134,29 +134,7 @@ const ValidationTable = {
      * @returns {string} Название таблицы
      */
     _getTableName(tableId) {
-        const foundNode = this._findNodeByTableId(AppState.treeData, tableId);
-        return foundNode?.label || `Таблица ${tableId}`;
-    },
-
-    /**
-     * Рекурсивно ищет узел таблицы в дереве
-     * @private
-     * @param {Object} node - Узел для поиска
-     * @param {string} tableId - ID таблицы
-     * @returns {Object|null} Найденный узел или null
-     */
-    _findNodeByTableId(node, tableId) {
-        if (!node) return null;
-
-        if (node.tableId === tableId) return node;
-
-        if (node.children?.length) {
-            for (const child of node.children) {
-                const found = this._findNodeByTableId(child, tableId);
-                if (found) return found;
-            }
-        }
-
-        return null;
+        const node = TreeUtils.findNodeByTableId(tableId);
+        return node?.label || `Таблица ${tableId}`;
     }
 };

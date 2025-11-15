@@ -137,7 +137,8 @@ Act Constructor/
 │       ├── tree/
 │       │   ├── tree-core.js
 │       │   ├── tree-drag-drop.js
-│       │   └── tree-renderer.js
+│       │   ├── tree-renderer.js
+│       │   └── tree-utils.js
 │       ├── validation/
 │       │   ├── validation.js
 │       │   ├── validation-act.js
