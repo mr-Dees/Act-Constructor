@@ -7,6 +7,7 @@
 class AppConfig {
     /**
      * Типы узлов дерева документа
+     * @type {{ITEM: string, TABLE: string, TEXTBLOCK: string, VIOLATION: string}}
      */
     static nodeTypes = {
         ITEM: 'item',
@@ -58,13 +59,6 @@ class AppConfig {
      * Настройки диалоговых окон
      */
     static dialog = {
-        // Тексты по умолчанию
-        defaultTitle: 'Подтверждение',
-        defaultMessage: 'Вы уверены?',
-        defaultIcon: '⚠️',
-        defaultConfirmText: 'Да',
-        defaultCancelText: 'Отмена',
-
         // Анимация
         closeDelay: 200
     };
@@ -105,28 +99,12 @@ class AppConfig {
             info: 'ℹ',
             warning: '⚠'
         },
-
-        // Сообщения
-        messages: {
-            noFormatsSelected: 'Выберите хотя бы один формат для сохранения',
-            savingInProgress: '⏳ Создаём акты...',
-            unexpectedError: (error) => `Произошла непредвиденная ошибка: ${error}`,
-            initializationError: (module, error) => `Ошибка инициализации ${module}: ${error}`
-        }
     };
 
     /**
      * Настройки системы помощи
      */
     static help = {
-        // ID DOM-элементов
-        elements: {
-            helpBtn: 'helpBtn',
-            modal: 'helpModal',
-            modalTitle: 'helpModalTitle',
-            modalBody: 'helpModalBody'
-        },
-
         // ID контейнеров с инструкциями
         contentIds: {
             1: 'help-step-1-content',
@@ -398,36 +376,6 @@ class AppConfig {
         endpoints: {
             saveAct: '/api/v1/act_operations/save_act',
             downloadFile: '/api/v1/act_operations/download'
-        },
-
-        // Сообщения API
-        messages: {
-            noValidFormats: 'Не выбраны валидные форматы для сохранения',
-            fileNotFound: (filename) => `Файл "${filename}" не найден на сервере`,
-            serverError: (status, statusText) => `Ошибка сервера: ${status} ${statusText}`,
-            generalError: (error) => `Произошла ошибка: ${error}`,
-
-            // Диалог скачивания
-            downloadPrompt: {
-                title: 'Скачать созданные файлы?',
-                message: (count) => `Было успешно создано ${count} файл(ов). Хотите скачать их сейчас?`,
-                icon: '📥',
-                confirmText: 'Скачать все',
-                cancelText: 'Не нужно'
-            },
-
-            // Результаты генерации
-            generation: {
-                success: (count, formats) => `Создано ${count} файл(ов): ${formats}`,
-                partial: (success, errors) => `Успешно: ${success}, Ошибок: ${errors}`,
-                failure: 'Не удалось создать файлы'
-            },
-
-            // Результаты скачивания
-            download: {
-                success: (count) => `Успешно скачано ${count} файл(ов)`,
-                partial: (success, errors) => `Скачано: ${success}, Ошибок: ${errors}`
-            }
         }
     };
 }

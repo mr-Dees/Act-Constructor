@@ -35,35 +35,12 @@ class APIClient {
         try {
             // Последовательно создаем файлы всех форматов
             for (const format of validFormats) {
-                try {
-                    const response = await fetch(
-                        `${AppConfig.api.endpoints.saveAct}?fmt=${format}`,
-                        {
-                            method: 'POST',
-                            headers: {'Content-Type': 'application/json'},
-                            body: JSON.stringify(data)
-                        }
-                    );
+                const result = await this._generateSingleFormat(format, data);
+                results.push(result);
 
-                    if (!response.ok) {
-                        const errorText = await response.text();
-                        throw new Error(`HTTP ${response.status}: ${errorText}`);
-                    }
-
-                    const result = await response.json();
-                    results.push({
-                        format,
-                        filename: result.filename,
-                        success: true
-                    });
+                if (result.success) {
                     successCount++;
-
-                } catch (error) {
-                    results.push({
-                        format,
-                        error: error.message,
-                        success: false
-                    });
+                } else {
                     errorCount++;
                 }
             }
@@ -88,11 +65,51 @@ class APIClient {
     }
 
     /**
+     * Генерирует акт в одном формате
+     * @private
+     * @param {string} format - Формат файла
+     * @param {Object} data - Данные акта
+     * @returns {Promise<Object>} Результат генерации
+     */
+    static async _generateSingleFormat(format, data) {
+        try {
+            const response = await fetch(
+                `${AppConfig.api.endpoints.saveAct}?fmt=${format}`,
+                {
+                    method: 'POST',
+                    headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify(data)
+                }
+            );
+
+            if (!response.ok) {
+                const errorText = await response.text();
+                throw new Error(`HTTP ${response.status}: ${errorText}`);
+            }
+
+            const result = await response.json();
+            return {
+                format,
+                filename: result.filename,
+                success: true
+            };
+
+        } catch (error) {
+            console.error(`Ошибка генерации формата ${format}:`, error);
+            return {
+                format,
+                error: error.message,
+                success: false
+            };
+        }
+    }
+
+    /**
      * Показывает результаты генерации файлов
      * @private
      * @param {number} successCount - Количество успешно созданных файлов
      * @param {number} errorCount - Количество ошибок
-     * @param {Array} results - Массив результатов
+     * @param {Array<Object>} results - Массив результатов
      */
     static _showGenerationResults(successCount, errorCount, results) {
         if (successCount > 0 && errorCount === 0) {
@@ -120,7 +137,7 @@ class APIClient {
     /**
      * Обрабатывает предложение скачать созданные файлы
      * @private
-     * @param {Array} results - Массив результатов генерации
+     * @param {Array<Object>} results - Массив результатов генерации
      * @param {number} successCount - Количество успешно созданных файлов
      */
     static async _handleDownloadPrompt(results, successCount) {
@@ -140,13 +157,14 @@ class APIClient {
     /**
      * Скачивает все успешно созданные файлы
      * @private
-     * @param {Array} results - Массив результатов генерации
+     * @param {Array<Object>} results - Массив результатов генерации
      */
     static async _downloadAllFiles(results) {
+        const successfulResults = results.filter(r => r.success);
         let downloadedCount = 0;
         let downloadErrors = 0;
 
-        for (const result of results.filter(r => r.success)) {
+        for (const result of successfulResults) {
             try {
                 await this.downloadFile(result.filename);
                 downloadedCount++;
@@ -156,7 +174,18 @@ class APIClient {
         }
 
         // Показываем итоговое уведомление о скачивании
-        if (downloadedCount === results.filter(r => r.success).length) {
+        this._showDownloadResults(downloadedCount, downloadErrors, successfulResults.length);
+    }
+
+    /**
+     * Показывает результаты скачивания файлов
+     * @private
+     * @param {number} downloadedCount - Количество скачанных файлов
+     * @param {number} downloadErrors - Количество ошибок
+     * @param {number} totalFiles - Общее количество файлов
+     */
+    static _showDownloadResults(downloadedCount, downloadErrors, totalFiles) {
+        if (downloadedCount === totalFiles) {
             Notifications.success(
                 `Успешно скачано ${downloadedCount} файл(ов)`,
                 AppConfig.notifications.duration.success
@@ -173,6 +202,7 @@ class APIClient {
      * Скачивает сгенерированный файл
      *
      * @param {string} filename - Имя файла для скачивания
+     * @returns {Promise<void>}
      * @throws {Error} При ошибке скачивания
      */
     static async downloadFile(filename) {
@@ -191,22 +221,30 @@ class APIClient {
             }
 
             const blob = await response.blob();
-
-            // Создаем временную ссылку для инициации скачивания
-            const url = window.URL.createObjectURL(blob);
-            const a = document.createElement('a');
-            a.href = url;
-            a.download = filename;
-
-            document.body.appendChild(a);
-            a.click();
-
-            // Освобождаем память
-            window.URL.revokeObjectURL(url);
-            document.body.removeChild(a);
+            this._triggerDownload(blob, filename);
 
         } catch (error) {
             throw error;
         }
+    }
+
+    /**
+     * Инициирует скачивание blob как файла
+     * @private
+     * @param {Blob} blob - Данные файла
+     * @param {string} filename - Имя файла
+     */
+    static _triggerDownload(blob, filename) {
+        const url = window.URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = filename;
+
+        document.body.appendChild(a);
+        a.click();
+
+        // Освобождаем память
+        window.URL.revokeObjectURL(url);
+        document.body.removeChild(a);
     }
 }

@@ -46,7 +46,6 @@ class NavigationManager {
      */
     static _setupSaveButton() {
         const generateBtn = document.getElementById('generateBtn');
-
         generateBtn?.addEventListener('click', async () => {
             await this._handleSave(generateBtn);
         });
@@ -58,9 +57,8 @@ class NavigationManager {
      * @param {HTMLElement} generateBtn - Кнопка сохранения
      */
     static async _handleSave(generateBtn) {
-        const selectedFormats = FormatMenuManager.getSelectedFormats();
-
         // Валидация форматов
+        const selectedFormats = FormatMenuManager.getSelectedFormats();
         if (selectedFormats.length === 0) {
             Notifications.error(
                 'Выберите хотя бы один формат для сохранения',
@@ -70,15 +68,41 @@ class NavigationManager {
         }
 
         // Валидация структуры акта
-        const validationResult = ValidationAct.validateStructure();
-        if (!validationResult.valid) {
+        if (!this._validateStructure()) return;
+
+        // Валидация таблиц
+        if (!this._validateTables()) return;
+
+        // Синхронизация данных из DOM
+        ItemsRenderer.syncDataToState();
+
+        // Выполнение сохранения с блокировкой UI
+        await this._performSave(generateBtn, selectedFormats);
+    }
+
+    /**
+     * Валидация структуры акта
+     * @private
+     * @returns {boolean} true если валидация прошла успешно
+     */
+    static _validateStructure() {
+        const result = ValidationAct.validateStructure();
+        if (!result.valid) {
             Notifications.error(
-                validationResult.message,
+                result.message,
                 AppConfig.notifications.duration.error
             );
-            return;
+            return false;
         }
+        return true;
+    }
 
+    /**
+     * Валидация таблиц
+     * @private
+     * @returns {boolean} true если валидация прошла успешно
+     */
+    static _validateTables() {
         // Критическая проверка заголовков таблиц
         const headerCheckResult = ValidationTable.validateHeaders();
         if (!headerCheckResult.valid) {
@@ -86,7 +110,7 @@ class NavigationManager {
                 headerCheckResult.message,
                 AppConfig.notifications.duration.warning
             );
-            return;
+            return false;
         }
 
         // Предупреждение о пустых таблицах
@@ -99,11 +123,7 @@ class NavigationManager {
             );
         }
 
-        // Синхронизация данных из DOM
-        ItemsRenderer.syncDataToState();
-
-        // Выполнение сохранения с блокировкой UI
-        await this._performSave(generateBtn, selectedFormats);
+        return true;
     }
 
     /**

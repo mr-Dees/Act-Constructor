@@ -9,20 +9,20 @@ class DialogManager {
      * Показывает диалоговое окно с подтверждением
      *
      * @param {Object} options - Параметры диалога
-     * @param {string} options.title - Заголовок диалога
-     * @param {string} options.message - Текст сообщения
+     * @param {string} [options.title] - Заголовок диалога
+     * @param {string} [options.message] - Текст сообщения
      * @param {string} [options.icon] - Иконка (эмодзи)
      * @param {string} [options.confirmText] - Текст кнопки подтверждения
      * @param {string} [options.cancelText] - Текст кнопки отмены
      * @returns {Promise<boolean>} Promise, который резолвится true при подтверждении, false при отмене
      */
-    static show(options) {
+    static show(options = {}) {
         const {
-            title = AppConfig.dialog.defaultTitle,
-            message = AppConfig.dialog.defaultMessage,
-            icon = AppConfig.dialog.defaultIcon,
-            confirmText = AppConfig.dialog.defaultConfirmText,
-            cancelText = AppConfig.dialog.defaultCancelText
+            title = 'Подтверждение',
+            message = 'Вы уверены?',
+            icon = '⚠️',
+            confirmText = 'Да',
+            cancelText = 'Отмена'
         } = options;
 
         return new Promise((resolve) => {
@@ -35,12 +35,10 @@ class DialogManager {
                 confirmText,
                 cancelText,
                 onConfirm: () => {
-                    this.hide(overlay);
-                    resolve(true);
+                    this._closeAndResolve(overlay, resolve, true);
                 },
                 onCancel: () => {
-                    this.hide(overlay);
-                    resolve(false);
+                    this._closeAndResolve(overlay, resolve, false);
                 }
             });
 
@@ -50,14 +48,27 @@ class DialogManager {
             // Закрытие по клику на оверлей
             overlay.addEventListener('click', (e) => {
                 if (e.target === overlay) {
-                    this.hide(overlay);
-                    resolve(false);
+                    this._closeAndResolve(overlay, resolve, false);
                 }
             });
 
             // Закрытие по Escape
-            this._setupEscapeHandler(overlay, () => resolve(false));
+            this._setupEscapeHandler(overlay, () => {
+                this._closeAndResolve(overlay, resolve, false);
+            });
         });
+    }
+
+    /**
+     * Закрывает диалог и резолвит промис
+     * @private
+     * @param {HTMLElement} overlay - Элемент оверлея
+     * @param {Function} resolve - Функция resolve промиса
+     * @param {boolean} result - Результат для resolve
+     */
+    static _closeAndResolve(overlay, resolve, result) {
+        this.hide(overlay);
+        resolve(result);
     }
 
     /**
@@ -75,6 +86,13 @@ class DialogManager {
      * Создает диалоговое окно
      * @private
      * @param {Object} params - Параметры диалога
+     * @param {string} params.title - Заголовок
+     * @param {string} params.message - Сообщение
+     * @param {string} params.icon - Иконка
+     * @param {string} params.confirmText - Текст кнопки подтверждения
+     * @param {string} params.cancelText - Текст кнопки отмены
+     * @param {Function} params.onConfirm - Обработчик подтверждения
+     * @param {Function} params.onCancel - Обработчик отмены
      * @returns {HTMLElement} Элемент диалога
      */
     static _createDialog(params) {
@@ -93,33 +111,42 @@ class DialogManager {
         const messageEl = this._createElement('p', 'dialog-message', message);
 
         // Контейнер кнопок
-        const buttonsContainer = document.createElement('div');
-        buttonsContainer.className = 'dialog-buttons';
-
-        // Кнопка отмены
-        const cancelBtn = this._createButton(
-            'btn btn-secondary',
+        const buttonsContainer = this._createButtonsContainer(
+            confirmText,
             cancelText,
+            onConfirm,
             onCancel
         );
 
-        // Кнопка подтверждения
-        const confirmBtn = this._createButton(
-            'btn btn-primary',
-            confirmText,
-            onConfirm
-        );
-
         // Собираем диалог
-        buttonsContainer.appendChild(cancelBtn);
-        buttonsContainer.appendChild(confirmBtn);
-
         dialog.appendChild(iconEl);
         dialog.appendChild(titleEl);
         dialog.appendChild(messageEl);
         dialog.appendChild(buttonsContainer);
 
         return dialog;
+    }
+
+    /**
+     * Создает контейнер с кнопками
+     * @private
+     * @param {string} confirmText - Текст кнопки подтверждения
+     * @param {string} cancelText - Текст кнопки отмены
+     * @param {Function} onConfirm - Обработчик подтверждения
+     * @param {Function} onCancel - Обработчик отмены
+     * @returns {HTMLElement} Контейнер с кнопками
+     */
+    static _createButtonsContainer(confirmText, cancelText, onConfirm, onCancel) {
+        const container = document.createElement('div');
+        container.className = 'dialog-buttons';
+
+        const cancelBtn = this._createButton('btn btn-secondary', cancelText, onCancel);
+        const confirmBtn = this._createButton('btn btn-primary', confirmText, onConfirm);
+
+        container.appendChild(cancelBtn);
+        container.appendChild(confirmBtn);
+
+        return container;
     }
 
     /**
@@ -163,7 +190,6 @@ class DialogManager {
         const escapeHandler = (e) => {
             if (e.key === 'Escape') {
                 onEscape();
-                this.hide(overlay);
                 document.removeEventListener('keydown', escapeHandler);
             }
         };
@@ -175,11 +201,11 @@ class DialogManager {
      * @param {HTMLElement} overlay - Элемент оверлея для удаления
      */
     static hide(overlay) {
-        if (overlay && overlay.parentNode) {
-            overlay.classList.add('hidden');
-            setTimeout(() => {
-                overlay.remove();
-            }, AppConfig.dialog.closeDelay);
-        }
+        if (!overlay || !overlay.parentNode) return;
+
+        overlay.classList.add('hidden');
+        setTimeout(() => {
+            overlay.remove();
+        }, AppConfig.dialog.closeDelay);
     }
 }

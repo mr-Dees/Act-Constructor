@@ -12,7 +12,10 @@ class FormatMenuManager {
         const dropdownBtn = document.getElementById('formatDropdownBtn');
         const formatMenu = document.getElementById('formatMenu');
 
-        if (!dropdownBtn || !formatMenu) return;
+        if (!dropdownBtn || !formatMenu) {
+            console.warn('FormatMenuManager: элементы меню форматов не найдены');
+            return;
+        }
 
         this._setupToggle(dropdownBtn, formatMenu);
         this._setupOutsideClick(dropdownBtn, formatMenu);
@@ -49,9 +52,10 @@ class FormatMenuManager {
         const viewportHeight = window.innerHeight;
         const spaceBelow = viewportHeight - buttonRect.bottom;
         const spaceAbove = buttonRect.top;
+        const menuMinHeight = 200;
 
         // Показываем меню сверху, если снизу недостаточно места
-        if (spaceBelow < 200 && spaceAbove > 200) {
+        if (spaceBelow < menuMinHeight && spaceAbove > menuMinHeight) {
             menu.style.bottom = 'calc(100% + 8px)';
             menu.style.top = 'auto';
         } else {
@@ -111,34 +115,24 @@ class FormatMenuManager {
 
         if (selectedFormats.length > 0) {
             const formatsText = selectedFormats.map(f => f.toUpperCase()).join(' + ');
-
-            this._setIndicator(dropdownBtn, formatsText);
-            this._updateTooltips(generateBtn, dropdownBtn, formatsText);
+            this._setIndicators(generateBtn, dropdownBtn, formatsText);
         } else {
             this._clearIndicators(generateBtn, dropdownBtn);
         }
     }
 
     /**
-     * Установка индикатора на кнопке
-     * @private
-     * @param {HTMLElement} button - Кнопка для индикатора
-     * @param {string} text - Текст индикатора
-     */
-    static _setIndicator(button, text) {
-        button.setAttribute('data-formats', text);
-        button.classList.add('has-formats');
-    }
-
-    /**
-     * Обновление подсказок кнопок
+     * Установка индикаторов на кнопках
      * @private
      * @param {HTMLElement} generateBtn - Кнопка сохранения
      * @param {HTMLElement} dropdownBtn - Кнопка меню
      * @param {string} formatsText - Текст с форматами
      */
-    static _updateTooltips(generateBtn, dropdownBtn, formatsText) {
+    static _setIndicators(generateBtn, dropdownBtn, formatsText) {
+        dropdownBtn.setAttribute('data-formats', formatsText);
+        dropdownBtn.classList.add('has-formats');
         dropdownBtn.title = `Выбрано: ${formatsText}`;
+
         generateBtn.title = `Сохранить в форматах: ${formatsText}`;
     }
 
@@ -149,12 +143,10 @@ class FormatMenuManager {
      * @param {HTMLElement} dropdownBtn - Кнопка меню
      */
     static _clearIndicators(generateBtn, dropdownBtn) {
-        [generateBtn, dropdownBtn].forEach(btn => {
-            btn.removeAttribute('data-formats');
-            btn.classList.remove('has-formats');
-        });
+        dropdownBtn.removeAttribute('data-formats');
+        dropdownBtn.classList.remove('has-formats');
+        dropdownBtn.title = 'Выбрать форматы';
 
         generateBtn.title = 'Выберите хотя бы один формат';
-        dropdownBtn.title = 'Выбрать форматы';
     }
 }

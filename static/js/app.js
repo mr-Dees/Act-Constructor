@@ -11,22 +11,11 @@ class App {
     static init() {
         try {
             this._initializeState();
-        } catch (err) {
-            Notifications.error(`Ошибка инициализации состояния: ${err.message}`);
-            throw err;
-        }
-
-        try {
             this._initializeManagers();
-        } catch (err) {
-            Notifications.error(`Ошибка инициализации менеджеров: ${err.message}`);
-            // продолжим работу, приложение частично работоспособно
-        }
-
-        try {
             this._setupEventHandlers();
         } catch (err) {
-            Notifications.error(`Ошибка настройки событий: ${err.message}`);
+            console.error('Критическая ошибка инициализации приложения:', err);
+            Notifications.error(`Ошибка инициализации приложения: ${err.message}`);
         }
     }
 
@@ -35,11 +24,17 @@ class App {
      * @private
      */
     static _initializeState() {
-        AppState.initializeTree();
-        AppState.generateNumbering();
+        try {
+            AppState.initializeTree();
+            AppState.generateNumbering();
 
-        if (!AppState.tableUISizes) {
-            AppState.tableUISizes = {};
+            if (!AppState.tableUISizes) {
+                AppState.tableUISizes = {};
+            }
+        } catch (err) {
+            console.error('Ошибка инициализации состояния:', err);
+            Notifications.error(`Ошибка инициализации состояния: ${err.message}`);
+            throw err;
         }
     }
 
@@ -48,29 +43,20 @@ class App {
      * @private
      */
     static _initializeManagers() {
-        // Оборачиваем каждый блок в try/catch для "graceful degrade"
-        try {
-            treeManager.render();
-        } catch (err) {
-            Notifications.error('Ошибка инициализации дерева: ' + err.message);
-        }
+        const managers = [
+            {name: 'Tree', fn: () => treeManager.render()},
+            {name: 'Preview', fn: () => requestAnimationFrame(() => PreviewManager.update())},
+            {name: 'ContextMenu', fn: () => ContextMenuManager.init()},
+            {name: 'Help', fn: () => HelpManager.init()}
+        ];
 
-        try {
-            requestAnimationFrame(() => PreviewManager.update());
-        } catch (err) {
-            Notifications.error('Ошибка инициализации PreviewManager: ' + err.message);
-        }
-
-        try {
-            ContextMenuManager.init();
-        } catch (err) {
-            Notifications.error('Ошибка инициализации ContextMenuManager: ' + err.message);
-        }
-
-        try {
-            HelpManager.init();
-        } catch (err) {
-            Notifications.error('Ошибка инициализации HelpManager: ' + err.message);
+        for (const manager of managers) {
+            try {
+                manager.fn();
+            } catch (err) {
+                console.error(`Ошибка инициализации ${manager.name}:`, err);
+                Notifications.error(`Ошибка инициализации ${manager.name}: ${err.message}`);
+            }
         }
     }
 
@@ -79,22 +65,19 @@ class App {
      * @private
      */
     static _setupEventHandlers() {
-        try {
-            NavigationManager.setup();
-        } catch (err) {
-            Notifications.error('Ошибка NavigationManager: ' + err.message);
-        }
+        const handlers = [
+            {name: 'Navigation', fn: () => NavigationManager.setup()},
+            {name: 'FormatMenu', fn: () => FormatMenuManager.setup()},
+            {name: 'Hotkeys', fn: () => this._setupGlobalKeyboardShortcuts()}
+        ];
 
-        try {
-            FormatMenuManager.setup();
-        } catch (err) {
-            Notifications.error('Ошибка FormatMenuManager: ' + err.message);
-        }
-
-        try {
-            this._setupGlobalKeyboardShortcuts();
-        } catch (err) {
-            Notifications.error('Ошибка инициализации горячих клавиш: ' + err.message);
+        for (const handler of handlers) {
+            try {
+                handler.fn();
+            } catch (err) {
+                console.error(`Ошибка настройки ${handler.name}:`, err);
+                Notifications.error(`Ошибка настройки ${handler.name}: ${err.message}`);
+            }
         }
     }
 
@@ -106,6 +89,7 @@ class App {
         document.addEventListener('keydown', (e) => {
             if ((e.ctrlKey || e.metaKey) && e.code === AppConfig.hotkeys.save.key) {
                 e.preventDefault();
+
                 if (AppState.currentStep === 2) {
                     const generateBtn = document.getElementById('generateBtn');
                     generateBtn?.click();
@@ -124,7 +108,7 @@ class App {
         this._updateStepVisibility(stepNum);
         this._handleStepTransition(stepNum);
 
-        HelpManager?.updateTooltip();
+        HelpManager.updateTooltip();
     }
 
     /**

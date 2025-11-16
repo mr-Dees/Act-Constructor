@@ -6,9 +6,15 @@
  */
 class NotificationManager {
     constructor() {
+        /** @type {HTMLElement|null} Контейнер для уведомлений */
         this.container = null;
+
+        /** @type {Map<string, HTMLElement>} Активные уведомления */
         this.notifications = new Map();
+
+        /** @type {Map<string, Object>} Кеш сообщений для группировки */
         this.messageCache = new Map();
+
         this.init();
     }
 
@@ -39,8 +45,8 @@ class NotificationManager {
      * Показывает уведомление
      *
      * @param {string} message - Текст уведомления
-     * @param {string} type - Тип уведомления ('success', 'error', 'info')
-     * @param {number} duration - Длительность отображения в миллисекундах (0 = не скрывать)
+     * @param {'success'|'error'|'info'|'warning'} type - Тип уведомления
+     * @param {number} [duration] - Длительность отображения в миллисекундах (0 = не скрывать)
      * @returns {string} ID уведомления
      */
     show(message, type = 'info', duration = AppConfig.notifications.duration.info) {
@@ -139,7 +145,7 @@ class NotificationManager {
      */
     _generateId() {
         const timestamp = Date.now();
-        const random = Math.random().toString(36).substr(2, 9);
+        const random = Math.random().toString(36).substring(2, 9);
         return `notification_${timestamp}_${random}`;
     }
 
@@ -301,7 +307,7 @@ class NotificationManager {
 
         setTimeout(() => {
             if (notification.parentNode) {
-                notification.parentNode.removeChild(notification);
+                notification.remove();
             }
             this.notifications.delete(id);
         }, AppConfig.notifications.animation.hidingDuration);
@@ -322,14 +328,13 @@ class NotificationManager {
      * @returns {string} Иконка
      */
     _getIcon(type) {
-        return AppConfig.notifications.icons[type] ||
-            AppConfig.notifications.icons.info;
+        return AppConfig.notifications.icons[type] || AppConfig.notifications.icons.info;
     }
 
     /**
      * Показывает уведомление об успехе
      * @param {string} message - Текст уведомления
-     * @param {number} duration - Длительность отображения
+     * @param {number} [duration] - Длительность отображения
      * @returns {string} ID уведомления
      */
     success(message, duration = AppConfig.notifications.duration.success) {
@@ -339,7 +344,7 @@ class NotificationManager {
     /**
      * Показывает уведомление об ошибке
      * @param {string} message - Текст уведомления
-     * @param {number} duration - Длительность отображения
+     * @param {number} [duration] - Длительность отображения
      * @returns {string} ID уведомления
      */
     error(message, duration = AppConfig.notifications.duration.error) {
@@ -349,11 +354,21 @@ class NotificationManager {
     /**
      * Показывает информационное уведомление
      * @param {string} message - Текст уведомления
-     * @param {number} duration - Длительность отображения
+     * @param {number} [duration] - Длительность отображения
      * @returns {string} ID уведомления
      */
     info(message, duration = AppConfig.notifications.duration.info) {
         return this.show(message, 'info', duration);
+    }
+
+    /**
+     * Показывает предупреждение
+     * @param {string} message - Текст уведомления
+     * @param {number} [duration] - Длительность отображения
+     * @returns {string} ID уведомления
+     */
+    warning(message, duration = AppConfig.notifications.duration.warning) {
+        return this.show(message, 'warning', duration);
     }
 }
 

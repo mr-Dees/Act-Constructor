@@ -26,35 +26,31 @@ class HelpManager {
     }
 
     /**
-     * Получает все нужные DOM-элементы.
+     * Получает все нужные DOM-элементы
      * @private
-     * @returns {Object} Элементы интерфейса помощи
+     * @returns {{helpBtn: HTMLElement|null, modal: HTMLElement|null}} Элементы интерфейса помощи
      */
     static _getElements() {
         return {
-            helpBtn: document.getElementById(AppConfig.help.elements.helpBtn),
-            modal: document.getElementById(AppConfig.help.elements.modal)
+            helpBtn: document.getElementById('helpBtn'),
+            modal: document.getElementById('helpModal')
         };
     }
 
     /**
-     * Проверяет наличие обязательных элементов.
+     * Проверяет наличие обязательных элементов
      * @private
-     * @param {Object} elements - Объекты DOM элементов
-     * @returns {boolean} true если найдено, иначе false
+     * @param {{helpBtn: HTMLElement|null, modal: HTMLElement|null}} elements - Объекты DOM элементов
+     * @returns {boolean} true если все элементы найдены, иначе false
      */
     static _validateElements(elements) {
-        if (!elements.helpBtn || !elements.modal) {
-            console.warn('HelpManager: обязательные элементы не найдены');
-            return false;
-        }
-        return true;
+        return !!(elements.helpBtn && elements.modal);
     }
 
     /**
-     * Назначает события на элементы управления.
+     * Назначает события на элементы управления
      * @private
-     * @param {Object} elements - DOM-элементы
+     * @param {{helpBtn: HTMLElement, modal: HTMLElement}} elements - DOM-элементы
      */
     static _setupEventHandlers(elements) {
         elements.helpBtn.addEventListener('click', () => this.show());
@@ -73,13 +69,13 @@ class HelpManager {
     }
 
     /**
-     * Отображает модальное окно инструкции для текущего шага.
+     * Отображает модальное окно инструкции для текущего шага
      */
     static show() {
         try {
             const currentStep = AppState.currentStep || 1;
-
             const elements = this._getModalElements();
+
             if (!elements) return;
 
             const contentId = AppConfig.help.contentIds[currentStep];
@@ -99,14 +95,14 @@ class HelpManager {
     }
 
     /**
-     * Находит внутренние элементы модального окна.
+     * Находит внутренние элементы модального окна
      * @private
-     * @returns {Object|null} Элементы модального окна или null
+     * @returns {{modal: HTMLElement, title: HTMLElement, body: HTMLElement}|null} Элементы модального окна или null
      */
     static _getModalElements() {
-        const modal = document.getElementById(AppConfig.help.elements.modal);
-        const title = document.getElementById(AppConfig.help.elements.modalTitle);
-        const body = document.getElementById(AppConfig.help.elements.modalBody);
+        const modal = document.getElementById('helpModal');
+        const title = document.getElementById('helpModalTitle');
+        const body = document.getElementById('helpModalBody');
 
         if (!modal || !title || !body) {
             console.warn('HelpManager: структура модального окна неполная');
@@ -117,9 +113,9 @@ class HelpManager {
     }
 
     /**
-     * Обновляет содержимое модального окна.
+     * Обновляет содержимое модального окна
      * @private
-     * @param {Object} elements - Ссылки на элементы модального окна
+     * @param {{title: HTMLElement, body: HTMLElement}} elements - Ссылки на элементы модального окна
      * @param {number} step - Номер шага
      * @param {string} content - HTML содержимое
      */
@@ -132,6 +128,7 @@ class HelpManager {
     /**
      * Показывает модальное окно
      * @private
+     * @param {HTMLElement} modal - Элемент модального окна
      */
     static _showModal(modal) {
         modal.classList.remove('hidden');
@@ -154,10 +151,10 @@ class HelpManager {
     }
 
     /**
-     * Скрывает модальное окно.
+     * Скрывает модальное окно
      */
     static hide() {
-        const modal = document.getElementById(AppConfig.help.elements.modal);
+        const modal = document.getElementById('helpModal');
         if (modal) {
             modal.classList.add('hidden');
             this._unlockBodyScroll();
@@ -165,10 +162,10 @@ class HelpManager {
     }
 
     /**
-     * Обновляет всплывающую подсказку у кнопки помощи.
+     * Обновляет всплывающую подсказку у кнопки помощи
      */
     static updateTooltip() {
-        const helpBtn = document.getElementById(AppConfig.help.elements.helpBtn);
+        const helpBtn = document.getElementById('helpBtn');
         if (!helpBtn) return;
 
         const currentStep = AppState.currentStep || 1;
