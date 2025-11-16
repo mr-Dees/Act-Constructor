@@ -6,22 +6,42 @@
  * Делегирует специализированные операции модулям StateContent, StateTree и ValidationTree.
  */
 const AppState = {
+    /** @type {number} Текущий шаг приложения (1 или 2) */
     currentStep: 1,
+
+    /** @type {Object|null} Корневой узел дерева документа */
     treeData: null,
+
+    /** @type {Object<string, Object>} Таблицы по ID */
     tables: {},
+
+    /** @type {Object<string, Object>} Текстовые блоки по ID */
     textBlocks: {},
+
+    /** @type {Object<string, Object>} Нарушения по ID */
     violations: {},
+
+    /** @type {Object|null} Выбранный узел дерева */
     selectedNode: null,
+
+    /** @type {Array} Выбранные ячейки таблицы */
     selectedCells: [],
 
-    /** Инициализирует базовую структуру дерева */
+    /**
+     * Инициализирует базовую структуру дерева
+     * @returns {Object} Корневой узел дерева
+     */
     initializeTree() {
         this.treeData = this._createRootStructure();
         this._createInitialTables();
         return this.treeData;
     },
 
-    /** @private */
+    /**
+     * Создает корневую структуру дерева с защищенными разделами
+     * @private
+     * @returns {Object} Корневой узел
+     */
     _createRootStructure() {
         const sections = AppConfig.tree.defaultSections.map(section =>
             this._createProtectedSection(section.id, section.label)
@@ -34,7 +54,13 @@ const AppState = {
         };
     },
 
-    /** @private */
+    /**
+     * Создает защищенный раздел первого уровня
+     * @private
+     * @param {string} id - ID раздела
+     * @param {string} label - Название раздела
+     * @returns {Object} Узел раздела
+     */
     _createProtectedSection(id, label) {
         return {
             id,
@@ -46,7 +72,10 @@ const AppState = {
         };
     },
 
-    /** @private */
+    /**
+     * Создает предустановленные таблицы при инициализации
+     * @private
+     */
     _createInitialTables() {
         const presets = AppConfig.content.tablePresets;
 
@@ -56,7 +85,16 @@ const AppState = {
         this._createTableFromPreset('3', presets.repositories, presets.repositories.label, true, false);
     },
 
-    /** @private */
+    /**
+     * Создает таблицу из пресета
+     * @private
+     * @param {string} nodeId - ID узла для добавления
+     * @param {Object} preset - Конфигурация таблицы
+     * @param {string} label - Название таблицы
+     * @param {boolean} protected - Защита от изменений
+     * @param {boolean} deletable - Возможность удаления
+     * @returns {Object} Результат создания
+     */
     _createTableFromPreset(nodeId, preset, label, protected, deletable) {
         return this._createSimpleTable(
             nodeId,
@@ -69,7 +107,18 @@ const AppState = {
         );
     },
 
-    /** @private */
+    /**
+     * Создает простую таблицу
+     * @private
+     * @param {string} nodeId - ID узла
+     * @param {number} rows - Количество строк
+     * @param {number} cols - Количество колонок
+     * @param {string[]} [headers] - Заголовки колонок
+     * @param {boolean} [protected] - Защита от изменений
+     * @param {boolean} [deletable] - Возможность удаления
+     * @param {string} [label] - Название таблицы
+     * @returns {Object} Результат создания
+     */
     _createSimpleTable(nodeId, rows, cols, headers = [], protected = false, deletable = true, label = '') {
         const node = this.findNodeById(nodeId);
         if (!node) {
@@ -92,7 +141,16 @@ const AppState = {
         return ValidationCore.success();
     },
 
-    /** @private */
+    /**
+     * Создает узел таблицы в дереве
+     * @private
+     * @param {string} parentId - ID родительского узла
+     * @param {string} tableId - ID таблицы
+     * @param {string} label - Название таблицы
+     * @param {boolean} protected - Защита
+     * @param {boolean} deletable - Возможность удаления
+     * @returns {Object} Узел таблицы
+     */
     _createTableNode(parentId, tableId, label, protected, deletable) {
         const node = {
             id: `${parentId}_table_${Date.now()}`,
@@ -114,7 +172,14 @@ const AppState = {
         return node;
     },
 
-    /** @private */
+    /**
+     * Создает сетку таблицы с данными
+     * @private
+     * @param {number} rows - Количество строк данных
+     * @param {number} cols - Количество колонок
+     * @param {string[]} headers - Заголовки
+     * @returns {Array<Array>} Сетка ячеек
+     */
     _createTableGrid(rows, cols, headers) {
         const grid = [];
 
@@ -128,7 +193,13 @@ const AppState = {
         return grid;
     },
 
-    /** @private */
+    /**
+     * Создает строку заголовков
+     * @private
+     * @param {number} cols - Количество колонок
+     * @param {string[]} headers - Тексты заголовков
+     * @returns {Array} Строка ячеек заголовка
+     */
     _createHeaderRow(cols, headers) {
         return Array.from({length: cols}, (_, c) => ({
             content: headers[c] || `Колонка ${c + 1}`,
@@ -140,7 +211,13 @@ const AppState = {
         }));
     },
 
-    /** @private */
+    /**
+     * Создает строку данных
+     * @private
+     * @param {number} rowIndex - Индекс строки
+     * @param {number} cols - Количество колонок
+     * @returns {Array} Строка ячеек данных
+     */
     _createDataRow(rowIndex, cols) {
         return Array.from({length: cols}, (_, c) => ({
             content: '',
@@ -152,7 +229,17 @@ const AppState = {
         }));
     },
 
-    /** @private */
+    /**
+     * Создает объект таблицы
+     * @private
+     * @param {string} tableId - ID таблицы
+     * @param {string} nodeId - ID узла
+     * @param {Array} grid - Сетка ячеек
+     * @param {number} cols - Количество колонок
+     * @param {boolean} protected - Защита
+     * @param {boolean} deletable - Возможность удаления
+     * @returns {Object} Объект таблицы
+     */
     _createTableObject(tableId, nodeId, grid, cols, protected, deletable) {
         return {
             id: tableId,
@@ -164,14 +251,24 @@ const AppState = {
         };
     },
 
-    /** @private */
+    /**
+     * Генерирует уникальный ID
+     * @private
+     * @param {string} prefix - Префикс ID
+     * @returns {string} Уникальный ID
+     */
     _generateId(prefix) {
         const timestamp = Date.now();
-        const random = Math.random().toString(36).substr(2, 9);
+        const random = Math.random().toString(36).substring(2, 9);
         return `${prefix}_${timestamp}_${random}`;
     },
 
-    /** Рекурсивно ищет узел по ID */
+    /**
+     * Рекурсивно ищет узел по ID
+     * @param {string} id - ID искомого узла
+     * @param {Object} [node] - Начальный узел для поиска
+     * @returns {Object|null} Найденный узел или null
+     */
     findNodeById(id, node = this.treeData) {
         if (node.id === id) return node;
         if (!node.children) return null;
@@ -184,7 +281,12 @@ const AppState = {
         return null;
     },
 
-    /** Находит родительский узел */
+    /**
+     * Находит родительский узел
+     * @param {string} nodeId - ID дочернего узла
+     * @param {Object} [parent] - Начальный узел для поиска
+     * @returns {Object|null} Родительский узел или null
+     */
     findParentNode(nodeId, parent = this.treeData) {
         if (!parent.children) return null;
 
@@ -198,7 +300,10 @@ const AppState = {
         return null;
     },
 
-    /** Экспортирует состояние для отправки на бэкенд */
+    /**
+     * Экспортирует состояние для отправки на бэкенд
+     * @returns {Object} Сериализованное состояние
+     */
     exportData() {
         return {
             tree: this._serializeTree(this.treeData),
@@ -208,7 +313,12 @@ const AppState = {
         };
     },
 
-    /** @private */
+    /**
+     * Сериализует дерево рекурсивно
+     * @private
+     * @param {Object} node - Узел для сериализации
+     * @returns {Object} Сериализованный узел
+     */
     _serializeTree(node) {
         const serialized = {
             id: node.id,
@@ -217,6 +327,7 @@ const AppState = {
             protected: node.protected || false
         };
 
+        // Добавляем ID связанного контента
         if (node.type === 'table' && node.tableId) {
             serialized.tableId = node.tableId;
         } else if (node.type === 'textblock' && node.textBlockId) {
@@ -227,15 +338,21 @@ const AppState = {
             serialized.content = node.content || '';
         }
 
+        // Дополнительные поля
         if (node.customLabel) serialized.customLabel = node.customLabel;
         if (node.number) serialized.number = node.number;
 
+        // Рекурсивная сериализация детей
         serialized.children = node.children?.map(child => this._serializeTree(child)) || [];
 
         return serialized;
     },
 
-    /** @private */
+    /**
+     * Сериализует таблицы
+     * @private
+     * @returns {Object} Сериализованные таблицы
+     */
     _serializeTables() {
         const serialized = {};
 
@@ -261,7 +378,11 @@ const AppState = {
         return serialized;
     },
 
-    /** @private */
+    /**
+     * Сериализует текстовые блоки
+     * @private
+     * @returns {Object} Сериализованные текстовые блоки
+     */
     _serializeTextBlocks() {
         const serialized = {};
         const defaults = AppConfig.content.defaults;
@@ -272,11 +393,11 @@ const AppState = {
                 nodeId: block.nodeId,
                 content: block.content || '',
                 formatting: {
-                    bold: block.formatting?.bold || defaults.formatting.bold,
-                    italic: block.formatting?.italic || defaults.formatting.italic,
-                    underline: block.formatting?.underline || defaults.formatting.underline,
-                    fontSize: block.formatting?.fontSize || defaults.fontSize,
-                    alignment: block.formatting?.alignment || defaults.alignment
+                    bold: block.formatting?.bold ?? defaults.formatting.bold,
+                    italic: block.formatting?.italic ?? defaults.formatting.italic,
+                    underline: block.formatting?.underline ?? defaults.formatting.underline,
+                    fontSize: block.formatting?.fontSize ?? defaults.fontSize,
+                    alignment: block.formatting?.alignment ?? defaults.alignment
                 }
             };
         }
@@ -284,7 +405,11 @@ const AppState = {
         return serialized;
     },
 
-    /** @private */
+    /**
+     * Сериализует нарушения
+     * @private
+     * @returns {Object} Сериализованные нарушения
+     */
     _serializeViolations() {
         const serialized = {};
 

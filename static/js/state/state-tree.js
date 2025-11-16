@@ -90,10 +90,12 @@ Object.assign(AppState, {
         child.number = number;
         child.label = `${number}. ${baseLabel}`;
 
+        // Обновляем метки таблиц метрик для узлов под пунктом 5
         if (parent.id === '5' && number.startsWith('5.')) {
             this.updateMetricsTableLabel(child.id);
         }
 
+        // Рекурсивная нумерация дочерних элементов
         if (child.children?.length > 0) {
             this.generateNumbering(child, number);
         }
@@ -179,7 +181,7 @@ Object.assign(AppState, {
     },
 
     /**
-     * Добавляет узел как sibling
+     * Добавляет узел как sibling (соседний элемент)
      * @private
      * @param {string} siblingId - ID узла-соседа
      * @param {Object} newNode - Новый узел
@@ -276,7 +278,7 @@ Object.assign(AppState, {
      * Перемещает узел в новую позицию
      * @param {string} draggedNodeId - ID перемещаемого узла
      * @param {string} targetNodeId - ID целевого узла
-     * @param {string} position - Позиция: 'before', 'after', 'child'
+     * @param {'before'|'after'|'child'} position - Позиция относительно целевого узла
      * @returns {Promise<Object>} Результат операции с полями valid, message
      */
     async moveNode(draggedNodeId, targetNodeId, position) {
@@ -312,6 +314,7 @@ Object.assign(AppState, {
         this._performMove(draggedNode, draggedParent, newParent, targetNode, targetNodeId, position);
         this.generateNumbering();
 
+        // Обрабатываем таблицы метрик для узлов под пунктом 5
         if (newParent.id === '5' && draggedNode.number?.startsWith('5.')) {
             this._handleMetricsTableForNode(draggedNode);
         }
@@ -374,7 +377,7 @@ Object.assign(AppState, {
     },
 
     /**
-     * Проверяет необходимость удаления таблицы метрик
+     * Проверяет необходимость удаления таблицы метрик при перемещении
      * @private
      * @param {Object} draggedNode - Перемещаемый узел
      * @param {Object} newParent - Новый родитель
@@ -387,9 +390,11 @@ Object.assign(AppState, {
 
         if (!hasMetricsTable) return ValidationCore.success();
 
+        // Проверяем, останется ли узел под пунктом 5 первого уровня
         const willStayUnder5FirstLevel = newParent && newParent.id === '5';
         if (willStayUnder5FirstLevel) return ValidationCore.success();
 
+        // Запрашиваем подтверждение удаления таблицы метрик
         const confirmed = await DialogManager.show(
             AppConfig.content.dialogs.deleteMetricsTable
         );
@@ -430,6 +435,7 @@ Object.assign(AppState, {
      * @returns {Object} Результат проверки
      */
     _checkDepthConstraints(draggedNode, targetNode, targetNodeId, position) {
+        // Информационные узлы не учитываются в глубине
         const isInformational = ['table', 'textblock', 'violation'].includes(draggedNode.type);
         if (isInformational) return ValidationCore.success();
 
@@ -474,13 +480,16 @@ Object.assign(AppState, {
      * @returns {Object} Результат проверки
      */
     _checkFirstLevelConstraints(draggedNode, draggedParent, targetNode, targetNodeId, position) {
+        // Проверяем только при перемещении before/after
         if (position === 'child') return ValidationCore.success();
 
         const targetParent = this.findParentNode(targetNodeId);
         if (!targetParent || targetParent.id !== 'root') return ValidationCore.success();
 
+        // Если узел уже на первом уровне, разрешаем перемещение
         if (draggedParent.id === 'root') return ValidationCore.success();
 
+        // Проверяем, есть ли уже кастомный пункт 6
         const hasCustomFirstLevel = targetParent.children.some(child => {
             const num = child.label.match(/^(\d+)\./);
             return num && parseInt(num[1]) === 6;
@@ -490,6 +499,7 @@ Object.assign(AppState, {
             return ValidationCore.failure('На первом уровне уже есть дополнительный пункт (6)');
         }
 
+        // Проверяем, что добавляем только после пункта 5 или перед пунктом 6
         const targetNum = targetNode.label.match(/^(\d+)\./);
         if (!targetNum) return ValidationCore.success();
 
@@ -514,8 +524,10 @@ Object.assign(AppState, {
      * @param {string} position - Позиция
      */
     _performMove(draggedNode, draggedParent, newParent, targetNode, targetNodeId, position) {
+        // Удаляем узел из старого родителя
         draggedParent.children = draggedParent.children.filter(n => n.id !== draggedNode.id);
 
+        // Добавляем узел в новую позицию
         if (position === 'child') {
             if (!newParent.children) newParent.children = [];
             newParent.children.push(draggedNode);
@@ -525,6 +537,7 @@ Object.assign(AppState, {
             newParent.children.splice(insertIndex + offset, 0, draggedNode);
         }
 
+        // Обновляем parentId если он существует
         if (draggedNode.parentId) {
             draggedNode.parentId = newParent.id;
         }

@@ -10,8 +10,8 @@ Object.assign(AppState, {
     /**
      * Добавляет таблицу к узлу дерева
      * @param {string} nodeId - ID узла для добавления
-     * @param {number} rows - Количество строк данных (без заголовка)
-     * @param {number} cols - Количество колонок
+     * @param {number} [rows=3] - Количество строк данных (без заголовка)
+     * @param {number} [cols=3] - Количество колонок
      * @returns {Object} Результат создания таблицы с полями valid, message
      */
     addTableToNode(nodeId, rows = 3, cols = 3) {
@@ -35,7 +35,12 @@ Object.assign(AppState, {
         return ValidationCore.success();
     },
 
-    /** @private */
+    /**
+     * Генерирует заголовки колонок по умолчанию
+     * @private
+     * @param {number} cols - Количество колонок
+     * @returns {string[]} Массив заголовков
+     */
     _generateDefaultHeaders(cols) {
         return Array.from({length: cols}, (_, i) => `Колонка ${i + 1}`);
     },
@@ -67,14 +72,17 @@ Object.assign(AppState, {
 
         const isRiskTable = table && (table.isRegularRiskTable || table.isOperationalRiskTable);
 
+        // Удаляем узел из дерева
         parent.children = parent.children.filter(child => child.id !== tableNodeId);
 
+        // Удаляем данные таблицы
         if (tableNode.tableId && this.tables[tableNode.tableId]) {
             delete this.tables[tableNode.tableId];
         }
 
         this.generateNumbering();
 
+        // Обновляем таблицы метрик если удалили таблицу рисков
         if (isRiskTable) {
             this._cleanupMetricsTablesAfterRiskTableDeleted(tableNodeId);
         }
@@ -130,7 +138,17 @@ Object.assign(AppState, {
         return ValidationCore.success();
     },
 
-    /** @private */
+    /**
+     * Создает узел контента (таблица, текстовый блок, нарушение)
+     * @private
+     * @param {string} parentId - ID родительского узла
+     * @param {string} contentId - ID контента
+     * @param {'table'|'textblock'|'violation'} type - Тип контента
+     * @param {string} [label=''] - Название узла
+     * @param {boolean} [protected=false] - Защита от изменений
+     * @param {boolean} [deletable=true] - Возможность удаления
+     * @returns {Object} Узел контента
+     */
     _createContentNode(parentId, contentId, type, label = '', protected = false, deletable = true) {
         const defaultLabels = {
             table: AppConfig.tree.labels.table,
@@ -163,7 +181,13 @@ Object.assign(AppState, {
         return node;
     },
 
-    /** @private */
+    /**
+     * Создает объект текстового блока с дефолтными настройками
+     * @private
+     * @param {string} textBlockId - ID текстового блока
+     * @param {string} nodeId - ID узла
+     * @returns {Object} Объект текстового блока
+     */
     _createTextBlockObject(textBlockId, nodeId) {
         const defaults = AppConfig.content.defaults;
 
@@ -181,7 +205,13 @@ Object.assign(AppState, {
         };
     },
 
-    /** @private */
+    /**
+     * Создает объект нарушения с дефолтными настройками
+     * @private
+     * @param {string} violationId - ID нарушения
+     * @param {string} nodeId - ID узла
+     * @returns {Object} Объект нарушения
+     */
     _createViolationObject(violationId, nodeId) {
         return {
             id: violationId,
@@ -215,7 +245,13 @@ Object.assign(AppState, {
         };
     },
 
-    /** @private */
+    /**
+     * Создает таблицу метрик для пункта под разделом 5
+     * @private
+     * @param {string} nodeId - ID узла
+     * @param {string} nodeNumber - Номер узла для подписи
+     * @returns {Object} Результат создания
+     */
     _createMetricsTable(nodeId, nodeNumber) {
         const node = this.findNodeById(nodeId);
 
@@ -247,10 +283,15 @@ Object.assign(AppState, {
         return ValidationCore.success();
     },
 
-    /** @private */
+    /**
+     * Создает сетку таблицы метрик с объединенными ячейками
+     * @private
+     * @returns {Array<Array>} Сетка ячеек
+     */
     _createMetricsGrid() {
         const grid = [];
 
+        // Первая строка заголовков с объединением
         const headerRow1 = [
             {content: 'Код метрики', isHeader: true, colSpan: 1, rowSpan: 2, originRow: 0, originCol: 0},
             {content: 'Наименование метрики', isHeader: true, colSpan: 1, rowSpan: 2, originRow: 0, originCol: 1},
@@ -278,6 +319,7 @@ Object.assign(AppState, {
         ];
         grid.push(headerRow1);
 
+        // Вторая строка заголовков
         const headerRow2 = [
             {
                 content: '',
@@ -334,6 +376,7 @@ Object.assign(AppState, {
         ];
         grid.push(headerRow2);
 
+        // Строки данных
         for (let r = 2; r < 4; r++) {
             grid.push(this._createDataRow(r, 7));
         }
@@ -341,7 +384,11 @@ Object.assign(AppState, {
         return grid;
     },
 
-    /** @private */
+    /**
+     * Создает главную таблицу метрик в разделе 5
+     * @private
+     * @returns {Object} Результат создания
+     */
     _createMainMetricsTable() {
         const node5 = this.findNodeById('5');
         if (!node5) {
@@ -383,7 +430,12 @@ Object.assign(AppState, {
         return ValidationCore.success();
     },
 
-    /** @private */
+    /**
+     * Находит все таблицы рисков в поддереве
+     * @private
+     * @param {Object} node - Корневой узел поддерева
+     * @returns {Array<Object>} Массив узлов таблиц рисков
+     */
     _findRiskTablesInSubtree(node) {
         let riskTables = [];
 
@@ -402,11 +454,16 @@ Object.assign(AppState, {
         return riskTables;
     },
 
-    /** @private */
+    /**
+     * Обновляет таблицы метрик после создания таблицы рисков
+     * @private
+     * @param {string} nodeId - ID узла с новой таблицей рисков
+     */
     _updateMetricsTablesAfterRiskTableCreated(nodeId) {
         const node = this.findNodeById(nodeId);
         if (!node) return;
 
+        // Находим узел первого уровня под пунктом 5
         let ancestorNode = node;
         let parentNode = this.findParentNode(ancestorNode.id);
 
@@ -415,6 +472,7 @@ Object.assign(AppState, {
             parentNode = this.findParentNode(ancestorNode.id);
         }
 
+        // Создаем таблицу метрик для узла первого уровня
         if (parentNode?.id === '5' && ancestorNode.number?.match(/^5\.\d+$/)) {
             const hasMetricsTable = ancestorNode.children?.some(
                 child => child.type === 'table' && child.isMetricsTable === true
@@ -425,11 +483,16 @@ Object.assign(AppState, {
             }
         }
 
+        // Создаем главную таблицу метрик
         this._createMainMetricsTable();
         this.generateNumbering();
     },
 
-    /** @private */
+    /**
+     * Удаляет таблицы метрик после удаления таблицы рисков
+     * @private
+     * @param {string} deletedNodeId - ID удаленного узла
+     */
     _cleanupMetricsTablesAfterRiskTableDeleted(deletedNodeId) {
         const node5 = this.findNodeById('5');
         if (!node5?.children) return;
@@ -438,9 +501,11 @@ Object.assign(AppState, {
             child.type === 'item' && child.number?.match(/^5\.\d+$/)
         );
 
+        // Проверяем каждый узел первого уровня
         for (const firstLevelNode of firstLevelNodes) {
             const riskTables = this._findRiskTablesInSubtree(firstLevelNode);
 
+            // Если нет таблиц рисков, удаляем таблицу метрик
             if (riskTables.length === 0) {
                 const metricsTableNode = firstLevelNode.children?.find(
                     child => child.type === 'table' && child.isMetricsTable === true
@@ -455,6 +520,7 @@ Object.assign(AppState, {
             }
         }
 
+        // Проверяем необходимость главной таблицы метрик
         const allRiskTables = this._findRiskTablesInSubtree(node5);
 
         if (allRiskTables.length === 0) {
@@ -473,7 +539,12 @@ Object.assign(AppState, {
         this.generateNumbering();
     },
 
-    /** @private */
+    /**
+     * Создает таблицу регулярных рисков
+     * @private
+     * @param {string} nodeId - ID узла для добавления
+     * @returns {Object} Результат создания
+     */
     _createRegularRiskTable(nodeId) {
         const node = this.findNodeById(nodeId);
 
@@ -503,7 +574,12 @@ Object.assign(AppState, {
         return ValidationCore.success();
     },
 
-    /** @private */
+    /**
+     * Создает таблицу операционных рисков
+     * @private
+     * @param {string} nodeId - ID узла для добавления
+     * @returns {Object} Результат создания
+     */
     _createOperationalRiskTable(nodeId) {
         const node = this.findNodeById(nodeId);
 
@@ -533,10 +609,15 @@ Object.assign(AppState, {
         return ValidationCore.success();
     },
 
-    /** @private */
+    /**
+     * Создает сетку таблицы операционных рисков с объединенными ячейками
+     * @private
+     * @returns {Array<Array>} Сетка ячеек
+     */
     _createOperationalRiskGrid() {
         const grid = [];
 
+        // Первая строка заголовков
         const headerRow1 = [
             {content: 'ОР', isHeader: true, colSpan: 1, rowSpan: 1, originRow: 0, originCol: 0},
             {
@@ -590,6 +671,7 @@ Object.assign(AppState, {
         ];
         grid.push(headerRow1);
 
+        // Вторая строка заголовков
         const headerRow2 = [
             {content: 'Код процесса', isHeader: true, colSpan: 1, rowSpan: 1, originRow: 1, originCol: 0},
             {content: 'Блок - владелец процесса', isHeader: true, colSpan: 1, rowSpan: 1, originRow: 1, originCol: 1},
@@ -616,6 +698,7 @@ Object.assign(AppState, {
         ];
         grid.push(headerRow2);
 
+        // Строки данных
         for (let r = 2; r < 4; r++) {
             grid.push(this._createDataRow(r, 6));
         }
