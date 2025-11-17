@@ -145,14 +145,16 @@ const ValidationCore = {
     /**
      * Проверяет, что узел имеет допустимый тип
      * @param {Object} node - Проверяемый узел
-     * @param {Array<string>} allowedTypes - Разрешенные типы
+     * @param {string[]} allowedTypes - Разрешенные типы
      * @param {string} operation - Описание операции для сообщения
      * @returns {Object} Результат валидации
      */
     validateNodeType(node, allowedTypes, operation) {
-        if (!allowedTypes.includes(node.type)) {
+        const nodeType = node.type || 'item';
+
+        if (!allowedTypes.includes(nodeType)) {
             return this.failure(
-                `Нельзя ${operation} для узла типа "${node.type}"`
+                `Нельзя ${operation} для узла типа "${nodeType}"`
             );
         }
         return this.success();

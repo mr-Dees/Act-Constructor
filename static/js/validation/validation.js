@@ -9,6 +9,7 @@ const ActValidation = {
      * Список зарегистрированных валидаторов
      * Каждый валидатор должен возвращать объект с полями: valid, message, isWarning
      * @private
+     * @type {Function[]}
      */
     _validators: [
         () => ValidationAct.validateStructure(),
@@ -41,8 +42,8 @@ const ActValidation = {
      * Выполняет полную валидацию акта
      * @returns {Object} Результат с массивами ошибок и предупреждений
      * @returns {boolean} result.valid - Валидна ли структура
-     * @returns {Array<string>} result.errors - Список критичных ошибок
-     * @returns {Array<string>} result.warnings - Список предупреждений
+     * @returns {string[]} result.errors - Список критичных ошибок
+     * @returns {string[]} result.warnings - Список предупреждений
      * @returns {boolean} result.canProceed - Можно ли продолжить операцию
      */
     runAllValidations() {

@@ -22,7 +22,7 @@ const ValidationTable = {
 
             if (this._hasEmptyHeaders(headerRow)) {
                 const tableName = this._getTableName(tableId);
-                emptyHeaders.push(`-  ${tableName}`);
+                emptyHeaders.push(`- ${tableName}`);
             }
         }
 
@@ -53,7 +53,7 @@ const ValidationTable = {
 
             if (!this._hasDataInRows(table.grid, dataStartIndex)) {
                 const tableName = this._getTableName(tableId);
-                emptyDataTables.push(`-  ${tableName}`);
+                emptyDataTables.push(`- ${tableName}`);
             }
         }
 
@@ -78,7 +78,7 @@ const ValidationTable = {
     /**
      * Находит строку с заголовками
      * @private
-     * @param {Array} grid - Матрица таблицы
+     * @param {Array<Array>} grid - Матрица таблицы
      * @returns {Array|null} Строка заголовков или null
      */
     _findHeaderRow(grid) {
@@ -88,7 +88,7 @@ const ValidationTable = {
     /**
      * Находит индекс строки с заголовками
      * @private
-     * @param {Array} grid - Матрица таблицы
+     * @param {Array<Array>} grid - Матрица таблицы
      * @returns {number} Индекс строки или -1
      */
     _findHeaderRowIndex(grid) {
@@ -112,7 +112,7 @@ const ValidationTable = {
     /**
      * Проверяет наличие данных в строках
      * @private
-     * @param {Array} grid - Матрица таблицы
+     * @param {Array<Array>} grid - Матрица таблицы
      * @param {number} startIndex - Индекс начала данных
      * @returns {boolean} Есть ли данные
      */
