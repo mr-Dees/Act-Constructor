@@ -1,6 +1,6 @@
 /**
  * Модуль для редактирования заголовков элементов документа.
- * Обеспечивает inline-редактирование заголовков пунктов, названий таблиц.
+ * Обеспечивает inline-редактирование заголовков пунктов, названий таблиц и узлов дерева.
  */
 class ItemsTitleEditing {
     /**
@@ -11,92 +11,130 @@ class ItemsTitleEditing {
      * @param {Object} node - Узел дерева, связанный с заголовком
      */
     static startEditingItemTitle(titleElement, node) {
-        // Предотвращаем повторный вход в режим редактирования
-        if (titleElement.classList.contains('editing')) {
-            return;
-        }
+        if (titleElement.classList.contains('editing')) return;
 
-        titleElement.classList.add('editing');
-        titleElement.contentEditable = 'true';
-
-        // Извлекаем базовую метку без нумерации (убираем "1.2.3. ")
-        const labelMatch = node.label.match(/^\d+(?:\.\d+)*\.\s*(.+)$/);
-        const baseLabel = labelMatch ? labelMatch[1] : node.label;
+        const baseLabel = this._extractBaseLabel(node.label);
         const originalLabel = node.label;
 
-        titleElement.textContent = baseLabel;
-        titleElement.focus();
+        this._initializeEditing(titleElement, baseLabel);
 
-        // Выделяем весь текст для удобного редактирования
-        const range = document.createRange();
-        range.selectNodeContents(titleElement);
-        const sel = window.getSelection();
-        sel.removeAllRanges();
-        sel.addRange(range);
-
-        /**
-         * Завершает редактирование заголовка и сохраняет или отменяет изменения.
-         * При сохранении восстанавливает нумерацию и обновляет UI.
-         * @param {boolean} cancel - Если true, отменяет изменения и восстанавливает оригинал
-         */
         const finishEditing = (cancel = false) => {
-            titleElement.contentEditable = 'false';
-            titleElement.classList.remove('editing');
+            this._cleanupEditing(titleElement);
 
             if (cancel) {
                 titleElement.textContent = originalLabel;
                 return;
             }
 
-            const newBaseLabel = titleElement.textContent.trim();
-            if (newBaseLabel && newBaseLabel !== baseLabel) {
-                // Сохраняем нумерацию при обновлении метки
-                const numberMatch = node.label.match(/^(\d+(?:\.\d+)*\.)\s*/);
-                if (numberMatch) {
-                    node.label = numberMatch[1] + ' ' + newBaseLabel;
-                } else {
-                    node.label = newBaseLabel;
-                }
-
-                // Перегенерируем нумерацию всего дерева
-                AppState.generateNumbering();
-                titleElement.textContent = node.label;
-                treeManager.render();
-                PreviewManager.update();
-            } else if (!newBaseLabel) {
-                // Возвращаем старую метку если новая пустая (валидация)
-                titleElement.textContent = originalLabel;
-            } else {
-                titleElement.textContent = node.label;
-            }
+            this._saveItemTitle(titleElement, node, baseLabel, originalLabel);
         };
 
-        // Сохранение при потере фокуса (клик вне элемента)
-        const blurHandler = () => {
-            finishEditing(false);
-        };
+        this._attachEditingHandlers(titleElement, finishEditing);
+    }
 
-        // Обработка горячих клавиш
-        const keydownHandler = (e) => {
-            if (e.key === 'Enter') {
-                // Enter - сохранить изменения
-                e.preventDefault();
-                e.stopPropagation();
-                titleElement.removeEventListener('blur', blurHandler);
-                titleElement.removeEventListener('keydown', keydownHandler);
-                finishEditing(false);
-            } else if (e.key === 'Escape') {
-                // Escape - отменить изменения
-                e.preventDefault();
-                e.stopPropagation();
-                titleElement.removeEventListener('blur', blurHandler);
-                titleElement.removeEventListener('keydown', keydownHandler);
-                finishEditing(true);
-            }
-        };
+    /**
+     * Извлекает базовую метку без нумерации.
+     * Удаляет префикс вида "1.2.3. " и возвращает чистый текст.
+     * @param {string} label - Полная метка с нумерацией
+     * @returns {string} Базовая метка без нумерации
+     * @private
+     */
+    static _extractBaseLabel(label) {
+        const match = label.match(/^\d+(?:\.\d+)*\.\s*(.+)$/);
+        return match ? match[1] : label;
+    }
 
-        titleElement.addEventListener('blur', blurHandler);
-        titleElement.addEventListener('keydown', keydownHandler);
+    /**
+     * Инициализирует режим редактирования элемента.
+     * Делает элемент редактируемым, устанавливает текст и фокус.
+     * @param {HTMLElement} element - Элемент для редактирования
+     * @param {string} text - Начальный текст
+     * @private
+     */
+    static _initializeEditing(element, text) {
+        element.classList.add('editing');
+        element.contentEditable = 'true';
+        element.textContent = text;
+        element.focus();
+
+        this._selectAllText(element);
+    }
+
+    /**
+     * Выделяет весь текст в элементе для удобного редактирования.
+     * @param {HTMLElement} element - Элемент с текстом
+     * @private
+     */
+    static _selectAllText(element) {
+        const range = document.createRange();
+        range.selectNodeContents(element);
+        const selection = window.getSelection();
+        selection.removeAllRanges();
+        selection.addRange(range);
+    }
+
+    /**
+     * Очищает режим редактирования элемента.
+     * Убирает contentEditable и класс editing.
+     * @param {HTMLElement} element - Элемент для очистки
+     * @private
+     */
+    static _cleanupEditing(element) {
+        element.contentEditable = 'false';
+        element.classList.remove('editing');
+    }
+
+    /**
+     * Сохраняет отредактированный заголовок пункта.
+     * Восстанавливает нумерацию и обновляет UI.
+     * @param {HTMLElement} titleElement - Элемент заголовка
+     * @param {Object} node - Узел дерева
+     * @param {string} baseLabel - Исходная базовая метка
+     * @param {string} originalLabel - Исходная полная метка
+     * @private
+     */
+    static _saveItemTitle(titleElement, node, baseLabel, originalLabel) {
+        const newBaseLabel = titleElement.textContent.trim();
+
+        if (!newBaseLabel) {
+            // Возвращаем старую метку если новая пустая
+            titleElement.textContent = originalLabel;
+            return;
+        }
+
+        if (newBaseLabel !== baseLabel) {
+            node.label = this._buildLabelWithNumbering(node.label, newBaseLabel);
+            this._updateUI(node, titleElement);
+        } else {
+            titleElement.textContent = node.label;
+        }
+    }
+
+    /**
+     * Создает метку с сохранением нумерации.
+     * Извлекает префикс нумерации и добавляет новый текст.
+     * @param {string} currentLabel - Текущая метка с нумерацией
+     * @param {string} newText - Новый текст метки
+     * @returns {string} Метка с восстановленной нумерацией
+     * @private
+     */
+    static _buildLabelWithNumbering(currentLabel, newText) {
+        const numberMatch = currentLabel.match(/^(\d+(?:\.\d+)*\.)\s*/);
+        return numberMatch ? `${numberMatch[1]} ${newText}` : newText;
+    }
+
+    /**
+     * Обновляет UI после изменения метки.
+     * Перегенерирует нумерацию, обновляет дерево и предпросмотр.
+     * @param {Object} node - Узел дерева
+     * @param {HTMLElement} titleElement - Элемент заголовка
+     * @private
+     */
+    static _updateUI(node, titleElement) {
+        AppState.generateNumbering();
+        titleElement.textContent = node.label;
+        treeManager.render();
+        PreviewManager.update();
     }
 
     /**
@@ -107,84 +145,47 @@ class ItemsTitleEditing {
      * @param {Object} node - Узел дерева таблицы
      */
     static startEditingTableTitle(titleElement, node) {
-        // Предотвращаем повторный вход в режим редактирования
-        if (titleElement.classList.contains('editing')) {
-            return;
-        }
+        if (titleElement.classList.contains('editing')) return;
 
-        titleElement.classList.add('editing');
-        titleElement.contentEditable = 'true';
-
-        // Используем пользовательскую метку или автоматическую
         const currentLabel = node.customLabel || node.label;
-        const originalLabel = currentLabel;
+        this._initializeEditing(titleElement, currentLabel);
 
-        titleElement.textContent = currentLabel;
-        titleElement.focus();
-
-        // Выделяем весь текст для удобного редактирования
-        const range = document.createRange();
-        range.selectNodeContents(titleElement);
-        const sel = window.getSelection();
-        sel.removeAllRanges();
-        sel.addRange(range);
-
-        /**
-         * Завершает редактирование заголовка таблицы.
-         * Сохраняет пользовательское название или удаляет его при пустом значении.
-         * @param {boolean} cancel - Если true, отменяет изменения
-         */
         const finishEditing = (cancel = false) => {
-            titleElement.contentEditable = 'false';
-            titleElement.classList.remove('editing');
+            this._cleanupEditing(titleElement);
 
             if (cancel) {
-                titleElement.textContent = originalLabel;
+                titleElement.textContent = currentLabel;
                 return;
             }
 
-            const newLabel = titleElement.textContent.trim();
-            if (newLabel) {
-                // Сохраняем пользовательское название
-                node.customLabel = newLabel;
-                node.label = newLabel;
-            } else {
-                // Удаляем кастомное название если пустое (вернется автонумерация)
-                delete node.customLabel;
-                node.label = node.number || originalLabel;
-            }
-
-            // Обновляем нумерацию и UI
-            AppState.generateNumbering();
-            titleElement.textContent = node.label;
-            treeManager.render();
-            PreviewManager.update();
+            this._saveTableTitle(titleElement, node, currentLabel);
         };
 
-        // Сохранение при потере фокуса
-        const blurHandler = () => {
-            finishEditing(false);
-        };
+        this._attachEditingHandlers(titleElement, finishEditing);
+    }
 
-        // Обработка горячих клавиш
-        const keydownHandler = (e) => {
-            if (e.key === 'Enter') {
-                e.preventDefault();
-                e.stopPropagation();
-                titleElement.removeEventListener('blur', blurHandler);
-                titleElement.removeEventListener('keydown', keydownHandler);
-                finishEditing(false);
-            } else if (e.key === 'Escape') {
-                e.preventDefault();
-                e.stopPropagation();
-                titleElement.removeEventListener('blur', blurHandler);
-                titleElement.removeEventListener('keydown', keydownHandler);
-                finishEditing(true);
-            }
-        };
+    /**
+     * Сохраняет отредактированный заголовок таблицы.
+     * Устанавливает customLabel или удаляет его при пустом значении.
+     * @param {HTMLElement} titleElement - Элемент заголовка таблицы
+     * @param {Object} node - Узел дерева таблицы
+     * @param {string} originalLabel - Исходная метка
+     * @private
+     */
+    static _saveTableTitle(titleElement, node, originalLabel) {
+        const newLabel = titleElement.textContent.trim();
 
-        titleElement.addEventListener('blur', blurHandler);
-        titleElement.addEventListener('keydown', keydownHandler);
+        if (newLabel) {
+            // Сохраняем пользовательское название
+            node.customLabel = newLabel;
+            node.label = newLabel;
+        } else {
+            // Удаляем кастомное название (вернется автонумерация)
+            delete node.customLabel;
+            node.label = node.number || originalLabel;
+        }
+
+        this._updateUI(node, titleElement);
     }
 
     /**
@@ -199,79 +200,140 @@ class ItemsTitleEditing {
         if (item.classList.contains('editing')) return;
 
         item.classList.add('editing');
-        labelElement.contentEditable = true;
         treeManager.editingElement = labelElement;
 
         const originalLabel = node.label;
+        const isSpecialType = ['table', 'textblock', 'violation'].includes(node.type);
 
-        if (node.type === 'table' || node.type === 'textblock' || node.type === 'violation') {
-            const currentLabel = node.customLabel || node.label;
-            labelElement.textContent = currentLabel;
+        // Для специальных типов используем customLabel
+        if (isSpecialType) {
+            labelElement.textContent = node.customLabel || node.label;
         }
 
-        labelElement.focus();
-        const range = document.createRange();
-        range.selectNodeContents(labelElement);
-        const sel = window.getSelection();
-        sel.removeAllRanges();
-        sel.addRange(range);
+        this._initializeEditing(labelElement, labelElement.textContent);
 
         const finishEditing = (cancel = false) => {
-            labelElement.contentEditable = false;
-            item.classList.remove('editing');
-            treeManager.editingElement = null;
+            this._cleanupTreeNodeEditing(labelElement, item, treeManager);
 
             if (cancel) {
                 labelElement.textContent = originalLabel;
                 return;
             }
 
-            const newLabel = labelElement.textContent.trim();
-
-            if (node.type === 'table' || node.type === 'textblock' || node.type === 'violation') {
-                if (newLabel && newLabel !== node.label) {
-                    node.customLabel = newLabel;
-                    node.label = newLabel;
-                } else if (!newLabel) {
-                    delete node.customLabel;
-                    node.label = node.number || originalLabel;
-                    AppState.generateNumbering();
-                    labelElement.textContent = node.label;
-                }
-                treeManager.render();
-                PreviewManager.update();
-            } else {
-                if (newLabel && newLabel !== originalLabel) {
-                    node.label = newLabel;
-                    AppState.generateNumbering();
-                    treeManager.render();
-                    PreviewManager.update();
-                } else if (!newLabel) {
-                    labelElement.textContent = originalLabel;
-                } else {
-                    labelElement.textContent = node.label;
-                }
-            }
+            this._saveTreeNodeLabel(labelElement, node, originalLabel, isSpecialType);
         };
 
-        const blurHandler = () => finishEditing(false);
+        this._attachEditingHandlers(labelElement, finishEditing);
+    }
+
+    /**
+     * Очищает режим редактирования узла дерева.
+     * Убирает классы и сбрасывает состояние менеджера дерева.
+     * @param {HTMLElement} labelElement - Элемент метки
+     * @param {HTMLElement} item - Элемент узла дерева
+     * @param {TreeManager} treeManager - Экземпляр менеджера дерева
+     * @private
+     */
+    static _cleanupTreeNodeEditing(labelElement, item, treeManager) {
+        labelElement.contentEditable = 'false';
+        item.classList.remove('editing');
+        treeManager.editingElement = null;
+    }
+
+    /**
+     * Сохраняет отредактированную метку узла дерева.
+     * Обрабатывает специальные и обычные типы узлов по-разному.
+     * @param {HTMLElement} labelElement - Элемент метки
+     * @param {Object} node - Узел дерева
+     * @param {string} originalLabel - Исходная метка
+     * @param {boolean} isSpecialType - Является ли узел специальным типом
+     * @private
+     */
+    static _saveTreeNodeLabel(labelElement, node, originalLabel, isSpecialType) {
+        const newLabel = labelElement.textContent.trim();
+
+        if (isSpecialType) {
+            this._saveSpecialNodeLabel(labelElement, node, newLabel, originalLabel);
+        } else {
+            this._saveRegularNodeLabel(labelElement, node, newLabel, originalLabel);
+        }
+    }
+
+    /**
+     * Сохраняет метку специального узла (таблица, текстовый блок, нарушение).
+     * Устанавливает customLabel или восстанавливает автоматическую нумерацию.
+     * @param {HTMLElement} labelElement - Элемент метки
+     * @param {Object} node - Узел дерева
+     * @param {string} newLabel - Новая метка
+     * @param {string} originalLabel - Исходная метка
+     * @private
+     */
+    static _saveSpecialNodeLabel(labelElement, node, newLabel, originalLabel) {
+        if (newLabel && newLabel !== node.label) {
+            node.customLabel = newLabel;
+            node.label = newLabel;
+        } else if (!newLabel) {
+            delete node.customLabel;
+            node.label = node.number || originalLabel;
+            AppState.generateNumbering();
+            labelElement.textContent = node.label;
+        }
+
+        this._updateTreeUI();
+    }
+
+    /**
+     * Сохраняет метку обычного узла.
+     * Обновляет label и перегенерирует нумерацию.
+     * @param {HTMLElement} labelElement - Элемент метки
+     * @param {Object} node - Узел дерева
+     * @param {string} newLabel - Новая метка
+     * @param {string} originalLabel - Исходная метка
+     * @private
+     */
+    static _saveRegularNodeLabel(labelElement, node, newLabel, originalLabel) {
+        if (newLabel && newLabel !== originalLabel) {
+            node.label = newLabel;
+            AppState.generateNumbering();
+            this._updateTreeUI();
+        } else if (!newLabel) {
+            labelElement.textContent = originalLabel;
+        } else {
+            labelElement.textContent = node.label;
+        }
+    }
+
+    /**
+     * Обновляет UI дерева и предпросмотра.
+     * Вызывается после изменения структуры или меток дерева.
+     * @private
+     */
+    static _updateTreeUI() {
+        treeManager.render();
+        PreviewManager.update();
+    }
+
+    /**
+     * Привязывает обработчики событий для редактирования.
+     * Обрабатывает потерю фокуса (blur) и нажатия клавиш (Enter/Escape).
+     * @param {HTMLElement} element - Редактируемый элемент
+     * @param {Function} finishCallback - Callback для завершения редактирования
+     * @private
+     */
+    static _attachEditingHandlers(element, finishCallback) {
+        const blurHandler = () => finishCallback(false);
+
         const keydownHandler = (e) => {
-            if (e.key === 'Enter') {
+            if (e.key === 'Enter' || e.key === 'Escape') {
                 e.preventDefault();
                 e.stopPropagation();
-                labelElement.removeEventListener('blur', blurHandler);
-                labelElement.removeEventListener('keydown', keydownHandler);
-                finishEditing(false);
-            } else if (e.key === 'Escape') {
-                e.preventDefault();
-                e.stopPropagation();
-                labelElement.removeEventListener('blur', blurHandler);
-                labelElement.removeEventListener('keydown', keydownHandler);
-                finishEditing(true);
+                element.removeEventListener('blur', blurHandler);
+                element.removeEventListener('keydown', keydownHandler);
+                finishCallback(e.key === 'Escape');
             }
         };
 
-        labelElement.addEventListener('blur', blurHandler);
-        labelElement.addEventListener('keydown', keydownHandler);
+        element.addEventListener('blur', blurHandler);
+        element.addEventListener('keydown', keydownHandler);
     }
 }
