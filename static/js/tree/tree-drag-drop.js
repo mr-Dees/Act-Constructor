@@ -5,12 +5,26 @@
  * Поддерживает валидацию перемещений и запрет на перетаскивание узлов с таблицами рисков.
  */
 class TreeDragDrop {
+    /**
+     * @param {TreeManager} manager - Экземпляр менеджера дерева
+     */
     constructor(manager) {
+        /** @type {TreeManager} */
         this.manager = manager;
+
+        /** @type {Object|null} Перетаскиваемый узел данных */
         this.draggedNode = null;
+
+        /** @type {HTMLElement|null} Перетаскиваемый DOM элемент */
         this.draggedElement = null;
+
+        /** @type {HTMLElement|null} Текущая зона сброса */
         this.currentDropZone = null;
+
+        /** @type {string|null} Позиция сброса ('before', 'after', 'child') */
         this.dropPosition = null;
+
+        /** @type {Object|null} Целевой узел для сброса */
         this.dropTargetNode = null;
     }
 
@@ -19,11 +33,13 @@ class TreeDragDrop {
      * Привязывает обработчики событий и активирует перетаскивание для доступных элементов
      */
     init() {
-        this.manager.container.addEventListener('dragstart', this.handleDragStart.bind(this));
-        this.manager.container.addEventListener('dragover', this.handleDragOver.bind(this));
-        this.manager.container.addEventListener('dragleave', this.handleDragLeave.bind(this));
-        this.manager.container.addEventListener('drop', this.handleDrop.bind(this));
-        this.manager.container.addEventListener('dragend', this.handleDragEnd.bind(this));
+        const container = this.manager.container;
+
+        container.addEventListener('dragstart', this.handleDragStart.bind(this));
+        container.addEventListener('dragover', this.handleDragOver.bind(this));
+        container.addEventListener('dragleave', this.handleDragLeave.bind(this));
+        container.addEventListener('drop', this.handleDrop.bind(this));
+        container.addEventListener('dragend', this.handleDragEnd.bind(this));
 
         this.enableDraggableItems();
     }
@@ -34,9 +50,8 @@ class TreeDragDrop {
      */
     enableDraggableItems() {
         const observer = new MutationObserver(() => {
-            this.manager.container.querySelectorAll('.tree-item:not(.protected)').forEach(item => {
-                item.setAttribute('draggable', 'true');
-            });
+            this.manager.container.querySelectorAll('.tree-item:not(.protected)')
+                .forEach(item => item.setAttribute('draggable', 'true'));
         });
 
         observer.observe(this.manager.container, {
@@ -44,9 +59,9 @@ class TreeDragDrop {
             subtree: true
         });
 
-        this.manager.container.querySelectorAll('.tree-item:not(.protected)').forEach(item => {
-            item.setAttribute('draggable', 'true');
-        });
+        // Начальная установка
+        this.manager.container.querySelectorAll('.tree-item:not(.protected)')
+            .forEach(item => item.setAttribute('draggable', 'true'));
     }
 
     /**
@@ -120,12 +135,8 @@ class TreeDragDrop {
      */
     canAcceptAsChild(targetNode, draggedNode) {
         // Информационные элементы не могут иметь детей
-        if (targetNode.type === 'table' || targetNode.type === 'textblock' || targetNode.type === 'violation') {
-            return false;
-        }
-
-        // Информационные элементы могут быть детьми любых обычных пунктов
-        return true;
+        const informationalTypes = ['table', 'textblock', 'violation'];
+        return !informationalTypes.includes(targetNode.type);
     }
 
     /**
@@ -154,6 +165,21 @@ class TreeDragDrop {
             return;
         }
 
+        const position = this._calculateDropPosition(e, treeItem, targetNode);
+        if (position) {
+            this.updateDropZone(treeItem, `drop-${position}`, position, targetNode);
+        }
+    }
+
+    /**
+     * Вычисляет позицию сброса относительно целевого элемента
+     * @private
+     * @param {DragEvent} e - Событие dragover
+     * @param {HTMLElement} treeItem - Целевой элемент
+     * @param {Object} targetNode - Целевой узел
+     * @returns {string|null} Позиция ('before', 'after', 'child') или null
+     */
+    _calculateDropPosition(e, treeItem, targetNode) {
         const rect = treeItem.getBoundingClientRect();
         const mouseY = e.clientY;
 
@@ -165,9 +191,6 @@ class TreeDragDrop {
         const relativeY = mouseY - labelRect.top;
         const labelHeight = labelRect.height;
 
-        let position = null;
-        let dropZoneClass = null;
-
         // Проверяем, может ли целевой узел принять перетаскиваемый как дочерний
         const canBeChild = this.canAcceptAsChild(targetNode, this.draggedNode);
 
@@ -176,35 +199,22 @@ class TreeDragDrop {
         const isDraggedInformational = ['table', 'textblock', 'violation'].includes(this.draggedNode.type);
 
         if (isDraggedInformational && draggedParent && draggedParent.id === targetNode.id) {
-            // Перетаскиваем информационный элемент на его текущего родителя
-            position = 'child';
-            dropZoneClass = 'drop-child';
-        } else if (relativeY < labelHeight * 0.15) {
-            // Верхние 15% label - before
-            position = 'before';
-            dropZoneClass = 'drop-before';
+            return 'child';
+        }
+
+        // Определяем зону сброса
+        if (relativeY < labelHeight * 0.15) {
+            return 'before';
         } else if (relativeY > labelHeight * 0.85) {
-            // Нижние 15% label - after
-            position = 'after';
-            dropZoneClass = 'drop-after';
+            return 'after';
         } else {
             // Средние 70% - child, если возможно
             if (canBeChild) {
-                position = 'child';
-                dropZoneClass = 'drop-child';
-            } else {
-                // Если нельзя child, выбираем ближайшую границу
-                if (relativeY < labelHeight * 0.5) {
-                    position = 'before';
-                    dropZoneClass = 'drop-before';
-                } else {
-                    position = 'after';
-                    dropZoneClass = 'drop-after';
-                }
+                return 'child';
             }
+            // Если нельзя child, выбираем ближайшую границу
+            return relativeY < labelHeight * 0.5 ? 'before' : 'after';
         }
-
-        this.updateDropZone(treeItem, dropZoneClass, position, targetNode);
     }
 
     /**
@@ -249,6 +259,8 @@ class TreeDragDrop {
         if (!treeItem) return;
 
         const rect = treeItem.getBoundingClientRect();
+
+        // Проверяем, действительно ли курсор покинул элемент
         if (e.clientX < rect.left || e.clientX >= rect.right ||
             e.clientY < rect.top || e.clientY >= rect.bottom) {
 
@@ -281,16 +293,14 @@ class TreeDragDrop {
         if (result.valid) {
             this.manager.render();
             PreviewManager.update('previewTrim', 30);
+
             if (AppState.currentStep === 2) {
                 ItemsRenderer.renderAll();
             }
 
             Notifications.success('Элемент успешно перемещен');
-        } else {
-            // Показываем ошибку если есть сообщение
-            if (result.message) {
-                Notifications.error(result.message);
-            }
+        } else if (result.message) {
+            Notifications.error(result.message);
         }
 
         this.cleanup();

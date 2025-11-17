@@ -277,7 +277,7 @@ const TreeUtils = {
         // Если у узла есть label, используем его
         if (node.label) return node.label;
 
-        // Для информационных элементов используем ID
+        // Для информационных элементов используем тип + ID
         const {TABLE, TEXTBLOCK, VIOLATION} = AppConfig.nodeTypes;
 
         if (node.type === TABLE && node.tableId) {
