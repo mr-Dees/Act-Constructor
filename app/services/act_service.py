@@ -22,20 +22,14 @@ class ActService:
     в разных форматах и получения истории документов.
     """
 
-    def __init__(self, storage: StorageService = None):
+    def __init__(self, storage: StorageService):
         """
         Инициализация сервиса с форматерами и хранилищем.
 
         Args:
-            storage: Сервис хранения файлов. Если None, создается новый экземпляр.
+            storage: Сервис хранения файлов (dependency injection)
         """
-        # Инициализация форматеров для разных выходных форматов
-        self.text_formatter = TextFormatter()
-        self.markdown_formatter = MarkdownFormatter()
-        self.docx_formatter = DocxFormatter()
-
-        # Инициализация сервиса работы с файлами
-        self.storage = storage or StorageService()
+        self.storage = storage
 
     def save_act(
             self,
@@ -63,9 +57,9 @@ class ActService:
         """
         # Маппинг форматов на форматеры и расширения
         format_handlers = {
-            "txt": (self.text_formatter, "txt"),
-            "md": (self.markdown_formatter, "md"),
-            "docx": (self.docx_formatter, "docx")
+            "txt": (TextFormatter, "txt"),
+            "md": (MarkdownFormatter, "md"),
+            "docx": (DocxFormatter, "docx")
         }
 
         if fmt not in format_handlers:
@@ -74,7 +68,10 @@ class ActService:
                 f"Используйте 'txt', 'md' или 'docx'."
             )
 
-        formatter, extension = format_handlers[fmt]
+        formatter_class, extension = format_handlers[fmt]
+
+        # Создаем новый экземпляр форматера для каждого запроса (thread-safe)
+        formatter = formatter_class()
 
         # Форматирование данных
         formatted_content = formatter.format(data)

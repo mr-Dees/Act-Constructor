@@ -5,13 +5,37 @@
 подключает маршруты API, статические файлы и шаблоны Jinja2.
 """
 
+from contextlib import asynccontextmanager
+
 from fastapi import FastAPI, Request
 from fastapi.responses import HTMLResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 
 from app.api.v1.routes import api_router as api_v1_router
-from app.core.config import Settings
+from app.core.config import Settings, setup_logging
+
+# Инициализируем настройки и логирование один раз на уровне модуля
+settings = Settings()
+logger = setup_logging(settings.log_level)
+
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    """
+    Управление жизненным циклом приложения.
+
+    Выполняется один раз при запуске и остановке worker-процесса.
+    """
+    # Startup
+    logger.info("Запуск приложения Act Constructor")
+    settings.ensure_directories()
+    logger.info("Приложение успешно инициализировано")
+
+    yield
+
+    # Shutdown
+    logger.info("Завершение работы приложения Act Constructor")
 
 
 def create_app() -> FastAPI:
@@ -20,7 +44,7 @@ def create_app() -> FastAPI:
 
     Выполняет следующие действия:
     - Создает приложение с метаданными из настроек
-    - Проверяет и создает необходимые директории
+    - Инициализирует Jinja2 для рендеринга шаблонов
     - Монтирует статические файлы (CSS, JS, изображения)
     - Регистрирует маршрут главной страницы
     - Подключает API роутеры с префиксом версии
@@ -28,10 +52,6 @@ def create_app() -> FastAPI:
     Returns:
         FastAPI: Полностью сконфигурированное приложение
     """
-    # Инициализация настроек и проверка директорий
-    settings = Settings()
-    settings.ensure_directories()
-
     # Инициализация Jinja2 для рендеринга HTML-шаблонов
     templates = Jinja2Templates(directory=str(settings.templates_dir))
 
@@ -39,7 +59,8 @@ def create_app() -> FastAPI:
     app = FastAPI(
         title=settings.app_title,
         version=settings.app_version,
-        description="API для создания и управления актами"
+        description="API для создания и управления актами",
+        lifespan=lifespan
     )
 
     # Подключение статических файлов (доступны по URL /static/*)
@@ -81,14 +102,13 @@ if __name__ == "__main__":
     # Запуск сервера разработки
     import uvicorn
 
-    # Получение настроек для параметров сервера
-    settings = Settings()
-
     uvicorn.run(
         # Настройки сервера
         "app.main:app",
         host=settings.host,
         port=settings.port,
         # Автоматическая перезагрузка при изменении кода
-        reload=True
+        reload=True,
+        # Уменьшаем verbosity uvicorn логов
+        log_level="info"
     )

@@ -5,11 +5,59 @@
 Использует переменные окружения из .env файла.
 """
 
+import logging
+import sys
+from functools import lru_cache
 from pathlib import Path
 from typing import ClassVar
 
 from pydantic import field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
+
+
+def setup_logging(log_level: str = "INFO") -> logging.Logger:
+    """
+    Настраивает систему логирования для приложения.
+
+    Args:
+        log_level: Уровень логирования (DEBUG, INFO, WARNING, ERROR, CRITICAL)
+
+    Returns:
+        Настроенный logger
+    """
+    logger = logging.getLogger("act_constructor")
+
+    # Очищаем существующие handlers для предотвращения дублирования
+    logger.handlers.clear()
+
+    logger.setLevel(getattr(logging, log_level.upper()))
+
+    # Создаем форматер для логов
+    formatter = logging.Formatter(
+        '%(asctime)s - %(name)s - %(levelname)s - %(message)s',
+        datefmt='%Y-%m-%d %H:%M:%S'
+    )
+
+    # Настраиваем консольный handler
+    console_handler = logging.StreamHandler(sys.stdout)
+    console_handler.setFormatter(formatter)
+    console_handler.setLevel(getattr(logging, log_level.upper()))
+
+    # Настраиваем файловый handler
+    log_dir = Path(__file__).resolve().parent.parent.parent / "logs"
+    log_dir.mkdir(exist_ok=True)
+    file_handler = logging.FileHandler(log_dir / "app.log", encoding='utf-8')
+    file_handler.setFormatter(formatter)
+    file_handler.setLevel(getattr(logging, log_level.upper()))
+
+    # Добавляем handlers
+    logger.addHandler(console_handler)
+    logger.addHandler(file_handler)
+
+    # Отключаем propagation чтобы избежать дублирования в root logger
+    logger.propagate = False
+
+    return logger
 
 
 class Settings(BaseSettings):
@@ -30,6 +78,9 @@ class Settings(BaseSettings):
 
     # Префикс для API версии 1
     api_v1_prefix: str = "/api/v1"
+
+    # Уровень логирования
+    log_level: str = "INFO"
 
     # Базовая директория проекта (относительный путь от конфига до корня проекта)
     base_dir: ClassVar[Path] = Path(__file__).resolve().parent.parent.parent
@@ -58,7 +109,8 @@ class Settings(BaseSettings):
     model_config = SettingsConfigDict(
         env_file=".env",  # Файл с переменными окружения
         case_sensitive=False,  # Нечувствительность к регистру переменных
-        extra="ignore"  # Игнорировать неизвестные поля из .env
+        extra="ignore",  # Игнорировать неизвестные поля из .env
+        validate_default=False  # Оптимизация валидации
     )
 
     @field_validator("port")
@@ -68,6 +120,16 @@ class Settings(BaseSettings):
         if not 1 <= v <= 65535:
             raise ValueError("Порт должен быть в диапазоне 1-65535")
         return v
+
+    @field_validator("log_level")
+    @classmethod
+    def validate_log_level(cls, v: str) -> str:
+        """Валидация уровня логирования."""
+        valid_levels = ["DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"]
+        v_upper = v.upper()
+        if v_upper not in valid_levels:
+            raise ValueError(f"log_level должен быть одним из: {', '.join(valid_levels)}")
+        return v_upper
 
     def ensure_directories(self) -> None:
         """
@@ -88,3 +150,13 @@ class Settings(BaseSettings):
             raise RuntimeError(
                 f"Директория статики не найдена: {self.static_dir}"
             )
+
+
+@lru_cache()
+def get_settings() -> Settings:
+    """
+    Возвращает singleton экземпляр Settings с кэшированием.
+
+    Используется как FastAPI dependency.
+    """
+    return Settings()

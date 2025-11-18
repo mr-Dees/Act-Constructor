@@ -12,6 +12,11 @@ Act Constructor/
 │   │   ├── __init__.py
 │   │   └── config.py
 │   ├── formatters/
+│   │   ├── utils/
+│   │   │   ├── __init__.py
+│   │   │   ├── formatting_utils.py
+│   │   │   ├── html_utils.py
+│   │   │   └── table_utils.py
 │   │   ├── __init__.py
 │   │   ├── base_formatter.py
 │   │   ├── docx_formatter.py
@@ -35,11 +40,14 @@ Act Constructor/
 │   ├── components/
 │   │   ├── context_menu.html
 │   │   ├── dialog.html
-│   │   ├── header.html
 │   │   ├── preview_panel.html
 │   │   └── tree_panel.html
+│   ├── help/
+│   │   ├── step1.html
+│   │   └── step2.html
 │   ├── base.html
-│   └── constructor.html
+│   ├── constructor.html
+│   └── header.html
 ├── static/
 │   ├── css/
 │   │   ├── base/
@@ -140,12 +148,6 @@ Act Constructor/
 │       │   ├── tree-renderer.js
 │       │   └── tree-utils.js
 │       ├── validation/
-│       │   ├── validation.js
-│       │   ├── validation-act.js
-│       │   ├── validation-core.js
-│       │   ├── validation-table.js
-│       │   └── validation-tree.js
-│       ├── violation/
 │       │   ├── validation.js
 │       │   ├── validation-act.js
 │       │   ├── validation-core.js
