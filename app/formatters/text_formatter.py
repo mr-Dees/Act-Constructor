@@ -6,6 +6,7 @@
 
 from typing import Dict, List
 
+from app.core.config import Settings
 from app.formatters.base_formatter import BaseFormatter
 from app.formatters.utils import HTMLUtils, TableUtils, FormattingUtils
 
@@ -17,8 +18,16 @@ class TextFormatter(BaseFormatter):
     Использует композицию утилит для обработки данных.
     """
 
-    HEADER_WIDTH = 80
-    INDENT_SIZE = 2
+    def __init__(self, settings: Settings):
+        """
+        Инициализация форматера с настройками.
+
+        Args:
+            settings: Глобальные настройки приложения
+        """
+        self.settings = settings
+        self.HEADER_WIDTH = settings.text_header_width
+        self.INDENT_SIZE = settings.text_indent_size
 
     def format(self, data: Dict) -> str:
         """Форматирует данные акта в plain text."""

@@ -6,6 +6,7 @@
 
 from typing import Dict, List
 
+from app.core.config import Settings
 from app.formatters.base_formatter import BaseFormatter
 from app.formatters.utils import HTMLUtils, TableUtils, FormattingUtils
 
@@ -17,7 +18,15 @@ class MarkdownFormatter(BaseFormatter):
     Следует принципу Composition over Inheritance.
     """
 
-    MAX_HEADING_LEVEL = 6
+    def __init__(self, settings: Settings):
+        """
+        Инициализация форматера с настройками.
+
+        Args:
+            settings: Глобальные настройки приложения
+        """
+        self.settings = settings
+        self.MAX_HEADING_LEVEL = settings.markdown_max_heading_level
 
     def format(self, data: Dict) -> str:
         """Форматирует данные акта в Markdown."""

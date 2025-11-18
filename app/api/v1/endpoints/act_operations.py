@@ -8,7 +8,7 @@
 import logging
 from typing import Literal
 
-from fastapi import APIRouter, Query, HTTPException, Depends
+from fastapi import APIRouter, Query, HTTPException, Depends, BackgroundTasks
 from fastapi.responses import FileResponse
 
 from app.core.config import get_settings, Settings
@@ -29,9 +29,12 @@ def get_storage_service(settings: Settings = Depends(get_settings)) -> StorageSe
     return StorageService(storage_dir=settings.storage_dir)
 
 
-def get_act_service(storage: StorageService = Depends(get_storage_service)) -> ActService:
+def get_act_service(
+        storage: StorageService = Depends(get_storage_service),
+        settings: Settings = Depends(get_settings)
+) -> ActService:
     """Dependency для получения сервиса работы с актами."""
-    return ActService(storage=storage)
+    return ActService(storage=storage, settings=settings)
 
 
 @router.post("/save_act", response_model=ActSaveResponse)
@@ -60,13 +63,16 @@ async def save_act(
     try:
         logger.info(f"Запрос на сохранение акта в формате {fmt}")
 
-        # ОТЛАДКА: проверяем что пришло
+        # Конвертируем Pydantic модель в словарь ОДИН РАЗ
         data_dict = data.model_dump()
-        logger.debug(f"Получено таблиц: {len(data_dict.get('tables', {}))}")
-        logger.debug(f"Список ID таблиц: {list(data_dict.get('tables', {}).keys())}")
 
-        # Конвертируем Pydantic модель в словарь и передаем в сервис
-        result = act_service.save_act(data.model_dump(), fmt=fmt)
+        # ОТЛАДКА: проверяем что пришло
+        logger.debug(f"Получено таблиц: {len(data_dict.get('tables', {}))}")
+        logger.debug(f"Получено текстовых блоков: {len(data_dict.get('textBlocks', {}))}")
+        logger.debug(f"Получено нарушений: {len(data_dict.get('violations', {}))}")
+
+        # Передаем уже конвертированный словарь в сервис
+        result = act_service.save_act(data_dict, fmt=fmt)
         logger.info(f"Акт успешно сохранен: {result.filename}")
         return result
     except ValueError as e:
@@ -76,15 +82,17 @@ async def save_act(
     except Exception as e:
         # Неожиданная ошибка при сохранении
         logger.exception(f"Неожиданная ошибка при сохранении акта: {e}")
+        # В production не показываем внутренние детали
         raise HTTPException(
             status_code=500,
-            detail=f"Ошибка сохранения акта: {str(e)}"
+            detail="Произошла ошибка при сохранении акта. Попробуйте позже."
         )
 
 
 @router.get("/download/{filename}")
 async def download_act(
         filename: str,
+        background_tasks: BackgroundTasks,
         storage: StorageService = Depends(get_storage_service)
 ) -> FileResponse:
     """
@@ -92,6 +100,7 @@ async def download_act(
 
     Args:
         filename: Имя файла для скачивания
+        background_tasks: FastAPI background tasks для cleanup
         storage: Сервис хранения (injected)
 
     Returns:
@@ -124,6 +133,7 @@ async def download_act(
         )
 
         logger.info(f"Файл {filename} отправлен на скачивание")
+
         # Возвращаем файл для скачивания
         return FileResponse(
             path=file_path,
@@ -136,5 +146,5 @@ async def download_act(
         logger.exception(f"Ошибка при скачивании файла {filename}: {e}")
         raise HTTPException(
             status_code=500,
-            detail=f"Ошибка при скачивании: {str(e)}"
+            detail="Произошла ошибка при скачивании файла"
         )

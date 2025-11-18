@@ -27,8 +27,9 @@ def setup_logging(log_level: str = "INFO") -> logging.Logger:
     """
     logger = logging.getLogger("act_constructor")
 
-    # Очищаем существующие handlers для предотвращения дублирования
-    logger.handlers.clear()
+    # Проверяем что логирование еще не настроено (защита от повторной настройки в workers)
+    if logger.handlers:
+        return logger
 
     logger.setLevel(getattr(logging, log_level.upper()))
 
@@ -82,6 +83,43 @@ class Settings(BaseSettings):
     # Уровень логирования
     log_level: str = "INFO"
 
+    # === Лимиты безопасности ===
+
+    # Максимальный размер тела запроса в байтах (10MB по умолчанию)
+    max_request_size: int = 10 * 1024 * 1024
+
+    # Rate limiting: максимум запросов в минуту на IP
+    rate_limit_per_minute: int = 1024
+
+    # Максимальный размер изображения в MB
+    max_image_size_mb: float = 10.0
+
+    # Timeout для парсинга HTML в секундах
+    html_parse_timeout: int = 30
+
+    # Максимальная глубина вложенности HTML
+    max_html_depth: int = 100
+
+    # === Параметры форматирования ===
+
+    # Ширина изображений в DOCX (в дюймах)
+    docx_image_width: float = 4.0
+
+    # Размер шрифта подписи в DOCX (в пунктах)
+    docx_caption_font_size: int = 10
+
+    # Максимальный уровень заголовков в DOCX
+    docx_max_heading_level: int = 9
+
+    # Ширина заголовка в текстовом формате (символов)
+    text_header_width: int = 80
+
+    # Размер отступа в текстовом формате (пробелов)
+    text_indent_size: int = 2
+
+    # Максимальный уровень заголовков в Markdown
+    markdown_max_heading_level: int = 6
+
     # Базовая директория проекта (относительный путь от конфига до корня проекта)
     base_dir: ClassVar[Path] = Path(__file__).resolve().parent.parent.parent
 
@@ -130,6 +168,14 @@ class Settings(BaseSettings):
         if v_upper not in valid_levels:
             raise ValueError(f"log_level должен быть одним из: {', '.join(valid_levels)}")
         return v_upper
+
+    @field_validator("max_request_size", "rate_limit_per_minute")
+    @classmethod
+    def validate_positive(cls, v: int) -> int:
+        """Валидация положительных значений."""
+        if v <= 0:
+            raise ValueError("Значение должно быть положительным")
+        return v
 
     def ensure_directories(self) -> None:
         """

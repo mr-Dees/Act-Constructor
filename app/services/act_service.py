@@ -5,13 +5,17 @@
 экспорта актов в различные форматы.
 """
 
+import logging
 from typing import Dict, Literal
 
+from app.core.config import Settings
 from app.formatters.docx_formatter import DocxFormatter
 from app.formatters.markdown_formatter import MarkdownFormatter
 from app.formatters.text_formatter import TextFormatter
 from app.schemas.act import ActSaveResponse
 from app.services.storage_service import StorageService
+
+logger = logging.getLogger("act_constructor.service")
 
 
 class ActService:
@@ -22,14 +26,24 @@ class ActService:
     в разных форматах и получения истории документов.
     """
 
-    def __init__(self, storage: StorageService):
+    def __init__(self, storage: StorageService, settings: Settings):
         """
         Инициализация сервиса с форматерами и хранилищем.
 
         Args:
             storage: Сервис хранения файлов (dependency injection)
+            settings: Настройки приложения (dependency injection)
         """
         self.storage = storage
+        self.settings = settings
+
+        # Кэшируем экземпляры форматеров (они stateless и thread-safe)
+        self._formatters = {
+            'txt': TextFormatter(settings),
+            'md': MarkdownFormatter(settings),
+            'docx': DocxFormatter(settings)
+        }
+        logger.debug("ActService инициализирован с кэшированными форматерами")
 
     def save_act(
             self,
@@ -40,7 +54,7 @@ class ActService:
         Сохраняет акт в хранилище в выбранном формате.
 
         Процесс:
-        1. Выбор форматера по типу формата
+        1. Выбор кэшированного форматера по типу формата
         2. Форматирование данных акта
         3. Сохранение через StorageService
         4. Возврат результата
@@ -55,23 +69,17 @@ class ActService:
         Raises:
             ValueError: Если указан неподдерживаемый формат
         """
-        # Маппинг форматов на форматеры и расширения
-        format_handlers = {
-            "txt": (TextFormatter, "txt"),
-            "md": (MarkdownFormatter, "md"),
-            "docx": (DocxFormatter, "docx")
-        }
-
-        if fmt not in format_handlers:
+        if fmt not in self._formatters:
             raise ValueError(
                 f"Неподдерживаемый формат: {fmt}. "
                 f"Используйте 'txt', 'md' или 'docx'."
             )
 
-        formatter_class, extension = format_handlers[fmt]
+        # Получаем кэшированный форматер
+        formatter = self._formatters[fmt]
+        extension = fmt
 
-        # Создаем новый экземпляр форматера для каждого запроса (thread-safe)
-        formatter = formatter_class()
+        logger.debug(f"Используется форматер: {formatter.__class__.__name__}")
 
         # Форматирование данных
         formatted_content = formatter.format(data)

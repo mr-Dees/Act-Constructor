@@ -5,8 +5,10 @@
 """
 
 import base64
+import binascii
 import logging
 import re
+import threading
 from html.parser import HTMLParser
 from io import BytesIO
 from typing import Dict, List, Tuple, Optional
@@ -17,10 +19,58 @@ from docx.oxml import OxmlElement
 from docx.oxml.ns import qn
 from docx.shared import Inches, Pt
 
+from app.core.config import Settings
 from app.formatters.base_formatter import BaseFormatter
 from app.formatters.utils import HTMLUtils
 
 logger = logging.getLogger("act_constructor.formatter")
+
+
+class TimeoutError(Exception):
+    """Исключение для timeout операций."""
+    pass
+
+
+class TimeoutContext:
+    """
+    Кроссплатформенный context manager для timeout операций.
+
+    Использует threading.Timer вместо signal (работает на Windows).
+    """
+
+    def __init__(self, seconds: int):
+        """
+        Инициализация timeout контекста.
+
+        Args:
+            seconds: Максимальное время выполнения в секундах
+        """
+        self.seconds = seconds
+        self.timer = None
+        self.timed_out = False
+
+    def _timeout_handler(self):
+        """Обработчик срабатывания таймера."""
+        self.timed_out = True
+        logger.warning(f"Операция превысила timeout {self.seconds}s")
+
+    def __enter__(self):
+        """Запускает таймер при входе в контекст."""
+        self.timer = threading.Timer(self.seconds, self._timeout_handler)
+        self.timer.daemon = True
+        self.timer.start()
+        return self
+
+    def __exit__(self, exc_type, exc_val, exc_tb):
+        """Останавливает таймер при выходе из контекста."""
+        if self.timer:
+            self.timer.cancel()
+
+        # Если был timeout, пробрасываем исключение
+        if self.timed_out:
+            raise TimeoutError(f"Операция превысила timeout {self.seconds}s")
+
+        return False
 
 
 class HTMLToDocxParser(HTMLParser):
@@ -30,10 +80,12 @@ class HTMLToDocxParser(HTMLParser):
     Поддерживает inline-форматирование, гиперссылки и сноски.
     """
 
-    def __init__(self, paragraph, document):
+    def __init__(self, paragraph, document, max_depth: int = 100):
         super().__init__()
         self.paragraph = paragraph
         self.document = document
+        self.max_depth = max_depth
+        self.current_depth = 0
         self._reset_state()
 
     def _reset_state(self):
@@ -55,6 +107,12 @@ class HTMLToDocxParser(HTMLParser):
 
     def handle_starttag(self, tag: str, attrs: List[Tuple[str, str]]):
         """Обрабатывает открывающие теги."""
+        # Проверка глубины вложенности для защиты от DoS
+        self.current_depth += 1
+        if self.current_depth > self.max_depth:
+            logger.warning(f"Превышена максимальная глубина вложенности HTML: {self.max_depth}")
+            raise ValueError(f"HTML слишком глубоко вложен (>{self.max_depth} уровней)")
+
         if tag == 'br':
             return
 
@@ -104,6 +162,9 @@ class HTMLToDocxParser(HTMLParser):
 
     def handle_endtag(self, tag: str):
         """Обрабатывает закрывающие теги."""
+        # Уменьшаем счетчик глубины
+        self.current_depth = max(0, self.current_depth - 1)
+
         if tag == 'br':
             self._flush_buffer()
             self.paragraph.add_run('\n')
@@ -236,35 +297,56 @@ class HTMLToDocxParser(HTMLParser):
         self.footnote_content = []
 
     def close(self):
-        """Завершает парсинг."""
+        """Завершает парсинг с полной очисткой состояния."""
         self._flush_buffer()
         super().close()
 
+        # ВАЖНО: явная очистка для предотвращения memory leak
+        self._reset_state()
+        self.current_depth = 0
+
     def reset(self):
-        """Переопределяем reset для очистки состояния."""
+        """Переопределяем reset для полной очистки состояния."""
         super().reset()
         self._reset_state()
+        self.current_depth = 0
 
 
 class DocxFormatter(BaseFormatter):
     """
     Форматер для преобразования акта в документ DOCX.
 
-    Использует композицию HTMLUtils для работы с HTML.
+    Использует композицию HTMLUtils для работы с HTML и конфигурируемые параметры.
     """
 
-    # Константы
-    MAX_HEADING_LEVEL = 9
-    DEFAULT_IMAGE_WIDTH = Inches(4)
-    CAPTION_FONT_SIZE = Pt(10)
-    MAX_IMAGE_SIZE_MB = 10
+    def __init__(self, settings: Settings):
+        """
+        Инициализация форматера с настройками.
 
-    ALIGNMENT_MAP = {
-        'center': WD_PARAGRAPH_ALIGNMENT.CENTER,
-        'right': WD_PARAGRAPH_ALIGNMENT.RIGHT,
-        'justify': WD_PARAGRAPH_ALIGNMENT.JUSTIFY,
-        'left': WD_PARAGRAPH_ALIGNMENT.LEFT
-    }
+        Args:
+            settings: Глобальные настройки приложения
+        """
+        self.settings = settings
+
+        # Загружаем константы из настроек
+        self.MAX_HEADING_LEVEL = settings.docx_max_heading_level
+        self.DEFAULT_IMAGE_WIDTH = Inches(settings.docx_image_width)
+        self.CAPTION_FONT_SIZE = Pt(settings.docx_caption_font_size)
+        self.MAX_IMAGE_SIZE_MB = settings.max_image_size_mb
+        self.HTML_PARSE_TIMEOUT = settings.html_parse_timeout
+        self.MAX_HTML_DEPTH = settings.max_html_depth
+
+        self.ALIGNMENT_MAP = {
+            'center': WD_PARAGRAPH_ALIGNMENT.CENTER,
+            'right': WD_PARAGRAPH_ALIGNMENT.RIGHT,
+            'justify': WD_PARAGRAPH_ALIGNMENT.JUSTIFY,
+            'left': WD_PARAGRAPH_ALIGNMENT.LEFT
+        }
+
+        logger.debug(f"DocxFormatter инициализирован с настройками: "
+                     f"image_width={settings.docx_image_width}\", "
+                     f"max_image_size={settings.max_image_size_mb}MB, "
+                     f"parse_timeout={settings.html_parse_timeout}s")
 
     def format(self, data: Dict) -> Document:
         """Форматирует данные акта в документ DOCX."""
@@ -433,14 +515,30 @@ class DocxFormatter(BaseFormatter):
                 WD_PARAGRAPH_ALIGNMENT.LEFT
             )
 
-            # Создаем новый парсер для каждого блока
-            parser = HTMLToDocxParser(paragraph, doc)
+            # Создаем новый парсер для каждого блока с защитой от глубокой вложенности
+            parser = HTMLToDocxParser(paragraph, doc, max_depth=self.MAX_HTML_DEPTH)
             try:
-                parser.feed(block['content'])
-                parser.close()
+                # Применяем кроссплатформенный timeout (работает на Windows)
+                try:
+                    with TimeoutContext(self.HTML_PARSE_TIMEOUT):
+                        parser.feed(block['content'])
+                        parser.close()
+                except TimeoutError as e:
+                    logger.error(f"Timeout парсинга HTML: {e}")
+                    paragraph.add_run("[Контент слишком сложен для отображения]")
+            except ValueError as e:
+                # Слишком глубокая вложенность
+                logger.error(f"HTML слишком вложен: {e}")
+                paragraph.add_run("[Контент слишком сложен для отображения]")
             except Exception as e:
                 logger.exception(f"Ошибка парсинга HTML: {e}")
-                paragraph.add_run(block['content'])
+                # Fallback: добавляем plain text
+                clean_text = HTMLUtils.clean_html(block['content'])
+                paragraph.add_run(clean_text)
+            finally:
+                # ВАЖНО: явная очистка парсера для предотвращения memory leak
+                parser.reset()
+                del parser
 
             # Применяем базовый размер шрифта
             base_font_size = formatting.get('fontSize', 14)
@@ -570,7 +668,7 @@ class DocxFormatter(BaseFormatter):
         return case_number
 
     def _add_image(self, doc: Document, item: Dict):
-        """Добавляет изображение из base64 с управлением памятью."""
+        """Добавляет изображение из base64 с управлением памятью и безопасной валидацией."""
         url = item.get('url', '')
         caption = item.get('caption', '')
         filename = item.get('filename', '')
@@ -582,8 +680,19 @@ class DocxFormatter(BaseFormatter):
 
         image_stream = None
         try:
+            # Безопасное разделение data URL
+            if ',' not in url:
+                raise ValueError("Некорректный формат data URL")
+
             header, encoded = url.split(',', 1)
-            image_data = base64.b64decode(encoded)
+
+            # ИСПРАВЛЕНИЕ: безопасное декодирование base64 с обработкой ошибок
+            try:
+                image_data = base64.b64decode(encoded, validate=True)
+            except (binascii.Error, ValueError) as e:
+                logger.error(f"Ошибка декодирования base64 для {filename}: {e}")
+                self._add_image_fallback(doc, filename, caption, "некорректный base64")
+                return
 
             # Проверка размера
             size_mb = len(image_data) / (1024 * 1024)
@@ -611,11 +720,12 @@ class DocxFormatter(BaseFormatter):
             logger.debug(f"Добавлено изображение: {filename} ({size_mb:.2f}MB)")
         except Exception as e:
             logger.exception(f"Ошибка добавления изображения {filename}: {e}")
-            self._add_image_fallback(doc, filename, caption, str(e))
+            self._add_image_fallback(doc, filename, caption, str(e)[:100])
         finally:
             # Явное освобождение памяти
             if image_stream:
                 image_stream.close()
+                del image_stream
 
     def _add_image_fallback(self, doc: Document, filename: str, caption: str, reason: str = ""):
         """Добавляет текстовую ссылку при ошибке."""
