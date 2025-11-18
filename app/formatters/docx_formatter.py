@@ -9,6 +9,7 @@ import binascii
 import logging
 import re
 import threading
+import time
 from html.parser import HTMLParser
 from io import BytesIO
 from typing import Dict, List, Tuple, Optional
@@ -31,28 +32,68 @@ class TimeoutError(Exception):
     pass
 
 
+class InterruptibleParser:
+    """
+    Обертка для HTMLParser с возможностью прерывания.
+
+    Использует флаг interrupted для остановки парсинга.
+    """
+
+    def __init__(self, parser, timeout: int):
+        self.parser = parser
+        self.timeout = timeout
+        self.interrupted = False
+        self.start_time = None
+
+    def feed(self, data: str):
+        """Парсит данные с проверкой timeout на каждом шаге."""
+        self.start_time = time.time()
+        self.interrupted = False
+
+        # Разбиваем на небольшие чанки для проверки timeout
+        chunk_size = 1000
+        for i in range(0, len(data), chunk_size):
+            if self.interrupted:
+                raise TimeoutError(f"Парсинг прерван по timeout {self.timeout}s")
+
+            if time.time() - self.start_time > self.timeout:
+                self.interrupted = True
+                raise TimeoutError(f"Парсинг превысил timeout {self.timeout}s")
+
+            chunk = data[i:i + chunk_size]
+            self.parser.feed(chunk)
+
+    def interrupt(self):
+        """Прерывает парсинг."""
+        self.interrupted = True
+
+
 class TimeoutContext:
     """
-    Кроссплатформенный context manager для timeout операций.
+    Кроссплатформенный context manager с реальным прерыванием.
 
-    Использует threading.Timer вместо signal (работает на Windows).
+    Использует threading.Timer и флаг прерывания вместо только логирования.
     """
 
-    def __init__(self, seconds: int):
+    def __init__(self, seconds: int, interruptible=None):
         """
         Инициализация timeout контекста.
 
         Args:
             seconds: Максимальное время выполнения в секундах
+            interruptible: Объект с методом interrupt() для прерывания операции
         """
         self.seconds = seconds
         self.timer = None
         self.timed_out = False
+        self.interruptible = interruptible
 
     def _timeout_handler(self):
-        """Обработчик срабатывания таймера."""
+        """Обработчик срабатывания таймера с прерыванием операции."""
         self.timed_out = True
-        logger.warning(f"Операция превысила timeout {self.seconds}s")
+        if self.interruptible:
+            self.interruptible.interrupt()
+        logger.warning(f"Операция превысила timeout {self.seconds}s и была прервана")
 
     def __enter__(self):
         """Запускает таймер при входе в контекст."""
@@ -67,7 +108,7 @@ class TimeoutContext:
             self.timer.cancel()
 
         # Если был timeout, пробрасываем исключение
-        if self.timed_out:
+        if self.timed_out and exc_type is None:
             raise TimeoutError(f"Операция превысила timeout {self.seconds}s")
 
         return False
@@ -301,7 +342,7 @@ class HTMLToDocxParser(HTMLParser):
         self._flush_buffer()
         super().close()
 
-        # ВАЖНО: явная очистка для предотвращения memory leak
+        # Явная очистка для предотвращения memory leak
         self._reset_state()
         self.current_depth = 0
 
@@ -335,6 +376,9 @@ class DocxFormatter(BaseFormatter):
         self.MAX_IMAGE_SIZE_MB = settings.max_image_size_mb
         self.HTML_PARSE_TIMEOUT = settings.html_parse_timeout
         self.MAX_HTML_DEPTH = settings.max_html_depth
+        # Параметры retry логики
+        self.MAX_RETRIES = settings.max_retries
+        self.RETRY_DELAY = settings.retry_delay
 
         self.ALIGNMENT_MAP = {
             'center': WD_PARAGRAPH_ALIGNMENT.CENTER,
@@ -346,7 +390,8 @@ class DocxFormatter(BaseFormatter):
         logger.debug(f"DocxFormatter инициализирован с настройками: "
                      f"image_width={settings.docx_image_width}\", "
                      f"max_image_size={settings.max_image_size_mb}MB, "
-                     f"parse_timeout={settings.html_parse_timeout}s")
+                     f"parse_timeout={settings.html_parse_timeout}s, "
+                     f"max_retries={settings.max_retries}")
 
     def format(self, data: Dict) -> Document:
         """Форматирует данные акта в документ DOCX."""
@@ -517,15 +562,17 @@ class DocxFormatter(BaseFormatter):
 
             # Создаем новый парсер для каждого блока с защитой от глубокой вложенности
             parser = HTMLToDocxParser(paragraph, doc, max_depth=self.MAX_HTML_DEPTH)
+            # Создаем прерываемый парсер
+            interruptible = InterruptibleParser(parser, self.HTML_PARSE_TIMEOUT)
+
             try:
-                # Применяем кроссплатформенный timeout (работает на Windows)
-                try:
-                    with TimeoutContext(self.HTML_PARSE_TIMEOUT):
-                        parser.feed(block['content'])
-                        parser.close()
-                except TimeoutError as e:
-                    logger.error(f"Timeout парсинга HTML: {e}")
-                    paragraph.add_run("[Контент слишком сложен для отображения]")
+                # Применяем timeout с возможностью прерывания
+                with TimeoutContext(self.HTML_PARSE_TIMEOUT, interruptible):
+                    interruptible.feed(block['content'])
+                    parser.close()
+            except TimeoutError as e:
+                logger.error(f"Timeout парсинга HTML: {e}")
+                paragraph.add_run("[Контент слишком сложен для отображения]")
             except ValueError as e:
                 # Слишком глубокая вложенность
                 logger.error(f"HTML слишком вложен: {e}")
@@ -536,9 +583,10 @@ class DocxFormatter(BaseFormatter):
                 clean_text = HTMLUtils.clean_html(block['content'])
                 paragraph.add_run(clean_text)
             finally:
-                # ВАЖНО: явная очистка парсера для предотвращения memory leak
+                # Явная очистка парсера для предотвращения memory leak
                 parser.reset()
                 del parser
+                del interruptible
 
             # Применяем базовый размер шрифта
             base_font_size = formatting.get('fontSize', 14)
@@ -668,7 +716,10 @@ class DocxFormatter(BaseFormatter):
         return case_number
 
     def _add_image(self, doc: Document, item: Dict):
-        """Добавляет изображение из base64 с управлением памятью и безопасной валидацией."""
+        """
+        Добавляет изображение из base64 с управлением памятью,
+        безопасной валидацией, retry логикой и graceful degradation.
+        """
         url = item.get('url', '')
         caption = item.get('caption', '')
         filename = item.get('filename', '')
@@ -679,62 +730,120 @@ class DocxFormatter(BaseFormatter):
             return
 
         image_stream = None
-        try:
-            # Безопасное разделение data URL
-            if ',' not in url:
-                raise ValueError("Некорректный формат data URL")
+        retry_count = 0
 
-            header, encoded = url.split(',', 1)
-
-            # ИСПРАВЛЕНИЕ: безопасное декодирование base64 с обработкой ошибок
+        while retry_count <= self.MAX_RETRIES:
             try:
-                image_data = base64.b64decode(encoded, validate=True)
-            except (binascii.Error, ValueError) as e:
-                logger.error(f"Ошибка декодирования base64 для {filename}: {e}")
-                self._add_image_fallback(doc, filename, caption, "некорректный base64")
-                return
+                # Безопасное разделение data URL
+                if ',' not in url:
+                    raise ValueError("Некорректный формат data URL")
 
-            # Проверка размера
-            size_mb = len(image_data) / (1024 * 1024)
-            if size_mb > self.MAX_IMAGE_SIZE_MB:
-                logger.warning(f"Изображение {filename} слишком большое: {size_mb:.2f}MB")
-                self._add_image_fallback(doc, filename, caption, f"размер: {size_mb:.1f}MB")
-                return
+                header, encoded = url.split(',', 1)
 
-            image_stream = BytesIO(image_data)
+                # Безопасное декодирование base64 с обработкой ошибок
+                try:
+                    image_data = base64.b64decode(encoded, validate=True)
+                except (binascii.Error, ValueError) as e:
+                    logger.error(f"Ошибка декодирования base64 для {filename}: {e}")
+                    self._add_image_fallback(doc, filename, caption, "некорректный base64")
+                    return
 
-            # Вставка изображения
-            img_paragraph = doc.add_paragraph()
-            img_paragraph.alignment = WD_PARAGRAPH_ALIGNMENT.CENTER
-            img_run = img_paragraph.add_run()
-            img_run.add_picture(image_stream, width=self.DEFAULT_IMAGE_WIDTH)
+                # Проверка размера
+                size_mb = len(image_data) / (1024 * 1024)
+                if size_mb > self.MAX_IMAGE_SIZE_MB:
+                    logger.warning(f"Изображение {filename} слишком большое: {size_mb:.2f}MB")
+                    self._add_image_fallback(doc, filename, caption, f"размер: {size_mb:.1f}MB")
+                    return
 
-            # Подпись
-            if caption:
-                p = doc.add_paragraph(caption)
-                p.alignment = WD_PARAGRAPH_ALIGNMENT.CENTER
-                for run in p.runs:
-                    run.italic = True
-                    run.font.size = self.CAPTION_FONT_SIZE
+                # Создаем stream внутри try-finally
+                image_stream = BytesIO(image_data)
 
-            logger.debug(f"Добавлено изображение: {filename} ({size_mb:.2f}MB)")
-        except Exception as e:
-            logger.exception(f"Ошибка добавления изображения {filename}: {e}")
-            self._add_image_fallback(doc, filename, caption, str(e)[:100])
-        finally:
-            # Явное освобождение памяти
-            if image_stream:
-                image_stream.close()
-                del image_stream
+                # Вставка изображения
+                img_paragraph = doc.add_paragraph()
+                img_paragraph.alignment = WD_PARAGRAPH_ALIGNMENT.CENTER
+                img_run = img_paragraph.add_run()
+                img_run.add_picture(image_stream, width=self.DEFAULT_IMAGE_WIDTH)
+
+                # Подпись
+                if caption:
+                    p = doc.add_paragraph(caption)
+                    p.alignment = WD_PARAGRAPH_ALIGNMENT.CENTER
+                    for run in p.runs:
+                        run.italic = True
+                        run.font.size = self.CAPTION_FONT_SIZE
+
+                logger.debug(f"Добавлено изображение: {filename} ({size_mb:.2f}MB)")
+
+                # Успешное добавление - выходим из retry loop
+                break
+
+            except (OSError, IOError) as e:
+                # Временные ошибки ввода-вывода - пробуем retry
+                retry_count += 1
+                if retry_count <= self.MAX_RETRIES:
+                    logger.warning(f"Ошибка I/O при добавлении изображения {filename} "
+                                   f"(попытка {retry_count}/{self.MAX_RETRIES}): {e}")
+                    time.sleep(self.RETRY_DELAY)
+                    continue
+                else:
+                    logger.error(f"Исчерпаны попытки добавления изображения {filename}: {e}")
+                    # Graceful degradation - показываем placeholder
+                    self._add_image_placeholder(doc, filename, caption, "временная ошибка I/O")
+                    break
+
+            except Exception as e:
+                # Неожиданные ошибки - graceful degradation без retry
+                logger.exception(f"Неожиданная ошибка при добавлении изображения {filename}: {e}")
+                self._add_image_placeholder(doc, filename, caption, str(e)[:100])
+                break
+
+            finally:
+                # Явное освобождение памяти в любом случае
+                if image_stream:
+                    try:
+                        image_stream.close()
+                    except Exception:
+                        pass
+                    del image_stream
+                    image_stream = None
 
     def _add_image_fallback(self, doc: Document, filename: str, caption: str, reason: str = ""):
-        """Добавляет текстовую ссылку при ошибке."""
+        """Добавляет текстовую ссылку при критической ошибке (не retry)."""
         error_msg = f"Изображение: {filename}"
         if reason:
             error_msg += f" (ошибка: {reason})"
         p = doc.add_paragraph(error_msg)
         if caption:
             p.add_run(f" - {caption}")
+
+    def _add_image_placeholder(self, doc: Document, filename: str, caption: str, reason: str = ""):
+        """
+        Добавляет placeholder изображения при временной ошибке.
+
+        Graceful degradation: показываем рамку вместо изображения.
+        """
+        # Добавляем параграф с рамкой
+        p = doc.add_paragraph()
+        p.alignment = WD_PARAGRAPH_ALIGNMENT.CENTER
+
+        # Текст placeholder
+        placeholder_text = f"[Изображение: {filename}]"
+        if reason:
+            placeholder_text += f"\n(временно недоступно: {reason})"
+
+        run = p.add_run(placeholder_text)
+        run.font.size = Pt(10)
+        run.italic = True
+
+        # Добавляем подпись если есть
+        if caption:
+            caption_p = doc.add_paragraph(caption)
+            caption_p.alignment = WD_PARAGRAPH_ALIGNMENT.CENTER
+            for run in caption_p.runs:
+                run.italic = True
+                run.font.size = self.CAPTION_FONT_SIZE
+
+        logger.info(f"Добавлен placeholder для изображения: {filename}")
 
     def _add_free_text(self, doc: Document, item: Dict):
         """Добавляет свободный текст."""

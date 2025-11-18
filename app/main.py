@@ -5,6 +5,7 @@
 подключает маршруты API, статические файлы и шаблоны Jinja2.
 """
 
+import threading
 from collections import defaultdict
 from contextlib import asynccontextmanager
 from datetime import datetime, timedelta
@@ -28,43 +29,96 @@ class RateLimitMiddleware(BaseHTTPMiddleware):
     Middleware для ограничения частоты запросов (rate limiting).
 
     Отслеживает количество запросов с каждого IP за последнюю минуту.
+    ИСПРАВЛЕНО: добавлена thread-safety и эффективная очистка.
     """
 
-    def __init__(self, app, rate_limit: int):
+    def __init__(self, app, rate_limit: int, settings: Settings):
         super().__init__(app)
         self.rate_limit = rate_limit
         # Словарь: IP -> список timestamp'ов запросов
         self.requests = defaultdict(list)
-        logger.info(f"Rate limiting инициализирован: {rate_limit} запросов/минуту")
+        # Блокировка для thread-safety
+        self.lock = threading.Lock()
+
+        # ИСПРАВЛЕНИЕ: параметры из настроек вместо хардкода
+        self.max_ips = settings.max_tracked_ips
+        self.cleanup_interval = settings.rate_limit_cleanup_interval
+        self.history_minutes = settings.rate_limit_history_minutes
+
+        self.last_cleanup = datetime.now()
+        logger.info(
+            f"Rate limiting инициализирован: {rate_limit} запросов/минуту, "
+            f"max_ips={self.max_ips}, cleanup_interval={self.cleanup_interval}s"
+        )
 
     async def dispatch(self, request: Request, call_next):
         """Обрабатывает каждый запрос с проверкой лимита."""
         client_ip = request.client.host
         now = datetime.now()
 
-        # Очищаем старые запросы (старше 1 минуты)
-        cutoff_time = now - timedelta(minutes=1)
-        self.requests[client_ip] = [
-            timestamp for timestamp in self.requests[client_ip]
-            if timestamp > cutoff_time
-        ]
+        with self.lock:
+            # Периодическая глобальная очистка
+            if (now - self.last_cleanup).total_seconds() > self.cleanup_interval:
+                self._cleanup_old_requests(now)
+                self.last_cleanup = now
 
-        # Проверяем лимит
-        if len(self.requests[client_ip]) >= self.rate_limit:
-            logger.warning(f"Rate limit превышен для IP: {client_ip}")
-            return JSONResponse(
-                status_code=429,
-                content={
-                    "detail": "Слишком много запросов. Попробуйте позже.",
-                    "retry_after": 60
-                }
-            )
+            # Ограничение количества отслеживаемых IP (защита от memory exhaustion)
+            if len(self.requests) >= self.max_ips and client_ip not in self.requests:
+                # Удаляем самый старый IP
+                oldest_ip = min(self.requests.keys(),
+                                key=lambda ip: self.requests[ip][-1] if self.requests[ip] else now)
+                del self.requests[oldest_ip]
+                logger.debug(f"Удален старый IP из rate limiter: {oldest_ip}")
 
-        # Добавляем текущий запрос
-        self.requests[client_ip].append(now)
+            # Получаем список запросов для текущего IP
+            ip_requests = self.requests[client_ip]
+
+            # Быстрая проверка лимита (используем существующий список)
+            cutoff_time = now - timedelta(minutes=1)
+            recent_requests = [ts for ts in ip_requests if ts > cutoff_time]
+
+            if len(recent_requests) >= self.rate_limit:
+                logger.warning(f"Rate limit превышен для IP: {client_ip}")
+                return JSONResponse(
+                    status_code=429,
+                    content={
+                        "detail": "Слишком много запросов. Попробуйте позже.",
+                        "retry_after": 60
+                    }
+                )
+
+            # Обновляем список (удаляем старые и добавляем новый)
+            recent_requests.append(now)
+            self.requests[client_ip] = recent_requests
 
         response = await call_next(request)
         return response
+
+    def _cleanup_old_requests(self, now: datetime):
+        """
+        Эффективная фоновая очистка старых запросов.
+
+        Удаляет все запросы старше настроенного времени и пустые IP-записи.
+        """
+        # ИСПРАВЛЕНИЕ: используем параметр из настроек
+        cutoff_time = now - timedelta(minutes=self.history_minutes)
+        ips_to_remove = []
+
+        for ip, timestamps in self.requests.items():
+            # Фильтруем старые запросы
+            recent = [ts for ts in timestamps if ts > cutoff_time]
+            if recent:
+                self.requests[ip] = recent
+            else:
+                # Помечаем пустые записи для удаления
+                ips_to_remove.append(ip)
+
+        # Удаляем пустые IP
+        for ip in ips_to_remove:
+            del self.requests[ip]
+
+        if ips_to_remove:
+            logger.debug(f"Очищено {len(ips_to_remove)} неактивных IP из rate limiter")
 
 
 class RequestSizeLimitMiddleware(BaseHTTPMiddleware):
@@ -153,7 +207,8 @@ def create_app() -> FastAPI:
     )
     app.add_middleware(
         RateLimitMiddleware,
-        rate_limit=settings.rate_limit_per_minute
+        rate_limit=settings.rate_limit_per_minute,
+        settings=settings
     )
 
     # Подключение статических файлов (доступны по URL /static/*)

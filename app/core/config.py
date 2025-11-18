@@ -100,6 +100,25 @@ class Settings(BaseSettings):
     # Максимальная глубина вложенности HTML
     max_html_depth: int = 100
 
+    # === параметры retry логики ===
+
+    # Максимальное количество повторных попыток при временных ошибках
+    max_retries: int = 3
+
+    # Задержка между попытками в секундах
+    retry_delay: float = 0.5
+
+    # === Параметры Rate Limiting ===
+
+    # Максимальное количество отслеживаемых IP-адресов
+    max_tracked_ips: int = 10000
+
+    # Интервал фоновой очистки неактивных IP в секундах
+    rate_limit_cleanup_interval: int = 60
+
+    # Время хранения истории запросов в минутах (для очистки)
+    rate_limit_history_minutes: int = 2
+
     # === Параметры форматирования ===
 
     # Ширина изображений в DOCX (в дюймах)
@@ -169,12 +188,20 @@ class Settings(BaseSettings):
             raise ValueError(f"log_level должен быть одним из: {', '.join(valid_levels)}")
         return v_upper
 
-    @field_validator("max_request_size", "rate_limit_per_minute")
+    @field_validator("max_request_size", "rate_limit_per_minute", "max_retries")
     @classmethod
     def validate_positive(cls, v: int) -> int:
         """Валидация положительных значений."""
         if v <= 0:
             raise ValueError("Значение должно быть положительным")
+        return v
+
+    @field_validator("retry_delay")
+    @classmethod
+    def validate_retry_delay(cls, v: float) -> float:
+        """Валидация задержки retry."""
+        if v < 0:
+            raise ValueError("retry_delay должен быть неотрицательным")
         return v
 
     def ensure_directories(self) -> None:
