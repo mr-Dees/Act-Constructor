@@ -6,6 +6,7 @@
 
 import base64
 import binascii
+import gc
 import logging
 import re
 import threading
@@ -39,9 +40,10 @@ class InterruptibleParser:
     Использует флаг interrupted для остановки парсинга.
     """
 
-    def __init__(self, parser, timeout: int):
+    def __init__(self, parser, timeout: int, chunk_size: int):
         self.parser = parser
         self.timeout = timeout
+        self.chunk_size = chunk_size
         self.interrupted = False
         self.start_time = None
 
@@ -50,9 +52,8 @@ class InterruptibleParser:
         self.start_time = time.time()
         self.interrupted = False
 
-        # Разбиваем на небольшие чанки для проверки timeout
-        chunk_size = 1000
-        for i in range(0, len(data), chunk_size):
+        # Используем настраиваемый chunk_size
+        for i in range(0, len(data), self.chunk_size):
             if self.interrupted:
                 raise TimeoutError(f"Парсинг прерван по timeout {self.timeout}s")
 
@@ -60,7 +61,7 @@ class InterruptibleParser:
                 self.interrupted = True
                 raise TimeoutError(f"Парсинг превысил timeout {self.timeout}s")
 
-            chunk = data[i:i + chunk_size]
+            chunk = data[i:i + self.chunk_size]
             self.parser.feed(chunk)
 
     def interrupt(self):
@@ -376,6 +377,7 @@ class DocxFormatter(BaseFormatter):
         self.MAX_IMAGE_SIZE_MB = settings.max_image_size_mb
         self.HTML_PARSE_TIMEOUT = settings.html_parse_timeout
         self.MAX_HTML_DEPTH = settings.max_html_depth
+        self.HTML_PARSE_CHUNK_SIZE = settings.html_parse_chunk_size
         # Параметры retry логики
         self.MAX_RETRIES = settings.max_retries
         self.RETRY_DELAY = settings.retry_delay
@@ -391,6 +393,7 @@ class DocxFormatter(BaseFormatter):
                      f"image_width={settings.docx_image_width}\", "
                      f"max_image_size={settings.max_image_size_mb}MB, "
                      f"parse_timeout={settings.html_parse_timeout}s, "
+                     f"chunk_size={settings.html_parse_chunk_size}, "
                      f"max_retries={settings.max_retries}")
 
     def format(self, data: Dict) -> Document:
@@ -562,8 +565,12 @@ class DocxFormatter(BaseFormatter):
 
             # Создаем новый парсер для каждого блока с защитой от глубокой вложенности
             parser = HTMLToDocxParser(paragraph, doc, max_depth=self.MAX_HTML_DEPTH)
-            # Создаем прерываемый парсер
-            interruptible = InterruptibleParser(parser, self.HTML_PARSE_TIMEOUT)
+            # Создаем прерываемый парсер с chunk_size из настроек
+            interruptible = InterruptibleParser(
+                parser,
+                self.HTML_PARSE_TIMEOUT,
+                self.HTML_PARSE_CHUNK_SIZE
+            )
 
             try:
                 # Применяем timeout с возможностью прерывания
@@ -583,10 +590,11 @@ class DocxFormatter(BaseFormatter):
                 clean_text = HTMLUtils.clean_html(block['content'])
                 paragraph.add_run(clean_text)
             finally:
-                # Явная очистка парсера для предотвращения memory leak
+                # Явная очистка парсера с принудительной сборкой мусора
                 parser.reset()
-                del parser
-                del interruptible
+                parser = None
+                interruptible = None
+                gc.collect()
 
             # Применяем базовый размер шрифта
             base_font_size = formatting.get('fontSize', 14)
@@ -730,6 +738,7 @@ class DocxFormatter(BaseFormatter):
             return
 
         image_stream = None
+        image_data = None  # Отдельная переменная для контроля памяти
         retry_count = 0
 
         while retry_count <= self.MAX_RETRIES:
@@ -804,8 +813,14 @@ class DocxFormatter(BaseFormatter):
                         image_stream.close()
                     except Exception:
                         pass
-                    del image_stream
                     image_stream = None
+
+                # Очищаем decoded data
+                if image_data:
+                    image_data = None
+
+                # Принудительная сборка мусора
+                gc.collect()
 
     def _add_image_fallback(self, doc: Document, filename: str, caption: str, reason: str = ""):
         """Добавляет текстовую ссылку при критической ошибке (не retry)."""

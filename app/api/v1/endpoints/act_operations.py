@@ -5,10 +5,11 @@
 и скачивания сохраненных файлов.
 """
 
+import asyncio
 import logging
 from typing import Literal
 
-from fastapi import APIRouter, Query, HTTPException, Depends, BackgroundTasks
+from fastapi import APIRouter, Query, HTTPException, Depends
 from fastapi.responses import FileResponse
 
 from app.core.config import get_settings, Settings
@@ -18,6 +19,24 @@ from app.services.storage_service import StorageService
 
 logger = logging.getLogger("act_constructor.api")
 router = APIRouter()
+
+# Semaphore для ограничения одновременных операций с файлами
+# Инициализируется при первом запросе
+_file_semaphore = None
+
+
+def get_file_semaphore(settings: Settings = Depends(get_settings)) -> asyncio.Semaphore:
+    """
+    Получает глобальный semaphore для ограничения файловых операций.
+
+    Защищает от исчерпания file descriptors при большом количестве
+    одновременных запросов на скачивание.
+    """
+    global _file_semaphore
+    if _file_semaphore is None:
+        _file_semaphore = asyncio.Semaphore(settings.max_concurrent_file_operations)
+        logger.info(f"File semaphore инициализирован: {settings.max_concurrent_file_operations}")
+    return _file_semaphore
 
 
 def get_storage_service(settings: Settings = Depends(get_settings)) -> StorageService:
@@ -35,6 +54,22 @@ def get_act_service(
 ) -> ActService:
     """Dependency для получения сервиса работы с актами."""
     return ActService(storage=storage, settings=settings)
+
+
+@router.get("/health")
+async def health_check() -> dict:
+    """
+    Health check endpoint для мониторинга.
+
+    Returns:
+        Статус сервиса и версия
+    """
+    settings = get_settings()
+    return {
+        "status": "ok",
+        "service": settings.app_title,
+        "version": settings.app_version
+    }
 
 
 @router.post("/save_act", response_model=ActSaveResponse)
@@ -63,16 +98,17 @@ async def save_act(
     try:
         logger.info(f"Запрос на сохранение акта в формате {fmt}")
 
-        # Конвертируем Pydantic модель в словарь ОДИН РАЗ
-        data_dict = data.model_dump()
+        # Используем mode='python' для оптимизации
+        # Конвертируем только необходимые поля без лишней сериализации
+        data_dict = data.model_dump(mode='python')
 
-        # ОТЛАДКА: проверяем что пришло
+        # Проверяем что пришло
         logger.debug(f"Получено таблиц: {len(data_dict.get('tables', {}))}")
         logger.debug(f"Получено текстовых блоков: {len(data_dict.get('textBlocks', {}))}")
         logger.debug(f"Получено нарушений: {len(data_dict.get('violations', {}))}")
 
-        # Передаем уже конвертированный словарь в сервис
-        result = act_service.save_act(data_dict, fmt=fmt)
+        # Await для асинхронного метода
+        result = await act_service.save_act(data_dict, fmt=fmt)
         logger.info(f"Акт успешно сохранен: {result.filename}")
         return result
     except ValueError as e:
@@ -92,16 +128,19 @@ async def save_act(
 @router.get("/download/{filename}")
 async def download_act(
         filename: str,
-        background_tasks: BackgroundTasks,
-        storage: StorageService = Depends(get_storage_service)
+        storage: StorageService = Depends(get_storage_service),
+        file_semaphore: asyncio.Semaphore = Depends(get_file_semaphore)
 ) -> FileResponse:
     """
     Скачивает сохраненный файл акта.
 
+    Добавлена защита от исчерпания file descriptors
+    через semaphore ограничивающий количество одновременных операций.
+
     Args:
         filename: Имя файла для скачивания
-        background_tasks: FastAPI background tasks для cleanup
         storage: Сервис хранения (injected)
+        file_semaphore: Semaphore для ограничения одновременных операций (injected)
 
     Returns:
         Файл для скачивания с корректным MIME-типом
@@ -109,42 +148,44 @@ async def download_act(
     Raises:
         HTTPException: 400 для небезопасных имен, 404 если файл не найден
     """
-    try:
-        logger.info(f"Запрос на скачивание файла: {filename}")
+    # Используем semaphore для ограничения одновременных файловых операций
+    async with file_semaphore:
+        try:
+            logger.info(f"Запрос на скачивание файла: {filename}")
 
-        # Валидация и получение безопасного пути
-        file_path = storage.get_file_path(filename)
-        if file_path is None:
-            is_valid = storage.validate_filename(filename)
-            status_code = 400 if not is_valid else 404
-            detail = "Некорректное имя файла" if not is_valid else "Файл не найден"
-            logger.warning(f"Отказ в доступе к файлу: {filename} (код: {status_code})")
-            raise HTTPException(status_code=status_code, detail=detail)
+            # Валидация и получение безопасного пути
+            file_path = storage.get_file_path(filename)
+            if file_path is None:
+                is_valid = storage.validate_filename(filename)
+                status_code = 400 if not is_valid else 404
+                detail = "Некорректное имя файла" if not is_valid else "Файл не найден"
+                logger.warning(f"Отказ в доступе к файлу: {filename} (код: {status_code})")
+                raise HTTPException(status_code=status_code, detail=detail)
 
-        # Определяем MIME-тип по расширению файла
-        mime_types = {
-            '.txt': 'text/plain',
-            '.md': 'text/markdown',
-            '.docx': 'application/vnd.openxmlformats-officedocument.wordprocessingml.document'
-        }
-        media_type = mime_types.get(
-            file_path.suffix,
-            'application/octet-stream'
-        )
+            # Определяем MIME-тип по расширению файла
+            mime_types = {
+                '.txt': 'text/plain',
+                '.md': 'text/markdown',
+                '.docx': 'application/vnd.openxmlformats-officedocument.wordprocessingml.document'
+            }
+            media_type = mime_types.get(
+                file_path.suffix,
+                'application/octet-stream'
+            )
 
-        logger.info(f"Файл {filename} отправлен на скачивание")
+            logger.info(f"Файл {filename} отправлен на скачивание")
 
-        # Возвращаем файл для скачивания
-        return FileResponse(
-            path=file_path,
-            media_type=media_type,
-            filename=filename
-        )
-    except HTTPException:
-        raise
-    except Exception as e:
-        logger.exception(f"Ошибка при скачивании файла {filename}: {e}")
-        raise HTTPException(
-            status_code=500,
-            detail="Произошла ошибка при скачивании файла"
-        )
+            # Возвращаем файл для скачивания
+            return FileResponse(
+                path=file_path,
+                media_type=media_type,
+                filename=filename
+            )
+        except HTTPException:
+            raise
+        except Exception as e:
+            logger.exception(f"Ошибка при скачивании файла {filename}: {e}")
+            raise HTTPException(
+                status_code=500,
+                detail="Произошла ошибка при скачивании файла"
+            )

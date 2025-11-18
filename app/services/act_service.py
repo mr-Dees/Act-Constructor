@@ -5,7 +5,10 @@
 экспорта актов в различные форматы.
 """
 
+import asyncio
+import gc
 import logging
+from concurrent.futures import ThreadPoolExecutor
 from typing import Dict, Literal
 
 from app.core.config import Settings
@@ -16,6 +19,10 @@ from app.schemas.act import ActSaveResponse
 from app.services.storage_service import StorageService
 
 logger = logging.getLogger("act_constructor.service")
+
+# ThreadPoolExecutor для CPU/IO-intensive операций
+# Размер пула = количество CPU cores для оптимальной загрузки
+executor = ThreadPoolExecutor(max_workers=4, thread_name_prefix="act_formatter")
 
 
 class ActService:
@@ -45,19 +52,39 @@ class ActService:
         }
         logger.debug("ActService инициализирован с кэшированными форматерами")
 
-    def save_act(
+    def _format_sync(
+            self,
+            data: Dict,
+            fmt: Literal["txt", "md", "docx"]
+    ):
+        """
+        Синхронная версия форматирования для выполнения в executor.
+
+        Args:
+            data: Словарь с данными акта
+            fmt: Формат файла
+
+        Returns:
+            Отформатированный контент
+        """
+        formatter = self._formatters[fmt]
+        logger.debug(f"Форматирование в {fmt} (thread: {threading.current_thread().name})")
+        return formatter.format(data)
+
+    async def save_act(
             self,
             data: Dict,
             fmt: Literal["txt", "md", "docx"] = "txt"
     ) -> ActSaveResponse:
         """
-        Сохраняет акт в хранилище в выбранном формате.
+        Асинхронно сохраняет акт в хранилище в выбранном формате.
 
         Процесс:
         1. Выбор кэшированного форматера по типу формата
-        2. Форматирование данных акта
+        2. Форматирование данных акта в отдельном потоке (не блокирует event loop)
         3. Сохранение через StorageService
-        4. Возврат результата
+        4. Очистка памяти
+        5. Возврат результата
 
         Args:
             data: Словарь с данными акта (дерево, таблицы, блоки)
@@ -75,30 +102,43 @@ class ActService:
                 f"Используйте 'txt', 'md' или 'docx'."
             )
 
-        # Получаем кэшированный форматер
-        formatter = self._formatters[fmt]
         extension = fmt
+        logger.debug(f"Используется форматер: {self._formatters[fmt].__class__.__name__}")
 
-        logger.debug(f"Используется форматер: {formatter.__class__.__name__}")
-
-        # Форматирование данных
-        formatted_content = formatter.format(data)
-
-        # Сохранение в зависимости от формата
-        if fmt == "docx":
-            # Для DOCX используем специальный метод
-            filename = self.storage.save_docx(formatted_content, prefix="act")
-        else:
-            # Для текстовых форматов используем обычный метод
-            filename = self.storage.save(
-                formatted_content,
-                prefix="act",
-                extension=extension
+        try:
+            # Форматирование в отдельном потоке для не блокирования event loop
+            loop = asyncio.get_event_loop()
+            formatted_content = await loop.run_in_executor(
+                executor,
+                self._format_sync,
+                data,
+                fmt
             )
 
-        # Формирование успешного ответа
-        return ActSaveResponse(
-            status="success",
-            message=f"Акт успешно сохранён в формате {fmt.upper()}",
-            filename=filename
-        )
+            # Сохранение в зависимости от формата
+            if fmt == "docx":
+                # Для DOCX используем специальный метод
+                filename = self.storage.save_docx(formatted_content, prefix="act")
+            else:
+                # Для текстовых форматов используем обычный метод
+                filename = self.storage.save(
+                    formatted_content,
+                    prefix="act",
+                    extension=extension
+                )
+
+            # Формирование успешного ответа
+            return ActSaveResponse(
+                status="success",
+                message=f"Акт успешно сохранён в формате {fmt.upper()}",
+                filename=filename
+            )
+        finally:
+            # Явная очистка памяти после обработки
+            formatted_content = None
+            gc.collect()
+            logger.debug("Память очищена после сохранения акта")
+
+
+# Добавляем импорт threading в начало файла
+import threading

@@ -100,6 +100,9 @@ class Settings(BaseSettings):
     # Максимальная глубина вложенности HTML
     max_html_depth: int = 100
 
+    # Размер чанков для парсинга HTML (в символах)
+    html_parse_chunk_size: int = 1000
+
     # === параметры retry логики ===
 
     # Максимальное количество повторных попыток при временных ошибках
@@ -138,6 +141,11 @@ class Settings(BaseSettings):
 
     # Максимальный уровень заголовков в Markdown
     markdown_max_heading_level: int = 6
+
+    # === Параметры управления ресурсами ===
+
+    # Максимальное количество одновременных операций с файлами
+    max_concurrent_file_operations: int = 100
 
     # Базовая директория проекта (относительный путь от конфига до корня проекта)
     base_dir: ClassVar[Path] = Path(__file__).resolve().parent.parent.parent
@@ -188,7 +196,8 @@ class Settings(BaseSettings):
             raise ValueError(f"log_level должен быть одним из: {', '.join(valid_levels)}")
         return v_upper
 
-    @field_validator("max_request_size", "rate_limit_per_minute", "max_retries")
+    @field_validator("max_request_size", "rate_limit_per_minute", "max_retries", "html_parse_chunk_size",
+                     "max_concurrent_file_operations")
     @classmethod
     def validate_positive(cls, v: int) -> int:
         """Валидация положительных значений."""

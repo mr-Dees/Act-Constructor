@@ -40,7 +40,7 @@ class RateLimitMiddleware(BaseHTTPMiddleware):
         # Блокировка для thread-safety
         self.lock = threading.Lock()
 
-        # ИСПРАВЛЕНИЕ: параметры из настроек вместо хардкода
+        # Параметры из настроек вместо хардкода
         self.max_ips = settings.max_tracked_ips
         self.cleanup_interval = settings.rate_limit_cleanup_interval
         self.history_minutes = settings.rate_limit_history_minutes
@@ -100,7 +100,7 @@ class RateLimitMiddleware(BaseHTTPMiddleware):
 
         Удаляет все запросы старше настроенного времени и пустые IP-записи.
         """
-        # ИСПРАВЛЕНИЕ: используем параметр из настроек
+        # Используем параметр из настроек
         cutoff_time = now - timedelta(minutes=self.history_minutes)
         ips_to_remove = []
 
