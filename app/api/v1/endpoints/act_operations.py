@@ -5,27 +5,33 @@
 и скачивания сохраненных файлов.
 """
 
+import logging
 from typing import Literal
 
 from fastapi import APIRouter, Query, HTTPException, Depends
 from fastapi.responses import FileResponse
 
-from app.core.config import Settings
+from app.core.config import get_settings, Settings
 from app.schemas.act import ActDataSchema, ActSaveResponse
 from app.services.act_service import ActService
+from app.services.storage_service import StorageService
 
-# Создание роутера для операций с актами
+logger = logging.getLogger("act_constructor.api")
 router = APIRouter()
 
 
-def get_settings() -> Settings:
-    """Dependency для получения настроек приложения."""
-    return Settings()
+def get_storage_service(settings: Settings = Depends(get_settings)) -> StorageService:
+    """
+    Dependency для получения StorageService.
+
+    Создает новый экземпляр для каждого запроса (dependency injection).
+    """
+    return StorageService(storage_dir=settings.storage_dir)
 
 
-def get_act_service() -> ActService:
+def get_act_service(storage: StorageService = Depends(get_storage_service)) -> ActService:
     """Dependency для получения сервиса работы с актами."""
-    return ActService()
+    return ActService(storage=storage)
 
 
 @router.post("/save_act", response_model=ActSaveResponse)
@@ -52,13 +58,24 @@ async def save_act(
         HTTPException: 400 при ошибке валидации, 500 при ошибке сохранения
     """
     try:
+        logger.info(f"Запрос на сохранение акта в формате {fmt}")
+
+        # ОТЛАДКА: проверяем что пришло
+        data_dict = data.model_dump()
+        logger.debug(f"Получено таблиц: {len(data_dict.get('tables', {}))}")
+        logger.debug(f"Список ID таблиц: {list(data_dict.get('tables', {}).keys())}")
+
         # Конвертируем Pydantic модель в словарь и передаем в сервис
-        return act_service.save_act(data.model_dump(), fmt=fmt)
+        result = act_service.save_act(data.model_dump(), fmt=fmt)
+        logger.info(f"Акт успешно сохранен: {result.filename}")
+        return result
     except ValueError as e:
         # Ошибка валидации формата
+        logger.error(f"Ошибка валидации формата: {e}")
         raise HTTPException(status_code=400, detail=str(e))
     except Exception as e:
         # Неожиданная ошибка при сохранении
+        logger.exception(f"Неожиданная ошибка при сохранении акта: {e}")
         raise HTTPException(
             status_code=500,
             detail=f"Ошибка сохранения акта: {str(e)}"
@@ -68,28 +85,32 @@ async def save_act(
 @router.get("/download/{filename}")
 async def download_act(
         filename: str,
-        settings: Settings = Depends(get_settings)
+        storage: StorageService = Depends(get_storage_service)
 ) -> FileResponse:
     """
     Скачивает сохраненный файл акта.
 
     Args:
         filename: Имя файла для скачивания
-        settings: Настройки приложения (injected)
+        storage: Сервис хранения (injected)
 
     Returns:
         Файл для скачивания с корректным MIME-типом
 
     Raises:
-        HTTPException: 404 если файл не найден, 500 при ошибке доступа
+        HTTPException: 400 для небезопасных имен, 404 если файл не найден
     """
     try:
-        # Формируем полный путь к файлу
-        file_path = settings.storage_dir / filename
+        logger.info(f"Запрос на скачивание файла: {filename}")
 
-        # Проверяем существование файла
-        if not file_path.exists():
-            raise HTTPException(status_code=404, detail="Файл не найден")
+        # Валидация и получение безопасного пути
+        file_path = storage.get_file_path(filename)
+        if file_path is None:
+            is_valid = storage.validate_filename(filename)
+            status_code = 400 if not is_valid else 404
+            detail = "Некорректное имя файла" if not is_valid else "Файл не найден"
+            logger.warning(f"Отказ в доступе к файлу: {filename} (код: {status_code})")
+            raise HTTPException(status_code=status_code, detail=detail)
 
         # Определяем MIME-тип по расширению файла
         mime_types = {
@@ -99,18 +120,20 @@ async def download_act(
         }
         media_type = mime_types.get(
             file_path.suffix,
-            # Дефолтный тип для неизвестных
             'application/octet-stream'
         )
 
+        logger.info(f"Файл {filename} отправлен на скачивание")
         # Возвращаем файл для скачивания
         return FileResponse(
             path=file_path,
             media_type=media_type,
             filename=filename
         )
+    except HTTPException:
+        raise
     except Exception as e:
-        # Обрабатываем непредвиденные ошибки
+        logger.exception(f"Ошибка при скачивании файла {filename}: {e}")
         raise HTTPException(
             status_code=500,
             detail=f"Ошибка при скачивании: {str(e)}"

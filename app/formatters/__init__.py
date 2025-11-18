@@ -12,7 +12,7 @@ from app.formatters.text_formatter import TextFormatter
 
 __all__ = [
     'BaseFormatter',
-    'TextFormatter',
-    'MarkdownFormatter',
     'DocxFormatter',
+    'MarkdownFormatter',
+    'TextFormatter',
 ]
