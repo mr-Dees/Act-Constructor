@@ -8,8 +8,9 @@
 import asyncio
 import gc
 import logging
+import threading
 from concurrent.futures import ThreadPoolExecutor
-from typing import Dict, Literal
+from typing import Literal
 
 from app.core.config import Settings
 from app.formatters.docx_formatter import DocxFormatter
@@ -20,8 +21,8 @@ from app.services.storage_service import StorageService
 
 logger = logging.getLogger("act_constructor.service")
 
-# ThreadPoolExecutor для CPU/IO-intensive операций
-# Размер пула = количество CPU cores для оптимальной загрузки
+# ThreadPoolExecutor для CPU/IO-intensive операций.
+# Размер пула = количество CPU cores для оптимальной загрузки.
 executor = ThreadPoolExecutor(max_workers=4, thread_name_prefix="act_formatter")
 
 
@@ -30,7 +31,8 @@ class ActService:
     Сервис для работы с актами.
 
     Предоставляет высокоуровневые методы для сохранения актов
-    в разных форматах и получения истории документов.
+    в разных форматах. Использует кэшированные форматеры и
+    ThreadPoolExecutor для неблокирующих операций.
     """
 
     def __init__(self, storage: StorageService, settings: Settings):
@@ -54,11 +56,13 @@ class ActService:
 
     def _format_sync(
             self,
-            data: Dict,
+            data: dict,
             fmt: Literal["txt", "md", "docx"]
     ):
         """
         Синхронная версия форматирования для выполнения в executor.
+
+        Выполняется в отдельном потоке для предотвращения блокировки event loop.
 
         Args:
             data: Словарь с данными акта
@@ -73,7 +77,7 @@ class ActService:
 
     async def save_act(
             self,
-            data: Dict,
+            data: dict,
             fmt: Literal["txt", "md", "docx"] = "txt"
     ) -> ActSaveResponse:
         """
@@ -91,7 +95,7 @@ class ActService:
             fmt: Формат файла ('txt', 'md' или 'docx')
 
         Returns:
-            ActSaveResponse: Результат операции с именем файла
+            Результат операции с именем файла
 
         Raises:
             ValueError: Если указан неподдерживаемый формат
@@ -106,7 +110,7 @@ class ActService:
         logger.debug(f"Используется форматер: {self._formatters[fmt].__class__.__name__}")
 
         try:
-            # Форматирование в отдельном потоке для не блокирования event loop
+            # Форматирование в отдельном потоке для не блокирования event loop.
             loop = asyncio.get_event_loop()
             formatted_content = await loop.run_in_executor(
                 executor,
@@ -138,7 +142,3 @@ class ActService:
             formatted_content = None
             gc.collect()
             logger.debug("Память очищена после сохранения акта")
-
-
-# Добавляем импорт threading в начало файла
-import threading

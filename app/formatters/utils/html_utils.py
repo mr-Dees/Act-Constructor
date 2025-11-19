@@ -6,7 +6,6 @@
 
 import html
 import re
-from typing import Dict
 
 
 class HTMLUtils:
@@ -25,7 +24,7 @@ class HTMLUtils:
             content: HTML-контент
 
         Returns:
-            str: Очищенный plain text
+            Очищенный plain text
 
         Example:
             >>> HTMLUtils.clean_html('<b>Hello</b><br/>World')
@@ -55,7 +54,7 @@ class HTMLUtils:
             content: HTML-контент
 
         Returns:
-            str: Markdown-текст
+            Markdown-текст
 
         Example:
             >>> HTMLUtils.html_to_markdown('<b>Bold</b> and <i>italic</i>')
@@ -100,7 +99,7 @@ class HTMLUtils:
             default: Значение по умолчанию
 
         Returns:
-            str: Значение свойства или default
+            Значение свойства или default
 
         Example:
             >>> html = '<div style="text-align: center; color: red">'
@@ -121,7 +120,7 @@ class HTMLUtils:
         return prop_match.group(1).strip() if prop_match else default
 
     @staticmethod
-    def parse_style_dict(style_string: str) -> Dict[str, str]:
+    def parse_style_dict(style_string: str) -> dict[str, str]:
         """
         Парсит CSS-строку стилей в словарь.
 
@@ -129,7 +128,7 @@ class HTMLUtils:
             style_string: CSS строка (например, 'color: red; font-size: 14px')
 
         Returns:
-            Dict[str, str]: Словарь {property: value}
+            Словарь {property: value}
 
         Example:
             >>> HTMLUtils.parse_style_dict('color: red; font-size: 14px')

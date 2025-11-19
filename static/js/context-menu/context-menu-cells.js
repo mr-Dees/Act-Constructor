@@ -141,7 +141,7 @@ class CellContextMenu {
         const isProtectedTable = table && table.protected === true;
 
         // Список действий, запрещенных для protected таблиц
-        // ВАЖНО: операции со строками НЕ включены!
+        // Операции со строками НЕ включены!
         const protectedForbiddenActions = [
             'merge-cells',
             'unmerge-cell',

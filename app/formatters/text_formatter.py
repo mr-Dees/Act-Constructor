@@ -4,8 +4,6 @@
 Создает plain text с ASCII-таблицами и отступами для иерархии.
 """
 
-from typing import Dict, List
-
 from app.core.config import Settings
 from app.formatters.base_formatter import BaseFormatter
 from app.formatters.utils import HTMLUtils, TableUtils, FormattingUtils
@@ -15,7 +13,8 @@ class TextFormatter(BaseFormatter):
     """
     Форматер для plain text с ASCII-графикой.
 
-    Использует композицию утилит для обработки данных.
+    Использует композицию утилит для обработки данных и создания
+    визуально приятного текстового представления с таблицами.
     """
 
     def __init__(self, settings: Settings):
@@ -29,8 +28,16 @@ class TextFormatter(BaseFormatter):
         self.HEADER_WIDTH = settings.text_header_width
         self.INDENT_SIZE = settings.text_indent_size
 
-    def format(self, data: Dict) -> str:
-        """Форматирует данные акта в plain text."""
+    def format(self, data: dict) -> str:
+        """
+        Форматирует данные акта в plain text.
+
+        Args:
+            data: Данные акта (tree, tables, textBlocks, violations)
+
+        Returns:
+            Plain text представление акта
+        """
         result = []
 
         # Извлекаем данные
@@ -57,13 +64,25 @@ class TextFormatter(BaseFormatter):
 
     def _format_item(
             self,
-            item: Dict,
-            violations: Dict,
-            textBlocks: Dict,
-            tables: Dict,
+            item: dict,
+            violations: dict,
+            textBlocks: dict,
+            tables: dict,
             level: int = 0
     ) -> str:
-        """Рекурсивно форматирует пункт с отступами."""
+        """
+        Рекурсивно форматирует пункт с отступами.
+
+        Args:
+            item: Узел дерева акта
+            violations: Словарь нарушений
+            textBlocks: Словарь текстовых блоков
+            tables: Словарь таблиц
+            level: Уровень вложенности (для отступов)
+
+        Returns:
+            Текстовое представление пункта
+        """
         lines = []
         indent = " " * (self.INDENT_SIZE * level)
 
@@ -102,7 +121,7 @@ class TextFormatter(BaseFormatter):
                 lines.append(f"{indent}{line}")
             lines.append("")
 
-        # Рекурсия
+        # Рекурсия для дочерних элементов
         children = item.get('children', [])
         for child in children:
             lines.append(
@@ -111,8 +130,17 @@ class TextFormatter(BaseFormatter):
 
         return "\n".join(lines)
 
-    def _format_table(self, table_data: Dict, level: int = 0) -> str:
-        """Форматирует таблицу в ASCII-графику."""
+    def _format_table(self, table_data: dict, level: int = 0) -> str:
+        """
+        Форматирует таблицу в ASCII-графику.
+
+        Args:
+            table_data: Данные таблицы с grid структурой
+            level: Уровень вложенности (для отступов)
+
+        Returns:
+            ASCII-таблица
+        """
         indent = " " * (self.INDENT_SIZE * level)
         grid = table_data.get('grid', [])
 
@@ -144,21 +172,49 @@ class TextFormatter(BaseFormatter):
 
         return "\n".join(lines)
 
-    def _draw_separator(self, col_widths: List[int], indent: str) -> str:
-        """Создает горизонтальный разделитель таблицы."""
+    def _draw_separator(self, col_widths: list[int], indent: str) -> str:
+        """
+        Создает горизонтальный разделитель таблицы.
+
+        Args:
+            col_widths: Ширины колонок
+            indent: Отступ для текущего уровня
+
+        Returns:
+            Строка разделителя
+        """
         parts = ['-' * (width + 2) for width in col_widths]
         return f"{indent}+{'+'.join(parts)}+"
 
-    def _draw_row(self, row: List[str], col_widths: List[int], indent: str) -> str:
-        """Создает строку таблицы с содержимым."""
+    def _draw_row(self, row: list[str], col_widths: list[int], indent: str) -> str:
+        """
+        Создает строку таблицы с содержимым.
+
+        Args:
+            row: Данные строки
+            col_widths: Ширины колонок
+            indent: Отступ для текущего уровня
+
+        Returns:
+            Отформатированная строка таблицы
+        """
         row_parts = []
         for col_idx, width in enumerate(col_widths):
             cell_text = str(row[col_idx]) if col_idx < len(row) else ''
             row_parts.append(f" {cell_text.ljust(width)} ")
         return f"{indent}|{'|'.join(row_parts)}|"
 
-    def _format_textblock(self, textblock_data: Dict, level: int = 0) -> str:
-        """Форматирует текстовый блок с очисткой HTML."""
+    def _format_textblock(self, textblock_data: dict, level: int = 0) -> str:
+        """
+        Форматирует текстовый блок с очисткой HTML.
+
+        Args:
+            textblock_data: Данные блока с HTML контентом
+            level: Уровень вложенности (для отступов)
+
+        Returns:
+            Очищенный текст с отступами
+        """
         indent = " " * (self.INDENT_SIZE * level)
         content = textblock_data.get('content', '')
 
@@ -184,8 +240,16 @@ class TextFormatter(BaseFormatter):
         result.extend(formatted_lines)
         return "\n".join(result)
 
-    def _format_violation(self, violation_data: Dict) -> str:
-        """Форматирует нарушение."""
+    def _format_violation(self, violation_data: dict) -> str:
+        """
+        Форматирует нарушение.
+
+        Args:
+            violation_data: Данные нарушения
+
+        Returns:
+            Текстовое представление нарушения
+        """
         lines = []
 
         self._add_labeled_section(lines, "Нарушено", violation_data.get('violated', ''))
@@ -198,8 +262,15 @@ class TextFormatter(BaseFormatter):
 
         return "\n".join(lines)
 
-    def _add_labeled_section(self, lines: List[str], label: str, data):
-        """Добавляет секцию с меткой."""
+    def _add_labeled_section(self, lines: list[str], label: str, data):
+        """
+        Добавляет секцию с меткой.
+
+        Args:
+            lines: Список строк для добавления
+            label: Текст метки
+            data: Данные секции (dict с enabled/content или строка)
+        """
         if isinstance(data, dict):
             if not data.get('enabled', False):
                 return
@@ -211,8 +282,14 @@ class TextFormatter(BaseFormatter):
             lines.append(f"{label}: {content}")
             lines.append("")
 
-    def _add_description_list(self, lines: List[str], desc_list: Dict):
-        """Добавляет список описаний."""
+    def _add_description_list(self, lines: list[str], desc_list: dict):
+        """
+        Добавляет список описаний.
+
+        Args:
+            lines: Список строк для добавления
+            desc_list: Данные списка с items
+        """
         if not desc_list.get('enabled', False):
             return
 
@@ -226,8 +303,14 @@ class TextFormatter(BaseFormatter):
                 lines.append(f"  • {item}")
         lines.append("")
 
-    def _add_additional_content(self, lines: List[str], additional_content: Dict):
-        """Добавляет дополнительный контент."""
+    def _add_additional_content(self, lines: list[str], additional_content: dict):
+        """
+        Добавляет дополнительный контент (кейсы, изображения, свободный текст).
+
+        Args:
+            lines: Список строк для добавления
+            additional_content: Данные с items разных типов
+        """
         if not additional_content.get('enabled', False):
             return
 
@@ -246,8 +329,18 @@ class TextFormatter(BaseFormatter):
                 self._add_free_text(lines, item)
                 case_number = 1
 
-    def _add_case(self, lines: List[str], item: Dict, case_number: int) -> int:
-        """Добавляет кейс."""
+    def _add_case(self, lines: list[str], item: dict, case_number: int) -> int:
+        """
+        Добавляет кейс с нумерацией.
+
+        Args:
+            lines: Список строк для добавления
+            item: Данные кейса
+            case_number: Текущий номер кейса
+
+        Returns:
+            Следующий номер кейса
+        """
         content = item.get('content', '')
         if content:
             lines.append(f"Кейс {case_number}: {content}")
@@ -255,8 +348,14 @@ class TextFormatter(BaseFormatter):
             return case_number + 1
         return case_number
 
-    def _add_image(self, lines: List[str], item: Dict):
-        """Добавляет ссылку на изображение."""
+    def _add_image(self, lines: list[str], item: dict):
+        """
+        Добавляет ссылку на изображение.
+
+        Args:
+            lines: Список строк для добавления
+            item: Данные изображения
+        """
         caption = item.get('caption', '')
         filename = item.get('filename', '')
 
@@ -266,8 +365,14 @@ class TextFormatter(BaseFormatter):
             lines.append(f"Изображение: {filename}")
         lines.append("")
 
-    def _add_free_text(self, lines: List[str], item: Dict):
-        """Добавляет свободный текст."""
+    def _add_free_text(self, lines: list[str], item: dict):
+        """
+        Добавляет свободный текст.
+
+        Args:
+            lines: Список строк для добавления
+            item: Данные с текстом
+        """
         content = item.get('content', '')
         if content:
             lines.append(content)

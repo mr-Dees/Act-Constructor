@@ -252,7 +252,7 @@ class TableCellsOperations {
             AppState.tableUISizes = {};
         }
 
-        // КРИТИЧЕСКИ ВАЖНО: удаляем старые размеры полностью
+        // Удаляем старые размеры полностью
         delete AppState.tableUISizes[table.id];
 
         const sizes = {};
@@ -829,7 +829,7 @@ class TableCellsOperations {
         const rowspan = cellData.rowSpan || 1;
         const colspan = cellData.colSpan || 1;
 
-        // КРИТИЧЕСКИ ВАЖНО: сохраняем флаг isHeader из исходной ячейки
+        // Сохраняем флаг isHeader из исходной ячейки
         const isHeaderCell = cellData.isHeader || false;
 
         // Восстановление всех ячеек в области объединения

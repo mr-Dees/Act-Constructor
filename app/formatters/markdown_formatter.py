@@ -1,10 +1,9 @@
 """
 Форматер для Markdown представления актов.
 
-Использует композицию утилит вместо наследования.
+Использует композицию утилит вместо наследования для обработки
+таблиц, HTML и форматирования.
 """
-
-from typing import Dict, List
 
 from app.core.config import Settings
 from app.formatters.base_formatter import BaseFormatter
@@ -15,7 +14,8 @@ class MarkdownFormatter(BaseFormatter):
     """
     Форматер для преобразования структуры акта в Markdown.
 
-    Следует принципу Composition over Inheritance.
+    Следует принципу Composition over Inheritance, используя
+    утилитарные классы для специфичных задач.
     """
 
     def __init__(self, settings: Settings):
@@ -28,8 +28,16 @@ class MarkdownFormatter(BaseFormatter):
         self.settings = settings
         self.MAX_HEADING_LEVEL = settings.markdown_max_heading_level
 
-    def format(self, data: Dict) -> str:
-        """Форматирует данные акта в Markdown."""
+    def format(self, data: dict) -> str:
+        """
+        Форматирует данные акта в Markdown.
+
+        Args:
+            data: Данные акта (tree, tables, textBlocks, violations)
+
+        Returns:
+            Markdown-текст акта
+        """
         result = []
 
         # Извлекаем данные (не сохраняем в self для thread-safety)
@@ -54,13 +62,25 @@ class MarkdownFormatter(BaseFormatter):
 
     def _format_item(
             self,
-            item: Dict,
-            violations: Dict,
-            textBlocks: Dict,
-            tables: Dict,
+            item: dict,
+            violations: dict,
+            textBlocks: dict,
+            tables: dict,
             level: int = 2
     ) -> str:
-        """Рекурсивно форматирует пункт акта."""
+        """
+        Рекурсивно форматирует пункт акта.
+
+        Args:
+            item: Узел дерева акта
+            violations: Словарь нарушений
+            textBlocks: Словарь текстовых блоков
+            tables: Словарь таблиц
+            level: Уровень вложенности (для заголовков)
+
+        Returns:
+            Markdown-текст пункта
+        """
         lines = []
 
         label = item.get('label', '')
@@ -109,8 +129,16 @@ class MarkdownFormatter(BaseFormatter):
 
         return "\n".join(lines)
 
-    def _format_table(self, table_data: Dict) -> str:
-        """Форматирует таблицу в Markdown pipe tables."""
+    def _format_table(self, table_data: dict) -> str:
+        """
+        Форматирует таблицу в Markdown pipe tables.
+
+        Args:
+            table_data: Данные таблицы с grid структурой
+
+        Returns:
+            Markdown-таблица
+        """
         grid = table_data.get('grid', [])
 
         if not grid:
@@ -139,8 +167,16 @@ class MarkdownFormatter(BaseFormatter):
 
         return "\n".join(lines)
 
-    def _format_textblock(self, textblock_data: Dict) -> str:
-        """Форматирует текстовый блок с HTML→Markdown конвертацией."""
+    def _format_textblock(self, textblock_data: dict) -> str:
+        """
+        Форматирует текстовый блок с HTML→Markdown конвертацией.
+
+        Args:
+            textblock_data: Данные блока с HTML контентом
+
+        Returns:
+            Markdown-текст блока
+        """
         content = textblock_data.get('content', '')
         if not content:
             return ""
@@ -161,8 +197,16 @@ class MarkdownFormatter(BaseFormatter):
         result.append(clean_content)
         return "\n".join(result)
 
-    def _format_violation(self, violation_data: Dict) -> str:
-        """Форматирует нарушение."""
+    def _format_violation(self, violation_data: dict) -> str:
+        """
+        Форматирует нарушение.
+
+        Args:
+            violation_data: Данные нарушения
+
+        Returns:
+            Markdown-текст нарушения
+        """
         lines = []
 
         self._add_labeled_section(lines, "Нарушено", violation_data.get('violated', ''))
@@ -175,8 +219,15 @@ class MarkdownFormatter(BaseFormatter):
 
         return "\n".join(lines)
 
-    def _add_labeled_section(self, lines: List[str], label: str, data):
-        """Добавляет секцию с меткой."""
+    def _add_labeled_section(self, lines: list[str], label: str, data):
+        """
+        Добавляет секцию с жирной меткой.
+
+        Args:
+            lines: Список строк для добавления
+            label: Текст метки
+            data: Данные секции (dict с enabled/content или строка)
+        """
         if isinstance(data, dict):
             if not data.get('enabled', False):
                 return
@@ -188,8 +239,14 @@ class MarkdownFormatter(BaseFormatter):
             lines.append(f"**{label}:** {content}")
             lines.append("")
 
-    def _add_description_list(self, lines: List[str], desc_list: Dict):
-        """Добавляет список описаний."""
+    def _add_description_list(self, lines: list[str], desc_list: dict):
+        """
+        Добавляет список описаний.
+
+        Args:
+            lines: Список строк для добавления
+            desc_list: Данные списка с items
+        """
         if not desc_list.get('enabled', False):
             return
 
@@ -203,8 +260,14 @@ class MarkdownFormatter(BaseFormatter):
                 lines.append(f"- {item}")
         lines.append("")
 
-    def _add_additional_content(self, lines: List[str], additional_content: Dict):
-        """Добавляет дополнительный контент."""
+    def _add_additional_content(self, lines: list[str], additional_content: dict):
+        """
+        Добавляет дополнительный контент (кейсы, изображения, свободный текст).
+
+        Args:
+            lines: Список строк для добавления
+            additional_content: Данные с items разных типов
+        """
         if not additional_content.get('enabled', False):
             return
 
@@ -223,8 +286,18 @@ class MarkdownFormatter(BaseFormatter):
                 self._add_free_text(lines, item)
                 case_number = 1
 
-    def _add_case(self, lines: List[str], item: Dict, case_number: int) -> int:
-        """Добавляет кейс."""
+    def _add_case(self, lines: list[str], item: dict, case_number: int) -> int:
+        """
+        Добавляет кейс с нумерацией.
+
+        Args:
+            lines: Список строк для добавления
+            item: Данные кейса
+            case_number: Текущий номер кейса
+
+        Returns:
+            Следующий номер кейса
+        """
         content = item.get('content', '')
         if content:
             lines.append(f"**Кейс {case_number}:** {content}")
@@ -232,8 +305,14 @@ class MarkdownFormatter(BaseFormatter):
             return case_number + 1
         return case_number
 
-    def _add_image(self, lines: List[str], item: Dict):
-        """Добавляет ссылку на изображение."""
+    def _add_image(self, lines: list[str], item: dict):
+        """
+        Добавляет ссылку на изображение.
+
+        Args:
+            lines: Список строк для добавления
+            item: Данные изображения
+        """
         caption = item.get('caption', '')
         filename = item.get('filename', '')
 
@@ -243,8 +322,14 @@ class MarkdownFormatter(BaseFormatter):
             lines.append(f"*{filename}*")
         lines.append("")
 
-    def _add_free_text(self, lines: List[str], item: Dict):
-        """Добавляет свободный текст."""
+    def _add_free_text(self, lines: list[str], item: dict):
+        """
+        Добавляет свободный текст.
+
+        Args:
+            lines: Список строк для добавления
+            item: Данные с текстом
+        """
         content = item.get('content', '')
         if content:
             lines.append(content)

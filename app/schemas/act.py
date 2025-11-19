@@ -5,7 +5,7 @@ Pydantic схемы для валидации данных актов.
 таблицы, текстовые блоки, нарушения и древовидную структуру.
 """
 
-from typing import List, Dict, Optional, Any, Literal
+from typing import Literal
 
 from pydantic import BaseModel, Field, field_validator
 
@@ -29,32 +29,37 @@ class TableCellSchema(BaseModel):
     colSpan: int = Field(default=1, ge=1, description="Colspan")
     rowSpan: int = Field(default=1, ge=1, description="Rowspan")
     isSpanned: bool = Field(default=False, description="Часть объединения")
-    spanOrigin: Optional[Dict[str, int]] = Field(default=None, description="Координаты главной ячейки")
-    originRow: Optional[int] = Field(default=None, ge=0, description="Исходная строка")
-    originCol: Optional[int] = Field(default=None, ge=0, description="Исходная колонка")
+    spanOrigin: dict[str, int] | None = Field(default=None, description="Координаты главной ячейки")
+    originRow: int | None = Field(default=None, ge=0, description="Исходная строка")
+    originCol: int | None = Field(default=None, ge=0, description="Исходная колонка")
 
 
 class TableSchema(BaseModel):
     """
     Схема таблицы с матричной структурой.
 
+    Добавлены лимиты на размер grid (макс 64 строки, 16 колонок)
+    для защиты от исчерпания памяти.
+
     Attributes:
         id: Уникальный идентификатор таблицы
         nodeId: ID узла дерева
-        grid: Матрица ячеек (двумерный массив)
+        grid: Матрица ячеек (двумерный массив, макс 64×16)
         colWidths: Массив ширин колонок в пикселях
         protected: Защищена ли таблица от перемещения и изменения структуры
         deletable: Можно ли удалить таблицу (работает независимо от protected)
     """
     id: str = Field(description="ID таблицы")
     nodeId: str = Field(description="ID узла дерева")
-    grid: List[List[TableCellSchema]] = Field(
+    grid: list[list[TableCellSchema]] = Field(
         default_factory=list,
-        description="Матрица ячеек"
+        description="Матрица ячеек",
+        max_length=64
     )
-    colWidths: List[int] = Field(
+    colWidths: list[int] = Field(
         default_factory=list,
-        description="Ширины колонок в пикселях"
+        description="Ширины колонок в пикселях",
+        max_length=16
     )
     protected: bool = Field(
         default=False,
@@ -65,10 +70,49 @@ class TableSchema(BaseModel):
         description="Разрешено ли удаление таблицы"
     )
 
+    @field_validator("grid")
+    @classmethod
+    def validate_grid_dimensions(cls, v: list[list[TableCellSchema]]) -> list[list[TableCellSchema]]:
+        """
+        Проверяет размеры матрицы (макс 64 строки × 16 колонок).
+
+        Args:
+            v: Матрица для валидации
+
+        Returns:
+            Валидированная матрица
+
+        Raises:
+            ValueError: Если превышен лимит колонок
+        """
+        if not v:
+            return v
+
+        # Проверяем количество колонок в каждой строке
+        for row_idx, row in enumerate(v):
+            if len(row) > 16:
+                raise ValueError(
+                    f"Строка {row_idx} содержит {len(row)} колонок, "
+                    f"максимум допустимо 16"
+                )
+
+        return v
+
     @field_validator("colWidths")
     @classmethod
-    def validate_col_widths(cls, v: List[int]) -> List[int]:
-        """Проверка, что все ширины положительные."""
+    def validate_col_widths(cls, v: list[int]) -> list[int]:
+        """
+        Проверяет что все ширины положительные.
+
+        Args:
+            v: Список ширин для валидации
+
+        Returns:
+            Валидированный список
+
+        Raises:
+            ValueError: Если есть неположительные ширины
+        """
         if any(width <= 0 for width in v):
             raise ValueError("Ширины колонок должны быть положительными")
         return v
@@ -114,26 +158,17 @@ class TextBlockSchema(BaseModel):
 
 
 class ViolationDescriptionListSchema(BaseModel):
-    """
-    Схема списка описаний нарушения.
-
-    Attributes:
-        enabled: Включен ли список в документ
-        items: Элементы буллитного списка
-    """
+    """Схема списка описаний нарушения."""
     enabled: bool = False
-    items: List[str] = Field(default_factory=list)
+    items: list[str] = Field(default_factory=list)
 
 
 class ViolationOptionalFieldSchema(BaseModel):
     """
     Схема опционального текстового поля нарушения.
 
-    Используется для причин, последствий, рекомендаций, ответственных лиц и др.
-
-    Attributes:
-        enabled: Включено ли поле в документ
-        content: Текстовое содержимое поля
+    Используется для причин, последствий, рекомендаций,
+    ответственных лиц и др.
     """
     enabled: bool = False
     content: str = ""
@@ -162,15 +197,9 @@ class ViolationContentItemSchema(BaseModel):
 
 
 class ViolationAdditionalContentSchema(BaseModel):
-    """
-    Коллекция дополнительного контента нарушения.
-
-    Attributes:
-        enabled: Включена ли секция
-        items: Список всех элементов в порядке добавления
-    """
+    """Коллекция дополнительного контента нарушения."""
     enabled: bool = False
-    items: List[ViolationContentItemSchema] = Field(default_factory=list)
+    items: list[ViolationContentItemSchema] = Field(default_factory=list)
 
 
 class ViolationSchema(BaseModel):
@@ -245,24 +274,25 @@ class ActItemSchema(BaseModel):
     id: str
     label: str
     type: Literal["item", "textblock", "violation", "table"] = "item"
-    content: Optional[str] = ""
-    protected: Optional[bool] = False
-    deletable: Optional[bool] = True
-    children: List['ActItemSchema'] = Field(default_factory=list)
-    tableId: Optional[str] = None
-    textBlockId: Optional[str] = None
-    violationId: Optional[str] = None
-    customLabel: Optional[str] = None
-    number: Optional[str] = None
-    isMetricsTable: Optional[bool] = False
-    isMainMetricsTable: Optional[bool] = False
+    content: str | None = ""
+    protected: bool | None = False
+    deletable: bool | None = True
+    children: list['ActItemSchema'] = Field(default_factory=list)
+    tableId: str | None = None
+    textBlockId: str | None = None
+    violationId: str | None = None
+    customLabel: str | None = None
+    number: str | None = None
+    isMetricsTable: bool | None = False
+    isMainMetricsTable: bool | None = False
 
 
 class ActDataSchema(BaseModel):
     """
     Полная схема данных акта.
 
-    Включает древовидную структуру и все связанные сущности.
+    Включает древовидную структуру и все связанные сущности
+    (таблицы, текстовые блоки, нарушения).
 
     Attributes:
         tree: Корневой узел дерева структуры акта
@@ -270,16 +300,16 @@ class ActDataSchema(BaseModel):
         textBlocks: Словарь текстовых блоков (ключ: ID блока)
         violations: Словарь нарушений (ключ: ID нарушения)
     """
-    tree: Dict = Field(description="Дерево структуры акта")
-    tables: Dict[str, Any] = Field(
+    tree: dict = Field(description="Дерево структуры акта")
+    tables: dict[str, dict] = Field(
         default_factory=dict,
         description="Таблицы"
     )
-    textBlocks: Dict[str, TextBlockSchema] = Field(
+    textBlocks: dict[str, TextBlockSchema] = Field(
         default_factory=dict,
         description="Текстовые блоки"
     )
-    violations: Dict[str, ViolationSchema] = Field(
+    violations: dict[str, ViolationSchema] = Field(
         default_factory=dict,
         description="Нарушения"
     )

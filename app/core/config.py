@@ -8,10 +8,11 @@
 import logging
 import sys
 from functools import lru_cache
+from logging.handlers import RotatingFileHandler
 from pathlib import Path
-from typing import ClassVar
+from typing import ClassVar, Literal
 
-from pydantic import field_validator
+from pydantic import Field, field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -20,14 +21,16 @@ def setup_logging(log_level: str = "INFO") -> logging.Logger:
     Настраивает систему логирования для приложения.
 
     Args:
-        log_level: Уровень логирования (DEBUG, INFO, WARNING, ERROR, CRITICAL)
+        log_level: Уровень логирования (DEBUG, INFO, WARNING, ERROR,
+            CRITICAL)
 
     Returns:
         Настроенный logger
     """
     logger = logging.getLogger("act_constructor")
 
-    # Проверяем что логирование еще не настроено (защита от повторной настройки в workers)
+    # Проверяем что логирование еще не настроено.
+    # Защита от повторной настройки в workers.
     if logger.handlers:
         return logger
 
@@ -44,10 +47,19 @@ def setup_logging(log_level: str = "INFO") -> logging.Logger:
     console_handler.setFormatter(formatter)
     console_handler.setLevel(getattr(logging, log_level.upper()))
 
-    # Настраиваем файловый handler
+    # Настраиваем файловый handler с автоматической ротацией
     log_dir = Path(__file__).resolve().parent.parent.parent / "logs"
     log_dir.mkdir(exist_ok=True)
-    file_handler = logging.FileHandler(log_dir / "app.log", encoding='utf-8')
+
+    # RotatingFileHandler: автоматическая ротация при достижении
+    # maxBytes.
+    # Хранит до backupCount старых файлов (app.log.1, app.log.2, ...).
+    file_handler = RotatingFileHandler(
+        log_dir / "app.log",
+        maxBytes=10 * 1024 * 1024,  # 10MB на файл
+        backupCount=5,  # Храним 5 старых файлов
+        encoding='utf-8'
+    )
     file_handler.setFormatter(formatter)
     file_handler.setLevel(getattr(logging, log_level.upper()))
 
@@ -65,8 +77,8 @@ class Settings(BaseSettings):
     """
     Класс настроек приложения на основе Pydantic.
 
-    Автоматически загружает переменные из .env файла
-    и предоставляет типизированный доступ к конфигурации.
+    Автоматически загружает переменные из .env файла и предоставляет
+    типизированный доступ к конфигурации.
     """
 
     # Метаданные приложения
@@ -75,21 +87,21 @@ class Settings(BaseSettings):
 
     # Параметры сервера
     host: str = "0.0.0.0"
-    port: int = 8000
+    port: int = Field(default=8000, ge=1, le=65535)
 
     # Префикс для API версии 1
     api_v1_prefix: str = "/api/v1"
 
-    # Уровень логирования
-    log_level: str = "INFO"
+    # Уровень логирования (ограничен допустимыми значениями)
+    log_level: Literal["DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"] = "INFO"
 
     # === Лимиты безопасности ===
 
     # Максимальный размер тела запроса в байтах (10MB по умолчанию)
-    max_request_size: int = 10 * 1024 * 1024
+    max_request_size: int = Field(default=10 * 1024 * 1024, gt=0)
 
     # Rate limiting: максимум запросов в минуту на IP
-    rate_limit_per_minute: int = 1024
+    rate_limit_per_minute: int = Field(default=1024, gt=0)
 
     # Максимальный размер изображения в MB
     max_image_size_mb: float = 10.0
@@ -101,26 +113,24 @@ class Settings(BaseSettings):
     max_html_depth: int = 100
 
     # Размер чанков для парсинга HTML (в символах)
-    html_parse_chunk_size: int = 1000
+    html_parse_chunk_size: int = Field(default=1000, gt=0)
 
-    # === параметры retry логики ===
+    # === Параметры retry логики ===
 
     # Максимальное количество повторных попыток при временных ошибках
-    max_retries: int = 3
+    max_retries: int = Field(default=3, gt=0)
 
     # Задержка между попытками в секундах
-    retry_delay: float = 0.5
+    retry_delay: float = Field(default=0.5, ge=0)
 
     # === Параметры Rate Limiting ===
 
-    # Максимальное количество отслеживаемых IP-адресов
-    max_tracked_ips: int = 10000
+    # Максимальное количество отслеживаемых IP-адресов в TTL cache
+    max_tracked_ips: int = 100
 
-    # Интервал фоновой очистки неактивных IP в секундах
-    rate_limit_cleanup_interval: int = 60
-
-    # Время хранения истории запросов в минутах (для очистки)
-    rate_limit_history_minutes: int = 2
+    # TTL (time-to-live) для записей в rate limiter (в секундах).
+    # Запросы старше этого времени автоматически удаляются из кэша.
+    rate_limit_ttl: int = 120
 
     # === Параметры форматирования ===
 
@@ -145,15 +155,25 @@ class Settings(BaseSettings):
     # === Параметры управления ресурсами ===
 
     # Максимальное количество одновременных операций с файлами
-    max_concurrent_file_operations: int = 100
+    max_concurrent_file_operations: int = Field(default=100, gt=0)
 
-    # Базовая директория проекта (относительный путь от конфига до корня проекта)
+    # Timeout для операции сохранения акта (в секундах)
+    save_operation_timeout: int = Field(default=300, gt=0)
+
+    # Timeout для всей операции сохранения акта (секунды)
+    save_act_timeout: int = 300
+
+    # Максимальная глубина дерева акта (защита от рекурсии)
+    max_tree_depth: int = 50
+
+    # Базовая директория проекта.
+    # Относительный путь от конфига до корня проекта.
     base_dir: ClassVar[Path] = Path(__file__).resolve().parent.parent.parent
 
     # Директория для хранения файлов актов
     @property
     def storage_dir(self) -> Path:
-        """Директория для хранения актов с автоматическим созданием."""
+        """Возвращает директорию для хранения актов."""
         path = self.base_dir / "DB" / "acts"
         path.mkdir(parents=True, exist_ok=True)
         return path
@@ -161,13 +181,13 @@ class Settings(BaseSettings):
     # Директория с HTML-шаблонами
     @property
     def templates_dir(self) -> Path:
-        """Директория с шаблонами."""
+        """Возвращает директорию с шаблонами."""
         return self.base_dir / "templates"
 
     # Директория со статическими файлами (CSS, JS)
     @property
     def static_dir(self) -> Path:
-        """Директория со статическими файлами."""
+        """Возвращает директорию со статическими файлами."""
         return self.base_dir / "static"
 
     # Конфигурация Pydantic
@@ -178,40 +198,11 @@ class Settings(BaseSettings):
         validate_default=False  # Оптимизация валидации
     )
 
-    @field_validator("port")
-    @classmethod
-    def validate_port(cls, v: int) -> int:
-        """Валидация номера порта."""
-        if not 1 <= v <= 65535:
-            raise ValueError("Порт должен быть в диапазоне 1-65535")
-        return v
-
     @field_validator("log_level")
     @classmethod
-    def validate_log_level(cls, v: str) -> str:
-        """Валидация уровня логирования."""
-        valid_levels = ["DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"]
-        v_upper = v.upper()
-        if v_upper not in valid_levels:
-            raise ValueError(f"log_level должен быть одним из: {', '.join(valid_levels)}")
-        return v_upper
-
-    @field_validator("max_request_size", "rate_limit_per_minute", "max_retries", "html_parse_chunk_size",
-                     "max_concurrent_file_operations")
-    @classmethod
-    def validate_positive(cls, v: int) -> int:
-        """Валидация положительных значений."""
-        if v <= 0:
-            raise ValueError("Значение должно быть положительным")
-        return v
-
-    @field_validator("retry_delay")
-    @classmethod
-    def validate_retry_delay(cls, v: float) -> float:
-        """Валидация задержки retry."""
-        if v < 0:
-            raise ValueError("retry_delay должен быть неотрицательным")
-        return v
+    def normalize_log_level(cls, v: str) -> str:
+        """Нормализует уровень логирования к верхнему регистру."""
+        return v.upper()
 
     def ensure_directories(self) -> None:
         """
@@ -219,6 +210,9 @@ class Settings(BaseSettings):
 
         Вызывайте этот метод при запуске приложения для гарантии
         существования всех рабочих директорий.
+
+        Raises:
+            RuntimeError: Если критичные директории не найдены
         """
         # storage_dir создается автоматически через property
         _ = self.storage_dir
@@ -236,9 +230,5 @@ class Settings(BaseSettings):
 
 @lru_cache()
 def get_settings() -> Settings:
-    """
-    Возвращает singleton экземпляр Settings с кэшированием.
-
-    Используется как FastAPI dependency.
-    """
+    """Возвращает singleton экземпляр Settings с кэшированием."""
     return Settings()

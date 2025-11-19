@@ -8,7 +8,6 @@
 import logging
 from datetime import datetime
 from pathlib import Path
-from typing import Optional
 
 from docx import Document
 
@@ -22,16 +21,18 @@ class StorageService:
     Обеспечивает уникальные имена файлов с временными метками
     и организует хранение в заданной директории.
 
-    Note: Singleton не используется из-за thread-safety в uvicorn workers.
+    Note:
+        Singleton не используется из-за thread-safety в uvicorn
+        workers.
     """
 
-    def __init__(self, storage_dir: Optional[Path] = None):
+    def __init__(self, storage_dir: Path | None = None):
         """
         Инициализация сервиса хранения.
 
         Args:
             storage_dir: Директория для хранения файлов актов.
-                        Если None, используется путь из настроек.
+                Если None, используется путь из настроек.
         """
         if storage_dir is None:
             from app.core.config import get_settings
@@ -59,7 +60,10 @@ class StorageService:
             extension: Расширение файла (без точки)
 
         Returns:
-            str: Имя созданного файла (без полного пути)
+            Имя созданного файла (без полного пути)
+
+        Raises:
+            Exception: При ошибке записи файла
         """
         # Генерация уникального имени на основе текущего времени
         timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
@@ -84,7 +88,10 @@ class StorageService:
             prefix: Префикс имени файла
 
         Returns:
-            str: Имя созданного файла (без полного пути)
+            Имя созданного файла (без полного пути)
+
+        Raises:
+            Exception: При ошибке сохранения документа
         """
         # Генерация уникального имени на основе текущего времени
         timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
@@ -113,7 +120,7 @@ class StorageService:
             filename: Имя файла для проверки
 
         Returns:
-            bool: True если имя безопасно
+            True если имя безопасно
         """
         if not filename:
             return False
@@ -135,7 +142,7 @@ class StorageService:
 
         return True
 
-    def get_file_path(self, filename: str) -> Optional[Path]:
+    def get_file_path(self, filename: str) -> Path | None:
         """
         Получает безопасный путь к файлу после валидации.
 

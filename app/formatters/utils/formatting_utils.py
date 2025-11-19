@@ -4,20 +4,16 @@
 Обрабатывает параметры fontSize, alignment и создает их описания.
 """
 
-from typing import List, Dict
-
 
 class FormattingUtils:
-    """
-    Stateless класс-утилита для работы с форматированием.
-    """
+    """Stateless класс-утилита для работы с форматированием."""
 
     # Константы по умолчанию
     DEFAULT_FONT_SIZE = 14
     DEFAULT_ALIGNMENT = 'left'
 
     @classmethod
-    def build_meta_description(cls, formatting: Dict) -> List[str]:
+    def build_meta_description(cls, formatting: dict) -> list[str]:
         """
         Создает человекочитаемое описание параметров форматирования.
 
@@ -25,7 +21,7 @@ class FormattingUtils:
             formatting: Словарь с параметрами {fontSize, alignment}
 
         Returns:
-            List[str]: Список строк-описаний (только отличающихся от дефолта)
+            Список строк-описаний (только отличающихся от дефолта)
 
         Example:
             >>> FormattingUtils.build_meta_description({'fontSize': 16, 'alignment': 'center'})
@@ -62,7 +58,7 @@ class FormattingUtils:
             default: Значение по умолчанию
 
         Returns:
-            str: Нормализованное значение (left, center, right, justify)
+            Нормализованное значение (left, center, right, justify)
         """
         valid_alignments = {'left', 'center', 'right', 'justify'}
         return alignment if alignment in valid_alignments else default

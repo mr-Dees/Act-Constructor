@@ -66,12 +66,7 @@ async def detailed_health_check(settings: Settings = Depends(get_settings)) -> d
 
 @router.get("/version")
 async def get_version(settings: Settings = Depends(get_settings)) -> dict:
-    """
-    Информация о версии сервиса.
-
-    Returns:
-        Версия приложения и API
-    """
+    """Возвращает информацию о версии сервиса."""
     return {
         "service": settings.app_title,
         "version": settings.app_version,

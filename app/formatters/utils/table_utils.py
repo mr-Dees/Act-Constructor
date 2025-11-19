@@ -4,16 +4,12 @@
 Обрабатывает grid-структуры с поддержкой colspan/rowspan.
 """
 
-from typing import List, Dict
-
 
 class TableUtils:
-    """
-    Stateless класс-утилита для работы с таблицами.
-    """
+    """Stateless класс-утилита для работы с таблицами."""
 
     @staticmethod
-    def build_display_matrix(grid: List[List[Dict]]) -> List[List[str]]:
+    def build_display_matrix(grid: list[list[dict]]) -> list[list[str]]:
         """
         Преобразует grid-структуру в матрицу строк для отображения.
 
@@ -23,11 +19,11 @@ class TableUtils:
         - Выравнивание до максимальной ширины
 
         Args:
-            grid: Двумерный массив ячеек с метаданными
-                  Каждая ячейка: {content, colSpan, isSpanned, ...}
+            grid: Двумерный массив ячеек с метаданными.
+                Каждая ячейка: {content, colSpan, isSpanned, ...}
 
         Returns:
-            List[List[str]]: Матрица строк одинаковой ширины
+            Матрица строк одинаковой ширины
 
         Example:
             >>> grid = [[
@@ -71,7 +67,7 @@ class TableUtils:
         return display_matrix
 
     @staticmethod
-    def calculate_column_widths(matrix: List[List[str]]) -> List[int]:
+    def calculate_column_widths(matrix: list[list[str]]) -> list[int]:
         """
         Вычисляет оптимальную ширину колонок для ASCII-таблицы.
 
@@ -79,7 +75,7 @@ class TableUtils:
             matrix: Матрица строк (результат build_display_matrix)
 
         Returns:
-            List[int]: Ширина каждой колонки в символах
+            Ширина каждой колонки в символах
 
         Example:
             >>> matrix = [['A', 'BBB'], ['CCCC', 'D']]
@@ -110,7 +106,7 @@ class TableUtils:
             text: Текст ячейки
 
         Returns:
-            str: Текст с экранированными |
+            Текст с экранированными |
 
         Example:
             >>> TableUtils.escape_markdown_pipes('A | B')

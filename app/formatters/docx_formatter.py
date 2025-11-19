@@ -1,7 +1,8 @@
 """
 Форматер для создания актов в формате DOCX.
 
-Преобразует структуру акта в документ Microsoft Word.
+Преобразует структуру акта в документ Microsoft Word с поддержкой
+форматирования, таблиц, изображений и HTML-контента.
 """
 
 import base64
@@ -13,7 +14,6 @@ import threading
 import time
 from html.parser import HTMLParser
 from io import BytesIO
-from typing import Dict, List, Tuple, Optional
 
 from docx import Document
 from docx.enum.text import WD_PARAGRAPH_ALIGNMENT
@@ -29,18 +29,27 @@ logger = logging.getLogger("act_constructor.formatter")
 
 
 class TimeoutError(Exception):
-    """Исключение для timeout операций."""
+    """Исключение для операций, превысивших допустимое время выполнения."""
     pass
 
 
 class InterruptibleParser:
     """
-    Обертка для HTMLParser с возможностью прерывания.
+    Обертка для HTMLParser с возможностью прерывания по timeout.
 
-    Использует флаг interrupted для остановки парсинга.
+    Позволяет безопасно остановить парсинг длинных или сложных
+    HTML-документов, разбивая их на чанки.
     """
 
     def __init__(self, parser, timeout: int, chunk_size: int):
+        """
+        Инициализация прерываемого парсера.
+
+        Args:
+            parser: Экземпляр HTMLParser для обработки
+            timeout: Максимальное время выполнения в секундах
+            chunk_size: Размер чанка для парсинга в символах
+        """
         self.parser = parser
         self.timeout = timeout
         self.chunk_size = chunk_size
@@ -48,7 +57,15 @@ class InterruptibleParser:
         self.start_time = None
 
     def feed(self, data: str):
-        """Парсит данные с проверкой timeout на каждом шаге."""
+        """
+        Парсит данные с проверкой timeout на каждом шаге.
+
+        Args:
+            data: HTML-строка для парсинга
+
+        Raises:
+            TimeoutError: Если парсинг превысил timeout
+        """
         self.start_time = time.time()
         self.interrupted = False
 
@@ -65,15 +82,17 @@ class InterruptibleParser:
             self.parser.feed(chunk)
 
     def interrupt(self):
-        """Прерывает парсинг."""
+        """Прерывает текущий парсинг."""
         self.interrupted = True
 
 
 class TimeoutContext:
     """
-    Кроссплатформенный context manager с реальным прерыванием.
+    Кроссплатформенный context manager с реальным прерыванием операций.
 
-    Использует threading.Timer и флаг прерывания вместо только логирования.
+    Использует threading.Timer для ограничения времени выполнения
+    блока кода. При превышении timeout прерывает операцию через
+    переданный interruptible объект.
     """
 
     def __init__(self, seconds: int, interruptible=None):
@@ -82,7 +101,8 @@ class TimeoutContext:
 
         Args:
             seconds: Максимальное время выполнения в секундах
-            interruptible: Объект с методом interrupt() для прерывания операции
+            interruptible: Объект с методом interrupt() для прерывания
+                операции
         """
         self.seconds = seconds
         self.timer = None
@@ -104,7 +124,20 @@ class TimeoutContext:
         return self
 
     def __exit__(self, exc_type, exc_val, exc_tb):
-        """Останавливает таймер при выходе из контекста."""
+        """
+        Останавливает таймер при выходе из контекста.
+
+        Args:
+            exc_type: Тип исключения (если было)
+            exc_val: Значение исключения
+            exc_tb: Traceback исключения
+
+        Returns:
+            False для проброса исключения
+
+        Raises:
+            TimeoutError: Если операция превысила timeout
+        """
         if self.timer:
             self.timer.cancel()
 
@@ -119,10 +152,19 @@ class HTMLToDocxParser(HTMLParser):
     """
     Парсер HTML для преобразования в Word runs.
 
-    Поддерживает inline-форматирование, гиперссылки и сноски.
+    Поддерживает inline-форматирование (bold, italic, underline),
+    гиперссылки, сноски и защиту от слишком глубокой вложенности.
     """
 
     def __init__(self, paragraph, document, max_depth: int = 100):
+        """
+        Инициализация парсера.
+
+        Args:
+            paragraph: Параграф DOCX для добавления runs
+            document: Документ DOCX (для гиперссылок)
+            max_depth: Максимальная глубина вложенности HTML
+        """
         super().__init__()
         self.paragraph = paragraph
         self.document = document
@@ -136,19 +178,28 @@ class HTMLToDocxParser(HTMLParser):
         self.italic = False
         self.underline = False
         self.strike = False
-        self.font_size: Optional[int] = None
-        self.alignment: Optional[str] = None
-        self.text_buffer: List[str] = []
+        self.font_size: int | None = None
+        self.alignment: str | None = None
+        self.text_buffer: list[str] = []
         self.in_div = False
         self.in_link = False
-        self.link_url: Optional[str] = None
-        self.link_text: List[str] = []
+        self.link_url: str | None = None
+        self.link_text: list[str] = []
         self.in_footnote = False
-        self.footnote_text: Optional[str] = None
-        self.footnote_content: List[str] = []
+        self.footnote_text: str | None = None
+        self.footnote_content: list[str] = []
 
-    def handle_starttag(self, tag: str, attrs: List[Tuple[str, str]]):
-        """Обрабатывает открывающие теги."""
+    def handle_starttag(self, tag: str, attrs: list[tuple[str, str]]):
+        """
+        Обрабатывает открывающие HTML теги.
+
+        Args:
+            tag: Имя тега
+            attrs: Список атрибутов тега
+
+        Raises:
+            ValueError: Если превышена максимальная глубина вложенности
+        """
         # Проверка глубины вложенности для защиты от DoS
         self.current_depth += 1
         if self.current_depth > self.max_depth:
@@ -203,7 +254,12 @@ class HTMLToDocxParser(HTMLParser):
                 self.in_div = True
 
     def handle_endtag(self, tag: str):
-        """Обрабатывает закрывающие теги."""
+        """
+        Обрабатывает закрывающие HTML теги.
+
+        Args:
+            tag: Имя тега
+        """
         # Уменьшаем счетчик глубины
         self.current_depth = max(0, self.current_depth - 1)
 
@@ -236,7 +292,12 @@ class HTMLToDocxParser(HTMLParser):
             self.alignment = None
 
     def handle_data(self, data: str):
-        """Обрабатывает текстовые данные."""
+        """
+        Обрабатывает текстовые данные между тегами.
+
+        Args:
+            data: Текстовое содержимое
+        """
         if not data.strip():
             return
 
@@ -251,7 +312,7 @@ class HTMLToDocxParser(HTMLParser):
         self.text_buffer.append(data)
 
     def _flush_buffer(self):
-        """Сбрасывает буфер в run с форматированием."""
+        """Сбрасывает текстовый буфер в run с текущим форматированием."""
         if not self.text_buffer:
             return
 
@@ -265,7 +326,12 @@ class HTMLToDocxParser(HTMLParser):
         self._apply_formatting(run)
 
     def _apply_formatting(self, run):
-        """Применяет текущее форматирование к run."""
+        """
+        Применяет текущее форматирование к run.
+
+        Args:
+            run: Run объект DOCX
+        """
         run.bold = self.bold
         run.italic = self.italic
         run.underline = self.underline
@@ -277,7 +343,7 @@ class HTMLToDocxParser(HTMLParser):
             run.font.size = Pt(self.font_size)
 
     def _add_hyperlink(self):
-        """Добавляет нативную гиперссылку Word."""
+        """Добавляет нативную гиперссылку Word с форматированием."""
         link_text = ''.join(self.link_text)
 
         try:
@@ -348,7 +414,7 @@ class HTMLToDocxParser(HTMLParser):
         self.current_depth = 0
 
     def reset(self):
-        """Переопределяем reset для полной очистки состояния."""
+        """Переопределяет reset для полной очистки состояния."""
         super().reset()
         self._reset_state()
         self.current_depth = 0
@@ -358,7 +424,9 @@ class DocxFormatter(BaseFormatter):
     """
     Форматер для преобразования акта в документ DOCX.
 
-    Использует композицию HTMLUtils для работы с HTML и конфигурируемые параметры.
+    Использует композицию HTMLUtils для работы с HTML и конфигурируемые
+    параметры из Settings. Поддерживает таблицы, изображения, HTML-блоки
+    и нарушения.
     """
 
     def __init__(self, settings: Settings):
@@ -396,8 +464,16 @@ class DocxFormatter(BaseFormatter):
                      f"chunk_size={settings.html_parse_chunk_size}, "
                      f"max_retries={settings.max_retries}")
 
-    def format(self, data: Dict) -> Document:
-        """Форматирует данные акта в документ DOCX."""
+    def format(self, data: dict) -> Document:
+        """
+        Форматирует данные акта в документ DOCX.
+
+        Args:
+            data: Данные акта (tree, tables, textBlocks, violations)
+
+        Returns:
+            Документ DOCX с отформатированным актом
+        """
         logger.info("Начало форматирования акта в DOCX")
         doc = Document()
 
@@ -420,13 +496,23 @@ class DocxFormatter(BaseFormatter):
     def _add_item(
             self,
             doc: Document,
-            item: Dict,
-            violations: Dict,
-            textBlocks: Dict,
-            tables: Dict,
+            item: dict,
+            violations: dict,
+            textBlocks: dict,
+            tables: dict,
             level: int = 1
     ):
-        """Рекурсивно добавляет пункт акта в документ."""
+        """
+        Рекурсивно добавляет пункт акта в документ.
+
+        Args:
+            doc: Документ DOCX
+            item: Узел дерева акта
+            violations: Словарь нарушений
+            textBlocks: Словарь текстовых блоков
+            tables: Словарь таблиц
+            level: Уровень вложенности (для заголовков)
+        """
         label = item.get('label', '')
         item_type = item.get('type', 'item')
 
@@ -466,13 +552,19 @@ class DocxFormatter(BaseFormatter):
                 logger.exception(f"Ошибка добавления нарушения {violation_id}: {e}")
                 doc.add_paragraph(f"[Ошибка отображения нарушения: {violation_id}]")
 
-        # Рекурсия
+        # Рекурсия для дочерних элементов
         children = item.get('children', [])
         for child in children:
             self._add_item(doc, child, violations, textBlocks, tables, level + 1)
 
-    def _add_table(self, doc: Document, table_data: Dict):
-        """Добавляет таблицу в документ."""
+    def _add_table(self, doc: Document, table_data: dict):
+        """
+        Добавляет таблицу в документ с поддержкой объединения ячеек.
+
+        Args:
+            doc: Документ DOCX
+            table_data: Данные таблицы с grid структурой
+        """
         grid = table_data.get('grid', [])
 
         if not grid or not grid[0]:
@@ -521,12 +613,24 @@ class DocxFormatter(BaseFormatter):
         logger.debug(f"Добавлена таблица {num_rows}x{num_cols}")
 
     def _merge_cells(
-            self, table, cell, cell_data: Dict,
+            self, table, cell, cell_data: dict,
             row_idx: int, col_idx: int,
             num_rows: int, num_cols: int,
             processed_merges: set
     ):
-        """Обрабатывает объединение ячеек."""
+        """
+        Обрабатывает объединение ячеек (colspan/rowspan).
+
+        Args:
+            table: Таблица DOCX
+            cell: Ячейка для объединения
+            cell_data: Данные ячейки с rowSpan/colSpan
+            row_idx: Индекс строки
+            col_idx: Индекс столбца
+            num_rows: Общее количество строк
+            num_cols: Общее количество столбцов
+            processed_merges: Set обработанных объединений
+        """
         rowspan = cell_data.get('rowSpan', 1)
         colspan = cell_data.get('colSpan', 1)
 
@@ -544,8 +648,14 @@ class DocxFormatter(BaseFormatter):
                 except Exception as e:
                     logger.exception(f"Ошибка объединения ячеек: {e}")
 
-    def _add_textblock(self, doc: Document, textblock_data: Dict):
-        """Добавляет текстовый блок с HTML-форматированием."""
+    def _add_textblock(self, doc: Document, textblock_data: dict):
+        """
+        Добавляет текстовый блок с HTML-форматированием и timeout защитой.
+
+        Args:
+            doc: Документ DOCX
+            textblock_data: Данные блока с HTML контентом
+        """
         content = textblock_data.get('content', '').strip()
         if not content:
             return
@@ -563,7 +673,8 @@ class DocxFormatter(BaseFormatter):
                 WD_PARAGRAPH_ALIGNMENT.LEFT
             )
 
-            # Создаем новый парсер для каждого блока с защитой от глубокой вложенности
+            # Создаем новый парсер для каждого блока с защитой от
+            # глубокой вложенности.
             parser = HTMLToDocxParser(paragraph, doc, max_depth=self.MAX_HTML_DEPTH)
             # Создаем прерываемый парсер с chunk_size из настроек
             interruptible = InterruptibleParser(
@@ -590,11 +701,15 @@ class DocxFormatter(BaseFormatter):
                 clean_text = HTMLUtils.clean_html(block['content'])
                 paragraph.add_run(clean_text)
             finally:
-                # Явная очистка парсера с принудительной сборкой мусора
-                parser.reset()
-                parser = None
-                interruptible = None
-                gc.collect()
+                # Гарантированная очистка памяти парсера
+                try:
+                    parser.reset()
+                except Exception:
+                    pass
+                finally:
+                    parser = None
+                    interruptible = None
+                    gc.collect()
 
             # Применяем базовый размер шрифта
             base_font_size = formatting.get('fontSize', 14)
@@ -605,8 +720,17 @@ class DocxFormatter(BaseFormatter):
         doc.add_paragraph()
         logger.debug("Добавлен текстовый блок")
 
-    def _parse_div_blocks(self, content: str, formatting: Dict) -> List[Dict]:
-        """Разбивает HTML на блоки по div-элементам."""
+    def _parse_div_blocks(self, content: str, formatting: dict) -> list[dict]:
+        """
+        Разбивает HTML на блоки по div-элементам с извлечением выравнивания.
+
+        Args:
+            content: HTML-контент
+            formatting: Базовые параметры форматирования
+
+        Returns:
+            Список блоков с контентом и выравниванием
+        """
         div_pattern = r'<div[^>]*>.*?</div>'
         div_matches = list(re.finditer(div_pattern, content, re.DOTALL))
 
@@ -627,7 +751,7 @@ class DocxFormatter(BaseFormatter):
             div_html = match.group(0)
             div_content = self._extract_div_content(div_html)
 
-            # ИСПОЛЬЗУЕМ утилиту HTMLUtils
+            # Используем утилиту HTMLUtils
             alignment = HTMLUtils.extract_style_property(
                 div_html, 'text-align', default_alignment
             )
@@ -646,12 +770,26 @@ class DocxFormatter(BaseFormatter):
         return blocks
 
     def _extract_div_content(self, div_html: str) -> str:
-        """Извлекает содержимое из div-тега."""
+        """
+        Извлекает содержимое из div-тега.
+
+        Args:
+            div_html: HTML строка с div элементом
+
+        Returns:
+            Содержимое div без обрамляющих тегов
+        """
         match = re.search(r'<div[^>]*>(.*?)</div>', div_html, re.DOTALL)
         return match.group(1).strip() if match else ''
 
-    def _add_violation(self, doc: Document, violation_data: Dict):
-        """Добавляет блок нарушения."""
+    def _add_violation(self, doc: Document, violation_data: dict):
+        """
+        Добавляет блок нарушения со всеми секциями.
+
+        Args:
+            doc: Документ DOCX
+            violation_data: Данные нарушения
+        """
         self._add_labeled_field(doc, 'Нарушено', violation_data.get('violated', ''))
         self._add_labeled_field(doc, 'Установлено', violation_data.get('established', ''))
         self._add_description_list(doc, violation_data.get('descriptionList', {}))
@@ -664,7 +802,14 @@ class DocxFormatter(BaseFormatter):
         logger.debug("Добавлен блок нарушения")
 
     def _add_labeled_field(self, doc: Document, label: str, data):
-        """Добавляет поле с меткой."""
+        """
+        Добавляет поле с жирной меткой.
+
+        Args:
+            doc: Документ DOCX
+            label: Текст метки
+            data: Данные поля (dict с enabled/content или строка)
+        """
         if isinstance(data, dict):
             if not data.get('enabled', False):
                 return
@@ -677,8 +822,14 @@ class DocxFormatter(BaseFormatter):
             p.add_run(f'{label}: ').bold = True
             p.add_run(content)
 
-    def _add_description_list(self, doc: Document, desc_list: Dict):
-        """Добавляет список описаний."""
+    def _add_description_list(self, doc: Document, desc_list: dict):
+        """
+        Добавляет список описаний в виде маркированного списка.
+
+        Args:
+            doc: Документ DOCX
+            desc_list: Данные списка с items
+        """
         if not desc_list.get('enabled', False):
             return
 
@@ -693,8 +844,14 @@ class DocxFormatter(BaseFormatter):
             if item.strip():
                 doc.add_paragraph(item, style='List Bullet')
 
-    def _add_additional_content(self, doc: Document, additional_content: Dict):
-        """Добавляет дополнительный контент."""
+    def _add_additional_content(self, doc: Document, additional_content: dict):
+        """
+        Добавляет дополнительный контент (кейсы, изображения, свободный текст).
+
+        Args:
+            doc: Документ DOCX
+            additional_content: Данные с items разных типов
+        """
         if not additional_content.get('enabled', False):
             return
 
@@ -713,8 +870,18 @@ class DocxFormatter(BaseFormatter):
                 self._add_free_text(doc, item)
                 case_number = 1
 
-    def _add_case(self, doc: Document, item: Dict, case_number: int) -> int:
-        """Добавляет кейс."""
+    def _add_case(self, doc: Document, item: dict, case_number: int) -> int:
+        """
+        Добавляет кейс с нумерацией.
+
+        Args:
+            doc: Документ DOCX
+            item: Данные кейса
+            case_number: Текущий номер кейса
+
+        Returns:
+            Следующий номер кейса
+        """
         content = item.get('content', '')
         if content:
             p = doc.add_paragraph()
@@ -723,10 +890,14 @@ class DocxFormatter(BaseFormatter):
             return case_number + 1
         return case_number
 
-    def _add_image(self, doc: Document, item: Dict):
+    def _add_image(self, doc: Document, item: dict):
         """
-        Добавляет изображение из base64 с управлением памятью,
-        безопасной валидацией, retry логикой и graceful degradation.
+        Добавляет изображение из base64 с управлением памятью, безопасной
+        валидацией, retry логикой и graceful degradation.
+
+        Args:
+            doc: Документ DOCX
+            item: Данные изображения (url, caption, filename)
         """
         url = item.get('url', '')
         caption = item.get('caption', '')
@@ -823,7 +994,15 @@ class DocxFormatter(BaseFormatter):
                 gc.collect()
 
     def _add_image_fallback(self, doc: Document, filename: str, caption: str, reason: str = ""):
-        """Добавляет текстовую ссылку при критической ошибке (не retry)."""
+        """
+        Добавляет текстовую ссылку при критической ошибке (не retry).
+
+        Args:
+            doc: Документ DOCX
+            filename: Имя файла изображения
+            caption: Подпись изображения
+            reason: Причина ошибки
+        """
         error_msg = f"Изображение: {filename}"
         if reason:
             error_msg += f" (ошибка: {reason})"
@@ -836,6 +1015,12 @@ class DocxFormatter(BaseFormatter):
         Добавляет placeholder изображения при временной ошибке.
 
         Graceful degradation: показываем рамку вместо изображения.
+
+        Args:
+            doc: Документ DOCX
+            filename: Имя файла изображения
+            caption: Подпись изображения
+            reason: Причина недоступности
         """
         # Добавляем параграф с рамкой
         p = doc.add_paragraph()
@@ -860,8 +1045,14 @@ class DocxFormatter(BaseFormatter):
 
         logger.info(f"Добавлен placeholder для изображения: {filename}")
 
-    def _add_free_text(self, doc: Document, item: Dict):
-        """Добавляет свободный текст."""
+    def _add_free_text(self, doc: Document, item: dict):
+        """
+        Добавляет свободный текст.
+
+        Args:
+            doc: Документ DOCX
+            item: Данные с текстом
+        """
         content = item.get('content', '')
         if content:
             doc.add_paragraph(content)

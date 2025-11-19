@@ -6,10 +6,10 @@
 """
 
 import threading
-from collections import defaultdict
 from contextlib import asynccontextmanager
 from datetime import datetime, timedelta
 
+from cachetools import TTLCache
 from fastapi import FastAPI, Request
 from fastapi.responses import HTMLResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
@@ -28,55 +28,63 @@ class RateLimitMiddleware(BaseHTTPMiddleware):
     """
     Middleware для ограничения частоты запросов (rate limiting).
 
-    Отслеживает количество запросов с каждого IP за последнюю минуту.
-    ИСПРАВЛЕНО: добавлена thread-safety и эффективная очистка.
+    Используется TTLCache вместо defaultdict для автоматической очистки
+    старых записей. Thread-safe и без memory leak.
     """
 
     def __init__(self, app, rate_limit: int, settings: Settings):
+        """
+        Инициализация middleware.
+
+        Args:
+            app: FastAPI приложение
+            rate_limit: Максимум запросов в минуту на IP
+            settings: Настройки приложения
+        """
         super().__init__(app)
         self.rate_limit = rate_limit
-        # Словарь: IP -> список timestamp'ов запросов
-        self.requests = defaultdict(list)
-        # Блокировка для thread-safety
+
+        # TTLCache автоматически удаляет старые записи.
+        self.requests = TTLCache(
+            maxsize=settings.max_tracked_ips,
+            ttl=settings.rate_limit_ttl
+        )
+
+        # Блокировка для thread-safety TTLCache (не thread-safe по
+        # умолчанию).
         self.lock = threading.Lock()
 
-        # Параметры из настроек вместо хардкода
-        self.max_ips = settings.max_tracked_ips
-        self.cleanup_interval = settings.rate_limit_cleanup_interval
-        self.history_minutes = settings.rate_limit_history_minutes
-
-        self.last_cleanup = datetime.now()
         logger.info(
             f"Rate limiting инициализирован: {rate_limit} запросов/минуту, "
-            f"max_ips={self.max_ips}, cleanup_interval={self.cleanup_interval}s"
+            f"max_ips={settings.max_tracked_ips}, ttl={settings.rate_limit_ttl}s"
         )
 
     async def dispatch(self, request: Request, call_next):
-        """Обрабатывает каждый запрос с проверкой лимита."""
+        """
+        Обрабатывает каждый запрос с проверкой лимита.
+
+        Args:
+            request: HTTP запрос
+            call_next: Следующий middleware в цепочке
+
+        Returns:
+            HTTP ответ или 429 при превышении лимита
+        """
         client_ip = request.client.host
         now = datetime.now()
 
         with self.lock:
-            # Периодическая глобальная очистка
-            if (now - self.last_cleanup).total_seconds() > self.cleanup_interval:
-                self._cleanup_old_requests(now)
-                self.last_cleanup = now
+            # Получаем или создаем список запросов для IP
+            if client_ip not in self.requests:
+                self.requests[client_ip] = []
 
-            # Ограничение количества отслеживаемых IP (защита от memory exhaustion)
-            if len(self.requests) >= self.max_ips and client_ip not in self.requests:
-                # Удаляем самый старый IP
-                oldest_ip = min(self.requests.keys(),
-                                key=lambda ip: self.requests[ip][-1] if self.requests[ip] else now)
-                del self.requests[oldest_ip]
-                logger.debug(f"Удален старый IP из rate limiter: {oldest_ip}")
-
-            # Получаем список запросов для текущего IP
             ip_requests = self.requests[client_ip]
 
-            # Быстрая проверка лимита (используем существующий список)
+            # Фильтруем запросы за последнюю минуту
             cutoff_time = now - timedelta(minutes=1)
             recent_requests = [ts for ts in ip_requests if ts > cutoff_time]
 
+            # Проверка лимита
             if len(recent_requests) >= self.rate_limit:
                 logger.warning(f"Rate limit превышен для IP: {client_ip}")
                 return JSONResponse(
@@ -87,38 +95,12 @@ class RateLimitMiddleware(BaseHTTPMiddleware):
                     }
                 )
 
-            # Обновляем список (удаляем старые и добавляем новый)
+            # Добавляем текущий запрос
             recent_requests.append(now)
             self.requests[client_ip] = recent_requests
 
         response = await call_next(request)
         return response
-
-    def _cleanup_old_requests(self, now: datetime):
-        """
-        Эффективная фоновая очистка старых запросов.
-
-        Удаляет все запросы старше настроенного времени и пустые IP-записи.
-        """
-        # Используем параметр из настроек
-        cutoff_time = now - timedelta(minutes=self.history_minutes)
-        ips_to_remove = []
-
-        for ip, timestamps in self.requests.items():
-            # Фильтруем старые запросы
-            recent = [ts for ts in timestamps if ts > cutoff_time]
-            if recent:
-                self.requests[ip] = recent
-            else:
-                # Помечаем пустые записи для удаления
-                ips_to_remove.append(ip)
-
-        # Удаляем пустые IP
-        for ip in ips_to_remove:
-            del self.requests[ip]
-
-        if ips_to_remove:
-            logger.debug(f"Очищено {len(ips_to_remove)} неактивных IP из rate limiter")
 
 
 class RequestSizeLimitMiddleware(BaseHTTPMiddleware):
@@ -129,12 +111,28 @@ class RequestSizeLimitMiddleware(BaseHTTPMiddleware):
     """
 
     def __init__(self, app, max_size: int):
+        """
+        Инициализация middleware.
+
+        Args:
+            app: FastAPI приложение
+            max_size: Максимальный размер тела запроса в байтах
+        """
         super().__init__(app)
         self.max_size = max_size
         logger.info(f"Request size limit установлен: {max_size / (1024 * 1024):.1f}MB")
 
     async def dispatch(self, request: Request, call_next):
-        """Проверяет размер тела запроса."""
+        """
+        Проверяет размер тела запроса.
+
+        Args:
+            request: HTTP запрос
+            call_next: Следующий middleware в цепочке
+
+        Returns:
+            HTTP ответ или 413 при превышении лимита
+        """
         content_length = request.headers.get("content-length")
 
         if content_length:
@@ -162,6 +160,12 @@ async def lifespan(app: FastAPI):
     Управление жизненным циклом приложения.
 
     Выполняется один раз при запуске и остановке worker-процесса.
+
+    Args:
+        app: FastAPI приложение
+
+    Yields:
+        Контроль приложению на время работы
     """
     # Startup
     logger.info("Запуск приложения Act Constructor")
@@ -172,6 +176,11 @@ async def lifespan(app: FastAPI):
 
     # Shutdown
     logger.info("Завершение работы приложения Act Constructor")
+
+    # Закрываем ThreadPoolExecutor
+    from app.services.act_service import executor
+    executor.shutdown(wait=True, cancel_futures=False)
+    logger.info("ThreadPoolExecutor корректно закрыт")
 
 
 def create_app() -> FastAPI:
@@ -187,7 +196,7 @@ def create_app() -> FastAPI:
     - Добавляет middleware для контроля нагрузки
 
     Returns:
-        FastAPI: Полностью сконфигурированное приложение
+        Полностью сконфигурированное приложение
     """
     # Инициализация Jinja2 для рендеринга HTML-шаблонов
     templates = Jinja2Templates(directory=str(settings.templates_dir))
@@ -200,7 +209,7 @@ def create_app() -> FastAPI:
         lifespan=lifespan
     )
 
-    # Добавляем middleware для ограничений (порядок важен: сначала размер, потом rate limit)
+    # Добавляем middleware для ограничений (сначала размер, потом rate limit)
     app.add_middleware(
         RequestSizeLimitMiddleware,
         max_size=settings.max_request_size
@@ -227,7 +236,7 @@ def create_app() -> FastAPI:
             request: Объект HTTP-запроса от FastAPI
 
         Returns:
-            HTMLResponse: Отрендеренный HTML-шаблон конструктора
+            Отрендеренный HTML-шаблон конструктора
         """
         return templates.TemplateResponse(
             "constructor.html",
