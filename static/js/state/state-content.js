@@ -558,7 +558,7 @@ Object.assign(AppState, {
 
         node.children.push(tableNode);
 
-        const grid = this._createTableGrid(preset.rows, preset.cols, preset.headers);
+        const grid = this._createTableGrid(preset.rows, preset.headers.length, preset.headers);
 
         const table = {
             id: tableId,
