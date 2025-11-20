@@ -449,3 +449,80 @@ const AppState = {
         return serialized;
     }
 };
+
+/**
+ * Обертывает AppState в Proxy для автоматического отслеживания изменений
+ *
+ * Использует Object.defineProperty для перехвата операций записи
+ * в ключевые свойства состояния. При любом изменении автоматически
+ * помечает состояние как несохраненное через StorageManager.
+ *
+ * @private
+ */
+function _wrapStateWithProxy() {
+    // Список свойств AppState для отслеживания изменений
+    const trackedProperties = [
+        'treeData',
+        'tables',
+        'textBlocks',
+        'violations',
+        'tableUISizes',
+        'currentStep',
+        'selectedNode',
+        'selectedCells'
+    ];
+
+    trackedProperties.forEach(prop => {
+        // Сохраняем текущее значение свойства
+        let internalValue = AppState[prop];
+
+        // Переопределяем свойство с геттером и сеттером
+        Object.defineProperty(AppState, prop, {
+            get() {
+                return internalValue;
+            },
+            set(newValue) {
+                // Устанавливаем новое значение
+                internalValue = newValue;
+
+                // Помечаем состояние как измененное
+                if (typeof StorageManager !== 'undefined' && StorageManager.markAsUnsaved) {
+                    StorageManager.markAsUnsaved();
+                }
+            },
+            enumerable: true,
+            configurable: true
+        });
+    });
+
+    console.log('State proxy инициализирован. Отслеживаются:', trackedProperties);
+}
+
+/**
+ * Инициализирует отслеживание изменений состояния
+ *
+ * Вызывается автоматически после загрузки DOM и StorageManager.
+ * Обертывает критичные свойства AppState для автоматического
+ * вызова markAsUnsaved() при любых изменениях.
+ */
+function _initStateTracking() {
+    // Проверяем доступность StorageManager
+    if (typeof StorageManager === 'undefined') {
+        console.warn('StorageManager не найден. Автосохранение недоступно.');
+        return;
+    }
+
+    // Инициализируем Proxy
+    _wrapStateWithProxy();
+}
+
+// Автоматическая инициализация при загрузке DOM
+if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', () => {
+        // Небольшая задержка для гарантии загрузки всех модулей
+        setTimeout(_initStateTracking, 0);
+    });
+} else {
+    // DOM уже загружен
+    setTimeout(_initStateTracking, 0);
+}

@@ -3,6 +3,7 @@
  *
  * Координирует инициализацию всех модулей и управляет глобальным состоянием.
  * Делегирует специфичную логику соответствующим менеджерам.
+ * Интегрирован с StorageManager для автосохранения.
  */
 class App {
     /**
@@ -11,6 +12,7 @@ class App {
     static init() {
         try {
             this._initializeState();
+            this._initializeStorageManager();
             this._initializeManagers();
             this._setupEventHandlers();
         } catch (err) {
@@ -35,6 +37,19 @@ class App {
             console.error('Ошибка инициализации состояния:', err);
             Notifications.error(`Ошибка инициализации состояния: ${err.message}`);
             throw err;
+        }
+    }
+
+    /**
+     * Инициализация менеджера хранилища
+     * @private
+     */
+    static _initializeStorageManager() {
+        try {
+            StorageManager.init();
+        } catch (err) {
+            console.error('Ошибка инициализации StorageManager:', err);
+            // Не критичная ошибка, продолжаем работу без автосохранения
         }
     }
 
@@ -68,6 +83,7 @@ class App {
         const handlers = [
             {name: 'Navigation', fn: () => NavigationManager.setup()},
             {name: 'FormatMenu', fn: () => FormatMenuManager.setup()},
+            {name: 'SaveIndicator', fn: () => this._setupSaveIndicator()},
             {name: 'Hotkeys', fn: () => this._setupGlobalKeyboardShortcuts()}
         ];
 
@@ -82,17 +98,57 @@ class App {
     }
 
     /**
+     * Настройка индикатора сохранности
+     * @private
+     */
+    static _setupSaveIndicator() {
+        const saveIndicatorBtn = document.getElementById('saveIndicatorBtn');
+
+        if (saveIndicatorBtn) {
+            // Удаляем старые обработчики если были
+            const newBtn = saveIndicatorBtn.cloneNode(true);
+            saveIndicatorBtn.parentNode.replaceChild(newBtn, saveIndicatorBtn);
+
+            // Добавляем новый обработчик
+            newBtn.addEventListener('click', (e) => {
+                e.preventDefault();
+                e.stopPropagation();
+
+                console.log('Save indicator clicked, disabled:', newBtn.disabled);
+
+                if (!newBtn.disabled) {
+                    StorageManager.forceSave();
+                }
+            });
+
+            console.log('Save indicator setup complete');
+        } else {
+            console.error('saveIndicatorBtn not found');
+        }
+    }
+
+    /**
      * Настройка глобальных горячих клавиш
      * @private
      */
     static _setupGlobalKeyboardShortcuts() {
-        document.addEventListener('keydown', (e) => {
+        document.addEventListener('keydown', async (e) => {
             if ((e.ctrlKey || e.metaKey) && e.code === AppConfig.hotkeys.save.key) {
                 e.preventDefault();
+                e.stopImmediatePropagation();
 
-                if (AppState.currentStep === 2) {
+                if (AppState.currentStep === 1) {
+                    // На шаге 1 - только локальное сохранение
+                    StorageManager.forceSave();
+                } else if (AppState.currentStep === 2) {
+                    // На шаге 2 - сохранение с блокировкой + генерация
+                    await StorageManager.forceSaveAsync();
+
+                    // Генерация уже внутри блокирует отслеживание
                     const generateBtn = document.getElementById('generateBtn');
-                    generateBtn?.click();
+                    if (generateBtn) {
+                        generateBtn.click();
+                    }
                 }
             }
         });
@@ -103,6 +159,7 @@ class App {
      * @param {number} stepNum - Номер шага (1 или 2)
      */
     static goToStep(stepNum) {
+        // Обновляем текущий шаг
         AppState.currentStep = stepNum;
 
         this._updateStepVisibility(stepNum);

@@ -29,6 +29,18 @@
     box-shadow: var(--shadow-md);
 }
 
+/* Класс для анимации подсветки элемента */
+.highlight-flash {
+    animation: highlightFlash 2s ease-out;
+    border-radius: var(--radius);
+    transition: background-color 0.3s ease, box-shadow 0.3s ease;
+}
+
+/* Стили для элементов items (если их еще нет) */
+.item-container {
+    transition: background-color 0.2s ease, box-shadow 0.2s ease;
+}
+
 /* Анимация мигающей подсветки элемента */
 .item-block.highlight-flash {
     animation: highlight-flash 1.5s ease-in-out;

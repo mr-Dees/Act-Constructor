@@ -77,3 +77,4 @@
 
 /* Вспомогательные утилиты */
 @import './utilities/helpers.css';
+@import './utilities/save-indicator.css';

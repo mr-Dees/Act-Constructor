@@ -3,36 +3,59 @@
  * Плавающая кнопка в шапке приложения для открытия модального окна помощи
  */
 
-/* Кнопка справки с иконкой лампочки */
-.help-button {
+/* Контейнер кнопки справки */
+.help-indicator {
     position: absolute;
     left: var(--spacing-lg);
     top: 50%;
-    transform: translateY(-50%);
+    transform: translateY(calc(-50% + 3px));
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 4px;
+}
+
+/* Кнопка справки с иконкой лампочки */
+.help-button {
+    width: 36px;
+    height: 36px;
     background: rgba(255, 255, 255, 0.1);
-    border: 0.0625em solid rgba(255, 255, 255, 0.3);
-    border-radius: 0.5em;
-    padding: 0.65em 0.75em;
+    border: 1px solid rgba(255, 255, 255, 0.2);
+    border-radius: 6px;
+    padding: 0;
     cursor: pointer;
-    transition: all 0.3s ease;
-    color: white;
+    transition: all 0.2s ease;
+    color: rgba(255, 255, 255, 0.9);
     display: flex;
     align-items: center;
-    gap: 0.375em;
+    justify-content: center;
     z-index: 1000;
-    font-size: 1em;
 }
 
 /* Эффект при наведении на кнопку */
 .help-button:hover {
     background: rgba(255, 255, 255, 0.2);
-    transform: translateY(-50%) scale(1.05);
-    box-shadow: 0 0.25em 0.75em rgba(0, 0, 0, 0.3);
+    border-color: rgba(255, 255, 255, 0.3);
+    transform: scale(1.05);
+}
+
+.help-button:active {
+    transform: scale(0.95);
 }
 
 /* Иконка лампочки */
 .lightbulb-icon {
-    font-size: 1.3em;
+    font-size: 18px;
     display: inline-block;
     line-height: 1;
+}
+
+/* Метка под кнопкой */
+.help-button-label {
+    font-size: 10px;
+    font-weight: 500;
+    color: rgba(255, 255, 255, 0.9);
+    white-space: nowrap;
+    user-select: none;
+    transition: color 0.2s ease;
 }

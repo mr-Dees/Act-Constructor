@@ -129,12 +129,13 @@ class TreeManager {
             // Переходим на шаг 2 (превью)
             App.goToStep(2);
 
-            // Используем несколько requestAnimationFrame для надежности отрисовки
+            // Используем цепочку requestAnimationFrame + timeout для надежности
             requestAnimationFrame(() => {
                 requestAnimationFrame(() => {
+                    // Увеличиваем задержку для гарантии полной отрисовки
                     setTimeout(() => {
                         this._scrollToPreviewElement(targetNodeId);
-                    }, 100);
+                    }, 300);
                 });
             });
         }
@@ -146,21 +147,62 @@ class TreeManager {
      * @param {string} targetNodeId - ID целевого узла
      */
     _scrollToPreviewElement(targetNodeId) {
+        console.log('Scrolling to node:', targetNodeId);
+
         const itemsContainer = document.getElementById('itemsContainer');
-        if (!itemsContainer) return;
+        if (!itemsContainer) {
+            console.error('itemsContainer не найден');
+            return;
+        }
 
-        // Ищем элемент на странице превью
-        const targetElement = itemsContainer.querySelector(`[data-node-id="${targetNodeId}"]`);
-        if (!targetElement) return;
+        console.log('itemsContainer found');
 
-        // Получаем высоту шапки для правильного позиционирования
+        // Ищем элемент на странице превью по различным селекторам
+        let targetElement = null;
+
+        // Попытка 1: прямой поиск по data-node-id
+        targetElement = itemsContainer.querySelector(`[data-node-id="${targetNodeId}"]`);
+        console.log('Direct search result:', targetElement);
+
+        // Попытка 2: поиск в item-container
+        if (!targetElement) {
+            const itemContainers = itemsContainer.querySelectorAll('.item-container');
+            console.log('Found item-containers:', itemContainers.length);
+
+            for (const container of itemContainers) {
+                console.log('Checking container:', container.dataset.nodeId);
+                if (container.dataset.nodeId === targetNodeId) {
+                    targetElement = container;
+                    console.log('Found in item-container');
+                    break;
+                }
+            }
+        }
+
+        // Попытка 3: поиск по ID элемента
+        if (!targetElement) {
+            targetElement = document.getElementById(`item-${targetNodeId}`);
+            console.log('Search by ID result:', targetElement);
+        }
+
+        if (!targetElement) {
+            console.error(`Элемент с node-id="${targetNodeId}" не найден`);
+            console.log('Available elements:', itemsContainer.querySelectorAll('[data-node-id]'));
+            return;
+        }
+
+        console.log('Target element found:', targetElement);
+
+        // Получаем высоту шапки
         const header = document.querySelector('.header');
-        const headerHeight = header ? header.offsetHeight : 60;
+        const headerHeight = header ? header.offsetHeight : 80;
 
         // Вычисляем позицию для прокрутки
         const elementRect = targetElement.getBoundingClientRect();
         const absoluteElementTop = elementRect.top + window.pageYOffset;
         const scrollToPosition = absoluteElementTop - headerHeight - 20;
+
+        console.log('Scrolling to position:', scrollToPosition);
 
         // Плавно прокручиваем к элементу
         window.scrollTo({
@@ -168,11 +210,93 @@ class TreeManager {
             behavior: 'smooth'
         });
 
-        // Добавляем анимацию подсветки элемента
-        targetElement.classList.add('highlight-flash');
-        setTimeout(() => {
-            targetElement.classList.remove('highlight-flash');
-        }, 2000);
+        // Запускаем анимацию подсветки
+        console.log('Starting highlight animation');
+        this._animateHighlight(targetElement);
+    }
+
+    /**
+     * Анимирует подсветку элемента через Web Animations API
+     * @private
+     * @param {HTMLElement} element - Элемент для подсветки
+     */
+    _animateHighlight(element) {
+        console.log('Animating element:', element);
+
+        // Сохраняем оригинальные стили
+        const originalBackground = element.style.backgroundColor;
+        const originalBoxShadow = element.style.boxShadow;
+        const originalTransition = element.style.transition;
+
+        // Временно отключаем transitions
+        element.style.transition = 'none';
+
+        // Ключевые кадры анимации
+        const keyframes = [
+            {
+                backgroundColor: 'transparent',
+                boxShadow: '0 0 0 0 rgba(102, 126, 234, 0)',
+                offset: 0
+            },
+            {
+                backgroundColor: 'rgba(102, 126, 234, 0.15)',
+                boxShadow: '0 0 10px 4px rgba(102, 126, 234, 0.4)',
+                offset: 0.25
+            },
+            {
+                backgroundColor: 'rgba(102, 126, 234, 0.25)',
+                boxShadow: '0 0 15px 6px rgba(102, 126, 234, 0.5)',
+                offset: 0.5
+            },
+            {
+                backgroundColor: 'rgba(102, 126, 234, 0.12)',
+                boxShadow: '0 0 8px 3px rgba(102, 126, 234, 0.3)',
+                offset: 0.85
+            },
+            {
+                backgroundColor: 'transparent',
+                boxShadow: '0 0 0 0 rgba(102, 126, 234, 0)',
+                offset: 1
+            }
+        ];
+
+        // Параметры анимации
+        const timing = {
+            duration: 2000,
+            easing: 'ease-out',
+            fill: 'forwards'
+        };
+
+        try {
+            // Запускаем анимацию
+            const animation = element.animate(keyframes, timing);
+
+            console.log('Animation started');
+
+            // Восстанавливаем оригинальные стили после анимации
+            animation.onfinish = () => {
+                console.log('Animation finished');
+                element.style.backgroundColor = originalBackground;
+                element.style.boxShadow = originalBoxShadow;
+                element.style.transition = originalTransition;
+            };
+
+            animation.oncancel = () => {
+                console.log('Animation cancelled');
+                element.style.backgroundColor = originalBackground;
+                element.style.boxShadow = originalBoxShadow;
+                element.style.transition = originalTransition;
+            };
+
+        } catch (error) {
+            console.error('Animation error:', error);
+
+            // Fallback: используем CSS класс
+            element.classList.add('highlight-flash');
+            setTimeout(() => {
+                element.classList.remove('highlight-flash');
+            }, 2000);
+        }
     }
 
     /**

@@ -331,4 +331,42 @@ class TreeRenderer {
             ContextMenuManager.show(e.clientX, e.clientY, node.id, 'tree');
         });
     }
+
+    /**
+     * Настраивает обработчики для редактируемых узлов
+     * @private
+     */
+    _setupEditableNodeHandlers(li, label, node, handleCtrlClick) {
+        let clickCount = 0;
+        let clickTimer = null;
+
+        label.addEventListener('click', (e) => {
+            e.stopPropagation();
+
+            // Обработка Ctrl+Click
+            if (e.ctrlKey || e.metaKey) {
+                console.log('Ctrl+Click detected on node:', node.id);
+                handleCtrlClick();
+                return;
+            }
+
+            // Отслеживаем двойной клик для редактирования
+            clickCount++;
+
+            if (clickCount === 1) {
+                // Первый клик - запускаем таймер
+                clickTimer = setTimeout(() => {
+                    clickCount = 0;
+                    this.manager.selectNode(li);
+                }, 300);
+            } else if (clickCount === 2) {
+                // Второй клик - начинаем редактирование
+                clearTimeout(clickTimer);
+                clickCount = 0;
+                ItemsTitleEditing.startEditingTreeNode(label, node, this.manager);
+            }
+        });
+
+        label.style.cursor = 'pointer';
+    }
 }

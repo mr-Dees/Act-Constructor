@@ -1,0 +1,101 @@
+/*
+ * Индикатор сохранности
+ * Кнопка с индикатором состояния сохранения в левом углу шапки
+ */
+
+.save-indicator {
+    position: absolute;
+    left: calc(var(--spacing-lg) + 52px);
+    top: 50%;
+    transform: translateY(calc(-50% + 3px));
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 4px;
+}
+
+.save-indicator-button {
+    width: 36px;
+    height: 36px;
+    border: none;
+    border-radius: 6px;
+    background: rgba(255, 255, 255, 0.1);
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    transition: all 0.2s ease;
+    position: relative;
+    border: 1px solid rgba(255, 255, 255, 0.2);
+}
+
+.save-indicator-button svg {
+    width: 16px;
+    height: 16px;
+    transition: all 0.2s ease;
+}
+
+/* Состояние: сохранено */
+.save-indicator-button.saved {
+    color: rgba(255, 255, 255, 0.9);
+    cursor: default;
+}
+
+.save-indicator-button.saved:hover {
+    background: rgba(255, 255, 255, 0.1);
+    transform: none;
+}
+
+/* Состояние: не сохранено */
+.save-indicator-button.unsaved {
+    color: #fbbf24;
+    background: rgba(251, 191, 36, 0.15);
+    border-color: rgba(251, 191, 36, 0.3);
+}
+
+.save-indicator-button.unsaved:hover {
+    background: rgba(251, 191, 36, 0.25);
+    border-color: rgba(251, 191, 36, 0.4);
+    transform: scale(1.05);
+}
+
+.save-indicator-button.unsaved:active {
+    transform: scale(0.95);
+}
+
+/* Анимация при изменении состояния */
+.save-indicator-button.unsaved svg {
+    animation: pulse 2s ease-in-out infinite;
+}
+
+@keyframes pulse {
+    0%, 100% {
+        opacity: 1;
+    }
+    50% {
+        opacity: 0.6;
+    }
+}
+
+/* Метка под кнопкой */
+.save-indicator-label {
+    font-size: 10px;
+    font-weight: 500;
+    color: rgba(255, 255, 255, 0.8);
+    white-space: nowrap;
+    user-select: none;
+    transition: color 0.2s ease;
+}
+
+.save-indicator-button.unsaved ~ .save-indicator-label {
+    color: #fbbf24;
+}
+
+.save-indicator-button.saved ~ .save-indicator-label {
+    color: rgba(255, 255, 255, 0.9);
+}
+
+/* Disabled состояние */
+.save-indicator-button:disabled {
+    opacity: 0.9;
+}

@@ -3,6 +3,7 @@
  *
  * Обрабатывает все HTTP-запросы к серверу для работы с актами.
  * Предоставляет методы для генерации и скачивания файлов актов.
+ * Интегрирован с StorageManager для автосохранения при генерации.
  */
 class APIClient {
     /**
@@ -10,29 +11,36 @@ class APIClient {
      *
      * Поддерживает создание нескольких форматов за один вызов.
      * Автоматически предлагает скачать созданные файлы.
+     * Сохраняет состояние в localStorage перед отправкой на сервер.
      *
      * @param {string|string[]} formats - Формат или массив форматов ('txt', 'md', 'docx')
      * @returns {Promise<boolean>} true если хотя бы один файл создан успешно
      */
     static async generateAct(formats = 'txt') {
-        const data = AppState.exportData();
-        const formatList = Array.isArray(formats) ? formats : [formats];
-
-        // Фильтруем только поддерживаемые форматы
-        const validFormats = formatList.filter(fmt =>
-            AppConfig.api.supportedFormats.includes(fmt)
-        );
-
-        if (validFormats.length === 0) {
-            Notifications.error('Не выбраны валидные форматы для сохранения');
-            return false;
-        }
-
-        const results = [];
-        let successCount = 0;
-        let errorCount = 0;
+        // Блокируем отслеживание на время всей операции генерации
+        StorageManager.disableTracking();
 
         try {
+            // Сохраняем состояние в localStorage перед генерацией
+            StorageManager.saveState(true);
+
+            const data = AppState.exportData();
+            const formatList = Array.isArray(formats) ? formats : [formats];
+
+            // Фильтруем только поддерживаемые форматы
+            const validFormats = formatList.filter(fmt =>
+                AppConfig.api.supportedFormats.includes(fmt)
+            );
+
+            if (validFormats.length === 0) {
+                Notifications.error('Не выбраны валидные форматы для сохранения');
+                return false;
+            }
+
+            const results = [];
+            let successCount = 0;
+            let errorCount = 0;
+
             // Последовательно создаем файлы всех форматов
             for (const format of validFormats) {
                 const result = await this._generateSingleFormat(format, data);
@@ -61,6 +69,11 @@ class APIClient {
                 AppConfig.notifications.duration.longSuccess
             );
             return false;
+        } finally {
+            // Разблокируем отслеживание после завершения всей операции
+            setTimeout(() => {
+                StorageManager.enableTracking();
+            }, 100);
         }
     }
 
@@ -141,6 +154,7 @@ class APIClient {
      * @param {number} successCount - Количество успешно созданных файлов
      */
     static async _handleDownloadPrompt(results, successCount) {
+        // Диалог показывается в контексте блокированного отслеживания
         const shouldDownload = await DialogManager.show({
             title: 'Скачать созданные файлы?',
             message: `Было успешно создано ${successCount} файл(ов). Хотите скачать их сейчас?`,

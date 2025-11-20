@@ -1,11 +1,43 @@
 <header class="header">
     <!-- Кнопка справки -->
-    <button id="helpBtn"
-            class="help-button"
-            title="Показать инструкцию"
-            aria-label="Показать инструкцию">
-        <span class="lightbulb-icon">💡</span>
-    </button>
+    <div class="help-indicator">
+        <button id="helpBtn"
+                class="help-button"
+                title="Показать инструкцию"
+                aria-label="Показать инструкцию">
+            <span class="lightbulb-icon">💡</span>
+        </button>
+        <span class="help-button-label">Помощь</span>
+    </div>
+
+    <!-- Индикатор сохранности -->
+    <div class="save-indicator">
+        <button id="saveIndicatorBtn"
+                class="save-indicator-button saved"
+                disabled
+                title="Все изменения сохранены"
+                aria-label="Индикатор сохранности">
+            <svg width="16" height="16" viewBox="0 0 16 16" fill="none" xmlns="http://www.w3.org/2000/svg">
+                <!-- Иконка дискеты -->
+                <path d="M12 1H2C1.44772 1 1 1.44772 1 2V14C1 14.5523 1.44772 15 2 15H14C14.5523 15 15 14.5523 15 14V4L12 1Z"
+                      stroke="currentColor"
+                      stroke-width="1.5"
+                      stroke-linecap="round"
+                      stroke-linejoin="round"/>
+                <path d="M11 1V5H4V1"
+                      stroke="currentColor"
+                      stroke-width="1.5"
+                      stroke-linecap="round"
+                      stroke-linejoin="round"/>
+                <path d="M4 15V9H11V15"
+                      stroke="currentColor"
+                      stroke-width="1.5"
+                      stroke-linecap="round"
+                      stroke-linejoin="round"/>
+            </svg>
+        </button>
+        <span id="saveIndicatorLabel" class="save-indicator-label">Сохранено</span>
+    </div>
 
     <!-- Индикатор текущего шага -->
     <div class="steps-container" role="tablist">

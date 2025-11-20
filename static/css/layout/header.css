@@ -1,6 +1,6 @@
 /*
  * Стили для шапки приложения
- * Содержит заголовок и навигацию по шагам
+ * Содержит навигацию по шагам и служебные кнопки
  */
 
 .header {
@@ -14,19 +14,9 @@
     z-index: 1000;
     box-shadow: var(--shadow-md);
     display: flex;
-    flex-direction: column;
     justify-content: center;
     align-items: center;
-}
-
-/* Основной заголовок */
-.header h1 {
-    font-size: 1.75rem;
-    font-weight: 700;
-    letter-spacing: -0.02em;
-    margin-bottom: var(--spacing);
-    text-shadow: 0 2px 4px rgba(0, 0, 0, 0.15);
-    text-align: center;
+    min-height: var(--header-min-height);
 }
 
 /* Контейнер для шагов навигации */
