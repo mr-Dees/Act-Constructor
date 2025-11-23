@@ -9,6 +9,8 @@
     gap: var(--spacing);
     margin-top: var(--spacing-xl);
     justify-content: center;
+    flex-wrap: wrap;
+    align-items: center;
 }
 
 /* Контейнер для кнопок навигации между шагами */
@@ -17,4 +19,24 @@
     gap: var(--spacing);
     margin-top: var(--spacing-xl);
     justify-content: center;
+    flex-wrap: wrap;
+    align-items: center;
+}
+
+/* Выравнивание кнопок по краям */
+.action-buttons.space-between,
+.step-actions.space-between {
+    justify-content: space-between;
+}
+
+/* Выравнивание кнопок справа */
+.action-buttons.end,
+.step-actions.end {
+    justify-content: flex-end;
+}
+
+/* Выравнивание кнопок слева */
+.action-buttons.start,
+.step-actions.start {
+    justify-content: flex-start;
 }

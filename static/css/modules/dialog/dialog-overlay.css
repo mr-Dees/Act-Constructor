@@ -8,36 +8,46 @@
 /* Полноэкранная подложка диалогового окна */
 .custom-dialog-overlay {
     position: fixed;
-    top: 0;
-    left: 0;
-    right: 0;
-    bottom: 0;
-    background: rgba(26, 32, 44, 0.5);
+    inset: 0;
+    background: var(--overlay-bg);
     backdrop-filter: blur(4px);
     -webkit-backdrop-filter: blur(4px);
-    z-index: 9999;
+    z-index: var(--z-modal-backdrop);
     display: flex;
     align-items: center;
     justify-content: center;
-    animation: fadeIn 0.2s ease-out;
+    animation: fadeIn var(--transition-base) ease-out;
     padding: var(--spacing-lg);
+    cursor: pointer;
+}
+
+/* Диалог не должен закрываться при клике на него */
+.custom-dialog-overlay > .custom-dialog {
+    cursor: default;
 }
 
 /* Скрытое состояние с плавным исчезновением */
 .custom-dialog-overlay.hidden {
-    animation: fadeOut 0.2s ease-out forwards;
+    animation: fadeOut var(--transition-base) ease-out forwards;
 }
 
-@keyframes fadeOut {
-    from {
-        opacity: 1;
-    }
-    to {
-        opacity: 0;
-    }
+/* Анимация закрытия */
+.custom-dialog-overlay.closing {
+    animation: fadeOut var(--transition-fast) ease-out forwards;
 }
 
 /* Предотвращение прокрутки фона при открытом диалоге */
 body.dialog-open {
     overflow: hidden;
+    padding-right: var(--scrollbar-width);
+}
+
+/* Множественные оверлеи для вложенных диалогов */
+.custom-dialog-overlay[data-level="2"] {
+    z-index: calc(var(--z-modal-backdrop) + 100);
+    background: rgb(26 32 44 / 60%);
+}
+
+.custom-dialog-overlay[data-level="2"] .custom-dialog {
+    z-index: calc(var(--z-modal) + 100);
 }

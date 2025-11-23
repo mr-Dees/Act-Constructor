@@ -31,7 +31,8 @@ class TreeManager {
 
     /**
      * Инициализация обработчиков для снятия выделения
-     * Настраивает реакцию на клики вне дерева и нажатие ESC
+     *
+     * Настраивает реакцию на клики вне дерева и нажатие ESC.
      */
     initDeselectionHandlers() {
         // Снимаем выделение при клике вне контейнера дерева
@@ -51,7 +52,8 @@ class TreeManager {
 
     /**
      * Снятие выделения всех узлов
-     * Убирает все классы выделения и сбрасывает ссылки на выбранный узел
+     *
+     * Убирает все классы выделения и сбрасывает ссылки на выбранный узел.
      */
     clearSelection() {
         // Убираем класс selected со всех элементов
@@ -69,7 +71,10 @@ class TreeManager {
 
     /**
      * Выбор узла
-     * Снимает выделение со всех узлов и выделяет указанный, также подсвечивает родительские элементы
+     *
+     * Снимает выделение со всех узлов и выделяет указанный,
+     * также подсвечивает родительские элементы.
+     *
      * @param {HTMLElement} itemElement - Элемент li, который нужно выделить
      */
     selectNode(itemElement) {
@@ -116,6 +121,7 @@ class TreeManager {
 
     /**
      * Обработчик Ctrl+Click для перехода к элементу в превью
+     *
      * @param {Object} node - Узел дерева
      * @param {HTMLElement} itemElement - Элемент li для выделения
      */
@@ -130,12 +136,13 @@ class TreeManager {
             App.goToStep(2);
 
             // Используем цепочку requestAnimationFrame + timeout для надежности
+            const delay = AppConfig.tree.scrollSettings.transitionDelay;
+
             requestAnimationFrame(() => {
                 requestAnimationFrame(() => {
-                    // Увеличиваем задержку для гарантии полной отрисовки
                     setTimeout(() => {
                         this._scrollToPreviewElement(targetNodeId);
-                    }, 300);
+                    }, delay);
                 });
             });
         }
@@ -147,161 +154,105 @@ class TreeManager {
      * @param {string} targetNodeId - ID целевого узла
      */
     _scrollToPreviewElement(targetNodeId) {
-        console.log('Scrolling to node:', targetNodeId);
-
         const itemsContainer = document.getElementById('itemsContainer');
         if (!itemsContainer) {
-            console.error('itemsContainer не найден');
+            console.warn('itemsContainer не найден');
             return;
         }
 
-        console.log('itemsContainer found');
-
-        // Ищем элемент на странице превью по различным селекторам
-        let targetElement = null;
-
-        // Попытка 1: прямой поиск по data-node-id
-        targetElement = itemsContainer.querySelector(`[data-node-id="${targetNodeId}"]`);
-        console.log('Direct search result:', targetElement);
-
-        // Попытка 2: поиск в item-container
+        const targetElement = this._findPreviewElement(itemsContainer, targetNodeId);
         if (!targetElement) {
-            const itemContainers = itemsContainer.querySelectorAll('.item-container');
-            console.log('Found item-containers:', itemContainers.length);
-
-            for (const container of itemContainers) {
-                console.log('Checking container:', container.dataset.nodeId);
-                if (container.dataset.nodeId === targetNodeId) {
-                    targetElement = container;
-                    console.log('Found in item-container');
-                    break;
-                }
-            }
-        }
-
-        // Попытка 3: поиск по ID элемента
-        if (!targetElement) {
-            targetElement = document.getElementById(`item-${targetNodeId}`);
-            console.log('Search by ID result:', targetElement);
-        }
-
-        if (!targetElement) {
-            console.error(`Элемент с node-id="${targetNodeId}" не найден`);
-            console.log('Available elements:', itemsContainer.querySelectorAll('[data-node-id]'));
+            console.warn(`Элемент с node-id="${targetNodeId}" не найден`);
             return;
         }
 
-        console.log('Target element found:', targetElement);
-
-        // Получаем высоту шапки
-        const header = document.querySelector('.header');
-        const headerHeight = header ? header.offsetHeight : 80;
-
-        // Вычисляем позицию для прокрутки
-        const elementRect = targetElement.getBoundingClientRect();
-        const absoluteElementTop = elementRect.top + window.pageYOffset;
-        const scrollToPosition = absoluteElementTop - headerHeight - 20;
-
-        console.log('Scrolling to position:', scrollToPosition);
-
-        // Плавно прокручиваем к элементу
-        window.scrollTo({
-            top: scrollToPosition,
-            behavior: 'smooth'
-        });
-
-        // Запускаем анимацию подсветки
-        console.log('Starting highlight animation');
+        this._performScroll(targetElement);
         this._animateHighlight(targetElement);
     }
 
     /**
-     * Анимирует подсветку элемента через Web Animations API
+     * Находит элемент в превью по различным селекторам
+     * @private
+     * @param {HTMLElement} container - Контейнер для поиска
+     * @param {string} nodeId - ID узла
+     * @returns {HTMLElement|null} Найденный элемент или null
+     */
+    _findPreviewElement(container, nodeId) {
+        // Попытка 1: ищем .item-block с data-node-id
+        let element = container.querySelector(`.item-block[data-node-id="${nodeId}"]`);
+        if (element) return element;
+
+        // Попытка 2: ищем любой элемент с data-node-id и находим ближайший .item-block
+        const nodeElement = container.querySelector(`[data-node-id="${nodeId}"]`);
+        if (nodeElement) {
+            const itemBlock = nodeElement.closest('.item-block');
+            if (itemBlock) return itemBlock;
+
+            // Если сам элемент имеет класс item-block
+            if (nodeElement.classList.contains('item-block')) {
+                return nodeElement;
+            }
+        }
+
+        // Попытка 3: поиск в item-container, затем ближайший item-block
+        const itemContainers = container.querySelectorAll('.item-container');
+        for (const cont of itemContainers) {
+            if (cont.dataset.nodeId === nodeId) {
+                const itemBlock = cont.querySelector('.item-block');
+                if (itemBlock) return itemBlock;
+                return cont;
+            }
+        }
+
+        return null;
+    }
+
+    /**
+     * Выполняет плавную прокрутку к элементу
+     * @private
+     * @param {HTMLElement} element - Целевой элемент
+     */
+    _performScroll(element) {
+        const header = document.querySelector('.header');
+        const headerHeight = header ? header.offsetHeight : 80;
+        const offset = AppConfig.tree.scrollSettings.headerOffset;
+
+        const elementRect = element.getBoundingClientRect();
+        const absoluteElementTop = elementRect.top + window.pageYOffset;
+        const scrollToPosition = absoluteElementTop - headerHeight - offset;
+
+        window.scrollTo({
+            top: scrollToPosition,
+            behavior: AppConfig.tree.scrollSettings.behavior
+        });
+    }
+
+    /**
+     * Анимирует подсветку элемента через CSS класс
      * @private
      * @param {HTMLElement} element - Элемент для подсветки
      */
     _animateHighlight(element) {
-        console.log('Animating element:', element);
+        // Убираем старую анимацию если она была
+        element.classList.remove('highlight-flash');
 
-        // Сохраняем оригинальные стили
-        const originalBackground = element.style.backgroundColor;
-        const originalBoxShadow = element.style.boxShadow;
-        const originalTransition = element.style.transition;
+        // Форсируем reflow для перезапуска анимации
+        void element.offsetWidth;
 
-        // Временно отключаем transitions
-        element.style.transition = 'none';
+        // Добавляем анимацию подсветки элемента
+        element.classList.add('highlight-flash');
 
-        // Ключевые кадры анимации
-        const keyframes = [
-            {
-                backgroundColor: 'transparent',
-                boxShadow: '0 0 0 0 rgba(102, 126, 234, 0)',
-                offset: 0
-            },
-            {
-                backgroundColor: 'rgba(102, 126, 234, 0.15)',
-                boxShadow: '0 0 10px 4px rgba(102, 126, 234, 0.4)',
-                offset: 0.25
-            },
-            {
-                backgroundColor: 'rgba(102, 126, 234, 0.25)',
-                boxShadow: '0 0 15px 6px rgba(102, 126, 234, 0.5)',
-                offset: 0.5
-            },
-            {
-                backgroundColor: 'rgba(102, 126, 234, 0.12)',
-                boxShadow: '0 0 8px 3px rgba(102, 126, 234, 0.3)',
-                offset: 0.85
-            },
-            {
-                backgroundColor: 'transparent',
-                boxShadow: '0 0 0 0 rgba(102, 126, 234, 0)',
-                offset: 1
-            }
-        ];
-
-        // Параметры анимации
-        const timing = {
-            duration: 2000,
-            easing: 'ease-out',
-            fill: 'forwards'
-        };
-
-        try {
-            // Запускаем анимацию
-            const animation = element.animate(keyframes, timing);
-
-            console.log('Animation started');
-
-            // Восстанавливаем оригинальные стили после анимации
-            animation.onfinish = () => {
-                console.log('Animation finished');
-                element.style.backgroundColor = originalBackground;
-                element.style.boxShadow = originalBoxShadow;
-                element.style.transition = originalTransition;
-            };
-
-            animation.oncancel = () => {
-                console.log('Animation cancelled');
-                element.style.backgroundColor = originalBackground;
-                element.style.boxShadow = originalBoxShadow;
-                element.style.transition = originalTransition;
-            };
-
-        } catch (error) {
-            console.error('Animation error:', error);
-
-            // Fallback: используем CSS класс
-            element.classList.add('highlight-flash');
-            setTimeout(() => {
-                element.classList.remove('highlight-flash');
-            }, 2000);
-        }
+        // Удаляем класс после завершения анимации (2 секунды)
+        setTimeout(() => {
+            element.classList.remove('highlight-flash');
+        }, 2000);
     }
 
     /**
      * Рендеринг дерева
-     * Делегирует выполнение в TreeRenderer
+     *
+     * Делегирует выполнение в TreeRenderer.
+     *
      * @param {Object} [node=AppState.treeData] - Корневой узел для рендеринга
      */
     render(node = AppState.treeData) {

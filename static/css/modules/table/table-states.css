@@ -6,21 +6,24 @@
 /* Выделенная ячейка */
 .editable-table td.selected,
 .editable-table th.selected {
-    background: var(--primary-subtle);
+    background: var(--table-row-selected);
     outline: 2px solid var(--primary);
     outline-offset: -2px;
+    z-index: var(--z-base);
 }
 
 /* Выделенный заголовок */
 .editable-table th.selected {
-    background: linear-gradient(135deg, #6579b5 0%, #8b6aa5 100%);
+    background: var(--table-header-selected);
 }
 
 /* Ячейка в режиме редактирования */
 .editable-table td.editing {
     padding: 0;
     height: auto;
-    background: var(--bg-primary);
+    background: var(--input-bg);
+    box-shadow: inset 0 0 0 2px var(--primary);
+    z-index: calc(var(--z-sticky) + 1);
 }
 
 /* Поле ввода в режиме редактирования */
@@ -28,9 +31,11 @@
     width: 100%;
     height: auto;
     border: none;
-    padding: 0.625rem 0.75rem 1.125rem 0.75rem;
-    font-family: inherit;
-    font-size: inherit;
+    padding: var(--spacing-sm) var(--spacing);
+    padding-bottom: var(--spacing-lg);
+    font-family: var(--font-family-base);
+    font-size: var(--font-size-sm);
+    line-height: var(--line-height-normal);
     box-sizing: border-box;
     outline: none;
     background: transparent;
@@ -38,6 +43,17 @@
     min-height: 2.25rem;
     display: block;
     color: var(--text-primary);
+}
+
+/* Фокус на поле ввода */
+.editable-table td.editing input:focus {
+    outline: none;
+}
+
+/* Плейсхолдер */
+.editable-table td.editing input::placeholder {
+    color: var(--input-placeholder);
+    opacity: 1;
 }
 
 /* Объединенные ячейки */
@@ -61,7 +77,9 @@
 
 /* Скрытие хендлов изменения размера при редактировании */
 .editable-table td.editing .resize-handle,
-.editable-table td.editing .row-resize-handle {
+.editable-table td.editing .row-resize-handle,
+.editable-table th.editing .resize-handle,
+.editable-table th.editing .row-resize-handle {
     display: none;
 }
 
@@ -79,4 +97,13 @@
 .editable-table.resizing .resize-handle,
 .editable-table.resizing .row-resize-handle {
     pointer-events: auto;
+}
+
+/* Курсор при изменении размеров */
+.editable-table.resizing.resizing-column {
+    cursor: col-resize;
+}
+
+.editable-table.resizing.resizing-row {
+    cursor: row-resize;
 }

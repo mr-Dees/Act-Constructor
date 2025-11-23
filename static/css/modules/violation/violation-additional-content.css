@@ -13,29 +13,28 @@
 .additional-content-items {
     display: flex;
     flex-direction: column;
-    gap: var(--spacing-md);
-    min-height: 120px;
+    gap: var(--spacing-sm);
+    min-height: 7.5rem;
     padding: var(--spacing-md);
     border: 2px dashed var(--border);
     border-radius: var(--radius);
-    background-color: var(--bg-secondary, #f8f9fa);
+    background-color: var(--bg-secondary);
     position: relative;
-    transition: border-color 0.9s ease, background-color 0.3s ease, transform 0.3s ease;
+    transition: all var(--transition-slow) ease;
     align-items: stretch;
 }
 
 .additional-content-items:hover {
     border-color: var(--primary);
-    background-color: var(--primary-subtle, rgba(79, 70, 229, 0.05));
+    background-color: var(--additional-content-hover-bg);
 }
 
 /* Состояние при перетаскивании файла */
 .additional-content-items.drag-over-file {
     border-color: var(--primary);
     border-width: 3px;
-    background-color: var(--primary-subtle, rgba(79, 70, 229, 0.15));
-    transform: scale(1.01);
-    box-shadow: 0 0 20px rgba(79, 70, 229, 0.3);
+    background-color: var(--drag-over-bg);
+    box-shadow: var(--drag-over-shadow);
     pointer-events: auto;
 }
 
@@ -46,14 +45,14 @@
     left: 50%;
     transform: translate(-50%, -50%);
     color: var(--primary);
-    font-size: 1.125rem;
-    font-weight: 700;
+    font-size: var(--font-size-lg);
+    font-weight: var(--font-weight-bold);
     pointer-events: none;
-    z-index: 1;
-    background: white;
-    padding: 16px 32px;
+    z-index: var(--z-base);
+    background: var(--bg-primary);
+    padding: var(--spacing-lg) var(--spacing-2xl);
     border-radius: var(--radius-md);
-    box-shadow: 0 4px 12px rgba(79, 70, 229, 0.2);
+    box-shadow: var(--drag-text-shadow);
     white-space: nowrap;
 }
 
@@ -65,10 +64,10 @@
     left: 50%;
     transform: translate(-50%, -50%);
     color: var(--text-tertiary);
-    font-size: 0.9375rem;
+    font-size: var(--font-size-sm);
     font-style: italic;
     pointer-events: none;
-    font-weight: 500;
+    font-weight: var(--font-weight-medium);
 }
 
 /* Скрываем подсказку при drag over */
@@ -81,33 +80,7 @@
     pointer-events: none;
 }
 
-/* Минималистичный индикатор позиции вставки - тонкая подсветка */
-.insert-indicator {
-    height: 8px;
-    background: transparent;
-    position: relative;
-    margin: 4px 0;
-    transition: all 0.9s cubic-bezier(0.4, 0, 0.2, 1);
-    pointer-events: none;
-}
-
-.insert-indicator::before {
-    content: '';
-    position: absolute;
-    left: 0;
-    right: 0;
-    top: 50%;
-    height: 2px;
-    background: linear-gradient(90deg,
-    transparent 0%,
-    rgba(79, 70, 229, 0.3) 20%,
-    rgba(79, 70, 229, 0.3) 80%,
-    transparent 100%);
-    transform: translateY(-50%);
-    border-radius: 2px;
-}
-
-/* Элемент контента с максимально плавными переходами */
+/* Элемент контента с минимальными эффектами */
 .content-item-wrapper {
     border: 2px solid var(--border);
     border-radius: var(--radius-md);
@@ -115,63 +88,63 @@
     background-color: var(--bg-primary);
     box-shadow: var(--shadow-sm);
     cursor: grab;
-    min-height: 80px;
-    transition: all 0.9s cubic-bezier(0.25, 0.46, 0.45, 0.94);
-    will-change: transform, box-shadow, opacity;
+    min-height: 5rem;
+    transition: all var(--transition-base);
     position: relative;
 }
 
 .content-item-wrapper:hover {
     border-color: var(--primary);
-    box-shadow: 0 8px 20px rgba(0, 0, 0, 0.12);
-    transform: translateY(-3px);
+    box-shadow: var(--shadow);
 }
 
 .content-item-wrapper:active {
     cursor: grabbing;
 }
 
-/* Эффект при перетаскивании - плавный и элегантный */
+/* Эффект при перетаскивании - только небольшое увеличение */
 .content-item-wrapper.dragging {
-    opacity: 0.7;
-    transform: scale(1.06);
-    box-shadow: 0 16px 32px rgba(79, 70, 229, 0.25);
+    opacity: 0.75;
+    transform: scale(1.03);
+    box-shadow: var(--shadow-lg);
     border-color: var(--primary);
-    z-index: 1000;
+    z-index: var(--z-dropdown);
     cursor: grabbing;
-    transition: all 0.3s cubic-bezier(0.34, 1.56, 0.64, 1);
 }
 
 /* Метка типа элемента */
 .content-item-label {
     padding: var(--spacing-sm) var(--spacing-md);
-    background: linear-gradient(135deg, var(--primary-subtle, rgba(79, 70, 229, 0.1)) 0%, var(--bg-tertiary) 100%);
+    background: var(--content-label-gradient);
     color: var(--text-primary);
-    font-size: 0.8125rem;
-    font-weight: 600;
+    font-size: var(--font-size-xs);
+    font-weight: var(--font-weight-semibold);
     text-transform: uppercase;
-    letter-spacing: 0.05em;
+    letter-spacing: var(--letter-spacing-wide);
     border-bottom: 1px solid var(--border);
     display: flex;
     align-items: center;
     gap: var(--spacing-xs);
     user-select: none;
-    transition: background 0.3s ease;
+    transition: background var(--transition-base);
 }
 
 /* Иконка перетаскивания */
 .drag-handle-inline {
     color: var(--primary);
-    font-size: 1rem;
+    font-size: var(--icon-size);
     line-height: 1;
     cursor: grab;
     opacity: 0.5;
-    transition: opacity 0.3s ease, transform 0.3s ease;
+    transition: all var(--transition-base);
 }
 
 .content-item-wrapper:hover .drag-handle-inline {
     opacity: 1;
-    transform: scale(1.1);
+}
+
+.content-item-wrapper:active .drag-handle-inline {
+    cursor: grabbing;
 }
 
 /* Миниатюра при перетаскивании */
@@ -180,22 +153,22 @@
     align-items: center;
     gap: var(--spacing-sm);
     padding: var(--spacing-md) var(--spacing-lg);
-    background: linear-gradient(135deg, var(--primary) 0%, #5b21b6 100%);
-    color: white;
+    background: var(--drag-miniature-gradient);
+    color: var(--text-on-primary);
     border-radius: var(--radius-md);
-    font-size: 1rem;
-    font-weight: 700;
-    box-shadow: 0 8px 24px rgba(79, 70, 229, 0.4);
+    font-size: var(--font-size-base);
+    font-weight: var(--font-weight-bold);
+    box-shadow: var(--drag-miniature-shadow);
     white-space: nowrap;
-    letter-spacing: 0.03em;
+    letter-spacing: var(--letter-spacing-wide);
 }
 
 .drag-miniature-icon {
-    font-size: 1.5rem;
+    font-size: var(--icon-size-lg);
 }
 
 .drag-miniature-label {
-    font-weight: 700;
+    font-weight: var(--font-weight-bold);
 }
 
 /* Содержимое элемента КЕЙСА И ТЕКСТА */
@@ -205,15 +178,13 @@
     gap: var(--spacing-sm);
     align-items: flex-start;
     background-color: var(--bg-primary);
-    transition: background-color 0.3s ease;
 }
 
-/* Textarea внутри элемента занимает всё доступное пространство */
+/* Textarea внутри элемента */
 .content-item .violation-textarea {
     flex: 1;
-    min-height: 60px;
+    min-height: 3.75rem;
     width: 100%;
-    transition: border-color 0.3s ease, box-shadow 0.3s ease;
 }
 
 /* Для изображений */
@@ -223,26 +194,23 @@
     flex-direction: column;
     gap: var(--spacing-sm);
     background-color: var(--bg-primary);
-    transition: background-color 0.3s ease;
 }
 
-/* Контейнер для превью изображения с фиксированной высотой */
+/* Контейнер для превью изображения */
 .image-preview-container {
     width: 100%;
-    height: 200px;
+    height: 12.5rem;
     display: flex;
     align-items: center;
     justify-content: center;
     flex-shrink: 0;
     cursor: inherit;
-    transition: transform 0.3s ease;
+    background: var(--gray-50);
+    border-radius: var(--radius-sm);
+    overflow: hidden;
 }
 
-.content-item-wrapper:hover .image-preview-container {
-    transform: scale(1.02);
-}
-
-/* Превью изображения с фиксированными размерами */
+/* Превью изображения */
 .image-preview {
     max-width: 100%;
     max-height: 100%;
@@ -251,42 +219,82 @@
     object-fit: contain;
     border: 1px solid var(--border-light);
     border-radius: var(--radius-sm);
-    background-color: var(--gray-50, #f9fafb);
     flex-shrink: 0;
-    transition: border-color 0.3s ease;
-    /* Запрещаем взаимодействие с изображением */
     pointer-events: none;
     user-select: none;
     -webkit-user-drag: none;
-    -moz-user-select: none;
-    -webkit-user-select: none;
-    -ms-user-select: none;
 }
 
 /* Имя файла изображения */
 .image-filename {
-    font-size: 0.75rem;
+    font-size: var(--font-size-xs);
     color: var(--text-tertiary);
     font-style: italic;
     word-break: break-all;
     padding: var(--spacing-xs) 0;
-    transition: color 0.3s ease;
+}
+
+.content-item-wrapper:hover .image-filename {
+    color: var(--text-secondary);
 }
 
 /* Поле ввода подписи к изображению */
 .image-item .violation-list-input {
     width: 100%;
-    padding: 0.6875rem 0.875rem;
+    padding: var(--spacing-sm) var(--spacing);
     border: 1px solid var(--border);
     border-radius: var(--radius);
-    font-family: inherit;
-    font-size: 0.875rem;
-    transition: border-color 0.3s ease, box-shadow 0.3s ease, transform 0.3s ease;
+    font-family: var(--font-family-base);
+    font-size: var(--font-size-sm);
+    transition: all var(--transition-base);
+    background-color: var(--input-bg);
+    color: var(--input-text);
+}
+
+.image-item .violation-list-input:hover {
+    border-color: var(--input-border-hover);
 }
 
 .image-item .violation-list-input:focus {
     outline: none;
-    border-color: var(--primary);
-    box-shadow: 0 0 0 3px var(--primary-subtle, rgba(79, 70, 229, 0.1));
-    transform: translateY(-1px);
+    border-color: var(--input-border-focus);
+    box-shadow: var(--input-shadow-focus);
+}
+
+.image-item .violation-list-input::placeholder {
+    color: var(--input-placeholder);
+}
+
+/* Кнопка удаления элемента контента */
+.content-item-delete {
+    position: absolute;
+    top: var(--spacing-sm);
+    right: var(--spacing-sm);
+    width: 2rem;
+    height: 2rem;
+    border: none;
+    background: var(--error);
+    color: var(--text-on-primary);
+    border-radius: var(--radius);
+    cursor: pointer;
+    opacity: 0;
+    transition: all var(--transition-base);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: var(--font-size-lg);
+    z-index: var(--z-base);
+}
+
+.content-item-wrapper:hover .content-item-delete {
+    opacity: 1;
+}
+
+.content-item-delete:hover {
+    background: var(--error-hover);
+    transform: scale(1.1);
+}
+
+.content-item-delete:active {
+    transform: scale(0.95);
 }

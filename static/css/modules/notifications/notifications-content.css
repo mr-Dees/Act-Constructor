@@ -5,30 +5,63 @@
 
 /* Иконка уведомления */
 .notification-icon {
-    font-size: 1.25rem;
+    font-size: var(--icon-size-lg);
     flex-shrink: 0;
     line-height: 1;
+    width: var(--icon-size-lg);
+    height: var(--icon-size-lg);
+    display: flex;
+    align-items: center;
+    justify-content: center;
 }
 
 /* Контейнер текстового содержимого */
 .notification-content {
     flex: 1;
     min-width: 0;
+    display: flex;
+    flex-direction: column;
+    gap: var(--spacing-xs);
 }
 
 /* Заголовок уведомления */
 .notification-title {
-    font-weight: 600;
-    font-size: 0.875rem;
-    margin-bottom: 0.25rem;
+    font-weight: var(--font-weight-semibold);
+    font-size: var(--font-size-sm);
     color: var(--text-primary);
+    line-height: var(--line-height-tight);
+    word-wrap: break-word;
 }
 
 /* Текст сообщения */
 .notification-message {
-    font-size: 0.8125rem;
+    font-size: var(--font-size-sm);
     color: var(--text-secondary);
-    line-height: 1.4;
+    line-height: var(--line-height-normal);
+    word-wrap: break-word;
+}
+
+/* Действия в уведомлении */
+.notification-actions {
+    display: flex;
+    gap: var(--spacing-sm);
+    margin-top: var(--spacing-xs);
+}
+
+.notification-action {
+    font-size: var(--font-size-xs);
+    font-weight: var(--font-weight-medium);
+    color: var(--primary);
+    background: none;
+    border: none;
+    padding: var(--spacing-xs) var(--spacing-sm);
+    border-radius: var(--radius-sm);
+    cursor: pointer;
+    transition: background var(--transition-fast);
+}
+
+.notification-action:hover {
+    background: var(--primary-subtle);
 }
 
 /* Кнопка закрытия уведомления */
@@ -39,49 +72,62 @@
     color: var(--text-tertiary);
     cursor: pointer;
     padding: 0;
-    width: 1.25rem;
-    height: 1.25rem;
+    width: var(--icon-size);
+    height: var(--icon-size);
     display: flex;
     align-items: center;
     justify-content: center;
-    border-radius: 50%;
-    transition: all 0.15s ease;
-    font-size: 1.125rem;
+    border-radius: var(--radius-full);
+    transition: all var(--transition-fast);
+    font-size: var(--font-size-lg);
     line-height: 1;
+    position: relative;
 }
 
 /* Подсветка кнопки закрытия при наведении */
 .notification-close:hover {
     background: var(--bg-tertiary);
     color: var(--text-primary);
+    transform: rotate(90deg);
+}
+
+.notification-close:active {
+    transform: rotate(90deg) scale(0.95);
+}
+
+/* Состояние фокуса */
+.notification-close:focus-visible {
+    outline: var(--focus-outline);
+    outline-offset: 2px;
 }
 
 /* Счетчик повторений уведомления */
 .notification-counter {
     flex-shrink: 0;
     background: var(--accent);
-    color: white;
-    border-radius: 50%;
-    width: 1.375rem;
+    color: var(--text-on-primary);
+    border-radius: var(--radius-full);
+    min-width: 1.375rem;
     height: 1.375rem;
     display: flex;
     align-items: center;
     justify-content: center;
-    font-size: 0.6875rem;
-    font-weight: 600;
-    margin-left: 0.25rem;
-    transition: transform 0.15s cubic-bezier(0.4, 0, 0.2, 1);
+    font-size: var(--font-size-xs);
+    font-weight: var(--font-weight-semibold);
+    padding: 0 var(--spacing-xs);
+    margin-left: var(--spacing-xs);
+    transition: transform var(--transition-fast) cubic-bezier(0.4, 0, 0.2, 1);
+    animation: scaleIn 0.2s cubic-bezier(0.4, 0, 0.2, 1);
 }
 
-/* Цвет счетчика для разных типов уведомлений */
-.notification.success .notification-counter {
-    background: var(--success);
+/* Анимация обновления счетчика */
+.notification-counter.updated {
+    animation: pulse 0.3s ease-in-out;
 }
 
-.notification.error .notification-counter {
-    background: var(--error);
-}
-
-.notification.info .notification-counter {
-    background: var(--accent);
+/* Временная метка */
+.notification-timestamp {
+    font-size: var(--font-size-xs);
+    color: var(--text-tertiary);
+    margin-top: var(--spacing-xs);
 }

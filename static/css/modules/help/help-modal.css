@@ -8,17 +8,15 @@
 /* Оверлей модального окна справки */
 .help-modal {
     position: fixed;
-    top: 0;
-    left: 0;
-    width: 100%;
-    height: 100%;
-    background: rgba(0, 0, 0, 0.6);
+    inset: 0;
+    background: var(--help-modal-overlay);
     display: flex;
     align-items: center;
     justify-content: center;
-    z-index: 10000;
-    backdrop-filter: blur(0.25em);
-    animation: fadeIn 0.3s ease;
+    z-index: var(--z-modal);
+    backdrop-filter: blur(4px);
+    animation: fadeIn var(--transition-base) ease;
+    padding: var(--spacing-lg);
 }
 
 /* Скрытое состояние модального окна */
@@ -28,57 +26,131 @@
 
 /* Контейнер содержимого справки */
 .help-modal-content {
-    background: white;
-    border-radius: 0.75em;
-    max-width: 43.75em;
-    width: 90%;
-    max-height: 80vh;
+    background: var(--modal-bg);
+    border-radius: var(--radius-xl);
+    max-width: 50rem;
+    width: 100%;
+    max-height: 85vh;
     display: flex;
     flex-direction: column;
-    box-shadow: 0 0.625em 2.5em rgba(0, 0, 0, 0.3);
-    animation: slideDown 0.3s ease;
+    box-shadow: var(--modal-shadow);
+    animation: scaleIn var(--transition-base) cubic-bezier(0.4, 0, 0.2, 1);
     overflow: hidden;
+    border: 1px solid var(--modal-border);
 }
 
 /* Шапка модального окна - фиксированная без прокрутки */
 .help-modal-header {
-    padding: 1.25em 1.5em;
-    border-bottom: 0.0625em solid #e0e0e0;
+    padding: var(--spacing-xl) var(--spacing-2xl);
+    border-bottom: 1px solid var(--border-light);
     display: flex;
     justify-content: space-between;
     align-items: center;
-    background: linear-gradient(to bottom, #748fca 0%, #9d7cb8 100%);
-    color: white;
-    border-radius: 0.75em 0.75em 0 0;
+    background: linear-gradient(135deg, #748fca 0%, #9d7cb8 100%);
+    color: var(--text-on-primary);
+    border-radius: var(--radius-xl) var(--radius-xl) 0 0;
     flex-shrink: 0;
 }
 
 /* Заголовок справки */
 .help-modal-header h3 {
     margin: 0;
-    font-size: 1.25em;
-    font-weight: 600;
+    font-size: var(--font-size-xl);
+    font-weight: var(--font-weight-semibold);
+    line-height: var(--line-height-tight);
+    display: flex;
+    align-items: center;
+    gap: var(--spacing-sm);
+}
+
+/* Иконка в заголовке */
+.help-modal-header h3::before {
+    content: '💡';
+    font-size: var(--icon-size-lg);
 }
 
 /* Кнопка закрытия модального окна */
 .help-modal-close {
     background: none;
     border: none;
-    font-size: 1.75em;
+    font-size: var(--font-size-3xl);
     cursor: pointer;
-    color: white;
+    color: var(--text-on-primary);
     line-height: 1;
     padding: 0;
-    width: 2em;
-    height: 2em;
+    width: 2.5rem;
+    height: 2.5rem;
     display: flex;
     align-items: center;
     justify-content: center;
-    border-radius: 0.25em;
-    transition: background 0.2s;
+    border-radius: var(--radius);
+    transition: var(--transition-all);
+    position: relative;
 }
 
 /* Подсветка кнопки закрытия при наведении */
 .help-modal-close:hover {
-    background: rgba(255, 255, 255, 0.2);
+    background: var(--help-close-hover);
+    transform: rotate(90deg);
+}
+
+.help-modal-close:active {
+    transform: rotate(90deg) scale(0.95);
+}
+
+/* Состояние фокуса */
+.help-modal-close:focus-visible {
+    outline: 2px solid var(--text-on-primary);
+    outline-offset: 2px;
+}
+
+/* Футер модального окна (опционально) */
+.help-modal-footer {
+    padding: var(--spacing-lg) var(--spacing-2xl);
+    border-top: 1px solid var(--border-light);
+    background: var(--modal-footer-bg);
+    display: flex;
+    justify-content: flex-end;
+    gap: var(--spacing);
+    flex-shrink: 0;
+    border-radius: 0 0 var(--radius-xl) var(--radius-xl);
+}
+
+/* Адаптивность для мобильных устройств */
+@media (max-width: 768px) {
+    .help-modal {
+        padding: var(--spacing);
+    }
+
+    .help-modal-content {
+        max-width: 100%;
+        max-height: 90vh;
+        border-radius: var(--radius-lg);
+    }
+
+    .help-modal-header {
+        padding: var(--spacing-lg) var(--spacing-xl);
+        border-radius: var(--radius-lg) var(--radius-lg) 0 0;
+    }
+
+    .help-modal-header h3 {
+        font-size: var(--font-size-lg);
+    }
+
+    .help-modal-close {
+        width: 2rem;
+        height: 2rem;
+        font-size: var(--font-size-2xl);
+    }
+
+    .help-modal-footer {
+        border-radius: 0 0 var(--radius-lg) var(--radius-lg);
+    }
+}
+
+/* Закрытие по клику вне модального окна */
+.help-modal-overlay {
+    position: absolute;
+    inset: 0;
+    z-index: -1;
 }

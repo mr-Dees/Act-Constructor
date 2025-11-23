@@ -3,20 +3,84 @@
  * Визуальное отображение иерархии через отступы и цвета
  */
 
+/* Базовый стиль для всех уровней */
+.item-block[class*="level-"] {
+    position: relative;
+}
+
 /* Второй уровень вложенности */
 .item-block.level-2 {
-    margin-left: 1.25rem;
+    margin-left: var(--spacing-2xl);
     border-left-color: var(--primary-light);
+}
+
+.item-block.level-2:hover {
+    border-left-color: var(--primary);
 }
 
 /* Третий уровень вложенности */
 .item-block.level-3 {
-    margin-left: 2.5rem;
+    margin-left: var(--spacing-4xl);
     border-left-color: var(--accent);
+}
+
+.item-block.level-3:hover {
+    border-left-color: var(--accent-hover);
 }
 
 /* Четвертый уровень вложенности */
 .item-block.level-4 {
-    margin-left: 3.75rem;
+    margin-left: calc(var(--spacing-4xl) + var(--spacing-xl));
     border-left-color: var(--secondary);
+}
+
+.item-block.level-4:hover {
+    border-left-color: var(--primary-light);
+}
+
+/* Индикатор уровня вложенности */
+.item-block[class*="level-"]::after {
+    content: attr(data-level);
+    position: absolute;
+    top: var(--spacing-xs);
+    right: var(--spacing-xs);
+    font-size: var(--font-size-xs);
+    color: var(--text-tertiary);
+    background: var(--bg-tertiary);
+    padding: 2px var(--spacing-xs);
+    border-radius: var(--radius-sm);
+    opacity: 0;
+    transition: opacity var(--transition-fast);
+}
+
+.item-block[class*="level-"]:hover::after {
+    opacity: 0.5;
+}
+
+/* Уменьшение padding для глубоко вложенных элементов */
+.item-block.level-3,
+.item-block.level-4 {
+    padding: var(--spacing) var(--spacing-md);
+}
+
+/* Визуальная связь между родителем и дочерними элементами */
+.item-block[class*="level-"]::before {
+    content: '';
+    position: absolute;
+    left: calc(var(--spacing-2xl) * -0.5);
+    top: 0;
+    bottom: 0;
+    width: 1px;
+    background: linear-gradient(
+            to bottom,
+            transparent 0%,
+            var(--border-light) 20%,
+            var(--border-light) 80%,
+            transparent 100%
+    );
+    opacity: 0.5;
+}
+
+.item-block.level-1::before {
+    display: none;
 }

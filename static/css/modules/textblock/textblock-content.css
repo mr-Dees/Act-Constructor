@@ -1,134 +1,72 @@
-/* Тулбар */
-.textblock-toolbar-global {
-    position: fixed;
-    top: 60px;
-    left: 50%;
-    transform: translateX(-50%);
-    background: var(--bg-primary);
-    border: 1px solid var(--border);
-    border-radius: var(--radius);
-    padding: 0.5rem 0.75rem;
-    box-shadow: 0 0.125rem 0.75rem rgba(0, 0, 0, 0.1);
-    display: flex;
-    align-items: center;
-    gap: 0.25rem;
-    z-index: 1000;
-    transition: opacity 0.2s ease;
-}
-
-.textblock-toolbar-global.hidden {
-    opacity: 0;
-    pointer-events: none;
-}
-
-/* Группы кнопок */
-.toolbar-group {
-    display: flex;
-    align-items: center;
-    gap: 0.125rem;
-}
-
-/* Разделитель */
-.toolbar-separator {
-    width: 1px;
-    height: 1.5rem;
-    background: var(--border);
-    margin: 0 0.25rem;
-}
-
-/* Кнопки */
-.toolbar-btn {
-    width: 2rem;
-    height: 2rem;
-    border: 1px solid transparent;
-    background: transparent;
-    border-radius: calc(var(--radius) * 0.75);
-    cursor: pointer;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    font-size: 0.875rem;
-    color: var(--text-primary);
-    transition: all 0.15s ease;
-}
-
-.toolbar-btn:hover {
-    background: var(--bg-secondary);
-    border-color: var(--border-medium);
-}
-
-.toolbar-btn.active {
-    background: var(--primary-subtle);
-    border-color: var(--primary);
-    color: var(--primary);
-}
-
-.toolbar-btn:active {
-    transform: scale(0.95);
-}
-
-/* Select элементы */
-.toolbar-select {
-    height: 2rem;
-    padding: 0 0.5rem;
-    border: 1px solid var(--border);
-    border-radius: calc(var(--radius) * 0.75);
-    background: var(--bg-primary);
-    font-size: 0.8125rem;
-    color: var(--text-primary);
-    cursor: pointer;
-    transition: all 0.15s ease;
-}
-
-.toolbar-select:hover {
-    border-color: var(--border-medium);
-}
-
-.toolbar-select:focus {
-    outline: none;
-    border-color: var(--primary);
-    box-shadow: 0 0 0 0.125rem var(--primary-subtle);
-}
-
-#fontSizeSelect {
-    width: 4.375rem;
-}
+/*
+ * Содержимое текстового блока
+ * Редактор и секции для форматирования текста
+ */
 
 /* Секция текстового блока */
 .textblock-section {
-    margin-bottom: 0.75rem;
+    margin-bottom: var(--spacing);
+}
+
+.textblock-section:last-child {
+    margin-bottom: 0;
 }
 
 /* Редактор текстового блока */
 .textblock-editor {
-    padding: 0.75rem 1rem;
-    border: 1px solid var(--border);
+    padding: var(--spacing) var(--spacing-lg);
+    border: 1px solid var(--input-border);
     border-radius: var(--radius);
-    background: var(--bg-primary);
+    background: var(--input-bg);
     min-height: 5rem;
-    font-family: inherit;
-    font-size: 0.9375rem;
-    line-height: 1.5;
-    color: var(--text-primary);
-    transition: all 0.2s ease;
+    font-family: var(--font-family-base);
+    font-size: var(--font-size-sm);
+    line-height: var(--line-height-relaxed);
+    color: var(--input-text);
+    transition: var(--transition-all);
     cursor: text;
+    outline: none;
 }
 
 /* Подсветка границы при наведении */
 .textblock-editor:hover {
-    border-color: var(--border-medium);
+    border-color: var(--input-border-hover);
 }
 
 /* Акцент при фокусе */
 .textblock-editor:focus {
-    outline: none;
-    border-color: var(--primary);
-    box-shadow: 0 0 0 0.1875rem var(--primary-subtle);
+    border-color: var(--input-border-focus);
+    box-shadow: var(--input-shadow-focus);
+}
+
+/* Состояние ошибки */
+.textblock-editor.error {
+    border-color: var(--input-error-border);
+    background: var(--input-error-bg);
+}
+
+.textblock-editor.error:focus {
+    box-shadow: var(--input-error-shadow);
+}
+
+/* Отключенное состояние */
+.textblock-editor:disabled {
+    background: var(--input-bg-disabled);
+    color: var(--input-text-disabled);
+    cursor: not-allowed;
+}
+
+/* Placeholder для пустого редактора */
+.textblock-editor:empty::before {
+    content: attr(data-placeholder);
+    color: var(--input-placeholder);
+    pointer-events: none;
+    font-style: italic;
 }
 
 /* Отступы между абзацами */
 .textblock-editor p {
-    margin-bottom: 0.5rem;
+    margin-bottom: var(--spacing-sm);
 }
 
 .textblock-editor p:last-child {
@@ -138,7 +76,7 @@
 /* Форматированный текст */
 .textblock-editor strong,
 .textblock-editor b {
-    font-weight: 600;
+    font-weight: var(--font-weight-semibold);
 }
 
 .textblock-editor em,
@@ -148,23 +86,98 @@
 
 .textblock-editor u {
     text-decoration: underline;
+    text-decoration-thickness: 1px;
+    text-underline-offset: 2px;
 }
 
 .textblock-editor s,
 .textblock-editor strike {
     text-decoration: line-through;
+    text-decoration-thickness: 1px;
+}
+
+/* Заголовки внутри редактора */
+.textblock-editor h1,
+.textblock-editor h2,
+.textblock-editor h3 {
+    font-weight: var(--font-weight-semibold);
+    line-height: var(--line-height-tight);
+    margin-bottom: var(--spacing-sm);
+    color: var(--text-primary);
+}
+
+.textblock-editor h1 {
+    font-size: var(--font-size-xl);
+}
+
+.textblock-editor h2 {
+    font-size: var(--font-size-lg);
+}
+
+.textblock-editor h3 {
+    font-size: var(--font-size-base);
+}
+
+/* Списки */
+.textblock-editor ul,
+.textblock-editor ol {
+    padding-left: var(--spacing-xl);
+    margin-bottom: var(--spacing-sm);
+}
+
+.textblock-editor li {
+    margin-bottom: var(--spacing-xs);
+}
+
+/* Цитаты */
+.textblock-editor blockquote {
+    border-left: 3px solid var(--primary);
+    padding-left: var(--spacing-lg);
+    margin: var(--spacing) 0;
+    color: var(--text-secondary);
+    font-style: italic;
+}
+
+/* Код */
+.textblock-editor code {
+    background: var(--gray-100);
+    padding: 0.125rem var(--spacing-xs);
+    border-radius: var(--radius-xs);
+    font-family: var(--font-family-mono);
+    font-size: 0.875em;
+    color: var(--text-primary);
+}
+
+.textblock-editor pre {
+    background: var(--gray-100);
+    padding: var(--spacing);
+    border-radius: var(--radius-sm);
+    overflow-x: auto;
+    margin: var(--spacing-sm) 0;
+}
+
+.textblock-editor pre code {
+    background: none;
+    padding: 0;
 }
 
 /* Переносы строк */
 .textblock-editor br {
     display: block;
     content: "";
-    margin: 0.25rem 0;
+    margin: var(--spacing-xs) 0;
 }
 
-/* Placeholder для пустого редактора */
-.textblock-editor:empty:before {
-    content: attr(data-placeholder);
-    color: var(--text-tertiary);
-    pointer-events: none;
+/* Горизонтальные разделители */
+.textblock-editor hr {
+    border: none;
+    border-top: 1px solid var(--border);
+    margin: var(--spacing-lg) 0;
+}
+
+/* Выделенный текст */
+.textblock-editor mark {
+    background: var(--highlight-bg);
+    padding: 0.125rem var(--spacing-xs);
+    border-radius: var(--radius-xs);
 }

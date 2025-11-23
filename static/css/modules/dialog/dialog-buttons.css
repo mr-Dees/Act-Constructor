@@ -11,6 +11,7 @@
     gap: var(--spacing);
     justify-content: center;
     flex-wrap: wrap;
+    align-items: center;
 }
 
 /* Кнопки внутри диалога используют базовый .btn */
@@ -20,7 +21,7 @@
     max-width: 12rem;
 }
 
-/* Переопределение для уменьшения тени в диалогах */
+/* Переопределение теней для диалогов */
 .dialog-buttons .btn {
     box-shadow: var(--shadow-xs);
 }
@@ -29,24 +30,26 @@
     box-shadow: var(--shadow-sm);
 }
 
-/* Дополнительные стили для первичной кнопки диалога */
-.dialog-buttons .btn-primary {
-    /* Можно добавить специфичные стили если нужно */
+.dialog-buttons .btn:active:not(:disabled) {
+    box-shadow: none;
 }
 
-/* Дополнительные стили для вторичной кнопки диалога */
-.dialog-buttons .btn-secondary {
-    /* Можно добавить специфичные стили если нужно */
+/* Группировка кнопок по краям */
+.dialog-buttons.space-between {
+    justify-content: space-between;
 }
 
-/* Адаптив для узких экранов */
-@media (max-width: 480px) {
-    .dialog-buttons {
-        flex-direction: column-reverse;
-    }
+/* Выравнивание справа */
+.dialog-buttons.end {
+    justify-content: flex-end;
+}
 
-    .dialog-buttons .btn {
-        width: 100%;
-        max-width: none;
-    }
+/* Вертикальное размещение */
+.dialog-buttons.vertical {
+    flex-direction: column;
+}
+
+.dialog-buttons.vertical .btn {
+    width: 100%;
+    max-width: none;
 }

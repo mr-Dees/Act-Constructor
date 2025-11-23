@@ -6,56 +6,119 @@
 /* Контейнер кнопки справки */
 .help-indicator {
     position: absolute;
-    left: var(--spacing-lg);
+    left: var(--spacing-2xl);
     top: 50%;
-    transform: translateY(calc(-50% + 3px));
+    transform: translateY(calc(-50% + 0.125rem));
     display: flex;
     flex-direction: column;
     align-items: center;
-    gap: 4px;
+    gap: var(--spacing-xs);
+    z-index: var(--z-sticky);
 }
 
 /* Кнопка справки с иконкой лампочки */
 .help-button {
-    width: 36px;
-    height: 36px;
-    background: rgba(255, 255, 255, 0.1);
-    border: 1px solid rgba(255, 255, 255, 0.2);
-    border-radius: 6px;
+    width: 2.5rem;
+    height: 2.5rem;
+    background: var(--step-bg);
+    border: 1px solid var(--step-border);
+    border-radius: var(--radius-sm);
     padding: 0;
     cursor: pointer;
-    transition: all 0.2s ease;
-    color: rgba(255, 255, 255, 0.9);
+    transition: var(--transition-all);
+    color: var(--text-on-primary);
     display: flex;
     align-items: center;
     justify-content: center;
-    z-index: 1000;
+    position: relative;
+    overflow: hidden;
+}
+
+/* Эффект ripple при нажатии */
+.help-button::before {
+    content: '';
+    position: absolute;
+    inset: 0;
+    background: radial-gradient(circle, rgb(255 255 255 / 30%) 0%, transparent 70%);
+    transform: scale(0);
+    transition: transform 0.6s ease-out;
+    pointer-events: none;
+}
+
+.help-button:active::before {
+    transform: scale(2);
 }
 
 /* Эффект при наведении на кнопку */
 .help-button:hover {
-    background: rgba(255, 255, 255, 0.2);
-    border-color: rgba(255, 255, 255, 0.3);
-    transform: scale(1.05);
+    background: var(--step-bg-hover);
+    border-color: var(--step-border-hover);
+    transform: translateY(-2px);
+    box-shadow: var(--shadow-sm);
 }
 
 .help-button:active {
-    transform: scale(0.95);
+    transform: translateY(0);
+    box-shadow: none;
+}
+
+/* Состояние фокуса */
+.help-button:focus-visible {
+    outline: var(--focus-outline);
+    outline-offset: var(--focus-outline-offset);
 }
 
 /* Иконка лампочки */
 .lightbulb-icon {
-    font-size: 18px;
+    font-size: var(--icon-size);
     display: inline-block;
     line-height: 1;
+    transition: transform var(--transition-base);
+}
+
+/* Анимация лампочки при наведении */
+.help-button:hover .lightbulb-icon {
+    transform: scale(1.1);
+}
+
+/* Пульсация для привлечения внимания (опционально) */
+.help-button.pulse {
+    animation: pulse 2s cubic-bezier(0.4, 0, 0.6, 1) infinite;
 }
 
 /* Метка под кнопкой */
 .help-button-label {
-    font-size: 10px;
-    font-weight: 500;
-    color: rgba(255, 255, 255, 0.9);
+    font-size: var(--font-size-xs);
+    font-weight: var(--font-weight-semibold);
+    color: var(--text-on-primary);
     white-space: nowrap;
     user-select: none;
-    transition: color 0.2s ease;
+    transition: color var(--transition-base);
+    line-height: var(--line-height-tight);
+    text-shadow: 0 1px 2px rgb(0 0 0 / 30%);
+}
+
+/* Подсветка метки при наведении на контейнер */
+.help-indicator:hover .help-button-label {
+    text-shadow: 0 1px 3px rgb(0 0 0 / 40%);
+}
+
+/* Адаптивность для маленьких экранов */
+@media (max-width: 768px) {
+    .help-indicator {
+        left: var(--spacing-lg);
+    }
+
+    .help-button {
+        width: 2rem;
+        height: 2rem;
+    }
+
+    .lightbulb-icon {
+        font-size: 0.875rem;
+    }
+
+    .help-button-label {
+        font-size: 0.625rem;
+    }
 }

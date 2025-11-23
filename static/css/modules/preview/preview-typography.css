@@ -6,57 +6,209 @@
 /* Главный заголовок документа */
 .preview h1 {
     text-align: center;
-    margin-bottom: var(--spacing-lg);
-    font-size: 1.5rem;
+    margin-top: 0;
+    margin-bottom: var(--spacing-xl);
+    font-size: var(--font-size-2xl);
     color: var(--text-primary);
-    font-weight: 700;
+    font-weight: var(--font-weight-bold);
+    line-height: var(--line-height-tight);
+    letter-spacing: var(--letter-spacing-tight);
 }
 
 /* Заголовок второго уровня */
 .preview h2 {
-    margin-top: var(--spacing-lg);
-    margin-bottom: var(--spacing-sm);
-    font-size: 1.25rem;
+    margin-top: var(--spacing-2xl);
+    margin-bottom: var(--spacing-md);
+    font-size: var(--font-size-xl);
     color: var(--text-primary);
-    font-weight: 600;
+    font-weight: var(--font-weight-semibold);
+    line-height: var(--line-height-tight);
+    letter-spacing: var(--letter-spacing-tight);
+}
+
+/* Первый h2 без верхнего отступа */
+.preview h2:first-child {
+    margin-top: 0;
 }
 
 /* Заголовок третьего уровня */
 .preview h3 {
-    margin-top: var(--spacing-md);
-    margin-bottom: var(--spacing-xs);
-    font-size: 1.125rem;
+    margin-top: var(--spacing-xl);
+    margin-bottom: var(--spacing-sm);
+    font-size: var(--font-size-lg);
     color: var(--text-primary);
-    font-weight: 600;
+    font-weight: var(--font-weight-semibold);
+    line-height: var(--line-height-normal);
 }
 
 /* Заголовок четвертого уровня */
 .preview h4 {
+    margin-top: var(--spacing-lg);
+    margin-bottom: var(--spacing-xs);
+    font-size: var(--font-size-base);
+    color: var(--text-secondary);
+    font-weight: var(--font-weight-semibold);
+    line-height: var(--line-height-normal);
+}
+
+/* Заголовки пятого и шестого уровня */
+.preview h5,
+.preview h6 {
     margin-top: var(--spacing);
     margin-bottom: var(--spacing-xs);
-    font-size: 1rem;
+    font-size: var(--font-size-sm);
     color: var(--text-secondary);
-    font-weight: 600;
+    font-weight: var(--font-weight-medium);
+    line-height: var(--line-height-normal);
 }
 
 /* Абзацы текста */
 .preview p {
-    margin-bottom: var(--spacing-sm);
-    line-height: 1.6;
+    margin-top: 0;
+    margin-bottom: var(--spacing);
+    line-height: var(--line-height-relaxed);
     text-align: justify;
     color: var(--text-primary);
+    hyphens: auto;
+}
+
+/* Первый абзац после заголовка */
+.preview h1 + p,
+.preview h2 + p,
+.preview h3 + p,
+.preview h4 + p {
+    margin-top: 0;
+}
+
+/* Последний абзац без нижнего отступа */
+.preview p:last-child {
+    margin-bottom: 0;
 }
 
 /* Нумерованные и маркированные списки */
 .preview ol,
 .preview ul {
-    margin-left: 1.5rem;
-    margin-bottom: var(--spacing-sm);
+    margin-top: 0;
+    margin-bottom: var(--spacing);
+    margin-left: var(--spacing-2xl);
+    padding-left: 0;
+}
+
+/* Вложенные списки */
+.preview ol ol,
+.preview ol ul,
+.preview ul ol,
+.preview ul ul {
+    margin-top: var(--spacing-xs);
+    margin-bottom: var(--spacing-xs);
 }
 
 /* Элементы списков */
 .preview li {
     margin-bottom: var(--spacing-xs);
-    line-height: 1.6;
+    line-height: var(--line-height-relaxed);
     color: var(--text-primary);
+}
+
+/* Последний элемент списка */
+.preview li:last-child {
+    margin-bottom: 0;
+}
+
+/* Цитаты */
+.preview blockquote {
+    margin: var(--spacing-lg) 0;
+    padding-left: var(--spacing-xl);
+    border-left: 4px solid var(--border-medium);
+    color: var(--text-secondary);
+    font-style: italic;
+}
+
+/* Выделение текста */
+.preview strong,
+.preview b {
+    font-weight: var(--font-weight-bold);
+    color: var(--text-primary);
+}
+
+.preview em,
+.preview i {
+    font-style: italic;
+}
+
+/* Подчеркнутый текст */
+.preview u {
+    text-decoration: underline;
+}
+
+/* Зачеркнутый текст */
+.preview s,
+.preview del {
+    text-decoration: line-through;
+    color: var(--text-tertiary);
+}
+
+/* Код и моноширинный текст */
+.preview code {
+    font-family: var(--font-family-mono);
+    font-size: 0.875em;
+    background: var(--bg-tertiary);
+    padding: 0.125rem 0.375rem;
+    border-radius: var(--radius-xs);
+    color: var(--text-secondary);
+}
+
+.preview pre {
+    margin: var(--spacing-lg) 0;
+    padding: var(--spacing);
+    background: var(--bg-tertiary);
+    border-radius: var(--radius-sm);
+    overflow-x: auto;
+    font-family: var(--font-family-mono);
+    font-size: var(--font-size-xs);
+    line-height: var(--line-height-relaxed);
+}
+
+.preview pre code {
+    background: transparent;
+    padding: 0;
+}
+
+/* Горизонтальная линия */
+.preview hr {
+    margin: var(--spacing-2xl) 0;
+    border: none;
+    border-top: 1px solid var(--border);
+}
+
+/* Ссылки */
+.preview a {
+    color: var(--text-link);
+    text-decoration: underline;
+    transition: color var(--transition-fast);
+}
+
+.preview a:hover {
+    color: var(--text-link-hover);
+}
+
+.preview a:visited {
+    color: var(--text-link-visited);
+}
+
+/* Верхний и нижний индексы */
+.preview sup,
+.preview sub {
+    font-size: 0.75em;
+    line-height: 0;
+    position: relative;
+    vertical-align: baseline;
+}
+
+.preview sup {
+    top: -0.5em;
+}
+
+.preview sub {
+    bottom: -0.25em;
 }
