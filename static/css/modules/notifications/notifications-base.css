@@ -6,37 +6,61 @@
 /* Контейнер для всех уведомлений */
 .notification-container {
     position: fixed;
-    top: calc(max(var(--header-height), var(--header-min-height)) + 1.25rem);
+    top: calc(max(var(--header-height), var(--header-min-height)) + var(--spacing-lg));
     right: var(--spacing-lg);
-    z-index: 10000;
+    z-index: var(--z-notification);
     display: flex;
     flex-direction: column;
     gap: var(--spacing);
-    max-width: 23.75rem;
+    max-width: 24rem;
     pointer-events: none;
 }
 
 /* Карточка отдельного уведомления */
 .notification {
-    background: var(--bg-primary);
+    background: var(--notification-bg);
     border-radius: var(--radius-md);
     padding: var(--spacing-md) var(--spacing-lg);
-    box-shadow: var(--shadow-lg);
+    box-shadow: var(--notification-shadow);
     display: flex;
     align-items: flex-start;
     gap: var(--spacing);
-    animation: slideInRight 0.25s cubic-bezier(0.4, 0, 0.2, 1);
-    pointer-events: auto;
-    border: 1px solid var(--border);
+    border: 1px solid var(--notification-border);
     border-left-width: 0.25rem;
+    pointer-events: auto;
+    position: relative;
+    overflow: hidden;
+    transition: all var(--transition-base);
+}
+
+/* Анимация появления */
+.notification {
+    animation: slideInRight 0.3s cubic-bezier(0.4, 0, 0.2, 1);
 }
 
 /* Увеличение тени при наведении */
 .notification:hover {
     box-shadow: var(--shadow-xl);
+    transform: translateX(-0.125rem);
 }
 
 /* Анимация исчезновения уведомления */
 .notification.hiding {
-    animation: slideOutRight 0.25s cubic-bezier(0.4, 0, 0.2, 1) forwards;
+    animation: slideOutRight 0.3s cubic-bezier(0.4, 0, 0.2, 1) forwards;
+}
+
+/* Прогресс-бар автозакрытия */
+.notification-progress {
+    position: absolute;
+    bottom: 0;
+    left: 0;
+    height: 0.1875rem;
+    background: currentColor;
+    opacity: 0.3;
+    transition: width linear;
+}
+
+/* Состояние паузы при наведении */
+.notification:hover .notification-progress {
+    animation-play-state: paused;
 }

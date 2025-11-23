@@ -5,97 +5,214 @@
 
 .save-indicator {
     position: absolute;
-    left: calc(var(--spacing-lg) + 52px);
+    left: var(--spacing-9xl);
     top: 50%;
-    transform: translateY(calc(-50% + 3px));
+    transform: translateY(calc(-50% + 0.125rem));
     display: flex;
     flex-direction: column;
     align-items: center;
-    gap: 4px;
+    gap: var(--spacing-xs);
+    z-index: var(--z-sticky);
 }
 
+/* Кнопка индикатора */
 .save-indicator-button {
-    width: 36px;
-    height: 36px;
-    border: none;
-    border-radius: 6px;
-    background: rgba(255, 255, 255, 0.1);
+    width: 2.5rem;
+    height: 2.5rem;
+    border: 1px solid var(--save-button-border);
+    border-radius: var(--radius-sm);
+    background: var(--save-button-bg);
     cursor: pointer;
     display: flex;
     align-items: center;
     justify-content: center;
-    transition: all 0.2s ease;
+    transition: var(--transition-all);
     position: relative;
-    border: 1px solid rgba(255, 255, 255, 0.2);
+    color: var(--save-button-text);
+    padding: 0;
+    overflow: hidden;
 }
 
+/* Эффект ripple при нажатии */
+.save-indicator-button::before {
+    content: '';
+    position: absolute;
+    inset: 0;
+    background: radial-gradient(circle, rgb(255 255 255 / 30%) 0%, transparent 70%);
+    transform: scale(0);
+    transition: transform 0.6s ease-out;
+    pointer-events: none;
+}
+
+.save-indicator-button:active::before {
+    transform: scale(2);
+}
+
+/* Иконка внутри кнопки */
 .save-indicator-button svg {
-    width: 16px;
-    height: 16px;
-    transition: all 0.2s ease;
+    width: var(--icon-size);
+    height: var(--icon-size);
+    transition: all var(--transition-base);
 }
 
 /* Состояние: сохранено */
 .save-indicator-button.saved {
-    color: rgba(255, 255, 255, 0.9);
     cursor: default;
+    background: rgb(255 255 255 / 20%);
+    border-color: rgb(255 255 255 / 40%);
+    color: #ffffff;
+    box-shadow: 0 0 8px rgb(255 255 255 / 30%);
 }
 
 .save-indicator-button.saved:hover {
-    background: rgba(255, 255, 255, 0.1);
+    background: rgb(255 255 255 / 20%);
     transform: none;
+    box-shadow: 0 0 8px rgb(255 255 255 / 30%);
+}
+
+/* Иконка для сохраненного состояния */
+.save-indicator-button.saved svg {
+    transform: scale(1.1);
+    filter: drop-shadow(0 0 2px rgb(255 255 255 / 60%));
 }
 
 /* Состояние: не сохранено */
 .save-indicator-button.unsaved {
-    color: #fbbf24;
-    background: rgba(251, 191, 36, 0.15);
-    border-color: rgba(251, 191, 36, 0.3);
+    color: var(--save-unsaved-color);
+    background: rgb(251 191 36 / 25%);
+    border-color: var(--save-unsaved-border);
 }
 
 .save-indicator-button.unsaved:hover {
-    background: rgba(251, 191, 36, 0.25);
-    border-color: rgba(251, 191, 36, 0.4);
-    transform: scale(1.05);
+    background: rgb(251 191 36 / 35%);
+    border-color: var(--save-unsaved-border-hover);
+    transform: translateY(-2px);
+    box-shadow: var(--shadow-sm);
 }
 
 .save-indicator-button.unsaved:active {
-    transform: scale(0.95);
+    transform: translateY(0);
+    box-shadow: none;
 }
 
-/* Анимация при изменении состояния */
+/* Анимация пульсации для несохраненного состояния */
 .save-indicator-button.unsaved svg {
     animation: pulse 2s ease-in-out infinite;
 }
 
-@keyframes pulse {
+/* Состояние: процесс сохранения */
+.save-indicator-button.saving {
+    cursor: wait;
+    background: rgb(74 154 182 / 25%);
+    border-color: var(--info);
+    color: var(--info);
+}
+
+.save-indicator-button.saving svg {
+    animation: spin 1s linear infinite;
+}
+
+@keyframes spin {
+    from {
+        transform: rotate(0deg);
+    }
+    to {
+        transform: rotate(360deg);
+    }
+}
+
+/* Состояние: ошибка сохранения */
+.save-indicator-button.error {
+    background: rgb(199 85 85 / 25%);
+    border-color: var(--error);
+    color: var(--error);
+    cursor: pointer;
+}
+
+.save-indicator-button.error:hover {
+    background: rgb(199 85 85 / 35%);
+    border-color: var(--error-hover);
+    transform: translateY(-2px);
+    box-shadow: var(--shadow-sm);
+}
+
+.save-indicator-button.error:active {
+    transform: translateY(0);
+    box-shadow: none;
+}
+
+.save-indicator-button.error svg {
+    animation: shake 0.5s ease-in-out;
+}
+
+@keyframes shake {
     0%, 100% {
-        opacity: 1;
+        transform: translateX(0);
     }
-    50% {
-        opacity: 0.6;
+    25% {
+        transform: translateX(-3px);
     }
+    75% {
+        transform: translateX(3px);
+    }
+}
+
+/* Состояние фокуса */
+.save-indicator-button:focus-visible {
+    outline: var(--focus-outline);
+    outline-offset: var(--focus-outline-offset);
 }
 
 /* Метка под кнопкой */
 .save-indicator-label {
-    font-size: 10px;
-    font-weight: 500;
-    color: rgba(255, 255, 255, 0.8);
+    font-size: var(--font-size-xs);
+    font-weight: var(--font-weight-semibold);
+    color: var(--text-on-primary);
     white-space: nowrap;
     user-select: none;
-    transition: color 0.2s ease;
+    transition: color var(--transition-base);
+    line-height: var(--line-height-tight);
+    text-shadow: 0 1px 2px rgb(0 0 0 / 30%);
+    min-width: 5.5rem;
+    text-align: center;
 }
 
+/* Подсветка метки при наведении на контейнер */
+.save-indicator:hover .save-indicator-label {
+    text-shadow: 0 1px 3px rgb(0 0 0 / 40%);
+}
+
+/* Метка для несохраненного состояния */
 .save-indicator-button.unsaved ~ .save-indicator-label {
     color: #fbbf24;
+    text-shadow: 0 1px 3px rgb(0 0 0 / 40%), 0 0 8px rgb(251 191 36 / 50%);
 }
 
+/* Метка для сохраненного состояния */
 .save-indicator-button.saved ~ .save-indicator-label {
-    color: rgba(255, 255, 255, 0.9);
+    color: #ffffff;
+    text-shadow: 0 1px 3px rgb(0 0 0 / 40%), 0 0 8px rgb(255 255 255 / 40%);
+}
+
+/* Метка для процесса сохранения */
+.save-indicator-button.saving ~ .save-indicator-label {
+    color: var(--info-light);
+    text-shadow: 0 1px 3px rgb(0 0 0 / 40%);
+}
+
+/* Метка для ошибки */
+.save-indicator-button.error ~ .save-indicator-label {
+    color: var(--error-light);
+    text-shadow: 0 1px 3px rgb(0 0 0 / 40%), 0 0 8px rgb(199 85 85 / 50%);
 }
 
 /* Disabled состояние */
 .save-indicator-button:disabled {
     opacity: 0.9;
+    cursor: not-allowed;
+}
+
+.save-indicator-button:disabled:hover {
+    transform: none;
+    box-shadow: none;
 }

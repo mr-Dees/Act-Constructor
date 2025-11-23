@@ -7,64 +7,98 @@
 .save-button-group {
     position: relative;
     display: inline-flex;
+    isolation: isolate;
 }
 
 /* Основная кнопка сохранения */
 .save-main-btn {
     border-top-right-radius: 0;
     border-bottom-right-radius: 0;
-    border-right: 1px solid rgba(255, 255, 255, 0.3);
+    border-right: 1px solid rgb(255 255 255 / 30%);
+    position: relative;
 }
 
 /* Кнопка открытия выпадающего меню форматов */
 .save-dropdown-btn {
-    padding: 0.625rem 0.75rem;
+    padding: var(--spacing-sm) var(--spacing);
     border-top-left-radius: 0;
     border-bottom-left-radius: 0;
     min-width: auto;
     position: relative;
 }
 
+/* Иконка стрелки в кнопке */
+.save-dropdown-btn::after {
+    content: '▼';
+    font-size: var(--font-size-xs);
+    margin-left: var(--spacing-xs);
+    transition: transform var(--transition-base);
+}
+
 /* Активное состояние кнопки меню */
 .save-dropdown-btn.active {
-    background: #469463;
+    background: var(--success-hover);
+}
+
+.save-dropdown-btn.active::after {
+    transform: rotate(180deg);
 }
 
 /* Подсказка с количеством выбранных форматов */
 .save-dropdown-btn.has-formats::before {
     content: attr(data-formats);
     position: absolute;
+    bottom: calc(100% + var(--spacing-xs));
+    left: 50%;
+    transform: translateX(-50%);
+    background: var(--tooltip-bg);
+    color: var(--tooltip-text);
+    padding: var(--spacing-xs) var(--spacing-sm);
+    border-radius: var(--radius-sm);
+    font-size: var(--font-size-xs);
+    font-weight: var(--font-weight-medium);
+    white-space: nowrap;
+    pointer-events: none;
+    opacity: 0;
+    transition: opacity var(--transition-base);
+    z-index: var(--z-tooltip);
+}
+
+/* Стрелка подсказки */
+.save-dropdown-btn.has-formats::after {
+    content: '';
+    position: absolute;
     bottom: 100%;
     left: 50%;
     transform: translateX(-50%);
-    background: var(--text-primary);
-    color: white;
-    padding: 0.25rem 0.5rem;
-    border-radius: var(--radius-sm);
-    font-size: 0.6875rem;
-    white-space: nowrap;
-    margin-bottom: 0.25rem;
+    border: 4px solid transparent;
+    border-top-color: var(--tooltip-bg);
     pointer-events: none;
     opacity: 0;
-    transition: opacity 0.2s ease;
+    transition: opacity var(--transition-base);
 }
 
 /* Показ подсказки при наведении */
-.save-dropdown-btn.has-formats:hover::before {
+.save-dropdown-btn.has-formats:hover::before,
+.save-dropdown-btn.has-formats:hover::after {
     opacity: 1;
 }
 
 /* Выпадающее меню выбора форматов */
 .format-dropdown-menu {
     position: absolute;
+    top: calc(100% + var(--spacing-xs));
+    right: 0;
     background: var(--bg-primary);
     border: 1px solid var(--border);
     border-radius: var(--radius);
     box-shadow: var(--shadow-lg);
-    padding: 0.5rem;
-    min-width: 160px;
-    z-index: 1001;
-    right: 0;
+    padding: var(--spacing-sm);
+    min-width: 10rem;
+    max-height: 20rem;
+    overflow-y: auto;
+    z-index: var(--z-dropdown);
+    animation: menuFadeIn var(--transition-base);
 }
 
 /* Скрытое состояние меню */
@@ -72,14 +106,26 @@
     display: none;
 }
 
+/* Заголовок меню (опционально) */
+.format-dropdown-header {
+    padding: var(--spacing-xs) var(--spacing-sm);
+    font-size: var(--font-size-xs);
+    font-weight: var(--font-weight-semibold);
+    color: var(--text-secondary);
+    text-transform: uppercase;
+    letter-spacing: var(--letter-spacing-wide);
+    border-bottom: 1px solid var(--border-light);
+    margin-bottom: var(--spacing-xs);
+}
+
 /* Элемент выбора формата */
 .format-option {
     display: flex;
     align-items: center;
-    padding: 0.5rem 0.75rem;
+    padding: var(--spacing-sm) var(--spacing);
     cursor: pointer;
     border-radius: var(--radius-sm);
-    transition: background 0.15s ease;
+    transition: background var(--transition-fast);
     user-select: none;
 }
 
@@ -88,16 +134,60 @@
     background: var(--bg-tertiary);
 }
 
+/* Активный формат */
+.format-option.active {
+    background: var(--primary-subtle);
+}
+
 /* Чекбокс выбора формата */
 .format-option input[type="checkbox"] {
-    margin-right: 0.625rem;
+    margin: 0;
+    margin-right: var(--spacing-sm);
     cursor: pointer;
     accent-color: var(--success);
+    width: 1rem;
+    height: 1rem;
+    flex-shrink: 0;
 }
 
 /* Название формата */
 .format-option span {
-    font-size: 0.875rem;
+    font-size: var(--font-size-sm);
     color: var(--text-primary);
-    font-weight: 500;
+    font-weight: var(--font-weight-medium);
+    flex: 1;
+}
+
+/* Индикатор формата по умолчанию */
+.format-option.default::after {
+    content: '★';
+    color: var(--warning);
+    font-size: var(--font-size-xs);
+    margin-left: var(--spacing-xs);
+}
+
+/* Разделитель между форматами */
+.format-divider {
+    height: 1px;
+    background: var(--border-light);
+    margin: var(--spacing-xs) 0;
+}
+
+/* Скроллбар для длинного списка */
+.format-dropdown-menu::-webkit-scrollbar {
+    width: var(--scrollbar-width);
+}
+
+.format-dropdown-menu::-webkit-scrollbar-track {
+    background: var(--scrollbar-bg);
+    border-radius: var(--radius);
+}
+
+.format-dropdown-menu::-webkit-scrollbar-thumb {
+    background: var(--scrollbar-thumb);
+    border-radius: var(--radius);
+}
+
+.format-dropdown-menu::-webkit-scrollbar-thumb:hover {
+    background: var(--scrollbar-thumb-hover);
 }

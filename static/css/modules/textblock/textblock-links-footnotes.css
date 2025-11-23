@@ -1,4 +1,4 @@
-/**
+/*
  * Стили для гиперссылок и сносок в текстовых блоках
  */
 
@@ -6,73 +6,56 @@
 .text-link,
 .text-footnote {
     position: relative;
-    background-color: rgba(91, 111, 168, 0.08);
+    background-color: var(--link-bg);
     color: var(--primary);
-    padding: 0.125rem 0.25rem;
-    border-radius: 0.1875rem;
+    padding: 0.125rem var(--spacing-xs);
+    border-radius: var(--radius-xs);
     cursor: pointer;
-    transition: all 0.2s ease;
+    transition: var(--transition-all);
     text-decoration: none;
-    border-bottom: 1px dotted var(--primary);
+    border-bottom: 1px dotted var(--link-border);
+    display: inline;
+    user-select: text;
 }
 
 /* Эффект при наведении */
 .text-link:hover,
 .text-footnote:hover {
-    background-color: rgba(91, 111, 168, 0.15);
+    background-color: var(--link-bg-hover);
     border-bottom-style: solid;
+    border-bottom-color: var(--primary);
 }
 
-/* Отличительный цвет для сносок */
+/* Отличительный стиль для сносок */
 .text-footnote {
-    background-color: rgba(74, 154, 182, 0.08);
+    background-color: var(--footnote-bg);
     color: var(--accent);
-    border-bottom-color: var(--accent);
+    border-bottom-color: var(--footnote-border);
 }
 
 .text-footnote:hover {
-    background-color: rgba(74, 154, 182, 0.15);
+    background-color: var(--footnote-bg-hover);
+    border-bottom-color: var(--accent);
 }
 
 /* Режим редактирования */
 .text-link.editing-mode,
 .text-footnote.editing-mode {
     position: relative;
-    z-index: 100;
-    padding: 0.375rem 0.5rem;
-    margin: -0.25rem -0.25rem;
+    z-index: var(--z-dropdown);
+    padding: var(--spacing-xs) var(--spacing-sm);
+    margin: calc(-1 * var(--spacing-xs)) calc(-1 * var(--spacing-xs));
     background-color: var(--bg-primary);
     border: 2px solid var(--primary);
     border-radius: var(--radius-sm);
     box-shadow: var(--shadow-md);
-    transform: translateY(-2px);
+    transform: translateY(-0.125rem);
     cursor: text;
-    animation: editingPulse 0.3s ease;
+    animation: editingPulse var(--transition-slow) ease;
 }
 
 .text-footnote.editing-mode {
     border-color: var(--accent);
-}
-
-@keyframes editingPulse {
-    0% {
-        transform: translateY(0) scale(1);
-        box-shadow: 0 0 0 0 rgba(91, 111, 168, 0.4);
-    }
-    50% {
-        transform: translateY(-2px) scale(1.02);
-        box-shadow: var(--shadow-md), 0 0 0 4px rgba(91, 111, 168, 0.2);
-    }
-    100% {
-        transform: translateY(-2px) scale(1);
-        box-shadow: var(--shadow-md);
-    }
-}
-
-/* Убираем подчеркивание в режиме редактирования */
-.text-link.editing-mode,
-.text-footnote.editing-mode {
-    border-bottom: none;
 }
 
 /* Фокус в режиме редактирования */
@@ -85,59 +68,47 @@
 
 .text-footnote.editing-mode:focus {
     border-color: var(--accent);
-    box-shadow: var(--shadow-lg), 0 0 0 3px rgba(74, 154, 182, 0.2);
+    box-shadow: var(--shadow-lg), 0 0 0 3px var(--footnote-focus-shadow);
 }
 
-/* Кастомный tooltip */
+/* Tooltip для отображения URL/содержимого */
 .link-footnote-tooltip {
     position: fixed;
-    background: var(--gray-800);
-    color: white;
-    padding: 0.5rem 0.75rem;
+    background: var(--tooltip-bg);
+    color: var(--tooltip-text);
+    padding: var(--spacing-sm) var(--spacing);
     border-radius: var(--radius-sm);
-    font-size: 0.8125rem;
-    line-height: 1.4;
+    font-size: var(--font-size-xs);
+    line-height: var(--line-height-normal);
     max-width: 20rem;
     word-break: break-word;
-    z-index: 9999;
+    z-index: var(--z-tooltip);
     pointer-events: none;
     box-shadow: var(--shadow-md);
-    animation: tooltipFadeIn 0.15s ease;
+    animation: tooltipFadeIn var(--transition-fast) ease;
 }
 
-@keyframes tooltipFadeIn {
-    from {
-        opacity: 0;
-        transform: translateY(-0.25rem);
-    }
-    to {
-        opacity: 1;
-        transform: translateY(0);
-    }
+/* Стрелка tooltip */
+.link-footnote-tooltip::before {
+    content: '';
+    position: absolute;
+    bottom: 100%;
+    left: var(--spacing);
+    border: 4px solid transparent;
+    border-bottom-color: var(--tooltip-bg);
 }
 
 /* Popup для редактирования */
 .link-footnote-popup {
     position: fixed;
-    background: var(--bg-primary);
-    border: 1px solid var(--border);
-    border-radius: var(--radius-md);
-    box-shadow: var(--shadow-lg);
+    background: var(--modal-bg);
+    border: 1px solid var(--modal-border);
+    border-radius: var(--radius-lg);
+    box-shadow: var(--modal-shadow);
     min-width: 20rem;
     max-width: 26rem;
-    z-index: 10000;
-    animation: popupFadeIn 0.2s ease;
-}
-
-@keyframes popupFadeIn {
-    from {
-        opacity: 0;
-        transform: translateY(-0.5rem);
-    }
-    to {
-        opacity: 1;
-        transform: translateY(0);
-    }
+    z-index: var(--z-modal);
+    animation: scaleIn var(--transition-base) ease;
 }
 
 /* Шапка popup */
@@ -145,133 +116,145 @@
     display: flex;
     align-items: center;
     justify-content: space-between;
-    padding: 0.75rem;
+    padding: var(--spacing) var(--spacing-lg);
     border-bottom: 1px solid var(--border-light);
-    background: var(--bg-secondary);
-    border-radius: var(--radius-md) var(--radius-md) 0 0;
+    background: var(--modal-header-bg);
+    border-radius: var(--radius-lg) var(--radius-lg) 0 0;
 }
 
 /* Метка типа (Ссылка/Сноска) */
 .link-footnote-popup-label {
-    font-size: 0.8125rem;
-    font-weight: 600;
+    font-size: var(--font-size-sm);
+    font-weight: var(--font-weight-semibold);
     color: var(--text-primary);
+    display: flex;
+    align-items: center;
+    gap: var(--spacing-xs);
 }
 
-/* Кнопка удаления (корзина) */
+/* Иконка в заголовке */
+.link-footnote-popup-label::before {
+    content: '🔗';
+    font-size: var(--font-size-base);
+}
+
+.link-footnote-popup[data-type="footnote"] .link-footnote-popup-label::before {
+    content: '📝';
+}
+
+/* Кнопка удаления */
 .popup-delete-btn {
     background: transparent;
     border: none;
     color: var(--text-secondary);
-    font-size: 1.125rem;
+    font-size: var(--icon-size-lg);
     cursor: pointer;
-    padding: 0.25rem 0.375rem;
+    padding: var(--spacing-xs);
     display: flex;
     align-items: center;
     justify-content: center;
     border-radius: var(--radius-sm);
-    transition: all 0.15s ease;
+    transition: var(--transition-all);
+    line-height: 1;
 }
 
 .popup-delete-btn:hover {
-    background: rgba(199, 85, 85, 0.1);
+    background: var(--delete-btn-hover-bg);
     color: var(--error);
     transform: scale(1.1);
 }
 
+.popup-delete-btn:active {
+    transform: scale(0.95);
+}
+
 /* Содержимое popup */
 .link-footnote-popup-content {
-    padding: 0.75rem;
+    padding: var(--spacing-lg);
     display: flex;
     flex-direction: column;
-    gap: 0.75rem;
+    gap: var(--spacing);
 }
 
 /* Поле ввода */
 .popup-field {
     display: flex;
     flex-direction: column;
-    gap: 0.375rem;
+    gap: var(--spacing-xs);
 }
 
 /* Метка поля */
 .popup-field-label {
-    font-size: 0.75rem;
-    font-weight: 600;
+    font-size: var(--font-size-xs);
+    font-weight: var(--font-weight-semibold);
     color: var(--text-secondary);
     text-transform: uppercase;
-    letter-spacing: 0.025em;
+    letter-spacing: var(--letter-spacing-wide);
 }
 
 /* Текстовое поле для отображаемого текста */
-.link-footnote-popup-text-input {
-    width: 100%;
-    padding: 0.5rem;
-    border: 1px solid var(--border);
-    border-radius: var(--radius-sm);
-    font-family: inherit;
-    font-size: 0.875rem;
-    color: var(--text-primary);
-    background: var(--bg-primary);
-    transition: all 0.15s ease;
-}
-
-.link-footnote-popup-text-input:focus {
-    outline: none;
-    border-color: var(--primary);
-    box-shadow: 0 0 0 0.1875rem var(--primary-subtle);
-}
-
-/* Редактируемое поле для URL/сноски */
+.link-footnote-popup-text-input,
 .link-footnote-popup-input {
     width: 100%;
-    padding: 0.5rem;
-    border: 1px solid var(--border);
+    padding: var(--spacing-sm) var(--spacing);
+    border: 1px solid var(--input-border);
     border-radius: var(--radius-sm);
-    font-family: inherit;
-    font-size: 0.875rem;
-    line-height: 1.4;
-    color: var(--text-primary);
-    background: var(--bg-primary);
-    resize: vertical;
-    min-height: 3rem;
-    transition: all 0.15s ease;
+    font-family: var(--font-family-base);
+    font-size: var(--font-size-sm);
+    color: var(--input-text);
+    background: var(--input-bg);
+    transition: var(--transition-all);
 }
 
+.link-footnote-popup-text-input:focus,
 .link-footnote-popup-input:focus {
     outline: none;
-    border-color: var(--primary);
-    box-shadow: 0 0 0 0.1875rem var(--primary-subtle);
+    border-color: var(--input-border-focus);
+    box-shadow: var(--input-shadow-focus);
 }
 
+/* Textarea для URL/содержимого сноски */
+.link-footnote-popup-input {
+    line-height: var(--line-height-normal);
+    resize: vertical;
+    min-height: 4rem;
+    max-height: 12rem;
+}
+
+/* Placeholder */
 .link-footnote-popup-input::placeholder,
 .link-footnote-popup-text-input::placeholder {
-    color: var(--text-tertiary);
+    color: var(--input-placeholder);
+    font-style: italic;
 }
 
 /* Скроллбар для textarea */
 .link-footnote-popup-input::-webkit-scrollbar {
-    width: 0.375rem;
+    width: var(--scrollbar-width);
 }
 
 .link-footnote-popup-input::-webkit-scrollbar-track {
-    background: var(--bg-tertiary);
+    background: var(--scrollbar-bg);
     border-radius: var(--radius-sm);
 }
 
 .link-footnote-popup-input::-webkit-scrollbar-thumb {
-    background: var(--border-medium);
+    background: var(--scrollbar-thumb);
     border-radius: var(--radius-sm);
 }
 
 .link-footnote-popup-input::-webkit-scrollbar-thumb:hover {
-    background: var(--gray-500);
+    background: var(--scrollbar-thumb-hover);
 }
 
-/* Стили для редактора с ссылками/сносками */
-.textblock-editor .text-link,
-.textblock-editor .text-footnote {
-    user-select: text;
+/* Кнопки действий в popup */
+.link-footnote-popup-actions {
+    display: flex;
+    gap: var(--spacing-sm);
+    justify-content: flex-end;
+    padding-top: var(--spacing-sm);
+    border-top: 1px solid var(--border-light);
+    margin-top: var(--spacing-xs);
 }
 
 /* Адаптация для предпросмотра */
@@ -279,4 +262,13 @@
 .preview-content .text-footnote {
     cursor: default;
     pointer-events: none;
+}
+
+/* Подсчет сносок */
+.text-footnote::after {
+    content: attr(data-footnote-number);
+    font-size: 0.7em;
+    vertical-align: super;
+    margin-left: 0.125rem;
+    font-weight: var(--font-weight-semibold);
 }

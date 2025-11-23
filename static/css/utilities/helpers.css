@@ -1,8 +1,171 @@
 /*
  * Вспомогательные утилитарные классы
- * Содержит переиспользуемые служебные стили
+ * Содержит переиспользуемые служебные стили для динамического управления из JS
  */
 
+/* Скрытие элемента с удалением из потока документа */
 .hidden {
     display: none !important;
+}
+
+/* Скрытие элемента с сохранением места в layout */
+.invisible {
+    visibility: hidden !important;
+}
+
+/* Полная прозрачность элемента */
+.opacity-0 {
+    opacity: 0 !important;
+}
+
+/* Полная непрозрачность элемента */
+.opacity-100 {
+    opacity: 1 !important;
+}
+
+/* Flex контейнер */
+.flex {
+    display: flex !important;
+}
+
+/* Направление flex элементов в колонку */
+.flex-column {
+    flex-direction: column !important;
+}
+
+/* Центрирование содержимого по обеим осям */
+.flex-center {
+    display: flex !important;
+    justify-content: center !important;
+    align-items: center !important;
+}
+
+/* Выравнивание по главной оси по центру */
+.justify-center {
+    justify-content: center !important;
+}
+
+/* Выравнивание по главной оси по краям */
+.justify-between {
+    justify-content: space-between !important;
+}
+
+/* Выравнивание по поперечной оси по центру */
+.align-center {
+    align-items: center !important;
+}
+
+/* Элемент занимает все доступное пространство */
+.flex-1 {
+    flex: 1 !important;
+}
+
+/* Запрет сжатия flex элемента */
+.flex-shrink-0 {
+    flex-shrink: 0 !important;
+}
+
+/* Выравнивание текста по центру */
+.text-center {
+    text-align: center !important;
+}
+
+/* Выравнивание текста по правому краю */
+.text-right {
+    text-align: right !important;
+}
+
+/* Запрет переноса текста */
+.text-nowrap {
+    white-space: nowrap !important;
+}
+
+/* Обрезка текста с многоточием */
+.text-truncate {
+    overflow: hidden !important;
+    text-overflow: ellipsis !important;
+    white-space: nowrap !important;
+}
+
+/* Полная ширина элемента */
+.w-full {
+    width: 100% !important;
+}
+
+/* Полная высота элемента */
+.h-full {
+    height: 100% !important;
+}
+
+/* Скрытие переполнения контента */
+.overflow-hidden {
+    overflow: hidden !important;
+}
+
+/* Автоматическая прокрутка при переполнении */
+.overflow-auto {
+    overflow: auto !important;
+}
+
+/* Автоматическая вертикальная прокрутка */
+.overflow-y-auto {
+    overflow-y: auto !important;
+}
+
+/* Скругление углов по умолчанию */
+.rounded {
+    border-radius: var(--radius) !important;
+}
+
+/* Полное скругление углов для круглых элементов */
+.rounded-full {
+    border-radius: var(--radius-full) !important;
+}
+
+/* Курсор указатель при наведении */
+.cursor-pointer {
+    cursor: pointer !important;
+}
+
+/* Курсор запрета действия */
+.cursor-not-allowed {
+    cursor: not-allowed !important;
+}
+
+/* Запрет выделения текста */
+.select-none {
+    user-select: none !important;
+}
+
+/* Игнорирование событий мыши */
+.pointer-events-none {
+    pointer-events: none !important;
+}
+
+/* Восстановление событий мыши */
+.pointer-events-auto {
+    pointer-events: auto !important;
+}
+
+/* Скрытие элемента для screen readers но доступного для вспомогательных технологий */
+.sr-only {
+    position: absolute !important;
+    width: 1px !important;
+    height: 1px !important;
+    padding: 0 !important;
+    margin: -1px !important;
+    overflow: hidden !important;
+    clip: rect(0, 0, 0, 0) !important;
+    white-space: nowrap !important;
+    border-width: 0 !important;
+}
+
+/* Плавный переход всех свойств */
+.transition-all {
+    transition: var(--transition-all) !important;
+}
+
+/* Вращение элемента для индикаторов загрузки */
+.animate-spin {
+    animation: spin 1s linear infinite;
 }

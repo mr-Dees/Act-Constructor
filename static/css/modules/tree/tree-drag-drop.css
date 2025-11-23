@@ -1,10 +1,18 @@
+/*
+ * Drag & Drop для дерева элементов
+ * Визуальная индикация перетаскивания и позиций вставки
+ */
+
 /* Стили для элемента во время перетаскивания */
 .tree-item.dragging {
     opacity: 0.4;
     cursor: move;
+    transform: scale(0.98);
+    box-shadow: var(--shadow-xl);
+    z-index: var(--z-modal);
 }
 
-/* Индикатор вставки перед элементом - линия располагается по центру промежутка */
+/* Индикатор вставки перед элементом */
 .tree-item.drop-before {
     position: relative;
 }
@@ -15,15 +23,16 @@
     top: 0;
     left: 0;
     right: 0;
-    height: 4px;
-    background-color: var(--primary, #007bff);
-    border-radius: 2px;
-    z-index: 1000;
+    height: var(--spacing-xs);
+    background: var(--insert-indicator-gradient);
+    border-radius: var(--radius-sm);
+    z-index: var(--z-dropdown);
     transform: translateY(-50%);
     animation: dropIndicatorPulse 0.8s ease-in-out infinite;
+    box-shadow: var(--highlight-insert-shadow);
 }
 
-/* Индикатор вставки после элемента - линия располагается по центру промежутка */
+/* Индикатор вставки после элемента */
 .tree-item.drop-after {
     position: relative;
 }
@@ -34,52 +43,79 @@
     bottom: 0;
     left: 0;
     right: 0;
-    height: 4px;
-    background-color: var(--primary, #007bff);
-    border-radius: 2px;
-    z-index: 1000;
+    height: var(--spacing-xs);
+    background: var(--insert-indicator-gradient);
+    border-radius: var(--radius-sm);
+    z-index: var(--z-dropdown);
     transform: translateY(50%);
     animation: dropIndicatorPulse 0.8s ease-in-out infinite;
+    box-shadow: var(--highlight-insert-shadow);
 }
 
 /* Индикатор вставки как дочерний элемент */
 .tree-item.drop-child {
-    background-color: rgba(0, 123, 255, 0.1);
-    border: 2px dashed var(--primary, #007bff);
-    border-radius: 4px;
+    background-color: var(--drop-child-bg);
+    border: 2px dashed var(--drop-child-border);
+    border-radius: var(--radius-sm);
     position: relative;
+    transform: scale(1.02);
+    box-shadow: var(--shadow-lg);
 }
 
 .tree-item.drop-child::before {
     content: '↳ Вставить внутрь';
     position: absolute;
-    right: 8px;
+    right: var(--spacing-sm);
     top: 50%;
     transform: translateY(-50%);
-    font-size: 0.75rem;
-    color: var(--primary, #007bff);
-    font-weight: 600;
-    background-color: white;
-    padding: 2px 6px;
-    border-radius: 3px;
-    z-index: 1001;
+    font-size: var(--font-size-xs);
+    color: var(--drop-child-border);
+    font-weight: var(--font-weight-semibold);
+    background-color: var(--bg-primary);
+    padding: var(--spacing-xs) var(--spacing-sm);
+    border-radius: var(--radius-sm);
+    z-index: var(--z-sticky);
     pointer-events: none;
+    box-shadow: var(--shadow-sm);
 }
 
 /* Стили для перетаскиваемых элементов */
-.tree-item[draggable="true"] {
+.tree-item[draggable="true"]:not(.protected) {
     cursor: grab;
 }
 
-.tree-item[draggable="true"]:active {
+.tree-item[draggable="true"]:not(.protected):active {
     cursor: grabbing;
 }
 
-/* Отключаем перетаскивание для защищенных элементов */
-.tree-item.protected {
-    cursor: default !important;
+/* Индикация возможности перетаскивания */
+.tree-item[draggable="true"]:not(.protected):hover::after {
+    content: '⋮⋮';
+    position: absolute;
+    left: var(--spacing-xs);
+    top: 50%;
+    transform: translateY(-50%);
+    color: var(--text-tertiary);
+    font-size: var(--font-size-sm);
+    opacity: 0.5;
+    pointer-events: none;
 }
 
+/* Отключаем перетаскивание для защищенных элементов */
 .tree-item.protected[draggable="true"] {
-    cursor: not-allowed !important;
+    cursor: default;
+}
+
+/* Оверлей при перетаскивании над всем деревом */
+.tree-container.drag-active {
+    outline: 2px dashed var(--primary-light);
+    outline-offset: -4px;
+    background: rgb(91 111 168 / 3%);
+}
+
+/* Подсветка допустимой зоны сброса */
+.tree-item.drop-zone:not(.protected) {
+    background: rgb(91 111 168 / 5%);
+    border-color: var(--primary-light);
+    box-shadow: var(--shadow-md);
 }

@@ -9,13 +9,39 @@
     --primary-hover: #4a5d8a;
     --primary-light: #7890c7;
     --primary-subtle: #dfe6f5;
+
     --secondary: #6b7a99;
+
     --accent: #4a9ab6;
+    --accent-hover: #3d8299;
+    --accent-light: #6bb5d0;
 
     /* Статусные цвета */
     --success: #52a876;
+    --success-hover: #448a63;
+    --success-light: #6bc493;
+    --success-bright: #10b981;
+    --success-subtle: #e8f5ee;
+
     --warning: #d89849;
+    --warning-hover: #c5853d;
+    --warning-light: #e5b36f;
+    --warning-subtle: #fef3e7;
+
     --error: #c75555;
+    --error-hover: #b54545;
+    --error-light: #d77979;
+    --error-subtle: #fdeaea;
+
+    --danger: #dc3545;
+    --danger-hover: #c82333;
+    --danger-light: #e4606d;
+    --danger-subtle: #fddede;
+
+    --info: #4a9ab6;
+    --info-hover: #3d8299;
+    --info-light: #6bb5d0;
+    --info-subtle: #e8f4f8;
 
     /* Градации серого */
     --gray-50: #f8fafb;
@@ -33,31 +59,241 @@
     --bg-primary: #ffffff;
     --bg-secondary: #f8fafb;
     --bg-tertiary: #f1f3f6;
+    --bg-hover: #f9fafb;
+    --bg-active: #e8ebf0;
+    --bg-disabled: #f1f3f6;
 
     /* Цвета границ */
     --border-light: #e8ebf0;
     --border: #d4d9e2;
     --border-medium: #bdc4d1;
+    --border-dark: #9ba3b3;
+    --border-focus: var(--primary);
 
     /* Цвета текста для обеспечения контрастности */
     --text-primary: #1a202c;
     --text-secondary: #4a5568;
     --text-tertiary: #9ba3b3;
+    --text-disabled: #cfd4dc;
+    --text-on-primary: #ffffff;
+    --text-on-dark: #ffffff;
+    --text-link: var(--primary);
+    --text-link-hover: var(--primary-hover);
+    --text-link-visited: var(--secondary);
+
+    /* Кнопки */
+    --button-bg: var(--primary);
+    --button-bg-hover: var(--primary-hover);
+    --button-bg-active: #3d4d73;
+    --button-text: var(--text-on-primary);
+    --button-border: transparent;
+    --button-disabled-bg: var(--gray-300);
+    --button-disabled-text: var(--text-tertiary);
+    --button-shadow: var(--shadow-sm);
+    --button-shadow-hover: var(--shadow);
+
+    --button-secondary-bg: var(--bg-secondary);
+    --button-secondary-bg-hover: var(--gray-200);
+    --button-secondary-text: var(--text-primary);
+    --button-secondary-border: var(--border);
+
+    --button-ghost-bg: transparent;
+    --button-ghost-bg-hover: rgb(91 111 168 / 10%);
+    --button-ghost-text: var(--primary);
+
+    /* Инпуты и формы */
+    --input-bg: #ffffff;
+    --input-bg-disabled: var(--gray-100);
+    --input-border: var(--border);
+    --input-border-hover: var(--border-medium);
+    --input-border-focus: var(--primary);
+    --input-text: var(--text-primary);
+    --input-text-disabled: var(--text-disabled);
+    --input-placeholder: var(--text-tertiary);
+    --input-shadow-focus: 0 0 0 3px rgb(91 111 168 / 15%);
+    --input-error-border: var(--error);
+    --input-error-bg: rgb(199 85 85 / 5%);
+    --input-error-shadow: 0 0 0 3px rgb(199 85 85 / 15%);
+    --input-success-border: var(--success);
+    --input-success-bg: rgb(82 168 118 / 5%);
+
+    --checkbox-bg: #ffffff;
+    --checkbox-bg-checked: var(--primary);
+    --checkbox-border: var(--border);
+    --checkbox-checkmark: #ffffff;
+
+    /* Оверлеи и полупрозрачные фоны */
+    --overlay-bg: rgb(26 32 44 / 50%);
+    --overlay-bg-dark: rgb(0 0 0 / 70%);
+    --overlay-bg-light: rgb(255 255 255 / 90%);
+    --step-bg: rgb(255 255 255 / 18%);
+    --step-bg-hover: rgb(255 255 255 / 25%);
+    --step-border: rgb(255 255 255 / 30%);
+    --step-border-hover: rgb(255 255 255 / 40%);
+    --help-modal-overlay: rgb(0 0 0 / 60%);
+    --help-close-hover: rgb(255 255 255 / 20%);
+    --help-panel-border: #b8c9e8;
+    --tooltip-bg: #2c3e50;
+    --tooltip-text: #ffffff;
+
+    /* Градиенты */
+    --gradient-primary: linear-gradient(135deg, var(--primary) 0%, var(--primary-hover) 100%);
+    --gradient-accent: linear-gradient(135deg, var(--accent) 0%, #3d8299 100%);
+    --item-highlight-gradient: linear-gradient(
+            135deg,
+            rgb(102 126 234 / 10%) 0%,
+            rgb(102 126 234 / 5%) 50%,
+            rgb(102 126 234 / 10%) 100%
+    );
+    --table-header-gradient: linear-gradient(135deg, #748fca 0%, #9d7cb8 100%);
+    --table-header-gradient-hover: linear-gradient(135deg, #6a81ba 0%, #9170ab 100%);
+    --table-header-selected: linear-gradient(135deg, #6579b5 0%, #8b6aa5 100%);
+    --content-label-gradient: linear-gradient(135deg, rgb(79 70 229 / 10%) 0%, var(--bg-tertiary) 100%);
+    --drag-miniature-gradient: linear-gradient(135deg, var(--primary) 0%, #5b21b6 100%);
+    --insert-indicator-gradient: linear-gradient(
+            90deg,
+            transparent 0%,
+            rgb(79 70 229 / 30%) 20%,
+            rgb(79 70 229 / 30%) 80%,
+            transparent 100%
+    );
+
+    /* Цвета таблиц */
+    --table-bg: #ffffff;
+    --table-border: var(--border-light);
+    --table-header-bg: var(--bg-tertiary);
+    --table-header-text: var(--text-primary);
+    --table-row-hover: var(--bg-hover);
+    --table-row-selected: rgb(91 111 168 / 8%);
+    --table-protected-header-bg: #f9f9f9;
+    --resize-handle-bg: rgb(91 111 168 / 30%);
+    --resize-handle-bg-subtle: rgb(91 111 168 / 20%);
+    --resize-handle-border: rgb(91 111 168 / 60%);
+
+    /* Цвета подсветки */
+    --highlight-bg: rgb(255 235 59 / 40%);
+    --highlight-insert: #2ecc71;
+    --highlight-insert-shadow: 0 0 8px rgb(46 204 113 / 60%);
+    --highlight-warning-shadow: 0 0 8px rgb(243 156 18 / 60%);
+    --highlight-error: #e74c3c;
+    --highlight-error-shadow: 0 0 8px rgb(231 76 60 / 60%);
+    --highlight-selection: rgb(91 111 168 / 20%);
+
+    /* Цвета для ссылок и сносок */
+    --link-bg: rgb(91 111 168 / 8%);
+    --link-bg-hover: rgb(91 111 168 / 15%);
+    --link-border: rgb(91 111 168 / 30%);
+    --footnote-bg: rgb(74 154 182 / 8%);
+    --footnote-bg-hover: rgb(74 154 182 / 15%);
+    --footnote-border: rgb(74 154 182 / 30%);
+    --footnote-focus-shadow: rgb(74 154 182 / 20%);
+    --delete-btn-hover-bg: rgb(199 85 85 / 10%);
+
+    /* Цвета для дерева */
+    --tree-node-bg: transparent;
+    --tree-node-bg-hover: rgb(91 111 168 / 5%);
+    --tree-node-bg-selected: rgb(91 111 168 / 10%);
+    --tree-node-border: transparent;
+    --tree-node-border-selected: var(--primary-light);
+    --tree-parent-selected-border: #aab9dc;
+    --tree-protected-bg: #fff8e8;
+    --drop-child-bg: rgb(0 123 255 / 10%);
+    --drop-child-border: #007bff;
+
+    /* Цвета для дополнительного контента нарушений */
+    --additional-content-hover-bg: rgb(79 70 229 / 5%);
+    --drag-over-bg: rgb(79 70 229 / 15%);
+    --drag-over-shadow: 0 0 1.25rem rgb(79 70 229 / 30%);
+    --drag-text-shadow: 0 0.25rem 0.75rem rgb(79 70 229 / 20%);
+    --content-item-hover-shadow: 0 0.5rem 1.25rem rgb(0 0 0 / 12%);
+    --content-item-dragging-shadow: 0 1rem 2rem rgb(79 70 229 / 25%);
+    --drag-miniature-shadow: 0 0.5rem 1.5rem rgb(79 70 229 / 40%);
+
+    /* Цвета для индикатора сохранения */
+    --save-button-bg: rgb(255 255 255 / 10%);
+    --save-button-border: rgb(255 255 255 / 20%);
+    --save-button-text: rgb(255 255 255 / 90%);
+    --save-saved-bg: rgb(82 168 118 / 15%);
+    --save-saved-border: rgb(82 168 118 / 30%);
+    --save-saved-color: var(--success);
+    --save-unsaved-color: #fbbf24;
+    --save-unsaved-bg: rgb(251 191 36 / 15%);
+    --save-unsaved-border: rgb(251 191 36 / 30%);
+    --save-unsaved-bg-hover: rgb(251 191 36 / 25%);
+    --save-unsaved-border-hover: rgb(251 191 36 / 40%);
+    --save-label-color: rgb(255 255 255 / 80%);
+
+    /* Фокус и outline */
+    --focus-outline: 2px solid var(--accent);
+    --focus-outline-offset: 2px;
+    --focus-ring: 0 0 0 3px rgb(74 154 182 / 25%);
+    --focus-ring-error: 0 0 0 3px rgb(199 85 85 / 25%);
+
+    /* Скроллбар */
+    --scrollbar-width: 8px;
+    --scrollbar-bg: var(--gray-100);
+    --scrollbar-thumb: var(--primary-light);
+    --scrollbar-thumb-hover: var(--primary);
+
+    /* Лоадеры и спиннеры */
+    --spinner-color: var(--primary);
+    --spinner-bg: var(--primary-subtle);
+    --skeleton-bg: var(--gray-200);
+    --skeleton-shimmer: linear-gradient(
+            90deg,
+            transparent 0%,
+            rgb(255 255 255 / 60%) 50%,
+            transparent 100%
+    );
+
+    /* Карточки */
+    --card-bg: #ffffff;
+    --card-border: var(--border-light);
+    --card-shadow: var(--shadow-sm);
+    --card-shadow-hover: var(--shadow);
+
+    /* Модальные окна */
+    --modal-bg: #ffffff;
+    --modal-border: var(--border-light);
+    --modal-shadow: var(--shadow-xl);
+    --modal-header-bg: var(--bg-secondary);
+    --modal-footer-bg: var(--bg-secondary);
+
+    /* Уведомления */
+    --notification-bg: #ffffff;
+    --notification-border: var(--border-light);
+    --notification-shadow: var(--shadow-lg);
+    --notification-success-bg: var(--success-subtle);
+    --notification-success-border: var(--success);
+    --notification-success-icon: var(--success);
+    --notification-warning-bg: var(--warning-subtle);
+    --notification-warning-border: var(--warning);
+    --notification-warning-icon: var(--warning);
+    --notification-error-bg: var(--error-subtle);
+    --notification-error-border: var(--error);
+    --notification-error-icon: var(--error);
+    --notification-info-bg: var(--info-subtle);
+    --notification-info-border: var(--info);
+    --notification-info-icon: var(--info);
 
     /* Тени для создания глубины элементов */
-    --shadow-xs: 0 1px 3px 0 rgba(0, 0, 0, 0.08);
-    --shadow-sm: 0 2px 6px 0 rgba(0, 0, 0, 0.12), 0 1px 3px -1px rgba(0, 0, 0, 0.1);
-    --shadow: 0 4px 10px -1px rgba(0, 0, 0, 0.14), 0 2px 6px -2px rgba(0, 0, 0, 0.12);
-    --shadow-md: 0 8px 16px -2px rgba(0, 0, 0, 0.16), 0 4px 8px -2px rgba(0, 0, 0, 0.12);
-    --shadow-lg: 0 12px 28px -4px rgba(0, 0, 0, 0.18), 0 6px 14px -4px rgba(0, 0, 0, 0.14);
-    --shadow-xl: 0 20px 40px -8px rgba(0, 0, 0, 0.22);
+    --shadow-xs: 0 1px 3px 0 rgb(0 0 0 / 8%);
+    --shadow-sm: 0 2px 6px 0 rgb(0 0 0 / 12%), 0 1px 3px -1px rgb(0 0 0 / 10%);
+    --shadow: 0 4px 10px -1px rgb(0 0 0 / 14%), 0 2px 6px -2px rgb(0 0 0 / 12%);
+    --shadow-md: 0 8px 16px -2px rgb(0 0 0 / 16%), 0 4px 8px -2px rgb(0 0 0 / 12%);
+    --shadow-lg: 0 12px 28px -4px rgb(0 0 0 / 18%), 0 6px 14px -4px rgb(0 0 0 / 14%);
+    --shadow-xl: 0 20px 40px -8px rgb(0 0 0 / 22%);
+    --shadow-inner: inset 0 2px 4px 0 rgb(0 0 0 / 6%);
 
     /* Радиусы скругления углов */
+    --radius-xs: 0.25rem;
     --radius-sm: 0.375rem;
     --radius: 0.5rem;
     --radius-md: 0.625rem;
     --radius-lg: 0.75rem;
     --radius-xl: 1rem;
+    --radius-2xl: 1.5rem;
+    --radius-full: 9999px;
 
     /* Размеры отступов в rem для адаптивности */
     --spacing-xs: 0.375rem;
@@ -67,10 +303,73 @@
     --spacing-lg: 1.25rem;
     --spacing-xl: 1.5rem;
     --spacing-2xl: 2rem;
+    --spacing-3xl: 2.5rem;
+    --spacing-4xl: 3rem;
+    --spacing-5xl: 3.5rem;
+    --spacing-6xl: 4rem;
+    --spacing-7xl: 4.5rem;
+    --spacing-8xl: 5rem;
+    --spacing-9xl: 5.5rem;
+    --spacing-10xl: 6rem;
+    --spacing-11xl: 6.5rem;
+    --spacing-12xl: 7rem;
+
+    /* Типографика */
+    --font-family-base: -apple-system, BlinkMacSystemFont, "Inter", "Segoe UI", system-ui, sans-serif;
+    --font-family-mono: "SF Mono", "Monaco", "Consolas", "Liberation Mono", "Courier New", monospace;
+    --font-size-xs: 0.75rem;
+    --font-size-sm: 0.875rem;
+    --font-size-base: 1rem;
+    --font-size-lg: 1.125rem;
+    --font-size-xl: 1.25rem;
+    --font-size-2xl: 1.5rem;
+    --font-size-3xl: 1.875rem;
+    --font-size-4xl: 2.25rem;
+    --font-weight-normal: 400;
+    --font-weight-medium: 500;
+    --font-weight-semibold: 600;
+    --font-weight-bold: 700;
+    --line-height-tight: 1.25;
+    --line-height-normal: 1.5;
+    --line-height-relaxed: 1.75;
+    --letter-spacing-tight: -0.025em;
+    --letter-spacing-normal: 0;
+    --letter-spacing-wide: 0.025em;
 
     /* Высота шапки с учетом минимального значения */
     --header-height: 9vh;
     --header-min-height: 80px;
 
-    --danger: #dc3545;
+    /* Переходы для анимаций */
+    --transition-fast: 150ms ease;
+    --transition-base: 200ms ease;
+    --transition-slow: 300ms ease;
+    --transition-all: all 200ms ease;
+
+    /* Z-index слои */
+    --z-base: 1;
+    --z-dropdown: 1000;
+    --z-sticky: 1100;
+    --z-fixed: 1200;
+    --z-modal-backdrop: 1300;
+    --z-modal: 1400;
+    --z-popover: 1500;
+    --z-tooltip: 1600;
+    --z-notification: 1700;
+
+    /* Иконки */
+    --icon-size-xs: 0.875rem;
+    --icon-size-sm: 1rem;
+    --icon-size: 1.25rem;
+    --icon-size-lg: 1.5rem;
+    --icon-size-xl: 2rem;
+    --icon-color: var(--text-secondary);
+    --icon-color-hover: var(--primary);
+
+    /* Брейкпоинты для использования с clamp */
+    --breakpoint-sm: 640px;
+    --breakpoint-md: 768px;
+    --breakpoint-lg: 1024px;
+    --breakpoint-xl: 1280px;
+    --breakpoint-2xl: 1536px;
 }

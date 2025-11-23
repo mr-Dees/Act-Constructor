@@ -5,30 +5,116 @@
 
 /* Уведомление об успешном действии */
 .notification.success {
-    border-left-color: var(--success);
+    border-left-color: var(--notification-success-border);
+    background: var(--notification-success-bg);
+}
+
+.notification.success .notification-icon {
+    color: var(--notification-success-icon);
+}
+
+.notification.success .notification-counter {
+    background: var(--success);
+}
+
+.notification.success .notification-progress {
+    color: var(--success);
 }
 
 /* Уведомление об ошибке */
 .notification.error {
-    border-left-color: var(--error);
+    border-left-color: var(--notification-error-border);
+    background: var(--notification-error-bg);
+}
+
+.notification.error .notification-icon {
+    color: var(--notification-error-icon);
+}
+
+.notification.error .notification-counter {
+    background: var(--error);
+}
+
+.notification.error .notification-progress {
+    color: var(--error);
+}
+
+/* Предупреждающее уведомление */
+.notification.warning {
+    border-left-color: var(--notification-warning-border);
+    background: var(--notification-warning-bg);
+}
+
+.notification.warning .notification-icon {
+    color: var(--notification-warning-icon);
+}
+
+.notification.warning .notification-counter {
+    background: var(--warning);
+}
+
+.notification.warning .notification-progress {
+    color: var(--warning);
 }
 
 /* Информационное уведомление */
 .notification.info {
-    border-left-color: var(--accent);
+    border-left-color: var(--notification-info-border);
+    background: var(--notification-info-bg);
 }
 
-/* Иконка успешного уведомления */
-.notification.success .notification-icon {
-    color: var(--success);
-}
-
-/* Иконка уведомления об ошибке */
-.notification.error .notification-icon {
-    color: var(--error);
-}
-
-/* Иконка информационного уведомления */
 .notification.info .notification-icon {
-    color: var(--accent);
+    color: var(--notification-info-icon);
+}
+
+.notification.info .notification-counter {
+    background: var(--info);
+}
+
+.notification.info .notification-progress {
+    color: var(--info);
+}
+
+/* Нейтральное уведомление (по умолчанию) */
+.notification.default {
+    border-left-color: var(--border-medium);
+}
+
+.notification.default .notification-icon {
+    color: var(--text-secondary);
+}
+
+.notification.default .notification-counter {
+    background: var(--gray-600);
+}
+
+.notification.default .notification-progress {
+    color: var(--gray-600);
+}
+
+/* Особые состояния */
+
+/* Закрепленное уведомление */
+.notification.pinned {
+    box-shadow: var(--shadow-xl), 0 0 0 2px var(--primary-light);
+}
+
+.notification.pinned::before {
+    content: '📌';
+    position: absolute;
+    top: var(--spacing-xs);
+    right: var(--spacing-xs);
+    font-size: var(--font-size-xs);
+    opacity: 0.6;
+}
+
+/* Важное уведомление с пульсацией */
+.notification.urgent {
+    animation: slideInRight 0.3s cubic-bezier(0.4, 0, 0.2, 1),
+    pulse 2s ease-in-out infinite 0.3s;
+}
+
+/* Уведомление с кнопками действий */
+.notification.has-actions .notification-content {
+    padding-bottom: var(--spacing-xs);
 }

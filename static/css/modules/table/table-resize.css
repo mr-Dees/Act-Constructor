@@ -12,21 +12,18 @@
     height: 100%;
     cursor: col-resize;
     background: transparent;
-    z-index: 30;
+    z-index: calc(var(--z-sticky) + 20);
     opacity: 0;
-    transition: all 0.15s ease;
+    transition: opacity var(--transition-fast), background var(--transition-fast);
     border-right: 2px solid transparent;
     pointer-events: auto;
 }
 
 /* Подсветка хендла колонки при наведении */
 .resize-handle:hover {
-    background: rgba(91, 111, 168, 0.3);
-    border-right: 2px solid var(--primary) !important;
-    right: -0.3125rem;
-    width: 0.5rem;
+    background: var(--resize-handle-bg);
+    border-right-color: var(--primary);
     opacity: 1;
-    cursor: col-resize !important;
 }
 
 /* Хендл изменения высоты строки */
@@ -38,37 +35,41 @@
     height: 0.5rem;
     cursor: row-resize;
     background: transparent;
-    z-index: 30;
+    z-index: calc(var(--z-sticky) + 20);
     opacity: 0;
-    transition: all 0.15s ease;
+    transition: opacity var(--transition-fast), background var(--transition-fast);
     border-bottom: 2px solid transparent;
     pointer-events: auto;
 }
 
 /* Подсветка хендла строки при наведении */
 .row-resize-handle:hover {
-    background: rgba(91, 111, 168, 0.3);
-    border-bottom: 2px solid var(--primary) !important;
-    bottom: -0.3125rem;
-    height: 0.5rem;
+    background: var(--resize-handle-bg);
+    border-bottom-color: var(--primary);
     opacity: 1;
-    cursor: row-resize !important;
 }
 
 /* Видимость хендлов при наведении на ячейку */
 .editable-table td:hover .resize-handle,
-.editable-table th:hover .resize-handle {
+.editable-table th:hover .resize-handle,
+.editable-table td:hover .row-resize-handle,
+.editable-table th:hover .row-resize-handle {
     opacity: 0.6;
-    background: rgba(91, 111, 168, 0.2);
-    border-right-color: rgba(91, 111, 168, 0.6);
+    background: var(--resize-handle-bg-subtle);
+}
+
+.editable-table td:hover .resize-handle,
+.editable-table th:hover .resize-handle {
+    border-right-color: var(--resize-handle-border);
+}
+
+.editable-table td:hover .row-resize-handle,
+.editable-table th:hover .row-resize-handle {
+    border-bottom-color: var(--resize-handle-border);
 }
 
 /* Полная видимость хендлов при прямом наведении */
 .resize-handle:hover,
-.row-resize-handle:hover,
-.editable-table td:hover .resize-handle,
-.editable-table td:hover .row-resize-handle,
-.editable-table th:hover .resize-handle,
-.editable-table th:hover .row-resize-handle {
+.row-resize-handle:hover {
     opacity: 1;
 }

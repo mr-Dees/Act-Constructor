@@ -2,37 +2,48 @@
  * Базовые стили кнопок
  *
  * Определяет общие стили для всех кнопок приложения.
- * Предоставляет базовые варианты: primary, secondary, success.
+ * Предоставляет базовые варианты: primary, secondary, success, danger, ghost.
  */
 
 /* Базовый класс для всех кнопок */
 .btn {
-    padding: 0.625rem 1.5rem;
-    border: none;
+    padding: var(--spacing-sm) var(--spacing-xl);
+    border: 1px solid transparent;
     border-radius: var(--radius);
-    font-size: 0.9375rem;
-    font-weight: 500;
+    font-size: var(--font-size-sm);
+    font-weight: var(--font-weight-medium);
+    font-family: var(--font-family-base);
     cursor: pointer;
-    transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
-    box-shadow: var(--shadow-sm);
+    transition: var(--transition-all);
+    box-shadow: var(--button-shadow);
     display: inline-flex;
     align-items: center;
     justify-content: center;
-    gap: 0.5rem;
+    gap: var(--spacing-sm);
     text-align: center;
-    line-height: 1;
+    line-height: var(--line-height-tight);
     white-space: nowrap;
+    user-select: none;
+    position: relative;
+    overflow: hidden;
 }
 
 /* Эффект при наведении */
-.btn:hover {
-    box-shadow: var(--shadow-md);
+.btn:hover:not(:disabled) {
+    box-shadow: var(--button-shadow-hover);
     transform: translateY(-1px);
 }
 
 /* Эффект при нажатии */
-.btn:active {
+.btn:active:not(:disabled) {
     transform: translateY(0);
+    box-shadow: var(--button-shadow);
+}
+
+/* Состояние фокуса для доступности */
+.btn:focus-visible {
+    outline: var(--focus-outline);
+    outline-offset: var(--focus-outline-offset);
 }
 
 /* Отключенное состояние */
@@ -40,41 +51,122 @@
     opacity: 0.6;
     cursor: not-allowed;
     transform: none;
+    background: var(--button-disabled-bg);
+    color: var(--button-disabled-text);
 }
 
 .btn:disabled:hover {
-    box-shadow: var(--shadow-sm);
+    box-shadow: var(--button-shadow);
     transform: none;
 }
 
 /* Основная кнопка с акцентным цветом */
 .btn-primary {
-    background: var(--primary);
-    color: white;
+    background: var(--button-bg);
+    color: var(--button-text);
+    border-color: var(--button-border);
 }
 
 .btn-primary:hover:not(:disabled) {
-    background: var(--primary-hover);
+    background: var(--button-bg-hover);
+}
+
+.btn-primary:active:not(:disabled) {
+    background: var(--button-bg-active);
 }
 
 /* Вторичная кнопка с нейтральным стилем */
 .btn-secondary {
-    background: var(--bg-tertiary);
-    color: var(--text-primary);
-    border: 1px solid var(--border);
+    background: var(--button-secondary-bg);
+    color: var(--button-secondary-text);
+    border-color: var(--button-secondary-border);
 }
 
 .btn-secondary:hover:not(:disabled) {
-    background: var(--gray-200);
+    background: var(--button-secondary-bg-hover);
     border-color: var(--border-medium);
+}
+
+.btn-secondary:active:not(:disabled) {
+    background: var(--gray-300);
 }
 
 /* Кнопка успешного действия */
 .btn-success {
     background: var(--success);
-    color: white;
+    color: var(--text-on-primary);
+    border-color: transparent;
 }
 
 .btn-success:hover:not(:disabled) {
-    background: #469463;
+    background: var(--success-hover);
+}
+
+.btn-success:active:not(:disabled) {
+    background: #3d8a5a;
+}
+
+/* Кнопка опасного действия */
+.btn-danger {
+    background: var(--danger);
+    color: var(--text-on-primary);
+    border-color: transparent;
+}
+
+.btn-danger:hover:not(:disabled) {
+    background: var(--danger-hover);
+}
+
+.btn-danger:active:not(:disabled) {
+    background: #bd2130;
+}
+
+/* Призрачная кнопка (прозрачная) */
+.btn-ghost {
+    background: var(--button-ghost-bg);
+    color: var(--button-ghost-text);
+    border-color: transparent;
+    box-shadow: none;
+}
+
+.btn-ghost:hover:not(:disabled) {
+    background: var(--button-ghost-bg-hover);
+    box-shadow: none;
+}
+
+.btn-ghost:active:not(:disabled) {
+    background: rgb(91 111 168 / 15%);
+}
+
+/* Размеры кнопок */
+.btn-sm {
+    padding: var(--spacing-xs) var(--spacing);
+    font-size: var(--font-size-xs);
+    gap: var(--spacing-xs);
+}
+
+.btn-lg {
+    padding: var(--spacing) var(--spacing-2xl);
+    font-size: var(--font-size-base);
+    gap: var(--spacing);
+}
+
+/* Кнопка на всю ширину */
+.btn-block {
+    width: 100%;
+    display: flex;
+}
+
+/* Иконка в кнопке */
+.btn-icon {
+    width: var(--icon-size);
+    height: var(--icon-size);
+    flex-shrink: 0;
+}
+
+/* Кнопка только с иконкой */
+.btn-icon-only {
+    padding: var(--spacing-sm);
+    aspect-ratio: 1;
+    min-width: auto;
 }

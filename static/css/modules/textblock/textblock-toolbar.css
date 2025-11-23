@@ -6,97 +6,190 @@
 /* Глобальная панель инструментов */
 .textblock-toolbar-global {
     position: fixed;
-    top: calc(max(var(--header-height), var(--header-min-height)) + 0.625rem);
+    top: calc(max(var(--header-height), var(--header-min-height)) + var(--spacing));
     left: 50%;
     transform: translateX(-50%);
     background: var(--bg-primary);
     border: 1px solid var(--border);
     border-radius: var(--radius-md);
-    padding: 0.5rem 0.875rem;
+    padding: var(--spacing-sm) var(--spacing-lg);
     box-shadow: var(--shadow-lg);
-    z-index: 999;
+    z-index: var(--z-sticky);
     display: flex;
     align-items: center;
-    gap: 0.5rem;
-    transition: all 0.2s ease;
+    gap: var(--spacing-sm);
+    transition: var(--transition-all);
+    max-width: 90vw;
+    overflow-x: auto;
+    scrollbar-width: thin;
 }
 
 /* Скрытое состояние панели */
 .textblock-toolbar-global.hidden {
-    display: none;
+    opacity: 0;
+    pointer-events: none;
+    transform: translateX(-50%) translateY(-0.5rem);
+}
+
+/* Скроллбар для узких экранов */
+.textblock-toolbar-global::-webkit-scrollbar {
+    height: 4px;
+}
+
+.textblock-toolbar-global::-webkit-scrollbar-track {
+    background: transparent;
+}
+
+.textblock-toolbar-global::-webkit-scrollbar-thumb {
+    background: var(--scrollbar-thumb);
+    border-radius: var(--radius-full);
 }
 
 /* Метка панели инструментов */
 .toolbar-label {
-    font-size: 0.8125rem;
+    font-size: var(--font-size-xs);
     color: var(--text-secondary);
-    font-weight: 500;
-    padding-right: 0.5rem;
+    font-weight: var(--font-weight-medium);
+    padding-right: var(--spacing-sm);
     border-right: 1px solid var(--border);
+    white-space: nowrap;
+    flex-shrink: 0;
+}
+
+/* Группы кнопок */
+.toolbar-group {
+    display: flex;
+    align-items: center;
+    gap: 2px;
+    flex-shrink: 0;
+}
+
+/* Разделитель между группами */
+.toolbar-separator {
+    width: 1px;
+    height: var(--spacing-xl);
+    background: var(--border);
+    margin: 0 var(--spacing-xs);
+    flex-shrink: 0;
 }
 
 /* Кнопка форматирования */
 .toolbar-btn {
-    background: var(--bg-secondary);
-    border: 1px solid var(--border);
+    background: transparent;
+    border: 1px solid transparent;
     border-radius: var(--radius-sm);
-    padding: 0.375rem 0.625rem;
+    padding: var(--spacing-xs) var(--spacing-sm);
     cursor: pointer;
-    font-size: 0.875rem;
+    font-size: var(--font-size-sm);
+    font-weight: var(--font-weight-medium);
     color: var(--text-primary);
-    transition: all 0.15s ease;
+    transition: var(--transition-all);
     display: flex;
     align-items: center;
     justify-content: center;
     min-width: 2rem;
     height: 2rem;
+    position: relative;
+    user-select: none;
 }
 
-/* Подсветка кнопки при наведении */
-.toolbar-btn:hover {
-    background: var(--bg-tertiary);
-    border-color: var(--border-medium);
+/* Подсветка при наведении */
+.toolbar-btn:hover:not(.active):not(:disabled) {
+    background: var(--bg-secondary);
+    border-color: var(--border);
     color: var(--primary);
-    box-shadow: var(--shadow-xs);
 }
 
-/* Состояние нажатия кнопки */
-.toolbar-btn:active {
+/* Активное состояние */
+.toolbar-btn.active {
     background: var(--primary-subtle);
     border-color: var(--primary);
+    color: var(--primary);
 }
 
-/* Разделитель между группами кнопок */
-.toolbar-separator {
-    width: 1px;
-    height: 1.5rem;
-    background: var(--border);
-    margin: 0 0.25rem;
+/* Состояние нажатия */
+.toolbar-btn:active:not(:disabled) {
+    transform: scale(0.95);
 }
 
-/* Выпадающий список выбора форматирования */
+/* Отключенное состояние */
+.toolbar-btn:disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
+}
+
+/* Tooltip для кнопок */
+.toolbar-btn[data-tooltip]::after {
+    content: attr(data-tooltip);
+    position: absolute;
+    bottom: calc(100% + var(--spacing-xs));
+    left: 50%;
+    transform: translateX(-50%);
+    background: var(--tooltip-bg);
+    color: var(--tooltip-text);
+    padding: var(--spacing-xs) var(--spacing-sm);
+    border-radius: var(--radius-xs);
+    font-size: var(--font-size-xs);
+    white-space: nowrap;
+    pointer-events: none;
+    opacity: 0;
+    transition: opacity var(--transition-fast);
+    z-index: var(--z-tooltip);
+}
+
+.toolbar-btn:hover[data-tooltip]::after {
+    opacity: 1;
+}
+
+/* Выпадающий список */
 .toolbar-select {
-    padding: 0.375rem 0.625rem;
+    padding: var(--spacing-xs) var(--spacing-sm);
     border: 1px solid var(--border);
     border-radius: var(--radius-sm);
-    background: var(--bg-secondary);
+    background: var(--bg-primary);
     color: var(--text-primary);
-    font-size: 0.8125rem;
+    font-size: var(--font-size-xs);
+    font-family: var(--font-family-base);
     cursor: pointer;
-    transition: all 0.15s ease;
+    transition: var(--transition-all);
     height: 2rem;
+    min-width: 4rem;
 }
 
-/* Подсветка списка при наведении */
+/* Подсветка при наведении */
 .toolbar-select:hover {
-    background: var(--bg-tertiary);
+    background: var(--bg-secondary);
     border-color: var(--border-medium);
-    box-shadow: var(--shadow-xs);
 }
 
-/* Состояние фокуса списка */
+/* Состояние фокуса */
 .toolbar-select:focus {
     outline: none;
-    border-color: var(--primary);
-    box-shadow: 0 0 0 0.1875rem var(--primary-subtle);
+    border-color: var(--input-border-focus);
+    box-shadow: var(--input-shadow-focus);
+}
+
+/* Специфичные размеры для селектов */
+#fontSizeSelect {
+    min-width: 4.5rem;
+}
+
+#headingSelect {
+    min-width: 5.5rem;
+}
+
+/* Индикатор количества выбранных элементов */
+.toolbar-count {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    background: var(--primary);
+    color: var(--text-on-primary);
+    font-size: var(--font-size-xs);
+    font-weight: var(--font-weight-semibold);
+    padding: 0.125rem var(--spacing-xs);
+    border-radius: var(--radius-full);
+    min-width: 1.25rem;
+    height: 1.25rem;
+    margin-left: var(--spacing-xs);
 }

@@ -8,6 +8,9 @@
     max-width: 100%;
     width: 100%;
     margin: 0 auto;
+    display: flex;
+    flex-direction: column;
+    gap: var(--spacing-sm);
 }
 
 /* Карточка отдельного элемента */
@@ -15,38 +18,51 @@
     background: var(--bg-primary);
     padding: var(--spacing-lg);
     border-radius: var(--radius-md);
-    margin-bottom: var(--spacing-sm);
     border: 1px solid var(--border);
-    border-left: 0.1875rem solid var(--primary);
+    border-left: 3px solid var(--primary);
     overflow: visible;
-    transition: border-color 0.2s ease, box-shadow 0.2s ease;
+    transition: border-color var(--transition-base),
+    box-shadow var(--transition-base),
+    transform var(--transition-fast);
     box-shadow: var(--shadow-sm);
+    position: relative;
 }
 
 /* Подсветка элемента при наведении */
 .item-block:hover {
     border-left-color: var(--primary-hover);
     box-shadow: var(--shadow-md);
+    transform: translateX(2px);
+}
+
+/* Состояние фокуса для доступности */
+.item-block:focus-within {
+    border-left-color: var(--primary-hover);
+    box-shadow: var(--shadow-md), var(--focus-ring);
+    outline: none;
+}
+
+/* Активный элемент */
+.item-block.active {
+    border-left-color: var(--accent);
+    background: var(--primary-subtle);
+    box-shadow: var(--shadow);
+}
+
+/* Защищенный элемент (не редактируемый) */
+.item-block.protected {
+    background: var(--tree-protected-bg);
+    opacity: 0.85;
+}
+
+.item-block.protected:hover {
+    transform: none;
 }
 
 /* Класс для анимации подсветки элемента */
-.highlight-flash {
-    animation: highlightFlash 2s ease-out;
-    border-radius: var(--radius);
-    transition: background-color 0.3s ease, box-shadow 0.3s ease;
-}
-
-/* Стили для элементов items (если их еще нет) */
-.item-container {
-    transition: background-color 0.2s ease, box-shadow 0.2s ease;
-}
-
-/* Анимация мигающей подсветки элемента */
 .item-block.highlight-flash {
-    animation: highlight-flash 1.5s ease-in-out;
-    border-radius: 8px;
-    position: relative;
-    z-index: 10;
+    animation: highlightFlash 2s ease-out;
+    z-index: var(--z-sticky);
 }
 
 /* Эффект свечения при подсветке */
@@ -57,15 +73,64 @@
     left: -4px;
     right: -4px;
     bottom: -4px;
-    border-radius: 10px;
-    background: linear-gradient(
-            135deg,
-            rgba(102, 126, 234, 0.1) 0%,
-            rgba(102, 126, 234, 0.05) 50%,
-            rgba(102, 126, 234, 0.1) 100%
-    );
+    border-radius: calc(var(--radius-md) + 2px);
+    background: var(--item-highlight-gradient);
     opacity: 0;
     pointer-events: none;
     z-index: -1;
-    animation: highlight-glow 2.5s cubic-bezier(0.4, 0.0, 0.2, 1);
+    animation: highlightGlow 2s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+/* Элемент в процессе перетаскивания */
+.item-block.dragging {
+    opacity: 0.5;
+    cursor: move;
+    box-shadow: var(--shadow-lg);
+}
+
+/* Индикатор места для вставки */
+.item-block.drop-target-before::before,
+.item-block.drop-target-after::after {
+    content: '';
+    position: absolute;
+    left: 0;
+    right: 0;
+    height: 2px;
+    background: var(--primary);
+    box-shadow: var(--highlight-insert-shadow);
+    animation: pulse 1s ease-in-out infinite;
+}
+
+.item-block.drop-target-before::before {
+    top: -2px;
+}
+
+.item-block.drop-target-after::after {
+    bottom: -2px;
+}
+
+/* Элемент с ошибкой валидации */
+.item-block.has-error {
+    border-left-color: var(--error);
+}
+
+.item-block.has-error:hover {
+    border-left-color: var(--error-hover);
+}
+
+/* Стили для элементов items */
+.item-container {
+    transition: background-color var(--transition-base),
+    box-shadow var(--transition-base),
+    opacity var(--transition-base);
+}
+
+/* Скрытый элемент */
+.item-container.hidden {
+    display: none;
+}
+
+/* Свернутый элемент */
+.item-container.collapsed > .item-block .item-children {
+    display: none;
 }

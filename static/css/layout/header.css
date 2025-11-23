@@ -4,25 +4,26 @@
  */
 
 .header {
-    background: linear-gradient(to right, #748fca 0%, #9d7cb8 100%);
-    color: white;
+    background: linear-gradient(135deg, #748fca 0%, #9d7cb8 100%);
+    color: var(--text-on-primary);
     padding: var(--spacing-lg) var(--spacing-2xl);
     position: fixed;
     top: 0;
     left: 0;
     right: 0;
-    z-index: 1000;
+    z-index: var(--z-fixed);
     box-shadow: var(--shadow-md);
     display: flex;
     justify-content: center;
     align-items: center;
     min-height: var(--header-min-height);
+    height: max(var(--header-height), var(--header-min-height));
 }
 
 /* Контейнер для шагов навигации */
 .steps-container {
     display: flex;
-    gap: 1.5em;
+    gap: var(--spacing-xl);
     align-items: center;
 }
 
@@ -31,25 +32,27 @@
     display: flex;
     justify-content: center;
     gap: var(--spacing);
+    align-items: center;
 }
 
 /* Элемент шага */
 .step {
-    padding: 0.5rem 1.125rem;
-    background: rgba(255, 255, 255, 0.18);
-    border: 1px solid rgba(255, 255, 255, 0.3);
+    padding: var(--spacing-sm) var(--spacing-lg);
+    background: var(--step-bg);
+    border: 1px solid var(--step-border);
     border-radius: var(--radius);
-    font-weight: 500;
-    font-size: 0.875rem;
+    font-weight: var(--font-weight-medium);
+    font-size: var(--font-size-sm);
     cursor: pointer;
-    transition: all 0.2s ease;
-    color: white;
+    transition: var(--transition-base);
+    color: var(--text-on-primary);
+    user-select: none;
 }
 
 /* Состояние при наведении */
-.step:hover {
-    background: rgba(255, 255, 255, 0.25);
-    border-color: rgba(255, 255, 255, 0.4);
+.step:hover:not(.active) {
+    background: var(--step-bg-hover);
+    border-color: var(--step-border-hover);
     transform: translateY(-1px);
     box-shadow: var(--shadow-sm);
 }
@@ -60,4 +63,11 @@
     color: var(--primary);
     border-color: var(--bg-primary);
     box-shadow: var(--shadow-sm);
+    cursor: default;
+}
+
+/* Состояние фокуса для доступности */
+.step:focus-visible {
+    outline: var(--focus-outline);
+    outline-offset: var(--focus-outline-offset);
 }

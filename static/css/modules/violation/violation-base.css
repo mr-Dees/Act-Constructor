@@ -8,9 +8,31 @@
     margin: var(--spacing-lg) 0;
     padding: var(--spacing-lg);
     border: 1px solid var(--border);
-    border-left: 0.1875rem solid var(--primary);
+    border-left: 3px solid var(--primary);
     border-radius: var(--radius-md);
     background-color: var(--bg-secondary);
+    transition: all var(--transition-base);
+}
+
+.violation-section:hover {
+    box-shadow: var(--shadow-sm);
+}
+
+/* Заголовок секции */
+.violation-section-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    margin-bottom: var(--spacing-md);
+    padding-bottom: var(--spacing-sm);
+    border-bottom: 1px solid var(--border-light);
+}
+
+.violation-section-title {
+    font-size: var(--font-size-lg);
+    font-weight: var(--font-weight-semibold);
+    color: var(--text-primary);
+    margin: 0;
 }
 
 /* Сетка для двух колонок полей */
@@ -25,43 +47,92 @@
 .violation-column {
     display: flex;
     flex-direction: column;
+    gap: var(--spacing-sm);
 }
 
 /* Метка поля ввода */
 .violation-label {
-    font-weight: 600;
-    font-size: 0.8125rem;
-    margin-bottom: 0.5rem;
+    font-weight: var(--font-weight-semibold);
+    font-size: var(--font-size-xs);
+    margin-bottom: var(--spacing-xs);
     color: var(--text-secondary);
     text-transform: uppercase;
-    letter-spacing: 0.05em;
+    letter-spacing: var(--letter-spacing-wide);
+    display: flex;
+    align-items: center;
+    gap: var(--spacing-xs);
+}
+
+/* Обязательное поле */
+.violation-label.required::after {
+    content: '*';
+    color: var(--error);
+    font-size: var(--font-size-sm);
 }
 
 /* Многострочное текстовое поле */
 .violation-textarea {
     width: 100%;
-    padding: 0.6875rem 0.875rem;
-    border: 1px solid var(--border);
+    padding: var(--spacing-sm) var(--spacing);
+    border: 1px solid var(--input-border);
     border-radius: var(--radius);
-    font-family: inherit;
-    font-size: 0.875rem;
+    font-family: var(--font-family-base);
+    font-size: var(--font-size-sm);
     resize: vertical;
     min-height: 5rem;
     max-height: 25rem;
-    background-color: var(--bg-primary);
-    transition: all 0.2s ease;
-    color: var(--text-primary);
-    line-height: 1.5;
+    background-color: var(--input-bg);
+    transition: all var(--transition-base);
+    color: var(--input-text);
+    line-height: var(--line-height-normal);
 }
 
 /* Подсветка границы при наведении */
 .violation-textarea:hover {
-    border-color: var(--border-medium);
+    border-color: var(--input-border-hover);
 }
 
 /* Акцент при фокусе на поле */
 .violation-textarea:focus {
     outline: none;
-    border-color: var(--primary);
-    box-shadow: 0 0 0 0.1875rem var(--primary-subtle);
+    border-color: var(--input-border-focus);
+    box-shadow: var(--input-shadow-focus);
+}
+
+.violation-textarea::placeholder {
+    color: var(--input-placeholder);
+}
+
+/* Состояние ошибки */
+.violation-textarea.error {
+    border-color: var(--input-error-border);
+    background-color: var(--input-error-bg);
+}
+
+.violation-textarea.error:focus {
+    box-shadow: var(--input-error-shadow);
+}
+
+/* Состояние успеха */
+.violation-textarea.success {
+    border-color: var(--input-success-border);
+    background-color: var(--input-success-bg);
+}
+
+/* Текст ошибки */
+.violation-error-text {
+    font-size: var(--font-size-xs);
+    color: var(--error);
+    margin-top: var(--spacing-xs);
+    display: flex;
+    align-items: center;
+    gap: var(--spacing-xs);
+}
+
+/* Текст подсказки */
+.violation-hint-text {
+    font-size: var(--font-size-xs);
+    color: var(--text-tertiary);
+    margin-top: var(--spacing-xs);
+    font-style: italic;
 }

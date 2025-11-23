@@ -6,29 +6,127 @@
 /* Контейнер шапки элемента */
 .item-header {
     margin-bottom: var(--spacing-md);
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: var(--spacing);
 }
 
 /* Заголовок элемента первого уровня */
 .item-title {
     color: var(--text-primary);
-    font-size: 1.0625rem;
+    font-size: var(--font-size-lg);
     margin: 0;
-    font-weight: 600;
-    letter-spacing: -0.01em;
+    font-weight: var(--font-weight-semibold);
+    letter-spacing: var(--letter-spacing-tight);
+    line-height: var(--line-height-tight);
+    flex: 1;
+}
+
+/* Редактируемый заголовок */
+.item-title.editable {
+    cursor: text;
+    padding: var(--spacing-xs) var(--spacing-sm);
+    border-radius: var(--radius-sm);
+    transition: background-color var(--transition-fast);
+}
+
+.item-title.editable:hover {
+    background: var(--bg-hover);
+}
+
+.item-title.editable:focus {
+    outline: none;
+    background: var(--bg-active);
+    box-shadow: 0 0 0 2px var(--primary-subtle);
 }
 
 /* Заголовок элемента второго уровня */
 .item-block.level-2 .item-title {
-    font-size: 1rem;
+    font-size: var(--font-size-base);
 }
 
 /* Заголовок элемента третьего уровня */
 .item-block.level-3 .item-title {
-    font-size: 0.9375rem;
+    font-size: var(--font-size-sm);
 }
 
 /* Заголовок элемента четвертого уровня */
 .item-block.level-4 .item-title {
-    font-size: 0.9375rem;
-    font-weight: 500;
+    font-size: var(--font-size-sm);
+    font-weight: var(--font-weight-medium);
+}
+
+/* Номер элемента */
+.item-number {
+    font-size: var(--font-size-sm);
+    color: var(--text-tertiary);
+    font-weight: var(--font-weight-medium);
+    margin-right: var(--spacing-xs);
+    flex-shrink: 0;
+}
+
+/* Иконки действий в шапке */
+.item-actions {
+    display: flex;
+    gap: var(--spacing-xs);
+    align-items: center;
+    opacity: 0;
+    transition: opacity var(--transition-fast);
+}
+
+.item-header:hover .item-actions,
+.item-header:focus-within .item-actions {
+    opacity: 1;
+}
+
+/* Кнопка действия в шапке */
+.item-action-btn {
+    padding: var(--spacing-xs);
+    background: transparent;
+    border: none;
+    border-radius: var(--radius-sm);
+    cursor: pointer;
+    color: var(--text-tertiary);
+    transition: var(--transition-fast);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+}
+
+.item-action-btn:hover {
+    background: var(--bg-hover);
+    color: var(--text-primary);
+}
+
+.item-action-btn:active {
+    background: var(--bg-active);
+}
+
+/* Кнопка сворачивания/разворачивания */
+.item-toggle-btn {
+    width: 1.25rem;
+    height: 1.25rem;
+    flex-shrink: 0;
+}
+
+.item-toggle-btn::before {
+    content: '▼';
+    transition: transform var(--transition-fast);
+    display: block;
+}
+
+.item-container.collapsed .item-toggle-btn::before {
+    transform: rotate(-90deg);
+}
+
+/* Бейдж со счетчиком дочерних элементов */
+.item-badge {
+    font-size: var(--font-size-xs);
+    background: var(--primary-subtle);
+    color: var(--primary);
+    padding: 2px var(--spacing-xs);
+    border-radius: var(--radius-full);
+    font-weight: var(--font-weight-semibold);
+    margin-left: var(--spacing-xs);
 }

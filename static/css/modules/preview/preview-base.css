@@ -7,18 +7,64 @@
 /* Контейнер предпросмотра документа */
 .preview {
     background: var(--bg-primary);
-    padding: var(--spacing-xl);
+    padding: var(--spacing-2xl);
     border-radius: var(--radius-md);
     font-family: 'Times New Roman', Georgia, serif;
     border: 1px solid var(--border);
-    font-size: 0.9375rem;
+    font-size: var(--font-size-sm);
+    line-height: var(--line-height-relaxed);
     overflow-y: auto;
     box-shadow: var(--shadow-sm);
+    color: var(--text-primary);
+    transition: box-shadow var(--transition-base);
+    max-width: 100%;
+}
+
+/* Hover эффект для области предпросмотра */
+.preview:hover {
+    box-shadow: var(--shadow);
 }
 
 /* Контент пункта */
 .preview-content {
-    margin-bottom: var(--spacing);
+    margin-bottom: var(--spacing-lg);
     padding: var(--spacing-sm);
     color: var(--text-primary);
+}
+
+/* Первый элемент без верхнего отступа */
+.preview-content:first-child {
+    margin-top: 0;
+}
+
+/* Последний элемент без нижнего отступа */
+.preview-content:last-child {
+    margin-bottom: 0;
+}
+
+/* Разделитель между секциями */
+.preview-divider {
+    height: 1px;
+    background: var(--border-light);
+    margin: var(--spacing-xl) 0;
+    border: none;
+}
+
+/* Скроллбар для предпросмотра */
+.preview::-webkit-scrollbar {
+    width: var(--scrollbar-width);
+}
+
+.preview::-webkit-scrollbar-track {
+    background: var(--scrollbar-bg);
+    border-radius: var(--radius);
+}
+
+.preview::-webkit-scrollbar-thumb {
+    background: var(--scrollbar-thumb);
+    border-radius: var(--radius);
+}
+
+.preview::-webkit-scrollbar-thumb:hover {
+    background: var(--scrollbar-thumb-hover);
 }

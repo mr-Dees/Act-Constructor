@@ -4,14 +4,59 @@
  */
 
 /* Недоступный пункт меню */
-.context-menu-item.disabled {
-    opacity: 0.4;
+.context-menu-item.disabled,
+.violation-context-menu-item.disabled {
+    opacity: 0.5;
     cursor: not-allowed;
     pointer-events: none;
-    color: var(--text-tertiary);
+    color: var(--text-disabled);
+}
+
+.context-menu-item.disabled .context-menu-item-icon {
+    color: var(--text-disabled);
 }
 
 /* Скрытое состояние меню */
-.context-menu.hidden {
+.context-menu.hidden,
+.violation-context-menu.hidden {
     display: none;
+}
+
+/* Выбранный пункт меню */
+.context-menu-item.selected,
+.violation-context-menu-item.selected {
+    background: var(--primary-subtle);
+    color: var(--primary);
+}
+
+.context-menu-item.selected::before {
+    content: '✓';
+    position: absolute;
+    left: var(--spacing-xs);
+    color: var(--primary);
+    font-weight: var(--font-weight-bold);
+}
+
+/* Индикация загрузки */
+.context-menu-item.loading,
+.violation-context-menu-item.loading {
+    opacity: 0.6;
+    cursor: wait;
+    pointer-events: none;
+}
+
+.context-menu-item.loading::after,
+.violation-context-menu-item.loading::after {
+    content: '...';
+    animation: pulse 1.5s ease-in-out infinite;
+}
+
+/* Анимация появления при открытии */
+.context-menu.opening {
+    animation: menuFadeIn var(--transition-base);
+}
+
+/* Анимация исчезновения при закрытии */
+.context-menu.closing {
+    animation: fadeOut var(--transition-fast);
 }

@@ -6,41 +6,97 @@
 
 /* Обертка таблицы с горизонтальной прокруткой */
 .preview-table-wrapper {
-    margin-bottom: 1.5rem;
+    margin: var(--spacing-xl) 0;
     overflow-x: auto;
+    border-radius: var(--radius-sm);
+    scrollbar-width: thin;
+    scrollbar-color: var(--scrollbar-thumb) var(--scrollbar-bg);
+}
+
+.preview-table-wrapper::-webkit-scrollbar {
+    height: var(--scrollbar-width);
+}
+
+.preview-table-wrapper::-webkit-scrollbar-track {
+    background: var(--scrollbar-bg);
+    border-radius: var(--radius);
+}
+
+.preview-table-wrapper::-webkit-scrollbar-thumb {
+    background: var(--scrollbar-thumb);
+    border-radius: var(--radius);
+}
+
+.preview-table-wrapper::-webkit-scrollbar-thumb:hover {
+    background: var(--scrollbar-thumb-hover);
 }
 
 /* Таблица в области предпросмотра */
 .preview-table {
     width: 100%;
     border-collapse: collapse;
-    margin: var(--spacing) 0;
-    border: 1px solid var(--border);
-    font-size: 0.875rem;
+    margin: 0;
+    border: 1px solid var(--table-border);
+    font-size: var(--font-size-sm);
+    background: var(--table-bg);
 }
 
 /* Ячейки таблицы */
 .preview-table th,
 .preview-table td {
-    border: 1px solid var(--border);
-    padding: 0.5rem;
+    border: 1px solid var(--table-border);
+    padding: var(--spacing-sm) var(--spacing);
     text-align: left;
+    vertical-align: top;
 }
 
 /* Заголовки таблицы */
 .preview-table-header {
-    background: var(--bg-tertiary);
-    font-weight: 600;
-    color: var(--text-primary);
+    background: var(--table-header-bg);
+    font-weight: var(--font-weight-semibold);
+    color: var(--table-header-text);
+    position: sticky;
+    top: 0;
+    z-index: var(--z-sticky);
+}
+
+/* Выравнивание текста в ячейках заголовка */
+.preview-table th {
+    text-align: center;
+    font-family: var(--font-family-base);
+}
+
+/* Альтернативные строки для лучшей читаемости */
+.preview-table tbody tr:nth-child(even) {
+    background: var(--bg-secondary);
+}
+
+/* Hover эффект для строк */
+.preview-table tbody tr:hover {
+    background: var(--table-row-hover);
+    transition: background var(--transition-fast);
 }
 
 /* Название таблицы */
 .preview-table-title {
-    font-weight: normal;
+    font-weight: var(--font-weight-normal);
     text-decoration: underline;
-    margin-top: var(--spacing);
-    margin-bottom: var(--spacing-sm);
+    text-align: left;
+    margin-top: var(--spacing-lg);
+    margin-bottom: var(--spacing);
     color: var(--text-secondary);
+    font-size: var(--font-size-sm);
+    font-family: 'Times New Roman', Georgia, serif;
+}
+
+/* Подпись под таблицей */
+.preview-table-caption {
+    caption-side: bottom;
+    padding: var(--spacing-sm);
+    text-align: center;
+    font-size: var(--font-size-xs);
+    color: var(--text-tertiary);
+    font-style: italic;
 }
 
 /* Пустая таблица */
@@ -52,4 +108,25 @@
     text-align: center;
     font-style: italic;
     color: var(--text-tertiary);
+    padding: var(--spacing-xl);
+    font-family: var(--font-family-base);
+}
+
+/* Числовые колонки выравниваются по правому краю */
+.preview-table td.numeric {
+    text-align: right;
+    font-variant-numeric: tabular-nums;
+}
+
+/* Ячейка с выделением */
+.preview-table td.highlight,
+.preview-table th.highlight {
+    background: var(--highlight-bg);
+    font-weight: var(--font-weight-semibold);
+}
+
+/* Ячейка с ошибкой */
+.preview-table td.error {
+    background: var(--error-subtle);
+    border-color: var(--error);
 }

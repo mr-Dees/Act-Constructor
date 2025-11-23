@@ -5,26 +5,133 @@
 
 /* Контейнер нарушения в предпросмотре */
 .preview-violation {
-    margin: 0.5rem 0;
-    padding: 0.625rem 0;
-    font-size: 0.875rem;
-    line-height: 1.6;
+    margin: var(--spacing) 0;
+    padding: var(--spacing);
+    font-size: var(--font-size-sm);
+    line-height: var(--line-height-relaxed);
     color: var(--text-primary);
+    background: var(--bg-secondary);
+    border-radius: var(--radius-sm);
+    border-left: 3px solid var(--primary);
+}
+
+/* Первое нарушение без верхнего отступа */
+.preview-violation:first-child {
+    margin-top: 0;
+}
+
+/* Последнее нарушение без нижнего отступа */
+.preview-violation:last-child {
+    margin-bottom: 0;
+}
+
+/* Заголовок нарушения */
+.preview-violation-title {
+    font-weight: var(--font-weight-semibold);
+    color: var(--text-primary);
+    margin-bottom: var(--spacing-xs);
+    font-size: var(--font-size-base);
 }
 
 /* Строка информации о нарушении */
 .preview-violation-line {
-    margin: 0.25rem 0;
+    margin: var(--spacing-xs) 0;
     color: var(--text-primary);
+    display: flex;
+    gap: var(--spacing-xs);
+}
+
+/* Метка поля */
+.preview-violation-label {
+    color: var(--text-secondary);
+    font-weight: var(--font-weight-medium);
+    min-width: 8rem;
+    flex-shrink: 0;
 }
 
 /* Выделенный текст в строке */
 .preview-violation-line strong {
     color: var(--text-primary);
-    font-weight: 600;
+    font-weight: var(--font-weight-semibold);
 }
 
 /* Обычный текст в строке */
 .preview-violation-line span {
     color: var(--text-secondary);
+    flex: 1;
+}
+
+/* Важное нарушение */
+.preview-violation.important {
+    border-left-color: var(--warning);
+    background: var(--warning-subtle);
+}
+
+/* Критическое нарушение */
+.preview-violation.critical {
+    border-left-color: var(--error);
+    background: var(--error-subtle);
+}
+
+/* Описание нарушения */
+.preview-violation-description {
+    margin-top: var(--spacing-sm);
+    padding-top: var(--spacing-sm);
+    border-top: 1px solid var(--border-light);
+    color: var(--text-secondary);
+    font-size: var(--font-size-xs);
+    line-height: var(--line-height-normal);
+}
+
+/* Вложенный список в нарушении */
+.preview-violation ul,
+.preview-violation ol {
+    margin: var(--spacing-xs) 0;
+    margin-left: var(--spacing-xl);
+}
+
+.preview-violation li {
+    margin-bottom: var(--spacing-xs);
+}
+
+/* Дополнительные материалы нарушения */
+.preview-violation-attachments {
+    margin-top: var(--spacing-sm);
+    padding: var(--spacing-sm);
+    background: var(--bg-primary);
+    border-radius: var(--radius-xs);
+    font-size: var(--font-size-xs);
+}
+
+.preview-violation-attachments-title {
+    font-weight: var(--font-weight-medium);
+    color: var(--text-secondary);
+    margin-bottom: var(--spacing-xs);
+}
+
+.preview-violation-attachment-item {
+    color: var(--text-link);
+    text-decoration: underline;
+    cursor: pointer;
+    display: block;
+    margin: var(--spacing-xs) 0;
+}
+
+.preview-violation-attachment-item:hover {
+    color: var(--text-link-hover);
+}
+
+/* Номер нарушения */
+.preview-violation-number {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 1.5rem;
+    height: 1.5rem;
+    background: var(--primary);
+    color: var(--text-on-primary);
+    border-radius: var(--radius-full);
+    font-size: var(--font-size-xs);
+    font-weight: var(--font-weight-bold);
+    margin-right: var(--spacing-xs);
 }

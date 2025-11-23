@@ -3,6 +3,7 @@
  *
  * Отвечает за создание DOM-структуры дерева на основе данных из AppState.
  * Обрабатывает события взаимодействия с узлами.
+ * Все константы вынесены в AppConfig для централизованного управления.
  */
 class TreeRenderer {
     /**
@@ -15,23 +16,22 @@ class TreeRenderer {
 
     /**
      * Рендеринг дерева
-     * Создает HTML-структуру дерева на основе данных из AppState
+     *
+     * Создает HTML-структуру дерева на основе данных из AppState.
+     *
      * @param {Object} [node=AppState.treeData] - Корневой узел для отрисовки
      */
     render(node = AppState.treeData) {
-        // Очищаем контейнер
         this.manager.container.innerHTML = '';
-
-        // Создаем элемент ul с деревом
         const ul = this.createTreeElement(node);
-
-        // Добавляем дерево в контейнер
         this.manager.container.appendChild(ul);
     }
 
     /**
-     * Создание элемента <ul> для дерева
-     * Генерирует список с дочерними элементами узла
+     * Создание элемента списка для дерева
+     *
+     * Генерирует ul с дочерними элементами узла.
+     *
      * @param {Object} node - Узел с дочерними элементами
      * @returns {HTMLUListElement} Элемент списка с деревом
      */
@@ -39,11 +39,9 @@ class TreeRenderer {
         const ul = document.createElement('ul');
         ul.className = 'tree';
 
-        // Если есть дочерние элементы, создаем для них узлы
         if (node.children?.length) {
             node.children.forEach(child => {
-                const li = this.createNodeElement(child);
-                ul.appendChild(li);
+                ul.appendChild(this.createNodeElement(child));
             });
         }
 
@@ -52,44 +50,47 @@ class TreeRenderer {
 
     /**
      * Создание элемента узла дерева
-     * Создает полный HTML-элемент узла со всеми обработчиками и иконками
+     *
+     * Создает полный HTML-элемент узла со всеми обработчиками и иконками.
+     *
      * @param {Object} node - Данные узла (id, label, type, children и т.д.)
      * @returns {HTMLLIElement} Готовый элемент узла дерева
      */
     createNodeElement(node) {
+        const li = this._createBaseLiElement(node);
+
+        // Добавляем элементы узла
+        li.appendChild(this._createToggleIcon(node, li));
+        li.appendChild(this._createLabel(node));
+        this._addNodeTypeIcon(li, node.type);
+
+        // Настраиваем обработчики
+        this._setupNodeEventHandlers(li, node);
+
+        // Рекурсивно создаем дочерние элементы
+        if (node.children?.length) {
+            li.appendChild(this._createChildrenContainer(node));
+        }
+
+        return li;
+    }
+
+    /**
+     * Создает базовый li элемент с классами и атрибутами
+     * @private
+     * @param {Object} node - Данные узла
+     * @returns {HTMLLIElement} Базовый элемент li
+     */
+    _createBaseLiElement(node) {
         const li = document.createElement('li');
         li.className = 'tree-item';
-
-        // Сохраняем ID узла в data-атрибуте
         li.dataset.nodeId = node.id;
 
-        // Добавляем класс для защищенных элементов (нельзя редактировать/удалять)
         if (node.protected) {
             li.classList.add('protected');
         }
 
-        // Добавляем специальные классы для типов узлов
         this._addNodeTypeClass(li, node.type);
-
-        // Создаем toggle для раскрытия/сворачивания
-        const toggle = this._createToggleIcon(node, li);
-        li.appendChild(toggle);
-
-        // Создаем метку (название) узла
-        const label = this._createLabel(node);
-        li.appendChild(label);
-
-        // Добавляем иконку типа узла
-        this.addNodeTypeIcon(li, node.type);
-
-        // Настраиваем обработчики событий для узла
-        this.setupNodeEventHandlers(li, label, node);
-
-        // Рекурсивно создаем дочерние элементы
-        if (node.children?.length) {
-            const childrenUl = this._createChildrenContainer(node);
-            li.appendChild(childrenUl);
-        }
 
         return li;
     }
@@ -124,16 +125,15 @@ class TreeRenderer {
         const toggle = document.createElement('span');
         toggle.className = 'toggle-icon';
 
-        // Показываем иконку только если есть дочерние элементы
-        toggle.textContent = (node.children?.length > 0) ? '▼' : '';
+        const icons = AppConfig.tree.interaction.toggleIcons;
+        toggle.textContent = node.children?.length > 0 ? icons.expanded : '';
 
-        // Обработчик клика для сворачивания/раскрытия узла
         toggle.addEventListener('click', (e) => {
             e.stopPropagation();
             li.classList.toggle('collapsed');
-
-            // Меняем иконку в зависимости от состояния
-            toggle.textContent = li.classList.contains('collapsed') ? '▶' : '▼';
+            toggle.textContent = li.classList.contains('collapsed')
+                ? icons.collapsed
+                : icons.expanded;
         });
 
         return toggle;
@@ -171,18 +171,13 @@ class TreeRenderer {
     }
 
     /**
-     * Добавление иконки типа узла
+     * Добавляет иконку типа узла
+     * @private
      * @param {HTMLElement} li - Элемент узла
      * @param {string} type - Тип узла (table, textblock, violation)
      */
-    addNodeTypeIcon(li, type) {
-        const iconConfig = {
-            table: {className: 'table-icon', emoji: '📊'},
-            textblock: {className: 'textblock-icon', emoji: '📝'},
-            violation: {className: 'violation-icon', emoji: '⚠️'}
-        };
-
-        const config = iconConfig[type];
+    _addNodeTypeIcon(li, type) {
+        const config = AppConfig.tree.icons[type];
         if (!config) return;
 
         const icon = document.createElement('span');
@@ -196,40 +191,40 @@ class TreeRenderer {
 
     /**
      * Настройка обработчиков событий для узла дерева
+     * @private
      * @param {HTMLElement} li - Элемент узла
-     * @param {HTMLElement} label - Элемент метки
      * @param {Object} node - Данные узла
      */
-    setupNodeEventHandlers(li, label, node) {
-        const handleCtrlClick = () => {
-            this.manager.handleCtrlClick(node, li);
-        };
+    _setupNodeEventHandlers(li, node) {
+        const label = li.querySelector('.tree-label');
+        const handleCtrlClick = () => this.manager.handleCtrlClick(node, li);
 
-        // Настройка обработчиков кликов
-        if (!node.protected) {
-            this._setupEditableNodeHandlers(li, label, node, handleCtrlClick);
+        // Обработчики для метки
+        if (node.protected) {
+            this._setupProtectedLabelHandlers(label, li, handleCtrlClick);
         } else {
-            this._setupProtectedNodeHandlers(li, label, handleCtrlClick);
+            this._setupEditableLabelHandlers(label, li, node, handleCtrlClick);
         }
 
-        // Обработчик клика по всему элементу li
+        // Обработчик для всего li
         this._setupLiClickHandler(li, label, handleCtrlClick);
 
-        // Обработчик контекстного меню (правый клик)
+        // Контекстное меню
         this._setupContextMenuHandler(li, node);
     }
 
     /**
-     * Настраивает обработчики для редактируемых узлов
+     * Настраивает обработчики для редактируемых меток
      * @private
-     * @param {HTMLElement} li - Элемент узла
      * @param {HTMLElement} label - Элемент метки
+     * @param {HTMLElement} li - Элемент узла
      * @param {Object} node - Данные узла
      * @param {Function} handleCtrlClick - Обработчик Ctrl+Click
      */
-    _setupEditableNodeHandlers(li, label, node, handleCtrlClick) {
+    _setupEditableLabelHandlers(label, li, node, handleCtrlClick) {
         let clickCount = 0;
         let clickTimer = null;
+        const doubleClickDelay = AppConfig.tree.interaction.doubleClickDelay;
 
         label.addEventListener('click', (e) => {
             e.stopPropagation();
@@ -240,17 +235,15 @@ class TreeRenderer {
                 return;
             }
 
-            // Отслеживаем двойной клик для редактирования
+            // Обработка двойного клика
             clickCount++;
 
             if (clickCount === 1) {
-                // Первый клик - запускаем таймер
                 clickTimer = setTimeout(() => {
                     clickCount = 0;
                     this.manager.selectNode(li);
-                }, 300);
+                }, doubleClickDelay);
             } else if (clickCount === 2) {
-                // Второй клик - начинаем редактирование
                 clearTimeout(clickTimer);
                 clickCount = 0;
                 ItemsTitleEditing.startEditingTreeNode(label, node, this.manager);
@@ -261,13 +254,13 @@ class TreeRenderer {
     }
 
     /**
-     * Настраивает обработчики для защищенных узлов
+     * Настраивает обработчики для защищенных меток
      * @private
-     * @param {HTMLElement} li - Элемент узла
      * @param {HTMLElement} label - Элемент метки
+     * @param {HTMLElement} li - Элемент узла
      * @param {Function} handleCtrlClick - Обработчик Ctrl+Click
      */
-    _setupProtectedNodeHandlers(li, label, handleCtrlClick) {
+    _setupProtectedLabelHandlers(label, li, handleCtrlClick) {
         label.addEventListener('click', (e) => {
             e.stopPropagation();
 
@@ -289,21 +282,13 @@ class TreeRenderer {
      */
     _setupLiClickHandler(li, label, handleCtrlClick) {
         li.addEventListener('click', (e) => {
-            // Игнорируем клики по служебным элементам
-            const ignoredClasses = [
-                'toggle-icon',
-                'table-icon',
-                'textblock-icon',
-                'violation-icon'
-            ];
-
-            if (e.target === label || ignoredClasses.some(cls => e.target.classList.contains(cls))) {
+            // Игнорируем клики по метке и служебным элементам
+            if (e.target === label || this._isIgnoredElement(e.target)) {
                 return;
             }
 
             e.stopPropagation();
 
-            // Обработка Ctrl+Click
             if (e.ctrlKey || e.metaKey) {
                 handleCtrlClick();
                 return;
@@ -311,6 +296,17 @@ class TreeRenderer {
 
             this.manager.selectNode(li);
         });
+    }
+
+    /**
+     * Проверяет, является ли элемент служебным (иконка)
+     * @private
+     * @param {HTMLElement} element - Проверяемый элемент
+     * @returns {boolean} true если элемент служебный
+     */
+    _isIgnoredElement(element) {
+        const ignoredClasses = AppConfig.tree.interaction.ignoredClickClasses;
+        return ignoredClasses.some(cls => element.classList.contains(cls));
     }
 
     /**
@@ -324,49 +320,8 @@ class TreeRenderer {
             e.preventDefault();
             e.stopPropagation();
 
-            // Выделяем элемент
             this.manager.selectNode(li);
-
-            // Показываем контекстное меню
             ContextMenuManager.show(e.clientX, e.clientY, node.id, 'tree');
         });
-    }
-
-    /**
-     * Настраивает обработчики для редактируемых узлов
-     * @private
-     */
-    _setupEditableNodeHandlers(li, label, node, handleCtrlClick) {
-        let clickCount = 0;
-        let clickTimer = null;
-
-        label.addEventListener('click', (e) => {
-            e.stopPropagation();
-
-            // Обработка Ctrl+Click
-            if (e.ctrlKey || e.metaKey) {
-                console.log('Ctrl+Click detected on node:', node.id);
-                handleCtrlClick();
-                return;
-            }
-
-            // Отслеживаем двойной клик для редактирования
-            clickCount++;
-
-            if (clickCount === 1) {
-                // Первый клик - запускаем таймер
-                clickTimer = setTimeout(() => {
-                    clickCount = 0;
-                    this.manager.selectNode(li);
-                }, 300);
-            } else if (clickCount === 2) {
-                // Второй клик - начинаем редактирование
-                clearTimeout(clickTimer);
-                clickCount = 0;
-                ItemsTitleEditing.startEditingTreeNode(label, node, this.manager);
-            }
-        });
-
-        label.style.cursor = 'pointer';
     }
 }

@@ -10,35 +10,61 @@
     margin-top: var(--spacing-md);
 }
 
+/* Заголовок секции опциональных полей */
+.violation-optional-fields-header {
+    font-size: var(--font-size-sm);
+    font-weight: var(--font-weight-semibold);
+    color: var(--text-secondary);
+    margin-bottom: var(--spacing-md);
+    text-transform: uppercase;
+    letter-spacing: var(--letter-spacing-wide);
+}
+
 /* Контейнер опционального поля */
 .violation-optional-field {
-    margin-bottom: var(--spacing-md);
+    margin-bottom: var(--spacing-sm);
+    border-radius: var(--radius);
+    transition: background var(--transition-base);
+}
+
+.violation-optional-field:hover {
+    background: var(--bg-hover);
 }
 
 /* Переключатель видимости поля */
 .violation-field-toggle {
     display: flex;
     align-items: center;
-    margin-bottom: 0.625rem;
+    padding: var(--spacing-xs) var(--spacing-sm);
+    margin-bottom: var(--spacing-sm);
     cursor: pointer;
+    border-radius: var(--radius-sm);
+    transition: all var(--transition-base);
+    user-select: none;
+}
+
+.violation-field-toggle:hover {
+    background: var(--bg-tertiary);
 }
 
 /* Чекбокс включения поля */
 .violation-field-toggle input[type="checkbox"] {
-    margin-right: 0.625rem;
-    width: 1.125rem;
-    height: 1.125rem;
+    margin: 0;
+    margin-right: var(--spacing-xs);
+    width: 1rem;
+    height: 1rem;
     cursor: pointer;
     accent-color: var(--primary);
+    flex-shrink: 0;
 }
 
 /* Метка опционального поля */
 .violation-field-label {
-    font-weight: 500;
+    font-weight: var(--font-weight-medium);
     color: var(--text-secondary);
     cursor: pointer;
-    user-select: none;
-    font-size: 0.875rem;
+    font-size: var(--font-size-sm);
+    flex: 1;
 }
 
 /* Подсветка метки при наведении */
@@ -46,8 +72,29 @@
     color: var(--primary);
 }
 
+/* Активное состояние */
+.violation-field-toggle.active .violation-field-label {
+    color: var(--text-primary);
+    font-weight: var(--font-weight-semibold);
+}
+
 /* Содержимое опционального поля */
 .violation-field-content {
-    margin-left: 1.75rem;
-    animation: fadeIn 0.2s ease-in;
+    margin-left: var(--spacing-xl);
+    padding-left: var(--spacing-md);
+    border-left: 2px solid var(--border-light);
+    animation: fadeIn var(--transition-base) ease-in;
+}
+
+/* Иконка статуса */
+.violation-field-icon {
+    width: var(--icon-size-sm);
+    height: var(--icon-size-sm);
+    margin-left: var(--spacing-xs);
+    color: var(--text-tertiary);
+    transition: color var(--transition-base);
+}
+
+.violation-field-toggle.active .violation-field-icon {
+    color: var(--success);
 }
