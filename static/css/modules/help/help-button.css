@@ -102,23 +102,3 @@
 .help-indicator:hover .help-button-label {
     text-shadow: 0 1px 3px rgb(0 0 0 / 40%);
 }
-
-/* Адаптивность для маленьких экранов */
-@media (max-width: 768px) {
-    .help-indicator {
-        left: var(--spacing-lg);
-    }
-
-    .help-button {
-        width: 2rem;
-        height: 2rem;
-    }
-
-    .lightbulb-icon {
-        font-size: 0.875rem;
-    }
-
-    .help-button-label {
-        font-size: 0.625rem;
-    }
-}

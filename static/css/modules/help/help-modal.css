@@ -116,38 +116,6 @@
     border-radius: 0 0 var(--radius-xl) var(--radius-xl);
 }
 
-/* Адаптивность для мобильных устройств */
-@media (max-width: 768px) {
-    .help-modal {
-        padding: var(--spacing);
-    }
-
-    .help-modal-content {
-        max-width: 100%;
-        max-height: 90vh;
-        border-radius: var(--radius-lg);
-    }
-
-    .help-modal-header {
-        padding: var(--spacing-lg) var(--spacing-xl);
-        border-radius: var(--radius-lg) var(--radius-lg) 0 0;
-    }
-
-    .help-modal-header h3 {
-        font-size: var(--font-size-lg);
-    }
-
-    .help-modal-close {
-        width: 2rem;
-        height: 2rem;
-        font-size: var(--font-size-2xl);
-    }
-
-    .help-modal-footer {
-        border-radius: 0 0 var(--radius-lg) var(--radius-lg);
-    }
-}
-
 /* Закрытие по клику вне модального окна */
 .help-modal-overlay {
     position: absolute;

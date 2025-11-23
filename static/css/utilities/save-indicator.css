@@ -112,15 +112,6 @@
     animation: spin 1s linear infinite;
 }
 
-@keyframes spin {
-    from {
-        transform: rotate(0deg);
-    }
-    to {
-        transform: rotate(360deg);
-    }
-}
-
 /* Состояние: ошибка сохранения */
 .save-indicator-button.error {
     background: rgb(199 85 85 / 25%);
@@ -143,18 +134,6 @@
 
 .save-indicator-button.error svg {
     animation: shake 0.5s ease-in-out;
-}
-
-@keyframes shake {
-    0%, 100% {
-        transform: translateX(0);
-    }
-    25% {
-        transform: translateX(-3px);
-    }
-    75% {
-        transform: translateX(3px);
-    }
 }
 
 /* Состояние фокуса */
