@@ -1,3 +1,4 @@
+# app/schemas/act.py
 """
 Pydantic схемы для валидации данных актов.
 
@@ -48,6 +49,10 @@ class TableSchema(BaseModel):
         colWidths: Массив ширин колонок в пикселях
         protected: Защищена ли таблица от перемещения и изменения структуры
         deletable: Можно ли удалить таблицу (работает независимо от protected)
+        isMetricsTable: Является ли таблицей метрик для пункта под разделом 5
+        isMainMetricsTable: Является ли главной таблицей метрик раздела 5
+        isRegularRiskTable: Является ли таблицей регулярных рисков
+        isOperationalRiskTable: Является ли таблицей операционных рисков
     """
     id: str = Field(description="ID таблицы")
     nodeId: str = Field(description="ID узла дерева")
@@ -70,6 +75,24 @@ class TableSchema(BaseModel):
         description="Разрешено ли удаление таблицы"
     )
 
+    # Флаги специальных таблиц
+    isMetricsTable: bool | None = Field(
+        default=False,
+        description="Таблица метрик для пункта под разделом 5"
+    )
+    isMainMetricsTable: bool | None = Field(
+        default=False,
+        description="Главная таблица метрик раздела 5"
+    )
+    isRegularRiskTable: bool | None = Field(
+        default=False,
+        description="Таблица регулярных рисков"
+    )
+    isOperationalRiskTable: bool | None = Field(
+        default=False,
+        description="Таблица операционных рисков"
+    )
+
     @field_validator("grid")
     @classmethod
     def validate_grid_dimensions(cls, v: list[list[TableCellSchema]]) -> list[list[TableCellSchema]]:
@@ -88,7 +111,6 @@ class TableSchema(BaseModel):
         if not v:
             return v
 
-        # Проверяем количество колонок в каждой строке
         for row_idx, row in enumerate(v):
             if len(row) > 16:
                 raise ValueError(
@@ -125,6 +147,9 @@ class TextBlockFormattingSchema(BaseModel):
     Attributes:
         fontSize: Базовый размер шрифта в пикселях (8-72)
         alignment: Выравнивание текста
+        bold: Жирный шрифт
+        italic: Курсив
+        underline: Подчеркивание
     """
     fontSize: int = Field(
         default=14,
@@ -136,6 +161,9 @@ class TextBlockFormattingSchema(BaseModel):
         default="left",
         description="Выравнивание"
     )
+    bold: bool = Field(default=False, description="Жирный")
+    italic: bool = Field(default=False, description="Курсив")
+    underline: bool = Field(default=False, description="Подчеркивание")
 
 
 class TextBlockSchema(BaseModel):
@@ -301,7 +329,7 @@ class ActDataSchema(BaseModel):
         violations: Словарь нарушений (ключ: ID нарушения)
     """
     tree: dict = Field(description="Дерево структуры акта")
-    tables: dict[str, dict] = Field(
+    tables: dict[str, TableSchema] = Field(
         default_factory=dict,
         description="Таблицы"
     )

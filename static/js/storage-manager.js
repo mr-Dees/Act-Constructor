@@ -44,7 +44,6 @@ class StorageManager {
     static init() {
         try {
             this._checkLocalStorageAvailable();
-            this._restoreSavedState();
             this._setupEventHandlers();
             this._updateSaveIndicator();
         } catch (error) {
@@ -65,6 +64,71 @@ class StorageManager {
             localStorage.removeItem(testKey);
         } catch (e) {
             throw new Error('localStorage недоступен');
+        }
+    }
+
+    /**
+     * Восстанавливает сохраненное состояние из localStorage
+     * Теперь это публичный метод, вызываемый явно
+     */
+    static restoreSavedState() {
+        const savedState = this._loadState();
+
+        if (!savedState) {
+            console.log('Нет сохраненного состояния для восстановления');
+            return false;
+        }
+
+        try {
+            // Отключаем отслеживание на время восстановления
+            this._trackingDisabled = true;
+
+            // Восстанавливаем данные в AppState
+            AppState.treeData = savedState.tree;
+            AppState.tables = savedState.tables || {};
+            AppState.textBlocks = savedState.textBlocks || {};
+            AppState.violations = savedState.violations || {};
+            AppState.tableUISizes = savedState.tableUISizes || {};
+
+            // Восстанавливаем текущий шаг БЕЗ вызова App.goToStep
+            const savedStep = savedState.currentStep || 1;
+            AppState.currentStep = savedStep;
+
+            // Восстанавливаем выбранный узел
+            if (savedState.selectedNodeId) {
+                AppState.selectedNode = AppState.findNodeById(savedState.selectedNodeId);
+            } else {
+                AppState.selectedNode = null;
+            }
+
+            // Восстанавливаем форматы сохранения
+            if (savedState.selectedFormats) {
+                setTimeout(() => {
+                    this._restoreSelectedFormats(savedState.selectedFormats);
+                }, 100);
+            }
+
+            // Перегенерируем нумерацию для консистентности
+            AppState.generateNumbering();
+
+            // Обновляем UI шагов в заголовке
+            this._updateStepUI(savedStep);
+
+            // Включаем отслеживание обратно
+            this._trackingDisabled = false;
+
+            console.log('Состояние успешно восстановлено из localStorage');
+            Notifications.info(AppConfig.localStorage.messages.restored);
+
+            this._markAsSaved();
+            return true;
+
+        } catch (error) {
+            this._trackingDisabled = false;
+            console.error('Ошибка восстановления состояния:', error);
+            Notifications.error('Не удалось восстановить сохраненное состояние');
+            this._clearStorage();
+            return false;
         }
     }
 
@@ -321,6 +385,7 @@ class StorageManager {
      */
     static _prepareStateForSaving() {
         return {
+            actId: window.currentActId || null,
             tree: AppState.treeData,
             tables: AppState.tables,
             textBlocks: AppState.textBlocks,

@@ -281,6 +281,20 @@ class ItemsRenderer {
             tableEl.classList.add('protected-table');
         }
 
+        // Проверяем наличие grid
+        if (!table.grid || table.grid.length === 0) {
+            // Создаем пустую таблицу-заглушку
+            const tr = document.createElement('tr');
+            const td = document.createElement('td');
+            td.textContent = '[Пустая таблица]';
+            td.style.padding = '10px';
+            td.style.color = '#999';
+            td.style.fontStyle = 'italic';
+            tr.appendChild(td);
+            tableEl.appendChild(tr);
+            return tableEl;
+        }
+
         const numCols = table.grid[0]?.length || 0;
 
         table.grid.forEach((rowData, rowIndex) => {

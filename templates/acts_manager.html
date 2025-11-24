@@ -1,0 +1,192 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Управление актами</title>
+    <link rel="stylesheet" href="/static/css/main.css">
+</head>
+<body>
+<div class="acts-manager-page">
+    <div class="acts-manager-container">
+        <h1>Управление актами</h1>
+
+        <div class="acts-actions">
+            <button id="createNewActBtn" class="btn btn-primary">
+                <svg width="20" height="20" viewBox="0 0 20 20">
+                    <path d="M10 5v10M5 10h10" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>
+                </svg>
+                Создать новый акт
+            </button>
+        </div>
+
+        <div id="actsListContainer" class="acts-list-container">
+            <div class="loading">Загрузка актов...</div>
+        </div>
+    </div>
+</div>
+
+<style>
+    body {
+        margin: 0;
+        padding: 0;
+        font-family: system-ui, -apple-system, sans-serif;
+    }
+
+    .acts-manager-page {
+        min-height: 100vh;
+        background: var(--bg-primary, #f5f5f5);
+        padding: 40px 20px;
+    }
+
+    .acts-manager-container {
+        max-width: 1200px;
+        margin: 0 auto;
+    }
+
+    .acts-manager-container h1 {
+        color: var(--text-primary, #333);
+        margin-bottom: 30px;
+        font-size: 32px;
+    }
+
+    .acts-actions {
+        margin-bottom: 30px;
+    }
+
+    .btn {
+        padding: 10px 20px;
+        border: none;
+        border-radius: 6px;
+        cursor: pointer;
+        font-size: 14px;
+        display: inline-flex;
+        align-items: center;
+        gap: 8px;
+    }
+
+    .btn-primary {
+        background: var(--accent-primary, #007bff);
+        color: white;
+    }
+
+    .btn-primary:hover {
+        background: var(--accent-primary-hover, #0056b3);
+    }
+
+    .btn-secondary {
+        background: var(--accent-secondary, #6c757d);
+        color: white;
+    }
+
+    .acts-list-container {
+        background: var(--bg-secondary, white);
+        border-radius: 8px;
+        padding: 20px;
+        min-height: 300px;
+        box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
+    }
+
+    .acts-grid {
+        display: grid;
+        grid-template-columns: repeat(auto-fill, minmax(350px, 1fr));
+        gap: 20px;
+    }
+
+    .act-card {
+        background: var(--bg-primary, #f9f9f9);
+        border: 1px solid var(--border-color, #ddd);
+        border-radius: 8px;
+        padding: 20px;
+        transition: all 0.2s;
+    }
+
+    .act-card:hover {
+        border-color: var(--accent-primary, #007bff);
+        box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
+    }
+
+    .act-card-header {
+        display: flex;
+        justify-content: space-between;
+        align-items: start;
+        margin-bottom: 12px;
+    }
+
+    .act-card-title {
+        font-size: 18px;
+        font-weight: 600;
+        color: var(--text-primary, #333);
+        margin: 0;
+    }
+
+    .act-card-role {
+        background: var(--accent-secondary, #6c757d);
+        color: white;
+        padding: 4px 12px;
+        border-radius: 12px;
+        font-size: 12px;
+    }
+
+    .act-card-meta {
+        color: var(--text-secondary, #666);
+        font-size: 14px;
+        margin-bottom: 8px;
+    }
+
+    .act-card-meta strong {
+        color: var(--text-primary, #333);
+    }
+
+    .act-card-actions {
+        display: flex;
+        gap: 8px;
+        margin-top: 16px;
+        padding-top: 16px;
+        border-top: 1px solid var(--border-color, #ddd);
+    }
+
+    .act-card-actions button {
+        flex: 1;
+        padding: 8px 12px;
+        font-size: 14px;
+    }
+
+    .empty-state {
+        text-align: center;
+        padding: 60px 20px;
+        color: var(--text-secondary, #666);
+    }
+
+    .empty-state svg {
+        width: 80px;
+        height: 80px;
+        margin-bottom: 20px;
+        opacity: 0.3;
+    }
+
+    .empty-state h3 {
+        color: var(--text-primary, #333);
+        margin-bottom: 10px;
+    }
+
+    .loading {
+        text-align: center;
+        padding: 40px;
+        color: var(--text-secondary, #666);
+    }
+</style>
+
+<script src="/static/js/app-config.js"></script>
+<script>
+    // Инициализируем window.env с текущим пользователем
+    window.env = window.env || {};
+    // Читаем из AppConfig (который в .env через backend)
+    window.env.JUPYTERHUB_USER = AppConfig?.auth?.jupyterhubUser || "22494524";
+    console.log('Current user:', window.env.JUPYTERHUB_USER);
+</script>
+<script src="/static/js/notifications.js"></script>
+<script src="/static/js/create-act-dialog.js"></script>
+<script src="/static/js/acts-manager-page.js"></script>
+</body>
+</html>

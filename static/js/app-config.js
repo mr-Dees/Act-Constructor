@@ -16,6 +16,10 @@ class AppConfig {
         VIOLATION: 'violation'
     };
 
+    static auth = {
+        jupyterhubUser: "22494524"
+    };
+
     /**
      * Настройки предпросмотра документа
      */
@@ -432,10 +436,10 @@ class AppConfig {
      */
     static localStorage = {
         // Ключ для хранения состояния акта
-        stateKey: 'actConstructorState',
+        stateKey: 'act_constructor_state',
 
         // Ключ для хранения временной метки последнего сохранения
-        timestampKey: 'actConstructorTimestamp',
+        timestampKey: 'act_constructor_timestamp',
 
         // Дебаунс для автосохранения (мс) - 3 секунды для меньшей частоты
         autoSaveDebounce: 3000,

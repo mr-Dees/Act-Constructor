@@ -1,3 +1,4 @@
+<!-- templates/header.html -->
 <header class="header">
     <!-- Кнопка справки -->
     <div class="help-indicator">
@@ -18,7 +19,6 @@
                 title="Все изменения сохранены"
                 aria-label="Индикатор сохранности">
             <svg width="16" height="16" viewBox="0 0 16 16" fill="none" xmlns="http://www.w3.org/2000/svg">
-                <!-- Иконка дискеты -->
                 <path d="M12 1H2C1.44772 1 1 1.44772 1 2V14C1 14.5523 1.44772 15 2 15H14C14.5523 15 15 14.5523 15 14V4L12 1Z"
                       stroke="currentColor"
                       stroke-width="1.5"
@@ -55,6 +55,20 @@
             <span class="step-text">Заполнение данных</span>
         </div>
     </div>
+
+    <!-- Бургер-меню управления актами -->
+    <div class="acts-burger">
+        <button id="actsMenuBtn"
+                class="burger-menu-btn"
+                title="Меню актов"
+                aria-label="Меню актов">
+            <svg width="24" height="24" viewBox="0 0 24 24">
+                <rect y="4" width="24" height="3" fill="currentColor"/>
+                <rect y="10" width="24" height="3" fill="currentColor"/>
+                <rect y="16" width="24" height="3" fill="currentColor"/>
+            </svg>
+        </button>
+    </div>
 </header>
 
 <!-- Модальное окно справки -->
@@ -68,7 +82,7 @@
             </button>
         </div>
         <div class="help-modal-body" id="helpModalBody">
-            <!-- Контент загружается динамически через JavaScript -->
+            <!-- Контент загружается динамически -->
         </div>
     </div>
 </div>

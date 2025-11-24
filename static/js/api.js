@@ -1,33 +1,27 @@
+// static/js/api.js
 /**
  * Клиент для взаимодействия с API
  *
  * Обрабатывает все HTTP-запросы к серверу для работы с актами.
- * Предоставляет методы для генерации и скачивания файлов актов.
- * Интегрирован с StorageManager для автосохранения при генерации.
+ * Предоставляет методы для генерации и скачивания файлов актов,
+ * а также загрузки содержимого из БД.
  */
 class APIClient {
     /**
      * Генерирует и сохраняет акты на сервере
      *
-     * Поддерживает создание нескольких форматов за один вызов.
-     * Автоматически предлагает скачать созданные файлы.
-     * Сохраняет состояние в localStorage перед отправкой на сервер.
-     *
      * @param {string|string[]} formats - Формат или массив форматов ('txt', 'md', 'docx')
      * @returns {Promise<boolean>} true если хотя бы один файл создан успешно
      */
     static async generateAct(formats = 'txt') {
-        // Блокируем отслеживание на время всей операции генерации
         StorageManager.disableTracking();
 
         try {
-            // Сохраняем состояние в localStorage перед генерацией
             StorageManager.saveState(true);
 
             const data = AppState.exportData();
             const formatList = Array.isArray(formats) ? formats : [formats];
 
-            // Фильтруем только поддерживаемые форматы
             const validFormats = formatList.filter(fmt =>
                 AppConfig.api.supportedFormats.includes(fmt)
             );
@@ -41,7 +35,6 @@ class APIClient {
             let successCount = 0;
             let errorCount = 0;
 
-            // Последовательно создаем файлы всех форматов
             for (const format of validFormats) {
                 const result = await this._generateSingleFormat(format, data);
                 results.push(result);
@@ -53,10 +46,8 @@ class APIClient {
                 }
             }
 
-            // Показываем итоговое уведомление
             this._showGenerationResults(successCount, errorCount, results);
 
-            // Предлагаем скачать успешно созданные файлы
             if (successCount > 0) {
                 await this._handleDownloadPrompt(results, successCount);
             }
@@ -70,7 +61,6 @@ class APIClient {
             );
             return false;
         } finally {
-            // Разблокируем отслеживание после завершения всей операции
             setTimeout(() => {
                 StorageManager.enableTracking();
             }, 100);
@@ -80,9 +70,6 @@ class APIClient {
     /**
      * Генерирует акт в одном формате
      * @private
-     * @param {string} format - Формат файла
-     * @param {Object} data - Данные акта
-     * @returns {Promise<Object>} Результат генерации
      */
     static async _generateSingleFormat(format, data) {
         try {
@@ -120,9 +107,6 @@ class APIClient {
     /**
      * Показывает результаты генерации файлов
      * @private
-     * @param {number} successCount - Количество успешно созданных файлов
-     * @param {number} errorCount - Количество ошибок
-     * @param {Array<Object>} results - Массив результатов
      */
     static _showGenerationResults(successCount, errorCount, results) {
         if (successCount > 0 && errorCount === 0) {
@@ -150,11 +134,8 @@ class APIClient {
     /**
      * Обрабатывает предложение скачать созданные файлы
      * @private
-     * @param {Array<Object>} results - Массив результатов генерации
-     * @param {number} successCount - Количество успешно созданных файлов
      */
     static async _handleDownloadPrompt(results, successCount) {
-        // Диалог показывается в контексте блокированного отслеживания
         const shouldDownload = await DialogManager.show({
             title: 'Скачать созданные файлы?',
             message: `Было успешно создано ${successCount} файл(ов). Хотите скачать их сейчас?`,
@@ -171,7 +152,6 @@ class APIClient {
     /**
      * Скачивает все успешно созданные файлы
      * @private
-     * @param {Array<Object>} results - Массив результатов генерации
      */
     static async _downloadAllFiles(results) {
         const successfulResults = results.filter(r => r.success);
@@ -187,16 +167,12 @@ class APIClient {
             }
         }
 
-        // Показываем итоговое уведомление о скачивании
         this._showDownloadResults(downloadedCount, downloadErrors, successfulResults.length);
     }
 
     /**
      * Показывает результаты скачивания файлов
      * @private
-     * @param {number} downloadedCount - Количество скачанных файлов
-     * @param {number} downloadErrors - Количество ошибок
-     * @param {number} totalFiles - Общее количество файлов
      */
     static _showDownloadResults(downloadedCount, downloadErrors, totalFiles) {
         if (downloadedCount === totalFiles) {
@@ -217,7 +193,6 @@ class APIClient {
      *
      * @param {string} filename - Имя файла для скачивания
      * @returns {Promise<void>}
-     * @throws {Error} При ошибке скачивания
      */
     static async downloadFile(filename) {
         try {
@@ -245,8 +220,6 @@ class APIClient {
     /**
      * Инициирует скачивание blob как файла
      * @private
-     * @param {Blob} blob - Данные файла
-     * @param {string} filename - Имя файла
      */
     static _triggerDownload(blob, filename) {
         const url = window.URL.createObjectURL(blob);
@@ -257,8 +230,183 @@ class APIClient {
         document.body.appendChild(a);
         a.click();
 
-        // Освобождаем память
         window.URL.revokeObjectURL(url);
         document.body.removeChild(a);
     }
+
+    /**
+     * Загружает содержимое акта из БД
+     *
+     * @param {number} actId - ID акта
+     * @returns {Promise<void>}
+     */
+    static async loadActContent(actId) {
+        const username = window.env?.JUPYTERHUB_USER || AppConfig?.auth?.jupyterhubUser || "";
+
+        try {
+            const resp = await fetch(`/api/v1/act_content/${actId}/content`, {
+                headers: {'X-JupyterHub-User': username}
+            });
+
+            if (!resp.ok) {
+                if (resp.status === 403) {
+                    throw new Error('Нет доступа к акту');
+                } else if (resp.status === 404) {
+                    throw new Error('Акт не найден');
+                }
+                throw new Error('Ошибка загрузки акта');
+            }
+
+            const content = await resp.json();
+
+            // Отключаем tracking на время загрузки
+            StorageManager.disableTracking();
+
+            // Проверяем, пустой ли акт
+            const isEmpty = !content.tree ||
+                !Array.isArray(content.tree.children) ||
+                content.tree.children.length === 0;
+
+            if (isEmpty) {
+                // Акт пустой: инициализируем структуру по умолчанию
+                AppState.initializeTree();
+                AppState.tables = {};
+                AppState.textBlocks = {};
+                AppState.violations = {};
+                AppState.tableUISizes = {};
+                AppState.generateNumbering();
+
+                // Сохраняем дефолтную структуру в БД
+                console.log('Сохраняем дефолтную структуру в БД...');
+                await this._saveDefaultStructure(actId, username);
+
+                Notifications.info('Акт был пуст и инициализирован автоматически');
+            } else {
+                // Загружаем существующее содержимое из БД
+                AppState.treeData = content.tree;
+                AppState.tables = content.tables || {};
+                AppState.textBlocks = content.textBlocks || {};
+                AppState.violations = content.violations || {};
+                AppState.tableUISizes = {};
+                AppState.generateNumbering();
+            }
+
+            // Обновляем интерфейс
+            if (typeof treeManager !== 'undefined') {
+                treeManager.render();
+            }
+            if (typeof ItemsRenderer !== 'undefined') {
+                ItemsRenderer.renderAll();
+            }
+            if (typeof PreviewManager !== 'undefined') {
+                PreviewManager.update();
+            }
+
+            // Сохраняем в localStorage для локальной работы
+            StorageManager.saveState(true);
+
+            // Включаем tracking обратно с задержкой
+            setTimeout(() => {
+                StorageManager.enableTracking();
+            }, 500);
+
+            console.log('Акт загружен из БД, ID:', actId);
+
+        } catch (err) {
+            console.error('Ошибка загрузки акта:', err);
+            StorageManager.enableTracking();
+            throw err;
+        }
+    }
+
+    // static/js/api.js (метод _saveDefaultStructure - с логированием)
+
+    /**
+     * Сохраняет дефолтную структуру в БД (без уведомлений)
+     * @private
+     */
+    static async _saveDefaultStructure(actId, username) {
+        try {
+            const data = AppState.exportData();
+
+            console.log('Сохраняем дефолтную структуру:', {
+                tablesCount: Object.keys(data.tables).length,
+                tables: data.tables
+            });
+
+            const resp = await fetch(`/api/v1/act_content/${actId}/content`, {
+                method: 'PUT',
+                headers: {
+                    'Content-Type': 'application/json',
+                    'X-JupyterHub-User': username
+                },
+                body: JSON.stringify(data)
+            });
+
+            if (!resp.ok) {
+                const error = await resp.text();
+                console.error('Ошибка сохранения:', error);
+                throw new Error('Ошибка сохранения дефолтной структуры');
+            }
+
+            console.log('Дефолтная структура сохранена в БД');
+
+        } catch (err) {
+            console.error('Ошибка сохранения дефолтной структуры:', err);
+            // Не бросаем ошибку выше, чтобы не прерывать работу
+        }
+    }
+
+    /**
+     * Сохраняет содержимое акта в БД
+     *
+     * @param {number} actId - ID акта
+     * @returns {Promise<void>}
+     */
+    static async saveActContent(actId) {
+        const username = window.env?.JUPYTERHUB_USER || AppConfig?.auth?.jupyterhubUser || "";
+
+        try {
+            // Блокируем отслеживание на время сохранения
+            StorageManager.disableTracking();
+
+            const data = AppState.exportData();
+
+            const resp = await fetch(`/api/v1/act_content/${actId}/content`, {
+                method: 'PUT',
+                headers: {
+                    'Content-Type': 'application/json',
+                    'X-JupyterHub-User': username
+                },
+                body: JSON.stringify(data)
+            });
+
+            if (!resp.ok) {
+                if (resp.status === 403) {
+                    throw new Error('Нет доступа к акту');
+                } else if (resp.status === 404) {
+                    throw new Error('Акт не найден');
+                }
+                throw new Error('Ошибка сохранения');
+            }
+
+            const result = await resp.json();
+            console.log('Акт сохранен в БД:', result);
+
+            Notifications.success('Акт сохранен в базу данных');
+
+        } catch (err) {
+            console.error('Ошибка сохранения акта в БД:', err);
+            Notifications.error(`Не удалось сохранить акт: ${err.message}`);
+            throw err;
+        } finally {
+            // Включаем отслеживание обратно
+            setTimeout(() => {
+                StorageManager.enableTracking();
+            }, 100);
+        }
+    }
 }
+
+// Глобальный доступ
+window.APIClient = APIClient;

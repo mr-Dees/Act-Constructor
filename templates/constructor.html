@@ -1,3 +1,4 @@
+<!-- templates/constructor.html -->
 {% extends "base.html" %}
 
 {% block content %}
@@ -21,10 +22,15 @@
     <div class="step-actions">
         <button id="backBtn" class="btn btn-secondary">◄ Назад</button>
 
-        <!-- Группа кнопок сохранения с выбором форматов -->
+        <!-- Кнопка сохранения в БД -->
+        <button id="saveToDbBtn" class="btn btn-primary" style="margin-right:8px;">
+            💾 Сохранить в БД
+        </button>
+
+        <!-- Группа кнопок экспорта с выбором форматов -->
         <div class="save-button-group">
             <button id="generateBtn" class="btn btn-success save-main-btn">
-                Сохранить акт
+                Экспортировать файлы
             </button>
             <button id="formatDropdownBtn"
                     class="btn btn-success save-dropdown-btn"
@@ -56,6 +62,98 @@
     </div>
 </div>
 
-<!-- Контекстные меню (подключаются в конце страницы) -->
+<script>
+    document.addEventListener('DOMContentLoaded', async () => {
+        const urlParams = new URLSearchParams(window.location.search);
+        const actIdFromUrl = urlParams.get('act_id');
+
+        if (actIdFromUrl) {
+            const currentActId = parseInt(actIdFromUrl);
+            window.currentActId = currentActId;
+            ActsMenuManager.currentActId = currentActId;
+
+            // Проверяем localStorage
+            const stateKey = AppConfig.localStorage.stateKey;
+            const savedStateJson = localStorage.getItem(stateKey);
+
+            let shouldLoadFromDB = true;
+
+            if (savedStateJson) {
+                try {
+                    const savedState = JSON.parse(savedStateJson);
+                    const savedActId = savedState.actId;
+
+                    // Если actId совпадает - восстанавливаем из localStorage
+                    if (savedActId === currentActId) {
+                        console.log('Восстанавливаем акт из localStorage, ID:', currentActId);
+                        shouldLoadFromDB = false;
+
+                        // StorageManager уже восстановил данные в init(),
+                        // просто обновляем UI
+                        if (typeof treeManager !== 'undefined') {
+                            treeManager.render();
+                        }
+                        if (typeof ItemsRenderer !== 'undefined') {
+                            ItemsRenderer.renderAll();
+                        }
+                        if (typeof PreviewManager !== 'undefined') {
+                            PreviewManager.update();
+                        }
+                    }
+                } catch (err) {
+                    console.error('Ошибка парсинга localStorage:', err);
+                    shouldLoadFromDB = true;
+                }
+            }
+
+            if (shouldLoadFromDB) {
+                console.log('Загружаем акт из БД, ID:', currentActId);
+                try {
+                    await APIClient.loadActContent(currentActId);
+                } catch (err) {
+                    console.error('Ошибка загрузки акта:', err);
+                    Notifications.error('Не удалось загрузить акт');
+                    setTimeout(() => {
+                        ActsMenuManager.show();
+                    }, 1000);
+                }
+            }
+        } else {
+            // Нет act_id в URL - показываем меню выбора
+            setTimeout(() => {
+                ActsMenuManager.show();
+            }, 500);
+        }
+
+        // Обработчик кнопки "Сохранить в БД"
+        document.getElementById('saveToDbBtn')?.addEventListener('click', async () => {
+            console.log('Нажата кнопка "Сохранить в БД"');
+
+            if (!window.currentActId) {
+                console.warn('currentActId не установлен');
+                Notifications.warning('Сначала выберите акт');
+                return;
+            }
+
+            console.log('Сохраняем акт ID:', window.currentActId);
+
+            try {
+                // Синхронизируем данные из DOM в AppState
+                if (typeof ItemsRenderer !== 'undefined') {
+                    console.log('Синхронизация данных из DOM...');
+                    ItemsRenderer.syncDataToState();
+                }
+
+                console.log('Вызов APIClient.saveActContent...');
+                await APIClient.saveActContent(window.currentActId);
+                console.log('Сохранение завершено');
+            } catch (err) {
+                console.error('Ошибка сохранения:', err);
+            }
+        });
+    });
+</script>
+
+<!-- Контекстные меню -->
 {% include "components/context_menu.html" %}
 {% endblock %}

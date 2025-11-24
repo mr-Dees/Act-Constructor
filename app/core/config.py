@@ -95,6 +95,18 @@ class Settings(BaseSettings):
     # Уровень логирования (ограничен допустимыми значениями)
     log_level: Literal["DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"] = "INFO"
 
+    # === База данных PostgreSQL ===
+    db_host: str = Field(default="localhost")
+    db_port: int = Field(default=5432, ge=1, le=65535)
+    db_name: str = Field(default="act_constructor")
+    db_user: str = Field(default="postgres")
+    db_password: str = Field(default="postgres")
+    db_pool_min_size: int = Field(default=2, ge=1)
+    db_pool_max_size: int = Field(default=10, ge=2)
+
+    # === Аутентификация ===
+    jupyterhub_user: str = Field(default="unknown_user")
+
     # === Лимиты безопасности ===
 
     # Максимальный размер тела запроса в байтах (10MB по умолчанию)

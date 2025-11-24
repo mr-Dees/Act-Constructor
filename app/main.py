@@ -18,6 +18,7 @@ from starlette.middleware.base import BaseHTTPMiddleware
 
 from app.api.v1.routes import api_router as api_v1_router
 from app.core.config import Settings, setup_logging
+from app.db.connection import init_db, close_db, create_tables_if_not_exist
 
 # Инициализируем настройки и логирование один раз на уровне модуля
 settings = Settings()
@@ -158,24 +159,29 @@ class RequestSizeLimitMiddleware(BaseHTTPMiddleware):
 async def lifespan(app: FastAPI):
     """
     Управление жизненным циклом приложения.
-
-    Выполняется один раз при запуске и остановке worker-процесса.
-
-    Args:
-        app: FastAPI приложение
-
-    Yields:
-        Контроль приложению на время работы
     """
     # Startup
     logger.info("Запуск приложения Act Constructor")
     settings.ensure_directories()
+
+    # ИНИЦИАЛИЗАЦИЯ БД
+    await init_db(settings)
+    logger.info("База данных инициализирована")
+
+    # СОЗДАНИЕ ТАБЛИЦ ЕСЛИ НЕ СУЩЕСТВУЮТ
+    await create_tables_if_not_exist()
+    logger.info("Схема базы данных проверена")
+
     logger.info("Приложение успешно инициализировано")
 
     yield
 
     # Shutdown
     logger.info("Завершение работы приложения Act Constructor")
+
+    # Закрываем пул БД
+    await close_db()
+    logger.info("Database pool закрыт")
 
     # Закрываем ThreadPoolExecutor
     from app.services.act_service import executor
@@ -228,19 +234,19 @@ def create_app() -> FastAPI:
     )
 
     @app.get("/", response_class=HTMLResponse)
-    async def show_constructor(request: Request):
-        """
-        Отображает главную страницу конструктора актов.
+    async def show_acts_manager(request: Request):
+        """Стартовая страница - менеджер актов."""
+        return templates.TemplateResponse(
+            "acts_manager.html",
+            {"request": request}
+        )
 
-        Args:
-            request: Объект HTTP-запроса от FastAPI
-
-        Returns:
-            Отрендеренный HTML-шаблон конструктора
-        """
+    @app.get("/constructor", response_class=HTMLResponse)
+    async def show_constructor(request: Request, act_id: int):
+        """Страница конструктора конкретного акта."""
         return templates.TemplateResponse(
             "constructor.html",
-            {"request": request}
+            {"request": request, "act_id": act_id}
         )
 
     # Подключение API роутеров версии 1 с префиксом /api/v1
