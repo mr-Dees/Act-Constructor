@@ -392,6 +392,9 @@ class APIClient {
             const result = await resp.json();
             console.log('Акт сохранен в БД:', result);
 
+            // Помечаем как синхронизированное с БД
+            StorageManager.markAsSyncedWithDB();
+
             Notifications.success('Акт сохранен в базу данных');
 
         } catch (err) {

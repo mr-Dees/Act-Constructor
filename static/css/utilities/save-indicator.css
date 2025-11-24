@@ -1,6 +1,7 @@
 /*
  * Индикатор сохранности
  * Кнопка с индикатором состояния сохранения в левом углу шапки
+ * Три состояния: saved (белый), local-only (желтый), unsaved (красный)
  */
 
 .save-indicator {
@@ -55,7 +56,7 @@
     transition: all var(--transition-base);
 }
 
-/* Состояние: сохранено */
+/* Состояние: полностью сохранено (белый) */
 .save-indicator-button.saved {
     cursor: default;
     background: rgb(255 255 255 / 20%);
@@ -70,34 +71,59 @@
     box-shadow: 0 0 8px rgb(255 255 255 / 30%);
 }
 
-/* Иконка для сохраненного состояния */
 .save-indicator-button.saved svg {
     transform: scale(1.1);
     filter: drop-shadow(0 0 2px rgb(255 255 255 / 60%));
 }
 
-/* Состояние: не сохранено */
-.save-indicator-button.unsaved {
-    color: var(--save-unsaved-color);
+/* Состояние: только локально (желтый) */
+.save-indicator-button.local-only {
+    color: #fbbf24;
     background: rgb(251 191 36 / 25%);
-    border-color: var(--save-unsaved-border);
+    border-color: rgb(251 191 36 / 60%);
+    box-shadow: 0 0 8px rgb(251 191 36 / 30%);
+}
+
+.save-indicator-button.local-only:hover {
+    background: rgb(251 191 36 / 35%);
+    border-color: rgb(251 191 36 / 80%);
+    transform: translateY(-2px);
+    box-shadow: 0 0 12px rgb(251 191 36 / 40%);
+}
+
+.save-indicator-button.local-only:active {
+    transform: translateY(0);
+    box-shadow: 0 0 8px rgb(251 191 36 / 30%);
+}
+
+.save-indicator-button.local-only svg {
+    animation: pulse 2s ease-in-out infinite;
+    filter: drop-shadow(0 0 2px rgb(251 191 36 / 60%));
+}
+
+/* Состояние: не сохранено (красный) */
+.save-indicator-button.unsaved {
+    color: #ef4444;
+    background: rgb(239 68 68 / 25%);
+    border-color: rgb(239 68 68 / 60%);
+    box-shadow: 0 0 8px rgb(239 68 68 / 30%);
 }
 
 .save-indicator-button.unsaved:hover {
-    background: rgb(251 191 36 / 35%);
-    border-color: var(--save-unsaved-border-hover);
+    background: rgb(239 68 68 / 35%);
+    border-color: rgb(239 68 68 / 80%);
     transform: translateY(-2px);
-    box-shadow: var(--shadow-sm);
+    box-shadow: 0 0 12px rgb(239 68 68 / 40%);
 }
 
 .save-indicator-button.unsaved:active {
     transform: translateY(0);
-    box-shadow: none;
+    box-shadow: 0 0 8px rgb(239 68 68 / 30%);
 }
 
-/* Анимация пульсации для несохраненного состояния */
 .save-indicator-button.unsaved svg {
     animation: pulse 2s ease-in-out infinite;
+    filter: drop-shadow(0 0 2px rgb(239 68 68 / 60%));
 }
 
 /* Состояние: процесс сохранения */
@@ -152,7 +178,7 @@
     transition: color var(--transition-base);
     line-height: var(--line-height-tight);
     text-shadow: 0 1px 2px rgb(0 0 0 / 30%);
-    min-width: 5.5rem;
+    min-width: 6.5rem;
     text-align: center;
 }
 
@@ -161,16 +187,22 @@
     text-shadow: 0 1px 3px rgb(0 0 0 / 40%);
 }
 
-/* Метка для несохраненного состояния */
-.save-indicator-button.unsaved ~ .save-indicator-label {
+/* Метка для полностью сохраненного состояния (белый) */
+.save-indicator-button.saved ~ .save-indicator-label {
+    color: #ffffff;
+    text-shadow: 0 1px 3px rgb(0 0 0 / 40%), 0 0 8px rgb(255 255 255 / 40%);
+}
+
+/* Метка для локально сохраненного состояния (желтый) */
+.save-indicator-button.local-only ~ .save-indicator-label {
     color: #fbbf24;
     text-shadow: 0 1px 3px rgb(0 0 0 / 40%), 0 0 8px rgb(251 191 36 / 50%);
 }
 
-/* Метка для сохраненного состояния */
-.save-indicator-button.saved ~ .save-indicator-label {
-    color: #ffffff;
-    text-shadow: 0 1px 3px rgb(0 0 0 / 40%), 0 0 8px rgb(255 255 255 / 40%);
+/* Метка для несохраненного состояния (красный) */
+.save-indicator-button.unsaved ~ .save-indicator-label {
+    color: #ef4444;
+    text-shadow: 0 1px 3px rgb(0 0 0 / 40%), 0 0 8px rgb(239 68 68 / 50%);
 }
 
 /* Метка для процесса сохранения */

@@ -4,6 +4,7 @@
  * Управляет сохранением и восстановлением состояния приложения
  * в localStorage с автоматическим дебаунсом и валидацией размера.
  * Интегрирован с системой Proxy для автоматического отслеживания изменений.
+ * Отслеживает синхронизацию с БД для предотвращения потери данных.
  */
 class StorageManager {
     /**
@@ -21,11 +22,18 @@ class StorageManager {
     static _periodicSaveInterval = null;
 
     /**
-     * Флаг для отслеживания несохраненных изменений
+     * Флаг для отслеживания несохраненных изменений в localStorage
      * @private
      * @type {boolean}
      */
     static _hasUnsavedChanges = false;
+
+    /**
+     * Флаг для отслеживания синхронизации с БД
+     * @private
+     * @type {boolean}
+     */
+    static _isSyncedWithDB = true;
 
     /**
      * Флаг блокировки автоматического отслеживания
@@ -122,7 +130,11 @@ class StorageManager {
 
             console.log('Состояние успешно восстановлено из localStorage');
 
-            this._markAsSaved();
+            // Помечаем как сохраненное в localStorage, но не синхронизированное с БД
+            this._hasUnsavedChanges = false;
+            this._isSyncedWithDB = false;
+            this._updateSaveIndicator();
+
             return true;
 
         } catch (error) {
@@ -191,12 +203,23 @@ class StorageManager {
      * @private
      */
     static _setupEventHandlers() {
-        // Сохранение при переходе на другую вкладку/закрытии
-        window.addEventListener('beforeunload', () => {
+        // Предупреждение при попытке закрыть страницу с несохраненными данными
+        window.addEventListener('beforeunload', (e) => {
+            // Сохраняем в localStorage перед закрытием
             if (this._hasUnsavedChanges) {
                 this.saveState(true);
             }
+
+            // Предупреждаем только если данные не синхронизированы с БД
+            if (!this._isSyncedWithDB && window.currentActId) {
+                e.preventDefault();
+                e.returnValue = 'У вас есть несохраненные изменения. Вы уверены, что хотите покинуть страницу?';
+                return e.returnValue;
+            }
         });
+
+        // Перехват попыток навигации (для показа кастомного диалога)
+        this._setupNavigationInterception();
 
         // Периодическое автосохранение (каждые 2 минуты при наличии изменений)
         this._periodicSaveInterval = setInterval(() => {
@@ -204,6 +227,77 @@ class StorageManager {
                 this.saveState(true);
             }
         }, AppConfig.localStorage.periodicSaveInterval);
+    }
+
+    /**
+     * Настраивает перехват попыток навигации
+     * @private
+     */
+    static _setupNavigationInterception() {
+        // Флаг разрешения навигации (для программных переходов)
+        window._allowNavigation = false;
+
+        // Перехватываем клики по ссылкам
+        document.addEventListener('click', async (e) => {
+            // Игнорируем если навигация разрешена
+            if (window._allowNavigation) return;
+
+            const link = e.target.closest('a[href]');
+
+            // Игнорируем если это не ссылка или если href пустой/якорь
+            if (!link || !link.href || link.href.startsWith('#') || link.href.startsWith('javascript:')) {
+                return;
+            }
+
+            // Игнорируем внешние ссылки и ссылки с target="_blank"
+            if (link.target === '_blank' || link.hostname !== window.location.hostname) {
+                return;
+            }
+
+            // Проверяем наличие несохраненных изменений
+            if (this.hasUnsyncedChanges()) {
+                e.preventDefault();
+
+                const confirmed = await DialogManager.show({
+                    title: 'Несохраненные изменения',
+                    message: 'У вас есть несохраненные изменения. Если вы продолжите, они будут утеряны. Сохранить изменения в базу данных?',
+                    icon: '⚠️',
+                    confirmText: 'Сохранить и продолжить',
+                    cancelText: 'Не сохранять'
+                });
+
+                if (confirmed) {
+                    try {
+                        // Синхронизируем и сохраняем
+                        if (typeof ItemsRenderer !== 'undefined') {
+                            ItemsRenderer.syncDataToState();
+                        }
+
+                        await APIClient.saveActContent(window.currentActId);
+                        Notifications.success('Изменения сохранены');
+                    } catch (err) {
+                        console.error('Ошибка сохранения:', err);
+                        Notifications.error('Не удалось сохранить изменения');
+
+                        const continueAnyway = await DialogManager.show({
+                            title: 'Ошибка сохранения',
+                            message: 'Не удалось сохранить изменения. Продолжить без сохранения?',
+                            icon: '❌',
+                            confirmText: 'Продолжить',
+                            cancelText: 'Отмена'
+                        });
+
+                        if (!continueAnyway) {
+                            return;
+                        }
+                    }
+                }
+
+                // Разрешаем навигацию и переходим по ссылке
+                window._allowNavigation = true;
+                window.location.href = link.href;
+            }
+        });
     }
 
     /**
@@ -219,6 +313,7 @@ class StorageManager {
         }
 
         this._hasUnsavedChanges = true;
+        this._isSyncedWithDB = false;
         this._updateSaveIndicator();
 
         // Запускаем дебаунс автосохранения
@@ -226,11 +321,20 @@ class StorageManager {
     }
 
     /**
-     * Помечает состояние как сохраненное
+     * Помечает состояние как сохраненное в localStorage
      * @private
      */
     static _markAsSaved() {
         this._hasUnsavedChanges = false;
+        this._updateSaveIndicator();
+    }
+
+    /**
+     * Помечает состояние как синхронизированное с БД
+     */
+    static markAsSyncedWithDB() {
+        this._hasUnsavedChanges = false;
+        this._isSyncedWithDB = true;
         this._updateSaveIndicator();
     }
 
@@ -365,10 +469,6 @@ class StorageManager {
             this._saveTimeout = null;
         }
 
-        // Немедленно помечаем как сохраненное
-        this._hasUnsavedChanges = false;
-        this._updateSaveIndicator();
-
         // Выполняем сохранение (silent режим)
         const success = this.saveState(true);
 
@@ -442,13 +542,23 @@ class StorageManager {
     }
 
     /**
+     * Проверяет наличие несохраненных в БД изменений
+     * @returns {boolean} true если данные не синхронизированы с БД
+     */
+    static hasUnsyncedChanges() {
+        return !this._isSyncedWithDB && window.currentActId !== null;
+    }
+
+    /**
      * Очищает сохраненное состояние из localStorage
      */
     static clearStorage() {
         try {
             localStorage.removeItem(AppConfig.localStorage.stateKey);
             localStorage.removeItem(AppConfig.localStorage.timestampKey);
-            this._markAsSaved();
+            this._hasUnsavedChanges = false;
+            this._isSyncedWithDB = true;
+            this._updateSaveIndicator();
             console.log('localStorage очищен');
         } catch (error) {
             console.error('Ошибка очистки localStorage:', error);
@@ -478,6 +588,10 @@ class StorageManager {
 
     /**
      * Обновляет индикатор сохранности в UI
+     * Три состояния:
+     * - saved (белый): сохранено в localStorage и БД
+     * - local-only (желтый): сохранено только в localStorage
+     * - unsaved (красный): не сохранено нигде
      * @private
      */
     static _updateSaveIndicator() {
@@ -486,15 +600,24 @@ class StorageManager {
 
         if (!button || !label) return;
 
+        // Удаляем все классы состояний
+        button.classList.remove('saved', 'local-only', 'unsaved');
+
         if (this._hasUnsavedChanges) {
+            // Красный: не сохранено даже в localStorage
             button.classList.add('unsaved');
-            button.classList.remove('saved');
             button.disabled = false;
             button.title = 'Сохранить изменения (Ctrl+S)';
             label.textContent = 'Не сохранено';
+        } else if (!this._isSyncedWithDB && window.currentActId) {
+            // Желтый: сохранено в localStorage, но не в БД
+            button.classList.add('local-only');
+            button.disabled = false;
+            button.title = 'Сохранить в базу данных (Ctrl+S)';
+            label.textContent = 'Только локально';
         } else {
+            // Белый: полностью синхронизировано
             button.classList.add('saved');
-            button.classList.remove('unsaved');
             button.disabled = true;
             button.title = 'Все изменения сохранены';
             label.textContent = 'Сохранено';

@@ -1,4 +1,5 @@
 // static/js/acts-menu.js
+
 /**
  * Менеджер меню выбора актов
  *
@@ -184,14 +185,59 @@ class ActsMenuManager {
             return;
         }
 
+        // Проверяем наличие несохраненных в БД изменений
+        if (StorageManager.hasUnsyncedChanges()) {
+            // Закрываем меню перед показом диалога
+            this.hide();
+
+            const confirmed = await DialogManager.show({
+                title: 'Несохраненные изменения',
+                message: 'У вас есть несохраненные изменения в текущем акте. Если вы продолжите, они будут утеряны. Сохранить изменения в базу данных?',
+                icon: '⚠️',
+                confirmText: 'Сохранить и продолжить',
+                cancelText: 'Не сохранять'
+            });
+
+            if (confirmed) {
+                try {
+                    // Синхронизируем данные и сохраняем в БД
+                    if (typeof ItemsRenderer !== 'undefined') {
+                        ItemsRenderer.syncDataToState();
+                    }
+
+                    await APIClient.saveActContent(window.currentActId);
+                    Notifications.success('Изменения сохранены в БД');
+                } catch (err) {
+                    console.error('Ошибка сохранения:', err);
+                    Notifications.error('Не удалось сохранить изменения');
+
+                    // Спрашиваем, продолжить ли без сохранения
+                    const continueAnyway = await DialogManager.show({
+                        title: 'Ошибка сохранения',
+                        message: 'Не удалось сохранить изменения. Продолжить без сохранения?',
+                        icon: '❌',
+                        confirmText: 'Продолжить',
+                        cancelText: 'Отмена'
+                    });
+
+                    if (!continueAnyway) {
+                        // Возвращаем меню если пользователь отменил
+                        this.show();
+                        return;
+                    }
+                }
+            }
+        } else {
+            // Если нет несохраненных изменений, просто закрываем меню
+            this.hide();
+        }
+
         try {
             // Очищаем localStorage перед загрузкой нового акта
             StorageManager.clearStorage();
 
             this.currentActId = actId;
             window.currentActId = actId;
-
-            this.hide();
 
             // Загружаем содержимое акта
             await APIClient.loadActContent(actId);
@@ -230,6 +276,10 @@ class ActsMenuManager {
             if (!response.ok) throw new Error('Ошибка загрузки данных акта');
 
             const actData = await response.json();
+
+            // Закрываем меню перед показом диалога
+            this.hide();
+
             CreateActDialog.showEdit(actData);
 
         } catch (err) {
@@ -247,8 +297,20 @@ class ActsMenuManager {
             return;
         }
 
-        const newKm = prompt('Введите новый номер КМ для дубликата:');
-        if (!newKm) return;
+        // Закрываем меню перед показом диалога
+        this.hide();
+
+        // Используем кастомный диалог вместо prompt
+        const newKm = await this._showPromptDialog(
+            'Дублирование акта',
+            'Введите новый номер КМ для дубликата:',
+            ''
+        );
+
+        if (!newKm || !newKm.trim()) {
+            Notifications.info('Дублирование отменено');
+            return;
+        }
 
         try {
             const username = window.env?.JUPYTERHUB_USER || AppConfig?.auth?.jupyterhubUser || "";
@@ -275,6 +337,87 @@ class ActsMenuManager {
             console.error('Ошибка дублирования акта:', err);
             Notifications.error(`Не удалось создать дубликат: ${err.message}`);
         }
+    }
+
+    /**
+     * Показывает кастомный диалог с полем ввода
+     * @private
+     * @param {string} title - Заголовок диалога
+     * @param {string} message - Текст сообщения
+     * @param {string} defaultValue - Значение по умолчанию
+     * @returns {Promise<string|null>} Введенное значение или null при отмене
+     */
+    static async _showPromptDialog(title, message, defaultValue = '') {
+        return new Promise((resolve) => {
+            const overlay = document.createElement('div');
+            overlay.className = 'custom-dialog-overlay';
+
+            const dialog = document.createElement('div');
+            dialog.className = 'custom-dialog';
+            dialog.style.maxWidth = '500px';
+
+            dialog.innerHTML = `
+                <div class="dialog-icon">📝</div>
+                <h3 class="dialog-title">${title}</h3>
+                <p class="dialog-message">${message}</p>
+                <input type="text" id="promptInput" class="dialog-input" value="${defaultValue}" 
+                       style="width:100%;padding:10px;border:1px solid #ddd;border-radius:4px;margin-bottom:20px;font-size:14px;">
+                <div class="dialog-buttons">
+                    <button class="btn btn-secondary" id="promptCancelBtn">Отмена</button>
+                    <button class="btn btn-primary" id="promptOkBtn">OK</button>
+                </div>
+            `;
+
+            overlay.appendChild(dialog);
+            document.body.appendChild(overlay);
+
+            const input = dialog.querySelector('#promptInput');
+            const okBtn = dialog.querySelector('#promptOkBtn');
+            const cancelBtn = dialog.querySelector('#promptCancelBtn');
+
+            // Фокус на поле ввода
+            setTimeout(() => {
+                input.focus();
+                input.select();
+            }, 100);
+
+            const close = (value) => {
+                overlay.classList.add('hidden');
+                setTimeout(() => {
+                    overlay.remove();
+                }, 200);
+                resolve(value);
+            };
+
+            okBtn.addEventListener('click', () => close(input.value));
+            cancelBtn.addEventListener('click', () => close(null));
+
+            // Enter для подтверждения
+            input.addEventListener('keydown', (e) => {
+                if (e.key === 'Enter') {
+                    e.preventDefault();
+                    close(input.value);
+                } else if (e.key === 'Escape') {
+                    close(null);
+                }
+            });
+
+            // Закрытие по клику на оверлей
+            overlay.addEventListener('click', (e) => {
+                if (e.target === overlay) {
+                    close(null);
+                }
+            });
+
+            // Закрытие по Escape
+            const escapeHandler = (e) => {
+                if (e.key === 'Escape') {
+                    close(null);
+                    document.removeEventListener('keydown', escapeHandler);
+                }
+            };
+            document.addEventListener('keydown', escapeHandler);
+        });
     }
 
     /**
@@ -381,31 +524,31 @@ class ActsMenuManager {
         const indicator = document.createElement('div');
         indicator.id = 'actLoadingIndicator';
         indicator.style.cssText = `
-        position: fixed;
-        top: 0;
-        left: 0;
-        width: 100%;
-        height: 100%;
-        background: rgba(255, 255, 255, 0.95);
-        display: flex;
-        align-items: center;
-        justify-content: center;
-        z-index: 9999;
-        flex-direction: column;
-        gap: 16px;
-    `;
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background: rgba(255, 255, 255, 0.95);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            z-index: 9999;
+            flex-direction: column;
+            gap: 16px;
+        `;
 
         indicator.innerHTML = `
-        <div class="spinner" style="
-            border: 4px solid #f3f3f3;
-            border-top: 4px solid #007bff;
-            border-radius: 50%;
-            width: 50px;
-            height: 50px;
-            animation: spin 1s linear infinite;
-        "></div>
-        <p style="font-size: 16px; color: #333; font-weight: 500;">${message}</p>
-    `;
+            <div class="spinner" style="
+                border: 4px solid #f3f3f3;
+                border-top: 4px solid #007bff;
+                border-radius: 50%;
+                width: 50px;
+                height: 50px;
+                animation: spin 1s linear infinite;
+            "></div>
+            <p style="font-size: 16px; color: #333; font-weight: 500;">${message}</p>
+        `;
 
         document.body.appendChild(indicator);
     }

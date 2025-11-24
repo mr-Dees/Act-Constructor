@@ -101,3 +101,27 @@
 .custom-dialog.closing {
     animation: scaleOut 0.2s cubic-bezier(0.4, 0, 0.2, 1);
 }
+
+/* dialog.css (добавить в конец файла) */
+
+/* Поле ввода в диалоговом окне */
+.dialog-input {
+    width: 100%;
+    padding: var(--spacing);
+    border: 1px solid var(--border-color);
+    border-radius: var(--radius);
+    margin-bottom: var(--spacing-xl);
+    font-size: var(--font-size-sm);
+    font-family: inherit;
+    transition: border-color var(--transition-fast), box-shadow var(--transition-fast);
+}
+
+.dialog-input:focus {
+    outline: none;
+    border-color: var(--accent-primary);
+    box-shadow: 0 0 0 3px rgb(0 123 255 / 10%);
+}
+
+.dialog-input::placeholder {
+    color: var(--text-tertiary);
+}
