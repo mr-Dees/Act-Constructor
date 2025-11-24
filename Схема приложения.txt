@@ -5,7 +5,9 @@ Act Constructor/
 │   │   └── v1/
 │   │       ├── endpoints/
 │   │       │   ├── __init__.py
+│   │       │   ├── act_content.py
 │   │       │   ├── act_operations.py
+│   │       │   ├── acts.py
 │   │       │   └── system.py
 │   │       ├── __init__.py
 │   │       └── routes.py
@@ -23,6 +25,12 @@ Act Constructor/
 │   │   ├── docx_formatter.py
 │   │   ├── markdown_formatter.py
 │   │   └── text_formatter.py
+│   ├── db/
+│   │   ├── __init__.py
+│   │   ├── connection.py
+│   │   ├── models.py
+│   │   ├── schema.sql
+│   │   └── service.py
 │   ├── schemas/
 │   │   ├── __init__.py
 │   │   └── act.py
@@ -39,6 +47,7 @@ Act Constructor/
 │
 ├── templates/
 │   ├── components/
+│   │   ├── acts_menu.html
 │   │   ├── context_menu.html
 │   │   ├── dialog.html
 │   │   ├── preview_panel.html
@@ -46,6 +55,7 @@ Act Constructor/
 │   ├── help/
 │   │   ├── step1.html
 │   │   └── step2.html
+│   ├── acts_manager.html
 │   ├── base.html
 │   ├── constructor.html
 │   └── header.html
@@ -162,9 +172,12 @@ Act Constructor/
 │       │   ├── violation-init.js
 │       │   ├── violation-paste.js
 │       │   └── violation-rendering.js
+│       ├── app-config.jsacts-manager-page.js
+│       ├── app-config.jsacts-menu.js
 │       ├── api.js
 │       ├── app.js
 │       ├── app-config.js
+│       ├── app-config.jscreate-act-dialog.js
 │       ├── dialog.js
 │       ├── format-menu-manager.js
 │       ├── help.js

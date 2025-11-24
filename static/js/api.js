@@ -269,6 +269,7 @@ class APIClient {
 
             if (isEmpty) {
                 // Акт пустой: инициализируем структуру по умолчанию
+                console.log('Акт пуст, инициализируем дефолтную структуру');
                 AppState.initializeTree();
                 AppState.tables = {};
                 AppState.textBlocks = {};
@@ -277,12 +278,12 @@ class APIClient {
                 AppState.generateNumbering();
 
                 // Сохраняем дефолтную структуру в БД
-                console.log('Сохраняем дефолтную структуру в БД...');
                 await this._saveDefaultStructure(actId, username);
 
-                Notifications.info('Акт был пуст и инициализирован автоматически');
+                Notifications.info('Акт инициализирован автоматически');
             } else {
                 // Загружаем существующее содержимое из БД
+                console.log('Загружаем содержимое акта из БД');
                 AppState.treeData = content.tree;
                 AppState.tables = content.tables || {};
                 AppState.textBlocks = content.textBlocks || {};
@@ -318,8 +319,6 @@ class APIClient {
             throw err;
         }
     }
-
-    // static/js/api.js (метод _saveDefaultStructure - с логированием)
 
     /**
      * Сохраняет дефолтную структуру в БД (без уведомлений)

@@ -63,68 +63,7 @@
 </div>
 
 <script>
-    document.addEventListener('DOMContentLoaded', async () => {
-        const urlParams = new URLSearchParams(window.location.search);
-        const actIdFromUrl = urlParams.get('act_id');
-
-        if (actIdFromUrl) {
-            const currentActId = parseInt(actIdFromUrl);
-            window.currentActId = currentActId;
-            ActsMenuManager.currentActId = currentActId;
-
-            // Проверяем localStorage
-            const stateKey = AppConfig.localStorage.stateKey;
-            const savedStateJson = localStorage.getItem(stateKey);
-
-            let shouldLoadFromDB = true;
-
-            if (savedStateJson) {
-                try {
-                    const savedState = JSON.parse(savedStateJson);
-                    const savedActId = savedState.actId;
-
-                    // Если actId совпадает - восстанавливаем из localStorage
-                    if (savedActId === currentActId) {
-                        console.log('Восстанавливаем акт из localStorage, ID:', currentActId);
-                        shouldLoadFromDB = false;
-
-                        // StorageManager уже восстановил данные в init(),
-                        // просто обновляем UI
-                        if (typeof treeManager !== 'undefined') {
-                            treeManager.render();
-                        }
-                        if (typeof ItemsRenderer !== 'undefined') {
-                            ItemsRenderer.renderAll();
-                        }
-                        if (typeof PreviewManager !== 'undefined') {
-                            PreviewManager.update();
-                        }
-                    }
-                } catch (err) {
-                    console.error('Ошибка парсинга localStorage:', err);
-                    shouldLoadFromDB = true;
-                }
-            }
-
-            if (shouldLoadFromDB) {
-                console.log('Загружаем акт из БД, ID:', currentActId);
-                try {
-                    await APIClient.loadActContent(currentActId);
-                } catch (err) {
-                    console.error('Ошибка загрузки акта:', err);
-                    Notifications.error('Не удалось загрузить акт');
-                    setTimeout(() => {
-                        ActsMenuManager.show();
-                    }, 1000);
-                }
-            }
-        } else {
-            // Нет act_id в URL - показываем меню выбора
-            setTimeout(() => {
-                ActsMenuManager.show();
-            }, 500);
-        }
-
+    document.addEventListener('DOMContentLoaded', () => {
         // Обработчик кнопки "Сохранить в БД"
         document.getElementById('saveToDbBtn')?.addEventListener('click', async () => {
             console.log('Нажата кнопка "Сохранить в БД"');

@@ -3,7 +3,7 @@
  * Менеджер меню выбора актов
  *
  * Управляет отображением списка актов пользователя и переключением между ними.
- * Интегрирован с БД через API.
+ * Интегрирован с БД через API. Отвечает за автозагрузку акта при входе в конструктор.
  */
 
 class ActsMenuManager {
@@ -12,6 +12,12 @@ class ActsMenuManager {
      * @type {number|null}
      */
     static currentActId = null;
+
+    /**
+     * Флаг выполнения начальной загрузки
+     * @type {boolean}
+     */
+    static _initialLoadInProgress = false;
 
     /**
      * Показывает меню выбора актов
@@ -272,6 +278,150 @@ class ActsMenuManager {
     }
 
     /**
+     * Автоматическая загрузка акта при инициализации страницы
+     * @private
+     * @param {number} actId - ID акта из URL
+     */
+    static async _autoLoadAct(actId) {
+        if (this._initialLoadInProgress) {
+            console.log('Загрузка уже выполняется');
+            return;
+        }
+
+        this._initialLoadInProgress = true;
+        this.currentActId = actId;
+        window.currentActId = actId;
+
+        try {
+            // Проверяем localStorage
+            const stateKey = AppConfig.localStorage.stateKey;
+            const savedStateJson = localStorage.getItem(stateKey);
+
+            let restoredFromCache = false;
+
+            if (savedStateJson) {
+                try {
+                    const savedState = JSON.parse(savedStateJson);
+                    const savedActId = savedState.actId;
+
+                    // Если actId совпадает - восстанавливаем из localStorage
+                    if (savedActId === actId) {
+                        console.log('Восстанавливаем акт из localStorage, ID:', actId);
+
+                        // Показываем индикатор на время восстановления
+                        this._showLoadingIndicator('Восстановление из кеша...');
+
+                        // Восстанавливаем состояние через StorageManager
+                        const restored = StorageManager.restoreSavedState();
+
+                        if (restored) {
+                            // Обновляем UI
+                            if (typeof treeManager !== 'undefined') {
+                                treeManager.render();
+                            }
+                            if (typeof ItemsRenderer !== 'undefined') {
+                                ItemsRenderer.renderAll();
+                            }
+                            if (typeof PreviewManager !== 'undefined') {
+                                PreviewManager.update();
+                            }
+
+                            Notifications.success('Акт восстановлен из кеша');
+                            restoredFromCache = true;
+                        }
+                    }
+                } catch (err) {
+                    console.error('Ошибка парсинга localStorage:', err);
+                    // Очищаем поврежденный кеш
+                    StorageManager.clearStorage();
+                }
+            }
+
+            // Если не удалось восстановить из кеша - загружаем из БД
+            if (!restoredFromCache) {
+                console.log('Загружаем акт из БД, ID:', actId);
+                this._showLoadingIndicator('Загрузка из базы данных...');
+
+                await APIClient.loadActContent(actId);
+                Notifications.success('Акт загружен из базы данных');
+            }
+
+        } catch (err) {
+            console.error('Ошибка загрузки акта:', err);
+
+            // Показываем понятное сообщение об ошибке
+            if (err.message.includes('Нет доступа')) {
+                Notifications.error('У вас нет доступа к этому акту');
+            } else if (err.message.includes('не найден')) {
+                Notifications.error('Акт не найден');
+            } else {
+                Notifications.error('Не удалось загрузить акт');
+            }
+
+            // Показываем меню выбора актов
+            setTimeout(() => {
+                this.show();
+            }, 1000);
+
+        } finally {
+            this._hideLoadingIndicator();
+            this._initialLoadInProgress = false;
+        }
+    }
+
+    /**
+     * Показывает индикатор загрузки
+     * @private
+     * @param {string} [message='Загрузка акта...'] - Текст сообщения
+     */
+    static _showLoadingIndicator(message = 'Загрузка акта...') {
+        // Удаляем предыдущий индикатор если есть
+        this._hideLoadingIndicator();
+
+        const indicator = document.createElement('div');
+        indicator.id = 'actLoadingIndicator';
+        indicator.style.cssText = `
+        position: fixed;
+        top: 0;
+        left: 0;
+        width: 100%;
+        height: 100%;
+        background: rgba(255, 255, 255, 0.95);
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        z-index: 9999;
+        flex-direction: column;
+        gap: 16px;
+    `;
+
+        indicator.innerHTML = `
+        <div class="spinner" style="
+            border: 4px solid #f3f3f3;
+            border-top: 4px solid #007bff;
+            border-radius: 50%;
+            width: 50px;
+            height: 50px;
+            animation: spin 1s linear infinite;
+        "></div>
+        <p style="font-size: 16px; color: #333; font-weight: 500;">${message}</p>
+    `;
+
+        document.body.appendChild(indicator);
+    }
+
+    /**
+     * Скрывает индикатор загрузки
+     * @private
+     */
+    static _hideLoadingIndicator() {
+        const indicator = document.getElementById('actLoadingIndicator');
+        if (indicator) {
+            indicator.remove();
+        }
+    }
+
+    /**
      * Экранирует HTML
      * @private
      */
@@ -282,7 +432,7 @@ class ActsMenuManager {
     }
 
     /**
-     * Инициализация обработчиков
+     * Инициализация обработчиков и автозагрузка акта
      */
     static init() {
         const menuBtn = document.getElementById('actsMenuBtn');
@@ -296,13 +446,21 @@ class ActsMenuManager {
             closeBtn.addEventListener('click', () => this.hide());
         }
 
-        // Извлекаем act_id из URL при загрузке
+        // Извлекаем act_id из URL
         const urlParams = new URLSearchParams(window.location.search);
         const actIdFromUrl = urlParams.get('act_id');
 
         if (actIdFromUrl) {
-            this.currentActId = parseInt(actIdFromUrl);
-            window.currentActId = this.currentActId;
+            const actId = parseInt(actIdFromUrl);
+
+            // Автоматически загружаем акт
+            this._autoLoadAct(actId);
+        } else {
+            // Если нет act_id - показываем меню выбора
+            console.log('Нет act_id в URL, показываем меню');
+            setTimeout(() => {
+                this.show();
+            }, 500);
         }
     }
 }

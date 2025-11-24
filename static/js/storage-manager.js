@@ -38,14 +38,16 @@ class StorageManager {
     /**
      * Инициализация менеджера хранилища
      *
-     * Восстанавливает сохраненное состояние при загрузке приложения
-     * и настраивает обработчики событий.
+     * НЕ восстанавливает состояние автоматически.
+     * Восстановление выполняется явно через ActsMenuManager.
      */
     static init() {
         try {
             this._checkLocalStorageAvailable();
             this._setupEventHandlers();
             this._updateSaveIndicator();
+
+            console.log('StorageManager инициализирован (без автовосстановления)');
         } catch (error) {
             console.error('Ошибка инициализации StorageManager:', error);
             Notifications.warning('Автосохранение недоступно в этом браузере');
@@ -69,7 +71,8 @@ class StorageManager {
 
     /**
      * Восстанавливает сохраненное состояние из localStorage
-     * Теперь это публичный метод, вызываемый явно
+     * Публичный метод, вызываемый явно из ActsMenuManager
+     * @returns {boolean} true если восстановление успешно
      */
     static restoreSavedState() {
         const savedState = this._loadState();
@@ -118,7 +121,6 @@ class StorageManager {
             this._trackingDisabled = false;
 
             console.log('Состояние успешно восстановлено из localStorage');
-            Notifications.info(AppConfig.localStorage.messages.restored);
 
             this._markAsSaved();
             return true;
@@ -129,78 +131,6 @@ class StorageManager {
             Notifications.error('Не удалось восстановить сохраненное состояние');
             this._clearStorage();
             return false;
-        }
-    }
-
-    /**
-     * Восстанавливает сохраненное состояние из localStorage
-     * @private
-     */
-    static _restoreSavedState() {
-        const savedState = this._loadState();
-
-        if (!savedState) {
-            console.log('Нет сохраненного состояния для восстановления');
-            return;
-        }
-
-        try {
-            // Отключаем отслеживание на время восстановления
-            this._trackingDisabled = true;
-
-            // Восстанавливаем данные в AppState
-            AppState.treeData = savedState.tree;
-            AppState.tables = savedState.tables || {};
-            AppState.textBlocks = savedState.textBlocks || {};
-            AppState.violations = savedState.violations || {};
-            AppState.tableUISizes = savedState.tableUISizes || {};
-
-            // Восстанавливаем текущий шаг БЕЗ вызова App.goToStep
-            const savedStep = savedState.currentStep || 1;
-            AppState.currentStep = savedStep;
-
-            // Восстанавливаем выбранный узел
-            if (savedState.selectedNodeId) {
-                AppState.selectedNode = AppState.findNodeById(savedState.selectedNodeId);
-            } else {
-                AppState.selectedNode = null;
-            }
-
-            // Восстанавливаем форматы сохранения
-            if (savedState.selectedFormats) {
-                setTimeout(() => {
-                    this._restoreSelectedFormats(savedState.selectedFormats);
-                }, 100);
-            }
-
-            // Перегенерируем нумерацию для консистентности
-            AppState.generateNumbering();
-
-            // Перерендерим дерево для восстановления обработчиков событий
-            if (typeof treeManager !== 'undefined' && treeManager.render) {
-                treeManager.render();
-
-                // Восстанавливаем выделение узла в UI
-                if (savedState.selectedNodeId) {
-                    this._restoreSelectedNodeUI(savedState.selectedNodeId);
-                }
-            }
-
-            // Обновляем UI шагов в заголовке
-            this._updateStepUI(savedStep);
-
-            // Включаем отслеживание обратно
-            this._trackingDisabled = false;
-
-            console.log('Состояние успешно восстановлено из localStorage');
-            Notifications.info(AppConfig.localStorage.messages.restored);
-
-            this._markAsSaved();
-        } catch (error) {
-            this._trackingDisabled = false;
-            console.error('Ошибка восстановления состояния:', error);
-            Notifications.error('Не удалось восстановить сохраненное состояние');
-            this._clearStorage();
         }
     }
 
@@ -220,20 +150,6 @@ class StorageManager {
             console.error('Ошибка чтения из localStorage:', error);
             return null;
         }
-    }
-
-    /**
-     * Восстанавливает выделение узла в UI дерева
-     * @private
-     * @param {string} nodeId - ID узла для выделения
-     */
-    static _restoreSelectedNodeUI(nodeId) {
-        setTimeout(() => {
-            const nodeElement = treeManager.container.querySelector(`[data-node-id="${nodeId}"]`);
-            if (nodeElement && treeManager.selectNode) {
-                treeManager.selectNode(nodeElement);
-            }
-        }, 50);
     }
 
     /**
@@ -533,7 +449,20 @@ class StorageManager {
             localStorage.removeItem(AppConfig.localStorage.stateKey);
             localStorage.removeItem(AppConfig.localStorage.timestampKey);
             this._markAsSaved();
-            Notifications.info('Сохраненное состояние удалено');
+            console.log('localStorage очищен');
+        } catch (error) {
+            console.error('Ошибка очистки localStorage:', error);
+        }
+    }
+
+    /**
+     * Внутренняя очистка без логов (для использования в catch блоках)
+     * @private
+     */
+    static _clearStorage() {
+        try {
+            localStorage.removeItem(AppConfig.localStorage.stateKey);
+            localStorage.removeItem(AppConfig.localStorage.timestampKey);
         } catch (error) {
             console.error('Ошибка очистки localStorage:', error);
         }
