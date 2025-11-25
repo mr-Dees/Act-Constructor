@@ -181,11 +181,11 @@
 <script>
     // Инициализируем window.env с текущим пользователем
     window.env = window.env || {};
-    // Читаем из AppConfig (который в .env через backend)
     window.env.JUPYTERHUB_USER = AppConfig?.auth?.jupyterhubUser || "22494524";
     console.log('Current user:', window.env.JUPYTERHUB_USER);
 </script>
 <script src="/static/js/notifications.js"></script>
+<script src="/static/js/dialog.js"></script>
 <script src="/static/js/create-act-dialog.js"></script>
 <script src="/static/js/acts-manager-page.js"></script>
 </body>

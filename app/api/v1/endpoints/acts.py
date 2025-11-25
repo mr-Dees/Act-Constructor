@@ -102,19 +102,52 @@ async def update_act_metadata(
 @router.post("/{act_id}/duplicate", response_model=ActResponse)
 async def duplicate_act(
         act_id: int,
-        new_km_number: str,
         username: str = Depends(get_username),
         conn=Depends(get_db)
 ):
-    """Создает дубликат акта с новым номером КМ."""
+    """
+    Создает дубликат акта с автоматически сгенерированным названием.
+
+    Новое название формируется как:
+    - "Название проверки (Копия)" - для первой копии
+    - "Название проверки (Копия 2)" - для второй копии
+    - и так далее
+    """
     db_service = ActDBService(conn)
     has_access = await db_service.check_user_access(act_id, username)
     if not has_access:
         raise HTTPException(status_code=403, detail="Нет доступа к акту")
     try:
-        return await db_service.duplicate_act(act_id, new_km_number, username)
+        return await db_service.duplicate_act(act_id, username)
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
     except Exception as e:
         logger.exception(f"Ошибка дублирования акта ID={act_id}: {e}")
         raise HTTPException(status_code=500, detail="Ошибка дублирования акта")
+
+
+@router.delete("/{act_id}")
+async def delete_act(
+        act_id: int,
+        username: str = Depends(get_username),
+        conn=Depends(get_db)
+):
+    """
+    Удаляет акт и все связанные данные.
+
+    Требует подтверждения на фронтенде.
+    Каскадное удаление обрабатывается на уровне БД через ON DELETE CASCADE.
+    """
+    db_service = ActDBService(conn)
+    has_access = await db_service.check_user_access(act_id, username)
+    if not has_access:
+        raise HTTPException(status_code=403, detail="Нет доступа к акту")
+    try:
+        await db_service.delete_act(act_id)
+        logger.info(f"Удален акт ID={act_id} пользователем {username}")
+        return {"success": True, "message": "Акт успешно удален"}
+    except ValueError as e:
+        raise HTTPException(status_code=404, detail=str(e))
+    except Exception as e:
+        logger.exception(f"Ошибка удаления акта ID={act_id}: {e}")
+        raise HTTPException(status_code=500, detail="Ошибка удаления акта")

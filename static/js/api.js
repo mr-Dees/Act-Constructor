@@ -4,7 +4,7 @@
  *
  * Обрабатывает все HTTP-запросы к серверу для работы с актами.
  * Предоставляет методы для генерации и скачивания файлов актов,
- * а также загрузки содержимого из БД.
+ * загрузки/сохранения содержимого из БД, а также удаления актов.
  */
 class APIClient {
     /**
@@ -406,6 +406,42 @@ class APIClient {
             setTimeout(() => {
                 StorageManager.enableTracking();
             }, 100);
+        }
+    }
+
+    /**
+     * Удаляет акт из БД
+     *
+     * @param {number} actId - ID акта
+     * @returns {Promise<void>}
+     */
+    static async deleteAct(actId) {
+        const username = window.env?.JUPYTERHUB_USER || AppConfig?.auth?.jupyterhubUser || "";
+
+        try {
+            const resp = await fetch(`/api/v1/acts/${actId}`, {
+                method: 'DELETE',
+                headers: {'X-JupyterHub-User': username}
+            });
+
+            if (!resp.ok) {
+                if (resp.status === 403) {
+                    throw new Error('Нет доступа к акту');
+                } else if (resp.status === 404) {
+                    throw new Error('Акт не найден');
+                }
+                throw new Error('Ошибка удаления акта');
+            }
+
+            const result = await resp.json();
+            console.log('Акт удален из БД:', result);
+
+            Notifications.success('Акт успешно удален');
+
+        } catch (err) {
+            console.error('Ошибка удаления акта:', err);
+            Notifications.error(`Не удалось удалить акт: ${err.message}`);
+            throw err;
         }
     }
 }

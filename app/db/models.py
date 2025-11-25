@@ -53,12 +53,17 @@ class ActUpdate(BaseModel):
 
 
 class ActListItem(BaseModel):
-    """Элемент списка актов (краткая информация)."""
+    """
+    Элемент списка актов (краткая информация).
+
+    Показывается на главной странице и в меню выбора актов.
+    """
     id: int
     km_number: str
     inspection_name: str
-    city: str
-    created_date: date
+    order_number: str
+    inspection_start_date: date
+    inspection_end_date: date
     last_edited_at: datetime | None
     user_role: str  # роль текущего пользователя в этом акте
 

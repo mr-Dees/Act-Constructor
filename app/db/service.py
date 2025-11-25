@@ -5,6 +5,8 @@
 
 import json
 import logging
+import re
+from datetime import datetime
 
 import asyncpg
 
@@ -153,15 +155,17 @@ class ActDBService:
                 a.id,
                 a.km_number,
                 a.inspection_name,
-                a.city,
-                a.created_date,
+                a.order_number,
+                a.inspection_start_date,
+                a.inspection_end_date,
                 a.last_edited_at,
                 atm.role as user_role
             FROM acts a
             INNER JOIN audit_team_members atm ON a.id = atm.act_id
             WHERE atm.username = $1
-            GROUP BY a.id, a.km_number, a.inspection_name, a.city, 
-                     a.created_date, a.last_edited_at, atm.role
+            GROUP BY a.id, a.km_number, a.inspection_name, a.order_number,
+                     a.inspection_start_date, a.inspection_end_date,
+                     a.last_edited_at, atm.role
             ORDER BY 
                 COALESCE(a.last_edited_at, a.created_at) DESC,
                 a.created_at DESC
@@ -174,8 +178,9 @@ class ActDBService:
                 id=row['id'],
                 km_number=row['km_number'],
                 inspection_name=row['inspection_name'],
-                city=row['city'],
-                created_date=row['created_date'],
+                order_number=row['order_number'],
+                inspection_start_date=row['inspection_start_date'],
+                inspection_end_date=row['inspection_end_date'],
                 last_edited_at=row['last_edited_at'],
                 user_role=row['user_role']
             )
@@ -334,9 +339,7 @@ class ActDBService:
             values.append(username)
             param_idx += 1
 
-            updates.append(f"last_edited_at = ${param_idx}")
-            values.append("CURRENT_TIMESTAMP")
-            param_idx += 1
+            updates.append("last_edited_at = CURRENT_TIMESTAMP")
 
             if updates:
                 values.append(act_id)  # для WHERE clause
@@ -402,18 +405,65 @@ class ActDBService:
 
             return await self.get_act_by_id(act_id)
 
+    async def _generate_unique_copy_name(self, original_name: str) -> str:
+        """
+        Генерирует уникальное название для копии акта.
+
+        Логика:
+        - "Название" → "Название (Копия)"
+        - "Название (Копия)" → "Название (Копия 2)"
+        - "Название (Копия 2)" → "Название (Копия 3)"
+
+        Args:
+            original_name: Исходное название проверки
+
+        Returns:
+            Уникальное название копии
+        """
+        # Проверяем есть ли уже "(Копия N)" в конце
+        match = re.search(r'^(.+?)\s*\(Копия\s*(\d*)\)\s*$', original_name)
+
+        if match:
+            # Уже есть "(Копия)" или "(Копия N)"
+            base_name = match.group(1)
+            existing_num = match.group(2)
+
+            if existing_num:
+                # Есть номер - увеличиваем
+                next_num = int(existing_num) + 1
+            else:
+                # Нет номера - ставим 2
+                next_num = 2
+
+            new_name = f"{base_name} (Копия {next_num})"
+        else:
+            # Первая копия
+            new_name = f"{original_name} (Копия)"
+
+        # Проверяем уникальность в БД
+        exists = await self.conn.fetchval(
+            "SELECT EXISTS(SELECT 1 FROM acts WHERE inspection_name = $1)",
+            new_name
+        )
+
+        if exists:
+            # Если всё ещё не уникально - рекурсивно пробуем следующий номер
+            return await self._generate_unique_copy_name(new_name)
+
+        return new_name
+
     async def duplicate_act(
             self,
             act_id: int,
-            new_km_number: str,
             username: str
     ) -> ActResponse:
         """
-        Создает дубликат акта с новым номером КМ.
+        Создает дубликат акта с автоматически сгенерированным названием.
+
+        Новый КМ генерируется как КМ_оригинала_copy_timestamp.
 
         Args:
             act_id: ID исходного акта
-            new_km_number: Новый номер КМ
             username: Имя пользователя-создателя
 
         Returns:
@@ -422,10 +472,19 @@ class ActDBService:
         # Получаем исходный акт
         original = await self.get_act_by_id(act_id)
 
+        # Генерируем уникальное название
+        new_inspection_name = await self._generate_unique_copy_name(
+            original.inspection_name
+        )
+
+        # Генерируем уникальный КМ
+        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        new_km_number = f"{original.km_number}_copy_{timestamp}"
+
         # Создаем новый акт с теми же данными
         new_act_data = ActCreate(
             km_number=new_km_number,
-            inspection_name=original.inspection_name,
+            inspection_name=new_inspection_name,
             city=original.city,
             created_date=original.created_date,
             order_number=original.order_number,
@@ -540,9 +599,38 @@ class ActDBService:
                 v['recommendations']
             )
 
-        logger.info(f"Создан дубликат акта: ID={act_id} -> ID={new_act.id}")
+        logger.info(f"Создан дубликат акта: ID={act_id} -> ID={new_act.id}, название='{new_inspection_name}'")
 
         return new_act
+
+    async def delete_act(self, act_id: int) -> None:
+        """
+        Удаляет акт и все связанные данные.
+
+        Каскадное удаление обрабатывается на уровне БД через ON DELETE CASCADE.
+
+        Args:
+            act_id: ID акта для удаления
+
+        Raises:
+            ValueError: Если акт не найден
+        """
+        # Проверяем что акт существует
+        exists = await self.conn.fetchval(
+            "SELECT EXISTS(SELECT 1 FROM acts WHERE id = $1)",
+            act_id
+        )
+
+        if not exists:
+            raise ValueError(f"Акт ID={act_id} не найден")
+
+        # Удаляем акт (каскадно удалятся все связанные данные)
+        await self.conn.execute(
+            "DELETE FROM acts WHERE id = $1",
+            act_id
+        )
+
+        logger.info(f"Акт ID={act_id} успешно удален")
 
     async def check_user_access(self, act_id: int, username: str) -> bool:
         """

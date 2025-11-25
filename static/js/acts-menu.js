@@ -1,5 +1,4 @@
 // static/js/acts-menu.js
-
 /**
  * Менеджер меню выбора актов
  *
@@ -60,6 +59,54 @@ class ActsMenuManager {
     }
 
     /**
+     * Форматирует дату в формате DD.MM.YYYY
+     * @private
+     * @param {string|Date} date - Дата для форматирования
+     * @returns {string} Отформатированная дата
+     */
+    static _formatDate(date) {
+        if (!date) return '—';
+
+        try {
+            const d = new Date(date);
+            if (isNaN(d.getTime())) return '—';
+
+            const day = String(d.getDate()).padStart(2, '0');
+            const month = String(d.getMonth() + 1).padStart(2, '0');
+            const year = d.getFullYear();
+
+            return `${day}.${month}.${year}`;
+        } catch (e) {
+            return '—';
+        }
+    }
+
+    /**
+     * Форматирует дату и время в формате DD.MM.YYYY HH:MM
+     * @private
+     * @param {string|Date} datetime - Дата-время для форматирования
+     * @returns {string} Отформатированная дата-время
+     */
+    static _formatDateTime(datetime) {
+        if (!datetime) return 'Не редактировался';
+
+        try {
+            const d = new Date(datetime);
+            if (isNaN(d.getTime())) return 'Не редактировался';
+
+            const day = String(d.getDate()).padStart(2, '0');
+            const month = String(d.getMonth() + 1).padStart(2, '0');
+            const year = d.getFullYear();
+            const hours = String(d.getHours()).padStart(2, '0');
+            const minutes = String(d.getMinutes()).padStart(2, '0');
+
+            return `${day}.${month}.${year} ${hours}:${minutes}`;
+        } catch (e) {
+            return 'Не редактировался';
+        }
+    }
+
+    /**
      * Рендерит список актов в меню
      */
     static async renderActsList() {
@@ -104,9 +151,9 @@ class ActsMenuManager {
                     transition: all 0.2s;
                 `;
 
-                const lastEdited = act.last_edited_at
-                    ? new Date(act.last_edited_at).toLocaleString('ru-RU')
-                    : 'Не редактировался';
+                const lastEdited = this._formatDateTime(act.last_edited_at);
+                const startDate = this._formatDate(act.inspection_start_date);
+                const endDate = this._formatDate(act.inspection_end_date);
 
                 li.innerHTML = `
                     <div style="display:flex;justify-content:space-between;align-items:start;margin-bottom:8px;">
@@ -120,10 +167,13 @@ class ActsMenuManager {
                         ">${act.user_role}</span>
                     </div>
                     <div style="font-size:13px;color:#666;margin-bottom:4px;">
-                        <strong>КМ:</strong> ${act.km_number}
+                        <strong>КМ:</strong> ${this._escapeHtml(act.km_number)}
+                    </div>
+                    <div style="font-size:13px;color:#666;margin-bottom:4px;">
+                        <strong>Приказ:</strong> ${this._escapeHtml(act.order_number)}
                     </div>
                     <div style="font-size:13px;color:#666;margin-bottom:8px;">
-                        <strong>Город:</strong> ${act.city}
+                        <strong>Период проверки:</strong> ${startDate} — ${endDate}
                     </div>
                     <div style="font-size:12px;color:#999;">
                         Изменено: ${lastEdited}
@@ -297,17 +347,18 @@ class ActsMenuManager {
             return;
         }
 
-        // Закрываем меню перед показом диалога
+        // Закрываем меню перед показом диалога подтверждения
         this.hide();
 
-        // Используем кастомный диалог вместо prompt
-        const newKm = await this._showPromptDialog(
-            'Дублирование акта',
-            'Введите новый номер КМ для дубликата:',
-            ''
-        );
+        const confirmed = await DialogManager.show({
+            title: 'Дублирование акта',
+            message: 'Будет создана копия текущего акта. Продолжить?',
+            icon: '📋',
+            confirmText: 'Создать копию',
+            cancelText: 'Отмена'
+        });
 
-        if (!newKm || !newKm.trim()) {
+        if (!confirmed) {
             Notifications.info('Дублирование отменено');
             return;
         }
@@ -315,7 +366,7 @@ class ActsMenuManager {
         try {
             const username = window.env?.JUPYTERHUB_USER || AppConfig?.auth?.jupyterhubUser || "";
             const response = await fetch(
-                `/api/v1/acts/${this.currentActId}/duplicate?new_km_number=${encodeURIComponent(newKm)}`,
+                `/api/v1/acts/${this.currentActId}/duplicate`,
                 {
                     method: 'POST',
                     headers: {'X-JupyterHub-User': username}
@@ -328,96 +379,55 @@ class ActsMenuManager {
             }
 
             const newAct = await response.json();
-            Notifications.success(`Дубликат создан: КМ ${newAct.km_number}`);
+            Notifications.success(`Копия создана: ${newAct.inspection_name}`);
 
             // Переходим к новому акту
             window.location.href = `/constructor?act_id=${newAct.id}`;
 
         } catch (err) {
             console.error('Ошибка дублирования акта:', err);
-            Notifications.error(`Не удалось создать дубликат: ${err.message}`);
+            Notifications.error(`Не удалось создать копию: ${err.message}`);
         }
     }
 
     /**
-     * Показывает кастомный диалог с полем ввода
-     * @private
-     * @param {string} title - Заголовок диалога
-     * @param {string} message - Текст сообщения
-     * @param {string} defaultValue - Значение по умолчанию
-     * @returns {Promise<string|null>} Введенное значение или null при отмене
+     * Удаляет текущий акт
      */
-    static async _showPromptDialog(title, message, defaultValue = '') {
-        return new Promise((resolve) => {
-            const overlay = document.createElement('div');
-            overlay.className = 'custom-dialog-overlay';
+    static async deleteCurrentAct() {
+        if (!this.currentActId) {
+            Notifications.warning('Сначала выберите акт');
+            return;
+        }
 
-            const dialog = document.createElement('div');
-            dialog.className = 'custom-dialog';
-            dialog.style.maxWidth = '500px';
+        // Закрываем меню перед показом диалога
+        this.hide();
 
-            dialog.innerHTML = `
-                <div class="dialog-icon">📝</div>
-                <h3 class="dialog-title">${title}</h3>
-                <p class="dialog-message">${message}</p>
-                <input type="text" id="promptInput" class="dialog-input" value="${defaultValue}" 
-                       style="width:100%;padding:10px;border:1px solid #ddd;border-radius:4px;margin-bottom:20px;font-size:14px;">
-                <div class="dialog-buttons">
-                    <button class="btn btn-secondary" id="promptCancelBtn">Отмена</button>
-                    <button class="btn btn-primary" id="promptOkBtn">OK</button>
-                </div>
-            `;
-
-            overlay.appendChild(dialog);
-            document.body.appendChild(overlay);
-
-            const input = dialog.querySelector('#promptInput');
-            const okBtn = dialog.querySelector('#promptOkBtn');
-            const cancelBtn = dialog.querySelector('#promptCancelBtn');
-
-            // Фокус на поле ввода
-            setTimeout(() => {
-                input.focus();
-                input.select();
-            }, 100);
-
-            const close = (value) => {
-                overlay.classList.add('hidden');
-                setTimeout(() => {
-                    overlay.remove();
-                }, 200);
-                resolve(value);
-            };
-
-            okBtn.addEventListener('click', () => close(input.value));
-            cancelBtn.addEventListener('click', () => close(null));
-
-            // Enter для подтверждения
-            input.addEventListener('keydown', (e) => {
-                if (e.key === 'Enter') {
-                    e.preventDefault();
-                    close(input.value);
-                } else if (e.key === 'Escape') {
-                    close(null);
-                }
-            });
-
-            // Закрытие по клику на оверлей
-            overlay.addEventListener('click', (e) => {
-                if (e.target === overlay) {
-                    close(null);
-                }
-            });
-
-            // Закрытие по Escape
-            const escapeHandler = (e) => {
-                if (e.key === 'Escape') {
-                    close(null);
-                    document.removeEventListener('keydown', escapeHandler);
-                }
-            };
-            document.addEventListener('keydown', escapeHandler);
+        const confirmed = await DialogManager.show({
+            title: 'Удаление акта',
+            message: 'Вы уверены, что хотите удалить этот акт? Это действие необратимо и удалит все данные акта.',
+            icon: '🗑️',
+            confirmText: 'Удалить',
+            cancelText: 'Отмена'
         });
+
+        if (!confirmed) {
+            Notifications.info('Удаление отменено');
+            return;
+        }
+
+        try {
+            await APIClient.deleteAct(this.currentActId);
+
+            // Очищаем localStorage
+            StorageManager.clearStorage();
+
+            // Переходим на главную страницу
+            window.location.href = '/';
+
+        } catch (err) {
+            console.error('Ошибка удаления акта:', err);
+            Notifications.error(`Не удалось удалить акт: ${err.message}`);
+        }
     }
 
     /**
