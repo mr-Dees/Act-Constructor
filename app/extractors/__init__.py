@@ -17,7 +17,7 @@ from app.extractors.api import (
     get_all_violations,
     get_violation_by_item,
     get_violations_by_item_list,
-    get_violation_field,
+    get_violation_fields,
 )
 
 __all__ = [
@@ -32,5 +32,5 @@ __all__ = [
     'get_all_violations',
     'get_violation_by_item',
     'get_violations_by_item_list',
-    'get_violation_field',
+    'get_violation_fields',
 ]

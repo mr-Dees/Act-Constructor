@@ -12,37 +12,123 @@ class ActFormatter:
     @staticmethod
     def format_tree_structure(tree: dict, stats: dict = None, level: int = 0) -> str:
         """
-        Выводит структуру дерева акта с названиями пунктов, может выводить статистику.
+        Выводит структуру дерева акта.
+
+        Логика:
+        - БЕЗ статистики (stats=None): только номера и названия пунктов (item)
+        - СО статистикой (stats!=None): пункты + элементы в квадратных скобках + статистика в конце
 
         Args:
             tree: Корневой узел или поддерево
-            stats: {'tables': ..., 'textblocks': ..., 'violations': ...}
-            level: Рекурсивный уровень
+            stats: {'tables': ..., 'textblocks': ..., 'violations': ...} или None
+            level: Рекурсивный уровень (используется внутренне)
 
         Returns:
             Человекочитаемый список пунктов с отступами/нумерацией
         """
+        # БЕЗ статистики - только пункты
+        if stats is None:
+            return ActFormatter._format_structure_simple(tree, level)
+
+        # СО статистикой - пункты + элементы + статистика В КОНЦЕ
+        lines = ActFormatter._format_structure_with_elements(tree, level)
+
+        # Добавляем статистику ОДИН РАЗ в самом конце (только на уровне 0)
+        if level == 0:
+            lines.append("")  # Пустая строка перед статистикой
+            lines.append(f"Всего таблиц: {stats.get('tables', 0)}")
+            lines.append(f"Всего текстовых блоков: {stats.get('textblocks', 0)}")
+            lines.append(f"Всего нарушений: {stats.get('violations', 0)}")
+
+        return '\n'.join(lines)
+
+    @staticmethod
+    def _format_structure_simple(node: dict, level: int = 0) -> str:
+        """
+        Форматирует структуру БЕЗ элементов (только пункты).
+
+        Args:
+            node: Узел дерева
+            level: Уровень вложенности
+
+        Returns:
+            Отформатированная строка
+        """
         lines = []
         indent = '  ' * level
-        label = tree.get('label') or ''
-        number = tree.get('number', '')
-        joined = f"{number}. {label}".strip() if number else label
 
-        lines.append(f"{indent}{joined}")
+        # Пропускаем информационные узлы
+        if node.get('type') in ['table', 'textblock', 'violation']:
+            return ''
 
-        for child in tree.get('children', []):
-            lines.append(ActFormatter.format_tree_structure(child, None, level + 1))
+        # Выводим только пункты
+        label = node.get('label', '')
+        if label and node.get('id') != 'root':
+            lines.append(f"{indent}{label}")
 
-        # Добавляем статистику в корень
-        if stats is not None and level == 0:
-            stat_lines = [
-                "",
-                f"Всего таблиц: {stats.get('tables', 0)}",
-                f"Всего текстовых блоков: {stats.get('textblocks', 0)}",
-                f"Всего нарушений: {stats.get('violations', 0)}",
-            ]
-            lines.extend(stat_lines)
-        return '\n'.join([line for line in lines if line.strip()])
+        # Рекурсия по детям
+        for child in node.get('children', []):
+            child_result = ActFormatter._format_structure_simple(
+                child,
+                level + 1 if node.get('id') != 'root' else level
+            )
+            if child_result:
+                lines.append(child_result)
+
+        return '\n'.join(lines)
+
+    @staticmethod
+    def _format_structure_with_elements(node: dict, level: int = 0) -> list:
+        """
+        Форматирует структуру С элементами в квадратных скобках.
+
+        Возвращает список строк (а не строку), чтобы избежать дублирования
+        при рекурсивных вызовах.
+
+        Args:
+            node: Узел дерева
+            level: Уровень вложенности
+
+        Returns:
+            Список строк (без join)
+        """
+        lines = []
+        indent = '  ' * level
+
+        # Информационные узлы - в квадратных скобках
+        if node.get('type') == 'table':
+            number = node.get('number', 'Таблица')
+            custom_label = node.get('customLabel', '')
+            if custom_label:
+                lines.append(f"{indent}[{number}] {custom_label}")
+            else:
+                lines.append(f"{indent}[{number}]")
+            return lines
+
+        if node.get('type') == 'textblock':
+            number = node.get('number', 'Текстовый блок')
+            lines.append(f"{indent}[{number}]")
+            return lines
+
+        if node.get('type') == 'violation':
+            number = node.get('number', 'Нарушение')
+            lines.append(f"{indent}[{number}]")
+            return lines
+
+        # Для пунктов - обычный вывод
+        label = node.get('label', '')
+        if label and node.get('id') != 'root':
+            lines.append(f"{indent}{label}")
+
+        # Рекурсия по детям
+        for child in node.get('children', []):
+            child_lines = ActFormatter._format_structure_with_elements(
+                child,
+                level + 1 if node.get('id') != 'root' else level
+            )
+            lines.extend(child_lines)  # extend вместо append
+
+        return lines
 
     @staticmethod
     def format_metadata(act_row: dict) -> str:
@@ -379,13 +465,13 @@ class ActFormatter:
         return []
 
     @staticmethod
-    def format_textblock(textblock_data: dict, node_number: str = "") -> str:
+    def format_textblock(textblock_data: dict, parent_item_number: str = "") -> str:
         """
         Форматирует текстовый блок.
 
         Args:
             textblock_data: Данные текстового блока
-            node_number: Номер узла в дереве
+            parent_item_number: Иерархический номер родительского пункта (например, "5.1.1")
 
         Returns:
             Отформатированный текст
@@ -400,8 +486,8 @@ class ActFormatter:
 
         lines = []
 
-        if node_number:
-            lines.append(f"\nТекстовый блок (пункт {node_number}):")
+        if parent_item_number:
+            lines.append(f"\nТекстовый блок (пункт {parent_item_number}):")
         else:
             lines.append("\nТекстовый блок:")
 
@@ -435,13 +521,13 @@ class ActFormatter:
         return text.strip()
 
     @staticmethod
-    def format_violation(violation_data: dict, node_number: str = "") -> str:
+    def format_violation(violation_data: dict, parent_item_number: str = "") -> str:
         """
         Форматирует нарушение.
 
         Args:
             violation_data: Данные нарушения
-            node_number: Номер узла в дереве
+            parent_item_number: Иерархический номер родительского пункта (например, "5.1.1.1")
 
         Returns:
             Отформатированное нарушение
@@ -449,8 +535,8 @@ class ActFormatter:
         lines = []
 
         # Заголовок
-        if node_number:
-            lines.append(f"\nНарушение (пункт {node_number})")
+        if parent_item_number:
+            lines.append(f"\nНарушение (пункт {parent_item_number})")
         else:
             lines.append("\nНарушение")
 
@@ -547,7 +633,8 @@ class ActFormatter:
             textblocks: list[dict],
             violations: list[dict],
             level: int = 0,
-            max_depth: int | None = None
+            max_depth: int | None = None,
+            parent_item_number: str = ""
     ) -> str:
         """
         Рекурсивно форматирует элемент дерева со всем содержимым.
@@ -559,13 +646,14 @@ class ActFormatter:
             textblocks: Все текстовые блоки акта
             violations: Все нарушения акта
             level: Текущий уровень вложенности
-            max_depth: Максимальная глубина рекурсии
+            max_depth: Максимальная глубина рекурсии (None - без ограничений)
+            parent_item_number: Иерархический номер родительского пункта
 
         Returns:
             Отформатированный текст пункта
         """
-        if max_depth is not None and level >= max_depth:
-            return ""
+        # Проверка глубины: если превышен лимит, не обрабатываем детей
+        process_children = (max_depth is None) or (level < max_depth)
 
         lines = []
         indent = "  " * level
@@ -575,10 +663,13 @@ class ActFormatter:
         label = node.get('label', '')
         number = node.get('number', '')
 
+        # Обновляем parent_item_number для дочерних элементов
+        current_item_number = parent_item_number
+        if node_type == 'item' and number:
+            current_item_number = number
+
         if node_type == 'item':
-            if number and label:
-                lines.append(f"{indent}{label}")
-            elif label:
+            if label:
                 lines.append(f"{indent}{label}")
 
             # Содержимое пункта
@@ -591,7 +682,8 @@ class ActFormatter:
             if table_id:
                 table = next((t for t in tables if t['table_id'] == table_id), None)
                 if table:
-                    formatted = ActFormatter.format_table(table, number)
+                    # Передаем parent_item_number вместо number
+                    formatted = ActFormatter.format_table(table, current_item_number)
                     for line in formatted.split('\n'):
                         lines.append(f"{indent}{line}")
 
@@ -600,7 +692,8 @@ class ActFormatter:
             if textblock_id:
                 textblock = next((tb for tb in textblocks if tb['textblock_id'] == textblock_id), None)
                 if textblock:
-                    formatted = ActFormatter.format_textblock(textblock, number)
+                    # Передаем parent_item_number вместо number
+                    formatted = ActFormatter.format_textblock(textblock, current_item_number)
                     for line in formatted.split('\n'):
                         lines.append(f"{indent}{line}")
 
@@ -609,23 +702,26 @@ class ActFormatter:
             if violation_id:
                 violation = next((v for v in violations if v['violation_id'] == violation_id), None)
                 if violation:
-                    formatted = ActFormatter.format_violation(violation, number)
+                    # Передаем parent_item_number вместо number
+                    formatted = ActFormatter.format_violation(violation, current_item_number)
                     for line in formatted.split('\n'):
                         lines.append(f"{indent}{line}")
 
-        # Рекурсивная обработка дочерних элементов
-        children = node.get('children', [])
-        for child in children:
-            child_formatted = ActFormatter.format_tree_item(
-                child,
-                tree_data,
-                tables,
-                textblocks,
-                violations,
-                level + 1,
-                max_depth
-            )
-            if child_formatted:
-                lines.append(child_formatted)
+        # Рекурсивная обработка дочерних элементов (только если не превышена глубина)
+        if process_children:
+            children = node.get('children', [])
+            for child in children:
+                child_formatted = ActFormatter.format_tree_item(
+                    child,
+                    tree_data,
+                    tables,
+                    textblocks,
+                    violations,
+                    level + 1,
+                    max_depth,
+                    current_item_number  # Передаем текущий номер пункта
+                )
+                if child_formatted:
+                    lines.append(child_formatted)
 
         return '\n'.join(lines)

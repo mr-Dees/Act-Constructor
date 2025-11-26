@@ -197,6 +197,71 @@ class ActQueries:
         return result
 
     @staticmethod
+    async def get_textblocks_by_item(
+            conn: asyncpg.Connection,
+            act_id: int,
+            item_number: str,
+            tree: dict = None,
+            recursive: bool = True
+    ) -> list[dict]:
+        """
+        Получает текстовые блоки конкретного пункта.
+
+        Args:
+            conn: Подключение к БД
+            act_id: ID акта
+            item_number: Номер пункта
+            tree: Дерево для маппинга
+            recursive: Искать в подпунктах
+
+        Returns:
+            Список текстовых блоков в пункте и его подпунктах
+        """
+        # Получаем все текстовые блоки
+        all_textblocks = await ActQueries.get_all_textblocks(conn, act_id, tree)
+
+        if not tree:
+            # Без дерева - старая логика
+            result = []
+            for textblock in all_textblocks:
+                node_num = textblock.get('node_number', '')
+                if not node_num:
+                    continue
+
+                if recursive:
+                    if node_num == item_number or node_num.startswith(f"{item_number}."):
+                        result.append(textblock)
+                else:
+                    if node_num == item_number:
+                        result.append(textblock)
+            return result
+
+        # С деревом - используем маппинг node_id -> hierarchical_number
+        node_id_to_number = ActQueries._build_node_id_to_hierarchical_number_map(tree)
+
+        result = []
+        for textblock in all_textblocks:
+            node_id = textblock.get('node_id')
+            if not node_id:
+                continue
+
+            # Находим родительский пункт этого текстового блока
+            parent_number = ActQueries._find_parent_item_number(tree, node_id, node_id_to_number)
+
+            if not parent_number:
+                continue
+
+            # Сравниваем с искомым номером пункта
+            if recursive:
+                if parent_number == item_number or parent_number.startswith(f"{item_number}."):
+                    result.append(textblock)
+            else:
+                if parent_number == item_number:
+                    result.append(textblock)
+
+        return result
+
+    @staticmethod
     async def get_all_textblocks(conn: asyncpg.Connection, act_id: int, tree: dict = None) -> list[dict]:
         """
         Получает все текстовые блоки акта.
@@ -320,27 +385,119 @@ class ActQueries:
         Returns:
             Список таблиц в пункте и его подпунктах
         """
-        # Получаем все таблицы с правильными номерами
+        # Получаем все таблицы
         all_tables = await ActQueries.get_all_tables(conn, act_id, tree)
 
-        # Фильтруем по номеру
+        if not tree:
+            # Без дерева - используем node_number напрямую (старая логика)
+            result = []
+            for table in all_tables:
+                node_num = table.get('node_number', '')
+                if not node_num:
+                    continue
+
+                if recursive:
+                    if node_num == item_number or node_num.startswith(f"{item_number}."):
+                        result.append(table)
+                else:
+                    if node_num == item_number:
+                        result.append(table)
+            return result
+
+        # С деревом - используем маппинг node_id -> hierarchical_number
+        # Строим маппинг node_id -> hierarchical_number из дерева
+        node_id_to_number = ActQueries._build_node_id_to_hierarchical_number_map(tree)
+
         result = []
         for table in all_tables:
-            node_num = table.get('node_number', '')
-
-            if not node_num:
+            node_id = table.get('node_id')
+            if not node_id:
                 continue
 
-            # Точное совпадение или начинается с item_number.
+            # Находим родительский пункт этой таблицы через node_id
+            parent_number = ActQueries._find_parent_item_number(tree, node_id, node_id_to_number)
+
+            if not parent_number:
+                continue
+
+            # Сравниваем с искомым номером пункта
             if recursive:
-                if node_num == item_number or node_num.startswith(f"{item_number}."):
+                # Точное совпадение ИЛИ начинается с item_number.
+                if parent_number == item_number or parent_number.startswith(f"{item_number}."):
                     result.append(table)
             else:
                 # Только точное совпадение
-                if node_num == item_number:
+                if parent_number == item_number:
                     result.append(table)
 
         return result
+
+    @staticmethod
+    def _build_node_id_to_hierarchical_number_map(tree: dict) -> dict:
+        """
+        Строит маппинг node_id -> hierarchical_number из дерева.
+
+        Args:
+            tree: Дерево или узел
+
+        Returns:
+            Словарь {node_id: hierarchical_number}
+        """
+        map_dict = {}
+
+        def traverse(node):
+            node_id = node.get('id')
+            number = node.get('number')
+            node_type = node.get('type', 'item')
+
+            # Сохраняем только для узлов типа 'item' (пункты)
+            if node_id and number and node_type == 'item':
+                map_dict[node_id] = number
+
+            for child in node.get('children', []):
+                traverse(child)
+
+        traverse(tree)
+        return map_dict
+
+    @staticmethod
+    def _find_parent_item_number(tree: dict, target_node_id: str, node_map: dict) -> str | None:
+        """
+        Находит иерархический номер родительского пункта (item) для узла.
+
+        Для узлов типа table/textblock/violation находит ближайший родительский
+        узел типа 'item' и возвращает его hierarchical number.
+
+        Args:
+            tree: Корень дерева
+            target_node_id: ID узла (например, таблицы или нарушения)
+            node_map: Маппинг node_id -> hierarchical_number для пунктов
+
+        Returns:
+            Hierarchical number родительского пункта (например, "5.1.1.1") или None
+        """
+
+        def find_node_and_parent(node, parent_item_number=None):
+            node_id = node.get('id')
+            node_type = node.get('type', 'item')
+
+            # Обновляем parent_item_number если текущий узел - пункт
+            if node_type == 'item' and node_id in node_map:
+                parent_item_number = node_map[node_id]
+
+            # Если нашли целевой узел - возвращаем текущий parent_item_number
+            if node_id == target_node_id:
+                return parent_item_number
+
+            # Рекурсия по детям
+            for child in node.get('children', []):
+                result = find_node_and_parent(child, parent_item_number)
+                if result is not None:
+                    return result
+
+            return None
+
+        return find_node_and_parent(tree)
 
     @staticmethod
     async def get_table_by_name(
@@ -396,22 +553,46 @@ class ActQueries:
         Returns:
             Список нарушений в пункте и его подпунктах
         """
-        # Получаем все нарушения с правильными номерами
+        # Получаем все нарушения
         all_violations = await ActQueries.get_all_violations(conn, act_id, tree)
 
-        # Фильтруем по номеру
+        if not tree:
+            # Без дерева - старая логика
+            result = []
+            for violation in all_violations:
+                node_num = violation.get('node_number', '')
+                if not node_num:
+                    continue
+
+                if recursive:
+                    if node_num == item_number or node_num.startswith(f"{item_number}."):
+                        result.append(violation)
+                else:
+                    if node_num == item_number:
+                        result.append(violation)
+            return result
+
+        # С деревом - используем маппинг node_id -> hierarchical_number
+        node_id_to_number = ActQueries._build_node_id_to_hierarchical_number_map(tree)
+
         result = []
         for violation in all_violations:
-            node_num = violation.get('node_number', '')
-
-            if not node_num:
+            node_id = violation.get('node_id')
+            if not node_id:
                 continue
 
+            # Находим родительский пункт этого нарушения
+            parent_number = ActQueries._find_parent_item_number(tree, node_id, node_id_to_number)
+
+            if not parent_number:
+                continue
+
+            # Сравниваем с искомым номером пункта
             if recursive:
-                if node_num == item_number or node_num.startswith(f"{item_number}."):
+                if parent_number == item_number or parent_number.startswith(f"{item_number}."):
                     result.append(violation)
             else:
-                if node_num == item_number:
+                if parent_number == item_number:
                     result.append(violation)
 
         return result
