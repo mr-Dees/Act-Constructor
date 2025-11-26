@@ -1,5 +1,8 @@
 """
-Модуль фильтрации актов по различным критериям.
+Модуль фильтрации актов по заданным критериям.
+
+Содержит класс ActFilters для построения SQL-запросов поиска по различным метаданным
+чек-листовых актов. Включает методы для поиска и форматирования результатов.
 """
 
 from datetime import date
@@ -9,7 +12,12 @@ import asyncpg
 
 
 class ActFilters:
-    """Построитель SQL-запросов с динамическими фильтрами для поиска актов."""
+    """
+    Построитель SQL-запросов с динамическими фильтрами для поиска актов.
+
+    Позволяет искать акты с помощью гибкой системы фильтров по метаданным:
+    названию проверки, городу, датам и номерам поручений.
+    """
 
     @staticmethod
     async def search_acts(
@@ -28,31 +36,34 @@ class ActFilters:
             with_metadata: bool = True
     ) -> list[dict]:
         """
-        Поиск актов по набору фильтров.
+        Выполняет поиск актов по переданным фильтрам.
+
+        Фильтры могут комбинироваться. Текстовые фильтры используют ILIKE
+        для поиска по подстроке (частичное совпадение).
 
         Args:
-            conn: Подключение к БД
-            inspection_names: Список названий проверок (частичное совпадение, ILIKE)
-            cities: Список городов (частичное совпадение, ILIKE)
-            created_date_from: Дата составления от
-            created_date_to: Дата составления до
-            order_date_from: Дата приказа от
-            order_date_to: Дата приказа до
-            inspection_start_from: Дата начала проверки от
-            inspection_start_to: Дата начала проверки до
-            inspection_end_from: Дата окончания проверки от
-            inspection_end_to: Дата окончания проверки до
-            directive_numbers: Список номеров поручений (частичное совпадение)
-            with_metadata: Включать подробные метаданные
+            conn: Открытое асинхронное подключение к БД.
+            inspection_names: Список частей названий проверок.
+            cities: Список городов.
+            created_date_from: Дата акта не раньше указанной.
+            created_date_to: Дата акта не позднее указанной.
+            order_date_from: Дата приказа не раньше указанной.
+            order_date_to: Дата приказа не позднее указанной.
+            inspection_start_from: Начало периода проверки >=.
+            inspection_start_to: Начало периода проверки <=.
+            inspection_end_from: Окончание периода проверки >=.
+            inspection_end_to: Окончание периода проверки <=.
+            directive_numbers: Поиск по номерам поручений (или их частям).
+            with_metadata: Добавлять ли к результату все метаданные.
 
         Returns:
-            Список словарей с информацией об актах
+            Список словарей — найденные акты с запрошенными полями.
         """
         conditions = []
         params = []
-        param_index = 1
+        param_index = 1  # Индексация параметров для asyncpg
 
-        # Фильтр по названиям проверок (ILIKE для частичного совпадения)
+        # --- Текстовые фильтры по названию проверки ---
         if inspection_names:
             name_conditions = []
             for name in inspection_names:
@@ -61,7 +72,7 @@ class ActFilters:
                 param_index += 1
             conditions.append(f"({' OR '.join(name_conditions)})")
 
-        # Фильтр по городам
+        # --- Фильтр по городам ---
         if cities:
             city_conditions = []
             for city in cities:
@@ -70,7 +81,7 @@ class ActFilters:
                 param_index += 1
             conditions.append(f"({' OR '.join(city_conditions)})")
 
-        # Фильтры по датам
+        # --- Фильтры по датам ---
         date_filters = [
             (created_date_from, "a.created_date >="),
             (created_date_to, "a.created_date <="),
@@ -81,14 +92,13 @@ class ActFilters:
             (inspection_end_from, "a.inspection_end_date >="),
             (inspection_end_to, "a.inspection_end_date <="),
         ]
-
         for date_value, condition in date_filters:
             if date_value:
                 conditions.append(f"{condition} ${param_index}")
                 params.append(date_value)
                 param_index += 1
 
-        # Фильтр по номерам поручений (JOIN с act_directives)
+        # --- Фильтр по номерам поручений (JOIN c act_directives) ---
         if directive_numbers:
             directive_conditions = []
             for directive in directive_numbers:
@@ -104,7 +114,7 @@ class ActFilters:
                 )"""
             )
 
-        # Базовый запрос
+        # --- Основной SELECT ---
         if with_metadata:
             base_query = """
                 SELECT 
@@ -137,53 +147,55 @@ class ActFilters:
                 FROM acts a
             """
 
-        # Добавляем WHERE если есть условия
+        # --- WHERE условия ---
         if conditions:
             base_query += " WHERE " + " AND ".join(conditions)
 
-        # Сортировка по дате редактирования (последние первыми)
+        # --- Сортировка: последние редактированные первыми ---
         base_query += " ORDER BY COALESCE(a.last_edited_at, a.created_at) DESC"
 
-        # Выполняем запрос
+        # --- Выполнение SQL ---
         rows = await conn.fetch(base_query, *params)
 
+        # Возврат результатов в виде словарей
         return [dict(row) for row in rows]
 
     @staticmethod
     def format_search_results(results: list[dict], with_metadata: bool = True) -> str:
         """
-        Форматирует результаты поиска в человекочитаемый вид.
+        Форматирует результаты поиска в человекочитаемый текстовый вид.
+
+        Для каждого акта отображает краткую метаинформацию.
 
         Args:
-            results: Результаты поиска
-            with_metadata: Включать подробные метаданные
+            results: Список найденных актов.
+            with_metadata: Полная информация или кратко.
 
         Returns:
-            Отформатированная строка
+            Строка для удобного просмотра результата.
         """
         if not results:
             return "По заданным фильтрам актов не найдено."
 
         lines = [f"Найдено актов: {len(results)}\n"]
-
         for idx, act in enumerate(results, 1):
             lines.append(f"{idx}. КМ: {act['km_number']}")
             lines.append(f"   Проверка: {act['inspection_name']}")
             lines.append(f"   Город: {act['city']}")
             lines.append(
-                f"   Период: {act['inspection_start_date']} - {act['inspection_end_date']}"
+                f"   Период: {act.get('inspection_start_date')} - {act.get('inspection_end_date')}"
             )
 
             if with_metadata:
-                lines.append(f"   Приказ: {act['order_number']} от {act['order_date']}")
-                lines.append(f"   Дата акта: {act['created_date']}")
+                lines.append(f"   Приказ: {act.get('order_number')} от {act.get('order_date')}")
+                lines.append(f"   Дата акта: {act.get('created_date')}")
                 lines.append(
-                    f"   Тип: {'Процессная' if act['is_process_based'] else 'Функциональная'}"
+                    f"   Тип: {'Процессная' if act.get('is_process_based') else 'Функциональная'}"
                 )
-                lines.append(f"   Создан: {act['created_by']} ({act['created_at']})")
-                if act['last_edited_by']:
+                lines.append(f"   Создан: {act.get('created_by')} ({act.get('created_at')})")
+                if act.get('last_edited_by'):
                     lines.append(
-                        f"   Последнее редактирование: {act['last_edited_by']} ({act['last_edited_at']})"
+                        f"   Последнее редактирование: {act.get('last_edited_by')} ({act.get('last_edited_at')})"
                     )
 
             lines.append("")  # Пустая строка между актами

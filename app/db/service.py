@@ -1,6 +1,12 @@
 # app/db/service.py
 """
-Сервис для работы с актами в PostgreSQL.
+Сервис бизнес-логики для работы с актами в PostgreSQL.
+
+Включает высокоуровневый класс ActDBService для:
+- Создания, удаления, обновления актов и связанных сущностей
+- Получения актов пользователя и полной информации по акту
+- Дублирования документа с копированием дерева, таблиц, текстблоков, нарушений
+- Проверки доступа пользователя
 """
 
 import json
@@ -23,14 +29,20 @@ logger = logging.getLogger("act_constructor.db")
 
 
 class ActDBService:
-    """Сервис для работы с актами в БД."""
+    """
+    Сервис для работы с актами и их связанными сущностями в базе данных.
+
+    Создаётся с помощью существующего подключения к PostgreSQL, затем
+    предоставляет основной CRUD-интерфейс для актов и публичные методы
+    для сервисных операций в приложении.
+    """
 
     def __init__(self, conn: asyncpg.Connection):
         """
-        Инициализация сервиса.
+        Инициализирует сервис с подключением к БД.
 
         Args:
-            conn: Подключение к PostgreSQL
+            conn: Асинхронное подключение к PostgreSQL
         """
         self.conn = conn
 
@@ -40,20 +52,28 @@ class ActDBService:
             username: str
     ) -> ActResponse:
         """
-        Создает новый акт с метаданными.
+        Создает новый акт с метаданными, аудиторской группой и поручениями.
+
+        Выполняет следующие действия в транзакции:
+        1. Проверяет что текущий пользователь входит в аудиторскую группу
+        2. Создает запись акта в таблице acts
+        3. Добавляет членов аудиторской группы
+        4. Добавляет поручения
+        5. Создает пустое дерево структуры
 
         Args:
-            act_data: Данные для создания акта
-            username: Имя пользователя-создателя
+            act_data: Валидированные данные для создания акта
+            username: Имя пользователя-создателя (из JUPYTERHUB_USER)
 
         Returns:
-            Созданный акт
+            Полная информация о созданном акте
 
         Raises:
-            ValueError: Если пользователь не в составе группы или КМ уже существует
+            ValueError: Если пользователь не входит в состав группы
+            asyncpg.UniqueViolationError: Если КМ номер уже существует
         """
         async with self.conn.transaction():
-            # Проверка что пользователь в составе группы
+            # Проверка: пользователь должен быть членом аудиторской группы
             user_in_team = any(
                 member.username == username
                 for member in act_data.audit_team
@@ -63,7 +83,7 @@ class ActDBService:
                     "Пользователь должен быть членом аудиторской группы"
                 )
 
-            # Создаем запись акта
+            # Создаем основную запись акта
             act_id = await self.conn.fetchval(
                 """
                 INSERT INTO acts (
@@ -87,7 +107,7 @@ class ActDBService:
                 act_data.inspection_end_date
             )
 
-            # Добавляем членов группы
+            # Добавляем членов аудиторской группы с сохранением порядка
             for idx, member in enumerate(act_data.audit_team):
                 await self.conn.execute(
                     """
@@ -101,10 +121,10 @@ class ActDBService:
                     member.full_name,
                     member.position,
                     member.username,
-                    idx
+                    idx  # Сохраняем порядок для корректного отображения
                 )
 
-            # Добавляем поручения
+            # Добавляем действующие поручения
             for idx, directive in enumerate(act_data.directives):
                 await self.conn.execute(
                     """
@@ -119,7 +139,7 @@ class ActDBService:
                     idx
                 )
 
-            # Создаем пустое дерево
+            # Создаем пустое дерево структуры (корневой узел)
             default_tree = {
                 "id": "root",
                 "label": act_data.inspection_name or "Акт",
@@ -137,17 +157,21 @@ class ActDBService:
 
             logger.info(f"Создан акт ID={act_id}, КМ={act_data.km_number}")
 
+            # Возвращаем полную информацию о созданном акте
             return await self.get_act_by_id(act_id)
 
     async def get_user_acts(self, username: str) -> list[ActListItem]:
         """
         Получает список актов, где пользователь является участником.
 
+        Возвращает только те акты, где пользователь состоит в аудиторской группе.
+        Результат отсортирован по дате последнего редактирования (последние первыми).
+
         Args:
             username: Имя пользователя из JUPYTERHUB_USER
 
         Returns:
-            Список актов с ролью пользователя
+            Список актов с информацией о роли пользователя в каждом акте
         """
         rows = await self.conn.fetch(
             """
@@ -173,6 +197,7 @@ class ActDBService:
             username
         )
 
+        # Преобразуем строки БД в Pydantic модели
         return [
             ActListItem(
                 id=row['id'],
@@ -189,16 +214,21 @@ class ActDBService:
 
     async def get_act_by_id(self, act_id: int) -> ActResponse:
         """
-        Получает полную информацию об акте.
+        Получает полную информацию об акте по его ID.
+
+        Извлекает:
+        - Основные метаданные акта
+        - Состав аудиторской группы
+        - Список действующих поручений
 
         Args:
-            act_id: ID акта
+            act_id: Внутренний ID акта в БД
 
         Returns:
             Полная информация об акте
 
         Raises:
-            ValueError: Если акт не найден
+            ValueError: Если акт с указанным ID не найден
         """
         # Получаем основные данные акта
         act_row = await self.conn.fetchrow(
@@ -211,7 +241,7 @@ class ActDBService:
         if not act_row:
             raise ValueError(f"Акт ID={act_id} не найден")
 
-        # Получаем аудиторскую группу
+        # Получаем аудиторскую группу с сохранением порядка
         team_rows = await self.conn.fetch(
             """
             SELECT role, full_name, position, username
@@ -232,7 +262,7 @@ class ActDBService:
             for row in team_rows
         ]
 
-        # Получаем поручения
+        # Получаем поручения с сохранением порядка
         directive_rows = await self.conn.fetch(
             """
             SELECT point_number, directive_number
@@ -251,6 +281,7 @@ class ActDBService:
             for row in directive_rows
         ]
 
+        # Собираем полную информацию об акте
         return ActResponse(
             id=act_row['id'],
             km_number=act_row['km_number'],
@@ -278,22 +309,29 @@ class ActDBService:
             username: str
     ) -> ActResponse:
         """
-        Обновляет метаданные акта.
+        Обновляет метаданные акта (частичное обновление).
+
+        Поддерживает обновление только переданных полей (PATCH-семантика).
+        Автоматически обновляет last_edited_by и last_edited_at.
 
         Args:
-            act_id: ID акта
-            act_update: Данные для обновления
-            username: Имя пользователя (для last_edited_by)
+            act_id: ID акта для обновления
+            act_update: Данные для обновления (все поля опциональны)
+            username: Имя пользователя, выполняющего редактирование
 
         Returns:
-            Обновленный акт
+            Обновленный акт с актуальными данными
+
+        Raises:
+            ValueError: Если акт не найден
         """
         async with self.conn.transaction():
-            # Строим SQL динамически только для переданных полей
+            # Строим динамический SQL для обновления только переданных полей
             updates = []
             values = []
             param_idx = 1
 
+            # Обрабатываем каждое опциональное поле
             if act_update.inspection_name is not None:
                 updates.append(f"inspection_name = ${param_idx}")
                 values.append(act_update.inspection_name)
@@ -334,15 +372,16 @@ class ActDBService:
                 values.append(act_update.is_process_based)
                 param_idx += 1
 
-            # Всегда обновляем last_edited_by и last_edited_at
+            # Всегда обновляем информацию о редактировании
             updates.append(f"last_edited_by = ${param_idx}")
             values.append(username)
             param_idx += 1
 
             updates.append("last_edited_at = CURRENT_TIMESTAMP")
 
+            # Выполняем UPDATE если есть изменения
             if updates:
-                values.append(act_id)  # для WHERE clause
+                values.append(act_id)  # Для WHERE clause
 
                 await self.conn.execute(
                     f"""
@@ -355,13 +394,13 @@ class ActDBService:
 
             # Обновляем аудиторскую группу если передана
             if act_update.audit_team is not None:
-                # Удаляем старых членов
+                # Удаляем старых членов группы
                 await self.conn.execute(
                     "DELETE FROM audit_team_members WHERE act_id = $1",
                     act_id
                 )
 
-                # Добавляем новых
+                # Добавляем новых членов с сохранением порядка
                 for idx, member in enumerate(act_update.audit_team):
                     await self.conn.execute(
                         """
@@ -386,7 +425,7 @@ class ActDBService:
                     act_id
                 )
 
-                # Добавляем новые
+                # Добавляем новые поручения
                 for idx, directive in enumerate(act_update.directives):
                     await self.conn.execute(
                         """
@@ -403,28 +442,32 @@ class ActDBService:
 
             logger.info(f"Обновлены метаданные акта ID={act_id}")
 
+            # Возвращаем актуальную информацию об акте
             return await self.get_act_by_id(act_id)
 
     async def _generate_unique_copy_name(self, original_name: str) -> str:
         """
         Генерирует уникальное название для копии акта.
 
-        Логика:
+        Логика именования:
         - "Название" → "Название (Копия)"
         - "Название (Копия)" → "Название (Копия 2)"
         - "Название (Копия 2)" → "Название (Копия 3)"
+        - И т.д.
+
+        Использует рекурсию для гарантированного поиска уникального названия.
 
         Args:
             original_name: Исходное название проверки
 
         Returns:
-            Уникальное название копии
+            Уникальное название копии, не конфликтующее с существующими актами
         """
-        # Проверяем есть ли уже "(Копия N)" в конце
+        # Ищем паттерн "(Копия N)" в конце названия
         match = re.search(r'^(.+?)\s*\(Копия\s*(\d*)\)\s*$', original_name)
 
         if match:
-            # Уже есть "(Копия)" или "(Копия N)"
+            # Уже есть "(Копия)" или "(Копия N)" в названии
             base_name = match.group(1)
             existing_num = match.group(2)
 
@@ -432,12 +475,12 @@ class ActDBService:
                 # Есть номер - увеличиваем
                 next_num = int(existing_num) + 1
             else:
-                # Нет номера - ставим 2
+                # Нет номера (просто "(Копия)") - ставим 2
                 next_num = 2
 
             new_name = f"{base_name} (Копия {next_num})"
         else:
-            # Первая копия
+            # Это первая копия
             new_name = f"{original_name} (Копия)"
 
         # Проверяем уникальность в БД
@@ -458,26 +501,38 @@ class ActDBService:
             username: str
     ) -> ActResponse:
         """
-        Создает дубликат акта с автоматически сгенерированным названием.
+        Создает полную копию акта со всеми данными.
 
-        Новый КМ генерируется как КМ_оригинала_copy_timestamp.
+        Копирует:
+        - Метаданные акта с автогенерацией уникального названия
+        - Аудиторскую группу
+        - Поручения
+        - Дерево структуры
+        - Все таблицы
+        - Все текстовые блоки
+        - Все нарушения
+
+        Новый КМ генерируется как: "{original_km}_copy_{timestamp}"
 
         Args:
-            act_id: ID исходного акта
-            username: Имя пользователя-создателя
+            act_id: ID исходного акта для дублирования
+            username: Имя пользователя-создателя копии
 
         Returns:
-            Новый акт
+            Полная информация о новом акте (копии)
+
+        Raises:
+            ValueError: Если исходный акт не найден
         """
         # Получаем исходный акт
         original = await self.get_act_by_id(act_id)
 
-        # Генерируем уникальное название
+        # Генерируем уникальное название для копии
         new_inspection_name = await self._generate_unique_copy_name(
             original.inspection_name
         )
 
-        # Генерируем уникальный КМ
+        # Генерируем уникальный КМ с временной меткой
         timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
         new_km_number = f"{original.km_number}_copy_{timestamp}"
 
@@ -498,7 +553,7 @@ class ActDBService:
 
         new_act = await self.create_act(new_act_data, username)
 
-        # Копируем дерево
+        # Копируем дерево структуры
         tree_row = await self.conn.fetchrow(
             "SELECT tree_data FROM act_tree WHERE act_id = $1",
             act_id
@@ -515,7 +570,7 @@ class ActDBService:
                 new_act.id
             )
 
-        # Копируем таблицы
+        # Копируем все таблицы с сохранением метаданных
         tables = await self.conn.fetch(
             "SELECT * FROM act_tables WHERE act_id = $1",
             act_id
@@ -547,7 +602,7 @@ class ActDBService:
                 table['is_operational_risk_table']
             )
 
-        # Копируем текстовые блоки
+        # Копируем все текстовые блоки
         textblocks = await self.conn.fetch(
             "SELECT * FROM act_textblocks WHERE act_id = $1",
             act_id
@@ -569,7 +624,7 @@ class ActDBService:
                 tb['formatting']
             )
 
-        # Копируем нарушения
+        # Копируем все нарушения
         violations = await self.conn.fetch(
             "SELECT * FROM act_violations WHERE act_id = $1",
             act_id
@@ -599,7 +654,10 @@ class ActDBService:
                 v['recommendations']
             )
 
-        logger.info(f"Создан дубликат акта: ID={act_id} -> ID={new_act.id}, название='{new_inspection_name}'")
+        logger.info(
+            f"Создан дубликат акта: ID={act_id} -> ID={new_act.id}, "
+            f"название='{new_inspection_name}'"
+        )
 
         return new_act
 
@@ -607,13 +665,19 @@ class ActDBService:
         """
         Удаляет акт и все связанные данные.
 
-        Каскадное удаление обрабатывается на уровне БД через ON DELETE CASCADE.
+        Благодаря ON DELETE CASCADE в схеме БД автоматически удаляются:
+        - Члены аудиторской группы
+        - Поручения
+        - Дерево структуры
+        - Все таблицы
+        - Все текстовые блоки
+        - Все нарушения
 
         Args:
             act_id: ID акта для удаления
 
         Raises:
-            ValueError: Если акт не найден
+            ValueError: Если акт с указанным ID не найден
         """
         # Проверяем что акт существует
         exists = await self.conn.fetchval(
@@ -630,18 +694,20 @@ class ActDBService:
             act_id
         )
 
-        logger.info(f"Акт ID={act_id} успешно удален")
+        logger.info(f"Акт ID={act_id} успешно удален со всеми связанными данными")
 
     async def check_user_access(self, act_id: int, username: str) -> bool:
         """
-        Проверяет доступ пользователя к акту.
+        Проверяет имеет ли пользователь доступ к акту.
+
+        Пользователь имеет доступ если он входит в состав аудиторской группы акта.
 
         Args:
-            act_id: ID акта
-            username: Имя пользователя
+            act_id: ID акта для проверки
+            username: Имя пользователя из JUPYTERHUB_USER
 
         Returns:
-            True если пользователь имеет доступ
+            True если пользователь имеет доступ, False иначе
         """
         result = await self.conn.fetchval(
             """

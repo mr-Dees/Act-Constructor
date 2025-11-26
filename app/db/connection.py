@@ -17,6 +17,23 @@ logger = logging.getLogger("act_constructor.db")
 _pool: Pool | None = None
 
 
+def get_pool() -> Pool:
+    """
+    Возвращает текущий пул подключений к БД.
+
+    Returns:
+        Активный пул подключений
+
+    Raises:
+        RuntimeError: Если пул не инициализирован
+    """
+    if _pool is None:
+        raise RuntimeError(
+            "Database pool не инициализирован. Вызовите init_db() сначала."
+        )
+    return _pool
+
+
 async def init_db(settings: Settings) -> None:
     """
     Инициализирует пул подключений к PostgreSQL.
@@ -69,19 +86,15 @@ async def get_db() -> AsyncGenerator[asyncpg.Connection, None]:
     Raises:
         RuntimeError: Если пул не инициализирован
     """
-    if _pool is None:
-        raise RuntimeError(
-            "Database pool не инициализирован. Вызовите init_db() сначала."
-        )
+    pool = get_pool()  # Используем геттер
 
-    async with _pool.acquire() as connection:
+    async with pool.acquire() as connection:
         yield connection
 
 
 async def create_tables_if_not_exist() -> None:
     """Создаёт таблицы если их нет."""
-    if _pool is None:
-        raise RuntimeError("Database pool не инициализирован")
+    pool = get_pool()  # Используем геттер
 
     schema_path = Path(__file__).parent / "schema.sql"
 
@@ -92,7 +105,7 @@ async def create_tables_if_not_exist() -> None:
     try:
         schema_sql = schema_path.read_text(encoding='utf-8')
 
-        async with _pool.acquire() as conn:
+        async with pool.acquire() as conn:
             # Выполняем SQL-скрипт
             await conn.execute(schema_sql)
 

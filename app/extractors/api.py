@@ -1,11 +1,23 @@
 """
 Детерминированные функции для извлечения и форматирования данных актов.
+
+Этот модуль предоставляет высокоуровневый API для получения данных актов из БД
+в человекочитаемом формате. Все функции используют существующий пул подключений
+из app.db.connection для оптимальной производительности.
+
+Основные возможности:
+- Поиск и фильтрация актов по различным критериям
+- Получение структуры и полного содержимого актов
+- Извлечение конкретных пунктов с поддержкой рекурсии
+- Batch-обработка для множественных запросов
+- Извлечение таблиц, текстовых блоков и нарушений
+- Выборочное извлечение полей нарушений
 """
 
 from datetime import date
-from typing import List, Dict, Optional
+from typing import Dict, List, Optional
 
-from app.extractors.connection import get_extractor_connection
+from app.db.connection import get_pool
 from app.extractors.filters import ActFilters
 from app.extractors.formatters import ActFormatter
 from app.extractors.queries import ActQueries
@@ -32,24 +44,30 @@ async def search_acts(
     """
     Поиск актов по набору фильтров.
 
+    Выполняет гибкий поиск актов в БД с использованием различных критериев.
+    Все текстовые фильтры поддерживают частичное совпадение (ILIKE).
+
     Args:
-        inspection_names: Список названий проверок (частичное совпадение)
-        cities: Список городов (частичное совпадение)
-        created_date_from: Дата составления от
-        created_date_to: Дата составления до
-        order_date_from: Дата приказа от
-        order_date_to: Дата приказа до
-        inspection_start_from: Дата начала проверки от
-        inspection_start_to: Дата начала проверки до
-        inspection_end_from: Дата окончания проверки от
-        inspection_end_to: Дата окончания проверки до
-        directive_numbers: Список номеров поручений
-        with_metadata: Включать подробные метаданные
+        inspection_names: Список названий проверок для поиска.
+        cities: Список городов для фильтрации.
+        created_date_from: Минимальная дата составления акта.
+        created_date_to: Максимальная дата составления акта.
+        order_date_from: Минимальная дата приказа.
+        order_date_to: Максимальная дата приказа.
+        inspection_start_from: Минимальная дата начала проверки.
+        inspection_start_to: Максимальная дата начала проверки.
+        inspection_end_from: Минимальная дата окончания проверки.
+        inspection_end_to: Максимальная дата окончания проверки.
+        directive_numbers: Список номеров поручений для поиска.
+        with_metadata: Включать ли подробные метаданные в результаты.
 
     Returns:
-        Отформатированный список актов
+        Отформатированный список найденных актов.
     """
-    async with get_extractor_connection() as conn:
+    pool = get_pool()
+
+    async with pool.acquire() as conn:
+        # Выполняем поиск с заданными фильтрами
         results = await ActFilters.search_acts(
             conn,
             inspection_names=inspection_names,
@@ -66,6 +84,7 @@ async def search_acts(
             with_metadata=with_metadata
         )
 
+        # Форматируем результаты в читаемый вид
         return ActFilters.format_search_results(results, with_metadata)
 
 
@@ -80,22 +99,30 @@ async def get_act_structure(
     """
     Получить структуру акта в виде дерева пунктов.
 
+    Возвращает иерархическое представление структуры акта с опциональной
+    статистикой по количеству таблиц, текстовых блоков и нарушений.
+
     Args:
-        km_number: КМ номер
-        with_statistics: Подсчитать количество блоков
+        km_number: КМ номер акта для получения структуры.
+        with_statistics: Включать ли подсчет элементов контента.
 
     Returns:
-        Дерево структуры (или описание ошибки)
+        Дерево структуры акта или сообщение об ошибке.
     """
-    async with get_extractor_connection() as conn:
+    pool = get_pool()
+
+    async with pool.acquire() as conn:
+        # Получаем метаданные акта
         act = await ActQueries.get_act_metadata(conn, km_number)
         if not act:
             return f"Акт с КМ {km_number} не найден."
 
+        # Получаем дерево структуры
         tree = await ActQueries.get_tree(conn, act['id'])
         if not tree:
             return "Структура акта не найдена."
 
+        # Если нужна статистика - собираем данные о контенте
         if with_statistics:
             tables = await ActQueries.get_all_tables(conn, act['id'], tree)
             textblocks = await ActQueries.get_all_textblocks(conn, act['id'], tree)
@@ -110,6 +137,7 @@ async def get_act_structure(
                 }
             )
 
+        # Без статистики - только структура
         return ActFormatter.format_tree_structure(tree)
 
 
@@ -118,19 +146,24 @@ async def get_act_structures_batch(
         with_statistics: bool = False
 ) -> Dict[str, str]:
     """
-    Получить структуры нескольких актов.
+    Получить структуры нескольких актов батчем.
+
+    Выполняет последовательное получение структур для списка КМ номеров.
 
     Args:
-        km_numbers: Список КМ номеров
-        with_statistics: Подсчитать количество блоков
+        km_numbers: Список КМ номеров актов.
+        with_statistics: Включать ли статистику по элементам контента.
 
     Returns:
-        Словарь {КМ: структура акта}
+        Словарь {КМ: структура акта}.
     """
     result = {}
+
+    # Обрабатываем каждый КМ последовательно
     for km in km_numbers:
         structure = await get_act_structure(km, with_statistics)
         result[km] = structure
+
     return result
 
 
@@ -145,18 +178,25 @@ async def get_act_by_km(
     """
     Получить весь акт по КМ как человекочитаемый текст.
 
+    Возвращает полное содержимое акта включая метаданные, аудиторскую группу,
+    поручения и все элементы контента (таблицы, текстовые блоки, нарушения).
+
     Args:
-        km_number: Номер КМ
-        with_metadata: True — включить метаданные акта в начало
+        km_number: КМ номер акта для получения.
+        with_metadata: Включать ли метаданные в начало вывода.
 
     Returns:
-        Полный текст акта (или описание ошибки)
+        Полный текст акта или сообщение об ошибке.
     """
-    async with get_extractor_connection() as conn:
+    pool = get_pool()
+
+    async with pool.acquire() as conn:
+        # Получаем метаданные акта
         act = await ActQueries.get_act_metadata(conn, km_number)
         if not act:
             return f"Акт с КМ {km_number} не найден."
 
+        # Получаем структуру и все элементы контента
         tree = await ActQueries.get_tree(conn, act['id'])
         tables = await ActQueries.get_all_tables(conn, act['id'], tree)
         textblocks = await ActQueries.get_all_textblocks(conn, act['id'], tree)
@@ -164,14 +204,20 @@ async def get_act_by_km(
 
         parts = []
 
+        # Добавляем метаданные если требуется
         if with_metadata:
             parts.append(ActFormatter.format_metadata(act))
+
+            # Добавляем аудиторскую группу
             team = await ActQueries.get_audit_team(conn, act['id'])
-            directives = await ActQueries.get_directives(conn, act['id'])
             parts.append(ActFormatter.format_audit_team(team))
+
+            # Добавляем поручения если есть
+            directives = await ActQueries.get_directives(conn, act['id'])
             if directives:
                 parts.append(ActFormatter.format_directives(directives))
 
+        # Рекурсивно форматируем дерево со всем контентом
         if tree:
             content = ActFormatter.format_tree_item(
                 tree, tree, tables, textblocks, violations
@@ -187,19 +233,24 @@ async def get_acts_by_km_list(
         with_metadata: bool = True
 ) -> Dict[str, str]:
     """
-    Получить несколько актов по списку КМ.
+    Получить несколько актов по списку КМ батчем.
+
+    Выполняет последовательное получение полного содержимого для списка актов.
 
     Args:
-        km_numbers: Список КМ номеров
-        with_metadata: Включить ли метаданные
+        km_numbers: Список КМ номеров актов.
+        with_metadata: Включать ли метаданные для каждого акта.
 
     Returns:
-        Словарь {КМ: текст акта или описание ошибки}
+        Словарь {КМ: текст акта или сообщение об ошибке}.
     """
     result = {}
+
+    # Обрабатываем каждый акт последовательно
     for km in km_numbers:
         act_text = await get_act_by_km(km, with_metadata=with_metadata)
         result[km] = act_text
+
     return result
 
 
@@ -217,73 +268,89 @@ async def get_item_by_number(
     """
     Получить конкретный пункт (или несколько пунктов) по КМ и номеру.
 
+    Извлекает содержимое указанного пункта акта с возможностью рекурсивного
+    включения подпунктов и ограничения глубины. Поддерживает batch-режим для
+    извлечения нескольких пунктов за один вызов.
+
     Args:
-        km_number: КМ
-        item_number: номер пункта ("5.1") или список номеров (["5.1", "5.2", "5.3"])
-        with_metadata: Включить метаданные в начало результата
-        recursive: True — включить подпункты, False — только указанный уровень
-        max_depth: Глубина рекурсии (None — всё дерево, работает только при recursive=True)
+        km_number: КМ номер акта.
+        item_number: Номер пункта ("5.1") или список номеров (["5.1", "5.2"]).
+        with_metadata: Включать ли метаданные акта в начало результата.
+        recursive: Включать ли подпункты и вложенный контент.
+        max_depth: Максимальная глубина рекурсии (None = без ограничений).
+                  Работает только при recursive=True.
 
     Returns:
-        Если item_number - str: человекочитаемый пункт
-        Если item_number - List[str]: Dict[str, str] - {номер_пункта: содержимое}
+        Если item_number - str: отформатированное содержимое пункта.
+        Если item_number - List[str]: Dict[номер_пункта: содержимое].
     """
-    # Если передан список - вызываем batch функцию
+    # Если передан список - используем batch функцию
     if isinstance(item_number, list):
         return await get_items_by_number_list(
             km_number, item_number, with_metadata, recursive
         )
 
-    # Одиночный пункт - существующая логика
-    async with get_extractor_connection() as conn:
+    # Одиночный пункт - основная логика
+    pool = get_pool()
+
+    async with pool.acquire() as conn:
+        # Получаем метаданные акта
         act = await ActQueries.get_act_metadata(conn, km_number)
         if not act:
             return f"Акт с КМ {km_number} не найден."
 
+        # Получаем дерево структуры
         tree = await ActQueries.get_tree(conn, act['id'])
         if not tree:
             return "Структура акта не найдена."
 
-        # Поиск нужного узла по номеру
+        # Ищем узел по номеру
         def _find_by_number(node, number):
-            # Сравниваем без точки в конце
+            """Рекурсивный поиск узла по номеру."""
+            # Нормализуем номера (убираем точку в конце)
             node_num = node.get('number', '').rstrip('.')
             search_num = number.rstrip('.')
 
             if node_num == search_num:
                 return node
 
+            # Рекурсивный поиск в детях
             for child in node.get('children', []):
                 res = _find_by_number(child, number)
                 if res is not None:
                     return res
+
             return None
 
+        # Находим целевой узел
         target = _find_by_number(tree, item_number)
         if not target:
             return f"Пункт с номером {item_number} не найден в КМ {km_number}"
 
+        # Получаем все элементы контента
         tables = await ActQueries.get_all_tables(conn, act['id'], tree)
         textblocks = await ActQueries.get_all_textblocks(conn, act['id'], tree)
         violations = await ActQueries.get_all_violations(conn, act['id'], tree)
 
         parts = []
+
+        # Добавляем метаданные если требуется
         if with_metadata:
             parts.append(ActFormatter.format_metadata(act))
 
-        # Если не рекурсивно — оставляем только прямые дочерние информационные узлы
+        # Форматируем узел с учетом режима рекурсии
         if not recursive:
-            # Создаем копию узла
+            # Нерекурсивный режим: только прямые информационные узлы
             target_copy = dict(target)
 
-            # Фильтруем детей: оставляем только информационные узлы (не пункты)
+            # Фильтруем детей: оставляем только информационные узлы
             filtered_children = [
                 child for child in target.get('children', [])
                 if child.get('type') in ['table', 'textblock', 'violation']
             ]
             target_copy['children'] = filtered_children
 
-            # Форматируем с max_depth=1 чтобы не уходить глубже
+            # Форматируем с max_depth=1 (только текущий уровень)
             parts.append(
                 ActFormatter.format_tree_item(
                     target_copy, tree, tables, textblocks, violations,
@@ -291,7 +358,7 @@ async def get_item_by_number(
                 )
             )
         else:
-            # Рекурсивный режим - показываем всё дерево
+            # Рекурсивный режим: показываем всё дерево с учетом max_depth
             parts.append(
                 ActFormatter.format_tree_item(
                     target, tree, tables, textblocks, violations,
@@ -311,19 +378,25 @@ async def get_items_by_number_list(
     """
     Получить несколько пунктов батчем.
 
+    Выполняет последовательное извлечение содержимого для списка пунктов
+    одного акта.
+
     Args:
-        km_number: КМ
-        item_numbers: Список номеров пунктов
-        with_metadata: Включить метаданные
-        recursive: Включить подпункты
+        km_number: КМ номер акта.
+        item_numbers: Список номеров пунктов для извлечения.
+        with_metadata: Включать ли метаданные акта.
+        recursive: Включать ли подпункты и вложенный контент.
 
     Returns:
-        Словарь {номер_пункта: текст}
+        Словарь {номер_пункта: содержимое}.
     """
     result = {}
+
+    # Обрабатываем каждый пункт последовательно
     for item_num in item_numbers:
         text = await get_item_by_number(km_number, item_num, with_metadata, recursive)
         result[item_num] = text
+
     return result
 
 
@@ -335,25 +408,45 @@ async def get_all_violations(
         km_number: str,
         with_metadata: bool = False
 ) -> str:
-    """Получить все нарушения по КМ-акту."""
-    async with get_extractor_connection() as conn:
+    """
+    Получить все нарушения по КМ-акту.
+
+    Извлекает все нарушения из акта с указанием родительского пункта для
+    каждого нарушения.
+
+    Args:
+        km_number: КМ номер акта.
+        with_metadata: Включать ли метаданные акта в начало вывода.
+
+    Returns:
+        Отформатированный список нарушений или сообщение об отсутствии.
+    """
+    pool = get_pool()
+
+    async with pool.acquire() as conn:
+        # Получаем метаданные акта
         act = await ActQueries.get_act_metadata(conn, km_number)
         if not act:
             return f"Акт с КМ {km_number} не найден."
 
+        # Получаем дерево и нарушения
         tree = await ActQueries.get_tree(conn, act['id'])
         violations = await ActQueries.get_all_violations(conn, act['id'], tree)
 
         parts = []
+
+        # Добавляем метаданные если требуется
         if with_metadata:
             parts.append(ActFormatter.format_metadata(act))
 
+        # Проверяем наличие нарушений
         if not violations:
             parts.append(f"В акте КМ {km_number} нет нарушений.")
         else:
             # Строим маппинг node_id -> parent_item_number
             node_id_to_number = ActQueries._build_node_id_to_hierarchical_number_map(tree)
 
+            # Форматируем каждое нарушение
             for v in violations:
                 # Находим родительский пункт
                 parent_number = ActQueries._find_parent_item_number(
@@ -369,19 +462,24 @@ async def get_all_violations_batch(
         with_metadata: bool = False
 ) -> Dict[str, str]:
     """
-    Получить все нарушения по списку КМ.
+    Получить все нарушения по списку КМ батчем.
+
+    Выполняет последовательное извлечение нарушений для списка актов.
 
     Args:
-        km_numbers: Список КМ
-        with_metadata: Включить метаданные
+        km_numbers: Список КМ номеров актов.
+        with_metadata: Включать ли метаданные для каждого акта.
 
     Returns:
-        Словарь {КМ: нарушения}
+        Словарь {КМ: нарушения}.
     """
     result = {}
+
+    # Обрабатываем каждый акт последовательно
     for km in km_numbers:
         violations = await get_all_violations(km, with_metadata)
         result[km] = violations
+
     return result
 
 
@@ -394,44 +492,55 @@ async def get_violation_by_item(
     """
     Получить нарушения по конкретному пункту (или нескольким пунктам) КМ.
 
+    Извлекает нарушения, находящиеся в указанном пункте и опционально в его
+    подпунктах.
+
     Args:
-        km_number: КМ номер
-        item_number: номер пункта ("5.1") или список номеров (["5.1", "5.2"])
-        with_metadata: Включить метаданные (default: False)
-        recursive: Искать в подпунктах (default: True)
+        km_number: КМ номер акта.
+        item_number: Номер пункта ("5.1") или список номеров (["5.1", "5.2"]).
+        with_metadata: Включать ли метаданные акта.
+        recursive: Искать ли в подпунктах.
 
     Returns:
-        Если item_number - str: нарушения в пункте
-        Если item_number - List[str]: Dict[str, str] - {номер_пункта: нарушения}
+        Если item_number - str: отформатированные нарушения в пункте.
+        Если item_number - List[str]: Dict[номер_пункта: нарушения].
     """
-    # Если передан список - вызываем batch функцию
+    # Если передан список - используем batch функцию
     if isinstance(item_number, list):
         return await get_violations_by_item_list(
             km_number, item_number, with_metadata, recursive
         )
 
-    # Одиночный пункт - существующая логика
-    async with get_extractor_connection() as conn:
+    # Одиночный пункт - основная логика
+    pool = get_pool()
+
+    async with pool.acquire() as conn:
+        # Получаем метаданные акта
         act = await ActQueries.get_act_metadata(conn, km_number)
         if not act:
             return f"Акт с КМ {km_number} не найден."
 
+        # Получаем дерево и нарушения в пункте
         tree = await ActQueries.get_tree(conn, act['id'])
         violations = await ActQueries.get_violations_by_item(
             conn, act['id'], item_number, tree, recursive
         )
 
         parts = []
+
+        # Добавляем метаданные если требуется
         if with_metadata:
             parts.append(ActFormatter.format_metadata(act))
 
+        # Проверяем наличие нарушений
         if not violations:
             scope = "и подпунктах" if recursive else ""
             parts.append(f"В пункте {item_number} {scope} КМ {km_number} нет нарушений.")
         else:
-            # Строим маппинг
+            # Строим маппинг node_id -> parent_item_number
             node_id_to_number = ActQueries._build_node_id_to_hierarchical_number_map(tree)
 
+            # Форматируем каждое нарушение
             for v in violations:
                 parent_number = ActQueries._find_parent_item_number(
                     tree, v.get('node_id'), node_id_to_number
@@ -450,19 +559,24 @@ async def get_violations_by_item_list(
     """
     Получить нарушения по списку пунктов батчем.
 
+    Выполняет последовательное извлечение нарушений для списка пунктов одного акта.
+
     Args:
-        km_number: КМ
-        item_numbers: Список номеров пунктов
-        with_metadata: Включить метаданные
-        recursive: Искать в подпунктах
+        km_number: КМ номер акта.
+        item_numbers: Список номеров пунктов.
+        with_metadata: Включать ли метаданные акта.
+        recursive: Искать ли в подпунктах.
 
     Returns:
-        Словарь {номер_пункта: текст нарушений}
+        Словарь {номер_пункта: нарушения}.
     """
     result = {}
+
+    # Обрабатываем каждый пункт последовательно
     for item_num in item_numbers:
         text = await get_violation_by_item(km_number, item_num, with_metadata, recursive)
         result[item_num] = text
+
     return result
 
 
@@ -475,50 +589,47 @@ async def get_violation_fields(
     """
     Получить определённые поля всех нарушений пункта (или нескольких пунктов) КМ.
 
+    Извлекает только указанные поля из нарушений, игнорируя остальное содержимое.
+    Полезно для получения конкретной информации без полного дампа нарушений.
+
+    Доступные поля:
+    - Базовые текстовые: "violated", "established"
+    - Дополнительный контент (по отдельности): "case", "image", "freeText"
+    - Весь доп. контент разом: "additional_content"
+    - Опциональные блоки: "responsible", "consequences", "reasons", "recommendations"
+
     Args:
-        km_number: КМ номер
-        item_number: номер пункта ("5.1") или список номеров (["5.1", "5.2"])
-        field_names: Список имен полей для извлечения
-        recursive: Искать в подпунктах (default: True)
-
-    Available field_names:
-        Базовые текстовые поля:
-        - "violated" - что нарушено
-        - "established" - что установлено
-
-        Дополнительный контент (можно по отдельности):
-        - "case" - кейсы
-        - "image" - изображения с подписями и именами файлов
-        - "freeText" - свободный текст
-        - "additional_content" - ВСЕ элементы дополнительного контента разом
-
-        Опциональные блоки:
-        - "responsible" - ответственные лица
-        - "consequences" - последствия
-        - "reasons" - причины
-        - "recommendations" - рекомендации
+        km_number: КМ номер акта.
+        item_number: Номер пункта ("5.1") или список номеров (["5.1", "5.2"]).
+        field_names: Список имен полей для извлечения.
+        recursive: Искать ли в подпунктах.
 
     Returns:
-        Если item_number - str: строка с полями нарушений
-        Если item_number - List[str]: Dict[str, str] - {номер_пункта: поля нарушений}
+        Если item_number - str: отформатированные поля нарушений.
+        Если item_number - List[str]: Dict[номер_пункта: поля нарушений].
     """
-    # Если передан список - вызываем batch функцию
+    # Если передан список - используем batch функцию
     if isinstance(item_number, list):
         return await get_violation_fields_batch(
             km_number, item_number, field_names, recursive
         )
 
-    # Одиночный пункт - существующая логика
-    async with get_extractor_connection() as conn:
+    # Одиночный пункт - основная логика
+    pool = get_pool()
+
+    async with pool.acquire() as conn:
+        # Получаем метаданные акта
         act = await ActQueries.get_act_metadata(conn, km_number)
         if not act:
             return f"Акт с КМ {km_number} не найден."
 
+        # Получаем дерево и нарушения в пункте
         tree = await ActQueries.get_tree(conn, act['id'])
         violations = await ActQueries.get_violations_by_item(
             conn, act['id'], item_number, tree, recursive
         )
 
+        # Проверяем наличие нарушений
         if not violations:
             scope = "и подпунктах" if recursive else ""
             return f"В пункте {item_number} {scope} нет нарушений."
@@ -526,7 +637,7 @@ async def get_violation_fields(
         # Строим маппинг node_id -> parent_item_number
         node_id_to_number = ActQueries._build_node_id_to_hierarchical_number_map(tree)
 
-        # Проверяем валидность полей
+        # Валидация полей
         valid_fields = {
             "violated", "established",
             "case", "image", "freeText", "additional_content",
@@ -534,8 +645,12 @@ async def get_violation_fields(
         }
         invalid_fields = [f for f in field_names if f not in valid_fields]
         if invalid_fields:
-            return f"Неизвестные поля: {', '.join(invalid_fields)}. Доступные: {', '.join(sorted(valid_fields))}"
+            return (
+                f"Неизвестные поля: {', '.join(invalid_fields)}. "
+                f"Доступные: {', '.join(sorted(valid_fields))}"
+            )
 
+        # Обрабатываем каждое нарушение
         parts = []
         for idx, v in enumerate(violations, 1):
             # Находим родительский пункт нарушения
@@ -547,6 +662,7 @@ async def get_violation_fields(
             violation_parts = []
             violation_header = f"Нарушение {idx} ({parent_info})"
 
+            # Обрабатываем каждое запрошенное поле
             for field_name in field_names:
                 # Базовые текстовые поля
                 if field_name == "violated":
@@ -589,6 +705,7 @@ async def get_violation_fields(
                 elif field_name in ("case", "image", "freeText"):
                     add_content = ActFormatter._parse_json_field(v.get("additional_content"))
                     if add_content and add_content.get("enabled"):
+                        # Фильтруем только нужный тип элементов
                         items = [item for item in add_content.get("items", [])
                                  if item.get("type") == field_name]
 
@@ -636,6 +753,7 @@ async def get_violation_fields(
                 parts.extend(violation_parts)
                 parts.append("")  # Пустая строка между нарушениями
 
+        # Проверяем, были ли найдены запрошенные поля
         if not parts:
             fields_str = ', '.join(field_names)
             return f"В пункте {item_number} нет указанных полей ({fields_str}) в нарушениях."
@@ -650,21 +768,26 @@ async def get_violation_fields_batch(
         recursive: bool = True
 ) -> Dict[str, str]:
     """
-    Получить конкретные поля нарушений по списку пунктов.
+    Получить конкретные поля нарушений по списку пунктов батчем.
+
+    Выполняет последовательное извлечение полей для списка пунктов одного акта.
 
     Args:
-        km_number: КМ номер
-        item_numbers: Список номеров пунктов
-        field_names: Список имен полей для извлечения
-        recursive: Искать в подпунктах
+        km_number: КМ номер акта.
+        item_numbers: Список номеров пунктов.
+        field_names: Список имен полей для извлечения.
+        recursive: Искать ли в подпунктах.
 
     Returns:
-        Словарь {номер_пункта: поля нарушений}
+        Словарь {номер_пункта: поля нарушений}.
     """
     result = {}
+
+    # Обрабатываем каждый пункт последовательно
     for item_num in item_numbers:
         text = await get_violation_fields(km_number, item_num, field_names, recursive)
         result[item_num] = text
+
     return result
 
 
@@ -679,31 +802,43 @@ async def get_all_tables(
     """
     Получить все таблицы по КМ.
 
+    Извлекает все таблицы из акта с указанием родительского пункта для каждой
+    таблицы. Таблицы форматируются в Markdown или текстовом виде в зависимости
+    от наличия объединенных ячеек.
+
     Args:
-        km_number: КМ
-        with_metadata: Включить метаданные
+        km_number: КМ номер акта.
+        with_metadata: Включать ли метаданные акта в начало вывода.
 
     Returns:
-        Все таблицы (Markdown)
+        Отформатированный список таблиц (Markdown) или сообщение об отсутствии.
     """
-    async with get_extractor_connection() as conn:
+    pool = get_pool()
+
+    async with pool.acquire() as conn:
+        # Получаем метаданные акта
         act = await ActQueries.get_act_metadata(conn, km_number)
         if not act:
             return f"Акт с КМ {km_number} не найден."
 
+        # Получаем дерево и таблицы
         tree = await ActQueries.get_tree(conn, act['id'])
         tables = await ActQueries.get_all_tables(conn, act['id'], tree)
 
         parts = []
+
+        # Добавляем метаданные если требуется
         if with_metadata:
             parts.append(ActFormatter.format_metadata(act))
 
+        # Проверяем наличие таблиц
         if not tables:
             parts.append(f"В акте КМ {km_number} нет таблиц.")
         else:
             # Строим маппинг node_id -> parent_item_number
             node_id_to_number = ActQueries._build_node_id_to_hierarchical_number_map(tree)
 
+            # Форматируем каждую таблицу
             for t in tables:
                 # Находим родительский пункт
                 parent_number = ActQueries._find_parent_item_number(
@@ -719,19 +854,24 @@ async def get_all_tables_batch(
         with_metadata: bool = False
 ) -> Dict[str, str]:
     """
-    Получить все таблицы по списку КМ.
+    Получить все таблицы по списку КМ батчем.
+
+    Выполняет последовательное извлечение таблиц для списка актов.
 
     Args:
-        km_numbers: Список КМ
-        with_metadata: Включить метаданные
+        km_numbers: Список КМ номеров актов.
+        with_metadata: Включать ли метаданные для каждого акта.
 
     Returns:
-        Словарь {КМ: таблицы}
+        Словарь {КМ: таблицы}.
     """
     result = {}
+
+    # Обрабатываем каждый акт последовательно
     for km in km_numbers:
         tables = await get_all_tables(km, with_metadata)
         result[km] = tables
+
     return result
 
 
@@ -744,37 +884,47 @@ async def get_all_tables_in_item(
     """
     Получить все таблицы по пункту (или нескольким пунктам) для заданного КМ.
 
+    Извлекает таблицы, находящиеся в указанном пункте и опционально в его
+    подпунктах.
+
     Args:
-        km_number: КМ
-        item_number: номер пункта ("5.1") или список номеров (["5.1", "5.2"])
-        with_metadata: Включить метаданные
-        recursive: True — включить подпункты, False — только указанный уровень
+        km_number: КМ номер акта.
+        item_number: Номер пункта ("5.1") или список номеров (["5.1", "5.2"]).
+        with_metadata: Включать ли метаданные акта.
+        recursive: Искать ли в подпунктах.
 
     Returns:
-        Если item_number - str: Markdown-таблицы
-        Если item_number - List[str]: Dict[str, str] - {номер_пункта: таблицы}
+        Если item_number - str: отформатированные таблицы (Markdown).
+        Если item_number - List[str]: Dict[номер_пункта: таблицы].
     """
-    # Если передан список - вызываем batch функцию
+    # Если передан список - используем batch функцию
     if isinstance(item_number, list):
         return await get_tables_by_item_list(
             km_number, item_number, with_metadata, recursive
         )
 
-    # Одиночный пункт - существующая логика
-    async with get_extractor_connection() as conn:
+    # Одиночный пункт - основная логика
+    pool = get_pool()
+
+    async with pool.acquire() as conn:
+        # Получаем метаданные акта
         act = await ActQueries.get_act_metadata(conn, km_number)
         if not act:
             return f"Акт с КМ {km_number} не найден."
 
+        # Получаем дерево и таблицы в пункте
         tree = await ActQueries.get_tree(conn, act['id'])
         tables = await ActQueries.get_tables_by_item(
             conn, act['id'], item_number, tree, recursive
         )
 
         parts = []
+
+        # Добавляем метаданные если требуется
         if with_metadata:
             parts.append(ActFormatter.format_metadata(act))
 
+        # Проверяем наличие таблиц
         if not tables:
             scope = "и подпунктах" if recursive else ""
             parts.append(f"В пункте {item_number} {scope} КМ {km_number} нет таблиц.")
@@ -782,6 +932,7 @@ async def get_all_tables_in_item(
             # Строим маппинг node_id -> parent_item_number
             node_id_to_number = ActQueries._build_node_id_to_hierarchical_number_map(tree)
 
+            # Форматируем каждую таблицу
             for t in tables:
                 # Находим родительский пункт
                 parent_number = ActQueries._find_parent_item_number(
@@ -801,19 +952,24 @@ async def get_tables_by_item_list(
     """
     Получить таблицы по списку пунктов батчем.
 
+    Выполняет последовательное извлечение таблиц для списка пунктов одного акта.
+
     Args:
-        km_number: КМ
-        item_numbers: Список номеров пунктов
-        with_metadata: Включить метаданные
-        recursive: Искать в подпунктах
+        km_number: КМ номер акта.
+        item_numbers: Список номеров пунктов.
+        with_metadata: Включать ли метаданные акта.
+        recursive: Искать ли в подпунктах.
 
     Returns:
-        Словарь {номер_пункта: таблицы}
+        Словарь {номер_пункта: таблицы}.
     """
     result = {}
+
+    # Обрабатываем каждый пункт последовательно
     for item_num in item_numbers:
         text = await get_all_tables_in_item(km_number, item_num, with_metadata, recursive)
         result[item_num] = text
+
     return result
 
 
@@ -827,20 +983,23 @@ async def get_table_by_name(
     """
     Получить таблицу по частичному названию для пункта КМ.
 
+    Выполняет поиск таблицы по частичному совпадению названия (ILIKE) в
+    указанном пункте. Поддерживает batch-режим для множественных пунктов
+    и/или названий.
+
     Args:
-        km_number: КМ номер
-        item_number: номер пункта ("5.1") или список номеров (["5.1", "5.2"])
-        table_name: название таблицы ("метрик") или список названий (["метрик", "риск"])
-        with_metadata: Включить метаданные
-        recursive: Искать в подпунктах
+        km_number: КМ номер акта.
+        item_number: Номер пункта ("5.1") или список номеров (["5.1", "5.2"]).
+        table_name: Название таблицы ("метрик") или список названий (["метрик", "риск"]).
+        with_metadata: Включать ли метаданные акта.
+        recursive: Искать ли в подпунктах.
 
     Returns:
-        Варианты возврата:
+        Варианты возврата в зависимости от типов аргументов:
         1. item_number=str, table_name=str → str (одна таблица)
-        2. item_number=str, table_name=List[str] → Dict[str, str] ({название: таблица})
-        3. item_number=List[str], table_name=str → Dict[str, str] ({пункт: таблица})
-        4. item_number=List[str], table_name=List[str] → Dict[str, Dict[str, str]]
-           ({пункт: {название: таблица}})
+        2. item_number=str, table_name=List[str] → Dict[название: таблица]
+        3. item_number=List[str], table_name=str → Dict[пункт: таблица]
+        4. item_number=List[str], table_name=List[str] → Dict[пункт: Dict[название: таблица]]
     """
     # Случай 4: Оба параметра - списки
     if isinstance(item_number, list) and isinstance(table_name, list):
@@ -860,14 +1019,18 @@ async def get_table_by_name(
 
     # Случай 2: item_number - строка, table_name - список
     if isinstance(table_name, list):
+        pool = get_pool()
+
         result = {}
-        async with get_extractor_connection() as conn:
+        async with pool.acquire() as conn:
+            # Получаем метаданные акта
             act = await ActQueries.get_act_metadata(conn, km_number)
             if not act:
                 return f"Акт с КМ {km_number} не найден."
 
             tree = await ActQueries.get_tree(conn, act['id'])
 
+            # Обрабатываем каждое название таблицы
             for name in table_name:
                 table = await ActQueries.get_table_by_name(
                     conn, act['id'], item_number, name, tree, recursive
@@ -875,7 +1038,10 @@ async def get_table_by_name(
 
                 if not table:
                     scope = "и подпунктах" if recursive else ""
-                    result[name] = f"В пункте {item_number} {scope} КМ {km_number} нет таблицы с названием '{name}'."
+                    result[name] = (
+                        f"В пункте {item_number} {scope} КМ {km_number} "
+                        f"нет таблицы с названием '{name}'."
+                    )
                 else:
                     # Строим маппинг и находим родительский пункт
                     node_id_to_number = ActQueries._build_node_id_to_hierarchical_number_map(tree)
@@ -884,7 +1050,9 @@ async def get_table_by_name(
                     )
 
                     parts = []
-                    if with_metadata and name == table_name[0]:  # Метаданные только один раз
+
+                    # Метаданные только для первой таблицы
+                    if with_metadata and name == table_name[0]:
                         parts.append(ActFormatter.format_metadata(act))
 
                     parts.append(ActFormatter.format_table(table, parent_number or ""))
@@ -892,25 +1060,33 @@ async def get_table_by_name(
 
         return result
 
-    # Случай 1: Оба параметра - строки (существующая логика)
-    async with get_extractor_connection() as conn:
+    # Случай 1: Оба параметра - строки (основная логика)
+    pool = get_pool()
+
+    async with pool.acquire() as conn:
+        # Получаем метаданные акта
         act = await ActQueries.get_act_metadata(conn, km_number)
         if not act:
             return f"Акт с КМ {km_number} не найден."
 
+        # Получаем дерево и ищем таблицу
         tree = await ActQueries.get_tree(conn, act['id'])
         table = await ActQueries.get_table_by_name(
             conn, act['id'], item_number, table_name, tree, recursive
         )
 
         parts = []
+
+        # Добавляем метаданные если требуется
         if with_metadata:
             parts.append(ActFormatter.format_metadata(act))
 
+        # Проверяем, найдена ли таблица
         if not table:
             scope = "и подпунктах" if recursive else ""
             parts.append(
-                f"В пункте {item_number} {scope} КМ {km_number} нет таблицы с названием, содержащим '{table_name}'."
+                f"В пункте {item_number} {scope} КМ {km_number} "
+                f"нет таблицы с названием, содержащим '{table_name}'."
             )
         else:
             # Строим маппинг и находим родительский пункт
@@ -931,22 +1107,28 @@ async def get_tables_by_name_batch(
         recursive: bool = True
 ) -> Dict[str, str]:
     """
-    Получить таблицы по названию для списка пунктов.
+    Получить таблицы по названию для списка пунктов батчем.
+
+    Выполняет последовательный поиск таблицы с указанным названием для списка
+    пунктов одного акта.
 
     Args:
-        km_number: КМ
-        item_numbers: Список номеров пунктов
-        table_name: Название таблицы
-        with_metadata: Включить метаданные
-        recursive: Искать в подпунктах
+        km_number: КМ номер акта.
+        item_numbers: Список номеров пунктов.
+        table_name: Название таблицы для поиска.
+        with_metadata: Включать ли метаданные акта.
+        recursive: Искать ли в подпунктах.
 
     Returns:
-        Словарь {номер_пункта: таблица}
+        Словарь {номер_пункта: таблица}.
     """
     result = {}
+
+    # Обрабатываем каждый пункт последовательно
     for item_num in item_numbers:
         text = await get_table_by_name(km_number, item_num, table_name, with_metadata, recursive)
         result[item_num] = text
+
     return result
 
 
@@ -961,31 +1143,42 @@ async def get_all_textblocks(
     """
     Получить все текстовые блоки по КМ.
 
+    Извлекает все текстовые блоки из акта с указанием родительского пункта
+    для каждого блока.
+
     Args:
-        km_number: КМ
-        with_metadata: Включить метаданные
+        km_number: КМ номер акта.
+        with_metadata: Включать ли метаданные акта в начало вывода.
 
     Returns:
-        Все текстовые блоки
+        Отформатированный список текстовых блоков или сообщение об отсутствии.
     """
-    async with get_extractor_connection() as conn:
+    pool = get_pool()
+
+    async with pool.acquire() as conn:
+        # Получаем метаданные акта
         act = await ActQueries.get_act_metadata(conn, km_number)
         if not act:
             return f"Акт с КМ {km_number} не найден."
 
+        # Получаем дерево и текстовые блоки
         tree = await ActQueries.get_tree(conn, act['id'])
         textblocks = await ActQueries.get_all_textblocks(conn, act['id'], tree)
 
         parts = []
+
+        # Добавляем метаданные если требуется
         if with_metadata:
             parts.append(ActFormatter.format_metadata(act))
 
+        # Проверяем наличие текстовых блоков
         if not textblocks:
             parts.append(f"В акте КМ {km_number} нет текстовых блоков.")
         else:
             # Строим маппинг node_id -> parent_item_number
             node_id_to_number = ActQueries._build_node_id_to_hierarchical_number_map(tree)
 
+            # Форматируем каждый текстовый блок
             for tb in textblocks:
                 # Находим родительский пункт
                 parent_number = ActQueries._find_parent_item_number(
@@ -1001,19 +1194,24 @@ async def get_all_textblocks_batch(
         with_metadata: bool = False
 ) -> Dict[str, str]:
     """
-    Получить все текстовые блоки по списку КМ.
+    Получить все текстовые блоки по списку КМ батчем.
+
+    Выполняет последовательное извлечение текстовых блоков для списка актов.
 
     Args:
-        km_numbers: Список КМ
-        with_metadata: Включить метаданные
+        km_numbers: Список КМ номеров актов.
+        with_metadata: Включать ли метаданные для каждого акта.
 
     Returns:
-        Словарь {КМ: текстовые блоки}
+        Словарь {КМ: текстовые блоки}.
     """
     result = {}
+
+    # Обрабатываем каждый акт последовательно
     for km in km_numbers:
         textblocks = await get_all_textblocks(km, with_metadata)
         result[km] = textblocks
+
     return result
 
 
@@ -1026,39 +1224,47 @@ async def get_textblocks_by_item(
     """
     Получить текстовые блоки по пункту (или нескольким пунктам) и КМ.
 
+    Извлекает текстовые блоки, находящиеся в указанном пункте и опционально
+    в его подпунктах.
+
     Args:
-        km_number: КМ
-        item_number: номер пункта ("5.1") или список номеров (["5.1", "5.2"])
-        with_metadata: Включить метаданные
-        recursive: Искать в подпунктах
+        km_number: КМ номер акта.
+        item_number: Номер пункта ("5.1") или список номеров (["5.1", "5.2"]).
+        with_metadata: Включать ли метаданные акта.
+        recursive: Искать ли в подпунктах.
 
     Returns:
-        Если item_number - str: текстовые блоки
-        Если item_number - List[str]: Dict[str, str] - {номер_пункта: текстовые блоки}
+        Если item_number - str: отформатированные текстовые блоки.
+        Если item_number - List[str]: Dict[номер_пункта: текстовые блоки].
     """
-    # Если передан список - вызываем batch функцию
+    # Если передан список - используем batch функцию
     if isinstance(item_number, list):
         return await get_textblocks_by_item_list(
             km_number, item_number, with_metadata, recursive
         )
 
-    # Одиночный пункт - существующая логика
-    async with get_extractor_connection() as conn:
+    # Одиночный пункт - основная логика
+    pool = get_pool()
+
+    async with pool.acquire() as conn:
+        # Получаем метаданные акта
         act = await ActQueries.get_act_metadata(conn, km_number)
         if not act:
             return f"Акт с КМ {km_number} не найден."
 
+        # Получаем дерево и текстовые блоки в пункте
         tree = await ActQueries.get_tree(conn, act['id'])
-
-        # Используем новый метод
         textblocks = await ActQueries.get_textblocks_by_item(
             conn, act['id'], item_number, tree, recursive
         )
 
         parts = []
+
+        # Добавляем метаданные если требуется
         if with_metadata:
             parts.append(ActFormatter.format_metadata(act))
 
+        # Проверяем наличие текстовых блоков
         if not textblocks:
             scope = "и подпунктах" if recursive else ""
             parts.append(f"В пункте {item_number} {scope} КМ {km_number} нет текстовых блоков.")
@@ -1066,6 +1272,7 @@ async def get_textblocks_by_item(
             # Строим маппинг node_id -> parent_item_number
             node_id_to_number = ActQueries._build_node_id_to_hierarchical_number_map(tree)
 
+            # Форматируем каждый текстовый блок
             for tb in textblocks:
                 # Находим родительский пункт
                 parent_number = ActQueries._find_parent_item_number(
@@ -1083,19 +1290,25 @@ async def get_textblocks_by_item_list(
         recursive: bool = True
 ) -> Dict[str, str]:
     """
-    Получить текстовые блоки по списку пунктов.
+    Получить текстовые блоки по списку пунктов батчем.
+
+    Выполняет последовательное извлечение текстовых блоков для списка пунктов
+    одного акта.
 
     Args:
-        km_number: КМ
-        item_numbers: Список номеров пунктов
-        with_metadata: Включить метаданные
-        recursive: Искать в подпунктах
+        km_number: КМ номер акта.
+        item_numbers: Список номеров пунктов.
+        with_metadata: Включать ли метаданные акта.
+        recursive: Искать ли в подпунктах.
 
     Returns:
-        Словарь {номер_пункта: текстовые блоки}
+        Словарь {номер_пункта: текстовые блоки}.
     """
     result = {}
+
+    # Обрабатываем каждый пункт последовательно
     for item_num in item_numbers:
         text = await get_textblocks_by_item(km_number, item_num, with_metadata, recursive)
         result[item_num] = text
+
     return result
