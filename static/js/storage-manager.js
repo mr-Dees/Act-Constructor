@@ -452,8 +452,8 @@ class StorageManager {
         });
 
         // Обновляем индикатор количества форматов на кнопке
-        if (typeof FormatMenuManager !== 'undefined' && FormatMenuManager.updateFormatCount) {
-            FormatMenuManager.updateFormatCount();
+        if (typeof FormatMenuManager !== 'undefined' && FormatMenuManager.updateIndicator) {
+            FormatMenuManager.updateIndicator();
         }
     }
 

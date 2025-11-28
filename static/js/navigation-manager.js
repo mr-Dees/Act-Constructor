@@ -41,43 +41,109 @@ class NavigationManager {
     }
 
     /**
-     * Настройка кнопки сохранения с валидацией
+     * Настройка кнопки "Сохранить и экспортировать"
      * @private
      */
     static _setupSaveButton() {
         const generateBtn = document.getElementById('generateBtn');
         generateBtn?.addEventListener('click', async () => {
-            await this._handleSave(generateBtn);
+            await this._handleSaveAndExport(generateBtn);
         });
     }
 
     /**
-     * Обработка сохранения с полной валидацией
+     * Обработка сохранения и экспорта
      * @private
      * @param {HTMLElement} generateBtn - Кнопка сохранения
      */
-    static async _handleSave(generateBtn) {
-        // Валидация форматов
+    static async _handleSaveAndExport(generateBtn) {
+        // Проверка наличия выбранного акта
+        if (!window.currentActId) {
+            Notifications.warning('Сначала выберите акт');
+            return;
+        }
+
+        // Получаем выбранные действия
         const selectedFormats = FormatMenuManager.getSelectedFormats();
+        const shouldSaveToDb = selectedFormats.includes('db');
+        const exportFormats = selectedFormats.filter(f => f !== 'db');
+
+        // Проверка что выбрано хотя бы одно действие
         if (selectedFormats.length === 0) {
             Notifications.error(
-                'Выберите хотя бы один формат для сохранения',
+                'Выберите хотя бы одно действие',
                 AppConfig.notifications.duration.error
             );
             return;
         }
 
-        // Валидация структуры акта
-        if (!this._validateStructure()) return;
+        // Валидация структуры акта (только для экспорта)
+        if (exportFormats.length > 0) {
+            if (!this._validateStructure()) return;
+            if (!this._validateTables()) return;
+        }
 
-        // Валидация таблиц
-        if (!this._validateTables()) return;
+        // Синхронизация данных из DOM в AppState
+        if (typeof ItemsRenderer !== 'undefined') {
+            ItemsRenderer.syncDataToState();
+        }
 
-        // Синхронизация данных из DOM
-        ItemsRenderer.syncDataToState();
+        // Блокируем кнопку
+        generateBtn.disabled = true;
+        const originalText = generateBtn.textContent;
+        generateBtn.textContent = '⏳ Обработка...';
 
-        // Выполнение сохранения с блокировкой UI
-        await this._performSave(generateBtn, selectedFormats);
+        try {
+            // 1. Сохранение в БД (если выбрано)
+            if (shouldSaveToDb) {
+                await this._saveToDatabase();
+            }
+
+            // 2. Экспорт файлов (если выбраны форматы)
+            if (exportFormats.length > 0) {
+                await this._exportFiles(exportFormats);
+            }
+
+        } catch (error) {
+            console.error('Ошибка при обработке:', error);
+            Notifications.error(
+                `Произошла ошибка: ${error.message}`,
+                AppConfig.notifications.duration.error
+            );
+        } finally {
+            // Разблокируем кнопку
+            generateBtn.disabled = false;
+            generateBtn.textContent = originalText;
+        }
+    }
+
+    /**
+     * Сохранение в базу данных
+     * @private
+     */
+    static async _saveToDatabase() {
+        try {
+            await APIClient.saveActContent(window.currentActId);
+            // Уведомление уже показано в APIClient.saveActContent
+        } catch (err) {
+            console.error('Ошибка сохранения в БД:', err);
+            throw err; // Пробрасываем ошибку выше
+        }
+    }
+
+    /**
+     * Экспорт файлов в выбранных форматах
+     * @private
+     * @param {string[]} formats - Массив форматов для экспорта
+     */
+    static async _exportFiles(formats) {
+        try {
+            await APIClient.generateAct(formats);
+            // Уведомления и диалог скачивания показаны в APIClient.generateAct
+        } catch (err) {
+            console.error('Ошибка экспорта файлов:', err);
+            throw err; // Пробрасываем ошибку выше
+        }
     }
 
     /**
@@ -124,29 +190,5 @@ class NavigationManager {
         }
 
         return true;
-    }
-
-    /**
-     * Выполнение сохранения с обработкой состояния кнопки
-     * @private
-     * @param {HTMLElement} button - Кнопка сохранения
-     * @param {string[]} formats - Выбранные форматы
-     */
-    static async _performSave(button, formats) {
-        button.disabled = true;
-        const originalText = button.textContent;
-        button.textContent = '⏳ Создаём акты...';
-
-        try {
-            await APIClient.generateAct(formats);
-        } catch (error) {
-            Notifications.error(
-                `Произошла непредвиденная ошибка: ${error.message}`,
-                AppConfig.notifications.duration.error
-            );
-        } finally {
-            button.disabled = false;
-            button.textContent = originalText;
-        }
     }
 }

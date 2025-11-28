@@ -22,20 +22,15 @@
     <div class="step-actions">
         <button id="backBtn" class="btn btn-secondary">◄ Назад</button>
 
-        <!-- Кнопка сохранения в БД -->
-        <button id="saveToDbBtn" class="btn btn-primary" style="margin-right:8px;">
-            💾 Сохранить в БД
-        </button>
-
         <!-- Группа кнопок экспорта с выбором форматов -->
         <div class="save-button-group">
             <button id="generateBtn" class="btn btn-success save-main-btn">
-                Экспортировать файлы
+                Сохранить
             </button>
             <button id="formatDropdownBtn"
                     class="btn btn-success save-dropdown-btn"
-                    title="Выбрать форматы экспорта"
-                    aria-label="Выбрать форматы экспорта"
+                    title="Выбрать действия"
+                    aria-label="Выбрать действия сохранения"
                     aria-expanded="false">
                 <svg width="12" height="12" viewBox="0 0 12 12" fill="none" xmlns="http://www.w3.org/2000/svg">
                     <path d="M2 4L6 8L10 4" stroke="currentColor" stroke-width="2" stroke-linecap="round"
@@ -43,7 +38,7 @@
                 </svg>
             </button>
 
-            <!-- Выпадающее меню выбора форматов экспорта -->
+            <!-- Выпадающее меню выбора действий -->
             <div id="formatMenu" class="format-dropdown-menu hidden" role="menu">
                 <label class="format-option">
                     <input type="checkbox" value="txt" checked>
@@ -57,41 +52,17 @@
                     <input type="checkbox" value="docx">
                     <span>Word (DOCX)</span>
                 </label>
+
+                <div class="format-divider"></div>
+
+                <label class="format-option">
+                    <input type="checkbox" value="db" id="saveToDbCheckbox" checked>
+                    <span>База данных (GP)</span>
+                </label>
             </div>
         </div>
     </div>
 </div>
-
-<script>
-    document.addEventListener('DOMContentLoaded', () => {
-        // Обработчик кнопки "Сохранить в БД"
-        document.getElementById('saveToDbBtn')?.addEventListener('click', async () => {
-            console.log('Нажата кнопка "Сохранить в БД"');
-
-            if (!window.currentActId) {
-                console.warn('currentActId не установлен');
-                Notifications.warning('Сначала выберите акт');
-                return;
-            }
-
-            console.log('Сохраняем акт ID:', window.currentActId);
-
-            try {
-                // Синхронизируем данные из DOM в AppState
-                if (typeof ItemsRenderer !== 'undefined') {
-                    console.log('Синхронизация данных из DOM...');
-                    ItemsRenderer.syncDataToState();
-                }
-
-                console.log('Вызов APIClient.saveActContent...');
-                await APIClient.saveActContent(window.currentActId);
-                console.log('Сохранение завершено');
-            } catch (err) {
-                console.error('Ошибка сохранения:', err);
-            }
-        });
-    });
-</script>
 
 <!-- Контекстные меню -->
 {% include "components/context_menu.html" %}

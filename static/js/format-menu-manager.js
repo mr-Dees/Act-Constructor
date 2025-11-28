@@ -95,8 +95,8 @@ class FormatMenuManager {
     }
 
     /**
-     * Получение списка выбранных форматов
-     * @returns {string[]} Массив выбранных форматов
+     * Получение списка выбранных форматов (включая опцию БД)
+     * @returns {string[]} Массив выбранных форматов и действий
      */
     static getSelectedFormats() {
         const checkboxes = document.querySelectorAll(
@@ -113,9 +113,22 @@ class FormatMenuManager {
         const dropdownBtn = document.getElementById('formatDropdownBtn');
         const selectedFormats = this.getSelectedFormats();
 
-        if (selectedFormats.length > 0) {
-            const formatsText = selectedFormats.map(f => f.toUpperCase()).join(' + ');
-            this._setIndicators(generateBtn, dropdownBtn, formatsText);
+        // Разделяем на БД и форматы экспорта
+        const hasDbSave = selectedFormats.includes('db');
+        const exportFormats = selectedFormats.filter(f => f !== 'db');
+
+        // Формируем текст индикатора
+        const parts = [];
+        if (exportFormats.length > 0) {
+            parts.push(exportFormats.map(f => f.toUpperCase()).join(' + '));
+        }
+        if (hasDbSave) {
+            parts.push('БД');
+        }
+
+        if (parts.length > 0) {
+            const indicatorText = parts.join(' + ');
+            this._setIndicators(generateBtn, dropdownBtn, indicatorText);
         } else {
             this._clearIndicators(generateBtn, dropdownBtn);
         }

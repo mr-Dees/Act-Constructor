@@ -94,7 +94,7 @@
     border-radius: var(--radius);
     box-shadow: var(--shadow-lg);
     padding: var(--spacing-sm);
-    min-width: 10rem;
+    min-width: var(--spacing-save-menu);
     max-height: 20rem;
     overflow-y: auto;
     z-index: var(--z-dropdown);

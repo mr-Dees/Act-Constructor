@@ -313,6 +313,7 @@
     --spacing-10xl: 6rem;
     --spacing-11xl: 6.5rem;
     --spacing-12xl: 7rem;
+    --spacing-save-menu: 17.5rem;
 
     /* Типографика */
     --font-family-base: -apple-system, BlinkMacSystemFont, "Inter", "Segoe UI", system-ui, sans-serif;
