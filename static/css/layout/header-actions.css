@@ -1,0 +1,108 @@
+/*
+ * Стили для кнопок действий в правой части шапки
+ */
+
+.header-actions-right {
+    position: absolute;
+    right: var(--spacing-2xl);
+    top: 50%;
+    transform: translateY(calc(-50% + 0.125rem));
+    display: flex;
+    align-items: flex-start;
+    gap: var(--spacing-xl);
+    z-index: var(--z-sticky);
+}
+
+/* Контейнер иконки + подпись */
+.header-action-container {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: var(--spacing-xs);
+    position: relative;
+}
+
+/* Кнопка */
+.header-action-btn {
+    width: 2.5rem;
+    height: 2.5rem;
+    background: var(--step-bg);
+    border: 1px solid var(--step-border);
+    border-radius: var(--radius-sm);
+    padding: 0;
+    cursor: pointer;
+    transition: var(--transition-all);
+    color: var(--text-on-primary);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    position: relative;
+    overflow: hidden;
+    margin-top: 2px;
+}
+
+.header-action-btn::before {
+    content: '';
+    position: absolute;
+    inset: 0;
+    background: radial-gradient(circle, rgb(255 255 255 / 30%) 0%, transparent 70%);
+    transform: scale(0);
+    transition: transform 0.6s ease-out;
+    pointer-events: none;
+}
+
+.header-action-btn:active::before {
+    transform: scale(2);
+}
+
+.header-action-btn:hover {
+    background: var(--step-bg-hover);
+    border-color: var(--step-border-hover);
+    transform: translateY(-2px);
+    box-shadow: var(--shadow-sm);
+}
+
+.header-action-btn:active {
+    transform: translateY(0);
+    box-shadow: none;
+}
+
+.header-action-btn:focus-visible {
+    outline: var(--focus-outline);
+    outline-offset: var(--focus-outline-offset);
+}
+
+/* Активное состояние кнопки (когда меню открыто) */
+.header-action-btn.active {
+    background: var(--bg-primary);
+    color: var(--primary);
+    border-color: var(--bg-primary);
+    box-shadow: var(--shadow-sm);
+    transform: translateY(0);
+}
+
+.header-action-btn.active:hover {
+    background: var(--bg-primary);
+    color: var(--primary-hover);
+    transform: translateY(0);
+}
+
+.header-action-btn svg {
+    margin-top: 1px;
+}
+
+/* Подпись */
+.header-action-label {
+    font-size: var(--font-size-xs);
+    font-weight: var(--font-weight-semibold);
+    color: var(--text-on-primary);
+    white-space: nowrap;
+    user-select: none;
+    line-height: var(--line-height-tight);
+    text-shadow: 0 1px 2px rgb(0 0 0 / 30%);
+    margin-top: 2px;
+}
+
+.header-action-container:hover .header-action-label {
+    text-shadow: 0 1px 3px rgb(0 0 0 / 40%);
+}

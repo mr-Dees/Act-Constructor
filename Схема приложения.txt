@@ -75,7 +75,9 @@ Act Constructor/
 │   │   ├── layout/
 │   │   │   ├── container.css
 │   │   │   ├── header.css
+│   │   │   ├── header-actions
 │   │   │   ├── panels.css
+│   │   │   ├── settings-menu
 │   │   │   └── two-columns.css
 │   │   ├── modules/
 │   │   │   ├── buttons/
@@ -128,8 +130,9 @@ Act Constructor/
 │   │   │       ├── violation-fields.css
 │   │   │       └── violation-list.css
 │   │   ├── utilities/
-│   │   │   ├── save-indicator.css
-│   │   │   └── helpers.css
+│   │   │   ├── acts-menu.css
+│   │   │   ├── helpers.css
+│   │   │   └── save-indicator.css
 │   │   └── main.css
 │   └── js/
 │       ├── context-menu/
@@ -179,16 +182,18 @@ Act Constructor/
 │       │   ├── violation-init.js
 │       │   ├── violation-paste.js
 │       │   └── violation-rendering.js
-│       ├── app-config.jsacts-manager-page.js
-│       ├── app-config.jsacts-menu.js
+│       ├── acts-manager-page.js
+│       ├── acts-menu.js
 │       ├── api.js
 │       ├── app.js
 │       ├── app-config.js
-│       ├── app-config.jscreate-act-dialog.js
+│       ├── create-act-dialog.js
 │       ├── dialog.js
 │       ├── format-menu-manager.js
 │       ├── help.js
 │       ├── navigation-manager.js
-│       └── notifications.js
+│       ├── notifications.js
+│       ├── settings-menu.js
+│       └── storage-manager.js
 ├── requirements.txt
 └── .env

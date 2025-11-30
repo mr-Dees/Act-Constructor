@@ -23,9 +23,14 @@ class ActsMenuManager {
      * Показывает меню выбора актов
      */
     static show() {
-        const menu = document.getElementById('actsMenu');
+        const menu = document.getElementById('actsMenuDropdown');
+        const btn = document.getElementById('actsMenuBtn');
+
         if (menu) {
             menu.classList.remove('hidden');
+            if (btn) {
+                btn.classList.add('active');
+            }
             this.renderActsList();
         }
     }
@@ -34,9 +39,26 @@ class ActsMenuManager {
      * Скрывает меню выбора актов
      */
     static hide() {
-        const menu = document.getElementById('actsMenu');
+        const menu = document.getElementById('actsMenuDropdown');
+        const btn = document.getElementById('actsMenuBtn');
+
         if (menu) {
             menu.classList.add('hidden');
+        }
+        if (btn) {
+            btn.classList.remove('active');
+        }
+    }
+
+    /**
+     * Переключает видимость меню
+     */
+    static toggle() {
+        const menu = document.getElementById('actsMenuDropdown');
+        if (menu && menu.classList.contains('hidden')) {
+            this.show();
+        } else {
+            this.hide();
         }
     }
 
@@ -113,26 +135,18 @@ class ActsMenuManager {
         const listContainer = document.getElementById('actsList');
         if (!listContainer) return;
 
-        listContainer.innerHTML = '<li style="padding:8px;color:#999;">Загрузка...</li>';
+        listContainer.innerHTML = '<li class="acts-list-loading">Загрузка...</li>';
 
         try {
             const acts = await this.fetchActsList();
 
             if (!acts.length) {
                 listContainer.innerHTML = `
-                    <li style="padding:12px;text-align:center;color:#999;">
-                        Нет доступных актов
-                    </li>
-                    <li style="padding:8px;text-align:center;">
-                        <button class="btn btn-primary" id="createActFromMenuBtn" style="width:100%;">
-                            Создать новый акт
-                        </button>
-                    </li>
+                    <div class="acts-list-empty">
+                        <div class="acts-list-empty-icon">📋</div>
+                        <div class="acts-list-empty-text">Нет доступных актов</div>
+                    </div>
                 `;
-                document.getElementById('createActFromMenuBtn')?.addEventListener('click', () => {
-                    this.hide();
-                    CreateActDialog.show();
-                });
                 return;
             }
 
@@ -141,83 +155,49 @@ class ActsMenuManager {
             acts.forEach(act => {
                 const li = document.createElement('li');
                 li.className = "acts-list-item";
-                li.style.cssText = `
-                    margin-bottom:12px;
-                    padding:12px;
-                    border:1px solid #ddd;
-                    border-radius:6px;
-                    background: ${this.currentActId === act.id ? '#f0f8ff' : 'white'};
-                    cursor:pointer;
-                    transition: all 0.2s;
-                `;
+                if (this.currentActId === act.id) {
+                    li.classList.add('current');
+                }
 
                 const lastEdited = this._formatDateTime(act.last_edited_at);
                 const startDate = this._formatDate(act.inspection_start_date);
                 const endDate = this._formatDate(act.inspection_end_date);
 
                 li.innerHTML = `
-                    <div style="display:flex;justify-content:space-between;align-items:start;margin-bottom:8px;">
-                        <b style="font-size:15px;">${this._escapeHtml(act.inspection_name)}</b>
-                        <span style="
-                            background:#6c757d;
-                            color:white;
-                            padding:2px 8px;
-                            border-radius:10px;
-                            font-size:11px;
-                        ">${act.user_role}</span>
+                    <div class="acts-list-item-header">
+                        <div class="acts-list-item-title">${this._escapeHtml(act.inspection_name)}</div>
+                        <span class="acts-list-item-badge">${this._escapeHtml(act.user_role)}</span>
                     </div>
-                    <div style="font-size:13px;color:#666;margin-bottom:4px;">
-                        <strong>КМ:</strong> ${this._escapeHtml(act.km_number)}
+                    <div class="acts-list-item-meta">
+                        <div class="acts-list-item-meta-row">
+                            <span class="acts-list-item-meta-label">КМ:</span>
+                            <span>${this._escapeHtml(act.km_number)}</span>
+                        </div>
+                        <div class="acts-list-item-meta-row">
+                            <span class="acts-list-item-meta-label">Приказ:</span>
+                            <span>${this._escapeHtml(act.order_number)}</span>
+                        </div>
+                        <div class="acts-list-item-meta-row">
+                            <span class="acts-list-item-meta-label">Период:</span>
+                            <span>${startDate} — ${endDate}</span>
+                        </div>
                     </div>
-                    <div style="font-size:13px;color:#666;margin-bottom:4px;">
-                        <strong>Приказ:</strong> ${this._escapeHtml(act.order_number)}
-                    </div>
-                    <div style="font-size:13px;color:#666;margin-bottom:8px;">
-                        <strong>Период проверки:</strong> ${startDate} — ${endDate}
-                    </div>
-                    <div style="font-size:12px;color:#999;">
+                    <div class="acts-list-item-date">
                         Изменено: ${lastEdited}
                     </div>
                 `;
 
                 li.addEventListener('click', () => this.selectAct(act.id));
-                li.addEventListener('mouseenter', () => {
-                    if (this.currentActId !== act.id) {
-                        li.style.background = '#f9f9f9';
-                        li.style.borderColor = '#007bff';
-                    }
-                });
-                li.addEventListener('mouseleave', () => {
-                    if (this.currentActId !== act.id) {
-                        li.style.background = 'white';
-                        li.style.borderColor = '#ddd';
-                    }
-                });
 
                 listContainer.appendChild(li);
-            });
-
-            // Кнопка создания нового акта внизу списка
-            const createLi = document.createElement('li');
-            createLi.style.cssText = 'padding:8px;margin-top:16px;border-top:1px solid #ddd;';
-            createLi.innerHTML = `
-                <button class="btn btn-primary" id="createActFromMenuBtn" style="width:100%;">
-                    + Создать новый акт
-                </button>
-            `;
-            listContainer.appendChild(createLi);
-
-            document.getElementById('createActFromMenuBtn')?.addEventListener('click', () => {
-                this.hide();
-                CreateActDialog.show();
             });
 
         } catch (err) {
             console.error('Ошибка загрузки актов:', err);
             listContainer.innerHTML = `
-                <li style="padding:12px;text-align:center;color:red;">
-                    Ошибка загрузки списка актов
-                </li>
+                <div class="acts-list-error">
+                    ❌ Ошибка загрузки списка актов
+                </div>
             `;
             if (typeof Notifications !== 'undefined') {
                 Notifications.error('Ошибка загрузки списка актов');
@@ -557,7 +537,7 @@ class ActsMenuManager {
                 height: 50px;
                 animation: spin 1s linear infinite;
             "></div>
-            <p style="font-size: 16px; color: #333; font-weight: 500;">${message}</p>
+            <p style="font-size: 16px; color: #333; font-weight: 500;">${this._escapeHtml(message)}</p>
         `;
 
         document.body.appendChild(indicator);
@@ -590,13 +570,53 @@ class ActsMenuManager {
     static init() {
         const menuBtn = document.getElementById('actsMenuBtn');
         const closeBtn = document.getElementById('closeActsMenuBtn');
+        const createBtn = document.getElementById('createNewActBtn');
+        const editBtn = document.getElementById('editMetadataBtn');
+        const duplicateBtn = document.getElementById('duplicateActBtn');
+        const deleteBtn = document.getElementById('deleteActBtn');
 
         if (menuBtn) {
-            menuBtn.addEventListener('click', () => this.show());
+            menuBtn.addEventListener('click', (e) => {
+                e.stopPropagation();
+                this.toggle();
+            });
         }
 
         if (closeBtn) {
             closeBtn.addEventListener('click', () => this.hide());
+        }
+
+        if (createBtn) {
+            createBtn.addEventListener('click', () => {
+                this.hide();
+                CreateActDialog.show();
+            });
+        }
+
+        if (editBtn) {
+            editBtn.addEventListener('click', () => this.showEditMetadataDialog());
+        }
+
+        if (duplicateBtn) {
+            duplicateBtn.addEventListener('click', () => this.duplicateCurrentAct());
+        }
+
+        if (deleteBtn) {
+            deleteBtn.addEventListener('click', () => this.deleteCurrentAct());
+        }
+
+        // Закрытие при клике вне меню
+        document.addEventListener('click', (e) => {
+            const menu = document.getElementById('actsMenuDropdown');
+            if (menu && !menu.contains(e.target) && !menuBtn?.contains(e.target)) {
+                this.hide();
+            }
+        });
+
+        // Предотвращаем закрытие при клике внутри меню
+        const menu = document.getElementById('actsMenuDropdown');
+        if (menu) {
+            menu.addEventListener('click', (e) => e.stopPropagation());
         }
 
         // Извлекаем act_id из URL

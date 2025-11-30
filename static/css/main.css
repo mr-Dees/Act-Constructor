@@ -11,6 +11,8 @@
 /* Компоненты разметки страницы */
 @import './layout/container.css';
 @import './layout/header.css';
+@import './layout/header-actions.css';
+@import './layout/settings-menu.css';
 @import './layout/two-columns.css';
 @import './layout/panels.css';
 
@@ -77,3 +79,4 @@
 /* Вспомогательные утилиты */
 @import './utilities/helpers.css';
 @import './utilities/save-indicator.css';
+@import './utilities/acts-menu.css';

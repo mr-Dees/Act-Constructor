@@ -1,0 +1,275 @@
+/*
+ * Выпадающее меню актов (бургер справа)
+ * Визуально согласовано с меню настроек и help-modal
+ */
+
+/* Контейнер для позиционирования меню */
+.acts-menu-container {
+    position: relative;
+}
+
+/* Выпадающее меню актов */
+.acts-menu-dropdown {
+    position: absolute;
+    top: calc(100% + 18px);
+    right: -5rem;
+    min-width: 40rem;
+    max-width: 60rem;
+    background: var(--modal-bg);
+    border: 1px solid var(--modal-border);
+    border-radius: var(--radius-xl);
+    box-shadow: var(--modal-shadow);
+    z-index: var(--z-dropdown);
+    overflow: hidden;
+    display: flex;
+    flex-direction: column;
+    animation: scaleIn var(--transition-base) cubic-bezier(0.4, 0, 0.2, 1);
+    max-height: 70vh;
+}
+
+.acts-menu-dropdown.hidden {
+    display: none;
+}
+
+/* Шапка меню актов */
+.acts-menu-header {
+    padding: var(--spacing-xl) var(--spacing-2xl);
+    background: linear-gradient(135deg, #748fca 0%, #9d7cb8 100%);
+    color: var(--text-on-primary);
+    border-bottom: 1px solid var(--border-light);
+    border-radius: var(--radius-xl) var(--radius-xl) 0 0;
+    flex-shrink: 0;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+}
+
+.acts-menu-header h4 {
+    margin: 0;
+    font-size: var(--font-size-xl);
+    font-weight: var(--font-weight-semibold);
+    line-height: var(--line-height-tight);
+}
+
+/* Кнопка закрытия меню актов */
+.acts-menu-close {
+    background: none;
+    border: none;
+    font-size: var(--font-size-3xl);
+    cursor: pointer;
+    color: var(--text-on-primary);
+    line-height: 1;
+    padding: 0;
+    width: 2.5rem;
+    height: 2.5rem;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    border-radius: var(--radius);
+    transition: var(--transition-all);
+}
+
+.acts-menu-close:hover {
+    background: var(--help-close-hover);
+    transform: rotate(90deg);
+}
+
+.acts-menu-close:active {
+    transform: rotate(90deg) scale(0.95);
+}
+
+.acts-menu-close:focus-visible {
+    outline: 2px solid var(--text-on-primary);
+    outline-offset: 2px;
+}
+
+/* Тело списка */
+.acts-menu-body {
+    padding: var(--spacing-xl);
+    overflow-y: auto;
+    overflow-x: hidden;
+    flex: 1;
+    min-height: 0;
+    scrollbar-width: thin;
+    scrollbar-color: var(--scrollbar-thumb) var(--scrollbar-bg);
+}
+
+.acts-menu-body::-webkit-scrollbar {
+    width: var(--scrollbar-width);
+}
+
+.acts-menu-body::-webkit-scrollbar-track {
+    background: var(--scrollbar-bg);
+    border-radius: 0 0 var(--radius-xl) 0;
+}
+
+.acts-menu-body::-webkit-scrollbar-thumb {
+    background: var(--scrollbar-thumb);
+    border-radius: var(--radius);
+}
+
+.acts-menu-body::-webkit-scrollbar-thumb:hover {
+    background: var(--scrollbar-thumb-hover);
+}
+
+/* Секция действий с актом */
+.acts-menu-actions {
+    display: flex;
+    flex-direction: column;
+    gap: var(--spacing);
+    margin-bottom: var(--spacing-lg);
+}
+
+/* Сетка для кнопок редактирования/дублирования/удаления */
+.acts-actions-grid {
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+    gap: var(--spacing-sm);
+}
+
+/* Кнопка с красным текстом для удаления */
+.btn-danger-text {
+    color: var(--danger);
+}
+
+.btn-danger-text:hover:not(:disabled) {
+    color: var(--danger-hover);
+    background: var(--danger-subtle);
+}
+
+/* Разделитель */
+.acts-menu-divider {
+    height: 1px;
+    background: var(--border-light);
+    margin: var(--spacing-lg) 0;
+    border: none;
+}
+
+/* Список актов */
+.acts-list {
+    list-style: none;
+    padding: 0;
+    margin: 0;
+    display: flex;
+    flex-direction: column;
+    gap: var(--spacing);
+}
+
+/* Элемент списка акта */
+.acts-list-item {
+    border-radius: var(--radius-md);
+    border: 1px solid var(--border-light);
+    background: var(--bg-secondary);
+    box-shadow: var(--shadow-xs);
+    padding: var(--spacing) var(--spacing-lg);
+    transition: var(--transition-all);
+    cursor: pointer;
+}
+
+.acts-list-item:hover {
+    background: var(--bg-hover);
+    border-color: var(--primary-light);
+    box-shadow: var(--shadow-sm);
+    transform: translateY(-1px);
+}
+
+.acts-list-item:active {
+    transform: translateY(0);
+}
+
+/* Активный (текущий) акт */
+.acts-list-item.current {
+    background: var(--primary-subtle);
+    border-color: var(--primary);
+    box-shadow: var(--shadow-sm);
+}
+
+/* Заголовок акта */
+.acts-list-item-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: flex-start;
+    gap: var(--spacing);
+    margin-bottom: var(--spacing-sm);
+}
+
+.acts-list-item-title {
+    font-size: var(--font-size-base);
+    font-weight: var(--font-weight-semibold);
+    color: var(--text-primary);
+    line-height: var(--line-height-tight);
+    flex: 1;
+}
+
+.acts-list-item-badge {
+    background: var(--gray-500);
+    color: var(--text-on-primary);
+    padding: var(--spacing-xs) var(--spacing-sm);
+    border-radius: var(--radius-full);
+    font-size: var(--font-size-xs);
+    font-weight: var(--font-weight-medium);
+    white-space: nowrap;
+    flex-shrink: 0;
+}
+
+/* Метаданные акта */
+.acts-list-item-meta {
+    display: flex;
+    flex-direction: column;
+    gap: var(--spacing-xs);
+    font-size: var(--font-size-sm);
+    color: var(--text-secondary);
+}
+
+.acts-list-item-meta-row {
+    display: flex;
+    gap: var(--spacing-xs);
+}
+
+.acts-list-item-meta-label {
+    font-weight: var(--font-weight-medium);
+    color: var(--text-primary);
+}
+
+/* Дата последнего редактирования */
+.acts-list-item-date {
+    font-size: var(--font-size-xs);
+    color: var(--text-tertiary);
+    margin-top: var(--spacing-xs);
+    padding-top: var(--spacing-xs);
+    border-top: 1px solid var(--border-light);
+}
+
+/* Пустое состояние */
+.acts-list-empty {
+    text-align: center;
+    padding: var(--spacing-2xl);
+    color: var(--text-tertiary);
+}
+
+.acts-list-empty-icon {
+    font-size: var(--font-size-4xl);
+    margin-bottom: var(--spacing);
+    opacity: 0.5;
+}
+
+.acts-list-empty-text {
+    font-size: var(--font-size-sm);
+    margin-bottom: var(--spacing-lg);
+}
+
+/* Состояние загрузки */
+.acts-list-loading {
+    text-align: center;
+    padding: var(--spacing-xl);
+    color: var(--text-tertiary);
+    font-size: var(--font-size-sm);
+}
+
+/* Сообщение об ошибке */
+.acts-list-error {
+    text-align: center;
+    padding: var(--spacing-xl);
+    color: var(--error);
+    font-size: var(--font-size-sm);
+}
