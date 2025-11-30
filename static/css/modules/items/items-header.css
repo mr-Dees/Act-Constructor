@@ -38,7 +38,7 @@
 .item-title.editable:focus {
     outline: none;
     background: var(--bg-active);
-    box-shadow: 0 0 0 2px var(--primary-subtle);
+    box-shadow: 0 0 0 var(--border-width-md) var(--primary-subtle);
 }
 
 /* Заголовок элемента второго уровня */
@@ -105,8 +105,8 @@
 
 /* Кнопка сворачивания/разворачивания */
 .item-toggle-btn {
-    width: 1.25rem;
-    height: 1.25rem;
+    width: var(--item-toggle-btn-size);
+    height: var(--item-toggle-btn-size);
     flex-shrink: 0;
 }
 
@@ -125,7 +125,7 @@
     font-size: var(--font-size-xs);
     background: var(--primary-subtle);
     color: var(--primary);
-    padding: 2px var(--spacing-xs);
+    padding: var(--item-badge-padding) var(--spacing-xs);
     border-radius: var(--radius-full);
     font-weight: var(--font-weight-semibold);
     margin-left: var(--spacing-xs);

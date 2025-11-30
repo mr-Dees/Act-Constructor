@@ -10,7 +10,7 @@
     padding: var(--spacing-2xl);
     border-radius: var(--radius-md);
     font-family: 'Times New Roman', Georgia, serif;
-    border: 1px solid var(--border);
+    border: var(--border-width-thin) solid var(--border);
     font-size: var(--font-size-sm);
     line-height: var(--line-height-relaxed);
     overflow-y: auto;
@@ -44,7 +44,7 @@
 
 /* Разделитель между секциями */
 .preview-divider {
-    height: 1px;
+    height: var(--border-width-thin);
     background: var(--border-light);
     margin: var(--spacing-xl) 0;
     border: none;

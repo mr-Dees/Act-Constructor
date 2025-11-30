@@ -15,13 +15,13 @@
 .item-textarea {
     width: 100%;
     padding: var(--spacing) var(--spacing-md);
-    border: 1px solid var(--border);
+    border: var(--border-width-thin) solid var(--border);
     border-radius: var(--radius);
     font-family: var(--font-family-base);
     font-size: var(--font-size-sm);
     line-height: var(--line-height-relaxed);
     resize: vertical;
-    min-height: 5rem;
+    min-height: var(--input-min-height);
     transition: border-color var(--transition-base),
     box-shadow var(--transition-base),
     background-color var(--transition-base);
@@ -53,7 +53,7 @@
     background: var(--input-bg-disabled);
     color: var(--input-text-disabled);
     cursor: not-allowed;
-    opacity: 0.7;
+    opacity: var(--opacity-disabled);
 }
 
 /* Поле с ошибкой */
@@ -86,7 +86,7 @@
 .item-children {
     margin-top: var(--spacing-md);
     padding-top: var(--spacing-md);
-    border-top: 1px solid var(--border-light);
+    border-top: var(--border-width-thin) solid var(--border-light);
     display: flex;
     flex-direction: column;
     gap: var(--spacing-sm);

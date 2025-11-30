@@ -47,14 +47,14 @@
     font-size: var(--font-size-xs);
     color: var(--text-tertiary);
     background: var(--bg-tertiary);
-    padding: 2px var(--spacing-xs);
+    padding: var(--item-badge-padding) var(--spacing-xs);
     border-radius: var(--radius-sm);
     opacity: 0;
     transition: opacity var(--transition-fast);
 }
 
 .item-block[class*="level-"]:hover::after {
-    opacity: 0.5;
+    opacity: var(--opacity-hover-indicator);
 }
 
 /* Уменьшение padding для глубоко вложенных элементов */
@@ -70,15 +70,9 @@
     left: calc(var(--spacing-2xl) * -0.5);
     top: 0;
     bottom: 0;
-    width: 1px;
-    background: linear-gradient(
-            to bottom,
-            transparent 0%,
-            var(--border-light) 20%,
-            var(--border-light) 80%,
-            transparent 100%
-    );
-    opacity: 0.5;
+    width: var(--item-level-connector-width);
+    background: var(--level-connector-gradient);
+    opacity: var(--opacity-subtle);
 }
 
 .item-block.level-1::before {

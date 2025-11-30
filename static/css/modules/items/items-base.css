@@ -18,8 +18,8 @@
     background: var(--bg-primary);
     padding: var(--spacing-lg);
     border-radius: var(--radius-md);
-    border: 1px solid var(--border);
-    border-left: 3px solid var(--primary);
+    border: var(--border-width-thin) solid var(--border);
+    border-left: var(--border-width-thick) solid var(--primary);
     overflow: visible;
     transition: border-color var(--transition-base),
     box-shadow var(--transition-base),
@@ -32,7 +32,7 @@
 .item-block:hover {
     border-left-color: var(--primary-hover);
     box-shadow: var(--shadow-md);
-    transform: translateX(2px);
+    transform: translateX(var(--item-hover-translate));
 }
 
 /* Состояние фокуса для доступности */
@@ -69,11 +69,11 @@
 .item-block.highlight-flash::before {
     content: '';
     position: absolute;
-    top: -4px;
-    left: -4px;
-    right: -4px;
-    bottom: -4px;
-    border-radius: calc(var(--radius-md) + 2px);
+    top: calc(var(--item-highlight-offset) * -1);
+    left: calc(var(--item-highlight-offset) * -1);
+    right: calc(var(--item-highlight-offset) * -1);
+    bottom: calc(var(--item-highlight-offset) * -1);
+    border-radius: calc(var(--radius-md) + var(--border-width-md));
     background: var(--item-highlight-gradient);
     opacity: 0;
     pointer-events: none;
@@ -95,18 +95,18 @@
     position: absolute;
     left: 0;
     right: 0;
-    height: 2px;
+    height: var(--item-drop-indicator-height);
     background: var(--primary);
     box-shadow: var(--highlight-insert-shadow);
     animation: pulse 1s ease-in-out infinite;
 }
 
 .item-block.drop-target-before::before {
-    top: -2px;
+    top: calc(var(--item-drop-indicator-height) * -1);
 }
 
 .item-block.drop-target-after::after {
-    bottom: -2px;
+    bottom: calc(var(--item-drop-indicator-height) * -1);
 }
 
 /* Элемент с ошибкой валидации */

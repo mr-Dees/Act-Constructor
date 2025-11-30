@@ -6,16 +6,16 @@
 /* Хендл изменения ширины колонки */
 .resize-handle {
     position: absolute;
-    right: -0.3125rem;
+    right: var(--table-resize-handle-offset);
     top: 0;
-    width: 0.5rem;
+    width: var(--table-resize-handle-width);
     height: 100%;
     cursor: col-resize;
     background: transparent;
-    z-index: calc(var(--z-sticky) + 20);
+    z-index: var(--z-sticky-elevated);
     opacity: 0;
     transition: opacity var(--transition-fast), background var(--transition-fast);
-    border-right: 2px solid transparent;
+    border-right: var(--table-resize-handle-border-width) solid transparent;
     pointer-events: auto;
 }
 
@@ -29,16 +29,16 @@
 /* Хендл изменения высоты строки */
 .row-resize-handle {
     position: absolute;
-    bottom: -0.3125rem;
+    bottom: var(--table-resize-handle-offset);
     left: 0;
     width: 100%;
-    height: 0.5rem;
+    height: var(--table-resize-handle-width);
     cursor: row-resize;
     background: transparent;
-    z-index: calc(var(--z-sticky) + 20);
+    z-index: var(--z-sticky-elevated);
     opacity: 0;
     transition: opacity var(--transition-fast), background var(--transition-fast);
-    border-bottom: 2px solid transparent;
+    border-bottom: var(--table-resize-handle-border-width) solid transparent;
     pointer-events: auto;
 }
 
@@ -54,7 +54,7 @@
 .editable-table th:hover .resize-handle,
 .editable-table td:hover .row-resize-handle,
 .editable-table th:hover .row-resize-handle {
-    opacity: 0.6;
+    opacity: var(--opacity-resize-handle);
     background: var(--resize-handle-bg-subtle);
 }
 

@@ -9,7 +9,7 @@
     padding: var(--spacing-lg);
     background: var(--bg-primary);
     border-radius: var(--radius-md);
-    border: 1px solid var(--border);
+    border: var(--border-width-thin) solid var(--border);
     box-shadow: var(--shadow-sm);
     overflow: hidden;
     position: relative;
@@ -35,21 +35,21 @@
     box-shadow: var(--shadow-xs);
     table-layout: fixed;
     margin: 0;
-    border: 2px solid var(--border-medium);
+    border: var(--table-border-width) solid var(--border-medium);
     overflow: visible;
 }
 
 /* Общие стили ячеек таблицы */
 .editable-table th,
 .editable-table td {
-    border: 1px solid var(--border-medium);
+    border: var(--table-cell-border-width) solid var(--border-medium);
     padding: var(--spacing-sm) var(--spacing);
     text-align: left;
     position: relative;
-    min-width: 5rem;
-    max-width: 50rem;
-    min-height: 2.25rem;
-    max-height: 37.5rem;
+    min-width: var(--table-cell-min-width);
+    max-width: var(--table-cell-max-width);
+    min-height: var(--table-cell-min-height);
+    max-height: var(--table-cell-max-height);
     word-wrap: break-word;
     word-break: normal;
     overflow-wrap: anywhere;
@@ -152,7 +152,7 @@
     padding: var(--spacing-lg);
     background: var(--bg-secondary);
     border-radius: var(--radius-md);
-    border: 1px solid var(--border-light);
+    border: var(--border-width-thin) solid var(--border-light);
     box-shadow: var(--shadow-xs);
 }
 
@@ -163,7 +163,7 @@
 
 /* Разделитель в контекстном меню */
 .context-menu-separator {
-    height: 1px;
+    height: var(--border-width-thin);
     background-color: var(--border-light);
     margin: var(--spacing-xs) 0;
 }
@@ -187,7 +187,7 @@
 .context-menu-item.disabled {
     color: var(--text-disabled);
     cursor: not-allowed;
-    opacity: 0.6;
+    opacity: var(--opacity-disabled);
 }
 
 .context-menu-item.disabled:hover {
@@ -214,126 +214,126 @@
 /* Подсветка границ для вставки (зеленая) */
 .highlight-border-top.highlight-insert::before,
 .highlight-border-top:not(.highlight-error):not(.highlight-warning)::before {
-    top: -0.125rem;
+    top: var(--table-highlight-border-offset);
     left: 0;
     right: 0;
-    height: 0.25rem;
+    height: var(--table-highlight-border-width);
     background: var(--highlight-insert);
-    animation: borderPulse 0.8s ease-in-out infinite;
+    animation: borderPulse var(--duration-border-pulse) ease-in-out infinite;
     box-shadow: var(--highlight-insert-shadow);
 }
 
 .highlight-border-bottom.highlight-insert::after,
 .highlight-border-bottom:not(.highlight-error):not(.highlight-warning)::after {
-    bottom: -0.125rem;
+    bottom: var(--table-highlight-border-offset);
     left: 0;
     right: 0;
-    height: 0.25rem;
+    height: var(--table-highlight-border-width);
     background: var(--highlight-insert);
-    animation: borderPulse 0.8s ease-in-out infinite;
+    animation: borderPulse var(--duration-border-pulse) ease-in-out infinite;
     box-shadow: var(--highlight-insert-shadow);
 }
 
 .highlight-border-left.highlight-insert::before,
 .highlight-border-left:not(.highlight-error):not(.highlight-warning)::before {
-    left: -0.125rem;
+    left: var(--table-highlight-border-offset);
     top: 0;
     bottom: 0;
-    width: 0.25rem;
+    width: var(--table-highlight-border-width);
     background: var(--highlight-insert);
-    animation: borderPulse 0.8s ease-in-out infinite;
+    animation: borderPulse var(--duration-border-pulse) ease-in-out infinite;
     box-shadow: var(--highlight-insert-shadow);
 }
 
 .highlight-border-right.highlight-insert::after,
 .highlight-border-right:not(.highlight-error):not(.highlight-warning)::after {
-    right: -0.125rem;
+    right: var(--table-highlight-border-offset);
     top: 0;
     bottom: 0;
-    width: 0.25rem;
+    width: var(--table-highlight-border-width);
     background: var(--highlight-insert);
-    animation: borderPulse 0.8s ease-in-out infinite;
+    animation: borderPulse var(--duration-border-pulse) ease-in-out infinite;
     box-shadow: var(--highlight-insert-shadow);
 }
 
 /* Подсветка границ для предупреждения (желто-оранжевая) */
 .highlight-border-top.highlight-warning::before {
-    top: -0.125rem;
+    top: var(--table-highlight-border-offset);
     left: 0;
     right: 0;
-    height: 0.25rem;
+    height: var(--table-highlight-border-width);
     background: var(--warning);
-    animation: borderPulse 0.8s ease-in-out infinite;
+    animation: borderPulse var(--duration-border-pulse) ease-in-out infinite;
     box-shadow: var(--highlight-warning-shadow);
 }
 
 .highlight-border-bottom.highlight-warning::after {
-    bottom: -0.125rem;
+    bottom: var(--table-highlight-border-offset);
     left: 0;
     right: 0;
-    height: 0.25rem;
+    height: var(--table-highlight-border-width);
     background: var(--warning);
-    animation: borderPulse 0.8s ease-in-out infinite;
+    animation: borderPulse var(--duration-border-pulse) ease-in-out infinite;
     box-shadow: var(--highlight-warning-shadow);
 }
 
 .highlight-border-left.highlight-warning::before {
-    left: -0.125rem;
+    left: var(--table-highlight-border-offset);
     top: 0;
     bottom: 0;
-    width: 0.25rem;
+    width: var(--table-highlight-border-width);
     background: var(--warning);
-    animation: borderPulse 0.8s ease-in-out infinite;
+    animation: borderPulse var(--duration-border-pulse) ease-in-out infinite;
     box-shadow: var(--highlight-warning-shadow);
 }
 
 .highlight-border-right.highlight-warning::after {
-    right: -0.125rem;
+    right: var(--table-highlight-border-offset);
     top: 0;
     bottom: 0;
-    width: 0.25rem;
+    width: var(--table-highlight-border-width);
     background: var(--warning);
-    animation: borderPulse 0.8s ease-in-out infinite;
+    animation: borderPulse var(--duration-border-pulse) ease-in-out infinite;
     box-shadow: var(--highlight-warning-shadow);
 }
 
 /* Подсветка границ для ошибок (красная) */
 .highlight-border-top.highlight-error::before {
-    top: -0.125rem;
+    top: var(--table-highlight-border-offset);
     left: 0;
     right: 0;
-    height: 0.25rem;
+    height: var(--table-highlight-border-width);
     background: var(--highlight-error);
-    animation: borderPulseError 0.6s ease-in-out 3;
+    animation: borderPulseError var(--duration-border-pulse-error) ease-in-out var(--animation-pulse-error-iterations);
     box-shadow: var(--highlight-error-shadow);
 }
 
 .highlight-border-bottom.highlight-error::after {
-    bottom: -0.125rem;
+    bottom: var(--table-highlight-border-offset);
     left: 0;
     right: 0;
-    height: 0.25rem;
+    height: var(--table-highlight-border-width);
     background: var(--highlight-error);
-    animation: borderPulseError 0.6s ease-in-out 3;
+    animation: borderPulseError var(--duration-border-pulse-error) ease-in-out var(--animation-pulse-error-iterations);
     box-shadow: var(--highlight-error-shadow);
 }
 
 .highlight-border-left.highlight-error::before {
-    left: -0.125rem;
+    left: var(--table-highlight-border-offset);
     top: 0;
     bottom: 0;
-    width: 0.25rem;
+    width: var(--table-highlight-border-width);
     background: var(--highlight-error);
-    animation: borderPulseError 0.6s ease-in-out 3;
+    animation: borderPulseError var(--duration-border-pulse-error) ease-in-out var(--animation-pulse-error-iterations);
     box-shadow: var(--highlight-error-shadow);
 }
 
 .highlight-border-right.highlight-error::after {
-    right: -0.125rem;
+    right: var(--table-highlight-border-offset);
     top: 0;
     bottom: 0;
-    width: 0.25rem;
+    width: var(--table-highlight-border-width);
     background: var(--highlight-error);
-    animation: borderPulseError 0.6s ease-in-out 3;
+    animation: borderPulseError var(--duration-border-pulse-error) ease-in-out var(--animation-pulse-error-iterations);
     box-shadow: var(--highlight-error-shadow);
 }

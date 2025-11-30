@@ -36,7 +36,7 @@
     width: 100%;
     border-collapse: collapse;
     margin: 0;
-    border: 1px solid var(--table-border);
+    border: var(--border-width-thin) solid var(--table-border);
     font-size: var(--font-size-sm);
     background: var(--table-bg);
 }
@@ -44,7 +44,7 @@
 /* Ячейки таблицы */
 .preview-table th,
 .preview-table td {
-    border: 1px solid var(--table-border);
+    border: var(--border-width-thin) solid var(--table-border);
     padding: var(--spacing-sm) var(--spacing);
     text-align: left;
     vertical-align: top;
@@ -101,7 +101,7 @@
 
 /* Пустая таблица */
 .preview-table-empty {
-    opacity: 0.6;
+    opacity: var(--opacity-subtle);
 }
 
 .preview-table-empty-cell {

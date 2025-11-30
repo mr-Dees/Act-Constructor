@@ -96,7 +96,7 @@
 
 /* Закрепленное уведомление */
 .notification.pinned {
-    box-shadow: var(--shadow-xl), 0 0 0 2px var(--primary-light);
+    box-shadow: var(--shadow-xl), 0 0 0 var(--notification-pinned-ring-width) var(--primary-light);
 }
 
 .notification.pinned::before {
@@ -105,13 +105,13 @@
     top: var(--spacing-xs);
     right: var(--spacing-xs);
     font-size: var(--font-size-xs);
-    opacity: 0.6;
+    opacity: var(--opacity-subtle);
 }
 
 /* Важное уведомление с пульсацией */
 .notification.urgent {
-    animation: slideInRight 0.3s cubic-bezier(0.4, 0, 0.2, 1),
-    pulse 2s ease-in-out infinite 0.3s;
+    animation: slideInRight var(--duration-notification-slide) cubic-bezier(0.4, 0, 0.2, 1),
+    pulse var(--duration-pulse-urgent) ease-in-out infinite var(--duration-notification-slide);
 }
 
 /* Уведомление с кнопками действий */
