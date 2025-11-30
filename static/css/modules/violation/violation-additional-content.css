@@ -14,9 +14,9 @@
     display: flex;
     flex-direction: column;
     gap: var(--spacing-sm);
-    min-height: 7.5rem;
+    min-height: var(--violation-additional-content-min-height);
     padding: var(--spacing-md);
-    border: 2px dashed var(--border);
+    border: var(--violation-additional-content-border-width) dashed var(--border);
     border-radius: var(--radius);
     background-color: var(--bg-secondary);
     position: relative;
@@ -32,7 +32,7 @@
 /* Состояние при перетаскивании файла */
 .additional-content-items.drag-over-file {
     border-color: var(--primary);
-    border-width: 3px;
+    border-width: var(--violation-additional-content-border-width-drag);
     background-color: var(--drag-over-bg);
     box-shadow: var(--drag-over-shadow);
     pointer-events: auto;
@@ -82,13 +82,13 @@
 
 /* Элемент контента с минимальными эффектами */
 .content-item-wrapper {
-    border: 2px solid var(--border);
+    border: var(--content-item-border-width) solid var(--border);
     border-radius: var(--radius-md);
     overflow: hidden;
     background-color: var(--bg-primary);
     box-shadow: var(--shadow-sm);
     cursor: grab;
-    min-height: 5rem;
+    min-height: var(--content-item-min-height);
     transition: all var(--transition-base);
     position: relative;
 }
@@ -104,7 +104,7 @@
 
 /* Эффект при перетаскивании - только небольшое увеличение */
 .content-item-wrapper.dragging {
-    opacity: 0.75;
+    opacity: var(--opacity-dragging);
     transform: scale(1.03);
     box-shadow: var(--shadow-lg);
     border-color: var(--primary);
@@ -121,7 +121,7 @@
     font-weight: var(--font-weight-semibold);
     text-transform: uppercase;
     letter-spacing: var(--letter-spacing-wide);
-    border-bottom: 1px solid var(--border);
+    border-bottom: var(--border-width-thin) solid var(--border);
     display: flex;
     align-items: center;
     gap: var(--spacing-xs);
@@ -135,7 +135,7 @@
     font-size: var(--icon-size);
     line-height: 1;
     cursor: grab;
-    opacity: 0.5;
+    opacity: var(--opacity-subtle);
     transition: all var(--transition-base);
 }
 
@@ -183,7 +183,7 @@
 /* Textarea внутри элемента */
 .content-item .violation-textarea {
     flex: 1;
-    min-height: 3.75rem;
+    min-height: calc(var(--violation-textarea-min-height) - var(--spacing-xl));
     width: 100%;
 }
 
@@ -199,7 +199,7 @@
 /* Контейнер для превью изображения */
 .image-preview-container {
     width: 100%;
-    height: 12.5rem;
+    height: var(--image-preview-height);
     display: flex;
     align-items: center;
     justify-content: center;
@@ -217,7 +217,7 @@
     width: auto;
     height: auto;
     object-fit: contain;
-    border: 1px solid var(--border-light);
+    border: var(--border-width-thin) solid var(--border-light);
     border-radius: var(--radius-sm);
     flex-shrink: 0;
     pointer-events: none;
@@ -242,7 +242,7 @@
 .image-item .violation-list-input {
     width: 100%;
     padding: var(--spacing-sm) var(--spacing);
-    border: 1px solid var(--border);
+    border: var(--border-width-thin) solid var(--border);
     border-radius: var(--radius);
     font-family: var(--font-family-base);
     font-size: var(--font-size-sm);
@@ -270,8 +270,8 @@
     position: absolute;
     top: var(--spacing-sm);
     right: var(--spacing-sm);
-    width: 2rem;
-    height: 2rem;
+    width: var(--content-delete-btn-size);
+    height: var(--content-delete-btn-size);
     border: none;
     background: var(--error);
     color: var(--text-on-primary);

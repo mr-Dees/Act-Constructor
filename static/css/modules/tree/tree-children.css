@@ -11,7 +11,7 @@
     margin-top: var(--spacing-xs);
     padding: 0;
     padding-left: var(--spacing);
-    border-left: 2px solid var(--border-light);
+    border-left: var(--border-width-md) solid var(--border-light);
 }
 
 /* Иконка переключения видимости дочерних элементов */
@@ -25,7 +25,7 @@
     cursor: pointer;
     user-select: none;
     font-size: var(--font-size-xs);
-    opacity: 0.7;
+    opacity: var(--opacity-tree-toggle);
     transition: var(--transition-all);
     color: var(--icon-color);
     flex-shrink: 0;
@@ -33,18 +33,18 @@
 
 /* Анимация поворота иконки */
 .toggle-icon.expanded {
-    transform: rotate(90deg);
+    transform: rotate(var(--rotate-toggle-expanded));
 }
 
 /* Подсветка иконки при наведении */
 .toggle-icon:hover {
     opacity: 1;
     color: var(--icon-color-hover);
-    transform: scale(1.1);
+    transform: scale(var(--scale-icon-hover));
 }
 
 .toggle-icon.expanded:hover {
-    transform: rotate(90deg) scale(1.1);
+    transform: rotate(var(--rotate-toggle-expanded)) scale(var(--scale-icon-hover));
 }
 
 /* Отступы для элементов без дочерних узлов */
@@ -59,8 +59,8 @@
     justify-content: center;
     margin-left: var(--spacing-xs);
     padding: 0 var(--spacing-xs);
-    min-width: 1.25rem;
-    height: 1.25rem;
+    min-width: var(--tree-count-size);
+    height: var(--tree-count-size);
     background: var(--gray-200);
     color: var(--text-secondary);
     font-size: var(--font-size-xs);

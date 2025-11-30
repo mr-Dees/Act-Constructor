@@ -6,7 +6,7 @@
 /* ВАЖНО: Защищенный элемент должен быть желтым */
 .tree-item.protected {
     background: var(--tree-protected-bg) !important;
-    border-left: 3px solid var(--warning);
+    border-left: var(--tree-protected-border-width) solid var(--warning);
     color: var(--text-primary);
     position: relative;
     box-shadow: var(--shadow-sm);
@@ -26,7 +26,7 @@
 .tree-item.protected.selected {
     background: var(--tree-protected-bg) !important;
     color: var(--primary);
-    border-left: 3px solid var(--warning);
+    border-left: var(--tree-protected-border-width) solid var(--warning);
     border-color: var(--tree-node-border-selected);
     box-shadow: var(--shadow-lg);
     font-weight: var(--font-weight-medium);
@@ -44,7 +44,7 @@
 .tree-item.protected.selected.strong {
     background: var(--warning-subtle) !important;
     color: var(--text-primary);
-    border-left: 3px solid var(--warning);
+    border-left: var(--tree-protected-border-width) solid var(--warning);
     box-shadow: var(--shadow-xl);
 }
 
@@ -52,7 +52,7 @@
 .tree-item.parent-selected {
     background: var(--tree-node-bg-selected);
     color: var(--primary);
-    border-color: var(--tree-node-border-selected);
+    border-color: var(--tree-parent-selected-border);
     box-shadow: var(--shadow-lg);
     font-weight: var(--font-weight-medium);
 }
@@ -61,8 +61,8 @@
 .tree-item.protected.parent-selected {
     background: var(--tree-protected-bg) !important;
     color: var(--primary);
-    border-left: 3px solid var(--warning);
-    border-color: var(--tree-node-border-selected);
+    border-left: var(--tree-protected-border-width) solid var(--warning);
+    border-color: var(--tree-parent-selected-border);
     box-shadow: var(--shadow-lg);
     font-weight: var(--font-weight-medium);
 }
@@ -70,18 +70,18 @@
 /* Элемент в режиме редактирования */
 .tree-item.editing .tree-label {
     background: var(--input-bg);
-    border: 2px solid var(--input-border-focus);
+    border: var(--border-width-md) solid var(--input-border-focus);
     border-radius: var(--radius-sm);
     outline: none;
     color: var(--input-text) !important;
     padding: var(--spacing-xs) var(--spacing-sm);
     box-shadow: var(--input-shadow-focus);
-    min-width: 8rem;
+    min-width: var(--tree-editing-min-width);
 }
 
 /* Анимация перехода в режим редактирования */
 .tree-item.editing {
-    animation: editingPulse 0.3s ease-out;
+    animation: editingPulse var(--duration-editing-pulse) ease-out;
     box-shadow: var(--shadow-lg) !important;
 }
 
@@ -97,7 +97,7 @@
 
 /* Отключенный элемент */
 .tree-item.disabled {
-    opacity: 0.5;
+    opacity: var(--opacity-disabled);
     cursor: not-allowed;
     pointer-events: none;
 }
@@ -121,5 +121,5 @@
 
 /* Временная подсветка (например, после вставки) */
 .tree-item.highlight {
-    animation: highlightFlash 1.2s ease-out;
+    animation: highlightFlash var(--duration-highlight-flash) ease-out;
 }

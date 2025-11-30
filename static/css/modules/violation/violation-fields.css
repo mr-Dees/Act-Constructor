@@ -5,7 +5,7 @@
 
 /* Секция опциональных полей */
 .violation-optional-fields {
-    border-top: 1px solid var(--border);
+    border-top: var(--border-width-thin) solid var(--border);
     padding-top: var(--spacing-md);
     margin-top: var(--spacing-md);
 }
@@ -51,8 +51,8 @@
 .violation-field-toggle input[type="checkbox"] {
     margin: 0;
     margin-right: var(--spacing-xs);
-    width: 1rem;
-    height: 1rem;
+    width: var(--violation-checkbox-size);
+    height: var(--violation-checkbox-size);
     cursor: pointer;
     accent-color: var(--primary);
     flex-shrink: 0;
@@ -82,7 +82,7 @@
 .violation-field-content {
     margin-left: var(--spacing-xl);
     padding-left: var(--spacing-md);
-    border-left: 2px solid var(--border-light);
+    border-left: var(--border-width-md) solid var(--border-light);
     animation: fadeIn var(--transition-base) ease-in;
 }
 

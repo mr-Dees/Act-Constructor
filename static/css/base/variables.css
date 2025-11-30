@@ -243,12 +243,42 @@
     --save-saved-bg: rgba(82, 168, 118, 0.15);
     --save-saved-border: rgba(82, 168, 118, 0.3);
     --save-saved-color: var(--success);
+    --save-saved-glow: rgba(255, 255, 255, 0.3);
+    --save-saved-white: #ffffff;
+    --save-saved-white-glow: rgba(255, 255, 255, 0.4);
+    --save-saved-white-bg: rgba(255, 255, 255, 0.2);
+    --save-saved-white-border: rgba(255, 255, 255, 0.4);
+    --save-saved-white-shadow: rgba(255, 255, 255, 0.6);
     --save-unsaved-color: #fbbf24;
     --save-unsaved-bg: rgba(251, 191, 36, 0.15);
     --save-unsaved-border: rgba(251, 191, 36, 0.3);
     --save-unsaved-bg-hover: rgba(251, 191, 36, 0.25);
     --save-unsaved-border-hover: rgba(251, 191, 36, 0.4);
+    --save-unsaved-bg-enhanced: rgba(251, 191, 36, 0.25);
+    --save-unsaved-border-enhanced: rgba(251, 191, 36, 0.6);
+    --save-unsaved-glow: rgba(251, 191, 36, 0.3);
+    --save-unsaved-glow-enhanced: rgba(251, 191, 36, 0.4);
+    --save-unsaved-shadow: rgba(251, 191, 36, 0.6);
+    --save-unsaved-text-glow: rgba(251, 191, 36, 0.5);
+    --save-local-only-bg: rgba(251, 191, 36, 0.25);
+    --save-local-only-border: rgba(251, 191, 36, 0.6);
+    --save-local-only-glow: rgba(251, 191, 36, 0.3);
+    --save-local-only-glow-enhanced: rgba(251, 191, 36, 0.4);
+    --save-local-only-bg-hover: rgba(251, 191, 36, 0.35);
+    --save-local-only-border-hover: rgba(251, 191, 36, 0.8);
+    --save-local-only-shadow: rgba(251, 191, 36, 0.6);
+    --save-error-bg: rgba(199, 85, 85, 0.25);
+    --save-error-border: var(--error);
+    --save-error-bg-hover: rgba(199, 85, 85, 0.35);
+    --save-error-border-hover: var(--error-hover);
+    --save-error-glow: rgba(239, 68, 68, 0.3);
+    --save-error-glow-enhanced: rgba(239, 68, 68, 0.4);
+    --save-error-shadow: rgba(239, 68, 68, 0.6);
+    --save-error-text-glow: rgba(239, 68, 68, 0.5);
+    --save-saving-bg: rgba(74, 154, 182, 0.25);
+    --save-saving-border: var(--info);
     --save-label-color: rgba(255, 255, 255, 0.8);
+    --save-ripple-bg: rgba(255, 255, 255, 0.3);
 
     /* Фокус и outline */
     --focus-outline: 2px solid var(--accent);
@@ -262,6 +292,7 @@
 
     /* Скроллбар */
     --scrollbar-width: 8px;
+    --scrollbar-width-thin: 4px;
     --scrollbar-bg: var(--gray-100);
     --scrollbar-thumb: var(--primary-light);
     --scrollbar-thumb-hover: var(--primary);
@@ -291,6 +322,11 @@
     --modal-footer-bg: var(--bg-secondary);
     --modal-max-width: 50rem;
     --modal-max-height-vh: 85vh;
+    --acts-menu-min-width: 40rem;
+    --acts-menu-max-width: 60rem;
+    --acts-menu-max-height: 70vh;
+    --acts-menu-top-offset: 1.125rem;
+    --acts-menu-right-offset: -5rem;
 
     /* Уведомления */
     --notification-bg: #ffffff;
@@ -322,6 +358,7 @@
     --preview-sup-offset: -0.5em;
     --preview-sub-offset: -0.25em;
     --preview-script-size-ratio: 0.75em;
+    --image-preview-height: 12.5rem;
 
     /* Таблицы специфичные переменные */
     --table-cell-min-width: 5rem;
@@ -338,6 +375,78 @@
     --table-highlight-border-width: 0.25rem;
     --table-highlight-border-offset: -0.125rem;
 
+    /* Текстовые блоки специфичные переменные */
+    --textblock-underline-thickness: 1px;
+    --textblock-underline-offset: 2px;
+    --textblock-blockquote-border-width: 3px;
+    --textblock-code-padding: 0.125rem;
+    --textblock-code-size-ratio: 0.875em;
+    --textblock-mark-padding: 0.125rem;
+
+    /* Ссылки и сноски специфичные переменные */
+    --link-footnote-padding: 0.125rem;
+    --link-footnote-border-width: 1px;
+    --link-footnote-editing-border-width: 2px;
+    --link-footnote-editing-offset: -0.125rem;
+    --link-footnote-editing-translate: -0.125rem;
+    --link-footnote-focus-ring-width: 3px;
+    --link-tooltip-max-width: 20rem;
+    --link-tooltip-arrow-size: 4px;
+    --link-popup-min-width: 20rem;
+    --link-popup-max-width: 26rem;
+    --link-popup-textarea-min-height: 4rem;
+    --link-popup-textarea-max-height: 12rem;
+    --link-footnote-number-size: 0.7em;
+    --link-footnote-number-offset: 0.125rem;
+
+    /* Toolbar специфичные переменные */
+    --toolbar-top-offset: var(--spacing);
+    --toolbar-max-width: 90vw;
+    --toolbar-scrollbar-height: 4px;
+    --toolbar-separator-height: var(--spacing-xl);
+    --toolbar-separator-width: 1px;
+    --toolbar-btn-min-width: 2rem;
+    --toolbar-btn-height: 2rem;
+    --toolbar-select-min-width: 4rem;
+    --toolbar-select-height: 2rem;
+    --toolbar-font-size-min-width: 4.5rem;
+    --toolbar-heading-min-width: 5.5rem;
+    --toolbar-count-min-width: 1.25rem;
+    --toolbar-count-height: 1.25rem;
+
+    /* Acts menu специфичные переменные */
+    --acts-menu-close-size: 2.5rem;
+    --acts-actions-grid-columns: 3;
+
+    /* Save indicator специфичные переменные */
+    --save-indicator-label-min-width: 6.5rem;
+
+    /* Tree специфичные переменные */
+    --tree-count-size: 1.25rem;
+    --tree-drop-indicator-height: 0.375rem;
+    --tree-node-type-border-width: 3px;
+    --tree-protected-border-width: 3px;
+    --tree-badge-height: 1.25rem;
+    --tree-editing-min-width: 8rem;
+    --tree-drag-active-offset: -4px;
+    --tree-drag-active-bg: rgba(91, 111, 168, 0.03);
+    --tree-drop-zone-bg: rgba(91, 111, 168, 0.05);
+    --tree-badge-table-bg: rgba(74, 154, 182, 0.15);
+    --tree-badge-textblock-bg: rgba(120, 144, 199, 0.15);
+
+    /* Violation специфичные переменные */
+    --violation-border-left-width: 3px;
+    --violation-textarea-min-height: 5rem;
+    --violation-textarea-max-height: 25rem;
+    --violation-checkbox-size: 1rem;
+    --violation-list-delete-btn-size: 2rem;
+    --violation-additional-content-min-height: 7.5rem;
+    --violation-additional-content-border-width: 2px;
+    --violation-additional-content-border-width-drag: 3px;
+    --content-item-border-width: 2px;
+    --content-item-min-height: 5rem;
+    --content-delete-btn-size: 2rem;
+
     /* Тени для создания глубины элементов */
     --shadow-xs: 0 1px 3px 0 rgba(0, 0, 0, 0.08);
     --shadow-sm: 0 2px 6px 0 rgba(0, 0, 0, 0.12), 0 1px 3px -1px rgba(0, 0, 0, 0.1);
@@ -346,6 +455,8 @@
     --shadow-lg: 0 12px 28px -4px rgba(0, 0, 0, 0.18), 0 6px 14px -4px rgba(0, 0, 0, 0.14);
     --shadow-xl: 0 20px 40px -8px rgba(0, 0, 0, 0.22);
     --shadow-inner: inset 0 2px 4px 0 rgba(0, 0, 0, 0.06);
+    --shadow-glow-sm: 0 0 8px;
+    --shadow-glow-md: 0 0 12px;
 
     /* Тени для текста */
     --text-shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.3);
@@ -388,6 +499,7 @@
     --translate-lg: 0.5rem;
     --translate-xl: 2rem;
     --translate-menu-y: 0.625rem;
+    --translate-save-indicator: 0.125rem;
 
     /* Размеры для контекстного меню и диалогов */
     --context-menu-min-width: 13rem;
@@ -410,20 +522,31 @@
     --item-badge-padding: 2px;
     --item-level-connector-width: 1px;
 
-    /* Трансформации для кнопок */
+    /* Трансформации и масштабирование */
     --button-hover-translate: -1px;
     --button-active-scale: 0.95;
+    --toolbar-btn-active-scale: 0.95;
+    --save-indicator-hover-translate: -2px;
+    --scale-icon-hover: 1.1;
+    --scale-dragging: 0.98;
+    --scale-drop-child: 1.02;
+    --rotate-toggle-expanded: 90deg;
 
     /* Ширина границ */
     --border-width-thin: 1px;
     --border-width-md: 2px;
     --border-width-thick: 3px;
 
-    /* Опасность (opacity) */
+    /* Прозрачность (opacity) */
     --opacity-disabled: 0.7;
     --opacity-subtle: 0.5;
     --opacity-hover-indicator: 0.5;
     --opacity-resize-handle: 0.6;
+    --opacity-save-indicator: 0.9;
+    --opacity-tree-toggle: 0.7;
+    --opacity-tree-icon: 0.7;
+    --opacity-dragging: 0.4;
+    --opacity-drag-indicator: 0.5;
 
     /* Типографика */
     --font-family-base: -apple-system, BlinkMacSystemFont, "Inter", "Segoe UI", system-ui, sans-serif;
@@ -466,9 +589,16 @@
     --duration-border-pulse: 0.8s;
     --duration-border-pulse-error: 0.6s;
     --animation-pulse-error-iterations: 3;
+    --duration-spin: 1s;
+    --duration-shake: 0.5s;
+    --duration-drop-indicator-pulse: 0.8s;
+    --duration-editing-pulse: 0.3s;
+    --duration-highlight-flash: 1.2s;
 
     /* Углы поворота */
     --rotate-close-button: 90deg;
+    --rotate-spin-start: 0deg;
+    --rotate-spin-end: 360deg;
 
     /* Z-index слои */
     --z-base: 1;

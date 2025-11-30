@@ -10,7 +10,7 @@
     justify-content: center;
     margin-left: var(--spacing-xs);
     font-style: normal;
-    opacity: 0.7;
+    opacity: var(--opacity-tree-icon);
     font-size: var(--font-size-xs);
     width: var(--icon-size-sm);
     height: var(--icon-size-sm);
@@ -24,7 +24,7 @@
 
 .tree-item.table-node:not(.selected):not(.parent-selected) {
     color: var(--accent);
-    border-left: 3px solid var(--accent);
+    border-left: var(--tree-node-type-border-width) solid var(--accent);
     font-weight: var(--font-weight-medium);
 }
 
@@ -44,7 +44,7 @@
 
 .tree-item.textblock-node:not(.selected):not(.parent-selected) {
     color: var(--primary-light);
-    border-left: 3px solid var(--primary-light);
+    border-left: var(--tree-node-type-border-width) solid var(--primary-light);
     font-weight: var(--font-weight-medium);
 }
 
@@ -64,7 +64,7 @@
 
 .tree-item.violation-node:not(.selected):not(.parent-selected) {
     color: var(--error);
-    border-left: 3px solid var(--error);
+    border-left: var(--tree-node-type-border-width) solid var(--error);
     font-weight: var(--font-weight-medium);
 }
 
@@ -82,7 +82,7 @@
     align-items: center;
     margin-left: var(--spacing-xs);
     padding: 0 var(--spacing-xs);
-    height: 1.25rem;
+    height: var(--tree-badge-height);
     font-size: var(--font-size-xs);
     font-weight: var(--font-weight-semibold);
     border-radius: var(--radius-sm);
@@ -92,12 +92,12 @@
 }
 
 .tree-item.table-node .node-type-badge {
-    background: rgb(74 154 182 / 15%);
+    background: var(--tree-badge-table-bg);
     color: var(--accent);
 }
 
 .tree-item.textblock-node .node-type-badge {
-    background: rgb(120 144 199 / 15%);
+    background: var(--tree-badge-textblock-bg);
     color: var(--primary-light);
 }
 

@@ -33,7 +33,7 @@
 .violation-list-add-btn:hover {
     background: var(--primary-hover);
     box-shadow: var(--shadow-sm);
-    transform: translateY(-1px);
+    transform: translateY(calc(-1 * var(--border-width-thin)));
 }
 
 /* Эффект нажатия кнопки */
@@ -76,7 +76,7 @@
 .violation-list-input {
     flex: 1;
     padding: var(--spacing-sm) var(--spacing);
-    border: 1px solid var(--input-border);
+    border: var(--border-width-thin) solid var(--input-border);
     border-radius: var(--radius);
     font-family: var(--font-family-base);
     font-size: var(--font-size-sm);
@@ -103,8 +103,8 @@
 
 /* Кнопка удаления элемента списка */
 .violation-list-delete-btn {
-    width: 2rem;
-    height: 2rem;
+    width: var(--violation-list-delete-btn-size);
+    height: var(--violation-list-delete-btn-size);
     border: none;
     background-color: var(--error);
     color: var(--text-on-primary);

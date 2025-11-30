@@ -15,10 +15,10 @@
 /* Редактор текстового блока */
 .textblock-editor {
     padding: var(--spacing) var(--spacing-lg);
-    border: 1px solid var(--input-border);
+    border: var(--border-width-thin) solid var(--input-border);
     border-radius: var(--radius);
     background: var(--input-bg);
-    min-height: 5rem;
+    min-height: var(--input-min-height);
     font-family: var(--font-family-base);
     font-size: var(--font-size-sm);
     line-height: var(--line-height-relaxed);
@@ -86,14 +86,14 @@
 
 .textblock-editor u {
     text-decoration: underline;
-    text-decoration-thickness: 1px;
-    text-underline-offset: 2px;
+    text-decoration-thickness: var(--textblock-underline-thickness);
+    text-underline-offset: var(--textblock-underline-offset);
 }
 
 .textblock-editor s,
 .textblock-editor strike {
     text-decoration: line-through;
-    text-decoration-thickness: 1px;
+    text-decoration-thickness: var(--textblock-underline-thickness);
 }
 
 /* Заголовки внутри редактора */
@@ -131,7 +131,7 @@
 
 /* Цитаты */
 .textblock-editor blockquote {
-    border-left: 3px solid var(--primary);
+    border-left: var(--textblock-blockquote-border-width) solid var(--primary);
     padding-left: var(--spacing-lg);
     margin: var(--spacing) 0;
     color: var(--text-secondary);
@@ -141,10 +141,10 @@
 /* Код */
 .textblock-editor code {
     background: var(--gray-100);
-    padding: 0.125rem var(--spacing-xs);
+    padding: var(--textblock-code-padding) var(--spacing-xs);
     border-radius: var(--radius-xs);
     font-family: var(--font-family-mono);
-    font-size: 0.875em;
+    font-size: var(--textblock-code-size-ratio);
     color: var(--text-primary);
 }
 
@@ -171,13 +171,13 @@
 /* Горизонтальные разделители */
 .textblock-editor hr {
     border: none;
-    border-top: 1px solid var(--border);
+    border-top: var(--border-width-thin) solid var(--border);
     margin: var(--spacing-lg) 0;
 }
 
 /* Выделенный текст */
 .textblock-editor mark {
     background: var(--highlight-bg);
-    padding: 0.125rem var(--spacing-xs);
+    padding: var(--textblock-mark-padding) var(--spacing-xs);
     border-radius: var(--radius-xs);
 }

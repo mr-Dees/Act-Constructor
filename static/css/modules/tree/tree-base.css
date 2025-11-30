@@ -8,7 +8,7 @@
     background: var(--bg-primary);
     padding: var(--spacing-lg);
     border-radius: var(--radius-md);
-    border: 1px solid var(--border);
+    border: var(--border-width-thin) solid var(--border);
     box-shadow: var(--shadow-sm);
     overflow-y: auto;
     scrollbar-width: thin;
@@ -47,7 +47,7 @@
     padding: var(--spacing-sm) var(--spacing);
     background: var(--bg-primary);
     border-radius: var(--radius);
-    border: 1px solid var(--tree-node-border);
+    border: var(--border-width-thin) solid var(--tree-node-border);
     cursor: pointer;
     transition: var(--transition-all);
     user-select: none;

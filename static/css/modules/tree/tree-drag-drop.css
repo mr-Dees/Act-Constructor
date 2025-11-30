@@ -5,9 +5,9 @@
 
 /* Стили для элемента во время перетаскивания */
 .tree-item.dragging {
-    opacity: 0.4;
+    opacity: var(--opacity-dragging);
     cursor: move;
-    transform: scale(0.98);
+    transform: scale(var(--scale-dragging));
     box-shadow: var(--shadow-xl);
     z-index: var(--z-modal);
 }
@@ -23,12 +23,12 @@
     top: 0;
     left: 0;
     right: 0;
-    height: var(--spacing-xs);
+    height: var(--tree-drop-indicator-height);
     background: var(--insert-indicator-gradient);
     border-radius: var(--radius-sm);
     z-index: var(--z-dropdown);
     transform: translateY(-50%);
-    animation: dropIndicatorPulse 0.8s ease-in-out infinite;
+    animation: dropIndicatorPulse var(--duration-drop-indicator-pulse) ease-in-out infinite;
     box-shadow: var(--highlight-insert-shadow);
 }
 
@@ -43,22 +43,22 @@
     bottom: 0;
     left: 0;
     right: 0;
-    height: var(--spacing-xs);
+    height: var(--tree-drop-indicator-height);
     background: var(--insert-indicator-gradient);
     border-radius: var(--radius-sm);
     z-index: var(--z-dropdown);
     transform: translateY(50%);
-    animation: dropIndicatorPulse 0.8s ease-in-out infinite;
+    animation: dropIndicatorPulse var(--duration-drop-indicator-pulse) ease-in-out infinite;
     box-shadow: var(--highlight-insert-shadow);
 }
 
 /* Индикатор вставки как дочерний элемент */
 .tree-item.drop-child {
     background-color: var(--drop-child-bg);
-    border: 2px dashed var(--drop-child-border);
+    border: var(--border-width-md) dashed var(--drop-child-border);
     border-radius: var(--radius-sm);
     position: relative;
-    transform: scale(1.02);
+    transform: scale(var(--scale-drop-child));
     box-shadow: var(--shadow-lg);
 }
 
@@ -97,7 +97,7 @@
     transform: translateY(-50%);
     color: var(--text-tertiary);
     font-size: var(--font-size-sm);
-    opacity: 0.5;
+    opacity: var(--opacity-drag-indicator);
     pointer-events: none;
 }
 
@@ -108,14 +108,14 @@
 
 /* Оверлей при перетаскивании над всем деревом */
 .tree-container.drag-active {
-    outline: 2px dashed var(--primary-light);
-    outline-offset: -4px;
-    background: rgb(91 111 168 / 3%);
+    outline: var(--border-width-md) dashed var(--primary-light);
+    outline-offset: var(--tree-drag-active-offset);
+    background: var(--tree-drag-active-bg);
 }
 
 /* Подсветка допустимой зоны сброса */
 .tree-item.drop-zone:not(.protected) {
-    background: rgb(91 111 168 / 5%);
+    background: var(--tree-drop-zone-bg);
     border-color: var(--primary-light);
     box-shadow: var(--shadow-md);
 }
