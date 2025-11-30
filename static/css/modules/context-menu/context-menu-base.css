@@ -11,8 +11,8 @@
     border-radius: var(--radius-md);
     box-shadow: var(--shadow-lg);
     z-index: var(--z-popover);
-    min-width: 13.125rem;
-    max-width: 20rem;
+    min-width: var(--context-menu-min-width);
+    max-width: var(--context-menu-max-width);
     overflow: hidden;
     padding: var(--spacing-xs);
     animation: menuFadeIn var(--transition-base);
@@ -39,7 +39,7 @@
 .context-menu-item:hover:not(.disabled) {
     background: var(--bg-tertiary);
     color: var(--primary);
-    transform: translateX(0.125rem);
+    transform: translateX(var(--translate-sm));
 }
 
 /* Активное состояние */
@@ -96,13 +96,13 @@
 /* Подсветка при наведении */
 .violation-context-menu-item:hover:not(.disabled) {
     background-color: var(--primary-subtle);
-    transform: translateX(0.25rem);
+    transform: translateX(var(--translate-md));
 }
 
 /* Активное состояние */
 .violation-context-menu-item:active:not(.disabled) {
-    background-color: rgb(91 111 168 / 15%);
-    transform: translateX(0.125rem);
+    background-color: var(--button-ghost-bg-active);
+    transform: translateX(var(--translate-sm));
 }
 
 /* Стиль для пункта удаления */
@@ -137,7 +137,7 @@
 }
 
 .context-menu-submenu:hover .submenu-arrow {
-    transform: translateX(0.125rem);
+    transform: translateX(var(--translate-sm));
     color: var(--primary);
 }
 
@@ -151,8 +151,8 @@
     border: 1px solid var(--border);
     border-radius: var(--radius-md);
     box-shadow: var(--shadow-lg);
-    min-width: 16rem;
-    max-width: 20rem;
+    min-width: var(--spacing-save-menu);
+    max-width: var(--context-menu-max-width);
     padding: var(--spacing-xs);
     z-index: calc(var(--z-popover) + 1);
     animation: menuFadeIn var(--transition-fast);

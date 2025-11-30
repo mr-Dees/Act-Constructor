@@ -98,8 +98,14 @@
     --button-secondary-border: var(--border);
 
     --button-ghost-bg: transparent;
-    --button-ghost-bg-hover: rgb(91 111 168 / 10%);
+    --button-ghost-bg-hover: rgba(91, 111, 168, 0.1);
+    --button-ghost-bg-active: rgba(91, 111, 168, 0.15);
     --button-ghost-text: var(--primary);
+
+    --button-success-active: #3d8a5a;
+    --button-danger-active: #bd2130;
+
+    --save-dropdown-border: rgba(255, 255, 255, 0.3);
 
     /* Инпуты и формы */
     --input-bg: #ffffff;
@@ -110,51 +116,56 @@
     --input-text: var(--text-primary);
     --input-text-disabled: var(--text-disabled);
     --input-placeholder: var(--text-tertiary);
-    --input-shadow-focus: 0 0 0 3px rgb(91 111 168 / 15%);
+    --input-shadow-focus: 0 0 0 var(--spacing-xs) rgba(91, 111, 168, 0.15);
+    --input-focus-shadow: 0 0 0 var(--spacing-xs) rgba(91, 111, 168, 0.15);
     --input-error-border: var(--error);
-    --input-error-bg: rgb(199 85 85 / 5%);
-    --input-error-shadow: 0 0 0 3px rgb(199 85 85 / 15%);
+    --input-error-bg: rgba(199, 85, 85, 0.05);
+    --input-error-shadow: 0 0 0 var(--spacing-xs) rgba(199, 85, 85, 0.15);
     --input-success-border: var(--success);
-    --input-success-bg: rgb(82 168 118 / 5%);
+    --input-success-bg: rgba(82, 168, 118, 0.05);
 
     --checkbox-bg: #ffffff;
     --checkbox-bg-checked: var(--primary);
     --checkbox-border: var(--border);
     --checkbox-checkmark: #ffffff;
+    --checkbox-size: 1rem;
 
     /* Оверлеи и полупрозрачные фоны */
-    --overlay-bg: rgb(26 32 44 / 50%);
-    --overlay-bg-dark: rgb(0 0 0 / 70%);
-    --overlay-bg-light: rgb(255 255 255 / 90%);
-    --step-bg: rgb(255 255 255 / 18%);
-    --step-bg-hover: rgb(255 255 255 / 25%);
-    --step-border: rgb(255 255 255 / 30%);
-    --step-border-hover: rgb(255 255 255 / 40%);
-    --help-modal-overlay: rgb(0 0 0 / 60%);
-    --help-close-hover: rgb(255 255 255 / 20%);
+    --overlay-bg: rgba(26, 32, 44, 0.5);
+    --overlay-bg-dark: rgba(0, 0, 0, 0.7);
+    --overlay-bg-light: rgba(255, 255, 255, 0.9);
+    --overlay-bg-darker: rgba(26, 32, 44, 0.6);
+    --step-bg: rgba(255, 255, 255, 0.18);
+    --step-bg-hover: rgba(255, 255, 255, 0.25);
+    --step-border: rgba(255, 255, 255, 0.3);
+    --step-border-hover: rgba(255, 255, 255, 0.4);
+    --help-modal-overlay: rgba(0, 0, 0, 0.6);
+    --help-close-hover: rgba(255, 255, 255, 0.2);
     --help-panel-border: #b8c9e8;
     --tooltip-bg: #2c3e50;
     --tooltip-text: #ffffff;
+    --tooltip-arrow-size: 0.25rem;
 
     /* Градиенты */
+    --gradient-header: linear-gradient(135deg, #748fca 0%, #9d7cb8 100%);
     --gradient-primary: linear-gradient(135deg, var(--primary) 0%, var(--primary-hover) 100%);
     --gradient-accent: linear-gradient(135deg, var(--accent) 0%, #3d8299 100%);
     --item-highlight-gradient: linear-gradient(
             135deg,
-            rgb(102 126 234 / 10%) 0%,
-            rgb(102 126 234 / 5%) 50%,
-            rgb(102 126 234 / 10%) 100%
+            rgba(102, 126, 234, 0.1) 0%,
+            rgba(102, 126, 234, 0.05) 50%,
+            rgba(102, 126, 234, 0.1) 100%
     );
     --table-header-gradient: linear-gradient(135deg, #748fca 0%, #9d7cb8 100%);
     --table-header-gradient-hover: linear-gradient(135deg, #6a81ba 0%, #9170ab 100%);
     --table-header-selected: linear-gradient(135deg, #6579b5 0%, #8b6aa5 100%);
-    --content-label-gradient: linear-gradient(135deg, rgb(79 70 229 / 10%) 0%, var(--bg-tertiary) 100%);
+    --content-label-gradient: linear-gradient(135deg, rgba(79, 70, 229, 0.1) 0%, var(--bg-tertiary) 100%);
     --drag-miniature-gradient: linear-gradient(135deg, var(--primary) 0%, #5b21b6 100%);
     --insert-indicator-gradient: linear-gradient(
             90deg,
             transparent 0%,
-            rgb(79 70 229 / 30%) 20%,
-            rgb(79 70 229 / 30%) 80%,
+            rgba(79, 70, 229, 0.3) 20%,
+            rgba(79, 70, 229, 0.3) 80%,
             transparent 100%
     );
 
@@ -164,70 +175,79 @@
     --table-header-bg: var(--bg-tertiary);
     --table-header-text: var(--text-primary);
     --table-row-hover: var(--bg-hover);
-    --table-row-selected: rgb(91 111 168 / 8%);
+    --table-row-selected: rgba(91, 111, 168, 0.08);
     --table-protected-header-bg: #f9f9f9;
-    --resize-handle-bg: rgb(91 111 168 / 30%);
-    --resize-handle-bg-subtle: rgb(91 111 168 / 20%);
-    --resize-handle-border: rgb(91 111 168 / 60%);
+    --resize-handle-bg: rgba(91, 111, 168, 0.3);
+    --resize-handle-bg-subtle: rgba(91, 111, 168, 0.2);
+    --resize-handle-border: rgba(91, 111, 168, 0.6);
 
     /* Цвета подсветки */
-    --highlight-bg: rgb(255 235 59 / 40%);
+    --highlight-bg: rgba(255, 235, 59, 0.4);
     --highlight-insert: #2ecc71;
-    --highlight-insert-shadow: 0 0 8px rgb(46 204 113 / 60%);
-    --highlight-warning-shadow: 0 0 8px rgb(243 156 18 / 60%);
+    --highlight-insert-shadow: 0 0 var(--spacing) rgba(46, 204, 113, 0.6);
+    --highlight-warning-shadow: 0 0 var(--spacing) rgba(243, 156, 18, 0.6);
     --highlight-error: #e74c3c;
-    --highlight-error-shadow: 0 0 8px rgb(231 76 60 / 60%);
-    --highlight-selection: rgb(91 111 168 / 20%);
+    --highlight-error-shadow: 0 0 var(--spacing) rgba(231, 76, 60, 0.6);
+    --highlight-selection: rgba(91, 111, 168, 0.2);
+    --highlight-glow-color: rgba(102, 126, 234, 0.3);
+    --highlight-glow-spread: rgba(102, 126, 234, 0.45);
 
     /* Цвета для ссылок и сносок */
-    --link-bg: rgb(91 111 168 / 8%);
-    --link-bg-hover: rgb(91 111 168 / 15%);
-    --link-border: rgb(91 111 168 / 30%);
-    --footnote-bg: rgb(74 154 182 / 8%);
-    --footnote-bg-hover: rgb(74 154 182 / 15%);
-    --footnote-border: rgb(74 154 182 / 30%);
-    --footnote-focus-shadow: rgb(74 154 182 / 20%);
-    --delete-btn-hover-bg: rgb(199 85 85 / 10%);
+    --link-bg: rgba(91, 111, 168, 0.08);
+    --link-bg-hover: rgba(91, 111, 168, 0.15);
+    --link-border: rgba(91, 111, 168, 0.3);
+    --link-animation-shadow: rgba(91, 111, 168, 0.4);
+    --link-animation-ring: rgba(91, 111, 168, 0.2);
+    --footnote-bg: rgba(74, 154, 182, 0.08);
+    --footnote-bg-hover: rgba(74, 154, 182, 0.15);
+    --footnote-border: rgba(74, 154, 182, 0.3);
+    --footnote-focus-shadow: rgba(74, 154, 182, 0.2);
+    --delete-btn-hover-bg: rgba(199, 85, 85, 0.1);
 
     /* Цвета для дерева */
     --tree-node-bg: transparent;
-    --tree-node-bg-hover: rgb(91 111 168 / 5%);
-    --tree-node-bg-selected: rgb(91 111 168 / 10%);
+    --tree-node-bg-hover: rgba(91, 111, 168, 0.05);
+    --tree-node-bg-selected: rgba(91, 111, 168, 0.1);
     --tree-node-border: transparent;
     --tree-node-border-selected: var(--primary-light);
     --tree-parent-selected-border: #aab9dc;
     --tree-protected-bg: #fff8e8;
-    --drop-child-bg: rgb(0 123 255 / 10%);
+    --drop-child-bg: rgba(0, 123, 255, 0.1);
     --drop-child-border: #007bff;
+    --drop-indicator-shadow: rgba(0, 123, 255, 0.7);
+    --drop-indicator-glow: rgba(0, 123, 255, 0.4);
 
     /* Цвета для дополнительного контента нарушений */
-    --additional-content-hover-bg: rgb(79 70 229 / 5%);
-    --drag-over-bg: rgb(79 70 229 / 15%);
-    --drag-over-shadow: 0 0 1.25rem rgb(79 70 229 / 30%);
-    --drag-text-shadow: 0 0.25rem 0.75rem rgb(79 70 229 / 20%);
-    --content-item-hover-shadow: 0 0.5rem 1.25rem rgb(0 0 0 / 12%);
-    --content-item-dragging-shadow: 0 1rem 2rem rgb(79 70 229 / 25%);
-    --drag-miniature-shadow: 0 0.5rem 1.5rem rgb(79 70 229 / 40%);
+    --additional-content-hover-bg: rgba(79, 70, 229, 0.05);
+    --drag-over-bg: rgba(79, 70, 229, 0.15);
+    --drag-over-shadow: 0 0 var(--spacing-xl) rgba(79, 70, 229, 0.3);
+    --drag-text-shadow: 0 var(--spacing-xs) var(--spacing-lg) rgba(79, 70, 229, 0.2);
+    --content-item-hover-shadow: 0 var(--spacing-sm) var(--spacing-xl) rgba(0, 0, 0, 0.12);
+    --content-item-dragging-shadow: 0 var(--spacing-md) var(--spacing-2xl) rgba(79, 70, 229, 0.25);
+    --drag-miniature-shadow: 0 var(--spacing-sm) var(--spacing-xl) rgba(79, 70, 229, 0.4);
 
     /* Цвета для индикатора сохранения */
-    --save-button-bg: rgb(255 255 255 / 10%);
-    --save-button-border: rgb(255 255 255 / 20%);
-    --save-button-text: rgb(255 255 255 / 90%);
-    --save-saved-bg: rgb(82 168 118 / 15%);
-    --save-saved-border: rgb(82 168 118 / 30%);
+    --save-button-bg: rgba(255, 255, 255, 0.1);
+    --save-button-border: rgba(255, 255, 255, 0.2);
+    --save-button-text: rgba(255, 255, 255, 0.9);
+    --save-saved-bg: rgba(82, 168, 118, 0.15);
+    --save-saved-border: rgba(82, 168, 118, 0.3);
     --save-saved-color: var(--success);
     --save-unsaved-color: #fbbf24;
-    --save-unsaved-bg: rgb(251 191 36 / 15%);
-    --save-unsaved-border: rgb(251 191 36 / 30%);
-    --save-unsaved-bg-hover: rgb(251 191 36 / 25%);
-    --save-unsaved-border-hover: rgb(251 191 36 / 40%);
-    --save-label-color: rgb(255 255 255 / 80%);
+    --save-unsaved-bg: rgba(251, 191, 36, 0.15);
+    --save-unsaved-border: rgba(251, 191, 36, 0.3);
+    --save-unsaved-bg-hover: rgba(251, 191, 36, 0.25);
+    --save-unsaved-border-hover: rgba(251, 191, 36, 0.4);
+    --save-label-color: rgba(255, 255, 255, 0.8);
 
     /* Фокус и outline */
     --focus-outline: 2px solid var(--accent);
     --focus-outline-offset: 2px;
-    --focus-ring: 0 0 0 3px rgb(74 154 182 / 25%);
-    --focus-ring-error: 0 0 0 3px rgb(199 85 85 / 25%);
+    --focus-ring: 0 0 0 var(--spacing-xs) rgba(74, 154, 182, 0.25);
+    --focus-ring-error: 0 0 0 var(--spacing-xs) rgba(199, 85, 85, 0.25);
+
+    /* Фоновый блюр для модалей и оверлеев */
+    --modal-blur-background: blur(var(--spacing-xs));
 
     /* Скроллбар */
     --scrollbar-width: 8px;
@@ -242,7 +262,7 @@
     --skeleton-shimmer: linear-gradient(
             90deg,
             transparent 0%,
-            rgb(255 255 255 / 60%) 50%,
+            rgba(255, 255, 255, 0.6) 50%,
             transparent 100%
     );
 
@@ -258,6 +278,8 @@
     --modal-shadow: var(--shadow-xl);
     --modal-header-bg: var(--bg-secondary);
     --modal-footer-bg: var(--bg-secondary);
+    --modal-max-width: 50rem;
+    --modal-max-height-vh: 85vh;
 
     /* Уведомления */
     --notification-bg: #ffffff;
@@ -277,13 +299,18 @@
     --notification-info-icon: var(--info);
 
     /* Тени для создания глубины элементов */
-    --shadow-xs: 0 1px 3px 0 rgb(0 0 0 / 8%);
-    --shadow-sm: 0 2px 6px 0 rgb(0 0 0 / 12%), 0 1px 3px -1px rgb(0 0 0 / 10%);
-    --shadow: 0 4px 10px -1px rgb(0 0 0 / 14%), 0 2px 6px -2px rgb(0 0 0 / 12%);
-    --shadow-md: 0 8px 16px -2px rgb(0 0 0 / 16%), 0 4px 8px -2px rgb(0 0 0 / 12%);
-    --shadow-lg: 0 12px 28px -4px rgb(0 0 0 / 18%), 0 6px 14px -4px rgb(0 0 0 / 14%);
-    --shadow-xl: 0 20px 40px -8px rgb(0 0 0 / 22%);
-    --shadow-inner: inset 0 2px 4px 0 rgb(0 0 0 / 6%);
+    --shadow-xs: 0 1px 3px 0 rgba(0, 0, 0, 0.08);
+    --shadow-sm: 0 2px 6px 0 rgba(0, 0, 0, 0.12), 0 1px 3px -1px rgba(0, 0, 0, 0.1);
+    --shadow: 0 4px 10px -1px rgba(0, 0, 0, 0.14), 0 2px 6px -2px rgba(0, 0, 0, 0.12);
+    --shadow-md: 0 8px 16px -2px rgba(0, 0, 0, 0.16), 0 4px 8px -2px rgba(0, 0, 0, 0.12);
+    --shadow-lg: 0 12px 28px -4px rgba(0, 0, 0, 0.18), 0 6px 14px -4px rgba(0, 0, 0, 0.14);
+    --shadow-xl: 0 20px 40px -8px rgba(0, 0, 0, 0.22);
+    --shadow-inner: inset 0 2px 4px 0 rgba(0, 0, 0, 0.06);
+
+    /* Тени для текста */
+    --text-shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.3);
+    --text-shadow: 0 1px 3px rgba(0, 0, 0, 0.4);
+    --text-shadow-lg: 0 2px 4px rgba(0, 0, 0, 0.5);
 
     /* Радиусы скругления углов */
     --radius-xs: 0.25rem;
@@ -315,6 +342,29 @@
     --spacing-12xl: 7rem;
     --spacing-save-menu: 17.5rem;
 
+    /* Дополнительные размеры для анимаций */
+    --translate-sm: 0.125rem;
+    --translate-md: 0.25rem;
+    --translate-lg: 0.5rem;
+    --translate-xl: 2rem;
+    --translate-menu-y: 0.625rem;
+
+    /* Размеры для контекстного меню и диалогов */
+    --context-menu-min-width: 13rem;
+    --context-menu-max-width: 20rem;
+    --dialog-max-width: 27.5rem;
+    --dialog-icon-size: 3rem;
+    --dialog-close-size: 2rem;
+    --format-menu-max-height: 20rem;
+
+    /* Размеры кнопок */
+    --button-size-sm: 2.5rem;
+    --button-size: 2.75rem;
+    --button-size-lg: 3rem;
+
+    /* Трансформации для кнопок */
+    --button-hover-translate: -1px;
+
     /* Типографика */
     --font-family-base: -apple-system, BlinkMacSystemFont, "Inter", "Segoe UI", system-ui, sans-serif;
     --font-family-mono: "SF Mono", "Monaco", "Consolas", "Liberation Mono", "Courier New", monospace;
@@ -340,12 +390,15 @@
     /* Высота шапки с учетом минимального значения */
     --header-height: 9vh;
     --header-min-height: 80px;
+    --body-padding-top: calc(max(var(--header-height), var(--header-min-height)) + 2.5vh);
+    --content-height: calc(100vh - var(--body-padding-top));
 
     /* Переходы для анимаций */
     --transition-fast: 150ms ease;
     --transition-base: 200ms ease;
     --transition-slow: 300ms ease;
     --transition-all: all 200ms ease;
+    --transition-ripple: 600ms ease-out;
 
     /* Z-index слои */
     --z-base: 1;

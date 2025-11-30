@@ -16,6 +16,7 @@
     min-height: 0;
     scrollbar-width: thin;
     scrollbar-color: var(--scrollbar-thumb) var(--scrollbar-bg);
+    scroll-behavior: smooth;
 }
 
 /* Кастомный скроллбар для WebKit браузеров */
@@ -240,15 +241,19 @@
 
 /* Ссылки в справке */
 .help-modal-body a {
-    color: var(--primary);
+    color: var(--text-link);
     text-decoration: none;
     border-bottom: 1px solid transparent;
     transition: var(--transition-base);
 }
 
 .help-modal-body a:hover {
-    color: var(--primary-hover);
-    border-bottom-color: var(--primary-hover);
+    color: var(--text-link-hover);
+    border-bottom-color: var(--text-link-hover);
+}
+
+.help-modal-body a:visited {
+    color: var(--text-link-visited);
 }
 
 /* Изображения в справке */

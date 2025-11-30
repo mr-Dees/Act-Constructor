@@ -4,7 +4,7 @@
  */
 
 .header {
-    background: linear-gradient(135deg, #748fca 0%, #9d7cb8 100%);
+    background: var(--gradient-header);
     color: var(--text-on-primary);
     padding: var(--spacing-lg) var(--spacing-2xl);
     position: fixed;
@@ -44,7 +44,7 @@
     font-weight: var(--font-weight-medium);
     font-size: var(--font-size-sm);
     cursor: pointer;
-    transition: var(--transition-base);
+    transition: var(--transition-all);
     color: var(--text-on-primary);
     user-select: none;
 }

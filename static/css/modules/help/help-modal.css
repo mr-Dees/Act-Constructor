@@ -14,7 +14,7 @@
     align-items: center;
     justify-content: center;
     z-index: var(--z-modal);
-    backdrop-filter: blur(4px);
+    backdrop-filter: var(--modal-blur-background);
     animation: fadeIn var(--transition-base) ease;
     padding: var(--spacing-lg);
 }
@@ -28,13 +28,13 @@
 .help-modal-content {
     background: var(--modal-bg);
     border-radius: var(--radius-xl);
-    max-width: 50rem;
+    max-width: var(--modal-max-width);
     width: 100%;
-    max-height: 85vh;
+    max-height: var(--modal-max-height-vh);
     display: flex;
     flex-direction: column;
     box-shadow: var(--modal-shadow);
-    animation: scaleIn var(--transition-base) cubic-bezier(0.4, 0, 0.2, 1);
+    animation: scaleIn var(--transition-slow) cubic-bezier(0.4, 0, 0.2, 1);
     overflow: hidden;
     border: 1px solid var(--modal-border);
 }
@@ -46,7 +46,7 @@
     display: flex;
     justify-content: space-between;
     align-items: center;
-    background: linear-gradient(135deg, #748fca 0%, #9d7cb8 100%);
+    background: var(--gradient-header);
     color: var(--text-on-primary);
     border-radius: var(--radius-xl) var(--radius-xl) 0 0;
     flex-shrink: 0;
@@ -78,8 +78,8 @@
     color: var(--text-on-primary);
     line-height: 1;
     padding: 0;
-    width: 2.5rem;
-    height: 2.5rem;
+    width: var(--button-size-sm);
+    height: var(--button-size-sm);
     display: flex;
     align-items: center;
     justify-content: center;
@@ -101,7 +101,7 @@
 /* Состояние фокуса */
 .help-modal-close:focus-visible {
     outline: 2px solid var(--text-on-primary);
-    outline-offset: 2px;
+    outline-offset: var(--focus-outline-offset);
 }
 
 /* Футер модального окна (опционально) */

@@ -8,7 +8,7 @@
 
 .settings-menu {
     position: absolute;
-    top: calc(100% + 18px);
+    top: calc(100% + var(--spacing-lg));
     right: 0;
     min-width: 27rem;
     max-width: 32rem;
@@ -27,12 +27,12 @@
     display: none;
 }
 
+/* Шапка меню */
 .settings-menu-header {
-    padding: var(--spacing-2xl) var(--spacing-2xl);
-    background: linear-gradient(135deg, #748fca 0%, #9d7cb8 100%);
+    padding: var(--spacing-2xl);
+    background: var(--gradient-header);
     color: var(--text-on-primary);
     border-bottom: 1px solid var(--border-light);
-    border-radius: var(--radius-xl) var(--radius-xl) 0 0;
     flex-shrink: 0;
 }
 
@@ -43,18 +43,43 @@
     line-height: var(--line-height-tight);
 }
 
+/* Тело меню */
 .settings-menu-body {
     padding: var(--spacing-xl);
     overflow-y: auto;
     max-height: 60vh;
+    scrollbar-width: thin;
+    scrollbar-color: var(--scrollbar-thumb) var(--scrollbar-bg);
 }
 
+.settings-menu-body::-webkit-scrollbar {
+    width: var(--scrollbar-width);
+}
+
+.settings-menu-body::-webkit-scrollbar-track {
+    background: var(--scrollbar-bg);
+}
+
+.settings-menu-body::-webkit-scrollbar-thumb {
+    background: var(--scrollbar-thumb);
+    border-radius: var(--radius);
+}
+
+.settings-menu-body::-webkit-scrollbar-thumb:hover {
+    background: var(--scrollbar-thumb-hover);
+}
+
+/* Секция настроек */
 .settings-menu-section {
     margin-bottom: var(--spacing-lg);
 }
 
+.settings-menu-section:last-child {
+    margin-bottom: 0;
+}
+
 .settings-section-title {
-    color: var(--primary-light);
+    color: var(--primary);
     margin-bottom: var(--spacing-sm);
     font-size: var(--font-size-base);
     font-weight: var(--font-weight-semibold);
@@ -68,14 +93,20 @@
     border: none;
 }
 
+/* Опция настройки */
 .settings-option {
     display: flex;
     justify-content: space-between;
     align-items: center;
     gap: var(--spacing);
-    margin-bottom: var(--spacing-sm);
+    padding: var(--spacing-sm) 0;
     cursor: pointer;
     user-select: none;
+    transition: opacity var(--transition-fast);
+}
+
+.settings-option:hover {
+    opacity: 0.8;
 }
 
 .settings-option-info {
@@ -94,15 +125,22 @@
 .settings-option-desc {
     font-size: var(--font-size-xs);
     color: var(--text-secondary);
+    line-height: var(--line-height-relaxed);
 }
 
+/* Чекбокс настройки */
 .settings-checkbox {
     display: flex;
-    flex-direction: row;
     align-items: flex-start;
+    gap: var(--spacing);
     padding: var(--spacing-xs) 0;
     cursor: pointer;
     user-select: none;
+    transition: opacity var(--transition-fast);
+}
+
+.settings-checkbox:hover {
+    opacity: 0.8;
 }
 
 .settings-checkbox input[type="checkbox"] {
@@ -110,7 +148,6 @@
     height: 1.125rem;
     cursor: pointer;
     accent-color: var(--primary);
-    margin-right: var(--spacing);
     margin-top: 2px;
     flex-shrink: 0;
 }
@@ -119,8 +156,10 @@
     font-size: var(--font-size-sm);
     color: var(--text-primary);
     line-height: var(--line-height-relaxed);
+    flex: 1;
 }
 
+/* Переключатель темы */
 .theme-switch {
     display: flex;
     align-items: center;
@@ -139,6 +178,7 @@
     border-radius: var(--radius-full);
     position: relative;
     transition: background var(--transition-base);
+    flex-shrink: 0;
 }
 
 .theme-slider::before {
@@ -146,7 +186,7 @@
     width: 1.25rem;
     height: 1.25rem;
     background: var(--bg-primary);
-    border-radius: 50%;
+    border-radius: var(--radius-full);
     position: absolute;
     left: 2px;
     top: 2px;
@@ -163,20 +203,18 @@
 }
 
 .theme-label {
-    text-align: right;
-    margin-top: var(--spacing-xs);
     font-size: var(--font-size-xs);
     font-weight: var(--font-weight-medium);
     color: var(--text-secondary);
 }
 
+/* Блок настройки периода автосохранения */
 .auto-save-period-row {
-    margin-top: var(--spacing-xs);
+    margin-top: var(--spacing-sm);
     padding: var(--spacing-md) var(--spacing-lg);
     background: var(--primary-subtle);
     border: 1px solid var(--help-panel-border);
     border-radius: var(--radius-md);
-    box-shadow: var(--shadow-xs);
 }
 
 .period-label {
@@ -200,7 +238,9 @@
     background: var(--input-bg);
     color: var(--text-primary);
     font-size: var(--font-size-sm);
+    font-family: var(--font-family-base);
     text-align: center;
+    transition: var(--transition-all);
 }
 
 .period-input-group input[type="number"]:hover {
@@ -218,9 +258,10 @@
     color: var(--text-secondary);
 }
 
+/* Иконка информации */
 .settings-menu .info-icon {
     color: var(--info);
     cursor: help;
-    font-size: 1.1em;
+    font-size: var(--font-size-lg);
     flex-shrink: 0;
 }

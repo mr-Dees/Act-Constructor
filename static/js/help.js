@@ -131,6 +131,7 @@ class HelpManager {
      * @param {HTMLElement} modal - Элемент модального окна
      */
     static _showModal(modal) {
+        document.querySelector('.help-modal-body').scrollTop = 0;
         modal.classList.remove('hidden');
     }
 

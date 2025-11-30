@@ -31,7 +31,7 @@
 /* Эффект при наведении */
 .btn:hover:not(:disabled) {
     box-shadow: var(--button-shadow-hover);
-    transform: translateY(-1px);
+    transform: translateY(var(--button-hover-translate));
 }
 
 /* Эффект при нажатии */
@@ -103,7 +103,7 @@
 }
 
 .btn-success:active:not(:disabled) {
-    background: #3d8a5a;
+    background: var(--button-success-active);
 }
 
 /* Кнопка опасного действия */
@@ -118,7 +118,7 @@
 }
 
 .btn-danger:active:not(:disabled) {
-    background: #bd2130;
+    background: var(--button-danger-active);
 }
 
 /* Призрачная кнопка (прозрачная) */
@@ -135,7 +135,7 @@
 }
 
 .btn-ghost:active:not(:disabled) {
-    background: rgb(91 111 168 / 15%);
+    background: var(--button-ghost-bg-active);
 }
 
 /* Размеры кнопок */

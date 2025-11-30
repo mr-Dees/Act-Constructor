@@ -16,9 +16,9 @@
 
 /* Кнопки внутри диалога используют базовый .btn */
 .dialog-buttons .btn {
-    min-width: 7rem;
+    min-width: var(--spacing-12xl);
     flex: 1;
-    max-width: 12rem;
+    max-width: var(--spacing-save-menu);
 }
 
 /* Переопределение теней для диалогов */

@@ -8,7 +8,7 @@
     position: absolute;
     left: var(--spacing-2xl);
     top: 50%;
-    transform: translateY(calc(-50% + 0.125rem));
+    transform: translateY(calc(-50% + var(--translate-sm)));
     display: flex;
     flex-direction: column;
     align-items: center;
@@ -18,8 +18,8 @@
 
 /* Кнопка справки с иконкой лампочки */
 .help-button {
-    width: 2.5rem;
-    height: 2.5rem;
+    width: var(--button-size-sm);
+    height: var(--button-size-sm);
     background: var(--step-bg);
     border: 1px solid var(--step-border);
     border-radius: var(--radius-sm);
@@ -39,9 +39,9 @@
     content: '';
     position: absolute;
     inset: 0;
-    background: radial-gradient(circle, rgb(255 255 255 / 30%) 0%, transparent 70%);
+    background: radial-gradient(circle, rgba(255, 255, 255, 0.3) 0%, transparent 70%);
     transform: scale(0);
-    transition: transform 0.6s ease-out;
+    transition: transform var(--transition-ripple);
     pointer-events: none;
 }
 
@@ -53,7 +53,7 @@
 .help-button:hover {
     background: var(--step-bg-hover);
     border-color: var(--step-border-hover);
-    transform: translateY(-2px);
+    transform: translateY(calc(-1 * var(--translate-md)));
     box-shadow: var(--shadow-sm);
 }
 
@@ -95,10 +95,10 @@
     user-select: none;
     transition: color var(--transition-base);
     line-height: var(--line-height-tight);
-    text-shadow: 0 1px 2px rgb(0 0 0 / 30%);
+    text-shadow: var(--text-shadow-sm);
 }
 
 /* Подсветка метки при наведении на контейнер */
 .help-indicator:hover .help-button-label {
-    text-shadow: 0 1px 3px rgb(0 0 0 / 40%);
+    text-shadow: var(--text-shadow);
 }

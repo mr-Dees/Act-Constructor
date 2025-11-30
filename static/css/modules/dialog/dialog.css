@@ -10,7 +10,7 @@
     background: var(--bg-primary);
     border-radius: var(--radius-xl);
     padding: var(--spacing-2xl);
-    max-width: 27.5rem;
+    max-width: var(--dialog-max-width);
     width: 100%;
     box-shadow: var(--shadow-xl);
     animation: scaleIn 0.25s cubic-bezier(0.4, 0, 0.2, 1);
@@ -25,8 +25,8 @@
     right: var(--spacing-md);
     background: transparent;
     border: none;
-    width: 2rem;
-    height: 2rem;
+    width: var(--dialog-close-size);
+    height: var(--dialog-close-size);
     border-radius: var(--radius);
     cursor: pointer;
     display: flex;
@@ -48,7 +48,7 @@
 
 /* Иконка в диалоговом окне */
 .dialog-icon {
-    font-size: 3rem;
+    font-size: var(--dialog-icon-size);
     text-align: center;
     margin-bottom: var(--spacing-lg);
     line-height: 1;
@@ -102,26 +102,26 @@
     animation: scaleOut 0.2s cubic-bezier(0.4, 0, 0.2, 1);
 }
 
-/* dialog.css (добавить в конец файла) */
-
 /* Поле ввода в диалоговом окне */
 .dialog-input {
     width: 100%;
     padding: var(--spacing);
-    border: 1px solid var(--border-color);
+    border: 1px solid var(--input-border);
     border-radius: var(--radius);
     margin-bottom: var(--spacing-xl);
     font-size: var(--font-size-sm);
     font-family: inherit;
+    color: var(--input-text);
+    background: var(--input-bg);
     transition: border-color var(--transition-fast), box-shadow var(--transition-fast);
 }
 
 .dialog-input:focus {
     outline: none;
-    border-color: var(--accent-primary);
-    box-shadow: 0 0 0 3px rgb(0 123 255 / 10%);
+    border-color: var(--input-border-focus);
+    box-shadow: var(--input-focus-shadow);
 }
 
 .dialog-input::placeholder {
-    color: var(--text-tertiary);
+    color: var(--input-placeholder);
 }

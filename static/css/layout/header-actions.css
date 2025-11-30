@@ -6,7 +6,7 @@
     position: absolute;
     right: var(--spacing-2xl);
     top: 50%;
-    transform: translateY(calc(-50% + 0.125rem));
+    transform: translateY(-50%);
     display: flex;
     align-items: flex-start;
     gap: var(--spacing-xl);
@@ -38,9 +38,9 @@
     justify-content: center;
     position: relative;
     overflow: hidden;
-    margin-top: 2px;
 }
 
+/* Эффект ripple при клике */
 .header-action-btn::before {
     content: '';
     position: absolute;
@@ -55,7 +55,7 @@
     transform: scale(2);
 }
 
-.header-action-btn:hover {
+.header-action-btn:hover:not(.active) {
     background: var(--step-bg-hover);
     border-color: var(--step-border-hover);
     transform: translateY(-2px);
@@ -84,11 +84,6 @@
 .header-action-btn.active:hover {
     background: var(--bg-primary);
     color: var(--primary-hover);
-    transform: translateY(0);
-}
-
-.header-action-btn svg {
-    margin-top: 1px;
 }
 
 /* Подпись */
@@ -100,7 +95,6 @@
     user-select: none;
     line-height: var(--line-height-tight);
     text-shadow: 0 1px 2px rgb(0 0 0 / 30%);
-    margin-top: 2px;
 }
 
 .header-action-container:hover .header-action-label {

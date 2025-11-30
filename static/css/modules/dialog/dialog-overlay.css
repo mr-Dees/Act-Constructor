@@ -10,8 +10,8 @@
     position: fixed;
     inset: 0;
     background: var(--overlay-bg);
-    backdrop-filter: blur(4px);
-    -webkit-backdrop-filter: blur(4px);
+    backdrop-filter: var(--modal-blur-background);
+    -webkit-backdrop-filter: var(--modal-blur-background);
     z-index: var(--z-modal-backdrop);
     display: flex;
     align-items: center;
@@ -45,7 +45,7 @@ body.dialog-open {
 /* Множественные оверлеи для вложенных диалогов */
 .custom-dialog-overlay[data-level="2"] {
     z-index: calc(var(--z-modal-backdrop) + 100);
-    background: rgb(26 32 44 / 60%);
+    background: var(--overlay-bg-darker);
 }
 
 .custom-dialog-overlay[data-level="2"] .custom-dialog {
