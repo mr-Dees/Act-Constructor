@@ -42,6 +42,8 @@ const CreateActDialog = {
 
         if (field.type === 'checkbox') {
             field.checked = !!value;
+        } else if (field.type === 'number') {
+            field.value = value !== null && value !== undefined ? value : '';
         } else if (field.tagName === 'BUTTON') {
             field.textContent = value;
         } else {
@@ -64,15 +66,15 @@ const CreateActDialog = {
         const modal = this._cloneTemplate('createActDialogTemplate');
         if (!modal) return;
 
-        const modalElement = modal.querySelector('.custom-dialog-overlay');
-
         // Заполняем заголовок и кнопку
         this._fillField(modal, 'title', isEdit ? 'Редактирование акта' : 'Создание нового акта');
         this._fillField(modal, 'submitText', isEdit ? 'Сохранить изменения' : 'Создать акт');
 
-        // Заполняем поля формы если редактирование
+        // Заполняем поля формы
         if (isEdit && actData) {
-            this._fillField(modal, 'km_number', actData.km_number);  // Добавили КМ
+            this._fillField(modal, 'km_number', actData.km_number);
+            this._fillField(modal, 'part_number', actData.part_number || 1);
+            this._fillField(modal, 'total_parts', actData.total_parts || 1);
             this._fillField(modal, 'inspection_name', actData.inspection_name);
             this._fillField(modal, 'city', actData.city);
             this._fillField(modal, 'created_date', actData.created_date);
@@ -82,11 +84,11 @@ const CreateActDialog = {
             this._fillField(modal, 'inspection_end_date', actData.inspection_end_date);
             this._fillField(modal, 'is_process_based', actData.is_process_based !== false);
         } else {
-            // Для нового акта ставим галочку по умолчанию
+            // Для нового акта значения по умолчанию
+            this._fillField(modal, 'part_number', 1);
+            this._fillField(modal, 'total_parts', 1);
             this._fillField(modal, 'is_process_based', true);
         }
-
-        // Убрали блок скрытия поля КМ
 
         document.body.appendChild(modal);
 
@@ -247,10 +249,20 @@ const CreateActDialog = {
                 return value && value.trim() !== '' ? value : null;
             };
 
+            // Вспомогательная функция для чисел
+            const getNumberOrDefault = (fieldName, defaultValue) => {
+                const value = fd.get(fieldName);
+                const parsed = parseInt(value, 10);
+                return !isNaN(parsed) && parsed > 0 ? parsed : defaultValue;
+            };
+
             const body = {
+                km_number: fd.get('km_number'),
+                part_number: getNumberOrDefault('part_number', 1),
+                total_parts: getNumberOrDefault('total_parts', 1),
                 inspection_name: fd.get('inspection_name'),
                 city: fd.get('city'),
-                created_date: getDateOrNull('created_date'),  // Теперь может быть null
+                created_date: getDateOrNull('created_date'),
                 order_number: fd.get('order_number'),
                 order_date: fd.get('order_date'),
                 inspection_start_date: fd.get('inspection_start_date'),
@@ -259,10 +271,6 @@ const CreateActDialog = {
                 audit_team: auditTeam,
                 directives: directives
             };
-
-            if (!isEdit) {
-                body.km_number = fd.get('km_number');
-            }
 
             const endpoint = isEdit
                 ? `/api/v1/acts/${actId}`

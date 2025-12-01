@@ -4,7 +4,9 @@
 -- Основная таблица актов с метаданными
 CREATE TABLE IF NOT EXISTS acts (
     id SERIAL PRIMARY KEY,
-    km_number VARCHAR(50) UNIQUE NOT NULL,
+    km_number VARCHAR(50) NOT NULL,
+    part_number INTEGER NOT NULL DEFAULT 1,
+    total_parts INTEGER NOT NULL DEFAULT 1,
     inspection_name TEXT NOT NULL,
     city VARCHAR(255) NOT NULL,
     created_date DATE,
@@ -13,11 +15,20 @@ CREATE TABLE IF NOT EXISTS acts (
     is_process_based BOOLEAN DEFAULT TRUE,
     inspection_start_date DATE NOT NULL,
     inspection_end_date DATE NOT NULL,
+
+    -- Служебные флаги для валидации (будущая функциональность)
+    needs_created_date BOOLEAN DEFAULT FALSE,
+    needs_directive_number BOOLEAN DEFAULT FALSE,
+    needs_invoice_check BOOLEAN DEFAULT FALSE,
+
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     created_by VARCHAR(255) NOT NULL,
     last_edited_by VARCHAR(255),
-    last_edited_at TIMESTAMP
+    last_edited_at TIMESTAMP,
+
+    -- Уникальность по паре (km_number, part_number)
+    UNIQUE(km_number, part_number)
 );
 
 -- Таблица членов аудиторской группы
@@ -110,6 +121,7 @@ CREATE TABLE IF NOT EXISTS act_violations (
 
 -- Индексы на acts
 CREATE INDEX IF NOT EXISTS idx_acts_km_number ON acts(km_number);
+CREATE INDEX IF NOT EXISTS idx_acts_km_part ON acts(km_number, part_number);
 CREATE INDEX IF NOT EXISTS idx_acts_created_by ON acts(created_by);
 CREATE INDEX IF NOT EXISTS idx_acts_last_edited_at ON acts(last_edited_at DESC);
 

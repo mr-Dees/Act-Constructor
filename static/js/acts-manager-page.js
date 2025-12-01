@@ -5,6 +5,17 @@
 
 class ActsManagerPage {
     /**
+     * Форматирует отображение КМ с учетом частей
+     * @private
+     */
+    static _formatKmNumber(kmNumber, partNumber, totalParts) {
+        if (totalParts > 1) {
+            return `${kmNumber}_${partNumber}`;
+        }
+        return kmNumber;
+    }
+
+    /**
      * Форматирует дату в формате DD.MM.YYYY
      * @private
      */
@@ -176,7 +187,7 @@ class ActsManagerPage {
         const data = {
             inspection_name: act.inspection_name,
             user_role: act.user_role,
-            km_number: act.km_number,
+            km_display: this._formatKmNumber(act.km_number, act.part_number || 1, act.total_parts || 1),
             order_number: act.order_number,
             inspection_start_date: this._formatDate(act.inspection_start_date),
             inspection_end_date: this._formatDate(act.inspection_end_date),

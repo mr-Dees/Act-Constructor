@@ -40,9 +40,20 @@
                 </label>
 
                 <label id="kmNumberField">
-                    Номер КМ *
-                    <input name="km_number" required>
+                    КМ номер *
+                    <input type="text" name="km_number" data-field="km_number" required>
                 </label>
+
+                <div style="display: grid; grid-template-columns: 1fr 1fr; gap: var(--spacing-md);">
+                    <label>
+                        Часть акта *
+                        <input type="number" name="part_number" data-field="part_number" min="1" value="1" required>
+                    </label>
+                    <label>
+                        Всего частей *
+                        <input type="number" name="total_parts" data-field="total_parts" min="1" value="1" required>
+                    </label>
+                </div>
 
                 <label class="checkbox-label">
                     <input type="checkbox" name="is_process_based" data-field="is_process_based">

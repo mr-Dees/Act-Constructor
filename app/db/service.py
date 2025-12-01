@@ -70,7 +70,7 @@ class ActDBService:
 
         Raises:
             ValueError: Если пользователь не входит в состав группы
-            asyncpg.UniqueViolationError: Если КМ номер уже существует
+            asyncpg.UniqueViolationError: Если пара (КМ, часть) уже существует
         """
         async with self.conn.transaction():
             # Проверка: пользователь должен быть членом аудиторской группы
@@ -87,15 +87,17 @@ class ActDBService:
             act_id = await self.conn.fetchval(
                 """
                 INSERT INTO acts (
-                    km_number, inspection_name, city, created_date,
+                    km_number, part_number, total_parts, inspection_name, city, created_date,
                     order_number, order_date, is_process_based,
                     created_by, inspection_start_date, inspection_end_date,
                     last_edited_at
                 )
-                VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, CURRENT_TIMESTAMP)
+                VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, CURRENT_TIMESTAMP)
                 RETURNING id
                 """,
                 act_data.km_number,
+                act_data.part_number,
+                act_data.total_parts,
                 act_data.inspection_name,
                 act_data.city,
                 act_data.created_date,
@@ -121,7 +123,7 @@ class ActDBService:
                     member.full_name,
                     member.position,
                     member.username,
-                    idx  # Сохраняем порядок для корректного отображения
+                    idx
                 )
 
             # Добавляем действующие поручения
@@ -155,7 +157,10 @@ class ActDBService:
                 json.dumps(default_tree)
             )
 
-            logger.info(f"Создан акт ID={act_id}, КМ={act_data.km_number}")
+            logger.info(
+                f"Создан акт ID={act_id}, КМ={act_data.km_number}, "
+                f"часть {act_data.part_number}/{act_data.total_parts}"
+            )
 
             # Возвращаем полную информацию о созданном акте
             return await self.get_act_by_id(act_id)
@@ -178,6 +183,8 @@ class ActDBService:
             SELECT 
                 a.id,
                 a.km_number,
+                a.part_number,
+                a.total_parts,
                 a.inspection_name,
                 a.order_number,
                 a.inspection_start_date,
@@ -187,7 +194,8 @@ class ActDBService:
             FROM acts a
             INNER JOIN audit_team_members atm ON a.id = atm.act_id
             WHERE atm.username = $1
-            GROUP BY a.id, a.km_number, a.inspection_name, a.order_number,
+            GROUP BY a.id, a.km_number, a.part_number, a.total_parts,
+                     a.inspection_name, a.order_number,
                      a.inspection_start_date, a.inspection_end_date,
                      a.last_edited_at, atm.role
             ORDER BY 
@@ -202,6 +210,8 @@ class ActDBService:
             ActListItem(
                 id=row['id'],
                 km_number=row['km_number'],
+                part_number=row['part_number'],
+                total_parts=row['total_parts'],
                 inspection_name=row['inspection_name'],
                 order_number=row['order_number'],
                 inspection_start_date=row['inspection_start_date'],
@@ -233,7 +243,16 @@ class ActDBService:
         # Получаем основные данные акта
         act_row = await self.conn.fetchrow(
             """
-            SELECT * FROM acts WHERE id = $1
+            SELECT 
+                id, km_number, part_number, total_parts,
+                inspection_name, city, created_date,
+                order_number, order_date, is_process_based,
+                inspection_start_date, inspection_end_date,
+                needs_created_date, needs_directive_number, needs_invoice_check,
+                created_at, updated_at, created_by,
+                last_edited_by, last_edited_at
+            FROM acts 
+            WHERE id = $1
             """,
             act_id
         )
@@ -285,6 +304,8 @@ class ActDBService:
         return ActResponse(
             id=act_row['id'],
             km_number=act_row['km_number'],
+            part_number=act_row['part_number'],
+            total_parts=act_row['total_parts'],
             inspection_name=act_row['inspection_name'],
             city=act_row['city'],
             created_date=act_row['created_date'],
@@ -295,6 +316,9 @@ class ActDBService:
             inspection_end_date=act_row['inspection_end_date'],
             audit_team=audit_team,
             directives=directives,
+            needs_created_date=act_row['needs_created_date'],
+            needs_directive_number=act_row['needs_directive_number'],
+            needs_invoice_check=act_row['needs_invoice_check'],
             created_at=act_row['created_at'],
             updated_at=act_row['updated_at'],
             created_by=act_row['created_by'],
@@ -332,6 +356,21 @@ class ActDBService:
             param_idx = 1
 
             # Обрабатываем каждое опциональное поле
+            if act_update.km_number is not None:
+                updates.append(f"km_number = ${param_idx}")
+                values.append(act_update.km_number)
+                param_idx += 1
+
+            if act_update.part_number is not None:
+                updates.append(f"part_number = ${param_idx}")
+                values.append(act_update.part_number)
+                param_idx += 1
+
+            if act_update.total_parts is not None:
+                updates.append(f"total_parts = ${param_idx}")
+                values.append(act_update.total_parts)
+                param_idx += 1
+
             if act_update.inspection_name is not None:
                 updates.append(f"inspection_name = ${param_idx}")
                 values.append(act_update.inspection_name)
@@ -539,6 +578,8 @@ class ActDBService:
         # Создаем новый акт с теми же данными
         new_act_data = ActCreate(
             km_number=new_km_number,
+            part_number=original.part_number,
+            total_parts=original.total_parts,
             inspection_name=new_inspection_name,
             city=original.city,
             created_date=original.created_date,
