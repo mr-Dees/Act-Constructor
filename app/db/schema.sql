@@ -7,7 +7,7 @@ CREATE TABLE IF NOT EXISTS acts (
     km_number VARCHAR(50) UNIQUE NOT NULL,
     inspection_name TEXT NOT NULL,
     city VARCHAR(255) NOT NULL,
-    created_date DATE NOT NULL,
+    created_date DATE,
     order_number VARCHAR(100) NOT NULL,
     order_date DATE NOT NULL,
     is_process_based BOOLEAN DEFAULT TRUE,

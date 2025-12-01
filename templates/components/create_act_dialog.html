@@ -1,0 +1,81 @@
+<!-- templates/components/create_act_dialog.html -->
+<template id="createActDialogTemplate">
+    <div class="custom-dialog-overlay">
+        <div class="custom-dialog dialog-create-act">
+            <h3 class="dialog-title" data-field="title"></h3>
+            <form id="actForm" autocomplete="off">
+                <label>
+                    Наименование проверки *
+                    <input name="inspection_name" required data-field="inspection_name">
+                </label>
+
+                <label>
+                    Город *
+                    <input name="city" required data-field="city">
+                </label>
+
+                <label>
+                    Дата составления
+                    <input type="date" name="created_date" data-field="created_date">
+                </label>
+
+                <label>
+                    Номер приказа *
+                    <input name="order_number" required data-field="order_number">
+                </label>
+
+                <label>
+                    Дата приказа *
+                    <input type="date" name="order_date" required data-field="order_date">
+                </label>
+
+                <label>
+                    Срок проверки: начало *
+                    <input type="date" name="inspection_start_date" required data-field="inspection_start_date">
+                </label>
+
+                <label>
+                    Срок проверки: окончание *
+                    <input type="date" name="inspection_end_date" required data-field="inspection_end_date">
+                </label>
+
+                <label id="kmNumberField">
+                    Номер КМ *
+                    <input name="km_number" required>
+                </label>
+
+                <label class="checkbox-label">
+                    <input type="checkbox" name="is_process_based" data-field="is_process_based">
+                    <span>Процессная проверка</span>
+                </label>
+
+                <fieldset>
+                    <legend>Состав аудиторской группы *</legend>
+                    <div id="auditTeamContainer"></div>
+                    <button type="button" id="addTeamMemberBtn" class="btn btn-secondary btn-add-item">
+                        <svg width="16" height="16" viewBox="0 0 24 24" fill="none">
+                            <path d="M12 5V19M5 12H19" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>
+                        </svg>
+                        Добавить члена группы
+                    </button>
+                </fieldset>
+
+                <fieldset>
+                    <legend>Действующие поручения</legend>
+                    <div id="directivesContainer"></div>
+                    <button type="button" id="addDirectiveBtn" class="btn btn-secondary btn-add-item">
+                        <svg width="16" height="16" viewBox="0 0 24 24" fill="none">
+                            <path d="M12 5V19M5 12H19" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>
+                        </svg>
+                        Добавить поручение
+                    </button>
+                </fieldset>
+
+                <div class="dialog-actions">
+                    <button type="submit" class="btn btn-primary" data-field="submitText"></button>
+                    <button type="button" class="btn btn-secondary dialog-cancel">Отмена</button>
+                </div>
+            </form>
+        </div>
+    </div>
+</template>

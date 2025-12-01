@@ -1,0 +1,20 @@
+<!-- templates/components/directive_row.html -->
+<template id="directiveRowTemplate">
+    <div class="directive-row">
+        <input name="point_number"
+               placeholder="№ пункта (5.1.1) *"
+               required
+               class="directive-point"
+               data-field="point_number">
+        <input name="directive_number"
+               placeholder="№ поручения *"
+               required
+               class="directive-number"
+               data-field="directive_number">
+        <button type="button" class="btn btn-ghost delete-directive-btn" title="Удалить">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none">
+                <path d="M18 6L6 18M6 6l12 12" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>
+            </svg>
+        </button>
+    </div>
+</template>

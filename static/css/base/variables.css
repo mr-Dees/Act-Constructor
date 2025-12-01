@@ -291,8 +291,8 @@
     --modal-blur-background: blur(var(--spacing-xs));
 
     /* Скроллбар */
-    --scrollbar-width: 8px;
-    --scrollbar-width-thin: 4px;
+    --scrollbar-width: 0.5rem;
+    --scrollbar-width-thin: 0.25rem;
     --scrollbar-bg: var(--gray-100);
     --scrollbar-thumb: var(--primary-light);
     --scrollbar-thumb-hover: var(--primary);
@@ -391,7 +391,7 @@
     --link-footnote-editing-translate: -0.125rem;
     --link-footnote-focus-ring-width: 3px;
     --link-tooltip-max-width: 20rem;
-    --link-tooltip-arrow-size: 4px;
+    --link-tooltip-arrow-size: 0.25rem;
     --link-popup-min-width: 20rem;
     --link-popup-max-width: 26rem;
     --link-popup-textarea-min-height: 4rem;
@@ -402,7 +402,7 @@
     /* Toolbar специфичные переменные */
     --toolbar-top-offset: var(--spacing);
     --toolbar-max-width: 90vw;
-    --toolbar-scrollbar-height: 4px;
+    --toolbar-scrollbar-height: 0.25rem;
     --toolbar-separator-height: var(--spacing-xl);
     --toolbar-separator-width: 1px;
     --toolbar-btn-min-width: 2rem;
@@ -428,7 +428,7 @@
     --tree-protected-border-width: 3px;
     --tree-badge-height: 1.25rem;
     --tree-editing-min-width: 8rem;
-    --tree-drag-active-offset: -4px;
+    --tree-drag-active-offset: -0.25rem;
     --tree-drag-active-bg: rgba(91, 111, 168, 0.03);
     --tree-drop-zone-bg: rgba(91, 111, 168, 0.05);
     --tree-badge-table-bg: rgba(74, 154, 182, 0.15);
@@ -509,24 +509,29 @@
     --dialog-close-size: 2rem;
     --format-menu-max-height: 20rem;
 
+    /* Диалог создания акта специфичные переменные */
+    --create-act-dialog-width: 65rem;
+    --create-act-dialog-max-height: 90vh;
+    --create-act-dialog-close-size: 2.5rem;
+
     /* Размеры кнопок */
     --button-size-sm: 2.5rem;
     --button-size: 2.75rem;
     --button-size-lg: 3rem;
 
     /* Размеры для элементов items */
-    --item-hover-translate: 2px;
-    --item-highlight-offset: 4px;
-    --item-drop-indicator-height: 2px;
+    --item-hover-translate: 0.125rem;
+    --item-highlight-offset: 0.25rem;
+    --item-drop-indicator-height: 0.125rem;
     --item-toggle-btn-size: 1.25rem;
-    --item-badge-padding: 2px;
+    --item-badge-padding: 0.125rem;
     --item-level-connector-width: 1px;
 
     /* Трансформации и масштабирование */
-    --button-hover-translate: -1px;
+    --button-hover-translate: -0.0625rem;
     --button-active-scale: 0.95;
     --toolbar-btn-active-scale: 0.95;
-    --save-indicator-hover-translate: -2px;
+    --save-indicator-hover-translate: -0.125rem;
     --scale-icon-hover: 1.1;
     --scale-dragging: 0.98;
     --scale-drop-child: 1.02;
@@ -572,7 +577,7 @@
 
     /* Высота шапки с учетом минимального значения */
     --header-height: 9vh;
-    --header-min-height: 80px;
+    --header-min-height: 5rem;
     --body-padding-top: calc(max(var(--header-height), var(--header-min-height)) + 2.5vh);
     --content-height: calc(100vh - var(--body-padding-top));
 

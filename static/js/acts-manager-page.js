@@ -1,16 +1,12 @@
 // static/js/acts-manager-page.js
 /**
  * Менеджер главной страницы выбора актов
- *
- * Отображает карточки актов с возможностью открытия, дублирования и удаления.
  */
 
 class ActsManagerPage {
     /**
      * Форматирует дату в формате DD.MM.YYYY
      * @private
-     * @param {string|Date} date - Дата для форматирования
-     * @returns {string} Отформатированная дата
      */
     static _formatDate(date) {
         if (!date) return '—';
@@ -32,8 +28,6 @@ class ActsManagerPage {
     /**
      * Форматирует дату и время в формате DD.MM.YYYY HH:MM
      * @private
-     * @param {string|Date} datetime - Дата-время для форматирования
-     * @returns {string} Отформатированная дата-время
      */
     static _formatDateTime(datetime) {
         if (!datetime) return 'Не редактировался';
@@ -48,10 +42,36 @@ class ActsManagerPage {
             const hours = String(d.getHours()).padStart(2, '0');
             const minutes = String(d.getMinutes()).padStart(2, '0');
 
-            return `${day}.${month}.${year} ${hours}:${minutes}`;
+            return `Изменено: ${day}.${month}.${year} ${hours}:${minutes}`;
         } catch (e) {
             return 'Не редактировался';
         }
+    }
+
+    /**
+     * Клонирует template элемент
+     * @private
+     */
+    static _cloneTemplate(templateId) {
+        const template = document.getElementById(templateId);
+        if (!template) {
+            console.error(`Template ${templateId} не найден`);
+            return null;
+        }
+        return template.content.cloneNode(true);
+    }
+
+    /**
+     * Заполняет поля в элементе данными
+     * @private
+     */
+    static _fillFields(element, data) {
+        element.querySelectorAll('[data-field]').forEach(field => {
+            const fieldName = field.getAttribute('data-field');
+            if (data.hasOwnProperty(fieldName)) {
+                field.textContent = data[fieldName];
+            }
+        });
     }
 
     /**
@@ -61,7 +81,7 @@ class ActsManagerPage {
         const container = document.getElementById('actsListContainer');
         if (!container) return;
 
-        container.innerHTML = '<div class="loading">Загрузка актов...</div>';
+        this._showLoading(container);
 
         try {
             const username = window.env?.JUPYTERHUB_USER || "unknown";
@@ -76,15 +96,7 @@ class ActsManagerPage {
             const acts = await response.json();
 
             if (!acts.length) {
-                container.innerHTML = `
-                    <div class="empty-state">
-                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                            <path d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"/>
-                        </svg>
-                        <h3>Нет доступных актов</h3>
-                        <p>Создайте первый акт, чтобы начать работу</p>
-                    </div>
-                `;
+                this._showEmptyState(container);
                 return;
             }
 
@@ -92,13 +104,44 @@ class ActsManagerPage {
 
         } catch (error) {
             console.error('Ошибка загрузки актов:', error);
-            container.innerHTML = `
-                <div class="empty-state" style="color: var(--error);">
-                    <h3>Ошибка загрузки</h3>
-                    <p>Не удалось загрузить список актов</p>
-                </div>
-            `;
+            this._showErrorState(container);
             Notifications.error('Ошибка загрузки списка актов');
+        }
+    }
+
+    /**
+     * Показывает индикатор загрузки
+     * @private
+     */
+    static _showLoading(container) {
+        const loading = this._cloneTemplate('actsLoadingTemplate');
+        if (loading) {
+            container.innerHTML = '';
+            container.appendChild(loading);
+        }
+    }
+
+    /**
+     * Показывает пустое состояние
+     * @private
+     */
+    static _showEmptyState(container) {
+        const emptyState = this._cloneTemplate('actsEmptyStateTemplate');
+        if (emptyState) {
+            container.innerHTML = '';
+            container.appendChild(emptyState);
+        }
+    }
+
+    /**
+     * Показывает состояние ошибки
+     * @private
+     */
+    static _showErrorState(container) {
+        const errorState = this._cloneTemplate('actsErrorStateTemplate');
+        if (errorState) {
+            container.innerHTML = '';
+            container.appendChild(errorState);
         }
     }
 
@@ -112,7 +155,9 @@ class ActsManagerPage {
 
         acts.forEach(act => {
             const card = this._createActCard(act);
-            grid.appendChild(card);
+            if (card) {
+                grid.appendChild(card);
+            }
         });
 
         container.innerHTML = '';
@@ -120,68 +165,98 @@ class ActsManagerPage {
     }
 
     /**
-     * Создает карточку акта
+     * Создает карточку акта из template
      * @private
      */
     static _createActCard(act) {
-        const card = document.createElement('div');
-        card.className = 'act-card';
+        const card = this._cloneTemplate('actCardTemplate');
+        if (!card) return null;
 
-        const lastEdited = this._formatDateTime(act.last_edited_at);
-        const startDate = this._formatDate(act.inspection_start_date);
-        const endDate = this._formatDate(act.inspection_end_date);
+        // Подготавливаем данные для заполнения
+        const data = {
+            inspection_name: act.inspection_name,
+            user_role: act.user_role,
+            km_number: act.km_number,
+            order_number: act.order_number,
+            inspection_start_date: this._formatDate(act.inspection_start_date),
+            inspection_end_date: this._formatDate(act.inspection_end_date),
+            last_edited_at: this._formatDateTime(act.last_edited_at)
+        };
 
-        card.innerHTML = `
-            <div class="act-card-header">
-                <h3 class="act-card-title">${this._escapeHtml(act.inspection_name)}</h3>
-                <span class="act-card-role">${act.user_role}</span>
-            </div>
-            
-            <div class="act-card-meta">
-                <strong>КМ:</strong> ${this._escapeHtml(act.km_number)}
-            </div>
-            
-            <div class="act-card-meta">
-                <strong>Приказ:</strong> ${this._escapeHtml(act.order_number)}
-            </div>
-            
-            <div class="act-card-meta">
-                <strong>Период проверки:</strong><br>
-                ${startDate} — ${endDate}
-            </div>
-            
-            <div class="act-card-meta" style="margin-top:12px;font-size:12px;color:#999;">
-                Изменено: ${lastEdited}
-            </div>
-            
-            <div class="act-card-actions">
-                <button class="btn btn-primary" onclick="ActsManagerPage.openAct(${act.id})" style="flex:2;">
-                    Открыть
-                </button>
-                <button class="btn btn-secondary" onclick="ActsManagerPage.duplicateAct(${act.id}, '${this._escapeHtml(act.inspection_name)}')" style="flex:1;" title="Дублировать акт">
-                    📋
-                </button>
-                <button class="btn btn-secondary" onclick="ActsManagerPage.deleteAct(${act.id}, '${this._escapeHtml(act.inspection_name)}')" style="flex:1;color:#dc3545;" title="Удалить акт">
-                    🗑️
-                </button>
-            </div>
-        `;
+        // Заполняем поля
+        this._fillFields(card, data);
+
+        // Привязываем обработчики к кнопкам
+        const cardElement = card.querySelector('.act-card');
+
+        const openBtn = cardElement.querySelector('[data-action="open"]');
+        const editBtn = cardElement.querySelector('[data-action="edit"]');
+        const duplicateBtn = cardElement.querySelector('[data-action="duplicate"]');
+        const deleteBtn = cardElement.querySelector('[data-action="delete"]');
+
+        if (openBtn) {
+            openBtn.addEventListener('click', () => this.openAct(act.id));
+        }
+
+        if (editBtn) {
+            editBtn.addEventListener('click', () => this.editAct(act.id));
+        }
+
+        if (duplicateBtn) {
+            duplicateBtn.addEventListener('click', () => this.duplicateAct(act.id, act.inspection_name));
+        }
+
+        if (deleteBtn) {
+            deleteBtn.addEventListener('click', () => this.deleteAct(act.id, act.inspection_name));
+        }
 
         return card;
     }
 
     /**
      * Открывает акт в конструкторе
-     * @param {number} actId - ID акта
      */
     static openAct(actId) {
         window.location.href = `/constructor?act_id=${actId}`;
     }
 
     /**
+     * Открывает диалог редактирования акта
+     */
+    static async editAct(actId) {
+        try {
+            const username = window.env?.JUPYTERHUB_USER || "unknown";
+            const response = await fetch(`/api/v1/acts/${actId}`, {
+                headers: {'X-JupyterHub-User': username}
+            });
+
+            if (!response.ok) {
+                if (response.status === 403) {
+                    throw new Error('Нет доступа к акту');
+                } else if (response.status === 404) {
+                    throw new Error('Акт не найден');
+                }
+                throw new Error('Ошибка загрузки акта');
+            }
+
+            const actData = await response.json();
+
+            // Открываем диалог редактирования
+            if (window.CreateActDialog && typeof window.CreateActDialog.showEdit === 'function') {
+                window.CreateActDialog.showEdit(actData);
+            } else {
+                console.error('CreateActDialog не найден');
+                Notifications.error('Ошибка открытия диалога редактирования');
+            }
+
+        } catch (error) {
+            console.error('Ошибка загрузки акта для редактирования:', error);
+            Notifications.error(`Не удалось загрузить акт: ${error.message}`);
+        }
+    }
+
+    /**
      * Дублирует акт с подтверждением
-     * @param {number} actId - ID акта
-     * @param {string} actName - Название акта
      */
     static async duplicateAct(actId, actName) {
         const confirmed = await DialogManager.show({
@@ -192,9 +267,7 @@ class ActsManagerPage {
             cancelText: 'Отмена'
         });
 
-        if (!confirmed) {
-            return;
-        }
+        if (!confirmed) return;
 
         try {
             const username = window.env?.JUPYTERHUB_USER || "unknown";
@@ -217,7 +290,6 @@ class ActsManagerPage {
             const newAct = await response.json();
             Notifications.success(`Копия создана: ${newAct.inspection_name}`);
 
-            // Предлагаем открыть новый акт или остаться на странице
             const openNewAct = await DialogManager.show({
                 title: 'Копия создана',
                 message: 'Хотите открыть новый акт сейчас?',
@@ -229,7 +301,6 @@ class ActsManagerPage {
             if (openNewAct) {
                 window.location.href = `/constructor?act_id=${newAct.id}`;
             } else {
-                // Перезагружаем список актов
                 await this.loadActs();
             }
 
@@ -241,8 +312,6 @@ class ActsManagerPage {
 
     /**
      * Удаляет акт с подтверждением
-     * @param {number} actId - ID акта
-     * @param {string} actName - Название акта
      */
     static async deleteAct(actId, actName) {
         const confirmed = await DialogManager.show({
@@ -253,9 +322,7 @@ class ActsManagerPage {
             cancelText: 'Отмена'
         });
 
-        if (!confirmed) {
-            return;
-        }
+        if (!confirmed) return;
 
         try {
             const username = window.env?.JUPYTERHUB_USER || "unknown";
@@ -274,8 +341,6 @@ class ActsManagerPage {
             }
 
             Notifications.success('Акт успешно удален');
-
-            // Перезагружаем список актов
             await this.loadActs();
 
         } catch (error) {
@@ -285,23 +350,11 @@ class ActsManagerPage {
     }
 
     /**
-     * Экранирует HTML
-     * @private
-     */
-    static _escapeHtml(text) {
-        const div = document.createElement('div');
-        div.textContent = text;
-        return div.innerHTML;
-    }
-
-    /**
      * Инициализация страницы
      */
     static init() {
-        // Загружаем список актов
         this.loadActs();
 
-        // Обработчик кнопки создания акта
         const createBtn = document.getElementById('createNewActBtn');
         if (createBtn) {
             createBtn.addEventListener('click', () => {
@@ -311,10 +364,8 @@ class ActsManagerPage {
     }
 }
 
-// Глобальный доступ
 window.ActsManagerPage = ActsManagerPage;
 
-// Инициализация при загрузке DOM
 document.addEventListener('DOMContentLoaded', () => {
     ActsManagerPage.init();
 });

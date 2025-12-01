@@ -1,0 +1,43 @@
+<!-- templates/components/acts_card_template.html -->
+<template id="actCardTemplate">
+    <div class="act-card">
+        <div class="act-card-header">
+            <h3 class="act-card-title" data-field="inspection_name"></h3>
+            <span class="act-card-role" data-field="user_role"></span>
+        </div>
+
+        <div class="act-card-body">
+            <div class="act-card-meta">
+                <strong>КМ:</strong> <span data-field="km_number"></span>
+            </div>
+
+            <div class="act-card-meta">
+                <strong>Приказ:</strong> <span data-field="order_number"></span>
+            </div>
+
+            <div class="act-card-meta">
+                <strong>Период проверки:</strong><br>
+                <span data-field="inspection_start_date"></span> — <span data-field="inspection_end_date"></span>
+            </div>
+
+            <div class="act-card-meta act-card-timestamp">
+                <span data-field="last_edited_at"></span>
+            </div>
+        </div>
+
+        <div class="act-card-actions">
+            <button class="btn btn-primary" data-action="open">
+                Открыть
+            </button>
+            <button class="btn btn-secondary" data-action="edit" title="Редактировать метаданные">
+                ✏️
+            </button>
+            <button class="btn btn-secondary" data-action="duplicate" title="Дублировать акт">
+                📋
+            </button>
+            <button class="btn btn-secondary btn-danger-text" data-action="delete" title="Удалить акт">
+                🗑️
+            </button>
+        </div>
+    </div>
+</template>

@@ -63,7 +63,7 @@ class ActCreate(BaseModel):
     km_number: str = Field(min_length=1, max_length=50)
     inspection_name: str = Field(min_length=1)
     city: str = Field(min_length=1, max_length=255)
-    created_date: date
+    created_date: Optional[date] = None
     order_number: str = Field(min_length=1, max_length=100)
     order_date: date
     audit_team: List[AuditTeamMember] = Field(min_length=1)
@@ -117,7 +117,7 @@ class ActResponse(BaseModel):
     km_number: str
     inspection_name: str
     city: str
-    created_date: date
+    created_date: Optional[date] = None
     order_number: str
     order_date: date
     is_process_based: bool

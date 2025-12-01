@@ -1,0 +1,274 @@
+/* static/css/modules/dialog/dialog-create-act.css */
+
+/**
+ * Стили диалога создания/редактирования акта
+ * Визуально согласован с acts-menu и help-modal
+ */
+
+.dialog-create-act {
+    width: var(--create-act-dialog-width);
+    max-width: var(--create-act-dialog-width);
+    min-width: var(--create-act-dialog-width);
+    max-height: var(--create-act-dialog-max-height);
+    padding: 0;
+    overflow: hidden;
+    display: flex;
+    flex-direction: column;
+}
+
+/* Шапка диалога */
+.dialog-create-act .dialog-title {
+    padding: var(--spacing-xl) var(--spacing-2xl);
+    background: var(--gradient-header);
+    color: var(--text-on-primary);
+    border-bottom: var(--border-width-thin) solid var(--border-light);
+    border-radius: var(--radius-xl) var(--radius-xl) 0 0;
+    margin: 0;
+    font-size: var(--font-size-xl);
+    font-weight: var(--font-weight-semibold);
+    line-height: var(--line-height-tight);
+    flex-shrink: 0;
+}
+
+/* Форма с прокруткой */
+.dialog-create-act form {
+    padding: var(--spacing-2xl);
+    overflow-y: auto;
+    overflow-x: hidden;
+    flex: 1;
+    min-height: 0;
+    display: flex;
+    flex-direction: column;
+    gap: var(--spacing-lg);
+    scrollbar-width: thin;
+    scrollbar-color: var(--scrollbar-thumb) var(--scrollbar-bg);
+}
+
+.dialog-create-act form::-webkit-scrollbar {
+    width: var(--scrollbar-width);
+}
+
+.dialog-create-act form::-webkit-scrollbar-track {
+    background: var(--scrollbar-bg);
+    border-radius: 0 0 var(--radius-xl) 0;
+}
+
+.dialog-create-act form::-webkit-scrollbar-thumb {
+    background: var(--scrollbar-thumb);
+    border-radius: var(--radius);
+}
+
+.dialog-create-act form::-webkit-scrollbar-thumb:hover {
+    background: var(--scrollbar-thumb-hover);
+}
+
+/* Поля формы */
+.dialog-create-act label {
+    display: flex;
+    flex-direction: column;
+    gap: var(--spacing-xs);
+    font-size: var(--font-size-sm);
+    font-weight: var(--font-weight-medium);
+    color: var(--text-primary);
+}
+
+.dialog-create-act input[type="text"],
+.dialog-create-act input[type="date"],
+.dialog-create-act input:not([type="checkbox"]),
+.dialog-create-act select {
+    padding: var(--spacing-sm) var(--spacing-md);
+    border: var(--border-width-thin) solid var(--input-border);
+    border-radius: var(--radius-sm);
+    font-size: var(--font-size-base);
+    background: var(--input-bg);
+    color: var(--input-text);
+    transition: var(--transition-fast);
+}
+
+.dialog-create-act input:focus,
+.dialog-create-act select:focus {
+    outline: none;
+    border-color: var(--input-border-focus);
+    box-shadow: var(--input-focus-shadow);
+}
+
+.dialog-create-act input:hover:not(:focus),
+.dialog-create-act select:hover:not(:focus) {
+    border-color: var(--input-border-hover);
+}
+
+/* Чекбокс */
+.dialog-create-act .checkbox-label {
+    flex-direction: row;
+    align-items: center;
+    gap: var(--spacing-sm);
+    cursor: pointer;
+    user-select: none;
+}
+
+.dialog-create-act .checkbox-label input[type="checkbox"] {
+    width: var(--checkbox-size);
+    height: var(--checkbox-size);
+    cursor: pointer;
+    flex-shrink: 0;
+}
+
+/* Fieldset */
+.dialog-create-act fieldset {
+    border: var(--border-width-thin) solid var(--border-light);
+    border-radius: var(--radius-lg);
+    padding: var(--spacing-xl);
+    margin: 0;
+    background: var(--bg-secondary);
+}
+
+.dialog-create-act legend {
+    padding: 0 var(--spacing-sm);
+    font-weight: var(--font-weight-semibold);
+    font-size: var(--font-size-base);
+    color: var(--text-primary);
+}
+
+/* Кнопка добавления */
+.dialog-create-act .btn-add-item {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: var(--spacing-xs);
+    margin-top: var(--spacing-md);
+}
+
+.dialog-create-act .btn-add-item svg {
+    flex-shrink: 0;
+}
+
+/* Действия диалога */
+.dialog-create-act .dialog-actions {
+    display: flex;
+    gap: var(--spacing-sm);
+    padding-top: var(--spacing-xl);
+    border-top: var(--border-width-thin) solid var(--border-light);
+    margin-top: auto;
+    flex-shrink: 0;
+}
+
+/* Строка члена группы */
+.team-member-row {
+    display: grid;
+    grid-template-columns: 10rem 1fr 1fr 8rem 2.5rem;
+    gap: var(--spacing-sm);
+    margin-bottom: var(--spacing-md);
+    align-items: center;
+}
+
+.team-member-role {
+    padding: var(--spacing-sm) var(--spacing-md);
+    border: var(--border-width-thin) solid var(--input-border);
+    border-radius: var(--radius-sm);
+    font-size: var(--font-size-sm);
+    background: var(--input-bg);
+    color: var(--input-text);
+    transition: var(--transition-fast);
+}
+
+.team-member-role:focus {
+    outline: none;
+    border-color: var(--input-border-focus);
+    box-shadow: var(--input-focus-shadow);
+}
+
+.team-member-name,
+.team-member-position,
+.team-member-username {
+    min-width: 0;
+}
+
+.delete-member-btn {
+    width: var(--button-size-sm);
+    height: var(--button-size-sm);
+    padding: 0;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    color: var(--text-secondary);
+    transition: var(--transition-fast);
+    flex-shrink: 0;
+}
+
+.delete-member-btn:hover {
+    color: var(--danger);
+    background: var(--danger-subtle);
+}
+
+.delete-member-btn:active {
+    transform: scale(var(--button-active-scale));
+}
+
+.delete-member-btn svg {
+    flex-shrink: 0;
+}
+
+/* Строка поручения */
+.directive-row {
+    display: grid;
+    grid-template-columns: 12rem 1fr 2.5rem;
+    gap: var(--spacing-sm);
+    margin-bottom: var(--spacing-md);
+    align-items: center;
+}
+
+.directive-point,
+.directive-number {
+    min-width: 0;
+}
+
+.delete-directive-btn {
+    width: var(--button-size-sm);
+    height: var(--button-size-sm);
+    padding: 0;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    color: var(--text-secondary);
+    transition: var(--transition-fast);
+    flex-shrink: 0;
+}
+
+.delete-directive-btn:hover {
+    color: var(--danger);
+    background: var(--danger-subtle);
+}
+
+.delete-directive-btn:active {
+    transform: scale(var(--button-active-scale));
+}
+
+.delete-directive-btn svg {
+    flex-shrink: 0;
+}
+
+/* Контейнеры для строк */
+#auditTeamContainer,
+#directivesContainer {
+    display: flex;
+    flex-direction: column;
+}
+
+#auditTeamContainer:empty::after,
+#directivesContainer:empty::after {
+    content: 'Нажмите кнопку ниже, чтобы добавить';
+    color: var(--text-tertiary);
+    font-size: var(--font-size-sm);
+    font-style: italic;
+    padding: var(--spacing-md);
+    text-align: center;
+}
+
+/* Скрытие поля КМ при редактировании */
+#kmNumberField {
+    display: flex;
+}
+
+#kmNumberField.hidden {
+    display: none;
+}

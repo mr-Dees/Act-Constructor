@@ -1,0 +1,124 @@
+/* static/css/modules/acts-manager/acts-manager-base.css */
+
+.acts-manager-page {
+    min-height: 100vh;
+    background: var(--bg-secondary);
+    padding: var(--spacing-6xl) var(--spacing-3xl);
+}
+
+.acts-manager-container {
+    max-width: var(--breakpoint-xl);
+    margin: 0 auto;
+}
+
+.acts-manager-header {
+    margin-bottom: var(--spacing-5xl);
+}
+
+.acts-manager-title {
+    color: var(--text-primary);
+    font-size: var(--font-size-4xl);
+    font-weight: var(--font-weight-bold);
+    margin: 0 0 var(--spacing-sm) 0;
+    line-height: var(--line-height-tight);
+}
+
+.acts-manager-subtitle {
+    color: var(--text-secondary);
+    font-size: var(--font-size-lg);
+    margin: 0;
+    line-height: var(--line-height-normal);
+}
+
+.acts-actions {
+    margin-bottom: var(--spacing-4xl);
+}
+
+.acts-list-container {
+    background: var(--bg-primary);
+    border-radius: var(--radius-lg);
+    padding: var(--spacing-3xl);
+    min-height: 18.75rem;
+    box-shadow: var(--shadow-sm);
+    border: 1px solid var(--border-light);
+}
+
+.acts-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(21.875rem, 1fr));
+    gap: var(--spacing-2xl);
+}
+
+.acts-loading {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    padding: var(--spacing-8xl) var(--spacing-2xl);
+    color: var(--text-secondary);
+    gap: var(--spacing-lg);
+}
+
+.acts-loading .spinner {
+    width: var(--spacing-5xl);
+    height: var(--spacing-5xl);
+    border: var(--border-width-thick) solid var(--gray-200);
+    border-top-color: var(--primary);
+    border-radius: var(--radius-full);
+    animation: spin var(--duration-spin) linear infinite;
+}
+
+.acts-empty-state {
+    text-align: center;
+    padding: var(--spacing-8xl) var(--spacing-3xl);
+    color: var(--text-secondary);
+}
+
+.empty-state-icon {
+    width: var(--spacing-10xl);
+    height: var(--spacing-10xl);
+    margin: 0 auto var(--spacing-3xl);
+    opacity: 0.3;
+}
+
+.empty-state-title {
+    color: var(--text-primary);
+    font-size: var(--font-size-2xl);
+    font-weight: var(--font-weight-semibold);
+    margin: 0 0 var(--spacing-md) 0;
+}
+
+.empty-state-description {
+    color: var(--text-secondary);
+    font-size: var(--font-size-base);
+    margin: 0;
+}
+
+.acts-error-state {
+    text-align: center;
+    padding: var(--spacing-6xl) var(--spacing-3xl);
+}
+
+.error-state-icon {
+    width: var(--spacing-8xl);
+    height: var(--spacing-8xl);
+    margin: 0 auto var(--spacing-xl);
+    stroke: var(--error);
+}
+
+.error-state-title {
+    color: var(--error);
+    font-size: var(--font-size-xl);
+    font-weight: var(--font-weight-semibold);
+    margin: 0 0 var(--spacing-md) 0;
+}
+
+.error-state-description {
+    color: var(--text-secondary);
+    font-size: var(--font-size-base);
+    margin: 0 0 var(--spacing-2xl) 0;
+}
+
+.btn-reload {
+    margin-top: var(--spacing-lg);
+}

@@ -1,8 +1,6 @@
 // static/js/create-act-dialog.js
 /**
  * Диалог создания и редактирования акта
- *
- * Поддерживает как создание нового акта, так и редактирование метаданных существующего.
  */
 
 const CreateActDialog = {
@@ -22,171 +20,190 @@ const CreateActDialog = {
     },
 
     /**
+     * Клонирует template
+     * @private
+     */
+    _cloneTemplate(templateId) {
+        const template = document.getElementById(templateId);
+        if (!template) {
+            console.error(`Template ${templateId} не найден`);
+            return null;
+        }
+        return template.content.cloneNode(true);
+    },
+
+    /**
+     * Заполняет поля формы данными
+     * @private
+     */
+    _fillField(element, fieldName, value) {
+        const field = element.querySelector(`[data-field="${fieldName}"]`);
+        if (!field) return;
+
+        if (field.type === 'checkbox') {
+            field.checked = !!value;
+        } else if (field.tagName === 'BUTTON') {
+            field.textContent = value;
+        } else {
+            if (field.textContent !== undefined && field.tagName !== 'INPUT') {
+                field.textContent = value;
+            } else {
+                field.value = value || '';
+            }
+        }
+    },
+
+    /**
      * Отображает диалог
      * @private
-     * @param {Object|null} actData - Данные акта (null для создания нового)
      */
     _showDialog(actData) {
         const isEdit = !!actData;
         const currentUser = window.env?.JUPYTERHUB_USER || AppConfig?.auth?.jupyterhubUser || "";
 
-        const modal = document.createElement('div');
-        modal.className = 'custom-dialog-overlay';
-        modal.innerHTML = `
-            <div class="custom-dialog" style="max-width:700px;max-height:90vh;overflow-y:auto;">
-                <h3 class="dialog-title">${isEdit ? 'Редактирование акта' : 'Создание нового акта'}</h3>
-                <form id="actForm" autocomplete="off">
-                    <label>
-                        Наименование проверки *
-                        <input name="inspection_name" required value="${actData?.inspection_name || ''}">
-                    </label>
-                    
-                    <label>
-                        Город *
-                        <input name="city" required value="${actData?.city || ''}">
-                    </label>
-                    
-                    <label>
-                        Дата составления *
-                        <input type="date" name="created_date" required 
-                               value="${actData?.created_date || ''}">
-                    </label>
-                    
-                    <label>
-                        Номер приказа *
-                        <input name="order_number" required value="${actData?.order_number || ''}">
-                    </label>
-                    
-                    <label>
-                        Дата приказа *
-                        <input type="date" name="order_date" required 
-                               value="${actData?.order_date || ''}">
-                    </label>
-                    
-                    <label>
-                        Срок проверки: начало *
-                        <input type="date" name="inspection_start_date" required 
-                               value="${actData?.inspection_start_date || ''}">
-                    </label>
-                    
-                    <label>
-                        Срок проверки: окончание *
-                        <input type="date" name="inspection_end_date" required 
-                               value="${actData?.inspection_end_date || ''}">
-                    </label>
-                    
-                    ${!isEdit ? `
-                        <label>
-                            Номер КМ *
-                            <input name="km_number" required>
-                        </label>
-                    ` : ''}
-                    
-                    <label style="display:flex;align-items:center;gap:8px;">
-                        <input type="checkbox" name="is_process_based" 
-                               ${actData?.is_process_based !== false ? 'checked' : ''}>
-                        <span>Процессная проверка</span>
-                    </label>
-                    
-                    <fieldset>
-                        <legend>Состав аудиторской группы *</legend>
-                        <div id="auditTeamContainer"></div>
-                        <button type="button" id="addTeamMemberBtn" class="btn btn-secondary" 
-                                style="margin-top:8px;">
-                            + Добавить члена группы
-                        </button>
-                    </fieldset>
-                    
-                    <fieldset>
-                        <legend>Действующие поручения</legend>
-                        <div id="directivesContainer"></div>
-                        <button type="button" id="addDirectiveBtn" class="btn btn-secondary" 
-                                style="margin-top:8px;">
-                            + Добавить поручение
-                        </button>
-                    </fieldset>
-                    
-                    <div style="margin-top:16px;display:flex;gap:8px;">
-                        <button type="submit" class="btn btn-primary">
-                            ${isEdit ? 'Сохранить изменения' : 'Создать акт'}
-                        </button>
-                        <button type="button" class="btn btn-secondary dialog-cancel">
-                            Отмена
-                        </button>
-                    </div>
-                </form>
-            </div>
-        `;
+        const modal = this._cloneTemplate('createActDialogTemplate');
+        if (!modal) return;
+
+        const modalElement = modal.querySelector('.custom-dialog-overlay');
+
+        // Заполняем заголовок и кнопку
+        this._fillField(modal, 'title', isEdit ? 'Редактирование акта' : 'Создание нового акта');
+        this._fillField(modal, 'submitText', isEdit ? 'Сохранить изменения' : 'Создать акт');
+
+        // Заполняем поля формы если редактирование
+        if (isEdit && actData) {
+            this._fillField(modal, 'km_number', actData.km_number);  // Добавили КМ
+            this._fillField(modal, 'inspection_name', actData.inspection_name);
+            this._fillField(modal, 'city', actData.city);
+            this._fillField(modal, 'created_date', actData.created_date);
+            this._fillField(modal, 'order_number', actData.order_number);
+            this._fillField(modal, 'order_date', actData.order_date);
+            this._fillField(modal, 'inspection_start_date', actData.inspection_start_date);
+            this._fillField(modal, 'inspection_end_date', actData.inspection_end_date);
+            this._fillField(modal, 'is_process_based', actData.is_process_based !== false);
+        } else {
+            // Для нового акта ставим галочку по умолчанию
+            this._fillField(modal, 'is_process_based', true);
+        }
+
+        // Убрали блок скрытия поля КМ
 
         document.body.appendChild(modal);
 
-        // Функция добавления члена группы
-        const addTeamMember = (role = 'Участник', fio = '', pos = '', username = '') => {
-            const container = document.getElementById('auditTeamContainer');
-            const member = document.createElement('div');
-            member.className = "team-member-row";
-            member.style.cssText = "display:flex;gap:8px;margin-bottom:8px;";
-            member.innerHTML = `
-                <select name="role" required style="flex:1;">
-                    <option value="Куратор">Куратор</option>
-                    <option value="Руководитель">Руководитель</option>
-                    <option value="Участник">Участник</option>
-                </select>
-                <input name="full_name" placeholder="ФИО *" required value="${fio}" style="flex:2;">
-                <input name="position" placeholder="Должность *" required value="${pos}" style="flex:2;">
-                <input name="username" placeholder="Логин *" required value="${username}" style="flex:1;">
-                <button type="button" class="delete-member-btn btn btn-secondary" 
-                        title="Удалить" style="padding:4px 12px;">×</button>
-            `;
-            member.querySelector('.delete-member-btn').onclick = () => member.remove();
-            container.appendChild(member);
-            member.querySelector('[name="role"]').value = role;
-        };
+        // Теперь работаем с добавленным в DOM элементом
+        const addedModal = document.body.lastElementChild;
 
-        // Функция добавления поручения
-        const addDirective = (point = '', num = '') => {
-            const container = document.getElementById('directivesContainer');
-            const directive = document.createElement('div');
-            directive.className = "directive-row";
-            directive.style.cssText = "display:flex;gap:8px;margin-bottom:8px;";
-            directive.innerHTML = `
-                <input name="point_number" placeholder="№ пункта (5.1.1) *" required 
-                       value="${point}" style="flex:1;">
-                <input name="directive_number" placeholder="№ поручения *" required 
-                       value="${num}" style="flex:2;">
-                <button type="button" class="delete-directive-btn btn btn-secondary" 
-                        title="Удалить" style="padding:4px 12px;">×</button>
-            `;
-            directive.querySelector('.delete-directive-btn').onclick = () => directive.remove();
-            container.appendChild(directive);
-        };
-
-        // Заполняем существующие данные или добавляем текущего пользователя
-        if (actData && actData.audit_team) {
-            actData.audit_team.forEach(member => {
-                addTeamMember(member.role, member.full_name, member.position, member.username);
-            });
-        } else {
-            // Автоматически добавляем текущего пользователя при создании
-            addTeamMember('Участник', '', '', currentUser);
-        }
-
-        if (actData && actData.directives) {
-            actData.directives.forEach(dir => {
-                addDirective(dir.point_number, dir.directive_number);
-            });
-        }
+        // Инициализируем аудиторскую группу и поручения
+        this._initializeAuditTeam(addedModal, actData, currentUser);
+        this._initializeDirectives(addedModal, actData);
 
         // Обработчики кнопок
-        document.getElementById('addTeamMemberBtn').onclick = () => addTeamMember();
-        document.getElementById('addDirectiveBtn').onclick = () => addDirective();
-        modal.querySelector('.dialog-cancel').onclick = () => modal.remove();
+        const addTeamBtn = addedModal.querySelector('#addTeamMemberBtn');
+        const addDirectiveBtn = addedModal.querySelector('#addDirectiveBtn');
+        const cancelBtn = addedModal.querySelector('.dialog-cancel');
+        const form = addedModal.querySelector('#actForm');
 
-        // Обработка отправки формы
-        modal.querySelector('#actForm').onsubmit = async (e) => {
-            e.preventDefault();
-            await this._handleFormSubmit(e.target, isEdit, actData?.id, currentUser, modal);
-        };
+        if (addTeamBtn) {
+            addTeamBtn.onclick = () => this._addTeamMember(addedModal);
+        }
+
+        if (addDirectiveBtn) {
+            addDirectiveBtn.onclick = () => this._addDirective(addedModal);
+        }
+
+        if (cancelBtn) {
+            cancelBtn.onclick = () => addedModal.remove();
+        }
+
+        if (form) {
+            form.onsubmit = async (e) => {
+                e.preventDefault();
+                await this._handleFormSubmit(e.target, isEdit, actData?.id, currentUser, addedModal);
+            };
+        }
+    },
+
+    /**
+     * Инициализирует аудиторскую группу
+     * @private
+     */
+    _initializeAuditTeam(modal, actData, currentUser) {
+        if (actData && actData.audit_team) {
+            actData.audit_team.forEach(member => {
+                this._addTeamMember(modal, member.role, member.full_name, member.position, member.username);
+            });
+        } else {
+            // Автоматически добавляем текущего пользователя
+            this._addTeamMember(modal, 'Участник', '', '', currentUser);
+        }
+    },
+
+    /**
+     * Инициализирует поручения
+     * @private
+     */
+    _initializeDirectives(modal, actData) {
+        if (actData && actData.directives) {
+            actData.directives.forEach(dir => {
+                this._addDirective(modal, dir.point_number, dir.directive_number);
+            });
+        }
+    },
+
+    /**
+     * Добавляет члена аудиторской группы
+     * @private
+     */
+    _addTeamMember(modal, role = 'Участник', fullName = '', position = '', username = '') {
+        const container = modal.querySelector('#auditTeamContainer');
+        if (!container) return;
+
+        const memberRow = this._cloneTemplate('teamMemberRowTemplate');
+        if (!memberRow) return;
+
+        const rowElement = memberRow.querySelector('.team-member-row');
+
+        // Заполняем данные
+        const roleSelect = rowElement.querySelector('[name="role"]');
+        if (roleSelect) roleSelect.value = role;
+
+        this._fillField(rowElement, 'full_name', fullName);
+        this._fillField(rowElement, 'position', position);
+        this._fillField(rowElement, 'username', username);
+
+        // Обработчик удаления
+        const deleteBtn = rowElement.querySelector('.delete-member-btn');
+        if (deleteBtn) {
+            deleteBtn.onclick = () => rowElement.remove();
+        }
+
+        container.appendChild(memberRow);
+    },
+
+    /**
+     * Добавляет поручение
+     * @private
+     */
+    _addDirective(modal, pointNumber = '', directiveNumber = '') {
+        const container = modal.querySelector('#directivesContainer');
+        if (!container) return;
+
+        const directiveRow = this._cloneTemplate('directiveRowTemplate');
+        if (!directiveRow) return;
+
+        const rowElement = directiveRow.querySelector('.directive-row');
+
+        // Заполняем данные
+        this._fillField(rowElement, 'point_number', pointNumber);
+        this._fillField(rowElement, 'directive_number', directiveNumber);
+
+        // Обработчик удаления
+        const deleteBtn = rowElement.querySelector('.delete-directive-btn');
+        if (deleteBtn) {
+            deleteBtn.onclick = () => rowElement.remove();
+        }
+
+        container.appendChild(directiveRow);
     },
 
     /**
@@ -199,7 +216,7 @@ const CreateActDialog = {
 
             // Собираем аудиторскую группу
             const auditTeam = Array.from(
-                document.getElementById('auditTeamContainer').children
+                modal.querySelectorAll('.team-member-row')
             ).map(row => ({
                 role: row.querySelector('[name="role"]').value,
                 full_name: row.querySelector('[name="full_name"]').value,
@@ -208,22 +225,32 @@ const CreateActDialog = {
             }));
 
             if (auditTeam.length === 0) {
-                alert('Добавьте хотя бы одного члена группы');
+                if (typeof Notifications !== 'undefined') {
+                    Notifications.warning('Добавьте хотя бы одного члена группы');
+                } else {
+                    alert('Добавьте хотя бы одного члена группы');
+                }
                 return;
             }
 
             // Собираем поручения
             const directives = Array.from(
-                document.getElementById('directivesContainer').children
+                modal.querySelectorAll('.directive-row')
             ).map(row => ({
                 point_number: row.querySelector('[name="point_number"]').value,
                 directive_number: row.querySelector('[name="directive_number"]').value
             }));
 
+            // Вспомогательная функция для обработки дат
+            const getDateOrNull = (fieldName) => {
+                const value = fd.get(fieldName);
+                return value && value.trim() !== '' ? value : null;
+            };
+
             const body = {
                 inspection_name: fd.get('inspection_name'),
                 city: fd.get('city'),
-                created_date: fd.get('created_date'),
+                created_date: getDateOrNull('created_date'),  // Теперь может быть null
                 order_number: fd.get('order_number'),
                 order_date: fd.get('order_date'),
                 inspection_start_date: fd.get('inspection_start_date'),
@@ -264,7 +291,10 @@ const CreateActDialog = {
             }
 
             if (isEdit) {
-                // При редактировании просто закрываем диалог
+                // При редактировании перезагружаем список актов если на странице управления
+                if (window.ActsManagerPage && typeof window.ActsManagerPage.loadActs === 'function') {
+                    window.ActsManagerPage.loadActs();
+                }
                 return;
             }
 

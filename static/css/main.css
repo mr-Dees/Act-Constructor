@@ -17,64 +17,69 @@
 @import './layout/panels.css';
 
 /* Модуль дерева элементов */
-@import 'modules/tree/tree-base.css';
-@import 'modules/tree/tree-drag-drop.css';
-@import 'modules/tree/tree-states.css';
-@import 'modules/tree/tree-nodes.css';
-@import 'modules/tree/tree-children.css';
+@import './modules/tree/tree-base.css';
+@import './modules/tree/tree-drag-drop.css';
+@import './modules/tree/tree-states.css';
+@import './modules/tree/tree-nodes.css';
+@import './modules/tree/tree-children.css';
 
 /* Модуль таблиц */
-@import 'modules/table/table-base.css';
-@import 'modules/table/table-states.css';
-@import 'modules/table/table-resize.css';
-@import 'modules/table/table-editor.css';
+@import './modules/table/table-base.css';
+@import './modules/table/table-states.css';
+@import './modules/table/table-resize.css';
+@import './modules/table/table-editor.css';
 
 /* Модуль нарушений */
-@import 'modules/violation/violation-base.css';
-@import 'modules/violation/violation-fields.css';
-@import 'modules/violation/violation-list.css';
-@import 'modules/violation/violation-additional-content.css';
+@import './modules/violation/violation-base.css';
+@import './modules/violation/violation-fields.css';
+@import './modules/violation/violation-list.css';
+@import './modules/violation/violation-additional-content.css';
 
 /* Модуль предпросмотра */
-@import 'modules/preview/preview-base.css';
-@import 'modules/preview/preview-typography.css';
-@import 'modules/preview/preview-table.css';
-@import 'modules/preview/preview-violation.css';
+@import './modules/preview/preview-base.css';
+@import './modules/preview/preview-typography.css';
+@import './modules/preview/preview-table.css';
+@import './modules/preview/preview-violation.css';
 
 /* Модуль справки */
-@import 'modules/help/help-button.css';
-@import 'modules/help/help-modal.css';
-@import 'modules/help/help-content.css';
+@import './modules/help/help-button.css';
+@import './modules/help/help-modal.css';
+@import './modules/help/help-content.css';
 
 /* Модуль кнопок */
-@import 'modules/buttons/buttons-base.css';
-@import 'modules/buttons/buttons-action.css';
-@import 'modules/buttons/buttons-save-group.css';
+@import './modules/buttons/buttons-base.css';
+@import './modules/buttons/buttons-action.css';
+@import './modules/buttons/buttons-save-group.css';
 
 /* Модуль элементов списка */
-@import 'modules/items/items-base.css';
-@import 'modules/items/items-levels.css';
-@import 'modules/items/items-header.css';
-@import 'modules/items/items-content.css';
+@import './modules/items/items-base.css';
+@import './modules/items/items-levels.css';
+@import './modules/items/items-header.css';
+@import './modules/items/items-content.css';
 
 /* Модуль текстовых блоков */
-@import 'modules/textblock/textblock-toolbar.css';
-@import 'modules/textblock/textblock-content.css';
-@import 'modules/textblock/textblock-links-footnotes.css';
+@import './modules/textblock/textblock-toolbar.css';
+@import './modules/textblock/textblock-content.css';
+@import './modules/textblock/textblock-links-footnotes.css';
 
 /* Модуль контекстного меню */
-@import 'modules/context-menu/context-menu-base.css';
-@import 'modules/context-menu/context-menu-states.css';
+@import './modules/context-menu/context-menu-base.css';
+@import './modules/context-menu/context-menu-states.css';
 
 /* Модуль уведомлений */
-@import 'modules/notifications/notifications-base.css';
-@import 'modules/notifications/notifications-types.css';
-@import 'modules/notifications/notifications-content.css';
+@import './modules/notifications/notifications-base.css';
+@import './modules/notifications/notifications-types.css';
+@import './modules/notifications/notifications-content.css';
 
 /* Модуль диалоговых окон */
 @import './modules/dialog/dialog.css';
-@import 'modules/dialog/dialog-overlay.css';
-@import 'modules/dialog/dialog-buttons.css';
+@import './modules/dialog/dialog-overlay.css';
+@import './modules/dialog/dialog-buttons.css';
+@import './modules/dialog/dialog-create-act.css';
+
+/* Acts Manager */
+@import './modules/acts-manager/acts-manager-base.css';
+@import './modules/acts-manager/acts-manager-cards.css';
 
 /* Вспомогательные утилиты */
 @import './utilities/helpers.css';
