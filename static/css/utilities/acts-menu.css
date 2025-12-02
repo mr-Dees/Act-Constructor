@@ -83,9 +83,9 @@
     outline-offset: var(--focus-outline-offset);
 }
 
-/* Тело списка */
+/* Тело меню с прокруткой */
 .acts-menu-body {
-    padding: var(--spacing-xl);
+    padding: 0;
     overflow-y: auto;
     overflow-x: hidden;
     flex: 1;
@@ -112,12 +112,17 @@
     background: var(--scrollbar-thumb-hover);
 }
 
-/* Секция действий с актом */
+/* Секция действий с актом (закреплена как шапка внутри body) */
 .acts-menu-actions {
+    position: sticky;
+    top: 0;
+    z-index: var(--z-sticky);
+    background: var(--bg-primary);
+    padding: var(--spacing-xl);
+    border-bottom: var(--border-width-thin) solid var(--border-light);
     display: flex;
     flex-direction: column;
     gap: var(--spacing);
-    margin-bottom: var(--spacing-lg);
 }
 
 /* Сетка для кнопок редактирования/дублирования/удаления */
@@ -141,22 +146,53 @@
 .acts-menu-divider {
     height: var(--border-width-thin);
     background: var(--border-light);
-    margin: var(--spacing-lg) 0;
+    margin: 0 var(--spacing-xl);
     border: none;
 }
 
 /* Список актов */
 .acts-list {
     list-style: none;
-    padding: 0;
+    padding: var(--spacing-xl);
     margin: 0;
     display: flex;
     flex-direction: column;
     gap: var(--spacing);
 }
 
+/* Секция текущего акта */
+.acts-list-current-section {
+    margin-bottom: var(--spacing-lg);
+}
+
+.acts-list-current-label {
+    font-size: var(--font-size-sm);
+    font-weight: var(--font-weight-semibold);
+    color: var(--text-secondary);
+    text-transform: uppercase;
+    letter-spacing: var(--letter-spacing-wide);
+    margin-bottom: var(--spacing-sm);
+    padding: 0 var(--spacing-sm);
+}
+
+/* Секция других актов */
+.acts-list-other-section {
+    padding-top: var(--spacing-lg);
+    border-top: var(--border-width-thin) solid var(--border-light);
+}
+
+.acts-list-other-label {
+    font-size: var(--font-size-sm);
+    font-weight: var(--font-weight-semibold);
+    color: var(--text-secondary);
+    text-transform: uppercase;
+    letter-spacing: var(--letter-spacing-wide);
+    margin-bottom: var(--spacing-sm);
+    padding: 0 var(--spacing-sm);
+}
+
 /* Элемент списка акта */
-.acts-list-item {
+.acts-menu-list-item {
     border-radius: var(--radius-md);
     border: var(--border-width-thin) solid var(--border-light);
     background: var(--bg-secondary);
@@ -166,26 +202,44 @@
     cursor: pointer;
 }
 
-.acts-list-item:hover {
+.acts-menu-list-item:hover {
     background: var(--bg-hover);
     border-color: var(--primary-light);
     box-shadow: var(--shadow-sm);
     transform: translateY(calc(-1 * var(--border-width-thin)));
 }
 
-.acts-list-item:active {
+.acts-menu-list-item:active {
     transform: translateY(0);
 }
 
-/* Активный (текущий) акт */
-.acts-list-item.current {
+/* Текущий акт (открыт в редакторе) */
+.acts-menu-list-item.current {
     background: var(--primary-subtle);
     border-color: var(--primary);
+    border-width: var(--border-width-md);
     box-shadow: var(--shadow-sm);
 }
 
-/* Заголовок акта */
-.acts-list-item-header {
+.acts-menu-list-item.current:hover {
+    background: var(--primary-subtle);
+    border-color: var(--primary-hover);
+}
+
+/* Выбранный акт для действий (одинарный клик) */
+.acts-menu-list-item.selected {
+    background: rgba(91, 111, 168, 0.08);
+    border-color: var(--primary-light);
+    box-shadow: var(--shadow-sm);
+}
+
+.acts-menu-list-item.selected:hover {
+    background: rgba(91, 111, 168, 0.12);
+    border-color: var(--primary);
+}
+
+/* Заголовок элемента акта */
+.acts-menu-item-header {
     display: flex;
     justify-content: space-between;
     align-items: flex-start;
@@ -193,7 +247,7 @@
     margin-bottom: var(--spacing-sm);
 }
 
-.acts-list-item-title {
+.acts-menu-item-title {
     font-size: var(--font-size-base);
     font-weight: var(--font-weight-semibold);
     color: var(--text-primary);
@@ -201,7 +255,7 @@
     flex: 1;
 }
 
-.acts-list-item-badge {
+.acts-menu-item-badge {
     background: var(--gray-500);
     color: var(--text-on-primary);
     padding: var(--spacing-xs) var(--spacing-sm);
@@ -213,7 +267,7 @@
 }
 
 /* Метаданные акта */
-.acts-list-item-meta {
+.acts-menu-item-meta {
     display: flex;
     flex-direction: column;
     gap: var(--spacing-xs);
@@ -221,18 +275,18 @@
     color: var(--text-secondary);
 }
 
-.acts-list-item-meta-row {
+.acts-menu-item-meta-row {
     display: flex;
     gap: var(--spacing-xs);
 }
 
-.acts-list-item-meta-label {
+.acts-menu-item-meta-label {
     font-weight: var(--font-weight-medium);
     color: var(--text-primary);
 }
 
 /* Дата последнего редактирования */
-.acts-list-item-date {
+.acts-menu-item-date {
     font-size: var(--font-size-xs);
     color: var(--text-tertiary);
     margin-top: var(--spacing-xs);
@@ -272,4 +326,36 @@
     padding: var(--spacing-xl);
     color: var(--error);
     font-size: var(--font-size-sm);
+}
+
+/* Индикатор загрузки акта (полноэкранный оверлей) */
+.act-loading-indicator {
+    position: fixed;
+    top: 0;
+    left: 0;
+    width: 100%;
+    height: 100%;
+    background: var(--overlay-bg-light);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    z-index: var(--z-modal);
+    flex-direction: column;
+    gap: var(--spacing-xl);
+}
+
+.act-loading-spinner {
+    border: var(--border-width-thick) solid var(--gray-200);
+    border-top-color: var(--primary);
+    border-radius: var(--radius-full);
+    width: var(--spacing-8xl);
+    height: var(--spacing-8xl);
+    animation: spin var(--duration-spin) linear infinite;
+}
+
+.act-loading-message {
+    font-size: var(--font-size-lg);
+    color: var(--text-primary);
+    font-weight: var(--font-weight-medium);
+    margin: 0;
 }

@@ -1,3 +1,5 @@
+// static/js/help.js
+
 /**
  * Менеджер системы помощи и инструкций
  *
@@ -14,33 +16,34 @@ class HelpManager {
             const elements = this._getElements();
 
             if (!this._validateElements(elements)) {
-                Notifications.error('Не удалось инициализировать систему помощи (DOM элементы не найдены)');
+                console.warn('HelpManager: не удалось найти все необходимые элементы DOM');
                 return;
             }
 
             this._setupEventHandlers(elements);
             this.updateTooltip();
         } catch (error) {
-            Notifications.error(`Ошибка инициализации HelpManager: ${error.message}`);
+            console.error(`Ошибка инициализации HelpManager: ${error.message}`);
         }
     }
 
     /**
      * Получает все нужные DOM-элементы
      * @private
-     * @returns {{helpBtn: HTMLElement|null, modal: HTMLElement|null}} Элементы интерфейса помощи
+     * @returns {{helpBtn: HTMLElement|null, modal: HTMLElement|null, closeBtn: HTMLElement|null}} Элементы интерфейса помощи
      */
     static _getElements() {
         return {
             helpBtn: document.getElementById('helpBtn'),
-            modal: document.getElementById('helpModal')
+            modal: document.getElementById('helpModal'),
+            closeBtn: document.getElementById('closeHelpModalBtn')
         };
     }
 
     /**
      * Проверяет наличие обязательных элементов
      * @private
-     * @param {{helpBtn: HTMLElement|null, modal: HTMLElement|null}} elements - Объекты DOM элементов
+     * @param {{helpBtn: HTMLElement|null, modal: HTMLElement|null, closeBtn: HTMLElement|null}} elements - Объекты DOM элементов
      * @returns {boolean} true если все элементы найдены, иначе false
      */
     static _validateElements(elements) {
@@ -50,17 +53,31 @@ class HelpManager {
     /**
      * Назначает события на элементы управления
      * @private
-     * @param {{helpBtn: HTMLElement, modal: HTMLElement}} elements - DOM-элементы
+     * @param {{helpBtn: HTMLElement, modal: HTMLElement, closeBtn: HTMLElement|null}} elements - DOM-элементы
      */
     static _setupEventHandlers(elements) {
+        // Открытие по кнопке помощи
         elements.helpBtn.addEventListener('click', () => this.show());
 
+        // Закрытие по кнопке крестика
+        if (elements.closeBtn) {
+            elements.closeBtn.addEventListener('click', () => this.hide());
+        }
+
+        // Закрытие по клику на оверлей
         elements.modal.addEventListener('click', (e) => {
             if (e.target === elements.modal) {
                 this.hide();
             }
         });
 
+        // Предотвращаем закрытие при клике внутри контента
+        const modalContent = elements.modal.querySelector('.help-modal-content');
+        if (modalContent) {
+            modalContent.addEventListener('click', (e) => e.stopPropagation());
+        }
+
+        // Закрытие по Escape
         document.addEventListener('keydown', (e) => {
             if (e.key === 'Escape' && !elements.modal.classList.contains('hidden')) {
                 this.hide();
@@ -82,7 +99,9 @@ class HelpManager {
             const contentElement = document.getElementById(contentId);
 
             if (!contentElement) {
-                Notifications.info(`Помощь отсутствует для шага ${currentStep}`);
+                if (typeof Notifications !== 'undefined') {
+                    Notifications.info(`Помощь отсутствует для шага ${currentStep}`);
+                }
                 return;
             }
 
@@ -90,7 +109,10 @@ class HelpManager {
             this._showModal(elements.modal);
             this._lockBodyScroll();
         } catch (error) {
-            Notifications.error(`Ошибка показа помощи: ${error.message}`);
+            console.error(`Ошибка показа помощи: ${error.message}`);
+            if (typeof Notifications !== 'undefined') {
+                Notifications.error(`Ошибка показа помощи: ${error.message}`);
+            }
         }
     }
 
@@ -131,7 +153,10 @@ class HelpManager {
      * @param {HTMLElement} modal - Элемент модального окна
      */
     static _showModal(modal) {
-        document.querySelector('.help-modal-body').scrollTop = 0;
+        const modalBody = modal.querySelector('.help-modal-body');
+        if (modalBody) {
+            modalBody.scrollTop = 0;
+        }
         modal.classList.remove('hidden');
     }
 
@@ -175,3 +200,11 @@ class HelpManager {
         helpBtn.title = `Инструкция: Шаг ${currentStep} - ${stepName}`;
     }
 }
+
+// Глобальный доступ
+window.HelpManager = HelpManager;
+
+// Инициализация при загрузке DOM
+document.addEventListener('DOMContentLoaded', () => {
+    HelpManager.init();
+});

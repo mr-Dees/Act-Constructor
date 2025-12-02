@@ -447,6 +447,37 @@
     --content-item-min-height: 5rem;
     --content-delete-btn-size: 2rem;
 
+    /* Settings menu специфичные переменные */
+    --settings-menu-min-width: 27rem;
+    --settings-menu-max-width: 32rem;
+    --settings-menu-max-height: 60vh;
+    --settings-menu-close-size: 2rem;
+
+    /* Theme switch специфичные переменные */
+    --theme-switch-width: 2.75rem;
+    --theme-switch-height: 1.5rem;
+    --theme-slider-dot-size: 1.25rem;
+    --theme-slider-dot-offset: 2px;
+    --theme-slider-dot-translate: 1.25rem;
+
+    /* Auto save period input специфичные переменные */
+    --auto-save-input-width: 3.5rem;
+
+    /* Help modal специфичные переменные */
+    --help-modal-max-width: 50rem;
+    --help-modal-max-height: 80vh;
+    --help-modal-close-size: 2.5rem;
+
+    /* Диалог создания акта специфичные переменные */
+    --create-act-dialog-width: 65rem;
+    --create-act-dialog-max-height: 90vh;
+    --create-act-dialog-close-size: 2.5rem;
+
+    /* Steps специфичные переменные */
+    --step-width: 16rem;
+    --step-padding-vertical: var(--spacing-sm);
+    --step-padding-horizontal: var(--spacing-2xl);
+
     /* Тени для создания глубины элементов */
     --shadow-xs: 0 1px 3px 0 rgba(0, 0, 0, 0.08);
     --shadow-sm: 0 2px 6px 0 rgba(0, 0, 0, 0.12), 0 1px 3px -1px rgba(0, 0, 0, 0.1);
@@ -508,11 +539,6 @@
     --dialog-icon-size: 3rem;
     --dialog-close-size: 2rem;
     --format-menu-max-height: 20rem;
-
-    /* Диалог создания акта специфичные переменные */
-    --create-act-dialog-width: 65rem;
-    --create-act-dialog-max-height: 90vh;
-    --create-act-dialog-close-size: 2.5rem;
 
     /* Размеры кнопок */
     --button-size-sm: 2.5rem;

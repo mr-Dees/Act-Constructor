@@ -8,16 +8,51 @@
 
 class ActsMenuManager {
     /**
-     * Текущий ID акта
+     * Текущий ID акта (загруженный)
      * @type {number|null}
      */
     static currentActId = null;
+
+    /**
+     * Выбранный ID акта (выделенный для действий)
+     * @type {number|null}
+     */
+    static selectedActId = null;
 
     /**
      * Флаг выполнения начальной загрузки
      * @type {boolean}
      */
     static _initialLoadInProgress = false;
+
+    /**
+     * Таймер для отслеживания двойного клика
+     * @private
+     * @type {number|null}
+     */
+    static _clickTimer = null;
+
+    /**
+     * Задержка для определения двойного клика (мс)
+     * @private
+     * @type {number}
+     */
+    static _clickDelay = 300;
+
+    /**
+     * Настраивает обработчик закрытия по Escape
+     * @private
+     */
+    static _setupEscapeHandler() {
+        document.addEventListener('keydown', (e) => {
+            if (e.key === 'Escape') {
+                const menu = document.getElementById('actsMenuDropdown');
+                if (menu && !menu.classList.contains('hidden')) {
+                    this.hide();
+                }
+            }
+        });
+    }
 
     /**
      * Показывает меню выбора актов
@@ -122,10 +157,54 @@ class ActsMenuManager {
             const hours = String(d.getHours()).padStart(2, '0');
             const minutes = String(d.getMinutes()).padStart(2, '0');
 
-            return `${day}.${month}.${year} ${hours}:${minutes}`;
+            return `Изменено: ${day}.${month}.${year} ${hours}:${minutes}`;
         } catch (e) {
             return 'Не редактировался';
         }
+    }
+
+    /**
+     * Форматирует информацию о частях акта
+     * @private
+     * @param {number} partNumber - Номер части
+     * @param {number} totalParts - Общее количество частей
+     * @returns {string} Отформатированная строка с частью
+     */
+    static _formatPartInfo(partNumber, totalParts) {
+        if (!totalParts || totalParts === 1) {
+            return ''; // Не показываем части если акт один
+        }
+        return `_${partNumber}`;
+    }
+
+    /**
+     * Клонирует template элемент
+     * @private
+     * @param {string} templateId - ID template
+     * @returns {DocumentFragment|null} Клонированный template
+     */
+    static _cloneTemplate(templateId) {
+        const template = document.getElementById(templateId);
+        if (!template) {
+            console.error(`Template ${templateId} не найден`);
+            return null;
+        }
+        return template.content.cloneNode(true);
+    }
+
+    /**
+     * Заполняет поля в элементе данными
+     * @private
+     * @param {Element} element - Элемент для заполнения
+     * @param {Object} data - Данные для заполнения
+     */
+    static _fillFields(element, data) {
+        element.querySelectorAll('[data-field]').forEach(field => {
+            const fieldName = field.getAttribute('data-field');
+            if (data.hasOwnProperty(fieldName)) {
+                field.textContent = data[fieldName];
+            }
+        });
     }
 
     /**
@@ -135,70 +214,58 @@ class ActsMenuManager {
         const listContainer = document.getElementById('actsList');
         if (!listContainer) return;
 
-        listContainer.innerHTML = '<li class="acts-list-loading">Загрузка...</li>';
+        this._showLoading(listContainer);
 
         try {
             const acts = await this.fetchActsList();
 
             if (!acts.length) {
-                listContainer.innerHTML = `
-                    <div class="acts-list-empty">
-                        <div class="acts-list-empty-icon">📋</div>
-                        <div class="acts-list-empty-text">Нет доступных актов</div>
-                    </div>
-                `;
+                this._showEmptyState(listContainer);
                 return;
             }
 
+            // Разделяем акты на текущий и остальные
+            const currentAct = acts.find(act => act.id === this.currentActId);
+            const otherActs = acts.filter(act => act.id !== this.currentActId);
+
             listContainer.innerHTML = '';
 
-            acts.forEach(act => {
-                const li = document.createElement('li');
-                li.className = "acts-list-item";
-                if (this.currentActId === act.id) {
-                    li.classList.add('current');
-                }
+            // Рендерим текущий акт отдельно
+            if (currentAct) {
+                const currentSection = document.createElement('div');
+                currentSection.className = 'acts-list-current-section';
 
-                const lastEdited = this._formatDateTime(act.last_edited_at);
-                const startDate = this._formatDate(act.inspection_start_date);
-                const endDate = this._formatDate(act.inspection_end_date);
+                const currentLabel = document.createElement('div');
+                currentLabel.className = 'acts-list-current-label';
+                currentLabel.textContent = 'Текущий акт';
 
-                li.innerHTML = `
-                    <div class="acts-list-item-header">
-                        <div class="acts-list-item-title">${this._escapeHtml(act.inspection_name)}</div>
-                        <span class="acts-list-item-badge">${this._escapeHtml(act.user_role)}</span>
-                    </div>
-                    <div class="acts-list-item-meta">
-                        <div class="acts-list-item-meta-row">
-                            <span class="acts-list-item-meta-label">КМ:</span>
-                            <span>${this._escapeHtml(act.km_number)}</span>
-                        </div>
-                        <div class="acts-list-item-meta-row">
-                            <span class="acts-list-item-meta-label">Приказ:</span>
-                            <span>${this._escapeHtml(act.order_number)}</span>
-                        </div>
-                        <div class="acts-list-item-meta-row">
-                            <span class="acts-list-item-meta-label">Период:</span>
-                            <span>${startDate} — ${endDate}</span>
-                        </div>
-                    </div>
-                    <div class="acts-list-item-date">
-                        Изменено: ${lastEdited}
-                    </div>
-                `;
+                currentSection.appendChild(currentLabel);
+                currentSection.appendChild(this._createActListItem(currentAct, true));
 
-                li.addEventListener('click', () => this.selectAct(act.id));
+                listContainer.appendChild(currentSection);
+            }
 
-                listContainer.appendChild(li);
-            });
+            // Рендерим остальные акты
+            if (otherActs.length > 0) {
+                const otherSection = document.createElement('div');
+                otherSection.className = 'acts-list-other-section';
+
+                const otherLabel = document.createElement('div');
+                otherLabel.className = 'acts-list-other-label';
+                otherLabel.textContent = 'Другие акты';
+
+                otherSection.appendChild(otherLabel);
+
+                otherActs.forEach(act => {
+                    otherSection.appendChild(this._createActListItem(act, false));
+                });
+
+                listContainer.appendChild(otherSection);
+            }
 
         } catch (err) {
             console.error('Ошибка загрузки актов:', err);
-            listContainer.innerHTML = `
-                <div class="acts-list-error">
-                    ❌ Ошибка загрузки списка актов
-                </div>
-            `;
+            this._showErrorState(listContainer);
             if (typeof Notifications !== 'undefined') {
                 Notifications.error('Ошибка загрузки списка актов');
             }
@@ -206,10 +273,149 @@ class ActsMenuManager {
     }
 
     /**
-     * Выбирает акт и загружает его содержимое
+     * Создает элемент списка акта из template
+     * @private
+     * @param {Object} act - Данные акта
+     * @param {boolean} isCurrent - Является ли акт текущим
+     * @returns {Element} Элемент списка
+     */
+    static _createActListItem(act, isCurrent) {
+        const item = this._cloneTemplate('actsMenuItemTemplate');
+        if (!item) {
+            console.error('Template actsMenuItemTemplate не найден');
+            return document.createElement('li');
+        }
+
+        const lastEdited = this._formatDateTime(act.last_edited_at);
+        const startDate = this._formatDate(act.inspection_start_date);
+        const endDate = this._formatDate(act.inspection_end_date);
+        const partInfo = this._formatPartInfo(act.part_number, act.total_parts);
+
+        // Подготавливаем данные для заполнения
+        const data = {
+            inspection_name: act.inspection_name,
+            user_role: act.user_role,
+            km_display: `${act.km_number}${partInfo}`,
+            order_number: act.order_number,
+            inspection_start_date: startDate,
+            inspection_end_date: endDate,
+            last_edited_at: lastEdited
+        };
+
+        // Заполняем поля
+        this._fillFields(item, data);
+
+        // Получаем элемент li
+        const listItem = item.querySelector('.acts-menu-list-item');
+        if (listItem) {
+            listItem.dataset.actId = act.id;
+
+            // Добавляем классы состояния
+            if (isCurrent) {
+                listItem.classList.add('current');
+            }
+            if (this.selectedActId === act.id) {
+                listItem.classList.add('selected');
+            }
+
+            // Обработчик клика
+            listItem.addEventListener('click', (e) => this._handleActClick(e, act.id));
+        }
+
+        return item;
+    }
+
+    /**
+     * Показывает индикатор загрузки
+     * @private
+     * @param {Element} container - Контейнер для индикатора
+     */
+    static _showLoading(container) {
+        const loading = this._cloneTemplate('actsLoadingTemplate');
+        if (loading) {
+            container.innerHTML = '';
+            container.appendChild(loading);
+        }
+    }
+
+    /**
+     * Показывает пустое состояние
+     * @private
+     * @param {Element} container - Контейнер для сообщения
+     */
+    static _showEmptyState(container) {
+        const emptyState = this._cloneTemplate('actsEmptyStateTemplate');
+        if (emptyState) {
+            container.innerHTML = '';
+            container.appendChild(emptyState);
+        }
+    }
+
+    /**
+     * Показывает состояние ошибки
+     * @private
+     * @param {Element} container - Контейнер для сообщения
+     */
+    static _showErrorState(container) {
+        const errorState = this._cloneTemplate('actsErrorStateTemplate');
+        if (errorState) {
+            container.innerHTML = '';
+            container.appendChild(errorState);
+        }
+    }
+
+    /**
+     * Обрабатывает клик по карточке акта
+     * @private
+     * @param {Event} e - Событие клика
      * @param {number} actId - ID акта
      */
-    static async selectAct(actId) {
+    static _handleActClick(e, actId) {
+        e.preventDefault();
+        e.stopPropagation();
+
+        // Если это двойной клик - загружаем акт
+        if (this._clickTimer !== null) {
+            clearTimeout(this._clickTimer);
+            this._clickTimer = null;
+            this._loadAct(actId);
+            return;
+        }
+
+        // Одинарный клик - выделяем акт
+        this._clickTimer = setTimeout(() => {
+            this._clickTimer = null;
+            this._selectActForActions(actId);
+        }, this._clickDelay);
+    }
+
+    /**
+     * Выделяет акт для действий (редактирование, дублирование, удаление)
+     * @private
+     * @param {number} actId - ID акта
+     */
+    static _selectActForActions(actId) {
+        this.selectedActId = actId;
+
+        // Убираем класс selected со всех элементов
+        const allItems = document.querySelectorAll('.acts-menu-list-item');
+        allItems.forEach(item => item.classList.remove('selected'));
+
+        // Добавляем класс selected к выбранному элементу
+        const selectedItem = document.querySelector(`.acts-menu-list-item[data-act-id="${actId}"]`);
+        if (selectedItem) {
+            selectedItem.classList.add('selected');
+        }
+
+        console.log('Выбран акт для действий:', actId);
+    }
+
+    /**
+     * Загружает акт (переход к редактированию)
+     * @private
+     * @param {number} actId - ID акта
+     */
+    static async _loadAct(actId) {
         if (actId === this.currentActId) {
             this.hide();
             return;
@@ -217,7 +423,6 @@ class ActsMenuManager {
 
         // Проверяем наличие несохраненных в БД изменений
         if (StorageManager.hasUnsyncedChanges()) {
-            // Закрываем меню перед показом диалога
             this.hide();
 
             const confirmed = await DialogManager.show({
@@ -230,7 +435,6 @@ class ActsMenuManager {
 
             if (confirmed) {
                 try {
-                    // Синхронизируем данные и сохраняем в БД
                     if (typeof ItemsRenderer !== 'undefined') {
                         ItemsRenderer.syncDataToState();
                     }
@@ -241,7 +445,6 @@ class ActsMenuManager {
                     console.error('Ошибка сохранения:', err);
                     Notifications.error('Не удалось сохранить изменения');
 
-                    // Спрашиваем, продолжить ли без сохранения
                     const continueAnyway = await DialogManager.show({
                         title: 'Ошибка сохранения',
                         message: 'Не удалось сохранить изменения. Продолжить без сохранения?',
@@ -251,28 +454,24 @@ class ActsMenuManager {
                     });
 
                     if (!continueAnyway) {
-                        // Возвращаем меню если пользователь отменил
                         this.show();
                         return;
                     }
                 }
             }
         } else {
-            // Если нет несохраненных изменений, просто закрываем меню
             this.hide();
         }
 
         try {
-            // Очищаем localStorage перед загрузкой нового акта
             StorageManager.clearStorage();
 
             this.currentActId = actId;
+            this.selectedActId = actId;
             window.currentActId = actId;
 
-            // Загружаем содержимое акта
             await APIClient.loadActContent(actId);
 
-            // Обновляем URL без перезагрузки
             const newUrl = `/constructor?act_id=${actId}`;
             window.history.pushState({actId}, '', newUrl);
 
@@ -289,17 +488,19 @@ class ActsMenuManager {
     }
 
     /**
-     * Показывает диалог редактирования метаданных текущего акта
+     * Показывает диалог редактирования метаданных выбранного акта
      */
     static async showEditMetadataDialog() {
-        if (!this.currentActId) {
-            Notifications.warning('Сначала выберите акт');
+        const actId = this.selectedActId || this.currentActId;
+
+        if (!actId) {
+            Notifications.warning('Сначала выберите акт из списка');
             return;
         }
 
         try {
             const username = window.env?.JUPYTERHUB_USER || AppConfig?.auth?.jupyterhubUser || "";
-            const response = await fetch(`/api/v1/acts/${this.currentActId}`, {
+            const response = await fetch(`/api/v1/acts/${actId}`, {
                 headers: {'X-JupyterHub-User': username}
             });
 
@@ -307,7 +508,6 @@ class ActsMenuManager {
 
             const actData = await response.json();
 
-            // Закрываем меню перед показом диалога
             this.hide();
 
             CreateActDialog.showEdit(actData);
@@ -319,20 +519,21 @@ class ActsMenuManager {
     }
 
     /**
-     * Создает дубликат текущего акта
+     * Создает дубликат выбранного акта
      */
     static async duplicateCurrentAct() {
-        if (!this.currentActId) {
-            Notifications.warning('Сначала выберите акт');
+        const actId = this.selectedActId || this.currentActId;
+
+        if (!actId) {
+            Notifications.warning('Сначала выберите акт из списка');
             return;
         }
 
-        // Закрываем меню перед показом диалога подтверждения
         this.hide();
 
         const confirmed = await DialogManager.show({
             title: 'Дублирование акта',
-            message: 'Будет создана копия текущего акта. Продолжить?',
+            message: 'Будет создана копия выбранного акта. Продолжить?',
             icon: '📋',
             confirmText: 'Создать копию',
             cancelText: 'Отмена'
@@ -346,7 +547,7 @@ class ActsMenuManager {
         try {
             const username = window.env?.JUPYTERHUB_USER || AppConfig?.auth?.jupyterhubUser || "";
             const response = await fetch(
-                `/api/v1/acts/${this.currentActId}/duplicate`,
+                `/api/v1/acts/${actId}/duplicate`,
                 {
                     method: 'POST',
                     headers: {'X-JupyterHub-User': username}
@@ -361,7 +562,6 @@ class ActsMenuManager {
             const newAct = await response.json();
             Notifications.success(`Копия создана: ${newAct.inspection_name}`);
 
-            // Переходим к новому акту
             window.location.href = `/constructor?act_id=${newAct.id}`;
 
         } catch (err) {
@@ -371,20 +571,21 @@ class ActsMenuManager {
     }
 
     /**
-     * Удаляет текущий акт
+     * Удаляет выбранный акт
      */
     static async deleteCurrentAct() {
-        if (!this.currentActId) {
-            Notifications.warning('Сначала выберите акт');
+        const actId = this.selectedActId || this.currentActId;
+
+        if (!actId) {
+            Notifications.warning('Сначала выберите акт из списка');
             return;
         }
 
-        // Закрываем меню перед показом диалога
         this.hide();
 
         const confirmed = await DialogManager.show({
             title: 'Удаление акта',
-            message: 'Вы уверены, что хотите удалить этот акт? Это действие необратимо и удалит все данные акта.',
+            message: 'Вы уверены, что хотите удалить выбранный акт? Это действие необратимо и удалит все данные акта.',
             icon: '🗑️',
             confirmText: 'Удалить',
             cancelText: 'Отмена'
@@ -396,13 +597,18 @@ class ActsMenuManager {
         }
 
         try {
-            await APIClient.deleteAct(this.currentActId);
+            await APIClient.deleteAct(actId);
 
-            // Очищаем localStorage
-            StorageManager.clearStorage();
-
-            // Переходим на главную страницу
-            window.location.href = '/';
+            // Если удаляем текущий акт - очищаем localStorage и переходим на главную
+            if (actId === this.currentActId) {
+                StorageManager.clearStorage();
+                window.location.href = '/';
+            } else {
+                // Если удаляем другой акт - перезагружаем список
+                Notifications.success('Акт успешно удален');
+                await this.renderActsList();
+                this.show();
+            }
 
         } catch (err) {
             console.error('Ошибка удаления акта:', err);
@@ -423,6 +629,7 @@ class ActsMenuManager {
 
         this._initialLoadInProgress = true;
         this.currentActId = actId;
+        this.selectedActId = actId;
         window.currentActId = actId;
 
         try {
@@ -511,34 +718,23 @@ class ActsMenuManager {
         // Удаляем предыдущий индикатор если есть
         this._hideLoadingIndicator();
 
-        const indicator = document.createElement('div');
-        indicator.id = 'actLoadingIndicator';
-        indicator.style.cssText = `
-            position: fixed;
-            top: 0;
-            left: 0;
-            width: 100%;
-            height: 100%;
-            background: rgba(255, 255, 255, 0.95);
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            z-index: 9999;
-            flex-direction: column;
-            gap: 16px;
-        `;
+        const indicator = this._cloneTemplate('actLoadingIndicatorTemplate');
+        if (!indicator) {
+            console.error('Template actLoadingIndicatorTemplate не найден');
+            return;
+        }
 
-        indicator.innerHTML = `
-            <div class="spinner" style="
-                border: 4px solid #f3f3f3;
-                border-top: 4px solid #007bff;
-                border-radius: 50%;
-                width: 50px;
-                height: 50px;
-                animation: spin 1s linear infinite;
-            "></div>
-            <p style="font-size: 16px; color: #333; font-weight: 500;">${this._escapeHtml(message)}</p>
-        `;
+        // Заполняем сообщение
+        const messageField = indicator.querySelector('[data-field="message"]');
+        if (messageField) {
+            messageField.textContent = message;
+        }
+
+        // Получаем корневой элемент и добавляем ID для последующего удаления
+        const indicatorElement = indicator.querySelector('.act-loading-indicator');
+        if (indicatorElement) {
+            indicatorElement.id = 'actLoadingIndicator';
+        }
 
         document.body.appendChild(indicator);
     }
@@ -574,6 +770,9 @@ class ActsMenuManager {
         const editBtn = document.getElementById('editMetadataBtn');
         const duplicateBtn = document.getElementById('duplicateActBtn');
         const deleteBtn = document.getElementById('deleteActBtn');
+
+        // Закрытие по Escape
+        this._setupEscapeHandler();
 
         if (menuBtn) {
             menuBtn.addEventListener('click', (e) => {

@@ -17,6 +17,27 @@ class ActDirective(BaseModel):
     point_number: str = Field(min_length=1, max_length=50)
     directive_number: str = Field(min_length=1, max_length=100)
 
+    @field_validator('point_number')
+    @classmethod
+    def validate_point_is_under_section_5(cls, v):
+        """Проверяет что поручение относится к разделу 5"""
+        if not v.startswith('5.'):
+            raise ValueError(f'Поручения могут быть только в разделе 5 (получено: {v})')
+
+        # Проверяем формат: должно быть 5.X.Y где X и Y - числа
+        parts = v.split('.')
+        if len(parts) < 3:
+            raise ValueError(f'Неверный формат пункта поручения: {v}. Ожидается формат 5.X.Y')
+
+        try:
+            # Проверяем что все части после 5 - числа
+            for part in parts[1:]:
+                int(part)
+        except ValueError:
+            raise ValueError(f'Неверный формат пункта поручения: {v}. Все части должны быть числами')
+
+        return v
+
 
 class ActCreate(BaseModel):
     """Модель для создания акта"""
@@ -42,6 +63,24 @@ class ActCreate(BaseModel):
             raise ValueError(f'Номер части ({v}) не может быть больше общего количества частей ({total})')
         return v
 
+    @field_validator('audit_team')
+    @classmethod
+    def validate_audit_team_composition(cls, v):
+        """Проверяет наличие минимум 1 куратора и 1 руководителя"""
+        if not v:
+            raise ValueError('Аудиторская группа не может быть пустой')
+
+        curators = [m for m in v if m.role == 'Куратор']
+        leaders = [m for m in v if m.role == 'Руководитель']
+
+        if len(curators) < 1:
+            raise ValueError('В аудиторской группе должен быть хотя бы один куратор')
+
+        if len(leaders) < 1:
+            raise ValueError('В аудиторской группе должен быть хотя бы один руководитель')
+
+        return v
+
 
 class ActUpdate(BaseModel):
     """Модель для обновления акта (все поля опциональны)"""
@@ -58,6 +97,27 @@ class ActUpdate(BaseModel):
     inspection_end_date: Optional[date] = None
     is_process_based: Optional[bool] = None
     directives: Optional[List[ActDirective]] = None
+
+    @field_validator('audit_team')
+    @classmethod
+    def validate_audit_team_composition(cls, v):
+        """Проверяет наличие минимум 1 куратора и 1 руководителя"""
+        if v is None:
+            return v
+
+        if not v:
+            raise ValueError('Аудиторская группа не может быть пустой')
+
+        curators = [m for m in v if m.role == 'Куратор']
+        leaders = [m for m in v if m.role == 'Руководитель']
+
+        if len(curators) < 1:
+            raise ValueError('В аудиторской группе должен быть хотя бы один куратор')
+
+        if len(leaders) < 1:
+            raise ValueError('В аудиторской группе должен быть хотя бы один руководитель')
+
+        return v
 
 
 class ActListItem(BaseModel):

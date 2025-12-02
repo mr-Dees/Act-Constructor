@@ -5,6 +5,13 @@
 
 const CreateActDialog = {
     /**
+     * Текущий активный диалог
+     * @private
+     * @type {Element|null}
+     */
+    _currentDialog: null,
+
+    /**
      * Показывает диалог создания нового акта
      */
     show() {
@@ -56,6 +63,31 @@ const CreateActDialog = {
     },
 
     /**
+     * Закрывает текущий диалог
+     * @private
+     */
+    _closeDialog() {
+        if (this._currentDialog) {
+            this._currentDialog.remove();
+            this._currentDialog = null;
+        }
+    },
+
+    /**
+     * Настраивает обработчик закрытия по Escape
+     * @private
+     */
+    _setupEscapeHandler() {
+        const escapeHandler = (e) => {
+            if (e.key === 'Escape') {
+                this._closeDialog();
+                document.removeEventListener('keydown', escapeHandler);
+            }
+        };
+        document.addEventListener('keydown', escapeHandler);
+    },
+
+    /**
      * Отображает диалог
      * @private
      */
@@ -70,7 +102,7 @@ const CreateActDialog = {
         this._fillField(modal, 'title', isEdit ? 'Редактирование акта' : 'Создание нового акта');
         this._fillField(modal, 'submitText', isEdit ? 'Сохранить изменения' : 'Создать акт');
 
-        // Заполняем поля формы
+        // Заполняем поля формы если редактирование
         if (isEdit && actData) {
             this._fillField(modal, 'km_number', actData.km_number);
             this._fillField(modal, 'part_number', actData.part_number || 1);
@@ -84,7 +116,7 @@ const CreateActDialog = {
             this._fillField(modal, 'inspection_end_date', actData.inspection_end_date);
             this._fillField(modal, 'is_process_based', actData.is_process_based !== false);
         } else {
-            // Для нового акта значения по умолчанию
+            // Для нового акта ставим значения по умолчанию
             this._fillField(modal, 'part_number', 1);
             this._fillField(modal, 'total_parts', 1);
             this._fillField(modal, 'is_process_based', true);
@@ -94,6 +126,22 @@ const CreateActDialog = {
 
         // Теперь работаем с добавленным в DOM элементом
         const addedModal = document.body.lastElementChild;
+        this._currentDialog = addedModal;
+
+        // Настраиваем обработчик Escape
+        this._setupEscapeHandler();
+
+        // УДАЛЕНЫ inline-стили - теперь работает через CSS [readonly]
+
+        // Скрываем/показываем секцию поручений
+        const directivesSection = addedModal.querySelector('fieldset:has(#directivesContainer)');
+        if (directivesSection) {
+            if (isEdit) {
+                directivesSection.style.display = '';
+            } else {
+                directivesSection.style.display = 'none';
+            }
+        }
 
         // Инициализируем аудиторскую группу и поручения
         this._initializeAuditTeam(addedModal, actData, currentUser);
@@ -102,8 +150,11 @@ const CreateActDialog = {
         // Обработчики кнопок
         const addTeamBtn = addedModal.querySelector('#addTeamMemberBtn');
         const addDirectiveBtn = addedModal.querySelector('#addDirectiveBtn');
+        const closeBtn = addedModal.querySelector('.dialog-create-act-close');
         const cancelBtn = addedModal.querySelector('.dialog-cancel');
         const form = addedModal.querySelector('#actForm');
+        const overlay = addedModal.querySelector('.custom-dialog-overlay');
+        const dialog = addedModal.querySelector('.custom-dialog');
 
         if (addTeamBtn) {
             addTeamBtn.onclick = () => this._addTeamMember(addedModal);
@@ -113,8 +164,25 @@ const CreateActDialog = {
             addDirectiveBtn.onclick = () => this._addDirective(addedModal);
         }
 
+        if (closeBtn) {
+            closeBtn.onclick = () => this._closeDialog();
+        }
+
         if (cancelBtn) {
-            cancelBtn.onclick = () => addedModal.remove();
+            cancelBtn.onclick = () => this._closeDialog();
+        }
+
+        // Закрытие по клику на оверлей
+        if (overlay && dialog) {
+            overlay.addEventListener('click', (e) => {
+                console.log('Click on overlay:', e.target);
+                console.log('Is overlay?', e.target === overlay);
+                console.log('Is inside dialog?', dialog.contains(e.target));
+
+                if (e.target === overlay) {
+                    this._closeDialog();
+                }
+            });
         }
 
         if (form) {
@@ -135,8 +203,15 @@ const CreateActDialog = {
                 this._addTeamMember(modal, member.role, member.full_name, member.position, member.username);
             });
         } else {
-            // Автоматически добавляем текущего пользователя
-            this._addTeamMember(modal, 'Участник', '', '', currentUser);
+            // 3 строки по умолчанию:
+            // 1. Куратор (пустой)
+            this._addTeamMember(modal, 'Куратор', '', '', '');
+
+            // 2. Руководитель (текущий пользователь)
+            this._addTeamMember(modal, 'Руководитель', '', '', currentUser);
+
+            // 3. Участник (пустой)
+            this._addTeamMember(modal, 'Участник', '', '', '');
         }
     },
 
@@ -156,7 +231,7 @@ const CreateActDialog = {
      * Добавляет члена аудиторской группы
      * @private
      */
-    _addTeamMember(modal, role = 'Участник', fullName = '', position = '', username = '') {
+    _addTeamMember(modal, role = 'Руководитель', fullName = '', position = '', username = '') {
         const container = modal.querySelector('#auditTeamContainer');
         if (!container) return;
 
@@ -209,11 +284,90 @@ const CreateActDialog = {
     },
 
     /**
+     * Валидирует форму перед отправкой
+     * @private
+     */
+    _validateForm(modal, isEdit) {
+        // Собираем аудиторскую группу
+        const teamMembers = Array.from(modal.querySelectorAll('.team-member-row'));
+
+        if (teamMembers.length === 0) {
+            if (typeof Notifications !== 'undefined') {
+                Notifications.warning('Добавьте хотя бы одного члена группы');
+            } else {
+                alert('Добавьте хотя бы одного члена группы');
+            }
+            return false;
+        }
+
+        // Проверяем наличие куратора и руководителя
+        const roles = teamMembers.map(row => row.querySelector('[name="role"]').value);
+        const hasCurator = roles.includes('Куратор');
+        const hasLeader = roles.includes('Руководитель');
+
+        if (!hasCurator) {
+            if (typeof Notifications !== 'undefined') {
+                Notifications.warning('В аудиторской группе должен быть хотя бы один куратор');
+            } else {
+                alert('В аудиторской группе должен быть хотя бы один куратор');
+            }
+            return false;
+        }
+
+        if (!hasLeader) {
+            if (typeof Notifications !== 'undefined') {
+                Notifications.warning('В аудиторской группе должен быть хотя бы один руководитель');
+            } else {
+                alert('В аудиторской группе должен быть хотя бы один руководитель');
+            }
+            return false;
+        }
+
+        // Валидируем поручения только при редактировании
+        if (isEdit) {
+            const directives = Array.from(modal.querySelectorAll('.directive-row'));
+
+            for (const row of directives) {
+                const pointNumber = row.querySelector('[name="point_number"]').value.trim();
+
+                if (!pointNumber) continue; // Пропускаем пустые строки
+
+                if (!pointNumber.startsWith('5.')) {
+                    if (typeof Notifications !== 'undefined') {
+                        Notifications.warning(`Поручения могут быть только в разделе 5 (указан пункт: ${pointNumber})`);
+                    } else {
+                        alert(`Поручения могут быть только в разделе 5 (указан пункт: ${pointNumber})`);
+                    }
+                    return false;
+                }
+
+                // Проверяем формат
+                const parts = pointNumber.split('.');
+                if (parts.length < 3) {
+                    if (typeof Notifications !== 'undefined') {
+                        Notifications.warning(`Неверный формат пункта: ${pointNumber}. Ожидается формат 5.X.Y`);
+                    } else {
+                        alert(`Неверный формат пункта: ${pointNumber}. Ожидается формат 5.X.Y`);
+                    }
+                    return false;
+                }
+            }
+        }
+
+        return true;
+    },
+
+    /**
      * Обрабатывает отправку формы
      * @private
      */
     async _handleFormSubmit(form, isEdit, actId, currentUser, modal) {
         try {
+            // Валидация перед отправкой
+            if (!this._validateForm(modal, isEdit)) {
+                return;
+            }
+
             const fd = new FormData(form);
 
             // Собираем аудиторскую группу
@@ -225,15 +379,6 @@ const CreateActDialog = {
                 position: row.querySelector('[name="position"]').value,
                 username: row.querySelector('[name="username"]').value
             }));
-
-            if (auditTeam.length === 0) {
-                if (typeof Notifications !== 'undefined') {
-                    Notifications.warning('Добавьте хотя бы одного члена группы');
-                } else {
-                    alert('Добавьте хотя бы одного члена группы');
-                }
-                return;
-            }
 
             // Собираем поручения
             const directives = Array.from(
@@ -288,11 +433,33 @@ const CreateActDialog = {
 
             if (!resp.ok) {
                 const errData = await resp.json();
+
+                // Проверяем специальный случай: КМ уже существует
+                if (resp.status === 409 && errData.detail?.type === 'km_exists') {
+                    const kmData = errData.detail;
+
+                    // Показываем диалог подтверждения
+                    const confirmed = await DialogManager.show({
+                        title: 'КМ уже существует',
+                        message: `Акт с КМ "${kmData.km_number}" уже существует (частей: ${kmData.current_parts}).\n\nСоздать новую часть ${kmData.next_part} для этого акта?`,
+                        icon: '❓',
+                        confirmText: 'Да, создать новую часть',
+                        cancelText: 'Отмена'
+                    });
+
+                    if (confirmed) {
+                        // Повторяем запрос с force_new_part=true
+                        await this._createWithNewPart(endpoint, body, currentUser);
+                    }
+                    return;
+                }
+
+                // Обычная ошибка
                 throw new Error(errData.detail || 'Ошибка сервера');
             }
 
             const data = await resp.json();
-            modal.remove();
+            this._closeDialog();
 
             if (typeof Notifications !== 'undefined') {
                 Notifications.success(isEdit ? 'Акт обновлен' : 'Акт создан успешно');
@@ -302,6 +469,11 @@ const CreateActDialog = {
                 // При редактировании перезагружаем список актов если на странице управления
                 if (window.ActsManagerPage && typeof window.ActsManagerPage.loadActs === 'function') {
                     window.ActsManagerPage.loadActs();
+                }
+
+                // Перезагружаем список в меню актов если оно открыто
+                if (window.ActsMenuManager && typeof window.ActsMenuManager.renderActsList === 'function') {
+                    window.ActsMenuManager.renderActsList();
                 }
                 return;
             }
@@ -313,6 +485,45 @@ const CreateActDialog = {
             console.error('Ошибка сохранения акта:', err);
             if (typeof Notifications !== 'undefined') {
                 Notifications.error('Не удалось сохранить акт: ' + err.message);
+            } else {
+                alert('Ошибка: ' + err.message);
+            }
+        }
+    },
+
+    /**
+     * Создает акт как новую часть существующего КМ
+     * @private
+     */
+    async _createWithNewPart(endpoint, body, currentUser) {
+        try {
+            const resp = await fetch(`${endpoint}?force_new_part=true`, {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                    'X-JupyterHub-User': currentUser
+                },
+                body: JSON.stringify(body)
+            });
+
+            if (!resp.ok) {
+                const errData = await resp.json();
+                throw new Error(errData.detail || 'Ошибка сервера');
+            }
+
+            const data = await resp.json();
+            this._closeDialog();
+
+            if (typeof Notifications !== 'undefined') {
+                Notifications.success(`Создана новая часть ${data.part_number} акта`);
+            }
+
+            window.location.href = `/constructor?act_id=${data.id}`;
+
+        } catch (err) {
+            console.error('Ошибка создания новой части:', err);
+            if (typeof Notifications !== 'undefined') {
+                Notifications.error('Не удалось создать новую часть: ' + err.message);
             } else {
                 alert('Ошибка: ' + err.message);
             }

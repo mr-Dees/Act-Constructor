@@ -23,8 +23,10 @@
 /* Контейнер для шагов навигации */
 .steps-container {
     display: flex;
-    gap: var(--spacing-xl);
+    gap: var(--spacing);
     align-items: center;
+    justify-content: center;
+    flex: 1;
 }
 
 /* Список шагов */
@@ -37,16 +39,20 @@
 
 /* Элемент шага */
 .step {
-    padding: var(--spacing-sm) var(--spacing-lg);
+    width: var(--step-width);
+    min-width: var(--step-width);
+    max-width: var(--step-width);
+    padding: var(--step-padding-vertical) var(--step-padding-horizontal);
     background: var(--step-bg);
-    border: 1px solid var(--step-border);
-    border-radius: var(--radius);
-    font-weight: var(--font-weight-medium);
-    font-size: var(--font-size-sm);
+    border: var(--border-width-thin) solid var(--step-border);
+    border-radius: var(--radius-lg);
     cursor: pointer;
     transition: var(--transition-all);
-    color: var(--text-on-primary);
     user-select: none;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    text-align: center;
 }
 
 /* Состояние при наведении */

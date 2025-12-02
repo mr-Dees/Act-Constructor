@@ -2,16 +2,21 @@
 <template id="createActDialogTemplate">
     <div class="custom-dialog-overlay">
         <div class="custom-dialog dialog-create-act">
-            <h3 class="dialog-title" data-field="title"></h3>
+            <div class="dialog-create-act-header">
+                <h3 class="dialog-title" data-field="title"></h3>
+                <button type="button" class="dialog-create-act-close" aria-label="Закрыть">
+                    &times;
+                </button>
+            </div>
             <form id="actForm" autocomplete="off">
                 <label>
                     Наименование проверки *
-                    <input name="inspection_name" required data-field="inspection_name">
+                    <input type="text" name="inspection_name" required data-field="inspection_name">
                 </label>
 
                 <label>
                     Город *
-                    <input name="city" required data-field="city">
+                    <input type="text" name="city" required data-field="city">
                 </label>
 
                 <label>
@@ -21,7 +26,7 @@
 
                 <label>
                     Номер приказа *
-                    <input name="order_number" required data-field="order_number">
+                    <input type="text" name="order_number" required data-field="order_number">
                 </label>
 
                 <label>
@@ -44,14 +49,16 @@
                     <input type="text" name="km_number" data-field="km_number" required>
                 </label>
 
-                <div style="display: grid; grid-template-columns: 1fr 1fr; gap: var(--spacing-md);">
+                <div class="act-parts-grid">
                     <label>
-                        Часть акта *
-                        <input type="number" name="part_number" data-field="part_number" min="1" value="1" required>
+                        Часть акта (автоматически)
+                        <input type="number" name="part_number" data-field="part_number" min="1" value="1" required
+                               readonly>
                     </label>
                     <label>
-                        Всего частей *
-                        <input type="number" name="total_parts" data-field="total_parts" min="1" value="1" required>
+                        Всего частей (автоматически)
+                        <input type="number" name="total_parts" data-field="total_parts" min="1" value="1" required
+                               readonly>
                     </label>
                 </div>
 

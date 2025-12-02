@@ -35,14 +35,13 @@
 </div>
 
 <!-- Шаблоны для JS -->
-{% include 'components/acts_card_template.html' %}
-{% include 'components/acts_empty_state.html' %}
-{% include 'components/acts_error_state.html' %}
-{% include 'components/acts_loading_template.html' %}
-{% include 'components/create_act_dialog.html' %}
-{% include 'components/team_member_row.html' %}
-{% include 'components/directive_row.html' %}
-
+{% include 'components/acts/create_act_dialog.html' %}
+{% include 'components/acts/team_member_row.html' %}
+{% include 'components/acts/directive_row.html' %}
+{% include 'components/acts/acts_loading.html' %}
+{% include 'components/acts/acts_empty_state.html' %}
+{% include 'components/acts/acts_error_state.html' %}
+{% include 'components/acts/acts_card.html' %}
 
 <script src="/static/js/app-config.js"></script>
 <script>

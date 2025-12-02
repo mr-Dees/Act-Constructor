@@ -13,7 +13,7 @@
 </head>
 <body>
     <!-- Шапка приложения -->
-    {% include 'header.html' %}
+    {% include 'header/header.html' %}
 
     <!-- Основной контент страницы -->
     {% block content %}{% endblock %}
@@ -92,8 +92,17 @@
     <script src="/static/js/create-act-dialog.js"></script>
 
     <!-- Информация подсказок -->
-    {% include 'help/step1.html' %}
-    {% include 'help/step2.html' %}
+    {% include 'header/help/step1.html' %}
+    {% include 'header/help/step2.html' %}
+
+<!-- Шаблон для меню актов -->
+    {% include 'header/acts_menu_item.html' %}
+    {% include 'components/acts/create_act_dialog.html' %}
+    {% include 'components/acts/team_member_row.html' %}
+    {% include 'components/acts/directive_row.html' %}
+    {% include 'components/acts/acts_loading.html' %}
+    {% include 'components/acts/acts_empty_state.html' %}
+    {% include 'components/acts/acts_error_state.html' %}
 
     <!-- Дополнительные скрипты страницы -->
     {% block extra_js %}{% endblock %}

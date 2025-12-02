@@ -10,10 +10,10 @@
     position: absolute;
     top: calc(100% + var(--spacing-lg));
     right: 0;
-    min-width: 27rem;
-    max-width: 32rem;
+    min-width: var(--settings-menu-min-width);
+    max-width: var(--settings-menu-max-width);
     background: var(--modal-bg);
-    border: 1px solid var(--modal-border);
+    border: var(--border-width-thin) solid var(--modal-border);
     border-radius: var(--radius-xl);
     box-shadow: var(--modal-shadow);
     z-index: var(--z-dropdown);
@@ -29,11 +29,15 @@
 
 /* Шапка меню */
 .settings-menu-header {
-    padding: var(--spacing-2xl);
+    padding: var(--spacing-xl) var(--spacing-2xl);
     background: var(--gradient-header);
     color: var(--text-on-primary);
-    border-bottom: 1px solid var(--border-light);
+    border-bottom: var(--border-width-thin) solid var(--border-light);
+    border-radius: var(--radius-xl) var(--radius-xl) 0 0;
     flex-shrink: 0;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
 }
 
 .settings-menu-header h4 {
@@ -43,11 +47,43 @@
     line-height: var(--line-height-tight);
 }
 
+/* Кнопка закрытия меню настроек */
+.settings-menu-close {
+    background: none;
+    border: none;
+    font-size: var(--font-size-3xl);
+    cursor: pointer;
+    color: var(--text-on-primary);
+    line-height: 1;
+    padding: 0;
+    width: var(--settings-menu-close-size);
+    height: var(--settings-menu-close-size);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    border-radius: var(--radius);
+    transition: var(--transition-all);
+}
+
+.settings-menu-close:hover {
+    background: var(--help-close-hover);
+    transform: rotate(var(--rotate-close-button));
+}
+
+.settings-menu-close:active {
+    transform: rotate(var(--rotate-close-button)) scale(var(--button-active-scale));
+}
+
+.settings-menu-close:focus-visible {
+    outline: var(--border-width-md) solid var(--text-on-primary);
+    outline-offset: var(--focus-outline-offset);
+}
+
 /* Тело меню */
 .settings-menu-body {
     padding: var(--spacing-xl);
     overflow-y: auto;
-    max-height: 60vh;
+    max-height: var(--settings-menu-max-height);
     scrollbar-width: thin;
     scrollbar-color: var(--scrollbar-thumb) var(--scrollbar-bg);
 }
@@ -87,7 +123,7 @@
 }
 
 .settings-divider {
-    height: 1px;
+    height: var(--border-width-thin);
     background: var(--border-light);
     margin: var(--spacing-lg) 0;
     border: none;
@@ -144,11 +180,11 @@
 }
 
 .settings-checkbox input[type="checkbox"] {
-    width: 1.125rem;
-    height: 1.125rem;
+    width: var(--checkbox-size);
+    height: var(--checkbox-size);
     cursor: pointer;
     accent-color: var(--primary);
-    margin-top: 2px;
+    margin-top: var(--spacing-xs);
     flex-shrink: 0;
 }
 
@@ -172,8 +208,8 @@
 }
 
 .theme-slider {
-    width: 2.75rem;
-    height: 1.5rem;
+    width: var(--theme-switch-width);
+    height: var(--theme-switch-height);
     background: var(--gray-300);
     border-radius: var(--radius-full);
     position: relative;
@@ -183,13 +219,13 @@
 
 .theme-slider::before {
     content: "";
-    width: 1.25rem;
-    height: 1.25rem;
+    width: var(--theme-slider-dot-size);
+    height: var(--theme-slider-dot-size);
     background: var(--bg-primary);
     border-radius: var(--radius-full);
     position: absolute;
-    left: 2px;
-    top: 2px;
+    left: var(--theme-slider-dot-offset);
+    top: var(--theme-slider-dot-offset);
     transition: transform var(--transition-base);
     box-shadow: var(--shadow-xs);
 }
@@ -199,7 +235,7 @@
 }
 
 .theme-switch input:checked + .theme-slider::before {
-    transform: translateX(1.25rem);
+    transform: translateX(var(--theme-slider-dot-translate));
 }
 
 .theme-label {
@@ -213,7 +249,7 @@
     margin-top: var(--spacing-sm);
     padding: var(--spacing-md) var(--spacing-lg);
     background: var(--primary-subtle);
-    border: 1px solid var(--help-panel-border);
+    border: var(--border-width-thin) solid var(--help-panel-border);
     border-radius: var(--radius-md);
 }
 
@@ -231,10 +267,10 @@
 }
 
 .period-input-group input[type="number"] {
-    width: 3.5rem;
+    width: var(--auto-save-input-width);
     padding: var(--spacing-xs) var(--spacing-sm);
     border-radius: var(--radius-sm);
-    border: 1px solid var(--input-border);
+    border: var(--border-width-thin) solid var(--input-border);
     background: var(--input-bg);
     color: var(--text-primary);
     font-size: var(--font-size-sm);
@@ -250,7 +286,7 @@
 .period-input-group input[type="number"]:focus {
     outline: none;
     border-color: var(--input-border-focus);
-    box-shadow: var(--input-shadow-focus);
+    box-shadow: var(--input-focus-shadow);
 }
 
 .period-unit {

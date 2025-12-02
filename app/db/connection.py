@@ -4,6 +4,7 @@
 """
 
 import logging
+from contextlib import asynccontextmanager
 from pathlib import Path
 from typing import AsyncGenerator
 
@@ -76,6 +77,7 @@ async def close_db() -> None:
         logger.info("Database pool закрыт")
 
 
+@asynccontextmanager
 async def get_db() -> AsyncGenerator[asyncpg.Connection, None]:
     """
     Dependency для получения подключения к БД.
@@ -86,15 +88,29 @@ async def get_db() -> AsyncGenerator[asyncpg.Connection, None]:
     Raises:
         RuntimeError: Если пул не инициализирован
     """
-    pool = get_pool()  # Используем геттер
+    pool = get_pool()
 
     async with pool.acquire() as connection:
         yield connection
 
 
+async def get_db_connection() -> asyncpg.Connection:
+    """
+    Альтернативный метод получения подключения (без context manager).
+
+    Returns:
+        Подключение из пула
+
+    Note:
+        Вызывающий код должен сам закрыть подключение через conn.close()
+    """
+    pool = get_pool()
+    return await pool.acquire()
+
+
 async def create_tables_if_not_exist() -> None:
     """Создаёт таблицы если их нет."""
-    pool = get_pool()  # Используем геттер
+    pool = get_pool()
 
     schema_path = Path(__file__).parent / "schema.sql"
 

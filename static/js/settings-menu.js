@@ -11,6 +11,7 @@ class SettingsMenuManager {
     static setup() {
         const btn = document.getElementById('settingsMenuBtn');
         const menu = document.getElementById('settingsMenu');
+        const closeBtn = document.getElementById('closeSettingsMenuBtn');
         const themeToggle = document.getElementById('themeToggle');
         const themeLabel = document.getElementById('themeToggleLabel');
         const downloadPromptToggle = document.getElementById('downloadPromptToggle');
@@ -18,30 +19,29 @@ class SettingsMenuManager {
         const autoSavePeriodContainer = document.getElementById('autoSavePeriodContainer');
         const autoSavePeriodInput = document.getElementById('autoSavePeriodInput');
 
-        // Показ/скрытие меню с управлением активным состоянием кнопки
+        // Показ меню
         btn?.addEventListener('click', e => {
             e.stopPropagation();
-            const isHidden = menu.classList.contains('hidden');
+            this.show();
+        });
 
-            if (isHidden) {
-                menu.classList.remove('hidden');
-                btn.classList.add('active');
-            } else {
-                menu.classList.add('hidden');
-                btn.classList.remove('active');
-            }
+        // Закрытие меню кнопкой крестика
+        closeBtn?.addEventListener('click', () => {
+            this.hide();
         });
 
         // Скрытие меню при клике вне
         document.addEventListener('click', e => {
-            if (!menu.contains(e.target) && !btn.contains(e.target)) {
-                menu.classList.add('hidden');
-                btn.classList.remove('active');
+            if (!menu?.contains(e.target) && !btn?.contains(e.target)) {
+                this.hide();
             }
         });
 
         // Предотвращаем закрытие при клике внутри меню
         menu?.addEventListener('click', e => e.stopPropagation());
+
+        // Закрытие по Escape
+        this._setupEscapeHandler();
 
         // Тема
         themeToggle?.addEventListener('change', () => {
@@ -86,6 +86,51 @@ class SettingsMenuManager {
         autoSaveToggle.checked = this._state.autoSave;
         autoSavePeriodInput.value = this._state.autoSavePeriod;
         autoSavePeriodContainer.style.display = this._state.autoSave ? '' : 'none';
+    }
+
+    /**
+     * Показывает меню настроек
+     */
+    static show() {
+        const menu = document.getElementById('settingsMenu');
+        const btn = document.getElementById('settingsMenuBtn');
+
+        if (menu) {
+            menu.classList.remove('hidden');
+        }
+        if (btn) {
+            btn.classList.add('active');
+        }
+    }
+
+    /**
+     * Скрывает меню настроек
+     */
+    static hide() {
+        const menu = document.getElementById('settingsMenu');
+        const btn = document.getElementById('settingsMenuBtn');
+
+        if (menu) {
+            menu.classList.add('hidden');
+        }
+        if (btn) {
+            btn.classList.remove('active');
+        }
+    }
+
+    /**
+     * Настраивает обработчик закрытия по Escape
+     * @private
+     */
+    static _setupEscapeHandler() {
+        document.addEventListener('keydown', (e) => {
+            if (e.key === 'Escape') {
+                const menu = document.getElementById('settingsMenu');
+                if (menu && !menu.classList.contains('hidden')) {
+                    this.hide();
+                }
+            }
+        });
     }
 
     static _saveSettings() {

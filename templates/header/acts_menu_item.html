@@ -1,0 +1,24 @@
+<!-- templates/components/acts_menu_item.html -->
+<template id="actsMenuItemTemplate">
+    <li class="acts-menu-list-item" data-act-id="">
+        <div class="acts-menu-item-header">
+            <div class="acts-menu-item-title" data-field="inspection_name"></div>
+            <span class="acts-menu-item-badge" data-field="user_role"></span>
+        </div>
+        <div class="acts-menu-item-meta">
+            <div class="acts-menu-item-meta-row">
+                <span class="acts-menu-item-meta-label">КМ:</span>
+                <span data-field="km_display"></span>
+            </div>
+            <div class="acts-menu-item-meta-row">
+                <span class="acts-menu-item-meta-label">Приказ:</span>
+                <span data-field="order_number"></span>
+            </div>
+            <div class="acts-menu-item-meta-row">
+                <span class="acts-menu-item-meta-label">Период:</span>
+                <span><span data-field="inspection_start_date"></span> — <span data-field="inspection_end_date"></span></span>
+            </div>
+        </div>
+        <div class="acts-menu-item-date" data-field="last_edited_at"></div>
+    </li>
+</template>

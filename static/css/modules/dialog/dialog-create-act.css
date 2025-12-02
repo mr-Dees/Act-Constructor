@@ -1,10 +1,8 @@
-/* static/css/modules/dialog/dialog-create-act.css */
-
 /**
  * Стили диалога создания/редактирования акта
- * Визуально согласован с acts-menu и help-modal
  */
 
+/* Основное окно диалога */
 .dialog-create-act {
     width: var(--create-act-dialog-width);
     max-width: var(--create-act-dialog-width);
@@ -14,20 +12,65 @@
     overflow: hidden;
     display: flex;
     flex-direction: column;
+    background: var(--modal-bg);
+    border-radius: var(--radius-xl);
+    box-shadow: var(--modal-shadow);
 }
 
-/* Шапка диалога */
-.dialog-create-act .dialog-title {
+/* Шапка диалога с кнопкой закрытия */
+.dialog-create-act-header {
     padding: var(--spacing-xl) var(--spacing-2xl);
     background: var(--gradient-header);
     color: var(--text-on-primary);
     border-bottom: var(--border-width-thin) solid var(--border-light);
     border-radius: var(--radius-xl) var(--radius-xl) 0 0;
+    flex-shrink: 0;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+}
+
+.dialog-create-act .dialog-title {
     margin: 0;
     font-size: var(--font-size-xl);
     font-weight: var(--font-weight-semibold);
     line-height: var(--line-height-tight);
-    flex-shrink: 0;
+    color: var(--text-on-primary);
+    padding: 0;
+    background: none;
+    border: none;
+}
+
+/* Кнопка закрытия диалога */
+.dialog-create-act-close {
+    background: none;
+    border: none;
+    font-size: var(--font-size-3xl);
+    cursor: pointer;
+    color: var(--text-on-primary);
+    line-height: 1;
+    padding: 0;
+    width: var(--create-act-dialog-close-size);
+    height: var(--create-act-dialog-close-size);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    border-radius: var(--radius);
+    transition: var(--transition-all);
+}
+
+.dialog-create-act-close:hover {
+    background: var(--help-close-hover);
+    transform: rotate(var(--rotate-close-button));
+}
+
+.dialog-create-act-close:active {
+    transform: rotate(var(--rotate-close-button)) scale(var(--button-active-scale));
+}
+
+.dialog-create-act-close:focus-visible {
+    outline: var(--border-width-md) solid var(--text-on-primary);
+    outline-offset: var(--focus-outline-offset);
 }
 
 /* Форма с прокруткой */
@@ -74,12 +117,13 @@
 
 .dialog-create-act input[type="text"],
 .dialog-create-act input[type="date"],
-.dialog-create-act input:not([type="checkbox"]),
+.dialog-create-act input[type="number"],
 .dialog-create-act select {
     padding: var(--spacing-sm) var(--spacing-md);
     border: var(--border-width-thin) solid var(--input-border);
     border-radius: var(--radius-sm);
     font-size: var(--font-size-base);
+    font-family: var(--font-family-base);
     background: var(--input-bg);
     color: var(--input-text);
     transition: var(--transition-fast);
@@ -92,9 +136,16 @@
     box-shadow: var(--input-focus-shadow);
 }
 
-.dialog-create-act input:hover:not(:focus),
-.dialog-create-act select:hover:not(:focus) {
+.dialog-create-act input:hover:not(:focus):not(:disabled):not([readonly]),
+.dialog-create-act select:hover:not(:focus):not(:disabled) {
     border-color: var(--input-border-hover);
+}
+
+/* Readonly поля */
+.dialog-create-act input[readonly] {
+    background: var(--input-bg-disabled);
+    cursor: not-allowed;
+    color: var(--input-text-disabled);
 }
 
 /* Чекбокс */
@@ -111,6 +162,7 @@
     height: var(--checkbox-size);
     cursor: pointer;
     flex-shrink: 0;
+    accent-color: var(--primary);
 }
 
 /* Fieldset */
@@ -152,10 +204,17 @@
     flex-shrink: 0;
 }
 
+/* Сетка для части/всего частей */
+.act-parts-grid {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: var(--spacing-md);
+}
+
 /* Строка члена группы */
 .team-member-row {
     display: grid;
-    grid-template-columns: 10rem 1fr 1fr 8rem 2.5rem;
+    grid-template-columns: 10rem 1fr 1fr 8rem var(--button-size-sm);
     gap: var(--spacing-sm);
     margin-bottom: var(--spacing-md);
     align-items: center;
@@ -166,6 +225,7 @@
     border: var(--border-width-thin) solid var(--input-border);
     border-radius: var(--radius-sm);
     font-size: var(--font-size-sm);
+    font-family: var(--font-family-base);
     background: var(--input-bg);
     color: var(--input-text);
     transition: var(--transition-fast);
@@ -191,6 +251,10 @@
     align-items: center;
     justify-content: center;
     color: var(--text-secondary);
+    background: transparent;
+    border: none;
+    border-radius: var(--radius-sm);
+    cursor: pointer;
     transition: var(--transition-fast);
     flex-shrink: 0;
 }
@@ -211,7 +275,7 @@
 /* Строка поручения */
 .directive-row {
     display: grid;
-    grid-template-columns: 12rem 1fr 2.5rem;
+    grid-template-columns: 12rem 1fr var(--button-size-sm);
     gap: var(--spacing-sm);
     margin-bottom: var(--spacing-md);
     align-items: center;
@@ -230,6 +294,10 @@
     align-items: center;
     justify-content: center;
     color: var(--text-secondary);
+    background: transparent;
+    border: none;
+    border-radius: var(--radius-sm);
+    cursor: pointer;
     transition: var(--transition-fast);
     flex-shrink: 0;
 }
@@ -271,4 +339,48 @@
 
 #kmNumberField.hidden {
     display: none;
+}
+
+/* Стили для полей внутри строк аудиторской группы */
+.team-member-row input[type="text"] {
+    padding: var(--spacing-sm) var(--spacing-md);
+    border: var(--border-width-thin) solid var(--input-border);
+    border-radius: var(--radius-sm);
+    font-size: var(--font-size-sm);
+    font-family: var(--font-family-base);
+    background: var(--input-bg);
+    color: var(--input-text);
+    transition: var(--transition-fast);
+}
+
+.team-member-row input[type="text"]:focus {
+    outline: none;
+    border-color: var(--input-border-focus);
+    box-shadow: var(--input-focus-shadow);
+}
+
+.team-member-row input[type="text"]:hover:not(:focus) {
+    border-color: var(--input-border-hover);
+}
+
+/* Стили для полей внутри строк поручений */
+.directive-row input[type="text"] {
+    padding: var(--spacing-sm) var(--spacing-md);
+    border: var(--border-width-thin) solid var(--input-border);
+    border-radius: var(--radius-sm);
+    font-size: var(--font-size-sm);
+    font-family: var(--font-family-base);
+    background: var(--input-bg);
+    color: var(--input-text);
+    transition: var(--transition-fast);
+}
+
+.directive-row input[type="text"]:focus {
+    outline: none;
+    border-color: var(--input-border-focus);
+    box-shadow: var(--input-focus-shadow);
+}
+
+.directive-row input[type="text"]:hover:not(:focus) {
+    border-color: var(--input-border-hover);
 }

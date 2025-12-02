@@ -1,12 +1,6 @@
 # app/db/service.py
 """
 Сервис бизнес-логики для работы с актами в PostgreSQL.
-
-Включает высокоуровневый класс ActDBService для:
-- Создания, удаления, обновления актов и связанных сущностей
-- Получения актов пользователя и полной информации по акту
-- Дублирования документа с копированием дерева, таблиц, текстблоков, нарушений
-- Проверки доступа пользователя
 """
 
 import json
@@ -29,50 +23,144 @@ logger = logging.getLogger("act_constructor.db")
 
 
 class ActDBService:
-    """
-    Сервис для работы с актами и их связанными сущностями в базе данных.
-
-    Создаётся с помощью существующего подключения к PostgreSQL, затем
-    предоставляет основной CRUD-интерфейс для актов и публичные методы
-    для сервисных операций в приложении.
-    """
+    """Сервис для работы с актами и их связанными сущностями в базе данных."""
 
     def __init__(self, conn: asyncpg.Connection):
+        """Инициализирует сервис с подключением к БД."""
+        self.conn = conn
+
+    async def check_km_exists(self, km_number: str) -> dict:
         """
-        Инициализирует сервис с подключением к БД.
+        Проверяет существование актов с данным КМ номером.
 
         Args:
-            conn: Асинхронное подключение к PostgreSQL
+            km_number: КМ номер для проверки
+
+        Returns:
+            Словарь с информацией:
+            - exists: bool - существуют ли акты с таким КМ
+            - current_parts: int - текущее количество частей
+            - next_part: int - номер следующей части
         """
-        self.conn = conn
+        row = await self.conn.fetchrow(
+            """
+            SELECT 
+                COUNT(*) as count,
+                MAX(part_number) as max_part,
+                MAX(total_parts) as total_parts
+            FROM acts 
+            WHERE km_number = $1
+            """,
+            km_number
+        )
+
+        exists = row['count'] > 0
+        current_parts = row['total_parts'] if exists else 0
+        next_part = (row['max_part'] + 1) if exists else 1
+
+        return {
+            'exists': exists,
+            'current_parts': current_parts,
+            'next_part': next_part
+        }
+
+    async def _update_total_parts_for_km(self, km_number: str, new_total: int) -> None:
+        """
+        Обновляет total_parts для всех актов с данным КМ номером.
+
+        Args:
+            km_number: КМ номер
+            new_total: Новое общее количество частей
+        """
+        await self.conn.execute(
+            """
+            UPDATE acts 
+            SET total_parts = $1,
+                updated_at = CURRENT_TIMESTAMP
+            WHERE km_number = $2
+            """,
+            new_total,
+            km_number
+        )
+        logger.info(f"Обновлено total_parts={new_total} для КМ={km_number}")
+
+    async def _recalculate_parts_after_delete(self, km_number: str, deleted_part: int) -> None:
+        """
+        Пересчитывает номера частей после удаления акта.
+
+        Сдвигает номера частей, которые были после удаленной.
+        Обновляет total_parts для всех актов с данным КМ.
+
+        Args:
+            km_number: КМ номер
+            deleted_part: Номер удаленной части
+        """
+        async with self.conn.transaction():
+            # Сдвигаем номера частей, которые были после удаленной
+            await self.conn.execute(
+                """
+                UPDATE acts
+                SET part_number = part_number - 1,
+                    updated_at = CURRENT_TIMESTAMP
+                WHERE km_number = $1 AND part_number > $2
+                """,
+                km_number,
+                deleted_part
+            )
+
+            # Получаем новое общее количество частей
+            new_total = await self.conn.fetchval(
+                "SELECT COUNT(*) FROM acts WHERE km_number = $1",
+                km_number
+            )
+
+            # Обновляем total_parts для всех актов с этим КМ
+            if new_total > 0:
+                await self._update_total_parts_for_km(km_number, new_total)
+                logger.info(
+                    f"Пересчитаны части для КМ={km_number}: "
+                    f"удалена часть {deleted_part}, новый total={new_total}"
+                )
 
     async def create_act(
             self,
             act_data: ActCreate,
-            username: str
+            username: str,
+            force_new_part: bool = False
     ) -> ActResponse:
         """
         Создает новый акт с метаданными, аудиторской группой и поручениями.
 
-        Выполняет следующие действия в транзакции:
-        1. Проверяет что текущий пользователь входит в аудиторскую группу
-        2. Создает запись акта в таблице acts
-        3. Добавляет членов аудиторской группы
-        4. Добавляет поручения
-        5. Создает пустое дерево структуры
-
         Args:
             act_data: Валидированные данные для создания акта
-            username: Имя пользователя-создателя (из JUPYTERHUB_USER)
+            username: Имя пользователя-создателя
+            force_new_part: Если True, создает новую часть существующего КМ
 
         Returns:
             Полная информация о созданном акте
-
-        Raises:
-            ValueError: Если пользователь не входит в состав группы
-            asyncpg.UniqueViolationError: Если пара (КМ, часть) уже существует
         """
         async with self.conn.transaction():
+            # Проверяем существование КМ и определяем номер части
+            km_info = await self.check_km_exists(act_data.km_number)
+
+            if km_info['exists'] and force_new_part:
+                # Создаем новую часть существующего КМ
+                part_number = km_info['next_part']
+                total_parts = km_info['current_parts'] + 1
+
+                # Обновляем total_parts для всех существующих частей
+                await self._update_total_parts_for_km(act_data.km_number, total_parts)
+            elif km_info['exists'] and not force_new_part:
+                # Дубликат - не должно произойти, но на всякий случай
+                raise ValueError(
+                    f"Акт с КМ '{act_data.km_number}' уже существует. "
+                    f"Используйте force_new_part=True для создания новой части."
+                )
+            else:
+                # Новый КМ - первая часть
+                part_number = 1
+                total_parts = 1
+
             # Проверка: пользователь должен быть членом аудиторской группы
             user_in_team = any(
                 member.username == username
@@ -83,7 +171,7 @@ class ActDBService:
                     "Пользователь должен быть членом аудиторской группы"
                 )
 
-            # Создаем основную запись акта
+            # Создаем основную запись акта с рассчитанными частями
             act_id = await self.conn.fetchval(
                 """
                 INSERT INTO acts (
@@ -96,8 +184,8 @@ class ActDBService:
                 RETURNING id
                 """,
                 act_data.km_number,
-                act_data.part_number,
-                act_data.total_parts,
+                part_number,
+                total_parts,
                 act_data.inspection_name,
                 act_data.city,
                 act_data.created_date,
@@ -159,25 +247,14 @@ class ActDBService:
 
             logger.info(
                 f"Создан акт ID={act_id}, КМ={act_data.km_number}, "
-                f"часть {act_data.part_number}/{act_data.total_parts}"
+                f"часть {part_number}/{total_parts}"
             )
 
             # Возвращаем полную информацию о созданном акте
             return await self.get_act_by_id(act_id)
 
     async def get_user_acts(self, username: str) -> list[ActListItem]:
-        """
-        Получает список актов, где пользователь является участником.
-
-        Возвращает только те акты, где пользователь состоит в аудиторской группе.
-        Результат отсортирован по дате последнего редактирования (последние первыми).
-
-        Args:
-            username: Имя пользователя из JUPYTERHUB_USER
-
-        Returns:
-            Список актов с информацией о роли пользователя в каждом акте
-        """
+        """Получает список актов, где пользователь является участником."""
         rows = await self.conn.fetch(
             """
             SELECT 
@@ -205,7 +282,6 @@ class ActDBService:
             username
         )
 
-        # Преобразуем строки БД в Pydantic модели
         return [
             ActListItem(
                 id=row['id'],
@@ -223,23 +299,7 @@ class ActDBService:
         ]
 
     async def get_act_by_id(self, act_id: int) -> ActResponse:
-        """
-        Получает полную информацию об акте по его ID.
-
-        Извлекает:
-        - Основные метаданные акта
-        - Состав аудиторской группы
-        - Список действующих поручений
-
-        Args:
-            act_id: Внутренний ID акта в БД
-
-        Returns:
-            Полная информация об акте
-
-        Raises:
-            ValueError: Если акт с указанным ID не найден
-        """
+        """Получает полную информацию об акте по его ID."""
         # Получаем основные данные акта
         act_row = await self.conn.fetchrow(
             """
@@ -335,21 +395,47 @@ class ActDBService:
         """
         Обновляет метаданные акта (частичное обновление).
 
-        Поддерживает обновление только переданных полей (PATCH-семантика).
-        Автоматически обновляет last_edited_by и last_edited_at.
-
-        Args:
-            act_id: ID акта для обновления
-            act_update: Данные для обновления (все поля опциональны)
-            username: Имя пользователя, выполняющего редактирование
-
-        Returns:
-            Обновленный акт с актуальными данными
-
-        Raises:
-            ValueError: Если акт не найден
+        При изменении КМ номера пересчитывает части для старого и нового КМ.
         """
         async with self.conn.transaction():
+            # Получаем текущие данные акта
+            current_act = await self.get_act_by_id(act_id)
+            old_km = current_act.km_number
+            old_part = current_act.part_number
+
+            # Валидация поручений если они переданы
+            if act_update.directives is not None:
+                await self._validate_directives_points(act_id, act_update.directives)
+
+            # Проверяем изменение КМ номера
+            km_changed = act_update.km_number is not None and act_update.km_number != old_km
+
+            if km_changed:
+                new_km = act_update.km_number
+
+                # Проверяем существование нового КМ
+                km_info = await self.check_km_exists(new_km)
+
+                if km_info['exists']:
+                    # Новый КМ уже существует - добавляем как новую часть
+                    new_part = km_info['next_part']
+                    new_total = km_info['current_parts'] + 1
+
+                    # Обновляем total_parts для всех актов нового КМ
+                    await self._update_total_parts_for_km(new_km, new_total)
+                else:
+                    # Новый КМ не существует - создаем первую часть
+                    new_part = 1
+                    new_total = 1
+
+                # Принудительно устанавливаем новые значения для обновляемого акта
+                act_update.part_number = new_part
+                act_update.total_parts = new_total
+
+                logger.info(
+                    f"Акт ID={act_id} изменяет КМ: {old_km}(часть {old_part}) -> {new_km}(часть {new_part})"
+                )
+
             # Строим динамический SQL для обновления только переданных полей
             updates = []
             values = []
@@ -433,13 +519,11 @@ class ActDBService:
 
             # Обновляем аудиторскую группу если передана
             if act_update.audit_team is not None:
-                # Удаляем старых членов группы
                 await self.conn.execute(
                     "DELETE FROM audit_team_members WHERE act_id = $1",
                     act_id
                 )
 
-                # Добавляем новых членов с сохранением порядка
                 for idx, member in enumerate(act_update.audit_team):
                     await self.conn.execute(
                         """
@@ -458,13 +542,11 @@ class ActDBService:
 
             # Обновляем поручения если переданы
             if act_update.directives is not None:
-                # Удаляем старые поручения
                 await self.conn.execute(
                     "DELETE FROM act_directives WHERE act_id = $1",
                     act_id
                 )
 
-                # Добавляем новые поручения
                 for idx, directive in enumerate(act_update.directives):
                     await self.conn.execute(
                         """
@@ -479,57 +561,83 @@ class ActDBService:
                         idx
                     )
 
+            # ВАЖНО: Пересчитываем части для старого КМ ПОСЛЕ обновления текущего акта
+            if km_changed:
+                await self._recalculate_parts_after_delete(old_km, old_part)
+                logger.info(f"Пересчитаны части для старого КМ={old_km} после перемещения акта ID={act_id}")
+
             logger.info(f"Обновлены метаданные акта ID={act_id}")
 
-            # Возвращаем актуальную информацию об акте
             return await self.get_act_by_id(act_id)
 
+    async def _validate_directives_points(self, act_id: int, directives: list[ActDirective]) -> None:
+        """Проверяет что все пункты поручений существуют в структуре акта."""
+        if not directives:
+            return
+
+        tree_row = await self.conn.fetchrow(
+            "SELECT tree_data FROM act_tree WHERE act_id = $1",
+            act_id
+        )
+
+        if not tree_row:
+            raise ValueError("Структура акта не найдена")
+
+        tree_data = tree_row['tree_data']
+        existing_points = self._collect_node_numbers(tree_data)
+
+        for directive in directives:
+            point = directive.point_number
+
+            if not point.startswith('5.'):
+                raise ValueError(
+                    f"Поручение '{directive.directive_number}' ссылается на пункт '{point}', "
+                    f"но поручения могут быть только в разделе 5"
+                )
+
+            if point not in existing_points:
+                raise ValueError(
+                    f"Поручение '{directive.directive_number}' ссылается на несуществующий "
+                    f"пункт '{point}'. Сначала создайте этот пункт в структуре акта."
+                )
+
+    def _collect_node_numbers(self, node: dict, numbers: set = None) -> set:
+        """Рекурсивно собирает все номера узлов из дерева."""
+        if numbers is None:
+            numbers = set()
+
+        if 'number' in node and node['number']:
+            numbers.add(node['number'])
+
+        if 'children' in node:
+            for child in node['children']:
+                self._collect_node_numbers(child, numbers)
+
+        return numbers
+
     async def _generate_unique_copy_name(self, original_name: str) -> str:
-        """
-        Генерирует уникальное название для копии акта.
-
-        Логика именования:
-        - "Название" → "Название (Копия)"
-        - "Название (Копия)" → "Название (Копия 2)"
-        - "Название (Копия 2)" → "Название (Копия 3)"
-        - И т.д.
-
-        Использует рекурсию для гарантированного поиска уникального названия.
-
-        Args:
-            original_name: Исходное название проверки
-
-        Returns:
-            Уникальное название копии, не конфликтующее с существующими актами
-        """
-        # Ищем паттерн "(Копия N)" в конце названия
+        """Генерирует уникальное название для копии акта."""
         match = re.search(r'^(.+?)\s*\(Копия\s*(\d*)\)\s*$', original_name)
 
         if match:
-            # Уже есть "(Копия)" или "(Копия N)" в названии
             base_name = match.group(1)
             existing_num = match.group(2)
 
             if existing_num:
-                # Есть номер - увеличиваем
                 next_num = int(existing_num) + 1
             else:
-                # Нет номера (просто "(Копия)") - ставим 2
                 next_num = 2
 
             new_name = f"{base_name} (Копия {next_num})"
         else:
-            # Это первая копия
             new_name = f"{original_name} (Копия)"
 
-        # Проверяем уникальность в БД
         exists = await self.conn.fetchval(
             "SELECT EXISTS(SELECT 1 FROM acts WHERE inspection_name = $1)",
             new_name
         )
 
         if exists:
-            # Если всё ещё не уникально - рекурсивно пробуем следующий номер
             return await self._generate_unique_copy_name(new_name)
 
         return new_name
@@ -539,43 +647,16 @@ class ActDBService:
             act_id: int,
             username: str
     ) -> ActResponse:
-        """
-        Создает полную копию акта со всеми данными.
-
-        Копирует:
-        - Метаданные акта с автогенерацией уникального названия
-        - Аудиторскую группу
-        - Поручения
-        - Дерево структуры
-        - Все таблицы
-        - Все текстовые блоки
-        - Все нарушения
-
-        Новый КМ генерируется как: "{original_km}_copy_{timestamp}"
-
-        Args:
-            act_id: ID исходного акта для дублирования
-            username: Имя пользователя-создателя копии
-
-        Returns:
-            Полная информация о новом акте (копии)
-
-        Raises:
-            ValueError: Если исходный акт не найден
-        """
-        # Получаем исходный акт
+        """Создает полную копию акта со всеми данными."""
         original = await self.get_act_by_id(act_id)
 
-        # Генерируем уникальное название для копии
         new_inspection_name = await self._generate_unique_copy_name(
             original.inspection_name
         )
 
-        # Генерируем уникальный КМ с временной меткой
         timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
         new_km_number = f"{original.km_number}_copy_{timestamp}"
 
-        # Создаем новый акт с теми же данными
         new_act_data = ActCreate(
             km_number=new_km_number,
             part_number=original.part_number,
@@ -592,7 +673,7 @@ class ActDBService:
             directives=original.directives
         )
 
-        new_act = await self.create_act(new_act_data, username)
+        new_act = await self.create_act(new_act_data, username, force_new_part=False)
 
         # Копируем дерево структуры
         tree_row = await self.conn.fetchrow(
@@ -611,7 +692,7 @@ class ActDBService:
                 new_act.id
             )
 
-        # Копируем все таблицы с сохранением метаданных
+        # Копируем все таблицы
         tables = await self.conn.fetch(
             "SELECT * FROM act_tables WHERE act_id = $1",
             act_id
@@ -706,50 +787,30 @@ class ActDBService:
         """
         Удаляет акт и все связанные данные.
 
-        Благодаря ON DELETE CASCADE в схеме БД автоматически удаляются:
-        - Члены аудиторской группы
-        - Поручения
-        - Дерево структуры
-        - Все таблицы
-        - Все текстовые блоки
-        - Все нарушения
-
-        Args:
-            act_id: ID акта для удаления
-
-        Raises:
-            ValueError: Если акт с указанным ID не найден
+        Пересчитывает номера частей для актов с тем же КМ номером.
         """
-        # Проверяем что акт существует
-        exists = await self.conn.fetchval(
-            "SELECT EXISTS(SELECT 1 FROM acts WHERE id = $1)",
-            act_id
-        )
+        # Получаем информацию об удаляемом акте
+        act = await self.get_act_by_id(act_id)
+        km_number = act.km_number
+        part_number = act.part_number
 
-        if not exists:
-            raise ValueError(f"Акт ID={act_id} не найден")
+        async with self.conn.transaction():
+            # Удаляем акт (каскадно удалятся все связанные данные)
+            await self.conn.execute(
+                "DELETE FROM acts WHERE id = $1",
+                act_id
+            )
 
-        # Удаляем акт (каскадно удалятся все связанные данные)
-        await self.conn.execute(
-            "DELETE FROM acts WHERE id = $1",
-            act_id
-        )
+            # Пересчитываем части для оставшихся актов с тем же КМ
+            await self._recalculate_parts_after_delete(km_number, part_number)
 
-        logger.info(f"Акт ID={act_id} успешно удален со всеми связанными данными")
+            logger.info(
+                f"Акт ID={act_id} (КМ={km_number}, часть {part_number}) "
+                f"удален со всеми связанными данными"
+            )
 
     async def check_user_access(self, act_id: int, username: str) -> bool:
-        """
-        Проверяет имеет ли пользователь доступ к акту.
-
-        Пользователь имеет доступ если он входит в состав аудиторской группы акта.
-
-        Args:
-            act_id: ID акта для проверки
-            username: Имя пользователя из JUPYTERHUB_USER
-
-        Returns:
-            True если пользователь имеет доступ, False иначе
-        """
+        """Проверяет имеет ли пользователь доступ к акту."""
         result = await self.conn.fetchval(
             """
             SELECT EXISTS(

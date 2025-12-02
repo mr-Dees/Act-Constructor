@@ -54,18 +54,33 @@ Act Constructor/
 │
 ├── templates/
 │   ├── components/
-│   │   ├── acts_menu.html
+│   │   ├── acts/
+│   │   │   ├── acts_card.html
+│   │   │   ├── acts_empty_state.html
+│   │   │   ├── acts_error_state.html
+│   │   │   ├── acts_loading.html
+│   │   │   ├── create_act_dialog.html
+│   │   │   ├── directive_row.html
+│   │   │   ├── team_member_row.html
 │   │   ├── context_menu.html
 │   │   ├── dialog.html
 │   │   ├── preview_panel.html
 │   │   └── tree_panel.html
-│   ├── help/
-│   │   ├── step1.html
-│   │   └── step2.html
+│   ├── header/
+│   │   ├── help/
+│   │   │   ├── step1.html
+│   │   │   └── step2.html
+│   │   ├── acts_menu_item.html
+│   │   ├── header.html
+│   │   ├── header_acts_menu.html
+│   │   ├── header_help_button.html
+│   │   ├── header_save_indicator.html
+│   │   ├── header_settings_menu.html
+│   │   ├── header_steps.html
+│   │   └── help_modal.html
 │   ├── acts_manager.html
 │   ├── base.html
-│   ├── constructor.html
-│   └── header.html
+│   └── constructor.html
 ├── static/
 │   ├── css/
 │   │   ├── base/
@@ -80,6 +95,9 @@ Act Constructor/
 │   │   │   ├── settings-menu
 │   │   │   └── two-columns.css
 │   │   ├── modules/
+│   │   │   ├── acts-manager/
+│   │   │   │   ├── acts-manager-base.css
+│   │   │   │   └── acts-manager-cards.css
 │   │   │   ├── buttons/
 │   │   │   │   ├── buttons-action.css
 │   │   │   │   ├── buttons-base.css
@@ -90,6 +108,7 @@ Act Constructor/
 │   │   │   ├── dialog/
 │   │   │   │   ├── dialog.css
 │   │   │   │   ├── dialog-buttons.css
+│   │   │   │   ├── dialog-create-act.css
 │   │   │   │   └── dialog-overlay.css
 │   │   │   ├── help/
 │   │   │   │   ├── help-button.css
