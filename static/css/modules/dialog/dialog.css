@@ -1,5 +1,5 @@
 /*
- * Стили диалогового окна
+ * Стили базового диалогового окна подтверждения
  *
  * Модальное окно с иконкой, заголовком и сообщением
  * для подтверждения действий пользователя.
@@ -7,15 +7,32 @@
 
 /* Контейнер диалогового окна */
 .custom-dialog {
-    background: var(--bg-primary);
+    background: var(--modal-bg);
     border-radius: var(--radius-xl);
     padding: var(--spacing-2xl);
     max-width: var(--dialog-max-width);
     width: 100%;
-    box-shadow: var(--shadow-xl);
-    animation: scaleIn 0.25s cubic-bezier(0.4, 0, 0.2, 1);
-    border: 1px solid var(--border-light);
+    box-shadow: var(--modal-shadow);
+    border: 1px solid var(--modal-border);
     position: relative;
+    transform: scale(0.95);
+    opacity: 0;
+    transition: transform var(--transition-base) var(--ease-in-out-smooth),
+    opacity var(--transition-base) var(--ease-in-out-smooth);
+}
+
+/* Видимое состояние диалога */
+.custom-dialog-overlay.visible > .custom-dialog {
+    transform: scale(1);
+    opacity: 1;
+}
+
+/* Анимация закрытия диалога */
+.custom-dialog-overlay.closing > .custom-dialog {
+    transform: scale(0.95);
+    opacity: 0;
+    transition: transform var(--transition-fast) var(--ease-in-out-smooth),
+    opacity var(--transition-fast) var(--ease-in-out-smooth);
 }
 
 /* Кнопка закрытия диалога */
@@ -43,7 +60,7 @@
 
 .dialog-close-btn:focus-visible {
     outline: var(--focus-outline);
-    outline-offset: -2px;
+    outline-offset: calc(-1 * var(--focus-outline-offset));
 }
 
 /* Иконка в диалоговом окне */
@@ -90,16 +107,12 @@
     text-align: center;
     line-height: var(--line-height-normal);
     margin-bottom: var(--spacing-xl);
+    white-space: pre-line;
 }
 
 /* Дополнительный контент в диалоге */
 .dialog-content {
     margin-bottom: var(--spacing-xl);
-}
-
-/* Анимация закрытия */
-.custom-dialog.closing {
-    animation: scaleOut 0.2s cubic-bezier(0.4, 0, 0.2, 1);
 }
 
 /* Поле ввода в диалоговом окне */
@@ -110,10 +123,14 @@
     border-radius: var(--radius);
     margin-bottom: var(--spacing-xl);
     font-size: var(--font-size-sm);
-    font-family: inherit;
+    font-family: var(--font-family-base);
     color: var(--input-text);
     background: var(--input-bg);
     transition: border-color var(--transition-fast), box-shadow var(--transition-fast);
+}
+
+.dialog-input:hover:not(:focus) {
+    border-color: var(--input-border-hover);
 }
 
 .dialog-input:focus {

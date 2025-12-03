@@ -751,16 +751,6 @@ class ActsMenuManager {
     }
 
     /**
-     * Экранирует HTML
-     * @private
-     */
-    static _escapeHtml(text) {
-        const div = document.createElement('div');
-        div.textContent = text;
-        return div.innerHTML;
-    }
-
-    /**
      * Инициализация обработчиков и автозагрузка акта
      */
     static init() {

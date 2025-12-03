@@ -97,7 +97,9 @@ Act Constructor/
 │   │   ├── modules/
 │   │   │   ├── acts-manager/
 │   │   │   │   ├── acts-manager-base.css
-│   │   │   │   └── acts-manager-cards.css
+│   │   │   │   ├── acts-manager-cards.css
+│   │   │   │   ├── acts-menu.css
+│   │   │   │   └── acts-modal.css
 │   │   │   ├── buttons/
 │   │   │   │   ├── buttons-action.css
 │   │   │   │   ├── buttons-base.css
@@ -108,7 +110,6 @@ Act Constructor/
 │   │   │   ├── dialog/
 │   │   │   │   ├── dialog.css
 │   │   │   │   ├── dialog-buttons.css
-│   │   │   │   ├── dialog-create-act.css
 │   │   │   │   └── dialog-overlay.css
 │   │   │   ├── help/
 │   │   │   │   ├── help-button.css
@@ -149,7 +150,6 @@ Act Constructor/
 │   │   │       ├── violation-fields.css
 │   │   │       └── violation-list.css
 │   │   ├── utilities/
-│   │   │   ├── acts-menu.css
 │   │   │   ├── helpers.css
 │   │   │   └── save-indicator.css
 │   │   └── main.css
@@ -160,6 +160,11 @@ Act Constructor/
 │       │   ├── context-menu-links-footnotes.js
 │       │   ├── context-menu-tree.js
 │       │   └── context-menu-violation.js
+│       ├── dialog/
+│       │   ├── dialog-base.js
+│       │   ├── dialog-confirm.js
+│       │   ├── dialog-create-act.js
+│       │   └── dialog-help.js
 │       ├── items/
 │       │   ├── items-renderer.js
 │       │   └── items-title-editing.js
@@ -206,10 +211,7 @@ Act Constructor/
 │       ├── api.js
 │       ├── app.js
 │       ├── app-config.js
-│       ├── create-act-dialog.js
-│       ├── dialog.js
 │       ├── format-menu-manager.js
-│       ├── help.js
 │       ├── navigation-manager.js
 │       ├── notifications.js
 │       ├── settings-menu.js

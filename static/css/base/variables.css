@@ -472,6 +472,8 @@
     --create-act-dialog-width: 65rem;
     --create-act-dialog-max-height: 90vh;
     --create-act-dialog-close-size: 2.5rem;
+    --team-member-grid-columns: 10rem 1fr 1fr 8rem var(--button-size-sm);
+    --directive-grid-columns: 12rem 1fr var(--button-size-sm);
 
     /* Steps специфичные переменные */
     --step-width: 16rem;
@@ -613,6 +615,11 @@
     --transition-slow: 300ms ease;
     --transition-all: all 200ms ease;
     --transition-ripple: 600ms ease-out;
+
+    /* Timing functions для более сложных анимаций */
+    --ease-in-out-smooth: cubic-bezier(0.4, 0, 0.2, 1);
+    --ease-out-back: cubic-bezier(0.34, 1.56, 0.64, 1);
+    --ease-in-out-circ: cubic-bezier(0.785, 0.135, 0.15, 0.86);
 
     /* Длительности анимаций */
     --duration-pulse-urgent: 2s;

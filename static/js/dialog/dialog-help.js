@@ -1,15 +1,21 @@
-// static/js/help.js
-
+// static/js/dialog/dialog-help.js
 /**
  * Менеджер системы помощи и инструкций
  *
  * Управляет отображением контекстных инструкций для пользователя
  * на разных этапах работы с конструктором актов.
+ * Наследует базовый функционал от DialogBase.
  */
-class HelpManager {
+class HelpManager extends DialogBase {
     /**
-     * Инициализирует менеджер помощи.
-     * Безопасно проверяет DOM и настраивает обработчики событий.
+     * Текущее модальное окно
+     * @private
+     * @type {HTMLElement|null}
+     */
+    static _currentModal = null;
+
+    /**
+     * Инициализирует менеджер помощи
      */
     static init() {
         try {
@@ -56,30 +62,30 @@ class HelpManager {
      * @param {{helpBtn: HTMLElement, modal: HTMLElement, closeBtn: HTMLElement|null}} elements - DOM-элементы
      */
     static _setupEventHandlers(elements) {
+        const {helpBtn, modal, closeBtn} = elements;
+
         // Открытие по кнопке помощи
-        elements.helpBtn.addEventListener('click', () => this.show());
+        helpBtn.addEventListener('click', () => this.show());
 
         // Закрытие по кнопке крестика
-        if (elements.closeBtn) {
-            elements.closeBtn.addEventListener('click', () => this.hide());
+        if (closeBtn) {
+            closeBtn.addEventListener('click', () => this.hide());
         }
 
-        // Закрытие по клику на оверлей
-        elements.modal.addEventListener('click', (e) => {
-            if (e.target === elements.modal) {
-                this.hide();
-            }
-        });
-
-        // Предотвращаем закрытие при клике внутри контента
-        const modalContent = elements.modal.querySelector('.help-modal-content');
-        if (modalContent) {
-            modalContent.addEventListener('click', (e) => e.stopPropagation());
-        }
+        // Закрытие по клику на оверлей (сам modal является оверлеем)
+        this._setupOverlayClickHandler(modal, modal.querySelector('.help-modal-content'), () => this.hide());
 
         // Закрытие по Escape
+        this._setupModalEscapeHandler(modal);
+    }
+
+    /**
+     * Настраивает обработчик Escape для модального окна помощи
+     * @private
+     */
+    static _setupModalEscapeHandler(modal) {
         document.addEventListener('keydown', (e) => {
-            if (e.key === 'Escape' && !elements.modal.classList.contains('hidden')) {
+            if (e.key === 'Escape' && !modal.classList.contains('hidden')) {
                 this.hide();
             }
         });
@@ -106,8 +112,7 @@ class HelpManager {
             }
 
             this._updateModalContent(elements, currentStep, contentElement.innerHTML);
-            this._showModal(elements.modal);
-            this._lockBodyScroll();
+            this._showModalHelp(elements.modal);
         } catch (error) {
             console.error(`Ошибка показа помощи: ${error.message}`);
             if (typeof Notifications !== 'undefined') {
@@ -148,32 +153,18 @@ class HelpManager {
     }
 
     /**
-     * Показывает модальное окно
+     * Показывает модальное окно помощи
      * @private
      * @param {HTMLElement} modal - Элемент модального окна
      */
-    static _showModal(modal) {
+    static _showModalHelp(modal) {
         const modalBody = modal.querySelector('.help-modal-body');
         if (modalBody) {
             modalBody.scrollTop = 0;
         }
         modal.classList.remove('hidden');
-    }
-
-    /**
-     * Блокирует прокрутку основной страницы
-     * @private
-     */
-    static _lockBodyScroll() {
-        document.body.style.overflow = 'hidden';
-    }
-
-    /**
-     * Разблокирует прокрутку основной страницы
-     * @private
-     */
-    static _unlockBodyScroll() {
-        document.body.style.overflow = '';
+        this._currentModal = modal;
+        this._lockBodyScroll();
     }
 
     /**
@@ -183,6 +174,7 @@ class HelpManager {
         const modal = document.getElementById('helpModal');
         if (modal) {
             modal.classList.add('hidden');
+            this._currentModal = null;
             this._unlockBodyScroll();
         }
     }

@@ -5,7 +5,7 @@
  * Прокрутка работает только для содержимого, шапка остается фиксированной.
  */
 
-/* Оверлей модального окна справки */
+/* Оверлей модального окна справки (использует .custom-dialog-overlay) */
 .help-modal {
     position: fixed;
     inset: 0;
@@ -15,8 +15,15 @@
     justify-content: center;
     z-index: var(--z-modal);
     backdrop-filter: var(--modal-blur-background);
-    animation: fadeIn var(--transition-base) ease;
+    -webkit-backdrop-filter: var(--modal-blur-background);
     padding: var(--spacing-lg);
+    opacity: 0;
+    transition: opacity var(--transition-base) ease;
+}
+
+/* Видимое состояние */
+.help-modal:not(.hidden) {
+    opacity: 1;
 }
 
 /* Скрытое состояние модального окна */
@@ -28,15 +35,24 @@
 .help-modal-content {
     background: var(--modal-bg);
     border-radius: var(--radius-xl);
-    max-width: var(--modal-max-width);
+    max-width: var(--help-modal-max-width);
     width: 100%;
-    max-height: var(--modal-max-height-vh);
+    max-height: var(--help-modal-max-height);
     display: flex;
     flex-direction: column;
     box-shadow: var(--modal-shadow);
-    animation: scaleIn var(--transition-slow) cubic-bezier(0.4, 0, 0.2, 1);
     overflow: hidden;
     border: 1px solid var(--modal-border);
+    transform: scale(0.95);
+    opacity: 0;
+    transition: transform var(--transition-slow) var(--ease-in-out-smooth),
+    opacity var(--transition-slow) var(--ease-in-out-smooth);
+}
+
+/* Видимое состояние контента */
+.help-modal:not(.hidden) .help-modal-content {
+    transform: scale(1);
+    opacity: 1;
 }
 
 /* Шапка модального окна - фиксированная без прокрутки */
@@ -78,8 +94,8 @@
     color: var(--text-on-primary);
     line-height: 1;
     padding: 0;
-    width: var(--button-size-sm);
-    height: var(--button-size-sm);
+    width: var(--help-modal-close-size);
+    height: var(--help-modal-close-size);
     display: flex;
     align-items: center;
     justify-content: center;
@@ -91,11 +107,11 @@
 /* Подсветка кнопки закрытия при наведении */
 .help-modal-close:hover {
     background: var(--help-close-hover);
-    transform: rotate(90deg);
+    transform: rotate(var(--rotate-close-button));
 }
 
 .help-modal-close:active {
-    transform: rotate(90deg) scale(0.95);
+    transform: rotate(var(--rotate-close-button)) scale(var(--button-active-scale));
 }
 
 /* Состояние фокуса */
@@ -114,11 +130,4 @@
     gap: var(--spacing);
     flex-shrink: 0;
     border-radius: 0 0 var(--radius-xl) var(--radius-xl);
-}
-
-/* Закрытие по клику вне модального окна */
-.help-modal-overlay {
-    position: absolute;
-    inset: 0;
-    z-index: -1;
 }

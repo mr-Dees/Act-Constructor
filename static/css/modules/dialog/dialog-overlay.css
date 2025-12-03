@@ -16,29 +16,41 @@
     display: flex;
     align-items: center;
     justify-content: center;
-    animation: fadeIn var(--transition-base) ease-out;
     padding: var(--spacing-lg);
-    cursor: pointer;
+    opacity: 0;
+    transition: opacity var(--transition-base) ease-out;
 }
 
-/* Диалог не должен закрываться при клике на него */
-.custom-dialog-overlay > .custom-dialog {
-    cursor: default;
-}
-
-/* Скрытое состояние с плавным исчезновением */
-.custom-dialog-overlay.hidden {
-    animation: fadeOut var(--transition-base) ease-out forwards;
+/* Видимое состояние с анимацией появления */
+.custom-dialog-overlay.visible {
+    opacity: 1;
 }
 
 /* Анимация закрытия */
 .custom-dialog-overlay.closing {
-    animation: fadeOut var(--transition-fast) ease-out forwards;
+    opacity: 0;
+    transition: opacity var(--transition-fast) ease-out;
+}
+
+/* Скрытое состояние (для обратной совместимости) */
+.custom-dialog-overlay.hidden {
+    opacity: 0;
+    pointer-events: none;
+}
+
+/* Внутренний диалог не закрывается при клике на него */
+.custom-dialog-overlay > .custom-dialog,
+.custom-dialog-overlay > .help-modal-content {
+    cursor: default;
 }
 
 /* Предотвращение прокрутки фона при открытом диалоге */
 body.dialog-open {
     overflow: hidden;
+}
+
+/* Компенсация ширины скроллбара только если он был виден */
+body.dialog-open.has-scrollbar {
     padding-right: var(--scrollbar-width);
 }
 
@@ -48,6 +60,6 @@ body.dialog-open {
     background: var(--overlay-bg-darker);
 }
 
-.custom-dialog-overlay[data-level="2"] .custom-dialog {
+.custom-dialog-overlay[data-level="2"] > .custom-dialog {
     z-index: calc(var(--z-modal) + 100);
 }

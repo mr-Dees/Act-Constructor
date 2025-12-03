@@ -1,9 +1,12 @@
 /**
  * Стили диалога создания/редактирования акта
+ *
+ * Сложная форма с динамическими секциями для управления
+ * метаданными акта, аудиторской группой и поручениями.
  */
 
 /* Основное окно диалога */
-.dialog-create-act {
+.acts-modal {
     width: var(--create-act-dialog-width);
     max-width: var(--create-act-dialog-width);
     min-width: var(--create-act-dialog-width);
@@ -15,14 +18,33 @@
     background: var(--modal-bg);
     border-radius: var(--radius-xl);
     box-shadow: var(--modal-shadow);
+    border: 1px solid var(--modal-border);
+    transform: scale(0.95);
+    opacity: 0;
+    transition: transform var(--transition-base) var(--ease-in-out-smooth),
+    opacity var(--transition-base) var(--ease-in-out-smooth);
+}
+
+/* Видимое состояние диалога */
+.custom-dialog-overlay.visible > .acts-modal {
+    transform: scale(1);
+    opacity: 1;
+}
+
+/* Анимация закрытия */
+.custom-dialog-overlay.closing > .acts-modal {
+    transform: scale(0.95);
+    opacity: 0;
+    transition: transform var(--transition-fast) var(--ease-in-out-smooth),
+    opacity var(--transition-fast) var(--ease-in-out-smooth);
 }
 
 /* Шапка диалога с кнопкой закрытия */
-.dialog-create-act-header {
+.acts-modal-header {
     padding: var(--spacing-xl) var(--spacing-2xl);
     background: var(--gradient-header);
     color: var(--text-on-primary);
-    border-bottom: var(--border-width-thin) solid var(--border-light);
+    border-bottom: 1px solid var(--border-light);
     border-radius: var(--radius-xl) var(--radius-xl) 0 0;
     flex-shrink: 0;
     display: flex;
@@ -30,7 +52,7 @@
     align-items: center;
 }
 
-.dialog-create-act .dialog-title {
+.acts-modal .dialog-title {
     margin: 0;
     font-size: var(--font-size-xl);
     font-weight: var(--font-weight-semibold);
@@ -42,7 +64,7 @@
 }
 
 /* Кнопка закрытия диалога */
-.dialog-create-act-close {
+.acts-modal-close {
     background: none;
     border: none;
     font-size: var(--font-size-3xl);
@@ -59,22 +81,22 @@
     transition: var(--transition-all);
 }
 
-.dialog-create-act-close:hover {
+.acts-modal-close:hover {
     background: var(--help-close-hover);
     transform: rotate(var(--rotate-close-button));
 }
 
-.dialog-create-act-close:active {
+.acts-modal-close:active {
     transform: rotate(var(--rotate-close-button)) scale(var(--button-active-scale));
 }
 
-.dialog-create-act-close:focus-visible {
-    outline: var(--border-width-md) solid var(--text-on-primary);
+.acts-modal-close:focus-visible {
+    outline: 2px solid var(--text-on-primary);
     outline-offset: var(--focus-outline-offset);
 }
 
 /* Форма с прокруткой */
-.dialog-create-act form {
+.acts-modal form {
     padding: var(--spacing-2xl);
     overflow-y: auto;
     overflow-x: hidden;
@@ -87,26 +109,26 @@
     scrollbar-color: var(--scrollbar-thumb) var(--scrollbar-bg);
 }
 
-.dialog-create-act form::-webkit-scrollbar {
+.acts-modal form::-webkit-scrollbar {
     width: var(--scrollbar-width);
 }
 
-.dialog-create-act form::-webkit-scrollbar-track {
+.acts-modal form::-webkit-scrollbar-track {
     background: var(--scrollbar-bg);
     border-radius: 0 0 var(--radius-xl) 0;
 }
 
-.dialog-create-act form::-webkit-scrollbar-thumb {
+.acts-modal form::-webkit-scrollbar-thumb {
     background: var(--scrollbar-thumb);
     border-radius: var(--radius);
 }
 
-.dialog-create-act form::-webkit-scrollbar-thumb:hover {
+.acts-modal form::-webkit-scrollbar-thumb:hover {
     background: var(--scrollbar-thumb-hover);
 }
 
-/* Поля формы */
-.dialog-create-act label {
+/* Базовые стили для label */
+.acts-modal label {
     display: flex;
     flex-direction: column;
     gap: var(--spacing-xs);
@@ -115,41 +137,42 @@
     color: var(--text-primary);
 }
 
-.dialog-create-act input[type="text"],
-.dialog-create-act input[type="date"],
-.dialog-create-act input[type="number"],
-.dialog-create-act select {
+/* Базовые стили для инпутов и селектов */
+.acts-modal input[type="text"],
+.acts-modal input[type="date"],
+.acts-modal input[type="number"],
+.acts-modal select {
     padding: var(--spacing-sm) var(--spacing-md);
-    border: var(--border-width-thin) solid var(--input-border);
+    border: 1px solid var(--input-border);
     border-radius: var(--radius-sm);
     font-size: var(--font-size-base);
     font-family: var(--font-family-base);
     background: var(--input-bg);
     color: var(--input-text);
-    transition: var(--transition-fast);
+    transition: border-color var(--transition-fast), box-shadow var(--transition-fast);
 }
 
-.dialog-create-act input:focus,
-.dialog-create-act select:focus {
+.acts-modal input:hover:not(:focus):not(:disabled):not([readonly]),
+.acts-modal select:hover:not(:focus):not(:disabled) {
+    border-color: var(--input-border-hover);
+}
+
+.acts-modal input:focus,
+.acts-modal select:focus {
     outline: none;
     border-color: var(--input-border-focus);
     box-shadow: var(--input-focus-shadow);
 }
 
-.dialog-create-act input:hover:not(:focus):not(:disabled):not([readonly]),
-.dialog-create-act select:hover:not(:focus):not(:disabled) {
-    border-color: var(--input-border-hover);
-}
-
 /* Readonly поля */
-.dialog-create-act input[readonly] {
+.acts-modal input[readonly] {
     background: var(--input-bg-disabled);
     cursor: not-allowed;
     color: var(--input-text-disabled);
 }
 
 /* Чекбокс */
-.dialog-create-act .checkbox-label {
+.acts-modal .checkbox-label {
     flex-direction: row;
     align-items: center;
     gap: var(--spacing-sm);
@@ -157,7 +180,7 @@
     user-select: none;
 }
 
-.dialog-create-act .checkbox-label input[type="checkbox"] {
+.acts-modal .checkbox-label input[type="checkbox"] {
     width: var(--checkbox-size);
     height: var(--checkbox-size);
     cursor: pointer;
@@ -165,24 +188,24 @@
     accent-color: var(--primary);
 }
 
-/* Fieldset */
-.dialog-create-act fieldset {
-    border: var(--border-width-thin) solid var(--border-light);
+/* Fieldset для группировки полей */
+.acts-modal fieldset {
+    border: 1px solid var(--border-light);
     border-radius: var(--radius-lg);
     padding: var(--spacing-xl);
     margin: 0;
     background: var(--bg-secondary);
 }
 
-.dialog-create-act legend {
+.acts-modal legend {
     padding: 0 var(--spacing-sm);
     font-weight: var(--font-weight-semibold);
     font-size: var(--font-size-base);
     color: var(--text-primary);
 }
 
-/* Кнопка добавления */
-.dialog-create-act .btn-add-item {
+/* Кнопка добавления элемента */
+.acts-modal .btn-add-item {
     display: inline-flex;
     align-items: center;
     justify-content: center;
@@ -190,45 +213,50 @@
     margin-top: var(--spacing-md);
 }
 
-.dialog-create-act .btn-add-item svg {
+.acts-modal .btn-add-item svg {
     flex-shrink: 0;
 }
 
-/* Действия диалога */
-.dialog-create-act .dialog-actions {
+/* Контейнер действий диалога */
+.acts-modal .dialog-actions {
     display: flex;
     gap: var(--spacing-sm);
     padding-top: var(--spacing-xl);
-    border-top: var(--border-width-thin) solid var(--border-light);
+    border-top: 1px solid var(--border-light);
     margin-top: auto;
     flex-shrink: 0;
 }
 
-/* Сетка для части/всего частей */
+/* Сетка для полей "часть/всего частей" */
 .act-parts-grid {
     display: grid;
     grid-template-columns: 1fr 1fr;
     gap: var(--spacing-md);
 }
 
-/* Строка члена группы */
+/* Строка члена аудиторской группы */
 .team-member-row {
     display: grid;
-    grid-template-columns: 10rem 1fr 1fr 8rem var(--button-size-sm);
+    grid-template-columns: var(--team-member-grid-columns);
     gap: var(--spacing-sm);
     margin-bottom: var(--spacing-md);
     align-items: center;
 }
 
+/* Селект роли */
 .team-member-role {
     padding: var(--spacing-sm) var(--spacing-md);
-    border: var(--border-width-thin) solid var(--input-border);
+    border: 1px solid var(--input-border);
     border-radius: var(--radius-sm);
     font-size: var(--font-size-sm);
     font-family: var(--font-family-base);
     background: var(--input-bg);
     color: var(--input-text);
-    transition: var(--transition-fast);
+    transition: border-color var(--transition-fast), box-shadow var(--transition-fast);
+}
+
+.team-member-role:hover:not(:focus) {
+    border-color: var(--input-border-hover);
 }
 
 .team-member-role:focus {
@@ -237,12 +265,30 @@
     box-shadow: var(--input-focus-shadow);
 }
 
-.team-member-name,
-.team-member-position,
-.team-member-username {
+/* Поля внутри строки члена группы */
+.team-member-row input[type="text"] {
+    padding: var(--spacing-sm) var(--spacing-md);
+    border: 1px solid var(--input-border);
+    border-radius: var(--radius-sm);
+    font-size: var(--font-size-sm);
+    font-family: var(--font-family-base);
+    background: var(--input-bg);
+    color: var(--input-text);
+    transition: border-color var(--transition-fast), box-shadow var(--transition-fast);
     min-width: 0;
 }
 
+.team-member-row input[type="text"]:hover:not(:focus) {
+    border-color: var(--input-border-hover);
+}
+
+.team-member-row input[type="text"]:focus {
+    outline: none;
+    border-color: var(--input-border-focus);
+    box-shadow: var(--input-focus-shadow);
+}
+
+/* Кнопка удаления члена группы */
 .delete-member-btn {
     width: var(--button-size-sm);
     height: var(--button-size-sm);
@@ -255,7 +301,7 @@
     border: none;
     border-radius: var(--radius-sm);
     cursor: pointer;
-    transition: var(--transition-fast);
+    transition: color var(--transition-fast), background var(--transition-fast), transform var(--transition-fast);
     flex-shrink: 0;
 }
 
@@ -269,23 +315,44 @@
 }
 
 .delete-member-btn svg {
+    width: var(--icon-size);
+    height: var(--icon-size);
     flex-shrink: 0;
 }
 
 /* Строка поручения */
 .directive-row {
     display: grid;
-    grid-template-columns: 12rem 1fr var(--button-size-sm);
+    grid-template-columns: var(--directive-grid-columns);
     gap: var(--spacing-sm);
     margin-bottom: var(--spacing-md);
     align-items: center;
 }
 
-.directive-point,
-.directive-number {
+/* Поля внутри строки поручения */
+.directive-row input[type="text"] {
+    padding: var(--spacing-sm) var(--spacing-md);
+    border: 1px solid var(--input-border);
+    border-radius: var(--radius-sm);
+    font-size: var(--font-size-sm);
+    font-family: var(--font-family-base);
+    background: var(--input-bg);
+    color: var(--input-text);
+    transition: border-color var(--transition-fast), box-shadow var(--transition-fast);
     min-width: 0;
 }
 
+.directive-row input[type="text"]:hover:not(:focus) {
+    border-color: var(--input-border-hover);
+}
+
+.directive-row input[type="text"]:focus {
+    outline: none;
+    border-color: var(--input-border-focus);
+    box-shadow: var(--input-focus-shadow);
+}
+
+/* Кнопка удаления поручения */
 .delete-directive-btn {
     width: var(--button-size-sm);
     height: var(--button-size-sm);
@@ -298,7 +365,7 @@
     border: none;
     border-radius: var(--radius-sm);
     cursor: pointer;
-    transition: var(--transition-fast);
+    transition: color var(--transition-fast), background var(--transition-fast), transform var(--transition-fast);
     flex-shrink: 0;
 }
 
@@ -312,16 +379,19 @@
 }
 
 .delete-directive-btn svg {
+    width: var(--icon-size);
+    height: var(--icon-size);
     flex-shrink: 0;
 }
 
-/* Контейнеры для строк */
+/* Контейнеры для динамических списков */
 #auditTeamContainer,
 #directivesContainer {
     display: flex;
     flex-direction: column;
 }
 
+/* Плейсхолдер для пустых контейнеров */
 #auditTeamContainer:empty::after,
 #directivesContainer:empty::after {
     content: 'Нажмите кнопку ниже, чтобы добавить';
@@ -339,48 +409,4 @@
 
 #kmNumberField.hidden {
     display: none;
-}
-
-/* Стили для полей внутри строк аудиторской группы */
-.team-member-row input[type="text"] {
-    padding: var(--spacing-sm) var(--spacing-md);
-    border: var(--border-width-thin) solid var(--input-border);
-    border-radius: var(--radius-sm);
-    font-size: var(--font-size-sm);
-    font-family: var(--font-family-base);
-    background: var(--input-bg);
-    color: var(--input-text);
-    transition: var(--transition-fast);
-}
-
-.team-member-row input[type="text"]:focus {
-    outline: none;
-    border-color: var(--input-border-focus);
-    box-shadow: var(--input-focus-shadow);
-}
-
-.team-member-row input[type="text"]:hover:not(:focus) {
-    border-color: var(--input-border-hover);
-}
-
-/* Стили для полей внутри строк поручений */
-.directive-row input[type="text"] {
-    padding: var(--spacing-sm) var(--spacing-md);
-    border: var(--border-width-thin) solid var(--input-border);
-    border-radius: var(--radius-sm);
-    font-size: var(--font-size-sm);
-    font-family: var(--font-family-base);
-    background: var(--input-bg);
-    color: var(--input-text);
-    transition: var(--transition-fast);
-}
-
-.directive-row input[type="text"]:focus {
-    outline: none;
-    border-color: var(--input-border-focus);
-    box-shadow: var(--input-focus-shadow);
-}
-
-.directive-row input[type="text"]:hover:not(:focus) {
-    border-color: var(--input-border-hover);
 }
