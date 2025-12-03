@@ -6,4 +6,4 @@
 
 from app.api.v1.endpoints import act_operations
 
-__all__ = ['act_operations']
+__all__ = ['act_content', 'act_operations', 'acts', 'auth', 'system']

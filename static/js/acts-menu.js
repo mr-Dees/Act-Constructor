@@ -102,7 +102,11 @@ class ActsMenuManager {
      * @returns {Promise<Array>} Массив актов
      */
     static async fetchActsList() {
-        const username = window.env?.JUPYTERHUB_USER || AppConfig?.auth?.jupyterhubUser || "";
+        const username = AuthManager.getCurrentUser();
+
+        if (!username) {
+            throw new Error('Пользователь не авторизован');
+        }
 
         const response = await fetch('/api/v1/acts/list', {
             headers: {'X-JupyterHub-User': username}
@@ -201,7 +205,7 @@ class ActsMenuManager {
     static _fillFields(element, data) {
         element.querySelectorAll('[data-field]').forEach(field => {
             const fieldName = field.getAttribute('data-field');
-            if (data.hasOwnProperty(fieldName)) {
+            if (Object.prototype.hasOwnProperty.call(data, fieldName)) {
                 field.textContent = data[fieldName];
             }
         });
@@ -378,7 +382,7 @@ class ActsMenuManager {
         if (this._clickTimer !== null) {
             clearTimeout(this._clickTimer);
             this._clickTimer = null;
-            this._loadAct(actId);
+            this._switchToAct(actId);
             return;
         }
 
@@ -411,26 +415,27 @@ class ActsMenuManager {
     }
 
     /**
-     * Загружает акт (переход к редактированию)
+     * Переключается на другой акт
      * @private
      * @param {number} actId - ID акта
      */
-    static async _loadAct(actId) {
+    static async _switchToAct(actId) {
+        // Если это текущий акт — просто закрываем меню
         if (actId === this.currentActId) {
             this.hide();
             return;
         }
 
-        // Проверяем наличие несохраненных в БД изменений
-        if (StorageManager.hasUnsyncedChanges()) {
+        // Проверяем несохраненные изменения
+        if (StorageManager.hasUnsyncedChanges() && window.currentActId) {
             this.hide();
 
             const confirmed = await DialogManager.show({
                 title: 'Несохраненные изменения',
-                message: 'У вас есть несохраненные изменения в текущем акте. Если вы продолжите, они будут утеряны. Сохранить изменения в базу данных?',
+                message: 'У вас есть несохраненные изменения в текущем акте. Сохранить перед переключением?',
                 icon: '⚠️',
-                confirmText: 'Сохранить и продолжить',
-                cancelText: 'Не сохранять'
+                confirmText: 'Сохранить и переключить',
+                cancelText: 'Переключить без сохранения'
             });
 
             if (confirmed) {
@@ -440,23 +445,11 @@ class ActsMenuManager {
                     }
 
                     await APIClient.saveActContent(window.currentActId);
-                    Notifications.success('Изменения сохранены в БД');
+                    Notifications.success('Изменения сохранены');
                 } catch (err) {
                     console.error('Ошибка сохранения:', err);
                     Notifications.error('Не удалось сохранить изменения');
-
-                    const continueAnyway = await DialogManager.show({
-                        title: 'Ошибка сохранения',
-                        message: 'Не удалось сохранить изменения. Продолжить без сохранения?',
-                        icon: '❌',
-                        confirmText: 'Продолжить',
-                        cancelText: 'Отмена'
-                    });
-
-                    if (!continueAnyway) {
-                        this.show();
-                        return;
-                    }
+                    return; // Отменяем переключение
                 }
             }
         } else {
@@ -464,24 +457,34 @@ class ActsMenuManager {
         }
 
         try {
-            StorageManager.clearStorage();
+            console.log('Переключаемся на акт:', actId);
 
+            // Загружаем содержимое нового акта
+            await APIClient.loadActContent(actId);
+
+            // Обновляем текущий ID
             this.currentActId = actId;
             this.selectedActId = actId;
             window.currentActId = actId;
 
-            await APIClient.loadActContent(actId);
-
+            // Обновляем URL без перезагрузки страницы
             const newUrl = `/constructor?act_id=${actId}`;
             window.history.pushState({actId}, '', newUrl);
 
-            if (typeof Notifications !== 'undefined') {
-                Notifications.success('Акт загружен');
-            }
+            // Помечаем как синхронизированный с БД
+            StorageManager.markAsSyncedWithDB();
 
-        } catch (err) {
-            console.error('Ошибка загрузки акта:', err);
-            if (typeof Notifications !== 'undefined') {
+            Notifications.success('Акт успешно загружен');
+
+        } catch (error) {
+            console.error('Ошибка переключения на акт:', error);
+
+            // Обрабатываем специфичные ошибки
+            if (error.code === 'ACCESS_DENIED') {
+                Notifications.error('У вас нет доступа к этому акту');
+            } else if (error.code === 'NOT_FOUND') {
+                Notifications.error('Акт не найден');
+            } else {
                 Notifications.error('Не удалось загрузить акт');
             }
         }
@@ -499,7 +502,12 @@ class ActsMenuManager {
         }
 
         try {
-            const username = window.env?.JUPYTERHUB_USER || AppConfig?.auth?.jupyterhubUser || "";
+            const username = AuthManager.getCurrentUser();
+
+            if (!username) {
+                throw new Error('Пользователь не авторизован');
+            }
+
             const response = await fetch(`/api/v1/acts/${actId}`, {
                 headers: {'X-JupyterHub-User': username}
             });
@@ -545,7 +553,12 @@ class ActsMenuManager {
         }
 
         try {
-            const username = window.env?.JUPYTERHUB_USER || AppConfig?.auth?.jupyterhubUser || "";
+            const username = AuthManager.getCurrentUser();
+
+            if (!username) {
+                throw new Error('Пользователь не авторизован');
+            }
+
             const response = await fetch(
                 `/api/v1/acts/${actId}/duplicate`,
                 {
@@ -602,7 +615,7 @@ class ActsMenuManager {
             // Если удаляем текущий акт - очищаем localStorage и переходим на главную
             if (actId === this.currentActId) {
                 StorageManager.clearStorage();
-                window.location.href = '/';
+                this._redirectToActsManager();
             } else {
                 // Если удаляем другой акт - перезагружаем список
                 Notifications.success('Акт успешно удален');
@@ -614,6 +627,19 @@ class ActsMenuManager {
             console.error('Ошибка удаления акта:', err);
             Notifications.error(`Не удалось удалить акт: ${err.message}`);
         }
+    }
+
+    /**
+     * Редиректит на страницу выбора актов
+     * @private
+     */
+    static _redirectToActsManager() {
+        console.log('Перенаправление на страницу выбора актов...');
+
+        // Небольшая задержка для показа уведомления
+        setTimeout(() => {
+            window.location.href = '/';
+        }, 1500);
     }
 
     /**
@@ -686,22 +712,20 @@ class ActsMenuManager {
                 Notifications.success('Акт загружен из базы данных');
             }
 
-        } catch (err) {
-            console.error('Ошибка загрузки акта:', err);
+        } catch (error) {
+            console.error('Ошибка загрузки акта:', error);
 
-            // Показываем понятное сообщение об ошибке
-            if (err.message.includes('Нет доступа')) {
+            // Обрабатываем специфичные ошибки
+            if (error.code === 'ACCESS_DENIED') {
                 Notifications.error('У вас нет доступа к этому акту');
-            } else if (err.message.includes('не найден')) {
+                this._redirectToActsManager();
+            } else if (error.code === 'NOT_FOUND') {
                 Notifications.error('Акт не найден');
+                this._redirectToActsManager();
             } else {
-                Notifications.error('Не удалось загрузить акт');
+                Notifications.error('Не удалось загрузить акт. Перенаправление на главную...');
+                this._redirectToActsManager();
             }
-
-            // Показываем меню выбора актов
-            setTimeout(() => {
-                this.show();
-            }, 1000);
 
         } finally {
             this._hideLoadingIndicator();
@@ -807,6 +831,29 @@ class ActsMenuManager {
         if (menu) {
             menu.addEventListener('click', (e) => e.stopPropagation());
         }
+
+        // Обработка кнопки "Назад" браузера
+        window.addEventListener('popstate', async (event) => {
+            const actId = event.state?.actId;
+
+            if (actId) {
+                try {
+                    await APIClient.loadActContent(actId);
+                    this.currentActId = actId;
+                    this.selectedActId = actId;
+                    window.currentActId = actId;
+                    StorageManager.markAsSyncedWithDB();
+                    Notifications.success('Акт восстановлен из истории');
+                } catch (error) {
+                    console.error('Ошибка восстановления акта из истории:', error);
+
+                    if (error.code === 'ACCESS_DENIED' || error.code === 'NOT_FOUND') {
+                        Notifications.error('Акт недоступен');
+                        this._redirectToActsManager();
+                    }
+                }
+            }
+        });
 
         // Извлекаем act_id из URL
         const urlParams = new URLSearchParams(window.location.search);

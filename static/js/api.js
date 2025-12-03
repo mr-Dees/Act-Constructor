@@ -239,9 +239,14 @@ class APIClient {
      *
      * @param {number} actId - ID акта
      * @returns {Promise<void>}
+     * @throws {Error} При ошибке доступа или загрузки
      */
     static async loadActContent(actId) {
-        const username = window.env?.JUPYTERHUB_USER || AppConfig?.auth?.jupyterhubUser || "";
+        const username = AuthManager.getCurrentUser();
+
+        if (!username) {
+            throw new Error('Пользователь не авторизован');
+        }
 
         try {
             const resp = await fetch(`/api/v1/act_content/${actId}/content`, {
@@ -250,9 +255,13 @@ class APIClient {
 
             if (!resp.ok) {
                 if (resp.status === 403) {
-                    throw new Error('Нет доступа к акту');
+                    const error = new Error('Нет доступа к акту');
+                    error.code = 'ACCESS_DENIED';
+                    throw error;
                 } else if (resp.status === 404) {
-                    throw new Error('Акт не найден');
+                    const error = new Error('Акт не найден');
+                    error.code = 'NOT_FOUND';
+                    throw error;
                 }
                 throw new Error('Ошибка загрузки акта');
             }
@@ -268,7 +277,6 @@ class APIClient {
                 content.tree.children.length === 0;
 
             if (isEmpty) {
-                // Акт пустой: инициализируем структуру по умолчанию
                 console.log('Акт пуст, инициализируем дефолтную структуру');
                 AppState.initializeTree();
                 AppState.tables = {};
@@ -282,7 +290,6 @@ class APIClient {
 
                 Notifications.info('Акт инициализирован автоматически');
             } else {
-                // Загружаем существующее содержимое из БД
                 console.log('Загружаем содержимое акта из БД');
                 AppState.treeData = content.tree;
                 AppState.tables = content.tables || {};
@@ -363,7 +370,11 @@ class APIClient {
      * @returns {Promise<void>}
      */
     static async saveActContent(actId) {
-        const username = window.env?.JUPYTERHUB_USER || AppConfig?.auth?.jupyterhubUser || "";
+        const username = AuthManager.getCurrentUser();
+
+        if (!username) {
+            throw new Error('Пользователь не авторизован');
+        }
 
         try {
             // Блокируем отслеживание на время сохранения
@@ -416,7 +427,11 @@ class APIClient {
      * @returns {Promise<void>}
      */
     static async deleteAct(actId) {
-        const username = window.env?.JUPYTERHUB_USER || AppConfig?.auth?.jupyterhubUser || "";
+        const username = AuthManager.getCurrentUser();
+
+        if (!username) {
+            throw new Error('Пользователь не авторизован');
+        }
 
         try {
             const resp = await fetch(`/api/v1/acts/${actId}`, {

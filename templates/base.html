@@ -21,6 +21,25 @@
     <!-- Конфигурация приложения -->
     <script src="/static/js/app-config.js"></script>
 
+    <!-- Авторизация (должна загружаться первой) -->
+    <script src="/static/js/auth.js"></script>
+
+    <script>
+        // Проверка авторизации только при открытии акта (constructor)
+        (async function() {
+            const urlParams = new URLSearchParams(window.location.search);
+            const actId = urlParams.get('act_id');
+
+            // Если это страница конструктора — требуем свежую авторизацию из окружения
+            if (actId && window.location.pathname === '/constructor') {
+                const isAuthorized = await AuthManager.requireAuth();
+                if (!isAuthorized) {
+                    throw new Error('Unauthorized');
+                }
+            }
+        })();
+    </script>
+
     <!-- Базовые утилиты -->
     <script src="/static/js/notifications.js"></script>
     <script src="/static/js/storage-manager.js"></script>
@@ -98,7 +117,7 @@
     {% include 'header/help/step1.html' %}
     {% include 'header/help/step2.html' %}
 
-<!-- Шаблон для меню актов -->
+    <!-- Шаблон для меню актов -->
     {% include 'header/acts_menu_item.html' %}
     {% include 'components/acts/create_act_dialog.html' %}
     {% include 'components/acts/team_member_row.html' %}
@@ -106,6 +125,9 @@
     {% include 'components/acts/acts_loading.html' %}
     {% include 'components/acts/acts_empty_state.html' %}
     {% include 'components/acts/acts_error_state.html' %}
+
+    <!-- Шаблон ошибки авторизации -->
+    {% include 'components/auth_error.html' %}
 
     <!-- Дополнительные скрипты страницы -->
     {% block extra_js %}{% endblock %}

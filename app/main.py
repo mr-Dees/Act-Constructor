@@ -2,7 +2,8 @@
 Точка входа FastAPI приложения.
 
 Этот модуль создает и конфигурирует основное приложение FastAPI,
-подключает маршруты API, статические файлы и шаблоны Jinja2.
+подключает маршруты API, статические файлы и шаблоны Jinja2,
+Проверяет доступ к акту на уровне HTML-роута /constructor.
 """
 
 import threading
@@ -10,15 +11,17 @@ from contextlib import asynccontextmanager
 from datetime import datetime, timedelta
 
 from cachetools import TTLCache
-from fastapi import FastAPI, Request
-from fastapi.responses import HTMLResponse, JSONResponse
+from fastapi import FastAPI, Request, Depends
+from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 from starlette.middleware.base import BaseHTTPMiddleware
 
+from app.api.v1.deps.auth_deps import get_username
 from app.api.v1.routes import api_router as api_v1_router
 from app.core.config import Settings, setup_logging
-from app.db.connection import init_db, close_db, create_tables_if_not_exist
+from app.db.connection import init_db, close_db, create_tables_if_not_exist, get_db
+from app.db.service import ActDBService
 
 # Инициализируем настройки и логирование один раз на уровне модуля
 settings = Settings()
@@ -197,7 +200,7 @@ def create_app() -> FastAPI:
     - Создает приложение с метаданными из настроек
     - Инициализирует Jinja2 для рендеринга шаблонов
     - Монтирует статические файлы (CSS, JS, изображения)
-    - Регистрирует маршрут главной страницы
+    - Регистрирует HTML-роуты с проверкой доступа к актам
     - Подключает API роутеры с префиксом версии
     - Добавляет middleware для контроля нагрузки
 
@@ -235,19 +238,55 @@ def create_app() -> FastAPI:
 
     @app.get("/", response_class=HTMLResponse)
     async def show_acts_manager(request: Request):
-        """Стартовая страница - менеджер актов."""
+        """
+        Стартовая страница - менеджер актов.
+
+        Отображает список актов пользователя для выбора.
+        Авторизация проверяется фронтендом через /api/v1/auth/me.
+        """
         return templates.TemplateResponse(
             "acts_manager.html",
             {"request": request}
         )
 
     @app.get("/constructor", response_class=HTMLResponse)
-    async def show_constructor(request: Request, act_id: int):
-        """Страница конструктора конкретного акта."""
-        return templates.TemplateResponse(
-            "constructor.html",
-            {"request": request, "act_id": act_id}
-        )
+    async def show_constructor(
+            request: Request,
+            act_id: int,
+            username: str = Depends(get_username)
+    ):
+        """
+        Страница конструктора конкретного акта.
+
+        Проверяет доступ пользователя к акту ДО рендеринга HTML.
+        При отсутствии доступа редиректит на главную страницу (менеджер актов).
+
+        Args:
+            request: HTTP запрос
+            act_id: ID акта из query параметра
+            username: Имя пользователя (из зависимости get_username)
+
+        Returns:
+            HTML страница конструктора или редирект на /
+
+        Raises:
+            RedirectResponse: 302 редирект на / при отсутствии доступа
+        """
+        async with get_db() as conn:
+            db_service = ActDBService(conn)
+
+            has_access = await db_service.check_user_access(act_id, username)
+            if not has_access:
+                logger.info(
+                    f"Пользователь {username} попытался открыть недоступный акт ID={act_id}, "
+                    f"редирект на менеджер актов"
+                )
+                return RedirectResponse(url="/", status_code=302)
+
+            return templates.TemplateResponse(
+                "constructor.html",
+                {"request": request, "act_id": act_id}
+            )
 
     # Подключение API роутеров версии 1 с префиксом /api/v1
     app.include_router(

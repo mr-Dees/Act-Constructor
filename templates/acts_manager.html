@@ -42,12 +42,10 @@
 {% include 'components/acts/acts_empty_state.html' %}
 {% include 'components/acts/acts_error_state.html' %}
 {% include 'components/acts/acts_card.html' %}
+{% include 'components/auth_error.html' %}
 
 <script src="/static/js/app-config.js"></script>
-<script>
-    window.env = window.env || {};
-    window.env.JUPYTERHUB_USER = AppConfig?.auth?.jupyterhubUser || "22494524";
-</script>
+<script src="/static/js/auth.js"></script>
 
 <!-- Диалоговая система -->
 <script src="/static/js/dialog/dialog-base.js"></script>
@@ -56,5 +54,18 @@
 
 <script src="/static/js/notifications.js"></script>
 <script src="/static/js/acts-manager-page.js"></script>
+
+<script>
+    // Проверка авторизации при загрузке страницы менеджера актов
+    document.addEventListener('DOMContentLoaded', async () => {
+        // Требуем свежую авторизацию через API
+        const isAuthorized = await AuthManager.requireAuth();
+
+        if (isAuthorized) {
+            // Инициализируем страницу только после успешной авторизации
+            ActsManagerPage.init();
+        }
+    });
+</script>
 </body>
 </html>

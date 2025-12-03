@@ -1,6 +1,14 @@
 # app/api/v1/endpoints/act_content.py
 """
 API эндпоинты для работы с содержимым актов.
+
+Предоставляет операции загрузки и сохранения структурированного содержимого:
+- Дерево структуры акта (tree)
+- Таблицы (tables)
+- Текстовые блоки (textBlocks)
+- Нарушения (violations)
+
+Авторизация и проверка доступа к акту осуществляется через зависимость get_username.
 """
 
 import json
@@ -8,7 +16,7 @@ import logging
 
 from fastapi import APIRouter, Depends, HTTPException
 
-from app.api.v1.endpoints.acts import get_username
+from app.api.v1.deps.auth_deps import get_username
 from app.db.connection import get_db
 from app.db.service import ActDBService
 from app.schemas.act import ActDataSchema
@@ -25,8 +33,22 @@ async def get_act_content(
     """
     Получает полное содержимое акта для редактора.
 
+    Загружает из БД:
+    - Дерево структуры (act_tree)
+    - Таблицы (act_tables)
+    - Текстовые блоки (act_textblocks)
+    - Нарушения (act_violations)
+
+    Args:
+        act_id: ID акта
+        username: Имя пользователя (из зависимости)
+
     Returns:
         Содержимое акта в формате {tree, tables, textBlocks, violations}
+
+    Raises:
+        HTTPException: 403 если нет доступа к акту
+        HTTPException: 500 при ошибках загрузки
     """
     async with get_db() as conn:
         db_service = ActDBService(conn)
@@ -149,8 +171,24 @@ async def save_act_content(
     """
     Сохраняет содержимое акта.
 
-    Обновляет дерево, таблицы, текстовые блоки и нарушения.
-    Обновляет last_edited_at и last_edited_by в таблице acts.
+    Обновляет в БД:
+    - Дерево структуры (act_tree)
+    - Таблицы (act_tables) - с пересозданием всех записей
+    - Текстовые блоки (act_textblocks) - с пересозданием
+    - Нарушения (act_violations) - с пересозданием
+    - Метку last_edited_at и last_edited_by в таблице acts
+
+    Args:
+        act_id: ID акта
+        data: Полное содержимое акта (валидировано через ActDataSchema)
+        username: Имя пользователя (из зависимости)
+
+    Returns:
+        Сообщение об успешном сохранении
+
+    Raises:
+        HTTPException: 403 если нет доступа к акту
+        HTTPException: 500 при ошибках сохранения
     """
     async with get_db() as conn:
         db_service = ActDBService(conn)

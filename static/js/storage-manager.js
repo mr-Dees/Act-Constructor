@@ -646,4 +646,13 @@ class StorageManager {
             this._periodicSaveInterval = null;
         }
     }
+
+    /**
+     * Инвалидирует кеш актов (для вызова после изменений)
+     */
+    static invalidateActsCache() {
+        if (window.ActsManagerPage && typeof window.ActsManagerPage.invalidateCache === 'function') {
+            window.ActsManagerPage.invalidateCache();
+        }
+    }
 }

@@ -5,6 +5,7 @@
 
 /* Базовые стили - переменные, сброс, анимации */
 @import './base/variables.css';
+@import 'base/auth.css';
 @import './base/reset.css';
 @import './base/animations.css';
 

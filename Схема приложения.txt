@@ -5,9 +5,13 @@ Act Constructor/
 │   │   └── v1/
 │   │       ├── endpoints/
 │   │       │   ├── __init__.py
+│   │       │   └── auth_deps.py
+│   │       ├── endpoints/
+│   │       │   ├── __init__.py
 │   │       │   ├── act_content.py
 │   │       │   ├── act_operations.py
 │   │       │   ├── acts.py
+│   │       │   ├── auth.py
 │   │       │   └── system.py
 │   │       ├── __init__.py
 │   │       └── routes.py
@@ -61,7 +65,8 @@ Act Constructor/
 │   │   │   ├── acts_loading.html
 │   │   │   ├── create_act_dialog.html
 │   │   │   ├── directive_row.html
-│   │   │   ├── team_member_row.html
+│   │   │   └── team_member_row.html
+│   │   ├── auth_error.html
 │   │   ├── context_menu.html
 │   │   ├── dialog.html
 │   │   ├── preview_panel.html
@@ -85,6 +90,7 @@ Act Constructor/
 │   ├── css/
 │   │   ├── base/
 │   │   │   ├── animations.css
+│   │   │   ├── auth.css
 │   │   │   ├── reset.css
 │   │   │   └── variables.css
 │   │   ├── layout/
@@ -211,6 +217,7 @@ Act Constructor/
 │       ├── api.js
 │       ├── app.js
 │       ├── app-config.js
+│       ├── auth.js
 │       ├── format-menu-manager.js
 │       ├── navigation-manager.js
 │       ├── notifications.js

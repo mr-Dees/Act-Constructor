@@ -5,6 +5,18 @@
 
 class ActsManagerPage {
     /**
+     * Ключ для кеша актов в localStorage
+     * @private
+     */
+    static _cacheKey = 'acts_list_cache';
+
+    /**
+     * Время жизни кеша (5 минут)
+     * @private
+     */
+    static _cacheExpiry = 5 * 60 * 1000;
+
+    /**
      * Форматирует отображение КМ с учетом частей
      * @private
      */
@@ -79,23 +91,107 @@ class ActsManagerPage {
     static _fillFields(element, data) {
         element.querySelectorAll('[data-field]').forEach(field => {
             const fieldName = field.getAttribute('data-field');
-            if (data.hasOwnProperty(fieldName)) {
+            if (Object.prototype.hasOwnProperty.call(data, fieldName)) {
                 field.textContent = data[fieldName];
             }
         });
     }
 
     /**
-     * Загружает и отображает список актов
+     * Загружает список актов из кеша
+     * @private
      */
-    static async loadActs() {
+    static _loadFromCache() {
+        try {
+            const cached = localStorage.getItem(this._cacheKey);
+            if (!cached) return null;
+
+            const parsed = JSON.parse(cached);
+
+            // Проверяем срок годности (если не бесконечный)
+            if (this._cacheExpiry !== Infinity) {
+                const now = Date.now();
+                if (now - parsed.timestamp > this._cacheExpiry) {
+                    this._clearCache();
+                    return null;
+                }
+            }
+
+            return parsed.acts;
+        } catch (error) {
+            console.error('Ошибка чтения кеша актов:', error);
+            this._clearCache();
+            return null;
+        }
+    }
+
+    /**
+     * Сохраняет список актов в кеш
+     * @private
+     */
+    static _saveToCache(acts) {
+        try {
+            const cacheData = {
+                acts: acts,
+                timestamp: Date.now()
+            };
+            localStorage.setItem(this._cacheKey, JSON.stringify(cacheData));
+        } catch (error) {
+            console.error('Ошибка сохранения кеша актов:', error);
+        }
+    }
+
+    /**
+     * Очищает кеш актов
+     * @private
+     */
+    static _clearCache() {
+        try {
+            localStorage.removeItem(this._cacheKey);
+        } catch (error) {
+            console.error('Ошибка очистки кеша актов:', error);
+        }
+    }
+
+    /**
+     * Инвалидирует кеш (для вызова после изменений)
+     */
+    static invalidateCache() {
+        this._clearCache();
+    }
+
+    /**
+     * Загружает и отображает список актов
+     * @param {boolean} [forceRefresh=false] - Принудительно обновить из API
+     */
+    static async loadActs(forceRefresh = false) {
         const container = document.getElementById('actsListContainer');
         if (!container) return;
 
+        // Пытаемся загрузить из кеша если не force
+        if (!forceRefresh) {
+            const cached = this._loadFromCache();
+            if (cached) {
+                console.log('Загружено из кеша:', cached.length, 'актов');
+                if (cached.length === 0) {
+                    this._showEmptyState(container);
+                } else {
+                    this._renderActsGrid(cached, container);
+                }
+                return;
+            }
+        }
+
+        // Показываем загрузку
         this._showLoading(container);
 
         try {
-            const username = window.env?.JUPYTERHUB_USER || "unknown";
+            const username = AuthManager.getCurrentUser();
+
+            if (!username) {
+                throw new Error('Пользователь не авторизован');
+            }
+
             const response = await fetch('/api/v1/acts/list', {
                 headers: {'X-JupyterHub-User': username}
             });
@@ -105,6 +201,9 @@ class ActsManagerPage {
             }
 
             const acts = await response.json();
+
+            // Сохраняем в кеш
+            this._saveToCache(acts);
 
             if (!acts.length) {
                 this._showEmptyState(container);
@@ -180,8 +279,11 @@ class ActsManagerPage {
      * @private
      */
     static _createActCard(act) {
-        const card = this._cloneTemplate('actCardTemplate');
-        if (!card) return null;
+        const cardFragment = this._cloneTemplate('actCardTemplate');
+        if (!cardFragment) return null;
+
+        const cardElement = cardFragment.querySelector('.act-card');
+        if (!cardElement) return null;
 
         // Подготавливаем данные для заполнения
         const data = {
@@ -195,11 +297,9 @@ class ActsManagerPage {
         };
 
         // Заполняем поля
-        this._fillFields(card, data);
+        this._fillFields(cardFragment, data);
 
         // Привязываем обработчики к кнопкам
-        const cardElement = card.querySelector('.act-card');
-
         const openBtn = cardElement.querySelector('[data-action="open"]');
         const editBtn = cardElement.querySelector('[data-action="edit"]');
         const duplicateBtn = cardElement.querySelector('[data-action="duplicate"]');
@@ -221,7 +321,7 @@ class ActsManagerPage {
             deleteBtn.addEventListener('click', () => this.deleteAct(act.id, act.inspection_name));
         }
 
-        return card;
+        return cardFragment;
     }
 
     /**
@@ -236,7 +336,12 @@ class ActsManagerPage {
      */
     static async editAct(actId) {
         try {
-            const username = window.env?.JUPYTERHUB_USER || "unknown";
+            const username = AuthManager.getCurrentUser();
+
+            if (!username) {
+                throw new Error('Пользователь не авторизован');
+            }
+
             const response = await fetch(`/api/v1/acts/${actId}`, {
                 headers: {'X-JupyterHub-User': username}
             });
@@ -252,7 +357,6 @@ class ActsManagerPage {
 
             const actData = await response.json();
 
-            // Открываем диалог редактирования
             if (window.CreateActDialog && typeof window.CreateActDialog.showEdit === 'function') {
                 window.CreateActDialog.showEdit(actData);
             } else {
@@ -281,7 +385,12 @@ class ActsManagerPage {
         if (!confirmed) return;
 
         try {
-            const username = window.env?.JUPYTERHUB_USER || "unknown";
+            const username = AuthManager.getCurrentUser();
+
+            if (!username) {
+                throw new Error('Пользователь не авторизован');
+            }
+
             const response = await fetch(`/api/v1/acts/${actId}/duplicate`, {
                 method: 'POST',
                 headers: {'X-JupyterHub-User': username}
@@ -299,6 +408,10 @@ class ActsManagerPage {
             }
 
             const newAct = await response.json();
+
+            // Инвалидируем кеш после успешного дублирования
+            this.invalidateCache();
+
             Notifications.success(`Копия создана: ${newAct.inspection_name}`);
 
             const openNewAct = await DialogManager.show({
@@ -312,7 +425,8 @@ class ActsManagerPage {
             if (openNewAct) {
                 window.location.href = `/constructor?act_id=${newAct.id}`;
             } else {
-                await this.loadActs();
+                // Принудительно обновляем список
+                await this.loadActs(true);
             }
 
         } catch (error) {
@@ -336,7 +450,12 @@ class ActsManagerPage {
         if (!confirmed) return;
 
         try {
-            const username = window.env?.JUPYTERHUB_USER || "unknown";
+            const username = AuthManager.getCurrentUser();
+
+            if (!username) {
+                throw new Error('Пользователь не авторизован');
+            }
+
             const response = await fetch(`/api/v1/acts/${actId}`, {
                 method: 'DELETE',
                 headers: {'X-JupyterHub-User': username}
@@ -351,8 +470,13 @@ class ActsManagerPage {
                 throw new Error('Ошибка удаления акта');
             }
 
+            // Инвалидируем кеш после успешного удаления
+            this.invalidateCache();
+
             Notifications.success('Акт успешно удален');
-            await this.loadActs();
+
+            // Принудительно обновляем список
+            await this.loadActs(true);
 
         } catch (error) {
             console.error('Ошибка удаления акта:', error);
@@ -364,19 +488,29 @@ class ActsManagerPage {
      * Инициализация страницы
      */
     static init() {
+        // Загружаем акты (с кешем)
         this.loadActs();
 
         const createBtn = document.getElementById('createNewActBtn');
         if (createBtn) {
             createBtn.addEventListener('click', () => {
-                CreateActDialog.show();
+                if (window.CreateActDialog && typeof window.CreateActDialog.show === 'function') {
+                    window.CreateActDialog.show();
+                } else {
+                    console.error('CreateActDialog не найден');
+                    Notifications.error('Ошибка открытия диалога создания акта');
+                }
+            });
+        }
+
+        // Обработчик для кнопки обновления (если есть)
+        const refreshBtn = document.getElementById('refreshActsBtn');
+        if (refreshBtn) {
+            refreshBtn.addEventListener('click', () => {
+                this.loadActs(true);
             });
         }
     }
 }
 
 window.ActsManagerPage = ActsManagerPage;
-
-document.addEventListener('DOMContentLoaded', () => {
-    ActsManagerPage.init();
-});

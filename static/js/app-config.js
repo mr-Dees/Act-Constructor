@@ -16,10 +16,6 @@ class AppConfig {
         VIOLATION: 'violation'
     };
 
-    static auth = {
-        jupyterhubUser: "22494524"
-    };
-
     /**
      * Настройки предпросмотра документа
      */

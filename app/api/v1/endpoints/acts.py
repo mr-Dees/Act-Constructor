@@ -1,30 +1,31 @@
 # app/api/v1/endpoints/acts.py
 """
 API эндпоинты для управления актами.
+
+Предоставляет CRUD операции для метаданных актов:
+- Список актов пользователя
+- Создание нового акта
+- Получение информации об акте
+- Обновление метаданных
+- Дублирование акта
+- Удаление акта
+
+Авторизация осуществляется через зависимость get_username (app.api.v1.deps.auth_deps).
 """
 
 import logging
-from typing import Annotated
 
 from asyncpg import UniqueViolationError
-from fastapi import APIRouter, HTTPException, Header, Depends
+from fastapi import APIRouter, HTTPException, Depends
 from pydantic import ValidationError
 
-from app.core.config import get_settings, Settings
+from app.api.v1.deps.auth_deps import get_username
 from app.db.connection import get_db
 from app.db.models import ActCreate, ActUpdate, ActListItem, ActResponse
 from app.db.service import ActDBService
 
 logger = logging.getLogger("act_constructor.api")
 router = APIRouter()
-
-
-def get_username(
-        x_jupyterhub_user: Annotated[str | None, Header()] = None,
-        settings: Settings = Depends(get_settings)
-) -> str:
-    """Извлекает имя пользователя из заголовка или настроек."""
-    return x_jupyterhub_user or settings.jupyterhub_user
 
 
 @router.get("/list", response_model=list[ActListItem])
@@ -52,8 +53,16 @@ async def create_act(
 
     Args:
         act_data: Данные для создания акта
-        username: Имя пользователя
+        username: Имя пользователя (из зависимости)
         force_new_part: Если True, создает новую часть существующего КМ
+
+    Returns:
+        Созданный акт с полными метаданными
+
+    Raises:
+        HTTPException: 409 если КМ уже существует и force_new_part=False
+        HTTPException: 422 при ошибках валидации
+        HTTPException: 500 при внутренних ошибках
     """
     try:
         async with get_db() as conn:
@@ -123,7 +132,20 @@ async def get_act(
         act_id: int,
         username: str = Depends(get_username)
 ):
-    """Получает полную информацию об акте."""
+    """
+    Получает полную информацию об акте.
+
+    Args:
+        act_id: ID акта
+        username: Имя пользователя (из зависимости)
+
+    Returns:
+        Полная информация об акте с метаданными
+
+    Raises:
+        HTTPException: 403 если нет доступа к акту
+        HTTPException: 404 если акт не найден
+    """
     try:
         async with get_db() as conn:
             db_service = ActDBService(conn)
@@ -147,7 +169,22 @@ async def update_act_metadata(
         act_update: ActUpdate,
         username: str = Depends(get_username)
 ):
-    """Обновляет метаданные акта (частичное обновление)."""
+    """
+    Обновляет метаданные акта (частичное обновление).
+
+    Args:
+        act_id: ID акта
+        act_update: Данные для обновления (только заполненные поля)
+        username: Имя пользователя (из зависимости)
+
+    Returns:
+        Обновленный акт с полными метаданными
+
+    Raises:
+        HTTPException: 403 если нет доступа к акту
+        HTTPException: 409 при конфликте уникальности
+        HTTPException: 422 при ошибках валидации
+    """
     try:
         async with get_db() as conn:
             db_service = ActDBService(conn)
@@ -227,6 +264,17 @@ async def duplicate_act(
     - "Название проверки (Копия)" - для первой копии
     - "Название проверки (Копия 2)" - для второй копии
     - и так далее
+
+    Args:
+        act_id: ID акта для дублирования
+        username: Имя пользователя (из зависимости)
+
+    Returns:
+        Новый акт (дубликат) с обновленным названием
+
+    Raises:
+        HTTPException: 403 если нет доступа к акту
+        HTTPException: 404 если акт не найден
     """
     try:
         async with get_db() as conn:
@@ -255,6 +303,17 @@ async def delete_act(
 
     Требует подтверждения на фронтенде.
     Каскадное удаление обрабатывается на уровне БД через ON DELETE CASCADE.
+
+    Args:
+        act_id: ID акта для удаления
+        username: Имя пользователя (из зависимости)
+
+    Returns:
+        Сообщение об успешном удалении
+
+    Raises:
+        HTTPException: 403 если нет доступа к акту
+        HTTPException: 404 если акт не найден
     """
     try:
         async with get_db() as conn:
