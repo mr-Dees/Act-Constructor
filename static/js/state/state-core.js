@@ -77,25 +77,38 @@ const AppState = {
      * @private
      */
     _createInitialTables() {
+        if (!AppConfig?.content?.tablePresets) {
+            return;
+        }
+
         const presets = AppConfig.content.tablePresets;
 
-        this._createTableFromPreset('2', presets.qualityAssessment, '', true, false);
-        this._createTableFromPreset('3', presets.dataTools, presets.dataTools.label, true, false);
-        this._createTableFromPreset('3', presets.dataSources, presets.dataSources.label, true, false);
-        this._createTableFromPreset('3', presets.repositories, presets.repositories.label, true, false);
+        // Ищем узлы по ID
+        const node2 = this.findNodeById('2');
+        const node3 = this.findNodeById('3');
+
+        if (node2) {
+            // Таблица для раздела 2
+            this._createTableFromPreset('2', presets.qualityAssessment, '', true, false);
+        }
+
+        if (node3) {
+            // Таблицы для раздела 3
+            this._createTableFromPreset('3', presets.dataTools, presets.dataTools.label, true, false);
+            this._createTableFromPreset('3', presets.dataSources, presets.dataSources.label, true, false);
+            this._createTableFromPreset('3', presets.repositories, presets.repositories.label, true, false);
+        }
     },
 
     /**
      * Создает таблицу из пресета
      * @private
-     * @param {string} nodeId - ID узла для добавления
-     * @param {Object} preset - Конфигурация таблицы
-     * @param {string} label - Название таблицы
-     * @param {boolean} protected - Защита от изменений
-     * @param {boolean} deletable - Возможность удаления
-     * @returns {Object} Результат создания
      */
     _createTableFromPreset(nodeId, preset, label, protected, deletable) {
+        if (!preset) {
+            return ValidationCore.failure('Пресет не передан');
+        }
+
         return this._createSimpleTable(
             nodeId,
             preset.rows,
@@ -126,7 +139,9 @@ const AppState = {
         }
 
         const validation = ValidationTree.canAddContent(node, AppConfig.nodeTypes.TABLE);
-        if (!validation.valid) return validation;
+        if (!validation.valid) {
+            return validation;
+        }
 
         const tableId = this._generateId('table');
         const tableNode = this._createTableNode(nodeId, tableId, label, protected, deletable);
@@ -153,7 +168,7 @@ const AppState = {
      */
     _createTableNode(parentId, tableId, label, protected, deletable) {
         const node = {
-            id: `${parentId}_table_${Date.now()}`,
+            id: `${parentId}_table_${Date.now()}_${Math.random().toString(36).substring(2, 9)}`,
             label: label || AppConfig.tree.labels.table,
             type: 'table',
             tableId,
@@ -270,6 +285,7 @@ const AppState = {
      * @returns {Object|null} Найденный узел или null
      */
     findNodeById(id, node = this.treeData) {
+        if (!node) return null;
         if (node.id === id) return node;
         if (!node.children) return null;
 
@@ -324,7 +340,8 @@ const AppState = {
             id: node.id,
             label: node.label,
             type: node.type || 'item',
-            protected: node.protected || false
+            protected: node.protected || false,
+            deletable: node.deletable !== undefined ? node.deletable : true
         };
 
         // Добавляем ID связанного контента
@@ -371,7 +388,8 @@ const AppState = {
                     originCol: cell.originCol
                 }))),
                 colWidths: table.colWidths || [],
-                protected: table.protected || false
+                protected: table.protected || false,
+                deletable: table.deletable !== undefined ? table.deletable : true
             };
         }
 

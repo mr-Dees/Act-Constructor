@@ -277,20 +277,25 @@ class APIClient {
                 content.tree.children.length === 0;
 
             if (isEmpty) {
-                console.log('Акт пуст, инициализируем дефолтную структуру');
-                AppState.initializeTree();
+                // Акт пуст, инициализируем дефолтную структуру
+
+                // Очищаем состояние ДО инициализации
+                AppState.treeData = null;
                 AppState.tables = {};
                 AppState.textBlocks = {};
                 AppState.violations = {};
                 AppState.tableUISizes = {};
+
+                // Инициализируем дерево и таблицы
+                AppState.initializeTree();
                 AppState.generateNumbering();
 
                 // Сохраняем дефолтную структуру в БД
                 await this._saveDefaultStructure(actId, username);
 
-                Notifications.info('Акт инициализирован автоматически');
+                Notifications.info('Акт инициализирован с базовой структурой');
             } else {
-                console.log('Загружаем содержимое акта из БД');
+                // Загружаем существующее содержимое из БД
                 AppState.treeData = content.tree;
                 AppState.tables = content.tables || {};
                 AppState.textBlocks = content.textBlocks || {};
@@ -318,8 +323,6 @@ class APIClient {
                 StorageManager.enableTracking();
             }, 500);
 
-            console.log('Акт загружен из БД, ID:', actId);
-
         } catch (err) {
             console.error('Ошибка загрузки акта:', err);
             StorageManager.enableTracking();
@@ -335,11 +338,6 @@ class APIClient {
         try {
             const data = AppState.exportData();
 
-            console.log('Сохраняем дефолтную структуру:', {
-                tablesCount: Object.keys(data.tables).length,
-                tables: data.tables
-            });
-
             const resp = await fetch(`/api/v1/act_content/${actId}/content`, {
                 method: 'PUT',
                 headers: {
@@ -351,11 +349,9 @@ class APIClient {
 
             if (!resp.ok) {
                 const error = await resp.text();
-                console.error('Ошибка сохранения:', error);
+                console.error('Ошибка сохранения дефолтной структуры:', error);
                 throw new Error('Ошибка сохранения дефолтной структуры');
             }
-
-            console.log('Дефолтная структура сохранена в БД');
 
         } catch (err) {
             console.error('Ошибка сохранения дефолтной структуры:', err);
