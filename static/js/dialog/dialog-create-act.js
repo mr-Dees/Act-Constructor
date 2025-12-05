@@ -7,7 +7,7 @@
  */
 class CreateActDialog extends DialogBase {
     /**
-     * Текущий активный диалог
+     * Текущий активный диалог (overlay элемент)
      * @private
      * @type {HTMLElement|null}
      */
@@ -17,7 +17,7 @@ class CreateActDialog extends DialogBase {
      * Показывает диалог создания нового акта
      */
     static show() {
-        this._showDialog(null);
+        this._showActDialog(null);
     }
 
     /**
@@ -25,7 +25,7 @@ class CreateActDialog extends DialogBase {
      * @param {Object} actData - Данные акта для редактирования
      */
     static showEdit(actData) {
-        this._showDialog(actData);
+        this._showActDialog(actData);
     }
 
     /**
@@ -33,50 +33,70 @@ class CreateActDialog extends DialogBase {
      * @private
      * @param {Object|null} actData - Данные акта (null для создания нового)
      */
-    static _showDialog(actData) {
+    static _showActDialog(actData) {
         const isEdit = !!actData;
         const currentUser = window.env?.JUPYTERHUB_USER || AppConfig?.auth?.jupyterhubUser || "";
 
         // Клонируем template
-        const modal = this._cloneTemplate('createActDialogTemplate');
-        if (!modal) return;
+        const fragment = this._cloneTemplate('createActDialogTemplate');
+        if (!fragment) return;
 
-        // Заполняем заголовок и кнопку
-        this._fillField(modal, 'title', isEdit ? 'Редактирование акта' : 'Создание нового акта');
-        this._fillField(modal, 'submitText', isEdit ? 'Сохранить изменения' : 'Создать акт');
+        // Создаём overlay
+        const overlay = this._createOverlay();
 
-        // Заполняем поля формы
-        if (isEdit && actData) {
-            this._fillFormFields(modal, actData);
+        // Переносим содержимое template в overlay
+        const dialogElement = fragment.querySelector('.custom-dialog');
+        if (dialogElement) {
+            overlay.appendChild(dialogElement);
         } else {
-            // Значения по умолчанию для нового акта
-            this._fillField(modal, 'part_number', 1);
-            this._fillField(modal, 'total_parts', 1);
-            this._fillField(modal, 'is_process_based', true);
+            // Fallback: добавляем всё содержимое fragment
+            overlay.appendChild(fragment);
         }
 
-        // Добавляем в DOM
-        document.body.appendChild(modal);
-
-        // ИСПРАВЛЕНИЕ: Теперь overlay - это корневой элемент, который мы добавили
-        const overlay = document.body.lastElementChild;
+        // Сохраняем ссылку на текущий диалог
         this._currentDialog = overlay;
 
         // Находим внутренний диалог для правильной обработки кликов
-        const dialog = overlay.querySelector('.custom-dialog');
+        const dialog = overlay.querySelector('.acts-modal');
+        if (!dialog) {
+            console.error('Не найден .acts-modal в template');
+            return;
+        }
+
+        // Заполняем заголовок и кнопку
+        this._fillField(dialog, 'title', isEdit ? 'Редактирование акта' : 'Создание нового акта');
+        this._fillField(dialog, 'submitText', isEdit ? 'Сохранить изменения' : 'Создать акт');
+
+        // Заполняем поля формы
+        if (isEdit && actData) {
+            this._fillFormFields(dialog, actData);
+            // Сохраняем исходный КМ для проверки изменений
+            const form = dialog.querySelector('#actForm');
+            if (form) {
+                form.dataset.originalKm = actData.km_number;
+            }
+        } else {
+            // Значения по умолчанию для нового акта
+            this._fillField(dialog, 'part_number', 1);
+            this._fillField(dialog, 'total_parts', 1);
+            this._fillField(dialog, 'is_process_based', true);
+        }
 
         // Настраиваем закрытие
         this._setupCloseHandlers(overlay, dialog);
 
         // Скрываем/показываем секции
-        this._toggleSections(overlay, isEdit);
+        this._toggleSections(dialog, isEdit);
 
         // Инициализируем динамические списки
-        this._initializeAuditTeam(overlay, actData, currentUser);
-        this._initializeDirectives(overlay, actData);
+        this._initializeAuditTeam(dialog, actData, currentUser);
+        this._initializeDirectives(dialog, actData);
 
         // Привязываем обработчики
-        this._setupEventHandlers(overlay, isEdit, actData, currentUser);
+        this._setupEventHandlers(dialog, isEdit, actData, currentUser);
+
+        // Инициализируем маски ввода
+        this._initInputMasks(dialog);
 
         // Показываем диалог с базовыми эффектами
         super._showDialog(overlay);
@@ -86,33 +106,47 @@ class CreateActDialog extends DialogBase {
      * Заполняет поля формы данными акта
      * @private
      */
-    static _fillFormFields(modal, actData) {
-        this._fillField(modal, 'km_number', actData.km_number);
-        this._fillField(modal, 'part_number', actData.part_number || 1);
-        this._fillField(modal, 'total_parts', actData.total_parts || 1);
-        this._fillField(modal, 'inspection_name', actData.inspection_name);
-        this._fillField(modal, 'city', actData.city);
-        this._fillField(modal, 'created_date', actData.created_date);
-        this._fillField(modal, 'order_number', actData.order_number);
-        this._fillField(modal, 'order_date', actData.order_date);
-        this._fillField(modal, 'inspection_start_date', actData.inspection_start_date);
-        this._fillField(modal, 'inspection_end_date', actData.inspection_end_date);
-        this._fillField(modal, 'is_process_based', actData.is_process_based !== false);
+    static _fillFormFields(dialog, actData) {
+        this._fillField(dialog, 'km_number', actData.km_number);
+        this._fillField(dialog, 'part_number', actData.part_number || 1);
+        this._fillField(dialog, 'total_parts', actData.total_parts || 1);
+        this._fillField(dialog, 'inspection_name', actData.inspection_name);
+        this._fillField(dialog, 'city', actData.city);
+        this._fillField(dialog, 'created_date', actData.created_date);
+        this._fillField(dialog, 'order_number', actData.order_number);
+        this._fillField(dialog, 'order_date', actData.order_date);
+        this._fillField(dialog, 'inspection_start_date', actData.inspection_start_date);
+        this._fillField(dialog, 'inspection_end_date', actData.inspection_end_date);
+        this._fillField(dialog, 'is_process_based', actData.is_process_based !== false);
+
+        // Новые поля для служебной записки
+        if (actData.service_note) {
+            this._fillField(dialog, 'service_note', actData.service_note);
+        }
+        if (actData.service_note_date) {
+            this._fillField(dialog, 'service_note_date', actData.service_note_date);
+        }
     }
 
     /**
      * Показывает/скрывает секции в зависимости от режима
      * @private
      */
-    static _toggleSections(overlay, isEdit) {
-        // Скрываем поле КМ при редактировании
-        const kmField = overlay.querySelector('#kmNumberField');
+    static _toggleSections(dialog, isEdit) {
+        // При редактировании КМ можно изменять - НЕ скрываем
+        const kmField = dialog.querySelector('#kmNumberField');
         if (kmField) {
-            kmField.style.display = isEdit ? 'none' : '';
+            kmField.style.display = ''; // Всегда показываем
         }
 
-        // Скрываем секцию поручений при создании
-        const directivesSection = overlay.querySelector('fieldset:has(#directivesContainer)');
+        // Служебная записка: только при редактировании
+        const serviceNoteSection = dialog.querySelector('#serviceNoteFieldset');
+        if (serviceNoteSection) {
+            serviceNoteSection.style.display = isEdit ? '' : 'none';
+        }
+
+        // Поручения: только при редактировании
+        const directivesSection = dialog.querySelector('#directivesFieldset');
         if (directivesSection) {
             directivesSection.style.display = isEdit ? '' : 'none';
         }
@@ -123,8 +157,8 @@ class CreateActDialog extends DialogBase {
      * @private
      */
     static _setupCloseHandlers(overlay, dialog) {
-        const closeBtn = overlay.querySelector('.acts-modal-close');
-        const cancelBtn = overlay.querySelector('.dialog-cancel');
+        const closeBtn = dialog.querySelector('.acts-modal-close');
+        const cancelBtn = dialog.querySelector('.dialog-cancel');
 
         if (closeBtn) {
             closeBtn.onclick = () => this._closeDialog();
@@ -145,24 +179,200 @@ class CreateActDialog extends DialogBase {
      * Настраивает обработчики событий формы
      * @private
      */
-    static _setupEventHandlers(overlay, isEdit, actData, currentUser) {
-        const addTeamBtn = overlay.querySelector('#addTeamMemberBtn');
-        const addDirectiveBtn = overlay.querySelector('#addDirectiveBtn');
-        const form = overlay.querySelector('#actForm');
+    static _setupEventHandlers(dialog, isEdit, actData, currentUser) {
+        const addTeamBtn = dialog.querySelector('#addTeamMemberBtn');
+        const addDirectiveBtn = dialog.querySelector('#addDirectiveBtn');
+        const form = dialog.querySelector('#actForm');
 
         if (addTeamBtn) {
-            addTeamBtn.onclick = () => this._addTeamMember(overlay);
+            addTeamBtn.onclick = () => this._addTeamMember(dialog);
         }
 
         if (addDirectiveBtn) {
-            addDirectiveBtn.onclick = () => this._addDirective(overlay);
+            addDirectiveBtn.onclick = () => this._addDirective(dialog);
         }
 
         if (form) {
             form.onsubmit = async (e) => {
                 e.preventDefault();
-                await this._handleFormSubmit(e.target, isEdit, actData?.id, currentUser, overlay);
+                await this._handleFormSubmit(e.target, isEdit, actData?.id, currentUser, dialog);
             };
+        }
+    }
+
+    /**
+     * Инициализирует маски ввода для КМ и служебной записки
+     * @private
+     */
+    static _initInputMasks(dialog) {
+        this._initKmNumberMask(dialog);
+        this._initServiceNoteMask(dialog);
+        this._initDateFieldsClearValidation(dialog);
+    }
+
+    /**
+     * Сбрасывает валидацию для полей дат при их изменении
+     * @private
+     */
+    static _initDateFieldsClearValidation(dialog) {
+        const dateFields = dialog.querySelectorAll('input[type="date"]');
+
+        dateFields.forEach(field => {
+            field.addEventListener('input', () => {
+                field.setCustomValidity('');
+            });
+
+            field.addEventListener('change', () => {
+                field.setCustomValidity('');
+            });
+        });
+    }
+
+    /**
+     * Инициализация маски ввода для КМ номера
+     * @private
+     */
+    static _initKmNumberMask(dialog) {
+        const kmInput = dialog.querySelector('input[name="km_number"]');
+        if (!kmInput) return;
+
+        kmInput.addEventListener('input', (e) => {
+            // Сбрасываем валидацию при изменении
+            e.target.setCustomValidity('');
+
+            let value = e.target.value;
+
+            // Удаляем все кроме цифр и дефисов
+            let cleaned = value.replace(/[^\dКМ\-]/g, '');
+
+            // Извлекаем только цифры
+            let digits = cleaned.replace(/[^\d]/g, '');
+
+            // Ограничиваем до 6 цифр
+            digits = digits.substring(0, 6);
+
+            // Форматируем: КМ-XX-XXXX
+            let formatted = 'КМ-';
+
+            if (digits.length > 0) {
+                formatted += digits.substring(0, 2);
+            }
+
+            if (digits.length > 2) {
+                formatted += '-' + digits.substring(2, 6);
+            }
+
+            e.target.value = formatted;
+        });
+
+        // Валидация при потере фокуса
+        kmInput.addEventListener('blur', (e) => {
+            const value = e.target.value;
+            const pattern = /^КМ-\d{2}-\d{4}$/;
+
+            // Сбрасываем предыдущую ошибку
+            e.target.setCustomValidity('');
+
+            if (value && !pattern.test(value)) {
+                e.target.setCustomValidity('КМ номер должен быть в формате КМ-XX-XXXX (например, КМ-75-9475)');
+                e.target.reportValidity();
+            }
+        });
+    }
+
+    /**
+     * Инициализация маски ввода для служебной записки
+     * @private
+     */
+    static _initServiceNoteMask(dialog) {
+        const serviceNoteInput = dialog.querySelector('input[name="service_note"]');
+        const serviceDateInput = dialog.querySelector('input[name="service_note_date"]');
+
+        if (!serviceNoteInput) return;
+
+        // Обработчик изменения для автоматического обновления части
+        serviceNoteInput.addEventListener('input', () => {
+            // Сбрасываем валидацию при изменении
+            serviceNoteInput.setCustomValidity('');
+            this._handleServiceNoteChange(dialog);
+        });
+
+        // Сбрасываем валидацию даты при её изменении
+        if (serviceDateInput) {
+            serviceDateInput.addEventListener('input', () => {
+                serviceDateInput.setCustomValidity('');
+            });
+        }
+
+        // Валидация при потере фокуса
+        serviceNoteInput.addEventListener('blur', (e) => {
+            const value = e.target.value.trim();
+
+            // Сбрасываем предыдущую ошибку
+            e.target.setCustomValidity('');
+
+            if (!value) {
+                return;
+            }
+
+            const pattern = /^.+\/\d{4}$/;
+
+            if (!pattern.test(value)) {
+                e.target.setCustomValidity(
+                    'Служебная записка должна быть в формате Текст/XXXX (4 цифры после /)'
+                );
+                e.target.reportValidity();
+            } else {
+                const parts = value.split('/');
+                if (parts[0].trim().length === 0) {
+                    e.target.setCustomValidity('Служебная записка должна содержать текст до символа "/"');
+                    e.target.reportValidity();
+                }
+            }
+        });
+    }
+
+    /**
+     * Обработчик изменения служебной записки
+     * Обновляет метку поля "Часть акта"
+     * @private
+     */
+    static _handleServiceNoteChange(dialog) {
+        const serviceNoteInput = dialog.querySelector('input[name="service_note"]');
+        const partNumberLabel = dialog.querySelector('#partNumberLabel');
+        const partNumberInput = dialog.querySelector('input[name="part_number"]');
+        const totalPartsLabel = dialog.querySelector('#totalPartsLabel');
+
+        if (!serviceNoteInput || !partNumberLabel) return;
+
+        const serviceNote = serviceNoteInput.value.trim();
+
+        if (serviceNote && serviceNote.includes('/')) {
+            // Извлекаем 4 цифры после "/"
+            const parts = serviceNote.split('/');
+            if (parts.length === 2 && /^\d{4}$/.test(parts[1])) {
+                const suffix = parseInt(parts[1], 10);
+                partNumberLabel.textContent = 'Часть акта (из СЗ)';
+                if (partNumberInput) {
+                    partNumberInput.value = suffix;
+                    partNumberInput.readOnly = true;
+                }
+
+                if (totalPartsLabel) {
+                    totalPartsLabel.textContent = 'Всего частей (не применимо)';
+                }
+                return;
+            }
+        }
+
+        // Возвращаем к автоматической нумерации
+        partNumberLabel.textContent = 'Часть акта (автоматически)';
+        if (partNumberInput) {
+            partNumberInput.readOnly = true;
+        }
+
+        if (totalPartsLabel) {
+            totalPartsLabel.textContent = 'Всего частей (автоматически)';
         }
     }
 
@@ -182,16 +392,16 @@ class CreateActDialog extends DialogBase {
      * Инициализирует аудиторскую группу
      * @private
      */
-    static _initializeAuditTeam(modal, actData, currentUser) {
-        if (actData && actData.audit_team) {
+    static _initializeAuditTeam(dialog, actData, currentUser) {
+        if (actData && actData.audit_team && actData.audit_team.length > 0) {
             actData.audit_team.forEach(member => {
-                this._addTeamMember(modal, member.role, member.full_name, member.position, member.username);
+                this._addTeamMember(dialog, member.role, member.full_name, member.position, member.username);
             });
         } else {
             // 3 строки по умолчанию
-            this._addTeamMember(modal, 'Куратор', '', '', '');
-            this._addTeamMember(modal, 'Руководитель', '', '', currentUser);
-            this._addTeamMember(modal, 'Участник', '', '', '');
+            this._addTeamMember(dialog, 'Куратор', '', '', '');
+            this._addTeamMember(dialog, 'Руководитель', '', '', currentUser);
+            this._addTeamMember(dialog, 'Участник', '', '', '');
         }
     }
 
@@ -199,10 +409,10 @@ class CreateActDialog extends DialogBase {
      * Инициализирует поручения
      * @private
      */
-    static _initializeDirectives(modal, actData) {
-        if (actData && actData.directives) {
+    static _initializeDirectives(dialog, actData) {
+        if (actData && actData.directives && actData.directives.length > 0) {
             actData.directives.forEach(dir => {
-                this._addDirective(modal, dir.point_number, dir.directive_number);
+                this._addDirective(dialog, dir.point_number, dir.directive_number);
             });
         }
     }
@@ -211,22 +421,28 @@ class CreateActDialog extends DialogBase {
      * Добавляет члена аудиторской группы
      * @private
      */
-    static _addTeamMember(modal, role = 'Руководитель', fullName = '', position = '', username = '') {
-        const container = modal.querySelector('#auditTeamContainer');
+    static _addTeamMember(dialog, role = 'Руководитель', fullName = '', position = '', username = '') {
+        const container = dialog.querySelector('#auditTeamContainer');
         if (!container) return;
 
         const memberRow = this._cloneTemplate('teamMemberRowTemplate');
         if (!memberRow) return;
 
         const rowElement = memberRow.querySelector('.team-member-row');
+        if (!rowElement) return;
 
         // Заполняем данные
         const roleSelect = rowElement.querySelector('[name="role"]');
         if (roleSelect) roleSelect.value = role;
 
-        this._fillField(rowElement, 'full_name', fullName);
-        this._fillField(rowElement, 'position', position);
-        this._fillField(rowElement, 'username', username);
+        const fullNameInput = rowElement.querySelector('[name="full_name"]');
+        if (fullNameInput) fullNameInput.value = fullName;
+
+        const positionInput = rowElement.querySelector('[name="position"]');
+        if (positionInput) positionInput.value = position;
+
+        const usernameInput = rowElement.querySelector('[name="username"]');
+        if (usernameInput) usernameInput.value = username;
 
         // Обработчик удаления
         const deleteBtn = rowElement.querySelector('.delete-member-btn');
@@ -241,18 +457,22 @@ class CreateActDialog extends DialogBase {
      * Добавляет поручение
      * @private
      */
-    static _addDirective(modal, pointNumber = '', directiveNumber = '') {
-        const container = modal.querySelector('#directivesContainer');
+    static _addDirective(dialog, pointNumber = '', directiveNumber = '') {
+        const container = dialog.querySelector('#directivesContainer');
         if (!container) return;
 
         const directiveRow = this._cloneTemplate('directiveRowTemplate');
         if (!directiveRow) return;
 
         const rowElement = directiveRow.querySelector('.directive-row');
+        if (!rowElement) return;
 
         // Заполняем данные
-        this._fillField(rowElement, 'point_number', pointNumber);
-        this._fillField(rowElement, 'directive_number', directiveNumber);
+        const pointInput = rowElement.querySelector('[name="point_number"]');
+        if (pointInput) pointInput.value = pointNumber;
+
+        const directiveInput = rowElement.querySelector('[name="directive_number"]');
+        if (directiveInput) directiveInput.value = directiveNumber;
 
         // Обработчик удаления
         const deleteBtn = rowElement.querySelector('.delete-directive-btn');
@@ -264,12 +484,54 @@ class CreateActDialog extends DialogBase {
     }
 
     /**
+     * Валидирует взаимосвязь служебной записки и даты
+     * @private
+     */
+    static _validateServiceNoteFields(dialog) {
+        const serviceNoteInput = dialog.querySelector('input[name="service_note"]');
+        const serviceDateInput = dialog.querySelector('input[name="service_note_date"]');
+
+        if (!serviceNoteInput || !serviceDateInput) return true;
+
+        const hasNote = serviceNoteInput.value.trim() !== '';
+        const hasDate = serviceDateInput.value.trim() !== '';
+
+        // Сначала очищаем все ошибки
+        serviceNoteInput.setCustomValidity('');
+        serviceDateInput.setCustomValidity('');
+
+        if (hasNote && !hasDate) {
+            serviceDateInput.setCustomValidity('При указании служебной записки необходимо указать дату');
+            serviceDateInput.reportValidity();
+            return false;
+        }
+
+        if (hasDate && !hasNote) {
+            serviceNoteInput.setCustomValidity('При указании даты служебной записки необходимо указать саму записку');
+            serviceNoteInput.reportValidity();
+            return false;
+        }
+
+        return true;
+    }
+
+    /**
      * Валидирует форму перед отправкой
      * @private
      */
-    static _validateForm(modal, isEdit) {
+    static _validateForm(dialog, isEdit) {
+        // Сначала сбрасываем все кастомные ошибки валидации
+        dialog.querySelectorAll('input, textarea, select').forEach(field => {
+            field.setCustomValidity('');
+        });
+
+        // Проверяем служебную записку
+        if (!this._validateServiceNoteFields(dialog)) {
+            return false;
+        }
+
         // Собираем аудиторскую группу
-        const teamMembers = Array.from(modal.querySelectorAll('.team-member-row'));
+        const teamMembers = Array.from(dialog.querySelectorAll('.team-member-row'));
 
         if (teamMembers.length === 0) {
             if (typeof Notifications !== 'undefined') {
@@ -305,7 +567,7 @@ class CreateActDialog extends DialogBase {
 
         // Валидируем поручения только при редактировании
         if (isEdit) {
-            const directives = Array.from(modal.querySelectorAll('.directive-row'));
+            const directives = Array.from(dialog.querySelectorAll('.directive-row'));
 
             for (const row of directives) {
                 const pointNumber = row.querySelector('[name="point_number"]').value.trim();
@@ -338,21 +600,67 @@ class CreateActDialog extends DialogBase {
     }
 
     /**
+     * Проверяет существование КМ номера
+     * @private
+     */
+    static async _checkKmExists(kmNumber, currentUser) {
+        try {
+            const response = await fetch(`/api/v1/acts/check-km?km_number=${encodeURIComponent(kmNumber)}`, {
+                headers: {'X-JupyterHub-User': currentUser}
+            });
+
+            if (!response.ok) {
+                throw new Error('Ошибка проверки КМ');
+            }
+
+            return await response.json();
+        } catch (error) {
+            console.error('Ошибка проверки КМ:', error);
+            return {exists: false, current_parts: 0, next_part: 1, has_service_notes: false};
+        }
+    }
+
+    /**
      * Обрабатывает отправку формы
      * @private
      */
-    static async _handleFormSubmit(form, isEdit, actId, currentUser, modal) {
+    static async _handleFormSubmit(form, isEdit, actId, currentUser, dialog) {
         try {
             // Валидация перед отправкой
-            if (!this._validateForm(modal, isEdit)) {
+            if (!this._validateForm(dialog, isEdit)) {
                 return;
             }
 
             const fd = new FormData(form);
+            const kmNumber = fd.get('km_number');
+
+            // При редактировании проверяем изменение КМ
+            if (isEdit) {
+                const originalKm = form.dataset.originalKm;
+
+                if (originalKm && kmNumber !== originalKm) {
+                    // КМ изменился - проверяем новый КМ
+                    const kmExists = await this._checkKmExists(kmNumber, currentUser);
+
+                    if (kmExists.exists) {
+                        const confirmed = await DialogManager.show({
+                            title: 'Изменение КМ',
+                            message: `КМ ${kmNumber} уже существует. Акт будет перемещен в новую группу КМ. Продолжить?`,
+                            icon: '⚠️',
+                            confirmText: 'Продолжить',
+                            cancelText: 'Отмена'
+                        });
+
+                        if (!confirmed) {
+                            return;
+                        }
+                    }
+                }
+            }
 
             // Собираем аудиторскую группу
             const auditTeam = Array.from(
-                modal.querySelectorAll('.team-member-row')
+                dialog.querySelectorAll('.team-member-row')
             ).map(row => ({
                 role: row.querySelector('[name="role"]').value,
                 full_name: row.querySelector('[name="full_name"]').value,
@@ -362,16 +670,21 @@ class CreateActDialog extends DialogBase {
 
             // Собираем поручения
             const directives = Array.from(
-                modal.querySelectorAll('.directive-row')
+                dialog.querySelectorAll('.directive-row')
             ).map(row => ({
                 point_number: row.querySelector('[name="point_number"]').value,
                 directive_number: row.querySelector('[name="directive_number"]').value
-            }));
+            })).filter(dir => dir.point_number.trim() !== ''); // Фильтруем пустые
 
             // Вспомогательные функции
             const getDateOrNull = (fieldName) => {
                 const value = fd.get(fieldName);
                 return value && value.trim() !== '' ? value : null;
+            };
+
+            const getStringOrNull = (fieldName) => {
+                const value = fd.get(fieldName);
+                return value && value.trim() !== '' ? value.trim() : null;
             };
 
             const getNumberOrDefault = (fieldName, defaultValue) => {
@@ -381,7 +694,7 @@ class CreateActDialog extends DialogBase {
             };
 
             const body = {
-                km_number: fd.get('km_number'),
+                km_number: kmNumber,
                 part_number: getNumberOrDefault('part_number', 1),
                 total_parts: getNumberOrDefault('total_parts', 1),
                 inspection_name: fd.get('inspection_name'),
@@ -393,7 +706,9 @@ class CreateActDialog extends DialogBase {
                 inspection_end_date: fd.get('inspection_end_date'),
                 is_process_based: !!fd.get('is_process_based'),
                 audit_team: auditTeam,
-                directives: directives
+                directives: directives,
+                service_note: getStringOrNull('service_note'),
+                service_note_date: getDateOrNull('service_note_date')
             };
 
             const endpoint = isEdit
@@ -413,14 +728,30 @@ class CreateActDialog extends DialogBase {
             if (!resp.ok) {
                 const errData = await resp.json();
 
-                // Проверяем специальный случай: КМ уже существует
-                if (resp.status === 409 && errData.detail?.type === 'km_exists') {
+                // Проверяем специальный случай: КМ уже существует (только при создании)
+                if (!isEdit && resp.status === 409 && errData.detail?.type === 'km_exists') {
                     const kmData = errData.detail;
+
+                    let message = `Акт с КМ "${kmData.km_number}" уже существует.\n\n`;
+
+                    if (kmData.has_service_notes) {
+                        message += `Существующие акты:\n`;
+                        message += `- Акты со служебными записками\n`;
+                        if (kmData.current_parts > 0) {
+                            message += `- Акты без служебных записок (частей: ${kmData.current_parts})\n\n`;
+                        }
+                        message += `Вы можете:\n`;
+                        message += `1. Создать новую часть БЕЗ служебной записки (номер части: ${kmData.next_part})\n`;
+                        message += `2. Указать служебную записку для нового акта в диалоге редактирования`;
+                    } else {
+                        message += `Текущее количество частей: ${kmData.current_parts}\n\n`;
+                        message += `Создать новую часть ${kmData.next_part} для этого акта?`;
+                    }
 
                     // Показываем диалог подтверждения
                     const confirmed = await DialogManager.show({
                         title: 'КМ уже существует',
-                        message: `Акт с КМ "${kmData.km_number}" уже существует (частей: ${kmData.current_parts}).\n\nСоздать новую часть ${kmData.next_part} для этого акта?`,
+                        message: message,
                         icon: '❓',
                         confirmText: 'Да, создать новую часть',
                         cancelText: 'Отмена'
@@ -444,16 +775,33 @@ class CreateActDialog extends DialogBase {
                 Notifications.success(isEdit ? 'Акт обновлен' : 'Акт создан успешно');
             }
 
+            // Инвалидируем кеш меню после любых изменений
+            if (window.ActsMenuManager && typeof window.ActsMenuManager._clearCache === 'function') {
+                window.ActsMenuManager._clearCache();
+            }
+
             if (isEdit) {
                 // При редактировании перезагружаем список актов
                 if (window.ActsManagerPage && typeof window.ActsManagerPage.loadActs === 'function') {
-                    window.ActsManagerPage.loadActs();
+                    await window.ActsManagerPage.loadActs();
                 }
 
-                // Перезагружаем список в меню актов
+                // Перезагружаем список в меню актов (force refresh из БД)
                 if (window.ActsMenuManager && typeof window.ActsMenuManager.renderActsList === 'function') {
-                    window.ActsMenuManager.renderActsList();
+                    await window.ActsMenuManager.renderActsList(true);
                 }
+
+                // Если редактируется текущий акт - перезагружаем его
+                if (window.currentActId === actId && window.APIClient) {
+                    await window.APIClient.loadActContent(actId);
+                    if (window.StorageManager && typeof window.StorageManager.markAsSyncedWithDB === 'function') {
+                        window.StorageManager.markAsSyncedWithDB();
+                    }
+                    if (typeof Notifications !== 'undefined') {
+                        Notifications.info('Данные акта обновлены');
+                    }
+                }
+
                 return;
             }
 

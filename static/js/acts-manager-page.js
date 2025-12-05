@@ -5,25 +5,20 @@
 
 class ActsManagerPage {
     /**
-     * Ключ для кеша актов в localStorage
+     * Форматирует отображение КМ с учетом служебной записки
      * @private
      */
-    static _cacheKey = 'acts_list_cache';
+    static _formatKmNumber(kmNumber, partNumber, totalParts, serviceNote) {
+        // Если есть служебная записка - склеиваем КМ + "_" + часть (из СЗ)
+        if (serviceNote) {
+            return `${kmNumber}_${partNumber}`;
+        }
 
-    /**
-     * Время жизни кеша (5 минут)
-     * @private
-     */
-    static _cacheExpiry = 5 * 60 * 1000;
-
-    /**
-     * Форматирует отображение КМ с учетом частей
-     * @private
-     */
-    static _formatKmNumber(kmNumber, partNumber, totalParts) {
+        // Иначе используем старую логику с подчеркиванием для многочастных актов без СЗ
         if (totalParts > 1) {
             return `${kmNumber}_${partNumber}`;
         }
+
         return kmNumber;
     }
 
@@ -98,89 +93,11 @@ class ActsManagerPage {
     }
 
     /**
-     * Загружает список актов из кеша
-     * @private
+     * Загружает список актов из API (всегда свежие данные)
      */
-    static _loadFromCache() {
-        try {
-            const cached = localStorage.getItem(this._cacheKey);
-            if (!cached) return null;
-
-            const parsed = JSON.parse(cached);
-
-            // Проверяем срок годности (если не бесконечный)
-            if (this._cacheExpiry !== Infinity) {
-                const now = Date.now();
-                if (now - parsed.timestamp > this._cacheExpiry) {
-                    this._clearCache();
-                    return null;
-                }
-            }
-
-            return parsed.acts;
-        } catch (error) {
-            console.error('Ошибка чтения кеша актов:', error);
-            this._clearCache();
-            return null;
-        }
-    }
-
-    /**
-     * Сохраняет список актов в кеш
-     * @private
-     */
-    static _saveToCache(acts) {
-        try {
-            const cacheData = {
-                acts: acts,
-                timestamp: Date.now()
-            };
-            localStorage.setItem(this._cacheKey, JSON.stringify(cacheData));
-        } catch (error) {
-            console.error('Ошибка сохранения кеша актов:', error);
-        }
-    }
-
-    /**
-     * Очищает кеш актов
-     * @private
-     */
-    static _clearCache() {
-        try {
-            localStorage.removeItem(this._cacheKey);
-        } catch (error) {
-            console.error('Ошибка очистки кеша актов:', error);
-        }
-    }
-
-    /**
-     * Инвалидирует кеш (для вызова после изменений)
-     */
-    static invalidateCache() {
-        this._clearCache();
-    }
-
-    /**
-     * Загружает и отображает список актов
-     * @param {boolean} [forceRefresh=false] - Принудительно обновить из API
-     */
-    static async loadActs(forceRefresh = false) {
+    static async loadActs() {
         const container = document.getElementById('actsListContainer');
         if (!container) return;
-
-        // Пытаемся загрузить из кеша если не force
-        if (!forceRefresh) {
-            const cached = this._loadFromCache();
-            if (cached) {
-                console.log('Загружено из кеша:', cached.length, 'актов');
-                if (cached.length === 0) {
-                    this._showEmptyState(container);
-                } else {
-                    this._renderActsGrid(cached, container);
-                }
-                return;
-            }
-        }
 
         // Показываем загрузку
         this._showLoading(container);
@@ -201,9 +118,6 @@ class ActsManagerPage {
             }
 
             const acts = await response.json();
-
-            // Сохраняем в кеш
-            this._saveToCache(acts);
 
             if (!acts.length) {
                 this._showEmptyState(container);
@@ -289,7 +203,12 @@ class ActsManagerPage {
         const data = {
             inspection_name: act.inspection_name,
             user_role: act.user_role,
-            km_display: this._formatKmNumber(act.km_number, act.part_number || 1, act.total_parts || 1),
+            km_display: this._formatKmNumber(
+                act.km_number,
+                act.part_number || 1,
+                act.total_parts || 1,
+                act.service_note
+            ),
             order_number: act.order_number,
             inspection_start_date: this._formatDate(act.inspection_start_date),
             inspection_end_date: this._formatDate(act.inspection_end_date),
@@ -409,9 +328,6 @@ class ActsManagerPage {
 
             const newAct = await response.json();
 
-            // Инвалидируем кеш после успешного дублирования
-            this.invalidateCache();
-
             Notifications.success(`Копия создана: ${newAct.inspection_name}`);
 
             const openNewAct = await DialogManager.show({
@@ -425,8 +341,8 @@ class ActsManagerPage {
             if (openNewAct) {
                 window.location.href = `/constructor?act_id=${newAct.id}`;
             } else {
-                // Принудительно обновляем список
-                await this.loadActs(true);
+                // Обновляем список
+                await this.loadActs();
             }
 
         } catch (error) {
@@ -470,13 +386,10 @@ class ActsManagerPage {
                 throw new Error('Ошибка удаления акта');
             }
 
-            // Инвалидируем кеш после успешного удаления
-            this.invalidateCache();
-
             Notifications.success('Акт успешно удален');
 
-            // Принудительно обновляем список
-            await this.loadActs(true);
+            // Обновляем список
+            await this.loadActs();
 
         } catch (error) {
             console.error('Ошибка удаления акта:', error);
@@ -488,7 +401,7 @@ class ActsManagerPage {
      * Инициализация страницы
      */
     static init() {
-        // Загружаем акты (с кешем)
+        // Загружаем акты (всегда из БД)
         this.loadActs();
 
         const createBtn = document.getElementById('createNewActBtn');
@@ -507,7 +420,7 @@ class ActsManagerPage {
         const refreshBtn = document.getElementById('refreshActsBtn');
         if (refreshBtn) {
             refreshBtn.addEventListener('click', () => {
-                this.loadActs(true);
+                this.loadActs();
             });
         }
     }

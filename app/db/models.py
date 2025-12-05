@@ -1,7 +1,9 @@
+# app/db/models.py
+import re
 from datetime import date, datetime
 from typing import List, Literal, Optional
 
-from pydantic import BaseModel, Field, field_validator
+from pydantic import BaseModel, Field, field_validator, model_validator
 
 
 class AuditTeamMember(BaseModel):
@@ -24,13 +26,11 @@ class ActDirective(BaseModel):
         if not v.startswith('5.'):
             raise ValueError(f'Поручения могут быть только в разделе 5 (получено: {v})')
 
-        # Проверяем формат: должно быть 5.X.Y где X и Y - числа
         parts = v.split('.')
         if len(parts) < 3:
             raise ValueError(f'Неверный формат пункта поручения: {v}. Ожидается формат 5.X.Y')
 
         try:
-            # Проверяем что все части после 5 - числа
             for part in parts[1:]:
                 int(part)
         except ValueError:
@@ -55,12 +55,61 @@ class ActCreate(BaseModel):
     is_process_based: bool = True
     directives: List[ActDirective] = Field(default_factory=list)
 
+    # Новые поля
+    service_note: Optional[str] = Field(default=None, max_length=100)
+    service_note_date: Optional[date] = None
+
+    @field_validator('km_number')
+    @classmethod
+    def validate_km_number_format(cls, v):
+        """Проверяет формат КМ: КМ-XX-XXXX"""
+        pattern = r'^КМ-\d{2}-\d{4}$'
+        if not re.match(pattern, v):
+            raise ValueError(
+                f'КМ номер должен быть в формате КМ-XX-XXXX (например, КМ-75-9475), получено: {v}'
+            )
+        return v
+
+    @field_validator('service_note')
+    @classmethod
+    def validate_service_note_format(cls, v):
+        """Проверяет формат служебной записки: Текст/XXXX"""
+        if v is None:
+            return v
+
+        pattern = r'^.+/\d{4}$'
+        if not re.match(pattern, v):
+            raise ValueError(
+                f'Служебная записка должна быть в формате Текст/XXXX '
+                f'(например, ЦМ-75-вн/9475), получено: {v}'
+            )
+
+        # Проверяем что есть содержательная часть до "/"
+        parts = v.rsplit('/', 1)
+        if len(parts[0].strip()) == 0:
+            raise ValueError('Служебная записка должна содержать текст до символа "/"')
+
+        return v
+
+    @model_validator(mode='after')
+    def validate_service_note_consistency(self):
+        """Проверяет что если указана служебная записка, то указана и дата"""
+        if self.service_note and not self.service_note_date:
+            raise ValueError('При указании служебной записки необходимо указать дату')
+
+        if self.service_note_date and not self.service_note:
+            raise ValueError('При указании даты служебной записки необходимо указать саму записку')
+
+        return self
+
     @field_validator('part_number')
     @classmethod
     def validate_part_number(cls, v, info):
         total = info.data.get('total_parts', 1)
         if v > total:
-            raise ValueError(f'Номер части ({v}) не может быть больше общего количества частей ({total})')
+            raise ValueError(
+                f'Номер части ({v}) не может быть больше общего количества частей ({total})'
+            )
         return v
 
     @field_validator('audit_team')
@@ -98,6 +147,44 @@ class ActUpdate(BaseModel):
     is_process_based: Optional[bool] = None
     directives: Optional[List[ActDirective]] = None
 
+    # Новые поля
+    service_note: Optional[str] = None
+    service_note_date: Optional[date] = None
+
+    @field_validator('km_number')
+    @classmethod
+    def validate_km_number_format(cls, v):
+        """Проверяет формат КМ: КМ-XX-XXXX"""
+        if v is None:
+            return v
+
+        pattern = r'^КМ-\d{2}-\d{4}$'
+        if not re.match(pattern, v):
+            raise ValueError(
+                f'КМ номер должен быть в формате КМ-XX-XXXX (например, КМ-75-9475), получено: {v}'
+            )
+        return v
+
+    @field_validator('service_note')
+    @classmethod
+    def validate_service_note_format(cls, v):
+        """Проверяет формат служебной записки: Текст/XXXX"""
+        if v is None:
+            return v
+
+        pattern = r'^.+/\d{4}$'
+        if not re.match(pattern, v):
+            raise ValueError(
+                f'Служебная записка должна быть в формате Текст/XXXX '
+                f'(например, ЦМ-75-вн/9475), получено: {v}'
+            )
+
+        parts = v.rsplit('/', 1)
+        if len(parts[0].strip()) == 0:
+            raise ValueError('Служебная записка должна содержать текст до символа "/"')
+
+        return v
+
     @field_validator('audit_team')
     @classmethod
     def validate_audit_team_composition(cls, v):
@@ -132,6 +219,7 @@ class ActListItem(BaseModel):
     inspection_end_date: date
     last_edited_at: Optional[datetime]
     user_role: str
+    service_note: Optional[str] = None
 
 
 class ActResponse(BaseModel):
@@ -151,10 +239,15 @@ class ActResponse(BaseModel):
     audit_team: List[AuditTeamMember]
     directives: List[ActDirective]
 
-    # Служебные флаги валидации (для будущего использования)
+    # Новые поля
+    service_note: Optional[str] = None
+    service_note_date: Optional[date] = None
+
+    # Служебные флаги валидации
     needs_created_date: bool = False
     needs_directive_number: bool = False
     needs_invoice_check: bool = False
+    needs_service_note: bool = False
 
     created_at: datetime
     updated_at: datetime

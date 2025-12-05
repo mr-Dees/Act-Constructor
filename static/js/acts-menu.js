@@ -40,6 +40,18 @@ class ActsMenuManager {
     static _clickDelay = 300;
 
     /**
+     * Ключ для кеша актов в localStorage
+     * @private
+     */
+    static _cacheKey = 'acts_menu_cache';
+
+    /**
+     * Время жизни кеша (1 минута)
+     * @private
+     */
+    static _cacheExpiry = 1 * 60 * 1000;
+
+    /**
      * Настраивает обработчик закрытия по Escape
      * @private
      */
@@ -98,10 +110,74 @@ class ActsMenuManager {
     }
 
     /**
-     * Загружает список актов из API
+     * Загружает список актов из кеша
+     * @private
+     */
+    static _loadFromCache() {
+        try {
+            const cached = localStorage.getItem(this._cacheKey);
+            if (!cached) return null;
+
+            const parsed = JSON.parse(cached);
+
+            // Проверяем срок годности
+            const now = Date.now();
+            if (now - parsed.timestamp > this._cacheExpiry) {
+                this._clearCache();
+                return null;
+            }
+
+            return parsed.acts;
+        } catch (error) {
+            console.error('Ошибка чтения кеша актов меню:', error);
+            this._clearCache();
+            return null;
+        }
+    }
+
+    /**
+     * Сохраняет список актов в кеш
+     * @private
+     */
+    static _saveToCache(acts) {
+        try {
+            const cacheData = {
+                acts: acts,
+                timestamp: Date.now()
+            };
+            localStorage.setItem(this._cacheKey, JSON.stringify(cacheData));
+        } catch (error) {
+            console.error('Ошибка сохранения кеша актов меню:', error);
+        }
+    }
+
+    /**
+     * Очищает кеш актов
+     * @private
+     */
+    static _clearCache() {
+        try {
+            localStorage.removeItem(this._cacheKey);
+        } catch (error) {
+            console.error('Ошибка очистки кеша актов меню:', error);
+        }
+    }
+
+    /**
+     * Загружает список актов из API или кеша
+     * @param {boolean} [forceRefresh=false] - Принудительно обновить из API
      * @returns {Promise<Array>} Массив актов
      */
-    static async fetchActsList() {
+    static async fetchActsList(forceRefresh = false) {
+        // Пытаемся загрузить из кеша если не force
+        if (!forceRefresh) {
+            const cached = this._loadFromCache();
+            if (cached) {
+                console.log('Загружено из кеша (меню):', cached.length, 'актов');
+                return cached;
+            }
+        }
+
         const username = AuthManager.getCurrentUser();
 
         if (!username) {
@@ -116,7 +192,12 @@ class ActsMenuManager {
             throw new Error('Ошибка загрузки списка актов');
         }
 
-        return await response.json();
+        const acts = await response.json();
+
+        // Сохраняем в кеш
+        this._saveToCache(acts);
+
+        return acts;
     }
 
     /**
@@ -168,20 +249,6 @@ class ActsMenuManager {
     }
 
     /**
-     * Форматирует информацию о частях акта
-     * @private
-     * @param {number} partNumber - Номер части
-     * @param {number} totalParts - Общее количество частей
-     * @returns {string} Отформатированная строка с частью
-     */
-    static _formatPartInfo(partNumber, totalParts) {
-        if (!totalParts || totalParts === 1) {
-            return ''; // Не показываем части если акт один
-        }
-        return `_${partNumber}`;
-    }
-
-    /**
      * Клонирует template элемент
      * @private
      * @param {string} templateId - ID template
@@ -213,15 +280,16 @@ class ActsMenuManager {
 
     /**
      * Рендерит список актов в меню
+     * @param {boolean} [forceRefresh=false] - Принудительно обновить из API
      */
-    static async renderActsList() {
+    static async renderActsList(forceRefresh = false) {
         const listContainer = document.getElementById('actsList');
         if (!listContainer) return;
 
         this._showLoading(listContainer);
 
         try {
-            const acts = await this.fetchActsList();
+            const acts = await this.fetchActsList(forceRefresh);
 
             if (!acts.length) {
                 this._showEmptyState(listContainer);
@@ -277,6 +345,24 @@ class ActsMenuManager {
     }
 
     /**
+     * Форматирует информацию о КМ с учетом служебной записки
+     * @private
+     */
+    static _formatKmDisplay(kmNumber, partNumber, totalParts, serviceNote) {
+        // Если есть служебная записка - склеиваем КМ + "_" + часть (из СЗ)
+        if (serviceNote) {
+            return `${kmNumber}_${partNumber}`;
+        }
+
+        // Иначе используем формат с подчеркиванием для многочастных актов без СЗ
+        if (totalParts > 1) {
+            return `${kmNumber}_${partNumber}`;
+        }
+
+        return kmNumber;
+    }
+
+    /**
      * Создает элемент списка акта из template
      * @private
      * @param {Object} act - Данные акта
@@ -293,13 +379,17 @@ class ActsMenuManager {
         const lastEdited = this._formatDateTime(act.last_edited_at);
         const startDate = this._formatDate(act.inspection_start_date);
         const endDate = this._formatDate(act.inspection_end_date);
-        const partInfo = this._formatPartInfo(act.part_number, act.total_parts);
 
         // Подготавливаем данные для заполнения
         const data = {
             inspection_name: act.inspection_name,
             user_role: act.user_role,
-            km_display: `${act.km_number}${partInfo}`,
+            km_display: this._formatKmDisplay(
+                act.km_number,
+                act.part_number,
+                act.total_parts,
+                act.service_note
+            ),
             order_number: act.order_number,
             inspection_start_date: startDate,
             inspection_end_date: endDate,
@@ -474,6 +564,9 @@ class ActsMenuManager {
             // Помечаем как синхронизированный с БД
             StorageManager.markAsSyncedWithDB();
 
+            // Инвалидируем кеш меню
+            this._clearCache();
+
             Notifications.success('Акт успешно загружен');
 
         } catch (error) {
@@ -573,6 +666,10 @@ class ActsMenuManager {
             }
 
             const newAct = await response.json();
+
+            // Инвалидируем кеш
+            this._clearCache();
+
             Notifications.success(`Копия создана: ${newAct.inspection_name}`);
 
             window.location.href = `/constructor?act_id=${newAct.id}`;
@@ -612,14 +709,17 @@ class ActsMenuManager {
         try {
             await APIClient.deleteAct(actId);
 
+            // Инвалидируем кеш
+            this._clearCache();
+
             // Если удаляем текущий акт - очищаем localStorage и переходим на главную
             if (actId === this.currentActId) {
                 StorageManager.clearStorage();
                 this._redirectToActsManager();
             } else {
-                // Если удаляем другой акт - перезагружаем список
+                // Если удаляем другой акт - перезагружаем список из БД
                 Notifications.success('Акт успешно удален');
-                await this.renderActsList();
+                await this.renderActsList(true);
                 this.show();
             }
 
@@ -843,6 +943,10 @@ class ActsMenuManager {
                     this.selectedActId = actId;
                     window.currentActId = actId;
                     StorageManager.markAsSyncedWithDB();
+
+                    // Инвалидируем кеш меню
+                    this._clearCache();
+
                     Notifications.success('Акт восстановлен из истории');
                 } catch (error) {
                     console.error('Ошибка восстановления акта из истории:', error);

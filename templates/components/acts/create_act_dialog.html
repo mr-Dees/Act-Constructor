@@ -1,4 +1,4 @@
-<!-- templates/components/create_act_dialog.html -->
+<!-- templates/components/acts/create_act_dialog.html -->
 <template id="createActDialogTemplate">
     <div class="custom-dialog-overlay">
         <div class="custom-dialog acts-modal">
@@ -46,18 +46,36 @@
 
                 <label id="kmNumberField">
                     КМ номер *
-                    <input type="text" name="km_number" data-field="km_number" required>
+                    <input type="text"
+                           name="km_number"
+                           data-field="km_number"
+                           placeholder="КМ-__-____"
+                           pattern="КМ-\d{2}-\d{4}"
+                           title="Формат: КМ-XX-XXXX (например, КМ-75-9475)"
+                           required>
+                    <small class="field-hint">Формат: КМ-XX-XXXX (например, КМ-75-9475). Поле можно
+                        редактировать.</small>
                 </label>
 
                 <div class="act-parts-grid">
                     <label>
-                        Часть акта (автоматически)
-                        <input type="number" name="part_number" data-field="part_number" min="1" value="1" required
+                        <span id="partNumberLabel">Часть акта (автоматически)</span>
+                        <input type="number"
+                               name="part_number"
+                               data-field="part_number"
+                               min="1"
+                               value="1"
+                               required
                                readonly>
                     </label>
                     <label>
-                        Всего частей (автоматически)
-                        <input type="number" name="total_parts" data-field="total_parts" min="1" value="1" required
+                        <span id="totalPartsLabel">Всего частей (автоматически)</span>
+                        <input type="number"
+                               name="total_parts"
+                               data-field="total_parts"
+                               min="1"
+                               value="1"
+                               required
                                readonly>
                     </label>
                 </div>
@@ -78,7 +96,32 @@
                     </button>
                 </fieldset>
 
-                <fieldset>
+                <!-- Служебная записка: показывается только при редактировании -->
+                <fieldset id="serviceNoteFieldset" class="service-note-section" style="display: none;">
+                    <legend>Служебная записка (опционально)</legend>
+
+                    <label>
+                        Номер служебной записки
+                        <input type="text"
+                               name="service_note"
+                               data-field="service_note"
+                               placeholder="ЦМ-75-вн/9475"
+                               pattern=".+/\d{4}"
+                               title="Формат: Текст/XXXX (например, ЦМ-75-вн/9475)">
+                        <small class="field-hint">При указании СЗ часть акта определяется последними 4 цифрами
+                            записки</small>
+                    </label>
+
+                    <label>
+                        Дата служебной записки
+                        <input type="date"
+                               name="service_note_date"
+                               data-field="service_note_date">
+                    </label>
+                </fieldset>
+
+                <!-- Действующие поручения: показывается только при редактировании -->
+                <fieldset id="directivesFieldset" style="display: none;">
                     <legend>Действующие поручения</legend>
                     <div id="directivesContainer"></div>
                     <button type="button" id="addDirectiveBtn" class="btn btn-secondary btn-add-item">

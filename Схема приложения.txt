@@ -3,7 +3,7 @@ Act Constructor/
 │   ├── api/
 │   │   ├── __init__.py
 │   │   └── v1/
-│   │       ├── endpoints/
+│   │       ├── deps/
 │   │       │   ├── __init__.py
 │   │       │   └── auth_deps.py
 │   │       ├── endpoints/
