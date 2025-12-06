@@ -600,222 +600,282 @@ class CreateActDialog extends DialogBase {
     }
 
     /**
-     * Проверяет существование КМ номера
-     * @private
-     */
-    static async _checkKmExists(kmNumber, currentUser) {
-        try {
-            const response = await fetch(`/api/v1/acts/check-km?km_number=${encodeURIComponent(kmNumber)}`, {
-                headers: {'X-JupyterHub-User': currentUser}
-            });
-
-            if (!response.ok) {
-                throw new Error('Ошибка проверки КМ');
-            }
-
-            return await response.json();
-        } catch (error) {
-            console.error('Ошибка проверки КМ:', error);
-            return {exists: false, current_parts: 0, next_part: 1, has_service_notes: false};
-        }
-    }
-
-    /**
      * Обрабатывает отправку формы
      * @private
      */
     static async _handleFormSubmit(form, isEdit, actId, currentUser, dialog) {
+        let body = null; // Объявляем выше try-catch
+
         try {
-            // Валидация перед отправкой
+            // Валидация
             if (!this._validateForm(dialog, isEdit)) {
                 return;
             }
 
-            const fd = new FormData(form);
-            const kmNumber = fd.get('km_number');
-
-            // При редактировании проверяем изменение КМ
-            if (isEdit) {
-                const originalKm = form.dataset.originalKm;
-
-                if (originalKm && kmNumber !== originalKm) {
-                    // КМ изменился - проверяем новый КМ
-                    const kmExists = await this._checkKmExists(kmNumber, currentUser);
-
-                    if (kmExists.exists) {
-                        const confirmed = await DialogManager.show({
-                            title: 'Изменение КМ',
-                            message: `КМ ${kmNumber} уже существует. Акт будет перемещен в новую группу КМ. Продолжить?`,
-                            icon: '⚠️',
-                            confirmText: 'Продолжить',
-                            cancelText: 'Отмена'
-                        });
-
-                        if (!confirmed) {
-                            return;
-                        }
-                    }
-                }
-            }
-
-            // Собираем аудиторскую группу
-            const auditTeam = Array.from(
-                dialog.querySelectorAll('.team-member-row')
-            ).map(row => ({
-                role: row.querySelector('[name="role"]').value,
-                full_name: row.querySelector('[name="full_name"]').value,
-                position: row.querySelector('[name="position"]').value,
-                username: row.querySelector('[name="username"]').value
-            }));
-
-            // Собираем поручения
-            const directives = Array.from(
-                dialog.querySelectorAll('.directive-row')
-            ).map(row => ({
-                point_number: row.querySelector('[name="point_number"]').value,
-                directive_number: row.querySelector('[name="directive_number"]').value
-            })).filter(dir => dir.point_number.trim() !== ''); // Фильтруем пустые
-
-            // Вспомогательные функции
-            const getDateOrNull = (fieldName) => {
-                const value = fd.get(fieldName);
-                return value && value.trim() !== '' ? value : null;
-            };
-
-            const getStringOrNull = (fieldName) => {
-                const value = fd.get(fieldName);
-                return value && value.trim() !== '' ? value.trim() : null;
-            };
-
-            const getNumberOrDefault = (fieldName, defaultValue) => {
-                const value = fd.get(fieldName);
-                const parsed = parseInt(value, 10);
-                return !isNaN(parsed) && parsed > 0 ? parsed : defaultValue;
-            };
-
-            const body = {
-                km_number: kmNumber,
-                part_number: getNumberOrDefault('part_number', 1),
-                total_parts: getNumberOrDefault('total_parts', 1),
-                inspection_name: fd.get('inspection_name'),
-                city: fd.get('city'),
-                created_date: getDateOrNull('created_date'),
-                order_number: fd.get('order_number'),
-                order_date: fd.get('order_date'),
-                inspection_start_date: fd.get('inspection_start_date'),
-                inspection_end_date: fd.get('inspection_end_date'),
-                is_process_based: !!fd.get('is_process_based'),
-                audit_team: auditTeam,
-                directives: directives,
-                service_note: getStringOrNull('service_note'),
-                service_note_date: getDateOrNull('service_note_date')
-            };
-
-            const endpoint = isEdit
-                ? `/api/v1/acts/${actId}`
-                : '/api/v1/acts/create';
-            const method = isEdit ? 'PATCH' : 'POST';
-
-            const resp = await fetch(endpoint, {
-                method: method,
-                headers: {
-                    'Content-Type': 'application/json',
-                    'X-JupyterHub-User': currentUser
-                },
-                body: JSON.stringify(body)
-            });
-
-            if (!resp.ok) {
-                const errData = await resp.json();
-
-                // Проверяем специальный случай: КМ уже существует (только при создании)
-                if (!isEdit && resp.status === 409 && errData.detail?.type === 'km_exists') {
-                    const kmData = errData.detail;
-
-                    let message = `Акт с КМ "${kmData.km_number}" уже существует.\n\n`;
-
-                    if (kmData.has_service_notes) {
-                        message += `Существующие акты:\n`;
-                        message += `- Акты со служебными записками\n`;
-                        if (kmData.current_parts > 0) {
-                            message += `- Акты без служебных записок (частей: ${kmData.current_parts})\n\n`;
-                        }
-                        message += `Вы можете:\n`;
-                        message += `1. Создать новую часть БЕЗ служебной записки (номер части: ${kmData.next_part})\n`;
-                        message += `2. Указать служебную записку для нового акта в диалоге редактирования`;
-                    } else {
-                        message += `Текущее количество частей: ${kmData.current_parts}\n\n`;
-                        message += `Создать новую часть ${kmData.next_part} для этого акта?`;
-                    }
-
-                    // Показываем диалог подтверждения
-                    const confirmed = await DialogManager.show({
-                        title: 'КМ уже существует',
-                        message: message,
-                        icon: '❓',
-                        confirmText: 'Да, создать новую часть',
-                        cancelText: 'Отмена'
-                    });
-
-                    if (confirmed) {
-                        // Повторяем запрос с force_new_part=true
-                        await this._createWithNewPart(endpoint, body, currentUser);
-                    }
-                    return;
-                }
-
-                // Обычная ошибка
-                throw new Error(errData.detail || 'Ошибка сервера');
-            }
-
-            const data = await resp.json();
-            this._closeDialog();
-
-            if (typeof Notifications !== 'undefined') {
-                Notifications.success(isEdit ? 'Акт обновлен' : 'Акт создан успешно');
-            }
-
-            // Инвалидируем кеш меню после любых изменений
-            if (window.ActsMenuManager && typeof window.ActsMenuManager._clearCache === 'function') {
-                window.ActsMenuManager._clearCache();
-            }
-
-            if (isEdit) {
-                // При редактировании перезагружаем список актов
-                if (window.ActsManagerPage && typeof window.ActsManagerPage.loadActs === 'function') {
-                    await window.ActsManagerPage.loadActs();
-                }
-
-                // Перезагружаем список в меню актов (force refresh из БД)
-                if (window.ActsMenuManager && typeof window.ActsMenuManager.renderActsList === 'function') {
-                    await window.ActsMenuManager.renderActsList(true);
-                }
-
-                // Если редактируется текущий акт - перезагружаем его
-                if (window.currentActId === actId && window.APIClient) {
-                    await window.APIClient.loadActContent(actId);
-                    if (window.StorageManager && typeof window.StorageManager.markAsSyncedWithDB === 'function') {
-                        window.StorageManager.markAsSyncedWithDB();
-                    }
-                    if (typeof Notifications !== 'undefined') {
-                        Notifications.info('Данные акта обновлены');
-                    }
-                }
-
+            // Проверка изменения КМ
+            if (isEdit && !await this._confirmKmChange(form, dialog)) {
                 return;
             }
 
-            // При создании переходим к новому акту
-            window.location.href = `/constructor?act_id=${data.id}`;
+            // Сбор данных
+            body = this._collectFormData(form, dialog, isEdit, actId);
+
+            // Отправка
+            const response = await this._submitActData(body, isEdit, actId, currentUser);
+
+            // Обработка успеха
+            await this._handleSubmitSuccess(response, isEdit, actId, dialog);
 
         } catch (err) {
-            console.error('Ошибка сохранения акта:', err);
+            // Обработка ошибок
+            await this._handleSubmitError(err, isEdit, currentUser, body, dialog);
+        }
+    }
+
+    /**
+     * Проверяет и подтверждает изменение КМ при редактировании
+     * @private
+     */
+    static async _confirmKmChange(form, dialog) {
+        const originalKm = form.dataset.originalKm;
+        const kmInput = dialog.querySelector('input[name="km_number"]');
+        const newKm = kmInput?.value;
+
+        if (!originalKm || !newKm || originalKm === newKm) {
+            return true; // КМ не изменился
+        }
+
+        return await DialogManager.show({
+            title: 'Изменение КМ',
+            message: `Вы изменяете КМ с ${originalKm} на ${newKm}. Акт будет перемещен в новую группу КМ. Продолжить?`,
+            icon: '⚠️',
+            confirmText: 'Продолжить',
+            cancelText: 'Отмена'
+        });
+    }
+
+    /**
+     * Собирает данные из формы
+     * @private
+     */
+    static _collectFormData(form, dialog, isEdit, actId) {
+        const fd = new FormData(form);
+
+        // Вспомогательные функции
+        const getDateOrNull = (fieldName) => {
+            const value = fd.get(fieldName);
+            return value && value.trim() !== '' ? value : null;
+        };
+
+        const getStringOrNull = (fieldName) => {
+            const value = fd.get(fieldName);
+            return value && value.trim() !== '' ? value.trim() : null;
+        };
+
+        const getNumberOrDefault = (fieldName, defaultValue) => {
+            const value = fd.get(fieldName);
+            const parsed = parseInt(value, 10);
+            return !isNaN(parsed) && parsed > 0 ? parsed : defaultValue;
+        };
+
+        // Собираем аудиторскую группу
+        const auditTeam = this._collectAuditTeam(dialog);
+
+        // Собираем поручения (только при редактировании)
+        const directives = isEdit ? this._collectDirectives(dialog) : [];
+
+        const body = {
+            km_number: fd.get('km_number'),
+            part_number: getNumberOrDefault('part_number', 1),
+            total_parts: getNumberOrDefault('total_parts', 1),
+            inspection_name: fd.get('inspection_name'),
+            city: fd.get('city'),
+            created_date: getDateOrNull('created_date'),
+            order_number: fd.get('order_number'),
+            order_date: fd.get('order_date'),
+            inspection_start_date: fd.get('inspection_start_date'),
+            inspection_end_date: fd.get('inspection_end_date'),
+            is_process_based: !!fd.get('is_process_based'),
+            audit_team: auditTeam,
+            directives: directives,
+            service_note: getStringOrNull('service_note'),
+            service_note_date: getDateOrNull('service_note_date')
+        };
+
+        return body;
+    }
+
+    /**
+     * Собирает данные аудиторской группы
+     * @private
+     */
+    static _collectAuditTeam(dialog) {
+        return Array.from(dialog.querySelectorAll('.team-member-row')).map(row => ({
+            role: row.querySelector('[name="role"]').value,
+            full_name: row.querySelector('[name="full_name"]').value,
+            position: row.querySelector('[name="position"]').value,
+            username: row.querySelector('[name="username"]').value
+        }));
+    }
+
+    /**
+     * Собирает данные поручений
+     * @private
+     */
+    static _collectDirectives(dialog) {
+        return Array.from(dialog.querySelectorAll('.directive-row'))
+            .map(row => ({
+                point_number: row.querySelector('[name="point_number"]').value,
+                directive_number: row.querySelector('[name="directive_number"]').value
+            }))
+            .filter(dir => dir.point_number.trim() !== '');
+    }
+
+    /**
+     * Отправляет данные акта на сервер
+     * @private
+     */
+    static async _submitActData(body, isEdit, actId, currentUser) {
+        const endpoint = isEdit ? `/api/v1/acts/${actId}` : '/api/v1/acts/create';
+        const method = isEdit ? 'PATCH' : 'POST';
+
+        const response = await fetch(endpoint, {
+            method: method,
+            headers: {
+                'Content-Type': 'application/json',
+                'X-JupyterHub-User': currentUser
+            },
+            body: JSON.stringify(body)
+        });
+
+        if (!response.ok) {
+            const errData = await response.json();
+            throw {response, errData}; // Бросаем объект для обработки в _handleSubmitError
+        }
+
+        return await response.json();
+    }
+
+    /**
+     * Обрабатывает успешную отправку формы
+     * @private
+     */
+    static async _handleSubmitSuccess(data, isEdit, actId, dialog) {
+        this._closeDialog();
+
+        if (typeof Notifications !== 'undefined') {
+            Notifications.success(isEdit ? 'Акт обновлен' : 'Акт создан успешно');
+        }
+
+        // Инвалидируем кеш меню
+        this._invalidateCache();
+
+        if (isEdit) {
+            await this._refreshAfterEdit(actId);
+        } else {
+            await this._navigateToNewAct(data.id);
+        }
+    }
+
+    /**
+     * Обрабатывает ошибки при отправке формы
+     * @private
+     */
+    static async _handleSubmitError(err, isEdit, currentUser, body, dialog) {
+        // Проверяем специальный случай: КМ уже существует (только при создании)
+        if (!isEdit && err.response?.status === 409 && err.errData?.detail?.type === 'km_exists') {
+            await this._handleKmExistsError(err.errData.detail, body, currentUser);
+            return;
+        }
+
+        // Обычная ошибка
+        console.error('Ошибка сохранения акта:', err);
+
+        const errorMessage = err.errData?.detail || err.message || 'Неизвестная ошибка';
+
+        if (typeof Notifications !== 'undefined') {
+            Notifications.error('Не удалось сохранить акт: ' + errorMessage);
+        } else {
+            alert('Ошибка: ' + errorMessage);
+        }
+    }
+
+    /**
+     * Обрабатывает ошибку существования КМ
+     * @private
+     */
+    static async _handleKmExistsError(kmData, body, currentUser) {
+        const message = this._buildKmExistsMessage(kmData);
+
+        const confirmed = await DialogManager.show({
+            title: 'КМ уже существует',
+            message: message,
+            icon: '❓',
+            confirmText: 'Да, создать новую часть',
+            cancelText: 'Отмена'
+        });
+
+        if (confirmed) {
+            await this._createWithNewPart('/api/v1/acts/create', body, currentUser);
+        }
+    }
+
+    /**
+     * Формирует сообщение об существующем КМ
+     * @private
+     */
+    static _buildKmExistsMessage(kmData) {
+        let message = `Акт с КМ "${kmData.km_number}" уже существует.\n\n`;
+        message += `Текущее количество частей: ${kmData.current_parts}\n\n`;
+        message += `Создать новую часть ${kmData.next_part} для этого акта?`;
+        return message;
+    }
+
+    /**
+     * Инвалидирует кеш меню актов
+     * @private
+     */
+    static _invalidateCache() {
+        if (window.ActsMenuManager && typeof window.ActsMenuManager._clearCache === 'function') {
+            window.ActsMenuManager._clearCache();
+        }
+    }
+
+    /**
+     * Обновляет интерфейс после редактирования
+     * @private
+     */
+    static async _refreshAfterEdit(actId) {
+        // Перезагружаем список актов
+        if (window.ActsManagerPage && typeof window.ActsManagerPage.loadActs === 'function') {
+            await window.ActsManagerPage.loadActs();
+        }
+
+        // Перезагружаем меню актов
+        if (window.ActsMenuManager && typeof window.ActsMenuManager.renderActsList === 'function') {
+            await window.ActsMenuManager.renderActsList(true);
+        }
+
+        // Если редактируется текущий акт - перезагружаем его
+        if (window.currentActId === actId && window.APIClient) {
+            await window.APIClient.loadActContent(actId);
+
+            if (window.StorageManager && typeof window.StorageManager.markAsSyncedWithDB === 'function') {
+                window.StorageManager.markAsSyncedWithDB();
+            }
+
             if (typeof Notifications !== 'undefined') {
-                Notifications.error('Не удалось сохранить акт: ' + err.message);
-            } else {
-                alert('Ошибка: ' + err.message);
+                Notifications.info('Данные акта обновлены');
             }
         }
+    }
+
+    /**
+     * Переходит на страницу нового акта
+     * @private
+     */
+    static async _navigateToNewAct(actId) {
+        window.location.href = `/constructor?act_id=${actId}`;
     }
 
     /**

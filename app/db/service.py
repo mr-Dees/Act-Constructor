@@ -844,31 +844,59 @@ class ActDBService:
     # -------------------------------------------------------------------------
 
     async def _generate_unique_copy_name(self, original_name: str) -> str:
-        """Генерирует уникальное название для копии акта."""
+        """
+        Генерирует уникальное название для копии акта.
+
+        Логика:
+        - "Название" → "Название (Копия)"
+        - "Название (Копия)" → "Название (Копия 2)"
+        - "Название (Копия 2)" → "Название (Копия 3)"
+        """
+        # Проверяем есть ли уже "(Копия ...)" в конце
         match = re.search(r'^(.+?)\s*\(Копия\s*(\d*)\)\s*$', original_name)
 
         if match:
-            base_name = match.group(1)
+            base_name = match.group(1).strip()
             existing_num = match.group(2)
 
             if existing_num:
                 next_num = int(existing_num) + 1
             else:
                 next_num = 2
-
-            new_name = f"{base_name} (Копия {next_num})"
         else:
-            new_name = f"{original_name} (Копия)"
+            base_name = original_name.strip()
+            next_num = None  # Первая копия без номера
 
-        exists = await self.conn.fetchval(
-            "SELECT EXISTS(SELECT 1 FROM acts WHERE inspection_name = $1)",
-            new_name
-        )
+        # Генерируем название и проверяем уникальность
+        attempt = 0
+        max_attempts = 100  # Защита от бесконечного цикла
 
-        if exists:
-            return await self._generate_unique_copy_name(new_name)
+        while attempt < max_attempts:
+            if next_num is None:
+                new_name = f"{base_name} (Копия)"
+            else:
+                new_name = f"{base_name} (Копия {next_num})"
 
-        return new_name
+            # Проверяем существование
+            exists = await self.conn.fetchval(
+                "SELECT EXISTS(SELECT 1 FROM acts WHERE inspection_name = $1)",
+                new_name
+            )
+
+            if not exists:
+                return new_name
+
+            # Если существует, увеличиваем счётчик
+            if next_num is None:
+                next_num = 2
+            else:
+                next_num += 1
+
+            attempt += 1
+
+        # Если не смогли найти уникальное имя, добавляем timestamp
+        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        return f"{base_name} (Копия {timestamp})"
 
     async def duplicate_act(
             self,
@@ -878,29 +906,24 @@ class ActDBService:
         """
         Создает дубликат акта.
 
-        Для служебной записки добавляет timestamp к базовой части.
+        Логика дублирования:
+        - Генерируется уникальное название (Копия, Копия 2, ...)
+        - КМ берётся из оригинала БЕЗ изменений
+        - Создаётся как новая часть существующего КМ (force_new_part=True)
+        - Служебная записка НЕ копируется (акт без СЗ)
         """
         original = await self.get_act_by_id(act_id)
+        km_digit = self._extract_km_digits(original.km_number)
 
         new_inspection_name = await self._generate_unique_copy_name(
             original.inspection_name
         )
 
-        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-
-        # Для КМ с СЗ добавляем timestamp к базовой части СЗ
-        if original.service_note:
-            base_note, suffix = original.service_note.rsplit('/', 1)
-            new_service_note = f"{base_note}_copy_{timestamp}/{suffix}"
-        else:
-            new_service_note = None
-
-        new_km_number = f"КМ-{timestamp[:2]}-{timestamp[2:6]}"  # КМ-YY-MMDD
-
+        # Создаём дубликат БЕЗ служебной записки и с тем же КМ
         new_act_data = ActCreate(
-            km_number=new_km_number,
-            part_number=original.part_number,
-            total_parts=original.total_parts,
+            km_number=original.km_number,  # КМ без изменений
+            part_number=1,  # Будет пересчитан автоматически
+            total_parts=1,  # Будет пересчитан автоматически
             inspection_name=new_inspection_name,
             city=original.city,
             created_date=original.created_date,
@@ -911,11 +934,12 @@ class ActDBService:
             inspection_end_date=original.inspection_end_date,
             is_process_based=original.is_process_based,
             directives=original.directives,
-            service_note=new_service_note,
-            service_note_date=original.service_note_date
+            service_note=None,  # НЕ копируем СЗ
+            service_note_date=None
         )
 
-        new_act = await self.create_act(new_act_data, username, force_new_part=False)
+        # Создаём как новую часть существующего КМ
+        new_act = await self.create_act(new_act_data, username, force_new_part=True)
 
         # Копируем дерево структуры
         tree_row = await self.conn.fetchrow(
@@ -1018,12 +1042,17 @@ class ActDBService:
                 v['recommendations']
             )
 
+        # Явно обновляем total_parts для всей группы КМ
+        await self._update_total_parts_for_km(km_digit)
+
         logger.info(
             f"Создан дубликат акта: ID={act_id} -> ID={new_act.id}, "
+            f"КМ={original.km_number} (цифры={km_digit}), "
             f"название='{new_inspection_name}'"
         )
 
-        return new_act
+        # Перезагружаем акт чтобы получить актуальный total_parts
+        return await self.get_act_by_id(new_act.id)
 
     async def delete_act(self, act_id: int) -> None:
         """

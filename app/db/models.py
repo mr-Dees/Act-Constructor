@@ -102,16 +102,6 @@ class ActCreate(BaseModel):
 
         return self
 
-    @field_validator('part_number')
-    @classmethod
-    def validate_part_number(cls, v, info):
-        total = info.data.get('total_parts', 1)
-        if v > total:
-            raise ValueError(
-                f'Номер части ({v}) не может быть больше общего количества частей ({total})'
-            )
-        return v
-
     @field_validator('audit_team')
     @classmethod
     def validate_audit_team_composition(cls, v):
