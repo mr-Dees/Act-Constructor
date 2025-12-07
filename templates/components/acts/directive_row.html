@@ -1,12 +1,13 @@
 <!-- templates/components/directive_row.html -->
 <template id="directiveRowTemplate">
     <div class="directive-row">
-        <input type="text"
-               name="point_number"
-               placeholder="№ пункта (5.1.1) *"
-               required
-               class="directive-point"
-               data-field="point_number">
+        <select name="point_number"
+                required
+                class="directive-point"
+                data-field="point_number">
+            <option value="">Выберите пункт...</option>
+            <!-- Опции будут добавлены динамически -->
+        </select>
         <input type="text"
                name="directive_number"
                placeholder="№ поручения *"

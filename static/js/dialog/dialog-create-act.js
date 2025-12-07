@@ -14,6 +14,13 @@ class CreateActDialog extends DialogBase {
     static _currentDialog = null;
 
     /**
+     * Кеш пунктов раздела 5 текущего акта
+     * @private
+     * @type {Array<{number: string, label: string}>}
+     */
+    static _section5Points = [];
+
+    /**
      * Показывает диалог создания нового акта
      */
     static show() {
@@ -24,8 +31,112 @@ class CreateActDialog extends DialogBase {
      * Показывает диалог редактирования существующего акта
      * @param {Object} actData - Данные акта для редактирования
      */
-    static showEdit(actData) {
+    static async showEdit(actData) {
+        const isEdit = !!actData;
+        const actId = actData?.id;
+
+        // Для редактирования акта загружаем структуру, чтобы получить пункты раздела 5
+        if (isEdit && actId) {
+            await this._loadSection5Points(actId);
+        } else {
+            this._section5Points = [];
+        }
+
         this._showActDialog(actData);
+    }
+
+    /**
+     * Загружает пункты раздела 5 для выпадающего списка поручений
+     * @private
+     * @param {number} actId - ID акта
+     */
+    static async _loadSection5Points(actId) {
+        try {
+            const currentUser = window.env?.JUPYTERHUB_USER || AppConfig?.auth?.jupyterhubUser || "";
+
+            // Используем правильный префикс роутера
+            const response = await fetch(`/api/v1/act_content/${actId}/content`, {
+                headers: {
+                    'X-JupyterHub-User': currentUser
+                }
+            });
+
+            if (!response.ok) {
+                throw new Error('Не удалось загрузить структуру акта');
+            }
+
+            const data = await response.json();
+
+            // Находим раздел 5 и извлекаем все его пункты
+            this._section5Points = this._extractSection5Points(data.tree);
+
+        } catch (err) {
+            console.error('Ошибка загрузки пунктов раздела 5:', err);
+            this._section5Points = [];
+
+            if (typeof Notifications !== 'undefined') {
+                Notifications.warning('Не удалось загрузить список пунктов для поручений');
+            }
+        }
+    }
+
+    /**
+     * Извлекает все пункты из раздела 5 (без самого раздела)
+     * @private
+     * @param {Object} tree - Дерево структуры акта
+     * @returns {Array<{number: string, label: string}>} Массив пунктов
+     */
+    static _extractSection5Points(tree) {
+        const section5 = this._findNodeById(tree, '5');
+        if (!section5 || !section5.children) return [];
+
+        const points = [];
+
+        // Рекурсивная функция для сбора пунктов
+        const collectPoints = (node) => {
+            if (!node.children) return;
+
+            for (const child of node.children) {
+                // Добавляем только обычные пункты (item), не таблицы/текстблоки/нарушения
+                if ((!child.type || child.type === 'item') && child.number) {
+                    // Проверяем глубину вложенности (максимум 4 уровня)
+                    const depth = child.number.split('.').length;
+
+                    if (depth <= 4) {
+                        points.push({
+                            number: child.number,
+                            label: child.label || child.number
+                        });
+                    }
+                }
+
+                // Рекурсивно обрабатываем дочерние элементы
+                collectPoints(child);
+            }
+        };
+
+        collectPoints(section5);
+        return points;
+    }
+
+    /**
+     * Находит узел по ID в дереве
+     * @private
+     * @param {Object} node - Текущий узел
+     * @param {string} id - ID искомого узла
+     * @returns {Object|null} Найденный узел или null
+     */
+    static _findNodeById(node, id) {
+        if (!node) return null;
+        if (node.id === id) return node;
+        if (!node.children) return null;
+
+        for (const child of node.children) {
+            const found = this._findNodeById(child, id);
+            if (found) return found;
+        }
+
+        return null;
     }
 
     /**
@@ -242,7 +353,7 @@ class CreateActDialog extends DialogBase {
 
             let value = e.target.value;
 
-            // Удаляем все кроме цифр и дефисов
+            // Удаляем все кроме цифр и дефисов и букв КМ
             let cleaned = value.replace(/[^\dКМ\-]/g, '');
 
             // Извлекаем только цифры
@@ -385,6 +496,7 @@ class CreateActDialog extends DialogBase {
             this._removeEscapeHandler(this._currentDialog);
             super._hideDialog(this._currentDialog);
             this._currentDialog = null;
+            this._section5Points = [];
         }
     }
 
@@ -454,6 +566,41 @@ class CreateActDialog extends DialogBase {
     }
 
     /**
+     * Заполняет выпадающий список пунктов раздела 5
+     * @private
+     * @param {HTMLSelectElement} selectElement - Select элемент для заполнения
+     */
+    static _populatePointSelect(selectElement) {
+        while (selectElement.options.length > 1) {
+            selectElement.remove(1);
+        }
+
+        if (!this._section5Points || this._section5Points.length === 0) {
+            const option = document.createElement('option');
+            option.value = '';
+            option.textContent = 'Нет доступных пунктов';
+            option.disabled = true;
+            selectElement.appendChild(option);
+            return;
+        }
+
+        this._section5Points.forEach(point => {
+            const option = document.createElement('option');
+            option.value = point.number;
+            option.textContent = point.label;
+
+            // Отключаем пункты с глубиной > 4 уровней
+            const depth = point.number.split('.').length;
+            if (depth > 4) {
+                option.disabled = true;
+                option.textContent = `${point.label} (недоступно - слишком глубоко)`;
+            }
+
+            selectElement.appendChild(option);
+        });
+    }
+
+    /**
      * Добавляет поручение
      * @private
      */
@@ -467,10 +614,16 @@ class CreateActDialog extends DialogBase {
         const rowElement = directiveRow.querySelector('.directive-row');
         if (!rowElement) return;
 
-        // Заполняем данные
-        const pointInput = rowElement.querySelector('[name="point_number"]');
-        if (pointInput) pointInput.value = pointNumber;
+        // Заполняем select опциями из раздела 5
+        const pointSelect = rowElement.querySelector('[name="point_number"]');
+        if (pointSelect) {
+            this._populatePointSelect(pointSelect);
+            if (pointNumber) {
+                pointSelect.value = pointNumber;
+            }
+        }
 
+        // Заполняем данные номера поручения
         const directiveInput = rowElement.querySelector('[name="directive_number"]');
         if (directiveInput) directiveInput.value = directiveNumber;
 
@@ -570,26 +723,16 @@ class CreateActDialog extends DialogBase {
             const directives = Array.from(dialog.querySelectorAll('.directive-row'));
 
             for (const row of directives) {
-                const pointNumber = row.querySelector('[name="point_number"]').value.trim();
+                const pointNumber = row.querySelector('[name="point_number"]').value;
 
                 if (!pointNumber) continue; // Пропускаем пустые строки
 
+                // Дополнительная защитная проверка (select содержит только 5.*)
                 if (!pointNumber.startsWith('5.')) {
                     if (typeof Notifications !== 'undefined') {
-                        Notifications.warning(`Поручения могут быть только в разделе 5 (указан пункт: ${pointNumber})`);
+                        Notifications.warning(`Поручения могут быть только в разделе 5 (выбран пункт: ${pointNumber})`);
                     } else {
-                        alert(`Поручения могут быть только в разделе 5 (указан пункт: ${pointNumber})`);
-                    }
-                    return false;
-                }
-
-                // Проверяем формат
-                const parts = pointNumber.split('.');
-                if (parts.length < 3) {
-                    if (typeof Notifications !== 'undefined') {
-                        Notifications.warning(`Неверный формат пункта: ${pointNumber}. Ожидается формат 5.X.Y`);
-                    } else {
-                        alert(`Неверный формат пункта: ${pointNumber}. Ожидается формат 5.X.Y`);
+                        alert(`Поручения могут быть только в разделе 5 (выбран пункт: ${pointNumber})`);
                     }
                     return false;
                 }
@@ -726,9 +869,9 @@ class CreateActDialog extends DialogBase {
         return Array.from(dialog.querySelectorAll('.directive-row'))
             .map(row => ({
                 point_number: row.querySelector('[name="point_number"]').value,
-                directive_number: row.querySelector('[name="directive_number"]').value
+                directive_number: row.querySelector('[name="directive_number"]').value.trim()
             }))
-            .filter(dir => dir.point_number.trim() !== '');
+            .filter(dir => dir.point_number !== '');
     }
 
     /**

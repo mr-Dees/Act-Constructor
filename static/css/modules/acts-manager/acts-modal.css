@@ -410,3 +410,39 @@
 #kmNumberField.hidden {
     display: none;
 }
+
+/* Стилизация select для пунктов поручений */
+.directive-row select[name="point_number"] {
+    flex: 1;
+    min-width: 150px;
+    padding: var(--spacing-sm) var(--spacing-md);
+    border: 1px solid var(--input-border);
+    border-radius: var(--radius-sm);
+    background: var(--input-bg);
+    color: var(--input-text);
+    font-size: var(--font-size-sm);
+    font-family: var(--font-family-base);
+    cursor: pointer;
+    transition: border-color var(--transition-fast), box-shadow var(--transition-fast);
+}
+
+.directive-row select[name="point_number"]:hover:not(:focus):not(:disabled) {
+    border-color: var(--input-border-hover);
+}
+
+.directive-row select[name="point_number"]:focus {
+    outline: none;
+    border-color: var(--input-border-focus);
+    box-shadow: var(--input-focus-shadow);
+}
+
+.directive-row select[name="point_number"]:disabled {
+    background: var(--input-bg-disabled);
+    cursor: not-allowed;
+    opacity: 0.6;
+}
+
+/* Стиль для placeholder опции */
+.directive-row select[name="point_number"] option:first-child {
+    color: var(--text-tertiary);
+}
