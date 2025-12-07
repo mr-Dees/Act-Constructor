@@ -106,9 +106,10 @@ class ActCreate(BaseModel):
     @field_validator('service_note')
     @classmethod
     def validate_service_note_format(cls, v):
-        """Проверяет формат служебной записки: Текст/XXXX"""
-        if v is None:
-            return v
+        """Проверяет формат служебной записки: Текст/XXXX или принимает пустую строку как None"""
+        # Пустая строка или None означает отсутствие СЗ
+        if v is None or (isinstance(v, str) and v.strip() == ''):
+            return None
 
         pattern = r'^.+/\d{4}$'
         if not re.match(pattern, v):
@@ -191,9 +192,10 @@ class ActUpdate(BaseModel):
     @field_validator('service_note')
     @classmethod
     def validate_service_note_format(cls, v):
-        """Проверяет формат служебной записки: Текст/XXXX"""
-        if v is None:
-            return v
+        """Проверяет формат служебной записки: Текст/XXXX или принимает пустую строку как None для удаления"""
+        # Пустая строка или None означает удаление СЗ
+        if v is None or (isinstance(v, str) and v.strip() == ''):
+            return None
 
         pattern = r'^.+/\d{4}$'
         if not re.match(pattern, v):

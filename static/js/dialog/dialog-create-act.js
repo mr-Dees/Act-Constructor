@@ -309,6 +309,9 @@ class CreateActDialog extends DialogBase {
                 await this._handleFormSubmit(e.target, isEdit, actData?.id, currentUser, dialog);
             };
         }
+
+        // Настраиваем интерактивные обработчики для полей СЗ
+        this._setupServiceNoteInteractiveHandlers(dialog);
     }
 
     /**
@@ -812,7 +815,9 @@ class CreateActDialog extends DialogBase {
 
         const getStringOrNull = (fieldName) => {
             const value = fd.get(fieldName);
-            return value && value.trim() !== '' ? value.trim() : null;
+            // Явно преобразуем пустую строку в null
+            const trimmed = value ? value.trim() : '';
+            return trimmed !== '' ? trimmed : null;
         };
 
         const getNumberOrDefault = (fieldName, defaultValue) => {
@@ -872,6 +877,50 @@ class CreateActDialog extends DialogBase {
                 directive_number: row.querySelector('[name="directive_number"]').value.trim()
             }))
             .filter(dir => dir.point_number !== '');
+    }
+
+    /**
+     * Настраивает обработчики для автоматической очистки связанных полей СЗ
+     * @private
+     */
+    static _setupServiceNoteInteractiveHandlers(dialog) {
+        const serviceNoteInput = dialog.querySelector('input[name="service_note"]');
+        const serviceDateInput = dialog.querySelector('input[name="service_note_date"]');
+
+        if (!serviceNoteInput || !serviceDateInput) return;
+
+        // При очистке номера СЗ - автоматически очищаем дату
+        serviceNoteInput.addEventListener('change', async (e) => {
+            const value = e.target.value.trim();
+
+            if (value === '' && serviceDateInput.value) {
+                // ИСПРАВЛЕНИЕ: Используем DialogManager вместо браузерного confirm
+                const confirmed = await DialogManager.show({
+                    title: 'Удаление служебной записки',
+                    message: 'Вы удаляете номер служебной записки. Очистить также и дату?',
+                    icon: '❓',
+                    confirmText: 'Да, очистить',
+                    cancelText: 'Нет',
+                    type: 'warning'
+                });
+
+                if (confirmed) {
+                    serviceDateInput.value = '';
+                }
+            }
+        });
+
+        // При указании даты СЗ - проверяем наличие номера
+        serviceDateInput.addEventListener('change', (e) => {
+            if (e.target.value && !serviceNoteInput.value.trim()) {
+                if (typeof Notifications !== 'undefined') {
+                    Notifications.warning('Сначала укажите номер служебной записки');
+                } else {
+                    alert('Сначала укажите номер служебной записки');
+                }
+                e.target.value = '';
+            }
+        });
     }
 
     /**

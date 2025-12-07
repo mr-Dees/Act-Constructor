@@ -508,15 +508,16 @@ class ActDBService:
                     act_update.service_note != old_service_note
             )
 
+            # ИСПРАВЛЕНИЕ: Улучшенная проверка удаления СЗ
+            # После валидации в models.py пустая строка уже преобразована в None
             service_note_removed = (
                     old_service_note is not None and
-                    act_update.service_note == ''
+                    act_update.service_note is None
             )
 
             # Обработка изменения служебной записки
             if service_note_changed or service_note_removed:
-                if act_update.service_note and act_update.service_note != '':
-                    # Добавили СЗ - меняем часть на суффикс из СЗ
+                if act_update.service_note:  # Добавили СЗ
                     service_note_suffix = self._extract_service_note_suffix(
                         act_update.service_note
                     )
@@ -554,29 +555,18 @@ class ActDBService:
                         )
 
                     act_update.part_number = new_part_number
-                else:
-                    # Убрали СЗ - назначаем следующий свободный номер для акта без СЗ
+                else:  # Убрали СЗ
                     km_digit = (
                         self._extract_km_digits(act_update.km_number)
                         if act_update.km_number
                         else old_km_digit
                     )
 
-                    next_part = await self.conn.fetchval(
-                        """
-                        SELECT COALESCE(
-                            MAX(CASE WHEN service_note IS NULL THEN part_number ELSE 0 END),
-                            0
-                        ) + 1
-                        FROM acts
-                        WHERE km_number_digit = $1 
-                          AND id != $2
-                        """,
-                        km_digit,
-                        act_id
-                    )
+                    # ИСПРАВЛЕНИЕ: Ищем первый свободный номер части среди актов без СЗ
+                    next_part = await self._find_free_part_number(km_digit, act_id)
 
                     act_update.part_number = next_part
+                    # ИСПРАВЛЕНИЕ: Явно устанавливаем None для очистки
                     act_update.service_note = None
                     act_update.service_note_date = None
 
@@ -613,8 +603,8 @@ class ActDBService:
                             f'{part_to_check} уже существует'
                         )
                 else:
-                    # Для актов без СЗ назначаем следующий номер
-                    new_part = km_info['next_part_no_sn']
+                    # Для актов без СЗ ищем первый свободный номер
+                    new_part = await self._find_free_part_number(new_km_digit, act_id)
                     act_update.part_number = new_part
 
                 logger.info(
@@ -685,15 +675,19 @@ class ActDBService:
                 values.append(act_update.is_process_based)
                 param_idx += 1
 
-            # Служебная записка
+            # ИСПРАВЛЕНИЕ: Обновленная обработка служебной записки
+            # Обрабатываем изменение или удаление СЗ
             if service_note_changed or service_note_removed:
                 updates.append(f"service_note = ${param_idx}")
-                values.append(
-                    act_update.service_note if act_update.service_note else None
-                )
+                values.append(act_update.service_note)  # Теперь это None при удалении
                 param_idx += 1
 
-            if act_update.service_note_date is not None:
+                # ИСПРАВЛЕНИЕ: Явно очищаем дату СЗ при удалении записки
+                updates.append(f"service_note_date = ${param_idx}")
+                values.append(act_update.service_note_date)  # None при удалении
+                param_idx += 1
+            elif act_update.service_note_date is not None:
+                # Обновляем только дату, если она передана отдельно
                 updates.append(f"service_note_date = ${param_idx}")
                 values.append(act_update.service_note_date)
                 param_idx += 1
@@ -780,6 +774,65 @@ class ActDBService:
             logger.info(f"Обновлены метаданные акта ID={act_id}")
 
             return await self.get_act_by_id(act_id)
+
+    async def _find_free_part_number(self, km_digit: str, exclude_act_id: int = None) -> int:
+        """
+        Находит первый свободный номер части для актов без СЗ.
+
+        Логика:
+        1. Получаем все занятые номера частей (включая акты с СЗ и без)
+        2. Ищем минимальный свободный номер начиная с 1
+        3. Возвращаем первый найденный свободный номер
+
+        Args:
+            km_digit: КМ номер (только цифры)
+            exclude_act_id: ID акта, который нужно исключить из проверки (для обновления)
+
+        Returns:
+            Первый свободный номер части
+
+        Examples:
+            Занятые номера: [1, 2, 4, 5] -> вернет 3
+            Занятые номера: [1, 2, 3] -> вернет 4
+            Занятые номера: [2, 3, 4] -> вернет 1
+        """
+        # Получаем все занятые номера частей
+        if exclude_act_id:
+            rows = await self.conn.fetch(
+                """
+                SELECT part_number 
+                FROM acts 
+                WHERE km_number_digit = $1 
+                  AND id != $2
+                ORDER BY part_number
+                """,
+                km_digit,
+                exclude_act_id
+            )
+        else:
+            rows = await self.conn.fetch(
+                """
+                SELECT part_number 
+                FROM acts 
+                WHERE km_number_digit = $1
+                ORDER BY part_number
+                """,
+                km_digit
+            )
+
+        occupied_numbers = {row['part_number'] for row in rows}
+
+        # Ищем первый свободный номер начиная с 1
+        part_number = 1
+        while part_number in occupied_numbers:
+            part_number += 1
+
+        logger.info(
+            f"Найден свободный номер части {part_number} для КМ (цифры)={km_digit}. "
+            f"Занятые номера: {sorted(occupied_numbers)}"
+        )
+
+        return part_number
 
     # -------------------------------------------------------------------------
     # ВАЛИДАЦИЯ ПОРУЧЕНИЙ
