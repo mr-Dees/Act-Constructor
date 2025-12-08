@@ -12,6 +12,7 @@ from datetime import datetime, timedelta
 
 from cachetools import TTLCache
 from fastapi import FastAPI, Request, Depends
+from fastapi.responses import FileResponse
 from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
@@ -235,6 +236,11 @@ def create_app() -> FastAPI:
         StaticFiles(directory=str(settings.static_dir)),
         name="static"
     )
+
+    @app.get("/favicon.ico", include_in_schema=False)
+    async def favicon():
+        favicon_path = settings.static_dir / "favicon.ico"
+        return FileResponse(favicon_path)
 
     @app.get("/", response_class=HTMLResponse)
     async def show_acts_manager(request: Request):
