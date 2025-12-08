@@ -53,8 +53,8 @@ venv.bak/
 *.db
 *.sqlite
 *.sqlite3
-DB/acts/*
-!DB/acts/.gitkeep
+acts_storage/*
+!acts_storage/.gitkeep
 
 # Logs
 *.log

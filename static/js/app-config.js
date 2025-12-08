@@ -242,9 +242,9 @@ class AppConfig {
 
         // Сообщения об ошибках
         errors: {
-            cannotAddToTable: 'Нельзя добавить {type} к таблице',
-            cannotAddToTextBlock: 'Нельзя добавить {type} к текстовому блоку',
-            cannotAddToViolation: 'Нельзя добавить {type} к нарушению',
+            cannotAddToTable: (type) => `Нельзя добавить ${type} к таблице`,
+            cannotAddToTextBlock: (type) => `Нельзя добавить ${type} к текстовому блоку`,
+            cannotAddToViolation: (type) => `Нельзя добавить ${type} к нарушению`,
             limitReached: (type, limit) => `Достигнуто максимальное количество ${type} (${limit}) для этого пункта`,
             protectedFromDeletion: 'Эта таблица защищена от удаления',
             notFound: (type) => `${type} не найден`
@@ -414,17 +414,11 @@ class AppConfig {
     };
 
     /**
-     * Настройки API
+     * Настройки контекстного меню
+     * TODO: Добавить настройки API при работе с модулем
      */
     static api = {
-        // Поддерживаемые форматы экспорта
-        supportedFormats: ['txt', 'docx', 'md'],
-
-        // Эндпоинты API
-        endpoints: {
-            saveAct: '/api/v1/act_operations/save_act',
-            downloadFile: '/api/v1/act_operations/download'
-        }
+        // Здесь будут настройки контекстного меню
     };
 
     /**
@@ -446,14 +440,5 @@ class AppConfig {
         // Максимальный размер данных в localStorage (байты)
         // Учитываем, что лимит обычно 5-10MB, ставим консервативный лимит
         maxStorageSize: 4 * 1024 * 1024, // 4MB
-
-        // Сообщения
-        messages: {
-            saved: 'Изменения сохранены',
-            restored: 'Состояние восстановлено из автосохранения',
-            storageFull: 'Недостаточно места для сохранения. Попробуйте упростить структуру акта.',
-            storageError: 'Ошибка сохранения данных',
-            noSavedState: 'Нет сохраненного состояния для восстановления'
-        }
     };
 }

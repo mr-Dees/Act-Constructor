@@ -1,19 +1,25 @@
-/* static/css/modules/acts-manager/acts-manager-cards.css */
+/*
+ * Стили для карточек актов
+ * Определяет внешний вид и поведение отдельных карточек в списке актов
+ */
 
+/* Базовый стиль карточки акта */
 .act-card {
     background: var(--card-bg);
-    border: 1px solid var(--card-border);
+    border: var(--border-width-thin) solid var(--card-border);
     border-radius: var(--radius-lg);
     padding: var(--spacing-2xl);
     transition: var(--transition-all);
 }
 
+/* Эффект при наведении - подсветка и небольшой подъем */
 .act-card:hover {
     border-color: var(--primary);
     box-shadow: var(--shadow-md);
     transform: translateY(calc(-1 * var(--translate-sm)));
 }
 
+/* Шапка карточки с заголовком и бейджем роли */
 .act-card-header {
     display: flex;
     justify-content: space-between;
@@ -22,6 +28,7 @@
     margin-bottom: var(--spacing-xl);
 }
 
+/* Заголовок карточки (название акта) */
 .act-card-title {
     font-size: var(--font-size-xl);
     font-weight: var(--font-weight-semibold);
@@ -31,6 +38,7 @@
     line-height: var(--line-height-tight);
 }
 
+/* Бейдж с ролью пользователя (автор/редактор) */
 .act-card-role {
     background: var(--secondary);
     color: var(--text-on-primary);
@@ -42,39 +50,45 @@
     flex-shrink: 0;
 }
 
+/* Тело карточки с метаданными */
 .act-card-body {
     display: flex;
     flex-direction: column;
     gap: var(--spacing-md);
 }
 
+/* Метаинформация акта (КМ, участок и т.д.) */
 .act-card-meta {
     color: var(--text-secondary);
     font-size: var(--font-size-sm);
     line-height: var(--line-height-relaxed);
 }
 
+/* Выделение важных данных в метаинформации */
 .act-card-meta strong {
     color: var(--text-primary);
     font-weight: var(--font-weight-medium);
 }
 
+/* Временная метка (дата создания/изменения) */
 .act-card-timestamp {
     font-size: var(--font-size-xs);
     color: var(--text-tertiary);
     margin-top: var(--spacing-sm);
     padding-top: var(--spacing-md);
-    border-top: 1px solid var(--border-light);
+    border-top: var(--border-width-thin) solid var(--border-light);
 }
 
+/* Контейнер для действий с актом (кнопки открыть, дублировать, удалить) */
 .act-card-actions {
     display: flex;
     gap: var(--spacing-sm);
     margin-top: var(--spacing-xl);
     padding-top: var(--spacing-xl);
-    border-top: 1px solid var(--border-light);
+    border-top: var(--border-width-thin) solid var(--border-light);
 }
 
+/* Основная кнопка действия (обычно "Открыть") */
 .act-card-actions .btn {
     flex: 1;
     padding: var(--spacing-sm) var(--spacing-lg);
@@ -82,6 +96,7 @@
     min-height: var(--button-size-sm);
 }
 
+/* Дополнительные кнопки-иконки (дублировать, удалить) */
 .act-card-actions .btn:not(:first-child) {
     flex: 0 0 var(--button-size-sm);
     padding: var(--spacing-xs);
@@ -90,18 +105,22 @@
     justify-content: center;
 }
 
+/* Эффект при наведении на кнопку - небольшой подъем */
 .act-card-actions .btn:hover {
     transform: translateY(calc(-1 * var(--button-hover-translate)));
 }
 
+/* Эффект при клике на кнопку - небольшое уменьшение */
 .act-card-actions .btn:active {
     transform: scale(var(--button-active-scale));
 }
 
+/* Базовый стиль для кнопки удаления (текстовый вариант) */
 .btn-danger-text {
     color: var(--text-secondary);
 }
 
+/* Эффект при наведении на кнопку удаления - красный цвет и фон */
 .btn-danger-text:hover {
     color: var(--danger);
     background: var(--danger-subtle);

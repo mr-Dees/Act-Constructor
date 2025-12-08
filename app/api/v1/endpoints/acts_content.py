@@ -1,4 +1,3 @@
-# app/api/v1/endpoints/act_content.py
 """
 API эндпоинты для работы с содержимым актов.
 
@@ -18,10 +17,10 @@ from fastapi import APIRouter, Depends, HTTPException
 
 from app.api.v1.deps.auth_deps import get_username
 from app.db.connection import get_db
-from app.db.service import ActDBService
-from app.schemas.act import ActDataSchema
+from app.db.repositories.act_repository import ActDBService
+from app.schemas.act_content import ActDataSchema
 
-logger = logging.getLogger("act_constructor.api")
+logger = logging.getLogger("act_constructor.api.content")
 router = APIRouter()
 
 

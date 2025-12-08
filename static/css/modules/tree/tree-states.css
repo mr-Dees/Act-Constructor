@@ -3,7 +3,7 @@
  * Стили для выбранных, защищенных и редактируемых элементов
  */
 
-/* ВАЖНО: Защищенный элемент должен быть желтым */
+/* Защищенный элемент должен быть желтым */
 .tree-item.protected {
     background: var(--tree-protected-bg) !important;
     border-left: var(--tree-protected-border-width) solid var(--warning);

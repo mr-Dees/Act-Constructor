@@ -13,7 +13,7 @@ from fastapi import APIRouter, Depends
 
 from app.core.config import get_settings, Settings
 
-logger = logging.getLogger("act_constructor.system")
+logger = logging.getLogger("act_constructor.api.system")
 router = APIRouter()
 
 

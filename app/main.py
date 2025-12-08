@@ -21,7 +21,7 @@ from app.api.v1.deps.auth_deps import get_username
 from app.api.v1.routes import api_router as api_v1_router
 from app.core.config import Settings, setup_logging
 from app.db.connection import init_db, close_db, create_tables_if_not_exist, get_db
-from app.db.service import ActDBService
+from app.db.repositories.act_repository import ActDBService
 
 # Инициализируем настройки и логирование один раз на уровне модуля
 settings = Settings()
@@ -187,7 +187,7 @@ async def lifespan(app: FastAPI):
     logger.info("Database pool закрыт")
 
     # Закрываем ThreadPoolExecutor
-    from app.services.act_service import executor
+    from app.services.export_service import executor
     executor.shutdown(wait=True, cancel_futures=False)
     logger.info("ThreadPoolExecutor корректно закрыт")
 
@@ -312,5 +312,5 @@ if __name__ == "__main__":
         # Автоматическая перезагрузка при изменении кода
         reload=True,
         # Уменьшаем verbosity uvicorn логов
-        log_level="info"
+        log_level="debug"
     )

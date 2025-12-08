@@ -1,4 +1,3 @@
-// static/js/dialog/dialog-help.js
 /**
  * Менеджер системы помощи и инструкций
  *

@@ -11,7 +11,7 @@ from pathlib import Path
 
 from docx import Document
 
-logger = logging.getLogger("act_constructor.storage")
+logger = logging.getLogger("act_constructor.service.storage")
 
 
 class StorageService:

@@ -1,4 +1,3 @@
-# app/api/v1/endpoints/auth.py
 """
 API эндпоинты для авторизации.
 """
@@ -12,7 +11,7 @@ from pydantic import BaseModel
 
 from app.core.config import get_settings
 
-logger = logging.getLogger("act_constructor.auth")
+logger = logging.getLogger("act_constructor.api.auth")
 router = APIRouter()
 
 

@@ -1,4 +1,3 @@
-// static/js/api.js
 /**
  * Клиент для взаимодействия с API
  *
@@ -23,7 +22,7 @@ class APIClient {
             const formatList = Array.isArray(formats) ? formats : [formats];
 
             const validFormats = formatList.filter(fmt =>
-                AppConfig.api.supportedFormats.includes(fmt)
+                ['txt', 'docx', 'md'].includes(fmt)
             );
 
             if (validFormats.length === 0) {
@@ -74,7 +73,7 @@ class APIClient {
     static async _generateSingleFormat(format, data) {
         try {
             const response = await fetch(
-                `${AppConfig.api.endpoints.saveAct}?fmt=${format}`,
+                `/api/v1/acts_export/save_act?fmt=${format}`,
                 {
                     method: 'POST',
                     headers: {'Content-Type': 'application/json'},
@@ -197,7 +196,7 @@ class APIClient {
     static async downloadFile(filename) {
         try {
             const response = await fetch(
-                `${AppConfig.api.endpoints.downloadFile}/${filename}`
+                `/api/v1/acts_export/download/${filename}`
             );
 
             if (!response.ok) {
@@ -249,7 +248,7 @@ class APIClient {
         }
 
         try {
-            const resp = await fetch(`/api/v1/act_content/${actId}/content`, {
+            const resp = await fetch(`/api/v1/acts_content/${actId}/content`, {
                 headers: {'X-JupyterHub-User': username}
             });
 
@@ -338,7 +337,7 @@ class APIClient {
         try {
             const data = AppState.exportData();
 
-            const resp = await fetch(`/api/v1/act_content/${actId}/content`, {
+            const resp = await fetch(`/api/v1/acts_content/${actId}/content`, {
                 method: 'PUT',
                 headers: {
                     'Content-Type': 'application/json',
@@ -378,7 +377,7 @@ class APIClient {
 
             const data = AppState.exportData();
 
-            const resp = await fetch(`/api/v1/act_content/${actId}/content`, {
+            const resp = await fetch(`/api/v1/acts_content/${actId}/content`, {
                 method: 'PUT',
                 headers: {
                     'Content-Type': 'application/json',

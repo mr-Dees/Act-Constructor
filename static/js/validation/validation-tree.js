@@ -107,19 +107,19 @@ const ValidationTree = {
         // Нельзя добавлять контент к информационным элементам
         if (node.type === TABLE) {
             return ValidationCore.failure(
-                errors.cannotAddToTable.replace('{type}', typeName)
+                errors.cannotAddToTable(typeName)
             );
         }
 
         if (node.type === TEXTBLOCK) {
             return ValidationCore.failure(
-                errors.cannotAddToTextBlock.replace('{type}', typeName)
+                errors.cannotAddToTextBlock(typeName)
             );
         }
 
         if (node.type === VIOLATION) {
             return ValidationCore.failure(
-                errors.cannotAddToViolation.replace('{type}', typeName)
+                errors.cannotAddToViolation(typeName)
             );
         }
 

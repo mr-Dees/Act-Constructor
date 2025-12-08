@@ -1,4 +1,3 @@
-// static/js/dialog/dialog-base.js
 /**
  * Базовый менеджер диалоговых окон
  *

@@ -13,12 +13,12 @@
 
 /* Базовые стили для body */
 body {
-    font-family: -apple-system, BlinkMacSystemFont, "Inter", "Segoe UI", system-ui, sans-serif;
-    background: linear-gradient(to bottom, #9d7cb8 0%, #748fca 100%);
+    font-family: var(--font-family-base);
+    background: var(--gradient-header);
     min-height: 100vh;
     color: var(--text-primary);
-    line-height: 1.6;
+    line-height: var(--line-height-normal);
     -webkit-font-smoothing: antialiased;
     -moz-osx-font-smoothing: grayscale;
-    font-size: 0.875rem;
+    font-size: var(--font-size-sm);
 }

@@ -1,4 +1,3 @@
-// static/js/dialog/dialog-confirm.js
 /**
  * Менеджер диалоговых окон подтверждения
  *

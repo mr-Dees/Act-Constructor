@@ -16,17 +16,17 @@ from app.core.config import Settings
 from app.formatters.docx_formatter import DocxFormatter
 from app.formatters.markdown_formatter import MarkdownFormatter
 from app.formatters.text_formatter import TextFormatter
-from app.schemas.act import ActSaveResponse
+from app.schemas.act_content import ActSaveResponse
 from app.services.storage_service import StorageService
 
-logger = logging.getLogger("act_constructor.service")
+logger = logging.getLogger("act_constructor.service.export")
 
 # ThreadPoolExecutor для CPU/IO-intensive операций.
 # Размер пула = количество CPU cores для оптимальной загрузки.
 executor = ThreadPoolExecutor(max_workers=4, thread_name_prefix="act_formatter")
 
 
-class ActService:
+class ExportService:
     """
     Сервис для работы с актами.
 
@@ -52,7 +52,7 @@ class ActService:
             'md': MarkdownFormatter(settings),
             'docx': DocxFormatter(settings)
         }
-        logger.debug("ActService инициализирован с кэшированными форматерами")
+        logger.debug("ExportService инициализирован с кэшированными форматерами")
 
     def _format_sync(
             self,

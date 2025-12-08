@@ -6,7 +6,7 @@
 
 from fastapi import APIRouter
 
-from app.api.v1.endpoints import act_operations, system, acts, act_content, auth
+from app.api.v1.endpoints import auth, acts, acts_content, acts_export, system
 
 # Создание главного роутера для API v1
 api_router = APIRouter()
@@ -15,13 +15,13 @@ api_router = APIRouter()
 # Формат: (Экземпляр роутера, префикс, теги для документации)
 ROUTERS = [
     # Авторизация (первым — логически важнее)
-    (auth.router, "/auth", ["Авторизация"]),
+    (auth, "/auth", ["Авторизация"]),
     # Служебные эндпоинты (system endpoints)
-    (system.router, "/system", ["Системные операции"]),
+    (system, "/system", ["Системные операции"]),
     # Бизнес-логика
-    (act_operations.router, "/act_operations", ["Операции с актами"]),
-    (acts.router, "/acts", ["Менеджмент актов"]),
-    (act_content.router, "/act_content", ["Контент актов"])
+    (acts, "/acts", ["Менеджмент актов"]),
+    (acts_content, "/acts_content", ["Содержимое актов"]),
+    (acts_export, "/acts_export", ["Операции экспорта"]),
 ]
 
 # Подключение всех роутеров (будут доступны по адресу /api/v1/*/*)

@@ -38,8 +38,8 @@ def setup_logging(log_level: str = "INFO") -> logging.Logger:
 
     # Создаем форматер для логов
     formatter = logging.Formatter(
-        '%(asctime)s - %(name)s - %(levelname)s - %(message)s',
-        datefmt='%Y-%m-%d %H:%M:%S'
+        '%(levelname)s:     [%(asctime)s] %(name)s - %(message)s',
+        datefmt='%H:%M:%S'
     )
 
     # Настраиваем консольный handler
@@ -67,8 +67,8 @@ def setup_logging(log_level: str = "INFO") -> logging.Logger:
     logger.addHandler(console_handler)
     logger.addHandler(file_handler)
 
-    # Отключаем propagation чтобы избежать дублирования в root logger
-    logger.propagate = False
+    # Поставить False если нужно отключить вывод событий в root logger
+    logger.propagate = True
 
     return logger
 
@@ -186,7 +186,7 @@ class Settings(BaseSettings):
     @property
     def storage_dir(self) -> Path:
         """Возвращает директорию для хранения актов."""
-        path = self.base_dir / "DB" / "acts"
+        path = self.base_dir / "acts_storage"
         path.mkdir(parents=True, exist_ok=True)
         return path
 

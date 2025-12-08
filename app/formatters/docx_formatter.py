@@ -25,7 +25,7 @@ from app.core.config import Settings
 from app.formatters.base_formatter import BaseFormatter
 from app.formatters.utils import HTMLUtils
 
-logger = logging.getLogger("act_constructor.formatter")
+logger = logging.getLogger("act_constructor.formatter.docx")
 
 
 class TimeoutError(Exception):

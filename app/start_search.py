@@ -12,7 +12,7 @@ import asyncio
 
 from app.core.config import Settings
 from app.db.connection import init_db, close_db
-from app.extractors.api import *
+from app.integrations.ai_assistant_bd_oarb.data_export import *
 
 # Инициализируем настройки один раз на уровне модуля
 settings = Settings()

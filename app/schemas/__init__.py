@@ -2,10 +2,10 @@
 Pydantic схемы для валидации данных.
 
 Определяет структуры данных для всех сущностей приложения:
-акты, таблицы, текстовые блоки, нарушения.
+акты, таблицы, текстовые блоки, нарушения и метаданные актов.
 """
 
-from app.schemas.act import (
+from app.schemas.act_content import (
     ActDataSchema,
     ActItemSchema,
     ActSaveResponse,
@@ -19,18 +19,35 @@ from app.schemas.act import (
     ViolationContentItemSchema,
     ViolationAdditionalContentSchema,
 )
+from app.schemas.act_metadata import (
+    AuditTeamMember,
+    ActDirective,
+    ActCreate,
+    ActUpdate,
+    ActListItem,
+    ActResponse,
+)
 
 __all__ = [
-    'ActDataSchema',
-    'ActItemSchema',
-    'ActSaveResponse',
-    'TableSchema',
-    'TableCellSchema',
-    'TextBlockSchema',
-    'TextBlockFormattingSchema',
-    'ViolationSchema',
-    'ViolationDescriptionListSchema',
-    'ViolationOptionalFieldSchema',
-    'ViolationContentItemSchema',
-    'ViolationAdditionalContentSchema',
+    # Схемы содержимого актов
+    "ActDataSchema",
+    "ActItemSchema",
+    "ActSaveResponse",
+    "TableSchema",
+    "TableCellSchema",
+    "TextBlockSchema",
+    "TextBlockFormattingSchema",
+    "ViolationSchema",
+    "ViolationDescriptionListSchema",
+    "ViolationOptionalFieldSchema",
+    "ViolationContentItemSchema",
+    "ViolationAdditionalContentSchema",
+
+    # Схемы метаданных актов
+    "AuditTeamMember",
+    "ActDirective",
+    "ActCreate",
+    "ActUpdate",
+    "ActListItem",
+    "ActResponse",
 ]

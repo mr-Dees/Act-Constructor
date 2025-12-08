@@ -24,14 +24,6 @@ class TableUtils:
 
         Returns:
             Матрица строк одинаковой ширины
-
-        Example:
-            >>> grid = [[
-            ...     {'content': 'A', 'colSpan': 2},
-            ...     {'content': '', 'isSpanned': True}
-            ... ]]
-            >>> TableUtils.build_display_matrix(grid)
-            [['A', '']]
         """
         display_matrix = []
         max_cols = 0
@@ -41,19 +33,19 @@ class TableUtils:
 
             for cell_data in row_data:
                 # Пропускаем поглощенные ячейки
-                if cell_data.get('isSpanned', False):
+                if cell_data.get("isSpanned", False):
                     continue
 
                 # Извлекаем содержимое и colspan
-                content = str(cell_data.get('content', ''))
-                colspan = cell_data.get('colSpan', 1)
+                content = str(cell_data.get("content", ""))
+                colspan = cell_data.get("colSpan", 1)
 
                 # Первая ячейка получает содержимое
                 display_row.append(content)
 
                 # Остальные ячейки в colspan - пустые
                 for _ in range(colspan - 1):
-                    display_row.append('')
+                    display_row.append("")
 
             if display_row:
                 display_matrix.append(display_row)
@@ -62,7 +54,7 @@ class TableUtils:
         # Выравнивание всех строк до максимальной ширины
         for row in display_matrix:
             while len(row) < max_cols:
-                row.append('')
+                row.append("")
 
         return display_matrix
 
@@ -76,11 +68,6 @@ class TableUtils:
 
         Returns:
             Ширина каждой колонки в символах
-
-        Example:
-            >>> matrix = [['A', 'BBB'], ['CCCC', 'D']]
-            >>> TableUtils.calculate_column_widths(matrix)
-            [4, 3]
         """
         if not matrix:
             return []
@@ -92,7 +79,7 @@ class TableUtils:
             for col_idx, cell_text in enumerate(row):
                 col_widths[col_idx] = max(
                     col_widths[col_idx],
-                    len(str(cell_text))
+                    len(str(cell_text)),
                 )
 
         return col_widths
@@ -107,9 +94,22 @@ class TableUtils:
 
         Returns:
             Текст с экранированными |
-
-        Example:
-            >>> TableUtils.escape_markdown_pipes('A | B')
-            'A \\| B'
         """
-        return text.replace('|', '\\|')
+        return text.replace("|", "\\|")
+
+    @staticmethod
+    def has_merged_cells(grid: list[list[dict]]) -> bool:
+        """
+        Проверяет наличие объединенных ячеек в таблице.
+
+        Args:
+            grid: Сетка ячеек
+
+        Returns:
+            True если есть ячейки с colSpan > 1 или rowSpan > 1
+        """
+        for row in grid:
+            for cell in row:
+                if cell.get("colSpan", 1) > 1 or cell.get("rowSpan", 1) > 1:
+                    return True
+        return False

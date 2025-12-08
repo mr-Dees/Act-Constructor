@@ -13,11 +13,11 @@ from fastapi import APIRouter, Query, HTTPException, Depends
 from fastapi.responses import FileResponse
 
 from app.core.config import get_settings, Settings
-from app.schemas.act import ActDataSchema, ActSaveResponse
-from app.services.act_service import ActService
+from app.schemas.act_content import ActDataSchema, ActSaveResponse
+from app.services.export_service import ExportService
 from app.services.storage_service import StorageService
 
-logger = logging.getLogger("act_constructor.api")
+logger = logging.getLogger("act_constructor.api.export")
 router = APIRouter()
 
 
@@ -29,20 +29,9 @@ def get_storage_service(settings: Settings = Depends(get_settings)) -> StorageSe
 def get_act_service(
         storage: StorageService = Depends(get_storage_service),
         settings: Settings = Depends(get_settings)
-) -> ActService:
-    """Создает экземпляр ActService для dependency injection."""
-    return ActService(storage=storage, settings=settings)
-
-
-@router.get("/health")
-async def health_check() -> dict:
-    """Проверяет работоспособность сервиса для мониторинга."""
-    settings = get_settings()
-    return {
-        "status": "ok",
-        "service": settings.app_title,
-        "version": settings.app_version
-    }
+) -> ExportService:
+    """Создает экземпляр ExportService для dependency injection."""
+    return ExportService(storage=storage, settings=settings)
 
 
 @router.post("/save_act", response_model=ActSaveResponse)
@@ -52,7 +41,7 @@ async def save_act(
             "txt",
             description="Формат сохранения файла"
         ),
-        act_service: ActService = Depends(get_act_service),
+        act_service: ExportService = Depends(get_act_service),
         settings: Settings = Depends(get_settings)
 ) -> ActSaveResponse:
     """

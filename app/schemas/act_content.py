@@ -1,4 +1,3 @@
-# app/schemas/act.py
 """
 Pydantic схемы для валидации данных актов.
 

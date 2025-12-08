@@ -1,4 +1,3 @@
-# app/db/connection.py
 """
 Управление подключением к PostgreSQL.
 """
@@ -13,7 +12,7 @@ from asyncpg import Pool
 
 from app.core.config import Settings
 
-logger = logging.getLogger("act_constructor.db")
+logger = logging.getLogger("act_constructor.db.connect")
 
 _pool: Pool | None = None
 
@@ -112,7 +111,7 @@ async def create_tables_if_not_exist() -> None:
     """Создаёт таблицы если их нет."""
     pool = get_pool()
 
-    schema_path = Path(__file__).parent / "schema.sql"
+    schema_path = Path(__file__).parent / "migrations" / "schema.sql"
 
     if not schema_path.exists():
         logger.warning(f"Файл схемы не найден: {schema_path}")

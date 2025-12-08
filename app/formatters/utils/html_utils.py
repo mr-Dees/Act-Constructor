@@ -25,16 +25,12 @@ class HTMLUtils:
 
         Returns:
             Очищенный plain text
-
-        Example:
-            >>> HTMLUtils.clean_html('<b>Hello</b><br/>World')
-            'Hello\\nWorld'
         """
         # Замена <br> на переносы строк
-        clean = re.sub(r'<br\s*/?>', '\n', content, flags=re.IGNORECASE)
+        clean = re.sub(r"<br\s*/?>", "\n", content, flags=re.IGNORECASE)
 
         # Удаление всех HTML-тегов
-        clean = re.sub(r'<[^>]+>', '', clean)
+        clean = re.sub(r"<[^>]+>", "", clean)
 
         # Декодирование HTML-сущностей (&nbsp;, &lt; и т.д.)
         return html.unescape(clean)
@@ -55,41 +51,41 @@ class HTMLUtils:
 
         Returns:
             Markdown-текст
-
-        Example:
-            >>> HTMLUtils.html_to_markdown('<b>Bold</b> and <i>italic</i>')
-            '**Bold** and *italic*'
         """
         # <br> -> Markdown hard break
-        result = re.sub(r'<br\s*/?>', '  \n', content, flags=re.IGNORECASE)
+        result = re.sub(r"<br\s*/?>", "  \n", content, flags=re.IGNORECASE)
 
         # <b>, <strong> -> **текст**
         result = re.sub(
-            r'<(?:b|strong)>(.+?)</(?:b|strong)>',
-            r'**\1**',
+            r"<(?:b|strong)>(.+?)</(?:b|strong)>",
+            r"**\1**",
             result,
-            flags=re.DOTALL
+            flags=re.DOTALL,
         )
 
         # <i>, <em> -> *текст*
         result = re.sub(
-            r'<(?:i|em)>(.+?)</(?:i|em)>',
-            r'*\1*',
+            r"<(?:i|em)>(.+?)</(?:i|em)>",
+            r"*\1*",
             result,
-            flags=re.DOTALL
+            flags=re.DOTALL,
         )
 
         # <u> -> текст (underline не поддерживается в Markdown)
-        result = re.sub(r'<u>(.+?)</u>', r'\1', result, flags=re.DOTALL)
+        result = re.sub(r"<u>(.+?)</u>", r"\1", result, flags=re.DOTALL)
 
         # Удаление остальных тегов
-        result = re.sub(r'<[^>]+>', '', result)
+        result = re.sub(r"<[^>]+>", "", result)
 
         # Декодирование HTML-сущностей
         return html.unescape(result)
 
     @staticmethod
-    def extract_style_property(html_element: str, property_name: str, default: str = '') -> str:
+    def extract_style_property(
+            html_element: str,
+            property_name: str,
+            default: str = "",
+    ) -> str:
         """
         Извлекает значение CSS-свойства из style атрибута.
 
@@ -100,11 +96,6 @@ class HTMLUtils:
 
         Returns:
             Значение свойства или default
-
-        Example:
-            >>> html = '<div style="text-align: center; color: red">'
-            >>> HTMLUtils.extract_style_property(html, 'text-align')
-            'center'
         """
         # Извлечение style атрибута
         style_match = re.search(r'style=["\']([^"\']*)["\']', html_element)
@@ -114,7 +105,7 @@ class HTMLUtils:
         style_str = style_match.group(1)
 
         # Поиск конкретного свойства
-        prop_pattern = rf'{re.escape(property_name)}\s*:\s*([^;]+)'
+        prop_pattern = rf"{re.escape(property_name)}\s*:\s*([^;]+)"
         prop_match = re.search(prop_pattern, style_str)
 
         return prop_match.group(1).strip() if prop_match else default
@@ -129,20 +120,16 @@ class HTMLUtils:
 
         Returns:
             Словарь {property: value}
-
-        Example:
-            >>> HTMLUtils.parse_style_dict('color: red; font-size: 14px')
-            {'color': 'red', 'font-size': '14px'}
         """
-        styles = {}
+        styles: dict[str, str] = {}
         if not style_string:
             return styles
 
-        for item in style_string.split(';'):
-            if ':' not in item:
+        for item in style_string.split(";"):
+            if ":" not in item:
                 continue
 
-            prop, value = item.split(':', 1)
+            prop, value = item.split(":", 1)
             styles[prop.strip()] = value.strip()
 
         return styles

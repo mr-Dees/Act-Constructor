@@ -1,4 +1,3 @@
-# app/api/v1/endpoints/acts.py
 """
 API эндпоинты для управления актами.
 
@@ -21,10 +20,10 @@ from pydantic import ValidationError
 
 from app.api.v1.deps.auth_deps import get_username
 from app.db.connection import get_db
-from app.db.models import ActCreate, ActUpdate, ActListItem, ActResponse
-from app.db.service import ActDBService
+from app.schemas.act_metadata import ActCreate, ActUpdate, ActListItem, ActResponse
+from app.db.repositories.act_repository import ActDBService
 
-logger = logging.getLogger("act_constructor.api")
+logger = logging.getLogger("act_constructor.api.acts")
 router = APIRouter()
 
 

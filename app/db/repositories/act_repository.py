@@ -1,26 +1,24 @@
-# app/db/service.py
 """
 Сервис бизнес-логики для работы с актами в PostgreSQL.
 """
 
 import json
 import logging
-import re
 from datetime import datetime
-from typing import Optional
 
 import asyncpg
 
-from app.db.models import (
+from app.db.utils import KMUtils, JSONDBUtils, ActDirectivesValidator
+from app.schemas.act_metadata import (
     ActCreate,
     ActUpdate,
     ActListItem,
     ActResponse,
     AuditTeamMember,
-    ActDirective
+    ActDirective,
 )
 
-logger = logging.getLogger("act_constructor.db")
+logger = logging.getLogger("act_constructor.db.repository")
 
 
 class ActDBService:
@@ -33,45 +31,6 @@ class ActDBService:
     # -------------------------------------------------------------------------
     # ВСПОМОГАТЕЛЬНЫЕ МЕТОДЫ
     # -------------------------------------------------------------------------
-
-    @staticmethod
-    def _extract_km_digits(km_number: str) -> str:
-        """
-        Извлекает только цифры из КМ номера.
-
-        Args:
-            km_number: КМ в формате КМ-XX-XXXX
-
-        Returns:
-            Строка из 6 цифр (например, "759475")
-        """
-        digits = re.sub(r'[^0-9]', '', km_number)
-
-        if len(digits) != 6:
-            raise ValueError(
-                f'КМ номер должен содержать ровно 6 цифр, получено: {len(digits)} ({km_number})'
-            )
-
-        return digits
-
-    @staticmethod
-    def _extract_service_note_suffix(service_note: str) -> Optional[str]:
-        """
-        Извлекает 4 цифры после "/" из служебной записки.
-
-        Args:
-            service_note: Служебная записка в формате Текст/XXXX
-
-        Returns:
-            Строка из 4 цифр или None
-        """
-        if not service_note:
-            return None
-
-        parts = service_note.rsplit('/', 1)
-        if len(parts) == 2:
-            return parts[1]
-        return None
 
     async def check_km_exists(self, km_number: str) -> dict:
         """
@@ -88,36 +47,45 @@ class ActDBService:
             - next_part_no_sn: int - следующий номер части для акта без СЗ
             - has_service_notes: bool - есть ли акты с служебными записками
         """
-        km_digit = self._extract_km_digits(km_number)
+        km_digit = KMUtils.extract_km_digits(km_number)
 
         row = await self.conn.fetchrow(
             """
             SELECT 
                 COUNT(*) as total_count,
-                MAX(CASE WHEN service_note IS NULL THEN part_number ELSE 0 END) as max_part_no_sn,
-                COUNT(CASE WHEN service_note IS NOT NULL THEN 1 END) as with_service_notes
+                MAX(
+                    CASE 
+                        WHEN service_note IS NULL THEN part_number 
+                        ELSE 0 
+                    END
+                ) as max_part_no_sn,
+                COUNT(
+                    CASE 
+                        WHEN service_note IS NOT NULL THEN 1 
+                    END
+                ) as with_service_notes
             FROM acts 
             WHERE km_number_digit = $1
             """,
-            km_digit
+            km_digit,
         )
 
-        total_count = row['total_count'] or 0
+        total_count = row["total_count"] or 0
         exists = total_count > 0
-        has_service_notes = row['with_service_notes'] > 0
+        has_service_notes = row["with_service_notes"] > 0
 
         # Следующий номер части для акта БЕЗ СЗ
-        max_part_no_sn = row['max_part_no_sn'] or 0
+        max_part_no_sn = row["max_part_no_sn"] or 0
         next_part_no_sn = max_part_no_sn + 1 if max_part_no_sn > 0 else 1
 
         # Для совместимости со старым кодом API, который ожидает current_parts
         return {
-            'exists': exists,
-            'total_parts': total_count,
-            'current_parts': total_count,  # важно для acts.py
-            'next_part_no_sn': next_part_no_sn,
-            'next_part': next_part_no_sn,  # если где-то использовался старый ключ
-            'has_service_notes': has_service_notes
+            "exists": exists,
+            "total_parts": total_count,
+            "current_parts": total_count,
+            "next_part_no_sn": next_part_no_sn,
+            "next_part": next_part_no_sn,
+            "has_service_notes": has_service_notes,
         }
 
     async def _update_total_parts_for_km(self, km_digit: str) -> None:
@@ -135,7 +103,7 @@ class ActDBService:
             FROM acts 
             WHERE km_number_digit = $1
             """,
-            km_digit
+            km_digit,
         )
 
         await self.conn.execute(
@@ -146,11 +114,89 @@ class ActDBService:
             WHERE km_number_digit = $2
             """,
             total_count,
-            km_digit
+            km_digit,
         )
 
         logger.info(
             f"Обновлено total_parts={total_count} для всех актов КМ (цифры)={km_digit}"
+        )
+
+    async def _find_free_part_number(
+            self,
+            km_digit: str,
+            exclude_act_id: int | None = None,
+    ) -> int:
+        """
+        Находит первый свободный номер части для актов (включая с СЗ и без).
+
+        Логика:
+        1. Получаем все занятые номера частей
+        2. Ищем минимальный свободный номер начиная с 1
+        3. Возвращаем первый найденный свободный номер
+        """
+        if exclude_act_id:
+            rows = await self.conn.fetch(
+                """
+                SELECT part_number 
+                FROM acts 
+                WHERE km_number_digit = $1 
+                  AND id != $2
+                ORDER BY part_number
+                """,
+                km_digit,
+                exclude_act_id,
+            )
+        else:
+            rows = await self.conn.fetch(
+                """
+                SELECT part_number 
+                FROM acts 
+                WHERE km_number_digit = $1
+                ORDER BY part_number
+                """,
+                km_digit,
+            )
+
+        occupied_numbers = {row["part_number"] for row in rows}
+
+        part_number = 1
+        while part_number in occupied_numbers:
+            part_number += 1
+
+        logger.info(
+            f"Найден свободный номер части {part_number} для КМ (цифры)={km_digit}. "
+            f"Занятые номера: {sorted(occupied_numbers)}"
+        )
+
+        return part_number
+
+    async def _validate_directives_points(
+            self,
+            act_id: int,
+            directives: list[ActDirective],
+    ) -> None:
+        """Проверяет что все пункты поручений существуют в структуре акта."""
+        if not directives:
+            return
+
+        tree_row = await self.conn.fetchrow(
+            "SELECT tree_data FROM act_tree WHERE act_id = $1",
+            act_id,
+        )
+
+        if not tree_row:
+            raise ValueError("Структура акта не найдена")
+
+        tree_data = JSONDBUtils.ensure_dict(tree_row["tree_data"])
+        if tree_data is None:
+            raise ValueError(
+                "Структура акта имеет некорректный формат (ожидался JSON-объект)"
+            )
+
+        existing_points = ActDirectivesValidator.collect_node_numbers(tree_data)
+        ActDirectivesValidator.validate_directives_points(
+            directives,
+            existing_points,
         )
 
     # -------------------------------------------------------------------------
@@ -161,41 +207,29 @@ class ActDBService:
             self,
             act_data: ActCreate,
             username: str,
-            force_new_part: bool = False
+            force_new_part: bool = False,
     ) -> ActResponse:
         """
         Создает новый акт с метаданными, аудиторской группой и поручениями.
 
         Логика нумерации:
         - Если указана service_note: part_number берется из последних 4 цифр СЗ
-        - Если service_note не указана: part_number = MAX(part_number для актов без СЗ) + 1
-
-        Args:
-            act_data: Валидированные данные для создания акта
-            username: Имя пользователя-создателя
-            force_new_part: Если True, создает новую часть существующего КМ
-
-        Returns:
-            Полная информация о созданном акте
+        - Если service_note не указана: part_number = первый свободный номер части
         """
         async with self.conn.transaction():
-            km_digit = self._extract_km_digits(act_data.km_number)
+            km_digit = KMUtils.extract_km_digits(act_data.km_number)
             km_info = await self.check_km_exists(act_data.km_number)
 
             # Определяем номер части
             if act_data.service_note:
-                # Часть определяется последними 4 цифрами СЗ
-                service_note_suffix = self._extract_service_note_suffix(
-                    act_data.service_note
-                )
-                if not service_note_suffix or not service_note_suffix.isdigit():
+                suffix = KMUtils.extract_service_note_suffix(act_data.service_note)
+                if not suffix or not suffix.isdigit():
                     raise ValueError(
                         f"Некорректный формат служебной записки: {act_data.service_note}"
                     )
 
-                part_number = int(service_note_suffix)
+                part_number = int(suffix)
 
-                # Проверяем, что такая комбинация km_digit + part еще не существует
                 exists = await self.conn.fetchval(
                     """
                     SELECT EXISTS(
@@ -204,20 +238,17 @@ class ActDBService:
                     )
                     """,
                     km_digit,
-                    part_number
+                    part_number,
                 )
 
                 if exists:
                     raise ValueError(
-                        f'Акт с КМ (цифры) {km_digit} и частью {part_number} уже существует'
+                        f"Акт с КМ (цифры) {km_digit} и частью {part_number} уже существует"
                     )
             else:
-                # Автоматическая нумерация для актов без СЗ
-                if km_info['exists'] and force_new_part:
-                    part_number = km_info['next_part_no_sn']
-                elif km_info['exists'] and not force_new_part:
-                    # Здесь backend генерирует 409 и отдает km_info в detail,
-                    # acts.py опирается на current_parts и next_part
+                if km_info["exists"] and force_new_part:
+                    part_number = km_info["next_part_no_sn"]
+                elif km_info["exists"] and not force_new_part:
                     raise ValueError(
                         f"Акт с КМ '{act_data.km_number}' уже существует. "
                         f"Используйте force_new_part=True для создания новой части."
@@ -225,20 +256,14 @@ class ActDBService:
                 else:
                     part_number = 1
 
-            # total_parts будет обновлен после создания акта для всех записей
-            total_parts = km_info['total_parts'] + 1
+            total_parts = km_info["total_parts"] + 1
 
-            # Проверка: пользователь должен быть членом аудиторской группы
             user_in_team = any(
-                member.username == username
-                for member in act_data.audit_team
+                member.username == username for member in act_data.audit_team
             )
             if not user_in_team:
-                raise ValueError(
-                    "Пользователь должен быть членом аудиторской группы"
-                )
+                raise ValueError("Пользователь должен быть членом аудиторской группы")
 
-            # Создаем основную запись акта
             act_id = await self.conn.fetchval(
                 """
                 INSERT INTO acts (
@@ -249,7 +274,13 @@ class ActDBService:
                     created_by, inspection_start_date, inspection_end_date,
                     last_edited_at
                 )
-                VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, CURRENT_TIMESTAMP)
+                VALUES (
+                    $1, $2, $3, $4, $5, $6, $7,
+                    $8, $9, $10,
+                    $11, $12,
+                    $13, $14, $15,
+                    CURRENT_TIMESTAMP
+                )
                 RETURNING id
                 """,
                 act_data.km_number,
@@ -266,10 +297,9 @@ class ActDBService:
                 act_data.service_note_date,
                 username,
                 act_data.inspection_start_date,
-                act_data.inspection_end_date
+                act_data.inspection_end_date,
             )
 
-            # Добавляем членов аудиторской группы
             for idx, member in enumerate(act_data.audit_team):
                 await self.conn.execute(
                     """
@@ -283,10 +313,9 @@ class ActDBService:
                     member.full_name,
                     member.position,
                     member.username,
-                    idx
+                    idx,
                 )
 
-            # Добавляем действующие поручения
             for idx, directive in enumerate(act_data.directives):
                 await self.conn.execute(
                     """
@@ -298,14 +327,13 @@ class ActDBService:
                     act_id,
                     directive.point_number,
                     directive.directive_number,
-                    idx
+                    idx,
                 )
 
-            # Создаем пустое дерево структуры
             default_tree = {
                 "id": "root",
                 "label": act_data.inspection_name or "Акт",
-                "children": []
+                "children": [],
             }
 
             await self.conn.execute(
@@ -314,10 +342,9 @@ class ActDBService:
                 VALUES ($1, $2)
                 """,
                 act_id,
-                json.dumps(default_tree)
+                json.dumps(default_tree),
             )
 
-            # Обновляем total_parts для всех актов с этим КМ
             await self._update_total_parts_for_km(km_digit)
 
             logger.info(
@@ -358,22 +385,22 @@ class ActDBService:
                 COALESCE(a.last_edited_at, a.created_at) DESC,
                 a.created_at DESC
             """,
-            username
+            username,
         )
 
         return [
             ActListItem(
-                id=row['id'],
-                km_number=row['km_number'],
-                part_number=row['part_number'],
-                total_parts=row['total_parts'],
-                inspection_name=row['inspection_name'],
-                order_number=row['order_number'],
-                inspection_start_date=row['inspection_start_date'],
-                inspection_end_date=row['inspection_end_date'],
-                last_edited_at=row['last_edited_at'],
-                user_role=row['user_role'],
-                service_note=row['service_note']
+                id=row["id"],
+                km_number=row["km_number"],
+                part_number=row["part_number"],
+                total_parts=row["total_parts"],
+                inspection_name=row["inspection_name"],
+                order_number=row["order_number"],
+                inspection_start_date=row["inspection_start_date"],
+                inspection_end_date=row["inspection_end_date"],
+                last_edited_at=row["last_edited_at"],
+                user_role=row["user_role"],
+                service_note=row["service_note"],
             )
             for row in rows
         ]
@@ -395,13 +422,12 @@ class ActDBService:
             FROM acts 
             WHERE id = $1
             """,
-            act_id
+            act_id,
         )
 
         if not act_row:
             raise ValueError(f"Акт ID={act_id} не найден")
 
-        # Аудиторская группа
         team_rows = await self.conn.fetch(
             """
             SELECT role, full_name, position, username
@@ -409,20 +435,19 @@ class ActDBService:
             WHERE act_id = $1
             ORDER BY order_index
             """,
-            act_id
+            act_id,
         )
 
         audit_team = [
             AuditTeamMember(
-                role=row['role'],
-                full_name=row['full_name'],
-                position=row['position'],
-                username=row['username']
+                role=row["role"],
+                full_name=row["full_name"],
+                position=row["position"],
+                username=row["username"],
             )
             for row in team_rows
         ]
 
-        # Поручения
         directive_rows = await self.conn.fetch(
             """
             SELECT point_number, directive_number
@@ -430,43 +455,43 @@ class ActDBService:
             WHERE act_id = $1
             ORDER BY order_index
             """,
-            act_id
+            act_id,
         )
 
         directives = [
             ActDirective(
-                point_number=row['point_number'],
-                directive_number=row['directive_number']
+                point_number=row["point_number"],
+                directive_number=row["directive_number"],
             )
             for row in directive_rows
         ]
 
         return ActResponse(
-            id=act_row['id'],
-            km_number=act_row['km_number'],
-            part_number=act_row['part_number'],
-            total_parts=act_row['total_parts'],
-            inspection_name=act_row['inspection_name'],
-            city=act_row['city'],
-            created_date=act_row['created_date'],
-            order_number=act_row['order_number'],
-            order_date=act_row['order_date'],
-            is_process_based=act_row['is_process_based'],
-            service_note=act_row['service_note'],
-            service_note_date=act_row['service_note_date'],
-            inspection_start_date=act_row['inspection_start_date'],
-            inspection_end_date=act_row['inspection_end_date'],
+            id=act_row["id"],
+            km_number=act_row["km_number"],
+            part_number=act_row["part_number"],
+            total_parts=act_row["total_parts"],
+            inspection_name=act_row["inspection_name"],
+            city=act_row["city"],
+            created_date=act_row["created_date"],
+            order_number=act_row["order_number"],
+            order_date=act_row["order_date"],
+            is_process_based=act_row["is_process_based"],
+            service_note=act_row["service_note"],
+            service_note_date=act_row["service_note_date"],
+            inspection_start_date=act_row["inspection_start_date"],
+            inspection_end_date=act_row["inspection_end_date"],
             audit_team=audit_team,
             directives=directives,
-            needs_created_date=act_row['needs_created_date'],
-            needs_directive_number=act_row['needs_directive_number'],
-            needs_invoice_check=act_row['needs_invoice_check'],
-            needs_service_note=act_row['needs_service_note'],
-            created_at=act_row['created_at'],
-            updated_at=act_row['updated_at'],
-            created_by=act_row['created_by'],
-            last_edited_by=act_row['last_edited_by'],
-            last_edited_at=act_row['last_edited_at']
+            needs_created_date=act_row["needs_created_date"],
+            needs_directive_number=act_row["needs_directive_number"],
+            needs_invoice_check=act_row["needs_invoice_check"],
+            needs_service_note=act_row["needs_service_note"],
+            created_at=act_row["created_at"],
+            updated_at=act_row["updated_at"],
+            created_by=act_row["created_by"],
+            last_edited_by=act_row["last_edited_by"],
+            last_edited_at=act_row["last_edited_at"],
         )
 
     # -------------------------------------------------------------------------
@@ -477,59 +502,49 @@ class ActDBService:
             self,
             act_id: int,
             act_update: ActUpdate,
-            username: str
+            username: str,
     ) -> ActResponse:
         """
         Обновляет метаданные акта (частичное обновление).
-
-        Упрощенная логика:
-        - Не пересчитываем номера частей других актов
-        - Только обновляем total_parts при изменении КМ
-        - При добавлении/удалении СЗ следим только за уникальностью (km_digit, part_number)
         """
         async with self.conn.transaction():
             current_act = await self.get_act_by_id(act_id)
             old_km_number = current_act.km_number
-            old_km_digit = self._extract_km_digits(old_km_number)
+            old_km_digit = KMUtils.extract_km_digits(old_km_number)
             old_service_note = current_act.service_note
 
-            # Валидация поручений
             if act_update.directives is not None:
                 await self._validate_directives_points(act_id, act_update.directives)
 
-            # Определяем изменения
             km_changed = (
-                    act_update.km_number is not None and
-                    act_update.km_number != old_km_number
+                    act_update.km_number is not None
+                    and act_update.km_number != old_km_number
             )
 
             service_note_changed = (
-                    act_update.service_note is not None and
-                    act_update.service_note != old_service_note
+                    act_update.service_note is not None
+                    and act_update.service_note != old_service_note
             )
 
-            # ИСПРАВЛЕНИЕ: Улучшенная проверка удаления СЗ
-            # После валидации в models.py пустая строка уже преобразована в None
             service_note_removed = (
-                    old_service_note is not None and
-                    act_update.service_note is None
+                    old_service_note is not None and act_update.service_note is None
             )
 
-            # Обработка изменения служебной записки
             if service_note_changed or service_note_removed:
-                if act_update.service_note:  # Добавили СЗ
-                    service_note_suffix = self._extract_service_note_suffix(
+                if act_update.service_note:
+                    suffix = KMUtils.extract_service_note_suffix(
                         act_update.service_note
                     )
-                    if not service_note_suffix or not service_note_suffix.isdigit():
+                    if not suffix or not suffix.isdigit():
                         raise ValueError(
-                            f"Некорректный формат служебной записки: {act_update.service_note}"
+                            f"Некорректный формат служебной записки: "
+                            f"{act_update.service_note}"
                         )
 
-                    new_part_number = int(service_note_suffix)
+                    new_part_number = int(suffix)
 
                     km_digit = (
-                        self._extract_km_digits(act_update.km_number)
+                        KMUtils.extract_km_digits(act_update.km_number)
                         if act_update.km_number
                         else old_km_digit
                     )
@@ -545,38 +560,34 @@ class ActDBService:
                         """,
                         km_digit,
                         new_part_number,
-                        act_id
+                        act_id,
                     )
 
                     if exists:
                         raise ValueError(
-                            f'Акт с КМ (цифры) {km_digit} и частью '
-                            f'{new_part_number} уже существует'
+                            f"Акт с КМ (цифры) {km_digit} и частью "
+                            f"{new_part_number} уже существует"
                         )
 
                     act_update.part_number = new_part_number
-                else:  # Убрали СЗ
+                else:
                     km_digit = (
-                        self._extract_km_digits(act_update.km_number)
+                        KMUtils.extract_km_digits(act_update.km_number)
                         if act_update.km_number
                         else old_km_digit
                     )
 
-                    # ИСПРАВЛЕНИЕ: Ищем первый свободный номер части среди актов без СЗ
                     next_part = await self._find_free_part_number(km_digit, act_id)
 
                     act_update.part_number = next_part
-                    # ИСПРАВЛЕНИЕ: Явно устанавливаем None для очистки
                     act_update.service_note = None
                     act_update.service_note_date = None
 
-            # Обработка изменения КМ
             if km_changed:
-                new_km_digit = self._extract_km_digits(act_update.km_number)
+                new_km_digit = KMUtils.extract_km_digits(act_update.km_number)
                 km_info = await self.check_km_exists(act_update.km_number)
 
                 if current_act.service_note or act_update.service_note:
-                    # Для актов с СЗ просто проверяем уникальность
                     part_to_check = (
                         act_update.part_number
                         if act_update.part_number is not None
@@ -594,16 +605,15 @@ class ActDBService:
                         """,
                         new_km_digit,
                         part_to_check,
-                        act_id
+                        act_id,
                     )
 
                     if exists:
                         raise ValueError(
-                            f'Акт с КМ (цифры) {new_km_digit} и частью '
-                            f'{part_to_check} уже существует'
+                            f"Акт с КМ (цифры) {new_km_digit} и частью "
+                            f"{part_to_check} уже существует"
                         )
                 else:
-                    # Для актов без СЗ ищем первый свободный номер
                     new_part = await self._find_free_part_number(new_km_digit, act_id)
                     act_update.part_number = new_part
 
@@ -613,27 +623,23 @@ class ActDBService:
                     f"{act_update.km_number}(часть {act_update.part_number})"
                 )
 
-            # Строим динамический SQL для UPDATE
-            updates = []
-            values = []
+            updates: list[str] = []
+            values: list[object] = []
             param_idx = 1
 
-            # КМ и km_number_digit
             if act_update.km_number is not None:
                 updates.append(f"km_number = ${param_idx}")
                 values.append(act_update.km_number)
                 param_idx += 1
 
                 updates.append(f"km_number_digit = ${param_idx}")
-                values.append(self._extract_km_digits(act_update.km_number))
+                values.append(KMUtils.extract_km_digits(act_update.km_number))
                 param_idx += 1
 
             if act_update.part_number is not None:
                 updates.append(f"part_number = ${param_idx}")
                 values.append(act_update.part_number)
                 param_idx += 1
-
-            # НЕ обновляем total_parts здесь - обновим отдельным запросом
 
             if act_update.inspection_name is not None:
                 updates.append(f"inspection_name = ${param_idx}")
@@ -675,31 +681,25 @@ class ActDBService:
                 values.append(act_update.is_process_based)
                 param_idx += 1
 
-            # ИСПРАВЛЕНИЕ: Обновленная обработка служебной записки
-            # Обрабатываем изменение или удаление СЗ
             if service_note_changed or service_note_removed:
                 updates.append(f"service_note = ${param_idx}")
-                values.append(act_update.service_note)  # Теперь это None при удалении
+                values.append(act_update.service_note)
                 param_idx += 1
 
-                # ИСПРАВЛЕНИЕ: Явно очищаем дату СЗ при удалении записки
                 updates.append(f"service_note_date = ${param_idx}")
-                values.append(act_update.service_note_date)  # None при удалении
+                values.append(act_update.service_note_date)
                 param_idx += 1
             elif act_update.service_note_date is not None:
-                # Обновляем только дату, если она передана отдельно
                 updates.append(f"service_note_date = ${param_idx}")
                 values.append(act_update.service_note_date)
                 param_idx += 1
 
-            # Информация о редактировании
             updates.append(f"last_edited_by = ${param_idx}")
             values.append(username)
             param_idx += 1
 
             updates.append("last_edited_at = CURRENT_TIMESTAMP")
 
-            # Выполняем UPDATE
             if updates:
                 values.append(act_id)
 
@@ -709,14 +709,13 @@ class ActDBService:
                     SET {', '.join(updates)}
                     WHERE id = ${param_idx}
                     """,
-                    *values
+                    *values,
                 )
 
-            # Аудиторская группа
             if act_update.audit_team is not None:
                 await self.conn.execute(
                     "DELETE FROM audit_team_members WHERE act_id = $1",
-                    act_id
+                    act_id,
                 )
 
                 for idx, member in enumerate(act_update.audit_team):
@@ -732,14 +731,13 @@ class ActDBService:
                         member.full_name,
                         member.position,
                         member.username,
-                        idx
+                        idx,
                     )
 
-            # Поручения
             if act_update.directives is not None:
                 await self.conn.execute(
                     "DELETE FROM act_directives WHERE act_id = $1",
-                    act_id
+                    act_id,
                 )
 
                 for idx, directive in enumerate(act_update.directives):
@@ -753,19 +751,17 @@ class ActDBService:
                         act_id,
                         directive.point_number,
                         directive.directive_number,
-                        idx
+                        idx,
                     )
 
-            # Обновляем total_parts для старого КМ (если КМ изменился)
             if km_changed:
                 await self._update_total_parts_for_km(old_km_digit)
                 logger.info(
                     f"Обновлен total_parts для старого КМ (цифры)={old_km_digit}"
                 )
 
-            # Обновляем total_parts для текущего/нового КМ
             current_km_digit = (
-                self._extract_km_digits(act_update.km_number)
+                KMUtils.extract_km_digits(act_update.km_number)
                 if act_update.km_number
                 else old_km_digit
             )
@@ -774,123 +770,6 @@ class ActDBService:
             logger.info(f"Обновлены метаданные акта ID={act_id}")
 
             return await self.get_act_by_id(act_id)
-
-    async def _find_free_part_number(self, km_digit: str, exclude_act_id: int = None) -> int:
-        """
-        Находит первый свободный номер части для актов без СЗ.
-
-        Логика:
-        1. Получаем все занятые номера частей (включая акты с СЗ и без)
-        2. Ищем минимальный свободный номер начиная с 1
-        3. Возвращаем первый найденный свободный номер
-
-        Args:
-            km_digit: КМ номер (только цифры)
-            exclude_act_id: ID акта, который нужно исключить из проверки (для обновления)
-
-        Returns:
-            Первый свободный номер части
-
-        Examples:
-            Занятые номера: [1, 2, 4, 5] -> вернет 3
-            Занятые номера: [1, 2, 3] -> вернет 4
-            Занятые номера: [2, 3, 4] -> вернет 1
-        """
-        # Получаем все занятые номера частей
-        if exclude_act_id:
-            rows = await self.conn.fetch(
-                """
-                SELECT part_number 
-                FROM acts 
-                WHERE km_number_digit = $1 
-                  AND id != $2
-                ORDER BY part_number
-                """,
-                km_digit,
-                exclude_act_id
-            )
-        else:
-            rows = await self.conn.fetch(
-                """
-                SELECT part_number 
-                FROM acts 
-                WHERE km_number_digit = $1
-                ORDER BY part_number
-                """,
-                km_digit
-            )
-
-        occupied_numbers = {row['part_number'] for row in rows}
-
-        # Ищем первый свободный номер начиная с 1
-        part_number = 1
-        while part_number in occupied_numbers:
-            part_number += 1
-
-        logger.info(
-            f"Найден свободный номер части {part_number} для КМ (цифры)={km_digit}. "
-            f"Занятые номера: {sorted(occupied_numbers)}"
-        )
-
-        return part_number
-
-    # -------------------------------------------------------------------------
-    # ВАЛИДАЦИЯ ПОРУЧЕНИЙ
-    # -------------------------------------------------------------------------
-
-    async def _validate_directives_points(self, act_id: int, directives: list[ActDirective]) -> None:
-        """Проверяет что все пункты поручений существуют в структуре акта."""
-        if not directives:
-            return
-
-        tree_row = await self.conn.fetchrow(
-            "SELECT tree_data FROM act_tree WHERE act_id = $1",
-            act_id
-        )
-
-        if not tree_row:
-            raise ValueError("Структура акта не найдена")
-
-        tree_data = tree_row['tree_data']
-
-        # Проверяем тип и парсим JSON если нужно
-        if isinstance(tree_data, str):
-            tree_data = json.loads(tree_data)
-
-        existing_points = self._collect_node_numbers(tree_data)
-
-        for directive in directives:
-            point = directive.point_number
-
-            if not point.startswith('5.'):
-                raise ValueError(
-                    f"Поручение '{directive.directive_number}' ссылается на пункт '{point}', "
-                    f"но поручения могут быть только в разделе 5"
-                )
-
-            if point not in existing_points:
-                raise ValueError(
-                    f"Поручение '{directive.directive_number}' ссылается на несуществующий "
-                    f"пункт '{point}'. Сначала создайте этот пункт в структуре акта."
-                )
-
-    def _collect_node_numbers(self, node, numbers: set = None) -> set:
-        """Рекурсивно собирает все номера узлов из дерева."""
-        if numbers is None:
-            numbers = set()
-
-        if not isinstance(node, dict):
-            logger.warning(f"Узел не является dict: {type(node)}, значение: {node}")
-            return numbers
-
-        if 'number' in node and node['number']:
-            numbers.add(node['number'])
-
-        if 'children' in node and isinstance(node['children'], list):
-            for child in node['children']:
-                self._collect_node_numbers(child, numbers)
-
-        return numbers
 
     # -------------------------------------------------------------------------
     # ДУБЛИРОВАНИЕ И УДАЛЕНИЕ
@@ -905,8 +784,9 @@ class ActDBService:
         - "Название (Копия)" → "Название (Копия 2)"
         - "Название (Копия 2)" → "Название (Копия 3)"
         """
-        # Проверяем есть ли уже "(Копия ...)" в конце
-        match = re.search(r'^(.+?)\s*\(Копия\s*(\d*)\)\s*$', original_name)
+        import re as _re
+
+        match = _re.search(r"^(.+?)\s*\(Копия\s*(\d*)\)\s*$", original_name)
 
         if match:
             base_name = match.group(1).strip()
@@ -918,11 +798,10 @@ class ActDBService:
                 next_num = 2
         else:
             base_name = original_name.strip()
-            next_num = None  # Первая копия без номера
+            next_num = None
 
-        # Генерируем название и проверяем уникальность
         attempt = 0
-        max_attempts = 100  # Защита от бесконечного цикла
+        max_attempts = 100
 
         while attempt < max_attempts:
             if next_num is None:
@@ -930,16 +809,14 @@ class ActDBService:
             else:
                 new_name = f"{base_name} (Копия {next_num})"
 
-            # Проверяем существование
             exists = await self.conn.fetchval(
                 "SELECT EXISTS(SELECT 1 FROM acts WHERE inspection_name = $1)",
-                new_name
+                new_name,
             )
 
             if not exists:
                 return new_name
 
-            # Если существует, увеличиваем счётчик
             if next_num is None:
                 next_num = 2
             else:
@@ -947,14 +824,13 @@ class ActDBService:
 
             attempt += 1
 
-        # Если не смогли найти уникальное имя, добавляем timestamp
         timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
         return f"{base_name} (Копия {timestamp})"
 
     async def duplicate_act(
             self,
             act_id: int,
-            username: str
+            username: str,
     ) -> ActResponse:
         """
         Создает дубликат акта.
@@ -966,17 +842,16 @@ class ActDBService:
         - Служебная записка НЕ копируется (акт без СЗ)
         """
         original = await self.get_act_by_id(act_id)
-        km_digit = self._extract_km_digits(original.km_number)
+        km_digit = KMUtils.extract_km_digits(original.km_number)
 
         new_inspection_name = await self._generate_unique_copy_name(
             original.inspection_name
         )
 
-        # Создаём дубликат БЕЗ служебной записки и с тем же КМ
         new_act_data = ActCreate(
-            km_number=original.km_number,  # КМ без изменений
-            part_number=1,  # Будет пересчитан автоматически
-            total_parts=1,  # Будет пересчитан автоматически
+            km_number=original.km_number,
+            part_number=1,
+            total_parts=1,
             inspection_name=new_inspection_name,
             city=original.city,
             created_date=original.created_date,
@@ -987,17 +862,15 @@ class ActDBService:
             inspection_end_date=original.inspection_end_date,
             is_process_based=original.is_process_based,
             directives=original.directives,
-            service_note=None,  # НЕ копируем СЗ
-            service_note_date=None
+            service_note=None,
+            service_note_date=None,
         )
 
-        # Создаём как новую часть существующего КМ
         new_act = await self.create_act(new_act_data, username, force_new_part=True)
 
-        # Копируем дерево структуры
         tree_row = await self.conn.fetchrow(
             "SELECT tree_data FROM act_tree WHERE act_id = $1",
-            act_id
+            act_id,
         )
 
         if tree_row:
@@ -1007,14 +880,13 @@ class ActDBService:
                 SET tree_data = $1
                 WHERE act_id = $2
                 """,
-                tree_row['tree_data'],
-                new_act.id
+                tree_row["tree_data"],
+                new_act.id,
             )
 
-        # Копируем все таблицы
         tables = await self.conn.fetch(
             "SELECT * FROM act_tables WHERE act_id = $1",
-            act_id
+            act_id,
         )
 
         for table in tables:
@@ -1026,27 +898,31 @@ class ActDBService:
                     is_metrics_table, is_main_metrics_table,
                     is_regular_risk_table, is_operational_risk_table
                 )
-                VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)
+                VALUES (
+                    $1, $2, $3, $4, $5,
+                    $6, $7, $8, $9,
+                    $10, $11,
+                    $12, $13
+                )
                 """,
                 new_act.id,
-                table['table_id'],
-                table['node_id'],
-                table['node_number'],
-                table['table_label'],
-                table['grid_data'],
-                table['col_widths'],
-                table['is_protected'],
-                table['is_deletable'],
-                table['is_metrics_table'],
-                table['is_main_metrics_table'],
-                table['is_regular_risk_table'],
-                table['is_operational_risk_table']
+                table["table_id"],
+                table["node_id"],
+                table["node_number"],
+                table["table_label"],
+                table["grid_data"],
+                table["col_widths"],
+                table["is_protected"],
+                table["is_deletable"],
+                table["is_metrics_table"],
+                table["is_main_metrics_table"],
+                table["is_regular_risk_table"],
+                table["is_operational_risk_table"],
             )
 
-        # Копируем все текстовые блоки
         textblocks = await self.conn.fetch(
             "SELECT * FROM act_textblocks WHERE act_id = $1",
-            act_id
+            act_id,
         )
 
         for tb in textblocks:
@@ -1058,17 +934,16 @@ class ActDBService:
                 VALUES ($1, $2, $3, $4, $5, $6)
                 """,
                 new_act.id,
-                tb['textblock_id'],
-                tb['node_id'],
-                tb['node_number'],
-                tb['content'],
-                tb['formatting']
+                tb["textblock_id"],
+                tb["node_id"],
+                tb["node_number"],
+                tb["content"],
+                tb["formatting"],
             )
 
-        # Копируем все нарушения
         violations = await self.conn.fetch(
             "SELECT * FROM act_violations WHERE act_id = $1",
-            act_id
+            act_id,
         )
 
         for v in violations:
@@ -1079,23 +954,26 @@ class ActDBService:
                     description_list, additional_content, reasons, consequences,
                     responsible, recommendations
                 )
-                VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)
+                VALUES (
+                    $1, $2, $3, $4, $5, $6,
+                    $7, $8, $9, $10,
+                    $11, $12
+                )
                 """,
                 new_act.id,
-                v['violation_id'],
-                v['node_id'],
-                v['node_number'],
-                v['violated'],
-                v['established'],
-                v['description_list'],
-                v['additional_content'],
-                v['reasons'],
-                v['consequences'],
-                v['responsible'],
-                v['recommendations']
+                v["violation_id"],
+                v["node_id"],
+                v["node_number"],
+                v["violated"],
+                v["established"],
+                v["description_list"],
+                v["additional_content"],
+                v["reasons"],
+                v["consequences"],
+                v["responsible"],
+                v["recommendations"],
             )
 
-        # Явно обновляем total_parts для всей группы КМ
         await self._update_total_parts_for_km(km_digit)
 
         logger.info(
@@ -1104,7 +982,6 @@ class ActDBService:
             f"название='{new_inspection_name}'"
         )
 
-        # Перезагружаем акт чтобы получить актуальный total_parts
         return await self.get_act_by_id(new_act.id)
 
     async def delete_act(self, act_id: int) -> None:
@@ -1116,12 +993,12 @@ class ActDBService:
         - Только обновляем total_parts
         """
         act = await self.get_act_by_id(act_id)
-        km_digit = self._extract_km_digits(act.km_number)
+        km_digit = KMUtils.extract_km_digits(act.km_number)
 
         async with self.conn.transaction():
             await self.conn.execute(
                 "DELETE FROM acts WHERE id = $1",
-                act_id
+                act_id,
             )
 
             await self._update_total_parts_for_km(km_digit)
@@ -1147,7 +1024,7 @@ class ActDBService:
             )
             """,
             act_id,
-            username
+            username,
         )
 
-        return result
+        return bool(result)

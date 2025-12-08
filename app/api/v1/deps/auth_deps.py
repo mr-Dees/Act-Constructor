@@ -1,4 +1,3 @@
-# app/api/v1/deps/auth_deps.py
 """
 Зависимости для авторизации (FastAPI Depends).
 

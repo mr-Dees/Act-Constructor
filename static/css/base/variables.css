@@ -322,6 +322,7 @@
     --modal-footer-bg: var(--bg-secondary);
     --modal-max-width: 50rem;
     --modal-max-height-vh: 85vh;
+    --acts-manager-min-width: 100rem;
     --acts-menu-min-width: 40rem;
     --acts-menu-max-width: 60rem;
     --acts-menu-max-height: 70vh;
@@ -417,6 +418,11 @@
     /* Acts menu специфичные переменные */
     --acts-menu-close-size: 2.5rem;
     --acts-actions-grid-columns: 3;
+
+    /* Acts Manager специфичные переменные */
+    --acts-list-min-height: 18.75rem;
+    --acts-grid-min-column-width: 21.875rem;
+    --acts-empty-icon-opacity: 0.3;
 
     /* Save indicator специфичные переменные */
     --save-indicator-label-min-width: 6.5rem;

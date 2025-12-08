@@ -2,59 +2,74 @@ Act Constructor/
 ├── app/
 │   ├── api/
 │   │   ├── __init__.py
-│   │   └── v1/
-│   │       ├── deps/
-│   │       │   ├── __init__.py
-│   │       │   └── auth_deps.py
-│   │       ├── endpoints/
-│   │       │   ├── __init__.py
-│   │       │   ├── act_content.py
-│   │       │   ├── act_operations.py
-│   │       │   ├── acts.py
-│   │       │   ├── auth.py
-│   │       │   └── system.py
-│   │       ├── __init__.py
-│   │       └── routes.py
+│   │   ├── v1/
+│   │   │   ├── deps/
+│   │   │   │   ├── __init__.py
+│   │   │   │   └── auth_deps.py
+│   │   │   ├── endpoints/
+│   │   │   │   ├── __init__.py
+│   │   │   │   ├── acts.py
+│   │   │   │   ├── acts_content.py
+│   │   │   │   ├── acts_export.py
+│   │   │   │   ├── auth.py
+│   │   │   │   └── system.py
+│   │   │   ├── __init__.py
+│   │   │   └── routes.py
+│   │   └── __init__.py
 │   ├── core/
 │   │   ├── __init__.py
 │   │   └── config.py
+│   ├── db/
+│   │   ├── migrations/
+│   │   │   └── schema.sql
+│   │   ├── queries/
+│   │   │   ├── __init__.py
+│   │   │   ├── act_filters.py
+│   │   │   └── act_queries.py
+│   │   ├── repositories/
+│   │   │   ├── __init__.py
+│   │   │   └── act_repository.py
+│   │   ├── utils/
+│   │   │   ├── __init__.py
+│   │   │   ├── act_directives_validator.py
+│   │   │   ├── json_db_utils.py
+│   │   │   └── km_utils.py
+│   │   ├── __init__.py
+│   │   └── connection.py
 │   ├── formatters/
 │   │   ├── utils/
 │   │   │   ├── __init__.py
 │   │   │   ├── formatting_utils.py
 │   │   │   ├── html_utils.py
+│   │   │   ├── json_utils.py
 │   │   │   └── table_utils.py
 │   │   ├── __init__.py
+│   │   ├── ai_readable_formatter.py
 │   │   ├── base_formatter.py
 │   │   ├── docx_formatter.py
 │   │   ├── markdown_formatter.py
 │   │   └── text_formatter.py
-│   ├── db/
-│   │   ├── __init__.py
-│   │   ├── connection.py
-│   │   ├── models.py
-│   │   ├── schema.sql
-│   │   └── service.py
-│   ├── extractors/
-│   │   ├── __init__.py
-│   │   ├── api.py
-│   │   ├── connection.py
-│   │   ├── filters.py
-│   │   ├── formatters.py
-│   │   └── queries.py
+│   ├── integrations/
+│   │   ├── ai_assistant_bd_oarb/
+│   │   │   ├── __init__.py
+│   │   │   └── data_export.py
+│   │   └── __init__.py
 │   ├── schemas/
 │   │   ├── __init__.py
-│   │   └── act.py
+│   │   ├── act_content.py
+│   │   └── act_metadata.py
 │   ├── services/
 │   │   ├── __init__.py
-│   │   ├── act_service.py
+│   │   ├── export_service.py
 │   │   └── storage_service.py
 │   ├── __init__.py
-│   └── main.py
+│   ├── main.py
+│   └── start_search.py
 │
-├── DB/
-│   └── acts/
-│       └── (здесь будут сохраняться файлы актов)
+├── logs/
+│   └── app.log
+├── acts_storage/
+│   └── (здесь будут сохраняться файлы актов в текстовом представлении (txt, md, word))
 │
 ├── templates/
 │   ├── components/

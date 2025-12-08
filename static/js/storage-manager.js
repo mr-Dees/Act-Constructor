@@ -366,7 +366,7 @@ class StorageManager {
             // Проверка размера данных
             if (stateJson.length > AppConfig.localStorage.maxStorageSize) {
                 console.warn('Размер данных превышает лимит localStorage');
-                Notifications.warning(AppConfig.localStorage.messages.storageFull);
+                Notifications.warning('Недостаточно места для сохранения. Попробуйте упростить структуру акта.');
                 return false;
             }
 
@@ -389,9 +389,9 @@ class StorageManager {
             console.error('Ошибка сохранения в localStorage:', error);
 
             if (error.name === 'QuotaExceededError') {
-                Notifications.error(AppConfig.localStorage.messages.storageFull);
+                Notifications.error('Недостаточно места для сохранения. Попробуйте упростить структуру акта.');
             } else {
-                Notifications.error(AppConfig.localStorage.messages.storageError);
+                Notifications.error('Ошибка сохранения данных');
             }
 
             return false;
@@ -473,7 +473,7 @@ class StorageManager {
         const success = this.saveState(true);
 
         if (success) {
-            Notifications.success(AppConfig.localStorage.messages.saved);
+            Notifications.success('Изменения сохранены');
         } else {
             // Если сохранение не удалось, возвращаем флаг
             this._hasUnsavedChanges = true;
