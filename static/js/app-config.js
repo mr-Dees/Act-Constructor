@@ -16,6 +16,47 @@ class AppConfig {
         VIOLATION: 'violation'
     };
 
+    static lock = {
+        // Продолжительность блокировки на сервере (минуты) - фолбэк значение
+        lockDurationMinutes: 30,
+
+        // Через сколько минут бездействия показывать предупреждение - фолбэк
+        inactivityTimeoutMinutes: 5,
+
+        // Как часто проверять бездействие (секунды) - фолбэк
+        inactivityCheckIntervalSeconds: 30,
+
+        // Как часто можно продлевать блокировку (минуты) - фолбэк
+        minExtensionIntervalMinutes: 5,
+
+        // Через сколько секунд автовыхода при бездействии - фолбэк
+        inactivityDialogTimeoutSeconds: 30,
+
+        messages: {
+            inactivityTitle: 'Долгое бездействие',
+            inactivityQuestion: (minutes) =>
+                `Вы не проявляли активность уже ${minutes} ${AppConfig.lock._pluralizeMinutes(minutes)}. Продолжить работу с актом или завершить сессию?`,
+
+            exitConfirmTitle: 'Завершить работу с актом',
+            exitConfirmQuestion: 'Сохранить изменения перед выходом?',
+
+            sessionExtended: 'Сессия продлена',
+            cannotExtend: 'Не удалось продлить сессию',
+            changesSaved: 'Изменения сохранены',
+            changesNotSaved: 'Не удалось сохранить изменения',
+            exitRedirect: 'Сессия завершена. Переадресация...',
+
+            actLockedByUser: (username) =>
+                `Акт сейчас редактируется пользователем ${username}. Попробуйте открыть его позже.`
+        },
+
+        _pluralizeMinutes: (n) => {
+            if (n % 10 === 1 && n % 100 !== 11) return 'минуту';
+            if (n % 10 >= 2 && n % 10 <= 4 && (n % 100 < 10 || n % 100 >= 20)) return 'минуты';
+            return 'минут';
+        }
+    };
+
     /**
      * Настройки предпросмотра документа
      */

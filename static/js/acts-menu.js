@@ -506,7 +506,7 @@ class ActsMenuManager {
     /**
      * Переключается на другой акт
      * @private
-     * @param {number} actId - ID акта
+     * @param {number} actId - ID акта для переключения
      */
     static async _switchToAct(actId) {
         // Если это текущий акт — просто закрываем меню
@@ -515,7 +515,7 @@ class ActsMenuManager {
             return;
         }
 
-        // Проверяем несохраненные изменения
+        // Проверяем несохраненные изменения в текущем акте
         if (StorageManager.hasUnsyncedChanges() && window.currentActId) {
             this.hide();
 
@@ -538,7 +538,7 @@ class ActsMenuManager {
                 } catch (err) {
                     console.error('Ошибка сохранения:', err);
                     Notifications.error('Не удалось сохранить изменения');
-                    return; // Отменяем переключение
+                    return;
                 }
             }
         } else {
@@ -548,36 +548,113 @@ class ActsMenuManager {
         try {
             console.log('Переключаемся на акт:', actId);
 
-            // Загружаем содержимое нового акта
+            // Освобождаем текущий акт перед переключением
+            if (window.currentActId && typeof LockManager !== 'undefined') {
+                console.log('Снимаем блокировку с текущего акта:', window.currentActId);
+
+                try {
+                    await APIClient.unlockAct(window.currentActId);
+                    console.log('Блокировка снята с акта', window.currentActId);
+                } catch (unlockError) {
+                    console.warn('Не удалось снять блокировку:', unlockError);
+                }
+
+                // Останавливаем все таймеры и отслеживание активности
+                LockManager.destroy();
+            }
+
+            // Пытаемся заблокировать целевой акт
+            if (typeof LockManager !== 'undefined' && LockManager.init) {
+                console.log('Попытка блокировки нового акта:', actId);
+
+                try {
+                    // Обновляем ID акта в LockManager
+                    LockManager._actId = actId;
+
+                    // Блокируем акт через API
+                    await LockManager._lockAct();
+
+                    console.log('Новый акт успешно заблокирован');
+
+                } catch (lockError) {
+                    // Акт занят другим пользователем
+                    if (lockError.message === 'ACT_LOCKED') {
+                        console.log('Новый акт занят другим пользователем');
+                        // Кеш очищен, диалог показан, редирект произойдет в LockManager
+                        return;
+                    }
+
+                    throw lockError;
+                }
+            }
+
+            // Загружаем содержимое нового акта из БД
+            console.log('Загружаем содержимое акта:', actId);
             await APIClient.loadActContent(actId);
 
-            // Обновляем текущий ID
+            // Обновляем идентификаторы текущего акта
             this.currentActId = actId;
             this.selectedActId = actId;
             window.currentActId = actId;
 
-            // Обновляем URL без перезагрузки страницы
+            // Обновляем URL в адресной строке без перезагрузки
             const newUrl = `/constructor?act_id=${actId}`;
             window.history.pushState({actId}, '', newUrl);
 
-            // Помечаем как синхронизированный с БД
+            // Помечаем состояние как синхронизированное с БД
             StorageManager.markAsSyncedWithDB();
 
-            // Инвалидируем кеш меню
+            // Сбрасываем кеш списка актов для актуального отображения
             this._clearCache();
+
+            // Перезапускаем мониторинг блокировки для нового акта
+            if (typeof LockManager !== 'undefined') {
+                LockManager._lastActivity = Date.now();
+                LockManager._warningShown = false;
+                LockManager._setupActivityTracking();
+                LockManager._startExpirationCheck();
+
+                console.log('LockManager перезапущен для акта', actId);
+            }
 
             Notifications.success('Акт успешно загружен');
 
         } catch (error) {
             console.error('Ошибка переключения на акт:', error);
 
-            // Обрабатываем специфичные ошибки
+            // Ошибка блокировки уже обработана выше
+            if (error.message === 'ACT_LOCKED') {
+                return;
+            }
+
+            // Обработка специфичных ошибок API
             if (error.code === 'ACCESS_DENIED') {
                 Notifications.error('У вас нет доступа к этому акту');
             } else if (error.code === 'NOT_FOUND') {
                 Notifications.error('Акт не найден');
             } else {
                 Notifications.error('Не удалось загрузить акт');
+            }
+
+            // Попытка вернуться к предыдущему акту при ошибке
+            if (window.currentActId) {
+                console.log('Возврат к предыдущему акту:', window.currentActId);
+
+                // Восстанавливаем блокировку и мониторинг для старого акта
+                if (typeof LockManager !== 'undefined') {
+                    try {
+                        LockManager._actId = window.currentActId;
+                        await LockManager._lockAct();
+                        LockManager._setupActivityTracking();
+                        LockManager._startExpirationCheck();
+                    } catch (revertError) {
+                        console.error('Не удалось вернуться к предыдущему акту:', revertError);
+                        this._redirectToActsManager();
+                    }
+                }
+            } else {
+                // Нет предыдущего акта — переход на главную
+                this._redirectToActsManager();
             }
         }
     }
@@ -758,7 +835,28 @@ class ActsMenuManager {
         window.currentActId = actId;
 
         try {
-            // Проверяем localStorage
+            // ШАГ 1: СНАЧАЛА пытаемся заблокировать акт
+            if (typeof LockManager !== 'undefined' && LockManager.init) {
+                console.log('Попытка блокировки акта перед загрузкой...');
+
+                try {
+                    await LockManager.init(actId);
+                    console.log('Акт успешно заблокирован');
+                } catch (lockError) {
+                    // Если блокировка не удалась (409 или другая ошибка)
+                    if (lockError.message === 'ACT_LOCKED') {
+                        // Акт занят - кеш уже очищен в LockManager
+                        console.log('Акт занят другим пользователем');
+                        return;
+                    }
+                    // Другие ошибки блокировки
+                    throw lockError;
+                }
+            } else {
+                console.error('LockManager не найден или не имеет метода init');
+            }
+
+            // ШАГ 2: Блокировка успешна - теперь загружаем данные
             const stateKey = AppConfig.localStorage.stateKey;
             const savedStateJson = localStorage.getItem(stateKey);
 
@@ -769,18 +867,14 @@ class ActsMenuManager {
                     const savedState = JSON.parse(savedStateJson);
                     const savedActId = savedState.actId;
 
-                    // Если actId совпадает - восстанавливаем из localStorage
+                    // Проверяем что кеш для ЭТОГО акта
                     if (savedActId === actId) {
                         console.log('Восстанавливаем акт из localStorage, ID:', actId);
-
-                        // Показываем индикатор на время восстановления
                         this._showLoadingIndicator('Восстановление из кеша...');
 
-                        // Восстанавливаем состояние через StorageManager
                         const restored = StorageManager.restoreSavedState();
 
                         if (restored) {
-                            // Обновляем UI
                             if (typeof treeManager !== 'undefined') {
                                 treeManager.render();
                             }
@@ -814,7 +908,12 @@ class ActsMenuManager {
         } catch (error) {
             console.error('Ошибка загрузки акта:', error);
 
-            // Обрабатываем специфичные ошибки
+            // Если это ошибка блокировки - она уже обработана выше
+            if (error.message === 'ACT_LOCKED') {
+                return;
+            }
+
+            // Обработка других ошибок
             if (error.code === 'ACCESS_DENIED') {
                 Notifications.error('У вас нет доступа к этому акту');
                 this._redirectToActsManager();

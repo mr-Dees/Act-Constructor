@@ -107,6 +107,29 @@ class Settings(BaseSettings):
     # === Аутентификация ===
     jupyterhub_user: str = Field(default="unknown_user")
 
+    # === Параметры блокировок актов ===
+
+    # # Продолжительность блокировки акта на сервере (минуты)
+    # act_lock_duration_minutes: int = Field(default=30, gt=0)
+    #
+    # # Через сколько минут бездействия показывать предупреждение (фронтенд)
+    # act_inactivity_timeout_minutes: float = Field(default=5.0, gt=0)
+    #
+    # # Как часто проверять бездействие на фронтенде (секунды)
+    # act_inactivity_check_interval_seconds: int = Field(default=30, gt=0)
+    #
+    # # Через сколько минут после последнего продления можно продлить снова (фронтенд)
+    # act_min_extension_interval_minutes: float = Field(default=5.0, gt=0)
+    #
+    # # Через сколько секунд автоматически завершать работу если пользователь не нажал кнопку
+    # act_inactivity_dialog_timeout_seconds: int = Field(default=30, gt=0)
+
+    act_lock_duration_minutes: int = Field(default=1, gt=0)  # 1 минута
+    act_inactivity_timeout_minutes: float = Field(default=0.5, gt=0)  # 30 секунд
+    act_inactivity_check_interval_seconds: int = Field(default=5, gt=0)  # 5 секунд
+    act_min_extension_interval_minutes: float = Field(default=0.25, gt=0)  # 15 секунд
+    act_inactivity_dialog_timeout_seconds: int = Field(default=15, gt=0)  # 15 секунд для автовыхода
+
     # === Лимиты безопасности ===
 
     # Максимальный размер тела запроса в байтах (10MB по умолчанию)

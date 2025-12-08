@@ -17,6 +17,25 @@ logger = logging.getLogger("act_constructor.api.system")
 router = APIRouter()
 
 
+@router.get("/config/lock")
+async def get_lock_config():
+    """
+    Получает настройки блокировок для фронтенда.
+
+    Returns:
+        Настройки блокировок актов
+    """
+    settings = get_settings()
+
+    return {
+        "lockDurationMinutes": settings.act_lock_duration_minutes,
+        "inactivityTimeoutMinutes": settings.act_inactivity_timeout_minutes,
+        "inactivityCheckIntervalSeconds": settings.act_inactivity_check_interval_seconds,
+        "minExtensionIntervalMinutes": settings.act_min_extension_interval_minutes,
+        "inactivityDialogTimeoutSeconds": settings.act_inactivity_dialog_timeout_seconds
+    }
+
+
 @router.get("/health")
 async def health_check(settings: Settings = Depends(get_settings)) -> dict:
     """

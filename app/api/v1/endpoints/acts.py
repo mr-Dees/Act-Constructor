@@ -20,8 +20,8 @@ from pydantic import ValidationError
 
 from app.api.v1.deps.auth_deps import get_username
 from app.db.connection import get_db
-from app.schemas.act_metadata import ActCreate, ActUpdate, ActListItem, ActResponse
 from app.db.repositories.act_repository import ActDBService
+from app.schemas.act_metadata import ActCreate, ActUpdate, ActListItem, ActResponse
 
 logger = logging.getLogger("act_constructor.api.acts")
 router = APIRouter()
@@ -39,6 +39,101 @@ async def list_user_acts(username: str = Depends(get_username)):
     except Exception as e:
         logger.exception(f"Ошибка получения списка актов: {e}")
         raise HTTPException(status_code=500, detail="Ошибка получения списка актов")
+
+
+@router.post("/{act_id}/lock", status_code=200)
+async def lock_act(
+        act_id: int,
+        username: str = Depends(get_username)
+):
+    """
+    Блокирует акт для редактирования текущим пользователем.
+
+    Логика:
+    - Проверяет доступ пользователя к акту
+    - Проверяет не заблокирован ли акт другим пользователем
+    - Если заблокирован текущим пользователем - продлевает блокировку
+    - Если блокировка истекла - снимает и создает новую
+    - Устанавливает блокировку на 30 минут
+
+    Returns:
+        {
+            "success": true,
+            "locked_until": "2025-12-08T13:35:00",
+            "message": "Акт заблокирован для редактирования"
+        }
+
+    Raises:
+        403: Нет доступа к акту
+        409: Акт уже редактируется другим пользователем
+    """
+    async with get_db() as conn:
+        db_service = ActDBService(conn)
+
+        # Проверяем доступ
+        has_access = await db_service.check_user_access(act_id, username)
+        if not has_access:
+            raise HTTPException(status_code=403, detail="Нет доступа к акту")
+
+        try:
+            lock_info = await db_service.lock_act(act_id, username)
+            return lock_info
+
+        except ValueError as e:
+            # Акт заблокирован другим пользователем
+            raise HTTPException(status_code=409, detail=str(e))
+
+
+@router.post("/{act_id}/unlock", status_code=200)
+async def unlock_act(
+        act_id: int,
+        username: str = Depends(get_username)
+):
+    """
+    Снимает блокировку с акта.
+
+    Может снять блокировку только тот пользователь, который ее установил.
+    """
+    async with get_db() as conn:
+        db_service = ActDBService(conn)
+
+        has_access = await db_service.check_user_access(act_id, username)
+        if not has_access:
+            raise HTTPException(status_code=403, detail="Нет доступа к акту")
+
+        await db_service.unlock_act(act_id, username)
+
+        return {
+            "success": True,
+            "message": "Блокировка снята"
+        }
+
+
+@router.post("/{act_id}/extend-lock", status_code=200)
+async def extend_lock(
+        act_id: int,
+        username: str = Depends(get_username)
+):
+    """
+    Продлевает блокировку акта на 30 минут.
+
+    Вызывается:
+    - При взаимодействии пользователя с актом (автоматически)
+    - При нажатии "Продлить" в диалоге предупреждения
+    """
+    async with get_db() as conn:
+        db_service = ActDBService(conn)
+
+        has_access = await db_service.check_user_access(act_id, username)
+        if not has_access:
+            raise HTTPException(status_code=403, detail="Нет доступа к акту")
+
+        try:
+            lock_info = await db_service.extend_lock(act_id, username)
+            return lock_info
+
+        except ValueError as e:
+            raise HTTPException(status_code=400, detail=str(e))
 
 
 @router.post("/create", response_model=ActResponse, status_code=201)

@@ -33,6 +33,11 @@ CREATE TABLE IF NOT EXISTS acts (
     needs_invoice_check BOOLEAN DEFAULT FALSE,
     needs_service_note BOOLEAN DEFAULT FALSE,
 
+    -- Блокировка для редактирования
+    locked_by VARCHAR(50) DEFAULT NULL,
+    locked_at TIMESTAMP DEFAULT NULL,
+    lock_expires_at TIMESTAMP DEFAULT NULL,
+
     -- Системные поля
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
@@ -93,6 +98,9 @@ COMMENT ON COLUMN acts.needs_created_date IS 'Флаг валидации: тр�
 COMMENT ON COLUMN acts.needs_directive_number IS 'Флаг валидации: требуется ли номер поручения';
 COMMENT ON COLUMN acts.needs_invoice_check IS 'Флаг валидации: требуется ли проверка фактуры';
 COMMENT ON COLUMN acts.needs_service_note IS 'Флаг валидации: требуется ли информация по служебной записке';
+COMMENT ON COLUMN acts.locked_by IS 'Username пользователя, заблокировавшего акт для редактирования';
+COMMENT ON COLUMN acts.locked_at IS 'Время начала блокировки';
+COMMENT ON COLUMN acts.lock_expires_at IS 'Время истечения блокировки (автоосвобождение)';
 COMMENT ON COLUMN acts.created_at IS 'Дата и время создания записи';
 COMMENT ON COLUMN acts.updated_at IS 'Дата и время последнего обновления метаданных';
 COMMENT ON COLUMN acts.created_by IS 'Числовой логин пользователя-создателя';
@@ -378,6 +386,19 @@ CREATE INDEX IF NOT EXISTS idx_acts_last_edited_at
     ON acts(last_edited_at DESC NULLS LAST);
 
 COMMENT ON INDEX idx_acts_last_edited_at IS 'Индекс для сортировки по времени последнего редактирования';
+
+-- Индексы для блокировок
+CREATE INDEX IF NOT EXISTS idx_acts_locked_by
+    ON acts(locked_by)
+    WHERE locked_by IS NOT NULL;
+
+COMMENT ON INDEX idx_acts_locked_by IS 'Частичный индекс для поиска заблокированных актов по пользователю';
+
+CREATE INDEX IF NOT EXISTS idx_acts_lock_expires
+    ON acts(lock_expires_at)
+    WHERE lock_expires_at IS NOT NULL;
+
+COMMENT ON INDEX idx_acts_lock_expires IS 'Частичный индекс для поиска актов с истекающей блокировкой';
 
 -- Индексы на audit_team_members
 CREATE INDEX IF NOT EXISTS idx_audit_team_username

@@ -4,7 +4,7 @@
 
 import json
 import logging
-from datetime import datetime
+from datetime import datetime, timedelta
 
 import asyncpg
 
@@ -198,6 +198,225 @@ class ActDBService:
             directives,
             existing_points,
         )
+
+    async def lock_act(
+            self,
+            act_id: int,
+            username: str,
+            duration_minutes: int | None = None
+    ) -> dict:
+        """
+        Блокирует акт для редактирования.
+
+        Returns:
+            dict с информацией о блокировке
+
+        Raises:
+            ValueError: если акт уже заблокирован другим пользователем
+        """
+        # Если duration не передан - берём из конфига
+        if duration_minutes is None:
+            from app.core.config import get_settings
+            settings = get_settings()
+            duration_minutes = settings.act_lock_duration_minutes
+
+        # Проверяем текущую блокировку
+        lock_info = await self.conn.fetchrow(
+            """
+            SELECT locked_by, locked_at, lock_expires_at
+            FROM acts
+            WHERE id = $1
+            """,
+            act_id
+        )
+
+        now = datetime.now()
+
+        if lock_info['locked_by']:
+            # Акт заблокирован
+            if lock_info['locked_by'] == username:
+                # Заблокирован текущим пользователем - продлеваем
+                lock_expires = now + timedelta(minutes=duration_minutes)
+
+                await self.conn.execute(
+                    """
+                    UPDATE acts
+                    SET lock_expires_at = $1
+                    WHERE id = $2
+                    """,
+                    lock_expires,
+                    act_id
+                )
+
+                logger.info(f"Блокировка акта ID={act_id} продлена для {username}")
+
+                return {
+                    "success": True,
+                    "locked_until": lock_expires.isoformat(),
+                    "message": "Блокировка продлена"
+                }
+            else:
+                # Заблокирован другим пользователем
+                if lock_info['lock_expires_at'] and lock_info['lock_expires_at'] > now:
+                    # Блокировка еще активна - НЕ показываем время
+                    raise ValueError(
+                        f"Акт редактируется пользователем {lock_info['locked_by']}. "
+                        f"Попробуйте открыть его позже."
+                    )
+                # Блокировка истекла - снимаем и блокируем заново
+
+        # Устанавливаем новую блокировку
+        lock_expires = now + timedelta(minutes=duration_minutes)
+
+        await self.conn.execute(
+            """
+            UPDATE acts
+            SET locked_by = $1,
+                locked_at = $2,
+                lock_expires_at = $3
+            WHERE id = $4
+            """,
+            username,
+            now,
+            lock_expires,
+            act_id
+        )
+
+        logger.info(f"Акт ID={act_id} заблокирован пользователем {username} до {lock_expires}")
+
+        return {
+            "success": True,
+            "locked_until": lock_expires.isoformat(),
+            "message": "Акт заблокирован для редактирования"
+        }
+
+    async def unlock_act(self, act_id: int, username: str) -> None:
+        """Снимает блокировку с акта."""
+        result = await self.conn.execute(
+            """
+            UPDATE acts
+            SET locked_by = NULL,
+                locked_at = NULL,
+                lock_expires_at = NULL
+            WHERE id = $1 AND locked_by = $2
+            """,
+            act_id,
+            username
+        )
+
+        if result == "UPDATE 0":
+            logger.warning(
+                f"Попытка снять блокировку с акта ID={act_id} "
+                f"пользователем {username}, который не владеет блокировкой"
+            )
+        else:
+            logger.info(f"Блокировка снята с акта ID={act_id} пользователем {username}")
+
+    async def extend_lock(
+            self,
+            act_id: int,
+            username: str,
+            duration_minutes: int | None = None
+    ) -> dict:
+        """
+        Продлевает блокировку акта.
+
+        Raises:
+            ValueError: если пользователь не владеет блокировкой
+        """
+        # Если duration не передан - берём из конфига
+        if duration_minutes is None:
+            from app.core.config import get_settings
+            settings = get_settings()
+            duration_minutes = settings.act_lock_duration_minutes
+
+        lock_info = await self.conn.fetchrow(
+            """
+            SELECT locked_by, lock_expires_at
+            FROM acts
+            WHERE id = $1
+            """,
+            act_id
+        )
+
+        if not lock_info['locked_by']:
+            raise ValueError("Акт не заблокирован")
+
+        if lock_info['locked_by'] != username:
+            raise ValueError("Вы не владеете блокировкой этого акта")
+
+        lock_expires = datetime.now() + timedelta(minutes=duration_minutes)
+
+        await self.conn.execute(
+            """
+            UPDATE acts
+            SET lock_expires_at = $1
+            WHERE id = $2
+            """,
+            lock_expires,
+            act_id
+        )
+
+        logger.info(f"Блокировка акта ID={act_id} продлена до {lock_expires}")
+
+        return {
+            "success": True,
+            "locked_until": lock_expires.isoformat(),
+            "message": "Блокировка продлена"
+        }
+
+    async def check_lock_status(self, act_id: int) -> dict:
+        """
+        Проверяет статус блокировки акта.
+
+        Returns:
+            {
+                "is_locked": bool,
+                "locked_by": str | None,
+                "locked_until": str | None
+            }
+        """
+        lock_info = await self.conn.fetchrow(
+            """
+            SELECT locked_by, lock_expires_at
+            FROM acts
+            WHERE id = $1
+            """,
+            act_id
+        )
+
+        if not lock_info['locked_by']:
+            return {
+                "is_locked": False,
+                "locked_by": None,
+                "locked_until": None
+            }
+
+        now = datetime.now()
+        if lock_info['lock_expires_at'] and lock_info['lock_expires_at'] > now:
+            return {
+                "is_locked": True,
+                "locked_by": lock_info['locked_by'],
+                "locked_until": lock_info['lock_expires_at'].isoformat()
+            }
+
+        # Блокировка истекла - автоматически снимаем
+        await self.conn.execute(
+            """
+            UPDATE acts
+            SET locked_by = NULL,
+                locked_at = NULL,
+                lock_expires_at = NULL
+            WHERE id = $1
+            """,
+            act_id
+        )
+
+        return {
+            "is_locked": False,
+            "locked_by": None,
+            "locked_until": None
+        }
 
     # -------------------------------------------------------------------------
     # СОЗДАНИЕ АКТА

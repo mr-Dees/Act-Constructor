@@ -399,7 +399,21 @@ class ActsManagerPage {
     /**
      * Инициализация страницы
      */
-    static init() {
+    static async init() {
+        console.log('ActsManagerPage.init() вызван');
+
+        // ВАЖНО: Сначала выполняем отложенные действия от LockManager
+        if (typeof LockManager !== 'undefined' && LockManager.executePendingActions) {
+            console.log('Вызываем LockManager.executePendingActions()');
+            await LockManager.executePendingActions();
+            console.log('LockManager.executePendingActions() завершен');
+        } else {
+            console.log('LockManager или executePendingActions не найден');
+        }
+
+        // Проверяем флаги из sessionStorage
+        await this._checkSessionExit();
+
         // Загружаем акты (всегда из БД)
         this.loadActs();
 
@@ -415,11 +429,41 @@ class ActsManagerPage {
             });
         }
 
-        // Обработчик для кнопки обновления (если есть)
         const refreshBtn = document.getElementById('refreshActsBtn');
         if (refreshBtn) {
             refreshBtn.addEventListener('click', () => {
                 this.loadActs();
+            });
+        }
+    }
+
+    /**
+     * Проверяет флаги завершения сессии и показывает соответствующий диалог
+     * @private
+     */
+    static async _checkSessionExit() {
+        const autoExited = sessionStorage.getItem('sessionAutoExited');
+        const exitedWithSave = sessionStorage.getItem('sessionExitedWithSave');
+
+        if (autoExited) {
+            sessionStorage.removeItem('sessionAutoExited');
+
+            await DialogManager.alert({
+                title: 'Сессия завершена',
+                message: 'Редактирование было автоматически прекращено из-за длительного бездействия. Изменения сохранены.',
+                icon: '⏱️',
+                type: 'info',
+                confirmText: 'Понятно'
+            });
+        } else if (exitedWithSave) {
+            sessionStorage.removeItem('sessionExitedWithSave');
+
+            await DialogManager.alert({
+                title: 'Данные сохранены',
+                message: 'Редактирование завершено. Все изменения сохранены.',
+                icon: '✅',
+                type: 'success',
+                confirmText: 'OK'
             });
         }
     }

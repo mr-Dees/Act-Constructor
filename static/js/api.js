@@ -6,6 +6,63 @@
  * загрузки/сохранения содержимого из БД, а также удаления актов.
  */
 class APIClient {
+    static async lockAct(actId) {
+        const username = AuthManager.getCurrentUser();
+
+        const response = await fetch(`/api/v1/acts/${actId}/lock`, {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+                'X-JupyterHub-User': username
+            }
+        });
+
+        if (!response.ok) {
+            const error = await response.json();
+            throw this._createError(response.status, error.detail);
+        }
+
+        return response.json();
+    }
+
+    static async unlockAct(actId) {
+        const username = AuthManager.getCurrentUser();
+
+        const response = await fetch(`/api/v1/acts/${actId}/unlock`, {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+                'X-JupyterHub-User': username
+            }
+        });
+
+        if (!response.ok) {
+            const error = await response.json();
+            throw this._createError(response.status, error.detail);
+        }
+
+        return response.json();
+    }
+
+    static async extendLock(actId) {
+        const username = AuthManager.getCurrentUser();
+
+        const response = await fetch(`/api/v1/acts/${actId}/extend-lock`, {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+                'X-JupyterHub-User': username
+            }
+        });
+
+        if (!response.ok) {
+            const error = await response.json();
+            throw this._createError(response.status, error.detail);
+        }
+
+        return response.json();
+    }
+
     /**
      * Генерирует и сохраняет акты на сервере
      *

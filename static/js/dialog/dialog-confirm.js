@@ -15,6 +15,10 @@ class DialogManager extends DialogBase {
      * @param {string} [options.confirmText='Да'] - Текст кнопки подтверждения
      * @param {string} [options.cancelText='Отмена'] - Текст кнопки отмены
      * @param {string} [options.type='warning'] - Тип диалога (success, warning, error, info)
+     * @param {boolean} [options.hideCancel=false] - Скрыть кнопку отмены (одна кнопка, любое закрытие = true)
+     * @param {boolean} [options.hideConfirm=false] - Скрыть кнопку подтверждения
+     * @param {boolean} [options.allowEscape=true] - Разрешить закрытие по Escape
+     * @param {boolean} [options.allowOverlayClose=true] - Разрешить закрытие кликом вне диалога
      * @returns {Promise<boolean>} Promise, который резолвится true при подтверждении, false при отмене
      */
     static show(options = {}) {
@@ -24,7 +28,11 @@ class DialogManager extends DialogBase {
             icon = '⚠️',
             confirmText = 'Да',
             cancelText = 'Отмена',
-            type = 'warning'
+            type = 'warning',
+            hideCancel = false,
+            hideConfirm = false,
+            allowEscape = true,
+            allowOverlayClose = true
         } = options;
 
         return new Promise((resolve) => {
@@ -37,6 +45,8 @@ class DialogManager extends DialogBase {
                 confirmText,
                 cancelText,
                 type,
+                hideCancel,
+                hideConfirm,
                 onConfirm: () => {
                     this._closeAndResolve(overlay, resolve, true);
                 },
@@ -53,15 +63,24 @@ class DialogManager extends DialogBase {
             // Показываем диалог
             this._showDialog(overlay);
 
-            // Настраиваем закрытие по клику вне диалога
-            this._setupOverlayClickHandler(overlay, dialogElement, () => {
-                this._closeAndResolve(overlay, resolve, false);
-            });
+            // Определяем результат при закрытии Esc/overlay
+            // hideCancel=true -> закрытие возвращает true (как подтверждение)
+            // hideCancel=false -> закрытие возвращает false (отмена)
+            const closeResult = hideCancel ? true : false;
 
-            // Закрытие по Escape
-            this._setupEscapeHandler(overlay, () => {
-                this._closeAndResolve(overlay, resolve, false);
-            });
+            // Настраиваем закрытие по клику вне диалога (если разрешено)
+            if (allowOverlayClose) {
+                this._setupOverlayClickHandler(overlay, dialogElement, () => {
+                    this._closeAndResolve(overlay, resolve, closeResult);
+                });
+            }
+
+            // Закрытие по Escape (если разрешено)
+            if (allowEscape) {
+                this._setupEscapeHandler(overlay, () => {
+                    this._closeAndResolve(overlay, resolve, closeResult);
+                });
+            }
         });
     }
 
@@ -88,12 +107,25 @@ class DialogManager extends DialogBase {
      * @param {string} params.confirmText - Текст кнопки подтверждения
      * @param {string} params.cancelText - Текст кнопки отмены
      * @param {string} params.type - Тип диалога
+     * @param {boolean} params.hideCancel - Скрыть кнопку отмены
+     * @param {boolean} params.hideConfirm - Скрыть кнопку подтверждения
      * @param {Function} params.onConfirm - Обработчик подтверждения
      * @param {Function} params.onCancel - Обработчик отмены
      * @returns {HTMLElement} Элемент диалога
      */
     static _createConfirmDialog(params) {
-        const {title, message, icon, confirmText, cancelText, type, onConfirm, onCancel} = params;
+        const {
+            title,
+            message,
+            icon,
+            confirmText,
+            cancelText,
+            type,
+            hideCancel,
+            hideConfirm,
+            onConfirm,
+            onCancel
+        } = params;
 
         const dialog = document.createElement('div');
         dialog.className = 'custom-dialog';
@@ -107,19 +139,23 @@ class DialogManager extends DialogBase {
         // Сообщение
         const messageEl = this._createElement('p', 'dialog-message', message);
 
-        // Контейнер кнопок
-        const buttonsContainer = this._createButtonsContainer(
-            confirmText,
-            cancelText,
-            onConfirm,
-            onCancel
-        );
-
         // Собираем диалог
         dialog.appendChild(iconEl);
         dialog.appendChild(titleEl);
         dialog.appendChild(messageEl);
-        dialog.appendChild(buttonsContainer);
+
+        // Контейнер кнопок (создаём только если есть хотя бы одна кнопка)
+        if (!hideCancel || !hideConfirm) {
+            const buttonsContainer = this._createButtonsContainer(
+                confirmText,
+                cancelText,
+                hideCancel,
+                hideConfirm,
+                onConfirm,
+                onCancel
+            );
+            dialog.appendChild(buttonsContainer);
+        }
 
         return dialog;
     }
@@ -129,19 +165,27 @@ class DialogManager extends DialogBase {
      * @private
      * @param {string} confirmText - Текст кнопки подтверждения
      * @param {string} cancelText - Текст кнопки отмены
+     * @param {boolean} hideCancel - Скрыть кнопку отмены
+     * @param {boolean} hideConfirm - Скрыть кнопку подтверждения
      * @param {Function} onConfirm - Обработчик подтверждения
      * @param {Function} onCancel - Обработчик отмены
      * @returns {HTMLElement} Контейнер с кнопками
      */
-    static _createButtonsContainer(confirmText, cancelText, onConfirm, onCancel) {
+    static _createButtonsContainer(confirmText, cancelText, hideCancel, hideConfirm, onConfirm, onCancel) {
         const container = document.createElement('div');
         container.className = 'dialog-buttons';
 
-        const cancelBtn = this._createButton('btn btn-secondary dialog-cancel', cancelText, onCancel);
-        const confirmBtn = this._createButton('btn btn-primary dialog-confirm', confirmText, onConfirm);
+        // Кнопка отмены (если не скрыта)
+        if (!hideCancel) {
+            const cancelBtn = this._createButton('btn btn-secondary dialog-cancel', cancelText, onCancel);
+            container.appendChild(cancelBtn);
+        }
 
-        container.appendChild(cancelBtn);
-        container.appendChild(confirmBtn);
+        // Кнопка подтверждения (если не скрыта)
+        if (!hideConfirm) {
+            const confirmBtn = this._createButton('btn btn-primary dialog-confirm', confirmText, onConfirm);
+            container.appendChild(confirmBtn);
+        }
 
         return container;
     }
@@ -154,6 +198,8 @@ class DialogManager extends DialogBase {
      * @param {string} [options.icon='ℹ️'] - Иконка
      * @param {string} [options.confirmText='ОК'] - Текст кнопки
      * @param {string} [options.type='info'] - Тип диалога
+     * @param {boolean} [options.allowEscape=true] - Разрешить закрытие по Escape
+     * @param {boolean} [options.allowOverlayClose=true] - Разрешить закрытие кликом вне диалога
      * @returns {Promise<boolean>} Promise, который всегда резолвится true
      */
     static alert(options = {}) {
@@ -162,7 +208,9 @@ class DialogManager extends DialogBase {
             message = '',
             icon = 'ℹ️',
             confirmText = 'ОК',
-            type = 'info'
+            type = 'info',
+            allowEscape = true,
+            allowOverlayClose = true
         } = options;
 
         return new Promise((resolve) => {
@@ -184,13 +232,17 @@ class DialogManager extends DialogBase {
 
             this._showDialog(overlay);
 
-            this._setupOverlayClickHandler(overlay, dialogElement, () => {
-                this._closeAndResolve(overlay, resolve, true);
-            });
+            if (allowOverlayClose) {
+                this._setupOverlayClickHandler(overlay, dialogElement, () => {
+                    this._closeAndResolve(overlay, resolve, true);
+                });
+            }
 
-            this._setupEscapeHandler(overlay, () => {
-                this._closeAndResolve(overlay, resolve, true);
-            });
+            if (allowEscape) {
+                this._setupEscapeHandler(overlay, () => {
+                    this._closeAndResolve(overlay, resolve, true);
+                });
+            }
         });
     }
 

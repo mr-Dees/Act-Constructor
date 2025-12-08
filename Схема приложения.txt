@@ -234,6 +234,7 @@ Act Constructor/
 │       ├── app-config.js
 │       ├── auth.js
 │       ├── format-menu-manager.js
+│       ├── lock-manager.js
 │       ├── navigation-manager.js
 │       ├── notifications.js
 │       ├── settings-menu.js
