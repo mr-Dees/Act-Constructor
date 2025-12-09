@@ -411,11 +411,145 @@ class ActsMenuManager {
                 listItem.classList.add('selected');
             }
 
+            // Добавляем классы статусов для стилизации рамок
+            const status = this._getActStatusClasses(act);
+            status.classes.forEach(cls => listItem.classList.add(cls));
+
             // Обработчик клика
-            listItem.addEventListener('click', (e) => this._handleActClick(e, act.id));
+            if (act.is_locked && !isCurrent) {
+                // Заблокированный акт - показываем уведомление при клике
+                listItem.addEventListener('click', (e) => {
+                    e.preventDefault();
+                    e.stopPropagation();
+                    if (typeof Notifications !== 'undefined') {
+                        Notifications.warning(
+                            `Акт редактируется пользователем ${act.locked_by}. Попробуйте позже.`
+                        );
+                    }
+                });
+            } else {
+                listItem.addEventListener('click', (e) => this._handleActClick(e, act.id));
+            }
+
+            // Добавляем теги статусов (включая информацию о блокировке)
+            this._addStatusTags(listItem, act);
         }
 
         return item;
+    }
+
+    /**
+     * Определяет классы статусов для элемента меню
+     * Используется для стилизации рамок элементов списка
+     * @private
+     * @param {Object} act - Данные акта
+     * @returns {Object} Объект с массивом классов
+     */
+    static _getActStatusClasses(act) {
+        const classes = [];
+
+        if (act.is_locked) {
+            classes.push('locked');
+        } else if (act.needs_invoice_check) {
+            // Критичный статус - усиленная рамка и свечение
+            classes.push('needs-invoice', 'needs-attention');
+        } else if (act.needs_created_date || act.needs_directive_number || act.needs_service_note) {
+            // Обычное требование внимания - цветная рамка
+            classes.push('needs-attention');
+        }
+
+        return {classes};
+    }
+
+    /**
+     * Создает тег статуса с иконкой и текстом
+     * Для заблокированных актов добавляет информацию о пользователе
+     * @private
+     * @param {string} icon - Эмодзи или символ иконки
+     * @param {string} text - Текст тега
+     * @param {string} type - Тип тега (locked, critical, attention)
+     * @param {string} lockedBy - Логин пользователя (для заблокированных актов)
+     * @returns {HTMLElement} Элемент тега
+     */
+    static _createStatusTag(icon, text, type, lockedBy = null) {
+        const tag = document.createElement('span');
+        tag.className = `status-tag ${type}`;
+
+        const iconSpan = document.createElement('span');
+        iconSpan.className = 'status-tag-icon';
+        iconSpan.textContent = icon;
+
+        const textSpan = document.createElement('span');
+        textSpan.className = 'status-tag-text';
+
+        // Для заблокированных актов добавляем информацию о пользователе
+        if (type === 'locked' && lockedBy) {
+            textSpan.textContent = `Редактируется: ${lockedBy}`;
+        } else {
+            textSpan.textContent = text;
+        }
+
+        tag.appendChild(iconSpan);
+        tag.appendChild(textSpan);
+
+        return tag;
+    }
+
+    /**
+     * Добавляет теги статусов к элементу списка
+     * Теги отображаются как небольшие бейджи с иконками и текстом
+     * @private
+     * @param {HTMLElement} listItem - Элемент списка
+     * @param {Object} act - Данные акта
+     */
+    static _addStatusTags(listItem, act) {
+        // Создаем контейнер для тегов если нужны статусы
+        const needsTags = act.is_locked ||
+            act.needs_invoice_check ||
+            act.needs_created_date ||
+            act.needs_directive_number ||
+            act.needs_service_note;
+
+        if (!needsTags) return;
+
+        const tagsContainer = document.createElement('div');
+        tagsContainer.className = 'acts-menu-item-status-tags';
+
+        // Тег блокировки (приоритетный - показываем только его с информацией о пользователе)
+        if (act.is_locked) {
+            const lockedTag = this._createStatusTag('🔒', 'Редактируется', 'locked', act.locked_by);
+            tagsContainer.appendChild(lockedTag);
+        } else {
+            // Тег критичного статуса (фактура) - приоритетнее остальных
+            if (act.needs_invoice_check) {
+                const criticalTag = this._createStatusTag('🚨', 'Проверить фактуру', 'critical');
+                tagsContainer.appendChild(criticalTag);
+            }
+
+            // Теги обычных требований
+            if (act.needs_created_date) {
+                const dateTag = this._createStatusTag('📅', 'Дата акта', 'attention');
+                tagsContainer.appendChild(dateTag);
+            }
+
+            if (act.needs_directive_number) {
+                const directiveTag = this._createStatusTag('📋', 'Поручения', 'attention');
+                tagsContainer.appendChild(directiveTag);
+            }
+
+            if (act.needs_service_note) {
+                const noteTag = this._createStatusTag('📝', 'Служ. записка', 'attention');
+                tagsContainer.appendChild(noteTag);
+            }
+        }
+
+        // Вставляем теги перед датой редактирования
+        const dateElement = listItem.querySelector('.acts-menu-item-date');
+        if (dateElement) {
+            listItem.insertBefore(tagsContainer, dateElement);
+        } else {
+            listItem.appendChild(tagsContainer);
+        }
     }
 
     /**

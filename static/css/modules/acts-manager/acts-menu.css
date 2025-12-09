@@ -23,7 +23,7 @@
     overflow: hidden;
     display: flex;
     flex-direction: column;
-    animation: scaleIn var(--transition-base) cubic-bezier(0.4, 0, 0.2, 1);
+    animation: scaleIn var(--transition-base) var(--ease-in-out-smooth);
     max-height: var(--acts-menu-max-height);
 }
 
@@ -228,13 +228,13 @@
 
 /* Выбранный акт для действий (одинарный клик) */
 .acts-menu-list-item.selected {
-    background: rgba(91, 111, 168, 0.08);
+    background: var(--table-row-selected);
     border-color: var(--primary-light);
     box-shadow: var(--shadow-sm);
 }
 
 .acts-menu-list-item.selected:hover {
-    background: rgba(91, 111, 168, 0.12);
+    background: var(--table-row-selected-hover);
     border-color: var(--primary);
 }
 
@@ -283,6 +283,48 @@
 .acts-menu-item-meta-label {
     font-weight: var(--font-weight-medium);
     color: var(--text-primary);
+}
+
+/* Контейнер для тегов статусов */
+.acts-menu-item-status-tags {
+    display: flex;
+    flex-wrap: wrap;
+    gap: var(--status-tag-gap);
+    margin-top: var(--spacing-sm);
+    padding-top: var(--spacing-xs);
+    border-top: var(--border-width-thin) solid var(--border-light);
+}
+
+/* Базовый стиль тега статуса */
+.status-tag {
+    display: inline-flex;
+    align-items: center;
+    gap: var(--spacing-xs);
+    padding: var(--status-tag-padding-v) var(--status-tag-padding-h);
+    border-radius: var(--radius-full);
+    font-size: var(--status-tag-font-size);
+    font-weight: var(--font-weight-medium);
+    line-height: 1;
+    white-space: nowrap;
+}
+
+/* Тег заблокированного акта */
+.status-tag.locked {
+    background: var(--act-locked-badge-bg);
+    color: var(--act-locked-badge-text);
+}
+
+/* Тег требующего внимания акта */
+.status-tag.attention {
+    background: var(--act-attention-badge-bg);
+    color: var(--act-attention-badge-text);
+}
+
+/* Тег критичного акта (фактура) */
+.status-tag.critical {
+    background: var(--act-critical-badge-bg);
+    color: var(--act-critical-badge-text);
+    animation: criticalTagPulse 2s var(--ease-in-out-smooth) infinite;
 }
 
 /* Дата последнего редактирования */
@@ -358,4 +400,39 @@
     color: var(--text-primary);
     font-weight: var(--font-weight-medium);
     margin: 0;
+}
+
+/* Заблокированный элемент списка */
+.acts-menu-list-item.locked {
+    opacity: var(--opacity-disabled);
+    cursor: not-allowed;
+}
+
+.acts-menu-list-item.locked:hover {
+    background: var(--bg-secondary);
+    border-color: var(--border-light);
+    box-shadow: var(--shadow-xs);
+    transform: none;
+}
+
+/* Элемент требующий внимания */
+.acts-menu-list-item.needs-attention {
+    border-color: var(--act-attention-border);
+    border-width: var(--border-width-md);
+}
+
+.acts-menu-list-item.needs-attention:hover {
+    border-color: var(--warning);
+}
+
+/* Элемент с критичным требованием */
+.acts-menu-list-item.needs-invoice {
+    border-color: var(--act-critical-border);
+    border-width: var(--border-width-md);
+    box-shadow: 0 0 var(--spacing-sm) var(--act-critical-glow);
+}
+
+.acts-menu-list-item.needs-invoice:hover {
+    border-color: var(--error-hover);
+    box-shadow: 0 0 var(--spacing-md) var(--act-critical-glow);
 }

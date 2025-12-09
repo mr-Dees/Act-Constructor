@@ -418,11 +418,59 @@
     /* Acts menu специфичные переменные */
     --acts-menu-close-size: 2.5rem;
     --acts-actions-grid-columns: 3;
-
-    /* Acts Manager специфичные переменные */
     --acts-list-min-height: 18.75rem;
     --acts-grid-min-column-width: 21.875rem;
     --acts-empty-icon-opacity: 0.3;
+
+    /* Цвета для заблокированных актов */
+    --act-locked-bg: var(--gray-100);
+    --act-locked-border: var(--gray-300);
+    --act-locked-text: var(--text-tertiary);
+    --act-locked-overlay: rgba(0, 0, 0, 0.05);
+    --act-locked-badge-bg: var(--gray-400);
+    --act-locked-badge-text: var(--text-on-primary);
+
+    /* Цвета для актов требующих внимания */
+    --act-attention-bg: rgba(251, 191, 36, 0.08);
+    --act-attention-border: rgba(251, 191, 36, 0.4);
+    --act-attention-text: var(--warning);
+    --act-attention-badge-bg: var(--warning);
+    --act-attention-badge-text: var(--text-on-primary);
+
+    /* Цвета для актов с критичными требованиями (фактура) */
+    --act-critical-bg: rgba(239, 68, 68, 0.08);
+    --act-critical-border: var(--error);
+    --act-critical-glow: rgba(239, 68, 68, 0.4);
+    --act-critical-badge-bg: var(--error);
+    --act-critical-badge-text: var(--text-on-primary);
+
+    /* Дополнительные цвета для состояний */
+    --table-row-selected-hover: rgba(91, 111, 168, 0.12);
+
+    /* Градиенты и фоны для предупреждений */
+    --invoice-warning-bg-start: rgba(239, 68, 68, 0.1);
+    --invoice-warning-bg-end: rgba(239, 68, 68, 0.05);
+    --invoice-warning-bg-start-strong: rgba(239, 68, 68, 0.15);
+    --invoice-warning-bg-end-strong: rgba(239, 68, 68, 0.08);
+    --invoice-warning-border: rgba(239, 68, 68, 0.3);
+
+    /* Дополнительные цвета подсветки для критичных элементов */
+    --critical-pulse-outer-glow: rgba(239, 68, 68, 0.2);
+
+    /* Анимация подпрыгивания кнопки */
+    --bounce-translate-up: -0.5rem;
+    --bounce-translate-down: -0.25rem;
+    --bounce-duration: 1s;
+
+    /* Размеры тегов статусов */
+    --status-tag-padding-v: var(--spacing-xs);
+    --status-tag-padding-h: var(--spacing-sm);
+    --status-tag-gap: var(--spacing-xs);
+    --status-tag-font-size: var(--font-size-xs);
+
+    /* Размеры предупреждения о фактуре */
+    --invoice-warning-padding: var(--spacing-lg);
+    --invoice-warning-border-width: var(--border-width-thick);
 
     /* Save indicator специфичные переменные */
     --save-indicator-label-min-width: 6.5rem;

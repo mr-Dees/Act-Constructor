@@ -29,8 +29,9 @@ class CreateActDialog extends DialogBase {
     /**
      * Показывает диалог редактирования существующего акта
      * @param {Object} actData - Данные акта для редактирования
+     * @param {Object} status - Статус акта (опционально)
      */
-    static async showEdit(actData) {
+    static async showEdit(actData, status = null) {
         const isEdit = !!actData;
         const actId = actData?.id;
 
@@ -41,7 +42,7 @@ class CreateActDialog extends DialogBase {
             this._section5Points = [];
         }
 
-        this._showActDialog(actData);
+        this._showActDialog(actData, status);
     }
 
     /**
@@ -142,8 +143,9 @@ class CreateActDialog extends DialogBase {
      * Отображает диалог создания/редактирования
      * @private
      * @param {Object|null} actData - Данные акта (null для создания нового)
+     * @param {Object|null} status - Статус акта (опционально)
      */
-    static _showActDialog(actData) {
+    static _showActDialog(actData, status = null) {
         const isEdit = !!actData;
         const currentUser = window.env?.JUPYTERHUB_USER || AppConfig?.auth?.jupyterhubUser || "";
 
@@ -166,7 +168,7 @@ class CreateActDialog extends DialogBase {
         // Сохраняем ссылку на текущий диалог
         this._currentDialog = overlay;
 
-        // Находим внутренний диалог для правильной обработки кликов
+        // Находим внутренний диалог
         const dialog = overlay.querySelector('.acts-modal');
         if (!dialog) {
             console.error('Не найден .acts-modal в template');
@@ -184,6 +186,11 @@ class CreateActDialog extends DialogBase {
             const form = dialog.querySelector('#actForm');
             if (form) {
                 form.dataset.originalKm = actData.km_number;
+            }
+
+            // Добавляем предупреждение о фактуре если нужно
+            if (actData.needs_invoice_check || status?.isCritical) {
+                this._addInvoiceWarning(dialog);
             }
         } else {
             // Значения по умолчанию для нового акта
@@ -208,8 +215,124 @@ class CreateActDialog extends DialogBase {
         // Инициализируем маски ввода
         this._initInputMasks(dialog);
 
-        // Показываем диалог с базовыми эффектами
+        // Показываем диалог
         super._showDialog(overlay);
+
+        // Подсвечиваем поля требующие заполнения (после отрисовки)
+        if (isEdit && status?.needsHighlight) {
+            setTimeout(() => {
+                this._highlightRequiredFields(dialog, actData);
+            }, 300);
+        }
+    }
+
+    /**
+     * Добавляет предупреждение о проверке фактуры в начало формы
+     * @private
+     * @param {HTMLElement} dialog - Диалог
+     */
+    static _addInvoiceWarning(dialog) {
+        const form = dialog.querySelector('#actForm');
+        if (!form) return;
+
+        // Проверяем что предупреждение еще не добавлено
+        if (form.querySelector('.acts-modal-invoice-warning')) return;
+
+        const warning = document.createElement('div');
+        warning.className = 'acts-modal-invoice-warning';
+        warning.innerHTML = `
+            <div class="invoice-warning-icon">🚨</div>
+            <div class="invoice-warning-content">
+                <strong>Требуется проверка фактуры</strong>
+                <p>По данному акту необходимо провести проверку фактуры. Убедитесь, что все документы проверены и актуализированы.</p>
+            </div>
+        `;
+
+        // Вставляем перед первым полем формы
+        const firstLabel = form.querySelector('label');
+        if (firstLabel) {
+            form.insertBefore(warning, firstLabel);
+        } else {
+            form.insertBefore(warning, form.firstChild);
+        }
+    }
+
+    /**
+     * Подсвечивает поля требующие заполнения
+     * Применяет класс .highlighted к label для инпутов или fieldset для групп полей
+     * Подсветка реализована через утолщенную цветную рамку без фона
+     * Для текста label добавляется класс .label-text для окрашивания
+     * @private
+     * @param {HTMLElement} dialog - Диалог
+     * @param {Object} actData - Данные акта с флагами валидации
+     */
+    static _highlightRequiredFields(dialog, actData) {
+        const fieldsToHighlight = [];
+
+        // Подсвечиваем дату составления акта (сам input через рамку + текст label)
+        if (actData.needs_created_date) {
+            const label = dialog.querySelector('#createdDateLabel');
+            if (label) {
+                label.classList.add('highlighted');
+                fieldsToHighlight.push(label);
+                console.log('Подсветка: дата составления акта');
+            }
+        }
+
+        // Подсвечиваем fieldset поручений (рамка контейнера + текст legend)
+        if (actData.needs_directive_number) {
+            const fieldset = dialog.querySelector('#directivesFieldset');
+            if (fieldset) {
+                fieldset.classList.add('highlighted');
+                fieldsToHighlight.push(fieldset);
+                console.log('Подсветка: секция поручений');
+            }
+        }
+
+        // Подсвечиваем fieldset служебной записки (рамка контейнера + текст legend)
+        if (actData.needs_service_note) {
+            const serviceNoteFieldset = dialog.querySelector('#serviceNoteFieldset');
+
+            if (serviceNoteFieldset) {
+                // Если есть fieldset - подсвечиваем его целиком
+                serviceNoteFieldset.classList.add('highlighted');
+                fieldsToHighlight.push(serviceNoteFieldset);
+                console.log('Подсветка: fieldset служебной записки');
+            } else {
+                // Fallback: подсвечиваем отдельные поля если нет fieldset
+                const field = dialog.querySelector('input[name="service_note"]');
+                if (field) {
+                    const label = field.closest('label');
+                    if (label) {
+                        label.classList.add('highlighted');
+                        fieldsToHighlight.push(label);
+                        console.log('Подсветка: служебная записка');
+                    }
+                }
+
+                const dateField = dialog.querySelector('input[name="service_note_date"]');
+                if (dateField) {
+                    const label = dateField.closest('label');
+                    if (label) {
+                        label.classList.add('highlighted');
+                        fieldsToHighlight.push(label);
+                        console.log('Подсветка: дата служебной записки');
+                    }
+                }
+            }
+        }
+
+        // Прокручиваем к первому подсвеченному полю с задержкой
+        if (fieldsToHighlight.length > 0) {
+            setTimeout(() => {
+                fieldsToHighlight[0].scrollIntoView({
+                    behavior: 'smooth',
+                    block: 'center'
+                });
+            }, 200);
+        }
+
+        console.log(`Подсвечено элементов: ${fieldsToHighlight.length}`);
     }
 
     /**

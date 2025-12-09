@@ -1,8 +1,7 @@
-/**
+/*
  * Стили диалога создания/редактирования акта
- *
  * Сложная форма с динамическими секциями для управления
- * метаданными акта, аудиторской группой и поручениями.
+ * метаданными акта, аудиторской группой и поручениями
  */
 
 /* Основное окно диалога */
@@ -18,7 +17,7 @@
     background: var(--modal-bg);
     border-radius: var(--radius-xl);
     box-shadow: var(--modal-shadow);
-    border: 1px solid var(--modal-border);
+    border: var(--border-width-thin) solid var(--modal-border);
     transform: scale(0.95);
     opacity: 0;
     transition: transform var(--transition-base) var(--ease-in-out-smooth),
@@ -44,7 +43,7 @@
     padding: var(--spacing-xl) var(--spacing-2xl);
     background: var(--gradient-header);
     color: var(--text-on-primary);
-    border-bottom: 1px solid var(--border-light);
+    border-bottom: var(--border-width-thin) solid var(--border-light);
     border-radius: var(--radius-xl) var(--radius-xl) 0 0;
     flex-shrink: 0;
     display: flex;
@@ -91,8 +90,49 @@
 }
 
 .acts-modal-close:focus-visible {
-    outline: 2px solid var(--text-on-primary);
+    outline: var(--border-width-md) solid var(--text-on-primary);
     outline-offset: var(--focus-outline-offset);
+}
+
+/* Предупреждение о проверке фактуры */
+.acts-modal-invoice-warning {
+    display: flex;
+    align-items: center;
+    gap: var(--spacing);
+    padding: var(--spacing-lg) var(--spacing-2xl);
+    background: linear-gradient(
+            90deg,
+            var(--invoice-warning-bg-start) 0%,
+            var(--invoice-warning-bg-end) 100%
+    );
+    border-bottom: var(--border-width-thin) solid var(--invoice-warning-border);
+    border-left: var(--invoice-warning-border-width) solid var(--danger);
+    animation: invoiceWarningPulse 2s var(--ease-in-out-smooth) infinite;
+}
+
+.invoice-warning-icon {
+    font-size: var(--font-size-3xl);
+    line-height: 1;
+    flex-shrink: 0;
+}
+
+.invoice-warning-content {
+    flex: 1;
+}
+
+.invoice-warning-content strong {
+    display: block;
+    color: var(--danger);
+    font-size: var(--font-size-base);
+    font-weight: var(--font-weight-semibold);
+    margin-bottom: var(--spacing-xs);
+}
+
+.invoice-warning-content p {
+    margin: 0;
+    font-size: var(--font-size-sm);
+    color: var(--text-secondary);
+    line-height: var(--line-height-relaxed);
 }
 
 /* Форма с прокруткой */
@@ -143,13 +183,14 @@
 .acts-modal input[type="number"],
 .acts-modal select {
     padding: var(--spacing-sm) var(--spacing-md);
-    border: 1px solid var(--input-border);
+    border: var(--border-width-thin) solid var(--input-border);
     border-radius: var(--radius-sm);
     font-size: var(--font-size-base);
     font-family: var(--font-family-base);
     background: var(--input-bg);
     color: var(--input-text);
-    transition: border-color var(--transition-fast), box-shadow var(--transition-fast);
+    transition: border-color var(--transition-fast),
+    box-shadow var(--transition-fast);
 }
 
 .acts-modal input:hover:not(:focus):not(:disabled):not([readonly]),
@@ -190,7 +231,7 @@
 
 /* Fieldset для группировки полей */
 .acts-modal fieldset {
-    border: 1px solid var(--border-light);
+    border: var(--border-width-thin) solid var(--border-light);
     border-radius: var(--radius-lg);
     padding: var(--spacing-xl);
     margin: 0;
@@ -222,7 +263,7 @@
     display: flex;
     gap: var(--spacing-sm);
     padding-top: var(--spacing-xl);
-    border-top: 1px solid var(--border-light);
+    border-top: var(--border-width-thin) solid var(--border-light);
     margin-top: auto;
     flex-shrink: 0;
 }
@@ -246,13 +287,14 @@
 /* Селект роли */
 .team-member-role {
     padding: var(--spacing-sm) var(--spacing-md);
-    border: 1px solid var(--input-border);
+    border: var(--border-width-thin) solid var(--input-border);
     border-radius: var(--radius-sm);
     font-size: var(--font-size-sm);
     font-family: var(--font-family-base);
     background: var(--input-bg);
     color: var(--input-text);
-    transition: border-color var(--transition-fast), box-shadow var(--transition-fast);
+    transition: border-color var(--transition-fast),
+    box-shadow var(--transition-fast);
 }
 
 .team-member-role:hover:not(:focus) {
@@ -268,13 +310,14 @@
 /* Поля внутри строки члена группы */
 .team-member-row input[type="text"] {
     padding: var(--spacing-sm) var(--spacing-md);
-    border: 1px solid var(--input-border);
+    border: var(--border-width-thin) solid var(--input-border);
     border-radius: var(--radius-sm);
     font-size: var(--font-size-sm);
     font-family: var(--font-family-base);
     background: var(--input-bg);
     color: var(--input-text);
-    transition: border-color var(--transition-fast), box-shadow var(--transition-fast);
+    transition: border-color var(--transition-fast),
+    box-shadow var(--transition-fast);
     min-width: 0;
 }
 
@@ -301,7 +344,9 @@
     border: none;
     border-radius: var(--radius-sm);
     cursor: pointer;
-    transition: color var(--transition-fast), background var(--transition-fast), transform var(--transition-fast);
+    transition: color var(--transition-fast),
+    background var(--transition-fast),
+    transform var(--transition-fast);
     flex-shrink: 0;
 }
 
@@ -332,13 +377,14 @@
 /* Поля внутри строки поручения */
 .directive-row input[type="text"] {
     padding: var(--spacing-sm) var(--spacing-md);
-    border: 1px solid var(--input-border);
+    border: var(--border-width-thin) solid var(--input-border);
     border-radius: var(--radius-sm);
     font-size: var(--font-size-sm);
     font-family: var(--font-family-base);
     background: var(--input-bg);
     color: var(--input-text);
-    transition: border-color var(--transition-fast), box-shadow var(--transition-fast);
+    transition: border-color var(--transition-fast),
+    box-shadow var(--transition-fast);
     min-width: 0;
 }
 
@@ -350,6 +396,42 @@
     outline: none;
     border-color: var(--input-border-focus);
     box-shadow: var(--input-focus-shadow);
+}
+
+/* Стилизация select для пунктов поручений */
+.directive-row select[name="point_number"] {
+    flex: 1;
+    min-width: 150px;
+    padding: var(--spacing-sm) var(--spacing-md);
+    border: var(--border-width-thin) solid var(--input-border);
+    border-radius: var(--radius-sm);
+    background: var(--input-bg);
+    color: var(--input-text);
+    font-size: var(--font-size-sm);
+    font-family: var(--font-family-base);
+    cursor: pointer;
+    transition: border-color var(--transition-fast),
+    box-shadow var(--transition-fast);
+}
+
+.directive-row select[name="point_number"]:hover:not(:focus):not(:disabled) {
+    border-color: var(--input-border-hover);
+}
+
+.directive-row select[name="point_number"]:focus {
+    outline: none;
+    border-color: var(--input-border-focus);
+    box-shadow: var(--input-focus-shadow);
+}
+
+.directive-row select[name="point_number"]:disabled {
+    background: var(--input-bg-disabled);
+    cursor: not-allowed;
+    opacity: var(--opacity-disabled);
+}
+
+.directive-row select[name="point_number"] option:first-child {
+    color: var(--text-tertiary);
 }
 
 /* Кнопка удаления поручения */
@@ -365,7 +447,9 @@
     border: none;
     border-radius: var(--radius-sm);
     cursor: pointer;
-    transition: color var(--transition-fast), background var(--transition-fast), transform var(--transition-fast);
+    transition: color var(--transition-fast),
+    background var(--transition-fast),
+    transform var(--transition-fast);
     flex-shrink: 0;
 }
 
@@ -411,38 +495,27 @@
     display: none;
 }
 
-/* Стилизация select для пунктов поручений */
-.directive-row select[name="point_number"] {
-    flex: 1;
-    min-width: 150px;
-    padding: var(--spacing-sm) var(--spacing-md);
-    border: 1px solid var(--input-border);
-    border-radius: var(--radius-sm);
-    background: var(--input-bg);
-    color: var(--input-text);
-    font-size: var(--font-size-sm);
-    font-family: var(--font-family-base);
-    cursor: pointer;
-    transition: border-color var(--transition-fast), box-shadow var(--transition-fast);
+/* Подсветка полей требующих заполнения - только рамка */
+.acts-modal label.highlighted input,
+.acts-modal label.highlighted textarea,
+.acts-modal label.highlighted select {
+    border-width: var(--border-width-md);
+    border-color: var(--warning);
 }
 
-.directive-row select[name="point_number"]:hover:not(:focus):not(:disabled) {
-    border-color: var(--input-border-hover);
+/* Подсветка текста label (опционально для определенных полей) */
+.acts-modal label.highlighted .label-text {
+    color: var(--warning);
+    font-weight: var(--font-weight-semibold);
 }
 
-.directive-row select[name="point_number"]:focus {
-    outline: none;
-    border-color: var(--input-border-focus);
-    box-shadow: var(--input-focus-shadow);
+/* Подсвеченный fieldset - только рамка */
+.acts-modal fieldset.highlighted {
+    border-width: var(--border-width-md);
+    border-color: var(--warning) !important;
 }
 
-.directive-row select[name="point_number"]:disabled {
-    background: var(--input-bg-disabled);
-    cursor: not-allowed;
-    opacity: 0.6;
-}
-
-/* Стиль для placeholder опции */
-.directive-row select[name="point_number"] option:first-child {
-    color: var(--text-tertiary);
+.acts-modal fieldset.highlighted legend {
+    color: var(--warning);
+    font-weight: var(--font-weight-semibold);
 }

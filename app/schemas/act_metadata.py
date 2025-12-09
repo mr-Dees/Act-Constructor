@@ -232,7 +232,8 @@ class ActUpdate(BaseModel):
 
 
 class ActListItem(BaseModel):
-    """Краткая информация об акте для списка"""
+    """Схема для списка актов пользователя."""
+
     id: int
     km_number: str
     part_number: int
@@ -244,6 +245,17 @@ class ActListItem(BaseModel):
     last_edited_at: Optional[datetime]
     user_role: str
     service_note: Optional[str] = None
+    # Статус блокировки
+    locked_by: str | None = None
+    is_locked: bool = False
+    # Флаги валидации
+    needs_created_date: bool = False
+    needs_directive_number: bool = False
+    needs_invoice_check: bool = False
+    needs_service_note: bool = False
+
+    class Config:
+        from_attributes = True
 
 
 class ActResponse(BaseModel):

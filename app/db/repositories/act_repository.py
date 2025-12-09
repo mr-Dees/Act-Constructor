@@ -592,20 +592,33 @@ class ActDBService:
                 a.inspection_end_date,
                 a.last_edited_at,
                 a.service_note,
-                atm.role as user_role
+                atm.role as user_role,
+                -- Добавляем поля блокировки
+                a.locked_by,
+                a.lock_expires_at,
+                -- Добавляем служебные флаги валидации
+                a.needs_created_date,
+                a.needs_directive_number,
+                a.needs_invoice_check,
+                a.needs_service_note
             FROM acts a
             INNER JOIN audit_team_members atm ON a.id = atm.act_id
             WHERE atm.username = $1
             GROUP BY a.id, a.km_number, a.part_number, a.total_parts,
                      a.inspection_name, a.order_number,
                      a.inspection_start_date, a.inspection_end_date,
-                     a.last_edited_at, a.service_note, atm.role
+                     a.last_edited_at, a.service_note, atm.role,
+                     a.locked_by, a.lock_expires_at,
+                     a.needs_created_date, a.needs_directive_number,
+                     a.needs_invoice_check, a.needs_service_note
             ORDER BY 
                 COALESCE(a.last_edited_at, a.created_at) DESC,
                 a.created_at DESC
             """,
             username,
         )
+
+        now = datetime.now()
 
         return [
             ActListItem(
@@ -620,6 +633,18 @@ class ActDBService:
                 last_edited_at=row["last_edited_at"],
                 user_role=row["user_role"],
                 service_note=row["service_note"],
+                # Статус блокировки
+                locked_by=row["locked_by"],
+                is_locked=(
+                        row["locked_by"] is not None and
+                        row["lock_expires_at"] is not None and
+                        row["lock_expires_at"] > now
+                ),
+                # Флаги валидации
+                needs_created_date=row["needs_created_date"],
+                needs_directive_number=row["needs_directive_number"],
+                needs_invoice_check=row["needs_invoice_check"],
+                needs_service_note=row["needs_service_note"],
             )
             for row in rows
         ]
@@ -749,6 +774,7 @@ class ActDBService:
                     old_service_note is not None and act_update.service_note is None
             )
 
+            # ЛОГИКА СЛУЖЕБКИ / ЧАСТИ
             if service_note_changed or service_note_removed:
                 if act_update.service_note:
                     suffix = KMUtils.extract_service_note_suffix(
@@ -846,6 +872,7 @@ class ActDBService:
             values: list[object] = []
             param_idx = 1
 
+            # Обычные поля
             if act_update.km_number is not None:
                 updates.append(f"km_number = ${param_idx}")
                 values.append(act_update.km_number)
@@ -913,6 +940,51 @@ class ActDBService:
                 values.append(act_update.service_note_date)
                 param_idx += 1
 
+            # АВТО-СБРОС СЛУЖЕБНЫХ ФЛАГОВ (кроме фактуры)
+            # Берём текущие значения флагов
+            needs_created_date = getattr(current_act, "needs_created_date", None)
+            needs_directive_number = getattr(current_act, "needs_directive_number", None)
+            needs_service_note = getattr(current_act, "needs_service_note", None)
+            # needs_invoice_check трогать не нужно — по твоему описанию снимают админы
+
+            # Дата составления: если была проблема и теперь дата передана и не None — снимаем флаг
+            if needs_created_date:
+                if act_update.created_date is not None:
+                    needs_created_date = False
+
+            # Поручения: если был флаг и в апдейте есть directives с номерами — снимаем
+            if needs_directive_number:
+                if act_update.directives is not None and len(act_update.directives) > 0:
+                    all_have_numbers = all(
+                        d.directive_number and d.directive_number.strip()
+                        for d in act_update.directives
+                    )
+                    if all_have_numbers:
+                        needs_directive_number = False
+
+            # Служебка: если был флаг и пришла непустая строка в service_note — снимаем
+            if needs_service_note:
+                if act_update.service_note is not None:
+                    if act_update.service_note.strip():
+                        needs_service_note = False
+
+            # Добавляем в UPDATE только если флаг действительно поменялся (не None и изменился)
+            if needs_created_date is not None and needs_created_date != current_act.needs_created_date:
+                updates.append(f"needs_created_date = ${param_idx}")
+                values.append(needs_created_date)
+                param_idx += 1
+
+            if needs_directive_number is not None and needs_directive_number != current_act.needs_directive_number:
+                updates.append(f"needs_directive_number = ${param_idx}")
+                values.append(needs_directive_number)
+                param_idx += 1
+
+            if needs_service_note is not None and needs_service_note != current_act.needs_service_note:
+                updates.append(f"needs_service_note = ${param_idx}")
+                values.append(needs_service_note)
+                param_idx += 1
+
+            # Служебные поля "кто/когда редактировал"
             updates.append(f"last_edited_by = ${param_idx}")
             values.append(username)
             param_idx += 1
@@ -931,6 +1003,7 @@ class ActDBService:
                     *values,
                 )
 
+            # Аудиторская группа
             if act_update.audit_team is not None:
                 await self.conn.execute(
                     "DELETE FROM audit_team_members WHERE act_id = $1",
@@ -953,6 +1026,7 @@ class ActDBService:
                         idx,
                     )
 
+            # Поручения
             if act_update.directives is not None:
                 await self.conn.execute(
                     "DELETE FROM act_directives WHERE act_id = $1",
@@ -973,6 +1047,7 @@ class ActDBService:
                         idx,
                     )
 
+            # Обновление total_parts
             if km_changed:
                 await self._update_total_parts_for_km(old_km_digit)
                 logger.info(

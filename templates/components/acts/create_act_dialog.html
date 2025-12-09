@@ -18,8 +18,8 @@
                     <input type="text" name="city" required data-field="city">
                 </label>
 
-                <label>
-                    Дата составления
+                <label id="createdDateLabel">
+                    <span class="label-text">Дата составления</span>
                     <input type="date" name="created_date" data-field="created_date">
                 </label>
 
@@ -52,8 +52,9 @@
                            pattern="КМ-\d{2}-\d{4}"
                            title="Формат: КМ-XX-XXXX (например, КМ-75-9475)"
                            required>
-                    <small class="field-hint">Формат: КМ-XX-XXXX (например, КМ-75-9475). Поле можно
-                        редактировать.</small>
+                    <small class="field-hint">
+                        Формат: КМ-XX-XXXX
+                    </small>
                 </label>
 
                 <div class="act-parts-grid">
@@ -107,11 +108,9 @@
                                placeholder="ЦМ-75-вн/9475"
                                pattern=".+/\d{4}"
                                title="Формат: Текст/XXXX (например, ЦМ-75-вн/9475)">
-                        <small class="field-hint">При указании СЗ часть акта определяется последними 4 цифрами
-                            записки</small>
                     </label>
 
-                    <label>
+                    <label style="padding-top: var(--translate-menu-y)">
                         Дата служебной записки
                         <input type="date"
                                name="service_note_date"

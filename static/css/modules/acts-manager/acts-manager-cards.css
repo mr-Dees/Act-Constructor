@@ -1,6 +1,7 @@
 /*
  * Стили для карточек актов
  * Определяет внешний вид и поведение отдельных карточек в списке актов
+ * Включает индикацию статусов: заблокирован, требует внимания, критичный
  */
 
 /* Базовый стиль карточки акта */
@@ -10,6 +11,7 @@
     border-radius: var(--radius-lg);
     padding: var(--spacing-2xl);
     transition: var(--transition-all);
+    position: relative;
 }
 
 /* Эффект при наведении - подсветка и небольшой подъем */
@@ -19,6 +21,102 @@
     transform: translateY(calc(-1 * var(--translate-sm)));
 }
 
+/* Карточка заблокированного акта */
+.act-card.locked {
+    background: var(--act-locked-bg);
+    border-color: var(--act-locked-border);
+    opacity: var(--opacity-disabled);
+    cursor: not-allowed;
+    position: relative;
+}
+
+/* Блокируем эффекты при наведении */
+.act-card.locked:hover {
+    border-color: var(--act-locked-border);
+    box-shadow: none;
+    transform: none;
+}
+
+/* Затемняем текст */
+.act-card.locked .act-card-title,
+.act-card.locked .act-card-meta {
+    color: var(--act-locked-text);
+}
+
+/* Бейдж роли для заблокированного акта */
+.act-card.locked .act-card-role {
+    background: var(--act-locked-badge-bg);
+    color: var(--act-locked-badge-text);
+}
+
+/* Блокируем кнопки */
+.act-card.locked .act-card-actions .btn {
+    cursor: not-allowed;
+    opacity: var(--opacity-disabled);
+    pointer-events: none;
+}
+
+/* Карточка требующая заполнения полей (только желтая) */
+.act-card.needs-attention:not(.needs-invoice) {
+    background: var(--act-attention-bg);
+    border-color: var(--act-attention-border);
+    border-width: var(--border-width-md);
+    position: relative;
+}
+
+.act-card.needs-attention:not(.needs-invoice):hover {
+    border-color: var(--warning);
+    box-shadow: var(--shadow-md), 0 0 var(--spacing-lg) var(--act-attention-border);
+}
+
+/* Карточка с критичным требованием проверки фактуры (только красная) */
+.act-card.needs-invoice:not(.needs-attention) {
+    background: var(--act-critical-bg);
+    border-color: var(--act-critical-border);
+    border-width: var(--border-width-thick);
+    box-shadow: 0 0 var(--spacing-lg) var(--act-critical-glow);
+    animation: criticalPulse 2s var(--ease-in-out-smooth) infinite;
+    position: relative;
+}
+
+.act-card.needs-invoice:not(.needs-attention):hover {
+    border-color: var(--error-hover);
+    box-shadow: 0 0 var(--spacing-xl) var(--act-critical-glow);
+}
+
+/* Карточка с обоими требованиями (красная рамка + желтое тело) - САМОЕ СПЕЦИФИЧНОЕ ПРАВИЛО */
+.act-card.needs-invoice.needs-attention {
+    background: var(--act-attention-bg) !important;
+    border-color: var(--act-critical-border);
+    border-width: var(--border-width-thick);
+    box-shadow: 0 0 var(--spacing-lg) var(--act-critical-glow);
+    animation: criticalPulse 2s var(--ease-in-out-smooth) infinite;
+    position: relative;
+}
+
+.act-card.needs-invoice.needs-attention:hover {
+    border-color: var(--error-hover);
+    box-shadow: 0 0 var(--spacing-xl) var(--act-critical-glow);
+}
+
+/* Подсветка кнопки редактирования для требующих внимания */
+.act-card.needs-attention .act-card-actions .btn[data-action="edit"] {
+    border: var(--border-width-md) solid var(--warning);
+    animation: bounceSmooth 2s var(--ease-in-out-smooth) infinite;
+}
+
+.act-card.needs-attention .act-card-actions .btn[data-action="edit"]:hover {
+    animation: none;
+    transform: translateY(calc(-1 * var(--button-hover-translate)));
+}
+
+/* Подсветка кнопки редактирования для критичных актов */
+.act-card.needs-invoice .act-card-actions .btn[data-action="edit"] {
+    border: var(--border-width-thick) solid var(--error);
+    animation: bounceSmooth 2s var(--ease-in-out-smooth) infinite,
+    criticalGlow 2s var(--ease-in-out-smooth) infinite;
+}
+
 /* Шапка карточки с заголовком и бейджем роли */
 .act-card-header {
     display: flex;
@@ -26,6 +124,7 @@
     align-items: flex-start;
     gap: var(--spacing-lg);
     margin-bottom: var(--spacing-xl);
+    position: relative;
 }
 
 /* Заголовок карточки (название акта) */
@@ -55,6 +154,7 @@
     display: flex;
     flex-direction: column;
     gap: var(--spacing-md);
+    position: relative;
 }
 
 /* Метаинформация акта (КМ, участок и т.д.) */
@@ -86,6 +186,7 @@
     margin-top: var(--spacing-xl);
     padding-top: var(--spacing-xl);
     border-top: var(--border-width-thin) solid var(--border-light);
+    position: relative;
 }
 
 /* Основная кнопка действия (обычно "Открыть") */
@@ -124,4 +225,96 @@
 .btn-danger-text:hover {
     color: var(--danger);
     background: var(--danger-subtle);
+}
+
+/* Контейнер для tooltip при наведении */
+.act-card[data-tooltip] {
+    position: relative;
+    cursor: help;
+}
+
+/* Tooltip над карточкой на всю её ширину */
+.act-card[data-tooltip]:hover::after {
+    content: attr(data-tooltip);
+    position: absolute;
+    bottom: calc(100% + var(--spacing-sm));
+    left: 0;
+    right: 0;
+    background: var(--tooltip-bg);
+    color: var(--tooltip-text);
+    padding: var(--spacing-md) var(--spacing-lg);
+    border-radius: var(--radius-lg);
+    font-size: var(--font-size-sm);
+    white-space: pre-line;
+    text-align: left;
+    pointer-events: none;
+    line-height: var(--line-height-relaxed);
+    box-shadow: var(--shadow-xl);
+    border: var(--border-width-thin) solid var(--border-light);
+    z-index: var(--z-tooltip);
+    animation: tooltipFadeInTop var(--transition-base);
+}
+
+/* Стрелка tooltip */
+.act-card[data-tooltip]:hover::before {
+    content: '';
+    position: absolute;
+    bottom: calc(100% + var(--spacing-xs));
+    left: var(--spacing-2xl);
+    border: var(--tooltip-arrow-size) solid transparent;
+    border-top-color: var(--tooltip-bg);
+    pointer-events: none;
+    filter: drop-shadow(0 var(--border-width-thin) 0 var(--border-light));
+    z-index: var(--z-tooltip);
+    animation: tooltipFadeInTop var(--transition-base);
+}
+
+/* Цвета tooltip для заблокированных карточек */
+.act-card.locked[data-tooltip]:hover::after {
+    background: var(--act-locked-badge-bg);
+    color: var(--act-locked-badge-text);
+    border-color: var(--act-locked-border);
+}
+
+.act-card.locked[data-tooltip]:hover::before {
+    border-top-color: var(--act-locked-badge-bg);
+    filter: drop-shadow(0 var(--border-width-thin) 0 var(--act-locked-border));
+}
+
+/* Цвета tooltip для карточек требующих внимания (только желтые) */
+.act-card.needs-attention:not(.needs-invoice)[data-tooltip]:hover::after {
+    background: var(--warning);
+    color: var(--text-on-primary);
+    border-color: var(--act-attention-border);
+}
+
+.act-card.needs-attention:not(.needs-invoice)[data-tooltip]:hover::before {
+    border-top-color: var(--warning);
+    filter: drop-shadow(0 var(--border-width-thin) 0 var(--act-attention-border));
+}
+
+/* Цвета tooltip для критичных карточек (только красные) */
+.act-card.needs-invoice:not(.needs-attention)[data-tooltip]:hover::after {
+    background: var(--error);
+    color: var(--text-on-primary);
+    border-color: var(--act-critical-border);
+    animation: tooltipFadeInTop var(--transition-base), criticalTooltipPulse 2s var(--ease-in-out-smooth) infinite;
+}
+
+.act-card.needs-invoice:not(.needs-attention)[data-tooltip]:hover::before {
+    border-top-color: var(--error);
+    filter: drop-shadow(0 var(--border-width-thin) 0 var(--act-critical-border));
+}
+
+/* Цвета tooltip для карточек с обоими требованиями (красный) */
+.act-card.needs-invoice.needs-attention[data-tooltip]:hover::after {
+    background: var(--error);
+    color: var(--text-on-primary);
+    border-color: var(--act-critical-border);
+    animation: tooltipFadeInTop var(--transition-base), criticalTooltipPulse 2s var(--ease-in-out-smooth) infinite;
+}
+
+.act-card.needs-invoice.needs-attention[data-tooltip]:hover::before {
+    border-top-color: var(--error);
+    filter: drop-shadow(0 var(--border-width-thin) 0 var(--act-critical-border));
 }

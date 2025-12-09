@@ -1,11 +1,19 @@
 /**
  * Менеджер главной страницы выбора актов
+ * Отвечает за отображение списка актов, создание/редактирование/удаление
  */
 
 class ActsManagerPage {
     /**
      * Форматирует отображение КМ с учетом служебной записки
+     * Если есть СЗ - склеиваем КМ + "_" + часть
+     * Для многочастных актов без СЗ также добавляем часть
      * @private
+     * @param {string} kmNumber - Номер КМ
+     * @param {number} partNumber - Номер части
+     * @param {number} totalParts - Всего частей
+     * @param {string} serviceNote - Номер служебной записки
+     * @returns {string} Отформатированная строка КМ
      */
     static _formatKmNumber(kmNumber, partNumber, totalParts, serviceNote) {
         // Если есть служебная записка - склеиваем КМ + "_" + часть (из СЗ)
@@ -24,6 +32,8 @@ class ActsManagerPage {
     /**
      * Форматирует дату в формате DD.MM.YYYY
      * @private
+     * @param {string} date - Дата в ISO формате
+     * @returns {string} Отформатированная дата или прочерк
      */
     static _formatDate(date) {
         if (!date) return '—';
@@ -45,6 +55,8 @@ class ActsManagerPage {
     /**
      * Форматирует дату и время в формате DD.MM.YYYY HH:MM
      * @private
+     * @param {string} datetime - Дата и время в ISO формате
+     * @returns {string} Отформатированная дата-время или текст по умолчанию
      */
     static _formatDateTime(datetime) {
         if (!datetime) return 'Не редактировался';
@@ -68,6 +80,8 @@ class ActsManagerPage {
     /**
      * Клонирует template элемент
      * @private
+     * @param {string} templateId - ID template элемента
+     * @returns {DocumentFragment|null} Клонированный фрагмент или null
      */
     static _cloneTemplate(templateId) {
         const template = document.getElementById(templateId);
@@ -79,8 +93,10 @@ class ActsManagerPage {
     }
 
     /**
-     * Заполняет поля в элементе данными
+     * Заполняет поля в элементе данными через data-field атрибуты
      * @private
+     * @param {Element} element - Элемент для заполнения
+     * @param {Object} data - Объект с данными
      */
     static _fillFields(element, data) {
         element.querySelectorAll('[data-field]').forEach(field => {
@@ -92,7 +108,102 @@ class ActsManagerPage {
     }
 
     /**
-     * Загружает список актов из API (всегда свежие данные)
+     * Определяет статус акта на основе флагов валидации
+     * Используется для применения классов стилизации и формирования tooltip
+     * @private
+     * @param {Object} act - Данные акта
+     * @returns {Object} Объект статуса с типом, классами, tooltip и флагами
+     */
+    static _getActStatus(act) {
+        // Проверяем блокировку (приоритетный статус)
+        if (act.is_locked) {
+            return {
+                type: 'locked',
+                classes: ['locked'],
+                tooltip: `Акт редактируется пользователем ${act.locked_by}.\nПопробуйте открыть его позже.`,
+                needsHighlight: false
+            };
+        }
+
+        // Проверяем есть ли критичный статус (фактура)
+        const needsInvoice = act.needs_invoice_check;
+
+        // Проверяем есть ли обычные требования валидации
+        const hasValidationIssues = act.needs_created_date ||
+            act.needs_directive_number ||
+            act.needs_service_note;
+
+        // Оба требования одновременно (красная рамка + желтое тело)
+        if (needsInvoice && hasValidationIssues) {
+            let tooltipText = '🚨 КРИТИЧНО: Необходима проверка фактуры!\n\n' +
+                '⚠️ Дополнительно требуется заполнить:\n' +
+                this._buildValidationTooltip(act);
+
+            return {
+                type: 'critical-attention',
+                classes: ['needs-invoice', 'needs-attention'],
+                tooltip: tooltipText,
+                needsHighlight: true,
+                isCritical: true
+            };
+        }
+
+        // Только фактура (красная)
+        if (needsInvoice) {
+            return {
+                type: 'critical',
+                classes: ['needs-invoice'],
+                tooltip: '🚨 КРИТИЧНО: Необходима проверка фактуры!',
+                needsHighlight: true,
+                isCritical: true
+            };
+        }
+
+        // Только обычные требования (желтая)
+        if (hasValidationIssues) {
+            return {
+                type: 'attention',
+                classes: ['needs-attention'],
+                tooltip: '⚠️ Требуется заполнение полей:\n' + this._buildValidationTooltip(act),
+                needsHighlight: true,
+                isCritical: false
+            };
+        }
+
+        // Нормальный статус - акт готов
+        return {
+            type: 'normal',
+            classes: [],
+            tooltip: null,
+            needsHighlight: false
+        };
+    }
+
+    /**
+     * Формирует текст tooltip с перечислением незаполненных полей
+     * @private
+     * @param {Object} act - Данные акта
+     * @returns {string} Многострочный текст с пунктами
+     */
+    static _buildValidationTooltip(act) {
+        const issues = [];
+
+        if (act.needs_created_date) {
+            issues.push('• Дата составления акта');
+        }
+        if (act.needs_directive_number) {
+            issues.push('• Номера поручений');
+        }
+        if (act.needs_service_note) {
+            issues.push('• Служебная записка');
+        }
+
+        return issues.length > 0 ? issues.join('\n') : '';
+    }
+
+    /**
+     * Загружает список актов из API (всегда свежие данные из БД)
+     * Не использует кеш, всегда делает запрос к серверу
      */
     static async loadActs() {
         const container = document.getElementById('actsListContainer');
@@ -135,6 +246,7 @@ class ActsManagerPage {
     /**
      * Показывает индикатор загрузки
      * @private
+     * @param {HTMLElement} container - Контейнер для вставки
      */
     static _showLoading(container) {
         const loading = this._cloneTemplate('actsLoadingTemplate');
@@ -145,8 +257,9 @@ class ActsManagerPage {
     }
 
     /**
-     * Показывает пустое состояние
+     * Показывает пустое состояние (нет актов)
      * @private
+     * @param {HTMLElement} container - Контейнер для вставки
      */
     static _showEmptyState(container) {
         const emptyState = this._cloneTemplate('actsEmptyStateTemplate');
@@ -159,6 +272,7 @@ class ActsManagerPage {
     /**
      * Показывает состояние ошибки
      * @private
+     * @param {HTMLElement} container - Контейнер для вставки
      */
     static _showErrorState(container) {
         const errorState = this._cloneTemplate('actsErrorStateTemplate');
@@ -171,6 +285,8 @@ class ActsManagerPage {
     /**
      * Рендерит сетку карточек актов
      * @private
+     * @param {Array} acts - Массив данных актов
+     * @param {HTMLElement} container - Контейнер для вставки
      */
     static _renderActsGrid(acts, container) {
         const grid = document.createElement('div');
@@ -188,8 +304,11 @@ class ActsManagerPage {
     }
 
     /**
-     * Создает карточку акта из template
+     * Создает карточку акта из template с применением статусов
+     * Статусы влияют на стилизацию рамок карточки
      * @private
+     * @param {Object} act - Данные акта
+     * @returns {DocumentFragment|null} Фрагмент с карточкой или null
      */
     static _createActCard(act) {
         const cardFragment = this._cloneTemplate('actCardTemplate');
@@ -197,6 +316,17 @@ class ActsManagerPage {
 
         const cardElement = cardFragment.querySelector('.act-card');
         if (!cardElement) return null;
+
+        // Получаем статус акта для определения стилизации
+        const status = this._getActStatus(act);
+
+        // Применяем классы статуса (для стилизации рамок)
+        status.classes.forEach(cls => cardElement.classList.add(cls));
+
+        // Добавляем tooltip если есть
+        if (status.tooltip) {
+            cardElement.setAttribute('data-tooltip', status.tooltip);
+        }
 
         // Подготавливаем данные для заполнения
         const data = {
@@ -214,29 +344,62 @@ class ActsManagerPage {
             last_edited_at: this._formatDateTime(act.last_edited_at)
         };
 
-        // Заполняем поля
+        // Заполняем поля через data-field атрибуты
         this._fillFields(cardFragment, data);
 
-        // Привязываем обработчики к кнопкам
+        // Привязываем обработчики к кнопкам действий
         const openBtn = cardElement.querySelector('[data-action="open"]');
         const editBtn = cardElement.querySelector('[data-action="edit"]');
         const duplicateBtn = cardElement.querySelector('[data-action="duplicate"]');
         const deleteBtn = cardElement.querySelector('[data-action="delete"]');
 
         if (openBtn) {
-            openBtn.addEventListener('click', () => this.openAct(act.id));
+            openBtn.addEventListener('click', () => {
+                if (act.is_locked) {
+                    Notifications.warning(
+                        `Акт редактируется пользователем ${act.locked_by}. Попробуйте позже.`
+                    );
+                    return;
+                }
+                this.openAct(act.id);
+            });
         }
 
         if (editBtn) {
-            editBtn.addEventListener('click', () => this.editAct(act.id));
+            editBtn.addEventListener('click', () => {
+                if (act.is_locked) {
+                    Notifications.warning(
+                        `Акт редактируется пользователем ${act.locked_by}. Попробуйте позже.`
+                    );
+                    return;
+                }
+                // Передаем статус для подсветки полей в диалоге
+                this.editAct(act.id, status);
+            });
         }
 
         if (duplicateBtn) {
-            duplicateBtn.addEventListener('click', () => this.duplicateAct(act.id, act.inspection_name));
+            duplicateBtn.addEventListener('click', () => {
+                if (act.is_locked) {
+                    Notifications.warning(
+                        `Акт редактируется пользователем ${act.locked_by}. Попробуйте позже.`
+                    );
+                    return;
+                }
+                this.duplicateAct(act.id, act.inspection_name);
+            });
         }
 
         if (deleteBtn) {
-            deleteBtn.addEventListener('click', () => this.deleteAct(act.id, act.inspection_name));
+            deleteBtn.addEventListener('click', () => {
+                if (act.is_locked) {
+                    Notifications.warning(
+                        `Акт редактируется пользователем ${act.locked_by}. Попробуйте позже.`
+                    );
+                    return;
+                }
+                this.deleteAct(act.id, act.inspection_name);
+            });
         }
 
         return cardFragment;
@@ -244,15 +407,18 @@ class ActsManagerPage {
 
     /**
      * Открывает акт в конструкторе
+     * @param {number} actId - ID акта
      */
     static openAct(actId) {
         window.location.href = `/constructor?act_id=${actId}`;
     }
 
     /**
-     * Открывает диалог редактирования акта
+     * Открывает диалог редактирования акта с подсветкой полей
+     * @param {number} actId - ID акта
+     * @param {Object} status - Статус акта для передачи в диалог
      */
-    static async editAct(actId) {
+    static async editAct(actId, status = null) {
         try {
             const username = AuthManager.getCurrentUser();
 
@@ -276,7 +442,8 @@ class ActsManagerPage {
             const actData = await response.json();
 
             if (window.CreateActDialog && typeof window.CreateActDialog.showEdit === 'function') {
-                window.CreateActDialog.showEdit(actData);
+                // Передаем статус в диалог для подсветки полей
+                window.CreateActDialog.showEdit(actData, status);
             } else {
                 console.error('CreateActDialog не найден');
                 Notifications.error('Ошибка открытия диалога редактирования');
@@ -290,6 +457,8 @@ class ActsManagerPage {
 
     /**
      * Дублирует акт с подтверждением
+     * @param {number} actId - ID акта для дублирования
+     * @param {string} actName - Название акта для отображения
      */
     static async duplicateAct(actId, actName) {
         const confirmed = await DialogManager.show({
@@ -340,7 +509,7 @@ class ActsManagerPage {
             if (openNewAct) {
                 window.location.href = `/constructor?act_id=${newAct.id}`;
             } else {
-                // Обновляем список
+                // Обновляем список актов
                 await this.loadActs();
             }
 
@@ -352,6 +521,8 @@ class ActsManagerPage {
 
     /**
      * Удаляет акт с подтверждением
+     * @param {number} actId - ID акта для удаления
+     * @param {string} actName - Название акта для отображения
      */
     static async deleteAct(actId, actName) {
         const confirmed = await DialogManager.show({
@@ -387,7 +558,7 @@ class ActsManagerPage {
 
             Notifications.success('Акт успешно удален');
 
-            // Обновляем список
+            // Обновляем список актов
             await this.loadActs();
 
         } catch (error) {
@@ -397,12 +568,14 @@ class ActsManagerPage {
     }
 
     /**
-     * Инициализация страницы
+     * Инициализация страницы при загрузке
+     * Выполняет отложенные действия LockManager и загружает список актов
      */
     static async init() {
         console.log('ActsManagerPage.init() вызван');
 
         // ВАЖНО: Сначала выполняем отложенные действия от LockManager
+        // Это необходимо для корректной разблокировки актов после выхода
         if (typeof LockManager !== 'undefined' && LockManager.executePendingActions) {
             console.log('Вызываем LockManager.executePendingActions()');
             await LockManager.executePendingActions();
@@ -411,12 +584,13 @@ class ActsManagerPage {
             console.log('LockManager или executePendingActions не найден');
         }
 
-        // Проверяем флаги из sessionStorage
+        // Проверяем флаги из sessionStorage и показываем диалоги
         await this._checkSessionExit();
 
-        // Загружаем акты (всегда из БД)
+        // Загружаем список актов (всегда свежие данные из БД)
         this.loadActs();
 
+        // Привязываем кнопку создания нового акта
         const createBtn = document.getElementById('createNewActBtn');
         if (createBtn) {
             createBtn.addEventListener('click', () => {
@@ -429,6 +603,7 @@ class ActsManagerPage {
             });
         }
 
+        // Привязываем кнопку обновления списка
         const refreshBtn = document.getElementById('refreshActsBtn');
         if (refreshBtn) {
             refreshBtn.addEventListener('click', () => {
@@ -439,6 +614,7 @@ class ActsManagerPage {
 
     /**
      * Проверяет флаги завершения сессии и показывает соответствующий диалог
+     * Флаги устанавливаются при выходе из конструктора (autoExit или exitWithSave)
      * @private
      */
     static async _checkSessionExit() {
@@ -469,4 +645,5 @@ class ActsManagerPage {
     }
 }
 
+// Экспортируем в глобальную область для доступа из HTML
 window.ActsManagerPage = ActsManagerPage;

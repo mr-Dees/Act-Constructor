@@ -314,3 +314,112 @@
 .animate-slide-down {
     animation: slideDown 0.2s ease-out;
 }
+
+/* Анимация критичной пульсации карточки */
+@keyframes criticalPulse {
+    0%,
+    100% {
+        box-shadow: 0 0 var(--spacing-lg) var(--act-critical-glow);
+    }
+    50% {
+        box-shadow: 0 0 var(--spacing-xl) var(--act-critical-glow),
+        0 0 var(--spacing-2xl) var(--critical-pulse-outer-glow);
+    }
+}
+
+/* Плавное подпрыгивание (для кнопок) */
+@keyframes bounceSmooth {
+    0% {
+        transform: translateY(0);
+    }
+    10% {
+        transform: translateY(var(--bounce-translate-up));
+    }
+    20% {
+        transform: translateY(var(--bounce-translate-down));
+    }
+    30% {
+        transform: translateY(var(--bounce-translate-up));
+    }
+    40%,
+    100% {
+        transform: translateY(0);
+    }
+}
+
+/* Критичное свечение (кнопка редактирования) */
+@keyframes criticalGlow {
+    0%,
+    100% {
+        box-shadow: 0 0 var(--spacing-sm) var(--act-critical-glow);
+    }
+    50% {
+        box-shadow: 0 0 var(--spacing-md) var(--act-critical-glow);
+    }
+}
+
+/* Пульсация критичного тултипа */
+@keyframes criticalTooltipPulse {
+    0%,
+    100% {
+        box-shadow: var(--shadow-xl), 0 0 var(--spacing-md) var(--act-critical-glow);
+    }
+    50% {
+        box-shadow: var(--shadow-xl), 0 0 var(--spacing-lg) var(--act-critical-glow);
+    }
+}
+
+/* Появление тултипа сверху */
+@keyframes tooltipFadeInTop {
+    from {
+        opacity: 0;
+        transform: translateY(var(--spacing-sm));
+    }
+    to {
+        opacity: 1;
+        transform: translateY(0);
+    }
+}
+
+/* Пульсация критичного тега */
+@keyframes criticalTagPulse {
+    0%,
+    100% {
+        box-shadow: 0 0 var(--spacing-xs) var(--act-critical-glow);
+    }
+    50% {
+        box-shadow: 0 0 var(--spacing-sm) var(--act-critical-glow);
+    }
+}
+
+/* Пульсация предупреждения о фактуре */
+@keyframes invoiceWarningPulse {
+    0%,
+    100% {
+        background: linear-gradient(
+                90deg,
+                var(--invoice-warning-bg-start) 0%,
+                var(--invoice-warning-bg-end) 100%
+        );
+    }
+    50% {
+        background: linear-gradient(
+                90deg,
+                var(--invoice-warning-bg-start-strong) 0%,
+                var(--invoice-warning-bg-end-strong) 100%
+        );
+    }
+}
+
+/* Утилитарные классы (опционально) */
+.animate-critical-pulse {
+    animation: criticalPulse 2s var(--ease-in-out-smooth) infinite;
+}
+
+.animate-bounce-smooth {
+    animation: bounceSmooth 2s var(--ease-in-out-smooth) infinite;
+}
+
+.animate-critical-glow {
+    animation: criticalGlow 2s var(--ease-in-out-smooth) infinite;
+}
