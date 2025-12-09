@@ -1,13 +1,17 @@
 /**
  * Менеджер главной страницы выбора актов
- * Отвечает за отображение списка актов, создание/редактирование/удаление
+ *
+ * Реализует управление списком актов, включая создание, редактирование (с блокировкой),
+ * дублирование и удаление. При редактировании метаданных выполняется логика блокировки
+ * через LockManager и безопасного сохранения перед выходом, аналогично поведению конструктора.
  */
-
 class ActsManagerPage {
+    /* --- Утилиты форматирования --- */
+
     /**
-     * Форматирует отображение КМ с учетом служебной записки
-     * Если есть СЗ - склеиваем КМ + "_" + часть
-     * Для многочастных актов без СЗ также добавляем часть
+     * Форматирует отображение КМ с учетом служебной записки.
+     * Если есть СЗ — склеиваем КМ + "_" + часть.
+     * Для многочастных актов без СЗ также добавляем часть.
      * @private
      * @param {string} kmNumber - Номер КМ
      * @param {number} partNumber - Номер части
@@ -16,69 +20,55 @@ class ActsManagerPage {
      * @returns {string} Отформатированная строка КМ
      */
     static _formatKmNumber(kmNumber, partNumber, totalParts, serviceNote) {
-        // Если есть служебная записка - склеиваем КМ + "_" + часть (из СЗ)
-        if (serviceNote) {
-            return `${kmNumber}_${partNumber}`;
-        }
-
-        // Иначе используем старую логику с подчеркиванием для многочастных актов без СЗ
-        if (totalParts > 1) {
-            return `${kmNumber}_${partNumber}`;
-        }
-
+        if (serviceNote) return `${kmNumber}_${partNumber}`;
+        if (totalParts > 1) return `${kmNumber}_${partNumber}`;
         return kmNumber;
     }
 
     /**
-     * Форматирует дату в формате DD.MM.YYYY
+     * Форматирует дату в формате DD.MM.YYYY.
      * @private
      * @param {string} date - Дата в ISO формате
      * @returns {string} Отформатированная дата или прочерк
      */
     static _formatDate(date) {
         if (!date) return '—';
-
         try {
             const d = new Date(date);
             if (isNaN(d.getTime())) return '—';
-
             const day = String(d.getDate()).padStart(2, '0');
             const month = String(d.getMonth() + 1).padStart(2, '0');
             const year = d.getFullYear();
-
             return `${day}.${month}.${year}`;
-        } catch (e) {
+        } catch {
             return '—';
         }
     }
 
     /**
-     * Форматирует дату и время в формате DD.MM.YYYY HH:MM
+     * Форматирует дату и время в формате DD.MM.YYYY HH:MM.
      * @private
      * @param {string} datetime - Дата и время в ISO формате
      * @returns {string} Отформатированная дата-время или текст по умолчанию
      */
     static _formatDateTime(datetime) {
         if (!datetime) return 'Не редактировался';
-
         try {
             const d = new Date(datetime);
             if (isNaN(d.getTime())) return 'Не редактировался';
-
             const day = String(d.getDate()).padStart(2, '0');
             const month = String(d.getMonth() + 1).padStart(2, '0');
             const year = d.getFullYear();
             const hours = String(d.getHours()).padStart(2, '0');
             const minutes = String(d.getMinutes()).padStart(2, '0');
-
             return `Изменено: ${day}.${month}.${year} ${hours}:${minutes}`;
-        } catch (e) {
+        } catch {
             return 'Не редактировался';
         }
     }
 
     /**
-     * Клонирует template элемент
+     * Клонирует template элемент по ID.
      * @private
      * @param {string} templateId - ID template элемента
      * @returns {DocumentFragment|null} Клонированный фрагмент или null
@@ -93,7 +83,7 @@ class ActsManagerPage {
     }
 
     /**
-     * Заполняет поля в элементе данными через data-field атрибуты
+     * Заполняет поля в элементе данными через data-field атрибуты.
      * @private
      * @param {Element} element - Элемент для заполнения
      * @param {Object} data - Объект с данными
@@ -107,9 +97,11 @@ class ActsManagerPage {
         });
     }
 
+    /* --- Определение статуса акта --- */
+
     /**
-     * Определяет статус акта на основе флагов валидации
-     * Используется для применения классов стилизации и формирования tooltip
+     * Определяет статус акта на основе флагов валидации.
+     * Используется для применения классов стилизации и формирования tooltip.
      * @private
      * @param {Object} act - Данные акта
      * @returns {Object} Объект статуса с типом, классами, tooltip и флагами
@@ -129,13 +121,15 @@ class ActsManagerPage {
         const needsInvoice = act.needs_invoice_check;
 
         // Проверяем есть ли обычные требования валидации
-        const hasValidationIssues = act.needs_created_date ||
+        const hasValidationIssues =
+            act.needs_created_date ||
             act.needs_directive_number ||
             act.needs_service_note;
 
         // Оба требования одновременно (красная рамка + желтое тело)
         if (needsInvoice && hasValidationIssues) {
-            let tooltipText = '🚨 КРИТИЧНО: Необходима проверка фактуры!\n\n' +
+            const tooltipText =
+                '🚨 КРИТИЧНО: Необходима проверка фактуры!\n\n' +
                 '⚠️ Дополнительно требуется заполнить:\n' +
                 this._buildValidationTooltip(act);
 
@@ -170,7 +164,7 @@ class ActsManagerPage {
             };
         }
 
-        // Нормальный статус - акт готов
+        // Нормальный статус — акт готов
         return {
             type: 'normal',
             classes: [],
@@ -180,7 +174,7 @@ class ActsManagerPage {
     }
 
     /**
-     * Формирует текст tooltip с перечислением незаполненных полей
+     * Формирует текст tooltip с перечислением незаполненных полей.
      * @private
      * @param {Object} act - Данные акта
      * @returns {string} Многострочный текст с пунктами
@@ -201,9 +195,11 @@ class ActsManagerPage {
         return issues.length > 0 ? issues.join('\n') : '';
     }
 
+    /* --- Основной функционал --- */
+
     /**
-     * Загружает список актов из API (всегда свежие данные из БД)
-     * Не использует кеш, всегда делает запрос к серверу
+     * Загружает список актов из API (всегда свежие данные из БД).
+     * Не использует кеш, всегда делает запрос к серверу.
      */
     static async loadActs() {
         const container = document.getElementById('actsListContainer');
@@ -244,7 +240,7 @@ class ActsManagerPage {
     }
 
     /**
-     * Показывает индикатор загрузки
+     * Показывает индикатор загрузки.
      * @private
      * @param {HTMLElement} container - Контейнер для вставки
      */
@@ -257,7 +253,7 @@ class ActsManagerPage {
     }
 
     /**
-     * Показывает пустое состояние (нет актов)
+     * Показывает пустое состояние (нет актов).
      * @private
      * @param {HTMLElement} container - Контейнер для вставки
      */
@@ -270,7 +266,7 @@ class ActsManagerPage {
     }
 
     /**
-     * Показывает состояние ошибки
+     * Показывает состояние ошибки.
      * @private
      * @param {HTMLElement} container - Контейнер для вставки
      */
@@ -283,7 +279,7 @@ class ActsManagerPage {
     }
 
     /**
-     * Рендерит сетку карточек актов
+     * Рендерит сетку карточек актов.
      * @private
      * @param {Array} acts - Массив данных актов
      * @param {HTMLElement} container - Контейнер для вставки
@@ -304,8 +300,8 @@ class ActsManagerPage {
     }
 
     /**
-     * Создает карточку акта из template с применением статусов
-     * Статусы влияют на стилизацию рамок карточки
+     * Создает карточку акта из template с применением статусов.
+     * Статусы влияют на стилизацию рамок карточки.
      * @private
      * @param {Object} act - Данные акта
      * @returns {DocumentFragment|null} Фрагмент с карточкой или null
@@ -319,8 +315,6 @@ class ActsManagerPage {
 
         // Получаем статус акта для определения стилизации
         const status = this._getActStatus(act);
-
-        // Применяем классы статуса (для стилизации рамок)
         status.classes.forEach(cls => cardElement.classList.add(cls));
 
         // Добавляем tooltip если есть
@@ -343,8 +337,6 @@ class ActsManagerPage {
             inspection_end_date: this._formatDate(act.inspection_end_date),
             last_edited_at: this._formatDateTime(act.last_edited_at)
         };
-
-        // Заполняем поля через data-field атрибуты
         this._fillFields(cardFragment, data);
 
         // Привязываем обработчики к кнопкам действий
@@ -353,60 +345,58 @@ class ActsManagerPage {
         const duplicateBtn = cardElement.querySelector('[data-action="duplicate"]');
         const deleteBtn = cardElement.querySelector('[data-action="delete"]');
 
+        // Универсальный helper для безопасного клика по кнопке
+        const safeClick = (handler) => (e) => {
+            e.preventDefault();
+            e.stopPropagation(); // 🔥 предотвращаем всплытие и двойной вызов
+            handler();
+        };
+
         if (openBtn) {
-            openBtn.addEventListener('click', () => {
+            openBtn.addEventListener('click', safeClick(() => {
                 if (act.is_locked) {
-                    Notifications.warning(
-                        `Акт редактируется пользователем ${act.locked_by}. Попробуйте позже.`
-                    );
+                    Notifications.warning(`Акт редактируется пользователем ${act.locked_by}.`);
                     return;
                 }
                 this.openAct(act.id);
-            });
+            }));
         }
 
         if (editBtn) {
-            editBtn.addEventListener('click', () => {
+            editBtn.addEventListener('click', safeClick(() => {
                 if (act.is_locked) {
-                    Notifications.warning(
-                        `Акт редактируется пользователем ${act.locked_by}. Попробуйте позже.`
-                    );
+                    Notifications.warning(`Акт редактируется пользователем ${act.locked_by}.`);
                     return;
                 }
-                // Передаем статус для подсветки полей в диалоге
                 this.editAct(act.id, status);
-            });
+            }));
         }
 
         if (duplicateBtn) {
-            duplicateBtn.addEventListener('click', () => {
+            duplicateBtn.addEventListener('click', safeClick(() => {
                 if (act.is_locked) {
-                    Notifications.warning(
-                        `Акт редактируется пользователем ${act.locked_by}. Попробуйте позже.`
-                    );
+                    Notifications.warning(`Акт редактируется пользователем ${act.locked_by}.`);
                     return;
                 }
                 this.duplicateAct(act.id, act.inspection_name);
-            });
+            }));
         }
 
         if (deleteBtn) {
-            deleteBtn.addEventListener('click', () => {
+            deleteBtn.addEventListener('click', safeClick(() => {
                 if (act.is_locked) {
-                    Notifications.warning(
-                        `Акт редактируется пользователем ${act.locked_by}. Попробуйте позже.`
-                    );
+                    Notifications.warning(`Акт редактируется пользователем ${act.locked_by}.`);
                     return;
                 }
                 this.deleteAct(act.id, act.inspection_name);
-            });
+            }));
         }
 
         return cardFragment;
     }
 
     /**
-     * Открывает акт в конструкторе
+     * Открывает акт в конструкторе.
      * @param {number} actId - ID акта
      */
     static openAct(actId) {
@@ -414,49 +404,105 @@ class ActsManagerPage {
     }
 
     /**
-     * Открывает диалог редактирования акта с подсветкой полей
-     * @param {number} actId - ID акта
-     * @param {Object} status - Статус акта для передачи в диалог
+     * Открывает диалог редактирования акта с блокировкой и автосохранением.
+     * Защищен от повторных вызовов и гарантирует одиночный unlock.
      */
     static async editAct(actId, status = null) {
+        if (this._editingActInProgress) {
+            console.warn('[ActsManagerPage] Повторный вызов editAct проигнорирован');
+            return;
+        }
+        this._editingActInProgress = true;
+
         try {
             const username = AuthManager.getCurrentUser();
-
-            if (!username) {
-                throw new Error('Пользователь не авторизован');
-            }
+            if (!username) throw new Error('Пользователь не авторизован');
 
             const response = await fetch(`/api/v1/acts/${actId}`, {
                 headers: {'X-JupyterHub-User': username}
             });
-
-            if (!response.ok) {
-                if (response.status === 403) {
-                    throw new Error('Нет доступа к акту');
-                } else if (response.status === 404) {
-                    throw new Error('Акт не найден');
-                }
-                throw new Error('Ошибка загрузки акта');
-            }
+            if (!response.ok) throw new Error('Ошибка загрузки акта');
 
             const actData = await response.json();
 
-            if (window.CreateActDialog && typeof window.CreateActDialog.showEdit === 'function') {
-                // Передаем статус в диалог для подсветки полей
-                window.CreateActDialog.showEdit(actData, status);
-            } else {
-                console.error('CreateActDialog не найден');
-                Notifications.error('Ошибка открытия диалога редактирования');
+            let lockAcquired = false;
+
+            // ВАЖНО: в конструкторе акт уже заблокирован, поэтому
+            // здесь блокируем ТОЛЬКО если открываем метаданные из списка актов (acts-manager page),
+            // где window.currentActId, как правило, не задан.
+            if (typeof window.currentActId === 'undefined' && typeof LockManager !== 'undefined') {
+                console.log(`[ActsManagerPage] Блокируем акт ${actId} для редактирования метаданных`);
+                try {
+                    await LockManager.init(actId);
+                    lockAcquired = true;
+                    console.log(`[ActsManagerPage] Акт ${actId} успешно заблокирован`);
+                } catch (err) {
+                    if (err.message === 'ACT_LOCKED') {
+                        Notifications.warning('Акт уже редактируется другим пользователем.');
+                        return;
+                    }
+                    throw err;
+                }
             }
 
-        } catch (error) {
-            console.error('Ошибка загрузки акта для редактирования:', error);
-            Notifications.error(`Не удалось загрузить акт: ${error.message}`);
+            if (!window.CreateActDialog || typeof window.CreateActDialog.showEdit !== 'function') {
+                Notifications.error('Ошибка: CreateActDialog не найден');
+                return;
+            }
+
+            // --- Перехватываем закрытие диалога для автосохранения и аккуратного unlock ---
+            const originalClose = CreateActDialog._closeDialog.bind(CreateActDialog);
+
+            // сохраняем ссылку, чтобы использовать корректный контекст
+            const dialogClass = CreateActDialog;
+
+            CreateActDialog._closeDialog = async function safeClose() {
+                try {
+                    if (!dialogClass._isSaving && lockAcquired) {
+                        dialogClass._isSaving = true;
+                        console.log('[ActsManagerPage] Выполняется автосохранение перед закрытием');
+
+                        const form = dialogClass._currentDialog?.querySelector('#actForm');
+                        if (form) {
+                            try {
+                                // 1️⃣ вызывем автосохранение с правильным контекстом
+                                await dialogClass._handleFormSubmit(form, true, actId, username, form);
+                                console.log('[ActsManagerPage] Автосохранение завершено');
+                            } catch (e) {
+                                console.error('Ошибка автосохранения перед закрытием:', e);
+                            }
+                        }
+                    }
+
+                    // 2️⃣ после сохранения снимаем блокировку
+                    if (lockAcquired && typeof LockManager !== 'undefined') {
+                        try {
+                            await LockManager.manualUnlock();
+                            console.log(`[ActsManagerPage] Акт ${actId} разблокирован (manualUnlock)`);
+                        } catch (unlockErr) {
+                            console.error('Ошибка ручной разблокировки:', unlockErr);
+                        }
+                    }
+                } finally {
+                    // 3️⃣ восстанавливаем оригинальное закрытие
+                    CreateActDialog._closeDialog = originalClose;
+                    dialogClass._isSaving = false;
+                    console.log('[ActsManagerPage] Закрытие диалога после сохранения и unlock');
+                    originalClose();
+                }
+            };
+
+            CreateActDialog.showEdit(actData, status);
+        } catch (err) {
+            console.error('Ошибка editAct:', err);
+            Notifications.error(err.message);
+        } finally {
+            this._editingActInProgress = false;
         }
     }
 
     /**
-     * Дублирует акт с подтверждением
+     * Дублирует акт с подтверждением.
      * @param {number} actId - ID акта для дублирования
      * @param {string} actName - Название акта для отображения
      */
@@ -520,7 +566,7 @@ class ActsManagerPage {
     }
 
     /**
-     * Удаляет акт с подтверждением
+     * Удаляет акт с подтверждением.
      * @param {number} actId - ID акта для удаления
      * @param {string} actName - Название акта для отображения
      */
@@ -568,21 +614,10 @@ class ActsManagerPage {
     }
 
     /**
-     * Инициализация страницы при загрузке
-     * Выполняет отложенные действия LockManager и загружает список актов
+     * Инициализация страницы при загрузке.
      */
     static async init() {
         console.log('ActsManagerPage.init() вызван');
-
-        // ВАЖНО: Сначала выполняем отложенные действия от LockManager
-        // Это необходимо для корректной разблокировки актов после выхода
-        if (typeof LockManager !== 'undefined' && LockManager.executePendingActions) {
-            console.log('Вызываем LockManager.executePendingActions()');
-            await LockManager.executePendingActions();
-            console.log('LockManager.executePendingActions() завершен');
-        } else {
-            console.log('LockManager или executePendingActions не найден');
-        }
 
         // Проверяем флаги из sessionStorage и показываем диалоги
         await this._checkSessionExit();
@@ -613,8 +648,8 @@ class ActsManagerPage {
     }
 
     /**
-     * Проверяет флаги завершения сессии и показывает соответствующий диалог
-     * Флаги устанавливаются при выходе из конструктора (autoExit или exitWithSave)
+     * Проверяет флаги завершения сессии и показывает соответствующий диалог.
+     * Флаги устанавливаются при выходе из конструктора (autoExit или exitWithSave).
      * @private
      */
     static async _checkSessionExit() {

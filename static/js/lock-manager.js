@@ -1,9 +1,9 @@
 /**
  * Менеджер блокировок актов
  *
- * Загружает настройки с сервера и работает с ними.
- * Автоматически завершает работу при бездействии если пользователь не реагирует.
- * При выходе всегда сохраняет изменения.
+ * Загружает настройки блокировок с сервера, управляет продлением и снятием блокировок.
+ * Автоматически завершает сессию при бездействии пользователя.
+ * Гарантирует одиночный unlock: предотвращает дублирующее снятие блокировки через sendBeacon.
  */
 class LockManager {
     static _actId = null;
@@ -13,10 +13,14 @@ class LockManager {
     static _inactivityDialogTimeout = null;
     static _lastActivity = Date.now();
     static _lastExtensionAt = Date.now();
-    static _exitPending = null;
+    static _warningShown = false;
+    static _isExiting = false;
+    static _manualUnlockTriggered = false; // 🔒 предотвращает лишний unlock
+    static _beforeUnloadHandler = null;
 
     /**
-     * Инициализация менеджера блокировок
+     * Инициализирует менеджер для конкретного акта
+     * @param {number} actId - ID акта
      */
     static async init(actId) {
         this._actId = actId;
@@ -30,11 +34,9 @@ class LockManager {
             this._startInactivityCheck();
             this._startAutoExtension();
             this._setupBeforeUnload();
-            this._setupPageHide();
 
             console.log('LockManager инициализирован для акта', actId);
             console.log('Настройки блокировок:', this._config);
-
         } catch (error) {
             console.error('Ошибка инициализации LockManager:', error);
             throw error;
@@ -42,23 +44,65 @@ class LockManager {
     }
 
     /**
-     * Загружает настройки блокировок с сервера
+     * Явный метод ручного unlock из внешнего кода.
+     * ДЕЛАЕТ:
+     *  - отключает beforeunload
+     *  - ставит флаг, чтобы sendBeacon не отправлялся
+     *  - снимает блокировку на сервере
+     *  - останавливает все таймеры
+     */
+    static async manualUnlock() {
+        if (!this._actId) {
+            console.warn('LockManager.manualUnlock вызван без активного акта');
+            return;
+        }
+
+        if (this._isExiting || this._manualUnlockTriggered) {
+            console.log('LockManager.manualUnlock: уже выполняется выход/разблокировка');
+            return;
+        }
+
+        this._manualUnlockTriggered = true;
+        this.disableBeforeUnload();
+        this.destroy();
+
+        const username = AuthManager?.getCurrentUser?.() || null;
+        if (!username) {
+            console.warn('LockManager.manualUnlock: пользователь неизвестен — пропускаем unlock');
+            return;
+        }
+
+        try {
+            const resp = await fetch(`/api/v1/acts/${this._actId}/unlock`, {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                    'X-JupyterHub-User': username
+                }
+            });
+
+            if (!resp.ok) {
+                console.warn('LockManager.manualUnlock: не удалось снять блокировку, статус', resp.status);
+            } else {
+                console.log(`[LockManager] Акт ${this._actId} успешно разблокирован вручную`);
+            }
+        } catch (e) {
+            console.error('[LockManager] Ошибка сети при manualUnlock:', e);
+        }
+    }
+
+    /**
+     * Загружает конфигурацию блокировок с сервера
      * @private
      */
     static async _loadConfig() {
         try {
             const response = await fetch('/api/v1/system/config/lock');
-
-            if (!response.ok) {
-                throw new Error('Не удалось загрузить настройки');
-            }
-
+            if (!response.ok) throw new Error('Не удалось загрузить настройки');
             this._config = await response.json();
             console.log('Настройки блокировок загружены:', this._config);
-
         } catch (error) {
-            console.error('Ошибка загрузки настроек, используем значения по умолчанию:', error);
-
+            console.error('Ошибка загрузки, используем значения по умолчанию');
             this._config = {
                 lockDurationMinutes: AppConfig.lock.lockDurationMinutes,
                 inactivityTimeoutMinutes: AppConfig.lock.inactivityTimeoutMinutes,
@@ -70,22 +114,23 @@ class LockManager {
     }
 
     /**
-     * Сброс внутреннего состояния
+     * Сбрасывает внутреннее состояние менеджера
      * @private
      */
     static _resetState() {
         this._lastActivity = Date.now();
         this._lastExtensionAt = Date.now();
-        this._exitPending = null;
+        this._warningShown = false;
+        this._isExiting = false;
+        this._manualUnlockTriggered = false;
     }
 
     /**
-     * Блокирует акт через API
+     * Выполняет запрос на блокировку акта
      * @private
      */
     static async _lockAct() {
         const username = AuthManager.getCurrentUser();
-
         const response = await fetch(`/api/v1/acts/${this._actId}/lock`, {
             method: 'POST',
             headers: {
@@ -96,8 +141,6 @@ class LockManager {
 
         if (response.status === 409) {
             const error = await response.json();
-            StorageManager.clearStorage();
-
             const lockedBy = this._extractUsernameFromError(error.detail);
 
             await DialogManager.show({
@@ -115,16 +158,14 @@ class LockManager {
             throw new Error('ACT_LOCKED');
         }
 
-        if (!response.ok) {
-            throw new Error('Не удалось заблокировать акт');
-        }
+        if (!response.ok) throw new Error('Не удалось заблокировать акт');
 
         const data = await response.json();
         console.log('Акт заблокирован до', data.locked_until);
     }
 
     /**
-     * Извлекает username из сообщения об ошибке
+     * Извлекает имя пользователя из текста ошибки
      * @private
      */
     static _extractUsernameFromError(errorDetail) {
@@ -133,12 +174,11 @@ class LockManager {
     }
 
     /**
-     * Продлевает блокировку через API
+     * Продлевает блокировку по API
      * @private
      */
     static async _extendLock() {
         const username = AuthManager.getCurrentUser();
-
         try {
             const response = await fetch(`/api/v1/acts/${this._actId}/extend-lock`, {
                 method: 'POST',
@@ -147,16 +187,10 @@ class LockManager {
                     'X-JupyterHub-User': username
                 }
             });
-
-            if (!response.ok) {
-                throw new Error('Не удалось продлить блокировку');
-            }
-
+            if (!response.ok) throw new Error('Не удалось продлить блокировку');
             const data = await response.json();
             console.log('Блокировка продлена до', data.locked_until);
-
             return true;
-
         } catch (error) {
             console.error('Ошибка продления блокировки:', error);
             return false;
@@ -164,15 +198,13 @@ class LockManager {
     }
 
     /**
-     * Продлевает блокировку безопасно
+     * Безопасное продление с обработкой ошибок
      * @private
      */
     static async _extendLockSafely() {
         try {
             const ok = await this._extendLock();
-            if (ok) {
-                this._lastExtensionAt = Date.now();
-            }
+            if (ok) this._lastExtensionAt = Date.now();
             return ok;
         } catch (e) {
             console.error('Ошибка автопродления блокировки:', e);
@@ -181,185 +213,99 @@ class LockManager {
     }
 
     /**
-     * Настраивает отслеживание активности пользователя
+     * Отслеживание активности пользователя.
      * @private
      */
     static _setupActivityTracking() {
         const events = ['mousedown', 'keydown', 'scroll', 'touchstart'];
-
-        const updateActivity = () => {
-            this._lastActivity = Date.now();
-        };
-
-        events.forEach(event => {
-            document.addEventListener(event, updateActivity, {passive: true});
-        });
+        const updateActivity = () => (this._lastActivity = Date.now());
+        events.forEach(event =>
+            document.addEventListener(event, updateActivity, {passive: true})
+        );
     }
 
     /**
-     * Запускает периодическую проверку бездействия
+     * Периодическая проверка бездействия.
      * @private
      */
     static _startInactivityCheck() {
         const intervalMs = this._config.inactivityCheckIntervalSeconds * 1000;
-
         this._inactivityCheckInterval = setInterval(() => {
             const now = Date.now();
-            const minutesInactive = (now - this._lastActivity) / 1000 / 60;
-
-            if (minutesInactive >= this._config.inactivityTimeoutMinutes) {
+            const minutesIdle = (now - this._lastActivity) / 1000 / 60;
+            if (minutesIdle >= this._config.inactivityTimeoutMinutes) {
                 clearInterval(this._inactivityCheckInterval);
                 this._inactivityCheckInterval = null;
-
-                this._handleInactivity(Math.floor(minutesInactive));
+                this._handleInactivity(Math.floor(minutesIdle));
             }
         }, intervalMs);
     }
 
     /**
-     * Запускает автоматическое продление блокировки
+     * Автоматическое продление блокировки.
      * @private
      */
     static _startAutoExtension() {
         const intervalMs = this._config.inactivityCheckIntervalSeconds * 1000;
-
         this._extensionInterval = setInterval(() => {
             const now = Date.now();
-            const minutesSinceActivity = (now - this._lastActivity) / 1000 / 60;
-            const minutesSinceExtension = (now - this._lastExtensionAt) / 1000 / 60;
-
-            if (minutesSinceActivity < this._config.inactivityTimeoutMinutes &&
-                minutesSinceExtension >= this._config.minExtensionIntervalMinutes) {
-
-                console.log('Пользователь активен, продлеваем блокировку в фоне');
+            const sinceActivity = (now - this._lastActivity) / 1000 / 60;
+            const sinceExtension = (now - this._lastExtensionAt) / 1000 / 60;
+            if (
+                sinceActivity < this._config.inactivityTimeoutMinutes &&
+                sinceExtension >= this._config.minExtensionIntervalMinutes
+            ) {
+                console.log('Пользователь активен → продлеваем блокировку');
                 this._extendLockSafely();
             }
         }, intervalMs);
     }
 
     /**
-     * Обрабатывает ситуацию бездействия
-     * @private
-     */
-    static async _handleInactivity(minutesInactive) {
-        const cfg = AppConfig.lock;
-        const timeoutSeconds = this._config.inactivityDialogTimeoutSeconds;
-
-        // Запускаем таймер автоматического выхода
-        this._inactivityDialogTimeout = setTimeout(() => {
-            console.log('Время ожидания истекло, автоматический выход с сохранением');
-            this._initiateExit('autoExit');
-        }, timeoutSeconds * 1000);
-
-        const stay = await DialogManager.show({
-            title: cfg.messages.inactivityTitle,
-            message: `${cfg.messages.inactivityQuestion(minutesInactive)}\n\nАвтоматический выход через ${timeoutSeconds} секунд.`,
-            icon: '💤',
-            type: 'warning',
-            confirmText: 'Продолжить работу',
-            cancelText: 'Сохранить и выйти',
-            allowEscape: true,
-            allowOverlayClose: true
-        });
-
-        // Отменяем таймер
-        if (this._inactivityDialogTimeout) {
-            clearTimeout(this._inactivityDialogTimeout);
-            this._inactivityDialogTimeout = null;
-        }
-
-        if (stay) {
-            // Продолжаем работу
-            const extended = await this._extendLockSafely();
-            this._lastActivity = Date.now();
-
-            if (extended && typeof Notifications !== 'undefined') {
-                Notifications.success(cfg.messages.sessionExtended);
-            } else if (!extended && typeof Notifications !== 'undefined') {
-                Notifications.error(cfg.messages.cannotExtend);
-            }
-
-            this._startInactivityCheck();
-        } else {
-            // Выходим с сохранением
-            this._initiateExit('manualExit');
-        }
-    }
-
-    /**
-     * Инициирует выход с сохранением
-     * @private
-     */
-    static _initiateExit(action) {
-        // Запоминаем намерение выйти (всегда с сохранением)
-        this._exitPending = {
-            action: action,
-            actId: this._actId,
-            shouldSave: true,
-            messageFlag: action === 'autoExit' ? 'sessionAutoExited' : 'sessionExitedWithSave'
-        };
-
-        // Очищаем таймеры
-        this.destroy();
-
-        // Редирект
-        window.location.href = '/';
-    }
-
-    /**
-     * Настраивает обработчик закрытия вкладки
+     * Настраивает beforeunload, который выполняет unlock при закрытии страницы.
+     * Если установлен флаг _manualUnlockTriggered, sendBeacon не отправляется.
      * @private
      */
     static _setupBeforeUnload() {
-        window.addEventListener('beforeunload', () => {
-            // Если есть отложенный выход - не снимаем блокировку здесь
-            if (this._exitPending) {
-                return;
-            }
+        this._beforeUnloadHandler = () => {
+            if (this._isExiting || this._manualUnlockTriggered || !this._actId) return;
 
-            // Случайное закрытие вкладки - снимаем блокировку
+            const username = AuthManager.getCurrentUser();
             const blob = new Blob(
-                [JSON.stringify({})],
+                [JSON.stringify({username})],
                 {type: 'application/json'}
             );
 
-            navigator.sendBeacon(
-                `/api/v1/acts/${this._actId}/unlock`,
-                blob
-            );
-        });
+            navigator.sendBeacon(`/api/v1/acts/${this._actId}/unlock`, blob);
+            console.log('BeforeUnload → отправлен beacon для unlock');
+        };
+        window.addEventListener('beforeunload', this._beforeUnloadHandler);
     }
 
     /**
-     * Настраивает обработчик pagehide
-     * @private
+     * Отключает обработчик beforeunload.
+     * Используется при ручной разблокировке.
      */
-    static _setupPageHide() {
-        window.addEventListener('pagehide', () => {
-            // Страница РЕАЛЬНО выгружается
-            if (this._exitPending) {
-                console.log('Страница выгружается, сохраняем команду:', this._exitPending);
-
-                sessionStorage.setItem('lockManager_pendingAction', JSON.stringify(this._exitPending));
-                sessionStorage.setItem(this._exitPending.messageFlag, 'true');
-            }
-        });
+    static disableBeforeUnload() {
+        if (this._beforeUnloadHandler) {
+            window.removeEventListener('beforeunload', this._beforeUnloadHandler);
+            this._beforeUnloadHandler = null;
+            console.log('LockManager.beforeunload отключен');
+        }
     }
 
     /**
-     * Очистка ресурсов
+     * Завершает все интервалы и таймеры.
      */
     static destroy() {
         if (this._inactivityCheckInterval) {
             clearInterval(this._inactivityCheckInterval);
             this._inactivityCheckInterval = null;
         }
-
         if (this._extensionInterval) {
             clearInterval(this._extensionInterval);
             this._extensionInterval = null;
         }
-
         if (this._inactivityDialogTimeout) {
             clearTimeout(this._inactivityDialogTimeout);
             this._inactivityDialogTimeout = null;
@@ -367,80 +313,118 @@ class LockManager {
     }
 
     /**
-     * Выполняет отложенные действия после загрузки главной страницы
+     * Обрабатывает состояние бездействия и вызывает автоматическое завершение.
+     * @private
      */
-    static async executePendingActions() {
-        const pendingActionJson = sessionStorage.getItem('lockManager_pendingAction');
+    static async _handleInactivity(minutesInactive) {
+        const cfg = AppConfig.lock;
+        const timeoutSeconds = this._config.inactivityDialogTimeoutSeconds;
 
-        console.log('executePendingActions вызван, pendingAction:', pendingActionJson);
+        this._inactivityDialogTimeout = setTimeout(() => {
+            console.log('Истекло время подтверждения, автосохранение и выход.');
+            this._initiateExit('autoExit');
+        }, timeoutSeconds * 1000);
 
-        if (!pendingActionJson) {
-            console.log('Нет отложенных действий');
-            return;
+        const stay = await DialogManager.show({
+            title: cfg.messages.inactivityTitle,
+            message: `${cfg.messages.inactivityQuestion(minutesInactive)}\n\nАвто-выход через ${timeoutSeconds} сек.`,
+            icon: '💤',
+            type: 'warning',
+            confirmText: 'Продолжить',
+            cancelText: 'Сохранить и выйти'
+        });
+
+        if (this._inactivityDialogTimeout) {
+            clearTimeout(this._inactivityDialogTimeout);
+            this._inactivityDialogTimeout = null;
         }
 
-        // Удаляем команду сразу
-        sessionStorage.removeItem('lockManager_pendingAction');
+        if (stay) {
+            const extended = await this._extendLockSafely();
+            this._lastActivity = Date.now();
+            if (extended && Notifications) Notifications.success(cfg.messages.sessionExtended);
+            if (!extended && Notifications) Notifications.error(cfg.messages.cannotExtend);
+            this._startInactivityCheck();
+        } else {
+            await this._initiateExit('manualExit');
+        }
+    }
+
+    /**
+     * Выполняет корректное завершение сессии и разблокировку акта.
+     * @private
+     */
+    static async _initiateExit(action) {
+        if (this._isExiting) return;
+        this._isExiting = true;
+        this._manualUnlockTriggered = true; // 🚫 блокируем sendBeacon
+
+        this.destroy();
+        this.disableBeforeUnload();
+
+        const username = AuthManager?.getCurrentUser?.() || null;
+        const messageFlag = action === 'autoExit'
+            ? 'sessionAutoExited'
+            : 'sessionExitedWithSave';
+
+        console.log(`LockManager: выход (${action}) начат…`);
 
         try {
-            const pendingAction = JSON.parse(pendingActionJson);
-            const {action, actId, shouldSave} = pendingAction;
-
-            console.log('Выполняем отложенное действие:', pendingAction);
-
-            const username = AuthManager.getCurrentUser();
-            console.log('Текущий пользователь:', username);
-
-            // Сохраняем если нужно
-            if (shouldSave) {
+            // --- 1️⃣ Сохраняем акт ТОЛЬКО если есть AppState (значит открыт в конструкторе) ---
+            if (typeof AppState !== 'undefined' && AppState?.exportData) {
                 try {
-                    const cachedData = localStorage.getItem(`act_${actId}_content`);
+                    const data = AppState.exportData();
+                    const saveResp = await fetch(`/api/v1/acts_content/${this._actId}/content`, {
+                        method: 'PUT',
+                        headers: {
+                            'Content-Type': 'application/json',
+                            'X-JupyterHub-User': username
+                        },
+                        body: JSON.stringify(data)
+                    });
 
-                    if (cachedData) {
-                        console.log('Найдены кешированные данные, сохраняем...');
-
-                        const saveResponse = await fetch(`/api/v1/acts/${actId}/content`, {
-                            method: 'PUT',
-                            headers: {
-                                'Content-Type': 'application/json',
-                                'X-JupyterHub-User': username
-                            },
-                            body: cachedData
-                        });
-
-                        if (saveResponse.ok) {
-                            console.log('Данные успешно сохранены');
-                        } else {
-                            console.error('Ошибка сохранения, статус:', saveResponse.status);
-                        }
+                    if (!saveResp.ok) {
+                        console.error(`[LockManager] Ошибка сохранения контента (код ${saveResp.status})`);
                     } else {
-                        console.log('Кешированные данные не найдены');
+                        console.log('[LockManager] Контент акта сохранён');
                     }
-                } catch (e) {
-                    console.error('Ошибка сохранения после редиректа:', e);
+                } catch (saveErr) {
+                    console.error('LockManager: ошибка при сохранении контента конструктора:', saveErr);
                 }
-            }
-
-            // Снимаем блокировку
-            console.log('Снимаем блокировку с акта', actId);
-
-            const unlockResponse = await fetch(`/api/v1/acts/${actId}/unlock`, {
-                method: 'POST',
-                headers: {
-                    'Content-Type': 'application/json',
-                    'X-JupyterHub-User': username
-                }
-            });
-
-            if (unlockResponse.ok) {
-                console.log('Блокировка успешно снята с акта', actId);
             } else {
-                const errorText = await unlockResponse.text();
-                console.error('Ошибка снятия блокировки, статус:', unlockResponse.status, 'ответ:', errorText);
+                console.log('[LockManager] AppState отсутствует — пропускаем сохранение (страница метаданных)');
             }
 
-        } catch (error) {
-            console.error('Ошибка выполнения отложенного действия:', error);
+            // --- 2️⃣ Снимаем блокировку ---
+            if (this._actId && username) {
+                try {
+                    const resp = await fetch(`/api/v1/acts/${this._actId}/unlock`, {
+                        method: 'POST',
+                        headers: {
+                            'Content-Type': 'application/json',
+                            'X-JupyterHub-User': username
+                        }
+                    });
+
+                    if (!resp.ok) {
+                        console.warn(`[LockManager] Ошибка unlock (код ${resp.status})`);
+                    } else {
+                        console.log(`[LockManager] Акт ${this._actId} успешно разблокирован (exit)`);
+                    }
+                } catch (unlockErr) {
+                    console.error('[LockManager] Ошибка сети при unlock:', unlockErr);
+                }
+            }
+
+            sessionStorage.setItem(messageFlag, 'true');
+        } catch (err) {
+            console.error('[LockManager] Ошибка выхода:', err);
+            sessionStorage.setItem(messageFlag, 'true');
+        } finally {
+            const closedId = this._actId;
+            this._actId = null;
+            console.log(`LockManager: завершение выхода для акта ${closedId}`);
+            setTimeout(() => window.location.href = '/', 300);
         }
     }
 }

@@ -101,7 +101,6 @@
 
 /* Подсветка кнопки редактирования для требующих внимания */
 .act-card.needs-attention .act-card-actions .btn[data-action="edit"] {
-    border: var(--border-width-md) solid var(--warning);
     animation: bounceSmooth 2s var(--ease-in-out-smooth) infinite;
 }
 
@@ -112,7 +111,6 @@
 
 /* Подсветка кнопки редактирования для критичных актов */
 .act-card.needs-invoice .act-card-actions .btn[data-action="edit"] {
-    border: var(--border-width-thick) solid var(--error);
     animation: bounceSmooth 2s var(--ease-in-out-smooth) infinite,
     criticalGlow 2s var(--ease-in-out-smooth) infinite;
 }
