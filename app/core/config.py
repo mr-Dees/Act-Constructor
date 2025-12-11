@@ -95,12 +95,30 @@ class Settings(BaseSettings):
     # Уровень логирования (ограничен допустимыми значениями)
     log_level: Literal["DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"] = "INFO"
 
+    # === Тип базы данных ===
+    db_type: Literal["postgresql", "greenplum"] = Field(default="postgresql")
+
     # === База данных PostgreSQL ===
     db_host: str = Field(default="localhost")
     db_port: int = Field(default=5432, ge=1, le=65535)
     db_name: str = Field(default="act_constructor")
     db_user: str = Field(default="postgres")
     db_password: str = Field(default="postgres")
+
+    # === Greenplum настройки ===
+    gp_host: str = Field(
+        default="gp_dns_pkap1123_audit.gp.df.sbrf.ru"
+    )
+    gp_port: int = Field(default=5432, ge=1, le=65535)
+    gp_database: str = Field(default="capgp3")
+    gp_schema: str = Field(
+        default="s_grnplm_ld_audit_da_project_4"
+    )
+    gp_table_prefix: str = Field(
+        default="t_db_oarb_audit_act_"
+    )
+
+    # === Пулы подключений ===
     db_pool_min_size: int = Field(default=2, ge=1)
     db_pool_max_size: int = Field(default=10, ge=2)
 
@@ -109,26 +127,20 @@ class Settings(BaseSettings):
 
     # === Параметры блокировок актов ===
 
-    # # Продолжительность блокировки акта на сервере (минуты)
-    # act_lock_duration_minutes: int = Field(default=30, gt=0)
-    #
-    # # Через сколько минут бездействия показывать предупреждение (фронтенд)
-    # act_inactivity_timeout_minutes: float = Field(default=5.0, gt=0)
-    #
-    # # Как часто проверять бездействие на фронтенде (секунды)
-    # act_inactivity_check_interval_seconds: int = Field(default=30, gt=0)
-    #
-    # # Через сколько минут после последнего продления можно продлить снова (фронтенд)
-    # act_min_extension_interval_minutes: float = Field(default=5.0, gt=0)
-    #
-    # # Через сколько секунд автоматически завершать работу если пользователь не нажал кнопку
-    # act_inactivity_dialog_timeout_seconds: int = Field(default=30, gt=0)
+    # Продолжительность блокировки акта на сервере (минуты)
+    act_lock_duration_minutes: int = Field(default=15, gt=0)
 
-    act_lock_duration_minutes: int = Field(default=1, gt=0)  # 1 минута
-    act_inactivity_timeout_minutes: float = Field(default=0.5, gt=0)  # 30 секунд
-    act_inactivity_check_interval_seconds: int = Field(default=5, gt=0)  # 5 секунд
-    act_min_extension_interval_minutes: float = Field(default=0.25, gt=0)  # 15 секунд
-    act_inactivity_dialog_timeout_seconds: int = Field(default=15, gt=0)  # 15 секунд для автовыхода
+    # Через сколько минут бездействия показывать предупреждение (фронтенд)
+    act_inactivity_timeout_minutes: float = Field(default=5.0, gt=0)
+
+    # Как часто проверять бездействие на фронтенде (секунды)
+    act_inactivity_check_interval_seconds: int = Field(default=60, gt=0)
+
+    # Через сколько минут после последнего продления можно продлить снова (фронтенд)
+    act_min_extension_interval_minutes: float = Field(default=5.0, gt=0)
+
+    # Через сколько секунд автоматически завершать работу если пользователь не нажал кнопку продолжить
+    act_inactivity_dialog_timeout_seconds: int = Field(default=30, gt=0)
 
     # === Лимиты безопасности ===
 
@@ -227,7 +239,7 @@ class Settings(BaseSettings):
 
     # Конфигурация Pydantic
     model_config = SettingsConfigDict(
-        env_file=".env",  # Файл с переменными окружения
+        env_file=str(base_dir / ".env"),  # Файл с переменными окружения
         case_sensitive=False,  # Нечувствительность к регистру переменных
         extra="ignore",  # Игнорировать неизвестные поля из .env
         validate_default=False  # Оптимизация валидации

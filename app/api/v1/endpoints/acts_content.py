@@ -16,7 +16,7 @@ import logging
 from fastapi import APIRouter, Depends, HTTPException
 
 from app.api.v1.deps.auth_deps import get_username
-from app.db.connection import get_db
+from app.db.connection import get_db, get_adapter
 from app.db.repositories.act_repository import ActDBService
 from app.schemas.act_content import ActDataSchema
 
@@ -57,9 +57,16 @@ async def get_act_content(
             raise HTTPException(status_code=403, detail="Нет доступа к акту")
 
         try:
+            # Получаем адаптер и имена таблиц
+            adapter = get_adapter()
+            acts_tree = adapter.get_table_name("act_tree")
+            acts_tables = adapter.get_table_name("act_tables")
+            acts_textblocks = adapter.get_table_name("act_textblocks")
+            acts_violations = adapter.get_table_name("act_violations")
+
             # Получаем дерево
             tree_row = await conn.fetchrow(
-                "SELECT tree_data FROM act_tree WHERE act_id = $1",
+                f"SELECT tree_data FROM {acts_tree} WHERE act_id = $1",
                 act_id
             )
 
@@ -71,11 +78,11 @@ async def get_act_content(
 
             # Получаем таблицы
             table_rows = await conn.fetch(
-                """
+                f"""
                 SELECT table_id, node_id, grid_data, col_widths, is_protected, 
                        is_deletable, is_metrics_table, is_main_metrics_table,
                        is_regular_risk_table, is_operational_risk_table
-                FROM act_tables
+                FROM {acts_tables}
                 WHERE act_id = $1
                 """,
                 act_id
@@ -99,9 +106,9 @@ async def get_act_content(
 
             # Получаем текстовые блоки
             tb_rows = await conn.fetch(
-                """
+                f"""
                 SELECT textblock_id, node_id, content, formatting
-                FROM act_textblocks
+                FROM {acts_textblocks}
                 WHERE act_id = $1
                 """,
                 act_id
@@ -119,11 +126,11 @@ async def get_act_content(
 
             # Получаем нарушения
             v_rows = await conn.fetch(
-                """
+                f"""
                 SELECT violation_id, node_id, violated, established,
                        description_list, additional_content, reasons,
                        consequences, responsible, recommendations
-                FROM act_violations
+                FROM {acts_violations}
                 WHERE act_id = $1
                 """,
                 act_id
@@ -197,11 +204,19 @@ async def save_act_content(
             raise HTTPException(status_code=403, detail="Нет доступа к акту")
 
         try:
+            # Получаем адаптер и имена таблиц
+            adapter = get_adapter()
+            acts = adapter.get_table_name("acts")
+            acts_tree = adapter.get_table_name("act_tree")
+            acts_tables = adapter.get_table_name("act_tables")
+            acts_textblocks = adapter.get_table_name("act_textblocks")
+            acts_violations = adapter.get_table_name("act_violations")
+
             async with conn.transaction():
                 # Обновляем дерево
                 await conn.execute(
-                    """
-                    UPDATE act_tree
+                    f"""
+                    UPDATE {acts_tree}
                     SET tree_data = $1, updated_at = CURRENT_TIMESTAMP
                     WHERE act_id = $2
                     """,
@@ -211,7 +226,7 @@ async def save_act_content(
 
                 # Удаляем старые таблицы и добавляем новые
                 await conn.execute(
-                    "DELETE FROM act_tables WHERE act_id = $1",
+                    f"DELETE FROM {acts_tables} WHERE act_id = $1",
                     act_id
                 )
 
@@ -222,8 +237,8 @@ async def save_act_content(
                     node_label = _find_node_label(data.tree, node_id)
 
                     await conn.execute(
-                        """
-                        INSERT INTO act_tables (
+                        f"""
+                        INSERT INTO {acts_tables} (
                             act_id, table_id, node_id, node_number, table_label,
                             grid_data, col_widths, is_protected, is_deletable,
                             is_metrics_table, is_main_metrics_table,
@@ -251,7 +266,7 @@ async def save_act_content(
 
                 # Удаляем старые текстовые блоки и добавляем новые
                 await conn.execute(
-                    "DELETE FROM act_textblocks WHERE act_id = $1",
+                    f"DELETE FROM {acts_textblocks} WHERE act_id = $1",
                     act_id
                 )
 
@@ -260,8 +275,8 @@ async def save_act_content(
                     node_number = _extract_node_number(data.tree, node_id)
 
                     await conn.execute(
-                        """
-                        INSERT INTO act_textblocks (
+                        f"""
+                        INSERT INTO {acts_textblocks} (
                             act_id, textblock_id, node_id, node_number, content, formatting
                         )
                         VALUES ($1, $2, $3, $4, $5, $6)
@@ -276,7 +291,7 @@ async def save_act_content(
 
                 # Удаляем старые нарушения и добавляем новые
                 await conn.execute(
-                    "DELETE FROM act_violations WHERE act_id = $1",
+                    f"DELETE FROM {acts_violations} WHERE act_id = $1",
                     act_id
                 )
 
@@ -285,8 +300,8 @@ async def save_act_content(
                     node_number = _extract_node_number(data.tree, node_id)
 
                     await conn.execute(
-                        """
-                        INSERT INTO act_violations (
+                        f"""
+                        INSERT INTO {acts_violations} (
                             act_id, violation_id, node_id, node_number, violated, established,
                             description_list, additional_content, reasons, consequences,
                             responsible, recommendations
@@ -309,8 +324,8 @@ async def save_act_content(
 
                 # Обновляем last_edited_by и last_edited_at в acts
                 await conn.execute(
-                    """
-                    UPDATE acts
+                    f"""
+                    UPDATE {acts}
                     SET last_edited_by = $1, last_edited_at = CURRENT_TIMESTAMP
                     WHERE id = $2
                     """,

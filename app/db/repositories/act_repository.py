@@ -1,5 +1,5 @@
 """
-Сервис бизнес-логики для работы с актами в PostgreSQL.
+Сервис бизнес-логики для работы с актами в PostgreSQL/Greenplum.
 """
 
 import json
@@ -8,6 +8,7 @@ from datetime import datetime, timedelta
 
 import asyncpg
 
+from app.db.connection import get_adapter
 from app.db.utils import KMUtils, JSONDBUtils, ActDirectivesValidator
 from app.schemas.act_metadata import (
     ActCreate,
@@ -27,6 +28,16 @@ class ActDBService:
     def __init__(self, conn: asyncpg.Connection):
         """Инициализирует сервис с подключением к БД."""
         self.conn = conn
+        self.adapter = get_adapter()
+
+        # Кэшируем имена таблиц для удобства
+        self.acts = self.adapter.get_table_name("acts")
+        self.audit_team = self.adapter.get_table_name("audit_team_members")
+        self.directives = self.adapter.get_table_name("act_directives")
+        self.tree = self.adapter.get_table_name("act_tree")
+        self.tables = self.adapter.get_table_name("act_tables")
+        self.textblocks = self.adapter.get_table_name("act_textblocks")
+        self.violations = self.adapter.get_table_name("act_violations")
 
     # -------------------------------------------------------------------------
     # ВСПОМОГАТЕЛЬНЫЕ МЕТОДЫ
@@ -50,7 +61,7 @@ class ActDBService:
         km_digit = KMUtils.extract_km_digits(km_number)
 
         row = await self.conn.fetchrow(
-            """
+            f"""
             SELECT 
                 COUNT(*) as total_count,
                 MAX(
@@ -64,7 +75,7 @@ class ActDBService:
                         WHEN service_note IS NOT NULL THEN 1 
                     END
                 ) as with_service_notes
-            FROM acts 
+            FROM {self.acts}
             WHERE km_number_digit = $1
             """,
             km_digit,
@@ -98,17 +109,17 @@ class ActDBService:
             km_digit: КМ номер (только цифры)
         """
         total_count = await self.conn.fetchval(
-            """
+            f"""
             SELECT COUNT(*) 
-            FROM acts 
+            FROM {self.acts}
             WHERE km_number_digit = $1
             """,
             km_digit,
         )
 
         await self.conn.execute(
-            """
-            UPDATE acts 
+            f"""
+            UPDATE {self.acts}
             SET total_parts = $1,
                 updated_at = CURRENT_TIMESTAMP
             WHERE km_number_digit = $2
@@ -136,9 +147,9 @@ class ActDBService:
         """
         if exclude_act_id:
             rows = await self.conn.fetch(
-                """
+                f"""
                 SELECT part_number 
-                FROM acts 
+                FROM {self.acts}
                 WHERE km_number_digit = $1 
                   AND id != $2
                 ORDER BY part_number
@@ -148,9 +159,9 @@ class ActDBService:
             )
         else:
             rows = await self.conn.fetch(
-                """
+                f"""
                 SELECT part_number 
-                FROM acts 
+                FROM {self.acts}
                 WHERE km_number_digit = $1
                 ORDER BY part_number
                 """,
@@ -180,7 +191,7 @@ class ActDBService:
             return
 
         tree_row = await self.conn.fetchrow(
-            "SELECT tree_data FROM act_tree WHERE act_id = $1",
+            f"SELECT tree_data FROM {self.tree} WHERE act_id = $1",
             act_id,
         )
 
@@ -222,9 +233,9 @@ class ActDBService:
 
         # Проверяем текущую блокировку
         lock_info = await self.conn.fetchrow(
-            """
+            f"""
             SELECT locked_by, locked_at, lock_expires_at
-            FROM acts
+            FROM {self.acts}
             WHERE id = $1
             """,
             act_id
@@ -239,8 +250,8 @@ class ActDBService:
                 lock_expires = now + timedelta(minutes=duration_minutes)
 
                 await self.conn.execute(
-                    """
-                    UPDATE acts
+                    f"""
+                    UPDATE {self.acts}
                     SET lock_expires_at = $1
                     WHERE id = $2
                     """,
@@ -269,8 +280,8 @@ class ActDBService:
         lock_expires = now + timedelta(minutes=duration_minutes)
 
         await self.conn.execute(
-            """
-            UPDATE acts
+            f"""
+            UPDATE {self.acts}
             SET locked_by = $1,
                 locked_at = $2,
                 lock_expires_at = $3
@@ -293,8 +304,8 @@ class ActDBService:
     async def unlock_act(self, act_id: int, username: str) -> None:
         """Снимает блокировку с акта."""
         result = await self.conn.execute(
-            """
-            UPDATE acts
+            f"""
+            UPDATE {self.acts}
             SET locked_by = NULL,
                 locked_at = NULL,
                 lock_expires_at = NULL
@@ -331,9 +342,9 @@ class ActDBService:
             duration_minutes = settings.act_lock_duration_minutes
 
         lock_info = await self.conn.fetchrow(
-            """
+            f"""
             SELECT locked_by, lock_expires_at
-            FROM acts
+            FROM {self.acts}
             WHERE id = $1
             """,
             act_id
@@ -348,8 +359,8 @@ class ActDBService:
         lock_expires = datetime.now() + timedelta(minutes=duration_minutes)
 
         await self.conn.execute(
-            """
-            UPDATE acts
+            f"""
+            UPDATE {self.acts}
             SET lock_expires_at = $1
             WHERE id = $2
             """,
@@ -377,9 +388,9 @@ class ActDBService:
             }
         """
         lock_info = await self.conn.fetchrow(
-            """
+            f"""
             SELECT locked_by, lock_expires_at
-            FROM acts
+            FROM {self.acts}
             WHERE id = $1
             """,
             act_id
@@ -402,8 +413,8 @@ class ActDBService:
 
         # Блокировка истекла - автоматически снимаем
         await self.conn.execute(
-            """
-            UPDATE acts
+            f"""
+            UPDATE {self.acts}
             SET locked_by = NULL,
                 locked_at = NULL,
                 lock_expires_at = NULL
@@ -450,9 +461,9 @@ class ActDBService:
                 part_number = int(suffix)
 
                 exists = await self.conn.fetchval(
-                    """
+                    f"""
                     SELECT EXISTS(
-                        SELECT 1 FROM acts 
+                        SELECT 1 FROM {self.acts}
                         WHERE km_number_digit = $1 AND part_number = $2
                     )
                     """,
@@ -484,8 +495,8 @@ class ActDBService:
                 raise ValueError("Пользователь должен быть членом аудиторской группы")
 
             act_id = await self.conn.fetchval(
-                """
-                INSERT INTO acts (
+                f"""
+                INSERT INTO {self.acts} (
                     km_number, km_number_digit, part_number, total_parts, 
                     inspection_name, city, created_date,
                     order_number, order_date, is_process_based,
@@ -521,8 +532,8 @@ class ActDBService:
 
             for idx, member in enumerate(act_data.audit_team):
                 await self.conn.execute(
-                    """
-                    INSERT INTO audit_team_members (
+                    f"""
+                    INSERT INTO {self.audit_team} (
                         act_id, role, full_name, position, username, order_index
                     )
                     VALUES ($1, $2, $3, $4, $5, $6)
@@ -537,8 +548,8 @@ class ActDBService:
 
             for idx, directive in enumerate(act_data.directives):
                 await self.conn.execute(
-                    """
-                    INSERT INTO act_directives (
+                    f"""
+                    INSERT INTO {self.directives} (
                         act_id, point_number, directive_number, order_index
                     )
                     VALUES ($1, $2, $3, $4)
@@ -556,8 +567,8 @@ class ActDBService:
             }
 
             await self.conn.execute(
-                """
-                INSERT INTO act_tree (act_id, tree_data)
+                f"""
+                INSERT INTO {self.tree} (act_id, tree_data)
                 VALUES ($1, $2)
                 """,
                 act_id,
@@ -580,7 +591,7 @@ class ActDBService:
     async def get_user_acts(self, username: str) -> list[ActListItem]:
         """Получает список актов, где пользователь является участником."""
         rows = await self.conn.fetch(
-            """
+            f"""
             SELECT 
                 a.id,
                 a.km_number,
@@ -591,26 +602,36 @@ class ActDBService:
                 a.inspection_start_date,
                 a.inspection_end_date,
                 a.last_edited_at,
+                a.created_at,
                 a.service_note,
-                atm.role as user_role,
-                -- Добавляем поля блокировки
+                MIN(atm.role) as user_role,
                 a.locked_by,
                 a.lock_expires_at,
-                -- Добавляем служебные флаги валидации
                 a.needs_created_date,
                 a.needs_directive_number,
                 a.needs_invoice_check,
                 a.needs_service_note
-            FROM acts a
-            INNER JOIN audit_team_members atm ON a.id = atm.act_id
+            FROM {self.acts} a
+            INNER JOIN {self.audit_team} atm ON a.id = atm.act_id
             WHERE atm.username = $1
-            GROUP BY a.id, a.km_number, a.part_number, a.total_parts,
-                     a.inspection_name, a.order_number,
-                     a.inspection_start_date, a.inspection_end_date,
-                     a.last_edited_at, a.service_note, atm.role,
-                     a.locked_by, a.lock_expires_at,
-                     a.needs_created_date, a.needs_directive_number,
-                     a.needs_invoice_check, a.needs_service_note
+            GROUP BY 
+                a.id, 
+                a.km_number, 
+                a.part_number, 
+                a.total_parts,
+                a.inspection_name, 
+                a.order_number,
+                a.inspection_start_date, 
+                a.inspection_end_date,
+                a.last_edited_at,
+                a.created_at,
+                a.service_note,
+                a.locked_by, 
+                a.lock_expires_at,
+                a.needs_created_date, 
+                a.needs_directive_number,
+                a.needs_invoice_check, 
+                a.needs_service_note
             ORDER BY 
                 COALESCE(a.last_edited_at, a.created_at) DESC,
                 a.created_at DESC
@@ -633,14 +654,12 @@ class ActDBService:
                 last_edited_at=row["last_edited_at"],
                 user_role=row["user_role"],
                 service_note=row["service_note"],
-                # Статус блокировки
                 locked_by=row["locked_by"],
                 is_locked=(
                         row["locked_by"] is not None and
                         row["lock_expires_at"] is not None and
                         row["lock_expires_at"] > now
                 ),
-                # Флаги валидации
                 needs_created_date=row["needs_created_date"],
                 needs_directive_number=row["needs_directive_number"],
                 needs_invoice_check=row["needs_invoice_check"],
@@ -652,7 +671,7 @@ class ActDBService:
     async def get_act_by_id(self, act_id: int) -> ActResponse:
         """Получает полную информацию об акте по его ID."""
         act_row = await self.conn.fetchrow(
-            """
+            f"""
             SELECT 
                 id, km_number, part_number, total_parts,
                 inspection_name, city, created_date,
@@ -663,7 +682,7 @@ class ActDBService:
                 needs_invoice_check, needs_service_note,
                 created_at, updated_at, created_by,
                 last_edited_by, last_edited_at
-            FROM acts 
+            FROM {self.acts}
             WHERE id = $1
             """,
             act_id,
@@ -673,9 +692,9 @@ class ActDBService:
             raise ValueError(f"Акт ID={act_id} не найден")
 
         team_rows = await self.conn.fetch(
-            """
+            f"""
             SELECT role, full_name, position, username
-            FROM audit_team_members
+            FROM {self.audit_team}
             WHERE act_id = $1
             ORDER BY order_index
             """,
@@ -693,9 +712,9 @@ class ActDBService:
         ]
 
         directive_rows = await self.conn.fetch(
-            """
+            f"""
             SELECT point_number, directive_number
-            FROM act_directives
+            FROM {self.directives}
             WHERE act_id = $1
             ORDER BY order_index
             """,
@@ -795,9 +814,9 @@ class ActDBService:
                     )
 
                     exists = await self.conn.fetchval(
-                        """
+                        f"""
                         SELECT EXISTS(
-                            SELECT 1 FROM acts 
+                            SELECT 1 FROM {self.acts}
                             WHERE km_number_digit = $1 
                               AND part_number = $2 
                               AND id != $3
@@ -840,9 +859,9 @@ class ActDBService:
                     )
 
                     exists = await self.conn.fetchval(
-                        """
+                        f"""
                         SELECT EXISTS(
-                            SELECT 1 FROM acts 
+                            SELECT 1 FROM {self.acts}
                             WHERE km_number_digit = $1 
                               AND part_number = $2
                               AND id != $3
@@ -941,18 +960,14 @@ class ActDBService:
                 param_idx += 1
 
             # АВТО-СБРОС СЛУЖЕБНЫХ ФЛАГОВ (кроме фактуры)
-            # Берём текущие значения флагов
             needs_created_date = getattr(current_act, "needs_created_date", None)
             needs_directive_number = getattr(current_act, "needs_directive_number", None)
             needs_service_note = getattr(current_act, "needs_service_note", None)
-            # needs_invoice_check трогать не нужно — по твоему описанию снимают админы
 
-            # Дата составления: если была проблема и теперь дата передана и не None — снимаем флаг
             if needs_created_date:
                 if act_update.created_date is not None:
                     needs_created_date = False
 
-            # Поручения: если был флаг и в апдейте есть directives с номерами — снимаем
             if needs_directive_number:
                 if act_update.directives is not None and len(act_update.directives) > 0:
                     all_have_numbers = all(
@@ -962,13 +977,11 @@ class ActDBService:
                     if all_have_numbers:
                         needs_directive_number = False
 
-            # Служебка: если был флаг и пришла непустая строка в service_note — снимаем
             if needs_service_note:
                 if act_update.service_note is not None:
                     if act_update.service_note.strip():
                         needs_service_note = False
 
-            # Добавляем в UPDATE только если флаг действительно поменялся (не None и изменился)
             if needs_created_date is not None and needs_created_date != current_act.needs_created_date:
                 updates.append(f"needs_created_date = ${param_idx}")
                 values.append(needs_created_date)
@@ -996,7 +1009,7 @@ class ActDBService:
 
                 await self.conn.execute(
                     f"""
-                    UPDATE acts
+                    UPDATE {self.acts}
                     SET {', '.join(updates)}
                     WHERE id = ${param_idx}
                     """,
@@ -1006,14 +1019,14 @@ class ActDBService:
             # Аудиторская группа
             if act_update.audit_team is not None:
                 await self.conn.execute(
-                    "DELETE FROM audit_team_members WHERE act_id = $1",
+                    f"DELETE FROM {self.audit_team} WHERE act_id = $1",
                     act_id,
                 )
 
                 for idx, member in enumerate(act_update.audit_team):
                     await self.conn.execute(
-                        """
-                        INSERT INTO audit_team_members (
+                        f"""
+                        INSERT INTO {self.audit_team} (
                             act_id, role, full_name, position, username, order_index
                         )
                         VALUES ($1, $2, $3, $4, $5, $6)
@@ -1029,14 +1042,14 @@ class ActDBService:
             # Поручения
             if act_update.directives is not None:
                 await self.conn.execute(
-                    "DELETE FROM act_directives WHERE act_id = $1",
+                    f"DELETE FROM {self.directives} WHERE act_id = $1",
                     act_id,
                 )
 
                 for idx, directive in enumerate(act_update.directives):
                     await self.conn.execute(
-                        """
-                        INSERT INTO act_directives (
+                        f"""
+                        INSERT INTO {self.directives} (
                             act_id, point_number, directive_number, order_index
                         )
                         VALUES ($1, $2, $3, $4)
@@ -1104,7 +1117,7 @@ class ActDBService:
                 new_name = f"{base_name} (Копия {next_num})"
 
             exists = await self.conn.fetchval(
-                "SELECT EXISTS(SELECT 1 FROM acts WHERE inspection_name = $1)",
+                f"SELECT EXISTS(SELECT 1 FROM {self.acts} WHERE inspection_name = $1)",
                 new_name,
             )
 
@@ -1163,14 +1176,14 @@ class ActDBService:
         new_act = await self.create_act(new_act_data, username, force_new_part=True)
 
         tree_row = await self.conn.fetchrow(
-            "SELECT tree_data FROM act_tree WHERE act_id = $1",
+            f"SELECT tree_data FROM {self.tree} WHERE act_id = $1",
             act_id,
         )
 
         if tree_row:
             await self.conn.execute(
-                """
-                UPDATE act_tree
+                f"""
+                UPDATE {self.tree}
                 SET tree_data = $1
                 WHERE act_id = $2
                 """,
@@ -1179,14 +1192,14 @@ class ActDBService:
             )
 
         tables = await self.conn.fetch(
-            "SELECT * FROM act_tables WHERE act_id = $1",
+            f"SELECT * FROM {self.tables} WHERE act_id = $1",
             act_id,
         )
 
         for table in tables:
             await self.conn.execute(
-                """
-                INSERT INTO act_tables (
+                f"""
+                INSERT INTO {self.tables} (
                     act_id, table_id, node_id, node_number, table_label,
                     grid_data, col_widths, is_protected, is_deletable,
                     is_metrics_table, is_main_metrics_table,
@@ -1215,14 +1228,14 @@ class ActDBService:
             )
 
         textblocks = await self.conn.fetch(
-            "SELECT * FROM act_textblocks WHERE act_id = $1",
+            f"SELECT * FROM {self.textblocks} WHERE act_id = $1",
             act_id,
         )
 
         for tb in textblocks:
             await self.conn.execute(
-                """
-                INSERT INTO act_textblocks (
+                f"""
+                INSERT INTO {self.textblocks} (
                     act_id, textblock_id, node_id, node_number, content, formatting
                 )
                 VALUES ($1, $2, $3, $4, $5, $6)
@@ -1236,14 +1249,14 @@ class ActDBService:
             )
 
         violations = await self.conn.fetch(
-            "SELECT * FROM act_violations WHERE act_id = $1",
+            f"SELECT * FROM {self.violations} WHERE act_id = $1",
             act_id,
         )
 
         for v in violations:
             await self.conn.execute(
-                """
-                INSERT INTO act_violations (
+                f"""
+                INSERT INTO {self.violations} (
                     act_id, violation_id, node_id, node_number, violated, established,
                     description_list, additional_content, reasons, consequences,
                     responsible, recommendations
@@ -1282,25 +1295,22 @@ class ActDBService:
         """
         Удаляет акт и все связанные данные.
 
-        Упрощенная логика:
-        - НЕ пересчитываем номера частей других актов
-        - Только обновляем total_parts
+        Использует метод адаптера для корректного удаления
+        в зависимости от типа СУБД.
         """
         act = await self.get_act_by_id(act_id)
         km_digit = KMUtils.extract_km_digits(act.km_number)
 
         async with self.conn.transaction():
-            await self.conn.execute(
-                "DELETE FROM acts WHERE id = $1",
-                act_id,
-            )
+            # Используем адаптер для удаления
+            await self.adapter.delete_act_cascade(self.conn, act_id)
 
+            # Обновляем total_parts
             await self._update_total_parts_for_km(km_digit)
 
             logger.info(
                 f"Акт ID={act_id} (КМ={act.km_number}, часть {act.part_number}, "
-                f"СЗ={act.service_note}) удален со всеми связанными данными. "
-                f"Обновлен total_parts для КМ (цифры)={km_digit}"
+                f"СЗ={act.service_note}) удален через {self.adapter.__class__.__name__}"
             )
 
     # -------------------------------------------------------------------------
@@ -1310,10 +1320,10 @@ class ActDBService:
     async def check_user_access(self, act_id: int, username: str) -> bool:
         """Проверяет имеет ли пользователь доступ к акту."""
         result = await self.conn.fetchval(
-            """
+            f"""
             SELECT EXISTS(
                 SELECT 1
-                FROM audit_team_members
+                FROM {self.audit_team}
                 WHERE act_id = $1 AND username = $2
             )
             """,

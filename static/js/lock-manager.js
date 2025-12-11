@@ -15,7 +15,7 @@ class LockManager {
     static _lastExtensionAt = Date.now();
     static _warningShown = false;
     static _isExiting = false;
-    static _manualUnlockTriggered = false; // 🔒 предотвращает лишний unlock
+    static _manualUnlockTriggered = false;
     static _beforeUnloadHandler = null;
 
     /**

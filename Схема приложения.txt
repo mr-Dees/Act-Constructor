@@ -20,8 +20,16 @@ Act Constructor/
 │   │   ├── __init__.py
 │   │   └── config.py
 │   ├── db/
+│   │   ├── adapters/
+│   │   │   ├── __init__.py
+│   │   │   ├── base.py
+│   │   │   ├── greenplum.py
+│   │   │   └── postgresql.py
 │   │   ├── migrations/
-│   │   │   └── schema.sql
+│   │   │   ├── greenplum/
+│   │   │   │   └── schema.sql
+│   │   │   └── postgresql/
+│   │   │       └── schema.sql
 │   │   ├── queries/
 │   │   │   ├── __init__.py
 │   │   │   ├── act_filters.py
