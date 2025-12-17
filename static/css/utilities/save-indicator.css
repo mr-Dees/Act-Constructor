@@ -104,26 +104,26 @@
 /* Состояние: не сохранено (красный) */
 .save-indicator-button.unsaved {
     color: var(--error);
-    background: var(--save-unsaved-bg-enhanced);
-    border-color: var(--save-unsaved-border-enhanced);
-    box-shadow: var(--shadow-glow-sm) var(--save-unsaved-glow);
+    background: var(--save-error-bg);
+    border-color: var(--save-error-border);
+    box-shadow: var(--shadow-glow-sm) var(--save-error-glow);
 }
 
 .save-indicator-button.unsaved:hover {
-    background: var(--save-unsaved-bg-hover);
-    border-color: var(--save-unsaved-border-hover);
+    background: var(--save-error-bg-hover);
+    border-color: var(--save-error-border-hover);
     transform: translateY(var(--save-indicator-hover-translate));
-    box-shadow: var(--shadow-glow-md) var(--save-unsaved-glow-enhanced);
+    box-shadow: var(--shadow-glow-md) var(--save-error-glow-enhanced);
 }
 
 .save-indicator-button.unsaved:active {
     transform: translateY(0);
-    box-shadow: var(--shadow-glow-sm) var(--save-unsaved-glow);
+    box-shadow: var(--shadow-glow-sm) var(--save-error-glow);
 }
 
 .save-indicator-button.unsaved svg {
     animation: pulse var(--duration-pulse-urgent) ease-in-out infinite;
-    filter: drop-shadow(0 0 var(--translate-md) var(--save-unsaved-shadow));
+    filter: drop-shadow(0 0 var(--translate-md) var(--save-error-shadow));
 }
 
 /* Состояние: процесс сохранения */

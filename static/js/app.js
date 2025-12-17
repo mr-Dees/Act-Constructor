@@ -137,18 +137,13 @@ class App {
                 e.preventDefault();
                 e.stopImmediatePropagation();
 
-                if (AppState.currentStep === 1) {
-                    // На шаге 1 - только локальное сохранение
-                    StorageManager.forceSave();
-                } else if (AppState.currentStep === 2) {
-                    // На шаге 2 - сохранение с блокировкой + генерация
-                    await StorageManager.forceSaveAsync();
+                // Сохранение с блокировкой + генерация
+                await StorageManager.forceSaveAsync();
 
-                    // Генерация уже внутри блокирует отслеживание
-                    const generateBtn = document.getElementById('generateBtn');
-                    if (generateBtn) {
-                        generateBtn.click();
-                    }
+                // Генерация уже внутри блокирует отслеживание
+                const generateBtn = document.getElementById('generateBtn');
+                if (generateBtn) {
+                    generateBtn.click();
                 }
             }
         });

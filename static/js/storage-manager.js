@@ -125,14 +125,19 @@ class StorageManager {
             // Обновляем UI шагов в заголовке
             this._updateStepUI(savedStep);
 
-            // Включаем отслеживание обратно
-            this._trackingDisabled = false;
-
             console.log('Состояние успешно восстановлено из localStorage');
 
-            // Помечаем как сохраненное в localStorage, но не синхронизированное с БД
+            // 🔧 ИСПРАВЛЕНИЕ: устанавливаем правильные флаги
+            // После восстановления из localStorage:
+            // - нет несохраненных изменений В ЛОКАЛСТОРАДЖ
+            // - но данные НЕ синхронизированы с БД
             this._hasUnsavedChanges = false;
             this._isSyncedWithDB = false;
+
+            // Включаем отслеживание ПОСЛЕ установки флагов
+            this._trackingDisabled = false;
+
+            // Обновляем индикатор ПОСЛЕ включения отслеживания
             this._updateSaveIndicator();
 
             return true;
@@ -312,8 +317,11 @@ class StorageManager {
             return;
         }
 
+        // 🔧 ИСПРАВЛЕНИЕ: устанавливаем оба флага одновременно
         this._hasUnsavedChanges = true;
         this._isSyncedWithDB = false;
+
+        // Обновляем индикатор
         this._updateSaveIndicator();
 
         // Запускаем дебаунс автосохранения
@@ -325,6 +333,8 @@ class StorageManager {
      * @private
      */
     static _markAsSaved() {
+        // 🔧 ИСПРАВЛЕНИЕ: сбрасываем только флаг несохраненных изменений
+        // Флаг синхронизации с БД остается как есть
         this._hasUnsavedChanges = false;
         this._updateSaveIndicator();
     }
@@ -333,6 +343,7 @@ class StorageManager {
      * Помечает состояние как синхронизированное с БД
      */
     static markAsSyncedWithDB() {
+        // 🔧 ИСПРАВЛЕНИЕ: при синхронизации с БД оба флага сбрасываются
         this._hasUnsavedChanges = false;
         this._isSyncedWithDB = true;
         this._updateSaveIndicator();
@@ -377,6 +388,8 @@ class StorageManager {
             const timestamp = new Date().toISOString();
             localStorage.setItem(AppConfig.localStorage.timestampKey, timestamp);
 
+            // 🔧 ИСПРАВЛЕНИЕ: при сохранении в localStorage меняем ТОЛЬКО флаг несохраненных изменений
+            // Флаг синхронизации с БД НЕ трогаем
             this._markAsSaved();
 
             if (!silent) {
@@ -556,8 +569,11 @@ class StorageManager {
         try {
             localStorage.removeItem(AppConfig.localStorage.stateKey);
             localStorage.removeItem(AppConfig.localStorage.timestampKey);
+
+            // 🔧 ИСПРАВЛЕНИЕ: при очистке сбрасываем оба флага
             this._hasUnsavedChanges = false;
             this._isSyncedWithDB = true;
+
             this._updateSaveIndicator();
             console.log('localStorage очищен');
         } catch (error) {
@@ -589,7 +605,7 @@ class StorageManager {
     /**
      * Обновляет индикатор сохранности в UI
      * Три состояния:
-     * - saved (белый): сохранено в localStorage и БД
+     * - saved (белый): сохранено в localStorage И БД
      * - local-only (желтый): сохранено только в localStorage
      * - unsaved (красный): не сохранено нигде
      * @private
@@ -603,8 +619,9 @@ class StorageManager {
         // Удаляем все классы состояний
         button.classList.remove('saved', 'local-only', 'unsaved');
 
+        // 🔧 ИСПРАВЛЕНИЕ: упрощенная и более понятная логика
         if (this._hasUnsavedChanges) {
-            // Красный: не сохранено даже в localStorage
+            // Красный: есть изменения, которые не сохранены даже в localStorage
             button.classList.add('unsaved');
             button.disabled = false;
             button.title = 'Сохранить изменения (Ctrl+S)';
@@ -622,6 +639,14 @@ class StorageManager {
             button.title = 'Все изменения сохранены';
             label.textContent = 'Сохранено';
         }
+
+        // Дополнительный лог для отладки
+        console.log('Индикатор обновлен:', {
+            hasUnsavedChanges: this._hasUnsavedChanges,
+            isSyncedWithDB: this._isSyncedWithDB,
+            state: button.classList.contains('unsaved') ? 'unsaved' :
+                button.classList.contains('local-only') ? 'local-only' : 'saved'
+        });
     }
 
     /**
