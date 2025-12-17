@@ -1016,7 +1016,7 @@ class CreateActDialog extends DialogBase {
             const value = e.target.value.trim();
 
             if (value === '' && serviceDateInput.value) {
-                // ИСПРАВЛЕНИЕ: Используем DialogManager вместо браузерного confirm
+                // Используем DialogManager вместо браузерного confirm
                 const confirmed = await DialogManager.show({
                     title: 'Удаление служебной записки',
                     message: 'Вы удаляете номер служебной записки. Очистить также и дату?',

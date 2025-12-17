@@ -127,22 +127,22 @@ class TableManager {
             });
         });
 
-        // ИСПРАВЛЕНИЕ: Обработка ручек изменения ширины колонок
+        // Обработка ручек изменения ширины колонок
         container.querySelectorAll('.resize-handle').forEach(handle => {
             handle.addEventListener('mousedown', (e) => {
                 e.preventDefault();
                 e.stopPropagation();
-                // КРИТИЧЕСКОЕ ИСПРАВЛЕНИЕ: делегируем к модулю sizes
+                // Делегируем к модулю sizes
                 this.sizes.startColumnResize(e);
             });
         });
 
-        // ИСПРАВЛЕНИЕ: Обработка ручек изменения высоты строк
+        // Обработка ручек изменения высоты строк
         container.querySelectorAll('.row-resize-handle').forEach(handle => {
             handle.addEventListener('mousedown', (e) => {
                 e.preventDefault();
                 e.stopPropagation();
-                // КРИТИЧЕСКОЕ ИСПРАВЛЕНИЕ: делегируем к модулю sizes
+                // Делегируем к модулю sizes
                 this.sizes.startRowResize(e);
             });
         });

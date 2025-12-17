@@ -427,7 +427,7 @@ class ActsManagerPage {
 
             let lockAcquired = false;
 
-            // ВАЖНО: в конструкторе акт уже заблокирован, поэтому
+            // В конструкторе акт уже заблокирован, поэтому
             // здесь блокируем ТОЛЬКО если открываем метаданные из списка актов (acts-manager page),
             // где window.currentActId, как правило, не задан.
             if (typeof window.currentActId === 'undefined' && typeof LockManager !== 'undefined') {

@@ -35,7 +35,7 @@ class TableSizes {
         // Поиск следующей колонки для компенсирующего изменения ширины
         const allRows = table.querySelectorAll('tr');
 
-        // ИСПРАВЛЕНИЕ: ищем следующую колонку на основе реальной структуры grid
+        // Ищем следующую колонку на основе реальной структуры grid
         // Используем первую строку для определения всех колонок
         let nextColIndex = colIndex + 1;
         let nextCell = null;
@@ -107,7 +107,7 @@ class TableSizes {
             const newWidthPx = (newWidthPercent / 100) * tableWidth;
             resizeLine.style.left = `${startX + (newWidthPx - startWidth)}px`;
 
-            // ИСПРАВЛЕНИЕ: применяем размеры только к ячейкам в той же колонке
+            // Применяем размеры только к ячейкам в той же колонке
             allRows.forEach(row => {
                 const cellsInRow = row.querySelectorAll('td, th');
                 cellsInRow.forEach(rowCell => {
