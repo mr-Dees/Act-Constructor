@@ -658,7 +658,7 @@ class CreateActDialog extends DialogBase {
      * Добавляет члена аудиторской группы
      * @private
      */
-    static _addTeamMember(dialog, role = 'Руководитель', fullName = '', position = '', username = '') {
+    static _addTeamMember(dialog, role = 'Участник', fullName = '', position = '', username = '') {
         const container = dialog.querySelector('#auditTeamContainer');
         if (!container) return;
 
