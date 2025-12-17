@@ -98,7 +98,7 @@ class ActsMenuManager {
         const username = AuthManager.getCurrentUser();
         if (!username) throw new Error('Пользователь не авторизован');
 
-        const response = await fetch('/api/v1/acts/list', {
+        const response = await fetch(AppConfig.api.getUrl('/api/v1/acts/list'), {
             headers: {'X-JupyterHub-User': username}
         });
         if (!response.ok) throw new Error('Ошибка загрузки списка актов');
@@ -350,7 +350,7 @@ class ActsMenuManager {
             await APIClient.loadActContent(actId);
             this.currentActId = actId;
             window.currentActId = actId;
-            window.history.pushState({actId}, '', `/constructor?act_id=${actId}`);
+            window.history.pushState({actId}, '', AppConfig.api.getUrl(`/constructor?act_id=${actId}`));
             StorageManager.markAsSyncedWithDB();
             this._clearCache();
             Notifications.success('Акт успешно загружен');
@@ -377,7 +377,7 @@ class ActsMenuManager {
 
         try {
             const username = AuthManager.getCurrentUser();
-            const response = await fetch(`/api/v1/acts/${actId}`, {
+            const response = await fetch(AppConfig.api.getUrl(`/api/v1/acts/${actId}`), {
                 headers: {'X-JupyterHub-User': username}
             });
             if (!response.ok) throw new Error('Ошибка загрузки данных акта');
@@ -409,7 +409,7 @@ class ActsMenuManager {
 
         try {
             const username = AuthManager.getCurrentUser();
-            const response = await fetch(`/api/v1/acts/${actId}/duplicate`, {
+            const response = await fetch(AppConfig.api.getUrl(`/api/v1/acts/${actId}/duplicate`), {
                 method: 'POST',
                 headers: {'X-JupyterHub-User': username}
             });
@@ -420,7 +420,7 @@ class ActsMenuManager {
             const newAct = await response.json();
             this._clearCache();
             Notifications.success(`Копия создана: ${newAct.inspection_name}`);
-            window.location.href = `/constructor?act_id=${newAct.id}`;
+            window.location.href = AppConfig.api.getUrl(`/constructor?act_id=${newAct.id}`);
         } catch (err) {
             console.error('Ошибка дублирования акта:', err);
             Notifications.error(`Не удалось создать копию: ${err.message}`);

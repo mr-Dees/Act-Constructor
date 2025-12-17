@@ -73,7 +73,7 @@ class LockManager {
         }
 
         try {
-            const resp = await fetch(`/api/v1/acts/${this._actId}/unlock`, {
+            const resp = await fetch(AppConfig.api.getUrl(`/api/v1/acts/${this._actId}/unlock`), {
                 method: 'POST',
                 headers: {
                     'Content-Type': 'application/json',
@@ -97,7 +97,7 @@ class LockManager {
      */
     static async _loadConfig() {
         try {
-            const response = await fetch('/api/v1/system/config/lock');
+            const response = await fetch(AppConfig.api.getUrl('/api/v1/system/config/lock'));
             if (!response.ok) throw new Error('Не удалось загрузить настройки');
             this._config = await response.json();
             console.log('Настройки блокировок загружены:', this._config);
@@ -131,7 +131,7 @@ class LockManager {
      */
     static async _lockAct() {
         const username = AuthManager.getCurrentUser();
-        const response = await fetch(`/api/v1/acts/${this._actId}/lock`, {
+        const response = await fetch(AppConfig.api.getUrl(`/api/v1/acts/${this._actId}/lock`), {
             method: 'POST',
             headers: {
                 'Content-Type': 'application/json',
@@ -180,7 +180,7 @@ class LockManager {
     static async _extendLock() {
         const username = AuthManager.getCurrentUser();
         try {
-            const response = await fetch(`/api/v1/acts/${this._actId}/extend-lock`, {
+            const response = await fetch(AppConfig.api.getUrl(`/api/v1/acts/${this._actId}/extend-lock`), {
                 method: 'POST',
                 headers: {
                     'Content-Type': 'application/json',
@@ -276,7 +276,7 @@ class LockManager {
                 {type: 'application/json'}
             );
 
-            navigator.sendBeacon(`/api/v1/acts/${this._actId}/unlock`, blob);
+            navigator.sendBeacon(AppConfig.api.getUrl(`/api/v1/acts/${this._actId}/unlock`), blob);
             console.log('BeforeUnload → отправлен beacon для unlock');
         };
         window.addEventListener('beforeunload', this._beforeUnloadHandler);
@@ -374,7 +374,7 @@ class LockManager {
             if (typeof AppState !== 'undefined' && AppState?.exportData) {
                 try {
                     const data = AppState.exportData();
-                    const saveResp = await fetch(`/api/v1/acts_content/${this._actId}/content`, {
+                    const saveResp = await fetch(AppConfig.api.getUrl(`/api/v1/acts_content/${this._actId}/content`), {
                         method: 'PUT',
                         headers: {
                             'Content-Type': 'application/json',
@@ -398,7 +398,7 @@ class LockManager {
             // --- 2️⃣ Снимаем блокировку ---
             if (this._actId && username) {
                 try {
-                    const resp = await fetch(`/api/v1/acts/${this._actId}/unlock`, {
+                    const resp = await fetch(AppConfig.api.getUrl(`/api/v1/acts/${this._actId}/unlock`), {
                         method: 'POST',
                         headers: {
                             'Content-Type': 'application/json',

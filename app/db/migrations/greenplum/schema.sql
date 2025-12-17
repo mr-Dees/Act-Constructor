@@ -7,7 +7,7 @@
 -- ============================================================================
 
 CREATE TABLE {SCHEMA}.{PREFIX}acts (
-    id BIGSERIAL,
+    id BIGSERIAL PRIMARY KEY,
 
     -- Номер КМ и части
     km_number VARCHAR(50) NOT NULL,
@@ -45,13 +45,10 @@ CREATE TABLE {SCHEMA}.{PREFIX}acts (
     updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     created_by VARCHAR(50) NOT NULL,
     last_edited_by VARCHAR(50),
-    last_edited_at TIMESTAMP,
-
-    -- PRIMARY KEY включает km_number_digit для распределения
-    PRIMARY KEY (km_number_digit, part_number, id)
+    last_edited_at TIMESTAMP
 )
 WITH (appendonly=false)
-DISTRIBUTED BY (km_number_digit);
+DISTRIBUTED BY (id);
 
 -- ============================================================================
 -- ТАБЛИЦА АУДИТОРСКОЙ ГРУППЫ

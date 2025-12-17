@@ -16,6 +16,71 @@ class AppConfig {
         VIOLATION: 'violation'
     };
 
+    /**
+     * Настройки API и URL
+     */
+    static api = {
+        /**
+         * Кеш базового URL (вычисляется один раз)
+         * @private
+         */
+        _baseUrlCache: null,
+
+        /**
+         * Получает базовый URL приложения с учетом прокси JupyterHub
+         * @returns {string}
+         */
+        getBaseUrl() {
+            // Используем кеш если уже вычислили
+            if (this._baseUrlCache !== null) {
+                return this._baseUrlCache;
+            }
+
+            const origin = window.location.origin;
+            const pathname = window.location.pathname;
+
+            // Проверяем, работаем ли мы через JupyterHub прокси
+            // Формат: /user/USERNAME/proxy/PORT/
+            const proxyMatch = pathname.match(/^(\/user\/[^\/]+\/proxy\/\d+)/);
+
+            if (proxyMatch) {
+                // Сохраняем в кеш и возвращаем полный путь с прокси префиксом
+                this._baseUrlCache = `${origin}${proxyMatch[1]}`;
+                console.log('Обнаружен JupyterHub прокси, базовый URL:', this._baseUrlCache);
+            } else {
+                // Для локальной разработки или прямого доступа
+                this._baseUrlCache = origin;
+                console.log('Прямой доступ (без прокси), базовый URL:', this._baseUrlCache);
+            }
+
+            return this._baseUrlCache;
+        },
+
+        /**
+         * Формирует полный URL для API эндпоинта
+         * @param {string} endpoint - путь эндпоинта (например, '/api/v1/auth/me' или 'api/v1/auth/me')
+         * @returns {string} - полный URL с учетом прокси
+         *
+         * @example
+         * // Локально: 'http://localhost:8000/api/v1/auth/me'
+         * // Через прокси: 'https://jupyterhub.../user/USERNAME/proxy/8000/api/v1/auth/me'
+         */
+        getUrl(endpoint) {
+            const baseUrl = this.getBaseUrl();
+            // Убираем начальный слеш если есть для корректной конкатенации
+            const cleanEndpoint = endpoint.startsWith('/') ? endpoint.slice(1) : endpoint;
+            return `${baseUrl}/${cleanEndpoint}`;
+        },
+
+        /**
+         * Сбрасывает кеш базового URL (для тестирования)
+         * @private
+         */
+        _resetCache() {
+            this._baseUrlCache = null;
+        }
+    };
+
     static lock = {
         // Продолжительность блокировки на сервере (минуты) - фолбэк значение
         lockDurationMinutes: 30,
@@ -452,14 +517,6 @@ class AppConfig {
             key: 'KeyS',
             ctrlOrMeta: true
         }
-    };
-
-    /**
-     * Настройки контекстного меню
-     * TODO: Добавить настройки API при работе с модулем
-     */
-    static api = {
-        // Здесь будут настройки контекстного меню
     };
 
     /**

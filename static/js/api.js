@@ -9,7 +9,7 @@ class APIClient {
     static async lockAct(actId) {
         const username = AuthManager.getCurrentUser();
 
-        const response = await fetch(`/api/v1/acts/${actId}/lock`, {
+        const response = await fetch(AppConfig.api.getUrl(`/api/v1/acts/${actId}/lock`), {
             method: 'POST',
             headers: {
                 'Content-Type': 'application/json',
@@ -28,7 +28,7 @@ class APIClient {
     static async unlockAct(actId) {
         const username = AuthManager.getCurrentUser();
 
-        const response = await fetch(`/api/v1/acts/${actId}/unlock`, {
+        const response = await fetch(AppConfig.api.getUrl(`/api/v1/acts/${actId}/unlock`), {
             method: 'POST',
             headers: {
                 'Content-Type': 'application/json',
@@ -47,7 +47,7 @@ class APIClient {
     static async extendLock(actId) {
         const username = AuthManager.getCurrentUser();
 
-        const response = await fetch(`/api/v1/acts/${actId}/extend-lock`, {
+        const response = await fetch(AppConfig.api.getUrl(`/api/v1/acts/${actId}/extend-lock`), {
             method: 'POST',
             headers: {
                 'Content-Type': 'application/json',
@@ -129,8 +129,8 @@ class APIClient {
      */
     static async _generateSingleFormat(format, data) {
         try {
-            const response = await fetch(
-                `/api/v1/acts_export/save_act?fmt=${format}`,
+            const response = await fetch(AppConfig.api.getUrl(
+                `/api/v1/acts_export/save_act?fmt=${format}`),
                 {
                     method: 'POST',
                     headers: {'Content-Type': 'application/json'},
@@ -252,8 +252,8 @@ class APIClient {
      */
     static async downloadFile(filename) {
         try {
-            const response = await fetch(
-                `/api/v1/acts_export/download/${filename}`
+            const response = await fetch(AppConfig.api.getUrl(
+                `/api/v1/acts_export/download/${filename}`)
             );
 
             if (!response.ok) {
@@ -305,7 +305,7 @@ class APIClient {
         }
 
         try {
-            const resp = await fetch(`/api/v1/acts_content/${actId}/content`, {
+            const resp = await fetch(AppConfig.api.getUrl(`/api/v1/acts_content/${actId}/content`), {
                 headers: {'X-JupyterHub-User': username}
             });
 
@@ -394,7 +394,7 @@ class APIClient {
         try {
             const data = AppState.exportData();
 
-            const resp = await fetch(`/api/v1/acts_content/${actId}/content`, {
+            const resp = await fetch(AppConfig.api.getUrl(`/api/v1/acts_content/${actId}/content`), {
                 method: 'PUT',
                 headers: {
                     'Content-Type': 'application/json',
@@ -434,7 +434,7 @@ class APIClient {
 
             const data = AppState.exportData();
 
-            const resp = await fetch(`/api/v1/acts_content/${actId}/content`, {
+            const resp = await fetch(AppConfig.api.getUrl(`/api/v1/acts_content/${actId}/content`), {
                 method: 'PUT',
                 headers: {
                     'Content-Type': 'application/json',
@@ -486,7 +486,7 @@ class APIClient {
         }
 
         try {
-            const resp = await fetch(`/api/v1/acts/${actId}`, {
+            const resp = await fetch(AppConfig.api.getUrl(`/api/v1/acts/${actId}`), {
                 method: 'DELETE',
                 headers: {'X-JupyterHub-User': username}
             });

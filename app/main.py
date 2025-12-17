@@ -19,14 +19,61 @@ from fastapi.templating import Jinja2Templates
 from starlette.middleware.base import BaseHTTPMiddleware
 
 from app.api.v1.deps.auth_deps import get_username
+from app.api.v1.endpoints.auth import get_current_user_from_env
 from app.api.v1.routes import api_router as api_v1_router
 from app.core.config import Settings, setup_logging
-from app.db.connection import init_db, close_db, create_tables_if_not_exist, get_db
+from app.db.connection import (
+    init_db,
+    close_db,
+    create_tables_if_not_exist,
+    get_db,
+    KerberosTokenExpiredError
+)
 from app.db.repositories.act_repository import ActDBService
 
 # Инициализируем настройки и логирование один раз на уровне модуля
 settings = Settings()
 logger = setup_logging(settings.log_level)
+
+root_path = ''
+if settings.db_type == 'greenplum':
+    root_path = f"/user/{get_current_user_from_env(truncate=False)}/proxy/{settings.port}"
+
+
+class HTTPSRedirectMiddleware(BaseHTTPMiddleware):
+    """
+    Middleware для форсирования HTTPS схемы в запросах.
+
+    Необходим для корректной работы url_for() за прокси JupyterHub,
+    который проксирует HTTPS, но отправляет запросы по HTTP.
+    """
+
+    async def dispatch(self, request: Request, call_next):
+        """
+        Перезаписывает схему на HTTPS если запрос пришел через прокси.
+
+        Args:
+            request: HTTP запрос
+            call_next: Следующий middleware в цепочке
+
+        Returns:
+            HTTP ответ
+        """
+        # Проверяем заголовки прокси
+        forwarded_proto = request.headers.get("x-forwarded-proto")
+        forwarded_scheme = request.headers.get("x-scheme")
+
+        # Если есть признаки HTTPS прокси - форсируем HTTPS
+        if forwarded_proto == "https" or forwarded_scheme == "https":
+            # Создаем новый scope с HTTPS схемой
+            scope = request.scope
+            scope["scheme"] = "https"
+
+            # Пересоздаем Request с новым scope
+            request = Request(scope, request.receive)
+
+        response = await call_next(request)
+        return response
 
 
 class RateLimitMiddleware(BaseHTTPMiddleware):
@@ -169,14 +216,36 @@ async def lifespan(app: FastAPI):
     settings.ensure_directories()
 
     # ИНИЦИАЛИЗАЦИЯ БД
-    await init_db(settings)
-    logger.info("База данных инициализирована")
+    try:
+        await init_db(settings)
+        logger.info("База данных инициализирована")
 
-    # СОЗДАНИЕ ТАБЛИЦ ЕСЛИ НЕ СУЩЕСТВУЮТ
-    await create_tables_if_not_exist()
-    logger.info("Схема базы данных проверена")
+        # СОЗДАНИЕ ТАБЛИЦ ЕСЛИ НЕ СУЩЕСТВУЮТ
+        await create_tables_if_not_exist()
+        logger.info("Схема базы данных проверена")
 
-    logger.info("Приложение успешно инициализировано")
+        logger.info("Приложение успешно инициализировано")
+
+    except KerberosTokenExpiredError as e:
+        logger.critical(
+            "\n" + "=" * 80 + "\n"
+                              "КРИТИЧЕСКАЯ ОШИБКА: Не удалось запустить приложение\n"
+                              "=" * 80 + "\n"
+                                         "Причина: Kerberos токен авторизации протух\n\n"
+                                         "Решение:\n"
+                                         "1. Откройте терминал JupyterHub\n"
+                                         "2. Выполните команду: kinit\n"
+                                         "3. Введите ваш пароль\n"
+                                         "4. Перезапустите приложение\n"
+                                         "=" * 80
+        )
+        raise RuntimeError(
+            "Приложение не может запуститься без валидного Kerberos токена. "
+            "Выполните 'kinit' в терминале."
+        ) from e
+    except Exception as e:
+        logger.critical(f"Критическая ошибка при запуске приложения: {e}")
+        raise
 
     yield
 
@@ -216,14 +285,21 @@ def create_app() -> FastAPI:
         title=settings.app_title,
         version=settings.app_version,
         description="API для создания и управления актами",
-        lifespan=lifespan
+        lifespan=lifespan,
+        root_path=root_path
     )
 
-    # Добавляем middleware для ограничений (сначала размер, потом rate limit)
+    # Добавляем middleware в правильном порядке (первый = последний в цепочке)
+    # 1. HTTPS redirect (самый первый - работает с исходным запросом)
+    app.add_middleware(HTTPSRedirectMiddleware)
+
+    # 2. Request size limit
     app.add_middleware(
         RequestSizeLimitMiddleware,
         max_size=settings.max_request_size
     )
+
+    # 3. Rate limiting (последний)
     app.add_middleware(
         RateLimitMiddleware,
         rate_limit=settings.rate_limit_per_minute,
@@ -294,6 +370,41 @@ def create_app() -> FastAPI:
                 {"request": request, "act_id": act_id}
             )
 
+    # Обработчик ошибки Kerberos токена
+    @app.exception_handler(KerberosTokenExpiredError)
+    async def kerberos_token_expired_handler(
+            request: Request,
+            exc: KerberosTokenExpiredError
+    ):
+        """
+        Обработчик для протухшего Kerberos токена.
+
+        Возвращает понятное сообщение пользователю с инструкциями.
+        """
+        logger.warning(
+            f"Kerberos токен протух во время запроса: {request.url.path}"
+        )
+
+        return JSONResponse(
+            status_code=401,
+            content={
+                "error": "kerberos_token_expired",
+                "detail": "Токен авторизации Kerberos истек",
+                "message": (
+                    "Ваш токен авторизации Kerberos истек и требует обновления. "
+                    "Для продолжения работы выполните команду 'kinit' в терминале "
+                    "JupyterHub и введите ваш пароль. После этого обновите страницу."
+                ),
+                "instructions": [
+                    "Откройте терминал JupyterHub",
+                    "Выполните команду: kinit",
+                    "Введите ваш пароль",
+                    "Обновите страницу приложения"
+                ],
+                "action_required": "kinit"
+            }
+        )
+
     # Подключение API роутеров версии 1 с префиксом /api/v1
     app.include_router(
         api_v1_router,
@@ -318,5 +429,7 @@ if __name__ == "__main__":
         # Автоматическая перезагрузка при изменении кода
         reload=True,
         # Уменьшаем verbosity uvicorn логов
-        log_level="debug"
+        log_level="debug",
+        # Если работаем с greenplum через прокси, то указываем корень
+        root_path=root_path
     )

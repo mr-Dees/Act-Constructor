@@ -99,6 +99,180 @@ class ActDBService:
             "has_service_notes": has_service_notes,
         }
 
+    async def _check_km_part_uniqueness(
+            self,
+            km_digit: str,
+            part_number: int,
+            exclude_act_id: int | None = None
+    ) -> bool:
+        """
+        Проверяет уникальность пары (km_number_digit, part_number).
+
+        Args:
+            km_digit: КМ номер (только цифры)
+            part_number: Номер части
+            exclude_act_id: ID акта для исключения (при UPDATE)
+
+        Returns:
+            True если пара уникальна, False если уже существует
+        """
+        if exclude_act_id:
+            exists = await self.conn.fetchval(
+                f"""
+                SELECT EXISTS(
+                    SELECT 1 FROM {self.acts}
+                    WHERE km_number_digit = $1 
+                      AND part_number = $2
+                      AND id != $3
+                )
+                """,
+                km_digit,
+                part_number,
+                exclude_act_id
+            )
+        else:
+            exists = await self.conn.fetchval(
+                f"""
+                SELECT EXISTS(
+                    SELECT 1 FROM {self.acts}
+                    WHERE km_number_digit = $1 
+                      AND part_number = $2
+                )
+                """,
+                km_digit,
+                part_number
+            )
+
+        return not exists
+
+    async def _recreate_act_record(
+            self,
+            old_act_id: int,
+            new_data: dict
+    ) -> int:
+        """
+        Пересоздает запись акта (DELETE + INSERT).
+
+        Используется для обновления КМ/части в Greenplum,
+        где нельзя UPDATE колонки не из DISTRIBUTED BY при наличии триггеров.
+
+        Args:
+            old_act_id: ID старого акта
+            new_data: Словарь с новыми данными для INSERT
+
+        Returns:
+            ID нового акта
+        """
+        # Получаем все данные старого акта
+        old_act = await self.conn.fetchrow(
+            f"SELECT * FROM {self.acts} WHERE id = $1",
+            old_act_id
+        )
+
+        if not old_act:
+            raise ValueError(f"Акт ID={old_act_id} не найден")
+
+        # Объединяем старые данные с новыми
+        merged_data = dict(old_act)
+        merged_data.update(new_data)
+
+        # Удаляем старую запись
+        await self.conn.execute(
+            f"DELETE FROM {self.acts} WHERE id = $1",
+            old_act_id
+        )
+
+        # Вставляем новую запись
+        new_act_id = await self.conn.fetchval(
+            f"""
+            INSERT INTO {self.acts} (
+                km_number, km_number_digit, part_number, total_parts,
+                inspection_name, city, created_date,
+                order_number, order_date, is_process_based,
+                inspection_start_date, inspection_end_date,
+                service_note, service_note_date,
+                needs_created_date, needs_directive_number,
+                needs_invoice_check, needs_service_note,
+                locked_by, locked_at, lock_expires_at,
+                created_at, updated_at, created_by,
+                last_edited_by, last_edited_at
+            )
+            VALUES (
+                $1, $2, $3, $4, $5, $6, $7,
+                $8, $9, $10, $11, $12,
+                $13, $14,
+                $15, $16, $17, $18,
+                $19, $20, $21,
+                $22, CURRENT_TIMESTAMP, $23,
+                $24, $25
+            )
+            RETURNING id
+            """,
+            merged_data['km_number'],
+            merged_data['km_number_digit'],
+            merged_data['part_number'],
+            merged_data['total_parts'],
+            merged_data['inspection_name'],
+            merged_data['city'],
+            merged_data['created_date'],
+            merged_data['order_number'],
+            merged_data['order_date'],
+            merged_data['is_process_based'],
+            merged_data['inspection_start_date'],
+            merged_data['inspection_end_date'],
+            merged_data['service_note'],
+            merged_data['service_note_date'],
+            merged_data['needs_created_date'],
+            merged_data['needs_directive_number'],
+            merged_data['needs_invoice_check'],
+            merged_data['needs_service_note'],
+            merged_data['locked_by'],
+            merged_data['locked_at'],
+            merged_data['lock_expires_at'],
+            merged_data['created_at'],
+            merged_data['created_by'],
+            merged_data['last_edited_by'],
+            merged_data['last_edited_at']
+        )
+
+        # Обновляем все связанные таблицы (меняем act_id)
+        await self.conn.execute(
+            f"UPDATE {self.audit_team} SET act_id = $1 WHERE act_id = $2",
+            new_act_id, old_act_id
+        )
+
+        await self.conn.execute(
+            f"UPDATE {self.directives} SET act_id = $1 WHERE act_id = $2",
+            new_act_id, old_act_id
+        )
+
+        await self.conn.execute(
+            f"UPDATE {self.tree} SET act_id = $1 WHERE act_id = $2",
+            new_act_id, old_act_id
+        )
+
+        await self.conn.execute(
+            f"UPDATE {self.tables} SET act_id = $1 WHERE act_id = $2",
+            new_act_id, old_act_id
+        )
+
+        await self.conn.execute(
+            f"UPDATE {self.textblocks} SET act_id = $1 WHERE act_id = $2",
+            new_act_id, old_act_id
+        )
+
+        await self.conn.execute(
+            f"UPDATE {self.violations} SET act_id = $1 WHERE act_id = $2",
+            new_act_id, old_act_id
+        )
+
+        logger.info(
+            f"Акт пересоздан: старый ID={old_act_id} → новый ID={new_act_id} "
+            f"(КМ={merged_data['km_number']}, часть={merged_data['part_number']})"
+        )
+
+        return new_act_id
+
     async def _update_total_parts_for_km(self, km_digit: str) -> None:
         """
         Обновляет total_parts для всех актов с данным КМ номером.
@@ -441,10 +615,6 @@ class ActDBService:
     ) -> ActResponse:
         """
         Создает новый акт с метаданными, аудиторской группой и поручениями.
-
-        Логика нумерации:
-        - Если указана service_note: part_number берется из последних 4 цифр СЗ
-        - Если service_note не указана: part_number = первый свободный номер части
         """
         async with self.conn.transaction():
             km_digit = KMUtils.extract_km_digits(act_data.km_number)
@@ -460,18 +630,9 @@ class ActDBService:
 
                 part_number = int(suffix)
 
-                exists = await self.conn.fetchval(
-                    f"""
-                    SELECT EXISTS(
-                        SELECT 1 FROM {self.acts}
-                        WHERE km_number_digit = $1 AND part_number = $2
-                    )
-                    """,
-                    km_digit,
-                    part_number,
-                )
-
-                if exists:
+                # РУЧНАЯ ПРОВЕРКА УНИКАЛЬНОСТИ
+                is_unique = await self._check_km_part_uniqueness(km_digit, part_number)
+                if not is_unique:
                     raise ValueError(
                         f"Акт с КМ (цифры) {km_digit} и частью {part_number} уже существует"
                     )
@@ -530,6 +691,7 @@ class ActDBService:
                 act_data.inspection_end_date,
             )
 
+            # Остальной код без изменений...
             for idx, member in enumerate(act_data.audit_team):
                 await self.conn.execute(
                     f"""
@@ -769,12 +931,15 @@ class ActDBService:
     ) -> ActResponse:
         """
         Обновляет метаданные акта (частичное обновление).
+
+        В Greenplum использует DELETE + INSERT для изменения km_number_digit или part_number.
         """
         async with self.conn.transaction():
             current_act = await self.get_act_by_id(act_id)
             old_km_number = current_act.km_number
             old_km_digit = KMUtils.extract_km_digits(old_km_number)
             old_service_note = current_act.service_note
+            old_part_number = current_act.part_number
 
             if act_update.directives is not None:
                 await self._validate_directives_points(act_id, act_update.directives)
@@ -793,183 +958,181 @@ class ActDBService:
                     old_service_note is not None and act_update.service_note is None
             )
 
+            # Определяем новые значения КМ и части
+            new_km_digit = (
+                KMUtils.extract_km_digits(act_update.km_number)
+                if act_update.km_number
+                else old_km_digit
+            )
+
+            new_part_number = old_part_number
+
             # ЛОГИКА СЛУЖЕБКИ / ЧАСТИ
             if service_note_changed or service_note_removed:
                 if act_update.service_note:
-                    suffix = KMUtils.extract_service_note_suffix(
-                        act_update.service_note
-                    )
+                    suffix = KMUtils.extract_service_note_suffix(act_update.service_note)
                     if not suffix or not suffix.isdigit():
                         raise ValueError(
-                            f"Некорректный формат служебной записки: "
-                            f"{act_update.service_note}"
+                            f"Некорректный формат служебной записки: {act_update.service_note}"
                         )
-
                     new_part_number = int(suffix)
-
-                    km_digit = (
-                        KMUtils.extract_km_digits(act_update.km_number)
-                        if act_update.km_number
-                        else old_km_digit
-                    )
-
-                    exists = await self.conn.fetchval(
-                        f"""
-                        SELECT EXISTS(
-                            SELECT 1 FROM {self.acts}
-                            WHERE km_number_digit = $1 
-                              AND part_number = $2 
-                              AND id != $3
-                        )
-                        """,
-                        km_digit,
-                        new_part_number,
-                        act_id,
-                    )
-
-                    if exists:
-                        raise ValueError(
-                            f"Акт с КМ (цифры) {km_digit} и частью "
-                            f"{new_part_number} уже существует"
-                        )
-
-                    act_update.part_number = new_part_number
                 else:
-                    km_digit = (
-                        KMUtils.extract_km_digits(act_update.km_number)
-                        if act_update.km_number
-                        else old_km_digit
-                    )
-
-                    next_part = await self._find_free_part_number(km_digit, act_id)
-
-                    act_update.part_number = next_part
+                    # СЗ удалена - ищем свободный номер
+                    new_part_number = await self._find_free_part_number(new_km_digit, act_id)
                     act_update.service_note = None
                     act_update.service_note_date = None
 
-            if km_changed:
-                new_km_digit = KMUtils.extract_km_digits(act_update.km_number)
-                km_info = await self.check_km_exists(act_update.km_number)
-
+            if km_changed and not (service_note_changed or service_note_removed):
+                # КМ изменился, но СЗ не трогали
                 if current_act.service_note or act_update.service_note:
-                    part_to_check = (
-                        act_update.part_number
-                        if act_update.part_number is not None
-                        else current_act.part_number
-                    )
-
-                    exists = await self.conn.fetchval(
-                        f"""
-                        SELECT EXISTS(
-                            SELECT 1 FROM {self.acts}
-                            WHERE km_number_digit = $1 
-                              AND part_number = $2
-                              AND id != $3
-                        )
-                        """,
-                        new_km_digit,
-                        part_to_check,
-                        act_id,
-                    )
-
-                    if exists:
-                        raise ValueError(
-                            f"Акт с КМ (цифры) {new_km_digit} и частью "
-                            f"{part_to_check} уже существует"
-                        )
+                    # Есть СЗ - часть из неё
+                    if act_update.part_number is not None:
+                        new_part_number = act_update.part_number
                 else:
-                    new_part = await self._find_free_part_number(new_km_digit, act_id)
-                    act_update.part_number = new_part
+                    # Нет СЗ - ищем свободный номер
+                    new_part_number = await self._find_free_part_number(new_km_digit, act_id)
 
-                logger.info(
-                    f"Акт ID={act_id} изменяет КМ: "
-                    f"{old_km_number}(часть {current_act.part_number}) -> "
-                    f"{act_update.km_number}(часть {act_update.part_number})"
+            # ПРОВЕРКА УНИКАЛЬНОСТИ пары (km_digit, part_number)
+            if km_changed or service_note_changed or service_note_removed or (act_update.part_number is not None):
+                is_unique = await self._check_km_part_uniqueness(
+                    new_km_digit,
+                    new_part_number,
+                    exclude_act_id=act_id
                 )
 
-            updates: list[str] = []
-            values: list[object] = []
-            param_idx = 1
+                if not is_unique:
+                    raise ValueError(
+                        f"Акт с КМ (цифры) {new_km_digit} и частью {new_part_number} уже существует"
+                    )
 
-            # Обычные поля
-            if act_update.km_number is not None:
-                updates.append(f"km_number = ${param_idx}")
-                values.append(act_update.km_number)
-                param_idx += 1
+            # ПРОВЕРКА: нужно ли пересоздавать запись (km_digit или part_number изменились)
+            needs_recreation = (
+                    new_km_digit != old_km_digit or
+                    new_part_number != old_part_number
+            )
 
-                updates.append(f"km_number_digit = ${param_idx}")
-                values.append(KMUtils.extract_km_digits(act_update.km_number))
-                param_idx += 1
+            if needs_recreation and not self.adapter.supports_cascade_delete():
+                # Greenplum: используем DELETE + INSERT
+                logger.info(
+                    f"Пересоздание акта ID={act_id}: "
+                    f"КМ {old_km_number}(часть {old_part_number}) → "
+                    f"{act_update.km_number or old_km_number}(часть {new_part_number})"
+                )
 
-            if act_update.part_number is not None:
-                updates.append(f"part_number = ${param_idx}")
-                values.append(act_update.part_number)
-                param_idx += 1
+                # Подготавливаем новые данные
+                new_data = {
+                    'km_number': act_update.km_number or old_km_number,
+                    'km_number_digit': new_km_digit,
+                    'part_number': new_part_number,
+                    'last_edited_by': username,
+                    'last_edited_at': datetime.now(),
+                }
 
-            if act_update.inspection_name is not None:
-                updates.append(f"inspection_name = ${param_idx}")
-                values.append(act_update.inspection_name)
-                param_idx += 1
-
-            if act_update.city is not None:
-                updates.append(f"city = ${param_idx}")
-                values.append(act_update.city)
-                param_idx += 1
-
-            if act_update.created_date is not None:
-                updates.append(f"created_date = ${param_idx}")
-                values.append(act_update.created_date)
-                param_idx += 1
-
-            if act_update.order_number is not None:
-                updates.append(f"order_number = ${param_idx}")
-                values.append(act_update.order_number)
-                param_idx += 1
-
-            if act_update.order_date is not None:
-                updates.append(f"order_date = ${param_idx}")
-                values.append(act_update.order_date)
-                param_idx += 1
-
-            if act_update.inspection_start_date is not None:
-                updates.append(f"inspection_start_date = ${param_idx}")
-                values.append(act_update.inspection_start_date)
-                param_idx += 1
-
-            if act_update.inspection_end_date is not None:
-                updates.append(f"inspection_end_date = ${param_idx}")
-                values.append(act_update.inspection_end_date)
-                param_idx += 1
-
-            if act_update.is_process_based is not None:
-                updates.append(f"is_process_based = ${param_idx}")
-                values.append(act_update.is_process_based)
-                param_idx += 1
-
-            if service_note_changed or service_note_removed:
-                updates.append(f"service_note = ${param_idx}")
-                values.append(act_update.service_note)
-                param_idx += 1
-
-                updates.append(f"service_note_date = ${param_idx}")
-                values.append(act_update.service_note_date)
-                param_idx += 1
-            elif act_update.service_note_date is not None:
-                updates.append(f"service_note_date = ${param_idx}")
-                values.append(act_update.service_note_date)
-                param_idx += 1
-
-            # АВТО-СБРОС СЛУЖЕБНЫХ ФЛАГОВ (кроме фактуры)
-            needs_created_date = getattr(current_act, "needs_created_date", None)
-            needs_directive_number = getattr(current_act, "needs_directive_number", None)
-            needs_service_note = getattr(current_act, "needs_service_note", None)
-
-            if needs_created_date:
+                # Добавляем остальные обновляемые поля
+                if act_update.inspection_name is not None:
+                    new_data['inspection_name'] = act_update.inspection_name
+                if act_update.city is not None:
+                    new_data['city'] = act_update.city
                 if act_update.created_date is not None:
+                    new_data['created_date'] = act_update.created_date
+                if act_update.order_number is not None:
+                    new_data['order_number'] = act_update.order_number
+                if act_update.order_date is not None:
+                    new_data['order_date'] = act_update.order_date
+                if act_update.inspection_start_date is not None:
+                    new_data['inspection_start_date'] = act_update.inspection_start_date
+                if act_update.inspection_end_date is not None:
+                    new_data['inspection_end_date'] = act_update.inspection_end_date
+                if act_update.is_process_based is not None:
+                    new_data['is_process_based'] = act_update.is_process_based
+                if service_note_changed or service_note_removed:
+                    new_data['service_note'] = act_update.service_note
+                    new_data['service_note_date'] = act_update.service_note_date
+
+                # Пересоздаем запись
+                new_act_id = await self._recreate_act_record(act_id, new_data)
+
+                # Используем новый ID дальше
+                act_id = new_act_id
+
+            else:
+                # PostgreSQL или обновление без изменения km_digit/part_number: обычный UPDATE
+                updates: list[str] = []
+                values: list[object] = []
+                param_idx = 1
+
+                if act_update.km_number is not None:
+                    updates.append(f"km_number = ${param_idx}")
+                    values.append(act_update.km_number)
+                    param_idx += 1
+
+                    updates.append(f"km_number_digit = ${param_idx}")
+                    values.append(new_km_digit)
+                    param_idx += 1
+
+                if new_part_number != old_part_number:
+                    updates.append(f"part_number = ${param_idx}")
+                    values.append(new_part_number)
+                    param_idx += 1
+
+                if act_update.inspection_name is not None:
+                    updates.append(f"inspection_name = ${param_idx}")
+                    values.append(act_update.inspection_name)
+                    param_idx += 1
+
+                if act_update.city is not None:
+                    updates.append(f"city = ${param_idx}")
+                    values.append(act_update.city)
+                    param_idx += 1
+
+                if act_update.created_date is not None:
+                    updates.append(f"created_date = ${param_idx}")
+                    values.append(act_update.created_date)
+                    param_idx += 1
+
+                if act_update.order_number is not None:
+                    updates.append(f"order_number = ${param_idx}")
+                    values.append(act_update.order_number)
+                    param_idx += 1
+
+                if act_update.order_date is not None:
+                    updates.append(f"order_date = ${param_idx}")
+                    values.append(act_update.order_date)
+                    param_idx += 1
+
+                if act_update.inspection_start_date is not None:
+                    updates.append(f"inspection_start_date = ${param_idx}")
+                    values.append(act_update.inspection_start_date)
+                    param_idx += 1
+
+                if act_update.inspection_end_date is not None:
+                    updates.append(f"inspection_end_date = ${param_idx}")
+                    values.append(act_update.inspection_end_date)
+                    param_idx += 1
+
+                if act_update.is_process_based is not None:
+                    updates.append(f"is_process_based = ${param_idx}")
+                    values.append(act_update.is_process_based)
+                    param_idx += 1
+
+                if service_note_changed or service_note_removed:
+                    updates.append(f"service_note = ${param_idx}")
+                    values.append(act_update.service_note)
+                    param_idx += 1
+
+                    updates.append(f"service_note_date = ${param_idx}")
+                    values.append(act_update.service_note_date)
+                    param_idx += 1
+
+                # АВТО-СБРОС СЛУЖЕБНЫХ ФЛАГОВ
+                needs_created_date = getattr(current_act, "needs_created_date", None)
+                needs_directive_number = getattr(current_act, "needs_directive_number", None)
+                needs_service_note = getattr(current_act, "needs_service_note", None)
+
+                if needs_created_date and act_update.created_date is not None:
                     needs_created_date = False
 
-            if needs_directive_number:
-                if act_update.directives is not None and len(act_update.directives) > 0:
+                if needs_directive_number and act_update.directives is not None and len(act_update.directives) > 0:
                     all_have_numbers = all(
                         d.directive_number and d.directive_number.strip()
                         for d in act_update.directives
@@ -977,44 +1140,43 @@ class ActDBService:
                     if all_have_numbers:
                         needs_directive_number = False
 
-            if needs_service_note:
-                if act_update.service_note is not None:
+                if needs_service_note and act_update.service_note is not None:
                     if act_update.service_note.strip():
                         needs_service_note = False
 
-            if needs_created_date is not None and needs_created_date != current_act.needs_created_date:
-                updates.append(f"needs_created_date = ${param_idx}")
-                values.append(needs_created_date)
+                if needs_created_date is not None and needs_created_date != current_act.needs_created_date:
+                    updates.append(f"needs_created_date = ${param_idx}")
+                    values.append(needs_created_date)
+                    param_idx += 1
+
+                if needs_directive_number is not None and needs_directive_number != current_act.needs_directive_number:
+                    updates.append(f"needs_directive_number = ${param_idx}")
+                    values.append(needs_directive_number)
+                    param_idx += 1
+
+                if needs_service_note is not None and needs_service_note != current_act.needs_service_note:
+                    updates.append(f"needs_service_note = ${param_idx}")
+                    values.append(needs_service_note)
+                    param_idx += 1
+
+                # Служебные поля
+                updates.append(f"last_edited_by = ${param_idx}")
+                values.append(username)
                 param_idx += 1
 
-            if needs_directive_number is not None and needs_directive_number != current_act.needs_directive_number:
-                updates.append(f"needs_directive_number = ${param_idx}")
-                values.append(needs_directive_number)
-                param_idx += 1
+                updates.append("last_edited_at = CURRENT_TIMESTAMP")
 
-            if needs_service_note is not None and needs_service_note != current_act.needs_service_note:
-                updates.append(f"needs_service_note = ${param_idx}")
-                values.append(needs_service_note)
-                param_idx += 1
+                if updates:
+                    values.append(act_id)
 
-            # Служебные поля "кто/когда редактировал"
-            updates.append(f"last_edited_by = ${param_idx}")
-            values.append(username)
-            param_idx += 1
-
-            updates.append("last_edited_at = CURRENT_TIMESTAMP")
-
-            if updates:
-                values.append(act_id)
-
-                await self.conn.execute(
-                    f"""
-                    UPDATE {self.acts}
-                    SET {', '.join(updates)}
-                    WHERE id = ${param_idx}
-                    """,
-                    *values,
-                )
+                    await self.conn.execute(
+                        f"""
+                        UPDATE {self.acts}
+                        SET {', '.join(updates)}
+                        WHERE id = ${param_idx}
+                        """,
+                        *values,
+                    )
 
             # Аудиторская группа
             if act_update.audit_team is not None:
@@ -1063,16 +1225,8 @@ class ActDBService:
             # Обновление total_parts
             if km_changed:
                 await self._update_total_parts_for_km(old_km_digit)
-                logger.info(
-                    f"Обновлен total_parts для старого КМ (цифры)={old_km_digit}"
-                )
 
-            current_km_digit = (
-                KMUtils.extract_km_digits(act_update.km_number)
-                if act_update.km_number
-                else old_km_digit
-            )
-            await self._update_total_parts_for_km(current_km_digit)
+            await self._update_total_parts_for_km(new_km_digit)
 
             logger.info(f"Обновлены метаданные акта ID={act_id}")
 

@@ -62,10 +62,10 @@ class GreenplumAdapter(DatabaseAdapter):
 
         # Таблиц нет - создаем
         schema_path = (
-            Path(__file__).parent.parent
-            / "migrations"
-            / "greenplum"
-            / "schema.sql"
+                Path(__file__).parent.parent
+                / "migrations"
+                / "greenplum"
+                / "schema.sql"
         )
 
         if not schema_path.exists():
@@ -89,9 +89,9 @@ class GreenplumAdapter(DatabaseAdapter):
             raise
 
     async def delete_act_cascade(
-        self,
-        conn: asyncpg.Connection,
-        act_id: int
+            self,
+            conn: asyncpg.Connection,
+            act_id: int
     ) -> None:
         """
         Удаляет акт с явным удалением связанных записей.
@@ -165,10 +165,7 @@ class GreenplumAdapter(DatabaseAdapter):
         Возвращает DISTRIBUTED BY clause для оптимального распределения.
 
         Стратегия распределения:
-        - acts: по km_number_digit (частые join по КМ)
-        - остальные таблицы: по id (простота и равномерность)
+        - Все таблицы распределяются по id для избежания проблем с UPDATE
+          на колонках в DISTRIBUTED BY при наличии триггеров
         """
-        if table_name == "acts":
-            return "DISTRIBUTED BY (km_number_digit)"
-
         return "DISTRIBUTED BY (id)"

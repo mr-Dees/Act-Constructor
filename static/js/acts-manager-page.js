@@ -215,7 +215,7 @@ class ActsManagerPage {
                 throw new Error('Пользователь не авторизован');
             }
 
-            const response = await fetch('/api/v1/acts/list', {
+            const response = await fetch(AppConfig.api.getUrl('/api/v1/acts/list'), {
                 headers: {'X-JupyterHub-User': username}
             });
 
@@ -400,7 +400,7 @@ class ActsManagerPage {
      * @param {number} actId - ID акта
      */
     static openAct(actId) {
-        window.location.href = `/constructor?act_id=${actId}`;
+        window.location.href = AppConfig.api.getUrl(`/constructor?act_id=${actId}`);
     }
 
     /**
@@ -418,7 +418,7 @@ class ActsManagerPage {
             const username = AuthManager.getCurrentUser();
             if (!username) throw new Error('Пользователь не авторизован');
 
-            const response = await fetch(`/api/v1/acts/${actId}`, {
+            const response = await fetch(AppConfig.api.getUrl(`/api/v1/acts/${actId}`), {
                 headers: {'X-JupyterHub-User': username}
             });
             if (!response.ok) throw new Error('Ошибка загрузки акта');
@@ -524,7 +524,7 @@ class ActsManagerPage {
                 throw new Error('Пользователь не авторизован');
             }
 
-            const response = await fetch(`/api/v1/acts/${actId}/duplicate`, {
+            const response = await fetch(AppConfig.api.getUrl(`/api/v1/acts/${actId}/duplicate`), {
                 method: 'POST',
                 headers: {'X-JupyterHub-User': username}
             });
@@ -553,7 +553,7 @@ class ActsManagerPage {
             });
 
             if (openNewAct) {
-                window.location.href = `/constructor?act_id=${newAct.id}`;
+                window.location.href = AppConfig.api.getUrl(`/constructor?act_id=${newAct.id}`);
             } else {
                 // Обновляем список актов
                 await this.loadActs();
@@ -588,7 +588,7 @@ class ActsManagerPage {
                 throw new Error('Пользователь не авторизован');
             }
 
-            const response = await fetch(`/api/v1/acts/${actId}`, {
+            const response = await fetch(AppConfig.api.getUrl(`/api/v1/acts/${actId}`), {
                 method: 'DELETE',
                 headers: {'X-JupyterHub-User': username}
             });

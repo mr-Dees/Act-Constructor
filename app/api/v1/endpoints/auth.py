@@ -45,7 +45,7 @@ def extract_username_digits(raw_username: str) -> str:
     return digits
 
 
-def get_current_user_from_env() -> str | None:
+def get_current_user_from_env(truncate = True) -> str | None:
     """
     Получает текущего пользователя из переменных окружения.
 
@@ -69,7 +69,10 @@ def get_current_user_from_env() -> str | None:
         return None
 
     # Извлекаем только цифры
-    username = extract_username_digits(raw_username)
+    if truncate:
+        username = extract_username_digits(raw_username)
+    else:
+        username = raw_username
 
     if not username:
         logger.warning(f"Не удалось извлечь цифры из username: {raw_username}")

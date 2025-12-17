@@ -3,16 +3,7 @@
  *
  * Проверяет авторизацию пользователя при открытии страницы.
  * Использует localStorage для кеширования username на 24 часа.
- *
- * Логика работы:
- * 1. При первом заходе запрашивает /api/v1/auth/me (берёт username из переменной окружения)
- * 2. Сохраняет username в localStorage с timestamp
- * 3. При последующих заходах использует кеш из localStorage без запроса к API
- * 4. Если кеш истёк (>24 часа) — делает новый запрос к API
- *
- * Примечание:
- * Основная проверка доступа к акту происходит на бэкенде (main.py /constructor).
- * Фронтенд использует сохранённый username для API-запросов (сохранение, загрузка списка и т.д.).
+ * Обрабатывает ошибки Kerberos токена.
  */
 class AuthManager {
     /**
@@ -124,13 +115,103 @@ class AuthManager {
     }
 
     /**
+     * Показывает ошибку Kerberos с инструкциями
+     * @private
+     * @param {Object} errorData - данные об ошибке от API
+     */
+    static _showKerberosError(errorData) {
+        const message = errorData.message || 'Токен авторизации Kerberos истек';
+        const instructions = errorData.instructions || [
+            'Откройте терминал JupyterHub',
+            'Выполните команду: kinit',
+            'Введите ваш пароль',
+            'Обновите страницу приложения'
+        ];
+
+        // Создаем красивое модальное окно с инструкциями
+        const overlay = document.createElement('div');
+        overlay.style.cssText = `
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background: rgba(0, 0, 0, 0.8);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            z-index: 10000;
+        `;
+
+        const modal = document.createElement('div');
+        modal.style.cssText = `
+            background: white;
+            padding: 2rem;
+            border-radius: 8px;
+            max-width: 500px;
+            box-shadow: 0 4px 20px rgba(0, 0, 0, 0.3);
+        `;
+
+        const title = document.createElement('h2');
+        title.textContent = '⚠️ Требуется обновление токена Kerberos';
+        title.style.cssText = 'margin: 0 0 1rem 0; color: #d32f2f;';
+
+        const description = document.createElement('p');
+        description.textContent = message;
+        description.style.cssText = 'margin: 0 0 1rem 0; line-height: 1.5;';
+
+        const instructionsList = document.createElement('ol');
+        instructionsList.style.cssText = 'margin: 1rem 0; padding-left: 1.5rem;';
+        instructions.forEach(instruction => {
+            const li = document.createElement('li');
+            li.textContent = instruction;
+            li.style.cssText = 'margin: 0.5rem 0;';
+            instructionsList.appendChild(li);
+        });
+
+        const refreshButton = document.createElement('button');
+        refreshButton.textContent = 'Обновить страницу';
+        refreshButton.style.cssText = `
+            background: #1976d2;
+            color: white;
+            border: none;
+            padding: 0.75rem 1.5rem;
+            border-radius: 4px;
+            cursor: pointer;
+            font-size: 1rem;
+            margin-top: 1rem;
+        `;
+        refreshButton.onclick = () => window.location.reload();
+
+        modal.appendChild(title);
+        modal.appendChild(description);
+        modal.appendChild(instructionsList);
+        modal.appendChild(refreshButton);
+        overlay.appendChild(modal);
+
+        document.body.innerHTML = '';
+        document.body.appendChild(overlay);
+    }
+
+    /**
      * Проверяет авторизацию через API (берёт из переменной окружения)
      * Используется при открытии любой страницы
      * @returns {Promise<{authenticated: boolean, username: string|null}>}
      */
     static async checkAuth() {
         try {
-            const response = await fetch('/api/v1/auth/me');
+            const response = await fetch(AppConfig.api.getUrl('/api/v1/auth/me'));
+
+            // Проверяем на ошибку Kerberos токена
+            if (response.status === 401) {
+                const errorData = await response.json();
+
+                if (errorData.error === 'kerberos_token_expired') {
+                    console.error('Kerberos токен истек');
+                    this._showKerberosError(errorData);
+                    return {authenticated: false, username: null};
+                }
+            }
 
             if (!response.ok) {
                 throw new Error('Ошибка проверки авторизации');

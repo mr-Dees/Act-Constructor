@@ -55,7 +55,7 @@ class CreateActDialog extends DialogBase {
             const currentUser = window.env?.JUPYTERHUB_USER || AppConfig?.auth?.jupyterhubUser || "";
 
             // Используем правильный префикс роутера
-            const response = await fetch(`/api/v1/acts_content/${actId}/content`, {
+            const response = await fetch(AppConfig.api.getUrl(`/api/v1/acts_content/${actId}/content`), {
                 headers: {
                     'X-JupyterHub-User': currentUser
                 }
@@ -1050,7 +1050,7 @@ class CreateActDialog extends DialogBase {
      * @private
      */
     static async _submitActData(body, isEdit, actId, currentUser) {
-        const endpoint = isEdit ? `/api/v1/acts/${actId}` : '/api/v1/acts/create';
+        const endpoint = isEdit ? AppConfig.api.getUrl(`/api/v1/acts/${actId}`) : AppConfig.api.getUrl('/api/v1/acts/create');
         const method = isEdit ? 'PATCH' : 'POST';
 
         const response = await fetch(endpoint, {
@@ -1130,7 +1130,7 @@ class CreateActDialog extends DialogBase {
         });
 
         if (confirmed) {
-            await this._createWithNewPart('/api/v1/acts/create', body, currentUser);
+            await this._createWithNewPart(AppConfig.api.getUrl('/api/v1/acts/create'), body, currentUser);
         }
     }
 
@@ -1189,7 +1189,7 @@ class CreateActDialog extends DialogBase {
      * @private
      */
     static async _navigateToNewAct(actId) {
-        window.location.href = `/constructor?act_id=${actId}`;
+        window.location.href = AppConfig.api.getUrl(`/constructor?act_id=${actId}`);
     }
 
     /**
@@ -1198,7 +1198,7 @@ class CreateActDialog extends DialogBase {
      */
     static async _createWithNewPart(endpoint, body, currentUser) {
         try {
-            const resp = await fetch(`${endpoint}?force_new_part=true`, {
+            const resp = await fetch(AppConfig.api.getUrl(`${endpoint}?force_new_part=true`), {
                 method: 'POST',
                 headers: {
                     'Content-Type': 'application/json',
@@ -1219,7 +1219,7 @@ class CreateActDialog extends DialogBase {
                 Notifications.success(`Создана новая часть ${data.part_number} акта`);
             }
 
-            window.location.href = `/constructor?act_id=${data.id}`;
+            window.location.href = AppConfig.api.getUrl(`/constructor?act_id=${data.id}`);
 
         } catch (err) {
             console.error('Ошибка создания новой части:', err);
