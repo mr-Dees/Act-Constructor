@@ -40,3 +40,60 @@
 .step-actions.start {
     justify-content: flex-start;
 }
+
+/* Базовые стили кнопки выхода */
+.header-action-btn--exit {
+    /* Наследует все базовые стили от .header-action-btn */
+}
+
+/* Hover эффект с красноватым акцентом */
+.header-action-btn--exit:hover:not(.active) {
+    background: var(--step-bg-hover);
+    border-color: var(--danger-light);
+    transform: translateY(calc(-1 * var(--translate-md)));
+    box-shadow: 0 var(--spacing-sm) var(--spacing-lg) var(--danger-subtle);
+    color: var(--danger);
+}
+
+/* Анимация стрелки при hover */
+.header-action-btn--exit svg {
+    transition: transform var(--transition-base);
+}
+
+.header-action-btn--exit:hover svg {
+    transform: translateX(var(--translate-sm));
+}
+
+/* Active состояние */
+.header-action-btn--exit:active:not(.active) {
+    transform: translateY(0);
+    box-shadow: var(--shadow-sm);
+}
+
+/* Состояние фокуса */
+.header-action-btn--exit:focus-visible {
+    outline: var(--border-width-md) solid var(--danger);
+    outline-offset: var(--focus-outline-offset);
+    box-shadow: var(--focus-ring-error);
+}
+
+/* Эффект ripple при клике */
+.header-action-btn--exit::before {
+    background: radial-gradient(
+        circle,
+        var(--danger-subtle) 0%,
+        transparent 70%
+    );
+}
+
+/* Подпись кнопки выхода */
+.header-action-label--exit {
+    color: var(--text-on-primary);
+    transition: color var(--transition-base), text-shadow var(--transition-base);
+}
+
+/* Hover эффект подписи */
+.header-action-container:has(.header-action-btn--exit):hover .header-action-label--exit {
+    color: var(--danger-light);
+    text-shadow: var(--text-shadow-sm);
+}
