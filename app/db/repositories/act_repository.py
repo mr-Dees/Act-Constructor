@@ -931,8 +931,6 @@ class ActDBService:
     ) -> ActResponse:
         """
         Обновляет метаданные акта (частичное обновление).
-
-        В Greenplum использует DELETE + INSERT для изменения km_number_digit или part_number.
         """
         async with self.conn.transaction():
             current_act = await self.get_act_by_id(act_id)
@@ -1005,178 +1003,127 @@ class ActDBService:
                         f"Акт с КМ (цифры) {new_km_digit} и частью {new_part_number} уже существует"
                     )
 
-            # ПРОВЕРКА: нужно ли пересоздавать запись (km_digit или part_number изменились)
-            needs_recreation = (
-                    new_km_digit != old_km_digit or
-                    new_part_number != old_part_number
-            )
+            # ОБЫЧНЫЙ UPDATE - все колонки можно обновлять
+            updates: list[str] = []
+            values: list[object] = []
+            param_idx = 1
 
-            if needs_recreation and not self.adapter.supports_cascade_delete():
-                # Greenplum: используем DELETE + INSERT
-                logger.info(
-                    f"Пересоздание акта ID={act_id}: "
-                    f"КМ {old_km_number}(часть {old_part_number}) → "
-                    f"{act_update.km_number or old_km_number}(часть {new_part_number})"
-                )
-
-                # Подготавливаем новые данные
-                new_data = {
-                    'km_number': act_update.km_number or old_km_number,
-                    'km_number_digit': new_km_digit,
-                    'part_number': new_part_number,
-                    'last_edited_by': username,
-                    'last_edited_at': datetime.now(),
-                }
-
-                # Добавляем остальные обновляемые поля
-                if act_update.inspection_name is not None:
-                    new_data['inspection_name'] = act_update.inspection_name
-                if act_update.city is not None:
-                    new_data['city'] = act_update.city
-                if act_update.created_date is not None:
-                    new_data['created_date'] = act_update.created_date
-                if act_update.order_number is not None:
-                    new_data['order_number'] = act_update.order_number
-                if act_update.order_date is not None:
-                    new_data['order_date'] = act_update.order_date
-                if act_update.inspection_start_date is not None:
-                    new_data['inspection_start_date'] = act_update.inspection_start_date
-                if act_update.inspection_end_date is not None:
-                    new_data['inspection_end_date'] = act_update.inspection_end_date
-                if act_update.is_process_based is not None:
-                    new_data['is_process_based'] = act_update.is_process_based
-                if service_note_changed or service_note_removed:
-                    new_data['service_note'] = act_update.service_note
-                    new_data['service_note_date'] = act_update.service_note_date
-
-                # Пересоздаем запись
-                new_act_id = await self._recreate_act_record(act_id, new_data)
-
-                # Используем новый ID дальше
-                act_id = new_act_id
-
-            else:
-                # PostgreSQL или обновление без изменения km_digit/part_number: обычный UPDATE
-                updates: list[str] = []
-                values: list[object] = []
-                param_idx = 1
-
-                if act_update.km_number is not None:
-                    updates.append(f"km_number = ${param_idx}")
-                    values.append(act_update.km_number)
-                    param_idx += 1
-
-                    updates.append(f"km_number_digit = ${param_idx}")
-                    values.append(new_km_digit)
-                    param_idx += 1
-
-                if new_part_number != old_part_number:
-                    updates.append(f"part_number = ${param_idx}")
-                    values.append(new_part_number)
-                    param_idx += 1
-
-                if act_update.inspection_name is not None:
-                    updates.append(f"inspection_name = ${param_idx}")
-                    values.append(act_update.inspection_name)
-                    param_idx += 1
-
-                if act_update.city is not None:
-                    updates.append(f"city = ${param_idx}")
-                    values.append(act_update.city)
-                    param_idx += 1
-
-                if act_update.created_date is not None:
-                    updates.append(f"created_date = ${param_idx}")
-                    values.append(act_update.created_date)
-                    param_idx += 1
-
-                if act_update.order_number is not None:
-                    updates.append(f"order_number = ${param_idx}")
-                    values.append(act_update.order_number)
-                    param_idx += 1
-
-                if act_update.order_date is not None:
-                    updates.append(f"order_date = ${param_idx}")
-                    values.append(act_update.order_date)
-                    param_idx += 1
-
-                if act_update.inspection_start_date is not None:
-                    updates.append(f"inspection_start_date = ${param_idx}")
-                    values.append(act_update.inspection_start_date)
-                    param_idx += 1
-
-                if act_update.inspection_end_date is not None:
-                    updates.append(f"inspection_end_date = ${param_idx}")
-                    values.append(act_update.inspection_end_date)
-                    param_idx += 1
-
-                if act_update.is_process_based is not None:
-                    updates.append(f"is_process_based = ${param_idx}")
-                    values.append(act_update.is_process_based)
-                    param_idx += 1
-
-                if service_note_changed or service_note_removed:
-                    updates.append(f"service_note = ${param_idx}")
-                    values.append(act_update.service_note)
-                    param_idx += 1
-
-                    updates.append(f"service_note_date = ${param_idx}")
-                    values.append(act_update.service_note_date)
-                    param_idx += 1
-
-                # АВТО-СБРОС СЛУЖЕБНЫХ ФЛАГОВ
-                needs_created_date = getattr(current_act, "needs_created_date", None)
-                needs_directive_number = getattr(current_act, "needs_directive_number", None)
-                needs_service_note = getattr(current_act, "needs_service_note", None)
-
-                if needs_created_date and act_update.created_date is not None:
-                    needs_created_date = False
-
-                if needs_directive_number and act_update.directives is not None and len(act_update.directives) > 0:
-                    all_have_numbers = all(
-                        d.directive_number and d.directive_number.strip()
-                        for d in act_update.directives
-                    )
-                    if all_have_numbers:
-                        needs_directive_number = False
-
-                if needs_service_note and act_update.service_note is not None:
-                    if act_update.service_note.strip():
-                        needs_service_note = False
-
-                if needs_created_date is not None and needs_created_date != current_act.needs_created_date:
-                    updates.append(f"needs_created_date = ${param_idx}")
-                    values.append(needs_created_date)
-                    param_idx += 1
-
-                if needs_directive_number is not None and needs_directive_number != current_act.needs_directive_number:
-                    updates.append(f"needs_directive_number = ${param_idx}")
-                    values.append(needs_directive_number)
-                    param_idx += 1
-
-                if needs_service_note is not None and needs_service_note != current_act.needs_service_note:
-                    updates.append(f"needs_service_note = ${param_idx}")
-                    values.append(needs_service_note)
-                    param_idx += 1
-
-                # Служебные поля
-                updates.append(f"last_edited_by = ${param_idx}")
-                values.append(username)
+            if act_update.km_number is not None:
+                updates.append(f"km_number = ${param_idx}")
+                values.append(act_update.km_number)
                 param_idx += 1
 
-                updates.append("last_edited_at = CURRENT_TIMESTAMP")
+                updates.append(f"km_number_digit = ${param_idx}")
+                values.append(new_km_digit)
+                param_idx += 1
 
-                if updates:
-                    values.append(act_id)
+            if new_part_number != old_part_number:
+                updates.append(f"part_number = ${param_idx}")
+                values.append(new_part_number)
+                param_idx += 1
 
-                    await self.conn.execute(
-                        f"""
-                        UPDATE {self.acts}
-                        SET {', '.join(updates)}
-                        WHERE id = ${param_idx}
-                        """,
-                        *values,
-                    )
+            if act_update.inspection_name is not None:
+                updates.append(f"inspection_name = ${param_idx}")
+                values.append(act_update.inspection_name)
+                param_idx += 1
+
+            if act_update.city is not None:
+                updates.append(f"city = ${param_idx}")
+                values.append(act_update.city)
+                param_idx += 1
+
+            if act_update.created_date is not None:
+                updates.append(f"created_date = ${param_idx}")
+                values.append(act_update.created_date)
+                param_idx += 1
+
+            if act_update.order_number is not None:
+                updates.append(f"order_number = ${param_idx}")
+                values.append(act_update.order_number)
+                param_idx += 1
+
+            if act_update.order_date is not None:
+                updates.append(f"order_date = ${param_idx}")
+                values.append(act_update.order_date)
+                param_idx += 1
+
+            if act_update.inspection_start_date is not None:
+                updates.append(f"inspection_start_date = ${param_idx}")
+                values.append(act_update.inspection_start_date)
+                param_idx += 1
+
+            if act_update.inspection_end_date is not None:
+                updates.append(f"inspection_end_date = ${param_idx}")
+                values.append(act_update.inspection_end_date)
+                param_idx += 1
+
+            if act_update.is_process_based is not None:
+                updates.append(f"is_process_based = ${param_idx}")
+                values.append(act_update.is_process_based)
+                param_idx += 1
+
+            if service_note_changed or service_note_removed:
+                updates.append(f"service_note = ${param_idx}")
+                values.append(act_update.service_note)
+                param_idx += 1
+
+                updates.append(f"service_note_date = ${param_idx}")
+                values.append(act_update.service_note_date)
+                param_idx += 1
+
+            # АВТО-СБРОС СЛУЖЕБНЫХ ФЛАГОВ
+            needs_created_date = getattr(current_act, "needs_created_date", None)
+            needs_directive_number = getattr(current_act, "needs_directive_number", None)
+            needs_service_note = getattr(current_act, "needs_service_note", None)
+
+            if needs_created_date and act_update.created_date is not None:
+                needs_created_date = False
+
+            if needs_directive_number and act_update.directives is not None and len(act_update.directives) > 0:
+                all_have_numbers = all(
+                    d.directive_number and d.directive_number.strip()
+                    for d in act_update.directives
+                )
+                if all_have_numbers:
+                    needs_directive_number = False
+
+            if needs_service_note and act_update.service_note is not None:
+                if act_update.service_note.strip():
+                    needs_service_note = False
+
+            if needs_created_date is not None and needs_created_date != current_act.needs_created_date:
+                updates.append(f"needs_created_date = ${param_idx}")
+                values.append(needs_created_date)
+                param_idx += 1
+
+            if needs_directive_number is not None and needs_directive_number != current_act.needs_directive_number:
+                updates.append(f"needs_directive_number = ${param_idx}")
+                values.append(needs_directive_number)
+                param_idx += 1
+
+            if needs_service_note is not None and needs_service_note != current_act.needs_service_note:
+                updates.append(f"needs_service_note = ${param_idx}")
+                values.append(needs_service_note)
+                param_idx += 1
+
+            # Служебные поля
+            updates.append(f"last_edited_by = ${param_idx}")
+            values.append(username)
+            param_idx += 1
+
+            updates.append("last_edited_at = CURRENT_TIMESTAMP")
+
+            if updates:
+                values.append(act_id)
+
+                await self.conn.execute(
+                    f"""
+                    UPDATE {self.acts}
+                    SET {', '.join(updates)}
+                    WHERE id = ${param_idx}
+                    """,
+                    *values,
+                )
 
             # Аудиторская группа
             if act_update.audit_team is not None:
