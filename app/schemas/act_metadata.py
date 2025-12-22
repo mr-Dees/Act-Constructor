@@ -94,11 +94,11 @@ class ActCreate(BaseModel):
     @field_validator('km_number')
     @classmethod
     def validate_km_number_format(cls, v):
-        """Проверяет формат КМ: КМ-XX-XXXX"""
-        pattern = r'^КМ-\d{2}-\d{4}$'
+        """Проверяет формат КМ: КМ-XX-XXXXX"""
+        pattern = r'^КМ-\d{2}-\d{5}$'
         if not re.match(pattern, v):
             raise ValueError(
-                f'КМ номер должен быть в формате КМ-XX-XXXX (например, КМ-75-9475), получено: {v}'
+                f'КМ номер должен быть в формате КМ-XX-XXXXX (например, КМ-99-94751), получено: {v}'
             )
         return v
 
@@ -177,14 +177,14 @@ class ActUpdate(BaseModel):
     @field_validator('km_number')
     @classmethod
     def validate_km_number_format(cls, v):
-        """Проверяет формат КМ: КМ-XX-XXXX"""
+        """Проверяет формат КМ: КМ-XX-XXXXX"""
         if v is None:
             return v
 
-        pattern = r'^КМ-\d{2}-\d{4}$'
+        pattern = r'^КМ-\d{2}-\d{5}$'
         if not re.match(pattern, v):
             raise ValueError(
-                f'КМ номер должен быть в формате КМ-XX-XXXX (например, КМ-75-9475), получено: {v}'
+                f'КМ номер должен быть в формате КМ-XX-XXXXX (например, КМ-99-94751), получено: {v}'
             )
         return v
 

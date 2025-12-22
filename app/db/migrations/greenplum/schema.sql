@@ -11,7 +11,7 @@ CREATE TABLE {SCHEMA}.{PREFIX}acts (
 
     -- Номер КМ и части
     km_number VARCHAR(50) NOT NULL,
-    km_number_digit VARCHAR(10) NOT NULL,
+    km_number_digit INTEGER NOT NULL,
     part_number INTEGER NOT NULL DEFAULT 1,
     total_parts INTEGER NOT NULL DEFAULT 1,
 
@@ -50,6 +50,35 @@ CREATE TABLE {SCHEMA}.{PREFIX}acts (
 WITH (appendonly=false)
 DISTRIBUTED BY (id);
 
+COMMENT ON TABLE {SCHEMA}.{PREFIX}acts IS 'Основная таблица актов проверки с метаданными';
+COMMENT ON COLUMN {SCHEMA}.{PREFIX}acts.id IS 'Уникальный идентификатор акта';
+COMMENT ON COLUMN {SCHEMA}.{PREFIX}acts.km_number IS 'КМ номер в формате КМ-XX-XXXXX для отображения (НЕ меняется при добавлении СЗ)';
+COMMENT ON COLUMN {SCHEMA}.{PREFIX}acts.km_number_digit IS 'КМ номер только цифры (всегда 7 цифр) для быстрого поиска';
+COMMENT ON COLUMN {SCHEMA}.{PREFIX}acts.part_number IS 'Номер части акта (1,2,3... для актов без СЗ или 4 цифры из СЗ для актов с СЗ)';
+COMMENT ON COLUMN {SCHEMA}.{PREFIX}acts.total_parts IS 'Общее количество частей акта (актов с данным КМ)';
+COMMENT ON COLUMN {SCHEMA}.{PREFIX}acts.inspection_name IS 'Наименование проверки';
+COMMENT ON COLUMN {SCHEMA}.{PREFIX}acts.city IS 'Город проведения проверки';
+COMMENT ON COLUMN {SCHEMA}.{PREFIX}acts.created_date IS 'Дата составления акта (опционально)';
+COMMENT ON COLUMN {SCHEMA}.{PREFIX}acts.order_number IS 'Номер приказа о проверке';
+COMMENT ON COLUMN {SCHEMA}.{PREFIX}acts.order_date IS 'Дата приказа о проверке';
+COMMENT ON COLUMN {SCHEMA}.{PREFIX}acts.is_process_based IS 'Флаг: является ли проверка процессной';
+COMMENT ON COLUMN {SCHEMA}.{PREFIX}acts.inspection_start_date IS 'Дата начала проверки';
+COMMENT ON COLUMN {SCHEMA}.{PREFIX}acts.inspection_end_date IS 'Дата окончания проверки';
+COMMENT ON COLUMN {SCHEMA}.{PREFIX}acts.service_note IS 'Номер служебной записки в формате Текст/XXXX';
+COMMENT ON COLUMN {SCHEMA}.{PREFIX}acts.service_note_date IS 'Дата служебной записки';
+COMMENT ON COLUMN {SCHEMA}.{PREFIX}acts.needs_created_date IS 'Флаг валидации: требуется ли дата составления';
+COMMENT ON COLUMN {SCHEMA}.{PREFIX}acts.needs_directive_number IS 'Флаг валидации: требуется ли номер поручения';
+COMMENT ON COLUMN {SCHEMA}.{PREFIX}acts.needs_invoice_check IS 'Флаг валидации: требуется ли проверка фактуры';
+COMMENT ON COLUMN {SCHEMA}.{PREFIX}acts.needs_service_note IS 'Флаг валидации: требуется ли информация по служебной записке';
+COMMENT ON COLUMN {SCHEMA}.{PREFIX}acts.locked_by IS 'Username пользователя, заблокировавшего акт для редактирования';
+COMMENT ON COLUMN {SCHEMA}.{PREFIX}acts.locked_at IS 'Время начала блокировки';
+COMMENT ON COLUMN {SCHEMA}.{PREFIX}acts.lock_expires_at IS 'Время истечения блокировки (автоосвобождение)';
+COMMENT ON COLUMN {SCHEMA}.{PREFIX}acts.created_at IS 'Дата и время создания записи';
+COMMENT ON COLUMN {SCHEMA}.{PREFIX}acts.updated_at IS 'Дата и время последнего обновления метаданных';
+COMMENT ON COLUMN {SCHEMA}.{PREFIX}acts.created_by IS 'Числовой логин пользователя-создателя';
+COMMENT ON COLUMN {SCHEMA}.{PREFIX}acts.last_edited_by IS 'Числовой логин последнего редактора содержимого';
+COMMENT ON COLUMN {SCHEMA}.{PREFIX}acts.last_edited_at IS 'Дата и время последнего редактирования содержимого';
+
 -- ============================================================================
 -- ТАБЛИЦА АУДИТОРСКОЙ ГРУППЫ
 -- ============================================================================
@@ -67,6 +96,16 @@ CREATE TABLE {SCHEMA}.{PREFIX}audit_team_members (
 WITH (appendonly=false)
 DISTRIBUTED BY (id);
 
+COMMENT ON TABLE {SCHEMA}.{PREFIX}audit_team_members IS 'Состав аудиторской группы для каждого акта';
+COMMENT ON COLUMN {SCHEMA}.{PREFIX}audit_team_members.id IS 'Уникальный идентификатор записи';
+COMMENT ON COLUMN {SCHEMA}.{PREFIX}audit_team_members.act_id IS 'Ссылка на акт';
+COMMENT ON COLUMN {SCHEMA}.{PREFIX}audit_team_members.role IS 'Роль члена группы: Куратор, Руководитель или Участник';
+COMMENT ON COLUMN {SCHEMA}.{PREFIX}audit_team_members.full_name IS 'Полное имя члена группы (ФИО)';
+COMMENT ON COLUMN {SCHEMA}.{PREFIX}audit_team_members.position IS 'Должность члена группы';
+COMMENT ON COLUMN {SCHEMA}.{PREFIX}audit_team_members.username IS 'Числовой логин пользователя в системе';
+COMMENT ON COLUMN {SCHEMA}.{PREFIX}audit_team_members.order_index IS 'Порядок отображения члена группы (для сортировки)';
+COMMENT ON COLUMN {SCHEMA}.{PREFIX}audit_team_members.created_at IS 'Дата и время добавления в группу';
+
 -- ============================================================================
 -- ТАБЛИЦА ПОРУЧЕНИЙ
 -- ============================================================================
@@ -82,6 +121,14 @@ CREATE TABLE {SCHEMA}.{PREFIX}act_directives (
 WITH (appendonly=false)
 DISTRIBUTED BY (id);
 
+COMMENT ON TABLE {SCHEMA}.{PREFIX}act_directives IS 'Действующие поручения, относящиеся к акту';
+COMMENT ON COLUMN {SCHEMA}.{PREFIX}act_directives.id IS 'Уникальный идентификатор поручения';
+COMMENT ON COLUMN {SCHEMA}.{PREFIX}act_directives.act_id IS 'Ссылка на акт';
+COMMENT ON COLUMN {SCHEMA}.{PREFIX}act_directives.point_number IS 'Номер пункта в акте (формат: 5.X или 5.X.Y или 5.X.Y.Z и т.д.)';
+COMMENT ON COLUMN {SCHEMA}.{PREFIX}act_directives.directive_number IS 'Номер действующего поручения';
+COMMENT ON COLUMN {SCHEMA}.{PREFIX}act_directives.order_index IS 'Порядок отображения поручения (для сортировки)';
+COMMENT ON COLUMN {SCHEMA}.{PREFIX}act_directives.created_at IS 'Дата и время создания записи';
+
 -- ============================================================================
 -- ТАБЛИЦА СТРУКТУРЫ ДЕРЕВА АКТА
 -- ============================================================================
@@ -95,6 +142,13 @@ CREATE TABLE {SCHEMA}.{PREFIX}act_tree (
 )
 WITH (appendonly=false)
 DISTRIBUTED BY (id);
+
+COMMENT ON TABLE {SCHEMA}.{PREFIX}act_tree IS 'Иерархическая структура акта в формате JSONB дерева';
+COMMENT ON COLUMN {SCHEMA}.{PREFIX}act_tree.id IS 'Уникальный идентификатор записи';
+COMMENT ON COLUMN {SCHEMA}.{PREFIX}act_tree.act_id IS 'Ссылка на акт (один акт = одно дерево)';
+COMMENT ON COLUMN {SCHEMA}.{PREFIX}act_tree.tree_data IS 'JSONB структура дерева с узлами, метками и детьми';
+COMMENT ON COLUMN {SCHEMA}.{PREFIX}act_tree.created_at IS 'Дата и время создания дерева';
+COMMENT ON COLUMN {SCHEMA}.{PREFIX}act_tree.updated_at IS 'Дата и время последнего изменения структуры';
 
 -- ============================================================================
 -- ТАБЛИЦА ТАБЛИЦ (ДЕНОРМАЛИЗОВАННАЯ)
@@ -121,6 +175,24 @@ CREATE TABLE {SCHEMA}.{PREFIX}act_tables (
 WITH (appendonly=false)
 DISTRIBUTED BY (id);
 
+COMMENT ON TABLE {SCHEMA}.{PREFIX}act_tables IS 'Таблицы внутри актов (денормализованное хранение для быстрого доступа)';
+COMMENT ON COLUMN {SCHEMA}.{PREFIX}act_tables.id IS 'Уникальный идентификатор записи';
+COMMENT ON COLUMN {SCHEMA}.{PREFIX}act_tables.act_id IS 'Ссылка на акт';
+COMMENT ON COLUMN {SCHEMA}.{PREFIX}act_tables.table_id IS 'Уникальный ID таблицы внутри акта';
+COMMENT ON COLUMN {SCHEMA}.{PREFIX}act_tables.node_id IS 'ID узла в дереве, к которому привязана таблица';
+COMMENT ON COLUMN {SCHEMA}.{PREFIX}act_tables.node_number IS 'Номер узла (например, 3.2.1) для аналитики';
+COMMENT ON COLUMN {SCHEMA}.{PREFIX}act_tables.table_label IS 'Название таблицы для поиска и навигации';
+COMMENT ON COLUMN {SCHEMA}.{PREFIX}act_tables.grid_data IS 'JSONB массив строк и ячеек таблицы';
+COMMENT ON COLUMN {SCHEMA}.{PREFIX}act_tables.col_widths IS 'JSONB массив ширин колонок в пикселях';
+COMMENT ON COLUMN {SCHEMA}.{PREFIX}act_tables.is_protected IS 'Флаг: защищена ли таблица от редактирования';
+COMMENT ON COLUMN {SCHEMA}.{PREFIX}act_tables.is_deletable IS 'Флаг: можно ли удалить таблицу';
+COMMENT ON COLUMN {SCHEMA}.{PREFIX}act_tables.is_metrics_table IS 'Флаг: таблица метрик';
+COMMENT ON COLUMN {SCHEMA}.{PREFIX}act_tables.is_main_metrics_table IS 'Флаг: основная таблица метрик';
+COMMENT ON COLUMN {SCHEMA}.{PREFIX}act_tables.is_regular_risk_table IS 'Флаг: таблица регулярных рисков';
+COMMENT ON COLUMN {SCHEMA}.{PREFIX}act_tables.is_operational_risk_table IS 'Флаг: таблица операционных рисков';
+COMMENT ON COLUMN {SCHEMA}.{PREFIX}act_tables.created_at IS 'Дата и время создания таблицы';
+COMMENT ON COLUMN {SCHEMA}.{PREFIX}act_tables.updated_at IS 'Дата и время последнего изменения таблицы';
+
 -- ============================================================================
 -- ТАБЛИЦА ТЕКСТОВЫХ БЛОКОВ
 -- ============================================================================
@@ -138,6 +210,17 @@ CREATE TABLE {SCHEMA}.{PREFIX}act_textblocks (
 )
 WITH (appendonly=false)
 DISTRIBUTED BY (id);
+
+COMMENT ON TABLE {SCHEMA}.{PREFIX}act_textblocks IS 'Текстовые блоки с форматированием внутри актов';
+COMMENT ON COLUMN {SCHEMA}.{PREFIX}act_textblocks.id IS 'Уникальный идентификатор записи';
+COMMENT ON COLUMN {SCHEMA}.{PREFIX}act_textblocks.act_id IS 'Ссылка на акт';
+COMMENT ON COLUMN {SCHEMA}.{PREFIX}act_textblocks.textblock_id IS 'Уникальный ID текстового блока внутри акта';
+COMMENT ON COLUMN {SCHEMA}.{PREFIX}act_textblocks.node_id IS 'ID узла в дереве, к которому привязан блок';
+COMMENT ON COLUMN {SCHEMA}.{PREFIX}act_textblocks.node_number IS 'Номер узла (например, 2.1) для аналитики';
+COMMENT ON COLUMN {SCHEMA}.{PREFIX}act_textblocks.content IS 'Текстовое содержимое блока';
+COMMENT ON COLUMN {SCHEMA}.{PREFIX}act_textblocks.formatting IS 'JSONB объект с информацией о форматировании (стили, выравнивание и т.д.)';
+COMMENT ON COLUMN {SCHEMA}.{PREFIX}act_textblocks.created_at IS 'Дата и время создания блока';
+COMMENT ON COLUMN {SCHEMA}.{PREFIX}act_textblocks.updated_at IS 'Дата и время последнего изменения блока';
 
 -- ============================================================================
 -- ТАБЛИЦА НАРУШЕНИЙ
@@ -163,6 +246,23 @@ CREATE TABLE {SCHEMA}.{PREFIX}act_violations (
 WITH (appendonly=false)
 DISTRIBUTED BY (id);
 
+COMMENT ON TABLE {SCHEMA}.{PREFIX}act_violations IS 'Нарушения, выявленные в ходе проверки';
+COMMENT ON COLUMN {SCHEMA}.{PREFIX}act_violations.id IS 'Уникальный идентификатор записи';
+COMMENT ON COLUMN {SCHEMA}.{PREFIX}act_violations.act_id IS 'Ссылка на акт';
+COMMENT ON COLUMN {SCHEMA}.{PREFIX}act_violations.violation_id IS 'Уникальный ID нарушения внутри акта';
+COMMENT ON COLUMN {SCHEMA}.{PREFIX}act_violations.node_id IS 'ID узла в дереве, к которому привязано нарушение';
+COMMENT ON COLUMN {SCHEMA}.{PREFIX}act_violations.node_number IS 'Номер узла (например, 5.1.3) для аналитики';
+COMMENT ON COLUMN {SCHEMA}.{PREFIX}act_violations.violated IS 'Что нарушено (нормативная база)';
+COMMENT ON COLUMN {SCHEMA}.{PREFIX}act_violations.established IS 'Что установлено (факты нарушения)';
+COMMENT ON COLUMN {SCHEMA}.{PREFIX}act_violations.description_list IS 'JSONB объект с полями enabled и items для списка описаний';
+COMMENT ON COLUMN {SCHEMA}.{PREFIX}act_violations.additional_content IS 'JSONB объект с полями enabled и items для дополнительного содержимого';
+COMMENT ON COLUMN {SCHEMA}.{PREFIX}act_violations.reasons IS 'JSONB объект с полями enabled и content для причин нарушения';
+COMMENT ON COLUMN {SCHEMA}.{PREFIX}act_violations.consequences IS 'JSONB объект с полями enabled и content для последствий нарушения';
+COMMENT ON COLUMN {SCHEMA}.{PREFIX}act_violations.responsible IS 'JSONB объект с полями enabled и content для ответственных лиц';
+COMMENT ON COLUMN {SCHEMA}.{PREFIX}act_violations.recommendations IS 'JSONB объект с полями enabled и content для рекомендаций по устранению';
+COMMENT ON COLUMN {SCHEMA}.{PREFIX}act_violations.created_at IS 'Дата и время создания записи о нарушении';
+COMMENT ON COLUMN {SCHEMA}.{PREFIX}act_violations.updated_at IS 'Дата и время последнего изменения записи';
+
 -- ============================================================================
 -- ИНДЕКСЫ ДЛЯ ОПТИМИЗАЦИИ ЗАПРОСОВ
 -- ============================================================================
@@ -187,7 +287,6 @@ CREATE INDEX idx_{PREFIX}acts_created_by
 CREATE INDEX idx_{PREFIX}acts_last_edited_at
     ON {SCHEMA}.{PREFIX}acts(last_edited_at);
 
--- Индексы для блокировок
 CREATE INDEX idx_{PREFIX}acts_locked_by
     ON {SCHEMA}.{PREFIX}acts(locked_by)
     WHERE locked_by IS NOT NULL;
@@ -240,7 +339,6 @@ CREATE INDEX idx_{PREFIX}act_violations_act_violation
 -- ТРИГГЕРЫ ДЛЯ АВТОМАТИЧЕСКОГО ОБНОВЛЕНИЯ updated_at
 -- ============================================================================
 
--- Функция для обновления updated_at
 CREATE OR REPLACE FUNCTION {SCHEMA}.update_updated_at_column()
 RETURNS TRIGGER AS $$
 BEGIN
@@ -249,12 +347,17 @@ BEGIN
 END;
 $$ LANGUAGE plpgsql;
 
--- Триггеры для каждой таблицы
+COMMENT ON FUNCTION {SCHEMA}.update_updated_at_column() IS
+    'Автоматически устанавливает updated_at = CURRENT_TIMESTAMP при UPDATE';
+
 DROP TRIGGER IF EXISTS update_{PREFIX}acts_updated_at ON {SCHEMA}.{PREFIX}acts;
 CREATE TRIGGER update_{PREFIX}acts_updated_at
     BEFORE UPDATE ON {SCHEMA}.{PREFIX}acts
     FOR EACH ROW
     EXECUTE PROCEDURE {SCHEMA}.update_updated_at_column();
+
+COMMENT ON TRIGGER update_{PREFIX}acts_updated_at ON {SCHEMA}.{PREFIX}acts IS
+    'Автоматически обновляет поле updated_at при изменении метаданных акта';
 
 DROP TRIGGER IF EXISTS update_{PREFIX}act_tree_updated_at ON {SCHEMA}.{PREFIX}act_tree;
 CREATE TRIGGER update_{PREFIX}act_tree_updated_at
@@ -262,11 +365,17 @@ CREATE TRIGGER update_{PREFIX}act_tree_updated_at
     FOR EACH ROW
     EXECUTE PROCEDURE {SCHEMA}.update_updated_at_column();
 
+COMMENT ON TRIGGER update_{PREFIX}act_tree_updated_at ON {SCHEMA}.{PREFIX}act_tree IS
+    'Автоматически обновляет поле updated_at при изменении структуры дерева';
+
 DROP TRIGGER IF EXISTS update_{PREFIX}act_tables_updated_at ON {SCHEMA}.{PREFIX}act_tables;
 CREATE TRIGGER update_{PREFIX}act_tables_updated_at
     BEFORE UPDATE ON {SCHEMA}.{PREFIX}act_tables
     FOR EACH ROW
     EXECUTE PROCEDURE {SCHEMA}.update_updated_at_column();
+
+COMMENT ON TRIGGER update_{PREFIX}act_tables_updated_at ON {SCHEMA}.{PREFIX}act_tables IS
+    'Автоматически обновляет поле updated_at при изменении таблицы';
 
 DROP TRIGGER IF EXISTS update_{PREFIX}act_textblocks_updated_at ON {SCHEMA}.{PREFIX}act_textblocks;
 CREATE TRIGGER update_{PREFIX}act_textblocks_updated_at
@@ -274,8 +383,14 @@ CREATE TRIGGER update_{PREFIX}act_textblocks_updated_at
     FOR EACH ROW
     EXECUTE PROCEDURE {SCHEMA}.update_updated_at_column();
 
+COMMENT ON TRIGGER update_{PREFIX}act_textblocks_updated_at ON {SCHEMA}.{PREFIX}act_textblocks IS
+    'Автоматически обновляет поле updated_at при изменении текстового блока';
+
 DROP TRIGGER IF EXISTS update_{PREFIX}act_violations_updated_at ON {SCHEMA}.{PREFIX}act_violations;
 CREATE TRIGGER update_{PREFIX}act_violations_updated_at
     BEFORE UPDATE ON {SCHEMA}.{PREFIX}act_violations
     FOR EACH ROW
     EXECUTE PROCEDURE {SCHEMA}.update_updated_at_column();
+
+COMMENT ON TRIGGER update_{PREFIX}act_violations_updated_at ON {SCHEMA}.{PREFIX}act_violations IS
+    'Автоматически обновляет поле updated_at при изменении нарушения';

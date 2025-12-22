@@ -485,9 +485,9 @@ class CreateActDialog extends DialogBase {
             let digits = cleaned.replace(/[^\d]/g, '');
 
             // Ограничиваем до 6 цифр
-            digits = digits.substring(0, 6);
+            digits = digits.substring(0, 7);
 
-            // Форматируем: КМ-XX-XXXX
+            // Форматируем: КМ-XX-XXXXX
             let formatted = 'КМ-';
 
             if (digits.length > 0) {
@@ -495,7 +495,7 @@ class CreateActDialog extends DialogBase {
             }
 
             if (digits.length > 2) {
-                formatted += '-' + digits.substring(2, 6);
+                formatted += '-' + digits.substring(2, 7);
             }
 
             e.target.value = formatted;
@@ -504,13 +504,13 @@ class CreateActDialog extends DialogBase {
         // Валидация при потере фокуса
         kmInput.addEventListener('blur', (e) => {
             const value = e.target.value;
-            const pattern = /^КМ-\d{2}-\d{4}$/;
+            const pattern = /^КМ-\d{2}-\d{5}$/;
 
             // Сбрасываем предыдущую ошибку
             e.target.setCustomValidity('');
 
             if (value && !pattern.test(value)) {
-                e.target.setCustomValidity('КМ номер должен быть в формате КМ-XX-XXXX (например, КМ-75-9475)');
+                e.target.setCustomValidity('КМ номер должен быть в формате КМ-XX-XXXXX (например, КМ-99-94751)');
                 e.target.reportValidity();
             }
         });

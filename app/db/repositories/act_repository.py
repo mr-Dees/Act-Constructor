@@ -48,7 +48,7 @@ class ActDBService:
         Проверяет существование актов с данным КМ номером.
 
         Args:
-            km_number: КМ номер в формате КМ-XX-XXXX
+            km_number: КМ номер в формате КМ-XX-XXXXX
 
         Returns:
             Словарь с информацией:

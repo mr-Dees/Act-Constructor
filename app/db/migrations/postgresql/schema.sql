@@ -9,7 +9,7 @@ CREATE TABLE IF NOT EXISTS acts (
 
     -- Номер КМ и части
     km_number VARCHAR(50) NOT NULL,
-    km_number_digit VARCHAR(10) NOT NULL,
+    km_number_digit INTEGER NOT NULL,
     part_number INTEGER NOT NULL DEFAULT 1,
     total_parts INTEGER NOT NULL DEFAULT 1,
 
@@ -47,10 +47,10 @@ CREATE TABLE IF NOT EXISTS acts (
 
     -- Constraints
     CONSTRAINT check_km_number_format
-        CHECK (km_number ~ '^КМ-\d{2}-\d{4}$'),
+        CHECK (km_number ~ '^КМ-\d{2}-\d{5}$'),
 
     CONSTRAINT check_km_number_digit_length
-        CHECK (length(km_number_digit) = 6),
+        CHECK (length(km_number_digit) = 7),
 
     CONSTRAINT check_service_note_format
         CHECK (
@@ -80,8 +80,8 @@ CREATE TABLE IF NOT EXISTS acts (
 COMMENT ON TABLE acts IS 'Основная таблица актов проверки с метаданными';
 
 COMMENT ON COLUMN acts.id IS 'Уникальный идентификатор акта';
-COMMENT ON COLUMN acts.km_number IS 'КМ номер в формате КМ-XX-XXXX для отображения (НЕ меняется при добавлении СЗ)';
-COMMENT ON COLUMN acts.km_number_digit IS 'КМ номер только цифры (всегда 6 цифр) для быстрого поиска';
+COMMENT ON COLUMN acts.km_number IS 'КМ номер в формате КМ-XX-XXXXX для отображения (НЕ меняется при добавлении СЗ)';
+COMMENT ON COLUMN acts.km_number_digit IS 'КМ номер только цифры (всегда 7 цифр) для быстрого поиска';
 COMMENT ON COLUMN acts.part_number IS 'Номер части акта (1,2,3... для актов без СЗ или 4 цифры из СЗ для актов с СЗ)';
 COMMENT ON COLUMN acts.total_parts IS 'Общее количество частей акта (актов с данным КМ)';
 COMMENT ON COLUMN acts.inspection_name IS 'Наименование проверки';
