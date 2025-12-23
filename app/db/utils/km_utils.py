@@ -10,7 +10,7 @@ class KMUtils:
     """Stateless утилиты для обработки КМ и служебных записок."""
 
     @staticmethod
-    def extract_km_digits(km_number: str) -> str:
+    def extract_km_digits(km_number: str) -> int:
         """
         Извлекает только цифры из КМ номера.
 
@@ -20,7 +20,7 @@ class KMUtils:
             km_number: КМ в формате КМ-XX-XXXXX или произвольная строка.
 
         Returns:
-            Строка из 7 цифр.
+            Числовой номер КМ из 7 цифр.
 
         Raises:
             ValueError: если количество цифр не равно 7.
@@ -33,7 +33,7 @@ class KMUtils:
                 f"{len(digits)} ({km_number})"
             )
 
-        return digits
+        return int(digits)
 
     @staticmethod
     def extract_service_note_suffix(service_note: str) -> Optional[str]:

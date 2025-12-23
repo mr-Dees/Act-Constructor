@@ -101,7 +101,7 @@ class ActDBService:
 
     async def _check_km_part_uniqueness(
             self,
-            km_digit: str,
+            km_digit: int,
             part_number: int,
             exclude_act_id: int | None = None
     ) -> bool:
@@ -273,7 +273,7 @@ class ActDBService:
 
         return new_act_id
 
-    async def _update_total_parts_for_km(self, km_digit: str) -> None:
+    async def _update_total_parts_for_km(self, km_digit: int) -> None:
         """
         Обновляет total_parts для всех актов с данным КМ номером.
 
@@ -308,7 +308,7 @@ class ActDBService:
 
     async def _find_free_part_number(
             self,
-            km_digit: str,
+            km_digit: int,
             exclude_act_id: int | None = None,
     ) -> int:
         """
@@ -691,7 +691,6 @@ class ActDBService:
                 act_data.inspection_end_date,
             )
 
-            # Остальной код без изменений...
             for idx, member in enumerate(act_data.audit_team):
                 await self.conn.execute(
                     f"""
