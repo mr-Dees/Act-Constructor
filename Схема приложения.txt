@@ -242,6 +242,7 @@ Act Constructor/
 │       ├── app-config.js
 │       ├── auth.js
 │       ├── format-menu-manager.js
+│       ├── header-exit.js
 │       ├── lock-manager.js
 │       ├── navigation-manager.js
 │       ├── notifications.js

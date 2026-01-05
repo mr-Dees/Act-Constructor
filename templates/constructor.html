@@ -1,63 +1,65 @@
 {% extends "base.html" %}
 
 {% block content %}
-<!-- Шаг 1: Конструктор структуры акта -->
-<div id="step1" class="step-content">
-    <div class="panels">
-        <!-- Панель дерева элементов -->
-        {% include "components/tree_panel.html" %}
+<div class="container">
+    <!-- Шаг 1: Конструктор структуры акта -->
+    <div id="step1" class="step-content">
+        <div class="panels">
+            <!-- Панель дерева элементов -->
+            {% include "components/tree_panel.html" %}
 
-        <!-- Панель предпросмотра -->
-        {% include "components/preview_panel.html" %}
+            <!-- Панель предпросмотра -->
+            {% include "components/preview_panel.html" %}
+        </div>
     </div>
-</div>
 
-<!-- Шаг 2: Заполнение содержимого элементов -->
-<div id="step2" class="step-content hidden">
-    <!-- Контейнер для редактирования элементов акта -->
-    <div id="itemsContainer" class="items-container"></div>
+    <!-- Шаг 2: Заполнение содержимого элементов -->
+    <div id="step2" class="step-content hidden">
+        <!-- Контейнер для редактирования элементов акта -->
+        <div id="itemsContainer" class="items-container"></div>
 
-    <!-- Панель навигации и сохранения -->
-    <div class="step-actions">
-        <button id="backBtn" class="btn btn-secondary">◄ Назад</button>
+        <!-- Панель навигации и сохранения -->
+        <div class="step-actions">
+            <button id="backBtn" class="btn btn-secondary">◄ Назад</button>
 
-        <!-- Группа кнопок экспорта с выбором форматов -->
-        <div class="save-button-group">
-            <button id="generateBtn" class="btn btn-success save-main-btn">
-                Сохранить
-            </button>
-            <button id="formatDropdownBtn"
-                    class="btn btn-success save-dropdown-btn"
-                    title="Выбрать действия"
-                    aria-label="Выбрать действия сохранения"
-                    aria-expanded="false">
-                <svg width="12" height="12" viewBox="0 0 12 12" fill="none" xmlns="http://www.w3.org/2000/svg">
-                    <path d="M2 4L6 8L10 4" stroke="currentColor" stroke-width="2" stroke-linecap="round"
-                          stroke-linejoin="round"/>
-                </svg>
-            </button>
+            <!-- Группа кнопок экспорта с выбором форматов -->
+            <div class="save-button-group">
+                <button id="generateBtn" class="btn btn-success save-main-btn">
+                    Сохранить
+                </button>
+                <button id="formatDropdownBtn"
+                        class="btn btn-success save-dropdown-btn"
+                        title="Выбрать действия"
+                        aria-label="Выбрать действия сохранения"
+                        aria-expanded="false">
+                    <svg width="12" height="12" viewBox="0 0 12 12" fill="none" xmlns="http://www.w3.org/2000/svg">
+                        <path d="M2 4L6 8L10 4" stroke="currentColor" stroke-width="2" stroke-linecap="round"
+                              stroke-linejoin="round"/>
+                    </svg>
+                </button>
 
-            <!-- Выпадающее меню выбора действий -->
-            <div id="formatMenu" class="format-dropdown-menu hidden" role="menu">
-                <label class="format-option">
-                    <input type="checkbox" value="txt" checked>
-                    <span>Текст (TXT)</span>
-                </label>
-                <label class="format-option">
-                    <input type="checkbox" value="md">
-                    <span>Markdown (MD)</span>
-                </label>
-                <label class="format-option">
-                    <input type="checkbox" value="docx">
-                    <span>Word (DOCX)</span>
-                </label>
+                <!-- Выпадающее меню выбора действий -->
+                <div id="formatMenu" class="format-dropdown-menu hidden" role="menu">
+                    <label class="format-option">
+                        <input type="checkbox" value="txt" checked>
+                        <span>Текст (TXT)</span>
+                    </label>
+                    <label class="format-option">
+                        <input type="checkbox" value="md">
+                        <span>Markdown (MD)</span>
+                    </label>
+                    <label class="format-option">
+                        <input type="checkbox" value="docx">
+                        <span>Word (DOCX)</span>
+                    </label>
 
-                <div class="format-divider"></div>
+                    <div class="format-divider"></div>
 
-                <label class="format-option">
-                    <input type="checkbox" value="db" id="saveToDbCheckbox" checked>
-                    <span>База данных (GP)</span>
-                </label>
+                    <label class="format-option">
+                        <input type="checkbox" value="db" id="saveToDbCheckbox" checked>
+                        <span>База данных (GP)</span>
+                    </label>
+                </div>
             </div>
         </div>
     </div>

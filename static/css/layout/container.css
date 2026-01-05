@@ -10,8 +10,11 @@
     background: var(--bg-primary);
     border-radius: var(--radius-xl);
     box-shadow: var(--shadow-xl);
-    overflow: visible;
-    min-height: var(--content-height);
+    overflow: hidden;
+    height: calc(100vh - var(--icon-size-xs) - 1.25vh);
+    min-height: calc(100vh - var(--icon-size-xs) - 1.25vh);
+    display: flex;
+    flex-direction: column;
 }
 
 /* Внутренняя область контента */
@@ -29,6 +32,9 @@
     padding-top: var(--spacing-12xl);
     height: 100%;
     display: flex;
+    flex: 1;
+    overflow: auto;
+    min-height: 0;
     flex-direction: column;
     gap: var(--spacing-md);
 }
