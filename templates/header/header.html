@@ -1,5 +1,5 @@
 <header class="header">
-    <!-- Блок действий справа: Акты + Настройки -->
+    <!-- Блок действий слева -->
     <div class="header-actions-left">
         {% include 'header/header_help_button.html' %}
         {% include 'header/header_save_indicator.html' %}
@@ -7,8 +7,9 @@
 
     {% include 'header/header_steps.html' %}
 
-    <!-- Блок действий справа: Акты + Настройки -->
+    <!-- Блок действий справа: Предпросмотр + Акты + Настройки + Выход -->
     <div class="header-actions-right">
+        {% include 'header/header_preview_button.html' %}
         {% include 'header/header_acts_menu.html' %}
         {% include 'header/header_settings_menu.html' %}
         {% include 'header/header_exit_button.html' %}

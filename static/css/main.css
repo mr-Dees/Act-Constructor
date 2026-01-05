@@ -41,6 +41,7 @@
 @import './modules/preview/preview-typography.css';
 @import './modules/preview/preview-table.css';
 @import './modules/preview/preview-violation.css';
+@import './modules/preview/preview-menu.css';
 
 /* Модуль справки */
 @import './modules/help/help-button.css';

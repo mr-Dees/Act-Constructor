@@ -11,7 +11,7 @@
 /* Выпадающее меню актов */
 .acts-menu-dropdown {
     position: absolute;
-    top: calc(100% + var(--acts-menu-top-offset));
+    top: calc(100% + var(--spacing-lg));
     right: var(--acts-menu-right-offset);
     min-width: var(--acts-menu-min-width);
     max-width: var(--acts-menu-max-width);
@@ -33,7 +33,7 @@
 
 /* Шапка меню актов */
 .acts-menu-header {
-    padding: var(--spacing-xl) var(--spacing-2xl);
+    padding: var(--spacing-lg) var(--spacing-2xl);
     background: var(--gradient-header);
     color: var(--text-on-primary);
     border-bottom: var(--border-width-thin) solid var(--border-light);

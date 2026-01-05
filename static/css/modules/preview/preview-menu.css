@@ -1,0 +1,305 @@
+/*
+ * Выпадающее меню предпросмотра
+ * Аналогично меню настроек и актов, без оверлея
+ */
+
+/* Контейнер меню */
+.preview-menu-container {
+    position: relative;
+}
+
+/* Выпадающее меню */
+.preview-menu {
+    position: absolute;
+    top: calc(100% + var(--spacing-lg));
+    right: var(--spacing-preview-menu);
+    width: 66vw;
+    min-width: 30rem;
+    max-width: 90vw;
+    max-height: calc(100vh - var(--header-height) - var(--spacing-2xl) - var(--spacing-xl));
+    background: var(--modal-bg);
+    border: var(--border-width-thin) solid var(--modal-border);
+    border-radius: var(--radius-xl);
+    box-shadow: var(--modal-shadow);
+    z-index: var(--z-dropdown);
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+    animation: scaleIn var(--transition-base) cubic-bezier(0.4, 0, 0.2, 1);
+    transition: width var(--transition-fast);
+    will-change: width;
+    contain: layout style paint;
+}
+
+/* Скрытое состояние */
+.preview-menu.hidden {
+    display: none;
+}
+
+/* Ручка для изменения размера */
+.preview-menu-resize-handle {
+    position: absolute;
+    left: 0;
+    top: 0;
+    bottom: 0;
+    width: var(--preview-resize-handle-width);
+    cursor: ew-resize;
+    z-index: var(--z-sticky);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    transition: background-color var(--transition-fast);
+    user-select: none;
+    touch-action: none;
+}
+
+.preview-menu-resize-handle:hover {
+    background: var(--preview-resize-handle-hover-bg);
+}
+
+.preview-menu-resize-handle.resizing {
+    background: var(--preview-resize-handle-active-bg);
+}
+
+/* Индикатор ручки */
+.preview-menu-resize-indicator {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: var(--spacing-xs);
+    padding: var(--spacing-sm);
+    border-radius: var(--radius-sm);
+    background: var(--preview-resize-indicator-bg);
+    box-shadow: var(--shadow-sm);
+    transition: opacity var(--transition-fast),
+    background-color var(--transition-fast),
+    box-shadow var(--transition-fast);
+    opacity: 0.7;
+    will-change: opacity, background-color;
+}
+
+.preview-menu-resize-handle:hover .preview-menu-resize-indicator {
+    opacity: 1;
+    background: var(--preview-resize-indicator-hover-bg);
+    box-shadow: var(--shadow);
+}
+
+.preview-menu-resize-handle.resizing .preview-menu-resize-indicator {
+    opacity: 1;
+    background: var(--preview-resize-indicator-active-bg);
+    box-shadow: var(--shadow-md);
+}
+
+/* Полоски индикатора */
+.resize-grip {
+    width: var(--preview-resize-grip-width);
+    height: var(--preview-resize-grip-height);
+    background: var(--preview-resize-grip-color);
+    border-radius: var(--radius-full);
+    transition: background-color var(--transition-fast),
+    transform var(--transition-fast);
+    will-change: background-color, transform;
+}
+
+.preview-menu-resize-handle:hover .resize-grip {
+    background: var(--preview-resize-grip-hover-color);
+    transform: scaleY(1.2);
+}
+
+.preview-menu-resize-handle.resizing .resize-grip {
+    background: var(--preview-resize-grip-active-color);
+    transform: scaleY(1.3);
+}
+
+/* Шапка меню */
+.preview-menu-header {
+    padding: var(--spacing-xl) var(--spacing-2xl);
+    background: var(--gradient-header);
+    color: var(--text-on-primary);
+    border-bottom: var(--border-width-thin) solid var(--border-light);
+    border-radius: var(--radius-xl) var(--radius-xl) 0 0;
+    flex-shrink: 0;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+}
+
+.preview-menu-header h4 {
+    margin: 0;
+    font-size: var(--font-size-xl);
+    font-weight: var(--font-weight-semibold);
+    line-height: var(--line-height-tight);
+}
+
+/* Кнопка закрытия */
+.preview-menu-close {
+    background: none;
+    border: none;
+    font-size: var(--font-size-3xl);
+    cursor: pointer;
+    color: var(--text-on-primary);
+    line-height: 1;
+    padding: 0;
+    width: var(--settings-menu-close-size);
+    height: var(--settings-menu-close-size);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    border-radius: var(--radius);
+    transition: var(--transition-all);
+}
+
+.preview-menu-close:hover {
+    background: var(--help-close-hover);
+    transform: rotate(var(--rotate-close-button));
+}
+
+.preview-menu-close:active {
+    transform: rotate(var(--rotate-close-button)) scale(var(--button-active-scale));
+}
+
+.preview-menu-close:focus-visible {
+    outline: var(--border-width-md) solid var(--text-on-primary);
+    outline-offset: var(--focus-outline-offset);
+}
+
+/* Тело меню с прокруткой */
+.preview-menu-body {
+    flex: 1;
+    overflow-y: auto;
+    overflow-x: hidden;
+    padding: var(--spacing-2xl);
+    scrollbar-width: thin;
+    scrollbar-color: var(--scrollbar-thumb) var(--scrollbar-bg);
+    font-family: 'Times New Roman', Georgia, serif;
+    font-size: var(--font-size-sm);
+    line-height: var(--line-height-relaxed);
+    color: var(--text-primary);
+    background: var(--bg-primary);
+}
+
+/* Стилизация scrollbar */
+.preview-menu-body::-webkit-scrollbar {
+    width: var(--scrollbar-width);
+}
+
+.preview-menu-body::-webkit-scrollbar-track {
+    background: var(--scrollbar-bg);
+    border-radius: var(--radius);
+}
+
+.preview-menu-body::-webkit-scrollbar-thumb {
+    background: var(--scrollbar-thumb);
+    border-radius: var(--radius);
+}
+
+.preview-menu-body::-webkit-scrollbar-thumb:hover {
+    background: var(--scrollbar-thumb-hover);
+}
+
+/* Типографика внутри меню (используем стили preview) */
+.preview-menu-body h1 {
+    text-align: center;
+    margin-top: 0;
+    margin-bottom: var(--spacing-xl);
+    font-size: var(--font-size-2xl);
+    color: var(--text-primary);
+    font-weight: var(--font-weight-bold);
+    line-height: var(--line-height-tight);
+    letter-spacing: var(--letter-spacing-tight);
+}
+
+.preview-menu-body h2 {
+    margin-top: var(--spacing-2xl);
+    margin-bottom: var(--spacing-md);
+    font-size: var(--font-size-xl);
+    color: var(--text-primary);
+    font-weight: var(--font-weight-semibold);
+    line-height: var(--line-height-tight);
+    letter-spacing: var(--letter-spacing-tight);
+}
+
+.preview-menu-body h2:first-child {
+    margin-top: 0;
+}
+
+.preview-menu-body h3 {
+    margin-top: var(--spacing-xl);
+    margin-bottom: var(--spacing-sm);
+    font-size: var(--font-size-lg);
+    color: var(--text-primary);
+    font-weight: var(--font-weight-semibold);
+    line-height: var(--line-height-normal);
+}
+
+.preview-menu-body h4 {
+    margin-top: var(--spacing-lg);
+    margin-bottom: var(--spacing-xs);
+    font-size: var(--font-size-base);
+    color: var(--text-secondary);
+    font-weight: var(--font-weight-semibold);
+    line-height: var(--line-height-normal);
+}
+
+.preview-menu-body p {
+    margin-top: 0;
+    margin-bottom: var(--spacing);
+    line-height: var(--line-height-relaxed);
+    text-align: justify;
+    color: var(--text-primary);
+    hyphens: auto;
+}
+
+.preview-menu-body p:last-child {
+    margin-bottom: 0;
+}
+
+/* Состояние загрузки */
+.preview-menu-body.loading {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    min-height: 200px;
+    color: var(--text-tertiary);
+    font-style: italic;
+}
+
+.preview-menu-body.loading::before {
+    content: '⏳ Загрузка предпросмотра...';
+    font-size: var(--font-size-base);
+    font-family: var(--font-family-base);
+}
+
+/* Пустое состояние */
+.preview-menu-body.empty {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    flex-direction: column;
+    min-height: 300px;
+    color: var(--text-tertiary);
+    text-align: center;
+    padding: var(--spacing-2xl);
+}
+
+.preview-menu-body.empty::before {
+    content: '📄';
+    font-size: 4rem;
+    margin-bottom: var(--spacing);
+    opacity: 0.3;
+}
+
+.preview-menu-body.empty::after {
+    content: 'Документ пуст. Добавьте элементы в структуру.';
+    font-style: italic;
+    font-size: var(--font-size-base);
+    font-family: var(--font-family-base);
+}
+
+/* Разделитель */
+.preview-menu-divider {
+    height: var(--border-width-thin);
+    background: var(--border-light);
+    margin: var(--spacing-xl) 0;
+    border: none;
+}

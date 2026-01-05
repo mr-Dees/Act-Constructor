@@ -102,6 +102,7 @@ Act Constructor/
 │   │   ├── header.html
 │   │   ├── header_acts_menu.html
 │   │   ├── header_help_button.html
+│   │   ├── header_preview_button.html
 │   │   ├── header_save_indicator.html
 │   │   ├── header_settings_menu.html
 │   │   ├── header_steps.html
@@ -155,6 +156,7 @@ Act Constructor/
 │   │   │   │   └── notifications-types.css
 │   │   │   ├── preview/
 │   │   │   │   ├── preview-base.css
+│   │   │   │   ├── preview-menu.css
 │   │   │   │   ├── preview-table.css
 │   │   │   │   ├── preview-typography.css
 │   │   │   │   └── preview-violation.css
@@ -246,6 +248,7 @@ Act Constructor/
 │       ├── lock-manager.js
 │       ├── navigation-manager.js
 │       ├── notifications.js
+│       ├── preview-menu.js
 │       ├── settings-menu.js
 │       └── storage-manager.js
 ├── requirements.txt

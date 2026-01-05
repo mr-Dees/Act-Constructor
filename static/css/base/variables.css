@@ -327,7 +327,7 @@
     --acts-menu-max-width: 60rem;
     --acts-menu-max-height: 70vh;
     --acts-menu-top-offset: 1.125rem;
-    --acts-menu-right-offset: -5rem;
+    --acts-menu-right-offset: -5.5rem;
 
     /* Уведомления */
     --notification-bg: #ffffff;
@@ -352,6 +352,17 @@
     --notification-pinned-ring-width: 2px;
 
     /* Preview специфичные переменные */
+    --preview-resize-handle-width: 1.5rem;
+    --preview-resize-handle-hover-bg: rgba(91, 111, 168, 0.05);
+    --preview-resize-handle-active-bg: rgba(91, 111, 168, 0.1);
+    --preview-resize-indicator-bg: var(--bg-secondary);
+    --preview-resize-indicator-hover-bg: var(--primary-subtle);
+    --preview-resize-indicator-active-bg: var(--primary-light);
+    --preview-resize-grip-width: 0.25rem;
+    --preview-resize-grip-height: 1.5rem;
+    --preview-resize-grip-color: var(--border-medium);
+    --preview-resize-grip-hover-color: var(--primary);
+    --preview-resize-grip-active-color: var(--primary-hover);
     --preview-violation-label-width: 8rem;
     --preview-violation-number-size: 1.5rem;
     --preview-code-padding: 0.125rem 0.375rem;
@@ -578,6 +589,7 @@
     --spacing-10xl: 6rem;
     --spacing-11xl: 6.5rem;
     --spacing-12xl: 7rem;
+    --spacing-preview-menu: -9.5rem;
     --spacing-save-menu: 17.5rem;
 
     /* Дополнительные размеры для анимаций */
