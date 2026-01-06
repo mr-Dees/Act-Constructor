@@ -29,23 +29,29 @@ const AppState = {
 
     /**
      * Инициализирует базовую структуру дерева
+     * @param {boolean} [isProcessBased=true] - Является ли проверка процессной
      * @returns {Object} Корневой узел дерева
      */
-    initializeTree() {
-        this.treeData = this._createRootStructure();
-        this._createInitialTables();
+    initializeTree(isProcessBased = true) {
+        this.treeData = this._createRootStructure(isProcessBased);
+        this._createInitialTables(isProcessBased);
         return this.treeData;
     },
 
     /**
      * Создает корневую структуру дерева с защищенными разделами
      * @private
+     * @param {boolean} isProcessBased - Является ли проверка процессной
      * @returns {Object} Корневой узел
      */
-    _createRootStructure() {
-        const sections = AppConfig.tree.defaultSections.map(section =>
-            this._createProtectedSection(section.id, section.label)
-        );
+    _createRootStructure(isProcessBased) {
+        const sections = AppConfig.tree.defaultSections.map(section => {
+            // Изменяем название раздела 1 для непроцессной проверки
+            if (section.id === '1' && !isProcessBased) {
+                return this._createProtectedSection(section.id, 'Характеристика проверяемого направления');
+            }
+            return this._createProtectedSection(section.id, section.label);
+        });
 
         return {
             id: 'root',
@@ -75,8 +81,9 @@ const AppState = {
     /**
      * Создает предустановленные таблицы при инициализации
      * @private
+     * @param {boolean} isProcessBased - Является ли проверка процессной
      */
-    _createInitialTables() {
+    _createInitialTables(isProcessBased) {
         if (!AppConfig?.content?.tablePresets) {
             return;
         }
@@ -87,8 +94,8 @@ const AppState = {
         const node2 = this.findNodeById('2');
         const node3 = this.findNodeById('3');
 
-        if (node2) {
-            // Таблица для раздела 2
+        // Таблица для раздела 2 создается ТОЛЬКО для процессной проверки
+        if (node2 && isProcessBased) {
             this._createTableFromPreset('2', presets.qualityAssessment, '', true, false);
         }
 

@@ -2,6 +2,7 @@
 API эндпоинты для работы с содержимым актов.
 
 Предоставляет операции загрузки и сохранения структурированного содержимого:
+- Метаданные акта
 - Дерево структуры акта (tree)
 - Таблицы (tables)
 - Текстовые блоки (textBlocks)
@@ -33,6 +34,7 @@ async def get_act_content(
     Получает полное содержимое акта для редактора.
 
     Загружает из БД:
+    - Полные метаданные акта (ActResponse)
     - Дерево структуры (act_tree)
     - Таблицы (act_tables)
     - Текстовые блоки (act_textblocks)
@@ -43,10 +45,11 @@ async def get_act_content(
         username: Имя пользователя (из зависимости)
 
     Returns:
-        Содержимое акта в формате {tree, tables, textBlocks, violations}
+        Содержимое акта в формате {metadata, tree, tables, textBlocks, violations}
 
     Raises:
         HTTPException: 403 если нет доступа к акту
+        HTTPException: 404 если акт не найден
         HTTPException: 500 при ошибках загрузки
     """
     async with get_db() as conn:
@@ -57,6 +60,9 @@ async def get_act_content(
             raise HTTPException(status_code=403, detail="Нет доступа к акту")
 
         try:
+            # Получаем полные метаданные акта через ActResponse
+            act_metadata = await db_service.get_act_by_id(act_id)
+
             # Получаем адаптер и имена таблиц
             adapter = get_adapter()
             acts_tree = adapter.get_table_name("act_tree")
@@ -152,14 +158,23 @@ async def get_act_content(
                 for row in v_rows
             }
 
-            logger.info(f"Загружено содержимое акта ID={act_id}")
+            logger.info(
+                f"Загружено содержимое акта ID={act_id}, "
+                f"КМ={act_metadata.km_number}, is_process_based={act_metadata.is_process_based}"
+            )
 
+            # Возвращаем метаданные + содержимое
             return {
+                'metadata': act_metadata.model_dump(mode='json'),
                 'tree': tree,
                 'tables': tables,
                 'textBlocks': textBlocks,
                 'violations': violations
             }
+        except HTTPException:
+            raise
+        except ValueError as e:
+            raise HTTPException(status_code=404, detail=str(e))
         except Exception as e:
             logger.exception(f"Ошибка загрузки содержимого акта ID={act_id}: {e}")
             raise HTTPException(
