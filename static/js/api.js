@@ -130,7 +130,7 @@ class APIClient {
     static async _generateSingleFormat(format, data) {
         try {
             const response = await fetch(AppConfig.api.getUrl(
-                `/api/v1/acts_export/save_act?fmt=${format}`),
+                    `/api/v1/acts_export/save_act?fmt=${format}`),
                 {
                     method: 'POST',
                     headers: {'Content-Type': 'application/json'},
@@ -324,6 +324,17 @@ class APIClient {
 
             const content = await resp.json();
 
+            // Сохраняем метаданные в глобальную переменную
+            window.actMetadata = content.metadata;
+
+            // Получаем флаг процессной проверки из метаданных
+            const isProcessBased = content.metadata?.is_process_based !== undefined
+                ? content.metadata.is_process_based
+                : true;
+
+            console.log('Загружены метаданные акта:', window.actMetadata);
+            console.log('Тип проверки:', isProcessBased ? 'процессная' : 'непроцессная');
+
             // Отключаем tracking на время загрузки
             StorageManager.disableTracking();
 
@@ -342,8 +353,8 @@ class APIClient {
                 AppState.violations = {};
                 AppState.tableUISizes = {};
 
-                // Инициализируем дерево и таблицы
-                AppState.initializeTree();
+                // Инициализируем дерево и таблицы с учетом типа проверки
+                AppState.initializeTree(isProcessBased);
                 AppState.generateNumbering();
 
                 // Сохраняем дефолтную структуру в БД

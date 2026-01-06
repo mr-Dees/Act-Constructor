@@ -101,6 +101,7 @@ Act Constructor/
 │   │   ├── acts_menu_item.html
 │   │   ├── header.html
 │   │   ├── header_acts_menu.html
+│   │   ├── header_exit_button.html
 │   │   ├── header_help_button.html
 │   │   ├── header_preview_button.html
 │   │   ├── header_save_indicator.html

@@ -27,7 +27,9 @@ class App {
      */
     static _initializeState() {
         try {
-            AppState.initializeTree();
+            // По умолчанию создаём процессную проверку
+            // При загрузке акта из БД структура будет перезаписана
+            AppState.initializeTree(true);
             AppState.generateNumbering();
 
             if (!AppState.tableUISizes) {

@@ -26,6 +26,10 @@
     <script src="{{ url_for('static', path='js/header-exit.js') }}"></script>
 
     <script>
+        // Инициализируем глобальную переменную для метаданных акта
+        // Будет заполнена при загрузке содержимого через APIClient.loadActContent()
+        window.actMetadata = null;
+
         // Проверка авторизации только при открытии акта (constructor)
         (async function() {
             const urlParams = new URLSearchParams(window.location.search);
