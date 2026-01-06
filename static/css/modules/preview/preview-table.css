@@ -86,7 +86,7 @@
     margin-bottom: var(--spacing);
     color: var(--text-secondary);
     font-size: var(--font-size-sm);
-    font-family: 'Times New Roman', Georgia, serif;
+    font-family: var(--font-family-base);
 }
 
 /* Подпись под таблицей */

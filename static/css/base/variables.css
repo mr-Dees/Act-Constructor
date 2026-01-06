@@ -370,6 +370,13 @@
     --preview-sup-offset: -0.5em;
     --preview-sub-offset: -0.25em;
     --preview-script-size-ratio: 0.75em;
+    --preview-menu-width: 66vw;
+    --preview-menu-min-width: 30rem;
+    --preview-menu-max-width: 90vw;
+    --preview-menu-max-height: calc(100vh - var(--header-height) - var(--spacing-2xl) - var(--spacing-xl));
+    --preview-menu-loading-min-height: 12.5rem;
+    --preview-menu-empty-min-height: 18.75rem;
+    --preview-menu-empty-icon-size: 4rem;
     --image-preview-height: 12.5rem;
 
     /* Таблицы специфичные переменные */
@@ -629,6 +636,8 @@
     --scale-icon-hover: 1.1;
     --scale-dragging: 0.98;
     --scale-drop-child: 1.02;
+    --scale-resize-grip-hover: 1.2;
+    --scale-resize-grip-active: 1.3;
     --rotate-toggle-expanded: 90deg;
 
     /* Ширина границ */
@@ -650,6 +659,7 @@
     /* Типографика */
     --font-family-base: -apple-system, BlinkMacSystemFont, "Inter", "Segoe UI", system-ui, sans-serif;
     --font-family-mono: "SF Mono", "Monaco", "Consolas", "Liberation Mono", "Courier New", monospace;
+    --font-family-serif: 'Times New Roman', Georgia, serif;
     --font-size-xs: 0.75rem;
     --font-size-sm: 0.875rem;
     --font-size-base: 1rem;

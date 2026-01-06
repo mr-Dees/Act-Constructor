@@ -9,7 +9,7 @@
     background: var(--bg-primary);
     padding: var(--spacing-2xl);
     border-radius: var(--radius-md);
-    font-family: 'Times New Roman', Georgia, serif;
+    font-family: var(--font-family-base);
     border: var(--border-width-thin) solid var(--border);
     font-size: var(--font-size-sm);
     line-height: var(--line-height-relaxed);
