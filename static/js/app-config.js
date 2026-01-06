@@ -175,10 +175,10 @@ class AppConfig {
     static notifications = {
         // Длительности показа уведомлений (мс)
         duration: {
-            error: 5000,
-            warning: 4000,
-            info: 3000,
-            success: 2000,
+            error: 7000,
+            warning: 6000,
+            info: 4000,
+            success: 4000,
             longSuccess: 6000
         },
 
