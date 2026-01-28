@@ -50,7 +50,7 @@ CREATE TABLE IF NOT EXISTS acts (
         CHECK (km_number ~ '^КМ-\d{2}-\d{5}$'),
 
     CONSTRAINT check_km_number_digit_length
-        CHECK (length(km_number_digit) = 7),
+        CHECK (length(km_number_digit::text) = 7),
 
     CONSTRAINT check_service_note_format
         CHECK (
