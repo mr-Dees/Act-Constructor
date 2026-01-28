@@ -21,7 +21,7 @@ from starlette.middleware.base import BaseHTTPMiddleware
 from app.api.v1.deps.auth_deps import get_username
 from app.api.v1.endpoints.auth import get_current_user_from_env
 from app.api.v1.routes import api_router as api_v1_router
-from app.core.config import Settings, setup_logging
+from app.core.config import Settings, setup_logging, ensure_dotenv
 from app.db.connection import (
     init_db,
     close_db,
@@ -30,6 +30,8 @@ from app.db.connection import (
     KerberosTokenExpiredError
 )
 from app.db.repositories.act_repository import ActDBService
+
+ensure_dotenv()
 
 # Инициализируем настройки и логирование один раз на уровне модуля
 settings = Settings()

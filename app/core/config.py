@@ -11,7 +11,7 @@ from functools import lru_cache
 from logging.handlers import RotatingFileHandler
 from pathlib import Path
 from typing import ClassVar, Literal
-
+from dotenv import dotenv_values, set_key
 from pydantic import Field, field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
@@ -279,3 +279,37 @@ class Settings(BaseSettings):
 def get_settings() -> Settings:
     """Возвращает singleton экземпляр Settings с кэшированием."""
     return Settings()
+
+def ensure_dotenv(env_file: str = ".env"):
+    """
+    Гарантирует наличие .env файла в корне проекта.
+
+    Если файл отсутствует — создаёт его, записывая туда все поля Settings по умолчанию.
+    Если файл существует — ничего не делает, используется стандартная загрузка Settings.
+
+    Args:
+        env_file (str): Путь к .env файлу (относительно корня проекта)
+    """
+    env_path = Path(env_file).resolve()
+
+    # Если .env уже существует — ничего не делаем
+    if env_path.exists():
+        print(f"Используется существующий .env файл: {env_path}")
+        return
+
+    # Создаём .env с параметрами по умолчанию из Settings
+    settings = Settings()  # Инициализируем с дефолтами
+    settings_dict = settings.model_dump()  # Pydantic v2 (или .dict() для v1)
+
+    print(f"Создаём .env файл с настройками по умолчанию: {env_path}")
+
+    # Записываем каждую переменную в .env
+    for key, value in settings_dict.items():
+        # Пропускаем сложные типы или None
+        if value is None:
+            continue
+        if isinstance(value, (list, dict, tuple)):
+            value = str(value)
+        set_key(str(env_path), key.upper(), str(value))
+
+    print(f"Файл .env успешно создан: {env_path}")
