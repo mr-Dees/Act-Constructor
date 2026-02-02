@@ -1,0 +1,329 @@
+/*
+ * Общие стили для sidebar-layout
+ * Используется на landing и acts-manager страницах
+ * Включает sidebar, topbar и их responsive-адаптацию
+ */
+
+/* ============================================
+   Основная структура sidebar-layout
+   ============================================ */
+
+.sidebar-layout {
+    display: flex;
+    height: 100vh;
+    background: var(--bg-secondary);
+    overflow: hidden;
+}
+
+.sidebar-layout-main {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    min-width: 0;
+    overflow: hidden;
+}
+
+/* ============================================
+   Левый сайдбар с навигацией
+   ============================================ */
+
+.landing-sidebar {
+    width: 280px;
+    background: var(--bg-primary);
+    border-right: var(--border-width-thin) solid var(--border-light);
+    display: flex;
+    flex-direction: column;
+    flex-shrink: 0;
+    transition: width var(--duration-normal) ease;
+    overflow: hidden;
+}
+
+.landing-sidebar.collapsed {
+    width: 68px;
+}
+
+.sidebar-header {
+    padding: var(--spacing-lg) var(--spacing-2xl);
+    border-bottom: var(--border-width-thin) solid var(--border-light);
+    display: flex;
+    align-items: center;
+    gap: var(--spacing-md);
+    height: 57px;
+    box-sizing: border-box;
+    flex-shrink: 0;
+}
+
+.sidebar-logo {
+    flex-shrink: 0;
+    line-height: 0;
+}
+
+.sidebar-logo svg {
+    width: 28px;
+    height: 28px;
+}
+
+.sidebar-title {
+    font-size: var(--font-size-base);
+    font-weight: var(--font-weight-semibold);
+    color: var(--text-primary);
+    margin: 0;
+    white-space: nowrap;
+    overflow: hidden;
+    opacity: 1;
+    transition: opacity var(--duration-fast) ease;
+}
+
+.landing-sidebar.collapsed .sidebar-title {
+    opacity: 0;
+    width: 0;
+}
+
+/* Кнопка сворачивания/разворачивания */
+.sidebar-toggle-btn {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    width: 30px;
+    height: 30px;
+    border-radius: var(--radius-sm);
+    border: var(--border-width-thin) solid var(--border-light);
+    background: var(--bg-primary);
+    color: var(--text-secondary);
+    cursor: pointer;
+    transition: all var(--duration-fast);
+    flex-shrink: 0;
+    margin-left: auto;
+}
+
+.sidebar-toggle-btn:hover {
+    background: var(--gray-50);
+    color: var(--primary);
+    border-color: var(--primary-light);
+}
+
+.sidebar-toggle-btn svg {
+    transition: transform var(--duration-fast) ease;
+}
+
+.landing-sidebar.collapsed .sidebar-toggle-btn svg {
+    transform: rotate(180deg);
+}
+
+.landing-sidebar.collapsed .sidebar-header {
+    padding: var(--spacing-lg);
+    justify-content: center;
+}
+
+.landing-sidebar.collapsed .sidebar-logo {
+    display: none;
+}
+
+.landing-sidebar.collapsed .sidebar-toggle-btn {
+    margin-left: 0;
+}
+
+/* Навигация по инструментам */
+.sidebar-nav {
+    flex: 1;
+    padding: var(--spacing-xl) 0;
+    overflow-y: auto;
+}
+
+.sidebar-nav-item {
+    display: flex;
+    align-items: center;
+    gap: var(--spacing-md);
+    padding: var(--spacing-md) var(--spacing-2xl);
+    color: var(--text-secondary);
+    text-decoration: none;
+    transition: all var(--duration-fast);
+    border: none;
+    background: transparent;
+    width: 100%;
+    text-align: left;
+    cursor: pointer;
+    position: relative;
+    font-size: var(--font-size-base);
+    font-family: inherit;
+}
+
+.sidebar-nav-item:hover:not([disabled]) {
+    background: var(--gray-50);
+    color: var(--primary);
+}
+
+.sidebar-nav-item:active:not([disabled]) {
+    background: var(--gray-100);
+}
+
+.sidebar-nav-item[disabled] {
+    opacity: 0.5;
+    cursor: not-allowed;
+}
+
+.sidebar-nav-item.active {
+    background: var(--primary-subtle);
+    color: var(--primary);
+    border-right: 3px solid var(--primary);
+    font-weight: var(--font-weight-semibold);
+}
+
+.sidebar-nav-icon {
+    flex-shrink: 0;
+}
+
+.sidebar-nav-label {
+    flex: 1;
+    font-weight: var(--font-weight-medium);
+    white-space: nowrap;
+    overflow: hidden;
+    opacity: 1;
+    transition: opacity var(--duration-fast) ease;
+}
+
+.landing-sidebar.collapsed .sidebar-nav-label {
+    opacity: 0;
+    width: 0;
+}
+
+.sidebar-nav-badge {
+    font-size: var(--font-size-xs);
+    padding: var(--spacing-xs) var(--spacing-sm);
+    background: var(--warning-subtle);
+    color: var(--warning);
+    border-radius: var(--radius-md);
+    font-weight: var(--font-weight-semibold);
+    white-space: nowrap;
+    overflow: hidden;
+    opacity: 1;
+    transition: opacity var(--duration-fast) ease;
+}
+
+.landing-sidebar.collapsed .sidebar-nav-badge {
+    opacity: 0;
+    width: 0;
+    padding: 0;
+}
+
+.landing-sidebar.collapsed .sidebar-nav-item {
+    padding: var(--spacing-md) var(--spacing-lg);
+    justify-content: center;
+}
+
+/* ============================================
+   Верхняя панель (topbar)
+   ============================================ */
+
+.landing-topbar {
+    background: var(--bg-primary);
+    border-bottom: var(--border-width-thin) solid var(--border-light);
+    padding: 0 var(--spacing-3xl);
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    height: 57px;
+    box-sizing: border-box;
+    flex-shrink: 0;
+}
+
+.landing-topbar-title {
+    font-size: var(--font-size-lg);
+    font-weight: var(--font-weight-semibold);
+    color: var(--text-primary);
+    margin: 0;
+}
+
+.landing-topbar-actions {
+    display: flex;
+    align-items: center;
+    gap: var(--spacing-sm);
+}
+
+.landing-topbar-btn {
+    width: 34px;
+    height: 34px;
+    border-radius: var(--radius-sm);
+    border: none;
+    background: transparent;
+    color: var(--text-secondary);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    cursor: pointer;
+    transition: all var(--duration-fast);
+}
+
+.landing-topbar-btn:hover {
+    background: var(--gray-100);
+    color: var(--primary);
+}
+
+/* Профиль пользователя в topbar */
+.topbar-user-profile {
+    display: flex;
+    align-items: center;
+    gap: var(--spacing-sm);
+    margin-left: var(--spacing-lg);
+    padding-left: var(--spacing-lg);
+    border-left: var(--border-width-thin) solid var(--border-light);
+}
+
+.topbar-user-avatar {
+    width: 34px;
+    height: 34px;
+    border-radius: var(--radius-full);
+    background: var(--primary-subtle);
+    color: var(--primary);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    flex-shrink: 0;
+}
+
+.topbar-user-avatar svg {
+    width: 16px;
+    height: 16px;
+}
+
+.topbar-user-info {
+    min-width: 0;
+}
+
+.topbar-user-name {
+    font-size: var(--font-size-xs);
+    font-weight: var(--font-weight-semibold);
+    color: var(--text-primary);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    line-height: 1.2;
+}
+
+.topbar-user-role {
+    font-size: 11px;
+    color: var(--text-secondary);
+    line-height: 1.2;
+}
+
+/* ============================================
+   Адаптивность sidebar-layout
+   ============================================ */
+
+@media (max-width: 768px) {
+    .landing-sidebar {
+        width: 240px;
+    }
+
+    .landing-sidebar.collapsed {
+        width: 56px;
+    }
+
+    .landing-topbar {
+        padding: 0 var(--spacing-2xl);
+    }
+
+    .topbar-user-info {
+        display: none;
+    }
+}

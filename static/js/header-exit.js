@@ -158,13 +158,13 @@ class HeaderExit {
             sessionStorage.setItem('sessionExitedWithSave', 'true');
 
             // Переходим на главную
-            window.location.href = AppConfig.api.getUrl('/');
+            window.location.href = AppConfig.api.getUrl('/acts');
 
         } catch (error) {
             console.error('Ошибка при выходе:', error);
 
             // Все равно пытаемся перейти
-            window.location.href = AppConfig.api.getUrl('/');
+            window.location.href = AppConfig.api.getUrl('/acts');
         }
     }
 }

@@ -1,0 +1,53 @@
+<!-- Общий sidebar для landing и acts-manager страниц -->
+<aside class="landing-sidebar" id="landingSidebar">
+    <div class="sidebar-header">
+        <div class="sidebar-logo">
+            <svg width="32" height="32" viewBox="0 0 32 32" fill="none">
+                <rect width="32" height="32" rx="6" fill="var(--primary)"/>
+                <path d="M8 12L16 8L24 12V20L16 24L8 20V12Z" fill="white" stroke="white" stroke-width="1.5"/>
+            </svg>
+        </div>
+        <h1 class="sidebar-title">Инструменты</h1>
+        <button class="sidebar-toggle-btn" id="sidebarToggleBtn" title="Свернуть/развернуть">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none">
+                <path d="M15 19l-7-7 7-7" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+            </svg>
+        </button>
+    </div>
+
+    <nav class="sidebar-nav">
+        <a href="/" class="sidebar-nav-item {{ 'active' if active_page == 'landing' else '' }}">
+            <svg class="sidebar-nav-icon" width="20" height="20" viewBox="0 0 24 24" fill="none">
+                <path d="M3 12l2-2m0 0l7-7 7 7M5 10v10a1 1 0 001 1h3m10-11l2 2m-2-2v10a1 1 0 01-1 1h-3m-4 0a1 1 0 01-1-1v-4a1 1 0 011-1h2a1 1 0 011 1v4a1 1 0 01-1 1m-2 0h2"
+                      stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+            </svg>
+            <span class="sidebar-nav-label">Рабочее пространство</span>
+        </a>
+
+        <a href="/acts" class="sidebar-nav-item {{ 'active' if active_page == 'acts' else '' }}">
+            <svg class="sidebar-nav-icon" width="20" height="20" viewBox="0 0 24 24" fill="none">
+                <path d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"
+                      stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+            </svg>
+            <span class="sidebar-nav-label">Управление актами</span>
+        </a>
+
+        <button class="sidebar-nav-item" disabled>
+            <svg class="sidebar-nav-icon" width="20" height="20" viewBox="0 0 24 24" fill="none">
+                <path d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2"
+                      stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+            </svg>
+            <span class="sidebar-nav-label">Другой инструмент</span>
+            <span class="sidebar-nav-badge">Скоро</span>
+        </button>
+
+        <button class="sidebar-nav-item" disabled>
+            <svg class="sidebar-nav-icon" width="20" height="20" viewBox="0 0 24 24" fill="none">
+                <path d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z"
+                      stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+            </svg>
+            <span class="sidebar-nav-label">Аналитика</span>
+            <span class="sidebar-nav-badge">Скоро</span>
+        </button>
+    </nav>
+</aside>

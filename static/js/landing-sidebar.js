@@ -1,0 +1,99 @@
+/**
+ * Общий менеджер sidebar для landing и acts-manager страниц
+ *
+ * Управляет сворачиванием/разворачиванием sidebar,
+ * навигацией между страницами и загрузкой информации о пользователе.
+ */
+class LandingSidebar {
+    static _storageKey = 'sidebar_collapsed';
+
+    /**
+     * Инициализирует sidebar
+     */
+    static init() {
+        this._restoreState();
+        this._setupToggle();
+        this._setupNavigation();
+        this._loadUserInfo();
+
+        console.log('LandingSidebar: инициализация завершена');
+    }
+
+    /**
+     * Восстанавливает состояние сворачивания из localStorage
+     * @private
+     */
+    static _restoreState() {
+        const sidebar = document.getElementById('landingSidebar');
+        if (!sidebar) return;
+
+        const collapsed = localStorage.getItem(this._storageKey) === 'true';
+        if (collapsed) {
+            sidebar.classList.add('collapsed');
+        }
+    }
+
+    /**
+     * Настраивает кнопку сворачивания/разворачивания
+     * @private
+     */
+    static _setupToggle() {
+        const toggleBtn = document.getElementById('sidebarToggleBtn');
+        const sidebar = document.getElementById('landingSidebar');
+        if (!toggleBtn || !sidebar) return;
+
+        toggleBtn.addEventListener('click', () => {
+            sidebar.classList.toggle('collapsed');
+            const isCollapsed = sidebar.classList.contains('collapsed');
+            localStorage.setItem(this._storageKey, isCollapsed.toString());
+        });
+    }
+
+    /**
+     * Настраивает навигацию по ссылкам sidebar
+     * @private
+     */
+    static _setupNavigation() {
+        // Навигация по активным ссылкам
+        const navLinks = document.querySelectorAll('.sidebar-nav a.sidebar-nav-item');
+        navLinks.forEach(link => {
+            link.addEventListener('click', (e) => {
+                e.preventDefault();
+                const href = link.getAttribute('href');
+                if (href) {
+                    window.location.href = AppConfig.api.getUrl(href);
+                }
+            });
+        });
+
+        // Обработчики для disabled кнопок
+        const disabledButtons = document.querySelectorAll('.sidebar-nav-item[disabled]');
+        disabledButtons.forEach(button => {
+            button.addEventListener('click', (e) => {
+                e.preventDefault();
+                const toolName = button.querySelector('.sidebar-nav-label')?.textContent;
+                console.log(`Инструмент "${toolName}" пока недоступен`);
+            });
+        });
+    }
+
+    /**
+     * Загружает информацию о текущем пользователе в topbar
+     * @private
+     */
+    static _loadUserInfo() {
+        try {
+            const username = AuthManager.getCurrentUser();
+            const userNameElement = document.getElementById('currentUserName');
+
+            if (userNameElement && username) {
+                userNameElement.textContent = username;
+            }
+        } catch (error) {
+            console.error('LandingSidebar: ошибка загрузки информации о пользователе:', error);
+        }
+    }
+}
+
+// Экспортируем в глобальную область видимости
+window.LandingSidebar = LandingSidebar;

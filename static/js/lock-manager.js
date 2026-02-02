@@ -154,7 +154,7 @@ class LockManager {
                 allowOverlayClose: false
             });
 
-            window.location.href = '/';
+            window.location.href = AppConfig.api.getUrl('/acts');
             throw new Error('ACT_LOCKED');
         }
 
@@ -424,7 +424,7 @@ class LockManager {
             const closedId = this._actId;
             this._actId = null;
             console.log(`LockManager: завершение выхода для акта ${closedId}`);
-            setTimeout(() => window.location.href = '/', 300);
+            setTimeout(() => window.location.href = AppConfig.api.getUrl('/acts'), 300);
         }
     }
 }
