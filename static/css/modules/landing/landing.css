@@ -240,7 +240,14 @@
     margin: 0;
 }
 
-.chat-close-btn {
+.chat-header-actions {
+    display: flex;
+    align-items: center;
+    gap: var(--spacing-xs);
+}
+
+.chat-close-btn,
+.chat-clear-btn {
     width: var(--spacing-4xl);
     height: var(--spacing-4xl);
     border-radius: var(--radius-md);
@@ -254,7 +261,8 @@
     transition: all var(--duration-fast);
 }
 
-.chat-close-btn:hover {
+.chat-close-btn:hover,
+.chat-clear-btn:hover {
     background: var(--gray-100);
     color: var(--text-primary);
 }
@@ -445,6 +453,64 @@
 .chat-input-container.processing .chat-send-btn {
     opacity: 0.5;
     pointer-events: none;
+}
+
+/* ============================================
+   Меню настроек на landing page
+   (переопределяет глобальные стили settings-menu
+    для единого стиля с landing page)
+   ============================================ */
+
+.landing-settings-menu {
+    position: absolute;
+    top: 57px;
+    right: var(--spacing-3xl);
+    min-width: 22rem;
+    max-width: 26rem;
+    background: var(--bg-primary);
+    border: var(--border-width-thin) solid var(--border-light);
+    border-radius: var(--radius-lg);
+    box-shadow: var(--shadow-md);
+}
+
+.landing-settings-menu .settings-menu-header {
+    background: var(--bg-secondary);
+    color: var(--text-primary);
+    border-bottom: var(--border-width-thin) solid var(--border-light);
+    border-radius: var(--radius-lg) var(--radius-lg) 0 0;
+}
+
+.landing-settings-menu .settings-menu-header h4 {
+    font-size: var(--font-size-lg);
+    font-weight: var(--font-weight-semibold);
+    color: var(--text-primary);
+}
+
+.landing-settings-menu .settings-menu-close {
+    color: var(--text-secondary);
+}
+
+.landing-settings-menu .settings-menu-close:hover {
+    background: var(--gray-100);
+    color: var(--text-primary);
+    transform: none;
+}
+
+.landing-settings-menu .settings-menu-close:active {
+    transform: none;
+}
+
+.landing-settings-menu .settings-section-title {
+    color: var(--text-secondary);
+    font-size: var(--font-size-xs);
+    font-weight: var(--font-weight-semibold);
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+}
+
+.landing-topbar-btn.active {
+    background: var(--gray-100);
+    color: var(--primary);
 }
 
 /* ============================================

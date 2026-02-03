@@ -18,11 +18,16 @@ class ChatManager {
     static _sendBtn = null;
     /** @type {HTMLElement|null} */
     static _placeholder = null;
+    /** @type {HTMLButtonElement|null} */
+    static _clearBtn = null;
 
     /** @type {boolean} */
     static _isProcessing = false;
 
     static _historyKey = 'chat_history';
+
+    /** @type {string} HTML welcome-сообщения для восстановления при очистке */
+    static _welcomeHtml = '';
 
     /**
      * Инициализация: кеширование DOM, обработчики, восстановление истории
@@ -48,6 +53,12 @@ class ChatManager {
             this._placeholder.classList.add('chat-placeholder-hidden');
         }
 
+        // Кэшируем welcome-сообщение для восстановления при очистке
+        const welcomeEl = this._messagesContainer.querySelector('.chat-message-bot');
+        if (welcomeEl) {
+            this._welcomeHtml = welcomeEl.outerHTML;
+        }
+
         // Сохраняем welcome-сообщение в историю с sentinel timestamp
         const welcomeMsg = this._messagesContainer.querySelector('.chat-message-bot .chat-message-content');
         if (welcomeMsg) {
@@ -55,6 +66,14 @@ class ChatManager {
                 role: 'assistant',
                 content: welcomeMsg.textContent.trim(),
                 timestamp: 0
+            });
+        }
+
+        // Кнопка очистки чата
+        this._clearBtn = document.querySelector('.chat-clear-btn');
+        if (this._clearBtn) {
+            this._clearBtn.addEventListener('click', () => {
+                this.clearChat();
             });
         }
 
@@ -131,7 +150,19 @@ class ChatManager {
     static async _getResponse(userText, history) {
         const delay = 500 + Math.random() * 500;
         await new Promise(resolve => setTimeout(resolve, delay));
-        return `Вы написали: «${userText}»`;
+
+        let response = `Вы написали: «${userText}»`;
+
+        if (typeof LandingSettingsManager !== 'undefined') {
+            const enabled = LandingSettingsManager.getEnabledAssistants();
+            if (enabled.length > 0) {
+                response += '\n\nПодключённые ассистенты:\n' + enabled.map(n => `• ${n}`).join('\n');
+            } else {
+                response += '\n\nНет подключённых ассистентов. Включите их в настройках.';
+            }
+        }
+
+        return response;
     }
 
     /**
@@ -182,9 +213,12 @@ class ChatManager {
         const content = document.createElement('div');
         content.className = 'chat-message-content';
 
-        const p = document.createElement('p');
-        p.textContent = text;
-        content.appendChild(p);
+        const lines = text.split('\n');
+        for (const line of lines) {
+            const p = document.createElement('p');
+            p.textContent = line;
+            content.appendChild(p);
+        }
 
         msg.appendChild(avatar);
         msg.appendChild(content);
@@ -327,6 +361,26 @@ class ChatManager {
     static clearHistory() {
         this._history = [];
         sessionStorage.removeItem(this._historyKey);
+    }
+
+    /**
+     * Полная очистка чата: DOM, история, восстановление welcome-сообщения
+     */
+    static clearChat() {
+        if (this._isProcessing) return;
+
+        this.clearHistory();
+        this._messagesContainer.innerHTML = this._welcomeHtml;
+
+        // Восстанавливаем welcome-запись в историю
+        const welcomeMsg = this._messagesContainer.querySelector('.chat-message-bot .chat-message-content');
+        if (welcomeMsg) {
+            this._history.push({
+                role: 'assistant',
+                content: welcomeMsg.textContent.trim(),
+                timestamp: 0
+            });
+        }
     }
 }
 

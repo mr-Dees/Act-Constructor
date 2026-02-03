@@ -18,17 +18,71 @@
         <!-- Шапка страницы -->
         {% include 'components/landing_topbar.html' %}
 
+        <!-- Выпадающее меню настроек -->
+        <div id="landingSettingsMenu" class="settings-menu hidden landing-settings-menu">
+            <div class="settings-menu-header">
+                <h4>Настройки</h4>
+                <button id="closeLandingSettingsBtn" class="settings-menu-close" aria-label="Закрыть">&times;</button>
+            </div>
+            <div class="settings-menu-body">
+                <div class="settings-menu-section">
+                    <h5 class="settings-section-title">AI Ассистенты</h5>
+
+                    <div class="settings-option" data-assistant="knowledge_base_oarb">
+                        <div class="settings-option-info">
+                            <div class="settings-option-label">База Знаний ОАРБ</div>
+                            <div class="settings-option-desc">Поиск по базе знаний отдела аудита розничного бизнеса</div>
+                        </div>
+                        <label class="theme-switch">
+                            <input type="checkbox" id="assistantKnowledgeOarb">
+                            <span class="theme-slider"></span>
+                        </label>
+                    </div>
+
+                    <div class="settings-option" data-assistant="knowledge_base_sources">
+                        <div class="settings-option-info">
+                            <div class="settings-option-label">База знаний источников информации</div>
+                            <div class="settings-option-desc">Поиск по каталогу источников данных</div>
+                        </div>
+                        <label class="theme-switch">
+                            <input type="checkbox" id="assistantKnowledgeSources">
+                            <span class="theme-slider"></span>
+                        </label>
+                    </div>
+
+                    <div class="settings-option" data-assistant="knowledge_base_tools">
+                        <div class="settings-option-info">
+                            <div class="settings-option-label">База знаний по инструментам</div>
+                            <div class="settings-option-desc">Поиск по документации инструментов</div>
+                        </div>
+                        <label class="theme-switch">
+                            <input type="checkbox" id="assistantKnowledgeTools">
+                            <span class="theme-slider"></span>
+                        </label>
+                    </div>
+                </div>
+            </div>
+        </div>
+
         <!-- Основной контент -->
         <div class="landing-content">
             <!-- Панель чата (центральная область) -->
             <aside class="chat-panel">
                 <div class="chat-header">
                     <h3 class="chat-title">AI Ассистент</h3>
-                    <button class="chat-close-btn">
-                        <svg width="16" height="16" viewBox="0 0 24 24" fill="none">
-                            <path d="M6 18L18 6M6 6l12 12" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>
-                        </svg>
-                    </button>
+                    <div class="chat-header-actions">
+                        <button class="chat-clear-btn" title="Очистить чат">
+                            <svg width="16" height="16" viewBox="0 0 24 24" fill="none">
+                                <path d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"
+                                      stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+                            </svg>
+                        </button>
+                        <button class="chat-close-btn">
+                            <svg width="16" height="16" viewBox="0 0 24 24" fill="none">
+                                <path d="M6 18L18 6M6 6l12 12" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>
+                            </svg>
+                        </button>
+                    </div>
                 </div>
 
                 <div class="chat-messages">
@@ -177,6 +231,7 @@
 <script src="{{ url_for('static', path='js/auth.js') }}"></script>
 <script src="{{ url_for('static', path='js/landing-sidebar.js') }}"></script>
 <script src="{{ url_for('static', path='js/chat-manager.js') }}"></script>
+<script src="{{ url_for('static', path='js/landing-settings.js') }}"></script>
 <script src="{{ url_for('static', path='js/landing-page.js') }}"></script>
 
 <script>

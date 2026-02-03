@@ -15,6 +15,7 @@ class LandingPage {
 
         this._setupNavigation();
         this._setupPlaceholderInteractions();
+        LandingSettingsManager.init();
         ChatManager.init();
 
         console.log('LandingPage: инициализация завершена');
@@ -33,9 +34,10 @@ class LandingPage {
             });
         }
 
-        // Кнопки в topbar
+        // Кнопки в topbar (кроме настроек — обрабатывается LandingSettingsManager)
         const topbarButtons = document.querySelectorAll('.landing-topbar-btn');
         topbarButtons.forEach(button => {
+            if (button.id === 'landingSettingsBtn') return;
             button.addEventListener('click', () => {
                 console.log('Функция в разработке');
             });
