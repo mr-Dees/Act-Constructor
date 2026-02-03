@@ -352,6 +352,40 @@ def create_app() -> FastAPI:
             }
         )
 
+    @app.get("/ck-fin-res", response_class=HTMLResponse)
+    async def show_ck_fin_res(request: Request):
+        """
+        Страница ЦК Фин.Рез.
+
+        Раздел в разработке — отображает заглушку.
+        Авторизация проверяется фронтендом через /api/v1/auth/me.
+        """
+        return templates.TemplateResponse(
+            "ck_fin_res.html",
+            {
+                "request": request,
+                "active_page": "ck_fin_res",
+                "topbar_title": "ЦК Фин.Рез.",
+            }
+        )
+
+    @app.get("/ck-client-experience", response_class=HTMLResponse)
+    async def show_ck_client_experience(request: Request):
+        """
+        Страница ЦК Клиентский опыт.
+
+        Раздел в разработке — отображает заглушку.
+        Авторизация проверяется фронтендом через /api/v1/auth/me.
+        """
+        return templates.TemplateResponse(
+            "ck_client_experience.html",
+            {
+                "request": request,
+                "active_page": "ck_client_experience",
+                "topbar_title": "ЦК Клиентский опыт",
+            }
+        )
+
     @app.get("/constructor", response_class=HTMLResponse)
     async def show_constructor(
             request: Request,

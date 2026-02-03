@@ -184,8 +184,7 @@
 }
 
 .landing-sidebar.collapsed .sidebar-nav-label {
-    opacity: 0;
-    width: 0;
+    display: none;
 }
 
 .sidebar-nav-badge {
@@ -202,14 +201,56 @@
 }
 
 .landing-sidebar.collapsed .sidebar-nav-badge {
-    opacity: 0;
-    width: 0;
-    padding: 0;
+    display: none;
 }
 
 .landing-sidebar.collapsed .sidebar-nav-item {
     padding: var(--spacing-md) var(--spacing-lg);
     justify-content: center;
+}
+
+/* ============================================
+   Footer сайдбара с кнопкой чата
+   ============================================ */
+
+.sidebar-footer {
+    flex-shrink: 0;
+    padding: var(--spacing-md) 0;
+    border-top: var(--border-width-thin) solid var(--border-light);
+}
+
+.sidebar-chat-btn {
+    display: flex;
+    align-items: center;
+    gap: var(--spacing-md);
+    padding: var(--spacing-md) var(--spacing-2xl);
+    width: 100%;
+    border: none;
+    background: transparent;
+    color: var(--text-secondary);
+    font-size: var(--font-size-base);
+    font-family: inherit;
+    cursor: pointer;
+    transition: all var(--duration-fast);
+    text-align: left;
+}
+
+.sidebar-chat-btn:hover {
+    background: var(--primary-subtle);
+    color: var(--primary);
+}
+
+.sidebar-chat-btn.sidebar-chat-hidden {
+    display: none;
+}
+
+.landing-sidebar.collapsed .sidebar-chat-btn {
+    padding: var(--spacing-md) var(--spacing-lg);
+    justify-content: center;
+}
+
+.landing-sidebar.collapsed .sidebar-chat-btn .sidebar-nav-label {
+    display: none;
 }
 
 /* ============================================

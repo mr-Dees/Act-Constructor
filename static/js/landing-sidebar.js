@@ -14,6 +14,7 @@ class LandingSidebar {
         this._restoreState();
         this._setupToggle();
         this._setupNavigation();
+        this._setupChatButton();
         this._loadUserInfo();
 
         console.log('LandingSidebar: инициализация завершена');
@@ -74,6 +75,29 @@ class LandingSidebar {
                 const toolName = button.querySelector('.sidebar-nav-label')?.textContent;
                 console.log(`Инструмент "${toolName}" пока недоступен`);
             });
+        });
+    }
+
+    /**
+     * Обработчик кнопки чата в footer сайдбара
+     * @private
+     */
+    static _setupChatButton() {
+        const chatBtn = document.getElementById('sidebarChatBtn');
+        if (!chatBtn) return;
+
+        chatBtn.addEventListener('click', () => {
+            // На landing page: разворачиваем встроенный чат
+            const chatPanel = document.getElementById('chatPanel');
+            if (chatPanel && typeof LandingPage !== 'undefined') {
+                LandingPage.expandChat();
+                return;
+            }
+
+            // На других страницах: открываем модальный чат
+            if (typeof ChatModalManager !== 'undefined') {
+                ChatModalManager.open();
+            }
         });
     }
 

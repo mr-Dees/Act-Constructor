@@ -18,6 +18,9 @@
         <!-- Шапка страницы -->
         {% include 'components/landing_topbar.html' %}
 
+        <!-- Выпадающее меню настроек -->
+        {% include 'components/settings_menu.html' %}
+
         <!-- Контент управления актами -->
         <div class="acts-manager-content">
             <div class="acts-manager-container">
@@ -46,6 +49,13 @@
     </main>
 </div>
 
+<!-- Модальный чат -->
+<div id="chatModalOverlay" class="chat-modal-overlay hidden">
+    <div class="chat-modal-container">
+        {% include 'components/chat_content.html' %}
+    </div>
+</div>
+
 <!-- Шаблоны для JS -->
 {% include 'components/acts/create_act_dialog.html' %}
 {% include 'components/acts/team_member_row.html' %}
@@ -67,6 +77,9 @@
 
 <script src="{{ url_for('static', path='js/notifications.js') }}"></script>
 <script src="{{ url_for('static', path='js/landing-sidebar.js') }}"></script>
+<script src="{{ url_for('static', path='js/chat-manager.js') }}"></script>
+<script src="{{ url_for('static', path='js/chat-modal.js') }}"></script>
+<script src="{{ url_for('static', path='js/landing-settings.js') }}"></script>
 <script src="{{ url_for('static', path='js/acts-manager-page.js') }}"></script>
 
 <script>
@@ -76,8 +89,9 @@
         const isAuthorized = await AuthManager.requireAuth();
 
         if (isAuthorized) {
-            // Инициализируем sidebar и страницу после успешной авторизации
+            // Инициализируем sidebar, настройки и страницу после успешной авторизации
             LandingSidebar.init();
+            LandingSettingsManager.init();
             ActsManagerPage.init();
         }
     });
