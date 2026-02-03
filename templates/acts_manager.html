@@ -9,28 +9,50 @@
     <link rel="stylesheet" href="{{ url_for('static', path='css/main.css') }}">
 </head>
 <body>
-<div class="acts-manager-page">
-    <div class="acts-manager-container">
-        <div class="acts-manager-header">
-            <h1 class="acts-manager-title">Управление актами</h1>
-            <p class="acts-manager-subtitle">Создавайте, редактируйте и организуйте свои акты</p>
-        </div>
+<div class="sidebar-layout">
+    <!-- Левый сайдбар с навигацией -->
+    {% include 'components/landing_sidebar.html' %}
 
-        <div class="acts-actions">
-            <button id="createNewActBtn" class="btn btn-primary">
-                <svg width="20" height="20" viewBox="0 0 24 24" fill="none">
-                    <path d="M12 5V19M5 12H19" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"/>
-                </svg>
-                Создать новый акт
-            </button>
-        </div>
+    <!-- Основной контент -->
+    <main class="sidebar-layout-main">
+        <!-- Шапка страницы -->
+        {% include 'components/landing_topbar.html' %}
 
-        <div id="actsListContainer" class="acts-list-container">
-            <div class="acts-loading">
-                <div class="spinner"></div>
-                <span>Загрузка актов...</span>
+        <!-- Выпадающее меню настроек -->
+        {% include 'components/settings_menu.html' %}
+
+        <!-- Контент управления актами -->
+        <div class="acts-manager-content">
+            <div class="acts-manager-container">
+                <div class="acts-manager-header">
+                    <h1 class="acts-manager-title">Управление актами</h1>
+                    <p class="acts-manager-subtitle">Создавайте, редактируйте и организуйте свои акты</p>
+                </div>
+
+                <div class="acts-actions">
+                    <button id="createNewActBtn" class="btn btn-primary">
+                        <svg width="20" height="20" viewBox="0 0 24 24" fill="none">
+                            <path d="M12 5V19M5 12H19" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"/>
+                        </svg>
+                        Создать новый акт
+                    </button>
+                </div>
+
+                <div id="actsListContainer" class="acts-list-container">
+                    <div class="acts-loading">
+                        <div class="spinner"></div>
+                        <span>Загрузка актов...</span>
+                    </div>
+                </div>
             </div>
         </div>
+    </main>
+</div>
+
+<!-- Модальный чат -->
+<div id="chatModalOverlay" class="chat-modal-overlay hidden">
+    <div class="chat-modal-container">
+        {% include 'components/chat_content.html' %}
     </div>
 </div>
 
@@ -54,6 +76,10 @@
 <script src="{{ url_for('static', path='js/dialog/dialog-create-act.js') }}"></script>
 
 <script src="{{ url_for('static', path='js/notifications.js') }}"></script>
+<script src="{{ url_for('static', path='js/landing-sidebar.js') }}"></script>
+<script src="{{ url_for('static', path='js/chat-manager.js') }}"></script>
+<script src="{{ url_for('static', path='js/chat-modal.js') }}"></script>
+<script src="{{ url_for('static', path='js/landing-settings.js') }}"></script>
 <script src="{{ url_for('static', path='js/acts-manager-page.js') }}"></script>
 
 <script>
@@ -63,7 +89,9 @@
         const isAuthorized = await AuthManager.requireAuth();
 
         if (isAuthorized) {
-            // Инициализируем страницу только после успешной авторизации
+            // Инициализируем sidebar, настройки и страницу после успешной авторизации
+            LandingSidebar.init();
+            LandingSettingsManager.init();
             ActsManagerPage.init();
         }
     });

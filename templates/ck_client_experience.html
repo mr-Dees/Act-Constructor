@@ -1,0 +1,67 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>ЦК Клиентский опыт</title>
+
+    <!-- Основные стили -->
+    <link rel="stylesheet" href="{{ url_for('static', path='css/main.css') }}">
+</head>
+<body>
+<div class="sidebar-layout">
+    <!-- Левый сайдбар с навигацией -->
+    {% include 'components/landing_sidebar.html' %}
+
+    <!-- Основной контент -->
+    <main class="sidebar-layout-main">
+        <!-- Шапка страницы -->
+        {% include 'components/landing_topbar.html' %}
+
+        <!-- Выпадающее меню настроек -->
+        {% include 'components/settings_menu.html' %}
+
+        <!-- Контент страницы -->
+        <div class="stub-page-content">
+            <div class="stub-page-placeholder">
+                <svg class="stub-page-icon" width="64" height="64" viewBox="0 0 24 24" fill="none">
+                    <path d="M17 20h5v-2a3 3 0 00-5.356-1.857M17 20H7m10 0v-2c0-.656-.126-1.283-.356-1.857M7 20H2v-2a3 3 0 015.356-1.857M7 20v-2c0-.656.126-1.283.356-1.857m0 0a5.002 5.002 0 019.288 0M15 7a3 3 0 11-6 0 3 3 0 016 0z"
+                          stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+                </svg>
+                <h2 class="stub-page-title">ЦК Клиентский опыт</h2>
+                <p class="stub-page-text">Раздел находится в разработке</p>
+            </div>
+        </div>
+    </main>
+</div>
+
+<!-- Модальный чат -->
+<div id="chatModalOverlay" class="chat-modal-overlay hidden">
+    <div class="chat-modal-container">
+        {% include 'components/chat_content.html' %}
+    </div>
+</div>
+
+<!-- Компонент для ошибок авторизации -->
+{% include 'components/auth_error.html' %}
+
+<!-- Скрипты -->
+<script src="{{ url_for('static', path='js/app-config.js') }}"></script>
+<script src="{{ url_for('static', path='js/auth.js') }}"></script>
+<script src="{{ url_for('static', path='js/landing-sidebar.js') }}"></script>
+<script src="{{ url_for('static', path='js/chat-manager.js') }}"></script>
+<script src="{{ url_for('static', path='js/chat-modal.js') }}"></script>
+<script src="{{ url_for('static', path='js/landing-settings.js') }}"></script>
+
+<script>
+    document.addEventListener('DOMContentLoaded', async () => {
+        const isAuthorized = await AuthManager.requireAuth();
+
+        if (isAuthorized) {
+            LandingSidebar.init();
+            LandingSettingsManager.init();
+        }
+    });
+</script>
+</body>
+</html>

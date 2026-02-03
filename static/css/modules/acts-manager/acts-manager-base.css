@@ -3,11 +3,13 @@
  * Определяет структуру и компоновку основных элементов страницы
  */
 
-/* Основной контейнер страницы */
-.acts-manager-page {
-    min-height: var(--acts-manager-min-width);
+/* Обертка контента acts-manager внутри sidebar-layout */
+.acts-manager-content {
+    flex: 1;
+    overflow-y: auto;
+    padding: var(--spacing-4xl) var(--spacing-3xl);
     background: var(--bg-secondary);
-    padding: var(--spacing-6xl) var(--spacing-3xl);
+    min-height: 0;
 }
 
 /* Контейнер с ограничением ширины для центрирования контента */

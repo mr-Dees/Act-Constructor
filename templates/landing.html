@@ -1,0 +1,149 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Портал инструментов</title>
+
+    <!-- Основные стили -->
+    <link rel="stylesheet" href="{{ url_for('static', path='css/main.css') }}">
+</head>
+<body>
+<div class="sidebar-layout">
+    <!-- Левый сайдбар с навигацией -->
+    {% include 'components/landing_sidebar.html' %}
+
+    <!-- Основной контент -->
+    <main class="sidebar-layout-main">
+        <!-- Шапка страницы -->
+        {% include 'components/landing_topbar.html' %}
+
+        <!-- Выпадающее меню настроек -->
+        {% include 'components/settings_menu.html' %}
+
+        <!-- Основной контент -->
+        <div class="landing-content">
+            <!-- Панель чата (центральная область) -->
+            <aside class="chat-panel" id="chatPanel">
+                {% include 'components/chat_content.html' %}
+            </aside>
+
+            <!-- Панель Airflow (правая область) -->
+            <section class="airflow-panel">
+                <div class="airflow-header">
+                    <h3 class="airflow-title">Мои проекты</h3>
+                    <button class="airflow-filter-btn">
+                        <svg width="16" height="16" viewBox="0 0 24 24" fill="none">
+                            <path d="M3 4a1 1 0 011-1h16a1 1 0 011 1v2.586a1 1 0 01-.293.707l-6.414 6.414a1 1 0 00-.293.707V17l-4 4v-6.586a1 1 0 00-.293-.707L3.293 7.293A1 1 0 013 6.586V4z"
+                                  stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+                        </svg>
+                        Фильтры
+                    </button>
+                </div>
+
+                <div class="airflow-content">
+                    <!-- Карточки проектов (заглушка) -->
+                    <div class="airflow-projects">
+                        <div class="project-card">
+                            <div class="project-card-header">
+                                <h4 class="project-card-title">Проект аудита процессов</h4>
+                                <span class="project-card-status status-active">В работе</span>
+                            </div>
+                            <div class="project-card-body">
+                                <p class="project-card-description">Проверка процессов кредитования физических лиц</p>
+                                <div class="project-card-progress">
+                                    <div class="progress-bar">
+                                        <div class="progress-fill" style="width: 65%;"></div>
+                                    </div>
+                                    <span class="progress-label">65% выполнено</span>
+                                </div>
+                            </div>
+                            <div class="project-card-footer">
+                                <div class="project-card-meta">
+                                    <span class="project-card-date">Дедлайн: 15.03.2026</span>
+                                </div>
+                            </div>
+                        </div>
+
+                        <div class="project-card">
+                            <div class="project-card-header">
+                                <h4 class="project-card-title">Аудит операционных рисков</h4>
+                                <span class="project-card-status status-pending">Ожидание</span>
+                            </div>
+                            <div class="project-card-body">
+                                <p class="project-card-description">Анализ операционных рисков в бэк-офисе</p>
+                                <div class="project-card-progress">
+                                    <div class="progress-bar">
+                                        <div class="progress-fill" style="width: 30%;"></div>
+                                    </div>
+                                    <span class="progress-label">30% выполнено</span>
+                                </div>
+                            </div>
+                            <div class="project-card-footer">
+                                <div class="project-card-meta">
+                                    <span class="project-card-date">Дедлайн: 22.03.2026</span>
+                                </div>
+                            </div>
+                        </div>
+
+                        <div class="project-card">
+                            <div class="project-card-header">
+                                <h4 class="project-card-title">Проверка соблюдения НПА</h4>
+                                <span class="project-card-status status-review">На проверке</span>
+                            </div>
+                            <div class="project-card-body">
+                                <p class="project-card-description">Контроль соответствия нормативным актам ЦБ РФ</p>
+                                <div class="project-card-progress">
+                                    <div class="progress-bar">
+                                        <div class="progress-fill" style="width: 90%;"></div>
+                                    </div>
+                                    <span class="progress-label">90% выполнено</span>
+                                </div>
+                            </div>
+                            <div class="project-card-footer">
+                                <div class="project-card-meta">
+                                    <span class="project-card-date">Дедлайн: 10.03.2026</span>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Сообщение о заглушке -->
+                    <div class="airflow-placeholder">
+                        <svg class="airflow-placeholder-icon" width="48" height="48" viewBox="0 0 24 24" fill="none">
+                            <path d="M13 10V3L4 14h7v7l9-11h-7z" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+                        </svg>
+                        <p class="airflow-placeholder-text">Интеграция с Airflow в разработке</p>
+                    </div>
+                </div>
+            </section>
+        </div>
+    </main>
+</div>
+
+<!-- Компонент для ошибок авторизации -->
+{% include 'components/auth_error.html' %}
+
+<!-- Скрипты -->
+<script src="{{ url_for('static', path='js/app-config.js') }}"></script>
+<script src="{{ url_for('static', path='js/auth.js') }}"></script>
+<script src="{{ url_for('static', path='js/landing-sidebar.js') }}"></script>
+<script src="{{ url_for('static', path='js/chat-manager.js') }}"></script>
+<script src="{{ url_for('static', path='js/landing-settings.js') }}"></script>
+<script src="{{ url_for('static', path='js/landing-page.js') }}"></script>
+
+<script>
+    // Проверка авторизации при загрузке landing page
+    document.addEventListener('DOMContentLoaded', async () => {
+        // Требуем авторизацию через API
+        const isAuthorized = await AuthManager.requireAuth();
+
+        if (isAuthorized) {
+            // Инициализируем sidebar и страницу после успешной авторизации
+            LandingSidebar.init();
+            LandingPage.init();
+        }
+    });
+</script>
+</body>
+</html>

@@ -457,7 +457,7 @@ class ActsMenuManager {
     }
 
     static _redirectToActsManager() {
-        setTimeout(() => (window.location.href = '/'), 1500);
+        setTimeout(() => (window.location.href = AppConfig.api.getUrl('/acts')), 1500);
     }
 
     static async _autoLoadAct(actId) {

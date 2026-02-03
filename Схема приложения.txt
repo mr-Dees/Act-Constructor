@@ -2,20 +2,19 @@ Act Constructor/
 ├── app/
 │   ├── api/
 │   │   ├── __init__.py
-│   │   ├── v1/
-│   │   │   ├── deps/
-│   │   │   │   ├── __init__.py
-│   │   │   │   └── auth_deps.py
-│   │   │   ├── endpoints/
-│   │   │   │   ├── __init__.py
-│   │   │   │   ├── acts.py
-│   │   │   │   ├── acts_content.py
-│   │   │   │   ├── acts_export.py
-│   │   │   │   ├── auth.py
-│   │   │   │   └── system.py
-│   │   │   ├── __init__.py
-│   │   │   └── routes.py
-│   │   └── __init__.py
+│   │   └── v1/
+│   │       ├── deps/
+│   │       │   ├── __init__.py
+│   │       │   └── auth_deps.py
+│   │       ├── endpoints/
+│   │       │   ├── __init__.py
+│   │       │   ├── acts.py
+│   │       │   ├── acts_content.py
+│   │       │   ├── acts_export.py
+│   │       │   ├── auth.py
+│   │       │   └── system.py
+│   │       ├── __init__.py
+│   │       └── routes.py
 │   ├── core/
 │   │   ├── __init__.py
 │   │   └── config.py
@@ -77,7 +76,7 @@ Act Constructor/
 ├── logs/
 │   └── app.log
 ├── acts_storage/
-│   └── (здесь будут сохраняться файлы актов в текстовом представлении (txt, md, word))
+│   └── (сохранённые файлы актов: txt, md, docx)
 │
 ├── templates/
 │   ├── components/
@@ -90,9 +89,13 @@ Act Constructor/
 │   │   │   ├── directive_row.html
 │   │   │   └── team_member_row.html
 │   │   ├── auth_error.html
+│   │   ├── chat_content.html
 │   │   ├── context_menu.html
 │   │   ├── dialog.html
+│   │   ├── landing_sidebar.html
+│   │   ├── landing_topbar.html
 │   │   ├── preview_panel.html
+│   │   ├── settings_menu.html
 │   │   └── tree_panel.html
 │   ├── header/
 │   │   ├── help/
@@ -110,8 +113,13 @@ Act Constructor/
 │   │   └── help_modal.html
 │   ├── acts_manager.html
 │   ├── base.html
-│   └── constructor.html
+│   ├── ck_client_experience.html
+│   ├── ck_fin_res.html
+│   ├── constructor.html
+│   └── landing.html
+│
 ├── static/
+│   ├── favicon.ico
 │   ├── css/
 │   │   ├── base/
 │   │   │   ├── animations.css
@@ -121,9 +129,9 @@ Act Constructor/
 │   │   ├── layout/
 │   │   │   ├── container.css
 │   │   │   ├── header.css
-│   │   │   ├── header-actions
+│   │   │   ├── header-actions.css
 │   │   │   ├── panels.css
-│   │   │   ├── settings-menu
+│   │   │   ├── settings-menu.css
 │   │   │   └── two-columns.css
 │   │   ├── modules/
 │   │   │   ├── acts-manager/
@@ -151,6 +159,9 @@ Act Constructor/
 │   │   │   │   ├── items-content.css
 │   │   │   │   ├── items-header.css
 │   │   │   │   └── items-levels.css
+│   │   │   ├── landing/
+│   │   │   │   ├── landing.css
+│   │   │   │   └── landing-sidebar.css
 │   │   │   ├── notifications/
 │   │   │   │   ├── notifications-base.css
 │   │   │   │   ├── notifications-content.css
@@ -244,13 +255,19 @@ Act Constructor/
 │       ├── app.js
 │       ├── app-config.js
 │       ├── auth.js
+│       ├── chat-manager.js
+│       ├── chat-modal.js
 │       ├── format-menu-manager.js
 │       ├── header-exit.js
+│       ├── landing-page.js
+│       ├── landing-settings.js
+│       ├── landing-sidebar.js
 │       ├── lock-manager.js
 │       ├── navigation-manager.js
 │       ├── notifications.js
 │       ├── preview-menu.js
 │       ├── settings-menu.js
 │       └── storage-manager.js
+│
 ├── requirements.txt
 └── .env

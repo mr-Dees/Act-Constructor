@@ -319,16 +319,71 @@ def create_app() -> FastAPI:
         return FileResponse(favicon_path)
 
     @app.get("/", response_class=HTMLResponse)
+    async def show_landing(request: Request):
+        """
+        Стартовая страница - портал инструментов.
+
+        Отображает дашборд с навигацией по инструментам компании.
+        Авторизация проверяется фронтендом через /api/v1/auth/me.
+        """
+        return templates.TemplateResponse(
+            "landing.html",
+            {
+                "request": request,
+                "active_page": "landing",
+                "topbar_title": "Рабочее пространство",
+            }
+        )
+
+    @app.get("/acts", response_class=HTMLResponse)
     async def show_acts_manager(request: Request):
         """
-        Стартовая страница - менеджер актов.
+        Страница управления актами.
 
         Отображает список актов пользователя для выбора.
         Авторизация проверяется фронтендом через /api/v1/auth/me.
         """
         return templates.TemplateResponse(
             "acts_manager.html",
-            {"request": request}
+            {
+                "request": request,
+                "active_page": "acts",
+                "topbar_title": "Управление актами",
+            }
+        )
+
+    @app.get("/ck-fin-res", response_class=HTMLResponse)
+    async def show_ck_fin_res(request: Request):
+        """
+        Страница ЦК Фин.Рез.
+
+        Раздел в разработке — отображает заглушку.
+        Авторизация проверяется фронтендом через /api/v1/auth/me.
+        """
+        return templates.TemplateResponse(
+            "ck_fin_res.html",
+            {
+                "request": request,
+                "active_page": "ck_fin_res",
+                "topbar_title": "ЦК Фин.Рез.",
+            }
+        )
+
+    @app.get("/ck-client-experience", response_class=HTMLResponse)
+    async def show_ck_client_experience(request: Request):
+        """
+        Страница ЦК Клиентский опыт.
+
+        Раздел в разработке — отображает заглушку.
+        Авторизация проверяется фронтендом через /api/v1/auth/me.
+        """
+        return templates.TemplateResponse(
+            "ck_client_experience.html",
+            {
+                "request": request,
+                "active_page": "ck_client_experience",
+                "topbar_title": "ЦК Клиентский опыт",
+            }
         )
 
     @app.get("/constructor", response_class=HTMLResponse)
@@ -363,7 +418,7 @@ def create_app() -> FastAPI:
                     f"Пользователь {username} попытался открыть недоступный акт ID={act_id}, "
                     f"редирект на менеджер актов"
                 )
-                return RedirectResponse(url="/", status_code=302)
+                return RedirectResponse(url="/acts", status_code=302)
 
             return templates.TemplateResponse(
                 "constructor.html",
