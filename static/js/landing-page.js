@@ -15,6 +15,7 @@ class LandingPage {
 
         this._setupNavigation();
         this._setupPlaceholderInteractions();
+        ChatManager.init();
 
         console.log('LandingPage: инициализация завершена');
     }
@@ -66,37 +67,6 @@ class LandingPage {
             card.style.cursor = 'pointer';
         });
 
-        // Попытка отправить сообщение в чат (заглушка)
-        const chatInput = document.querySelector('.chat-input');
-        const chatSendBtn = document.querySelector('.chat-send-btn');
-
-        if (chatInput) {
-            chatInput.addEventListener('keydown', (e) => {
-                if (e.key === 'Enter' && !chatInput.disabled) {
-                    this._sendChatMessage(chatInput.value);
-                    chatInput.value = '';
-                }
-            });
-        }
-
-        if (chatSendBtn) {
-            chatSendBtn.addEventListener('click', () => {
-                if (!chatInput.disabled && chatInput.value.trim()) {
-                    this._sendChatMessage(chatInput.value);
-                    chatInput.value = '';
-                }
-            });
-        }
-    }
-
-    /**
-     * Отправляет сообщение в чат (заглушка)
-     * @private
-     * @param {string} message - Текст сообщения
-     */
-    static _sendChatMessage(message) {
-        console.log('Отправка сообщения в чат (функция в разработке):', message);
-        // В будущем здесь будет реальная отправка сообщения AI-ассистенту
     }
 
     /**

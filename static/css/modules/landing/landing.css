@@ -384,6 +384,69 @@
     margin: 0;
 }
 
+/* Скрытая заглушка */
+.chat-placeholder-hidden {
+    display: none;
+}
+
+/* Сообщение пользователя (аватар справа) */
+.chat-message-user {
+    flex-direction: row-reverse;
+}
+
+.chat-message-user .chat-message-avatar {
+    background: var(--gray-200);
+    color: var(--text-secondary);
+}
+
+.chat-message-user .chat-message-content {
+    background: var(--primary-subtle);
+    padding: var(--spacing-md) var(--spacing-lg);
+    border-radius: var(--radius-md);
+    border-top-right-radius: 2px;
+}
+
+/* Контент бот-сообщения (стиль пузыря) */
+.chat-message-bot .chat-message-content {
+    background: var(--bg-secondary);
+    padding: var(--spacing-md) var(--spacing-lg);
+    border-radius: var(--radius-md);
+    border-top-left-radius: 2px;
+}
+
+/* Typing-индикатор (три точки) */
+.chat-typing-indicator .chat-message-content {
+    display: flex;
+    align-items: center;
+    gap: 4px;
+    padding: var(--spacing-md) var(--spacing-lg);
+    background: var(--bg-secondary);
+    border-radius: var(--radius-md);
+}
+
+.chat-typing-dot {
+    width: 6px;
+    height: 6px;
+    border-radius: var(--radius-full);
+    background: var(--text-secondary);
+    animation: chatTypingBounce 1.4s infinite ease-in-out both;
+}
+
+.chat-typing-dot:nth-child(1) { animation-delay: -0.32s; }
+.chat-typing-dot:nth-child(2) { animation-delay: -0.16s; }
+.chat-typing-dot:nth-child(3) { animation-delay: 0s; }
+
+@keyframes chatTypingBounce {
+    0%, 80%, 100% { transform: scale(0.6); opacity: 0.4; }
+    40% { transform: scale(1); opacity: 1; }
+}
+
+/* Состояние обработки */
+.chat-input-container.processing .chat-send-btn {
+    opacity: 0.5;
+    pointer-events: none;
+}
+
 /* ============================================
    Адаптивность
    ============================================ */
