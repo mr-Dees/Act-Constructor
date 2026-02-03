@@ -130,4 +130,6 @@ cython_debug/
 
 # Specific files
 Схема приложения.txt
+Описание приложения.md
+CLAUDE_OLD.md
 CLAUDE.md

@@ -322,6 +322,7 @@
     padding: var(--spacing-lg) var(--spacing-2xl);
     border-top: var(--border-width-thin) solid var(--border-light);
     display: flex;
+    align-items: flex-end;
     gap: var(--spacing-md);
     flex-shrink: 0;
 }
@@ -334,6 +335,10 @@
     font-size: var(--font-size-sm);
     color: var(--text-primary);
     background: var(--bg-secondary);
+    font-family: inherit;
+    resize: none;
+    overflow-y: auto;
+    line-height: var(--line-height-normal, 1.5);
 }
 
 .chat-input:disabled {
@@ -503,10 +508,10 @@
 }
 
 .chat-modal-container {
-    width: 480px;
+    width: 700px;
     max-width: 90vw;
-    height: 600px;
-    max-height: 80vh;
+    height: 80vh;
+    max-height: 900px;
     background: var(--bg-primary);
     border-radius: var(--radius-lg);
     border: var(--border-width-thin) solid var(--border-light);

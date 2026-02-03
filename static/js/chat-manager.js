@@ -85,6 +85,11 @@ class ChatManager {
             }
         });
 
+        // Авторесайз textarea при вводе / shift+enter
+        this._input.addEventListener('input', () => {
+            this._autoResizeInput();
+        });
+
         this._sendBtn.addEventListener('click', () => {
             this.sendMessage();
         });
@@ -105,6 +110,7 @@ class ChatManager {
         if (!text) return;
 
         this._input.value = '';
+        this._autoResizeInput();
         this._addUserMessage(text);
         this._processResponse(text);
     }
@@ -345,6 +351,17 @@ class ChatManager {
      */
     static _scrollToBottom() {
         this._messagesContainer.scrollTop = this._messagesContainer.scrollHeight;
+    }
+
+    /**
+     * Авторесайз textarea: подстраивает высоту под содержимое (макс. 5 строк)
+     * @private
+     */
+    static _autoResizeInput() {
+        if (!this._input) return;
+        this._input.style.height = 'auto';
+        const maxHeight = parseInt(getComputedStyle(this._input).lineHeight, 10) * 5 || 120;
+        this._input.style.height = Math.min(this._input.scrollHeight, maxHeight) + 'px';
     }
 
     /**
