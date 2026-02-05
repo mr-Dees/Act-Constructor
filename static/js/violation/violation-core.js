@@ -95,7 +95,7 @@ class ViolationManager {
         optionalFieldsContainer.className = 'violation-optional-fields';
 
         optionalFieldsContainer.appendChild(
-            this.createOptionalField(violation, 'descriptionList', 'Описание перечнем', 'list')
+            this.createOptionalField(violation, 'descriptionList', 'Описание причин', 'list')
         );
 
         optionalFieldsContainer.appendChild(
