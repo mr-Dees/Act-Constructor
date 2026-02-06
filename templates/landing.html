@@ -28,11 +28,11 @@
                 {% include 'components/chat_content.html' %}
             </aside>
 
-            <!-- Панель Airflow (правая область) -->
-            <section class="airflow-panel">
-                <div class="airflow-header">
-                    <h3 class="airflow-title">Мои проекты</h3>
-                    <button class="airflow-filter-btn">
+            <!-- Панель workflow (правая область) -->
+            <section class="workflow-panel">
+                <div class="workflow-header">
+                    <h3 class="workflow-title">Мои проекты</h3>
+                    <button class="workflow-filter-btn">
                         <svg width="16" height="16" viewBox="0 0 24 24" fill="none">
                             <path d="M3 4a1 1 0 011-1h16a1 1 0 011 1v2.586a1 1 0 01-.293.707l-6.414 6.414a1 1 0 00-.293.707V17l-4 4v-6.586a1 1 0 00-.293-.707L3.293 7.293A1 1 0 013 6.586V4z"
                                   stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
@@ -41,9 +41,9 @@
                     </button>
                 </div>
 
-                <div class="airflow-content">
+                <div class="workflow-content">
                     <!-- Карточки проектов (заглушка) -->
-                    <div class="airflow-projects">
+                    <div class="workflow-projects">
                         <div class="project-card">
                             <div class="project-card-header">
                                 <h4 class="project-card-title">Проект аудита процессов</h4>
@@ -109,11 +109,11 @@
                     </div>
 
                     <!-- Сообщение о заглушке -->
-                    <div class="airflow-placeholder">
-                        <svg class="airflow-placeholder-icon" width="48" height="48" viewBox="0 0 24 24" fill="none">
+                    <div class="workflow-placeholder">
+                        <svg class="workflow-placeholder-icon" width="48" height="48" viewBox="0 0 24 24" fill="none">
                             <path d="M13 10V3L4 14h7v7l9-11h-7z" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
                         </svg>
-                        <p class="airflow-placeholder-text">Интеграция с Airflow в разработке</p>
+                        <p class="workflow-placeholder-text">Интеграция с workflow в разработке</p>
                     </div>
                 </div>
             </section>

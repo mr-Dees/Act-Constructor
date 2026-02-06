@@ -368,7 +368,39 @@ class ActsMenuManager {
         }
     }
 
+    /**
+     * Применяет ограничения для read-only режима к кнопкам меню.
+     * Вызывается после загрузки контента акта.
+     */
+    static applyReadOnlyRestrictions() {
+        if (!AppConfig.readOnlyMode?.isReadOnly) return;
+
+        const editBtn = document.getElementById('editMetadataBtn');
+        const deleteBtn = document.getElementById('deleteActBtn');
+        const tooltip = 'Недоступно для роли "Участник"';
+
+        if (editBtn) {
+            editBtn.disabled = true;
+            editBtn.classList.add('disabled');
+            editBtn.title = tooltip;
+        }
+
+        if (deleteBtn) {
+            deleteBtn.disabled = true;
+            deleteBtn.classList.add('disabled');
+            deleteBtn.title = tooltip;
+        }
+
+        console.log('ActsMenuManager: применены ограничения read-only для кнопок меню');
+    }
+
     static async showEditMetadataDialog() {
+        // Проверка read-only режима
+        if (AppConfig.readOnlyMode?.isReadOnly) {
+            Notifications.warning('Редактирование метаданных недоступно для роли "Участник"');
+            return;
+        }
+
         const actId = this.currentActId; // Теперь ВСЕГДА текущий акт
         if (!actId) {
             Notifications.warning('Нет открытого акта');
@@ -428,6 +460,12 @@ class ActsMenuManager {
     }
 
     static async deleteCurrentAct() {
+        // Проверка read-only режима
+        if (AppConfig.readOnlyMode?.isReadOnly) {
+            Notifications.warning('Удаление недоступно для роли "Участник"');
+            return;
+        }
+
         const actId = this.currentActId; // Теперь ВСЕГДА текущий акт
         if (!actId) {
             Notifications.warning('Нет открытого акта');
@@ -467,8 +505,13 @@ class ActsMenuManager {
         window.currentActId = actId;
 
         try {
-            if (LockManager?.init) await LockManager.init(actId);
+            // Сначала загружаем контент - это установит readOnlyMode на основе прав пользователя
             await APIClient.loadActContent(actId);
+
+            // Инициализируем LockManager только после загрузки контента
+            // В режиме read-only блокировка будет пропущена
+            if (LockManager?.init) await LockManager.init(actId);
+
             Notifications.success('Акт загружен');
         } catch (error) {
             console.error('Ошибка загрузки акта:', error);

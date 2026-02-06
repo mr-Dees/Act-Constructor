@@ -15,6 +15,11 @@ class App {
             this._initializeStorageManager();
             this._initializeManagers();
             this._setupEventHandlers();
+
+            // Применяем режим только чтения если активен
+            if (AppConfig.readOnlyMode?.isReadOnly) {
+                this._applyReadOnlyMode();
+            }
         } catch (err) {
             console.error('Критическая ошибка инициализации приложения:', err);
             Notifications.error(`Ошибка инициализации приложения: ${err.message}`);
@@ -195,10 +200,77 @@ class App {
         if (stepNum === 2) {
             textBlockManager.initGlobalToolbar();
             ItemsRenderer.renderAll();
+
+            // Применяем режим только чтения к новым элементам
+            if (AppConfig.readOnlyMode?.isReadOnly) {
+                this._applyReadOnlyToContent();
+            }
         } else {
             textBlockManager.hideToolbar();
             requestAnimationFrame(() => PreviewManager.update('previewTrim'));
         }
+    }
+
+    /**
+     * Применяет режим только чтения к интерфейсу
+     * @private
+     */
+    static _applyReadOnlyMode() {
+        console.log('Применяется режим только чтения');
+
+        // Добавляем класс к body для глобальных стилей
+        document.body.classList.add('read-only-mode');
+
+        // Отключаем кнопку сохранения
+        const saveIndicatorBtn = document.getElementById('saveIndicatorBtn');
+        if (saveIndicatorBtn) {
+            saveIndicatorBtn.disabled = true;
+            saveIndicatorBtn.title = AppConfig.readOnlyMode.messages.cannotSave;
+            saveIndicatorBtn.classList.add('disabled');
+        }
+
+        // Отключаем кнопку генерации
+        const generateBtn = document.getElementById('generateBtn');
+        if (generateBtn) {
+            // Генерация всё ещё доступна для просмотра, но без сохранения в БД
+            // Оставляем активной для экспорта
+        }
+
+        // Скрываем тулбар форматирования в режиме просмотра
+        const toolbar = document.querySelector('.formatting-toolbar');
+        if (toolbar) {
+            toolbar.classList.add('read-only-hidden');
+        }
+    }
+
+    /**
+     * Применяет режим только чтения к контенту (таблицы, текстблоки, нарушения)
+     * @private
+     */
+    static _applyReadOnlyToContent() {
+        // Делаем текстовые блоки нередактируемыми
+        document.querySelectorAll('.textblock-content[contenteditable="true"]').forEach(el => {
+            el.contentEditable = 'false';
+            el.classList.add('read-only');
+        });
+
+        // Делаем ячейки таблиц нередактируемыми
+        document.querySelectorAll('.table-cell[contenteditable="true"]').forEach(el => {
+            el.contentEditable = 'false';
+            el.classList.add('read-only');
+        });
+
+        // Делаем поля нарушений нередактируемыми
+        document.querySelectorAll('.violation-field[contenteditable="true"]').forEach(el => {
+            el.contentEditable = 'false';
+            el.classList.add('read-only');
+        });
+
+        // Делаем input и textarea нередактируемыми
+        document.querySelectorAll('.violation-editor input, .violation-editor textarea').forEach(el => {
+            el.readOnly = true;
+            el.classList.add('read-only');
+        });
     }
 }
 

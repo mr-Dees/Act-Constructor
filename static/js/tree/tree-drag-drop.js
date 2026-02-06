@@ -70,6 +70,12 @@ class TreeDragDrop {
      * @param {DragEvent} e - Событие dragstart
      */
     handleDragStart(e) {
+        // Блокируем drag-and-drop в режиме только чтения
+        if (AppConfig.readOnlyMode?.isReadOnly) {
+            e.preventDefault();
+            return;
+        }
+
         const treeItem = e.target.closest('.tree-item');
         if (!treeItem) return;
 

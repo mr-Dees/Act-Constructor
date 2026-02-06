@@ -23,6 +23,13 @@ class LockManager {
      * @param {number} actId - ID акта
      */
     static async init(actId) {
+        // Проверяем режим только чтения - блокировка не нужна
+        if (AppConfig.readOnlyMode?.isReadOnly) {
+            console.log('LockManager: Режим только чтения, блокировка не требуется');
+            this._actId = actId; // Сохраняем ID для возможного использования
+            return;
+        }
+
         this._actId = actId;
         this._resetState();
 
@@ -52,6 +59,12 @@ class LockManager {
      *  - останавливает все таймеры
      */
     static async manualUnlock() {
+        // Read-only пользователь не имеет блокировки - ничего делать не нужно
+        if (AppConfig.readOnlyMode?.isReadOnly) {
+            console.log('LockManager.manualUnlock: read-only режим, блокировка не требуется');
+            return;
+        }
+
         if (!this._actId) {
             console.warn('LockManager.manualUnlock вызван без активного акта');
             return;

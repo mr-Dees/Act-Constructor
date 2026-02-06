@@ -1,11 +1,11 @@
 /*
  * Стили для стартовой страницы (Landing Page)
- * Контент-специфичные стили: airflow dashboard и AI-чат
+ * Контент-специфичные стили: workflow dashboard и AI-чат
  * Общие layout-стили (sidebar, topbar) вынесены в landing-sidebar.css
  */
 
 /* ============================================
-   Контент с airflow и чатом
+   Контент с workflow и чатом
    ============================================ */
 
 .landing-content {
@@ -19,10 +19,10 @@
 }
 
 /* ============================================
-   Airflow панель (правая область)
+   workflow панель (правая область)
    ============================================ */
 
-.airflow-panel {
+.workflow-panel {
     background: var(--bg-primary);
     border-radius: var(--radius-lg);
     border: var(--border-width-thin) solid var(--border-light);
@@ -32,7 +32,7 @@
     min-height: 0;
 }
 
-.airflow-header {
+.workflow-header {
     padding: var(--spacing-lg) var(--spacing-2xl);
     border-bottom: var(--border-width-thin) solid var(--border-light);
     display: flex;
@@ -41,14 +41,14 @@
     flex-shrink: 0;
 }
 
-.airflow-title {
+.workflow-title {
     font-size: var(--font-size-xl);
     font-weight: var(--font-weight-bold);
     color: var(--text-primary);
     margin: 0;
 }
 
-.airflow-filter-btn {
+.workflow-filter-btn {
     display: flex;
     align-items: center;
     gap: var(--spacing-sm);
@@ -62,13 +62,13 @@
     transition: all var(--duration-fast);
 }
 
-.airflow-filter-btn:hover {
+.workflow-filter-btn:hover {
     background: var(--gray-50);
     border-color: var(--primary-light);
     color: var(--primary);
 }
 
-.airflow-content {
+.workflow-content {
     flex: 1;
     overflow-y: auto;
     padding: var(--spacing-2xl);
@@ -76,7 +76,7 @@
 }
 
 /* Сетка проектов */
-.airflow-projects {
+.workflow-projects {
     display: grid;
     grid-template-columns: repeat(auto-fill, minmax(320px, 1fr));
     gap: var(--spacing-2xl);
@@ -189,8 +189,8 @@
     color: var(--text-secondary);
 }
 
-/* Заглушка airflow */
-.airflow-placeholder {
+/* Заглушка workflow */
+.workflow-placeholder {
     display: flex;
     flex-direction: column;
     align-items: center;
@@ -199,12 +199,12 @@
     text-align: center;
 }
 
-.airflow-placeholder-icon {
+.workflow-placeholder-icon {
     color: var(--gray-300);
     margin-bottom: var(--spacing-xl);
 }
 
-.airflow-placeholder-text {
+.workflow-placeholder-text {
     font-size: var(--font-size-base);
     color: var(--text-secondary);
     margin: 0;
@@ -479,7 +479,7 @@
     display: none;
 }
 
-/* Airflow на всю ширину когда чат скрыт */
+/* workflow на всю ширину когда чат скрыт */
 .landing-content.chat-hidden {
     grid-template-columns: 1fr;
 }
@@ -654,7 +654,7 @@ body.chat-modal-open {
         gap: var(--spacing-lg);
     }
 
-    .airflow-projects {
+    .workflow-projects {
         grid-template-columns: 1fr;
     }
 }

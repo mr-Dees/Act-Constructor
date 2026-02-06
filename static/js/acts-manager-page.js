@@ -345,6 +345,28 @@ class ActsManagerPage {
         const duplicateBtn = cardElement.querySelector('[data-action="duplicate"]');
         const deleteBtn = cardElement.querySelector('[data-action="delete"]');
 
+        // Проверяем, может ли пользователь редактировать (не Участник)
+        const canEdit = act.user_role !== 'Участник';
+
+        // Деактивируем кнопки для роли "Участник"
+        // Примечание: кнопка "Дублировать" остаётся активной - Участник может
+        // дублировать акт и станет Редактором в новом акте
+        if (!canEdit) {
+            const readOnlyTooltip = 'Редактирование недоступно для роли "Участник"';
+
+            if (editBtn) {
+                editBtn.disabled = true;
+                editBtn.classList.add('disabled');
+                editBtn.title = readOnlyTooltip;
+            }
+            // duplicateBtn остаётся активной для Участника
+            if (deleteBtn) {
+                deleteBtn.disabled = true;
+                deleteBtn.classList.add('disabled');
+                deleteBtn.title = 'Удаление недоступно для роли "Участник"';
+            }
+        }
+
         // Универсальный helper для безопасного клика по кнопке
         const safeClick = (handler) => (e) => {
             e.preventDefault();
@@ -364,6 +386,10 @@ class ActsManagerPage {
 
         if (editBtn) {
             editBtn.addEventListener('click', safeClick(() => {
+                if (!canEdit) {
+                    Notifications.warning('Редактирование недоступно для роли "Участник"');
+                    return;
+                }
                 if (act.is_locked) {
                     Notifications.warning(`Акт редактируется пользователем ${act.locked_by}.`);
                     return;
@@ -374,6 +400,8 @@ class ActsManagerPage {
 
         if (duplicateBtn) {
             duplicateBtn.addEventListener('click', safeClick(() => {
+                // Дублирование доступно для всех ролей, включая Участника
+                // Участник станет Редактором в новом акте
                 if (act.is_locked) {
                     Notifications.warning(`Акт редактируется пользователем ${act.locked_by}.`);
                     return;
@@ -384,6 +412,10 @@ class ActsManagerPage {
 
         if (deleteBtn) {
             deleteBtn.addEventListener('click', safeClick(() => {
+                if (!canEdit) {
+                    Notifications.warning('Удаление недоступно для роли "Участник"');
+                    return;
+                }
                 if (act.is_locked) {
                     Notifications.warning(`Акт редактируется пользователем ${act.locked_by}.`);
                     return;

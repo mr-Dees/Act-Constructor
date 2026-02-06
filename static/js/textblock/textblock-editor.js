@@ -22,13 +22,20 @@ Object.assign(TextBlockManager.prototype, {
     createEditor(textBlock) {
         const editor = document.createElement('div');
         editor.className = 'textblock-editor';
-        editor.contentEditable = 'true';
         editor.dataset.textBlockId = textBlock.id;
         editor.dataset.placeholder = 'Введите текст...';
         editor.innerHTML = textBlock.content || '';
 
+        // Отключаем редактирование в режиме только чтения
+        if (AppConfig.readOnlyMode?.isReadOnly) {
+            editor.contentEditable = 'false';
+            editor.classList.add('read-only');
+        } else {
+            editor.contentEditable = 'true';
+            this.attachEditorEvents(editor, textBlock);
+        }
+
         this.applyFormatting(editor, textBlock.formatting);
-        this.attachEditorEvents(editor, textBlock);
 
         return editor;
     },

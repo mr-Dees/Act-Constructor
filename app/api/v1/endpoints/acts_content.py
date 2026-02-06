@@ -55,8 +55,9 @@ async def get_act_content(
     async with get_db() as conn:
         db_service = ActDBService(conn)
 
-        has_access = await db_service.check_user_access(act_id, username)
-        if not has_access:
+        # Проверяем доступ и получаем права пользователя
+        permission = await db_service.get_user_edit_permission(act_id, username)
+        if not permission["has_access"]:
             raise HTTPException(status_code=403, detail="Нет доступа к акту")
 
         try:
@@ -163,13 +164,17 @@ async def get_act_content(
                 f"КМ={act_metadata.km_number}, is_process_based={act_metadata.is_process_based}"
             )
 
-            # Возвращаем метаданные + содержимое
+            # Возвращаем метаданные + содержимое + права пользователя
             return {
                 'metadata': act_metadata.model_dump(mode='json'),
                 'tree': tree,
                 'tables': tables,
                 'textBlocks': textBlocks,
-                'violations': violations
+                'violations': violations,
+                'userPermission': {
+                    'canEdit': permission["can_edit"],
+                    'role': permission["role"]
+                }
             }
         except HTTPException:
             raise
@@ -214,9 +219,15 @@ async def save_act_content(
     async with get_db() as conn:
         db_service = ActDBService(conn)
 
-        has_access = await db_service.check_user_access(act_id, username)
-        if not has_access:
+        # Проверяем доступ и права на редактирование
+        permission = await db_service.get_user_edit_permission(act_id, username)
+        if not permission["has_access"]:
             raise HTTPException(status_code=403, detail="Нет доступа к акту")
+        if not permission["can_edit"]:
+            raise HTTPException(
+                status_code=403,
+                detail="Недостаточно прав для сохранения. Роль 'Участник' имеет доступ только для просмотра."
+            )
 
         try:
             # Получаем адаптер и имена таблиц

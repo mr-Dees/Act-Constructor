@@ -1066,6 +1066,8 @@ class ActDBService:
         - КМ берётся из оригинала БЕЗ изменений
         - Создаётся как новая часть существующего КМ (force_new_part=True)
         - Служебная записка НЕ копируется (акт без СЗ)
+        - Команда НЕ копируется - создаётся новая с пользователем как Редактором
+        - Поручения НЕ копируются
         """
         original = await self.get_act_by_id(act_id)
         km_digit = KMUtils.extract_km_digits(original.km_number)
@@ -1073,6 +1075,63 @@ class ActDBService:
         new_inspection_name = await self._generate_unique_copy_name(
             original.inspection_name
         )
+
+        # Формируем команду для нового акта
+        # Порядок: Куратор, Руководитель, Редактор (при необходимости)
+        new_team = []
+
+        # Находим роль текущего пользователя в оригинале
+        user_original_role = None
+        user_full_name = username  # По умолчанию используем username
+        user_position = "Аудитор"  # По умолчанию
+
+        for member in original.audit_team:
+            if member.username == username:
+                user_original_role = member.role
+                user_full_name = member.full_name
+                user_position = member.position
+                break
+
+        # 1. Куратор: пользователь или заглушка
+        if user_original_role == "Куратор":
+            new_team.append(AuditTeamMember(
+                username=username,
+                role="Куратор",
+                full_name=user_full_name,
+                position=user_position
+            ))
+        else:
+            new_team.append(AuditTeamMember(
+                username="00000000",
+                role="Куратор",
+                full_name="Требуется назначить",
+                position="—"
+            ))
+
+        # 2. Руководитель: пользователь или заглушка
+        if user_original_role == "Руководитель":
+            new_team.append(AuditTeamMember(
+                username=username,
+                role="Руководитель",
+                full_name=user_full_name,
+                position=user_position
+            ))
+        else:
+            new_team.append(AuditTeamMember(
+                username="00000000",
+                role="Руководитель",
+                full_name="Требуется назначить",
+                position="—"
+            ))
+
+        # 3. Редактор: добавляем если пользователь не Куратор и не Руководитель
+        if user_original_role not in ("Куратор", "Руководитель"):
+            new_team.append(AuditTeamMember(
+                username=username,
+                role="Редактор",
+                full_name=user_full_name,
+                position=user_position
+            ))
 
         new_act_data = ActCreate(
             km_number=original.km_number,
@@ -1083,11 +1142,11 @@ class ActDBService:
             created_date=original.created_date,
             order_number=original.order_number,
             order_date=original.order_date,
-            audit_team=original.audit_team,
+            audit_team=new_team,  # Пользователь + заглушки для обязательных ролей
             inspection_start_date=original.inspection_start_date,
             inspection_end_date=original.inspection_end_date,
             is_process_based=original.is_process_based,
-            directives=original.directives,
+            directives=[],  # Поручения НЕ копируются
             service_note=None,
             service_note_date=None,
         )
@@ -1251,3 +1310,36 @@ class ActDBService:
         )
 
         return bool(result)
+
+    async def get_user_edit_permission(self, act_id: int, username: str) -> dict:
+        """
+        Проверяет права пользователя на редактирование акта.
+
+        Роли с правом редактирования: Куратор, Руководитель, Редактор
+        Роль только для просмотра: Участник
+
+        Args:
+            act_id: ID акта
+            username: Имя пользователя
+
+        Returns:
+            dict с полями:
+                - has_access: есть ли доступ к акту
+                - can_edit: может ли редактировать
+                - role: роль пользователя в команде
+        """
+        row = await self.conn.fetchrow(
+            f"""
+            SELECT role FROM {self.audit_team}
+            WHERE act_id = $1 AND username = $2
+            """,
+            act_id,
+            username,
+        )
+
+        if not row:
+            return {"has_access": False, "can_edit": False, "role": None}
+
+        role = row["role"]
+        can_edit = role in ("Куратор", "Руководитель", "Редактор")
+        return {"has_access": True, "can_edit": can_edit, "role": role}

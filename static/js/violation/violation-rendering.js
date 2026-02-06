@@ -36,16 +36,19 @@ Object.assign(ViolationManager.prototype, {
                 itemElement.dataset.itemId = item.id;
                 itemElement.dataset.itemIndex = index;
 
-                // Добавляем drag-and-drop атрибуты
-                itemElement.draggable = true;
+                // Добавляем drag-and-drop атрибуты (только если не режим чтения)
+                const isReadOnly = AppConfig.readOnlyMode?.isReadOnly;
+                itemElement.draggable = !isReadOnly;
 
-                // Обработчики перетаскивания
-                itemElement.addEventListener('dragstart', (e) => this.handleDragStart(e, violation, index, item));
-                itemElement.addEventListener('dragover', (e) => this.handleDragOver(e, violation, container));
-                itemElement.addEventListener('dragenter', (e) => this.handleDragEnter(e));
-                itemElement.addEventListener('dragleave', (e) => this.handleDragLeave(e));
-                itemElement.addEventListener('drop', (e) => this.handleDrop(e, violation, index, container));
-                itemElement.addEventListener('dragend', (e) => this.handleDragEnd(e, container));
+                // Обработчики перетаскивания (только если не режим чтения)
+                if (!isReadOnly) {
+                    itemElement.addEventListener('dragstart', (e) => this.handleDragStart(e, violation, index, item));
+                    itemElement.addEventListener('dragover', (e) => this.handleDragOver(e, violation, container));
+                    itemElement.addEventListener('dragenter', (e) => this.handleDragEnter(e));
+                    itemElement.addEventListener('dragleave', (e) => this.handleDragLeave(e));
+                    itemElement.addEventListener('drop', (e) => this.handleDrop(e, violation, index, container));
+                    itemElement.addEventListener('dragend', (e) => this.handleDragEnd(e, container));
+                }
 
                 container.appendChild(itemElement);
             }

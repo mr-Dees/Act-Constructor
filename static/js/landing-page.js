@@ -3,7 +3,7 @@
  *
  * Управляет отображением портала инструментов компании:
  * - Sidebar с навигацией по инструментам
- * - Airflow dashboard с проектами (заглушка)
+ * - Workflow dashboard с проектами (заглушка)
  * - AI-чат ассистент (заглушка)
  */
 class LandingPage {
@@ -32,7 +32,7 @@ class LandingPage {
     }
 
     /**
-     * Настраивает обработчики для topbar, чата и airflow
+     * Настраивает обработчики для topbar, чата и workflow
      * @private
      */
     static _setupNavigation() {
@@ -51,8 +51,8 @@ class LandingPage {
             });
         });
 
-        // Кнопка фильтров в airflow
-        const filterBtn = document.querySelector('.airflow-filter-btn');
+        // Кнопка фильтров в workflow
+        const filterBtn = document.querySelector('.workflow-filter-btn');
         if (filterBtn) {
             filterBtn.addEventListener('click', () => {
                 console.log('Фильтры проектов (функция в разработке)');
@@ -80,12 +80,12 @@ class LandingPage {
     }
 
     /**
-     * Обновляет список проектов (заглушка для будущей интеграции с Airflow)
+     * Обновляет список проектов (заглушка для будущей интеграции с workflow)
      * @private
      */
     static async _refreshProjects() {
         console.log('Обновление списка проектов (функция в разработке)');
-        // В будущем здесь будет запрос к Airflow API
+        // В будущем здесь будет запрос к workflow API
     }
 
     /**

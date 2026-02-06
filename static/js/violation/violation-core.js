@@ -55,11 +55,18 @@ class ViolationManager {
         violatedTextarea.value = violation.violated || '';
         violatedTextarea.rows = 4;
 
-        // Настраиваем обработку клавиш для сохранения изменений
-        this.setupTextareaHandlers(violatedTextarea, (value) => {
-            violation.violated = value;
-            PreviewManager.update();
-        });
+        // Проверяем режим только чтения
+        const isReadOnly = AppConfig.readOnlyMode?.isReadOnly;
+        if (isReadOnly) {
+            violatedTextarea.readOnly = true;
+            violatedTextarea.classList.add('read-only');
+        } else {
+            // Настраиваем обработку клавиш для сохранения изменений
+            this.setupTextareaHandlers(violatedTextarea, (value) => {
+                violation.violated = value;
+                PreviewManager.update();
+            });
+        }
 
         violatedColumn.appendChild(violatedTextarea);
 
@@ -78,11 +85,17 @@ class ViolationManager {
         establishedTextarea.value = violation.established || '';
         establishedTextarea.rows = 4;
 
-        // Настраиваем обработку клавиш для сохранения изменений
-        this.setupTextareaHandlers(establishedTextarea, (value) => {
-            violation.established = value;
-            PreviewManager.update();
-        });
+        // Проверяем режим только чтения
+        if (isReadOnly) {
+            establishedTextarea.readOnly = true;
+            establishedTextarea.classList.add('read-only');
+        } else {
+            // Настраиваем обработку клавиш для сохранения изменений
+            this.setupTextareaHandlers(establishedTextarea, (value) => {
+                violation.established = value;
+                PreviewManager.update();
+            });
+        }
 
         establishedColumn.appendChild(establishedTextarea);
 
