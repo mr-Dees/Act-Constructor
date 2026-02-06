@@ -32,6 +32,12 @@ class CreateActDialog extends DialogBase {
      * @param {Object} status - Статус акта (опционально)
      */
     static async showEdit(actData, status = null) {
+        // Проверяем роль пользователя - Участник не может редактировать
+        if (actData?.user_role === 'Участник') {
+            Notifications.warning('Редактирование недоступно для роли "Участник"');
+            return;
+        }
+
         const isEdit = !!actData;
         const actId = actData?.id;
 

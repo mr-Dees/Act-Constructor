@@ -327,6 +327,15 @@ class APIClient {
             // Сохраняем метаданные в глобальную переменную
             window.actMetadata = content.metadata;
 
+            // Обрабатываем права пользователя
+            if (content.userPermission) {
+                AppConfig.readOnlyMode.isReadOnly = !content.userPermission.canEdit;
+                AppConfig.readOnlyMode.userRole = content.userPermission.role;
+
+                console.log('Права пользователя:', content.userPermission);
+                console.log('Режим только чтения:', AppConfig.readOnlyMode.isReadOnly);
+            }
+
             // Получаем флаг процессной проверки из метаданных
             const isProcessBased = content.metadata?.is_process_based !== undefined
                 ? content.metadata.is_process_based
@@ -357,8 +366,10 @@ class APIClient {
                 AppState.initializeTree(isProcessBased);
                 AppState.generateNumbering();
 
-                // Сохраняем дефолтную структуру в БД
-                await this._saveDefaultStructure(actId, username);
+                // Сохраняем дефолтную структуру в БД ТОЛЬКО если есть права на редактирование
+                if (!AppConfig.readOnlyMode.isReadOnly) {
+                    await this._saveDefaultStructure(actId, username);
+                }
 
                 Notifications.info('Акт инициализирован с базовой структурой');
             } else {
@@ -389,6 +400,19 @@ class APIClient {
             setTimeout(() => {
                 StorageManager.enableTracking();
             }, 500);
+
+            // Показываем баннер и применяем режим просмотра если нет прав на редактирование
+            if (AppConfig.readOnlyMode.isReadOnly) {
+                this._showReadOnlyBanner();
+                // Применяем read-only стили к интерфейсу
+                if (typeof App !== 'undefined' && App._applyReadOnlyMode) {
+                    App._applyReadOnlyMode();
+                }
+                // Применяем ограничения к меню актов
+                if (typeof ActsMenuManager !== 'undefined' && ActsMenuManager.applyReadOnlyRestrictions) {
+                    ActsMenuManager.applyReadOnlyRestrictions();
+                }
+            }
 
         } catch (err) {
             console.error('Ошибка загрузки акта:', err);
@@ -521,6 +545,54 @@ class APIClient {
             Notifications.error(`Не удалось удалить акт: ${err.message}`);
             throw err;
         }
+    }
+
+    /**
+     * Создает ошибку API с кодом
+     * @private
+     */
+    static _createError(status, detail) {
+        const error = new Error(detail);
+        error.status = status;
+        return error;
+    }
+
+    /**
+     * Показывает баннер режима только чтения
+     * @private
+     */
+    static _showReadOnlyBanner() {
+        // Проверяем, не показан ли уже баннер
+        if (document.querySelector('.read-only-banner')) {
+            return;
+        }
+
+        const banner = document.createElement('div');
+        banner.className = 'read-only-banner';
+        banner.innerHTML = `
+            <span class="read-only-banner-icon">👁</span>
+            <span class="read-only-banner-text">${AppConfig.readOnlyMode.messages.viewOnlyBanner}</span>
+        `;
+
+        // Вставляем баннер после header
+        const header = document.querySelector('.header');
+        if (header && header.nextSibling) {
+            header.parentNode.insertBefore(banner, header.nextSibling);
+        } else {
+            document.body.insertBefore(banner, document.body.firstChild);
+        }
+    }
+
+    /**
+     * Проверяет режим только чтения и показывает уведомление
+     * @returns {boolean} true если режим только чтения активен
+     */
+    static checkReadOnlyMode() {
+        if (AppConfig.readOnlyMode?.isReadOnly) {
+            Notifications.warning(AppConfig.readOnlyMode.messages.cannotEdit);
+            return true;
+        }
+        return false;
     }
 }
 

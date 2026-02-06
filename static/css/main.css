@@ -8,6 +8,7 @@
 @import 'base/auth.css';
 @import './base/reset.css';
 @import './base/animations.css';
+@import './base/read-only.css';
 
 /* Компоненты разметки страницы */
 @import './layout/container.css';

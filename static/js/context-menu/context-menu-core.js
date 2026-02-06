@@ -47,6 +47,12 @@ class ContextMenuManager {
     }
 
     static show(x, y, nodeId, type, options = {}) {
+        // В режиме только чтения показываем предупреждение вместо меню
+        if (AppConfig.readOnlyMode?.isReadOnly) {
+            Notifications.warning(AppConfig.readOnlyMode.messages.cannotEdit);
+            return;
+        }
+
         this.hide();
         this.currentNodeId = nodeId;
         this.activeMenuType = type;

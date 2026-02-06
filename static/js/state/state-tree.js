@@ -128,6 +128,11 @@ Object.assign(AppState, {
      * @returns {Object} Результат создания узла с полями valid, message
      */
     addNode(parentId, label, isChild = true) {
+        // Блокируем добавление в режиме только чтения
+        if (AppConfig.readOnlyMode?.isReadOnly) {
+            return ValidationCore.failure(AppConfig.readOnlyMode.messages.cannotModifyTree);
+        }
+
         const parent = this.findNodeById(parentId);
         if (!parent) {
             return ValidationCore.failure(AppConfig.tree.validation.parentNotFound);
@@ -201,6 +206,12 @@ Object.assign(AppState, {
      * @returns {boolean} true если удаление успешно
      */
     deleteNode(nodeId) {
+        // Блокируем удаление в режиме только чтения
+        if (AppConfig.readOnlyMode?.isReadOnly) {
+            Notifications.warning(AppConfig.readOnlyMode.messages.cannotModifyTree);
+            return false;
+        }
+
         const node = this.findNodeById(nodeId);
         if (!node) return false;
 
@@ -282,6 +293,11 @@ Object.assign(AppState, {
      * @returns {Promise<Object>} Результат операции с полями valid, message
      */
     async moveNode(draggedNodeId, targetNodeId, position) {
+        // Блокируем перемещение в режиме только чтения
+        if (AppConfig.readOnlyMode?.isReadOnly) {
+            return ValidationCore.failure(AppConfig.readOnlyMode.messages.cannotModifyTree);
+        }
+
         if (draggedNodeId === targetNodeId) {
             return ValidationCore.failure(AppConfig.tree.validation.cannotMoveToSelf);
         }

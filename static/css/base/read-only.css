@@ -1,0 +1,161 @@
+/*
+ * Стили для режима только чтения
+ * Применяются когда пользователь имеет роль "Участник"
+ */
+
+/* Баннер режима просмотра */
+.read-only-banner {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 8px;
+    background: linear-gradient(135deg, #fff3cd 0%, #ffeeba 100%);
+    border-bottom: 1px solid #ffc107;
+    padding: 10px 16px;
+    color: #856404;
+    font-size: 14px;
+    font-weight: 500;
+    text-align: center;
+    box-shadow: 0 2px 4px rgba(0, 0, 0, 0.05);
+    z-index: 100;
+}
+
+.read-only-banner-icon {
+    font-size: 18px;
+}
+
+.read-only-banner-text {
+    letter-spacing: 0.3px;
+}
+
+/* Глобальные стили для режима только чтения */
+body.read-only-mode .editable,
+body.read-only-mode [contenteditable="true"] {
+    pointer-events: none;
+    background-color: #f8f9fa !important;
+    cursor: not-allowed;
+}
+
+body.read-only-mode .read-only {
+    background-color: #f8f9fa !important;
+    cursor: not-allowed;
+}
+
+/* Скрытие элементов в режиме просмотра */
+body.read-only-mode .read-only-hidden {
+    display: none !important;
+}
+
+/* Деактивированные кнопки */
+body.read-only-mode .btn.disabled,
+body.read-only-mode button.disabled,
+body.read-only-mode button:disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
+    pointer-events: none;
+}
+
+/* Стили для карточек актов - деактивированные кнопки */
+.act-card .btn.disabled,
+.act-card button.disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
+    pointer-events: none;
+}
+
+/* Дерево в режиме просмотра */
+body.read-only-mode .tree-node {
+    cursor: default;
+}
+
+body.read-only-mode .tree-node:hover {
+    background-color: transparent;
+}
+
+body.read-only-mode .tree-node .node-label {
+    cursor: default;
+}
+
+/* Таблицы в режиме просмотра */
+body.read-only-mode .table-cell {
+    cursor: default;
+}
+
+body.read-only-mode .table-cell:focus {
+    outline: none;
+    box-shadow: none;
+}
+
+body.read-only-mode .resize-handle {
+    display: none;
+}
+
+/* Текстовые блоки в режиме просмотра */
+body.read-only-mode .textblock-content {
+    cursor: default;
+}
+
+body.read-only-mode .textblock-content:focus {
+    outline: none;
+    box-shadow: none;
+}
+
+/* Нарушения в режиме просмотра */
+body.read-only-mode .violation-field {
+    cursor: default;
+}
+
+body.read-only-mode .violation-field:focus {
+    outline: none;
+    box-shadow: none;
+}
+
+body.read-only-mode .violation-editor input,
+body.read-only-mode .violation-editor textarea {
+    background-color: #f8f9fa;
+    cursor: not-allowed;
+}
+
+/* Контекстное меню - скрываем опции редактирования */
+body.read-only-mode .context-menu-item[data-action="add"],
+body.read-only-mode .context-menu-item[data-action="delete"],
+body.read-only-mode .context-menu-item[data-action="edit"],
+body.read-only-mode .context-menu-item[data-action="merge"],
+body.read-only-mode .context-menu-item[data-action="split"],
+body.read-only-mode .context-menu-item[data-action="addRow"],
+body.read-only-mode .context-menu-item[data-action="addColumn"],
+body.read-only-mode .context-menu-item[data-action="deleteRow"],
+body.read-only-mode .context-menu-item[data-action="deleteColumn"] {
+    display: none !important;
+}
+
+/* Индикатор сохранения в режиме просмотра */
+body.read-only-mode #saveIndicatorBtn.disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
+}
+
+/* Drag-and-drop отключен */
+body.read-only-mode .tree-node[draggable="true"] {
+    cursor: default;
+}
+
+body.read-only-mode .tree-node.dragging {
+    opacity: 1;
+}
+
+/* Кнопки добавления контента скрыты */
+body.read-only-mode .add-content-btn,
+body.read-only-mode .add-table-btn,
+body.read-only-mode .add-textblock-btn,
+body.read-only-mode .add-violation-btn {
+    display: none !important;
+}
+
+/* Кнопки удаления контента скрыты */
+body.read-only-mode .delete-content-btn,
+body.read-only-mode .delete-table-btn,
+body.read-only-mode .delete-textblock-btn,
+body.read-only-mode .delete-violation-btn {
+    display: none !important;
+}

@@ -70,10 +70,15 @@ async def lock_act(
     async with get_db() as conn:
         db_service = ActDBService(conn)
 
-        # Проверяем доступ
-        has_access = await db_service.check_user_access(act_id, username)
-        if not has_access:
+        # Проверяем доступ и права на редактирование
+        permission = await db_service.get_user_edit_permission(act_id, username)
+        if not permission["has_access"]:
             raise HTTPException(status_code=403, detail="Нет доступа к акту")
+        if not permission["can_edit"]:
+            raise HTTPException(
+                status_code=403,
+                detail="Недостаточно прав для редактирования. Роль 'Участник' имеет доступ только для просмотра."
+            )
 
         try:
             lock_info = await db_service.lock_act(act_id, username)
@@ -124,9 +129,15 @@ async def extend_lock(
     async with get_db() as conn:
         db_service = ActDBService(conn)
 
-        has_access = await db_service.check_user_access(act_id, username)
-        if not has_access:
+        # Проверяем доступ и права на редактирование
+        permission = await db_service.get_user_edit_permission(act_id, username)
+        if not permission["has_access"]:
             raise HTTPException(status_code=403, detail="Нет доступа к акту")
+        if not permission["can_edit"]:
+            raise HTTPException(
+                status_code=403,
+                detail="Недостаточно прав для редактирования"
+            )
 
         try:
             lock_info = await db_service.extend_lock(act_id, username)
@@ -283,11 +294,17 @@ async def update_act_metadata(
         async with get_db() as conn:
             db_service = ActDBService(conn)
 
-            has_access = await db_service.check_user_access(act_id, username)
-            if not has_access:
+            # Проверяем доступ и права на редактирование
+            permission = await db_service.get_user_edit_permission(act_id, username)
+            if not permission["has_access"]:
                 raise HTTPException(
                     status_code=403,
                     detail="У вас нет доступа к этому акту"
+                )
+            if not permission["can_edit"]:
+                raise HTTPException(
+                    status_code=403,
+                    detail="Недостаточно прав для редактирования"
                 )
 
             updated_act = await db_service.update_act_metadata(
@@ -373,8 +390,11 @@ async def duplicate_act(
     try:
         async with get_db() as conn:
             db_service = ActDBService(conn)
-            has_access = await db_service.check_user_access(act_id, username)
-            if not has_access:
+
+            # Проверяем доступ к акту (can_edit НЕ требуется для дублирования)
+            # Участник может дублировать акт - он станет Редактором в новом акте
+            permission = await db_service.get_user_edit_permission(act_id, username)
+            if not permission["has_access"]:
                 raise HTTPException(status_code=403, detail="Нет доступа к акту")
 
             return await db_service.duplicate_act(act_id, username)
@@ -412,9 +432,16 @@ async def delete_act(
     try:
         async with get_db() as conn:
             db_service = ActDBService(conn)
-            has_access = await db_service.check_user_access(act_id, username)
-            if not has_access:
+
+            # Проверяем доступ и права на редактирование
+            permission = await db_service.get_user_edit_permission(act_id, username)
+            if not permission["has_access"]:
                 raise HTTPException(status_code=403, detail="Нет доступа к акту")
+            if not permission["can_edit"]:
+                raise HTTPException(
+                    status_code=403,
+                    detail="Недостаточно прав для удаления акта"
+                )
 
             await db_service.delete_act(act_id)
             logger.info(f"Удален акт ID={act_id} пользователем {username}")

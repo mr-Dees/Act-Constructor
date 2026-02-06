@@ -30,6 +30,12 @@ class HeaderExit {
      * @private
      */
     static async _handleExit() {
+        // Read-only пользователи просто выходят без вопросов о сохранении
+        if (AppConfig.readOnlyMode?.isReadOnly) {
+            window.location.href = AppConfig.api.getUrl('/acts');
+            return;
+        }
+
         // Проверяем есть ли изменения
         const hasUnsavedChanges = StorageManager?.hasUnsavedChanges?.() || false;
 
@@ -115,6 +121,13 @@ class HeaderExit {
      */
     static async _performExit(wasSaved = false) {
         try {
+            // Read-only пользователи не сохраняют и не разблокируют
+            if (AppConfig.readOnlyMode?.isReadOnly) {
+                console.log('HeaderExit: read-only режим, пропускаем сохранение и unlock');
+                window.location.href = AppConfig.api.getUrl('/acts');
+                return;
+            }
+
             // Если НЕ сохранили, нужно сохранить перед unlock
             if (!wasSaved && window.currentActId && typeof AppState !== 'undefined' && AppState?.exportData) {
                 try {

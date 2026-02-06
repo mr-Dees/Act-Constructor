@@ -99,7 +99,7 @@ DISTRIBUTED BY (id);
 COMMENT ON TABLE {SCHEMA}.{PREFIX}audit_team_members IS 'Состав аудиторской группы для каждого акта';
 COMMENT ON COLUMN {SCHEMA}.{PREFIX}audit_team_members.id IS 'Уникальный идентификатор записи';
 COMMENT ON COLUMN {SCHEMA}.{PREFIX}audit_team_members.act_id IS 'Ссылка на акт';
-COMMENT ON COLUMN {SCHEMA}.{PREFIX}audit_team_members.role IS 'Роль члена группы: Куратор, Руководитель или Участник';
+COMMENT ON COLUMN {SCHEMA}.{PREFIX}audit_team_members.role IS 'Роль члена группы: Куратор, Руководитель, Редактор или Участник';
 COMMENT ON COLUMN {SCHEMA}.{PREFIX}audit_team_members.full_name IS 'Полное имя члена группы (ФИО)';
 COMMENT ON COLUMN {SCHEMA}.{PREFIX}audit_team_members.position IS 'Должность члена группы';
 COMMENT ON COLUMN {SCHEMA}.{PREFIX}audit_team_members.username IS 'Числовой логин пользователя в системе';

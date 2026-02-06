@@ -114,7 +114,7 @@ COMMENT ON COLUMN acts.last_edited_at IS 'Дата и время последн�
 CREATE TABLE IF NOT EXISTS audit_team_members (
     id SERIAL PRIMARY KEY,
     act_id INTEGER NOT NULL REFERENCES acts(id) ON DELETE CASCADE,
-    role VARCHAR(50) NOT NULL CHECK (role IN ('Куратор', 'Руководитель', 'Участник')),
+    role VARCHAR(50) NOT NULL CHECK (role IN ('Куратор', 'Руководитель', 'Редактор', 'Участник')),
     full_name VARCHAR(255) NOT NULL,
     position VARCHAR(255) NOT NULL,
     username VARCHAR(50) NOT NULL,
@@ -129,7 +129,7 @@ COMMENT ON TABLE audit_team_members IS 'Состав аудиторской гр
 
 COMMENT ON COLUMN audit_team_members.id IS 'Уникальный идентификатор записи';
 COMMENT ON COLUMN audit_team_members.act_id IS 'Ссылка на акт';
-COMMENT ON COLUMN audit_team_members.role IS 'Роль члена группы: Куратор, Руководитель или Участник';
+COMMENT ON COLUMN audit_team_members.role IS 'Роль члена группы: Куратор, Руководитель, Редактор или Участник';
 COMMENT ON COLUMN audit_team_members.full_name IS 'Полное имя члена группы (ФИО)';
 COMMENT ON COLUMN audit_team_members.position IS 'Должность члена группы';
 COMMENT ON COLUMN audit_team_members.username IS 'Числовой логин пользователя в системе';

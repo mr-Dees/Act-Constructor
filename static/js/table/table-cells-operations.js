@@ -14,6 +14,12 @@ class TableCellsOperations {
      * @param {HTMLElement} cellEl - DOM-элемент ячейки
      */
     startEditingCell(cellEl) {
+        // Блокируем редактирование в режиме только чтения
+        if (AppConfig.readOnlyMode?.isReadOnly) {
+            Notifications.warning(AppConfig.readOnlyMode.messages.cannotEdit);
+            return;
+        }
+
         const originalContent = cellEl.textContent;
         cellEl.classList.add('editing');
 

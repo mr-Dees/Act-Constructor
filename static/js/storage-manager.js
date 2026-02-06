@@ -476,6 +476,12 @@ class StorageManager {
      * @returns {boolean} true если сохранение успешно
      */
     static forceSave() {
+        // Блокируем сохранение в режиме только чтения
+        if (AppConfig.readOnlyMode?.isReadOnly) {
+            Notifications.warning(AppConfig.readOnlyMode.messages.cannotSave);
+            return false;
+        }
+
         // Отменяем pending дебаунс, если есть
         if (this._saveTimeout) {
             clearTimeout(this._saveTimeout);
