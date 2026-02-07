@@ -561,12 +561,13 @@ class TreeRenderer {
         const itemBlock = document.querySelector(`.item-block[data-node-id="${node.id}"]`);
         if (!itemBlock) return;
 
-        const select = itemBlock.querySelector('.tb-selector-select');
-        if (select) {
-            const tbList = node.tb || [];
-            Array.from(select.options).forEach(opt => {
-                opt.selected = tbList.includes(opt.value);
-            });
+        const oldSelector = itemBlock.querySelector(':scope > .item-header .tb-selector');
+        if (oldSelector) {
+            const newSelector = ItemsRenderer._createTbSelector(node);
+            oldSelector.replaceWith(newSelector);
         }
+
+        // Обновляем родительские TB-селекторы в items
+        ItemsRenderer._updateParentTbInItems(node);
     }
 }

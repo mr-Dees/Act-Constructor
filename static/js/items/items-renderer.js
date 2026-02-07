@@ -202,39 +202,31 @@ class ItemsRenderer {
         const isLeaf = TreeUtils.isTbLeaf(node);
 
         if (isLeaf) {
-            const select = document.createElement('select');
-            select.className = 'tb-selector-select';
-            select.multiple = true;
+            // Кликабельный бейдж (аналогично tree-renderer)
+            const badge = document.createElement('span');
+            const tbList = node.tb || [];
 
-            AppConfig.territorialBanks.forEach(bank => {
-                const option = document.createElement('option');
-                option.value = bank.abbr;
-                option.textContent = `${bank.name} (${bank.abbr})`;
-                option.selected = (node.tb || []).includes(bank.abbr);
-                select.appendChild(option);
-            });
-
-            // Размер select: показываем до 5 строк
-            select.size = Math.min(AppConfig.territorialBanks.length, 5);
-
-            if (AppConfig.readOnlyMode?.isReadOnly) {
-                select.disabled = true;
+            if (tbList.length > 0) {
+                badge.className = 'tb-selector-badge tb-selector-badge--assigned';
+                badge.textContent = tbList.join(', ');
+                badge.title = tbList.map(abbr => {
+                    const bank = AppConfig.territorialBanks.find(b => b.abbr === abbr);
+                    return bank ? `${bank.name} (${abbr})` : abbr;
+                }).join(', ');
+            } else {
+                badge.className = 'tb-selector-badge tb-selector-badge--empty';
+                badge.textContent = 'Выбрать';
+                badge.title = 'Назначить территориальный банк';
             }
 
-            select.addEventListener('change', () => {
-                node.tb = Array.from(select.selectedOptions, opt => opt.value);
+            if (!AppConfig.readOnlyMode?.isReadOnly) {
+                badge.addEventListener('click', (e) => {
+                    e.stopPropagation();
+                    this._showTbDropdownInItems(badge, node);
+                });
+            }
 
-                if (window.storageManager) {
-                    window.storageManager.markAsUnsaved();
-                }
-
-                // Перерисовываем дерево для обновления бейджей
-                if (window.treeManager) {
-                    window.treeManager.render();
-                }
-            });
-
-            container.appendChild(select);
+            container.appendChild(badge);
         } else {
             // Read-only для не-leaf: показываем вычисленные ТБ
             const computed = TreeUtils.getComputedTb(node);
@@ -243,12 +235,12 @@ class ItemsRenderer {
                 badgesContainer.className = 'tb-selector-badges';
 
                 computed.forEach(abbr => {
-                    const badge = document.createElement('span');
-                    badge.className = 'tb-selector-badge tb-selector-badge--computed';
-                    badge.textContent = abbr;
-                    const bank = AppConfig.territorialBanks.find(b => b.abbr === abbr);
-                    if (bank) badge.title = bank.name;
-                    badgesContainer.appendChild(badge);
+                    const b = document.createElement('span');
+                    b.className = 'tb-selector-badge tb-selector-badge--computed';
+                    b.textContent = abbr;
+                    const bank = AppConfig.territorialBanks.find(x => x.abbr === abbr);
+                    if (bank) b.title = bank.name;
+                    badgesContainer.appendChild(b);
                 });
 
                 container.appendChild(badgesContainer);
@@ -261,6 +253,145 @@ class ItemsRenderer {
         }
 
         return container;
+    }
+
+    /**
+     * Показывает дропдаун для выбора ТБ на Шаге 2
+     * @param {HTMLElement} badge - Элемент бейджа
+     * @param {Object} node - Узел дерева
+     * @private
+     */
+    static _showTbDropdownInItems(badge, node) {
+        // Закрываем предыдущий дропдаун
+        this._closeTbDropdownInItems();
+
+        const dropdown = document.createElement('div');
+        dropdown.className = 'tb-dropdown';
+        const currentTb = node.tb || [];
+
+        AppConfig.territorialBanks.forEach(bank => {
+            const item = document.createElement('label');
+            item.className = 'tb-dropdown-item';
+
+            const checkbox = document.createElement('input');
+            checkbox.type = 'checkbox';
+            checkbox.checked = currentTb.includes(bank.abbr);
+            checkbox.addEventListener('change', () => {
+                // Обновляем node.tb
+                if (!node.tb) node.tb = [];
+                if (checkbox.checked) {
+                    if (!node.tb.includes(bank.abbr)) node.tb.push(bank.abbr);
+                } else {
+                    node.tb = node.tb.filter(t => t !== bank.abbr);
+                }
+
+                if (window.storageManager) window.storageManager.markAsUnsaved();
+
+                // Обновляем бейдж в items
+                this._updateTbBadgeInItems(badge, node);
+                // Обновляем бейджи родителей в items
+                this._updateParentTbInItems(node);
+                // Перерисовываем дерево
+                if (window.treeManager) window.treeManager.render();
+            });
+
+            const nameSpan = document.createElement('span');
+            nameSpan.className = 'tb-dropdown-item-name';
+            nameSpan.textContent = bank.name;
+
+            const abbrSpan = document.createElement('span');
+            abbrSpan.className = 'tb-dropdown-item-abbr';
+            abbrSpan.textContent = bank.abbr;
+
+            item.appendChild(checkbox);
+            item.appendChild(nameSpan);
+            item.appendChild(abbrSpan);
+            dropdown.appendChild(item);
+        });
+
+        document.body.appendChild(dropdown);
+        const rect = badge.getBoundingClientRect();
+        dropdown.style.top = `${rect.bottom + 4}px`;
+        dropdown.style.left = `${rect.left}px`;
+
+        // Корректировка позиции
+        const dRect = dropdown.getBoundingClientRect();
+        if (dRect.right > window.innerWidth) {
+            dropdown.style.left = `${window.innerWidth - dRect.width - 8}px`;
+        }
+        if (dRect.bottom > window.innerHeight) {
+            dropdown.style.top = `${rect.top - dRect.height - 4}px`;
+        }
+
+        const closeHandler = (e) => {
+            if (!dropdown.contains(e.target) && e.target !== badge) {
+                this._closeTbDropdownInItems();
+                document.removeEventListener('mousedown', closeHandler);
+            }
+        };
+        setTimeout(() => document.addEventListener('mousedown', closeHandler), 0);
+
+        this._currentTbDropdown = dropdown;
+        this._currentTbCloseHandler = closeHandler;
+    }
+
+    /**
+     * Закрывает текущий дропдаун ТБ на Шаге 2
+     * @private
+     */
+    static _closeTbDropdownInItems() {
+        if (this._currentTbDropdown) {
+            this._currentTbDropdown.remove();
+            this._currentTbDropdown = null;
+        }
+        if (this._currentTbCloseHandler) {
+            document.removeEventListener('mousedown', this._currentTbCloseHandler);
+            this._currentTbCloseHandler = null;
+        }
+    }
+
+    /**
+     * Обновляет бейдж ТБ на Шаге 2 после изменения
+     * @param {HTMLElement} badge - Элемент бейджа
+     * @param {Object} node - Узел дерева
+     * @private
+     */
+    static _updateTbBadgeInItems(badge, node) {
+        const tbList = node.tb || [];
+        if (tbList.length > 0) {
+            badge.className = 'tb-selector-badge tb-selector-badge--assigned';
+            badge.textContent = tbList.join(', ');
+            badge.title = tbList.map(abbr => {
+                const bank = AppConfig.territorialBanks.find(b => b.abbr === abbr);
+                return bank ? `${bank.name} (${abbr})` : abbr;
+            }).join(', ');
+        } else {
+            badge.className = 'tb-selector-badge tb-selector-badge--empty';
+            badge.textContent = 'Выбрать';
+            badge.title = 'Назначить территориальный банк';
+        }
+    }
+
+    /**
+     * Обновляет TB-селекторы родительских узлов на Шаге 2
+     * @param {Object} node - Узел дерева
+     * @private
+     */
+    static _updateParentTbInItems(node) {
+        let parent = TreeUtils.findParentNode(node.id);
+        while (parent && parent.id !== 'root') {
+            if (TreeUtils.isUnderSection5(parent)) {
+                const parentBlock = document.querySelector(`.item-block[data-node-id="${parent.id}"]`);
+                if (parentBlock) {
+                    const oldSelector = parentBlock.querySelector(':scope > .item-header .tb-selector');
+                    if (oldSelector) {
+                        const newSelector = this._createTbSelector(parent);
+                        oldSelector.replaceWith(newSelector);
+                    }
+                }
+            }
+            parent = TreeUtils.findParentNode(parent.id);
+        }
     }
 
     /**

@@ -189,6 +189,16 @@ class NavigationManager {
             );
         }
 
+        // Предупреждение о незаполненных ТБ
+        const tbCheckResult = ValidationAct.validateTb();
+        if (!tbCheckResult.valid) {
+            Notifications.show(
+                tbCheckResult.message,
+                'info',
+                AppConfig.notifications.duration.warning
+            );
+        }
+
         return true;
     }
 }

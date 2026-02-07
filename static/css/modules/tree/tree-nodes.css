@@ -138,10 +138,11 @@
 }
 
 .tb-badge--computed {
-    background: var(--primary-subtle);
-    color: var(--primary);
-    border: 1px solid var(--primary-light);
+    background: var(--bg-secondary);
+    color: var(--text-tertiary);
+    border: 1px solid var(--border);
     cursor: default;
+    opacity: 0.7;
 }
 
 .tb-badge--empty {
