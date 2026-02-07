@@ -126,6 +126,7 @@ class TreeManager {
      * @param {HTMLElement} itemElement - Элемент li для выделения
      */
     handleCtrlClick(node, itemElement) {
+        ContextMenuManager.hide();
         this.selectNode(itemElement);
 
         // Проверяем, что мы на шаге 1 (конструктор)
