@@ -147,6 +147,12 @@ class ItemsRenderer {
         }
 
         header.appendChild(title);
+
+        // Селектор ТБ для узлов под разделом 5
+        if (TreeUtils.isUnderSection5(node)) {
+            header.appendChild(this._createTbSelector(node));
+        }
+
         return header;
     }
 
@@ -176,6 +182,85 @@ class ItemsRenderer {
         });
 
         textSpan.style.cursor = 'pointer';
+    }
+
+    /**
+     * Создает селектор ТБ для узла на Шаге 2
+     * @param {Object} node - Узел дерева
+     * @returns {HTMLElement} Контейнер с селектором ТБ
+     * @private
+     */
+    static _createTbSelector(node) {
+        const container = document.createElement('div');
+        container.className = 'tb-selector';
+
+        const label = document.createElement('span');
+        label.className = 'tb-selector-label';
+        label.textContent = 'ТБ:';
+        container.appendChild(label);
+
+        const isLeaf = TreeUtils.isTbLeaf(node);
+
+        if (isLeaf) {
+            const select = document.createElement('select');
+            select.className = 'tb-selector-select';
+            select.multiple = true;
+
+            AppConfig.territorialBanks.forEach(bank => {
+                const option = document.createElement('option');
+                option.value = bank.abbr;
+                option.textContent = `${bank.name} (${bank.abbr})`;
+                option.selected = (node.tb || []).includes(bank.abbr);
+                select.appendChild(option);
+            });
+
+            // Размер select: показываем до 5 строк
+            select.size = Math.min(AppConfig.territorialBanks.length, 5);
+
+            if (AppConfig.readOnlyMode?.isReadOnly) {
+                select.disabled = true;
+            }
+
+            select.addEventListener('change', () => {
+                node.tb = Array.from(select.selectedOptions, opt => opt.value);
+
+                if (window.storageManager) {
+                    window.storageManager.markAsUnsaved();
+                }
+
+                // Перерисовываем дерево для обновления бейджей
+                if (window.treeManager) {
+                    window.treeManager.render();
+                }
+            });
+
+            container.appendChild(select);
+        } else {
+            // Read-only для не-leaf: показываем вычисленные ТБ
+            const computed = TreeUtils.getComputedTb(node);
+            if (computed.length > 0) {
+                const badgesContainer = document.createElement('div');
+                badgesContainer.className = 'tb-selector-badges';
+
+                computed.forEach(abbr => {
+                    const badge = document.createElement('span');
+                    badge.className = 'tb-selector-badge tb-selector-badge--computed';
+                    badge.textContent = abbr;
+                    const bank = AppConfig.territorialBanks.find(b => b.abbr === abbr);
+                    if (bank) badge.title = bank.name;
+                    badgesContainer.appendChild(badge);
+                });
+
+                container.appendChild(badgesContainer);
+            } else {
+                const empty = document.createElement('span');
+                empty.className = 'tb-selector-empty';
+                empty.textContent = 'не назначен';
+                container.appendChild(empty);
+            }
+        }
+
+        return container;
     }
 
     /**

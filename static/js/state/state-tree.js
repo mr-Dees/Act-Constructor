@@ -324,6 +324,11 @@ Object.assign(AppState, {
         this._performMove(draggedNode, draggedParent, newParent, targetNode, targetNodeId, position);
         this.generateNumbering();
 
+        // Очищаем ТБ если узел переместился за пределы раздела 5
+        if (!TreeUtils.isUnderSection5(draggedNode)) {
+            this._clearTbRecursive(draggedNode);
+        }
+
         // Обрабатываем таблицы метрик для узлов под пунктом 5
         // только если у узла уже есть таблицы рисков в поддереве
         if (newParent.id === '5' && draggedNode.number?.startsWith('5.')) {
@@ -588,5 +593,22 @@ Object.assign(AppState, {
         if (!parent || parent.id !== '5') return false;
 
         return node.number && node.number.match(/^5\.\d+$/);
+    },
+
+    /**
+     * Рекурсивно очищает свойство tb у узла и всех его потомков
+     * @private
+     * @param {Object} node - Узел для очистки
+     */
+    _clearTbRecursive(node) {
+        if (node.tb) {
+            delete node.tb;
+        }
+
+        if (node.children) {
+            for (const child of node.children) {
+                this._clearTbRecursive(child);
+            }
+        }
     }
 });

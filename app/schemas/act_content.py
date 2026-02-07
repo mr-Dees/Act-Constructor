@@ -312,6 +312,7 @@ class ActItemSchema(BaseModel):
     number: str | None = None
     isMetricsTable: bool | None = False
     isMainMetricsTable: bool | None = False
+    tb: list[str] | None = None
 
 
 class ActDataSchema(BaseModel):

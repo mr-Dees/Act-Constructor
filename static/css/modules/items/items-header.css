@@ -122,6 +122,73 @@
     transform: rotate(-90deg);
 }
 
+/* === Селектор территориального банка (ТБ) на Шаге 2 === */
+.tb-selector {
+    display: flex;
+    align-items: center;
+    gap: var(--spacing-xs);
+    flex-shrink: 0;
+}
+
+.tb-selector-label {
+    font-size: var(--font-size-sm);
+    color: var(--text-tertiary);
+    font-weight: var(--font-weight-medium);
+    white-space: nowrap;
+}
+
+.tb-selector-badges {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 4px;
+    align-items: center;
+}
+
+.tb-selector-badge {
+    display: inline-flex;
+    align-items: center;
+    padding: 2px var(--spacing-xs);
+    font-size: var(--font-size-xs);
+    border-radius: var(--radius-sm);
+    white-space: nowrap;
+}
+
+.tb-selector-badge--assigned {
+    background: var(--success-subtle);
+    color: var(--success);
+    border: 1px solid var(--success-light);
+}
+
+.tb-selector-badge--computed {
+    background: var(--primary-subtle);
+    color: var(--primary);
+    border: 1px solid var(--primary-light);
+}
+
+.tb-selector-select {
+    font-size: var(--font-size-sm);
+    padding: 2px var(--spacing-xs);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-sm);
+    background: var(--bg-primary);
+    color: var(--text-primary);
+    min-width: 160px;
+    max-width: 280px;
+    cursor: pointer;
+}
+
+.tb-selector-select:focus {
+    outline: none;
+    border-color: var(--primary);
+    box-shadow: 0 0 0 2px var(--primary-subtle);
+}
+
+.tb-selector-empty {
+    font-size: var(--font-size-xs);
+    color: var(--text-tertiary);
+    font-style: italic;
+}
+
 /* Бейдж со счетчиком дочерних элементов */
 .item-badge {
     font-size: var(--font-size-xs);

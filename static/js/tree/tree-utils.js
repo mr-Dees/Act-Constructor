@@ -266,6 +266,42 @@ const TreeUtils = {
     },
 
     /**
+     * Проверяет, является ли узел item-узлом под разделом 5
+     * @param {Object} node - Проверяемый узел
+     * @returns {boolean} true если узел под разделом 5
+     */
+    isUnderSection5(node) {
+        return node.number && node.number.startsWith('5.') && (!node.type || node.type === 'item');
+    },
+
+    /**
+     * Проверяет, является ли узел TB-leaf (item-узел под разделом 5 без дочерних item-узлов)
+     * @param {Object} node - Проверяемый узел
+     * @returns {boolean} true если это TB-leaf
+     */
+    isTbLeaf(node) {
+        if (!this.isUnderSection5(node)) return false;
+        const itemChildren = (node.children || []).filter(c => !c.type || c.type === 'item');
+        return itemChildren.length === 0;
+    },
+
+    /**
+     * Вычисляет ТБ для узла: для leaf — node.tb, для родителя — union из потомков
+     * @param {Object} node - Узел дерева
+     * @returns {string[]} Массив аббревиатур ТБ
+     */
+    getComputedTb(node) {
+        const itemChildren = (node.children || []).filter(c => !c.type || c.type === 'item');
+        if (itemChildren.length === 0) return node.tb || [];
+
+        const allTbs = new Set();
+        for (const child of itemChildren) {
+            this.getComputedTb(child).forEach(tb => allTbs.add(tb));
+        }
+        return [...allTbs];
+    },
+
+    /**
      * Получает название узла с учетом связанных элементов
      * @param {string} nodeId - ID узла
      * @returns {string} Название узла

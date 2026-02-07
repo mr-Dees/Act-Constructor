@@ -113,3 +113,84 @@
     background: var(--error-subtle);
     color: var(--error);
 }
+
+/* === Бейдж территориального банка (ТБ) === */
+.tb-badge {
+    display: inline-flex;
+    align-items: center;
+    margin-left: var(--spacing-sm);
+    padding: 1px var(--spacing-xs);
+    font-size: var(--font-size-xs);
+    border-radius: var(--radius-sm);
+    white-space: nowrap;
+    cursor: pointer;
+    user-select: none;
+    line-height: 1.4;
+    max-width: 180px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+.tb-badge--assigned {
+    background: var(--success-subtle);
+    color: var(--success);
+    border: 1px solid var(--success-light);
+}
+
+.tb-badge--computed {
+    background: var(--primary-subtle);
+    color: var(--primary);
+    border: 1px solid var(--primary-light);
+    cursor: default;
+}
+
+.tb-badge--empty {
+    background: var(--bg-secondary);
+    color: var(--text-tertiary);
+    border: 1px dashed var(--border);
+}
+
+/* Дропдаун выбора ТБ */
+.tb-dropdown {
+    position: fixed;
+    z-index: 1000;
+    background: var(--bg-primary);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-md);
+    box-shadow: var(--shadow-lg);
+    padding: var(--spacing-xs) 0;
+    min-width: 220px;
+    max-height: 300px;
+    overflow-y: auto;
+}
+
+.tb-dropdown-item {
+    display: flex;
+    align-items: center;
+    gap: var(--spacing-sm);
+    padding: var(--spacing-xs) var(--spacing-sm);
+    cursor: pointer;
+    font-size: var(--font-size-sm);
+    transition: background var(--transition-fast);
+}
+
+.tb-dropdown-item:hover {
+    background: var(--bg-hover);
+}
+
+.tb-dropdown-item input[type="checkbox"] {
+    accent-color: var(--primary);
+    margin: 0;
+    flex-shrink: 0;
+}
+
+.tb-dropdown-item-name {
+    flex: 1;
+    color: var(--text-primary);
+}
+
+.tb-dropdown-item-abbr {
+    color: var(--text-tertiary);
+    font-size: var(--font-size-xs);
+    flex-shrink: 0;
+}
