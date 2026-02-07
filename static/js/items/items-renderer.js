@@ -285,14 +285,14 @@ class ItemsRenderer {
                     node.tb = node.tb.filter(t => t !== bank.abbr);
                 }
 
-                if (window.storageManager) window.storageManager.markAsUnsaved();
+                StorageManager.markAsUnsaved();
 
                 // Обновляем бейдж в items
                 this._updateTbBadgeInItems(badge, node);
                 // Обновляем бейджи родителей в items
                 this._updateParentTbInItems(node);
                 // Перерисовываем дерево
-                if (window.treeManager) window.treeManager.render();
+                treeManager.render();
             });
 
             const nameSpan = document.createElement('span');

@@ -514,9 +514,7 @@ class TreeRenderer {
         }
 
         // Помечаем изменения
-        if (window.storageManager) {
-            window.storageManager.markAsUnsaved();
-        }
+        StorageManager.markAsUnsaved();
     }
 
     /**
