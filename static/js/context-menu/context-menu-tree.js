@@ -58,6 +58,8 @@ class TreeContextMenu {
         if (node.type && node.type !== 'item') return false;
         if (!node.number) return false;
         if (!/^5\.\d+/.test(node.number)) return false;
+        // Нельзя создать вторую таблицу рисков на одном узле
+        if (this._hasDirectRiskTables(node)) return false;
         // На уровне 5.* нельзя, если где-либо в 5.*.* уже есть риски
         if (node.number.match(/^5\.\d+$/) && this._hasRiskTablesBelowLevel5x()) return false;
         // На уровне 5.*.* нельзя, если где-либо на 5.* уже есть риски
@@ -67,6 +69,9 @@ class TreeContextMenu {
 
     /** Возвращает причину блокировки создания таблицы рисков */
     _getRiskTableBlockReason(node) {
+        if (this._hasDirectRiskTables(node)) {
+            return 'На одном пункте может быть только одна таблица рисков';
+        }
         if (node.number?.match(/^5\.\d+$/) && this._hasRiskTablesBelowLevel5x()) {
             return 'Нельзя создать таблицу рисков: в подпунктах раздела 5 уже есть таблицы рисков';
         }

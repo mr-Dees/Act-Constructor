@@ -321,6 +321,9 @@ Object.assign(AppState, {
         );
         if (!firstLevelCheck.valid) return firstLevelCheck;
 
+        const riskCheck = this._checkSection5RiskConstraints(draggedNode, newParent);
+        if (!riskCheck.valid) return riskCheck;
+
         this._performMove(draggedNode, draggedParent, newParent, targetNode, targetNodeId, position);
         this.generateNumbering();
 
@@ -525,6 +528,40 @@ Object.assign(AppState, {
         if ((position === 'before' && targetNumber !== 6) ||
             (position === 'after' && targetNumber !== 5)) {
             return ValidationCore.failure(AppConfig.tree.validation.firstLevelOnlyAtEnd);
+        }
+
+        return ValidationCore.success();
+    },
+
+    /**
+     * Проверяет ограничения перемещения узлов в раздел 5 с учётом таблиц рисков
+     * @private
+     * @param {Object} draggedNode - Перемещаемый узел
+     * @param {Object} newParent - Новый родитель после перемещения
+     * @returns {Object} Результат проверки
+     */
+    _checkSection5RiskConstraints(draggedNode, newParent) {
+        // Проверяем только item-узлы
+        if (draggedNode.type && draggedNode.type !== 'item') return ValidationCore.success();
+
+        // Если новый родитель — узел 5.*, проверяем наличие таблиц рисков на уровне 5.*
+        if (newParent.number?.match(/^5\.\d+$/)) {
+            const node5 = this.findNodeById('5');
+            if (node5?.children) {
+                const hasRiskAtLevel5x = node5.children.some(child => {
+                    if (child.type !== 'item' || !child.number?.match(/^5\.\d+$/)) return false;
+                    return child.children?.some(c => {
+                        if (c.type !== 'table' || !c.tableId) return false;
+                        const table = this.tables[c.tableId];
+                        return table && (table.isRegularRiskTable || table.isOperationalRiskTable);
+                    });
+                });
+                if (hasRiskAtLevel5x) {
+                    return ValidationCore.failure(
+                        'Нельзя перемещать элементы в подпункты раздела 5: есть таблицы рисков на уровне пунктов'
+                    );
+                }
+            }
         }
 
         return ValidationCore.success();
