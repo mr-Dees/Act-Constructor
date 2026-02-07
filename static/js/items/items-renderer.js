@@ -127,10 +127,23 @@ class ItemsRenderer {
 
         const title = document.createElement(`h${Math.min(level + 1, 6)}`);
         title.className = 'item-title';
-        title.textContent = node.label;
+
+        // Номер — нередактируемый
+        if (node.number) {
+            const numberSpan = document.createElement('span');
+            numberSpan.className = 'item-number';
+            numberSpan.textContent = node.number + '. ';
+            title.appendChild(numberSpan);
+        }
+
+        // Текст заголовка — редактируемый
+        const textSpan = document.createElement('span');
+        textSpan.className = 'item-title-text';
+        textSpan.textContent = node.label;
+        title.appendChild(textSpan);
 
         if (!node.protected) {
-            this._setupTitleEditing(title, node);
+            this._setupTitleEditing(textSpan, node);
         }
 
         header.appendChild(title);
@@ -144,11 +157,11 @@ class ItemsRenderer {
      * @param {Object} node - Узел дерева
      * @private
      */
-    static _setupTitleEditing(title, node) {
+    static _setupTitleEditing(textSpan, node) {
         let clickCount = 0;
         let clickTimer = null;
 
-        title.addEventListener('click', () => {
+        textSpan.addEventListener('click', () => {
             clickCount++;
 
             if (clickCount === 1) {
@@ -158,11 +171,11 @@ class ItemsRenderer {
             } else if (clickCount === 2) {
                 clearTimeout(clickTimer);
                 clickCount = 0;
-                ItemsTitleEditing.startEditingItemTitle(title, node);
+                ItemsTitleEditing.startEditingItemTitle(textSpan, node);
             }
         });
 
-        title.style.cursor = 'pointer';
+        textSpan.style.cursor = 'pointer';
     }
 
     /**
@@ -220,7 +233,7 @@ class ItemsRenderer {
         const tableTitle = document.createElement('h4');
         tableTitle.className = 'table-title';
         tableTitle.contentEditable = false;
-        tableTitle.textContent = node.label;
+        tableTitle.textContent = node.customLabel || node.number || node.label;
 
         // Применяем стили
         Object.assign(tableTitle.style, {

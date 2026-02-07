@@ -84,16 +84,23 @@ class MarkdownFormatter(BaseFormatter):
         lines = []
 
         label = item.get('label', '')
+        number = item.get('number', '')
         item_type = item.get('type', 'item')
 
+        # Для item-узлов собираем полный заголовок из номера и текста
+        if item_type not in ['table', 'textblock', 'violation']:
+            full_label = f"{number}. {label}" if number and label else (label or number)
+        else:
+            full_label = item.get('customLabel') or number or label
+
         # Заголовок
-        if label and item_type not in ['textblock', 'violation', 'table']:
+        if full_label and item_type not in ['textblock', 'violation', 'table']:
             heading_level = min(level, self.MAX_HEADING_LEVEL)
             heading_prefix = '#' * heading_level
-            lines.append(f"{heading_prefix} {label}")
+            lines.append(f"{heading_prefix} {full_label}")
             lines.append("")
-        elif label and item_type == 'table':
-            lines.append(label)
+        elif full_label and item_type == 'table':
+            lines.append(full_label)
             lines.append("")
 
         # Текстовое содержание

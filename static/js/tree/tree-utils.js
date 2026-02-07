@@ -274,22 +274,19 @@ const TreeUtils = {
         const node = this.findNodeById(nodeId);
         if (!node) return `Узел ${nodeId}`;
 
-        // Если у узла есть label, используем его
-        if (node.label) return node.label;
-
-        // Для информационных элементов используем тип + ID
         const {TABLE, TEXTBLOCK, VIOLATION} = AppConfig.nodeTypes;
+        const isContentType = [TABLE, TEXTBLOCK, VIOLATION].includes(node.type);
 
-        if (node.type === TABLE && node.tableId) {
-            return `Таблица ${node.tableId}`;
-        }
-        if (node.type === TEXTBLOCK && node.textBlockId) {
-            return `Текстовый блок ${node.textBlockId}`;
-        }
-        if (node.type === VIOLATION && node.violationId) {
-            return `Нарушение ${node.violationId}`;
+        if (isContentType) {
+            // Для content-типов: customLabel или number или label
+            return node.customLabel || node.number || node.label || `Узел ${nodeId}`;
         }
 
-        return `Узел ${nodeId}`;
+        // Для item-узлов: number + label
+        if (node.number && node.label) {
+            return node.number + '. ' + node.label;
+        }
+
+        return node.label || `Узел ${nodeId}`;
     }
 };

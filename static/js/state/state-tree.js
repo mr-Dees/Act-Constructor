@@ -38,7 +38,6 @@ Object.assign(AppState, {
         const tableIndex = parentTables.indexOf(child) + 1;
 
         child.number = `Таблица ${tableIndex}`;
-        child.label = child.customLabel || child.number;
     },
 
     /**
@@ -52,7 +51,6 @@ Object.assign(AppState, {
         const textBlockIndex = parentTextBlocks.indexOf(child) + 1;
 
         child.number = `Текстовый блок ${textBlockIndex}`;
-        child.label = child.customLabel || child.number;
     },
 
     /**
@@ -66,7 +64,6 @@ Object.assign(AppState, {
         const violationIndex = parentViolations.indexOf(child) + 1;
 
         child.number = `Нарушение ${violationIndex}`;
-        child.label = child.customLabel || child.number;
     },
 
     /**
@@ -84,11 +81,8 @@ Object.assign(AppState, {
         if (itemIndex === -1) return;
 
         const number = prefix ? `${prefix}.${itemIndex + 1}` : `${itemIndex + 1}`;
-        const baseLabelMatch = child.label.match(/^[\d.]+\s*(.*)$/);
-        const baseLabel = baseLabelMatch ? baseLabelMatch[1] : child.label;
 
         child.number = number;
-        child.label = `${number}. ${baseLabel}`;
 
         // Обновляем метки таблиц метрик для узлов под пунктом 5
         if (parent.id === '5' && number.startsWith('5.')) {
@@ -507,8 +501,8 @@ Object.assign(AppState, {
 
         // Проверяем, есть ли уже кастомный пункт 6
         const hasCustomFirstLevel = targetParent.children.some(child => {
-            const num = child.label.match(/^(\d+)\./);
-            return num && parseInt(num[1]) === 6;
+            const num = child.number ? parseInt(child.number) : null;
+            return num === 6;
         });
 
         if (hasCustomFirstLevel) {
@@ -516,10 +510,8 @@ Object.assign(AppState, {
         }
 
         // Проверяем, что добавляем только после пункта 5 или перед пунктом 6
-        const targetNum = targetNode.label.match(/^(\d+)\./);
-        if (!targetNum) return ValidationCore.success();
-
-        const targetNumber = parseInt(targetNum[1]);
+        const targetNumber = targetNode.number ? parseInt(targetNode.number) : null;
+        if (!targetNumber) return ValidationCore.success();
 
         if ((position === 'before' && targetNumber !== 6) ||
             (position === 'after' && targetNumber !== 5)) {

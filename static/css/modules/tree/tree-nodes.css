@@ -3,6 +3,14 @@
  * Специальные стили для разных типов элементов документа
  */
 
+/* Номер узла (нередактируемый) */
+.tree-node-number {
+    color: var(--text-tertiary);
+    font-weight: var(--font-weight-semibold);
+    user-select: none;
+    pointer-events: none;
+}
+
 /* Общие стили для иконок типов узлов */
 .tree-icon {
     display: inline-flex;

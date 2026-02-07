@@ -148,8 +148,29 @@ class TreeRenderer {
     _createLabel(node) {
         const label = document.createElement('span');
         label.className = 'tree-label';
-        label.textContent = node.label;
         label.contentEditable = false;
+
+        const isContentType = ['table', 'textblock', 'violation'].includes(node.type);
+
+        if (isContentType) {
+            // Для content-типов: один span с customLabel или number
+            label.textContent = node.customLabel || node.number || node.label;
+        } else {
+            // Для item-узлов: два span-а (номер + текст)
+            if (node.number) {
+                const numberSpan = document.createElement('span');
+                numberSpan.className = 'tree-node-number';
+                numberSpan.textContent = node.number + '. ';
+                numberSpan.contentEditable = false;
+                label.appendChild(numberSpan);
+            }
+
+            const textSpan = document.createElement('span');
+            textSpan.className = 'tree-node-text';
+            textSpan.textContent = node.label;
+            label.appendChild(textSpan);
+        }
+
         return label;
     }
 
@@ -229,6 +250,12 @@ class TreeRenderer {
         label.addEventListener('click', (e) => {
             e.stopPropagation();
 
+            // Игнорируем клики по нередактируемому номеру
+            if (e.target.closest('.tree-node-number')) {
+                this.manager.selectNode(li);
+                return;
+            }
+
             // Обработка Ctrl+Click
             if (e.ctrlKey || e.metaKey) {
                 handleCtrlClick();
@@ -246,7 +273,9 @@ class TreeRenderer {
             } else if (clickCount === 2) {
                 clearTimeout(clickTimer);
                 clickCount = 0;
-                ItemsTitleEditing.startEditingTreeNode(label, node, this.manager);
+                // Для item-узлов передаём .tree-node-text, для остальных — весь label
+                const editTarget = label.querySelector('.tree-node-text') || label;
+                ItemsTitleEditing.startEditingTreeNode(editTarget, node, this.manager);
             }
         });
 
@@ -283,7 +312,7 @@ class TreeRenderer {
     _setupLiClickHandler(li, label, handleCtrlClick) {
         li.addEventListener('click', (e) => {
             // Игнорируем клики по метке и служебным элементам
-            if (e.target === label || this._isIgnoredElement(e.target)) {
+            if (e.target === label || e.target.closest('.tree-label') || this._isIgnoredElement(e.target)) {
                 return;
             }
 

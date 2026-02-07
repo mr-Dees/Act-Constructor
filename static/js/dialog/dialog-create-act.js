@@ -111,7 +111,7 @@ class CreateActDialog extends DialogBase {
                     if (depth <= 4) {
                         points.push({
                             number: child.number,
-                            label: child.label || child.number
+                            label: child.number ? (child.number + '. ' + (child.label || '')) : (child.label || child.number)
                         });
                     }
                 }

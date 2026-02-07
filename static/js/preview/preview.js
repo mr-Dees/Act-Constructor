@@ -102,7 +102,7 @@ class PreviewManager {
         // Показываем название только если customLabel задан явно
         if (child.customLabel !== '') {
             const tableTitle = document.createElement('h4');
-            tableTitle.textContent = child.label;
+            tableTitle.textContent = child.customLabel || child.number || child.label;
             tableTitle.className = 'preview-table-title';
             container.appendChild(tableTitle);
         }
@@ -161,7 +161,7 @@ class PreviewManager {
     static _renderHeading(child, container, level) {
         const headingLevel = Math.min(level + 1, AppConfig.preview.maxHeadingLevel);
         const heading = document.createElement(`h${headingLevel}`);
-        heading.textContent = child.label;
+        heading.textContent = child.number ? child.number + '. ' + child.label : child.label;
         container.appendChild(heading);
     }
 

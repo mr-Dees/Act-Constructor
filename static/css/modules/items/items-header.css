@@ -64,6 +64,8 @@
     font-weight: var(--font-weight-medium);
     margin-right: var(--spacing-xs);
     flex-shrink: 0;
+    user-select: none;
+    pointer-events: none;
 }
 
 /* Иконки действий в шапке */

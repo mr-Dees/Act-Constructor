@@ -379,6 +379,10 @@ class APIClient {
                 AppState.textBlocks = content.textBlocks || {};
                 AppState.violations = content.violations || {};
                 AppState.tableUISizes = {};
+
+                // Миграция: strip числового префикса из label для item-узлов
+                this._migrateStripNumberFromLabels(AppState.treeData);
+
                 AppState.generateNumbering();
             }
 
@@ -544,6 +548,29 @@ class APIClient {
             console.error('Ошибка удаления акта:', err);
             Notifications.error(`Не удалось удалить акт: ${err.message}`);
             throw err;
+        }
+    }
+
+    /**
+     * Миграция: удаляет числовой префикс из label для item-узлов.
+     * Нужна для обратной совместимости с данными, где label содержал номер.
+     * @private
+     * @param {Object} node - Узел дерева для обработки
+     */
+    static _migrateStripNumberFromLabels(node) {
+        if (!node) return;
+
+        if (node.children) {
+            for (const child of node.children) {
+                // Только для item-узлов (не table/textblock/violation)
+                if (!child.type || child.type === 'item') {
+                    const match = child.label?.match(/^\d+(?:\.\d+)*\.\s*(.+)$/);
+                    if (match) {
+                        child.label = match[1];
+                    }
+                }
+                this._migrateStripNumberFromLabels(child);
+            }
         }
     }
 

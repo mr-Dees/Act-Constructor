@@ -87,12 +87,19 @@ class TextFormatter(BaseFormatter):
         indent = " " * (self.INDENT_SIZE * level)
 
         label = item.get('label', '')
+        number = item.get('number', '')
         item_type = item.get('type', 'item')
 
+        # Для item-узлов собираем полный заголовок из номера и текста
+        if item_type not in ['table', 'textblock', 'violation']:
+            full_label = f"{number}. {label}" if number and label else (label or number)
+        else:
+            full_label = item.get('customLabel') or number or label
+
         # Заголовок с подчеркиванием
-        if label and item_type not in ['textblock', 'violation']:
-            lines.append(f"{indent}{label}")
-            lines.append(f"{indent}{'-' * len(label)}")
+        if full_label and item_type not in ['textblock', 'violation']:
+            lines.append(f"{indent}{full_label}")
+            lines.append(f"{indent}{'-' * len(full_label)}")
 
         # Текстовое содержание
         content = item.get('content', '')

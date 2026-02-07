@@ -57,8 +57,10 @@ class ActFormatter:
 
         # Выводим только пункты
         label = node.get("label", "")
-        if label and node.get("id") != "root":
-            lines.append(f"{indent}{label}")
+        number = node.get("number", "")
+        display = f"{number}. {label}" if number and label else (label or number)
+        if display and node.get("id") != "root":
+            lines.append(f"{indent}{display}")
 
         # Рекурсия по детям
         for child in node.get("children", []):
@@ -106,8 +108,10 @@ class ActFormatter:
 
         # Для пунктов - обычный вывод
         label = node.get("label", "")
-        if label and node.get("id") != "root":
-            lines.append(f"{indent}{label}")
+        number = node.get("number", "")
+        display = f"{number}. {label}" if number and label else (label or number)
+        if display and node.get("id") != "root":
+            lines.append(f"{indent}{display}")
 
         # Рекурсия по детям
         for child in node.get("children", []):
@@ -527,8 +531,9 @@ class ActFormatter:
             current_item_number = number
 
         if node_type == "item":
-            if label:
-                lines.append(f"{indent}{label}")
+            display = f"{number}. {label}" if number and label else (label or number)
+            if display:
+                lines.append(f"{indent}{display}")
 
             content = node.get("content", "").strip()
             if content:
