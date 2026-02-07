@@ -325,8 +325,12 @@ Object.assign(AppState, {
         this.generateNumbering();
 
         // Обрабатываем таблицы метрик для узлов под пунктом 5
+        // только если у узла уже есть таблицы рисков в поддереве
         if (newParent.id === '5' && draggedNode.number?.startsWith('5.')) {
-            this._handleMetricsTableForNode(draggedNode);
+            const riskTables = this._findRiskTablesInSubtree(draggedNode);
+            if (riskTables.length > 0) {
+                this._handleMetricsTableForNode(draggedNode);
+            }
         }
 
         return ValidationCore.success();
