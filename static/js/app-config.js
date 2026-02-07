@@ -253,7 +253,7 @@ class AppConfig {
      */
     static tree = {
         // Ограничения структуры
-        maxDepth: 4,
+        maxDepth: 3,
         maxCustomFirstLevelSections: 1,
 
         // Стандартные разделы
