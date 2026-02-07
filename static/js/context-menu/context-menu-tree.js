@@ -50,7 +50,7 @@ class TreeContextMenu {
     _isRiskTableAllowedForNode(node) {
         if (node.type && node.type !== 'item') return false;
         if (!node.number) return false;
-        return /^5\.\d+\.\d+/.test(node.number);
+        return /^5\.\d+/.test(node.number);
     }
 
     /** Выполняет действие */
@@ -74,11 +74,11 @@ class TreeContextMenu {
             case 'add-regular-risk-table':
                 return this._isRiskTableAllowedForNode(node)
                     ? this.handleAddTable(node, nodeId, 'regular-risk')
-                    : Notifications.error('Таблицы рисков можно создавать только в пунктах 5.*.*');
+                    : Notifications.error('Таблицы рисков можно создавать только в подпунктах раздела 5');
             case 'add-operational-risk-table':
                 return this._isRiskTableAllowedForNode(node)
                     ? this.handleAddTable(node, nodeId, 'operational-risk')
-                    : Notifications.error('Таблицы рисков можно создавать только в пунктах 5.*.*');
+                    : Notifications.error('Таблицы рисков можно создавать только в подпунктах раздела 5');
             case 'add-textblock':
                 this.handleAddTextBlock(node, nodeId);
                 break;
@@ -198,8 +198,14 @@ class TreeContextMenu {
             if (table?.isMetricsTable) {
                 const parentUnder5 = this._findParentFirstLevelUnderPoint5(node);
                 if (parentUnder5) {
-                    const hasRisks = AppState._findRiskTablesInSubtree(parentUnder5).length > 0;
-                    if (hasRisks) {
+                    let hasDeepRisks = false;
+                    for (const child of parentUnder5.children || []) {
+                        if (child.type === 'item' && AppState._findRiskTablesInSubtree(child).length > 0) {
+                            hasDeepRisks = true;
+                            break;
+                        }
+                    }
+                    if (hasDeepRisks) {
                         Notifications.error('Нельзя удалить таблицу метрик, пока есть таблицы рисков');
                         return;
                     }
