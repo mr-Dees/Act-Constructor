@@ -143,20 +143,18 @@ Object.assign(TextBlockManager.prototype, {
         if (selection && !selection.isCollapsed && selection.rangeCount > 0) {
             const range = selection.getRangeAt(0);
 
-            // Проверяем, находимся ли мы в ссылке или сноске
-            const parentLink = this.findParentLink(range.commonAncestorContainer);
-            const parentFootnote = this.findParentFootnote(range.commonAncestorContainer);
+            // Собираем ID ссылок/сносок в выделении до изменения DOM
+            // (contentEditable=false не позволяет execCommand менять их напрямую)
+            const selectedSpecialIds = new Set();
+            this.activeEditor.querySelectorAll('.text-link, .text-footnote').forEach(el => {
+                if (range.intersectsNode(el)) {
+                    selectedSpecialIds.add(
+                        el.getAttribute('data-link-id') || el.getAttribute('data-footnote-id')
+                    );
+                }
+            });
 
-            if (parentLink || parentFootnote) {
-                const element = parentLink || parentFootnote;
-                element.style.fontSize = `${fontSize}px`;
-
-                const textBlockId = this.activeEditor.dataset.textBlockId;
-                this.saveContent(textBlockId, this.activeEditor.innerHTML);
-                return;
-            }
-
-            // Применяем ко всему выделению через execCommand
+            // Применяем к обычному тексту через execCommand
             this.execCommand('fontSize', '7');
 
             // Заменяем font tags на span с точным размером, сохраняя выделение
@@ -167,9 +165,11 @@ Object.assign(TextBlockManager.prototype, {
                 span.style.fontSize = `${fontSize}px`;
                 span.innerHTML = font.innerHTML;
 
-                // Удаляем font-size у вложенных элементов, чтобы не перекрывали новый размер
+                // Удаляем font-size у вложенных элементов (кроме ссылок/сносок)
                 span.querySelectorAll('[style]').forEach(child => {
-                    if (child.style.fontSize) {
+                    if (child.style.fontSize &&
+                        !child.classList?.contains('text-link') &&
+                        !child.classList?.contains('text-footnote')) {
                         child.style.fontSize = '';
                         if (!child.getAttribute('style')?.trim()) {
                             child.removeAttribute('style');
@@ -180,6 +180,16 @@ Object.assign(TextBlockManager.prototype, {
                 font.parentNode.replaceChild(span, font);
                 newSpans.push(span);
             });
+
+            // Применяем размер к ссылкам/сноскам, попавшим в выделение
+            if (selectedSpecialIds.size > 0) {
+                this.activeEditor.querySelectorAll('.text-link, .text-footnote').forEach(el => {
+                    const id = el.getAttribute('data-link-id') || el.getAttribute('data-footnote-id');
+                    if (selectedSpecialIds.has(id)) {
+                        el.style.fontSize = `${fontSize}px`;
+                    }
+                });
+            }
 
             // Восстанавливаем выделение на новые элементы
             if (newSpans.length > 0) {
