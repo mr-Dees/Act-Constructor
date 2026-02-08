@@ -45,6 +45,13 @@ class TreeContextMenu {
         if (operationalRiskItem)
             operationalRiskItem.classList.toggle('disabled', !isRiskTableAllowed);
 
+        // Показываем "Приложить фактуру" только для leaf-узлов раздела 5
+        const attachInvoiceItem = this.menu.querySelector('[data-action="attach-invoice"]');
+        const attachInvoiceSeparator = this.menu.querySelector('[data-action="attach-invoice-separator"]');
+        const showInvoice = TreeUtils.isTbLeaf(node);
+        if (attachInvoiceItem) attachInvoiceItem.style.display = showInvoice ? '' : 'none';
+        if (attachInvoiceSeparator) attachInvoiceSeparator.style.display = showInvoice ? '' : 'none';
+
         // Блокируем добавление подпунктов для всех 5.*, если где-либо на 5.* есть таблицы рисков
         const addChildItem = this.menu.querySelector('[data-action="add-child"]');
         if (addChildItem) {
@@ -153,6 +160,9 @@ class TreeContextMenu {
                 break;
             case 'add-violation':
                 this.handleAddViolation(node, nodeId);
+                break;
+            case 'attach-invoice':
+                this.handleAttachInvoice(node, nodeId);
                 break;
             case 'delete':
                 this.handleDelete(node, nodeId);
@@ -264,6 +274,16 @@ class TreeContextMenu {
         } else {
             Notifications.error(result.message || 'Ошибка при добавлении нарушения');
         }
+    }
+
+    /** Приложить фактуру (заглушка) */
+    handleAttachInvoice(node, nodeId) {
+        DialogManager.alert({
+            title: 'Приложить фактуру',
+            message: `Функционал прикрепления фактуры к пункту ${node.number || ''} находится в разработке`,
+            icon: '📎',
+            type: 'info'
+        });
     }
 
     /** Удаляет узел */
