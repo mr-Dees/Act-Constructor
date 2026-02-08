@@ -38,7 +38,6 @@ Object.assign(AppState, {
         const tableIndex = parentTables.indexOf(child) + 1;
 
         child.number = `Таблица ${tableIndex}`;
-        child.label = child.customLabel || child.number;
     },
 
     /**
@@ -52,7 +51,6 @@ Object.assign(AppState, {
         const textBlockIndex = parentTextBlocks.indexOf(child) + 1;
 
         child.number = `Текстовый блок ${textBlockIndex}`;
-        child.label = child.customLabel || child.number;
     },
 
     /**
@@ -66,7 +64,6 @@ Object.assign(AppState, {
         const violationIndex = parentViolations.indexOf(child) + 1;
 
         child.number = `Нарушение ${violationIndex}`;
-        child.label = child.customLabel || child.number;
     },
 
     /**
@@ -84,11 +81,8 @@ Object.assign(AppState, {
         if (itemIndex === -1) return;
 
         const number = prefix ? `${prefix}.${itemIndex + 1}` : `${itemIndex + 1}`;
-        const baseLabelMatch = child.label.match(/^[\d.]+\s*(.*)$/);
-        const baseLabel = baseLabelMatch ? baseLabelMatch[1] : child.label;
 
         child.number = number;
-        child.label = `${number}. ${baseLabel}`;
 
         // Обновляем метки таблиц метрик для узлов под пунктом 5
         if (parent.id === '5' && number.startsWith('5.')) {
@@ -149,6 +143,10 @@ Object.assign(AppState, {
         const newNode = this._createNewNode(label);
 
         if (isChild) {
+            // Очищаем ТБ у родителя, если он был листовым узлом в разделе 5
+            if (TreeUtils.isUnderSection5(parent) && TreeUtils.isTbLeaf(parent)) {
+                delete parent.tb;
+            }
             this._addAsChild(parent, newNode);
         } else {
             this._addAsSibling(parentId, newNode);
@@ -327,12 +325,40 @@ Object.assign(AppState, {
         );
         if (!firstLevelCheck.valid) return firstLevelCheck;
 
+        const riskCheck = this._checkSection5RiskConstraints(draggedNode, newParent);
+        if (!riskCheck.valid) return riskCheck;
+
+        // Запоминаем, был ли новый родитель листовым узлом в разделе 5
+        const wasNewParentTbLeaf = position === 'child' &&
+            (!draggedNode.type || draggedNode.type === 'item') &&
+            TreeUtils.isUnderSection5(newParent) &&
+            TreeUtils.isTbLeaf(newParent);
+
         this._performMove(draggedNode, draggedParent, newParent, targetNode, targetNodeId, position);
         this.generateNumbering();
 
+        // Очищаем ТБ у нового родителя, если он был листовым узлом в разделе 5
+        if (wasNewParentTbLeaf) {
+            delete newParent.tb;
+        }
+
+        // Очищаем ТБ у старого родителя, если он стал листовым узлом в разделе 5
+        if (TreeUtils.isUnderSection5(draggedParent) && TreeUtils.isTbLeaf(draggedParent)) {
+            delete draggedParent.tb;
+        }
+
+        // Очищаем ТБ если узел переместился за пределы раздела 5
+        if (!TreeUtils.isUnderSection5(draggedNode)) {
+            this._clearTbRecursive(draggedNode);
+        }
+
         // Обрабатываем таблицы метрик для узлов под пунктом 5
+        // только если у узла уже есть таблицы рисков в поддереве
         if (newParent.id === '5' && draggedNode.number?.startsWith('5.')) {
-            this._handleMetricsTableForNode(draggedNode);
+            const riskTables = this._findRiskTablesInSubtree(draggedNode);
+            if (riskTables.length > 0) {
+                this._handleMetricsTableForNode(draggedNode);
+            }
         }
 
         return ValidationCore.success();
@@ -507,8 +533,8 @@ Object.assign(AppState, {
 
         // Проверяем, есть ли уже кастомный пункт 6
         const hasCustomFirstLevel = targetParent.children.some(child => {
-            const num = child.label.match(/^(\d+)\./);
-            return num && parseInt(num[1]) === 6;
+            const num = child.number ? parseInt(child.number) : null;
+            return num === 6;
         });
 
         if (hasCustomFirstLevel) {
@@ -516,14 +542,46 @@ Object.assign(AppState, {
         }
 
         // Проверяем, что добавляем только после пункта 5 или перед пунктом 6
-        const targetNum = targetNode.label.match(/^(\d+)\./);
-        if (!targetNum) return ValidationCore.success();
-
-        const targetNumber = parseInt(targetNum[1]);
+        const targetNumber = targetNode.number ? parseInt(targetNode.number) : null;
+        if (!targetNumber) return ValidationCore.success();
 
         if ((position === 'before' && targetNumber !== 6) ||
             (position === 'after' && targetNumber !== 5)) {
             return ValidationCore.failure(AppConfig.tree.validation.firstLevelOnlyAtEnd);
+        }
+
+        return ValidationCore.success();
+    },
+
+    /**
+     * Проверяет ограничения перемещения узлов в раздел 5 с учётом таблиц рисков
+     * @private
+     * @param {Object} draggedNode - Перемещаемый узел
+     * @param {Object} newParent - Новый родитель после перемещения
+     * @returns {Object} Результат проверки
+     */
+    _checkSection5RiskConstraints(draggedNode, newParent) {
+        // Проверяем только item-узлы
+        if (draggedNode.type && draggedNode.type !== 'item') return ValidationCore.success();
+
+        // Если новый родитель — узел 5.*, проверяем наличие таблиц рисков на уровне 5.*
+        if (newParent.number?.match(/^5\.\d+$/)) {
+            const node5 = this.findNodeById('5');
+            if (node5?.children) {
+                const hasRiskAtLevel5x = node5.children.some(child => {
+                    if (child.type !== 'item' || !child.number?.match(/^5\.\d+$/)) return false;
+                    return child.children?.some(c => {
+                        if (c.type !== 'table' || !c.tableId) return false;
+                        const table = this.tables[c.tableId];
+                        return table && (table.isRegularRiskTable || table.isOperationalRiskTable);
+                    });
+                });
+                if (hasRiskAtLevel5x) {
+                    return ValidationCore.failure(
+                        'Нельзя перемещать элементы в подпункты раздела 5: есть таблицы рисков на уровне пунктов'
+                    );
+                }
+            }
         }
 
         return ValidationCore.success();
@@ -550,13 +608,35 @@ Object.assign(AppState, {
         } else {
             const insertIndex = newParent.children.findIndex(n => n.id === targetNodeId);
             const offset = position === 'after' ? 1 : 0;
-            newParent.children.splice(insertIndex + offset, 0, draggedNode);
+            let effectiveIndex = insertIndex + offset;
+
+            // Страховка: не вставляем перед закреплёнными таблицами
+            const firstNonPinnedIndex = this._getFirstNonPinnedIndex(newParent);
+            if (effectiveIndex < firstNonPinnedIndex) {
+                effectiveIndex = firstNonPinnedIndex;
+            }
+
+            newParent.children.splice(effectiveIndex, 0, draggedNode);
         }
 
         // Обновляем parentId если он существует
         if (draggedNode.parentId) {
             draggedNode.parentId = newParent.id;
         }
+    },
+
+    /**
+     * Возвращает индекс первого незакреплённого элемента в children родителя
+     * @private
+     * @param {Object} parent - Родительский узел
+     * @returns {number} Индекс первого незакреплённого элемента
+     */
+    _getFirstNonPinnedIndex(parent) {
+        if (!parent.children) return 0;
+        for (let i = 0; i < parent.children.length; i++) {
+            if (!TreeUtils.isPinnedTable(parent.children[i])) return i;
+        }
+        return parent.children.length;
     },
 
     /**
@@ -592,5 +672,22 @@ Object.assign(AppState, {
         if (!parent || parent.id !== '5') return false;
 
         return node.number && node.number.match(/^5\.\d+$/);
+    },
+
+    /**
+     * Рекурсивно очищает свойство tb у узла и всех его потомков
+     * @private
+     * @param {Object} node - Узел для очистки
+     */
+    _clearTbRecursive(node) {
+        if (node.tb) {
+            delete node.tb;
+        }
+
+        if (node.children) {
+            for (const child of node.children) {
+                this._clearTbRecursive(child);
+            }
+        }
     }
 });

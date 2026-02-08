@@ -266,6 +266,57 @@ const TreeUtils = {
     },
 
     /**
+     * Проверяет, является ли узел item-узлом под разделом 5
+     * @param {Object} node - Проверяемый узел
+     * @returns {boolean} true если узел под разделом 5
+     */
+    isUnderSection5(node) {
+        return node.number && node.number.startsWith('5.') && (!node.type || node.type === 'item');
+    },
+
+    /**
+     * Проверяет, является ли узел TB-leaf (item-узел под разделом 5 без дочерних item-узлов)
+     * @param {Object} node - Проверяемый узел
+     * @returns {boolean} true если это TB-leaf
+     */
+    isTbLeaf(node) {
+        if (!this.isUnderSection5(node)) return false;
+        const itemChildren = (node.children || []).filter(c => !c.type || c.type === 'item');
+        return itemChildren.length === 0;
+    },
+
+    /**
+     * Вычисляет ТБ для узла: для leaf — node.tb, для родителя — union из потомков
+     * @param {Object} node - Узел дерева
+     * @returns {string[]} Массив аббревиатур ТБ
+     */
+    getComputedTb(node) {
+        const itemChildren = (node.children || []).filter(c => !c.type || c.type === 'item');
+        if (itemChildren.length === 0) return node.tb || [];
+
+        const allTbs = new Set();
+        for (const child of itemChildren) {
+            this.getComputedTb(child).forEach(tb => allTbs.add(tb));
+        }
+        return [...allTbs];
+    },
+
+    /**
+     * Проверяет, является ли узел закреплённой таблицей (метрики, риски)
+     * @param {Object} node - Проверяемый узел
+     * @returns {boolean} true если это закреплённая таблица
+     */
+    isPinnedTable(node) {
+        if (node.type !== 'table') return false;
+        if (node.isMetricsTable || node.isMainMetricsTable) return true;
+        if (node.tableId) {
+            const table = AppState.tables[node.tableId];
+            if (table && (table.isRegularRiskTable || table.isOperationalRiskTable)) return true;
+        }
+        return false;
+    },
+
+    /**
      * Получает название узла с учетом связанных элементов
      * @param {string} nodeId - ID узла
      * @returns {string} Название узла
@@ -274,22 +325,19 @@ const TreeUtils = {
         const node = this.findNodeById(nodeId);
         if (!node) return `Узел ${nodeId}`;
 
-        // Если у узла есть label, используем его
-        if (node.label) return node.label;
-
-        // Для информационных элементов используем тип + ID
         const {TABLE, TEXTBLOCK, VIOLATION} = AppConfig.nodeTypes;
+        const isContentType = [TABLE, TEXTBLOCK, VIOLATION].includes(node.type);
 
-        if (node.type === TABLE && node.tableId) {
-            return `Таблица ${node.tableId}`;
-        }
-        if (node.type === TEXTBLOCK && node.textBlockId) {
-            return `Текстовый блок ${node.textBlockId}`;
-        }
-        if (node.type === VIOLATION && node.violationId) {
-            return `Нарушение ${node.violationId}`;
+        if (isContentType) {
+            // Для content-типов: customLabel или number или label
+            return node.customLabel || node.number || node.label || `Узел ${nodeId}`;
         }
 
-        return `Узел ${nodeId}`;
+        // Для item-узлов: number + label
+        if (node.number && node.label) {
+            return node.number + '. ' + node.label;
+        }
+
+        return node.label || `Узел ${nodeId}`;
     }
 };

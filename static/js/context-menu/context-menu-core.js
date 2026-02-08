@@ -28,12 +28,13 @@ class ContextMenuManager {
     }
 
     static attachGlobalClickHandler() {
+        // Используем capture-фазу, чтобы обработчик срабатывал до stopPropagation() в дочерних элементах
         document.addEventListener('click', (e) => {
             if (!e.target.closest('.context-menu') &&
                 !e.target.closest('.violation-context-menu')) {
                 this.hide();
             }
-        });
+        }, true);
     }
 
     static initializeMenuHandlers() {

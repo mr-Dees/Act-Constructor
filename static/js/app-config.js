@@ -9,6 +9,24 @@ class AppConfig {
      * Типы узлов дерева документа
      * @type {{ITEM: string, TABLE: string, TEXTBLOCK: string, VIOLATION: string}}
      */
+    /**
+     * Список территориальных банков для назначения пунктам раздела 5
+     * @type {Array<{abbr: string, name: string}>}
+     */
+    static territorialBanks = [
+        { abbr: 'СибБ',  name: 'Сибирский' },
+        { abbr: 'СРБ',   name: 'Среднерусский' },
+        { abbr: 'СЗБ',   name: 'Северо-западный' },
+        { abbr: 'ЮЗБ',   name: 'Юго-западный' },
+        { abbr: 'ЦЧБ',   name: 'Центрально-черноземный' },
+        { abbr: 'МБ',    name: 'Московский' },
+        { abbr: 'УБ',    name: 'Уральский' },
+        { abbr: 'ДВБ',   name: 'Дальневосточный' },
+        { abbr: 'ПБ',    name: 'Поволжский' },
+        { abbr: 'ВВБ',   name: 'Волговятский' },
+        { abbr: 'ББ',    name: 'Байкальский' }
+    ];
+
     static nodeTypes = {
         ITEM: 'item',
         TABLE: 'table',
@@ -235,7 +253,7 @@ class AppConfig {
      */
     static tree = {
         // Ограничения структуры
-        maxDepth: 4,
+        maxDepth: 3,
         maxCustomFirstLevelSections: 1,
 
         // Стандартные разделы
@@ -281,7 +299,8 @@ class AppConfig {
                 'toggle-icon',
                 'table-icon',
                 'textblock-icon',
-                'violation-icon'
+                'violation-icon',
+                'tb-badge'
             ],
 
             // Иконки раскрытия/сворачивания

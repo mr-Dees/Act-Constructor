@@ -44,13 +44,80 @@ class TreeContextMenu {
             regularRiskItem.classList.toggle('disabled', !isRiskTableAllowed);
         if (operationalRiskItem)
             operationalRiskItem.classList.toggle('disabled', !isRiskTableAllowed);
+
+        // Блокируем добавление подпунктов для всех 5.*, если где-либо на 5.* есть таблицы рисков
+        const addChildItem = this.menu.querySelector('[data-action="add-child"]');
+        if (addChildItem) {
+            const isAddChildBlocked = node.number?.match(/^5\.\d+$/) && this._hasRiskTablesAtLevel5x();
+            addChildItem.classList.toggle('disabled', !!isAddChildBlocked);
+        }
     }
 
     /** Проверяет, разрешено ли создавать таблицу риска */
     _isRiskTableAllowedForNode(node) {
         if (node.type && node.type !== 'item') return false;
         if (!node.number) return false;
-        return /^5\.\d+\.\d+/.test(node.number);
+        if (!/^5\.\d+/.test(node.number)) return false;
+        // Нельзя создать вторую таблицу рисков на одном узле
+        if (this._hasDirectRiskTables(node)) return false;
+        // На уровне 5.* нельзя, если где-либо в 5.*.* уже есть риски
+        if (node.number.match(/^5\.\d+$/) && this._hasRiskTablesBelowLevel5x()) return false;
+        // На уровне 5.*.* нельзя, если где-либо на 5.* уже есть риски
+        if (node.number.match(/^5\.\d+\.\d+/) && this._hasRiskTablesAtLevel5x()) return false;
+        return true;
+    }
+
+    /** Возвращает причину блокировки создания таблицы рисков */
+    _getRiskTableBlockReason(node) {
+        if (this._hasDirectRiskTables(node)) {
+            return 'На одном пункте может быть только одна таблица рисков';
+        }
+        if (node.number?.match(/^5\.\d+$/) && this._hasRiskTablesBelowLevel5x()) {
+            return 'Нельзя создать таблицу рисков: в подпунктах раздела 5 уже есть таблицы рисков';
+        }
+        if (node.number?.match(/^5\.\d+\.\d+/) && this._hasRiskTablesAtLevel5x()) {
+            return 'Нельзя создать таблицу рисков: в пунктах раздела 5 уже есть таблицы рисков';
+        }
+        return 'Таблицы рисков можно создавать только в подпунктах раздела 5';
+    }
+
+    /** Проверяет, есть ли у узла прямые дочерние таблицы рисков */
+    _hasDirectRiskTables(node) {
+        if (!node.children) return false;
+        return node.children.some(child => {
+            if (child.type !== 'table' || !child.tableId) return false;
+            const table = AppState.tables[child.tableId];
+            return table && (table.isRegularRiskTable || table.isOperationalRiskTable);
+        });
+    }
+
+    /** Проверяет, есть ли таблицы рисков в дочерних item-узлах */
+    _hasChildItemRiskTables(node) {
+        if (!node.children) return false;
+        for (const child of node.children) {
+            if (child.type === 'item' && AppState._findRiskTablesInSubtree(child).length > 0) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    /** Проверяет, есть ли таблицы рисков на уровне 5.* (в любой ветке) */
+    _hasRiskTablesAtLevel5x() {
+        const node5 = AppState.findNodeById('5');
+        if (!node5?.children) return false;
+        return node5.children.some(child =>
+            child.type === 'item' && child.number?.match(/^5\.\d+$/) && this._hasDirectRiskTables(child)
+        );
+    }
+
+    /** Проверяет, есть ли таблицы рисков на уровне 5.*.* и глубже (в любой ветке) */
+    _hasRiskTablesBelowLevel5x() {
+        const node5 = AppState.findNodeById('5');
+        if (!node5?.children) return false;
+        return node5.children.some(child =>
+            child.type === 'item' && child.number?.match(/^5\.\d+$/) && this._hasChildItemRiskTables(child)
+        );
     }
 
     /** Выполняет действие */
@@ -72,13 +139,15 @@ class TreeContextMenu {
                 this.handleAddTable(node, nodeId, 'regular');
                 break;
             case 'add-regular-risk-table':
-                return this._isRiskTableAllowedForNode(node)
-                    ? this.handleAddTable(node, nodeId, 'regular-risk')
-                    : Notifications.error('Таблицы рисков можно создавать только в пунктах 5.*.*');
+                if (!this._isRiskTableAllowedForNode(node)) {
+                    return Notifications.error(this._getRiskTableBlockReason(node));
+                }
+                return this.handleAddTable(node, nodeId, 'regular-risk');
             case 'add-operational-risk-table':
-                return this._isRiskTableAllowedForNode(node)
-                    ? this.handleAddTable(node, nodeId, 'operational-risk')
-                    : Notifications.error('Таблицы рисков можно создавать только в пунктах 5.*.*');
+                if (!this._isRiskTableAllowedForNode(node)) {
+                    return Notifications.error(this._getRiskTableBlockReason(node));
+                }
+                return this.handleAddTable(node, nodeId, 'operational-risk');
             case 'add-textblock':
                 this.handleAddTextBlock(node, nodeId);
                 break;
@@ -98,6 +167,12 @@ class TreeContextMenu {
             return;
         }
 
+        // Нельзя добавлять подпункты ни к одному 5.*, если где-либо на 5.* есть таблица рисков
+        if (node.number?.match(/^5\.\d+$/) && this._hasRiskTablesAtLevel5x()) {
+            Notifications.error('Нельзя добавлять подпункты: в разделе 5 есть таблицы рисков на уровне пунктов');
+            return;
+        }
+
         const result = AppState.addNode(nodeId, '', true);
         if (result.valid) {
             this.updateTreeViews();
@@ -108,6 +183,14 @@ class TreeContextMenu {
 
     /** Добавляет соседний элемент */
     handleAddSibling(node, nodeId) {
+        // Нельзя добавлять соседние подпункты на уровне 5.*.*, если где-либо на 5.* есть таблица рисков
+        if (node.number?.match(/^5\.\d+\./)) {
+            if (this._hasRiskTablesAtLevel5x()) {
+                Notifications.error('Нельзя добавлять подпункты: в разделе 5 есть таблицы рисков на уровне пунктов');
+                return;
+            }
+        }
+
         const result = AppState.addNode(nodeId, '', false);
         if (result.valid) {
             this.updateTreeViews();
@@ -198,8 +281,14 @@ class TreeContextMenu {
             if (table?.isMetricsTable) {
                 const parentUnder5 = this._findParentFirstLevelUnderPoint5(node);
                 if (parentUnder5) {
-                    const hasRisks = AppState._findRiskTablesInSubtree(parentUnder5).length > 0;
-                    if (hasRisks) {
+                    let hasDeepRisks = false;
+                    for (const child of parentUnder5.children || []) {
+                        if (child.type === 'item' && AppState._findRiskTablesInSubtree(child).length > 0) {
+                            hasDeepRisks = true;
+                            break;
+                        }
+                    }
+                    if (hasDeepRisks) {
                         Notifications.error('Нельзя удалить таблицу метрик, пока есть таблицы рисков');
                         return;
                     }

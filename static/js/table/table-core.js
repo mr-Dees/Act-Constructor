@@ -161,7 +161,7 @@ class TableManager {
         // Заголовок берется из связанного узла дерева
         const node = AppState.findNodeById(table.nodeId);
         const title = document.createElement('h3');
-        title.textContent = node ? node.label : 'Таблица';
+        title.textContent = node ? (node.customLabel || node.number || node.label || 'Таблица') : 'Таблица';
         section.appendChild(title);
 
         // Контейнер с горизонтальной прокруткой

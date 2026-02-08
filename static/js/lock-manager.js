@@ -11,6 +11,7 @@ class LockManager {
     static _inactivityCheckInterval = null;
     static _extensionInterval = null;
     static _inactivityDialogTimeout = null;
+    static _countdownInterval = null;
     static _lastActivity = Date.now();
     static _lastExtensionAt = Date.now();
     static _warningShown = false;
@@ -323,6 +324,10 @@ class LockManager {
             clearTimeout(this._inactivityDialogTimeout);
             this._inactivityDialogTimeout = null;
         }
+        if (this._countdownInterval) {
+            clearInterval(this._countdownInterval);
+            this._countdownInterval = null;
+        }
     }
 
     /**
@@ -338,18 +343,45 @@ class LockManager {
             this._initiateExit('autoExit');
         }, timeoutSeconds * 1000);
 
-        const stay = await DialogManager.show({
+        const dialogPromise = DialogManager.show({
             title: cfg.messages.inactivityTitle,
-            message: `${cfg.messages.inactivityQuestion(minutesInactive)}\n\nАвто-выход через ${timeoutSeconds} сек.`,
+            message: cfg.messages.inactivityQuestion(minutesInactive),
             icon: '💤',
             type: 'warning',
             confirmText: 'Продолжить',
             cancelText: 'Сохранить и выйти'
         });
 
+        // Добавляем элемент с живым обратным отсчётом
+        const overlay = document.querySelector('.custom-dialog-overlay:last-child');
+        const messageEl = overlay?.querySelector('.dialog-message');
+        let countdownEl = null;
+        if (messageEl) {
+            countdownEl = document.createElement('p');
+            countdownEl.className = 'dialog-message';
+            countdownEl.style.marginTop = '4px';
+            countdownEl.style.fontWeight = 'bold';
+            countdownEl.textContent = `Авто-выход через ${timeoutSeconds} сек.`;
+            messageEl.after(countdownEl);
+        }
+
+        let remaining = timeoutSeconds;
+        this._countdownInterval = setInterval(() => {
+            remaining--;
+            if (remaining < 0) remaining = 0;
+            if (countdownEl) countdownEl.textContent = `Авто-выход через ${remaining} сек.`;
+            if (remaining <= 0) clearInterval(this._countdownInterval);
+        }, 1000);
+
+        const stay = await dialogPromise;
+
         if (this._inactivityDialogTimeout) {
             clearTimeout(this._inactivityDialogTimeout);
             this._inactivityDialogTimeout = null;
+        }
+        if (this._countdownInterval) {
+            clearInterval(this._countdownInterval);
+            this._countdownInterval = null;
         }
 
         if (stay) {

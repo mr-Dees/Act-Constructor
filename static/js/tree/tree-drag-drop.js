@@ -209,18 +209,37 @@ class TreeDragDrop {
         }
 
         // Определяем зону сброса
+        let position;
         if (relativeY < labelHeight * 0.15) {
-            return 'before';
+            position = 'before';
         } else if (relativeY > labelHeight * 0.85) {
-            return 'after';
+            position = 'after';
         } else {
             // Средние 70% - child, если возможно
             if (canBeChild) {
-                return 'child';
+                position = 'child';
+            } else {
+                // Если нельзя child, выбираем ближайшую границу
+                position = relativeY < labelHeight * 0.5 ? 'before' : 'after';
             }
-            // Если нельзя child, выбираем ближайшую границу
-            return relativeY < labelHeight * 0.5 ? 'before' : 'after';
         }
+
+        // Блокируем размещение перед/между закреплёнными таблицами
+        if (TreeUtils.isPinnedTable(targetNode)) {
+            if (position === 'before') return null;
+            if (position === 'after') {
+                const parent = AppState.findParentNode(targetNode.id);
+                if (parent?.children) {
+                    const idx = parent.children.indexOf(targetNode);
+                    const nextSibling = parent.children[idx + 1];
+                    if (nextSibling && TreeUtils.isPinnedTable(nextSibling)) {
+                        return null;
+                    }
+                }
+            }
+        }
+
+        return position;
     }
 
     /**

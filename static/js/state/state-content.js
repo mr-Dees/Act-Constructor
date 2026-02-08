@@ -487,14 +487,16 @@ Object.assign(AppState, {
             parentNode = this.findParentNode(ancestorNode.id);
         }
 
-        // Создаем таблицу метрик для узла первого уровня
+        // Создаём таблицу метрик на 5.* ТОЛЬКО если таблица рисков на более глубоком уровне
         if (parentNode?.id === '5' && ancestorNode.number?.match(/^5\.\d+$/)) {
-            const hasMetricsTable = ancestorNode.children?.some(
-                child => child.type === 'table' && child.isMetricsTable === true
-            );
+            if (nodeId !== ancestorNode.id) {
+                const hasMetricsTable = ancestorNode.children?.some(
+                    child => child.type === 'table' && child.isMetricsTable === true
+                );
 
-            if (!hasMetricsTable) {
-                this._createMetricsTable(ancestorNode.id, ancestorNode.number);
+                if (!hasMetricsTable) {
+                    this._createMetricsTable(ancestorNode.id, ancestorNode.number);
+                }
             }
         }
 
@@ -518,10 +520,16 @@ Object.assign(AppState, {
 
         // Проверяем каждый узел первого уровня
         for (const firstLevelNode of firstLevelNodes) {
-            const riskTables = this._findRiskTablesInSubtree(firstLevelNode);
+            // Считаем только таблицы рисков в дочерних item-узлах (5.*.* и глубже)
+            let deepRiskTables = [];
+            for (const child of firstLevelNode.children || []) {
+                if (child.type === 'item') {
+                    deepRiskTables = deepRiskTables.concat(this._findRiskTablesInSubtree(child));
+                }
+            }
 
-            // Если нет таблиц рисков, удаляем таблицу метрик
-            if (riskTables.length === 0) {
+            // Если нет глубоких таблиц рисков, удаляем таблицу метрик
+            if (deepRiskTables.length === 0) {
                 const metricsTableNode = firstLevelNode.children?.find(
                     child => child.type === 'table' && child.isMetricsTable === true
                 );
@@ -571,7 +579,8 @@ Object.assign(AppState, {
 
         const tableNode = this._createContentNode(nodeId, tableId, 'table', preset.label, true, true);
 
-        node.children.push(tableNode);
+        const insertIdx = this._getFirstNonPinnedIndex(node);
+        node.children.splice(insertIdx, 0, tableNode);
 
         const grid = this._createTableGrid(preset.rows, preset.headers.length, preset.headers);
 
@@ -606,7 +615,8 @@ Object.assign(AppState, {
 
         const tableNode = this._createContentNode(nodeId, tableId, 'table', preset.label, true, true);
 
-        node.children.push(tableNode);
+        const insertIdx = this._getFirstNonPinnedIndex(node);
+        node.children.splice(insertIdx, 0, tableNode);
 
         const grid = this._createOperationalRiskGrid();
 

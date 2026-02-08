@@ -514,12 +514,19 @@ class DocxFormatter(BaseFormatter):
             level: Уровень вложенности (для заголовков)
         """
         label = item.get('label', '')
+        number = item.get('number', '')
         item_type = item.get('type', 'item')
 
-        if label and item_type not in ['textblock', 'violation']:
+        # Для item-узлов собираем полный заголовок из номера и текста
+        if item_type not in ['table', 'textblock', 'violation']:
+            full_label = f"{number}. {label}" if number and label else (label or number)
+        else:
+            full_label = item.get('customLabel') or number or label
+
+        if full_label and item_type not in ['textblock', 'violation']:
             heading_level = min(level, self.MAX_HEADING_LEVEL)
-            doc.add_heading(label, level=heading_level)
-            logger.debug(f"Добавлен заголовок уровня {heading_level}: {label}")
+            doc.add_heading(full_label, level=heading_level)
+            logger.debug(f"Добавлен заголовок уровня {heading_level}: {full_label}")
 
         content = item.get('content', '')
         if content:

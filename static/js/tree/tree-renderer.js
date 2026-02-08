@@ -148,8 +148,34 @@ class TreeRenderer {
     _createLabel(node) {
         const label = document.createElement('span');
         label.className = 'tree-label';
-        label.textContent = node.label;
         label.contentEditable = false;
+
+        const isContentType = ['table', 'textblock', 'violation'].includes(node.type);
+
+        if (isContentType) {
+            // Для content-типов: один span с customLabel или number
+            label.textContent = node.customLabel || node.number || node.label;
+        } else {
+            // Для item-узлов: два span-а (номер + текст)
+            if (node.number) {
+                const numberSpan = document.createElement('span');
+                numberSpan.className = 'tree-node-number';
+                numberSpan.textContent = node.number + '. ';
+                numberSpan.contentEditable = false;
+                label.appendChild(numberSpan);
+            }
+
+            const textSpan = document.createElement('span');
+            textSpan.className = 'tree-node-text';
+            textSpan.textContent = node.label;
+            label.appendChild(textSpan);
+
+            // Бейдж ТБ для узлов под разделом 5
+            if (TreeUtils.isUnderSection5(node)) {
+                label.appendChild(this._createTbBadge(node));
+            }
+        }
+
         return label;
     }
 
@@ -229,6 +255,12 @@ class TreeRenderer {
         label.addEventListener('click', (e) => {
             e.stopPropagation();
 
+            // Игнорируем клики по нередактируемому номеру
+            if (e.target.closest('.tree-node-number')) {
+                this.manager.selectNode(li);
+                return;
+            }
+
             // Обработка Ctrl+Click
             if (e.ctrlKey || e.metaKey) {
                 handleCtrlClick();
@@ -246,7 +278,9 @@ class TreeRenderer {
             } else if (clickCount === 2) {
                 clearTimeout(clickTimer);
                 clickCount = 0;
-                ItemsTitleEditing.startEditingTreeNode(label, node, this.manager);
+                // Для item-узлов передаём .tree-node-text, для остальных — весь label
+                const editTarget = label.querySelector('.tree-node-text') || label;
+                ItemsTitleEditing.startEditingTreeNode(editTarget, node, this.manager);
             }
         });
 
@@ -283,7 +317,7 @@ class TreeRenderer {
     _setupLiClickHandler(li, label, handleCtrlClick) {
         li.addEventListener('click', (e) => {
             // Игнорируем клики по метке и служебным элементам
-            if (e.target === label || this._isIgnoredElement(e.target)) {
+            if (e.target === label || e.target.closest('.tree-label') || this._isIgnoredElement(e.target)) {
                 return;
             }
 
@@ -323,5 +357,215 @@ class TreeRenderer {
             this.manager.selectNode(li);
             ContextMenuManager.show(e.clientX, e.clientY, node.id, 'tree');
         });
+    }
+
+    /**
+     * Создает бейдж ТБ для узла дерева
+     * @private
+     * @param {Object} node - Узел дерева
+     * @returns {HTMLElement} Элемент бейджа
+     */
+    _createTbBadge(node) {
+        const badge = document.createElement('span');
+        badge.className = 'tb-badge';
+
+        const isLeaf = TreeUtils.isTbLeaf(node);
+
+        if (isLeaf) {
+            const tbList = node.tb || [];
+            if (tbList.length > 0) {
+                badge.classList.add('tb-badge--assigned');
+                badge.textContent = tbList.join(', ');
+                badge.title = tbList.map(abbr => {
+                    const bank = AppConfig.territorialBanks.find(b => b.abbr === abbr);
+                    return bank ? `${bank.name} (${abbr})` : abbr;
+                }).join(', ');
+            } else {
+                badge.classList.add('tb-badge--empty');
+                badge.textContent = 'ТБ';
+                badge.title = 'Назначить территориальный банк';
+            }
+
+            badge.addEventListener('click', (e) => {
+                e.stopPropagation();
+                if (AppConfig.readOnlyMode?.isReadOnly) return;
+                this._showTbDropdown(badge, node);
+            });
+        } else {
+            const computed = TreeUtils.getComputedTb(node);
+            if (computed.length > 0) {
+                badge.classList.add('tb-badge--computed');
+                badge.textContent = computed.join(', ');
+                badge.title = 'Вычислено из дочерних пунктов: ' + computed.join(', ');
+            } else {
+                badge.classList.add('tb-badge--empty');
+                badge.textContent = 'ТБ';
+                badge.title = 'ТБ не назначен дочерним пунктам';
+                badge.style.cursor = 'default';
+            }
+        }
+
+        return badge;
+    }
+
+    /**
+     * Показывает дропдаун для выбора ТБ
+     * @private
+     * @param {HTMLElement} badge - Элемент бейджа
+     * @param {Object} node - Узел дерева
+     */
+    _showTbDropdown(badge, node) {
+        // Закрываем предыдущий дропдаун если есть
+        this._closeTbDropdown();
+
+        const dropdown = document.createElement('div');
+        dropdown.className = 'tb-dropdown';
+
+        const currentTb = node.tb || [];
+
+        AppConfig.territorialBanks.forEach(bank => {
+            const item = document.createElement('label');
+            item.className = 'tb-dropdown-item';
+
+            const checkbox = document.createElement('input');
+            checkbox.type = 'checkbox';
+            checkbox.checked = currentTb.includes(bank.abbr);
+            checkbox.addEventListener('change', () => {
+                this._onTbCheckboxChange(node, bank.abbr, checkbox.checked);
+                // Обновляем бейдж в дереве
+                this._updateTbBadgeInTree(node);
+                // Обновляем селектор на шаге 2 если виден
+                this._syncTbToStep2(node);
+            });
+
+            const nameSpan = document.createElement('span');
+            nameSpan.className = 'tb-dropdown-item-name';
+            nameSpan.textContent = bank.name;
+
+            const abbrSpan = document.createElement('span');
+            abbrSpan.className = 'tb-dropdown-item-abbr';
+            abbrSpan.textContent = bank.abbr;
+
+            item.appendChild(checkbox);
+            item.appendChild(nameSpan);
+            item.appendChild(abbrSpan);
+            dropdown.appendChild(item);
+        });
+
+        // Позиционируем дропдаун
+        document.body.appendChild(dropdown);
+        const rect = badge.getBoundingClientRect();
+        dropdown.style.top = `${rect.bottom + 4}px`;
+        dropdown.style.left = `${rect.left}px`;
+
+        // Корректируем позицию если выходит за экран
+        const dropdownRect = dropdown.getBoundingClientRect();
+        if (dropdownRect.right > window.innerWidth) {
+            dropdown.style.left = `${window.innerWidth - dropdownRect.width - 8}px`;
+        }
+        if (dropdownRect.bottom > window.innerHeight) {
+            dropdown.style.top = `${rect.top - dropdownRect.height - 4}px`;
+        }
+
+        // Закрытие при клике вне
+        const closeHandler = (e) => {
+            if (!dropdown.contains(e.target) && e.target !== badge) {
+                this._closeTbDropdown();
+                document.removeEventListener('mousedown', closeHandler);
+            }
+        };
+        setTimeout(() => document.addEventListener('mousedown', closeHandler), 0);
+
+        this._currentTbDropdown = dropdown;
+        this._currentTbDropdownCloseHandler = closeHandler;
+    }
+
+    /**
+     * Закрывает текущий дропдаун ТБ
+     * @private
+     */
+    _closeTbDropdown() {
+        if (this._currentTbDropdown) {
+            this._currentTbDropdown.remove();
+            this._currentTbDropdown = null;
+        }
+        if (this._currentTbDropdownCloseHandler) {
+            document.removeEventListener('mousedown', this._currentTbDropdownCloseHandler);
+            this._currentTbDropdownCloseHandler = null;
+        }
+    }
+
+    /**
+     * Обработчик изменения чекбокса ТБ
+     * @private
+     * @param {Object} node - Узел дерева
+     * @param {string} abbr - Аббревиатура банка
+     * @param {boolean} checked - Выбран ли
+     */
+    _onTbCheckboxChange(node, abbr, checked) {
+        if (!node.tb) node.tb = [];
+
+        if (checked) {
+            if (!node.tb.includes(abbr)) {
+                node.tb.push(abbr);
+            }
+        } else {
+            node.tb = node.tb.filter(t => t !== abbr);
+        }
+
+        // Помечаем изменения
+        StorageManager.markAsUnsaved();
+    }
+
+    /**
+     * Обновляет бейдж ТБ в дереве для узла и его родителей
+     * @private
+     * @param {Object} node - Узел дерева
+     */
+    _updateTbBadgeInTree(node) {
+        // Обновляем бейдж текущего узла
+        const li = this.manager.container.querySelector(`[data-node-id="${node.id}"]`);
+        if (li) {
+            const oldBadge = li.querySelector(':scope > .tree-label .tb-badge');
+            if (oldBadge) {
+                const newBadge = this._createTbBadge(node);
+                oldBadge.replaceWith(newBadge);
+            }
+        }
+
+        // Обновляем бейджи родительских узлов (computed TB)
+        let parent = TreeUtils.findParentNode(node.id);
+        while (parent && parent.id !== 'root') {
+            if (TreeUtils.isUnderSection5(parent)) {
+                const parentLi = this.manager.container.querySelector(`[data-node-id="${parent.id}"]`);
+                if (parentLi) {
+                    const parentBadge = parentLi.querySelector(':scope > .tree-label .tb-badge');
+                    if (parentBadge) {
+                        const newParentBadge = this._createTbBadge(parent);
+                        parentBadge.replaceWith(newParentBadge);
+                    }
+                }
+            }
+            parent = TreeUtils.findParentNode(parent.id);
+        }
+    }
+
+    /**
+     * Синхронизирует изменения ТБ из дерева к шагу 2
+     * @private
+     * @param {Object} node - Узел дерева
+     */
+    _syncTbToStep2(node) {
+        const itemBlock = document.querySelector(`.item-block[data-node-id="${node.id}"]`);
+        if (!itemBlock) return;
+
+        const oldSelector = itemBlock.querySelector(':scope > .item-header .tb-selector');
+        if (oldSelector) {
+            const newSelector = ItemsRenderer._createTbSelector(node);
+            oldSelector.replaceWith(newSelector);
+        }
+
+        // Обновляем родительские TB-селекторы в items
+        ItemsRenderer._updateParentTbInItems(node);
     }
 }

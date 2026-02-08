@@ -365,6 +365,7 @@ const AppState = {
         // Дополнительные поля
         if (node.customLabel) serialized.customLabel = node.customLabel;
         if (node.number) serialized.number = node.number;
+        if (node.tb?.length) serialized.tb = node.tb;
 
         // Рекурсивная сериализация детей
         serialized.children = node.children?.map(child => this._serializeTree(child)) || [];

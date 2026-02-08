@@ -26,6 +26,9 @@ Object.assign(TextBlockManager.prototype, {
         editor.dataset.placeholder = 'Введите текст...';
         editor.innerHTML = textBlock.content || '';
 
+        // Привязываем tooltip к ссылкам/сноскам сразу при создании
+        this._attachInitialTooltipHandlers(editor);
+
         // Отключаем редактирование в режиме только чтения
         if (AppConfig.readOnlyMode?.isReadOnly) {
             editor.contentEditable = 'false';
@@ -38,6 +41,30 @@ Object.assign(TextBlockManager.prototype, {
         this.applyFormatting(editor, textBlock.formatting);
 
         return editor;
+    },
+
+    /**
+     * Привязывает tooltip-обработчики к ссылкам/сноскам при начальном рендере
+     * Обработчики будут заменены полным набором при фокусе редактора
+     * @private
+     */
+    _attachInitialTooltipHandlers(editor) {
+        const elements = editor.querySelectorAll('.text-link, .text-footnote');
+
+        elements.forEach(element => {
+            element._mouseenterHandler = () => {
+                this.tooltipTimeout = setTimeout(() => {
+                    this.showTooltip(element);
+                }, 700);
+            };
+
+            element._mouseleaveHandler = () => {
+                this.hideTooltip();
+            };
+
+            element.addEventListener('mouseenter', element._mouseenterHandler);
+            element.addEventListener('mouseleave', element._mouseleaveHandler);
+        });
     },
 
     /**
@@ -120,27 +147,51 @@ Object.assign(TextBlockManager.prototype, {
      * Обработчик клавиш
      */
     handleEditorKeydown(e, editor, textBlock) {
-        // Обработка горячих клавиш
-        if (e.ctrlKey || e.metaKey) {
-            switch (e.key.toLowerCase()) {
-                case 'b':
+        // Все горячие клавиши: Ctrl+Shift+* (e.code — независимо от раскладки)
+        if ((e.ctrlKey || e.metaKey) && e.shiftKey) {
+            switch (e.code) {
+                case 'KeyB':
                     e.preventDefault();
                     this.execCommand('bold');
                     this.updateToolbarState();
                     break;
-                case 'i':
+                case 'KeyI':
                     e.preventDefault();
                     this.execCommand('italic');
                     this.updateToolbarState();
                     break;
-                case 'u':
+                case 'KeyU':
                     e.preventDefault();
                     this.execCommand('underline');
                     this.updateToolbarState();
                     break;
-                case 'k':
+                case 'KeyX':
+                    e.preventDefault();
+                    this.execCommand('strikeThrough');
+                    this.updateToolbarState();
+                    break;
+                case 'KeyK':
                     e.preventDefault();
                     this.createOrEditLink();
+                    break;
+                case 'KeyF':
+                    e.preventDefault();
+                    this.createOrEditFootnote();
+                    break;
+                case 'KeyA':
+                    e.preventDefault();
+                    this.cycleAlignment();
+                    this.updateToolbarState();
+                    break;
+                case 'Period':
+                    e.preventDefault();
+                    this.stepFontSize(1);
+                    this.updateToolbarState();
+                    break;
+                case 'Comma':
+                    e.preventDefault();
+                    this.stepFontSize(-1);
+                    this.updateToolbarState();
                     break;
             }
         }

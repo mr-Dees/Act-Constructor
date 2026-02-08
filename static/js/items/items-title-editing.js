@@ -13,10 +13,9 @@ class ItemsTitleEditing {
     static startEditingItemTitle(titleElement, node) {
         if (titleElement.classList.contains('editing')) return;
 
-        const baseLabel = this._extractBaseLabel(node.label);
         const originalLabel = node.label;
 
-        this._initializeEditing(titleElement, baseLabel);
+        this._initializeEditing(titleElement, node.label);
 
         const finishEditing = (cancel = false) => {
             this._cleanupEditing(titleElement);
@@ -26,22 +25,10 @@ class ItemsTitleEditing {
                 return;
             }
 
-            this._saveItemTitle(titleElement, node, baseLabel, originalLabel);
+            this._saveItemTitle(titleElement, node, originalLabel);
         };
 
         this._attachEditingHandlers(titleElement, finishEditing);
-    }
-
-    /**
-     * Извлекает базовую метку без нумерации.
-     * Удаляет префикс вида "1.2.3. " и возвращает чистый текст.
-     * @param {string} label - Полная метка с нумерацией
-     * @returns {string} Базовая метка без нумерации
-     * @private
-     */
-    static _extractBaseLabel(label) {
-        const match = label.match(/^\d+(?:\.\d+)*\.\s*(.+)$/);
-        return match ? match[1] : label;
     }
 
     /**
@@ -93,34 +80,21 @@ class ItemsTitleEditing {
      * @param {string} originalLabel - Исходная полная метка
      * @private
      */
-    static _saveItemTitle(titleElement, node, baseLabel, originalLabel) {
-        const newBaseLabel = titleElement.textContent.trim();
+    static _saveItemTitle(titleElement, node, originalLabel) {
+        const newLabel = titleElement.textContent.trim();
 
-        if (!newBaseLabel) {
+        if (!newLabel) {
             // Возвращаем старую метку если новая пустая
             titleElement.textContent = originalLabel;
             return;
         }
 
-        if (newBaseLabel !== baseLabel) {
-            node.label = this._buildLabelWithNumbering(node.label, newBaseLabel);
+        if (newLabel !== originalLabel) {
+            node.label = newLabel;
             this._updateUI(node, titleElement);
         } else {
             titleElement.textContent = node.label;
         }
-    }
-
-    /**
-     * Создает метку с сохранением нумерации.
-     * Извлекает префикс нумерации и добавляет новый текст.
-     * @param {string} currentLabel - Текущая метка с нумерацией
-     * @param {string} newText - Новый текст метки
-     * @returns {string} Метка с восстановленной нумерацией
-     * @private
-     */
-    static _buildLabelWithNumbering(currentLabel, newText) {
-        const numberMatch = currentLabel.match(/^(\d+(?:\.\d+)*\.)\s*/);
-        return numberMatch ? `${numberMatch[1]} ${newText}` : newText;
     }
 
     /**
@@ -131,7 +105,6 @@ class ItemsTitleEditing {
      * @private
      */
     static _updateUI(node, titleElement) {
-        AppState.generateNumbering();
         titleElement.textContent = node.label;
         treeManager.render();
         PreviewManager.update();
@@ -147,7 +120,7 @@ class ItemsTitleEditing {
     static startEditingTableTitle(titleElement, node) {
         if (titleElement.classList.contains('editing')) return;
 
-        const currentLabel = node.customLabel || node.label;
+        const currentLabel = node.customLabel || node.number || node.label;
         this._initializeEditing(titleElement, currentLabel);
 
         const finishEditing = (cancel = false) => {
@@ -178,14 +151,14 @@ class ItemsTitleEditing {
         if (newLabel) {
             // Сохраняем пользовательское название
             node.customLabel = newLabel;
-            node.label = newLabel;
         } else {
             // Удаляем кастомное название (вернется автонумерация)
             delete node.customLabel;
-            node.label = node.number || originalLabel;
         }
 
-        this._updateUI(node, titleElement);
+        titleElement.textContent = node.customLabel || node.number || node.label;
+        treeManager.render();
+        PreviewManager.update();
     }
 
     /**
@@ -207,7 +180,7 @@ class ItemsTitleEditing {
 
         // Для специальных типов используем customLabel
         if (isSpecialType) {
-            labelElement.textContent = node.customLabel || node.label;
+            labelElement.textContent = node.customLabel || node.number || node.label;
         }
 
         this._initializeEditing(labelElement, labelElement.textContent);
@@ -216,7 +189,11 @@ class ItemsTitleEditing {
             this._cleanupTreeNodeEditing(labelElement, item, treeManager);
 
             if (cancel) {
-                labelElement.textContent = originalLabel;
+                if (isSpecialType) {
+                    labelElement.textContent = node.customLabel || node.number || node.label;
+                } else {
+                    labelElement.textContent = originalLabel;
+                }
                 return;
             }
 
@@ -269,16 +246,13 @@ class ItemsTitleEditing {
      * @private
      */
     static _saveSpecialNodeLabel(labelElement, node, newLabel, originalLabel) {
-        if (newLabel && newLabel !== node.label) {
+        if (newLabel && newLabel !== (node.customLabel || node.number || node.label)) {
             node.customLabel = newLabel;
-            node.label = newLabel;
         } else if (!newLabel) {
             delete node.customLabel;
-            node.label = node.number || originalLabel;
-            AppState.generateNumbering();
-            labelElement.textContent = node.label;
         }
 
+        labelElement.textContent = node.customLabel || node.number || node.label;
         this._updateTreeUI();
     }
 
@@ -294,7 +268,6 @@ class ItemsTitleEditing {
     static _saveRegularNodeLabel(labelElement, node, newLabel, originalLabel) {
         if (newLabel && newLabel !== originalLabel) {
             node.label = newLabel;
-            AppState.generateNumbering();
             this._updateTreeUI();
         } else if (!newLabel) {
             labelElement.textContent = originalLabel;
