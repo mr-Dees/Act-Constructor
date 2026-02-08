@@ -143,6 +143,10 @@ Object.assign(AppState, {
         const newNode = this._createNewNode(label);
 
         if (isChild) {
+            // Очищаем ТБ у родителя, если он был листовым узлом в разделе 5
+            if (TreeUtils.isUnderSection5(parent) && TreeUtils.isTbLeaf(parent)) {
+                delete parent.tb;
+            }
             this._addAsChild(parent, newNode);
         } else {
             this._addAsSibling(parentId, newNode);
@@ -324,8 +328,24 @@ Object.assign(AppState, {
         const riskCheck = this._checkSection5RiskConstraints(draggedNode, newParent);
         if (!riskCheck.valid) return riskCheck;
 
+        // Запоминаем, был ли новый родитель листовым узлом в разделе 5
+        const wasNewParentTbLeaf = position === 'child' &&
+            (!draggedNode.type || draggedNode.type === 'item') &&
+            TreeUtils.isUnderSection5(newParent) &&
+            TreeUtils.isTbLeaf(newParent);
+
         this._performMove(draggedNode, draggedParent, newParent, targetNode, targetNodeId, position);
         this.generateNumbering();
+
+        // Очищаем ТБ у нового родителя, если он был листовым узлом в разделе 5
+        if (wasNewParentTbLeaf) {
+            delete newParent.tb;
+        }
+
+        // Очищаем ТБ у старого родителя, если он стал листовым узлом в разделе 5
+        if (TreeUtils.isUnderSection5(draggedParent) && TreeUtils.isTbLeaf(draggedParent)) {
+            delete draggedParent.tb;
+        }
 
         // Очищаем ТБ если узел переместился за пределы раздела 5
         if (!TreeUtils.isUnderSection5(draggedNode)) {
