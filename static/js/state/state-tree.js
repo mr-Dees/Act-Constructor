@@ -608,13 +608,35 @@ Object.assign(AppState, {
         } else {
             const insertIndex = newParent.children.findIndex(n => n.id === targetNodeId);
             const offset = position === 'after' ? 1 : 0;
-            newParent.children.splice(insertIndex + offset, 0, draggedNode);
+            let effectiveIndex = insertIndex + offset;
+
+            // Страховка: не вставляем перед закреплёнными таблицами
+            const firstNonPinnedIndex = this._getFirstNonPinnedIndex(newParent);
+            if (effectiveIndex < firstNonPinnedIndex) {
+                effectiveIndex = firstNonPinnedIndex;
+            }
+
+            newParent.children.splice(effectiveIndex, 0, draggedNode);
         }
 
         // Обновляем parentId если он существует
         if (draggedNode.parentId) {
             draggedNode.parentId = newParent.id;
         }
+    },
+
+    /**
+     * Возвращает индекс первого незакреплённого элемента в children родителя
+     * @private
+     * @param {Object} parent - Родительский узел
+     * @returns {number} Индекс первого незакреплённого элемента
+     */
+    _getFirstNonPinnedIndex(parent) {
+        if (!parent.children) return 0;
+        for (let i = 0; i < parent.children.length; i++) {
+            if (!TreeUtils.isPinnedTable(parent.children[i])) return i;
+        }
+        return parent.children.length;
     },
 
     /**

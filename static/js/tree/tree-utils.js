@@ -302,6 +302,21 @@ const TreeUtils = {
     },
 
     /**
+     * Проверяет, является ли узел закреплённой таблицей (метрики, риски)
+     * @param {Object} node - Проверяемый узел
+     * @returns {boolean} true если это закреплённая таблица
+     */
+    isPinnedTable(node) {
+        if (node.type !== 'table') return false;
+        if (node.isMetricsTable || node.isMainMetricsTable) return true;
+        if (node.tableId) {
+            const table = AppState.tables[node.tableId];
+            if (table && (table.isRegularRiskTable || table.isOperationalRiskTable)) return true;
+        }
+        return false;
+    },
+
+    /**
      * Получает название узла с учетом связанных элементов
      * @param {string} nodeId - ID узла
      * @returns {string} Название узла

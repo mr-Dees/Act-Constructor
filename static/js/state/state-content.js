@@ -579,7 +579,8 @@ Object.assign(AppState, {
 
         const tableNode = this._createContentNode(nodeId, tableId, 'table', preset.label, true, true);
 
-        node.children.push(tableNode);
+        const insertIdx = this._getFirstNonPinnedIndex(node);
+        node.children.splice(insertIdx, 0, tableNode);
 
         const grid = this._createTableGrid(preset.rows, preset.headers.length, preset.headers);
 
@@ -614,7 +615,8 @@ Object.assign(AppState, {
 
         const tableNode = this._createContentNode(nodeId, tableId, 'table', preset.label, true, true);
 
-        node.children.push(tableNode);
+        const insertIdx = this._getFirstNonPinnedIndex(node);
+        node.children.splice(insertIdx, 0, tableNode);
 
         const grid = this._createOperationalRiskGrid();
 
