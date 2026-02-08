@@ -32,6 +32,7 @@ Object.assign(TextBlockManager.prototype, {
             
             <div class="toolbar-group">
                 <select class="toolbar-select" id="fontSizeSelect" title="Размер шрифта (Ctrl+Shift+> / <)">
+                    <option value="" disabled hidden>—</option>
                     ${this.fontSizes.map(size =>
             `<option value="${size}" ${size === 14 ? 'selected' : ''}>${size}px</option>`
         ).join('')}
@@ -165,6 +166,17 @@ Object.assign(TextBlockManager.prototype, {
                 const span = document.createElement('span');
                 span.style.fontSize = `${fontSize}px`;
                 span.innerHTML = font.innerHTML;
+
+                // Удаляем font-size у вложенных элементов, чтобы не перекрывали новый размер
+                span.querySelectorAll('[style]').forEach(child => {
+                    if (child.style.fontSize) {
+                        child.style.fontSize = '';
+                        if (!child.getAttribute('style')?.trim()) {
+                            child.removeAttribute('style');
+                        }
+                    }
+                });
+
                 font.parentNode.replaceChild(span, font);
                 newSpans.push(span);
             });
@@ -196,9 +208,15 @@ Object.assign(TextBlockManager.prototype, {
         const selection = window.getSelection();
         let fontSize = 14;
 
-        if (selection && selection.rangeCount > 0) {
+        if (selection && !selection.isCollapsed && selection.rangeCount > 0) {
+            // Для выделения — определяем размер из текстовых узлов
+            const sizes = this._getSelectedFontSizes(selection);
+            if (sizes.size > 0) {
+                fontSize = [...sizes][0];
+            }
+        } else if (selection && selection.rangeCount > 0) {
             const range = selection.getRangeAt(0);
-            const container = range.commonAncestorContainer;
+            const container = range.startContainer;
             const element = container.nodeType === 3 ? container.parentElement : container;
 
             if (element && this.activeEditor.contains(element)) {
@@ -266,27 +284,76 @@ Object.assign(TextBlockManager.prototype, {
         if (!fontSizeSelect) return;
 
         const selection = window.getSelection();
-        let fontSize = 14;
 
+        // Если есть выделение — проверяем смешанные размеры
+        if (selection && !selection.isCollapsed && selection.rangeCount > 0) {
+            const sizes = this._getSelectedFontSizes(selection);
+
+            if (sizes.size > 1) {
+                // Смешанные размеры — показываем прочерк
+                fontSizeSelect.value = '';
+                return;
+            }
+
+            if (sizes.size === 1) {
+                const fontSize = [...sizes][0];
+                const closestSize = this.fontSizes.reduce((prev, curr) =>
+                    Math.abs(curr - fontSize) < Math.abs(prev - fontSize) ? curr : prev
+                );
+                fontSizeSelect.value = closestSize;
+                return;
+            }
+        }
+
+        // Курсор без выделения
+        let fontSize = 14;
         if (selection && selection.rangeCount > 0) {
             const range = selection.getRangeAt(0);
-            const container = range.commonAncestorContainer;
+            const container = range.startContainer;
             const element = container.nodeType === 3 ? container.parentElement : container;
 
             if (element && this.activeEditor?.contains(element)) {
-                const computedSize = window.getComputedStyle(element).fontSize;
-                fontSize = parseInt(computedSize);
+                fontSize = parseInt(window.getComputedStyle(element).fontSize);
             }
         } else if (this.activeEditor) {
-            const computedSize = window.getComputedStyle(this.activeEditor).fontSize;
-            fontSize = parseInt(computedSize);
+            fontSize = parseInt(window.getComputedStyle(this.activeEditor).fontSize);
         }
 
-        // Находим ближайшее значение из списка
         const closestSize = this.fontSizes.reduce((prev, curr) =>
             Math.abs(curr - fontSize) < Math.abs(prev - fontSize) ? curr : prev
         );
-
         fontSizeSelect.value = closestSize;
+    },
+
+    /**
+     * Собирает уникальные размеры шрифта из выделенного текста
+     * @private
+     */
+    _getSelectedFontSizes(selection) {
+        const sizes = new Set();
+        const range = selection.getRangeAt(0);
+        const ancestor = range.commonAncestorContainer;
+        const root = ancestor.nodeType === 3 ? ancestor.parentElement : ancestor;
+
+        if (!root || !this.activeEditor?.contains(root)) return sizes;
+
+        const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT, {
+            acceptNode: (node) => {
+                if (!node.textContent.trim()) return NodeFilter.FILTER_REJECT;
+                return range.intersectsNode(node)
+                    ? NodeFilter.FILTER_ACCEPT
+                    : NodeFilter.FILTER_REJECT;
+            }
+        });
+
+        let node;
+        while (node = walker.nextNode()) {
+            const el = node.parentElement;
+            if (el) {
+                sizes.add(parseInt(window.getComputedStyle(el).fontSize));
+            }
+        }
+
+        return sizes;
     }
 });
