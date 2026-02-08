@@ -26,6 +26,9 @@ Object.assign(TextBlockManager.prototype, {
         editor.dataset.placeholder = 'Введите текст...';
         editor.innerHTML = textBlock.content || '';
 
+        // Привязываем tooltip к ссылкам/сноскам сразу при создании
+        this._attachInitialTooltipHandlers(editor);
+
         // Отключаем редактирование в режиме только чтения
         if (AppConfig.readOnlyMode?.isReadOnly) {
             editor.contentEditable = 'false';
@@ -38,6 +41,30 @@ Object.assign(TextBlockManager.prototype, {
         this.applyFormatting(editor, textBlock.formatting);
 
         return editor;
+    },
+
+    /**
+     * Привязывает tooltip-обработчики к ссылкам/сноскам при начальном рендере
+     * Обработчики будут заменены полным набором при фокусе редактора
+     * @private
+     */
+    _attachInitialTooltipHandlers(editor) {
+        const elements = editor.querySelectorAll('.text-link, .text-footnote');
+
+        elements.forEach(element => {
+            element._mouseenterHandler = () => {
+                this.tooltipTimeout = setTimeout(() => {
+                    this.showTooltip(element);
+                }, 700);
+            };
+
+            element._mouseleaveHandler = () => {
+                this.hideTooltip();
+            };
+
+            element.addEventListener('mouseenter', element._mouseenterHandler);
+            element.addEventListener('mouseleave', element._mouseleaveHandler);
+        });
     },
 
     /**

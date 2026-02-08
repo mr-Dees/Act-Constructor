@@ -311,6 +311,9 @@ class PreviewMenuManager {
             1,
             previewTrim
         );
+
+        // Привязываем tooltip к ссылкам и сноскам
+        PreviewManager._attachPreviewTooltips(this.menuBody);
     }
 
     /**

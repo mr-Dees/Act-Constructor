@@ -264,6 +264,15 @@
     pointer-events: none;
 }
 
+/* Ссылки и сноски в панели предпросмотра — только tooltip при наведении */
+#preview .text-link,
+#preview .text-footnote,
+#previewMenu .text-link,
+#previewMenu .text-footnote {
+    cursor: default;
+    pointer-events: auto;
+}
+
 /* Подсчет сносок */
 .text-footnote::after {
     content: attr(data-footnote-number);

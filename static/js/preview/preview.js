@@ -26,6 +26,13 @@ class PreviewManager {
     }
 
     /**
+     * Текущий tooltip в предпросмотре
+     * @private
+     */
+    static _previewTooltip = null;
+    static _previewTooltipTimeout = null;
+
+    /**
      * Выполняет обновление предпросмотра
      * @private
      * @param {number} previewTrim - Максимальная длина текста
@@ -34,10 +41,12 @@ class PreviewManager {
         const preview = document.getElementById('preview');
         if (!preview) return;
 
+        this._hidePreviewTooltip();
         preview.innerHTML = '';
 
         this._renderTitle(preview);
         this._renderTree(preview, previewTrim);
+        this._attachPreviewTooltips(preview);
     }
 
     /**
@@ -213,5 +222,88 @@ class PreviewManager {
      */
     static forceUpdate() {
         this._performUpdate(AppConfig.preview.defaultTrimLength);
+    }
+
+    /**
+     * Привязывает обработчики tooltip к ссылкам и сноскам в предпросмотре
+     * @private
+     * @param {HTMLElement} preview - Контейнер предпросмотра
+     */
+    static _attachPreviewTooltips(preview) {
+        const elements = preview.querySelectorAll('.text-link, .text-footnote');
+
+        elements.forEach(element => {
+            element.addEventListener('mouseenter', () => {
+                this._previewTooltipTimeout = setTimeout(() => {
+                    this._showPreviewTooltip(element);
+                }, 700);
+            });
+
+            element.addEventListener('mouseleave', () => {
+                this._hidePreviewTooltip();
+            });
+        });
+    }
+
+    /**
+     * Показывает tooltip для ссылки/сноски в предпросмотре
+     * @private
+     * @param {HTMLElement} element - Элемент ссылки или сноски
+     */
+    static _showPreviewTooltip(element) {
+        this._hidePreviewTooltip();
+
+        const isLink = element.classList.contains('text-link');
+        const content = isLink
+            ? element.getAttribute('data-link-url')
+            : element.getAttribute('data-footnote-text');
+
+        if (!content) return;
+
+        const tooltip = document.createElement('div');
+        tooltip.className = 'link-footnote-tooltip';
+        tooltip.textContent = content;
+
+        document.body.appendChild(tooltip);
+
+        const rect = element.getBoundingClientRect();
+        const tooltipRect = tooltip.getBoundingClientRect();
+
+        let left = rect.left + (rect.width / 2) - (tooltipRect.width / 2);
+        let top = rect.bottom + 8;
+
+        const viewportWidth = window.innerWidth;
+        const viewportHeight = window.innerHeight;
+
+        if (left + tooltipRect.width > viewportWidth) {
+            left = viewportWidth - tooltipRect.width - 10;
+        }
+        if (left < 10) {
+            left = 10;
+        }
+
+        if (top + tooltipRect.height > viewportHeight) {
+            top = rect.top - tooltipRect.height - 8;
+        }
+
+        tooltip.style.left = `${left}px`;
+        tooltip.style.top = `${top}px`;
+
+        this._previewTooltip = tooltip;
+    }
+
+    /**
+     * Скрывает tooltip в предпросмотре
+     * @private
+     */
+    static _hidePreviewTooltip() {
+        if (this._previewTooltip) {
+            this._previewTooltip.remove();
+            this._previewTooltip = null;
+        }
+        if (this._previewTooltipTimeout) {
+            clearTimeout(this._previewTooltipTimeout);
+            this._previewTooltipTimeout = null;
+        }
     }
 }
