@@ -120,27 +120,51 @@ Object.assign(TextBlockManager.prototype, {
      * Обработчик клавиш
      */
     handleEditorKeydown(e, editor, textBlock) {
-        // Обработка горячих клавиш
-        if (e.ctrlKey || e.metaKey) {
-            switch (e.key.toLowerCase()) {
-                case 'b':
+        // Все горячие клавиши: Ctrl+Shift+* (e.code — независимо от раскладки)
+        if ((e.ctrlKey || e.metaKey) && e.shiftKey) {
+            switch (e.code) {
+                case 'KeyB':
                     e.preventDefault();
                     this.execCommand('bold');
                     this.updateToolbarState();
                     break;
-                case 'i':
+                case 'KeyI':
                     e.preventDefault();
                     this.execCommand('italic');
                     this.updateToolbarState();
                     break;
-                case 'u':
+                case 'KeyU':
                     e.preventDefault();
                     this.execCommand('underline');
                     this.updateToolbarState();
                     break;
-                case 'k':
+                case 'KeyX':
+                    e.preventDefault();
+                    this.execCommand('strikeThrough');
+                    this.updateToolbarState();
+                    break;
+                case 'KeyK':
                     e.preventDefault();
                     this.createOrEditLink();
+                    break;
+                case 'KeyF':
+                    e.preventDefault();
+                    this.createOrEditFootnote();
+                    break;
+                case 'KeyA':
+                    e.preventDefault();
+                    this.cycleAlignment();
+                    this.updateToolbarState();
+                    break;
+                case 'Period':
+                    e.preventDefault();
+                    this.stepFontSize(1);
+                    this.updateToolbarState();
+                    break;
+                case 'Comma':
+                    e.preventDefault();
+                    this.stepFontSize(-1);
+                    this.updateToolbarState();
                     break;
             }
         }
