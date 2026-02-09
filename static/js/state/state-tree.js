@@ -143,9 +143,10 @@ Object.assign(AppState, {
         const newNode = this._createNewNode(label);
 
         if (isChild) {
-            // Очищаем ТБ у родителя, если он был листовым узлом в разделе 5
+            // Очищаем ТБ и фактуру у родителя, если он был листовым узлом в разделе 5
             if (TreeUtils.isUnderSection5(parent) && TreeUtils.isTbLeaf(parent)) {
                 delete parent.tb;
+                delete parent.invoice;
             }
             this._addAsChild(parent, newNode);
         } else {
@@ -337,9 +338,10 @@ Object.assign(AppState, {
         this._performMove(draggedNode, draggedParent, newParent, targetNode, targetNodeId, position);
         this.generateNumbering();
 
-        // Очищаем ТБ у нового родителя, если он был листовым узлом в разделе 5
+        // Очищаем ТБ и фактуру у нового родителя, если он был листовым узлом в разделе 5
         if (wasNewParentTbLeaf) {
             delete newParent.tb;
+            delete newParent.invoice;
         }
 
         // Очищаем ТБ у старого родителя, если он стал листовым узлом в разделе 5
@@ -347,9 +349,10 @@ Object.assign(AppState, {
             delete draggedParent.tb;
         }
 
-        // Очищаем ТБ если узел переместился за пределы раздела 5
+        // Очищаем ТБ и фактуры если узел переместился за пределы раздела 5
         if (!TreeUtils.isUnderSection5(draggedNode)) {
             this._clearTbRecursive(draggedNode);
+            this._clearInvoiceRecursive(draggedNode);
         }
 
         // Обрабатываем таблицы метрик для узлов под пунктом 5
@@ -687,6 +690,23 @@ Object.assign(AppState, {
         if (node.children) {
             for (const child of node.children) {
                 this._clearTbRecursive(child);
+            }
+        }
+    },
+
+    /**
+     * Рекурсивно очищает свойство invoice у узла и всех его потомков
+     * @private
+     * @param {Object} node - Узел для очистки
+     */
+    _clearInvoiceRecursive(node) {
+        if (node.invoice) {
+            delete node.invoice;
+        }
+
+        if (node.children) {
+            for (const child of node.children) {
+                this._clearInvoiceRecursive(child);
             }
         }
     }

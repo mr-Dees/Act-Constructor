@@ -332,8 +332,24 @@ const AppState = {
             tree: this._serializeTree(this.treeData),
             tables: this._serializeTables(),
             textBlocks: this._serializeTextBlocks(),
-            violations: this._serializeViolations()
+            violations: this._serializeViolations(),
+            invoiceNodeIds: this._collectInvoiceNodeIds()
         };
+    },
+
+    /**
+     * Собирает ID узлов, у которых есть прикреплённая фактура
+     * @private
+     * @returns {string[]} Массив ID узлов с фактурами
+     */
+    _collectInvoiceNodeIds() {
+        const ids = [];
+        const walk = (node) => {
+            if (node.invoice) ids.push(node.id);
+            if (node.children) node.children.forEach(walk);
+        };
+        if (this.treeData) walk(this.treeData);
+        return ids;
     },
 
     /**

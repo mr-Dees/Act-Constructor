@@ -341,6 +341,10 @@ class ActDataSchema(BaseModel):
         default_factory=dict,
         description="Нарушения"
     )
+    invoiceNodeIds: list[str] = Field(
+        default_factory=list,
+        description="ID узлов, у которых есть прикреплённая фактура"
+    )
 
 
 class ActSaveResponse(BaseModel):

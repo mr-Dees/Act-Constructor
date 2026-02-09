@@ -353,6 +353,41 @@ async def save_act_content(
                         json.dumps(v_data.recommendations.model_dump())
                     )
 
+                # Синхронизируем фактуры: удаляем записи для узлов без фактур
+                acts_invoices = adapter.get_table_name("act_invoices")
+
+                if data.invoiceNodeIds:
+                    # Удаляем фактуры для узлов, которых нет в списке
+                    await conn.execute(
+                        f"""
+                        DELETE FROM {acts_invoices}
+                        WHERE act_id = $1
+                          AND node_id != ALL($2::varchar[])
+                        """,
+                        act_id,
+                        data.invoiceNodeIds,
+                    )
+
+                    # Обновляем node_number для оставшихся фактур
+                    for nid in data.invoiceNodeIds:
+                        node_number = _extract_node_number(data.tree, nid)
+                        if node_number:
+                            await conn.execute(
+                                f"""
+                                UPDATE {acts_invoices}
+                                SET node_number = $1
+                                WHERE act_id = $2 AND node_id = $3
+                                  AND (node_number IS DISTINCT FROM $1)
+                                """,
+                                node_number, act_id, nid,
+                            )
+                else:
+                    # Список пуст — удаляем все фактуры акта
+                    await conn.execute(
+                        f"DELETE FROM {acts_invoices} WHERE act_id = $1",
+                        act_id,
+                    )
+
                 # Обновляем last_edited_by и last_edited_at в acts
                 await conn.execute(
                     f"""
