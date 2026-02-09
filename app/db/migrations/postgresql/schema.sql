@@ -391,6 +391,33 @@ COMMENT ON COLUMN act_invoices.updated_at IS 'Дата и время после�
 COMMENT ON COLUMN act_invoices.created_by IS 'Числовой логин пользователя-создателя';
 
 -- ============================================================================
+-- РЕЕСТР HIVE-ТАБЛИЦ (для локального тестирования)
+-- ============================================================================
+
+CREATE TABLE IF NOT EXISTS hive_tables_registry (
+    id SERIAL PRIMARY KEY,
+    schema_name VARCHAR(255) NOT NULL,
+    table_name VARCHAR(255) NOT NULL,
+    UNIQUE(schema_name, table_name)
+);
+
+COMMENT ON TABLE hive_tables_registry IS 'Реестр hive-таблиц (реплика для фактур)';
+
+-- Заполняем тестовыми данными (аналог текущего HIVE_MOCK_TABLES)
+INSERT INTO hive_tables_registry (schema_name, table_name) VALUES
+    ('team_sva_oarb_3', 't_audit_invoices_main'),
+    ('team_sva_oarb_3', 't_audit_invoices_details'),
+    ('team_sva_oarb_3', 't_audit_invoices_summary'),
+    ('team_sva_oarb_3', 't_audit_metrics_ks'),
+    ('team_sva_oarb_3', 't_audit_metrics_fr'),
+    ('team_sva_oarb_3', 't_audit_metrics_or'),
+    ('team_sva_oarb_3', 't_audit_risk_regular'),
+    ('team_sva_oarb_3', 't_audit_risk_operational'),
+    ('team_sva_oarb_3', 't_audit_fact_data'),
+    ('team_sva_oarb_3', 't_audit_fact_aggregated')
+ON CONFLICT DO NOTHING;
+
+-- ============================================================================
 -- ИНДЕКСЫ ДЛЯ ОПТИМИЗАЦИИ ЗАПРОСОВ
 -- ============================================================================
 

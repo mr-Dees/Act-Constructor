@@ -122,6 +122,12 @@ class Settings(BaseSettings):
     invoice_hive_schema: str = Field(default="team_sva_oarb_3")
     invoice_gp_schema: str = Field(default="s_grnplm_ld_audit_da_sandbox_oarb")
 
+    # === Реестр hive-таблиц (реплика на GP/PG) ===
+    invoice_hive_registry_schema: str = Field(default="s_grnplm_ld_audit_project_4")
+    invoice_hive_registry_table: str = Field(default="hive_tables_registry")
+    invoice_hive_registry_col_schema: str = Field(default="schema_name")
+    invoice_hive_registry_col_table: str = Field(default="table_name")
+
     # === Пулы подключений ===
     db_pool_min_size: int = Field(default=2, ge=1)
     db_pool_max_size: int = Field(default=10, ge=2)

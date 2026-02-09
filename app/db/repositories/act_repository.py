@@ -21,20 +21,6 @@ from app.schemas.act_metadata import (
 
 logger = logging.getLogger("act_constructor.db.repository")
 
-# Бутафорский список таблиц Hive (TODO: подключить реальный источник)
-HIVE_MOCK_TABLES = [
-    "t_audit_invoices_main",
-    "t_audit_invoices_details",
-    "t_audit_invoices_summary",
-    "t_audit_metrics_ks",
-    "t_audit_metrics_fr",
-    "t_audit_metrics_or",
-    "t_audit_risk_regular",
-    "t_audit_risk_operational",
-    "t_audit_fact_data",
-    "t_audit_fact_aggregated",
-]
-
 
 class ActDBService:
     """Сервис для работы с актами и их связанными сущностями в базе данных."""
@@ -1380,10 +1366,23 @@ class ActDBService:
         settings = get_settings()
 
         if db_type == "hive":
-            schema = settings.invoice_hive_schema
+            if settings.db_type == "postgresql":
+                registry_schema = "public"
+            else:
+                registry_schema = settings.invoice_hive_registry_schema
+
+            registry_table = settings.invoice_hive_registry_table
+            col_schema = settings.invoice_hive_registry_col_schema
+            col_table = settings.invoice_hive_registry_col_table
+
+            rows = await self.conn.fetch(
+                f'SELECT {col_schema}, {col_table} '
+                f'FROM {registry_schema}.{registry_table} '
+                f'ORDER BY {col_table}',
+            )
             return [
-                {"schema_name": schema, "table_name": t}
-                for t in HIVE_MOCK_TABLES
+                {"schema_name": row[col_schema], "table_name": row[col_table]}
+                for row in rows
             ]
 
         elif db_type == "greenplum":
