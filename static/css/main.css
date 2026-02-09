@@ -78,6 +78,7 @@
 @import './modules/dialog/dialog.css';
 @import './modules/dialog/dialog-overlay.css';
 @import './modules/dialog/dialog-buttons.css';
+@import './modules/dialog/dialog-invoice.css';
 
 /* Модуль управления актами */
 @import './modules/acts-manager/acts-manager-base.css';

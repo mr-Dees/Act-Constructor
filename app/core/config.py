@@ -118,6 +118,10 @@ class Settings(BaseSettings):
         default="t_db_oarb_audit_act_"
     )
 
+    # === Схемы для фактур ===
+    invoice_hive_schema: str = Field(default="team_sva_oarb_3")
+    invoice_gp_schema: str = Field(default="s_grnplm_ld_audit_da_sandbox_oarb")
+
     # === Пулы подключений ===
     db_pool_min_size: int = Field(default=2, ge=1)
     db_pool_max_size: int = Field(default=10, ge=2)

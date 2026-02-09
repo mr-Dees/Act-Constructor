@@ -52,6 +52,14 @@ class TreeContextMenu {
         if (attachInvoiceItem) attachInvoiceItem.style.display = showInvoice ? '' : 'none';
         if (attachInvoiceSeparator) attachInvoiceSeparator.style.display = showInvoice ? '' : 'none';
 
+        // Меняем текст пункта в зависимости от наличия фактуры
+        if (attachInvoiceItem && showInvoice) {
+            const hasInvoice = !!node.invoice;
+            attachInvoiceItem.textContent = hasInvoice
+                ? '📎 Изменить информацию о фактуре'
+                : '📎 Приложить фактуру';
+        }
+
         // Блокируем добавление подпунктов для всех 5.*, если где-либо на 5.* есть таблицы рисков
         const addChildItem = this.menu.querySelector('[data-action="add-child"]');
         if (addChildItem) {
@@ -276,14 +284,9 @@ class TreeContextMenu {
         }
     }
 
-    /** Приложить фактуру (заглушка) */
+    /** Приложить фактуру */
     handleAttachInvoice(node, nodeId) {
-        DialogManager.alert({
-            title: 'Приложить фактуру',
-            message: `Функционал прикрепления фактуры к пункту ${node.number || ''} находится в разработке`,
-            icon: '📎',
-            type: 'info'
-        });
+        InvoiceDialog.show(node, nodeId);
     }
 
     /** Удаляет узел */

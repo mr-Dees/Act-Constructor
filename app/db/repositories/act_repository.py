@@ -21,6 +21,20 @@ from app.schemas.act_metadata import (
 
 logger = logging.getLogger("act_constructor.db.repository")
 
+# Бутафорский список таблиц Hive (TODO: подключить реальный источник)
+HIVE_MOCK_TABLES = [
+    "t_audit_invoices_main",
+    "t_audit_invoices_details",
+    "t_audit_invoices_summary",
+    "t_audit_metrics_ks",
+    "t_audit_metrics_fr",
+    "t_audit_metrics_or",
+    "t_audit_risk_regular",
+    "t_audit_risk_operational",
+    "t_audit_fact_data",
+    "t_audit_fact_aggregated",
+]
+
 
 class ActDBService:
     """Сервис для работы с актами и их связанными сущностями в базе данных."""
@@ -38,6 +52,7 @@ class ActDBService:
         self.tables = self.adapter.get_table_name("act_tables")
         self.textblocks = self.adapter.get_table_name("act_textblocks")
         self.violations = self.adapter.get_table_name("act_violations")
+        self.invoices = self.adapter.get_table_name("act_invoices")
 
     # -------------------------------------------------------------------------
     # ВСПОМОГАТЕЛЬНЫЕ МЕТОДЫ
@@ -1343,3 +1358,197 @@ class ActDBService:
         role = row["role"]
         can_edit = role in ("Куратор", "Руководитель", "Редактор")
         return {"has_access": True, "can_edit": can_edit, "role": role}
+
+    # -------------------------------------------------------------------------
+    # ФАКТУРЫ
+    # -------------------------------------------------------------------------
+
+    async def list_tables(self, db_type: str) -> list[dict]:
+        """
+        Возвращает полный список таблиц в указанной БД.
+
+        Args:
+            db_type: Тип БД (hive, greenplum)
+
+        Returns:
+            Список словарей {schema_name, table_name}
+
+        Raises:
+            ValueError: Если db_type не поддерживается
+        """
+        from app.core.config import get_settings
+        settings = get_settings()
+
+        if db_type == "hive":
+            schema = settings.invoice_hive_schema
+            return [
+                {"schema_name": schema, "table_name": t}
+                for t in HIVE_MOCK_TABLES
+            ]
+
+        elif db_type == "greenplum":
+            # Тестовый режим (локальный PostgreSQL) или прод (Greenplum)
+            if settings.db_type == "postgresql":
+                target_schema = "public"
+            else:
+                target_schema = settings.invoice_gp_schema
+
+            rows = await self.conn.fetch(
+                "SELECT tablename FROM pg_tables WHERE schemaname = $1 ORDER BY tablename",
+                target_schema,
+            )
+            return [
+                {"schema_name": target_schema, "table_name": row["tablename"]}
+                for row in rows
+            ]
+
+        else:
+            raise ValueError(f"Неподдерживаемый тип БД: {db_type}")
+
+    async def save_invoice(self, data: dict, username: str) -> dict:
+        """
+        Сохраняет фактуру (UPSERT по act_id + node_id).
+
+        Args:
+            data: Словарь с данными фактуры
+            username: Имя пользователя
+
+        Returns:
+            Словарь с данными сохраненной фактуры
+        """
+        row = await self.conn.fetchrow(
+            f"""
+            INSERT INTO {self.invoices} (
+                act_id, node_id, node_number, db_type,
+                schema_name, table_name, metrics_types, created_by
+            )
+            VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+            ON CONFLICT (act_id, node_id) DO UPDATE SET
+                node_number = EXCLUDED.node_number,
+                db_type = EXCLUDED.db_type,
+                schema_name = EXCLUDED.schema_name,
+                table_name = EXCLUDED.table_name,
+                metrics_types = EXCLUDED.metrics_types,
+                verification_status = 'pending',
+                updated_at = CURRENT_TIMESTAMP
+            RETURNING id, act_id, node_id, node_number, db_type,
+                      schema_name, table_name, metrics_types,
+                      verification_status, created_at, updated_at, created_by
+            """,
+            data["act_id"],
+            data["node_id"],
+            data.get("node_number"),
+            data["db_type"],
+            data["schema_name"],
+            data["table_name"],
+            json.dumps(data["metrics_types"]),
+            username,
+        )
+
+        logger.info(
+            f"Фактура сохранена: act_id={data['act_id']}, "
+            f"node_id={data['node_id']}, table={data['table_name']}"
+        )
+
+        return {
+            "id": row["id"],
+            "act_id": row["act_id"],
+            "node_id": row["node_id"],
+            "node_number": row["node_number"],
+            "db_type": row["db_type"],
+            "schema_name": row["schema_name"],
+            "table_name": row["table_name"],
+            "metrics_types": json.loads(row["metrics_types"])
+                if isinstance(row["metrics_types"], str)
+                else row["metrics_types"],
+            "verification_status": row["verification_status"],
+            "created_at": row["created_at"].isoformat(),
+            "updated_at": row["updated_at"].isoformat(),
+            "created_by": row["created_by"],
+        }
+
+    async def get_invoice_for_node(
+            self,
+            act_id: int,
+            node_id: str,
+    ) -> dict | None:
+        """Получает фактуру для конкретного узла."""
+        row = await self.conn.fetchrow(
+            f"""
+            SELECT id, act_id, node_id, node_number, db_type,
+                   schema_name, table_name, metrics_types,
+                   verification_status, created_at, updated_at, created_by
+            FROM {self.invoices}
+            WHERE act_id = $1 AND node_id = $2
+            """,
+            act_id,
+            node_id,
+        )
+
+        if not row:
+            return None
+
+        return {
+            "id": row["id"],
+            "act_id": row["act_id"],
+            "node_id": row["node_id"],
+            "node_number": row["node_number"],
+            "db_type": row["db_type"],
+            "schema_name": row["schema_name"],
+            "table_name": row["table_name"],
+            "metrics_types": json.loads(row["metrics_types"])
+                if isinstance(row["metrics_types"], str)
+                else row["metrics_types"],
+            "verification_status": row["verification_status"],
+            "created_at": row["created_at"].isoformat(),
+            "updated_at": row["updated_at"].isoformat(),
+            "created_by": row["created_by"],
+        }
+
+    async def get_invoices_for_act(self, act_id: int) -> list[dict]:
+        """Получает все фактуры для акта."""
+        rows = await self.conn.fetch(
+            f"""
+            SELECT id, act_id, node_id, node_number, db_type,
+                   schema_name, table_name, metrics_types,
+                   verification_status, created_at, updated_at, created_by
+            FROM {self.invoices}
+            WHERE act_id = $1
+            ORDER BY node_number, created_at
+            """,
+            act_id,
+        )
+
+        return [
+            {
+                "id": row["id"],
+                "act_id": row["act_id"],
+                "node_id": row["node_id"],
+                "node_number": row["node_number"],
+                "db_type": row["db_type"],
+                "schema_name": row["schema_name"],
+                "table_name": row["table_name"],
+                "metrics_types": json.loads(row["metrics_types"])
+                    if isinstance(row["metrics_types"], str)
+                    else row["metrics_types"],
+                "verification_status": row["verification_status"],
+                "created_at": row["created_at"].isoformat(),
+                "updated_at": row["updated_at"].isoformat(),
+                "created_by": row["created_by"],
+            }
+            for row in rows
+        ]
+
+    async def verify_invoice(self, invoice_id: int) -> dict:
+        """
+        Верификация фактуры (TODO-заглушка).
+
+        В будущем здесь будет вызов внешнего сервиса для проверки
+        соответствия фактуры и данных в таблице.
+        """
+        logger.info(f"TODO: Верификация фактуры ID={invoice_id} (заглушка)")
+        return {
+            "invoice_id": invoice_id,
+            "status": "pending",
+            "message": "Верификация пока не реализована",
+        }

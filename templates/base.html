@@ -59,6 +59,7 @@
     <script src="{{ url_for('static', path='js/dialog/dialog-confirm.js') }}"></script>
     <script src="{{ url_for('static', path='js/dialog/dialog-create-act.js') }}"></script>
     <script src="{{ url_for('static', path='js/dialog/dialog-help.js') }}"></script>
+    <script src="{{ url_for('static', path='js/dialog/dialog-invoice.js') }}"></script>
 
     <!-- Контекстное меню -->
     <script src="{{ url_for('static', path='js/context-menu/context-menu-core.js') }}"></script>
@@ -126,6 +127,7 @@
 
     <!-- Шаблон для меню актов -->
     {% include 'header/acts_menu_item.html' %}
+    {% include 'components/invoice_dialog.html' %}
     {% include 'components/acts/create_act_dialog.html' %}
     {% include 'components/acts/team_member_row.html' %}
     {% include 'components/acts/directive_row.html' %}

@@ -159,6 +159,10 @@ async def get_act_content(
                 for row in v_rows
             }
 
+            # Получаем фактуры
+            invoices_list = await db_service.get_invoices_for_act(act_id)
+            invoices = {inv["node_id"]: inv for inv in invoices_list}
+
             logger.info(
                 f"Загружено содержимое акта ID={act_id}, "
                 f"КМ={act_metadata.km_number}, is_process_based={act_metadata.is_process_based}"
@@ -171,6 +175,7 @@ async def get_act_content(
                 'tables': tables,
                 'textBlocks': textBlocks,
                 'violations': violations,
+                'invoices': invoices,
                 'userPermission': {
                     'canEdit': permission["can_edit"],
                     'role': permission["role"]

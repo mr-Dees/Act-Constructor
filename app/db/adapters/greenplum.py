@@ -102,6 +102,7 @@ class GreenplumAdapter(DatabaseAdapter):
         async with conn.transaction():
             # Порядок важен: сначала зависимые таблицы
             tables_to_delete = [
+                "act_invoices",
                 "act_violations",
                 "act_textblocks",
                 "act_tables",
