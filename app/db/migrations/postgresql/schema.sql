@@ -396,27 +396,25 @@ COMMENT ON COLUMN act_invoices.created_by IS 'Числовой логин пол
 -- РЕЕСТР HIVE-ТАБЛИЦ (для локального тестирования)
 -- ============================================================================
 
-CREATE TABLE IF NOT EXISTS hive_tables_registry (
+CREATE TABLE IF NOT EXISTS t_db_oarb_ua_hadoop_tables (
     id SERIAL PRIMARY KEY,
-    schema_name VARCHAR(255) NOT NULL,
-    table_name VARCHAR(255) NOT NULL,
-    UNIQUE(schema_name, table_name)
+    table_name VARCHAR(255) NOT NULL UNIQUE
 );
 
-COMMENT ON TABLE hive_tables_registry IS 'Реестр hive-таблиц (реплика для фактур)';
+COMMENT ON TABLE t_db_oarb_ua_hadoop_tables IS 'Реестр hive-таблиц (реплика для фактур)';
 
 -- Заполняем тестовыми данными (аналог текущего HIVE_MOCK_TABLES)
-INSERT INTO hive_tables_registry (schema_name, table_name) VALUES
-    ('team_sva_oarb_3', 't_audit_invoices_main'),
-    ('team_sva_oarb_3', 't_audit_invoices_details'),
-    ('team_sva_oarb_3', 't_audit_invoices_summary'),
-    ('team_sva_oarb_3', 't_audit_metrics_ks'),
-    ('team_sva_oarb_3', 't_audit_metrics_fr'),
-    ('team_sva_oarb_3', 't_audit_metrics_or'),
-    ('team_sva_oarb_3', 't_audit_risk_regular'),
-    ('team_sva_oarb_3', 't_audit_risk_operational'),
-    ('team_sva_oarb_3', 't_audit_fact_data'),
-    ('team_sva_oarb_3', 't_audit_fact_aggregated')
+INSERT INTO t_db_oarb_ua_hadoop_tables (table_name) VALUES
+    ('t_audit_invoices_main'),
+    ('t_audit_invoices_details'),
+    ('t_audit_invoices_summary'),
+    ('t_audit_metrics_ks'),
+    ('t_audit_metrics_fr'),
+    ('t_audit_metrics_or'),
+    ('t_audit_risk_regular'),
+    ('t_audit_risk_operational'),
+    ('t_audit_fact_data'),
+    ('t_audit_fact_aggregated')
 ON CONFLICT DO NOTHING;
 
 -- ============================================================================

@@ -34,7 +34,7 @@ async def list_tables(
         username: Имя пользователя (из зависимости)
 
     Returns:
-        Список таблиц [{schema_name, table_name}, ...]
+        Список таблиц [{table_name}, ...]
     """
     if db_type not in ("hive", "greenplum"):
         raise HTTPException(

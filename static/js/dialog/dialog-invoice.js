@@ -26,7 +26,7 @@ class InvoiceDialog extends DialogBase {
     static _currentNodeId = null;
 
     /**
-     * Выбранная таблица {schema_name, table_name}
+     * Выбранная таблица {table_name}
      * @private
      */
     static _selectedTable = null;
@@ -48,7 +48,7 @@ class InvoiceDialog extends DialogBase {
     /**
      * Кэш загруженных таблиц для текущего db_type
      * @private
-     * @type {Array<{schema_name: string, table_name: string}>|null}
+     * @type {Array<{table_name: string}>|null}
      */
     static _cachedTables = null;
 
@@ -187,7 +187,6 @@ class InvoiceDialog extends DialogBase {
         // Заполняем таблицу — показываем имя в строке поиска
         if (invoice.table_name) {
             this._selectedTable = {
-                schema_name: invoice.schema_name,
                 table_name: invoice.table_name,
             };
             const searchInput = overlay.querySelector('.invoice-search-input');
@@ -392,12 +391,17 @@ class InvoiceDialog extends DialogBase {
 
         const dbType = overlay.querySelector('input[name="invoice-db-type"]:checked')?.value || 'hive';
 
+        // Схема берётся из конфига, а не из таблицы реестра
+        const schemaName = dbType === 'hive'
+            ? (this._invoiceConfig?.hiveSchema || 'team_sva_oarb_3')
+            : (this._invoiceConfig?.gpSchema || 's_grnplm_ld_audit_da_sandbox_oarb');
+
         const data = {
             act_id: parseInt(actId, 10),
             node_id: this._currentNodeId,
             node_number: this._currentNode?.number || null,
             db_type: dbType,
-            schema_name: this._selectedTable.schema_name,
+            schema_name: schemaName,
             table_name: this._selectedTable.table_name,
             metrics_types: Array.from(this._selectedMetrics),
         };

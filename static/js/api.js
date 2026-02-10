@@ -616,7 +616,7 @@ class APIClient {
      * Загружает полный список таблиц для фактуры
      *
      * @param {string} dbType - Тип БД ('hive' или 'greenplum')
-     * @returns {Promise<Array<{schema_name: string, table_name: string}>>}
+     * @returns {Promise<Array<{table_name: string}>>}
      */
     static async loadInvoiceTables(dbType) {
         const username = AuthManager.getCurrentUser();

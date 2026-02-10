@@ -1360,7 +1360,7 @@ class ActDBService:
             db_type: Тип БД (hive, greenplum)
 
         Returns:
-            Список словарей {schema_name, table_name}
+            Список словарей {table_name}
 
         Raises:
             ValueError: Если db_type не поддерживается
@@ -1375,16 +1375,15 @@ class ActDBService:
                 registry_schema = settings.invoice_hive_registry_schema
 
             registry_table = settings.invoice_hive_registry_table
-            col_schema = settings.invoice_hive_registry_col_schema
             col_table = settings.invoice_hive_registry_col_table
 
             rows = await self.conn.fetch(
-                f'SELECT {col_schema}, {col_table} '
+                f'SELECT {col_table} '
                 f'FROM {registry_schema}.{registry_table} '
                 f'ORDER BY {col_table}',
             )
             return [
-                {"schema_name": row[col_schema], "table_name": row[col_table]}
+                {"table_name": row[col_table]}
                 for row in rows
             ]
 
@@ -1400,7 +1399,7 @@ class ActDBService:
                 target_schema,
             )
             return [
-                {"schema_name": target_schema, "table_name": row["tablename"]}
+                {"table_name": row["tablename"]}
                 for row in rows
             ]
 

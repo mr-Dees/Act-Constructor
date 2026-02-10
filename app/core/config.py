@@ -124,8 +124,7 @@ class Settings(BaseSettings):
 
     # === Реестр hive-таблиц (реплика на GP/PG) ===
     invoice_hive_registry_schema: str = Field(default="s_grnplm_ld_audit_project_4")
-    invoice_hive_registry_table: str = Field(default="hive_tables_registry")
-    invoice_hive_registry_col_schema: str = Field(default="schema_name")
+    invoice_hive_registry_table: str = Field(default="t_db_oarb_ua_hadoop_tables")
     invoice_hive_registry_col_table: str = Field(default="table_name")
 
     # === Пулы подключений ===
