@@ -531,12 +531,13 @@ class ActDBService:
                 await self.conn.execute(
                     f"""
                     INSERT INTO {self.directives} (
-                        act_id, point_number, directive_number, order_index
+                        act_id, point_number, node_id, directive_number, order_index
                     )
-                    VALUES ($1, $2, $3, $4)
+                    VALUES ($1, $2, $3, $4, $5)
                     """,
                     act_id,
                     directive.point_number,
+                    directive.node_id,
                     directive.directive_number,
                     idx,
                 )
@@ -694,7 +695,7 @@ class ActDBService:
 
         directive_rows = await self.conn.fetch(
             f"""
-            SELECT point_number, directive_number
+            SELECT point_number, node_id, directive_number
             FROM {self.directives}
             WHERE act_id = $1
             ORDER BY order_index
@@ -706,6 +707,7 @@ class ActDBService:
             ActDirective(
                 point_number=row["point_number"],
                 directive_number=row["directive_number"],
+                node_id=row["node_id"],
             )
             for row in directive_rows
         ]
@@ -978,12 +980,13 @@ class ActDBService:
                     await self.conn.execute(
                         f"""
                         INSERT INTO {self.directives} (
-                            act_id, point_number, directive_number, order_index
+                            act_id, point_number, node_id, directive_number, order_index
                         )
-                        VALUES ($1, $2, $3, $4)
+                        VALUES ($1, $2, $3, $4, $5)
                         """,
                         act_id,
                         directive.point_number,
+                        directive.node_id,
                         directive.directive_number,
                         idx,
                     )

@@ -144,6 +144,7 @@ CREATE TABLE IF NOT EXISTS act_directives (
     id SERIAL PRIMARY KEY,
     act_id INTEGER NOT NULL REFERENCES acts(id) ON DELETE CASCADE,
     point_number VARCHAR(50) NOT NULL,
+    node_id VARCHAR(100),
     directive_number VARCHAR(100) NOT NULL,
     order_index INTEGER DEFAULT 0,
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
@@ -160,6 +161,7 @@ COMMENT ON TABLE act_directives IS 'Действующие поручения, �
 COMMENT ON COLUMN act_directives.id IS 'Уникальный идентификатор поручения';
 COMMENT ON COLUMN act_directives.act_id IS 'Ссылка на акт';
 COMMENT ON COLUMN act_directives.point_number IS 'Номер пункта в акте (формат: 5.X или 5.X.Y или 5.X.Y.Z и т.д.)';
+COMMENT ON COLUMN act_directives.node_id IS 'ID узла в дереве для синхронизации point_number';
 COMMENT ON COLUMN act_directives.directive_number IS 'Номер действующего поручения';
 COMMENT ON COLUMN act_directives.order_index IS 'Порядок отображения поручения (для сортировки)';
 COMMENT ON COLUMN act_directives.created_at IS 'Дата и время создания записи';

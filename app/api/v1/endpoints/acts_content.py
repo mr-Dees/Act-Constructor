@@ -388,6 +388,30 @@ async def save_act_content(
                         act_id,
                     )
 
+                # Синхронизируем поручения: обновляем point_number по node_id
+                acts_directives = adapter.get_table_name("act_directives")
+
+                directives_with_node = await conn.fetch(
+                    f"""
+                    SELECT id, node_id, point_number
+                    FROM {acts_directives}
+                    WHERE act_id = $1 AND node_id IS NOT NULL
+                    """,
+                    act_id,
+                )
+
+                for dir_row in directives_with_node:
+                    new_number = _extract_node_number(data.tree, dir_row["node_id"])
+                    if new_number and new_number != dir_row["point_number"]:
+                        await conn.execute(
+                            f"""
+                            UPDATE {acts_directives}
+                            SET point_number = $1
+                            WHERE id = $2
+                            """,
+                            new_number, dir_row["id"],
+                        )
+
                 # Обновляем last_edited_by и last_edited_at в acts
                 await conn.execute(
                     f"""

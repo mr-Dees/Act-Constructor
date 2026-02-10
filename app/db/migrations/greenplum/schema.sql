@@ -114,6 +114,7 @@ CREATE TABLE {SCHEMA}.{PREFIX}act_directives (
     id BIGSERIAL PRIMARY KEY,
     act_id BIGINT NOT NULL,
     point_number VARCHAR(50) NOT NULL,
+    node_id VARCHAR(100),
     directive_number VARCHAR(100) NOT NULL,
     order_index INTEGER DEFAULT 0,
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
@@ -125,6 +126,7 @@ COMMENT ON TABLE {SCHEMA}.{PREFIX}act_directives IS 'Действующие по
 COMMENT ON COLUMN {SCHEMA}.{PREFIX}act_directives.id IS 'Уникальный идентификатор поручения';
 COMMENT ON COLUMN {SCHEMA}.{PREFIX}act_directives.act_id IS 'Ссылка на акт';
 COMMENT ON COLUMN {SCHEMA}.{PREFIX}act_directives.point_number IS 'Номер пункта в акте (формат: 5.X или 5.X.Y или 5.X.Y.Z и т.д.)';
+COMMENT ON COLUMN {SCHEMA}.{PREFIX}act_directives.node_id IS 'ID узла в дереве для синхронизации point_number';
 COMMENT ON COLUMN {SCHEMA}.{PREFIX}act_directives.directive_number IS 'Номер действующего поручения';
 COMMENT ON COLUMN {SCHEMA}.{PREFIX}act_directives.order_index IS 'Порядок отображения поручения (для сортировки)';
 COMMENT ON COLUMN {SCHEMA}.{PREFIX}act_directives.created_at IS 'Дата и время создания записи';
