@@ -445,6 +445,16 @@ class InvoiceDialog extends DialogBase {
 
             this._close();
 
+            // Сохраняем акт в БД чтобы audit_act_id и audit_point_id
+            // сразу попали в таблицу act_invoices
+            if (window.currentActId) {
+                try {
+                    await APIClient.saveActContent(window.currentActId);
+                } catch (saveErr) {
+                    console.warn('Не удалось сохранить акт после прикрепления фактуры:', saveErr);
+                }
+            }
+
         } catch (err) {
             console.error('Ошибка сохранения фактуры:', err);
             Notifications.error(`Ошибка сохранения: ${err.message}`);
