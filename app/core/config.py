@@ -131,6 +131,11 @@ class Settings(BaseSettings):
     db_pool_min_size: int = Field(default=2, ge=1)
     db_pool_max_size: int = Field(default=10, ge=2)
 
+    # === Сервис идентификации аудита ===
+    # TODO: URL внешнего сервиса идентификации аудита
+    audit_id_service_url: str = ""
+    audit_id_service_timeout: int = 10
+
     # === Аутентификация ===
     jupyterhub_user: str = Field(default="unknown_user")
 

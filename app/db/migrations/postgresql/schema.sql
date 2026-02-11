@@ -38,6 +38,9 @@ CREATE TABLE IF NOT EXISTS acts (
     locked_at TIMESTAMP DEFAULT NULL,
     lock_expires_at TIMESTAMP DEFAULT NULL,
 
+    -- Идентификатор аудита из внешнего сервиса
+    audit_act_id VARCHAR(36),
+
     -- Системные поля
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
@@ -114,6 +117,7 @@ COMMENT ON COLUMN acts.last_edited_at IS 'Дата и время последн�
 CREATE TABLE IF NOT EXISTS audit_team_members (
     id SERIAL PRIMARY KEY,
     act_id INTEGER NOT NULL REFERENCES acts(id) ON DELETE CASCADE,
+    audit_act_id VARCHAR(36),
     role VARCHAR(50) NOT NULL CHECK (role IN ('Куратор', 'Руководитель', 'Редактор', 'Участник')),
     full_name VARCHAR(255) NOT NULL,
     position VARCHAR(255) NOT NULL,
@@ -143,6 +147,8 @@ COMMENT ON COLUMN audit_team_members.created_at IS 'Дата и время до�
 CREATE TABLE IF NOT EXISTS act_directives (
     id SERIAL PRIMARY KEY,
     act_id INTEGER NOT NULL REFERENCES acts(id) ON DELETE CASCADE,
+    audit_act_id VARCHAR(36),
+    audit_point_id VARCHAR(36),
     point_number VARCHAR(50) NOT NULL,
     node_id VARCHAR(100),
     directive_number VARCHAR(100) NOT NULL,
@@ -196,6 +202,8 @@ COMMENT ON COLUMN act_tree.updated_at IS 'Дата и время последн�
 CREATE TABLE IF NOT EXISTS act_tables (
     id SERIAL PRIMARY KEY,
     act_id INTEGER NOT NULL REFERENCES acts(id) ON DELETE CASCADE,
+    audit_act_id VARCHAR(36),
+    audit_point_id VARCHAR(36),
     table_id VARCHAR(100) NOT NULL,
     node_id VARCHAR(100) NOT NULL,
     node_number VARCHAR(50),
@@ -246,6 +254,8 @@ COMMENT ON COLUMN act_tables.updated_at IS 'Дата и время послед�
 CREATE TABLE IF NOT EXISTS act_textblocks (
     id SERIAL PRIMARY KEY,
     act_id INTEGER NOT NULL REFERENCES acts(id) ON DELETE CASCADE,
+    audit_act_id VARCHAR(36),
+    audit_point_id VARCHAR(36),
     textblock_id VARCHAR(100) NOT NULL,
     node_id VARCHAR(100) NOT NULL,
     node_number VARCHAR(50),
@@ -279,6 +289,8 @@ COMMENT ON COLUMN act_textblocks.updated_at IS 'Дата и время посл�
 CREATE TABLE IF NOT EXISTS act_violations (
     id SERIAL PRIMARY KEY,
     act_id INTEGER NOT NULL REFERENCES acts(id) ON DELETE CASCADE,
+    audit_act_id VARCHAR(36),
+    audit_point_id VARCHAR(36),
     violation_id VARCHAR(100) NOT NULL,
     node_id VARCHAR(100) NOT NULL,
     node_number VARCHAR(50),
@@ -359,6 +371,8 @@ COMMENT ON COLUMN act_violations.updated_at IS 'Дата и время посл�
 CREATE TABLE IF NOT EXISTS act_invoices (
     id SERIAL PRIMARY KEY,
     act_id INTEGER NOT NULL REFERENCES acts(id) ON DELETE CASCADE,
+    audit_act_id VARCHAR(36),
+    audit_point_id VARCHAR(36),
     node_id VARCHAR(100) NOT NULL,
     node_number VARCHAR(50),
     db_type VARCHAR(20) NOT NULL CHECK (db_type IN ('hive', 'greenplum')),
@@ -555,6 +569,49 @@ CREATE INDEX IF NOT EXISTS idx_act_invoices_node
     ON act_invoices(act_id, node_id);
 
 COMMENT ON INDEX idx_act_invoices_node IS 'Индекс для поиска фактуры по узлу';
+
+-- Индексы на audit_act_id
+CREATE INDEX IF NOT EXISTS idx_acts_audit_act_id
+    ON acts(audit_act_id)
+    WHERE audit_act_id IS NOT NULL;
+
+COMMENT ON INDEX idx_acts_audit_act_id IS 'Индекс для поиска по идентификатору аудита акта';
+
+CREATE INDEX IF NOT EXISTS idx_audit_team_audit_act_id
+    ON audit_team_members(audit_act_id)
+    WHERE audit_act_id IS NOT NULL;
+
+COMMENT ON INDEX idx_audit_team_audit_act_id IS 'Индекс для поиска членов группы по идентификатору аудита';
+
+CREATE INDEX IF NOT EXISTS idx_act_directives_audit_act_id
+    ON act_directives(audit_act_id)
+    WHERE audit_act_id IS NOT NULL;
+
+COMMENT ON INDEX idx_act_directives_audit_act_id IS 'Индекс для поиска поручений по идентификатору аудита';
+
+CREATE INDEX IF NOT EXISTS idx_act_tables_audit_act_id
+    ON act_tables(audit_act_id)
+    WHERE audit_act_id IS NOT NULL;
+
+COMMENT ON INDEX idx_act_tables_audit_act_id IS 'Индекс для поиска таблиц по идентификатору аудита';
+
+CREATE INDEX IF NOT EXISTS idx_act_textblocks_audit_act_id
+    ON act_textblocks(audit_act_id)
+    WHERE audit_act_id IS NOT NULL;
+
+COMMENT ON INDEX idx_act_textblocks_audit_act_id IS 'Индекс для поиска текстовых блоков по идентификатору аудита';
+
+CREATE INDEX IF NOT EXISTS idx_act_violations_audit_act_id
+    ON act_violations(audit_act_id)
+    WHERE audit_act_id IS NOT NULL;
+
+COMMENT ON INDEX idx_act_violations_audit_act_id IS 'Индекс для поиска нарушений по идентификатору аудита';
+
+CREATE INDEX IF NOT EXISTS idx_act_invoices_audit_act_id
+    ON act_invoices(audit_act_id)
+    WHERE audit_act_id IS NOT NULL;
+
+COMMENT ON INDEX idx_act_invoices_audit_act_id IS 'Индекс для поиска фактур по идентификатору аудита';
 
 -- GIN индексы на JSONB для полнотекстового поиска
 CREATE INDEX IF NOT EXISTS idx_act_tree_data

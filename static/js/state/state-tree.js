@@ -154,6 +154,12 @@ Object.assign(AppState, {
         }
 
         this.generateNumbering();
+
+        // Асинхронно присваиваем audit_point_id новым узлам (не блокируем пользователя)
+        if (typeof AuditIdService !== 'undefined' && window.currentActId) {
+            AuditIdService.assignMissingPointIds(window.currentActId, this.treeData);
+        }
+
         return ValidationCore.success();
     },
 

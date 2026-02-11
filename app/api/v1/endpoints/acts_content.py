@@ -244,6 +244,15 @@ async def save_act_content(
             acts_violations = adapter.get_table_name("act_violations")
 
             async with conn.transaction():
+                # Получаем audit_act_id из таблицы acts
+                audit_act_id = await conn.fetchval(
+                    f"SELECT audit_act_id FROM {acts} WHERE id = $1",
+                    act_id
+                )
+
+                # Создаем маппинг {node_id -> audit_point_id} обходом дерева
+                audit_point_map = _build_audit_point_map(data.tree)
+
                 # Обновляем дерево
                 await conn.execute(
                     f"""
@@ -267,17 +276,24 @@ async def save_act_content(
                     node_number = _extract_node_number(data.tree, node_id)
                     node_label = _find_node_label(data.tree, node_id)
 
+                    # Для content-узлов берём audit_point_id родительского item-узла
+                    parent_node_id = _find_parent_item_node_id(data.tree, node_id)
+                    audit_point_id = audit_point_map.get(parent_node_id) if parent_node_id else None
+
                     await conn.execute(
                         f"""
                         INSERT INTO {acts_tables} (
-                            act_id, table_id, node_id, node_number, table_label,
+                            act_id, audit_act_id, audit_point_id,
+                            table_id, node_id, node_number, table_label,
                             grid_data, col_widths, is_protected, is_deletable,
                             is_metrics_table, is_main_metrics_table,
                             is_regular_risk_table, is_operational_risk_table
                         )
-                        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)
+                        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15)
                         """,
                         act_id,
+                        audit_act_id,
+                        audit_point_id,
                         table_id,
                         node_id,
                         node_number,
@@ -305,14 +321,20 @@ async def save_act_content(
                     node_id = tb_data.nodeId
                     node_number = _extract_node_number(data.tree, node_id)
 
+                    parent_node_id = _find_parent_item_node_id(data.tree, node_id)
+                    audit_point_id = audit_point_map.get(parent_node_id) if parent_node_id else None
+
                     await conn.execute(
                         f"""
                         INSERT INTO {acts_textblocks} (
-                            act_id, textblock_id, node_id, node_number, content, formatting
+                            act_id, audit_act_id, audit_point_id,
+                            textblock_id, node_id, node_number, content, formatting
                         )
-                        VALUES ($1, $2, $3, $4, $5, $6)
+                        VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
                         """,
                         act_id,
+                        audit_act_id,
+                        audit_point_id,
                         tb_id,
                         node_id,
                         node_number,
@@ -330,16 +352,22 @@ async def save_act_content(
                     node_id = v_data.nodeId
                     node_number = _extract_node_number(data.tree, node_id)
 
+                    parent_node_id = _find_parent_item_node_id(data.tree, node_id)
+                    audit_point_id = audit_point_map.get(parent_node_id) if parent_node_id else None
+
                     await conn.execute(
                         f"""
                         INSERT INTO {acts_violations} (
-                            act_id, violation_id, node_id, node_number, violated, established,
+                            act_id, audit_act_id, audit_point_id,
+                            violation_id, node_id, node_number, violated, established,
                             description_list, additional_content, reasons, consequences,
                             responsible, recommendations
                         )
-                        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)
+                        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14)
                         """,
                         act_id,
+                        audit_act_id,
+                        audit_point_id,
                         v_id,
                         node_id,
                         node_number,
@@ -368,19 +396,21 @@ async def save_act_content(
                         data.invoiceNodeIds,
                     )
 
-                    # Обновляем node_number для оставшихся фактур
+                    # Обновляем node_number, audit_act_id, audit_point_id для оставшихся фактур
                     for nid in data.invoiceNodeIds:
                         node_number = _extract_node_number(data.tree, nid)
-                        if node_number:
-                            await conn.execute(
-                                f"""
-                                UPDATE {acts_invoices}
-                                SET node_number = $1
-                                WHERE act_id = $2 AND node_id = $3
-                                  AND (node_number IS DISTINCT FROM $1)
-                                """,
-                                node_number, act_id, nid,
-                            )
+                        inv_audit_point_id = audit_point_map.get(nid)
+                        await conn.execute(
+                            f"""
+                            UPDATE {acts_invoices}
+                            SET node_number = COALESCE($1, node_number),
+                                audit_act_id = $4,
+                                audit_point_id = $5
+                            WHERE act_id = $2 AND node_id = $3
+                            """,
+                            node_number, act_id, nid,
+                            audit_act_id, inv_audit_point_id,
+                        )
                 else:
                     # Список пуст — удаляем все фактуры акта
                     await conn.execute(
@@ -402,14 +432,29 @@ async def save_act_content(
 
                 for dir_row in directives_with_node:
                     new_number = _extract_node_number(data.tree, dir_row["node_id"])
+                    dir_audit_point_id = audit_point_map.get(dir_row["node_id"])
                     if new_number and new_number != dir_row["point_number"]:
                         await conn.execute(
                             f"""
                             UPDATE {acts_directives}
-                            SET point_number = $1
+                            SET point_number = $1,
+                                audit_act_id = $3,
+                                audit_point_id = $4
                             WHERE id = $2
                             """,
                             new_number, dir_row["id"],
+                            audit_act_id, dir_audit_point_id,
+                        )
+                    else:
+                        await conn.execute(
+                            f"""
+                            UPDATE {acts_directives}
+                            SET audit_act_id = $2,
+                                audit_point_id = $3
+                            WHERE id = $1
+                            """,
+                            dir_row["id"],
+                            audit_act_id, dir_audit_point_id,
                         )
 
                 # Обновляем last_edited_by и last_edited_at в acts
@@ -461,6 +506,65 @@ def _find_node_label(tree: dict, node_id: str, current_node: dict = None) -> str
 
     for child in current_node.get('children', []):
         result = _find_node_label(tree, node_id, child)
+        if result:
+            return result
+
+    return None
+
+
+def _build_audit_point_map(tree: dict) -> dict[str, str | None]:
+    """
+    Строит маппинг {node_id -> auditPointId} обходом дерева.
+
+    Для item-узлов берёт auditPointId из самого узла.
+    """
+    result = {}
+
+    def _walk(node: dict):
+        node_type = node.get('type', 'item')
+        if node_type == 'item' or node_type not in ('table', 'textblock', 'violation'):
+            audit_point_id = node.get('auditPointId')
+            if audit_point_id:
+                result[node.get('id')] = audit_point_id
+        for child in node.get('children', []):
+            _walk(child)
+
+    _walk(tree)
+    return result
+
+
+def _find_parent_item_node_id(
+    tree: dict,
+    target_node_id: str,
+    current_node: dict = None,
+    parent_item_id: str | None = None
+) -> str | None:
+    """
+    Находит ID ближайшего родительского item-узла для данного узла.
+
+    Для content-узлов (table/textblock/violation) возвращает ID
+    родительского item-узла, чей auditPointId следует использовать.
+    """
+    if current_node is None:
+        current_node = tree
+
+    node_type = current_node.get('type', 'item')
+
+    # Обновляем parent_item_id если текущий узел — item
+    if node_type == 'item' or node_type not in ('table', 'textblock', 'violation'):
+        current_item_id = current_node.get('id')
+    else:
+        current_item_id = parent_item_id
+
+    if current_node.get('id') == target_node_id:
+        # Если это content-узел — возвращаем parent_item_id
+        if node_type in ('table', 'textblock', 'violation'):
+            return parent_item_id
+        # Если это item-узел — возвращаем его собственный id
+        return current_node.get('id')
+
+    for child in current_node.get('children', []):
+        result = _find_parent_item_node_id(tree, target_node_id, child, current_item_id)
         if result:
             return result
 

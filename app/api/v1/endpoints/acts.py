@@ -21,7 +21,8 @@ from pydantic import ValidationError
 from app.api.v1.deps.auth_deps import get_username
 from app.db.connection import get_db
 from app.db.repositories.act_repository import ActDBService
-from app.schemas.act_metadata import ActCreate, ActUpdate, ActListItem, ActResponse
+from app.schemas.act_metadata import ActCreate, ActUpdate, ActListItem, ActResponse, AuditPointIdsRequest
+from app.services.audit_id_service import AuditIdService
 
 logger = logging.getLogger("act_constructor.api.acts")
 router = APIRouter()
@@ -405,6 +406,41 @@ async def duplicate_act(
     except Exception as e:
         logger.exception(f"Ошибка дублирования акта ID={act_id}: {e}")
         raise HTTPException(status_code=500, detail="Ошибка дублирования акта")
+
+
+@router.post("/{act_id}/audit-point-ids")
+async def generate_audit_point_ids(
+        act_id: int,
+        request: AuditPointIdsRequest,
+        username: str = Depends(get_username)
+):
+    """
+    Генерирует audit_point_id для списка узлов дерева акта.
+
+    Args:
+        act_id: ID акта
+        request: Список node_id для генерации
+        username: Имя пользователя (из зависимости)
+
+    Returns:
+        Словарь {node_id: audit_point_id}
+    """
+    try:
+        async with get_db() as conn:
+            db_service = ActDBService(conn)
+
+            has_access = await db_service.check_user_access(act_id, username)
+            if not has_access:
+                raise HTTPException(status_code=403, detail="Нет доступа к акту")
+
+            result = await AuditIdService.generate_audit_point_ids(request.node_ids)
+            return result
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.exception(f"Ошибка генерации audit_point_ids для акта ID={act_id}: {e}")
+        raise HTTPException(status_code=500, detail="Ошибка генерации идентификаторов")
 
 
 @router.delete("/{act_id}")

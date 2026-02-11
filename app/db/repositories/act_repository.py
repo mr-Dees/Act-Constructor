@@ -10,6 +10,7 @@ import asyncpg
 
 from app.db.connection import get_adapter
 from app.db.utils import KMUtils, JSONDBUtils, ActDirectivesValidator
+from app.services.audit_id_service import AuditIdService
 from app.schemas.act_metadata import (
     ActCreate,
     ActUpdate,
@@ -475,13 +476,17 @@ class ActDBService:
             if not user_in_team:
                 raise ValueError("Пользователь должен быть членом аудиторской группы")
 
+            # Генерируем уникальный идентификатор аудита для акта
+            audit_act_id = await AuditIdService.generate_audit_act_id()
+
             act_id = await self.conn.fetchval(
                 f"""
                 INSERT INTO {self.acts} (
-                    km_number, km_number_digit, part_number, total_parts, 
+                    km_number, km_number_digit, part_number, total_parts,
                     inspection_name, city, created_date,
                     order_number, order_date, is_process_based,
                     service_note, service_note_date,
+                    audit_act_id,
                     created_by, inspection_start_date, inspection_end_date,
                     last_edited_at
                 )
@@ -489,7 +494,8 @@ class ActDBService:
                     $1, $2, $3, $4, $5, $6, $7,
                     $8, $9, $10,
                     $11, $12,
-                    $13, $14, $15,
+                    $13,
+                    $14, $15, $16,
                     CURRENT_TIMESTAMP
                 )
                 RETURNING id
@@ -506,6 +512,7 @@ class ActDBService:
                 act_data.is_process_based,
                 act_data.service_note,
                 act_data.service_note_date,
+                audit_act_id,
                 username,
                 act_data.inspection_start_date,
                 act_data.inspection_end_date,
@@ -515,11 +522,12 @@ class ActDBService:
                 await self.conn.execute(
                     f"""
                     INSERT INTO {self.audit_team} (
-                        act_id, role, full_name, position, username, order_index
+                        act_id, audit_act_id, role, full_name, position, username, order_index
                     )
-                    VALUES ($1, $2, $3, $4, $5, $6)
+                    VALUES ($1, $2, $3, $4, $5, $6, $7)
                     """,
                     act_id,
+                    audit_act_id,
                     member.role,
                     member.full_name,
                     member.position,
@@ -574,7 +582,7 @@ class ActDBService:
         """Получает список актов, где пользователь является участником."""
         rows = await self.conn.fetch(
             f"""
-            SELECT 
+            SELECT
                 a.id,
                 a.km_number,
                 a.part_number,
@@ -586,6 +594,7 @@ class ActDBService:
                 a.last_edited_at,
                 a.created_at,
                 a.service_note,
+                a.audit_act_id,
                 MIN(atm.role) as user_role,
                 a.locked_by,
                 a.lock_expires_at,
@@ -596,25 +605,26 @@ class ActDBService:
             FROM {self.acts} a
             INNER JOIN {self.audit_team} atm ON a.id = atm.act_id
             WHERE atm.username = $1
-            GROUP BY 
-                a.id, 
-                a.km_number, 
-                a.part_number, 
+            GROUP BY
+                a.id,
+                a.km_number,
+                a.part_number,
                 a.total_parts,
-                a.inspection_name, 
+                a.inspection_name,
                 a.order_number,
-                a.inspection_start_date, 
+                a.inspection_start_date,
                 a.inspection_end_date,
                 a.last_edited_at,
                 a.created_at,
                 a.service_note,
-                a.locked_by, 
+                a.audit_act_id,
+                a.locked_by,
                 a.lock_expires_at,
-                a.needs_created_date, 
+                a.needs_created_date,
                 a.needs_directive_number,
-                a.needs_invoice_check, 
+                a.needs_invoice_check,
                 a.needs_service_note
-            ORDER BY 
+            ORDER BY
                 COALESCE(a.last_edited_at, a.created_at) DESC,
                 a.created_at DESC
             """,
@@ -636,6 +646,7 @@ class ActDBService:
                 last_edited_at=row["last_edited_at"],
                 user_role=row["user_role"],
                 service_note=row["service_note"],
+                audit_act_id=row["audit_act_id"],
                 locked_by=row["locked_by"],
                 is_locked=(
                         row["locked_by"] is not None and
@@ -654,13 +665,14 @@ class ActDBService:
         """Получает полную информацию об акте по его ID."""
         act_row = await self.conn.fetchrow(
             f"""
-            SELECT 
+            SELECT
                 id, km_number, part_number, total_parts,
                 inspection_name, city, created_date,
                 order_number, order_date, is_process_based,
                 service_note, service_note_date,
+                audit_act_id,
                 inspection_start_date, inspection_end_date,
-                needs_created_date, needs_directive_number, 
+                needs_created_date, needs_directive_number,
                 needs_invoice_check, needs_service_note,
                 created_at, updated_at, created_by,
                 last_edited_by, last_edited_at
@@ -725,6 +737,7 @@ class ActDBService:
             is_process_based=act_row["is_process_based"],
             service_note=act_row["service_note"],
             service_note_date=act_row["service_note_date"],
+            audit_act_id=act_row["audit_act_id"],
             inspection_start_date=act_row["inspection_start_date"],
             inspection_end_date=act_row["inspection_end_date"],
             audit_team=audit_team,
@@ -948,6 +961,12 @@ class ActDBService:
 
             # Аудиторская группа
             if act_update.audit_team is not None:
+                # Получаем audit_act_id для записи в audit_team_members
+                cur_audit_act_id = await self.conn.fetchval(
+                    f"SELECT audit_act_id FROM {self.acts} WHERE id = $1",
+                    act_id,
+                )
+
                 await self.conn.execute(
                     f"DELETE FROM {self.audit_team} WHERE act_id = $1",
                     act_id,
@@ -957,11 +976,12 @@ class ActDBService:
                     await self.conn.execute(
                         f"""
                         INSERT INTO {self.audit_team} (
-                            act_id, role, full_name, position, username, order_index
+                            act_id, audit_act_id, role, full_name, position, username, order_index
                         )
-                        VALUES ($1, $2, $3, $4, $5, $6)
+                        VALUES ($1, $2, $3, $4, $5, $6, $7)
                         """,
                         act_id,
+                        cur_audit_act_id,
                         member.role,
                         member.full_name,
                         member.position,

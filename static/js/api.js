@@ -371,6 +371,11 @@ class APIClient {
                     this._attachInvoicesToTree(AppState.treeData, content.invoices);
                 }
 
+                // Асинхронно присваиваем audit_point_id (не блокируем пользователя)
+                if (typeof AuditIdService !== 'undefined') {
+                    AuditIdService.assignMissingPointIds(actId, AppState.treeData);
+                }
+
                 // Сохраняем дефолтную структуру в БД ТОЛЬКО если есть права на редактирование
                 if (!AppConfig.readOnlyMode.isReadOnly) {
                     await this._saveDefaultStructure(actId, username);
@@ -393,6 +398,11 @@ class APIClient {
                 // Привязываем фактуры к узлам дерева
                 if (content.invoices) {
                     this._attachInvoicesToTree(AppState.treeData, content.invoices);
+                }
+
+                // Асинхронно присваиваем audit_point_id (не блокируем пользователя)
+                if (typeof AuditIdService !== 'undefined') {
+                    AuditIdService.assignMissingPointIds(actId, AppState.treeData);
                 }
             }
 

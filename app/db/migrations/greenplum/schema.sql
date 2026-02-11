@@ -40,6 +40,9 @@ CREATE TABLE {SCHEMA}.{PREFIX}acts (
     locked_at TIMESTAMP DEFAULT NULL,
     lock_expires_at TIMESTAMP DEFAULT NULL,
 
+    -- Идентификатор аудита из внешнего сервиса
+    audit_act_id VARCHAR(36),
+
     -- Системные поля
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
@@ -86,6 +89,7 @@ COMMENT ON COLUMN {SCHEMA}.{PREFIX}acts.last_edited_at IS 'Дата и врем�
 CREATE TABLE {SCHEMA}.{PREFIX}audit_team_members (
     id BIGSERIAL PRIMARY KEY,
     act_id BIGINT NOT NULL,
+    audit_act_id VARCHAR(36),
     role VARCHAR(50) NOT NULL,
     full_name VARCHAR(255) NOT NULL,
     position VARCHAR(255) NOT NULL,
@@ -113,6 +117,8 @@ COMMENT ON COLUMN {SCHEMA}.{PREFIX}audit_team_members.created_at IS 'Дата и
 CREATE TABLE {SCHEMA}.{PREFIX}act_directives (
     id BIGSERIAL PRIMARY KEY,
     act_id BIGINT NOT NULL,
+    audit_act_id VARCHAR(36),
+    audit_point_id VARCHAR(36),
     point_number VARCHAR(50) NOT NULL,
     node_id VARCHAR(100),
     directive_number VARCHAR(100) NOT NULL,
@@ -159,6 +165,8 @@ COMMENT ON COLUMN {SCHEMA}.{PREFIX}act_tree.updated_at IS 'Дата и врем�
 CREATE TABLE {SCHEMA}.{PREFIX}act_tables (
     id BIGSERIAL PRIMARY KEY,
     act_id BIGINT NOT NULL,
+    audit_act_id VARCHAR(36),
+    audit_point_id VARCHAR(36),
     table_id VARCHAR(100) NOT NULL,
     node_id VARCHAR(100) NOT NULL,
     node_number VARCHAR(50),
@@ -202,6 +210,8 @@ COMMENT ON COLUMN {SCHEMA}.{PREFIX}act_tables.updated_at IS 'Дата и вре�
 CREATE TABLE {SCHEMA}.{PREFIX}act_textblocks (
     id BIGSERIAL PRIMARY KEY,
     act_id BIGINT NOT NULL,
+    audit_act_id VARCHAR(36),
+    audit_point_id VARCHAR(36),
     textblock_id VARCHAR(100) NOT NULL,
     node_id VARCHAR(100) NOT NULL,
     node_number VARCHAR(50),
@@ -231,6 +241,8 @@ COMMENT ON COLUMN {SCHEMA}.{PREFIX}act_textblocks.updated_at IS 'Дата и в�
 CREATE TABLE {SCHEMA}.{PREFIX}act_violations (
     id BIGSERIAL PRIMARY KEY,
     act_id BIGINT NOT NULL,
+    audit_act_id VARCHAR(36),
+    audit_point_id VARCHAR(36),
     violation_id VARCHAR(100) NOT NULL,
     node_id VARCHAR(100) NOT NULL,
     node_number VARCHAR(50),
@@ -272,6 +284,8 @@ COMMENT ON COLUMN {SCHEMA}.{PREFIX}act_violations.updated_at IS 'Дата и в�
 CREATE TABLE {SCHEMA}.{PREFIX}act_invoices (
     id BIGSERIAL PRIMARY KEY,
     act_id BIGINT NOT NULL,
+    audit_act_id VARCHAR(36),
+    audit_point_id VARCHAR(36),
     node_id VARCHAR(100) NOT NULL,
     node_number VARCHAR(50),
     db_type VARCHAR(20) NOT NULL,
@@ -378,6 +392,35 @@ CREATE INDEX idx_{PREFIX}act_invoices_act_id
 
 CREATE INDEX idx_{PREFIX}act_invoices_act_node
     ON {SCHEMA}.{PREFIX}act_invoices(act_id, node_id);
+
+-- Индексы на audit_act_id
+CREATE INDEX idx_{PREFIX}acts_audit_act_id
+    ON {SCHEMA}.{PREFIX}acts(audit_act_id)
+    WHERE audit_act_id IS NOT NULL;
+
+CREATE INDEX idx_{PREFIX}audit_team_audit_act_id
+    ON {SCHEMA}.{PREFIX}audit_team_members(audit_act_id)
+    WHERE audit_act_id IS NOT NULL;
+
+CREATE INDEX idx_{PREFIX}act_directives_audit_act_id
+    ON {SCHEMA}.{PREFIX}act_directives(audit_act_id)
+    WHERE audit_act_id IS NOT NULL;
+
+CREATE INDEX idx_{PREFIX}act_tables_audit_act_id
+    ON {SCHEMA}.{PREFIX}act_tables(audit_act_id)
+    WHERE audit_act_id IS NOT NULL;
+
+CREATE INDEX idx_{PREFIX}act_textblocks_audit_act_id
+    ON {SCHEMA}.{PREFIX}act_textblocks(audit_act_id)
+    WHERE audit_act_id IS NOT NULL;
+
+CREATE INDEX idx_{PREFIX}act_violations_audit_act_id
+    ON {SCHEMA}.{PREFIX}act_violations(audit_act_id)
+    WHERE audit_act_id IS NOT NULL;
+
+CREATE INDEX idx_{PREFIX}act_invoices_audit_act_id
+    ON {SCHEMA}.{PREFIX}act_invoices(audit_act_id)
+    WHERE audit_act_id IS NOT NULL;
 
 -- ============================================================================
 -- ТРИГГЕРЫ ДЛЯ АВТОМАТИЧЕСКОГО ОБНОВЛЕНИЯ updated_at

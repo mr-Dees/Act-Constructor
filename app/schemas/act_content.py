@@ -313,6 +313,7 @@ class ActItemSchema(BaseModel):
     isMetricsTable: bool | None = False
     isMainMetricsTable: bool | None = False
     tb: list[str] | None = None
+    auditPointId: str | None = None
 
 
 class ActDataSchema(BaseModel):
