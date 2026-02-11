@@ -1437,33 +1437,8 @@ class ActDBService:
         Returns:
             Словарь с данными сохраненной фактуры
         """
-        row = await self.conn.fetchrow(
-            f"""
-            INSERT INTO {self.invoices} (
-                act_id, node_id, node_number, db_type,
-                schema_name, table_name, metrics_types, created_by
-            )
-            VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
-            ON CONFLICT (act_id, node_id) DO UPDATE SET
-                node_number = EXCLUDED.node_number,
-                db_type = EXCLUDED.db_type,
-                schema_name = EXCLUDED.schema_name,
-                table_name = EXCLUDED.table_name,
-                metrics_types = EXCLUDED.metrics_types,
-                verification_status = 'pending',
-                updated_at = CURRENT_TIMESTAMP
-            RETURNING id, act_id, node_id, node_number, db_type,
-                      schema_name, table_name, metrics_types,
-                      verification_status, created_at, updated_at, created_by
-            """,
-            data["act_id"],
-            data["node_id"],
-            data.get("node_number"),
-            data["db_type"],
-            data["schema_name"],
-            data["table_name"],
-            json.dumps(data["metrics_types"]),
-            username,
+        row = await self.adapter.upsert_invoice(
+            self.conn, self.invoices, data, username
         )
 
         logger.info(

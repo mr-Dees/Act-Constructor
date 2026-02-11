@@ -4,6 +4,7 @@
 Реализует интерфейс DatabaseAdapter с учетом специфики MPP-архитектуры.
 """
 
+import json
 import logging
 from pathlib import Path
 
@@ -160,6 +161,70 @@ class GreenplumAdapter(DatabaseAdapter):
     async def get_current_schema(self, conn: asyncpg.Connection) -> str:
         """Возвращает настроенную схему Greenplum."""
         return self.schema
+
+    async def upsert_invoice(
+            self,
+            conn: asyncpg.Connection,
+            table_name: str,
+            data: dict,
+            username: str,
+    ) -> asyncpg.Record:
+        """
+        Upsert фактуры через UPDATE + INSERT (без ON CONFLICT).
+
+        Greenplum не поддерживает INSERT ... ON CONFLICT DO UPDATE.
+        """
+        metrics_json = json.dumps(data["metrics_types"])
+
+        # Попытка UPDATE существующей записи
+        row = await conn.fetchrow(
+            f"""
+            UPDATE {table_name} SET
+                node_number = $3,
+                db_type = $4,
+                schema_name = $5,
+                table_name = $6,
+                metrics_types = $7,
+                verification_status = 'pending',
+                updated_at = CURRENT_TIMESTAMP
+            WHERE act_id = $1 AND node_id = $2
+            RETURNING id, act_id, node_id, node_number, db_type,
+                      schema_name, table_name, metrics_types,
+                      verification_status, created_at, updated_at, created_by
+            """,
+            data["act_id"],
+            data["node_id"],
+            data.get("node_number"),
+            data["db_type"],
+            data["schema_name"],
+            data["table_name"],
+            metrics_json,
+        )
+
+        if row:
+            return row
+
+        # Запись не найдена — INSERT
+        return await conn.fetchrow(
+            f"""
+            INSERT INTO {table_name} (
+                act_id, node_id, node_number, db_type,
+                schema_name, table_name, metrics_types, created_by
+            )
+            VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+            RETURNING id, act_id, node_id, node_number, db_type,
+                      schema_name, table_name, metrics_types,
+                      verification_status, created_at, updated_at, created_by
+            """,
+            data["act_id"],
+            data["node_id"],
+            data.get("node_number"),
+            data["db_type"],
+            data["schema_name"],
+            data["table_name"],
+            metrics_json,
+            username,
+        )
 
     def get_distributed_by_clause(self, table_name: str) -> str:
         """
