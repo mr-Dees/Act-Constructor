@@ -20,7 +20,7 @@
 
                 <label id="createdDateLabel">
                     <span class="label-text">Дата составления</span>
-                    <input type="date" name="created_date" data-field="created_date">
+                    <input type="date" name="created_date" data-field="created_date" min="2000-01-01" max="9999-12-31">
                 </label>
 
                 <label>
@@ -30,17 +30,17 @@
 
                 <label>
                     Дата приказа *
-                    <input type="date" name="order_date" required data-field="order_date">
+                    <input type="date" name="order_date" required data-field="order_date" min="2000-01-01" max="9999-12-31">
                 </label>
 
                 <label>
                     Срок проверки: начало *
-                    <input type="date" name="inspection_start_date" required data-field="inspection_start_date">
+                    <input type="date" name="inspection_start_date" required data-field="inspection_start_date" min="2000-01-01" max="9999-12-31">
                 </label>
 
                 <label>
                     Срок проверки: окончание *
-                    <input type="date" name="inspection_end_date" required data-field="inspection_end_date">
+                    <input type="date" name="inspection_end_date" required data-field="inspection_end_date" min="2000-01-01" max="9999-12-31">
                 </label>
 
                 <label id="kmNumberField">
@@ -114,7 +114,9 @@
                         Дата служебной записки
                         <input type="date"
                                name="service_note_date"
-                               data-field="service_note_date">
+                               data-field="service_note_date"
+                               min="2000-01-01"
+                               max="9999-12-31">
                     </label>
                 </fieldset>
 

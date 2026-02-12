@@ -467,6 +467,16 @@ class CreateActDialog extends DialogBase {
 
             field.addEventListener('change', () => {
                 field.setCustomValidity('');
+
+                // Обрезаем год до 4 цифр если пользователь ввёл больше
+                const value = field.value;
+                if (value) {
+                    const match = value.match(/^(\d{4,})-(\d{2})-(\d{2})$/);
+                    if (match && match[1].length > 4) {
+                        const year = match[1].substring(0, 4);
+                        field.value = `${year}-${match[2]}-${match[3]}`;
+                    }
+                }
             });
         });
     }
@@ -785,6 +795,28 @@ class CreateActDialog extends DialogBase {
     }
 
     /**
+     * Валидирует поля дат — год должен содержать ровно 4 цифры
+     * @private
+     */
+    static _validateDateFields(dialog) {
+        const dateFields = dialog.querySelectorAll('input[type="date"]');
+
+        for (const field of dateFields) {
+            const value = field.value;
+            if (!value) continue;
+
+            const match = value.match(/^(\d+)-(\d{2})-(\d{2})$/);
+            if (!match || match[1].length !== 4) {
+                field.setCustomValidity('Год должен содержать ровно 4 цифры');
+                field.reportValidity();
+                return false;
+            }
+        }
+
+        return true;
+    }
+
+    /**
      * Валидирует взаимосвязь служебной записки и даты
      * @private
      */
@@ -825,6 +857,11 @@ class CreateActDialog extends DialogBase {
         dialog.querySelectorAll('input, textarea, select').forEach(field => {
             field.setCustomValidity('');
         });
+
+        // Проверяем корректность дат (год — 4 цифры)
+        if (!this._validateDateFields(dialog)) {
+            return false;
+        }
 
         // Проверяем служебную записку
         if (!this._validateServiceNoteFields(dialog)) {
