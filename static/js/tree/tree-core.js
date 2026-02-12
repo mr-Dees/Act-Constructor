@@ -214,16 +214,19 @@ class TreeManager {
      * @param {HTMLElement} element - Целевой элемент
      */
     _performScroll(element) {
+        const scrollContainer = document.getElementById('step2');
+        if (!scrollContainer) return;
+
         const header = document.querySelector('.header');
-        const headerHeight = header ? header.offsetHeight : 80;
-        const offset = AppConfig.tree.scrollSettings.headerOffset;
+        const headerHeight = header ? header.offsetHeight : 0;
+        const padding = AppConfig.tree.scrollSettings.headerOffset;
 
-        const elementRect = element.getBoundingClientRect();
-        const absoluteElementTop = elementRect.top + window.pageYOffset;
-        const scrollToPosition = absoluteElementTop - headerHeight - offset;
+        const elementTop = element.getBoundingClientRect().top
+            - scrollContainer.getBoundingClientRect().top
+            + scrollContainer.scrollTop;
 
-        window.scrollTo({
-            top: scrollToPosition,
+        scrollContainer.scrollTo({
+            top: elementTop - headerHeight - padding,
             behavior: AppConfig.tree.scrollSettings.behavior
         });
     }
