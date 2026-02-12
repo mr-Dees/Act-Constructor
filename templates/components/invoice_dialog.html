@@ -1,0 +1,79 @@
+<template id="invoiceDialogTemplate">
+    <div class="custom-dialog-overlay">
+        <div class="custom-dialog invoice-modal">
+            <div class="invoice-modal-header">
+                <h3 class="dialog-title">Приложить фактуру</h3>
+                <button type="button" class="dialog-close-btn invoice-close-btn" aria-label="Закрыть">
+                    &times;
+                </button>
+            </div>
+
+            <div class="invoice-modal-body">
+                <!-- Информация о пункте -->
+                <div class="invoice-node-info">
+                    <span class="invoice-node-label">Пункт:</span>
+                    <span class="invoice-node-number" data-field="node-number"></span>
+                    <span class="invoice-node-name" data-field="node-name"></span>
+                </div>
+
+                <!-- Выбор БД -->
+                <div class="invoice-section">
+                    <div class="invoice-section-label">База данных</div>
+                    <div class="invoice-db-radios">
+                        <label class="invoice-radio-label">
+                            <input type="radio" name="invoice-db-type" value="hive" checked>
+                            <span>Hive</span>
+                            <span class="invoice-schema-hint" data-db="hive"></span>
+                        </label>
+                        <label class="invoice-radio-label">
+                            <input type="radio" name="invoice-db-type" value="greenplum">
+                            <span>GreenPlum</span>
+                            <span class="invoice-schema-hint" data-db="greenplum"></span>
+                        </label>
+                    </div>
+                </div>
+
+                <!-- Поиск таблицы -->
+                <div class="invoice-section">
+                    <div class="invoice-section-label">Таблица</div>
+                    <div class="invoice-search-wrapper">
+                        <input type="text"
+                               class="invoice-search-input"
+                               placeholder="Начните вводить название таблицы..."
+                               autocomplete="off">
+                        <div class="invoice-search-dropdown"></div>
+                    </div>
+                </div>
+
+                <!-- Тип метрики -->
+                <div class="invoice-section">
+                    <div class="invoice-section-label">Тип метрики</div>
+                    <div class="invoice-chips">
+                        <button type="button" class="invoice-chip" data-metric="КС">КС</button>
+                        <button type="button" class="invoice-chip" data-metric="ФР">ФР</button>
+                        <button type="button" class="invoice-chip" data-metric="ОР">ОР</button>
+                        <button type="button" class="invoice-chip" data-metric="РР">РР</button>
+                        <button type="button" class="invoice-chip" data-metric="МКР">МКР</button>
+                    </div>
+                </div>
+
+                <!-- Код метрики -->
+                <div class="invoice-section invoice-metric-code-section">
+                    <div class="invoice-section-label">Код метрики</div>
+                    <div class="invoice-search-wrapper">
+                        <input type="text" class="invoice-metric-search-input"
+                               placeholder="Введите код или название метрики..."
+                               autocomplete="off">
+                        <div class="invoice-metric-dropdown"></div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Кнопки -->
+            <div class="invoice-actions">
+                <button type="button" class="btn btn-secondary invoice-cancel-btn">Отмена</button>
+                <button type="button" class="btn btn-primary invoice-save-btn">Сохранить</button>
+            </div>
+        </div>
+    </div>
+</template>

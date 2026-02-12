@@ -143,9 +143,10 @@ Object.assign(AppState, {
         const newNode = this._createNewNode(label);
 
         if (isChild) {
-            // Очищаем ТБ у родителя, если он был листовым узлом в разделе 5
+            // Очищаем ТБ и фактуру у родителя, если он был листовым узлом в разделе 5
             if (TreeUtils.isUnderSection5(parent) && TreeUtils.isTbLeaf(parent)) {
                 delete parent.tb;
+                delete parent.invoice;
             }
             this._addAsChild(parent, newNode);
         } else {
@@ -153,6 +154,12 @@ Object.assign(AppState, {
         }
 
         this.generateNumbering();
+
+        // Асинхронно присваиваем audit_point_id новым узлам (не блокируем пользователя)
+        if (typeof AuditIdService !== 'undefined' && window.currentActId) {
+            AuditIdService.assignMissingPointIds(window.currentActId, this.treeData);
+        }
+
         return ValidationCore.success();
     },
 
@@ -328,6 +335,17 @@ Object.assign(AppState, {
         const riskCheck = this._checkSection5RiskConstraints(draggedNode, newParent);
         if (!riskCheck.valid) return riskCheck;
 
+        // Запрещаем перемещение узлов с таблицами рисков за пределы раздела 5
+        if (this._findRiskTablesInSubtree(draggedNode).length > 0) {
+            const newParentUnder5 = newParent.id === '5' || TreeUtils.isUnderSection5(newParent);
+            if (!newParentUnder5) {
+                return ValidationCore.failure('Нельзя перемещать блоки с таблицами рисков за пределы раздела 5');
+            }
+        }
+
+        // Запоминаем предка 5.X до перемещения (для пересчёта сводных таблиц)
+        const oldAncestor5x = this._findFirstLevelAncestorUnder5(draggedNode.id);
+
         // Запоминаем, был ли новый родитель листовым узлом в разделе 5
         const wasNewParentTbLeaf = position === 'child' &&
             (!draggedNode.type || draggedNode.type === 'item') &&
@@ -337,9 +355,10 @@ Object.assign(AppState, {
         this._performMove(draggedNode, draggedParent, newParent, targetNode, targetNodeId, position);
         this.generateNumbering();
 
-        // Очищаем ТБ у нового родителя, если он был листовым узлом в разделе 5
+        // Очищаем ТБ и фактуру у нового родителя, если он был листовым узлом в разделе 5
         if (wasNewParentTbLeaf) {
             delete newParent.tb;
+            delete newParent.invoice;
         }
 
         // Очищаем ТБ у старого родителя, если он стал листовым узлом в разделе 5
@@ -347,19 +366,14 @@ Object.assign(AppState, {
             delete draggedParent.tb;
         }
 
-        // Очищаем ТБ если узел переместился за пределы раздела 5
+        // Очищаем ТБ и фактуры если узел переместился за пределы раздела 5
         if (!TreeUtils.isUnderSection5(draggedNode)) {
             this._clearTbRecursive(draggedNode);
+            this._clearInvoiceRecursive(draggedNode);
         }
 
-        // Обрабатываем таблицы метрик для узлов под пунктом 5
-        // только если у узла уже есть таблицы рисков в поддереве
-        if (newParent.id === '5' && draggedNode.number?.startsWith('5.')) {
-            const riskTables = this._findRiskTablesInSubtree(draggedNode);
-            if (riskTables.length > 0) {
-                this._handleMetricsTableForNode(draggedNode);
-            }
-        }
+        // Пересчитываем сводные таблицы метрик при перемещении внутри раздела 5
+        this._reconcileMetricsTablesAfterMove(draggedNode, oldAncestor5x);
 
         return ValidationCore.success();
     },
@@ -675,6 +689,63 @@ Object.assign(AppState, {
     },
 
     /**
+     * Находит узел 5.X (первого уровня под разделом 5), который является предком данного узла
+     * @private
+     * @param {string} nodeId - ID узла
+     * @returns {Object|null} Узел 5.X или null если узел не в разделе 5
+     */
+    _findFirstLevelAncestorUnder5(nodeId) {
+        let node = this.findNodeById(nodeId);
+        if (!node) return null;
+
+        let parent = this.findParentNode(nodeId);
+        while (parent && parent.id !== '5') {
+            node = parent;
+            parent = this.findParentNode(node.id);
+        }
+
+        if (parent?.id === '5' && node.number?.match(/^5\.\d+$/)) return node;
+        return null;
+    },
+
+    /**
+     * Полная сверка сводных таблиц метрик после перемещения узла внутри раздела 5
+     * @private
+     * @param {Object} draggedNode - Перемещённый узел
+     * @param {Object|null} oldAncestor5x - Старый предок 5.X до перемещения
+     */
+    _reconcileMetricsTablesAfterMove(draggedNode, oldAncestor5x) {
+        // Проверяем, есть ли в перемещённом поддереве таблицы рисков
+        const riskTables = this._findRiskTablesInSubtree(draggedNode);
+        if (riskTables.length === 0) return;
+
+        // Находим нового предка 5.X
+        const newAncestor5x = this._findFirstLevelAncestorUnder5(draggedNode.id);
+
+        // Если предок 5.X не изменился — ранний выход
+        if (oldAncestor5x && newAncestor5x && oldAncestor5x.id === newAncestor5x.id) return;
+
+        // Очистка старого: удаляет сводные таблицы у всех 5.X, где нет глубоких рисков
+        this._cleanupMetricsTablesAfterRiskTableDeleted(draggedNode.id);
+
+        // Создание сводной для нового предка 5.X, если риски переехали туда
+        if (newAncestor5x) {
+            this._handleMetricsTableForNode(newAncestor5x);
+        }
+
+        // Главная сводная таблица: создаём/удаляем по наличию рисков в разделе 5
+        const node5 = this.findNodeById('5');
+        if (node5) {
+            const allRiskTables = this._findRiskTablesInSubtree(node5);
+            if (allRiskTables.length > 0) {
+                this._createMainMetricsTable();
+            }
+        }
+
+        this.generateNumbering();
+    },
+
+    /**
      * Рекурсивно очищает свойство tb у узла и всех его потомков
      * @private
      * @param {Object} node - Узел для очистки
@@ -687,6 +758,23 @@ Object.assign(AppState, {
         if (node.children) {
             for (const child of node.children) {
                 this._clearTbRecursive(child);
+            }
+        }
+    },
+
+    /**
+     * Рекурсивно очищает свойство invoice у узла и всех его потомков
+     * @private
+     * @param {Object} node - Узел для очистки
+     */
+    _clearInvoiceRecursive(node) {
+        if (node.invoice) {
+            delete node.invoice;
+        }
+
+        if (node.children) {
+            for (const child of node.children) {
+                this._clearInvoiceRecursive(child);
             }
         }
     }

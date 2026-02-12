@@ -174,6 +174,11 @@ class TreeRenderer {
             if (TreeUtils.isUnderSection5(node)) {
                 label.appendChild(this._createTbBadge(node));
             }
+
+            // Бейдж фактуры для leaf-узлов под разделом 5
+            if (TreeUtils.isTbLeaf(node) && node.invoice) {
+                label.appendChild(this._createInvoiceBadge());
+            }
         }
 
         return label;
@@ -405,6 +410,20 @@ class TreeRenderer {
             }
         }
 
+        return badge;
+    }
+
+    /**
+     * Создает бейдж фактуры
+     * @private
+     * @returns {HTMLElement} Элемент бейджа
+     */
+    _createInvoiceBadge() {
+        const badge = document.createElement('span');
+        badge.className = 'invoice-badge';
+        badge.textContent = '📎';
+        badge.title = 'Фактура прикреплена';
+        badge.contentEditable = false;
         return badge;
     }
 

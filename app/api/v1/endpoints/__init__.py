@@ -8,6 +8,7 @@
 from app.api.v1.endpoints.acts import router as acts
 from app.api.v1.endpoints.acts_content import router as acts_content
 from app.api.v1.endpoints.acts_export import router as acts_export
+from app.api.v1.endpoints.acts_invoice import router as acts_invoice
 from app.api.v1.endpoints.auth import router as auth
 from app.api.v1.endpoints.system import router as system
 
@@ -16,5 +17,6 @@ __all__ = [
     "acts",
     "acts_content",
     "acts_export",
+    "acts_invoice",
     "system",
 ]

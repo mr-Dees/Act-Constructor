@@ -38,6 +38,9 @@ CREATE TABLE IF NOT EXISTS acts (
     locked_at TIMESTAMP DEFAULT NULL,
     lock_expires_at TIMESTAMP DEFAULT NULL,
 
+    -- Идентификатор аудита из внешнего сервиса
+    audit_act_id VARCHAR(36),
+
     -- Системные поля
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
@@ -114,6 +117,7 @@ COMMENT ON COLUMN acts.last_edited_at IS 'Дата и время последн�
 CREATE TABLE IF NOT EXISTS audit_team_members (
     id SERIAL PRIMARY KEY,
     act_id INTEGER NOT NULL REFERENCES acts(id) ON DELETE CASCADE,
+    audit_act_id VARCHAR(36),
     role VARCHAR(50) NOT NULL CHECK (role IN ('Куратор', 'Руководитель', 'Редактор', 'Участник')),
     full_name VARCHAR(255) NOT NULL,
     position VARCHAR(255) NOT NULL,
@@ -143,7 +147,10 @@ COMMENT ON COLUMN audit_team_members.created_at IS 'Дата и время до�
 CREATE TABLE IF NOT EXISTS act_directives (
     id SERIAL PRIMARY KEY,
     act_id INTEGER NOT NULL REFERENCES acts(id) ON DELETE CASCADE,
+    audit_act_id VARCHAR(36),
+    audit_point_id VARCHAR(36),
     point_number VARCHAR(50) NOT NULL,
+    node_id VARCHAR(100),
     directive_number VARCHAR(100) NOT NULL,
     order_index INTEGER DEFAULT 0,
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
@@ -160,6 +167,7 @@ COMMENT ON TABLE act_directives IS 'Действующие поручения, �
 COMMENT ON COLUMN act_directives.id IS 'Уникальный идентификатор поручения';
 COMMENT ON COLUMN act_directives.act_id IS 'Ссылка на акт';
 COMMENT ON COLUMN act_directives.point_number IS 'Номер пункта в акте (формат: 5.X или 5.X.Y или 5.X.Y.Z и т.д.)';
+COMMENT ON COLUMN act_directives.node_id IS 'ID узла в дереве для синхронизации point_number';
 COMMENT ON COLUMN act_directives.directive_number IS 'Номер действующего поручения';
 COMMENT ON COLUMN act_directives.order_index IS 'Порядок отображения поручения (для сортировки)';
 COMMENT ON COLUMN act_directives.created_at IS 'Дата и время создания записи';
@@ -194,6 +202,8 @@ COMMENT ON COLUMN act_tree.updated_at IS 'Дата и время последн�
 CREATE TABLE IF NOT EXISTS act_tables (
     id SERIAL PRIMARY KEY,
     act_id INTEGER NOT NULL REFERENCES acts(id) ON DELETE CASCADE,
+    audit_act_id VARCHAR(36),
+    audit_point_id VARCHAR(36),
     table_id VARCHAR(100) NOT NULL,
     node_id VARCHAR(100) NOT NULL,
     node_number VARCHAR(50),
@@ -244,6 +254,8 @@ COMMENT ON COLUMN act_tables.updated_at IS 'Дата и время послед�
 CREATE TABLE IF NOT EXISTS act_textblocks (
     id SERIAL PRIMARY KEY,
     act_id INTEGER NOT NULL REFERENCES acts(id) ON DELETE CASCADE,
+    audit_act_id VARCHAR(36),
+    audit_point_id VARCHAR(36),
     textblock_id VARCHAR(100) NOT NULL,
     node_id VARCHAR(100) NOT NULL,
     node_number VARCHAR(50),
@@ -277,6 +289,8 @@ COMMENT ON COLUMN act_textblocks.updated_at IS 'Дата и время посл�
 CREATE TABLE IF NOT EXISTS act_violations (
     id SERIAL PRIMARY KEY,
     act_id INTEGER NOT NULL REFERENCES acts(id) ON DELETE CASCADE,
+    audit_act_id VARCHAR(36),
+    audit_point_id VARCHAR(36),
     violation_id VARCHAR(100) NOT NULL,
     node_id VARCHAR(100) NOT NULL,
     node_number VARCHAR(50),
@@ -349,6 +363,106 @@ COMMENT ON COLUMN act_violations.responsible IS 'JSONB объект с поля�
 COMMENT ON COLUMN act_violations.recommendations IS 'JSONB объект с полями enabled и content для рекомендаций по устранению';
 COMMENT ON COLUMN act_violations.created_at IS 'Дата и время создания записи о нарушении';
 COMMENT ON COLUMN act_violations.updated_at IS 'Дата и время последнего изменения записи';
+
+-- ============================================================================
+-- ТАБЛИЦА ФАКТУР
+-- ============================================================================
+
+CREATE TABLE IF NOT EXISTS act_invoices (
+    id SERIAL PRIMARY KEY,
+    act_id INTEGER NOT NULL REFERENCES acts(id) ON DELETE CASCADE,
+    audit_act_id VARCHAR(36),
+    audit_point_id VARCHAR(36),
+    node_id VARCHAR(100) NOT NULL,
+    node_number VARCHAR(50),
+    db_type VARCHAR(20) NOT NULL CHECK (db_type IN ('hive', 'greenplum')),
+    schema_name VARCHAR(255) NOT NULL,
+    table_name VARCHAR(255) NOT NULL,
+    metric_type VARCHAR(10) NOT NULL DEFAULT '',
+    metric_code VARCHAR(50),
+    metric_name VARCHAR(500),
+    verification_status VARCHAR(20) NOT NULL DEFAULT 'pending'
+        CHECK (verification_status IN ('pending', 'verified', 'rejected')),
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    created_by VARCHAR(50) NOT NULL,
+
+    UNIQUE(act_id, node_id)
+);
+
+COMMENT ON TABLE act_invoices IS 'Фактуры, прикрепленные к пунктам акта';
+
+COMMENT ON COLUMN act_invoices.id IS 'Уникальный идентификатор записи';
+COMMENT ON COLUMN act_invoices.act_id IS 'Ссылка на акт';
+COMMENT ON COLUMN act_invoices.node_id IS 'ID узла в дереве, к которому привязана фактура';
+COMMENT ON COLUMN act_invoices.node_number IS 'Номер узла (например, 5.1.3) для аналитики';
+COMMENT ON COLUMN act_invoices.db_type IS 'Тип базы данных: hive или greenplum';
+COMMENT ON COLUMN act_invoices.schema_name IS 'Имя схемы в базе данных';
+COMMENT ON COLUMN act_invoices.table_name IS 'Имя таблицы в базе данных';
+COMMENT ON COLUMN act_invoices.metric_type IS 'Тип метрики (КС, ФР, ОР, РР, МКР)';
+COMMENT ON COLUMN act_invoices.metric_code IS 'Код метрики из справочника';
+COMMENT ON COLUMN act_invoices.metric_name IS 'Название метрики из справочника';
+COMMENT ON COLUMN act_invoices.verification_status IS 'Статус верификации: pending, verified, rejected';
+COMMENT ON COLUMN act_invoices.created_at IS 'Дата и время создания записи';
+COMMENT ON COLUMN act_invoices.updated_at IS 'Дата и время последнего обновления';
+COMMENT ON COLUMN act_invoices.created_by IS 'Числовой логин пользователя-создателя';
+
+-- ============================================================================
+-- РЕЕСТР HIVE-ТАБЛИЦ (для локального тестирования)
+-- ============================================================================
+
+CREATE TABLE IF NOT EXISTS t_db_oarb_ua_hadoop_tables (
+    id SERIAL PRIMARY KEY,
+    table_name VARCHAR(255) NOT NULL UNIQUE
+);
+
+COMMENT ON TABLE t_db_oarb_ua_hadoop_tables IS 'Реестр hive-таблиц (реплика для фактур)';
+
+-- Заполняем тестовыми данными (аналог текущего HIVE_MOCK_TABLES)
+INSERT INTO t_db_oarb_ua_hadoop_tables (table_name) VALUES
+    ('t_audit_invoices_main'),
+    ('t_audit_invoices_details'),
+    ('t_audit_invoices_summary'),
+    ('t_audit_metrics_ks'),
+    ('t_audit_metrics_fr'),
+    ('t_audit_metrics_or'),
+    ('t_audit_risk_regular'),
+    ('t_audit_risk_operational'),
+    ('t_audit_fact_data'),
+    ('t_audit_fact_aggregated')
+ON CONFLICT DO NOTHING;
+
+-- ============================================================================
+-- СПРАВОЧНИК МЕТРИК (для локального тестирования)
+-- ============================================================================
+
+CREATE TABLE IF NOT EXISTS t_db_oarb_ua_violation_metric_dict (
+    id SERIAL PRIMARY KEY,
+    code VARCHAR(50) NOT NULL UNIQUE,
+    metric_name VARCHAR(500) NOT NULL,
+    metric_group VARCHAR(10)
+);
+
+COMMENT ON TABLE t_db_oarb_ua_violation_metric_dict IS 'Справочник метрик нарушений';
+
+-- Заполняем тестовыми данными
+INSERT INTO t_db_oarb_ua_violation_metric_dict (code, metric_name, metric_group) VALUES
+    ('1001', 'Несоблюдение лимитов кредитования', 'КС'),
+    ('1002', 'Нарушение порядка оценки залога', 'КС'),
+    ('1003', 'Некорректное определение категории качества', 'КС'),
+    ('1004', 'Нарушение порядка формирования резервов', 'КС'),
+    ('2001', 'Искажение финансовой отчетности', 'ФР'),
+    ('2002', 'Некорректный расчет финансовых показателей', 'ФР'),
+    ('2003', 'Нарушение учетной политики', 'ФР'),
+    ('3001', 'Несоблюдение процедур идентификации', 'ОР'),
+    ('3002', 'Нарушение порядка ведения досье клиента', 'ОР'),
+    ('3003', 'Несоответствие внутренним регламентам', 'ОР'),
+    ('4001', 'Нарушение регуляторных требований', 'РР'),
+    ('4002', 'Несоблюдение нормативов ЦБ', 'РР'),
+    ('5001', 'Нарушение методологии расчета', 'МКР'),
+    ('5002', 'Некорректная калибровка модели', 'МКР'),
+    ('9001', 'Прочие нарушения без категории', NULL)
+ON CONFLICT DO NOTHING;
 
 -- ============================================================================
 -- ИНДЕКСЫ ДЛЯ ОПТИМИЗАЦИИ ЗАПРОСОВ
@@ -478,6 +592,60 @@ CREATE INDEX IF NOT EXISTS idx_act_violations_node_number
 
 COMMENT ON INDEX idx_act_violations_node_number IS 'Частичный индекс для поиска нарушений по номеру узла';
 
+-- Индексы на act_invoices
+CREATE INDEX IF NOT EXISTS idx_act_invoices_act_id
+    ON act_invoices(act_id);
+
+COMMENT ON INDEX idx_act_invoices_act_id IS 'Индекс для получения всех фактур акта';
+
+CREATE INDEX IF NOT EXISTS idx_act_invoices_node
+    ON act_invoices(act_id, node_id);
+
+COMMENT ON INDEX idx_act_invoices_node IS 'Индекс для поиска фактуры по узлу';
+
+-- Индексы на audit_act_id
+CREATE INDEX IF NOT EXISTS idx_acts_audit_act_id
+    ON acts(audit_act_id)
+    WHERE audit_act_id IS NOT NULL;
+
+COMMENT ON INDEX idx_acts_audit_act_id IS 'Индекс для поиска по идентификатору аудита акта';
+
+CREATE INDEX IF NOT EXISTS idx_audit_team_audit_act_id
+    ON audit_team_members(audit_act_id)
+    WHERE audit_act_id IS NOT NULL;
+
+COMMENT ON INDEX idx_audit_team_audit_act_id IS 'Индекс для поиска членов группы по идентификатору аудита';
+
+CREATE INDEX IF NOT EXISTS idx_act_directives_audit_act_id
+    ON act_directives(audit_act_id)
+    WHERE audit_act_id IS NOT NULL;
+
+COMMENT ON INDEX idx_act_directives_audit_act_id IS 'Индекс для поиска поручений по идентификатору аудита';
+
+CREATE INDEX IF NOT EXISTS idx_act_tables_audit_act_id
+    ON act_tables(audit_act_id)
+    WHERE audit_act_id IS NOT NULL;
+
+COMMENT ON INDEX idx_act_tables_audit_act_id IS 'Индекс для поиска таблиц по идентификатору аудита';
+
+CREATE INDEX IF NOT EXISTS idx_act_textblocks_audit_act_id
+    ON act_textblocks(audit_act_id)
+    WHERE audit_act_id IS NOT NULL;
+
+COMMENT ON INDEX idx_act_textblocks_audit_act_id IS 'Индекс для поиска текстовых блоков по идентификатору аудита';
+
+CREATE INDEX IF NOT EXISTS idx_act_violations_audit_act_id
+    ON act_violations(audit_act_id)
+    WHERE audit_act_id IS NOT NULL;
+
+COMMENT ON INDEX idx_act_violations_audit_act_id IS 'Индекс для поиска нарушений по идентификатору аудита';
+
+CREATE INDEX IF NOT EXISTS idx_act_invoices_audit_act_id
+    ON act_invoices(audit_act_id)
+    WHERE audit_act_id IS NOT NULL;
+
+COMMENT ON INDEX idx_act_invoices_audit_act_id IS 'Индекс для поиска фактур по идентификатору аудита';
+
 -- GIN индексы на JSONB для полнотекстового поиска
 CREATE INDEX IF NOT EXISTS idx_act_tree_data
     ON act_tree USING GIN(tree_data);
@@ -562,3 +730,14 @@ CREATE TRIGGER update_act_violations_updated_at
 
 COMMENT ON TRIGGER update_act_violations_updated_at ON act_violations IS
     'Автоматически обновляет поле updated_at при изменении нарушения';
+
+-- Триггер для act_invoices
+DROP TRIGGER IF EXISTS update_act_invoices_updated_at ON act_invoices;
+CREATE TRIGGER update_act_invoices_updated_at
+    BEFORE UPDATE ON act_invoices
+    FOR EACH ROW
+    EXECUTE FUNCTION update_updated_at_column();
+
+COMMENT ON TRIGGER update_act_invoices_updated_at ON act_invoices IS
+    'Автоматически обновляет поле updated_at при изменении фактуры';
+

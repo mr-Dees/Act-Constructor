@@ -6,7 +6,7 @@
 
 from fastapi import APIRouter
 
-from app.api.v1.endpoints import auth, acts, acts_content, acts_export, system
+from app.api.v1.endpoints import auth, acts, acts_content, acts_export, acts_invoice, system
 
 # Создание главного роутера для API v1
 api_router = APIRouter()
@@ -22,6 +22,7 @@ ROUTERS = [
     (acts, "/acts", ["Менеджмент актов"]),
     (acts_content, "/acts_content", ["Содержимое актов"]),
     (acts_export, "/acts_export", ["Операции экспорта"]),
+    (acts_invoice, "/acts_invoice", ["Фактуры актов"]),
 ]
 
 # Подключение всех роутеров (будут доступны по адресу /api/v1/*/*)

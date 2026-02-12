@@ -1,0 +1,386 @@
+/*
+ * Стили диалога "Приложить фактуру"
+ *
+ * Модальное окно для выбора БД, поиска таблиц,
+ * выбора типов метрик и сохранения фактуры.
+ */
+
+/* Основное окно диалога */
+.invoice-modal {
+    width: 500px;
+    max-width: 500px;
+    padding: 0;
+    overflow: hidden;
+    display: flex;
+    flex-direction: column;
+    background: var(--modal-bg);
+    border-radius: var(--radius-xl);
+    box-shadow: var(--modal-shadow);
+    border: 1px solid var(--modal-border);
+    transform: scale(0.95);
+    opacity: 0;
+    transition: transform var(--transition-base) var(--ease-in-out-smooth),
+        opacity var(--transition-base) var(--ease-in-out-smooth);
+}
+
+.custom-dialog-overlay.visible > .invoice-modal {
+    transform: scale(1);
+    opacity: 1;
+    overflow: visible;
+}
+
+.custom-dialog-overlay.closing > .invoice-modal {
+    transform: scale(0.95);
+    opacity: 0;
+    transition: transform var(--transition-fast) var(--ease-in-out-smooth),
+        opacity var(--transition-fast) var(--ease-in-out-smooth);
+}
+
+/* Шапка диалога */
+.invoice-modal-header {
+    padding: var(--spacing-lg) var(--spacing-2xl);
+    background: var(--gradient-header);
+    color: var(--text-on-primary);
+    border-bottom: 1px solid var(--border-light);
+    border-radius: var(--radius-xl) var(--radius-xl) 0 0;
+    flex-shrink: 0;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+}
+
+.invoice-modal .dialog-title {
+    margin: 0;
+    font-size: var(--font-size-xl);
+    font-weight: var(--font-weight-semibold);
+    color: var(--text-on-primary);
+    text-align: left;
+}
+
+.invoice-close-btn {
+    color: var(--text-on-primary);
+    font-size: var(--font-size-3xl);
+    line-height: 1;
+    width: 32px;
+    height: 32px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    border-radius: var(--radius);
+    transition: var(--transition-all);
+}
+
+.invoice-close-btn:hover {
+    background: rgba(255, 255, 255, 0.15);
+}
+
+/* Тело диалога */
+.invoice-modal-body {
+    flex: 1;
+}
+
+/* Информация о пункте */
+.invoice-node-info {
+    padding: var(--spacing-md) var(--spacing-2xl);
+    background: var(--bg-secondary);
+    border-bottom: 1px solid var(--border-light);
+    font-size: var(--font-size-sm);
+    color: var(--text-secondary);
+    display: flex;
+    align-items: center;
+    gap: var(--spacing-xs);
+}
+
+.invoice-node-label {
+    font-weight: var(--font-weight-medium);
+    color: var(--text-tertiary);
+}
+
+.invoice-node-number {
+    font-weight: var(--font-weight-semibold);
+    color: var(--primary);
+}
+
+.invoice-node-name {
+    color: var(--text-primary);
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+/* Секция */
+.invoice-section {
+    padding: 0 var(--spacing-2xl);
+    margin-top: var(--spacing-lg);
+}
+
+.invoice-section-label {
+    font-size: var(--font-size-sm);
+    font-weight: var(--font-weight-medium);
+    color: var(--text-primary);
+    margin-bottom: var(--spacing-sm);
+}
+
+/* Radio-кнопки выбора БД */
+.invoice-db-radios {
+    display: flex;
+    flex-direction: column;
+    gap: var(--spacing-sm);
+}
+
+.invoice-radio-label {
+    display: flex;
+    align-items: center;
+    gap: var(--spacing-sm);
+    cursor: pointer;
+    font-size: var(--font-size-sm);
+    padding: var(--spacing-sm) var(--spacing-md);
+    border-radius: var(--radius-sm);
+    transition: background var(--transition-fast);
+}
+
+.invoice-radio-label:hover {
+    background: var(--bg-hover);
+}
+
+.invoice-radio-label input[type="radio"] {
+    accent-color: var(--primary);
+    cursor: pointer;
+}
+
+.invoice-schema-hint {
+    font-size: var(--font-size-xs);
+    color: var(--text-tertiary);
+    margin-left: auto;
+    font-family: var(--font-family-mono, monospace);
+}
+
+/* Поиск таблицы */
+.invoice-search-wrapper {
+    position: relative;
+}
+
+.invoice-search-input,
+.invoice-metric-search-input {
+    width: 100%;
+    padding: var(--spacing-sm) var(--spacing-md);
+    border: 1px solid var(--input-border);
+    border-radius: var(--radius-sm);
+    font-size: var(--font-size-sm);
+    font-family: var(--font-family-base);
+    color: var(--input-text);
+    background: var(--input-bg);
+    transition: border-color var(--transition-fast), box-shadow var(--transition-fast);
+    box-sizing: border-box;
+}
+
+.invoice-search-input:hover:not(:focus),
+.invoice-metric-search-input:hover:not(:focus) {
+    border-color: var(--input-border-hover);
+}
+
+.invoice-search-input:focus,
+.invoice-metric-search-input:focus {
+    outline: none;
+    border-color: var(--input-border-focus);
+    box-shadow: var(--input-focus-shadow);
+}
+
+.invoice-search-input::placeholder,
+.invoice-metric-search-input::placeholder {
+    color: var(--input-placeholder);
+}
+
+/* Выпадающий список результатов */
+.invoice-search-dropdown,
+.invoice-metric-dropdown {
+    position: absolute;
+    top: 100%;
+    left: 0;
+    right: 0;
+    background: var(--bg-primary);
+    border: 1px solid var(--border);
+    border-top: none;
+    border-radius: 0 0 var(--radius-sm) var(--radius-sm);
+    box-shadow: var(--shadow-md);
+    z-index: 10;
+    display: none;
+    max-height: 200px;
+    overflow-y: auto;
+}
+
+.invoice-search-dropdown.visible,
+.invoice-metric-dropdown.visible {
+    display: block;
+}
+
+.invoice-search-dropdown-item {
+    padding: var(--spacing-sm) var(--spacing-md);
+    font-size: var(--font-size-sm);
+    cursor: pointer;
+    transition: background var(--transition-fast);
+    font-family: var(--font-family-mono, monospace);
+    color: var(--text-primary);
+}
+
+.invoice-search-dropdown-item:hover {
+    background: var(--bg-hover);
+}
+
+.invoice-search-dropdown-empty {
+    padding: var(--spacing-sm) var(--spacing-md);
+    font-size: var(--font-size-sm);
+    color: var(--text-tertiary);
+    font-style: italic;
+}
+
+/* Подсветка выбранной таблицы/метрики в строке поиска */
+.invoice-search-input.has-value,
+.invoice-metric-search-input.has-value {
+    color: var(--primary);
+    font-weight: var(--font-weight-medium);
+}
+
+/* Чипы метрик */
+.invoice-chips {
+    display: flex;
+    flex-wrap: wrap;
+    gap: var(--spacing-sm);
+}
+
+.invoice-chip {
+    padding: var(--spacing-xs) var(--spacing-lg);
+    border: 1px solid var(--border);
+    border-radius: 20px;
+    background: var(--bg-primary);
+    color: var(--text-secondary);
+    font-size: var(--font-size-sm);
+    font-weight: var(--font-weight-medium);
+    cursor: pointer;
+    transition: all var(--transition-fast);
+    user-select: none;
+}
+
+.invoice-chip:hover {
+    border-color: var(--primary-light);
+    color: var(--primary);
+}
+
+.invoice-chip.active {
+    background: var(--primary);
+    color: var(--text-on-primary);
+    border-color: var(--primary);
+}
+
+.invoice-chip.active:hover {
+    background: var(--primary-hover);
+    border-color: var(--primary-hover);
+    color: var(--text-on-primary);
+}
+
+/* Элементы dropdown метрик */
+.invoice-metric-dropdown-item {
+    padding: var(--spacing-sm) var(--spacing-md);
+    font-size: var(--font-size-sm);
+    cursor: pointer;
+    transition: background var(--transition-fast);
+    color: var(--text-primary);
+    display: flex;
+    align-items: baseline;
+}
+
+.invoice-metric-dropdown-item:hover {
+    background: var(--bg-hover);
+}
+
+.invoice-metric-item-code {
+    font-family: var(--font-family-mono, monospace);
+    font-weight: var(--font-weight-semibold);
+    color: var(--primary);
+    flex-shrink: 0;
+}
+
+.invoice-metric-item-name {
+    color: var(--text-secondary);
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+/* Разделитель группы в полном перечне */
+.invoice-metric-group-separator {
+    padding: var(--spacing-xs) var(--spacing-md);
+    font-size: var(--font-size-xs);
+    font-weight: var(--font-weight-semibold);
+    color: var(--text-tertiary);
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+    border-top: 1px solid var(--border-light);
+    margin-top: var(--spacing-xs);
+    background: var(--bg-secondary);
+}
+
+/* Кнопка "Показать полный перечень метрик" */
+.invoice-metric-show-all {
+    padding: var(--spacing-sm) var(--spacing-md);
+    font-size: var(--font-size-sm);
+    font-style: italic;
+    color: var(--primary);
+    cursor: pointer;
+    transition: background var(--transition-fast);
+    border-top: 1px solid var(--border-light);
+}
+
+.invoice-metric-show-all:hover {
+    background: var(--bg-hover);
+}
+
+/* Кнопки действий */
+.invoice-actions {
+    display: flex;
+    gap: var(--spacing);
+    justify-content: flex-end;
+    padding: var(--spacing-lg) var(--spacing-2xl) var(--spacing-xl);
+    border-top: 1px solid var(--border-light);
+    margin-top: var(--spacing-xl);
+}
+
+.invoice-actions .btn {
+    min-width: 120px;
+    padding: var(--spacing-sm) var(--spacing-xl);
+    border-radius: var(--radius-sm);
+    font-size: var(--font-size-sm);
+    font-weight: var(--font-weight-medium);
+    cursor: pointer;
+    transition: all var(--transition-fast);
+    border: 1px solid transparent;
+}
+
+.invoice-actions .btn-secondary {
+    background: var(--bg-tertiary);
+    color: var(--text-secondary);
+    border-color: var(--border);
+}
+
+.invoice-actions .btn-secondary:hover {
+    background: var(--bg-active);
+    color: var(--text-primary);
+}
+
+.invoice-actions .btn-primary {
+    background: var(--primary);
+    color: var(--text-on-primary);
+    border-color: var(--primary);
+}
+
+.invoice-actions .btn-primary:hover {
+    background: var(--primary-hover);
+    border-color: var(--primary-hover);
+}
+
+.invoice-actions .btn-primary:disabled {
+    background: var(--bg-disabled);
+    color: var(--text-disabled);
+    border-color: var(--border);
+    cursor: not-allowed;
+}

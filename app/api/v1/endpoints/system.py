@@ -36,6 +36,22 @@ async def get_lock_config():
     }
 
 
+@router.get("/config/invoice")
+async def get_invoice_config():
+    """
+    Получает настройки схем для фактур (для фронтенда).
+
+    Returns:
+        Названия схем Hive и GreenPlum
+    """
+    settings = get_settings()
+
+    return {
+        "hiveSchema": settings.invoice_hive_schema,
+        "gpSchema": settings.invoice_gp_schema,
+    }
+
+
 @router.get("/health")
 async def health_check(settings: Settings = Depends(get_settings)) -> dict:
     """

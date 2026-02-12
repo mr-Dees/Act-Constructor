@@ -10,6 +10,7 @@ import asyncpg
 
 from app.db.connection import get_adapter
 from app.db.utils import KMUtils, JSONDBUtils, ActDirectivesValidator
+from app.services.audit_id_service import AuditIdService
 from app.schemas.act_metadata import (
     ActCreate,
     ActUpdate,
@@ -38,6 +39,7 @@ class ActDBService:
         self.tables = self.adapter.get_table_name("act_tables")
         self.textblocks = self.adapter.get_table_name("act_textblocks")
         self.violations = self.adapter.get_table_name("act_violations")
+        self.invoices = self.adapter.get_table_name("act_invoices")
 
     # -------------------------------------------------------------------------
     # ВСПОМОГАТЕЛЬНЫЕ МЕТОДЫ
@@ -474,13 +476,17 @@ class ActDBService:
             if not user_in_team:
                 raise ValueError("Пользователь должен быть членом аудиторской группы")
 
+            # Генерируем уникальный идентификатор аудита для акта
+            audit_act_id = await AuditIdService.generate_audit_act_id()
+
             act_id = await self.conn.fetchval(
                 f"""
                 INSERT INTO {self.acts} (
-                    km_number, km_number_digit, part_number, total_parts, 
+                    km_number, km_number_digit, part_number, total_parts,
                     inspection_name, city, created_date,
                     order_number, order_date, is_process_based,
                     service_note, service_note_date,
+                    audit_act_id,
                     created_by, inspection_start_date, inspection_end_date,
                     last_edited_at
                 )
@@ -488,7 +494,8 @@ class ActDBService:
                     $1, $2, $3, $4, $5, $6, $7,
                     $8, $9, $10,
                     $11, $12,
-                    $13, $14, $15,
+                    $13,
+                    $14, $15, $16,
                     CURRENT_TIMESTAMP
                 )
                 RETURNING id
@@ -505,6 +512,7 @@ class ActDBService:
                 act_data.is_process_based,
                 act_data.service_note,
                 act_data.service_note_date,
+                audit_act_id,
                 username,
                 act_data.inspection_start_date,
                 act_data.inspection_end_date,
@@ -514,11 +522,12 @@ class ActDBService:
                 await self.conn.execute(
                     f"""
                     INSERT INTO {self.audit_team} (
-                        act_id, role, full_name, position, username, order_index
+                        act_id, audit_act_id, role, full_name, position, username, order_index
                     )
-                    VALUES ($1, $2, $3, $4, $5, $6)
+                    VALUES ($1, $2, $3, $4, $5, $6, $7)
                     """,
                     act_id,
+                    audit_act_id,
                     member.role,
                     member.full_name,
                     member.position,
@@ -530,12 +539,13 @@ class ActDBService:
                 await self.conn.execute(
                     f"""
                     INSERT INTO {self.directives} (
-                        act_id, point_number, directive_number, order_index
+                        act_id, point_number, node_id, directive_number, order_index
                     )
-                    VALUES ($1, $2, $3, $4)
+                    VALUES ($1, $2, $3, $4, $5)
                     """,
                     act_id,
                     directive.point_number,
+                    directive.node_id,
                     directive.directive_number,
                     idx,
                 )
@@ -572,7 +582,7 @@ class ActDBService:
         """Получает список актов, где пользователь является участником."""
         rows = await self.conn.fetch(
             f"""
-            SELECT 
+            SELECT
                 a.id,
                 a.km_number,
                 a.part_number,
@@ -584,6 +594,7 @@ class ActDBService:
                 a.last_edited_at,
                 a.created_at,
                 a.service_note,
+                a.audit_act_id,
                 MIN(atm.role) as user_role,
                 a.locked_by,
                 a.lock_expires_at,
@@ -594,25 +605,26 @@ class ActDBService:
             FROM {self.acts} a
             INNER JOIN {self.audit_team} atm ON a.id = atm.act_id
             WHERE atm.username = $1
-            GROUP BY 
-                a.id, 
-                a.km_number, 
-                a.part_number, 
+            GROUP BY
+                a.id,
+                a.km_number,
+                a.part_number,
                 a.total_parts,
-                a.inspection_name, 
+                a.inspection_name,
                 a.order_number,
-                a.inspection_start_date, 
+                a.inspection_start_date,
                 a.inspection_end_date,
                 a.last_edited_at,
                 a.created_at,
                 a.service_note,
-                a.locked_by, 
+                a.audit_act_id,
+                a.locked_by,
                 a.lock_expires_at,
-                a.needs_created_date, 
+                a.needs_created_date,
                 a.needs_directive_number,
-                a.needs_invoice_check, 
+                a.needs_invoice_check,
                 a.needs_service_note
-            ORDER BY 
+            ORDER BY
                 COALESCE(a.last_edited_at, a.created_at) DESC,
                 a.created_at DESC
             """,
@@ -634,6 +646,7 @@ class ActDBService:
                 last_edited_at=row["last_edited_at"],
                 user_role=row["user_role"],
                 service_note=row["service_note"],
+                audit_act_id=row["audit_act_id"],
                 locked_by=row["locked_by"],
                 is_locked=(
                         row["locked_by"] is not None and
@@ -652,13 +665,14 @@ class ActDBService:
         """Получает полную информацию об акте по его ID."""
         act_row = await self.conn.fetchrow(
             f"""
-            SELECT 
+            SELECT
                 id, km_number, part_number, total_parts,
                 inspection_name, city, created_date,
                 order_number, order_date, is_process_based,
                 service_note, service_note_date,
+                audit_act_id,
                 inspection_start_date, inspection_end_date,
-                needs_created_date, needs_directive_number, 
+                needs_created_date, needs_directive_number,
                 needs_invoice_check, needs_service_note,
                 created_at, updated_at, created_by,
                 last_edited_by, last_edited_at
@@ -693,7 +707,7 @@ class ActDBService:
 
         directive_rows = await self.conn.fetch(
             f"""
-            SELECT point_number, directive_number
+            SELECT point_number, node_id, directive_number
             FROM {self.directives}
             WHERE act_id = $1
             ORDER BY order_index
@@ -705,6 +719,7 @@ class ActDBService:
             ActDirective(
                 point_number=row["point_number"],
                 directive_number=row["directive_number"],
+                node_id=row["node_id"],
             )
             for row in directive_rows
         ]
@@ -722,6 +737,7 @@ class ActDBService:
             is_process_based=act_row["is_process_based"],
             service_note=act_row["service_note"],
             service_note_date=act_row["service_note_date"],
+            audit_act_id=act_row["audit_act_id"],
             inspection_start_date=act_row["inspection_start_date"],
             inspection_end_date=act_row["inspection_end_date"],
             audit_team=audit_team,
@@ -945,6 +961,12 @@ class ActDBService:
 
             # Аудиторская группа
             if act_update.audit_team is not None:
+                # Получаем audit_act_id для записи в audit_team_members
+                cur_audit_act_id = await self.conn.fetchval(
+                    f"SELECT audit_act_id FROM {self.acts} WHERE id = $1",
+                    act_id,
+                )
+
                 await self.conn.execute(
                     f"DELETE FROM {self.audit_team} WHERE act_id = $1",
                     act_id,
@@ -954,11 +976,12 @@ class ActDBService:
                     await self.conn.execute(
                         f"""
                         INSERT INTO {self.audit_team} (
-                            act_id, role, full_name, position, username, order_index
+                            act_id, audit_act_id, role, full_name, position, username, order_index
                         )
-                        VALUES ($1, $2, $3, $4, $5, $6)
+                        VALUES ($1, $2, $3, $4, $5, $6, $7)
                         """,
                         act_id,
+                        cur_audit_act_id,
                         member.role,
                         member.full_name,
                         member.position,
@@ -977,12 +1000,13 @@ class ActDBService:
                     await self.conn.execute(
                         f"""
                         INSERT INTO {self.directives} (
-                            act_id, point_number, directive_number, order_index
+                            act_id, point_number, node_id, directive_number, order_index
                         )
-                        VALUES ($1, $2, $3, $4)
+                        VALUES ($1, $2, $3, $4, $5)
                         """,
                         act_id,
                         directive.point_number,
+                        directive.node_id,
                         directive.directive_number,
                         idx,
                     )
@@ -1343,3 +1367,218 @@ class ActDBService:
         role = row["role"]
         can_edit = role in ("Куратор", "Руководитель", "Редактор")
         return {"has_access": True, "can_edit": can_edit, "role": role}
+
+    # -------------------------------------------------------------------------
+    # ФАКТУРЫ
+    # -------------------------------------------------------------------------
+
+    async def list_metric_dict(self) -> list[dict]:
+        """
+        Возвращает справочник метрик из таблицы t_db_oarb_ua_violation_metric_dict.
+
+        Returns:
+            Список словарей {code, metric_name, metric_group}
+        """
+        from app.core.config import get_settings
+        settings = get_settings()
+
+        if settings.db_type == "postgresql":
+            registry_schema = "public"
+        else:
+            registry_schema = settings.invoice_hive_registry_schema
+
+        metric_table = settings.invoice_metric_dict_table
+
+        rows = await self.conn.fetch(
+            f'SELECT code, metric_name, metric_group '
+            f'FROM {registry_schema}.{metric_table} '
+            f'ORDER BY code',
+        )
+
+        return [
+            {
+                "code": row["code"],
+                "metric_name": row["metric_name"],
+                "metric_group": row["metric_group"],
+            }
+            for row in rows
+        ]
+
+    async def list_tables(self, db_type: str) -> list[dict]:
+        """
+        Возвращает полный список таблиц в указанной БД.
+
+        Args:
+            db_type: Тип БД (hive, greenplum)
+
+        Returns:
+            Список словарей {table_name}
+
+        Raises:
+            ValueError: Если db_type не поддерживается
+        """
+        from app.core.config import get_settings
+        settings = get_settings()
+
+        if db_type == "hive":
+            if settings.db_type == "postgresql":
+                registry_schema = "public"
+            else:
+                registry_schema = settings.invoice_hive_registry_schema
+
+            registry_table = settings.invoice_hive_registry_table
+            col_table = settings.invoice_hive_registry_col_table
+
+            rows = await self.conn.fetch(
+                f'SELECT {col_table} '
+                f'FROM {registry_schema}.{registry_table} '
+                f'ORDER BY {col_table}',
+            )
+            return [
+                {"table_name": row[col_table]}
+                for row in rows
+            ]
+
+        elif db_type == "greenplum":
+            # Тестовый режим (локальный PostgreSQL) или прод (Greenplum)
+            if settings.db_type == "postgresql":
+                target_schema = "public"
+            else:
+                target_schema = settings.invoice_gp_schema
+
+            rows = await self.conn.fetch(
+                "SELECT tablename FROM pg_tables WHERE schemaname = $1 ORDER BY tablename",
+                target_schema,
+            )
+            return [
+                {"table_name": row["tablename"]}
+                for row in rows
+            ]
+
+        else:
+            raise ValueError(f"Неподдерживаемый тип БД: {db_type}")
+
+    async def save_invoice(self, data: dict, username: str) -> dict:
+        """
+        Сохраняет фактуру (UPSERT по act_id + node_id).
+
+        Args:
+            data: Словарь с данными фактуры
+            username: Имя пользователя
+
+        Returns:
+            Словарь с данными сохраненной фактуры
+        """
+        row = await self.adapter.upsert_invoice(
+            self.conn, self.invoices, data, username
+        )
+
+        logger.info(
+            f"Фактура сохранена: act_id={data['act_id']}, "
+            f"node_id={data['node_id']}, table={data['table_name']}"
+        )
+
+        return {
+            "id": row["id"],
+            "act_id": row["act_id"],
+            "node_id": row["node_id"],
+            "node_number": row["node_number"],
+            "db_type": row["db_type"],
+            "schema_name": row["schema_name"],
+            "table_name": row["table_name"],
+            "metric_type": row["metric_type"],
+            "metric_code": row["metric_code"],
+            "metric_name": row["metric_name"],
+            "verification_status": row["verification_status"],
+            "created_at": row["created_at"].isoformat(),
+            "updated_at": row["updated_at"].isoformat(),
+            "created_by": row["created_by"],
+        }
+
+    async def get_invoice_for_node(
+            self,
+            act_id: int,
+            node_id: str,
+    ) -> dict | None:
+        """Получает фактуру для конкретного узла."""
+        row = await self.conn.fetchrow(
+            f"""
+            SELECT id, act_id, node_id, node_number, db_type,
+                   schema_name, table_name, metric_type,
+                   metric_code, metric_name,
+                   verification_status, created_at, updated_at, created_by
+            FROM {self.invoices}
+            WHERE act_id = $1 AND node_id = $2
+            """,
+            act_id,
+            node_id,
+        )
+
+        if not row:
+            return None
+
+        return {
+            "id": row["id"],
+            "act_id": row["act_id"],
+            "node_id": row["node_id"],
+            "node_number": row["node_number"],
+            "db_type": row["db_type"],
+            "schema_name": row["schema_name"],
+            "table_name": row["table_name"],
+            "metric_type": row["metric_type"],
+            "metric_code": row["metric_code"],
+            "metric_name": row["metric_name"],
+            "verification_status": row["verification_status"],
+            "created_at": row["created_at"].isoformat(),
+            "updated_at": row["updated_at"].isoformat(),
+            "created_by": row["created_by"],
+        }
+
+    async def get_invoices_for_act(self, act_id: int) -> list[dict]:
+        """Получает все фактуры для акта."""
+        rows = await self.conn.fetch(
+            f"""
+            SELECT id, act_id, node_id, node_number, db_type,
+                   schema_name, table_name, metric_type,
+                   metric_code, metric_name,
+                   verification_status, created_at, updated_at, created_by
+            FROM {self.invoices}
+            WHERE act_id = $1
+            ORDER BY node_number, created_at
+            """,
+            act_id,
+        )
+
+        return [
+            {
+                "id": row["id"],
+                "act_id": row["act_id"],
+                "node_id": row["node_id"],
+                "node_number": row["node_number"],
+                "db_type": row["db_type"],
+                "schema_name": row["schema_name"],
+                "table_name": row["table_name"],
+                "metric_type": row["metric_type"],
+                "metric_code": row["metric_code"],
+                "metric_name": row["metric_name"],
+                "verification_status": row["verification_status"],
+                "created_at": row["created_at"].isoformat(),
+                "updated_at": row["updated_at"].isoformat(),
+                "created_by": row["created_by"],
+            }
+            for row in rows
+        ]
+
+    async def verify_invoice(self, invoice_id: int) -> dict:
+        """
+        Верификация фактуры (TODO-заглушка).
+
+        В будущем здесь будет вызов внешнего сервиса для проверки
+        соответствия фактуры и данных в таблице.
+        """
+        logger.info(f"TODO: Верификация фактуры ID={invoice_id} (заглушка)")
+        return {
+            "invoice_id": invoice_id,
+            "status": "pending",
+            "message": "Верификация пока не реализована",
+        }

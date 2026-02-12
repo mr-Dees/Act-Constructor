@@ -366,6 +366,16 @@ class APIClient {
                 AppState.initializeTree(isProcessBased);
                 AppState.generateNumbering();
 
+                // Привязываем фактуры к узлам дерева
+                if (content.invoices) {
+                    this._attachInvoicesToTree(AppState.treeData, content.invoices);
+                }
+
+                // Асинхронно присваиваем audit_point_id (не блокируем пользователя)
+                if (typeof AuditIdService !== 'undefined') {
+                    AuditIdService.assignMissingPointIds(actId, AppState.treeData);
+                }
+
                 // Сохраняем дефолтную структуру в БД ТОЛЬКО если есть права на редактирование
                 if (!AppConfig.readOnlyMode.isReadOnly) {
                     await this._saveDefaultStructure(actId, username);
@@ -384,6 +394,16 @@ class APIClient {
                 this._migrateStripNumberFromLabels(AppState.treeData);
 
                 AppState.generateNumbering();
+
+                // Привязываем фактуры к узлам дерева
+                if (content.invoices) {
+                    this._attachInvoicesToTree(AppState.treeData, content.invoices);
+                }
+
+                // Асинхронно присваиваем audit_point_id (не блокируем пользователя)
+                if (typeof AuditIdService !== 'undefined') {
+                    AuditIdService.assignMissingPointIds(actId, AppState.treeData);
+                }
             }
 
             // Обновляем интерфейс
@@ -572,6 +592,135 @@ class APIClient {
                 this._migrateStripNumberFromLabels(child);
             }
         }
+    }
+
+    /**
+     * Привязывает фактуры из БД к соответствующим узлам дерева.
+     * @private
+     * @param {Object} node - Узел дерева
+     * @param {Object} invoicesMap - Словарь фактур {node_id: invoice_data}
+     */
+    static _attachInvoicesToTree(node, invoicesMap) {
+        if (!node) return;
+        if (invoicesMap[node.id]) {
+            const inv = invoicesMap[node.id];
+            node.invoice = {
+                db_type: inv.db_type,
+                schema_name: inv.schema_name,
+                table_name: inv.table_name,
+                metric_type: inv.metric_type,
+                metric_code: inv.metric_code || null,
+                metric_name: inv.metric_name || null,
+            };
+        }
+        if (node.children) {
+            for (const child of node.children) {
+                this._attachInvoicesToTree(child, invoicesMap);
+            }
+        }
+    }
+
+    // -----------------------------------------------------------------
+    // Фактуры
+    // -----------------------------------------------------------------
+
+    /**
+     * Загружает справочник метрик
+     *
+     * @returns {Promise<Array<{code: string, metric_name: string, metric_group: string|null}>>}
+     */
+    static async loadMetricDict() {
+        const username = AuthManager.getCurrentUser();
+
+        const response = await fetch(
+            AppConfig.api.getUrl('/api/v1/acts_invoice/metrics'),
+            {
+                headers: { 'X-JupyterHub-User': username }
+            }
+        );
+
+        if (!response.ok) {
+            const error = await response.json();
+            throw this._createError(response.status, error.detail);
+        }
+
+        return response.json();
+    }
+
+    /**
+     * Загружает полный список таблиц для фактуры
+     *
+     * @param {string} dbType - Тип БД ('hive' или 'greenplum')
+     * @returns {Promise<Array<{table_name: string}>>}
+     */
+    static async loadInvoiceTables(dbType) {
+        const username = AuthManager.getCurrentUser();
+
+        const response = await fetch(
+            AppConfig.api.getUrl(`/api/v1/acts_invoice/tables/${dbType}`),
+            {
+                headers: { 'X-JupyterHub-User': username }
+            }
+        );
+
+        if (!response.ok) {
+            const error = await response.json();
+            throw this._createError(response.status, error.detail);
+        }
+
+        return response.json();
+    }
+
+    /**
+     * Сохраняет фактуру (UPSERT по act_id + node_id)
+     *
+     * @param {Object} data - Данные фактуры
+     * @returns {Promise<Object>} Сохраненная фактура
+     */
+    static async saveInvoice(data) {
+        const username = AuthManager.getCurrentUser();
+
+        const response = await fetch(AppConfig.api.getUrl('/api/v1/acts_invoice/save'), {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+                'X-JupyterHub-User': username,
+            },
+            body: JSON.stringify(data),
+        });
+
+        if (!response.ok) {
+            const error = await response.json();
+            throw this._createError(response.status, error.detail);
+        }
+
+        return response.json();
+    }
+
+    /**
+     * Верификация фактуры (TODO-заглушка)
+     *
+     * @param {number} invoiceId - ID фактуры
+     * @returns {Promise<Object>} Результат верификации
+     */
+    static async verifyInvoice(invoiceId) {
+        const username = AuthManager.getCurrentUser();
+
+        const response = await fetch(AppConfig.api.getUrl('/api/v1/acts_invoice/verify'), {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+                'X-JupyterHub-User': username,
+            },
+            body: JSON.stringify({ invoice_id: invoiceId }),
+        });
+
+        if (!response.ok) {
+            const error = await response.json();
+            throw this._createError(response.status, error.detail);
+        }
+
+        return response.json();
     }
 
     /**

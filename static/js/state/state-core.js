@@ -332,8 +332,24 @@ const AppState = {
             tree: this._serializeTree(this.treeData),
             tables: this._serializeTables(),
             textBlocks: this._serializeTextBlocks(),
-            violations: this._serializeViolations()
+            violations: this._serializeViolations(),
+            invoiceNodeIds: this._collectInvoiceNodeIds()
         };
+    },
+
+    /**
+     * Собирает ID узлов, у которых есть прикреплённая фактура
+     * @private
+     * @returns {string[]} Массив ID узлов с фактурами
+     */
+    _collectInvoiceNodeIds() {
+        const ids = [];
+        const walk = (node) => {
+            if (node.invoice) ids.push(node.id);
+            if (node.children) node.children.forEach(walk);
+        };
+        if (this.treeData) walk(this.treeData);
+        return ids;
     },
 
     /**
@@ -366,6 +382,7 @@ const AppState = {
         if (node.customLabel) serialized.customLabel = node.customLabel;
         if (node.number) serialized.number = node.number;
         if (node.tb?.length) serialized.tb = node.tb;
+        if (node.auditPointId) serialized.auditPointId = node.auditPointId;
 
         // Рекурсивная сериализация детей
         serialized.children = node.children?.map(child => this._serializeTree(child)) || [];

@@ -313,6 +313,7 @@ class ActItemSchema(BaseModel):
     isMetricsTable: bool | None = False
     isMainMetricsTable: bool | None = False
     tb: list[str] | None = None
+    auditPointId: str | None = None
 
 
 class ActDataSchema(BaseModel):
@@ -340,6 +341,10 @@ class ActDataSchema(BaseModel):
     violations: dict[str, ViolationSchema] = Field(
         default_factory=dict,
         description="Нарушения"
+    )
+    invoiceNodeIds: list[str] = Field(
+        default_factory=list,
+        description="ID узлов, у которых есть прикреплённая фактура"
     )
 
 

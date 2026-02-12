@@ -87,8 +87,8 @@ class TreeDragDrop {
             return;
         }
 
-        // Запрещаем перетаскивание узлов с таблицами рисков
-        if (this._hasRiskTablesInSubtree(node)) {
+        // Запрещаем перетаскивание узлов с таблицами рисков (кроме перемещения внутри раздела 5)
+        if (this._hasRiskTablesInSubtree(node) && !TreeUtils.isUnderSection5(node)) {
             e.preventDefault();
             Notifications.error('Нельзя перемещать блоки, содержащие таблицы рисков');
             return;

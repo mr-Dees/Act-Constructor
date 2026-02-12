@@ -17,6 +17,7 @@ class ActDirective(BaseModel):
     """Поручение"""
     point_number: str = Field(min_length=1, max_length=50)
     directive_number: str = Field(min_length=1, max_length=100)
+    node_id: str | None = Field(default=None, max_length=100)
 
     @field_validator('point_number')
     @classmethod
@@ -245,6 +246,7 @@ class ActListItem(BaseModel):
     last_edited_at: Optional[datetime]
     user_role: str
     service_note: Optional[str] = None
+    audit_act_id: Optional[str] = None
     # Статус блокировки
     locked_by: str | None = None
     is_locked: bool = False
@@ -279,6 +281,9 @@ class ActResponse(BaseModel):
     service_note: Optional[str] = None
     service_note_date: Optional[date] = None
 
+    # Идентификатор аудита
+    audit_act_id: Optional[str] = None
+
     # Служебные флаги валидации
     needs_created_date: bool = False
     needs_directive_number: bool = False
@@ -290,3 +295,8 @@ class ActResponse(BaseModel):
     created_by: str
     last_edited_by: Optional[str]
     last_edited_at: Optional[datetime]
+
+
+class AuditPointIdsRequest(BaseModel):
+    """Запрос на генерацию audit_point_id для списка узлов."""
+    node_ids: List[str] = Field(min_length=1)

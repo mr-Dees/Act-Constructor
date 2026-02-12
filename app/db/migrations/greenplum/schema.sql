@@ -40,6 +40,9 @@ CREATE TABLE {SCHEMA}.{PREFIX}acts (
     locked_at TIMESTAMP DEFAULT NULL,
     lock_expires_at TIMESTAMP DEFAULT NULL,
 
+    -- Идентификатор аудита из внешнего сервиса
+    audit_act_id VARCHAR(36),
+
     -- Системные поля
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
@@ -86,6 +89,7 @@ COMMENT ON COLUMN {SCHEMA}.{PREFIX}acts.last_edited_at IS 'Дата и врем�
 CREATE TABLE {SCHEMA}.{PREFIX}audit_team_members (
     id BIGSERIAL PRIMARY KEY,
     act_id BIGINT NOT NULL,
+    audit_act_id VARCHAR(36),
     role VARCHAR(50) NOT NULL,
     full_name VARCHAR(255) NOT NULL,
     position VARCHAR(255) NOT NULL,
@@ -113,7 +117,10 @@ COMMENT ON COLUMN {SCHEMA}.{PREFIX}audit_team_members.created_at IS 'Дата и
 CREATE TABLE {SCHEMA}.{PREFIX}act_directives (
     id BIGSERIAL PRIMARY KEY,
     act_id BIGINT NOT NULL,
+    audit_act_id VARCHAR(36),
+    audit_point_id VARCHAR(36),
     point_number VARCHAR(50) NOT NULL,
+    node_id VARCHAR(100),
     directive_number VARCHAR(100) NOT NULL,
     order_index INTEGER DEFAULT 0,
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
@@ -125,6 +132,7 @@ COMMENT ON TABLE {SCHEMA}.{PREFIX}act_directives IS 'Действующие по
 COMMENT ON COLUMN {SCHEMA}.{PREFIX}act_directives.id IS 'Уникальный идентификатор поручения';
 COMMENT ON COLUMN {SCHEMA}.{PREFIX}act_directives.act_id IS 'Ссылка на акт';
 COMMENT ON COLUMN {SCHEMA}.{PREFIX}act_directives.point_number IS 'Номер пункта в акте (формат: 5.X или 5.X.Y или 5.X.Y.Z и т.д.)';
+COMMENT ON COLUMN {SCHEMA}.{PREFIX}act_directives.node_id IS 'ID узла в дереве для синхронизации point_number';
 COMMENT ON COLUMN {SCHEMA}.{PREFIX}act_directives.directive_number IS 'Номер действующего поручения';
 COMMENT ON COLUMN {SCHEMA}.{PREFIX}act_directives.order_index IS 'Порядок отображения поручения (для сортировки)';
 COMMENT ON COLUMN {SCHEMA}.{PREFIX}act_directives.created_at IS 'Дата и время создания записи';
@@ -157,6 +165,8 @@ COMMENT ON COLUMN {SCHEMA}.{PREFIX}act_tree.updated_at IS 'Дата и врем�
 CREATE TABLE {SCHEMA}.{PREFIX}act_tables (
     id BIGSERIAL PRIMARY KEY,
     act_id BIGINT NOT NULL,
+    audit_act_id VARCHAR(36),
+    audit_point_id VARCHAR(36),
     table_id VARCHAR(100) NOT NULL,
     node_id VARCHAR(100) NOT NULL,
     node_number VARCHAR(50),
@@ -200,6 +210,8 @@ COMMENT ON COLUMN {SCHEMA}.{PREFIX}act_tables.updated_at IS 'Дата и вре�
 CREATE TABLE {SCHEMA}.{PREFIX}act_textblocks (
     id BIGSERIAL PRIMARY KEY,
     act_id BIGINT NOT NULL,
+    audit_act_id VARCHAR(36),
+    audit_point_id VARCHAR(36),
     textblock_id VARCHAR(100) NOT NULL,
     node_id VARCHAR(100) NOT NULL,
     node_number VARCHAR(50),
@@ -229,6 +241,8 @@ COMMENT ON COLUMN {SCHEMA}.{PREFIX}act_textblocks.updated_at IS 'Дата и в�
 CREATE TABLE {SCHEMA}.{PREFIX}act_violations (
     id BIGSERIAL PRIMARY KEY,
     act_id BIGINT NOT NULL,
+    audit_act_id VARCHAR(36),
+    audit_point_id VARCHAR(36),
     violation_id VARCHAR(100) NOT NULL,
     node_id VARCHAR(100) NOT NULL,
     node_number VARCHAR(50),
@@ -262,6 +276,47 @@ COMMENT ON COLUMN {SCHEMA}.{PREFIX}act_violations.responsible IS 'JSONB объе
 COMMENT ON COLUMN {SCHEMA}.{PREFIX}act_violations.recommendations IS 'JSONB объект с полями enabled и content для рекомендаций по устранению';
 COMMENT ON COLUMN {SCHEMA}.{PREFIX}act_violations.created_at IS 'Дата и время создания записи о нарушении';
 COMMENT ON COLUMN {SCHEMA}.{PREFIX}act_violations.updated_at IS 'Дата и время последнего изменения записи';
+
+-- ============================================================================
+-- ТАБЛИЦА ФАКТУР
+-- ============================================================================
+
+CREATE TABLE {SCHEMA}.{PREFIX}act_invoices (
+    id BIGSERIAL PRIMARY KEY,
+    act_id BIGINT NOT NULL,
+    audit_act_id VARCHAR(36),
+    audit_point_id VARCHAR(36),
+    node_id VARCHAR(100) NOT NULL,
+    node_number VARCHAR(50),
+    db_type VARCHAR(20) NOT NULL,
+    schema_name VARCHAR(255) NOT NULL,
+    table_name VARCHAR(255) NOT NULL,
+    metric_type VARCHAR(10) NOT NULL DEFAULT '',
+    metric_code VARCHAR(50),
+    metric_name VARCHAR(500),
+    verification_status VARCHAR(20) NOT NULL DEFAULT 'pending',
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    created_by VARCHAR(50) NOT NULL
+)
+WITH (appendonly=false)
+DISTRIBUTED BY (id);
+
+COMMENT ON TABLE {SCHEMA}.{PREFIX}act_invoices IS 'Фактуры, прикрепленные к пунктам акта';
+COMMENT ON COLUMN {SCHEMA}.{PREFIX}act_invoices.id IS 'Уникальный идентификатор записи';
+COMMENT ON COLUMN {SCHEMA}.{PREFIX}act_invoices.act_id IS 'Ссылка на акт';
+COMMENT ON COLUMN {SCHEMA}.{PREFIX}act_invoices.node_id IS 'ID узла в дереве, к которому привязана фактура';
+COMMENT ON COLUMN {SCHEMA}.{PREFIX}act_invoices.node_number IS 'Номер узла (например, 5.1.3) для аналитики';
+COMMENT ON COLUMN {SCHEMA}.{PREFIX}act_invoices.db_type IS 'Тип базы данных: hive или greenplum';
+COMMENT ON COLUMN {SCHEMA}.{PREFIX}act_invoices.schema_name IS 'Имя схемы в базе данных';
+COMMENT ON COLUMN {SCHEMA}.{PREFIX}act_invoices.table_name IS 'Имя таблицы в базе данных';
+COMMENT ON COLUMN {SCHEMA}.{PREFIX}act_invoices.metric_type IS 'Тип метрики (КС, ФР, ОР, РР, МКР)';
+COMMENT ON COLUMN {SCHEMA}.{PREFIX}act_invoices.metric_code IS 'Код метрики из справочника';
+COMMENT ON COLUMN {SCHEMA}.{PREFIX}act_invoices.metric_name IS 'Название метрики из справочника';
+COMMENT ON COLUMN {SCHEMA}.{PREFIX}act_invoices.verification_status IS 'Статус верификации: pending, verified, rejected';
+COMMENT ON COLUMN {SCHEMA}.{PREFIX}act_invoices.created_at IS 'Дата и время создания записи';
+COMMENT ON COLUMN {SCHEMA}.{PREFIX}act_invoices.updated_at IS 'Дата и время последнего обновления';
+COMMENT ON COLUMN {SCHEMA}.{PREFIX}act_invoices.created_by IS 'Числовой логин пользователя-создателя';
 
 -- ============================================================================
 -- ИНДЕКСЫ ДЛЯ ОПТИМИЗАЦИИ ЗАПРОСОВ
@@ -335,6 +390,42 @@ CREATE INDEX idx_{PREFIX}act_violations_act_id
 CREATE INDEX idx_{PREFIX}act_violations_act_violation
     ON {SCHEMA}.{PREFIX}act_violations(act_id, violation_id);
 
+-- Индексы на act_invoices
+CREATE INDEX idx_{PREFIX}act_invoices_act_id
+    ON {SCHEMA}.{PREFIX}act_invoices(act_id);
+
+CREATE INDEX idx_{PREFIX}act_invoices_act_node
+    ON {SCHEMA}.{PREFIX}act_invoices(act_id, node_id);
+
+-- Индексы на audit_act_id
+CREATE INDEX idx_{PREFIX}acts_audit_act_id
+    ON {SCHEMA}.{PREFIX}acts(audit_act_id)
+    WHERE audit_act_id IS NOT NULL;
+
+CREATE INDEX idx_{PREFIX}audit_team_audit_act_id
+    ON {SCHEMA}.{PREFIX}audit_team_members(audit_act_id)
+    WHERE audit_act_id IS NOT NULL;
+
+CREATE INDEX idx_{PREFIX}act_directives_audit_act_id
+    ON {SCHEMA}.{PREFIX}act_directives(audit_act_id)
+    WHERE audit_act_id IS NOT NULL;
+
+CREATE INDEX idx_{PREFIX}act_tables_audit_act_id
+    ON {SCHEMA}.{PREFIX}act_tables(audit_act_id)
+    WHERE audit_act_id IS NOT NULL;
+
+CREATE INDEX idx_{PREFIX}act_textblocks_audit_act_id
+    ON {SCHEMA}.{PREFIX}act_textblocks(audit_act_id)
+    WHERE audit_act_id IS NOT NULL;
+
+CREATE INDEX idx_{PREFIX}act_violations_audit_act_id
+    ON {SCHEMA}.{PREFIX}act_violations(audit_act_id)
+    WHERE audit_act_id IS NOT NULL;
+
+CREATE INDEX idx_{PREFIX}act_invoices_audit_act_id
+    ON {SCHEMA}.{PREFIX}act_invoices(audit_act_id)
+    WHERE audit_act_id IS NOT NULL;
+
 -- ============================================================================
 -- ТРИГГЕРЫ ДЛЯ АВТОМАТИЧЕСКОГО ОБНОВЛЕНИЯ updated_at
 -- ============================================================================
@@ -394,3 +485,13 @@ CREATE TRIGGER update_{PREFIX}act_violations_updated_at
 
 COMMENT ON TRIGGER update_{PREFIX}act_violations_updated_at ON {SCHEMA}.{PREFIX}act_violations IS
     'Автоматически обновляет поле updated_at при изменении нарушения';
+
+DROP TRIGGER IF EXISTS update_{PREFIX}act_invoices_updated_at ON {SCHEMA}.{PREFIX}act_invoices;
+CREATE TRIGGER update_{PREFIX}act_invoices_updated_at
+    BEFORE UPDATE ON {SCHEMA}.{PREFIX}act_invoices
+    FOR EACH ROW
+    EXECUTE PROCEDURE {SCHEMA}.update_updated_at_column();
+
+COMMENT ON TRIGGER update_{PREFIX}act_invoices_updated_at ON {SCHEMA}.{PREFIX}act_invoices IS
+    'Автоматически обновляет поле updated_at при изменении фактуры';
+

@@ -110,6 +110,7 @@ class CreateActDialog extends DialogBase {
 
                     if (depth <= 4) {
                         points.push({
+                            id: child.id,
                             number: child.number,
                             label: child.number ? (child.number + '. ' + (child.label || '')) : (child.label || child.number)
                         });
@@ -655,7 +656,7 @@ class CreateActDialog extends DialogBase {
     static _initializeDirectives(dialog, actData) {
         if (actData && actData.directives && actData.directives.length > 0) {
             actData.directives.forEach(dir => {
-                this._addDirective(dialog, dir.point_number, dir.directive_number);
+                this._addDirective(dialog, dir.point_number, dir.directive_number, dir.node_id || '');
             });
         }
     }
@@ -719,6 +720,7 @@ class CreateActDialog extends DialogBase {
             const option = document.createElement('option');
             option.value = point.number;
             option.textContent = point.label;
+            option.dataset.nodeId = point.id || '';
 
             // Отключаем пункты с глубиной > 4 уровней
             const depth = point.number.split('.').length;
@@ -735,7 +737,7 @@ class CreateActDialog extends DialogBase {
      * Добавляет поручение
      * @private
      */
-    static _addDirective(dialog, pointNumber = '', directiveNumber = '') {
+    static _addDirective(dialog, pointNumber = '', directiveNumber = '', nodeId = '') {
         const container = dialog.querySelector('#directivesContainer');
         if (!container) return;
 
@@ -752,6 +754,21 @@ class CreateActDialog extends DialogBase {
             if (pointNumber) {
                 pointSelect.value = pointNumber;
             }
+
+            // При смене select — обновить nodeId из выбранного option
+            pointSelect.addEventListener('change', () => {
+                const selected = pointSelect.options[pointSelect.selectedIndex];
+                rowElement.dataset.nodeId = selected?.dataset?.nodeId || '';
+            });
+        }
+
+        // Сохраняем node_id в data-атрибуте строки
+        if (nodeId) {
+            rowElement.dataset.nodeId = nodeId;
+        } else if (pointSelect && pointSelect.value) {
+            // Берём nodeId из выбранного option
+            const selected = pointSelect.options[pointSelect.selectedIndex];
+            rowElement.dataset.nodeId = selected?.dataset?.nodeId || '';
         }
 
         // Заполняем данные номера поручения
@@ -1002,7 +1019,8 @@ class CreateActDialog extends DialogBase {
         return Array.from(dialog.querySelectorAll('.directive-row'))
             .map(row => ({
                 point_number: row.querySelector('[name="point_number"]').value,
-                directive_number: row.querySelector('[name="directive_number"]').value.trim()
+                directive_number: row.querySelector('[name="directive_number"]').value.trim(),
+                node_id: row.dataset.nodeId || null
             }))
             .filter(dir => dir.point_number !== '');
     }

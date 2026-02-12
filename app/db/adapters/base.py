@@ -110,6 +110,31 @@ class DatabaseAdapter(ABC):
         """
         pass
 
+    @abstractmethod
+    async def upsert_invoice(
+            self,
+            conn: asyncpg.Connection,
+            table_name: str,
+            data: dict,
+            username: str,
+    ) -> asyncpg.Record:
+        """
+        Вставляет или обновляет фактуру (UPSERT по act_id + node_id).
+
+        PostgreSQL использует INSERT ... ON CONFLICT DO UPDATE.
+        Greenplum требует явного UPDATE + INSERT.
+
+        Args:
+            conn: Подключение к базе данных
+            table_name: Полное имя таблицы act_invoices
+            data: Словарь с данными фактуры
+            username: Имя пользователя
+
+        Returns:
+            Запись с данными сохраненной фактуры
+        """
+        pass
+
     def qualify_column(self, table_alias: str, column: str) -> str:
         """
         Квалифицирует имя колонки с учетом алиаса таблицы.

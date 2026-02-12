@@ -1,203 +1,119 @@
 /**
- * Сервис генерации уникальных идентификаторов
+ * Сервис для работы с идентификаторами аудита (audit_point_id)
  *
- * Генерирует UUID v4 для узлов дерева и контента.
- * Поддерживает переключение между локальной генерацией
- * и внешним сервисом (заглушка для будущей интеграции).
+ * Запрашивает audit_point_id для узлов дерева через бэкенд.
+ * Все вызовы асинхронные, ошибки логируются но не прерывают работу.
  */
-class IdGeneratorService {
+class AuditIdService {
     /**
-     * Конфигурация сервиса
-     * @type {Object}
+     * Запрашивает audit_point_id для списка node_id через бэкенд
+     *
+     * @param {number} actId - ID акта
+     * @param {string[]} nodeIds - Список ID узлов
+     * @returns {Promise<Object<string, string>>} Словарь {node_id: audit_point_id}
      */
-    static config = {
-        /** @type {'local'|'external'} Режим генерации */
-        mode: 'local',
-
-        /** @type {string|null} URL внешнего сервиса (заглушка) */
-        externalEndpoint: null,
-
-        /** @type {Array<string>} Кеш предзагруженных ID для external режима */
-        _idCache: []
-    };
-
-    /**
-     * Синхронная генерация ID (для local режима)
-     *
-     * Используется для немедленного создания узлов без асинхронных вызовов.
-     * В режиме external возвращает ID из кеша или генерирует локально.
-     *
-     * @param {string} [prefix='node'] - Префикс ID (node, table, textblock, violation)
-     * @returns {string} Уникальный идентификатор в формате prefix_uuid
-     *
-     * @example
-     * const nodeId = IdGeneratorService.generateIdSync('node');
-     * // node_a1b2c3d4-e5f6-4a7b-8c9d-0e1f2a3b4c5d
-     */
-    static generateIdSync(prefix = 'node') {
-        if (this.config.mode === 'external' && this.config._idCache.length > 0) {
-            const cachedId = this.config._idCache.shift();
-            return `${prefix}_${cachedId}`;
-        }
-        return this._generateLocalId(prefix);
-    }
-
-    /**
-     * Асинхронная генерация ID (для external режима)
-     *
-     * В режиме local работает синхронно.
-     * В режиме external запрашивает ID у внешнего сервиса.
-     *
-     * @param {string} [prefix='node'] - Префикс ID
-     * @returns {Promise<string>} Уникальный идентификатор
-     *
-     * @example
-     * const nodeId = await IdGeneratorService.generateId('table');
-     */
-    static async generateId(prefix = 'node') {
-        if (this.config.mode === 'external') {
-            return this._getExternalId(prefix);
-        }
-        return this._generateLocalId(prefix);
-    }
-
-    /**
-     * Локальная генерация UUID v4
-     *
-     * Генерирует криптографически случайный UUID v4.
-     * Использует crypto.getRandomValues() при наличии, иначе Math.random().
-     *
-     * @private
-     * @param {string} prefix - Префикс ID
-     * @returns {string} ID в формате prefix_uuid
-     */
-    static _generateLocalId(prefix) {
-        const uuid = this._generateUUIDv4();
-        return `${prefix}_${uuid}`;
-    }
-
-    /**
-     * Генерирует UUID v4 строку
-     *
-     * @private
-     * @returns {string} UUID в формате xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx
-     */
-    static _generateUUIDv4() {
-        // Используем crypto.randomUUID() если доступен (современные браузеры)
-        if (typeof crypto !== 'undefined' && crypto.randomUUID) {
-            return crypto.randomUUID();
-        }
-
-        // Фолбэк на шаблонную генерацию
-        return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, (c) => {
-            const r = (Math.random() * 16) | 0;
-            const v = c === 'x' ? r : (r & 0x3) | 0x8;
-            return v.toString(16);
-        });
-    }
-
-    /**
-     * Заглушка для получения ID от внешнего сервиса
-     *
-     * TODO: Реализовать запрос к внешнему сервису генерации ID.
-     * Сервис должен возвращать гарантированно уникальные ID
-     * в распределенной среде.
-     *
-     * @private
-     * @param {string} prefix - Префикс ID
-     * @returns {Promise<string>} ID от внешнего сервиса или локальный фолбэк
-     */
-    static async _getExternalId(prefix) {
-        // Проверяем конфигурацию
-        if (!this.config.externalEndpoint) {
-            console.warn('IdGeneratorService: external endpoint не настроен, используется локальная генерация');
-            return this._generateLocalId(prefix);
+    static async fetchAuditPointIds(actId, nodeIds) {
+        if (!actId || !nodeIds || nodeIds.length === 0) {
+            return {};
         }
 
         try {
-            // TODO: Реализовать запрос к внешнему сервису
-            // const response = await fetch(this.config.externalEndpoint, {
-            //     method: 'POST',
-            //     headers: { 'Content-Type': 'application/json' },
-            //     body: JSON.stringify({ prefix, count: 1 })
-            // });
-            //
-            // if (!response.ok) {
-            //     throw new Error(`HTTP ${response.status}`);
-            // }
-            //
-            // const data = await response.json();
-            // return data.id;
+            const username = AuthManager.getCurrentUser();
+            if (!username) {
+                console.warn('AuditIdService: пользователь не авторизован');
+                return {};
+            }
 
-            console.warn('IdGeneratorService: внешний сервис ID не реализован, используется локальная генерация');
-            return this._generateLocalId(prefix);
+            const response = await fetch(
+                AppConfig.api.getUrl(`/api/v1/acts/${actId}/audit-point-ids`),
+                {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                        'X-JupyterHub-User': username
+                    },
+                    body: JSON.stringify({ node_ids: nodeIds })
+                }
+            );
 
+            if (!response.ok) {
+                console.error(`AuditIdService: ошибка запроса audit_point_ids: HTTP ${response.status}`);
+                return {};
+            }
+
+            return await response.json();
         } catch (error) {
-            console.error('IdGeneratorService: ошибка внешнего сервиса:', error);
-            return this._generateLocalId(prefix);
+            console.error('AuditIdService: ошибка получения audit_point_ids:', error);
+            return {};
         }
     }
 
     /**
-     * Предзагрузка ID для external режима (заглушка)
+     * Обходит дерево, собирает item-узлы без auditPointId,
+     * выполняет batch-запрос и присваивает полученные ID.
      *
-     * Позволяет заранее получить пул ID для синхронного использования.
-     *
-     * @param {number} [count=10] - Количество ID для предзагрузки
+     * @param {number} actId - ID акта
+     * @param {Object} treeData - Корневой узел дерева
      * @returns {Promise<void>}
      */
-    static async prefetchIds(count = 10) {
-        if (this.config.mode !== 'external' || !this.config.externalEndpoint) {
-            return;
-        }
+    static async assignMissingPointIds(actId, treeData) {
+        if (!actId || !treeData) return;
 
-        // TODO: Реализовать предзагрузку ID
-        // try {
-        //     const response = await fetch(this.config.externalEndpoint, {
-        //         method: 'POST',
-        //         headers: { 'Content-Type': 'application/json' },
-        //         body: JSON.stringify({ count })
-        //     });
-        //
-        //     const data = await response.json();
-        //     this.config._idCache.push(...data.ids);
-        // } catch (error) {
-        //     console.error('IdGeneratorService: ошибка предзагрузки ID:', error);
-        // }
+        try {
+            // Собираем item-узлы без auditPointId
+            const missingNodes = [];
+            this._collectMissingNodes(treeData, missingNodes);
 
-        console.warn('IdGeneratorService: предзагрузка ID не реализована');
-    }
+            if (missingNodes.length === 0) return;
 
-    /**
-     * Настройка сервиса
-     *
-     * @param {Object} options - Параметры конфигурации
-     * @param {string} [options.mode] - Режим генерации ('local' | 'external')
-     * @param {string} [options.externalEndpoint] - URL внешнего сервиса
-     *
-     * @example
-     * IdGeneratorService.configure({
-     *     mode: 'external',
-     *     externalEndpoint: 'https://id-service.example.com/generate'
-     * });
-     */
-    static configure(options) {
-        Object.assign(this.config, options);
+            const nodeIds = missingNodes.map(n => n.id);
 
-        if (options.mode === 'external' && !options.externalEndpoint) {
-            console.warn('IdGeneratorService: включен external режим без указания endpoint');
+            // Batch-запрос к бэкенду
+            const pointIds = await this.fetchAuditPointIds(actId, nodeIds);
+            if (!pointIds || Object.keys(pointIds).length === 0) return;
+
+            // Присваиваем полученные ID узлам
+            let assigned = 0;
+            for (const node of missingNodes) {
+                if (pointIds[node.id]) {
+                    node.auditPointId = pointIds[node.id];
+                    assigned++;
+                }
+            }
+
+            if (assigned > 0) {
+                console.log(`AuditIdService: присвоено ${assigned} audit_point_id`);
+
+                // Помечаем состояние как несохранённое
+                if (typeof StorageManager !== 'undefined' && StorageManager.markAsUnsaved) {
+                    StorageManager.markAsUnsaved();
+                }
+            }
+        } catch (error) {
+            console.error('AuditIdService: ошибка assignMissingPointIds:', error);
         }
     }
 
     /**
-     * Сброс конфигурации к значениям по умолчанию
-     * Используется в тестах.
+     * Рекурсивно собирает item-узлы без auditPointId
+     * @private
+     * @param {Object} node - Текущий узел
+     * @param {Array} result - Массив для накопления результатов
      */
-    static reset() {
-        this.config = {
-            mode: 'local',
-            externalEndpoint: null,
-            _idCache: []
-        };
+    static _collectMissingNodes(node, result) {
+        if (!node) return;
+
+        const type = node.type || 'item';
+
+        // Собираем только item-узлы (не content-узлы и не root)
+        if (type === 'item' && node.id !== 'root' && !node.auditPointId) {
+            result.push(node);
+        }
+
+        if (node.children) {
+            for (const child of node.children) {
+                this._collectMissingNodes(child, result);
+            }
+        }
     }
 }
