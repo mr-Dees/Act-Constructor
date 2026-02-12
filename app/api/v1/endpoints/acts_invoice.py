@@ -21,6 +21,29 @@ logger = logging.getLogger("act_constructor.api.invoice")
 router = APIRouter()
 
 
+@router.get("/metrics")
+async def list_metrics(
+        username: str = Depends(get_username),
+) -> list[dict]:
+    """
+    Возвращает справочник метрик.
+
+    Returns:
+        Список метрик [{code, metric_name, metric_group}, ...]
+    """
+    async with get_db() as conn:
+        db_service = ActDBService(conn)
+        try:
+            results = await db_service.list_metric_dict()
+            return results
+        except Exception as e:
+            logger.exception(f"Ошибка загрузки справочника метрик: {e}")
+            raise HTTPException(
+                status_code=500,
+                detail="Ошибка загрузки справочника метрик"
+            )
+
+
 @router.get("/tables/{db_type}")
 async def list_tables(
         db_type: str,

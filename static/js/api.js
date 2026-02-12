@@ -608,7 +608,9 @@ class APIClient {
                 db_type: inv.db_type,
                 schema_name: inv.schema_name,
                 table_name: inv.table_name,
-                metrics_types: inv.metrics_types,
+                metric_type: inv.metric_type,
+                metric_code: inv.metric_code || null,
+                metric_name: inv.metric_name || null,
             };
         }
         if (node.children) {
@@ -621,6 +623,29 @@ class APIClient {
     // -----------------------------------------------------------------
     // Фактуры
     // -----------------------------------------------------------------
+
+    /**
+     * Загружает справочник метрик
+     *
+     * @returns {Promise<Array<{code: string, metric_name: string, metric_group: string|null}>>}
+     */
+    static async loadMetricDict() {
+        const username = AuthManager.getCurrentUser();
+
+        const response = await fetch(
+            AppConfig.api.getUrl('/api/v1/acts_invoice/metrics'),
+            {
+                headers: { 'X-JupyterHub-User': username }
+            }
+        );
+
+        if (!response.ok) {
+            const error = await response.json();
+            throw this._createError(response.status, error.detail);
+        }
+
+        return response.json();
+    }
 
     /**
      * Загружает полный список таблиц для фактуры

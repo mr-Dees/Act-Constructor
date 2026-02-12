@@ -127,6 +127,9 @@ class Settings(BaseSettings):
     invoice_hive_registry_table: str = Field(default="t_db_oarb_ua_hadoop_tables")
     invoice_hive_registry_col_table: str = Field(default="table_name")
 
+    # === Справочник метрик ===
+    invoice_metric_dict_table: str = Field(default="t_db_oarb_ua_violation_metric_dict")
+
     # === Пулы подключений ===
     db_pool_min_size: int = Field(default=2, ge=1)
     db_pool_max_size: int = Field(default=10, ge=2)

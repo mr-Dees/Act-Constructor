@@ -1372,6 +1372,38 @@ class ActDBService:
     # ФАКТУРЫ
     # -------------------------------------------------------------------------
 
+    async def list_metric_dict(self) -> list[dict]:
+        """
+        Возвращает справочник метрик из таблицы t_db_oarb_ua_violation_metric_dict.
+
+        Returns:
+            Список словарей {code, metric_name, metric_group}
+        """
+        from app.core.config import get_settings
+        settings = get_settings()
+
+        if settings.db_type == "postgresql":
+            registry_schema = "public"
+        else:
+            registry_schema = settings.invoice_hive_registry_schema
+
+        metric_table = settings.invoice_metric_dict_table
+
+        rows = await self.conn.fetch(
+            f'SELECT code, metric_name, metric_group '
+            f'FROM {registry_schema}.{metric_table} '
+            f'ORDER BY code',
+        )
+
+        return [
+            {
+                "code": row["code"],
+                "metric_name": row["metric_name"],
+                "metric_group": row["metric_group"],
+            }
+            for row in rows
+        ]
+
     async def list_tables(self, db_type: str) -> list[dict]:
         """
         Возвращает полный список таблиц в указанной БД.
@@ -1454,9 +1486,9 @@ class ActDBService:
             "db_type": row["db_type"],
             "schema_name": row["schema_name"],
             "table_name": row["table_name"],
-            "metrics_types": json.loads(row["metrics_types"])
-                if isinstance(row["metrics_types"], str)
-                else row["metrics_types"],
+            "metric_type": row["metric_type"],
+            "metric_code": row["metric_code"],
+            "metric_name": row["metric_name"],
             "verification_status": row["verification_status"],
             "created_at": row["created_at"].isoformat(),
             "updated_at": row["updated_at"].isoformat(),
@@ -1472,7 +1504,8 @@ class ActDBService:
         row = await self.conn.fetchrow(
             f"""
             SELECT id, act_id, node_id, node_number, db_type,
-                   schema_name, table_name, metrics_types,
+                   schema_name, table_name, metric_type,
+                   metric_code, metric_name,
                    verification_status, created_at, updated_at, created_by
             FROM {self.invoices}
             WHERE act_id = $1 AND node_id = $2
@@ -1492,9 +1525,9 @@ class ActDBService:
             "db_type": row["db_type"],
             "schema_name": row["schema_name"],
             "table_name": row["table_name"],
-            "metrics_types": json.loads(row["metrics_types"])
-                if isinstance(row["metrics_types"], str)
-                else row["metrics_types"],
+            "metric_type": row["metric_type"],
+            "metric_code": row["metric_code"],
+            "metric_name": row["metric_name"],
             "verification_status": row["verification_status"],
             "created_at": row["created_at"].isoformat(),
             "updated_at": row["updated_at"].isoformat(),
@@ -1506,7 +1539,8 @@ class ActDBService:
         rows = await self.conn.fetch(
             f"""
             SELECT id, act_id, node_id, node_number, db_type,
-                   schema_name, table_name, metrics_types,
+                   schema_name, table_name, metric_type,
+                   metric_code, metric_name,
                    verification_status, created_at, updated_at, created_by
             FROM {self.invoices}
             WHERE act_id = $1
@@ -1524,9 +1558,9 @@ class ActDBService:
                 "db_type": row["db_type"],
                 "schema_name": row["schema_name"],
                 "table_name": row["table_name"],
-                "metrics_types": json.loads(row["metrics_types"])
-                    if isinstance(row["metrics_types"], str)
-                    else row["metrics_types"],
+                "metric_type": row["metric_type"],
+                "metric_code": row["metric_code"],
+                "metric_name": row["metric_name"],
                 "verification_status": row["verification_status"],
                 "created_at": row["created_at"].isoformat(),
                 "updated_at": row["updated_at"].isoformat(),

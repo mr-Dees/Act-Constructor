@@ -4,7 +4,6 @@
 Реализует интерфейс DatabaseAdapter с учетом специфики MPP-архитектуры.
 """
 
-import json
 import logging
 from pathlib import Path
 
@@ -174,8 +173,6 @@ class GreenplumAdapter(DatabaseAdapter):
 
         Greenplum не поддерживает INSERT ... ON CONFLICT DO UPDATE.
         """
-        metrics_json = json.dumps(data["metrics_types"])
-
         # Попытка UPDATE существующей записи
         row = await conn.fetchrow(
             f"""
@@ -184,12 +181,15 @@ class GreenplumAdapter(DatabaseAdapter):
                 db_type = $4,
                 schema_name = $5,
                 table_name = $6,
-                metrics_types = $7,
+                metric_type = $7,
+                metric_code = $8,
+                metric_name = $9,
                 verification_status = 'pending',
                 updated_at = CURRENT_TIMESTAMP
             WHERE act_id = $1 AND node_id = $2
             RETURNING id, act_id, node_id, node_number, db_type,
-                      schema_name, table_name, metrics_types,
+                      schema_name, table_name, metric_type,
+                      metric_code, metric_name,
                       verification_status, created_at, updated_at, created_by
             """,
             data["act_id"],
@@ -198,7 +198,9 @@ class GreenplumAdapter(DatabaseAdapter):
             data["db_type"],
             data["schema_name"],
             data["table_name"],
-            metrics_json,
+            data["metric_type"],
+            data.get("metric_code"),
+            data.get("metric_name"),
         )
 
         if row:
@@ -209,11 +211,13 @@ class GreenplumAdapter(DatabaseAdapter):
             f"""
             INSERT INTO {table_name} (
                 act_id, node_id, node_number, db_type,
-                schema_name, table_name, metrics_types, created_by
+                schema_name, table_name, metric_type,
+                metric_code, metric_name, created_by
             )
-            VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
             RETURNING id, act_id, node_id, node_number, db_type,
-                      schema_name, table_name, metrics_types,
+                      schema_name, table_name, metric_type,
+                      metric_code, metric_name,
                       verification_status, created_at, updated_at, created_by
             """,
             data["act_id"],
@@ -222,7 +226,9 @@ class GreenplumAdapter(DatabaseAdapter):
             data["db_type"],
             data["schema_name"],
             data["table_name"],
-            metrics_json,
+            data["metric_type"],
+            data.get("metric_code"),
+            data.get("metric_name"),
             username,
         )
 

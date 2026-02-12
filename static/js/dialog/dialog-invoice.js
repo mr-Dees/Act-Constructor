@@ -2,7 +2,8 @@
  * Диалог прикрепления фактуры к пункту акта.
  *
  * Позволяет выбрать БД (Hive/GreenPlum), найти таблицу по имени,
- * выбрать типы метрик и сохранить фактуру.
+ * выбрать тип метрики (одиночный выбор), выбрать код метрики
+ * из справочника и сохранить фактуру.
  * Наследует базовый функционал от DialogBase.
  */
 class InvoiceDialog extends DialogBase {
@@ -32,11 +33,18 @@ class InvoiceDialog extends DialogBase {
     static _selectedTable = null;
 
     /**
-     * Выбранные метрики
+     * Выбранный тип метрики (одиночный выбор)
      * @private
-     * @type {Set<string>}
+     * @type {string|null}
      */
-    static _selectedMetrics = new Set();
+    static _selectedMetric = null;
+
+    /**
+     * Выбранный код метрики из справочника
+     * @private
+     * @type {{code: string, metric_name: string, metric_group: string|null}|null}
+     */
+    static _selectedMetricCode = null;
 
     /**
      * Кэш конфигурации фактур (загружается 1 раз)
@@ -60,6 +68,20 @@ class InvoiceDialog extends DialogBase {
     static _currentDbType = null;
 
     /**
+     * Кэш справочника метрик (загружается 1 раз)
+     * @private
+     * @type {Array<{code: string, metric_name: string, metric_group: string|null}>|null}
+     */
+    static _cachedMetricDict = null;
+
+    /**
+     * Флаг: показать полный перечень метрик (все группы)
+     * @private
+     * @type {boolean}
+     */
+    static _showFullMetricList = false;
+
+    /**
      * Показывает диалог для указанного узла.
      * @param {Object} node - Узел дерева
      * @param {string} nodeId - ID узла
@@ -73,7 +95,9 @@ class InvoiceDialog extends DialogBase {
         this._currentNode = node;
         this._currentNodeId = nodeId;
         this._selectedTable = null;
-        this._selectedMetrics = new Set();
+        this._selectedMetric = null;
+        this._selectedMetricCode = null;
+        this._showFullMetricList = false;
 
         const template = this._cloneTemplate('invoiceDialogTemplate');
         if (!template) return;
@@ -114,9 +138,10 @@ class InvoiceDialog extends DialogBase {
             setTimeout(() => searchInput.focus(), 200);
         }
 
-        // Загружаем таблицы для выбранной БД
+        // Загружаем таблицы и справочник метрик параллельно
         const dbType = overlay.querySelector('input[name="invoice-db-type"]:checked')?.value || 'hive';
         this._loadTables(overlay, dbType);
+        this._loadMetricDict();
     }
 
     /**
@@ -176,6 +201,21 @@ class InvoiceDialog extends DialogBase {
     }
 
     /**
+     * Загружает справочник метрик (кэширует при первом вызове).
+     * @private
+     */
+    static async _loadMetricDict() {
+        if (this._cachedMetricDict !== null) return;
+
+        try {
+            this._cachedMetricDict = await APIClient.loadMetricDict();
+        } catch (err) {
+            console.error('Ошибка загрузки справочника метрик:', err);
+            this._cachedMetricDict = [];
+        }
+    }
+
+    /**
      * Предзаполняет диалог данными существующей фактуры.
      * @private
      */
@@ -196,14 +236,28 @@ class InvoiceDialog extends DialogBase {
             }
         }
 
-        // Заполняем метрики
-        if (invoice.metrics_types && Array.isArray(invoice.metrics_types)) {
-            this._selectedMetrics = new Set(invoice.metrics_types);
+        // Заполняем тип метрики
+        if (invoice.metric_type) {
+            this._selectedMetric = invoice.metric_type;
             overlay.querySelectorAll('.invoice-chip').forEach(chip => {
-                if (this._selectedMetrics.has(chip.dataset.metric)) {
+                if (chip.dataset.metric === this._selectedMetric) {
                     chip.classList.add('active');
                 }
             });
+        }
+
+        // Заполняем код метрики
+        if (invoice.metric_code) {
+            this._selectedMetricCode = {
+                code: invoice.metric_code,
+                metric_name: invoice.metric_name || '',
+                metric_group: this._selectedMetric || null,
+            };
+            const metricInput = overlay.querySelector('.invoice-metric-search-input');
+            if (metricInput) {
+                metricInput.value = `${invoice.metric_code} — ${invoice.metric_name || ''}`;
+                metricInput.classList.add('has-value');
+            }
         }
     }
 
@@ -273,19 +327,63 @@ class InvoiceDialog extends DialogBase {
             });
         }
 
-        // Чипы метрик
+        // Чипы метрик — одиночный выбор
         overlay.querySelectorAll('.invoice-chip').forEach(chip => {
             chip.addEventListener('click', () => {
                 const metric = chip.dataset.metric;
-                if (this._selectedMetrics.has(metric)) {
-                    this._selectedMetrics.delete(metric);
+
+                if (this._selectedMetric === metric) {
+                    // Повторный клик — деактивировать
+                    this._selectedMetric = null;
                     chip.classList.remove('active');
                 } else {
-                    this._selectedMetrics.add(metric);
+                    // Новый выбор — убрать active со всех, поставить на текущий
+                    overlay.querySelectorAll('.invoice-chip').forEach(c => c.classList.remove('active'));
                     chip.classList.add('active');
+                    this._selectedMetric = metric;
+
+                    // Сбросить код метрики при смене типа
+                    this._selectedMetricCode = null;
+                    this._showFullMetricList = false;
+                    const metricInput = overlay.querySelector('.invoice-metric-search-input');
+                    if (metricInput) {
+                        metricInput.value = '';
+                        metricInput.classList.remove('has-value');
+                    }
+                    this._hideMetricDropdown(overlay);
                 }
             });
         });
+
+        // Поиск кода метрики
+        const metricInput = overlay.querySelector('.invoice-metric-search-input');
+        if (metricInput) {
+            metricInput.addEventListener('input', () => {
+                const query = metricInput.value.trim();
+
+                // Сброс выбора если текст изменился
+                if (this._selectedMetricCode) {
+                    const currentText = `${this._selectedMetricCode.code} — ${this._selectedMetricCode.metric_name}`;
+                    if (query !== currentText) {
+                        this._selectedMetricCode = null;
+                        metricInput.classList.remove('has-value');
+                    }
+                }
+
+                this._filterAndShowMetrics(overlay, query);
+            });
+
+            metricInput.addEventListener('focus', () => {
+                // При фокусе показать начальный список
+                if (!this._selectedMetricCode) {
+                    this._filterAndShowMetrics(overlay, metricInput.value.trim());
+                }
+            });
+
+            metricInput.addEventListener('blur', () => {
+                setTimeout(() => this._hideMetricDropdown(overlay), 200);
+            });
+        }
 
         // Сохранение
         if (saveBtn) {
@@ -367,6 +465,200 @@ class InvoiceDialog extends DialogBase {
         this._hideDropdown(overlay);
     }
 
+    // -----------------------------------------------------------------
+    // Секция кода метрики
+    // -----------------------------------------------------------------
+
+    /**
+     * Фильтрует справочник метрик и показывает dropdown.
+     *
+     * Логика:
+     * - Без запроса: показываем метрики выбранной группы, остальные через "Показать полный перечень"
+     * - С запросом: ищем по ВСЕМ метрикам, но группа выбранного типа идёт первой
+     * @private
+     */
+    static _filterAndShowMetrics(overlay, query) {
+        if (!this._cachedMetricDict) return;
+
+        let primaryItems;
+        let otherItems;
+
+        if (query.length > 0) {
+            // С запросом — ищем по ВСЕМ метрикам
+            const isDigitSearch = /^\d/.test(query);
+            const queryLower = query.toLowerCase();
+
+            const filterFn = isDigitSearch
+                ? (m) => m.code.includes(query)
+                : (m) => m.metric_name.toLowerCase().includes(queryLower);
+
+            const allFiltered = this._cachedMetricDict.filter(filterFn);
+
+            if (this._selectedMetric) {
+                // Выбранная группа — первая, остальные — ниже
+                primaryItems = allFiltered.filter(m => m.metric_group === this._selectedMetric);
+                otherItems = allFiltered.filter(m => m.metric_group !== this._selectedMetric);
+            } else {
+                primaryItems = allFiltered;
+                otherItems = [];
+            }
+        } else {
+            // Без запроса — фильтрация по группе
+            if (this._selectedMetric) {
+                primaryItems = this._cachedMetricDict.filter(
+                    m => m.metric_group === this._selectedMetric
+                );
+                otherItems = this._cachedMetricDict.filter(
+                    m => m.metric_group !== this._selectedMetric
+                );
+            } else {
+                primaryItems = this._cachedMetricDict;
+                otherItems = [];
+            }
+        }
+
+        const hasQuery = query.length > 0;
+        this._showMetricDropdown(overlay, primaryItems.slice(0, 100), otherItems, hasQuery);
+    }
+
+    /**
+     * Показывает dropdown с метриками.
+     * @param {HTMLElement} overlay
+     * @param {Array} primaryItems - основной список (выбранная группа или все)
+     * @param {Array} otherItems - метрики из других групп
+     * @param {boolean} hasQuery - есть ли поисковый запрос (если да, показываем всё сразу)
+     * @private
+     */
+    static _showMetricDropdown(overlay, primaryItems, otherItems, hasQuery = false) {
+        const dropdown = overlay.querySelector('.invoice-metric-dropdown');
+        if (!dropdown) return;
+
+        dropdown.innerHTML = '';
+
+        // При активном поиске показываем другие группы сразу
+        const expandOther = this._showFullMetricList || hasQuery;
+
+        if (primaryItems.length === 0 && (!expandOther || otherItems.length === 0)) {
+            const empty = document.createElement('div');
+            empty.className = 'invoice-search-dropdown-empty';
+            empty.textContent = 'Метрики не найдены';
+            dropdown.appendChild(empty);
+        } else {
+            // Основной список
+            primaryItems.forEach(item => {
+                dropdown.appendChild(this._createMetricDropdownItem(overlay, item));
+            });
+
+            // Другие группы
+            if (expandOther && otherItems.length > 0) {
+                // Группируем другие метрики по группам
+                const groups = {};
+                otherItems.forEach(item => {
+                    const group = item.metric_group || 'Без группы';
+                    if (!groups[group]) groups[group] = [];
+                    groups[group].push(item);
+                });
+
+                let totalShown = primaryItems.length;
+                for (const [groupName, items] of Object.entries(groups)) {
+                    if (totalShown >= 100) break;
+
+                    // Разделитель группы
+                    const separator = document.createElement('div');
+                    separator.className = 'invoice-metric-group-separator';
+                    separator.textContent = groupName;
+                    dropdown.appendChild(separator);
+
+                    for (const item of items) {
+                        if (totalShown >= 100) break;
+                        dropdown.appendChild(this._createMetricDropdownItem(overlay, item));
+                        totalShown++;
+                    }
+                }
+            }
+
+            // Кнопка "Показать полный перечень" только без активного поиска
+            if (!expandOther && otherItems.length > 0) {
+                const showAllBtn = document.createElement('div');
+                showAllBtn.className = 'invoice-metric-show-all';
+                showAllBtn.textContent = `Показать полный перечень метрик (ещё ${otherItems.length})`;
+                showAllBtn.addEventListener('mousedown', (e) => {
+                    e.preventDefault();
+                    this._showFullMetricList = true;
+                    const metricInput = overlay.querySelector('.invoice-metric-search-input');
+                    this._filterAndShowMetrics(overlay, metricInput?.value?.trim() || '');
+                });
+                dropdown.appendChild(showAllBtn);
+            }
+        }
+
+        dropdown.classList.add('visible');
+    }
+
+    /**
+     * Создаёт элемент dropdown для метрики.
+     * @private
+     */
+    static _createMetricDropdownItem(overlay, item) {
+        const el = document.createElement('div');
+        el.className = 'invoice-metric-dropdown-item';
+
+        const codeSpan = document.createElement('span');
+        codeSpan.className = 'invoice-metric-item-code';
+        codeSpan.textContent = item.code;
+
+        const nameSpan = document.createElement('span');
+        nameSpan.className = 'invoice-metric-item-name';
+        nameSpan.textContent = ` — ${item.metric_name}`;
+
+        el.appendChild(codeSpan);
+        el.appendChild(nameSpan);
+
+        el.addEventListener('mousedown', (e) => {
+            e.preventDefault();
+            this._selectMetricCode(overlay, item);
+        });
+
+        return el;
+    }
+
+    /**
+     * Скрывает dropdown метрик.
+     * @private
+     */
+    static _hideMetricDropdown(overlay) {
+        const dropdown = overlay.querySelector('.invoice-metric-dropdown');
+        if (dropdown) dropdown.classList.remove('visible');
+    }
+
+    /**
+     * Выбирает код метрики из dropdown.
+     * @private
+     */
+    static _selectMetricCode(overlay, item) {
+        this._selectedMetricCode = item;
+
+        const metricInput = overlay.querySelector('.invoice-metric-search-input');
+        if (metricInput) {
+            metricInput.value = `${item.code} — ${item.metric_name}`;
+            metricInput.classList.add('has-value');
+        }
+
+        // Авто-корректировка типа метрики
+        if (item.metric_group && item.metric_group !== this._selectedMetric) {
+            this._selectedMetric = item.metric_group;
+            overlay.querySelectorAll('.invoice-chip').forEach(chip => {
+                if (chip.dataset.metric === item.metric_group) {
+                    chip.classList.add('active');
+                } else {
+                    chip.classList.remove('active');
+                }
+            });
+        }
+
+        this._hideMetricDropdown(overlay);
+    }
+
     /**
      * Сохраняет фактуру.
      * @private
@@ -378,8 +670,19 @@ class InvoiceDialog extends DialogBase {
             return;
         }
 
-        if (this._selectedMetrics.size === 0) {
-            Notifications.warning('Выберите хотя бы один тип метрики');
+        if (!this._selectedMetric) {
+            Notifications.warning('Выберите тип метрики');
+            return;
+        }
+
+        if (!this._selectedMetricCode) {
+            Notifications.warning('Выберите код метрики');
+            return;
+        }
+
+        // Если код метрики без группы и тип не указан
+        if (this._selectedMetricCode.metric_group === null && !this._selectedMetric) {
+            Notifications.warning('Необходимо указать тип метрики');
             return;
         }
 
@@ -403,7 +706,9 @@ class InvoiceDialog extends DialogBase {
             db_type: dbType,
             schema_name: schemaName,
             table_name: this._selectedTable.table_name,
-            metrics_types: Array.from(this._selectedMetrics),
+            metric_type: this._selectedMetric,
+            metric_code: this._selectedMetricCode.code,
+            metric_name: this._selectedMetricCode.metric_name,
         };
 
         // Блокируем кнопку на время сохранения
@@ -422,7 +727,9 @@ class InvoiceDialog extends DialogBase {
                     db_type: data.db_type,
                     schema_name: data.schema_name,
                     table_name: data.table_name,
-                    metrics_types: data.metrics_types,
+                    metric_type: data.metric_type,
+                    metric_code: data.metric_code,
+                    metric_name: data.metric_name,
                 };
             }
 
@@ -480,7 +787,9 @@ class InvoiceDialog extends DialogBase {
         this._currentNode = null;
         this._currentNodeId = null;
         this._selectedTable = null;
-        this._selectedMetrics = new Set();
+        this._selectedMetric = null;
+        this._selectedMetricCode = null;
+        this._showFullMetricList = false;
     }
 }
 

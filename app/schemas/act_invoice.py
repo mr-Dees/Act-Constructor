@@ -24,15 +24,16 @@ class InvoiceSave(BaseModel):
     db_type: Literal["hive", "greenplum"] = Field(..., description="Тип БД")
     schema_name: str = Field(..., min_length=1, description="Имя схемы")
     table_name: str = Field(..., min_length=1, description="Имя таблицы")
-    metrics_types: list[str] = Field(..., min_length=1, description="Типы метрик")
+    metric_type: str = Field(..., min_length=1, description="Тип метрики (КС, ФР, ОР, РР, МКР)")
+    metric_code: str | None = Field(None, description="Код метрики из справочника")
+    metric_name: str | None = Field(None, description="Название метрики из справочника")
 
-    @field_validator("metrics_types")
+    @field_validator("metric_type")
     @classmethod
-    def validate_metrics_types(cls, v: list[str]) -> list[str]:
-        invalid = set(v) - VALID_METRICS_TYPES
-        if invalid:
+    def validate_metric_type(cls, v: str) -> str:
+        if v not in VALID_METRICS_TYPES:
             raise ValueError(
-                f"Недопустимые типы метрик: {invalid}. "
+                f"Недопустимый тип метрики: {v}. "
                 f"Допустимые: {VALID_METRICS_TYPES}"
             )
         return v
@@ -48,7 +49,9 @@ class InvoiceResponse(BaseModel):
     db_type: str
     schema_name: str
     table_name: str
-    metrics_types: list[str]
+    metric_type: str
+    metric_code: str | None = None
+    metric_name: str | None = None
     verification_status: str
     created_at: datetime
     updated_at: datetime

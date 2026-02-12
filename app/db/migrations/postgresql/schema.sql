@@ -378,15 +378,14 @@ CREATE TABLE IF NOT EXISTS act_invoices (
     db_type VARCHAR(20) NOT NULL CHECK (db_type IN ('hive', 'greenplum')),
     schema_name VARCHAR(255) NOT NULL,
     table_name VARCHAR(255) NOT NULL,
-    metrics_types JSONB NOT NULL DEFAULT '[]',
+    metric_type VARCHAR(10) NOT NULL DEFAULT '',
+    metric_code VARCHAR(50),
+    metric_name VARCHAR(500),
     verification_status VARCHAR(20) NOT NULL DEFAULT 'pending'
         CHECK (verification_status IN ('pending', 'verified', 'rejected')),
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     created_by VARCHAR(50) NOT NULL,
-
-    CONSTRAINT check_metrics_types_is_array
-        CHECK (jsonb_typeof(metrics_types) = 'array'),
 
     UNIQUE(act_id, node_id)
 );
@@ -400,7 +399,9 @@ COMMENT ON COLUMN act_invoices.node_number IS 'Номер узла (наприм
 COMMENT ON COLUMN act_invoices.db_type IS 'Тип базы данных: hive или greenplum';
 COMMENT ON COLUMN act_invoices.schema_name IS 'Имя схемы в базе данных';
 COMMENT ON COLUMN act_invoices.table_name IS 'Имя таблицы в базе данных';
-COMMENT ON COLUMN act_invoices.metrics_types IS 'JSONB массив типов метрик (КС, ФР, ОР, РР, МКР)';
+COMMENT ON COLUMN act_invoices.metric_type IS 'Тип метрики (КС, ФР, ОР, РР, МКР)';
+COMMENT ON COLUMN act_invoices.metric_code IS 'Код метрики из справочника';
+COMMENT ON COLUMN act_invoices.metric_name IS 'Название метрики из справочника';
 COMMENT ON COLUMN act_invoices.verification_status IS 'Статус верификации: pending, verified, rejected';
 COMMENT ON COLUMN act_invoices.created_at IS 'Дата и время создания записи';
 COMMENT ON COLUMN act_invoices.updated_at IS 'Дата и время последнего обновления';
@@ -429,6 +430,38 @@ INSERT INTO t_db_oarb_ua_hadoop_tables (table_name) VALUES
     ('t_audit_risk_operational'),
     ('t_audit_fact_data'),
     ('t_audit_fact_aggregated')
+ON CONFLICT DO NOTHING;
+
+-- ============================================================================
+-- СПРАВОЧНИК МЕТРИК (для локального тестирования)
+-- ============================================================================
+
+CREATE TABLE IF NOT EXISTS t_db_oarb_ua_violation_metric_dict (
+    id SERIAL PRIMARY KEY,
+    code VARCHAR(50) NOT NULL UNIQUE,
+    metric_name VARCHAR(500) NOT NULL,
+    metric_group VARCHAR(10)
+);
+
+COMMENT ON TABLE t_db_oarb_ua_violation_metric_dict IS 'Справочник метрик нарушений';
+
+-- Заполняем тестовыми данными
+INSERT INTO t_db_oarb_ua_violation_metric_dict (code, metric_name, metric_group) VALUES
+    ('1001', 'Несоблюдение лимитов кредитования', 'КС'),
+    ('1002', 'Нарушение порядка оценки залога', 'КС'),
+    ('1003', 'Некорректное определение категории качества', 'КС'),
+    ('1004', 'Нарушение порядка формирования резервов', 'КС'),
+    ('2001', 'Искажение финансовой отчетности', 'ФР'),
+    ('2002', 'Некорректный расчет финансовых показателей', 'ФР'),
+    ('2003', 'Нарушение учетной политики', 'ФР'),
+    ('3001', 'Несоблюдение процедур идентификации', 'ОР'),
+    ('3002', 'Нарушение порядка ведения досье клиента', 'ОР'),
+    ('3003', 'Несоответствие внутренним регламентам', 'ОР'),
+    ('4001', 'Нарушение регуляторных требований', 'РР'),
+    ('4002', 'Несоблюдение нормативов ЦБ', 'РР'),
+    ('5001', 'Нарушение методологии расчета', 'МКР'),
+    ('5002', 'Некорректная калибровка модели', 'МКР'),
+    ('9001', 'Прочие нарушения без категории', NULL)
 ON CONFLICT DO NOTHING;
 
 -- ============================================================================
@@ -707,3 +740,4 @@ CREATE TRIGGER update_act_invoices_updated_at
 
 COMMENT ON TRIGGER update_act_invoices_updated_at ON act_invoices IS
     'Автоматически обновляет поле updated_at при изменении фактуры';
+
