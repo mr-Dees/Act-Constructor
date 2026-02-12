@@ -14,6 +14,13 @@ class HelpManager extends DialogBase {
     static _currentModal = null;
 
     /**
+     * Сохранённые позиции прокрутки по номеру шага
+     * @private
+     * @type {Object<number, number>}
+     */
+    static _scrollPositions = {};
+
+    /**
      * Инициализирует менеджер помощи
      */
     static init() {
@@ -65,6 +72,17 @@ class HelpManager extends DialogBase {
 
         // Открытие по кнопке помощи
         helpBtn.addEventListener('click', () => this.show());
+
+        // Непрерывное отслеживание позиции прокрутки
+        const modalBody = modal.querySelector('.help-modal-body');
+        if (modalBody) {
+            modalBody.addEventListener('scroll', () => {
+                if (!modal.classList.contains('hidden')) {
+                    const step = AppState.currentStep || 1;
+                    this._scrollPositions[step] = modalBody.scrollTop;
+                }
+            });
+        }
 
         // Закрытие по кнопке крестика
         if (closeBtn) {
@@ -157,13 +175,23 @@ class HelpManager extends DialogBase {
      * @param {HTMLElement} modal - Элемент модального окна
      */
     static _showModalHelp(modal) {
-        const modalBody = modal.querySelector('.help-modal-body');
-        if (modalBody) {
-            modalBody.scrollTop = 0;
-        }
         modal.classList.remove('hidden');
         this._currentModal = modal;
         this._lockBodyScroll();
+
+        const modalBody = modal.querySelector('.help-modal-body');
+        if (modalBody) {
+            const currentStep = AppState.currentStep || 1;
+            const savedPosition = this._scrollPositions[currentStep] || 0;
+
+            requestAnimationFrame(() => {
+                modalBody.style.scrollBehavior = 'auto';
+                modalBody.scrollTop = savedPosition;
+                requestAnimationFrame(() => {
+                    modalBody.style.scrollBehavior = '';
+                });
+            });
+        }
     }
 
     /**
