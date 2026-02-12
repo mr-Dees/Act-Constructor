@@ -135,8 +135,44 @@ class TreeContextMenu {
         );
     }
 
+    /** Проверяет, есть ли в разделе 5 TB-leaf узлы на уровне 5.X и item-узлы на уровне 5.X.X одновременно */
+    _hasBothLevelsAvailable() {
+        const node5 = AppState.findNodeById('5');
+        if (!node5?.children) return false;
+        const items = node5.children.filter(c => !c.type || c.type === 'item');
+        let hasLeafAt5x = false;
+        let hasNodesAt5xx = false;
+        for (const child of items) {
+            const itemKids = (child.children || []).filter(gc => !gc.type || gc.type === 'item');
+            if (itemKids.length === 0) hasLeafAt5x = true;
+            else hasNodesAt5xx = true;
+            if (hasLeafAt5x && hasNodesAt5xx) return true;
+        }
+        return false;
+    }
+
+    /** Проверяет, нужно ли показать предупреждение о выборе уровня для таблиц рисков */
+    _shouldShowRiskLevelWarning() {
+        return !this._hasRiskTablesAtLevel5x()
+            && !this._hasRiskTablesBelowLevel5x()
+            && this._hasBothLevelsAvailable();
+    }
+
+    /** Показывает предупреждение о выборе уровня для таблиц рисков */
+    async _showRiskLevelWarning() {
+        await DialogManager.alert({
+            title: 'Обратите внимание',
+            icon: 'ℹ️',
+            message: 'В рамках одного акта таблицы рисков могут располагаться либо на уровне пунктов (5.1, 5.2, ...), '
+                + 'либо на уровне подпунктов (5.1.1, 5.1.2, ...), но не на обоих уровнях одновременно.\n\n'
+                + 'Пожалуйста, прикрепляйте таблицы рисков только к пунктам одного уровня.',
+            confirmText: 'Понятно',
+            type: 'info'
+        });
+    }
+
     /** Выполняет действие */
-    handleAction(action) {
+    async handleAction(action) {
         const nodeId = ContextMenuManager.currentNodeId;
         if (!nodeId) return;
 
@@ -157,10 +193,16 @@ class TreeContextMenu {
                 if (!this._isRiskTableAllowedForNode(node)) {
                     return Notifications.error(this._getRiskTableBlockReason(node));
                 }
+                if (this._shouldShowRiskLevelWarning()) {
+                    await this._showRiskLevelWarning();
+                }
                 return this.handleAddTable(node, nodeId, 'regular-risk');
             case 'add-operational-risk-table':
                 if (!this._isRiskTableAllowedForNode(node)) {
                     return Notifications.error(this._getRiskTableBlockReason(node));
+                }
+                if (this._shouldShowRiskLevelWarning()) {
+                    await this._showRiskLevelWarning();
                 }
                 return this.handleAddTable(node, nodeId, 'operational-risk');
             case 'add-textblock':
