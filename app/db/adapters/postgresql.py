@@ -4,6 +4,7 @@
 Реализует интерфейс DatabaseAdapter для стандартного PostgreSQL.
 """
 
+import json
 import logging
 from pathlib import Path
 
@@ -89,27 +90,25 @@ class PostgreSQLAdapter(DatabaseAdapter):
             username: str,
     ) -> asyncpg.Record:
         """Upsert фактуры через INSERT ... ON CONFLICT DO UPDATE."""
+        metrics_json = json.dumps(data["metrics"], ensure_ascii=False)
+
         return await conn.fetchrow(
             f"""
             INSERT INTO {table_name} (
                 act_id, node_id, node_number, db_type,
-                schema_name, table_name, metric_type,
-                metric_code, metric_name, created_by
+                schema_name, table_name, metrics, created_by
             )
-            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
+            VALUES ($1, $2, $3, $4, $5, $6, $7::jsonb, $8)
             ON CONFLICT (act_id, node_id) DO UPDATE SET
                 node_number = EXCLUDED.node_number,
                 db_type = EXCLUDED.db_type,
                 schema_name = EXCLUDED.schema_name,
                 table_name = EXCLUDED.table_name,
-                metric_type = EXCLUDED.metric_type,
-                metric_code = EXCLUDED.metric_code,
-                metric_name = EXCLUDED.metric_name,
+                metrics = EXCLUDED.metrics,
                 verification_status = 'pending',
                 updated_at = CURRENT_TIMESTAMP
             RETURNING id, act_id, node_id, node_number, db_type,
-                      schema_name, table_name, metric_type,
-                      metric_code, metric_name,
+                      schema_name, table_name, metrics,
                       verification_status, created_at, updated_at, created_by
             """,
             data["act_id"],
@@ -118,9 +117,7 @@ class PostgreSQLAdapter(DatabaseAdapter):
             data["db_type"],
             data["schema_name"],
             data["table_name"],
-            data["metric_type"],
-            data.get("metric_code"),
-            data.get("metric_name"),
+            metrics_json,
             username,
         )
 

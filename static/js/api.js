@@ -608,9 +608,7 @@ class APIClient {
                 db_type: inv.db_type,
                 schema_name: inv.schema_name,
                 table_name: inv.table_name,
-                metric_type: inv.metric_type,
-                metric_code: inv.metric_code || null,
-                metric_name: inv.metric_name || null,
+                metrics: inv.metrics || [],
             };
         }
         if (node.children) {

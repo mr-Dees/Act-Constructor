@@ -291,13 +291,13 @@ CREATE TABLE {SCHEMA}.{PREFIX}act_invoices (
     db_type VARCHAR(20) NOT NULL,
     schema_name VARCHAR(255) NOT NULL,
     table_name VARCHAR(255) NOT NULL,
-    metric_type VARCHAR(10) NOT NULL DEFAULT '',
-    metric_code VARCHAR(50),
-    metric_name VARCHAR(500),
+    metrics JSONB NOT NULL DEFAULT '[]',
     verification_status VARCHAR(20) NOT NULL DEFAULT 'pending',
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-    created_by VARCHAR(50) NOT NULL
+    created_by VARCHAR(50) NOT NULL,
+    etl_loading_id BIGINT DEFAULT NULL,
+    create_date DATE DEFAULT NULL
 )
 WITH (appendonly=false)
 DISTRIBUTED BY (id);
@@ -310,9 +310,7 @@ COMMENT ON COLUMN {SCHEMA}.{PREFIX}act_invoices.node_number IS 'Номер уз�
 COMMENT ON COLUMN {SCHEMA}.{PREFIX}act_invoices.db_type IS 'Тип базы данных: hive или greenplum';
 COMMENT ON COLUMN {SCHEMA}.{PREFIX}act_invoices.schema_name IS 'Имя схемы в базе данных';
 COMMENT ON COLUMN {SCHEMA}.{PREFIX}act_invoices.table_name IS 'Имя таблицы в базе данных';
-COMMENT ON COLUMN {SCHEMA}.{PREFIX}act_invoices.metric_type IS 'Тип метрики (КС, ФР, ОР, РР, МКР)';
-COMMENT ON COLUMN {SCHEMA}.{PREFIX}act_invoices.metric_code IS 'Код метрики из справочника';
-COMMENT ON COLUMN {SCHEMA}.{PREFIX}act_invoices.metric_name IS 'Название метрики из справочника';
+COMMENT ON COLUMN {SCHEMA}.{PREFIX}act_invoices.metrics IS 'JSONB массив метрик [{metric_type, metric_code, metric_name}, ...] (до 5 элементов)';
 COMMENT ON COLUMN {SCHEMA}.{PREFIX}act_invoices.verification_status IS 'Статус верификации: pending, verified, rejected';
 COMMENT ON COLUMN {SCHEMA}.{PREFIX}act_invoices.created_at IS 'Дата и время создания записи';
 COMMENT ON COLUMN {SCHEMA}.{PREFIX}act_invoices.updated_at IS 'Дата и время последнего обновления';

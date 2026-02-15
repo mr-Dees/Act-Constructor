@@ -1478,6 +1478,10 @@ class ActDBService:
             f"node_id={data['node_id']}, table={data['table_name']}"
         )
 
+        metrics = row["metrics"]
+        if isinstance(metrics, str):
+            metrics = json.loads(metrics)
+
         return {
             "id": row["id"],
             "act_id": row["act_id"],
@@ -1486,9 +1490,7 @@ class ActDBService:
             "db_type": row["db_type"],
             "schema_name": row["schema_name"],
             "table_name": row["table_name"],
-            "metric_type": row["metric_type"],
-            "metric_code": row["metric_code"],
-            "metric_name": row["metric_name"],
+            "metrics": metrics,
             "verification_status": row["verification_status"],
             "created_at": row["created_at"].isoformat(),
             "updated_at": row["updated_at"].isoformat(),
@@ -1504,8 +1506,7 @@ class ActDBService:
         row = await self.conn.fetchrow(
             f"""
             SELECT id, act_id, node_id, node_number, db_type,
-                   schema_name, table_name, metric_type,
-                   metric_code, metric_name,
+                   schema_name, table_name, metrics,
                    verification_status, created_at, updated_at, created_by
             FROM {self.invoices}
             WHERE act_id = $1 AND node_id = $2
@@ -1517,6 +1518,10 @@ class ActDBService:
         if not row:
             return None
 
+        metrics = row["metrics"]
+        if isinstance(metrics, str):
+            metrics = json.loads(metrics)
+
         return {
             "id": row["id"],
             "act_id": row["act_id"],
@@ -1525,9 +1530,7 @@ class ActDBService:
             "db_type": row["db_type"],
             "schema_name": row["schema_name"],
             "table_name": row["table_name"],
-            "metric_type": row["metric_type"],
-            "metric_code": row["metric_code"],
-            "metric_name": row["metric_name"],
+            "metrics": metrics,
             "verification_status": row["verification_status"],
             "created_at": row["created_at"].isoformat(),
             "updated_at": row["updated_at"].isoformat(),
@@ -1539,8 +1542,7 @@ class ActDBService:
         rows = await self.conn.fetch(
             f"""
             SELECT id, act_id, node_id, node_number, db_type,
-                   schema_name, table_name, metric_type,
-                   metric_code, metric_name,
+                   schema_name, table_name, metrics,
                    verification_status, created_at, updated_at, created_by
             FROM {self.invoices}
             WHERE act_id = $1
@@ -1549,8 +1551,13 @@ class ActDBService:
             act_id,
         )
 
-        return [
-            {
+        result = []
+        for row in rows:
+            metrics = row["metrics"]
+            if isinstance(metrics, str):
+                metrics = json.loads(metrics)
+
+            result.append({
                 "id": row["id"],
                 "act_id": row["act_id"],
                 "node_id": row["node_id"],
@@ -1558,16 +1565,14 @@ class ActDBService:
                 "db_type": row["db_type"],
                 "schema_name": row["schema_name"],
                 "table_name": row["table_name"],
-                "metric_type": row["metric_type"],
-                "metric_code": row["metric_code"],
-                "metric_name": row["metric_name"],
+                "metrics": metrics,
                 "verification_status": row["verification_status"],
                 "created_at": row["created_at"].isoformat(),
                 "updated_at": row["updated_at"].isoformat(),
                 "created_by": row["created_by"],
-            }
-            for row in rows
-        ]
+            })
+
+        return result
 
     async def verify_invoice(self, invoice_id: int) -> dict:
         """

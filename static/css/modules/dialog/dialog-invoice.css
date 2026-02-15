@@ -249,6 +249,8 @@
 }
 
 .invoice-chip {
+    display: inline-flex;
+    align-items: center;
     padding: var(--spacing-xs) var(--spacing-lg);
     border: 1px solid var(--border);
     border-radius: 20px;
@@ -275,6 +277,35 @@
 .invoice-chip.active:hover {
     background: var(--primary-hover);
     border-color: var(--primary-hover);
+    color: var(--text-on-primary);
+}
+
+.invoice-chip.configured {
+    border-color: var(--primary);
+    color: var(--primary);
+    background: var(--bg-primary);
+}
+
+.invoice-chip.configured:hover {
+    background: var(--primary-lightest, rgba(37, 99, 235, 0.06));
+}
+
+.invoice-chip-code {
+    position: relative;
+    top: 1px;
+    margin-left: var(--spacing-xs);
+    padding: 0 var(--spacing-xs);
+    font-size: var(--font-size-xs);
+    font-weight: var(--font-weight-semibold);
+    font-family: var(--font-family-mono, monospace);
+    background: var(--primary);
+    color: var(--text-on-primary);
+    border-radius: 8px;
+    line-height: 1.4;
+}
+
+.invoice-chip.active .invoice-chip-code {
+    background: rgba(255, 255, 255, 0.25);
     color: var(--text-on-primary);
 }
 

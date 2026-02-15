@@ -2,7 +2,7 @@
  * Диалог прикрепления фактуры к пункту акта.
  *
  * Позволяет выбрать БД (Hive/GreenPlum), найти таблицу по имени,
- * выбрать тип метрики (одиночный выбор), выбрать код метрики
+ * выбрать до 5 типов метрик (КС, ФР, ОР, РР, МКР) с кодами
  * из справочника и сохранить фактуру.
  * Наследует базовый функционал от DialogBase.
  */
@@ -33,18 +33,19 @@ class InvoiceDialog extends DialogBase {
     static _selectedTable = null;
 
     /**
-     * Выбранный тип метрики (одиночный выбор)
+     * Тип метрики, на который сейчас наведён фокус (активный чип).
      * @private
      * @type {string|null}
      */
-    static _selectedMetric = null;
+    static _focusedMetric = null;
 
     /**
-     * Выбранный код метрики из справочника
+     * Map: metric_type -> {code, metric_name, metric_group}
+     * Хранит данные для каждого выбранного типа метрики.
      * @private
-     * @type {{code: string, metric_name: string, metric_group: string|null}|null}
+     * @type {Object}
      */
-    static _selectedMetricCode = null;
+    static _selectedMetrics = {};
 
     /**
      * Кэш конфигурации фактур (загружается 1 раз)
@@ -82,6 +83,13 @@ class InvoiceDialog extends DialogBase {
     static _showFullMetricList = false;
 
     /**
+     * Флаг: пропустить следующий unfocus (после выбора кода из dropdown)
+     * @private
+     * @type {boolean}
+     */
+    static _skipNextUnfocus = false;
+
+    /**
      * Показывает диалог для указанного узла.
      * @param {Object} node - Узел дерева
      * @param {string} nodeId - ID узла
@@ -95,8 +103,8 @@ class InvoiceDialog extends DialogBase {
         this._currentNode = node;
         this._currentNodeId = nodeId;
         this._selectedTable = null;
-        this._selectedMetric = null;
-        this._selectedMetricCode = null;
+        this._focusedMetric = null;
+        this._selectedMetrics = {};
         this._showFullMetricList = false;
 
         const template = this._cloneTemplate('invoiceDialogTemplate');
@@ -236,27 +244,22 @@ class InvoiceDialog extends DialogBase {
             }
         }
 
-        // Заполняем тип метрики
-        if (invoice.metric_type) {
-            this._selectedMetric = invoice.metric_type;
-            overlay.querySelectorAll('.invoice-chip').forEach(chip => {
-                if (chip.dataset.metric === this._selectedMetric) {
-                    chip.classList.add('active');
-                }
-            });
-        }
-
-        // Заполняем код метрики
-        if (invoice.metric_code) {
-            this._selectedMetricCode = {
-                code: invoice.metric_code,
-                metric_name: invoice.metric_name || '',
-                metric_group: this._selectedMetric || null,
+        // Заполняем метрики из массива
+        const metrics = invoice.metrics || [];
+        for (const m of metrics) {
+            this._selectedMetrics[m.metric_type] = {
+                code: m.metric_code || null,
+                metric_name: m.metric_name || '',
+                metric_group: m.metric_type,
             };
-            const metricInput = overlay.querySelector('.invoice-metric-search-input');
-            if (metricInput) {
-                metricInput.value = `${invoice.metric_code} — ${invoice.metric_name || ''}`;
-                metricInput.classList.add('has-value');
+
+            // Визуализация чипов
+            const chip = overlay.querySelector(`.invoice-chip[data-metric="${m.metric_type}"]`);
+            if (chip) {
+                chip.classList.add('configured');
+                if (m.metric_code) {
+                    this._updateChipBadge(chip, m.metric_code);
+                }
             }
         }
     }
@@ -327,30 +330,32 @@ class InvoiceDialog extends DialogBase {
             });
         }
 
-        // Чипы метрик — одиночный выбор
+        // Чипы метрик — мультивыбор + фокус
         overlay.querySelectorAll('.invoice-chip').forEach(chip => {
             chip.addEventListener('click', () => {
                 const metric = chip.dataset.metric;
 
-                if (this._selectedMetric === metric) {
-                    // Повторный клик — деактивировать
-                    this._selectedMetric = null;
-                    chip.classList.remove('active');
-                } else {
-                    // Новый выбор — убрать active со всех, поставить на текущий
-                    overlay.querySelectorAll('.invoice-chip').forEach(c => c.classList.remove('active'));
-                    chip.classList.add('active');
-                    this._selectedMetric = metric;
+                if (this._focusedMetric === metric) {
+                    // Клик по focused чипу — деактивировать и удалить данные
+                    chip.classList.remove('active', 'configured');
+                    this._removeChipBadge(chip);
+                    delete this._selectedMetrics[metric];
+                    this._focusedMetric = null;
 
-                    // Сбросить код метрики при смене типа
-                    this._selectedMetricCode = null;
-                    this._showFullMetricList = false;
+                    // Очистить поле кода
                     const metricInput = overlay.querySelector('.invoice-metric-search-input');
                     if (metricInput) {
                         metricInput.value = '';
                         metricInput.classList.remove('has-value');
                     }
                     this._hideMetricDropdown(overlay);
+                } else if (this._selectedMetrics[metric] !== undefined) {
+                    // Клик по configured чипу — переключить фокус на него
+                    this._switchFocus(overlay, metric);
+                } else {
+                    // Клик по невыбранному — добавить + сфокусировать
+                    this._selectedMetrics[metric] = null; // пока нет кода
+                    this._switchFocus(overlay, metric);
                 }
             });
         });
@@ -361,12 +366,17 @@ class InvoiceDialog extends DialogBase {
             metricInput.addEventListener('input', () => {
                 const query = metricInput.value.trim();
 
-                // Сброс выбора если текст изменился
-                if (this._selectedMetricCode) {
-                    const currentText = `${this._selectedMetricCode.code} — ${this._selectedMetricCode.metric_name}`;
+                // Сброс выбранного кода если текст изменился
+                if (this._focusedMetric && this._selectedMetrics[this._focusedMetric]) {
+                    const currentData = this._selectedMetrics[this._focusedMetric];
+                    const currentText = `${currentData.code} — ${currentData.metric_name}`;
                     if (query !== currentText) {
-                        this._selectedMetricCode = null;
+                        this._selectedMetrics[this._focusedMetric] = null;
                         metricInput.classList.remove('has-value');
+
+                        // Убрать бейдж с чипа
+                        const chip = overlay.querySelector(`.invoice-chip[data-metric="${this._focusedMetric}"]`);
+                        if (chip) this._removeChipBadge(chip);
                     }
                 }
 
@@ -375,7 +385,7 @@ class InvoiceDialog extends DialogBase {
 
             metricInput.addEventListener('focus', () => {
                 // При фокусе показать начальный список
-                if (!this._selectedMetricCode) {
+                if (this._focusedMetric && !this._selectedMetrics[this._focusedMetric]) {
                     this._filterAndShowMetrics(overlay, metricInput.value.trim());
                 }
             });
@@ -385,10 +395,121 @@ class InvoiceDialog extends DialogBase {
             });
         }
 
+        // Клик по пустому месту диалога — сброс фокуса с чипа
+        dialog.addEventListener('click', (e) => {
+            if (this._skipNextUnfocus) {
+                this._skipNextUnfocus = false;
+                return;
+            }
+            if (!e.target.closest('.invoice-chip') && !e.target.closest('.invoice-metric-search-input') && !e.target.closest('.invoice-metric-dropdown')) {
+                this._unfocusMetric(overlay);
+            }
+        });
+
         // Сохранение
         if (saveBtn) {
             saveBtn.addEventListener('click', () => this._save(overlay));
         }
+    }
+
+    /**
+     * Переключает фокус на указанный тип метрики.
+     * @private
+     */
+    static _switchFocus(overlay, metricType) {
+        // Снять active с предыдущего focused чипа (если есть),
+        // сделать его configured если у него есть код
+        if (this._focusedMetric && this._focusedMetric !== metricType) {
+            const prevChip = overlay.querySelector(`.invoice-chip[data-metric="${this._focusedMetric}"]`);
+            if (prevChip) {
+                prevChip.classList.remove('active');
+                if (this._selectedMetrics[this._focusedMetric]) {
+                    prevChip.classList.add('configured');
+                } else {
+                    // Нет кода — оставить configured (без бейджа, но выбран)
+                    prevChip.classList.add('configured');
+                }
+            }
+        }
+
+        this._focusedMetric = metricType;
+
+        // Сделать текущий чип active
+        overlay.querySelectorAll('.invoice-chip').forEach(c => c.classList.remove('active'));
+        const chip = overlay.querySelector(`.invoice-chip[data-metric="${metricType}"]`);
+        if (chip) {
+            chip.classList.add('active');
+            chip.classList.remove('configured');
+        }
+
+        // Обновить поле кода
+        const metricInput = overlay.querySelector('.invoice-metric-search-input');
+        if (metricInput) {
+            const metricData = this._selectedMetrics[metricType];
+            if (metricData && metricData.code) {
+                metricInput.value = `${metricData.code} — ${metricData.metric_name}`;
+                metricInput.classList.add('has-value');
+            } else {
+                metricInput.value = '';
+                metricInput.classList.remove('has-value');
+            }
+        }
+
+        this._showFullMetricList = false;
+        this._hideMetricDropdown(overlay);
+    }
+
+    /**
+     * Снимает фокус с активного чипа и очищает поле кода метрики.
+     * @private
+     */
+    static _unfocusMetric(overlay) {
+        if (!this._focusedMetric) return;
+
+        const chip = overlay.querySelector(`.invoice-chip[data-metric="${this._focusedMetric}"]`);
+        if (chip) {
+            chip.classList.remove('active');
+            if (this._selectedMetrics[this._focusedMetric]) {
+                chip.classList.add('configured');
+            } else {
+                // Нет кода — убрать чип из выбранных
+                delete this._selectedMetrics[this._focusedMetric];
+                chip.classList.remove('configured');
+                this._removeChipBadge(chip);
+            }
+        }
+
+        this._focusedMetric = null;
+
+        const metricInput = overlay.querySelector('.invoice-metric-search-input');
+        if (metricInput) {
+            metricInput.value = '';
+            metricInput.classList.remove('has-value');
+        }
+        this._hideMetricDropdown(overlay);
+    }
+
+    /**
+     * Создаёт или обновляет бейдж кода внутри чипа.
+     * @private
+     */
+    static _updateChipBadge(chip, code) {
+        let badge = chip.querySelector('.invoice-chip-code');
+        if (!badge) {
+            badge = document.createElement('span');
+            badge.className = 'invoice-chip-code';
+            chip.appendChild(badge);
+        }
+        badge.textContent = code;
+    }
+
+    /**
+     * Удаляет бейдж кода из чипа.
+     * @private
+     */
+    static _removeChipBadge(chip) {
+        const badge = chip.querySelector('.invoice-chip-code');
+        if (badge) badge.remove();
     }
 
     /**
@@ -494,22 +615,22 @@ class InvoiceDialog extends DialogBase {
 
             const allFiltered = this._cachedMetricDict.filter(filterFn);
 
-            if (this._selectedMetric) {
+            if (this._focusedMetric) {
                 // Выбранная группа — первая, остальные — ниже
-                primaryItems = allFiltered.filter(m => m.metric_group === this._selectedMetric);
-                otherItems = allFiltered.filter(m => m.metric_group !== this._selectedMetric);
+                primaryItems = allFiltered.filter(m => m.metric_group === this._focusedMetric);
+                otherItems = allFiltered.filter(m => m.metric_group !== this._focusedMetric);
             } else {
                 primaryItems = allFiltered;
                 otherItems = [];
             }
         } else {
             // Без запроса — фильтрация по группе
-            if (this._selectedMetric) {
+            if (this._focusedMetric) {
                 primaryItems = this._cachedMetricDict.filter(
-                    m => m.metric_group === this._selectedMetric
+                    m => m.metric_group === this._focusedMetric
                 );
                 otherItems = this._cachedMetricDict.filter(
-                    m => m.metric_group !== this._selectedMetric
+                    m => m.metric_group !== this._focusedMetric
                 );
             } else {
                 primaryItems = this._cachedMetricDict;
@@ -636,24 +757,42 @@ class InvoiceDialog extends DialogBase {
      * @private
      */
     static _selectMetricCode(overlay, item) {
-        this._selectedMetricCode = item;
+        this._skipNextUnfocus = true;
 
+        // Определяем целевой тип метрики
+        let targetMetric = this._focusedMetric;
+
+        // Авто-корректировка: если группа метрики не совпадает с focused
+        if (item.metric_group && item.metric_group !== this._focusedMetric) {
+            targetMetric = item.metric_group;
+
+            // Если этот тип ещё не был выбран — добавляем
+            if (this._selectedMetrics[targetMetric] === undefined) {
+                this._selectedMetrics[targetMetric] = null;
+            }
+
+            // Переключаем фокус на новый тип
+            this._switchFocus(overlay, targetMetric);
+        }
+
+        // Сохраняем данные
+        this._selectedMetrics[targetMetric] = {
+            code: item.code,
+            metric_name: item.metric_name,
+            metric_group: item.metric_group,
+        };
+
+        // Обновляем поле кода
         const metricInput = overlay.querySelector('.invoice-metric-search-input');
         if (metricInput) {
             metricInput.value = `${item.code} — ${item.metric_name}`;
             metricInput.classList.add('has-value');
         }
 
-        // Авто-корректировка типа метрики
-        if (item.metric_group && item.metric_group !== this._selectedMetric) {
-            this._selectedMetric = item.metric_group;
-            overlay.querySelectorAll('.invoice-chip').forEach(chip => {
-                if (chip.dataset.metric === item.metric_group) {
-                    chip.classList.add('active');
-                } else {
-                    chip.classList.remove('active');
-                }
-            });
+        // Обновляем бейдж на чипе
+        const chip = overlay.querySelector(`.invoice-chip[data-metric="${targetMetric}"]`);
+        if (chip) {
+            this._updateChipBadge(chip, item.code);
         }
 
         this._hideMetricDropdown(overlay);
@@ -670,19 +809,22 @@ class InvoiceDialog extends DialogBase {
             return;
         }
 
-        if (!this._selectedMetric) {
-            Notifications.warning('Выберите тип метрики');
-            return;
+        // Собираем массив метрик
+        const metricsArray = [];
+        for (const [metricType, metricData] of Object.entries(this._selectedMetrics)) {
+            if (!metricData || !metricData.code) {
+                Notifications.warning(`Выберите код для метрики ${metricType}`);
+                return;
+            }
+            metricsArray.push({
+                metric_type: metricType,
+                metric_code: metricData.code,
+                metric_name: metricData.metric_name,
+            });
         }
 
-        if (!this._selectedMetricCode) {
-            Notifications.warning('Выберите код метрики');
-            return;
-        }
-
-        // Если код метрики без группы и тип не указан
-        if (this._selectedMetricCode.metric_group === null && !this._selectedMetric) {
-            Notifications.warning('Необходимо указать тип метрики');
+        if (metricsArray.length === 0) {
+            Notifications.warning('Выберите хотя бы одну метрику');
             return;
         }
 
@@ -706,9 +848,7 @@ class InvoiceDialog extends DialogBase {
             db_type: dbType,
             schema_name: schemaName,
             table_name: this._selectedTable.table_name,
-            metric_type: this._selectedMetric,
-            metric_code: this._selectedMetricCode.code,
-            metric_name: this._selectedMetricCode.metric_name,
+            metrics: metricsArray,
         };
 
         // Блокируем кнопку на время сохранения
@@ -727,9 +867,7 @@ class InvoiceDialog extends DialogBase {
                     db_type: data.db_type,
                     schema_name: data.schema_name,
                     table_name: data.table_name,
-                    metric_type: data.metric_type,
-                    metric_code: data.metric_code,
-                    metric_name: data.metric_name,
+                    metrics: data.metrics,
                 };
             }
 
@@ -787,9 +925,10 @@ class InvoiceDialog extends DialogBase {
         this._currentNode = null;
         this._currentNodeId = null;
         this._selectedTable = null;
-        this._selectedMetric = null;
-        this._selectedMetricCode = null;
+        this._focusedMetric = null;
+        this._selectedMetrics = {};
         this._showFullMetricList = false;
+        this._skipNextUnfocus = false;
     }
 }
 
