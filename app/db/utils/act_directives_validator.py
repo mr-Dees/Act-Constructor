@@ -67,3 +67,24 @@ class ActDirectivesValidator:
                     f"несуществующий пункт '{point}'. Сначала создайте этот "
                     f"пункт в структуре акта."
                 )
+
+    @staticmethod
+    def build_audit_point_map(tree: dict) -> dict[str, str | None]:
+        """
+        Строит маппинг {node_id -> auditPointId} обходом дерева.
+
+        Для item-узлов берёт auditPointId из самого узла.
+        """
+        result: dict[str, str | None] = {}
+
+        def _walk(node: dict) -> None:
+            node_type = node.get('type', 'item')
+            if node_type == 'item' or node_type not in ('table', 'textblock', 'violation'):
+                audit_point_id = node.get('auditPointId')
+                if audit_point_id:
+                    result[node.get('id')] = audit_point_id
+            for child in node.get('children', []):
+                _walk(child)
+
+        _walk(tree)
+        return result

@@ -233,10 +233,15 @@ class ActDBService:
             self,
             act_id: int,
             directives: list[ActDirective],
-    ) -> None:
-        """Проверяет что все пункты поручений существуют в структуре акта."""
+    ) -> dict | None:
+        """
+        Проверяет что все пункты поручений существуют в структуре акта.
+
+        Returns:
+            Загруженное дерево (dict) или None если поручений нет.
+        """
         if not directives:
-            return
+            return None
 
         tree_row = await self.conn.fetchrow(
             f"SELECT tree_data FROM {self.tree} WHERE act_id = $1",
@@ -257,6 +262,8 @@ class ActDBService:
             directives,
             existing_points,
         )
+
+        return tree_data
 
     async def lock_act(
             self,
@@ -539,11 +546,13 @@ class ActDBService:
                 await self.conn.execute(
                     f"""
                     INSERT INTO {self.directives} (
-                        act_id, point_number, node_id, directive_number, order_index
+                        act_id, audit_act_id, point_number, node_id,
+                        directive_number, order_index
                     )
-                    VALUES ($1, $2, $3, $4, $5)
+                    VALUES ($1, $2, $3, $4, $5, $6)
                     """,
                     act_id,
+                    audit_act_id,
                     directive.point_number,
                     directive.node_id,
                     directive.directive_number,
@@ -773,8 +782,15 @@ class ActDBService:
             old_service_note = current_act.service_note
             old_part_number = current_act.part_number
 
+            # Получаем audit_act_id — нужен и для audit_team, и для directives
+            cur_audit_act_id = await self.conn.fetchval(
+                f"SELECT audit_act_id FROM {self.acts} WHERE id = $1",
+                act_id,
+            )
+
+            tree_data = None
             if act_update.directives is not None:
-                await self._validate_directives_points(act_id, act_update.directives)
+                tree_data = await self._validate_directives_points(act_id, act_update.directives)
 
             km_changed = (
                     act_update.km_number is not None
@@ -961,12 +977,6 @@ class ActDBService:
 
             # Аудиторская группа
             if act_update.audit_team is not None:
-                # Получаем audit_act_id для записи в audit_team_members
-                cur_audit_act_id = await self.conn.fetchval(
-                    f"SELECT audit_act_id FROM {self.acts} WHERE id = $1",
-                    act_id,
-                )
-
                 await self.conn.execute(
                     f"DELETE FROM {self.audit_team} WHERE act_id = $1",
                     act_id,
@@ -996,15 +1006,28 @@ class ActDBService:
                     act_id,
                 )
 
+                # Строим маппинг {node_id -> audit_point_id} из дерева
+                audit_point_map = (
+                    ActDirectivesValidator.build_audit_point_map(tree_data)
+                    if tree_data else {}
+                )
+
                 for idx, directive in enumerate(act_update.directives):
+                    audit_point_id = (
+                        audit_point_map.get(directive.node_id)
+                        if directive.node_id else None
+                    )
                     await self.conn.execute(
                         f"""
                         INSERT INTO {self.directives} (
-                            act_id, point_number, node_id, directive_number, order_index
+                            act_id, audit_act_id, audit_point_id,
+                            point_number, node_id, directive_number, order_index
                         )
-                        VALUES ($1, $2, $3, $4, $5)
+                        VALUES ($1, $2, $3, $4, $5, $6, $7)
                         """,
                         act_id,
+                        cur_audit_act_id,
+                        audit_point_id,
                         directive.point_number,
                         directive.node_id,
                         directive.directive_number,

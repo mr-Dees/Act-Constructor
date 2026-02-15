@@ -19,6 +19,7 @@ from fastapi import APIRouter, Depends, HTTPException
 from app.api.v1.deps.auth_deps import get_username
 from app.db.connection import get_db, get_adapter
 from app.db.repositories.act_repository import ActDBService
+from app.db.utils import ActDirectivesValidator
 from app.schemas.act_content import ActDataSchema
 
 logger = logging.getLogger("act_constructor.api.content")
@@ -251,7 +252,7 @@ async def save_act_content(
                 )
 
                 # Создаем маппинг {node_id -> audit_point_id} обходом дерева
-                audit_point_map = _build_audit_point_map(data.tree)
+                audit_point_map = ActDirectivesValidator.build_audit_point_map(data.tree)
 
                 # Обновляем дерево
                 await conn.execute(
@@ -510,27 +511,6 @@ def _find_node_label(tree: dict, node_id: str, current_node: dict = None) -> str
             return result
 
     return None
-
-
-def _build_audit_point_map(tree: dict) -> dict[str, str | None]:
-    """
-    Строит маппинг {node_id -> auditPointId} обходом дерева.
-
-    Для item-узлов берёт auditPointId из самого узла.
-    """
-    result = {}
-
-    def _walk(node: dict):
-        node_type = node.get('type', 'item')
-        if node_type == 'item' or node_type not in ('table', 'textblock', 'violation'):
-            audit_point_id = node.get('auditPointId')
-            if audit_point_id:
-                result[node.get('id')] = audit_point_id
-        for child in node.get('children', []):
-            _walk(child)
-
-    _walk(tree)
-    return result
 
 
 def _find_parent_item_node_id(
