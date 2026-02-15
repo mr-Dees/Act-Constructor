@@ -30,6 +30,13 @@ Object.assign(ViolationManager.prototype, {
                 return;
             }
 
+            // Если вставка происходит в textarea или input внутри дополнительного контента —
+            // не перехватываем, позволяем стандартное поведение браузера
+            const target = e.target;
+            if (target && (target.tagName === 'TEXTAREA' || target.tagName === 'INPUT')) {
+                return;
+            }
+
             // Получаем данные из буфера обмена
             const items = e.clipboardData?.items;
             if (!items) {
@@ -102,41 +109,39 @@ Object.assign(ViolationManager.prototype, {
             }
             // Обрабатываем текст только если нет изображения
             else if (textItem) {
-                textItem.getAsString((text) => {
-                    const textContent = text.trim();
+                const textContent = e.clipboardData.getData('text/plain').trim();
 
-                    if (textContent) {
-                        e.preventDefault();
+                if (textContent) {
+                    e.preventDefault();
 
-                        // Определяем тип: кейс или текст
-                        const normalizedText = textContent.toLowerCase();
-                        const startsWithCase = normalizedText.startsWith('кейс');
+                    // Определяем тип: кейс или текст
+                    const normalizedText = textContent.toLowerCase();
+                    const startsWithCase = normalizedText.startsWith('кейс');
 
-                        let type, content, message;
+                    let type, content, message;
 
-                        if (startsWithCase) {
-                            type = 'case';
-                            // Убираем "кейс" (4 символа) и затем номер с разделителем
-                            content = textContent
-                                .substring(4)
-                                .replace(/^\s*\d+\s*[.:\-–—]?\s*/, '')
-                                .trim();
-                            message = 'Кейс добавлен из буфера обмена';
-                        } else {
-                            type = 'freeText';
-                            content = textContent;
-                            message = 'Текст добавлен из буфера обмена';
-                        }
-
-                        // Добавляем элемент в определенную позицию
-                        this.addContentItemAtPosition(violation, type, targetContainer, insertIndex, {
-                            content: content
-                        });
-
-                        PreviewManager.update();
-                        Notifications.success(message);
+                    if (startsWithCase) {
+                        type = 'case';
+                        // Убираем "кейс" (4 символа) и затем номер с разделителем
+                        content = textContent
+                            .substring(4)
+                            .replace(/^\s*\d+\s*[.:\-–—]?\s*/, '')
+                            .trim();
+                        message = 'Кейс добавлен из буфера обмена';
+                    } else {
+                        type = 'freeText';
+                        content = textContent;
+                        message = 'Текст добавлен из буфера обмена';
                     }
-                });
+
+                    // Добавляем элемент в определенную позицию
+                    this.addContentItemAtPosition(violation, type, targetContainer, insertIndex, {
+                        content: content
+                    });
+
+                    PreviewManager.update();
+                    Notifications.success(message);
+                }
             }
         });
     }
