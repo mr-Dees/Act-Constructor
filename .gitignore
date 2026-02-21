@@ -78,6 +78,7 @@ coverage.xml
 
 # Documentation
 docs/
+!docs/plans/
 docs/_build/
 docs/_static/
 docs/_templates/
