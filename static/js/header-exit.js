@@ -129,7 +129,7 @@ class HeaderExit {
             }
 
             // Разрешаем навигацию без предупреждения браузера
-            if (typeof StorageManager !== 'undefined') {
+            if (typeof StorageManager !== 'undefined' && typeof StorageManager.allowUnload === 'function') {
                 StorageManager.allowUnload();
             }
 

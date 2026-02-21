@@ -169,7 +169,7 @@ class LockManager {
             });
 
             // Разрешаем навигацию без предупреждения браузера
-            if (typeof StorageManager !== 'undefined') {
+            if (typeof StorageManager !== 'undefined' && typeof StorageManager.allowUnload === 'function') {
                 StorageManager.allowUnload();
             }
 
@@ -413,7 +413,7 @@ class LockManager {
         this.disableBeforeUnload();
 
         // Разрешаем навигацию без предупреждения браузера
-        if (typeof StorageManager !== 'undefined') {
+        if (typeof StorageManager !== 'undefined' && typeof StorageManager.allowUnload === 'function') {
             StorageManager.allowUnload();
         }
 
@@ -443,7 +443,7 @@ class LockManager {
                     } else {
                         console.log('[LockManager] Контент акта сохранён');
                         // Синхронизируем флаг StorageManager после успешного сохранения
-                        if (typeof StorageManager !== 'undefined') {
+                        if (typeof StorageManager !== 'undefined' && typeof StorageManager.markAsSyncedWithDB === 'function') {
                             StorageManager.markAsSyncedWithDB();
                         }
                     }
