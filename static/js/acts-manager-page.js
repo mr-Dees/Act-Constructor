@@ -469,8 +469,7 @@ class ActsManagerPage {
                     lockAcquired = true;
                     console.log(`[ActsManagerPage] Акт ${actId} успешно заблокирован`);
                 } catch (err) {
-                    if (err.message === 'ACT_LOCKED') {
-                        Notifications.warning('Акт уже редактируется другим пользователем.');
+                    if (err.message === 'ACT_LOCKED' || err.message === 'LOCK_FAILED') {
                         return;
                     }
                     throw err;

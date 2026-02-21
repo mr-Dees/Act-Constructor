@@ -168,11 +168,34 @@ class LockManager {
                 allowOverlayClose: false
             });
 
+            // Разрешаем навигацию без предупреждения браузера
+            if (typeof StorageManager !== 'undefined' && typeof StorageManager.allowUnload === 'function') {
+                StorageManager.allowUnload();
+            }
+
             window.location.href = AppConfig.api.getUrl('/acts');
             throw new Error('ACT_LOCKED');
         }
 
-        if (!response.ok) throw new Error('Не удалось заблокировать акт');
+        if (!response.ok) {
+            await DialogManager.show({
+                title: 'Ошибка блокировки',
+                message: AppConfig.lock.messages.lockFailed,
+                icon: '⚠️',
+                type: 'danger',
+                confirmText: 'Вернуться к списку',
+                hideCancel: true,
+                allowEscape: false,
+                allowOverlayClose: false
+            });
+
+            if (typeof StorageManager !== 'undefined' && typeof StorageManager.allowUnload === 'function') {
+                StorageManager.allowUnload();
+            }
+
+            window.location.href = AppConfig.api.getUrl('/acts');
+            throw new Error('LOCK_FAILED');
+        }
 
         const data = await response.json();
         console.log('Акт заблокирован до', data.locked_until);
@@ -261,7 +284,7 @@ class LockManager {
      */
     static _startAutoExtension() {
         const intervalMs = this._config.inactivityCheckIntervalSeconds * 1000;
-        this._extensionInterval = setInterval(() => {
+        this._extensionInterval = setInterval(async () => {
             const now = Date.now();
             const sinceActivity = (now - this._lastActivity) / 1000 / 60;
             const sinceExtension = (now - this._lastExtensionAt) / 1000 / 60;
@@ -270,7 +293,11 @@ class LockManager {
                 sinceExtension >= this._config.minExtensionIntervalMinutes
             ) {
                 console.log('Пользователь активен → продлеваем блокировку');
-                this._extendLockSafely();
+                const ok = await this._extendLockSafely();
+                if (!ok) {
+                    console.error('Автопродление не удалось → выход');
+                    this._initiateExit('extensionFailed');
+                }
             }
         }, intervalMs);
     }
@@ -386,10 +413,14 @@ class LockManager {
 
         if (stay) {
             const extended = await this._extendLockSafely();
-            this._lastActivity = Date.now();
-            if (extended && Notifications) Notifications.success(cfg.messages.sessionExtended);
-            if (!extended && Notifications) Notifications.error(cfg.messages.cannotExtend);
-            this._startInactivityCheck();
+            if (extended) {
+                this._lastActivity = Date.now();
+                if (Notifications) Notifications.success(cfg.messages.sessionExtended);
+                this._startInactivityCheck();
+            } else {
+                if (Notifications) Notifications.error(cfg.messages.cannotExtend);
+                await this._initiateExit('extensionFailed');
+            }
         } else {
             await this._initiateExit('manualExit');
         }
@@ -406,6 +437,11 @@ class LockManager {
 
         this.destroy();
         this.disableBeforeUnload();
+
+        // Разрешаем навигацию без предупреждения браузера
+        if (typeof StorageManager !== 'undefined' && typeof StorageManager.allowUnload === 'function') {
+            StorageManager.allowUnload();
+        }
 
         const username = AuthManager?.getCurrentUser?.() || null;
         const messageFlag = action === 'autoExit'
@@ -432,6 +468,10 @@ class LockManager {
                         console.error(`[LockManager] Ошибка сохранения контента (код ${saveResp.status})`);
                     } else {
                         console.log('[LockManager] Контент акта сохранён');
+                        // Синхронизируем флаг StorageManager после успешного сохранения
+                        if (typeof StorageManager !== 'undefined' && typeof StorageManager.markAsSyncedWithDB === 'function') {
+                            StorageManager.markAsSyncedWithDB();
+                        }
                     }
                 } catch (saveErr) {
                     console.error('LockManager: ошибка при сохранении контента конструктора:', saveErr);

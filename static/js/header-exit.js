@@ -128,6 +128,11 @@ class HeaderExit {
                 return;
             }
 
+            // Разрешаем навигацию без предупреждения браузера
+            if (typeof StorageManager !== 'undefined' && typeof StorageManager.allowUnload === 'function') {
+                StorageManager.allowUnload();
+            }
+
             // Если НЕ сохранили, нужно сохранить перед unlock
             if (!wasSaved && window.currentActId && typeof AppState !== 'undefined' && AppState?.exportData) {
                 try {

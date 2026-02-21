@@ -308,10 +308,11 @@ class ActDBService:
                     f"""
                     UPDATE {self.acts}
                     SET lock_expires_at = $1
-                    WHERE id = $2
+                    WHERE id = $2 AND locked_by = $3
                     """,
                     lock_expires,
-                    act_id
+                    act_id,
+                    username
                 )
 
                 logger.info(f"Блокировка акта ID={act_id} продлена для {username}")
@@ -334,19 +335,27 @@ class ActDBService:
         # Устанавливаем новую блокировку
         lock_expires = now + timedelta(minutes=duration_minutes)
 
-        await self.conn.execute(
+        result = await self.conn.execute(
             f"""
             UPDATE {self.acts}
             SET locked_by = $1,
                 locked_at = $2,
                 lock_expires_at = $3
             WHERE id = $4
+              AND (locked_by IS NULL OR lock_expires_at <= $5)
             """,
             username,
             now,
             lock_expires,
-            act_id
+            act_id,
+            now
         )
+
+        if result == "UPDATE 0":
+            raise ValueError(
+                "Не удалось заблокировать акт — блокировка была захвачена другим пользователем. "
+                "Попробуйте позже."
+            )
 
         logger.info(f"Акт ID={act_id} заблокирован пользователем {username} до {lock_expires}")
 
@@ -411,17 +420,24 @@ class ActDBService:
         if lock_info['locked_by'] != username:
             raise ValueError("Вы не владеете блокировкой этого акта")
 
+        if lock_info['lock_expires_at'] and lock_info['lock_expires_at'] <= datetime.now():
+            raise ValueError("Блокировка истекла. Откройте акт заново для продолжения работы.")
+
         lock_expires = datetime.now() + timedelta(minutes=duration_minutes)
 
-        await self.conn.execute(
+        result = await self.conn.execute(
             f"""
             UPDATE {self.acts}
             SET lock_expires_at = $1
-            WHERE id = $2
+            WHERE id = $2 AND locked_by = $3
             """,
             lock_expires,
-            act_id
+            act_id,
+            username
         )
+
+        if result == "UPDATE 0":
+            raise ValueError("Блокировка была перехвачена другим пользователем")
 
         logger.info(f"Блокировка акта ID={act_id} продлена до {lock_expires}")
 
