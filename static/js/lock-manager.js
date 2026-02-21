@@ -168,6 +168,11 @@ class LockManager {
                 allowOverlayClose: false
             });
 
+            // Разрешаем навигацию без предупреждения браузера
+            if (typeof StorageManager !== 'undefined') {
+                StorageManager.allowUnload();
+            }
+
             window.location.href = AppConfig.api.getUrl('/acts');
             throw new Error('ACT_LOCKED');
         }
@@ -407,6 +412,11 @@ class LockManager {
         this.destroy();
         this.disableBeforeUnload();
 
+        // Разрешаем навигацию без предупреждения браузера
+        if (typeof StorageManager !== 'undefined') {
+            StorageManager.allowUnload();
+        }
+
         const username = AuthManager?.getCurrentUser?.() || null;
         const messageFlag = action === 'autoExit'
             ? 'sessionAutoExited'
@@ -432,6 +442,10 @@ class LockManager {
                         console.error(`[LockManager] Ошибка сохранения контента (код ${saveResp.status})`);
                     } else {
                         console.log('[LockManager] Контент акта сохранён');
+                        // Синхронизируем флаг StorageManager после успешного сохранения
+                        if (typeof StorageManager !== 'undefined') {
+                            StorageManager.markAsSyncedWithDB();
+                        }
                     }
                 } catch (saveErr) {
                     console.error('LockManager: ошибка при сохранении контента конструктора:', saveErr);

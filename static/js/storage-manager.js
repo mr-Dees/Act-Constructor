@@ -44,6 +44,14 @@ class StorageManager {
     static _trackingDisabled = false;
 
     /**
+     * Флаг программного выхода со страницы
+     * При установке в true обработчик beforeunload не блокирует навигацию
+     * @private
+     * @type {boolean}
+     */
+    static _programmaticExit = false;
+
+    /**
      * Инициализация менеджера хранилища
      *
      * НЕ восстанавливает состояние автоматически.
@@ -213,6 +221,11 @@ class StorageManager {
             // Сохраняем в localStorage перед закрытием
             if (this._hasUnsavedChanges) {
                 this.saveState(true);
+            }
+
+            // При программном выходе не показываем диалог браузера
+            if (this._programmaticExit) {
+                return;
             }
 
             // Предупреждаем только если данные не синхронизированы с БД
@@ -543,6 +556,15 @@ class StorageManager {
      */
     static enableTracking() {
         this._trackingDisabled = false;
+    }
+
+    /**
+     * Разрешает покинуть страницу без предупреждения браузера.
+     * Вызывается при программном выходе (автовыход по неактивности,
+     * кнопка выхода, акт заблокирован другим пользователем).
+     */
+    static allowUnload() {
+        this._programmaticExit = true;
     }
 
     /**
