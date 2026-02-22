@@ -1,0 +1,870 @@
+/**
+ * Операции с ячейками таблиц.
+ * Обрабатывает редактирование содержимого, выделение и объединение/разделение ячеек.
+ * Работает с матричной grid-структурой таблиц в AppState.
+ */
+class TableCellsOperations {
+    constructor(tableManager) {
+        this.tableManager = tableManager;
+    }
+
+    /**
+     * Начинает редактирование содержимого ячейки.
+     * Создает textarea для ввода текста с поддержкой Shift+Enter для многострочного ввода.
+     * @param {HTMLElement} cellEl - DOM-элемент ячейки
+     */
+    startEditingCell(cellEl) {
+        // Блокируем редактирование в режиме только чтения
+        if (AppConfig.readOnlyMode?.isReadOnly) {
+            Notifications.warning(AppConfig.readOnlyMode.messages.cannotEdit);
+            return;
+        }
+
+        const originalContent = cellEl.textContent;
+        cellEl.classList.add('editing');
+
+        const textarea = document.createElement('textarea');
+        textarea.value = originalContent;
+        textarea.style.width = '100%';
+        textarea.style.height = '100%';
+        textarea.style.minHeight = '28px';
+        textarea.style.border = 'none';
+        textarea.style.outline = 'none';
+        textarea.style.resize = 'none';
+        textarea.style.padding = '4px';
+        textarea.style.fontFamily = 'inherit';
+        textarea.style.fontSize = 'inherit';
+
+        cellEl.textContent = '';
+        cellEl.appendChild(textarea);
+        textarea.focus();
+
+        const finishEditing = (cancel = false) => {
+            if (cancel) {
+                cellEl.textContent = originalContent;
+            } else {
+                const newValue = textarea.value.trim();
+                cellEl.textContent = newValue;
+
+                const tableId = cellEl.dataset.tableId;
+                const row = parseInt(cellEl.dataset.row);
+                const col = parseInt(cellEl.dataset.col);
+                const table = AppState.tables[tableId];
+
+                if (table && table.grid && table.grid[row] && table.grid[row][col]) {
+                    if (!table.grid[row][col].isSpanned) {
+                        table.grid[row][col].content = newValue;
+                    }
+                }
+
+                PreviewManager.update();
+            }
+
+            cellEl.classList.remove('editing');
+        };
+
+        const blurHandler = () => {
+            finishEditing(false);
+        };
+
+        const keydownHandler = (e) => {
+            if (e.key === 'Enter' && !e.shiftKey) {
+                e.preventDefault();
+                e.stopPropagation();
+                textarea.removeEventListener('blur', blurHandler);
+                textarea.removeEventListener('keydown', keydownHandler);
+                finishEditing(false);
+            } else if (e.key === 'Enter' && e.shiftKey) {
+                e.stopPropagation();
+            } else if (e.key === 'Escape') {
+                e.preventDefault();
+                e.stopPropagation();
+                textarea.removeEventListener('blur', blurHandler);
+                textarea.removeEventListener('keydown', keydownHandler);
+                finishEditing(true);
+            }
+        };
+
+        textarea.addEventListener('blur', blurHandler);
+        textarea.addEventListener('keydown', keydownHandler);
+    }
+
+    /**
+     * Вставляет новую строку выше выбранной ячейки.
+     * Учитывает объединенные ячейки и запрещает вставку выше заголовка.
+     */
+    insertRowAbove() {
+        if (this.tableManager.selectedCells.length === 0) return;
+
+        const cell = this.tableManager.selectedCells[0];
+        const tableId = cell.dataset.tableId;
+        let rowIndex = parseInt(cell.dataset.row);
+        const table = AppState.tables[tableId];
+
+        if (!table || !table.grid) return;
+
+        // КРИТИЧЕСКАЯ ПРОВЕРКА: запрещаем вставку выше заголовка
+        const isHeaderRow = table.grid[rowIndex].some(c => c.isHeader === true);
+        if (isHeaderRow) {
+            Notifications.error('Нельзя добавить строку выше заголовка таблицы');
+            return;
+        }
+
+        // ДОПОЛНИТЕЛЬНАЯ ПРОВЕРКА: если текущая строка часть объединения с заголовком
+        rowIndex = this._findRowStartOfSpan(table, rowIndex);
+        const targetRowIsHeader = table.grid[rowIndex].some(c => c.isHeader === true);
+        if (targetRowIsHeader) {
+            Notifications.error('Нельзя добавить строку выше заголовка таблицы');
+            return;
+        }
+
+        // Новая строка с пустыми ячейками
+        const newRow = [];
+        const numCols = table.grid[0].length;
+
+        for (let c = 0; c < numCols; c++) {
+            newRow.push({
+                content: '',
+                isHeader: false,
+                colSpan: 1,
+                rowSpan: 1,
+                originRow: rowIndex,
+                originCol: c
+            });
+        }
+
+        // Вставляем новую строку в grid
+        table.grid.splice(rowIndex, 0, newRow);
+
+        // Обновляем originRow для всех ячеек ниже
+        for (let r = rowIndex + 1; r < table.grid.length; r++) {
+            for (let c = 0; c < table.grid[r].length; c++) {
+                if (table.grid[r][c].originRow !== undefined) {
+                    table.grid[r][c].originRow = r;
+                }
+            }
+        }
+
+        // Обновляем rowSpan для ячеек с объединением
+        for (let r = 0; r < rowIndex; r++) {
+            for (let c = 0; c < table.grid[r].length; c++) {
+                const cellData = table.grid[r][c];
+                if (!cellData.isSpanned) {
+                    const cellEndRow = r + (cellData.rowSpan || 1);
+                    if (cellEndRow > rowIndex) {
+                        cellData.rowSpan = (cellData.rowSpan || 1) + 1;
+                    }
+                }
+            }
+        }
+
+        this.clearSelection();
+        ItemsRenderer.renderAll();
+        PreviewManager.update();
+    }
+
+    /**
+     * Вставляет новую строку ниже выбранной ячейки.
+     * Учитывает объединенные ячейки для корректной вставки.
+     */
+    insertRowBelow() {
+        if (this.tableManager.selectedCells.length === 0) return;
+
+        const cell = this.tableManager.selectedCells[0];
+        const tableId = cell.dataset.tableId;
+        let rowIndex = parseInt(cell.dataset.row);
+        const table = AppState.tables[tableId];
+
+        if (!table || !table.grid) return;
+
+        let insertRowIndex = rowIndex + 1;
+        for (let c = 0; c < table.grid[rowIndex].length; c++) {
+            const cellData = table.grid[rowIndex][c];
+            if (!cellData.isSpanned && cellData.rowSpan > 1) {
+                const cellEndRow = rowIndex + cellData.rowSpan;
+                insertRowIndex = Math.max(insertRowIndex, cellEndRow);
+            }
+        }
+
+        for (let r = 0; r < rowIndex; r++) {
+            for (let c = 0; c < table.grid[r].length; c++) {
+                const cellData = table.grid[r][c];
+                if (!cellData.isSpanned && cellData.rowSpan > 1) {
+                    const cellEndRow = r + cellData.rowSpan;
+                    if (cellEndRow > rowIndex) {
+                        insertRowIndex = Math.max(insertRowIndex, cellEndRow);
+                    }
+                }
+            }
+        }
+
+        const newRow = [];
+        const numCols = table.grid[0].length;
+
+        for (let c = 0; c < numCols; c++) {
+            newRow.push({
+                content: '',
+                isHeader: false,
+                colSpan: 1,
+                rowSpan: 1,
+                originRow: insertRowIndex,
+                originCol: c
+            });
+        }
+
+        table.grid.splice(insertRowIndex, 0, newRow);
+
+        for (let r = insertRowIndex + 1; r < table.grid.length; r++) {
+            for (let c = 0; c < table.grid[r].length; c++) {
+                if (table.grid[r][c].originRow !== undefined) {
+                    table.grid[r][c].originRow = r;
+                }
+            }
+        }
+
+        for (let r = 0; r < insertRowIndex; r++) {
+            for (let c = 0; c < table.grid[r].length; c++) {
+                const cellData = table.grid[r][c];
+                if (!cellData.isSpanned) {
+                    const cellEndRow = r + (cellData.rowSpan || 1);
+                    if (cellEndRow > insertRowIndex) {
+                        cellData.rowSpan = (cellData.rowSpan || 1) + 1;
+                    }
+                }
+            }
+        }
+
+        this.clearSelection();
+        ItemsRenderer.renderAll();
+        PreviewManager.update();
+    }
+
+    /**
+     * Перераспределяет ширину колонок равномерно после изменения структуры.
+     * Полностью пересоздает размеры при изменении количества колонок.
+     * @param {Object} table - Объект таблицы из AppState
+     */
+    _redistributeColumnWidths(table) {
+        if (!table || !table.grid || !table.grid[0]) return;
+
+        const numCols = table.grid[0].length;
+        const equalWidthPercent = 100 / numCols;
+
+        if (table.colWidths) {
+            table.colWidths = new Array(numCols).fill(equalWidthPercent);
+        }
+
+        if (!AppState.tableUISizes) {
+            AppState.tableUISizes = {};
+        }
+
+        // Удаляем старые размеры полностью
+        delete AppState.tableUISizes[table.id];
+
+        const sizes = {};
+
+        for (let r = 0; r < table.grid.length; r++) {
+            for (let c = 0; c < table.grid[r].length; c++) {
+                const cellData = table.grid[r][c];
+                if (cellData.isSpanned) continue;
+
+                const key = `${r}-${c}`;
+                const colspan = cellData.colSpan || 1;
+                const widthPercent = equalWidthPercent * colspan;
+
+                sizes[key] = {
+                    width: `${widthPercent}%`,
+                    height: '',
+                    minWidth: '80px',
+                    minHeight: '28px',
+                    wordBreak: 'normal',
+                    overflowWrap: 'anywhere'
+                };
+            }
+        }
+
+        AppState.tableUISizes[table.id] = {
+            cellSizes: sizes
+        };
+    }
+
+    /**
+     * Вставляет новую колонку слева от выбранной ячейки.
+     * Учитывает объединенные ячейки и сохраняет флаг заголовка для новых ячеек.
+     */
+    insertColumnLeft() {
+        if (this.tableManager.selectedCells.length === 0) return;
+
+        const cell = this.tableManager.selectedCells[0];
+        const tableId = cell.dataset.tableId;
+        let colIndex = parseInt(cell.dataset.col);
+        const table = AppState.tables[tableId];
+
+        if (!table || !table.grid) return;
+
+        // Проверка protected
+        if (table.protected === true) {
+            Notifications.error('Структуру этой таблицы нельзя изменять');
+            return;
+        }
+
+        colIndex = this._findColumnStartOfSpan(table, colIndex);
+
+        let headerRowIndex = -1;
+        for (let r = 0; r < table.grid.length; r++) {
+            if (table.grid[r].some(c => c.isHeader === true)) {
+                headerRowIndex = r;
+                break;
+            }
+        }
+
+        for (let r = 0; r < table.grid.length; r++) {
+            const isHeaderRow = r === headerRowIndex;
+            table.grid[r].splice(colIndex, 0, {
+                content: '',
+                isHeader: isHeaderRow,
+                colSpan: 1,
+                rowSpan: 1,
+                originRow: r,
+                originCol: colIndex
+            });
+        }
+
+        for (let r = 0; r < table.grid.length; r++) {
+            for (let c = colIndex + 1; c < table.grid[r].length; c++) {
+                if (table.grid[r][c].originCol !== undefined) {
+                    table.grid[r][c].originCol = c;
+                }
+            }
+        }
+
+        for (let r = 0; r < table.grid.length; r++) {
+            for (let c = 0; c < colIndex; c++) {
+                const cellData = table.grid[r][c];
+                if (!cellData.isSpanned) {
+                    const cellEndCol = c + (cellData.colSpan || 1);
+                    if (cellEndCol > colIndex) {
+                        cellData.colSpan = (cellData.colSpan || 1) + 1;
+                    }
+                }
+            }
+        }
+
+        this._redistributeColumnWidths(table);
+        this.clearSelection();
+        ItemsRenderer.renderAll();
+        PreviewManager.update();
+    }
+
+    /**
+     * Вставляет новую колонку справа от выбранной ячейки.
+     * Учитывает объединенные ячейки и сохраняет флаг заголовка для новых ячеек.
+     */
+    insertColumnRight() {
+        if (this.tableManager.selectedCells.length === 0) return;
+
+        const cell = this.tableManager.selectedCells[0];
+        const tableId = cell.dataset.tableId;
+        let colIndex = parseInt(cell.dataset.col);
+        const table = AppState.tables[tableId];
+
+        if (!table || !table.grid) return;
+
+        // Проверка protected
+        if (table.protected === true) {
+            Notifications.error('Структуру этой таблицы нельзя изменять');
+            return;
+        }
+
+        let insertColIndex = colIndex + 1;
+        for (let r = 0; r < table.grid.length; r++) {
+            const cellData = table.grid[r][colIndex];
+            if (cellData && !cellData.isSpanned && cellData.colSpan > 1) {
+                const cellEndCol = colIndex + cellData.colSpan;
+                insertColIndex = Math.max(insertColIndex, cellEndCol);
+            }
+        }
+
+        for (let r = 0; r < table.grid.length; r++) {
+            for (let c = 0; c < colIndex; c++) {
+                const cellData = table.grid[r][c];
+                if (!cellData.isSpanned && cellData.colSpan > 1) {
+                    const cellEndCol = c + cellData.colSpan;
+                    if (cellEndCol > colIndex) {
+                        insertColIndex = Math.max(insertColIndex, cellEndCol);
+                    }
+                }
+            }
+        }
+
+        let headerRowIndex = -1;
+        for (let r = 0; r < table.grid.length; r++) {
+            if (table.grid[r].some(c => c.isHeader === true)) {
+                headerRowIndex = r;
+                break;
+            }
+        }
+
+        for (let r = 0; r < table.grid.length; r++) {
+            const isHeaderRow = r === headerRowIndex;
+            table.grid[r].splice(insertColIndex, 0, {
+                content: '',
+                isHeader: isHeaderRow,
+                colSpan: 1,
+                rowSpan: 1,
+                originRow: r,
+                originCol: insertColIndex
+            });
+        }
+
+        for (let r = 0; r < table.grid.length; r++) {
+            for (let c = insertColIndex + 1; c < table.grid[r].length; c++) {
+                if (table.grid[r][c].originCol !== undefined) {
+                    table.grid[r][c].originCol = c;
+                }
+            }
+        }
+
+        for (let r = 0; r < table.grid.length; r++) {
+            for (let c = 0; c < insertColIndex; c++) {
+                const cellData = table.grid[r][c];
+                if (!cellData.isSpanned) {
+                    const cellEndCol = c + (cellData.colSpan || 1);
+                    if (cellEndCol > insertColIndex) {
+                        cellData.colSpan = (cellData.colSpan || 1) + 1;
+                    }
+                }
+            }
+        }
+
+        this._redistributeColumnWidths(table);
+        this.clearSelection();
+        ItemsRenderer.renderAll();
+        PreviewManager.update();
+    }
+
+    /**
+     * Удаляет выбранную строку из таблицы.
+     * Проверяет защиту заголовков и наличие объединенных ячеек.
+     */
+    deleteRow() {
+        if (this.tableManager.selectedCells.length === 0) return;
+
+        const cell = this.tableManager.selectedCells[0];
+        const tableId = cell.dataset.tableId;
+        const rowIndex = parseInt(cell.dataset.row);
+        const table = AppState.tables[tableId];
+
+        if (!table || !table.grid) return;
+
+        // Проверка: запрещаем удаление строки заголовков
+        const isHeaderRow = table.grid[rowIndex].some(c => c.isHeader === true);
+        if (isHeaderRow) {
+            return;
+        }
+
+        // Проверяем наличие объединенных ячеек в строке
+        const hasMergedCells = this._rowHasAnyMergedCells(table, rowIndex);
+        if (hasMergedCells) {
+            return;
+        }
+
+        // Проверяем, что в таблице остается хотя бы одна строка данных
+        const headerRowCount = table.grid.filter(row => row.some(c => c.isHeader === true)).length;
+        if (table.grid.length - headerRowCount <= 1) {
+            return;
+        }
+
+        // Уменьшаем rowSpan для ячеек, которые охватывают удаляемую строку
+        for (let r = 0; r < rowIndex; r++) {
+            for (let c = 0; c < table.grid[r].length; c++) {
+                const cellData = table.grid[r][c];
+                if (!cellData.isSpanned) {
+                    const cellEndRow = r + (cellData.rowSpan || 1);
+                    if (cellEndRow > rowIndex) {
+                        cellData.rowSpan = Math.max(1, (cellData.rowSpan || 1) - 1);
+                    }
+                }
+            }
+        }
+
+        // Удаляем строку
+        table.grid.splice(rowIndex, 1);
+
+        // Обновляем originRow для всех ячеек ниже
+        for (let r = rowIndex; r < table.grid.length; r++) {
+            for (let c = 0; c < table.grid[r].length; c++) {
+                if (table.grid[r][c].originRow !== undefined) {
+                    table.grid[r][c].originRow = r;
+                }
+            }
+        }
+
+        this.clearSelection();
+        ItemsRenderer.renderAll();
+        PreviewManager.update();
+    }
+
+    /**
+     * Удаляет выбранную колонку из таблицы.
+     * Проверяет минимальное количество колонок и наличие объединенных ячеек.
+     */
+    deleteColumn() {
+        if (this.tableManager.selectedCells.length === 0) return;
+
+        const cell = this.tableManager.selectedCells[0];
+        const tableId = cell.dataset.tableId;
+        const colIndex = parseInt(cell.dataset.col);
+        const table = AppState.tables[tableId];
+
+        if (!table || !table.grid) return;
+
+        // Проверка protected
+        if (table.protected === true) {
+            Notifications.error('Структуру этой таблицы нельзя изменять');
+            return;
+        }
+
+        // Проверяем минимальное количество колонок
+        if (table.grid[0].length <= 1) {
+            return;
+        }
+
+        // Проверяем наличие объединенных ячеек в колонке
+        const hasMergedCells = this._columnHasAnyMergedCells(table, colIndex);
+        if (hasMergedCells) {
+            return;
+        }
+
+        // Уменьшаем colSpan для ячеек, которые охватывают удаляемую колонку
+        for (let r = 0; r < table.grid.length; r++) {
+            for (let c = 0; c < colIndex; c++) {
+                const cellData = table.grid[r][c];
+                if (!cellData.isSpanned) {
+                    const cellEndCol = c + (cellData.colSpan || 1);
+                    if (cellEndCol > colIndex) {
+                        cellData.colSpan = Math.max(1, (cellData.colSpan || 1) - 1);
+                    }
+                }
+            }
+        }
+
+        // Удаляем колонку из всех строк
+        for (let r = 0; r < table.grid.length; r++) {
+            table.grid[r].splice(colIndex, 1);
+        }
+
+        // Обновляем originCol для всех ячеек справа
+        for (let r = 0; r < table.grid.length; r++) {
+            for (let c = colIndex; c < table.grid[r].length; c++) {
+                if (table.grid[r][c].originCol !== undefined) {
+                    table.grid[r][c].originCol = c;
+                }
+            }
+        }
+
+        this._redistributeColumnWidths(table);
+        this.clearSelection();
+        ItemsRenderer.renderAll();
+        PreviewManager.update();
+    }
+
+    /**
+     * Находит начальную строку для вставки с учетом объединенных ячеек
+     * @param {Object} table - Объект таблицы
+     * @param {number} rowIndex - Индекс текущей строки
+     * @returns {number} Индекс начальной строки
+     */
+    _findRowStartOfSpan(table, rowIndex) {
+        for (let r = 0; r < rowIndex; r++) {
+            for (let c = 0; c < table.grid[r].length; c++) {
+                const cellData = table.grid[r][c];
+                if (!cellData.isSpanned && cellData.rowSpan > 1) {
+                    const cellEndRow = r + cellData.rowSpan;
+                    if (cellEndRow > rowIndex) {
+                        return r;
+                    }
+                }
+            }
+        }
+        return rowIndex;
+    }
+
+    /**
+     * Находит начальную колонку для вставки с учетом объединенных ячеек
+     * @param {Object} table - Объект таблицы
+     * @param {number} colIndex - Индекс текущей колонки
+     * @returns {number} Индекс начальной колонки
+     */
+    _findColumnStartOfSpan(table, colIndex) {
+        for (let r = 0; r < table.grid.length; r++) {
+            for (let c = 0; c < colIndex; c++) {
+                const cellData = table.grid[r][c];
+                if (!cellData.isSpanned && cellData.colSpan > 1) {
+                    const cellEndCol = c + cellData.colSpan;
+                    if (cellEndCol > colIndex) {
+                        return c;
+                    }
+                }
+            }
+        }
+        return colIndex;
+    }
+
+    /**
+     * Проверяет наличие объединенных ячеек в строке
+     * @param {Object} table - Объект таблицы
+     * @param {number} rowIndex - Индекс строки
+     * @returns {boolean} true если есть объединенные ячейки
+     */
+    _rowHasAnyMergedCells(table, rowIndex) {
+        for (let c = 0; c < table.grid[rowIndex].length; c++) {
+            const cellData = table.grid[rowIndex][c];
+            if (cellData.isSpanned) continue;
+            if ((cellData.rowSpan || 1) > 1 || (cellData.colSpan || 1) > 1) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    /**
+     * Проверяет наличие объединенных ячеек в колонке
+     * @param {Object} table - Объект таблицы
+     * @param {number} colIndex - Индекс колонки
+     * @returns {boolean} true если есть объединенные ячейки
+     */
+    _columnHasAnyMergedCells(table, colIndex) {
+        for (let r = 0; r < table.grid.length; r++) {
+            const cellData = table.grid[r][colIndex];
+            if (cellData.isSpanned) continue;
+            if ((cellData.rowSpan || 1) > 1 || (cellData.colSpan || 1) > 1) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    /**
+     * Проверяет возможность объединения ячеек разных типов
+     * @param {Object} table - Объект таблицы
+     * @param {number} minRow - Минимальный индекс строки
+     * @param {number} maxRow - Максимальный индекс строки
+     * @param {number} minCol - Минимальный индекс колонки
+     * @param {number} maxCol - Максимальный индекс колонки
+     * @returns {boolean} true если можно объединять
+     */
+    _canMergeCellsAcrossTypes(table, minRow, maxRow, minCol, maxCol) {
+        let hasHeader = false;
+        let hasData = false;
+
+        for (let r = minRow; r <= maxRow; r++) {
+            for (let c = minCol; c <= maxCol; c++) {
+                const cellData = table.grid[r][c];
+                if (!cellData.isSpanned) {
+                    if (cellData.isHeader) {
+                        hasHeader = true;
+                    } else {
+                        hasData = true;
+                    }
+                }
+            }
+        }
+
+        return !(hasHeader && hasData);
+    }
+
+    /**
+     * Пересчитывает ширину колонок (алиас для _redistributeColumnWidths)
+     * @param {Object} table - Объект таблицы
+     */
+    _recalculateColumnWidths(table) {
+        this._redistributeColumnWidths(table);
+    }
+
+    /**
+     * Выделяет ячейку
+     * @param {HTMLElement} cell - DOM-элемент ячейки
+     */
+    selectCell(cell) {
+        cell.classList.add('selected');
+        this.tableManager.selectedCells.push(cell);
+        AppState.selectedCells = this.tableManager.selectedCells;
+    }
+
+    /**
+     * Снимает выделение со всех ячеек
+     */
+    clearSelection() {
+        this.tableManager.selectedCells.forEach(cell => cell.classList.remove('selected'));
+        this.tableManager.selectedCells = [];
+        AppState.selectedCells = [];
+    }
+
+    /**
+     * Объединяет выбранные ячейки в одну.
+     * Проверяет прямоугольность выделения и совместимость типов ячеек.
+     */
+    mergeCells() {
+        if (this.tableManager.selectedCells.length < 2) return;
+
+        const coords = this.tableManager.selectedCells.map(cell => ({
+            row: parseInt(cell.dataset.row),
+            col: parseInt(cell.dataset.col),
+            tableId: cell.dataset.tableId,
+            cell: cell
+        }));
+
+        const tableId = coords[0].tableId;
+        if (!coords.every(c => c.tableId === tableId)) {
+            Notifications.error('Можно объединять только ячейки из одной таблицы');
+            return;
+        }
+
+        const table = AppState.tables[tableId];
+        if (!table) return;
+
+        // Проверка protected
+        if (table.protected === true) {
+            Notifications.error('Структуру этой таблицы нельзя изменять');
+            return;
+        }
+
+        for (let coord of coords) {
+            const cellData = table.grid[coord.row][coord.col];
+            if (cellData.isSpanned) {
+                Notifications.error('Нельзя объединять уже объединенные ячейки. Сначала разделите их.');
+                return;
+            }
+            if (cellData.colSpan > 1 || cellData.rowSpan > 1) {
+                Notifications.error('Нельзя объединять ячейки, если среди них есть уже объединенные.');
+                return;
+            }
+        }
+
+        const minRow = Math.min(...coords.map(c => c.row));
+        const maxRow = Math.max(...coords.map(c => c.row));
+        const minCol = Math.min(...coords.map(c => c.col));
+        const maxCol = Math.max(...coords.map(c => c.col));
+
+        const rowspan = maxRow - minRow + 1;
+        const colspan = maxCol - minCol + 1;
+
+        const expectedCellsCount = rowspan * colspan;
+        if (this.tableManager.selectedCells.length !== expectedCellsCount) {
+            Notifications.error('Можно объединять только полную прямоугольную область ячеек');
+            return;
+        }
+
+        const selectedSet = new Set(coords.map(c => `${c.row}-${c.col}`));
+        for (let r = minRow; r <= maxRow; r++) {
+            for (let c = minCol; c <= maxCol; c++) {
+                if (!selectedSet.has(`${r}-${c}`)) {
+                    Notifications.error('Можно объединять только полную прямоугольную область ячеек');
+                    return;
+                }
+            }
+        }
+
+        if (!this._canMergeCellsAcrossTypes(table, minRow, maxRow, minCol, maxCol)) {
+            Notifications.error('Нельзя объединять ячейки заголовка с ячейками данных');
+            return;
+        }
+
+        let mergedContent = [];
+        for (let r = minRow; r <= maxRow; r++) {
+            for (let c = minCol; c <= maxCol; c++) {
+                const content = table.grid[r][c].content;
+                if (content && content.trim()) {
+                    mergedContent.push(content);
+                }
+            }
+        }
+
+        const originCell = table.grid[minRow][minCol];
+        originCell.content = mergedContent.join(' ');
+        originCell.colSpan = colspan;
+        originCell.rowSpan = rowspan;
+
+        for (let r = minRow; r <= maxRow; r++) {
+            for (let c = minCol; c <= maxCol; c++) {
+                if (r !== minRow || c !== minCol) {
+                    table.grid[r][c] = {
+                        isSpanned: true,
+                        spanOrigin: {row: minRow, col: minCol}
+                    };
+                }
+            }
+        }
+
+        this.clearSelection();
+        ItemsRenderer.renderAll();
+        PreviewManager.update();
+        Notifications.success('Ячейки объединены');
+    }
+
+    /**
+     * Разделение объединенной ячейки на отдельные ячейки.
+     * Восстанавливает grid-структуру, создавая пустые ячейки на месте spanned.
+     * Сохраняет флаг isHeader для ячеек заголовка.
+     */
+    unmergeCells() {
+        if (this.tableManager.selectedCells.length !== 1) return;
+
+        const cell = this.tableManager.selectedCells[0];
+        const tableId = cell.dataset.tableId;
+        const row = parseInt(cell.dataset.row);
+        const col = parseInt(cell.dataset.col);
+
+        const table = AppState.tables[tableId];
+        if (!table) return;
+
+        // Проверка protected
+        if (table.protected === true) {
+            Notifications.error('Структуру этой таблицы нельзя изменять');
+            return;
+        }
+
+        const cellData = table.grid[row][col];
+
+        // Проверка наличия объединения
+        if (cellData.colSpan <= 1 && cellData.rowSpan <= 1) {
+            return;
+        }
+
+        const rowspan = cellData.rowSpan || 1;
+        const colspan = cellData.colSpan || 1;
+
+        // Сохраняем флаг isHeader из исходной ячейки
+        const isHeaderCell = cellData.isHeader || false;
+
+        // Восстановление всех ячеек в области объединения
+        for (let r = row; r < row + rowspan; r++) {
+            for (let c = col; c < col + colspan; c++) {
+                if (table.grid[r] && table.grid[r][c]) {
+                    if (r === row && c === col) {
+                        // Главная ячейка - сброс colspan/rowspan, но сохраняем isHeader
+                        table.grid[r][c].colSpan = 1;
+                        table.grid[r][c].rowSpan = 1;
+                        // isHeader остается без изменений
+                    } else {
+                        // Создание новых пустых ячеек с сохранением флага заголовка
+                        table.grid[r][c] = {
+                            content: '',
+                            isHeader: isHeaderCell,  // Наследуем флаг заголовка
+                            colSpan: 1,
+                            rowSpan: 1,
+                            originRow: r,
+                            originCol: c
+                        };
+                    }
+                }
+            }
+        }
+
+        this.clearSelection();
+        ItemsRenderer.renderAll();
+        PreviewManager.update();
+        Notifications.success('Ячейка разъединена');
+    }
+}
