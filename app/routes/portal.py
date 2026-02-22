@@ -29,7 +29,7 @@ async def show_landing(request: Request):
     Авторизация проверяется фронтендом через /api/v1/auth/me.
     """
     return templates.TemplateResponse(
-        "landing.html",
+        "portal/landing/landing.html",
         {
             "request": request,
             "active_page": "landing",
@@ -47,7 +47,7 @@ async def show_acts_manager(request: Request):
     Авторизация проверяется фронтендом через /api/v1/auth/me.
     """
     return templates.TemplateResponse(
-        "acts_manager.html",
+        "portal/acts-manager/acts_manager.html",
         {
             "request": request,
             "active_page": "acts",
@@ -65,7 +65,7 @@ async def show_ck_fin_res(request: Request):
     Авторизация проверяется фронтендом через /api/v1/auth/me.
     """
     return templates.TemplateResponse(
-        "ck_fin_res.html",
+        "portal/ck/ck_fin_res.html",
         {
             "request": request,
             "active_page": "ck_fin_res",
@@ -83,7 +83,7 @@ async def show_ck_client_experience(request: Request):
     Авторизация проверяется фронтендом через /api/v1/auth/me.
     """
     return templates.TemplateResponse(
-        "ck_client_experience.html",
+        "portal/ck/ck_client_experience.html",
         {
             "request": request,
             "active_page": "ck_client_experience",
