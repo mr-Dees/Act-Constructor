@@ -11,7 +11,7 @@ import asyncpg
 from app.db.repositories.base import BaseRepository
 from app.db.utils import KMUtils, JSONDBUtils, ActDirectivesValidator
 from app.services.audit_id_service import AuditIdService
-from app.schemas.act_metadata import (
+from app.schemas.acts.act_metadata import (
     ActCreate,
     ActUpdate,
     ActListItem,

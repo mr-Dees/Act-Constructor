@@ -1,8 +1,5 @@
 """
-Pydantic схемы для валидации данных.
-
-Определяет структуры данных для всех сущностей приложения:
-акты, таблицы, текстовые блоки, нарушения и метаданные актов.
+Pydantic схемы для домена актов.
 """
 
 from app.schemas.acts.act_content import (
@@ -26,10 +23,16 @@ from app.schemas.acts.act_metadata import (
     ActUpdate,
     ActListItem,
     ActResponse,
+    AuditPointIdsRequest,
+)
+from app.schemas.acts.act_invoice import (
+    InvoiceSave,
+    InvoiceVerifyRequest,
+    MetricItem,
 )
 
 __all__ = [
-    # Схемы содержимого актов
+    # Содержимое актов
     "ActDataSchema",
     "ActItemSchema",
     "ActSaveResponse",
@@ -42,12 +45,16 @@ __all__ = [
     "ViolationOptionalFieldSchema",
     "ViolationContentItemSchema",
     "ViolationAdditionalContentSchema",
-
-    # Схемы метаданных актов
+    # Метаданные актов
     "AuditTeamMember",
     "ActDirective",
     "ActCreate",
     "ActUpdate",
     "ActListItem",
     "ActResponse",
+    "AuditPointIdsRequest",
+    # Фактуры
+    "InvoiceSave",
+    "InvoiceVerifyRequest",
+    "MetricItem",
 ]

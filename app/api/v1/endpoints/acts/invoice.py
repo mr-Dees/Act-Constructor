@@ -15,7 +15,7 @@ from fastapi import APIRouter, Depends, HTTPException
 from app.api.v1.deps.auth_deps import get_username
 from app.db.connection import get_db
 from app.db.repositories.acts import ActInvoiceRepository, ActAccessRepository
-from app.schemas.act_invoice import InvoiceSave, InvoiceVerifyRequest
+from app.schemas.acts.act_invoice import InvoiceSave, InvoiceVerifyRequest
 
 logger = logging.getLogger("act_constructor.api.invoice")
 router = APIRouter()

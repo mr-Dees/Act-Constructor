@@ -21,7 +21,7 @@ from pydantic import ValidationError
 from app.api.v1.deps.auth_deps import get_username
 from app.db.connection import get_db
 from app.db.repositories.acts import ActCrudRepository, ActLockRepository, ActAccessRepository
-from app.schemas.act_metadata import ActCreate, ActUpdate, ActListItem, ActResponse, AuditPointIdsRequest
+from app.schemas.acts.act_metadata import ActCreate, ActUpdate, ActListItem, ActResponse, AuditPointIdsRequest
 from app.services.audit_id_service import AuditIdService
 
 logger = logging.getLogger("act_constructor.api.acts")

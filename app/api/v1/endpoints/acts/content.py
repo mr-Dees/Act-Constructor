@@ -20,7 +20,7 @@ from app.api.v1.deps.auth_deps import get_username
 from app.db.connection import get_db, get_adapter
 from app.db.repositories.acts import ActAccessRepository, ActCrudRepository, ActInvoiceRepository
 from app.db.utils import ActDirectivesValidator
-from app.schemas.act_content import ActDataSchema
+from app.schemas.acts.act_content import ActDataSchema
 
 logger = logging.getLogger("act_constructor.api.content")
 router = APIRouter()

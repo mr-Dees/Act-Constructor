@@ -13,9 +13,9 @@ from fastapi import APIRouter, Query, HTTPException, Depends
 from fastapi.responses import FileResponse
 
 from app.core.config import get_settings, Settings
-from app.schemas.act_content import ActDataSchema, ActSaveResponse
-from app.services.export_service import ExportService
-from app.services.storage_service import StorageService
+from app.schemas.acts.act_content import ActDataSchema, ActSaveResponse
+from app.services.acts.export_service import ExportService
+from app.services.acts.storage_service import StorageService
 
 logger = logging.getLogger("act_constructor.api.export")
 router = APIRouter()

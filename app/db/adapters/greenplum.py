@@ -66,6 +66,7 @@ class GreenplumAdapter(DatabaseAdapter):
                 Path(__file__).parent.parent
                 / "migrations"
                 / "greenplum"
+                / "acts"
                 / "schema.sql"
         )
 

@@ -5,7 +5,7 @@
 import logging
 from typing import Iterable
 
-from app.schemas.act_metadata import ActDirective
+from app.schemas.acts.act_metadata import ActDirective
 
 logger = logging.getLogger("act_constructor.db.utils.validator")
 

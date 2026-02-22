@@ -13,11 +13,11 @@ from concurrent.futures import ThreadPoolExecutor
 from typing import Literal
 
 from app.core.config import Settings
-from app.formatters.docx_formatter import DocxFormatter
-from app.formatters.markdown_formatter import MarkdownFormatter
-from app.formatters.text_formatter import TextFormatter
-from app.schemas.act_content import ActSaveResponse
-from app.services.storage_service import StorageService
+from app.formatters.acts.docx_formatter import DocxFormatter
+from app.formatters.acts.markdown_formatter import MarkdownFormatter
+from app.formatters.acts.text_formatter import TextFormatter
+from app.schemas.acts.act_content import ActSaveResponse
+from app.services.acts.storage_service import StorageService
 
 logger = logging.getLogger("act_constructor.service.export")
 

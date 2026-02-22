@@ -24,6 +24,7 @@ class PostgreSQLAdapter(DatabaseAdapter):
                 Path(__file__).parent.parent
                 / "migrations"
                 / "postgresql"
+                / "acts"
                 / "schema.sql"
         )
 

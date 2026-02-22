@@ -89,7 +89,7 @@ async def lifespan(app: FastAPI):
     logger.info("Database pool закрыт")
 
     # Закрываем ThreadPoolExecutor
-    from app.services.export_service import executor
+    from app.services.acts.export_service import executor
     executor.shutdown(wait=True, cancel_futures=False)
     logger.info("ThreadPoolExecutor корректно закрыт")
 
