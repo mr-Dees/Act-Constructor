@@ -1,0 +1,18 @@
+/*
+ * Portal page styles - shared + portal layout + page-specific
+ * Used by: landing, acts-manager, CK stub pages
+ */
+@import './shared.css';
+
+/* Portal layout */
+@import '../portal/layout/sidebar.css';
+@import '../portal/layout/settings-menu.css';
+
+/* Landing */
+@import '../portal/landing/landing.css';
+
+/* Acts manager */
+@import '../portal/acts-manager/acts-manager-base.css';
+@import '../portal/acts-manager/acts-manager-cards.css';
+@import '../portal/acts-manager/acts-menu.css';
+@import '../portal/acts-manager/acts-modal.css';
