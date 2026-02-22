@@ -18,9 +18,9 @@ from datetime import date
 from typing import Dict, List, Optional
 
 from app.db.connection import get_pool
-from app.db.queries.acts.act_filters import ActFilters
-from app.formatters.acts.ai_readable_formatter import ActFormatter
-from app.db.queries.acts.act_queries import ActQueries
+from app.integrations.ai_assistant.queries.act_filters import ActFilters
+from app.integrations.ai_assistant.formatters.ai_readable_formatter import ActFormatter
+from app.integrations.ai_assistant.queries.act_queries import ActQueries
 
 
 # ============================================================================

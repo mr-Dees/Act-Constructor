@@ -19,7 +19,6 @@ from app.db.connection import (
     get_db_connection,
     create_tables_if_not_exist,
 )
-from app.db.queries import ActQueries, ActFilters
 
 __all__ = [
     "get_pool",
@@ -32,6 +31,4 @@ __all__ = [
     "ActLockRepository",
     "ActAccessRepository",
     "ActInvoiceRepository",
-    "ActQueries",
-    "ActFilters",
 ]

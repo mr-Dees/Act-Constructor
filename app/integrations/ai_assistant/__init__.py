@@ -5,7 +5,7 @@
 из PostgreSQL в человекочитаемом формате.
 """
 
-from app.integrations.ai_assistant_bd_oarb.data_export import (
+from app.integrations.ai_assistant.data_export import (
     # Поиск и фильтрация актов
     search_acts,
 

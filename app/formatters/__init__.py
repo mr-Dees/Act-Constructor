@@ -6,10 +6,10 @@
 - текстовый форматер (plain text, ASCII-таблицы)
 - Markdown форматер
 - DOCX форматер (Microsoft Word)
-- утилитарный ActFormatter для человекочитаемого вывода данных из БД
+
+Примечание: ActFormatter перемещён в app.integrations.ai_assistant.formatters.
 """
 
-from app.formatters.acts.ai_readable_formatter import ActFormatter
 from app.formatters.base_formatter import BaseFormatter
 from app.formatters.acts.docx_formatter import DocxFormatter
 from app.formatters.acts.markdown_formatter import MarkdownFormatter
@@ -20,5 +20,4 @@ __all__ = [
     "TextFormatter",
     "MarkdownFormatter",
     "DocxFormatter",
-    "ActFormatter",
 ]

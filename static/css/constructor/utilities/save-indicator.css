@@ -5,15 +5,11 @@
  */
 
 .save-indicator {
-    position: absolute;
-    left: var(--spacing-9xl);
-    top: 50%;
-    transform: translateY(calc(-50% + var(--translate-save-indicator)));
+    position: relative;
     display: flex;
     flex-direction: column;
     align-items: center;
     gap: var(--spacing-xs);
-    z-index: var(--z-sticky);
 }
 
 /* Кнопка индикатора */
@@ -178,7 +174,6 @@
     transition: color var(--transition-base);
     line-height: var(--line-height-tight);
     text-shadow: var(--text-shadow-sm);
-    min-width: var(--save-indicator-label-min-width);
     text-align: center;
 }
 

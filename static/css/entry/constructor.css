@@ -66,6 +66,9 @@
 @import '../constructor/dialog/dialog-invoice.css';
 @import '../shared/dialog/acts-modal.css';
 
+/* Chat popup */
+@import '../constructor/chat/chat-popup.css';
+
 /* Utilities */
 @import '../constructor/utilities/helpers.css';
 @import '../constructor/utilities/save-indicator.css';

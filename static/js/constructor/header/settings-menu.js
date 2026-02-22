@@ -6,12 +6,29 @@
  * параметры загрузки файлов и сохраняет все изменения в localStorage.
  */
 class SettingsMenuManager {
-    /** @private Состояние настроек */
+    /** @private Состояние настроек приложения */
     static _state = {
         theme: 'light',
         downloadPrompt: true,
         autoSave: true,
         autoSavePeriod: 3
+    };
+
+    /** Общий ключ localStorage для баз знаний (синхронизация с порталом) */
+    static _kbStorageKey = 'assistant_knowledge_bases';
+
+    /** Маппинг id чекбокса → { key, label } */
+    static _knowledgeBases = {
+        assistantKnowledgeOarb:    { key: 'knowledge_base_oarb',    label: 'База Знаний ОАРБ' },
+        assistantKnowledgeSources: { key: 'knowledge_base_sources', label: 'База знаний источников информации' },
+        assistantKnowledgeTools:   { key: 'knowledge_base_tools',   label: 'База знаний по инструментам' }
+    };
+
+    /** @private Состояние баз знаний */
+    static _kbState = {
+        knowledge_base_oarb: false,
+        knowledge_base_sources: false,
+        knowledge_base_tools: false
     };
 
     /**
@@ -95,6 +112,11 @@ class SettingsMenuManager {
         autoSaveToggle.checked = this._state.autoSave;
         autoSavePeriodInput.value = this._state.autoSavePeriod;
         autoSavePeriodContainer.style.display = this._state.autoSave ? '' : 'none';
+
+        // Базы знаний AI-ассистента (общий localStorage с порталом)
+        this._loadKbState();
+        this._applyKbState();
+        this._setupKbToggles();
     }
 
     /**
@@ -186,6 +208,69 @@ class SettingsMenuManager {
             const periodMs = this._state.autoSavePeriod * 1000;
             console.log('Обновлена периодичность автосохранения:', periodMs, 'мс');
             // StorageManager.updatePeriod(periodMs);
+        }
+    }
+
+    /**
+     * Загружает состояние баз знаний из общего localStorage
+     * @private
+     */
+    static _loadKbState() {
+        try {
+            const data = localStorage.getItem(this._kbStorageKey);
+            if (!data) return;
+
+            const saved = JSON.parse(data);
+            if (saved && typeof saved === 'object') {
+                for (const key of Object.keys(this._kbState)) {
+                    if (typeof saved[key] === 'boolean') {
+                        this._kbState[key] = saved[key];
+                    }
+                }
+            }
+        } catch (e) {
+            console.warn('SettingsMenuManager: не удалось загрузить настройки баз знаний', e);
+        }
+    }
+
+    /**
+     * Сохраняет состояние баз знаний в общий localStorage
+     * @private
+     */
+    static _saveKbState() {
+        try {
+            localStorage.setItem(this._kbStorageKey, JSON.stringify(this._kbState));
+        } catch (e) {
+            console.warn('SettingsMenuManager: не удалось сохранить настройки баз знаний', e);
+        }
+    }
+
+    /**
+     * Синхронизирует чекбоксы баз знаний с текущим состоянием
+     * @private
+     */
+    static _applyKbState() {
+        for (const [id, info] of Object.entries(this._knowledgeBases)) {
+            const checkbox = document.getElementById(id);
+            if (checkbox) {
+                checkbox.checked = !!this._kbState[info.key];
+            }
+        }
+    }
+
+    /**
+     * Обработчики change на тумблерах баз знаний
+     * @private
+     */
+    static _setupKbToggles() {
+        for (const [id, info] of Object.entries(this._knowledgeBases)) {
+            const checkbox = document.getElementById(id);
+            if (!checkbox) continue;
+
+            checkbox.addEventListener('change', () => {
+                this._kbState[info.key] = checkbox.checked;
+                this._saveKbState();
+            });
         }
     }
 

@@ -5,7 +5,7 @@
  * Состояние сохраняется в localStorage.
  */
 class LandingSettingsManager {
-    static _storageKey = 'landing_assistants';
+    static _storageKey = 'assistant_knowledge_bases';
 
     /** Маппинг id чекбокса → { key, label } */
     static _assistants = {

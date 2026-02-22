@@ -1,13 +1,6 @@
 """
 SQL-запросы к базе данных.
 
-Backward-compatible re-exports из доменных подпакетов.
+Примечание: ActQueries и ActFilters перемещены в app.integrations.ai_assistant.queries,
+т.к. используются исключительно модулем AI-интеграции.
 """
-
-from app.db.queries.acts.act_filters import ActFilters
-from app.db.queries.acts.act_queries import ActQueries
-
-__all__ = [
-    "ActQueries",
-    "ActFilters",
-]

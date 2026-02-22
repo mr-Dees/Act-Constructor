@@ -5,15 +5,11 @@
 
 /* Контейнер кнопки справки */
 .help-indicator {
-    position: absolute;
-    left: var(--spacing-2xl);
-    top: 50%;
-    transform: translateY(calc(-50% + var(--translate-sm)));
+    position: relative;
     display: flex;
     flex-direction: column;
     align-items: center;
     gap: var(--spacing-xs);
-    z-index: var(--z-sticky);
 }
 
 /* Кнопка справки с иконкой лампочки */

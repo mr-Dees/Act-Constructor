@@ -138,37 +138,99 @@ class ChatManager {
     }
 
     /**
-     * ТОЧКА ЗАМЕНЫ: эхо-ответ → реальный API
+     * Получает ответ от API чата.
      *
-     * Для подключения реального API замените тело этого метода на:
-     *   const res = await fetch('/api/v1/chat/message', {
-     *       method: 'POST',
-     *       headers: { 'Content-Type': 'application/json' },
-     *       body: JSON.stringify({ message: userText, history })
-     *   });
-     *   const data = await res.json();
-     *   return data.response;
+     * Отправляет POST /api/v1/chat/message с текстом и историей.
+     * При ошибке API возвращает fallback эхо-ответ.
      *
      * @param {string} userText — текст пользователя
      * @param {Array} history — полная история диалога
      * @returns {Promise<string>}
      */
     static async _getResponse(userText, history) {
-        const delay = 500 + Math.random() * 500;
-        await new Promise(resolve => setTimeout(resolve, delay));
+        try {
+            // Определяем act_id из URL (контекст конструктора)
+            const urlParams = new URLSearchParams(window.location.search);
+            const actId = urlParams.get('act_id');
 
-        let response = `Вы написали: «${userText}»`;
+            // Фильтруем welcome-сообщение (timestamp === 0) из истории
+            const filteredHistory = history
+                .filter(entry => entry.timestamp !== 0)
+                .map(entry => ({
+                    role: entry.role,
+                    content: entry.content,
+                    timestamp: entry.timestamp
+                }));
 
-        if (typeof LandingSettingsManager !== 'undefined') {
-            const enabled = LandingSettingsManager.getEnabledAssistants();
-            if (enabled.length > 0) {
-                response += '\n\nПодключённые ассистенты:\n' + enabled.map(n => `• ${n}`).join('\n');
-            } else {
-                response += '\n\nНет подключённых ассистентов. Включите их в настройках.';
+            const body = {
+                message: userText,
+                history: filteredHistory,
+            };
+
+            if (actId) {
+                body.act_id = parseInt(actId, 10);
             }
-        }
 
-        return response;
+            // Подключённые базы знаний из общих настроек
+            body.knowledge_bases = this._getEnabledKnowledgeBases();
+
+            // Формируем URL через AppConfig (поддержка JupyterHub proxy)
+            const url = typeof AppConfig !== 'undefined'
+                ? AppConfig.api.getUrl('api/v1/chat/message')
+                : '/api/v1/chat/message';
+
+            const res = await fetch(url, {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                    ...(typeof AuthManager !== 'undefined' && AuthManager.getCurrentUser()
+                        ? AuthManager.getAuthHeaders()
+                        : {}
+                    )
+                },
+                body: JSON.stringify(body)
+            });
+
+            if (!res.ok) {
+                throw new Error(`HTTP ${res.status}`);
+            }
+
+            const data = await res.json();
+            return data.response;
+        } catch (err) {
+            console.warn('ChatManager: ошибка API, используется fallback', err);
+
+            // Fallback: эхо-ответ при недоступности API
+            return `Вы написали: «${userText}»\n\nНе удалось связаться с сервером. Попробуйте позже.`;
+        }
+    }
+
+    /** Маппинг ключей → label для баз знаний */
+    static _knowledgeBases = {
+        knowledge_base_oarb:    'База Знаний ОАРБ',
+        knowledge_base_sources: 'База знаний источников информации',
+        knowledge_base_tools:   'База знаний по инструментам'
+    };
+
+    /**
+     * Читает включённые базы знаний из localStorage (общий ключ для всех страниц)
+     * @returns {string[]} массив label включённых баз
+     * @private
+     */
+    static _getEnabledKnowledgeBases() {
+        try {
+            const data = localStorage.getItem('assistant_knowledge_bases');
+            if (!data) return [];
+
+            const state = JSON.parse(data);
+            const enabled = [];
+            for (const [key, label] of Object.entries(this._knowledgeBases)) {
+                if (state[key]) enabled.push(label);
+            }
+            return enabled;
+        } catch {
+            return [];
+        }
     }
 
     /**

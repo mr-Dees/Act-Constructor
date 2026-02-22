@@ -2,6 +2,19 @@
  * Стили для кнопок действий в правой части шапки
  */
 
+/* Блок действий слева */
+.header-actions-left {
+    position: absolute;
+    left: var(--spacing-2xl);
+    top: 50%;
+    transform: translateY(calc(-50% + var(--translate-sm)));
+    display: flex;
+    align-items: flex-start;
+    gap: var(--spacing-xl);
+    z-index: var(--z-sticky);
+}
+
+/* Блок действий справа */
 .header-actions-right {
     position: absolute;
     right: var(--spacing-2xl);

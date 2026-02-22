@@ -6,6 +6,7 @@ __pycache__/
 .Python
 .claude/
 .serena/
+.playwright*/
 nul
 build/
 develop-eggs/
@@ -18,6 +19,9 @@ lib64/
 parts/
 sdist/
 var/
+node_modules/
+package.json
+package-*.json
 wheels/
 share/python-wheels/
 *.egg-info/
