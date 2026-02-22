@@ -8,6 +8,8 @@
 @import '../constructor/layout/container.css';
 @import '../constructor/layout/header.css';
 @import '../constructor/layout/header-actions.css';
+@import '../shared/layout/settings-menu.css';
+@import '../constructor/layout/acts-menu.css';
 @import '../constructor/layout/two-columns.css';
 @import '../constructor/layout/panels.css';
 
@@ -62,6 +64,7 @@
 
 /* Dialog (constructor-specific) */
 @import '../constructor/dialog/dialog-invoice.css';
+@import '../shared/dialog/acts-modal.css';
 
 /* Utilities */
 @import '../constructor/utilities/helpers.css';

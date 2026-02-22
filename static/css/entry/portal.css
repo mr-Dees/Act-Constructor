@@ -6,7 +6,7 @@
 
 /* Portal layout */
 @import '../portal/layout/sidebar.css';
-@import '../portal/layout/settings-menu.css';
+@import '../shared/layout/settings-menu.css';
 
 /* Landing */
 @import '../portal/landing/landing.css';
@@ -14,5 +14,4 @@
 /* Acts manager */
 @import '../portal/acts-manager/acts-manager-base.css';
 @import '../portal/acts-manager/acts-manager-cards.css';
-@import '../portal/acts-manager/acts-menu.css';
-@import '../portal/acts-manager/acts-modal.css';
+@import '../shared/dialog/acts-modal.css';

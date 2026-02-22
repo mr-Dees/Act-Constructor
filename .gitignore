@@ -4,6 +4,9 @@ __pycache__/
 *$py.class
 *.so
 .Python
+.claude/
+.serena/
+nul
 build/
 develop-eggs/
 dist/
@@ -46,6 +49,7 @@ venv.bak/
 
 # Environment variables
 .env
+.env_*
 .env.local
 .env.*.local
 
@@ -132,5 +136,4 @@ cython_debug/
 # Specific files
 Схема приложения.txt
 Описание приложения.md
-CLAUDE_OLD.md
 CLAUDE.md
