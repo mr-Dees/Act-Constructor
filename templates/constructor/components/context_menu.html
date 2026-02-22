@@ -1,0 +1,78 @@
+<!-- Контекстное меню для дерева структуры -->
+<div id="contextMenu" class="context-menu hidden" role="menu">
+    <!-- Добавление элементов -->
+    <div class="context-menu-item" data-action="add-child" role="menuitem">
+        ➕ Добавить подпункт
+    </div>
+    <div class="context-menu-item" data-action="add-sibling" role="menuitem">
+        ➕ Добавить соседний пункт
+    </div>
+    <div class="context-menu-separator" role="separator"></div>
+
+    <!-- Типы таблиц -->
+    <div class="context-menu-item" data-action="add-regular-table" role="menuitem">
+        📊 Добавить обычную таблицу
+    </div>
+    <div class="context-menu-item" data-action="add-regular-risk-table" role="menuitem">
+        ⚠️ Добавить таблицу регуляторного риска
+    </div>
+    <div class="context-menu-item" data-action="add-operational-risk-table" role="menuitem">
+        🔴 Добавить таблицу операционного риска
+    </div>
+    <div class="context-menu-separator" role="separator"></div>
+
+    <!-- Другие типы содержимого -->
+    <div class="context-menu-item" data-action="add-textblock" role="menuitem">
+        📝 Добавить текстовый блок
+    </div>
+    <div class="context-menu-item" data-action="add-violation" role="menuitem">
+        ⚠️ Добавить нарушение
+    </div>
+    <div class="context-menu-separator" role="separator"></div>
+
+    <!-- Фактура -->
+    <div class="context-menu-item" data-action="attach-invoice" role="menuitem" style="display: none;">
+        📎 Приложить фактуру
+    </div>
+    <div class="context-menu-separator" data-action="attach-invoice-separator" role="separator" style="display: none;"></div>
+
+    <!-- Удаление -->
+    <div class="context-menu-item" data-action="delete" role="menuitem">
+        🗑️ Удалить
+    </div>
+</div>
+
+<!-- Контекстное меню для работы с ячейками таблицы -->
+<div id="cellContextMenu" class="context-menu hidden" role="menu">
+    <!-- Объединение ячеек -->
+    <div class="context-menu-item" data-action="merge-cells" role="menuitem">
+        🔗 Объединить ячейки
+    </div>
+    <div class="context-menu-item" data-action="unmerge-cell" role="menuitem">
+        ↩️ Разъединить ячейку
+    </div>
+    <div class="context-menu-separator" role="separator"></div>
+
+    <!-- Операции со строками -->
+    <div class="context-menu-item" data-action="insert-row-above" role="menuitem">
+        ⬆️ Вставить строку выше
+    </div>
+    <div class="context-menu-item" data-action="insert-row-below" role="menuitem">
+        ⬇️ Вставить строку ниже
+    </div>
+    <div class="context-menu-item" data-action="delete-row" role="menuitem">
+        🗑️ Удалить строку
+    </div>
+    <div class="context-menu-separator" role="separator"></div>
+
+    <!-- Операции с колонками -->
+    <div class="context-menu-item" data-action="insert-col-left" role="menuitem">
+        ⬅️ Вставить колонку слева
+    </div>
+    <div class="context-menu-item" data-action="insert-col-right" role="menuitem">
+        ➡️ Вставить колонку справа
+    </div>
+    <div class="context-menu-item" data-action="delete-col" role="menuitem">
+        🗑️ Удалить колонку
+    </div>
+</div>

@@ -56,6 +56,6 @@ async def show_constructor(
             return RedirectResponse(url="/acts", status_code=302)
 
         return templates.TemplateResponse(
-            "constructor.html",
+            "constructor/constructor.html",
             {"request": request, "act_id": act_id}
         )
