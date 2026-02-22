@@ -20,7 +20,7 @@ from pydantic import ValidationError
 
 from app.api.v1.deps.auth_deps import get_username
 from app.db.connection import get_db
-from app.db.repositories.act_repository import ActDBService
+from app.db.repositories.acts import ActCrudRepository, ActLockRepository, ActAccessRepository
 from app.schemas.act_metadata import ActCreate, ActUpdate, ActListItem, ActResponse, AuditPointIdsRequest
 from app.services.audit_id_service import AuditIdService
 
@@ -33,8 +33,8 @@ async def list_user_acts(username: str = Depends(get_username)):
     """Получает список актов пользователя (только те, где участвует)."""
     try:
         async with get_db() as conn:
-            db_service = ActDBService(conn)
-            acts = await db_service.get_user_acts(username)
+            crud = ActCrudRepository(conn)
+            acts = await crud.get_user_acts(username)
             logger.info(f"Получен список актов для {username}: {len(acts)} шт.")
             return acts
     except Exception as e:
@@ -69,10 +69,11 @@ async def lock_act(
         409: Акт уже редактируется другим пользователем
     """
     async with get_db() as conn:
-        db_service = ActDBService(conn)
+        access = ActAccessRepository(conn)
+        lock = ActLockRepository(conn)
 
         # Проверяем доступ и права на редактирование
-        permission = await db_service.get_user_edit_permission(act_id, username)
+        permission = await access.get_user_edit_permission(act_id, username)
         if not permission["has_access"]:
             raise HTTPException(status_code=403, detail="Нет доступа к акту")
         if not permission["can_edit"]:
@@ -82,7 +83,7 @@ async def lock_act(
             )
 
         try:
-            lock_info = await db_service.lock_act(act_id, username)
+            lock_info = await lock.lock_act(act_id, username)
             return lock_info
 
         except ValueError as e:
@@ -101,13 +102,14 @@ async def unlock_act(
     Может снять блокировку только тот пользователь, который ее установил.
     """
     async with get_db() as conn:
-        db_service = ActDBService(conn)
+        access = ActAccessRepository(conn)
+        lock = ActLockRepository(conn)
 
-        has_access = await db_service.check_user_access(act_id, username)
+        has_access = await access.check_user_access(act_id, username)
         if not has_access:
             raise HTTPException(status_code=403, detail="Нет доступа к акту")
 
-        await db_service.unlock_act(act_id, username)
+        await lock.unlock_act(act_id, username)
 
         return {
             "success": True,
@@ -128,10 +130,11 @@ async def extend_lock(
     - При нажатии "Продлить" в диалоге предупреждения
     """
     async with get_db() as conn:
-        db_service = ActDBService(conn)
+        access = ActAccessRepository(conn)
+        lock_repo = ActLockRepository(conn)
 
         # Проверяем доступ и права на редактирование
-        permission = await db_service.get_user_edit_permission(act_id, username)
+        permission = await access.get_user_edit_permission(act_id, username)
         if not permission["has_access"]:
             raise HTTPException(status_code=403, detail="Нет доступа к акту")
         if not permission["can_edit"]:
@@ -141,7 +144,7 @@ async def extend_lock(
             )
 
         try:
-            lock_info = await db_service.extend_lock(act_id, username)
+            lock_info = await lock_repo.extend_lock(act_id, username)
             return lock_info
 
         except ValueError as e:
@@ -172,10 +175,10 @@ async def create_act(
     """
     try:
         async with get_db() as conn:
-            db_service = ActDBService(conn)
+            crud = ActCrudRepository(conn)
 
             # Проверяем существование КМ
-            km_info = await db_service.check_km_exists(act_data.km_number)
+            km_info = await crud.check_km_exists(act_data.km_number)
 
             if km_info['exists'] and not force_new_part:
                 # КМ существует, но force_new_part=False
@@ -191,7 +194,7 @@ async def create_act(
                     }
                 )
 
-            new_act = await db_service.create_act(act_data, username, force_new_part)
+            new_act = await crud.create_act(act_data, username, force_new_part)
             logger.info(
                 f"Создан акт ID={new_act.id}, КМ={new_act.km_number}, "
                 f"часть {new_act.part_number}/{new_act.total_parts}, "
@@ -254,12 +257,14 @@ async def get_act(
     """
     try:
         async with get_db() as conn:
-            db_service = ActDBService(conn)
-            has_access = await db_service.check_user_access(act_id, username)
+            access = ActAccessRepository(conn)
+            crud = ActCrudRepository(conn)
+
+            has_access = await access.check_user_access(act_id, username)
             if not has_access:
                 raise HTTPException(status_code=403, detail="Нет доступа к акту")
 
-            return await db_service.get_act_by_id(act_id)
+            return await crud.get_act_by_id(act_id)
     except HTTPException:
         raise
     except ValueError as e:
@@ -293,10 +298,11 @@ async def update_act_metadata(
     """
     try:
         async with get_db() as conn:
-            db_service = ActDBService(conn)
+            access = ActAccessRepository(conn)
+            crud = ActCrudRepository(conn)
 
             # Проверяем доступ и права на редактирование
-            permission = await db_service.get_user_edit_permission(act_id, username)
+            permission = await access.get_user_edit_permission(act_id, username)
             if not permission["has_access"]:
                 raise HTTPException(
                     status_code=403,
@@ -308,7 +314,7 @@ async def update_act_metadata(
                     detail="Недостаточно прав для редактирования"
                 )
 
-            updated_act = await db_service.update_act_metadata(
+            updated_act = await crud.update_act_metadata(
                 act_id, act_update, username
             )
             logger.info(f"Акт ID={act_id} обновлен пользователем {username}")
@@ -390,15 +396,16 @@ async def duplicate_act(
     """
     try:
         async with get_db() as conn:
-            db_service = ActDBService(conn)
+            access = ActAccessRepository(conn)
+            crud = ActCrudRepository(conn)
 
             # Проверяем доступ к акту (can_edit НЕ требуется для дублирования)
             # Участник может дублировать акт - он станет Редактором в новом акте
-            permission = await db_service.get_user_edit_permission(act_id, username)
+            permission = await access.get_user_edit_permission(act_id, username)
             if not permission["has_access"]:
                 raise HTTPException(status_code=403, detail="Нет доступа к акту")
 
-            return await db_service.duplicate_act(act_id, username)
+            return await crud.duplicate_act(act_id, username)
     except HTTPException:
         raise
     except ValueError as e:
@@ -427,9 +434,9 @@ async def generate_audit_point_ids(
     """
     try:
         async with get_db() as conn:
-            db_service = ActDBService(conn)
+            access = ActAccessRepository(conn)
 
-            has_access = await db_service.check_user_access(act_id, username)
+            has_access = await access.check_user_access(act_id, username)
             if not has_access:
                 raise HTTPException(status_code=403, detail="Нет доступа к акту")
 
@@ -467,10 +474,11 @@ async def delete_act(
     """
     try:
         async with get_db() as conn:
-            db_service = ActDBService(conn)
+            access = ActAccessRepository(conn)
+            crud = ActCrudRepository(conn)
 
             # Проверяем доступ и права на редактирование
-            permission = await db_service.get_user_edit_permission(act_id, username)
+            permission = await access.get_user_edit_permission(act_id, username)
             if not permission["has_access"]:
                 raise HTTPException(status_code=403, detail="Нет доступа к акту")
             if not permission["can_edit"]:
@@ -479,7 +487,7 @@ async def delete_act(
                     detail="Недостаточно прав для удаления акта"
                 )
 
-            await db_service.delete_act(act_id)
+            await crud.delete_act(act_id)
             logger.info(f"Удален акт ID={act_id} пользователем {username}")
             return {"success": True, "message": "Акт успешно удален"}
     except HTTPException:

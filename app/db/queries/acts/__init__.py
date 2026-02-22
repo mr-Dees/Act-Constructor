@@ -1,7 +1,5 @@
 """
-SQL-запросы к базе данных.
-
-Backward-compatible re-exports из доменных подпакетов.
+SQL-запросы домена актов.
 """
 
 from app.db.queries.acts.act_filters import ActFilters

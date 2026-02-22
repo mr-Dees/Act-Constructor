@@ -18,7 +18,7 @@ from fastapi import APIRouter, Depends, HTTPException
 
 from app.api.v1.deps.auth_deps import get_username
 from app.db.connection import get_db, get_adapter
-from app.db.repositories.act_repository import ActDBService
+from app.db.repositories.acts import ActAccessRepository, ActCrudRepository, ActInvoiceRepository
 from app.db.utils import ActDirectivesValidator
 from app.schemas.act_content import ActDataSchema
 
@@ -54,16 +54,18 @@ async def get_act_content(
         HTTPException: 500 при ошибках загрузки
     """
     async with get_db() as conn:
-        db_service = ActDBService(conn)
+        access = ActAccessRepository(conn)
+        crud = ActCrudRepository(conn)
+        invoice_repo = ActInvoiceRepository(conn)
 
         # Проверяем доступ и получаем права пользователя
-        permission = await db_service.get_user_edit_permission(act_id, username)
+        permission = await access.get_user_edit_permission(act_id, username)
         if not permission["has_access"]:
             raise HTTPException(status_code=403, detail="Нет доступа к акту")
 
         try:
             # Получаем полные метаданные акта через ActResponse
-            act_metadata = await db_service.get_act_by_id(act_id)
+            act_metadata = await crud.get_act_by_id(act_id)
 
             # Получаем адаптер и имена таблиц
             adapter = get_adapter()
@@ -87,7 +89,7 @@ async def get_act_content(
             # Получаем таблицы
             table_rows = await conn.fetch(
                 f"""
-                SELECT table_id, node_id, grid_data, col_widths, is_protected, 
+                SELECT table_id, node_id, grid_data, col_widths, is_protected,
                        is_deletable, is_metrics_table, is_main_metrics_table,
                        is_regular_risk_table, is_operational_risk_table
                 FROM {acts_tables}
@@ -161,7 +163,7 @@ async def get_act_content(
             }
 
             # Получаем фактуры
-            invoices_list = await db_service.get_invoices_for_act(act_id)
+            invoices_list = await invoice_repo.get_invoices_for_act(act_id)
             invoices = {inv["node_id"]: inv for inv in invoices_list}
 
             logger.info(
@@ -223,10 +225,10 @@ async def save_act_content(
         HTTPException: 500 при ошибках сохранения
     """
     async with get_db() as conn:
-        db_service = ActDBService(conn)
+        access = ActAccessRepository(conn)
 
         # Проверяем доступ и права на редактирование
-        permission = await db_service.get_user_edit_permission(act_id, username)
+        permission = await access.get_user_edit_permission(act_id, username)
         if not permission["has_access"]:
             raise HTTPException(status_code=403, detail="Нет доступа к акту")
         if not permission["can_edit"]:

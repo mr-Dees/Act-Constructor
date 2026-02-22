@@ -1,15 +1,15 @@
 """
-Инфраструктура доступа к PostgreSQL и бизнес-логика работы с актами.
+Репозитории доступа к данным.
 
-Содержит:
-- функции инициализации и управления пулом подключений
-- контекстный менеджер для получения соединения
-- вспомогательную функцию создания схемы БД
-- высокоуровневый сервис ActDBService
-- классы запросов ActQueries и фильтров ActFilters
+Backward-compatible re-exports из доменных подпакетов.
 """
 
-from app.db.repositories.act_repository import ActDBService
+from app.db.repositories.acts import (
+    ActCrudRepository,
+    ActLockRepository,
+    ActAccessRepository,
+    ActInvoiceRepository,
+)
 
 from app.db.connection import (
     get_pool,
@@ -28,7 +28,10 @@ __all__ = [
     "get_db",
     "get_db_connection",
     "create_tables_if_not_exist",
-    "ActDBService",
+    "ActCrudRepository",
+    "ActLockRepository",
+    "ActAccessRepository",
+    "ActInvoiceRepository",
     "ActQueries",
     "ActFilters",
 ]

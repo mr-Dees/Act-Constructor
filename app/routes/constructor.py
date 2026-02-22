@@ -12,7 +12,7 @@ from fastapi.templating import Jinja2Templates
 from app.api.v1.deps.auth_deps import get_username
 from app.core.config import Settings, setup_logging
 from app.db.connection import get_db
-from app.db.repositories.act_repository import ActDBService
+from app.db.repositories.acts import ActAccessRepository
 
 settings = Settings()
 logger = setup_logging(settings.log_level)
@@ -45,9 +45,9 @@ async def show_constructor(
         RedirectResponse: 302 редирект на / при отсутствии доступа
     """
     async with get_db() as conn:
-        db_service = ActDBService(conn)
+        access = ActAccessRepository(conn)
 
-        has_access = await db_service.check_user_access(act_id, username)
+        has_access = await access.check_user_access(act_id, username)
         if not has_access:
             logger.info(
                 f"Пользователь {username} попытался открыть недоступный акт ID={act_id}, "

@@ -1,14 +1,14 @@
 """
-Сервис бизнес-логики для работы с актами в PostgreSQL/Greenplum.
+Репозиторий CRUD операций с актами.
 """
 
 import json
 import logging
-from datetime import datetime, timedelta
+from datetime import datetime
 
 import asyncpg
 
-from app.db.connection import get_adapter
+from app.db.repositories.base import BaseRepository
 from app.db.utils import KMUtils, JSONDBUtils, ActDirectivesValidator
 from app.services.audit_id_service import AuditIdService
 from app.schemas.act_metadata import (
@@ -20,18 +20,14 @@ from app.schemas.act_metadata import (
     ActDirective,
 )
 
-logger = logging.getLogger("act_constructor.db.repository")
+logger = logging.getLogger("act_constructor.db.repository.crud")
 
 
-class ActDBService:
-    """Сервис для работы с актами и их связанными сущностями в базе данных."""
+class ActCrudRepository(BaseRepository):
+    """CRUD операции с актами и их связанными сущностями."""
 
     def __init__(self, conn: asyncpg.Connection):
-        """Инициализирует сервис с подключением к БД."""
-        self.conn = conn
-        self.adapter = get_adapter()
-
-        # Кэшируем имена таблиц для удобства
+        super().__init__(conn)
         self.acts = self.adapter.get_table_name("acts")
         self.audit_team = self.adapter.get_table_name("audit_team_members")
         self.directives = self.adapter.get_table_name("act_directives")
@@ -39,7 +35,6 @@ class ActDBService:
         self.tables = self.adapter.get_table_name("act_tables")
         self.textblocks = self.adapter.get_table_name("act_textblocks")
         self.violations = self.adapter.get_table_name("act_violations")
-        self.invoices = self.adapter.get_table_name("act_invoices")
 
     # -------------------------------------------------------------------------
     # ВСПОМОГАТЕЛЬНЫЕ МЕТОДЫ
@@ -49,32 +44,29 @@ class ActDBService:
         """
         Проверяет существование актов с данным КМ номером.
 
-        Args:
-            km_number: КМ номер в формате КМ-XX-XXXXX
-
         Returns:
             Словарь с информацией:
-            - exists: bool - существуют ли акты с таким КМ
-            - total_parts: int - общее количество актов (всех типов)
-            - current_parts: int - то же самое, что total_parts (для обратной совместимости API)
-            - next_part_no_sn: int - следующий номер части для акта без СЗ
-            - has_service_notes: bool - есть ли акты с служебными записками
+            - exists: bool
+            - total_parts: int
+            - current_parts: int (backward compat)
+            - next_part_no_sn: int
+            - has_service_notes: bool
         """
         km_digit = KMUtils.extract_km_digits(km_number)
 
         row = await self.conn.fetchrow(
             f"""
-            SELECT 
+            SELECT
                 COUNT(*) as total_count,
                 MAX(
-                    CASE 
-                        WHEN service_note IS NULL THEN part_number 
-                        ELSE 0 
+                    CASE
+                        WHEN service_note IS NULL THEN part_number
+                        ELSE 0
                     END
                 ) as max_part_no_sn,
                 COUNT(
-                    CASE 
-                        WHEN service_note IS NOT NULL THEN 1 
+                    CASE
+                        WHEN service_note IS NOT NULL THEN 1
                     END
                 ) as with_service_notes
             FROM {self.acts}
@@ -87,11 +79,9 @@ class ActDBService:
         exists = total_count > 0
         has_service_notes = row["with_service_notes"] > 0
 
-        # Следующий номер части для акта БЕЗ СЗ
         max_part_no_sn = row["max_part_no_sn"] or 0
         next_part_no_sn = max_part_no_sn + 1 if max_part_no_sn > 0 else 1
 
-        # Для совместимости со старым кодом API, который ожидает current_parts
         return {
             "exists": exists,
             "total_parts": total_count,
@@ -110,11 +100,6 @@ class ActDBService:
         """
         Проверяет уникальность пары (km_number_digit, part_number).
 
-        Args:
-            km_digit: КМ номер (только цифры)
-            part_number: Номер части
-            exclude_act_id: ID акта для исключения (при UPDATE)
-
         Returns:
             True если пара уникальна, False если уже существует
         """
@@ -123,7 +108,7 @@ class ActDBService:
                 f"""
                 SELECT EXISTS(
                     SELECT 1 FROM {self.acts}
-                    WHERE km_number_digit = $1 
+                    WHERE km_number_digit = $1
                       AND part_number = $2
                       AND id != $3
                 )
@@ -137,7 +122,7 @@ class ActDBService:
                 f"""
                 SELECT EXISTS(
                     SELECT 1 FROM {self.acts}
-                    WHERE km_number_digit = $1 
+                    WHERE km_number_digit = $1
                       AND part_number = $2
                 )
                 """,
@@ -148,17 +133,10 @@ class ActDBService:
         return not exists
 
     async def _update_total_parts_for_km(self, km_digit: int) -> None:
-        """
-        Обновляет total_parts для всех актов с данным КМ номером.
-
-        total_parts = реальное количество актов (независимо от типа).
-
-        Args:
-            km_digit: КМ номер (только цифры)
-        """
+        """Обновляет total_parts для всех актов с данным КМ номером."""
         total_count = await self.conn.fetchval(
             f"""
-            SELECT COUNT(*) 
+            SELECT COUNT(*)
             FROM {self.acts}
             WHERE km_number_digit = $1
             """,
@@ -185,20 +163,13 @@ class ActDBService:
             km_digit: int,
             exclude_act_id: int | None = None,
     ) -> int:
-        """
-        Находит первый свободный номер части для актов (включая с СЗ и без).
-
-        Логика:
-        1. Получаем все занятые номера частей
-        2. Ищем минимальный свободный номер начиная с 1
-        3. Возвращаем первый найденный свободный номер
-        """
+        """Находит первый свободный номер части для актов."""
         if exclude_act_id:
             rows = await self.conn.fetch(
                 f"""
-                SELECT part_number 
+                SELECT part_number
                 FROM {self.acts}
-                WHERE km_number_digit = $1 
+                WHERE km_number_digit = $1
                   AND id != $2
                 ORDER BY part_number
                 """,
@@ -208,7 +179,7 @@ class ActDBService:
         else:
             rows = await self.conn.fetch(
                 f"""
-                SELECT part_number 
+                SELECT part_number
                 FROM {self.acts}
                 WHERE km_number_digit = $1
                 ORDER BY part_number
@@ -234,12 +205,7 @@ class ActDBService:
             act_id: int,
             directives: list[ActDirective],
     ) -> dict | None:
-        """
-        Проверяет что все пункты поручений существуют в структуре акта.
-
-        Returns:
-            Загруженное дерево (dict) или None если поручений нет.
-        """
+        """Проверяет что все пункты поручений существуют в структуре акта."""
         if not directives:
             return None
 
@@ -265,188 +231,6 @@ class ActDBService:
 
         return tree_data
 
-    async def lock_act(
-            self,
-            act_id: int,
-            username: str,
-            duration_minutes: int | None = None
-    ) -> dict:
-        """
-        Блокирует акт для редактирования.
-
-        Returns:
-            dict с информацией о блокировке
-
-        Raises:
-            ValueError: если акт уже заблокирован другим пользователем
-        """
-        # Если duration не передан - берём из конфига
-        if duration_minutes is None:
-            from app.core.config import get_settings
-            settings = get_settings()
-            duration_minutes = settings.act_lock_duration_minutes
-
-        # Проверяем текущую блокировку
-        lock_info = await self.conn.fetchrow(
-            f"""
-            SELECT locked_by, locked_at, lock_expires_at
-            FROM {self.acts}
-            WHERE id = $1
-            """,
-            act_id
-        )
-
-        now = datetime.now()
-
-        if lock_info['locked_by']:
-            # Акт заблокирован
-            if lock_info['locked_by'] == username:
-                # Заблокирован текущим пользователем - продлеваем
-                lock_expires = now + timedelta(minutes=duration_minutes)
-
-                await self.conn.execute(
-                    f"""
-                    UPDATE {self.acts}
-                    SET lock_expires_at = $1
-                    WHERE id = $2 AND locked_by = $3
-                    """,
-                    lock_expires,
-                    act_id,
-                    username
-                )
-
-                logger.info(f"Блокировка акта ID={act_id} продлена для {username}")
-
-                return {
-                    "success": True,
-                    "locked_until": lock_expires.isoformat(),
-                    "message": "Блокировка продлена"
-                }
-            else:
-                # Заблокирован другим пользователем
-                if lock_info['lock_expires_at'] and lock_info['lock_expires_at'] > now:
-                    # Блокировка еще активна - НЕ показываем время
-                    raise ValueError(
-                        f"Акт редактируется пользователем {lock_info['locked_by']}. "
-                        f"Попробуйте открыть его позже."
-                    )
-                # Блокировка истекла - снимаем и блокируем заново
-
-        # Устанавливаем новую блокировку
-        lock_expires = now + timedelta(minutes=duration_minutes)
-
-        result = await self.conn.execute(
-            f"""
-            UPDATE {self.acts}
-            SET locked_by = $1,
-                locked_at = $2,
-                lock_expires_at = $3
-            WHERE id = $4
-              AND (locked_by IS NULL OR lock_expires_at <= $5)
-            """,
-            username,
-            now,
-            lock_expires,
-            act_id,
-            now
-        )
-
-        if result == "UPDATE 0":
-            raise ValueError(
-                "Не удалось заблокировать акт — блокировка была захвачена другим пользователем. "
-                "Попробуйте позже."
-            )
-
-        logger.info(f"Акт ID={act_id} заблокирован пользователем {username} до {lock_expires}")
-
-        return {
-            "success": True,
-            "locked_until": lock_expires.isoformat(),
-            "message": "Акт заблокирован для редактирования"
-        }
-
-    async def unlock_act(self, act_id: int, username: str) -> None:
-        """Снимает блокировку с акта."""
-        result = await self.conn.execute(
-            f"""
-            UPDATE {self.acts}
-            SET locked_by = NULL,
-                locked_at = NULL,
-                lock_expires_at = NULL
-            WHERE id = $1 AND locked_by = $2
-            """,
-            act_id,
-            username
-        )
-
-        if result == "UPDATE 0":
-            logger.warning(
-                f"Попытка снять блокировку с акта ID={act_id} "
-                f"пользователем {username}, который не владеет блокировкой"
-            )
-        else:
-            logger.info(f"Блокировка снята с акта ID={act_id} пользователем {username}")
-
-    async def extend_lock(
-            self,
-            act_id: int,
-            username: str,
-            duration_minutes: int | None = None
-    ) -> dict:
-        """
-        Продлевает блокировку акта.
-
-        Raises:
-            ValueError: если пользователь не владеет блокировкой
-        """
-        # Если duration не передан - берём из конфига
-        if duration_minutes is None:
-            from app.core.config import get_settings
-            settings = get_settings()
-            duration_minutes = settings.act_lock_duration_minutes
-
-        lock_info = await self.conn.fetchrow(
-            f"""
-            SELECT locked_by, lock_expires_at
-            FROM {self.acts}
-            WHERE id = $1
-            """,
-            act_id
-        )
-
-        if not lock_info['locked_by']:
-            raise ValueError("Акт не заблокирован")
-
-        if lock_info['locked_by'] != username:
-            raise ValueError("Вы не владеете блокировкой этого акта")
-
-        if lock_info['lock_expires_at'] and lock_info['lock_expires_at'] <= datetime.now():
-            raise ValueError("Блокировка истекла. Откройте акт заново для продолжения работы.")
-
-        lock_expires = datetime.now() + timedelta(minutes=duration_minutes)
-
-        result = await self.conn.execute(
-            f"""
-            UPDATE {self.acts}
-            SET lock_expires_at = $1
-            WHERE id = $2 AND locked_by = $3
-            """,
-            lock_expires,
-            act_id,
-            username
-        )
-
-        if result == "UPDATE 0":
-            raise ValueError("Блокировка была перехвачена другим пользователем")
-
-        logger.info(f"Блокировка акта ID={act_id} продлена до {lock_expires}")
-
-        return {
-            "success": True,
-            "locked_until": lock_expires.isoformat(),
-            "message": "Блокировка продлена"
-        }
-
     # -------------------------------------------------------------------------
     # СОЗДАНИЕ АКТА
     # -------------------------------------------------------------------------
@@ -457,14 +241,11 @@ class ActDBService:
             username: str,
             force_new_part: bool = False,
     ) -> ActResponse:
-        """
-        Создает новый акт с метаданными, аудиторской группой и поручениями.
-        """
+        """Создает новый акт с метаданными, аудиторской группой и поручениями."""
         async with self.conn.transaction():
             km_digit = KMUtils.extract_km_digits(act_data.km_number)
             km_info = await self.check_km_exists(act_data.km_number)
 
-            # Определяем номер части
             if act_data.service_note:
                 suffix = KMUtils.extract_service_note_suffix(act_data.service_note)
                 if not suffix or not suffix.isdigit():
@@ -474,7 +255,6 @@ class ActDBService:
 
                 part_number = int(suffix)
 
-                # РУЧНАЯ ПРОВЕРКА УНИКАЛЬНОСТИ
                 is_unique = await self._check_km_part_uniqueness(km_digit, part_number)
                 if not is_unique:
                     raise ValueError(
@@ -499,7 +279,6 @@ class ActDBService:
             if not user_in_team:
                 raise ValueError("Пользователь должен быть членом аудиторской группы")
 
-            # Генерируем уникальный идентификатор аудита для акта
             audit_act_id = await AuditIdService.generate_audit_act_id()
 
             act_id = await self.conn.fetchval(
@@ -788,9 +567,7 @@ class ActDBService:
             act_update: ActUpdate,
             username: str,
     ) -> ActResponse:
-        """
-        Обновляет метаданные акта (частичное обновление).
-        """
+        """Обновляет метаданные акта (частичное обновление)."""
         async with self.conn.transaction():
             current_act = await self.get_act_by_id(act_id)
             old_km_number = current_act.km_number
@@ -798,7 +575,6 @@ class ActDBService:
             old_service_note = current_act.service_note
             old_part_number = current_act.part_number
 
-            # Получаем audit_act_id — нужен и для audit_team, и для directives
             cur_audit_act_id = await self.conn.fetchval(
                 f"SELECT audit_act_id FROM {self.acts} WHERE id = $1",
                 act_id,
@@ -822,7 +598,6 @@ class ActDBService:
                     old_service_note is not None and act_update.service_note is None
             )
 
-            # Определяем новые значения КМ и части
             new_km_digit = (
                 KMUtils.extract_km_digits(act_update.km_number)
                 if act_update.km_number
@@ -831,7 +606,6 @@ class ActDBService:
 
             new_part_number = old_part_number
 
-            # ЛОГИКА СЛУЖЕБКИ / ЧАСТИ
             if service_note_changed or service_note_removed:
                 if act_update.service_note:
                     suffix = KMUtils.extract_service_note_suffix(act_update.service_note)
@@ -841,22 +615,17 @@ class ActDBService:
                         )
                     new_part_number = int(suffix)
                 else:
-                    # СЗ удалена - ищем свободный номер
                     new_part_number = await self._find_free_part_number(new_km_digit, act_id)
                     act_update.service_note = None
                     act_update.service_note_date = None
 
             if km_changed and not (service_note_changed or service_note_removed):
-                # КМ изменился, но СЗ не трогали
                 if current_act.service_note or act_update.service_note:
-                    # Есть СЗ - часть из неё
                     if act_update.part_number is not None:
                         new_part_number = act_update.part_number
                 else:
-                    # Нет СЗ - ищем свободный номер
                     new_part_number = await self._find_free_part_number(new_km_digit, act_id)
 
-            # ПРОВЕРКА УНИКАЛЬНОСТИ пары (km_digit, part_number)
             if km_changed or service_note_changed or service_note_removed or (act_update.part_number is not None):
                 is_unique = await self._check_km_part_uniqueness(
                     new_km_digit,
@@ -869,7 +638,6 @@ class ActDBService:
                         f"Акт с КМ (цифры) {new_km_digit} и частью {new_part_number} уже существует"
                     )
 
-            # ОБЫЧНЫЙ UPDATE - все колонки можно обновлять
             updates: list[str] = []
             values: list[object] = []
             param_idx = 1
@@ -972,7 +740,6 @@ class ActDBService:
                 values.append(needs_service_note)
                 param_idx += 1
 
-            # Служебные поля
             updates.append(f"last_edited_by = ${param_idx}")
             values.append(username)
             param_idx += 1
@@ -991,7 +758,6 @@ class ActDBService:
                     *values,
                 )
 
-            # Аудиторская группа
             if act_update.audit_team is not None:
                 await self.conn.execute(
                     f"DELETE FROM {self.audit_team} WHERE act_id = $1",
@@ -1015,14 +781,12 @@ class ActDBService:
                         idx,
                     )
 
-            # Поручения
             if act_update.directives is not None:
                 await self.conn.execute(
                     f"DELETE FROM {self.directives} WHERE act_id = $1",
                     act_id,
                 )
 
-                # Строим маппинг {node_id -> audit_point_id} из дерева
                 audit_point_map = (
                     ActDirectivesValidator.build_audit_point_map(tree_data)
                     if tree_data else {}
@@ -1050,7 +814,6 @@ class ActDBService:
                         idx,
                     )
 
-            # Обновление total_parts
             if km_changed:
                 await self._update_total_parts_for_km(old_km_digit)
 
@@ -1065,14 +828,7 @@ class ActDBService:
     # -------------------------------------------------------------------------
 
     async def _generate_unique_copy_name(self, original_name: str) -> str:
-        """
-        Генерирует уникальное название для копии акта.
-
-        Логика:
-        - "Название" → "Название (Копия)"
-        - "Название (Копия)" → "Название (Копия 2)"
-        - "Название (Копия 2)" → "Название (Копия 3)"
-        """
+        """Генерирует уникальное название для копии акта."""
         import re as _re
 
         match = _re.search(r"^(.+?)\s*\(Копия\s*(\d*)\)\s*$", original_name)
@@ -1121,17 +877,7 @@ class ActDBService:
             act_id: int,
             username: str,
     ) -> ActResponse:
-        """
-        Создает дубликат акта.
-
-        Логика дублирования:
-        - Генерируется уникальное название (Копия, Копия 2, ...)
-        - КМ берётся из оригинала БЕЗ изменений
-        - Создаётся как новая часть существующего КМ (force_new_part=True)
-        - Служебная записка НЕ копируется (акт без СЗ)
-        - Команда НЕ копируется - создаётся новая с пользователем как Редактором
-        - Поручения НЕ копируются
-        """
+        """Создает дубликат акта."""
         original = await self.get_act_by_id(act_id)
         km_digit = KMUtils.extract_km_digits(original.km_number)
 
@@ -1139,14 +885,11 @@ class ActDBService:
             original.inspection_name
         )
 
-        # Формируем команду для нового акта
-        # Порядок: Куратор, Руководитель, Редактор (при необходимости)
         new_team = []
 
-        # Находим роль текущего пользователя в оригинале
         user_original_role = None
-        user_full_name = username  # По умолчанию используем username
-        user_position = "Аудитор"  # По умолчанию
+        user_full_name = username
+        user_position = "Аудитор"
 
         for member in original.audit_team:
             if member.username == username:
@@ -1155,7 +898,6 @@ class ActDBService:
                 user_position = member.position
                 break
 
-        # 1. Куратор: пользователь или заглушка
         if user_original_role == "Куратор":
             new_team.append(AuditTeamMember(
                 username=username,
@@ -1171,7 +913,6 @@ class ActDBService:
                 position="—"
             ))
 
-        # 2. Руководитель: пользователь или заглушка
         if user_original_role == "Руководитель":
             new_team.append(AuditTeamMember(
                 username=username,
@@ -1187,7 +928,6 @@ class ActDBService:
                 position="—"
             ))
 
-        # 3. Редактор: добавляем если пользователь не Куратор и не Руководитель
         if user_original_role not in ("Куратор", "Руководитель"):
             new_team.append(AuditTeamMember(
                 username=username,
@@ -1205,11 +945,11 @@ class ActDBService:
             created_date=original.created_date,
             order_number=original.order_number,
             order_date=original.order_date,
-            audit_team=new_team,  # Пользователь + заглушки для обязательных ролей
+            audit_team=new_team,
             inspection_start_date=original.inspection_start_date,
             inspection_end_date=original.inspection_end_date,
             is_process_based=original.is_process_based,
-            directives=[],  # Поручения НЕ копируются
+            directives=[],
             service_note=None,
             service_note_date=None,
         )
@@ -1333,296 +1073,16 @@ class ActDBService:
         return await self.get_act_by_id(new_act.id)
 
     async def delete_act(self, act_id: int) -> None:
-        """
-        Удаляет акт и все связанные данные.
-
-        Использует метод адаптера для корректного удаления
-        в зависимости от типа СУБД.
-        """
+        """Удаляет акт и все связанные данные."""
         act = await self.get_act_by_id(act_id)
         km_digit = KMUtils.extract_km_digits(act.km_number)
 
         async with self.conn.transaction():
-            # Используем адаптер для удаления
             await self.adapter.delete_act_cascade(self.conn, act_id)
 
-            # Обновляем total_parts
             await self._update_total_parts_for_km(km_digit)
 
             logger.info(
                 f"Акт ID={act_id} (КМ={act.km_number}, часть {act.part_number}, "
                 f"СЗ={act.service_note}) удален через {self.adapter.__class__.__name__}"
             )
-
-    # -------------------------------------------------------------------------
-    # ДОСТУП
-    # -------------------------------------------------------------------------
-
-    async def check_user_access(self, act_id: int, username: str) -> bool:
-        """Проверяет имеет ли пользователь доступ к акту."""
-        result = await self.conn.fetchval(
-            f"""
-            SELECT EXISTS(
-                SELECT 1
-                FROM {self.audit_team}
-                WHERE act_id = $1 AND username = $2
-            )
-            """,
-            act_id,
-            username,
-        )
-
-        return bool(result)
-
-    async def get_user_edit_permission(self, act_id: int, username: str) -> dict:
-        """
-        Проверяет права пользователя на редактирование акта.
-
-        Роли с правом редактирования: Куратор, Руководитель, Редактор
-        Роль только для просмотра: Участник
-
-        Args:
-            act_id: ID акта
-            username: Имя пользователя
-
-        Returns:
-            dict с полями:
-                - has_access: есть ли доступ к акту
-                - can_edit: может ли редактировать
-                - role: роль пользователя в команде
-        """
-        row = await self.conn.fetchrow(
-            f"""
-            SELECT role FROM {self.audit_team}
-            WHERE act_id = $1 AND username = $2
-            """,
-            act_id,
-            username,
-        )
-
-        if not row:
-            return {"has_access": False, "can_edit": False, "role": None}
-
-        role = row["role"]
-        can_edit = role in ("Куратор", "Руководитель", "Редактор")
-        return {"has_access": True, "can_edit": can_edit, "role": role}
-
-    # -------------------------------------------------------------------------
-    # ФАКТУРЫ
-    # -------------------------------------------------------------------------
-
-    async def list_metric_dict(self) -> list[dict]:
-        """
-        Возвращает справочник метрик из таблицы t_db_oarb_ua_violation_metric_dict.
-
-        Returns:
-            Список словарей {code, metric_name, metric_group}
-        """
-        from app.core.config import get_settings
-        settings = get_settings()
-
-        if settings.db_type == "postgresql":
-            registry_schema = "public"
-        else:
-            registry_schema = settings.invoice_hive_registry_schema
-
-        metric_table = settings.invoice_metric_dict_table
-
-        rows = await self.conn.fetch(
-            f'SELECT code, metric_name, metric_group '
-            f'FROM {registry_schema}.{metric_table} '
-            f'ORDER BY code',
-        )
-
-        return [
-            {
-                "code": row["code"],
-                "metric_name": row["metric_name"],
-                "metric_group": row["metric_group"],
-            }
-            for row in rows
-        ]
-
-    async def list_tables(self, db_type: str) -> list[dict]:
-        """
-        Возвращает полный список таблиц в указанной БД.
-
-        Args:
-            db_type: Тип БД (hive, greenplum)
-
-        Returns:
-            Список словарей {table_name}
-
-        Raises:
-            ValueError: Если db_type не поддерживается
-        """
-        from app.core.config import get_settings
-        settings = get_settings()
-
-        if db_type == "hive":
-            if settings.db_type == "postgresql":
-                registry_schema = "public"
-            else:
-                registry_schema = settings.invoice_hive_registry_schema
-
-            registry_table = settings.invoice_hive_registry_table
-            col_table = settings.invoice_hive_registry_col_table
-
-            rows = await self.conn.fetch(
-                f'SELECT {col_table} '
-                f'FROM {registry_schema}.{registry_table} '
-                f'ORDER BY {col_table}',
-            )
-            return [
-                {"table_name": row[col_table]}
-                for row in rows
-            ]
-
-        elif db_type == "greenplum":
-            # Тестовый режим (локальный PostgreSQL) или прод (Greenplum)
-            if settings.db_type == "postgresql":
-                target_schema = "public"
-            else:
-                target_schema = settings.invoice_gp_schema
-
-            rows = await self.conn.fetch(
-                "SELECT tablename FROM pg_tables WHERE schemaname = $1 ORDER BY tablename",
-                target_schema,
-            )
-            return [
-                {"table_name": row["tablename"]}
-                for row in rows
-            ]
-
-        else:
-            raise ValueError(f"Неподдерживаемый тип БД: {db_type}")
-
-    async def save_invoice(self, data: dict, username: str) -> dict:
-        """
-        Сохраняет фактуру (UPSERT по act_id + node_id).
-
-        Args:
-            data: Словарь с данными фактуры
-            username: Имя пользователя
-
-        Returns:
-            Словарь с данными сохраненной фактуры
-        """
-        row = await self.adapter.upsert_invoice(
-            self.conn, self.invoices, data, username
-        )
-
-        logger.info(
-            f"Фактура сохранена: act_id={data['act_id']}, "
-            f"node_id={data['node_id']}, table={data['table_name']}"
-        )
-
-        metrics = row["metrics"]
-        if isinstance(metrics, str):
-            metrics = json.loads(metrics)
-
-        return {
-            "id": row["id"],
-            "act_id": row["act_id"],
-            "node_id": row["node_id"],
-            "node_number": row["node_number"],
-            "db_type": row["db_type"],
-            "schema_name": row["schema_name"],
-            "table_name": row["table_name"],
-            "metrics": metrics,
-            "verification_status": row["verification_status"],
-            "created_at": row["created_at"].isoformat(),
-            "updated_at": row["updated_at"].isoformat(),
-            "created_by": row["created_by"],
-        }
-
-    async def get_invoice_for_node(
-            self,
-            act_id: int,
-            node_id: str,
-    ) -> dict | None:
-        """Получает фактуру для конкретного узла."""
-        row = await self.conn.fetchrow(
-            f"""
-            SELECT id, act_id, node_id, node_number, db_type,
-                   schema_name, table_name, metrics,
-                   verification_status, created_at, updated_at, created_by
-            FROM {self.invoices}
-            WHERE act_id = $1 AND node_id = $2
-            """,
-            act_id,
-            node_id,
-        )
-
-        if not row:
-            return None
-
-        metrics = row["metrics"]
-        if isinstance(metrics, str):
-            metrics = json.loads(metrics)
-
-        return {
-            "id": row["id"],
-            "act_id": row["act_id"],
-            "node_id": row["node_id"],
-            "node_number": row["node_number"],
-            "db_type": row["db_type"],
-            "schema_name": row["schema_name"],
-            "table_name": row["table_name"],
-            "metrics": metrics,
-            "verification_status": row["verification_status"],
-            "created_at": row["created_at"].isoformat(),
-            "updated_at": row["updated_at"].isoformat(),
-            "created_by": row["created_by"],
-        }
-
-    async def get_invoices_for_act(self, act_id: int) -> list[dict]:
-        """Получает все фактуры для акта."""
-        rows = await self.conn.fetch(
-            f"""
-            SELECT id, act_id, node_id, node_number, db_type,
-                   schema_name, table_name, metrics,
-                   verification_status, created_at, updated_at, created_by
-            FROM {self.invoices}
-            WHERE act_id = $1
-            ORDER BY node_number, created_at
-            """,
-            act_id,
-        )
-
-        result = []
-        for row in rows:
-            metrics = row["metrics"]
-            if isinstance(metrics, str):
-                metrics = json.loads(metrics)
-
-            result.append({
-                "id": row["id"],
-                "act_id": row["act_id"],
-                "node_id": row["node_id"],
-                "node_number": row["node_number"],
-                "db_type": row["db_type"],
-                "schema_name": row["schema_name"],
-                "table_name": row["table_name"],
-                "metrics": metrics,
-                "verification_status": row["verification_status"],
-                "created_at": row["created_at"].isoformat(),
-                "updated_at": row["updated_at"].isoformat(),
-                "created_by": row["created_by"],
-            })
-
-        return result
-
-    async def verify_invoice(self, invoice_id: int) -> dict:
-        """
-        Верификация фактуры (TODO-заглушка).
-
-        В будущем здесь будет вызов внешнего сервиса для проверки
-        соответствия фактуры и данных в таблице.
-        """
-        logger.info(f"TODO: Верификация фактуры ID={invoice_id} (заглушка)")
-        return {
-            "invoice_id": invoice_id,
-            "status": "pending",
-            "message": "Верификация пока не реализована",
-        }

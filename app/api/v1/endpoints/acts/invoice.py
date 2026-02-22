@@ -14,7 +14,7 @@ from fastapi import APIRouter, Depends, HTTPException
 
 from app.api.v1.deps.auth_deps import get_username
 from app.db.connection import get_db
-from app.db.repositories.act_repository import ActDBService
+from app.db.repositories.acts import ActInvoiceRepository, ActAccessRepository
 from app.schemas.act_invoice import InvoiceSave, InvoiceVerifyRequest
 
 logger = logging.getLogger("act_constructor.api.invoice")
@@ -32,9 +32,9 @@ async def list_metrics(
         Список метрик [{code, metric_name, metric_group}, ...]
     """
     async with get_db() as conn:
-        db_service = ActDBService(conn)
+        invoice_repo = ActInvoiceRepository(conn)
         try:
-            results = await db_service.list_metric_dict()
+            results = await invoice_repo.list_metric_dict()
             return results
         except Exception as e:
             logger.exception(f"Ошибка загрузки справочника метрик: {e}")
@@ -66,9 +66,9 @@ async def list_tables(
         )
 
     async with get_db() as conn:
-        db_service = ActDBService(conn)
+        invoice_repo = ActInvoiceRepository(conn)
         try:
-            results = await db_service.list_tables(db_type)
+            results = await invoice_repo.list_tables(db_type)
             return results
         except ValueError as e:
             raise HTTPException(status_code=400, detail=str(e))
@@ -96,15 +96,16 @@ async def save_invoice(
         Сохраненная фактура с id и статусом
     """
     async with get_db() as conn:
-        db_service = ActDBService(conn)
+        access = ActAccessRepository(conn)
+        invoice_repo = ActInvoiceRepository(conn)
 
         # Проверяем доступ к акту
-        has_access = await db_service.check_user_access(data.act_id, username)
+        has_access = await access.check_user_access(data.act_id, username)
         if not has_access:
             raise HTTPException(status_code=403, detail="Нет доступа к акту")
 
         try:
-            result = await db_service.save_invoice(data.model_dump(), username)
+            result = await invoice_repo.save_invoice(data.model_dump(), username)
             logger.info(
                 f"Фактура сохранена: act_id={data.act_id}, "
                 f"node_id={data.node_id}, user={username}"
@@ -134,9 +135,9 @@ async def verify_invoice(
         Статус верификации
     """
     async with get_db() as conn:
-        db_service = ActDBService(conn)
+        invoice_repo = ActInvoiceRepository(conn)
         try:
-            result = await db_service.verify_invoice(data.invoice_id)
+            result = await invoice_repo.verify_invoice(data.invoice_id)
             return result
         except Exception as e:
             logger.exception(f"Ошибка верификации фактуры: {e}")
@@ -162,15 +163,16 @@ async def get_act_invoices(
         Список фактур акта
     """
     async with get_db() as conn:
-        db_service = ActDBService(conn)
+        access = ActAccessRepository(conn)
+        invoice_repo = ActInvoiceRepository(conn)
 
         # Проверяем доступ к акту
-        has_access = await db_service.check_user_access(act_id, username)
+        has_access = await access.check_user_access(act_id, username)
         if not has_access:
             raise HTTPException(status_code=403, detail="Нет доступа к акту")
 
         try:
-            results = await db_service.get_invoices_for_act(act_id)
+            results = await invoice_repo.get_invoices_for_act(act_id)
             return results
         except Exception as e:
             logger.exception(f"Ошибка получения фактур акта ID={act_id}: {e}")
