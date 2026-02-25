@@ -7,6 +7,7 @@ from datetime import datetime, timedelta
 
 import asyncpg
 
+from app.core.exceptions import ActLockError
 from app.db.repositories.base import BaseRepository
 
 logger = logging.getLogger("act_constructor.db.repository.lock")
@@ -74,9 +75,11 @@ class ActLockRepository(BaseRepository):
                 }
             else:
                 if lock_info['lock_expires_at'] and lock_info['lock_expires_at'] > now:
-                    raise ValueError(
+                    raise ActLockError(
                         f"Акт редактируется пользователем {lock_info['locked_by']}. "
-                        f"Попробуйте открыть его позже."
+                        f"Попробуйте открыть его позже.",
+                        locked_by=lock_info["locked_by"],
+                        locked_until=str(lock_info["lock_expires_at"]),
                     )
 
         lock_expires = now + timedelta(minutes=duration_minutes)
@@ -98,7 +101,7 @@ class ActLockRepository(BaseRepository):
         )
 
         if result == "UPDATE 0":
-            raise ValueError(
+            raise ActLockError(
                 "Не удалось заблокировать акт — блокировка была захвачена другим пользователем. "
                 "Попробуйте позже."
             )
@@ -160,13 +163,13 @@ class ActLockRepository(BaseRepository):
         )
 
         if not lock_info['locked_by']:
-            raise ValueError("Акт не заблокирован")
+            raise ActLockError("Акт не заблокирован")
 
         if lock_info['locked_by'] != username:
-            raise ValueError("Вы не владеете блокировкой этого акта")
+            raise ActLockError("Вы не владеете блокировкой этого акта")
 
         if lock_info['lock_expires_at'] and lock_info['lock_expires_at'] <= datetime.now():
-            raise ValueError("Блокировка истекла. Откройте акт заново для продолжения работы.")
+            raise ActLockError("Блокировка истекла. Откройте акт заново для продолжения работы.")
 
         lock_expires = datetime.now() + timedelta(minutes=duration_minutes)
 
@@ -182,7 +185,7 @@ class ActLockRepository(BaseRepository):
         )
 
         if result == "UPDATE 0":
-            raise ValueError("Блокировка была перехвачена другим пользователем")
+            raise ActLockError("Блокировка была перехвачена другим пользователем")
 
         logger.info(f"Блокировка акта ID={act_id} продлена до {lock_expires}")
 
