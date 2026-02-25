@@ -20,6 +20,7 @@ from app.core.middleware import (
     RateLimitMiddleware,
     RequestSizeLimitMiddleware
 )
+from app.core.exceptions import ActConstructorError
 from app.db.connection import (
     init_db,
     close_db,
@@ -180,6 +181,11 @@ def create_app() -> FastAPI:
                 "action_required": "kinit"
             }
         )
+
+    @app.exception_handler(ActConstructorError)
+    async def act_constructor_error_handler(request: Request, exc: ActConstructorError) -> JSONResponse:
+        """Единый обработчик всех доменных исключений Act Constructor."""
+        return JSONResponse(status_code=exc.status_code, content=exc.to_detail())
 
     # Подключение HTML-роутов
     app.include_router(portal_router)
