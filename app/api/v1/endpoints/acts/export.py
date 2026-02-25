@@ -13,6 +13,7 @@ from fastapi import APIRouter, Query, HTTPException, Depends
 from fastapi.responses import FileResponse
 
 from app.core.config import get_settings, Settings
+from app.db.utils import ActTreeUtils
 from app.schemas.acts.act_content import ActDataSchema, ActSaveResponse
 from app.services.acts.export_service import ExportService
 from app.services.acts.storage_service import StorageService
@@ -64,7 +65,7 @@ async def save_act(
         logger.info(f"Запрос на сохранение акта в формате {fmt}")
 
         # Валидация глубины дерева (защита от рекурсии)
-        tree_depth = _calculate_tree_depth(data.tree)
+        tree_depth = ActTreeUtils.calculate_tree_depth(data.tree)
         if tree_depth > settings.max_tree_depth:
             logger.warning(f"Превышена максимальная глубина дерева: {tree_depth}")
             raise HTTPException(
@@ -113,29 +114,6 @@ async def save_act(
             status_code=500,
             detail="Произошла ошибка при сохранении акта. Попробуйте позже."
         )
-
-
-def _calculate_tree_depth(tree: dict, current_depth: int = 0) -> int:
-    """
-    Рекурсивно вычисляет максимальную глубину дерева.
-
-    Args:
-        tree: Узел дерева с полем 'children'
-        current_depth: Текущая глубина (для рекурсии)
-
-    Returns:
-        Максимальная глубина дерева
-    """
-    children = tree.get('children', [])
-    if not children:
-        return current_depth
-
-    max_child_depth = current_depth
-    for child in children:
-        child_depth = _calculate_tree_depth(child, current_depth + 1)
-        max_child_depth = max(max_child_depth, child_depth)
-
-    return max_child_depth
 
 
 @router.get("/download/{filename}")

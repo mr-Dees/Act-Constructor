@@ -6,6 +6,7 @@ Backward-compatible re-exports из доменных подпакетов.
 """
 
 from app.db.utils.acts.act_directives_validator import ActDirectivesValidator
+from app.db.utils.acts.act_tree_utils import ActTreeUtils
 from app.db.utils.acts.km_utils import KMUtils
 from app.db.utils.json_db_utils import JSONDBUtils
 
@@ -13,4 +14,5 @@ __all__ = [
     "KMUtils",
     "JSONDBUtils",
     "ActDirectivesValidator",
+    "ActTreeUtils",
 ]
