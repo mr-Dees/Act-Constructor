@@ -16,6 +16,7 @@ import logging
 from fastapi import APIRouter, Depends, HTTPException
 
 from app.api.v1.deps.auth_deps import get_username
+from app.core.exceptions import ActConstructorError, AccessDeniedError, InsufficientRightsError
 from app.db.connection import get_db
 from app.db.repositories.acts import ActAccessRepository, ActContentRepository, ActCrudRepository, ActInvoiceRepository
 from app.schemas.acts.act_content import ActDataSchema
@@ -51,18 +52,18 @@ async def get_act_content(
         HTTPException: 404 если акт не найден
         HTTPException: 500 при ошибках загрузки
     """
-    async with get_db() as conn:
-        access = ActAccessRepository(conn)
-        crud = ActCrudRepository(conn)
-        content_repo = ActContentRepository(conn)
-        invoice_repo = ActInvoiceRepository(conn)
+    try:
+        async with get_db() as conn:
+            access = ActAccessRepository(conn)
+            crud = ActCrudRepository(conn)
+            content_repo = ActContentRepository(conn)
+            invoice_repo = ActInvoiceRepository(conn)
 
-        # Проверяем доступ и получаем права пользователя
-        permission = await access.get_user_edit_permission(act_id, username)
-        if not permission["has_access"]:
-            raise HTTPException(status_code=403, detail="Нет доступа к акту")
+            # Проверяем доступ и получаем права пользователя
+            permission = await access.get_user_edit_permission(act_id, username)
+            if not permission["has_access"]:
+                raise AccessDeniedError("Нет доступа к акту")
 
-        try:
             # Получаем полные метаданные акта через ActResponse
             act_metadata = await crud.get_act_by_id(act_id)
 
@@ -88,16 +89,13 @@ async def get_act_content(
                     'role': permission["role"]
                 }
             }
-        except HTTPException:
-            raise
-        except ValueError as e:
-            raise HTTPException(status_code=404, detail=str(e))
-        except Exception as e:
-            logger.exception(f"Ошибка загрузки содержимого акта ID={act_id}: {e}")
-            raise HTTPException(
-                status_code=500,
-                detail="Ошибка загрузки содержимого акта"
-            )
+
+    except ActConstructorError:
+        raise
+
+    except Exception as e:
+        logger.exception(f"Ошибка загрузки содержимого акта ID={act_id}: {e}")
+        raise HTTPException(status_code=500, detail="Ошибка загрузки содержимого акта")
 
 
 @router.put("/{act_id}/content")
@@ -128,25 +126,25 @@ async def save_act_content(
         HTTPException: 403 если нет доступа к акту
         HTTPException: 500 при ошибках сохранения
     """
-    async with get_db() as conn:
-        access = ActAccessRepository(conn)
-        content_repo = ActContentRepository(conn)
+    try:
+        async with get_db() as conn:
+            access = ActAccessRepository(conn)
+            content_repo = ActContentRepository(conn)
 
-        # Проверяем доступ и права на редактирование
-        permission = await access.get_user_edit_permission(act_id, username)
-        if not permission["has_access"]:
-            raise HTTPException(status_code=403, detail="Нет доступа к акту")
-        if not permission["can_edit"]:
-            raise HTTPException(
-                status_code=403,
-                detail="Недостаточно прав для сохранения. Роль 'Участник' имеет доступ только для просмотра."
-            )
+            # Проверяем доступ и права на редактирование
+            permission = await access.get_user_edit_permission(act_id, username)
+            if not permission["has_access"]:
+                raise AccessDeniedError("Нет доступа к акту")
+            if not permission["can_edit"]:
+                raise InsufficientRightsError(
+                    "Недостаточно прав для сохранения. Роль 'Участник' имеет доступ только для просмотра."
+                )
 
-        try:
             return await content_repo.save_content(act_id, data, username)
-        except Exception as e:
-            logger.exception(f"Ошибка сохранения содержимого акта ID={act_id}: {e}")
-            raise HTTPException(
-                status_code=500,
-                detail=f"Ошибка сохранения содержимого акта: {str(e)}"
-            )
+
+    except ActConstructorError:
+        raise
+
+    except Exception as e:
+        logger.exception(f"Ошибка сохранения содержимого акта ID={act_id}: {e}")
+        raise HTTPException(status_code=500, detail="Ошибка сохранения содержимого акта")

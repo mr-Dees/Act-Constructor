@@ -22,6 +22,7 @@ from docx.oxml.ns import qn
 from docx.shared import Inches, Pt
 
 from app.core.config import Settings
+from app.core.exceptions import ActValidationError
 from app.formatters.base_formatter import BaseFormatter
 from app.formatters.utils import HTMLUtils
 
@@ -204,7 +205,7 @@ class HTMLToDocxParser(HTMLParser):
         self.current_depth += 1
         if self.current_depth > self.max_depth:
             logger.warning(f"Превышена максимальная глубина вложенности HTML: {self.max_depth}")
-            raise ValueError(f"HTML слишком глубоко вложен (>{self.max_depth} уровней)")
+            raise ActValidationError(f"HTML слишком глубоко вложен (>{self.max_depth} уровней)")
 
         if tag == 'br':
             return
@@ -923,7 +924,7 @@ class DocxFormatter(BaseFormatter):
             try:
                 # Безопасное разделение data URL
                 if ',' not in url:
-                    raise ValueError("Некорректный формат data URL")
+                    raise ActValidationError("Некорректный формат data URL")
 
                 header, encoded = url.split(',', 1)
 

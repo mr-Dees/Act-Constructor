@@ -19,6 +19,7 @@ from fastapi import APIRouter, HTTPException, Depends
 from pydantic import ValidationError
 
 from app.api.v1.deps.auth_deps import get_username
+from app.core.exceptions import ActConstructorError, AccessDeniedError, InsufficientRightsError
 from app.db.connection import get_db
 from app.db.repositories.acts import ActCrudRepository, ActLockRepository, ActAccessRepository
 from app.schemas.acts.act_metadata import ActCreate, ActUpdate, ActListItem, ActResponse, AuditPointIdsRequest
@@ -26,6 +27,33 @@ from app.services.audit_id_service import AuditIdService
 
 logger = logging.getLogger("act_constructor.api.acts")
 router = APIRouter()
+
+
+def _format_validation_error(e: ValidationError) -> str:
+    """Форматирует ошибки Pydantic ValidationError в читаемую строку."""
+    return "; ".join(
+        f"{' → '.join(str(l) for l in err['loc'])}: {err['msg']}"
+        for err in e.errors()
+    )
+
+
+def _handle_unique_violation(
+        e: UniqueViolationError,
+        km_number: str | None = None,
+        part_number: int | None = None,
+        total_parts: int | None = None,
+) -> None:
+    """Обрабатывает UniqueViolationError из БД, выбрасывает HTTPException 409."""
+    error_detail = str(e)
+    if "acts_km_part_unique" in error_detail and km_number:
+        logger.warning(f"Конфликт уникальности КМ: {error_detail}")
+        if total_parts:
+            detail_msg = f"Акт с КМ '{km_number}' (часть {part_number} из {total_parts}) уже существует"
+        else:
+            detail_msg = f"Акт с КМ '{km_number}' (часть {part_number}) уже существует"
+        raise HTTPException(status_code=409, detail=detail_msg)
+    logger.error(f"Ошибка уникальности: {error_detail}")
+    raise HTTPException(status_code=409, detail="Акт с такими данными уже существует")
 
 
 @router.get("/list", response_model=list[ActListItem])
@@ -75,20 +103,14 @@ async def lock_act(
         # Проверяем доступ и права на редактирование
         permission = await access.get_user_edit_permission(act_id, username)
         if not permission["has_access"]:
-            raise HTTPException(status_code=403, detail="Нет доступа к акту")
+            raise AccessDeniedError("Нет доступа к акту")
         if not permission["can_edit"]:
-            raise HTTPException(
-                status_code=403,
-                detail="Недостаточно прав для редактирования. Роль 'Участник' имеет доступ только для просмотра."
+            raise InsufficientRightsError(
+                "Недостаточно прав для редактирования. Роль 'Участник' имеет доступ только для просмотра."
             )
 
-        try:
-            lock_info = await lock.lock_act(act_id, username)
-            return lock_info
-
-        except ValueError as e:
-            # Акт заблокирован другим пользователем
-            raise HTTPException(status_code=409, detail=str(e))
+        lock_info = await lock.lock_act(act_id, username)
+        return lock_info
 
 
 @router.post("/{act_id}/unlock", status_code=200)
@@ -107,7 +129,7 @@ async def unlock_act(
 
         has_access = await access.check_user_access(act_id, username)
         if not has_access:
-            raise HTTPException(status_code=403, detail="Нет доступа к акту")
+            raise AccessDeniedError("Нет доступа к акту")
 
         await lock.unlock_act(act_id, username)
 
@@ -136,19 +158,12 @@ async def extend_lock(
         # Проверяем доступ и права на редактирование
         permission = await access.get_user_edit_permission(act_id, username)
         if not permission["has_access"]:
-            raise HTTPException(status_code=403, detail="Нет доступа к акту")
+            raise AccessDeniedError("Нет доступа к акту")
         if not permission["can_edit"]:
-            raise HTTPException(
-                status_code=403,
-                detail="Недостаточно прав для редактирования"
-            )
+            raise InsufficientRightsError("Недостаточно прав для редактирования")
 
-        try:
-            lock_info = await lock_repo.extend_lock(act_id, username)
-            return lock_info
-
-        except ValueError as e:
-            raise HTTPException(status_code=400, detail=str(e))
+        lock_info = await lock_repo.extend_lock(act_id, username)
+        return lock_info
 
 
 @router.post("/create", response_model=ActResponse, status_code=201)
@@ -176,24 +191,6 @@ async def create_act(
     try:
         async with get_db() as conn:
             crud = ActCrudRepository(conn)
-
-            # Проверяем существование КМ
-            km_info = await crud.check_km_exists(act_data.km_number)
-
-            if km_info['exists'] and not force_new_part:
-                # КМ существует, но force_new_part=False
-                # Возвращаем специальный статус для диалога на фронте
-                raise HTTPException(
-                    status_code=409,
-                    detail={
-                        "type": "km_exists",
-                        "message": f"Акт с КМ '{act_data.km_number}' уже существует",
-                        "km_number": act_data.km_number,
-                        "current_parts": km_info['current_parts'],
-                        "next_part": km_info['next_part']
-                    }
-                )
-
             new_act = await crud.create_act(act_data, username, force_new_part)
             logger.info(
                 f"Создан акт ID={new_act.id}, КМ={new_act.km_number}, "
@@ -202,31 +199,16 @@ async def create_act(
             )
             return new_act
 
-    except HTTPException:
-        raise
-
     except ValidationError as e:
-        error_details = []
-        for err in e.errors():
-            loc = " → ".join(str(l) for l in err["loc"])
-            error_details.append(f"{loc}: {err['msg']}")
-
-        error_message = "; ".join(error_details)
+        error_message = _format_validation_error(e)
         logger.warning(f"Ошибка валидации при создании акта: {error_message}")
         raise HTTPException(status_code=422, detail=error_message)
 
     except UniqueViolationError as e:
-        error_detail = str(e)
-        logger.error(f"Ошибка уникальности при создании акта: {error_detail}")
-        raise HTTPException(
-            status_code=409,
-            detail="Акт с такими данными уже существует"
-        )
+        _handle_unique_violation(e, act_data.km_number, act_data.part_number, act_data.total_parts)
 
-    except ValueError as e:
-        error_msg = str(e)
-        logger.warning(f"Ошибка валидации при создании акта: {error_msg}")
-        raise HTTPException(status_code=400, detail=error_msg)
+    except ActConstructorError:
+        raise
 
     except Exception as e:
         logger.error(f"Ошибка создания акта: {e}", exc_info=True)
@@ -255,23 +237,15 @@ async def get_act(
         HTTPException: 403 если нет доступа к акту
         HTTPException: 404 если акт не найден
     """
-    try:
-        async with get_db() as conn:
-            access = ActAccessRepository(conn)
-            crud = ActCrudRepository(conn)
+    async with get_db() as conn:
+        access = ActAccessRepository(conn)
+        crud = ActCrudRepository(conn)
 
-            has_access = await access.check_user_access(act_id, username)
-            if not has_access:
-                raise HTTPException(status_code=403, detail="Нет доступа к акту")
+        has_access = await access.check_user_access(act_id, username)
+        if not has_access:
+            raise AccessDeniedError("Нет доступа к акту")
 
-            return await crud.get_act_by_id(act_id)
-    except HTTPException:
-        raise
-    except ValueError as e:
-        raise HTTPException(status_code=404, detail=str(e))
-    except Exception as e:
-        logger.exception(f"Ошибка получения акта ID={act_id}: {e}")
-        raise HTTPException(status_code=500, detail="Ошибка получения акта")
+        return await crud.get_act_by_id(act_id)
 
 
 @router.patch("/{act_id}", response_model=ActResponse)
@@ -304,15 +278,9 @@ async def update_act_metadata(
             # Проверяем доступ и права на редактирование
             permission = await access.get_user_edit_permission(act_id, username)
             if not permission["has_access"]:
-                raise HTTPException(
-                    status_code=403,
-                    detail="У вас нет доступа к этому акту"
-                )
+                raise AccessDeniedError("У вас нет доступа к этому акту")
             if not permission["can_edit"]:
-                raise HTTPException(
-                    status_code=403,
-                    detail="Недостаточно прав для редактирования"
-                )
+                raise InsufficientRightsError("Недостаточно прав для редактирования")
 
             updated_act = await crud.update_act_metadata(
                 act_id, act_update, username
@@ -320,47 +288,16 @@ async def update_act_metadata(
             logger.info(f"Акт ID={act_id} обновлен пользователем {username}")
             return updated_act
 
-    except HTTPException:
-        raise
-
     except ValidationError as e:
-        # Детальная обработка ошибок валидации Pydantic
-        error_details = []
-        for err in e.errors():
-            loc = " → ".join(str(l) for l in err["loc"])
-            error_details.append(f"{loc}: {err['msg']}")
-
-        error_message = "; ".join(error_details)
+        error_message = _format_validation_error(e)
         logger.warning(f"Ошибка валидации при обновлении акта: {error_message}")
         raise HTTPException(status_code=422, detail=error_message)
 
     except UniqueViolationError as e:
-        error_detail = str(e)
+        _handle_unique_violation(e, act_update.km_number, act_update.part_number, act_update.total_parts)
 
-        if "acts_km_part_unique" in error_detail:
-            logger.warning(f"Попытка изменить акт на дубликат: {error_detail}")
-
-            km_value = act_update.km_number or "указанный КМ"
-            part_value = act_update.part_number or "указанная часть"
-            total_value = act_update.total_parts or ""
-
-            if total_value:
-                detail_msg = f"Акт с КМ '{km_value}' (часть {part_value} из {total_value}) уже существует"
-            else:
-                detail_msg = f"Акт с КМ '{km_value}' (часть {part_value}) уже существует"
-
-            raise HTTPException(status_code=409, detail=detail_msg)
-
-        logger.error(f"Ошибка уникальности при обновлении акта: {error_detail}")
-        raise HTTPException(
-            status_code=409,
-            detail="Акт с такими данными уже существует"
-        )
-
-    except ValueError as e:
-        error_msg = str(e)
-        logger.warning(f"Ошибка валидации при обновлении акта: {error_msg}")
-        raise HTTPException(status_code=400, detail=error_msg)
+    except ActConstructorError:
+        raise
 
     except Exception as e:
         logger.error(f"Ошибка обновления акта ID={act_id}: {e}", exc_info=True)
@@ -394,25 +331,17 @@ async def duplicate_act(
         HTTPException: 403 если нет доступа к акту
         HTTPException: 404 если акт не найден
     """
-    try:
-        async with get_db() as conn:
-            access = ActAccessRepository(conn)
-            crud = ActCrudRepository(conn)
+    async with get_db() as conn:
+        access = ActAccessRepository(conn)
+        crud = ActCrudRepository(conn)
 
-            # Проверяем доступ к акту (can_edit НЕ требуется для дублирования)
-            # Участник может дублировать акт - он станет Редактором в новом акте
-            permission = await access.get_user_edit_permission(act_id, username)
-            if not permission["has_access"]:
-                raise HTTPException(status_code=403, detail="Нет доступа к акту")
+        # Проверяем доступ к акту (can_edit НЕ требуется для дублирования)
+        # Участник может дублировать акт - он станет Редактором в новом акте
+        permission = await access.get_user_edit_permission(act_id, username)
+        if not permission["has_access"]:
+            raise AccessDeniedError("Нет доступа к акту")
 
-            return await crud.duplicate_act(act_id, username)
-    except HTTPException:
-        raise
-    except ValueError as e:
-        raise HTTPException(status_code=400, detail=str(e))
-    except Exception as e:
-        logger.exception(f"Ошибка дублирования акта ID={act_id}: {e}")
-        raise HTTPException(status_code=500, detail="Ошибка дублирования акта")
+        return await crud.duplicate_act(act_id, username)
 
 
 @router.post("/{act_id}/audit-point-ids")
@@ -432,22 +361,14 @@ async def generate_audit_point_ids(
     Returns:
         Словарь {node_id: audit_point_id}
     """
-    try:
-        async with get_db() as conn:
-            access = ActAccessRepository(conn)
+    async with get_db() as conn:
+        access = ActAccessRepository(conn)
 
-            has_access = await access.check_user_access(act_id, username)
-            if not has_access:
-                raise HTTPException(status_code=403, detail="Нет доступа к акту")
+        has_access = await access.check_user_access(act_id, username)
+        if not has_access:
+            raise AccessDeniedError("Нет доступа к акту")
 
-            result = await AuditIdService.generate_audit_point_ids(request.node_ids)
-            return result
-
-    except HTTPException:
-        raise
-    except Exception as e:
-        logger.exception(f"Ошибка генерации audit_point_ids для акта ID={act_id}: {e}")
-        raise HTTPException(status_code=500, detail="Ошибка генерации идентификаторов")
+        return await AuditIdService.generate_audit_point_ids(request.node_ids)
 
 
 @router.delete("/{act_id}")
@@ -472,28 +393,17 @@ async def delete_act(
         HTTPException: 403 если нет доступа к акту
         HTTPException: 404 если акт не найден
     """
-    try:
-        async with get_db() as conn:
-            access = ActAccessRepository(conn)
-            crud = ActCrudRepository(conn)
+    async with get_db() as conn:
+        access = ActAccessRepository(conn)
+        crud = ActCrudRepository(conn)
 
-            # Проверяем доступ и права на редактирование
-            permission = await access.get_user_edit_permission(act_id, username)
-            if not permission["has_access"]:
-                raise HTTPException(status_code=403, detail="Нет доступа к акту")
-            if not permission["can_edit"]:
-                raise HTTPException(
-                    status_code=403,
-                    detail="Недостаточно прав для удаления акта"
-                )
+        # Проверяем доступ и права на редактирование
+        permission = await access.get_user_edit_permission(act_id, username)
+        if not permission["has_access"]:
+            raise AccessDeniedError("Нет доступа к акту")
+        if not permission["can_edit"]:
+            raise InsufficientRightsError("Недостаточно прав для удаления акта")
 
-            await crud.delete_act(act_id)
-            logger.info(f"Удален акт ID={act_id} пользователем {username}")
-            return {"success": True, "message": "Акт успешно удален"}
-    except HTTPException:
-        raise
-    except ValueError as e:
-        raise HTTPException(status_code=404, detail=str(e))
-    except Exception as e:
-        logger.exception(f"Ошибка удаления акта ID={act_id}: {e}")
-        raise HTTPException(status_code=500, detail="Ошибка удаления акта")
+        await crud.delete_act(act_id)
+        logger.info(f"Удален акт ID={act_id} пользователем {username}")
+        return {"success": True, "message": "Акт успешно удален"}

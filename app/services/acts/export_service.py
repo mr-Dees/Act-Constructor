@@ -13,6 +13,7 @@ from concurrent.futures import ThreadPoolExecutor
 from typing import Literal
 
 from app.core.config import Settings
+from app.core.exceptions import ActConstructorError, UnsupportedFormatError
 from app.formatters.acts.docx_formatter import DocxFormatter
 from app.formatters.acts.markdown_formatter import MarkdownFormatter
 from app.formatters.acts.text_formatter import TextFormatter
@@ -98,10 +99,10 @@ class ExportService:
             Результат операции с именем файла
 
         Raises:
-            ValueError: Если указан неподдерживаемый формат
+            UnsupportedFormatError: Если указан неподдерживаемый формат
         """
         if fmt not in self._formatters:
-            raise ValueError(
+            raise UnsupportedFormatError(
                 f"Неподдерживаемый формат: {fmt}. "
                 f"Используйте 'txt', 'md' или 'docx'."
             )
@@ -109,27 +110,40 @@ class ExportService:
         extension = fmt
         logger.debug(f"Используется форматер: {self._formatters[fmt].__class__.__name__}")
 
+        formatted_content = None
         try:
             # Форматирование в отдельном потоке для не блокирования event loop.
             loop = asyncio.get_event_loop()
-            formatted_content = await loop.run_in_executor(
-                executor,
-                self._format_sync,
-                data,
-                fmt
-            )
+            try:
+                formatted_content = await loop.run_in_executor(
+                    executor,
+                    self._format_sync,
+                    data,
+                    fmt
+                )
+            except ActConstructorError:
+                raise
+            except Exception as e:
+                logger.exception(f"Ошибка форматирования акта в формат {fmt}: {e}")
+                raise ActConstructorError(f"Не удалось отформатировать акт в формат {fmt.upper()}") from e
 
             # Сохранение в зависимости от формата
-            if fmt == "docx":
-                # Для DOCX используем специальный метод
-                filename = self.storage.save_docx(formatted_content, prefix="act")
-            else:
-                # Для текстовых форматов используем обычный метод
-                filename = self.storage.save(
-                    formatted_content,
-                    prefix="act",
-                    extension=extension
-                )
+            try:
+                if fmt == "docx":
+                    # Для DOCX используем специальный метод
+                    filename = self.storage.save_docx(formatted_content, prefix="act")
+                else:
+                    # Для текстовых форматов используем обычный метод
+                    filename = self.storage.save(
+                        formatted_content,
+                        prefix="act",
+                        extension=extension
+                    )
+            except ActConstructorError:
+                raise
+            except Exception as e:
+                logger.exception(f"Ошибка сохранения файла акта ({fmt}): {e}")
+                raise ActConstructorError("Не удалось сохранить файл акта") from e
 
             # Формирование успешного ответа
             return ActSaveResponse(
