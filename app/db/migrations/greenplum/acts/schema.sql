@@ -48,12 +48,32 @@ CREATE TABLE {SCHEMA}.{PREFIX}acts (
     updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     created_by VARCHAR(50) NOT NULL,
     last_edited_by VARCHAR(50),
-    last_edited_at TIMESTAMP
+    last_edited_at TIMESTAMP,
+
+    -- Constraints
+    CONSTRAINT check_km_number_format
+        CHECK (km_number ~ '^КМ-\d{2}-\d{5}$'),
+    CONSTRAINT check_km_number_digit_length
+        CHECK (length(km_number_digit::text) = 7),
+    CONSTRAINT check_part_number_positive
+        CHECK (part_number > 0),
+    CONSTRAINT check_total_parts_positive
+        CHECK (total_parts > 0),
+    CONSTRAINT check_inspection_dates
+        CHECK (inspection_end_date >= inspection_start_date),
+    CONSTRAINT check_service_note_format
+        CHECK (service_note IS NULL OR service_note ~ '^.+/\d{4}$'),
+    CONSTRAINT check_service_note_consistency
+        CHECK ((service_note IS NULL AND service_note_date IS NULL) OR
+               (service_note IS NOT NULL AND service_note_date IS NOT NULL))
 )
 WITH (appendonly=false)
 DISTRIBUTED BY (id);
 
-COMMENT ON TABLE {SCHEMA}.{PREFIX}acts IS 'Основная таблица актов проверки с метаданными';
+-- UNIQUE(km_number_digit, part_number) обеспечивается на уровне приложения
+COMMENT ON TABLE {SCHEMA}.{PREFIX}acts IS
+    'Основная таблица актов проверки. '
+    'UNIQUE(km_number_digit, part_number) обеспечивается на уровне приложения ';
 COMMENT ON COLUMN {SCHEMA}.{PREFIX}acts.id IS 'Уникальный идентификатор акта';
 COMMENT ON COLUMN {SCHEMA}.{PREFIX}acts.km_number IS 'КМ номер в формате КМ-XX-XXXXX для отображения (НЕ меняется при добавлении СЗ)';
 COMMENT ON COLUMN {SCHEMA}.{PREFIX}acts.km_number_digit IS 'КМ номер только цифры (всегда 7 цифр) для быстрого поиска';
@@ -95,10 +115,16 @@ CREATE TABLE {SCHEMA}.{PREFIX}audit_team_members (
     position VARCHAR(255) NOT NULL,
     username VARCHAR(50) NOT NULL,
     order_index INTEGER DEFAULT 0,
-    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+
+    -- Constraints
+    CONSTRAINT check_role_values
+        CHECK (role IN ('Куратор', 'Руководитель', 'Редактор', 'Участник')),
+    CONSTRAINT check_order_index_non_negative
+        CHECK (order_index >= 0)
 )
 WITH (appendonly=false)
-DISTRIBUTED BY (id);
+DISTRIBUTED BY (act_id);
 
 COMMENT ON TABLE {SCHEMA}.{PREFIX}audit_team_members IS 'Состав аудиторской группы для каждого акта';
 COMMENT ON COLUMN {SCHEMA}.{PREFIX}audit_team_members.id IS 'Уникальный идентификатор записи';
@@ -123,10 +149,16 @@ CREATE TABLE {SCHEMA}.{PREFIX}act_directives (
     node_id VARCHAR(100),
     directive_number VARCHAR(100) NOT NULL,
     order_index INTEGER DEFAULT 0,
-    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+
+    -- Constraints
+    CONSTRAINT check_point_number_format
+        CHECK (point_number ~ '^5\.([\d]+\.)*[\d]+$'),
+    CONSTRAINT check_order_index_non_negative
+        CHECK (order_index >= 0)
 )
 WITH (appendonly=false)
-DISTRIBUTED BY (id);
+DISTRIBUTED BY (act_id);
 
 COMMENT ON TABLE {SCHEMA}.{PREFIX}act_directives IS 'Действующие поручения, относящиеся к акту';
 COMMENT ON COLUMN {SCHEMA}.{PREFIX}act_directives.id IS 'Уникальный идентификатор поручения';
@@ -146,10 +178,16 @@ CREATE TABLE {SCHEMA}.{PREFIX}act_tree (
     act_id BIGINT NOT NULL,
     tree_data JSONB NOT NULL,
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+
+    -- Constraints
+    CONSTRAINT check_tree_data_not_empty
+        CHECK (jsonb_typeof(tree_data) = 'object'),
+
+    UNIQUE(act_id)
 )
 WITH (appendonly=false)
-DISTRIBUTED BY (id);
+DISTRIBUTED BY (act_id);
 
 COMMENT ON TABLE {SCHEMA}.{PREFIX}act_tree IS 'Иерархическая структура акта в формате JSONB дерева';
 COMMENT ON COLUMN {SCHEMA}.{PREFIX}act_tree.id IS 'Уникальный идентификатор записи';
@@ -180,10 +218,18 @@ CREATE TABLE {SCHEMA}.{PREFIX}act_tables (
     is_regular_risk_table BOOLEAN DEFAULT FALSE,
     is_operational_risk_table BOOLEAN DEFAULT FALSE,
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+
+    -- Constraints
+    CONSTRAINT check_grid_data_is_array
+        CHECK (jsonb_typeof(grid_data) = 'array'),
+    CONSTRAINT check_col_widths_is_array
+        CHECK (jsonb_typeof(col_widths) = 'array'),
+
+    UNIQUE(act_id, table_id)
 )
 WITH (appendonly=false)
-DISTRIBUTED BY (id);
+DISTRIBUTED BY (act_id);
 
 COMMENT ON TABLE {SCHEMA}.{PREFIX}act_tables IS 'Таблицы внутри актов (денормализованное хранение для быстрого доступа)';
 COMMENT ON COLUMN {SCHEMA}.{PREFIX}act_tables.id IS 'Уникальный идентификатор записи';
@@ -218,10 +264,16 @@ CREATE TABLE {SCHEMA}.{PREFIX}act_textblocks (
     content TEXT NOT NULL,
     formatting JSONB NOT NULL,
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+
+    -- Constraints
+    CONSTRAINT check_formatting_is_object
+        CHECK (jsonb_typeof(formatting) = 'object'),
+
+    UNIQUE(act_id, textblock_id)
 )
 WITH (appendonly=false)
-DISTRIBUTED BY (id);
+DISTRIBUTED BY (act_id);
 
 COMMENT ON TABLE {SCHEMA}.{PREFIX}act_textblocks IS 'Текстовые блоки с форматированием внутри актов';
 COMMENT ON COLUMN {SCHEMA}.{PREFIX}act_textblocks.id IS 'Уникальный идентификатор записи';
@@ -255,10 +307,26 @@ CREATE TABLE {SCHEMA}.{PREFIX}act_violations (
     responsible JSONB,
     recommendations JSONB,
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+
+    -- Constraints (GP 5.x не поддерживает оператор '?' для JSONB, проверяем только тип)
+    CONSTRAINT check_description_list_is_object_or_null
+        CHECK (description_list IS NULL OR jsonb_typeof(description_list) = 'object'),
+    CONSTRAINT check_additional_content_is_object_or_null
+        CHECK (additional_content IS NULL OR jsonb_typeof(additional_content) = 'object'),
+    CONSTRAINT check_reasons_is_object_or_null
+        CHECK (reasons IS NULL OR jsonb_typeof(reasons) = 'object'),
+    CONSTRAINT check_consequences_is_object_or_null
+        CHECK (consequences IS NULL OR jsonb_typeof(consequences) = 'object'),
+    CONSTRAINT check_responsible_is_object_or_null
+        CHECK (responsible IS NULL OR jsonb_typeof(responsible) = 'object'),
+    CONSTRAINT check_recommendations_is_object_or_null
+        CHECK (recommendations IS NULL OR jsonb_typeof(recommendations) = 'object'),
+
+    UNIQUE(act_id, violation_id)
 )
 WITH (appendonly=false)
-DISTRIBUTED BY (id);
+DISTRIBUTED BY (act_id);
 
 COMMENT ON TABLE {SCHEMA}.{PREFIX}act_violations IS 'Нарушения, выявленные в ходе проверки';
 COMMENT ON COLUMN {SCHEMA}.{PREFIX}act_violations.id IS 'Уникальный идентификатор записи';
@@ -297,10 +365,20 @@ CREATE TABLE {SCHEMA}.{PREFIX}act_invoices (
     updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     created_by VARCHAR(50) NOT NULL,
     etl_loading_id BIGINT DEFAULT NULL,
-    create_date DATE DEFAULT NULL
+    create_date DATE DEFAULT NULL,
+
+    -- Constraints
+    CONSTRAINT check_db_type_values
+        CHECK (db_type IN ('hive', 'greenplum')),
+    CONSTRAINT check_verification_status_values
+        CHECK (verification_status IN ('pending', 'verified', 'rejected')),
+    CONSTRAINT check_metrics_is_array
+        CHECK (jsonb_typeof(metrics) = 'array'),
+
+    UNIQUE(act_id, node_id)
 )
 WITH (appendonly=false)
-DISTRIBUTED BY (id);
+DISTRIBUTED BY (act_id);
 
 COMMENT ON TABLE {SCHEMA}.{PREFIX}act_invoices IS 'Фактуры, прикрепленные к пунктам акта';
 COMMENT ON COLUMN {SCHEMA}.{PREFIX}act_invoices.id IS 'Уникальный идентификатор записи';
@@ -334,6 +412,10 @@ CREATE INDEX idx_{PREFIX}acts_service_note
     ON {SCHEMA}.{PREFIX}acts(service_note)
     WHERE service_note IS NOT NULL;
 
+CREATE INDEX idx_{PREFIX}acts_service_note_date
+    ON {SCHEMA}.{PREFIX}acts(service_note_date)
+    WHERE service_note_date IS NOT NULL;
+
 CREATE INDEX idx_{PREFIX}acts_created_by
     ON {SCHEMA}.{PREFIX}acts(created_by);
 
@@ -355,9 +437,15 @@ CREATE INDEX idx_{PREFIX}audit_team_username
 CREATE INDEX idx_{PREFIX}audit_team_act_id
     ON {SCHEMA}.{PREFIX}audit_team_members(act_id);
 
+CREATE INDEX idx_{PREFIX}audit_team_act_order
+    ON {SCHEMA}.{PREFIX}audit_team_members(act_id, order_index);
+
 -- Индексы на act_directives
 CREATE INDEX idx_{PREFIX}act_directives_act_id
     ON {SCHEMA}.{PREFIX}act_directives(act_id);
+
+CREATE INDEX idx_{PREFIX}act_directives_act_order
+    ON {SCHEMA}.{PREFIX}act_directives(act_id, order_index);
 
 -- Индексы на act_tree
 CREATE INDEX idx_{PREFIX}act_tree_act_id
@@ -374,6 +462,17 @@ CREATE INDEX idx_{PREFIX}act_tables_node_number
     ON {SCHEMA}.{PREFIX}act_tables(act_id, node_number)
     WHERE node_number IS NOT NULL;
 
+CREATE INDEX idx_{PREFIX}act_tables_label
+    ON {SCHEMA}.{PREFIX}act_tables(act_id, table_label)
+    WHERE table_label IS NOT NULL;
+
+CREATE INDEX idx_{PREFIX}act_tables_special_flags
+    ON {SCHEMA}.{PREFIX}act_tables(act_id)
+    WHERE is_metrics_table = TRUE
+       OR is_main_metrics_table = TRUE
+       OR is_regular_risk_table = TRUE
+       OR is_operational_risk_table = TRUE;
+
 -- Индексы на act_textblocks
 CREATE INDEX idx_{PREFIX}act_textblocks_act_id
     ON {SCHEMA}.{PREFIX}act_textblocks(act_id);
@@ -381,12 +480,20 @@ CREATE INDEX idx_{PREFIX}act_textblocks_act_id
 CREATE INDEX idx_{PREFIX}act_textblocks_act_textblock
     ON {SCHEMA}.{PREFIX}act_textblocks(act_id, textblock_id);
 
+CREATE INDEX idx_{PREFIX}act_textblocks_node_number
+    ON {SCHEMA}.{PREFIX}act_textblocks(act_id, node_number)
+    WHERE node_number IS NOT NULL;
+
 -- Индексы на act_violations
 CREATE INDEX idx_{PREFIX}act_violations_act_id
     ON {SCHEMA}.{PREFIX}act_violations(act_id);
 
 CREATE INDEX idx_{PREFIX}act_violations_act_violation
     ON {SCHEMA}.{PREFIX}act_violations(act_id, violation_id);
+
+CREATE INDEX idx_{PREFIX}act_violations_node_number
+    ON {SCHEMA}.{PREFIX}act_violations(act_id, node_number)
+    WHERE node_number IS NOT NULL;
 
 -- Индексы на act_invoices
 CREATE INDEX idx_{PREFIX}act_invoices_act_id
@@ -492,4 +599,3 @@ CREATE TRIGGER update_{PREFIX}act_invoices_updated_at
 
 COMMENT ON TRIGGER update_{PREFIX}act_invoices_updated_at ON {SCHEMA}.{PREFIX}act_invoices IS
     'Автоматически обновляет поле updated_at при изменении фактуры';
-

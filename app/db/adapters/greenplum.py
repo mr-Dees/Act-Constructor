@@ -232,7 +232,10 @@ class GreenplumAdapter(DatabaseAdapter):
         Возвращает DISTRIBUTED BY clause для оптимального распределения.
 
         Стратегия распределения:
-        - Все таблицы распределяются по id для избежания проблем с UPDATE
-          на колонках в DISTRIBUTED BY при наличии триггеров
+        - acts: по id (km_number_digit обновляется, не может быть dist key)
+        - Дочерние таблицы: по act_id (act_id никогда не обновляется,
+          JOIN с acts становится локальным на сегменте, позволяет UNIQUE constraints)
         """
-        return "DISTRIBUTED BY (id)"
+        if table_name.endswith("acts"):
+            return "DISTRIBUTED BY (id)"
+        return "DISTRIBUTED BY (act_id)"
