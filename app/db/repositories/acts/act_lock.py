@@ -33,7 +33,7 @@ class ActLockRepository(BaseRepository):
             dict с информацией о блокировке
 
         Raises:
-            ValueError: если акт уже заблокирован другим пользователем
+            ActLockError: если акт уже заблокирован другим пользователем
         """
         if duration_minutes is None:
             from app.core.config import get_settings
@@ -146,7 +146,7 @@ class ActLockRepository(BaseRepository):
         Продлевает блокировку акта.
 
         Raises:
-            ValueError: если пользователь не владеет блокировкой
+            ActLockError: если пользователь не владеет блокировкой
         """
         if duration_minutes is None:
             from app.core.config import get_settings

@@ -13,6 +13,7 @@ import logging
 from fastapi import APIRouter, Depends, HTTPException
 
 from app.api.v1.deps.auth_deps import get_username
+from app.core.exceptions import AccessDeniedError
 from app.db.connection import get_db
 from app.db.repositories.acts import ActInvoiceRepository, ActAccessRepository
 from app.schemas.acts.act_invoice import InvoiceSave, InvoiceVerifyRequest
@@ -59,25 +60,10 @@ async def list_tables(
     Returns:
         Список таблиц [{table_name}, ...]
     """
-    if db_type not in ("hive", "greenplum"):
-        raise HTTPException(
-            status_code=400,
-            detail=f"Неподдерживаемый тип БД: {db_type}. Допустимые: hive, greenplum"
-        )
-
     async with get_db() as conn:
         invoice_repo = ActInvoiceRepository(conn)
-        try:
-            results = await invoice_repo.list_tables(db_type)
-            return results
-        except ValueError as e:
-            raise HTTPException(status_code=400, detail=str(e))
-        except Exception as e:
-            logger.exception(f"Ошибка загрузки таблиц ({db_type}): {e}")
-            raise HTTPException(
-                status_code=500,
-                detail="Ошибка загрузки таблиц"
-            )
+        results = await invoice_repo.list_tables(db_type)
+        return results
 
 
 @router.post("/save")
@@ -102,21 +88,14 @@ async def save_invoice(
         # Проверяем доступ к акту
         has_access = await access.check_user_access(data.act_id, username)
         if not has_access:
-            raise HTTPException(status_code=403, detail="Нет доступа к акту")
+            raise AccessDeniedError("Нет доступа к акту")
 
-        try:
-            result = await invoice_repo.save_invoice(data.model_dump(), username)
-            logger.info(
-                f"Фактура сохранена: act_id={data.act_id}, "
-                f"node_id={data.node_id}, user={username}"
-            )
-            return result
-        except Exception as e:
-            logger.exception(f"Ошибка сохранения фактуры: {e}")
-            raise HTTPException(
-                status_code=500,
-                detail=f"Ошибка сохранения фактуры: {str(e)}"
-            )
+        result = await invoice_repo.save_invoice(data.model_dump(), username)
+        logger.info(
+            f"Фактура сохранена: act_id={data.act_id}, "
+            f"node_id={data.node_id}, user={username}"
+        )
+        return result
 
 
 @router.post("/verify")
@@ -169,14 +148,6 @@ async def get_act_invoices(
         # Проверяем доступ к акту
         has_access = await access.check_user_access(act_id, username)
         if not has_access:
-            raise HTTPException(status_code=403, detail="Нет доступа к акту")
+            raise AccessDeniedError("Нет доступа к акту")
 
-        try:
-            results = await invoice_repo.get_invoices_for_act(act_id)
-            return results
-        except Exception as e:
-            logger.exception(f"Ошибка получения фактур акта ID={act_id}: {e}")
-            raise HTTPException(
-                status_code=500,
-                detail="Ошибка получения фактур"
-            )
+        return await invoice_repo.get_invoices_for_act(act_id)

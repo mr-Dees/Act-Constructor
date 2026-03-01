@@ -8,6 +8,7 @@ from datetime import datetime
 
 import asyncpg
 
+from app.core.exceptions import ActNotFoundError, ActValidationError, KmConflictError
 from app.db.repositories.base import BaseRepository
 from app.db.utils import KMUtils, JSONDBUtils, ActDirectivesValidator
 from app.services.audit_id_service import AuditIdService
@@ -215,13 +216,11 @@ class ActCrudRepository(BaseRepository):
         )
 
         if not tree_row:
-            raise ValueError("Структура акта не найдена")
+            raise ActNotFoundError("Структура акта не найдена")
 
         tree_data = JSONDBUtils.ensure_dict(tree_row["tree_data"])
         if tree_data is None:
-            raise ValueError(
-                "Структура акта имеет некорректный формат (ожидался JSON-объект)"
-            )
+            raise ActValidationError("Структура акта имеет некорректный формат (ожидался JSON-объект)")
 
         existing_points = ActDirectivesValidator.collect_node_numbers(tree_data)
         ActDirectivesValidator.validate_directives_points(
@@ -249,24 +248,27 @@ class ActCrudRepository(BaseRepository):
             if act_data.service_note:
                 suffix = KMUtils.extract_service_note_suffix(act_data.service_note)
                 if not suffix or not suffix.isdigit():
-                    raise ValueError(
-                        f"Некорректный формат служебной записки: {act_data.service_note}"
-                    )
+                    raise ActValidationError(f"Некорректный формат служебной записки: {act_data.service_note}")
 
                 part_number = int(suffix)
 
                 is_unique = await self._check_km_part_uniqueness(km_digit, part_number)
                 if not is_unique:
-                    raise ValueError(
-                        f"Акт с КМ (цифры) {km_digit} и частью {part_number} уже существует"
+                    raise KmConflictError(
+                        f"Акт с КМ (цифры) {km_digit} и частью {part_number} уже существует",
+                        km_number=act_data.km_number,
+                        current_parts=km_info["current_parts"],
+                        next_part=part_number,
                     )
             else:
                 if km_info["exists"] and force_new_part:
                     part_number = km_info["next_part_no_sn"]
                 elif km_info["exists"] and not force_new_part:
-                    raise ValueError(
-                        f"Акт с КМ '{act_data.km_number}' уже существует. "
-                        f"Используйте force_new_part=True для создания новой части."
+                    raise KmConflictError(
+                        f"Акт с КМ '{act_data.km_number}' уже существует",
+                        km_number=act_data.km_number,
+                        current_parts=km_info["current_parts"],
+                        next_part=km_info["next_part"],
                     )
                 else:
                     part_number = 1
@@ -277,7 +279,7 @@ class ActCrudRepository(BaseRepository):
                 member.username == username for member in act_data.audit_team
             )
             if not user_in_team:
-                raise ValueError("Пользователь должен быть членом аудиторской группы")
+                raise ActValidationError("Пользователь должен быть членом аудиторской группы")
 
             audit_act_id = await AuditIdService.generate_audit_act_id()
 
@@ -487,7 +489,7 @@ class ActCrudRepository(BaseRepository):
         )
 
         if not act_row:
-            raise ValueError(f"Акт ID={act_id} не найден")
+            raise ActNotFoundError(f"Акт ID={act_id} не найден")
 
         team_rows = await self.conn.fetch(
             f"""
@@ -610,9 +612,7 @@ class ActCrudRepository(BaseRepository):
                 if act_update.service_note:
                     suffix = KMUtils.extract_service_note_suffix(act_update.service_note)
                     if not suffix or not suffix.isdigit():
-                        raise ValueError(
-                            f"Некорректный формат служебной записки: {act_update.service_note}"
-                        )
+                        raise ActValidationError(f"Некорректный формат служебной записки: {act_update.service_note}")
                     new_part_number = int(suffix)
                 else:
                     new_part_number = await self._find_free_part_number(new_km_digit, act_id)
@@ -634,8 +634,9 @@ class ActCrudRepository(BaseRepository):
                 )
 
                 if not is_unique:
-                    raise ValueError(
-                        f"Акт с КМ (цифры) {new_km_digit} и частью {new_part_number} уже существует"
+                    raise KmConflictError(
+                        f"Акт с КМ (цифры) {new_km_digit} и частью {new_part_number} уже существует",
+                        km_number=act_update.km_number or current_act.km_number,
                     )
 
             updates: list[str] = []

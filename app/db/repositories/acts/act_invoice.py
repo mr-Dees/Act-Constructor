@@ -7,6 +7,7 @@ import logging
 
 import asyncpg
 
+from app.core.exceptions import InvoiceError
 from app.db.repositories.base import BaseRepository
 
 logger = logging.getLogger("act_constructor.db.repository.invoice")
@@ -62,7 +63,7 @@ class ActInvoiceRepository(BaseRepository):
             Список словарей {table_name}
 
         Raises:
-            ValueError: Если db_type не поддерживается
+            InvoiceError: Если db_type не поддерживается
         """
         from app.core.config import get_settings
         settings = get_settings()
@@ -102,7 +103,7 @@ class ActInvoiceRepository(BaseRepository):
             ]
 
         else:
-            raise ValueError(f"Неподдерживаемый тип БД: {db_type}")
+            raise InvoiceError(f"Неподдерживаемый тип БД: {db_type}")
 
     async def save_invoice(self, data: dict, username: str) -> dict:
         """

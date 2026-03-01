@@ -13,6 +13,7 @@ from fastapi import APIRouter, Query, HTTPException, Depends
 from fastapi.responses import FileResponse
 
 from app.core.config import get_settings, Settings
+from app.core.exceptions import ActConstructorError
 from app.db.utils import ActTreeUtils
 from app.schemas.acts.act_content import ActDataSchema, ActSaveResponse
 from app.services.acts.export_service import ExportService
@@ -102,10 +103,8 @@ async def save_act(
 
     except HTTPException:
         raise
-    except ValueError as e:
-        # Ошибка валидации формата
-        logger.error(f"Ошибка валидации формата: {e}")
-        raise HTTPException(status_code=400, detail=str(e))
+    except ActConstructorError:
+        raise
     except Exception as e:
         # Неожиданная ошибка при сохранении
         logger.exception(f"Неожиданная ошибка при сохранении акта: {e}")

@@ -1158,8 +1158,8 @@ class CreateActDialog extends DialogBase {
      */
     static async _handleSubmitError(err, isEdit, currentUser, body, dialog) {
         // Проверяем специальный случай: КМ уже существует (только при создании)
-        if (!isEdit && err.response?.status === 409 && err.errData?.detail?.type === 'km_exists') {
-            await this._handleKmExistsError(err.errData.detail, body, currentUser);
+        if (!isEdit && err.response?.status === 409 && err.errData?.type === 'km_exists') {
+            await this._handleKmExistsError(err.errData, body, currentUser);
             return;
         }
 
