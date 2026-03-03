@@ -5,43 +5,53 @@
 из PostgreSQL в человекочитаемом формате.
 """
 
-from app.integrations.ai_assistant.data_export import (
-    # Поиск и фильтрация актов
-    search_acts,
+from app.integrations.ai_assistant.export_search import search_acts
 
-    # Структура актов
+from app.integrations.ai_assistant.export_structure import (
     get_act_structure,
     get_act_structures_batch,
+)
 
-    # Полное содержимое актов
+from app.integrations.ai_assistant.export_acts import (
     get_act_by_km,
     get_acts_by_km_list,
+)
 
-    # Извлечение пунктов
+from app.integrations.ai_assistant.export_items import (
     get_item_by_number,
     get_items_by_number_list,
+)
 
-    # Извлечение нарушений
+from app.integrations.ai_assistant.export_violations import (
     get_all_violations,
     get_all_violations_batch,
     get_violation_by_item,
     get_violations_by_item_list,
     get_violation_fields,
     get_violation_fields_batch,
+)
 
-    # Извлечение таблиц
+from app.integrations.ai_assistant.export_tables import (
     get_all_tables,
     get_all_tables_batch,
     get_all_tables_in_item,
     get_tables_by_item_list,
     get_table_by_name,
     get_tables_by_name_batch,
+)
 
-    # Извлечение текстовых блоков
+from app.integrations.ai_assistant.export_textblocks import (
     get_all_textblocks,
     get_all_textblocks_batch,
     get_textblocks_by_item,
     get_textblocks_by_item_list,
+)
+
+from app.integrations.ai_assistant.export_invoices import (
+    get_all_invoices,
+    get_all_invoices_batch,
+    get_invoices_by_item,
+    get_invoices_by_item_list,
 )
 
 __all__ = [
@@ -81,4 +91,10 @@ __all__ = [
     "get_all_textblocks_batch",
     "get_textblocks_by_item",
     "get_textblocks_by_item_list",
+
+    # Извлечение фактур
+    "get_all_invoices",
+    "get_all_invoices_batch",
+    "get_invoices_by_item",
+    "get_invoices_by_item_list",
 ]

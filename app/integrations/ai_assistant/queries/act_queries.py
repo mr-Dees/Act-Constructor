@@ -2,7 +2,7 @@
 SQL запросы для извлечения данных актов из PostgreSQL.
 
 Содержит класс ActQueries с методами для получения метаданных актов, структуры дерева,
-таблиц, текстовых блоков, нарушений и связанных данных (аудиторская группа, поручения).
+таблиц, текстовых блоков, нарушений, фактур и связанных данных (аудиторская группа, поручения).
 Включает вспомогательные методы для навигации по иерархической структуре дерева.
 """
 
@@ -620,6 +620,130 @@ class ActQueries:
                         data[field] = None
 
             result.append(data)
+
+        return result
+
+    # ========================================================================
+    # ИЗВЛЕЧЕНИЕ ФАКТУР
+    # ========================================================================
+
+    @staticmethod
+    async def get_all_invoices(conn: asyncpg.Connection, act_id: int, tree: dict = None) -> list[dict]:
+        """
+        Получает все фактуры акта.
+
+        Извлекает данные из таблицы act_invoices с типом БД, схемой, таблицей,
+        метриками и статусом верификации. Корректирует node_number если передано дерево.
+
+        Args:
+            conn: Активное подключение к PostgreSQL.
+            act_id: Внутренний ID акта в БД.
+            tree: Дерево структуры для маппинга номеров (опционально).
+
+        Returns:
+            Список словарей с данными фактур. JSONB поля распарсены.
+        """
+        rows = await conn.fetch(
+            """
+            SELECT id, node_id, node_number, db_type, schema_name, table_name,
+                   metrics, verification_status, created_at, created_by
+            FROM act_invoices
+            WHERE act_id = $1
+            ORDER BY node_number NULLS LAST
+            """,
+            act_id
+        )
+
+        # Строим маппинг node_id → number
+        node_map = {}
+        if tree:
+            node_map = ActQueries._build_node_id_to_number_map(tree)
+
+        result = []
+        for row in rows:
+            data = dict(row)
+
+            # Корректируем node_number из дерева
+            if tree and data['node_id'] in node_map:
+                data['node_number'] = node_map[data['node_id']]
+
+            # Парсим JSONB поле metrics
+            if isinstance(data['metrics'], str):
+                try:
+                    data['metrics'] = json.loads(data['metrics'])
+                except json.JSONDecodeError:
+                    data['metrics'] = []
+
+            result.append(data)
+
+        return result
+
+    @staticmethod
+    async def get_invoices_by_item(
+            conn: asyncpg.Connection,
+            act_id: int,
+            item_number: str,
+            tree: dict = None,
+            recursive: bool = True
+    ) -> list[dict]:
+        """
+        Получает фактуры конкретного пункта акта.
+
+        Фильтрует фактуры по номеру пункта. При recursive=True включает
+        фактуры из всех подпунктов.
+
+        Args:
+            conn: Активное подключение к PostgreSQL.
+            act_id: Внутренний ID акта в БД.
+            item_number: Номер пункта (например, "5.1.2").
+            tree: Дерево для точного маппинга node_id → parent_number.
+            recursive: Искать ли в подпунктах.
+
+        Returns:
+            Список фактур, принадлежащих указанному пункту и его подпунктам
+            (если recursive=True).
+        """
+        # Получаем все фактуры акта
+        all_invoices = await ActQueries.get_all_invoices(conn, act_id, tree)
+
+        if not tree:
+            # Без дерева: используем node_number напрямую
+            result = []
+            for invoice in all_invoices:
+                node_num = invoice.get('node_number', '')
+                if not node_num:
+                    continue
+
+                if recursive:
+                    if node_num == item_number or node_num.startswith(f"{item_number}."):
+                        result.append(invoice)
+                else:
+                    if node_num == item_number:
+                        result.append(invoice)
+            return result
+
+        # С деревом: используем маппинг node_id → hierarchical_number
+        node_id_to_number = ActQueries._build_node_id_to_hierarchical_number_map(tree)
+
+        result = []
+        for invoice in all_invoices:
+            node_id = invoice.get('node_id')
+            if not node_id:
+                continue
+
+            # Находим родительский пункт фактуры
+            parent_number = ActQueries._find_parent_item_number(tree, node_id, node_id_to_number)
+
+            if not parent_number:
+                continue
+
+            # Сравниваем с искомым номером
+            if recursive:
+                if parent_number == item_number or parent_number.startswith(f"{item_number}."):
+                    result.append(invoice)
+            else:
+                if parent_number == item_number:
+                    result.append(invoice)
 
         return result
 

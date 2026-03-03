@@ -504,6 +504,66 @@ class ActFormatter:
         return "\n".join(lines)
 
     @staticmethod
+    def format_invoice(invoice_data: dict, parent_item_number: str = "") -> str:
+        """
+        Форматирует фактуру в текстовое представление.
+
+        Args:
+            invoice_data: Данные фактуры из БД.
+            parent_item_number: Номер родительского пункта в дереве.
+        """
+        lines: list[str] = []
+
+        if parent_item_number:
+            lines.append(f"\nФактура (пункт {parent_item_number})")
+        else:
+            lines.append("\nФактура")
+
+        lines.append("─" * 50)
+
+        db_type = invoice_data.get("db_type", "")
+        schema_name = invoice_data.get("schema_name", "")
+        table_name = invoice_data.get("table_name", "")
+
+        lines.append(f"Тип БД: {db_type}")
+        lines.append(f"Схема: {schema_name}")
+        lines.append(f"Таблица: {table_name}")
+
+        # Метрики
+        metrics = invoice_data.get("metrics", [])
+        if isinstance(metrics, str):
+            try:
+                metrics = json.loads(metrics)
+            except json.JSONDecodeError:
+                metrics = []
+
+        if metrics:
+            lines.append(f"Метрики ({len(metrics)}):")
+            for m in metrics:
+                metric_type = m.get("metric_type", "")
+                metric_code = m.get("metric_code", "")
+                metric_name = m.get("metric_name", "")
+                lines.append(f"  {metric_type}: {metric_code} — {metric_name}")
+        else:
+            lines.append("Метрики: не указаны")
+
+        # Статус верификации
+        status = invoice_data.get("verification_status", "pending")
+        status_labels = {
+            "pending": "Ожидает верификации",
+            "verified": "Верифицирована",
+            "rejected": "Отклонена",
+        }
+        lines.append(f"Статус: {status_labels.get(status, status)}")
+
+        # Дата создания
+        created_at = invoice_data.get("created_at")
+        if created_at:
+            lines.append(f"Создана: {created_at}")
+
+        return "\n".join(lines)
+
+    @staticmethod
     def format_tree_item(
             node: dict,
             tree_data: dict,
