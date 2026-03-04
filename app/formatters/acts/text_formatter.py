@@ -25,8 +25,8 @@ class TextFormatter(BaseFormatter):
             settings: Глобальные настройки приложения
         """
         self.settings = settings
-        self.HEADER_WIDTH = settings.text_header_width
-        self.INDENT_SIZE = settings.text_indent_size
+        self.HEADER_WIDTH = settings.formatting.text_header_width
+        self.INDENT_SIZE = settings.formatting.text_indent_size
 
     def format(self, data: dict) -> str:
         """

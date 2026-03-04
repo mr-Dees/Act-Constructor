@@ -30,12 +30,12 @@ class ActInvoiceRepository(BaseRepository):
         from app.core.config import get_settings
         settings = get_settings()
 
-        if settings.db_type == "postgresql":
+        if settings.database.type == "postgresql":
             registry_schema = "public"
         else:
-            registry_schema = settings.invoice_hive_registry_schema
+            registry_schema = settings.invoice.hive_registry_schema
 
-        metric_table = settings.invoice_metric_dict_table
+        metric_table = settings.invoice.metric_dict_table
 
         rows = await self.conn.fetch(
             f'SELECT code, metric_name, metric_group '
@@ -69,13 +69,13 @@ class ActInvoiceRepository(BaseRepository):
         settings = get_settings()
 
         if db_type == "hive":
-            if settings.db_type == "postgresql":
+            if settings.database.type == "postgresql":
                 registry_schema = "public"
             else:
-                registry_schema = settings.invoice_hive_registry_schema
+                registry_schema = settings.invoice.hive_registry_schema
 
-            registry_table = settings.invoice_hive_registry_table
-            col_table = settings.invoice_hive_registry_col_table
+            registry_table = settings.invoice.hive_registry_table
+            col_table = settings.invoice.hive_registry_col_table
 
             rows = await self.conn.fetch(
                 f'SELECT {col_table} '
@@ -88,10 +88,10 @@ class ActInvoiceRepository(BaseRepository):
             ]
 
         elif db_type == "greenplum":
-            if settings.db_type == "postgresql":
+            if settings.database.type == "postgresql":
                 target_schema = "public"
             else:
-                target_schema = settings.invoice_gp_schema
+                target_schema = settings.invoice.gp_schema
 
             rows = await self.conn.fetch(
                 "SELECT tablename FROM pg_tables WHERE schemaname = $1 ORDER BY tablename",

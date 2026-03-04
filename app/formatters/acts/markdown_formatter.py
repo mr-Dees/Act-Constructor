@@ -26,7 +26,7 @@ class MarkdownFormatter(BaseFormatter):
             settings: Глобальные настройки приложения
         """
         self.settings = settings
-        self.MAX_HEADING_LEVEL = settings.markdown_max_heading_level
+        self.MAX_HEADING_LEVEL = settings.formatting.markdown_max_heading_level
 
     def format(self, data: dict) -> str:
         """

@@ -15,10 +15,10 @@ from fastapi import Request
 from fastapi.responses import JSONResponse
 from starlette.middleware.base import BaseHTTPMiddleware
 
-from app.core.config import Settings, setup_logging
+from app.core.config import get_settings, setup_logging
 
-settings = Settings()
-logger = setup_logging(settings.log_level)
+settings = get_settings()
+logger = setup_logging(settings.server.log_level)
 
 
 class HTTPSRedirectMiddleware(BaseHTTPMiddleware):
@@ -79,8 +79,8 @@ class RateLimitMiddleware(BaseHTTPMiddleware):
 
         # TTLCache автоматически удаляет старые записи.
         self.requests = TTLCache(
-            maxsize=settings.max_tracked_ips,
-            ttl=settings.rate_limit_ttl
+            maxsize=settings.security.max_tracked_ips,
+            ttl=settings.security.rate_limit_ttl
         )
 
         # Блокировка для thread-safety TTLCache (не thread-safe по
@@ -89,7 +89,7 @@ class RateLimitMiddleware(BaseHTTPMiddleware):
 
         logger.info(
             f"Rate limiting инициализирован: {rate_limit} запросов/минуту, "
-            f"max_ips={settings.max_tracked_ips}, ttl={settings.rate_limit_ttl}s"
+            f"max_ips={settings.security.max_tracked_ips}, ttl={settings.security.rate_limit_ttl}s"
         )
 
     async def dispatch(self, request: Request, call_next):

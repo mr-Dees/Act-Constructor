@@ -11,12 +11,12 @@
 import asyncio
 from datetime import date
 
-from app.core.config import Settings
+from app.core.config import get_settings
 from app.db.connection import init_db, close_db
 from app.integrations.ai_assistant import *
 
 # Инициализируем настройки один раз на уровне модуля
-settings = Settings()
+settings = get_settings()
 
 
 # ============================================================================
@@ -36,7 +36,7 @@ async def ensure_db_initialized():
         print("🔌 Инициализация пула подключений к БД...")
         await init_db(settings)
         print("✅ Пул подключений успешно создан")
-        print(f"   📍 Подключено к: {settings.db_host}:{settings.db_port}/{settings.db_name}\n")
+        print(f"   📍 Подключено к: {settings.database.host}:{settings.database.port}/{settings.database.name}\n")
     else:
         print("ℹ️  Пул подключений уже инициализирован\n")
 

@@ -12,9 +12,9 @@ from fastapi import APIRouter, Request
 from fastapi.responses import HTMLResponse
 from fastapi.templating import Jinja2Templates
 
-from app.core.config import Settings
+from app.core.config import get_settings
 
-settings = Settings()
+settings = get_settings()
 templates = Jinja2Templates(directory=str(settings.templates_dir))
 
 router = APIRouter()

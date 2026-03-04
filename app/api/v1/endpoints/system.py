@@ -28,11 +28,11 @@ async def get_lock_config():
     settings = get_settings()
 
     return {
-        "lockDurationMinutes": settings.act_lock_duration_minutes,
-        "inactivityTimeoutMinutes": settings.act_inactivity_timeout_minutes,
-        "inactivityCheckIntervalSeconds": settings.act_inactivity_check_interval_seconds,
-        "minExtensionIntervalMinutes": settings.act_min_extension_interval_minutes,
-        "inactivityDialogTimeoutSeconds": settings.act_inactivity_dialog_timeout_seconds
+        "lockDurationMinutes": settings.lock.duration_minutes,
+        "inactivityTimeoutMinutes": settings.lock.inactivity_timeout_minutes,
+        "inactivityCheckIntervalSeconds": settings.lock.inactivity_check_interval_seconds,
+        "minExtensionIntervalMinutes": settings.lock.min_extension_interval_minutes,
+        "inactivityDialogTimeoutSeconds": settings.lock.inactivity_dialog_timeout_seconds
     }
 
 
@@ -47,8 +47,8 @@ async def get_invoice_config():
     settings = get_settings()
 
     return {
-        "hiveSchema": settings.invoice_hive_schema,
-        "gpSchema": settings.invoice_gp_schema,
+        "hiveSchema": settings.invoice.hive_schema,
+        "gpSchema": settings.invoice.gp_schema,
     }
 
 
@@ -87,14 +87,14 @@ async def detailed_health_check(settings: Settings = Depends(get_settings)) -> d
         "environment": {
             "python_version": sys.version,
             "platform": platform.platform(),
-            "host": settings.host,
-            "port": settings.port,
+            "host": settings.server.host,
+            "port": settings.server.port,
         },
         "configuration": {
-            "max_request_size_mb": settings.max_request_size / (1024 * 1024),
-            "rate_limit_per_minute": settings.rate_limit_per_minute,
-            "max_image_size_mb": settings.max_image_size_mb,
-            "html_parse_timeout": settings.html_parse_timeout,
+            "max_request_size_mb": settings.security.max_request_size / (1024 * 1024),
+            "rate_limit_per_minute": settings.security.rate_limit_per_minute,
+            "max_image_size_mb": settings.formatting.max_image_size_mb,
+            "html_parse_timeout": settings.formatting.html_parse_timeout,
         }
     }
 

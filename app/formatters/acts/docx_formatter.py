@@ -440,16 +440,16 @@ class DocxFormatter(BaseFormatter):
         self.settings = settings
 
         # Загружаем константы из настроек
-        self.MAX_HEADING_LEVEL = settings.docx_max_heading_level
-        self.DEFAULT_IMAGE_WIDTH = Inches(settings.docx_image_width)
-        self.CAPTION_FONT_SIZE = Pt(settings.docx_caption_font_size)
-        self.MAX_IMAGE_SIZE_MB = settings.max_image_size_mb
-        self.HTML_PARSE_TIMEOUT = settings.html_parse_timeout
-        self.MAX_HTML_DEPTH = settings.max_html_depth
-        self.HTML_PARSE_CHUNK_SIZE = settings.html_parse_chunk_size
+        self.MAX_HEADING_LEVEL = settings.formatting.docx_max_heading_level
+        self.DEFAULT_IMAGE_WIDTH = Inches(settings.formatting.docx_image_width)
+        self.CAPTION_FONT_SIZE = Pt(settings.formatting.docx_caption_font_size)
+        self.MAX_IMAGE_SIZE_MB = settings.formatting.max_image_size_mb
+        self.HTML_PARSE_TIMEOUT = settings.formatting.html_parse_timeout
+        self.MAX_HTML_DEPTH = settings.formatting.max_html_depth
+        self.HTML_PARSE_CHUNK_SIZE = settings.formatting.html_parse_chunk_size
         # Параметры retry логики
-        self.MAX_RETRIES = settings.max_retries
-        self.RETRY_DELAY = settings.retry_delay
+        self.MAX_RETRIES = settings.formatting.max_retries
+        self.RETRY_DELAY = settings.formatting.retry_delay
 
         self.ALIGNMENT_MAP = {
             'center': WD_PARAGRAPH_ALIGNMENT.CENTER,
@@ -459,11 +459,11 @@ class DocxFormatter(BaseFormatter):
         }
 
         logger.debug(f"DocxFormatter инициализирован с настройками: "
-                     f"image_width={settings.docx_image_width}\", "
-                     f"max_image_size={settings.max_image_size_mb}MB, "
-                     f"parse_timeout={settings.html_parse_timeout}s, "
-                     f"chunk_size={settings.html_parse_chunk_size}, "
-                     f"max_retries={settings.max_retries}")
+                     f"image_width={settings.formatting.docx_image_width}\", "
+                     f"max_image_size={settings.formatting.max_image_size_mb}MB, "
+                     f"parse_timeout={settings.formatting.html_parse_timeout}s, "
+                     f"chunk_size={settings.formatting.html_parse_chunk_size}, "
+                     f"max_retries={settings.formatting.max_retries}")
 
     def format(self, data: dict) -> Document:
         """

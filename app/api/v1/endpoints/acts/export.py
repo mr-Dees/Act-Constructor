@@ -67,11 +67,11 @@ async def save_act(
 
         # Валидация глубины дерева (защита от рекурсии)
         tree_depth = ActTreeUtils.calculate_tree_depth(data.tree)
-        if tree_depth > settings.max_tree_depth:
+        if tree_depth > settings.resource.max_tree_depth:
             logger.warning(f"Превышена максимальная глубина дерева: {tree_depth}")
             raise HTTPException(
                 status_code=400,
-                detail=f"Глубина дерева ({tree_depth}) превышает максимум ({settings.max_tree_depth})"
+                detail=f"Глубина дерева ({tree_depth}) превышает максимум ({settings.resource.max_tree_depth})"
             )
 
         # Используем mode='python' для оптимизации.
@@ -88,14 +88,14 @@ async def save_act(
         try:
             result = await asyncio.wait_for(
                 act_service.save_act(data_dict, fmt=fmt),
-                timeout=settings.save_act_timeout
+                timeout=settings.resource.save_act_timeout
             )
         except asyncio.TimeoutError:
-            logger.error(f"Timeout при сохранении акта (>{settings.save_act_timeout}s)")
+            logger.error(f"Timeout при сохранении акта (>{settings.resource.save_act_timeout}s)")
             raise HTTPException(
                 status_code=408,
                 detail=f"Обработка акта заняла слишком много времени "
-                       f"(>{settings.save_act_timeout}s). Попробуйте упростить структуру."
+                       f"(>{settings.resource.save_act_timeout}s). Попробуйте упростить структуру."
             )
 
         logger.info(f"Акт успешно сохранен: {result.filename}")
@@ -142,8 +142,8 @@ async def download_act(
     # В multiprocessing каждый worker имеет свой event loop и свой
     # semaphore.
     if not hasattr(download_act, '_semaphore'):
-        download_act._semaphore = asyncio.Semaphore(settings.max_concurrent_file_operations)
-        logger.info(f"File semaphore создан для worker: {settings.max_concurrent_file_operations}")
+        download_act._semaphore = asyncio.Semaphore(settings.resource.max_concurrent_file_operations)
+        logger.info(f"File semaphore создан для worker: {settings.resource.max_concurrent_file_operations}")
 
     async with download_act._semaphore:
         try:

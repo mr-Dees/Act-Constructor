@@ -114,23 +114,23 @@ async def init_db(settings: Settings) -> None:
 
     try:
         # Определяем тип БД и создаем адаптер
-        if settings.db_type == "postgresql":
+        if settings.database.type == "postgresql":
             _adapter = PostgreSQLAdapter()
 
             dsn = (
-                f"postgresql://{settings.db_user}:{settings.db_password}"
-                f"@{settings.db_host}:{settings.db_port}/{settings.db_name}"
+                f"postgresql://{settings.database.user}:{settings.database.password}"
+                f"@{settings.database.host}:{settings.database.port}/{settings.database.name}"
             )
 
             logger.info(
                 f"Инициализация PostgreSQL: "
-                f"{settings.db_host}:{settings.db_port}/{settings.db_name}"
+                f"{settings.database.host}:{settings.database.port}/{settings.database.name}"
             )
 
-        elif settings.db_type == "greenplum":
+        elif settings.database.type == "greenplum":
             _adapter = GreenplumAdapter(
-                schema=settings.gp_schema,
-                table_prefix=settings.gp_table_prefix
+                schema=settings.database.gp.schema_name,
+                table_prefix=settings.database.gp.table_prefix
             )
 
             # Получаем username из JUPYTERHUB_USER
@@ -150,30 +150,30 @@ async def init_db(settings: Settings) -> None:
 
             dsn = (
                 f"postgresql://{username_digits}"
-                f"@{settings.gp_host}:{settings.gp_port}/{settings.gp_database}"
+                f"@{settings.database.gp.host}:{settings.database.gp.port}/{settings.database.gp.database}"
             )
 
             logger.info(
                 f"Инициализация Greenplum: "
-                f"{settings.gp_host}:{settings.gp_port}/{settings.gp_database}, "
-                f"schema={settings.gp_schema}, user={username_digits}"
+                f"{settings.database.gp.host}:{settings.database.gp.port}/{settings.database.gp.database}, "
+                f"schema={settings.database.gp.schema_name}, user={username_digits}"
             )
 
         else:
-            raise ValueError(f"Неподдерживаемый тип БД: {settings.db_type}")
+            raise ValueError(f"Неподдерживаемый тип БД: {settings.database.type}")
 
         # Создаем пул подключений
         try:
             _pool = await asyncpg.create_pool(
                 dsn,
-                min_size=settings.db_pool_min_size,
-                max_size=settings.db_pool_max_size,
+                min_size=settings.database.pool_min_size,
+                max_size=settings.database.pool_max_size,
                 command_timeout=60
             )
 
             logger.info(
-                f"Database pool создан для {settings.db_type} "
-                f"(min={settings.db_pool_min_size}, max={settings.db_pool_max_size})"
+                f"Database pool создан для {settings.database.type} "
+                f"(min={settings.database.pool_min_size}, max={settings.database.pool_max_size})"
             )
 
         except asyncpg.PostgresError as e:

@@ -14,7 +14,7 @@ from fastapi.staticfiles import StaticFiles
 
 from app.api.v1.endpoints.auth import get_current_user_from_env
 from app.api.v1.routes import api_router as api_v1_router
-from app.core.config import Settings, setup_logging
+from app.core.config import get_settings, setup_logging
 from app.core.middleware import (
     HTTPSRedirectMiddleware,
     RateLimitMiddleware,
@@ -31,12 +31,12 @@ from app.routes.portal import router as portal_router
 from app.routes.constructor import router as constructor_router
 
 # Инициализируем настройки и логирование один раз на уровне модуля
-settings = Settings()
-logger = setup_logging(settings.log_level)
+settings = get_settings()
+logger = setup_logging(settings.server.log_level)
 
 root_path = ''
-if settings.db_type == 'greenplum':
-    root_path = f"/user/{get_current_user_from_env(truncate=False)}/proxy/{settings.port}"
+if settings.database.type == 'greenplum':
+    root_path = f"/user/{get_current_user_from_env(truncate=False)}/proxy/{settings.server.port}"
 
 
 @asynccontextmanager
@@ -125,13 +125,13 @@ def create_app() -> FastAPI:
     # 2. Request size limit
     app.add_middleware(
         RequestSizeLimitMiddleware,
-        max_size=settings.max_request_size
+        max_size=settings.security.max_request_size
     )
 
     # 3. Rate limiting (последний)
     app.add_middleware(
         RateLimitMiddleware,
-        rate_limit=settings.rate_limit_per_minute,
+        rate_limit=settings.security.rate_limit_per_minute,
         settings=settings
     )
 
@@ -194,7 +194,7 @@ def create_app() -> FastAPI:
     # Подключение API роутеров версии 1 с префиксом /api/v1
     app.include_router(
         api_v1_router,
-        prefix=settings.api_v1_prefix
+        prefix=settings.server.api_v1_prefix
     )
 
     return app
@@ -210,8 +210,8 @@ if __name__ == "__main__":
     uvicorn.run(
         # Настройки сервера
         "app.main:app",
-        host=settings.host,
-        port=settings.port,
+        host=settings.server.host,
+        port=settings.server.port,
         # Автоматическая перезагрузка при изменении кода
         reload=True,
         # Уменьшаем verbosity uvicorn логов

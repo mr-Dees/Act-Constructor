@@ -10,12 +10,12 @@ from fastapi.responses import HTMLResponse, RedirectResponse
 from fastapi.templating import Jinja2Templates
 
 from app.api.v1.deps.auth_deps import get_username
-from app.core.config import Settings, setup_logging
+from app.core.config import get_settings, setup_logging
 from app.db.connection import get_db
 from app.db.repositories.acts import ActAccessRepository
 
-settings = Settings()
-logger = setup_logging(settings.log_level)
+settings = get_settings()
+logger = setup_logging(settings.server.log_level)
 templates = Jinja2Templates(directory=str(settings.templates_dir))
 
 router = APIRouter()

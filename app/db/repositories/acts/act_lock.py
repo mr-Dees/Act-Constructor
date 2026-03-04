@@ -38,7 +38,7 @@ class ActLockRepository(BaseRepository):
         if duration_minutes is None:
             from app.core.config import get_settings
             settings = get_settings()
-            duration_minutes = settings.act_lock_duration_minutes
+            duration_minutes = settings.lock.duration_minutes
 
         lock_info = await self.conn.fetchrow(
             f"""
@@ -151,7 +151,7 @@ class ActLockRepository(BaseRepository):
         if duration_minutes is None:
             from app.core.config import get_settings
             settings = get_settings()
-            duration_minutes = settings.act_lock_duration_minutes
+            duration_minutes = settings.lock.duration_minutes
 
         lock_info = await self.conn.fetchrow(
             f"""
