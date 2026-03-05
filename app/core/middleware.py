@@ -7,7 +7,7 @@ Middleware для FastAPI приложения.
 - Ограничения размера тела запроса (RequestSizeLimitMiddleware)
 """
 
-import threading
+import asyncio
 from datetime import datetime, timedelta
 
 from cachetools import TTLCache
@@ -15,7 +15,7 @@ from fastapi import Request
 from fastapi.responses import JSONResponse
 from starlette.middleware.base import BaseHTTPMiddleware
 
-from app.core.config import get_settings, setup_logging
+from app.core.config import Settings, get_settings, setup_logging
 
 settings = get_settings()
 logger = setup_logging(settings.server.log_level)
@@ -83,9 +83,9 @@ class RateLimitMiddleware(BaseHTTPMiddleware):
             ttl=settings.security.rate_limit_ttl
         )
 
-        # Блокировка для thread-safety TTLCache (не thread-safe по
-        # умолчанию).
-        self.lock = threading.Lock()
+        # asyncio.Lock — корректный примитив для async-кода.
+        # В отличие от threading.Lock, не блокирует event loop.
+        self.lock = asyncio.Lock()
 
         logger.info(
             f"Rate limiting инициализирован: {rate_limit} запросов/минуту, "
@@ -103,18 +103,18 @@ class RateLimitMiddleware(BaseHTTPMiddleware):
         Returns:
             HTTP ответ или 429 при превышении лимита
         """
-        client_ip = request.client.host
+        client_ip = request.client.host if request.client else "unknown"
         now = datetime.now()
+        cutoff_time = now - timedelta(minutes=1)
 
-        with self.lock:
+        async with self.lock:
             # Получаем или создаем список запросов для IP
             if client_ip not in self.requests:
                 self.requests[client_ip] = []
 
             ip_requests = self.requests[client_ip]
 
-            # Фильтруем запросы за последнюю минуту
-            cutoff_time = now - timedelta(minutes=1)
+            # Скользящее окно: отбрасываем метки старше 60 секунд
             recent_requests = [ts for ts in ip_requests if ts > cutoff_time]
 
             # Проверка лимита
