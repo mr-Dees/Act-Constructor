@@ -261,39 +261,6 @@ async def get_db() -> AsyncGenerator[asyncpg.Connection, None]:
         raise
 
 
-async def get_db_connection() -> asyncpg.Connection:
-    """
-    Альтернативный метод получения подключения (без context manager).
-
-    Returns:
-        Подключение из пула
-
-    Raises:
-        KerberosTokenExpiredError: Если токен протух
-        RuntimeError: Если пул не инициализирован
-
-    Note:
-        Вызывающий код должен сам закрыть подключение через conn.close()
-    """
-    pool = get_pool()
-
-    try:
-        return await pool.acquire()
-    except asyncpg.PostgresError as e:
-        error_message = str(e)
-
-        if _is_kerberos_token_expired(error_message):
-            logger.error(
-                "Kerberos токен протух при получении подключения. "
-                "Выполните 'kinit' для обновления."
-            )
-            raise KerberosTokenExpiredError(
-                "Kerberos токен протух. Выполните 'kinit' для обновления."
-            ) from e
-
-        raise
-
-
 async def create_tables_if_not_exist() -> None:
     """
     Создаёт таблицы если их нет, используя адаптер текущей СУБД.

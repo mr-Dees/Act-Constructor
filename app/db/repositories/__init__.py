@@ -1,7 +1,7 @@
 """
 Репозитории доступа к данным.
 
-Backward-compatible re-exports из доменных подпакетов.
+Re-exports из доменных подпакетов.
 """
 
 from app.db.repositories.acts import (
@@ -16,7 +16,6 @@ from app.db.connection import (
     init_db,
     close_db,
     get_db,
-    get_db_connection,
     create_tables_if_not_exist,
 )
 
@@ -25,7 +24,6 @@ __all__ = [
     "init_db",
     "close_db",
     "get_db",
-    "get_db_connection",
     "create_tables_if_not_exist",
     "ActCrudRepository",
     "ActLockRepository",

@@ -12,7 +12,6 @@ from app.db.connection import (
     init_db,
     close_db,
     get_db,
-    get_db_connection,
     create_tables_if_not_exist,
 )
 
@@ -21,6 +20,5 @@ __all__ = [
     "init_db",
     "close_db",
     "get_db",
-    "get_db_connection",
     "create_tables_if_not_exist",
 ]
