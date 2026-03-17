@@ -1,9 +1,7 @@
 """
-Пакет зависимостей FastAPI (Depends) для API v1.
+Shared зависимости FastAPI (Depends) для API v1.
 
-Содержит переиспользуемые зависимости:
-- Авторизация и извлечение username
-- Проверка доступа к ресурсам (по мере добавления)
+Доменные DI-зависимости живут в app/domains/*/deps.py.
 """
 
 from app.api.v1.deps.auth_deps import get_username

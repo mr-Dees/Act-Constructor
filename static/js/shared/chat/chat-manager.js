@@ -26,6 +26,9 @@ class ChatManager {
 
     static _historyKey = 'chat_history';
 
+    /** @type {Object<string, string>|null} Маппинг key→label баз знаний (загружается из DOM) */
+    static _knowledgeBaseMap = null;
+
     /** @type {string} HTML welcome-сообщения для восстановления при очистке */
     static _welcomeHtml = '';
 
@@ -174,6 +177,12 @@ class ChatManager {
             // Подключённые базы знаний из общих настроек
             body.knowledge_bases = this._getEnabledKnowledgeBases();
 
+            // Фильтрация tools по доменам текущей страницы
+            const domains = this._detectDomains();
+            if (domains) {
+                body.domains = domains;
+            }
+
             // Формируем URL через AppConfig (поддержка JupyterHub proxy)
             const url = typeof AppConfig !== 'undefined'
                 ? AppConfig.api.getUrl('api/v1/chat/message')
@@ -205,12 +214,44 @@ class ChatManager {
         }
     }
 
-    /** Маппинг ключей → label для баз знаний */
-    static _knowledgeBases = {
-        knowledge_base_oarb:    'База Знаний ОАРБ',
-        knowledge_base_sources: 'База знаний источников информации',
-        knowledge_base_tools:   'База знаний по инструментам'
-    };
+    /**
+     * Загружает маппинг key→label баз знаний из DOM (meta-тег или data-атрибуты)
+     * @returns {Object<string, string>}
+     * @private
+     */
+    static _getKnowledgeBaseMap() {
+        if (this._knowledgeBaseMap !== null) return this._knowledgeBaseMap;
+
+        this._knowledgeBaseMap = {};
+
+        // Источник 1: meta-тег chat-knowledge-bases (JSON массив)
+        const meta = document.querySelector('meta[name="chat-knowledge-bases"]');
+        if (meta) {
+            try {
+                const bases = JSON.parse(meta.content);
+                if (Array.isArray(bases)) {
+                    for (const kb of bases) {
+                        if (kb.key && kb.label) {
+                            this._knowledgeBaseMap[kb.key] = kb.label;
+                        }
+                    }
+                    return this._knowledgeBaseMap;
+                }
+            } catch { /* fallback ниже */ }
+        }
+
+        // Источник 2: data-атрибуты DOM-элементов (settings toggles)
+        const options = document.querySelectorAll('.settings-option[data-kb-key]');
+        for (const opt of options) {
+            const key = opt.dataset.kbKey;
+            const label = opt.dataset.kbLabel;
+            if (key && label) {
+                this._knowledgeBaseMap[key] = label;
+            }
+        }
+
+        return this._knowledgeBaseMap;
+    }
 
     /**
      * Читает включённые базы знаний из localStorage (общий ключ для всех страниц)
@@ -223,13 +264,32 @@ class ChatManager {
             if (!data) return [];
 
             const state = JSON.parse(data);
+            const kbMap = this._getKnowledgeBaseMap();
             const enabled = [];
-            for (const [key, label] of Object.entries(this._knowledgeBases)) {
+            for (const [key, label] of Object.entries(kbMap)) {
                 if (state[key]) enabled.push(label);
             }
             return enabled;
         } catch {
             return [];
+        }
+    }
+
+    /**
+     * Определяет список доменов для фильтрации tools из meta-тега.
+     * Бэкенд передаёт chat_domains через <meta name="chat-domains">.
+     * @returns {string[]|null} массив доменов или null (все tools)
+     * @private
+     */
+    static _detectDomains() {
+        const meta = document.querySelector('meta[name="chat-domains"]');
+        if (!meta) return null;
+
+        try {
+            const domains = JSON.parse(meta.content);
+            return Array.isArray(domains) ? domains : null;
+        } catch {
+            return null;
         }
     }
 

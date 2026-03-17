@@ -4,8 +4,8 @@
 Реализует интерфейс DatabaseAdapter для стандартного PostgreSQL.
 """
 
-import json
 import logging
+import re
 from pathlib import Path
 
 import asyncpg
@@ -18,45 +18,31 @@ logger = logging.getLogger("act_constructor.db.adapters.postgresql")
 class PostgreSQLAdapter(DatabaseAdapter):
     """Адаптер для работы с PostgreSQL."""
 
-    async def create_tables(self, conn: asyncpg.Connection) -> None:
-        """Создает таблицы из schema.sql для PostgreSQL."""
-        schema_path = (
-                Path(__file__).parent.parent
-                / "migrations"
-                / "postgresql"
-                / "acts"
-                / "schema.sql"
-        )
+    async def create_tables(self, conn: asyncpg.Connection, schema_paths: list[Path] | None = None) -> None:
+        """Создает таблицы из списка schema.sql для PostgreSQL."""
+        if not schema_paths:
+            return
 
-        if not schema_path.exists():
-            raise FileNotFoundError(f"Схема не найдена: {schema_path}")
+        for schema_path in schema_paths:
+            if not schema_path.exists():
+                logger.warning(f"Схема не найдена: {schema_path}, пропускаем")
+                continue
 
-        schema_sql = schema_path.read_text(encoding='utf-8')
+            schema_sql = schema_path.read_text(encoding='utf-8')
 
-        try:
-            await conn.execute(schema_sql)
-            logger.info("PostgreSQL схема создана успешно")
-        except asyncpg.DuplicateObjectError:
-            logger.info("PostgreSQL схема уже существует")
-        except Exception as e:
-            logger.error(f"Ошибка создания PostgreSQL схемы: {e}")
-            raise
+            # Пропускаем файлы без реальных SQL-операторов
+            if not re.sub(r'--[^\n]*', '', schema_sql).strip():
+                logger.debug(f"Пустая схема (только комментарии): {schema_path}, пропускаем")
+                continue
 
-    async def delete_act_cascade(
-            self,
-            conn: asyncpg.Connection,
-            act_id: int
-    ) -> None:
-        """
-        Удаляет акт используя ON DELETE CASCADE.
-
-        PostgreSQL автоматически удаляет связанные записи.
-        """
-        await conn.execute(
-            "DELETE FROM acts WHERE id = $1",
-            act_id
-        )
-        logger.debug(f"Акт ID={act_id} удален (PostgreSQL CASCADE)")
+            try:
+                await conn.execute(schema_sql)
+                logger.info(f"PostgreSQL схема создана: {schema_path.parent.parent.name}")
+            except asyncpg.DuplicateObjectError:
+                logger.info(f"PostgreSQL схема уже существует: {schema_path.parent.parent.name}")
+            except Exception as e:
+                logger.error(f"Ошибка создания PostgreSQL схемы {schema_path}: {e}")
+                raise
 
     def get_table_name(self, base_name: str) -> str:
         """Возвращает имя таблицы без префиксов."""
@@ -78,50 +64,11 @@ class PostgreSQLAdapter(DatabaseAdapter):
         """PostgreSQL поддерживает ON DELETE CASCADE."""
         return True
 
+    def supports_on_conflict(self) -> bool:
+        """PostgreSQL поддерживает INSERT ... ON CONFLICT DO UPDATE."""
+        return True
+
     async def get_current_schema(self, conn: asyncpg.Connection) -> str:
         """Возвращает текущую схему PostgreSQL."""
         schema = await conn.fetchval("SELECT current_schema()")
         return schema or "public"
-
-    async def upsert_invoice(
-            self,
-            conn: asyncpg.Connection,
-            table_name: str,
-            data: dict,
-            username: str,
-    ) -> asyncpg.Record:
-        """Upsert фактуры через INSERT ... ON CONFLICT DO UPDATE."""
-        metrics_json = json.dumps(data["metrics"], ensure_ascii=False)
-
-        return await conn.fetchrow(
-            f"""
-            INSERT INTO {table_name} (
-                act_id, node_id, node_number, db_type,
-                schema_name, table_name, metrics, created_by
-            )
-            VALUES ($1, $2, $3, $4, $5, $6, $7::jsonb, $8)
-            ON CONFLICT (act_id, node_id) DO UPDATE SET
-                node_number = EXCLUDED.node_number,
-                db_type = EXCLUDED.db_type,
-                schema_name = EXCLUDED.schema_name,
-                table_name = EXCLUDED.table_name,
-                metrics = EXCLUDED.metrics,
-                verification_status = 'pending',
-                updated_at = CURRENT_TIMESTAMP
-            RETURNING id, act_id, node_id, node_number, db_type,
-                      schema_name, table_name, metrics,
-                      verification_status, created_at, updated_at, created_by
-            """,
-            data["act_id"],
-            data["node_id"],
-            data.get("node_number"),
-            data["db_type"],
-            data["schema_name"],
-            data["table_name"],
-            metrics_json,
-            username,
-        )
-
-    def get_distributed_by_clause(self, table_name: str) -> str:
-        """PostgreSQL не использует DISTRIBUTED BY."""
-        return ""

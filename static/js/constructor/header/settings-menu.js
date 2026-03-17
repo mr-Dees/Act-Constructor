@@ -17,19 +17,11 @@ class SettingsMenuManager {
     /** Общий ключ localStorage для баз знаний (синхронизация с порталом) */
     static _kbStorageKey = 'assistant_knowledge_bases';
 
-    /** Маппинг id чекбокса → { key, label } */
-    static _knowledgeBases = {
-        assistantKnowledgeOarb:    { key: 'knowledge_base_oarb',    label: 'База Знаний ОАРБ' },
-        assistantKnowledgeSources: { key: 'knowledge_base_sources', label: 'База знаний источников информации' },
-        assistantKnowledgeTools:   { key: 'knowledge_base_tools',   label: 'База знаний по инструментам' }
-    };
+    /** @type {string[]} Ключи баз знаний (загружаются из DOM) */
+    static _kbKeys = [];
 
-    /** @private Состояние баз знаний */
-    static _kbState = {
-        knowledge_base_oarb: false,
-        knowledge_base_sources: false,
-        knowledge_base_tools: false
-    };
+    /** @type {Object<string, boolean>} Состояние баз знаний */
+    static _kbState = {};
 
     /**
      * Инициализирует меню настроек и подключает обработчики событий
@@ -113,7 +105,8 @@ class SettingsMenuManager {
         autoSavePeriodInput.value = this._state.autoSavePeriod;
         autoSavePeriodContainer.style.display = this._state.autoSave ? '' : 'none';
 
-        // Базы знаний AI-ассистента (общий localStorage с порталом)
+        // Базы знаний AI-ассистента (загружаем ключи из DOM, общий localStorage с порталом)
+        this._loadKbKeysFromDOM();
         this._loadKbState();
         this._applyKbState();
         this._setupKbToggles();
@@ -212,6 +205,24 @@ class SettingsMenuManager {
     }
 
     /**
+     * Загружает ключи баз знаний из data-атрибутов DOM-элементов
+     * @private
+     */
+    static _loadKbKeysFromDOM() {
+        this._kbKeys = [];
+        this._kbState = {};
+
+        const options = document.querySelectorAll('.settings-option[data-kb-key]');
+        for (const opt of options) {
+            const key = opt.dataset.kbKey;
+            if (key) {
+                this._kbKeys.push(key);
+                this._kbState[key] = false;
+            }
+        }
+    }
+
+    /**
      * Загружает состояние баз знаний из общего localStorage
      * @private
      */
@@ -222,7 +233,7 @@ class SettingsMenuManager {
 
             const saved = JSON.parse(data);
             if (saved && typeof saved === 'object') {
-                for (const key of Object.keys(this._kbState)) {
+                for (const key of this._kbKeys) {
                     if (typeof saved[key] === 'boolean') {
                         this._kbState[key] = saved[key];
                     }
@@ -250,25 +261,27 @@ class SettingsMenuManager {
      * @private
      */
     static _applyKbState() {
-        for (const [id, info] of Object.entries(this._knowledgeBases)) {
-            const checkbox = document.getElementById(id);
-            if (checkbox) {
-                checkbox.checked = !!this._kbState[info.key];
+        const checkboxes = document.querySelectorAll('.settings-option[data-kb-key] input[data-kb-key]');
+        for (const checkbox of checkboxes) {
+            const key = checkbox.dataset.kbKey;
+            if (key) {
+                checkbox.checked = !!this._kbState[key];
             }
         }
     }
 
     /**
-     * Обработчики change на тумблерах баз знаний
+     * Обработчики change на тумблерах баз знаний (используют data-kb-key)
      * @private
      */
     static _setupKbToggles() {
-        for (const [id, info] of Object.entries(this._knowledgeBases)) {
-            const checkbox = document.getElementById(id);
-            if (!checkbox) continue;
+        const checkboxes = document.querySelectorAll('.settings-option[data-kb-key] input[data-kb-key]');
+        for (const checkbox of checkboxes) {
+            const key = checkbox.dataset.kbKey;
+            if (!key) continue;
 
             checkbox.addEventListener('change', () => {
-                this._kbState[info.key] = checkbox.checked;
+                this._kbState[key] = checkbox.checked;
                 this._saveKbState();
             });
         }

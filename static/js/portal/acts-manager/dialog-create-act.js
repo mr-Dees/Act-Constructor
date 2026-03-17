@@ -61,7 +61,7 @@ class CreateActDialog extends DialogBase {
             const currentUser = window.env?.JUPYTERHUB_USER || AppConfig?.auth?.jupyterhubUser || "";
 
             // Используем правильный префикс роутера
-            const response = await fetch(AppConfig.api.getUrl(`/api/v1/acts_content/${actId}/content`), {
+            const response = await fetch(AppConfig.api.getUrl(`/api/v1/acts/${actId}/content`), {
                 headers: {
                     'X-JupyterHub-User': currentUser
                 }

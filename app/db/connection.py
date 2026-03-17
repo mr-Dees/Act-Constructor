@@ -261,19 +261,33 @@ async def get_db() -> AsyncGenerator[asyncpg.Connection, None]:
         raise
 
 
-async def create_tables_if_not_exist() -> None:
+async def create_tables_if_not_exist(domains=None) -> None:
     """
     Создаёт таблицы если их нет, используя адаптер текущей СУБД.
+
+    Args:
+        domains: Список DomainDescriptor для поиска schema.sql
 
     Raises:
         KerberosTokenExpiredError: Если токен протух во время создания таблиц
     """
+    from app.db.adapters.postgresql import PostgreSQLAdapter
+
     pool = get_pool()
     adapter = get_adapter()
+    db_type = "postgresql" if isinstance(adapter, PostgreSQLAdapter) else "greenplum"
+
+    schema_paths = []
+    if domains:
+        for d in domains:
+            if d.package_path:
+                path = d.package_path / "migrations" / db_type / "schema.sql"
+                if path.exists():
+                    schema_paths.append(path)
 
     try:
         async with pool.acquire() as conn:
-            await adapter.create_tables(conn)
+            await adapter.create_tables(conn, schema_paths)
 
         logger.info(
             f"Схема БД ({adapter.__class__.__name__}) создана/проверена успешно"

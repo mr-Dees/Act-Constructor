@@ -159,7 +159,7 @@ class InvoiceDialog extends DialogBase {
     static async _loadConfig(overlay) {
         if (!this._invoiceConfig) {
             try {
-                const resp = await fetch(AppConfig.api.getUrl('/api/v1/system/config/invoice'));
+                const resp = await fetch(AppConfig.api.getUrl('/api/v1/acts/config/invoice'));
                 if (resp.ok) {
                     this._invoiceConfig = await resp.json();
                 }

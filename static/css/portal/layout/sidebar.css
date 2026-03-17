@@ -131,6 +131,27 @@
     overflow-y: auto;
 }
 
+/* Группы навигации */
+.sidebar-nav-group-label {
+    display: block;
+    padding: 8px 16px 4px;
+    font-size: 11px;
+    text-transform: uppercase;
+    color: var(--text-secondary);
+    letter-spacing: 0.5px;
+    white-space: nowrap;
+    overflow: hidden;
+    opacity: 1;
+    transition: opacity var(--duration-fast) ease;
+}
+
+.landing-sidebar.collapsed .sidebar-nav-group-label {
+    opacity: 0;
+    height: 0;
+    padding: 0;
+    overflow: hidden;
+}
+
 .sidebar-nav-item {
     display: flex;
     align-items: center;

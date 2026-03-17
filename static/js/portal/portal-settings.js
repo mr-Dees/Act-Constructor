@@ -3,28 +3,22 @@
  *
  * Управляет выпадающим меню с тумблерами AI-ассистентов.
  * Состояние сохраняется в localStorage.
+ * Базы знаний читаются из DOM (data-атрибуты, сгенерированные бэкендом).
  */
 class LandingSettingsManager {
     static _storageKey = 'assistant_knowledge_bases';
 
-    /** Маппинг id чекбокса → { key, label } */
-    static _assistants = {
-        assistantKnowledgeOarb:    { key: 'knowledge_base_oarb',    label: 'База Знаний ОАРБ' },
-        assistantKnowledgeSources: { key: 'knowledge_base_sources', label: 'База знаний источников информации' },
-        assistantKnowledgeTools:   { key: 'knowledge_base_tools',   label: 'База знаний по инструментам' }
-    };
+    /** @type {Object<string, {key: string, label: string}>} Загружается из DOM */
+    static _assistants = {};
 
-    /** @type {{ knowledge_base_oarb: boolean, knowledge_base_sources: boolean, knowledge_base_tools: boolean }} */
-    static _state = {
-        knowledge_base_oarb: false,
-        knowledge_base_sources: false,
-        knowledge_base_tools: false
-    };
+    /** @type {Object<string, boolean>} */
+    static _state = {};
 
     /**
-     * Инициализация: загрузка состояния, привязка обработчиков, применение к чекбоксам
+     * Инициализация: загрузка баз знаний из DOM, состояния, привязка обработчиков
      */
     static init() {
+        this._loadAssistantsFromDOM();
         this._loadState();
         this._applyState();
 
@@ -35,6 +29,25 @@ class LandingSettingsManager {
         this._setupAssistantToggles();
 
         console.log('LandingSettingsManager: инициализация завершена');
+    }
+
+    /**
+     * Загружает маппинг баз знаний из data-атрибутов DOM-элементов
+     * @private
+     */
+    static _loadAssistantsFromDOM() {
+        this._assistants = {};
+        this._state = {};
+
+        const options = document.querySelectorAll('.settings-option[data-kb-key]');
+        for (const opt of options) {
+            const key = opt.dataset.kbKey;
+            const label = opt.dataset.kbLabel;
+            if (key && label) {
+                this._assistants[key] = { key, label };
+                this._state[key] = false;
+            }
+        }
     }
 
     /**
@@ -77,8 +90,8 @@ class LandingSettingsManager {
      */
     static getEnabledAssistants() {
         const enabled = [];
-        for (const [id, info] of Object.entries(this._assistants)) {
-            if (this._state[info.key]) {
+        for (const [key, info] of Object.entries(this._assistants)) {
+            if (this._state[key]) {
                 enabled.push(info.label);
             }
         }
@@ -153,16 +166,17 @@ class LandingSettingsManager {
     }
 
     /**
-     * Обработчики change на каждом тумблере
+     * Обработчики change на каждом тумблере (используют data-kb-key)
      * @private
      */
     static _setupAssistantToggles() {
-        for (const [id, info] of Object.entries(this._assistants)) {
-            const checkbox = document.getElementById(id);
-            if (!checkbox) continue;
+        const checkboxes = document.querySelectorAll('.settings-option[data-kb-key] input[data-kb-key]');
+        for (const checkbox of checkboxes) {
+            const key = checkbox.dataset.kbKey;
+            if (!key) continue;
 
             checkbox.addEventListener('change', () => {
-                this._state[info.key] = checkbox.checked;
+                this._state[key] = checkbox.checked;
                 this._saveState();
             });
         }
@@ -173,10 +187,11 @@ class LandingSettingsManager {
      * @private
      */
     static _applyState() {
-        for (const [id, info] of Object.entries(this._assistants)) {
-            const checkbox = document.getElementById(id);
-            if (checkbox) {
-                checkbox.checked = !!this._state[info.key];
+        const checkboxes = document.querySelectorAll('.settings-option[data-kb-key] input[data-kb-key]');
+        for (const checkbox of checkboxes) {
+            const key = checkbox.dataset.kbKey;
+            if (key) {
+                checkbox.checked = !!this._state[key];
             }
         }
     }

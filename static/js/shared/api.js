@@ -130,7 +130,7 @@ class APIClient {
     static async _generateSingleFormat(format, data) {
         try {
             const response = await fetch(AppConfig.api.getUrl(
-                    `/api/v1/acts_export/save_act?fmt=${format}`),
+                    `/api/v1/acts/export/save_act?fmt=${format}`),
                 {
                     method: 'POST',
                     headers: {'Content-Type': 'application/json'},
@@ -253,7 +253,7 @@ class APIClient {
     static async downloadFile(filename) {
         try {
             const response = await fetch(AppConfig.api.getUrl(
-                `/api/v1/acts_export/download/${filename}`)
+                `/api/v1/acts/export/download/${filename}`)
             );
 
             if (!response.ok) {
@@ -305,7 +305,7 @@ class APIClient {
         }
 
         try {
-            const resp = await fetch(AppConfig.api.getUrl(`/api/v1/acts_content/${actId}/content`), {
+            const resp = await fetch(AppConfig.api.getUrl(`/api/v1/acts/${actId}/content`), {
                 headers: {'X-JupyterHub-User': username}
             });
 
@@ -453,7 +453,7 @@ class APIClient {
         try {
             const data = AppState.exportData();
 
-            const resp = await fetch(AppConfig.api.getUrl(`/api/v1/acts_content/${actId}/content`), {
+            const resp = await fetch(AppConfig.api.getUrl(`/api/v1/acts/${actId}/content`), {
                 method: 'PUT',
                 headers: {
                     'Content-Type': 'application/json',
@@ -493,7 +493,7 @@ class APIClient {
 
             const data = AppState.exportData();
 
-            const resp = await fetch(AppConfig.api.getUrl(`/api/v1/acts_content/${actId}/content`), {
+            const resp = await fetch(AppConfig.api.getUrl(`/api/v1/acts/${actId}/content`), {
                 method: 'PUT',
                 headers: {
                     'Content-Type': 'application/json',
@@ -631,7 +631,7 @@ class APIClient {
         const username = AuthManager.getCurrentUser();
 
         const response = await fetch(
-            AppConfig.api.getUrl('/api/v1/acts_invoice/metrics'),
+            AppConfig.api.getUrl('/api/v1/acts/invoice/metrics'),
             {
                 headers: { 'X-JupyterHub-User': username }
             }
@@ -655,7 +655,7 @@ class APIClient {
         const username = AuthManager.getCurrentUser();
 
         const response = await fetch(
-            AppConfig.api.getUrl(`/api/v1/acts_invoice/tables/${dbType}`),
+            AppConfig.api.getUrl(`/api/v1/acts/invoice/tables/${dbType}`),
             {
                 headers: { 'X-JupyterHub-User': username }
             }
@@ -678,7 +678,7 @@ class APIClient {
     static async saveInvoice(data) {
         const username = AuthManager.getCurrentUser();
 
-        const response = await fetch(AppConfig.api.getUrl('/api/v1/acts_invoice/save'), {
+        const response = await fetch(AppConfig.api.getUrl('/api/v1/acts/invoice/save'), {
             method: 'POST',
             headers: {
                 'Content-Type': 'application/json',
@@ -704,7 +704,7 @@ class APIClient {
     static async verifyInvoice(invoiceId) {
         const username = AuthManager.getCurrentUser();
 
-        const response = await fetch(AppConfig.api.getUrl('/api/v1/acts_invoice/verify'), {
+        const response = await fetch(AppConfig.api.getUrl('/api/v1/acts/invoice/verify'), {
             method: 'POST',
             headers: {
                 'Content-Type': 'application/json',

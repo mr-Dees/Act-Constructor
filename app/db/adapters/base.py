@@ -5,6 +5,7 @@
 """
 
 from abc import ABC, abstractmethod
+from pathlib import Path
 
 import asyncpg
 
@@ -18,30 +19,13 @@ class DatabaseAdapter(ABC):
     """
 
     @abstractmethod
-    async def create_tables(self, conn: asyncpg.Connection) -> None:
+    async def create_tables(self, conn: asyncpg.Connection, schema_paths: list[Path]) -> None:
         """
-        Создает таблицы в БД согласно схеме для конкретной СУБД.
+        Создает таблицы в БД из списка SQL-схем.
 
         Args:
             conn: Подключение к базе данных
-        """
-        pass
-
-    @abstractmethod
-    async def delete_act_cascade(
-            self,
-            conn: asyncpg.Connection,
-            act_id: int
-    ) -> None:
-        """
-        Удаляет акт со всеми связанными данными.
-
-        PostgreSQL использует ON DELETE CASCADE.
-        Greenplum требует явного удаления в правильном порядке.
-
-        Args:
-            conn: Подключение к базе данных
-            act_id: ID акта для удаления
+            schema_paths: Пути к файлам schema.sql каждого домена
         """
         pass
 
@@ -98,6 +82,16 @@ class DatabaseAdapter(ABC):
         pass
 
     @abstractmethod
+    def supports_on_conflict(self) -> bool:
+        """
+        Проверяет поддержку INSERT ... ON CONFLICT DO UPDATE.
+
+        Returns:
+            True если СУБД поддерживает ON CONFLICT
+        """
+        pass
+
+    @abstractmethod
     async def get_current_schema(self, conn: asyncpg.Connection) -> str:
         """
         Возвращает текущую схему/namespace базы данных.
@@ -107,31 +101,6 @@ class DatabaseAdapter(ABC):
 
         Returns:
             Название текущей схемы
-        """
-        pass
-
-    @abstractmethod
-    async def upsert_invoice(
-            self,
-            conn: asyncpg.Connection,
-            table_name: str,
-            data: dict,
-            username: str,
-    ) -> asyncpg.Record:
-        """
-        Вставляет или обновляет фактуру (UPSERT по act_id + node_id).
-
-        PostgreSQL использует INSERT ... ON CONFLICT DO UPDATE.
-        Greenplum требует явного UPDATE + INSERT.
-
-        Args:
-            conn: Подключение к базе данных
-            table_name: Полное имя таблицы act_invoices
-            data: Словарь с данными фактуры
-            username: Имя пользователя
-
-        Returns:
-            Запись с данными сохраненной фактуры
         """
         pass
 
@@ -147,19 +116,3 @@ class DatabaseAdapter(ABC):
             Квалифицированное имя колонки (например, a.id)
         """
         return f"{table_alias}.{column}"
-
-    @abstractmethod
-    def get_distributed_by_clause(self, table_name: str) -> str:
-        """
-        Возвращает DISTRIBUTED BY clause для таблицы (только Greenplum).
-
-        PostgreSQL: пустая строка
-        Greenplum: DISTRIBUTED BY (column)
-
-        Args:
-            table_name: Базовое имя таблицы
-
-        Returns:
-            DISTRIBUTED BY clause или пустая строка
-        """
-        pass

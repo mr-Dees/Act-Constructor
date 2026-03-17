@@ -111,7 +111,7 @@ class LockManager {
      */
     static async _loadConfig() {
         try {
-            const response = await fetch(AppConfig.api.getUrl('/api/v1/system/config/lock'));
+            const response = await fetch(AppConfig.api.getUrl('/api/v1/acts/config/lock'));
             if (!response.ok) throw new Error('Не удалось загрузить настройки');
             this._config = await response.json();
             console.log('Настройки блокировок загружены:', this._config);
@@ -455,7 +455,7 @@ class LockManager {
             if (typeof AppState !== 'undefined' && AppState?.exportData) {
                 try {
                     const data = AppState.exportData();
-                    const saveResp = await fetch(AppConfig.api.getUrl(`/api/v1/acts_content/${this._actId}/content`), {
+                    const saveResp = await fetch(AppConfig.api.getUrl(`/api/v1/acts/${this._actId}/content`), {
                         method: 'PUT',
                         headers: {
                             'Content-Type': 'application/json',

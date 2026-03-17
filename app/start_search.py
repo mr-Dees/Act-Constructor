@@ -13,7 +13,7 @@ from datetime import date
 
 from app.core.config import get_settings
 from app.db.connection import init_db, close_db
-from app.integrations.ai_assistant import *
+from app.domains.acts.integrations.ai_assistant import *
 
 # Инициализируем настройки один раз на уровне модуля
 settings = get_settings()

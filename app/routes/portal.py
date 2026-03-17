@@ -1,21 +1,19 @@
 """
-HTML-роуты портальных страниц.
+HTML-роуты shared портальных страниц.
 
 Содержит маршруты для:
 - Стартовая страница (landing)
-- Управление актами (acts manager)
-- ЦК Фин.Рез. (заглушка)
-- ЦК Клиентский опыт (заглушка)
+
+Доменные HTML-роуты (/acts, /constructor, /ck-*) живут в app/domains/*/routes/.
 """
 
 from fastapi import APIRouter, Request
 from fastapi.responses import HTMLResponse
-from fastapi.templating import Jinja2Templates
 
-from app.core.config import get_settings
+from app.core.navigation import get_knowledge_bases_as_dicts, get_nav_items_grouped
+from app.core.templating import get_templates
 
-settings = get_settings()
-templates = Jinja2Templates(directory=str(settings.templates_dir))
+templates = get_templates()
 
 router = APIRouter()
 
@@ -34,59 +32,8 @@ async def show_landing(request: Request):
             "request": request,
             "active_page": "landing",
             "topbar_title": "Рабочее пространство",
-        }
-    )
-
-
-@router.get("/acts", response_class=HTMLResponse)
-async def show_acts_manager(request: Request):
-    """
-    Страница управления актами.
-
-    Отображает список актов пользователя для выбора.
-    Авторизация проверяется фронтендом через /api/v1/auth/me.
-    """
-    return templates.TemplateResponse(
-        "portal/acts-manager/acts_manager.html",
-        {
-            "request": request,
-            "active_page": "acts",
-            "topbar_title": "Управление актами",
-        }
-    )
-
-
-@router.get("/ck-fin-res", response_class=HTMLResponse)
-async def show_ck_fin_res(request: Request):
-    """
-    Страница ЦК Фин.Рез.
-
-    Раздел в разработке — отображает заглушку.
-    Авторизация проверяется фронтендом через /api/v1/auth/me.
-    """
-    return templates.TemplateResponse(
-        "portal/ck/ck_fin_res.html",
-        {
-            "request": request,
-            "active_page": "ck_fin_res",
-            "topbar_title": "ЦК Фин.Рез.",
-        }
-    )
-
-
-@router.get("/ck-client-experience", response_class=HTMLResponse)
-async def show_ck_client_experience(request: Request):
-    """
-    Страница ЦК Клиентский опыт.
-
-    Раздел в разработке — отображает заглушку.
-    Авторизация проверяется фронтендом через /api/v1/auth/me.
-    """
-    return templates.TemplateResponse(
-        "portal/ck/ck_client_experience.html",
-        {
-            "request": request,
-            "active_page": "ck_client_experience",
-            "topbar_title": "ЦК Клиентский опыт",
+            "nav_groups": get_nav_items_grouped(),
+            "chat_domains": None,
+            "knowledge_bases": get_knowledge_bases_as_dicts(),
         }
     )

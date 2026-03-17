@@ -144,7 +144,7 @@ class HeaderExit {
                     if (username) {
                         const data = AppState.exportData();
                         const saveResp = await fetch(
-                            AppConfig.api.getUrl(`/api/v1/acts_content/${window.currentActId}/content`),
+                            AppConfig.api.getUrl(`/api/v1/acts/${window.currentActId}/content`),
                             {
                                 method: 'PUT',
                                 headers: {

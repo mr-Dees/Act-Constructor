@@ -4,8 +4,8 @@
 Реализует интерфейс DatabaseAdapter с учетом специфики MPP-архитектуры.
 """
 
-import json
 import logging
+import re
 from pathlib import Path
 
 import asyncpg
@@ -33,101 +33,42 @@ class GreenplumAdapter(DatabaseAdapter):
             f"schema={schema}, prefix={table_prefix}"
         )
 
-    async def create_tables(self, conn: asyncpg.Connection) -> None:
+    async def create_tables(self, conn: asyncpg.Connection, schema_paths: list[Path] | None = None) -> None:
         """
-        Создает таблицы из schema.sql для Greenplum.
+        Создает таблицы из списка schema.sql для Greenplum.
 
         Сначала проверяет существование основной таблицы.
         Если таблицы уже есть - пропускает создание.
         """
-        # Проверяем существование основной таблицы
-        table_exists = await conn.fetchval(
-            """
-            SELECT EXISTS (
-                SELECT 1 
-                FROM pg_tables 
-                WHERE schemaname = $1 
-                AND tablename = $2
-            )
-            """,
-            self.schema,
-            f"{self.table_prefix}acts"
-        )
-
-        if table_exists:
-            logger.info(
-                f"Таблицы в {self.schema}.{self.table_prefix}* уже существуют, "
-                f"пропускаем создание"
-            )
+        if not schema_paths:
             return
 
-        # Таблиц нет - создаем
-        schema_path = (
-                Path(__file__).parent.parent
-                / "migrations"
-                / "greenplum"
-                / "acts"
-                / "schema.sql"
-        )
+        for schema_path in schema_paths:
+            if not schema_path.exists():
+                logger.warning(f"Схема не найдена: {schema_path}, пропускаем")
+                continue
 
-        if not schema_path.exists():
-            raise FileNotFoundError(f"Схема не найдена: {schema_path}")
+            schema_sql = schema_path.read_text(encoding='utf-8')
 
-        schema_sql = schema_path.read_text(encoding='utf-8')
+            # Подставляем схему и префикс
+            schema_sql = schema_sql.replace("{SCHEMA}", self.schema)
+            schema_sql = schema_sql.replace("{PREFIX}", self.table_prefix)
 
-        # Подставляем схему и префикс
-        schema_sql = schema_sql.replace("{SCHEMA}", self.schema)
-        schema_sql = schema_sql.replace("{PREFIX}", self.table_prefix)
+            # Пропускаем файлы без реальных SQL-операторов
+            if not re.sub(r'--[^\n]*', '', schema_sql).strip():
+                logger.debug(f"Пустая схема (только комментарии): {schema_path}, пропускаем")
+                continue
 
-        try:
-            await conn.execute(schema_sql)
-            logger.info("Greenplum таблицы созданы успешно")
-        except asyncpg.DuplicateTableError as e:
-            logger.info(f"Некоторые таблицы Greenplum уже существуют: {e}")
-        except asyncpg.DuplicateObjectError as e:
-            logger.info(f"Некоторые объекты Greenplum уже существуют: {e}")
-        except Exception as e:
-            logger.error(f"Ошибка создания Greenplum схемы: {e}")
-            raise
-
-    async def delete_act_cascade(
-            self,
-            conn: asyncpg.Connection,
-            act_id: int
-    ) -> None:
-        """
-        Удаляет акт с явным удалением связанных записей.
-
-        Greenplum не поддерживает ON DELETE CASCADE,
-        поэтому удаляем в правильном порядке.
-        """
-        async with conn.transaction():
-            # Порядок важен: сначала зависимые таблицы
-            tables_to_delete = [
-                "act_invoices",
-                "act_violations",
-                "act_textblocks",
-                "act_tables",
-                "act_tree",
-                "act_directives",
-                "audit_team_members",
-            ]
-
-            for table in tables_to_delete:
-                table_name = self.get_table_name(table)
-                result = await conn.execute(
-                    f"DELETE FROM {table_name} WHERE act_id = $1",
-                    act_id
-                )
-                logger.debug(f"Удалено из {table}: {result}")
-
-            # Финальное удаление акта
-            acts_table = self.get_table_name("acts")
-            await conn.execute(
-                f"DELETE FROM {acts_table} WHERE id = $1",
-                act_id
-            )
-            logger.debug(f"Акт ID={act_id} удален (Greenplum explicit cascade)")
+            try:
+                await conn.execute(schema_sql)
+                logger.info(f"Greenplum таблицы созданы: {schema_path.parent.parent.name}")
+            except asyncpg.DuplicateTableError as e:
+                logger.info(f"Некоторые таблицы Greenplum уже существуют: {e}")
+            except asyncpg.DuplicateObjectError as e:
+                logger.info(f"Некоторые объекты Greenplum уже существуют: {e}")
+            except Exception as e:
+                logger.error(f"Ошибка создания Greenplum схемы {schema_path}: {e}")
+                raise
 
     def get_table_name(self, base_name: str) -> str:
         """
@@ -159,83 +100,10 @@ class GreenplumAdapter(DatabaseAdapter):
         """Greenplum НЕ поддерживает ON DELETE CASCADE."""
         return False
 
+    def supports_on_conflict(self) -> bool:
+        """Greenplum НЕ поддерживает INSERT ... ON CONFLICT DO UPDATE."""
+        return False
+
     async def get_current_schema(self, conn: asyncpg.Connection) -> str:
         """Возвращает настроенную схему Greenplum."""
         return self.schema
-
-    async def upsert_invoice(
-            self,
-            conn: asyncpg.Connection,
-            table_name: str,
-            data: dict,
-            username: str,
-    ) -> asyncpg.Record:
-        """
-        Upsert фактуры через UPDATE + INSERT (без ON CONFLICT).
-
-        Greenplum не поддерживает INSERT ... ON CONFLICT DO UPDATE.
-        """
-        metrics_json = json.dumps(data["metrics"], ensure_ascii=False)
-
-        # Попытка UPDATE существующей записи
-        row = await conn.fetchrow(
-            f"""
-            UPDATE {table_name} SET
-                node_number = $3,
-                db_type = $4,
-                schema_name = $5,
-                table_name = $6,
-                metrics = $7::jsonb,
-                verification_status = 'pending',
-                updated_at = CURRENT_TIMESTAMP
-            WHERE act_id = $1 AND node_id = $2
-            RETURNING id, act_id, node_id, node_number, db_type,
-                      schema_name, table_name, metrics,
-                      verification_status, created_at, updated_at, created_by
-            """,
-            data["act_id"],
-            data["node_id"],
-            data.get("node_number"),
-            data["db_type"],
-            data["schema_name"],
-            data["table_name"],
-            metrics_json,
-        )
-
-        if row:
-            return row
-
-        # Запись не найдена — INSERT
-        return await conn.fetchrow(
-            f"""
-            INSERT INTO {table_name} (
-                act_id, node_id, node_number, db_type,
-                schema_name, table_name, metrics, created_by
-            )
-            VALUES ($1, $2, $3, $4, $5, $6, $7::jsonb, $8)
-            RETURNING id, act_id, node_id, node_number, db_type,
-                      schema_name, table_name, metrics,
-                      verification_status, created_at, updated_at, created_by
-            """,
-            data["act_id"],
-            data["node_id"],
-            data.get("node_number"),
-            data["db_type"],
-            data["schema_name"],
-            data["table_name"],
-            metrics_json,
-            username,
-        )
-
-    def get_distributed_by_clause(self, table_name: str) -> str:
-        """
-        Возвращает DISTRIBUTED BY clause для оптимального распределения.
-
-        Стратегия распределения:
-        - acts: по id (km_number_digit обновляется, не может быть dist key)
-        - Дочерние таблицы: по act_id (act_id никогда не обновляется,
-          JOIN с acts становится локальным на сегменте, позволяет UNIQUE constraints)
-        """
-        if table_name.endswith("acts"):
-            return "DISTRIBUTED BY (id)"
-        return "DISTRIBUTED BY (act_id)"

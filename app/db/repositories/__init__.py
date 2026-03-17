@@ -1,32 +1,12 @@
 """
 Репозитории доступа к данным.
 
-Re-exports из доменных подпакетов.
+Доменные репозитории живут в app/domains/*/repositories/.
+Здесь остается только shared BaseRepository.
 """
 
-from app.db.repositories.acts import (
-    ActCrudRepository,
-    ActLockRepository,
-    ActAccessRepository,
-    ActInvoiceRepository,
-)
-
-from app.db.connection import (
-    get_pool,
-    init_db,
-    close_db,
-    get_db,
-    create_tables_if_not_exist,
-)
+from app.db.repositories.base import BaseRepository
 
 __all__ = [
-    "get_pool",
-    "init_db",
-    "close_db",
-    "get_db",
-    "create_tables_if_not_exist",
-    "ActCrudRepository",
-    "ActLockRepository",
-    "ActAccessRepository",
-    "ActInvoiceRepository",
+    "BaseRepository",
 ]

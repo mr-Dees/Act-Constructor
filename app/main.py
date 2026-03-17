@@ -4,9 +4,11 @@
 Этот модуль создает и конфигурирует основное приложение FastAPI,
 подключает маршруты API и HTML-роуты, статические файлы,
 настраивает middleware и обработчики ошибок.
+Домены обнаруживаются автоматически из app/domains/.
 """
 
 from contextlib import asynccontextmanager
+from pathlib import Path
 
 from fastapi import FastAPI, Request
 from fastapi.responses import FileResponse, JSONResponse
@@ -15,12 +17,15 @@ from fastapi.staticfiles import StaticFiles
 from app.api.v1.endpoints.auth import get_current_user_from_env
 from app.api.v1.routes import api_router as api_v1_router
 from app.core.config import get_settings, setup_logging
+from app.core.domain_registry import discover_domains, register_domains
 from app.core.middleware import (
     HTTPSRedirectMiddleware,
     RateLimitMiddleware,
     RequestSizeLimitMiddleware
 )
-from app.core.exceptions import ActConstructorError
+from asyncpg import UniqueViolationError
+
+from app.core.exceptions import AppError
 from app.db.connection import (
     init_db,
     close_db,
@@ -28,7 +33,6 @@ from app.db.connection import (
     KerberosTokenExpiredError
 )
 from app.routes.portal import router as portal_router
-from app.routes.constructor import router as constructor_router
 
 # Инициализируем настройки и логирование один раз на уровне модуля
 settings = get_settings()
@@ -37,6 +41,9 @@ logger = setup_logging(settings.server.log_level)
 root_path = ''
 if settings.database.type == 'greenplum':
     root_path = f"/user/{get_current_user_from_env(truncate=False)}/proxy/{settings.server.port}"
+
+# Директория доменов
+_domains_dir = Path(__file__).resolve().parent / "domains"
 
 
 @asynccontextmanager
@@ -48,14 +55,41 @@ async def lifespan(app: FastAPI):
     logger.info("Запуск приложения Act Constructor")
     settings.ensure_directories()
 
+    # discover_domains() вызывается повторно (первый раз — в create_app для роутеров).
+    # Результат кэшируется в _domains, здесь нужен для lifecycle и БД.
+    domains = discover_domains(_domains_dir)
+    logger.info(f"Обнаружено доменов: {len(domains)}")
+
+    # Список успешно стартовавших доменов — используется и в startup-откате, и в shutdown
+    started: list = []
+
     # ИНИЦИАЛИЗАЦИЯ БД
     try:
         await init_db(settings)
         logger.info("База данных инициализирована")
 
         # СОЗДАНИЕ ТАБЛИЦ ЕСЛИ НЕ СУЩЕСТВУЮТ
-        await create_tables_if_not_exist()
+        await create_tables_if_not_exist(domains)
         logger.info("Схема базы данных проверена")
+
+        # Запуск доменов с откатом при частичной ошибке:
+        # если on_startup домена N падает, вызываем on_shutdown для 1..N-1
+        try:
+            for d in domains:
+                if d.on_startup:
+                    await d.on_startup(app)
+                started.append(d)
+        except Exception:
+            logger.exception(
+                "Ошибка при запуске домена, откат инициализированных доменов"
+            )
+            for d in reversed(started):
+                if d.on_shutdown:
+                    try:
+                        await d.on_shutdown(app)
+                    except Exception:
+                        logger.exception(f"Ошибка при откате домена {d.name}")
+            raise
 
         logger.info("Приложение успешно инициализировано")
 
@@ -85,26 +119,22 @@ async def lifespan(app: FastAPI):
     # Shutdown
     logger.info("Завершение работы приложения Act Constructor")
 
+    # Завершение доменов в обратном порядке (только успешно стартовавшие)
+    for d in reversed(started):
+        if d.on_shutdown:
+            try:
+                await d.on_shutdown(app)
+            except Exception:
+                logger.exception(f"Ошибка при завершении домена {d.name}")
+
     # Закрываем пул БД
     await close_db()
     logger.info("Database pool закрыт")
-
-    # Закрываем ThreadPoolExecutor
-    from app.services.acts.export_service import executor
-    executor.shutdown(wait=True, cancel_futures=False)
-    logger.info("ThreadPoolExecutor корректно закрыт")
 
 
 def create_app() -> FastAPI:
     """
     Создает и конфигурирует экземпляр FastAPI приложения.
-
-    Выполняет следующие действия:
-    - Создает приложение с метаданными из настроек
-    - Монтирует статические файлы (CSS, JS, изображения)
-    - Подключает HTML-роуты (портал, конструктор)
-    - Подключает API роутеры с префиксом версии
-    - Добавляет middleware для контроля нагрузки
 
     Returns:
         Полностью сконфигурированное приложение
@@ -153,11 +183,7 @@ def create_app() -> FastAPI:
             request: Request,
             exc: KerberosTokenExpiredError
     ):
-        """
-        Обработчик для протухшего Kerberos токена.
-
-        Возвращает понятное сообщение пользователю с инструкциями.
-        """
+        """Обработчик для протухшего Kerberos токена."""
         logger.warning(
             f"Kerberos токен протух во время запроса: {request.url.path}"
         )
@@ -182,20 +208,33 @@ def create_app() -> FastAPI:
             }
         )
 
-    @app.exception_handler(ActConstructorError)
-    async def act_constructor_error_handler(request: Request, exc: ActConstructorError) -> JSONResponse:
-        """Единый обработчик всех доменных исключений Act Constructor."""
+    @app.exception_handler(AppError)
+    async def app_error_handler(request: Request, exc: AppError) -> JSONResponse:
+        """Единый обработчик всех доменных исключений."""
         return JSONResponse(status_code=exc.status_code, content=exc.to_detail())
 
-    # Подключение HTML-роутов
-    app.include_router(portal_router)
-    app.include_router(constructor_router)
+    @app.exception_handler(UniqueViolationError)
+    async def unique_violation_handler(request: Request, exc: UniqueViolationError) -> JSONResponse:
+        """Fallback для неизвестных конфликтов уникальности из БД."""
+        logger.warning(f"UniqueViolationError: {exc} (path: {request.url.path})")
+        return JSONResponse(
+            status_code=409,
+            content={"detail": "Запись с такими данными уже существует"},
+        )
 
-    # Подключение API роутеров версии 1 с префиксом /api/v1
+    # Подключение shared HTML-роутов (лендинг, CK-заглушки)
+    app.include_router(portal_router)
+
+    # Подключение shared API роутеров (auth, chat, system)
     app.include_router(
         api_v1_router,
         prefix=settings.server.api_v1_prefix
     )
+
+    # discover_domains() вызывается здесь для регистрации роутеров при создании app.
+    # Повторный вызов в lifespan() (для БД и lifecycle) использует кэш _domains.
+    domains = discover_domains(_domains_dir)
+    register_domains(app, domains, settings.server.api_v1_prefix)
 
     return app
 

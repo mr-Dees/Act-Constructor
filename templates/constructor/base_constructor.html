@@ -3,6 +3,8 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="chat-domains" content="{{ chat_domains | tojson if chat_domains is defined else 'null' }}">
+    <meta name="chat-knowledge-bases" content="{{ knowledge_bases | tojson if knowledge_bases is defined else '[]' }}">
     <title>{% block title %}Конструктор актов{% endblock %}</title>
 
     <!-- Основные стили -->

@@ -1,13 +1,6 @@
 """
 Бизнес-логика приложения.
 
-Содержит сервисы для работы с актами и хранилищем файлов.
+Доменные сервисы живут в app/domains/*/services/.
+Здесь остаются только shared сервисы.
 """
-
-from app.services.acts.export_service import ExportService
-from app.services.acts.storage_service import StorageService
-
-__all__ = [
-    "ExportService",
-    "StorageService",
-]
