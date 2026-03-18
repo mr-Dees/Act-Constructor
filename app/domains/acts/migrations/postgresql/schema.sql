@@ -466,6 +466,26 @@ INSERT INTO t_db_oarb_ua_violation_metric_dict (code, metric_name, metric_group)
 ON CONFLICT DO NOTHING;
 
 -- ============================================================================
+-- ТАБЛИЦА АУДИТ-ЛОГА
+-- ============================================================================
+
+CREATE TABLE IF NOT EXISTS audit_log (
+    id SERIAL PRIMARY KEY,
+    act_id INTEGER,
+    action VARCHAR(50) NOT NULL,
+    username VARCHAR(50) NOT NULL,
+    details JSONB DEFAULT '{}',
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+
+COMMENT ON TABLE audit_log IS 'Лог чувствительных операций для compliance';
+COMMENT ON COLUMN audit_log.act_id IS 'ID акта (NULL для системных событий)';
+COMMENT ON COLUMN audit_log.action IS 'Тип операции: create, update, delete, duplicate, lock, unlock';
+COMMENT ON COLUMN audit_log.username IS 'Пользователь, выполнивший операцию';
+COMMENT ON COLUMN audit_log.details IS 'JSONB с деталями операции';
+COMMENT ON COLUMN audit_log.created_at IS 'Время операции';
+
+-- ============================================================================
 -- ИНДЕКСЫ ДЛЯ ОПТИМИЗАЦИИ ЗАПРОСОВ
 -- ============================================================================
 
@@ -646,6 +666,20 @@ CREATE INDEX IF NOT EXISTS idx_act_invoices_audit_act_id
     WHERE audit_act_id IS NOT NULL;
 
 COMMENT ON INDEX idx_act_invoices_audit_act_id IS 'Индекс для поиска фактур по идентификатору аудита';
+
+-- Индексы на audit_log
+CREATE INDEX IF NOT EXISTS idx_audit_log_act_id
+    ON audit_log(act_id)
+    WHERE act_id IS NOT NULL;
+
+CREATE INDEX IF NOT EXISTS idx_audit_log_username
+    ON audit_log(username);
+
+CREATE INDEX IF NOT EXISTS idx_audit_log_action
+    ON audit_log(action);
+
+CREATE INDEX IF NOT EXISTS idx_audit_log_created_at
+    ON audit_log(created_at);
 
 -- GIN индексы на JSONB для полнотекстового поиска
 CREATE INDEX IF NOT EXISTS idx_act_tree_data

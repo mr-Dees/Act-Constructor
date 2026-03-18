@@ -5,7 +5,9 @@
 в файловой системе.
 """
 
+import json
 import logging
+import secrets
 from datetime import datetime
 from pathlib import Path
 
@@ -43,6 +45,57 @@ class StorageService:
         self.storage_dir.mkdir(parents=True, exist_ok=True)
         logger.info(f"StorageService инициализирован: {self.storage_dir}")
 
+    def _generate_filename(self, prefix: str, extension: str) -> str:
+        """
+        Генерирует уникальное имя файла с временной меткой и случайным токеном.
+
+        Формат: {prefix}_{YYYYMMDD_HHMMSS}_{hex_token}.{extension}
+
+        Args:
+            prefix: Префикс имени файла
+            extension: Расширение файла (без точки)
+
+        Returns:
+            Уникальное имя файла
+        """
+        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        token = secrets.token_hex(4)
+        return f"{prefix}_{timestamp}_{token}.{extension}"
+
+    @property
+    def _mapping_path(self) -> Path:
+        """Путь к файлу маппинга filename → act_id."""
+        return self.storage_dir / ".file_mapping.json"
+
+    def _load_mapping(self) -> dict:
+        """Загружает маппинг filename → act_id из JSON-файла."""
+        if self._mapping_path.exists():
+            try:
+                return json.loads(self._mapping_path.read_text(encoding='utf-8'))
+            except (json.JSONDecodeError, OSError):
+                logger.warning("Не удалось прочитать маппинг файлов")
+        return {}
+
+    def _save_mapping(self, mapping: dict) -> None:
+        """Сохраняет маппинг filename → act_id в JSON-файл."""
+        try:
+            self._mapping_path.write_text(
+                json.dumps(mapping, ensure_ascii=False), encoding='utf-8'
+            )
+        except OSError:
+            logger.exception("Не удалось сохранить маппинг файлов")
+
+    def register_file(self, filename: str, act_id: int) -> None:
+        """Регистрирует связь filename → act_id."""
+        mapping = self._load_mapping()
+        mapping[filename] = act_id
+        self._save_mapping(mapping)
+
+    def get_act_id_for_file(self, filename: str) -> int | None:
+        """Возвращает act_id для файла или None."""
+        mapping = self._load_mapping()
+        return mapping.get(filename)
+
     def save(
             self,
             content: str,
@@ -52,7 +105,7 @@ class StorageService:
         """
         Сохраняет текстовое содержимое в файл с временной меткой.
 
-        Формат имени файла: {prefix}_{YYYYMMDD_HHMMSS}.{extension}
+        Формат имени файла: {prefix}_{YYYYMMDD_HHMMSS}_{hex_token}.{extension}
 
         Args:
             content: Текстовое содержимое для сохранения
@@ -65,9 +118,8 @@ class StorageService:
         Raises:
             Exception: При ошибке записи файла
         """
-        # Генерация уникального имени на основе текущего времени
-        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-        filename = f"{prefix}_{timestamp}.{extension}"
+        # Генерация уникального имени с временной меткой и токеном
+        filename = self._generate_filename(prefix, extension)
         filepath = self.storage_dir / filename
 
         try:
@@ -93,9 +145,8 @@ class StorageService:
         Raises:
             Exception: При ошибке сохранения документа
         """
-        # Генерация уникального имени на основе текущего времени
-        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-        filename = f"{prefix}_{timestamp}.docx"
+        # Генерация уникального имени с временной меткой и токеном
+        filename = self._generate_filename(prefix, "docx")
         filepath = self.storage_dir / filename
 
         try:

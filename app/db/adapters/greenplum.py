@@ -93,7 +93,7 @@ class GreenplumAdapter(DatabaseAdapter):
                 "GIN индекс в Greenplum может быть медленным, "
                 "рассмотрите альтернативы"
             )
-            return "GIN"
+            return "BTREE"
         return index_type
 
     def supports_cascade_delete(self) -> bool:

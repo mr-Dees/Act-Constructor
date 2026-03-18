@@ -5,7 +5,7 @@
 ACTS__* префикс в .env файле.
 """
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 
 
 class LockSettings(BaseModel):
@@ -67,6 +67,18 @@ class InvoiceSettings(BaseModel):
     hive_registry_table: str = Field(default="t_db_oarb_ua_hadoop_tables")
     hive_registry_col_table: str = Field(default="table_name")
     metric_dict_table: str = Field(default="t_db_oarb_ua_violation_metric_dict")
+
+    @field_validator(
+        'hive_schema', 'gp_schema', 'hive_registry_schema',
+        'hive_registry_table', 'hive_registry_col_table', 'metric_dict_table',
+    )
+    @classmethod
+    def validate_sql_identifiers(cls, v: str) -> str:
+        """Проверяет что значение является безопасным SQL-идентификатором."""
+        from app.db.utils.sql_utils import validate_sql_identifier
+        if not validate_sql_identifier(v):
+            raise ValueError(f"Небезопасный SQL-идентификатор в настройках: {v!r}")
+        return v
 
 
 class ActsSettings(BaseModel):

@@ -12,9 +12,12 @@ from typing import Literal
 from fastapi import APIRouter, Query, HTTPException, Depends
 from fastapi.responses import FileResponse
 
+from app.api.v1.deps.auth_deps import get_username
 from app.core.config import get_settings, Settings
 from app.core.exceptions import AppError
 from app.core.settings_registry import get as get_domain_settings
+from app.db.connection import get_db
+from app.domains.acts.repositories.act_access import ActAccessRepository
 from app.domains.acts.settings import ActsSettings
 from app.domains.acts.utils import ActTreeUtils
 from app.domains.acts.schemas.act_content import ActDataSchema, ActSaveResponse
@@ -45,7 +48,13 @@ async def save_act(
             "txt",
             description="Формат сохранения файла"
         ),
+        act_id: int | None = Query(
+            None,
+            description="ID акта для контроля доступа при скачивании"
+        ),
+        username: str = Depends(get_username),
         act_service: ExportService = Depends(get_act_service),
+        storage: StorageService = Depends(get_storage_service),
         settings: Settings = Depends(get_settings)
 ) -> ActSaveResponse:
     """
@@ -55,7 +64,10 @@ async def save_act(
         data: Данные акта (дерево структуры, таблицы, текстовые блоки,
             нарушения)
         fmt: Формат экспорта - 'txt', 'md' или 'docx'
+        act_id: ID акта для привязки файла к контролю доступа
+        username: Имя пользователя (из авторизации)
         act_service: Сервис для работы с актами (injected)
+        storage: Сервис хранения файлов (injected)
         settings: Настройки приложения (injected)
 
     Returns:
@@ -102,6 +114,11 @@ async def save_act(
             )
 
         logger.info(f"Акт успешно сохранен: {result.filename}")
+
+        # Регистрируем связь файла с актом для контроля доступа при скачивании
+        if act_id is not None:
+            storage.register_file(result.filename, act_id)
+
         return result
 
     except HTTPException:
@@ -121,17 +138,20 @@ async def save_act(
 @router.get("/download/{filename}")
 async def download_act(
         filename: str,
+        username: str = Depends(get_username),
         storage: StorageService = Depends(get_storage_service),
         settings: Settings = Depends(get_settings)
 ) -> FileResponse:
     """
     Скачивает сохраненный файл акта.
 
-    Использует per-worker semaphore для ограничения одновременных
-    файловых операций.
+    Проверяет авторизацию пользователя и его доступ к акту,
+    которому принадлежит файл. Использует per-worker semaphore
+    для ограничения одновременных файловых операций.
 
     Args:
         filename: Имя файла для скачивания
+        username: Имя пользователя (из авторизации)
         storage: Сервис хранения (injected)
         settings: Настройки приложения (injected)
 
@@ -139,7 +159,8 @@ async def download_act(
         Файл для скачивания с корректным MIME-типом
 
     Raises:
-        HTTPException: Для небезопасных имен (400) или если файл не найден (404)
+        HTTPException: 401 без авторизации, 403 нет доступа,
+            400 небезопасное имя, 404 файл не найден
     """
     # Создаем per-worker semaphore для ограничения файловых операций.
     # В multiprocessing каждый worker имеет свой event loop и свой
@@ -151,7 +172,7 @@ async def download_act(
 
     async with download_act._semaphore:
         try:
-            logger.info(f"Запрос на скачивание файла: {filename}")
+            logger.info(f"Запрос на скачивание файла: {filename} от пользователя {username}")
 
             # Валидация и получение безопасного пути
             file_path = storage.get_file_path(filename)
@@ -161,6 +182,22 @@ async def download_act(
                 detail = "Некорректное имя файла" if not is_valid else "Файл не найден"
                 logger.warning(f"Отказ в доступе к файлу: {filename} (код: {status_code})")
                 raise HTTPException(status_code=status_code, detail=detail)
+
+            # Проверка доступа пользователя к акту, которому принадлежит файл
+            act_id = storage.get_act_id_for_file(filename)
+            if act_id is not None:
+                async with get_db() as conn:
+                    access_repo = ActAccessRepository(conn)
+                    has_access = await access_repo.check_user_access(act_id, username)
+                    if not has_access:
+                        logger.warning(
+                            f"Отказ в скачивании файла {filename}: "
+                            f"пользователь {username} не имеет доступа к акту {act_id}"
+                        )
+                        raise HTTPException(
+                            status_code=403,
+                            detail="Нет доступа к файлу"
+                        )
 
             # Определяем MIME-тип по расширению файла
             mime_types = {
@@ -173,7 +210,7 @@ async def download_act(
                 'application/octet-stream'
             )
 
-            logger.info(f"Файл {filename} отправлен на скачивание")
+            logger.info(f"Файл {filename} отправлен на скачивание пользователю {username}")
 
             # Возвращаем файл для скачивания
             return FileResponse(

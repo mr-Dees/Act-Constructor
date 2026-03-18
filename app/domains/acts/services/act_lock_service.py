@@ -11,6 +11,7 @@ import asyncpg
 from app.core.config import Settings
 from app.domains.acts.exceptions import ActLockError
 from app.domains.acts.repositories.act_access import ActAccessRepository
+from app.domains.acts.repositories.act_audit_log import ActAuditLogRepository
 from app.domains.acts.repositories.act_lock import ActLockRepository
 from app.domains.acts.services.access_guard import AccessGuard
 from app.domains.acts.settings import ActsSettings
@@ -36,6 +37,7 @@ class ActLockService:
         self._access = access or ActAccessRepository(conn)
         self._lock = lock or ActLockRepository(conn)
         self.guard = AccessGuard(self._access, self._lock)
+        self._audit = ActAuditLogRepository(conn)
 
     async def lock_act(self, act_id: int, username: str) -> dict:
         """Блокирует акт для редактирования."""
@@ -45,6 +47,7 @@ class ActLockService:
 
         row = await self._lock.atomic_lock_act(act_id, username, duration)
         if row:
+            await self._audit.log("lock", username, act_id)
             return {
                 "success": True,
                 "locked_until": row["lock_expires_at"].isoformat(),
@@ -67,6 +70,7 @@ class ActLockService:
         was_unlocked = await self._lock.unlock_act(act_id, username)
         if not was_unlocked:
             raise ActLockError("Вы не владеете блокировкой этого акта")
+        await self._audit.log("unlock", username, act_id)
         return {"success": True, "message": "Блокировка снята"}
 
     async def extend_lock(self, act_id: int, username: str) -> dict:
@@ -75,19 +79,19 @@ class ActLockService:
 
         duration = self.acts_settings.lock.duration_minutes
 
-        row = await self._lock.atomic_extend_lock(act_id, username, duration)
-        if row:
+        result = await self._lock.atomic_extend_lock(act_id, username, duration)
+
+        if result["extended"]:
             return {
                 "success": True,
-                "locked_until": row["lock_expires_at"].isoformat(),
+                "locked_until": result["lock_expires_at"].isoformat(),
                 "message": "Блокировка продлена",
             }
 
-        lock_info = await self._lock.get_lock_info(act_id)
-        if not lock_info or not lock_info["locked_by"]:
+        # Диагностика на основе атомарно полученного состояния
+        if not result["locked_by"]:
             raise ActLockError("Акт не заблокирован")
-        if lock_info["locked_by"] != username:
+        if result["locked_by"] != username:
             raise ActLockError("Вы не владеете блокировкой этого акта")
-        if lock_info["lock_expires_at"]:
-            raise ActLockError("Блокировка истекла. Откройте акт заново для продолжения работы.")
-        raise ActLockError("Не удалось продлить блокировку. Попробуйте позже.")
+        # locked_by == username, но extend не сработал → блокировка истекла
+        raise ActLockError("Блокировка истекла. Откройте акт заново для продолжения работы.")

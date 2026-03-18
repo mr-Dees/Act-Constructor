@@ -173,7 +173,7 @@ class RequestSizeLimitMiddleware(BaseHTTPMiddleware):
             if content_length > self.max_size:
                 logger.warning(
                     f"Отклонен запрос с размером {content_length / (1024 * 1024):.1f}MB "
-                    f"от {request.client.host}"
+                    f"от {request.client.host if request.client else 'unknown'}"
                 )
                 return JSONResponse(
                     status_code=413,

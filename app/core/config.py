@@ -7,12 +7,13 @@
 
 import logging
 import sys
+import warnings
 from functools import lru_cache
 from logging.handlers import RotatingFileHandler
 from pathlib import Path
 from typing import ClassVar, Literal
 
-from pydantic import BaseModel, Field, field_validator
+from pydantic import BaseModel, Field, field_validator, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 def setup_logging(log_level: str = "INFO") -> logging.Logger:
@@ -110,9 +111,10 @@ class DatabaseSettings(BaseModel):
     port: int = Field(default=5432, ge=1, le=65535)
     name: str = Field(default="act_constructor")
     user: str = Field(default="postgres")
-    password: str = Field(default="postgres")
+    password: str = Field(default="")
     pool_min_size: int = Field(default=2, ge=1)
     pool_max_size: int = Field(default=10, ge=2)
+    command_timeout: int = Field(default=60, gt=0)
     gp: GreenplumSettings = GreenplumSettings()
 
 
@@ -131,6 +133,7 @@ class ChatSettings(BaseModel):
     api_key: str = ""
     max_tool_rounds: int = 5
     temperature: float = 0.1
+    tool_execution_timeout: int = 30
     system_prompt: str = (
         "Ты — AI-ассистент системы управления актами проверок. "
         "Отвечай на русском языке. Используй доступные инструменты "
@@ -188,6 +191,17 @@ class Settings(BaseSettings):
     def static_dir(self) -> Path:
         """Возвращает директорию со статическими файлами."""
         return self.base_dir / "static"
+
+    @model_validator(mode='after')
+    def warn_empty_db_password(self):
+        """Предупреждает если пароль БД не задан для PostgreSQL."""
+        if self.database.type == "postgresql" and not self.database.password:
+            warnings.warn(
+                "DATABASE__PASSWORD не задан. Подключение к PostgreSQL без пароля. "
+                "Задайте DATABASE__PASSWORD в .env для production.",
+                stacklevel=2,
+            )
+        return self
 
     # Конфигурация Pydantic
     model_config = SettingsConfigDict(

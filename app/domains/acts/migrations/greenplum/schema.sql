@@ -395,6 +395,28 @@ COMMENT ON COLUMN {SCHEMA}.{PREFIX}act_invoices.updated_at IS 'Дата и вр�
 COMMENT ON COLUMN {SCHEMA}.{PREFIX}act_invoices.created_by IS 'Числовой логин пользователя-создателя';
 
 -- ============================================================================
+-- ТАБЛИЦА АУДИТ-ЛОГА
+-- ============================================================================
+
+CREATE TABLE {SCHEMA}.{PREFIX}audit_log (
+    id BIGSERIAL PRIMARY KEY,
+    act_id BIGINT,
+    action VARCHAR(50) NOT NULL,
+    username VARCHAR(50) NOT NULL,
+    details JSONB DEFAULT '{}',
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+)
+WITH (appendonly=false)
+DISTRIBUTED BY (id);
+
+COMMENT ON TABLE {SCHEMA}.{PREFIX}audit_log IS 'Лог чувствительных операций для compliance';
+COMMENT ON COLUMN {SCHEMA}.{PREFIX}audit_log.act_id IS 'ID акта (NULL для системных событий)';
+COMMENT ON COLUMN {SCHEMA}.{PREFIX}audit_log.action IS 'Тип операции: create, update, delete, duplicate, lock, unlock';
+COMMENT ON COLUMN {SCHEMA}.{PREFIX}audit_log.username IS 'Пользователь, выполнивший операцию';
+COMMENT ON COLUMN {SCHEMA}.{PREFIX}audit_log.details IS 'JSONB с деталями операции';
+COMMENT ON COLUMN {SCHEMA}.{PREFIX}audit_log.created_at IS 'Время операции';
+
+-- ============================================================================
 -- ИНДЕКСЫ ДЛЯ ОПТИМИЗАЦИИ ЗАПРОСОВ
 -- ============================================================================
 
@@ -530,6 +552,20 @@ CREATE INDEX idx_{PREFIX}act_violations_audit_act_id
 CREATE INDEX idx_{PREFIX}act_invoices_audit_act_id
     ON {SCHEMA}.{PREFIX}act_invoices(audit_act_id)
     WHERE audit_act_id IS NOT NULL;
+
+-- Индексы на audit_log
+CREATE INDEX idx_{PREFIX}audit_log_act_id
+    ON {SCHEMA}.{PREFIX}audit_log(act_id)
+    WHERE act_id IS NOT NULL;
+
+CREATE INDEX idx_{PREFIX}audit_log_username
+    ON {SCHEMA}.{PREFIX}audit_log(username);
+
+CREATE INDEX idx_{PREFIX}audit_log_action
+    ON {SCHEMA}.{PREFIX}audit_log(action);
+
+CREATE INDEX idx_{PREFIX}audit_log_created_at
+    ON {SCHEMA}.{PREFIX}audit_log(created_at);
 
 -- ============================================================================
 -- ТРИГГЕРЫ ДЛЯ АВТОМАТИЧЕСКОГО ОБНОВЛЕНИЯ updated_at

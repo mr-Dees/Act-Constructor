@@ -63,32 +63,50 @@ class ActLockRepository(BaseRepository):
         act_id: int,
         username: str,
         duration_minutes: int,
-    ) -> dict | None:
+    ) -> dict:
         """
         Атомарно продлевает блокировку.
 
-        UPDATE ... WHERE locked_by = $username AND lock_expires_at > CURRENT_TIMESTAMP RETURNING *
+        Возвращает результат попытки И текущее состояние в одном запросе (без TOCTOU).
 
         Returns:
-            dict или None если блокировка не принадлежит пользователю / истекла
+            dict с полями: extended (bool), locked_by, lock_expires_at
         """
         row = await self.conn.fetchrow(
             f"""
-            UPDATE {self.acts}
-            SET lock_expires_at = CURRENT_TIMESTAMP + $1 * interval '1 minute'
-            WHERE id = $2
-              AND locked_by = $3
-              AND lock_expires_at > CURRENT_TIMESTAMP
-            RETURNING locked_by, locked_at, lock_expires_at
+            WITH attempt AS (
+                UPDATE {self.acts}
+                SET lock_expires_at = CURRENT_TIMESTAMP + $1 * interval '1 minute'
+                WHERE id = $2
+                  AND locked_by = $3
+                  AND lock_expires_at > CURRENT_TIMESTAMP
+                RETURNING locked_by, locked_at, lock_expires_at
+            )
+            SELECT
+                a.locked_by,
+                a.lock_expires_at,
+                EXISTS(SELECT 1 FROM attempt) AS extended,
+                (SELECT lock_expires_at FROM attempt) AS new_lock_expires_at
+            FROM {self.acts} a
+            WHERE a.id = $2
             """,
             float(duration_minutes),
             act_id,
             username,
         )
-        if row:
+        if not row:
+            return {"extended": False, "locked_by": None, "lock_expires_at": None}
+
+        result = {
+            "extended": row["extended"],
+            "locked_by": row["locked_by"],
+            "lock_expires_at": row["new_lock_expires_at"] if row["extended"] else row["lock_expires_at"],
+        }
+
+        if row["extended"]:
             logger.info(f"Блокировка акта ID={act_id} продлена на {duration_minutes} мин")
-            return dict(row)
-        return None
+
+        return result
 
     async def get_lock_info(self, act_id: int) -> dict | None:
         """SELECT locked_by, lock_expires_at для диагностики."""

@@ -28,6 +28,7 @@ from app.services.audit_id_service import AuditIdService
 from app.domains.acts.repositories.act_crud import ActCrudRepository
 from app.domains.acts.repositories.act_lock import ActLockRepository
 from app.domains.acts.repositories.act_access import ActAccessRepository
+from app.domains.acts.repositories.act_audit_log import ActAuditLogRepository
 from app.domains.acts.services.access_guard import AccessGuard
 
 logger = logging.getLogger("act_constructor.service.acts.crud")
@@ -54,6 +55,7 @@ class ActCrudService:
         self._lock = lock or ActLockRepository(conn)
         self._access = access or ActAccessRepository(conn)
         self.guard = AccessGuard(self._access, self._lock)
+        self._audit = ActAuditLogRepository(conn)
 
     # -------------------------------------------------------------------------
     # SIMPLE CRUD
@@ -91,6 +93,11 @@ class ActCrudService:
                 )
 
             km_digit = KMUtils.extract_km_digits(act.km_number)
+
+            await self._audit.log("delete", username, act_id, {
+                "km_number": act.km_number,
+                "part_number": act.part_number,
+            })
 
             await self._crud.delete_by_id(act_id)
             await self._crud.update_total_parts_for_km(km_digit)
@@ -164,24 +171,33 @@ class ActCrudService:
 
             audit_act_id = await AuditIdService.generate_audit_act_id()
 
-            act_id = await self._crud.insert_act(
-                km_number=act_data.km_number,
-                km_digit=km_digit,
-                part_number=part_number,
-                total_parts=total_parts,
-                inspection_name=act_data.inspection_name,
-                city=act_data.city,
-                created_date=act_data.created_date,
-                order_number=act_data.order_number,
-                order_date=act_data.order_date,
-                is_process_based=act_data.is_process_based,
-                service_note=act_data.service_note,
-                service_note_date=act_data.service_note_date,
-                audit_act_id=audit_act_id,
-                created_by=username,
-                inspection_start_date=act_data.inspection_start_date,
-                inspection_end_date=act_data.inspection_end_date,
-            )
+            try:
+                act_id = await self._crud.insert_act(
+                    km_number=act_data.km_number,
+                    km_digit=km_digit,
+                    part_number=part_number,
+                    total_parts=total_parts,
+                    inspection_name=act_data.inspection_name,
+                    city=act_data.city,
+                    created_date=act_data.created_date,
+                    order_number=act_data.order_number,
+                    order_date=act_data.order_date,
+                    is_process_based=act_data.is_process_based,
+                    service_note=act_data.service_note,
+                    service_note_date=act_data.service_note_date,
+                    audit_act_id=audit_act_id,
+                    created_by=username,
+                    inspection_start_date=act_data.inspection_start_date,
+                    inspection_end_date=act_data.inspection_end_date,
+                )
+            except asyncpg.UniqueViolationError:
+                raise KmConflictError(
+                    f"Акт с КМ (цифры) {km_digit} и частью {part_number} уже существует "
+                    f"(параллельное создание)",
+                    km_number=act_data.km_number,
+                    current_parts=km_info["current_parts"],
+                    next_part=part_number,
+                )
 
             await self._crud.insert_team_members_batch(
                 act_id, audit_act_id, act_data.audit_team
@@ -203,6 +219,11 @@ class ActCrudService:
                 f"Создан акт ID={act_id}, КМ={act_data.km_number}, "
                 f"часть {part_number}/{total_parts}, СЗ={act_data.service_note}"
             )
+
+            await self._audit.log("create", username, act_id, {
+                "km_number": act_data.km_number,
+                "part_number": part_number,
+            })
 
             return await self._crud.get_act_by_id(act_id)
 
@@ -386,6 +407,11 @@ class ActCrudService:
             await self._crud.update_total_parts_for_km(new_km_digit)
 
             logger.info(f"Обновлены метаданные акта ID={act_id}")
+
+            await self._audit.log("update", username, act_id, {
+                "fields": list(sent_fields),
+            })
+
             return await self._crud.get_act_by_id(act_id)
 
     # -------------------------------------------------------------------------
@@ -518,5 +544,10 @@ class ActCrudService:
                 f"КМ={original.km_number} (цифры={km_digit}), "
                 f"название='{new_inspection_name}'"
             )
+
+            await self._audit.log("duplicate", username, new_act_id, {
+                "source_act_id": act_id,
+                "km_number": original.km_number,
+            })
 
             return await self._crud.get_act_by_id(new_act_id)

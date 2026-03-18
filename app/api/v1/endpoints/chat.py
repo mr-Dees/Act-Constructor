@@ -8,6 +8,7 @@
 4. Возвращает финальный текстовый ответ
 """
 
+import asyncio
 import json
 import logging
 from datetime import date
@@ -42,13 +43,11 @@ def _convert_param(value, param_type: str):
         return str(value).lower() in ("true", "1")
     if param_type == "integer":
         return int(value)
+    if param_type == "date":
+        if isinstance(value, str):
+            return date.fromisoformat(value)
+        return value
     if param_type == "string":
-        # Проверяем, является ли это датой (YYYY-MM-DD)
-        if isinstance(value, str) and len(value) == 10:
-            try:
-                return date.fromisoformat(value)
-            except ValueError:
-                pass
         return str(value)
     return value
 
@@ -61,20 +60,28 @@ async def _execute_tool_call(tool_name: str, arguments: dict) -> str:
     if chat_tool.handler is None:
         return f"Ошибка: инструмент '{tool_name}' не имеет обработчика"
 
-    # Конвертация типов параметров
+    # Конвертация типов параметров (неизвестные аргументы отбрасываются)
     param_types = {p.name: p.type for p in chat_tool.parameters}
     converted_args = {}
     for key, value in arguments.items():
         if key in param_types:
             converted_args[key] = _convert_param(value, param_types[key])
-        else:
-            converted_args[key] = value
 
     try:
-        result = await chat_tool.handler(**converted_args)
+        settings = get_settings()
+        timeout = settings.chat.tool_execution_timeout
+        result = await asyncio.wait_for(
+            chat_tool.handler(**converted_args),
+            timeout=timeout,
+        )
         if isinstance(result, dict):
             return json.dumps(result, ensure_ascii=False, default=str)
         return str(result)
+    except asyncio.TimeoutError:
+        logger.warning(
+            "Таймаут выполнения ChatTool %s (%dс)", tool_name, timeout,
+        )
+        return f"Ошибка: таймаут выполнения инструмента '{tool_name}'"
     except Exception as exc:
         logger.exception("Ошибка выполнения ChatTool %s", tool_name)
         return f"Ошибка выполнения инструмента: {exc}"

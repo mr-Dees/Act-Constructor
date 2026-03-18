@@ -129,8 +129,14 @@ class APIClient {
      */
     static async _generateSingleFormat(format, data) {
         try {
-            const response = await fetch(AppConfig.api.getUrl(
-                    `/api/v1/acts/export/save_act?fmt=${format}`),
+            // Передаём act_id для привязки файла к контролю доступа
+            const actId = new URLSearchParams(window.location.search).get('act_id');
+            let url = `/api/v1/acts/export/save_act?fmt=${format}`;
+            if (actId) {
+                url += `&act_id=${encodeURIComponent(actId)}`;
+            }
+
+            const response = await fetch(AppConfig.api.getUrl(url),
                 {
                     method: 'POST',
                     headers: {'Content-Type': 'application/json'},

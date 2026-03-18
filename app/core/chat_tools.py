@@ -20,7 +20,7 @@ class ChatToolParam:
     """Параметр инструмента чата (маппится на JSON Schema property)."""
 
     name: str
-    type: str  # "string", "integer", "boolean", "array", "object"
+    type: str  # "string", "integer", "boolean", "array", "object", "date"
     description: str
     required: bool = True
     default: Any = None
@@ -56,12 +56,16 @@ class ChatTool:
         properties = {}
         required = []
         for p in self.parameters:
-            prop: dict[str, Any] = {"type": p.type, "description": p.description}
+            # "date" → JSON Schema "string" с format "date"
+            schema_type = "string" if p.type == "date" else p.type
+            prop: dict[str, Any] = {"type": schema_type, "description": p.description}
+            if p.type == "date":
+                prop["format"] = "date"
             if p.enum:
                 prop["enum"] = p.enum
             if p.default is not None:
                 prop["default"] = p.default
-            if p.type == "array":
+            if schema_type == "array":
                 prop["items"] = {"type": p.items_type}
             properties[p.name] = prop
             if p.required:

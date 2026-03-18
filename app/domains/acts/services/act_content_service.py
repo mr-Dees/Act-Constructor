@@ -9,7 +9,8 @@ import logging
 import asyncpg
 
 from app.core.config import Settings
-from app.domains.acts.exceptions import AccessDeniedError
+from app.core.settings_registry import get as get_domain_settings
+from app.domains.acts.exceptions import AccessDeniedError, ActValidationError
 from app.domains.acts.repositories.act_access import ActAccessRepository
 from app.domains.acts.repositories.act_crud import ActCrudRepository
 from app.domains.acts.repositories.act_content import ActContentRepository
@@ -17,6 +18,8 @@ from app.domains.acts.repositories.act_invoice import ActInvoiceRepository
 from app.domains.acts.repositories.act_lock import ActLockRepository
 from app.domains.acts.schemas.act_content import ActDataSchema
 from app.domains.acts.services.access_guard import AccessGuard
+from app.domains.acts.settings import ActsSettings
+from app.domains.acts.utils import ActTreeUtils
 
 logger = logging.getLogger("act_constructor.service.acts.content")
 
@@ -80,4 +83,28 @@ class ActContentService:
         """Сохраняет содержимое акта."""
         await self.guard.require_edit_permission(act_id, username)
         await self.guard.require_lock_owner(act_id, username)
+
+        # Валидация дерева перед сохранением
+        self._validate_tree(data)
+
         return await self._content.save_content(act_id, data, username)
+
+    @staticmethod
+    def _validate_tree(data: ActDataSchema) -> None:
+        """Проверяет структуру дерева перед сохранением."""
+        tree = data.tree
+        if not tree:
+            return
+
+        acts_cfg = get_domain_settings("acts", ActsSettings)
+
+        # Проверка глубины
+        depth = ActTreeUtils.calculate_tree_depth(tree)
+        if depth > acts_cfg.resource.max_tree_depth:
+            raise ActValidationError(
+                f"Глубина дерева ({depth}) превышает максимум ({acts_cfg.resource.max_tree_depth})"
+            )
+
+        # Проверка наличия корневого узла
+        if not tree.get('id'):
+            raise ActValidationError("Дерево должно иметь корневой узел с id")

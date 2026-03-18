@@ -35,12 +35,22 @@ def extract_username_digits(raw_username: str) -> str:
 
     Returns:
         Только цифры из username
+
+    Raises:
+        HTTPException: 401 если формат username некорректен
     """
     # Берем часть до первого подчеркивания или всю строку
     base_part = raw_username.split('_')[0]
 
     # Извлекаем только цифры
     digits = re.sub(r'\D', '', base_part)
+
+    # Валидация формата: табельный номер от 5 до 20 цифр
+    if not digits or len(digits) < 5 or len(digits) > 20:
+        raise HTTPException(
+            status_code=401,
+            detail="Некорректный формат имени пользователя"
+        )
 
     return digits
 

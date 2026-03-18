@@ -165,7 +165,7 @@ class ActUpdate(BaseModel):
     created_date: Optional[date] = None
     order_number: Optional[str] = None
     order_date: Optional[date] = None
-    audit_team: Optional[List[AuditTeamMember]] = None
+    audit_team: Optional[List[AuditTeamMember]] = Field(default=None, min_length=1)
     inspection_start_date: Optional[date] = None
     inspection_end_date: Optional[date] = None
     is_process_based: Optional[bool] = None

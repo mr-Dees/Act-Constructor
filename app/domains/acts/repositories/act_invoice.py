@@ -9,6 +9,7 @@ import asyncpg
 
 from app.domains.acts.exceptions import InvoiceError
 from app.db.repositories.base import BaseRepository
+from app.db.utils.sql_utils import quote_ident
 
 logger = logging.getLogger("act_constructor.db.repository.invoice")
 
@@ -59,7 +60,7 @@ class ActInvoiceRepository(BaseRepository):
         """
         rows = await self.conn.fetch(
             f'SELECT code, metric_name, metric_group '
-            f'FROM {registry_schema}.{metric_table} '
+            f'FROM {quote_ident(registry_schema)}.{quote_ident(metric_table)} '
             f'ORDER BY code',
         )
 
@@ -99,9 +100,9 @@ class ActInvoiceRepository(BaseRepository):
         """
         if db_type == "hive":
             rows = await self.conn.fetch(
-                f'SELECT {hive_registry_col_table} '
-                f'FROM {hive_registry_schema}.{hive_registry_table} '
-                f'ORDER BY {hive_registry_col_table}',
+                f'SELECT {quote_ident(hive_registry_col_table)} '
+                f'FROM {quote_ident(hive_registry_schema)}.{quote_ident(hive_registry_table)} '
+                f'ORDER BY {quote_ident(hive_registry_col_table)}',
             )
             return [
                 {"table_name": row[hive_registry_col_table]}
@@ -165,39 +166,20 @@ class ActInvoiceRepository(BaseRepository):
                 username,
             )
         else:
-            # Greenplum: UPDATE + fallback INSERT
-            row = await self.conn.fetchrow(
-                f"""
-                UPDATE {self.invoices} SET
-                    node_number = $3,
-                    db_type = $4,
-                    schema_name = $5,
-                    table_name = $6,
-                    metrics = $7::jsonb,
-                    verification_status = 'pending',
-                    updated_at = CURRENT_TIMESTAMP
-                WHERE act_id = $1 AND node_id = $2
-                RETURNING id, act_id, node_id, node_number, db_type,
-                          schema_name, table_name, metrics,
-                          verification_status, created_at, updated_at, created_by
-                """,
-                data["act_id"],
-                data["node_id"],
-                data.get("node_number"),
-                data["db_type"],
-                data["schema_name"],
-                data["table_name"],
-                metrics_json,
-            )
-
-            if not row:
+            # Greenplum: UPDATE + fallback INSERT с retry при race condition
+            row = None
+            for attempt in range(2):
                 row = await self.conn.fetchrow(
                     f"""
-                    INSERT INTO {self.invoices} (
-                        act_id, node_id, node_number, db_type,
-                        schema_name, table_name, metrics, created_by
-                    )
-                    VALUES ($1, $2, $3, $4, $5, $6, $7::jsonb, $8)
+                    UPDATE {self.invoices} SET
+                        node_number = $3,
+                        db_type = $4,
+                        schema_name = $5,
+                        table_name = $6,
+                        metrics = $7::jsonb,
+                        verification_status = 'pending',
+                        updated_at = CURRENT_TIMESTAMP
+                    WHERE act_id = $1 AND node_id = $2
                     RETURNING id, act_id, node_id, node_number, db_type,
                               schema_name, table_name, metrics,
                               verification_status, created_at, updated_at, created_by
@@ -209,8 +191,39 @@ class ActInvoiceRepository(BaseRepository):
                     data["schema_name"],
                     data["table_name"],
                     metrics_json,
-                    username,
                 )
+                if row:
+                    break
+                try:
+                    row = await self.conn.fetchrow(
+                        f"""
+                        INSERT INTO {self.invoices} (
+                            act_id, node_id, node_number, db_type,
+                            schema_name, table_name, metrics, created_by
+                        )
+                        VALUES ($1, $2, $3, $4, $5, $6, $7::jsonb, $8)
+                        RETURNING id, act_id, node_id, node_number, db_type,
+                                  schema_name, table_name, metrics,
+                                  verification_status, created_at, updated_at, created_by
+                        """,
+                        data["act_id"],
+                        data["node_id"],
+                        data.get("node_number"),
+                        data["db_type"],
+                        data["schema_name"],
+                        data["table_name"],
+                        metrics_json,
+                        username,
+                    )
+                    break
+                except asyncpg.UniqueViolationError:
+                    if attempt == 0:
+                        logger.info(
+                            f"UPSERT race condition для act_id={data['act_id']}, "
+                            f"node_id={data['node_id']}, повторная попытка"
+                        )
+                        continue
+                    raise
 
         logger.info(
             f"Фактура сохранена: act_id={data['act_id']}, "

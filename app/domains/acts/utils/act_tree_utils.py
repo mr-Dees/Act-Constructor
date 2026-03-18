@@ -4,38 +4,28 @@
 
 
 class ActTreeUtils:
-    """Stateless-утилиты для рекурсивного обхода дерева акта."""
+    """Stateless-утилиты для итеративного обхода дерева акта."""
 
     @staticmethod
     def extract_node_number(tree: dict, node_id: str, current_node: dict = None) -> str | None:
-        """Рекурсивно извлекает номер узла из дерева."""
-        if current_node is None:
-            current_node = tree
-
-        if current_node.get('id') == node_id:
-            return current_node.get('number')
-
-        for child in current_node.get('children', []):
-            result = ActTreeUtils.extract_node_number(tree, node_id, child)
-            if result:
-                return result
-
+        """Извлекает номер узла из дерева (итеративный обход)."""
+        stack = [current_node if current_node is not None else tree]
+        while stack:
+            node = stack.pop()
+            if node.get('id') == node_id:
+                return node.get('number')
+            stack.extend(node.get('children', []))
         return None
 
     @staticmethod
     def find_node_label(tree: dict, node_id: str, current_node: dict = None) -> str | None:
-        """Рекурсивно ищет метку узла в дереве."""
-        if current_node is None:
-            current_node = tree
-
-        if current_node.get('id') == node_id:
-            return current_node.get('label')
-
-        for child in current_node.get('children', []):
-            result = ActTreeUtils.find_node_label(tree, node_id, child)
-            if result:
-                return result
-
+        """Ищет метку узла в дереве (итеративный обход)."""
+        stack = [current_node if current_node is not None else tree]
+        while stack:
+            node = stack.pop()
+            if node.get('id') == node_id:
+                return node.get('label')
+            stack.extend(node.get('children', []))
         return None
 
     @staticmethod
@@ -46,57 +36,56 @@ class ActTreeUtils:
         parent_item_id: str | None = None
     ) -> str | None:
         """
-        Находит ID ближайшего родительского item-узла для данного узла.
+        Находит ID ближайшего родительского item-узла (итеративный обход).
 
         Для content-узлов (table/textblock/violation) возвращает ID
         родительского item-узла, чей auditPointId следует использовать.
         """
-        if current_node is None:
-            current_node = tree
+        # Элементы стека: (node, parent_item_id)
+        start = current_node if current_node is not None else tree
+        stack = [(start, parent_item_id)]
+        while stack:
+            node, p_item_id = stack.pop()
+            node_type = node.get('type', 'item')
 
-        node_type = current_node.get('type', 'item')
+            # Обновляем parent_item_id если текущий узел — item
+            if node_type == 'item' or node_type not in ('table', 'textblock', 'violation'):
+                current_item_id = node.get('id')
+            else:
+                current_item_id = p_item_id
 
-        # Обновляем parent_item_id если текущий узел — item
-        if node_type == 'item' or node_type not in ('table', 'textblock', 'violation'):
-            current_item_id = current_node.get('id')
-        else:
-            current_item_id = parent_item_id
+            if node.get('id') == target_node_id:
+                # Если это content-узел — возвращаем parent_item_id
+                if node_type in ('table', 'textblock', 'violation'):
+                    return p_item_id
+                # Если это item-узел — возвращаем его собственный id
+                return node.get('id')
 
-        if current_node.get('id') == target_node_id:
-            # Если это content-узел — возвращаем parent_item_id
-            if node_type in ('table', 'textblock', 'violation'):
-                return parent_item_id
-            # Если это item-узел — возвращаем его собственный id
-            return current_node.get('id')
-
-        for child in current_node.get('children', []):
-            result = ActTreeUtils.find_parent_item_node_id(
-                tree, target_node_id, child, current_item_id
-            )
-            if result:
-                return result
-
+            for child in node.get('children', []):
+                stack.append((child, current_item_id))
         return None
 
     @staticmethod
     def calculate_tree_depth(tree: dict, current_depth: int = 0) -> int:
         """
-        Рекурсивно вычисляет максимальную глубину дерева.
+        Вычисляет максимальную глубину дерева (итеративный обход).
 
         Args:
             tree: Узел дерева с полем 'children'
-            current_depth: Текущая глубина (для рекурсии)
+            current_depth: Начальная глубина
 
         Returns:
             Максимальная глубина дерева
         """
-        children = tree.get('children', [])
-        if not children:
-            return current_depth
-
-        max_child_depth = current_depth
-        for child in children:
-            child_depth = ActTreeUtils.calculate_tree_depth(child, current_depth + 1)
-            max_child_depth = max(max_child_depth, child_depth)
-
-        return max_child_depth
+        max_depth = current_depth
+        # Элементы стека: (node, depth)
+        stack = [(tree, current_depth)]
+        while stack:
+            node, depth = stack.pop()
+            children = node.get('children', [])
+            if not children:
+                max_depth = max(max_depth, depth)
+            else:
+                for child in children:
+                    stack.append((child, depth + 1))
+        return max_depth

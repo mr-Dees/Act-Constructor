@@ -168,7 +168,7 @@ async def init_db(settings: Settings) -> None:
                 dsn,
                 min_size=settings.database.pool_min_size,
                 max_size=settings.database.pool_max_size,
-                command_timeout=60
+                command_timeout=settings.database.command_timeout
             )
 
             logger.info(
