@@ -57,6 +57,10 @@ class TableCellsOperations {
                     }
                 }
 
+                if (typeof ChangelogTracker !== 'undefined') {
+                    ChangelogTracker._recordDebounced('modify_table', tableId, '', {field: 'cell'}, 5000);
+                }
+
                 PreviewManager.update();
             }
 

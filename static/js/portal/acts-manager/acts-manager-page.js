@@ -342,6 +342,7 @@ class ActsManagerPage {
         // Привязываем обработчики к кнопкам действий
         const openBtn = cardElement.querySelector('[data-action="open"]');
         const editBtn = cardElement.querySelector('[data-action="edit"]');
+        const historyBtn = cardElement.querySelector('[data-action="history"]');
         const duplicateBtn = cardElement.querySelector('[data-action="duplicate"]');
         const deleteBtn = cardElement.querySelector('[data-action="delete"]');
 
@@ -395,6 +396,16 @@ class ActsManagerPage {
                     return;
                 }
                 this.editAct(act.id, status);
+            }));
+        }
+
+        // Кнопка «История» — видна только Куратору и Руководителю
+        if (historyBtn && ['Куратор', 'Руководитель'].includes(act.user_role)) {
+            historyBtn.style.display = '';
+            historyBtn.addEventListener('click', safeClick(async () => {
+                if (typeof AuditLogDialog !== 'undefined') {
+                    await AuditLogDialog.show(act.id, act.inspection_name);
+                }
             }));
         }
 

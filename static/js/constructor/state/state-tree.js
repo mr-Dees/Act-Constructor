@@ -160,6 +160,10 @@ Object.assign(AppState, {
             AuditIdService.assignMissingPointIds(window.currentActId, this.treeData);
         }
 
+        if (typeof ChangelogTracker !== 'undefined') {
+            ChangelogTracker.record('add_node', newNode.id, newNode.label, {parentId: isChild ? parentId : this.findParentNode(parentId)?.id});
+        }
+
         return ValidationCore.success();
     },
 
@@ -221,6 +225,11 @@ Object.assign(AppState, {
         if (!node) return false;
 
         const isRiskTable = this._isRiskTable(node);
+
+        if (typeof ChangelogTracker !== 'undefined') {
+            const parent = this.findParentNode(nodeId);
+            ChangelogTracker.record('delete_node', nodeId, node.label, {parentId: parent?.id});
+        }
 
         this._deleteNodeData(node);
         this._deleteChildren(node);
@@ -354,6 +363,10 @@ Object.assign(AppState, {
 
         this._performMove(draggedNode, draggedParent, newParent, targetNode, targetNodeId, position);
         this.generateNumbering();
+
+        if (typeof ChangelogTracker !== 'undefined') {
+            ChangelogTracker.record('move_node', draggedNodeId, draggedNode.label, {from: draggedParent.id, to: newParent.id, position});
+        }
 
         // Очищаем ТБ и фактуру у нового родителя, если он был листовым узлом в разделе 5
         if (wasNewParentTbLeaf) {

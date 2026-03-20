@@ -4,6 +4,7 @@ from app.domains.acts.api.management import router as management_router
 from app.domains.acts.api.content import router as content_router
 from app.domains.acts.api.export import router as export_router
 from app.domains.acts.api.invoice import router as invoice_router
+from app.domains.acts.api.audit_log import router as audit_log_router
 
 
 def get_api_routers():
@@ -13,4 +14,5 @@ def get_api_routers():
         (content_router, "/acts", ["Содержимое актов"]),
         (export_router, "/acts/export", ["Операции экспорта"]),
         (invoice_router, "/acts/invoice", ["Фактуры актов"]),
+        (audit_log_router, "/acts", ["Аудит-лог актов"]),
     ]

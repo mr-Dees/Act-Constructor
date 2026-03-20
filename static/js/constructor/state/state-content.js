@@ -35,6 +35,9 @@ Object.assign(AppState, {
         const table = this._createTableObject(tableId, tableNode.id, grid, cols, false, true);
 
         this.tables[tableId] = table;
+        if (typeof ChangelogTracker !== 'undefined') {
+            ChangelogTracker.record('add_table', tableId, 'Таблица', {nodeId});
+        }
         this.generateNumbering();
 
         return ValidationCore.success();
@@ -76,6 +79,10 @@ Object.assign(AppState, {
         }
 
         const isRiskTable = table && (table.isRegularRiskTable || table.isOperationalRiskTable);
+
+        if (typeof ChangelogTracker !== 'undefined') {
+            ChangelogTracker.record('delete_table', tableNode.tableId, tableNode.label || 'Таблица', {nodeId: tableNode.parentId});
+        }
 
         // Удаляем узел из дерева
         parent.children = parent.children.filter(child => child.id !== tableNodeId);
@@ -119,6 +126,9 @@ Object.assign(AppState, {
         const textBlock = this._createTextBlockObject(textBlockId, textBlockNode.id);
 
         this.textBlocks[textBlockId] = textBlock;
+        if (typeof ChangelogTracker !== 'undefined') {
+            ChangelogTracker.record('add_textblock', textBlockId, 'Текстовый блок', {nodeId});
+        }
         this.generateNumbering();
 
         return ValidationCore.success();
@@ -148,6 +158,9 @@ Object.assign(AppState, {
         const violation = this._createViolationObject(violationId, violationNode.id);
 
         this.violations[violationId] = violation;
+        if (typeof ChangelogTracker !== 'undefined') {
+            ChangelogTracker.record('add_violation', violationId, 'Нарушение', {nodeId});
+        }
         this.generateNumbering();
 
         return ValidationCore.success();

@@ -268,6 +268,9 @@ class ItemsTitleEditing {
     static _saveRegularNodeLabel(labelElement, node, newLabel, originalLabel) {
         if (newLabel && newLabel !== originalLabel) {
             node.label = newLabel;
+            if (typeof ChangelogTracker !== 'undefined') {
+                ChangelogTracker.record('rename_node', node.id, newLabel, {old: originalLabel, new: newLabel});
+            }
             this._updateTreeUI();
         } else if (!newLabel) {
             labelElement.textContent = originalLabel;

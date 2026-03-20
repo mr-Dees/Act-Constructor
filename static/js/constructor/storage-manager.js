@@ -15,11 +15,18 @@ class StorageManager {
     static _saveTimeout = null;
 
     /**
-     * Интервал периодического автосохранения
+     * Интервал периодического автосохранения в localStorage
      * @private
      * @type {number|null}
      */
     static _periodicSaveInterval = null;
+
+    /**
+     * Интервал периодического сохранения в БД
+     * @private
+     * @type {number|null}
+     */
+    static _periodicDbSaveInterval = null;
 
     /**
      * Флаг для отслеживания несохраненных изменений в localStorage
@@ -239,10 +246,21 @@ class StorageManager {
         // Перехват попыток навигации (для показа кастомного диалога)
         this._setupNavigationInterception();
 
-        // Периодическое автосохранение (каждые 2 минуты при наличии изменений)
+        // Периодическое автосохранение в localStorage (каждые 2 минуты при наличии изменений)
         this._periodicSaveInterval = setInterval(() => {
             if (this._hasUnsavedChanges) {
                 this.saveState(true);
+            }
+        }, AppConfig.localStorage.periodicSaveInterval);
+
+        // Периодическое сохранение в БД (каждые 2 минуты при наличии несинхронизированных данных)
+        this._periodicDbSaveInterval = setInterval(async () => {
+            if (this.hasUnsyncedChanges() && window.currentActId) {
+                try {
+                    await APIClient.saveActContent(window.currentActId, { saveType: 'periodic' });
+                } catch (err) {
+                    console.error('Периодическое сохранение в БД не удалось:', err);
+                }
             }
         }, AppConfig.localStorage.periodicSaveInterval);
     }
@@ -291,7 +309,7 @@ class StorageManager {
                             ItemsRenderer.syncDataToState();
                         }
 
-                        await APIClient.saveActContent(window.currentActId);
+                        await APIClient.saveActContent(window.currentActId, { saveType: 'manual' });
                         Notifications.success('Изменения сохранены');
                     } catch (err) {
                         console.error('Ошибка сохранения:', err);
@@ -697,6 +715,11 @@ class StorageManager {
         if (this._periodicSaveInterval) {
             clearInterval(this._periodicSaveInterval);
             this._periodicSaveInterval = null;
+        }
+
+        if (this._periodicDbSaveInterval) {
+            clearInterval(this._periodicDbSaveInterval);
+            this._periodicDbSaveInterval = null;
         }
     }
 

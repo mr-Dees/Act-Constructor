@@ -312,7 +312,7 @@ class ActsMenuManager {
             if (confirmed) {
                 try {
                     ItemsRenderer?.syncDataToState();
-                    await APIClient.saveActContent(window.currentActId);
+                    await APIClient.saveActContent(window.currentActId, { saveType: 'manual' });
                     Notifications.success('Изменения сохранены');
                 } catch (err) {
                     console.error('Ошибка сохранения:', err);
@@ -350,6 +350,7 @@ class ActsMenuManager {
             await APIClient.loadActContent(actId);
             this.currentActId = actId;
             window.currentActId = actId;
+            if (typeof ChangelogTracker !== 'undefined') ChangelogTracker.init(actId);
             window.history.pushState({actId}, '', AppConfig.api.getUrl(`/constructor?act_id=${actId}`));
             StorageManager.markAsSyncedWithDB();
             this._clearCache();
@@ -503,6 +504,7 @@ class ActsMenuManager {
         this._initialLoadInProgress = true;
         this.currentActId = actId;
         window.currentActId = actId;
+        if (typeof ChangelogTracker !== 'undefined') ChangelogTracker.init(actId);
 
         try {
             // Сначала загружаем контент - это установит readOnlyMode на основе прав пользователя

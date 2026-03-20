@@ -16,7 +16,7 @@ from app.core.domain import DomainDescriptor
 logger = logging.getLogger("act_constructor.core.domain_registry")
 
 _domains: list[DomainDescriptor] = []
-_domains_registered = False
+_registered_app_ids: set[int] = set()
 
 REQUIRED_DOMAINS = {"acts"}
 
@@ -157,11 +157,12 @@ def register_domains(
     """
     Регистрирует роутеры и обработчики ошибок доменов в FastAPI приложении.
     """
-    global _domains_registered
-    if _domains_registered:
-        logger.debug("Домены уже зарегистрированы, пропуск повторной регистрации")
+    global _registered_app_ids
+    app_id = id(app)
+    if app_id in _registered_app_ids:
+        logger.debug("Домены уже зарегистрированы в этом приложении, пропуск")
         return
-    _domains_registered = True
+    _registered_app_ids.add(app_id)
 
     registered_exc_classes: dict[type[Exception], str] = {}
 
@@ -206,6 +207,6 @@ def get_all_domains() -> list[DomainDescriptor]:
 
 def reset_registry() -> None:
     """Сбрасывает реестр (для тестов)."""
-    global _domains, _domains_registered
+    global _domains, _registered_app_ids
     _domains = []
-    _domains_registered = False
+    _registered_app_ids = set()

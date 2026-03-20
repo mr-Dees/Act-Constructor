@@ -39,11 +39,19 @@
 {% include 'portal/acts-manager/components/acts_empty_state.html' %}
 {% include 'portal/acts-manager/components/acts_error_state.html' %}
 {% include 'portal/acts-manager/components/acts_card.html' %}
+{% include 'portal/acts-manager/components/audit_log_dialog.html' %}
 {% endblock %}
 
 {% block extra_js %}
 <script src="{{ url_for('static', path='js/constructor/lock-manager.js') }}"></script>
 <script src="{{ url_for('static', path='js/portal/acts-manager/dialog-create-act.js') }}"></script>
+<script src="{{ url_for('static', path='js/portal/acts-manager/dialog-audit-log.js') }}"></script>
+<script src="{{ url_for('static', path='js/constructor/preview/preview-table-renderer.js') }}"></script>
+<script src="{{ url_for('static', path='js/constructor/preview/preview-textblock-renderer.js') }}"></script>
+<script src="{{ url_for('static', path='js/constructor/preview/preview-violation-renderer.js') }}"></script>
+<script src="{{ url_for('static', path='js/portal/acts-manager/diff-engine.js') }}"></script>
+<script src="{{ url_for('static', path='js/portal/acts-manager/diff-renderer.js') }}"></script>
+<script src="{{ url_for('static', path='js/portal/acts-manager/version-preview.js') }}"></script>
 <script src="{{ url_for('static', path='js/portal/acts-manager/acts-manager-page.js') }}"></script>
 {% endblock %}
 

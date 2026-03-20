@@ -328,6 +328,7 @@ class ActDataSchema(BaseModel):
         tables: Словарь таблиц (ключ: ID таблицы)
         textBlocks: Словарь текстовых блоков (ключ: ID блока)
         violations: Словарь нарушений (ключ: ID нарушения)
+        saveType: Тип сохранения (manual, periodic, auto)
     """
     tree: dict = Field(description="Дерево структуры акта")
     tables: dict[str, TableSchema] = Field(
@@ -345,6 +346,15 @@ class ActDataSchema(BaseModel):
     invoiceNodeIds: list[str] = Field(
         default_factory=list,
         description="ID узлов, у которых есть прикреплённая фактура"
+    )
+    changelog: list[dict] = Field(
+        default_factory=list,
+        description="Гранулярный лог локальных изменений"
+    )
+    saveType: str = Field(
+        default="auto",
+        pattern=r"^(manual|periodic|auto)$",
+        description="Тип сохранения: manual (Ctrl+S), periodic (2мин), auto (debounced)"
     )
 
 

@@ -404,6 +404,7 @@ CREATE TABLE {SCHEMA}.{PREFIX}audit_log (
     action VARCHAR(50) NOT NULL,
     username VARCHAR(50) NOT NULL,
     details JSONB DEFAULT '{}',
+    changelog JSONB DEFAULT '[]',
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 )
 WITH (appendonly=false)
@@ -414,7 +415,39 @@ COMMENT ON COLUMN {SCHEMA}.{PREFIX}audit_log.act_id IS 'ID акта (NULL для
 COMMENT ON COLUMN {SCHEMA}.{PREFIX}audit_log.action IS 'Тип операции: create, update, delete, duplicate, lock, unlock';
 COMMENT ON COLUMN {SCHEMA}.{PREFIX}audit_log.username IS 'Пользователь, выполнивший операцию';
 COMMENT ON COLUMN {SCHEMA}.{PREFIX}audit_log.details IS 'JSONB с деталями операции';
+COMMENT ON COLUMN {SCHEMA}.{PREFIX}audit_log.changelog IS 'JSONB массив гранулярных изменений из конструктора';
 COMMENT ON COLUMN {SCHEMA}.{PREFIX}audit_log.created_at IS 'Время операции';
+
+-- ============================================================================
+-- ТАБЛИЦА ВЕРСИЙ СОДЕРЖИМОГО
+-- ============================================================================
+
+CREATE TABLE {SCHEMA}.{PREFIX}act_content_versions (
+    id BIGSERIAL PRIMARY KEY,
+    act_id BIGINT NOT NULL,
+    version_number BIGINT NOT NULL,
+    save_type VARCHAR(20) NOT NULL DEFAULT 'auto',
+    username VARCHAR(50) NOT NULL,
+    tree_data JSONB NOT NULL,
+    tables_data JSONB NOT NULL DEFAULT '{}',
+    textblocks_data JSONB NOT NULL DEFAULT '{}',
+    violations_data JSONB NOT NULL DEFAULT '{}',
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    UNIQUE (act_id, version_number)
+)
+WITH (appendonly=false)
+DISTRIBUTED BY (id);
+
+COMMENT ON TABLE {SCHEMA}.{PREFIX}act_content_versions IS 'Снэпшоты содержимого актов для просмотра истории и восстановления';
+COMMENT ON COLUMN {SCHEMA}.{PREFIX}act_content_versions.act_id IS 'ID акта';
+COMMENT ON COLUMN {SCHEMA}.{PREFIX}act_content_versions.version_number IS 'Порядковый номер версии';
+COMMENT ON COLUMN {SCHEMA}.{PREFIX}act_content_versions.save_type IS 'Тип сохранения: manual, periodic, auto';
+COMMENT ON COLUMN {SCHEMA}.{PREFIX}act_content_versions.username IS 'Пользователь, создавший версию';
+COMMENT ON COLUMN {SCHEMA}.{PREFIX}act_content_versions.tree_data IS 'Снэпшот дерева';
+COMMENT ON COLUMN {SCHEMA}.{PREFIX}act_content_versions.tables_data IS 'Снэпшот таблиц';
+COMMENT ON COLUMN {SCHEMA}.{PREFIX}act_content_versions.textblocks_data IS 'Снэпшот текстовых блоков';
+COMMENT ON COLUMN {SCHEMA}.{PREFIX}act_content_versions.violations_data IS 'Снэпшот нарушений';
+COMMENT ON COLUMN {SCHEMA}.{PREFIX}act_content_versions.created_at IS 'Время создания версии';
 
 -- ============================================================================
 -- ИНДЕКСЫ ДЛЯ ОПТИМИЗАЦИИ ЗАПРОСОВ
@@ -566,6 +599,13 @@ CREATE INDEX idx_{PREFIX}audit_log_action
 
 CREATE INDEX idx_{PREFIX}audit_log_created_at
     ON {SCHEMA}.{PREFIX}audit_log(created_at);
+
+CREATE INDEX idx_{PREFIX}audit_log_act_created
+    ON {SCHEMA}.{PREFIX}audit_log(act_id, created_at DESC);
+
+-- Индексы на act_content_versions
+CREATE INDEX idx_{PREFIX}act_content_versions_act
+    ON {SCHEMA}.{PREFIX}act_content_versions(act_id, version_number DESC);
 
 -- ============================================================================
 -- ТРИГГЕРЫ ДЛЯ АВТОМАТИЧЕСКОГО ОБНОВЛЕНИЯ updated_at

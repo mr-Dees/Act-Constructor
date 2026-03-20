@@ -11,6 +11,7 @@ import asyncpg
 from app.core.config import Settings
 from app.domains.acts.exceptions import InvoiceError
 from app.domains.acts.repositories.act_access import ActAccessRepository
+from app.domains.acts.repositories.act_audit_log import ActAuditLogRepository
 from app.domains.acts.repositories.act_invoice import ActInvoiceRepository
 from app.domains.acts.repositories.act_lock import ActLockRepository
 from app.domains.acts.services.access_guard import AccessGuard
@@ -39,6 +40,7 @@ class ActInvoiceService:
         self._lock = lock or ActLockRepository(conn)
         self._invoice = invoice or ActInvoiceRepository(conn)
         self.guard = AccessGuard(self._access, self._lock)
+        self._audit = ActAuditLogRepository(conn)
 
     def _resolve_schema(self, schema: str) -> str:
         """Возвращает 'public' для PostgreSQL, иначе — переданную схему."""
@@ -83,6 +85,14 @@ class ActInvoiceService:
             f"Фактура сохранена: act_id={data['act_id']}, "
             f"node_id={data['node_id']}, user={username}"
         )
+
+        await self._audit.log("save_invoice", username, data["act_id"], {
+            "node_id": data["node_id"],
+            "db_type": data.get("db_type"),
+            "table_name": data.get("table_name"),
+            "metrics_count": len(data.get("metrics", [])),
+        })
+
         return result
 
     async def verify_invoice(self, invoice_id: int, act_id: int, username: str) -> dict:

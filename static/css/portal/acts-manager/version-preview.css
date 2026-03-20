@@ -1,0 +1,327 @@
+/* Полноэкранный предпросмотр версии */
+.version-preview-container {
+    width: 99vw;
+    height: 97vh;
+    display: flex;
+    flex-direction: column;
+    background: var(--color-bg-primary, #fff);
+    border-radius: var(--radius-xl, 1rem);
+    overflow: hidden;
+    box-shadow: 0 8px 32px rgba(0, 0, 0, 0.2);
+    /* Приведение акцентного цвета к пастельной палитре проекта */
+    --color-primary: var(--primary, #5b6fa8);
+    --color-primary-hover: var(--primary-hover, #4a5d8a);
+}
+
+.version-preview-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 16px 24px;
+    border-bottom: 1px solid var(--color-border, #e0e0e0);
+    gap: 16px;
+    flex-shrink: 0;
+}
+
+.version-preview-info {
+    flex: 1;
+    min-width: 0;
+}
+
+.version-preview-info h2 {
+    font-size: 16px;
+    font-weight: 600;
+    margin: 0 0 4px 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.version-preview-info span {
+    font-size: 12px;
+    color: var(--color-text-secondary, #888);
+}
+
+.version-preview-controls {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    flex-shrink: 0;
+}
+
+.version-preview-toggle {
+    display: flex;
+    border: 1px solid var(--color-border, #ddd);
+    border-radius: 6px;
+    overflow: hidden;
+}
+
+.version-preview-toggle .toggle-btn {
+    background: var(--color-bg-secondary, #f5f5f5);
+    border: none;
+    padding: 6px 14px;
+    font-size: 12px;
+    cursor: pointer;
+    color: var(--color-text-secondary, #666);
+    transition: all 0.15s;
+}
+
+.version-preview-toggle .toggle-btn:not(:last-child) {
+    border-right: 1px solid var(--color-border, #ddd);
+}
+
+.version-preview-toggle .toggle-btn.active {
+    background: var(--color-primary, #2563eb);
+    color: #fff;
+}
+
+.version-preview-close {
+    background: none;
+    border: none;
+    font-size: 24px;
+    cursor: pointer;
+    color: var(--color-text-secondary, #666);
+    padding: 4px 8px;
+    border-radius: 4px;
+    line-height: 1;
+}
+
+.version-preview-close:hover {
+    background: var(--color-bg-hover, #f0f0f0);
+    color: var(--color-text-primary, #333);
+}
+
+.version-preview-body {
+    flex: 1;
+    overflow: auto;
+    padding: 24px;
+}
+
+.version-preview-ui.hidden,
+.version-preview-json.hidden,
+.version-preview-diff.hidden {
+    display: none;
+}
+
+.version-preview-json pre {
+    background: var(--color-bg-secondary, #f5f5f5);
+    padding: 16px;
+    border-radius: 8px;
+    font-size: 12px;
+    line-height: 1.5;
+    overflow: auto;
+    border: 1px solid var(--color-border, #e0e0e0);
+    white-space: pre-wrap;
+    word-break: break-all;
+}
+
+.version-preview-footer {
+    display: flex;
+    justify-content: flex-end;
+    gap: 8px;
+    padding: 16px 24px;
+    border-top: 1px solid var(--color-border, #e0e0e0);
+    flex-shrink: 0;
+}
+
+/* UI-представление: заголовки и метки */
+.version-preview-heading {
+    margin: 16px 0 8px 0;
+    color: var(--color-text-primary, #333);
+}
+
+h1.version-preview-heading { font-size: 18px; }
+h2.version-preview-heading { font-size: 16px; }
+h3.version-preview-heading { font-size: 15px; }
+h4.version-preview-heading { font-size: 14px; }
+h5.version-preview-heading { font-size: 13px; }
+
+.version-preview-label {
+    font-size: 12px;
+    font-weight: 500;
+    color: var(--color-text-secondary, #666);
+    margin: 12px 0 4px 0;
+    padding-left: 4px;
+    border-left: 3px solid var(--color-primary, #2563eb);
+}
+
+/* Diff controls */
+.diff-controls {
+    display: flex;
+    gap: 0;
+    margin-bottom: 16px;
+    border: 1px solid var(--color-border, #ddd);
+    border-radius: 6px;
+    overflow: hidden;
+    width: fit-content;
+}
+
+.diff-controls.hidden {
+    display: none;
+}
+
+.diff-mode-btn {
+    background: var(--color-bg-secondary, #f5f5f5);
+    border: none;
+    padding: 6px 16px;
+    font-size: 13px;
+    cursor: pointer;
+    color: var(--color-text-secondary, #666);
+    transition: all 0.15s;
+}
+
+.diff-mode-btn:not(:last-child) {
+    border-right: 1px solid var(--color-border, #ddd);
+}
+
+.diff-mode-btn.active {
+    background: var(--color-primary, #5b6fa8);
+    color: #fff;
+}
+
+/* Diff status indicators */
+.diff-node {
+    margin: 2px 0;
+}
+
+.diff-added {
+    border-left: 3px solid #22c55e;
+    background: rgba(34, 197, 94, 0.06);
+    padding-left: 12px;
+    margin-left: -3px;
+}
+
+.diff-removed {
+    border-left: 3px solid #ef4444;
+    background: rgba(239, 68, 68, 0.06);
+    padding-left: 12px;
+    margin-left: -3px;
+    opacity: 0.7;
+    text-decoration: line-through;
+}
+
+.diff-modified {
+    border-left: 3px solid #f59e0b;
+    background: rgba(245, 158, 11, 0.06);
+    padding-left: 12px;
+    margin-left: -3px;
+}
+
+/* Hide unchanged in changes-only mode */
+.diff-changes-only .diff-unchanged {
+    display: none;
+}
+
+/* Diff table wrapper */
+.diff-table-wrapper {
+    margin: 8px 0;
+}
+
+.diff-table-wrapper.diff-added {
+    border: 2px solid #22c55e;
+    border-radius: 6px;
+    padding: 4px;
+}
+
+.diff-table-wrapper.diff-removed {
+    border: 2px solid #ef4444;
+    border-radius: 6px;
+    padding: 4px;
+    text-decoration: none;
+}
+
+/* Diff table cells */
+.diff-cell-changed {
+    background: rgba(245, 158, 11, 0.12) !important;
+}
+
+.diff-cell-old {
+    color: #dc2626;
+    text-decoration: line-through;
+    font-size: 0.9em;
+    display: block;
+}
+
+.diff-cell-new {
+    color: #16a34a;
+    font-weight: 500;
+    display: block;
+}
+
+/* Text word-level diff */
+.diff-text ins {
+    background: rgba(34, 197, 94, 0.2);
+    text-decoration: none;
+    padding: 1px 2px;
+    border-radius: 2px;
+}
+
+.diff-text del {
+    background: rgba(239, 68, 68, 0.2);
+    padding: 1px 2px;
+    border-radius: 2px;
+}
+
+/* Diff textblock */
+.diff-textblock {
+    margin: 8px 0;
+    padding: 8px 12px;
+    font-size: 14px;
+    line-height: 1.6;
+}
+
+/* Diff violation */
+.diff-violation {
+    margin: 8px 0;
+    padding: 8px 12px;
+}
+
+.diff-violation-field {
+    margin: 4px 0;
+    font-size: 14px;
+    line-height: 1.5;
+}
+
+.diff-field-changed {
+    background: rgba(245, 158, 11, 0.08);
+    border-radius: 4px;
+    padding: 4px 8px;
+}
+
+.diff-field-changed del {
+    color: #dc2626;
+    background: rgba(239, 68, 68, 0.1);
+    border-radius: 2px;
+    padding: 1px 3px;
+}
+
+.diff-field-changed ins {
+    color: #16a34a;
+    background: rgba(34, 197, 94, 0.1);
+    border-radius: 2px;
+    padding: 1px 3px;
+}
+
+/* No changes message */
+.diff-no-changes {
+    text-align: center;
+    padding: 60px 20px;
+}
+
+.diff-no-changes-icon {
+    font-size: 48px;
+    color: #22c55e;
+    margin-bottom: 16px;
+}
+
+.diff-no-changes-title {
+    font-size: 18px;
+    font-weight: 600;
+    color: var(--color-text-primary, #333);
+    margin-bottom: 8px;
+}
+
+.diff-no-changes-subtitle {
+    font-size: 14px;
+    color: var(--color-text-secondary, #888);
+}

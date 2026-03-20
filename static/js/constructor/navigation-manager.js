@@ -123,7 +123,7 @@ class NavigationManager {
      */
     static async _saveToDatabase() {
         try {
-            await APIClient.saveActContent(window.currentActId);
+            await APIClient.saveActContent(window.currentActId, { saveType: 'manual' });
             // Уведомление уже показано в APIClient.saveActContent
         } catch (err) {
             console.error('Ошибка сохранения в БД:', err);

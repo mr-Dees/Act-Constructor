@@ -408,9 +408,35 @@ class ActCrudService:
 
             logger.info(f"Обновлены метаданные акта ID={act_id}")
 
-            await self._audit.log("update", username, act_id, {
-                "fields": list(sent_fields),
-            })
+            changes = {}
+            field_mapping = {
+                "km_number": (current_act.km_number, act_update.km_number),
+                "inspection_name": (current_act.inspection_name, act_update.inspection_name),
+                "city": (current_act.city, act_update.city),
+                "created_date": (current_act.created_date, act_update.created_date),
+                "order_number": (current_act.order_number, act_update.order_number),
+                "order_date": (current_act.order_date, act_update.order_date),
+                "inspection_start_date": (current_act.inspection_start_date, act_update.inspection_start_date),
+                "inspection_end_date": (current_act.inspection_end_date, act_update.inspection_end_date),
+                "is_process_based": (current_act.is_process_based, act_update.is_process_based),
+                "service_note": (old_service_note, act_update.service_note),
+            }
+            for field_name in sent_fields:
+                if field_name in field_mapping:
+                    old_val, new_val = field_mapping[field_name]
+                    if str(old_val) != str(new_val):
+                        changes[field_name] = {
+                            "old": str(old_val) if old_val is not None else None,
+                            "new": str(new_val) if new_val is not None else None,
+                        }
+
+            details = {"changes": changes}
+            if act_update.audit_team is not None:
+                details["audit_team_replaced"] = True
+            if act_update.directives is not None:
+                details["directives_replaced"] = True
+
+            await self._audit.log("update", username, act_id, details)
 
             return await self._crud.get_act_by_id(act_id)
 

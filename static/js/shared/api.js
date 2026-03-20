@@ -484,9 +484,11 @@ class APIClient {
      * Сохраняет содержимое акта в БД
      *
      * @param {number} actId - ID акта
+     * @param {Object} [options] - Опции сохранения
+     * @param {string} [options.saveType='auto'] - Тип сохранения: 'manual' | 'periodic' | 'auto'
      * @returns {Promise<void>}
      */
-    static async saveActContent(actId) {
+    static async saveActContent(actId, { saveType = 'auto' } = {}) {
         const username = AuthManager.getCurrentUser();
 
         if (!username) {
@@ -498,6 +500,8 @@ class APIClient {
             StorageManager.disableTracking();
 
             const data = AppState.exportData();
+            data.saveType = saveType;
+            data.changelog = typeof ChangelogTracker !== 'undefined' ? ChangelogTracker.flush() : [];
 
             const resp = await fetch(AppConfig.api.getUrl(`/api/v1/acts/${actId}/content`), {
                 method: 'PUT',
@@ -773,6 +777,105 @@ class APIClient {
             return true;
         }
         return false;
+    }
+
+    /**
+     * Загружает содержимое акта (raw JSON) без побочных эффектов.
+     * Используется для diff-сравнения версий.
+     * @param {number} actId
+     * @returns {Promise<Object>}
+     */
+    static async loadActContentRaw(actId) {
+        const username = AuthManager.getCurrentUser();
+        const resp = await fetch(AppConfig.api.getUrl(`/api/v1/acts/${actId}/content`), {
+            headers: { 'X-JupyterHub-User': username }
+        });
+        if (!resp.ok) throw this._createError(resp.status, `HTTP ${resp.status}`);
+        return resp.json();
+    }
+
+    // -------------------------------------------------------------------------
+    // АУДИТ-ЛОГ И ВЕРСИИ
+    // -------------------------------------------------------------------------
+
+    /**
+     * Получает записи аудит-лога акта
+     * @param {number} actId - ID акта
+     * @param {Object} [params] - Параметры фильтрации
+     * @returns {Promise<{items: Array, total: number}>}
+     */
+    static async getAuditLog(actId, { action, username, fromDate, toDate, limit = 50, offset = 0 } = {}) {
+        const currentUser = AuthManager.getCurrentUser();
+        const query = new URLSearchParams();
+        if (action) query.set('action', action);
+        if (username) query.set('username', username);
+        if (fromDate) query.set('from_date', fromDate);
+        if (toDate) query.set('to_date', toDate);
+        query.set('limit', limit);
+        query.set('offset', offset);
+
+        const resp = await fetch(AppConfig.api.getUrl(`/api/v1/acts/${actId}/audit-log?${query}`), {
+            headers: { 'X-JupyterHub-User': currentUser }
+        });
+        if (!resp.ok) throw this._createError(resp.status, 'Ошибка загрузки аудит-лога');
+        return resp.json();
+    }
+
+    /**
+     * Получает список версий содержимого акта
+     * @param {number} actId - ID акта
+     * @param {Object} [params] - Параметры пагинации
+     * @returns {Promise<{items: Array, total: number}>}
+     */
+    static async getVersions(actId, { limit = 50, offset = 0 } = {}) {
+        const username = AuthManager.getCurrentUser();
+        const resp = await fetch(
+            AppConfig.api.getUrl(`/api/v1/acts/${actId}/versions?limit=${limit}&offset=${offset}`),
+            { headers: { 'X-JupyterHub-User': username } }
+        );
+        if (!resp.ok) throw this._createError(resp.status, 'Ошибка загрузки версий');
+        return resp.json();
+    }
+
+    /**
+     * Получает полный снэпшот конкретной версии
+     * @param {number} actId - ID акта
+     * @param {number} versionId - ID версии
+     * @returns {Promise<Object>}
+     */
+    static async getVersion(actId, versionId) {
+        const username = AuthManager.getCurrentUser();
+        const resp = await fetch(
+            AppConfig.api.getUrl(`/api/v1/acts/${actId}/versions/${versionId}`),
+            { headers: { 'X-JupyterHub-User': username } }
+        );
+        if (!resp.ok) throw this._createError(resp.status, 'Ошибка загрузки версии');
+        return resp.json();
+    }
+
+    /**
+     * Восстанавливает содержимое акта из указанной версии
+     * @param {number} actId - ID акта
+     * @param {number} versionId - ID версии
+     * @returns {Promise<Object>}
+     */
+    static async restoreVersion(actId, versionId) {
+        const username = AuthManager.getCurrentUser();
+        const resp = await fetch(
+            AppConfig.api.getUrl(`/api/v1/acts/${actId}/versions/${versionId}/restore`),
+            {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                    'X-JupyterHub-User': username
+                }
+            }
+        );
+        if (!resp.ok) {
+            const err = await resp.json().catch(() => ({}));
+            throw this._createError(resp.status, err.detail || 'Ошибка восстановления версии');
+        }
+        return resp.json();
     }
 }
 

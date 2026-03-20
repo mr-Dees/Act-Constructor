@@ -14,4 +14,10 @@
 /* Acts manager */
 @import '../portal/acts-manager/acts-manager-base.css';
 @import '../portal/acts-manager/acts-manager-cards.css';
+@import '../portal/acts-manager/audit-log-dialog.css';
 @import '../shared/dialog/acts-modal.css';
+@import '../portal/acts-manager/version-preview.css';
+@import '../constructor/preview/preview-base.css';
+@import '../constructor/preview/preview-table.css';
+@import '../constructor/preview/preview-typography.css';
+@import '../constructor/preview/preview-violation.css';

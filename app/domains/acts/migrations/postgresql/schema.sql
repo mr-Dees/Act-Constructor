@@ -475,6 +475,7 @@ CREATE TABLE IF NOT EXISTS audit_log (
     action VARCHAR(50) NOT NULL,
     username VARCHAR(50) NOT NULL,
     details JSONB DEFAULT '{}',
+    changelog JSONB DEFAULT '[]',
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
 
@@ -483,7 +484,37 @@ COMMENT ON COLUMN audit_log.act_id IS 'ID акта (NULL для системны
 COMMENT ON COLUMN audit_log.action IS 'Тип операции: create, update, delete, duplicate, lock, unlock';
 COMMENT ON COLUMN audit_log.username IS 'Пользователь, выполнивший операцию';
 COMMENT ON COLUMN audit_log.details IS 'JSONB с деталями операции';
+COMMENT ON COLUMN audit_log.changelog IS 'JSONB массив гранулярных изменений из конструктора';
 COMMENT ON COLUMN audit_log.created_at IS 'Время операции';
+
+-- ============================================================================
+-- ТАБЛИЦА ВЕРСИЙ СОДЕРЖИМОГО
+-- ============================================================================
+
+CREATE TABLE IF NOT EXISTS act_content_versions (
+    id SERIAL PRIMARY KEY,
+    act_id INTEGER NOT NULL REFERENCES acts(id) ON DELETE CASCADE,
+    version_number INTEGER NOT NULL,
+    save_type VARCHAR(20) NOT NULL DEFAULT 'auto',
+    username VARCHAR(50) NOT NULL,
+    tree_data JSONB NOT NULL,
+    tables_data JSONB NOT NULL DEFAULT '{}',
+    textblocks_data JSONB NOT NULL DEFAULT '{}',
+    violations_data JSONB NOT NULL DEFAULT '{}',
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    UNIQUE (act_id, version_number)
+);
+
+COMMENT ON TABLE act_content_versions IS 'Снэпшоты содержимого актов для просмотра истории и восстановления';
+COMMENT ON COLUMN act_content_versions.act_id IS 'ID акта';
+COMMENT ON COLUMN act_content_versions.version_number IS 'Порядковый номер версии (автоинкремент внутри act_id)';
+COMMENT ON COLUMN act_content_versions.save_type IS 'Тип сохранения: manual, periodic, auto';
+COMMENT ON COLUMN act_content_versions.username IS 'Пользователь, создавший версию';
+COMMENT ON COLUMN act_content_versions.tree_data IS 'Снэпшот дерева';
+COMMENT ON COLUMN act_content_versions.tables_data IS 'Снэпшот таблиц';
+COMMENT ON COLUMN act_content_versions.textblocks_data IS 'Снэпшот текстовых блоков';
+COMMENT ON COLUMN act_content_versions.violations_data IS 'Снэпшот нарушений';
+COMMENT ON COLUMN act_content_versions.created_at IS 'Время создания версии';
 
 -- ============================================================================
 -- ИНДЕКСЫ ДЛЯ ОПТИМИЗАЦИИ ЗАПРОСОВ
@@ -680,6 +711,18 @@ CREATE INDEX IF NOT EXISTS idx_audit_log_action
 
 CREATE INDEX IF NOT EXISTS idx_audit_log_created_at
     ON audit_log(created_at);
+
+CREATE INDEX IF NOT EXISTS idx_audit_log_act_created
+    ON audit_log(act_id, created_at DESC)
+    WHERE act_id IS NOT NULL;
+
+COMMENT ON INDEX idx_audit_log_act_created IS 'Составной индекс для запросов аудит-лога по акту с сортировкой по времени';
+
+-- Индексы на act_content_versions
+CREATE INDEX IF NOT EXISTS idx_act_content_versions_act
+    ON act_content_versions(act_id, version_number DESC);
+
+COMMENT ON INDEX idx_act_content_versions_act IS 'Индекс для получения версий акта с сортировкой по номеру';
 
 -- GIN индексы на JSONB для полнотекстового поиска
 CREATE INDEX IF NOT EXISTS idx_act_tree_data

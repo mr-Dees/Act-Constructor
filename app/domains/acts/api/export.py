@@ -18,6 +18,7 @@ from app.core.exceptions import AppError
 from app.core.settings_registry import get as get_domain_settings
 from app.db.connection import get_db
 from app.domains.acts.repositories.act_access import ActAccessRepository
+from app.domains.acts.repositories.act_audit_log import ActAuditLogRepository
 from app.domains.acts.settings import ActsSettings
 from app.domains.acts.utils import ActTreeUtils
 from app.domains.acts.schemas.act_content import ActDataSchema, ActSaveResponse
@@ -119,6 +120,17 @@ async def save_act(
         if act_id is not None:
             storage.register_file(result.filename, act_id)
 
+            # Аудит-лог экспорта
+            try:
+                async with get_db() as audit_conn:
+                    audit = ActAuditLogRepository(audit_conn)
+                    await audit.log("export", username, act_id, {
+                        "format": fmt,
+                        "filename": result.filename,
+                    })
+            except Exception:
+                logger.exception("Не удалось записать аудит-лог экспорта")
+
         return result
 
     except HTTPException:
@@ -198,6 +210,12 @@ async def download_act(
                             status_code=403,
                             detail="Нет доступа к файлу"
                         )
+
+                    # Аудит-лог скачивания
+                    audit = ActAuditLogRepository(conn)
+                    await audit.log("download", username, act_id, {
+                        "filename": filename,
+                    })
 
             # Определяем MIME-тип по расширению файла
             mime_types = {

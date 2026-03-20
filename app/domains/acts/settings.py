@@ -81,9 +81,16 @@ class InvoiceSettings(BaseModel):
         return v
 
 
+class AuditLogSettings(BaseModel):
+    """Параметры аудит-лога и версионирования."""
+    retention_days: int = Field(default=365, gt=0)
+    max_content_versions: int = Field(default=50, gt=0)
+
+
 class ActsSettings(BaseModel):
     """Корневая модель настроек домена актов."""
     lock: LockSettings = LockSettings()
     formatting: FormattingSettings = FormattingSettings()
     resource: ResourceSettings = ResourceSettings()
     invoice: InvoiceSettings = InvoiceSettings()
+    audit_log: AuditLogSettings = AuditLogSettings()

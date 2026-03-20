@@ -76,6 +76,11 @@ class UnsupportedFormatError(AppError):
     status_code = 400
 
 
+class ManagementRoleRequiredError(AppError):
+    """Операция доступна только для Куратора или Руководителя."""
+    status_code = 403
+
+
 class InvoiceError(AppError):
     """Ошибка при работе с фактурой (неподдерживаемый тип БД и т.п.)."""
     status_code = 400

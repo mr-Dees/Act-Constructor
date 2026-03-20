@@ -12,6 +12,11 @@ from fastapi import Depends
 from app.core.config import get_settings, Settings
 from app.core.settings_registry import get as get_domain_settings
 from app.db.connection import get_db
+from app.domains.acts.repositories.act_access import ActAccessRepository
+from app.domains.acts.repositories.act_audit_log import ActAuditLogRepository
+from app.domains.acts.repositories.act_content_version import ActContentVersionRepository
+from app.domains.acts.repositories.act_lock import ActLockRepository
+from app.domains.acts.services.access_guard import AccessGuard
 from app.domains.acts.services.act_crud_service import ActCrudService
 from app.domains.acts.services.act_lock_service import ActLockService
 from app.domains.acts.services.act_content_service import ActContentService
@@ -53,3 +58,14 @@ async def get_invoice_service(
     """Создает ActInvoiceService с подключением из пула."""
     async with get_db() as conn:
         yield ActInvoiceService(conn=conn, settings=settings, acts_settings=_get_acts_settings())
+
+
+async def get_audit_log_service() -> AsyncGenerator[tuple[AccessGuard, ActAuditLogRepository, ActContentVersionRepository], None]:
+    """Создает зависимости для аудит-лога: guard + репозитории."""
+    async with get_db() as conn:
+        access = ActAccessRepository(conn)
+        lock = ActLockRepository(conn)
+        guard = AccessGuard(access, lock)
+        audit_repo = ActAuditLogRepository(conn)
+        versions_repo = ActContentVersionRepository(conn)
+        yield guard, audit_repo, versions_repo

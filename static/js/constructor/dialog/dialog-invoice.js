@@ -894,7 +894,7 @@ class InvoiceDialog extends DialogBase {
             // сразу попали в таблицу act_invoices
             if (window.currentActId) {
                 try {
-                    await APIClient.saveActContent(window.currentActId);
+                    await APIClient.saveActContent(window.currentActId, { saveType: 'auto' });
                 } catch (saveErr) {
                     console.warn('Не удалось сохранить акт после прикрепления фактуры:', saveErr);
                 }

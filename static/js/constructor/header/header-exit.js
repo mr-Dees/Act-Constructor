@@ -74,7 +74,7 @@ class HeaderExit {
 
             // Сохраняем контент
             if (window.currentActId && typeof APIClient !== 'undefined') {
-                await APIClient.saveActContent(window.currentActId);
+                await APIClient.saveActContent(window.currentActId, { saveType: 'manual' });
             }
 
             // Успешно сохранили - теперь выходим
@@ -143,6 +143,7 @@ class HeaderExit {
                     const username = AuthManager?.getCurrentUser?.() || null;
                     if (username) {
                         const data = AppState.exportData();
+                        data.saveType = 'manual';
                         const saveResp = await fetch(
                             AppConfig.api.getUrl(`/api/v1/acts/${window.currentActId}/content`),
                             {

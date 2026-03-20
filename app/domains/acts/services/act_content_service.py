@@ -15,6 +15,8 @@ from app.domains.acts.repositories.act_access import ActAccessRepository
 from app.domains.acts.repositories.act_crud import ActCrudRepository
 from app.domains.acts.repositories.act_content import ActContentRepository
 from app.domains.acts.repositories.act_invoice import ActInvoiceRepository
+from app.domains.acts.repositories.act_audit_log import ActAuditLogRepository
+from app.domains.acts.repositories.act_content_version import ActContentVersionRepository
 from app.domains.acts.repositories.act_lock import ActLockRepository
 from app.domains.acts.schemas.act_content import ActDataSchema
 from app.domains.acts.services.access_guard import AccessGuard
@@ -46,6 +48,8 @@ class ActContentService:
         self._content = content or ActContentRepository(conn)
         self._invoice = invoice or ActInvoiceRepository(conn)
         self.guard = AccessGuard(self._access, self._lock)
+        self._audit = ActAuditLogRepository(conn)
+        self._versions = ActContentVersionRepository(conn)
 
     async def get_content(self, act_id: int, username: str) -> dict:
         """
@@ -87,7 +91,36 @@ class ActContentService:
         # Валидация дерева перед сохранением
         self._validate_tree(data)
 
-        return await self._content.save_content(act_id, data, username)
+        # Вычисляем diff ДО сохранения
+        diff = await self._audit.compute_content_diff(act_id, data)
+        diff["save_type"] = data.saveType
+
+        # Вычисляем field-level diff для изменённых элементов
+        field_changes = await self._audit.compute_field_diffs(act_id, data)
+        if field_changes:
+            diff["field_changes"] = field_changes
+
+        # Сохраняем содержимое
+        result = await self._content.save_content(act_id, data, username)
+
+        # Записываем в аудит-лог (fire-and-forget)
+        await self._audit.log("content_save", username, act_id, diff, changelog=data.changelog)
+
+        # Создаём снэпшот версии только для manual/periodic
+        if data.saveType in ("manual", "periodic"):
+            acts_cfg = get_domain_settings("acts", ActsSettings)
+            await self._versions.create_version(
+                act_id=act_id,
+                username=username,
+                save_type=data.saveType,
+                tree=data.tree,
+                tables={tid: t.model_dump(mode="json") for tid, t in data.tables.items()},
+                textblocks={tid: t.model_dump(mode="json") for tid, t in data.textBlocks.items()},
+                violations={vid: v.model_dump(mode="json") for vid, v in data.violations.items()},
+                max_versions=acts_cfg.audit_log.max_content_versions,
+            )
+
+        return result
 
     @staticmethod
     def _validate_tree(data: ActDataSchema) -> None:

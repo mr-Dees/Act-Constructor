@@ -64,6 +64,9 @@ class ViolationManager {
             // Настраиваем обработку клавиш для сохранения изменений
             this.setupTextareaHandlers(violatedTextarea, (value) => {
                 violation.violated = value;
+                if (typeof ChangelogTracker !== 'undefined') {
+                    ChangelogTracker._recordDebounced('modify_violation', violation.id, '', {field: 'violated'}, 5000);
+                }
                 PreviewManager.update();
             });
         }
@@ -93,6 +96,9 @@ class ViolationManager {
             // Настраиваем обработку клавиш для сохранения изменений
             this.setupTextareaHandlers(establishedTextarea, (value) => {
                 violation.established = value;
+                if (typeof ChangelogTracker !== 'undefined') {
+                    ChangelogTracker._recordDebounced('modify_violation', violation.id, '', {field: 'established'}, 5000);
+                }
                 PreviewManager.update();
             });
         }

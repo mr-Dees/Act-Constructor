@@ -5,7 +5,7 @@ AccessGuard инкапсулирует проверки доступа, прав
 и владения блокировкой. Используется всеми сервисами домена актов.
 """
 
-from app.domains.acts.exceptions import AccessDeniedError, ActLockError, InsufficientRightsError
+from app.domains.acts.exceptions import AccessDeniedError, ActLockError, InsufficientRightsError, ManagementRoleRequiredError
 from app.domains.acts.repositories.act_access import ActAccessRepository
 from app.domains.acts.repositories.act_lock import ActLockRepository
 
@@ -41,6 +41,22 @@ class AccessGuard:
             raise InsufficientRightsError(
                 "Недостаточно прав для редактирования. "
                 "Роль 'Участник' имеет доступ только для просмотра."
+            )
+        return permission
+
+    async def require_management_role(self, act_id: int, username: str) -> dict:
+        """
+        Требует роль Куратор или Руководитель.
+
+        Returns:
+            dict с полями has_access, can_edit, role
+        """
+        permission = await self._access.get_user_edit_permission(act_id, username)
+        if not permission["has_access"]:
+            raise AccessDeniedError("Нет доступа к акту")
+        if permission["role"] not in ("Куратор", "Руководитель"):
+            raise ManagementRoleRequiredError(
+                "Доступно только для Куратора и Руководителя"
             )
         return permission
 

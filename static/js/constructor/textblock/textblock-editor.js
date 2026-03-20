@@ -119,6 +119,10 @@ Object.assign(TextBlockManager.prototype, {
         editor.saveTimeout = setTimeout(() => {
             textBlock.content = editor.innerHTML;
 
+            if (typeof ChangelogTracker !== 'undefined') {
+                ChangelogTracker._recordDebounced('modify_textblock', textBlock.id, '', {field: 'content'}, 5000);
+            }
+
             // Применяем форматирование к новым ссылкам и сноскам
             this.applyFormattingToNewNodes(editor);
 
