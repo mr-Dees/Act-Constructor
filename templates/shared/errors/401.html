@@ -1,0 +1,20 @@
+{% extends "shared/errors/base_error.html" %}
+{% block title %}401 — Требуется авторизация{% endblock %}
+{% block icon %}🔒{% endblock %}
+{% block code %}401{% endblock %}
+{% block error_title %}Требуется авторизация{% endblock %}
+{% block message %}Для доступа к приложению необходимо авторизоваться через JupyterHub.{% endblock %}
+{% block extra %}
+{% if reason == "kerberos" %}
+<div class="error-kerberos">
+    <h3 class="error-kerberos-title">Токен Kerberos истёк</h3>
+    <p class="error-kerberos-text">Для продолжения работы обновите токен:</p>
+    <ol class="error-kerberos-steps">
+        <li>Откройте терминал JupyterHub</li>
+        <li>Выполните команду: <code>kinit</code></li>
+        <li>Введите ваш пароль</li>
+        <li>Обновите страницу приложения</li>
+    </ol>
+</div>
+{% endif %}
+{% endblock %}

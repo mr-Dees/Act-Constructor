@@ -17,7 +17,6 @@ class LandingSidebar {
         this._setupChatButton();
         this._loadUserInfo();
         this._setupAdminButton();
-        this._filterNavByRoles();
 
         console.log('LandingSidebar: инициализация завершена');
     }
@@ -122,86 +121,17 @@ class LandingSidebar {
 
     /**
      * Настраивает кнопку администрирования в footer
-     * Показывает кнопку только для пользователей с ролью admin
+     * Кнопка рендерится сервером только для админов
      * @private
      */
-    static async _setupAdminButton() {
+    static _setupAdminButton() {
         const btn = document.getElementById('sidebarAdminBtn');
         if (!btn) return;
 
-        try {
-            const rolesData = await this._loadRolesData();
-
-            if (rolesData.is_admin) {
-                btn.classList.remove('hidden');
-                btn.addEventListener('click', () => {
-                    window.location.href = AppConfig.api.getUrl('/admin');
-                });
-            }
-        } catch (error) {
-            console.error('LandingSidebar: ошибка проверки роли админа:', error);
-        }
-    }
-
-    /**
-     * Фильтрует элементы навигации по ролям пользователя
-     * Скрывает доменные ссылки, к которым нет доступа
-     * @private
-     */
-    static async _filterNavByRoles() {
-        const navItems = document.querySelectorAll('.sidebar-nav-item[data-domain]');
-
-        try {
-            const rolesData = await this._loadRolesData();
-
-            // Определяем разрешённые домены
-            const allowAll = rolesData.is_admin;
-            const userDomains = new Set(rolesData.roles.map(r => r.domain_name).filter(Boolean));
-
-            // Показываем разрешённые пункты через класс role-visible
-            navItems.forEach(item => {
-                const domain = item.dataset.domain;
-                if (allowAll || !domain || userDomains.has(domain)) {
-                    item.classList.add('role-visible');
-                }
-            });
-
-            // Скрываем группы без видимых пунктов
-            document.querySelectorAll('.sidebar-nav-group').forEach(group => {
-                let nextEl = group.nextElementSibling;
-                let hasVisible = false;
-                while (nextEl && !nextEl.classList.contains('sidebar-nav-group')) {
-                    if (nextEl.classList.contains('sidebar-nav-item') && nextEl.classList.contains('role-visible')) {
-                        hasVisible = true;
-                        break;
-                    }
-                    nextEl = nextEl.nextElementSibling;
-                }
-                if (!hasVisible) {
-                    group.classList.add('role-hidden');
-                }
-            });
-        } catch (error) {
-            console.error('LandingSidebar: ошибка фильтрации по ролям:', error);
-            // Fallback: показать все пункты
-            navItems.forEach(item => item.classList.add('role-visible'));
-        }
-    }
-
-    /**
-     * Загружает данные о ролях пользователя с кэшированием в sessionStorage
-     * @returns {Promise<Object>} Данные о ролях {is_admin, roles}
-     * @private
-     */
-    static async _loadRolesData() {
-        const cached = sessionStorage.getItem('user_roles_data');
-        if (cached) {
-            return JSON.parse(cached);
-        }
-
-        const rolesData = await APIClient.loadMyRoles();
-        sessionStorage.setItem('user_roles_data', JSON.stringify(rolesData));
-        return rolesData;
+        btn.addEventListener('click', (e) => {
+            e.preventDefault();
+            window.location.href = AppConfig.api.getUrl('/admin');
+        });
     }
 }
 

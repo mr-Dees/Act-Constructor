@@ -11,7 +11,7 @@ from contextlib import asynccontextmanager
 from pathlib import Path
 
 from fastapi import FastAPI, HTTPException, Request
-from fastapi.responses import FileResponse, JSONResponse, RedirectResponse
+from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 
 from app.api.v1.endpoints.auth import get_current_user_from_env
@@ -32,6 +32,7 @@ from app.db.connection import (
     create_tables_if_not_exist,
     KerberosTokenExpiredError
 )
+from app.routes.errors import router as error_router
 from app.routes.portal import router as portal_router
 
 # Инициализируем настройки и логирование один раз на уровне модуля
@@ -44,6 +45,31 @@ if settings.database.type == 'greenplum':
 
 # Директория доменов
 _domains_dir = Path(__file__).resolve().parent / "domains"
+
+
+def _is_html_request(request: Request) -> bool:
+    """Проверяет, является ли запрос HTML (не API)."""
+    return not request.url.path.startswith("/api/")
+
+
+def _render_error_page(request: Request, code: int, reason: str | None = None):
+    """Рендерит HTML-страницу ошибки."""
+    from app.core.templating import get_templates
+    _templates = get_templates()
+    template_map = {
+        400: "shared/errors/400.html",
+        401: "shared/errors/401.html",
+        403: "shared/errors/403.html",
+        404: "shared/errors/404.html",
+        500: "shared/errors/500.html",
+        503: "shared/errors/503.html",
+    }
+    template_name = template_map.get(code, template_map[500])
+    return _templates.TemplateResponse(
+        template_name,
+        {"request": request, "reason": reason},
+        status_code=code,
+    )
 
 
 @asynccontextmanager
@@ -188,6 +214,9 @@ def create_app() -> FastAPI:
             f"Kerberos токен протух во время запроса: {request.url.path}"
         )
 
+        if _is_html_request(request):
+            return _render_error_page(request, 401, reason="kerberos")
+
         return JSONResponse(
             status_code=401,
             content={
@@ -211,6 +240,8 @@ def create_app() -> FastAPI:
     @app.exception_handler(AppError)
     async def app_error_handler(request: Request, exc: AppError) -> JSONResponse:
         """Единый обработчик всех доменных исключений."""
+        if _is_html_request(request):
+            return _render_error_page(request, exc.status_code)
         return JSONResponse(status_code=exc.status_code, content=exc.to_detail())
 
     @app.exception_handler(UniqueViolationError)
@@ -224,10 +255,24 @@ def create_app() -> FastAPI:
 
     @app.exception_handler(HTTPException)
     async def http_exception_handler(request: Request, exc: HTTPException):
-        """403 на HTML-маршрутах → редирект на главную вместо JSON."""
-        if exc.status_code == 403 and not request.url.path.startswith("/api/"):
-            return RedirectResponse(url="/", status_code=303)
+        """HTTP-ошибки: HTML-страница для браузера, JSON для API."""
+        if _is_html_request(request):
+            return _render_error_page(request, exc.status_code)
         return JSONResponse(status_code=exc.status_code, content={"detail": exc.detail})
+
+    @app.exception_handler(Exception)
+    async def generic_exception_handler(request: Request, exc: Exception):
+        """Перехват необработанных исключений — detail ТОЛЬКО в логах."""
+        logger.exception(f"Необработанное исключение: {request.url.path}")
+        if _is_html_request(request):
+            return _render_error_page(request, 500)
+        return JSONResponse(
+            status_code=500,
+            content={"detail": "Внутренняя ошибка сервера"},
+        )
+
+    # Подключение роута ошибок (до portal_router)
+    app.include_router(error_router)
 
     # Подключение shared HTML-роутов (лендинг, CK-заглушки)
     app.include_router(portal_router)

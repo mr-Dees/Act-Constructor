@@ -120,77 +120,8 @@ class AuthManager {
      * @param {Object} errorData - данные об ошибке от API
      */
     static _showKerberosError(errorData) {
-        const message = errorData.message || 'Токен авторизации Kerberos истек';
-        const instructions = errorData.instructions || [
-            'Откройте терминал JupyterHub',
-            'Выполните команду: kinit',
-            'Введите ваш пароль',
-            'Обновите страницу приложения'
-        ];
-
-        // Создаем красивое модальное окно с инструкциями
-        const overlay = document.createElement('div');
-        overlay.style.cssText = `
-            position: fixed;
-            top: 0;
-            left: 0;
-            width: 100%;
-            height: 100%;
-            background: rgba(0, 0, 0, 0.8);
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            z-index: 10000;
-        `;
-
-        const modal = document.createElement('div');
-        modal.style.cssText = `
-            background: white;
-            padding: 2rem;
-            border-radius: 8px;
-            max-width: 500px;
-            box-shadow: 0 4px 20px rgba(0, 0, 0, 0.3);
-        `;
-
-        const title = document.createElement('h2');
-        title.textContent = '⚠️ Требуется обновление токена Kerberos';
-        title.style.cssText = 'margin: 0 0 1rem 0; color: #d32f2f;';
-
-        const description = document.createElement('p');
-        description.textContent = message;
-        description.style.cssText = 'margin: 0 0 1rem 0; line-height: 1.5;';
-
-        const instructionsList = document.createElement('ol');
-        instructionsList.style.cssText = 'margin: 1rem 0; padding-left: 1.5rem;';
-        instructions.forEach(instruction => {
-            const li = document.createElement('li');
-            li.textContent = instruction;
-            li.style.cssText = 'margin: 0.5rem 0;';
-            instructionsList.appendChild(li);
-        });
-
-        const refreshButton = document.createElement('button');
-        refreshButton.textContent = 'Обновить страницу';
-        refreshButton.style.cssText = `
-            background: #1976d2;
-            color: white;
-            border: none;
-            padding: 0.75rem 1.5rem;
-            border-radius: 4px;
-            cursor: pointer;
-            font-size: 1rem;
-            margin-top: 1rem;
-        `;
-        refreshButton.onclick = () => window.location.reload();
-
-        modal.appendChild(title);
-        modal.appendChild(description);
-        modal.appendChild(instructionsList);
-        modal.appendChild(refreshButton);
-        overlay.appendChild(modal);
-
-        document.body.innerHTML = '';
-        document.body.appendChild(overlay);
+        const baseUrl = AppConfig.api.getBaseUrl();
+        window.location.href = `${baseUrl}/error/401?reason=kerberos`;
     }
 
     /**
@@ -267,17 +198,8 @@ class AuthManager {
      * @private
      */
     static _showAuthError() {
-        const tmpl = document.getElementById('authErrorTemplate');
-        if (!tmpl) {
-            console.error('authErrorTemplate не найден');
-            return;
-        }
-
-        const fragment = tmpl.content.cloneNode(true);
-
-        // Полностью очищаем body и вставляем только overlay из шаблона
-        document.body.innerHTML = '';
-        document.body.appendChild(fragment);
+        const baseUrl = AppConfig.api.getBaseUrl();
+        window.location.href = `${baseUrl}/error/401`;
     }
 
     /**

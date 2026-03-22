@@ -52,6 +52,33 @@ def get_nav_items_grouped() -> list[dict]:
     return [{"group": group_name, "nav_items": group_items} for group_name, group_items in groups.items()]
 
 
+def get_nav_items_for_user(roles: list[dict]) -> list[dict]:
+    """
+    Собирает NavItem, фильтруя по ролям пользователя.
+
+    Админ видит все элементы. Обычный пользователь видит только домены,
+    к которым у него есть доступ (по domain_name в ролях).
+    Пустые группы не включаются.
+    """
+    from app.core.domain_registry import get_all_domains
+
+    is_admin = any(r["name"] == "Админ" for r in roles)
+    user_domains = {r["domain_name"] for r in roles if r.get("domain_name")}
+
+    items: list[NavItem] = []
+    for d in get_all_domains():
+        if is_admin or d.name in user_domains:
+            items.extend(d.nav_items)
+    items.sort(key=lambda x: x.order)
+
+    # Группировка, пустые группы исключаются
+    groups: dict[str, list[NavItem]] = {}
+    for item in items:
+        g = item.group or ""
+        groups.setdefault(g, []).append(item)
+    return [{"group": group_name, "nav_items": group_items} for group_name, group_items in groups.items()]
+
+
 def get_knowledge_bases() -> list[KnowledgeBase]:
     """Собирает KnowledgeBase из всех доменов."""
     from app.core.domain_registry import get_all_domains

@@ -41,9 +41,6 @@
 <!-- Дополнительные шаблоны страницы -->
 {% block templates %}{% endblock %}
 
-<!-- Компонент для ошибок авторизации -->
-{% include 'shared/auth_error.html' %}
-
 <!-- Общие скрипты портала -->
 <script src="{{ url_for('static', path='js/shared/app-config.js') }}"></script>
 <script src="{{ url_for('static', path='js/shared/auth.js') }}"></script>
