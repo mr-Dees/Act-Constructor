@@ -7,7 +7,7 @@
 
 from fastapi import APIRouter
 
-from app.api.v1.endpoints import auth, chat, system
+from app.api.v1.endpoints import auth, chat, roles, system
 
 # Создание главного роутера для API v1
 api_router = APIRouter()
@@ -17,6 +17,7 @@ ROUTERS = [
     (auth, "/auth", ["Авторизация"]),
     (system, "/system", ["Системные операции"]),
     (chat, "/chat", ["AI-ассистент"]),
+    (roles, "/roles", ["Роли пользователей"]),
 ]
 
 # Подключение shared роутеров

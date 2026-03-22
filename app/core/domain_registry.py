@@ -9,7 +9,7 @@ import importlib
 import logging
 from pathlib import Path
 
-from fastapi import FastAPI
+from fastapi import Depends, FastAPI
 
 from app.core.domain import DomainDescriptor
 
@@ -166,16 +166,27 @@ def register_domains(
 
     registered_exc_classes: dict[type[Exception], str] = {}
 
+    from app.api.v1.deps.role_deps import require_admin, require_domain_access
+
     for d in domains:
+        # Определяем зависимости проверки ролей для домена
+        if d.name == "admin":
+            role_deps = [Depends(require_admin())]
+        else:
+            role_deps = [Depends(require_domain_access(d.name))]
+
         # API роутеры
         for router, prefix, tags in d.api_routers:
             full_prefix = f"{api_prefix}{prefix}"
-            app.include_router(router, prefix=full_prefix, tags=tags)
+            app.include_router(
+                router, prefix=full_prefix, tags=tags,
+                dependencies=role_deps,
+            )
             logger.info(f"Домен {d.name}: API {full_prefix}")
 
         # HTML роутеры
         for router in d.html_routers:
-            app.include_router(router)
+            app.include_router(router, dependencies=role_deps)
             logger.info(f"Домен {d.name}: HTML роутер зарегистрирован")
 
         # Обработчики ошибок (с детекцией коллизий)

@@ -85,6 +85,7 @@ coverage.xml
 *.ipynb
 
 # Documentation
+DEVELOPER_GUIDE.md
 docs/
 !docs/plans/
 docs/_build/

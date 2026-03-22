@@ -877,6 +877,91 @@ class APIClient {
         }
         return resp.json();
     }
+
+    // -------------------------------------------------------------------------
+    // РОЛИ И АДМИНИСТРИРОВАНИЕ
+    // -------------------------------------------------------------------------
+
+    /**
+     * Загружает роли текущего пользователя
+     * @returns {Promise<{is_admin: boolean, roles: Array}>}
+     */
+    static async loadMyRoles() {
+        const username = AuthManager.getCurrentUser();
+        const response = await fetch(AppConfig.api.getUrl('/api/v1/roles/my-roles'), {
+            headers: { 'X-JupyterHub-User': username }
+        });
+        if (!response.ok) throw this._createError(response.status, 'Ошибка загрузки ролей');
+        return response.json();
+    }
+
+    /**
+     * Загружает список всех доступных ролей (для админ-панели)
+     * @returns {Promise<Array<{id: number, name: string, description: string}>>}
+     */
+    static async loadAllRoles() {
+        const username = AuthManager.getCurrentUser();
+        const response = await fetch(AppConfig.api.getUrl('/api/v1/admin/roles'), {
+            headers: { 'X-JupyterHub-User': username }
+        });
+        if (!response.ok) throw this._createError(response.status, 'Ошибка загрузки ролей');
+        return response.json();
+    }
+
+    /**
+     * Загружает справочник пользователей (для админ-панели)
+     * @returns {Promise<Array<{username: string, fullname: string, email: string, job: string, roles: Array}>>}
+     */
+    static async loadUserDirectory() {
+        const username = AuthManager.getCurrentUser();
+        const response = await fetch(AppConfig.api.getUrl('/api/v1/admin/users/directory'), {
+            headers: { 'X-JupyterHub-User': username }
+        });
+        if (!response.ok) throw this._createError(response.status, 'Ошибка загрузки справочника');
+        return response.json();
+    }
+
+    /**
+     * Назначает роль пользователю
+     * @param {string} targetUsername - Имя пользователя
+     * @param {number} roleId - ID роли
+     * @returns {Promise<Object>}
+     */
+    static async assignRole(targetUsername, roleId) {
+        const username = AuthManager.getCurrentUser();
+        const response = await fetch(AppConfig.api.getUrl(`/api/v1/admin/users/${targetUsername}/roles`), {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+                'X-JupyterHub-User': username
+            },
+            body: JSON.stringify({ role_id: roleId })
+        });
+        if (!response.ok) {
+            const error = await response.json();
+            throw this._createError(response.status, error.detail);
+        }
+        return response.json();
+    }
+
+    /**
+     * Снимает роль с пользователя
+     * @param {string} targetUsername - Имя пользователя
+     * @param {number} roleId - ID роли
+     * @returns {Promise<Object>}
+     */
+    static async removeRole(targetUsername, roleId) {
+        const username = AuthManager.getCurrentUser();
+        const response = await fetch(AppConfig.api.getUrl(`/api/v1/admin/users/${targetUsername}/roles/${roleId}`), {
+            method: 'DELETE',
+            headers: { 'X-JupyterHub-User': username }
+        });
+        if (!response.ok) {
+            const error = await response.json();
+            throw this._createError(response.status, error.detail);
+        }
+        return response.json();
+    }
 }
 
 // Глобальный доступ

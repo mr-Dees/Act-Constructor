@@ -1,0 +1,109 @@
+/* Admin roles table */
+.admin-roles-section {
+    margin-top: 8px;
+}
+
+.admin-roles-table {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+}
+
+.admin-roles-row {
+    display: flex;
+    align-items: center;
+    gap: 16px;
+    padding: 12px 16px;
+    background: var(--bg-primary);
+    border: 1px solid var(--border-color);
+    border-radius: 8px;
+    transition: box-shadow 0.15s;
+}
+
+.admin-roles-row:hover {
+    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.08);
+}
+
+.admin-roles-row-info {
+    flex: 0 0 280px;
+    min-width: 0;
+}
+
+.admin-roles-row-name {
+    font-weight: 500;
+    color: var(--text-primary);
+    font-size: 0.9rem;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+.admin-roles-row-details {
+    font-size: 0.8rem;
+    color: var(--text-secondary);
+    margin-top: 2px;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+.admin-roles-row-chips {
+    display: flex;
+    gap: 8px;
+    flex-wrap: wrap;
+    flex: 1;
+}
+
+.admin-role-chip {
+    padding: 6px 14px;
+    border-radius: 16px;
+    border: 1px solid var(--border-color);
+    background: var(--bg-secondary);
+    color: var(--text-secondary);
+    font-size: 0.8rem;
+    cursor: pointer;
+    transition: all 0.2s;
+    white-space: nowrap;
+}
+
+.admin-role-chip:hover {
+    border-color: var(--primary);
+    color: var(--primary);
+}
+
+.admin-role-chip.active {
+    background: var(--primary);
+    color: white;
+    border-color: var(--primary);
+}
+
+.admin-role-chip.active:hover {
+    opacity: 0.85;
+    color: white;
+}
+
+.admin-role-chip:disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
+}
+
+.admin-remove-btn {
+    flex-shrink: 0;
+    width: 28px;
+    height: 28px;
+    border: none;
+    background: transparent;
+    color: var(--text-tertiary);
+    font-size: 1.2rem;
+    cursor: pointer;
+    border-radius: 50%;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    transition: all 0.15s;
+}
+
+.admin-remove-btn:hover {
+    background: var(--bg-hover);
+    color: var(--danger);
+}

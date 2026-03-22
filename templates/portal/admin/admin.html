@@ -1,0 +1,50 @@
+{% extends "portal/base_portal.html" %}
+
+{% block title %}Администрирование{% endblock %}
+
+{% block content %}
+<div class="admin-content">
+    <div class="admin-header">
+        <h1 class="admin-title">Управление ролями пользователей</h1>
+    </div>
+
+    <!-- Поиск пользователей -->
+    <div class="admin-search-section">
+        <div class="admin-search-wrapper">
+            <input type="text" id="adminSearchInput" class="admin-search-input"
+                   placeholder="Введите минимум 2 символа для поиска (ФИО, таб. номер, email)..."
+                   autocomplete="off">
+            <div id="adminSearchDropdown" class="admin-search-dropdown hidden"></div>
+        </div>
+    </div>
+
+    <!-- Таблица ролей -->
+    <div class="admin-roles-section">
+        <div id="adminRolesTable" class="admin-roles-table">
+            <!-- Заполняется из JS -->
+        </div>
+        <div id="adminEmptyState" class="admin-empty-state">
+            Найдите пользователей через поиск выше
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block extra_js %}
+<script src="{{ url_for('static', path='js/portal/admin/admin-search.js') }}"></script>
+<script src="{{ url_for('static', path='js/portal/admin/admin-roles.js') }}"></script>
+<script src="{{ url_for('static', path='js/portal/admin/admin-page.js') }}"></script>
+{% endblock %}
+
+{% block init_script %}
+<script>
+    document.addEventListener('DOMContentLoaded', async () => {
+        const isAuthorized = await AuthManager.requireAuth();
+        if (isAuthorized) {
+            LandingSidebar.init();
+            LandingSettingsManager.init();
+            AdminPage.init();
+        }
+    });
+</script>
+{% endblock %}

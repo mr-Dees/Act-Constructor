@@ -10,8 +10,8 @@
 from contextlib import asynccontextmanager
 from pathlib import Path
 
-from fastapi import FastAPI, Request
-from fastapi.responses import FileResponse, JSONResponse
+from fastapi import FastAPI, HTTPException, Request
+from fastapi.responses import FileResponse, JSONResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
 
 from app.api.v1.endpoints.auth import get_current_user_from_env
@@ -221,6 +221,13 @@ def create_app() -> FastAPI:
             status_code=409,
             content={"detail": "Запись с такими данными уже существует"},
         )
+
+    @app.exception_handler(HTTPException)
+    async def http_exception_handler(request: Request, exc: HTTPException):
+        """403 на HTML-маршрутах → редирект на главную вместо JSON."""
+        if exc.status_code == 403 and not request.url.path.startswith("/api/"):
+            return RedirectResponse(url="/", status_code=303)
+        return JSONResponse(status_code=exc.status_code, content={"detail": exc.detail})
 
     # Подключение shared HTML-роутов (лендинг, CK-заглушки)
     app.include_router(portal_router)

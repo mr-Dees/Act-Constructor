@@ -370,6 +370,22 @@
 }
 
 /* ============================================
+   Доменные пункты: скрыты до проверки ролей
+   ============================================ */
+
+.sidebar-nav-item[data-domain] {
+    display: none;
+}
+
+.sidebar-nav-item[data-domain].role-visible {
+    display: flex;
+}
+
+.sidebar-nav-group.role-hidden {
+    display: none;
+}
+
+/* ============================================
    Адаптивность sidebar-layout
    ============================================ */
 

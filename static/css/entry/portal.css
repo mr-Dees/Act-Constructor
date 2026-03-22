@@ -21,3 +21,8 @@
 @import '../constructor/preview/preview-table.css';
 @import '../constructor/preview/preview-typography.css';
 @import '../constructor/preview/preview-violation.css';
+
+/* Admin */
+@import '../portal/admin/admin-page.css';
+@import '../portal/admin/admin-search.css';
+@import '../portal/admin/admin-roles.css';
