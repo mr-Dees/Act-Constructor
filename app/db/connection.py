@@ -277,9 +277,11 @@ async def create_tables_if_not_exist(domains=None) -> None:
     adapter = get_adapter()
     db_type = "postgresql" if isinstance(adapter, PostgreSQLAdapter) else "greenplum"
 
+    substitutions = {}
     schema_paths = []
     if domains:
         for d in domains:
+            substitutions.update(d.migration_substitutions)
             if d.package_path:
                 path = d.package_path / "migrations" / db_type / "schema.sql"
                 if path.exists():
@@ -287,7 +289,7 @@ async def create_tables_if_not_exist(domains=None) -> None:
 
     try:
         async with pool.acquire() as conn:
-            await adapter.create_tables(conn, schema_paths)
+            await adapter.create_tables(conn, schema_paths, substitutions)
 
         logger.info(
             f"Схема БД ({adapter.__class__.__name__}) создана/проверена успешно"

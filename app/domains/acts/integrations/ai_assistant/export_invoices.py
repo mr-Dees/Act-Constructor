@@ -8,7 +8,6 @@ from app.domains.acts.integrations.ai_assistant._helpers import (
     batch_over_km, batch_over_items,
 )
 from app.domains.acts.integrations.ai_assistant.formatters.ai_readable_formatter import ActFormatter
-from app.domains.acts.integrations.ai_assistant.queries.act_queries import ActQueries
 
 
 async def get_all_invoices(
@@ -32,7 +31,7 @@ async def get_all_invoices(
         if ctx.error:
             return ctx.error
 
-        invoices = await ActQueries.get_all_invoices(ctx.conn, ctx.act['id'], ctx.tree)
+        invoices = await ctx.queries.get_all_invoices(ctx.conn, ctx.act['id'], ctx.tree)
 
         parts = []
         prepend_metadata(parts, ctx.act, with_metadata)
@@ -101,7 +100,7 @@ async def get_invoices_by_item(
         if ctx.error:
             return ctx.error
 
-        invoices = await ActQueries.get_invoices_by_item(
+        invoices = await ctx.queries.get_invoices_by_item(
             ctx.conn, ctx.act['id'], item_number, ctx.tree, recursive
         )
 

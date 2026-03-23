@@ -19,8 +19,12 @@ class ActFilters:
     названию проверки, городу, датам и номерам поручений.
     """
 
-    @staticmethod
+    def __init__(self, adapter):
+        self.acts = adapter.get_table_name("acts")
+        self.directives_table = adapter.get_table_name("act_directives")
+
     async def search_acts(
+            self,
             conn: asyncpg.Connection,
             inspection_names: Optional[list[str]] = None,
             cities: Optional[list[str]] = None,
@@ -108,7 +112,7 @@ class ActFilters:
 
             conditions.append(
                 f"""EXISTS (
-                    SELECT 1 FROM act_directives ad
+                    SELECT 1 FROM {self.directives_table} ad
                     WHERE ad.act_id = a.id
                     AND ({' OR '.join(directive_conditions)})
                 )"""
@@ -116,8 +120,8 @@ class ActFilters:
 
         # --- Основной SELECT ---
         if with_metadata:
-            base_query = """
-                SELECT 
+            base_query = f"""
+                SELECT
                     a.id,
                     a.km_number,
                     a.inspection_name,
@@ -133,18 +137,18 @@ class ActFilters:
                     a.created_by,
                     a.last_edited_by,
                     a.last_edited_at
-                FROM acts a
+                FROM {self.acts} a
             """
         else:
-            base_query = """
-                SELECT 
+            base_query = f"""
+                SELECT
                     a.id,
                     a.km_number,
                     a.inspection_name,
                     a.city,
                     a.inspection_start_date,
                     a.inspection_end_date
-                FROM acts a
+                FROM {self.acts} a
             """
 
         # --- WHERE условия ---

@@ -1102,8 +1102,13 @@ class InvoiceDialog extends DialogBase {
 
         // Схема берётся из конфига, а не из таблицы реестра
         const schemaName = dbType === 'hive'
-            ? (this._invoiceConfig?.hiveSchema || 'team_sva_oarb_3')
-            : (this._invoiceConfig?.gpSchema || 's_grnplm_ld_audit_da_sandbox_oarb');
+            ? this._invoiceConfig?.hiveSchema
+            : this._invoiceConfig?.gpSchema;
+
+        if (!schemaName) {
+            Notifications.warning('Конфигурация фактур не загружена. Обновите страницу.');
+            return;
+        }
 
         const data = {
             act_id: parseInt(actId, 10),

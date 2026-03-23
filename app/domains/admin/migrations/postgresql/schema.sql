@@ -4,7 +4,7 @@
 -- СПРАВОЧНИК ПОЛЬЗОВАТЕЛЕЙ (для локального тестирования)
 -- ============================================================================
 
-CREATE TABLE IF NOT EXISTS t_db_oarb_ua_user (
+CREATE TABLE IF NOT EXISTS {REF_USER_TABLE} (
     id SERIAL PRIMARY KEY,
     username VARCHAR(50) NOT NULL UNIQUE,
     fullname VARCHAR(255) NOT NULL,
@@ -14,16 +14,16 @@ CREATE TABLE IF NOT EXISTS t_db_oarb_ua_user (
     branch VARCHAR(255) NOT NULL DEFAULT ''
 );
 
-COMMENT ON TABLE t_db_oarb_ua_user IS 'Справочник пользователей (реплика из GP для локального тестирования)';
-COMMENT ON COLUMN t_db_oarb_ua_user.username IS 'Числовой логин пользователя';
-COMMENT ON COLUMN t_db_oarb_ua_user.fullname IS 'ФИО пользователя';
-COMMENT ON COLUMN t_db_oarb_ua_user.job IS 'Должность';
-COMMENT ON COLUMN t_db_oarb_ua_user.tn IS 'Табельный номер';
-COMMENT ON COLUMN t_db_oarb_ua_user.email IS 'Электронная почта';
-COMMENT ON COLUMN t_db_oarb_ua_user.branch IS 'Подразделение';
+COMMENT ON TABLE {REF_USER_TABLE} IS 'Справочник пользователей (реплика из GP для локального тестирования)';
+COMMENT ON COLUMN {REF_USER_TABLE}.username IS 'Числовой логин пользователя';
+COMMENT ON COLUMN {REF_USER_TABLE}.fullname IS 'ФИО пользователя';
+COMMENT ON COLUMN {REF_USER_TABLE}.job IS 'Должность';
+COMMENT ON COLUMN {REF_USER_TABLE}.tn IS 'Табельный номер';
+COMMENT ON COLUMN {REF_USER_TABLE}.email IS 'Электронная почта';
+COMMENT ON COLUMN {REF_USER_TABLE}.branch IS 'Подразделение';
 
 -- Заполняем тестовыми данными
-INSERT INTO t_db_oarb_ua_user (username, fullname, job, tn, email, branch) VALUES
+INSERT INTO {REF_USER_TABLE} (username, fullname, job, tn, email, branch) VALUES
     ('22494524', 'МАШТАКОВ ДЕНИС РОМАНОВИЧ', 'Менеджер направления', '02115412', 'DRMashtakov@omega.sbrf.ru', 'Отдел аудита розничного бизнеса'),
     ('22501001', 'ИВАНОВ АЛЕКСЕЙ ПЕТРОВИЧ', 'Руководитель группы', '02115500', 'APIvanov@omega.sbrf.ru', 'Отдел аудита розничного бизнеса'),
     ('22501002', 'ПЕТРОВА ЕЛЕНА СЕРГЕЕВНА', 'Главный аудитор', '02115501', 'ESPetrova@omega.sbrf.ru', 'Отдел аудита розничного бизнеса'),
@@ -102,7 +102,7 @@ CREATE INDEX IF NOT EXISTS idx_roles_domain_name
 
 COMMENT ON INDEX idx_roles_domain_name IS 'Частичный индекс для поиска ролей по домену';
 
-CREATE INDEX IF NOT EXISTS idx_t_db_oarb_ua_user_branch
-    ON t_db_oarb_ua_user(branch);
+CREATE INDEX IF NOT EXISTS idx_{REF_USER_TABLE}_branch
+    ON {REF_USER_TABLE}(branch);
 
-COMMENT ON INDEX idx_t_db_oarb_ua_user_branch IS 'Индекс для фильтрации пользователей по подразделению';
+COMMENT ON INDEX idx_{REF_USER_TABLE}_branch IS 'Индекс для фильтрации пользователей по подразделению';

@@ -2,7 +2,7 @@
 
 from typing import Dict, List
 
-from app.db.connection import get_pool
+from app.db.connection import get_adapter, get_pool
 from app.domains.acts.integrations.ai_assistant._helpers import (
     ActContext, build_node_map, find_parent_number,
     assemble_parts, prepend_metadata,
@@ -34,7 +34,7 @@ async def get_all_tables(
         if ctx.error:
             return ctx.error
 
-        tables = await ActQueries.get_all_tables(ctx.conn, ctx.act['id'], ctx.tree)
+        tables = await ctx.queries.get_all_tables(ctx.conn, ctx.act['id'], ctx.tree)
 
         parts = []
         prepend_metadata(parts, ctx.act, with_metadata)
@@ -103,7 +103,7 @@ async def get_all_tables_in_item(
         if ctx.error:
             return ctx.error
 
-        tables = await ActQueries.get_tables_by_item(
+        tables = await ctx.queries.get_tables_by_item(
             ctx.conn, ctx.act['id'], item_number, ctx.tree, recursive
         )
 
@@ -196,17 +196,19 @@ async def get_table_by_name(
     # Случай 2: item_number - строка, table_name - список
     if isinstance(table_name, list):
         pool = get_pool()
+        adapter = get_adapter()
+        queries = ActQueries(adapter)
 
         result = {}
         async with pool.acquire() as conn:
-            act = await ActQueries.get_act_metadata(conn, km_number)
+            act = await queries.get_act_metadata(conn, km_number)
             if not act:
                 return f"Акт с КМ {km_number} не найден."
 
-            tree = await ActQueries.get_tree(conn, act['id'])
+            tree = await queries.get_tree(conn, act['id'])
 
             for name in table_name:
-                table = await ActQueries.get_table_by_name(
+                table = await queries.get_table_by_name(
                     conn, act['id'], item_number, name, tree, recursive
                 )
 
@@ -237,7 +239,7 @@ async def get_table_by_name(
         if ctx.error:
             return ctx.error
 
-        table = await ActQueries.get_table_by_name(
+        table = await ctx.queries.get_table_by_name(
             ctx.conn, ctx.act['id'], item_number, table_name, ctx.tree, recursive
         )
 

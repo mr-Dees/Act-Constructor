@@ -8,7 +8,6 @@ from app.domains.acts.integrations.ai_assistant._helpers import (
     batch_over_km, batch_over_items,
 )
 from app.domains.acts.integrations.ai_assistant.formatters.ai_readable_formatter import ActFormatter
-from app.domains.acts.integrations.ai_assistant.queries.act_queries import ActQueries
 
 
 async def get_all_textblocks(
@@ -32,7 +31,7 @@ async def get_all_textblocks(
         if ctx.error:
             return ctx.error
 
-        textblocks = await ActQueries.get_all_textblocks(ctx.conn, ctx.act['id'], ctx.tree)
+        textblocks = await ctx.queries.get_all_textblocks(ctx.conn, ctx.act['id'], ctx.tree)
 
         parts = []
         prepend_metadata(parts, ctx.act, with_metadata)
@@ -101,7 +100,7 @@ async def get_textblocks_by_item(
         if ctx.error:
             return ctx.error
 
-        textblocks = await ActQueries.get_textblocks_by_item(
+        textblocks = await ctx.queries.get_textblocks_by_item(
             ctx.conn, ctx.act['id'], item_number, ctx.tree, recursive
         )
 

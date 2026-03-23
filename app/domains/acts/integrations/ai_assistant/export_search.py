@@ -3,7 +3,7 @@
 from datetime import date
 from typing import List, Optional
 
-from app.db.connection import get_pool
+from app.db.connection import get_adapter, get_pool
 from app.domains.acts.integrations.ai_assistant.queries.act_filters import ActFilters
 
 
@@ -45,9 +45,11 @@ async def search_acts(
         Отформатированный список найденных актов.
     """
     pool = get_pool()
+    adapter = get_adapter()
+    filters = ActFilters(adapter)
 
     async with pool.acquire() as conn:
-        results = await ActFilters.search_acts(
+        results = await filters.search_acts(
             conn,
             inspection_names=inspection_names,
             cities=cities,

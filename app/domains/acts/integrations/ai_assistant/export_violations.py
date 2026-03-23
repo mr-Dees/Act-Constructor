@@ -9,7 +9,6 @@ from app.domains.acts.integrations.ai_assistant._helpers import (
     batch_over_km, batch_over_items,
 )
 from app.domains.acts.integrations.ai_assistant.formatters.ai_readable_formatter import ActFormatter
-from app.domains.acts.integrations.ai_assistant.queries.act_queries import ActQueries
 
 
 async def get_all_violations(
@@ -33,7 +32,7 @@ async def get_all_violations(
         if ctx.error:
             return ctx.error
 
-        violations = await ActQueries.get_all_violations(ctx.conn, ctx.act['id'], ctx.tree)
+        violations = await ctx.queries.get_all_violations(ctx.conn, ctx.act['id'], ctx.tree)
 
         parts = []
         prepend_metadata(parts, ctx.act, with_metadata)
@@ -102,7 +101,7 @@ async def get_violation_by_item(
         if ctx.error:
             return ctx.error
 
-        violations = await ActQueries.get_violations_by_item(
+        violations = await ctx.queries.get_violations_by_item(
             ctx.conn, ctx.act['id'], item_number, ctx.tree, recursive
         )
 
@@ -184,7 +183,7 @@ async def get_violation_fields(
         if ctx.error:
             return ctx.error
 
-        violations = await ActQueries.get_violations_by_item(
+        violations = await ctx.queries.get_violations_by_item(
             ctx.conn, ctx.act['id'], item_number, ctx.tree, recursive
         )
 

@@ -27,14 +27,13 @@ class AdminRepository(BaseRepository):
         """
         Возвращает имя таблицы справочника пользователей.
 
-        Для PostgreSQL: t_db_oarb_ua_user (создаётся нашей миграцией).
-        Для GreenPlum: фиксированная таблица в отдельной схеме (уже существует),
-        НЕ использует adapter.get_table_name(), т.к. таблица не имеет общего префикса.
+        Для PostgreSQL: имя таблицы из настроек (без схемы).
+        Для GreenPlum: схема.таблица из настроек.
         """
+        ud = self.settings.user_directory
         if isinstance(self.adapter, GreenplumAdapter):
-            ud = self.settings.user_directory
             return f"{ud.schema_name}.{ud.table}"
-        return "t_db_oarb_ua_user"
+        return ud.table
 
     # -------------------------------------------------------------------------
     # РОЛИ

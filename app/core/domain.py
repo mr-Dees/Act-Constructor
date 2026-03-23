@@ -59,3 +59,4 @@ class DomainDescriptor:
     nav_items: list[NavItem] = field(default_factory=list)
     knowledge_bases: list[KnowledgeBase] = field(default_factory=list)
     chat_system_prompt: str = ""
+    migration_substitutions: dict[str, str] = field(default_factory=dict)

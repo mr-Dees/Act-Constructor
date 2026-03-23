@@ -6,7 +6,6 @@ from app.domains.acts.integrations.ai_assistant._helpers import (
     ActContext, assemble_parts, prepend_metadata, batch_over_km,
 )
 from app.domains.acts.integrations.ai_assistant.formatters.ai_readable_formatter import ActFormatter
-from app.domains.acts.integrations.ai_assistant.queries.act_queries import ActQueries
 
 
 async def get_act_by_km(
@@ -30,19 +29,19 @@ async def get_act_by_km(
         if ctx.error:
             return ctx.error
 
-        tables = await ActQueries.get_all_tables(ctx.conn, ctx.act['id'], ctx.tree)
-        textblocks = await ActQueries.get_all_textblocks(ctx.conn, ctx.act['id'], ctx.tree)
-        violations = await ActQueries.get_all_violations(ctx.conn, ctx.act['id'], ctx.tree)
+        tables = await ctx.queries.get_all_tables(ctx.conn, ctx.act['id'], ctx.tree)
+        textblocks = await ctx.queries.get_all_textblocks(ctx.conn, ctx.act['id'], ctx.tree)
+        violations = await ctx.queries.get_all_violations(ctx.conn, ctx.act['id'], ctx.tree)
 
         parts = []
 
         if with_metadata:
             parts.append(ActFormatter.format_metadata(ctx.act))
 
-            team = await ActQueries.get_audit_team(ctx.conn, ctx.act['id'])
+            team = await ctx.queries.get_audit_team(ctx.conn, ctx.act['id'])
             parts.append(ActFormatter.format_audit_team(team))
 
-            directives = await ActQueries.get_directives(ctx.conn, ctx.act['id'])
+            directives = await ctx.queries.get_directives(ctx.conn, ctx.act['id'])
             if directives:
                 parts.append(ActFormatter.format_directives(directives))
 

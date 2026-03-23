@@ -19,13 +19,19 @@ class DatabaseAdapter(ABC):
     """
 
     @abstractmethod
-    async def create_tables(self, conn: asyncpg.Connection, schema_paths: list[Path]) -> None:
+    async def create_tables(
+        self,
+        conn: asyncpg.Connection,
+        schema_paths: list[Path],
+        substitutions: dict[str, str] | None = None,
+    ) -> None:
         """
         Создает таблицы в БД из списка SQL-схем.
 
         Args:
             conn: Подключение к базе данных
             schema_paths: Пути к файлам schema.sql каждого домена
+            substitutions: Подстановки плейсхолдеров в SQL (например, {REF_HADOOP_TABLES} → имя таблицы)
         """
         pass
 

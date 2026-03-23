@@ -9,8 +9,9 @@
 
 from typing import Dict, List
 
-from app.db.connection import get_pool
+from app.db.connection import get_pool, get_adapter
 from app.domains.acts.integrations.ai_assistant.queries.act_queries import ActQueries
+from app.domains.acts.integrations.ai_assistant.queries.act_filters import ActFilters
 from app.domains.acts.integrations.ai_assistant.formatters.ai_readable_formatter import ActFormatter
 
 
@@ -34,6 +35,8 @@ class ActContext:
         self.act = None
         self.tree = None
         self.error = None
+        self.queries = None
+        self.filters = None
         self._pool = None
         self._conn_ctx = None
 
@@ -42,12 +45,16 @@ class ActContext:
         self._conn_ctx = self._pool.acquire()
         self.conn = await self._conn_ctx.__aenter__()
 
-        self.act = await ActQueries.get_act_metadata(self.conn, self.km_number)
+        adapter = get_adapter()
+        self.queries = ActQueries(adapter)
+        self.filters = ActFilters(adapter)
+
+        self.act = await self.queries.get_act_metadata(self.conn, self.km_number)
         if not self.act:
             self.error = f"Акт с КМ {self.km_number} не найден."
             return self
 
-        self.tree = await ActQueries.get_tree(self.conn, self.act['id'])
+        self.tree = await self.queries.get_tree(self.conn, self.act['id'])
         return self
 
     async def __aexit__(self, exc_type, exc_val, exc_tb):

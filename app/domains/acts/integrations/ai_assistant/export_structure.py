@@ -4,7 +4,6 @@ from typing import Dict, List
 
 from app.domains.acts.integrations.ai_assistant._helpers import ActContext, batch_over_km
 from app.domains.acts.integrations.ai_assistant.formatters.ai_readable_formatter import ActFormatter
-from app.domains.acts.integrations.ai_assistant.queries.act_queries import ActQueries
 
 
 async def get_act_structure(
@@ -32,9 +31,9 @@ async def get_act_structure(
             return "Структура акта не найдена."
 
         if with_statistics:
-            tables = await ActQueries.get_all_tables(ctx.conn, ctx.act['id'], ctx.tree)
-            textblocks = await ActQueries.get_all_textblocks(ctx.conn, ctx.act['id'], ctx.tree)
-            violations = await ActQueries.get_all_violations(ctx.conn, ctx.act['id'], ctx.tree)
+            tables = await ctx.queries.get_all_tables(ctx.conn, ctx.act['id'], ctx.tree)
+            textblocks = await ctx.queries.get_all_textblocks(ctx.conn, ctx.act['id'], ctx.tree)
+            violations = await ctx.queries.get_all_violations(ctx.conn, ctx.act['id'], ctx.tree)
 
             return ActFormatter.format_tree_structure(
                 ctx.tree,

@@ -7,7 +7,6 @@ from app.domains.acts.integrations.ai_assistant._helpers import (
     find_node_by_number, batch_over_items,
 )
 from app.domains.acts.integrations.ai_assistant.formatters.ai_readable_formatter import ActFormatter
-from app.domains.acts.integrations.ai_assistant.queries.act_queries import ActQueries
 
 
 async def get_item_by_number(
@@ -52,9 +51,9 @@ async def get_item_by_number(
         if not target:
             return f"Пункт с номером {item_number} не найден в КМ {km_number}"
 
-        tables = await ActQueries.get_all_tables(ctx.conn, ctx.act['id'], ctx.tree)
-        textblocks = await ActQueries.get_all_textblocks(ctx.conn, ctx.act['id'], ctx.tree)
-        violations = await ActQueries.get_all_violations(ctx.conn, ctx.act['id'], ctx.tree)
+        tables = await ctx.queries.get_all_tables(ctx.conn, ctx.act['id'], ctx.tree)
+        textblocks = await ctx.queries.get_all_textblocks(ctx.conn, ctx.act['id'], ctx.tree)
+        violations = await ctx.queries.get_all_violations(ctx.conn, ctx.act['id'], ctx.tree)
 
         parts = []
         prepend_metadata(parts, ctx.act, with_metadata)

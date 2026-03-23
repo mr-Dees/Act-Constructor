@@ -15,8 +15,10 @@ def _build_domain():
     from app.domains.acts.api import get_api_routers
     from app.domains.acts.routes import get_html_routers
     from app.domains.acts._lifecycle import on_shutdown
-    from app.domains.acts.settings import ActsSettings
+    from app.domains.acts.settings import ActsSettings, InvoiceSettings
     from app.domains.acts.integrations.chat_tools import get_chat_tools
+
+    inv = InvoiceSettings()
 
     return DomainDescriptor(
         name="acts",
@@ -25,6 +27,12 @@ def _build_domain():
         settings_class=ActsSettings,
         on_shutdown=on_shutdown,
         chat_tools=get_chat_tools(),
+        migration_substitutions={
+            "{REF_HADOOP_TABLES}": inv.hive_registry_table,
+            "{REF_METRIC_DICT}": inv.metric_dict_table,
+            "{REF_PROCESS_DICT}": inv.process_dict_table,
+            "{REF_SUBSIDIARY_DICT}": inv.subsidiary_dict_table,
+        },
         nav_items=[
             NavItem(
                 label="Управление актами",

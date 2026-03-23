@@ -13,22 +13,27 @@ import asyncpg
 
 class ActQueries:
     """
-    Набор SQL-запросов для извлечения данных актов из БД.
+    SQL-запросы для извлечения данных актов из БД.
 
-    Предоставляет методы для получения:
-    - Метаданных актов
-    - Структуры дерева пунктов
-    - Таблиц, текстовых блоков и нарушений
-    - Аудиторской группы и поручений
-    - Навигации по иерархии пунктов
+    Использует adapter для разрешения имён таблиц,
+    обеспечивая совместимость с PostgreSQL и Greenplum.
     """
+
+    def __init__(self, adapter):
+        self.acts = adapter.get_table_name("acts")
+        self.team = adapter.get_table_name("audit_team_members")
+        self.directives_table = adapter.get_table_name("act_directives")
+        self.tree_table = adapter.get_table_name("act_tree")
+        self.tables_table = adapter.get_table_name("act_tables")
+        self.textblocks = adapter.get_table_name("act_textblocks")
+        self.violations = adapter.get_table_name("act_violations")
+        self.invoices = adapter.get_table_name("act_invoices")
 
     # ========================================================================
     # ОСНОВНЫЕ МЕТАДАННЫЕ И СВЯЗАННЫЕ ДАННЫЕ
     # ========================================================================
 
-    @staticmethod
-    async def get_act_metadata(conn: asyncpg.Connection, km_number: str) -> dict | None:
+    async def get_act_metadata(self, conn: asyncpg.Connection, km_number: str) -> dict | None:
         """
         Получает основные метаданные акта по КМ номеру.
 
@@ -43,9 +48,9 @@ class ActQueries:
             Словарь с полями акта или None если акт не найден.
         """
         row = await conn.fetchrow(
-            """
+            f"""
             SELECT *
-            FROM acts
+            FROM {self.acts}
             WHERE km_number = $1
             """,
             km_number
@@ -53,8 +58,7 @@ class ActQueries:
 
         return dict(row) if row else None
 
-    @staticmethod
-    async def get_audit_team(conn: asyncpg.Connection, act_id: int) -> list[dict]:
+    async def get_audit_team(self, conn: asyncpg.Connection, act_id: int) -> list[dict]:
         """
         Получает состав аудиторской группы для акта.
 
@@ -70,9 +74,9 @@ class ActQueries:
             Пустой список если группа не указана.
         """
         rows = await conn.fetch(
-            """
+            f"""
             SELECT role, full_name, position, username
-            FROM audit_team_members
+            FROM {self.team}
             WHERE act_id = $1
             ORDER BY order_index
             """,
@@ -81,8 +85,7 @@ class ActQueries:
 
         return [dict(row) for row in rows]
 
-    @staticmethod
-    async def get_directives(conn: asyncpg.Connection, act_id: int) -> list[dict]:
+    async def get_directives(self, conn: asyncpg.Connection, act_id: int) -> list[dict]:
         """
         Получает действующие поручения для акта.
 
@@ -98,9 +101,9 @@ class ActQueries:
             Пустой список если поручений нет.
         """
         rows = await conn.fetch(
-            """
+            f"""
             SELECT point_number, directive_number
-            FROM act_directives
+            FROM {self.directives_table}
             WHERE act_id = $1
             ORDER BY order_index
             """,
@@ -113,8 +116,7 @@ class ActQueries:
     # ДЕРЕВО СТРУКТУРЫ АКТА
     # ========================================================================
 
-    @staticmethod
-    async def get_tree(conn: asyncpg.Connection, act_id: int) -> dict | None:
+    async def get_tree(self, conn: asyncpg.Connection, act_id: int) -> dict | None:
         """
         Получает иерархическое дерево структуры акта.
 
@@ -130,9 +132,9 @@ class ActQueries:
             Словарь с деревом (корневой узел) или None если дерево отсутствует.
         """
         row = await conn.fetchrow(
-            """
+            f"""
             SELECT tree_data
-            FROM act_tree
+            FROM {self.tree_table}
             WHERE act_id = $1
             """,
             act_id
@@ -270,8 +272,7 @@ class ActQueries:
     # ИЗВЛЕЧЕНИЕ ТАБЛИЦ
     # ========================================================================
 
-    @staticmethod
-    async def get_all_tables(conn: asyncpg.Connection, act_id: int, tree: dict = None) -> list[dict]:
+    async def get_all_tables(self, conn: asyncpg.Connection, act_id: int, tree: dict = None) -> list[dict]:
         """
         Получает все таблицы акта.
 
@@ -287,9 +288,9 @@ class ActQueries:
             Список словарей с данными таблиц. JSONB поля распарсены в dict/list.
         """
         rows = await conn.fetch(
-            """
+            f"""
             SELECT table_id, node_id, node_number, table_label, grid_data, col_widths
-            FROM act_tables
+            FROM {self.tables_table}
             WHERE act_id = $1
             ORDER BY node_number NULLS LAST
             """,
@@ -326,8 +327,8 @@ class ActQueries:
 
         return result
 
-    @staticmethod
     async def get_tables_by_item(
+            self,
             conn: asyncpg.Connection,
             act_id: int,
             item_number: str,
@@ -352,7 +353,7 @@ class ActQueries:
             (если recursive=True).
         """
         # Получаем все таблицы акта
-        all_tables = await ActQueries.get_all_tables(conn, act_id, tree)
+        all_tables = await self.get_all_tables(conn, act_id, tree)
 
         if not tree:
             # Без дерева: используем node_number напрямую (упрощенная логика)
@@ -397,8 +398,8 @@ class ActQueries:
 
         return result
 
-    @staticmethod
     async def get_table_by_name(
+            self,
             conn: asyncpg.Connection,
             act_id: int,
             item_number: str,
@@ -424,7 +425,7 @@ class ActQueries:
             Данные первой найденной таблицы или None.
         """
         # Получаем все таблицы пункта
-        tables = await ActQueries.get_tables_by_item(conn, act_id, item_number, tree, recursive)
+        tables = await self.get_tables_by_item(conn, act_id, item_number, tree, recursive)
 
         # Ищем по названию (case-insensitive)
         search_term = table_name.lower()
@@ -439,8 +440,7 @@ class ActQueries:
     # ИЗВЛЕЧЕНИЕ ТЕКСТОВЫХ БЛОКОВ
     # ========================================================================
 
-    @staticmethod
-    async def get_all_textblocks(conn: asyncpg.Connection, act_id: int, tree: dict = None) -> list[dict]:
+    async def get_all_textblocks(self, conn: asyncpg.Connection, act_id: int, tree: dict = None) -> list[dict]:
         """
         Получает все текстовые блоки акта.
 
@@ -456,9 +456,9 @@ class ActQueries:
             Список словарей с данными текстовых блоков.
         """
         rows = await conn.fetch(
-            """
+            f"""
             SELECT textblock_id, node_id, node_number, content, formatting
-            FROM act_textblocks
+            FROM {self.textblocks}
             WHERE act_id = $1
             ORDER BY node_number NULLS LAST
             """,
@@ -489,8 +489,8 @@ class ActQueries:
 
         return result
 
-    @staticmethod
     async def get_textblocks_by_item(
+            self,
             conn: asyncpg.Connection,
             act_id: int,
             item_number: str,
@@ -515,7 +515,7 @@ class ActQueries:
             (если recursive=True).
         """
         # Получаем все текстовые блоки
-        all_textblocks = await ActQueries.get_all_textblocks(conn, act_id, tree)
+        all_textblocks = await self.get_all_textblocks(conn, act_id, tree)
 
         if not tree:
             # Без дерева: упрощенная логика по node_number
@@ -562,8 +562,7 @@ class ActQueries:
     # ИЗВЛЕЧЕНИЕ НАРУШЕНИЙ
     # ========================================================================
 
-    @staticmethod
-    async def get_all_violations(conn: asyncpg.Connection, act_id: int, tree: dict = None) -> list[dict]:
+    async def get_all_violations(self, conn: asyncpg.Connection, act_id: int, tree: dict = None) -> list[dict]:
         """
         Получает все нарушения акта.
 
@@ -580,12 +579,12 @@ class ActQueries:
             Список словарей с данными нарушений. JSONB поля распарсены.
         """
         rows = await conn.fetch(
-            """
-            SELECT 
+            f"""
+            SELECT
                 violation_id, node_id, node_number, violated, established,
                 description_list, additional_content, reasons, consequences,
                 responsible, recommendations
-            FROM act_violations
+            FROM {self.violations}
             WHERE act_id = $1
             ORDER BY node_number NULLS LAST
             """,
@@ -627,8 +626,7 @@ class ActQueries:
     # ИЗВЛЕЧЕНИЕ ФАКТУР
     # ========================================================================
 
-    @staticmethod
-    async def get_all_invoices(conn: asyncpg.Connection, act_id: int, tree: dict = None) -> list[dict]:
+    async def get_all_invoices(self, conn: asyncpg.Connection, act_id: int, tree: dict = None) -> list[dict]:
         """
         Получает все фактуры акта.
 
@@ -644,10 +642,10 @@ class ActQueries:
             Список словарей с данными фактур. JSONB поля распарсены.
         """
         rows = await conn.fetch(
-            """
+            f"""
             SELECT id, node_id, node_number, db_type, schema_name, table_name,
                    metrics, verification_status, created_at, created_by
-            FROM act_invoices
+            FROM {self.invoices}
             WHERE act_id = $1
             ORDER BY node_number NULLS LAST
             """,
@@ -678,8 +676,8 @@ class ActQueries:
 
         return result
 
-    @staticmethod
     async def get_invoices_by_item(
+            self,
             conn: asyncpg.Connection,
             act_id: int,
             item_number: str,
@@ -704,7 +702,7 @@ class ActQueries:
             (если recursive=True).
         """
         # Получаем все фактуры акта
-        all_invoices = await ActQueries.get_all_invoices(conn, act_id, tree)
+        all_invoices = await self.get_all_invoices(conn, act_id, tree)
 
         if not tree:
             # Без дерева: используем node_number напрямую
@@ -747,8 +745,8 @@ class ActQueries:
 
         return result
 
-    @staticmethod
     async def get_violations_by_item(
+            self,
             conn: asyncpg.Connection,
             act_id: int,
             item_number: str,
@@ -773,7 +771,7 @@ class ActQueries:
             (если recursive=True).
         """
         # Получаем все нарушения
-        all_violations = await ActQueries.get_all_violations(conn, act_id, tree)
+        all_violations = await self.get_all_violations(conn, act_id, tree)
 
         if not tree:
             # Без дерева: упрощенная логика
