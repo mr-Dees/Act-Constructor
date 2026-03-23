@@ -619,6 +619,8 @@ class APIClient {
                 schema_name: inv.schema_name,
                 table_name: inv.table_name,
                 metrics: inv.metrics || [],
+                process: inv.process || [],
+                profile_div: inv.profile_div || null,
             };
         }
         if (node.children) {
@@ -652,6 +654,40 @@ class APIClient {
             throw this._createError(response.status, error.detail);
         }
 
+        return response.json();
+    }
+
+    /**
+     * Загружает справочник процессов
+     * @returns {Promise<Array<{process_code: string, process_name: string}>>}
+     */
+    static async loadProcessDict() {
+        const username = AuthManager.getCurrentUser();
+        const response = await fetch(
+            AppConfig.api.getUrl('/api/v1/acts/invoice/processes'),
+            { headers: { 'X-JupyterHub-User': username } }
+        );
+        if (!response.ok) {
+            const error = await response.json();
+            throw this._createError(response.status, error.detail);
+        }
+        return response.json();
+    }
+
+    /**
+     * Загружает справочник подразделений
+     * @returns {Promise<Array<{name: string}>>}
+     */
+    static async loadSubsidiaryDict() {
+        const username = AuthManager.getCurrentUser();
+        const response = await fetch(
+            AppConfig.api.getUrl('/api/v1/acts/invoice/subsidiaries'),
+            { headers: { 'X-JupyterHub-User': username } }
+        );
+        if (!response.ok) {
+            const error = await response.json();
+            throw this._createError(response.status, error.detail);
+        }
         return response.json();
     }
 
@@ -709,9 +745,10 @@ class APIClient {
      * Верификация фактуры (TODO-заглушка)
      *
      * @param {number} invoiceId - ID фактуры
+     * @param {number} actId - ID акта для проверки доступа
      * @returns {Promise<Object>} Результат верификации
      */
-    static async verifyInvoice(invoiceId) {
+    static async verifyInvoice(invoiceId, actId) {
         const username = AuthManager.getCurrentUser();
 
         const response = await fetch(AppConfig.api.getUrl('/api/v1/acts/invoice/verify'), {
@@ -720,7 +757,7 @@ class APIClient {
                 'Content-Type': 'application/json',
                 'X-JupyterHub-User': username,
             },
-            body: JSON.stringify({ invoice_id: invoiceId }),
+            body: JSON.stringify({ invoice_id: invoiceId, act_id: actId }),
         });
 
         if (!response.ok) {

@@ -28,6 +28,10 @@ class ActInvoiceRepository(BaseRepository):
         if isinstance(metrics, str):
             metrics = json.loads(metrics)
 
+        process = row.get("process")
+        if isinstance(process, str):
+            process = json.loads(process)
+
         return {
             "id": row["id"],
             "act_id": row["act_id"],
@@ -37,6 +41,8 @@ class ActInvoiceRepository(BaseRepository):
             "schema_name": row["schema_name"],
             "table_name": row["table_name"],
             "metrics": metrics,
+            "process": process,
+            "profile_div": row.get("profile_div"),
             "verification_status": row["verification_status"],
             "created_at": row["created_at"].isoformat(),
             "updated_at": row["updated_at"].isoformat(),
@@ -72,6 +78,38 @@ class ActInvoiceRepository(BaseRepository):
             }
             for row in rows
         ]
+
+    async def list_process_dict(
+        self,
+        registry_schema: str,
+        process_table: str,
+        col_code: str,
+        col_name: str,
+    ) -> list[dict]:
+        """Возвращает справочник процессов."""
+        rows = await self.conn.fetch(
+            f'SELECT {quote_ident(col_code)}, {quote_ident(col_name)} '
+            f'FROM {quote_ident(registry_schema)}.{quote_ident(process_table)} '
+            f'ORDER BY {quote_ident(col_code)}',
+        )
+        return [
+            {"process_code": row[col_code], "process_name": row[col_name]}
+            for row in rows
+        ]
+
+    async def list_subsidiary_dict(
+        self,
+        registry_schema: str,
+        subsidiary_table: str,
+        col_name: str,
+    ) -> list[dict]:
+        """Возвращает справочник подразделений."""
+        rows = await self.conn.fetch(
+            f'SELECT {quote_ident(col_name)} '
+            f'FROM {quote_ident(registry_schema)}.{quote_ident(subsidiary_table)} '
+            f'ORDER BY {quote_ident(col_name)}',
+        )
+        return [{"name": row[col_name]} for row in rows]
 
     async def list_tables(
         self,
@@ -134,6 +172,8 @@ class ActInvoiceRepository(BaseRepository):
             Словарь с данными сохраненной фактуры
         """
         metrics_json = json.dumps(data["metrics"], ensure_ascii=False)
+        process_raw = data.get("process")
+        process_json = json.dumps(process_raw, ensure_ascii=False) if process_raw is not None else None
 
         if self.adapter.supports_on_conflict():
             # PostgreSQL: INSERT ... ON CONFLICT DO UPDATE
@@ -141,19 +181,25 @@ class ActInvoiceRepository(BaseRepository):
                 f"""
                 INSERT INTO {self.invoices} (
                     act_id, node_id, node_number, db_type,
-                    schema_name, table_name, metrics, created_by
+                    schema_name, table_name, metrics,
+                    process, profile_div, created_by
                 )
-                VALUES ($1, $2, $3, $4, $5, $6, $7::jsonb, $8)
+                VALUES ($1, $2, $3, $4, $5, $6, $7::jsonb, $8::jsonb, $9, $10)
                 ON CONFLICT (act_id, node_id) DO UPDATE SET
                     node_number = EXCLUDED.node_number,
                     db_type = EXCLUDED.db_type,
                     schema_name = EXCLUDED.schema_name,
                     table_name = EXCLUDED.table_name,
                     metrics = EXCLUDED.metrics,
+                    process = EXCLUDED.process,
+                    profile_div = EXCLUDED.profile_div,
                     verification_status = 'pending',
-                    updated_at = CURRENT_TIMESTAMP
+                    updated_at = CURRENT_TIMESTAMP,
+                    etl_loading_id = NULL,
+                    create_date = NULL
                 RETURNING id, act_id, node_id, node_number, db_type,
                           schema_name, table_name, metrics,
+                          process, profile_div,
                           verification_status, created_at, updated_at, created_by
                 """,
                 data["act_id"],
@@ -163,6 +209,8 @@ class ActInvoiceRepository(BaseRepository):
                 data["schema_name"],
                 data["table_name"],
                 metrics_json,
+                process_json,
+                data.get("profile_div"),
                 username,
             )
         else:
@@ -177,11 +225,16 @@ class ActInvoiceRepository(BaseRepository):
                         schema_name = $5,
                         table_name = $6,
                         metrics = $7::jsonb,
+                        process = $8::jsonb,
+                        profile_div = $9,
                         verification_status = 'pending',
-                        updated_at = CURRENT_TIMESTAMP
+                        updated_at = CURRENT_TIMESTAMP,
+                        etl_loading_id = NULL,
+                        create_date = NULL
                     WHERE act_id = $1 AND node_id = $2
                     RETURNING id, act_id, node_id, node_number, db_type,
                               schema_name, table_name, metrics,
+                              process, profile_div,
                               verification_status, created_at, updated_at, created_by
                     """,
                     data["act_id"],
@@ -191,6 +244,8 @@ class ActInvoiceRepository(BaseRepository):
                     data["schema_name"],
                     data["table_name"],
                     metrics_json,
+                    process_json,
+                    data.get("profile_div"),
                 )
                 if row:
                     break
@@ -199,11 +254,13 @@ class ActInvoiceRepository(BaseRepository):
                         f"""
                         INSERT INTO {self.invoices} (
                             act_id, node_id, node_number, db_type,
-                            schema_name, table_name, metrics, created_by
+                            schema_name, table_name, metrics,
+                            process, profile_div, created_by
                         )
-                        VALUES ($1, $2, $3, $4, $5, $6, $7::jsonb, $8)
+                        VALUES ($1, $2, $3, $4, $5, $6, $7::jsonb, $8::jsonb, $9, $10)
                         RETURNING id, act_id, node_id, node_number, db_type,
                                   schema_name, table_name, metrics,
+                                  process, profile_div,
                                   verification_status, created_at, updated_at, created_by
                         """,
                         data["act_id"],
@@ -213,6 +270,8 @@ class ActInvoiceRepository(BaseRepository):
                         data["schema_name"],
                         data["table_name"],
                         metrics_json,
+                        process_json,
+                        data.get("profile_div"),
                         username,
                     )
                     break
@@ -242,6 +301,7 @@ class ActInvoiceRepository(BaseRepository):
             f"""
             SELECT id, act_id, node_id, node_number, db_type,
                    schema_name, table_name, metrics,
+                   process, profile_div,
                    verification_status, created_at, updated_at, created_by
             FROM {self.invoices}
             WHERE act_id = $1 AND node_id = $2
@@ -261,6 +321,7 @@ class ActInvoiceRepository(BaseRepository):
             f"""
             SELECT id, act_id, node_id, node_number, db_type,
                    schema_name, table_name, metrics,
+                   process, profile_div,
                    verification_status, created_at, updated_at, created_by
             FROM {self.invoices}
             WHERE act_id = $1

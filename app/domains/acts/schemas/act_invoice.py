@@ -48,6 +48,14 @@ class InvoiceSave(BaseModel):
         max_length=5,
         description="Список метрик (от 1 до 5)",
     )
+    process: list[dict] | None = Field(
+        None,
+        description="Массив процессов [{process_code: str}, ...]",
+    )
+    profile_div: str | None = Field(
+        None,
+        description="Подразделение профиля",
+    )
 
     @model_validator(mode="after")
     def validate_unique_metric_types(self) -> "InvoiceSave":
@@ -68,6 +76,8 @@ class InvoiceResponse(BaseModel):
     schema_name: str
     table_name: str
     metrics: list[dict]
+    process: list[dict] | None = None
+    profile_div: str | None = None
     verification_status: str
     created_at: datetime
     updated_at: datetime

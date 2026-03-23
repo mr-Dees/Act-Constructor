@@ -67,10 +67,17 @@ class InvoiceSettings(BaseModel):
     hive_registry_table: str = Field(default="t_db_oarb_ua_hadoop_tables")
     hive_registry_col_table: str = Field(default="table_name")
     metric_dict_table: str = Field(default="t_db_oarb_ua_violation_metric_dict")
+    process_dict_table: str = Field(default="t_db_oarb_ua_process_dict")
+    process_dict_col_code: str = Field(default="process_code")
+    process_dict_col_name: str = Field(default="process_name")
+    subsidiary_dict_table: str = Field(default="t_db_oarb_ua_subsidiary_dict")
+    subsidiary_dict_col_name: str = Field(default="name")
 
     @field_validator(
         'hive_schema', 'gp_schema', 'hive_registry_schema',
         'hive_registry_table', 'hive_registry_col_table', 'metric_dict_table',
+        'process_dict_table', 'process_dict_col_code', 'process_dict_col_name',
+        'subsidiary_dict_table', 'subsidiary_dict_col_name',
     )
     @classmethod
     def validate_sql_identifiers(cls, v: str) -> str:

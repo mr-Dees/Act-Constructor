@@ -415,3 +415,178 @@
     border-color: var(--border);
     cursor: not-allowed;
 }
+
+/* ============================================
+   Процессы — чипы выбранных
+   ============================================ */
+
+.invoice-process-chips {
+    display: flex;
+    flex-wrap: wrap;
+    gap: var(--spacing-xs);
+    margin-top: var(--spacing-sm);
+}
+
+.invoice-process-chip {
+    display: inline-flex;
+    align-items: center;
+    gap: var(--spacing-xs);
+    padding: var(--spacing-xs) var(--spacing-md);
+    border: 1px solid var(--primary);
+    border-radius: 16px;
+    background: var(--bg-primary);
+    color: var(--primary);
+    font-size: var(--font-size-xs);
+    font-weight: var(--font-weight-medium);
+}
+
+.invoice-process-chip-code {
+    font-family: var(--font-family-mono, monospace);
+    font-weight: var(--font-weight-semibold);
+}
+
+.invoice-process-chip-remove {
+    cursor: pointer;
+    font-size: var(--font-size-sm);
+    line-height: 1;
+    opacity: 0.6;
+    transition: opacity var(--transition-fast);
+}
+
+.invoice-process-chip-remove:hover {
+    opacity: 1;
+}
+
+/* ============================================
+   Dropdown процессов
+   ============================================ */
+
+.invoice-process-dropdown {
+    position: absolute;
+    top: 100%;
+    left: 0;
+    right: 0;
+    background: var(--bg-primary);
+    border: 1px solid var(--border);
+    border-top: none;
+    border-radius: 0 0 var(--radius-sm) var(--radius-sm);
+    box-shadow: var(--shadow-md);
+    z-index: 10;
+    display: none;
+    max-height: 200px;
+    overflow-y: auto;
+}
+
+.invoice-process-dropdown.visible {
+    display: block;
+}
+
+.invoice-process-dropdown-item {
+    padding: var(--spacing-sm) var(--spacing-md);
+    font-size: var(--font-size-sm);
+    cursor: pointer;
+    transition: background var(--transition-fast);
+    color: var(--text-primary);
+    display: flex;
+    align-items: baseline;
+}
+
+.invoice-process-dropdown-item:hover {
+    background: var(--bg-hover);
+}
+
+.invoice-process-item-code {
+    font-family: var(--font-family-mono, monospace);
+    font-weight: var(--font-weight-semibold);
+    color: var(--primary);
+    flex-shrink: 0;
+}
+
+.invoice-process-item-name {
+    color: var(--text-secondary);
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+/* ============================================
+   Dropdown подразделений
+   ============================================ */
+
+.invoice-subsidiary-dropdown {
+    position: absolute;
+    top: 100%;
+    left: 0;
+    right: 0;
+    background: var(--bg-primary);
+    border: 1px solid var(--border);
+    border-top: none;
+    border-radius: 0 0 var(--radius-sm) var(--radius-sm);
+    box-shadow: var(--shadow-md);
+    z-index: 10;
+    display: none;
+    max-height: 200px;
+    overflow-y: auto;
+}
+
+.invoice-subsidiary-dropdown.visible {
+    display: block;
+}
+
+.invoice-subsidiary-dropdown-item {
+    padding: var(--spacing-sm) var(--spacing-md);
+    font-size: var(--font-size-sm);
+    cursor: pointer;
+    transition: background var(--transition-fast);
+    color: var(--text-primary);
+}
+
+.invoice-subsidiary-dropdown-item:hover {
+    background: var(--bg-hover);
+}
+
+/* Подсветка выбранных полей */
+.invoice-process-search-input.has-value,
+.invoice-subsidiary-search-input.has-value {
+    color: var(--primary);
+    font-weight: var(--font-weight-medium);
+}
+
+.invoice-process-search-input,
+.invoice-subsidiary-search-input {
+    width: 100%;
+    padding: var(--spacing-sm) var(--spacing-md);
+    border: 1px solid var(--input-border);
+    border-radius: var(--radius-sm);
+    font-size: var(--font-size-sm);
+    font-family: var(--font-family-base);
+    color: var(--input-text);
+    background: var(--input-bg);
+    transition: border-color var(--transition-fast), box-shadow var(--transition-fast);
+    box-sizing: border-box;
+}
+
+.invoice-process-search-input:hover:not(:focus),
+.invoice-subsidiary-search-input:hover:not(:focus) {
+    border-color: var(--input-border-hover);
+}
+
+.invoice-process-search-input:focus,
+.invoice-subsidiary-search-input:focus {
+    outline: none;
+    border-color: var(--input-border-focus);
+    box-shadow: var(--input-focus-shadow);
+}
+
+.invoice-process-search-input::placeholder,
+.invoice-subsidiary-search-input::placeholder {
+    color: var(--input-placeholder);
+}
+
+.invoice-process-search-dropdown-empty,
+.invoice-subsidiary-search-dropdown-empty {
+    padding: var(--spacing-sm) var(--spacing-md);
+    font-size: var(--font-size-sm);
+    color: var(--text-tertiary);
+    font-style: italic;
+}

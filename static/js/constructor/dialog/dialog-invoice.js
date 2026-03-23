@@ -89,6 +89,18 @@ class InvoiceDialog extends DialogBase {
      */
     static _skipNextUnfocus = false;
 
+    /** Кэш справочника процессов */
+    static _cachedProcessDict = null;
+
+    /** Кэш справочника подразделений */
+    static _cachedSubsidiaryDict = null;
+
+    /** Выбранные процессы [{process_code, process_name}] */
+    static _selectedProcesses = [];
+
+    /** Выбранное подразделение (строка) */
+    static _selectedSubsidiary = null;
+
     /**
      * Показывает диалог для указанного узла.
      * @param {Object} node - Узел дерева
@@ -106,6 +118,8 @@ class InvoiceDialog extends DialogBase {
         this._focusedMetric = null;
         this._selectedMetrics = {};
         this._showFullMetricList = false;
+        this._selectedProcesses = [];
+        this._selectedSubsidiary = null;
 
         const template = this._cloneTemplate('invoiceDialogTemplate');
         if (!template) return;
@@ -150,6 +164,8 @@ class InvoiceDialog extends DialogBase {
         const dbType = overlay.querySelector('input[name="invoice-db-type"]:checked')?.value || 'hive';
         this._loadTables(overlay, dbType);
         this._loadMetricDict();
+        this._loadProcessDict();
+        this._loadSubsidiaryDict();
     }
 
     /**
@@ -223,6 +239,26 @@ class InvoiceDialog extends DialogBase {
         }
     }
 
+    static async _loadProcessDict() {
+        if (this._cachedProcessDict !== null) return;
+        try {
+            this._cachedProcessDict = await APIClient.loadProcessDict();
+        } catch (err) {
+            console.error('Ошибка загрузки справочника процессов:', err);
+            this._cachedProcessDict = [];
+        }
+    }
+
+    static async _loadSubsidiaryDict() {
+        if (this._cachedSubsidiaryDict !== null) return;
+        try {
+            this._cachedSubsidiaryDict = await APIClient.loadSubsidiaryDict();
+        } catch (err) {
+            console.error('Ошибка загрузки справочника подразделений:', err);
+            this._cachedSubsidiaryDict = [];
+        }
+    }
+
     /**
      * Предзаполняет диалог данными существующей фактуры.
      * @private
@@ -260,6 +296,22 @@ class InvoiceDialog extends DialogBase {
                 if (m.metric_code) {
                     this._updateChipBadge(chip, m.metric_code);
                 }
+            }
+        }
+
+        // Предзаполняем процессы
+        if (invoice.process && Array.isArray(invoice.process)) {
+            this._selectedProcesses = [...invoice.process];
+            this._renderProcessChips(overlay);
+        }
+
+        // Предзаполняем подразделение
+        if (invoice.profile_div) {
+            this._selectedSubsidiary = invoice.profile_div;
+            const subInput = overlay.querySelector('.invoice-subsidiary-search-input');
+            if (subInput) {
+                subInput.value = invoice.profile_div;
+                subInput.classList.add('has-value');
             }
         }
     }
@@ -405,6 +457,54 @@ class InvoiceDialog extends DialogBase {
                 this._unfocusMetric(overlay);
             }
         });
+
+        // Поиск процессов — клиентская фильтрация + мульти-выбор
+        const processInput = overlay.querySelector('.invoice-process-search-input');
+        if (processInput) {
+            processInput.addEventListener('input', () => {
+                const query = processInput.value.trim();
+                if (query.length === 0) {
+                    this._hideProcessDropdown(overlay);
+                    return;
+                }
+                this._filterAndShowProcesses(overlay, query);
+            });
+            processInput.addEventListener('blur', () => {
+                setTimeout(() => this._hideProcessDropdown(overlay), 200);
+            });
+            processInput.addEventListener('focus', () => {
+                const query = processInput.value.trim();
+                if (query.length > 0) {
+                    this._filterAndShowProcesses(overlay, query);
+                }
+            });
+        }
+
+        // Поиск подразделений — клиентская фильтрация + одиночный выбор
+        const subInput = overlay.querySelector('.invoice-subsidiary-search-input');
+        if (subInput) {
+            subInput.addEventListener('input', () => {
+                const query = subInput.value.trim();
+                if (this._selectedSubsidiary && query !== this._selectedSubsidiary) {
+                    this._selectedSubsidiary = null;
+                    subInput.classList.remove('has-value');
+                }
+                if (query.length === 0) {
+                    this._hideSubsidiaryDropdown(overlay);
+                    return;
+                }
+                this._filterAndShowSubsidiaries(overlay, query);
+            });
+            subInput.addEventListener('blur', () => {
+                setTimeout(() => this._hideSubsidiaryDropdown(overlay), 200);
+            });
+            subInput.addEventListener('focus', () => {
+                const query = subInput.value.trim();
+                if (query.length > 0 && !this._selectedSubsidiary) {
+                    this._filterAndShowSubsidiaries(overlay, query);
+                }
+            });
+        }
 
         // Сохранение
         if (saveBtn) {
@@ -798,6 +898,170 @@ class InvoiceDialog extends DialogBase {
         this._hideMetricDropdown(overlay);
     }
 
+    // -----------------------------------------------------------------
+    // Секция процессов
+    // -----------------------------------------------------------------
+
+    static _filterAndShowProcesses(overlay, query) {
+        if (!this._cachedProcessDict) return;
+
+        const queryLower = query.toLowerCase();
+        const filtered = this._cachedProcessDict.filter(
+            p => p.process_code.toLowerCase().includes(queryLower) ||
+                 p.process_name.toLowerCase().includes(queryLower)
+        );
+
+        // Исключаем уже выбранные
+        const selectedCodes = new Set(this._selectedProcesses.map(p => p.process_code));
+        const available = filtered.filter(p => !selectedCodes.has(p.process_code));
+
+        this._showProcessDropdown(overlay, available.slice(0, 50));
+    }
+
+    static _showProcessDropdown(overlay, results) {
+        const dropdown = overlay.querySelector('.invoice-process-dropdown');
+        if (!dropdown) return;
+
+        dropdown.innerHTML = '';
+
+        if (results.length === 0) {
+            const empty = document.createElement('div');
+            empty.className = 'invoice-process-search-dropdown-empty';
+            empty.textContent = 'Процессы не найдены';
+            dropdown.appendChild(empty);
+        } else {
+            results.forEach(item => {
+                const el = document.createElement('div');
+                el.className = 'invoice-process-dropdown-item';
+
+                const codeSpan = document.createElement('span');
+                codeSpan.className = 'invoice-process-item-code';
+                codeSpan.textContent = item.process_code;
+
+                const nameSpan = document.createElement('span');
+                nameSpan.className = 'invoice-process-item-name';
+                nameSpan.textContent = ` — ${item.process_name}`;
+
+                el.appendChild(codeSpan);
+                el.appendChild(nameSpan);
+
+                el.addEventListener('mousedown', (e) => {
+                    e.preventDefault();
+                    this._selectProcess(overlay, item);
+                });
+                dropdown.appendChild(el);
+            });
+        }
+
+        dropdown.classList.add('visible');
+    }
+
+    static _hideProcessDropdown(overlay) {
+        const dropdown = overlay.querySelector('.invoice-process-dropdown');
+        if (dropdown) dropdown.classList.remove('visible');
+    }
+
+    static _selectProcess(overlay, item) {
+        this._selectedProcesses.push({
+            process_code: item.process_code,
+            process_name: item.process_name,
+        });
+
+        // Очищаем input
+        const processInput = overlay.querySelector('.invoice-process-search-input');
+        if (processInput) processInput.value = '';
+
+        this._hideProcessDropdown(overlay);
+        this._renderProcessChips(overlay);
+    }
+
+    static _renderProcessChips(overlay) {
+        const container = overlay.querySelector('.invoice-process-chips');
+        if (!container) return;
+
+        container.innerHTML = '';
+
+        this._selectedProcesses.forEach((proc, index) => {
+            const chip = document.createElement('div');
+            chip.className = 'invoice-process-chip';
+
+            const codeSpan = document.createElement('span');
+            codeSpan.className = 'invoice-process-chip-code';
+            codeSpan.textContent = proc.process_code;
+
+            const removeBtn = document.createElement('span');
+            removeBtn.className = 'invoice-process-chip-remove';
+            removeBtn.textContent = '\u00d7';
+            removeBtn.addEventListener('click', () => {
+                this._selectedProcesses.splice(index, 1);
+                this._renderProcessChips(overlay);
+            });
+
+            chip.appendChild(codeSpan);
+            chip.appendChild(removeBtn);
+            container.appendChild(chip);
+        });
+    }
+
+    // -----------------------------------------------------------------
+    // Секция подразделений
+    // -----------------------------------------------------------------
+
+    static _filterAndShowSubsidiaries(overlay, query) {
+        if (!this._cachedSubsidiaryDict) return;
+
+        const queryLower = query.toLowerCase();
+        const filtered = this._cachedSubsidiaryDict.filter(
+            s => s.name.toLowerCase().includes(queryLower)
+        );
+
+        this._showSubsidiaryDropdown(overlay, filtered.slice(0, 50));
+    }
+
+    static _showSubsidiaryDropdown(overlay, results) {
+        const dropdown = overlay.querySelector('.invoice-subsidiary-dropdown');
+        if (!dropdown) return;
+
+        dropdown.innerHTML = '';
+
+        if (results.length === 0) {
+            const empty = document.createElement('div');
+            empty.className = 'invoice-subsidiary-search-dropdown-empty';
+            empty.textContent = 'Подразделения не найдены';
+            dropdown.appendChild(empty);
+        } else {
+            results.forEach(item => {
+                const el = document.createElement('div');
+                el.className = 'invoice-subsidiary-dropdown-item';
+                el.textContent = item.name;
+                el.addEventListener('mousedown', (e) => {
+                    e.preventDefault();
+                    this._selectSubsidiary(overlay, item);
+                });
+                dropdown.appendChild(el);
+            });
+        }
+
+        dropdown.classList.add('visible');
+    }
+
+    static _hideSubsidiaryDropdown(overlay) {
+        const dropdown = overlay.querySelector('.invoice-subsidiary-dropdown');
+        if (dropdown) dropdown.classList.remove('visible');
+    }
+
+    static _selectSubsidiary(overlay, item) {
+        this._selectedSubsidiary = item.name;
+
+        const subInput = overlay.querySelector('.invoice-subsidiary-search-input');
+        if (subInput) {
+            subInput.value = item.name;
+            subInput.classList.add('has-value');
+        }
+
+        this._hideSubsidiaryDropdown(overlay);
+    }
+
     /**
      * Сохраняет фактуру.
      * @private
@@ -849,6 +1113,8 @@ class InvoiceDialog extends DialogBase {
             schema_name: schemaName,
             table_name: this._selectedTable.table_name,
             metrics: metricsArray,
+            process: this._selectedProcesses.length > 0 ? this._selectedProcesses : null,
+            profile_div: this._selectedSubsidiary || null,
         };
 
         // Блокируем кнопку на время сохранения
@@ -868,13 +1134,15 @@ class InvoiceDialog extends DialogBase {
                     schema_name: data.schema_name,
                     table_name: data.table_name,
                     metrics: data.metrics,
+                    process: data.process,
+                    profile_div: data.profile_div,
                 };
             }
 
             // Вызываем верификацию (заглушка)
             if (result && result.id) {
                 try {
-                    const verifyResult = await APIClient.verifyInvoice(result.id);
+                    const verifyResult = await APIClient.verifyInvoice(result.id, data.act_id);
                     console.log('Результат верификации (заглушка):', verifyResult);
                 } catch (verifyErr) {
                     console.warn('Ошибка верификации (заглушка):', verifyErr);
@@ -929,6 +1197,8 @@ class InvoiceDialog extends DialogBase {
         this._selectedMetrics = {};
         this._showFullMetricList = false;
         this._skipNextUnfocus = false;
+        this._selectedProcesses = [];
+        this._selectedSubsidiary = null;
     }
 }
 

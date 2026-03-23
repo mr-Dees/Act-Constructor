@@ -360,6 +360,8 @@ CREATE TABLE {SCHEMA}.{PREFIX}act_invoices (
     schema_name VARCHAR(255) NOT NULL,
     table_name VARCHAR(255) NOT NULL,
     metrics JSONB NOT NULL DEFAULT '[]',
+    process JSONB DEFAULT NULL,
+    profile_div TEXT DEFAULT NULL,
     verification_status VARCHAR(20) NOT NULL DEFAULT 'pending',
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
@@ -393,6 +395,8 @@ COMMENT ON COLUMN {SCHEMA}.{PREFIX}act_invoices.verification_status IS 'Стат
 COMMENT ON COLUMN {SCHEMA}.{PREFIX}act_invoices.created_at IS 'Дата и время создания записи';
 COMMENT ON COLUMN {SCHEMA}.{PREFIX}act_invoices.updated_at IS 'Дата и время последнего обновления';
 COMMENT ON COLUMN {SCHEMA}.{PREFIX}act_invoices.created_by IS 'Числовой логин пользователя-создателя';
+COMMENT ON COLUMN {SCHEMA}.{PREFIX}act_invoices.process IS 'JSONB массив процессов [{"process_code": "П6152"}, ...]';
+COMMENT ON COLUMN {SCHEMA}.{PREFIX}act_invoices.profile_div IS 'Подразделение профиля';
 
 -- ============================================================================
 -- ТАБЛИЦА АУДИТ-ЛОГА

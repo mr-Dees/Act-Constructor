@@ -4,6 +4,7 @@
 Справочники метрик, списки таблиц, CRUD и верификация фактур.
 """
 
+import json
 import logging
 
 import asyncpg
@@ -58,6 +59,27 @@ class ActInvoiceService:
             metric_table=self.acts_settings.invoice.metric_dict_table,
         )
 
+    async def list_processes(self) -> list[dict]:
+        """Возвращает справочник процессов."""
+        inv = self.acts_settings.invoice
+        registry_schema = self._resolve_schema(inv.hive_registry_schema)
+        return await self._invoice.list_process_dict(
+            registry_schema=registry_schema,
+            process_table=inv.process_dict_table,
+            col_code=inv.process_dict_col_code,
+            col_name=inv.process_dict_col_name,
+        )
+
+    async def list_subsidiaries(self) -> list[dict]:
+        """Возвращает справочник подразделений."""
+        inv = self.acts_settings.invoice
+        registry_schema = self._resolve_schema(inv.hive_registry_schema)
+        return await self._invoice.list_subsidiary_dict(
+            registry_schema=registry_schema,
+            subsidiary_table=inv.subsidiary_dict_table,
+            col_name=inv.subsidiary_dict_col_name,
+        )
+
     async def list_tables(self, db_type: str) -> list[dict]:
         """Возвращает список таблиц в указанной БД."""
         inv = self.acts_settings.invoice
@@ -78,8 +100,20 @@ class ActInvoiceService:
             raise InvoiceError(f"Неподдерживаемый тип БД: {db_type}")
 
     async def save_invoice(self, data: dict, username: str) -> dict:
-        """Сохраняет фактуру (UPSERT по act_id + node_id)."""
+        """Сохраняет фактуру с детекцией реальных изменений для ETL-полей."""
         await self.guard.require_edit_permission(data["act_id"], username)
+
+        current = await self._invoice.get_invoice_for_node(
+            data["act_id"], data["node_id"]
+        )
+
+        if current and not self._has_real_changes(current, data):
+            logger.info(
+                f"Фактура не изменена: act_id={data['act_id']}, "
+                f"node_id={data['node_id']}, пропуск UPDATE"
+            )
+            return current
+
         result = await self._invoice.save_invoice(data, username)
         logger.info(
             f"Фактура сохранена: act_id={data['act_id']}, "
@@ -94,6 +128,27 @@ class ActInvoiceService:
         })
 
         return result
+
+    @staticmethod
+    def _has_real_changes(current: dict, new_data: dict) -> bool:
+        """Сравнивает текущие и новые данные фактуры."""
+        for field in ("db_type", "schema_name", "table_name", "profile_div"):
+            if current.get(field) != new_data.get(field):
+                return True
+
+        current_metrics = current.get("metrics") or []
+        new_metrics = new_data.get("metrics") or []
+        if json.dumps(current_metrics, sort_keys=True, ensure_ascii=False) != \
+           json.dumps(new_metrics, sort_keys=True, ensure_ascii=False):
+            return True
+
+        current_process = current.get("process") or []
+        new_process = new_data.get("process") or []
+        if json.dumps(current_process, sort_keys=True, ensure_ascii=False) != \
+           json.dumps(new_process, sort_keys=True, ensure_ascii=False):
+            return True
+
+        return False
 
     async def verify_invoice(self, invoice_id: int, act_id: int, username: str) -> dict:
         """Верификация фактуры (заглушка)."""

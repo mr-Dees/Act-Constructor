@@ -23,6 +23,24 @@ async def list_metrics(
     return await service.list_metrics()
 
 
+@router.get("/processes")
+async def list_processes(
+    username: str = Depends(get_username),
+    service: ActInvoiceService = Depends(get_invoice_service),
+) -> list[dict]:
+    """Возвращает справочник процессов."""
+    return await service.list_processes()
+
+
+@router.get("/subsidiaries")
+async def list_subsidiaries(
+    username: str = Depends(get_username),
+    service: ActInvoiceService = Depends(get_invoice_service),
+) -> list[dict]:
+    """Возвращает справочник подразделений."""
+    return await service.list_subsidiaries()
+
+
 @router.get("/tables/{db_type}")
 async def list_tables(
     db_type: str,

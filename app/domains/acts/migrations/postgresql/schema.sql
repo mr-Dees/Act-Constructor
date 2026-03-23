@@ -379,6 +379,8 @@ CREATE TABLE IF NOT EXISTS act_invoices (
     schema_name VARCHAR(255) NOT NULL,
     table_name VARCHAR(255) NOT NULL,
     metrics JSONB NOT NULL DEFAULT '[]',
+    process JSONB DEFAULT NULL,
+    profile_div TEXT DEFAULT NULL,
     verification_status VARCHAR(20) NOT NULL DEFAULT 'pending'
         CHECK (verification_status IN ('pending', 'verified', 'rejected')),
 
@@ -407,6 +409,8 @@ COMMENT ON COLUMN act_invoices.verification_status IS 'Статус верифи
 COMMENT ON COLUMN act_invoices.created_at IS 'Дата и время создания записи';
 COMMENT ON COLUMN act_invoices.updated_at IS 'Дата и время последнего обновления';
 COMMENT ON COLUMN act_invoices.created_by IS 'Числовой логин пользователя-создателя';
+COMMENT ON COLUMN act_invoices.process IS 'JSONB массив процессов [{"process_code": "П6152"}, ...]';
+COMMENT ON COLUMN act_invoices.profile_div IS 'Подразделение профиля';
 
 -- ============================================================================
 -- РЕЕСТР HIVE-ТАБЛИЦ (для локального тестирования)
@@ -515,6 +519,55 @@ COMMENT ON COLUMN act_content_versions.tables_data IS 'Снэпшот табли
 COMMENT ON COLUMN act_content_versions.textblocks_data IS 'Снэпшот текстовых блоков';
 COMMENT ON COLUMN act_content_versions.violations_data IS 'Снэпшот нарушений';
 COMMENT ON COLUMN act_content_versions.created_at IS 'Время создания версии';
+
+-- ============================================================================
+-- СПРАВОЧНИК ПРОЦЕССОВ (для локального тестирования)
+-- ============================================================================
+
+CREATE TABLE IF NOT EXISTS t_db_oarb_ua_process_dict (
+    id SERIAL PRIMARY KEY,
+    process_code VARCHAR(50) NOT NULL UNIQUE,
+    process_name VARCHAR(500) NOT NULL
+);
+
+COMMENT ON TABLE t_db_oarb_ua_process_dict IS 'Справочник процессов аудита';
+
+INSERT INTO t_db_oarb_ua_process_dict (process_code, process_name) VALUES
+    ('П6152', 'Кредитование юридических лиц'),
+    ('П6153', 'Кредитование физических лиц'),
+    ('П6210', 'Операции на финансовых рынках'),
+    ('П6301', 'Расчётно-кассовое обслуживание'),
+    ('П6401', 'Управление рисками'),
+    ('П6501', 'Противодействие мошенничеству'),
+    ('П6601', 'Информационная безопасность'),
+    ('П6701', 'Комплаенс и ПОД/ФТ'),
+    ('П6802', 'Внутренний контроль'),
+    ('П6903', 'Управление персоналом')
+ON CONFLICT DO NOTHING;
+
+-- ============================================================================
+-- СПРАВОЧНИК ПОДРАЗДЕЛЕНИЙ (для локального тестирования)
+-- ============================================================================
+
+CREATE TABLE IF NOT EXISTS t_db_oarb_ua_subsidiary_dict (
+    id SERIAL PRIMARY KEY,
+    name VARCHAR(500) NOT NULL UNIQUE
+);
+
+COMMENT ON TABLE t_db_oarb_ua_subsidiary_dict IS 'Справочник подразделений профиля';
+
+INSERT INTO t_db_oarb_ua_subsidiary_dict (name) VALUES
+    ('Департамент внутреннего аудита'),
+    ('Управление кредитных рисков'),
+    ('Блок "Розничный бизнес"'),
+    ('Блок "Корпоративный бизнес"'),
+    ('Департамент комплаенс'),
+    ('Управление операционных рисков'),
+    ('Департамент информационных технологий'),
+    ('Финансовый департамент'),
+    ('Юридический департамент'),
+    ('Департамент безопасности')
+ON CONFLICT DO NOTHING;
 
 -- ============================================================================
 -- ИНДЕКСЫ ДЛЯ ОПТИМИЗАЦИИ ЗАПРОСОВ
