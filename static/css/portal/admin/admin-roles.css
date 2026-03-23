@@ -1,6 +1,10 @@
 /* Admin roles table */
 .admin-roles-section {
     margin-top: 8px;
+    flex: 1;
+    min-height: 0;
+    overflow-y: auto;
+    padding-bottom: 24px;
 }
 
 .admin-roles-table {
@@ -9,6 +13,80 @@
     gap: 8px;
 }
 
+/* Table header */
+.admin-roles-header {
+    display: flex;
+    border-bottom: 2px solid var(--gray-200);
+    padding: 8px 16px;
+}
+
+.admin-header-cell {
+    font-weight: var(--font-weight-semibold);
+    color: var(--text-secondary);
+    font-size: var(--font-size-sm);
+}
+
+.admin-header-cell:nth-child(1) {
+    flex: 0 0 22%;
+}
+
+.admin-header-cell:nth-child(2) {
+    flex: 1;
+}
+
+.admin-header-cell:nth-child(3) {
+    flex: 0 0 12%;
+}
+
+.admin-header-cell.sortable {
+    cursor: pointer;
+    user-select: none;
+}
+
+.admin-header-cell.sortable:hover {
+    color: var(--primary);
+}
+
+.admin-header-cell.active {
+    color: var(--primary);
+}
+
+.sort-indicator {
+    margin-left: 4px;
+    font-size: var(--font-size-sm);
+}
+
+/* Role filter bar */
+.admin-filter-bar {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+    margin-bottom: 16px;
+}
+
+.admin-filter-chip {
+    padding: 4px 14px;
+    border-radius: var(--radius-full);
+    border: 1px solid var(--gray-300);
+    background: var(--bg-primary);
+    cursor: pointer;
+    font-size: var(--font-size-sm);
+    color: var(--text-secondary);
+    transition: all 0.2s;
+}
+
+.admin-filter-chip:hover {
+    border-color: var(--primary);
+    color: var(--primary);
+}
+
+.admin-filter-chip.active {
+    background: var(--primary);
+    color: white;
+    border-color: var(--primary);
+}
+
+/* Rows */
 .admin-roles-row {
     display: flex;
     align-items: center;
@@ -20,12 +98,16 @@
     transition: box-shadow 0.15s;
 }
 
+.admin-roles-row.hidden {
+    display: none;
+}
+
 .admin-roles-row:hover {
     box-shadow: 0 2px 8px rgba(0, 0, 0, 0.08);
 }
 
 .admin-roles-row-info {
-    flex: 0 0 280px;
+    flex: 0 0 22%;
     min-width: 0;
 }
 
@@ -52,6 +134,15 @@
     gap: 8px;
     flex-wrap: wrap;
     flex: 1;
+}
+
+.admin-roles-row-username {
+    flex: 0 0 12%;
+    font-size: 0.8rem;
+    color: var(--text-secondary);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
 }
 
 .admin-role-chip {
@@ -85,25 +176,4 @@
 .admin-role-chip:disabled {
     opacity: 0.5;
     cursor: not-allowed;
-}
-
-.admin-remove-btn {
-    flex-shrink: 0;
-    width: 28px;
-    height: 28px;
-    border: none;
-    background: transparent;
-    color: var(--text-tertiary);
-    font-size: 1.2rem;
-    cursor: pointer;
-    border-radius: 50%;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    transition: all 0.15s;
-}
-
-.admin-remove-btn:hover {
-    background: var(--bg-hover);
-    color: var(--danger);
 }

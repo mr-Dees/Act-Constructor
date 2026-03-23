@@ -12,9 +12,26 @@
     <div class="admin-search-section">
         <div class="admin-search-wrapper">
             <input type="text" id="adminSearchInput" class="admin-search-input"
-                   placeholder="Введите минимум 2 символа для поиска (ФИО, таб. номер, email)..."
+                   placeholder="Поиск по ФИО, логину, email..."
                    autocomplete="off">
-            <div id="adminSearchDropdown" class="admin-search-dropdown hidden"></div>
+        </div>
+    </div>
+
+    <!-- Панель фильтров по ролям -->
+    <div class="admin-filter-bar" id="adminFilterBar">
+        <!-- JS заполнит чипсами ролей -->
+    </div>
+
+    <!-- Заголовок таблицы -->
+    <div class="admin-roles-header">
+        <div class="admin-header-cell sortable" data-sort="fullname">
+            ФИО <span class="sort-indicator"></span>
+        </div>
+        <div class="admin-header-cell sortable" data-sort="roles">
+            Роли <span class="sort-indicator"></span>
+        </div>
+        <div class="admin-header-cell sortable" data-sort="username">
+            Логин <span class="sort-indicator"></span>
         </div>
     </div>
 
@@ -22,9 +39,6 @@
     <div class="admin-roles-section">
         <div id="adminRolesTable" class="admin-roles-table">
             <!-- Заполняется из JS -->
-        </div>
-        <div id="adminEmptyState" class="admin-empty-state">
-            Найдите пользователей через поиск выше
         </div>
     </div>
 </div>

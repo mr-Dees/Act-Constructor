@@ -16,7 +16,6 @@ class LandingSidebar {
         this._setupNavigation();
         this._setupChatButton();
         this._loadUserInfo();
-        this._setupAdminButton();
 
         console.log('LandingSidebar: инициализация завершена');
     }
@@ -119,20 +118,6 @@ class LandingSidebar {
         }
     }
 
-    /**
-     * Настраивает кнопку администрирования в footer
-     * Кнопка рендерится сервером только для админов
-     * @private
-     */
-    static _setupAdminButton() {
-        const btn = document.getElementById('sidebarAdminBtn');
-        if (!btn) return;
-
-        btn.addEventListener('click', (e) => {
-            e.preventDefault();
-            window.location.href = AppConfig.api.getUrl('/admin');
-        });
-    }
 }
 
 // Экспортируем в глобальную область видимости

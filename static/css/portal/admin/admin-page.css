@@ -1,7 +1,11 @@
 /* Admin page layout */
 .admin-content {
     padding: 24px 32px;
-    max-width: 1200px;
+    width: 100%;
+    height: calc(100vh - 57px);
+    box-sizing: border-box;
+    display: flex;
+    flex-direction: column;
 }
 
 .admin-header {
@@ -13,50 +17,4 @@
     font-weight: 600;
     color: var(--text-primary);
     margin: 0;
-}
-
-.admin-empty-state {
-    text-align: center;
-    padding: 48px 24px;
-    color: var(--text-secondary);
-    font-size: 0.9rem;
-}
-
-.admin-empty-state.hidden {
-    display: none;
-}
-
-/* Sidebar admin button */
-.sidebar-admin-btn {
-    display: flex;
-    align-items: center;
-    gap: var(--spacing-md);
-    width: 100%;
-    padding: var(--spacing-md) var(--spacing-2xl);
-    border: none;
-    background: transparent;
-    color: var(--text-secondary);
-    font-size: var(--font-size-base);
-    font-family: inherit;
-    cursor: pointer;
-    transition: all var(--duration-fast);
-    text-align: left;
-}
-
-.sidebar-admin-btn:hover {
-    background: var(--primary-subtle);
-    color: var(--primary);
-}
-
-.sidebar-admin-btn.hidden {
-    display: none;
-}
-
-.landing-sidebar.collapsed .sidebar-admin-btn {
-    padding: var(--spacing-md) var(--spacing-lg);
-    justify-content: center;
-}
-
-.landing-sidebar.collapsed .sidebar-admin-btn .sidebar-nav-label {
-    display: none;
 }

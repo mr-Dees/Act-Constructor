@@ -7,7 +7,6 @@
 class AdminPage {
     static _usersDirectory = [];
     static _allRoles = [];
-    static _selectedUsers = new Map(); // username -> user data with roles
 
     /**
      * Инициализирует страницу администрирования
@@ -21,8 +20,9 @@ class AdminPage {
             this._usersDirectory = directory;
             this._allRoles = roles;
 
-            AdminSearch.init(this._usersDirectory, (user) => this._onUserSelected(user));
+            AdminSearch.init();
             AdminRoles.init(this._allRoles);
+            AdminRoles.setUsers(this._usersDirectory);
 
             console.log('AdminPage: инициализация завершена');
         } catch (error) {
@@ -32,38 +32,12 @@ class AdminPage {
     }
 
     /**
-     * Обработчик выбора пользователя из поиска
-     * @param {Object} user - Данные пользователя
-     * @private
-     */
-    static _onUserSelected(user) {
-        if (this._selectedUsers.has(user.username)) {
-            return; // Уже в таблице
-        }
-        this._selectedUsers.set(user.username, user);
-        AdminRoles.addUser(user);
-        document.getElementById('adminEmptyState')?.classList.add('hidden');
-    }
-
-    /**
-     * Удаляет пользователя из таблицы ролей
-     * @param {string} username - Имя пользователя
-     */
-    static removeUser(username) {
-        this._selectedUsers.delete(username);
-        AdminRoles.removeUser(username);
-        if (this._selectedUsers.size === 0) {
-            document.getElementById('adminEmptyState')?.classList.remove('hidden');
-        }
-    }
-
-    /**
      * Обновляет роли пользователя в локальном состоянии
      * @param {string} username - Имя пользователя
      * @param {Array} roles - Массив ролей
      */
     static updateUserRoles(username, roles) {
-        const user = this._selectedUsers.get(username);
+        const user = this._usersDirectory.find(u => u.username === username);
         if (user) {
             user.roles = roles;
         }

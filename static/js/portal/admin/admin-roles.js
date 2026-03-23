@@ -1,12 +1,18 @@
 /**
  * Управление таблицей ролей пользователей
  *
- * Отображает строки пользователей с чипсами ролей,
- * обеспечивает назначение/снятие ролей через API.
+ * Отображает все строки пользователей с чипсами ролей,
+ * обеспечивает назначение/снятие ролей через API,
+ * фильтрацию по тексту и ролям, сортировку по столбцам.
  */
 class AdminRoles {
     static _allRoles = [];
+    static _users = [];
     static _tableEl = null;
+    static _textFilter = '';
+    static _roleFilter = null;
+    static _sortField = 'fullname';
+    static _sortDir = 'asc';
 
     /**
      * Инициализирует компонент таблицы ролей
@@ -15,39 +21,214 @@ class AdminRoles {
     static init(allRoles) {
         this._allRoles = allRoles;
         this._tableEl = document.getElementById('adminRolesTable');
+
+        this._initSortHandlers();
+        this._renderRoleFilters();
     }
 
     /**
-     * Добавляет пользователя в таблицу ролей
-     * @param {Object} user - Данные пользователя
+     * Устанавливает массив пользователей и рендерит таблицу
+     * @param {Array} users - Полный массив пользователей
      */
-    static addUser(user) {
-        if (!this._tableEl) return;
+    static setUsers(users) {
+        this._users = users;
+        this._sortUsers();
+        this._renderAll();
+    }
 
-        const row = document.createElement('div');
-        row.className = 'admin-roles-row';
-        row.dataset.username = user.username;
-        row.innerHTML = this._renderRow(user);
+    /**
+     * Фильтрует видимые строки по тексту (fullname, username, email)
+     * @param {string} query - Строка поиска
+     */
+    static filterByText(query) {
+        this._textFilter = query.toLowerCase();
+        this._applyFilters();
+    }
 
-        row.querySelectorAll('.admin-role-chip').forEach(chip => {
-            chip.addEventListener('click', () => this._toggleRole(user.username, chip));
-        });
+    /**
+     * Фильтрует по роли (toggle)
+     * @param {number|null} roleId - ID роли или null для сброса
+     */
+    static filterByRole(roleId) {
+        this._roleFilter = (this._roleFilter === roleId) ? null : roleId;
+        this._updateRoleFilterChips();
+        this._applyFilters();
+    }
 
-        const removeBtn = row.querySelector('.admin-remove-btn');
-        if (removeBtn) {
-            removeBtn.addEventListener('click', () => AdminPage.removeUser(user.username));
+    /**
+     * Сортирует по полю; при повторном клике — меняет направление
+     * @param {string} field - Поле сортировки (fullname, roles, username)
+     */
+    static sort(field) {
+        if (this._sortField === field) {
+            this._sortDir = this._sortDir === 'asc' ? 'desc' : 'asc';
+        } else {
+            this._sortField = field;
+            this._sortDir = 'asc';
         }
 
-        this._tableEl.appendChild(row);
+        this._sortUsers();
+        this._renderAll();
+        this._applyFilters();
+        this._renderSortIndicators();
     }
 
     /**
-     * Удаляет пользователя из таблицы ролей
-     * @param {string} username - Имя пользователя
+     * Инициализирует обработчики кликов по заголовкам
+     * @private
      */
-    static removeUser(username) {
-        const row = this._tableEl?.querySelector(`[data-username="${username}"]`);
-        if (row) row.remove();
+    static _initSortHandlers() {
+        document.querySelectorAll('.admin-header-cell.sortable').forEach(cell => {
+            cell.addEventListener('click', () => {
+                this.sort(cell.dataset.sort);
+            });
+        });
+        this._renderSortIndicators();
+    }
+
+    /**
+     * Обновляет индикаторы сортировки в заголовках
+     * @private
+     */
+    static _renderSortIndicators() {
+        document.querySelectorAll('.admin-header-cell.sortable').forEach(cell => {
+            const indicator = cell.querySelector('.sort-indicator');
+            const isActive = cell.dataset.sort === this._sortField;
+
+            cell.classList.toggle('active', isActive);
+            if (indicator) {
+                indicator.textContent = isActive ? (this._sortDir === 'asc' ? '\u25B2' : '\u25BC') : '';
+            }
+        });
+    }
+
+    /**
+     * Рендерит чипсы фильтров по ролям
+     * @private
+     */
+    static _renderRoleFilters() {
+        const bar = document.getElementById('adminFilterBar');
+        if (!bar) return;
+
+        bar.innerHTML = '';
+        for (const role of this._allRoles) {
+            const chip = document.createElement('button');
+            chip.className = 'admin-filter-chip';
+            chip.dataset.roleId = role.id;
+            chip.textContent = role.name;
+            chip.title = role.description || '';
+            chip.addEventListener('click', () => this.filterByRole(role.id));
+            bar.appendChild(chip);
+        }
+    }
+
+    /**
+     * Обновляет активное состояние чипсов фильтров
+     * @private
+     */
+    static _updateRoleFilterChips() {
+        const bar = document.getElementById('adminFilterBar');
+        if (!bar) return;
+
+        bar.querySelectorAll('.admin-filter-chip').forEach(chip => {
+            const chipRoleId = parseInt(chip.dataset.roleId);
+            chip.classList.toggle('active', chipRoleId === this._roleFilter);
+        });
+    }
+
+    /**
+     * Сортирует массив пользователей
+     * @private
+     */
+    static _sortUsers() {
+        const dir = this._sortDir === 'asc' ? 1 : -1;
+
+        this._users.sort((a, b) => {
+            switch (this._sortField) {
+                case 'fullname':
+                    return dir * a.fullname.localeCompare(b.fullname, 'ru');
+                case 'roles':
+                    return dir * (a.roles.length - b.roles.length);
+                case 'username':
+                    return dir * a.username.localeCompare(b.username);
+                default:
+                    return 0;
+            }
+        });
+    }
+
+    /**
+     * Рендерит все строки пользователей
+     * @private
+     */
+    static _renderAll() {
+        if (!this._tableEl) return;
+        this._tableEl.innerHTML = '';
+
+        const fragment = document.createDocumentFragment();
+        for (const user of this._users) {
+            const row = document.createElement('div');
+            row.className = 'admin-roles-row';
+            row.dataset.username = user.username;
+            row.dataset.fullname = user.fullname || '';
+            row.dataset.email = user.email || '';
+            row.innerHTML = this._renderRow(user);
+
+            row.querySelectorAll('.admin-role-chip').forEach(chip => {
+                chip.addEventListener('click', () => this._toggleRole(user.username, chip));
+            });
+
+            fragment.appendChild(row);
+        }
+        this._tableEl.appendChild(fragment);
+    }
+
+    /**
+     * Применяет текстовый фильтр и фильтр по роли к строкам (CSS toggle)
+     * @private
+     */
+    static _applyFilters() {
+        if (!this._tableEl) return;
+
+        const rows = this._tableEl.querySelectorAll('.admin-roles-row');
+        for (const row of rows) {
+            const matchesText = this._matchesTextFilter(row);
+            const matchesRole = this._matchesRoleFilter(row.dataset.username);
+            row.classList.toggle('hidden', !(matchesText && matchesRole));
+        }
+    }
+
+    /**
+     * Проверяет, подходит ли строка под текстовый фильтр
+     * @param {HTMLElement} row - DOM-элемент строки
+     * @returns {boolean}
+     * @private
+     */
+    static _matchesTextFilter(row) {
+        if (!this._textFilter) return true;
+
+        const fullname = (row.dataset.fullname || '').toLowerCase();
+        const username = (row.dataset.username || '').toLowerCase();
+        const email = (row.dataset.email || '').toLowerCase();
+
+        return fullname.includes(this._textFilter) ||
+               username.includes(this._textFilter) ||
+               email.includes(this._textFilter);
+    }
+
+    /**
+     * Проверяет, имеет ли пользователь выбранную роль
+     * @param {string} username - Имя пользователя
+     * @returns {boolean}
+     * @private
+     */
+    static _matchesRoleFilter(username) {
+        if (this._roleFilter === null) return true;
+
+        const user = this._users.find(u => u.username === username);
+        if (!user) return false;
+
+        return user.roles.some(r => r.id === this._roleFilter);
     }
 
     /**
@@ -62,7 +243,7 @@ class AdminRoles {
             const active = userRoleIds.has(role.id);
             return `<button class="admin-role-chip ${active ? 'active' : ''}"
                             data-role-id="${role.id}"
-                            title="${this._escapeAttr(role.description)}">
+                            title="${this._escapeAttr(role.description || '')}">
                         ${this._escapeHtml(role.name)}
                     </button>`;
         }).join('');
@@ -70,10 +251,10 @@ class AdminRoles {
         return `
             <div class="admin-roles-row-info">
                 <div class="admin-roles-row-name">${this._escapeHtml(user.fullname)}</div>
-                <div class="admin-roles-row-details">${this._escapeHtml(user.username)} | ${this._escapeHtml(user.job || '')}</div>
+                <div class="admin-roles-row-details">${this._escapeHtml(user.job || '')}</div>
             </div>
             <div class="admin-roles-row-chips">${chips}</div>
-            <button class="admin-remove-btn" title="Убрать из списка">&times;</button>
+            <div class="admin-roles-row-username">${this._escapeHtml(user.username)}</div>
         `;
     }
 
@@ -99,7 +280,7 @@ class AdminRoles {
             }
 
             // Обновляем локальное состояние
-            const user = AdminPage._selectedUsers.get(username);
+            const user = this._users.find(u => u.username === username);
             if (user) {
                 if (isActive) {
                     user.roles = user.roles.filter(r => r.id !== roleId);
