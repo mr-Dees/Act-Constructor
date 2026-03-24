@@ -16,9 +16,9 @@ router = APIRouter()
 async def show_ck_fin_res(request: Request, roles: list[dict] = Depends(get_user_roles)):
     """Страница ЦК Фин.Рез."""
     return templates.TemplateResponse(
+        request,
         "portal/ck/ck_fin_res.html",
         {
-            "request": request,
             "active_page": "ck_fin_res",
             "topbar_title": "ЦК Фин.Рез.",
             "nav_groups": get_nav_items_for_user(roles),

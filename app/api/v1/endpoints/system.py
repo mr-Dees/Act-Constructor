@@ -11,6 +11,7 @@ from datetime import datetime
 
 from fastapi import APIRouter, Depends
 
+from app.api.v1.deps.auth_deps import get_username
 from app.core.config import get_settings, Settings
 
 logger = logging.getLogger("act_constructor.api.system")
@@ -34,9 +35,28 @@ async def health_check(settings: Settings = Depends(get_settings)) -> dict:
 @router.get("/health/detailed")
 async def detailed_health_check(settings: Settings = Depends(get_settings)) -> dict:
     """
-    Расширенный health check с информацией о системе.
+    Расширенный health check без авторизации.
 
-    Полезен для диагностики проблем и мониторинга состояния.
+    Возвращает только безопасную информацию (без системных деталей).
+    """
+    return {
+        "status": "ok",
+        "service": settings.app_title,
+        "version": settings.app_version,
+        "timestamp": datetime.now().isoformat(),
+    }
+
+
+@router.get("/health/detailed/full")
+async def detailed_health_check_full(
+    username: str = Depends(get_username),
+    settings: Settings = Depends(get_settings),
+) -> dict:
+    """
+    Полный health check с системной информацией (требует авторизации).
+
+    Доступен только авторизованным пользователям. Включает версию Python,
+    платформу, хост и порт для диагностики.
     """
     return {
         "status": "ok",

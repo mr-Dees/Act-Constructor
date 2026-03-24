@@ -16,9 +16,9 @@ router = APIRouter()
 async def show_ck_client_experience(request: Request, roles: list[dict] = Depends(get_user_roles)):
     """Страница ЦК Клиентский опыт."""
     return templates.TemplateResponse(
+        request,
         "portal/ck/ck_client_experience.html",
         {
-            "request": request,
             "active_page": "ck_client_experience",
             "topbar_title": "ЦК Клиентский опыт",
             "nav_groups": get_nav_items_for_user(roles),

@@ -66,8 +66,9 @@ def _render_error_page(request: Request, code: int, reason: str | None = None):
     }
     template_name = template_map.get(code, template_map[500])
     return _templates.TemplateResponse(
+        request,
         template_name,
-        {"request": request, "reason": reason},
+        {"reason": reason},
         status_code=code,
     )
 

@@ -16,9 +16,9 @@ router = APIRouter()
 async def show_acts_manager(request: Request, roles: list[dict] = Depends(get_user_roles)):
     """Страница управления актами."""
     return templates.TemplateResponse(
+        request,
         "portal/acts-manager/acts_manager.html",
         {
-            "request": request,
             "active_page": "acts",
             "topbar_title": "Управление актами",
             "nav_groups": get_nav_items_for_user(roles),

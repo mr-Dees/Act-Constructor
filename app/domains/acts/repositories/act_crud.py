@@ -139,7 +139,7 @@ class ActCrudRepository(BaseRepository):
             km_digit,
         )
 
-        logger.info(
+        logger.debug(
             f"Обновлено total_parts={total_count} для всех актов КМ (цифры)={km_digit}"
         )
 
@@ -178,7 +178,7 @@ class ActCrudRepository(BaseRepository):
         while part_number in occupied_numbers:
             part_number += 1
 
-        logger.info(
+        logger.debug(
             f"Найден свободный номер части {part_number} для КМ (цифры)={km_digit}. "
             f"Занятые номера: {sorted(occupied_numbers)}"
         )

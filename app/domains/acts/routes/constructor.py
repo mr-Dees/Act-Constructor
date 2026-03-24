@@ -57,9 +57,9 @@ async def show_constructor(
             return RedirectResponse(url="/acts", status_code=302)
 
         return templates.TemplateResponse(
+            request,
             "constructor/constructor.html",
             {
-                "request": request,
                 "act_id": act_id,
                 "chat_domains": get_chat_domains_for_page("acts"),
                 "knowledge_bases": get_knowledge_bases_as_dicts(),

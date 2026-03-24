@@ -7,6 +7,8 @@
 
 import importlib
 import logging
+from bisect import insort
+from collections import deque
 from pathlib import Path
 
 from fastapi import Depends, FastAPI
@@ -131,17 +133,16 @@ def _toposort(domains: list[DomainDescriptor]) -> list[DomainDescriptor]:
             in_degree[d.name] += 1
             dependents[dep].append(d.name)
 
-    queue = [name for name, deg in in_degree.items() if deg == 0]
+    queue = deque(sorted(name for name, deg in in_degree.items() if deg == 0))
     result: list[DomainDescriptor] = []
 
     while queue:
-        queue.sort()  # детерминированный порядок
-        name = queue.pop(0)
+        name = queue.popleft()
         result.append(name_to_domain[name])
         for dep_name in dependents[name]:
             in_degree[dep_name] -= 1
             if in_degree[dep_name] == 0:
-                queue.append(dep_name)
+                insort(queue, dep_name)
 
     if len(result) != len(domains):
         raise RuntimeError("Циклическая зависимость между доменами")

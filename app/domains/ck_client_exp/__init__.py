@@ -1,5 +1,7 @@
 """Домен ЦК Клиентский опыт (заглушка)."""
 
+DOMAIN_NAME = "ck_client_exp"
+
 
 def _build_domain():
     """Ленивое построение DomainDescriptor."""
@@ -7,7 +9,7 @@ def _build_domain():
     from app.domains.ck_client_exp.routes import get_html_routers
 
     return DomainDescriptor(
-        name="ck_client_exp",
+        name=DOMAIN_NAME,
         html_routers=get_html_routers(),
         nav_items=[
             NavItem(
@@ -23,7 +25,7 @@ def _build_domain():
                 ),
                 order=30,
                 active_page="ck_client_experience",
-                chat_domains=["ck_client_exp", "acts"],
+                chat_domains=[DOMAIN_NAME, "acts"],
                 group="Центры компетенций",
             ),
         ],

@@ -36,7 +36,8 @@ async def show_error_page(request: Request, code: int, reason: str | None = None
         status = code
 
     return templates.TemplateResponse(
+        request,
         template_name,
-        {"request": request, "reason": reason},
+        {"reason": reason},
         status_code=status,
     )

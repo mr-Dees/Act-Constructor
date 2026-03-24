@@ -21,9 +21,9 @@ async def show_admin_page(request: Request, roles: list[dict] = Depends(get_user
     Авторизация и проверка роли Админ выполняется фронтендом.
     """
     return templates.TemplateResponse(
+        request,
         "portal/admin/admin.html",
         {
-            "request": request,
             "active_page": "admin",
             "topbar_title": "Администрирование",
             "nav_groups": get_nav_items_for_user(roles),

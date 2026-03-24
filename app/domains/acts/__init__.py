@@ -9,28 +9,32 @@ CRUD, блокировки, содержимое, экспорт, фактуры
 """
 
 
+DOMAIN_NAME = "acts"
+
+
 def _build_domain():
     """Ленивое построение DomainDescriptor (вызывается из domain_registry)."""
     from app.core.domain import DomainDescriptor, KnowledgeBase, NavItem
     from app.domains.acts.api import get_api_routers
     from app.domains.acts.routes import get_html_routers
-    from app.domains.acts._lifecycle import on_shutdown
+    from app.domains.acts._lifecycle import on_startup, on_shutdown
     from app.core import settings_registry
     from app.domains.acts.settings import ActsSettings
     from app.domains.acts.integrations.chat_tools import get_chat_tools
 
     return DomainDescriptor(
-        name="acts",
+        name=DOMAIN_NAME,
         api_routers=get_api_routers(),
         html_routers=get_html_routers(),
         settings_class=ActsSettings,
+        on_startup=on_startup,
         on_shutdown=on_shutdown,
         chat_tools=get_chat_tools(),
         migration_substitutions={
-            "{REF_HADOOP_TABLES}": lambda: settings_registry.get("acts", ActsSettings).invoice.hive_registry_table,
-            "{REF_METRIC_DICT}": lambda: settings_registry.get("acts", ActsSettings).invoice.metric_dict_table,
-            "{REF_PROCESS_DICT}": lambda: settings_registry.get("acts", ActsSettings).invoice.process_dict_table,
-            "{REF_SUBSIDIARY_DICT}": lambda: settings_registry.get("acts", ActsSettings).invoice.subsidiary_dict_table,
+            "{REF_HADOOP_TABLES}": lambda: settings_registry.get(DOMAIN_NAME, ActsSettings).invoice.hive_registry_table,
+            "{REF_METRIC_DICT}": lambda: settings_registry.get(DOMAIN_NAME, ActsSettings).invoice.metric_dict_table,
+            "{REF_PROCESS_DICT}": lambda: settings_registry.get(DOMAIN_NAME, ActsSettings).invoice.process_dict_table,
+            "{REF_SUBSIDIARY_DICT}": lambda: settings_registry.get(DOMAIN_NAME, ActsSettings).invoice.subsidiary_dict_table,
         },
         nav_items=[
             NavItem(
@@ -45,7 +49,7 @@ def _build_domain():
                 ),
                 order=10,
                 active_page="acts",
-                chat_domains=["acts"],
+                chat_domains=[DOMAIN_NAME],
                 group="Аудит",
             ),
         ],

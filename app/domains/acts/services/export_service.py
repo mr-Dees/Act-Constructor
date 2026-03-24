@@ -9,7 +9,6 @@ import asyncio
 import gc
 import logging
 import threading
-from concurrent.futures import ThreadPoolExecutor
 from typing import Literal
 
 from app.core.config import Settings
@@ -20,13 +19,10 @@ from app.domains.acts.formatters.markdown_formatter import MarkdownFormatter
 from app.domains.acts.formatters.text_formatter import TextFormatter
 from app.domains.acts.schemas.act_content import ActSaveResponse
 from app.domains.acts.services.storage_service import StorageService
+from app.domains.acts._lifecycle import get_executor
 from app.domains.acts.settings import ActsSettings
 
 logger = logging.getLogger("act_constructor.service.export")
-
-# ThreadPoolExecutor для CPU/IO-intensive операций.
-# Размер пула = количество CPU cores для оптимальной загрузки.
-executor = ThreadPoolExecutor(max_workers=4, thread_name_prefix="act_formatter")
 
 
 class ExportService:
@@ -119,7 +115,7 @@ class ExportService:
             loop = asyncio.get_running_loop()
             try:
                 formatted_content = await loop.run_in_executor(
-                    executor,
+                    get_executor(),
                     self._format_sync,
                     data,
                     fmt

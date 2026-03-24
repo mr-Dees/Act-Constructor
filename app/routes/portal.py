@@ -53,9 +53,9 @@ async def show_landing(request: Request):
         nav_groups = get_nav_items_grouped()
 
     return templates.TemplateResponse(
+        request,
         "portal/landing/landing.html",
         {
-            "request": request,
             "active_page": "landing",
             "topbar_title": "Рабочее пространство",
             "nav_groups": nav_groups,

@@ -5,7 +5,7 @@
 -- ============================================================================
 
 CREATE TABLE IF NOT EXISTS acts (
-    id SERIAL PRIMARY KEY,
+    id BIGSERIAL PRIMARY KEY,
 
     -- Номер КМ и части
     km_number VARCHAR(50) NOT NULL,
@@ -115,7 +115,7 @@ COMMENT ON COLUMN acts.last_edited_at IS 'Дата и время последн�
 -- ============================================================================
 
 CREATE TABLE IF NOT EXISTS audit_team_members (
-    id SERIAL PRIMARY KEY,
+    id BIGSERIAL PRIMARY KEY,
     act_id INTEGER NOT NULL REFERENCES acts(id) ON DELETE CASCADE,
     audit_act_id VARCHAR(36),
     role VARCHAR(50) NOT NULL CHECK (role IN ('Куратор', 'Руководитель', 'Редактор', 'Участник')),
@@ -145,7 +145,7 @@ COMMENT ON COLUMN audit_team_members.created_at IS 'Дата и время до�
 -- ============================================================================
 
 CREATE TABLE IF NOT EXISTS act_directives (
-    id SERIAL PRIMARY KEY,
+    id BIGSERIAL PRIMARY KEY,
     act_id INTEGER NOT NULL REFERENCES acts(id) ON DELETE CASCADE,
     audit_act_id VARCHAR(36),
     audit_point_id VARCHAR(36),
@@ -177,7 +177,7 @@ COMMENT ON COLUMN act_directives.created_at IS 'Дата и время созд�
 -- ============================================================================
 
 CREATE TABLE IF NOT EXISTS act_tree (
-    id SERIAL PRIMARY KEY,
+    id BIGSERIAL PRIMARY KEY,
     act_id INTEGER UNIQUE NOT NULL REFERENCES acts(id) ON DELETE CASCADE,
     tree_data JSONB NOT NULL,
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
@@ -200,7 +200,7 @@ COMMENT ON COLUMN act_tree.updated_at IS 'Дата и время последн�
 -- ============================================================================
 
 CREATE TABLE IF NOT EXISTS act_tables (
-    id SERIAL PRIMARY KEY,
+    id BIGSERIAL PRIMARY KEY,
     act_id INTEGER NOT NULL REFERENCES acts(id) ON DELETE CASCADE,
     audit_act_id VARCHAR(36),
     audit_point_id VARCHAR(36),
@@ -252,7 +252,7 @@ COMMENT ON COLUMN act_tables.updated_at IS 'Дата и время послед�
 -- ============================================================================
 
 CREATE TABLE IF NOT EXISTS act_textblocks (
-    id SERIAL PRIMARY KEY,
+    id BIGSERIAL PRIMARY KEY,
     act_id INTEGER NOT NULL REFERENCES acts(id) ON DELETE CASCADE,
     audit_act_id VARCHAR(36),
     audit_point_id VARCHAR(36),
@@ -287,7 +287,7 @@ COMMENT ON COLUMN act_textblocks.updated_at IS 'Дата и время посл�
 -- ============================================================================
 
 CREATE TABLE IF NOT EXISTS act_violations (
-    id SERIAL PRIMARY KEY,
+    id BIGSERIAL PRIMARY KEY,
     act_id INTEGER NOT NULL REFERENCES acts(id) ON DELETE CASCADE,
     audit_act_id VARCHAR(36),
     audit_point_id VARCHAR(36),
@@ -369,7 +369,7 @@ COMMENT ON COLUMN act_violations.updated_at IS 'Дата и время посл�
 -- ============================================================================
 
 CREATE TABLE IF NOT EXISTS act_invoices (
-    id SERIAL PRIMARY KEY,
+    id BIGSERIAL PRIMARY KEY,
     act_id INTEGER NOT NULL REFERENCES acts(id) ON DELETE CASCADE,
     audit_act_id VARCHAR(36),
     audit_point_id VARCHAR(36),
@@ -417,7 +417,7 @@ COMMENT ON COLUMN act_invoices.profile_div IS 'Подразделение про
 -- ============================================================================
 
 CREATE TABLE IF NOT EXISTS {REF_HADOOP_TABLES} (
-    id SERIAL PRIMARY KEY,
+    id BIGSERIAL PRIMARY KEY,
     table_name VARCHAR(255) NOT NULL UNIQUE
 );
 
@@ -442,7 +442,7 @@ ON CONFLICT DO NOTHING;
 -- ============================================================================
 
 CREATE TABLE IF NOT EXISTS {REF_METRIC_DICT} (
-    id SERIAL PRIMARY KEY,
+    id BIGSERIAL PRIMARY KEY,
     code VARCHAR(50) NOT NULL UNIQUE,
     metric_name VARCHAR(500) NOT NULL,
     metric_group VARCHAR(10)
@@ -474,7 +474,7 @@ ON CONFLICT DO NOTHING;
 -- ============================================================================
 
 CREATE TABLE IF NOT EXISTS audit_log (
-    id SERIAL PRIMARY KEY,
+    id BIGSERIAL PRIMARY KEY,
     act_id INTEGER,
     action VARCHAR(50) NOT NULL,
     username VARCHAR(50) NOT NULL,
@@ -496,7 +496,7 @@ COMMENT ON COLUMN audit_log.created_at IS 'Время операции';
 -- ============================================================================
 
 CREATE TABLE IF NOT EXISTS act_content_versions (
-    id SERIAL PRIMARY KEY,
+    id BIGSERIAL PRIMARY KEY,
     act_id INTEGER NOT NULL REFERENCES acts(id) ON DELETE CASCADE,
     version_number INTEGER NOT NULL,
     save_type VARCHAR(20) NOT NULL DEFAULT 'auto',
@@ -525,7 +525,7 @@ COMMENT ON COLUMN act_content_versions.created_at IS 'Время создани�
 -- ============================================================================
 
 CREATE TABLE IF NOT EXISTS {REF_PROCESS_DICT} (
-    id SERIAL PRIMARY KEY,
+    id BIGSERIAL PRIMARY KEY,
     process_code VARCHAR(50) NOT NULL UNIQUE,
     process_name VARCHAR(500) NOT NULL
 );
@@ -550,7 +550,7 @@ ON CONFLICT DO NOTHING;
 -- ============================================================================
 
 CREATE TABLE IF NOT EXISTS {REF_SUBSIDIARY_DICT} (
-    id SERIAL PRIMARY KEY,
+    id BIGSERIAL PRIMARY KEY,
     name VARCHAR(500) NOT NULL UNIQUE
 );
 

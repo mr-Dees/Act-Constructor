@@ -25,7 +25,8 @@ from app.domains.acts.settings import ActsSettings
 
 
 def _get_acts_settings() -> ActsSettings:
-    return get_domain_settings("acts", ActsSettings)
+    from app.domains.acts import DOMAIN_NAME
+    return get_domain_settings(DOMAIN_NAME, ActsSettings)
 
 
 async def get_crud_service(

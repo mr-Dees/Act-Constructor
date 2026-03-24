@@ -28,6 +28,17 @@ from app.domains.acts.services.storage_service import StorageService
 logger = logging.getLogger("act_constructor.api.export")
 router = APIRouter()
 
+_download_semaphore: asyncio.Semaphore | None = None
+
+
+def _get_download_semaphore(acts_cfg: ActsSettings) -> asyncio.Semaphore:
+    """Возвращает per-worker семафор для ограничения файловых операций."""
+    global _download_semaphore
+    if _download_semaphore is None:
+        _download_semaphore = asyncio.Semaphore(acts_cfg.resource.max_concurrent_file_operations)
+        logger.info(f"File semaphore создан для worker: {acts_cfg.resource.max_concurrent_file_operations}")
+    return _download_semaphore
+
 
 def get_storage_service(settings: Settings = Depends(get_settings)) -> StorageService:
     """Создает экземпляр StorageService для dependency injection."""
@@ -177,14 +188,7 @@ async def download_act(
         HTTPException: 401 без авторизации, 403 нет доступа,
             400 небезопасное имя, 404 файл не найден
     """
-    # Создаем per-worker semaphore для ограничения файловых операций.
-    # В multiprocessing каждый worker имеет свой event loop и свой
-    # semaphore.
-    if not hasattr(download_act, '_semaphore'):
-        download_act._semaphore = asyncio.Semaphore(acts_cfg.resource.max_concurrent_file_operations)
-        logger.info(f"File semaphore создан для worker: {acts_cfg.resource.max_concurrent_file_operations}")
-
-    async with download_act._semaphore:
+    async with _get_download_semaphore(acts_cfg):
         try:
             logger.info(f"Запрос на скачивание файла: {filename} от пользователя {username}")
 

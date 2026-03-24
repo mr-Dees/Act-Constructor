@@ -49,7 +49,12 @@ class ActQueries:
         """
         row = await conn.fetchrow(
             f"""
-            SELECT *
+            SELECT id, km_number, km_number_digit, part_number, total_parts,
+                   inspection_name, city, created_date, order_number, order_date,
+                   is_process_based, service_note, service_note_date,
+                   audit_act_id, inspection_start_date, inspection_end_date,
+                   created_at, updated_at, created_by,
+                   last_edited_by, last_edited_at
             FROM {self.acts}
             WHERE km_number = $1
             """,

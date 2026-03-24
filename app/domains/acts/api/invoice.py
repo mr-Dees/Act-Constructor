@@ -4,12 +4,16 @@ API эндпоинты для работы с фактурами актов.
 Тонкие обёртки — вся логика в ActInvoiceService.
 """
 
+from typing import Literal
+
 from fastapi import APIRouter, Depends
 
 from app.api.v1.deps.auth_deps import get_username
 from app.domains.acts.deps import get_invoice_service
 from app.domains.acts.schemas.act_invoice import InvoiceSave, InvoiceVerifyRequest
 from app.domains.acts.services.act_invoice_service import ActInvoiceService
+
+DbType = Literal["hive", "greenplum"]
 
 router = APIRouter()
 
@@ -43,7 +47,7 @@ async def list_subsidiaries(
 
 @router.get("/tables/{db_type}")
 async def list_tables(
-    db_type: str,
+    db_type: DbType,
     username: str = Depends(get_username),
     service: ActInvoiceService = Depends(get_invoice_service),
 ) -> list[dict]:

@@ -1,5 +1,7 @@
 """Домен ЦК Фин.Рез. (заглушка)."""
 
+DOMAIN_NAME = "ck_fin_res"
+
 
 def _build_domain():
     """Ленивое построение DomainDescriptor."""
@@ -7,7 +9,7 @@ def _build_domain():
     from app.domains.ck_fin_res.routes import get_html_routers
 
     return DomainDescriptor(
-        name="ck_fin_res",
+        name=DOMAIN_NAME,
         html_routers=get_html_routers(),
         nav_items=[
             NavItem(
@@ -23,7 +25,7 @@ def _build_domain():
                 ),
                 order=20,
                 active_page="ck_fin_res",
-                chat_domains=["ck_fin_res", "acts"],
+                chat_domains=[DOMAIN_NAME, "acts"],
                 group="Центры компетенций",
             ),
         ],
