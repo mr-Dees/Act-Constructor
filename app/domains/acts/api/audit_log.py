@@ -16,13 +16,21 @@ from app.domains.acts.schemas.act_audit_log import (
     ContentVersionsResponse,
 )
 from app.domains.acts.schemas.act_responses import RestoreVersionResponse
+from app.schemas.errors import ErrorDetail
 from app.domains.acts.services.audit_log_service import AuditLogService
 
 logger = logging.getLogger("act_constructor.api.audit_log")
 router = APIRouter()
 
 
-@router.get("/{act_id}/audit-log", response_model=AuditLogResponse)
+@router.get(
+    "/{act_id}/audit-log",
+    response_model=AuditLogResponse,
+    responses={
+        403: {"description": "Требуется роль Куратора или Руководителя", "model": ErrorDetail},
+        404: {"description": "Акт не найден", "model": ErrorDetail},
+    },
+)
 async def get_audit_log(
     act_id: int,
     username: str = Depends(get_username),
@@ -51,7 +59,14 @@ async def get_audit_log(
     return AuditLogResponse(items=items, total=total)
 
 
-@router.get("/{act_id}/versions", response_model=ContentVersionsResponse)
+@router.get(
+    "/{act_id}/versions",
+    response_model=ContentVersionsResponse,
+    responses={
+        403: {"description": "Требуется роль Куратора или Руководителя", "model": ErrorDetail},
+        404: {"description": "Акт не найден", "model": ErrorDetail},
+    },
+)
 async def get_versions(
     act_id: int,
     username: str = Depends(get_username),
@@ -70,7 +85,14 @@ async def get_versions(
     return ContentVersionsResponse(items=items, total=total)
 
 
-@router.get("/{act_id}/versions/{version_id}", response_model=ContentVersionDetail)
+@router.get(
+    "/{act_id}/versions/{version_id}",
+    response_model=ContentVersionDetail,
+    responses={
+        403: {"description": "Требуется роль Куратора или Руководителя", "model": ErrorDetail},
+        404: {"description": "Версия не найдена", "model": ErrorDetail},
+    },
+)
 async def get_version(
     act_id: int,
     version_id: int,
@@ -89,7 +111,14 @@ async def get_version(
     return ContentVersionDetail(**version)
 
 
-@router.post("/{act_id}/versions/{version_id}/restore", response_model=RestoreVersionResponse)
+@router.post(
+    "/{act_id}/versions/{version_id}/restore",
+    response_model=RestoreVersionResponse,
+    responses={
+        403: {"description": "Требуется роль Куратора или Руководителя", "model": ErrorDetail},
+        404: {"description": "Версия не найдена", "model": ErrorDetail},
+    },
+)
 async def restore_version(
     act_id: int,
     version_id: int,

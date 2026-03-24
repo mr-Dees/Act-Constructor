@@ -13,6 +13,7 @@ from fastapi import APIRouter, Depends
 
 from app.api.v1.deps.auth_deps import get_username
 from app.core.config import get_settings, Settings
+from app.schemas.errors import ErrorDetail
 
 logger = logging.getLogger("act_constructor.api.system")
 router = APIRouter()
@@ -47,7 +48,7 @@ async def detailed_health_check(settings: Settings = Depends(get_settings)) -> d
     }
 
 
-@router.get("/health/detailed/full")
+@router.get("/health/detailed/full", responses={401: {"description": "Требуется авторизация", "model": ErrorDetail}})
 async def detailed_health_check_full(
     username: str = Depends(get_username),
     settings: Settings = Depends(get_settings),

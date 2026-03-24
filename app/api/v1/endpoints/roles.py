@@ -8,11 +8,12 @@ from fastapi import APIRouter, Depends
 
 from app.api.v1.deps.auth_deps import get_username
 from app.api.v1.deps.role_deps import get_user_roles
+from app.schemas.errors import ErrorDetail
 
 router = APIRouter()
 
 
-@router.get("/my-roles")
+@router.get("/my-roles", responses={401: {"description": "Требуется авторизация", "model": ErrorDetail}})
 async def get_my_roles(
     username: str = Depends(get_username),
     roles: list[dict] = Depends(get_user_roles),

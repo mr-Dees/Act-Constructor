@@ -24,6 +24,7 @@ from app.domains.acts.utils import ActTreeUtils
 from app.domains.acts.schemas.act_content import ActDataSchema, ActSaveResponse
 from app.domains.acts.services.export_service import ExportService
 from app.domains.acts.services.storage_service import StorageService
+from app.schemas.errors import ErrorDetail
 
 logger = logging.getLogger("act_constructor.api.export")
 router = APIRouter()
@@ -54,7 +55,16 @@ def get_act_service(
     return ExportService(storage=storage, settings=settings, acts_settings=acts_settings)
 
 
-@router.post("/save-act", response_model=ActSaveResponse)
+@router.post(
+    "/save-act",
+    response_model=ActSaveResponse,
+    responses={
+        400: {"description": "Превышена глубина дерева или неподдерживаемый формат", "model": ErrorDetail},
+        408: {"description": "Таймаут обработки акта", "model": ErrorDetail},
+        422: {"description": "Ошибка валидации входных данных"},
+        500: {"description": "Внутренняя ошибка при сохранении", "model": ErrorDetail},
+    },
+)
 async def save_act(
         data: ActDataSchema,
         fmt: Literal["txt", "md", "docx"] = Query(
@@ -159,7 +169,15 @@ async def save_act(
         )
 
 
-@router.get("/download/{filename}")
+@router.get(
+    "/download/{filename}",
+    responses={
+        400: {"description": "Некорректное имя файла", "model": ErrorDetail},
+        403: {"description": "Нет доступа к файлу", "model": ErrorDetail},
+        404: {"description": "Файл не найден", "model": ErrorDetail},
+        500: {"description": "Ошибка при скачивании файла", "model": ErrorDetail},
+    },
+)
 async def download_act(
         filename: str,
         username: str = Depends(get_username),

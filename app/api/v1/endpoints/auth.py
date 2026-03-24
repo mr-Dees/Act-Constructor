@@ -10,6 +10,7 @@ from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
 
 from app.core.config import get_settings
+from app.schemas.errors import ErrorDetail
 
 logger = logging.getLogger("act_constructor.api.auth")
 router = APIRouter()
@@ -117,7 +118,7 @@ async def get_current_user():
     )
 
 
-@router.get("/validate")
+@router.get("/validate", responses={401: {"description": "Требуется авторизация", "model": ErrorDetail}})
 async def validate_session():
     """
     Проверяет валидность текущей сессии.

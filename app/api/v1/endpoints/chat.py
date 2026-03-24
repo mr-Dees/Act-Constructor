@@ -20,6 +20,7 @@ from app.api.v1.deps.auth_deps import get_username
 from app.core.chat_tools import get_all_tools, get_openai_tools, get_tool, get_tools_by_domain
 from app.core.config import get_settings
 from app.schemas.chat import ChatRequest, ChatResponse
+from app.schemas.errors import ErrorDetail
 
 logger = logging.getLogger("act_constructor.chat")
 
@@ -87,7 +88,7 @@ async def _execute_tool_call(tool_name: str, arguments: dict) -> str:
         return f"Ошибка выполнения инструмента: {exc}"
 
 
-@router.post("/message", response_model=ChatResponse)
+@router.post("/message", response_model=ChatResponse, responses={401: {"description": "Требуется авторизация", "model": ErrorDetail}, 422: {"description": "Ошибка валидации входных данных"}})
 async def send_message(
     request: ChatRequest,
     username: str = Depends(get_username),

@@ -9,6 +9,7 @@ from fastapi import APIRouter, Depends
 from app.api.v1.deps.auth_deps import get_username
 from app.domains.acts.deps import get_crud_service, get_lock_service, _get_acts_settings
 from app.domains.acts.schemas.act_metadata import ActCreate, ActUpdate, ActListItem, ActResponse, AuditPointIdsRequest
+from app.schemas.errors import ErrorDetail, LockErrorDetail, KmConflictDetail
 from app.domains.acts.schemas.act_responses import (
     LockConfigResponse,
     LockResponse,
@@ -31,7 +32,7 @@ async def list_user_acts(
     return await service.list_acts(username)
 
 
-@router.post("/{act_id}/lock", response_model=LockResponse, status_code=200)
+@router.post("/{act_id}/lock", response_model=LockResponse, status_code=200, responses={403: {"description": "Нет доступа к акту", "model": ErrorDetail}, 404: {"description": "Акт не найден", "model": ErrorDetail}, 409: {"description": "Акт заблокирован другим пользователем", "model": LockErrorDetail}})
 async def lock_act(
         act_id: int,
         username: str = Depends(get_username),
@@ -41,7 +42,7 @@ async def lock_act(
     return await service.lock_act(act_id, username)
 
 
-@router.post("/{act_id}/unlock", response_model=OperationResult, status_code=200)
+@router.post("/{act_id}/unlock", response_model=OperationResult, status_code=200, responses={403: {"description": "Нет доступа к акту", "model": ErrorDetail}, 404: {"description": "Акт не найден", "model": ErrorDetail}, 409: {"description": "Блокировка не принадлежит пользователю", "model": ErrorDetail}})
 async def unlock_act(
         act_id: int,
         username: str = Depends(get_username),
@@ -51,7 +52,7 @@ async def unlock_act(
     return await service.unlock_act(act_id, username)
 
 
-@router.post("/{act_id}/extend-lock", response_model=LockResponse, status_code=200)
+@router.post("/{act_id}/extend-lock", response_model=LockResponse, status_code=200, responses={403: {"description": "Нет доступа к акту", "model": ErrorDetail}, 404: {"description": "Акт не найден", "model": ErrorDetail}, 409: {"description": "Блокировка не принадлежит пользователю", "model": LockErrorDetail}})
 async def extend_lock(
         act_id: int,
         username: str = Depends(get_username),
@@ -61,7 +62,7 @@ async def extend_lock(
     return await service.extend_lock(act_id, username)
 
 
-@router.post("/create", response_model=ActResponse, status_code=201)
+@router.post("/create", response_model=ActResponse, status_code=201, responses={409: {"description": "Акт с таким КМ уже существует", "model": KmConflictDetail}, 422: {"description": "Ошибка валидации входных данных"}})
 async def create_act(
         act_data: ActCreate,
         username: str = Depends(get_username),
@@ -97,7 +98,7 @@ async def get_invoice_config(
     }
 
 
-@router.get("/{act_id}", response_model=ActResponse)
+@router.get("/{act_id}", response_model=ActResponse, responses={403: {"description": "Нет доступа к акту", "model": ErrorDetail}, 404: {"description": "Акт не найден", "model": ErrorDetail}})
 async def get_act(
         act_id: int,
         username: str = Depends(get_username),
@@ -107,7 +108,7 @@ async def get_act(
     return await service.get_act(act_id, username)
 
 
-@router.patch("/{act_id}", response_model=ActResponse)
+@router.patch("/{act_id}", response_model=ActResponse, responses={403: {"description": "Нет прав на редактирование", "model": ErrorDetail}, 404: {"description": "Акт не найден", "model": ErrorDetail}, 409: {"description": "Конфликт данных", "model": ErrorDetail}, 422: {"description": "Ошибка валидации входных данных"}})
 async def update_act_metadata(
         act_id: int,
         act_update: ActUpdate,
@@ -118,7 +119,7 @@ async def update_act_metadata(
     return await service.update_act_metadata(act_id, act_update, username)
 
 
-@router.post("/{act_id}/duplicate", response_model=ActResponse)
+@router.post("/{act_id}/duplicate", response_model=ActResponse, responses={403: {"description": "Нет доступа к акту", "model": ErrorDetail}, 404: {"description": "Акт не найден", "model": ErrorDetail}})
 async def duplicate_act(
         act_id: int,
         username: str = Depends(get_username),
@@ -128,7 +129,7 @@ async def duplicate_act(
     return await service.duplicate_act(act_id, username)
 
 
-@router.post("/{act_id}/audit-point-ids", response_model=dict[str, str])
+@router.post("/{act_id}/audit-point-ids", response_model=dict[str, str], responses={403: {"description": "Нет доступа к акту", "model": ErrorDetail}, 404: {"description": "Акт не найден", "model": ErrorDetail}})
 async def generate_audit_point_ids(
         act_id: int,
         request: AuditPointIdsRequest,
@@ -139,7 +140,7 @@ async def generate_audit_point_ids(
     return await service.generate_audit_point_ids(act_id, request.node_ids, username)
 
 
-@router.delete("/{act_id}", response_model=OperationResult)
+@router.delete("/{act_id}", response_model=OperationResult, responses={403: {"description": "Нет прав на удаление", "model": ErrorDetail}, 404: {"description": "Акт не найден", "model": ErrorDetail}})
 async def delete_act(
         act_id: int,
         username: str = Depends(get_username),
