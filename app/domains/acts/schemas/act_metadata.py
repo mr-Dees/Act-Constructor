@@ -2,7 +2,7 @@ import re
 from datetime import date, datetime
 from typing import List, Literal, Optional
 
-from pydantic import BaseModel, Field, field_validator, model_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 
 class AuditTeamMember(BaseModel):
@@ -256,8 +256,7 @@ class ActListItem(BaseModel):
     needs_invoice_check: bool = False
     needs_service_note: bool = False
 
-    class Config:
-        from_attributes = True
+    model_config = ConfigDict(from_attributes=True)
 
 
 class ActResponse(BaseModel):
