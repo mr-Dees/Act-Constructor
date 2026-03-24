@@ -47,28 +47,24 @@ class ActContentVersionRepository(BaseRepository):
             max_versions: Максимальное число версий (старые удаляются)
         """
         try:
-            # Получить текущий максимальный номер версии
-            row = await self.conn.fetchrow(
-                f"SELECT COALESCE(MAX(version_number), 0) AS max_ver "
-                f"FROM {self.versions_table} WHERE act_id = $1",
-                act_id,
-            )
-            next_version = row["max_ver"] + 1
-
             tree_json = json.dumps(tree, ensure_ascii=False, default=str)
             tables_json = json.dumps(tables, ensure_ascii=False, default=str)
             textblocks_json = json.dumps(textblocks, ensure_ascii=False, default=str)
             violations_json = json.dumps(violations, ensure_ascii=False, default=str)
 
-            await self.conn.execute(
+            # Атомарный INSERT с вычислением version_number
+            row = await self.conn.fetchrow(
                 f"""
                 INSERT INTO {self.versions_table}
                     (act_id, version_number, save_type, username,
                      tree_data, tables_data, textblocks_data, violations_data)
-                VALUES ($1, $2, $3, $4, $5::jsonb, $6::jsonb, $7::jsonb, $8::jsonb)
+                SELECT $1, COALESCE(MAX(version_number), 0) + 1, $2, $3,
+                       $4::jsonb, $5::jsonb, $6::jsonb, $7::jsonb
+                FROM {self.versions_table}
+                WHERE act_id = $1
+                RETURNING version_number
                 """,
                 act_id,
-                next_version,
                 save_type,
                 username,
                 tree_json,
@@ -76,6 +72,7 @@ class ActContentVersionRepository(BaseRepository):
                 textblocks_json,
                 violations_json,
             )
+            next_version = row["version_number"]
 
             # Удалить старые версии если превышен лимит
             await self._cleanup_old_versions(act_id, max_versions)
