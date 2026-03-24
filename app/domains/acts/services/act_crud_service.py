@@ -241,10 +241,7 @@ class ActCrudService:
 
         async with self.conn.transaction():
             current_act = await self._crud.get_act_by_id_for_update(act_id)
-            old_km_number = current_act.km_number
-            old_km_digit = KMUtils.extract_km_digits(old_km_number)
-            old_service_note = current_act.service_note
-            old_part_number = current_act.part_number
+            old_km_digit = KMUtils.extract_km_digits(current_act.km_number)
 
             cur_audit_act_id = await self._crud.get_audit_act_id(act_id)
 
@@ -254,191 +251,271 @@ class ActCrudService:
                     act_id, act_update.directives
                 )
 
-            km_changed = (
-                "km_number" in sent_fields
-                and act_update.km_number is not None
-                and act_update.km_number != old_km_number
-            )
-            service_note_changed = (
-                "service_note" in sent_fields
-                and act_update.service_note is not None
-                and act_update.service_note != old_service_note
-            )
-            service_note_removed = (
-                "service_note" in sent_fields
-                and act_update.service_note is None
-                and old_service_note is not None
+            # Валидация КМ, служебной записки, номера части
+            new_km_digit, new_part_number, km_changed = await self._validate_km_and_part(
+                act_id, act_update, current_act, sent_fields, old_km_digit,
             )
 
-            new_km_digit = (
-                KMUtils.extract_km_digits(act_update.km_number)
-                if act_update.km_number
-                else old_km_digit
+            # Формирование SQL UPDATE
+            updates, values = self._build_update_query(
+                act_update, current_act, sent_fields,
+                new_km_digit, new_part_number, km_changed, username,
             )
-
-            new_part_number = old_part_number
-
-            if service_note_changed or service_note_removed:
-                if act_update.service_note:
-                    suffix = KMUtils.extract_service_note_suffix(act_update.service_note)
-                    if not suffix or not suffix.isdigit():
-                        raise ActValidationError(
-                            f"Некорректный формат служебной записки: {act_update.service_note}"
-                        )
-                    new_part_number = int(suffix)
-                else:
-                    new_part_number = await self._crud.find_free_part_number(
-                        new_km_digit, act_id
-                    )
-                    act_update.service_note = None
-                    act_update.service_note_date = None
-
-            if km_changed and not (service_note_changed or service_note_removed):
-                if current_act.service_note or act_update.service_note:
-                    if act_update.part_number is not None:
-                        new_part_number = act_update.part_number
-                else:
-                    new_part_number = await self._crud.find_free_part_number(
-                        new_km_digit, act_id
-                    )
-
-            if (
-                km_changed
-                or service_note_changed
-                or service_note_removed
-                or (act_update.part_number is not None)
-            ):
-                is_unique = await self._crud.check_km_part_uniqueness(
-                    new_km_digit, new_part_number, exclude_act_id=act_id
-                )
-                if not is_unique:
-                    raise KmConflictError(
-                        f"Акт с КМ (цифры) {new_km_digit} и частью {new_part_number} уже существует",
-                        km_number=act_update.km_number or current_act.km_number,
-                    )
-
-            # Формируем динамический UPDATE
-            updates: list[str] = []
-            values: list = []
-            param_idx = 1
-
-            def _add(col, val):
-                nonlocal param_idx
-                updates.append(f"{col} = ${param_idx}")
-                values.append(val)
-                param_idx += 1
-
-            if "km_number" in sent_fields and act_update.km_number is not None:
-                _add("km_number", act_update.km_number)
-                _add("km_number_digit", new_km_digit)
-            if new_part_number != old_part_number:
-                _add("part_number", new_part_number)
-            if "inspection_name" in sent_fields and act_update.inspection_name is not None:
-                _add("inspection_name", act_update.inspection_name)
-            if "city" in sent_fields and act_update.city is not None:
-                _add("city", act_update.city)
-            if "created_date" in sent_fields:
-                _add("created_date", act_update.created_date)
-            if "order_number" in sent_fields and act_update.order_number is not None:
-                _add("order_number", act_update.order_number)
-            if "order_date" in sent_fields and act_update.order_date is not None:
-                _add("order_date", act_update.order_date)
-            if "inspection_start_date" in sent_fields and act_update.inspection_start_date is not None:
-                _add("inspection_start_date", act_update.inspection_start_date)
-            if "inspection_end_date" in sent_fields and act_update.inspection_end_date is not None:
-                _add("inspection_end_date", act_update.inspection_end_date)
-            if "is_process_based" in sent_fields and act_update.is_process_based is not None:
-                _add("is_process_based", act_update.is_process_based)
-            if service_note_changed or service_note_removed:
-                _add("service_note", act_update.service_note)
-                _add("service_note_date", act_update.service_note_date)
-
-            # Авто-сброс служебных флагов
-            needs_created_date = current_act.needs_created_date
-            needs_directive_number = current_act.needs_directive_number
-            needs_service_note = current_act.needs_service_note
-
-            if needs_created_date and "created_date" in sent_fields and act_update.created_date is not None:
-                needs_created_date = False
-            if (
-                needs_directive_number
-                and act_update.directives is not None
-                and len(act_update.directives) > 0
-            ):
-                all_have_numbers = all(
-                    d.directive_number and d.directive_number.strip()
-                    for d in act_update.directives
-                )
-                if all_have_numbers:
-                    needs_directive_number = False
-            if needs_service_note and "service_note" in sent_fields and act_update.service_note is not None:
-                if act_update.service_note.strip():
-                    needs_service_note = False
-
-            if needs_created_date != current_act.needs_created_date:
-                _add("needs_created_date", needs_created_date)
-            if needs_directive_number != current_act.needs_directive_number:
-                _add("needs_directive_number", needs_directive_number)
-            if needs_service_note != current_act.needs_service_note:
-                _add("needs_service_note", needs_service_note)
-
-            _add("last_edited_by", username)
-            updates.append("last_edited_at = CURRENT_TIMESTAMP")
-
             await self._crud.execute_update(act_id, updates, values)
 
-            if act_update.audit_team is not None:
-                await self._crud.replace_team_members(
-                    act_id, cur_audit_act_id, act_update.audit_team
-                )
+            # Замена команды и поручений
+            await self._sync_team_and_directives(
+                act_id, cur_audit_act_id, act_update, tree_data,
+            )
 
-            if act_update.directives is not None:
-                audit_point_map = (
-                    ActDirectivesValidator.build_audit_point_map(tree_data)
-                    if tree_data
-                    else {}
-                )
-                await self._crud.replace_directives(
-                    act_id, cur_audit_act_id, act_update.directives, audit_point_map
-                )
-
+            # Обновление total_parts
             if km_changed:
                 await self._crud.update_total_parts_for_km(old_km_digit)
             await self._crud.update_total_parts_for_km(new_km_digit)
 
             logger.info(f"Обновлены метаданные акта ID={act_id}")
 
-            changes = {}
-            field_mapping = {
-                "km_number": (current_act.km_number, act_update.km_number),
-                "inspection_name": (current_act.inspection_name, act_update.inspection_name),
-                "city": (current_act.city, act_update.city),
-                "created_date": (current_act.created_date, act_update.created_date),
-                "order_number": (current_act.order_number, act_update.order_number),
-                "order_date": (current_act.order_date, act_update.order_date),
-                "inspection_start_date": (current_act.inspection_start_date, act_update.inspection_start_date),
-                "inspection_end_date": (current_act.inspection_end_date, act_update.inspection_end_date),
-                "is_process_based": (current_act.is_process_based, act_update.is_process_based),
-                "service_note": (old_service_note, act_update.service_note),
-            }
-            for field_name in sent_fields:
-                if field_name in field_mapping:
-                    old_val, new_val = field_mapping[field_name]
-                    if str(old_val) != str(new_val):
-                        changes[field_name] = {
-                            "old": str(old_val) if old_val is not None else None,
-                            "new": str(new_val) if new_val is not None else None,
-                        }
-
-            details = {"changes": changes}
-            if act_update.audit_team is not None:
-                details["audit_team_replaced"] = True
-            if act_update.directives is not None:
-                details["directives_replaced"] = True
-
-            await self._audit.log("update", username, act_id, details)
+            # Аудит-лог
+            await self._log_metadata_changes(
+                act_id, username, act_update, current_act, sent_fields,
+            )
 
             return await self._crud.get_act_by_id(act_id)
+
+    async def _validate_km_and_part(
+        self,
+        act_id: int,
+        act_update: ActUpdate,
+        current_act: ActResponse,
+        sent_fields: set[str],
+        old_km_digit: str,
+    ) -> tuple[str, int, bool]:
+        """Валидация КМ-номера, служебной записки и номера части.
+
+        Returns:
+            (new_km_digit, new_part_number, km_changed)
+        """
+        km_changed = (
+            "km_number" in sent_fields
+            and act_update.km_number is not None
+            and act_update.km_number != current_act.km_number
+        )
+        service_note_changed = (
+            "service_note" in sent_fields
+            and act_update.service_note is not None
+            and act_update.service_note != current_act.service_note
+        )
+        service_note_removed = (
+            "service_note" in sent_fields
+            and act_update.service_note is None
+            and current_act.service_note is not None
+        )
+
+        new_km_digit = (
+            KMUtils.extract_km_digits(act_update.km_number)
+            if act_update.km_number
+            else old_km_digit
+        )
+
+        new_part_number = current_act.part_number
+
+        if service_note_changed or service_note_removed:
+            if act_update.service_note:
+                suffix = KMUtils.extract_service_note_suffix(act_update.service_note)
+                if not suffix or not suffix.isdigit():
+                    raise ActValidationError(
+                        f"Некорректный формат служебной записки: {act_update.service_note}"
+                    )
+                new_part_number = int(suffix)
+            else:
+                new_part_number = await self._crud.find_free_part_number(
+                    new_km_digit, act_id
+                )
+                act_update.service_note = None
+                act_update.service_note_date = None
+
+        if km_changed and not (service_note_changed or service_note_removed):
+            if current_act.service_note or act_update.service_note:
+                if act_update.part_number is not None:
+                    new_part_number = act_update.part_number
+            else:
+                new_part_number = await self._crud.find_free_part_number(
+                    new_km_digit, act_id
+                )
+
+        if (
+            km_changed
+            or service_note_changed
+            or service_note_removed
+            or (act_update.part_number is not None)
+        ):
+            is_unique = await self._crud.check_km_part_uniqueness(
+                new_km_digit, new_part_number, exclude_act_id=act_id
+            )
+            if not is_unique:
+                raise KmConflictError(
+                    f"Акт с КМ (цифры) {new_km_digit} и частью {new_part_number} уже существует",
+                    km_number=act_update.km_number or current_act.km_number,
+                )
+
+        return new_km_digit, new_part_number, km_changed
+
+    @staticmethod
+    def _build_update_query(
+        act_update: ActUpdate,
+        current_act: ActResponse,
+        sent_fields: set[str],
+        new_km_digit: str,
+        new_part_number: int,
+        km_changed: bool,
+        username: str,
+    ) -> tuple[list[str], list]:
+        """Формирование динамического SQL UPDATE с diff полей.
+
+        Returns:
+            (updates, values) — список SET-фрагментов и параметров
+        """
+        updates: list[str] = []
+        values: list = []
+        param_idx = 1
+
+        service_note_changed = (
+            "service_note" in sent_fields
+            and act_update.service_note is not None
+            and act_update.service_note != current_act.service_note
+        )
+        service_note_removed = (
+            "service_note" in sent_fields
+            and act_update.service_note is None
+            and current_act.service_note is not None
+        )
+
+        def _add(col, val):
+            nonlocal param_idx
+            updates.append(f"{col} = ${param_idx}")
+            values.append(val)
+            param_idx += 1
+
+        if "km_number" in sent_fields and act_update.km_number is not None:
+            _add("km_number", act_update.km_number)
+            _add("km_number_digit", new_km_digit)
+        if new_part_number != current_act.part_number:
+            _add("part_number", new_part_number)
+        if "inspection_name" in sent_fields and act_update.inspection_name is not None:
+            _add("inspection_name", act_update.inspection_name)
+        if "city" in sent_fields and act_update.city is not None:
+            _add("city", act_update.city)
+        if "created_date" in sent_fields:
+            _add("created_date", act_update.created_date)
+        if "order_number" in sent_fields and act_update.order_number is not None:
+            _add("order_number", act_update.order_number)
+        if "order_date" in sent_fields and act_update.order_date is not None:
+            _add("order_date", act_update.order_date)
+        if "inspection_start_date" in sent_fields and act_update.inspection_start_date is not None:
+            _add("inspection_start_date", act_update.inspection_start_date)
+        if "inspection_end_date" in sent_fields and act_update.inspection_end_date is not None:
+            _add("inspection_end_date", act_update.inspection_end_date)
+        if "is_process_based" in sent_fields and act_update.is_process_based is not None:
+            _add("is_process_based", act_update.is_process_based)
+        if service_note_changed or service_note_removed:
+            _add("service_note", act_update.service_note)
+            _add("service_note_date", act_update.service_note_date)
+
+        # Авто-сброс служебных флагов
+        needs_created_date = current_act.needs_created_date
+        needs_directive_number = current_act.needs_directive_number
+        needs_service_note = current_act.needs_service_note
+
+        if needs_created_date and "created_date" in sent_fields and act_update.created_date is not None:
+            needs_created_date = False
+        if (
+            needs_directive_number
+            and act_update.directives is not None
+            and len(act_update.directives) > 0
+        ):
+            all_have_numbers = all(
+                d.directive_number and d.directive_number.strip()
+                for d in act_update.directives
+            )
+            if all_have_numbers:
+                needs_directive_number = False
+        if needs_service_note and "service_note" in sent_fields and act_update.service_note is not None:
+            if act_update.service_note.strip():
+                needs_service_note = False
+
+        if needs_created_date != current_act.needs_created_date:
+            _add("needs_created_date", needs_created_date)
+        if needs_directive_number != current_act.needs_directive_number:
+            _add("needs_directive_number", needs_directive_number)
+        if needs_service_note != current_act.needs_service_note:
+            _add("needs_service_note", needs_service_note)
+
+        _add("last_edited_by", username)
+        updates.append("last_edited_at = CURRENT_TIMESTAMP")
+
+        return updates, values
+
+    async def _sync_team_and_directives(
+        self,
+        act_id: int,
+        audit_act_id: str,
+        act_update: ActUpdate,
+        tree_data,
+    ) -> None:
+        """Замена команды аудита и поручений."""
+        if act_update.audit_team is not None:
+            await self._crud.replace_team_members(
+                act_id, audit_act_id, act_update.audit_team
+            )
+
+        if act_update.directives is not None:
+            audit_point_map = (
+                ActDirectivesValidator.build_audit_point_map(tree_data)
+                if tree_data
+                else {}
+            )
+            await self._crud.replace_directives(
+                act_id, audit_act_id, act_update.directives, audit_point_map
+            )
+
+    async def _log_metadata_changes(
+        self,
+        act_id: int,
+        username: str,
+        act_update: ActUpdate,
+        current_act: ActResponse,
+        sent_fields: set[str],
+    ) -> None:
+        """Логирование изменений метаданных в аудит-лог."""
+        changes = {}
+        field_mapping = {
+            "km_number": (current_act.km_number, act_update.km_number),
+            "inspection_name": (current_act.inspection_name, act_update.inspection_name),
+            "city": (current_act.city, act_update.city),
+            "created_date": (current_act.created_date, act_update.created_date),
+            "order_number": (current_act.order_number, act_update.order_number),
+            "order_date": (current_act.order_date, act_update.order_date),
+            "inspection_start_date": (current_act.inspection_start_date, act_update.inspection_start_date),
+            "inspection_end_date": (current_act.inspection_end_date, act_update.inspection_end_date),
+            "is_process_based": (current_act.is_process_based, act_update.is_process_based),
+            "service_note": (current_act.service_note, act_update.service_note),
+        }
+        for field_name in sent_fields:
+            if field_name in field_mapping:
+                old_val, new_val = field_mapping[field_name]
+                if str(old_val) != str(new_val):
+                    changes[field_name] = {
+                        "old": str(old_val) if old_val is not None else None,
+                        "new": str(new_val) if new_val is not None else None,
+                    }
+
+        details = {"changes": changes}
+        if act_update.audit_team is not None:
+            details["audit_team_replaced"] = True
+        if act_update.directives is not None:
+            details["directives_replaced"] = True
+
+        await self._audit.log("update", username, act_id, details)
 
     # -------------------------------------------------------------------------
     # DUPLICATE ACT

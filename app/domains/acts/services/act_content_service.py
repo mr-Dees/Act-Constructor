@@ -9,7 +9,6 @@ import logging
 import asyncpg
 
 from app.core.config import Settings
-from app.core.settings_registry import get as get_domain_settings
 from app.domains.acts.exceptions import AccessDeniedError, ActValidationError
 from app.domains.acts.repositories.act_access import ActAccessRepository
 from app.domains.acts.repositories.act_crud import ActCrudRepository
@@ -33,6 +32,7 @@ class ActContentService:
         self,
         conn: asyncpg.Connection,
         settings: Settings,
+        acts_settings: ActsSettings,
         *,
         access: ActAccessRepository | None = None,
         lock: ActLockRepository | None = None,
@@ -42,6 +42,7 @@ class ActContentService:
     ):
         self.conn = conn
         self.settings = settings
+        self.acts_settings = acts_settings
         self._access = access or ActAccessRepository(conn)
         self._lock = lock or ActLockRepository(conn)
         self._crud = crud or ActCrudRepository(conn)
@@ -108,7 +109,6 @@ class ActContentService:
 
         # Создаём снэпшот версии только для manual/periodic
         if data.saveType in ("manual", "periodic"):
-            acts_cfg = get_domain_settings("acts", ActsSettings)
             await self._versions.create_version(
                 act_id=act_id,
                 username=username,
@@ -117,25 +117,22 @@ class ActContentService:
                 tables={tid: t.model_dump(mode="json") for tid, t in data.tables.items()},
                 textblocks={tid: t.model_dump(mode="json") for tid, t in data.textBlocks.items()},
                 violations={vid: v.model_dump(mode="json") for vid, v in data.violations.items()},
-                max_versions=acts_cfg.audit_log.max_content_versions,
+                max_versions=self.acts_settings.audit_log.max_content_versions,
             )
 
         return result
 
-    @staticmethod
-    def _validate_tree(data: ActDataSchema) -> None:
+    def _validate_tree(self, data: ActDataSchema) -> None:
         """Проверяет структуру дерева перед сохранением."""
         tree = data.tree
         if not tree:
             return
 
-        acts_cfg = get_domain_settings("acts", ActsSettings)
-
         # Проверка глубины
         depth = ActTreeUtils.calculate_tree_depth(tree)
-        if depth > acts_cfg.resource.max_tree_depth:
+        if depth > self.acts_settings.resource.max_tree_depth:
             raise ActValidationError(
-                f"Глубина дерева ({depth}) превышает максимум ({acts_cfg.resource.max_tree_depth})"
+                f"Глубина дерева ({depth}) превышает максимум ({self.acts_settings.resource.max_tree_depth})"
             )
 
         # Проверка наличия корневого узла

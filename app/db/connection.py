@@ -117,9 +117,12 @@ async def init_db(settings: Settings) -> None:
         if settings.database.type == "postgresql":
             _adapter = PostgreSQLAdapter()
 
-            dsn = (
-                f"postgresql://{settings.database.user}:{settings.database.password}"
-                f"@{settings.database.host}:{settings.database.port}/{settings.database.name}"
+            pool_kwargs = dict(
+                host=settings.database.host,
+                port=settings.database.port,
+                database=settings.database.name,
+                user=settings.database.user,
+                password=settings.database.password,
             )
 
             logger.info(
@@ -148,9 +151,11 @@ async def init_db(settings: Settings) -> None:
                     f"Не удалось извлечь username для Greenplum: {username}"
                 )
 
-            dsn = (
-                f"postgresql://{username_digits}"
-                f"@{settings.database.gp.host}:{settings.database.gp.port}/{settings.database.gp.database}"
+            pool_kwargs = dict(
+                host=settings.database.gp.host,
+                port=settings.database.gp.port,
+                database=settings.database.gp.database,
+                user=username_digits,
             )
 
             logger.info(
@@ -165,7 +170,7 @@ async def init_db(settings: Settings) -> None:
         # Создаем пул подключений
         try:
             _pool = await asyncpg.create_pool(
-                dsn,
+                **pool_kwargs,
                 min_size=settings.database.pool_min_size,
                 max_size=settings.database.pool_max_size,
                 command_timeout=settings.database.command_timeout

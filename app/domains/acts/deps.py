@@ -49,7 +49,7 @@ async def get_content_service(
 ) -> AsyncGenerator[ActContentService, None]:
     """Создает ActContentService с подключением из пула."""
     async with get_db() as conn:
-        yield ActContentService(conn=conn, settings=settings)
+        yield ActContentService(conn=conn, settings=settings, acts_settings=_get_acts_settings())
 
 
 async def get_invoice_service(

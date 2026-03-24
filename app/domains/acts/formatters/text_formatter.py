@@ -5,7 +5,6 @@
 """
 
 from app.core.config import Settings
-from app.core.settings_registry import get as get_domain_settings
 from app.domains.acts.settings import ActsSettings
 from app.formatters.base_formatter import BaseFormatter
 from app.formatters.utils import HTMLUtils, TableUtils, FormattingUtils
@@ -19,17 +18,17 @@ class TextFormatter(BaseFormatter):
     визуально приятного текстового представления с таблицами.
     """
 
-    def __init__(self, settings: Settings):
+    def __init__(self, settings: Settings, acts_settings: ActsSettings):
         """
         Инициализация форматера с настройками.
 
         Args:
             settings: Глобальные настройки приложения
+            acts_settings: Доменные настройки актов
         """
         self.settings = settings
-        acts_cfg = get_domain_settings("acts", ActsSettings)
-        self.HEADER_WIDTH = acts_cfg.formatting.text_header_width
-        self.INDENT_SIZE = acts_cfg.formatting.text_indent_size
+        self.HEADER_WIDTH = acts_settings.formatting.text_header_width
+        self.INDENT_SIZE = acts_settings.formatting.text_indent_size
 
     def format(self, data: dict) -> str:
         """

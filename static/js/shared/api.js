@@ -131,7 +131,7 @@ class APIClient {
         try {
             // Передаём act_id для привязки файла к контролю доступа
             const actId = new URLSearchParams(window.location.search).get('act_id');
-            let url = `/api/v1/acts/export/save_act?fmt=${format}`;
+            let url = `/api/v1/acts/export/save-act?fmt=${format}`;
             if (actId) {
                 url += `&act_id=${encodeURIComponent(actId)}`;
             }

@@ -121,7 +121,7 @@ async def send_message(
         request.history = request.history[-settings.chat.max_history_length:]
 
     # Fallback: если API не настроен
-    if not settings.chat.api_base or not settings.chat.api_key:
+    if not settings.chat.api_base or not settings.chat.api_key.get_secret_value():
         return _fallback_response(request)
 
     try:
@@ -130,7 +130,7 @@ async def send_message(
         logger.warning("Пакет openai не установлен, используется заглушка")
         return _fallback_response(request)
 
-    client = _get_openai_client(settings.chat.api_base, settings.chat.api_key)
+    client = _get_openai_client(settings.chat.api_base, settings.chat.api_key.get_secret_value())
 
     # Сбор tools: фильтрация по доменам или все
     if request.domains:
@@ -213,7 +213,7 @@ async def send_message(
     except Exception as exc:
         logger.exception("Ошибка вызова LLM API")
         return ChatResponse(
-            response=f"Ошибка связи с AI-сервисом: {exc}",
+            response="Временная ошибка AI-сервиса. Попробуйте позже.",
             status="error",
         )
 

@@ -7,8 +7,7 @@ API эндпоинты для управления актами.
 from fastapi import APIRouter, Depends
 
 from app.api.v1.deps.auth_deps import get_username
-from app.core.settings_registry import get as get_domain_settings
-from app.domains.acts.deps import get_crud_service, get_lock_service
+from app.domains.acts.deps import get_crud_service, get_lock_service, _get_acts_settings
 from app.domains.acts.schemas.act_metadata import ActCreate, ActUpdate, ActListItem, ActResponse, AuditPointIdsRequest
 from app.domains.acts.schemas.act_responses import (
     LockConfigResponse,
@@ -74,10 +73,10 @@ async def create_act(
 
 
 @router.get("/config/lock", response_model=LockConfigResponse)
-async def get_lock_config():
+async def get_lock_config(
+        acts_cfg: ActsSettings = Depends(_get_acts_settings),
+):
     """Получает настройки блокировок для фронтенда."""
-    acts_cfg = get_domain_settings("acts", ActsSettings)
-
     return {
         "lockDurationMinutes": acts_cfg.lock.duration_minutes,
         "inactivityTimeoutMinutes": acts_cfg.lock.inactivity_timeout_minutes,
@@ -88,10 +87,10 @@ async def get_lock_config():
 
 
 @router.get("/config/invoice", response_model=InvoiceConfigResponse)
-async def get_invoice_config():
+async def get_invoice_config(
+        acts_cfg: ActsSettings = Depends(_get_acts_settings),
+):
     """Получает настройки схем для фактур (для фронтенда)."""
-    acts_cfg = get_domain_settings("acts", ActsSettings)
-
     return {
         "hiveSchema": acts_cfg.invoice.hive_schema,
         "gpSchema": acts_cfg.invoice.gp_schema,

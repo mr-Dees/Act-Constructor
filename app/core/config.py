@@ -13,7 +13,7 @@ from logging.handlers import RotatingFileHandler
 from pathlib import Path
 from typing import ClassVar, Literal
 
-from pydantic import BaseModel, Field, field_validator, model_validator
+from pydantic import BaseModel, Field, SecretStr, field_validator, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 def setup_logging(log_level: str = "INFO") -> logging.Logger:
@@ -130,7 +130,7 @@ class ChatSettings(BaseModel):
     """Настройки AI-чата (OpenAI-совместимый API)."""
     model: str = "gpt-4o"
     api_base: str = ""
-    api_key: str = ""
+    api_key: SecretStr = SecretStr("")
     max_tool_rounds: int = 5
     temperature: float = 0.1
     tool_execution_timeout: int = 30

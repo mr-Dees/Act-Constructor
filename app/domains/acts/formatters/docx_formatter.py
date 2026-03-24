@@ -22,7 +22,6 @@ from docx.oxml.ns import qn
 from docx.shared import Inches, Pt
 
 from app.core.config import Settings
-from app.core.settings_registry import get as get_domain_settings
 from app.domains.acts.settings import ActsSettings
 from app.domains.acts.exceptions import ActValidationError
 from app.formatters.base_formatter import BaseFormatter
@@ -432,18 +431,18 @@ class DocxFormatter(BaseFormatter):
     и нарушения.
     """
 
-    def __init__(self, settings: Settings):
+    def __init__(self, settings: Settings, acts_settings: ActsSettings):
         """
         Инициализация форматера с настройками.
 
         Args:
             settings: Глобальные настройки приложения
+            acts_settings: Доменные настройки актов
         """
         self.settings = settings
 
         # Загружаем константы из доменных настроек
-        acts_cfg = get_domain_settings("acts", ActsSettings)
-        fmt = acts_cfg.formatting
+        fmt = acts_settings.formatting
         self.MAX_HEADING_LEVEL = fmt.docx_max_heading_level
         self.DEFAULT_IMAGE_WIDTH = Inches(fmt.docx_image_width)
         self.CAPTION_FONT_SIZE = Pt(fmt.docx_caption_font_size)

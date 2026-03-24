@@ -6,7 +6,6 @@
 """
 
 from app.core.config import Settings
-from app.core.settings_registry import get as get_domain_settings
 from app.domains.acts.settings import ActsSettings
 from app.formatters.base_formatter import BaseFormatter
 from app.formatters.utils import HTMLUtils, TableUtils, FormattingUtils
@@ -20,16 +19,16 @@ class MarkdownFormatter(BaseFormatter):
     утилитарные классы для специфичных задач.
     """
 
-    def __init__(self, settings: Settings):
+    def __init__(self, settings: Settings, acts_settings: ActsSettings):
         """
         Инициализация форматера с настройками.
 
         Args:
             settings: Глобальные настройки приложения
+            acts_settings: Доменные настройки актов
         """
         self.settings = settings
-        acts_cfg = get_domain_settings("acts", ActsSettings)
-        self.MAX_HEADING_LEVEL = acts_cfg.formatting.markdown_max_heading_level
+        self.MAX_HEADING_LEVEL = acts_settings.formatting.markdown_max_heading_level
 
     def format(self, data: dict) -> str:
         """

@@ -20,6 +20,7 @@ from app.domains.acts.formatters.markdown_formatter import MarkdownFormatter
 from app.domains.acts.formatters.text_formatter import TextFormatter
 from app.domains.acts.schemas.act_content import ActSaveResponse
 from app.domains.acts.services.storage_service import StorageService
+from app.domains.acts.settings import ActsSettings
 
 logger = logging.getLogger("act_constructor.service.export")
 
@@ -37,22 +38,23 @@ class ExportService:
     ThreadPoolExecutor для неблокирующих операций.
     """
 
-    def __init__(self, storage: StorageService, settings: Settings):
+    def __init__(self, storage: StorageService, settings: Settings, acts_settings: ActsSettings):
         """
         Инициализация сервиса с форматерами и хранилищем.
 
         Args:
             storage: Сервис хранения файлов (dependency injection)
             settings: Настройки приложения (dependency injection)
+            acts_settings: Доменные настройки актов (dependency injection)
         """
         self.storage = storage
         self.settings = settings
 
         # Кэшируем экземпляры форматеров (они stateless и thread-safe)
         self._formatters = {
-            'txt': TextFormatter(settings),
-            'md': MarkdownFormatter(settings),
-            'docx': DocxFormatter(settings)
+            'txt': TextFormatter(settings, acts_settings),
+            'md': MarkdownFormatter(settings, acts_settings),
+            'docx': DocxFormatter(settings, acts_settings)
         }
         logger.debug("ExportService инициализирован с кэшированными форматерами")
 

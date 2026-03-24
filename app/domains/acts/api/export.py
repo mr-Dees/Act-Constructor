@@ -15,8 +15,8 @@ from fastapi.responses import FileResponse
 from app.api.v1.deps.auth_deps import get_username
 from app.core.config import get_settings, Settings
 from app.core.exceptions import AppError
-from app.core.settings_registry import get as get_domain_settings
 from app.db.connection import get_db
+from app.domains.acts.deps import _get_acts_settings
 from app.domains.acts.repositories.act_access import ActAccessRepository
 from app.domains.acts.repositories.act_audit_log import ActAuditLogRepository
 from app.domains.acts.settings import ActsSettings
@@ -36,13 +36,14 @@ def get_storage_service(settings: Settings = Depends(get_settings)) -> StorageSe
 
 def get_act_service(
         storage: StorageService = Depends(get_storage_service),
-        settings: Settings = Depends(get_settings)
+        settings: Settings = Depends(get_settings),
+        acts_settings: ActsSettings = Depends(_get_acts_settings),
 ) -> ExportService:
     """Создает экземпляр ExportService для dependency injection."""
-    return ExportService(storage=storage, settings=settings)
+    return ExportService(storage=storage, settings=settings, acts_settings=acts_settings)
 
 
-@router.post("/save_act", response_model=ActSaveResponse)
+@router.post("/save-act", response_model=ActSaveResponse)
 async def save_act(
         data: ActDataSchema,
         fmt: Literal["txt", "md", "docx"] = Query(
@@ -56,7 +57,8 @@ async def save_act(
         username: str = Depends(get_username),
         act_service: ExportService = Depends(get_act_service),
         storage: StorageService = Depends(get_storage_service),
-        settings: Settings = Depends(get_settings)
+        settings: Settings = Depends(get_settings),
+        acts_cfg: ActsSettings = Depends(_get_acts_settings),
 ) -> ActSaveResponse:
     """
     Сохраняет структуру акта в указанном формате.
@@ -81,7 +83,6 @@ async def save_act(
         logger.info(f"Запрос на сохранение акта в формате {fmt}")
 
         # Валидация глубины дерева (защита от рекурсии)
-        acts_cfg = get_domain_settings("acts", ActsSettings)
         tree_depth = ActTreeUtils.calculate_tree_depth(data.tree)
         if tree_depth > acts_cfg.resource.max_tree_depth:
             logger.warning(f"Превышена максимальная глубина дерева: {tree_depth}")
@@ -152,7 +153,8 @@ async def download_act(
         filename: str,
         username: str = Depends(get_username),
         storage: StorageService = Depends(get_storage_service),
-        settings: Settings = Depends(get_settings)
+        settings: Settings = Depends(get_settings),
+        acts_cfg: ActsSettings = Depends(_get_acts_settings),
 ) -> FileResponse:
     """
     Скачивает сохраненный файл акта.
@@ -166,6 +168,7 @@ async def download_act(
         username: Имя пользователя (из авторизации)
         storage: Сервис хранения (injected)
         settings: Настройки приложения (injected)
+        acts_cfg: Доменные настройки актов (injected)
 
     Returns:
         Файл для скачивания с корректным MIME-типом
@@ -178,7 +181,6 @@ async def download_act(
     # В multiprocessing каждый worker имеет свой event loop и свой
     # semaphore.
     if not hasattr(download_act, '_semaphore'):
-        acts_cfg = get_domain_settings("acts", ActsSettings)
         download_act._semaphore = asyncio.Semaphore(acts_cfg.resource.max_concurrent_file_operations)
         logger.info(f"File semaphore создан для worker: {acts_cfg.resource.max_concurrent_file_operations}")
 
