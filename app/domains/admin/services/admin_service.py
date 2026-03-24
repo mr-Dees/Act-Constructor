@@ -10,7 +10,7 @@ from app.domains.admin.exceptions import RoleNotFoundError, UserNotFoundError
 from app.domains.admin.repositories.admin_repository import AdminRepository
 from app.domains.admin.settings import AdminSettings
 
-logger = logging.getLogger("act_constructor.domains.admin.service")
+logger = logging.getLogger("audit_workstation.domains.admin.service")
 
 
 class AdminService:

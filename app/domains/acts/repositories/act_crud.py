@@ -18,7 +18,7 @@ from app.domains.acts.schemas.act_metadata import (
     ActDirective,
 )
 
-logger = logging.getLogger("act_constructor.db.repository.crud")
+logger = logging.getLogger("audit_workstation.db.repository.crud")
 
 
 class ActCrudRepository(BaseRepository):

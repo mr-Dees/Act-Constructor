@@ -6,7 +6,7 @@ from concurrent.futures import ThreadPoolExecutor
 
 from fastapi import FastAPI
 
-logger = logging.getLogger("act_constructor.domains.acts.lifecycle")
+logger = logging.getLogger("audit_workstation.domains.acts.lifecycle")
 
 _executor: ThreadPoolExecutor | None = None
 

@@ -79,7 +79,7 @@ async def lifespan(app: FastAPI):
     Управление жизненным циклом приложения.
     """
     # Startup
-    logger.info("Запуск приложения Act Constructor")
+    logger.info("Запуск приложения Audit Workstation")
     settings.ensure_directories()
 
     # discover_domains() вызывается повторно (первый раз — в create_app для роутеров).
@@ -144,7 +144,7 @@ async def lifespan(app: FastAPI):
     yield
 
     # Shutdown
-    logger.info("Завершение работы приложения Act Constructor")
+    logger.info("Завершение работы приложения Audit Workstation")
 
     # Завершение доменов в обратном порядке (только успешно стартовавшие)
     for d in reversed(started):
@@ -170,7 +170,7 @@ def create_app() -> FastAPI:
     app = FastAPI(
         title=settings.app_title,
         version=settings.app_version,
-        description="API для создания и управления актами",
+        description="Рабочая станция аудитора — акты, AI-ассистент, аналитика, интеграции",
         lifespan=lifespan,
         root_path=root_path
     )

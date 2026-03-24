@@ -27,7 +27,7 @@ from app.domains.acts.exceptions import ActValidationError
 from app.formatters.base_formatter import BaseFormatter
 from app.formatters.utils import HTMLUtils
 
-logger = logging.getLogger("act_constructor.formatter.docx")
+logger = logging.getLogger("audit_workstation.formatter.docx")
 
 
 class TimeoutError(Exception):

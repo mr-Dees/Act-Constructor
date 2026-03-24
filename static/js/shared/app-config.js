@@ -568,10 +568,10 @@ class AppConfig {
      */
     static localStorage = {
         // Ключ для хранения состояния акта
-        stateKey: 'act_constructor_state',
+        stateKey: 'audit_workstation_state',
 
         // Ключ для хранения временной метки последнего сохранения
-        timestampKey: 'act_constructor_timestamp',
+        timestampKey: 'audit_workstation_timestamp',
 
         // Дебаунс для автосохранения (мс) - 3 секунды для меньшей частоты
         autoSaveDebounce: 3000,

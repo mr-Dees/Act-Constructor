@@ -22,7 +22,7 @@ from app.domains.acts.services.access_guard import AccessGuard
 from app.domains.acts.settings import ActsSettings
 from app.domains.acts.utils import ActTreeUtils
 
-logger = logging.getLogger("act_constructor.service.acts.content")
+logger = logging.getLogger("audit_workstation.service.acts.content")
 
 
 class ActContentService:

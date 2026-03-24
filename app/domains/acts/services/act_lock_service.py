@@ -16,7 +16,7 @@ from app.domains.acts.repositories.act_lock import ActLockRepository
 from app.domains.acts.services.access_guard import AccessGuard
 from app.domains.acts.settings import ActsSettings
 
-logger = logging.getLogger("act_constructor.service.acts.lock")
+logger = logging.getLogger("audit_workstation.service.acts.lock")
 
 
 class ActLockService:

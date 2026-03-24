@@ -19,7 +19,7 @@ from app.domains.acts.schemas.act_responses import RestoreVersionResponse
 from app.schemas.errors import ErrorDetail
 from app.domains.acts.services.audit_log_service import AuditLogService
 
-logger = logging.getLogger("act_constructor.api.audit_log")
+logger = logging.getLogger("audit_workstation.api.audit_log")
 router = APIRouter()
 
 

@@ -15,7 +15,7 @@ from app.api.v1.deps.auth_deps import get_username
 from app.core.config import get_settings, Settings
 from app.schemas.errors import ErrorDetail
 
-logger = logging.getLogger("act_constructor.api.system")
+logger = logging.getLogger("audit_workstation.api.system")
 router = APIRouter()
 
 

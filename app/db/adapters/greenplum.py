@@ -13,7 +13,7 @@ import asyncpg
 
 from app.db.adapters.base import DatabaseAdapter
 
-logger = logging.getLogger("act_constructor.db.adapters.greenplum")
+logger = logging.getLogger("audit_workstation.db.adapters.greenplum")
 
 
 class GreenplumAdapter(DatabaseAdapter):

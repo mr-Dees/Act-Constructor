@@ -12,7 +12,7 @@ import logging
 from dataclasses import dataclass, field
 from typing import Any, Awaitable, Callable
 
-logger = logging.getLogger("act_constructor.core.chat_tools")
+logger = logging.getLogger("audit_workstation.core.chat_tools")
 
 
 @dataclass(frozen=True)

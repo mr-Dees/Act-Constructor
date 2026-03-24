@@ -11,7 +11,7 @@ import asyncpg
 
 from app.db.repositories.base import BaseRepository
 
-logger = logging.getLogger("act_constructor.db.repository.lock")
+logger = logging.getLogger("audit_workstation.db.repository.lock")
 
 
 class ActLockRepository(BaseRepository):

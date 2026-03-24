@@ -27,7 +27,7 @@ def setup_logging(log_level: str = "INFO") -> logging.Logger:
     Returns:
         Настроенный logger
     """
-    logger = logging.getLogger("act_constructor")
+    logger = logging.getLogger("audit_workstation")
 
     # Проверяем что логирование еще не настроено.
     # Защита от повторной настройки в workers.
@@ -109,7 +109,7 @@ class DatabaseSettings(BaseModel):
     type: Literal["postgresql", "greenplum"] = Field(default="postgresql")
     host: str = Field(default="localhost")
     port: int = Field(default=5432, ge=1, le=65535)
-    name: str = Field(default="act_constructor")
+    name: str = Field(default="audit_workstation")
     user: str = Field(default="postgres")
     password: str = Field(default="")
     pool_min_size: int = Field(default=2, ge=1)
@@ -135,9 +135,9 @@ class ChatSettings(BaseModel):
     temperature: float = 0.1
     tool_execution_timeout: int = 30
     system_prompt: str = (
-        "Ты — AI-ассистент системы управления актами проверок. "
+        "Ты — AI-ассистент рабочей станции аудитора Audit Workstation. "
         "Отвечай на русском языке. Используй доступные инструменты "
-        "для поиска и извлечения данных из актов."
+        "для поиска, анализа и работы с данными."
     )
     max_history_length: int = 50
     max_message_content_length: int = 10000
@@ -155,7 +155,7 @@ class Settings(BaseSettings):
     """
 
     # Метаданные приложения
-    app_title: str = "Act Constructor"
+    app_title: str = "Audit Workstation"
     app_version: str = "1.0.0"
 
     # Аутентификация

@@ -12,7 +12,7 @@ from pydantic import BaseModel
 from app.core.config import get_settings
 from app.schemas.errors import ErrorDetail
 
-logger = logging.getLogger("act_constructor.api.auth")
+logger = logging.getLogger("audit_workstation.api.auth")
 router = APIRouter()
 
 

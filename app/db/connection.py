@@ -16,7 +16,7 @@ from app.db.adapters.base import DatabaseAdapter
 from app.db.adapters.greenplum import GreenplumAdapter
 from app.db.adapters.postgresql import PostgreSQLAdapter
 
-logger = logging.getLogger("act_constructor.db.connect")
+logger = logging.getLogger("audit_workstation.db.connect")
 
 _pool: Pool | None = None
 _adapter: DatabaseAdapter | None = None

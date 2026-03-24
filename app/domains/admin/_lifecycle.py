@@ -4,7 +4,7 @@ import logging
 
 from fastapi import FastAPI
 
-logger = logging.getLogger("act_constructor.domains.admin.lifecycle")
+logger = logging.getLogger("audit_workstation.domains.admin.lifecycle")
 
 
 async def on_startup(app: FastAPI) -> None:

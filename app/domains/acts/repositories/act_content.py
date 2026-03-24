@@ -18,7 +18,7 @@ from app.db.repositories.base import BaseRepository
 from app.domains.acts.utils import ActDirectivesValidator, ActTreeUtils
 from app.domains.acts.schemas.act_content import ActDataSchema
 
-logger = logging.getLogger("act_constructor.db.repository.content")
+logger = logging.getLogger("audit_workstation.db.repository.content")
 
 
 class ActContentRepository(BaseRepository):

@@ -22,7 +22,7 @@ from app.core.config import get_settings
 from app.schemas.chat import ChatRequest, ChatResponse
 from app.schemas.errors import ErrorDetail
 
-logger = logging.getLogger("act_constructor.chat")
+logger = logging.getLogger("audit_workstation.chat")
 
 router = APIRouter()
 

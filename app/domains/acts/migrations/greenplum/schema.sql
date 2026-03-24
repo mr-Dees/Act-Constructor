@@ -1,4 +1,4 @@
--- Схема базы данных для Act Constructor (Greenplum)
+-- Схема базы данных для Audit Workstation (Greenplum)
 -- Схема: {SCHEMA}
 -- Префикс таблиц: {PREFIX}
 

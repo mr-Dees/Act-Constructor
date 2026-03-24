@@ -5,7 +5,7 @@ import logging
 from app.domains.acts.schemas.act_content import ActDataSchema
 from app.domains.acts.repositories.act_content import ActContentRepository
 
-logger = logging.getLogger("act_constructor.services.audit_log")
+logger = logging.getLogger("audit_workstation.services.audit_log")
 
 
 class AuditLogService:

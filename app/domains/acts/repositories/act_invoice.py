@@ -11,7 +11,7 @@ from app.domains.acts.exceptions import InvoiceError
 from app.db.repositories.base import BaseRepository
 from app.db.utils.sql_utils import quote_ident
 
-logger = logging.getLogger("act_constructor.db.repository.invoice")
+logger = logging.getLogger("audit_workstation.db.repository.invoice")
 
 
 class ActInvoiceRepository(BaseRepository):

@@ -10,7 +10,7 @@ from app.db.adapters.greenplum import GreenplumAdapter
 from app.db.repositories.base import BaseRepository
 from app.domains.admin.settings import AdminSettings
 
-logger = logging.getLogger("act_constructor.db.repository.admin")
+logger = logging.getLogger("audit_workstation.db.repository.admin")
 
 
 class AdminRepository(BaseRepository):

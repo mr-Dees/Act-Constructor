@@ -15,7 +15,7 @@ from fastapi.responses import HTMLResponse
 from app.core.navigation import get_knowledge_bases_as_dicts, get_nav_items_for_user, get_nav_items_grouped
 from app.core.templating import get_templates
 
-logger = logging.getLogger("act_constructor.routes.portal")
+logger = logging.getLogger("audit_workstation.routes.portal")
 
 templates = get_templates()
 

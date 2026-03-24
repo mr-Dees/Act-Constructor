@@ -31,7 +31,7 @@ from app.domains.acts.repositories.act_access import ActAccessRepository
 from app.domains.acts.repositories.act_audit_log import ActAuditLogRepository
 from app.domains.acts.services.access_guard import AccessGuard
 
-logger = logging.getLogger("act_constructor.service.acts.crud")
+logger = logging.getLogger("audit_workstation.service.acts.crud")
 
 PLACEHOLDER_USERNAME = "00000000"
 PLACEHOLDER_FULL_NAME = "Требуется назначить"

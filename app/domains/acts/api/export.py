@@ -26,7 +26,7 @@ from app.domains.acts.services.export_service import ExportService
 from app.domains.acts.services.storage_service import StorageService
 from app.schemas.errors import ErrorDetail
 
-logger = logging.getLogger("act_constructor.api.export")
+logger = logging.getLogger("audit_workstation.api.export")
 router = APIRouter()
 
 _download_semaphore: asyncio.Semaphore | None = None

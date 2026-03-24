@@ -15,7 +15,7 @@ from fastapi import Depends, FastAPI
 
 from app.core.domain import DomainDescriptor
 
-logger = logging.getLogger("act_constructor.core.domain_registry")
+logger = logging.getLogger("audit_workstation.core.domain_registry")
 
 _domains: list[DomainDescriptor] = []
 _registered_app_ids: set[int] = set()

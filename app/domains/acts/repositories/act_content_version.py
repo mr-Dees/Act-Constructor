@@ -12,7 +12,7 @@ import asyncpg
 
 from app.db.repositories.base import BaseRepository
 
-logger = logging.getLogger("act_constructor.db.repository.content_version")
+logger = logging.getLogger("audit_workstation.db.repository.content_version")
 
 
 class ActContentVersionRepository(BaseRepository):
