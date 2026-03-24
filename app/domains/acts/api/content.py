@@ -9,6 +9,7 @@ from fastapi import APIRouter, Depends
 from app.api.v1.deps.auth_deps import get_username
 from app.domains.acts.deps import get_content_service, get_invoice_service
 from app.domains.acts.schemas.act_content import ActDataSchema
+from app.domains.acts.schemas.act_responses import SaveContentResponse
 from app.domains.acts.services.act_content_service import ActContentService
 from app.domains.acts.services.act_invoice_service import ActInvoiceService
 
@@ -25,7 +26,7 @@ async def get_act_content(
     return await service.get_content(act_id, username)
 
 
-@router.put("/{act_id}/content")
+@router.put("/{act_id}/content", response_model=SaveContentResponse)
 async def save_act_content(
     act_id: int,
     data: ActDataSchema,

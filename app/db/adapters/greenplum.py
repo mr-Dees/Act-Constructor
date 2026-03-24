@@ -6,6 +6,7 @@
 
 import logging
 import re
+from collections.abc import Callable
 from pathlib import Path
 
 import asyncpg
@@ -33,7 +34,7 @@ class GreenplumAdapter(DatabaseAdapter):
             f"schema={schema}, prefix={table_prefix}"
         )
 
-    async def create_tables(self, conn: asyncpg.Connection, schema_paths: list[Path] | None = None, substitutions: dict[str, str] | None = None) -> None:
+    async def create_tables(self, conn: asyncpg.Connection, schema_paths: list[Path] | None = None, substitutions: dict[str, str | Callable[[], str]] | None = None) -> None:
         """
         Создает таблицы из списка schema.sql для Greenplum.
 
@@ -57,7 +58,8 @@ class GreenplumAdapter(DatabaseAdapter):
             # Подстановка плейсхолдеров справочных таблиц
             if substitutions:
                 for placeholder, value in substitutions.items():
-                    schema_sql = schema_sql.replace(placeholder, value)
+                    resolved = value() if callable(value) else value
+                    schema_sql = schema_sql.replace(placeholder, resolved)
 
             # Пропускаем файлы без реальных SQL-операторов
             if not re.sub(r'--[^\n]*', '', schema_sql).strip():

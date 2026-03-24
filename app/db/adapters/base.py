@@ -5,6 +5,7 @@
 """
 
 from abc import ABC, abstractmethod
+from collections.abc import Callable
 from pathlib import Path
 
 import asyncpg
@@ -23,7 +24,7 @@ class DatabaseAdapter(ABC):
         self,
         conn: asyncpg.Connection,
         schema_paths: list[Path],
-        substitutions: dict[str, str] | None = None,
+        substitutions: dict[str, str | Callable[[], str]] | None = None,
     ) -> None:
         """
         Создает таблицы в БД из списка SQL-схем.

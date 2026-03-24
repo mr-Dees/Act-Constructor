@@ -8,6 +8,7 @@ Middleware для FastAPI приложения.
 """
 
 import asyncio
+import json
 from datetime import datetime, timedelta
 
 from cachetools import TTLCache
@@ -136,52 +137,90 @@ class RateLimitMiddleware(BaseHTTPMiddleware):
         return response
 
 
-class RequestSizeLimitMiddleware(BaseHTTPMiddleware):
+# Используется raw ASGI middleware вместо BaseHTTPMiddleware, т.к. BaseHTTPMiddleware
+# буферизует тело запроса целиком до вызова dispatch(), что делает невозможным
+# потоковый контроль размера при chunked transfer encoding (без Content-Length).
+# Остальные middleware (rate limit, HTTPS redirect) не работают с телом запроса
+# и безопасно используют BaseHTTPMiddleware.
+class RequestSizeLimitMiddleware:
     """
     Middleware для ограничения размера тела запроса.
 
     Предотвращает исчерпание памяти при отправке огромных JSON.
+    Raw ASGI middleware для поддержки chunked transfer encoding.
     """
 
     def __init__(self, app, max_size: int):
-        """
-        Инициализация middleware.
-
-        Args:
-            app: FastAPI приложение
-            max_size: Максимальный размер тела запроса в байтах
-        """
-        super().__init__(app)
+        self.app = app
         self.max_size = max_size
         logger.info(f"Request size limit установлен: {max_size / (1024 * 1024):.1f}MB")
 
-    async def dispatch(self, request: Request, call_next):
-        """
-        Проверяет размер тела запроса.
+    async def __call__(self, scope, receive, send):
+        if scope["type"] != "http":
+            await self.app(scope, receive, send)
+            return
 
-        Args:
-            request: HTTP запрос
-            call_next: Следующий middleware в цепочке
-
-        Returns:
-            HTTP ответ или 413 при превышении лимита
-        """
-        content_length = request.headers.get("content-length")
-
-        if content_length:
-            content_length = int(content_length)
+        # Fast path: проверка Content-Length до чтения тела
+        headers = dict(scope.get("headers", []))
+        content_length_raw = headers.get(b"content-length")
+        if content_length_raw:
+            try:
+                content_length = int(content_length_raw)
+            except (ValueError, TypeError):
+                content_length = 0
             if content_length > self.max_size:
+                client_host = self._get_client_host(scope)
                 logger.warning(
                     f"Отклонен запрос с размером {content_length / (1024 * 1024):.1f}MB "
-                    f"от {request.client.host if request.client else 'unknown'}"
+                    f"от {client_host}"
                 )
-                return JSONResponse(
-                    status_code=413,
-                    content={
-                        "detail": f"Размер запроса превышает лимит "
-                                  f"({self.max_size / (1024 * 1024):.1f}MB)"
-                    }
-                )
+                await self._send_413(send)
+                return
 
-        response = await call_next(request)
-        return response
+        # Streaming path: оборачиваем receive для контроля размера по чанкам
+        received_size = 0
+        rejected = False
+
+        async def receive_wrapper():
+            nonlocal received_size, rejected
+            message = await receive()
+            if message["type"] == "http.request" and not rejected:
+                received_size += len(message.get("body", b""))
+                if received_size > self.max_size:
+                    rejected = True
+                    client_host = self._get_client_host(scope)
+                    logger.warning(
+                        f"Отклонен chunked запрос с размером >{received_size / (1024 * 1024):.1f}MB "
+                        f"от {client_host}"
+                    )
+                    await self._send_413(send)
+                    return {"type": "http.disconnect"}
+            return message
+
+        # Блокируем send после отправки 413, чтобы app не отправил повторный ответ
+        async def send_wrapper(message):
+            if not rejected:
+                await send(message)
+
+        await self.app(scope, receive_wrapper, send_wrapper)
+
+    def _get_client_host(self, scope) -> str:
+        client = scope.get("client")
+        return client[0] if client else "unknown"
+
+    async def _send_413(self, send):
+        body = json.dumps(
+            {"detail": f"Размер запроса превышает лимит ({self.max_size / (1024 * 1024):.1f}MB)"}
+        ).encode("utf-8")
+        await send({
+            "type": "http.response.start",
+            "status": 413,
+            "headers": [
+                [b"content-type", b"application/json"],
+                [b"content-length", str(len(body)).encode()],
+            ],
+        })
+        await send({
+            "type": "http.response.body",
+            "body": body,
+        })

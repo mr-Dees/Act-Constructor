@@ -12,9 +12,8 @@ def _build_domain():
     from app.domains.admin.api import get_api_routers
     from app.domains.admin.routes import get_html_routers
     from app.domains.admin._lifecycle import on_startup
-    from app.domains.admin.settings import AdminSettings, UserDirectorySettings
-
-    admin_cfg = AdminSettings()
+    from app.core import settings_registry
+    from app.domains.admin.settings import AdminSettings
 
     return DomainDescriptor(
         name="admin",
@@ -23,6 +22,6 @@ def _build_domain():
         settings_class=AdminSettings,
         on_startup=on_startup,
         migration_substitutions={
-            "{REF_USER_TABLE}": admin_cfg.user_directory.table,
+            "{REF_USER_TABLE}": lambda: settings_registry.get("admin", AdminSettings).user_directory.table,
         },
     )

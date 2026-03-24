@@ -85,10 +85,13 @@ class ActContentRepository(BaseRepository):
             # Маппинг {node_id -> audit_point_id} обходом дерева
             audit_point_map = ActDirectivesValidator.build_audit_point_map(data.tree)
 
+            # Маппинг {node_id -> {number, label, parent_item_node_id}} за один обход
+            node_map = self._build_node_map(data.tree)
+
             await self._save_tree(act_id, data.tree)
-            await self._save_tables(act_id, audit_act_id, data, audit_point_map)
-            await self._save_textblocks(act_id, audit_act_id, data, audit_point_map)
-            await self._save_violations(act_id, audit_act_id, data, audit_point_map)
+            await self._save_tables(act_id, audit_act_id, data, audit_point_map, node_map)
+            await self._save_textblocks(act_id, audit_act_id, data, audit_point_map, node_map)
+            await self._save_violations(act_id, audit_act_id, data, audit_point_map, node_map)
             await self._sync_invoices(act_id, audit_act_id, data, audit_point_map)
             await self._sync_directives(act_id, audit_act_id, data, audit_point_map)
             await self._update_edit_timestamp(act_id, username)
@@ -191,6 +194,49 @@ class ActContentRepository(BaseRepository):
     # СОХРАНЕНИЕ
     # -------------------------------------------------------------------------
 
+    @staticmethod
+    def _build_node_map(tree: dict) -> dict[str, dict]:
+        """
+        Один обход дерева — собирает number, label и parent_item_node_id для каждого узла.
+
+        Returns:
+            Маппинг {node_id: {"number": str | None, "label": str | None,
+                               "parent_item_node_id": str | None}}
+        """
+        node_map: dict[str, dict] = {}
+        # Элементы стека: (node, parent_item_id)
+        stack: list[tuple[dict, str | None]] = [(tree, None)]
+
+        while stack:
+            node, parent_item_id = stack.pop()
+            node_id = node.get("id")
+            node_type = node.get("type", "item")
+
+            # Определяем current_item_id по логике find_parent_item_node_id
+            if node_type == "item" or node_type not in ("table", "textblock", "violation"):
+                current_item_id = node_id
+            else:
+                current_item_id = parent_item_id
+
+            # Для content-узлов parent_item_node_id = parent_item_id,
+            # для item-узлов = собственный id
+            if node_type in ("table", "textblock", "violation"):
+                resolved_parent = parent_item_id
+            else:
+                resolved_parent = node_id
+
+            if node_id:
+                node_map[node_id] = {
+                    "number": node.get("number"),
+                    "label": node.get("label"),
+                    "parent_item_node_id": resolved_parent,
+                }
+
+            for child in node.get("children", []):
+                stack.append((child, current_item_id))
+
+        return node_map
+
     async def _save_tree(self, act_id: int, tree: dict) -> None:
         """Обновляет дерево структуры акта."""
         await self.conn.execute(
@@ -205,40 +251,30 @@ class ActContentRepository(BaseRepository):
 
     async def _save_tables(
         self, act_id: int, audit_act_id: str | None,
-        data: ActDataSchema, audit_point_map: dict
+        data: ActDataSchema, audit_point_map: dict,
+        node_map: dict[str, dict]
     ) -> None:
-        """Пересоздаёт таблицы акта."""
+        """Пересоздаёт таблицы акта (batch INSERT через executemany)."""
         await self.conn.execute(
             f"DELETE FROM {self.tables} WHERE act_id = $1",
             act_id
         )
 
+        args: list[tuple] = []
         for table_id, table_data in data.tables.items():
             node_id = table_data.nodeId
-            node_number = ActTreeUtils.extract_node_number(data.tree, node_id)
-            node_label = ActTreeUtils.find_node_label(data.tree, node_id)
-
-            parent_node_id = ActTreeUtils.find_parent_item_node_id(data.tree, node_id)
+            info = node_map.get(node_id, {})
+            parent_node_id = info.get("parent_item_node_id")
             audit_point_id = audit_point_map.get(parent_node_id) if parent_node_id else None
 
-            await self.conn.execute(
-                f"""
-                INSERT INTO {self.tables} (
-                    act_id, audit_act_id, audit_point_id,
-                    table_id, node_id, node_number, table_label,
-                    grid_data, col_widths, is_protected, is_deletable,
-                    is_metrics_table, is_main_metrics_table,
-                    is_regular_risk_table, is_operational_risk_table
-                )
-                VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15)
-                """,
+            args.append((
                 act_id,
                 audit_act_id,
                 audit_point_id,
                 table_id,
                 node_id,
-                node_number,
-                node_label,
+                info.get("number"),
+                info.get("label"),
                 json.dumps([
                     [cell.model_dump() for cell in row]
                     for row in table_data.grid
@@ -249,27 +285,55 @@ class ActContentRepository(BaseRepository):
                 getattr(table_data, 'isMetricsTable', False),
                 getattr(table_data, 'isMainMetricsTable', False),
                 getattr(table_data, 'isRegularRiskTable', False),
-                getattr(table_data, 'isOperationalRiskTable', False)
+                getattr(table_data, 'isOperationalRiskTable', False),
+            ))
+
+        if args:
+            await self.conn.executemany(
+                f"""
+                INSERT INTO {self.tables} (
+                    act_id, audit_act_id, audit_point_id,
+                    table_id, node_id, node_number, table_label,
+                    grid_data, col_widths, is_protected, is_deletable,
+                    is_metrics_table, is_main_metrics_table,
+                    is_regular_risk_table, is_operational_risk_table
+                )
+                VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15)
+                """,
+                args,
             )
 
     async def _save_textblocks(
         self, act_id: int, audit_act_id: str | None,
-        data: ActDataSchema, audit_point_map: dict
+        data: ActDataSchema, audit_point_map: dict,
+        node_map: dict[str, dict]
     ) -> None:
-        """Пересоздаёт текстовые блоки акта."""
+        """Пересоздаёт текстовые блоки акта (batch INSERT через executemany)."""
         await self.conn.execute(
             f"DELETE FROM {self.textblocks} WHERE act_id = $1",
             act_id
         )
 
+        args: list[tuple] = []
         for tb_id, tb_data in data.textBlocks.items():
             node_id = tb_data.nodeId
-            node_number = ActTreeUtils.extract_node_number(data.tree, node_id)
-
-            parent_node_id = ActTreeUtils.find_parent_item_node_id(data.tree, node_id)
+            info = node_map.get(node_id, {})
+            parent_node_id = info.get("parent_item_node_id")
             audit_point_id = audit_point_map.get(parent_node_id) if parent_node_id else None
 
-            await self.conn.execute(
+            args.append((
+                act_id,
+                audit_act_id,
+                audit_point_id,
+                tb_id,
+                node_id,
+                info.get("number"),
+                tb_data.content,
+                json.dumps(tb_data.formatting.model_dump()),
+            ))
+
+        if args:
+            await self.conn.executemany(
                 f"""
                 INSERT INTO {self.textblocks} (
                     act_id, audit_act_id, audit_point_id,
@@ -277,34 +341,46 @@ class ActContentRepository(BaseRepository):
                 )
                 VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
                 """,
-                act_id,
-                audit_act_id,
-                audit_point_id,
-                tb_id,
-                node_id,
-                node_number,
-                tb_data.content,
-                json.dumps(tb_data.formatting.model_dump())
+                args,
             )
 
     async def _save_violations(
         self, act_id: int, audit_act_id: str | None,
-        data: ActDataSchema, audit_point_map: dict
+        data: ActDataSchema, audit_point_map: dict,
+        node_map: dict[str, dict]
     ) -> None:
-        """Пересоздаёт нарушения акта."""
+        """Пересоздаёт нарушения акта (batch INSERT через executemany)."""
         await self.conn.execute(
             f"DELETE FROM {self.violations} WHERE act_id = $1",
             act_id
         )
 
+        args: list[tuple] = []
         for v_id, v_data in data.violations.items():
             node_id = v_data.nodeId
-            node_number = ActTreeUtils.extract_node_number(data.tree, node_id)
-
-            parent_node_id = ActTreeUtils.find_parent_item_node_id(data.tree, node_id)
+            info = node_map.get(node_id, {})
+            parent_node_id = info.get("parent_item_node_id")
             audit_point_id = audit_point_map.get(parent_node_id) if parent_node_id else None
 
-            await self.conn.execute(
+            args.append((
+                act_id,
+                audit_act_id,
+                audit_point_id,
+                v_id,
+                node_id,
+                info.get("number"),
+                v_data.violated,
+                v_data.established,
+                json.dumps(v_data.descriptionList.model_dump()),
+                json.dumps(v_data.additionalContent.model_dump()),
+                json.dumps(v_data.reasons.model_dump()),
+                json.dumps(v_data.consequences.model_dump()),
+                json.dumps(v_data.responsible.model_dump()),
+                json.dumps(v_data.recommendations.model_dump()),
+            ))
+
+        if args:
+            await self.conn.executemany(
                 f"""
                 INSERT INTO {self.violations} (
                     act_id, audit_act_id, audit_point_id,
@@ -314,20 +390,7 @@ class ActContentRepository(BaseRepository):
                 )
                 VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14)
                 """,
-                act_id,
-                audit_act_id,
-                audit_point_id,
-                v_id,
-                node_id,
-                node_number,
-                v_data.violated,
-                v_data.established,
-                json.dumps(v_data.descriptionList.model_dump()),
-                json.dumps(v_data.additionalContent.model_dump()),
-                json.dumps(v_data.reasons.model_dump()),
-                json.dumps(v_data.consequences.model_dump()),
-                json.dumps(v_data.responsible.model_dump()),
-                json.dumps(v_data.recommendations.model_dump())
+                args,
             )
 
     async def _sync_invoices(

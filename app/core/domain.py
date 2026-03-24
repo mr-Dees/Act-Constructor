@@ -9,7 +9,8 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Awaitable, Callable
+from collections.abc import Callable
+from typing import Awaitable
 
 from fastapi import APIRouter, FastAPI
 from pydantic import BaseModel
@@ -59,4 +60,4 @@ class DomainDescriptor:
     nav_items: list[NavItem] = field(default_factory=list)
     knowledge_bases: list[KnowledgeBase] = field(default_factory=list)
     chat_system_prompt: str = ""
-    migration_substitutions: dict[str, str] = field(default_factory=dict)
+    migration_substitutions: dict[str, str | Callable[[], str]] = field(default_factory=dict)

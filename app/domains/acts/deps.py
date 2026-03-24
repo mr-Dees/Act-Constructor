@@ -60,7 +60,7 @@ async def get_invoice_service(
         yield ActInvoiceService(conn=conn, settings=settings, acts_settings=_get_acts_settings())
 
 
-async def get_audit_log_service() -> AsyncGenerator[tuple[AccessGuard, ActAuditLogRepository, ActContentVersionRepository], None]:
+async def get_audit_log_deps() -> AsyncGenerator[tuple[AccessGuard, ActAuditLogRepository, ActContentVersionRepository], None]:
     """Создает зависимости для аудит-лога: guard + репозитории."""
     async with get_db() as conn:
         access = ActAccessRepository(conn)
@@ -69,3 +69,16 @@ async def get_audit_log_service() -> AsyncGenerator[tuple[AccessGuard, ActAuditL
         audit_repo = ActAuditLogRepository(conn)
         versions_repo = ActContentVersionRepository(conn)
         yield guard, audit_repo, versions_repo
+
+
+async def get_audit_log_service() -> AsyncGenerator:
+    """Создает AuditLogService с подключением из пула."""
+    from app.domains.acts.services.audit_log_service import AuditLogService
+
+    async with get_db() as conn:
+        access = ActAccessRepository(conn)
+        lock = ActLockRepository(conn)
+        guard = AccessGuard(access, lock)
+        audit_repo = ActAuditLogRepository(conn)
+        versions_repo = ActContentVersionRepository(conn)
+        yield AuditLogService(guard, audit_repo, versions_repo, conn)

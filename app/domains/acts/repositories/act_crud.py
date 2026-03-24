@@ -521,8 +521,14 @@ class ActCrudRepository(BaseRepository):
             for row in rows
         ]
 
-    async def get_act_by_id(self, act_id: int) -> ActResponse:
-        """Получает полную информацию об акте по его ID."""
+    async def _fetch_act(self, act_id: int, *, for_update: bool = False) -> ActResponse:
+        """Загружает акт с участниками и поручениями.
+
+        Args:
+            act_id: ID акта.
+            for_update: если True, добавляет FOR UPDATE к SELECT акта.
+        """
+        lock_clause = "FOR UPDATE" if for_update else ""
         act_row = await self.conn.fetchrow(
             f"""
             SELECT
@@ -538,6 +544,7 @@ class ActCrudRepository(BaseRepository):
                 last_edited_by, last_edited_at
             FROM {self.acts}
             WHERE id = $1
+            {lock_clause}
             """,
             act_id,
         )
@@ -612,99 +619,14 @@ class ActCrudRepository(BaseRepository):
             last_edited_by=act_row["last_edited_by"],
             last_edited_at=act_row["last_edited_at"],
         )
+
+    async def get_act_by_id(self, act_id: int) -> ActResponse:
+        """Получает полную информацию об акте по его ID."""
+        return await self._fetch_act(act_id)
 
     async def get_act_by_id_for_update(self, act_id: int) -> ActResponse:
         """Получает акт с блокировкой строки (SELECT ... FOR UPDATE)."""
-        act_row = await self.conn.fetchrow(
-            f"""
-            SELECT
-                id, km_number, part_number, total_parts,
-                inspection_name, city, created_date,
-                order_number, order_date, is_process_based,
-                service_note, service_note_date,
-                audit_act_id,
-                inspection_start_date, inspection_end_date,
-                needs_created_date, needs_directive_number,
-                needs_invoice_check, needs_service_note,
-                created_at, updated_at, created_by,
-                last_edited_by, last_edited_at
-            FROM {self.acts}
-            WHERE id = $1
-            FOR UPDATE
-            """,
-            act_id,
-        )
-
-        if not act_row:
-            raise ActNotFoundError(f"Акт ID={act_id} не найден")
-
-        team_rows = await self.conn.fetch(
-            f"""
-            SELECT role, full_name, position, username
-            FROM {self.audit_team}
-            WHERE act_id = $1
-            ORDER BY order_index
-            """,
-            act_id,
-        )
-
-        audit_team = [
-            AuditTeamMember(
-                role=row["role"],
-                full_name=row["full_name"],
-                position=row["position"],
-                username=row["username"],
-            )
-            for row in team_rows
-        ]
-
-        directive_rows = await self.conn.fetch(
-            f"""
-            SELECT point_number, node_id, directive_number
-            FROM {self.directives}
-            WHERE act_id = $1
-            ORDER BY order_index
-            """,
-            act_id,
-        )
-
-        directives = [
-            ActDirective(
-                point_number=row["point_number"],
-                directive_number=row["directive_number"],
-                node_id=row["node_id"],
-            )
-            for row in directive_rows
-        ]
-
-        return ActResponse(
-            id=act_row["id"],
-            km_number=act_row["km_number"],
-            part_number=act_row["part_number"],
-            total_parts=act_row["total_parts"],
-            inspection_name=act_row["inspection_name"],
-            city=act_row["city"],
-            created_date=act_row["created_date"],
-            order_number=act_row["order_number"],
-            order_date=act_row["order_date"],
-            is_process_based=act_row["is_process_based"],
-            service_note=act_row["service_note"],
-            service_note_date=act_row["service_note_date"],
-            audit_act_id=act_row["audit_act_id"],
-            inspection_start_date=act_row["inspection_start_date"],
-            inspection_end_date=act_row["inspection_end_date"],
-            audit_team=audit_team,
-            directives=directives,
-            needs_created_date=act_row["needs_created_date"],
-            needs_directive_number=act_row["needs_directive_number"],
-            needs_invoice_check=act_row["needs_invoice_check"],
-            needs_service_note=act_row["needs_service_note"],
-            created_at=act_row["created_at"],
-            updated_at=act_row["updated_at"],
-            created_by=act_row["created_by"],
-            last_edited_by=act_row["last_edited_by"],
-            last_edited_at=act_row["last_edited_at"],
-        )
+        return await self._fetch_act(act_id, for_update=True)
 
     # -------------------------------------------------------------------------
     # ОБНОВЛЕНИЕ МЕТАДАННЫХ (атомарный UPDATE)

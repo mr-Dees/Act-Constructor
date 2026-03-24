@@ -10,6 +10,12 @@ from app.api.v1.deps.auth_deps import get_username
 from app.core.settings_registry import get as get_domain_settings
 from app.domains.acts.deps import get_crud_service, get_lock_service
 from app.domains.acts.schemas.act_metadata import ActCreate, ActUpdate, ActListItem, ActResponse, AuditPointIdsRequest
+from app.domains.acts.schemas.act_responses import (
+    LockConfigResponse,
+    LockResponse,
+    InvoiceConfigResponse,
+    OperationResult,
+)
 from app.domains.acts.services.act_crud_service import ActCrudService
 from app.domains.acts.services.act_lock_service import ActLockService
 from app.domains.acts.settings import ActsSettings
@@ -26,7 +32,7 @@ async def list_user_acts(
     return await service.list_acts(username)
 
 
-@router.post("/{act_id}/lock", status_code=200)
+@router.post("/{act_id}/lock", response_model=LockResponse, status_code=200)
 async def lock_act(
         act_id: int,
         username: str = Depends(get_username),
@@ -36,7 +42,7 @@ async def lock_act(
     return await service.lock_act(act_id, username)
 
 
-@router.post("/{act_id}/unlock", status_code=200)
+@router.post("/{act_id}/unlock", response_model=OperationResult, status_code=200)
 async def unlock_act(
         act_id: int,
         username: str = Depends(get_username),
@@ -46,7 +52,7 @@ async def unlock_act(
     return await service.unlock_act(act_id, username)
 
 
-@router.post("/{act_id}/extend-lock", status_code=200)
+@router.post("/{act_id}/extend-lock", response_model=LockResponse, status_code=200)
 async def extend_lock(
         act_id: int,
         username: str = Depends(get_username),
@@ -67,7 +73,7 @@ async def create_act(
     return await service.create_act(act_data, username, force_new_part)
 
 
-@router.get("/config/lock")
+@router.get("/config/lock", response_model=LockConfigResponse)
 async def get_lock_config():
     """Получает настройки блокировок для фронтенда."""
     acts_cfg = get_domain_settings("acts", ActsSettings)
@@ -81,7 +87,7 @@ async def get_lock_config():
     }
 
 
-@router.get("/config/invoice")
+@router.get("/config/invoice", response_model=InvoiceConfigResponse)
 async def get_invoice_config():
     """Получает настройки схем для фактур (для фронтенда)."""
     acts_cfg = get_domain_settings("acts", ActsSettings)
@@ -123,7 +129,7 @@ async def duplicate_act(
     return await service.duplicate_act(act_id, username)
 
 
-@router.post("/{act_id}/audit-point-ids")
+@router.post("/{act_id}/audit-point-ids", response_model=dict[str, str])
 async def generate_audit_point_ids(
         act_id: int,
         request: AuditPointIdsRequest,
@@ -134,7 +140,7 @@ async def generate_audit_point_ids(
     return await service.generate_audit_point_ids(act_id, request.node_ids, username)
 
 
-@router.delete("/{act_id}")
+@router.delete("/{act_id}", response_model=OperationResult)
 async def delete_act(
         act_id: int,
         username: str = Depends(get_username),

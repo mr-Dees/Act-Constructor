@@ -114,7 +114,7 @@ class ExportService:
         formatted_content = None
         try:
             # Форматирование в отдельном потоке для не блокирования event loop.
-            loop = asyncio.get_event_loop()
+            loop = asyncio.get_running_loop()
             try:
                 formatted_content = await loop.run_in_executor(
                     executor,

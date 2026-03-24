@@ -101,6 +101,25 @@ async def send_message(
     settings = get_settings()
     logger.info("Сообщение чата от %s: %s", username, request.message[:100])
 
+    # Валидация context по лимитам из конфига
+    if request.context:
+        max_keys = settings.chat.max_context_keys
+        max_val_len = settings.chat.max_context_value_length
+        if len(request.context) > max_keys:
+            request.context = dict(list(request.context.items())[:max_keys])
+        # Санитизация ключей и значений: убираем угловые скобки для защиты от XML breakout
+        def _sanitize(s: str, max_len: int) -> str:
+            return s.replace("<", "").replace(">", "").replace("\n", " ")[:max_len]
+
+        request.context = {
+            _sanitize(str(k), 100): _sanitize(str(v), max_val_len)
+            for k, v in request.context.items()
+        }
+
+    # Валидация history по лимитам из конфига
+    if len(request.history) > settings.chat.max_history_length:
+        request.history = request.history[-settings.chat.max_history_length:]
+
     # Fallback: если API не настроен
     if not settings.chat.api_base or not settings.chat.api_key:
         return _fallback_response(request)
@@ -230,8 +249,8 @@ def _build_messages(
     if request.act_id is not None:
         user_content += f"\n\n[Контекст: акт #{request.act_id}]"
     if request.context:
-        context_parts = [f"{k}: {v}" for k, v in request.context.items()]
-        user_content += f"\n[Доп. контекст: {', '.join(context_parts)}]"
+        context_parts = [f"  {k}: {v}" for k, v in request.context.items()]
+        user_content += f"\n<user-context>\n{chr(10).join(context_parts)}\n</user-context>"
 
     messages.append({"role": "user", "content": user_content})
     return messages

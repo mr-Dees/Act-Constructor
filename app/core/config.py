@@ -139,6 +139,10 @@ class ChatSettings(BaseModel):
         "Отвечай на русском языке. Используй доступные инструменты "
         "для поиска и извлечения данных из актов."
     )
+    max_history_length: int = 50
+    max_message_content_length: int = 10000
+    max_context_keys: int = 20
+    max_context_value_length: int = 1000
 
 
 class Settings(BaseSettings):
