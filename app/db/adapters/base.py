@@ -4,6 +4,7 @@
 Определяет интерфейс для работы с различными СУБД.
 """
 
+import re
 from abc import ABC, abstractmethod
 from collections.abc import Callable
 from pathlib import Path
@@ -18,6 +19,38 @@ class DatabaseAdapter(ABC):
     Каждая СУБД должна реализовать этот интерфейс для обеспечения
     единообразной работы с разными типами баз данных.
     """
+
+    @staticmethod
+    def _extract_table_names_from_sql(sql: str) -> list[str]:
+        """
+        Извлекает имена таблиц из CREATE TABLE операторов в SQL.
+
+        Args:
+            sql: SQL-текст после подстановки плейсхолдеров
+
+        Returns:
+            Список имён таблиц в порядке их появления в SQL
+        """
+        pattern = r'CREATE\s+TABLE\s+(?:IF\s+NOT\s+EXISTS\s+)?(\S+)\s*\('
+        return re.findall(pattern, sql, re.IGNORECASE)
+
+    @abstractmethod
+    async def _get_existing_tables(
+        self,
+        conn: asyncpg.Connection,
+        expected_names: list[str],
+    ) -> set[str]:
+        """
+        Проверяет, какие из ожидаемых таблиц уже существуют в БД.
+
+        Args:
+            conn: Подключение к базе данных
+            expected_names: Список ожидаемых имён таблиц (как в SQL)
+
+        Returns:
+            Множество имён существующих таблиц
+        """
+        pass
 
     @abstractmethod
     async def create_tables(

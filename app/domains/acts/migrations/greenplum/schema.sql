@@ -6,7 +6,7 @@
 -- ОСНОВНАЯ ТАБЛИЦА АКТОВ
 -- ============================================================================
 
-CREATE TABLE {SCHEMA}.{PREFIX}acts (
+CREATE TABLE IF NOT EXISTS {SCHEMA}.{PREFIX}acts (
     id BIGSERIAL PRIMARY KEY,
 
     -- Номер КМ и части
@@ -106,7 +106,7 @@ COMMENT ON COLUMN {SCHEMA}.{PREFIX}acts.last_edited_at IS 'Дата и врем�
 -- ТАБЛИЦА АУДИТОРСКОЙ ГРУППЫ
 -- ============================================================================
 
-CREATE TABLE {SCHEMA}.{PREFIX}audit_team_members (
+CREATE TABLE IF NOT EXISTS {SCHEMA}.{PREFIX}audit_team_members (
     id BIGSERIAL NOT NULL,
     act_id BIGINT NOT NULL,
     audit_act_id VARCHAR(36),
@@ -141,7 +141,7 @@ COMMENT ON COLUMN {SCHEMA}.{PREFIX}audit_team_members.created_at IS 'Дата и
 -- ТАБЛИЦА ПОРУЧЕНИЙ
 -- ============================================================================
 
-CREATE TABLE {SCHEMA}.{PREFIX}act_directives (
+CREATE TABLE IF NOT EXISTS {SCHEMA}.{PREFIX}act_directives (
     id BIGSERIAL NOT NULL,
     act_id BIGINT NOT NULL,
     audit_act_id VARCHAR(36),
@@ -175,7 +175,7 @@ COMMENT ON COLUMN {SCHEMA}.{PREFIX}act_directives.created_at IS 'Дата и в�
 -- ТАБЛИЦА СТРУКТУРЫ ДЕРЕВА АКТА
 -- ============================================================================
 
-CREATE TABLE {SCHEMA}.{PREFIX}act_tree (
+CREATE TABLE IF NOT EXISTS {SCHEMA}.{PREFIX}act_tree (
     id BIGSERIAL NOT NULL,
     act_id BIGINT NOT NULL,
     tree_data JSONB NOT NULL,
@@ -203,7 +203,7 @@ COMMENT ON COLUMN {SCHEMA}.{PREFIX}act_tree.updated_at IS 'Дата и врем�
 -- ТАБЛИЦА ТАБЛИЦ (ДЕНОРМАЛИЗОВАННАЯ)
 -- ============================================================================
 
-CREATE TABLE {SCHEMA}.{PREFIX}act_tables (
+CREATE TABLE IF NOT EXISTS {SCHEMA}.{PREFIX}act_tables (
     id BIGSERIAL NOT NULL,
     act_id BIGINT NOT NULL,
     audit_act_id VARCHAR(36),
@@ -257,7 +257,7 @@ COMMENT ON COLUMN {SCHEMA}.{PREFIX}act_tables.updated_at IS 'Дата и вре�
 -- ТАБЛИЦА ТЕКСТОВЫХ БЛОКОВ
 -- ============================================================================
 
-CREATE TABLE {SCHEMA}.{PREFIX}act_textblocks (
+CREATE TABLE IF NOT EXISTS {SCHEMA}.{PREFIX}act_textblocks (
     id BIGSERIAL NOT NULL,
     act_id BIGINT NOT NULL,
     audit_act_id VARCHAR(36),
@@ -295,7 +295,7 @@ COMMENT ON COLUMN {SCHEMA}.{PREFIX}act_textblocks.updated_at IS 'Дата и в�
 -- ТАБЛИЦА НАРУШЕНИЙ
 -- ============================================================================
 
-CREATE TABLE {SCHEMA}.{PREFIX}act_violations (
+CREATE TABLE IF NOT EXISTS {SCHEMA}.{PREFIX}act_violations (
     id BIGSERIAL NOT NULL,
     act_id BIGINT NOT NULL,
     audit_act_id VARCHAR(36),
@@ -355,7 +355,7 @@ COMMENT ON COLUMN {SCHEMA}.{PREFIX}act_violations.updated_at IS 'Дата и в�
 -- ТАБЛИЦА ФАКТУР
 -- ============================================================================
 
-CREATE TABLE {SCHEMA}.{PREFIX}act_invoices (
+CREATE TABLE IF NOT EXISTS {SCHEMA}.{PREFIX}act_invoices (
     id BIGSERIAL NOT NULL,
     act_id BIGINT NOT NULL,
     audit_act_id VARCHAR(36),
@@ -409,7 +409,7 @@ COMMENT ON COLUMN {SCHEMA}.{PREFIX}act_invoices.profile_div IS 'Подразде
 -- ТАБЛИЦА АУДИТ-ЛОГА
 -- ============================================================================
 
-CREATE TABLE {SCHEMA}.{PREFIX}audit_log (
+CREATE TABLE IF NOT EXISTS {SCHEMA}.{PREFIX}audit_log (
     id BIGSERIAL PRIMARY KEY,
     act_id BIGINT,
     action VARCHAR(50) NOT NULL,
@@ -433,7 +433,7 @@ COMMENT ON COLUMN {SCHEMA}.{PREFIX}audit_log.created_at IS 'Время опер�
 -- ТАБЛИЦА ВЕРСИЙ СОДЕРЖИМОГО
 -- ============================================================================
 
-CREATE TABLE {SCHEMA}.{PREFIX}act_content_versions (
+CREATE TABLE IF NOT EXISTS {SCHEMA}.{PREFIX}act_content_versions (
     id BIGSERIAL NOT NULL,
     act_id BIGINT NOT NULL,
     version_number BIGINT NOT NULL,
@@ -466,74 +466,74 @@ COMMENT ON COLUMN {SCHEMA}.{PREFIX}act_content_versions.created_at IS 'Врем�
 -- ============================================================================
 
 -- Индексы на acts
-CREATE INDEX idx_{PREFIX}acts_id
+CREATE INDEX IF NOT EXISTS idx_{PREFIX}acts_id
     ON {SCHEMA}.{PREFIX}acts(id);
 
-CREATE INDEX idx_{PREFIX}acts_km_digit
+CREATE INDEX IF NOT EXISTS idx_{PREFIX}acts_km_digit
     ON {SCHEMA}.{PREFIX}acts(km_number_digit);
 
-CREATE INDEX idx_{PREFIX}acts_km_digit_part
+CREATE INDEX IF NOT EXISTS idx_{PREFIX}acts_km_digit_part
     ON {SCHEMA}.{PREFIX}acts(km_number_digit, part_number);
 
-CREATE INDEX idx_{PREFIX}acts_service_note
+CREATE INDEX IF NOT EXISTS idx_{PREFIX}acts_service_note
     ON {SCHEMA}.{PREFIX}acts(service_note)
     WHERE service_note IS NOT NULL;
 
-CREATE INDEX idx_{PREFIX}acts_service_note_date
+CREATE INDEX IF NOT EXISTS idx_{PREFIX}acts_service_note_date
     ON {SCHEMA}.{PREFIX}acts(service_note_date)
     WHERE service_note_date IS NOT NULL;
 
-CREATE INDEX idx_{PREFIX}acts_created_by
+CREATE INDEX IF NOT EXISTS idx_{PREFIX}acts_created_by
     ON {SCHEMA}.{PREFIX}acts(created_by);
 
-CREATE INDEX idx_{PREFIX}acts_last_edited_at
+CREATE INDEX IF NOT EXISTS idx_{PREFIX}acts_last_edited_at
     ON {SCHEMA}.{PREFIX}acts(last_edited_at);
 
-CREATE INDEX idx_{PREFIX}acts_locked_by
+CREATE INDEX IF NOT EXISTS idx_{PREFIX}acts_locked_by
     ON {SCHEMA}.{PREFIX}acts(locked_by)
     WHERE locked_by IS NOT NULL;
 
-CREATE INDEX idx_{PREFIX}acts_lock_expires
+CREATE INDEX IF NOT EXISTS idx_{PREFIX}acts_lock_expires
     ON {SCHEMA}.{PREFIX}acts(lock_expires_at)
     WHERE lock_expires_at IS NOT NULL;
 
 -- Индексы на audit_team_members
-CREATE INDEX idx_{PREFIX}audit_team_username
+CREATE INDEX IF NOT EXISTS idx_{PREFIX}audit_team_username
     ON {SCHEMA}.{PREFIX}audit_team_members(username);
 
-CREATE INDEX idx_{PREFIX}audit_team_act_id
+CREATE INDEX IF NOT EXISTS idx_{PREFIX}audit_team_act_id
     ON {SCHEMA}.{PREFIX}audit_team_members(act_id);
 
-CREATE INDEX idx_{PREFIX}audit_team_act_order
+CREATE INDEX IF NOT EXISTS idx_{PREFIX}audit_team_act_order
     ON {SCHEMA}.{PREFIX}audit_team_members(act_id, order_index);
 
 -- Индексы на act_directives
-CREATE INDEX idx_{PREFIX}act_directives_act_id
+CREATE INDEX IF NOT EXISTS idx_{PREFIX}act_directives_act_id
     ON {SCHEMA}.{PREFIX}act_directives(act_id);
 
-CREATE INDEX idx_{PREFIX}act_directives_act_order
+CREATE INDEX IF NOT EXISTS idx_{PREFIX}act_directives_act_order
     ON {SCHEMA}.{PREFIX}act_directives(act_id, order_index);
 
 -- Индексы на act_tree
-CREATE INDEX idx_{PREFIX}act_tree_act_id
+CREATE INDEX IF NOT EXISTS idx_{PREFIX}act_tree_act_id
     ON {SCHEMA}.{PREFIX}act_tree(act_id);
 
 -- Индексы на act_tables
-CREATE INDEX idx_{PREFIX}act_tables_act_id
+CREATE INDEX IF NOT EXISTS idx_{PREFIX}act_tables_act_id
     ON {SCHEMA}.{PREFIX}act_tables(act_id);
 
-CREATE INDEX idx_{PREFIX}act_tables_act_table
+CREATE INDEX IF NOT EXISTS idx_{PREFIX}act_tables_act_table
     ON {SCHEMA}.{PREFIX}act_tables(act_id, table_id);
 
-CREATE INDEX idx_{PREFIX}act_tables_node_number
+CREATE INDEX IF NOT EXISTS idx_{PREFIX}act_tables_node_number
     ON {SCHEMA}.{PREFIX}act_tables(act_id, node_number)
     WHERE node_number IS NOT NULL;
 
-CREATE INDEX idx_{PREFIX}act_tables_label
+CREATE INDEX IF NOT EXISTS idx_{PREFIX}act_tables_label
     ON {SCHEMA}.{PREFIX}act_tables(act_id, table_label)
     WHERE table_label IS NOT NULL;
 
-CREATE INDEX idx_{PREFIX}act_tables_special_flags
+CREATE INDEX IF NOT EXISTS idx_{PREFIX}act_tables_special_flags
     ON {SCHEMA}.{PREFIX}act_tables(act_id)
     WHERE is_metrics_table = TRUE
        OR is_main_metrics_table = TRUE
@@ -541,82 +541,82 @@ CREATE INDEX idx_{PREFIX}act_tables_special_flags
        OR is_operational_risk_table = TRUE;
 
 -- Индексы на act_textblocks
-CREATE INDEX idx_{PREFIX}act_textblocks_act_id
+CREATE INDEX IF NOT EXISTS idx_{PREFIX}act_textblocks_act_id
     ON {SCHEMA}.{PREFIX}act_textblocks(act_id);
 
-CREATE INDEX idx_{PREFIX}act_textblocks_act_textblock
+CREATE INDEX IF NOT EXISTS idx_{PREFIX}act_textblocks_act_textblock
     ON {SCHEMA}.{PREFIX}act_textblocks(act_id, textblock_id);
 
-CREATE INDEX idx_{PREFIX}act_textblocks_node_number
+CREATE INDEX IF NOT EXISTS idx_{PREFIX}act_textblocks_node_number
     ON {SCHEMA}.{PREFIX}act_textblocks(act_id, node_number)
     WHERE node_number IS NOT NULL;
 
 -- Индексы на act_violations
-CREATE INDEX idx_{PREFIX}act_violations_act_id
+CREATE INDEX IF NOT EXISTS idx_{PREFIX}act_violations_act_id
     ON {SCHEMA}.{PREFIX}act_violations(act_id);
 
-CREATE INDEX idx_{PREFIX}act_violations_act_violation
+CREATE INDEX IF NOT EXISTS idx_{PREFIX}act_violations_act_violation
     ON {SCHEMA}.{PREFIX}act_violations(act_id, violation_id);
 
-CREATE INDEX idx_{PREFIX}act_violations_node_number
+CREATE INDEX IF NOT EXISTS idx_{PREFIX}act_violations_node_number
     ON {SCHEMA}.{PREFIX}act_violations(act_id, node_number)
     WHERE node_number IS NOT NULL;
 
 -- Индексы на act_invoices
-CREATE INDEX idx_{PREFIX}act_invoices_act_id
+CREATE INDEX IF NOT EXISTS idx_{PREFIX}act_invoices_act_id
     ON {SCHEMA}.{PREFIX}act_invoices(act_id);
 
-CREATE INDEX idx_{PREFIX}act_invoices_act_node
+CREATE INDEX IF NOT EXISTS idx_{PREFIX}act_invoices_act_node
     ON {SCHEMA}.{PREFIX}act_invoices(act_id, node_id);
 
 -- Индексы на audit_act_id
-CREATE INDEX idx_{PREFIX}acts_audit_act_id
+CREATE INDEX IF NOT EXISTS idx_{PREFIX}acts_audit_act_id
     ON {SCHEMA}.{PREFIX}acts(audit_act_id)
     WHERE audit_act_id IS NOT NULL;
 
-CREATE INDEX idx_{PREFIX}audit_team_audit_act_id
+CREATE INDEX IF NOT EXISTS idx_{PREFIX}audit_team_audit_act_id
     ON {SCHEMA}.{PREFIX}audit_team_members(audit_act_id)
     WHERE audit_act_id IS NOT NULL;
 
-CREATE INDEX idx_{PREFIX}act_directives_audit_act_id
+CREATE INDEX IF NOT EXISTS idx_{PREFIX}act_directives_audit_act_id
     ON {SCHEMA}.{PREFIX}act_directives(audit_act_id)
     WHERE audit_act_id IS NOT NULL;
 
-CREATE INDEX idx_{PREFIX}act_tables_audit_act_id
+CREATE INDEX IF NOT EXISTS idx_{PREFIX}act_tables_audit_act_id
     ON {SCHEMA}.{PREFIX}act_tables(audit_act_id)
     WHERE audit_act_id IS NOT NULL;
 
-CREATE INDEX idx_{PREFIX}act_textblocks_audit_act_id
+CREATE INDEX IF NOT EXISTS idx_{PREFIX}act_textblocks_audit_act_id
     ON {SCHEMA}.{PREFIX}act_textblocks(audit_act_id)
     WHERE audit_act_id IS NOT NULL;
 
-CREATE INDEX idx_{PREFIX}act_violations_audit_act_id
+CREATE INDEX IF NOT EXISTS idx_{PREFIX}act_violations_audit_act_id
     ON {SCHEMA}.{PREFIX}act_violations(audit_act_id)
     WHERE audit_act_id IS NOT NULL;
 
-CREATE INDEX idx_{PREFIX}act_invoices_audit_act_id
+CREATE INDEX IF NOT EXISTS idx_{PREFIX}act_invoices_audit_act_id
     ON {SCHEMA}.{PREFIX}act_invoices(audit_act_id)
     WHERE audit_act_id IS NOT NULL;
 
 -- Индексы на audit_log
-CREATE INDEX idx_{PREFIX}audit_log_act_id
+CREATE INDEX IF NOT EXISTS idx_{PREFIX}audit_log_act_id
     ON {SCHEMA}.{PREFIX}audit_log(act_id)
     WHERE act_id IS NOT NULL;
 
-CREATE INDEX idx_{PREFIX}audit_log_username
+CREATE INDEX IF NOT EXISTS idx_{PREFIX}audit_log_username
     ON {SCHEMA}.{PREFIX}audit_log(username);
 
-CREATE INDEX idx_{PREFIX}audit_log_action
+CREATE INDEX IF NOT EXISTS idx_{PREFIX}audit_log_action
     ON {SCHEMA}.{PREFIX}audit_log(action);
 
-CREATE INDEX idx_{PREFIX}audit_log_created_at
+CREATE INDEX IF NOT EXISTS idx_{PREFIX}audit_log_created_at
     ON {SCHEMA}.{PREFIX}audit_log(created_at);
 
-CREATE INDEX idx_{PREFIX}audit_log_act_created
+CREATE INDEX IF NOT EXISTS idx_{PREFIX}audit_log_act_created
     ON {SCHEMA}.{PREFIX}audit_log(act_id, created_at DESC);
 
 -- Индексы на act_content_versions
-CREATE INDEX idx_{PREFIX}act_content_versions_act
+CREATE INDEX IF NOT EXISTS idx_{PREFIX}act_content_versions_act
     ON {SCHEMA}.{PREFIX}act_content_versions(act_id, version_number DESC);
 
 -- ============================================================================

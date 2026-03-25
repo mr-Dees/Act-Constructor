@@ -297,12 +297,9 @@ async def create_tables_if_not_exist(domains=None) -> None:
             await adapter.create_tables(conn, schema_paths, substitutions)
 
         logger.info(
-            f"Схема БД ({adapter.__class__.__name__}) создана/проверена успешно"
+            f"Схема БД ({adapter.__class__.__name__}): "
+            f"целостность проверена для {len(schema_paths)} доменов"
         )
-
-    except asyncpg.DuplicateObjectError as e:
-        logger.warning(f"Некоторые объекты БД уже существуют: {e}")
-        logger.info("Схема БД проверена")
 
     except asyncpg.PostgresError as e:
         error_message = str(e)
