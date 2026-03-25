@@ -1,6 +1,4 @@
-"""
-Сервис администрирования — бизнес-логика управления ролями.
-"""
+"""Сервис администрирования — бизнес-логика управления ролями."""
 
 import logging
 
@@ -11,6 +9,8 @@ from app.domains.admin.repositories.admin_repository import AdminRepository
 from app.domains.admin.settings import AdminSettings
 
 logger = logging.getLogger("audit_workstation.domains.admin.service")
+
+MIN_SEARCH_LENGTH = 2
 
 
 class AdminService:
@@ -26,12 +26,7 @@ class AdminService:
         return await self.repo.get_all_roles()
 
     async def get_user_roles(self, username: str) -> dict:
-        """
-        Возвращает роли пользователя.
-
-        Returns:
-            dict с ключами username, roles, is_admin.
-        """
+        """Возвращает роли пользователя."""
         roles = await self.repo.get_user_roles(username)
         is_admin = any(r["name"] == "Админ" for r in roles)
         return {
@@ -46,10 +41,15 @@ class AdminService:
 
         Raises:
             RoleNotFoundError: если роль не существует.
+            UserNotFoundError: если пользователь не найден в справочнике.
         """
         role = await self.repo.get_role_by_id(role_id)
         if not role:
             raise RoleNotFoundError(f"Роль с id={role_id} не найдена")
+
+        user = await self.repo.get_user_from_directory(username)
+        if not user:
+            raise UserNotFoundError(f"Пользователь {username} не найден в справочнике")
 
         assigned = await self.repo.assign_role(username, role_id, assigned_by)
         if assigned:
@@ -60,45 +60,30 @@ class AdminService:
         return assigned
 
     async def remove_role(self, username: str, role_id: int) -> bool:
-        """
-        Снимает роль с пользователя.
-
-        Raises:
-            RoleNotFoundError: если роль не существует.
-        """
+        """Снимает роль с пользователя."""
         role = await self.repo.get_role_by_id(role_id)
         if not role:
             raise RoleNotFoundError(f"Роль с id={role_id} не найдена")
 
         removed = await self.repo.remove_role(username, role_id)
         if removed:
-            logger.info(
-                f"Роль '{role['name']}' снята с пользователя {username}"
-            )
+            logger.info(f"Роль '{role['name']}' снята с пользователя {username}")
         return removed
 
     async def get_user_directory(self) -> list[dict]:
-        """
-        Возвращает справочник пользователей с назначенными ролями.
+        """Возвращает пользователей отдела + пользователей с ролями."""
+        branch = self.settings.user_directory.branch_filter
+        return await self.repo.get_users_with_roles(branch)
 
-        Для каждого пользователя загружаются его роли из user_roles.
-        """
-        users = await self.repo.get_user_directory()
-        for user in users:
-            roles = await self.repo.get_user_roles(user["username"])
-            user["roles"] = roles
-        return users
+    async def search_users(self, query: str) -> list[dict]:
+        """Поиск пользователей в справочнике (исключая уже видимых)."""
+        if len(query) < MIN_SEARCH_LENGTH:
+            return []
+        branch = self.settings.user_directory.branch_filter
+        return await self.repo.search_users(query, branch)
 
     async def seed_initial_roles(self, branch_filter: str, default_admin: str) -> None:
-        """
-        Начальное заполнение ролей при первом запуске.
-
-        Если таблица user_roles пуста:
-        1. Получает роли 'Цифровой акт' и 'Админ'
-        2. Выбирает пользователей из справочника по подразделению
-        3. Назначает 'Цифровой акт' всем пользователям подразделения
-        4. Назначает 'Админ' пользователю default_admin
-        """
+        """Начальное заполнение ролей при первом запуске."""
         count = await self.repo.count_user_roles()
         if count > 0:
             logger.info(
@@ -125,13 +110,11 @@ class AdminService:
             )
             return
 
-        # Назначаем 'Цифровой акт' всем пользователям подразделения
         assignments: list[tuple[str, int, str]] = [
             (u, digital_act_role["id"], "system")
             for u in usernames
         ]
 
-        # Назначаем 'Админ' дефолтному администратору
         if default_admin in usernames:
             assignments.append((default_admin, admin_role["id"], "system"))
 
