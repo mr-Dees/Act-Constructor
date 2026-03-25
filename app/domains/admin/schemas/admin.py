@@ -26,6 +26,15 @@ class UserDirectoryItem(BaseModel):
     tn: str = ""
     email: str = ""
     roles: list[RoleSchema] = []
+    is_department: bool = True
+
+
+class UserSearchResult(BaseModel):
+    """Результат поиска пользователя в справочнике."""
+    username: str
+    fullname: str = ""
+    job: str = ""
+    email: str = ""
 
 
 class RoleAssignRequest(BaseModel):
