@@ -172,6 +172,7 @@ class AdminRoles {
             row.dataset.username = user.username;
             row.dataset.fullname = user.fullname || '';
             row.dataset.email = user.email || '';
+            row.dataset.department = user.is_department !== false ? '1' : '0';
             row.innerHTML = this._renderRow(user);
 
             row.querySelectorAll('.admin-role-chip').forEach(chip => {
@@ -248,9 +249,15 @@ class AdminRoles {
                     </button>`;
         }).join('');
 
+        const externalBadge = user.is_department === false
+            ? '<span class="admin-external-badge">внешний</span>'
+            : '';
+
         return `
             <div class="admin-roles-row-info">
-                <div class="admin-roles-row-name">${this._escapeHtml(user.fullname)}</div>
+                <div class="admin-roles-row-name">
+                    ${this._escapeHtml(user.fullname)}${externalBadge}
+                </div>
                 <div class="admin-roles-row-details">${this._escapeHtml(user.job || '')}</div>
             </div>
             <div class="admin-roles-row-chips">${chips}</div>
@@ -296,6 +303,22 @@ class AdminRoles {
         } finally {
             chip.disabled = false;
         }
+    }
+
+    /**
+     * Добавляет пользователя в список и перерисовывает таблицу
+     * @param {Object} user - Данные пользователя с ролями
+     */
+    static addUser(user) {
+        const exists = this._users.find(u => u.username === user.username);
+        if (exists) {
+            exists.roles = user.roles;
+        } else {
+            this._users.push(user);
+        }
+        this._sortUsers();
+        this._renderAll();
+        this._applyFilters();
     }
 
     /**
