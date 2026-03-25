@@ -15,6 +15,7 @@ from app.domains.admin.schemas.admin import (
     RoleSchema,
     UserDirectoryItem,
     UserRolesResponse,
+    UserSearchResult,
 )
 from app.domains.admin.services.admin_service import AdminService
 
@@ -35,6 +36,15 @@ async def get_user_directory(
 ):
     """Возвращает справочник пользователей с назначенными ролями."""
     return await service.get_user_directory()
+
+
+@router.get("/users/search", response_model=list[UserSearchResult])
+async def search_users(
+    q: str = "",
+    service: AdminService = Depends(get_admin_service),
+):
+    """Поиск пользователей в справочнике для добавления в систему."""
+    return await service.search_users(q)
 
 
 @router.get("/users/{username}/roles", response_model=UserRolesResponse)
