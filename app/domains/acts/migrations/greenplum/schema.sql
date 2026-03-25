@@ -107,7 +107,7 @@ COMMENT ON COLUMN {SCHEMA}.{PREFIX}acts.last_edited_at IS 'Дата и врем�
 -- ============================================================================
 
 CREATE TABLE {SCHEMA}.{PREFIX}audit_team_members (
-    id BIGSERIAL PRIMARY KEY,
+    id BIGSERIAL NOT NULL,
     act_id BIGINT NOT NULL,
     audit_act_id VARCHAR(36),
     role VARCHAR(50) NOT NULL,
@@ -118,6 +118,7 @@ CREATE TABLE {SCHEMA}.{PREFIX}audit_team_members (
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
 
     -- Constraints
+    PRIMARY KEY (act_id, id),
     CONSTRAINT check_role_values
         CHECK (role IN ('Куратор', 'Руководитель', 'Редактор', 'Участник')),
     CONSTRAINT check_order_index_non_negative
@@ -141,7 +142,7 @@ COMMENT ON COLUMN {SCHEMA}.{PREFIX}audit_team_members.created_at IS 'Дата и
 -- ============================================================================
 
 CREATE TABLE {SCHEMA}.{PREFIX}act_directives (
-    id BIGSERIAL PRIMARY KEY,
+    id BIGSERIAL NOT NULL,
     act_id BIGINT NOT NULL,
     audit_act_id VARCHAR(36),
     audit_point_id VARCHAR(36),
@@ -152,6 +153,7 @@ CREATE TABLE {SCHEMA}.{PREFIX}act_directives (
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
 
     -- Constraints
+    PRIMARY KEY (act_id, id),
     CONSTRAINT check_point_number_format
         CHECK (point_number ~ '^5\.([\d]+\.)*[\d]+$'),
     CONSTRAINT check_order_index_non_negative
@@ -174,13 +176,14 @@ COMMENT ON COLUMN {SCHEMA}.{PREFIX}act_directives.created_at IS 'Дата и в�
 -- ============================================================================
 
 CREATE TABLE {SCHEMA}.{PREFIX}act_tree (
-    id BIGSERIAL PRIMARY KEY,
+    id BIGSERIAL NOT NULL,
     act_id BIGINT NOT NULL,
     tree_data JSONB NOT NULL,
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
 
     -- Constraints
+    PRIMARY KEY (act_id, id),
     CONSTRAINT check_tree_data_not_empty
         CHECK (jsonb_typeof(tree_data) = 'object'),
 
@@ -201,7 +204,7 @@ COMMENT ON COLUMN {SCHEMA}.{PREFIX}act_tree.updated_at IS 'Дата и врем�
 -- ============================================================================
 
 CREATE TABLE {SCHEMA}.{PREFIX}act_tables (
-    id BIGSERIAL PRIMARY KEY,
+    id BIGSERIAL NOT NULL,
     act_id BIGINT NOT NULL,
     audit_act_id VARCHAR(36),
     audit_point_id VARCHAR(36),
@@ -221,6 +224,7 @@ CREATE TABLE {SCHEMA}.{PREFIX}act_tables (
     updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
 
     -- Constraints
+    PRIMARY KEY (act_id, id),
     CONSTRAINT check_grid_data_is_array
         CHECK (jsonb_typeof(grid_data) = 'array'),
     CONSTRAINT check_col_widths_is_array
@@ -254,7 +258,7 @@ COMMENT ON COLUMN {SCHEMA}.{PREFIX}act_tables.updated_at IS 'Дата и вре�
 -- ============================================================================
 
 CREATE TABLE {SCHEMA}.{PREFIX}act_textblocks (
-    id BIGSERIAL PRIMARY KEY,
+    id BIGSERIAL NOT NULL,
     act_id BIGINT NOT NULL,
     audit_act_id VARCHAR(36),
     audit_point_id VARCHAR(36),
@@ -267,6 +271,7 @@ CREATE TABLE {SCHEMA}.{PREFIX}act_textblocks (
     updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
 
     -- Constraints
+    PRIMARY KEY (act_id, id),
     CONSTRAINT check_formatting_is_object
         CHECK (jsonb_typeof(formatting) = 'object'),
 
@@ -291,7 +296,7 @@ COMMENT ON COLUMN {SCHEMA}.{PREFIX}act_textblocks.updated_at IS 'Дата и в�
 -- ============================================================================
 
 CREATE TABLE {SCHEMA}.{PREFIX}act_violations (
-    id BIGSERIAL PRIMARY KEY,
+    id BIGSERIAL NOT NULL,
     act_id BIGINT NOT NULL,
     audit_act_id VARCHAR(36),
     audit_point_id VARCHAR(36),
@@ -310,6 +315,7 @@ CREATE TABLE {SCHEMA}.{PREFIX}act_violations (
     updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
 
     -- Constraints (GP 5.x не поддерживает оператор '?' для JSONB, проверяем только тип)
+    PRIMARY KEY (act_id, id),
     CONSTRAINT check_description_list_is_object_or_null
         CHECK (description_list IS NULL OR jsonb_typeof(description_list) = 'object'),
     CONSTRAINT check_additional_content_is_object_or_null
@@ -350,7 +356,7 @@ COMMENT ON COLUMN {SCHEMA}.{PREFIX}act_violations.updated_at IS 'Дата и в�
 -- ============================================================================
 
 CREATE TABLE {SCHEMA}.{PREFIX}act_invoices (
-    id BIGSERIAL PRIMARY KEY,
+    id BIGSERIAL NOT NULL,
     act_id BIGINT NOT NULL,
     audit_act_id VARCHAR(36),
     audit_point_id VARCHAR(36),
@@ -370,6 +376,7 @@ CREATE TABLE {SCHEMA}.{PREFIX}act_invoices (
     create_date DATE DEFAULT NULL,
 
     -- Constraints
+    PRIMARY KEY (act_id, id),
     CONSTRAINT check_db_type_values
         CHECK (db_type IN ('hive', 'greenplum')),
     CONSTRAINT check_verification_status_values
@@ -427,7 +434,7 @@ COMMENT ON COLUMN {SCHEMA}.{PREFIX}audit_log.created_at IS 'Время опер�
 -- ============================================================================
 
 CREATE TABLE {SCHEMA}.{PREFIX}act_content_versions (
-    id BIGSERIAL PRIMARY KEY,
+    id BIGSERIAL NOT NULL,
     act_id BIGINT NOT NULL,
     version_number BIGINT NOT NULL,
     save_type VARCHAR(20) NOT NULL DEFAULT 'auto',
@@ -437,10 +444,11 @@ CREATE TABLE {SCHEMA}.{PREFIX}act_content_versions (
     textblocks_data JSONB NOT NULL DEFAULT '{}',
     violations_data JSONB NOT NULL DEFAULT '{}',
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    PRIMARY KEY (act_id, id),
     UNIQUE (act_id, version_number)
 )
 WITH (appendonly=false)
-DISTRIBUTED BY (id);
+DISTRIBUTED BY (act_id);
 
 COMMENT ON TABLE {SCHEMA}.{PREFIX}act_content_versions IS 'Снэпшоты содержимого актов для просмотра истории и восстановления';
 COMMENT ON COLUMN {SCHEMA}.{PREFIX}act_content_versions.act_id IS 'ID акта';

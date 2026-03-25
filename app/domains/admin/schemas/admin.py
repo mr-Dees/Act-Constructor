@@ -21,7 +21,7 @@ class UserRolesResponse(BaseModel):
 class UserDirectoryItem(BaseModel):
     """Пользователь из справочника с назначенными ролями."""
     username: str
-    fullname: str
+    fullname: str = ""
     job: str = ""
     tn: str = ""
     email: str = ""

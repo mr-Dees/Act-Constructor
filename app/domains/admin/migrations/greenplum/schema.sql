@@ -11,12 +11,12 @@ CREATE TABLE {SCHEMA}.{PREFIX}roles (
     id BIGSERIAL PRIMARY KEY,
     name VARCHAR(100) NOT NULL,
     domain_name VARCHAR(100),
-    description TEXT NOT NULL DEFAULT '',
-
-    UNIQUE(name)
+    description TEXT NOT NULL DEFAULT ''
 )
 WITH (appendonly=false)
 DISTRIBUTED BY (id);
+
+-- UNIQUE(name) обеспечивается на уровне приложения (GP: distribution key должен быть в UNIQUE)
 
 COMMENT ON TABLE {SCHEMA}.{PREFIX}roles IS 'Справочник ролей приложения';
 COMMENT ON COLUMN {SCHEMA}.{PREFIX}roles.id IS 'Уникальный идентификатор роли';
@@ -40,12 +40,12 @@ CREATE TABLE {SCHEMA}.{PREFIX}user_roles (
     username VARCHAR(50) NOT NULL,
     role_id BIGINT NOT NULL,
     assigned_by VARCHAR(50) NOT NULL,
-    assigned_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-
-    UNIQUE(username, role_id)
+    assigned_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 )
 WITH (appendonly=false)
 DISTRIBUTED BY (id);
+
+-- UNIQUE(username, role_id) обеспечивается на уровне приложения (GP: distribution key должен быть в UNIQUE)
 
 COMMENT ON TABLE {SCHEMA}.{PREFIX}user_roles IS 'Связь пользователей с ролями';
 COMMENT ON COLUMN {SCHEMA}.{PREFIX}user_roles.username IS 'Числовой логин пользователя';

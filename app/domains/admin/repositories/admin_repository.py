@@ -160,7 +160,11 @@ class AdminRepository(BaseRepository):
         """Возвращает всех пользователей из справочника."""
         rows = await self.conn.fetch(
             f"""
-            SELECT username, fullname, job, tn, email
+            SELECT username,
+                   COALESCE(fullname, '') AS fullname,
+                   COALESCE(job, '') AS job,
+                   COALESCE(tn, '') AS tn,
+                   COALESCE(email, '') AS email
             FROM {self.user_table}
             ORDER BY fullname
             """
@@ -184,7 +188,11 @@ class AdminRepository(BaseRepository):
         """Возвращает пользователя из справочника по username."""
         row = await self.conn.fetchrow(
             f"""
-            SELECT username, fullname, job, tn, email
+            SELECT username,
+                   COALESCE(fullname, '') AS fullname,
+                   COALESCE(job, '') AS job,
+                   COALESCE(tn, '') AS tn,
+                   COALESCE(email, '') AS email
             FROM {self.user_table}
             WHERE username = $1
             """,
