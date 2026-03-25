@@ -382,10 +382,8 @@ class APIClient {
                     AuditIdService.assignMissingPointIds(actId, AppState.treeData);
                 }
 
-                // Сохраняем дефолтную структуру в БД ТОЛЬКО если есть права на редактирование
-                if (!AppConfig.readOnlyMode.isReadOnly) {
-                    await this._saveDefaultStructure(actId, username);
-                }
+                // Флаг: дефолтную структуру нужно сохранить после блокировки
+                this._pendingDefaultStructureSave = !AppConfig.readOnlyMode.isReadOnly;
 
                 Notifications.info('Акт инициализирован с базовой структурой');
             } else {

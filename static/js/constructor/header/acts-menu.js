@@ -348,6 +348,16 @@ class ActsMenuManager {
             }
 
             await APIClient.loadActContent(actId);
+
+            // Сохраняем дефолтную структуру после блокировки (для новых актов)
+            if (APIClient._pendingDefaultStructureSave) {
+                APIClient._pendingDefaultStructureSave = false;
+                const username = AuthManager?.getCurrentUser?.() || null;
+                if (username) {
+                    await APIClient._saveDefaultStructure(actId, username);
+                }
+            }
+
             this.currentActId = actId;
             window.currentActId = actId;
             if (typeof ChangelogTracker !== 'undefined') ChangelogTracker.init(actId);
@@ -513,6 +523,15 @@ class ActsMenuManager {
             // Инициализируем LockManager только после загрузки контента
             // В режиме read-only блокировка будет пропущена
             if (LockManager?.init) await LockManager.init(actId);
+
+            // Сохраняем дефолтную структуру ПОСЛЕ блокировки (для новых актов)
+            if (APIClient._pendingDefaultStructureSave) {
+                APIClient._pendingDefaultStructureSave = false;
+                const username = AuthManager?.getCurrentUser?.() || null;
+                if (username) {
+                    await APIClient._saveDefaultStructure(actId, username);
+                }
+            }
 
             Notifications.success('Акт загружен');
         } catch (error) {
