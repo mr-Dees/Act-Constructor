@@ -2,6 +2,7 @@
 Репозиторий операций администрирования.
 """
 
+import json
 import logging
 
 import asyncpg
@@ -152,24 +153,87 @@ class AdminRepository(BaseRepository):
                 count += 1
         return count
 
-    # -------------------------------------------------------------------------
-    # СПРАВОЧНИК ПОЛЬЗОВАТЕЛЕЙ
-    # -------------------------------------------------------------------------
+    async def get_users_with_roles(self, branch: str) -> list[dict]:
+        """
+        Возвращает пользователей отдела + пользователей с ролями.
 
-    async def get_user_directory(self) -> list[dict]:
-        """Возвращает всех пользователей из справочника."""
+        Один SQL-запрос с UNION + LEFT JOIN + json_agg.
+        """
+        rows = await self.conn.fetch(
+            f"""
+            SELECT
+                base.username,
+                COALESCE(d.fullname, '') AS fullname,
+                COALESCE(d.job, '') AS job,
+                COALESCE(d.tn, '') AS tn,
+                COALESCE(d.email, '') AS email,
+                (d.branch IS NOT NULL AND d.branch = $1) AS is_department,
+                COALESCE(
+                    json_agg(json_build_object(
+                        'id', r.id, 'name', r.name,
+                        'domain_name', r.domain_name,
+                        'description', r.description
+                    )) FILTER (WHERE r.id IS NOT NULL),
+                    '[]'::json
+                ) AS roles
+            FROM (
+                SELECT username FROM {self.user_table} WHERE branch = $1
+                UNION
+                SELECT DISTINCT username FROM {self.user_roles}
+            ) base
+            LEFT JOIN {self.user_table} d ON d.username = base.username
+            LEFT JOIN {self.user_roles} ur ON ur.username = base.username
+            LEFT JOIN {self.roles} r ON r.id = ur.role_id
+            GROUP BY base.username, d.fullname, d.job, d.tn, d.email, d.branch
+            ORDER BY COALESCE(d.fullname, base.username)
+            """,
+            branch,
+        )
+        result = []
+        for row in rows:
+            d = dict(row)
+            roles = d["roles"]
+            if isinstance(roles, str):
+                roles = json.loads(roles)
+            d["roles"] = roles
+            result.append(d)
+        return result
+
+    async def search_users(self, query: str, branch: str, limit: int = 20) -> list[dict]:
+        """
+        Поиск пользователей в справочнике по ФИО или username.
+
+        Исключает пользователей, уже видимых в основном списке
+        (из отдела + с ролями).
+        """
+        escaped = query.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
+        pattern = f"%{escaped}%"
         rows = await self.conn.fetch(
             f"""
             SELECT username,
                    COALESCE(fullname, '') AS fullname,
                    COALESCE(job, '') AS job,
-                   COALESCE(tn, '') AS tn,
                    COALESCE(email, '') AS email
             FROM {self.user_table}
+            WHERE (fullname ILIKE $1 OR username LIKE $2)
+              AND username NOT IN (
+                  SELECT username FROM {self.user_table} WHERE branch = $3
+                  UNION
+                  SELECT DISTINCT username FROM {self.user_roles}
+              )
             ORDER BY fullname
-            """
+            LIMIT $4
+            """,
+            pattern,
+            pattern,
+            branch,
+            limit,
         )
         return [dict(r) for r in rows]
+
+    # -------------------------------------------------------------------------
+    # СПРАВОЧНИК ПОЛЬЗОВАТЕЛЕЙ
+    # -------------------------------------------------------------------------
 
     async def get_users_from_directory(self, branch_filter: str) -> list[str]:
         """Возвращает список username пользователей из указанного подразделения."""
