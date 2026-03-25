@@ -39,11 +39,11 @@ class ActLockRepository(BaseRepository):
         row = await self.conn.fetchrow(
             f"""
             UPDATE {self.acts}
-            SET locked_by = $1,
+            SET locked_by = $1::VARCHAR,
                 locked_at = CURRENT_TIMESTAMP,
                 lock_expires_at = CURRENT_TIMESTAMP + $2 * interval '1 minute'
             WHERE id = $3
-              AND (locked_by IS NULL OR locked_by = $1 OR lock_expires_at <= CURRENT_TIMESTAMP)
+              AND (locked_by IS NULL OR locked_by = $1::VARCHAR OR lock_expires_at <= CURRENT_TIMESTAMP)
             RETURNING locked_by, locked_at, lock_expires_at
             """,
             username,
