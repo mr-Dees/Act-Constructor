@@ -53,9 +53,9 @@ class AdminAddUserDialog extends DialogBase {
                         </div>
                     </div>
                 </div>
-                <div class="dialog-footer">
-                    <button class="dialog-btn dialog-btn-cancel">Отмена</button>
-                    <button class="dialog-btn dialog-btn-confirm" disabled>Добавить</button>
+                <div class="dialog-buttons">
+                    <button class="btn btn-secondary dialog-cancel">Отмена</button>
+                    <button class="btn btn-primary dialog-confirm" disabled>Добавить</button>
                 </div>
             </div>
         `;
@@ -71,8 +71,8 @@ class AdminAddUserDialog extends DialogBase {
      */
     static _bindEvents(overlay) {
         const input = overlay.querySelector('.admin-add-search-input');
-        const cancelBtn = overlay.querySelector('.dialog-btn-cancel');
-        const confirmBtn = overlay.querySelector('.dialog-btn-confirm');
+        const cancelBtn = overlay.querySelector('.dialog-cancel');
+        const confirmBtn = overlay.querySelector('.dialog-confirm');
 
         input.addEventListener('input', () => this._onSearchInput(overlay));
         cancelBtn.addEventListener('click', () => this._close());
@@ -99,7 +99,7 @@ class AdminAddUserDialog extends DialogBase {
             const selectedEl = overlay.querySelector('.admin-add-selected');
 
             selectedEl.style.display = 'none';
-            overlay.querySelector('.dialog-btn-confirm').disabled = true;
+            overlay.querySelector('.dialog-confirm').disabled = true;
 
             if (query.length < 2) {
                 resultsEl.innerHTML = '';
@@ -146,7 +146,7 @@ class AdminAddUserDialog extends DialogBase {
         const resultsEl = overlay.querySelector('.admin-add-results');
         const selectedEl = overlay.querySelector('.admin-add-selected');
         const selectedUserEl = overlay.querySelector('.admin-add-selected-user');
-        const confirmBtn = overlay.querySelector('.dialog-btn-confirm');
+        const confirmBtn = overlay.querySelector('.dialog-confirm');
 
         resultsEl.innerHTML = '';
         selectedEl.style.display = 'block';
@@ -170,7 +170,7 @@ class AdminAddUserDialog extends DialogBase {
         const username = selectedEl.dataset.username;
         const roleSelect = overlay.querySelector('.admin-add-role-select');
         const roleId = parseInt(roleSelect.value);
-        const confirmBtn = overlay.querySelector('.dialog-btn-confirm');
+        const confirmBtn = overlay.querySelector('.dialog-confirm');
 
         confirmBtn.disabled = true;
 
