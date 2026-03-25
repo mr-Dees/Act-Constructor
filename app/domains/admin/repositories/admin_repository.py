@@ -181,7 +181,11 @@ class AdminRepository(BaseRepository):
                 UNION
                 SELECT DISTINCT username FROM {self.user_roles}
             ) base
-            LEFT JOIN {self.user_table} d ON d.username = base.username
+            LEFT JOIN (
+                SELECT DISTINCT ON (username) username, fullname, job, tn, email, branch
+                FROM {self.user_table}
+                ORDER BY username
+            ) d ON d.username = base.username
             LEFT JOIN {self.user_roles} ur ON ur.username = base.username
             LEFT JOIN {self.roles} r ON r.id = ur.role_id
             GROUP BY base.username, d.fullname, d.job, d.tn, d.email, d.branch
@@ -210,17 +214,21 @@ class AdminRepository(BaseRepository):
         pattern = f"%{escaped}%"
         rows = await self.conn.fetch(
             f"""
-            SELECT username,
-                   COALESCE(fullname, '') AS fullname,
-                   COALESCE(job, '') AS job,
-                   COALESCE(email, '') AS email
-            FROM {self.user_table}
-            WHERE (fullname ILIKE $1 OR username LIKE $2)
-              AND username NOT IN (
-                  SELECT username FROM {self.user_table} WHERE branch = $3
-                  UNION
-                  SELECT DISTINCT username FROM {self.user_roles}
-              )
+            SELECT username, fullname, job, email FROM (
+                SELECT DISTINCT ON (username)
+                       username,
+                       COALESCE(fullname, '') AS fullname,
+                       COALESCE(job, '') AS job,
+                       COALESCE(email, '') AS email
+                FROM {self.user_table}
+                WHERE (fullname ILIKE $1 OR username LIKE $2)
+                  AND username NOT IN (
+                      SELECT username FROM {self.user_table} WHERE branch = $3
+                      UNION
+                      SELECT DISTINCT username FROM {self.user_roles}
+                  )
+                ORDER BY username
+            ) sub
             ORDER BY fullname
             LIMIT $4
             """,
@@ -239,7 +247,7 @@ class AdminRepository(BaseRepository):
         """Возвращает список username пользователей из указанного подразделения."""
         rows = await self.conn.fetch(
             f"""
-            SELECT username
+            SELECT DISTINCT username
             FROM {self.user_table}
             WHERE branch = $1
             ORDER BY username
