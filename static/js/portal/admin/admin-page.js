@@ -1,16 +1,10 @@
 /**
  * Главный контроллер страницы администрирования ролей
- *
- * Загружает справочник пользователей и список ролей,
- * координирует поиск и управление ролями.
  */
 class AdminPage {
     static _usersDirectory = [];
     static _allRoles = [];
 
-    /**
-     * Инициализирует страницу администрирования
-     */
     static async init() {
         try {
             const [directory, roles] = await Promise.all([
@@ -23,6 +17,7 @@ class AdminPage {
             AdminSearch.init();
             AdminRoles.init(this._allRoles);
             AdminRoles.setUsers(this._usersDirectory);
+            this._initAddUserButton();
 
             console.log('AdminPage: инициализация завершена');
         } catch (error) {
@@ -31,18 +26,27 @@ class AdminPage {
         }
     }
 
-    /**
-     * Обновляет роли пользователя в локальном состоянии
-     * @param {string} username - Имя пользователя
-     * @param {Array} roles - Массив ролей
-     */
     static updateUserRoles(username, roles) {
         const user = this._usersDirectory.find(u => u.username === username);
         if (user) {
             user.roles = roles;
+        } else {
+            this._usersDirectory.push({ username, roles });
+        }
+    }
+
+    /**
+     * Инициализирует кнопку добавления пользователя
+     * @private
+     */
+    static _initAddUserButton() {
+        const btn = document.getElementById('adminAddUserBtn');
+        if (btn) {
+            btn.addEventListener('click', () => {
+                AdminAddUserDialog.show(this._allRoles);
+            });
         }
     }
 }
 
-// Экспортируем в глобальную область видимости
 window.AdminPage = AdminPage;
