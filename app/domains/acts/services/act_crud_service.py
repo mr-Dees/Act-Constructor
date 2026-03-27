@@ -251,6 +251,22 @@ class ActCrudService:
                     act_id, act_update.directives
                 )
 
+            # Валидация дат проверки (с учётом частичного обновления)
+            effective_start = (
+                act_update.inspection_start_date
+                if "inspection_start_date" in sent_fields and act_update.inspection_start_date is not None
+                else current_act.inspection_start_date
+            )
+            effective_end = (
+                act_update.inspection_end_date
+                if "inspection_end_date" in sent_fields and act_update.inspection_end_date is not None
+                else current_act.inspection_end_date
+            )
+            if effective_start and effective_end and effective_end < effective_start:
+                raise ActValidationError(
+                    "Дата окончания проверки не может быть раньше даты начала"
+                )
+
             # Валидация КМ, служебной записки, номера части
             new_km_digit, new_part_number, km_changed = await self._validate_km_and_part(
                 act_id, act_update, current_act, sent_fields, old_km_digit,

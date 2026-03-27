@@ -23,9 +23,9 @@ from app.core.middleware import (
     RateLimitMiddleware,
     RequestSizeLimitMiddleware
 )
-from asyncpg import UniqueViolationError
+from asyncpg import CheckViolationError, UniqueViolationError
 
-from app.core.exceptions import AppError
+from app.core.exceptions import AppError, CHECK_CONSTRAINT_MESSAGES
 from app.db.connection import (
     init_db,
     close_db,
@@ -48,8 +48,14 @@ _domains_dir = Path(__file__).resolve().parent / "domains"
 
 
 def _is_html_request(request: Request) -> bool:
-    """Проверяет, является ли запрос HTML (не API)."""
-    return not request.url.path.startswith("/api/")
+    """Проверяет, является ли запрос HTML (не API).
+
+    Используется scope["path"] вместо request.url.path, т.к. url.path
+    включает root_path (например, /user/.../proxy/8005/api/v1/...),
+    а scope["path"] содержит путь относительно приложения (/api/v1/...).
+    """
+    path = request.scope.get("path", request.url.path)
+    return not path.startswith("/api/")
 
 
 def _render_error_page(request: Request, code: int, reason: str | None = None):
@@ -253,6 +259,20 @@ def create_app() -> FastAPI:
             status_code=409,
             content={"detail": "Запись с такими данными уже существует"},
         )
+
+    @app.exception_handler(CheckViolationError)
+    async def check_violation_handler(request: Request, exc: CheckViolationError) -> JSONResponse:
+        """Обработчик нарушений CHECK-ограничений БД."""
+        exc_str = str(exc)
+        logger.warning(f"CheckViolationError: {exc_str} (path: {request.url.path})")
+
+        detail = "Данные не прошли проверку ограничений базы данных"
+        for constraint_name, message in CHECK_CONSTRAINT_MESSAGES.items():
+            if constraint_name in exc_str:
+                detail = message
+                break
+
+        return JSONResponse(status_code=422, content={"detail": detail})
 
     @app.exception_handler(HTTPException)
     async def http_exception_handler(request: Request, exc: HTTPException):

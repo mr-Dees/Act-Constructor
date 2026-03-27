@@ -817,6 +817,34 @@ class CreateActDialog extends DialogBase {
     }
 
     /**
+     * Валидирует что дата окончания проверки не раньше даты начала
+     * @private
+     */
+    static _validateInspectionDates(dialog) {
+        const startInput = dialog.querySelector('input[name="inspection_start_date"]');
+        const endInput = dialog.querySelector('input[name="inspection_end_date"]');
+
+        if (!startInput || !endInput) return true;
+
+        const startValue = startInput.value;
+        const endValue = endInput.value;
+
+        if (!startValue || !endValue) return true;
+
+        // Очищаем предыдущие ошибки
+        startInput.setCustomValidity('');
+        endInput.setCustomValidity('');
+
+        if (endValue < startValue) {
+            endInput.setCustomValidity('Дата окончания проверки не может быть раньше даты начала');
+            endInput.reportValidity();
+            return false;
+        }
+
+        return true;
+    }
+
+    /**
      * Валидирует взаимосвязь служебной записки и даты
      * @private
      */
@@ -860,6 +888,11 @@ class CreateActDialog extends DialogBase {
 
         // Проверяем корректность дат (год — 4 цифры)
         if (!this._validateDateFields(dialog)) {
+            return false;
+        }
+
+        // Проверяем что дата окончания проверки не раньше даты начала
+        if (!this._validateInspectionDates(dialog)) {
             return false;
         }
 
@@ -1124,8 +1157,14 @@ class CreateActDialog extends DialogBase {
         });
 
         if (!response.ok) {
-            const errData = await response.json();
-            throw {response, errData}; // Бросаем объект для обработки в _handleSubmitError
+            let errData;
+            try {
+                errData = await response.json();
+            } catch {
+                // Сервер вернул не-JSON ответ (HTML-страница ошибки и т.д.)
+                errData = {detail: `Ошибка сервера (${response.status})`};
+            }
+            throw {response, errData};
         }
 
         return await response.json();

@@ -457,7 +457,12 @@ class ActsMenuManager {
                 headers: {'X-JupyterHub-User': username}
             });
             if (!response.ok) {
-                const error = await response.json();
+                let error;
+                try {
+                    error = await response.json();
+                } catch {
+                    error = {};
+                }
                 throw new Error(error.detail || 'Ошибка дублирования');
             }
             const newAct = await response.json();

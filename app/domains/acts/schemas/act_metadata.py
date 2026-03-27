@@ -136,6 +136,19 @@ class ActCreate(BaseModel):
 
         return self
 
+    @model_validator(mode='after')
+    def validate_inspection_dates(self):
+        """Проверяет что дата окончания проверки не раньше даты начала."""
+        if (
+            self.inspection_start_date
+            and self.inspection_end_date
+            and self.inspection_end_date < self.inspection_start_date
+        ):
+            raise ValueError(
+                'Дата окончания проверки не может быть раньше даты начала'
+            )
+        return self
+
     @field_validator('audit_team')
     @classmethod
     def validate_audit_team_composition(cls, v):

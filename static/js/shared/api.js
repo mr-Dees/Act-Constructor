@@ -18,8 +18,7 @@ class APIClient {
         });
 
         if (!response.ok) {
-            const error = await response.json();
-            throw this._createError(response.status, error.detail);
+            await this._throwApiError(response);
         }
 
         return response.json();
@@ -37,8 +36,7 @@ class APIClient {
         });
 
         if (!response.ok) {
-            const error = await response.json();
-            throw this._createError(response.status, error.detail);
+            await this._throwApiError(response);
         }
 
         return response.json();
@@ -56,8 +54,7 @@ class APIClient {
         });
 
         if (!response.ok) {
-            const error = await response.json();
-            throw this._createError(response.status, error.detail);
+            await this._throwApiError(response);
         }
 
         return response.json();
@@ -648,8 +645,7 @@ class APIClient {
         );
 
         if (!response.ok) {
-            const error = await response.json();
-            throw this._createError(response.status, error.detail);
+            await this._throwApiError(response);
         }
 
         return response.json();
@@ -666,8 +662,7 @@ class APIClient {
             { headers: { 'X-JupyterHub-User': username } }
         );
         if (!response.ok) {
-            const error = await response.json();
-            throw this._createError(response.status, error.detail);
+            await this._throwApiError(response);
         }
         return response.json();
     }
@@ -683,8 +678,7 @@ class APIClient {
             { headers: { 'X-JupyterHub-User': username } }
         );
         if (!response.ok) {
-            const error = await response.json();
-            throw this._createError(response.status, error.detail);
+            await this._throwApiError(response);
         }
         return response.json();
     }
@@ -706,8 +700,7 @@ class APIClient {
         );
 
         if (!response.ok) {
-            const error = await response.json();
-            throw this._createError(response.status, error.detail);
+            await this._throwApiError(response);
         }
 
         return response.json();
@@ -732,8 +725,7 @@ class APIClient {
         });
 
         if (!response.ok) {
-            const error = await response.json();
-            throw this._createError(response.status, error.detail);
+            await this._throwApiError(response);
         }
 
         return response.json();
@@ -759,8 +751,7 @@ class APIClient {
         });
 
         if (!response.ok) {
-            const error = await response.json();
-            throw this._createError(response.status, error.detail);
+            await this._throwApiError(response);
         }
 
         return response.json();
@@ -774,6 +765,25 @@ class APIClient {
         const error = new Error(detail);
         error.status = status;
         return error;
+    }
+
+    /**
+     * Парсит JSON-тело ответа и бросает ошибку API.
+     * Безопасно обрабатывает не-JSON ответы (HTML-страницы ошибок и т.д.).
+     * @private
+     */
+    static async _throwApiError(response, fallbackDetail) {
+        let detail;
+        try {
+            const body = await response.json();
+            detail = body.detail;
+        } catch {
+            // Сервер вернул не-JSON ответ
+        }
+        throw this._createError(
+            response.status,
+            detail || fallbackDetail || `Ошибка сервера (${response.status})`
+        );
     }
 
     /**
@@ -973,8 +983,7 @@ class APIClient {
             body: JSON.stringify({ role_id: roleId })
         });
         if (!response.ok) {
-            const error = await response.json();
-            throw this._createError(response.status, error.detail);
+            await this._throwApiError(response);
         }
         return response.json();
     }
@@ -992,8 +1001,7 @@ class APIClient {
             headers: { 'X-JupyterHub-User': username }
         });
         if (!response.ok) {
-            const error = await response.json();
-            throw this._createError(response.status, error.detail);
+            await this._throwApiError(response);
         }
         return response.json();
     }

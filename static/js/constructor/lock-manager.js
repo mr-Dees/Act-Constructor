@@ -154,7 +154,12 @@ class LockManager {
         });
 
         if (response.status === 409) {
-            const error = await response.json();
+            let error;
+            try {
+                error = await response.json();
+            } catch {
+                error = {detail: `Акт заблокирован (${response.status})`};
+            }
             const lockedBy = this._extractUsernameFromError(error.detail);
 
             await DialogManager.show({

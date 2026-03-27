@@ -135,7 +135,12 @@ class AuthManager {
 
             // Проверяем на ошибку Kerberos токена
             if (response.status === 401) {
-                const errorData = await response.json();
+                let errorData;
+                try {
+                    errorData = await response.json();
+                } catch {
+                    errorData = {};
+                }
 
                 if (errorData.error === 'kerberos_token_expired') {
                     console.error('Kerberos токен истек');

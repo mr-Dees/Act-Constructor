@@ -578,7 +578,12 @@ class ActsManagerPage {
                     throw new Error('Акт не найден');
                 }
 
-                const error = await response.json();
+                let error;
+                try {
+                    error = await response.json();
+                } catch {
+                    error = {};
+                }
                 throw new Error(error.detail || 'Ошибка дублирования акта');
             }
 
