@@ -329,10 +329,12 @@ Service (бизнес-логика)
 app/api/v1/
 ├── routes.py              — главный роутер (агрегирует shared endpoints)
 ├── deps/
-│   └── auth_deps.py       — get_username() — проверка авторизации
+│   ├── auth_deps.py       — get_username() — проверка авторизации
+│   └── role_deps.py       — require_admin() — проверка роли Админ
 └── endpoints/
     ├── auth.py            — GET /me, /validate
-    ├── chat.py            — POST /message (AI-ассистент)
+    ├── chat.py            — POST /message (AI-ассистент + аудит-логирование)
+    ├── roles.py           — /roles/ (интеграция с admin доменом)
     └── system.py          — health, version
 ```
 
@@ -345,7 +347,8 @@ app/domains/acts/api/
 ├── content.py             — загрузка/сохранение содержимого
 ├── export.py              — экспорт в форматы
 ├── invoice.py             — работа с фактурами
-└── audit_log.py           — история операций
+├── audit_log.py           — история операций
+└── users.py               — поиск пользователей для autocomplete участников
 ```
 
 **Сервисы домена актов:**
@@ -360,6 +363,7 @@ app/domains/acts/api/
 | `StorageService` | `storage_service.py` | Файловый I/O (`acts_storage/`) |
 | `AuditLogService` | `audit_log_service.py` | История операций, восстановление версий |
 | `AccessGuard` | `access_guard.py` | Проверка доступа и прав |
+| `ActUsersRepository` | `repositories/act_users.py` | Поиск пользователей в справочнике (autocomplete) |
 
 ### 3.2 FastAPI Depends (DI)
 
@@ -467,7 +471,7 @@ def get_api_routers():
 
 | Файл | Модели |
 |------|--------|
-| `act_metadata.py` | `ActCreate`, `ActUpdate`, `AuditTeamMember`, `ActDirective` |
+| `act_metadata.py` | `ActCreate`, `ActUpdate`, `AuditTeamMember`, `ActDirective`, `UserSearchResult` |
 | `act_content.py` | `TreeNodeSchema`, `TableSchema`, `TextBlockSchema`, `ViolationSchema`, `ActDataSchema` |
 | `act_invoice.py` | `InvoiceSave`, `MetricItem` |
 | `act_audit_log.py` | Модели для аудит-лога |
@@ -999,10 +1003,10 @@ async def on_shutdown(app: FastAPI) -> None:
 Поле `dependencies` в `DomainDescriptor` определяет порядок инициализации. `discover_domains()` выполняет топологическую сортировку (алгоритм Кана):
 
 ```python
-# Пример: ck_fin_res зависит от acts
+# Пример: acts зависит от admin (для справочника пользователей)
 DomainDescriptor(
-    name="ck_fin_res",
-    dependencies=["acts"],  # acts будет инициализирован первым
+    name="acts",
+    dependencies=["admin"],  # admin будет инициализирован первым
 )
 ```
 
@@ -1356,6 +1360,8 @@ return ChatResponse(response=response.choices[0].message.content)
 - Конвертация типов параметров (`"boolean"` → bool, `"integer"` → int, `"date"` → date)
 - Таймаут на каждый инструмент (по умолчанию 30 сек)
 - Результаты dict → JSON, остальное → str
+
+**Аудит-логирование:** после каждого вызова чата записывается аудит-лог (fire-and-forget) с текстом сообщения, ответом, вызванными инструментами и статусом.
 
 **Fallback:** если API не настроен (пустой `CHAT__API_BASE`), возвращается заглушка с инструкциями.
 
@@ -1826,6 +1832,8 @@ ACTS__AUDIT_LOG__RETENTION_DAYS=365
 | | `ACTS__INVOICE__SUBSIDIARY_DICT_COL_NAME` | str | `name` | Колонка имени |
 | **Акты: Аудит-лог** | `ACTS__AUDIT_LOG__RETENTION_DAYS` | int | `365` | Дни хранения лога |
 | | `ACTS__AUDIT_LOG__MAX_CONTENT_VERSIONS` | int | `50` | Макс. версий содержимого |
+| | `ACTS__AUDIT_LOG__MAX_DIFF_ELEMENTS` | int | `20` | Макс. элементов в diff |
+| | `ACTS__AUDIT_LOG__MAX_DIFF_CELLS_PER_TABLE` | int | `50` | Макс. ячеек diff на таблицу |
 | **Администрирование** | `ADMIN__USER_DIRECTORY__SCHEMA` | str | `s_grnplm_...` | Схема справочника |
 | | `ADMIN__USER_DIRECTORY__TABLE` | str | `t_db_oarb_ua_user` | Таблица пользователей |
 | | `ADMIN__USER_DIRECTORY__BRANCH_FILTER` | str | `Отдел аудита...` | Фильтр отделения |

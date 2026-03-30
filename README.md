@@ -90,6 +90,7 @@ uvicorn app.main:app --host 0.0.0.0 --port 8000
 | Безопасность | `SECURITY__MAX_REQUEST_SIZE`, `SECURITY__RATE_LIMIT_PER_MINUTE` | Лимиты запросов |
 | AI-чат | `CHAT__API_BASE`, `CHAT__API_KEY`, `CHAT__MODEL` | OpenAI-совместимый LLM API (опционально) |
 | Блокировки | `ACTS__LOCK__DURATION_MINUTES`, `ACTS__LOCK__INACTIVITY_TIMEOUT_MINUTES` | Управление блокировками актов |
+| Аудит-лог | `ACTS__AUDIT_LOG__RETENTION_DAYS`, `ACTS__AUDIT_LOG__MAX_DIFF_ELEMENTS` | Хранение логов и лимиты diff |
 | Фактуры | `ACTS__INVOICE__HIVE_SCHEMA`, `ACTS__INVOICE__GP_SCHEMA` | Схемы для привязки фактур |
 
 Полный список переменных — в файле [.env.example](.env.example).
@@ -104,7 +105,8 @@ Browser (vanilla JS)
 FastAPI Application
     ├── Shared API (auth, chat, system)
     ├── Domain Plugin Registry
-    │   └── acts/ — CRUD, блокировки, содержимое, экспорт, фактуры, аудит-лог
+    │   ├── acts/ — CRUD, блокировки, содержимое, экспорт, фактуры, аудит-лог
+    │   └── admin/ — роли, справочник пользователей
     └── Database Layer
         ├── asyncpg Connection Pool
         └── Adapters (PostgreSQL | Greenplum)
@@ -140,7 +142,7 @@ app/
 │   │   ├── formatters/     — экспорт (TXT, MD, DOCX)
 │   │   └── migrations/     — SQL-схемы (PostgreSQL, Greenplum)
 │   ├── admin/              — администрирование (роли, справочник пользователей)
-│   └── ...                 — другие домены-плагины (ck_fin_res, ck_client_exp)
+│   └── ck_*/               — домены-заглушки (ck_fin_res, ck_client_exp)
 ├── schemas/                — общие модели (chat, errors)
 └── formatters/             — общие утилиты форматирования
 static/
@@ -157,7 +159,7 @@ templates/
 | URL | Описание |
 |-----|----------|
 | `/` | Главная страница (workspace) с AI-чатом |
-| `/acts` | Менеджер актов — карточки, создание, дублирование, удаление |
+| `/acts` | Менеджер актов — карточки, создание (с autocomplete участников), дублирование, удаление |
 | `/constructor?act_id=X` | Конструктор актов — двухшаговый редактор (структура + содержимое) |
 | `/admin` | Панель администрирования — управление ролями и пользователями |
 
@@ -180,6 +182,7 @@ templates/
 | `/api/v1/acts/export/` | Экспорт и скачивание документов |
 | `/api/v1/acts/invoices/` | Управление фактурами |
 | `/api/v1/acts/{id}/audit-log` | Журнал операций и версии содержимого |
+| `/api/v1/acts/users/` | Поиск пользователей для аудиторской группы |
 | `/api/v1/admin/` | Управление ролями и пользователями |
 
 ## Тестирование
