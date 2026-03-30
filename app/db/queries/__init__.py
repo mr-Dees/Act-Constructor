@@ -1,17 +1,6 @@
 """
-SQL-запросы к базе данных актов.
+SQL-запросы к базе данных.
 
-Содержит:
-- ActQueries: извлечение метаданных, дерева структуры, таблиц,
-  текстовых блоков и нарушений, а также навигацию по иерархии
-- ActFilters: построение запросов поиска актов по метаданным и
-  форматирование результатов поиска
+Примечание: ActQueries и ActFilters перемещены в app.integrations.ai_assistant.queries,
+т.к. используются исключительно модулем AI-интеграции.
 """
-
-from app.db.queries.act_filters import ActFilters
-from app.db.queries.act_queries import ActQueries
-
-__all__ = [
-    "ActQueries",
-    "ActFilters",
-]

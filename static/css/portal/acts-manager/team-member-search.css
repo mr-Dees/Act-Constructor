@@ -1,0 +1,95 @@
+/* Team member autocomplete search dropdown */
+
+.team-member-name-wrapper {
+    position: relative;
+    min-width: 0;
+}
+
+.team-member-name-wrapper input {
+    width: 100%;
+}
+
+.team-member-search-dropdown {
+    position: absolute;
+    top: 100%;
+    left: 0;
+    right: 0;
+    z-index: 100;
+    background: var(--bg-primary);
+    border: 1px solid var(--border-color);
+    border-top: none;
+    border-radius: 0 0 8px 8px;
+    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
+    max-height: 200px;
+    overflow-y: auto;
+    display: none;
+}
+
+.team-member-search-dropdown.visible {
+    display: block;
+}
+
+.team-member-search-item {
+    padding: 8px 12px;
+    cursor: pointer;
+    border-bottom: 1px solid var(--border-color);
+    transition: background-color 0.15s;
+}
+
+.team-member-search-item:last-child {
+    border-bottom: none;
+}
+
+.team-member-search-item:hover {
+    background: var(--bg-secondary);
+}
+
+.team-member-search-item-name {
+    font-size: 0.85rem;
+    color: var(--text-primary);
+    font-weight: 500;
+}
+
+.team-member-search-item-details {
+    font-size: 0.75rem;
+    color: var(--text-tertiary);
+    margin-top: 2px;
+}
+
+.team-member-search-empty,
+.team-member-search-loading {
+    padding: 12px;
+    text-align: center;
+    font-size: 0.8rem;
+    color: var(--text-tertiary);
+}
+
+/* Readonly state after selection */
+.team-member-row input[readonly] {
+    background: var(--bg-secondary);
+    cursor: default;
+    opacity: 0.85;
+}
+
+/* Clear button (reset selected user) */
+.clear-member-btn {
+    display: none;
+    align-items: center;
+    justify-content: center;
+    background: none;
+    border: none;
+    cursor: pointer;
+    color: var(--text-tertiary);
+    padding: 4px;
+    border-radius: 4px;
+    transition: color 0.15s, background-color 0.15s;
+}
+
+.clear-member-btn:hover {
+    color: var(--text-primary);
+    background: var(--bg-secondary);
+}
+
+.clear-member-btn.visible {
+    display: flex;
+}

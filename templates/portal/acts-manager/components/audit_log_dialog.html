@@ -1,0 +1,113 @@
+<template id="auditLogDialogTemplate">
+    <div class="custom-dialog-overlay">
+        <div class="custom-dialog acts-modal audit-log-modal">
+            <div class="acts-modal-header">
+                <h3 class="dialog-title">История изменений</h3>
+                <button class="acts-modal-close" data-action="close">&times;</button>
+            </div>
+
+            <!-- Вкладки -->
+            <div class="audit-log-tabs">
+                <button class="audit-log-tab active" data-tab="log">История операций</button>
+                <button class="audit-log-tab" data-tab="versions">Версии содержимого</button>
+            </div>
+
+            <!-- Вкладка: История операций -->
+            <div class="audit-log-tab-content" data-tab-content="log">
+                <!-- Фильтры -->
+                <div class="audit-log-filters collapsed">
+                    <div class="audit-log-filters-header">
+                        <button class="audit-log-filters-collapse" data-action="collapse-filters">
+                            <span class="audit-log-filters-chevron">&#9662;</span>
+                            Фильтры
+                        </button>
+                        <button class="audit-log-filter-toggle" data-action="toggle-all">Выбрать все</button>
+                    </div>
+                    <div class="audit-log-filters-body">
+                    <div class="audit-log-chip-groups">
+                        <div class="audit-log-chip-group all-inactive" data-group="lifecycle">
+                            <button class="audit-log-group-label">Жизненный цикл</button>
+                            <div class="audit-log-chips">
+                                <button class="audit-log-chip" data-value="duplicate">Дублирование</button>
+                                <button class="audit-log-chip" data-value="restore">Восстановление</button>
+                                <button class="audit-log-chip" data-value="create,delete">Создание / Удаление</button>
+                            </div>
+                        </div>
+                        <div class="audit-log-chip-group" data-group="content">
+                            <button class="audit-log-group-label">Содержимое</button>
+                            <div class="audit-log-chips">
+                                <button class="audit-log-chip active" data-value="content_save">Сохранение</button>
+                                <button class="audit-log-chip active" data-value="update">Обновление</button>
+                                <button class="audit-log-chip active" data-value="save_invoice">Фактуры</button>
+                            </div>
+                        </div>
+                        <div class="audit-log-chip-group all-inactive" data-group="lock">
+                            <button class="audit-log-group-label">Блокировка</button>
+                            <div class="audit-log-chips">
+                                <button class="audit-log-chip" data-value="lock">Блокировка</button>
+                                <button class="audit-log-chip" data-value="unlock">Разблокировка</button>
+                            </div>
+                        </div>
+                        <div class="audit-log-chip-group all-inactive" data-group="export">
+                            <button class="audit-log-group-label">Экспорт</button>
+                            <div class="audit-log-chips">
+                                <button class="audit-log-chip" data-value="export">Экспорт</button>
+                                <button class="audit-log-chip" data-value="download">Скачивание</button>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="audit-log-filter-row">
+                        <input type="date" data-filter="from-date" title="От даты">
+                        <input type="date" data-filter="to-date" title="До даты">
+                        <input type="text" data-filter="username" placeholder="Пользователь">
+                    </div>
+                    </div>
+                </div>
+                <div class="audit-log-list" id="auditLogList"></div>
+                <div class="audit-log-pagination" id="auditLogPagination"></div>
+            </div>
+
+            <!-- Вкладка: Версии -->
+            <div class="audit-log-tab-content hidden" data-tab-content="versions">
+                <div class="audit-log-list" id="versionsList"></div>
+                <div class="audit-log-pagination" id="versionsPagination"></div>
+            </div>
+        </div>
+    </div>
+</template>
+
+<template id="versionPreviewTemplate">
+    <div class="custom-dialog-overlay">
+        <div class="version-preview-container">
+            <div class="version-preview-header">
+                <div class="version-preview-info">
+                    <h2 data-field="title"></h2>
+                    <span data-field="meta"></span>
+                </div>
+                <div class="version-preview-controls">
+                    <div class="version-preview-toggle">
+                        <button class="toggle-btn active" data-view="ui">Предпросмотр</button>
+                        <button class="toggle-btn" data-view="json">JSON</button>
+                        <button class="toggle-btn" data-view="diff">Сравнение</button>
+                    </div>
+                    <button class="version-preview-close" data-action="close">&times;</button>
+                </div>
+            </div>
+            <div class="version-preview-body">
+                <div class="version-preview-ui"></div>
+                <div class="version-preview-json hidden"><pre></pre></div>
+                <div class="version-preview-diff hidden">
+                    <div class="diff-controls hidden">
+                        <button class="diff-mode-btn active" data-diff-mode="all">Показать все</button>
+                        <button class="diff-mode-btn" data-diff-mode="changes-only">Только различия</button>
+                    </div>
+                    <div class="diff-content"></div>
+                </div>
+            </div>
+            <div class="version-preview-footer">
+                <button class="btn btn-primary" data-action="restore">Восстановить эту версию</button>
+                <button class="btn btn-secondary" data-action="close">Закрыть</button>
+            </div>
+        </div>
+    </div>
+</template>

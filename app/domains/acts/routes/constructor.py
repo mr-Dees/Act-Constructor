@@ -1,0 +1,69 @@
+"""
+HTML-роут конструктора актов.
+
+Содержит маршрут для страницы конструктора с проверкой доступа
+пользователя к акту через зависимости авторизации и БД.
+"""
+
+import logging
+
+from fastapi import APIRouter, Request, Depends
+from fastapi.responses import HTMLResponse, RedirectResponse
+
+from app.api.v1.deps.auth_deps import get_username
+from app.core.config import get_settings
+from app.core.navigation import get_chat_domains_for_page, get_knowledge_bases_as_dicts
+from app.core.templating import get_templates
+from app.db.connection import get_db
+from app.domains.acts.repositories import ActAccessRepository
+
+settings = get_settings()
+logger = logging.getLogger("audit_workstation.domains.acts.routes.constructor")
+templates = get_templates()
+
+router = APIRouter()
+
+
+@router.get("/constructor", response_class=HTMLResponse)
+async def show_constructor(
+        request: Request,
+        act_id: int,
+        username: str = Depends(get_username)
+):
+    """
+    Страница конструктора конкретного акта.
+
+    Проверяет доступ пользователя к акту ДО рендеринга HTML.
+    При отсутствии доступа редиректит на главную страницу (менеджер актов).
+
+    Args:
+        request: HTTP запрос
+        act_id: ID акта из query параметра
+        username: Имя пользователя (из зависимости get_username)
+
+    Returns:
+        HTML страница конструктора или редирект на /
+
+    Raises:
+        RedirectResponse: 302 редирект на / при отсутствии доступа
+    """
+    async with get_db() as conn:
+        access = ActAccessRepository(conn)
+
+        has_access = await access.check_user_access(act_id, username)
+        if not has_access:
+            logger.info(
+                f"Пользователь {username} попытался открыть недоступный акт ID={act_id}, "
+                f"редирект на менеджер актов"
+            )
+            return RedirectResponse(url="/acts", status_code=302)
+
+        return templates.TemplateResponse(
+            request,
+            "constructor/constructor.html",
+            {
+                "act_id": act_id,
+                "chat_domains": get_chat_domains_for_page("acts"),
+                "knowledge_bases": get_knowledge_bases_as_dicts(),
+            }
+        )

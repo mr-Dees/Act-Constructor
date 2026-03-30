@@ -1,0 +1,126 @@
+{% extends "portal/base_portal.html" %}
+
+{% block title %}Портал инструментов{% endblock %}
+
+{# Landing использует inline чат, а не модальный — убираем модальный оверлей #}
+{% block modal_chat %}{% endblock %}
+
+{% block content %}
+<!-- Основной контент -->
+<div class="landing-content">
+    <!-- Панель чата (центральная область) -->
+    <aside class="chat-panel" id="chatPanel">
+        {% include 'shared/chat_content.html' %}
+    </aside>
+
+    <!-- Панель workflow (правая область) -->
+    <section class="workflow-panel">
+        <div class="workflow-header">
+            <h3 class="workflow-title">Мои проекты</h3>
+            <button class="workflow-filter-btn">
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none">
+                    <path d="M3 4a1 1 0 011-1h16a1 1 0 011 1v2.586a1 1 0 01-.293.707l-6.414 6.414a1 1 0 00-.293.707V17l-4 4v-6.586a1 1 0 00-.293-.707L3.293 7.293A1 1 0 013 6.586V4z"
+                          stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+                </svg>
+                Фильтры
+            </button>
+        </div>
+
+        <div class="workflow-content">
+            <!-- Карточки проектов (заглушка) -->
+            <div class="workflow-projects">
+                <div class="project-card">
+                    <div class="project-card-header">
+                        <h4 class="project-card-title">Проект аудита процессов</h4>
+                        <span class="project-card-status status-active">В работе</span>
+                    </div>
+                    <div class="project-card-body">
+                        <p class="project-card-description">Проверка процессов кредитования физических лиц</p>
+                        <div class="project-card-progress">
+                            <div class="progress-bar">
+                                <div class="progress-fill" style="width: 65%;"></div>
+                            </div>
+                            <span class="progress-label">65% выполнено</span>
+                        </div>
+                    </div>
+                    <div class="project-card-footer">
+                        <div class="project-card-meta">
+                            <span class="project-card-date">Дедлайн: 15.03.2026</span>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="project-card">
+                    <div class="project-card-header">
+                        <h4 class="project-card-title">Аудит операционных рисков</h4>
+                        <span class="project-card-status status-pending">Ожидание</span>
+                    </div>
+                    <div class="project-card-body">
+                        <p class="project-card-description">Анализ операционных рисков в бэк-офисе</p>
+                        <div class="project-card-progress">
+                            <div class="progress-bar">
+                                <div class="progress-fill" style="width: 30%;"></div>
+                            </div>
+                            <span class="progress-label">30% выполнено</span>
+                        </div>
+                    </div>
+                    <div class="project-card-footer">
+                        <div class="project-card-meta">
+                            <span class="project-card-date">Дедлайн: 22.03.2026</span>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="project-card">
+                    <div class="project-card-header">
+                        <h4 class="project-card-title">Проверка соблюдения НПА</h4>
+                        <span class="project-card-status status-review">На проверке</span>
+                    </div>
+                    <div class="project-card-body">
+                        <p class="project-card-description">Контроль соответствия нормативным актам ЦБ РФ</p>
+                        <div class="project-card-progress">
+                            <div class="progress-bar">
+                                <div class="progress-fill" style="width: 90%;"></div>
+                            </div>
+                            <span class="progress-label">90% выполнено</span>
+                        </div>
+                    </div>
+                    <div class="project-card-footer">
+                        <div class="project-card-meta">
+                            <span class="project-card-date">Дедлайн: 10.03.2026</span>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Сообщение о заглушке -->
+            <div class="workflow-placeholder">
+                <svg class="workflow-placeholder-icon" width="48" height="48" viewBox="0 0 24 24" fill="none">
+                    <path d="M13 10V3L4 14h7v7l9-11h-7z" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+                </svg>
+                <p class="workflow-placeholder-text">Интеграция с workflow в разработке</p>
+            </div>
+        </div>
+    </section>
+</div>
+{% endblock %}
+
+{% block extra_js %}
+<script src="{{ url_for('static', path='js/portal/landing/landing-page.js') }}"></script>
+{% endblock %}
+
+{% block init_script %}
+<script>
+    // Проверка авторизации при загрузке landing page
+    document.addEventListener('DOMContentLoaded', async () => {
+        // Требуем авторизацию через API
+        const isAuthorized = await AuthManager.requireAuth();
+
+        if (isAuthorized) {
+            // Инициализируем sidebar и страницу после успешной авторизации
+            LandingSidebar.init();
+            LandingPage.init();
+        }
+    });
+</script>
+{% endblock %}

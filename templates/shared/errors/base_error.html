@@ -1,0 +1,21 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>{% block title %}Ошибка{% endblock %}</title>
+    <link rel="stylesheet" href="{{ url_for('static', path='css/shared/errors/errors.css') }}">
+</head>
+<body>
+    <div class="error-page">
+        <div class="error-card">
+            <div class="error-icon">{% block icon %}{% endblock %}</div>
+            <h1 class="error-code">{% block code %}{% endblock %}</h1>
+            <h2 class="error-title">{% block error_title %}{% endblock %}</h2>
+            <p class="error-message">{% block message %}{% endblock %}</p>
+            {% block extra %}{% endblock %}
+            <a href="{{ request.scope.get('root_path', '') }}/" class="error-home-link">На главную</a>
+        </div>
+    </div>
+</body>
+</html>

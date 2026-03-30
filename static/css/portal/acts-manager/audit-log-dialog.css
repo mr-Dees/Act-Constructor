@@ -1,0 +1,400 @@
+/* Модификатор для аудит-лог диалога */
+.audit-log-modal {
+    width: 99vw;
+    height: 97vh;
+    max-width: 99vw;
+    min-width: auto;
+    max-height: 97vh;
+    border-radius: var(--radius-xl, 1rem);
+    /* Приведение акцентного цвета к пастельной палитре проекта */
+    --color-primary: var(--primary, #5b6fa8);
+    --color-primary-hover: var(--primary-hover, #4a5d8a);
+}
+
+/* Вкладки */
+.audit-log-tabs {
+    display: flex;
+    gap: 0;
+    border-bottom: 1px solid var(--color-border, #e0e0e0);
+    padding: 0 24px;
+}
+
+.audit-log-tab {
+    background: none;
+    border: none;
+    padding: 12px 20px;
+    font-size: 14px;
+    cursor: pointer;
+    color: var(--color-text-secondary, #666);
+    border-bottom: 2px solid transparent;
+    transition: all 0.15s;
+}
+
+.audit-log-tab:hover {
+    color: var(--color-text-primary, #333);
+}
+
+.audit-log-tab.active {
+    color: var(--color-primary);
+    border-bottom-color: var(--color-primary);
+    font-weight: 500;
+}
+
+/* Фильтры */
+.audit-log-filters {
+    padding: 14px 0;
+    border-bottom: 1px solid var(--color-border, #e8e8e8);
+    margin-bottom: 14px;
+}
+
+/* Заголовок фильтров */
+.audit-log-filters-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    margin-bottom: 10px;
+}
+
+/* Кнопка сворачивания */
+.audit-log-filters-collapse {
+    background: none;
+    border: none;
+    padding: 0;
+    font-size: 14px;
+    font-weight: 600;
+    color: var(--color-text-primary, #333);
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    gap: 5px;
+}
+
+.audit-log-filters-collapse:hover {
+    color: var(--color-primary);
+}
+
+/* Шеврон */
+.audit-log-filters-chevron {
+    display: inline-block;
+    transition: transform 0.2s;
+    font-size: 11px;
+    line-height: 1;
+}
+
+/* Свёрнутое состояние */
+.audit-log-filters.collapsed .audit-log-filters-chevron {
+    transform: rotate(-90deg);
+}
+
+.audit-log-filters.collapsed .audit-log-filters-body {
+    display: none;
+}
+
+.audit-log-filters.collapsed .audit-log-filters-header {
+    margin-bottom: 0;
+}
+
+.audit-log-filters.collapsed {
+    margin-bottom: 0;
+    border-bottom: none;
+}
+
+.audit-log-chip-groups {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 10px 20px;
+    margin-bottom: 14px;
+}
+
+.audit-log-chip-group {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+}
+
+.audit-log-group-label {
+    background: none;
+    border: none;
+    padding: 4px 0;
+    font-size: 12px;
+    font-weight: 600;
+    color: var(--color-text-secondary, #666);
+    cursor: pointer;
+    white-space: nowrap;
+    text-align: center;
+    transition: color 0.15s, background 0.15s;
+}
+
+.audit-log-group-label:hover {
+    color: var(--color-primary);
+    text-decoration: underline;
+    background: rgba(91, 111, 168, 0.06);
+    border-radius: 4px;
+}
+
+.audit-log-chip-group.all-inactive .audit-log-group-label {
+    color: var(--color-text-tertiary, #aaa);
+}
+
+.audit-log-filter-toggle {
+    align-self: flex-start;
+    background: none;
+    border: none;
+    padding: 0;
+    font-size: 13px;
+    color: var(--color-primary);
+    cursor: pointer;
+    font-weight: 500;
+}
+
+.audit-log-filter-toggle:hover {
+    text-decoration: underline;
+}
+
+.audit-log-chips {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px;
+    justify-content: center;
+}
+
+.audit-log-chip {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: calc(50% - 3px);
+    box-sizing: border-box;
+    padding: 5px 12px;
+    border: 1px solid var(--color-border, #ddd);
+    border-radius: 20px;
+    background: var(--color-bg-primary, #fff);
+    color: var(--color-text-secondary, #555);
+    font-size: 13px;
+    font-weight: 500;
+    cursor: pointer;
+    transition: all 0.15s;
+    user-select: none;
+}
+
+.audit-log-chip:hover {
+    border-color: var(--color-primary);
+    color: var(--color-primary);
+}
+
+.audit-log-chip.active {
+    background: var(--color-primary);
+    color: #fff;
+    border-color: var(--color-primary);
+}
+
+.audit-log-chip.active:hover {
+    background: var(--color-primary-hover);
+    border-color: var(--color-primary-hover);
+}
+
+.audit-log-filter-row {
+    display: flex;
+    gap: 10px;
+    align-items: center;
+    max-width: 600px;
+}
+
+.audit-log-filter-row input {
+    padding: 4px 10px;
+    border: 1px solid var(--color-border, #ddd);
+    border-radius: 6px;
+    font-size: 13px;
+    color: var(--color-text-primary, #333);
+    background: var(--color-bg-primary, #fff);
+}
+
+.audit-log-filter-row input[type="text"] {
+    flex: 1;
+    min-width: 120px;
+}
+
+/* Контент вкладок */
+.audit-log-tab-content {
+    flex: 1;
+    overflow: auto;
+    padding: 16px 24px;
+}
+
+.audit-log-tab-content.hidden {
+    display: none;
+}
+
+/* Записи */
+.audit-log-list {
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+}
+
+.audit-log-entry {
+    padding: 14px 16px;
+    border: 1px solid var(--color-border, #e8e8e8);
+    border-radius: 10px;
+    background: var(--color-bg-secondary, #fafafa);
+}
+
+.audit-log-entry-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: baseline;
+    gap: 10px;
+    flex-wrap: wrap;
+}
+
+.audit-log-entry-action {
+    font-weight: 500;
+    font-size: 14px;
+    color: var(--color-text-primary, #333);
+}
+
+.audit-log-entry-meta {
+    font-size: 13px;
+    color: var(--color-text-secondary, #888);
+    white-space: nowrap;
+}
+
+.audit-log-entry-details {
+    margin-top: 8px;
+    font-size: 13px;
+    color: var(--color-text-secondary, #555);
+    line-height: 1.5;
+}
+
+.audit-log-entry-details code {
+    font-size: 12px;
+    background: var(--color-bg-hover, #f0f0f0);
+    padding: 2px 5px;
+    border-radius: 4px;
+    word-break: break-all;
+}
+
+.audit-log-entry-actions {
+    margin-top: 10px;
+    display: flex;
+    gap: 8px;
+}
+
+.audit-log-entry-actions .btn-sm {
+    padding: 6px 14px;
+    font-size: 13px;
+}
+
+/* Changelog toggle */
+.audit-log-changelog-toggle {
+    background: none;
+    border: none;
+    color: var(--color-primary);
+    font-size: 13px;
+    cursor: pointer;
+    padding: 4px 0;
+    margin-top: 6px;
+}
+
+.audit-log-changelog-toggle:hover {
+    text-decoration: underline;
+}
+
+.audit-log-changelog-list {
+    margin: 8px 0 0 16px;
+    padding: 0;
+    font-size: 13px;
+    color: var(--color-text-secondary, #555);
+    line-height: 1.6;
+    list-style: disc;
+}
+
+.audit-log-changelog-list.hidden {
+    display: none;
+}
+
+/* Состояния */
+.audit-log-loading,
+.audit-log-empty,
+.audit-log-error {
+    text-align: center;
+    padding: 40px 16px;
+    font-size: 14px;
+    color: var(--color-text-secondary, #888);
+}
+
+.audit-log-error {
+    color: var(--color-danger, #dc2626);
+}
+
+/* Пагинация */
+.audit-log-pagination {
+    padding: 10px 0;
+}
+
+.audit-log-pages {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 10px;
+}
+
+.audit-log-page-info {
+    font-size: 13px;
+    color: var(--color-text-secondary, #888);
+}
+
+/* Кнопки — синхронизация с пастельной палитрой проекта */
+.audit-log-modal .btn {
+    box-shadow: none;
+}
+
+.audit-log-modal .btn-primary {
+    background: var(--color-primary);
+    border-color: var(--color-primary);
+}
+
+.audit-log-modal .btn-primary:hover:not(:disabled) {
+    background: var(--color-primary-hover);
+    border-color: var(--color-primary-hover);
+}
+
+.audit-log-modal .btn-secondary {
+    background: var(--color-bg-primary, #fff);
+    border-color: var(--color-border, #ddd);
+    color: var(--color-text-primary, #333);
+}
+
+.audit-log-modal .btn-secondary:hover:not(:disabled) {
+    border-color: var(--color-primary);
+    color: var(--color-primary);
+    background: var(--color-bg-primary, #fff);
+}
+
+/* Детализация изменений в changelog */
+.field-changes-list {
+    margin: 4px 0 0 20px;
+    padding: 0;
+    list-style: none;
+    font-size: 12px;
+    line-height: 1.5;
+}
+
+.field-change-item {
+    color: var(--color-text-secondary, #666);
+    padding: 1px 0;
+}
+
+.field-change-item .field-old {
+    color: var(--color-danger, #dc2626);
+    text-decoration: line-through;
+}
+
+.field-change-item .field-new {
+    color: #16a34a;
+    font-weight: 500;
+}
+
+.field-change-more {
+    color: var(--color-text-tertiary, #aaa);
+    font-style: italic;
+}

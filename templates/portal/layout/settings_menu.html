@@ -1,0 +1,25 @@
+<!-- Выпадающее меню настроек (общий компонент для всех страниц) -->
+<div id="landingSettingsMenu" class="settings-menu hidden landing-settings-menu">
+    <div class="settings-menu-header">
+        <h4>Настройки</h4>
+        <button id="closeLandingSettingsBtn" class="settings-menu-close" aria-label="Закрыть">&times;</button>
+    </div>
+    <div class="settings-menu-body">
+        <div class="settings-menu-section">
+            <h5 class="settings-section-title">AI Ассистенты</h5>
+
+            {% for kb in knowledge_bases | default([]) %}
+            <div class="settings-option" data-kb-key="{{ kb.key }}" data-kb-label="{{ kb.label }}">
+                <div class="settings-option-info">
+                    <div class="settings-option-label">{{ kb.label }}</div>
+                    <div class="settings-option-desc">{{ kb.description }}</div>
+                </div>
+                <label class="theme-switch">
+                    <input type="checkbox" data-kb-key="{{ kb.key }}">
+                    <span class="theme-slider"></span>
+                </label>
+            </div>
+            {% endfor %}
+        </div>
+    </div>
+</div>

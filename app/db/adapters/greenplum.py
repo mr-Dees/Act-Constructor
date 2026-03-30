@@ -4,15 +4,16 @@
 Реализует интерфейс DatabaseAdapter с учетом специфики MPP-архитектуры.
 """
 
-import json
 import logging
+import re
+from collections.abc import Callable
 from pathlib import Path
 
 import asyncpg
 
 from app.db.adapters.base import DatabaseAdapter
 
-logger = logging.getLogger("act_constructor.db.adapters.greenplum")
+logger = logging.getLogger("audit_workstation.db.adapters.greenplum")
 
 
 class GreenplumAdapter(DatabaseAdapter):
@@ -33,100 +34,108 @@ class GreenplumAdapter(DatabaseAdapter):
             f"schema={schema}, prefix={table_prefix}"
         )
 
-    async def create_tables(self, conn: asyncpg.Connection) -> None:
-        """
-        Создает таблицы из schema.sql для Greenplum.
+    async def _get_existing_tables(
+        self,
+        conn: asyncpg.Connection,
+        expected_names: list[str],
+    ) -> set[str]:
+        """Проверяет существование таблиц в схеме Greenplum."""
+        if not expected_names:
+            return set()
 
-        Сначала проверяет существование основной таблицы.
-        Если таблицы уже есть - пропускает создание.
-        """
-        # Проверяем существование основной таблицы
-        table_exists = await conn.fetchval(
-            """
-            SELECT EXISTS (
-                SELECT 1 
-                FROM pg_tables 
-                WHERE schemaname = $1 
-                AND tablename = $2
-            )
-            """,
-            self.schema,
-            f"{self.table_prefix}acts"
+        # expected_names могут быть квалифицированными: schema.table_name
+        name_map: dict[str, str] = {}
+        for name in expected_names:
+            parts = name.split('.')
+            simple_name = parts[-1] if len(parts) > 1 else name
+            name_map[simple_name] = name
+
+        simple_names = list(name_map.keys())
+        rows = await conn.fetch(
+            "SELECT tablename FROM pg_tables "
+            "WHERE schemaname = $1 AND tablename = ANY($2::text[])",
+            self.schema, simple_names,
         )
+        existing_simple = {r['tablename'] for r in rows}
+        return {name_map[s] for s in existing_simple if s in name_map}
 
-        if table_exists:
-            logger.info(
-                f"Таблицы в {self.schema}.{self.table_prefix}* уже существуют, "
-                f"пропускаем создание"
-            )
+    async def create_tables(self, conn: asyncpg.Connection, schema_paths: list[Path] | None = None, substitutions: dict[str, str | Callable[[], str]] | None = None) -> None:
+        """Создает таблицы из списка schema.sql для Greenplum с проверкой целостности."""
+        if not schema_paths:
             return
 
-        # Таблиц нет - создаем
-        schema_path = (
-                Path(__file__).parent.parent
-                / "migrations"
-                / "greenplum"
-                / "schema.sql"
-        )
+        for schema_path in schema_paths:
+            if not schema_path.exists():
+                logger.warning(f"Схема не найдена: {schema_path}, пропускаем")
+                continue
 
-        if not schema_path.exists():
-            raise FileNotFoundError(f"Схема не найдена: {schema_path}")
+            schema_sql = schema_path.read_text(encoding='utf-8')
 
-        schema_sql = schema_path.read_text(encoding='utf-8')
+            # Подставляем схему и префикс
+            schema_sql = schema_sql.replace("{SCHEMA}", self.schema)
+            schema_sql = schema_sql.replace("{PREFIX}", self.table_prefix)
 
-        # Подставляем схему и префикс
-        schema_sql = schema_sql.replace("{SCHEMA}", self.schema)
-        schema_sql = schema_sql.replace("{PREFIX}", self.table_prefix)
+            # Подстановка плейсхолдеров справочных таблиц
+            if substitutions:
+                for placeholder, value in substitutions.items():
+                    resolved = value() if callable(value) else value
+                    schema_sql = schema_sql.replace(placeholder, resolved)
 
-        try:
-            await conn.execute(schema_sql)
-            logger.info("Greenplum таблицы созданы успешно")
-        except asyncpg.DuplicateTableError as e:
-            logger.info(f"Некоторые таблицы Greenplum уже существуют: {e}")
-        except asyncpg.DuplicateObjectError as e:
-            logger.info(f"Некоторые объекты Greenplum уже существуют: {e}")
-        except Exception as e:
-            logger.error(f"Ошибка создания Greenplum схемы: {e}")
-            raise
+            # Пропускаем файлы без реальных SQL-операторов
+            if not re.sub(r'--[^\n]*', '', schema_sql).strip():
+                logger.debug(f"Пустая схема (только комментарии): {schema_path}, пропускаем")
+                continue
 
-    async def delete_act_cascade(
-            self,
-            conn: asyncpg.Connection,
-            act_id: int
-    ) -> None:
-        """
-        Удаляет акт с явным удалением связанных записей.
+            domain_name = schema_path.parent.parent.name
+            expected = self._extract_table_names_from_sql(schema_sql)
 
-        Greenplum не поддерживает ON DELETE CASCADE,
-        поэтому удаляем в правильном порядке.
-        """
-        async with conn.transaction():
-            # Порядок важен: сначала зависимые таблицы
-            tables_to_delete = [
-                "act_invoices",
-                "act_violations",
-                "act_textblocks",
-                "act_tables",
-                "act_tree",
-                "act_directives",
-                "audit_team_members",
-            ]
+            if not expected:
+                logger.debug(f"Нет CREATE TABLE в схеме: {schema_path}")
+                continue
 
-            for table in tables_to_delete:
-                table_name = self.get_table_name(table)
-                result = await conn.execute(
-                    f"DELETE FROM {table_name} WHERE act_id = $1",
-                    act_id
+            # Pre-check: какие таблицы уже существуют
+            existing = await self._get_existing_tables(conn, expected)
+            missing = [t for t in expected if t not in existing]
+
+            if not missing:
+                logger.info(
+                    f"Greenplum: все таблицы домена '{domain_name}' существуют "
+                    f"({len(expected)} шт.)"
                 )
-                logger.debug(f"Удалено из {table}: {result}")
+                continue
 
-            # Финальное удаление акта
-            acts_table = self.get_table_name("acts")
-            await conn.execute(
-                f"DELETE FROM {acts_table} WHERE id = $1",
-                act_id
+            missing_short = [t.split('.')[-1] for t in missing]
+            logger.info(
+                f"Greenplum: создание таблиц домена '{domain_name}' — "
+                f"отсутствуют {len(missing)} из {len(expected)}: {', '.join(missing_short)}"
             )
-            logger.debug(f"Акт ID={act_id} удален (Greenplum explicit cascade)")
+
+            try:
+                await conn.execute(schema_sql)
+                logger.info(f"Greenplum схема выполнена: {domain_name}")
+            except asyncpg.DuplicateTableError as e:
+                logger.warning(f"Greenplum: часть таблиц уже существовала ({domain_name}): {e}")
+            except asyncpg.DuplicateObjectError as e:
+                logger.warning(f"Greenplum: часть объектов уже существовала ({domain_name}): {e}")
+            except Exception as e:
+                logger.error(f"Ошибка создания Greenplum схемы {schema_path}: {e}")
+                raise
+
+            # Post-verify: убеждаемся, что все таблицы созданы
+            existing_after = await self._get_existing_tables(conn, expected)
+            still_missing = [t for t in expected if t not in existing_after]
+
+            if still_missing:
+                still_missing_short = [t.split('.')[-1] for t in still_missing]
+                raise RuntimeError(
+                    f"Greenplum: не удалось создать все таблицы домена '{domain_name}'. "
+                    f"Отсутствуют: {', '.join(still_missing_short)}"
+                )
+
+            logger.info(
+                f"Greenplum: целостность схемы '{domain_name}' подтверждена "
+                f"({len(expected)} таблиц)"
+            )
 
     def get_table_name(self, base_name: str) -> str:
         """
@@ -151,87 +160,17 @@ class GreenplumAdapter(DatabaseAdapter):
                 "GIN индекс в Greenplum может быть медленным, "
                 "рассмотрите альтернативы"
             )
-            return "GIN"
+            return "BTREE"
         return index_type
 
     def supports_cascade_delete(self) -> bool:
         """Greenplum НЕ поддерживает ON DELETE CASCADE."""
         return False
 
+    def supports_on_conflict(self) -> bool:
+        """Greenplum НЕ поддерживает INSERT ... ON CONFLICT DO UPDATE."""
+        return False
+
     async def get_current_schema(self, conn: asyncpg.Connection) -> str:
         """Возвращает настроенную схему Greenplum."""
         return self.schema
-
-    async def upsert_invoice(
-            self,
-            conn: asyncpg.Connection,
-            table_name: str,
-            data: dict,
-            username: str,
-    ) -> asyncpg.Record:
-        """
-        Upsert фактуры через UPDATE + INSERT (без ON CONFLICT).
-
-        Greenplum не поддерживает INSERT ... ON CONFLICT DO UPDATE.
-        """
-        metrics_json = json.dumps(data["metrics"], ensure_ascii=False)
-
-        # Попытка UPDATE существующей записи
-        row = await conn.fetchrow(
-            f"""
-            UPDATE {table_name} SET
-                node_number = $3,
-                db_type = $4,
-                schema_name = $5,
-                table_name = $6,
-                metrics = $7::jsonb,
-                verification_status = 'pending',
-                updated_at = CURRENT_TIMESTAMP
-            WHERE act_id = $1 AND node_id = $2
-            RETURNING id, act_id, node_id, node_number, db_type,
-                      schema_name, table_name, metrics,
-                      verification_status, created_at, updated_at, created_by
-            """,
-            data["act_id"],
-            data["node_id"],
-            data.get("node_number"),
-            data["db_type"],
-            data["schema_name"],
-            data["table_name"],
-            metrics_json,
-        )
-
-        if row:
-            return row
-
-        # Запись не найдена — INSERT
-        return await conn.fetchrow(
-            f"""
-            INSERT INTO {table_name} (
-                act_id, node_id, node_number, db_type,
-                schema_name, table_name, metrics, created_by
-            )
-            VALUES ($1, $2, $3, $4, $5, $6, $7::jsonb, $8)
-            RETURNING id, act_id, node_id, node_number, db_type,
-                      schema_name, table_name, metrics,
-                      verification_status, created_at, updated_at, created_by
-            """,
-            data["act_id"],
-            data["node_id"],
-            data.get("node_number"),
-            data["db_type"],
-            data["schema_name"],
-            data["table_name"],
-            metrics_json,
-            username,
-        )
-
-    def get_distributed_by_clause(self, table_name: str) -> str:
-        """
-        Возвращает DISTRIBUTED BY clause для оптимального распределения.
-
-        Стратегия распределения:
-        - Все таблицы распределяются по id для избежания проблем с UPDATE
-          на колонках в DISTRIBUTED BY при наличии триггеров
-        """
-        return "DISTRIBUTED BY (id)"

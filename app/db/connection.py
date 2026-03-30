@@ -16,7 +16,7 @@ from app.db.adapters.base import DatabaseAdapter
 from app.db.adapters.greenplum import GreenplumAdapter
 from app.db.adapters.postgresql import PostgreSQLAdapter
 
-logger = logging.getLogger("act_constructor.db.connect")
+logger = logging.getLogger("audit_workstation.db.connect")
 
 _pool: Pool | None = None
 _adapter: DatabaseAdapter | None = None
@@ -114,23 +114,26 @@ async def init_db(settings: Settings) -> None:
 
     try:
         # Определяем тип БД и создаем адаптер
-        if settings.db_type == "postgresql":
+        if settings.database.type == "postgresql":
             _adapter = PostgreSQLAdapter()
 
-            dsn = (
-                f"postgresql://{settings.db_user}:{settings.db_password}"
-                f"@{settings.db_host}:{settings.db_port}/{settings.db_name}"
+            pool_kwargs = dict(
+                host=settings.database.host,
+                port=settings.database.port,
+                database=settings.database.name,
+                user=settings.database.user,
+                password=settings.database.password,
             )
 
             logger.info(
                 f"Инициализация PostgreSQL: "
-                f"{settings.db_host}:{settings.db_port}/{settings.db_name}"
+                f"{settings.database.host}:{settings.database.port}/{settings.database.name}"
             )
 
-        elif settings.db_type == "greenplum":
+        elif settings.database.type == "greenplum":
             _adapter = GreenplumAdapter(
-                schema=settings.gp_schema,
-                table_prefix=settings.gp_table_prefix
+                schema=settings.database.gp.schema_name,
+                table_prefix=settings.database.gp.table_prefix
             )
 
             # Получаем username из JUPYTERHUB_USER
@@ -148,32 +151,34 @@ async def init_db(settings: Settings) -> None:
                     f"Не удалось извлечь username для Greenplum: {username}"
                 )
 
-            dsn = (
-                f"postgresql://{username_digits}"
-                f"@{settings.gp_host}:{settings.gp_port}/{settings.gp_database}"
+            pool_kwargs = dict(
+                host=settings.database.gp.host,
+                port=settings.database.gp.port,
+                database=settings.database.gp.database,
+                user=username_digits,
             )
 
             logger.info(
                 f"Инициализация Greenplum: "
-                f"{settings.gp_host}:{settings.gp_port}/{settings.gp_database}, "
-                f"schema={settings.gp_schema}, user={username_digits}"
+                f"{settings.database.gp.host}:{settings.database.gp.port}/{settings.database.gp.database}, "
+                f"schema={settings.database.gp.schema_name}, user={username_digits}"
             )
 
         else:
-            raise ValueError(f"Неподдерживаемый тип БД: {settings.db_type}")
+            raise ValueError(f"Неподдерживаемый тип БД: {settings.database.type}")
 
         # Создаем пул подключений
         try:
             _pool = await asyncpg.create_pool(
-                dsn,
-                min_size=settings.db_pool_min_size,
-                max_size=settings.db_pool_max_size,
-                command_timeout=60
+                **pool_kwargs,
+                min_size=settings.database.pool_min_size,
+                max_size=settings.database.pool_max_size,
+                command_timeout=settings.database.command_timeout
             )
 
             logger.info(
-                f"Database pool создан для {settings.db_type} "
-                f"(min={settings.db_pool_min_size}, max={settings.db_pool_max_size})"
+                f"Database pool создан для {settings.database.type} "
+                f"(min={settings.database.pool_min_size}, max={settings.database.pool_max_size})"
             )
 
         except asyncpg.PostgresError as e:
@@ -261,60 +266,40 @@ async def get_db() -> AsyncGenerator[asyncpg.Connection, None]:
         raise
 
 
-async def get_db_connection() -> asyncpg.Connection:
-    """
-    Альтернативный метод получения подключения (без context manager).
-
-    Returns:
-        Подключение из пула
-
-    Raises:
-        KerberosTokenExpiredError: Если токен протух
-        RuntimeError: Если пул не инициализирован
-
-    Note:
-        Вызывающий код должен сам закрыть подключение через conn.close()
-    """
-    pool = get_pool()
-
-    try:
-        return await pool.acquire()
-    except asyncpg.PostgresError as e:
-        error_message = str(e)
-
-        if _is_kerberos_token_expired(error_message):
-            logger.error(
-                "Kerberos токен протух при получении подключения. "
-                "Выполните 'kinit' для обновления."
-            )
-            raise KerberosTokenExpiredError(
-                "Kerberos токен протух. Выполните 'kinit' для обновления."
-            ) from e
-
-        raise
-
-
-async def create_tables_if_not_exist() -> None:
+async def create_tables_if_not_exist(domains=None) -> None:
     """
     Создаёт таблицы если их нет, используя адаптер текущей СУБД.
+
+    Args:
+        domains: Список DomainDescriptor для поиска schema.sql
 
     Raises:
         KerberosTokenExpiredError: Если токен протух во время создания таблиц
     """
+    from app.db.adapters.postgresql import PostgreSQLAdapter
+
     pool = get_pool()
     adapter = get_adapter()
+    db_type = "postgresql" if isinstance(adapter, PostgreSQLAdapter) else "greenplum"
+
+    substitutions = {}
+    schema_paths = []
+    if domains:
+        for d in domains:
+            substitutions.update(d.migration_substitutions)
+            if d.package_path:
+                path = d.package_path / "migrations" / db_type / "schema.sql"
+                if path.exists():
+                    schema_paths.append(path)
 
     try:
         async with pool.acquire() as conn:
-            await adapter.create_tables(conn)
+            await adapter.create_tables(conn, schema_paths, substitutions)
 
         logger.info(
-            f"Схема БД ({adapter.__class__.__name__}) создана/проверена успешно"
+            f"Схема БД ({adapter.__class__.__name__}): "
+            f"целостность проверена для {len(schema_paths)} доменов"
         )
-
-    except asyncpg.DuplicateObjectError as e:
-        logger.warning(f"Некоторые объекты БД уже существуют: {e}")
-        logger.info("Схема БД проверена")
 
     except asyncpg.PostgresError as e:
         error_message = str(e)

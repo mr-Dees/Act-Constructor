@@ -4,58 +4,105 @@
 Реализует интерфейс DatabaseAdapter для стандартного PostgreSQL.
 """
 
-import json
 import logging
+import re
+from collections.abc import Callable
 from pathlib import Path
 
 import asyncpg
 
 from app.db.adapters.base import DatabaseAdapter
 
-logger = logging.getLogger("act_constructor.db.adapters.postgresql")
+logger = logging.getLogger("audit_workstation.db.adapters.postgresql")
 
 
 class PostgreSQLAdapter(DatabaseAdapter):
     """Адаптер для работы с PostgreSQL."""
 
-    async def create_tables(self, conn: asyncpg.Connection) -> None:
-        """Создает таблицы из schema.sql для PostgreSQL."""
-        schema_path = (
-                Path(__file__).parent.parent
-                / "migrations"
-                / "postgresql"
-                / "schema.sql"
+    async def _get_existing_tables(
+        self,
+        conn: asyncpg.Connection,
+        expected_names: list[str],
+    ) -> set[str]:
+        """Проверяет существование таблиц в схеме public."""
+        if not expected_names:
+            return set()
+        rows = await conn.fetch(
+            "SELECT tablename FROM pg_tables "
+            "WHERE schemaname = 'public' AND tablename = ANY($1::text[])",
+            expected_names,
         )
+        return {r['tablename'] for r in rows}
 
-        if not schema_path.exists():
-            raise FileNotFoundError(f"Схема не найдена: {schema_path}")
+    async def create_tables(self, conn: asyncpg.Connection, schema_paths: list[Path] | None = None, substitutions: dict[str, str | Callable[[], str]] | None = None) -> None:
+        """Создает таблицы из списка schema.sql для PostgreSQL с проверкой целостности."""
+        if not schema_paths:
+            return
 
-        schema_sql = schema_path.read_text(encoding='utf-8')
+        for schema_path in schema_paths:
+            if not schema_path.exists():
+                logger.warning(f"Схема не найдена: {schema_path}, пропускаем")
+                continue
 
-        try:
-            await conn.execute(schema_sql)
-            logger.info("PostgreSQL схема создана успешно")
-        except asyncpg.DuplicateObjectError:
-            logger.info("PostgreSQL схема уже существует")
-        except Exception as e:
-            logger.error(f"Ошибка создания PostgreSQL схемы: {e}")
-            raise
+            schema_sql = schema_path.read_text(encoding='utf-8')
 
-    async def delete_act_cascade(
-            self,
-            conn: asyncpg.Connection,
-            act_id: int
-    ) -> None:
-        """
-        Удаляет акт используя ON DELETE CASCADE.
+            # Подстановка плейсхолдеров справочных таблиц
+            if substitutions:
+                for placeholder, value in substitutions.items():
+                    resolved = value() if callable(value) else value
+                    schema_sql = schema_sql.replace(placeholder, resolved)
 
-        PostgreSQL автоматически удаляет связанные записи.
-        """
-        await conn.execute(
-            "DELETE FROM acts WHERE id = $1",
-            act_id
-        )
-        logger.debug(f"Акт ID={act_id} удален (PostgreSQL CASCADE)")
+            # Пропускаем файлы без реальных SQL-операторов
+            if not re.sub(r'--[^\n]*', '', schema_sql).strip():
+                logger.debug(f"Пустая схема (только комментарии): {schema_path}, пропускаем")
+                continue
+
+            domain_name = schema_path.parent.parent.name
+            expected = self._extract_table_names_from_sql(schema_sql)
+
+            if not expected:
+                logger.debug(f"Нет CREATE TABLE в схеме: {schema_path}")
+                continue
+
+            # Pre-check: какие таблицы уже существуют
+            existing = await self._get_existing_tables(conn, expected)
+            missing = [t for t in expected if t not in existing]
+
+            if not missing:
+                logger.info(
+                    f"PostgreSQL: все таблицы домена '{domain_name}' существуют "
+                    f"({len(expected)} шт.)"
+                )
+                continue
+
+            logger.info(
+                f"PostgreSQL: создание таблиц домена '{domain_name}' — "
+                f"отсутствуют {len(missing)} из {len(expected)}: {', '.join(missing)}"
+            )
+
+            try:
+                await conn.execute(schema_sql)
+                logger.info(f"PostgreSQL схема выполнена: {domain_name}")
+            except asyncpg.DuplicateObjectError:
+                logger.info(f"PostgreSQL: некоторые объекты уже существуют ({domain_name})")
+            except Exception as e:
+                logger.error(f"Ошибка создания PostgreSQL схемы {schema_path}: {e}")
+                raise
+
+            # Post-verify: убеждаемся, что все таблицы созданы
+            existing_after = await self._get_existing_tables(conn, expected)
+            still_missing = [t for t in expected if t not in existing_after]
+
+            if still_missing:
+                raise RuntimeError(
+                    f"PostgreSQL: не удалось создать все таблицы домена '{domain_name}'. "
+                    f"Отсутствуют: {', '.join(still_missing)}"
+                )
+
+            logger.info(
+                f"PostgreSQL: целостность схемы '{domain_name}' подтверждена "
+                f"({len(expected)} таблиц)"
+            )
 
     def get_table_name(self, base_name: str) -> str:
         """Возвращает имя таблицы без префиксов."""
@@ -77,50 +124,11 @@ class PostgreSQLAdapter(DatabaseAdapter):
         """PostgreSQL поддерживает ON DELETE CASCADE."""
         return True
 
+    def supports_on_conflict(self) -> bool:
+        """PostgreSQL поддерживает INSERT ... ON CONFLICT DO UPDATE."""
+        return True
+
     async def get_current_schema(self, conn: asyncpg.Connection) -> str:
         """Возвращает текущую схему PostgreSQL."""
         schema = await conn.fetchval("SELECT current_schema()")
         return schema or "public"
-
-    async def upsert_invoice(
-            self,
-            conn: asyncpg.Connection,
-            table_name: str,
-            data: dict,
-            username: str,
-    ) -> asyncpg.Record:
-        """Upsert фактуры через INSERT ... ON CONFLICT DO UPDATE."""
-        metrics_json = json.dumps(data["metrics"], ensure_ascii=False)
-
-        return await conn.fetchrow(
-            f"""
-            INSERT INTO {table_name} (
-                act_id, node_id, node_number, db_type,
-                schema_name, table_name, metrics, created_by
-            )
-            VALUES ($1, $2, $3, $4, $5, $6, $7::jsonb, $8)
-            ON CONFLICT (act_id, node_id) DO UPDATE SET
-                node_number = EXCLUDED.node_number,
-                db_type = EXCLUDED.db_type,
-                schema_name = EXCLUDED.schema_name,
-                table_name = EXCLUDED.table_name,
-                metrics = EXCLUDED.metrics,
-                verification_status = 'pending',
-                updated_at = CURRENT_TIMESTAMP
-            RETURNING id, act_id, node_id, node_number, db_type,
-                      schema_name, table_name, metrics,
-                      verification_status, created_at, updated_at, created_by
-            """,
-            data["act_id"],
-            data["node_id"],
-            data.get("node_number"),
-            data["db_type"],
-            data["schema_name"],
-            data["table_name"],
-            metrics_json,
-            username,
-        )
-
-    def get_distributed_by_clause(self, table_name: str) -> str:
-        """PostgreSQL не использует DISTRIBUTED BY."""
-        return ""

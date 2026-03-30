@@ -1,0 +1,39 @@
+/* Admin page layout */
+.admin-content {
+    padding: 24px 32px;
+    width: 100%;
+    height: calc(100vh - 57px);
+    box-sizing: border-box;
+    display: flex;
+    flex-direction: column;
+}
+
+.admin-header {
+    margin-bottom: 24px;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+}
+
+.admin-title {
+    font-size: 1.5rem;
+    font-weight: 600;
+    color: var(--text-primary);
+    margin: 0;
+}
+
+.admin-add-user-btn {
+    padding: 8px 20px;
+    border-radius: 8px;
+    border: 1px solid var(--primary);
+    background: var(--primary);
+    color: white;
+    font-size: 0.85rem;
+    cursor: pointer;
+    transition: opacity 0.2s;
+    white-space: nowrap;
+}
+
+.admin-add-user-btn:hover {
+    opacity: 0.85;
+}

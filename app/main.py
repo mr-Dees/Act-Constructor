@@ -2,208 +2,82 @@
 Точка входа FastAPI приложения.
 
 Этот модуль создает и конфигурирует основное приложение FastAPI,
-подключает маршруты API, статические файлы и шаблоны Jinja2,
-Проверяет доступ к акту на уровне HTML-роута /constructor.
+подключает маршруты API и HTML-роуты, статические файлы,
+настраивает middleware и обработчики ошибок.
+Домены обнаруживаются автоматически из app/domains/.
 """
 
-import threading
 from contextlib import asynccontextmanager
-from datetime import datetime, timedelta
+from pathlib import Path
 
-from cachetools import TTLCache
-from fastapi import FastAPI, Request, Depends
-from fastapi.responses import FileResponse
-from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse
+from fastapi import FastAPI, HTTPException, Request
+from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
-from fastapi.templating import Jinja2Templates
-from starlette.middleware.base import BaseHTTPMiddleware
 
-from app.api.v1.deps.auth_deps import get_username
 from app.api.v1.endpoints.auth import get_current_user_from_env
 from app.api.v1.routes import api_router as api_v1_router
-from app.core.config import Settings, setup_logging
+from app.core.config import get_settings, setup_logging
+from app.core.domain_registry import discover_domains, register_domains
+from app.core.middleware import (
+    HTTPSRedirectMiddleware,
+    RateLimitMiddleware,
+    RequestIdMiddleware,
+    RequestSizeLimitMiddleware
+)
+from asyncpg import CheckViolationError, UniqueViolationError
+
+from app.core.exceptions import AppError, CHECK_CONSTRAINT_MESSAGES
 from app.db.connection import (
     init_db,
     close_db,
     create_tables_if_not_exist,
-    get_db,
     KerberosTokenExpiredError
 )
-from app.db.repositories.act_repository import ActDBService
+from app.routes.errors import router as error_router
+from app.routes.portal import router as portal_router
 
 # Инициализируем настройки и логирование один раз на уровне модуля
-settings = Settings()
-logger = setup_logging(settings.log_level)
+settings = get_settings()
+logger = setup_logging(settings.server.log_level)
 
 root_path = ''
-if settings.db_type == 'greenplum':
-    root_path = f"/user/{get_current_user_from_env(truncate=False)}/proxy/{settings.port}"
+if settings.database.type == 'greenplum':
+    root_path = f"/user/{get_current_user_from_env(truncate=False)}/proxy/{settings.server.port}"
+
+# Директория доменов
+_domains_dir = Path(__file__).resolve().parent / "domains"
 
 
-class HTTPSRedirectMiddleware(BaseHTTPMiddleware):
+def _is_html_request(request: Request) -> bool:
+    """Проверяет, является ли запрос HTML (не API).
+
+    Используется scope["path"] вместо request.url.path, т.к. url.path
+    включает root_path (например, /user/.../proxy/8005/api/v1/...),
+    а scope["path"] содержит путь относительно приложения (/api/v1/...).
     """
-    Middleware для форсирования HTTPS схемы в запросах.
-
-    Необходим для корректной работы url_for() за прокси JupyterHub,
-    который проксирует HTTPS, но отправляет запросы по HTTP.
-    """
-
-    async def dispatch(self, request: Request, call_next):
-        """
-        Перезаписывает схему на HTTPS если запрос пришел через прокси.
-
-        Args:
-            request: HTTP запрос
-            call_next: Следующий middleware в цепочке
-
-        Returns:
-            HTTP ответ
-        """
-        # Проверяем заголовки прокси
-        forwarded_proto = request.headers.get("x-forwarded-proto")
-        forwarded_scheme = request.headers.get("x-scheme")
-
-        # Если есть признаки HTTPS прокси - форсируем HTTPS
-        if forwarded_proto == "https" or forwarded_scheme == "https":
-            # Создаем новый scope с HTTPS схемой
-            scope = request.scope
-            scope["scheme"] = "https"
-
-            # Пересоздаем Request с новым scope
-            request = Request(scope, request.receive)
-
-        response = await call_next(request)
-        return response
+    path = request.scope.get("path", request.url.path)
+    return not path.startswith("/api/")
 
 
-class RateLimitMiddleware(BaseHTTPMiddleware):
-    """
-    Middleware для ограничения частоты запросов (rate limiting).
-
-    Используется TTLCache вместо defaultdict для автоматической очистки
-    старых записей. Thread-safe и без memory leak.
-    """
-
-    def __init__(self, app, rate_limit: int, settings: Settings):
-        """
-        Инициализация middleware.
-
-        Args:
-            app: FastAPI приложение
-            rate_limit: Максимум запросов в минуту на IP
-            settings: Настройки приложения
-        """
-        super().__init__(app)
-        self.rate_limit = rate_limit
-
-        # TTLCache автоматически удаляет старые записи.
-        self.requests = TTLCache(
-            maxsize=settings.max_tracked_ips,
-            ttl=settings.rate_limit_ttl
-        )
-
-        # Блокировка для thread-safety TTLCache (не thread-safe по
-        # умолчанию).
-        self.lock = threading.Lock()
-
-        logger.info(
-            f"Rate limiting инициализирован: {rate_limit} запросов/минуту, "
-            f"max_ips={settings.max_tracked_ips}, ttl={settings.rate_limit_ttl}s"
-        )
-
-    async def dispatch(self, request: Request, call_next):
-        """
-        Обрабатывает каждый запрос с проверкой лимита.
-
-        Args:
-            request: HTTP запрос
-            call_next: Следующий middleware в цепочке
-
-        Returns:
-            HTTP ответ или 429 при превышении лимита
-        """
-        client_ip = request.client.host
-        now = datetime.now()
-
-        with self.lock:
-            # Получаем или создаем список запросов для IP
-            if client_ip not in self.requests:
-                self.requests[client_ip] = []
-
-            ip_requests = self.requests[client_ip]
-
-            # Фильтруем запросы за последнюю минуту
-            cutoff_time = now - timedelta(minutes=1)
-            recent_requests = [ts for ts in ip_requests if ts > cutoff_time]
-
-            # Проверка лимита
-            if len(recent_requests) >= self.rate_limit:
-                logger.warning(f"Rate limit превышен для IP: {client_ip}")
-                return JSONResponse(
-                    status_code=429,
-                    content={
-                        "detail": "Слишком много запросов. Попробуйте позже.",
-                        "retry_after": 60
-                    }
-                )
-
-            # Добавляем текущий запрос
-            recent_requests.append(now)
-            self.requests[client_ip] = recent_requests
-
-        response = await call_next(request)
-        return response
-
-
-class RequestSizeLimitMiddleware(BaseHTTPMiddleware):
-    """
-    Middleware для ограничения размера тела запроса.
-
-    Предотвращает исчерпание памяти при отправке огромных JSON.
-    """
-
-    def __init__(self, app, max_size: int):
-        """
-        Инициализация middleware.
-
-        Args:
-            app: FastAPI приложение
-            max_size: Максимальный размер тела запроса в байтах
-        """
-        super().__init__(app)
-        self.max_size = max_size
-        logger.info(f"Request size limit установлен: {max_size / (1024 * 1024):.1f}MB")
-
-    async def dispatch(self, request: Request, call_next):
-        """
-        Проверяет размер тела запроса.
-
-        Args:
-            request: HTTP запрос
-            call_next: Следующий middleware в цепочке
-
-        Returns:
-            HTTP ответ или 413 при превышении лимита
-        """
-        content_length = request.headers.get("content-length")
-
-        if content_length:
-            content_length = int(content_length)
-            if content_length > self.max_size:
-                logger.warning(
-                    f"Отклонен запрос с размером {content_length / (1024 * 1024):.1f}MB "
-                    f"от {request.client.host}"
-                )
-                return JSONResponse(
-                    status_code=413,
-                    content={
-                        "detail": f"Размер запроса превышает лимит "
-                                  f"({self.max_size / (1024 * 1024):.1f}MB)"
-                    }
-                )
-
-        response = await call_next(request)
-        return response
+def _render_error_page(request: Request, code: int, reason: str | None = None):
+    """Рендерит HTML-страницу ошибки."""
+    from app.core.templating import get_templates
+    _templates = get_templates()
+    template_map = {
+        400: "shared/errors/400.html",
+        401: "shared/errors/401.html",
+        403: "shared/errors/403.html",
+        404: "shared/errors/404.html",
+        500: "shared/errors/500.html",
+        503: "shared/errors/503.html",
+    }
+    template_name = template_map.get(code, template_map[500])
+    return _templates.TemplateResponse(
+        request,
+        template_name,
+        {"reason": reason},
+        status_code=code,
+    )
 
 
 @asynccontextmanager
@@ -212,8 +86,16 @@ async def lifespan(app: FastAPI):
     Управление жизненным циклом приложения.
     """
     # Startup
-    logger.info("Запуск приложения Act Constructor")
+    logger.info("Запуск приложения Audit Workstation")
     settings.ensure_directories()
+
+    # discover_domains() вызывается повторно (первый раз — в create_app для роутеров).
+    # Результат кэшируется в _domains, здесь нужен для lifecycle и БД.
+    domains = discover_domains(_domains_dir)
+    logger.info(f"Обнаружено доменов: {len(domains)}")
+
+    # Список успешно стартовавших доменов — используется и в startup-откате, и в shutdown
+    started: list = []
 
     # ИНИЦИАЛИЗАЦИЯ БД
     try:
@@ -221,8 +103,27 @@ async def lifespan(app: FastAPI):
         logger.info("База данных инициализирована")
 
         # СОЗДАНИЕ ТАБЛИЦ ЕСЛИ НЕ СУЩЕСТВУЮТ
-        await create_tables_if_not_exist()
+        await create_tables_if_not_exist(domains)
         logger.info("Схема базы данных проверена")
+
+        # Запуск доменов с откатом при частичной ошибке:
+        # если on_startup домена N падает, вызываем on_shutdown для 1..N-1
+        try:
+            for d in domains:
+                if d.on_startup:
+                    await d.on_startup(app)
+                started.append(d)
+        except Exception:
+            logger.exception(
+                "Ошибка при запуске домена, откат инициализированных доменов"
+            )
+            for d in reversed(started):
+                if d.on_shutdown:
+                    try:
+                        await d.on_shutdown(app)
+                    except Exception:
+                        logger.exception(f"Ошибка при откате домена {d.name}")
+            raise
 
         logger.info("Приложение успешно инициализировано")
 
@@ -250,41 +151,33 @@ async def lifespan(app: FastAPI):
     yield
 
     # Shutdown
-    logger.info("Завершение работы приложения Act Constructor")
+    logger.info("Завершение работы приложения Audit Workstation")
+
+    # Завершение доменов в обратном порядке (только успешно стартовавшие)
+    for d in reversed(started):
+        if d.on_shutdown:
+            try:
+                await d.on_shutdown(app)
+            except Exception:
+                logger.exception(f"Ошибка при завершении домена {d.name}")
 
     # Закрываем пул БД
     await close_db()
     logger.info("Database pool закрыт")
-
-    # Закрываем ThreadPoolExecutor
-    from app.services.export_service import executor
-    executor.shutdown(wait=True, cancel_futures=False)
-    logger.info("ThreadPoolExecutor корректно закрыт")
 
 
 def create_app() -> FastAPI:
     """
     Создает и конфигурирует экземпляр FastAPI приложения.
 
-    Выполняет следующие действия:
-    - Создает приложение с метаданными из настроек
-    - Инициализирует Jinja2 для рендеринга шаблонов
-    - Монтирует статические файлы (CSS, JS, изображения)
-    - Регистрирует HTML-роуты с проверкой доступа к актам
-    - Подключает API роутеры с префиксом версии
-    - Добавляет middleware для контроля нагрузки
-
     Returns:
         Полностью сконфигурированное приложение
     """
-    # Инициализация Jinja2 для рендеринга HTML-шаблонов
-    templates = Jinja2Templates(directory=str(settings.templates_dir))
-
     # Создание FastAPI приложения с базовыми настройками
     app = FastAPI(
         title=settings.app_title,
         version=settings.app_version,
-        description="API для создания и управления актами",
+        description="Рабочая станция аудитора — акты, AI-ассистент, аналитика, интеграции",
         lifespan=lifespan,
         root_path=root_path
     )
@@ -296,15 +189,18 @@ def create_app() -> FastAPI:
     # 2. Request size limit
     app.add_middleware(
         RequestSizeLimitMiddleware,
-        max_size=settings.max_request_size
+        max_size=settings.security.max_request_size
     )
 
-    # 3. Rate limiting (последний)
+    # 3. Rate limiting
     app.add_middleware(
         RateLimitMiddleware,
-        rate_limit=settings.rate_limit_per_minute,
+        rate_limit=settings.security.rate_limit_per_minute,
         settings=settings
     )
+
+    # 4. Request ID — самый последний, запускается первым: охватывает всю цепочку middleware
+    app.add_middleware(RequestIdMiddleware)
 
     # Подключение статических файлов (доступны по URL /static/*)
     app.mount(
@@ -318,127 +214,19 @@ def create_app() -> FastAPI:
         favicon_path = settings.static_dir / "favicon.ico"
         return FileResponse(favicon_path)
 
-    @app.get("/", response_class=HTMLResponse)
-    async def show_landing(request: Request):
-        """
-        Стартовая страница - портал инструментов.
-
-        Отображает дашборд с навигацией по инструментам компании.
-        Авторизация проверяется фронтендом через /api/v1/auth/me.
-        """
-        return templates.TemplateResponse(
-            "landing.html",
-            {
-                "request": request,
-                "active_page": "landing",
-                "topbar_title": "Рабочее пространство",
-            }
-        )
-
-    @app.get("/acts", response_class=HTMLResponse)
-    async def show_acts_manager(request: Request):
-        """
-        Страница управления актами.
-
-        Отображает список актов пользователя для выбора.
-        Авторизация проверяется фронтендом через /api/v1/auth/me.
-        """
-        return templates.TemplateResponse(
-            "acts_manager.html",
-            {
-                "request": request,
-                "active_page": "acts",
-                "topbar_title": "Управление актами",
-            }
-        )
-
-    @app.get("/ck-fin-res", response_class=HTMLResponse)
-    async def show_ck_fin_res(request: Request):
-        """
-        Страница ЦК Фин.Рез.
-
-        Раздел в разработке — отображает заглушку.
-        Авторизация проверяется фронтендом через /api/v1/auth/me.
-        """
-        return templates.TemplateResponse(
-            "ck_fin_res.html",
-            {
-                "request": request,
-                "active_page": "ck_fin_res",
-                "topbar_title": "ЦК Фин.Рез.",
-            }
-        )
-
-    @app.get("/ck-client-experience", response_class=HTMLResponse)
-    async def show_ck_client_experience(request: Request):
-        """
-        Страница ЦК Клиентский опыт.
-
-        Раздел в разработке — отображает заглушку.
-        Авторизация проверяется фронтендом через /api/v1/auth/me.
-        """
-        return templates.TemplateResponse(
-            "ck_client_experience.html",
-            {
-                "request": request,
-                "active_page": "ck_client_experience",
-                "topbar_title": "ЦК Клиентский опыт",
-            }
-        )
-
-    @app.get("/constructor", response_class=HTMLResponse)
-    async def show_constructor(
-            request: Request,
-            act_id: int,
-            username: str = Depends(get_username)
-    ):
-        """
-        Страница конструктора конкретного акта.
-
-        Проверяет доступ пользователя к акту ДО рендеринга HTML.
-        При отсутствии доступа редиректит на главную страницу (менеджер актов).
-
-        Args:
-            request: HTTP запрос
-            act_id: ID акта из query параметра
-            username: Имя пользователя (из зависимости get_username)
-
-        Returns:
-            HTML страница конструктора или редирект на /
-
-        Raises:
-            RedirectResponse: 302 редирект на / при отсутствии доступа
-        """
-        async with get_db() as conn:
-            db_service = ActDBService(conn)
-
-            has_access = await db_service.check_user_access(act_id, username)
-            if not has_access:
-                logger.info(
-                    f"Пользователь {username} попытался открыть недоступный акт ID={act_id}, "
-                    f"редирект на менеджер актов"
-                )
-                return RedirectResponse(url="/acts", status_code=302)
-
-            return templates.TemplateResponse(
-                "constructor.html",
-                {"request": request, "act_id": act_id}
-            )
-
     # Обработчик ошибки Kerberos токена
     @app.exception_handler(KerberosTokenExpiredError)
     async def kerberos_token_expired_handler(
             request: Request,
             exc: KerberosTokenExpiredError
     ):
-        """
-        Обработчик для протухшего Kerberos токена.
-
-        Возвращает понятное сообщение пользователю с инструкциями.
-        """
+        """Обработчик для протухшего Kerberos токена."""
         logger.warning(
             f"Kerberos токен протух во время запроса: {request.url.path}"
         )
+
+        if _is_html_request(request):
+            return _render_error_page(request, 401, reason="kerberos")
 
         return JSONResponse(
             status_code=401,
@@ -460,17 +248,79 @@ def create_app() -> FastAPI:
             }
         )
 
-    # Подключение API роутеров версии 1 с префиксом /api/v1
+    @app.exception_handler(AppError)
+    async def app_error_handler(request: Request, exc: AppError) -> JSONResponse:
+        """Единый обработчик всех доменных исключений."""
+        if _is_html_request(request):
+            return _render_error_page(request, exc.status_code)
+        return JSONResponse(status_code=exc.status_code, content=exc.to_detail())
+
+    @app.exception_handler(UniqueViolationError)
+    async def unique_violation_handler(request: Request, exc: UniqueViolationError) -> JSONResponse:
+        """Fallback для неизвестных конфликтов уникальности из БД."""
+        logger.warning(f"UniqueViolationError: {exc} (path: {request.url.path})")
+        return JSONResponse(
+            status_code=409,
+            content={"detail": "Запись с такими данными уже существует"},
+        )
+
+    @app.exception_handler(CheckViolationError)
+    async def check_violation_handler(request: Request, exc: CheckViolationError) -> JSONResponse:
+        """Обработчик нарушений CHECK-ограничений БД."""
+        exc_str = str(exc)
+        logger.warning(f"CheckViolationError: {exc_str} (path: {request.url.path})")
+
+        detail = "Данные не прошли проверку ограничений базы данных"
+        for constraint_name, message in CHECK_CONSTRAINT_MESSAGES.items():
+            if constraint_name in exc_str:
+                detail = message
+                break
+
+        return JSONResponse(status_code=422, content={"detail": detail})
+
+    @app.exception_handler(HTTPException)
+    async def http_exception_handler(request: Request, exc: HTTPException):
+        """HTTP-ошибки: HTML-страница для браузера, JSON для API."""
+        if _is_html_request(request):
+            return _render_error_page(request, exc.status_code)
+        return JSONResponse(status_code=exc.status_code, content={"detail": exc.detail})
+
+    @app.exception_handler(Exception)
+    async def generic_exception_handler(request: Request, exc: Exception):
+        """Перехват необработанных исключений — detail ТОЛЬКО в логах."""
+        logger.exception(f"Необработанное исключение: {request.url.path}")
+        if _is_html_request(request):
+            return _render_error_page(request, 500)
+        return JSONResponse(
+            status_code=500,
+            content={"detail": "Внутренняя ошибка сервера"},
+        )
+
+    # Подключение роута ошибок (до portal_router)
+    app.include_router(error_router)
+
+    # Подключение shared HTML-роутов (лендинг, CK-заглушки)
+    app.include_router(portal_router)
+
+    # Подключение shared API роутеров (auth, chat, system)
     app.include_router(
         api_v1_router,
-        prefix=settings.api_v1_prefix
+        prefix=settings.server.api_v1_prefix
     )
+
+    # discover_domains() вызывается здесь для регистрации роутеров при создании app.
+    # Повторный вызов в lifespan() (для БД и lifecycle) использует кэш _domains.
+    domains = discover_domains(_domains_dir)
+    register_domains(app, domains, settings.server.api_v1_prefix)
 
     return app
 
 
-# Создание глобального экземпляра приложения
-app = create_app()
+# Создание экземпляра приложения — только если модуль импортируется (не запускается напрямую).
+# При запуске через `python -m app.main` uvicorn сам импортирует модуль в дочернем процессе,
+# поэтому здесь не нужно создавать приложение — это исключает лишний цикл инициализации.
+if __name__ != "__main__":
+    app = create_app()
 
 if __name__ == "__main__":
     # Запуск сервера разработки
@@ -479,12 +329,12 @@ if __name__ == "__main__":
     uvicorn.run(
         # Настройки сервера
         "app.main:app",
-        host=settings.host,
-        port=settings.port,
+        host=settings.server.host,
+        port=settings.server.port,
         # Автоматическая перезагрузка при изменении кода
         reload=True,
-        # Уменьшаем verbosity uvicorn логов
-        log_level="debug",
+        # Уровень uvicorn синхронизирован с SERVER__LOG_LEVEL
+        log_level=settings.server.log_level.lower(),
         # Если работаем с greenplum через прокси, то указываем корень
         root_path=root_path
     )

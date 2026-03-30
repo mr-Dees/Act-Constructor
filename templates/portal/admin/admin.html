@@ -1,0 +1,66 @@
+{% extends "portal/base_portal.html" %}
+
+{% block title %}Администрирование{% endblock %}
+
+{% block content %}
+<div class="admin-content">
+    <div class="admin-header">
+        <h1 class="admin-title">Управление ролями пользователей</h1>
+        <button id="adminAddUserBtn" class="admin-add-user-btn">+ Добавить пользователя</button>
+    </div>
+
+    <!-- Поиск пользователей -->
+    <div class="admin-search-section">
+        <div class="admin-search-wrapper">
+            <input type="text" id="adminSearchInput" class="admin-search-input"
+                   placeholder="Поиск по ФИО, логину, email..."
+                   autocomplete="off">
+        </div>
+    </div>
+
+    <!-- Панель фильтров по ролям -->
+    <div class="admin-filter-bar" id="adminFilterBar">
+        <!-- JS заполнит чипсами ролей -->
+    </div>
+
+    <!-- Заголовок таблицы -->
+    <div class="admin-roles-header">
+        <div class="admin-header-cell sortable" data-sort="fullname">
+            ФИО <span class="sort-indicator"></span>
+        </div>
+        <div class="admin-header-cell sortable" data-sort="roles">
+            Роли <span class="sort-indicator"></span>
+        </div>
+        <div class="admin-header-cell sortable" data-sort="username">
+            Логин <span class="sort-indicator"></span>
+        </div>
+    </div>
+
+    <!-- Таблица ролей -->
+    <div class="admin-roles-section">
+        <div id="adminRolesTable" class="admin-roles-table">
+            <!-- Заполняется из JS -->
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block extra_js %}
+<script src="{{ url_for('static', path='js/portal/admin/admin-search.js') }}"></script>
+<script src="{{ url_for('static', path='js/portal/admin/admin-roles.js') }}"></script>
+<script src="{{ url_for('static', path='js/portal/admin/admin-add-user-dialog.js') }}"></script>
+<script src="{{ url_for('static', path='js/portal/admin/admin-page.js') }}"></script>
+{% endblock %}
+
+{% block init_script %}
+<script>
+    document.addEventListener('DOMContentLoaded', async () => {
+        const isAuthorized = await AuthManager.requireAuth();
+        if (isAuthorized) {
+            LandingSidebar.init();
+            LandingSettingsManager.init();
+            AdminPage.init();
+        }
+    });
+</script>
+{% endblock %}

@@ -1,0 +1,75 @@
+/*
+ * Constructor styles - shared + constructor-specific
+ * Used by: audit workstation/editor page
+ */
+@import './shared.css';
+
+/* Constructor layout */
+@import '../constructor/layout/container.css';
+@import '../constructor/layout/header.css';
+@import '../constructor/layout/header-actions.css';
+@import '../shared/layout/settings-menu.css';
+@import '../constructor/layout/acts-menu.css';
+@import '../constructor/layout/two-columns.css';
+@import '../constructor/layout/panels.css';
+
+/* Tree */
+@import '../constructor/tree/tree-base.css';
+@import '../constructor/tree/tree-drag-drop.css';
+@import '../constructor/tree/tree-states.css';
+@import '../constructor/tree/tree-nodes.css';
+@import '../constructor/tree/tree-children.css';
+
+/* Table */
+@import '../constructor/table/table-base.css';
+@import '../constructor/table/table-states.css';
+@import '../constructor/table/table-resize.css';
+@import '../constructor/table/table-editor.css';
+
+/* Violation */
+@import '../constructor/violation/violation-base.css';
+@import '../constructor/violation/violation-fields.css';
+@import '../constructor/violation/violation-list.css';
+@import '../constructor/violation/violation-additional-content.css';
+
+/* Preview */
+@import '../constructor/preview/preview-base.css';
+@import '../constructor/preview/preview-typography.css';
+@import '../constructor/preview/preview-table.css';
+@import '../constructor/preview/preview-violation.css';
+@import '../constructor/preview/preview-menu.css';
+
+/* Help */
+@import '../constructor/help/help-button.css';
+@import '../constructor/help/help-modal.css';
+@import '../constructor/help/help-content.css';
+
+/* Buttons (constructor-specific) */
+@import '../constructor/buttons/buttons-save-group.css';
+
+/* Items */
+@import '../constructor/items/items-base.css';
+@import '../constructor/items/items-levels.css';
+@import '../constructor/items/items-header.css';
+@import '../constructor/items/items-content.css';
+
+/* Textblock */
+@import '../constructor/textblock/textblock-toolbar.css';
+@import '../constructor/textblock/textblock-content.css';
+@import '../constructor/textblock/textblock-links-footnotes.css';
+
+/* Context menu */
+@import '../constructor/context-menu/context-menu-base.css';
+@import '../constructor/context-menu/context-menu-states.css';
+
+/* Dialog (constructor-specific) */
+@import '../constructor/dialog/dialog-invoice.css';
+@import '../shared/dialog/acts-modal.css';
+
+/* Chat popup */
+@import '../constructor/chat/chat-popup.css';
+
+/* Utilities */
+@import '../constructor/utilities/helpers.css';
+@import '../constructor/utilities/save-indicator.css';
+@import '../constructor/utilities/read-only.css';

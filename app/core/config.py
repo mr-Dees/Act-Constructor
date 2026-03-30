@@ -5,16 +5,29 @@
 Использует переменные окружения из .env файла.
 """
 
+import contextvars
 import logging
 import sys
+import warnings
 from functools import lru_cache
 from logging.handlers import RotatingFileHandler
 from pathlib import Path
 from typing import ClassVar, Literal
 
-from pydantic import Field, field_validator
+from pydantic import BaseModel, Field, SecretStr, field_validator, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
+# ContextVar для хранения request_id в асинхронном контексте запроса.
+# Значение по умолчанию «-» используется вне контекста HTTP-запроса (startup, shutdown и т.д.)
+request_id_var: contextvars.ContextVar[str] = contextvars.ContextVar("request_id", default="-")
+
+
+class RequestIdFilter(logging.Filter):
+    """Инжектирует request_id текущего запроса в каждую запись лога."""
+
+    def filter(self, record: logging.LogRecord) -> bool:
+        record.request_id = request_id_var.get()
+        return True
 
 def setup_logging(log_level: str = "INFO") -> logging.Logger:
     """
@@ -27,7 +40,7 @@ def setup_logging(log_level: str = "INFO") -> logging.Logger:
     Returns:
         Настроенный logger
     """
-    logger = logging.getLogger("act_constructor")
+    logger = logging.getLogger("audit_workstation")
 
     # Проверяем что логирование еще не настроено.
     # Защита от повторной настройки в workers.
@@ -38,8 +51,8 @@ def setup_logging(log_level: str = "INFO") -> logging.Logger:
 
     # Создаем форматер для логов
     formatter = logging.Formatter(
-        '%(levelname)s:     [%(asctime)s] %(name)s - %(message)s',
-        datefmt='%H:%M:%S'
+        '%(levelname)s:     [%(asctime)s] [%(request_id)s] %(name)s - %(message)s',
+        datefmt='%Y-%m-%d %H:%M:%S'
     )
 
     # Настраиваем консольный handler
@@ -63,14 +76,94 @@ def setup_logging(log_level: str = "INFO") -> logging.Logger:
     file_handler.setFormatter(formatter)
     file_handler.setLevel(getattr(logging, log_level.upper()))
 
+    # Инжектируем request_id в каждую запись через handlers, а не через logger.
+    # Причина: при propagation от дочерних логгеров Python вызывает callHandlers()
+    # на родительском логгере, минуя его собственные filters. Фильтр на handler
+    # гарантированно срабатывает непосредственно перед emit().
+    request_id_filter = RequestIdFilter()
+    console_handler.addFilter(request_id_filter)
+    file_handler.addFilter(request_id_filter)
+
     # Добавляем handlers
     logger.addHandler(console_handler)
     logger.addHandler(file_handler)
 
-    # Поставить False если нужно отключить вывод событий в root logger
-    logger.propagate = True
+    # False: не пропускать сообщения в root logger (избегаем дублей с uvicorn)
+    logger.propagate = False
 
     return logger
+
+
+# === Вложенные модели настроек ===
+
+
+class ServerSettings(BaseModel):
+    """Параметры сервера."""
+    host: str = "0.0.0.0"
+    port: int = Field(default=8000, ge=1, le=65535)
+    api_v1_prefix: str = "/api/v1"
+    log_level: Literal["DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"] = "INFO"
+
+    @field_validator("log_level")
+    @classmethod
+    def normalize_log_level(cls, v: str) -> str:
+        """Нормализует уровень логирования к верхнему регистру."""
+        return v.upper()
+
+
+class GreenplumSettings(BaseModel):
+    """Настройки подключения к Greenplum."""
+    host: str = Field(default="gp_dns_pkap1123_audit.gp.df.sbrf.ru")
+    port: int = Field(default=5432, ge=1, le=65535)
+    database: str = Field(default="capgp3")
+    schema_name: str = Field(
+        default="s_grnplm_ld_audit_da_project_4",
+        alias="schema"
+    )
+    table_prefix: str = Field(default="t_db_oarb_audit_act_")
+
+    model_config = {"populate_by_name": True}
+
+
+class DatabaseSettings(BaseModel):
+    """Настройки базы данных."""
+    type: Literal["postgresql", "greenplum"] = Field(default="postgresql")
+    host: str = Field(default="localhost")
+    port: int = Field(default=5432, ge=1, le=65535)
+    name: str = Field(default="audit_workstation")
+    user: str = Field(default="postgres")
+    password: str = Field(default="")
+    pool_min_size: int = Field(default=2, ge=1)
+    pool_max_size: int = Field(default=10, ge=2)
+    command_timeout: int = Field(default=60, gt=0)
+    gp: GreenplumSettings = GreenplumSettings()
+
+
+class SecuritySettings(BaseModel):
+    """Лимиты безопасности."""
+    max_request_size: int = Field(default=10 * 1024 * 1024, gt=0)
+    rate_limit_per_minute: int = Field(default=1024, gt=0)
+    max_tracked_ips: int = 100
+    rate_limit_ttl: int = 120
+
+
+class ChatSettings(BaseModel):
+    """Настройки AI-чата (OpenAI-совместимый API)."""
+    model: str = "gpt-4o"
+    api_base: str = ""
+    api_key: SecretStr = SecretStr("")
+    max_tool_rounds: int = 5
+    temperature: float = 0.1
+    tool_execution_timeout: int = 30
+    system_prompt: str = (
+        "Ты — AI-ассистент рабочей станции аудитора Audit Workstation. "
+        "Отвечай на русском языке. Используй доступные инструменты "
+        "для поиска, анализа и работы с данными."
+    )
+    max_history_length: int = 50
+    max_message_content_length: int = 10000
+    max_context_keys: int = 20
+    max_context_value_length: int = 1000
 
 
 class Settings(BaseSettings):
@@ -78,176 +171,27 @@ class Settings(BaseSettings):
     Класс настроек приложения на основе Pydantic.
 
     Автоматически загружает переменные из .env файла и предоставляет
-    типизированный доступ к конфигурации.
+    типизированный доступ к конфигурации. Вложенные настройки используют
+    разделитель __ (например, SERVER__HOST, DATABASE__TYPE).
     """
 
     # Метаданные приложения
-    app_title: str = "Act Constructor"
+    app_title: str = "Audit Workstation"
     app_version: str = "1.0.0"
 
-    # Параметры сервера
-    host: str = "0.0.0.0"
-    port: int = Field(default=8000, ge=1, le=65535)
+    # Аутентификация
+    jupyterhub_user: str = Field(default="unknown_user")
 
-    # Префикс для API версии 1
-    api_v1_prefix: str = "/api/v1"
-
-    # Уровень логирования (ограничен допустимыми значениями)
-    log_level: Literal["DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"] = "INFO"
-
-    # === Тип базы данных ===
-    db_type: Literal["postgresql", "greenplum"] = Field(default="postgresql")
-
-    # === База данных PostgreSQL ===
-    db_host: str = Field(default="localhost")
-    db_port: int = Field(default=5432, ge=1, le=65535)
-    db_name: str = Field(default="act_constructor")
-    db_user: str = Field(default="postgres")
-    db_password: str = Field(default="postgres")
-
-    # === Greenplum настройки ===
-    gp_host: str = Field(
-        default="gp_dns_pkap1123_audit.gp.df.sbrf.ru"
-    )
-    gp_port: int = Field(default=5432, ge=1, le=65535)
-    gp_database: str = Field(default="capgp3")
-    gp_schema: str = Field(
-        default="s_grnplm_ld_audit_da_project_4"
-    )
-    gp_table_prefix: str = Field(
-        default="t_db_oarb_audit_act_"
-    )
-
-    # === Схемы для фактур ===
-    invoice_hive_schema: str = Field(default="team_sva_oarb_3")
-    invoice_gp_schema: str = Field(default="s_grnplm_ld_audit_da_sandbox_oarb")
-
-    # === Реестр hive-таблиц (реплика на GP/PG) ===
-    invoice_hive_registry_schema: str = Field(default="s_grnplm_ld_audit_project_4")
-    invoice_hive_registry_table: str = Field(default="t_db_oarb_ua_hadoop_tables")
-    invoice_hive_registry_col_table: str = Field(default="table_name")
-
-    # === Справочник метрик ===
-    invoice_metric_dict_table: str = Field(default="t_db_oarb_ua_violation_metric_dict")
-
-    # === Пулы подключений ===
-    db_pool_min_size: int = Field(default=2, ge=1)
-    db_pool_max_size: int = Field(default=10, ge=2)
-
-    # === Сервис идентификации аудита ===
+    # Сервис идентификации аудита
     # TODO: URL внешнего сервиса идентификации аудита
     audit_id_service_url: str = ""
     audit_id_service_timeout: int = 10
 
-    # === Аутентификация ===
-    jupyterhub_user: str = Field(default="unknown_user")
-
-    # === Параметры блокировок и контроля активности пользователя ===
-    #
-    # Механизм работы:
-    # 1. При открытии акта сервер ставит эксклюзивную блокировку на act_lock_duration_minutes.
-    # 2. Фронтенд каждые act_inactivity_check_interval_seconds проверяет,
-    #    двигал ли пользователь мышь / нажимал клавиши / скроллил.
-    # 3. Если пользователь активен и с последнего продления прошло ≥ act_min_extension_interval_minutes,
-    #    фронтенд автоматически продлевает блокировку на сервере.
-    # 4. Если пользователь бездействует ≥ act_inactivity_timeout_minutes,
-    #    появляется диалог «Продолжить работу?» с обратным отсчётом.
-    # 5. Если пользователь не отвечает за act_inactivity_dialog_timeout_seconds —
-    #    контент автосохраняется, блокировка снимается, происходит редирект на список актов.
-
-    # Время жизни серверной блокировки (минуты).
-    # Если фронтенд не продлит блокировку за это время — она истечёт автоматически,
-    # и акт станет доступен другим пользователям.
-    act_lock_duration_minutes: int = Field(default=15, gt=0)
-
-    # Порог бездействия (минуты): через сколько минут без активности (mousedown, keydown,
-    # scroll, touchstart) показать диалог с предложением продолжить или выйти.
-    act_inactivity_timeout_minutes: float = Field(default=5.0, gt=0)
-
-    # Интервал проверки активности на фронтенде (секунды): как часто фронтенд
-    # сравнивает время последнего действия пользователя с порогом бездействия,
-    # а также решает, нужно ли продлить блокировку.
-    act_inactivity_check_interval_seconds: int = Field(default=60, gt=0)
-
-    # Минимальный интервал между продлениями блокировки (минуты): защита от
-    # слишком частых запросов extend-lock на сервер. Продление произойдёт только
-    # если пользователь активен И с прошлого продления прошло не менее этого времени.
-    act_min_extension_interval_minutes: float = Field(default=5.0, gt=0)
-
-    # Таймаут диалога бездействия (секунды): сколько времени пользователю даётся
-    # на ответ в диалоге «Продолжить работу?». По истечении — автосохранение и выход.
-    act_inactivity_dialog_timeout_seconds: int = Field(default=30, gt=0)
-
-    # === Лимиты безопасности ===
-
-    # Максимальный размер тела запроса в байтах (10MB по умолчанию)
-    max_request_size: int = Field(default=10 * 1024 * 1024, gt=0)
-
-    # Rate limiting: максимум запросов в минуту на IP
-    rate_limit_per_minute: int = Field(default=1024, gt=0)
-
-    # Максимальный размер изображения в MB
-    max_image_size_mb: float = 10.0
-
-    # Timeout для парсинга HTML в секундах
-    html_parse_timeout: int = 30
-
-    # Максимальная глубина вложенности HTML
-    max_html_depth: int = 100
-
-    # Размер чанков для парсинга HTML (в символах)
-    html_parse_chunk_size: int = Field(default=1000, gt=0)
-
-    # === Параметры retry логики ===
-
-    # Максимальное количество повторных попыток при временных ошибках
-    max_retries: int = Field(default=3, gt=0)
-
-    # Задержка между попытками в секундах
-    retry_delay: float = Field(default=0.5, ge=0)
-
-    # === Параметры Rate Limiting ===
-
-    # Максимальное количество отслеживаемых IP-адресов в TTL cache
-    max_tracked_ips: int = 100
-
-    # TTL (time-to-live) для записей в rate limiter (в секундах).
-    # Запросы старше этого времени автоматически удаляются из кэша.
-    rate_limit_ttl: int = 120
-
-    # === Параметры форматирования ===
-
-    # Ширина изображений в DOCX (в дюймах)
-    docx_image_width: float = 4.0
-
-    # Размер шрифта подписи в DOCX (в пунктах)
-    docx_caption_font_size: int = 10
-
-    # Максимальный уровень заголовков в DOCX
-    docx_max_heading_level: int = 9
-
-    # Ширина заголовка в текстовом формате (символов)
-    text_header_width: int = 80
-
-    # Размер отступа в текстовом формате (пробелов)
-    text_indent_size: int = 2
-
-    # Максимальный уровень заголовков в Markdown
-    markdown_max_heading_level: int = 6
-
-    # === Параметры управления ресурсами ===
-
-    # Максимальное количество одновременных операций с файлами
-    max_concurrent_file_operations: int = Field(default=100, gt=0)
-
-    # Timeout для операции сохранения акта (в секундах)
-    save_operation_timeout: int = Field(default=300, gt=0)
-
-    # Timeout для всей операции сохранения акта (секунды)
-    save_act_timeout: int = 300
-
-    # Максимальная глубина дерева акта (защита от рекурсии)
-    max_tree_depth: int = 50
+    # Вложенные настройки (shared)
+    server: ServerSettings = ServerSettings()
+    database: DatabaseSettings = DatabaseSettings()
+    security: SecuritySettings = SecuritySettings()
+    chat: ChatSettings = ChatSettings()
 
     # Базовая директория проекта.
     # Относительный путь от конфига до корня проекта.
@@ -273,19 +217,24 @@ class Settings(BaseSettings):
         """Возвращает директорию со статическими файлами."""
         return self.base_dir / "static"
 
+    @model_validator(mode='after')
+    def warn_empty_db_password(self):
+        """Предупреждает если пароль БД не задан для PostgreSQL."""
+        if self.database.type == "postgresql" and not self.database.password:
+            warnings.warn(
+                "DATABASE__PASSWORD не задан. Подключение к PostgreSQL без пароля. "
+                "Задайте DATABASE__PASSWORD в .env для production.",
+                stacklevel=2,
+            )
+        return self
+
     # Конфигурация Pydantic
     model_config = SettingsConfigDict(
         env_file=str(base_dir / ".env"),  # Файл с переменными окружения
+        env_nested_delimiter="__",  # Разделитель для вложенных настроек
         case_sensitive=False,  # Нечувствительность к регистру переменных
         extra="ignore",  # Игнорировать неизвестные поля из .env
-        validate_default=False  # Оптимизация валидации
     )
-
-    @field_validator("log_level")
-    @classmethod
-    def normalize_log_level(cls, v: str) -> str:
-        """Нормализует уровень логирования к верхнему регистру."""
-        return v.upper()
 
     def ensure_directories(self) -> None:
         """

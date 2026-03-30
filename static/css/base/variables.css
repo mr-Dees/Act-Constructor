@@ -544,7 +544,7 @@
     --create-act-dialog-width: 65rem;
     --create-act-dialog-max-height: 90vh;
     --create-act-dialog-close-size: 2.5rem;
-    --team-member-grid-columns: 10rem 1fr 1fr 8rem var(--button-size-sm);
+    --team-member-grid-columns: 10rem 1fr 1fr 8rem var(--button-size-sm) var(--button-size-sm);
     --directive-grid-columns: 12rem 1fr var(--button-size-sm);
 
     /* Steps специфичные переменные */

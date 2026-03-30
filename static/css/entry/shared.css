@@ -1,0 +1,27 @@
+/*
+ * Shared styles - base + cross-cutting components
+ * Used by all pages (portal and constructor)
+ */
+
+/* Base */
+@import '../base/variables.css';
+@import '../base/auth.css';
+@import '../base/reset.css';
+@import '../base/animations.css';
+
+/* Shared buttons */
+@import '../shared/buttons/buttons-base.css';
+@import '../shared/buttons/buttons-action.css';
+
+/* Shared notifications */
+@import '../shared/notifications/notifications-base.css';
+@import '../shared/notifications/notifications-types.css';
+@import '../shared/notifications/notifications-content.css';
+
+/* Shared dialogs */
+@import '../shared/dialog/dialog.css';
+@import '../shared/dialog/dialog-overlay.css';
+@import '../shared/dialog/dialog-buttons.css';
+
+/* Shared chat */
+@import '../shared/chat/chat.css';

@@ -27,7 +27,8 @@ class JSONDBUtils:
 
         if isinstance(value, str):
             try:
-                return json.loads(value)
+                parsed = json.loads(value)
+                return parsed if isinstance(parsed, dict) else None
             except json.JSONDecodeError:
                 return None
 
