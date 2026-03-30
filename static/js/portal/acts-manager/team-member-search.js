@@ -200,6 +200,17 @@ class TeamMemberSearch {
     }
 
     /**
+     * Заполняет строку данными пользователя программно (без клика)
+     * @param {Object} user - { fullname, job, username }
+     */
+    fillFromUser(user) {
+        this._nameInput.value = this._toTitleCase(user.fullname || '');
+        this._positionInput.value = user.job || '';
+        this._usernameInput.value = user.username || '';
+        this.setSelected();
+    }
+
+    /**
      * Устанавливает состояние "уже выбран" (для режима редактирования)
      */
     setSelected() {

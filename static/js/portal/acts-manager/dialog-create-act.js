@@ -646,7 +646,7 @@ class CreateActDialog extends DialogBase {
      * Инициализирует аудиторскую группу
      * @private
      */
-    static _initializeAuditTeam(dialog, actData, currentUser) {
+    static async _initializeAuditTeam(dialog, actData, currentUser) {
         if (actData && actData.audit_team && actData.audit_team.length > 0) {
             actData.audit_team.forEach(member => {
                 this._addTeamMember(dialog, member.role, member.full_name, member.position, member.username);
@@ -654,8 +654,29 @@ class CreateActDialog extends DialogBase {
         } else {
             // 3 строки по умолчанию
             this._addTeamMember(dialog, 'Куратор', '', '', '');
-            this._addTeamMember(dialog, 'Руководитель', '', '', '');
+            const leader = this._addTeamMember(dialog, 'Руководитель', '', '', '');
             this._addTeamMember(dialog, 'Участник', '', '', '');
+
+            // Автозаполнение текущего пользователя в строку "Руководитель"
+            if (currentUser && leader) {
+                this._autoFillUser(leader, currentUser);
+            }
+        }
+    }
+
+    /**
+     * Загружает данные пользователя по логину и заполняет строку
+     * @private
+     */
+    static async _autoFillUser({ search }, username) {
+        try {
+            const users = await APIClient.searchTeamUsers(username);
+            const exact = users.find(u => u.username === username);
+            if (exact) {
+                search.fillFromUser(exact);
+            }
+        } catch (err) {
+            console.error('Автозаполнение пользователя:', err);
         }
     }
 
@@ -677,13 +698,13 @@ class CreateActDialog extends DialogBase {
      */
     static _addTeamMember(dialog, role = 'Участник', fullName = '', position = '', username = '') {
         const container = dialog.querySelector('#auditTeamContainer');
-        if (!container) return;
+        if (!container) return null;
 
         const memberRow = this._cloneTemplate('teamMemberRowTemplate');
-        if (!memberRow) return;
+        if (!memberRow) return null;
 
         const rowElement = memberRow.querySelector('.team-member-row');
-        if (!rowElement) return;
+        if (!rowElement) return null;
 
         // Заполняем данные
         const roleSelect = rowElement.querySelector('[name="role"]');
@@ -714,6 +735,8 @@ class CreateActDialog extends DialogBase {
                 rowElement.remove();
             };
         }
+
+        return { rowElement, search };
     }
 
     /**
