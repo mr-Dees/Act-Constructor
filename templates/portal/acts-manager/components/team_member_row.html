@@ -6,9 +6,16 @@
             <option value="Редактор">Редактор</option>
             <option value="Участник">Участник</option>
         </select>
-        <input type="text" name="full_name" placeholder="ФИО *" required class="team-member-name"data-field="full_name">
-        <input type="text" name="position" placeholder="Должность *" required class="team-member-position"data-field="position">
-        <input type="text" name="username" placeholder="Логин *" required class="team-member-username"data-field="username">
+        <div class="team-member-name-wrapper">
+            <input type="text" name="full_name" placeholder="ФИО *" required class="team-member-name" data-field="full_name" autocomplete="off">
+        </div>
+        <input type="text" name="position" placeholder="Должность *" required class="team-member-position" data-field="position">
+        <input type="text" name="username" placeholder="Логин *" required class="team-member-username" data-field="username">
+        <button type="button" class="btn btn-ghost clear-member-btn" title="Сбросить выбор">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none">
+                <path d="M3 12h18M3 12l6-6M3 12l6 6" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+            </svg>
+        </button>
         <button type="button" class="btn btn-ghost delete-member-btn" title="Удалить">
             <svg width="16" height="16" viewBox="0 0 24 24" fill="none">
                 <path d="M18 6L6 18M6 6l12 12" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>
