@@ -92,6 +92,8 @@ class AuditLogSettings(BaseModel):
     """Параметры аудит-лога и версионирования."""
     retention_days: int = Field(default=365, gt=0)
     max_content_versions: int = Field(default=50, gt=0)
+    max_diff_elements: int = Field(default=20, gt=0)
+    max_diff_cells_per_table: int = Field(default=50, gt=0)
 
 
 class ActsSettings(BaseModel):

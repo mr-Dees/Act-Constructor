@@ -259,12 +259,24 @@ class ActAuditLogRepository(BaseRepository):
             logger.exception(f"Не удалось вычислить diff содержимого: act_id={act_id}")
             return {"error": "diff computation failed"}
 
-    async def compute_field_diffs(self, act_id: int, data) -> dict[str, dict]:
+    async def compute_field_diffs(
+        self,
+        act_id: int,
+        data,
+        *,
+        max_elements: int = 20,
+        max_cells_per_table: int = 50,
+    ) -> dict[str, dict]:
         """
         Вычисляет field-level diff для элементов, изменённых при content_save.
 
         Сравнивает текущее состояние в БД с входящими данными.
-        Лимит: не более 20 элементов, 50 ячеек на таблицу.
+
+        Args:
+            act_id: ID акта
+            data: ActDataSchema с входящими данными
+            max_elements: Максимум элементов для diff
+            max_cells_per_table: Максимум ячеек на таблицу
 
         Returns:
             {element_id: {type, name, ...changes}}
@@ -273,7 +285,6 @@ class ActAuditLogRepository(BaseRepository):
             content_map = self._build_node_content_map(data.tree)
             result: dict[str, dict] = {}
             processed = 0
-            max_elements = 20
 
             # --- Таблицы ---
             db_tables = await self.conn.fetch(
@@ -293,12 +304,12 @@ class ActAuditLogRepository(BaseRepository):
                     [cell.model_dump() for cell in row]
                     for row in new_table.grid
                 ]
-                cells = self._diff_table_cells(old_grid, new_grid)
+                cells = self._diff_table_cells(old_grid, new_grid, max_cells=max_cells_per_table)
                 if cells:
                     result[table_id] = {
                         "type": "table",
                         "name": content_map.get(table_id, table_id),
-                        "cells": cells[:50],
+                        "cells": cells[:max_cells_per_table],
                     }
                     processed += 1
 
@@ -372,7 +383,7 @@ class ActAuditLogRepository(BaseRepository):
             return {}
 
     @staticmethod
-    def _diff_table_cells(old_grid: list, new_grid: list) -> list[dict]:
+    def _diff_table_cells(old_grid: list, new_grid: list, *, max_cells: int = 50) -> list[dict]:
         """Попарное сравнение ячеек двух grid, возвращает список изменённых."""
         changes: list[dict] = []
         max_rows = max(len(old_grid), len(new_grid))
@@ -415,7 +426,7 @@ class ActAuditLogRepository(BaseRepository):
                         "old": str(old_val)[:100],
                         "new": str(new_val)[:100],
                     })
-                    if len(changes) >= 50:
+                    if len(changes) >= max_cells:
                         return changes
         return changes
 

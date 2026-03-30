@@ -97,7 +97,13 @@ class ActContentService:
         diff["save_type"] = data.saveType
 
         # Вычисляем field-level diff для изменённых элементов
-        field_changes = await self._audit.compute_field_diffs(act_id, data)
+        audit_log_cfg = self.acts_settings.audit_log
+        field_changes = await self._audit.compute_field_diffs(
+            act_id,
+            data,
+            max_elements=audit_log_cfg.max_diff_elements,
+            max_cells_per_table=audit_log_cfg.max_diff_cells_per_table,
+        )
         if field_changes:
             diff["field_changes"] = field_changes
 
