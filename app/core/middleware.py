@@ -9,6 +9,8 @@ Middleware для FastAPI приложения.
 
 import asyncio
 import json
+import logging
+import uuid
 from datetime import datetime, timedelta
 
 from cachetools import TTLCache
@@ -16,10 +18,10 @@ from fastapi import Request
 from fastapi.responses import JSONResponse
 from starlette.middleware.base import BaseHTTPMiddleware
 
-from app.core.config import Settings, get_settings, setup_logging
+from app.core.config import Settings, get_settings, request_id_var
 
 settings = get_settings()
-logger = setup_logging(settings.server.log_level)
+logger = logging.getLogger("audit_workstation.middleware")
 
 
 class HTTPSRedirectMiddleware(BaseHTTPMiddleware):
@@ -224,3 +226,20 @@ class RequestSizeLimitMiddleware:
             "type": "http.response.body",
             "body": body,
         })
+
+
+class RequestIdMiddleware(BaseHTTPMiddleware):
+    """
+    Назначает уникальный request_id каждому входящему запросу.
+
+    Читает X-Request-ID из заголовков (для сквозной трассировки через прокси),
+    иначе генерирует короткий UUID. Сохраняет в ContextVar — доступен во всех логах
+    в рамках обработки запроса. Возвращает request_id в заголовке ответа.
+    """
+
+    async def dispatch(self, request: Request, call_next):
+        request_id = request.headers.get("X-Request-ID") or uuid.uuid4().hex[:8]
+        request_id_var.set(request_id)
+        response = await call_next(request)
+        response.headers["X-Request-ID"] = request_id
+        return response

@@ -5,6 +5,7 @@
 Использует переменные окружения из .env файла.
 """
 
+import contextvars
 import logging
 import sys
 import warnings
@@ -15,6 +16,18 @@ from typing import ClassVar, Literal
 
 from pydantic import BaseModel, Field, SecretStr, field_validator, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
+
+# ContextVar для хранения request_id в асинхронном контексте запроса.
+# Значение по умолчанию «-» используется вне контекста HTTP-запроса (startup, shutdown и т.д.)
+request_id_var: contextvars.ContextVar[str] = contextvars.ContextVar("request_id", default="-")
+
+
+class RequestIdFilter(logging.Filter):
+    """Инжектирует request_id текущего запроса в каждую запись лога."""
+
+    def filter(self, record: logging.LogRecord) -> bool:
+        record.request_id = request_id_var.get()
+        return True
 
 def setup_logging(log_level: str = "INFO") -> logging.Logger:
     """
@@ -38,8 +51,8 @@ def setup_logging(log_level: str = "INFO") -> logging.Logger:
 
     # Создаем форматер для логов
     formatter = logging.Formatter(
-        '%(levelname)s:     [%(asctime)s] %(name)s - %(message)s',
-        datefmt='%H:%M:%S'
+        '%(levelname)s:     [%(asctime)s] [%(request_id)s] %(name)s - %(message)s',
+        datefmt='%Y-%m-%d %H:%M:%S'
     )
 
     # Настраиваем консольный handler
@@ -63,12 +76,20 @@ def setup_logging(log_level: str = "INFO") -> logging.Logger:
     file_handler.setFormatter(formatter)
     file_handler.setLevel(getattr(logging, log_level.upper()))
 
+    # Инжектируем request_id в каждую запись через handlers, а не через logger.
+    # Причина: при propagation от дочерних логгеров Python вызывает callHandlers()
+    # на родительском логгере, минуя его собственные filters. Фильтр на handler
+    # гарантированно срабатывает непосредственно перед emit().
+    request_id_filter = RequestIdFilter()
+    console_handler.addFilter(request_id_filter)
+    file_handler.addFilter(request_id_filter)
+
     # Добавляем handlers
     logger.addHandler(console_handler)
     logger.addHandler(file_handler)
 
-    # Поставить False если нужно отключить вывод событий в root logger
-    logger.propagate = True
+    # False: не пропускать сообщения в root logger (избегаем дублей с uvicorn)
+    logger.propagate = False
 
     return logger
 

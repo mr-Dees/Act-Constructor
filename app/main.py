@@ -21,6 +21,7 @@ from app.core.domain_registry import discover_domains, register_domains
 from app.core.middleware import (
     HTTPSRedirectMiddleware,
     RateLimitMiddleware,
+    RequestIdMiddleware,
     RequestSizeLimitMiddleware
 )
 from asyncpg import CheckViolationError, UniqueViolationError
@@ -191,12 +192,15 @@ def create_app() -> FastAPI:
         max_size=settings.security.max_request_size
     )
 
-    # 3. Rate limiting (последний)
+    # 3. Rate limiting
     app.add_middleware(
         RateLimitMiddleware,
         rate_limit=settings.security.rate_limit_per_minute,
         settings=settings
     )
+
+    # 4. Request ID — самый последний, запускается первым: охватывает всю цепочку middleware
+    app.add_middleware(RequestIdMiddleware)
 
     # Подключение статических файлов (доступны по URL /static/*)
     app.mount(
@@ -329,8 +333,8 @@ if __name__ == "__main__":
         port=settings.server.port,
         # Автоматическая перезагрузка при изменении кода
         reload=True,
-        # Уменьшаем verbosity uvicorn логов
-        log_level="debug",
+        # Уровень uvicorn синхронизирован с SERVER__LOG_LEVEL
+        log_level=settings.server.log_level.lower(),
         # Если работаем с greenplum через прокси, то указываем корень
         root_path=root_path
     )
