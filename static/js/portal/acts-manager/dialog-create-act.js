@@ -654,7 +654,7 @@ class CreateActDialog extends DialogBase {
         } else {
             // 3 строки по умолчанию
             this._addTeamMember(dialog, 'Куратор', '', '', '');
-            this._addTeamMember(dialog, 'Руководитель', '', '', currentUser);
+            this._addTeamMember(dialog, 'Руководитель', '', '', '');
             this._addTeamMember(dialog, 'Участник', '', '', '');
         }
     }

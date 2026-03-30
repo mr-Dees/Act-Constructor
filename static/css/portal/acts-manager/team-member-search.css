@@ -2,7 +2,11 @@
 
 .team-member-name-wrapper {
     position: relative;
-    flex: 1;
+    min-width: 0;
+}
+
+.team-member-name-wrapper input {
+    width: 100%;
 }
 
 .team-member-search-dropdown {
