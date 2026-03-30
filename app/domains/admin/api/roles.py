@@ -1,14 +1,14 @@
 """
 API эндпоинты для администрирования ролей.
 
-Проверка прав администратора выполняется на уровне регистрации домена
-(require_admin dependency в domain_registry.register_domains).
+Проверка прав администратора: defence-in-depth — require_admin применяется
+и на уровне include_router (domain_registry), и на каждом эндпоинте.
 """
 
 from fastapi import APIRouter, Depends
 
 from app.api.v1.deps.auth_deps import get_username
-from app.api.v1.deps.role_deps import invalidate_roles_cache
+from app.api.v1.deps.role_deps import invalidate_roles_cache, require_admin
 from app.domains.admin.deps import get_admin_service
 from app.domains.admin.schemas.admin import (
     RoleAssignRequest,
@@ -19,10 +19,12 @@ from app.domains.admin.schemas.admin import (
 )
 from app.domains.admin.services.admin_service import AdminService
 
+_admin = Depends(require_admin())
+
 router = APIRouter()
 
 
-@router.get("/roles", response_model=list[RoleSchema])
+@router.get("/roles", response_model=list[RoleSchema], dependencies=[_admin])
 async def list_roles(
     service: AdminService = Depends(get_admin_service),
 ):
@@ -30,7 +32,7 @@ async def list_roles(
     return await service.get_all_roles()
 
 
-@router.get("/users/directory", response_model=list[UserDirectoryItem])
+@router.get("/users/directory", response_model=list[UserDirectoryItem], dependencies=[_admin])
 async def get_user_directory(
     service: AdminService = Depends(get_admin_service),
 ):
@@ -38,7 +40,7 @@ async def get_user_directory(
     return await service.get_user_directory()
 
 
-@router.get("/users/search", response_model=list[UserSearchResult])
+@router.get("/users/search", response_model=list[UserSearchResult], dependencies=[_admin])
 async def search_users(
     q: str = "",
     service: AdminService = Depends(get_admin_service),
@@ -47,7 +49,7 @@ async def search_users(
     return await service.search_users(q)
 
 
-@router.get("/users/{username}/roles", response_model=UserRolesResponse)
+@router.get("/users/{username}/roles", response_model=UserRolesResponse, dependencies=[_admin])
 async def get_user_roles(
     username: str,
     service: AdminService = Depends(get_admin_service),
@@ -56,7 +58,7 @@ async def get_user_roles(
     return await service.get_user_roles(username)
 
 
-@router.post("/users/{username}/roles", status_code=200)
+@router.post("/users/{username}/roles", status_code=200, dependencies=[_admin])
 async def assign_role(
     username: str,
     body: RoleAssignRequest,
@@ -73,7 +75,7 @@ async def assign_role(
     }
 
 
-@router.delete("/users/{username}/roles/{role_id}", status_code=200)
+@router.delete("/users/{username}/roles/{role_id}", status_code=200, dependencies=[_admin])
 async def remove_role(
     username: str,
     role_id: int,
