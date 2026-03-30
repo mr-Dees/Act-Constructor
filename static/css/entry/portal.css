@@ -14,6 +14,7 @@
 /* Acts manager */
 @import '../portal/acts-manager/acts-manager-base.css';
 @import '../portal/acts-manager/acts-manager-cards.css';
+@import '../portal/acts-manager/team-member-search.css';
 @import '../portal/acts-manager/audit-log-dialog.css';
 @import '../shared/dialog/acts-modal.css';
 @import '../portal/acts-manager/version-preview.css';
