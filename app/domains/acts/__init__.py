@@ -27,6 +27,7 @@ def _build_domain():
         api_routers=get_api_routers(),
         html_routers=get_html_routers(),
         settings_class=ActsSettings,
+        dependencies=["admin"],
         on_startup=on_startup,
         on_shutdown=on_shutdown,
         chat_tools=get_chat_tools(),
