@@ -169,6 +169,9 @@ def register_domains(
 
     from app.api.v1.deps.role_deps import require_admin, require_domain_access
 
+    api_count = 0
+    html_count = 0
+
     for d in domains:
         # Определяем зависимости проверки ролей для домена
         if d.name == "admin":
@@ -183,12 +186,14 @@ def register_domains(
                 router, prefix=full_prefix, tags=tags,
                 dependencies=role_deps,
             )
-            logger.info(f"Домен {d.name}: API {full_prefix}")
+            logger.debug(f"Домен {d.name}: API {full_prefix}")
+            api_count += 1
 
         # HTML роутеры
         for router in d.html_routers:
             app.include_router(router, dependencies=role_deps)
-            logger.info(f"Домен {d.name}: HTML роутер зарегистрирован")
+            logger.debug(f"Домен {d.name}: HTML роутер зарегистрирован")
+            html_count += 1
 
         # Обработчики ошибок (с детекцией коллизий)
         if d.exception_handlers:
@@ -201,7 +206,9 @@ def register_domains(
                     )
                 app.add_exception_handler(exc_class, handler)
                 registered_exc_classes[exc_class] = d.name
-                logger.info(f"Домен {d.name}: обработчик {exc_class.__name__}")
+                logger.debug(f"Домен {d.name}: обработчик {exc_class.__name__}")
+
+    logger.info(f"Роутеры зарегистрированы: {api_count} API, {html_count} HTML")
 
 
 def get_domain(name: str) -> DomainDescriptor | None:
