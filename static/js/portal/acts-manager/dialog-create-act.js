@@ -698,18 +698,21 @@ class CreateActDialog extends DialogBase {
         const usernameInput = rowElement.querySelector('[name="username"]');
         if (usernameInput) usernameInput.value = username;
 
-        // Обработчик удаления
-        const deleteBtn = rowElement.querySelector('.delete-member-btn');
-        if (deleteBtn) {
-            deleteBtn.onclick = () => rowElement.remove();
-        }
-
         container.appendChild(memberRow);
 
         // Инициализация autocomplete поиска
         const search = new TeamMemberSearch(rowElement);
         if (fullName && username) {
             search.setSelected();
+        }
+
+        // Обработчик удаления (с очисткой глобальных listeners)
+        const deleteBtn = rowElement.querySelector('.delete-member-btn');
+        if (deleteBtn) {
+            deleteBtn.onclick = () => {
+                search.destroy();
+                rowElement.remove();
+            };
         }
     }
 

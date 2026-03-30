@@ -54,11 +54,12 @@ class TeamMemberSearch {
             this._clearBtn.addEventListener('click', () => this._onClear());
         }
 
-        document.addEventListener('click', (e) => {
+        this._onDocumentClick = (e) => {
             if (!this._wrapper.contains(e.target)) {
                 this._hideDropdown();
             }
-        });
+        };
+        document.addEventListener('click', this._onDocumentClick);
 
         this._nameInput.addEventListener('keydown', (e) => {
             if (e.key === 'Escape') {
@@ -209,6 +210,16 @@ class TeamMemberSearch {
         if (this._clearBtn) {
             this._clearBtn.classList.add('visible');
         }
+    }
+
+    /**
+     * Удаляет глобальные обработчики событий при удалении строки
+     */
+    destroy() {
+        if (this._onDocumentClick) {
+            document.removeEventListener('click', this._onDocumentClick);
+        }
+        clearTimeout(this._debounceTimer);
     }
 
     /**
