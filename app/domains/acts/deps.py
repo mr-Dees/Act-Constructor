@@ -21,6 +21,7 @@ from app.domains.acts.services.act_crud_service import ActCrudService
 from app.domains.acts.services.act_lock_service import ActLockService
 from app.domains.acts.services.act_content_service import ActContentService
 from app.domains.acts.services.act_invoice_service import ActInvoiceService
+from app.domains.acts.repositories.act_users import ActUsersRepository
 from app.domains.acts.settings import ActsSettings
 
 
@@ -83,3 +84,9 @@ async def get_audit_log_service() -> AsyncGenerator:
         audit_repo = ActAuditLogRepository(conn)
         versions_repo = ActContentVersionRepository(conn)
         yield AuditLogService(guard, audit_repo, versions_repo, conn)
+
+
+async def get_users_repository() -> AsyncGenerator[ActUsersRepository, None]:
+    """Создает ActUsersRepository с подключением из пула."""
+    async with get_db() as conn:
+        yield ActUsersRepository(conn)

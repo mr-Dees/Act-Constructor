@@ -13,6 +13,13 @@ class AuditTeamMember(BaseModel):
     username: str = Field(min_length=1, max_length=255)
 
 
+class UserSearchResult(BaseModel):
+    """Результат поиска пользователя в справочнике."""
+    username: str
+    fullname: str = ""
+    job: str = ""
+
+
 class ActDirective(BaseModel):
     """Поручение"""
     point_number: str = Field(min_length=1, max_length=50)
