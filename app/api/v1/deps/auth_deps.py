@@ -11,7 +11,7 @@ from fastapi import HTTPException
 
 from app.api.v1.endpoints.auth import get_current_user_from_env
 
-logger = logging.getLogger("audit_workstation.auth_deps")
+logger = logging.getLogger("audit_workstation.api.deps.auth")
 
 
 def get_username() -> str:

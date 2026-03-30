@@ -5,18 +5,20 @@ HTML-роут конструктора актов.
 пользователя к акту через зависимости авторизации и БД.
 """
 
+import logging
+
 from fastapi import APIRouter, Request, Depends
 from fastapi.responses import HTMLResponse, RedirectResponse
 
 from app.api.v1.deps.auth_deps import get_username
-from app.core.config import get_settings, setup_logging
+from app.core.config import get_settings
 from app.core.navigation import get_chat_domains_for_page, get_knowledge_bases_as_dicts
 from app.core.templating import get_templates
 from app.db.connection import get_db
 from app.domains.acts.repositories import ActAccessRepository
 
 settings = get_settings()
-logger = setup_logging(settings.server.log_level)
+logger = logging.getLogger("audit_workstation.domains.acts.routes.constructor")
 templates = get_templates()
 
 router = APIRouter()

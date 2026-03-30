@@ -13,7 +13,7 @@ from pathlib import Path
 
 from docx import Document
 
-logger = logging.getLogger("audit_workstation.service.storage")
+logger = logging.getLogger("audit_workstation.service.acts.storage")
 
 
 class StorageService:

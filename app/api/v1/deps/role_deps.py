@@ -14,7 +14,7 @@ from fastapi import Depends, HTTPException
 from app.api.v1.deps.auth_deps import get_username
 from app.db.connection import get_db, get_adapter
 
-logger = logging.getLogger("audit_workstation.deps.roles")
+logger = logging.getLogger("audit_workstation.api.deps.roles")
 
 # Кеш ролей: maxsize=256, ttl=60 секунд
 _roles_cache: TTLCache = TTLCache(maxsize=256, ttl=60)

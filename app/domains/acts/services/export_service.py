@@ -22,7 +22,7 @@ from app.domains.acts.services.storage_service import StorageService
 from app.domains.acts._lifecycle import get_executor
 from app.domains.acts.settings import ActsSettings
 
-logger = logging.getLogger("audit_workstation.service.export")
+logger = logging.getLogger("audit_workstation.service.acts.export")
 
 
 class ExportService:
