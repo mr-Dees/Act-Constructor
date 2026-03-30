@@ -705,6 +705,12 @@ class CreateActDialog extends DialogBase {
         }
 
         container.appendChild(memberRow);
+
+        // Инициализация autocomplete поиска
+        const search = new TeamMemberSearch(rowElement);
+        if (fullName && username) {
+            search.setSelected();
+        }
     }
 
     /**
