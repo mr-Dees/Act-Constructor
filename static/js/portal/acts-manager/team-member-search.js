@@ -82,9 +82,8 @@ class TeamMemberSearch {
             return;
         }
 
-        this._showLoading();
-
         this._debounceTimer = setTimeout(async () => {
+            this._showLoading();
             try {
                 const users = await APIClient.searchTeamUsers(query);
                 const filtered = this._excludeAlreadyAdded(users);
@@ -135,9 +134,9 @@ class TeamMemberSearch {
             const details = [u.job, u.username].filter(Boolean).map(s => this._escapeHtml(s)).join(' \u00b7 ');
             return `
                 <div class="team-member-search-item"
-                     data-username="${this._escapeHtml(u.username)}"
-                     data-fullname="${this._escapeHtml(u.fullname)}"
-                     data-job="${this._escapeHtml(u.job)}">
+                     data-username="${this._escapeHtml(u.username || '')}"
+                     data-fullname="${this._escapeHtml(u.fullname || '')}"
+                     data-job="${this._escapeHtml(u.job || '')}">
                     <div class="team-member-search-item-name">${name}</div>
                     <div class="team-member-search-item-details">${details}</div>
                 </div>
