@@ -88,6 +88,37 @@ async def _execute_tool_call(tool_name: str, arguments: dict) -> str:
         return f"Ошибка выполнения инструмента: {exc}"
 
 
+async def _log_chat_audit(
+    username: str,
+    act_id: int | None,
+    message: str,
+    tool_calls: list[dict],
+    response: str,
+    status: str,
+    domains: list[str] | None,
+    rounds: int,
+) -> None:
+    """Записывает вызов чата в аудит-лог (fire-and-forget)."""
+    try:
+        from app.db.connection import get_db
+        from app.domains.acts.repositories.act_audit_log import ActAuditLogRepository
+
+        details = {
+            "message": message[:500],
+            "response": response[:500],
+            "domains": domains,
+            "tool_calls": tool_calls,
+            "rounds": rounds,
+            "status": status,
+        }
+
+        async with get_db() as conn:
+            repo = ActAuditLogRepository(conn)
+            await repo.log("chat_message", username, act_id, details)
+    except Exception:
+        logger.exception("Не удалось записать аудит-лог чата")
+
+
 @router.post("/message", response_model=ChatResponse, responses={401: {"description": "Требуется авторизация", "model": ErrorDetail}, 422: {"description": "Ошибка валидации входных данных"}})
 async def send_message(
     request: ChatRequest,
@@ -123,13 +154,25 @@ async def send_message(
 
     # Fallback: если API не настроен
     if not settings.chat.api_base or not settings.chat.api_key.get_secret_value():
-        return _fallback_response(request)
+        fallback = _fallback_response(request)
+        await _log_chat_audit(
+            username=username, act_id=request.act_id,
+            message=request.message, tool_calls=[], response=fallback.response,
+            status="fallback", domains=request.domains, rounds=0,
+        )
+        return fallback
 
     try:
         from openai import NOT_GIVEN
     except ImportError:
         logger.warning("Пакет openai не установлен, используется заглушка")
-        return _fallback_response(request)
+        fallback = _fallback_response(request)
+        await _log_chat_audit(
+            username=username, act_id=request.act_id,
+            message=request.message, tool_calls=[], response=fallback.response,
+            status="fallback", domains=request.domains, rounds=0,
+        )
+        return fallback
 
     client = _get_openai_client(settings.chat.api_base, settings.chat.api_key.get_secret_value())
 
@@ -155,6 +198,7 @@ async def send_message(
     messages = _build_messages(settings, request, domain_descriptors)
 
     sources: list[str] = []
+    audit_tool_calls: list[dict] = []
 
     try:
         response = await client.chat.completions.create(
@@ -191,6 +235,13 @@ async def send_message(
                 result = await _execute_tool_call(tool_name, arguments)
                 sources.append(tool_name)
 
+                audit_tool_calls.append({
+                    "tool": tool_name,
+                    "arguments": arguments,
+                    "result_length": len(result),
+                    "result_preview": result[:200],
+                })
+
                 messages.append({
                     "role": "tool",
                     "tool_call_id": tc.id,
@@ -206,6 +257,18 @@ async def send_message(
             )
 
         answer = response.choices[0].message.content or ""
+
+        await _log_chat_audit(
+            username=username,
+            act_id=request.act_id,
+            message=request.message,
+            tool_calls=audit_tool_calls,
+            response=answer,
+            status="ok",
+            domains=request.domains,
+            rounds=rounds,
+        )
+
         return ChatResponse(
             response=answer,
             sources=list(dict.fromkeys(sources)),  # уникальные, в порядке вызова
@@ -213,6 +276,18 @@ async def send_message(
 
     except Exception as exc:
         logger.exception("Ошибка вызова LLM API")
+
+        await _log_chat_audit(
+            username=username,
+            act_id=request.act_id,
+            message=request.message,
+            tool_calls=audit_tool_calls,
+            response="",
+            status="error",
+            domains=request.domains,
+            rounds=0,
+        )
+
         return ChatResponse(
             response="Временная ошибка AI-сервиса. Попробуйте позже.",
             status="error",
