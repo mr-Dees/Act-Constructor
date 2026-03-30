@@ -1020,6 +1020,21 @@ class APIClient {
         if (!response.ok) throw this._createError(response.status, 'Ошибка поиска пользователей');
         return response.json();
     }
+
+    /**
+     * Поиск пользователей в справочнике для аудиторской группы
+     * @param {string} query - Строка поиска (мин. 2 символа)
+     * @returns {Promise<Array<{username: string, fullname: string, job: string}>>}
+     */
+    static async searchTeamUsers(query) {
+        const username = AuthManager.getCurrentUser();
+        const response = await fetch(
+            AppConfig.api.getUrl(`/api/v1/acts/users/search?q=${encodeURIComponent(query)}`),
+            { headers: { 'X-JupyterHub-User': username } }
+        );
+        if (!response.ok) throw this._createError(response.status, 'Ошибка поиска пользователей');
+        return response.json();
+    }
 }
 
 // Глобальный доступ
