@@ -86,7 +86,7 @@ class GreenplumAdapter(DatabaseAdapter):
                 logger.debug(f"Пустая схема (только комментарии): {schema_path}, пропускаем")
                 continue
 
-            domain_name = schema_path.parent.parent.name
+            domain_name = schema_path.parent.parent.parent.name
             expected = self._extract_table_names_from_sql(schema_sql)
 
             if not expected:
@@ -110,16 +110,25 @@ class GreenplumAdapter(DatabaseAdapter):
                 f"отсутствуют {len(missing)} из {len(expected)}: {', '.join(missing_short)}"
             )
 
-            try:
-                await conn.execute(schema_sql)
-                logger.info(f"Greenplum схема выполнена: {domain_name}")
-            except asyncpg.DuplicateTableError as e:
-                logger.warning(f"Greenplum: часть таблиц уже существовала ({domain_name}): {e}")
-            except asyncpg.DuplicateObjectError as e:
-                logger.warning(f"Greenplum: часть объектов уже существовала ({domain_name}): {e}")
-            except Exception as e:
-                logger.error(f"Ошибка создания Greenplum схемы {schema_path}: {e}")
-                raise
+            # Разбиваем и выполняем оператор за оператором,
+            # чтобы ошибка одного оператора не прерывала весь batch
+            statements = self._split_sql_statements(schema_sql)
+
+            for stmt in statements:
+                try:
+                    await conn.execute(stmt)
+                except asyncpg.DuplicateTableError:
+                    logger.debug("Greenplum: таблица уже существует, пропускаем")
+                except asyncpg.DuplicateObjectError:
+                    logger.debug("Greenplum: объект уже существует, пропускаем")
+                except Exception as e:
+                    logger.error(f"Greenplum: ошибка выполнения оператора: {e}")
+                    raise
+
+            logger.info(
+                f"Greenplum схема выполнена: {domain_name} "
+                f"({len(statements)} операторов)"
+            )
 
             # Post-verify: убеждаемся, что все таблицы созданы
             existing_after = await self._get_existing_tables(conn, expected)

@@ -144,6 +144,91 @@ class DatabaseAdapter(ABC):
         """
         pass
 
+    @staticmethod
+    def _split_sql_statements(sql: str) -> list[str]:
+        """
+        Разделяет SQL-текст на отдельные операторы.
+
+        Корректно обрабатывает:
+        - Разделение по `;`
+        - Dollar-quoting (`$$...$$` и `$tag$...$tag$`) — не разбивает внутри
+        - Блочные комментарии (`/* ... */`)
+        - Однострочные комментарии (`--`)
+        - Строковые литералы (`'...'` с экранированием `''`)
+        """
+        statements = []
+        current_pos = 0
+        i = 0
+        n = len(sql)
+
+        while i < n:
+            c = sql[i]
+
+            # Однострочный комментарий: пропускаем до конца строки
+            if c == '-' and i + 1 < n and sql[i + 1] == '-':
+                i = sql.find('\n', i)
+                if i == -1:
+                    break
+                i += 1
+                continue
+
+            # Блочный комментарий /* ... */
+            if c == '/' and i + 1 < n and sql[i + 1] == '*':
+                end = sql.find('*/', i + 2)
+                if end != -1:
+                    i = end + 2
+                else:
+                    i = n
+                continue
+
+            # Строковый литерал в одинарных кавычках
+            if c == "'":
+                i += 1
+                while i < n:
+                    if sql[i] == "'":
+                        if i + 1 < n and sql[i + 1] == "'":
+                            i += 2  # экранированная кавычка
+                        else:
+                            i += 1
+                            break
+                    i += 1
+                continue
+
+            # Dollar-quoting ($$ или $tag$)
+            if c == '$':
+                m = re.match(r'\$(\w*)\$', sql[i:])
+                if m:
+                    tag = m.group(0)
+                    end = sql.find(tag, i + len(tag))
+                    if end != -1:
+                        i = end + len(tag)
+                    else:
+                        i = n
+                    continue
+
+            # Разделитель операторов
+            if c == ';':
+                stmt = sql[current_pos:i + 1].strip()
+                if stmt and stmt != ';':
+                    # Пропускаем операторы, содержащие только комментарии
+                    content = re.sub(r'/\*.*?\*/', '', stmt, flags=re.DOTALL)
+                    content = re.sub(r'--[^\n]*', '', content).strip()
+                    if content and content != ';':
+                        statements.append(stmt)
+                current_pos = i + 1
+
+            i += 1
+
+        # Оставшийся текст
+        remaining = sql[current_pos:].strip()
+        if remaining:
+            content = re.sub(r'/\*.*?\*/', '', remaining, flags=re.DOTALL)
+            content = re.sub(r'--[^\n]*', '', content).strip()
+            if content:
+                statements.append(remaining)
+
+        return statements
+
     def qualify_column(self, table_alias: str, column: str) -> str:
         """
         Квалифицирует имя колонки с учетом алиаса таблицы.

@@ -463,77 +463,79 @@ COMMENT ON COLUMN {SCHEMA}.{PREFIX}act_content_versions.created_at IS 'Врем�
 
 -- ============================================================================
 -- ИНДЕКСЫ ДЛЯ ОПТИМИЗАЦИИ ЗАПРОСОВ
+-- Примечание: CREATE INDEX без IF NOT EXISTS — GP 6.x (PG 9.4) не поддерживает
+-- IF NOT EXISTS для индексов. Обработка дублей — на уровне адаптера.
 -- ============================================================================
 
 -- Индексы на acts
-CREATE INDEX IF NOT EXISTS idx_{PREFIX}acts_id
+CREATE INDEX idx_{PREFIX}acts_id
     ON {SCHEMA}.{PREFIX}acts(id);
 
-CREATE INDEX IF NOT EXISTS idx_{PREFIX}acts_km_digit
+CREATE INDEX idx_{PREFIX}acts_km_digit
     ON {SCHEMA}.{PREFIX}acts(km_number_digit);
 
-CREATE INDEX IF NOT EXISTS idx_{PREFIX}acts_km_digit_part
+CREATE INDEX idx_{PREFIX}acts_km_digit_part
     ON {SCHEMA}.{PREFIX}acts(km_number_digit, part_number);
 
-CREATE INDEX IF NOT EXISTS idx_{PREFIX}acts_service_note
+CREATE INDEX idx_{PREFIX}acts_service_note
     ON {SCHEMA}.{PREFIX}acts(service_note)
     WHERE service_note IS NOT NULL;
 
-CREATE INDEX IF NOT EXISTS idx_{PREFIX}acts_service_note_date
+CREATE INDEX idx_{PREFIX}acts_service_note_date
     ON {SCHEMA}.{PREFIX}acts(service_note_date)
     WHERE service_note_date IS NOT NULL;
 
-CREATE INDEX IF NOT EXISTS idx_{PREFIX}acts_created_by
+CREATE INDEX idx_{PREFIX}acts_created_by
     ON {SCHEMA}.{PREFIX}acts(created_by);
 
-CREATE INDEX IF NOT EXISTS idx_{PREFIX}acts_last_edited_at
+CREATE INDEX idx_{PREFIX}acts_last_edited_at
     ON {SCHEMA}.{PREFIX}acts(last_edited_at);
 
-CREATE INDEX IF NOT EXISTS idx_{PREFIX}acts_locked_by
+CREATE INDEX idx_{PREFIX}acts_locked_by
     ON {SCHEMA}.{PREFIX}acts(locked_by)
     WHERE locked_by IS NOT NULL;
 
-CREATE INDEX IF NOT EXISTS idx_{PREFIX}acts_lock_expires
+CREATE INDEX idx_{PREFIX}acts_lock_expires
     ON {SCHEMA}.{PREFIX}acts(lock_expires_at)
     WHERE lock_expires_at IS NOT NULL;
 
 -- Индексы на audit_team_members
-CREATE INDEX IF NOT EXISTS idx_{PREFIX}audit_team_username
+CREATE INDEX idx_{PREFIX}audit_team_username
     ON {SCHEMA}.{PREFIX}audit_team_members(username);
 
-CREATE INDEX IF NOT EXISTS idx_{PREFIX}audit_team_act_id
+CREATE INDEX idx_{PREFIX}audit_team_act_id
     ON {SCHEMA}.{PREFIX}audit_team_members(act_id);
 
-CREATE INDEX IF NOT EXISTS idx_{PREFIX}audit_team_act_order
+CREATE INDEX idx_{PREFIX}audit_team_act_order
     ON {SCHEMA}.{PREFIX}audit_team_members(act_id, order_index);
 
 -- Индексы на act_directives
-CREATE INDEX IF NOT EXISTS idx_{PREFIX}act_directives_act_id
+CREATE INDEX idx_{PREFIX}act_directives_act_id
     ON {SCHEMA}.{PREFIX}act_directives(act_id);
 
-CREATE INDEX IF NOT EXISTS idx_{PREFIX}act_directives_act_order
+CREATE INDEX idx_{PREFIX}act_directives_act_order
     ON {SCHEMA}.{PREFIX}act_directives(act_id, order_index);
 
 -- Индексы на act_tree
-CREATE INDEX IF NOT EXISTS idx_{PREFIX}act_tree_act_id
+CREATE INDEX idx_{PREFIX}act_tree_act_id
     ON {SCHEMA}.{PREFIX}act_tree(act_id);
 
 -- Индексы на act_tables
-CREATE INDEX IF NOT EXISTS idx_{PREFIX}act_tables_act_id
+CREATE INDEX idx_{PREFIX}act_tables_act_id
     ON {SCHEMA}.{PREFIX}act_tables(act_id);
 
-CREATE INDEX IF NOT EXISTS idx_{PREFIX}act_tables_act_table
+CREATE INDEX idx_{PREFIX}act_tables_act_table
     ON {SCHEMA}.{PREFIX}act_tables(act_id, table_id);
 
-CREATE INDEX IF NOT EXISTS idx_{PREFIX}act_tables_node_number
+CREATE INDEX idx_{PREFIX}act_tables_node_number
     ON {SCHEMA}.{PREFIX}act_tables(act_id, node_number)
     WHERE node_number IS NOT NULL;
 
-CREATE INDEX IF NOT EXISTS idx_{PREFIX}act_tables_label
+CREATE INDEX idx_{PREFIX}act_tables_label
     ON {SCHEMA}.{PREFIX}act_tables(act_id, table_label)
     WHERE table_label IS NOT NULL;
 
-CREATE INDEX IF NOT EXISTS idx_{PREFIX}act_tables_special_flags
+CREATE INDEX idx_{PREFIX}act_tables_special_flags
     ON {SCHEMA}.{PREFIX}act_tables(act_id)
     WHERE is_metrics_table = TRUE
        OR is_main_metrics_table = TRUE
@@ -541,82 +543,82 @@ CREATE INDEX IF NOT EXISTS idx_{PREFIX}act_tables_special_flags
        OR is_operational_risk_table = TRUE;
 
 -- Индексы на act_textblocks
-CREATE INDEX IF NOT EXISTS idx_{PREFIX}act_textblocks_act_id
+CREATE INDEX idx_{PREFIX}act_textblocks_act_id
     ON {SCHEMA}.{PREFIX}act_textblocks(act_id);
 
-CREATE INDEX IF NOT EXISTS idx_{PREFIX}act_textblocks_act_textblock
+CREATE INDEX idx_{PREFIX}act_textblocks_act_textblock
     ON {SCHEMA}.{PREFIX}act_textblocks(act_id, textblock_id);
 
-CREATE INDEX IF NOT EXISTS idx_{PREFIX}act_textblocks_node_number
+CREATE INDEX idx_{PREFIX}act_textblocks_node_number
     ON {SCHEMA}.{PREFIX}act_textblocks(act_id, node_number)
     WHERE node_number IS NOT NULL;
 
 -- Индексы на act_violations
-CREATE INDEX IF NOT EXISTS idx_{PREFIX}act_violations_act_id
+CREATE INDEX idx_{PREFIX}act_violations_act_id
     ON {SCHEMA}.{PREFIX}act_violations(act_id);
 
-CREATE INDEX IF NOT EXISTS idx_{PREFIX}act_violations_act_violation
+CREATE INDEX idx_{PREFIX}act_violations_act_violation
     ON {SCHEMA}.{PREFIX}act_violations(act_id, violation_id);
 
-CREATE INDEX IF NOT EXISTS idx_{PREFIX}act_violations_node_number
+CREATE INDEX idx_{PREFIX}act_violations_node_number
     ON {SCHEMA}.{PREFIX}act_violations(act_id, node_number)
     WHERE node_number IS NOT NULL;
 
 -- Индексы на act_invoices
-CREATE INDEX IF NOT EXISTS idx_{PREFIX}act_invoices_act_id
+CREATE INDEX idx_{PREFIX}act_invoices_act_id
     ON {SCHEMA}.{PREFIX}act_invoices(act_id);
 
-CREATE INDEX IF NOT EXISTS idx_{PREFIX}act_invoices_act_node
+CREATE INDEX idx_{PREFIX}act_invoices_act_node
     ON {SCHEMA}.{PREFIX}act_invoices(act_id, node_id);
 
 -- Индексы на audit_act_id
-CREATE INDEX IF NOT EXISTS idx_{PREFIX}acts_audit_act_id
+CREATE INDEX idx_{PREFIX}acts_audit_act_id
     ON {SCHEMA}.{PREFIX}acts(audit_act_id)
     WHERE audit_act_id IS NOT NULL;
 
-CREATE INDEX IF NOT EXISTS idx_{PREFIX}audit_team_audit_act_id
+CREATE INDEX idx_{PREFIX}audit_team_audit_act_id
     ON {SCHEMA}.{PREFIX}audit_team_members(audit_act_id)
     WHERE audit_act_id IS NOT NULL;
 
-CREATE INDEX IF NOT EXISTS idx_{PREFIX}act_directives_audit_act_id
+CREATE INDEX idx_{PREFIX}act_directives_audit_act_id
     ON {SCHEMA}.{PREFIX}act_directives(audit_act_id)
     WHERE audit_act_id IS NOT NULL;
 
-CREATE INDEX IF NOT EXISTS idx_{PREFIX}act_tables_audit_act_id
+CREATE INDEX idx_{PREFIX}act_tables_audit_act_id
     ON {SCHEMA}.{PREFIX}act_tables(audit_act_id)
     WHERE audit_act_id IS NOT NULL;
 
-CREATE INDEX IF NOT EXISTS idx_{PREFIX}act_textblocks_audit_act_id
+CREATE INDEX idx_{PREFIX}act_textblocks_audit_act_id
     ON {SCHEMA}.{PREFIX}act_textblocks(audit_act_id)
     WHERE audit_act_id IS NOT NULL;
 
-CREATE INDEX IF NOT EXISTS idx_{PREFIX}act_violations_audit_act_id
+CREATE INDEX idx_{PREFIX}act_violations_audit_act_id
     ON {SCHEMA}.{PREFIX}act_violations(audit_act_id)
     WHERE audit_act_id IS NOT NULL;
 
-CREATE INDEX IF NOT EXISTS idx_{PREFIX}act_invoices_audit_act_id
+CREATE INDEX idx_{PREFIX}act_invoices_audit_act_id
     ON {SCHEMA}.{PREFIX}act_invoices(audit_act_id)
     WHERE audit_act_id IS NOT NULL;
 
 -- Индексы на audit_log
-CREATE INDEX IF NOT EXISTS idx_{PREFIX}audit_log_act_id
+CREATE INDEX idx_{PREFIX}audit_log_act_id
     ON {SCHEMA}.{PREFIX}audit_log(act_id)
     WHERE act_id IS NOT NULL;
 
-CREATE INDEX IF NOT EXISTS idx_{PREFIX}audit_log_username
+CREATE INDEX idx_{PREFIX}audit_log_username
     ON {SCHEMA}.{PREFIX}audit_log(username);
 
-CREATE INDEX IF NOT EXISTS idx_{PREFIX}audit_log_action
+CREATE INDEX idx_{PREFIX}audit_log_action
     ON {SCHEMA}.{PREFIX}audit_log(action);
 
-CREATE INDEX IF NOT EXISTS idx_{PREFIX}audit_log_created_at
+CREATE INDEX idx_{PREFIX}audit_log_created_at
     ON {SCHEMA}.{PREFIX}audit_log(created_at);
 
-CREATE INDEX IF NOT EXISTS idx_{PREFIX}audit_log_act_created
+CREATE INDEX idx_{PREFIX}audit_log_act_created
     ON {SCHEMA}.{PREFIX}audit_log(act_id, created_at DESC);
 
 -- Индексы на act_content_versions
-CREATE INDEX IF NOT EXISTS idx_{PREFIX}act_content_versions_act
+CREATE INDEX idx_{PREFIX}act_content_versions_act
     ON {SCHEMA}.{PREFIX}act_content_versions(act_id, version_number DESC);
 
 -- ============================================================================

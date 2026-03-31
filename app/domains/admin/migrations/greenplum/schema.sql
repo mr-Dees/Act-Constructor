@@ -59,14 +59,16 @@ COMMENT ON COLUMN {SCHEMA}.{PREFIX}user_roles.assigned_at IS 'Дата и вре
 
 -- ============================================================================
 -- ИНДЕКСЫ
+-- Примечание: CREATE INDEX без IF NOT EXISTS — GP 6.x (PG 9.4) не поддерживает
+-- IF NOT EXISTS для индексов. Обработка дублей — на уровне адаптера.
 -- ============================================================================
 
-CREATE INDEX IF NOT EXISTS idx_{PREFIX}user_roles_username
+CREATE INDEX idx_{PREFIX}user_roles_username
     ON {SCHEMA}.{PREFIX}user_roles(username);
 
-CREATE INDEX IF NOT EXISTS idx_{PREFIX}user_roles_role_id
+CREATE INDEX idx_{PREFIX}user_roles_role_id
     ON {SCHEMA}.{PREFIX}user_roles(role_id);
 
-CREATE INDEX IF NOT EXISTS idx_{PREFIX}roles_domain_name
+CREATE INDEX idx_{PREFIX}roles_domain_name
     ON {SCHEMA}.{PREFIX}roles(domain_name)
     WHERE domain_name IS NOT NULL;

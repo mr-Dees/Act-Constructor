@@ -57,7 +57,7 @@ class PostgreSQLAdapter(DatabaseAdapter):
                 logger.debug(f"Пустая схема (только комментарии): {schema_path}, пропускаем")
                 continue
 
-            domain_name = schema_path.parent.parent.name
+            domain_name = schema_path.parent.parent.parent.name
             expected = self._extract_table_names_from_sql(schema_sql)
 
             if not expected:
