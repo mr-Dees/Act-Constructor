@@ -51,7 +51,7 @@ def _load_from_env(name: str, cls: type[BaseModel]) -> BaseModel:
             f"Ошибка загрузки настроек домена '{name}' из .env: {e}"
         ) from e
     try:
-        return cls.model_validate(loader_instance.model_dump())
+        return cls.model_validate(loader_instance.model_dump(by_alias=True))
     except Exception as e:
         raise RuntimeError(
             f"Валидация настроек домена '{name}' не пройдена: {e}"
