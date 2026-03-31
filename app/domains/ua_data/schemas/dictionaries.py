@@ -17,81 +17,71 @@ class _AuditFieldsMixin(BaseModel):
 
 
 class ProcessDict(_AuditFieldsMixin):
-    """Справочник процессов."""
+    """Справочник бизнес-процессов."""
 
     id: int | None = None
     process_code: str
     process_name: str
-    description: str | None = None
+    block_owner: str = ""
+    department_owner: str = ""
 
 
 class TerbankDict(_AuditFieldsMixin):
     """Справочник территориальных банков."""
 
-    id: int | None = None
-    terbank_code: str
-    terbank_name: str
-    short_name: str | None = None
+    tb_id: int
+    short_name: str
+    full_name: str = ""
 
 
 class GosbDict(_AuditFieldsMixin):
     """Справочник ГОСБов."""
 
-    id: int | None = None
-    gosb_code: str
+    gosb_id: int
     gosb_name: str
-    terbank_id: int | None = None
 
 
 class VspDict(_AuditFieldsMixin):
     """Справочник ВСП."""
 
-    id: int | None = None
-    vsp_code: str
-    vsp_name: str
-    gosb_id: int | None = None
+    vsp_id: int
+    vsp_urf_code: str = ""
+    vsp_type: str = ""
 
 
 class ChannelDict(_AuditFieldsMixin):
     """Справочник каналов."""
 
     id: int | None = None
-    channel_code: str
-    channel_name: str
+    channel: str
 
 
 class ProductDict(_AuditFieldsMixin):
     """Справочник продуктов."""
 
     id: int | None = None
-    product_code: str
     product_name: str
-    category: str | None = None
 
 
 class SubsidiaryDict(_AuditFieldsMixin):
-    """Справочник дочерних организаций."""
+    """Справочник дочерних компаний."""
 
     id: int | None = None
-    subsidiary_code: str
+    subsidiary_group: str = ""
     subsidiary_name: str
-    inn: str | None = None
 
 
 class ViolationMetricDict(_AuditFieldsMixin):
     """Справочник метрик нарушений."""
 
     id: int | None = None
-    metric_code: str
+    code: str
     metric_name: str
-    metric_type: str | None = None
-    description: str | None = None
 
 
 class TeamDict(_AuditFieldsMixin):
-    """Справочник команд аудита."""
+    """Справочник команд."""
 
     id: int | None = None
-    team_code: str
-    team_name: str
-    leader_name: str | None = None
+    tb_id: int | None = None
+    username: str

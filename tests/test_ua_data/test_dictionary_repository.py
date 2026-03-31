@@ -108,17 +108,16 @@ class TestGetDepartments:
 
     async def test_returns_list_of_dicts(self, repo, mock_conn):
         mock_conn.fetch.return_value = [
-            {"id": 1, "department_code": "OARB",
-             "department_name": "Отдел аудита розничного бизнеса",
-             "parent_code": None, "level": 1,
-             "terbank_code": None, "terbank_name": None,
-             "gosb_code": None, "gosb_name": None,
-             "vsp_code": None, "vsp_name": None},
+            {"id": 1, "tb_id": 7, "gosb_id": 7001,
+             "vsp_id": 700101, "subsidiary_id": None,
+             "tb_short_name": "Московский", "tb_full_name": "Московский банк ПАО Сбербанк",
+             "gosb_name": "ГОСБ Москва",
+             "vsp_urf_code": "URF007", "vsp_type": "Филиал"},
         ]
         result = await repo.get_departments()
         assert isinstance(result, list)
         assert len(result) == 1
-        assert result[0]["department_code"] == "OARB"
+        assert result[0]["tb_id"] == 7
 
     async def test_empty_result(self, repo, mock_conn):
         mock_conn.fetch.return_value = []

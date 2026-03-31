@@ -125,14 +125,12 @@ CREATE INDEX IF NOT EXISTS idx_ck_fr_validation_km_id
 -- ============================================================================
 -- VIEW FR-ВАЛИДАЦИИ
 -- Присоединяет номер акта из справочника служебных записок.
--- Примечание: t_db_oarb_ua_sub_number использует km_number/sub_number
--- в PostgreSQL-миграции ua_data, тогда как в Greenplum — km_id/act_sub_number.
 -- ============================================================================
 
 CREATE OR REPLACE VIEW v_db_oarb_ck_fr_validation AS
-SELECT fr.*, sn.sub_number AS act_sub_number
+SELECT fr.*, sn.act_sub_number
 FROM t_db_oarb_ck_fr_validation fr
-LEFT JOIN t_db_oarb_ua_sub_number sn ON sn.km_number = fr.km_id
+LEFT JOIN t_db_oarb_ua_sub_number sn ON sn.km_id = fr.km_id
 WHERE fr.is_actual = true;
 
 -- ============================================================================

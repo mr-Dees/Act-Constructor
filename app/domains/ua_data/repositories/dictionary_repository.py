@@ -89,20 +89,19 @@ class DictionaryRepository(BaseRepository):
             f"""
             SELECT
                 d.id,
-                d.department_code,
-                d.department_name,
-                d.parent_code,
-                d.level,
-                t.terbank_code,
-                t.terbank_name,
-                g.gosb_code,
+                d.tb_id,
+                d.gosb_id,
+                d.vsp_id,
+                d.subsidiary_id,
+                tb.short_name AS tb_short_name,
+                tb.full_name AS tb_full_name,
                 g.gosb_name,
-                v.vsp_code,
-                v.vsp_name
+                v.vsp_urf_code,
+                v.vsp_type
             FROM {self.departments} d
-            LEFT JOIN {self.terbank_dict} t ON t.id = d.id AND t.is_actual = true
-            LEFT JOIN {self.gosb_dict} g ON g.id = d.id AND g.is_actual = true
-            LEFT JOIN {self.vsp_dict} v ON v.id = d.id AND v.is_actual = true
+            LEFT JOIN {self.terbank_dict} tb ON tb.tb_id = d.tb_id AND tb.is_actual = true
+            LEFT JOIN {self.gosb_dict} g ON g.gosb_id = d.gosb_id AND g.is_actual = true
+            LEFT JOIN {self.vsp_dict} v ON v.vsp_id = d.vsp_id AND v.is_actual = true
             WHERE d.is_actual = true
             ORDER BY d.id
             """
