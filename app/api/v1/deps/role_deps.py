@@ -16,15 +16,15 @@ from app.db.connection import get_db, get_adapter
 
 logger = logging.getLogger("audit_workstation.api.deps.roles")
 
-# Кеш ролей: maxsize=256, ttl=60 секунд
-_roles_cache: TTLCache = TTLCache(maxsize=256, ttl=60)
+# Кеш ролей: maxsize=256, ttl=10 секунд
+_roles_cache: TTLCache = TTLCache(maxsize=256, ttl=10)
 
 
 async def get_user_roles(username: str = Depends(get_username)) -> list[dict]:
     """
     Возвращает список ролей текущего пользователя.
 
-    Кешируется на 60 секунд. Если у пользователя нет ролей,
+    Кешируется на 10 секунд. Если у пользователя нет ролей,
     автоматически назначает роль 'Цифровой акт'.
     """
     if username in _roles_cache:
