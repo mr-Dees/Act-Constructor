@@ -6,7 +6,7 @@
 """
 
 import logging
-from datetime import date
+from datetime import date, datetime
 
 import asyncpg
 
@@ -15,6 +15,32 @@ from app.db.repositories.base import BaseRepository
 logger = logging.getLogger("audit_workstation.domains.ck_fin_res.repository")
 
 # Поля для INSERT (без системных полей id, created_at, updated_at и т.д.)
+_DATE_FIELDS = {"dt_sz"}
+_TIMESTAMP_FIELDS = {"rev_start_dt", "rev_end_dt", "execution_deadline"}
+_NULLABLE_FIELDS = _DATE_FIELDS | _TIMESTAMP_FIELDS | {"assigment_id"}
+_NUMERIC_DEFAULTS = {
+    "metric_element_counts": 0,
+    "metric_amount_rubles": 0,
+    "is_sent_to_top_brass": False,
+    "real_loss": False,
+}
+
+
+def _coerce(field: str, value):
+    """Приводит значение к типу, ожидаемому asyncpg, с учётом NOT NULL DEFAULT."""
+    if value is None:
+        if field in _NULLABLE_FIELDS:
+            return None
+        if field in _NUMERIC_DEFAULTS:
+            return _NUMERIC_DEFAULTS[field]
+        return ""
+    if field in _DATE_FIELDS and isinstance(value, str):
+        return date.fromisoformat(value[:10])
+    if field in _TIMESTAMP_FIELDS and isinstance(value, str):
+        return datetime.fromisoformat(value)
+    return value
+
+
 _INSERT_FIELDS = (
     "reestr_metric_id",
     "neg_finder_tb_id",
@@ -135,7 +161,7 @@ class FRValidationRepository(BaseRepository):
             if field == "created_by":
                 values.append(username)
             else:
-                values.append(data.get(field))
+                values.append(_coerce(field, data.get(field)))
 
         placeholders = ", ".join(f"${i}" for i in range(1, len(_INSERT_FIELDS) + 1))
         columns = ", ".join(_INSERT_FIELDS)
@@ -173,7 +199,7 @@ class FRValidationRepository(BaseRepository):
 
         async with self.conn.transaction():
             # Деактивация старых записей
-            id_placeholders = ", ".join(f"${i + 1}" for i in range(len(ids)))
+            id_placeholders = ", ".join(f"${i + 2}" for i in range(len(ids)))
             deactivate_query = (
                 f"UPDATE {self.table} "
                 f"SET deleted_at = now(), is_actual = false, updated_by = $1 "
@@ -189,7 +215,7 @@ class FRValidationRepository(BaseRepository):
                     if field == "created_by":
                         values.append(username)
                     else:
-                        values.append(item.get(field))
+                        values.append(_coerce(field, item.get(field)))
 
                 placeholders = ", ".join(
                     f"${i}" for i in range(1, len(_INSERT_FIELDS) + 1)

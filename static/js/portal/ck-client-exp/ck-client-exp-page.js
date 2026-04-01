@@ -116,7 +116,7 @@ class CkClientExpPage {
                 Notifications.success('Запись создана');
             } else if (mode === 'edit') {
                 const record = CkForm.getCurrentRecord();
-                await APIClient.updateCkRecords(CkClientExpConfig.apiPrefix, [{ id: record.id, ...data }]);
+                await APIClient.updateCkRecords(CkClientExpConfig.apiPrefix, [{ ...record, ...data }]);
                 Notifications.success('Запись обновлена');
             }
             await this._loadData();
@@ -131,13 +131,10 @@ class CkClientExpPage {
         const record = CkForm.getCurrentRecord();
         if (!record) return;
 
-        const confirmed = await new Promise(resolve => {
-            DialogManager.confirm(
-                'Удалить запись?',
-                `Запись #${record.id} будет удалена.`,
-                () => resolve(true),
-                () => resolve(false)
-            );
+        const confirmed = await DialogManager.show({
+            title: 'Удалить запись?',
+            message: `Запись #${record.id} будет удалена.`,
+            type: 'warning',
         });
         if (!confirmed) return;
 
