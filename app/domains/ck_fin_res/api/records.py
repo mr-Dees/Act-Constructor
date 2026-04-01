@@ -10,6 +10,7 @@ from fastapi import APIRouter, Depends
 from app.api.v1.deps.auth_deps import get_username
 from app.api.v1.deps.role_deps import require_domain_access
 from app.domains.ck_fin_res.deps import get_fr_validation_service
+from app.domains.ck_fin_res.schemas.fr_validation import FRValidationCreate
 from app.domains.ck_fin_res.schemas.requests import ValidationSearchRequest
 from app.domains.ck_fin_res.services.fr_validation_service import FRValidationService
 
@@ -44,12 +45,12 @@ async def get_record(
 
 @router.post("/records", status_code=201, dependencies=[_access])
 async def create_record(
-    body: dict,
+    body: FRValidationCreate,
     username: str = Depends(get_username),
     service: FRValidationService = Depends(get_fr_validation_service),
 ):
     """Создаёт новую запись FR-валидации."""
-    return await service.create_record(body, username)
+    return await service.create_record(body.model_dump(), username)
 
 
 @router.post("/records/batch-update", dependencies=[_access])

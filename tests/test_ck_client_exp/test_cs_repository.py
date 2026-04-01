@@ -114,6 +114,32 @@ class TestGetById:
 
 
 # -------------------------------------------------------------------------
+# create
+# -------------------------------------------------------------------------
+
+
+class TestCreate:
+
+    async def test_returns_id(self, repo, mock_conn):
+        """Возвращает словарь с id и created_at после вставки."""
+        mock_conn.fetchrow.return_value = {
+            "id": 42,
+            "created_at": "2025-06-15T12:00:00",
+        }
+        result = await repo.create(
+            data={"metric_code": "CS-001", "metric_unic_clients": 150},
+            username="testuser",
+        )
+
+        assert result["id"] == 42
+        assert "created_at" in result
+
+        query = mock_conn.fetchrow.call_args[0][0]
+        assert "INSERT INTO" in query
+        assert "RETURNING id, created_at" in query
+
+
+# -------------------------------------------------------------------------
 # soft_delete
 # -------------------------------------------------------------------------
 
@@ -133,3 +159,25 @@ class TestSoftDelete:
         result = await repo.soft_delete(record_id=999, username="testuser")
 
         assert result is False
+
+
+# -------------------------------------------------------------------------
+# batch_update
+# -------------------------------------------------------------------------
+
+
+class TestBatchUpdate:
+
+    async def test_empty_items(self, repo, mock_conn):
+        """Пустой список — возвращает 0, запросов нет."""
+        result = await repo.batch_update(items=[], username="testuser")
+        assert result == 0
+        mock_conn.execute.assert_not_called()
+
+    async def test_items_without_id(self, repo, mock_conn):
+        """Элементы без поля id — возвращает 0."""
+        result = await repo.batch_update(
+            items=[{"metric_code": "CS-001"}],
+            username="testuser",
+        )
+        assert result == 0

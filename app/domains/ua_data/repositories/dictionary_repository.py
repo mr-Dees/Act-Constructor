@@ -73,7 +73,7 @@ class DictionaryRepository(BaseRepository):
         """Возвращает список актуальных метрик нарушений, фильтруя по префиксу кода."""
         rows = await self.conn.fetch(
             f"""
-            SELECT id, code, metric_name
+            SELECT id, code, metric_name, metric_group
             FROM {self.violation_metric_dict}
             WHERE is_actual = true
               AND code LIKE $1

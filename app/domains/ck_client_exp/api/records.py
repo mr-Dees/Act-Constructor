@@ -10,6 +10,7 @@ from fastapi import APIRouter, Depends
 from app.api.v1.deps.auth_deps import get_username
 from app.api.v1.deps.role_deps import require_domain_access
 from app.domains.ck_client_exp.deps import get_cs_validation_service
+from app.domains.ck_client_exp.schemas.cs_validation import CSValidationCreate
 from app.domains.ck_client_exp.schemas.requests import ValidationSearchRequest
 from app.domains.ck_client_exp.services.cs_validation_service import CSValidationService
 
@@ -44,12 +45,12 @@ async def get_record(
 
 @router.post("/records", status_code=201, dependencies=[_access])
 async def create_record(
-    body: dict,
+    body: CSValidationCreate,
     username: str = Depends(get_username),
     service: CSValidationService = Depends(get_cs_validation_service),
 ):
     """Создаёт новую запись CS-валидации."""
-    return await service.create_record(body, username)
+    return await service.create_record(body.model_dump(), username)
 
 
 @router.post("/records/batch-update", dependencies=[_access])

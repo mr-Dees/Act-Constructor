@@ -11,6 +11,8 @@ class CkTable {
     static _sortDir = 'asc';
     static _filterQuery = '';
     static _debounceTimer = null;
+    static _page = 1;
+    static _pageSize = 0;
 
     /**
      * @param {Object} config
@@ -18,6 +20,7 @@ class CkTable {
      * @param {Function} config.onRowSelect - callback(record)
      * @param {HTMLElement} config.tableEl - контейнер для таблицы
      * @param {Object} config.dictionaries - справочники для format-функций
+     * @param {number} [config.pageSize=0] - размер страницы (0 = без пагинации)
      */
     static init(config) {
         this._config = config;
@@ -27,12 +30,20 @@ class CkTable {
         this._sortField = null;
         this._sortDir = 'asc';
         this._filterQuery = '';
+        this._page = 1;
+        this._pageSize = config.pageSize || 0;
         this._render();
     }
 
     static setData(records) {
         this._data = records || [];
+        this._page = 1;
         this._applyFilterAndSort();
+        this._renderBody();
+    }
+
+    static setPage(page) {
+        this._page = page;
         this._renderBody();
     }
 
@@ -102,8 +113,14 @@ class CkTable {
             return;
         }
 
+        let dataToRender = this._filteredData;
+        if (this._pageSize > 0) {
+            const start = (this._page - 1) * this._pageSize;
+            dataToRender = this._filteredData.slice(start, start + this._pageSize);
+        }
+
         const fragment = document.createDocumentFragment();
-        for (const record of this._filteredData) {
+        for (const record of dataToRender) {
             const tr = document.createElement('tr');
             tr.dataset.id = record.id;
             if (record.id === this._selectedId) {
@@ -199,6 +216,7 @@ class CkTable {
         }
 
         this._filteredData = result;
+        this._page = 1;
     }
 }
 

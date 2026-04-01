@@ -36,6 +36,7 @@ class CkFinResPage {
             tableEl: document.getElementById('ckTablePanel'),
             dictionaries: this._dictionaries,
             onRowSelect: (record) => this._onRowSelect(record),
+            pageSize: 50,
         });
 
         // Пагинация
@@ -93,6 +94,10 @@ class CkFinResPage {
         } catch (error) {
             Notifications.error('Ошибка загрузки данных: ' + error.message);
         }
+    }
+
+    static _onPageChange() {
+        CkTable.setPage(CkPagination.getPage());
     }
 
     static _onRowSelect(record) {

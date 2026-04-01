@@ -75,6 +75,42 @@ class TestDeleteRecord:
 
 
 # -------------------------------------------------------------------------
+# create_record
+# -------------------------------------------------------------------------
+
+
+class TestCreateRecord:
+
+    async def test_delegates_to_repo(self, service, cs_repo):
+        """Делегирует создание записи репозиторию."""
+        cs_repo.create.return_value = {"id": 42, "created_at": "2025-06-15T12:00:00"}
+        result = await service.create_record(
+            data={"metric_code": "CS-001"},
+            username="testuser",
+        )
+
+        cs_repo.create.assert_called_once_with({"metric_code": "CS-001"}, "testuser")
+        assert result["id"] == 42
+
+
+# -------------------------------------------------------------------------
+# batch_update_records
+# -------------------------------------------------------------------------
+
+
+class TestBatchUpdateRecords:
+
+    async def test_delegates_to_repo(self, service, cs_repo):
+        """Делегирует пакетное обновление репозиторию."""
+        cs_repo.batch_update.return_value = 2
+        items = [{"id": 1, "metric_code": "CS-001"}, {"id": 2, "metric_code": "CS-002"}]
+        result = await service.batch_update_records(items, "testuser")
+
+        cs_repo.batch_update.assert_called_once_with(items, "testuser")
+        assert result == 2
+
+
+# -------------------------------------------------------------------------
 # get_dictionary
 # -------------------------------------------------------------------------
 
