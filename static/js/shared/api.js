@@ -1056,7 +1056,8 @@ class APIClient {
             body: JSON.stringify(filters)
         });
         if (!response.ok) await this._throwApiError(response);
-        return response.json();
+        const json = await response.json();
+        return json.data;
     }
 
     /**
@@ -1137,7 +1138,8 @@ class APIClient {
             headers: { 'X-JupyterHub-User': username }
         });
         if (!response.ok) await this._throwApiError(response);
-        return response.json();
+        const json = await response.json();
+        return json.data;
     }
 }
 

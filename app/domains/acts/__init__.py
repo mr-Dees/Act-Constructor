@@ -27,15 +27,12 @@ def _build_domain():
         api_routers=get_api_routers(),
         html_routers=get_html_routers(),
         settings_class=ActsSettings,
-        dependencies=["admin"],
+        dependencies=["admin", "ua_data"],
         on_startup=on_startup,
         on_shutdown=on_shutdown,
         chat_tools=get_chat_tools(),
         migration_substitutions={
             "{REF_HADOOP_TABLES}": lambda: settings_registry.get(DOMAIN_NAME, ActsSettings).invoice.hive_registry_table,
-            "{REF_METRIC_DICT}": lambda: settings_registry.get(DOMAIN_NAME, ActsSettings).invoice.metric_dict_table,
-            "{REF_PROCESS_DICT}": lambda: settings_registry.get(DOMAIN_NAME, ActsSettings).invoice.process_dict_table,
-            "{REF_SUBSIDIARY_DICT}": lambda: settings_registry.get(DOMAIN_NAME, ActsSettings).invoice.subsidiary_dict_table,
         },
         nav_items=[
             NavItem(

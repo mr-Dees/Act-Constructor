@@ -71,7 +71,7 @@ class InvoiceSettings(BaseModel):
     process_dict_col_code: str = Field(default="process_code")
     process_dict_col_name: str = Field(default="process_name")
     subsidiary_dict_table: str = Field(default="t_db_oarb_ua_subsidiary_dict")
-    subsidiary_dict_col_name: str = Field(default="name")
+    subsidiary_dict_col_name: str = Field(default="subsidiary_name")
 
     @field_validator(
         'hive_schema', 'gp_schema', 'hive_registry_schema',
