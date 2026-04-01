@@ -28,3 +28,9 @@
 @import '../portal/admin/admin-search.css';
 @import '../portal/admin/admin-roles.css';
 @import '../portal/admin/admin-add-user.css';
+
+/* CK domains (Фин.Рез. + Клиентский опыт) */
+@import '../portal/ck/ck-page.css';
+@import '../portal/ck/ck-table.css';
+@import '../portal/ck/ck-form.css';
+@import '../portal/ck/ck-process-picker.css';
