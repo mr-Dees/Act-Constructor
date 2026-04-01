@@ -1,4 +1,4 @@
-"""Домен ЦК Клиентский опыт (заглушка)."""
+"""Домен ЦК Клиентский опыт."""
 
 DOMAIN_NAME = "ck_client_exp"
 
@@ -6,11 +6,16 @@ DOMAIN_NAME = "ck_client_exp"
 def _build_domain():
     """Ленивое построение DomainDescriptor."""
     from app.core.domain import DomainDescriptor, NavItem
+    from app.domains.ck_client_exp.api import get_api_routers
     from app.domains.ck_client_exp.routes import get_html_routers
+    from app.domains.ck_client_exp.settings import CkClientExpSettings
 
     return DomainDescriptor(
         name=DOMAIN_NAME,
+        api_routers=get_api_routers(),
         html_routers=get_html_routers(),
+        settings_class=CkClientExpSettings,
+        dependencies=["admin", "ua_data"],
         nav_items=[
             NavItem(
                 label="ЦК Клиентский опыт",
