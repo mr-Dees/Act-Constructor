@@ -131,5 +131,7 @@ class TestSearchRecords:
             end_date=None,
             metric_code=["FR-001"],
             process_code=None,
+            limit=100,
+            offset=0,
         )
         assert len(result) == 1

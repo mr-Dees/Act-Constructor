@@ -28,6 +28,6 @@ async def on_startup(app: FastAPI) -> None:
                 branch_filter=settings.user_directory.branch_filter,
                 default_admin=settings.user_directory.default_admin,
             )
-    except Exception as exc:
-        logger.error(f"Ошибка начального заполнения ролей: {exc}")
+    except Exception:
+        logger.exception("Ошибка начального заполнения ролей")
         # Не прерываем запуск приложения — роли можно назначить позже

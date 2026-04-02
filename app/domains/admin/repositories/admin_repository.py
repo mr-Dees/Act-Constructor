@@ -144,9 +144,10 @@ class AdminRepository(BaseRepository):
             Количество назначенных ролей.
         """
         count = 0
-        for username, role_id, assigned_by in assignments:
-            if await self.assign_role(username, role_id, assigned_by):
-                count += 1
+        async with self.conn.transaction():
+            for username, role_id, assigned_by in assignments:
+                if await self.assign_role(username, role_id, assigned_by):
+                    count += 1
         return count
 
     async def get_users_with_roles(self, branch: str) -> list[dict]:

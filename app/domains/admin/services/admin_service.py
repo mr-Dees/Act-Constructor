@@ -54,8 +54,8 @@ class AdminService:
         assigned = await self.repo.assign_role(username, role_id, assigned_by)
         if assigned:
             logger.info(
-                f"Роль '{role['name']}' назначена пользователю {username} "
-                f"(назначил: {assigned_by})"
+                "Роль '%s' назначена пользователю %s (назначил: %s)",
+                role["name"], username, assigned_by,
             )
         return assigned
 
@@ -67,7 +67,7 @@ class AdminService:
 
         removed = await self.repo.remove_role(username, role_id)
         if removed:
-            logger.info(f"Роль '{role['name']}' снята с пользователя {username}")
+            logger.info("Роль '%s' снята с пользователя %s", role["name"], username)
         return removed
 
     async def get_user_directory(self) -> list[dict]:
@@ -87,8 +87,8 @@ class AdminService:
         count = await self.repo.count_user_roles()
         if count > 0:
             logger.info(
-                f"Таблица user_roles не пуста ({count} записей), "
-                f"начальное заполнение пропущено"
+                "Таблица user_roles не пуста (%s записей), начальное заполнение пропущено",
+                count,
             )
             return
 
@@ -105,8 +105,8 @@ class AdminService:
         usernames = await self.repo.get_users_from_directory(branch_filter)
         if not usernames:
             logger.warning(
-                f"Пользователи с branch='{branch_filter}' не найдены, "
-                f"заполнение пропущено"
+                "Пользователи с branch='%s' не найдены, заполнение пропущено",
+                branch_filter,
             )
             return
 
@@ -120,6 +120,6 @@ class AdminService:
 
         assigned_count = await self.repo.bulk_assign_roles(assignments)
         logger.info(
-            f"Начальное заполнение ролей: назначено {assigned_count} ролей "
-            f"для {len(usernames)} пользователей из '{branch_filter}'"
+            "Начальное заполнение ролей: назначено %s ролей для %s пользователей из '%s'",
+            assigned_count, len(usernames), branch_filter,
         )

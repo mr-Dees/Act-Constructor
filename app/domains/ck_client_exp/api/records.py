@@ -36,6 +36,8 @@ async def search_records(
         end_date=body.end_date,
         metric_code=body.metric_code or None,
         process_code=body.process_code or None,
+        limit=body.limit,
+        offset=body.offset,
     )
     return {"data": data}
 

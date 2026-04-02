@@ -106,6 +106,8 @@ class FRValidationRepository(BaseRepository):
         end_date: date | None = None,
         metric_code: list[str] | None = None,
         process_code: list[str] | None = None,
+        limit: int = 100,
+        offset: int = 0,
     ) -> list[dict]:
         """
         Поиск записей FR-валидации по фильтрам.
@@ -140,7 +142,11 @@ class FRValidationRepository(BaseRepository):
             idx += len(process_code)
 
         where = f" WHERE {' AND '.join(conditions)}" if conditions else ""
-        query = f"SELECT * FROM {self.view}{where} ORDER BY id DESC"
+        query = (
+            f"SELECT * FROM {self.view}{where} "
+            f"ORDER BY id DESC LIMIT ${idx} OFFSET ${idx + 1}"
+        )
+        params.extend([limit, offset])
 
         logger.debug("Поиск FR-валидации: %s параметров", len(params))
         rows = await self.conn.fetch(query, *params)
@@ -215,13 +221,22 @@ class FRValidationRepository(BaseRepository):
             id_placeholders = ", ".join(f"${i + 2}" for i in range(len(ids)))
             deactivate_query = (
                 f"UPDATE {self.table} "
-                f"SET deleted_at = now(), is_actual = false, updated_by = $1 "
+                f"SET deleted_at = now(), updated_at = now(), is_actual = false, updated_by = $1 "
                 f"WHERE id IN ({id_placeholders})"
             )
             result = await self.conn.execute(deactivate_query, username, *ids)
             updated_count = int(result.split()[-1]) if result else 0
 
-            # Вставка новых версий
+            # Вставка новых версий (пакетом)
+            columns = ", ".join(_INSERT_FIELDS)
+            placeholders = ", ".join(
+                f"${i}" for i in range(1, len(_INSERT_FIELDS) + 1)
+            )
+            insert_query = (
+                f"INSERT INTO {self.table} ({columns}) "
+                f"VALUES ({placeholders})"
+            )
+            rows_to_insert = []
             for item in items:
                 values = []
                 for field in _INSERT_FIELDS:
@@ -229,17 +244,8 @@ class FRValidationRepository(BaseRepository):
                         values.append(username)
                     else:
                         values.append(_coerce(field, item.get(field)))
-
-                placeholders = ", ".join(
-                    f"${i}" for i in range(1, len(_INSERT_FIELDS) + 1)
-                )
-                columns = ", ".join(_INSERT_FIELDS)
-
-                insert_query = (
-                    f"INSERT INTO {self.table} ({columns}) "
-                    f"VALUES ({placeholders})"
-                )
-                await self.conn.execute(insert_query, *values)
+                rows_to_insert.append(values)
+            await self.conn.executemany(insert_query, rows_to_insert)
 
         logger.info(
             "Пакетное обновление FR-валидации: %s записей деактивировано, "
@@ -264,6 +270,7 @@ class FRValidationRepository(BaseRepository):
             UPDATE {self.table}
             SET is_actual = false,
                 deleted_at = now(),
+                updated_at = now(),
                 updated_by = $1
             WHERE id = $2 AND is_actual = true
             """,

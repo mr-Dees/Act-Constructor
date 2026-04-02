@@ -13,6 +13,8 @@ class ValidationSearchRequest(BaseModel):
     end_date: Optional[date] = None
     metric_code: list[str] = Field(default_factory=list)
     process_code: list[str] = Field(default_factory=list)
+    limit: int = Field(default=100, ge=1, le=1000)
+    offset: int = Field(default=0, ge=0)
 
     @model_validator(mode="after")
     def validate_date_range(self):

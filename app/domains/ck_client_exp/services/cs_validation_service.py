@@ -52,6 +52,8 @@ class CSValidationService:
         end_date: date | None = None,
         metric_code: list[str] | None = None,
         process_code: list[str] | None = None,
+        limit: int = 100,
+        offset: int = 0,
     ) -> list[dict]:
         """Поиск записей CS-валидации по фильтрам."""
         return await self.cs_repo.search(
@@ -59,6 +61,8 @@ class CSValidationService:
             end_date=end_date,
             metric_code=metric_code,
             process_code=process_code,
+            limit=limit,
+            offset=offset,
         )
 
     # ------------------------------------------------------------------
