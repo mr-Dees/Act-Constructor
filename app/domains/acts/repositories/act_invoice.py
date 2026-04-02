@@ -83,17 +83,15 @@ class ActInvoiceRepository(BaseRepository):
         self,
         registry_schema: str,
         process_table: str,
-        col_code: str,
-        col_name: str,
     ) -> list[dict]:
         """Возвращает справочник процессов."""
         rows = await self.conn.fetch(
-            f'SELECT {quote_ident(col_code)}, {quote_ident(col_name)} '
+            f'SELECT process_code, process_name '
             f'FROM {quote_ident(registry_schema)}.{quote_ident(process_table)} '
-            f'ORDER BY {quote_ident(col_code)}',
+            f'ORDER BY process_code',
         )
         return [
-            {"process_code": row[col_code], "process_name": row[col_name]}
+            {"process_code": row["process_code"], "process_name": row["process_name"]}
             for row in rows
         ]
 
@@ -101,15 +99,14 @@ class ActInvoiceRepository(BaseRepository):
         self,
         registry_schema: str,
         subsidiary_table: str,
-        col_name: str,
     ) -> list[dict]:
         """Возвращает справочник подразделений."""
         rows = await self.conn.fetch(
-            f'SELECT {quote_ident(col_name)} '
+            f'SELECT subsidiary_name '
             f'FROM {quote_ident(registry_schema)}.{quote_ident(subsidiary_table)} '
-            f'ORDER BY {quote_ident(col_name)}',
+            f'ORDER BY subsidiary_name',
         )
-        return [{"name": row[col_name]} for row in rows]
+        return [{"name": row["subsidiary_name"]} for row in rows]
 
     async def list_tables(
         self,
@@ -117,7 +114,6 @@ class ActInvoiceRepository(BaseRepository):
         *,
         hive_registry_schema: str | None = None,
         hive_registry_table: str | None = None,
-        hive_registry_col_table: str | None = None,
         gp_target_schema: str | None = None,
     ) -> list[dict]:
         """
@@ -127,7 +123,6 @@ class ActInvoiceRepository(BaseRepository):
             db_type: Тип БД (hive, greenplum)
             hive_registry_schema: Схема реестра Hive-таблиц
             hive_registry_table: Таблица реестра Hive
-            hive_registry_col_table: Колонка с именем таблицы в реестре
             gp_target_schema: Целевая схема Greenplum
 
         Returns:
@@ -138,12 +133,12 @@ class ActInvoiceRepository(BaseRepository):
         """
         if db_type == "hive":
             rows = await self.conn.fetch(
-                f'SELECT {quote_ident(hive_registry_col_table)} '
+                f'SELECT table_name '
                 f'FROM {quote_ident(hive_registry_schema)}.{quote_ident(hive_registry_table)} '
-                f'ORDER BY {quote_ident(hive_registry_col_table)}',
+                f'ORDER BY table_name',
             )
             return [
-                {"table_name": row[hive_registry_col_table]}
+                {"table_name": row["table_name"]}
                 for row in rows
             ]
 

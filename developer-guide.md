@@ -1822,19 +1822,12 @@ ACTS__AUDIT_LOG__RETENTION_DAYS=365
 | **Акты: Фактуры** | `ACTS__INVOICE__HIVE_SCHEMA` | str | `team_sva_oarb_3` | Hive-схема |
 | | `ACTS__INVOICE__GP_SCHEMA` | str | `s_grnplm_...` | GP-схема |
 | | `ACTS__INVOICE__HIVE_REGISTRY_SCHEMA` | str | `s_grnplm_...` | Реестр Hive |
-| | `ACTS__INVOICE__HIVE_REGISTRY_TABLE` | str | `t_db_oarb_ua_hadoop_tables` | Таблица реестра |
-| | `ACTS__INVOICE__HIVE_REGISTRY_COL_TABLE` | str | `table_name` | Колонка имени |
-| | `ACTS__INVOICE__METRIC_DICT_TABLE` | str | `t_db_oarb_ua_violation_metric_dict` | Словарь метрик |
-| | `ACTS__INVOICE__PROCESS_DICT_TABLE` | str | `t_db_oarb_ua_process_dict` | Словарь процессов |
-| | `ACTS__INVOICE__PROCESS_DICT_COL_CODE` | str | `process_code` | Колонка кода |
-| | `ACTS__INVOICE__PROCESS_DICT_COL_NAME` | str | `process_name` | Колонка имени |
-| | `ACTS__INVOICE__SUBSIDIARY_DICT_TABLE` | str | `t_db_oarb_ua_subsidiary_dict` | Словарь филиалов |
-| | `ACTS__INVOICE__SUBSIDIARY_DICT_COL_NAME` | str | `name` | Колонка имени |
+| | `ACTS__INVOICE__HIVE_REGISTRY_TABLE` | str | `t_db_oarb_ua_hadoop_tables` | Таблица реестра Hive |
 | **Акты: Аудит-лог** | `ACTS__AUDIT_LOG__RETENTION_DAYS` | int | `365` | Дни хранения лога |
 | | `ACTS__AUDIT_LOG__MAX_CONTENT_VERSIONS` | int | `50` | Макс. версий содержимого |
 | | `ACTS__AUDIT_LOG__MAX_DIFF_ELEMENTS` | int | `20` | Макс. элементов в diff |
 | | `ACTS__AUDIT_LOG__MAX_DIFF_CELLS_PER_TABLE` | int | `50` | Макс. ячеек diff на таблицу |
-| **Администрирование** | `ADMIN__USER_DIRECTORY__SCHEMA` | str | `s_grnplm_...` | Схема справочника |
+| **Администрирование** | `ADMIN__USER_DIRECTORY__SCHEMA` | str | `""` | Схема справочника (пустая — основная GP) |
 | | `ADMIN__USER_DIRECTORY__TABLE` | str | `t_db_oarb_ua_user` | Таблица пользователей |
 | | `ADMIN__USER_DIRECTORY__BRANCH_FILTER` | str | `Отдел аудита...` | Фильтр отделения |
 | | `ADMIN__USER_DIRECTORY__DEFAULT_ADMIN` | str | `00000000` | Админ по умолчанию |

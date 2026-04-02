@@ -17,3 +17,4 @@ class UaDataSettings(BaseModel):
     channel_dict: str = "t_db_oarb_ua_channel_dict"
     product_dict: str = "t_db_oarb_ua_product_dict"
     team_dict: str = "t_db_oarb_ua_team_dict"
+    subsidiary_dict: str = "t_db_oarb_ua_subsidiary_dict"

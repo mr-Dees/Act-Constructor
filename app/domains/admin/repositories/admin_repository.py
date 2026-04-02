@@ -7,7 +7,6 @@ import logging
 
 import asyncpg
 
-from app.db.adapters.greenplum import GreenplumAdapter
 from app.db.repositories.base import BaseRepository
 from app.domains.admin.settings import AdminSettings
 
@@ -26,15 +25,12 @@ class AdminRepository(BaseRepository):
 
     def _resolve_user_table(self) -> str:
         """
-        Возвращает имя таблицы справочника пользователей.
+        Возвращает квалифицированное имя таблицы справочника пользователей.
 
-        Для PostgreSQL: имя таблицы из настроек (без схемы).
-        Для GreenPlum: схема.таблица из настроек.
+        Использует qualify_table_name — единый механизм для всех адаптеров.
         """
         ud = self.settings.user_directory
-        if isinstance(self.adapter, GreenplumAdapter):
-            return f"{ud.schema_name}.{ud.table}"
-        return ud.table
+        return self.adapter.qualify_table_name(ud.table, ud.schema_name)
 
     # -------------------------------------------------------------------------
     # РОЛИ

@@ -8,11 +8,13 @@ from pydantic import BaseModel, Field
 
 
 class UserDirectorySettings(BaseModel):
-    """Настройки справочника пользователей в GreenPlum."""
-    schema_name: str = Field(
-        default="s_grnplm_ld_audit_da_project_4",
-        alias="schema",
-    )
+    """
+    Настройки справочника пользователей.
+
+    schema_name — схема таблицы пользователей.
+    Пустая строка — используется основная схема GP (или без схемы для PostgreSQL).
+    """
+    schema_name: str = Field(default="", alias="schema")
     table: str = "t_db_oarb_ua_user"
     branch_filter: str = "Отдел аудита розничного бизнеса"
     default_admin: str = "22494524"

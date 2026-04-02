@@ -224,11 +224,11 @@ class TestAdminSettingsEnvParsing:
         from app.domains.admin.settings import AdminSettings, UserDirectorySettings
 
         defaults = UserDirectorySettings()
-        assert defaults.schema_name == "s_grnplm_ld_audit_da_project_4"
+        assert defaults.schema_name == ""
         assert defaults.table == "t_db_oarb_ua_user"
 
         admin = AdminSettings()
-        assert admin.user_directory.schema_name == "s_grnplm_ld_audit_da_project_4"
+        assert admin.user_directory.schema_name == ""
 
     def test_admin_schema_only_override(self, tmp_path: Path):
         """Переопределение только SCHEMA, остальное — дефолт."""

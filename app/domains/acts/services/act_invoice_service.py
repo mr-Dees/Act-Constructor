@@ -10,6 +10,7 @@ import logging
 import asyncpg
 
 from app.core.config import Settings
+from app.core.settings_registry import get as get_domain_settings
 from app.domains.acts.exceptions import InvoiceError
 from app.domains.acts.repositories.act_access import ActAccessRepository
 from app.domains.acts.repositories.act_audit_log import ActAuditLogRepository
@@ -17,6 +18,7 @@ from app.domains.acts.repositories.act_invoice import ActInvoiceRepository
 from app.domains.acts.repositories.act_lock import ActLockRepository
 from app.domains.acts.services.access_guard import AccessGuard
 from app.domains.acts.settings import ActsSettings
+from app.domains.ua_data.settings import UaDataSettings
 
 logger = logging.getLogger("audit_workstation.service.acts.invoice")
 
@@ -50,34 +52,36 @@ class ActInvoiceService:
         return schema
 
     async def list_metrics(self) -> list[dict]:
-        """Возвращает справочник метрик."""
+        """Возвращает справочник метрик (таблица из ua_data)."""
+        ua = get_domain_settings("ua_data", UaDataSettings)
         registry_schema = self._resolve_schema(
             self.acts_settings.invoice.hive_registry_schema
         )
         return await self._invoice.list_metric_dict(
             registry_schema=registry_schema,
-            metric_table=self.acts_settings.invoice.metric_dict_table,
+            metric_table=ua.violation_metric_dict,
         )
 
     async def list_processes(self) -> list[dict]:
-        """Возвращает справочник процессов."""
-        inv = self.acts_settings.invoice
-        registry_schema = self._resolve_schema(inv.hive_registry_schema)
+        """Возвращает справочник процессов (таблица из ua_data)."""
+        ua = get_domain_settings("ua_data", UaDataSettings)
+        registry_schema = self._resolve_schema(
+            self.acts_settings.invoice.hive_registry_schema
+        )
         return await self._invoice.list_process_dict(
             registry_schema=registry_schema,
-            process_table=inv.process_dict_table,
-            col_code=inv.process_dict_col_code,
-            col_name=inv.process_dict_col_name,
+            process_table=ua.process_dict,
         )
 
     async def list_subsidiaries(self) -> list[dict]:
-        """Возвращает справочник подразделений."""
-        inv = self.acts_settings.invoice
-        registry_schema = self._resolve_schema(inv.hive_registry_schema)
+        """Возвращает справочник подразделений (таблица из ua_data)."""
+        ua = get_domain_settings("ua_data", UaDataSettings)
+        registry_schema = self._resolve_schema(
+            self.acts_settings.invoice.hive_registry_schema
+        )
         return await self._invoice.list_subsidiary_dict(
             registry_schema=registry_schema,
-            subsidiary_table=inv.subsidiary_dict_table,
-            col_name=inv.subsidiary_dict_col_name,
+            subsidiary_table=ua.subsidiary_dict,
         )
 
     async def list_tables(self, db_type: str) -> list[dict]:
@@ -89,7 +93,6 @@ class ActInvoiceService:
                 db_type,
                 hive_registry_schema=self._resolve_schema(inv.hive_registry_schema),
                 hive_registry_table=inv.hive_registry_table,
-                hive_registry_col_table=inv.hive_registry_col_table,
             )
         elif db_type == "greenplum":
             return await self._invoice.list_tables(
