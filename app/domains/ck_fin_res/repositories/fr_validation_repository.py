@@ -19,12 +19,17 @@ logger = logging.getLogger("audit_workstation.domains.ck_fin_res.repository")
 # Поля для INSERT (без системных полей id, created_at, updated_at и т.д.)
 _DATE_FIELDS = {"dt_sz"}
 _TIMESTAMP_FIELDS = {"rev_start_dt", "rev_end_dt", "execution_deadline"}
-_NULLABLE_FIELDS = _DATE_FIELDS | _TIMESTAMP_FIELDS | {"assigment_id"}
+_NULLABLE_FIELDS = (
+    _DATE_FIELDS
+    | _TIMESTAMP_FIELDS
+    | {"act_sub_number_id", "reestr_metric_id", "assigment_id", "etl_loading_id"}
+)
 _NUMERIC_DEFAULTS = {
     "metric_element_counts": 0,
     "metric_amount_rubles": 0,
     "is_sent_to_top_brass": False,
     "real_loss": False,
+    "applied_into_ua": False,
 }
 
 
@@ -44,9 +49,12 @@ def _coerce(field: str, value):
 
 
 _INSERT_FIELDS = (
+    "act_sub_number_id",
     "reestr_metric_id",
+    "application_status",
     "neg_finder_tb_id",
     "metric_code",
+    "metric_name",
     "metric_element_counts",
     "metric_amount_rubles",
     "is_sent_to_top_brass",
@@ -73,6 +81,8 @@ _INSERT_FIELDS = (
     "assigment_recommendation",
     "execution_deadline",
     "used_pm_lib",
+    "etl_loading_id",
+    "applied_into_ua",
     "created_by",
 )
 

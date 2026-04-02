@@ -10,14 +10,23 @@
 CREATE TABLE IF NOT EXISTS t_db_oarb_ck_fr_validation (
     id SERIAL PRIMARY KEY,
 
-    -- Идентификатор метрики в реестре
-    reestr_metric_id TEXT NOT NULL DEFAULT '',
+    -- Идентификатор записи в таблице sub_number (связь с актом)
+    act_sub_number_id BIGINT,
+
+    -- Идентификатор метрики в реестре (FK на t_db_oarb_ck_validation_reestr_metric)
+    reestr_metric_id BIGINT,
+
+    -- Статус заявки
+    application_status TEXT NOT NULL DEFAULT '',
 
     -- Идентификатор ТБ в системе Neg Finder
     neg_finder_tb_id TEXT NOT NULL DEFAULT '',
 
     -- Код метрики FR
     metric_code TEXT NOT NULL DEFAULT '',
+
+    -- Наименование метрики
+    metric_name TEXT NOT NULL DEFAULT '',
 
     -- Количество элементов (строк/операций) по метрике
     metric_element_counts BIGINT DEFAULT 0,
@@ -97,8 +106,14 @@ CREATE TABLE IF NOT EXISTS t_db_oarb_ck_fr_validation (
     -- Используемая библиотека процессного менеджмента
     used_pm_lib TEXT NOT NULL DEFAULT '',
 
+    -- Идентификатор ETL-загрузки
+    etl_loading_id BIGINT,
+
     -- Хэш строки для контроля дублирования
     row_hash TEXT NOT NULL DEFAULT '',
+
+    -- Признак: применено ли в UA
+    applied_into_ua BOOLEAN NOT NULL DEFAULT false,
 
     -- Стандартные аудиторские поля
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
@@ -122,23 +137,46 @@ CREATE INDEX IF NOT EXISTS idx_ck_fr_validation_is_actual
 CREATE INDEX IF NOT EXISTS idx_ck_fr_validation_km_id
     ON t_db_oarb_ck_fr_validation (km_id);
 
+CREATE INDEX IF NOT EXISTS idx_ck_fr_validation_act_sub_number_id
+    ON t_db_oarb_ck_fr_validation (act_sub_number_id);
+
 -- ============================================================================
 -- VIEW FR-ВАЛИДАЦИИ
--- Присоединяет номер акта из справочника служебных записок.
+-- Присоединяет номер акта из справочника служебных записок по act_sub_number_id.
 -- ============================================================================
 
 CREATE OR REPLACE VIEW v_db_oarb_ck_fr_validation AS
 SELECT fr.*, sn.act_sub_number
 FROM t_db_oarb_ck_fr_validation fr
-LEFT JOIN t_db_oarb_ua_sub_number sn ON sn.km_id = fr.km_id
+LEFT JOIN t_db_oarb_ua_sub_number sn ON sn.id = fr.act_sub_number_id
 WHERE fr.is_actual = true;
+
+-- ============================================================================
+-- СПРАВОЧНАЯ ИНФОРМАЦИЯ: t_db_oarb_ck_validation_reestr_metric
+-- Таблица реестра метрик (управляется ETL, в приложении не создаётся).
+-- Содержит присвоенные ID реестра метрик (формат ФР00001),
+-- генерируемые автоматически средствами БД.
+--
+-- Структура (Greenplum):
+--   id                    bigserial  — PK
+--   act_sub_number_id     bigint     — связь с актом
+--   hash_reestr_metric_id bigint     — хэш идентификатора метрики
+--   reestr_metric         text       — номер реестра метрики (формат ФР00001)
+--   metric_group          text       — группа метрики
+--   metric_code           text       — код метрики
+--   etl_loading_id        bigint     — ID ETL-загрузки
+--   + стандартные аудиторские поля
+--
+-- Связь: t_db_oarb_ck_fr_validation.reestr_metric_id → id этой таблицы.
+-- ============================================================================
 
 -- ============================================================================
 -- ТЕСТОВЫЕ ДАННЫЕ
 -- ============================================================================
 
 INSERT INTO t_db_oarb_ck_fr_validation (
-    reestr_metric_id, neg_finder_tb_id, metric_code,
+    act_sub_number_id, reestr_metric_id, application_status,
+    neg_finder_tb_id, metric_code, metric_name,
     metric_element_counts, metric_amount_rubles, is_sent_to_top_brass,
     km_id, num_sz, dt_sz, act_item_number,
     process_number, process_name,
@@ -147,12 +185,13 @@ INSERT INTO t_db_oarb_ck_fr_validation (
     rev_start_dt, rev_end_dt, process_owner,
     sberdocs_ctrl_assgn_number, assigment_id, assigment_format,
     inspection_name, assigment_recommendation, execution_deadline,
-    used_pm_lib, row_hash
+    used_pm_lib, etl_loading_id, row_hash, applied_into_ua
 )
 VALUES
     -- 1. Осуществление переводов
     (
-        'RM-FR-001', 'TB-09-001', '211',
+        NULL, NULL, 'Новая',
+        'TB-09-001', '211', 'Нарушение порядка переводов',
         15, 1250000.00, true,
         'КМ-09-41726', 'ЦА 36-мо0255', '2025-03-01', '2.1',
         '3015', 'Осуществление переводов',
@@ -161,11 +200,12 @@ VALUES
         '2025-01-15 00:00:00', '2025-03-01 00:00:00', 'Козлов А.В.',
         'SD-2025-00142', 1001, 'Предписание',
         'Проверка переводов СР банк 2025', 'Усилить контроль валютных операций', '2025-06-30 00:00:00',
-        'PM-LIB-3.2', 'a1b2c3d4e5f6'
+        'PM-LIB-3.2', NULL, 'a1b2c3d4e5f6', false
     ),
     -- 2. Управление рисками сделок
     (
-        'RM-FR-002', 'TB-07-001', '231',
+        NULL, NULL, 'На рассмотрении',
+        'TB-07-001', '231', 'Неполная оценка кредитного риска',
         8, 3500000.00, false,
         'КМ-07-30001', 'МСК 12-мо0100', '2025-02-15', '3.2',
         '2019', 'Управление рисками сделок',
@@ -174,11 +214,12 @@ VALUES
         '2025-01-10 00:00:00', '2025-02-15 00:00:00', 'Смирнова Е.П.',
         'SD-2025-00098', 1002, 'Рекомендация',
         'Проверка управления рисками МСК 2025', 'Обновить модель оценки рисков', '2025-07-31 00:00:00',
-        'PM-LIB-3.2', 'b2c3d4e5f6a1'
+        'PM-LIB-3.2', NULL, 'b2c3d4e5f6a1', false
     ),
     -- 3. Риск-менеджмент
     (
-        'RM-FR-003', 'TB-14-001', '402',
+        NULL, NULL, 'Утверждена',
+        'TB-14-001', '402', 'Превышение лимитов расходов',
         22, 780000.00, true,
         'КМ-14-50001', 'ЦА 50-мо0300', '2025-04-10', '1.3',
         '2014', 'Риск-менеджмент',
@@ -187,11 +228,12 @@ VALUES
         '2025-02-01 00:00:00', '2025-04-10 00:00:00', 'Николаев Д.С.',
         'SD-2025-00201', 1003, 'Предписание',
         'Проверка риск-менеджмента ПВ банк 2025', 'Пересмотреть лимиты расходов', '2025-09-30 00:00:00',
-        'PM-LIB-3.1', 'c3d4e5f6a1b2'
+        'PM-LIB-3.1', NULL, 'c3d4e5f6a1b2', true
     ),
     -- 4. Работа с обратной связью клиентов
     (
-        'RM-FR-004', 'TB-09-002', '211',
+        NULL, NULL, 'Новая',
+        'TB-09-002', '211', 'Несвоевременная обработка обращений',
         5, 420000.00, false,
         'КМ-09-41726', 'ЦА 36-мо0255', '2025-03-01', '4.1',
         '1014', 'Работа с обратной связью клиентов',
@@ -200,11 +242,12 @@ VALUES
         '2025-01-15 00:00:00', '2025-03-01 00:00:00', 'Козлов А.В.',
         'SD-2025-00143', NULL, 'Рекомендация',
         'Проверка переводов СР банк 2025', 'Оптимизировать процесс обработки обращений', '2025-06-30 00:00:00',
-        'PM-LIB-3.2', 'd4e5f6a1b2c3'
+        'PM-LIB-3.2', NULL, 'd4e5f6a1b2c3', false
     ),
     -- 5. Ведение кредитных сделок
     (
-        'RM-FR-005', 'TB-07-002', '130',
+        NULL, NULL, 'На рассмотрении',
+        'TB-07-002', '130', 'Нарушение оформления кредитных договоров',
         30, 5600000.00, true,
         'КМ-07-30001', 'МСК 12-мо0100', '2025-02-15', '2.4',
         '1013', 'Ведение кредитных сделок',
@@ -213,6 +256,6 @@ VALUES
         '2025-01-10 00:00:00', '2025-02-15 00:00:00', 'Смирнова Е.П.',
         'SD-2025-00099', 1004, 'Предписание',
         'Проверка управления рисками МСК 2025', 'Провести обучение сотрудников', '2025-05-31 00:00:00',
-        'PM-LIB-3.2', 'e5f6a1b2c3d4'
+        'PM-LIB-3.2', NULL, 'e5f6a1b2c3d4', false
     )
 ON CONFLICT DO NOTHING;

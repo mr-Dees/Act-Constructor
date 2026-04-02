@@ -27,13 +27,22 @@ class TestFRValidationCreate:
         assert record.metric_amount_rubles == Decimal("0")
         assert record.is_sent_to_top_brass is False
         assert record.dt_sz is None
+        assert record.act_sub_number_id is None
+        assert record.reestr_metric_id is None
+        assert record.application_status == ""
+        assert record.metric_name == ""
+        assert record.etl_loading_id is None
+        assert record.applied_into_ua is False
 
     def test_full_fields(self):
         """Создание с полным набором полей, включая Decimal, даты и булевы."""
         record = FRValidationCreate(
-            reestr_metric_id="RM-123",
+            act_sub_number_id=10,
+            reestr_metric_id=100,
+            application_status="Новая",
             neg_finder_tb_id="NF-07",
             metric_code="FR-002",
+            metric_name="Нарушение порядка переводов",
             metric_element_counts=5,
             metric_amount_rubles=Decimal("123456.78"),
             is_sent_to_top_brass=True,
@@ -60,6 +69,8 @@ class TestFRValidationCreate:
             assigment_recommendation="Рекомендация",
             execution_deadline=datetime(2025, 12, 31),
             used_pm_lib="PM-1",
+            etl_loading_id=500,
+            applied_into_ua=True,
         )
         assert record.metric_amount_rubles == Decimal("123456.78")
         assert record.is_sent_to_top_brass is True
@@ -67,6 +78,12 @@ class TestFRValidationCreate:
         assert record.real_loss is True
         assert record.assigment_id == 42
         assert record.rev_start_dt == datetime(2025, 1, 1, 0, 0)
+        assert record.act_sub_number_id == 10
+        assert record.reestr_metric_id == 100
+        assert record.application_status == "Новая"
+        assert record.metric_name == "Нарушение порядка переводов"
+        assert record.etl_loading_id == 500
+        assert record.applied_into_ua is True
 
     def test_metric_code_required(self):
         """metric_code — обязательное поле."""

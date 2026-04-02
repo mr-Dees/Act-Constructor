@@ -10,9 +10,12 @@ from pydantic import BaseModel, Field
 class FRValidationCreate(BaseModel):
     """Модель для создания записи FR-валидации."""
 
-    reestr_metric_id: str = ""
+    act_sub_number_id: Optional[int] = None
+    reestr_metric_id: Optional[int] = None
+    application_status: str = ""
     neg_finder_tb_id: str = ""
     metric_code: str = Field(...)
+    metric_name: str = ""
     metric_element_counts: int = Field(default=0, ge=0)
     metric_amount_rubles: Decimal = Decimal("0")
     is_sent_to_top_brass: bool = False
@@ -39,6 +42,8 @@ class FRValidationCreate(BaseModel):
     assigment_recommendation: str = ""
     execution_deadline: Optional[datetime] = None
     used_pm_lib: str = ""
+    etl_loading_id: Optional[int] = None
+    applied_into_ua: bool = False
 
 
 class FRValidationRecord(FRValidationCreate):
@@ -54,6 +59,6 @@ class FRValidationRecord(FRValidationCreate):
 
 
 class FRValidationView(FRValidationRecord):
-    """Представление FR-валидации с вычисляемыми полями."""
+    """Представление FR-валидации с вычисляемыми полями (JOIN по act_sub_number_id)."""
 
     act_sub_number: Optional[str] = None
