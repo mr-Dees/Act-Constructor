@@ -192,3 +192,26 @@ class TestBatchUpdate:
             username="testuser",
         )
         assert result == 0
+
+    async def test_happy_path(self, repo, mock_conn):
+        """Корректное обновление: деактивация + вставка новых версий."""
+        mock_conn.execute.return_value = "UPDATE 2"
+        items = [
+            {"id": 1, "metric_code": "CS-001", "metric_unic_clients": 10},
+            {"id": 2, "metric_code": "CS-002", "metric_unic_clients": 20},
+        ]
+        result = await repo.batch_update(items=items, username="testuser")
+
+        assert result == 2
+        # Деактивация вызвана через execute
+        deactivate_call = mock_conn.execute.call_args_list[0]
+        query = deactivate_call[0][0]
+        assert "UPDATE" in query
+        assert "is_actual = false" in query
+        assert "updated_at = now()" in query
+        # Вставка вызвана через executemany
+        mock_conn.executemany.assert_called_once()
+        insert_query = mock_conn.executemany.call_args[0][0]
+        assert "INSERT INTO" in insert_query
+        rows = mock_conn.executemany.call_args[0][1]
+        assert len(rows) == 2

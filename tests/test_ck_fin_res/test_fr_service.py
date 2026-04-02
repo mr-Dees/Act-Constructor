@@ -94,6 +94,25 @@ class TestGetDictionary:
 
 
 # -------------------------------------------------------------------------
+# create_record
+# -------------------------------------------------------------------------
+
+
+class TestCreateRecord:
+
+    async def test_delegates_to_repo(self, service, fr_repo):
+        """Делегирует создание записи репозиторию."""
+        fr_repo.create.return_value = {"id": 42, "created_at": "2025-06-15T12:00:00"}
+        result = await service.create_record(
+            data={"metric_code": "FR-001"},
+            username="testuser",
+        )
+
+        fr_repo.create.assert_called_once_with({"metric_code": "FR-001"}, "testuser")
+        assert result["id"] == 42
+
+
+# -------------------------------------------------------------------------
 # batch_update_records
 # -------------------------------------------------------------------------
 
