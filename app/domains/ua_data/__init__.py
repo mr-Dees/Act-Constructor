@@ -6,8 +6,10 @@ DOMAIN_NAME = "ua_data"
 def _build_domain():
     """Ленивое построение DomainDescriptor."""
     from app.core.domain import DomainDescriptor
+    from app.domains.ua_data.settings import UaDataSettings
 
     return DomainDescriptor(
         name=DOMAIN_NAME,
+        settings_class=UaDataSettings,
         dependencies=["admin"],
     )

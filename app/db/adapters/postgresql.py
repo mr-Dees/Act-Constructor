@@ -108,6 +108,12 @@ class PostgreSQLAdapter(DatabaseAdapter):
         """Возвращает имя таблицы без префиксов."""
         return base_name
 
+    def qualify_table_name(self, full_name: str, schema: str = "") -> str:
+        """Квалифицирует схемой если указана, иначе возвращает как есть."""
+        if schema:
+            return f"{schema}.{full_name}"
+        return full_name
+
     def get_serial_type(self) -> str:
         """PostgreSQL использует SERIAL."""
         return "SERIAL"

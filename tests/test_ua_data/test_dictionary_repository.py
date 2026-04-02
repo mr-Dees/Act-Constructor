@@ -3,16 +3,27 @@
 import pytest
 from unittest.mock import MagicMock, patch
 
+from app.core import settings_registry
 from app.domains.ua_data.repositories.dictionary_repository import (
     DictionaryRepository,
 )
+from app.domains.ua_data.settings import UaDataSettings
+
+
+@pytest.fixture(autouse=True)
+def _reset_settings():
+    """Сброс реестра настроек между тестами."""
+    settings_registry.reset()
+    settings_registry.register("ua_data", UaDataSettings)
+    yield
+    settings_registry.reset()
 
 
 @pytest.fixture
 def repo(mock_conn):
     """Создаёт DictionaryRepository с замоканным адаптером и соединением."""
     mock_adapter = MagicMock()
-    mock_adapter.get_table_name = lambda name: name
+    mock_adapter.qualify_table_name = lambda name, schema="": name
     with patch(
         "app.db.repositories.base.get_adapter", return_value=mock_adapter
     ):

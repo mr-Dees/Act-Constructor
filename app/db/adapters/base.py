@@ -86,6 +86,24 @@ class DatabaseAdapter(ABC):
         pass
 
     @abstractmethod
+    def qualify_table_name(self, full_name: str, schema: str = "") -> str:
+        """
+        Квалифицирует имя таблицы схемой БЕЗ добавления префикса.
+
+        Используется для справочных таблиц и таблиц других доменов,
+        которые уже имеют полное имя и не нуждаются в префиксе.
+
+        Args:
+            full_name: Полное имя таблицы без схемы
+            schema: Явная схема. Если пустая — Greenplum использует
+                основную схему, PostgreSQL не квалифицирует.
+
+        Returns:
+            Имя таблицы, квалифицированное схемой
+        """
+        pass
+
+    @abstractmethod
     def get_serial_type(self) -> str:
         """
         Возвращает тип для auto-increment колонок.

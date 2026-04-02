@@ -4,9 +4,20 @@ import pytest
 from unittest.mock import AsyncMock, MagicMock, patch
 from datetime import date
 
+from app.core import settings_registry
 from app.domains.ck_client_exp.repositories.cs_validation_repository import (
     CSValidationRepository,
 )
+from app.domains.ck_client_exp.settings import CkClientExpSettings
+
+
+@pytest.fixture(autouse=True)
+def _reset_settings():
+    """Сброс реестра настроек между тестами."""
+    settings_registry.reset()
+    settings_registry.register("ck_client_exp", CkClientExpSettings)
+    yield
+    settings_registry.reset()
 
 
 @pytest.fixture
@@ -32,7 +43,7 @@ def mock_conn():
 def repo(mock_conn):
     """Создаёт CSValidationRepository с замоканным адаптером и соединением."""
     mock_adapter = MagicMock()
-    mock_adapter.get_table_name = lambda name: name
+    mock_adapter.qualify_table_name = lambda name, schema="": name
     with patch(
         "app.db.repositories.base.get_adapter", return_value=mock_adapter
     ):

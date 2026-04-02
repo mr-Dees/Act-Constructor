@@ -7,7 +7,9 @@
 
 import logging
 
+from app.core.settings_registry import get as get_domain_settings
 from app.db.repositories.base import BaseRepository
+from app.domains.ua_data.settings import UaDataSettings
 
 logger = logging.getLogger("audit_workstation.domains.ua_data.repository")
 
@@ -17,33 +19,17 @@ class DictionaryRepository(BaseRepository):
 
     def __init__(self, conn):
         super().__init__(conn)
-        self.process_dict = self.adapter.get_table_name(
-            "t_db_oarb_ua_process_dict"
-        )
-        self.terbank_dict = self.adapter.get_table_name(
-            "t_db_oarb_ua_terbank_dict"
-        )
-        self.violation_metric_dict = self.adapter.get_table_name(
-            "t_db_oarb_ua_violation_metric_dict"
-        )
-        self.departments = self.adapter.get_table_name(
-            "t_db_oarb_ua_departments"
-        )
-        self.gosb_dict = self.adapter.get_table_name(
-            "t_db_oarb_ua_gosb_dict"
-        )
-        self.vsp_dict = self.adapter.get_table_name(
-            "t_db_oarb_ua_vsp_dict"
-        )
-        self.channel_dict = self.adapter.get_table_name(
-            "t_db_oarb_ua_channel_dict"
-        )
-        self.product_dict = self.adapter.get_table_name(
-            "t_db_oarb_ua_product_dict"
-        )
-        self.team_dict = self.adapter.get_table_name(
-            "t_db_oarb_ua_team_dict"
-        )
+        s = get_domain_settings("ua_data", UaDataSettings)
+        q = lambda name: self.adapter.qualify_table_name(name, s.schema_name)
+        self.process_dict = q(s.process_dict)
+        self.terbank_dict = q(s.terbank_dict)
+        self.violation_metric_dict = q(s.violation_metric_dict)
+        self.departments = q(s.departments)
+        self.gosb_dict = q(s.gosb_dict)
+        self.vsp_dict = q(s.vsp_dict)
+        self.channel_dict = q(s.channel_dict)
+        self.product_dict = q(s.product_dict)
+        self.team_dict = q(s.team_dict)
 
     async def get_processes(self) -> list[dict]:
         """Возвращает список актуальных процессов."""

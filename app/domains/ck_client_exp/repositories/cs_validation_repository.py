@@ -10,7 +10,9 @@ from datetime import date
 
 import asyncpg
 
+from app.core.settings_registry import get as get_domain_settings
 from app.db.repositories.base import BaseRepository
+from app.domains.ck_client_exp.settings import CkClientExpSettings
 
 logger = logging.getLogger("audit_workstation.domains.ck_client_exp.repository")
 
@@ -62,8 +64,9 @@ class CSValidationRepository(BaseRepository):
 
     def __init__(self, conn: asyncpg.Connection):
         super().__init__(conn)
-        self.table = self.adapter.get_table_name("t_db_oarb_ck_cs_validation")
-        self.view = self.adapter.get_table_name("v_db_oarb_ck_cs_validation")
+        s = get_domain_settings("ck_client_exp", CkClientExpSettings)
+        self.table = self.adapter.qualify_table_name(s.cs_validation_table, s.schema_name)
+        self.view = self.adapter.qualify_table_name(s.cs_validation_view, s.schema_name)
 
     # ------------------------------------------------------------------
     # ПОИСК

@@ -10,7 +10,9 @@ from datetime import date, datetime
 
 import asyncpg
 
+from app.core.settings_registry import get as get_domain_settings
 from app.db.repositories.base import BaseRepository
+from app.domains.ck_fin_res.settings import CkFinResSettings
 
 logger = logging.getLogger("audit_workstation.domains.ck_fin_res.repository")
 
@@ -80,8 +82,9 @@ class FRValidationRepository(BaseRepository):
 
     def __init__(self, conn: asyncpg.Connection):
         super().__init__(conn)
-        self.table = self.adapter.get_table_name("t_db_oarb_ck_fr_validation")
-        self.view = self.adapter.get_table_name("v_db_oarb_ck_fr_validation")
+        s = get_domain_settings("ck_fin_res", CkFinResSettings)
+        self.table = self.adapter.qualify_table_name(s.fr_validation_table, s.schema_name)
+        self.view = self.adapter.qualify_table_name(s.fr_validation_view, s.schema_name)
 
     # ------------------------------------------------------------------
     # ПОИСК
