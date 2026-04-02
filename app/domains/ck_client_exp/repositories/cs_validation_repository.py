@@ -17,7 +17,7 @@ from app.domains.ck_client_exp.settings import CkClientExpSettings
 logger = logging.getLogger("audit_workstation.domains.ck_client_exp.repository")
 
 _DATE_FIELDS = {"dt_sz"}
-_NULLABLE_FIELDS = _DATE_FIELDS
+_NULLABLE_FIELDS = _DATE_FIELDS | {"act_sub_number_id"}
 _NUMERIC_DEFAULTS = {
     "metric_unic_clients": 0,
     "metric_element_counts": 0,
@@ -41,6 +41,7 @@ def _coerce(field: str, value):
 
 # Поля для INSERT (без системных полей id, created_at, updated_at и т.д.)
 _INSERT_FIELDS = (
+    "act_sub_number_id",
     "reestr_metric_id",
     "neg_finder_tb_id",
     "metric_code",

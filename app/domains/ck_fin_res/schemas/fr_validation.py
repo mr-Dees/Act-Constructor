@@ -12,38 +12,44 @@ class FRValidationCreate(BaseModel):
 
     act_sub_number_id: Optional[int] = None
     reestr_metric_id: Optional[int] = None
-    application_status: str = ""
-    neg_finder_tb_id: str = ""
-    metric_code: str = Field(...)
-    metric_name: str = ""
+    application_status: str = Field(default="", max_length=200)
+    neg_finder_tb_id: str = Field(default="", max_length=200)
+    metric_code: str = Field(..., max_length=200)
+    metric_name: str = Field(default="", max_length=500)
     metric_element_counts: int = Field(default=0, ge=0)
     metric_amount_rubles: Decimal = Decimal("0")
     is_sent_to_top_brass: bool = False
-    km_id: str = ""
-    num_sz: str = ""
+    km_id: str = Field(default="", max_length=200)
+    num_sz: str = Field(default="", max_length=200)
     dt_sz: Optional[date] = None
-    act_item_number: str = ""
-    process_number: str = ""
-    process_name: str = ""
-    deviation_description: str = ""
-    deviation_reason: str = ""
-    deviation_consequence: str = ""
+    act_item_number: str = Field(default="", max_length=200)
+    process_number: str = Field(default="", max_length=200)
+    process_name: str = Field(default="", max_length=500)
+    deviation_description: str = Field(default="", max_length=10000)
+    deviation_reason: str = Field(default="", max_length=10000)
+    deviation_consequence: str = Field(default="", max_length=10000)
     real_loss: bool = False
-    ck_comment: str = ""
-    pocket: str = ""
-    risk: str = ""
+    ck_comment: str = Field(default="", max_length=10000)
+    pocket: str = Field(default="", max_length=500)
+    risk: str = Field(default="", max_length=500)
     rev_start_dt: Optional[datetime] = None
     rev_end_dt: Optional[datetime] = None
-    process_owner: str = ""
-    sberdocs_ctrl_assgn_number: str = ""
+    process_owner: str = Field(default="", max_length=500)
+    sberdocs_ctrl_assgn_number: str = Field(default="", max_length=200)
     assigment_id: Optional[int] = None
-    assigment_format: str = ""
-    inspection_name: str = ""
-    assigment_recommendation: str = ""
+    assigment_format: str = Field(default="", max_length=200)
+    inspection_name: str = Field(default="", max_length=500)
+    assigment_recommendation: str = Field(default="", max_length=10000)
     execution_deadline: Optional[datetime] = None
-    used_pm_lib: str = ""
+    used_pm_lib: str = Field(default="", max_length=200)
     etl_loading_id: Optional[int] = None
     applied_into_ua: bool = False
+
+
+class FRValidationBatchItem(FRValidationCreate):
+    """Элемент пакетного обновления FR-валидации (id обязателен)."""
+
+    id: int
 
 
 class FRValidationRecord(FRValidationCreate):

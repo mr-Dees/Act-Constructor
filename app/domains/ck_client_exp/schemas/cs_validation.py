@@ -10,20 +10,27 @@ from pydantic import BaseModel, Field
 class CSValidationCreate(BaseModel):
     """Модель для создания записи CS-валидации."""
 
-    reestr_metric_id: str = ""
-    neg_finder_tb_id: str = ""
-    metric_code: str = Field(...)
+    act_sub_number_id: Optional[int] = None
+    reestr_metric_id: str = Field(default="", max_length=200)
+    neg_finder_tb_id: str = Field(default="", max_length=200)
+    metric_code: str = Field(..., max_length=200)
     metric_unic_clients: int = Field(default=0, ge=0)
     metric_element_counts: int = Field(default=0, ge=0)
     metric_amount_rubles: Decimal = Decimal("0")
     is_sent_to_top_brass: bool = False
-    km_id: str = ""
-    num_sz: str = ""
+    km_id: str = Field(default="", max_length=200)
+    num_sz: str = Field(default="", max_length=200)
     dt_sz: Optional[date] = None
-    act_item_number: str = ""
-    process_number: str = ""
-    process_name: str = ""
-    ck_comment: str = ""
+    act_item_number: str = Field(default="", max_length=200)
+    process_number: str = Field(default="", max_length=200)
+    process_name: str = Field(default="", max_length=500)
+    ck_comment: str = Field(default="", max_length=10000)
+
+
+class CSValidationBatchItem(CSValidationCreate):
+    """Элемент пакетного обновления CS-валидации (id обязателен)."""
+
+    id: int
 
 
 class CSValidationRecord(CSValidationCreate):

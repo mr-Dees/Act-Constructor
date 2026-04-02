@@ -6,13 +6,19 @@ API эндпоинты для записей FR-валидации.
 """
 
 from fastapi import APIRouter, Depends
+from fastapi.responses import JSONResponse
 
 from app.api.v1.deps.auth_deps import get_username
 from app.api.v1.deps.role_deps import require_domain_access
 from app.domains.ck_fin_res.deps import get_fr_validation_service
-from app.domains.ck_fin_res.schemas.fr_validation import FRValidationCreate
+from app.domains.ck_fin_res.schemas.fr_validation import (
+    FRValidationBatchItem,
+    FRValidationCreate,
+)
 from app.domains.ck_fin_res.schemas.requests import ValidationSearchRequest
 from app.domains.ck_fin_res.services.fr_validation_service import FRValidationService
+
+MAX_BATCH_SIZE = 500
 
 _access = Depends(require_domain_access("ck_fin_res"))
 
@@ -55,16 +61,22 @@ async def create_record(
 
 @router.post("/records/batch-update", dependencies=[_access])
 async def batch_update_records(
-    body: list[dict],
+    body: list[FRValidationBatchItem],
     username: str = Depends(get_username),
     service: FRValidationService = Depends(get_fr_validation_service),
 ):
     """Пакетное обновление записей FR-валидации."""
-    count = await service.batch_update_records(body, username)
+    if len(body) > MAX_BATCH_SIZE:
+        return JSONResponse(
+            status_code=422,
+            content={"detail": f"Максимальный размер пакета: {MAX_BATCH_SIZE}"},
+        )
+    items = [item.model_dump() for item in body]
+    count = await service.batch_update_records(items, username)
     return {"updated": count}
 
 
-@router.delete("/records/{record_id}", dependencies=[_access])
+@router.delete("/records/{record_id}", status_code=204, dependencies=[_access])
 async def delete_record(
     record_id: int,
     username: str = Depends(get_username),
@@ -72,4 +84,3 @@ async def delete_record(
 ):
     """Мягкое удаление записи FR-валидации."""
     await service.delete_record(record_id, username)
-    return {"detail": "Запись удалена"}

@@ -132,11 +132,21 @@ class DatabaseSettings(BaseModel):
     port: int = Field(default=5432, ge=1, le=65535)
     name: str = Field(default="audit_workstation")
     user: str = Field(default="postgres")
-    password: str = Field(default="")
+    password: SecretStr = SecretStr("")
     pool_min_size: int = Field(default=2, ge=1)
     pool_max_size: int = Field(default=10, ge=2)
     command_timeout: int = Field(default=60, gt=0)
     gp: GreenplumSettings = GreenplumSettings()
+
+    @model_validator(mode="after")
+    def validate_pool_sizes(self):
+        """Проверяет, что pool_min_size <= pool_max_size."""
+        if self.pool_min_size > self.pool_max_size:
+            raise ValueError(
+                f"pool_min_size ({self.pool_min_size}) не может быть больше "
+                f"pool_max_size ({self.pool_max_size})"
+            )
+        return self
 
 
 class SecuritySettings(BaseModel):
@@ -220,7 +230,7 @@ class Settings(BaseSettings):
     @model_validator(mode='after')
     def warn_empty_db_password(self):
         """Предупреждает если пароль БД не задан для PostgreSQL."""
-        if self.database.type == "postgresql" and not self.database.password:
+        if self.database.type == "postgresql" and not self.database.password.get_secret_value():
             warnings.warn(
                 "DATABASE__PASSWORD не задан. Подключение к PostgreSQL без пароля. "
                 "Задайте DATABASE__PASSWORD в .env для production.",
