@@ -43,6 +43,7 @@ class FRValidationCreate(BaseModel):
     execution_deadline: Optional[datetime] = None
     used_pm_lib: str = Field(default="", max_length=200)
     etl_loading_id: Optional[int] = None
+    row_hash: str = Field(default="", max_length=500)
     applied_into_ua: bool = False
 
 

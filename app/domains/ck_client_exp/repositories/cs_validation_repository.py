@@ -17,7 +17,7 @@ from app.domains.ck_client_exp.settings import CkClientExpSettings
 logger = logging.getLogger("audit_workstation.domains.ck_client_exp.repository")
 
 _DATE_FIELDS = {"dt_sz"}
-_NULLABLE_FIELDS = _DATE_FIELDS | {"act_sub_number_id"}
+_NULLABLE_FIELDS = _DATE_FIELDS | {"act_sub_number_id", "reestr_metric_id"}
 _NUMERIC_DEFAULTS = {
     "metric_unic_clients": 0,
     "metric_element_counts": 0,
@@ -195,7 +195,7 @@ class CSValidationRepository(BaseRepository):
             deactivate_query = (
                 f"UPDATE {self.table} "
                 f"SET deleted_at = now(), updated_at = now(), is_actual = false, updated_by = $1 "
-                f"WHERE id IN ({id_placeholders})"
+                f"WHERE id IN ({id_placeholders}) AND is_actual = true"
             )
             result = await self.conn.execute(deactivate_query, username, *ids)
             updated_count = int(result.split()[-1]) if result else 0

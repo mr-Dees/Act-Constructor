@@ -27,6 +27,7 @@ class TestCSValidationCreate:
         assert record.metric_element_counts == 0
         assert record.metric_amount_rubles == Decimal("0")
         assert record.is_sent_to_top_brass is False
+        assert record.reestr_metric_id is None
         assert record.dt_sz is None
 
     def test_metric_unic_clients_field(self):
@@ -50,7 +51,7 @@ class TestCSValidationCreate:
     def test_full_fields(self):
         """Создание с полным набором полей."""
         record = CSValidationCreate(
-            reestr_metric_id="RM-456",
+            reestr_metric_id=456,
             neg_finder_tb_id="NF-03",
             metric_code="CS-010",
             metric_unic_clients=200,

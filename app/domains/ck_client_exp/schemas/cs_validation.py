@@ -11,7 +11,7 @@ class CSValidationCreate(BaseModel):
     """Модель для создания записи CS-валидации."""
 
     act_sub_number_id: Optional[int] = None
-    reestr_metric_id: str = Field(default="", max_length=200)
+    reestr_metric_id: Optional[int] = None
     neg_finder_tb_id: str = Field(default="", max_length=200)
     metric_code: str = Field(..., max_length=200)
     metric_unic_clients: int = Field(default=0, ge=0)

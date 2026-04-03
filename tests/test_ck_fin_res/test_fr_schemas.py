@@ -32,6 +32,7 @@ class TestFRValidationCreate:
         assert record.application_status == ""
         assert record.metric_name == ""
         assert record.etl_loading_id is None
+        assert record.row_hash == ""
         assert record.applied_into_ua is False
 
     def test_full_fields(self):
@@ -70,6 +71,7 @@ class TestFRValidationCreate:
             execution_deadline=datetime(2025, 12, 31),
             used_pm_lib="PM-1",
             etl_loading_id=500,
+            row_hash="abc123hash",
             applied_into_ua=True,
         )
         assert record.metric_amount_rubles == Decimal("123456.78")
@@ -83,6 +85,7 @@ class TestFRValidationCreate:
         assert record.application_status == "Новая"
         assert record.metric_name == "Нарушение порядка переводов"
         assert record.etl_loading_id == 500
+        assert record.row_hash == "abc123hash"
         assert record.applied_into_ua is True
 
     def test_metric_code_required(self):

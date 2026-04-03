@@ -82,6 +82,7 @@ _INSERT_FIELDS = (
     "execution_deadline",
     "used_pm_lib",
     "etl_loading_id",
+    "row_hash",
     "applied_into_ua",
     "created_by",
 )
@@ -222,7 +223,7 @@ class FRValidationRepository(BaseRepository):
             deactivate_query = (
                 f"UPDATE {self.table} "
                 f"SET deleted_at = now(), updated_at = now(), is_actual = false, updated_by = $1 "
-                f"WHERE id IN ({id_placeholders})"
+                f"WHERE id IN ({id_placeholders}) AND is_actual = true"
             )
             result = await self.conn.execute(deactivate_query, username, *ids)
             updated_count = int(result.split()[-1]) if result else 0

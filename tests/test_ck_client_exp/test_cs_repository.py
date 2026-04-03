@@ -208,6 +208,7 @@ class TestBatchUpdate:
         query = deactivate_call[0][0]
         assert "UPDATE" in query
         assert "is_actual = false" in query
+        assert "AND is_actual = true" in query
         assert "updated_at = now()" in query
         # Вставка вызвана через executemany
         mock_conn.executemany.assert_called_once()

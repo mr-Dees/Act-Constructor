@@ -174,6 +174,7 @@ WHERE fr.is_actual = true;
 -- ТЕСТОВЫЕ ДАННЫЕ
 -- ============================================================================
 
+-- 1. Осуществление переводов
 INSERT INTO t_db_oarb_ck_fr_validation (
     act_sub_number_id, reestr_metric_id, application_status,
     neg_finder_tb_id, metric_code, metric_name,
@@ -185,77 +186,135 @@ INSERT INTO t_db_oarb_ck_fr_validation (
     rev_start_dt, rev_end_dt, process_owner,
     sberdocs_ctrl_assgn_number, assigment_id, assigment_format,
     inspection_name, assigment_recommendation, execution_deadline,
-    used_pm_lib, etl_loading_id, row_hash, applied_into_ua
-)
-VALUES
-    -- 1. Осуществление переводов
-    (
-        NULL, NULL, 'Новая',
-        'TB-09-001', '211', 'Нарушение порядка переводов',
-        15, 1250000.00, true,
-        'КМ-09-41726', 'ЦА 36-мо0255', '2025-03-01', '2.1',
-        '3015', 'Осуществление переводов',
-        'Некорректное проведение валютных переводов', 'Ошибка оператора', 'Задержка зачисления средств',
-        true, 'Требуется доработка процедуры контроля', 'Городская', 'Операционный риск',
-        '2025-01-15 00:00:00', '2025-03-01 00:00:00', 'Козлов А.В.',
-        'SD-2025-00142', 1001, 'Предписание',
-        'Проверка переводов СР банк 2025', 'Усилить контроль валютных операций', '2025-06-30 00:00:00',
-        'PM-LIB-3.2', NULL, 'a1b2c3d4e5f6', false
-    ),
-    -- 2. Управление рисками сделок
-    (
-        NULL, NULL, 'На рассмотрении',
-        'TB-07-001', '231', 'Неполная оценка кредитного риска',
-        8, 3500000.00, false,
-        'КМ-07-30001', 'МСК 12-мо0100', '2025-02-15', '3.2',
-        '2019', 'Управление рисками сделок',
-        'Неполная оценка кредитного риска', 'Недостаток информации о заёмщике', 'Увеличение просроченной задолженности',
-        false, '', 'Корпоративная', 'Кредитный риск',
-        '2025-01-10 00:00:00', '2025-02-15 00:00:00', 'Смирнова Е.П.',
-        'SD-2025-00098', 1002, 'Рекомендация',
-        'Проверка управления рисками МСК 2025', 'Обновить модель оценки рисков', '2025-07-31 00:00:00',
-        'PM-LIB-3.2', NULL, 'b2c3d4e5f6a1', false
-    ),
-    -- 3. Риск-менеджмент
-    (
-        NULL, NULL, 'Утверждена',
-        'TB-14-001', '402', 'Превышение лимитов расходов',
-        22, 780000.00, true,
-        'КМ-14-50001', 'ЦА 50-мо0300', '2025-04-10', '1.3',
-        '2014', 'Риск-менеджмент',
-        'Превышение лимитов операционных расходов', 'Рост затрат на устранение инцидентов', 'Перерасход бюджета подразделения',
-        true, 'Необходим пересмотр лимитов', 'Региональная', 'Операционный риск',
-        '2025-02-01 00:00:00', '2025-04-10 00:00:00', 'Николаев Д.С.',
-        'SD-2025-00201', 1003, 'Предписание',
-        'Проверка риск-менеджмента ПВ банк 2025', 'Пересмотреть лимиты расходов', '2025-09-30 00:00:00',
-        'PM-LIB-3.1', NULL, 'c3d4e5f6a1b2', true
-    ),
-    -- 4. Работа с обратной связью клиентов
-    (
-        NULL, NULL, 'Новая',
-        'TB-09-002', '211', 'Несвоевременная обработка обращений',
-        5, 420000.00, false,
-        'КМ-09-41726', 'ЦА 36-мо0255', '2025-03-01', '4.1',
-        '1014', 'Работа с обратной связью клиентов',
-        'Несвоевременная обработка обращений клиентов', 'Нехватка персонала', 'Снижение лояльности клиентов',
-        false, 'Рекомендовано увеличить штат', 'Городская', 'Репутационный риск',
-        '2025-01-15 00:00:00', '2025-03-01 00:00:00', 'Козлов А.В.',
-        'SD-2025-00143', NULL, 'Рекомендация',
-        'Проверка переводов СР банк 2025', 'Оптимизировать процесс обработки обращений', '2025-06-30 00:00:00',
-        'PM-LIB-3.2', NULL, 'd4e5f6a1b2c3', false
-    ),
-    -- 5. Ведение кредитных сделок
-    (
-        NULL, NULL, 'На рассмотрении',
-        'TB-07-002', '130', 'Нарушение оформления кредитных договоров',
-        30, 5600000.00, true,
-        'КМ-07-30001', 'МСК 12-мо0100', '2025-02-15', '2.4',
-        '1013', 'Ведение кредитных сделок',
-        'Нарушение порядка оформления кредитных договоров', 'Несоблюдение внутренних регламентов', 'Рост просроченной задолженности',
-        true, 'Критичное нарушение, требуется немедленное устранение', 'Корпоративная', 'Кредитный риск',
-        '2025-01-10 00:00:00', '2025-02-15 00:00:00', 'Смирнова Е.П.',
-        'SD-2025-00099', 1004, 'Предписание',
-        'Проверка управления рисками МСК 2025', 'Провести обучение сотрудников', '2025-05-31 00:00:00',
-        'PM-LIB-3.2', NULL, 'e5f6a1b2c3d4', false
-    )
-ON CONFLICT DO NOTHING;
+    used_pm_lib, etl_loading_id, row_hash, applied_into_ua,
+    created_by
+) SELECT
+    NULL, NULL, 'Новая',
+    'TB-09-001', '211', 'Нарушение порядка переводов',
+    15, 1250000.00, true,
+    'КМ-09-41726', 'ЦА 36-мо0255', '2025-03-01', '2.1',
+    '3015', 'Осуществление переводов',
+    'Некорректное проведение валютных переводов', 'Ошибка оператора', 'Задержка зачисления средств',
+    true, 'Требуется доработка процедуры контроля', 'Городская', 'Операционный риск',
+    '2025-01-15 00:00:00', '2025-03-01 00:00:00', 'Козлов А.В.',
+    'SD-2025-00142', 1001, 'Предписание',
+    'Проверка переводов СР банк 2025', 'Усилить контроль валютных операций', '2025-06-30 00:00:00',
+    'PM-LIB-3.2', NULL, 'a1b2c3d4e5f6', false,
+    'system'
+WHERE NOT EXISTS (SELECT 1 FROM t_db_oarb_ck_fr_validation LIMIT 1);
+
+-- 2. Управление рисками сделок
+INSERT INTO t_db_oarb_ck_fr_validation (
+    act_sub_number_id, reestr_metric_id, application_status,
+    neg_finder_tb_id, metric_code, metric_name,
+    metric_element_counts, metric_amount_rubles, is_sent_to_top_brass,
+    km_id, num_sz, dt_sz, act_item_number,
+    process_number, process_name,
+    deviation_description, deviation_reason, deviation_consequence,
+    real_loss, ck_comment, pocket, risk,
+    rev_start_dt, rev_end_dt, process_owner,
+    sberdocs_ctrl_assgn_number, assigment_id, assigment_format,
+    inspection_name, assigment_recommendation, execution_deadline,
+    used_pm_lib, etl_loading_id, row_hash, applied_into_ua,
+    created_by
+) SELECT
+    NULL, NULL, 'На рассмотрении',
+    'TB-07-001', '231', 'Неполная оценка кредитного риска',
+    8, 3500000.00, false,
+    'КМ-07-30001', 'МСК 12-мо0100', '2025-02-15', '3.2',
+    '2019', 'Управление рисками сделок',
+    'Неполная оценка кредитного риска', 'Недостаток информации о заёмщике', 'Увеличение просроченной задолженности',
+    false, '', 'Корпоративная', 'Кредитный риск',
+    '2025-01-10 00:00:00', '2025-02-15 00:00:00', 'Смирнова Е.П.',
+    'SD-2025-00098', 1002, 'Рекомендация',
+    'Проверка управления рисками МСК 2025', 'Обновить модель оценки рисков', '2025-07-31 00:00:00',
+    'PM-LIB-3.2', NULL, 'b2c3d4e5f6a1', false,
+    'system'
+WHERE NOT EXISTS (SELECT 1 FROM t_db_oarb_ck_fr_validation LIMIT 1);
+
+-- 3. Риск-менеджмент
+INSERT INTO t_db_oarb_ck_fr_validation (
+    act_sub_number_id, reestr_metric_id, application_status,
+    neg_finder_tb_id, metric_code, metric_name,
+    metric_element_counts, metric_amount_rubles, is_sent_to_top_brass,
+    km_id, num_sz, dt_sz, act_item_number,
+    process_number, process_name,
+    deviation_description, deviation_reason, deviation_consequence,
+    real_loss, ck_comment, pocket, risk,
+    rev_start_dt, rev_end_dt, process_owner,
+    sberdocs_ctrl_assgn_number, assigment_id, assigment_format,
+    inspection_name, assigment_recommendation, execution_deadline,
+    used_pm_lib, etl_loading_id, row_hash, applied_into_ua,
+    created_by
+) SELECT
+    NULL, NULL, 'Утверждена',
+    'TB-14-001', '402', 'Превышение лимитов расходов',
+    22, 780000.00, true,
+    'КМ-14-50001', 'ЦА 50-мо0300', '2025-04-10', '1.3',
+    '2014', 'Риск-менеджмент',
+    'Превышение лимитов операционных расходов', 'Рост затрат на устранение инцидентов', 'Перерасход бюджета подразделения',
+    true, 'Необходим пересмотр лимитов', 'Региональная', 'Операционный риск',
+    '2025-02-01 00:00:00', '2025-04-10 00:00:00', 'Николаев Д.С.',
+    'SD-2025-00201', 1003, 'Предписание',
+    'Проверка риск-менеджмента ПВ банк 2025', 'Пересмотреть лимиты расходов', '2025-09-30 00:00:00',
+    'PM-LIB-3.1', NULL, 'c3d4e5f6a1b2', true,
+    'system'
+WHERE NOT EXISTS (SELECT 1 FROM t_db_oarb_ck_fr_validation LIMIT 1);
+
+-- 4. Работа с обратной связью клиентов
+INSERT INTO t_db_oarb_ck_fr_validation (
+    act_sub_number_id, reestr_metric_id, application_status,
+    neg_finder_tb_id, metric_code, metric_name,
+    metric_element_counts, metric_amount_rubles, is_sent_to_top_brass,
+    km_id, num_sz, dt_sz, act_item_number,
+    process_number, process_name,
+    deviation_description, deviation_reason, deviation_consequence,
+    real_loss, ck_comment, pocket, risk,
+    rev_start_dt, rev_end_dt, process_owner,
+    sberdocs_ctrl_assgn_number, assigment_id, assigment_format,
+    inspection_name, assigment_recommendation, execution_deadline,
+    used_pm_lib, etl_loading_id, row_hash, applied_into_ua,
+    created_by
+) SELECT
+    NULL, NULL, 'Новая',
+    'TB-09-002', '211', 'Несвоевременная обработка обращений',
+    5, 420000.00, false,
+    'КМ-09-41726', 'ЦА 36-мо0255', '2025-03-01', '4.1',
+    '1014', 'Работа с обратной связью клиентов',
+    'Несвоевременная обработка обращений клиентов', 'Нехватка персонала', 'Снижение лояльности клиентов',
+    false, 'Рекомендовано увеличить штат', 'Городская', 'Репутационный риск',
+    '2025-01-15 00:00:00', '2025-03-01 00:00:00', 'Козлов А.В.',
+    'SD-2025-00143', NULL, 'Рекомендация',
+    'Проверка переводов СР банк 2025', 'Оптимизировать процесс обработки обращений', '2025-06-30 00:00:00',
+    'PM-LIB-3.2', NULL, 'd4e5f6a1b2c3', false,
+    'system'
+WHERE NOT EXISTS (SELECT 1 FROM t_db_oarb_ck_fr_validation LIMIT 1);
+
+-- 5. Ведение кредитных сделок
+INSERT INTO t_db_oarb_ck_fr_validation (
+    act_sub_number_id, reestr_metric_id, application_status,
+    neg_finder_tb_id, metric_code, metric_name,
+    metric_element_counts, metric_amount_rubles, is_sent_to_top_brass,
+    km_id, num_sz, dt_sz, act_item_number,
+    process_number, process_name,
+    deviation_description, deviation_reason, deviation_consequence,
+    real_loss, ck_comment, pocket, risk,
+    rev_start_dt, rev_end_dt, process_owner,
+    sberdocs_ctrl_assgn_number, assigment_id, assigment_format,
+    inspection_name, assigment_recommendation, execution_deadline,
+    used_pm_lib, etl_loading_id, row_hash, applied_into_ua,
+    created_by
+) SELECT
+    NULL, NULL, 'На рассмотрении',
+    'TB-07-002', '130', 'Нарушение оформления кредитных договоров',
+    30, 5600000.00, true,
+    'КМ-07-30001', 'МСК 12-мо0100', '2025-02-15', '2.4',
+    '1013', 'Ведение кредитных сделок',
+    'Нарушение порядка оформления кредитных договоров', 'Несоблюдение внутренних регламентов', 'Рост просроченной задолженности',
+    true, 'Критичное нарушение, требуется немедленное устранение', 'Корпоративная', 'Кредитный риск',
+    '2025-01-10 00:00:00', '2025-02-15 00:00:00', 'Смирнова Е.П.',
+    'SD-2025-00099', 1004, 'Предписание',
+    'Проверка управления рисками МСК 2025', 'Провести обучение сотрудников', '2025-05-31 00:00:00',
+    'PM-LIB-3.2', NULL, 'e5f6a1b2c3d4', false,
+    'system'
+WHERE NOT EXISTS (SELECT 1 FROM t_db_oarb_ck_fr_validation LIMIT 1);
