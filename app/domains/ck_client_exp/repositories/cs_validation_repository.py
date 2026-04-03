@@ -194,7 +194,7 @@ class CSValidationRepository(BaseRepository):
             id_placeholders = ", ".join(f"${i + 2}" for i in range(len(ids)))
             deactivate_query = (
                 f"UPDATE {self.table} "
-                f"SET deleted_at = now(), updated_at = now(), is_actual = false, updated_by = $1 "
+                f"SET updated_at = now(), is_actual = false, updated_by = $1 "
                 f"WHERE id IN ({id_placeholders}) AND is_actual = true"
             )
             result = await self.conn.execute(deactivate_query, username, *ids)
@@ -243,7 +243,6 @@ class CSValidationRepository(BaseRepository):
             UPDATE {self.table}
             SET is_actual = false,
                 deleted_at = now(),
-                updated_at = now(),
                 updated_by = $1
             WHERE id = $2 AND is_actual = true
             """,
