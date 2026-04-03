@@ -85,28 +85,16 @@ class TestGetMetricCodes:
 
     async def test_returns_list_of_dicts(self, repo, mock_conn):
         mock_conn.fetch.return_value = [
-            {"id": 1, "code": "211", "metric_name": "Уровень потерь"},
+            {"id": 1, "code": "211", "metric_name": "Уровень потерь", "metric_group": "ФР"},
         ]
         result = await repo.get_metric_codes()
         assert isinstance(result, list)
         assert len(result) == 1
         assert result[0]["code"] == "211"
 
-    async def test_passes_prefix_parameter(self, repo, mock_conn):
-        mock_conn.fetch.return_value = []
-        await repo.get_metric_codes(prefix="FR")
-        args = mock_conn.fetch.call_args
-        assert args[0][1] == "FR%"
-
-    async def test_default_prefix_is_empty(self, repo, mock_conn):
-        mock_conn.fetch.return_value = []
-        await repo.get_metric_codes()
-        args = mock_conn.fetch.call_args
-        assert args[0][1] == "%"
-
     async def test_empty_result(self, repo, mock_conn):
         mock_conn.fetch.return_value = []
-        result = await repo.get_metric_codes(prefix="NONE")
+        result = await repo.get_metric_codes()
         assert result == []
 
 

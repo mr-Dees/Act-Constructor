@@ -55,17 +55,15 @@ class DictionaryRepository(BaseRepository):
         )
         return [dict(r) for r in rows]
 
-    async def get_metric_codes(self, prefix: str = "") -> list[dict]:
-        """Возвращает список актуальных метрик нарушений, фильтруя по префиксу кода."""
+    async def get_metric_codes(self) -> list[dict]:
+        """Возвращает список актуальных метрик нарушений."""
         rows = await self.conn.fetch(
             f"""
             SELECT id, code, metric_name, metric_group
             FROM {self.violation_metric_dict}
             WHERE is_actual = true
-              AND code LIKE $1
             ORDER BY code
-            """,
-            f"{prefix}%",
+            """
         )
         return [dict(r) for r in rows]
 
@@ -90,6 +88,7 @@ class DictionaryRepository(BaseRepository):
             LEFT JOIN {self.vsp_dict} v ON v.vsp_id = d.vsp_id AND v.is_actual = true
             WHERE d.is_actual = true
             ORDER BY d.id
+            LIMIT 5000
             """
         )
         return [dict(r) for r in rows]
