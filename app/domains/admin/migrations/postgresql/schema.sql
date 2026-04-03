@@ -106,3 +106,33 @@ CREATE INDEX IF NOT EXISTS idx_{REF_USER_TABLE}_branch
     ON {REF_USER_TABLE}(branch);
 
 COMMENT ON INDEX idx_{REF_USER_TABLE}_branch IS 'Индекс для фильтрации пользователей по подразделению';
+
+-- ============================================================================
+-- ТАБЛИЦА АУДИТ-ЛОГА АДМИНИСТРИРОВАНИЯ
+-- ============================================================================
+
+CREATE TABLE IF NOT EXISTS admin_audit_log (
+    id SERIAL PRIMARY KEY,
+    action VARCHAR(50) NOT NULL,
+    target_username VARCHAR(50) NOT NULL,
+    admin_username VARCHAR(50) NOT NULL,
+    role_id INTEGER,
+    role_name VARCHAR(100) NOT NULL DEFAULT '',
+    details TEXT NOT NULL DEFAULT '',
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+
+COMMENT ON TABLE admin_audit_log IS 'Аудит-лог операций администрирования ролей';
+COMMENT ON COLUMN admin_audit_log.action IS 'Тип операции (assign_role, remove_role)';
+COMMENT ON COLUMN admin_audit_log.target_username IS 'Пользователь, над которым выполнена операция';
+COMMENT ON COLUMN admin_audit_log.admin_username IS 'Администратор, выполнивший операцию';
+COMMENT ON COLUMN admin_audit_log.role_id IS 'ID роли';
+COMMENT ON COLUMN admin_audit_log.role_name IS 'Имя роли (денормализовано)';
+COMMENT ON COLUMN admin_audit_log.details IS 'Дополнительная информация';
+COMMENT ON COLUMN admin_audit_log.created_at IS 'Дата и время операции';
+
+CREATE INDEX IF NOT EXISTS idx_admin_audit_log_target
+    ON admin_audit_log(target_username);
+
+CREATE INDEX IF NOT EXISTS idx_admin_audit_log_created
+    ON admin_audit_log(created_at DESC);

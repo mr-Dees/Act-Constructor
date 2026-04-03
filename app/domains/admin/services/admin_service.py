@@ -5,6 +5,7 @@ import logging
 import asyncpg
 
 from app.domains.admin.exceptions import LastAdminError, RoleNotFoundError, UserNotFoundError
+from app.domains.admin.repositories.admin_audit_log import AdminAuditLogRepository
 from app.domains.admin.repositories.admin_repository import AdminRepository
 from app.domains.admin.settings import AdminSettings
 
@@ -20,6 +21,7 @@ class AdminService:
         self.conn = conn
         self.settings = settings
         self.repo = AdminRepository(conn, settings)
+        self.audit_log = AdminAuditLogRepository(conn)
 
     async def get_all_roles(self) -> list[dict]:
         """Возвращает все роли системы."""
@@ -53,9 +55,12 @@ class AdminService:
 
         assigned = await self.repo.assign_role(username, role_id, assigned_by)
         if assigned:
-            logger.info(
-                "Роль '%s' назначена пользователю %s (назначил: %s)",
-                role["name"], username, assigned_by,
+            await self.audit_log.log(
+                action="assign_role",
+                target_username=username,
+                admin_username=assigned_by,
+                role_id=role_id,
+                role_name=role["name"],
             )
         return assigned
 
@@ -80,11 +85,18 @@ class AdminService:
 
         removed = await self.repo.remove_role(username, role_id)
         if removed:
-            logger.info(
-                "Роль '%s' снята с пользователя %s (снял: %s)",
-                role["name"], username, removed_by,
+            await self.audit_log.log(
+                action="remove_role",
+                target_username=username,
+                admin_username=removed_by,
+                role_id=role_id,
+                role_name=role["name"],
             )
         return removed
+
+    async def get_audit_log(self, **filters) -> tuple[list[dict], int]:
+        """Возвращает записи аудит-лога с фильтрацией."""
+        return await self.audit_log.get_log(**filters)
 
     async def get_user_directory(self) -> list[dict]:
         """Возвращает пользователей отдела + пользователей с ролями."""

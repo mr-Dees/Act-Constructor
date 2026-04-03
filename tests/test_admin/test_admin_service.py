@@ -13,14 +13,22 @@ def mock_repo():
     """Mock AdminRepository."""
     repo = AsyncMock()
     repo.get_role_by_id = AsyncMock()
+    repo.get_user_from_directory = AsyncMock()
     repo.count_admins = AsyncMock()
+    repo.assign_role = AsyncMock()
     repo.remove_role = AsyncMock()
     return repo
 
 
 @pytest.fixture
-def service(mock_conn, mock_repo):
-    """Создаёт AdminService с замоканным репозиторием."""
+def mock_audit_log():
+    """Mock AdminAuditLogRepository."""
+    return AsyncMock()
+
+
+@pytest.fixture
+def service(mock_conn, mock_repo, mock_audit_log):
+    """Создаёт AdminService с замоканными репозиториями."""
     mock_adapter = MagicMock()
     mock_adapter.get_table_name = lambda name: name
     mock_adapter.qualify_table_name = lambda name, schema="": name
@@ -30,7 +38,46 @@ def service(mock_conn, mock_repo):
     ):
         svc = AdminService(conn=mock_conn, settings=AdminSettings())
     svc.repo = mock_repo
+    svc.audit_log = mock_audit_log
     return svc
+
+
+# -------------------------------------------------------------------------
+# assign_role — аудит-лог
+# -------------------------------------------------------------------------
+
+
+class TestAssignRoleAudit:
+
+    async def test_logs_on_assign(self, service, mock_repo, mock_audit_log):
+        """При назначении роли пишется запись в аудит-лог."""
+        mock_repo.get_role_by_id.return_value = {
+            "id": 2, "name": "ЦК Фин.Рез.", "domain_name": "ck_fin_res", "description": "",
+        }
+        mock_repo.get_user_from_directory.return_value = {"username": "12345"}
+        mock_repo.assign_role.return_value = True
+
+        await service.assign_role("12345", 2, "admin_user")
+
+        mock_audit_log.log.assert_called_once_with(
+            action="assign_role",
+            target_username="12345",
+            admin_username="admin_user",
+            role_id=2,
+            role_name="ЦК Фин.Рез.",
+        )
+
+    async def test_no_log_when_already_assigned(self, service, mock_repo, mock_audit_log):
+        """Если роль уже назначена — аудит-лог не пишется."""
+        mock_repo.get_role_by_id.return_value = {
+            "id": 2, "name": "ЦК Фин.Рез.", "domain_name": "ck_fin_res", "description": "",
+        }
+        mock_repo.get_user_from_directory.return_value = {"username": "12345"}
+        mock_repo.assign_role.return_value = False
+
+        await service.assign_role("12345", 2, "admin_user")
+
+        mock_audit_log.log.assert_not_called()
 
 
 # -------------------------------------------------------------------------
@@ -40,7 +87,7 @@ def service(mock_conn, mock_repo):
 
 class TestRemoveRoleLastAdmin:
 
-    async def test_blocks_last_admin_removal(self, service, mock_repo):
+    async def test_blocks_last_admin_removal(self, service, mock_repo, mock_audit_log):
         """Нельзя снять роль Админ, если это последний администратор."""
         mock_repo.get_role_by_id.return_value = {
             "id": 1, "name": "Админ", "domain_name": None, "description": "",
@@ -51,6 +98,7 @@ class TestRemoveRoleLastAdmin:
             await service.remove_role("12345", 1, "admin_user")
 
         mock_repo.remove_role.assert_not_called()
+        mock_audit_log.log.assert_not_called()
 
     async def test_allows_removal_with_multiple_admins(self, service, mock_repo):
         """Можно снять роль Админ, если администраторов больше одного."""
@@ -86,36 +134,37 @@ class TestRemoveRoleLastAdmin:
 
 
 # -------------------------------------------------------------------------
-# remove_role — аудит-логирование
+# remove_role — аудит-лог
 # -------------------------------------------------------------------------
 
 
-class TestRemoveRoleAuditLog:
+class TestRemoveRoleAudit:
 
-    async def test_logs_removed_by(self, service, mock_repo):
-        """Лог содержит информацию о том, кто снял роль."""
+    async def test_logs_on_remove(self, service, mock_repo, mock_audit_log):
+        """При снятии роли пишется запись в аудит-лог."""
         mock_repo.get_role_by_id.return_value = {
             "id": 2, "name": "ЦК Фин.Рез.", "domain_name": "ck_fin_res", "description": "",
         }
         mock_repo.remove_role.return_value = True
 
-        with patch("app.domains.admin.services.admin_service.logger") as mock_logger:
-            await service.remove_role("12345", 2, "admin_user")
+        await service.remove_role("12345", 2, "admin_user")
 
-            mock_logger.info.assert_called_once()
-            call_args = mock_logger.info.call_args[0]
-            assert "admin_user" in call_args
-            assert "12345" in call_args
+        mock_audit_log.log.assert_called_once_with(
+            action="remove_role",
+            target_username="12345",
+            admin_username="admin_user",
+            role_id=2,
+            role_name="ЦК Фин.Рез.",
+        )
 
-    async def test_no_log_when_not_removed(self, service, mock_repo):
-        """Если роль не была назначена — лог не пишется."""
+    async def test_no_log_when_not_removed(self, service, mock_repo, mock_audit_log):
+        """Если роль не была назначена — аудит-лог не пишется."""
         mock_repo.get_role_by_id.return_value = {
             "id": 2, "name": "ЦК Фин.Рез.", "domain_name": "ck_fin_res", "description": "",
         }
         mock_repo.remove_role.return_value = False
 
-        with patch("app.domains.admin.services.admin_service.logger") as mock_logger:
-            result = await service.remove_role("12345", 2, "admin_user")
+        result = await service.remove_role("12345", 2, "admin_user")
 
-            assert result is False
-            mock_logger.info.assert_not_called()
+        assert result is False
+        mock_audit_log.log.assert_not_called()

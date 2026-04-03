@@ -72,3 +72,35 @@ CREATE INDEX idx_{PREFIX}user_roles_role_id
 CREATE INDEX idx_{PREFIX}roles_domain_name
     ON {SCHEMA}.{PREFIX}roles(domain_name)
     WHERE domain_name IS NOT NULL;
+
+-- ============================================================================
+-- ТАБЛИЦА АУДИТ-ЛОГА АДМИНИСТРИРОВАНИЯ
+-- ============================================================================
+
+CREATE TABLE IF NOT EXISTS {SCHEMA}.{PREFIX}admin_audit_log (
+    id BIGSERIAL PRIMARY KEY,
+    action VARCHAR(50) NOT NULL,
+    target_username VARCHAR(50) NOT NULL,
+    admin_username VARCHAR(50) NOT NULL,
+    role_id BIGINT,
+    role_name VARCHAR(100) NOT NULL DEFAULT '',
+    details TEXT NOT NULL DEFAULT '',
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+)
+WITH (appendonly=false)
+DISTRIBUTED BY (id);
+
+COMMENT ON TABLE {SCHEMA}.{PREFIX}admin_audit_log IS 'Аудит-лог операций администрирования ролей';
+COMMENT ON COLUMN {SCHEMA}.{PREFIX}admin_audit_log.action IS 'Тип операции (assign_role, remove_role)';
+COMMENT ON COLUMN {SCHEMA}.{PREFIX}admin_audit_log.target_username IS 'Пользователь, над которым выполнена операция';
+COMMENT ON COLUMN {SCHEMA}.{PREFIX}admin_audit_log.admin_username IS 'Администратор, выполнивший операцию';
+COMMENT ON COLUMN {SCHEMA}.{PREFIX}admin_audit_log.role_id IS 'ID роли';
+COMMENT ON COLUMN {SCHEMA}.{PREFIX}admin_audit_log.role_name IS 'Имя роли (денормализовано)';
+COMMENT ON COLUMN {SCHEMA}.{PREFIX}admin_audit_log.details IS 'Дополнительная информация';
+COMMENT ON COLUMN {SCHEMA}.{PREFIX}admin_audit_log.created_at IS 'Дата и время операции';
+
+CREATE INDEX idx_{PREFIX}admin_audit_log_target
+    ON {SCHEMA}.{PREFIX}admin_audit_log(target_username);
+
+CREATE INDEX idx_{PREFIX}admin_audit_log_created
+    ON {SCHEMA}.{PREFIX}admin_audit_log(created_at DESC);
