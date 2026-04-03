@@ -5,8 +5,7 @@ API эндпоинты для записей FR-валидации.
 на каждом эндпоинте через dependencies.
 """
 
-from fastapi import APIRouter, Depends
-from fastapi.responses import JSONResponse
+from fastapi import APIRouter, Depends, HTTPException
 
 from app.api.v1.deps.auth_deps import get_username
 from app.api.v1.deps.role_deps import require_domain_access
@@ -69,9 +68,9 @@ async def batch_update_records(
 ):
     """Пакетное обновление записей FR-валидации."""
     if len(body) > MAX_BATCH_SIZE:
-        return JSONResponse(
+        raise HTTPException(
             status_code=422,
-            content={"detail": f"Максимальный размер пакета: {MAX_BATCH_SIZE}"},
+            detail=f"Максимальный размер пакета: {MAX_BATCH_SIZE}",
         )
     items = [item.model_dump() for item in body]
     count = await service.batch_update_records(items, username)
