@@ -217,6 +217,31 @@ class TestBulkAssignRoles:
 
 
 # -------------------------------------------------------------------------
+# count_admins
+# -------------------------------------------------------------------------
+
+
+class TestCountAdmins:
+
+    async def test_returns_count(self, repo, mock_conn):
+        """Возвращает количество администраторов."""
+        mock_conn.fetchval.return_value = 3
+        result = await repo.count_admins()
+
+        assert result == 3
+        query = mock_conn.fetchval.call_args[0][0]
+        assert "JOIN" in query
+        assert mock_conn.fetchval.call_args[0][1] == "Админ"
+
+    async def test_zero_admins(self, repo, mock_conn):
+        """Возвращает 0, если администраторов нет."""
+        mock_conn.fetchval.return_value = 0
+        result = await repo.count_admins()
+
+        assert result == 0
+
+
+# -------------------------------------------------------------------------
 # count_user_roles
 # -------------------------------------------------------------------------
 

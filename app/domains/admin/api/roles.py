@@ -79,10 +79,11 @@ async def assign_role(
 async def remove_role(
     username: str,
     role_id: int,
+    admin_username: str = Depends(get_username),
     service: AdminService = Depends(get_admin_service),
 ):
     """Снимает роль с пользователя."""
-    removed = await service.remove_role(username, role_id)
+    removed = await service.remove_role(username, role_id, admin_username)
     if removed:
         invalidate_roles_cache(username)
     return {

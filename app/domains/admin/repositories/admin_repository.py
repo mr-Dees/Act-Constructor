@@ -125,6 +125,17 @@ class AdminRepository(BaseRepository):
         )
         return result == "DELETE 1"
 
+    async def count_admins(self) -> int:
+        """Возвращает количество пользователей с ролью 'Админ'."""
+        return await self.conn.fetchval(
+            f"""
+            SELECT COUNT(*) FROM {self.user_roles} ur
+            JOIN {self.roles} r ON r.id = ur.role_id
+            WHERE r.name = $1
+            """,
+            "Админ",
+        )
+
     async def count_user_roles(self) -> int:
         """Возвращает общее количество записей в user_roles."""
         return await self.conn.fetchval(

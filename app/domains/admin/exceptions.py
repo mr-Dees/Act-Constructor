@@ -16,3 +16,8 @@ class RoleNotFoundError(AppError):
 class AdminAccessDeniedError(AppError):
     """Пользователь не является администратором."""
     status_code = 403
+
+
+class LastAdminError(AppError):
+    """Нельзя снять роль — последний администратор системы."""
+    status_code = 409

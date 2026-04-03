@@ -4,7 +4,7 @@ import logging
 
 import asyncpg
 
-from app.domains.admin.exceptions import RoleNotFoundError, UserNotFoundError
+from app.domains.admin.exceptions import LastAdminError, RoleNotFoundError, UserNotFoundError
 from app.domains.admin.repositories.admin_repository import AdminRepository
 from app.domains.admin.settings import AdminSettings
 
@@ -59,15 +59,31 @@ class AdminService:
             )
         return assigned
 
-    async def remove_role(self, username: str, role_id: int) -> bool:
-        """Снимает роль с пользователя."""
+    async def remove_role(self, username: str, role_id: int, removed_by: str) -> bool:
+        """
+        Снимает роль с пользователя.
+
+        Raises:
+            RoleNotFoundError: если роль не существует.
+            LastAdminError: если это последний администратор системы.
+        """
         role = await self.repo.get_role_by_id(role_id)
         if not role:
             raise RoleNotFoundError(f"Роль с id={role_id} не найдена")
 
+        if role["name"] == "Админ":
+            admin_count = await self.repo.count_admins()
+            if admin_count <= 1:
+                raise LastAdminError(
+                    "Нельзя снять роль — это последний администратор системы"
+                )
+
         removed = await self.repo.remove_role(username, role_id)
         if removed:
-            logger.info("Роль '%s' снята с пользователя %s", role["name"], username)
+            logger.info(
+                "Роль '%s' снята с пользователя %s (снял: %s)",
+                role["name"], username, removed_by,
+            )
         return removed
 
     async def get_user_directory(self) -> list[dict]:
