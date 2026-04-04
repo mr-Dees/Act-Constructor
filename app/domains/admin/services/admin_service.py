@@ -47,10 +47,12 @@ class AdminService:
         """
         role = await self.repo.get_role_by_id(role_id)
         if not role:
+            logger.warning("Попытка назначить несуществующую роль id=%s", role_id)
             raise RoleNotFoundError(f"Роль с id={role_id} не найдена")
 
         user = await self.repo.get_user_from_directory(username)
         if not user:
+            logger.warning("Пользователь %s не найден в справочнике при назначении роли", username)
             raise UserNotFoundError(f"Пользователь {username} не найден в справочнике")
 
         assigned = await self.repo.assign_role(username, role_id, assigned_by)
@@ -74,11 +76,16 @@ class AdminService:
         """
         role = await self.repo.get_role_by_id(role_id)
         if not role:
+            logger.warning("Попытка снять несуществующую роль id=%s", role_id)
             raise RoleNotFoundError(f"Роль с id={role_id} не найдена")
 
         if role["name"] == "Админ":
             admin_count = await self.repo.count_admins()
             if admin_count <= 1:
+                logger.warning(
+                    "Попытка снять роль Админ с %s — последний администратор (снимает %s)",
+                    username, removed_by,
+                )
                 raise LastAdminError(
                     "Нельзя снять роль — это последний администратор системы"
                 )

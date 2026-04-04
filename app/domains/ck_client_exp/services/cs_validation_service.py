@@ -78,6 +78,7 @@ class CSValidationService:
         """
         record = await self.cs_repo.get_by_id(record_id)
         if record is None:
+            logger.warning("Запись CS-валидации id=%s не найдена", record_id)
             raise CSRecordNotFoundError(f"Запись CS-валидации id={record_id} не найдена")
         return record
 
@@ -110,6 +111,7 @@ class CSValidationService:
         """
         deleted = await self.cs_repo.soft_delete(record_id, username)
         if not deleted:
+            logger.warning("Запись CS-валидации id=%s не найдена при удалении", record_id)
             raise CSRecordNotFoundError(f"Запись CS-валидации id={record_id} не найдена")
         return deleted
 
