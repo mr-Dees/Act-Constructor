@@ -30,6 +30,7 @@ class DictionaryRepository(BaseRepository):
         self.channel_dict = q(s.channel_dict)
         self.product_dict = q(s.product_dict)
         self.team_dict = q(s.team_dict)
+        logger.debug("DictionaryRepository инициализирован, схема: %s", s.schema_name)
 
     async def get_processes(self) -> list[dict]:
         """Возвращает список актуальных процессов."""
@@ -91,6 +92,7 @@ class DictionaryRepository(BaseRepository):
             LIMIT 5000
             """
         )
+        logger.debug("Загружено подразделений: %s", len(rows))
         return [dict(r) for r in rows]
 
     async def get_channels(self) -> list[dict]:

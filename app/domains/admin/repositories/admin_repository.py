@@ -115,6 +115,7 @@ class AdminRepository(BaseRepository):
                 )
                 return True
             except asyncpg.UniqueViolationError:
+                logger.debug("Роль role_id=%s уже назначена пользователю %s (race condition)", role_id, username)
                 return False
 
     async def remove_role(self, username: str, role_id: int) -> bool:
@@ -159,6 +160,7 @@ class AdminRepository(BaseRepository):
             for username, role_id, assigned_by in assignments:
                 if await self.assign_role(username, role_id, assigned_by):
                     count += 1
+        logger.info("Массовое назначение ролей: %s из %s успешно", count, len(assignments))
         return count
 
     async def get_users_with_roles(self, branch: str) -> list[dict]:
