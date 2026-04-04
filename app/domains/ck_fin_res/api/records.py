@@ -5,7 +5,11 @@ API эндпоинты для записей FR-валидации.
 на каждом эндпоинте через dependencies.
 """
 
+import logging
+
 from fastapi import APIRouter, Depends, HTTPException
+
+logger = logging.getLogger("audit_workstation.api.ck_fin_res.records")
 
 from app.api.v1.deps.auth_deps import get_username
 from app.api.v1.deps.role_deps import require_domain_access
@@ -57,7 +61,9 @@ async def create_record(
     service: FRValidationService = Depends(get_fr_validation_service),
 ):
     """Создаёт новую запись FR-валидации."""
-    return await service.create_record(body.model_dump(), username)
+    result = await service.create_record(body.model_dump(), username)
+    logger.info("Создана запись FR-валидации пользователем %s", username)
+    return result
 
 
 @router.post("/records/batch-update", dependencies=[_access])
@@ -74,6 +80,7 @@ async def batch_update_records(
         )
     items = [item.model_dump() for item in body]
     count = await service.batch_update_records(items, username)
+    logger.info("Пакетное обновление FR-валидации: %s записей, пользователь %s", count, username)
     return {"updated": count}
 
 
@@ -85,3 +92,4 @@ async def delete_record(
 ):
     """Мягкое удаление записи FR-валидации."""
     await service.delete_record(record_id, username)
+    logger.info("Удалена запись FR-валидации id=%s пользователем %s", record_id, username)

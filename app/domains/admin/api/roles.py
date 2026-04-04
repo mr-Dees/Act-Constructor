@@ -5,7 +5,11 @@ API эндпоинты для администрирования ролей.
 и на уровне include_router (domain_registry), и на каждом эндпоинте.
 """
 
+import logging
+
 from fastapi import APIRouter, Depends, Query
+
+logger = logging.getLogger("audit_workstation.api.admin.roles")
 
 from app.api.v1.deps.auth_deps import get_username
 from app.api.v1.deps.role_deps import invalidate_roles_cache, require_admin
@@ -70,6 +74,7 @@ async def assign_role(
     assigned = await service.assign_role(username, body.role_id, admin_username)
     if assigned:
         invalidate_roles_cache(username)
+        logger.info("Роль id=%s назначена пользователю %s админом %s", body.role_id, username, admin_username)
     return {
         "assigned": assigned,
         "detail": "Роль назначена" if assigned else "Роль уже назначена",
@@ -87,6 +92,7 @@ async def remove_role(
     removed = await service.remove_role(username, role_id, admin_username)
     if removed:
         invalidate_roles_cache(username)
+        logger.info("Роль id=%s снята с пользователя %s админом %s", role_id, username, admin_username)
     return {
         "removed": removed,
         "detail": "Роль снята" if removed else "Роль не была назначена",
