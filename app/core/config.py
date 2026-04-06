@@ -157,25 +157,6 @@ class SecuritySettings(BaseModel):
     rate_limit_ttl: int = 120
 
 
-class ChatSettings(BaseModel):
-    """Настройки AI-чата (OpenAI-совместимый API)."""
-    model: str = "gpt-4o"
-    api_base: str = ""
-    api_key: SecretStr = SecretStr("")
-    max_tool_rounds: int = 5
-    temperature: float = 0.1
-    tool_execution_timeout: int = 30
-    system_prompt: str = (
-        "Ты — AI-ассистент рабочей станции аудитора Audit Workstation. "
-        "Отвечай на русском языке. Используй доступные инструменты "
-        "для поиска, анализа и работы с данными."
-    )
-    max_history_length: int = 50
-    max_message_content_length: int = 10000
-    max_context_keys: int = 20
-    max_context_value_length: int = 1000
-
-
 class Settings(BaseSettings):
     """
     Класс настроек приложения на основе Pydantic.
@@ -201,8 +182,6 @@ class Settings(BaseSettings):
     server: ServerSettings = ServerSettings()
     database: DatabaseSettings = DatabaseSettings()
     security: SecuritySettings = SecuritySettings()
-    chat: ChatSettings = ChatSettings()
-
     # Базовая директория проекта.
     # Относительный путь от конфига до корня проекта.
     base_dir: ClassVar[Path] = Path(__file__).resolve().parent.parent.parent

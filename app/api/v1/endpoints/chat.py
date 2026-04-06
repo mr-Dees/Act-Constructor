@@ -18,7 +18,8 @@ from fastapi import APIRouter, Depends
 
 from app.api.v1.deps.auth_deps import get_username
 from app.core.chat.tools import get_all_tools, get_openai_tools, get_tool, get_tools_by_domain
-from app.core.config import get_settings
+from app.core.settings_registry import get as get_domain_settings
+from app.domains.chat.settings import ChatDomainSettings
 from app.schemas.chat import ChatRequest, ChatResponse
 from app.schemas.errors import ErrorDetail
 
@@ -69,8 +70,8 @@ async def _execute_tool_call(tool_name: str, arguments: dict) -> str:
             converted_args[key] = _convert_param(value, param_types[key])
 
     try:
-        settings = get_settings()
-        timeout = settings.chat.tool_execution_timeout
+        chat_settings = get_domain_settings("chat", ChatDomainSettings)
+        timeout = chat_settings.tool_execution_timeout
         result = await asyncio.wait_for(
             chat_tool.handler(**converted_args),
             timeout=timeout,
@@ -130,30 +131,30 @@ async def send_message(
     Если настроен OpenAI-совместимый API (CHAT__API_BASE, CHAT__API_KEY),
     выполняет agent loop с function-calling. Иначе — fallback-заглушка.
     """
-    settings = get_settings()
+    chat_settings = get_domain_settings("chat", ChatDomainSettings)
     logger.info("Сообщение чата от %s: %s", username, request.message[:100])
 
-    # Валидация context по лимитам из конфига
+    # Валидация context: лимиты безопасности (защита от переполнения)
+    _max_context_keys = 20
+    _max_context_value_length = 1000
     if request.context:
-        max_keys = settings.chat.max_context_keys
-        max_val_len = settings.chat.max_context_value_length
-        if len(request.context) > max_keys:
-            request.context = dict(list(request.context.items())[:max_keys])
+        if len(request.context) > _max_context_keys:
+            request.context = dict(list(request.context.items())[:_max_context_keys])
         # Санитизация ключей и значений: убираем угловые скобки для защиты от XML breakout
         def _sanitize(s: str, max_len: int) -> str:
             return s.replace("<", "").replace(">", "").replace("\n", " ")[:max_len]
 
         request.context = {
-            _sanitize(str(k), 100): _sanitize(str(v), max_val_len)
+            _sanitize(str(k), 100): _sanitize(str(v), _max_context_value_length)
             for k, v in request.context.items()
         }
 
     # Валидация history по лимитам из конфига
-    if len(request.history) > settings.chat.max_history_length:
-        request.history = request.history[-settings.chat.max_history_length:]
+    if len(request.history) > chat_settings.max_history_length:
+        request.history = request.history[-chat_settings.max_history_length:]
 
     # Fallback: если API не настроен
-    if not settings.chat.api_base or not settings.chat.api_key.get_secret_value():
+    if not chat_settings.api_base or not chat_settings.api_key.get_secret_value():
         fallback = _fallback_response(request)
         await _log_chat_audit(
             username=username, act_id=request.act_id,
@@ -174,7 +175,7 @@ async def send_message(
         )
         return fallback
 
-    client = _get_openai_client(settings.chat.api_base, settings.chat.api_key.get_secret_value())
+    client = _get_openai_client(chat_settings.api_base, chat_settings.api_key.get_secret_value())
 
     # Сбор tools: фильтрация по доменам или все
     if request.domains:
@@ -195,24 +196,24 @@ async def send_message(
                 domain_descriptors.append(d)
 
     # Построение messages
-    messages = _build_messages(settings, request, domain_descriptors)
+    messages = _build_messages(chat_settings, request, domain_descriptors)
 
     sources: list[str] = []
     audit_tool_calls: list[dict] = []
 
     try:
         response = await client.chat.completions.create(
-            model=settings.chat.model,
+            model=chat_settings.model,
             messages=messages,
             tools=tools if tools else NOT_GIVEN,
-            temperature=settings.chat.temperature,
+            temperature=chat_settings.temperature,
         )
 
         # Agent loop: выполнение tool calls
         rounds = 0
         while (
             response.choices[0].message.tool_calls
-            and rounds < settings.chat.max_tool_rounds
+            and rounds < chat_settings.max_tool_rounds
         ):
             rounds += 1
             assistant_msg = response.choices[0].message
@@ -250,10 +251,10 @@ async def send_message(
 
             # Следующий вызов LLM
             response = await client.chat.completions.create(
-                model=settings.chat.model,
+                model=chat_settings.model,
                 messages=messages,
                 tools=tools if tools else NOT_GIVEN,
-                temperature=settings.chat.temperature,
+                temperature=chat_settings.temperature,
             )
 
         answer = response.choices[0].message.content or ""
@@ -295,14 +296,14 @@ async def send_message(
 
 
 def _build_messages(
-    settings,
+    chat_settings: ChatDomainSettings,
     request: ChatRequest,
     domain_descriptors: list | None = None,
 ) -> list[dict]:
     """Формирует список messages для OpenAI API."""
     # TODO: использовать request.knowledge_bases для расширения system prompt
     # (например, подключение RAG-контекста из выбранных баз знаний)
-    base_prompt = settings.chat.system_prompt
+    base_prompt = chat_settings.system_prompt
     if domain_descriptors:
         domain_prompts = [
             d.chat_system_prompt

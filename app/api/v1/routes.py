@@ -1,13 +1,13 @@
 """
 Главный роутер для API версии 1.
 
-Содержит только shared эндпоинты (auth, chat, system).
+Содержит только shared эндпоинты (auth, system).
 Доменные эндпоинты регистрируются через domain_registry.
 """
 
 from fastapi import APIRouter
 
-from app.api.v1.endpoints import auth, chat, roles, system
+from app.api.v1.endpoints import auth, roles, system
 
 # Создание главного роутера для API v1
 api_router = APIRouter()
@@ -16,7 +16,6 @@ api_router = APIRouter()
 ROUTERS = [
     (auth, "/auth", ["Авторизация"]),
     (system, "/system", ["Системные операции"]),
-    (chat, "/chat", ["AI-ассистент"]),
     (roles, "/roles", ["Роли пользователей"]),
 ]
 
