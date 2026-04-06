@@ -101,6 +101,23 @@ class TestGreenplumSchemaCompatibility:
             + "\n".join(violations)
         )
 
+    def test_no_on_delete_cascade(self, gp_schema_files):
+        """ON DELETE CASCADE / ON DELETE SET NULL на REFERENCES не поддерживается в GP 6."""
+        pattern = re.compile(r'ON\s+DELETE\s+(CASCADE|SET\s+NULL)', re.IGNORECASE)
+        violations = self._find_violations(gp_schema_files, pattern)
+        assert not violations, (
+            f"ON DELETE CASCADE/SET NULL не поддерживается в GP 6:\n"
+            + "\n".join(violations)
+        )
+
+    def test_chat_domain_migration_discovered(self, gp_schema_files):
+        """GP-миграция домена chat обнаруживается автоматически."""
+        domain_names = {s.parent.parent.parent.name for s in gp_schema_files}
+        assert "chat" in domain_names, (
+            f"Миграция chat не найдена среди GP-схем. "
+            f"Обнаруженные домены: {sorted(domain_names)}"
+        )
+
 
 # ---------------------------------------------------------------------------
 # 2. SQL Statement Splitter (_split_sql_statements)
