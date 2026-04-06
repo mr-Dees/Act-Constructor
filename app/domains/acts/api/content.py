@@ -4,7 +4,11 @@ API эндпоинты для работы с содержимым актов.
 Тонкие обёртки — вся логика в ActContentService.
 """
 
+import logging
+
 from fastapi import APIRouter, Depends
+
+logger = logging.getLogger("audit_workstation.api.acts.content")
 
 from app.api.v1.deps.auth_deps import get_username
 from app.schemas.errors import ErrorDetail
@@ -50,7 +54,9 @@ async def save_act_content(
     service: ActContentService = Depends(get_content_service),
 ) -> dict:
     """Сохраняет содержимое акта."""
-    return await service.save_content(act_id, data, username)
+    result = await service.save_content(act_id, data, username)
+    logger.info("Сохранено содержимое акта id=%s пользователем %s", act_id, username)
+    return result
 
 
 @router.get(

@@ -4,7 +4,11 @@ API эндпоинты для управления актами.
 Тонкие обёртки — вся логика в сервисах.
 """
 
+import logging
+
 from fastapi import APIRouter, Depends
+
+logger = logging.getLogger("audit_workstation.api.acts.management")
 
 from app.api.v1.deps.auth_deps import get_username
 from app.domains.acts.deps import get_crud_service, get_lock_service, _get_acts_settings
@@ -70,7 +74,9 @@ async def create_act(
         service: ActCrudService = Depends(get_crud_service),
 ):
     """Создает новый акт с метаданными и связанными сущностями."""
-    return await service.create_act(act_data, username, force_new_part)
+    result = await service.create_act(act_data, username, force_new_part)
+    logger.info("Создан акт id=%s пользователем %s", result["id"], username)
+    return result
 
 
 @router.get("/config/lock", response_model=LockConfigResponse)
@@ -116,7 +122,9 @@ async def update_act_metadata(
         service: ActCrudService = Depends(get_crud_service),
 ):
     """Обновляет метаданные акта (частичное обновление)."""
-    return await service.update_act_metadata(act_id, act_update, username)
+    result = await service.update_act_metadata(act_id, act_update, username)
+    logger.info("Обновлены метаданные акта id=%s пользователем %s", act_id, username)
+    return result
 
 
 @router.post("/{act_id}/duplicate", response_model=ActResponse, responses={403: {"description": "Нет доступа к акту", "model": ErrorDetail}, 404: {"description": "Акт не найден", "model": ErrorDetail}})
@@ -126,7 +134,9 @@ async def duplicate_act(
         service: ActCrudService = Depends(get_crud_service),
 ):
     """Создает дубликат акта."""
-    return await service.duplicate_act(act_id, username)
+    result = await service.duplicate_act(act_id, username)
+    logger.info("Дублирован акт id=%s → id=%s пользователем %s", act_id, result["id"], username)
+    return result
 
 
 @router.post("/{act_id}/audit-point-ids", response_model=dict[str, str], responses={403: {"description": "Нет доступа к акту", "model": ErrorDetail}, 404: {"description": "Акт не найден", "model": ErrorDetail}})
@@ -147,4 +157,6 @@ async def delete_act(
         service: ActCrudService = Depends(get_crud_service),
 ):
     """Удаляет акт и все связанные данные."""
-    return await service.delete_act(act_id, username)
+    result = await service.delete_act(act_id, username)
+    logger.info("Удалён акт id=%s пользователем %s", act_id, username)
+    return result

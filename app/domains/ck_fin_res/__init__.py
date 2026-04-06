@@ -1,4 +1,4 @@
-"""Домен ЦК Фин.Рез. (заглушка)."""
+"""Домен ЦК Фин.Рез."""
 
 DOMAIN_NAME = "ck_fin_res"
 
@@ -6,11 +6,16 @@ DOMAIN_NAME = "ck_fin_res"
 def _build_domain():
     """Ленивое построение DomainDescriptor."""
     from app.core.domain import DomainDescriptor, NavItem
+    from app.domains.ck_fin_res.api import get_api_routers
     from app.domains.ck_fin_res.routes import get_html_routers
+    from app.domains.ck_fin_res.settings import CkFinResSettings
 
     return DomainDescriptor(
         name=DOMAIN_NAME,
+        api_routers=get_api_routers(),
         html_routers=get_html_routers(),
+        settings_class=CkFinResSettings,
+        dependencies=["admin", "ua_data"],
         nav_items=[
             NavItem(
                 label="ЦК Фин.Рез.",

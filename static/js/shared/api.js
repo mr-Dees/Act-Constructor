@@ -1035,6 +1035,112 @@ class APIClient {
         if (!response.ok) throw this._createError(response.status, 'Ошибка поиска пользователей');
         return response.json();
     }
+
+    // ========================================================================
+    // ЦК домены (Фин.Рез. / Клиентский опыт)
+    // ========================================================================
+
+    /**
+     * Поиск записей валидации ЦК.
+     * @param {string} prefix - 'ck-fin-res' или 'ck-client-exp'
+     * @param {Object} filters - {start_date?, end_date?, metric_code?, process_code?}
+     */
+    static async searchCkRecords(prefix, filters = {}) {
+        const username = AuthManager.getCurrentUser();
+        const response = await fetch(AppConfig.api.getUrl(`/api/v1/${prefix}/records/search`), {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+                'X-JupyterHub-User': username
+            },
+            body: JSON.stringify(filters)
+        });
+        if (!response.ok) await this._throwApiError(response);
+        const json = await response.json();
+        return json.data;
+    }
+
+    /**
+     * Получить запись по ID.
+     * @param {string} prefix - 'ck-fin-res' или 'ck-client-exp'
+     * @param {number} id
+     */
+    static async getCkRecord(prefix, id) {
+        const username = AuthManager.getCurrentUser();
+        const response = await fetch(AppConfig.api.getUrl(`/api/v1/${prefix}/records/${id}`), {
+            headers: { 'X-JupyterHub-User': username }
+        });
+        if (!response.ok) await this._throwApiError(response);
+        return response.json();
+    }
+
+    /**
+     * Создать новую запись.
+     * @param {string} prefix
+     * @param {Object} data
+     */
+    static async createCkRecord(prefix, data) {
+        const username = AuthManager.getCurrentUser();
+        const response = await fetch(AppConfig.api.getUrl(`/api/v1/${prefix}/records`), {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+                'X-JupyterHub-User': username
+            },
+            body: JSON.stringify(data)
+        });
+        if (!response.ok) await this._throwApiError(response);
+        return response.json();
+    }
+
+    /**
+     * Пакетное обновление записей.
+     * @param {string} prefix
+     * @param {Array} items - [{id, ...fields}]
+     */
+    static async updateCkRecords(prefix, items) {
+        const username = AuthManager.getCurrentUser();
+        const response = await fetch(AppConfig.api.getUrl(`/api/v1/${prefix}/records/batch-update`), {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+                'X-JupyterHub-User': username
+            },
+            body: JSON.stringify(items)
+        });
+        if (!response.ok) await this._throwApiError(response);
+        return response.json();
+    }
+
+    /**
+     * Мягкое удаление записи.
+     * @param {string} prefix
+     * @param {number} id
+     */
+    static async deleteCkRecord(prefix, id) {
+        const username = AuthManager.getCurrentUser();
+        const response = await fetch(AppConfig.api.getUrl(`/api/v1/${prefix}/records/${id}`), {
+            method: 'DELETE',
+            headers: { 'X-JupyterHub-User': username }
+        });
+        if (!response.ok) await this._throwApiError(response);
+        return response.json();
+    }
+
+    /**
+     * Получить данные справочника.
+     * @param {string} prefix
+     * @param {string} name - 'processes', 'terbanks', 'metrics', 'departments', 'channels', 'products', 'teams'
+     */
+    static async getCkDictionary(prefix, name) {
+        const username = AuthManager.getCurrentUser();
+        const response = await fetch(AppConfig.api.getUrl(`/api/v1/${prefix}/dictionaries/${name}`), {
+            headers: { 'X-JupyterHub-User': username }
+        });
+        if (!response.ok) await this._throwApiError(response);
+        const json = await response.json();
+        return json.data;
+    }
 }
 
 // Глобальный доступ

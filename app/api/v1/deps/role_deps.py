@@ -8,6 +8,7 @@
 import logging
 from typing import Callable
 
+import asyncpg
 from cachetools import TTLCache
 from fastapi import Depends, HTTPException
 
@@ -88,7 +89,7 @@ async def _auto_assign_default_role(conn, username, roles_table, user_roles_tabl
                 """,
                 username, role_id,
             )
-        except Exception:
+        except asyncpg.UniqueViolationError:
             pass  # Already assigned by concurrent request
 
     logger.info(f"Auto-assign: роль 'Цифровой акт' назначена пользователю {username}")

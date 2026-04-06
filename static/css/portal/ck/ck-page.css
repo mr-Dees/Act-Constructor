@@ -1,0 +1,151 @@
+/* Layout ЦК-страниц: 4 горизонтальные полосы */
+
+.ck-page {
+    display: flex;
+    flex-direction: column;
+    height: calc(100vh - 64px); /* минус topbar портала */
+    background: var(--bg-secondary);
+}
+
+/* 1. Toolbar */
+.ck-toolbar {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 12px 16px;
+    background: var(--bg-primary);
+    border-bottom: 1px solid var(--border);
+    flex-shrink: 0;
+}
+
+.ck-toolbar__user {
+    margin-left: auto;
+    font-size: 12px;
+    color: var(--text-secondary);
+}
+
+.ck-toolbar__user b {
+    color: var(--text-primary);
+}
+
+/* 2. Sub-header */
+.ck-subheader {
+    display: flex;
+    align-items: center;
+    height: 48px;
+    border-bottom: 1px solid var(--border);
+    background: var(--bg-primary);
+    flex-shrink: 0;
+}
+
+.ck-subheader__left {
+    flex: 1;
+    padding: 0 12px;
+    border-right: 2px solid var(--gray-200);
+    height: 100%;
+    display: flex;
+    align-items: center;
+}
+
+.ck-subheader__right {
+    width: 400px;
+    flex-shrink: 0;
+    padding: 0 16px;
+    height: 100%;
+    display: flex;
+    align-items: center;
+    gap: 12px;
+}
+
+.ck-subheader__record-title {
+    font-size: 14px;
+    font-weight: 600;
+    color: var(--text-primary);
+    white-space: nowrap;
+}
+
+.ck-subheader__record-meta {
+    font-size: 11px;
+    color: var(--text-secondary);
+    white-space: nowrap;
+}
+
+.ck-search-input {
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    padding: 6px 12px;
+    font-size: 13px;
+    color: var(--text-primary);
+    background: var(--bg-primary);
+    flex: 1;
+    outline: none;
+}
+
+.ck-search-input::placeholder {
+    color: var(--text-tertiary);
+}
+
+.ck-search-input:focus {
+    border-color: var(--primary);
+    box-shadow: var(--input-focus-shadow);
+}
+
+/* 3. Content area */
+.ck-content {
+    display: flex;
+    flex: 1;
+    min-height: 0;
+}
+
+.ck-content__table-panel {
+    flex: 1;
+    min-width: 0;
+    border-right: 2px solid var(--gray-200);
+    display: flex;
+    flex-direction: column;
+    background: var(--bg-primary);
+}
+
+.ck-content__form-panel {
+    width: 400px;
+    flex-shrink: 0;
+    overflow-y: auto;
+    background: var(--bg-primary);
+    padding: 16px;
+}
+
+/* 4. Footer */
+.ck-footer {
+    display: flex;
+    align-items: center;
+    height: 42px;
+    border-top: 1px solid var(--border);
+    background: var(--bg-secondary);
+    flex-shrink: 0;
+}
+
+.ck-footer__left {
+    flex: 1;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 0 12px;
+    font-size: 12px;
+    color: var(--text-secondary);
+    border-right: 2px solid var(--gray-200);
+    height: 100%;
+}
+
+.ck-footer__left b {
+    color: var(--text-primary);
+}
+
+.ck-footer__right {
+    width: 400px;
+    flex-shrink: 0;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 0 16px;
+    height: 100%;
+}

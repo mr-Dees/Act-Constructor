@@ -22,6 +22,7 @@ def mock_repo():
 def service(mock_conn, settings, mock_repo):
     mock_adapter = MagicMock()
     mock_adapter.get_table_name = lambda name: name
+    mock_adapter.qualify_table_name = lambda name, schema="": name
     with patch("app.db.repositories.base.get_adapter", return_value=mock_adapter):
         svc = AdminService(conn=mock_conn, settings=settings)
     svc.repo = mock_repo

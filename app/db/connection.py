@@ -122,7 +122,7 @@ async def init_db(settings: Settings) -> None:
                 port=settings.database.port,
                 database=settings.database.name,
                 user=settings.database.user,
-                password=settings.database.password,
+                password=settings.database.password.get_secret_value(),
             )
 
             logger.info(

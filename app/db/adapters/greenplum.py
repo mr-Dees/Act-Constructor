@@ -154,6 +154,14 @@ class GreenplumAdapter(DatabaseAdapter):
         """
         return f"{self.schema}.{self.table_prefix}{base_name}"
 
+    def qualify_table_name(self, full_name: str, schema: str = "") -> str:
+        """
+        Квалифицирует имя таблицы схемой без добавления префикса.
+
+        Пример: s_grnplm_ld_audit_da_project_4.t_db_oarb_ua_process_dict
+        """
+        return f"{schema or self.schema}.{full_name}"
+
     def get_serial_type(self) -> str:
         """Greenplum использует BIGSERIAL."""
         return "BIGSERIAL"

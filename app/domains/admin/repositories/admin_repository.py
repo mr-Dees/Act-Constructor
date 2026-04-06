@@ -7,7 +7,6 @@ import logging
 
 import asyncpg
 
-from app.db.adapters.greenplum import GreenplumAdapter
 from app.db.repositories.base import BaseRepository
 from app.domains.admin.settings import AdminSettings
 
@@ -26,15 +25,12 @@ class AdminRepository(BaseRepository):
 
     def _resolve_user_table(self) -> str:
         """
-        Возвращает имя таблицы справочника пользователей.
+        Возвращает квалифицированное имя таблицы справочника пользователей.
 
-        Для PostgreSQL: имя таблицы из настроек (без схемы).
-        Для GreenPlum: схема.таблица из настроек.
+        Использует qualify_table_name — единый механизм для всех адаптеров.
         """
         ud = self.settings.user_directory
-        if isinstance(self.adapter, GreenplumAdapter):
-            return f"{ud.schema_name}.{ud.table}"
-        return ud.table
+        return self.adapter.qualify_table_name(ud.table, ud.schema_name)
 
     # -------------------------------------------------------------------------
     # РОЛИ
@@ -119,6 +115,7 @@ class AdminRepository(BaseRepository):
                 )
                 return True
             except asyncpg.UniqueViolationError:
+                logger.debug("Роль role_id=%s уже назначена пользователю %s (race condition)", role_id, username)
                 return False
 
     async def remove_role(self, username: str, role_id: int) -> bool:
@@ -128,6 +125,17 @@ class AdminRepository(BaseRepository):
             username, role_id,
         )
         return result == "DELETE 1"
+
+    async def count_admins(self) -> int:
+        """Возвращает количество пользователей с ролью 'Админ'."""
+        return await self.conn.fetchval(
+            f"""
+            SELECT COUNT(*) FROM {self.user_roles} ur
+            JOIN {self.roles} r ON r.id = ur.role_id
+            WHERE r.name = $1
+            """,
+            "Админ",
+        )
 
     async def count_user_roles(self) -> int:
         """Возвращает общее количество записей в user_roles."""
@@ -148,9 +156,11 @@ class AdminRepository(BaseRepository):
             Количество назначенных ролей.
         """
         count = 0
-        for username, role_id, assigned_by in assignments:
-            if await self.assign_role(username, role_id, assigned_by):
-                count += 1
+        async with self.conn.transaction():
+            for username, role_id, assigned_by in assignments:
+                if await self.assign_role(username, role_id, assigned_by):
+                    count += 1
+        logger.info("Массовое назначение ролей: %s из %s успешно", count, len(assignments))
         return count
 
     async def get_users_with_roles(self, branch: str) -> list[dict]:

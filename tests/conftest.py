@@ -12,6 +12,14 @@ def mock_conn():
     conn.fetchval = AsyncMock()
     conn.fetch = AsyncMock()
     conn.execute = AsyncMock()
+    conn.executemany = AsyncMock()
+
+    # Mock менеджера транзакций
+    tx = AsyncMock()
+    tx.__aenter__ = AsyncMock(return_value=tx)
+    tx.__aexit__ = AsyncMock(return_value=False)
+    conn.transaction = MagicMock(return_value=tx)
+
     return conn
 
 
@@ -20,4 +28,6 @@ def mock_adapter():
     """Mock DatabaseAdapter для unit-тестов."""
     adapter = MagicMock()
     adapter.get_table_name = lambda name: name
+    adapter.qualify_table_name = lambda name, schema="": name
+    adapter.supports_on_conflict = MagicMock(return_value=True)
     return adapter

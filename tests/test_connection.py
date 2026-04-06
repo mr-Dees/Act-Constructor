@@ -40,7 +40,7 @@ def _make_settings(db_type="postgresql", jupyterhub_user="12345_user"):
     s.database.port = 5432
     s.database.name = "testdb"
     s.database.user = "testuser"
-    s.database.password = "secret"
+    s.database.password = MagicMock(get_secret_value=MagicMock(return_value="secret"))
     s.database.pool_min_size = 1
     s.database.pool_max_size = 5
     s.database.command_timeout = 30

@@ -4,7 +4,8 @@ import logging
 
 import asyncpg
 
-from app.domains.admin.exceptions import RoleNotFoundError, UserNotFoundError
+from app.domains.admin.exceptions import LastAdminError, RoleNotFoundError, UserNotFoundError
+from app.domains.admin.repositories.admin_audit_log import AdminAuditLogRepository
 from app.domains.admin.repositories.admin_repository import AdminRepository
 from app.domains.admin.settings import AdminSettings
 
@@ -20,6 +21,7 @@ class AdminService:
         self.conn = conn
         self.settings = settings
         self.repo = AdminRepository(conn, settings)
+        self.audit_log = AdminAuditLogRepository(conn)
 
     async def get_all_roles(self) -> list[dict]:
         """Возвращает все роли системы."""
@@ -45,30 +47,63 @@ class AdminService:
         """
         role = await self.repo.get_role_by_id(role_id)
         if not role:
+            logger.warning("Попытка назначить несуществующую роль id=%s", role_id)
             raise RoleNotFoundError(f"Роль с id={role_id} не найдена")
 
         user = await self.repo.get_user_from_directory(username)
         if not user:
+            logger.warning("Пользователь %s не найден в справочнике при назначении роли", username)
             raise UserNotFoundError(f"Пользователь {username} не найден в справочнике")
 
         assigned = await self.repo.assign_role(username, role_id, assigned_by)
         if assigned:
-            logger.info(
-                f"Роль '{role['name']}' назначена пользователю {username} "
-                f"(назначил: {assigned_by})"
+            await self.audit_log.log(
+                action="assign_role",
+                target_username=username,
+                admin_username=assigned_by,
+                role_id=role_id,
+                role_name=role["name"],
             )
         return assigned
 
-    async def remove_role(self, username: str, role_id: int) -> bool:
-        """Снимает роль с пользователя."""
+    async def remove_role(self, username: str, role_id: int, removed_by: str) -> bool:
+        """
+        Снимает роль с пользователя.
+
+        Raises:
+            RoleNotFoundError: если роль не существует.
+            LastAdminError: если это последний администратор системы.
+        """
         role = await self.repo.get_role_by_id(role_id)
         if not role:
+            logger.warning("Попытка снять несуществующую роль id=%s", role_id)
             raise RoleNotFoundError(f"Роль с id={role_id} не найдена")
+
+        if role["name"] == "Админ":
+            admin_count = await self.repo.count_admins()
+            if admin_count <= 1:
+                logger.warning(
+                    "Попытка снять роль Админ с %s — последний администратор (снимает %s)",
+                    username, removed_by,
+                )
+                raise LastAdminError(
+                    "Нельзя снять роль — это последний администратор системы"
+                )
 
         removed = await self.repo.remove_role(username, role_id)
         if removed:
-            logger.info(f"Роль '{role['name']}' снята с пользователя {username}")
+            await self.audit_log.log(
+                action="remove_role",
+                target_username=username,
+                admin_username=removed_by,
+                role_id=role_id,
+                role_name=role["name"],
+            )
         return removed
+
+    async def get_audit_log(self, **filters) -> tuple[list[dict], int]:
+        """Возвращает записи аудит-лога с фильтрацией."""
+        return await self.audit_log.get_log(**filters)
 
     async def get_user_directory(self) -> list[dict]:
         """Возвращает пользователей отдела + пользователей с ролями."""
@@ -87,8 +122,8 @@ class AdminService:
         count = await self.repo.count_user_roles()
         if count > 0:
             logger.info(
-                f"Таблица user_roles не пуста ({count} записей), "
-                f"начальное заполнение пропущено"
+                "Таблица user_roles не пуста (%s записей), начальное заполнение пропущено",
+                count,
             )
             return
 
@@ -105,8 +140,8 @@ class AdminService:
         usernames = await self.repo.get_users_from_directory(branch_filter)
         if not usernames:
             logger.warning(
-                f"Пользователи с branch='{branch_filter}' не найдены, "
-                f"заполнение пропущено"
+                "Пользователи с branch='%s' не найдены, заполнение пропущено",
+                branch_filter,
             )
             return
 
@@ -120,6 +155,6 @@ class AdminService:
 
         assigned_count = await self.repo.bulk_assign_roles(assignments)
         logger.info(
-            f"Начальное заполнение ролей: назначено {assigned_count} ролей "
-            f"для {len(usernames)} пользователей из '{branch_filter}'"
+            "Начальное заполнение ролей: назначено %s ролей для %s пользователей из '%s'",
+            assigned_count, len(usernames), branch_filter,
         )

@@ -1,5 +1,7 @@
 """Pydantic схемы для эндпоинтов администрирования."""
 
+from datetime import datetime
+
 from pydantic import BaseModel
 
 
@@ -40,3 +42,21 @@ class UserSearchResult(BaseModel):
 class RoleAssignRequest(BaseModel):
     """Запрос на назначение роли пользователю."""
     role_id: int
+
+
+class AuditLogEntry(BaseModel):
+    """Запись аудит-лога администрирования."""
+    id: int
+    action: str
+    target_username: str
+    admin_username: str
+    role_id: int | None = None
+    role_name: str = ""
+    details: str = ""
+    created_at: datetime
+
+
+class AuditLogResponse(BaseModel):
+    """Ответ со списком записей аудит-лога."""
+    items: list[AuditLogEntry]
+    total: int

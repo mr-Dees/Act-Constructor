@@ -4,9 +4,12 @@ API эндпоинты для работы с фактурами актов.
 Тонкие обёртки — вся логика в ActInvoiceService.
 """
 
+import logging
 from typing import Literal
 
 from fastapi import APIRouter, Depends
+
+logger = logging.getLogger("audit_workstation.api.acts.invoice")
 
 from app.api.v1.deps.auth_deps import get_username
 from app.schemas.errors import ErrorDetail
@@ -74,7 +77,9 @@ async def save_invoice(
     service: ActInvoiceService = Depends(get_invoice_service),
 ) -> dict:
     """Сохраняет фактуру (UPSERT по act_id + node_id)."""
-    return await service.save_invoice(data.model_dump(), username)
+    result = await service.save_invoice(data.model_dump(), username)
+    logger.info("Сохранена фактура для акта id=%s пользователем %s", data.act_id, username)
+    return result
 
 
 @router.post(

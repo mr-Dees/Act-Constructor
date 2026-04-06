@@ -1,6 +1,5 @@
 """Репозиторий поиска пользователей в справочнике."""
 
-from app.db.adapters.greenplum import GreenplumAdapter
 from app.db.repositories.base import BaseRepository
 from app.core.settings_registry import get as get_domain_settings
 from app.domains.admin.settings import AdminSettings
@@ -13,10 +12,7 @@ class ActUsersRepository(BaseRepository):
         super().__init__(conn)
         settings = get_domain_settings("admin", AdminSettings)
         ud = settings.user_directory
-        if isinstance(self.adapter, GreenplumAdapter):
-            self.user_table = f"{ud.schema_name}.{ud.table}"
-        else:
-            self.user_table = ud.table
+        self.user_table = self.adapter.qualify_table_name(ud.table, ud.schema_name)
 
     async def search_users(self, query: str, limit: int = 20) -> list[dict]:
         """Поиск по ФИО (ILIKE) или логину (LIKE)."""
