@@ -31,14 +31,14 @@ class CkClientExpConfig {
 
     static fields = [
         { key: 'metric_code', label: 'Метрика', type: 'dictionary', dict: 'metrics', required: true },
-        { key: 'neg_finder_tb_id', label: 'ТБ-находитель', type: 'dictionary', dict: 'terbanks' },
+        { key: 'neg_finder_tb_id', label: 'ТБ-инициаторы', type: 'dictionary', dict: 'terbanks' },
         { row: [
             { key: 'num_sz', label: '№ с/з', type: 'text', required: true },
             { key: 'dt_sz', label: 'Дата с/з', type: 'date', width: '140px' },
         ]},
         { row: [
             { key: 'metric_unic_clients', label: 'Уник. клиенты', type: 'number', min: 0 },
-            { key: 'metric_element_counts', label: 'Кол-во', type: 'number', min: 0, width: '70px' },
+            { key: 'metric_element_counts', label: 'Кол-во (шт.)', type: 'number', min: 0, width: '90px' },
         ]},
         { row: [
             { key: 'metric_amount_rubles', label: 'Сумма (руб.)', type: 'number', min: 0 },
