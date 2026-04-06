@@ -17,6 +17,12 @@ from app.core.chat.schemas import (
     parse_message_blocks,
     serialize_message_blocks,
 )
+from app.core.chat.buttons import (
+    get_action_handler,
+    get_all_action_handlers,
+    register_action_handler,
+    reset_action_handlers,
+)
 from app.core.chat.tools import (
     ChatTool,
     ChatToolParam,
