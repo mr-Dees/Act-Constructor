@@ -5,7 +5,7 @@
 ChatTool-обёртку с типизированными параметрами.
 """
 
-from app.core.chat_tools import ChatTool, ChatToolParam
+from app.core.chat.tools import ChatTool, ChatToolParam
 
 _DOMAIN = "acts"
 

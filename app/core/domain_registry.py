@@ -86,7 +86,7 @@ def discover_domains(domains_dir: Path) -> list[DomainDescriptor]:
 
         # Регистрация chat tools
         if descriptor.chat_tools:
-            from app.core.chat_tools import register_tools
+            from app.core.chat.tools import register_tools
             register_tools(descriptor.chat_tools)
             logger.info(
                 f"Chat tools домена {descriptor.name}: "

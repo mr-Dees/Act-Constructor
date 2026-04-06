@@ -17,7 +17,7 @@ from functools import lru_cache
 from fastapi import APIRouter, Depends
 
 from app.api.v1.deps.auth_deps import get_username
-from app.core.chat_tools import get_all_tools, get_openai_tools, get_tool, get_tools_by_domain
+from app.core.chat.tools import get_all_tools, get_openai_tools, get_tool, get_tools_by_domain
 from app.core.config import get_settings
 from app.schemas.chat import ChatRequest, ChatResponse
 from app.schemas.errors import ErrorDetail
