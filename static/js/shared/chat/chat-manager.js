@@ -276,7 +276,7 @@ class ChatManager {
 
             case 'block_delta': {
                 const block = this._streamingBlocks[event.data.index];
-                if (block) block.appendText(event.data.content);
+                if (block) block.appendText(event.data.delta || event.data.content || '');
                 break;
             }
 

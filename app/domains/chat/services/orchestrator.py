@@ -136,12 +136,12 @@ class Orchestrator:
                         continue
                     block_type = block.get("type", "")
                     if block_type == "text":
-                        text_parts.append(block.get("text", ""))
+                        text_parts.append(block.get("content", block.get("text", "")))
                     elif block_type == "reasoning":
-                        text_parts.append(block.get("text", ""))
+                        text_parts.append(block.get("content", block.get("text", "")))
                     elif block_type == "code":
                         lang = block.get("language", "")
-                        code = block.get("code", "")
+                        code = block.get("content", block.get("code", ""))
                         text_parts.append(f"```{lang}\n{code}\n```")
             elif isinstance(content_blocks, str):
                 text_parts.append(content_blocks)
@@ -288,7 +288,7 @@ class Orchestrator:
                 }
 
             # Сохраняем сообщение ассистента в БД
-            content_blocks = [{"type": "text", "text": answer}]
+            content_blocks = [{"type": "text", "content": answer}]
             await self.msg_service.save_assistant_message(
                 conversation_id=conversation_id,
                 content=content_blocks,
