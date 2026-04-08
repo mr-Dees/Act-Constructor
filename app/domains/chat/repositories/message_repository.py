@@ -17,6 +17,19 @@ class MessageRepository(BaseRepository):
         super().__init__(conn)
         self.table = self.adapter.get_table_name("chat_messages")
 
+    @staticmethod
+    def _parse_row(row: dict) -> dict:
+        """Парсит JSONB-поля из строк в Python-объекты."""
+        result = dict(row)
+        for key in ("content", "token_usage"):
+            val = result.get(key)
+            if isinstance(val, str):
+                try:
+                    result[key] = json.loads(val)
+                except json.JSONDecodeError:
+                    result[key] = None
+        return result
+
     async def create(
         self,
         *,
@@ -42,7 +55,7 @@ class MessageRepository(BaseRepository):
             model,
             json.dumps(token_usage, ensure_ascii=False) if token_usage else None,
         )
-        return dict(row)
+        return self._parse_row(row)
 
     async def get_by_conversation(
         self,
@@ -63,7 +76,7 @@ class MessageRepository(BaseRepository):
             limit,
             offset,
         )
-        return [dict(r) for r in rows]
+        return [self._parse_row(r) for r in rows]
 
     async def count_by_conversation(self, conversation_id: str) -> int:
         """Возвращает количество сообщений в беседе."""

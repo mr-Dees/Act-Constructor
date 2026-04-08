@@ -115,18 +115,31 @@ class ChatManager {
         const text = this._input.value.trim();
         if (!text) return;
 
+        // Собираем файлы до очистки UI
+        const files = [...this._pendingFiles];
+
         this._input.value = '';
         this._autoResizeInput();
-        this._addUserMessage(text);
-
         this._setProcessing(true);
-        this._showTypingIndicator();
 
         try {
+            // Создаём беседу ДО рендеринга сообщения, чтобы
+            // callback _onConversationSwitch не затёр DOM
             const conversationId = await this._ensureConversation();
-            const botContainer = this._addBotMessageStreaming();
-            const files = [...this._pendingFiles];
+
+            // Рендерим user-сообщение после создания беседы
+            if (files.length > 0) {
+                const fileBlocks = files.map(f => ({
+                    type: 'file', name: f.name, size: f.size,
+                }));
+                this._renderUserMessageWithFiles(text, fileBlocks);
+            } else {
+                this._addUserMessage(text);
+            }
             this._clearPendingFiles();
+
+            this._showTypingIndicator();
+            const botContainer = this._addBotMessageStreaming();
 
             await ChatStream.send(conversationId, text, files, {
                 domains: this._detectDomains(),
@@ -224,9 +237,14 @@ class ChatManager {
             return this._currentConversationId;
         }
 
-        // Создаём беседу через ChatHistory, если доступен
+        // Создаём беседу через ChatHistory, если доступен.
+        // Подавляем callback, чтобы _onConversationSwitch
+        // не очистил DOM с сообщениями.
         if (typeof ChatHistory !== 'undefined') {
+            const origCallback = ChatHistory.onConversationChange;
+            ChatHistory.onConversationChange = null;
             await ChatHistory.createConversation();
+            ChatHistory.onConversationChange = origCallback;
             this._currentConversationId = ChatHistory.getCurrentId();
         } else {
             // Fallback: создаём напрямую
@@ -355,6 +373,7 @@ class ChatManager {
      */
     static async _onConversationSwitch(conversationId) {
         this._currentConversationId = conversationId;
+        this._clearPendingFiles();
         this._messagesContainer.innerHTML = '';
 
         if (!conversationId) {
@@ -381,15 +400,24 @@ class ChatManager {
             const messages = await response.json();
 
             for (const msg of messages) {
+                const blocks = Array.isArray(msg.content) ? msg.content : [];
+
                 if (msg.role === 'user') {
-                    this._renderMessage('user', msg.content || '');
+                    // Извлекаем текст из блоков
+                    const textBlock = blocks.find(b => b.type === 'text');
+                    const text = textBlock
+                        ? (textBlock.content || textBlock.text || '')
+                        : '';
+
+                    // Рендерим user-сообщение с файлами, если есть
+                    const fileBlocks = blocks.filter(b => b.type === 'file');
+                    this._renderUserMessageWithFiles(text, fileBlocks);
                 } else if (msg.role === 'assistant') {
-                    // Рендерим блоки, если есть, иначе plain text
-                    if (msg.blocks && msg.blocks.length > 0) {
+                    if (blocks.length > 0) {
                         const container = this._addBotMessageStreaming();
-                        ChatRenderer.renderBlocks(container, msg.blocks);
+                        ChatRenderer.renderBlocks(container, blocks);
                     } else {
-                        this._renderMessage('bot', msg.content || '');
+                        this._renderMessage('bot', '');
                     }
                 }
             }
@@ -486,6 +514,49 @@ class ChatManager {
      */
     static _addUserMessage(text) {
         this._renderMessage('user', text);
+    }
+
+    /**
+     * Рендерит пользовательское сообщение с файлами (для загрузки истории)
+     * @param {string} text — текст сообщения
+     * @param {Array<Object>} fileBlocks — файловые блоки
+     * @private
+     */
+    static _renderUserMessageWithFiles(text, fileBlocks) {
+        const msg = document.createElement('div');
+        msg.className = 'chat-message chat-message-user';
+
+        const avatar = document.createElement('div');
+        avatar.className = 'chat-message-avatar';
+        avatar.innerHTML = `<svg width="20" height="20" viewBox="0 0 24 24" fill="none">
+            <path d="M20 21v-2a4 4 0 00-4-4H8a4 4 0 00-4 4v2M12 11a4 4 0 100-8 4 4 0 000 8z"
+                  stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+        </svg>`;
+
+        const content = document.createElement('div');
+        content.className = 'chat-message-content';
+
+        if (text) {
+            const lines = text.split('\n');
+            for (const line of lines) {
+                const p = document.createElement('p');
+                p.textContent = line;
+                content.appendChild(p);
+            }
+        }
+
+        // Файлы — рендерим как компактные чипы внутри сообщения
+        if (fileBlocks && fileBlocks.length > 0) {
+            for (const fb of fileBlocks) {
+                const el = ChatRenderer.renderBlock(fb);
+                if (el) content.appendChild(el);
+            }
+        }
+
+        msg.appendChild(avatar);
+        msg.appendChild(content);
+        this._messagesContainer.appendChild(msg);
+        this._scrollToBottom();
     }
 
     /**

@@ -2,7 +2,7 @@
  * Менеджер popup-панели чата AI-ассистента в конструкторе
  *
  * Управляет открытием/закрытием popup, ленивой инициализацией ChatManager,
- * изменением размера панели и сохранением ширины в localStorage.
+ * свободным изменением размера (corner grip) и сохранением размеров в localStorage.
  */
 class ChatPopupManager {
     /** @type {boolean} */
@@ -10,10 +10,12 @@ class ChatPopupManager {
     /** @type {boolean} */
     static _chatInitialized = false;
 
-    static _storageKey = 'chat_popup_width';
-    static _defaultWidth = 500;
-    static _minWidth = 400;
+    static _storageKey = 'chat_popup_size';
+    static _defaultWidth = 650;
+    static _minWidth = 480;
     static _maxWidthVw = 80;
+    static _minHeight = 300;
+    static _maxHeightVh = 85;
 
     /**
      * Инициализирует popup: кэширует DOM, подключает обработчики
@@ -21,7 +23,7 @@ class ChatPopupManager {
     static setup() {
         this._btn = document.getElementById('chatPopupBtn');
         this._panel = document.getElementById('chatPopupPanel');
-        this._resizeHandle = document.getElementById('chatPopupResizeHandle');
+        this._resizeCorner = document.getElementById('chatPopupResizeCorner');
         this._closeBtn = this._panel?.querySelector('.chat-close-btn');
 
         if (!this._btn || !this._panel) {
@@ -29,8 +31,8 @@ class ChatPopupManager {
             return;
         }
 
-        // Восстанавливаем сохранённую ширину
-        this._restoreWidth();
+        // Восстанавливаем сохранённые размеры
+        this._restoreSize();
 
         // Кнопка toggle
         this._btn.addEventListener('click', (e) => {
@@ -62,8 +64,8 @@ class ChatPopupManager {
             }
         });
 
-        // Resize handle
-        this._setupResize();
+        // Corner resize (свободное изменение ширины и высоты)
+        this._setupCornerResize();
 
         this._initialized = true;
         console.log('ChatPopupManager: инициализация завершена');
@@ -113,25 +115,29 @@ class ChatPopupManager {
     }
 
     /**
-     * Настраивает resize через левый drag handle
+     * Настраивает свободный resize через угловую ручку (bottom-right)
      * @private
      */
-    static _setupResize() {
-        if (!this._resizeHandle) return;
+    static _setupCornerResize() {
+        if (!this._resizeCorner) return;
 
         let isResizing = false;
         let startX = 0;
+        let startY = 0;
         let startWidth = 0;
+        let startHeight = 0;
 
-        this._resizeHandle.addEventListener('mousedown', (e) => {
+        this._resizeCorner.addEventListener('mousedown', (e) => {
             e.preventDefault();
             e.stopPropagation();
 
             isResizing = true;
             startX = e.clientX;
+            startY = e.clientY;
             startWidth = this._panel.offsetWidth;
+            startHeight = this._panel.offsetHeight;
 
-            document.body.style.cursor = 'ew-resize';
+            document.body.style.cursor = 'nwse-resize';
             document.body.style.userSelect = 'none';
         });
 
@@ -139,12 +145,21 @@ class ChatPopupManager {
             if (!isResizing) return;
 
             requestAnimationFrame(() => {
-                // Правый drag → увеличение ширины = startWidth + (clientX - startX)
-                const delta = e.clientX - startX;
                 const maxWidth = window.innerWidth * this._maxWidthVw / 100;
-                const newWidth = Math.max(this._minWidth, Math.min(maxWidth, startWidth + delta));
+                const maxHeight = window.innerHeight * this._maxHeightVh / 100;
+
+                const newWidth = Math.max(
+                    this._minWidth,
+                    Math.min(maxWidth, startWidth + (e.clientX - startX)),
+                );
+                const newHeight = Math.max(
+                    this._minHeight,
+                    Math.min(maxHeight, startHeight + (e.clientY - startY)),
+                );
 
                 this._panel.style.width = newWidth + 'px';
+                this._panel.style.height = newHeight + 'px';
+                this._panel.style.maxHeight = newHeight + 'px';
             });
         });
 
@@ -155,37 +170,40 @@ class ChatPopupManager {
             document.body.style.cursor = '';
             document.body.style.userSelect = '';
 
-            // Сохраняем новую ширину
-            this._saveWidth();
+            this._saveSize();
         });
     }
 
     /**
-     * Сохраняет ширину панели в localStorage
+     * Сохраняет размеры панели в localStorage
      * @private
      */
-    static _saveWidth() {
+    static _saveSize() {
         if (!this._panel) return;
         try {
-            localStorage.setItem(this._storageKey, this._panel.style.width || this._defaultWidth + 'px');
-        } catch (e) {
-            // ignore
-        }
+            localStorage.setItem(this._storageKey, JSON.stringify({
+                width: this._panel.style.width,
+                height: this._panel.style.height,
+            }));
+        } catch { /* ignore */ }
     }
 
     /**
-     * Восстанавливает ширину панели из localStorage
+     * Восстанавливает размеры панели из localStorage
      * @private
      */
-    static _restoreWidth() {
+    static _restoreSize() {
         try {
             const saved = localStorage.getItem(this._storageKey);
-            if (saved && this._panel) {
-                this._panel.style.width = saved;
+            if (!saved || !this._panel) return;
+
+            const { width, height } = JSON.parse(saved);
+            if (width) this._panel.style.width = width;
+            if (height) {
+                this._panel.style.height = height;
+                this._panel.style.maxHeight = height;
             }
-        } catch (e) {
-            // ignore
-        }
+        } catch { /* ignore */ }
     }
 }
 

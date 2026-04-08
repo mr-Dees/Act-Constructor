@@ -126,3 +126,39 @@
     background: var(--danger-subtle);
     color: var(--danger);
 }
+
+/* ============================================
+   Кнопка toggle (свернуть/развернуть)
+   ============================================ */
+
+.chat-history-toggle {
+    width: 100%;
+    padding: var(--spacing-xs);
+    border: none;
+    background: transparent;
+    color: var(--text-secondary);
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    flex-shrink: 0;
+    transition: all var(--duration-fast, 150ms);
+}
+
+.chat-history-toggle:hover {
+    background: var(--bg-secondary);
+    color: var(--text-primary);
+}
+
+/* ============================================
+   Свёрнутое состояние
+   ============================================ */
+
+.chat-history--collapsed {
+    width: 28px;
+    min-width: 28px;
+}
+
+.chat-history--collapsed .chat-history-toggle {
+    padding: var(--spacing-sm) var(--spacing-xs);
+}

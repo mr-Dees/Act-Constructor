@@ -19,6 +19,9 @@ const ChatHistory = {
     /** @type {function(string): void|null} Callback при смене беседы */
     onConversationChange: null,
 
+    /** @type {boolean} Панель свёрнута */
+    _collapsed: false,
+
     /**
      * Инициализация: сохраняет контейнер и рендерит пустой список
      *
@@ -30,6 +33,7 @@ const ChatHistory = {
             console.warn('ChatHistory: контейнер не найден');
             return;
         }
+        this._restoreCollapsed();
         this._render();
     },
 
@@ -61,7 +65,18 @@ const ChatHistory = {
             }
 
             this._conversations = await response.json();
+
+            // Автоматически выбираем самую свежую беседу
+            if (this._conversations.length > 0 && !this._currentId) {
+                this._currentId = this._conversations[0].id;
+            }
+
             this._render();
+
+            // Уведомляем ChatManager о выбранной беседе
+            if (this._currentId && this.onConversationChange) {
+                this.onConversationChange(this._currentId);
+            }
         } catch (err) {
             console.error('ChatHistory: ошибка загрузки бесед', err);
         }
@@ -185,34 +200,57 @@ const ChatHistory = {
     // ========================================================
 
     /**
+     * Переключает видимость панели истории
+     */
+    toggleCollapsed() {
+        this._collapsed = !this._collapsed;
+        this._saveCollapsed();
+        this._render();
+    },
+
+    /**
      * Перерисовывает панель истории
      * @private
      */
     _render() {
         if (!this._container) return;
 
-        let html = '<div class="chat-history">';
+        const collapsedClass = this._collapsed ? ' chat-history--collapsed' : '';
+        let html = `<div class="chat-history${collapsedClass}">`;
 
-        // Кнопка «Новый чат»
-        html += '<button class="chat-history-new" data-action="new">+ Новый чат</button>';
+        // Кнопка toggle
+        const toggleIcon = this._collapsed
+            ? '<path d="M9 18l6-6-6-6" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>'
+            : '<path d="M15 18l-6-6 6-6" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>';
+        const toggleTitle = this._collapsed ? 'Показать беседы' : 'Скрыть беседы';
+        html += `<button class="chat-history-toggle" data-action="toggle" title="${toggleTitle}">`;
+        html += `<svg width="16" height="16" viewBox="0 0 24 24" fill="none">${toggleIcon}</svg>`;
+        html += '</button>';
 
-        // Список бесед
-        html += '<div class="chat-history-list">';
+        if (!this._collapsed) {
+            // Кнопка «Новый чат»
+            html += '<button class="chat-history-new" data-action="new">+ Новый чат</button>';
 
-        for (const conv of this._conversations) {
-            const isActive = conv.id === this._currentId;
-            const activeClass = isActive ? ' chat-history-item--active' : '';
-            const title = this._escapeHtml(this._truncateTitle(conv.title || 'Без названия'));
-            const date = this._formatDate(conv.updated_at || conv.created_at);
+            // Список бесед
+            html += '<div class="chat-history-list">';
 
-            html += `<div class="chat-history-item${activeClass}" data-id="${this._escapeHtml(conv.id)}">`;
-            html += `  <div class="chat-history-item-title" title="${title}">${title}</div>`;
-            html += `  <div class="chat-history-item-date">${date}</div>`;
-            html += `  <button class="chat-history-item-delete" data-action="delete" data-id="${this._escapeHtml(conv.id)}" title="Удалить">&times;</button>`;
+            for (const conv of this._conversations) {
+                const isActive = conv.id === this._currentId;
+                const activeClass = isActive ? ' chat-history-item--active' : '';
+                const title = this._escapeHtml(this._truncateTitle(conv.title || 'Без названия'));
+                const date = this._formatDate(conv.updated_at || conv.created_at);
+
+                html += `<div class="chat-history-item${activeClass}" data-id="${this._escapeHtml(conv.id)}">`;
+                html += `  <div class="chat-history-item-title" title="${title}">${title}</div>`;
+                html += `  <div class="chat-history-item-date">${date}</div>`;
+                html += `  <button class="chat-history-item-delete" data-action="delete" data-id="${this._escapeHtml(conv.id)}" title="Удалить">&times;</button>`;
+                html += '</div>';
+            }
+
             html += '</div>';
         }
 
-        html += '</div></div>';
+        html += '</div>';
 
         this._container.innerHTML = html;
 
@@ -226,6 +264,14 @@ const ChatHistory = {
      */
     _bindEvents() {
         if (!this._container) return;
+
+        // Кнопка toggle
+        const toggleBtn = this._container.querySelector('[data-action="toggle"]');
+        if (toggleBtn) {
+            toggleBtn.addEventListener('click', () => {
+                this.toggleCollapsed();
+            });
+        }
 
         // Кнопка «Новый чат»
         const newBtn = this._container.querySelector('[data-action="new"]');
@@ -320,6 +366,28 @@ const ChatHistory = {
     _truncateTitle(title, maxLength = 40) {
         if (!title || title.length <= maxLength) return title || '';
         return title.slice(0, maxLength) + '\u2026'; // …
+    },
+
+    /**
+     * Сохраняет состояние панели в localStorage
+     * @private
+     */
+    _saveCollapsed() {
+        try {
+            localStorage.setItem('chat_history_collapsed', this._collapsed ? '1' : '0');
+        } catch { /* ignore */ }
+    },
+
+    /**
+     * Восстанавливает состояние панели из localStorage
+     * @private
+     */
+    _restoreCollapsed() {
+        try {
+            this._collapsed = localStorage.getItem('chat_history_collapsed') === '1';
+        } catch {
+            this._collapsed = false;
+        }
     },
 };
 

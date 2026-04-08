@@ -60,7 +60,7 @@ class MessageService:
             )
 
         # Собираем блоки контента
-        blocks: list[dict] = [{"type": "text", "text": content}]
+        blocks: list[dict] = [{"type": "text", "content": content}]
         if file_blocks:
             blocks.extend(file_blocks)
 

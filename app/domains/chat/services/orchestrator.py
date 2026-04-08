@@ -567,7 +567,7 @@ class Orchestrator:
 
             # Сохраняем сообщение ассистента
             if full_answer:
-                content_blocks = [{"type": "text", "text": full_answer}]
+                content_blocks = [{"type": "text", "content": full_answer}]
                 await self.msg_service.save_assistant_message(
                     conversation_id=conversation_id,
                     content=content_blocks,

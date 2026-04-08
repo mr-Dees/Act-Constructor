@@ -134,14 +134,31 @@
     flex-shrink: 0;
 }
 
+/* Обёртка textarea + кнопка прикрепления */
+.chat-input-wrapper {
+    flex: 1;
+    display: flex;
+    align-items: flex-end;
+    position: relative;
+    border: var(--border-width-thin) solid var(--border-light);
+    border-radius: var(--radius-md);
+    background: var(--bg-secondary);
+    transition: border-color var(--duration-fast);
+}
+
+.chat-input-wrapper:focus-within {
+    border-color: var(--primary);
+}
+
 .chat-input {
     flex: 1;
     padding: var(--spacing-md) var(--spacing-lg);
-    border: var(--border-width-thin) solid var(--border-light);
+    padding-right: var(--spacing-4xl);
+    border: none;
     border-radius: var(--radius-md);
     font-size: var(--font-size-sm);
     color: var(--text-primary);
-    background: var(--bg-secondary);
+    background: transparent;
     font-family: inherit;
     resize: none;
     overflow-y: auto;
@@ -155,7 +172,6 @@
 
 .chat-input:focus:not(:disabled) {
     outline: none;
-    border-color: var(--primary);
 }
 
 .chat-send-btn {
@@ -261,16 +277,21 @@
     40% { transform: scale(1); opacity: 1; }
 }
 
-/* Кнопка прикрепления файла */
+/* Кнопка прикрепления файла (внутри input-wrapper) */
 .chat-attach-btn {
     background: none;
     border: none;
     cursor: pointer;
-    padding: 4px;
+    padding: var(--spacing-xs);
+    margin-right: var(--spacing-xs);
+    margin-bottom: var(--spacing-xs);
     color: var(--text-secondary);
     display: flex;
     align-items: center;
     justify-content: center;
+    flex-shrink: 0;
+    border-radius: var(--radius-sm);
+    transition: color var(--duration-fast);
 }
 
 .chat-attach-btn:hover {

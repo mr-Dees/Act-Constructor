@@ -276,24 +276,26 @@ const ChatRenderer = {
         icon.className = 'chat-block-file-icon';
         icon.textContent = '\uD83D\uDCC4'; // 📄
 
-        const link = document.createElement('a');
-        link.className = 'chat-block-file-name';
-        link.textContent = block.filename || 'Файл';
-        link.target = '_blank';
-        link.rel = 'noopener noreferrer';
+        // Если есть file_id — ссылка для скачивания, иначе просто span
+        const nameEl = document.createElement(block.file_id ? 'a' : 'span');
+        nameEl.className = 'chat-block-file-name';
+        nameEl.textContent = block.filename || block.name || 'Файл';
 
-        // URL для скачивания файла
-        const fileUrl = `/api/v1/chat/files/${block.file_id}`;
-        link.href = (typeof AppConfig !== 'undefined')
-            ? AppConfig.api.getUrl(fileUrl)
-            : fileUrl;
+        if (block.file_id) {
+            nameEl.target = '_blank';
+            nameEl.rel = 'noopener noreferrer';
+            const fileUrl = `/api/v1/chat/files/${block.file_id}`;
+            nameEl.href = (typeof AppConfig !== 'undefined')
+                ? AppConfig.api.getUrl(fileUrl)
+                : fileUrl;
+        }
 
         const size = document.createElement('span');
         size.className = 'chat-block-file-size';
-        size.textContent = this._formatSize(block.file_size || 0);
+        size.textContent = this._formatSize(block.file_size || block.size || 0);
 
         div.appendChild(icon);
-        div.appendChild(link);
+        div.appendChild(nameEl);
         div.appendChild(size);
 
         return div;
