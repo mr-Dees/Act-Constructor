@@ -149,6 +149,9 @@ class ChatManager {
                 },
                 onError: (err) => {
                     console.error('ChatManager: ошибка стриминга', err);
+                    this._removeTypingIndicator();
+                    const msgEl = botContainer.closest('.chat-message');
+                    if (msgEl) msgEl.style.display = '';
                     const errDiv = document.createElement('div');
                     errDiv.className = 'chat-error';
                     errDiv.textContent = 'Произошла ошибка. Попробуйте ещё раз.';
@@ -284,6 +287,9 @@ class ChatManager {
         switch (event.type) {
             case 'message_start':
                 this._streamingBlocks = {};
+                this._removeTypingIndicator();
+                const msgEl = container.closest('.chat-message');
+                if (msgEl) msgEl.style.display = '';
                 break;
 
             case 'block_start': {
@@ -347,6 +353,7 @@ class ChatManager {
     static _addBotMessageStreaming() {
         const msg = document.createElement('div');
         msg.className = 'chat-message chat-message-bot';
+        msg.style.display = 'none';
 
         const avatar = document.createElement('div');
         avatar.className = 'chat-message-avatar';
@@ -362,7 +369,6 @@ class ChatManager {
         msg.appendChild(content);
 
         this._messagesContainer.appendChild(msg);
-        this._scrollToBottom();
 
         return content;
     }

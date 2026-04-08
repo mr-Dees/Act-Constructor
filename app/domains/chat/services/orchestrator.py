@@ -382,9 +382,12 @@ class Orchestrator:
                             temperature=self.settings.temperature,
                             stream=True,
                         )
-                    except Exception:
-                        logger.debug(
-                            "Стриминг не поддержан, фолбек на обычный вызов",
+                    except Exception as exc:
+                        logger.warning(
+                            "Стриминг не удался, фолбек на обычный вызов: "
+                            "%s: %s",
+                            type(exc).__name__,
+                            exc,
                         )
                         use_streaming = False
 
