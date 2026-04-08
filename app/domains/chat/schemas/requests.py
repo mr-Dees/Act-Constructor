@@ -14,9 +14,3 @@ class CreateConversationRequest(BaseModel):
 
 class UpdateConversationRequest(BaseModel):
     title: str = Field(min_length=1, max_length=500)
-
-
-class SendMessageRequest(BaseModel):
-    message: str = Field(min_length=1, max_length=10000)
-    domains: list[str] | None = None
-    context: dict[str, Any] | None = None
