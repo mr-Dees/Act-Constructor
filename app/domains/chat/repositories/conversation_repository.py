@@ -17,6 +17,18 @@ class ConversationRepository(BaseRepository):
         super().__init__(conn)
         self.table = self.adapter.get_table_name("chat_conversations")
 
+    @staticmethod
+    def _parse_row(row: dict) -> dict:
+        """Парсит JSONB-поля из строк в Python-объекты."""
+        result = dict(row)
+        val = result.get("context")
+        if isinstance(val, str):
+            try:
+                result["context"] = json.loads(val)
+            except json.JSONDecodeError:
+                result["context"] = None
+        return result
+
     async def create(
         self,
         *,
@@ -39,7 +51,7 @@ class ConversationRepository(BaseRepository):
             domain_name,
             json.dumps(context, ensure_ascii=False) if context else None,
         )
-        return dict(row)
+        return self._parse_row(row)
 
     async def get_by_id(self, conversation_id: str, user_id: str) -> dict | None:
         """Возвращает беседу по ID с проверкой владельца."""
@@ -51,7 +63,7 @@ class ConversationRepository(BaseRepository):
             conversation_id,
             user_id,
         )
-        return dict(row) if row else None
+        return self._parse_row(row) if row else None
 
     async def get_by_user(
         self,
@@ -87,7 +99,7 @@ class ConversationRepository(BaseRepository):
                 limit,
                 offset,
             )
-        return [dict(r) for r in rows]
+        return [self._parse_row(r) for r in rows]
 
     async def update_title(
         self, conversation_id: str, user_id: str, title: str,
@@ -117,15 +129,32 @@ class ConversationRepository(BaseRepository):
         )
 
     async def delete(self, conversation_id: str, user_id: str) -> bool:
-        """Удаляет беседу. Возвращает True если запись удалена."""
-        result = await self.conn.execute(
-            f"""
-            DELETE FROM {self.table}
-            WHERE id = $1 AND user_id = $2
-            """,
-            conversation_id,
-            user_id,
-        )
+        """Удаляет беседу со всеми связанными данными. Возвращает True если удалена."""
+        if self.adapter.supports_cascade_delete():
+            result = await self.conn.execute(
+                f"DELETE FROM {self.table} WHERE id = $1 AND user_id = $2",
+                conversation_id,
+                user_id,
+            )
+            return result == "DELETE 1"
+
+        # Greenplum: явное удаление дочерних записей
+        files_table = self.adapter.get_table_name("chat_files")
+        messages_table = self.adapter.get_table_name("chat_messages")
+        async with self.conn.transaction():
+            await self.conn.execute(
+                f"DELETE FROM {files_table} WHERE conversation_id = $1",
+                conversation_id,
+            )
+            await self.conn.execute(
+                f"DELETE FROM {messages_table} WHERE conversation_id = $1",
+                conversation_id,
+            )
+            result = await self.conn.execute(
+                f"DELETE FROM {self.table} WHERE id = $1 AND user_id = $2",
+                conversation_id,
+                user_id,
+            )
         return result == "DELETE 1"
 
     async def count_by_user(self, user_id: str) -> int:

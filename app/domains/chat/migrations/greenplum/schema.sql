@@ -1,4 +1,12 @@
-CREATE TABLE IF NOT EXISTS chat_conversations (
+-- Схема базы данных для домена чата (Greenplum)
+-- Схема: {SCHEMA}
+-- Префикс таблиц: {PREFIX}
+
+-- ============================================================================
+-- ТАБЛИЦА БЕСЕД
+-- ============================================================================
+
+CREATE TABLE IF NOT EXISTS {SCHEMA}.{PREFIX}chat_conversations (
     id              VARCHAR(36) PRIMARY KEY,
     user_id         VARCHAR(50) NOT NULL,
     title           VARCHAR(500),
@@ -6,29 +14,51 @@ CREATE TABLE IF NOT EXISTS chat_conversations (
     context         JSONB,
     created_at      TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
     updated_at      TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
-);
-CREATE INDEX idx_chat_conversations_user ON chat_conversations(user_id);
+)
+WITH (appendonly=false)
+DISTRIBUTED BY (id);
 
-CREATE TABLE IF NOT EXISTS chat_messages (
+CREATE INDEX idx_{PREFIX}chat_conversations_user
+    ON {SCHEMA}.{PREFIX}chat_conversations(user_id);
+
+-- ============================================================================
+-- ТАБЛИЦА СООБЩЕНИЙ
+-- ============================================================================
+
+CREATE TABLE IF NOT EXISTS {SCHEMA}.{PREFIX}chat_messages (
     id              VARCHAR(36) PRIMARY KEY,
-    conversation_id VARCHAR(36) NOT NULL REFERENCES chat_conversations(id),
+    conversation_id VARCHAR(36) NOT NULL REFERENCES {SCHEMA}.{PREFIX}chat_conversations(id),
     role            VARCHAR(20) NOT NULL,
     content         JSONB NOT NULL,
     model           VARCHAR(100),
     token_usage     JSONB,
     created_at      TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
-);
-CREATE INDEX idx_chat_messages_conversation ON chat_messages(conversation_id);
-CREATE INDEX idx_chat_messages_created ON chat_messages(conversation_id, created_at);
+)
+WITH (appendonly=false)
+DISTRIBUTED BY (id);
 
-CREATE TABLE IF NOT EXISTS chat_files (
+CREATE INDEX idx_{PREFIX}chat_messages_conversation
+    ON {SCHEMA}.{PREFIX}chat_messages(conversation_id);
+
+CREATE INDEX idx_{PREFIX}chat_messages_created
+    ON {SCHEMA}.{PREFIX}chat_messages(conversation_id, created_at);
+
+-- ============================================================================
+-- ТАБЛИЦА ФАЙЛОВ
+-- ============================================================================
+
+CREATE TABLE IF NOT EXISTS {SCHEMA}.{PREFIX}chat_files (
     id              VARCHAR(36) PRIMARY KEY,
-    conversation_id VARCHAR(36) NOT NULL REFERENCES chat_conversations(id),
-    message_id      VARCHAR(36) REFERENCES chat_messages(id),
+    conversation_id VARCHAR(36) NOT NULL REFERENCES {SCHEMA}.{PREFIX}chat_conversations(id),
+    message_id      VARCHAR(36) REFERENCES {SCHEMA}.{PREFIX}chat_messages(id),
     filename        VARCHAR(500) NOT NULL,
     mime_type       VARCHAR(200) NOT NULL,
     file_size       INTEGER NOT NULL,
-    file_data       TEXT NOT NULL,
+    file_data       BYTEA NOT NULL,
     created_at      TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
-);
-CREATE INDEX idx_chat_files_conversation ON chat_files(conversation_id);
+)
+WITH (appendonly=false)
+DISTRIBUTED BY (id);
+
+CREATE INDEX idx_{PREFIX}chat_files_conversation
+    ON {SCHEMA}.{PREFIX}chat_files(conversation_id);
