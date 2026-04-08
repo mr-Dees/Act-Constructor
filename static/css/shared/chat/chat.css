@@ -284,11 +284,11 @@
     cursor: pointer;
     padding: var(--spacing-xs);
     margin-right: var(--spacing-xs);
-    margin-bottom: var(--spacing-xs);
     color: var(--text-secondary);
     display: flex;
     align-items: center;
     justify-content: center;
+    align-self: center;
     flex-shrink: 0;
     border-radius: var(--radius-sm);
     transition: color var(--duration-fast);
