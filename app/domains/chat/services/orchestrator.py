@@ -143,6 +143,9 @@ class Orchestrator:
                         lang = block.get("language", "")
                         code = block.get("content", block.get("code", ""))
                         text_parts.append(f"```{lang}\n{code}\n```")
+                    elif block_type == "file":
+                        fname = block.get("filename", "файл")
+                        text_parts.append(f"[Прикреплён файл: {fname}]")
             elif isinstance(content_blocks, str):
                 text_parts.append(content_blocks)
 
@@ -152,12 +155,81 @@ class Orchestrator:
 
         return messages
 
+    async def _build_user_content(
+        self,
+        user_message: str,
+        file_blocks: list[dict] | None,
+    ) -> str:
+        """Строит содержимое user-сообщения: текст + извлечённый контент файлов."""
+        if not file_blocks:
+            return user_message
+
+        from app.db.connection import get_db
+        from app.domains.chat.repositories.file_repository import FileRepository
+        from app.domains.chat.services.file_extraction import extract_text
+
+        parts = [user_message]
+        async with get_db() as conn:
+            file_repo = FileRepository(conn)
+            for fb in file_blocks:
+                file_id = fb.get("file_id")
+                if not file_id:
+                    continue
+                # Получаем данные файла напрямую (без проверки user_id,
+                # т.к. файл уже привязан к беседе пользователя)
+                row = await conn.fetchrow(
+                    f"SELECT filename, mime_type, file_data "
+                    f"FROM {file_repo.table} WHERE id = $1",
+                    file_id,
+                )
+                if not row:
+                    continue
+                text = extract_text(
+                    row["file_data"], row["mime_type"], row["filename"],
+                )
+                parts.append(f"\n--- Файл: {row['filename']} ---\n{text}")
+
+        return "\n".join(parts)
+
     def _get_openai_client(self):
         """Возвращает AsyncOpenAI клиент."""
         return _get_openai_client(
             self.settings.api_base,
             self.settings.api_key.get_secret_value(),
         )
+
+    async def _save_assistant_message(
+        self,
+        *,
+        conversation_id: str,
+        content_blocks: list[dict],
+        token_usage: dict | None,
+    ) -> None:
+        """Сохраняет сообщение ассистента с отдельным соединением из пула.
+
+        StreamingResponse может пережить dependency-соединение,
+        поэтому для сохранения берём свежее соединение.
+        """
+        from app.db.connection import get_db
+        from app.domains.chat.repositories.conversation_repository import (
+            ConversationRepository,
+        )
+        from app.domains.chat.repositories.message_repository import (
+            MessageRepository,
+        )
+
+        async with get_db() as conn:
+            msg_service = MessageService(
+                msg_repo=MessageRepository(conn),
+                conv_repo=ConversationRepository(conn),
+                settings=self.settings,
+            )
+            await msg_service.save_assistant_message(
+                conversation_id=conversation_id,
+                content=content_blocks,
+                model=self.settings.model,
+                token_usage=token_usage if token_usage else None,
+            )
 
     async def _execute_tool_call(
         self, tool_name: str, arguments: dict,
@@ -228,7 +300,9 @@ class Orchestrator:
         if history and history[-1].get("role") == "user":
             history = history[:-1]
         messages.extend(history)
-        messages.append({"role": "user", "content": user_message})
+
+        user_content = await self._build_user_content(user_message, file_blocks)
+        messages.append({"role": "user", "content": user_content})
 
         sources: list[str] = []
         token_usage: dict[str, Any] = {}
@@ -360,7 +434,9 @@ class Orchestrator:
         if history and history[-1].get("role") == "user":
             history = history[:-1]
         messages.extend(history)
-        messages.append({"role": "user", "content": user_message})
+
+        user_content = await self._build_user_content(user_message, file_blocks)
+        messages.append({"role": "user", "content": user_content})
 
         sources: list[str] = []
         token_usage: dict[str, Any] = {}
@@ -575,14 +651,14 @@ class Orchestrator:
                     }
                 break
 
-            # Сохраняем сообщение ассистента
+            # Сохраняем сообщение ассистента (свежее соединение из пула,
+            # т.к. dependency-соединение может быть закрыто к этому моменту)
             if full_answer:
                 content_blocks = [{"type": "text", "content": full_answer}]
-                await self.msg_service.save_assistant_message(
+                await self._save_assistant_message(
                     conversation_id=conversation_id,
-                    content=content_blocks,
-                    model=self.settings.model,
-                    token_usage=token_usage if token_usage else None,
+                    content_blocks=content_blocks,
+                    token_usage=token_usage,
                 )
 
         except Exception as exc:

@@ -140,7 +140,7 @@ class ChatManager {
             this._clearPendingFiles();
 
             this._showTypingIndicator();
-            const botContainer = this._addBotMessageStreaming();
+            const botContainer = this._addBotMessageStreaming({ hidden: true });
 
             await ChatStream.send(conversationId, text, files, {
                 domains: this._detectDomains(),
@@ -350,10 +350,10 @@ class ChatManager {
      * @returns {HTMLElement} — контейнер .chat-message-content для добавления блоков
      * @private
      */
-    static _addBotMessageStreaming() {
+    static _addBotMessageStreaming({ hidden = false } = {}) {
         const msg = document.createElement('div');
         msg.className = 'chat-message chat-message-bot';
-        msg.style.display = 'none';
+        if (hidden) msg.style.display = 'none';
 
         const avatar = document.createElement('div');
         avatar.className = 'chat-message-avatar';
