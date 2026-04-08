@@ -278,7 +278,7 @@ class Orchestrator:
                     temperature=self.settings.temperature,
                 )
 
-            answer = response.choices[0].message.content or ""
+            answer = (response.choices[0].message.content or "").lstrip("\n")
 
             if response.usage:
                 token_usage = {
@@ -410,6 +410,13 @@ class Orchestrator:
 
                         # Текстовый контент
                         if delta.content:
+                            text = delta.content
+                            # Убираем ведущие переносы строк
+                            # (модели с thinking отдают \n\n перед ответом)
+                            if not block_started:
+                                text = text.lstrip("\n")
+                                if not text:
+                                    continue
                             if not block_started:
                                 yield sse_block_start(
                                     block_index=block_index,
@@ -418,9 +425,9 @@ class Orchestrator:
                                 block_started = True
                             yield sse_block_delta(
                                 block_index=block_index,
-                                delta=delta.content,
+                                delta=text,
                             )
-                            accumulated_content += delta.content
+                            accumulated_content += text
 
                         # Tool calls (инкрементальная сборка)
                         if delta.tool_calls:
@@ -554,7 +561,7 @@ class Orchestrator:
                     continue
 
                 # Финальный текстовый ответ (non-streaming)
-                answer = response.choices[0].message.content or ""
+                answer = (response.choices[0].message.content or "").lstrip("\n")
                 yield sse_block_start(block_index=block_index, block_type="text")
                 yield sse_block_delta(block_index=block_index, delta=answer)
                 yield sse_block_end(block_index=block_index)
