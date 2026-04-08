@@ -90,8 +90,9 @@ class ChatManager {
             this.sendMessage();
         });
 
-        // Инициализация файлового ввода
+        // Инициализация файлового ввода и drag-and-drop
         this._initFileInput();
+        this._initDragAndDrop();
 
         // Инициализация панели истории бесед (если контейнер присутствует в DOM)
         const historyContainer = document.getElementById('chatHistoryContainer');
@@ -693,6 +694,70 @@ class ChatManager {
             fileInput.value = '';
             this._renderFilePreview();
         });
+    }
+
+    /**
+     * Инициализирует drag-and-drop файлов в область чата
+     * @private
+     */
+    static _initDragAndDrop() {
+        const dropZone = this._messagesContainer?.closest('.chat-body');
+        if (!dropZone) return;
+
+        const overlay = dropZone.querySelector('.chat-drop-overlay');
+        if (!overlay) return;
+
+        let dragCounter = 0;
+
+        dropZone.addEventListener('dragenter', (e) => {
+            e.preventDefault();
+            if (!this._hasDragFiles(e)) return;
+            dragCounter++;
+            if (dragCounter === 1) overlay.classList.remove('hidden');
+        });
+
+        dropZone.addEventListener('dragover', (e) => {
+            e.preventDefault();
+            if (this._hasDragFiles(e)) e.dataTransfer.dropEffect = 'copy';
+        });
+
+        dropZone.addEventListener('dragleave', (e) => {
+            e.preventDefault();
+            dragCounter--;
+            if (dragCounter <= 0) {
+                dragCounter = 0;
+                overlay.classList.add('hidden');
+            }
+        });
+
+        dropZone.addEventListener('drop', (e) => {
+            e.preventDefault();
+            dragCounter = 0;
+            overlay.classList.add('hidden');
+
+            if (this._isProcessing) return;
+
+            const files = e.dataTransfer?.files;
+            if (!files || files.length === 0) return;
+
+            for (const file of files) {
+                this._pendingFiles.push(file);
+            }
+            this._renderFilePreview();
+        });
+    }
+
+    /**
+     * Проверяет, содержит ли drag-событие файлы
+     * @param {DragEvent} e
+     * @returns {boolean}
+     * @private
+     */
+    static _hasDragFiles(e) {
+        if (e.dataTransfer?.types) {
+            return e.dataTransfer.types.includes('Files');
+        }
+        return false;
     }
 
     /**
