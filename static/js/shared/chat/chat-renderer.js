@@ -265,7 +265,7 @@ const ChatRenderer = {
     },
 
     /**
-     * Блок файла — карточка с иконкой, именем и размером
+     * Блок файла — карточка с иконкой, именем, размером и кнопками действий
      * @private
      */
     _renderFile(block) {
@@ -276,18 +276,13 @@ const ChatRenderer = {
         icon.className = 'chat-block-file-icon';
         icon.textContent = '\uD83D\uDCC4'; // 📄
 
-        // Если есть file_id — ссылка для скачивания, иначе просто span
-        const nameEl = document.createElement(block.file_id ? 'a' : 'span');
+        const nameEl = document.createElement('span');
         nameEl.className = 'chat-block-file-name';
         nameEl.textContent = block.filename || block.name || 'Файл';
 
         if (block.file_id) {
-            nameEl.target = '_blank';
-            nameEl.rel = 'noopener noreferrer';
-            const fileUrl = `/api/v1/chat/files/${block.file_id}`;
-            nameEl.href = (typeof AppConfig !== 'undefined')
-                ? AppConfig.api.getUrl(fileUrl)
-                : fileUrl;
+            nameEl.classList.add('chat-block-file-name--clickable');
+            nameEl.addEventListener('click', () => ChatRenderer._openFileViewer(block));
         }
 
         const size = document.createElement('span');
@@ -298,11 +293,36 @@ const ChatRenderer = {
         div.appendChild(nameEl);
         div.appendChild(size);
 
+        // Кнопки действий — только при наличии file_id
+        if (block.file_id) {
+            const actions = document.createElement('div');
+            actions.className = 'chat-block-file-actions';
+
+            // Предпросмотр
+            const previewBtn = document.createElement('button');
+            previewBtn.className = 'chat-block-file-btn';
+            previewBtn.title = 'Предпросмотр';
+            previewBtn.innerHTML = '<svg width="16" height="16" viewBox="0 0 24 24" fill="none"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/><circle cx="12" cy="12" r="3" stroke="currentColor" stroke-width="2"/></svg>';
+            previewBtn.addEventListener('click', () => ChatRenderer._openFileViewer(block));
+
+            // Скачать
+            const downloadBtn = document.createElement('a');
+            downloadBtn.className = 'chat-block-file-btn';
+            downloadBtn.href = this._getFileUrl(block.file_id);
+            downloadBtn.download = block.filename || block.name || 'Файл';
+            downloadBtn.title = 'Скачать';
+            downloadBtn.innerHTML = '<svg width="16" height="16" viewBox="0 0 24 24" fill="none"><path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4M7 10l5 5 5-5M12 15V3" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>';
+
+            actions.appendChild(previewBtn);
+            actions.appendChild(downloadBtn);
+            div.appendChild(actions);
+        }
+
         return div;
     },
 
     /**
-     * Блок изображения с ленивой загрузкой
+     * Блок изображения с ленивой загрузкой и предпросмотром по клику
      * @private
      */
     _renderImage(block) {
@@ -314,12 +334,19 @@ const ChatRenderer = {
         img.alt = block.alt || 'Изображение';
 
         const imgUrl = block.url || (block.file_id
-            ? ((typeof AppConfig !== 'undefined')
-                ? AppConfig.api.getUrl(`/api/v1/chat/files/${block.file_id}`)
-                : `/api/v1/chat/files/${block.file_id}`)
+            ? this._getFileUrl(block.file_id)
             : '');
 
         img.src = imgUrl;
+
+        if (block.file_id) {
+            img.style.cursor = 'pointer';
+            img.addEventListener('click', () => ChatRenderer._openFileViewer({
+                ...block,
+                mime_type: block.mime_type || 'image/png',
+            }));
+        }
+
         div.appendChild(img);
 
         return div;
@@ -369,6 +396,152 @@ const ChatRenderer = {
     // ========================================================
     //  Хелперы
     // ========================================================
+
+    /**
+     * Конструирует URL для скачивания файла чата
+     *
+     * @param {string} fileId — идентификатор файла
+     * @returns {string}
+     * @private
+     */
+    _getFileUrl(fileId) {
+        const path = `/api/v1/chat/files/${fileId}`;
+        return (typeof AppConfig !== 'undefined') ? AppConfig.api.getUrl(path) : path;
+    },
+
+    /**
+     * Открывает полноэкранный модальный просмотрщик файла
+     *
+     * Поддерживает изображения, PDF, текстовые файлы и JSON/XML.
+     * Для неподдерживаемых типов предлагает скачать.
+     *
+     * @param {Object} block — блок файла {file_id, filename, name, mime_type, ...}
+     * @private
+     */
+    _openFileViewer(block) {
+        // Удаляем предыдущий просмотрщик, если есть
+        ChatRenderer._closeFileViewer();
+
+        const fileUrl = ChatRenderer._getFileUrl(block.file_id);
+        const inlineUrl = fileUrl + (fileUrl.includes('?') ? '&' : '?') + 'inline=true';
+        const mime = (block.mime_type || '').toLowerCase();
+        const filename = block.filename || block.name || 'Файл';
+
+        // Оверлей
+        const overlay = document.createElement('div');
+        overlay.className = 'chat-file-viewer-overlay';
+
+        overlay.addEventListener('click', (e) => {
+            if (e.target === overlay) ChatRenderer._closeFileViewer();
+        });
+
+        ChatRenderer._fileViewerEscHandler = (e) => {
+            if (e.key === 'Escape') ChatRenderer._closeFileViewer();
+        };
+        document.addEventListener('keydown', ChatRenderer._fileViewerEscHandler);
+
+        // Модальный контейнер
+        const modal = document.createElement('div');
+        modal.className = 'chat-file-viewer';
+
+        // Шапка
+        const header = document.createElement('div');
+        header.className = 'chat-file-viewer-header';
+
+        const title = document.createElement('span');
+        title.className = 'chat-file-viewer-title';
+        title.textContent = filename;
+
+        const actions = document.createElement('div');
+        actions.className = 'chat-file-viewer-actions';
+
+        // Кнопка «Скачать» в шапке
+        const downloadBtn = document.createElement('a');
+        downloadBtn.className = 'chat-file-viewer-btn';
+        downloadBtn.href = fileUrl;
+        downloadBtn.download = filename;
+        downloadBtn.title = 'Скачать';
+        downloadBtn.innerHTML = '<svg width="18" height="18" viewBox="0 0 24 24" fill="none"><path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4M7 10l5 5 5-5M12 15V3" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>';
+
+        // Кнопка «Закрыть»
+        const closeBtn = document.createElement('button');
+        closeBtn.className = 'chat-file-viewer-btn';
+        closeBtn.title = 'Закрыть';
+        closeBtn.innerHTML = '<svg width="18" height="18" viewBox="0 0 24 24" fill="none"><path d="M18 6L6 18M6 6l12 12" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>';
+        closeBtn.addEventListener('click', () => ChatRenderer._closeFileViewer());
+
+        actions.appendChild(downloadBtn);
+        actions.appendChild(closeBtn);
+        header.appendChild(title);
+        header.appendChild(actions);
+
+        // Тело — содержимое зависит от MIME-типа
+        const body = document.createElement('div');
+        body.className = 'chat-file-viewer-body';
+
+        if (mime.startsWith('image/')) {
+            const img = document.createElement('img');
+            img.src = inlineUrl;
+            img.alt = filename;
+            img.className = 'chat-file-viewer-image';
+            body.appendChild(img);
+        } else if (mime === 'application/pdf') {
+            const iframe = document.createElement('iframe');
+            iframe.src = inlineUrl;
+            iframe.className = 'chat-file-viewer-iframe';
+            body.appendChild(iframe);
+        } else if (mime.startsWith('text/') || mime === 'application/json' || mime === 'application/xml') {
+            const pre = document.createElement('pre');
+            pre.className = 'chat-file-viewer-text';
+            pre.textContent = 'Загрузка...';
+            body.appendChild(pre);
+
+            const fetchOpts = {};
+            if (typeof AuthManager !== 'undefined' && AuthManager.getAuthHeaders) {
+                fetchOpts.headers = AuthManager.getAuthHeaders();
+            }
+            fetch(inlineUrl, fetchOpts)
+                .then(r => r.text())
+                .then(text => { pre.textContent = text; })
+                .catch(() => { pre.textContent = 'Ошибка загрузки файла'; });
+        } else {
+            // Неподдерживаемый тип — сообщение + ссылка на скачивание
+            const unsupported = document.createElement('div');
+            unsupported.className = 'chat-file-viewer-unsupported';
+            unsupported.innerHTML = `
+                <svg width="48" height="48" viewBox="0 0 24 24" fill="none">
+                    <path d="M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8z" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+                    <polyline points="14,2 14,8 20,8" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+                </svg>
+                <p>Предпросмотр недоступен для данного типа файла</p>
+            `;
+            const dlLink = document.createElement('a');
+            dlLink.href = fileUrl;
+            dlLink.download = filename;
+            dlLink.className = 'chat-file-viewer-download-link';
+            dlLink.textContent = 'Скачать файл';
+            unsupported.appendChild(dlLink);
+            body.appendChild(unsupported);
+        }
+
+        modal.appendChild(header);
+        modal.appendChild(body);
+        overlay.appendChild(modal);
+        document.body.appendChild(overlay);
+    },
+
+    /**
+     * Закрывает модальный просмотрщик файла
+     * @private
+     */
+    _closeFileViewer() {
+        const existing = document.querySelector('.chat-file-viewer-overlay');
+        if (existing) existing.remove();
+        if (ChatRenderer._fileViewerEscHandler) {
+            document.removeEventListener('keydown', ChatRenderer._fileViewerEscHandler);
+            ChatRenderer._fileViewerEscHandler = null;
+        }
+    },
 
     /**
      * Базовый markdown → HTML (bold, italic, inline code, переносы строк)

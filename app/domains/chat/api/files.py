@@ -20,19 +20,21 @@ router = APIRouter()
 )
 async def download_file(
     file_id: str,
+    inline: bool = False,
     username: str = Depends(get_username),
     file_service: FileService = Depends(get_file_service),
 ):
-    """Возвращает файл для скачивания."""
+    """Возвращает файл для скачивания или предпросмотра."""
     file_data = await file_service.get_file(file_id=file_id, user_id=username)
 
     filename_encoded = quote(file_data["filename"])
+    disposition = "inline" if inline else "attachment"
     return Response(
         content=file_data["file_data"],
         media_type=file_data["mime_type"],
         headers={
             "Content-Disposition": (
-                f"attachment; filename*=UTF-8''{filename_encoded}"
+                f"{disposition}; filename*=UTF-8''{filename_encoded}"
             ),
         },
     )

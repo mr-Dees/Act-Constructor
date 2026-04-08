@@ -235,6 +235,40 @@
     color: var(--text-tertiary);
 }
 
+/* Кликабельное имя файла */
+.chat-block-file-name--clickable {
+    cursor: pointer;
+}
+
+/* Кнопки действий в файловом блоке */
+.chat-block-file-actions {
+    display: flex;
+    align-items: center;
+    gap: 2px;
+    flex-shrink: 0;
+    margin-left: var(--spacing-xs);
+}
+
+.chat-block-file-btn {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    width: 28px;
+    height: 28px;
+    border: none;
+    background: transparent;
+    color: var(--text-tertiary);
+    border-radius: var(--radius-sm);
+    cursor: pointer;
+    transition: all var(--duration-fast);
+    text-decoration: none;
+}
+
+.chat-block-file-btn:hover {
+    background: var(--gray-100);
+    color: var(--primary);
+}
+
 /* ============================================
    Блок изображения
    ============================================ */
@@ -281,4 +315,174 @@
 .chat-block-buttons--action .chat-btn:hover {
     background: var(--primary-hover);
     border-color: var(--primary-hover);
+}
+
+/* ============================================
+   Просмотрщик файлов (модальное окно)
+   ============================================ */
+
+.chat-file-viewer-overlay {
+    position: fixed;
+    inset: 0;
+    z-index: calc(var(--z-modal-backdrop, 1000) + 10);
+    background: var(--overlay-bg, rgba(0, 0, 0, 0.6));
+    backdrop-filter: blur(4px);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    animation: chatFileViewerFadeIn 0.2s ease;
+}
+
+.chat-file-viewer {
+    width: 800px;
+    max-width: 90vw;
+    height: 80vh;
+    max-height: 900px;
+    background: var(--bg-primary);
+    border-radius: var(--radius-lg);
+    border: var(--border-width-thin) solid var(--border-light);
+    box-shadow: var(--shadow-lg, 0 20px 60px rgba(0, 0, 0, 0.15));
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+    animation: chatFileViewerSlideUp 0.3s ease;
+}
+
+.chat-file-viewer-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: var(--spacing-md) var(--spacing-lg);
+    border-bottom: var(--border-width-thin) solid var(--border-light);
+    flex-shrink: 0;
+}
+
+.chat-file-viewer-title {
+    font-size: var(--font-size-sm);
+    font-weight: var(--font-weight-semibold, 600);
+    color: var(--text-primary);
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    flex: 1;
+    margin-right: var(--spacing-md);
+}
+
+.chat-file-viewer-actions {
+    display: flex;
+    align-items: center;
+    gap: var(--spacing-xs);
+    flex-shrink: 0;
+}
+
+.chat-file-viewer-btn {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    width: 32px;
+    height: 32px;
+    border: none;
+    background: transparent;
+    color: var(--text-secondary);
+    border-radius: var(--radius-md);
+    cursor: pointer;
+    transition: all var(--duration-fast);
+    text-decoration: none;
+}
+
+.chat-file-viewer-btn:hover {
+    background: var(--gray-100);
+    color: var(--text-primary);
+}
+
+/* Тело просмотрщика */
+.chat-file-viewer-body {
+    flex: 1;
+    overflow: auto;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    min-height: 0;
+}
+
+/* Текстовый контент */
+.chat-file-viewer-text {
+    width: 100%;
+    height: 100%;
+    margin: 0;
+    padding: var(--spacing-lg);
+    font-size: var(--font-size-sm);
+    font-family: 'Consolas', 'Monaco', 'Courier New', monospace;
+    color: var(--text-primary);
+    background: var(--bg-secondary);
+    border: none;
+    overflow: auto;
+    white-space: pre-wrap;
+    word-wrap: break-word;
+    line-height: 1.6;
+    tab-size: 4;
+}
+
+/* Изображение */
+.chat-file-viewer-image {
+    max-width: 100%;
+    max-height: 100%;
+    object-fit: contain;
+    border-radius: var(--radius-sm);
+}
+
+/* Iframe (PDF и другие) */
+.chat-file-viewer-iframe {
+    width: 100%;
+    height: 100%;
+    border: none;
+}
+
+/* Неподдерживаемый тип файла */
+.chat-file-viewer-unsupported {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: var(--spacing-md);
+    padding: var(--spacing-2xl);
+    color: var(--text-secondary);
+    text-align: center;
+}
+
+.chat-file-viewer-unsupported p {
+    margin: 0;
+    font-size: var(--font-size-sm);
+}
+
+.chat-file-viewer-unsupported svg {
+    color: var(--gray-300);
+}
+
+.chat-file-viewer-download-link {
+    display: inline-flex;
+    align-items: center;
+    gap: var(--spacing-xs);
+    padding: var(--spacing-sm) var(--spacing-lg);
+    background: var(--primary);
+    color: white;
+    border-radius: var(--radius-md);
+    text-decoration: none;
+    font-size: var(--font-size-sm);
+    font-weight: var(--font-weight-semibold, 600);
+    transition: background var(--duration-fast);
+}
+
+.chat-file-viewer-download-link:hover {
+    background: var(--primary-hover);
+}
+
+/* Анимации */
+@keyframes chatFileViewerFadeIn {
+    from { opacity: 0; }
+    to { opacity: 1; }
+}
+
+@keyframes chatFileViewerSlideUp {
+    from { transform: translateY(20px); opacity: 0; }
+    to { transform: translateY(0); opacity: 1; }
 }

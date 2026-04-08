@@ -34,6 +34,7 @@ class ChatDomainSettings(BaseModel):
         "image/*",
     ]
     max_files_per_message: int = Field(default=5, gt=0)
+    max_total_file_size: int = Field(default=30 * 1024 * 1024, gt=0)
 
     # Хранение
     max_conversations_per_user: int = Field(default=100, gt=0)

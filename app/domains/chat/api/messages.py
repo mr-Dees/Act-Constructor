@@ -12,6 +12,7 @@ from app.domains.chat.deps import (
     get_file_service,
     get_message_service,
 )
+from app.domains.chat.exceptions import ChatFileValidationError
 from app.domains.chat.schemas.responses import FileUploadResponse, MessageResponse
 from app.domains.chat.services.conversation_service import ConversationService
 from app.domains.chat.services.file_service import FileService
@@ -55,10 +56,31 @@ async def send_message(
         except json.JSONDecodeError:
             domains_list = [d.strip() for d in domains.split(",") if d.strip()]
 
-    # Сохраняем загруженные файлы
-    file_blocks: list[dict] = []
+    # Валидируем количество файлов
+    max_files = file_service.settings.max_files_per_message
+    if len(files) > max_files:
+        raise ChatFileValidationError(
+            f"Слишком много файлов (максимум {max_files}).",
+        )
+
+    # Читаем все файлы и проверяем суммарный размер
+    file_entries: list[tuple[UploadFile, bytes]] = []
+    total_size = 0
     for upload_file in files:
         file_data = await upload_file.read()
+        total_size += len(file_data)
+        file_entries.append((upload_file, file_data))
+
+    max_total = file_service.settings.max_total_file_size
+    if total_size > max_total:
+        max_mb = max_total / (1024 * 1024)
+        raise ChatFileValidationError(
+            f"Суммарный размер файлов слишком велик (максимум {max_mb:.0f} МБ).",
+        )
+
+    # Сохраняем файлы после валидации
+    file_blocks: list[dict] = []
+    for upload_file, file_data in file_entries:
         saved = await file_service.save_file(
             conversation_id=conversation_id,
             user_id=username,

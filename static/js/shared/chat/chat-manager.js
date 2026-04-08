@@ -688,7 +688,8 @@ class ChatManager {
         if (!fileInput) return;
 
         fileInput.addEventListener('change', () => {
-            for (const file of fileInput.files) {
+            const validated = this._validateFiles([...fileInput.files]);
+            for (const file of validated) {
                 this._pendingFiles.push(file);
             }
             fileInput.value = '';
@@ -740,7 +741,8 @@ class ChatManager {
             const files = e.dataTransfer?.files;
             if (!files || files.length === 0) return;
 
-            for (const file of files) {
+            const validated = this._validateFiles([...files]);
+            for (const file of validated) {
                 this._pendingFiles.push(file);
             }
             this._renderFilePreview();
@@ -758,6 +760,58 @@ class ChatManager {
             return e.dataTransfer.types.includes('Files');
         }
         return false;
+    }
+
+    /** Лимиты файлов (соответствуют серверным настройкам по умолчанию) */
+    static _FILE_LIMITS = {
+        maxFileSize: 10 * 1024 * 1024,       // 10 МБ на файл
+        maxFilesPerMessage: 5,                // файлов в сообщении
+        maxTotalFileSize: 30 * 1024 * 1024,   // 30 МБ суммарно
+    };
+
+    /**
+     * Валидирует новые файлы перед добавлением в очередь.
+     * Возвращает массив файлов, прошедших проверку.
+     *
+     * @param {File[]} newFiles — новые файлы для добавления
+     * @returns {File[]} валидные файлы
+     * @private
+     */
+    static _validateFiles(newFiles) {
+        const limits = this._FILE_LIMITS;
+        const currentSize = this._pendingFiles.reduce((sum, f) => sum + f.size, 0);
+        const currentCount = this._pendingFiles.length;
+
+        const accepted = [];
+        const errors = [];
+
+        for (const file of newFiles) {
+            if (file.size > limits.maxFileSize) {
+                const maxMb = (limits.maxFileSize / (1024 * 1024)).toFixed(0);
+                errors.push(`«${file.name}» превышает ${maxMb} МБ`);
+                continue;
+            }
+
+            if (currentCount + accepted.length >= limits.maxFilesPerMessage) {
+                errors.push(`Максимум ${limits.maxFilesPerMessage} файлов в сообщении`);
+                break;
+            }
+
+            const totalAfter = currentSize + accepted.reduce((s, f) => s + f.size, 0) + file.size;
+            if (totalAfter > limits.maxTotalFileSize) {
+                const maxMb = (limits.maxTotalFileSize / (1024 * 1024)).toFixed(0);
+                errors.push(`Суммарный размер файлов превышает ${maxMb} МБ`);
+                break;
+            }
+
+            accepted.push(file);
+        }
+
+        if (errors.length > 0 && typeof Notifications !== 'undefined') {
+            Notifications.warning(errors.join('. '));
+        }
+
+        return accepted;
     }
 
     /**
