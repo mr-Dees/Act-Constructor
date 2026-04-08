@@ -3,8 +3,7 @@
 import logging
 import uuid
 
-from fastapi import HTTPException
-
+from app.domains.chat.exceptions import ChatLimitError, ConversationNotFoundError
 from app.domains.chat.repositories.conversation_repository import ConversationRepository
 from app.domains.chat.settings import ChatDomainSettings
 
@@ -34,12 +33,9 @@ class ConversationService:
         """Создаёт новую беседу с проверкой лимита."""
         count = await self.conv_repo.count_by_user(user_id)
         if count >= self.settings.max_conversations_per_user:
-            raise HTTPException(
-                status_code=422,
-                detail=(
-                    f"Достигнут лимит бесед: {self.settings.max_conversations_per_user}. "
-                    f"Удалите старые беседы перед созданием новых."
-                ),
+            raise ChatLimitError(
+                f"Достигнут лимит бесед: {self.settings.max_conversations_per_user}. "
+                f"Удалите старые беседы перед созданием новых."
             )
 
         conversation_id = str(uuid.uuid4())
@@ -69,11 +65,11 @@ class ConversationService:
         Возвращает беседу по ID.
 
         Raises:
-            HTTPException(404): если беседа не найдена или не принадлежит пользователю.
+            ConversationNotFoundError: если беседа не найдена или не принадлежит пользователю.
         """
         conversation = await self.conv_repo.get_by_id(conversation_id, user_id)
         if not conversation:
-            raise HTTPException(status_code=404, detail="Беседа не найдена")
+            raise ConversationNotFoundError("Беседа не найдена")
         return conversation
 
     async def update_title(

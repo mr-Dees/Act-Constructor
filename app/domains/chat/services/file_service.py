@@ -4,8 +4,11 @@ import fnmatch
 import logging
 import uuid
 
-from fastapi import HTTPException
-
+from app.domains.chat.exceptions import (
+    ChatFileNotFoundError,
+    ChatFileValidationError,
+    ConversationNotFoundError,
+)
 from app.domains.chat.repositories.conversation_repository import ConversationRepository
 from app.domains.chat.repositories.file_repository import FileRepository
 from app.domains.chat.settings import ChatDomainSettings
@@ -38,13 +41,12 @@ class FileService:
         Валидирует параметры файла.
 
         Raises:
-            HTTPException(422): если файл не проходит валидацию.
+            ChatFileValidationError: если файл не проходит валидацию.
         """
         if file_size > self.settings.max_file_size:
             max_mb = self.settings.max_file_size / (1024 * 1024)
-            raise HTTPException(
-                status_code=422,
-                detail=f"Файл '{filename}' слишком большой (максимум {max_mb:.0f} МБ).",
+            raise ChatFileValidationError(
+                f"Файл '{filename}' слишком большой (максимум {max_mb:.0f} МБ).",
             )
 
         allowed = any(
@@ -52,9 +54,8 @@ class FileService:
             for pattern in self.settings.allowed_mime_types
         )
         if not allowed:
-            raise HTTPException(
-                status_code=422,
-                detail=f"Тип файла '{mime_type}' не поддерживается.",
+            raise ChatFileValidationError(
+                f"Тип файла '{mime_type}' не поддерживается.",
             )
 
     async def save_file(
@@ -70,12 +71,12 @@ class FileService:
         Сохраняет файл: проверяет принадлежность беседы, валидирует и создаёт запись.
 
         Raises:
-            HTTPException(404): если беседа не найдена.
-            HTTPException(422): если файл не проходит валидацию.
+            ConversationNotFoundError: если беседа не найдена.
+            ChatFileValidationError: если файл не проходит валидацию.
         """
         conversation = await self.conv_repo.get_by_id(conversation_id, user_id)
         if not conversation:
-            raise HTTPException(status_code=404, detail="Беседа не найдена")
+            raise ConversationNotFoundError("Беседа не найдена")
 
         file_size = len(file_data)
         self.validate_file(filename=filename, mime_type=mime_type, file_size=file_size)
@@ -95,9 +96,9 @@ class FileService:
         Возвращает файл с данными.
 
         Raises:
-            HTTPException(404): если файл не найден или не принадлежит пользователю.
+            ChatFileNotFoundError: если файл не найден или не принадлежит пользователю.
         """
         file_data = await self.file_repo.get_file_data(file_id=file_id, user_id=user_id)
         if not file_data:
-            raise HTTPException(status_code=404, detail="Файл не найден")
+            raise ChatFileNotFoundError("Файл не найден")
         return file_data

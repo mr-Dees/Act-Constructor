@@ -3,8 +3,7 @@
 import logging
 import uuid
 
-from fastapi import HTTPException
-
+from app.domains.chat.exceptions import ChatLimitError
 from app.domains.chat.repositories.conversation_repository import ConversationRepository
 from app.domains.chat.repositories.message_repository import MessageRepository
 from app.domains.chat.settings import ChatDomainSettings
@@ -41,22 +40,16 @@ class MessageService:
         Собирает блоки: текстовый + опциональные файловые.
         """
         if len(content) > self.settings.max_message_content_length:
-            raise HTTPException(
-                status_code=422,
-                detail=(
-                    f"Сообщение слишком длинное: {len(content)} символов "
-                    f"(максимум {self.settings.max_message_content_length})."
-                ),
+            raise ChatLimitError(
+                f"Сообщение слишком длинное: {len(content)} символов "
+                f"(максимум {self.settings.max_message_content_length})."
             )
 
         msg_count = await self.msg_repo.count_by_conversation(conversation_id)
         if msg_count >= self.settings.max_messages_per_conversation:
-            raise HTTPException(
-                status_code=422,
-                detail=(
-                    f"Достигнут лимит сообщений в беседе: "
-                    f"{self.settings.max_messages_per_conversation}."
-                ),
+            raise ChatLimitError(
+                f"Достигнут лимит сообщений в беседе: "
+                f"{self.settings.max_messages_per_conversation}."
             )
 
         # Собираем блоки контента
