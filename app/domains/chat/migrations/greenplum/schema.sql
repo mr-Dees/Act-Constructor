@@ -35,7 +35,7 @@ CREATE TABLE IF NOT EXISTS {SCHEMA}.{PREFIX}chat_messages (
     created_at      TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
 )
 WITH (appendonly=false)
-DISTRIBUTED BY (conversation_id);
+DISTRIBUTED BY (id);
 
 CREATE INDEX idx_{PREFIX}chat_messages_conversation
     ON {SCHEMA}.{PREFIX}chat_messages(conversation_id);
@@ -58,7 +58,7 @@ CREATE TABLE IF NOT EXISTS {SCHEMA}.{PREFIX}chat_files (
     created_at      TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
 )
 WITH (appendonly=false)
-DISTRIBUTED BY (conversation_id);
+DISTRIBUTED BY (id);
 
 CREATE INDEX idx_{PREFIX}chat_files_conversation
     ON {SCHEMA}.{PREFIX}chat_files(conversation_id);
