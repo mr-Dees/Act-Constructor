@@ -436,7 +436,10 @@ const ChatRenderer = {
         });
 
         ChatRenderer._fileViewerEscHandler = (e) => {
-            if (e.key === 'Escape') ChatRenderer._closeFileViewer();
+            if (e.key === 'Escape') {
+                e.stopImmediatePropagation();
+                ChatRenderer._closeFileViewer();
+            }
         };
         document.addEventListener('keydown', ChatRenderer._fileViewerEscHandler);
 
