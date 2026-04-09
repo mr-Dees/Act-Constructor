@@ -1038,13 +1038,20 @@ class CreateActDialog extends DialogBase {
             return true; // КМ не изменился
         }
 
-        return await DialogManager.show({
+        const confirmed = await DialogManager.show({
             title: 'Изменение КМ',
             message: `Вы изменяете КМ с ${originalKm} на ${newKm}. Акт будет перемещен в новую группу КМ. Продолжить?`,
             icon: '⚠️',
             confirmText: 'Продолжить',
             cancelText: 'Отмена'
         });
+
+        // Обновляем originalKm после подтверждения, чтобы повторный вызов не показал диалог снова
+        if (confirmed) {
+            form.dataset.originalKm = newKm;
+        }
+
+        return confirmed;
     }
 
     /**
