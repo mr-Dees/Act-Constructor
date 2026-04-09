@@ -7,6 +7,8 @@
  */
 const ChatUI = {
 
+    /** @type {boolean} */
+    _initialized: false,
     /** @type {HTMLElement|null} */
     _messagesContainer: null,
     /** @type {HTMLInputElement|null} */
@@ -25,6 +27,7 @@ const ChatUI = {
      * @param {HTMLButtonElement} data.sendBtn
      */
     init({ messagesContainer, input, sendBtn }) {
+        if (this._initialized) return;
         this._messagesContainer = messagesContainer;
         this._input = input;
         this._sendBtn = sendBtn;
@@ -33,6 +36,8 @@ const ChatUI = {
         ChatEventBus.on('ui:scroll-bottom', () => this._scrollToBottom());
         ChatEventBus.on('ui:typing-show', () => this._showTypingIndicator());
         ChatEventBus.on('ui:typing-hide', () => this._removeTypingIndicator());
+
+        this._initialized = true;
     },
 
     /**

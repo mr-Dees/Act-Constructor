@@ -6,6 +6,8 @@
  */
 const ChatFiles = {
 
+    /** @type {boolean} */
+    _initialized: false,
     /** @type {File[]} Файлы, ожидающие отправки */
     _pendingFiles: [],
 
@@ -26,12 +28,15 @@ const ChatFiles = {
      * @param {HTMLElement} data.messagesContainer
      */
     init({ messagesContainer }) {
+        if (this._initialized) return;
         this._messagesContainer = messagesContainer;
         this._initFileInput();
         this._initDragAndDrop();
 
         ChatEventBus.on('context:conversation-cleared', () => this.clear());
         ChatEventBus.on('context:conversation-switched', () => this.clear());
+
+        this._initialized = true;
     },
 
     /**

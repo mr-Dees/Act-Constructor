@@ -16,6 +16,8 @@ class ChatManager {
 
     /** @type {boolean} */
     static _initialized = false;
+    /** @type {HTMLInputElement|null} */
+    static _input = null;
 
     /**
      * Инициализация: кеширование DOM, запуск модулей

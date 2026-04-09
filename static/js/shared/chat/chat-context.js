@@ -6,6 +6,8 @@
  */
 const ChatContext = {
 
+    /** @type {boolean} */
+    _initialized: false,
     /** @type {string|null} ID текущей активной беседы */
     _currentConversationId: null,
 
@@ -16,6 +18,7 @@ const ChatContext = {
      * Инициализация: подключение ChatHistory callback
      */
     init() {
+        if (this._initialized) return;
         const historyContainer = document.getElementById('chatHistoryContainer');
         if (historyContainer && typeof ChatHistory !== 'undefined') {
             ChatHistory.init(historyContainer);
@@ -28,6 +31,8 @@ const ChatContext = {
         ChatEventBus.on('chat:clear', () => {
             this._currentConversationId = null;
         });
+
+        this._initialized = true;
     },
 
     /**

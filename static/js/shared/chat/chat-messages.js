@@ -6,6 +6,8 @@
  */
 const ChatMessages = {
 
+    /** @type {boolean} */
+    _initialized: false,
     /** @type {HTMLElement|null} */
     _messagesContainer: null,
 
@@ -22,6 +24,7 @@ const ChatMessages = {
      * @param {HTMLElement} data.messagesContainer
      */
     init({ messagesContainer }) {
+        if (this._initialized) return;
         this._messagesContainer = messagesContainer;
 
         // Кэшируем welcome-сообщение для восстановления при очистке
@@ -37,6 +40,8 @@ const ChatMessages = {
             this._streamingBlocks = {};
             this._restoreWelcome();
         });
+
+        this._initialized = true;
     },
 
     /**
