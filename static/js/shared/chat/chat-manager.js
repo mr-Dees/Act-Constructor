@@ -1,527 +1,171 @@
 /**
- * Менеджер чата с AI-ассистентом
+ * Менеджер чата с AI-ассистентом — фасад
  *
- * Управляет отправкой/приёмом сообщений, историей (sessionStorage),
- * typing-индикатором и блокировкой UI во время обработки.
+ * Тонкий оркестратор: инициализирует модули, делегирует
+ * вызовы через ChatEventBus. Сохраняет обратную совместимость
+ * публичного API для ChatModalManager, ChatPopupManager и LandingPage.
  *
- * Точка замены эхо на реальный API — метод _getResponse().
+ * Модули:
+ *   ChatEventBus  — шина событий
+ *   ChatUI        — typing, processing, scroll, resize
+ *   ChatFiles     — валидация, drag-drop, превью файлов
+ *   ChatContext   — KB, домены, conversation management
+ *   ChatMessages  — отправка, SSE-роутинг, рендеринг сообщений
  */
 class ChatManager {
-    /** @type {Array<{role: string, content: string, timestamp: number}>} */
-    static _history = [];
-
-    /** @type {HTMLElement|null} */
-    static _messagesContainer = null;
-    /** @type {HTMLInputElement|null} */
-    static _input = null;
-    /** @type {HTMLButtonElement|null} */
-    static _sendBtn = null;
-    /** @type {HTMLElement|null} */
-    static _placeholder = null;
-    /** @type {HTMLButtonElement|null} */
-    static _clearBtn = null;
 
     /** @type {boolean} */
-    static _isProcessing = false;
-
-    static _historyKey = 'chat_history';
-
-    /** @type {Object<string, string>|null} Маппинг key→label баз знаний (загружается из DOM) */
-    static _knowledgeBaseMap = null;
-
-    /** @type {string} HTML welcome-сообщения для восстановления при очистке */
-    static _welcomeHtml = '';
+    static _initialized = false;
+    /** @type {HTMLInputElement|null} */
+    static _input = null;
 
     /**
-     * Инициализация: кеширование DOM, обработчики, восстановление истории
+     * Инициализация: кеширование DOM, запуск модулей
      */
     static init() {
-        this._messagesContainer = document.querySelector('.chat-messages');
-        this._input = document.querySelector('.chat-input');
-        this._sendBtn = document.querySelector('.chat-send-btn');
-        this._placeholder = document.querySelector('.chat-placeholder');
+        if (this._initialized) return;
 
-        if (!this._messagesContainer || !this._input || !this._sendBtn) {
+        const messagesContainer = document.querySelector('.chat-messages');
+        const input = document.querySelector('.chat-input');
+        const sendBtn = document.querySelector('.chat-send-btn');
+
+        if (!messagesContainer || !input || !sendBtn) {
             console.warn('ChatManager: не найдены необходимые DOM-элементы');
             return;
         }
 
         // Активируем input и кнопку
-        this._input.disabled = false;
-        this._input.placeholder = 'Введите сообщение...';
-        this._sendBtn.disabled = false;
+        input.disabled = false;
+        input.placeholder = 'Введите сообщение...';
+        sendBtn.disabled = false;
 
         // Скрываем placeholder
-        if (this._placeholder) {
-            this._placeholder.classList.add('chat-placeholder-hidden');
+        const placeholder = document.querySelector('.chat-placeholder');
+        if (placeholder) {
+            placeholder.classList.add('chat-placeholder-hidden');
         }
 
-        // Кэшируем welcome-сообщение для восстановления при очистке
-        const welcomeEl = this._messagesContainer.querySelector('.chat-message-bot');
-        if (welcomeEl) {
-            this._welcomeHtml = welcomeEl.outerHTML;
-        }
+        // Инициализация модулей
+        const domRefs = { messagesContainer, input, sendBtn };
 
-        // Сохраняем welcome-сообщение в историю с sentinel timestamp
-        const welcomeMsg = this._messagesContainer.querySelector('.chat-message-bot .chat-message-content');
-        if (welcomeMsg) {
-            this._history.push({
-                role: 'assistant',
-                content: welcomeMsg.textContent.trim(),
-                timestamp: 0
-            });
-        }
+        ChatUI.init(domRefs);
+        ChatFiles.init(domRefs);
+        ChatMessages.init(domRefs);
+        ChatContext.init();
 
         // Кнопка очистки чата
-        this._clearBtn = document.querySelector('.chat-clear-btn');
-        if (this._clearBtn) {
-            this._clearBtn.addEventListener('click', () => {
-                this.clearChat();
-            });
+        const clearBtn = document.querySelector('.chat-clear-btn');
+        if (clearBtn) {
+            clearBtn.addEventListener('click', () => this.clearChat());
         }
 
-        // Обработчики
-        this._input.addEventListener('keydown', (e) => {
+        // Обработчики ввода
+        input.addEventListener('keydown', (e) => {
             if (e.key === 'Enter' && !e.shiftKey) {
                 e.preventDefault();
                 this.sendMessage();
             }
         });
 
-        // Авторесайз textarea при вводе / shift+enter
-        this._input.addEventListener('input', () => {
-            this._autoResizeInput();
+        input.addEventListener('input', () => {
+            ChatUI.autoResizeInput();
         });
 
-        this._sendBtn.addEventListener('click', () => {
+        sendBtn.addEventListener('click', () => {
             this.sendMessage();
         });
 
-        // Восстанавливаем историю из sessionStorage
-        this._restoreHistory();
-
+        this._input = input;
+        this._initialized = true;
         console.log('ChatManager: инициализация завершена');
     }
 
     /**
      * Отправляет сообщение пользователя
      */
-    static sendMessage() {
-        if (this._isProcessing) return;
+    static async sendMessage() {
+        if (ChatUI.isProcessing()) return;
 
         const text = this._input.value.trim();
         if (!text) return;
 
+        const files = ChatFiles.getPendingFiles();
+
         this._input.value = '';
-        this._autoResizeInput();
-        this._addUserMessage(text);
-        this._processResponse(text);
+        ChatUI.autoResizeInput();
+
+        ChatEventBus.emit('chat:send-request', { text, files });
     }
 
     /**
-     * Обрабатывает ответ: typing → получение → вывод
-     * @param {string} userText
-     * @private
+     * Отправляет быстрый ответ (quick reply) из кнопки ChatRenderer
+     * @param {string} value — текст быстрого ответа
      */
-    static async _processResponse(userText) {
-        this._setProcessing(true);
-        this._showTypingIndicator();
-
-        try {
-            const response = await this._getResponse(userText, this._history);
-            this._removeTypingIndicator();
-            this._addBotMessage(response);
-        } catch (err) {
-            this._removeTypingIndicator();
-            this._addBotMessage('Произошла ошибка. Попробуйте ещё раз.');
-            console.error('ChatManager: ошибка получения ответа', err);
-        } finally {
-            this._setProcessing(false);
-        }
+    static sendQuickReply(value) {
+        if (ChatUI.isProcessing() || !value) return;
+        this._input.value = value;
+        this.sendMessage();
     }
 
     /**
-     * Получает ответ от API чата.
-     *
-     * Отправляет POST /api/v1/chat/message с текстом и историей.
-     * При ошибке API возвращает fallback эхо-ответ.
-     *
-     * @param {string} userText — текст пользователя
-     * @param {Array} history — полная история диалога
-     * @returns {Promise<string>}
+     * Выполняет действие (action) из кнопки ChatRenderer
+     * @param {string} actionId — идентификатор действия
+     * @param {Object} params — параметры действия
      */
-    static async _getResponse(userText, history) {
+    static async executeAction(actionId, params = {}) {
+        if (ChatUI.isProcessing()) return;
+
+        ChatEventBus.emit('ui:processing', { state: true });
+        ChatEventBus.emit('ui:typing-show');
+
         try {
-            // Определяем act_id из URL (контекст конструктора)
-            const urlParams = new URLSearchParams(window.location.search);
-            const actId = urlParams.get('act_id');
-
-            // Фильтруем welcome-сообщение (timestamp === 0) из истории
-            const filteredHistory = history
-                .filter(entry => entry.timestamp !== 0)
-                .map(entry => ({
-                    role: entry.role,
-                    content: entry.content,
-                    timestamp: entry.timestamp
-                }));
-
-            const body = {
-                message: userText,
-                history: filteredHistory,
-            };
-
-            if (actId) {
-                body.act_id = parseInt(actId, 10);
-            }
-
-            // Подключённые базы знаний из общих настроек
-            body.knowledge_bases = this._getEnabledKnowledgeBases();
-
-            // Фильтрация tools по доменам текущей страницы
-            const domains = this._detectDomains();
-            if (domains) {
-                body.domains = domains;
-            }
-
-            // Формируем URL через AppConfig (поддержка JupyterHub proxy)
+            const conversationId = await ChatContext.ensureConversation();
+            const endpoint = `/api/v1/chat/conversations/${conversationId}/actions/${actionId}`;
             const url = typeof AppConfig !== 'undefined'
-                ? AppConfig.api.getUrl('api/v1/chat/message')
-                : '/api/v1/chat/message';
+                ? AppConfig.api.getUrl(endpoint)
+                : endpoint;
 
-            const res = await fetch(url, {
+            const headers = {
+                'Content-Type': 'application/json',
+            };
+            if (typeof AuthManager !== 'undefined' && AuthManager.getCurrentUser()) {
+                Object.assign(headers, AuthManager.getAuthHeaders());
+            }
+
+            const response = await fetch(url, {
                 method: 'POST',
-                headers: {
-                    'Content-Type': 'application/json',
-                    ...(typeof AuthManager !== 'undefined' && AuthManager.getCurrentUser()
-                        ? AuthManager.getAuthHeaders()
-                        : {}
-                    )
-                },
-                body: JSON.stringify(body)
+                headers,
+                body: JSON.stringify(params),
             });
 
-            if (!res.ok) {
-                throw new Error(`HTTP ${res.status}`);
+            ChatEventBus.emit('ui:typing-hide');
+
+            if (!response.ok) {
+                throw new Error(`HTTP ${response.status}`);
             }
 
-            const data = await res.json();
-            return data.response;
+            const data = await response.json();
+            if (data.message) {
+                ChatMessages.renderMessage('bot', data.message);
+            }
         } catch (err) {
-            console.warn('ChatManager: ошибка API, используется fallback', err);
-
-            // Fallback: эхо-ответ при недоступности API
-            return `Вы написали: «${userText}»\n\nНе удалось связаться с сервером. Попробуйте позже.`;
+            ChatEventBus.emit('ui:typing-hide');
+            console.error('ChatManager: ошибка выполнения действия', err);
+            ChatMessages.renderMessage('bot', 'Не удалось выполнить действие. Попробуйте ещё раз.');
+        } finally {
+            ChatEventBus.emit('ui:processing', { state: false });
         }
     }
 
     /**
-     * Загружает маппинг key→label баз знаний из DOM (meta-тег или data-атрибуты)
-     * @returns {Object<string, string>}
-     * @private
-     */
-    static _getKnowledgeBaseMap() {
-        if (this._knowledgeBaseMap !== null) return this._knowledgeBaseMap;
-
-        this._knowledgeBaseMap = {};
-
-        // Источник 1: meta-тег chat-knowledge-bases (JSON массив)
-        const meta = document.querySelector('meta[name="chat-knowledge-bases"]');
-        if (meta) {
-            try {
-                const bases = JSON.parse(meta.content);
-                if (Array.isArray(bases)) {
-                    for (const kb of bases) {
-                        if (kb.key && kb.label) {
-                            this._knowledgeBaseMap[kb.key] = kb.label;
-                        }
-                    }
-                    return this._knowledgeBaseMap;
-                }
-            } catch { /* fallback ниже */ }
-        }
-
-        // Источник 2: data-атрибуты DOM-элементов (settings toggles)
-        const options = document.querySelectorAll('.settings-option[data-kb-key]');
-        for (const opt of options) {
-            const key = opt.dataset.kbKey;
-            const label = opt.dataset.kbLabel;
-            if (key && label) {
-                this._knowledgeBaseMap[key] = label;
-            }
-        }
-
-        return this._knowledgeBaseMap;
-    }
-
-    /**
-     * Читает включённые базы знаний из localStorage (общий ключ для всех страниц)
-     * @returns {string[]} массив label включённых баз
-     * @private
-     */
-    static _getEnabledKnowledgeBases() {
-        try {
-            const data = localStorage.getItem('assistant_knowledge_bases');
-            if (!data) return [];
-
-            const state = JSON.parse(data);
-            const kbMap = this._getKnowledgeBaseMap();
-            const enabled = [];
-            for (const [key, label] of Object.entries(kbMap)) {
-                if (state[key]) enabled.push(label);
-            }
-            return enabled;
-        } catch {
-            return [];
-        }
-    }
-
-    /**
-     * Определяет список доменов для фильтрации tools из meta-тега.
-     * Бэкенд передаёт chat_domains через <meta name="chat-domains">.
-     * @returns {string[]|null} массив доменов или null (все tools)
-     * @private
-     */
-    static _detectDomains() {
-        const meta = document.querySelector('meta[name="chat-domains"]');
-        if (!meta) return null;
-
-        try {
-            const domains = JSON.parse(meta.content);
-            return Array.isArray(domains) ? domains : null;
-        } catch {
-            return null;
-        }
-    }
-
-    /**
-     * Добавляет сообщение пользователя в DOM и историю
-     * @param {string} text
-     * @private
-     */
-    static _addUserMessage(text) {
-        this._renderMessage('user', text);
-        this._pushToHistory('user', text);
-    }
-
-    /**
-     * Добавляет сообщение бота в DOM и историю
-     * @param {string} text
-     * @private
-     */
-    static _addBotMessage(text) {
-        this._renderMessage('bot', text);
-        this._pushToHistory('assistant', text);
-    }
-
-    /**
-     * Создаёт DOM-элемент сообщения и вставляет в контейнер
-     * @param {'user'|'bot'} role
-     * @param {string} text
-     * @private
-     */
-    static _renderMessage(role, text) {
-        const msg = document.createElement('div');
-        msg.className = `chat-message chat-message-${role}`;
-
-        const avatar = document.createElement('div');
-        avatar.className = 'chat-message-avatar';
-
-        if (role === 'bot') {
-            avatar.innerHTML = `<svg width="20" height="20" viewBox="0 0 24 24" fill="none">
-                <path d="M9.75 17L9 20l-1 1h8l-1-1-.75-3M3 13h18M5 17h14a2 2 0 002-2V5a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z"
-                      stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
-            </svg>`;
-        } else {
-            avatar.innerHTML = `<svg width="20" height="20" viewBox="0 0 24 24" fill="none">
-                <path d="M20 21v-2a4 4 0 00-4-4H8a4 4 0 00-4 4v2M12 11a4 4 0 100-8 4 4 0 000 8z"
-                      stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
-            </svg>`;
-        }
-
-        const content = document.createElement('div');
-        content.className = 'chat-message-content';
-
-        const lines = text.split('\n');
-        for (const line of lines) {
-            const p = document.createElement('p');
-            p.textContent = line;
-            content.appendChild(p);
-        }
-
-        msg.appendChild(avatar);
-        msg.appendChild(content);
-
-        this._messagesContainer.appendChild(msg);
-        this._scrollToBottom();
-    }
-
-    /**
-     * Показывает typing-индикатор (три анимированные точки)
-     * @private
-     */
-    static _showTypingIndicator() {
-        const indicator = document.createElement('div');
-        indicator.className = 'chat-message chat-message-bot chat-typing-indicator';
-
-        const avatar = document.createElement('div');
-        avatar.className = 'chat-message-avatar';
-        avatar.innerHTML = `<svg width="20" height="20" viewBox="0 0 24 24" fill="none">
-            <path d="M9.75 17L9 20l-1 1h8l-1-1-.75-3M3 13h18M5 17h14a2 2 0 002-2V5a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z"
-                  stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
-        </svg>`;
-
-        const content = document.createElement('div');
-        content.className = 'chat-message-content';
-        content.innerHTML = '<span class="chat-typing-dot"></span><span class="chat-typing-dot"></span><span class="chat-typing-dot"></span>';
-
-        indicator.appendChild(avatar);
-        indicator.appendChild(content);
-
-        this._messagesContainer.appendChild(indicator);
-        this._scrollToBottom();
-    }
-
-    /**
-     * Убирает typing-индикатор
-     * @private
-     */
-    static _removeTypingIndicator() {
-        const indicator = this._messagesContainer.querySelector('.chat-typing-indicator');
-        if (indicator) {
-            indicator.remove();
-        }
-    }
-
-    /**
-     * Добавляет запись в историю и сохраняет в sessionStorage
-     * @param {'user'|'assistant'} role
-     * @param {string} content
-     * @private
-     */
-    static _pushToHistory(role, content) {
-        const entry = { role, content, timestamp: Date.now() };
-        this._history.push(entry);
-        this._saveHistory();
-    }
-
-    /**
-     * Сохраняет историю в sessionStorage
-     * @private
-     */
-    static _saveHistory() {
-        try {
-            sessionStorage.setItem(this._historyKey, JSON.stringify(this._history));
-        } catch (e) {
-            console.warn('ChatManager: не удалось сохранить историю в sessionStorage', e);
-        }
-    }
-
-    /**
-     * Восстанавливает историю из sessionStorage и ре-рендерит сообщения
-     * @private
-     */
-    static _restoreHistory() {
-        try {
-            const data = sessionStorage.getItem(this._historyKey);
-            if (!data) return;
-
-            const saved = JSON.parse(data);
-            if (!Array.isArray(saved) || saved.length === 0) return;
-
-            // Очищаем текущую историю и контейнер сообщений
-            this._history = [];
-            this._messagesContainer.innerHTML = '';
-
-            for (const entry of saved) {
-                this._history.push(entry);
-
-                // Пропускаем welcome-сообщение (sentinel timestamp === 0)
-                if (entry.timestamp === 0) continue;
-
-                const displayRole = entry.role === 'assistant' ? 'bot' : 'user';
-                this._renderMessage(displayRole, entry.content);
-            }
-        } catch (e) {
-            console.warn('ChatManager: не удалось восстановить историю', e);
-        }
-    }
-
-    /**
-     * Устанавливает состояние обработки (блокировка UI)
-     * @param {boolean} state
-     * @private
-     */
-    static _setProcessing(state) {
-        this._isProcessing = state;
-
-        const container = this._input.closest('.chat-input-container');
-        if (container) {
-            container.classList.toggle('processing', state);
-        }
-
-        this._sendBtn.disabled = state;
-        this._input.disabled = state;
-
-        if (!state) {
-            this._input.focus();
-        }
-    }
-
-    /**
-     * Прокручивает контейнер сообщений вниз
-     * @private
-     */
-    static _scrollToBottom() {
-        this._messagesContainer.scrollTop = this._messagesContainer.scrollHeight;
-    }
-
-    /**
-     * Авторесайз textarea: подстраивает высоту под содержимое (макс. 5 строк)
-     * @private
-     */
-    static _autoResizeInput() {
-        if (!this._input) return;
-        this._input.style.height = 'auto';
-        const maxHeight = parseInt(getComputedStyle(this._input).lineHeight, 10) * 5 || 120;
-        this._input.style.height = Math.min(this._input.scrollHeight, maxHeight) + 'px';
-    }
-
-    /**
-     * Возвращает текущую историю диалога (для будущего API)
-     * @returns {Array<{role: string, content: string, timestamp: number}>}
-     */
-    static getHistory() {
-        return [...this._history];
-    }
-
-    /**
-     * Очищает историю и sessionStorage
-     */
-    static clearHistory() {
-        this._history = [];
-        sessionStorage.removeItem(this._historyKey);
-    }
-
-    /**
-     * Полная очистка чата: DOM, история, восстановление welcome-сообщения
+     * Полная очистка чата
      */
     static clearChat() {
-        if (this._isProcessing) return;
+        if (ChatUI.isProcessing()) return;
 
-        this.clearHistory();
-        this._messagesContainer.innerHTML = this._welcomeHtml;
-
-        // Восстанавливаем welcome-запись в историю
-        const welcomeMsg = this._messagesContainer.querySelector('.chat-message-bot .chat-message-content');
-        if (welcomeMsg) {
-            this._history.push({
-                role: 'assistant',
-                content: welcomeMsg.textContent.trim(),
-                timestamp: 0
-            });
-        }
+        ChatFiles.clear();
+        ChatEventBus.emit('chat:clear');
     }
 }
 
-// Экспортируем в глобальную область видимости
 window.ChatManager = ChatManager;

@@ -25,3 +25,5 @@
 
 /* Shared chat */
 @import '../shared/chat/chat.css';
+@import '../shared/chat/chat-blocks.css';
+@import '../shared/chat/chat-history.css';

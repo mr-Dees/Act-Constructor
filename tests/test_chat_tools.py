@@ -2,7 +2,7 @@
 
 import pytest
 
-from app.core.chat_tools import (
+from app.core.chat.tools import (
     ChatTool,
     ChatToolParam,
     get_all_tools,

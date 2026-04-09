@@ -1,10 +1,14 @@
 """
 Middleware для FastAPI приложения.
 
+Все middleware реализованы как raw ASGI — без BaseHTTPMiddleware,
+который буферизирует тело ответа и ломает SSE-стриминг.
+
 Содержит middleware классы для:
 - Форсирования HTTPS схемы за прокси (HTTPSRedirectMiddleware)
 - Ограничения частоты запросов (RateLimitMiddleware)
 - Ограничения размера тела запроса (RequestSizeLimitMiddleware)
+- Назначения request_id (RequestIdMiddleware)
 """
 
 import asyncio
@@ -14,9 +18,6 @@ import uuid
 from datetime import datetime, timedelta
 
 from cachetools import TTLCache
-from fastapi import Request
-from fastapi.responses import JSONResponse
-from starlette.middleware.base import BaseHTTPMiddleware
 
 from app.core.config import Settings, get_settings, request_id_var
 
@@ -24,7 +25,7 @@ settings = get_settings()
 logger = logging.getLogger("audit_workstation.middleware")
 
 
-class HTTPSRedirectMiddleware(BaseHTTPMiddleware):
+class HTTPSRedirectMiddleware:
     """
     Middleware для форсирования HTTPS схемы в запросах.
 
@@ -32,35 +33,22 @@ class HTTPSRedirectMiddleware(BaseHTTPMiddleware):
     который проксирует HTTPS, но отправляет запросы по HTTP.
     """
 
-    async def dispatch(self, request: Request, call_next):
-        """
-        Перезаписывает схему на HTTPS если запрос пришел через прокси.
+    def __init__(self, app):
+        self.app = app
 
-        Args:
-            request: HTTP запрос
-            call_next: Следующий middleware в цепочке
+    async def __call__(self, scope, receive, send):
+        if scope["type"] == "http":
+            headers = dict(scope.get("headers", []))
+            if (
+                headers.get(b"x-forwarded-proto") == b"https"
+                or headers.get(b"x-scheme") == b"https"
+            ):
+                scope["scheme"] = "https"
 
-        Returns:
-            HTTP ответ
-        """
-        # Проверяем заголовки прокси
-        forwarded_proto = request.headers.get("x-forwarded-proto")
-        forwarded_scheme = request.headers.get("x-scheme")
-
-        # Если есть признаки HTTPS прокси - форсируем HTTPS
-        if forwarded_proto == "https" or forwarded_scheme == "https":
-            # Создаем новый scope с HTTPS схемой
-            scope = request.scope
-            scope["scheme"] = "https"
-
-            # Пересоздаем Request с новым scope
-            request = Request(scope, request.receive)
-
-        response = await call_next(request)
-        return response
+        await self.app(scope, receive, send)
 
 
-class RateLimitMiddleware(BaseHTTPMiddleware):
+class RateLimitMiddleware:
     """
     Middleware для ограничения частоты запросов (rate limiting).
 
@@ -69,15 +57,7 @@ class RateLimitMiddleware(BaseHTTPMiddleware):
     """
 
     def __init__(self, app, rate_limit: int, settings: Settings):
-        """
-        Инициализация middleware.
-
-        Args:
-            app: FastAPI приложение
-            rate_limit: Максимум запросов в минуту на IP
-            settings: Настройки приложения
-        """
-        super().__init__(app)
+        self.app = app
         self.rate_limit = rate_limit
 
         # TTLCache автоматически удаляет старые записи.
@@ -87,7 +67,6 @@ class RateLimitMiddleware(BaseHTTPMiddleware):
         )
 
         # asyncio.Lock — корректный примитив для async-кода.
-        # В отличие от threading.Lock, не блокирует event loop.
         self.lock = asyncio.Lock()
 
         logger.info(
@@ -95,23 +74,17 @@ class RateLimitMiddleware(BaseHTTPMiddleware):
             f"max_ips={settings.security.max_tracked_ips}, ttl={settings.security.rate_limit_ttl}s"
         )
 
-    async def dispatch(self, request: Request, call_next):
-        """
-        Обрабатывает каждый запрос с проверкой лимита.
+    async def __call__(self, scope, receive, send):
+        if scope["type"] != "http":
+            await self.app(scope, receive, send)
+            return
 
-        Args:
-            request: HTTP запрос
-            call_next: Следующий middleware в цепочке
-
-        Returns:
-            HTTP ответ или 429 при превышении лимита
-        """
-        client_ip = request.client.host if request.client else "unknown"
+        client = scope.get("client")
+        client_ip = client[0] if client else "unknown"
         now = datetime.now()
         cutoff_time = now - timedelta(minutes=1)
 
         async with self.lock:
-            # Получаем или создаем список запросов для IP
             if client_ip not in self.requests:
                 self.requests[client_ip] = []
 
@@ -120,30 +93,35 @@ class RateLimitMiddleware(BaseHTTPMiddleware):
             # Скользящее окно: отбрасываем метки старше 60 секунд
             recent_requests = [ts for ts in ip_requests if ts > cutoff_time]
 
-            # Проверка лимита
             if len(recent_requests) >= self.rate_limit:
                 logger.warning(f"Rate limit превышен для IP: {client_ip}")
-                return JSONResponse(
-                    status_code=429,
-                    content={
-                        "detail": "Слишком много запросов. Попробуйте позже.",
-                        "retry_after": 60
-                    }
-                )
+                body = json.dumps({
+                    "detail": "Слишком много запросов. Попробуйте позже.",
+                    "retry_after": 60,
+                }).encode("utf-8")
+                await send({
+                    "type": "http.response.start",
+                    "status": 429,
+                    "headers": [
+                        [b"content-type", b"application/json"],
+                        [b"content-length", str(len(body)).encode()],
+                    ],
+                })
+                await send({
+                    "type": "http.response.body",
+                    "body": body,
+                })
+                return
 
-            # Добавляем текущий запрос
             recent_requests.append(now)
             self.requests[client_ip] = recent_requests
 
-        response = await call_next(request)
-        return response
+        await self.app(scope, receive, send)
 
 
 # Используется raw ASGI middleware вместо BaseHTTPMiddleware, т.к. BaseHTTPMiddleware
 # буферизует тело запроса целиком до вызова dispatch(), что делает невозможным
 # потоковый контроль размера при chunked transfer encoding (без Content-Length).
-# Остальные middleware (rate limit, HTTPS redirect) не работают с телом запроса
-# и безопасно используют BaseHTTPMiddleware.
 class RequestSizeLimitMiddleware:
     """
     Middleware для ограничения размера тела запроса.
@@ -228,7 +206,7 @@ class RequestSizeLimitMiddleware:
         })
 
 
-class RequestIdMiddleware(BaseHTTPMiddleware):
+class RequestIdMiddleware:
     """
     Назначает уникальный request_id каждому входящему запросу.
 
@@ -237,9 +215,32 @@ class RequestIdMiddleware(BaseHTTPMiddleware):
     в рамках обработки запроса. Возвращает request_id в заголовке ответа.
     """
 
-    async def dispatch(self, request: Request, call_next):
-        request_id = request.headers.get("X-Request-ID") or uuid.uuid4().hex[:8]
+    def __init__(self, app):
+        self.app = app
+
+    async def __call__(self, scope, receive, send):
+        if scope["type"] != "http":
+            await self.app(scope, receive, send)
+            return
+
+        # Извлекаем X-Request-ID из заголовков запроса
+        request_id = None
+        for name, value in scope.get("headers", []):
+            if name == b"x-request-id":
+                request_id = value.decode()
+                break
+
+        if not request_id:
+            request_id = uuid.uuid4().hex[:8]
+
         request_id_var.set(request_id)
-        response = await call_next(request)
-        response.headers["X-Request-ID"] = request_id
-        return response
+
+        # Добавляем X-Request-ID в заголовки ответа
+        async def send_wrapper(message):
+            if message["type"] == "http.response.start":
+                headers = list(message.get("headers", []))
+                headers.append([b"x-request-id", request_id.encode()])
+                message = {**message, "headers": headers}
+            await send(message)
+
+        await self.app(scope, receive, send_wrapper)

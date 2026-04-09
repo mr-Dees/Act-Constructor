@@ -15,7 +15,7 @@ from typing import Awaitable
 from fastapi import APIRouter, FastAPI
 from pydantic import BaseModel
 
-from app.core.chat_tools import ChatTool
+from app.core.chat.tools import ChatTool
 
 
 @dataclass(frozen=True)

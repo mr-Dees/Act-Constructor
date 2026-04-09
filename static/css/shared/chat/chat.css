@@ -60,6 +60,21 @@
     color: var(--text-primary);
 }
 
+/* Тело чата: сайдбар истории + зона сообщений */
+.chat-body {
+    display: flex;
+    flex: 1;
+    overflow: hidden;
+    position: relative;
+}
+
+.chat-messages-wrapper {
+    display: flex;
+    flex-direction: column;
+    flex: 1;
+    overflow: hidden;
+}
+
 .chat-messages {
     flex: 1;
     overflow-y: auto;
@@ -120,14 +135,31 @@
     flex-shrink: 0;
 }
 
+/* Обёртка textarea + кнопка прикрепления */
+.chat-input-wrapper {
+    flex: 1;
+    display: flex;
+    align-items: flex-end;
+    position: relative;
+    border: var(--border-width-thin) solid var(--border-light);
+    border-radius: var(--radius-md);
+    background: var(--bg-secondary);
+    transition: border-color var(--duration-fast);
+}
+
+.chat-input-wrapper:focus-within {
+    border-color: var(--primary);
+}
+
 .chat-input {
     flex: 1;
     padding: var(--spacing-md) var(--spacing-lg);
-    border: var(--border-width-thin) solid var(--border-light);
+    padding-right: var(--spacing-4xl);
+    border: none;
     border-radius: var(--radius-md);
     font-size: var(--font-size-sm);
     color: var(--text-primary);
-    background: var(--bg-secondary);
+    background: transparent;
     font-family: inherit;
     resize: none;
     overflow-y: auto;
@@ -141,7 +173,6 @@
 
 .chat-input:focus:not(:disabled) {
     outline: none;
-    border-color: var(--primary);
 }
 
 .chat-send-btn {
@@ -245,6 +276,99 @@
 @keyframes chatTypingBounce {
     0%, 80%, 100% { transform: scale(0.6); opacity: 0.4; }
     40% { transform: scale(1); opacity: 1; }
+}
+
+/* Кнопка прикрепления файла (внутри input-wrapper) */
+.chat-attach-btn {
+    background: none;
+    border: none;
+    cursor: pointer;
+    padding: var(--spacing-xs);
+    margin-right: var(--spacing-xs);
+    color: var(--text-secondary);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    align-self: center;
+    flex-shrink: 0;
+    border-radius: var(--radius-sm);
+    transition: color var(--duration-fast);
+}
+
+.chat-attach-btn:hover {
+    color: var(--primary);
+}
+
+/* Превью прикреплённых файлов */
+.chat-file-preview {
+    display: flex;
+    gap: var(--spacing-xs);
+    padding: var(--spacing-xs) var(--spacing-2xl);
+    border-top: var(--border-width-thin) solid var(--border-light);
+    flex-wrap: wrap;
+}
+
+.chat-file-preview[hidden] {
+    display: none;
+}
+
+.chat-file-chip {
+    display: flex;
+    align-items: center;
+    gap: 4px;
+    padding: 2px 8px;
+    background: var(--bg-secondary);
+    border-radius: var(--radius-md);
+    font-size: var(--font-size-sm);
+}
+
+.chat-file-chip-remove {
+    cursor: pointer;
+    color: var(--text-secondary);
+}
+
+.chat-file-chip-remove:hover {
+    color: var(--danger, #dc3545);
+}
+
+/* Оверлей для drag-and-drop файлов */
+.chat-drop-overlay {
+    position: absolute;
+    inset: 0;
+    z-index: 10;
+    background: var(--overlay-bg, rgba(0, 0, 0, 0.4));
+    backdrop-filter: blur(2px);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    border-radius: var(--radius-md);
+    pointer-events: none;
+}
+
+.chat-drop-overlay.hidden {
+    display: none;
+}
+
+.chat-drop-overlay-content {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: var(--spacing-md);
+    color: var(--primary);
+    font-size: var(--font-size-md);
+    font-weight: var(--font-weight-semibold, 600);
+    padding: var(--spacing-2xl);
+    border: 2px dashed var(--primary);
+    border-radius: var(--radius-lg);
+    background: var(--bg-primary);
+    opacity: 0.95;
+}
+
+/* Ошибка в чате */
+.chat-error {
+    color: var(--danger, #dc3545);
+    padding: var(--spacing-xs);
+    font-size: var(--font-size-sm);
 }
 
 /* Состояние обработки */

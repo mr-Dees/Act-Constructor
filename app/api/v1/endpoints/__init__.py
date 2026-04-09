@@ -5,13 +5,11 @@ Shared эндпоинты API v1.
 """
 
 from app.api.v1.endpoints.auth import router as auth
-from app.api.v1.endpoints.chat import router as chat
 from app.api.v1.endpoints.roles import router as roles
 from app.api.v1.endpoints.system import router as system
 
 __all__ = [
     "auth",
-    "chat",
     "roles",
     "system",
 ]

@@ -103,10 +103,12 @@ uvicorn app.main:app --host 0.0.0.0 --port 8000
 Browser (vanilla JS)
     |
 FastAPI Application
-    ├── Shared API (auth, chat, system)
+    ├── Shared API (auth, system, roles)
     ├── Domain Plugin Registry
     │   ├── acts/ — CRUD, блокировки, содержимое, экспорт, фактуры, аудит-лог
-    │   └── admin/ — роли, справочник пользователей
+    │   ├── admin/ — роли, справочник пользователей
+    │   ├── chat/ — AI-ассистент (SSE-стриминг, conversation persistence, function-calling)
+    │   └── ck_*/ — верификация метрик (ck_fin_res, ck_client_exp)
     └── Database Layer
         ├── asyncpg Connection Pool
         └── Adapters (PostgreSQL | Greenplum)
@@ -124,13 +126,14 @@ FastAPI Application
 - **Vanilla JavaScript** (ES6+) — без фреймворков
 - 3-зонная модульная архитектура: `shared/`, `portal/`, `constructor/`
 - Jinja2-шаблоны с двумя независимыми базовыми шаблонами
+- Чат-система: event-driven архитектура из 6 модулей (EventBus, UI, Files, Context, Messages, Manager)
 
 ### Структура проекта
 
 ```
 app/
 ├── main.py                 — фабрика приложения, lifecycle
-├── api/v1/                 — shared API эндпоинты (auth, chat, system)
+├── api/v1/                 — shared API эндпоинты (auth, system, roles)
 ├── core/                   — конфигурация, middleware, реестры
 ├── db/                     — пул подключений, адаптеры, базовый репозиторий
 ├── domains/
@@ -142,13 +145,15 @@ app/
 │   │   ├── formatters/     — экспорт (TXT, MD, DOCX)
 │   │   └── migrations/     — SQL-схемы (PostgreSQL, Greenplum)
 │   ├── admin/              — администрирование (роли, справочник пользователей)
+│   ├── chat/               — AI-ассистент (conversations, messages, files, actions)
 │   ├── ck_fin_res/         — ЦК Финансовый результат (верификация метрик FR)
 │   └── ck_client_exp/      — ЦК Клиентский опыт (верификация метрик CS)
-├── schemas/                — общие модели (chat, errors)
+├── schemas/                — общие модели (errors)
 └── formatters/             — общие утилиты форматирования
 static/
 ├── css/                    — модульные CSS (entry/ -> base/ + shared/ + zone/)
 └── js/                     — модульный JS (shared/ + portal/ + constructor/)
+    └── shared/chat/        — 10 модулей: event-bus, ui, files, context, messages, manager, stream, renderer, history, modal
 templates/
 ├── shared/                 — общие компоненты (chat, dialog, errors)
 ├── portal/                 — портал (landing, acts-manager)

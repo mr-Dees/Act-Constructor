@@ -1,0 +1,488 @@
+/*
+ * Стили блоков чата: код, reasoning, plan, файлы, изображения, кнопки
+ * Используется совместно с ChatRenderer
+ */
+
+/* ============================================
+   Базовый блок
+   ============================================ */
+
+.chat-block {
+    margin-bottom: var(--spacing-sm);
+}
+
+.chat-block:last-child {
+    margin-bottom: 0;
+}
+
+/* ============================================
+   Текстовый блок
+   ============================================ */
+
+.chat-block-text code {
+    background: var(--bg-tertiary);
+    padding: 0.125rem 0.375rem;
+    border-radius: var(--radius-xs);
+    font-family: var(--font-family-mono);
+    font-size: var(--font-size-xs);
+}
+
+/* ============================================
+   Блок кода
+   ============================================ */
+
+.chat-block-code {
+    border: var(--border-width-thin) solid var(--border-light);
+    border-radius: var(--radius-sm);
+    overflow: hidden;
+}
+
+.chat-block-code-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: var(--spacing-xs) var(--spacing-sm);
+    background: var(--bg-tertiary);
+    border-bottom: var(--border-width-thin) solid var(--border-light);
+}
+
+.chat-block-code-lang {
+    font-size: var(--font-size-xs);
+    color: var(--text-secondary);
+    font-weight: var(--font-weight-medium);
+    text-transform: lowercase;
+}
+
+.chat-block-code-copy {
+    border: none;
+    background: transparent;
+    color: var(--text-secondary);
+    font-size: var(--font-size-xs);
+    cursor: pointer;
+    padding: 0.125rem var(--spacing-xs);
+    border-radius: var(--radius-xs);
+    transition: all var(--duration-fast, 150ms);
+}
+
+.chat-block-code-copy:hover {
+    background: var(--bg-secondary);
+    color: var(--text-primary);
+}
+
+.chat-block-code pre {
+    margin: 0;
+    padding: var(--spacing-sm);
+    overflow-x: auto;
+    background: var(--bg-secondary);
+}
+
+.chat-block-code code {
+    font-family: var(--font-family-mono);
+    font-size: var(--font-size-xs);
+    color: var(--text-primary);
+    line-height: var(--line-height-relaxed);
+}
+
+/* ============================================
+   Блок рассуждений (reasoning)
+   ============================================ */
+
+.chat-block-reasoning {
+    border: var(--border-width-thin) solid var(--border-light);
+    border-radius: var(--radius-sm);
+    overflow: hidden;
+}
+
+.chat-block-reasoning > summary {
+    padding: var(--spacing-xs) var(--spacing-sm);
+    background: var(--bg-secondary);
+    color: var(--text-secondary);
+    font-size: var(--font-size-sm);
+    cursor: pointer;
+    user-select: none;
+    list-style: none;
+}
+
+.chat-block-reasoning > summary::-webkit-details-marker {
+    display: none;
+}
+
+.chat-block-reasoning > summary::before {
+    content: '\25B6'; /* ▶ */
+    display: inline-block;
+    margin-right: var(--spacing-xs);
+    font-size: var(--font-size-xs);
+    transition: transform var(--duration-fast, 150ms);
+}
+
+.chat-block-reasoning[open] > summary::before {
+    transform: rotate(90deg);
+}
+
+.chat-block-reasoning-content {
+    padding: var(--spacing-sm);
+    font-size: var(--font-size-sm);
+    color: var(--text-secondary);
+    line-height: var(--line-height-relaxed);
+    border-top: var(--border-width-thin) solid var(--border-light);
+}
+
+/* ============================================
+   Блок плана
+   ============================================ */
+
+.chat-block-plan {
+    border: var(--border-width-thin) solid var(--border-light);
+    border-radius: var(--radius-sm);
+    padding: var(--spacing-sm);
+}
+
+.chat-block-plan-title {
+    font-size: var(--font-size-sm);
+    font-weight: var(--font-weight-semibold);
+    color: var(--text-primary);
+    margin-bottom: var(--spacing-xs);
+}
+
+.chat-block-plan-steps {
+    list-style: none;
+    margin: 0;
+    padding: 0;
+}
+
+.chat-block-plan-step {
+    display: flex;
+    align-items: center;
+    gap: var(--spacing-xs);
+    padding: var(--spacing-xs) 0;
+    font-size: var(--font-size-sm);
+    color: var(--text-secondary);
+}
+
+.chat-block-plan-step-icon {
+    flex-shrink: 0;
+    width: 1.25rem;
+    text-align: center;
+    font-size: var(--font-size-sm);
+}
+
+.chat-block-plan-step--done {
+    color: var(--success);
+}
+
+.chat-block-plan-step--done .chat-block-plan-step-icon {
+    color: var(--success);
+}
+
+.chat-block-plan-step--in_progress {
+    color: var(--primary);
+}
+
+.chat-block-plan-step--in_progress .chat-block-plan-step-icon {
+    color: var(--primary);
+    animation: chatPlanSpin 1.5s linear infinite;
+}
+
+.chat-block-plan-step--pending {
+    color: var(--text-tertiary);
+}
+
+.chat-block-plan-step--pending .chat-block-plan-step-icon {
+    color: var(--text-tertiary);
+}
+
+@keyframes chatPlanSpin {
+    from { transform: rotate(0deg); }
+    to { transform: rotate(360deg); }
+}
+
+/* ============================================
+   Блок файла
+   ============================================ */
+
+.chat-block-file {
+    display: flex;
+    align-items: center;
+    gap: var(--spacing-xs);
+    padding: var(--spacing-xs) var(--spacing-sm);
+    background: var(--bg-secondary);
+    border-radius: var(--radius-sm);
+    border: var(--border-width-thin) solid var(--border-light);
+}
+
+.chat-block-file-icon {
+    flex-shrink: 0;
+    font-size: var(--font-size-lg);
+}
+
+.chat-block-file-name {
+    flex: 1;
+    font-size: var(--font-size-sm);
+    color: var(--primary);
+    text-decoration: none;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.chat-block-file-name:hover {
+    text-decoration: underline;
+}
+
+.chat-block-file-size {
+    flex-shrink: 0;
+    font-size: var(--font-size-xs);
+    color: var(--text-tertiary);
+}
+
+/* Кликабельное имя файла */
+.chat-block-file-name--clickable {
+    cursor: pointer;
+}
+
+/* Кнопки действий в файловом блоке */
+.chat-block-file-actions {
+    display: flex;
+    align-items: center;
+    gap: 2px;
+    flex-shrink: 0;
+    margin-left: var(--spacing-xs);
+}
+
+.chat-block-file-btn {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    width: 28px;
+    height: 28px;
+    border: none;
+    background: transparent;
+    color: var(--text-tertiary);
+    border-radius: var(--radius-sm);
+    cursor: pointer;
+    transition: all var(--duration-fast);
+    text-decoration: none;
+}
+
+.chat-block-file-btn:hover {
+    background: var(--gray-100);
+    color: var(--primary);
+}
+
+/* ============================================
+   Блок изображения
+   ============================================ */
+
+.chat-block-image img {
+    max-width: 100%;
+    border-radius: var(--radius-sm);
+    display: block;
+}
+
+/* ============================================
+   Блок кнопок
+   ============================================ */
+
+.chat-block-buttons {
+    display: flex;
+    flex-wrap: wrap;
+    gap: var(--spacing-xs);
+}
+
+.chat-block-buttons .chat-btn {
+    padding: var(--spacing-xs) var(--spacing-sm);
+    border: var(--border-width-thin) solid var(--border-light);
+    border-radius: var(--radius-sm);
+    background: var(--bg-primary);
+    color: var(--text-primary);
+    font-size: var(--font-size-sm);
+    cursor: pointer;
+    transition: all var(--duration-fast, 150ms);
+}
+
+.chat-block-buttons .chat-btn:hover {
+    background: var(--bg-secondary);
+    border-color: var(--border-medium);
+}
+
+/* Кнопки действий — акцентный стиль */
+.chat-block-buttons--action .chat-btn {
+    background: var(--primary);
+    color: var(--text-on-primary);
+    border-color: var(--primary);
+}
+
+.chat-block-buttons--action .chat-btn:hover {
+    background: var(--primary-hover);
+    border-color: var(--primary-hover);
+}
+
+/* ============================================
+   Просмотрщик файлов (модальное окно)
+   ============================================ */
+
+.chat-file-viewer-overlay {
+    position: fixed;
+    inset: 0;
+    z-index: calc(var(--z-modal-backdrop, 1000) + 10);
+    background: var(--overlay-bg, rgba(0, 0, 0, 0.6));
+    backdrop-filter: blur(4px);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    animation: chatFileViewerFadeIn 0.2s ease;
+}
+
+.chat-file-viewer {
+    width: 800px;
+    max-width: 90vw;
+    height: 80vh;
+    max-height: 900px;
+    background: var(--bg-primary);
+    border-radius: var(--radius-lg);
+    border: var(--border-width-thin) solid var(--border-light);
+    box-shadow: var(--shadow-lg, 0 20px 60px rgba(0, 0, 0, 0.15));
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+    animation: chatFileViewerSlideUp 0.3s ease;
+}
+
+.chat-file-viewer-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: var(--spacing-md) var(--spacing-lg);
+    border-bottom: var(--border-width-thin) solid var(--border-light);
+    flex-shrink: 0;
+}
+
+.chat-file-viewer-title {
+    font-size: var(--font-size-sm);
+    font-weight: var(--font-weight-semibold, 600);
+    color: var(--text-primary);
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    flex: 1;
+    margin-right: var(--spacing-md);
+}
+
+.chat-file-viewer-actions {
+    display: flex;
+    align-items: center;
+    gap: var(--spacing-xs);
+    flex-shrink: 0;
+}
+
+.chat-file-viewer-btn {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    width: 32px;
+    height: 32px;
+    border: none;
+    background: transparent;
+    color: var(--text-secondary);
+    border-radius: var(--radius-md);
+    cursor: pointer;
+    transition: all var(--duration-fast);
+    text-decoration: none;
+}
+
+.chat-file-viewer-btn:hover {
+    background: var(--gray-100);
+    color: var(--text-primary);
+}
+
+/* Тело просмотрщика */
+.chat-file-viewer-body {
+    flex: 1;
+    overflow: auto;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    min-height: 0;
+}
+
+/* Текстовый контент */
+.chat-file-viewer-text {
+    width: 100%;
+    height: 100%;
+    margin: 0;
+    padding: var(--spacing-lg);
+    font-size: var(--font-size-sm);
+    font-family: 'Consolas', 'Monaco', 'Courier New', monospace;
+    color: var(--text-primary);
+    background: var(--bg-secondary);
+    border: none;
+    overflow: auto;
+    white-space: pre-wrap;
+    word-wrap: break-word;
+    line-height: 1.6;
+    tab-size: 4;
+}
+
+/* Изображение */
+.chat-file-viewer-image {
+    max-width: 100%;
+    max-height: 100%;
+    object-fit: contain;
+    border-radius: var(--radius-sm);
+}
+
+/* Iframe (PDF и другие) */
+.chat-file-viewer-iframe {
+    width: 100%;
+    height: 100%;
+    border: none;
+}
+
+/* Неподдерживаемый тип файла */
+.chat-file-viewer-unsupported {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: var(--spacing-md);
+    padding: var(--spacing-2xl);
+    color: var(--text-secondary);
+    text-align: center;
+}
+
+.chat-file-viewer-unsupported p {
+    margin: 0;
+    font-size: var(--font-size-sm);
+}
+
+.chat-file-viewer-unsupported svg {
+    color: var(--gray-300);
+}
+
+.chat-file-viewer-download-link {
+    display: inline-flex;
+    align-items: center;
+    gap: var(--spacing-xs);
+    padding: var(--spacing-sm) var(--spacing-lg);
+    background: var(--primary);
+    color: white;
+    border-radius: var(--radius-md);
+    text-decoration: none;
+    font-size: var(--font-size-sm);
+    font-weight: var(--font-weight-semibold, 600);
+    transition: background var(--duration-fast);
+}
+
+.chat-file-viewer-download-link:hover {
+    background: var(--primary-hover);
+}
+
+/* Анимации */
+@keyframes chatFileViewerFadeIn {
+    from { opacity: 0; }
+    to { opacity: 1; }
+}
+
+@keyframes chatFileViewerSlideUp {
+    from { transform: translateY(20px); opacity: 0; }
+    to { transform: translateY(0); opacity: 1; }
+}
