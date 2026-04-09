@@ -468,7 +468,18 @@ class ActsMenuManager {
             const newAct = await response.json();
             this._clearCache();
             Notifications.success(`Копия создана: ${newAct.inspection_name}`);
-            window.location.href = AppConfig.api.getUrl(`/constructor?act_id=${newAct.id}`);
+
+            const openNewAct = await DialogManager.show({
+                title: 'Копия создана',
+                message: 'Хотите открыть новый акт сейчас?',
+                icon: '✅',
+                confirmText: 'Открыть',
+                cancelText: 'Остаться здесь'
+            });
+
+            if (openNewAct) {
+                window.location.href = AppConfig.api.getUrl(`/constructor?act_id=${newAct.id}`);
+            }
         } catch (err) {
             console.error('Ошибка дублирования акта:', err);
             Notifications.error(`Не удалось создать копию: ${err.message}`);
