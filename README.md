@@ -126,6 +126,7 @@ FastAPI Application
 - **Vanilla JavaScript** (ES6+) — без фреймворков
 - 3-зонная модульная архитектура: `shared/`, `portal/`, `constructor/`
 - Jinja2-шаблоны с двумя независимыми базовыми шаблонами
+- Чат-система: event-driven архитектура из 6 модулей (EventBus, UI, Files, Context, Messages, Manager)
 
 ### Структура проекта
 
@@ -152,6 +153,7 @@ app/
 static/
 ├── css/                    — модульные CSS (entry/ -> base/ + shared/ + zone/)
 └── js/                     — модульный JS (shared/ + portal/ + constructor/)
+    └── shared/chat/        — 10 модулей: event-bus, ui, files, context, messages, manager, stream, renderer, history, modal
 templates/
 ├── shared/                 — общие компоненты (chat, dialog, errors)
 ├── portal/                 — портал (landing, acts-manager)
