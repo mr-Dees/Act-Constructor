@@ -310,7 +310,7 @@ class TestBuildUserContent:
 class TestOrchestratorRun:
 
     @patch("app.domains.chat.services.orchestrator._get_openai_client")
-    async def test_run_simple_response(self, mock_client_factory, orchestrator, msg_service):
+    async def test_run_simple_response(self, mock_client_factory, orchestrator):
         """Простой ответ LLM без tool calls."""
         mock_client = AsyncMock()
         usage = MagicMock()
@@ -324,6 +324,7 @@ class TestOrchestratorRun:
         )
         mock_client.chat.completions.create = AsyncMock(return_value=response)
         mock_client_factory.return_value = mock_client
+        orchestrator._save_assistant_message = AsyncMock()
 
         result = await orchestrator.run(
             conversation_id="conv-1",
@@ -333,7 +334,7 @@ class TestOrchestratorRun:
         assert result["response"] == "Привет! Чем помочь?"
         assert result["model"] == "gpt-4o"
         assert result["token_usage"]["total_tokens"] == 30
-        msg_service.save_assistant_message.assert_called_once()
+        orchestrator._save_assistant_message.assert_called_once()
 
     @patch("app.domains.chat.services.orchestrator._get_openai_client")
     async def test_run_with_tool_calls(self, mock_client_factory, orchestrator):
@@ -366,6 +367,7 @@ class TestOrchestratorRun:
             side_effect=[response1, response2],
         )
         mock_client_factory.return_value = mock_client
+        orchestrator._save_assistant_message = AsyncMock()
 
         result = await orchestrator.run(
             conversation_id="conv-1",
@@ -396,6 +398,7 @@ class TestOrchestratorRun:
             side_effect=[response_with_tc] * 3 + [response_final],
         )
         mock_client_factory.return_value = mock_client
+        orchestrator._save_assistant_message = AsyncMock()
 
         result = await orchestrator.run(
             conversation_id="conv-1",
@@ -447,6 +450,7 @@ class TestOrchestratorRun:
         response = _make_mock_response(content="\n\nОтвет ассистента")
         mock_client.chat.completions.create = AsyncMock(return_value=response)
         mock_client_factory.return_value = mock_client
+        orchestrator._save_assistant_message = AsyncMock()
 
         result = await orchestrator.run(
             conversation_id="conv-1",

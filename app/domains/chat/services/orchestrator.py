@@ -366,12 +366,12 @@ class Orchestrator:
                     "total_tokens": response.usage.total_tokens,
                 }
 
-            # Сохраняем сообщение ассистента в БД
+            # Сохраняем сообщение ассистента через свежее соединение из пула
+            # (DI-соединение может быть закрыто при StreamingResponse)
             content_blocks = [{"type": "text", "content": answer}]
-            await self.msg_service.save_assistant_message(
+            await self._save_assistant_message(
                 conversation_id=conversation_id,
-                content=content_blocks,
-                model=self.settings.model,
+                content_blocks=content_blocks,
                 token_usage=token_usage if token_usage else None,
             )
 
@@ -657,14 +657,18 @@ class Orchestrator:
                 break
 
             # Сохраняем сообщение ассистента (свежее соединение из пула,
-            # т.к. dependency-соединение может быть закрыто к этому моменту)
+            # т.к. dependency-соединение может быть закрыто к этому моменту).
+            # Ошибка сохранения не должна emit'ить error SSE после контента.
             if full_answer:
                 content_blocks = [{"type": "text", "content": full_answer}]
-                await self._save_assistant_message(
-                    conversation_id=conversation_id,
-                    content_blocks=content_blocks,
-                    token_usage=token_usage,
-                )
+                try:
+                    await self._save_assistant_message(
+                        conversation_id=conversation_id,
+                        content_blocks=content_blocks,
+                        token_usage=token_usage,
+                    )
+                except Exception as save_exc:
+                    logger.exception("Не удалось сохранить сообщение ассистента")
 
         except Exception as exc:
             logger.exception("Ошибка стримингового agent loop")
