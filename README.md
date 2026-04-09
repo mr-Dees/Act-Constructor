@@ -92,6 +92,10 @@ uvicorn app.main:app --host 0.0.0.0 --port 8000
 | Блокировки | `ACTS__LOCK__DURATION_MINUTES`, `ACTS__LOCK__INACTIVITY_TIMEOUT_MINUTES` | Управление блокировками актов |
 | Аудит-лог | `ACTS__AUDIT_LOG__RETENTION_DAYS`, `ACTS__AUDIT_LOG__MAX_DIFF_ELEMENTS` | Хранение логов и лимиты diff |
 | Фактуры | `ACTS__INVOICE__HIVE_SCHEMA`, `ACTS__INVOICE__GP_SCHEMA` | Схемы для привязки фактур |
+| Администрирование | `ADMIN__USER_DIRECTORY__*` | Справочник пользователей |
+| ЦК Фин.Рез. | `CK_FIN_RES__SCHEMA_NAME`, `CK_FIN_RES__*` | Таблицы и VIEW верификации FR |
+| ЦК Клиентский опыт | `CK_CLIENT_EXP__SCHEMA_NAME`, `CK_CLIENT_EXP__*` | Таблицы и VIEW верификации CS |
+| Справочные данные | `UA_DATA__*` | Словари процессов, ТБ, подразделений |
 
 Полный список переменных — в файле [.env.example](.env.example).
 
@@ -108,7 +112,8 @@ FastAPI Application
     │   ├── acts/ — CRUD, блокировки, содержимое, экспорт, фактуры, аудит-лог
     │   ├── admin/ — роли, справочник пользователей
     │   ├── chat/ — AI-ассистент (SSE-стриминг, conversation persistence, function-calling)
-    │   └── ck_*/ — верификация метрик (ck_fin_res, ck_client_exp)
+    │   ├── ck_*/ — верификация метрик (ck_fin_res, ck_client_exp)
+    │   └── ua_data/ — справочные данные УА (словари процессов, ТБ, подразделений)
     └── Database Layer
         ├── asyncpg Connection Pool
         └── Adapters (PostgreSQL | Greenplum)
@@ -126,7 +131,7 @@ FastAPI Application
 - **Vanilla JavaScript** (ES6+) — без фреймворков
 - 3-зонная модульная архитектура: `shared/`, `portal/`, `constructor/`
 - Jinja2-шаблоны с двумя независимыми базовыми шаблонами
-- Чат-система: event-driven архитектура из 6 модулей (EventBus, UI, Files, Context, Messages, Manager)
+- Чат-система: event-driven архитектура из 10 модулей (EventBus, UI, Files, Context, Messages, Manager, Stream, Renderer, History, Modal)
 
 ### Структура проекта
 
@@ -213,6 +218,7 @@ pytest
 
 ### Middleware
 
-1. HTTPS Redirect (для reverse proxy)
-2. Ограничение размера запросов (по умолчанию 10 МБ)
-3. Rate limiting (по умолчанию 1024 запросов/мин на IP)
+1. RequestId — генерация уникального ID для каждого запроса
+2. Rate limiting (по умолчанию 1024 запросов/мин на IP)
+3. Ограничение размера запросов (по умолчанию 10 МБ)
+4. HTTPS Redirect (для reverse proxy)
