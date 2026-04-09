@@ -135,7 +135,7 @@ async def duplicate_act(
 ):
     """Создает дубликат акта."""
     result = await service.duplicate_act(act_id, username)
-    logger.info("Дублирован акт id=%s → id=%s пользователем %s", act_id, result["id"], username)
+    logger.info("Дублирован акт id=%s → id=%s пользователем %s", act_id, result.id, username)
     return result
 
 
