@@ -168,9 +168,10 @@ class TestInitDb:
 
     # --- Greenplum ---
 
+    @patch("app.db.connection._is_kerberos_ticket_valid", return_value=True)
     @patch("app.db.connection.asyncpg.create_pool", new_callable=AsyncMock)
     @patch.dict("os.environ", {"JUPYTERHUB_USER": "u12345_test"})
-    async def test_greenplum_успешная_инициализация_env(self, mock_create_pool):
+    async def test_greenplum_успешная_инициализация_env(self, mock_create_pool, _mock_krb):
         from app.db.adapters.greenplum import GreenplumAdapter
 
         mock_pool = AsyncMock()
@@ -187,9 +188,10 @@ class TestInitDb:
         call_kwargs = mock_create_pool.call_args
         assert call_kwargs.kwargs.get("user") == "12345" or call_kwargs[1].get("user") == "12345"
 
+    @patch("app.db.connection._is_kerberos_ticket_valid", return_value=True)
     @patch("app.db.connection.asyncpg.create_pool", new_callable=AsyncMock)
     @patch.dict("os.environ", {"JUPYTERHUB_USER": ""})
-    async def test_greenplum_fallback_на_settings(self, mock_create_pool):
+    async def test_greenplum_fallback_на_settings(self, mock_create_pool, _mock_krb):
         mock_pool = AsyncMock()
         mock_create_pool.return_value = mock_pool
 
@@ -207,31 +209,59 @@ class TestInitDb:
         with pytest.raises(ValueError, match="Не удалось извлечь username"):
             await init_db(settings)
 
+    @patch("app.db.connection._is_kerberos_ticket_valid", return_value=True)
     @patch("app.db.connection.asyncpg.create_pool", new_callable=AsyncMock)
     @patch.dict("os.environ", {"JUPYTERHUB_USER": "u12345_test"})
-    async def test_greenplum_kerberos_ошибка(self, mock_create_pool):
+    async def test_greenplum_kerberos_ошибка(self, mock_create_pool, _mock_krb):
         mock_create_pool.side_effect = asyncpg.PostgresError("ticket expired")
 
         settings = _make_settings(db_type="greenplum")
         with pytest.raises(KerberosTokenExpiredError):
             await init_db(settings)
 
+    @patch("app.db.connection._is_kerberos_ticket_valid", return_value=True)
     @patch("app.db.connection.asyncpg.create_pool", new_callable=AsyncMock)
     @patch.dict("os.environ", {"JUPYTERHUB_USER": "u12345_test"})
-    async def test_greenplum_postgres_error_не_kerberos(self, mock_create_pool):
+    async def test_greenplum_postgres_error_не_kerberos(self, mock_create_pool, _mock_krb):
         mock_create_pool.side_effect = asyncpg.PostgresError("permission denied")
 
         settings = _make_settings(db_type="greenplum")
         with pytest.raises(RuntimeError, match="Не удалось подключиться к БД"):
             await init_db(settings)
 
+    @patch("app.db.connection._is_kerberos_ticket_valid", return_value=True)
     @patch("app.db.connection.asyncpg.create_pool", new_callable=AsyncMock)
     @patch.dict("os.environ", {"JUPYTERHUB_USER": "u12345_test"})
-    async def test_greenplum_неожиданная_ошибка(self, mock_create_pool):
+    async def test_greenplum_неожиданная_ошибка(self, mock_create_pool, _mock_krb):
         mock_create_pool.side_effect = OSError("network unreachable")
 
         settings = _make_settings(db_type="greenplum")
         with pytest.raises(RuntimeError, match="Не удалось создать пул подключений"):
+            await init_db(settings)
+
+    @patch("app.db.connection._is_kerberos_ticket_valid", return_value=False)
+    @patch("app.db.connection.asyncpg.create_pool", new_callable=AsyncMock)
+    @patch.dict("os.environ", {"JUPYTERHUB_USER": "u12345_test"})
+    async def test_greenplum_предпроверка_kerberos(self, mock_create_pool, _mock_krb):
+        """Предпроверка klist -s ловит протухший билет до подключения к БД."""
+        settings = _make_settings(db_type="greenplum")
+        with pytest.raises(KerberosTokenExpiredError):
+            await init_db(settings)
+
+        # Подключение к БД не должно происходить
+        mock_create_pool.assert_not_awaited()
+
+    @patch("app.db.connection._is_kerberos_ticket_valid", return_value=False)
+    @patch("app.db.connection.asyncpg.create_pool", new_callable=AsyncMock)
+    @patch.dict("os.environ", {"JUPYTERHUB_USER": "u12345_test"})
+    async def test_greenplum_ошибка_подключения_при_протухшем_билете(self, mock_create_pool, mock_krb):
+        """OSError при подключении к GP + протухший билет → KerberosTokenExpiredError."""
+        # Имитируем: предпроверка прошла (билет был валиден), но к моменту подключения протух
+        mock_krb.side_effect = [True, False]
+        mock_create_pool.side_effect = OSError("Connection refused")
+
+        settings = _make_settings(db_type="greenplum")
+        with pytest.raises(KerberosTokenExpiredError):
             await init_db(settings)
 
     # --- PostgreSQL ошибки подключения ---

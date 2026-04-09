@@ -5,6 +5,7 @@
 import logging
 import os
 import re
+import subprocess as _subprocess
 from contextlib import asynccontextmanager
 from typing import AsyncGenerator
 
@@ -58,6 +59,25 @@ def _is_kerberos_token_expired(error_message: str) -> bool:
     ]
 
     return any(pattern in error_lower for pattern in kerberos_patterns)
+
+
+def _is_kerberos_ticket_valid() -> bool:
+    """
+    Проверяет наличие действующего (не истёкшего) Kerberos билета через klist -s.
+
+    Returns:
+        True если билет валиден, или если проверка невозможна (klist не найден)
+    """
+    try:
+        result = _subprocess.run(
+            ["klist", "-s"],
+            capture_output=True,
+            timeout=5
+        )
+        return result.returncode == 0
+    except (FileNotFoundError, _subprocess.TimeoutExpired):
+        # klist недоступен или зависает — не блокируем запуск
+        return True
 
 
 def get_pool() -> Pool:
@@ -167,6 +187,22 @@ async def init_db(settings: Settings) -> None:
         else:
             raise ValueError(f"Неподдерживаемый тип БД: {settings.database.type}")
 
+        # Для Greenplum: проверяем Kerberos билет до подключения,
+        # чтобы выдать понятную ошибку вместо низкоуровневых Connection refused / GSS failure
+        if settings.database.type == "greenplum" and not _is_kerberos_ticket_valid():
+            logger.error(
+                "\n" + "=" * 80 + "\n"
+                "ОШИБКА: Kerberos билет отсутствует или истёк!\n"
+                "=" * 80 + "\n"
+                "Для продолжения работы выполните в терминале:\n\n"
+                "    kinit\n\n"
+                "После ввода пароля перезапустите приложение.\n"
+                "=" * 80
+            )
+            raise KerberosTokenExpiredError(
+                "Kerberos билет отсутствует или истёк. Выполните 'kinit' для обновления."
+            )
+
         # Создаем пул подключений
         try:
             _pool = await asyncpg.create_pool(
@@ -207,6 +243,20 @@ async def init_db(settings: Settings) -> None:
             raise RuntimeError(f"Не удалось подключиться к БД: {e}") from e
 
         except Exception as e:
+            # Для Greenplum: OSError / ConnectionRefused часто означает протухший билет
+            if settings.database.type == "greenplum" and not _is_kerberos_ticket_valid():
+                logger.error(
+                    "\n" + "=" * 80 + "\n"
+                    "ОШИБКА: Kerberos билет отсутствует или истёк!\n"
+                    "=" * 80 + "\n"
+                    "Для продолжения работы выполните в терминале:\n\n"
+                    "    kinit\n\n"
+                    "После ввода пароля перезапустите приложение.\n"
+                    "=" * 80
+                )
+                raise KerberosTokenExpiredError(
+                    "Kerberos билет отсутствует или истёк. Выполните 'kinit' для обновления."
+                ) from e
             logger.error(f"Неожиданная ошибка при создании пула: {e}")
             raise RuntimeError(f"Не удалось создать пул подключений: {e}") from e
 
