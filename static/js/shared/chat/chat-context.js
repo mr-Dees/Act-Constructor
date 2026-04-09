@@ -14,6 +14,9 @@ const ChatContext = {
     /** @type {Object<string, string>|null} Маппинг key->label баз знаний */
     _knowledgeBaseMap: null,
 
+    /** @type {Promise<string>|null} Pending promise для ensureConversation (защита от дублей) */
+    _pendingEnsure: null,
+
     /**
      * Инициализация: подключение ChatHistory callback
      */
@@ -30,6 +33,7 @@ const ChatContext = {
 
         ChatEventBus.on('chat:clear', () => {
             this._currentConversationId = null;
+            this._pendingEnsure = null;
         });
 
         this._initialized = true;
@@ -44,6 +48,25 @@ const ChatContext = {
             return this._currentConversationId;
         }
 
+        // Promise lock: если уже создаём — возвращаем тот же промис
+        if (this._pendingEnsure) {
+            return this._pendingEnsure;
+        }
+
+        this._pendingEnsure = this._createConversation();
+        try {
+            return await this._pendingEnsure;
+        } finally {
+            this._pendingEnsure = null;
+        }
+    },
+
+    /**
+     * Внутренний метод создания беседы
+     * @returns {Promise<string>}
+     * @private
+     */
+    async _createConversation() {
         // Создаём беседу через ChatHistory, если доступен.
         // Подавляем callback, чтобы _onConversationSwitch
         // не очистил DOM с сообщениями.
