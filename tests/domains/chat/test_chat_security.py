@@ -458,28 +458,23 @@ class TestFileValidation:
             file_size=settings.max_file_size,
         )
 
-    def test_validate_zero_size_file(self, file_service):
-        """Файл нулевого размера проходит валидацию.
+    def test_validate_zero_size_file_rejected(self, file_service):
+        """Файл нулевого размера отклоняется."""
+        with pytest.raises(ChatFileValidationError):
+            file_service.validate_file(
+                filename="empty.txt",
+                mime_type="text/plain",
+                file_size=0,
+            )
 
-        BUG #12: Нет DB-level constraint на file_size.
-        """
-        file_service.validate_file(
-            filename="empty.txt",
-            mime_type="text/plain",
-            file_size=0,
-        )
-
-    def test_validate_negative_size_not_caught(self, file_service):
-        """Отрицательный размер файла проходит валидацию.
-
-        BUG #12: Нет проверки file_size > 0 ни на уровне сервиса, ни БД.
-        """
-        # Отрицательный размер проходит (0 < max_file_size — True)
-        file_service.validate_file(
-            filename="negative.txt",
-            mime_type="text/plain",
-            file_size=-1,
-        )
+    def test_validate_negative_size_rejected(self, file_service):
+        """Отрицательный размер файла отклоняется."""
+        with pytest.raises(ChatFileValidationError):
+            file_service.validate_file(
+                filename="negative.txt",
+                mime_type="text/plain",
+                file_size=-1,
+            )
 
 
 # -------------------------------------------------------------------------

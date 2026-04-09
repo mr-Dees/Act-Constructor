@@ -43,6 +43,11 @@ class FileService:
         Raises:
             ChatFileValidationError: если файл не проходит валидацию.
         """
+        if file_size <= 0:
+            raise ChatFileValidationError(
+                f"Файл '{filename}' пуст или имеет некорректный размер.",
+            )
+
         if file_size > self.settings.max_file_size:
             max_mb = self.settings.max_file_size / (1024 * 1024)
             raise ChatFileValidationError(
