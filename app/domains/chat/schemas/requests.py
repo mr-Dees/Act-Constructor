@@ -7,8 +7,8 @@ from pydantic import BaseModel, Field
 
 
 class CreateConversationRequest(BaseModel):
-    title: str | None = None
-    domain_name: str | None = None
+    title: str | None = Field(None, max_length=500)
+    domain_name: str | None = Field(None, max_length=100)
     context: dict[str, Any] | None = None
 
 

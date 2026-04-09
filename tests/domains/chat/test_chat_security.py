@@ -383,15 +383,15 @@ class TestInputValidation:
         req = UpdateConversationRequest(title="Нормальный заголовок")
         assert req.title == "Нормальный заголовок"
 
-    def test_create_conversation_no_title_validation(self):
-        """Создание беседы не ограничивает длину заголовка.
+    def test_create_conversation_title_max_length(self):
+        """Слишком длинный заголовок при создании отклоняется."""
+        with pytest.raises(ValidationError):
+            CreateConversationRequest(title="A" * 501)
 
-        BUG: CreateConversationRequest не имеет max_length для title,
-        в отличие от UpdateConversationRequest.
-        """
-        # Очень длинный заголовок при создании — проходит
-        req = CreateConversationRequest(title="A" * 10000)
-        assert len(req.title) == 10000
+    def test_create_conversation_title_valid(self):
+        """Заголовок в пределах лимита проходит."""
+        req = CreateConversationRequest(title="A" * 500)
+        assert len(req.title) == 500
 
     def test_create_conversation_context_accepts_any_dict(self):
         """BUG #13: context принимает произвольный JSONB без ограничения размера."""
