@@ -33,8 +33,14 @@ class ActionService:
         logger.info(
             "Выполнение действия %s пользователем %s", action_id, user_id,
         )
+        # Фильтруем зарезервированные ключи из params,
+        # чтобы клиент не мог подменить user_id/conversation_id
+        safe_params = {
+            k: v for k, v in (params or {}).items()
+            if k not in ("user_id", "conversation_id")
+        }
         return await entry["handler"](
             user_id=user_id,
             conversation_id=conversation_id,
-            **(params or {}),
+            **safe_params,
         )

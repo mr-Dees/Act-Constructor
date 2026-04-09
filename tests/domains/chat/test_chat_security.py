@@ -103,15 +103,12 @@ class TestActionKwargsInjection:
     что позволяет клиенту подменить user_id и conversation_id.
     """
 
-    async def test_user_id_in_params_causes_crash(self):
-        """BUG: user_id в params вызывает TypeError вместо корректной обработки.
+    async def test_user_id_in_params_filtered(self):
+        """user_id в params фильтруется — используется серверный user_id."""
+        captured_kwargs = {}
 
-        ActionService вызывает handler(user_id=user_id, **(params or {})),
-        и если params содержит 'user_id', Python выбрасывает TypeError
-        'got multiple values for keyword argument'. Это приводит к 500-ошибке
-        вместо корректного отклонения или санитизации параметров.
-        """
         async def handler(**kwargs):
+            captured_kwargs.update(kwargs)
             return {"status": "ok"}
 
         register_action_handler(
@@ -122,18 +119,22 @@ class TestActionKwargsInjection:
         )
 
         service = ActionService()
-        # Клиент передаёт user_id в params — вызывает необработанный TypeError
-        with pytest.raises(TypeError, match="multiple values"):
-            await service.execute(
-                action_id="test_action",
-                params={"user_id": "admin_user"},
-                user_id="regular_user",
-                conversation_id="conv-1",
-            )
+        await service.execute(
+            action_id="test_action",
+            params={"user_id": "admin_user"},
+            user_id="regular_user",
+            conversation_id="conv-1",
+        )
 
-    async def test_conversation_id_in_params_causes_crash(self):
-        """BUG: conversation_id в params вызывает TypeError."""
+        # user_id из params отброшен, используется серверный
+        assert captured_kwargs["user_id"] == "regular_user"
+
+    async def test_conversation_id_in_params_filtered(self):
+        """conversation_id в params фильтруется — используется серверный."""
+        captured_kwargs = {}
+
         async def handler(**kwargs):
+            captured_kwargs.update(kwargs)
             return {"status": "ok"}
 
         register_action_handler(
@@ -144,13 +145,15 @@ class TestActionKwargsInjection:
         )
 
         service = ActionService()
-        with pytest.raises(TypeError, match="multiple values"):
-            await service.execute(
-                action_id="test_action_2",
-                params={"conversation_id": "other-conv"},
-                user_id="user1",
-                conversation_id="conv-1",
-            )
+        await service.execute(
+            action_id="test_action_2",
+            params={"conversation_id": "other-conv"},
+            user_id="user1",
+            conversation_id="conv-1",
+        )
+
+        # conversation_id из params отброшен
+        assert captured_kwargs["conversation_id"] == "conv-1"
 
     async def test_arbitrary_params_passed_to_handler(self):
         """Произвольные params передаются в handler без санитизации.
