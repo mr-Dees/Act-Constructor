@@ -75,7 +75,7 @@ async def create_act(
 ):
     """Создает новый акт с метаданными и связанными сущностями."""
     result = await service.create_act(act_data, username, force_new_part)
-    logger.info("Создан акт id=%s пользователем %s", result["id"], username)
+    logger.info("Создан акт id=%s пользователем %s", result.id, username)
     return result
 
 
