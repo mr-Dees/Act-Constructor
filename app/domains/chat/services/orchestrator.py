@@ -159,6 +159,7 @@ class Orchestrator:
         self,
         user_message: str,
         file_blocks: list[dict] | None,
+        conversation_id: str | None = None,
     ) -> str:
         """Строит содержимое user-сообщения: текст + извлечённый контент файлов."""
         if not file_blocks:
@@ -175,13 +176,17 @@ class Orchestrator:
                 file_id = fb.get("file_id")
                 if not file_id:
                     continue
-                # Получаем данные файла напрямую (без проверки user_id,
-                # т.к. файл уже привязан к беседе пользователя)
-                row = await conn.fetchrow(
-                    f"SELECT filename, mime_type, file_data "
-                    f"FROM {file_repo.table} WHERE id = $1",
-                    file_id,
-                )
+                # Получаем данные через репозиторий с проверкой conversation_id
+                if conversation_id:
+                    row = await file_repo.get_file_content(
+                        file_id=file_id,
+                        conversation_id=conversation_id,
+                    )
+                else:
+                    row = await file_repo.get_file_content(
+                        file_id=file_id,
+                        conversation_id="",
+                    )
                 if not row:
                     continue
                 text = extract_text(
@@ -301,7 +306,7 @@ class Orchestrator:
             history = history[:-1]
         messages.extend(history)
 
-        user_content = await self._build_user_content(user_message, file_blocks)
+        user_content = await self._build_user_content(user_message, file_blocks, conversation_id)
         messages.append({"role": "user", "content": user_content})
 
         sources: list[str] = []
@@ -435,7 +440,7 @@ class Orchestrator:
             history = history[:-1]
         messages.extend(history)
 
-        user_content = await self._build_user_content(user_message, file_blocks)
+        user_content = await self._build_user_content(user_message, file_blocks, conversation_id)
         messages.append({"role": "user", "content": user_content})
 
         sources: list[str] = []

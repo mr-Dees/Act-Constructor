@@ -272,13 +272,8 @@ class TestBuildUserContent:
 
         assert result == "Текст"
 
-    # BUG #5: Оркестратор обходит абстракцию репозитория — прямой SQL в _build_user_content
-    async def test_raw_sql_bypasses_ownership_check(self, orchestrator):
-        """BUG: _build_user_content использует прямой SQL без проверки владельца файла.
-
-        Это позволяет извлекать контент файлов без проверки принадлежности
-        к беседе текущего пользователя. Файл просто получается по id напрямую.
-        """
+    async def test_file_access_uses_conversation_id(self, orchestrator):
+        """_build_user_content получает файлы через репозиторий с проверкой conversation_id."""
         mock_conn = AsyncMock()
         mock_conn.fetchrow = AsyncMock(return_value={
             "filename": "secret.pdf",
@@ -290,23 +285,21 @@ class TestBuildUserContent:
         ctx.__aexit__ = AsyncMock(return_value=False)
         mock_adapter = MagicMock(get_table_name=lambda name: name)
 
-        file_blocks = [{"file_id": "foreign-file-id"}]
+        file_blocks = [{"file_id": "file-id-1"}]
 
         with (
             patch("app.db.connection.get_db", return_value=ctx),
             patch("app.db.repositories.base.get_adapter", return_value=mock_adapter),
         ):
-            result = await orchestrator._build_user_content("Покажи", file_blocks)
+            result = await orchestrator._build_user_content(
+                "Покажи", file_blocks, "conv-123",
+            )
 
-        # Файл получен напрямую по ID — нет проверки user_id/conversation_id
         assert "secret.pdf" in result
-        # SQL в _build_user_content: SELECT ... FROM chat_files WHERE id = $1
-        # Нет JOIN с conversation/user, нет WHERE user_id
+        # SQL содержит проверку conversation_id
         call_args = mock_conn.fetchrow.call_args
         sql = call_args[0][0]
-        assert "user_id" not in sql, (
-            "Ожидается отсутствие проверки user_id в прямом SQL запросе"
-        )
+        assert "conversation_id" in sql
 
 
 # -------------------------------------------------------------------------

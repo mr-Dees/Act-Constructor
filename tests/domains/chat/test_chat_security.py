@@ -544,14 +544,13 @@ class TestMessageLimits:
 # -------------------------------------------------------------------------
 
 
-class TestOrchestratorBypassesRepository:
-    """BUG: _build_user_content использует прямой SQL вместо FileRepository.get_file_data.
-
-    Это пропускает проверку ownership (JOIN с conversations + WHERE user_id).
+class TestOrchestratorFileAccess:
+    """_build_user_content использует FileRepository.get_file_content
+    с проверкой conversation_id для ограничения доступа к файлам.
     """
 
-    async def test_direct_sql_without_user_check(self):
-        """Прямой SQL в _build_user_content не проверяет user_id."""
+    async def test_file_access_checks_conversation_id(self):
+        """_build_user_content передаёт conversation_id при получении файла."""
         from app.domains.chat.services.orchestrator import Orchestrator
 
         mock_conn = AsyncMock()
@@ -579,11 +578,10 @@ class TestOrchestratorBypassesRepository:
             patch("app.db.repositories.base.get_adapter", return_value=mock_adapter),
         ):
             result = await orchestrator._build_user_content(
-                "Запрос", [{"file_id": "any-file-id"}],
+                "Запрос", [{"file_id": "any-file-id"}], "conv-123",
             )
 
-        # Проверяем SQL — он НЕ содержит user_id в условии
+        # SQL содержит conversation_id в условии
         sql_call = mock_conn.fetchrow.call_args[0][0]
-        assert "user_id" not in sql_call
-        # Контент файла получен без проверки владельца
+        assert "conversation_id" in sql_call
         assert "target.pdf" in result

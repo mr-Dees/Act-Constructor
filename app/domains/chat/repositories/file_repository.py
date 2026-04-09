@@ -62,6 +62,21 @@ class FileRepository(BaseRepository):
         )
         return dict(row) if row else None
 
+    async def get_file_content(
+        self, *, file_id: str, conversation_id: str,
+    ) -> dict | None:
+        """Возвращает содержимое файла, проверяя принадлежность к беседе."""
+        row = await self.conn.fetchrow(
+            f"""
+            SELECT filename, mime_type, file_data
+            FROM {self.table}
+            WHERE id = $1 AND conversation_id = $2
+            """,
+            file_id,
+            conversation_id,
+        )
+        return dict(row) if row else None
+
     async def link_to_message(self, file_id: str, message_id: str) -> None:
         """Привязывает файл к сообщению."""
         await self.conn.execute(
