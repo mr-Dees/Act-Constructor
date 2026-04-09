@@ -34,9 +34,16 @@ const ChatMessages = {
         }
 
         ChatEventBus.on('chat:send-request', (data) => this._send(data));
-        ChatEventBus.on('context:conversation-switched', (data) => this._renderConversationMessages(data));
-        ChatEventBus.on('context:conversation-cleared', () => this._restoreWelcome());
+        ChatEventBus.on('context:conversation-switched', (data) => {
+            ChatStream.abort();
+            this._renderConversationMessages(data);
+        });
+        ChatEventBus.on('context:conversation-cleared', () => {
+            ChatStream.abort();
+            this._restoreWelcome();
+        });
         ChatEventBus.on('chat:clear', () => {
+            ChatStream.abort();
             this._streamingBlocks = {};
             this._restoreWelcome();
         });

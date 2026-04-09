@@ -6,6 +6,9 @@
  */
 const ChatStream = {
 
+    /** @type {AbortController|null} Контроллер для отмены текущего стрима */
+    _abortController: null,
+
     /**
      * Отправляет сообщение и читает SSE-поток ответа
      *
@@ -21,6 +24,12 @@ const ChatStream = {
     async send(conversationId, message, files = [], options = {}) {
         const { domains, onEvent, onError, onDone } = options;
 
+        // Отменяем предыдущий стрим, если есть
+        this.abort();
+
+        const controller = new AbortController();
+        this._abortController = controller;
+
         try {
             const formData = this._buildFormData(message, files, domains);
             const url = this._buildUrl(conversationId);
@@ -30,6 +39,7 @@ const ChatStream = {
                 method: 'POST',
                 headers,
                 body: formData,
+                signal: controller.signal,
             });
 
             if (!response.ok) {
@@ -64,8 +74,27 @@ const ChatStream = {
                 }
             }
         } catch (err) {
+            if (err.name === 'AbortError') {
+                // Стрим отменён явно — не сообщаем об ошибке
+                if (onDone) onDone();
+                return;
+            }
             console.error('ChatStream: ошибка стриминга', err);
             if (onError) onError(err);
+        } finally {
+            if (this._abortController === controller) {
+                this._abortController = null;
+            }
+        }
+    },
+
+    /**
+     * Отменяет текущий SSE-стрим, если он активен
+     */
+    abort() {
+        if (this._abortController) {
+            this._abortController.abort();
+            this._abortController = null;
         }
     },
 

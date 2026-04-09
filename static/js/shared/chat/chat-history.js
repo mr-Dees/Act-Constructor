@@ -22,12 +22,16 @@ const ChatHistory = {
     /** @type {boolean} Панель свёрнута */
     _collapsed: false,
 
+    /** @type {boolean} */
+    _initialized: false,
+
     /**
      * Инициализация: сохраняет контейнер и рендерит пустой список
      *
      * @param {HTMLElement} container — контейнер для панели истории
      */
     init(container) {
+        if (this._initialized) return;
         this._container = container;
         if (!this._container) {
             console.warn('ChatHistory: контейнер не найден');
@@ -35,6 +39,7 @@ const ChatHistory = {
         }
         this._restoreCollapsed();
         this._render();
+        this._initialized = true;
     },
 
     /**
