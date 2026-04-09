@@ -1,0 +1,925 @@
+"""Тесты оркестратора agent loop для AI-чата."""
+
+import asyncio
+import json
+from unittest.mock import AsyncMock, MagicMock, patch, PropertyMock
+
+import pytest
+
+from app.core.chat.tools import ChatTool, ChatToolParam, register_tools, reset as reset_tools
+from app.core.domain_registry import reset_registry
+from app.core.settings_registry import reset as reset_settings
+from app.core.chat.buttons import reset_action_handlers
+from app.domains.chat.services.orchestrator import Orchestrator, _convert_param
+from app.domains.chat.settings import ChatDomainSettings
+
+
+# -------------------------------------------------------------------------
+# Фикстуры
+# -------------------------------------------------------------------------
+
+
+@pytest.fixture(autouse=True)
+def clean_registries():
+    """Сброс глобального состояния реестров между тестами."""
+    reset_registry()
+    reset_settings()
+    reset_tools()
+    reset_action_handlers()
+    yield
+    reset_registry()
+    reset_settings()
+    reset_tools()
+    reset_action_handlers()
+
+
+@pytest.fixture
+def settings():
+    """Настройки чата с API для тестов."""
+    return ChatDomainSettings(
+        api_base="http://test-llm:8000/v1",
+        api_key="test-key",
+        max_tool_rounds=3,
+        tool_execution_timeout=5,
+        streaming_enabled=True,
+    )
+
+
+@pytest.fixture
+def settings_no_api():
+    """Настройки чата без API (fallback-режим)."""
+    return ChatDomainSettings(api_base="", api_key="")
+
+
+@pytest.fixture
+def msg_service():
+    """Mock MessageService."""
+    svc = AsyncMock()
+    svc.get_history = AsyncMock(return_value=[])
+    svc.save_assistant_message = AsyncMock(return_value={"id": "msg-1"})
+    return svc
+
+
+@pytest.fixture
+def conv_service():
+    """Mock ConversationService."""
+    return AsyncMock()
+
+
+@pytest.fixture
+def orchestrator(msg_service, conv_service, settings):
+    """Оркестратор с тестовыми зависимостями."""
+    return Orchestrator(
+        msg_service=msg_service,
+        conv_service=conv_service,
+        settings=settings,
+    )
+
+
+@pytest.fixture
+def orchestrator_no_api(msg_service, conv_service, settings_no_api):
+    """Оркестратор без настроек LLM API."""
+    return Orchestrator(
+        msg_service=msg_service,
+        conv_service=conv_service,
+        settings=settings_no_api,
+    )
+
+
+def _make_mock_response(content="Ответ ассистента", tool_calls=None, usage=None):
+    """Создаёт mock-ответ OpenAI API."""
+    message = MagicMock()
+    message.content = content
+    message.tool_calls = tool_calls
+
+    choice = MagicMock()
+    choice.message = message
+    choice.finish_reason = "stop" if not tool_calls else "tool_calls"
+
+    response = MagicMock()
+    response.choices = [choice]
+    response.usage = usage
+    return response
+
+
+def _make_tool_call(name="test_tool", arguments='{"query": "test"}', tc_id="tc-1"):
+    """Создаёт mock tool_call."""
+    func = MagicMock()
+    func.name = name
+    func.arguments = arguments
+
+    tc = MagicMock()
+    tc.id = tc_id
+    tc.function = func
+    return tc
+
+
+# -------------------------------------------------------------------------
+# _convert_param
+# -------------------------------------------------------------------------
+
+
+class TestConvertParam:
+
+    def test_convert_boolean_true(self):
+        """Конвертация строки 'true' в булево значение."""
+        assert _convert_param("true", "boolean") is True
+
+    def test_convert_boolean_false(self):
+        """Конвертация строки 'false' в булево значение."""
+        assert _convert_param("false", "boolean") is False
+
+    def test_convert_boolean_native(self):
+        """Нативное булево значение возвращается без изменений."""
+        assert _convert_param(True, "boolean") is True
+
+    def test_convert_integer(self):
+        """Конвертация строки в целое число."""
+        assert _convert_param("42", "integer") == 42
+
+    def test_convert_date_string(self):
+        """Конвертация ISO-строки в объект date."""
+        from datetime import date
+        result = _convert_param("2025-01-15", "date")
+        assert result == date(2025, 1, 15)
+
+    def test_convert_string(self):
+        """Конвертация значения в строку."""
+        assert _convert_param(123, "string") == "123"
+
+    def test_convert_none(self):
+        """None возвращается без конвертации."""
+        assert _convert_param(None, "string") is None
+
+    def test_convert_unknown_type(self):
+        """Неизвестный тип возвращает значение как есть."""
+        assert _convert_param([1, 2], "array") == [1, 2]
+
+
+# -------------------------------------------------------------------------
+# _build_system_messages
+# -------------------------------------------------------------------------
+
+
+class TestBuildSystemMessages:
+
+    def test_base_prompt_only(self, orchestrator):
+        """Без доменов возвращается только базовый системный промпт."""
+        messages = orchestrator._build_system_messages(domains=None)
+        assert len(messages) == 1
+        assert messages[0]["role"] == "system"
+        assert "AI-ассистент" in messages[0]["content"]
+
+    def test_with_domain_prompts(self, orchestrator):
+        """С доменами добавляются доменные промпты."""
+        from app.core.domain import DomainDescriptor
+        from app.core.domain_registry import _domains
+
+        descriptor = DomainDescriptor(
+            name="test_domain",
+            chat_system_prompt="Это доменный промпт для тестов.",
+        )
+        _domains.append(descriptor)
+
+        messages = orchestrator._build_system_messages(domains=["test_domain"])
+        assert len(messages) == 1
+        assert "Это доменный промпт для тестов." in messages[0]["content"]
+
+    def test_unknown_domain_ignored(self, orchestrator):
+        """Неизвестный домен игнорируется без ошибки."""
+        messages = orchestrator._build_system_messages(domains=["unknown_domain"])
+        assert len(messages) == 1
+        # Доменных промптов нет — только базовый
+        assert "AI-ассистент" in messages[0]["content"]
+
+
+# -------------------------------------------------------------------------
+# _build_user_content
+# -------------------------------------------------------------------------
+
+
+class TestBuildUserContent:
+
+    async def test_no_files(self, orchestrator):
+        """Без файлов возвращается исходный текст."""
+        result = await orchestrator._build_user_content("Привет", None)
+        assert result == "Привет"
+
+    async def test_empty_file_blocks(self, orchestrator):
+        """Пустой список файлов возвращается как исходный текст."""
+        result = await orchestrator._build_user_content("Привет", [])
+        assert result == "Привет"
+
+    async def test_with_file_blocks(self, orchestrator):
+        """С файлами добавляется извлечённый контент."""
+        mock_conn = AsyncMock()
+        mock_conn.fetchrow = AsyncMock(return_value={
+            "filename": "test.txt",
+            "mime_type": "text/plain",
+            "file_data": b"Hello world",
+        })
+        ctx = AsyncMock()
+        ctx.__aenter__ = AsyncMock(return_value=mock_conn)
+        ctx.__aexit__ = AsyncMock(return_value=False)
+        mock_adapter = MagicMock(get_table_name=lambda name: name)
+
+        file_blocks = [{"file_id": "file-1", "filename": "test.txt"}]
+
+        with (
+            patch("app.db.connection.get_db", return_value=ctx),
+            patch("app.db.repositories.base.get_adapter", return_value=mock_adapter),
+        ):
+            result = await orchestrator._build_user_content("Вопрос", file_blocks)
+
+        assert "Вопрос" in result
+        assert "test.txt" in result
+
+    async def test_file_not_found_skipped(self, orchestrator):
+        """Несуществующий файл пропускается без ошибки."""
+        mock_conn = AsyncMock()
+        mock_conn.fetchrow = AsyncMock(return_value=None)
+        ctx = AsyncMock()
+        ctx.__aenter__ = AsyncMock(return_value=mock_conn)
+        ctx.__aexit__ = AsyncMock(return_value=False)
+        mock_adapter = MagicMock(get_table_name=lambda name: name)
+
+        file_blocks = [{"file_id": "nonexistent"}]
+
+        with (
+            patch("app.db.connection.get_db", return_value=ctx),
+            patch("app.db.repositories.base.get_adapter", return_value=mock_adapter),
+        ):
+            result = await orchestrator._build_user_content("Вопрос", file_blocks)
+
+        assert result == "Вопрос"
+
+    async def test_file_block_without_id_skipped(self, orchestrator):
+        """Блок файла без file_id пропускается."""
+        mock_conn = AsyncMock()
+        mock_conn.fetchrow = AsyncMock(return_value=None)
+        ctx = AsyncMock()
+        ctx.__aenter__ = AsyncMock(return_value=mock_conn)
+        ctx.__aexit__ = AsyncMock(return_value=False)
+        mock_adapter = MagicMock(get_table_name=lambda name: name)
+
+        with (
+            patch("app.db.connection.get_db", return_value=ctx),
+            patch("app.db.repositories.base.get_adapter", return_value=mock_adapter),
+        ):
+            result = await orchestrator._build_user_content(
+                "Текст", [{"type": "file"}],
+            )
+
+        assert result == "Текст"
+
+    # BUG #5: Оркестратор обходит абстракцию репозитория — прямой SQL в _build_user_content
+    async def test_raw_sql_bypasses_ownership_check(self, orchestrator):
+        """BUG: _build_user_content использует прямой SQL без проверки владельца файла.
+
+        Это позволяет извлекать контент файлов без проверки принадлежности
+        к беседе текущего пользователя. Файл просто получается по id напрямую.
+        """
+        mock_conn = AsyncMock()
+        mock_conn.fetchrow = AsyncMock(return_value={
+            "filename": "secret.pdf",
+            "mime_type": "text/plain",
+            "file_data": b"Secret data contents",
+        })
+        ctx = AsyncMock()
+        ctx.__aenter__ = AsyncMock(return_value=mock_conn)
+        ctx.__aexit__ = AsyncMock(return_value=False)
+        mock_adapter = MagicMock(get_table_name=lambda name: name)
+
+        file_blocks = [{"file_id": "foreign-file-id"}]
+
+        with (
+            patch("app.db.connection.get_db", return_value=ctx),
+            patch("app.db.repositories.base.get_adapter", return_value=mock_adapter),
+        ):
+            result = await orchestrator._build_user_content("Покажи", file_blocks)
+
+        # Файл получен напрямую по ID — нет проверки user_id/conversation_id
+        assert "secret.pdf" in result
+        # SQL в _build_user_content: SELECT ... FROM chat_files WHERE id = $1
+        # Нет JOIN с conversation/user, нет WHERE user_id
+        call_args = mock_conn.fetchrow.call_args
+        sql = call_args[0][0]
+        assert "user_id" not in sql, (
+            "Ожидается отсутствие проверки user_id в прямом SQL запросе"
+        )
+
+
+# -------------------------------------------------------------------------
+# run() — полный (не стриминговый) agent loop
+# -------------------------------------------------------------------------
+
+
+class TestOrchestratorRun:
+
+    @patch("app.domains.chat.services.orchestrator._get_openai_client")
+    async def test_run_simple_response(self, mock_client_factory, orchestrator, msg_service):
+        """Простой ответ LLM без tool calls."""
+        mock_client = AsyncMock()
+        usage = MagicMock()
+        usage.prompt_tokens = 10
+        usage.completion_tokens = 20
+        usage.total_tokens = 30
+
+        response = _make_mock_response(
+            content="Привет! Чем помочь?",
+            usage=usage,
+        )
+        mock_client.chat.completions.create = AsyncMock(return_value=response)
+        mock_client_factory.return_value = mock_client
+
+        result = await orchestrator.run(
+            conversation_id="conv-1",
+            user_message="Привет",
+        )
+
+        assert result["response"] == "Привет! Чем помочь?"
+        assert result["model"] == "gpt-4o"
+        assert result["token_usage"]["total_tokens"] == 30
+        msg_service.save_assistant_message.assert_called_once()
+
+    @patch("app.domains.chat.services.orchestrator._get_openai_client")
+    async def test_run_with_tool_calls(self, mock_client_factory, orchestrator):
+        """Agent loop с вызовом инструмента."""
+        # Регистрируем тестовый инструмент
+        test_tool = ChatTool(
+            name="search_acts",
+            domain="acts",
+            description="Поиск актов",
+            parameters=[
+                ChatToolParam(name="query", type="string", description="Запрос"),
+            ],
+            handler=AsyncMock(return_value="Найден акт КМ-01-00001"),
+        )
+        register_tools([test_tool])
+
+        mock_client = AsyncMock()
+        # Первый вызов — tool_call
+        tool_call = _make_tool_call(
+            name="search_acts",
+            arguments='{"query": "КМ-01"}',
+        )
+        response1 = _make_mock_response(
+            content=None,
+            tool_calls=[tool_call],
+        )
+        # Второй вызов — финальный ответ
+        response2 = _make_mock_response(content="Найден акт КМ-01-00001.")
+        mock_client.chat.completions.create = AsyncMock(
+            side_effect=[response1, response2],
+        )
+        mock_client_factory.return_value = mock_client
+
+        result = await orchestrator.run(
+            conversation_id="conv-1",
+            user_message="Найди акт КМ-01",
+        )
+
+        assert "search_acts" in result["sources"]
+        assert "КМ-01-00001" in result["response"]
+
+    @patch("app.domains.chat.services.orchestrator._get_openai_client")
+    async def test_run_max_tool_rounds_limit(self, mock_client_factory, orchestrator):
+        """Agent loop останавливается при достижении лимита раундов."""
+        test_tool = ChatTool(
+            name="loop_tool",
+            domain="test",
+            description="Инструмент для теста лимита",
+            handler=AsyncMock(return_value="Результат"),
+        )
+        register_tools([test_tool])
+
+        mock_client = AsyncMock()
+        # Всегда возвращаем tool_call — цикл должен остановиться
+        tool_call = _make_tool_call(name="loop_tool", arguments="{}")
+        response_with_tc = _make_mock_response(content=None, tool_calls=[tool_call])
+        # Финальный ответ после лимита раундов
+        response_final = _make_mock_response(content="Ответ после лимита")
+        mock_client.chat.completions.create = AsyncMock(
+            side_effect=[response_with_tc] * 3 + [response_final],
+        )
+        mock_client_factory.return_value = mock_client
+
+        result = await orchestrator.run(
+            conversation_id="conv-1",
+            user_message="Тест лимита",
+        )
+
+        # max_tool_rounds=3, значит 3 tool_call + 1 финальный = 4 вызова
+        assert mock_client.chat.completions.create.call_count == 4
+
+    async def test_run_fallback_no_api(self, orchestrator_no_api):
+        """Без настроек API возвращается fallback-ответ."""
+        result = await orchestrator_no_api.run(
+            conversation_id="conv-1",
+            user_message="Привет",
+        )
+
+        assert result["status"] == "fallback"
+        assert "Привет" in result["response"]
+        assert "режиме заглушки" in result["response"]
+
+    # BUG #7: run() возвращает HTTP 200 с error payload вместо ошибки
+    @patch("app.domains.chat.services.orchestrator._get_openai_client")
+    async def test_run_api_error_returns_200_with_error_payload(
+        self, mock_client_factory, orchestrator,
+    ):
+        """BUG: При ошибке LLM API run() возвращает dict с 'status: error',
+        но HTTP-эндпоинт вернёт 200, а не 500/503.
+        """
+        mock_client = AsyncMock()
+        mock_client.chat.completions.create = AsyncMock(
+            side_effect=Exception("Connection refused"),
+        )
+        mock_client_factory.return_value = mock_client
+
+        result = await orchestrator.run(
+            conversation_id="conv-1",
+            user_message="Привет",
+        )
+
+        # Ошибка замаскирована как dict с status='error'
+        assert result["status"] == "error"
+        assert "Временная ошибка" in result["response"]
+        # Нет HTTPException или raise — вызывающий код получит 200 OK
+
+    @patch("app.domains.chat.services.orchestrator._get_openai_client")
+    async def test_run_strips_leading_newlines(self, mock_client_factory, orchestrator):
+        """Ведущие переносы строк убираются из ответа LLM."""
+        mock_client = AsyncMock()
+        response = _make_mock_response(content="\n\nОтвет ассистента")
+        mock_client.chat.completions.create = AsyncMock(return_value=response)
+        mock_client_factory.return_value = mock_client
+
+        result = await orchestrator.run(
+            conversation_id="conv-1",
+            user_message="Вопрос",
+        )
+
+        assert result["response"] == "Ответ ассистента"
+
+
+# -------------------------------------------------------------------------
+# _execute_tool_call
+# -------------------------------------------------------------------------
+
+
+class TestExecuteToolCall:
+
+    async def test_tool_not_found(self, orchestrator):
+        """Вызов несуществующего инструмента возвращает ошибку."""
+        result = await orchestrator._execute_tool_call("nonexistent", {})
+        assert "не найден" in result
+
+    async def test_tool_without_handler(self, orchestrator):
+        """Инструмент без обработчика возвращает ошибку."""
+        tool = ChatTool(
+            name="no_handler_tool",
+            domain="test",
+            description="Без обработчика",
+            handler=None,
+        )
+        register_tools([tool])
+
+        result = await orchestrator._execute_tool_call("no_handler_tool", {})
+        assert "не имеет обработчика" in result
+
+    async def test_tool_timeout(self, orchestrator):
+        """Таймаут выполнения инструмента возвращает ошибку."""
+
+        async def slow_handler(**kwargs):
+            await asyncio.sleep(100)
+            return "Не должно вернуться"
+
+        tool = ChatTool(
+            name="slow_tool",
+            domain="test",
+            description="Медленный инструмент",
+            handler=slow_handler,
+        )
+        register_tools([tool])
+
+        result = await orchestrator._execute_tool_call("slow_tool", {})
+        assert "таймаут" in result.lower()
+
+    async def test_tool_exception(self, orchestrator):
+        """Исключение в обработчике возвращает ошибку."""
+
+        async def failing_handler(**kwargs):
+            raise ValueError("Внутренняя ошибка инструмента")
+
+        tool = ChatTool(
+            name="failing_tool",
+            domain="test",
+            description="Сбойный инструмент",
+            handler=failing_handler,
+        )
+        register_tools([tool])
+
+        result = await orchestrator._execute_tool_call("failing_tool", {})
+        assert "Ошибка выполнения" in result
+
+    async def test_tool_dict_result_serialized(self, orchestrator):
+        """Dict-результат инструмента сериализуется в JSON."""
+        tool = ChatTool(
+            name="json_tool",
+            domain="test",
+            description="JSON инструмент",
+            handler=AsyncMock(return_value={"status": "ok", "data": [1, 2]}),
+        )
+        register_tools([tool])
+
+        result = await orchestrator._execute_tool_call("json_tool", {})
+        parsed = json.loads(result)
+        assert parsed["status"] == "ok"
+
+    async def test_tool_param_type_conversion(self, orchestrator):
+        """Параметры инструмента конвертируются в правильные типы."""
+        received_args = {}
+
+        async def capture_handler(**kwargs):
+            received_args.update(kwargs)
+            return "OK"
+
+        tool = ChatTool(
+            name="typed_tool",
+            domain="test",
+            description="Типизированный инструмент",
+            parameters=[
+                ChatToolParam(name="count", type="integer", description="Кол-во"),
+                ChatToolParam(name="active", type="boolean", description="Флаг"),
+            ],
+            handler=capture_handler,
+        )
+        register_tools([tool])
+
+        await orchestrator._execute_tool_call("typed_tool", {
+            "count": "5",
+            "active": "true",
+        })
+
+        assert received_args["count"] == 5
+        assert received_args["active"] is True
+
+
+# -------------------------------------------------------------------------
+# run_stream() — стриминговый agent loop
+# -------------------------------------------------------------------------
+
+
+class TestOrchestratorRunStream:
+
+    async def test_stream_fallback_emits_full_lifecycle(self, orchestrator_no_api):
+        """Без API: message_start → block_start → delta → block_end → message_end."""
+        events = []
+        async for event in orchestrator_no_api.run_stream(
+            conversation_id="conv-1",
+            user_message="Привет",
+        ):
+            events.append(event)
+
+        event_types = [e.split("\n")[0].replace("event: ", "") for e in events]
+        assert event_types == [
+            "message_start",
+            "block_start",
+            "block_delta",
+            "block_end",
+            "message_end",
+        ]
+
+    async def test_stream_fallback_contains_message(self, orchestrator_no_api):
+        """Fallback-стриминг содержит текст сообщения пользователя."""
+        events = []
+        async for event in orchestrator_no_api.run_stream(
+            conversation_id="conv-1",
+            user_message="Тестовое сообщение",
+        ):
+            events.append(event)
+
+        all_text = "".join(events)
+        assert "Тестовое сообщение" in all_text
+
+    @patch("app.domains.chat.services.orchestrator._get_openai_client")
+    async def test_stream_normal_response(self, mock_client_factory, orchestrator):
+        """Нормальный стриминг с текстовым ответом."""
+        mock_client = AsyncMock()
+
+        # Создаём async iterable для стриминга
+        async def mock_stream():
+            # Чанк 1: текстовое содержимое
+            chunk1 = MagicMock()
+            delta1 = MagicMock()
+            delta1.content = "Привет"
+            delta1.tool_calls = None
+            chunk1.choices = [MagicMock(delta=delta1, finish_reason=None)]
+
+            # Чанк 2: продолжение текста
+            chunk2 = MagicMock()
+            delta2 = MagicMock()
+            delta2.content = " мир!"
+            delta2.tool_calls = None
+            chunk2.choices = [MagicMock(delta=delta2, finish_reason=None)]
+
+            # Чанк 3: завершение
+            chunk3 = MagicMock()
+            delta3 = MagicMock()
+            delta3.content = None
+            delta3.tool_calls = None
+            chunk3.choices = [MagicMock(delta=delta3, finish_reason="stop")]
+
+            for chunk in [chunk1, chunk2, chunk3]:
+                yield chunk
+
+        mock_client.chat.completions.create = AsyncMock(return_value=mock_stream())
+        mock_client_factory.return_value = mock_client
+
+        events = []
+        async for event in orchestrator.run_stream(
+            conversation_id="conv-1",
+            user_message="Привет",
+        ):
+            events.append(event)
+
+        event_types = [e.split("\n")[0].replace("event: ", "") for e in events]
+        assert event_types[0] == "message_start"
+        assert event_types[-1] == "message_end"
+        assert "block_start" in event_types
+        assert "block_delta" in event_types
+        assert "block_end" in event_types
+
+    # BUG #6: message_end не гарантирован на всех путях ошибок
+    @patch("app.domains.chat.services.orchestrator._get_openai_client")
+    async def test_stream_error_guarantees_message_end(
+        self, mock_client_factory, orchestrator,
+    ):
+        """BUG: При ошибке стриминга message_end должен быть гарантирован."""
+        mock_client = AsyncMock()
+        mock_client.chat.completions.create = AsyncMock(
+            side_effect=Exception("LLM API недоступен"),
+        )
+        mock_client_factory.return_value = mock_client
+
+        events = []
+        async for event in orchestrator.run_stream(
+            conversation_id="conv-1",
+            user_message="Привет",
+        ):
+            events.append(event)
+
+        event_types = [e.split("\n")[0].replace("event: ", "") for e in events]
+        # message_end ДОЛЖЕН быть последним событием даже при ошибке
+        assert event_types[-1] == "message_end"
+        # Ошибка должна быть отправлена
+        assert "error" in event_types
+
+    @patch("app.domains.chat.services.orchestrator._get_openai_client")
+    async def test_stream_with_tool_calls(self, mock_client_factory, orchestrator):
+        """Стриминг с вызовом инструмента: tool_call и tool_result."""
+        test_tool = ChatTool(
+            name="stream_tool",
+            domain="test",
+            description="Инструмент для стрим-теста",
+            handler=AsyncMock(return_value="Результат инструмента"),
+        )
+        register_tools([test_tool])
+
+        mock_client = AsyncMock()
+
+        # Первый вызов: стриминг с tool_call
+        async def mock_stream_with_tool():
+            # Чанк с tool_call дельтами
+            chunk1 = MagicMock()
+            delta1 = MagicMock()
+            delta1.content = None
+            tc_delta = MagicMock()
+            tc_delta.index = 0
+            tc_delta.id = "tc-stream-1"
+            tc_delta.function = MagicMock()
+            tc_delta.function.name = "stream_tool"
+            tc_delta.function.arguments = '{"query": "test"}'
+            delta1.tool_calls = [tc_delta]
+            chunk1.choices = [MagicMock(delta=delta1, finish_reason=None)]
+
+            # Финальный чанк
+            chunk2 = MagicMock()
+            delta2 = MagicMock()
+            delta2.content = None
+            delta2.tool_calls = None
+            chunk2.choices = [MagicMock(delta=delta2, finish_reason="tool_calls")]
+
+            for chunk in [chunk1, chunk2]:
+                yield chunk
+
+        # Второй вызов: финальный ответ (non-streaming после tool)
+        response_final = _make_mock_response(content="Ответ после инструмента")
+
+        mock_client.chat.completions.create = AsyncMock(
+            side_effect=[mock_stream_with_tool(), response_final],
+        )
+        mock_client_factory.return_value = mock_client
+
+        events = []
+        async for event in orchestrator.run_stream(
+            conversation_id="conv-1",
+            user_message="Используй инструмент",
+        ):
+            events.append(event)
+
+        event_types = [e.split("\n")[0].replace("event: ", "") for e in events]
+        assert "tool_call" in event_types
+        assert "tool_result" in event_types
+        assert event_types[-1] == "message_end"
+
+    @patch("app.domains.chat.services.orchestrator._get_openai_client")
+    async def test_stream_saves_assistant_message(
+        self, mock_client_factory, orchestrator,
+    ):
+        """После стриминга сохраняется сообщение ассистента через свежее соединение."""
+        mock_client = AsyncMock()
+
+        async def mock_stream():
+            chunk = MagicMock()
+            delta = MagicMock()
+            delta.content = "Ответ"
+            delta.tool_calls = None
+            chunk.choices = [MagicMock(delta=delta, finish_reason=None)]
+
+            chunk2 = MagicMock()
+            delta2 = MagicMock()
+            delta2.content = None
+            delta2.tool_calls = None
+            chunk2.choices = [MagicMock(delta=delta2, finish_reason="stop")]
+
+            for c in [chunk, chunk2]:
+                yield c
+
+        mock_client.chat.completions.create = AsyncMock(return_value=mock_stream())
+        mock_client_factory.return_value = mock_client
+
+        # Mock для _save_assistant_message (свежее соединение из пула)
+        mock_conn = AsyncMock()
+        mock_conn.fetchrow = AsyncMock(return_value={
+            "id": "msg-saved",
+            "conversation_id": "conv-1",
+            "role": "assistant",
+            "content": [{"type": "text", "content": "Ответ"}],
+            "model": "gpt-4o",
+            "token_usage": None,
+            "created_at": "2025-01-01T00:00:00",
+        })
+        ctx = AsyncMock()
+        ctx.__aenter__ = AsyncMock(return_value=mock_conn)
+        ctx.__aexit__ = AsyncMock(return_value=False)
+        mock_adapter = MagicMock(get_table_name=lambda n: n)
+
+        # Потребляем стрим
+        events = []
+        with (
+            patch("app.db.connection.get_db", return_value=ctx) as mock_get_db,
+            patch("app.db.repositories.base.get_adapter", return_value=mock_adapter),
+        ):
+            async for event in orchestrator.run_stream(
+                conversation_id="conv-1",
+                user_message="Привет",
+            ):
+                events.append(event)
+
+            # Проверяем, что get_db вызывался (свежее соединение для сохранения)
+            mock_get_db.assert_called()
+
+    async def test_stream_openai_not_installed(self, orchestrator):
+        """При отсутствии openai пакета — fallback с сообщением."""
+        # Патчим import openai чтобы он выбрасывал ImportError
+        import builtins
+        original_import = builtins.__import__
+
+        def mock_import(name, *args, **kwargs):
+            if name == "openai":
+                raise ImportError("No module named 'openai'")
+            return original_import(name, *args, **kwargs)
+
+        events = []
+        with patch("builtins.__import__", side_effect=mock_import):
+            async for event in orchestrator.run_stream(
+                conversation_id="conv-1",
+                user_message="Привет",
+            ):
+                events.append(event)
+
+        all_text = "".join(events)
+        assert "message_end" in all_text
+
+
+# -------------------------------------------------------------------------
+# _get_history_messages
+# -------------------------------------------------------------------------
+
+
+class TestGetHistoryMessages:
+
+    async def test_empty_history(self, orchestrator, msg_service):
+        """Пустая история возвращает пустой список."""
+        msg_service.get_history.return_value = []
+        result = await orchestrator._get_history_messages("conv-1")
+        assert result == []
+
+    async def test_text_blocks_extracted(self, orchestrator, msg_service):
+        """Текстовые блоки извлекаются в формат OpenAI."""
+        msg_service.get_history.return_value = [
+            {
+                "role": "user",
+                "content": [{"type": "text", "content": "Вопрос"}],
+            },
+            {
+                "role": "assistant",
+                "content": [{"type": "text", "content": "Ответ"}],
+            },
+        ]
+
+        result = await orchestrator._get_history_messages("conv-1")
+        assert len(result) == 2
+        assert result[0] == {"role": "user", "content": "Вопрос"}
+        assert result[1] == {"role": "assistant", "content": "Ответ"}
+
+    async def test_code_blocks_formatted(self, orchestrator, msg_service):
+        """Code-блоки форматируются как markdown fenced code."""
+        msg_service.get_history.return_value = [
+            {
+                "role": "assistant",
+                "content": [
+                    {"type": "code", "language": "python", "content": "print('hi')"},
+                ],
+            },
+        ]
+
+        result = await orchestrator._get_history_messages("conv-1")
+        assert "```python" in result[0]["content"]
+        assert "print('hi')" in result[0]["content"]
+
+    async def test_file_blocks_formatted(self, orchestrator, msg_service):
+        """File-блоки форматируются как '[Прикреплён файл: ...]'."""
+        msg_service.get_history.return_value = [
+            {
+                "role": "user",
+                "content": [
+                    {"type": "text", "content": "Смотри файл"},
+                    {"type": "file", "filename": "report.pdf"},
+                ],
+            },
+        ]
+
+        result = await orchestrator._get_history_messages("conv-1")
+        assert "Прикреплён файл: report.pdf" in result[0]["content"]
+
+    async def test_history_truncated_to_max_length(self, orchestrator, msg_service):
+        """История обрезается до max_history_length."""
+        orchestrator.settings.max_history_length = 3
+        msg_service.get_history.return_value = [
+            {"role": "user", "content": [{"type": "text", "content": f"Msg {i}"}]}
+            for i in range(10)
+        ]
+
+        result = await orchestrator._get_history_messages("conv-1")
+        assert len(result) == 3
+
+    async def test_string_content_handled(self, orchestrator, msg_service):
+        """Строковый контент (не список блоков) обрабатывается."""
+        msg_service.get_history.return_value = [
+            {"role": "user", "content": "Просто строка"},
+        ]
+
+        result = await orchestrator._get_history_messages("conv-1")
+        assert result[0]["content"] == "Просто строка"
+
+
+# -------------------------------------------------------------------------
+# _fallback_response
+# -------------------------------------------------------------------------
+
+
+class TestFallbackResponse:
+
+    def test_fallback_with_no_tools(self, orchestrator):
+        """Fallback без зарегистрированных инструментов."""
+        result = orchestrator._fallback_response("Привет")
+        assert "Привет" in result["response"]
+        assert "Инструменты не зарегистрированы" in result["response"]
+        assert result["status"] == "fallback"
+
+    def test_fallback_with_tools(self, orchestrator):
+        """Fallback с зарегистрированными инструментами."""
+        tool = ChatTool(
+            name="test_tool",
+            domain="test",
+            description="Тестовый инструмент",
+            handler=AsyncMock(),
+        )
+        register_tools([tool])
+
+        result = orchestrator._fallback_response("Привет")
+        assert "Доступно инструментов: 1" in result["response"]
+        assert "CHAT__API_BASE" in result["response"]
