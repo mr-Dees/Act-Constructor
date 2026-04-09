@@ -91,7 +91,7 @@ const ChatMessages = {
         } catch (err) {
             ChatEventBus.emit('ui:typing-hide');
             console.error('ChatMessages: ошибка отправки', err);
-            this._renderMessage('bot', 'Произошла ошибка. Попробуйте ещё раз.');
+            this.renderMessage('bot', 'Произошла ошибка. Попробуйте ещё раз.');
         } finally {
             ChatEventBus.emit('ui:processing', { state: false });
         }
@@ -198,7 +198,7 @@ const ChatMessages = {
      * @private
      */
     _addUserMessage(text) {
-        this._renderMessage('user', text);
+        this.renderMessage('user', text);
     },
 
     /**
@@ -249,9 +249,8 @@ const ChatMessages = {
      *
      * @param {'user'|'bot'} role
      * @param {string} text
-     * @private
      */
-    _renderMessage(role, text) {
+    renderMessage(role, text) {
         const msg = document.createElement('div');
         msg.className = `chat-message chat-message-${role}`;
 
@@ -298,8 +297,6 @@ const ChatMessages = {
     _renderConversationMessages({ conversationId, messages }) {
         this._messagesContainer.innerHTML = '';
 
-        ChatFiles.clear();
-
         for (const msg of messages) {
             const blocks = Array.isArray(msg.content) ? msg.content : [];
 
@@ -316,7 +313,7 @@ const ChatMessages = {
                     const container = this._addBotMessageStreaming();
                     ChatRenderer.renderBlocks(container, blocks);
                 } else {
-                    this._renderMessage('bot', '');
+                    this.renderMessage('bot', '');
                 }
             }
         }

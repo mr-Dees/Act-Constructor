@@ -29,6 +29,9 @@ const ChatFiles = {
         this._messagesContainer = messagesContainer;
         this._initFileInput();
         this._initDragAndDrop();
+
+        ChatEventBus.on('context:conversation-cleared', () => this.clear());
+        ChatEventBus.on('context:conversation-switched', () => this.clear());
     },
 
     /**

@@ -144,12 +144,12 @@ class ChatManager {
 
             const data = await response.json();
             if (data.message) {
-                ChatMessages._renderMessage('bot', data.message);
+                ChatMessages.renderMessage('bot', data.message);
             }
         } catch (err) {
             ChatEventBus.emit('ui:typing-hide');
             console.error('ChatManager: ошибка выполнения действия', err);
-            ChatMessages._renderMessage('bot', 'Не удалось выполнить действие. Попробуйте ещё раз.');
+            ChatMessages.renderMessage('bot', 'Не удалось выполнить действие. Попробуйте ещё раз.');
         } finally {
             ChatEventBus.emit('ui:processing', { state: false });
         }
