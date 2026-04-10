@@ -426,7 +426,15 @@ class ActsMenuManager {
             if (!response.ok) throw new Error('Ошибка загрузки данных акта');
             const actData = await response.json();
             this.hide();
-            CreateActDialog.showEdit(actData);
+
+            // Вычисляем статус для подсветки незаполненных полей
+            const hasValidationIssues = actData.needs_created_date || actData.needs_directive_number || actData.needs_service_note;
+            const needsInvoice = actData.needs_invoice_check;
+            const status = (hasValidationIssues || needsInvoice)
+                ? { needsHighlight: true, isCritical: !!needsInvoice }
+                : null;
+
+            CreateActDialog.showEdit(actData, status);
         } catch (err) {
             console.error('Ошибка загрузки данных акта:', err);
             Notifications.error('Не удалось загрузить данные акта');
