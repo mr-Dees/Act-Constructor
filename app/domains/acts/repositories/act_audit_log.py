@@ -341,10 +341,7 @@ class ActAuditLogRepository(BaseRepository):
                 f"SELECT violation_id, "
                 f"COALESCE(violated, '') AS violated, "
                 f"COALESCE(established, '') AS established, "
-                f"COALESCE(reasons, '') AS reasons, "
-                f"COALESCE(consequences, '') AS consequences, "
-                f"COALESCE(responsible, '') AS responsible, "
-                f"COALESCE(recommendations, '') AS recommendations "
+                f"reasons, consequences, responsible, recommendations "
                 f"FROM {self._violations} WHERE act_id = $1",
                 act_id,
             )
@@ -359,13 +356,18 @@ class ActAuditLogRepository(BaseRepository):
                     continue
                 changed_fields: dict[str, dict] = {}
                 for field in viol_fields:
-                    old_val = old.get(field, "")
-                    # Для optional fields (reasons, etc.) — берём .content
+                    old_val = old.get(field)
                     new_attr = getattr(new_viol, field, None)
                     if hasattr(new_attr, "content"):
                         new_val = new_attr.content or ""
+                        # JSONB-поля — извлекаем content для сравнения
+                        if isinstance(old_val, dict):
+                            old_val = old_val.get("content", "")
+                        else:
+                            old_val = old_val or ""
                     else:
                         new_val = new_attr or ""
+                        old_val = old_val or ""
                     if old_val != new_val:
                         changed_fields[field] = {"changed": True}
                 if changed_fields:
