@@ -180,41 +180,44 @@ class ActCrudService:
         table_id = f"table_{uuid.uuid4().hex[:12]}"
         node_id = f"{parent_id}_qa_{table_id}"
 
-        # Узел дерева
+        # Узел дерева (формат совпадает с state-core.js _createTableNode)
         tree_node = {
             "id": node_id,
-            "label": "Оценка качества",
+            "label": "Таблица",
             "type": "table",
-            "tableType": "qualityAssessment",
             "tableId": table_id,
+            "parentId": parent_id,
             "protected": True,
             "deletable": False,
-            "children": [],
+            "customLabel": "",
         }
 
-        # Данные таблицы
-        rows = []
-
-        # Header row
-        header_cells = [
-            {"value": h, "colSpan": 1, "rowSpan": 1}
-            for h in preset["headers"]
+        # Grid: 2D массив ячеек (формат совпадает с state-core.js _createTableGrid)
+        grid = []
+        header_row = [
+            {
+                "content": h, "isHeader": True,
+                "colSpan": 1, "rowSpan": 1,
+                "originRow": 0, "originCol": c,
+            }
+            for c, h in enumerate(preset["headers"])
         ]
-        rows.append({"isHeader": True, "cells": header_cells})
-
-        # Data rows
-        for _ in range(preset["rows"]):
-            data_cells = [
-                {"value": "", "colSpan": 1, "rowSpan": 1}
-                for _ in range(preset["cols"])
+        grid.append(header_row)
+        for r in range(1, preset["rows"] + 1):
+            data_row = [
+                {
+                    "content": "", "isHeader": False,
+                    "colSpan": 1, "rowSpan": 1,
+                    "originRow": r, "originCol": c,
+                }
+                for c in range(preset["cols"])
             ]
-            rows.append({"isHeader": False, "cells": data_cells})
+            grid.append(data_row)
 
         table_data = {
             "table_id": table_id,
             "node_id": node_id,
-            "rows": rows,
-            "grid": rows,
+            "grid": grid,
             "col_widths": preset["col_widths"],
             "protected": True,
             "deletable": False,

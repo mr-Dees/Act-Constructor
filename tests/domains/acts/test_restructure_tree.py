@@ -302,12 +302,13 @@ class TestNonProcessToProcess:
         assert len(section_2["children"]) == 1
         qa_node = section_2["children"][0]
         assert qa_node["type"] == "table"
-        assert qa_node["tableType"] == "qualityAssessment"
         assert qa_node["protected"] is True
         assert qa_node["deletable"] is False
+        assert qa_node["parentId"] == "2"
+        assert qa_node["label"] == "Таблица"
 
     def test_quality_assessment_table_data_created(self, non_process_tree):
-        """Создаются данные таблицы qualityAssessment с правильной структурой."""
+        """Создаются данные таблицы qualityAssessment с правильной структурой grid."""
         result = ActCrudService.restructure_sections_for_type_change(
             non_process_tree, new_is_process_based=True,
         )
@@ -315,26 +316,34 @@ class TestNonProcessToProcess:
         assert len(result["tables_to_insert"]) == 1
         table_data = result["tables_to_insert"][0]
 
-        # 3 строки: 1 header + 2 data
-        assert len(table_data["rows"]) == 3
+        # 3 строки: 1 header + 2 data (2D массив ячеек)
+        grid = table_data["grid"]
+        assert len(grid) == 3
 
         # Первая строка — header
-        header_row = table_data["rows"][0]
-        assert header_row["isHeader"] is True
-        assert len(header_row["cells"]) == 4
-        assert header_row["cells"][0]["value"] == "Процесс"
-        assert header_row["cells"][1]["value"] == (
+        header_row = grid[0]
+        assert len(header_row) == 4
+        assert header_row[0]["content"] == "Процесс"
+        assert header_row[0]["isHeader"] is True
+        assert header_row[0]["originRow"] == 0
+        assert header_row[0]["originCol"] == 0
+        assert header_row[1]["content"] == (
             "Количество проверенных экземпляров области проверки процесса, шт"
         )
-        assert header_row["cells"][2]["value"] == "Общее количество отклонений, шт"
-        assert header_row["cells"][3]["value"] == "Уровень отклонений, %"
+        assert header_row[2]["content"] == "Общее количество отклонений, шт"
+        assert header_row[3]["content"] == "Уровень отклонений, %"
 
         # Data строки
-        for row in table_data["rows"][1:]:
-            assert row["isHeader"] is False
-            assert len(row["cells"]) == 4
-            for cell in row["cells"]:
-                assert cell["value"] == ""
+        for r_idx, row in enumerate(grid[1:], start=1):
+            assert len(row) == 4
+            for c_idx, cell in enumerate(row):
+                assert cell["content"] == ""
+                assert cell["isHeader"] is False
+                assert cell["originRow"] == r_idx
+                assert cell["originCol"] == c_idx
+
+        # col_widths
+        assert table_data["col_widths"] == [150, 200, 150, 100]
 
     def test_textblock_ids_collected_for_deletion(self, non_process_tree):
         """textblock_ids из разделов 1 и 2 собраны для удаления."""
