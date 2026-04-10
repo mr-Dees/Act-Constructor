@@ -5,6 +5,8 @@
  * индикаторами выбранных форматов и их визуализацией.
  */
 class FormatMenuManager {
+    static _storageKey = 'selected_formats';
+
     /**
      * Настройка меню форматов
      */
@@ -19,6 +21,7 @@ class FormatMenuManager {
 
         this._setupToggle(dropdownBtn, formatMenu);
         this._setupOutsideClick(dropdownBtn, formatMenu);
+        this._restoreFormats(formatMenu);
         this._setupCheckboxHandlers(formatMenu);
 
         this.updateIndicator();
@@ -90,8 +93,42 @@ class FormatMenuManager {
     static _setupCheckboxHandlers(menu) {
         const checkboxes = menu.querySelectorAll('input[type="checkbox"]');
         checkboxes.forEach(checkbox => {
-            checkbox.addEventListener('change', () => this.updateIndicator());
+            checkbox.addEventListener('change', () => {
+                this.updateIndicator();
+                this._saveFormats();
+            });
         });
+    }
+
+    /**
+     * Сохраняет выбранные форматы в localStorage
+     * @private
+     */
+    static _saveFormats() {
+        const formats = this.getSelectedFormats();
+        localStorage.setItem(this._storageKey, JSON.stringify(formats));
+    }
+
+    /**
+     * Восстанавливает выбранные форматы из localStorage
+     * @private
+     * @param {HTMLElement} menu - Элемент меню
+     */
+    static _restoreFormats(menu) {
+        const saved = localStorage.getItem(this._storageKey);
+        if (!saved) return;
+
+        try {
+            const formats = JSON.parse(saved);
+            if (!Array.isArray(formats)) return;
+
+            const checkboxes = menu.querySelectorAll('input[type="checkbox"]');
+            checkboxes.forEach(checkbox => {
+                checkbox.checked = formats.includes(checkbox.value);
+            });
+        } catch (e) {
+            console.error('Ошибка восстановления форматов:', e);
+        }
     }
 
     /**
