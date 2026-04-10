@@ -4,6 +4,7 @@
 Создание, чтение, обновление, удаление, дублирование актов.
 """
 
+import json
 import logging
 import re
 import uuid
@@ -26,6 +27,7 @@ from app.domains.acts.schemas.act_metadata import (
     AuditTeamMember,
 )
 from app.services.audit_id_service import AuditIdService
+from app.domains.acts.repositories.act_content import ActContentRepository
 from app.domains.acts.repositories.act_crud import ActCrudRepository
 from app.domains.acts.repositories.act_lock import ActLockRepository
 from app.domains.acts.repositories.act_access import ActAccessRepository
@@ -210,8 +212,12 @@ class ActCrudService:
 
         table_data = {
             "table_id": table_id,
+            "node_id": node_id,
             "rows": rows,
+            "grid": rows,
             "col_widths": preset["col_widths"],
+            "protected": True,
+            "deletable": False,
         }
 
         return tree_node, table_data
@@ -437,6 +443,16 @@ class ActCrudService:
                 new_km_digit, new_part_number, km_changed, username,
             )
             await self._crud.execute_update(act_id, updates, values)
+
+            # Перестройка разделов 1-2 при смене типа проверки
+            if (
+                "is_process_based" in sent_fields
+                and act_update.is_process_based is not None
+                and act_update.is_process_based != current_act.is_process_based
+            ):
+                await self._apply_tree_restructure(
+                    act_id, act_update.is_process_based, username,
+                )
 
             # Замена команды и поручений
             await self._sync_team_and_directives(
@@ -691,6 +707,64 @@ class ActCrudService:
             details["directives_replaced"] = True
 
         await self._audit.log("update", username, act_id, details)
+
+    async def _apply_tree_restructure(
+        self, act_id: int, new_is_process_based: bool, username: str,
+    ) -> None:
+        """Перестраивает разделы 1-2 в БД при смене типа проверки."""
+        content_repo = ActContentRepository(self.conn)
+
+        tree_data = await content_repo._load_tree(act_id)
+        if not tree_data.get("children"):
+            return
+
+        result = self.restructure_sections_for_type_change(
+            tree_data, new_is_process_based=new_is_process_based,
+        )
+
+        # Сохраняем обновлённое дерево
+        await content_repo._save_tree(act_id, result["tree"])
+
+        # Удаляем контент из разделов 1-2
+        ids = result["content_ids_to_delete"]
+        if ids["table_ids"]:
+            await self.conn.execute(
+                f"DELETE FROM {content_repo.tables} WHERE act_id = $1 AND table_id = ANY($2)",
+                act_id, ids["table_ids"],
+            )
+        if ids["textblock_ids"]:
+            await self.conn.execute(
+                f"DELETE FROM {content_repo.textblocks} WHERE act_id = $1 AND textblock_id = ANY($2)",
+                act_id, ids["textblock_ids"],
+            )
+        if ids["violation_ids"]:
+            await self.conn.execute(
+                f"DELETE FROM {content_repo.violations} WHERE act_id = $1 AND violation_id = ANY($2)",
+                act_id, ids["violation_ids"],
+            )
+
+        # Вставляем новые таблицы (qualityAssessment для процессной)
+        for table in result["tables_to_insert"]:
+            await self.conn.execute(
+                f"""
+                INSERT INTO {content_repo.tables}
+                    (act_id, table_id, node_id, grid_data, col_widths,
+                     is_protected, is_deletable)
+                VALUES ($1, $2, $3, $4, $5, $6, $7)
+                """,
+                act_id,
+                table["table_id"],
+                table["node_id"],
+                json.dumps(table["grid"]),
+                json.dumps(table["col_widths"]),
+                table["protected"],
+                table["deletable"],
+            )
+
+        logger.info(
+            f"Перестроены разделы 1-2 акта ID={act_id}: "
+            f"is_process_based={new_is_process_based}"
+        )
 
     # -------------------------------------------------------------------------
     # DUPLICATE ACT
