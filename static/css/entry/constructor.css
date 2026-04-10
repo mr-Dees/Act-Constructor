@@ -65,6 +65,7 @@
 /* Dialog (constructor-specific) */
 @import '../constructor/dialog/dialog-invoice.css';
 @import '../shared/dialog/acts-modal.css';
+@import '../portal/acts-manager/team-member-search.css';
 
 /* Chat popup */
 @import '../constructor/chat/chat-popup.css';
