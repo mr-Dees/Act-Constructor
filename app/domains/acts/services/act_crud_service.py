@@ -451,7 +451,7 @@ class ActCrudService:
                 and act_update.is_process_based != current_act.is_process_based
             ):
                 await self._apply_tree_restructure(
-                    act_id, act_update.is_process_based, username,
+                    act_id, act_update.is_process_based,
                 )
 
             # Замена команды и поручений
@@ -709,7 +709,7 @@ class ActCrudService:
         await self._audit.log("update", username, act_id, details)
 
     async def _apply_tree_restructure(
-        self, act_id: int, new_is_process_based: bool, username: str,
+        self, act_id: int, new_is_process_based: bool,
     ) -> None:
         """Перестраивает разделы 1-2 в БД при смене типа проверки."""
         content_repo = ActContentRepository(self.conn)
@@ -729,17 +729,17 @@ class ActCrudService:
         ids = result["content_ids_to_delete"]
         if ids["table_ids"]:
             await self.conn.execute(
-                f"DELETE FROM {content_repo.tables} WHERE act_id = $1 AND table_id = ANY($2)",
+                f"DELETE FROM {content_repo.tables} WHERE act_id = $1 AND table_id = ANY($2::varchar[])",
                 act_id, ids["table_ids"],
             )
         if ids["textblock_ids"]:
             await self.conn.execute(
-                f"DELETE FROM {content_repo.textblocks} WHERE act_id = $1 AND textblock_id = ANY($2)",
+                f"DELETE FROM {content_repo.textblocks} WHERE act_id = $1 AND textblock_id = ANY($2::varchar[])",
                 act_id, ids["textblock_ids"],
             )
         if ids["violation_ids"]:
             await self.conn.execute(
-                f"DELETE FROM {content_repo.violations} WHERE act_id = $1 AND violation_id = ANY($2)",
+                f"DELETE FROM {content_repo.violations} WHERE act_id = $1 AND violation_id = ANY($2::varchar[])",
                 act_id, ids["violation_ids"],
             )
 
