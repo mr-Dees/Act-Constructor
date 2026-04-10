@@ -67,6 +67,7 @@ class ActCrudService:
         False: "Характеристика проверяемого направления",
     }
 
+    # Источник правды: static/js/shared/app-config.js → content.tablePresets.qualityAssessment
     _QUALITY_ASSESSMENT_PRESET = {
         "headers": [
             "Процесс",
@@ -95,13 +96,15 @@ class ActCrudService:
         При переходе к процессной проверке в раздел 2 добавляется
         таблица qualityAssessment. Разделы 3-5 не затрагиваются.
 
+        ВАЖНО: мутирует переданный tree_data in-place.
+
         Args:
             tree_data: текущее дерево акта (dict с id, label, children).
             new_is_process_based: новый тип проверки.
 
         Returns:
             dict с ключами:
-                - tree: обновлённое дерево
+                - tree: обновлённое дерево (тот же объект, что и tree_data)
                 - content_ids_to_delete: {table_ids, textblock_ids, violation_ids}
                 - tables_to_insert: список данных таблиц для вставки в БД
         """
