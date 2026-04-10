@@ -6,6 +6,7 @@
 
 import logging
 import re
+import uuid
 from datetime import datetime
 
 import asyncpg
@@ -56,6 +57,161 @@ class ActCrudService:
         self._access = access or ActAccessRepository(conn)
         self.guard = AccessGuard(self._access, self._lock)
         self._audit = ActAuditLogRepository(conn)
+
+    # -------------------------------------------------------------------------
+    # Константы для перестройки дерева при смене типа проверки
+    # -------------------------------------------------------------------------
+
+    _SECTION_1_LABELS = {
+        True: "Информация о процессе, клиентском пути",
+        False: "Характеристика проверяемого направления",
+    }
+
+    _QUALITY_ASSESSMENT_PRESET = {
+        "headers": [
+            "Процесс",
+            "Количество проверенных экземпляров области проверки процесса, шт",
+            "Общее количество отклонений, шт",
+            "Уровень отклонений, %",
+        ],
+        "rows": 2,
+        "cols": 4,
+        "col_widths": [150, 200, 150, 100],
+    }
+
+    # -------------------------------------------------------------------------
+    # Перестройка дерева при смене типа проверки
+    # -------------------------------------------------------------------------
+
+    @staticmethod
+    def restructure_sections_for_type_change(
+        tree_data: dict,
+        *,
+        new_is_process_based: bool,
+    ) -> dict:
+        """Перестраивает разделы 1-2 дерева при смене типа проверки.
+
+        Разделы 1 и 2 очищаются, label раздела 1 обновляется.
+        При переходе к процессной проверке в раздел 2 добавляется
+        таблица qualityAssessment. Разделы 3-5 не затрагиваются.
+
+        Args:
+            tree_data: текущее дерево акта (dict с id, label, children).
+            new_is_process_based: новый тип проверки.
+
+        Returns:
+            dict с ключами:
+                - tree: обновлённое дерево
+                - content_ids_to_delete: {table_ids, textblock_ids, violation_ids}
+                - tables_to_insert: список данных таблиц для вставки в БД
+        """
+        ids: dict[str, list[str]] = {
+            "table_ids": [],
+            "textblock_ids": [],
+            "violation_ids": [],
+        }
+        tables_to_insert: list[dict] = []
+
+        for child in tree_data.get("children", []):
+            if child.get("id") not in ("1", "2"):
+                continue
+
+            # Рекурсивно собираем ID содержимого для удаления
+            ActCrudService._collect_content_ids(
+                child.get("children", []), ids,
+            )
+
+            if child["id"] == "1":
+                child["label"] = ActCrudService._SECTION_1_LABELS[
+                    new_is_process_based
+                ]
+                child["children"] = []
+
+            elif child["id"] == "2":
+                child["children"] = []
+                if new_is_process_based:
+                    qa_node, qa_table_data = (
+                        ActCrudService._make_quality_assessment_table(
+                            parent_id="2",
+                        )
+                    )
+                    child["children"] = [qa_node]
+                    tables_to_insert.append(qa_table_data)
+
+        return {
+            "tree": tree_data,
+            "content_ids_to_delete": ids,
+            "tables_to_insert": tables_to_insert,
+        }
+
+    @staticmethod
+    def _collect_content_ids(
+        nodes: list[dict],
+        ids: dict[str, list[str]],
+    ) -> None:
+        """Рекурсивно собирает tableId / textBlockId / violationId из узлов."""
+        for node in nodes:
+            if "tableId" in node:
+                ids["table_ids"].append(node["tableId"])
+            if "textBlockId" in node:
+                ids["textblock_ids"].append(node["textBlockId"])
+            if "violationId" in node:
+                ids["violation_ids"].append(node["violationId"])
+            ActCrudService._collect_content_ids(
+                node.get("children", []), ids,
+            )
+
+    @staticmethod
+    def _make_quality_assessment_table(
+        parent_id: str,
+    ) -> tuple[dict, dict]:
+        """Создаёт узел дерева и данные таблицы qualityAssessment.
+
+        Returns:
+            (tree_node, table_data) — узел для вставки в children
+            и данные таблицы для вставки в БД.
+        """
+        preset = ActCrudService._QUALITY_ASSESSMENT_PRESET
+        table_id = f"table_{uuid.uuid4().hex[:12]}"
+        node_id = f"{parent_id}_qa_{table_id}"
+
+        # Узел дерева
+        tree_node = {
+            "id": node_id,
+            "label": "Оценка качества",
+            "type": "table",
+            "tableType": "qualityAssessment",
+            "tableId": table_id,
+            "protected": True,
+            "deletable": False,
+            "children": [],
+        }
+
+        # Данные таблицы
+        rows = []
+
+        # Header row
+        header_cells = [
+            {"value": h, "colSpan": 1, "rowSpan": 1}
+            for h in preset["headers"]
+        ]
+        rows.append({"isHeader": True, "cells": header_cells})
+
+        # Data rows
+        for _ in range(preset["rows"]):
+            data_cells = [
+                {"value": "", "colSpan": 1, "rowSpan": 1}
+                for _ in range(preset["cols"])
+            ]
+            rows.append({"isHeader": False, "cells": data_cells})
+
+        table_data = {
+            "table_id": table_id,
+            "rows": rows,
+            "col_widths": preset["col_widths"],
+        }
+
+        return tree_node, table_data
 
     # -------------------------------------------------------------------------
     # SIMPLE CRUD
