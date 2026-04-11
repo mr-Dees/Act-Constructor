@@ -581,34 +581,81 @@ Object.assign(AppState, {
     },
 
     /**
-     * Проверяет ограничения перемещения узлов в раздел 5 с учётом таблиц рисков
+     * Проверяет ограничения перемещения узлов в раздел 5 с учётом таблиц рисков.
+     * Гарантирует, что таблицы рисков остаются на одном уровне: либо все на уровне
+     * пунктов (5.x), либо все на уровне подпунктов (5.x.x+), но не одновременно.
+     *
+     * Вычисляет фактическую глубину каждого узла с риск-таблицами:
+     * - Оставшиеся узлы (не в перемещаемом поддереве) — по текущей глубине
+     * - Узлы в перемещаемом поддереве — по глубине в новой позиции
      * @private
      * @param {Object} draggedNode - Перемещаемый узел
      * @param {Object} newParent - Новый родитель после перемещения
      * @returns {Object} Результат проверки
      */
     _checkSection5RiskConstraints(draggedNode, newParent) {
-        // Проверяем только item-узлы
         if (draggedNode.type && draggedNode.type !== 'item') return ValidationCore.success();
 
-        // Если новый родитель — узел 5.*, проверяем наличие таблиц рисков на уровне 5.*
-        if (newParent.number?.match(/^5\.\d+$/)) {
-            const node5 = this.findNodeById('5');
-            if (node5?.children) {
-                const hasRiskAtLevel5x = node5.children.some(child => {
-                    if (child.type !== 'item' || !child.number?.match(/^5\.\d+$/)) return false;
-                    return child.children?.some(c => {
-                        if (c.type !== 'table' || !c.tableId) return false;
-                        const table = this.tables[c.tableId];
-                        return table && (table.isRegularRiskTable || table.isOperationalRiskTable);
-                    });
-                });
-                if (hasRiskAtLevel5x) {
-                    return ValidationCore.failure(
-                        'Нельзя перемещать элементы в подпункты раздела 5: есть таблицы рисков на уровне пунктов'
-                    );
+        const node5 = this.findNodeById('5');
+        if (!node5?.children) return ValidationCore.success();
+
+        const isNewParentInSection5 = newParent.id === '5' || !!newParent.number?.match(/^5\.\d+/);
+        if (!isNewParentInSection5) return ValidationCore.success();
+
+        // Собираем ID перемещаемого поддерева для исключения
+        const draggedIds = new Set();
+        const collectIds = (n) => { draggedIds.add(n.id); n.children?.forEach(collectIds); };
+        collectIds(draggedNode);
+
+        // Глубина узла под секцией 5: число сегментов - 1 (5→0, 5.1→1, 5.1.1→2, ...)
+        const getDepth = (node) => node.number ? (node.number.split('.').length - 1) : 0;
+
+        let hasPointLevel = false;
+        let hasSubpointLevel = false;
+
+        // 1. Оставшиеся узлы — определяем уровень рисков, исключая перемещаемое поддерево
+        const checkRemaining = (node) => {
+            if (draggedIds.has(node.id)) return;
+            if ((!node.type || node.type === 'item') && node.number?.match(/^5\.\d+/)) {
+                if (node.children?.some(c => !draggedIds.has(c.id) && this._isRiskTable(c))) {
+                    if (getDepth(node) === 1) hasPointLevel = true;
+                    else hasSubpointLevel = true;
                 }
             }
+            node.children?.forEach(child => {
+                if (!draggedIds.has(child.id)) checkRemaining(child);
+            });
+        };
+        checkRemaining(node5);
+
+        // 2. Перемещаемое поддерево — вычисляем глубину на новой позиции
+        const newParentDepth = newParent.id === '5' ? 0 : getDepth(newParent);
+
+        const checkDragged = (node, depth) => {
+            if (node.children?.some(c => this._isRiskTable(c))) {
+                if (depth === 1) hasPointLevel = true;
+                else hasSubpointLevel = true;
+            }
+            node.children?.forEach(child => {
+                if (!child.type || child.type === 'item') {
+                    checkDragged(child, depth + 1);
+                }
+            });
+        };
+        checkDragged(draggedNode, newParentDepth + 1);
+
+        // Конфликт уровней — блокируем
+        if (hasPointLevel && hasSubpointLevel) {
+            return ValidationCore.failure(
+                'Нельзя перемещать: таблицы рисков окажутся на разных уровнях раздела 5'
+            );
+        }
+
+        // Нельзя создавать подпункты в 5.x при наличии рисков на уровне пунктов
+        if (hasPointLevel && newParent.number?.match(/^5\.\d+$/)) {
+            return ValidationCore.failure(
+                'Нельзя перемещать элементы в подпункты раздела 5: есть таблицы рисков на уровне пунктов'
+            );
         }
 
         return ValidationCore.success();
@@ -672,6 +719,14 @@ Object.assign(AppState, {
      * @param {Object} node - Узел для обработки
      */
     _handleMetricsTableForNode(node) {
+        // Сводная таблица на 5.X нужна только при наличии рисков на глубоком уровне (5.X.X+)
+        if (!node.number?.match(/^5\.\d+$/)) return;
+
+        const hasDeepRisks = (node.children || []).some(child =>
+            child.type === 'item' && this._findRiskTablesInSubtree(child).length > 0
+        );
+        if (!hasDeepRisks) return;
+
         const hasTable = node.children?.some(
             child => child.type === 'table' && child.isMetricsTable === true
         );
@@ -741,9 +796,14 @@ Object.assign(AppState, {
         // Очистка старого: удаляет сводные таблицы у всех 5.X, где нет глубоких рисков
         this._cleanupMetricsTablesAfterRiskTableDeleted(draggedNode.id);
 
-        // Создание сводной для нового предка 5.X, если риски переехали туда
+        // Создание сводной для нового предка 5.X, только если риски на глубоком уровне (5.X.X+)
         if (newAncestor5x) {
-            this._handleMetricsTableForNode(newAncestor5x);
+            const hasDeepRisks = (newAncestor5x.children || []).some(child =>
+                child.type === 'item' && this._findRiskTablesInSubtree(child).length > 0
+            );
+            if (hasDeepRisks) {
+                this._handleMetricsTableForNode(newAncestor5x);
+            }
         }
 
         // Главная сводная таблица: создаём/удаляем по наличию рисков в разделе 5

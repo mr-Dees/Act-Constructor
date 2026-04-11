@@ -133,48 +133,15 @@ class HeaderExit {
                 StorageManager.allowUnload();
             }
 
-            // Если НЕ сохранили, нужно сохранить перед unlock
-            if (!wasSaved && window.currentActId && typeof AppState !== 'undefined' && AppState?.exportData) {
-                try {
-                    if (typeof Notifications !== 'undefined') {
-                        Notifications.info('Сохранение текущего состояния...', AppConfig.notifications.duration.info);
-                    }
-
-                    const username = AuthManager?.getCurrentUser?.() || null;
-                    if (username) {
-                        const data = AppState.exportData();
-                        data.saveType = 'manual';
-                        const saveResp = await fetch(
-                            AppConfig.api.getUrl(`/api/v1/acts/${window.currentActId}/content`),
-                            {
-                                method: 'PUT',
-                                headers: {
-                                    'Content-Type': 'application/json',
-                                    'X-JupyterHub-User': username
-                                },
-                                body: JSON.stringify(data)
-                            }
-                        );
-
-                        if (!saveResp.ok) {
-                            console.warn('Не удалось сохранить состояние перед выходом, код', saveResp.status);
-                        } else {
-                            console.log('Текущее состояние сохранено перед выходом');
-                        }
-                    }
-                } catch (saveErr) {
-                    console.error('Ошибка сохранения состояния перед выходом:', saveErr);
-                    // Продолжаем выход даже если не удалось сохранить
-                }
-            }
-
             // Снимаем блокировку через LockManager
             if (window.LockManager && typeof LockManager.manualUnlock === 'function') {
                 await LockManager.manualUnlock();
             }
 
-            // Устанавливаем флаг успешного выхода
-            sessionStorage.setItem('sessionExitedWithSave', 'true');
+            // Устанавливаем флаг только если данные были сохранены
+            if (wasSaved) {
+                sessionStorage.setItem('sessionExitedWithSave', 'true');
+            }
 
             // Переходим на главную
             window.location.href = AppConfig.api.getUrl('/acts');

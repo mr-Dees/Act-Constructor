@@ -6,6 +6,9 @@
  * Интегрирован с StorageManager для автосохранения.
  */
 class App {
+    static _stepStorageKey = 'constructor_current_step';
+    static _scrollStorageKey = 'constructor_scroll_positions';
+
     /**
      * Инициализация приложения при загрузке страницы
      */
@@ -15,6 +18,10 @@ class App {
             this._initializeStorageManager();
             this._initializeManagers();
             this._setupEventHandlers();
+
+            // Восстанавливаем шаг и позицию скролла из localStorage
+            this._restoreStep();
+            this._setupScrollPersistence();
 
             // Применяем режим только чтения если активен
             if (AppConfig.readOnlyMode?.isReadOnly) {
@@ -163,11 +170,26 @@ class App {
     static goToStep(stepNum) {
         // Обновляем текущий шаг
         AppState.currentStep = stepNum;
+        localStorage.setItem(this._stepStorageKey, stepNum);
 
         this._updateStepVisibility(stepNum);
         this._handleStepTransition(stepNum);
 
         HelpManager.updateTooltip();
+    }
+
+    /**
+     * Восстанавливает шаг из localStorage
+     * @private
+     */
+    static _restoreStep() {
+        const saved = localStorage.getItem(this._stepStorageKey);
+        if (saved) {
+            const step = parseInt(saved, 10);
+            if (step === 2) {
+                this.goToStep(2);
+            }
+        }
     }
 
     /**
@@ -208,6 +230,62 @@ class App {
         } else {
             textBlockManager.hideToolbar();
             requestAnimationFrame(() => PreviewManager.update('previewTrim'));
+        }
+    }
+
+    /**
+     * Настраивает сохранение позиций скролла при уходе со страницы
+     * и восстанавливает сохранённые позиции
+     * @private
+     */
+    static _setupScrollPersistence() {
+        // Сохраняем позиции при уходе со страницы
+        window.addEventListener('beforeunload', () => this._saveScrollPositions());
+
+        // Восстанавливаем позиции после полной отрисовки
+        requestAnimationFrame(() => this._restoreScrollPositions());
+    }
+
+    /**
+     * Сохраняет позиции скролла всех панелей в localStorage
+     * @private
+     */
+    static _saveScrollPositions() {
+        const positions = {};
+
+        const tree = document.querySelector('.tree-container');
+        if (tree) positions.tree = tree.scrollTop;
+
+        const preview = document.querySelector('.preview');
+        if (preview) positions.preview = preview.scrollTop;
+
+        const step2 = document.getElementById('step2');
+        if (step2) positions.step2 = step2.scrollTop;
+
+        localStorage.setItem(this._scrollStorageKey, JSON.stringify(positions));
+    }
+
+    /**
+     * Восстанавливает позиции скролла из localStorage
+     * @private
+     */
+    static _restoreScrollPositions() {
+        const saved = localStorage.getItem(this._scrollStorageKey);
+        if (!saved) return;
+
+        try {
+            const positions = JSON.parse(saved);
+
+            const tree = document.querySelector('.tree-container');
+            if (tree && positions.tree) tree.scrollTop = positions.tree;
+
+            const preview = document.querySelector('.preview');
+            if (preview && positions.preview) preview.scrollTop = positions.preview;
+
+            const step2 = document.getElementById('step2');
+            if (step2 && positions.step2) step2.scrollTop = positions.step2;
+        } catch (e) {
+            console.error('Ошибка восстановления позиции скролла:', e);
         }
     }
 

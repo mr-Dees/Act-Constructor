@@ -4,8 +4,10 @@
 Создание, чтение, обновление, удаление, дублирование актов.
 """
 
+import json
 import logging
 import re
+import uuid
 from datetime import datetime
 
 import asyncpg
@@ -25,6 +27,7 @@ from app.domains.acts.schemas.act_metadata import (
     AuditTeamMember,
 )
 from app.services.audit_id_service import AuditIdService
+from app.domains.acts.repositories.act_content import ActContentRepository
 from app.domains.acts.repositories.act_crud import ActCrudRepository
 from app.domains.acts.repositories.act_lock import ActLockRepository
 from app.domains.acts.repositories.act_access import ActAccessRepository
@@ -56,6 +59,171 @@ class ActCrudService:
         self._access = access or ActAccessRepository(conn)
         self.guard = AccessGuard(self._access, self._lock)
         self._audit = ActAuditLogRepository(conn)
+
+    # -------------------------------------------------------------------------
+    # Константы для перестройки дерева при смене типа проверки
+    # -------------------------------------------------------------------------
+
+    _SECTION_1_LABELS = {
+        True: "Информация о процессе, клиентском пути",
+        False: "Характеристика проверяемого направления",
+    }
+
+    # Источник правды: static/js/shared/app-config.js → content.tablePresets.qualityAssessment
+    _QUALITY_ASSESSMENT_PRESET = {
+        "headers": [
+            "Процесс",
+            "Количество проверенных экземпляров области проверки процесса, шт",
+            "Общее количество отклонений, шт",
+            "Уровень отклонений, %",
+        ],
+        "rows": 2,
+        "cols": 4,
+        "col_widths": [150, 200, 150, 100],
+    }
+
+    # -------------------------------------------------------------------------
+    # Перестройка дерева при смене типа проверки
+    # -------------------------------------------------------------------------
+
+    @staticmethod
+    def restructure_sections_for_type_change(
+        tree_data: dict,
+        *,
+        new_is_process_based: bool,
+    ) -> dict:
+        """Перестраивает разделы 1-2 дерева при смене типа проверки.
+
+        Разделы 1 и 2 очищаются, label раздела 1 обновляется.
+        При переходе к процессной проверке в раздел 2 добавляется
+        таблица qualityAssessment. Разделы 3-5 не затрагиваются.
+
+        ВАЖНО: мутирует переданный tree_data in-place.
+
+        Args:
+            tree_data: текущее дерево акта (dict с id, label, children).
+            new_is_process_based: новый тип проверки.
+
+        Returns:
+            dict с ключами:
+                - tree: обновлённое дерево (тот же объект, что и tree_data)
+                - content_ids_to_delete: {table_ids, textblock_ids, violation_ids}
+                - tables_to_insert: список данных таблиц для вставки в БД
+        """
+        ids: dict[str, list[str]] = {
+            "table_ids": [],
+            "textblock_ids": [],
+            "violation_ids": [],
+        }
+        tables_to_insert: list[dict] = []
+
+        for child in tree_data.get("children", []):
+            if child.get("id") not in ("1", "2"):
+                continue
+
+            # Рекурсивно собираем ID содержимого для удаления
+            ActCrudService._collect_content_ids(
+                child.get("children", []), ids,
+            )
+
+            if child["id"] == "1":
+                child["label"] = ActCrudService._SECTION_1_LABELS[
+                    new_is_process_based
+                ]
+                child["children"] = []
+
+            elif child["id"] == "2":
+                child["children"] = []
+                if new_is_process_based:
+                    qa_node, qa_table_data = (
+                        ActCrudService._make_quality_assessment_table(
+                            parent_id="2",
+                        )
+                    )
+                    child["children"] = [qa_node]
+                    tables_to_insert.append(qa_table_data)
+
+        return {
+            "tree": tree_data,
+            "content_ids_to_delete": ids,
+            "tables_to_insert": tables_to_insert,
+        }
+
+    @staticmethod
+    def _collect_content_ids(
+        nodes: list[dict],
+        ids: dict[str, list[str]],
+    ) -> None:
+        """Рекурсивно собирает tableId / textBlockId / violationId из узлов."""
+        for node in nodes:
+            if "tableId" in node:
+                ids["table_ids"].append(node["tableId"])
+            if "textBlockId" in node:
+                ids["textblock_ids"].append(node["textBlockId"])
+            if "violationId" in node:
+                ids["violation_ids"].append(node["violationId"])
+            ActCrudService._collect_content_ids(
+                node.get("children", []), ids,
+            )
+
+    @staticmethod
+    def _make_quality_assessment_table(
+        parent_id: str,
+    ) -> tuple[dict, dict]:
+        """Создаёт узел дерева и данные таблицы qualityAssessment.
+
+        Returns:
+            (tree_node, table_data) — узел для вставки в children
+            и данные таблицы для вставки в БД.
+        """
+        preset = ActCrudService._QUALITY_ASSESSMENT_PRESET
+        table_id = f"table_{uuid.uuid4().hex[:12]}"
+        node_id = f"{parent_id}_qa_{table_id}"
+
+        # Узел дерева (формат совпадает с state-core.js _createTableNode)
+        tree_node = {
+            "id": node_id,
+            "label": "Таблица",
+            "type": "table",
+            "tableId": table_id,
+            "parentId": parent_id,
+            "protected": True,
+            "deletable": False,
+            "customLabel": "",
+        }
+
+        # Grid: 2D массив ячеек (формат совпадает с state-core.js _createTableGrid)
+        grid = []
+        header_row = [
+            {
+                "content": h, "isHeader": True,
+                "colSpan": 1, "rowSpan": 1,
+                "originRow": 0, "originCol": c,
+            }
+            for c, h in enumerate(preset["headers"])
+        ]
+        grid.append(header_row)
+        for r in range(1, preset["rows"] + 1):
+            data_row = [
+                {
+                    "content": "", "isHeader": False,
+                    "colSpan": 1, "rowSpan": 1,
+                    "originRow": r, "originCol": c,
+                }
+                for c in range(preset["cols"])
+            ]
+            grid.append(data_row)
+
+        table_data = {
+            "table_id": table_id,
+            "node_id": node_id,
+            "grid": grid,
+            "col_widths": preset["col_widths"],
+            "protected": True,
+            "deletable": False,
+        }
+
+        return tree_node, table_data
 
     # -------------------------------------------------------------------------
     # SIMPLE CRUD
@@ -278,6 +446,16 @@ class ActCrudService:
                 new_km_digit, new_part_number, km_changed, username,
             )
             await self._crud.execute_update(act_id, updates, values)
+
+            # Перестройка разделов 1-2 при смене типа проверки
+            if (
+                "is_process_based" in sent_fields
+                and act_update.is_process_based is not None
+                and act_update.is_process_based != current_act.is_process_based
+            ):
+                await self._apply_tree_restructure(
+                    act_id, act_update.is_process_based,
+                )
 
             # Замена команды и поручений
             await self._sync_team_and_directives(
@@ -532,6 +710,64 @@ class ActCrudService:
             details["directives_replaced"] = True
 
         await self._audit.log("update", username, act_id, details)
+
+    async def _apply_tree_restructure(
+        self, act_id: int, new_is_process_based: bool,
+    ) -> None:
+        """Перестраивает разделы 1-2 в БД при смене типа проверки."""
+        content_repo = ActContentRepository(self.conn)
+
+        tree_data = await content_repo._load_tree(act_id)
+        if not tree_data.get("children"):
+            return
+
+        result = self.restructure_sections_for_type_change(
+            tree_data, new_is_process_based=new_is_process_based,
+        )
+
+        # Сохраняем обновлённое дерево
+        await content_repo._save_tree(act_id, result["tree"])
+
+        # Удаляем контент из разделов 1-2
+        ids = result["content_ids_to_delete"]
+        if ids["table_ids"]:
+            await self.conn.execute(
+                f"DELETE FROM {content_repo.tables} WHERE act_id = $1 AND table_id = ANY($2::varchar[])",
+                act_id, ids["table_ids"],
+            )
+        if ids["textblock_ids"]:
+            await self.conn.execute(
+                f"DELETE FROM {content_repo.textblocks} WHERE act_id = $1 AND textblock_id = ANY($2::varchar[])",
+                act_id, ids["textblock_ids"],
+            )
+        if ids["violation_ids"]:
+            await self.conn.execute(
+                f"DELETE FROM {content_repo.violations} WHERE act_id = $1 AND violation_id = ANY($2::varchar[])",
+                act_id, ids["violation_ids"],
+            )
+
+        # Вставляем новые таблицы (qualityAssessment для процессной)
+        for table in result["tables_to_insert"]:
+            await self.conn.execute(
+                f"""
+                INSERT INTO {content_repo.tables}
+                    (act_id, table_id, node_id, grid_data, col_widths,
+                     is_protected, is_deletable)
+                VALUES ($1, $2, $3, $4, $5, $6, $7)
+                """,
+                act_id,
+                table["table_id"],
+                table["node_id"],
+                json.dumps(table["grid"]),
+                json.dumps(table["col_widths"]),
+                table["protected"],
+                table["deletable"],
+            )
+
+        logger.info(
+            f"Перестроены разделы 1-2 акта ID={act_id}: "
+            f"is_process_based={new_is_process_based}"
+        )
 
     # -------------------------------------------------------------------------
     # DUPLICATE ACT

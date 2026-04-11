@@ -193,6 +193,7 @@ class CreateActDialog extends DialogBase {
             const form = dialog.querySelector('#actForm');
             if (form) {
                 form.dataset.originalKm = actData.km_number;
+                form.dataset.originalProcessBased = actData.is_process_based !== false ? 'true' : 'false';
             }
 
             // Добавляем предупреждение о фактуре если нужно
@@ -1010,6 +1011,11 @@ class CreateActDialog extends DialogBase {
                 return;
             }
 
+            // Проверка изменения типа проверки
+            if (isEdit && !await this._confirmProcessTypeChange(form, dialog)) {
+                return;
+            }
+
             // Сбор данных
             body = this._collectFormData(form, dialog, isEdit, actId);
 
@@ -1038,13 +1044,52 @@ class CreateActDialog extends DialogBase {
             return true; // КМ не изменился
         }
 
-        return await DialogManager.show({
+        const confirmed = await DialogManager.show({
             title: 'Изменение КМ',
             message: `Вы изменяете КМ с ${originalKm} на ${newKm}. Акт будет перемещен в новую группу КМ. Продолжить?`,
             icon: '⚠️',
             confirmText: 'Продолжить',
             cancelText: 'Отмена'
         });
+
+        // Обновляем originalKm после подтверждения, чтобы повторный вызов не показал диалог снова
+        if (confirmed) {
+            form.dataset.originalKm = newKm;
+        }
+
+        return confirmed;
+    }
+
+    /**
+     * Проверяет и подтверждает изменение типа проверки при редактировании
+     * @private
+     */
+    static async _confirmProcessTypeChange(form, dialog) {
+        const original = form.dataset.originalProcessBased;
+        if (!original) {
+            return true; // Нет оригинального значения (новый акт)
+        }
+
+        const checkbox = dialog.querySelector('input[name="is_process_based"]');
+        const current = checkbox?.checked ? 'true' : 'false';
+
+        if (original === current) {
+            return true; // Тип не изменился
+        }
+
+        const confirmed = await DialogManager.show({
+            title: 'Изменение типа проверки',
+            message: 'Изменение типа проверки приведёт к сбросу разделов 1 и 2. Все данные в этих разделах будут потеряны. Продолжить?',
+            icon: '⚠️',
+            confirmText: 'Продолжить',
+            cancelText: 'Отмена'
+        });
+
+        if (confirmed) {
+            form.dataset.originalProcessBased = current;
+        }
+
+        return confirmed;
     }
 
     /**
