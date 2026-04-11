@@ -719,6 +719,14 @@ Object.assign(AppState, {
      * @param {Object} node - Узел для обработки
      */
     _handleMetricsTableForNode(node) {
+        // Сводная таблица на 5.X нужна только при наличии рисков на глубоком уровне (5.X.X+)
+        if (!node.number?.match(/^5\.\d+$/)) return;
+
+        const hasDeepRisks = (node.children || []).some(child =>
+            child.type === 'item' && this._findRiskTablesInSubtree(child).length > 0
+        );
+        if (!hasDeepRisks) return;
+
         const hasTable = node.children?.some(
             child => child.type === 'table' && child.isMetricsTable === true
         );
@@ -788,9 +796,14 @@ Object.assign(AppState, {
         // Очистка старого: удаляет сводные таблицы у всех 5.X, где нет глубоких рисков
         this._cleanupMetricsTablesAfterRiskTableDeleted(draggedNode.id);
 
-        // Создание сводной для нового предка 5.X, если риски переехали туда
+        // Создание сводной для нового предка 5.X, только если риски на глубоком уровне (5.X.X+)
         if (newAncestor5x) {
-            this._handleMetricsTableForNode(newAncestor5x);
+            const hasDeepRisks = (newAncestor5x.children || []).some(child =>
+                child.type === 'item' && this._findRiskTablesInSubtree(child).length > 0
+            );
+            if (hasDeepRisks) {
+                this._handleMetricsTableForNode(newAncestor5x);
+            }
         }
 
         // Главная сводная таблица: создаём/удаляем по наличию рисков в разделе 5
