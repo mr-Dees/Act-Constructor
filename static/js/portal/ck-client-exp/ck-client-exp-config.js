@@ -55,7 +55,7 @@ class CkClientExpConfig {
             { key: 'block_owner', label: 'Блок', type: 'readonly-text', computed: true },
             { key: 'department_owner', label: 'Подразделение', type: 'readonly-text', computed: true },
         ]},
-        { key: 'reestr_metric_id', label: 'ID реестра метрики', type: 'text' },
+        { key: 'reestr_metric_id', label: 'ID реестра метрики', type: 'readonly-text' },
     ];
 
     static dictNames = ['metrics', 'terbanks', 'processes'];

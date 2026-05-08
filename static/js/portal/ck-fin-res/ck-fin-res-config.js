@@ -114,7 +114,7 @@ class CkFinResConfig {
         { key: 'assigment_recommendation', label: 'Формулировка поручения', type: 'textarea', rows: 2 },
         { key: 'execution_deadline', label: 'Срок контроля исполнения поручения', type: 'date' },
         { key: 'used_pm_lib', label: 'Использование PM', type: 'select', options: FR_USED_PM_OPTIONS },
-        { key: 'reestr_metric_id', label: 'ID реестра метрики', type: 'text' },
+        { key: 'reestr_metric_id', label: 'ID реестра метрики', type: 'readonly-text' },
     ];
 
     static dictNames = ['metrics', 'terbanks', 'processes'];

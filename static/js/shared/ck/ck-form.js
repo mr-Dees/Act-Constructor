@@ -72,8 +72,10 @@ class CkForm {
                 }
                 // paired_extras не отправляются — они вычисляются на бэке через JOIN
             } else if (field.type === 'readonly-text') {
-                // readonly-text без computed=true — попадает в payload как есть
-                data[field.key] = el.dataset.value || '';
+                // Пустое значение опускаем — пусть {...record, ...data} сохранит исходное
+                // (важно для Optional[int]-полей вроде reestr_metric_id: '' не парсится в int)
+                const v = el.dataset.value || '';
+                if (v !== '') data[field.key] = v;
             } else {
                 data[field.key] = el.value;
             }
