@@ -39,14 +39,19 @@ CREATE INDEX IF NOT EXISTS idx_ck_cs_validation_act_sub_number_id ON t_db_oarb_c
 
 -- ============================================================================
 -- VIEW CS-ВАЛИДАЦИИ
+-- Присоединяет номер акта из справочника служебных записок по act_sub_number_id
+-- и владельца блока/подразделения из справочника процессов по process_number.
 -- ============================================================================
 
 CREATE OR REPLACE VIEW v_db_oarb_ck_cs_validation AS
 SELECT
     cs.*,
-    sn.act_sub_number
+    sn.act_sub_number,
+    pd.block_owner AS block_owner,
+    pd.department_owner AS department_owner
 FROM t_db_oarb_ck_cs_validation cs
 LEFT JOIN t_db_oarb_ua_sub_number sn ON sn.id = cs.act_sub_number_id
+LEFT JOIN t_db_oarb_ua_process_dict pd ON pd.process_code = cs.process_number
 WHERE cs.is_actual = true;
 
 -- ============================================================================

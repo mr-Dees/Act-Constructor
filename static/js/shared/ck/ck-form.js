@@ -50,7 +50,11 @@ class CkForm {
 
     static collectData() {
         const data = {};
-        for (const field of this._config.fields) {
+        const fields = this._flattenFields();
+        for (const field of fields) {
+            // computed-поля приходят из VIEW JOIN на бэке — не отправляем в payload
+            if (field.computed) continue;
+
             const el = document.getElementById(`ck-field-${field.key}`);
             if (!el) continue;
 
@@ -66,6 +70,10 @@ class CkForm {
                 if (field.paired) {
                     data[field.paired] = el.dataset.pairedValue || '';
                 }
+                // paired_extras не отправляются — они вычисляются на бэке через JOIN
+            } else if (field.type === 'readonly-text') {
+                // readonly-text без computed=true — попадает в payload как есть
+                data[field.key] = el.dataset.value || '';
             } else {
                 data[field.key] = el.value;
             }
@@ -73,16 +81,34 @@ class CkForm {
         return data;
     }
 
+    /** Возвращает плоский список всех полей с учётом row-групп. */
+    static _flattenFields() {
+        const result = [];
+        for (const field of this._config.fields) {
+            if (field.row) {
+                for (const sub of field.row) result.push(sub);
+            } else {
+                result.push(field);
+            }
+        }
+        return result;
+    }
+
     static validate() {
         const errors = [];
-        for (const field of this._config.fields) {
+        const fields = this._flattenFields();
+        for (const field of fields) {
             if (!field.required) continue;
+            // computed-поля заполняются автоматически — не валидируем
+            if (field.computed) continue;
             const el = document.getElementById(`ck-field-${field.key}`);
             if (!el) continue;
 
             let isEmpty = false;
             if (field.type === 'process-picker') {
                 isEmpty = !el.dataset.value;
+            } else if (field.type === 'readonly-text') {
+                isEmpty = !(el.dataset.value || '').trim();
             } else if (field.type === 'checkbox') {
                 isEmpty = false; // checkbox всегда valid
             } else {
@@ -250,6 +276,13 @@ class CkForm {
                 input.textContent = '— не выбран —';
                 break;
 
+            case 'readonly-text':
+                input = document.createElement('div');
+                input.className = 'ck-form__readonly';
+                input.dataset.value = '';
+                input.textContent = field.placeholder || '—';
+                break;
+
             default:
                 input = document.createElement('input');
                 input.type = 'text';
@@ -285,37 +318,84 @@ class CkForm {
     }
 
     static _populateFields(record) {
-        for (const field of this._config.fields) {
-            const fields = field.row ? field.row : [field];
-            for (const f of fields) {
-                const el = document.getElementById(`ck-field-${f.key}`);
-                if (!el) continue;
-                const val = record[f.key];
+        const fields = this._flattenFields();
+        for (const f of fields) {
+            const el = document.getElementById(`ck-field-${f.key}`);
+            if (!el) continue;
+            const val = record[f.key];
 
-                if (f.type === 'checkbox') {
-                    el.checked = !!val;
-                } else if (f.type === 'process-picker') {
-                    el.dataset.value = record[f.key] || '';
-                    el.dataset.pairedValue = record[f.paired] || '';
-                    const num = record[f.key] || '';
-                    const name = record[f.paired] || '';
-                    el.textContent = num ? `${num} — ${name}` : '— не выбран —';
-                } else if (f.type === 'date') {
-                    el.value = val ? val.substring(0, 10) : '';
-                } else {
-                    el.value = val ?? '';
+            if (f.type === 'checkbox') {
+                el.checked = !!val;
+            } else if (f.type === 'process-picker') {
+                el.dataset.value = record[f.key] || '';
+                el.dataset.pairedValue = record[f.paired] || '';
+                const num = record[f.key] || '';
+                const name = record[f.paired] || '';
+                el.textContent = num ? `${num} — ${name}` : '— не выбран —';
+                // paired_extras: заполняем связанные read-only поля
+                if (Array.isArray(f.paired_extras)) {
+                    for (const extra of f.paired_extras) {
+                        const extraEl = document.getElementById(`ck-field-${extra.key}`);
+                        if (!extraEl) continue;
+                        const extraVal = record[extra.source] || '';
+                        extraEl.dataset.value = extraVal;
+                        extraEl.textContent = extraVal || (extra.placeholder || '—');
+                    }
                 }
+            } else if (f.type === 'readonly-text') {
+                const v = val || '';
+                el.dataset.value = v;
+                el.textContent = v || (f.placeholder || '—');
+            } else if (f.type === 'date') {
+                el.value = val ? val.substring(0, 10) : '';
+            } else {
+                el.value = val ?? '';
             }
         }
     }
 
-    /** Устанавливает значение процесса извне (после picker). */
-    static setProcessValue(fieldKey, processNumber, processName) {
+    /**
+     * Устанавливает значение процесса извне (после picker).
+     * @param {string} fieldKey - ключ основного поля (например, 'process_number')
+     * @param {string} processNumber - значение основного поля
+     * @param {string} processName - значение paired-поля (например, process_name)
+     * @param {Object} [extras] - словарь значений для paired_extras, ключ = source
+     *   из конфига {key, source}. Например: { block_owner: '...', department_owner: '...' }
+     */
+    static setProcessValue(fieldKey, processNumber, processName, extras) {
         const el = document.getElementById(`ck-field-${fieldKey}`);
         if (!el) return;
-        el.dataset.value = processNumber;
-        el.dataset.pairedValue = processName;
-        el.textContent = `${processNumber} — ${processName}`;
+        const num = processNumber || '';
+        const name = processName || '';
+        el.dataset.value = num;
+        el.dataset.pairedValue = name;
+        el.textContent = num ? `${num} — ${name}` : '— не выбран —';
+
+        // Заполняем paired_extras, если они описаны в конфиге
+        const fieldCfg = this._findFieldConfig(fieldKey);
+        if (fieldCfg && Array.isArray(fieldCfg.paired_extras) && extras) {
+            for (const extra of fieldCfg.paired_extras) {
+                const extraEl = document.getElementById(`ck-field-${extra.key}`);
+                if (!extraEl) continue;
+                const v = extras[extra.source] || '';
+                extraEl.dataset.value = v;
+                extraEl.textContent = v || (extra.placeholder || '—');
+            }
+        }
+    }
+
+    /** Ищет конфиг поля по key (с учётом row-групп). */
+    static _findFieldConfig(key) {
+        if (!this._config) return null;
+        for (const field of this._config.fields) {
+            if (field.row) {
+                const found = field.row.find(f => f.key === key);
+                if (found) return found;
+            } else if (field.key === key) {
+                return field;
+            }
+        }
+        return null;
     }
 }
 

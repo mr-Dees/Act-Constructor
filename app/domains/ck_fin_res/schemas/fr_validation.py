@@ -69,3 +69,4 @@ class FRValidationView(FRValidationRecord):
     """Представление FR-валидации с вычисляемыми полями (JOIN по act_sub_number_id)."""
 
     act_sub_number: Optional[str] = None
+    department_owner: Optional[str] = None

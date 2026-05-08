@@ -11,7 +11,7 @@ class CkProcessPicker extends DialogBase {
 
     /**
      * @param {Array} processes - [{process_code, process_name, block_owner, department_owner}]
-     * @param {Function} onSelect - callback({process_number, process_name})
+     * @param {Function} onSelect - callback({process_number, process_name, block_owner, department_owner})
      */
     static show(processes, onSelect) {
         this._processes = processes || [];
@@ -147,7 +147,9 @@ class CkProcessPicker extends DialogBase {
         if (!this._selectedProcess || !this._onSelect) return;
         this._onSelect({
             process_number: this._selectedProcess.process_code,
-            process_name: this._selectedProcess.process_name
+            process_name: this._selectedProcess.process_name,
+            block_owner: this._selectedProcess.block_owner || '',
+            department_owner: this._selectedProcess.department_owner || ''
         });
         this._close();
     }

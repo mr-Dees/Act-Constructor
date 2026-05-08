@@ -142,13 +142,17 @@ CREATE INDEX IF NOT EXISTS idx_ck_fr_validation_act_sub_number_id
 
 -- ============================================================================
 -- VIEW FR-ВАЛИДАЦИИ
--- Присоединяет номер акта из справочника служебных записок по act_sub_number_id.
+-- Присоединяет номер акта из справочника служебных записок по act_sub_number_id
+-- и владельца-подразделения из справочника процессов по process_number.
 -- ============================================================================
 
 CREATE OR REPLACE VIEW v_db_oarb_ck_fr_validation AS
-SELECT fr.*, sn.act_sub_number
+SELECT fr.*,
+       sn.act_sub_number,
+       pd.department_owner AS department_owner
 FROM t_db_oarb_ck_fr_validation fr
 LEFT JOIN t_db_oarb_ua_sub_number sn ON sn.id = fr.act_sub_number_id
+LEFT JOIN t_db_oarb_ua_process_dict pd ON pd.process_code = fr.process_number
 WHERE fr.is_actual = true;
 
 -- ============================================================================

@@ -157,7 +157,7 @@ class CkClientExpPage {
     static _openProcessPicker(field) {
         const processes = this._dictionaries.processes || [];
         CkProcessPicker.show(processes, (selected) => {
-            CkForm.setProcessValue(field.key, selected.process_number, selected.process_name);
+            CkForm.setProcessValue(field.key, selected.process_number, selected.process_name, selected);
         });
     }
 

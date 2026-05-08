@@ -31,7 +31,7 @@ class CkClientExpConfig {
 
     static fields = [
         { key: 'metric_code', label: 'Метрика', type: 'dictionary', dict: 'metrics', required: true },
-        { key: 'neg_finder_tb_id', label: 'ТБ-инициаторы', type: 'dictionary', dict: 'terbanks' },
+        { key: 'neg_finder_tb_id', label: 'ТБ-руководитель проверки', type: 'dictionary', dict: 'terbanks' },
         { row: [
             { key: 'num_sz', label: '№ с/з', type: 'text', required: true },
             { key: 'dt_sz', label: 'Дата с/з', type: 'date', width: '140px' },
@@ -40,14 +40,21 @@ class CkClientExpConfig {
             { key: 'metric_unic_clients', label: 'Уник. клиенты', type: 'number', min: 0 },
             { key: 'metric_element_counts', label: 'Кол-во (шт.)', type: 'number', min: 0, width: '90px' },
         ]},
+        { key: 'metric_amount_rubles', label: 'Сумма (руб.)', type: 'number', min: 0 },
         { row: [
-            { key: 'metric_amount_rubles', label: 'Сумма (руб.)', type: 'number', min: 0 },
-            { key: 'is_sent_to_top_brass', label: 'На НС', type: 'checkbox', width: '60px' },
+            { key: 'is_sent_to_top_brass', label: 'На НС', type: 'checkbox', width: '120px' },
+            { key: 'ck_comment', label: 'Комментарий ЦК', type: 'textarea', rows: 2 },
         ]},
         { key: 'km_id', label: '№ КМ', type: 'text', required: true },
         { key: 'act_item_number', label: 'Пункт акта', type: 'text' },
-        { key: 'process_number', label: 'Процесс', type: 'process-picker', required: true, paired: 'process_name' },
-        { key: 'ck_comment', label: 'Комментарий ЦК', type: 'textarea', rows: 3 },
+        { key: 'process_number', label: 'Процесс', type: 'process-picker', required: true, paired: 'process_name', paired_extras: [
+            { key: 'block_owner', source: 'block_owner' },
+            { key: 'department_owner', source: 'department_owner' },
+        ]},
+        { row: [
+            { key: 'block_owner', label: 'Блок', type: 'readonly-text', computed: true },
+            { key: 'department_owner', label: 'Подразделение', type: 'readonly-text', computed: true },
+        ]},
         { key: 'reestr_metric_id', label: 'ID реестра метрики', type: 'text' },
     ];
 

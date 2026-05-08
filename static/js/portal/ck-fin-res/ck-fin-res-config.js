@@ -30,6 +30,16 @@ const FR_RISK_OPTIONS = [
     'Риск кибербезопасности',
 ];
 
+// TODO: перенести в API-справочники когда потребуется динамика
+const FR_ASSIGNMENT_FORMAT_OPTIONS = [
+    'Централизованный контроль',
+    'Самостоятельный контроль',
+    'Нет поручения',
+];
+
+// TODO: перенести в API-справочники когда потребуется динамика
+const FR_USED_PM_OPTIONS = ['Да', 'Нет'];
+
 class CkFinResConfig {
     static apiPrefix = 'ck-fin-res';
     static domainName = 'ck_fin_res';
@@ -60,7 +70,7 @@ class CkFinResConfig {
 
     static fields = [
         { key: 'metric_code', label: 'Метрика', type: 'dictionary', dict: 'metrics', required: true },
-        { key: 'neg_finder_tb_id', label: 'ТБ-инициаторы', type: 'dictionary', dict: 'terbanks' },
+        { key: 'neg_finder_tb_id', label: 'ТБ-руководитель проверки', type: 'dictionary', dict: 'terbanks' },
         { row: [
             { key: 'num_sz', label: '№ с/з', type: 'text', required: true },
             { key: 'dt_sz', label: 'Дата с/з', type: 'date', width: '140px' },
@@ -69,13 +79,21 @@ class CkFinResConfig {
             { key: 'metric_element_counts', label: 'Кол-во (шт.)', type: 'number', min: 0, width: '90px' },
             { key: 'metric_amount_rubles', label: 'Сумма (руб.)', type: 'number', min: 0 },
         ]},
+        { key: 'real_loss', label: 'Реальные потери', type: 'checkbox' },
         { row: [
-            { key: 'is_sent_to_top_brass', label: 'На НС', type: 'checkbox', width: '60px' },
-            { key: 'real_loss', label: 'Реальные потери', type: 'checkbox', width: '120px' },
+            { key: 'is_sent_to_top_brass', label: 'На НС', type: 'checkbox', width: '120px' },
+            { key: 'ck_comment', label: 'Комментарий ЦК ФР', type: 'textarea', rows: 2 },
         ]},
         { key: 'km_id', label: '№ КМ', type: 'text', required: true },
         { key: 'act_item_number', label: 'Пункт акта', type: 'text' },
-        { key: 'process_number', label: 'Процесс', type: 'process-picker', required: true, paired: 'process_name' },
+        { key: 'process_number', label: 'Процесс', type: 'process-picker', required: true, paired: 'process_name', paired_extras: [
+            { key: 'process_owner', source: 'block_owner' },
+            { key: 'department_owner', source: 'department_owner' },
+        ]},
+        { row: [
+            { key: 'process_owner', label: 'Блок', type: 'readonly-text' },
+            { key: 'department_owner', label: 'Подразделение', type: 'readonly-text', computed: true },
+        ]},
         { row: [
             { key: 'pocket', label: 'Карман', type: 'select', options: FR_POCKET_OPTIONS },
             { key: 'risk', label: 'Вид риска', type: 'select', options: FR_RISK_OPTIONS },
@@ -84,20 +102,18 @@ class CkFinResConfig {
         { key: 'deviation_reason', label: 'Причина отклонения', type: 'textarea', rows: 2 },
         { key: 'deviation_consequence', label: 'Последствия отклонения', type: 'textarea', rows: 2 },
         { row: [
-            { key: 'rev_start_dt', label: 'Начало проверки', type: 'date' },
-            { key: 'rev_end_dt', label: 'Конец проверки', type: 'date' },
+            { key: 'rev_start_dt', label: 'Начало ревизуемого периода', type: 'date' },
+            { key: 'rev_end_dt', label: 'Конец ревизуемого периода', type: 'date' },
         ]},
-        { key: 'process_owner', label: 'Владелец процесса', type: 'text' },
         { key: 'inspection_name', label: 'Наименование проверки', type: 'text' },
         { key: 'sberdocs_ctrl_assgn_number', label: '№ контр. поручения SberDocs', type: 'text' },
         { row: [
             { key: 'assigment_id', label: 'ИД поручения УВА', type: 'number' },
-            { key: 'assigment_format', label: 'Формат поручения', type: 'text' },
+            { key: 'assigment_format', label: 'Формат поручения', type: 'select', options: FR_ASSIGNMENT_FORMAT_OPTIONS },
         ]},
         { key: 'assigment_recommendation', label: 'Формулировка поручения', type: 'textarea', rows: 2 },
-        { key: 'execution_deadline', label: 'Срок исполнения', type: 'date' },
-        { key: 'used_pm_lib', label: 'Использование РМ', type: 'text' },
-        { key: 'ck_comment', label: 'Комментарий ЦК ФР', type: 'textarea', rows: 2 },
+        { key: 'execution_deadline', label: 'Срок контроля исполнения поручения', type: 'date' },
+        { key: 'used_pm_lib', label: 'Использование PM', type: 'select', options: FR_USED_PM_OPTIONS },
         { key: 'reestr_metric_id', label: 'ID реестра метрики', type: 'text' },
     ];
 
