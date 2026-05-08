@@ -16,6 +16,7 @@ from app.domains.ck_fin_res.services.fr_validation_service import FRValidationSe
 DictionaryName = Literal[
     "processes", "terbanks", "metrics",
     "departments", "channels", "products", "teams",
+    "risk_types",
 ]
 
 _access = Depends(require_domain_access("ck_fin_res"))

@@ -30,6 +30,7 @@ class DictionaryRepository(BaseRepository):
         self.channel_dict = q(s.channel_dict)
         self.product_dict = q(s.product_dict)
         self.team_dict = q(s.team_dict)
+        self.violation_risk_type_dict = q(s.violation_risk_type_dict)
         logger.debug("DictionaryRepository инициализирован, схема: %s", s.schema_name)
 
     async def get_processes(self) -> list[dict]:
@@ -113,6 +114,18 @@ class DictionaryRepository(BaseRepository):
             f"""
             SELECT id, product_name
             FROM {self.product_dict}
+            WHERE is_actual = true
+            ORDER BY id
+            """
+        )
+        return [dict(r) for r in rows]
+
+    async def get_risk_types(self) -> list[dict]:
+        """Возвращает список актуальных типов риска (для CK Фин.Рез.)."""
+        rows = await self.conn.fetch(
+            f"""
+            SELECT id, risk
+            FROM {self.violation_risk_type_dict}
             WHERE is_actual = true
             ORDER BY id
             """
