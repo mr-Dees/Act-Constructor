@@ -203,6 +203,8 @@ class CkForm {
                 input = document.createElement('input');
                 input.type = 'text';
                 input.className = 'ck-form__input';
+                if (field.mask === 'km') this._attachKmMask(input);
+                if (field.pattern) this._attachPatternValidator(input, field);
                 break;
 
             case 'number':
@@ -312,6 +314,9 @@ class CkForm {
                 label: `${t.tb_id} — ${t.short_name}`
             }));
         }
+        if (dictName === 'risk_types') {
+            return items.map(r => ({ value: r.risk, label: r.risk }));
+        }
         // Дефолтный формат
         return items.map(i => ({
             value: i.id || i.code || i.name || '',
@@ -350,6 +355,18 @@ class CkForm {
                 el.textContent = v || (f.placeholder || '—');
             } else if (f.type === 'date') {
                 el.value = val ? val.substring(0, 10) : '';
+            } else if ((f.type === 'select' || f.type === 'dictionary') && val) {
+                // Если значение не попало в options (legacy/удалённое из справочника),
+                // подкладываем его как опцию, чтобы оно отображалось.
+                const strVal = String(val);
+                const exists = Array.from(el.options).some(o => o.value === strVal);
+                if (!exists) {
+                    const opt = document.createElement('option');
+                    opt.value = strVal;
+                    opt.textContent = strVal;
+                    el.appendChild(opt);
+                }
+                el.value = strVal;
             } else {
                 el.value = val ?? '';
             }
@@ -384,6 +401,51 @@ class CkForm {
                 extraEl.textContent = v || (extra.placeholder || '—');
             }
         }
+    }
+
+    /**
+     * Маска для № КМ: авто-префикс "КМ-" + ровно 2 цифры + "-" + ровно 5 цифр.
+     * Работает аналогично acts-manager: пользователь вводит цифры,
+     * прочее форматируется автоматически.
+     */
+    static _attachKmMask(input) {
+        const format = (raw) => {
+            const digits = (raw || '').replace(/\D/g, '').slice(0, 7);
+            if (!digits) return '';
+            if (digits.length <= 2) return `КМ-${digits}`;
+            return `КМ-${digits.slice(0, 2)}-${digits.slice(2)}`;
+        };
+        input.addEventListener('input', (e) => {
+            input.setCustomValidity('');
+            e.target.value = format(e.target.value);
+        });
+        input.addEventListener('blur', (e) => {
+            const v = (e.target.value || '').trim();
+            if (!v) return;
+            if (!/^КМ-\d{2}-\d{5}$/.test(v)) {
+                e.target.setCustomValidity('№ КМ должен быть в формате КМ-XX-XXXXX (например, КМ-09-41726)');
+                e.target.reportValidity();
+            } else {
+                e.target.setCustomValidity('');
+            }
+        });
+    }
+
+    /** Валидация на blur по произвольному regex (string). */
+    static _attachPatternValidator(input, field) {
+        const re = new RegExp(field.pattern);
+        const msg = field.patternMessage || `Значение должно соответствовать формату ${field.pattern}`;
+        input.addEventListener('input', () => input.setCustomValidity(''));
+        input.addEventListener('blur', (e) => {
+            const v = (e.target.value || '').trim();
+            if (!v) return;
+            if (!re.test(v)) {
+                e.target.setCustomValidity(msg);
+                e.target.reportValidity();
+            } else {
+                e.target.setCustomValidity('');
+            }
+        });
     }
 
     /** Ищет конфиг поля по key (с учётом row-групп). */

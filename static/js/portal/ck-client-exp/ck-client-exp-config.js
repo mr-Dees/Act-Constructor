@@ -33,8 +33,9 @@ class CkClientExpConfig {
         { key: 'metric_code', label: 'Метрика', type: 'dictionary', dict: 'metrics', required: true },
         { key: 'neg_finder_tb_id', label: 'ТБ-руководитель проверки', type: 'dictionary', dict: 'terbanks' },
         { row: [
-            { key: 'num_sz', label: '№ с/з', type: 'text', required: true },
-            { key: 'dt_sz', label: 'Дата с/з', type: 'date', width: '140px' },
+            { key: 'num_sz', label: '№ с/з', type: 'text', required: true,
+              pattern: '^\\d{3,4}$', patternMessage: '№ с/з: 3 или 4 цифры' },
+            { key: 'dt_sz', label: 'Дата с/з', type: 'date', width: '140px', required: true },
         ]},
         { row: [
             { key: 'metric_unic_clients', label: 'Уник. клиенты', type: 'number', min: 0 },
@@ -45,7 +46,7 @@ class CkClientExpConfig {
             { key: 'is_sent_to_top_brass', label: 'На НС', type: 'checkbox', width: '120px' },
             { key: 'ck_comment', label: 'Комментарий ЦК', type: 'textarea', rows: 2 },
         ]},
-        { key: 'km_id', label: '№ КМ', type: 'text', required: true },
+        { key: 'km_id', label: '№ КМ', type: 'text', required: true, mask: 'km' },
         { key: 'act_item_number', label: 'Пункт акта', type: 'text' },
         { key: 'process_number', label: 'Процесс', type: 'process-picker', required: true, paired: 'process_name', paired_extras: [
             { key: 'block_owner', source: 'block_owner' },

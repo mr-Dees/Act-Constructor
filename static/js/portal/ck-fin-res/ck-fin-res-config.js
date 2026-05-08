@@ -4,33 +4,6 @@
  */
 
 // TODO: перенести в API-справочники когда потребуется динамика
-const FR_POCKET_OPTIONS = [
-    'нет',
-    'ОА, правовые вопросы, комплаенс',
-    'Риск-менеджмент',
-    'Внутренний аудит',
-    'Финансы',
-    'ИТ',
-    'Операционный блок',
-    'Розничный бизнес',
-    'Корпоративный бизнес',
-];
-
-// TODO: перенести в API-справочники когда потребуется динамика
-const FR_RISK_OPTIONS = [
-    'Кредитный риск B2B',
-    'Товарный риск Банковской книги',
-    'Риск ликвидности долговых ценных бумаг Банковской книги',
-    'Риск ликвидности',
-    'Риск участия и вынужденной поддержки',
-    'Стратегический риск',
-    'Риск изменения законодательства',
-    'Операционный риск',
-    'Модельный риск',
-    'Риск кибербезопасности',
-];
-
-// TODO: перенести в API-справочники когда потребуется динамика
 const FR_ASSIGNMENT_FORMAT_OPTIONS = [
     'Централизованный контроль',
     'Самостоятельный контроль',
@@ -72,8 +45,9 @@ class CkFinResConfig {
         { key: 'metric_code', label: 'Метрика', type: 'dictionary', dict: 'metrics', required: true },
         { key: 'neg_finder_tb_id', label: 'ТБ-руководитель проверки', type: 'dictionary', dict: 'terbanks' },
         { row: [
-            { key: 'num_sz', label: '№ с/з', type: 'text', required: true },
-            { key: 'dt_sz', label: 'Дата с/з', type: 'date', width: '140px' },
+            { key: 'num_sz', label: '№ с/з', type: 'text', required: true,
+              pattern: '^\\d{3,4}$', patternMessage: '№ с/з: 3 или 4 цифры' },
+            { key: 'dt_sz', label: 'Дата с/з', type: 'date', width: '140px', required: true },
         ]},
         { row: [
             { key: 'metric_element_counts', label: 'Кол-во (шт.)', type: 'number', min: 0, width: '90px' },
@@ -84,7 +58,7 @@ class CkFinResConfig {
             { key: 'is_sent_to_top_brass', label: 'На НС', type: 'checkbox', width: '120px' },
             { key: 'ck_comment', label: 'Комментарий ЦК ФР', type: 'textarea', rows: 2 },
         ]},
-        { key: 'km_id', label: '№ КМ', type: 'text', required: true },
+        { key: 'km_id', label: '№ КМ', type: 'text', required: true, mask: 'km' },
         { key: 'act_item_number', label: 'Пункт акта', type: 'text' },
         { key: 'process_number', label: 'Процесс', type: 'process-picker', required: true, paired: 'process_name', paired_extras: [
             { key: 'process_owner', source: 'block_owner' },
@@ -95,8 +69,8 @@ class CkFinResConfig {
             { key: 'department_owner', label: 'Подразделение', type: 'readonly-text', computed: true },
         ]},
         { row: [
-            { key: 'pocket', label: 'Карман', type: 'select', options: FR_POCKET_OPTIONS },
-            { key: 'risk', label: 'Вид риска', type: 'select', options: FR_RISK_OPTIONS },
+            { key: 'pocket', label: 'Карман', type: 'text' },
+            { key: 'risk', label: 'Вид риска', type: 'dictionary', dict: 'risk_types' },
         ]},
         { key: 'deviation_description', label: 'Описание отклонения', type: 'textarea', rows: 3 },
         { key: 'deviation_reason', label: 'Причина отклонения', type: 'textarea', rows: 2 },
@@ -117,7 +91,7 @@ class CkFinResConfig {
         { key: 'reestr_metric_id', label: 'ID реестра метрики', type: 'readonly-text' },
     ];
 
-    static dictNames = ['metrics', 'terbanks', 'processes'];
+    static dictNames = ['metrics', 'terbanks', 'processes', 'risk_types'];
 }
 
 window.CkFinResConfig = CkFinResConfig;
