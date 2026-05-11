@@ -2,8 +2,11 @@
 
 from __future__ import annotations
 
+import asyncio
 import logging
 import uuid
+from dataclasses import dataclass
+from typing import AsyncIterator
 
 import asyncpg
 
@@ -22,6 +25,13 @@ logger = logging.getLogger("audit_workstation.domains.chat.services.agent_bridge
 
 class AgentBridgeTimeout(Exception):
     """Внешний агент не успел ответить в выделенное время."""
+
+
+@dataclass
+class AgentBridgeUpdate:
+    """Юнит, который сервис стримит наружу: либо event, либо финальный response."""
+    event: dict | None = None
+    response: dict | None = None
 
 
 class AgentBridgeService:
@@ -76,3 +86,42 @@ class AgentBridgeService:
     async def poll_response(self, request_id: str) -> dict | None:
         """Возвращает финальный ответ агента или None, если ещё не готов."""
         return await self._responses.get_by_request_id(request_id)
+
+    async def wait_for_completion(
+        self,
+        request_id: str,
+        *,
+        poll_interval_sec: float,
+        timeout_sec: float,
+    ) -> AsyncIterator[AgentBridgeUpdate]:
+        """Async-генератор: yield events и финальный response по мере появления.
+
+        Опрашивает БД с интервалом poll_interval_sec. По таймауту:
+        UPDATE agent_requests SET status='timeout' + raise AgentBridgeTimeout.
+        """
+        deadline = asyncio.get_event_loop().time() + timeout_sec
+        last_event_id: int | None = None
+
+        while True:
+            new_events = await self.poll_events(request_id, since_id=last_event_id)
+            for ev in new_events:
+                last_event_id = ev["id"]
+                yield AgentBridgeUpdate(event=ev)
+
+            response = await self.poll_response(request_id)
+            if response is not None:
+                yield AgentBridgeUpdate(response=response)
+                await self._requests.update_status(request_id, status="done")
+                return
+
+            if asyncio.get_event_loop().time() > deadline:
+                await self._requests.update_status(
+                    request_id,
+                    status="timeout",
+                    error_message="agent did not respond within timeout",
+                )
+                raise AgentBridgeTimeout(
+                    f"agent did not respond within {timeout_sec}s"
+                )
+
+            await asyncio.sleep(poll_interval_sec)
