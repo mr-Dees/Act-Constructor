@@ -63,64 +63,74 @@ DISTRIBUTED BY (id);
 CREATE INDEX idx_{PREFIX}chat_files_conversation
     ON {SCHEMA}.{PREFIX}chat_files(conversation_id);
 
+-- ============================================================================
+-- ОЧЕРЕДЬ ЗАПРОСОВ К ВНЕШНЕМУ ИИ-АГЕНТУ
+-- ============================================================================
+
 -- Sequence для id событий агента; адаптер ловит DuplicateObjectError
-CREATE SEQUENCE agent_response_events_id_seq;
+CREATE SEQUENCE {SCHEMA}.{PREFIX}agent_response_events_id_seq;
 
--- Очередь запросов от AW к внешнему агенту
--- DISTRIBUTED BY (conversation_id): данные одной беседы лежат на одном
--- сегменте — все poll-запросы по conversation_id остаются локальными.
-CREATE TABLE agent_requests (
-    id              UUID NOT NULL,
-    conversation_id UUID NOT NULL,
-    message_id      UUID NOT NULL,
-    user_id         TEXT NOT NULL,
-    domain_name     TEXT,
-    knowledge_bases JSONB NOT NULL DEFAULT '[]'::jsonb,
+-- Очередь запросов от AW к внешнему агенту.
+-- DISTRIBUTED BY (conversation_id): данные одной беседы — на одном сегменте.
+CREATE TABLE IF NOT EXISTS {SCHEMA}.{PREFIX}agent_requests (
+    id                VARCHAR(36) NOT NULL,
+    conversation_id   VARCHAR(36) NOT NULL,
+    message_id        VARCHAR(36) NOT NULL,
+    user_id           VARCHAR(50) NOT NULL,
+    domain_name       VARCHAR(100),
+    knowledge_bases   JSONB NOT NULL DEFAULT '[]'::jsonb,
     last_user_message TEXT NOT NULL,
-    history         JSONB NOT NULL DEFAULT '[]'::jsonb,
-    files           JSONB NOT NULL DEFAULT '[]'::jsonb,
-    status          TEXT NOT NULL DEFAULT 'pending'
-                    CHECK (status IN ('pending','in_progress','done','error','timeout')),
-    error_message   TEXT,
-    created_at      TIMESTAMPTZ NOT NULL DEFAULT now(),
-    started_at      TIMESTAMPTZ,
-    finished_at     TIMESTAMPTZ,
+    history           JSONB NOT NULL DEFAULT '[]'::jsonb,
+    files             JSONB NOT NULL DEFAULT '[]'::jsonb,
+    status            VARCHAR(20) NOT NULL DEFAULT 'pending'
+                      CHECK (status IN ('pending','in_progress','done','error','timeout')),
+    error_message     TEXT,
+    created_at        TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    started_at        TIMESTAMP,
+    finished_at       TIMESTAMP,
     PRIMARY KEY (id)
-) DISTRIBUTED BY (conversation_id);
+)
+WITH (appendonly=false)
+DISTRIBUTED BY (conversation_id);
 
-CREATE INDEX ix_agent_requests_status_created
-    ON agent_requests (status, created_at);
-CREATE INDEX ix_agent_requests_message
-    ON agent_requests (message_id);
+CREATE INDEX idx_{PREFIX}agent_requests_status_created
+    ON {SCHEMA}.{PREFIX}agent_requests(status, created_at);
+CREATE INDEX idx_{PREFIX}agent_requests_message
+    ON {SCHEMA}.{PREFIX}agent_requests(message_id);
 
-
-CREATE TABLE agent_response_events (
-    id            BIGINT NOT NULL DEFAULT nextval('agent_response_events_id_seq'),
-    request_id    UUID NOT NULL,
+-- Append-only лента событий от агента.
+CREATE TABLE IF NOT EXISTS {SCHEMA}.{PREFIX}agent_response_events (
+    id            BIGINT NOT NULL
+                  DEFAULT nextval('{SCHEMA}.{PREFIX}agent_response_events_id_seq'),
+    request_id    VARCHAR(36) NOT NULL,
     seq           INTEGER NOT NULL,
-    event_type    TEXT NOT NULL
+    event_type    VARCHAR(20) NOT NULL
                   CHECK (event_type IN ('reasoning','status','error')),
     payload       JSONB NOT NULL,
-    created_at    TIMESTAMPTZ NOT NULL DEFAULT now(),
+    created_at    TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
     PRIMARY KEY (id)
-) DISTRIBUTED BY (request_id);
+)
+WITH (appendonly=false)
+DISTRIBUTED BY (request_id);
 
-CREATE INDEX ix_agent_response_events_request_id
-    ON agent_response_events (request_id, id);
+CREATE INDEX idx_{PREFIX}agent_response_events_request
+    ON {SCHEMA}.{PREFIX}agent_response_events(request_id, id);
 
-
-CREATE TABLE agent_responses (
-    id             UUID NOT NULL,
-    request_id     UUID NOT NULL,
+-- Финальный ответ агента (однократный INSERT, stop-сигнал).
+CREATE TABLE IF NOT EXISTS {SCHEMA}.{PREFIX}agent_responses (
+    id             VARCHAR(36) NOT NULL,
+    request_id     VARCHAR(36) NOT NULL,
     blocks         JSONB NOT NULL,
-    finish_reason  TEXT NOT NULL DEFAULT 'stop'
+    finish_reason  VARCHAR(20) NOT NULL DEFAULT 'stop'
                    CHECK (finish_reason IN ('stop','length','content_filter','error')),
     token_usage    JSONB,
-    model          TEXT,
-    created_at     TIMESTAMPTZ NOT NULL DEFAULT now(),
+    model          VARCHAR(100),
+    created_at     TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
     PRIMARY KEY (id),
     UNIQUE (request_id)
-) DISTRIBUTED BY (request_id);
+)
+WITH (appendonly=false)
+DISTRIBUTED BY (request_id);
 
-CREATE INDEX ix_agent_responses_request_id
-    ON agent_responses (request_id);
+CREATE INDEX idx_{PREFIX}agent_responses_request
+    ON {SCHEMA}.{PREFIX}agent_responses(request_id);
