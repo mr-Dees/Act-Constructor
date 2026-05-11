@@ -113,6 +113,8 @@ async def send_message(
     )
 
     # Определяем режим ответа по Accept header
+    # TODO(forward): пробросить список knowledge_bases из контекста беседы,
+    # когда фронт начнёт передавать выбранные пользователем БЗ.
     accept = request.headers.get("accept", "")
     if "text/event-stream" in accept:
         return StreamingResponse(
@@ -121,6 +123,8 @@ async def send_message(
                 user_message=message,
                 domains=domains_list,
                 file_blocks=file_blocks if file_blocks else None,
+                user_id=username,
+                knowledge_bases=[],
             ),
             media_type="text/event-stream",
             headers={

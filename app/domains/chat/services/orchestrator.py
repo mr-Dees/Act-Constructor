@@ -259,6 +259,156 @@ class Orchestrator:
                 token_usage=token_usage if token_usage else None,
             )
 
+    async def _handle_forward_call(
+        self,
+        *,
+        conversation_id: str,
+        message_id: str,
+        user_id: str,
+        domain_name: str | None,
+        knowledge_bases: list[str],
+        history: list[dict],
+        files: list[dict],
+        arguments: dict,
+        block_index: int,
+    ) -> AsyncGenerator[tuple[str, Any], None]:
+        """Создаёт agent_request и стримит ответы внешнего агента как SSE.
+
+        Yield-ит кортежи (kind, payload):
+          - ("sse", "...SSE-строка...") — событие для StreamingResponse
+          - ("error", "...SSE-error...") — ошибка регистрации запроса
+          - ("final", {"blocks": [...], "token_usage": {...}}) — финальные данные
+            для сохранения ассистент-сообщения
+        """
+        from app.db.connection import get_db
+        from app.domains.chat.integrations.forward_handler import (
+            FORWARD_SENTINEL_PATTERN,
+            build_forward_handler,
+        )
+        from app.domains.chat.services.agent_bridge import (
+            AgentBridgeService,
+            AgentBridgeTimeout,
+        )
+
+        # Открываем свежее соединение из пула — соединение из dependency
+        # может закрыться к моменту, когда мы окажемся внутри SSE-стрима.
+        async with get_db() as conn:
+            handler = build_forward_handler(
+                conn=conn,
+                conversation_id=conversation_id,
+                message_id=message_id,
+                user_id=user_id,
+                domain_name=domain_name,
+                knowledge_bases=knowledge_bases,
+                history=history,
+                files=files,
+            )
+            sentinel = await handler(**arguments)
+            match = FORWARD_SENTINEL_PATTERN.match(sentinel)
+            if not match:
+                yield (
+                    "error",
+                    sse_error(
+                        error="Не удалось переадресовать запрос внешнему агенту.",
+                    ),
+                )
+                return
+            request_id = match.group("request_id")
+
+            bridge = AgentBridgeService(conn)
+            reasoning_block_started = False
+            try:
+                async for upd in bridge.wait_for_completion(
+                    request_id,
+                    poll_interval_sec=self.settings.agent_bridge.poll_interval_sec,
+                    timeout_sec=self.settings.agent_bridge.timeout_sec,
+                ):
+                    if upd.event:
+                        ev = upd.event
+                        if ev["event_type"] == "reasoning":
+                            chunk_text = (ev["payload"] or {}).get("text", "")
+                            if not chunk_text:
+                                continue
+                            if not reasoning_block_started:
+                                yield (
+                                    "sse",
+                                    sse_block_start(
+                                        block_index=block_index,
+                                        block_type="reasoning",
+                                    ),
+                                )
+                                reasoning_block_started = True
+                            yield (
+                                "sse",
+                                sse_block_delta(
+                                    block_index=block_index,
+                                    delta=chunk_text,
+                                ),
+                            )
+                        elif ev["event_type"] == "error":
+                            payload = ev["payload"] or {}
+                            yield (
+                                "sse",
+                                sse_error(
+                                    error=payload.get(
+                                        "message", "Ошибка внешнего агента",
+                                    ),
+                                    code=payload.get("code"),
+                                ),
+                            )
+                        # status — пока игнорируем
+                    if upd.response:
+                        if reasoning_block_started:
+                            yield (
+                                "sse",
+                                sse_block_end(block_index=block_index),
+                            )
+                            block_index += 1
+                            reasoning_block_started = False
+                        # Финальные блоки от агента: эмитим их как SSE-блоки
+                        for raw_block in upd.response["blocks"]:
+                            btype = raw_block.get("type", "text")
+                            yield (
+                                "sse",
+                                sse_block_start(
+                                    block_index=block_index, block_type=btype,
+                                ),
+                            )
+                            if btype in ("text", "code"):
+                                yield (
+                                    "sse",
+                                    sse_block_delta(
+                                        block_index=block_index,
+                                        delta=raw_block.get("content", ""),
+                                    ),
+                                )
+                            # Остальные типы (file, image, buttons, client_action)
+                            # фронт получит из финального сохранения сообщения.
+                            yield (
+                                "sse",
+                                sse_block_end(block_index=block_index),
+                            )
+                            block_index += 1
+                        yield (
+                            "final",
+                            {
+                                "blocks": upd.response["blocks"],
+                                "token_usage": upd.response.get("token_usage") or {},
+                            },
+                        )
+                        return
+            except AgentBridgeTimeout:
+                if reasoning_block_started:
+                    yield ("sse", sse_block_end(block_index=block_index))
+                yield (
+                    "sse",
+                    sse_error(
+                        error="Внешний агент не ответил вовремя. Попробуйте позже.",
+                        code="agent_timeout",
+                    ),
+                )
+                return
+
     async def _execute_tool_call(
         self, tool_name: str, arguments: dict,
     ) -> str:
@@ -421,14 +571,21 @@ class Orchestrator:
         user_message: str,
         domains: list[str] | None = None,
         file_blocks: list[dict] | None = None,
+        message_id: str | None = None,
+        user_id: str | None = None,
+        knowledge_bases: list[str] | None = None,
     ) -> AsyncGenerator[str, None]:
         """
         Стриминговый agent loop — генерирует SSE-события.
 
         Если streaming_enabled, использует stream=True с автофолбеком.
         Всегда yield-ит message_start/message_end.
+
+        message_id, user_id, knowledge_bases используются для tool-call
+        chat.forward_to_knowledge_agent — оркестратор подставляет
+        замыкание-handler с контекстом текущего сообщения.
         """
-        message_id = str(uuid.uuid4())
+        message_id = message_id or str(uuid.uuid4())
         yield sse_message_start(
             conversation_id=conversation_id,
             message_id=message_id,
@@ -579,6 +736,57 @@ class Orchestrator:
                                 arguments=arguments,
                             )
 
+                            if tool_name == "chat.forward_to_knowledge_agent":
+                                # Терминальный tool: переключаемся в стрим из bridge
+                                history_messages = await self._get_history_messages(
+                                    conversation_id,
+                                )
+                                # Последнее user-сообщение уже сохранено —
+                                # из истории его убираем, форвардим вопрос отдельно.
+                                if (
+                                    history_messages
+                                    and history_messages[-1].get("role") == "user"
+                                ):
+                                    history_messages = history_messages[:-1]
+                                final_blocks_for_save: list[dict] = []
+                                final_token_usage: dict = {}
+                                async for kind, payload in self._handle_forward_call(
+                                    conversation_id=conversation_id,
+                                    message_id=message_id,
+                                    user_id=user_id or "",
+                                    domain_name=(domains[0] if domains else None),
+                                    knowledge_bases=knowledge_bases or [],
+                                    history=history_messages,
+                                    files=file_blocks or [],
+                                    arguments=arguments,
+                                    block_index=block_index,
+                                ):
+                                    if kind in ("sse", "error"):
+                                        yield payload
+                                    elif kind == "final":
+                                        final_blocks_for_save = payload["blocks"]
+                                        final_token_usage = payload["token_usage"]
+                                sources.append(tool_name)
+                                if final_blocks_for_save:
+                                    try:
+                                        await self._save_assistant_message(
+                                            conversation_id=conversation_id,
+                                            content_blocks=final_blocks_for_save,
+                                            token_usage=final_token_usage or None,
+                                        )
+                                    except Exception:
+                                        logger.exception(
+                                            "Не удалось сохранить ответ агента",
+                                        )
+                                yield sse_message_end(
+                                    message_id=message_id,
+                                    model=self.settings.model,
+                                    token_usage=(
+                                        final_token_usage if final_token_usage else None
+                                    ),
+                                )
+                                return
+
                             result = await self._execute_tool_call(
                                 tool_name, arguments,
                             )
@@ -628,6 +836,55 @@ class Orchestrator:
                             tool_call_id=tc.id,
                             arguments=arguments,
                         )
+
+                        if tool_name == "chat.forward_to_knowledge_agent":
+                            # Терминальный tool: переключаемся в стрим из bridge
+                            history_messages = await self._get_history_messages(
+                                conversation_id,
+                            )
+                            if (
+                                history_messages
+                                and history_messages[-1].get("role") == "user"
+                            ):
+                                history_messages = history_messages[:-1]
+                            final_blocks_for_save: list[dict] = []
+                            final_token_usage: dict = {}
+                            async for kind, payload in self._handle_forward_call(
+                                conversation_id=conversation_id,
+                                message_id=message_id,
+                                user_id=user_id or "",
+                                domain_name=(domains[0] if domains else None),
+                                knowledge_bases=knowledge_bases or [],
+                                history=history_messages,
+                                files=file_blocks or [],
+                                arguments=arguments,
+                                block_index=block_index,
+                            ):
+                                if kind in ("sse", "error"):
+                                    yield payload
+                                elif kind == "final":
+                                    final_blocks_for_save = payload["blocks"]
+                                    final_token_usage = payload["token_usage"]
+                            sources.append(tool_name)
+                            if final_blocks_for_save:
+                                try:
+                                    await self._save_assistant_message(
+                                        conversation_id=conversation_id,
+                                        content_blocks=final_blocks_for_save,
+                                        token_usage=final_token_usage or None,
+                                    )
+                                except Exception:
+                                    logger.exception(
+                                        "Не удалось сохранить ответ агента",
+                                    )
+                            yield sse_message_end(
+                                message_id=message_id,
+                                model=self.settings.model,
+                                token_usage=(
+                                    final_token_usage if final_token_usage else None
+                                ),
+                            )
+                            return
 
                         result = await self._execute_tool_call(
                             tool_name, arguments,
