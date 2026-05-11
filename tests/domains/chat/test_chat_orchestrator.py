@@ -86,6 +86,16 @@ def orchestrator_no_api(msg_service, conv_service, settings_no_api):
     )
 
 
+@pytest.fixture
+def orchestrator_default_settings():
+    """Оркестратор с дефолтными настройками для проверки системного промпта."""
+    return Orchestrator(
+        msg_service=AsyncMock(),
+        conv_service=AsyncMock(),
+        settings=ChatDomainSettings(),
+    )
+
+
 def _make_mock_response(content="Ответ ассистента", tool_calls=None, usage=None):
     """Создаёт mock-ответ OpenAI API."""
     message = MagicMock()
@@ -168,7 +178,7 @@ class TestBuildSystemMessages:
         messages = orchestrator._build_system_messages(domains=None)
         assert len(messages) == 1
         assert messages[0]["role"] == "system"
-        assert "AI-ассистент" in messages[0]["content"]
+        assert "forward_to_knowledge_agent" in messages[0]["content"]
 
     def test_with_domain_prompts(self, orchestrator):
         """С доменами добавляются доменные промпты."""
@@ -190,7 +200,27 @@ class TestBuildSystemMessages:
         messages = orchestrator._build_system_messages(domains=["unknown_domain"])
         assert len(messages) == 1
         # Доменных промптов нет — только базовый
-        assert "AI-ассистент" in messages[0]["content"]
+        assert "forward_to_knowledge_agent" in messages[0]["content"]
+
+
+def test_system_prompt_mentions_forward_priority(orchestrator_default_settings):
+    """В system-промпте должно быть правило «по умолчанию forward_to_knowledge_agent»."""
+    msgs = orchestrator_default_settings._build_system_messages(None)
+    text = msgs[0]["content"]
+    assert "forward_to_knowledge_agent" in text
+    assert "по умолчанию" in text.lower() or "приоритет" in text.lower()
+
+
+def test_system_prompt_local_smalltalk_mentions_local(monkeypatch, orchestrator_default_settings):
+    orchestrator_default_settings.settings.smalltalk_mode = "local"
+    msgs = orchestrator_default_settings._build_system_messages(None)
+    assert "локальный" in msgs[0]["content"].lower() or "local" in msgs[0]["content"].lower()
+
+
+def test_system_prompt_forward_smalltalk_mentions_forwarding(orchestrator_default_settings):
+    orchestrator_default_settings.settings.smalltalk_mode = "forward"
+    msgs = orchestrator_default_settings._build_system_messages(None)
+    assert "forward_to_knowledge_agent" in msgs[0]["content"]
 
 
 # -------------------------------------------------------------------------

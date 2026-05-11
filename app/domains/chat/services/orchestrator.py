@@ -65,6 +65,20 @@ def _convert_param(value: Any, param_type: str) -> Any:
     return value
 
 
+BASE_SYSTEM_PROMPT = (
+    "Ты — ассистент в AuditWorkstation.\n\n"
+    "ВАЖНОЕ ПРАВИЛО ПРИОРИТЕТА:\n"
+    "По умолчанию любые вопросы пользователя про данные, контент, акты, "
+    "нормативы, регламенты, фактуры, нарушения, метрики, реестры — "
+    "передавай через chat.forward_to_knowledge_agent. Внешний агент сам "
+    "найдёт информацию.\n\n"
+    "Локальные action-tools (open_*, navigate_*, notify, ...) — вызывай "
+    "ТОЛЬКО когда пользователь явно просит что-то сделать в интерфейсе "
+    "(\"открой\", \"создай\", \"перейди\", \"покажи на странице\").\n\n"
+    "Не сочиняй данные из БЗ — всегда передавай вопрос внешнему агенту."
+)
+
+
 class Orchestrator:
     """Оркестратор agent loop для AI-чата."""
 
@@ -82,8 +96,14 @@ class Orchestrator:
     def _build_system_messages(
         self, domains: list[str] | None,
     ) -> list[dict[str, str]]:
-        """Собирает системный промпт из базового + доменных промптов."""
-        base_prompt = self.settings.system_prompt
+        """Собирает системный промпт: базовый + правило small-talk + доменные."""
+        smalltalk_line = (
+            "\n\nДля small-talk (приветствия, вопросы о тебе) давай "
+            "локальный краткий текстовый ответ без вызова инструментов."
+            if self.settings.smalltalk_mode == "local"
+            else "\n\nДля small-talk также вызывай chat.forward_to_knowledge_agent."
+        )
+        base_prompt = BASE_SYSTEM_PROMPT + smalltalk_line
 
         if domains:
             from app.core.domain_registry import get_domain
