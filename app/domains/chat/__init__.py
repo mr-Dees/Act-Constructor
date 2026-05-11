@@ -7,6 +7,7 @@ def _build_domain():
     """Ленивая инициализация домена."""
     from app.core.domain import DomainDescriptor
     from app.domains.chat.api import get_api_routers
+    from app.domains.chat.integrations.chat_tools import get_chat_tools
     from app.domains.chat.settings import ChatDomainSettings
 
     return DomainDescriptor(
@@ -15,4 +16,5 @@ def _build_domain():
         html_routers=[],
         settings_class=ChatDomainSettings,
         dependencies=[],
+        chat_tools=get_chat_tools(),
     )
