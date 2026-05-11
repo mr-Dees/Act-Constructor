@@ -409,6 +409,24 @@ class Orchestrator:
                 )
                 return
 
+    def _parse_client_action_result(self, raw: str) -> dict | None:
+        """Если result tool'а — JSON-блок client_action, возвращает dict.
+
+        Иначе возвращает None (это обычный текстовый результат tool'а).
+        """
+        try:
+            obj = json.loads(raw)
+        except (ValueError, TypeError):
+            return None
+        if not isinstance(obj, dict):
+            return None
+        if obj.get("type") != "client_action":
+            return None
+        # Минимальная валидация
+        if "action" not in obj:
+            return None
+        return obj
+
     async def _execute_tool_call(
         self, tool_name: str, arguments: dict,
     ) -> str:
@@ -629,6 +647,7 @@ class Orchestrator:
         token_usage: dict[str, Any] = {}
         full_answer = ""
         block_index = 0
+        emitted_blocks: list[dict] = []  # ClientActionBlock'и, эмитнутые до финала
 
         try:
             use_streaming = self.settings.streaming_enabled
@@ -798,10 +817,34 @@ class Orchestrator:
                                 result=result,
                             )
 
+                            client_action = self._parse_client_action_result(result)
+                            if client_action is not None:
+                                # Эмитим client_action как полноценный блок ответа
+                                yield sse_block_start(
+                                    block_index=block_index,
+                                    block_type="client_action",
+                                )
+                                yield sse_block_delta(
+                                    block_index=block_index,
+                                    delta=json.dumps(
+                                        client_action, ensure_ascii=False,
+                                    ),
+                                )
+                                yield sse_block_end(block_index=block_index)
+                                # Сохраняем для итогового _save_assistant_message
+                                emitted_blocks.append(client_action)
+                                block_index += 1
+                                # LLM получает краткий итог, не JSON
+                                tool_result_for_llm = (
+                                    f"<выполнено: {tool_name}>"
+                                )
+                            else:
+                                tool_result_for_llm = result
+
                             messages.append({
                                 "role": "tool",
                                 "tool_call_id": tc.id,
-                                "content": result,
+                                "content": tool_result_for_llm,
                             })
 
                         rounds += 1
@@ -897,10 +940,34 @@ class Orchestrator:
                             result=result,
                         )
 
+                        client_action = self._parse_client_action_result(result)
+                        if client_action is not None:
+                            # Эмитим client_action как полноценный блок ответа
+                            yield sse_block_start(
+                                block_index=block_index,
+                                block_type="client_action",
+                            )
+                            yield sse_block_delta(
+                                block_index=block_index,
+                                delta=json.dumps(
+                                    client_action, ensure_ascii=False,
+                                ),
+                            )
+                            yield sse_block_end(block_index=block_index)
+                            # Сохраняем для итогового _save_assistant_message
+                            emitted_blocks.append(client_action)
+                            block_index += 1
+                            # LLM получает краткий итог, не JSON
+                            tool_result_for_llm = (
+                                f"<выполнено: {tool_name}>"
+                            )
+                        else:
+                            tool_result_for_llm = result
+
                         messages.append({
                             "role": "tool",
                             "tool_call_id": tc.id,
-                            "content": result,
+                            "content": tool_result_for_llm,
                         })
 
                     rounds += 1
@@ -924,15 +991,17 @@ class Orchestrator:
             # Сохраняем сообщение ассистента (свежее соединение из пула,
             # т.к. dependency-соединение может быть закрыто к этому моменту).
             # Ошибка сохранения не должна emit'ить error SSE после контента.
+            content_blocks: list[dict] = list(emitted_blocks)
             if full_answer:
-                content_blocks = [{"type": "text", "content": full_answer}]
+                content_blocks.append({"type": "text", "content": full_answer})
+            if content_blocks:
                 try:
                     await self._save_assistant_message(
                         conversation_id=conversation_id,
                         content_blocks=content_blocks,
                         token_usage=token_usage,
                     )
-                except Exception as save_exc:
+                except Exception:
                     logger.exception("Не удалось сохранить сообщение ассистента")
 
         except Exception as exc:
