@@ -166,3 +166,156 @@ async def get_messages(
         limit=limit,
         offset=offset,
     )
+
+
+@router.get(
+    "/conversations/{conversation_id}/agent-request/{request_id}/stream",
+    summary="Возобновить SSE-стрим ответа агента после обрыва соединения",
+)
+async def resume_agent_request_stream(
+    conversation_id: str,
+    request_id: str,
+    since: int | None = Query(None, description="id последнего полученного события"),
+    username: str = Depends(get_username),
+    conv_service: ConversationService = Depends(get_conversation_service),
+):
+    """Стримит накопленные события (с id > since) и финал в виде SSE-блоков.
+
+    Использовать, если клиент потерял соединение во время forward'а к
+    внешнему агенту: фронт перезапрашивает поток с курсором last_seen_event_id.
+    """
+    # Проверка владения беседой — те же права, что и при отправке сообщения
+    await conv_service.get(conversation_id, username)
+
+    async def event_stream():
+        from app.core.settings_registry import get as get_domain_settings
+        from app.db.connection import get_db
+        from app.domains.chat.services.agent_bridge import (
+            AgentBridgeService, AgentBridgeTimeout,
+        )
+        from app.domains.chat.services.streaming import (
+            sse_block_delta, sse_block_end, sse_block_start, sse_error,
+            sse_message_end,
+        )
+        from app.domains.chat.settings import ChatDomainSettings
+
+        settings = get_domain_settings("chat", ChatDomainSettings)
+        block_index = 0
+        reasoning_started = False
+        last_seen = since
+
+        async with get_db() as conn:
+            bridge = AgentBridgeService(conn)
+
+            # Сначала отдаём уже накопленные события (если они есть на старте)
+            existing = await bridge.poll_events(request_id, since_id=last_seen)
+            for ev in existing:
+                last_seen = ev["id"]
+                if ev["event_type"] == "reasoning":
+                    text = (ev["payload"] or {}).get("text", "")
+                    if not text:
+                        continue
+                    if not reasoning_started:
+                        yield sse_block_start(
+                            block_index=block_index, block_type="reasoning",
+                        )
+                        reasoning_started = True
+                    yield sse_block_delta(block_index=block_index, delta=text)
+                elif ev["event_type"] == "error":
+                    payload = ev["payload"] or {}
+                    yield sse_error(
+                        error=payload.get("message", "Ошибка внешнего агента"),
+                        code=payload.get("code"),
+                    )
+
+            # Проверяем, не появился ли уже финальный ответ
+            existing_response = await bridge.poll_response(request_id)
+            if existing_response is not None:
+                if reasoning_started:
+                    yield sse_block_end(block_index=block_index)
+                    block_index += 1
+                    reasoning_started = False
+                for raw_block in existing_response["blocks"]:
+                    btype = raw_block.get("type", "text")
+                    yield sse_block_start(
+                        block_index=block_index, block_type=btype,
+                    )
+                    if btype in ("text", "code"):
+                        yield sse_block_delta(
+                            block_index=block_index,
+                            delta=raw_block.get("content", ""),
+                        )
+                    yield sse_block_end(block_index=block_index)
+                    block_index += 1
+                yield sse_message_end(
+                    message_id=str(request_id),
+                    model=settings.model,
+                    token_usage=existing_response.get("token_usage") or None,
+                )
+                return
+
+            # Иначе — ждём дальше через wait_for_completion
+            try:
+                async for upd in bridge.wait_for_completion(
+                    request_id,
+                    poll_interval_sec=settings.agent_bridge.poll_interval_sec,
+                    timeout_sec=settings.agent_bridge.timeout_sec,
+                ):
+                    if upd.event:
+                        ev = upd.event
+                        # wait_for_completion начинает с since_id=None, поэтому
+                        # отфильтруем уже виденные
+                        if last_seen is not None and ev["id"] <= last_seen:
+                            continue
+                        last_seen = ev["id"]
+                        if ev["event_type"] == "reasoning":
+                            text = (ev["payload"] or {}).get("text", "")
+                            if not text:
+                                continue
+                            if not reasoning_started:
+                                yield sse_block_start(
+                                    block_index=block_index,
+                                    block_type="reasoning",
+                                )
+                                reasoning_started = True
+                            yield sse_block_delta(
+                                block_index=block_index, delta=text,
+                            )
+                        elif ev["event_type"] == "error":
+                            payload = ev["payload"] or {}
+                            yield sse_error(
+                                error=payload.get("message", "Ошибка внешнего агента"),
+                                code=payload.get("code"),
+                            )
+                    if upd.response:
+                        if reasoning_started:
+                            yield sse_block_end(block_index=block_index)
+                            block_index += 1
+                            reasoning_started = False
+                        for raw_block in upd.response["blocks"]:
+                            btype = raw_block.get("type", "text")
+                            yield sse_block_start(
+                                block_index=block_index, block_type=btype,
+                            )
+                            if btype in ("text", "code"):
+                                yield sse_block_delta(
+                                    block_index=block_index,
+                                    delta=raw_block.get("content", ""),
+                                )
+                            yield sse_block_end(block_index=block_index)
+                            block_index += 1
+                        yield sse_message_end(
+                            message_id=str(request_id),
+                            model=settings.model,
+                            token_usage=upd.response.get("token_usage") or None,
+                        )
+                        return
+            except AgentBridgeTimeout:
+                if reasoning_started:
+                    yield sse_block_end(block_index=block_index)
+                yield sse_error(
+                    error="Внешний агент не ответил вовремя. Попробуйте позже.",
+                    code="agent_timeout",
+                )
+
+    return StreamingResponse(event_stream(), media_type="text/event-stream")
