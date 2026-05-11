@@ -304,7 +304,7 @@ class TestStreamingLifecycle:
             assert evt == "block_delta"
 
     # BUG #6: message_end не гарантирован при ошибке
-    @patch("app.domains.chat.services.orchestrator._get_openai_client")
+    @patch("app.domains.chat.services.orchestrator.Orchestrator._get_openai_client")
     async def test_error_in_stream_still_yields_message_end(
         self, mock_client_factory, orchestrator,
     ):
@@ -327,7 +327,7 @@ class TestStreamingLifecycle:
         assert types[-1] == "message_end"
         assert "error" in types
 
-    @patch("app.domains.chat.services.orchestrator._get_openai_client")
+    @patch("app.domains.chat.services.orchestrator.Orchestrator._get_openai_client")
     async def test_error_during_streaming_chunks(
         self, mock_client_factory, orchestrator,
     ):
@@ -358,7 +358,7 @@ class TestStreamingLifecycle:
         types = [_get_event_type(e) for e in events]
         assert types[-1] == "message_end"
 
-    @patch("app.domains.chat.services.orchestrator._get_openai_client")
+    @patch("app.domains.chat.services.orchestrator.Orchestrator._get_openai_client")
     async def test_save_failure_after_stream_does_not_break_sse(
         self, mock_client_factory, orchestrator,
     ):
@@ -411,7 +411,7 @@ class TestStreamingLifecycle:
 
 class TestStreamingFallback:
 
-    @patch("app.domains.chat.services.orchestrator._get_openai_client")
+    @patch("app.domains.chat.services.orchestrator.Orchestrator._get_openai_client")
     async def test_streaming_disabled_uses_non_stream(
         self, mock_client_factory, orchestrator_no_streaming,
     ):
@@ -448,7 +448,7 @@ class TestStreamingFallback:
         call_kwargs = create_call.call_args.kwargs if create_call.call_args.kwargs else {}
         assert call_kwargs.get("stream") is not True
 
-    @patch("app.domains.chat.services.orchestrator._get_openai_client")
+    @patch("app.domains.chat.services.orchestrator.Orchestrator._get_openai_client")
     async def test_streaming_fallback_on_error(
         self, mock_client_factory, orchestrator,
     ):
@@ -499,7 +499,7 @@ class TestStreamingFallback:
 
 class TestStreamingToolCalls:
 
-    @patch("app.domains.chat.services.orchestrator._get_openai_client")
+    @patch("app.domains.chat.services.orchestrator.Orchestrator._get_openai_client")
     async def test_tool_call_events_in_stream(
         self, mock_client_factory, orchestrator,
     ):
@@ -574,7 +574,7 @@ class TestStreamingToolCalls:
         tr_data = _parse_event_data(tr_events[0])
         assert "5 актов" in tr_data["result"]
 
-    @patch("app.domains.chat.services.orchestrator._get_openai_client")
+    @patch("app.domains.chat.services.orchestrator.Orchestrator._get_openai_client")
     async def test_multiple_tool_calls_in_one_round(
         self, mock_client_factory, orchestrator,
     ):

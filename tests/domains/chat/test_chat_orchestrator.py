@@ -339,7 +339,7 @@ class TestBuildUserContent:
 
 class TestOrchestratorRun:
 
-    @patch("app.domains.chat.services.orchestrator._get_openai_client")
+    @patch("app.domains.chat.services.orchestrator.Orchestrator._get_openai_client")
     async def test_run_simple_response(self, mock_client_factory, orchestrator):
         """Простой ответ LLM без tool calls."""
         mock_client = AsyncMock()
@@ -366,7 +366,7 @@ class TestOrchestratorRun:
         assert result["token_usage"]["total_tokens"] == 30
         orchestrator._save_assistant_message.assert_called_once()
 
-    @patch("app.domains.chat.services.orchestrator._get_openai_client")
+    @patch("app.domains.chat.services.orchestrator.Orchestrator._get_openai_client")
     async def test_run_with_tool_calls(self, mock_client_factory, orchestrator):
         """Agent loop с вызовом инструмента."""
         # Регистрируем тестовый инструмент
@@ -407,7 +407,7 @@ class TestOrchestratorRun:
         assert "search_acts" in result["sources"]
         assert "КМ-01-00001" in result["response"]
 
-    @patch("app.domains.chat.services.orchestrator._get_openai_client")
+    @patch("app.domains.chat.services.orchestrator.Orchestrator._get_openai_client")
     async def test_run_max_tool_rounds_limit(self, mock_client_factory, orchestrator):
         """Agent loop останавливается при достижении лимита раундов."""
         test_tool = ChatTool(
@@ -450,7 +450,7 @@ class TestOrchestratorRun:
         assert "режиме заглушки" in result["response"]
 
     # BUG #7: run() возвращает HTTP 200 с error payload вместо ошибки
-    @patch("app.domains.chat.services.orchestrator._get_openai_client")
+    @patch("app.domains.chat.services.orchestrator.Orchestrator._get_openai_client")
     async def test_run_api_error_returns_200_with_error_payload(
         self, mock_client_factory, orchestrator,
     ):
@@ -473,7 +473,7 @@ class TestOrchestratorRun:
         assert "Временная ошибка" in result["response"]
         # Нет HTTPException или raise — вызывающий код получит 200 OK
 
-    @patch("app.domains.chat.services.orchestrator._get_openai_client")
+    @patch("app.domains.chat.services.orchestrator.Orchestrator._get_openai_client")
     async def test_run_strips_leading_newlines(self, mock_client_factory, orchestrator):
         """Ведущие переносы строк убираются из ответа LLM."""
         mock_client = AsyncMock()
@@ -630,7 +630,7 @@ class TestOrchestratorRunStream:
         all_text = "".join(events)
         assert "Тестовое сообщение" in all_text
 
-    @patch("app.domains.chat.services.orchestrator._get_openai_client")
+    @patch("app.domains.chat.services.orchestrator.Orchestrator._get_openai_client")
     async def test_stream_normal_response(self, mock_client_factory, orchestrator):
         """Нормальный стриминг с текстовым ответом."""
         mock_client = AsyncMock()
@@ -679,7 +679,7 @@ class TestOrchestratorRunStream:
         assert "block_end" in event_types
 
     # BUG #6: message_end не гарантирован на всех путях ошибок
-    @patch("app.domains.chat.services.orchestrator._get_openai_client")
+    @patch("app.domains.chat.services.orchestrator.Orchestrator._get_openai_client")
     async def test_stream_error_guarantees_message_end(
         self, mock_client_factory, orchestrator,
     ):
@@ -703,7 +703,7 @@ class TestOrchestratorRunStream:
         # Ошибка должна быть отправлена
         assert "error" in event_types
 
-    @patch("app.domains.chat.services.orchestrator._get_openai_client")
+    @patch("app.domains.chat.services.orchestrator.Orchestrator._get_openai_client")
     async def test_stream_with_tool_calls(self, mock_client_factory, orchestrator):
         """Стриминг с вызовом инструмента: tool_call и tool_result."""
         test_tool = ChatTool(
@@ -761,7 +761,7 @@ class TestOrchestratorRunStream:
         assert "tool_result" in event_types
         assert event_types[-1] == "message_end"
 
-    @patch("app.domains.chat.services.orchestrator._get_openai_client")
+    @patch("app.domains.chat.services.orchestrator.Orchestrator._get_openai_client")
     async def test_stream_saves_assistant_message(
         self, mock_client_factory, orchestrator,
     ):

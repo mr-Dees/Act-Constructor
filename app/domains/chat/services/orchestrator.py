@@ -13,7 +13,6 @@ import logging
 import uuid
 from collections.abc import AsyncGenerator
 from datetime import date
-from functools import lru_cache
 from typing import Any
 
 from app.core.chat.tools import (
@@ -23,7 +22,9 @@ from app.core.chat.tools import (
 )
 from app.core.settings_registry import get as get_domain_settings
 from app.domains.chat.services.conversation_service import ConversationService
+from app.domains.chat.services.llm_client import build_llm_client
 from app.domains.chat.services.message_service import MessageService
+from app.domains.chat.services.retry import retry_on_transient
 from app.domains.chat.services.streaming import (
     sse_block_delta,
     sse_block_end,
@@ -34,16 +35,10 @@ from app.domains.chat.services.streaming import (
     sse_tool_call,
     sse_tool_result,
 )
+from app.domains.chat.services.tool_call_accumulator import ToolCallAccumulator
 from app.domains.chat.settings import ChatDomainSettings
 
 logger = logging.getLogger("audit_workstation.domains.chat.orchestrator")
-
-
-@lru_cache(maxsize=1)
-def _get_openai_client(api_base: str, api_key: str):
-    """Singleton AsyncOpenAI клиент (кэшируется по параметрам подключения)."""
-    from openai import AsyncOpenAI
-    return AsyncOpenAI(base_url=api_base, api_key=api_key)
 
 
 def _convert_param(value: Any, param_type: str) -> Any:
@@ -92,6 +87,17 @@ class Orchestrator:
         self.msg_service = msg_service
         self.conv_service = conv_service
         self.settings = settings or get_domain_settings("chat", ChatDomainSettings)
+        self._retry_call = retry_on_transient(
+            on_429=self.settings.retry.on_429,
+            on_5xx=self.settings.retry.on_5xx,
+            max_attempts=self.settings.retry.max_attempts,
+            backoff_base=self.settings.retry.backoff_base_sec,
+        )
+
+    async def _completions_create(self, client, **kwargs):
+        """Обёрнутый retry'ем вызов chat.completions.create."""
+        wrapped = self._retry_call(client.chat.completions.create)
+        return await wrapped(**kwargs)
 
     def _build_system_messages(
         self, domains: list[str] | None,
@@ -217,11 +223,8 @@ class Orchestrator:
         return "\n".join(parts)
 
     def _get_openai_client(self):
-        """Возвращает AsyncOpenAI клиент."""
-        return _get_openai_client(
-            self.settings.api_base,
-            self.settings.api_key.get_secret_value(),
-        )
+        """Возвращает AsyncOpenAI клиент согласно профильным настройкам."""
+        return build_llm_client(self.settings)
 
     async def _save_assistant_message(
         self,
@@ -333,7 +336,8 @@ class Orchestrator:
         token_usage: dict[str, Any] = {}
 
         try:
-            response = await client.chat.completions.create(
+            response = await self._completions_create(
+                client,
                 model=self.settings.model,
                 messages=messages,
                 tools=tools if tools else NOT_GIVEN,
@@ -370,7 +374,8 @@ class Orchestrator:
                         "content": result,
                     })
 
-                response = await client.chat.completions.create(
+                response = await self._completions_create(
+                    client,
                     model=self.settings.model,
                     messages=messages,
                     tools=tools if tools else NOT_GIVEN,
@@ -476,7 +481,8 @@ class Orchestrator:
                 if use_streaming:
                     # Стриминговый вызов LLM
                     try:
-                        response_stream = await client.chat.completions.create(
+                        response_stream = await self._completions_create(
+                            client,
                             model=self.settings.model,
                             messages=messages,
                             tools=tools if tools else NOT_GIVEN,
@@ -495,100 +501,81 @@ class Orchestrator:
                 if use_streaming:
                     # Собираем стриминговый ответ
                     accumulated_content = ""
-                    accumulated_tool_calls: dict[int, dict] = {}
+                    acc = ToolCallAccumulator()
                     block_started = False
                     finish_reason = None
 
                     async for chunk in response_stream:
                         if not chunk.choices:
                             continue
-                        delta = chunk.choices[0].delta
-                        if delta is None:
-                            continue
 
                         if chunk.choices[0].finish_reason:
                             finish_reason = chunk.choices[0].finish_reason
 
-                        # Текстовый контент
-                        if delta.content:
-                            text = delta.content
-                            # Убираем ведущие переносы строк
-                            # (модели с thinking отдают \n\n перед ответом)
-                            if not block_started:
-                                text = text.lstrip("\n")
-                                if not text:
-                                    continue
-                            if not block_started:
-                                yield sse_block_start(
+                        # Аккумулятор сам собирает tool_calls и reasoning_details
+                        for event in acc.consume(chunk):
+                            kind, payload = event
+                            if kind == "content":
+                                text = payload
+                                # Убираем ведущие переносы строк
+                                # (модели с thinking отдают \n\n перед ответом)
+                                if not block_started:
+                                    text = text.lstrip("\n")
+                                    if not text:
+                                        continue
+                                    yield sse_block_start(
+                                        block_index=block_index,
+                                        block_type="text",
+                                    )
+                                    block_started = True
+                                yield sse_block_delta(
                                     block_index=block_index,
-                                    block_type="text",
+                                    delta=text,
                                 )
-                                block_started = True
-                            yield sse_block_delta(
-                                block_index=block_index,
-                                delta=text,
-                            )
-                            accumulated_content += text
-
-                        # Tool calls (инкрементальная сборка)
-                        if delta.tool_calls:
-                            for tc_delta in delta.tool_calls:
-                                idx = tc_delta.index
-                                if idx not in accumulated_tool_calls:
-                                    accumulated_tool_calls[idx] = {
-                                        "id": "",
-                                        "name": "",
-                                        "arguments": "",
-                                    }
-                                if tc_delta.id:
-                                    accumulated_tool_calls[idx]["id"] = tc_delta.id
-                                if tc_delta.function:
-                                    if tc_delta.function.name:
-                                        accumulated_tool_calls[idx]["name"] = (
-                                            tc_delta.function.name
-                                        )
-                                    if tc_delta.function.arguments:
-                                        accumulated_tool_calls[idx]["arguments"] += (
-                                            tc_delta.function.arguments
-                                        )
+                                accumulated_content += text
 
                     if block_started:
                         yield sse_block_end(block_index=block_index)
                         block_index += 1
 
                     # Обработка tool calls из стриминга
-                    if accumulated_tool_calls and finish_reason == "tool_calls":
-                        tool_calls_for_msg = []
-                        for idx in sorted(accumulated_tool_calls):
-                            tc_data = accumulated_tool_calls[idx]
-                            tool_calls_for_msg.append({
-                                "id": tc_data["id"],
+                    finalized_tool_calls = (
+                        acc.finalize() if finish_reason == "tool_calls" else []
+                    )
+                    if finalized_tool_calls:
+                        tool_calls_for_msg = [
+                            {
+                                "id": tc.id,
                                 "type": "function",
                                 "function": {
-                                    "name": tc_data["name"],
-                                    "arguments": tc_data["arguments"],
+                                    "name": tc.name,
+                                    "arguments": tc.arguments,
                                 },
-                            })
+                            }
+                            for tc in finalized_tool_calls
+                        ]
 
-                        messages.append({
+                        assistant_msg = {
                             "role": "assistant",
                             "content": accumulated_content or None,
                             "tool_calls": tool_calls_for_msg,
-                        })
+                        }
+                        # MiniMax M2: пробрасываем reasoning_details обратно
+                        # в сообщение, чтобы качество tool-call не падало.
+                        if acc.reasoning_details:
+                            assistant_msg["reasoning_details"] = acc.reasoning_details
+                        messages.append(assistant_msg)
 
-                        for tc_data in [
-                            accumulated_tool_calls[i]
-                            for i in sorted(accumulated_tool_calls)
-                        ]:
-                            tool_name = tc_data["name"]
+                        for tc in finalized_tool_calls:
+                            tool_name = tc.name
                             try:
-                                arguments = json.loads(tc_data["arguments"])
+                                arguments = json.loads(tc.arguments)
                             except json.JSONDecodeError:
                                 arguments = {}
 
                             yield sse_tool_call(
                                 tool_name=tool_name,
-                                tool_call_id=tc_data["id"],
+                                tool_call_id=tc.id,
                                 arguments=arguments,
                             )
 
@@ -599,13 +586,13 @@ class Orchestrator:
 
                             yield sse_tool_result(
                                 tool_name=tool_name,
-                                tool_call_id=tc_data["id"],
+                                tool_call_id=tc.id,
                                 result=result,
                             )
 
                             messages.append({
                                 "role": "tool",
-                                "tool_call_id": tc_data["id"],
+                                "tool_call_id": tc.id,
                                 "content": result,
                             })
 
@@ -617,7 +604,8 @@ class Orchestrator:
                     break
 
                 # Non-streaming вызов (фолбек или tool-call раунды)
-                response = await client.chat.completions.create(
+                response = await self._completions_create(
+                    client,
                     model=self.settings.model,
                     messages=messages,
                     tools=tools if tools else NOT_GIVEN,
