@@ -46,6 +46,8 @@ const ChatRenderer = {
                 return this._renderImage(block);
             case 'buttons':
                 return this._renderButtons(block);
+            case 'client_action':
+                return this._renderClientAction(block);
             default:
                 console.warn('ChatRenderer: неизвестный тип блока', block.type);
                 return null;
@@ -391,6 +393,34 @@ const ChatRenderer = {
         }
 
         return div;
+    },
+
+    /**
+     * Рендерит блок client_action: показывает label-чип в чате и сразу
+     * выполняет команду через ClientActionsRegistry.
+     *
+     * @param {Object} block — {action, params, label}
+     * @returns {HTMLElement}
+     */
+    _renderClientAction(block) {
+        const el = document.createElement('div');
+        el.className = 'chat-block chat-block-client-action';
+        el.textContent = block.label || 'Выполняю команду…';
+
+        // Команда выполняется на клиенте сразу после получения.
+        if (window.ClientActionsRegistry
+            && typeof window.ClientActionsRegistry.execute === 'function') {
+            try {
+                window.ClientActionsRegistry.execute(block.action, block.params);
+            } catch (err) {
+                console.error('ChatRenderer: ошибка исполнения client_action:', err);
+            }
+        } else {
+            console.warn('ChatRenderer: ClientActionsRegistry не подключён;'
+                + ' проверь подключение chat-client-actions.js');
+        }
+
+        return el;
     },
 
     // ========================================================
