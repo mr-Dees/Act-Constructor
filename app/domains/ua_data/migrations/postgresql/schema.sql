@@ -173,6 +173,29 @@ INSERT INTO t_db_oarb_ua_violation_metric_dict (code, metric_name, metric_group)
     ('9001', 'Прочие нарушения без категории',                NULL)
 ON CONFLICT DO NOTHING;
 
+-- СПРАВОЧНИК ТИПОВ РИСКА (для CK Фин.Рез.)
+CREATE TABLE IF NOT EXISTS t_db_oarb_ua_violation_risk_type_dict (
+    id SERIAL PRIMARY KEY,
+    risk TEXT NOT NULL,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP, created_by TEXT DEFAULT 'system',
+    updated_by TEXT, deleted_at TIMESTAMP,
+    is_actual BOOLEAN NOT NULL DEFAULT true
+);
+
+INSERT INTO t_db_oarb_ua_violation_risk_type_dict (risk) VALUES
+    ('Кредитный риск B2B'),
+    ('Товарный риск Банковской книги'),
+    ('Риск ликвидности долговых ценных бумаг Банковской книги'),
+    ('Риск ликвидности'),
+    ('Риск участия и вынужденной поддержки'),
+    ('Стратегический риск'),
+    ('Риск изменения законодательства'),
+    ('Операционный риск'),
+    ('Модельный риск'),
+    ('Риск кибербезопасности')
+ON CONFLICT DO NOTHING;
+
 -- СПРАВОЧНИК КОМАНД
 CREATE TABLE IF NOT EXISTS t_db_oarb_ua_team_dict (
     id SERIAL PRIMARY KEY,

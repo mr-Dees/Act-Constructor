@@ -28,6 +28,7 @@ _DICT_DISPATCH = {
     "channels": "get_channels",
     "products": "get_products",
     "teams": "get_teams",
+    "risk_types": "get_risk_types",
 }
 
 

@@ -46,6 +46,7 @@
   - [6.5 Миграции](#65-миграции)
   - [6.6 JSON/JSONB утилиты](#66-jsonjsonb-утилиты)
   - [6.7 Пример: добавление новой таблицы](#67-пример-добавление-новой-таблицы)
+  - [6.8 Добавление UA-справочника](#68-добавление-ua-справочника)
 - [7. AI-ассистент](#7-ai-ассистент)
   - [7.1 Архитектура: chat endpoint -> LLM -> tool_calls](#71-архитектура-chat-endpoint---llm---tool_calls)
   - [7.2 ChatTool и ChatToolParam](#72-chattool-и-chattoolparam)
@@ -182,8 +183,7 @@ Act Constructor/
 ├── .env.example                  — шаблон конфигурации
 ├── requirements.txt              — зависимости
 ├── requirements-dev.txt          — dev-зависимости (pytest и т.д.)
-├── pytest.ini                    — конфигурация pytest
-└── CLAUDE.md                     — инструкции для AI-ассистента разработки
+└── pytest.ini                    — конфигурация pytest
 ```
 
 ---
@@ -1405,6 +1405,64 @@ class ActAttachmentRepository(BaseRepository):
 ```
 
 **Шаг 4.** Перезапустить приложение — таблица создастся автоматически.
+
+### 6.8 Добавление UA-справочника
+
+Справочники UA (процессы, тербанки, метрики, типы риска и т.п.) — read-only-таблицы домена `ua_data`, используемые из других доменов через `DictionaryRepository`. На PostgreSQL они создаются автоматически по миграции; на Greenplum таблицы и view создаются вручную (наполняются ETL).
+
+Пошаговый чек-лист добавления нового справочника (на примере `violation_risk_type_dict`):
+
+**Шаг 1. PostgreSQL-миграция.** Добавить `CREATE TABLE` + сидовые `INSERT … ON CONFLICT DO NOTHING` в `app/domains/ua_data/migrations/postgresql/schema.sql`. Колонки-метки актуальны: `created_at`, `updated_at`, `created_by`, `updated_by`, `deleted_at`, `is_actual` — все справочники должны их иметь.
+
+**Шаг 2. Настройки.** Добавить поле в `UaDataSettings` (`app/domains/ua_data/settings.py`) с дефолтным именем таблицы:
+
+```python
+violation_risk_type_dict: str = "t_db_oarb_ua_violation_risk_type_dict"
+```
+
+**Шаг 3. Репозиторий.** В `app/domains/ua_data/repositories/dictionary_repository.py`:
+- проинициализировать атрибут через `q(s.<имя_поля>)` в `__init__`;
+- добавить метод `get_<имя>() -> list[dict]` с фильтром `WHERE is_actual = true`.
+
+**Шаг 4. Регистрация в потребителе.** Чтобы справочник стал доступен через `/api/v1/<domain>/dictionaries/{name}`:
+- добавить ключ в `_DICT_DISPATCH` сервиса домена-потребителя (например, `app/domains/ck_fin_res/services/fr_validation_service.py`);
+- расширить `Literal` в `app/domains/<domain>/api/dictionaries.py`.
+
+**Шаг 5. `.env` и `.env.example`.** Добавить переменную `UA_DATA__<NAME>=t_db_oarb_…` в оба файла рядом с остальными `UA_DATA__*` — позволяет переопределить имя таблицы без релиза кода.
+
+**Шаг 6. Фронтенд.** На странице, где справочник используется:
+- добавить ключ справочника в `static dictNames = [...]` конфига (например, `ck-fin-res-config.js`);
+- описать поле как `{ key: '<поле>', type: 'dictionary', dict: '<имя_справочника>' }`.
+
+**Шаг 7. Greenplum (вручную).** Таблицы UA-справочников в GP создаются и наполняются ETL — приложение их только читает. Перед первым запуском в проде нужно вручную выполнить DDL на двух схемах:
+
+```sql
+-- 1. Проектная схема: реальная таблица (DATABASE__GP__SCHEMA)
+CREATE TABLE s_grnplm_ld_audit_da_project_4.t_db_oarb_ua_violation_risk_type_dict (
+    id          SERIAL PRIMARY KEY,
+    risk        TEXT NOT NULL,
+    created_at  TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    updated_at  TIMESTAMP,
+    created_by  TEXT DEFAULT 'system',
+    updated_by  TEXT,
+    deleted_at  TIMESTAMP,
+    is_actual   BOOLEAN NOT NULL DEFAULT true
+)
+DISTRIBUTED BY (id);
+
+-- сидовые INSERT'ы (для GP — без ON CONFLICT, см. ограничения совместимости ниже)
+
+-- 2. Sandbox-схема: представление для приложения
+CREATE OR REPLACE VIEW s_grnplm_ld_audit_da_sandbox_oarb.v_db_oarb_ua_violation_risk_type_dict AS
+SELECT id, risk, created_at, updated_at, created_by, updated_by, deleted_at, is_actual
+FROM   s_grnplm_ld_audit_da_project_4.t_db_oarb_ua_violation_risk_type_dict;
+```
+
+GP-схема `app/domains/ua_data/migrations/greenplum/schema.sql` остаётся пустой (заглушкой) — она нужна только для прохождения автомиграции.
+
+> **Важно для Greenplum:** в DDL не использовать `IF NOT EXISTS` для индексов, `ON CONFLICT`, `jsonb_set()`/`jsonb_pretty()`, `ADD COLUMN IF NOT EXISTS`, `CREATE SEQUENCE IF NOT EXISTS` (GP 6.x ≈ PG 9.4). GP-адаптер выполняет SQL по одному statement и сам ловит `DuplicateTableError`/`DuplicateObjectError` — поэтому достаточно `CREATE INDEX` без `IF NOT EXISTS`.
+
+**Шаг 8. Перезапуск.** На PG приложение создаст таблицу автоматически; на GP — после ручного DDL.
 
 ---
 

@@ -49,3 +49,5 @@ class CSValidationView(CSValidationRecord):
     """Представление CS-валидации с вычисляемыми полями."""
 
     act_sub_number: Optional[str] = None
+    block_owner: Optional[str] = None
+    department_owner: Optional[str] = None
