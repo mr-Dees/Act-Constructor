@@ -1,0 +1,77 @@
+"""Тесты конфигурации профилей и retry/agent_bridge."""
+import pytest
+
+from app.core.settings_registry import _load_from_env, register, get, reset
+from app.domains.chat.settings import ChatDomainSettings
+
+
+def _env(monkeypatch, **vars):
+    """Хелпер: проставить env-переменные для одного теста."""
+    for k, v in vars.items():
+        monkeypatch.setenv(k, v)
+
+
+@pytest.fixture(autouse=True)
+def _reset_registry():
+    reset()
+    yield
+    reset()
+
+
+def _load(monkeypatch, **env_vars) -> ChatDomainSettings:
+    _env(monkeypatch, **env_vars)
+    return _load_from_env("chat", ChatDomainSettings)
+
+
+def test_default_profile_is_sglang(monkeypatch):
+    s = _load(monkeypatch,
+              CHAT__API_BASE="http://localhost:30000/v1",
+              CHAT__API_KEY="dummy",
+              CHAT__MODEL="m")
+    assert s.profile == "sglang"
+    assert s.retry.on_429 is True
+    assert s.retry.on_5xx is True
+    assert s.smalltalk_mode == "local"
+    assert s.agent_bridge.poll_interval_sec == 1.0
+
+
+def test_openrouter_profile_with_extra_headers(monkeypatch):
+    s = _load(monkeypatch,
+              CHAT__PROFILE="openrouter",
+              CHAT__API_BASE="https://openrouter.ai/api/v1",
+              CHAT__API_KEY="sk-or-x",
+              CHAT__MODEL="minimax/minimax-m2:free",
+              CHAT__EXTRA_HEADERS='{"HTTP-Referer":"https://aw.local"}')
+    assert s.profile == "openrouter"
+    assert s.extra_headers == {"HTTP-Referer": "https://aw.local"}
+
+
+def test_nested_retry_overrides(monkeypatch):
+    s = _load(monkeypatch,
+              CHAT__API_BASE="http://x", CHAT__API_KEY="x", CHAT__MODEL="m",
+              CHAT__RETRY__ON_429="false",
+              CHAT__RETRY__ON_5XX="true",
+              CHAT__RETRY__MAX_ATTEMPTS="3",
+              CHAT__RETRY__BACKOFF_BASE_SEC="0.5")
+    assert s.retry.on_429 is False
+    assert s.retry.on_5xx is True
+    assert s.retry.max_attempts == 3
+    assert s.retry.backoff_base_sec == 0.5
+
+
+def test_nested_agent_bridge_overrides(monkeypatch):
+    s = _load(monkeypatch,
+              CHAT__API_BASE="http://x", CHAT__API_KEY="x", CHAT__MODEL="m",
+              CHAT__AGENT_BRIDGE__POLL_INTERVAL_SEC="0.25",
+              CHAT__AGENT_BRIDGE__TIMEOUT_SEC="60",
+              CHAT__AGENT_BRIDGE__HISTORY_LIMIT="10")
+    assert s.agent_bridge.poll_interval_sec == 0.25
+    assert s.agent_bridge.timeout_sec == 60
+    assert s.agent_bridge.history_limit == 10
+
+
+def test_smalltalk_mode_forward(monkeypatch):
+    s = _load(monkeypatch,
+              CHAT__API_BASE="http://x", CHAT__API_KEY="x", CHAT__MODEL="m",
+              CHAT__SMALLTALK_MODE="forward")
+    assert s.smalltalk_mode == "forward"

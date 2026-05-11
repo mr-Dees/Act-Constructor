@@ -1,10 +1,33 @@
 """Настройки домена чата."""
 
+from typing import Literal
+
 from pydantic import BaseModel, Field, SecretStr
+
+
+class RetryPolicy(BaseModel):
+    """Политика повторных попыток для transient-ошибок LLM-провайдера."""
+
+    on_429: bool = True   # rate-limit (transient)
+    on_5xx: bool = True   # server errors (transient)
+    max_attempts: int = Field(default=5, ge=1)
+    backoff_base_sec: float = Field(default=2.0, ge=0.0)
+
+
+class AgentBridgeSettings(BaseModel):
+    """Настройки моста к внешнему ИИ-агенту через таблицы БД."""
+
+    poll_interval_sec: float = Field(default=1.0, gt=0.0)
+    timeout_sec: int = Field(default=120, gt=0)
+    history_limit: int = Field(default=30, gt=0)
 
 
 class ChatDomainSettings(BaseModel):
     """Настройки AI-ассистента и чата."""
+
+    # Профиль провайдера LLM
+    profile: Literal["openrouter", "sglang", "openai"] = "sglang"
+    extra_headers: dict[str, str] = {}
 
     # LLM
     model: str = "gpt-4o"
@@ -13,6 +36,14 @@ class ChatDomainSettings(BaseModel):
     temperature: float = Field(default=0.1, ge=0.0, le=2.0)
     max_tool_rounds: int = Field(default=5, gt=0)
     streaming_enabled: bool = True
+    request_timeout: int = Field(default=60, gt=0)
+
+    # Поведение small-talk
+    smalltalk_mode: Literal["local", "forward"] = "local"
+
+    # Retry-политика и мост к внешнему агенту
+    retry: RetryPolicy = RetryPolicy()
+    agent_bridge: AgentBridgeSettings = AgentBridgeSettings()
 
     # Оркестрация
     system_prompt: str = (
