@@ -25,3 +25,15 @@ async def test_notify_handler_preserves_unicode():
     """ensure_ascii=False должен сохранить русские символы как есть."""
     raw = await notify_handler(message="Привет, мир!")
     assert "Привет, мир!" in raw  # не должно быть \\u04...
+
+
+async def test_open_act_page_handler_returns_open_url_block():
+    from app.domains.acts.integrations.action_handlers import open_act_page_handler
+    raw = await open_act_page_handler(km_number="КМ-23-00001")
+    block = json.loads(raw)
+    assert block["type"] == "client_action"
+    assert block["action"] == "open_url"
+    # URL должен заканчиваться номером акта (URL-encoded для Cyrillic ОК)
+    assert block["params"]["url"].endswith("00001") or "КМ-23-00001" in block["params"]["url"]
+    assert "Открываю" in block["label"]
+    assert "КМ-23-00001" in block["label"]
