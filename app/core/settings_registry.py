@@ -34,12 +34,19 @@ def _load_from_env(name: str, cls: type[BaseModel]) -> BaseModel:
                 case_sensitive=False,
                 extra="ignore",
             ),
-            # Копируем default values из cls
+            # Копируем default values из cls (включая default_factory)
             **{
-                field_name: field_info.default
+                field_name: (
+                    field_info.default_factory()  # type: ignore[misc]
+                    if field_info.default_factory is not None
+                    else field_info.default
+                )
                 for field_name, field_info in cls.model_fields.items()
-                if field_info.default is not None
-                and field_info.default is not PydanticUndefined
+                if field_info.default_factory is not None
+                or (
+                    field_info.default is not None
+                    and field_info.default is not PydanticUndefined
+                )
             },
         },
     )

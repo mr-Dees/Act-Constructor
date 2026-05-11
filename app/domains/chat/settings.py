@@ -27,7 +27,7 @@ class ChatDomainSettings(BaseModel):
 
     # Профиль провайдера LLM
     profile: Literal["openrouter", "sglang", "openai"] = "sglang"
-    extra_headers: dict[str, str] = {}
+    extra_headers: dict[str, str] = Field(default_factory=dict)
 
     # LLM
     model: str = "gpt-4o"
@@ -42,8 +42,8 @@ class ChatDomainSettings(BaseModel):
     smalltalk_mode: Literal["local", "forward"] = "local"
 
     # Retry-политика и мост к внешнему агенту
-    retry: RetryPolicy = RetryPolicy()
-    agent_bridge: AgentBridgeSettings = AgentBridgeSettings()
+    retry: RetryPolicy = Field(default_factory=RetryPolicy)
+    agent_bridge: AgentBridgeSettings = Field(default_factory=AgentBridgeSettings)
 
     # Оркестрация
     system_prompt: str = (

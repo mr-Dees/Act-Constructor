@@ -1,7 +1,7 @@
 """Тесты конфигурации профилей и retry/agent_bridge."""
 import pytest
 
-from app.core.settings_registry import _load_from_env, register, get, reset
+from app.core.settings_registry import _load_from_env, reset
 from app.domains.chat.settings import ChatDomainSettings
 
 
