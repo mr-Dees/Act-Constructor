@@ -12,6 +12,7 @@ from pydantic import Discriminator, Tag, TypeAdapter
 
 from app.core.chat.blocks import (
     ButtonGroup,
+    ClientActionBlock,
     CodeBlock,
     FileBlock,
     ImageBlock,
@@ -32,7 +33,8 @@ _DiscriminatedBlock = Annotated[
     | Annotated[PlanBlock, Tag("plan")]
     | Annotated[FileBlock, Tag("file")]
     | Annotated[ImageBlock, Tag("image")]
-    | Annotated[ButtonGroup, Tag("buttons")],
+    | Annotated[ButtonGroup, Tag("buttons")]
+    | Annotated[ClientActionBlock, Tag("client_action")],
     Discriminator("type"),
 ]
 

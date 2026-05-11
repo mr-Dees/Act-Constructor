@@ -223,3 +223,29 @@ class TestMessageBlockUnion:
         blocks2 = parse_message_blocks(serialized)
         serialized2 = serialize_message_blocks(blocks2)
         assert serialized == serialized2
+
+
+def test_client_action_block_parses():
+    from app.core.chat.blocks import ClientActionBlock
+    block = ClientActionBlock(
+        action="open_url",
+        params={"url": "/acts/КМ-23-001"},
+        label="Открываю акт КМ-23-001…",
+    )
+    assert block.type == "client_action"
+    assert block.action == "open_url"
+    assert block.params == {"url": "/acts/КМ-23-001"}
+    assert block.label == "Открываю акт КМ-23-001…"
+
+
+def test_client_action_block_in_discriminated_union():
+    """Дискриминированное объединение должно знать про client_action."""
+    from app.core.chat.schemas import parse_message_blocks
+    blocks = parse_message_blocks([
+        {"type": "client_action", "action": "notify",
+         "params": {"message": "Привет"}, "label": None},
+    ])
+    assert len(blocks) == 1
+    assert blocks[0].type == "client_action"
+    assert blocks[0].action == "notify"
+    assert blocks[0].label is None

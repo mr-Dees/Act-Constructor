@@ -99,6 +99,19 @@ class ButtonGroup(BaseModel):
     buttons: list[Union[QuickReplyButton, ActionButton]]
 
 
+class ClientActionBlock(BaseModel):
+    """Команда фронту выполнить чисто-клиентское действие.
+
+    Типы action и формат params определяются реестром ClientActionsRegistry
+    на стороне браузера. Стандартные action: 'open_url', 'notify', 'trigger_sdk'.
+    """
+
+    type: Literal["client_action"] = "client_action"
+    action: str
+    params: dict[str, Any] = {}
+    label: str | None = None
+
+
 # ---------------------------------------------------------------------------
 # Дискриминированное объединение всех блоков
 # ---------------------------------------------------------------------------
@@ -111,4 +124,5 @@ MessageBlock = Union[
     FileBlock,
     ImageBlock,
     ButtonGroup,
+    ClientActionBlock,
 ]

@@ -3,6 +3,7 @@
 from app.core.chat.blocks import (
     ActionButton,
     ButtonGroup,
+    ClientActionBlock,
     CodeBlock,
     FileBlock,
     ImageBlock,
