@@ -32,3 +32,66 @@ CREATE TABLE IF NOT EXISTS chat_files (
     created_at      TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
 CREATE INDEX IF NOT EXISTS idx_chat_files_conversation ON chat_files(conversation_id);
+
+-- ── Sequence для id событий агента (генерация на нашей стороне или у агента) ──
+CREATE SEQUENCE IF NOT EXISTS agent_response_events_id_seq;
+
+-- ── Очередь запросов от AW к внешнему агенту ───────────────────────────
+-- ВАЖНО: id всегда генерируется Python (uuid.uuid4()), не БД, чтобы код был
+-- одинаковым между PG и GP (в GP нет pgcrypto по умолчанию).
+CREATE TABLE IF NOT EXISTS agent_requests (
+    id              UUID PRIMARY KEY,
+    conversation_id UUID NOT NULL,
+    message_id      UUID NOT NULL,
+    user_id         TEXT NOT NULL,
+    domain_name     TEXT,
+    knowledge_bases JSONB NOT NULL DEFAULT '[]'::jsonb,
+    last_user_message TEXT NOT NULL,
+    history         JSONB NOT NULL DEFAULT '[]'::jsonb,
+    files           JSONB NOT NULL DEFAULT '[]'::jsonb,
+    status          TEXT NOT NULL DEFAULT 'pending'
+                    CHECK (status IN ('pending','in_progress','done','error','timeout')),
+    error_message   TEXT,
+    created_at      TIMESTAMPTZ NOT NULL DEFAULT now(),
+    started_at      TIMESTAMPTZ,
+    finished_at     TIMESTAMPTZ
+);
+
+CREATE INDEX IF NOT EXISTS ix_agent_requests_status_created
+    ON agent_requests (status, created_at);
+CREATE INDEX IF NOT EXISTS ix_agent_requests_conversation
+    ON agent_requests (conversation_id, created_at DESC);
+CREATE INDEX IF NOT EXISTS ix_agent_requests_message
+    ON agent_requests (message_id);
+
+
+-- ── Append-only лента событий от агента ────────────────────────────────
+CREATE TABLE IF NOT EXISTS agent_response_events (
+    id            BIGINT PRIMARY KEY
+                  DEFAULT nextval('agent_response_events_id_seq'),
+    request_id    UUID NOT NULL,
+    seq           INTEGER NOT NULL,
+    event_type    TEXT NOT NULL
+                  CHECK (event_type IN ('reasoning','status','error')),
+    payload       JSONB NOT NULL,
+    created_at    TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+CREATE INDEX IF NOT EXISTS ix_agent_response_events_request_id
+    ON agent_response_events (request_id, id);
+
+
+-- ── Финальный ответ агента (однократный INSERT, stop-сигнал) ──────────
+CREATE TABLE IF NOT EXISTS agent_responses (
+    id             UUID PRIMARY KEY,
+    request_id     UUID NOT NULL UNIQUE,
+    blocks         JSONB NOT NULL,
+    finish_reason  TEXT NOT NULL DEFAULT 'stop'
+                   CHECK (finish_reason IN ('stop','length','content_filter','error')),
+    token_usage    JSONB,
+    model          TEXT,
+    created_at     TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+CREATE INDEX IF NOT EXISTS ix_agent_responses_request_id
+    ON agent_responses (request_id);
