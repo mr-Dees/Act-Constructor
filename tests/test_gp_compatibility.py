@@ -118,6 +118,31 @@ class TestGreenplumSchemaCompatibility:
             f"Обнаруженные домены: {sorted(domain_names)}"
         )
 
+    def test_chat_gp_schema_has_agent_bridge_tables(self):
+        """Новые agent_* таблицы добавлены в GP-схему чата и используют {SCHEMA}.{PREFIX}."""
+        schema_path = (
+            Path(__file__).parent.parent
+            / "app" / "domains" / "chat" / "migrations" / "greenplum" / "schema.sql"
+        )
+        content = schema_path.read_text(encoding="utf-8")
+
+        # Все 3 таблицы должны присутствовать с placeholder'ами схемы и префикса
+        for table in ("agent_requests", "agent_response_events", "agent_responses"):
+            assert f"CREATE TABLE IF NOT EXISTS {{SCHEMA}}.{{PREFIX}}{table}" in content, \
+                f"Таблица {table} не найдена с {{SCHEMA}}.{{PREFIX}}-префиксом в GP-схеме"
+
+        # Sequence для events
+        assert "CREATE SEQUENCE {SCHEMA}.{PREFIX}agent_response_events_id_seq" in content
+
+        # Все индексы используют idx_{PREFIX}*
+        for idx_name in (
+            "idx_{PREFIX}agent_requests_status_created",
+            "idx_{PREFIX}agent_requests_message",
+            "idx_{PREFIX}agent_response_events_request",
+            "idx_{PREFIX}agent_responses_request",
+        ):
+            assert idx_name in content, f"Индекс {idx_name} не найден в GP-схеме"
+
 
 # ---------------------------------------------------------------------------
 # 2. SQL Statement Splitter (_split_sql_statements)
