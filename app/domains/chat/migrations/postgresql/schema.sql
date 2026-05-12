@@ -89,6 +89,3 @@ CREATE TABLE IF NOT EXISTS agent_responses (
     model          VARCHAR(100),
     created_at     TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
-
-CREATE INDEX IF NOT EXISTS idx_agent_responses_request
-    ON agent_responses(request_id);

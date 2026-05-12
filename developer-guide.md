@@ -1646,12 +1646,12 @@ KnowledgeBase(
 
 ### 7.6 Пример: добавление нового chat tool
 
-> Пример ниже использует устаревшее имя `ai_assistant` — структура осталась актуальной, имена замените под свой домен (например, `chat_helpers`).
+> Имя пакета `helpers` ниже — плейсхолдер. Замените на любое имя, подходящее вашему домену (например, `chat_helpers`).
 
 **Шаг 1.** Создать handler:
 
 ```python
-# app/domains/reports/integrations/ai_assistant/export_reports.py
+# app/domains/reports/integrations/helpers/export_reports.py
 async def get_report_summary(report_id: int) -> str:
     """Получает краткое содержание отчета."""
     # ... логика
@@ -1661,7 +1661,7 @@ async def get_report_summary(report_id: int) -> str:
 **Шаг 2.** Экспортировать из `__init__.py`:
 
 ```python
-# app/domains/reports/integrations/ai_assistant/__init__.py
+# app/domains/reports/integrations/helpers/__init__.py
 from .export_reports import get_report_summary
 __all__ = ["get_report_summary"]
 ```
@@ -1671,7 +1671,7 @@ __all__ = ["get_report_summary"]
 ```python
 # app/domains/reports/integrations/chat_tools.py
 def get_chat_tools() -> list[ChatTool]:
-    from app.domains.reports.integrations.ai_assistant import get_report_summary
+    from app.domains.reports.integrations.helpers import get_report_summary
     return [
         ChatTool(
             name="reports.get_report_summary",
@@ -1700,14 +1700,14 @@ def _build_domain():
 
 **Шаг 5.** Написать тест (см. [раздел 8](#8-тестирование)).
 
-**Пример реальной структуры: `acts/integrations/ai_assistant/`**
+**Пример структуры:** `<your_domain>/integrations/helpers/`
 
-Домен актов реализует развитую структуру AI-интеграции:
+Развитая структура AI-интеграции для домена с большим количеством инструментов:
 
 ```
-app/domains/acts/integrations/
-├── chat_tools.py                    — определения 27 ChatTool
-└── ai_assistant/
+app/domains/<your_domain>/integrations/
+├── chat_tools.py                    — определения ChatTool
+└── helpers/
     ├── _helpers.py                  — общие утилиты для экспортов
     ├── export_acts.py               — полное содержимое актов
     ├── export_invoices.py           — данные фактур

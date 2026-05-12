@@ -131,6 +131,3 @@ CREATE TABLE IF NOT EXISTS {SCHEMA}.{PREFIX}agent_responses (
 )
 WITH (appendonly=false)
 DISTRIBUTED BY (request_id);
-
-CREATE INDEX idx_{PREFIX}agent_responses_request
-    ON {SCHEMA}.{PREFIX}agent_responses(request_id);

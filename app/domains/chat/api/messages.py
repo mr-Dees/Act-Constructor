@@ -20,6 +20,8 @@ from app.domains.chat.services.message_service import MessageService
 
 logger = logging.getLogger("audit_workstation.domains.chat.api.messages")
 
+_kb_warned = [False]  # one-time warning suppression
+
 router = APIRouter()
 
 
@@ -117,6 +119,12 @@ async def send_message(
     # когда фронт начнёт передавать выбранные пользователем БЗ.
     accept = request.headers.get("accept", "")
     if "text/event-stream" in accept:
+        if not _kb_warned[0]:
+            logger.warning(
+                "Forward'ы к внешнему агенту идут с пустым knowledge_bases — "
+                "пробросьте список БЗ из контекста беседы (один раз на процесс)"
+            )
+            _kb_warned[0] = True
         return StreamingResponse(
             orchestrator.run_stream(
                 conversation_id=conversation_id,
