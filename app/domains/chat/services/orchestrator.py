@@ -210,8 +210,11 @@ class Orchestrator:
 
         Извлекает текст из блоков контента:
         - text → текст
-        - reasoning → текст
         - code → markdown fenced code block
+
+        Блоки reasoning и error сохранены в истории только для отображения
+        в UI; в контекст модели они не попадают (чтобы не засорять контекст
+        служебной информацией).
         """
         history = await self.msg_service.get_history(conversation_id)
         messages: list[dict[str, str]] = []
@@ -232,8 +235,6 @@ class Orchestrator:
                         continue
                     block_type = block.get("type", "")
                     if block_type == "text":
-                        text_parts.append(block.get("content", block.get("text", "")))
-                    elif block_type == "reasoning":
                         text_parts.append(block.get("content", block.get("text", "")))
                     elif block_type == "code":
                         lang = block.get("language", "")
@@ -396,6 +397,11 @@ class Orchestrator:
             )
 
             bridge = AgentBridgeService(conn)
+            # Аккумулятор блоков, которые пришли ДО финального ответа
+            # (reasoning-чанки и error-события). Нужен, чтобы сохранить их
+            # в content сообщения для отображения в истории — в живом потоке
+            # они уже отправлены, но без сохранения пропадают при перезагрузке.
+            pre_final_blocks: list[dict] = []
             try:
                 async for upd in bridge.wait_for_completion(
                     request_id,
@@ -435,17 +441,25 @@ class Orchestrator:
                                 sse_block_end(block_index=block_index),
                             )
                             block_index += 1
+                            pre_final_blocks.append(
+                                {"type": "reasoning", "content": chunk_text},
+                            )
                         elif ev["event_type"] == "error":
                             payload = ev["payload"] or {}
+                            err_message = payload.get(
+                                "message", "Ошибка внешнего агента",
+                            )
+                            err_code = payload.get("code")
                             yield (
                                 "sse",
-                                sse_error(
-                                    error=payload.get(
-                                        "message", "Ошибка внешнего агента",
-                                    ),
-                                    code=payload.get("code"),
-                                ),
+                                sse_error(error=err_message, code=err_code),
                             )
+                            err_block: dict = {
+                                "type": "error", "message": err_message,
+                            }
+                            if err_code:
+                                err_block["code"] = err_code
+                            pre_final_blocks.append(err_block)
                         # status — пока игнорируем
                     if upd.response:
                         logger.info(
@@ -506,7 +520,9 @@ class Orchestrator:
                         yield (
                             "final",
                             {
-                                "blocks": upd.response["blocks"],
+                                "blocks": (
+                                    pre_final_blocks + list(upd.response["blocks"])
+                                ),
                                 "token_usage": upd.response.get("token_usage") or {},
                             },
                         )
@@ -517,13 +533,21 @@ class Orchestrator:
                     "request_id=%s",
                     request_id,
                 )
+                timeout_message = (
+                    "Внешний агент не ответил вовремя. Попробуйте позже."
+                )
                 yield (
                     "sse",
-                    sse_error(
-                        error="Внешний агент не ответил вовремя. Попробуйте позже.",
-                        code="agent_timeout",
-                    ),
+                    sse_error(error=timeout_message, code="agent_timeout"),
                 )
+                # Сохраняем уже накопленные блоки + блок ошибки таймаута,
+                # чтобы при перезагрузке истории пользователь видел контекст.
+                pre_final_blocks.append({
+                    "type": "error",
+                    "message": timeout_message,
+                    "code": "agent_timeout",
+                })
+                yield ("final", {"blocks": pre_final_blocks, "token_usage": {}})
                 return
 
     def _parse_client_action_result(self, raw: str) -> dict | None:

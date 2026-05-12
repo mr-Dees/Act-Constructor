@@ -964,6 +964,47 @@ class TestGetHistoryMessages:
         result = await orchestrator._get_history_messages("conv-1")
         assert result[0]["content"] == "Просто строка"
 
+    async def test_reasoning_blocks_excluded_from_llm_context(
+        self, orchestrator, msg_service,
+    ):
+        """Reasoning сохранён в истории для UI, но в контекст LLM не идёт.
+
+        Иначе модель в следующем запросе увидит собственный chain-of-thought
+        предыдущего ответа и контекст будет засоряться.
+        """
+        msg_service.get_history.return_value = [
+            {
+                "role": "assistant",
+                "content": [
+                    {"type": "reasoning", "content": "Думаю про КСО"},
+                    {"type": "text", "content": "Ответ по КСО"},
+                ],
+            },
+        ]
+
+        result = await orchestrator._get_history_messages("conv-1")
+        assert len(result) == 1
+        assert result[0]["content"] == "Ответ по КСО"
+        assert "Думаю про КСО" not in result[0]["content"]
+
+    async def test_error_blocks_excluded_from_llm_context(
+        self, orchestrator, msg_service,
+    ):
+        """Сохранённые error-блоки в контекст LLM не передаются."""
+        msg_service.get_history.return_value = [
+            {
+                "role": "assistant",
+                "content": [
+                    {"type": "error", "message": "Сбой моста", "code": "x"},
+                    {"type": "text", "content": "Запросите позже."},
+                ],
+            },
+        ]
+
+        result = await orchestrator._get_history_messages("conv-1")
+        assert result[0]["content"] == "Запросите позже."
+        assert "Сбой моста" not in result[0]["content"]
+
 
 # -------------------------------------------------------------------------
 # _fallback_response

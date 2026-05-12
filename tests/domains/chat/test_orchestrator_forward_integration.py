@@ -191,10 +191,15 @@ async def test_forward_tool_call_streams_reasoning_and_final(monkeypatch):
         for e in events
     )
 
-    # Финальные блоки агента должны быть переданы в _save_assistant_message
+    # Финальные блоки агента + накопленные reasoning-чанки (в порядке прихода)
+    # должны быть переданы в _save_assistant_message, чтобы при перезагрузке
+    # истории пользователь видел те же reasoning, что и в живом стриме.
     orch._save_assistant_message.assert_called_once()
     saved_blocks = orch._save_assistant_message.call_args.kwargs["content_blocks"]
-    assert saved_blocks == [{"type": "text", "text": "КСО — это ..."}]
+    assert saved_blocks == [
+        {"type": "reasoning", "content": "Думаю..."},
+        {"type": "text", "text": "КСО — это ..."},
+    ]
 
 
 async def test_forward_emits_separate_block_per_reasoning_chunk(monkeypatch):

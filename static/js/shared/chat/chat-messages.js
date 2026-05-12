@@ -180,11 +180,16 @@ const ChatMessages = {
             }
 
             case 'error': {
-                const errDiv = document.createElement('div');
-                errDiv.className = 'chat-error';
-                errDiv.textContent =
+                // Рендерим как ErrorBlock, чтобы стримовое и сохранённое
+                // отображение ошибки выглядело одинаково.
+                const message =
                     event.data.error || event.data.message || 'Произошла ошибка';
-                container.appendChild(errDiv);
+                const errBlock = ChatRenderer.renderBlock({
+                    type: 'error',
+                    message,
+                    code: event.data.code || null,
+                });
+                if (errBlock) ChatRenderer.appendBlock(container, errBlock);
                 break;
             }
 

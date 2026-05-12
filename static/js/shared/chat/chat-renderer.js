@@ -120,6 +120,8 @@ const ChatRenderer = {
                 return this._renderButtons(block);
             case 'client_action':
                 return this._renderClientAction(block, options);
+            case 'error':
+                return this._renderError(block);
             default:
                 console.warn('ChatRenderer: неизвестный тип блока', block.type);
                 return null;
@@ -532,6 +534,23 @@ const ChatRenderer = {
             }
         }
 
+        return el;
+    },
+
+    /**
+     * Блок ошибки — сообщение об ошибке от внешнего агента или внутреннее.
+     *
+     * @param {Object} block — { type: 'error', message, code? }
+     * @returns {HTMLElement}
+     * @private
+     */
+    _renderError(block) {
+        const el = document.createElement('div');
+        el.className = 'chat-block chat-block-error';
+        el.textContent = block.message || 'Произошла ошибка';
+        if (block.code) {
+            el.dataset.code = block.code;
+        }
         return el;
     },
 

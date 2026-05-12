@@ -108,6 +108,18 @@ class ClientActionBlock(BaseModel):
     label: str | None = None
 
 
+class ErrorBlock(BaseModel):
+    """Блок сообщения об ошибке (например, от внешнего агента).
+
+    Сохраняется в истории сообщения для отображения; в контекст LLM
+    при формировании истории не попадает.
+    """
+
+    type: Literal["error"] = "error"
+    message: str
+    code: str | None = None
+
+
 # ---------------------------------------------------------------------------
 # Дискриминированное объединение всех блоков
 # ---------------------------------------------------------------------------
@@ -121,4 +133,5 @@ MessageBlock = Union[
     ImageBlock,
     ButtonGroup,
     ClientActionBlock,
+    ErrorBlock,
 ]

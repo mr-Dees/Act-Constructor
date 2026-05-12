@@ -229,3 +229,34 @@ def test_client_action_block_in_discriminated_union():
     assert blocks[0].type == "client_action"
     assert blocks[0].action == "notify"
     assert blocks[0].label is None
+
+
+def test_error_block_parses_with_code():
+    from app.core.chat.blocks import ErrorBlock
+    block = ErrorBlock(
+        message="База знаний недоступна",
+        code="kb_unavailable",
+    )
+    assert block.type == "error"
+    assert block.message == "База знаний недоступна"
+    assert block.code == "kb_unavailable"
+
+
+def test_error_block_parses_without_code():
+    from app.core.chat.blocks import ErrorBlock
+    block = ErrorBlock(message="Что-то пошло не так")
+    assert block.type == "error"
+    assert block.code is None
+
+
+def test_error_block_in_discriminated_union():
+    """Дискриминированное объединение должно знать про error."""
+    from app.core.chat.schemas import parse_message_blocks
+    blocks = parse_message_blocks([
+        {"type": "error", "message": "Сбой", "code": "kb_unavailable"},
+        {"type": "error", "message": "Сбой без кода"},
+    ])
+    assert len(blocks) == 2
+    assert blocks[0].type == "error"
+    assert blocks[0].code == "kb_unavailable"
+    assert blocks[1].code is None

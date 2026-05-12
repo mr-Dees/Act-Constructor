@@ -371,7 +371,8 @@
 }
 
 /* Сообщение об ошибке выполнения client-action */
-.chat-error {
+.chat-error,
+.chat-block-error {
     padding: var(--spacing-xs) var(--spacing-sm);
     border: var(--border-width-thin) solid var(--border-medium);
     border-radius: var(--radius-sm);
