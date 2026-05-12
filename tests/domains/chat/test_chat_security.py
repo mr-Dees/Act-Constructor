@@ -10,12 +10,10 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import pytest
 from pydantic import ValidationError
 
-from app.core.chat.buttons import register_action_handler, reset_action_handlers
 from app.core.chat.tools import reset as reset_tools
 from app.core.domain_registry import reset_registry
 from app.core.settings_registry import reset as reset_settings
 from app.domains.chat.exceptions import (
-    ActionNotFoundError,
     ChatFileNotFoundError,
     ChatFileValidationError,
     ChatLimitError,
@@ -25,7 +23,6 @@ from app.domains.chat.schemas.requests import (
     CreateConversationRequest,
     UpdateConversationRequest,
 )
-from app.domains.chat.services.action_service import ActionService
 from app.domains.chat.services.conversation_service import ConversationService
 from app.domains.chat.services.file_service import FileService
 from app.domains.chat.services.message_service import MessageService
@@ -43,12 +40,10 @@ def clean_registries():
     reset_registry()
     reset_settings()
     reset_tools()
-    reset_action_handlers()
     yield
     reset_registry()
     reset_settings()
     reset_tools()
-    reset_action_handlers()
 
 
 @pytest.fixture
@@ -91,108 +86,6 @@ def msg_service(msg_repo, conv_repo, settings):
 def file_service(file_repo, conv_repo, settings):
     """FileService с mock-зависимостями."""
     return FileService(file_repo=file_repo, conv_repo=conv_repo, settings=settings)
-
-
-# -------------------------------------------------------------------------
-# BUG #2: Action handler kwargs injection
-# -------------------------------------------------------------------------
-
-
-class TestActionKwargsInjection:
-    """BUG: params из запроса распаковываются как **kwargs в handler,
-    что позволяет клиенту подменить user_id и conversation_id.
-    """
-
-    async def test_user_id_in_params_filtered(self):
-        """user_id в params фильтруется — используется серверный user_id."""
-        captured_kwargs = {}
-
-        async def handler(**kwargs):
-            captured_kwargs.update(kwargs)
-            return {"status": "ok"}
-
-        register_action_handler(
-            action_id="test_action",
-            domain="test",
-            handler=handler,
-            label="Тест",
-        )
-
-        service = ActionService()
-        await service.execute(
-            action_id="test_action",
-            params={"user_id": "admin_user"},
-            user_id="regular_user",
-            conversation_id="conv-1",
-        )
-
-        # user_id из params отброшен, используется серверный
-        assert captured_kwargs["user_id"] == "regular_user"
-
-    async def test_conversation_id_in_params_filtered(self):
-        """conversation_id в params фильтруется — используется серверный."""
-        captured_kwargs = {}
-
-        async def handler(**kwargs):
-            captured_kwargs.update(kwargs)
-            return {"status": "ok"}
-
-        register_action_handler(
-            action_id="test_action_2",
-            domain="test",
-            handler=handler,
-            label="Тест 2",
-        )
-
-        service = ActionService()
-        await service.execute(
-            action_id="test_action_2",
-            params={"conversation_id": "other-conv"},
-            user_id="user1",
-            conversation_id="conv-1",
-        )
-
-        # conversation_id из params отброшен
-        assert captured_kwargs["conversation_id"] == "conv-1"
-
-    async def test_arbitrary_params_passed_to_handler(self):
-        """Произвольные params передаются в handler без санитизации.
-
-        Клиент может передать любые kwargs, которые будут переданы в handler.
-        Если handler имеет побочные эффекты, это может быть опасно.
-        """
-        captured_kwargs = {}
-
-        async def handler(**kwargs):
-            captured_kwargs.update(kwargs)
-            return {"status": "ok"}
-
-        register_action_handler(
-            action_id="test_action_3",
-            domain="test",
-            handler=handler,
-            label="Тест 3",
-        )
-
-        service = ActionService()
-        await service.execute(
-            action_id="test_action_3",
-            params={"admin_mode": True, "delete_all": True},
-            user_id="user1",
-        )
-
-        # Произвольные params проходят без фильтрации
-        assert captured_kwargs["admin_mode"] is True
-        assert captured_kwargs["delete_all"] is True
-
-    async def test_action_not_found(self):
-        """Несуществующее действие вызывает ActionNotFoundError."""
-        service = ActionService()
-        with pytest.raises(ActionNotFoundError):
-            await service.execute(
-                action_id="nonexistent",
-                user_id="user1",
-            )
 
 
 # -------------------------------------------------------------------------

@@ -12,7 +12,6 @@ import pytest
 from app.core.chat.tools import reset as reset_tools
 from app.core.domain_registry import reset_registry
 from app.core.settings_registry import reset as reset_settings
-from app.core.chat.buttons import reset_action_handlers
 from app.domains.chat.exceptions import ChatLimitError
 from app.domains.chat.services.conversation_service import ConversationService
 from app.domains.chat.services.message_service import MessageService
@@ -30,12 +29,10 @@ def clean_registries():
     reset_registry()
     reset_settings()
     reset_tools()
-    reset_action_handlers()
     yield
     reset_registry()
     reset_settings()
     reset_tools()
-    reset_action_handlers()
 
 
 @pytest.fixture

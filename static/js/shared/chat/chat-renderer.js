@@ -358,44 +358,78 @@ const ChatRenderer = {
     },
 
     /**
-     * Блок кнопок (quick_reply или action)
+     * Блок кнопок: каждая кнопка — клиентское действие через
+     * ClientActionsRegistry. Никаких сообщений в чат не отправляется,
+     * никаких HTTP-запросов на сервер не делается.
+     *
+     * После клика вся группа кнопок заменяется на статический бейдж
+     * "Выбрано: <label>", чтобы пользователь не мог нажать повторно
+     * и видел подтверждение выбора.
+     *
      * @private
      */
     _renderButtons(block) {
-        const variant = block.variant || 'quick_reply';
-        const div = document.createElement('div');
-        div.className = `chat-block chat-block-buttons chat-block-buttons--${variant}`;
+        const wrapper = document.createElement('div');
+        wrapper.className = 'chat-block chat-block-buttons';
 
-        const buttons = block.buttons || [];
+        const buttons = Array.isArray(block.buttons) ? block.buttons : [];
         for (const btn of buttons) {
             const button = document.createElement('button');
             button.className = 'chat-btn';
-            button.textContent = btn.label || btn.text || '';
+            button.type = 'button';
+            button.textContent = btn.label || btn.action_id || '';
 
-            if (variant === 'quick_reply') {
-                button.addEventListener('click', () => {
-                    if (typeof ChatManager !== 'undefined' && ChatManager.sendQuickReply) {
-                        ChatManager.sendQuickReply(btn.value || btn.label || '');
-                    }
-                });
-            } else if (variant === 'action') {
-                button.addEventListener('click', () => {
-                    if (btn.confirm) {
-                        const confirmed = window.confirm(
-                            typeof btn.confirm === 'string' ? btn.confirm : 'Выполнить действие?'
-                        );
-                        if (!confirmed) return;
-                    }
-                    if (typeof ChatManager !== 'undefined' && ChatManager.executeAction) {
-                        ChatManager.executeAction(btn.id, btn.params || {});
-                    }
-                });
-            }
+            button.addEventListener('click', () => {
+                this._handleButtonClick(wrapper, btn);
+            });
 
-            div.appendChild(button);
+            wrapper.appendChild(button);
         }
 
-        return div;
+        return wrapper;
+    },
+
+    /**
+     * Обработчик клика по кнопке группы.
+     * Исполняет client-action через реестр и заменяет группу на бейдж.
+     *
+     * @param {HTMLElement} wrapper — DOM-элемент группы кнопок
+     * @param {Object} btn — описание кнопки {action_id, label, params}
+     * @private
+     */
+    _handleButtonClick(wrapper, btn) {
+        const actionId = btn.action_id;
+        const label = btn.label || actionId || '';
+        const registry = window.ClientActionsRegistry;
+
+        const isRegistered = !!actionId
+            && !!registry
+            && typeof registry.isRegistered === 'function'
+            && registry.isRegistered(actionId);
+
+        if (!isRegistered) {
+            const errDiv = document.createElement('div');
+            errDiv.className = 'chat-block chat-error';
+            errDiv.textContent = `Действие "${actionId || '(без id)'}" не поддерживается`;
+            wrapper.replaceWith(errDiv);
+            return;
+        }
+
+        try {
+            registry.execute(actionId, btn.params || {});
+        } catch (err) {
+            console.error('ClientActionsRegistry: ошибка исполнения кнопки', err);
+            const errDiv = document.createElement('div');
+            errDiv.className = 'chat-block chat-error';
+            errDiv.textContent = `Ошибка выполнения действия "${actionId}": ${(err && err.message) || err}`;
+            wrapper.replaceWith(errDiv);
+            return;
+        }
+
+        const selected = document.createElement('div');
+        selected.className = 'chat-block chat-button-selected';
+        selected.textContent = `Выбрано: ${label}`;
+        wrapper.replaceWith(selected);
     },
 
     /**

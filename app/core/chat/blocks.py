@@ -16,21 +16,17 @@ from pydantic import BaseModel
 # Вспомогательные модели (не являются самостоятельными блоками)
 # ---------------------------------------------------------------------------
 
-class QuickReplyButton(BaseModel):
-    """Кнопка быстрого ответа — отправляет ``value`` как сообщение."""
+class Button(BaseModel):
+    """Кнопка чата — клик исполняется через ClientActionsRegistry на фронте.
 
+    ``action_id`` должен соответствовать имени обработчика, зарегистрированного
+    в ``window.ClientActionsRegistry`` на стороне браузера. Никаких HTTP-запросов
+    на сервер по клику не делается.
+    """
+
+    action_id: str
     label: str
-    value: str
-
-
-class ActionButton(BaseModel):
-    """Кнопка действия — вызывает серверный обработчик."""
-
-    id: str
-    label: str
-    domain: str
     params: dict[str, Any] = {}
-    confirm: bool = False
 
 
 class PlanStep(BaseModel):
@@ -92,11 +88,11 @@ class ImageBlock(BaseModel):
 
 
 class ButtonGroup(BaseModel):
-    """Группа кнопок — быстрые ответы или действия."""
+    """Группа кнопок — клик каждой кнопки исполняется через
+    ClientActionsRegistry на фронте."""
 
     type: Literal["buttons"] = "buttons"
-    variant: Literal["quick_reply", "action"]
-    buttons: list[Union[QuickReplyButton, ActionButton]]
+    buttons: list[Button]
 
 
 class ClientActionBlock(BaseModel):

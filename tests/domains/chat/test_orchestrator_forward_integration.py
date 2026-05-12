@@ -12,7 +12,6 @@ import pytest
 from app.core.chat.tools import register_tools, reset as reset_tools
 from app.core.domain_registry import reset_registry
 from app.core.settings_registry import reset as reset_settings
-from app.core.chat.buttons import reset_action_handlers
 from app.domains.chat.integrations.chat_tools import get_chat_tools
 from app.domains.chat.services.orchestrator import Orchestrator
 from app.domains.chat.settings import ChatDomainSettings
@@ -24,13 +23,11 @@ def _clean_registries():
     reset_registry()
     reset_settings()
     reset_tools()
-    reset_action_handlers()
     register_tools(get_chat_tools())
     yield
     reset_registry()
     reset_settings()
     reset_tools()
-    reset_action_handlers()
 
 
 def _stream_chunks(tool_call_id: str, args_json: str):

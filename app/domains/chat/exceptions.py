@@ -13,11 +13,6 @@ class ChatFileNotFoundError(AppError):
     status_code = 404
 
 
-class ActionNotFoundError(AppError):
-    """Действие не найдено."""
-    status_code = 404
-
-
 class ChatLimitError(AppError):
     """Превышен лимит (бесед, сообщений и т.д.)."""
     status_code = 422

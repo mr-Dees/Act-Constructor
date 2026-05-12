@@ -98,66 +98,6 @@ class ChatManager {
     }
 
     /**
-     * Отправляет быстрый ответ (quick reply) из кнопки ChatRenderer
-     * @param {string} value — текст быстрого ответа
-     */
-    static sendQuickReply(value) {
-        if (ChatUI.isProcessing() || !value) return;
-        this._input.value = value;
-        this.sendMessage();
-    }
-
-    /**
-     * Выполняет действие (action) из кнопки ChatRenderer
-     * @param {string} actionId — идентификатор действия
-     * @param {Object} params — параметры действия
-     */
-    static async executeAction(actionId, params = {}) {
-        if (ChatUI.isProcessing()) return;
-
-        ChatEventBus.emit('ui:processing', { state: true });
-        ChatEventBus.emit('ui:typing-show');
-
-        try {
-            const conversationId = await ChatContext.ensureConversation();
-            const endpoint = `/api/v1/chat/conversations/${conversationId}/actions/${actionId}`;
-            const url = typeof AppConfig !== 'undefined'
-                ? AppConfig.api.getUrl(endpoint)
-                : endpoint;
-
-            const headers = {
-                'Content-Type': 'application/json',
-            };
-            if (typeof AuthManager !== 'undefined' && AuthManager.getCurrentUser()) {
-                Object.assign(headers, AuthManager.getAuthHeaders());
-            }
-
-            const response = await fetch(url, {
-                method: 'POST',
-                headers,
-                body: JSON.stringify(params),
-            });
-
-            ChatEventBus.emit('ui:typing-hide');
-
-            if (!response.ok) {
-                throw new Error(`HTTP ${response.status}`);
-            }
-
-            const data = await response.json();
-            if (data.message) {
-                ChatMessages.renderMessage('bot', data.message);
-            }
-        } catch (err) {
-            ChatEventBus.emit('ui:typing-hide');
-            console.error('ChatManager: ошибка выполнения действия', err);
-            ChatMessages.renderMessage('bot', 'Не удалось выполнить действие. Попробуйте ещё раз.');
-        } finally {
-            ChatEventBus.emit('ui:processing', { state: false });
-        }
-    }
-
-    /**
      * Полная очистка чата
      */
     static clearChat() {

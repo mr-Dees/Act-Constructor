@@ -34,6 +34,10 @@
             }
         },
 
+        isRegistered(action) {
+            return typeof handlers[action] === 'function';
+        },
+
         list() {
             return Object.keys(handlers);
         },

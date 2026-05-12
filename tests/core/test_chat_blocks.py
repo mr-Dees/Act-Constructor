@@ -4,7 +4,7 @@ import pytest
 from pydantic import ValidationError
 
 from app.core.chat.blocks import (
-    ActionButton,
+    Button,
     ButtonGroup,
     CodeBlock,
     FileBlock,
@@ -12,7 +12,6 @@ from app.core.chat.blocks import (
     MessageBlock,
     PlanBlock,
     PlanStep,
-    QuickReplyButton,
     ReasoningBlock,
     TextBlock,
 )
@@ -112,43 +111,23 @@ class TestImageBlock:
 class TestButtonGroup:
     """Тесты группы кнопок."""
 
-    def test_quick_reply_variant(self):
+    def test_create_with_buttons(self):
         buttons = [
-            QuickReplyButton(label="Да", value="yes"),
-            QuickReplyButton(label="Нет", value="no"),
+            Button(action_id="acts.open_act_page", label="Открыть КМ-23-001",
+                   params={"km_number": "КМ-23-001"}),
+            Button(action_id="acts.open_act_page", label="Открыть КМ-23-002",
+                   params={"km_number": "КМ-23-002"}),
         ]
-        group = ButtonGroup(variant="quick_reply", buttons=buttons)
+        group = ButtonGroup(buttons=buttons)
         assert group.type == "buttons"
-        assert group.variant == "quick_reply"
         assert len(group.buttons) == 2
-        assert group.buttons[0].label == "Да"
-        assert group.buttons[0].value == "yes"
+        assert group.buttons[0].action_id == "acts.open_act_page"
+        assert group.buttons[0].label == "Открыть КМ-23-001"
+        assert group.buttons[0].params == {"km_number": "КМ-23-001"}
 
-    def test_action_variant(self):
-        buttons = [
-            ActionButton(
-                id="act-1",
-                label="Запустить проверку",
-                domain="acts",
-                params={"km": "КМ-01-00001"},
-                confirm=True,
-            ),
-        ]
-        group = ButtonGroup(variant="action", buttons=buttons)
-        assert group.type == "buttons"
-        assert group.variant == "action"
-        assert len(group.buttons) == 1
-        btn = group.buttons[0]
-        assert btn.id == "act-1"
-        assert btn.label == "Запустить проверку"
-        assert btn.domain == "acts"
-        assert btn.params == {"km": "КМ-01-00001"}
-        assert btn.confirm is True
-
-    def test_action_button_defaults(self):
-        btn = ActionButton(id="a1", label="Тест", domain="admin")
+    def test_button_defaults(self):
+        btn = Button(action_id="a1", label="Тест")
         assert btn.params == {}
-        assert btn.confirm is False
 
 
 class TestMessageBlockUnion:
@@ -183,8 +162,9 @@ class TestMessageBlockUnion:
             {"type": "image", "file_id": "i1", "alt": "График"},
             {
                 "type": "buttons",
-                "variant": "quick_reply",
-                "buttons": [{"label": "OK", "value": "ok"}],
+                "buttons": [{"action_id": "acts.open_act_page",
+                             "label": "Открыть",
+                             "params": {"km_number": "КМ-01-00001"}}],
             },
         ]
         blocks = parse_message_blocks(raw)

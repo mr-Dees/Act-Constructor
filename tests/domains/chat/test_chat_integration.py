@@ -7,7 +7,6 @@ import pytest
 from app.core.domain_registry import discover_domains, reset_registry
 from app.core.settings_registry import reset as reset_settings
 from app.core.chat.tools import reset as reset_tools
-from app.core.chat.buttons import reset_action_handlers
 
 
 @pytest.fixture(autouse=True)
@@ -16,12 +15,10 @@ def clean_registries():
     reset_registry()
     reset_settings()
     reset_tools()
-    reset_action_handlers()
     yield
     reset_registry()
     reset_settings()
     reset_tools()
-    reset_action_handlers()
 
 
 # -------------------------------------------------------------------------
@@ -68,11 +65,9 @@ def test_core_sdk_imports():
         PlanBlock,
         FileBlock,
         ImageBlock,
+        Button,
         ButtonGroup,
-        QuickReplyButton,
-        ActionButton,
         register_tools,
-        register_action_handler,
         parse_message_blocks,
         serialize_message_blocks,
     )
@@ -86,11 +81,9 @@ def test_core_sdk_imports():
     assert PlanBlock is not None
     assert FileBlock is not None
     assert ImageBlock is not None
+    assert Button is not None
     assert ButtonGroup is not None
-    assert QuickReplyButton is not None
-    assert ActionButton is not None
     assert callable(register_tools)
-    assert callable(register_action_handler)
     assert callable(parse_message_blocks)
     assert callable(serialize_message_blocks)
 

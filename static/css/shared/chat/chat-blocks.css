@@ -305,16 +305,26 @@
     border-color: var(--border-medium);
 }
 
-/* Кнопки действий — акцентный стиль */
-.chat-block-buttons--action .chat-btn {
-    background: var(--primary);
-    color: var(--text-on-primary);
-    border-color: var(--primary);
+/* Бейдж выбранной кнопки — заменяет всю группу после клика */
+.chat-button-selected {
+    display: inline-block;
+    padding: var(--spacing-xs) var(--spacing-sm);
+    border: var(--border-width-thin) solid var(--border-light);
+    border-radius: var(--radius-sm);
+    background: var(--bg-secondary);
+    color: var(--text-secondary);
+    font-size: var(--font-size-sm);
+    font-style: italic;
 }
 
-.chat-block-buttons--action .chat-btn:hover {
-    background: var(--primary-hover);
-    border-color: var(--primary-hover);
+/* Сообщение об ошибке выполнения client-action */
+.chat-error {
+    padding: var(--spacing-xs) var(--spacing-sm);
+    border: var(--border-width-thin) solid var(--border-medium);
+    border-radius: var(--radius-sm);
+    background: var(--bg-secondary);
+    color: var(--text-error, #c00);
+    font-size: var(--font-size-sm);
 }
 
 /* ============================================
