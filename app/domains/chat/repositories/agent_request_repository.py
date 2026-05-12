@@ -61,6 +61,10 @@ class AgentRequestRepository(BaseRepository):
             json.dumps(history or [], ensure_ascii=False),
             json.dumps(files or [], ensure_ascii=False),
         )
+        logger.debug(
+            "agent_requests: создан id=%s conv=%s status=pending",
+            id, conversation_id,
+        )
 
     async def get(self, request_id: str) -> dict | None:
         """Возвращает строку запроса по идентификатору, либо None."""
@@ -96,3 +100,7 @@ class AgentRequestRepository(BaseRepository):
                 f"UPDATE {self.table} SET status = $2 WHERE id = $1",
                 request_id, status,
             )
+        logger.debug(
+            "agent_requests: обновлён id=%s status=%s",
+            request_id, status,
+        )

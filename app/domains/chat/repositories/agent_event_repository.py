@@ -53,6 +53,10 @@ class AgentEventRepository(BaseRepository):
             event_type,
             json.dumps(payload, ensure_ascii=False),
         )
+        logger.debug(
+            "agent_response_events: добавлено id=%s request=%s seq=%d тип=%s",
+            new_id, request_id, seq, event_type,
+        )
         return int(new_id)
 
     async def poll(
@@ -85,5 +89,11 @@ class AgentEventRepository(BaseRepository):
                 """,
                 request_id,
                 since_id,
+            )
+        if rows:
+            logger.debug(
+                "agent_response_events: получено %d событий после seq=%s "
+                "для request=%s",
+                len(rows), since_id, request_id,
             )
         return [self._parse_row(r) for r in rows]

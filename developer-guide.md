@@ -55,6 +55,8 @@
   - [7.5 Knowledge bases](#75-knowledge-bases)
   - [7.6 Пример: добавление нового chat tool](#76-пример-добавление-нового-chat-tool)
   - [7.7 Фронтенд: event-driven архитектура чата](#77-фронтенд-event-driven-архитектура-чата)
+  - [7.8 Внешний ИИ-агент через таблицы БД](#78-внешний-ии-агент-через-таблицы-бд)
+  - [7.9 Action-handlers и ClientActionBlock](#79-action-handlers-и-clientactionblock)
 - [8. Тестирование](#8-тестирование)
   - [8.1 Стек и структура](#81-стек-и-структура)
   - [8.2 Фикстуры: сброс реестров](#82-фикстуры-сброс-реестров)
@@ -1470,7 +1472,7 @@ GP-схема `app/domains/ua_data/migrations/greenplum/schema.sql` остаёт
 
 ### 7.1 Архитектура: chat domain
 
-AI-ассистент реализован как доменный плагин `app/domains/chat/` с SSE-стримингом и agent loop:
+AI-ассистент реализован как доменный плагин `app/domains/chat/` с SSE-стримингом и agent loop. Локальная LLM (профиль `sglang` для прода / `openrouter` для dev — см. `app/domains/chat/services/llm_client.py`) выступает оркестратором: для **информационных запросов** (про данные/контент) решает форвардить во внешнего ИИ-агента через ChatTool `chat.forward_to_knowledge_agent` (см. [7.8](#78-внешний-ии-агент-через-таблицы-бд)); для **запросов на действие в интерфейсе** — вызывает локальный action-tool, возвращающий `ClientActionBlock` (см. [7.9](#79-action-handlers-и-clientactionblock)).
 
 ```
 Клиент → POST /api/v1/chat/conversations/{id}/messages (FormData)
@@ -1726,6 +1728,8 @@ app/domains/<your_domain>/integrations/
 
 Каждый `export_*.py` содержит async-функцию, которая используется как `handler` в `ChatTool`. Функция получает соединение из пула, выполняет SQL через `act_queries.py` и форматирует результат через `ai_readable_formatter.py`.
 
+> **Важно:** для **информационных** запросов (про данные/контент актов и БЗ) локальные tools регистрировать НЕ нужно — это работа внешнего ИИ-агента (см. [7.8](#78-внешний-ии-агент-через-таблицы-бд)). Локальные tools оставлять только для **действий в интерфейсе** (открыть/создать/уведомить — см. [7.9](#79-action-handlers-и-clientactionblock)).
+
 ### 7.7 Фронтенд: event-driven архитектура чата
 
 Фронтенд чата построен на event-driven архитектуре из 6 модулей, связанных через шину событий `ChatEventBus`. Три режима чата (inline на landing, modal в portal, popup в constructor) используют единый набор модулей.
@@ -1776,6 +1780,105 @@ chat-modal.js / chat-popup.js
 - **Ленивая инициализация**: `ChatModalManager`/`ChatPopupManager` вызывают `ChatManager.init()` при первом открытии
 - **Публичный API фасада**: `ChatManager.init()`, `.sendMessage()`, `.sendQuickReply(value)`, `.executeAction(actionId, params)`, `.clearChat()` — обратная совместимость для всех точек интеграции
 - **Прямой fetch в executeAction**: actions используют отдельный API endpoint без SSE, поэтому не идут через event bus
+
+### 7.8 Внешний ИИ-агент через таблицы БД
+
+Для запросов про **данные/контент** (БЗ актов, регламенты, нормативы) локальная LLM делегирует работу внешнему ИИ-агенту коллег через очередь в основной БД. Агент-сервис разрабатывается отдельной командой; AW не делает HTTP-запросов к нему — взаимодействие исключительно через таблицы.
+
+**Поток:**
+
+```
+LLM-оркестратор → tool chat.forward_to_knowledge_agent
+    ↓ INSERT в agent_requests (history, files, last_user_message, kb_hint)
+    ↓ возвращает sentinel "<<forwarded_request:UUID>>"
+Orchestrator переключается в bridge stream:
+    ↓ AgentBridgeService.wait_for_completion(request_id)
+    ↓ polling: agent_response_events (reasoning chunks, status, error)
+    ↓ polling: agent_responses (финальный ответ — stop-сигнал)
+SSE → клиент (block_start type=reasoning → deltas → финальные блоки)
+```
+
+**Таблицы** (`app/domains/chat/migrations/{postgresql,greenplum}/schema.sql`):
+
+| Таблица | Кто пишет | Назначение |
+|---|---|---|
+| `agent_requests` | AW | Очередь запросов к агенту (`status`: pending → in_progress → done/error/timeout) |
+| `agent_response_events` | агент | Append-only лента событий: `reasoning`, `status`, `error` (id из общей sequence) |
+| `agent_responses` | агент | Однократный INSERT финального ответа (UNIQUE по `request_id` — stop-сигнал) |
+
+**Архитектурные ограничения:**
+
+- **Polling-only**, без LISTEN/NOTIFY и постоянных соединений (между AW и агент-сервисом нет прямой сети — оба общаются только через БД).
+- **Greenplum-first**: схема DDL построена под GP (VARCHAR(36) для id, `{SCHEMA}.{PREFIX}` placeholders, `DISTRIBUTED BY (conversation_id)` для requests и `(request_id)` для events/responses).
+- **Retention** — задача администратора, в коде housekeeping не запускается (см. `external-agent-imitation.sql` в корне для SQL-сниппетов).
+- **Восстановление** после обрыва SSE — endpoint `GET /conversations/{id}/agent-request/{rid}/stream?since={event_id}` (`app/domains/chat/api/messages.py`).
+
+**Ключевые модули:**
+- `app/domains/chat/services/agent_bridge.py` — `AgentBridgeService.send/poll_events/poll_response/wait_for_completion`
+- `app/domains/chat/integrations/forward_handler.py` — фабрика `build_forward_handler(...)`, sentinel-pattern
+- `app/domains/chat/repositories/agent_*_repository.py` — три CRUD-репозитория
+- `app/domains/chat/services/{llm_client,retry,tool_call_accumulator}.py` — провайдер-агностичная LLM-инфра (OpenRouter/SGLang quirks: `index=None` fallback, `reasoning_details` для MiniMax M2)
+
+Для имитации работы внешнего агента вручную (вставки в БД через DBeaver/psql) — см. `external-agent-imitation.sql` в корне репозитория: 6 секций (типичные сценарии успеха/ошибки/таймаута, работа с файлами, очистка, диагностика).
+
+### 7.9 Action-handlers и ClientActionBlock
+
+Action-tools — это ChatTool'ы для **действий в интерфейсе** (открыть страницу, показать уведомление, навигировать, активировать SDK). Их handler возвращает JSON-сериализованный `ClientActionBlock`, оркестратор парсит ответ и эмитит SSE-событие `event: client_action`, фронт исполняет команду через `ClientActionsRegistry`.
+
+**Поток:**
+
+```
+LLM выдал tool_call → Orchestrator._execute_tool_call(name, args)
+    ↓ handler возвращает str (JSON-encoded ClientActionBlock)
+Orchestrator._parse_client_action_result(raw)
+    ↓ если type == "client_action" → block в emitted_blocks
+SSE: yield sse_client_action(block=client_action)
+    ↓ фронт chat-messages.js: case 'client_action'
+ChatRenderer.renderBlock(block, {execute: true})
+    ↓ _renderClientAction → ClientActionsRegistry.execute(action, params)
+```
+
+**Реестр клиентских команд** (`static/js/shared/chat/chat-client-actions.js`):
+
+| action | params | Что делает |
+|---|---|---|
+| `open_url` | `{url: string}` | `window.location.href = url` |
+| `notify` | `{message: string, level?: 'info'\|'success'\|'warning'\|'error'}` | Toast через `window.Notifications.show` |
+| `trigger_sdk` | `{method: string, args?: any[]}` | `window[method](...args)` — вызов глобальной SDK-функции |
+
+Регистрация дополнительных команд в JS: `ClientActionsRegistry.register('my_action', ({...params}) => {...})`.
+
+**Критическое правило**: `ClientActionBlock` исполняется **ровно один раз** в момент получения SSE-события. При рендере исторических сообщений (загрузка из `chat_messages.content`) фронт вызывает `ChatRenderer.renderBlocks(container, blocks, {execute: false})` — отображает только label-чип, без исполнения. Иначе пользователь застрянет в редирект-цикле.
+
+**Пример action-handler'а** (`app/domains/acts/integrations/action_handlers.py`):
+
+```python
+async def open_act_page_handler(
+    *, km_number: str | None = None, sz_number: str | None = None,
+) -> str:
+    """Поиск акта по КМ/СЗ → ClientActionBlock(open_url) или текст с просьбой уточнить."""
+    if not km_number and not sz_number:
+        return "Не указан ни КМ-номер, ни номер служебной записки."
+
+    # ВАЖНО: импорты внутри функции — для тестов через
+    # patch.multiple("app.db.connection", get_db=..., get_adapter=...)
+    from app.db.connection import get_adapter, get_db
+
+    # ... build SQL query ...
+    async with get_db() as conn:
+        rows = await conn.fetch(sql, *params)
+
+    if len(rows) == 1:
+        return json.dumps({
+            "type": "client_action",
+            "action": "open_url",
+            "params": {"url": f"/constructor?act_id={rows[0]['id']}"},
+            "label": f"Открываю акт {rows[0]['km_number']}…",
+        }, ensure_ascii=False)
+    # ... 0 / multiple branches return plain text ...
+```
+
+Регистрация в `chat_tools.py` домена — обычная (с `category="action"`), всё как описано в [7.6](#76-пример-добавление-нового-chat-tool).
 
 ---
 

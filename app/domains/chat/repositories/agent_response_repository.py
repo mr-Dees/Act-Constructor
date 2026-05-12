@@ -59,6 +59,10 @@ class AgentResponseRepository(BaseRepository):
             json.dumps(token_usage, ensure_ascii=False) if token_usage is not None else None,
             model,
         )
+        logger.debug(
+            "agent_responses: создан id=%s request=%s blocks=%d finish=%s",
+            id, request_id, len(blocks), finish_reason,
+        )
 
     async def get_by_request_id(self, request_id: str) -> dict | None:
         """Возвращает финальный ответ по request_id, либо None."""
@@ -66,4 +70,8 @@ class AgentResponseRepository(BaseRepository):
             f"SELECT * FROM {self.table} WHERE request_id = $1",
             request_id,
         )
+        if row is not None:
+            logger.debug(
+                "agent_responses: получен ответ для request=%s", request_id,
+            )
         return self._parse_row(row) if row else None
