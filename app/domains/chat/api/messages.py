@@ -2,6 +2,7 @@
 
 import json
 import logging
+import time
 
 from fastapi import APIRouter, Depends, File, Form, Query, Request, UploadFile
 from fastapi.responses import StreamingResponse
@@ -47,6 +48,17 @@ async def send_message(
     Если Accept: text/event-stream — возвращает SSE-поток,
     иначе — JSON-ответ.
     """
+    logger.info(
+        "Получен запрос пользователя: conversation=%s, message_len=%d, "
+        "files=%d",
+        conversation_id, len(message or ""), len(files),
+    )
+    logger.debug(
+        "Тело запроса (truncated): message=%r, domains=%r",
+        (message[:500] + "...") if message and len(message) > 500 else message,
+        domains,
+    )
+
     # Проверяем, что беседа существует и принадлежит пользователю
     await conv_service.get(conversation_id, username)
 
@@ -125,15 +137,35 @@ async def send_message(
                 "пробросьте список БЗ из контекста беседы (один раз на процесс)"
             )
             _kb_warned[0] = True
+
+        logger.info("SSE-стрим открыт: conversation=%s", conversation_id)
+        stream_started_at = time.monotonic()
+
+        async def _instrumented_stream():
+            try:
+                async for chunk in orchestrator.run_stream(
+                    conversation_id=conversation_id,
+                    user_message=message,
+                    domains=domains_list,
+                    file_blocks=file_blocks if file_blocks else None,
+                    user_id=username,
+                    knowledge_bases=[],
+                ):
+                    yield chunk
+            except Exception:
+                logger.exception(
+                    "Ошибка в SSE-стриме: conversation=%s", conversation_id,
+                )
+                raise
+            finally:
+                logger.info(
+                    "SSE-стрим закрыт: conversation=%s, длительность=%.2fс",
+                    conversation_id,
+                    time.monotonic() - stream_started_at,
+                )
+
         return StreamingResponse(
-            orchestrator.run_stream(
-                conversation_id=conversation_id,
-                user_message=message,
-                domains=domains_list,
-                file_blocks=file_blocks if file_blocks else None,
-                user_id=username,
-                knowledge_bases=[],
-            ),
+            _instrumented_stream(),
             media_type="text/event-stream",
             headers={
                 "Cache-Control": "no-cache",
@@ -143,12 +175,18 @@ async def send_message(
         )
 
     # Полный ответ (не стриминг)
-    result = await orchestrator.run(
-        conversation_id=conversation_id,
-        user_message=message,
-        domains=domains_list,
-        file_blocks=file_blocks if file_blocks else None,
-    )
+    try:
+        result = await orchestrator.run(
+            conversation_id=conversation_id,
+            user_message=message,
+            domains=domains_list,
+            file_blocks=file_blocks if file_blocks else None,
+        )
+    except Exception:
+        logger.exception(
+            "Ошибка обработки сообщения: conversation=%s", conversation_id,
+        )
+        raise
     return result
 
 

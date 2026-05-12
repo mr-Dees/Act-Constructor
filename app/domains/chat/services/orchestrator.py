@@ -10,6 +10,7 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+import time
 import uuid
 from collections.abc import AsyncGenerator
 from datetime import date
@@ -97,8 +98,46 @@ class Orchestrator:
 
     async def _completions_create(self, client, **kwargs):
         """Обёрнутый retry'ем вызов chat.completions.create."""
-        wrapped = self._retry_call(client.chat.completions.create)
-        return await wrapped(**kwargs)
+        model = kwargs.get("model", self.settings.model)
+        stream = kwargs.get("stream", False)
+        msg_count = len(kwargs.get("messages") or [])
+        logger.info(
+            "LLM вызов: профиль=%s, модель=%s, история=%d сообщений, "
+            "stream=%s",
+            self.settings.profile, model, msg_count, stream,
+        )
+        logger.debug(
+            "LLM запрос: модель=%s, max_tokens=%s, stream=%s, "
+            "temperature=%s",
+            model, kwargs.get("max_tokens"), stream,
+            kwargs.get("temperature"),
+        )
+        started = time.monotonic()
+        try:
+            wrapped = self._retry_call(client.chat.completions.create)
+            result = await wrapped(**kwargs)
+        except Exception:
+            logger.exception(
+                "LLM вызов завершился ошибкой после ретраев: модель=%s",
+                model,
+            )
+            raise
+        if not stream:
+            usage = getattr(result, "usage", None)
+            tokens_in = getattr(usage, "prompt_tokens", None) if usage else None
+            tokens_out = (
+                getattr(usage, "completion_tokens", None) if usage else None
+            )
+            finish_reason = None
+            if getattr(result, "choices", None):
+                finish_reason = getattr(result.choices[0], "finish_reason", None)
+            logger.info(
+                "LLM ответ получен за %.2fс: tokens_in=%s, tokens_out=%s, "
+                "finish=%s",
+                time.monotonic() - started, tokens_in, tokens_out,
+                finish_reason,
+            )
+        return result
 
     def _build_system_messages(
         self, domains: list[str] | None,
@@ -307,6 +346,11 @@ class Orchestrator:
             sentinel = await handler(**arguments)
             match = FORWARD_SENTINEL_PATTERN.match(sentinel)
             if not match:
+                logger.warning(
+                    "Forward: не удалось зарегистрировать agent_request "
+                    "для conversation=%s",
+                    conversation_id,
+                )
                 yield (
                     "error",
                     sse_error(
@@ -315,6 +359,11 @@ class Orchestrator:
                 )
                 return
             request_id = match.group("request_id")
+            logger.info(
+                "Forward во внешний агент: request_id=%s, knowledge_bases=%s, "
+                "history_len=%d, files=%d",
+                request_id, knowledge_bases, len(history), len(files),
+            )
 
             bridge = AgentBridgeService(conn)
             try:
@@ -331,6 +380,10 @@ class Orchestrator:
                             chunk_text = (ev["payload"] or {}).get("text", "")
                             if not chunk_text:
                                 continue
+                            logger.info(
+                                "Событие агента: тип=reasoning, длина=%d",
+                                len(chunk_text),
+                            )
                             # Каждый reasoning-чанк — отдельный сворачиваемый
                             # блок (start + delta + end), со своим block_index.
                             yield (
@@ -365,6 +418,13 @@ class Orchestrator:
                             )
                         # status — пока игнорируем
                     if upd.response:
+                        logger.info(
+                            "Финальный ответ агента: request_id=%s, "
+                            "blocks=%d, tokens=%s",
+                            request_id,
+                            len(upd.response.get("blocks") or []),
+                            upd.response.get("token_usage"),
+                        )
                         # Финальные блоки от агента: эмитим их как SSE-блоки
                         for raw_block in upd.response["blocks"]:
                             btype = raw_block.get("type", "text")
@@ -404,6 +464,11 @@ class Orchestrator:
                         )
                         return
             except AgentBridgeTimeout:
+                logger.warning(
+                    "Forward: внешний агент не ответил вовремя, "
+                    "request_id=%s",
+                    request_id,
+                )
                 yield (
                     "sse",
                     sse_error(
@@ -455,8 +520,15 @@ class Orchestrator:
                 timeout=timeout,
             )
             if isinstance(result, dict):
-                return json.dumps(result, ensure_ascii=False, default=str)
-            return str(result)
+                out = json.dumps(result, ensure_ascii=False, default=str)
+            else:
+                out = str(result)
+            preview = out[:200] + "..." if len(out) > 200 else out
+            logger.info(
+                "Tool result: %s, длина=%d, preview=%s",
+                tool_name, len(out), preview,
+            )
+            return out
         except asyncio.TimeoutError:
             logger.warning(
                 "Таймаут выполнения ChatTool %s (%dс)", tool_name, timeout,
@@ -608,6 +680,13 @@ class Orchestrator:
         замыкание-handler с контекстом текущего сообщения.
         """
         message_id = message_id or str(uuid.uuid4())
+        run_started = time.monotonic()
+        logger.info(
+            "Старт оркестрации: conversation=%s, message=%s, домены=%s, "
+            "files=%d",
+            conversation_id, message_id, domains,
+            len(file_blocks or []),
+        )
         yield sse_message_start(
             conversation_id=conversation_id,
             message_id=message_id,
@@ -684,8 +763,16 @@ class Orchestrator:
                     acc = ToolCallAccumulator()
                     block_started = False
                     finish_reason = None
+                    first_chunk_at: float | None = None
+                    stream_started_at = time.monotonic()
 
                     async for chunk in response_stream:
+                        if first_chunk_at is None:
+                            first_chunk_at = time.monotonic()
+                            logger.debug(
+                                "LLM первый чанк за %.2fс",
+                                first_chunk_at - stream_started_at,
+                            )
                         if not chunk.choices:
                             continue
 
@@ -753,6 +840,17 @@ class Orchestrator:
                             except json.JSONDecodeError:
                                 arguments = {}
 
+                            args_str = json.dumps(
+                                arguments, ensure_ascii=False, default=str,
+                            )
+                            args_preview = (
+                                args_str[:200] + "..."
+                                if len(args_str) > 200 else args_str
+                            )
+                            logger.info(
+                                "Tool call: %s, args=%s",
+                                tool_name, args_preview,
+                            )
                             yield sse_tool_call(
                                 tool_name=tool_name,
                                 tool_call_id=tc.id,
@@ -870,6 +968,17 @@ class Orchestrator:
                         except json.JSONDecodeError:
                             arguments = {}
 
+                        args_str = json.dumps(
+                            arguments, ensure_ascii=False, default=str,
+                        )
+                        args_preview = (
+                            args_str[:200] + "..."
+                            if len(args_str) > 200 else args_str
+                        )
+                        logger.info(
+                            "Tool call: %s, args=%s",
+                            tool_name, args_preview,
+                        )
                         yield sse_tool_call(
                             tool_name=tool_name,
                             tool_call_id=tc.id,
@@ -1004,6 +1113,12 @@ class Orchestrator:
             logger.exception("Ошибка стримингового agent loop")
             yield sse_error(error="Временная ошибка AI-сервиса. Попробуйте позже.")
 
+        logger.info(
+            "Оркестрация завершена: conversation=%s, длительность=%.2fс, "
+            "tokens=%s",
+            conversation_id, time.monotonic() - run_started,
+            token_usage if token_usage else None,
+        )
         yield sse_message_end(
             message_id=message_id,
             model=self.settings.model,
