@@ -24,9 +24,13 @@ const ChatRenderer = {
     },
 
     /**
-     * Добавляет DOM-элемент блока в контейнер с авто-вставкой
-     * визуального разделителя между двумя последовательными
-     * reasoning-блоками.
+     * Добавляет DOM-элемент блока в контейнер.
+     *
+     * Reasoning-блоки группируются во внешний <details class="chat-reasoning-group">,
+     * чтобы всю цепочку рассуждений можно было свернуть одним кликом.
+     * Каждый непрерывный run reasoning-блоков образует одну группу;
+     * как только появляется блок другого типа — группа финализируется,
+     * и следующий reasoning создаёт новую группу.
      *
      * Используется и live-стримом, и историей.
      *
@@ -38,18 +42,54 @@ const ChatRenderer = {
 
         const isReasoning = el.classList
             && el.classList.contains('chat-block-reasoning');
-        const lastChild = container.lastElementChild;
-        const lastIsReasoning = lastChild
-            && lastChild.classList
-            && lastChild.classList.contains('chat-block-reasoning');
 
-        if (isReasoning && lastIsReasoning) {
-            const sep = document.createElement('hr');
-            sep.className = 'chat-reasoning-separator';
-            container.appendChild(sep);
+        if (isReasoning) {
+            // Ищем активную (не финализированную) группу среди потомков container'а.
+            // Группа считается активной только если она — последний дочерний элемент.
+            const lastChild = container.lastElementChild;
+            const isActiveGroup = lastChild
+                && lastChild.classList
+                && lastChild.classList.contains('chat-reasoning-group')
+                && !lastChild.dataset.finalized;
+
+            if (isActiveGroup) {
+                // Добавляем разделитель, если в группе уже есть reasoning-блоки
+                const groupContent = lastChild.querySelector('.chat-reasoning-group-content');
+                if (groupContent.lastElementChild) {
+                    const sep = document.createElement('hr');
+                    sep.className = 'chat-reasoning-separator';
+                    groupContent.appendChild(sep);
+                }
+                groupContent.appendChild(el);
+            } else {
+                // Создаём новую группу
+                const group = document.createElement('details');
+                group.className = 'chat-reasoning-group';
+                group.open = true;
+
+                const summary = document.createElement('summary');
+                summary.textContent = 'Рассуждение агента';
+                group.appendChild(summary);
+
+                const groupContent = document.createElement('div');
+                groupContent.className = 'chat-reasoning-group-content';
+                groupContent.appendChild(el);
+                group.appendChild(groupContent);
+
+                container.appendChild(group);
+            }
+        } else {
+            // Финализируем активную группу, чтобы следующий reasoning начал новую
+            const lastChild = container.lastElementChild;
+            if (lastChild
+                && lastChild.classList
+                && lastChild.classList.contains('chat-reasoning-group')
+                && !lastChild.dataset.finalized) {
+                lastChild.dataset.finalized = 'true';
+            }
+
+            container.appendChild(el);
         }
-
-        container.appendChild(el);
     },
 
     /**

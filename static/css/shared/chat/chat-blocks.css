@@ -127,12 +127,57 @@
     border-top: var(--border-width-thin) solid var(--border-light);
 }
 
-/* Разделитель между двумя последовательными reasoning-блоками */
+/* Разделитель между двумя последовательными reasoning-блоками внутри группы */
 .chat-reasoning-separator {
     border: none;
     border-top: var(--border-width-thin) dashed var(--border-light);
     margin: var(--spacing-xs) 0;
     width: 100%;
+}
+
+/* ============================================
+   Группа reasoning-блоков (внешний контейнер)
+   ============================================ */
+
+.chat-reasoning-group {
+    border: var(--border-width-thin) solid var(--border-light);
+    border-radius: var(--radius-sm);
+    margin-bottom: var(--spacing-sm);
+    background: var(--bg-tertiary, var(--bg-secondary));
+}
+
+.chat-reasoning-group > summary {
+    padding: var(--spacing-xs) var(--spacing-sm);
+    cursor: pointer;
+    user-select: none;
+    font-weight: 500;
+    color: var(--text-primary);
+    list-style: none;
+}
+
+.chat-reasoning-group > summary::-webkit-details-marker {
+    display: none;
+}
+
+.chat-reasoning-group > summary::before {
+    content: '\25B6';
+    display: inline-block;
+    margin-right: var(--spacing-xs);
+    transition: transform var(--duration-fast, 150ms);
+    font-size: 0.7em;
+}
+
+.chat-reasoning-group[open] > summary::before {
+    transform: rotate(90deg);
+}
+
+.chat-reasoning-group-content {
+    padding: var(--spacing-xs) var(--spacing-sm) var(--spacing-sm);
+    border-top: var(--border-width-thin) solid var(--border-light);
+}
+
+.chat-reasoning-group-content > .chat-block-reasoning {
+    margin-bottom: 0;
 }
 
 /* ============================================
