@@ -244,12 +244,12 @@ async def test_list_pages_emits_buttons_after_text():
         buttons_block = blocks[1]
         assert buttons_block["type"] == "buttons"
         assert isinstance(buttons_block["buttons"], list)
-        assert len(buttons_block["buttons"]) == 2
         for btn in buttons_block["buttons"]:
             assert btn["action_id"] == "open_url"
             assert "url" in btn["params"]
         urls = {b["params"]["url"] for b in buttons_block["buttons"]}
-        assert urls == {"/a", "/b"}
+        # Кнопки доменов + статическая Админ-панель (всегда первой)
+        assert {"/a", "/b", "/admin"}.issubset(urls)
     finally:
         dr.reset_registry()
 

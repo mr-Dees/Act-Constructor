@@ -23,6 +23,15 @@ _EXTRA_CAPABILITIES = (
     "- Найти информацию из базы знаний — задай вопрос"
 )
 
+# Страницы, не регистрируемые через nav_items домена, но доступные в системе.
+STATIC_PAGES = [
+    {
+        "label": "Админ-панель",
+        "url": "/admin",
+        "description": "Управление пользователями, ролями и доступом к доменам",
+    },
+]
+
 
 async def list_pages_handler() -> str:
     """Возвращает текст-описание и кнопки для всех зарегистрированных страниц."""
@@ -30,6 +39,17 @@ async def list_pages_handler() -> str:
 
     page_lines: list[str] = []
     buttons: list[dict] = []
+
+    # Статические страницы (не привязаны к nav_items домена) — первыми.
+    for page in STATIC_PAGES:
+        buttons.append({
+            "action_id": "open_url",
+            "label": page["label"],
+            "params": {"url": page["url"]},
+        })
+        if page.get("description"):
+            page_lines.append(f"- **{page['label']}** — {page['description']}")
+
     for d in get_all_domains():
         for nav in d.nav_items:
             if not nav.url:

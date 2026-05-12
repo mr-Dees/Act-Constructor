@@ -8,7 +8,7 @@
 
 def _build_domain():
     """Ленивое построение DomainDescriptor (вызывается из domain_registry)."""
-    from app.core.domain import DomainDescriptor, NavItem
+    from app.core.domain import DomainDescriptor
     from app.domains.admin.api import get_api_routers
     from app.domains.admin.routes import get_html_routers
     from app.domains.admin._lifecycle import on_startup
@@ -26,23 +26,7 @@ def _build_domain():
         migration_substitutions={
             "{REF_USER_TABLE}": lambda: settings_registry.get("admin", AdminSettings).user_directory.table,
         },
-        nav_items=[
-            NavItem(
-                label="Администрирование",
-                url="/admin",
-                icon_svg=(
-                    '<path d="M12 4.5a3.5 3.5 0 100 7 3.5 3.5 0 000-7zM4 '
-                    '20a8 8 0 1116 0H4z" '
-                    'stroke="currentColor" stroke-width="2" '
-                    'stroke-linecap="round" stroke-linejoin="round"/>'
-                ),
-                order=90,
-                active_page="admin",
-                chat_domains=["admin"],
-                group="Администрирование",
-                description="Управление пользователями, ролями и доступом к доменам",
-            ),
-        ],
+        nav_items=[],
         chat_system_prompt=(
             "В админ-панели администратор управляет пользователями, ролями "
             "и доступом к доменам. Ты можешь подсказать, как туда попасть "
