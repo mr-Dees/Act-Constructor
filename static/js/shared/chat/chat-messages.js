@@ -132,7 +132,7 @@ const ChatMessages = {
                 }
                 const sb = ChatRenderer.createStreamingBlock(event.data.type);
                 this._streamingBlocks[event.data.index] = sb;
-                container.appendChild(sb.element);
+                ChatRenderer.appendBlock(container, sb.element);
                 break;
             }
 
@@ -160,7 +160,7 @@ const ChatMessages = {
 
             case 'buttons': {
                 const btnBlock = ChatRenderer.renderBlock({ type: 'buttons', ...event.data });
-                if (btnBlock) container.appendChild(btnBlock);
+                if (btnBlock) ChatRenderer.appendBlock(container, btnBlock);
                 break;
             }
 
@@ -171,14 +171,15 @@ const ChatMessages = {
                     { type: 'client_action', ...ca },
                     { execute: true },
                 );
-                if (el) container.appendChild(el);
+                if (el) ChatRenderer.appendBlock(container, el);
                 break;
             }
 
             case 'error': {
                 const errDiv = document.createElement('div');
                 errDiv.className = 'chat-error';
-                errDiv.textContent = event.data.message;
+                errDiv.textContent =
+                    event.data.error || event.data.message || 'Произошла ошибка';
                 container.appendChild(errDiv);
                 break;
             }

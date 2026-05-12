@@ -209,7 +209,6 @@ async def resume_agent_request_stream(
 
         settings = get_domain_settings("chat", ChatDomainSettings)
         block_index = 0
-        reasoning_started = False
         last_seen = since
 
         async with get_db() as conn:
@@ -223,12 +222,13 @@ async def resume_agent_request_stream(
                     text = (ev["payload"] or {}).get("text", "")
                     if not text:
                         continue
-                    if not reasoning_started:
-                        yield sse_block_start(
-                            block_index=block_index, block_type="reasoning",
-                        )
-                        reasoning_started = True
+                    # Каждый reasoning-чанк — отдельный сворачиваемый блок.
+                    yield sse_block_start(
+                        block_index=block_index, block_type="reasoning",
+                    )
                     yield sse_block_delta(block_index=block_index, delta=text)
+                    yield sse_block_end(block_index=block_index)
+                    block_index += 1
                 elif ev["event_type"] == "error":
                     payload = ev["payload"] or {}
                     yield sse_error(
@@ -239,10 +239,6 @@ async def resume_agent_request_stream(
             # Проверяем, не появился ли уже финальный ответ
             existing_response = await bridge.poll_response(request_id)
             if existing_response is not None:
-                if reasoning_started:
-                    yield sse_block_end(block_index=block_index)
-                    block_index += 1
-                    reasoning_started = False
                 for raw_block in existing_response["blocks"]:
                     btype = raw_block.get("type", "text")
                     yield sse_block_start(
@@ -287,15 +283,17 @@ async def resume_agent_request_stream(
                             text = (ev["payload"] or {}).get("text", "")
                             if not text:
                                 continue
-                            if not reasoning_started:
-                                yield sse_block_start(
-                                    block_index=block_index,
-                                    block_type="reasoning",
-                                )
-                                reasoning_started = True
+                            # Каждый reasoning-чанк — отдельный
+                            # сворачиваемый блок.
+                            yield sse_block_start(
+                                block_index=block_index,
+                                block_type="reasoning",
+                            )
                             yield sse_block_delta(
                                 block_index=block_index, delta=text,
                             )
+                            yield sse_block_end(block_index=block_index)
+                            block_index += 1
                         elif ev["event_type"] == "error":
                             payload = ev["payload"] or {}
                             yield sse_error(
@@ -303,10 +301,6 @@ async def resume_agent_request_stream(
                                 code=payload.get("code"),
                             )
                     if upd.response:
-                        if reasoning_started:
-                            yield sse_block_end(block_index=block_index)
-                            block_index += 1
-                            reasoning_started = False
                         for raw_block in upd.response["blocks"]:
                             btype = raw_block.get("type", "text")
                             yield sse_block_start(
@@ -331,8 +325,6 @@ async def resume_agent_request_stream(
                         )
                         return
             except AgentBridgeTimeout:
-                if reasoning_started:
-                    yield sse_block_end(block_index=block_index)
                 yield sse_error(
                     error="Внешний агент не ответил вовремя. Попробуйте позже.",
                     code="agent_timeout",

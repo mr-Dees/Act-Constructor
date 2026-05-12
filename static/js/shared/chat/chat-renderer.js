@@ -19,8 +19,37 @@ const ChatRenderer = {
 
         for (const block of blocks) {
             const el = this.renderBlock(block, opts);
-            if (el) container.appendChild(el);
+            if (el) this.appendBlock(container, el);
         }
+    },
+
+    /**
+     * Добавляет DOM-элемент блока в контейнер с авто-вставкой
+     * визуального разделителя между двумя последовательными
+     * reasoning-блоками.
+     *
+     * Используется и live-стримом, и историей.
+     *
+     * @param {HTMLElement} container
+     * @param {HTMLElement} el
+     */
+    appendBlock(container, el) {
+        if (!container || !el) return;
+
+        const isReasoning = el.classList
+            && el.classList.contains('chat-block-reasoning');
+        const lastChild = container.lastElementChild;
+        const lastIsReasoning = lastChild
+            && lastChild.classList
+            && lastChild.classList.contains('chat-block-reasoning');
+
+        if (isReasoning && lastIsReasoning) {
+            const sep = document.createElement('hr');
+            sep.className = 'chat-reasoning-separator';
+            container.appendChild(sep);
+        }
+
+        container.appendChild(el);
     },
 
     /**
@@ -60,6 +89,10 @@ const ChatRenderer = {
     /**
      * Создаёт стриминговый блок для инкрементального отображения SSE-данных
      *
+     * Для reasoning-блока: каждый вызов создаёт НОВЫЙ <details>-элемент
+     * (изначально раскрытый), чтобы каждый reasoning-чанк отображался
+     * как отдельный сворачиваемый блок.
+     *
      * @param {string} blockType — тип блока ('text' или 'reasoning')
      * @returns {{ element: HTMLElement, appendText: function(string): void, finalize: function(): void }}
      */
@@ -67,12 +100,11 @@ const ChatRenderer = {
         if (blockType === 'reasoning') {
             const details = document.createElement('details');
             details.className = 'chat-block chat-block-reasoning';
+            // По умолчанию каждый чанк раскрыт; пользователь сворачивает руками.
+            details.open = true;
 
-            const displayMode = this._getReasoningDisplayMode();
-            if (displayMode === 'hidden') {
+            if (this._getReasoningDisplayMode() === 'hidden') {
                 details.style.display = 'none';
-            } else if (displayMode === 'expanded') {
-                details.open = true;
             }
 
             const summary = document.createElement('summary');
@@ -204,18 +236,17 @@ const ChatRenderer = {
     },
 
     /**
-     * Блок рассуждений (сворачиваемый details/summary)
+     * Блок рассуждений (сворачиваемый details/summary).
+     * По умолчанию раскрыт; пользователь сворачивает руками.
      * @private
      */
     _renderReasoning(block) {
         const details = document.createElement('details');
         details.className = 'chat-block chat-block-reasoning';
+        details.open = true;
 
-        const displayMode = this._getReasoningDisplayMode();
-        if (displayMode === 'hidden') {
+        if (this._getReasoningDisplayMode() === 'hidden') {
             details.style.display = 'none';
-        } else if (displayMode === 'expanded') {
-            details.open = true;
         }
 
         const summary = document.createElement('summary');

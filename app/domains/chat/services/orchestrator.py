@@ -317,7 +317,6 @@ class Orchestrator:
             request_id = match.group("request_id")
 
             bridge = AgentBridgeService(conn)
-            reasoning_block_started = False
             try:
                 async for upd in bridge.wait_for_completion(
                     request_id,
@@ -332,15 +331,15 @@ class Orchestrator:
                             chunk_text = (ev["payload"] or {}).get("text", "")
                             if not chunk_text:
                                 continue
-                            if not reasoning_block_started:
-                                yield (
-                                    "sse",
-                                    sse_block_start(
-                                        block_index=block_index,
-                                        block_type="reasoning",
-                                    ),
-                                )
-                                reasoning_block_started = True
+                            # Каждый reasoning-чанк — отдельный сворачиваемый
+                            # блок (start + delta + end), со своим block_index.
+                            yield (
+                                "sse",
+                                sse_block_start(
+                                    block_index=block_index,
+                                    block_type="reasoning",
+                                ),
+                            )
                             yield (
                                 "sse",
                                 sse_block_delta(
@@ -348,6 +347,11 @@ class Orchestrator:
                                     delta=chunk_text,
                                 ),
                             )
+                            yield (
+                                "sse",
+                                sse_block_end(block_index=block_index),
+                            )
+                            block_index += 1
                         elif ev["event_type"] == "error":
                             payload = ev["payload"] or {}
                             yield (
@@ -361,13 +365,6 @@ class Orchestrator:
                             )
                         # status — пока игнорируем
                     if upd.response:
-                        if reasoning_block_started:
-                            yield (
-                                "sse",
-                                sse_block_end(block_index=block_index),
-                            )
-                            block_index += 1
-                            reasoning_block_started = False
                         # Финальные блоки от агента: эмитим их как SSE-блоки
                         for raw_block in upd.response["blocks"]:
                             btype = raw_block.get("type", "text")
@@ -407,8 +404,6 @@ class Orchestrator:
                         )
                         return
             except AgentBridgeTimeout:
-                if reasoning_block_started:
-                    yield ("sse", sse_block_end(block_index=block_index))
                 yield (
                     "sse",
                     sse_error(

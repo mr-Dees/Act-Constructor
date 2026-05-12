@@ -127,6 +127,14 @@
     border-top: var(--border-width-thin) solid var(--border-light);
 }
 
+/* Разделитель между двумя последовательными reasoning-блоками */
+.chat-reasoning-separator {
+    border: none;
+    border-top: var(--border-width-thin) dashed var(--border-light);
+    margin: var(--spacing-xs) 0;
+    width: 100%;
+}
+
 /* ============================================
    Блок плана
    ============================================ */
