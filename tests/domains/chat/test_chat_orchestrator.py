@@ -200,6 +200,51 @@ class TestBuildSystemMessages:
         assert "forward_to_knowledge_agent" in messages[0]["content"]
 
 
+def test_system_prompt_includes_available_pages_section(orchestrator_default_settings):
+    """Системный промпт содержит раздел 'Доступные страницы' с NavItem всех доменов."""
+    from app.core.domain import DomainDescriptor, NavItem
+    from app.core.domain_registry import _domains
+
+    _domains.append(DomainDescriptor(
+        name="dom_with_desc",
+        nav_items=[
+            NavItem(
+                label="Страница A",
+                url="/a",
+                icon_svg="<svg/>",
+                description="Описание A",
+            ),
+        ],
+    ))
+    _domains.append(DomainDescriptor(
+        name="dom_without_desc",
+        nav_items=[
+            NavItem(label="Страница B", url="/b", icon_svg="<svg/>"),
+        ],
+    ))
+
+    msgs = orchestrator_default_settings._build_system_messages(None)
+    content = msgs[0]["content"]
+
+    assert "## Доступные страницы" in content
+    # С описанием
+    assert "- Страница A (/a) — Описание A" in content
+    # Без описания — без " — "
+    assert "- Страница B (/b)" in content
+    assert "- Страница B (/b) —" not in content
+
+
+def test_system_prompt_includes_open_page_instructions(orchestrator_default_settings):
+    """Системный промпт содержит инструкции про chat.list_pages и open_*."""
+    msgs = orchestrator_default_settings._build_system_messages(None)
+    content = msgs[0]["content"]
+
+    assert "## Открытие страниц" in content
+    assert "chat.list_pages" in content
+    assert "admin.open_admin_panel" in content
+    assert "acts.open_act_page" in content
+
+
 def test_system_prompt_mentions_forward_priority(orchestrator_default_settings):
     """В system-промпте должно быть правило «по умолчанию forward_to_knowledge_agent»."""
     msgs = orchestrator_default_settings._build_system_messages(None)

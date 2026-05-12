@@ -12,10 +12,14 @@ def _reset_tools():
     tools_registry.reset()
 
 
-def test_get_chat_tools_returns_two_tools():
+def test_get_chat_tools_returns_expected_tools():
     chat_tools = get_chat_tools()
     names = {t.name for t in chat_tools}
-    assert names == {"chat.forward_to_knowledge_agent", "chat.notify"}
+    assert names == {
+        "chat.forward_to_knowledge_agent",
+        "chat.notify",
+        "chat.list_pages",
+    }
 
 
 def test_forward_tool_has_no_handler():

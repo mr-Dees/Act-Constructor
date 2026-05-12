@@ -121,3 +121,79 @@ async def test_open_act_page_query_by_sz_uses_service_note(mock_conn):
         await open_act_page_handler(sz_number="100/2024")
     sql = mock_conn.fetch.call_args.args[0]
     assert "service_note" in sql
+
+
+# ── per-domain open_*_page handlers ──
+
+
+async def test_admin_open_admin_panel_emits_client_action():
+    from app.domains.admin.integrations.action_handlers import (
+        open_admin_panel_handler,
+    )
+    raw = await open_admin_panel_handler()
+    block = json.loads(raw)
+    assert block["type"] == "client_action"
+    assert block["action"] == "open_url"
+    assert block["params"]["url"] == "/admin"
+    assert block["label"] == "Администрирование"
+
+
+async def test_ck_fin_res_open_page_emits_client_action():
+    from app.domains.ck_fin_res.integrations.action_handlers import (
+        open_ck_fin_res_page_handler,
+    )
+    raw = await open_ck_fin_res_page_handler()
+    block = json.loads(raw)
+    assert block["type"] == "client_action"
+    assert block["action"] == "open_url"
+    assert block["params"]["url"] == "/ck-fin-res"
+    assert block["label"] == "ЦК Фин.Рез."
+
+
+async def test_ck_client_exp_open_page_emits_client_action():
+    from app.domains.ck_client_exp.integrations.action_handlers import (
+        open_ck_client_exp_page_handler,
+    )
+    raw = await open_ck_client_exp_page_handler()
+    block = json.loads(raw)
+    assert block["type"] == "client_action"
+    assert block["action"] == "open_url"
+    assert block["params"]["url"] == "/ck-client-experience"
+    assert block["label"] == "ЦК Клиентский опыт"
+
+
+# ── chat.list_pages ──
+
+
+async def test_list_pages_emits_buttons_with_all_nav_items():
+    """Handler chat.list_pages возвращает buttons-блок для всех NavItem доменов."""
+    from app.core import domain_registry as dr
+    from app.core.domain import DomainDescriptor, NavItem
+    from app.domains.chat.integrations.list_pages_handler import (
+        list_pages_handler,
+    )
+
+    dr.reset_registry()
+    try:
+        dr._domains.append(DomainDescriptor(
+            name="d1",
+            nav_items=[NavItem(label="Стр A", url="/a", icon_svg="<svg/>")],
+        ))
+        dr._domains.append(DomainDescriptor(
+            name="d2",
+            nav_items=[NavItem(label="Стр B", url="/b", icon_svg="<svg/>")],
+        ))
+
+        raw = await list_pages_handler()
+        block = json.loads(raw)
+
+        assert block["type"] == "buttons"
+        assert isinstance(block["buttons"], list)
+        assert len(block["buttons"]) == 2
+        for btn in block["buttons"]:
+            assert btn["action_id"] == "open_url"
+            assert "url" in btn["params"]
+        urls = {b["params"]["url"] for b in block["buttons"]}
+        assert urls == {"/a", "/b"}
+    finally:
+        dr.reset_registry()

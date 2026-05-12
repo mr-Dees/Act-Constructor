@@ -12,4 +12,8 @@ def _build_domain():
         name=DOMAIN_NAME,
         settings_class=UaDataSettings,
         dependencies=["admin"],
+        chat_system_prompt=(
+            "У тебя есть доступ к справочным данным UA: список подразделений "
+            "и контрагентов."
+        ),
     )

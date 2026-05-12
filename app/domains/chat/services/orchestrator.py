@@ -162,6 +162,34 @@ class Orchestrator:
             if domain_prompts:
                 base_prompt = base_prompt + "\n\n" + "\n\n".join(domain_prompts)
 
+        # Раздел "Доступные страницы" — список NavItem всех известных доменов
+        from app.core.domain_registry import get_all_domains
+        available_pages: list[str] = []
+        for d in get_all_domains():
+            for nav in d.nav_items:
+                if not nav.url:
+                    continue
+                line = f"- {nav.label} ({nav.url})"
+                if nav.description:
+                    line += f" — {nav.description}"
+                available_pages.append(line)
+        if available_pages:
+            base_prompt += "\n\n## Доступные страницы\n" + "\n".join(
+                available_pages,
+            )
+
+        base_prompt += (
+            "\n\n## Открытие страниц\n"
+            "- Когда пользователь спрашивает что ты умеешь, какие функции "
+            "доступны, что есть в системе — вызови инструмент "
+            "chat.list_pages.\n"
+            "- Когда пользователь просит открыть конкретную страницу из "
+            "списка — вызови соответствующий инструмент "
+            "`<домен>.open_<...>` (например admin.open_admin_panel).\n"
+            "- Для открытия конкретного акта по КМ-номеру или СЗ — вызови "
+            "acts.open_act_page.\n"
+        )
+
         return [{"role": "system", "content": base_prompt}]
 
     def _get_tools(self, domains: list[str] | None) -> list[dict]:
@@ -506,6 +534,23 @@ class Orchestrator:
             return None
         # Минимальная валидация
         if "action" not in obj:
+            return None
+        return obj
+
+    def _parse_buttons_result(self, raw: str) -> dict | None:
+        """Если result tool'а — JSON-блок buttons, возвращает dict.
+
+        Иначе None.
+        """
+        try:
+            obj = json.loads(raw)
+        except (ValueError, TypeError):
+            return None
+        if not isinstance(obj, dict):
+            return None
+        if obj.get("type") != "buttons":
+            return None
+        if not isinstance(obj.get("buttons"), list):
             return None
         return obj
 
@@ -933,6 +978,10 @@ class Orchestrator:
                             )
 
                             client_action = self._parse_client_action_result(result)
+                            buttons_block = (
+                                None if client_action is not None
+                                else self._parse_buttons_result(result)
+                            )
                             if client_action is not None:
                                 # Команда выполняется фронтом сразу при получении.
                                 # block_index НЕ инкрементим — это не блок контента
@@ -942,6 +991,15 @@ class Orchestrator:
                                 yield sse_client_action(block=client_action)
                                 emitted_blocks.append(client_action)
                                 # LLM получает краткий итог, не JSON
+                                tool_result_for_llm = (
+                                    f"<выполнено: {tool_name}>"
+                                )
+                            elif buttons_block is not None:
+                                # Группа кнопок — отдельный SSE-канал
+                                yield sse_buttons(
+                                    buttons=buttons_block.get("buttons", []),
+                                )
+                                emitted_blocks.append(buttons_block)
                                 tool_result_for_llm = (
                                     f"<выполнено: {tool_name}>"
                                 )
@@ -1059,6 +1117,10 @@ class Orchestrator:
                         )
 
                         client_action = self._parse_client_action_result(result)
+                        buttons_block = (
+                            None if client_action is not None
+                            else self._parse_buttons_result(result)
+                        )
                         if client_action is not None:
                             # Эмитим client_action как полноценный блок ответа
                             yield sse_block_start(
@@ -1076,6 +1138,14 @@ class Orchestrator:
                             emitted_blocks.append(client_action)
                             block_index += 1
                             # LLM получает краткий итог, не JSON
+                            tool_result_for_llm = (
+                                f"<выполнено: {tool_name}>"
+                            )
+                        elif buttons_block is not None:
+                            yield sse_buttons(
+                                buttons=buttons_block.get("buttons", []),
+                            )
+                            emitted_blocks.append(buttons_block)
                             tool_result_for_llm = (
                                 f"<выполнено: {tool_name}>"
                             )
