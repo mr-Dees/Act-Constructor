@@ -126,6 +126,10 @@ const ChatMessages = {
                 break;
 
             case 'block_start': {
+                if (event.data.type === 'client_action') {
+                    // client_action приходит как отдельное событие — игнорируем block_start
+                    break;
+                }
                 const sb = ChatRenderer.createStreamingBlock(event.data.type);
                 this._streamingBlocks[event.data.index] = sb;
                 container.appendChild(sb.element);
@@ -157,6 +161,17 @@ const ChatMessages = {
             case 'buttons': {
                 const btnBlock = ChatRenderer.renderBlock({ type: 'buttons', ...event.data });
                 if (btnBlock) container.appendChild(btnBlock);
+                break;
+            }
+
+            case 'client_action': {
+                // Команда выполняется немедленно (live-стрим).
+                const ca = event.data.block || {};
+                const el = ChatRenderer.renderBlock(
+                    { type: 'client_action', ...ca },
+                    { execute: true },
+                );
+                if (el) container.appendChild(el);
                 break;
             }
 
@@ -323,7 +338,7 @@ const ChatMessages = {
             } else if (msg.role === 'assistant') {
                 if (blocks.length > 0) {
                     const container = this._addBotMessageStreaming();
-                    ChatRenderer.renderBlocks(container, blocks);
+                    ChatRenderer.renderBlocks(container, blocks, { execute: false });
                 } else {
                     this.renderMessage('bot', '');
                 }

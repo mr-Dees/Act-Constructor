@@ -85,6 +85,15 @@ def sse_buttons(*, buttons: list[dict[str, Any]]) -> str:
     })
 
 
+def sse_client_action(*, block: dict[str, Any]) -> str:
+    """Команда фронту выполнить чисто-клиентское действие сразу.
+
+    Содержит полный ClientActionBlock (action, params, label).
+    Фронт исполняет команду через ClientActionsRegistry один раз.
+    """
+    return format_sse_event("client_action", {"block": block})
+
+
 def sse_message_end(
     *,
     message_id: str,

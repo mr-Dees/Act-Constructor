@@ -29,6 +29,7 @@ from app.domains.chat.services.streaming import (
     sse_block_delta,
     sse_block_end,
     sse_block_start,
+    sse_client_action,
     sse_error,
     sse_message_end,
     sse_message_start,
@@ -819,21 +820,13 @@ class Orchestrator:
 
                             client_action = self._parse_client_action_result(result)
                             if client_action is not None:
-                                # Эмитим client_action как полноценный блок ответа
-                                yield sse_block_start(
-                                    block_index=block_index,
-                                    block_type="client_action",
-                                )
-                                yield sse_block_delta(
-                                    block_index=block_index,
-                                    delta=json.dumps(
-                                        client_action, ensure_ascii=False,
-                                    ),
-                                )
-                                yield sse_block_end(block_index=block_index)
-                                # Сохраняем для итогового _save_assistant_message
+                                # Команда выполняется фронтом сразу при получении.
+                                # block_index НЕ инкрементим — это не блок контента
+                                # в потоке; в _save_assistant_message блок сохранится
+                                # как content для отображения в истории (где он будет
+                                # показан как чип без исполнения).
+                                yield sse_client_action(block=client_action)
                                 emitted_blocks.append(client_action)
-                                block_index += 1
                                 # LLM получает краткий итог, не JSON
                                 tool_result_for_llm = (
                                     f"<выполнено: {tool_name}>"

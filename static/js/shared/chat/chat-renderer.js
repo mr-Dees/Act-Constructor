@@ -12,12 +12,13 @@ const ChatRenderer = {
      *
      * @param {HTMLElement} container — контейнер для отрисовки
      * @param {Array<Object>} blocks — массив блоков {type, ...data}
+     * @param {Object} [opts] — опции рендера (например, opts.execute для client_action)
      */
-    renderBlocks(container, blocks) {
+    renderBlocks(container, blocks, opts) {
         if (!container || !Array.isArray(blocks)) return;
 
         for (const block of blocks) {
-            const el = this.renderBlock(block);
+            const el = this.renderBlock(block, opts);
             if (el) container.appendChild(el);
         }
     },
@@ -26,10 +27,12 @@ const ChatRenderer = {
      * Рендерит один блок в DOM-элемент
      *
      * @param {Object} block — блок {type, ...data}
+     * @param {Object} [opts] — опции рендера (например, opts.execute для client_action)
      * @returns {HTMLElement|null}
      */
-    renderBlock(block) {
+    renderBlock(block, opts) {
         if (!block || !block.type) return null;
+        const options = opts || {};
 
         switch (block.type) {
             case 'text':
@@ -47,7 +50,7 @@ const ChatRenderer = {
             case 'buttons':
                 return this._renderButtons(block);
             case 'client_action':
-                return this._renderClientAction(block);
+                return this._renderClientAction(block, options);
             default:
                 console.warn('ChatRenderer: неизвестный тип блока', block.type);
                 return null;
@@ -396,28 +399,32 @@ const ChatRenderer = {
     },
 
     /**
-     * Рендерит блок client_action: показывает label-чип в чате и сразу
-     * выполняет команду через ClientActionsRegistry.
+     * Рендерит блок client_action: показывает label-чип в чате.
+     * Выполняет команду через ClientActionsRegistry только если opts.execute=true
+     * (по умолчанию false — чтобы при загрузке истории команды не реэкзекьютились).
      *
      * @param {Object} block — {action, params, label}
+     * @param {Object} [opts] — {execute: boolean}
      * @returns {HTMLElement}
      */
-    _renderClientAction(block) {
+    _renderClientAction(block, opts) {
         const el = document.createElement('div');
         el.className = 'chat-block chat-block-client-action';
         el.textContent = block.label || 'Выполняю команду…';
 
-        // Команда выполняется на клиенте сразу после получения.
-        if (window.ClientActionsRegistry
-            && typeof window.ClientActionsRegistry.execute === 'function') {
-            try {
-                window.ClientActionsRegistry.execute(block.action, block.params);
-            } catch (err) {
-                console.error('ChatRenderer: ошибка исполнения client_action:', err);
+        const shouldExecute = !!(opts && opts.execute);
+        if (shouldExecute) {
+            if (window.ClientActionsRegistry
+                && typeof window.ClientActionsRegistry.execute === 'function') {
+                try {
+                    window.ClientActionsRegistry.execute(block.action, block.params);
+                } catch (err) {
+                    console.error('ChatRenderer: ошибка исполнения client_action:', err);
+                }
+            } else {
+                console.warn('ChatRenderer: ClientActionsRegistry не подключён;'
+                    + ' проверь подключение chat-client-actions.js');
             }
-        } else {
-            console.warn('ChatRenderer: ClientActionsRegistry не подключён;'
-                + ' проверь подключение chat-client-actions.js');
         }
 
         return el;
