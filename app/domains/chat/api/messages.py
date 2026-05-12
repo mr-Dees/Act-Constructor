@@ -240,8 +240,8 @@ async def resume_agent_request_stream(
             AgentBridgeService, AgentBridgeTimeout,
         )
         from app.domains.chat.services.streaming import (
-            sse_block_delta, sse_block_end, sse_block_start, sse_error,
-            sse_message_end,
+            sse_block_delta, sse_block_end, sse_block_start, sse_buttons,
+            sse_client_action, sse_error, sse_message_end,
         )
         from app.domains.chat.settings import ChatDomainSettings
 
@@ -279,15 +279,20 @@ async def resume_agent_request_stream(
             if existing_response is not None:
                 for raw_block in existing_response["blocks"]:
                     btype = raw_block.get("type", "text")
+                    if btype == "buttons":
+                        yield sse_buttons(
+                            buttons=raw_block.get("buttons", []),
+                        )
+                        continue
+                    if btype == "client_action":
+                        yield sse_client_action(block=raw_block)
+                        continue
                     yield sse_block_start(
                         block_index=block_index, block_type=btype,
                     )
                     if btype in ("text", "code"):
                         content_key = "code" if btype == "code" else "text"
-                        delta = (
-                            raw_block.get(content_key)
-                            or raw_block.get("content", "")
-                        )
+                        delta = raw_block.get(content_key, "")
                         yield sse_block_delta(
                             block_index=block_index,
                             delta=delta,
@@ -341,15 +346,20 @@ async def resume_agent_request_stream(
                     if upd.response:
                         for raw_block in upd.response["blocks"]:
                             btype = raw_block.get("type", "text")
+                            if btype == "buttons":
+                                yield sse_buttons(
+                                    buttons=raw_block.get("buttons", []),
+                                )
+                                continue
+                            if btype == "client_action":
+                                yield sse_client_action(block=raw_block)
+                                continue
                             yield sse_block_start(
                                 block_index=block_index, block_type=btype,
                             )
                             if btype in ("text", "code"):
                                 content_key = "code" if btype == "code" else "text"
-                                delta = (
-                                    raw_block.get(content_key)
-                                    or raw_block.get("content", "")
-                                )
+                                delta = raw_block.get(content_key, "")
                                 yield sse_block_delta(
                                     block_index=block_index,
                                     delta=delta,

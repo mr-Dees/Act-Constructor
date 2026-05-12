@@ -30,6 +30,7 @@ from app.domains.chat.services.streaming import (
     sse_block_delta,
     sse_block_end,
     sse_block_start,
+    sse_buttons,
     sse_client_action,
     sse_error,
     sse_message_end,
@@ -428,6 +429,22 @@ class Orchestrator:
                         # Финальные блоки от агента: эмитим их как SSE-блоки
                         for raw_block in upd.response["blocks"]:
                             btype = raw_block.get("type", "text")
+                            if btype == "buttons":
+                                # buttons — отдельный SSE-канал, без block_index
+                                yield (
+                                    "sse",
+                                    sse_buttons(
+                                        buttons=raw_block.get("buttons", []),
+                                    ),
+                                )
+                                continue
+                            if btype == "client_action":
+                                # client_action исполняется фронтом сразу
+                                yield (
+                                    "sse",
+                                    sse_client_action(block=raw_block),
+                                )
+                                continue
                             yield (
                                 "sse",
                                 sse_block_start(
@@ -435,12 +452,8 @@ class Orchestrator:
                                 ),
                             )
                             if btype in ("text", "code"):
-                                # Агент использует ключ text/code, локальная схема — content
                                 content_key = "code" if btype == "code" else "text"
-                                delta = (
-                                    raw_block.get(content_key)
-                                    or raw_block.get("content", "")
-                                )
+                                delta = raw_block.get(content_key, "")
                                 yield (
                                     "sse",
                                     sse_block_delta(
@@ -448,8 +461,8 @@ class Orchestrator:
                                         delta=delta,
                                     ),
                                 )
-                            # Остальные типы (file, image, buttons, client_action)
-                            # фронт получит из финального сохранения сообщения.
+                            # Остальные типы (file, image, ...) — block_start/end
+                            # без дельты; фронт возьмёт из сохранённого сообщения.
                             yield (
                                 "sse",
                                 sse_block_end(block_index=block_index),

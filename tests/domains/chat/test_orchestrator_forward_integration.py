@@ -121,7 +121,7 @@ async def test_forward_tool_call_streams_reasoning_and_final(monkeypatch):
         yield AgentBridgeUpdate(response={
             "id": "resp-1",
             "request_id": request_id,
-            "blocks": [{"type": "text", "content": "КСО — это ..."}],
+            "blocks": [{"type": "text", "text": "КСО — это ..."}],
             "finish_reason": "stop",
             "token_usage": None,
             "model": "imitated",
@@ -194,7 +194,7 @@ async def test_forward_tool_call_streams_reasoning_and_final(monkeypatch):
     # Финальные блоки агента должны быть переданы в _save_assistant_message
     orch._save_assistant_message.assert_called_once()
     saved_blocks = orch._save_assistant_message.call_args.kwargs["content_blocks"]
-    assert saved_blocks == [{"type": "text", "content": "КСО — это ..."}]
+    assert saved_blocks == [{"type": "text", "text": "КСО — это ..."}]
 
 
 async def test_forward_emits_separate_block_per_reasoning_chunk(monkeypatch):
@@ -251,7 +251,7 @@ async def test_forward_emits_separate_block_per_reasoning_chunk(monkeypatch):
         yield AgentBridgeUpdate(response={
             "id": "resp-1",
             "request_id": request_id,
-            "blocks": [{"type": "text", "content": "Финал"}],
+            "blocks": [{"type": "text", "text": "Финал"}],
             "finish_reason": "stop",
             "token_usage": None,
             "model": "imitated",
@@ -329,3 +329,217 @@ async def test_forward_emits_separate_block_per_reasoning_chunk(monkeypatch):
         and '"index": 3' in e
         for e in events
     )
+
+
+def _setup_forward_with_response_blocks(monkeypatch, orch, response_blocks):
+    """Хелпер: настраивает мок LLM/моста, возвращающий заданные финальные блоки."""
+    fake_client = MagicMock()
+    fake_client.chat.completions.create = AsyncMock(
+        return_value=_async_iter(_stream_chunks(
+            tool_call_id="tc_1",
+            args_json='{"question":"Q"}',
+        )),
+    )
+    monkeypatch.setattr(orch, "_get_openai_client", lambda: fake_client)
+
+    from app.domains.chat.services.agent_bridge import (
+        AgentBridgeService,
+        AgentBridgeUpdate,
+    )
+
+    async def fake_wait_for_completion(
+        self, request_id, *, poll_interval_sec,
+        initial_response_timeout_sec, event_timeout_sec, max_total_duration_sec,
+    ):
+        yield AgentBridgeUpdate(response={
+            "id": "resp-1",
+            "request_id": request_id,
+            "blocks": response_blocks,
+            "finish_reason": "stop",
+            "token_usage": None,
+            "model": "imitated",
+            "created_at": None,
+        })
+
+    monkeypatch.setattr(
+        AgentBridgeService,
+        "send",
+        AsyncMock(return_value="aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee"),
+    )
+    monkeypatch.setattr(
+        AgentBridgeService,
+        "wait_for_completion",
+        fake_wait_for_completion,
+    )
+
+    orch._save_assistant_message = AsyncMock()
+
+
+async def test_buttons_block_emits_sse_buttons_not_block_start(monkeypatch):
+    """Финальный buttons-блок эмитится как event:buttons, без block_start/end."""
+    settings = ChatDomainSettings(
+        api_base="http://test-llm:8000/v1",
+        api_key="test-key",
+        streaming_enabled=True,
+    )
+    settings.agent_bridge.poll_interval_sec = 0.01
+    settings.agent_bridge.initial_response_timeout_sec = 5
+    settings.agent_bridge.event_timeout_sec = 5
+    settings.agent_bridge.max_total_duration_sec = 5
+
+    msg_service = AsyncMock()
+    msg_service.get_history = AsyncMock(return_value=[])
+    conv_service = AsyncMock()
+
+    orch = Orchestrator(
+        msg_service=msg_service,
+        conv_service=conv_service,
+        settings=settings,
+    )
+
+    buttons_payload = [
+        {"action_id": "open_url", "label": "Test", "params": {"url": "/test"}},
+    ]
+    _setup_forward_with_response_blocks(
+        monkeypatch, orch,
+        response_blocks=[{"type": "buttons", "buttons": buttons_payload}],
+    )
+
+    fake_conn = AsyncMock()
+    ctx = AsyncMock()
+    ctx.__aenter__ = AsyncMock(return_value=fake_conn)
+    ctx.__aexit__ = AsyncMock(return_value=False)
+    fake_adapter = MagicMock(get_table_name=lambda n: n)
+
+    events: list[str] = []
+    with (
+        patch("app.db.connection.get_db", return_value=ctx),
+        patch("app.db.repositories.base.get_adapter", return_value=fake_adapter),
+    ):
+        async for ev in orch.run_stream(
+            conversation_id="conv-1",
+            user_message="Q",
+            domains=["chat"],
+            file_blocks=[],
+            message_id="msg-1",
+            user_id="u",
+            knowledge_bases=["acts_default"],
+        ):
+            events.append(ev)
+
+    # Ровно одно event: buttons с нужным payload
+    buttons_events = [
+        e for e in events
+        if isinstance(e, str) and e.startswith("event: buttons")
+    ]
+    assert len(buttons_events) == 1
+    assert "open_url" in buttons_events[0]
+    assert "/test" in buttons_events[0]
+
+    # И ноль block_start/block_end с типом buttons
+    assert not any(
+        isinstance(e, str)
+        and "block_start" in e and '"type": "buttons"' in e
+        for e in events
+    )
+    assert not any(
+        isinstance(e, str)
+        and "block_end" in e and '"index": 0' in e
+        for e in events
+    )
+
+
+async def test_text_and_buttons_in_same_response_each_renders_correctly(monkeypatch):
+    """Text получает block_start/delta/end с index=0; buttons — отдельный канал."""
+    settings = ChatDomainSettings(
+        api_base="http://test-llm:8000/v1",
+        api_key="test-key",
+        streaming_enabled=True,
+    )
+    settings.agent_bridge.poll_interval_sec = 0.01
+    settings.agent_bridge.initial_response_timeout_sec = 5
+    settings.agent_bridge.event_timeout_sec = 5
+    settings.agent_bridge.max_total_duration_sec = 5
+
+    msg_service = AsyncMock()
+    msg_service.get_history = AsyncMock(return_value=[])
+    conv_service = AsyncMock()
+
+    orch = Orchestrator(
+        msg_service=msg_service,
+        conv_service=conv_service,
+        settings=settings,
+    )
+
+    buttons_payload = [
+        {"action_id": "open_url", "label": "Открыть", "params": {"url": "/x"}},
+    ]
+    _setup_forward_with_response_blocks(
+        monkeypatch, orch,
+        response_blocks=[
+            {"type": "text", "text": "Готово."},
+            {"type": "buttons", "buttons": buttons_payload},
+        ],
+    )
+
+    fake_conn = AsyncMock()
+    ctx = AsyncMock()
+    ctx.__aenter__ = AsyncMock(return_value=fake_conn)
+    ctx.__aexit__ = AsyncMock(return_value=False)
+    fake_adapter = MagicMock(get_table_name=lambda n: n)
+
+    events: list[str] = []
+    with (
+        patch("app.db.connection.get_db", return_value=ctx),
+        patch("app.db.repositories.base.get_adapter", return_value=fake_adapter),
+    ):
+        async for ev in orch.run_stream(
+            conversation_id="conv-1",
+            user_message="Q",
+            domains=["chat"],
+            file_blocks=[],
+            message_id="msg-1",
+            user_id="u",
+            knowledge_bases=["acts_default"],
+        ):
+            events.append(ev)
+
+    # Text-блок: block_start(index=0,type=text) + block_delta + block_end(index=0)
+    assert any(
+        isinstance(e, str)
+        and "block_start" in e
+        and '"type": "text"' in e and '"index": 0' in e
+        for e in events
+    )
+    assert any(
+        isinstance(e, str)
+        and "block_delta" in e
+        and '"index": 0' in e and "Готово" in e
+        for e in events
+    )
+    assert any(
+        isinstance(e, str)
+        and "block_end" in e and '"index": 0' in e
+        for e in events
+    )
+
+    # buttons — ровно одно event:buttons; никаких block_start/end с buttons
+    buttons_events = [
+        e for e in events
+        if isinstance(e, str) and e.startswith("event: buttons")
+    ]
+    assert len(buttons_events) == 1
+    assert "Открыть" in buttons_events[0]
+
+    assert not any(
+        isinstance(e, str)
+        and "block_start" in e and '"type": "buttons"' in e
+        for e in events
+    )
+
+    # Нет коллизии индексов: только один block_start с index=0 (text)
+    block_starts_idx0 = [
+        e for e in events
+        if isinstance(e, str) and "block_start" in e and '"index": 0' in e
+    ]
+    assert len(block_starts_idx0) == 1
