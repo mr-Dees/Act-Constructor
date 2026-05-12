@@ -182,7 +182,8 @@ class Orchestrator:
             "\n\n## Открытие страниц\n"
             "- Когда пользователь спрашивает что ты умеешь, какие функции "
             "доступны, что есть в системе — вызови инструмент "
-            "chat.list_pages.\n"
+            "chat.list_pages. Не пиши свой текст перед или после — "
+            "инструмент сам выдаст описание и кнопки.\n"
             "- Когда пользователь просит открыть конкретную страницу из "
             "списка — вызови соответствующий инструмент "
             "`<домен>.open_<...>` (например admin.open_admin_panel).\n"
@@ -458,12 +459,18 @@ class Orchestrator:
                         for raw_block in upd.response["blocks"]:
                             btype = raw_block.get("type", "text")
                             if btype == "buttons":
-                                # buttons — отдельный SSE-канал, без block_index
+                                # buttons — отдельный SSE-канал, без block_index;
+                                # серверные action_id (имена ChatTool) переводим
+                                # в клиентские действия через button_translator.
+                                translated = await self._translate_buttons(
+                                    raw_block.get("buttons", []),
+                                )
+                                # Мутируем raw_block в response, чтобы в БД
+                                # сохранилась уже транслированная версия.
+                                raw_block["buttons"] = translated
                                 yield (
                                     "sse",
-                                    sse_buttons(
-                                        buttons=raw_block.get("buttons", []),
-                                    ),
+                                    sse_buttons(buttons=translated),
                                 )
                                 continue
                             if btype == "client_action":
@@ -553,6 +560,67 @@ class Orchestrator:
         if not isinstance(obj.get("buttons"), list):
             return None
         return obj
+
+    def _parse_blocks_list_result(self, raw: str) -> list[dict] | None:
+        """Если result tool'а — JSON-список блоков, возвращает список dict.
+
+        Иначе None.
+        """
+        try:
+            obj = json.loads(raw)
+        except (ValueError, TypeError):
+            return None
+        if not isinstance(obj, list):
+            return None
+        if not all(isinstance(b, dict) and "type" in b for b in obj):
+            return None
+        return obj
+
+    async def _translate_buttons(self, buttons: list[dict]) -> list[dict]:
+        """Транслирует серверные action_id (имена ChatTool) в клиентские действия.
+
+        Для каждой кнопки:
+          - Если action_id — имя зарегистрированного ChatTool с button_translator,
+            вызывает транслятор и заменяет action_id+params результатом.
+          - Иначе пропускает кнопку без изменений. Если action_id похож на
+            имя tool'а (содержит точку), но транслятор не зарегистрирован —
+            пишет WARNING (это конфигурационный пробел).
+        """
+        result: list[dict] = []
+        for btn in buttons:
+            if not isinstance(btn, dict):
+                result.append(btn)
+                continue
+            action_id = btn.get("action_id")
+            tool = get_tool(action_id) if action_id else None
+            if tool is not None:
+                translator = getattr(tool, "button_translator", None)
+                if translator is None:
+                    logger.warning(
+                        "Кнопка с action_id='%s' указывает на ChatTool, но "
+                        "button_translator не зарегистрирован — кнопка не "
+                        "будет обработана клиентом",
+                        action_id,
+                    )
+                    result.append(btn)
+                    continue
+                try:
+                    translated = await translator(btn.get("params") or {})
+                except Exception as exc:
+                    logger.exception(
+                        "button_translator '%s' завершился ошибкой: %s",
+                        action_id, exc,
+                    )
+                    translated = None
+                if translated:
+                    result.append({
+                        "action_id": translated["action"],
+                        "label": btn.get("label", ""),
+                        "params": translated.get("params", {}),
+                    })
+                    continue
+            result.append(btn)
+        return result
 
     async def _execute_tool_call(
         self, tool_name: str, arguments: dict,
@@ -978,8 +1046,12 @@ class Orchestrator:
                             )
 
                             client_action = self._parse_client_action_result(result)
-                            buttons_block = (
+                            blocks_list = (
                                 None if client_action is not None
+                                else self._parse_blocks_list_result(result)
+                            )
+                            buttons_block = (
+                                None if (client_action is not None or blocks_list is not None)
                                 else self._parse_buttons_result(result)
                             )
                             if client_action is not None:
@@ -994,12 +1066,56 @@ class Orchestrator:
                                 tool_result_for_llm = (
                                     f"<выполнено: {tool_name}>"
                                 )
+                            elif blocks_list is not None:
+                                for raw_block in blocks_list:
+                                    btype = raw_block.get("type", "text")
+                                    if btype == "buttons":
+                                        translated = await self._translate_buttons(
+                                            raw_block.get("buttons", []),
+                                        )
+                                        yield sse_buttons(buttons=translated)
+                                        emitted_blocks.append(
+                                            {"type": "buttons", "buttons": translated},
+                                        )
+                                        continue
+                                    if btype == "client_action":
+                                        yield sse_client_action(block=raw_block)
+                                        emitted_blocks.append(raw_block)
+                                        continue
+                                    yield sse_block_start(
+                                        block_index=block_index, block_type=btype,
+                                    )
+                                    if btype in ("text", "code"):
+                                        content_key = (
+                                            "code" if btype == "code" else "text"
+                                        )
+                                        delta = raw_block.get(content_key, "")
+                                        yield sse_block_delta(
+                                            block_index=block_index, delta=delta,
+                                        )
+                                    yield sse_block_end(block_index=block_index)
+                                    # Сохраняем блок для истории в едином формате
+                                    # (text → content)
+                                    if btype == "text":
+                                        emitted_blocks.append({
+                                            "type": "text",
+                                            "content": raw_block.get("text", ""),
+                                        })
+                                    else:
+                                        emitted_blocks.append(raw_block)
+                                    block_index += 1
+                                tool_result_for_llm = (
+                                    f"<выполнено: {tool_name}>"
+                                )
                             elif buttons_block is not None:
                                 # Группа кнопок — отдельный SSE-канал
-                                yield sse_buttons(
-                                    buttons=buttons_block.get("buttons", []),
+                                translated = await self._translate_buttons(
+                                    buttons_block.get("buttons", []),
                                 )
-                                emitted_blocks.append(buttons_block)
+                                yield sse_buttons(buttons=translated)
+                                emitted_blocks.append(
+                                    {"type": "buttons", "buttons": translated},
+                                )
                                 tool_result_for_llm = (
                                     f"<выполнено: {tool_name}>"
                                 )
@@ -1117,8 +1233,12 @@ class Orchestrator:
                         )
 
                         client_action = self._parse_client_action_result(result)
-                        buttons_block = (
+                        blocks_list = (
                             None if client_action is not None
+                            else self._parse_blocks_list_result(result)
+                        )
+                        buttons_block = (
+                            None if (client_action is not None or blocks_list is not None)
                             else self._parse_buttons_result(result)
                         )
                         if client_action is not None:
@@ -1141,11 +1261,53 @@ class Orchestrator:
                             tool_result_for_llm = (
                                 f"<выполнено: {tool_name}>"
                             )
-                        elif buttons_block is not None:
-                            yield sse_buttons(
-                                buttons=buttons_block.get("buttons", []),
+                        elif blocks_list is not None:
+                            for raw_block in blocks_list:
+                                btype = raw_block.get("type", "text")
+                                if btype == "buttons":
+                                    translated = await self._translate_buttons(
+                                        raw_block.get("buttons", []),
+                                    )
+                                    yield sse_buttons(buttons=translated)
+                                    emitted_blocks.append(
+                                        {"type": "buttons", "buttons": translated},
+                                    )
+                                    continue
+                                if btype == "client_action":
+                                    yield sse_client_action(block=raw_block)
+                                    emitted_blocks.append(raw_block)
+                                    continue
+                                yield sse_block_start(
+                                    block_index=block_index, block_type=btype,
+                                )
+                                if btype in ("text", "code"):
+                                    content_key = (
+                                        "code" if btype == "code" else "text"
+                                    )
+                                    delta = raw_block.get(content_key, "")
+                                    yield sse_block_delta(
+                                        block_index=block_index, delta=delta,
+                                    )
+                                yield sse_block_end(block_index=block_index)
+                                if btype == "text":
+                                    emitted_blocks.append({
+                                        "type": "text",
+                                        "content": raw_block.get("text", ""),
+                                    })
+                                else:
+                                    emitted_blocks.append(raw_block)
+                                block_index += 1
+                            tool_result_for_llm = (
+                                f"<выполнено: {tool_name}>"
                             )
-                            emitted_blocks.append(buttons_block)
+                        elif buttons_block is not None:
+                            translated = await self._translate_buttons(
+                                buttons_block.get("buttons", []),
+                            )
+                            yield sse_buttons(buttons=translated)
+                            emitted_blocks.append(
+                                {"type": "buttons", "buttons": translated},
+                            )
                             tool_result_for_llm = (
                                 f"<выполнено: {tool_name}>"
                             )

@@ -26,6 +26,51 @@ _kb_warned = [False]  # one-time warning suppression
 router = APIRouter()
 
 
+async def _translate_buttons(buttons: list[dict]) -> list[dict]:
+    """Транслирует серверные action_id (имена ChatTool) в клиентские действия.
+
+    Дублирует логику Orchestrator._translate_buttons для resume-стрима, где
+    оркестратор не задействован (мы стримим напрямую из bridge).
+    """
+    from app.core.chat.tools import get_tool
+
+    result: list[dict] = []
+    for btn in buttons:
+        if not isinstance(btn, dict):
+            result.append(btn)
+            continue
+        action_id = btn.get("action_id")
+        tool = get_tool(action_id) if action_id else None
+        if tool is not None:
+            translator = getattr(tool, "button_translator", None)
+            if translator is None:
+                logger.warning(
+                    "Кнопка с action_id='%s' указывает на ChatTool, но "
+                    "button_translator не зарегистрирован — кнопка не "
+                    "будет обработана клиентом",
+                    action_id,
+                )
+                result.append(btn)
+                continue
+            try:
+                translated = await translator(btn.get("params") or {})
+            except Exception as exc:
+                logger.exception(
+                    "button_translator '%s' завершился ошибкой: %s",
+                    action_id, exc,
+                )
+                translated = None
+            if translated:
+                result.append({
+                    "action_id": translated["action"],
+                    "label": btn.get("label", ""),
+                    "params": translated.get("params", {}),
+                })
+                continue
+        result.append(btn)
+    return result
+
+
 @router.post(
     "/conversations/{conversation_id}/messages",
     summary="Отправить сообщение",
@@ -280,9 +325,10 @@ async def resume_agent_request_stream(
                 for raw_block in existing_response["blocks"]:
                     btype = raw_block.get("type", "text")
                     if btype == "buttons":
-                        yield sse_buttons(
-                            buttons=raw_block.get("buttons", []),
+                        translated = await _translate_buttons(
+                            raw_block.get("buttons", []),
                         )
+                        yield sse_buttons(buttons=translated)
                         continue
                     if btype == "client_action":
                         yield sse_client_action(block=raw_block)
@@ -347,9 +393,10 @@ async def resume_agent_request_stream(
                         for raw_block in upd.response["blocks"]:
                             btype = raw_block.get("type", "text")
                             if btype == "buttons":
-                                yield sse_buttons(
-                                    buttons=raw_block.get("buttons", []),
+                                translated = await _translate_buttons(
+                                    raw_block.get("buttons", []),
                                 )
+                                yield sse_buttons(buttons=translated)
                                 continue
                             if btype == "client_action":
                                 yield sse_client_action(block=raw_block)

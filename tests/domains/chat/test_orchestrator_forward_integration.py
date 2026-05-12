@@ -543,3 +543,159 @@ async def test_text_and_buttons_in_same_response_each_renders_correctly(monkeypa
         if isinstance(e, str) and "block_start" in e and '"index": 0' in e
     ]
     assert len(block_starts_idx0) == 1
+
+
+# ── server-side button translation (Fix B) ──
+
+
+async def _run_forward_and_collect_events(monkeypatch, response_blocks):
+    """Гоняет run_stream через forward с заданными response_blocks; возвращает events."""
+    settings = ChatDomainSettings(
+        api_base="http://test-llm:8000/v1",
+        api_key="test-key",
+        streaming_enabled=True,
+    )
+    settings.agent_bridge.poll_interval_sec = 0.01
+    settings.agent_bridge.initial_response_timeout_sec = 5
+    settings.agent_bridge.event_timeout_sec = 5
+    settings.agent_bridge.max_total_duration_sec = 5
+
+    msg_service = AsyncMock()
+    msg_service.get_history = AsyncMock(return_value=[])
+    conv_service = AsyncMock()
+
+    orch = Orchestrator(
+        msg_service=msg_service,
+        conv_service=conv_service,
+        settings=settings,
+    )
+    _setup_forward_with_response_blocks(monkeypatch, orch, response_blocks)
+
+    fake_conn = AsyncMock()
+    ctx = AsyncMock()
+    ctx.__aenter__ = AsyncMock(return_value=fake_conn)
+    ctx.__aexit__ = AsyncMock(return_value=False)
+    fake_adapter = MagicMock(get_table_name=lambda n: n)
+
+    events: list[str] = []
+    with (
+        patch("app.db.connection.get_db", return_value=ctx),
+        patch("app.db.repositories.base.get_adapter", return_value=fake_adapter),
+    ):
+        async for ev in orch.run_stream(
+            conversation_id="conv-1",
+            user_message="Q",
+            domains=["chat"],
+            file_blocks=[],
+            message_id="msg-1",
+            user_id="u",
+            knowledge_bases=["acts_default"],
+        ):
+            events.append(ev)
+    return events, orch
+
+
+async def test_orchestrator_translates_buttons_with_backend_action_ids(
+    monkeypatch,
+):
+    """Кнопки с action_id='acts.open_act_page' транслируются в open_url + URL."""
+    from app.core.chat.tools import ChatTool, register_tools
+
+    async def fake_translator(params):
+        km = params.get("km_number")
+        return {
+            "action": "open_url",
+            "params": {"url": f"/constructor?act_id=for-{km}"},
+        }
+
+    register_tools([ChatTool(
+        name="acts.open_act_page",
+        domain="acts",
+        description="test",
+        button_translator=fake_translator,
+    )])
+
+    backend_buttons = [
+        {"action_id": "acts.open_act_page", "label": "Открыть КМ-11-11111",
+         "params": {"km_number": "КМ-11-11111"}},
+        {"action_id": "acts.open_act_page", "label": "Открыть КМ-22-22222",
+         "params": {"km_number": "КМ-22-22222"}},
+    ]
+    events, _ = await _run_forward_and_collect_events(
+        monkeypatch,
+        response_blocks=[{"type": "buttons", "buttons": backend_buttons}],
+    )
+
+    buttons_events = [
+        e for e in events
+        if isinstance(e, str) and e.startswith("event: buttons")
+    ]
+    assert len(buttons_events) == 1
+    blob = buttons_events[0]
+    # action_id'ы переписаны на open_url
+    assert "open_url" in blob
+    assert "acts.open_act_page" not in blob
+    # URL'ы из транслятора присутствуют
+    assert "for-КМ-11-11111" in blob
+    assert "for-КМ-22-22222" in blob
+    # Лейблы сохранены
+    assert "Открыть КМ-11-11111" in blob
+    assert "Открыть КМ-22-22222" in blob
+
+
+async def test_orchestrator_passes_through_buttons_with_client_action_ids(
+    monkeypatch,
+):
+    """Кнопки с action_id='open_url' (клиентский action) проходят без изменений."""
+    buttons = [
+        {"action_id": "open_url", "label": "Открыть",
+         "params": {"url": "/some-page"}},
+    ]
+    events, _ = await _run_forward_and_collect_events(
+        monkeypatch,
+        response_blocks=[{"type": "buttons", "buttons": buttons}],
+    )
+    buttons_events = [
+        e for e in events
+        if isinstance(e, str) and e.startswith("event: buttons")
+    ]
+    assert len(buttons_events) == 1
+    assert "open_url" in buttons_events[0]
+    assert "/some-page" in buttons_events[0]
+    assert "Открыть" in buttons_events[0]
+
+
+async def test_orchestrator_logs_warning_for_unknown_button_action_id(
+    monkeypatch, caplog,
+):
+    """Кнопки с action_id вида '<tool>' без транслятора пропускаются + WARNING."""
+    from app.core.chat.tools import ChatTool, register_tools
+
+    # Регистрируем tool БЕЗ button_translator
+    register_tools([ChatTool(
+        name="unknown.foo",
+        domain="unknown",
+        description="test",
+    )])
+
+    buttons = [
+        {"action_id": "unknown.foo", "label": "X", "params": {}},
+    ]
+    import logging as _logging
+    caplog.set_level(_logging.WARNING)
+    events, _ = await _run_forward_and_collect_events(
+        monkeypatch,
+        response_blocks=[{"type": "buttons", "buttons": buttons}],
+    )
+    buttons_events = [
+        e for e in events
+        if isinstance(e, str) and e.startswith("event: buttons")
+    ]
+    assert len(buttons_events) == 1
+    # Кнопка проходит без изменений
+    assert "unknown.foo" in buttons_events[0]
+    # WARNING был залогирован
+    assert any(
+        "unknown.foo" in r.getMessage() and "button_translator" in r.getMessage()
+        for r in caplog.records
+    )

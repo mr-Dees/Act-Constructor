@@ -165,8 +165,61 @@ async def test_ck_client_exp_open_page_emits_client_action():
 # ── chat.list_pages ──
 
 
-async def test_list_pages_emits_buttons_with_all_nav_items():
-    """Handler chat.list_pages возвращает buttons-блок для всех NavItem доменов."""
+async def test_list_pages_emits_text_block_with_intro_and_descriptions():
+    """Первый блок — text с описанием ассистента и списком разделов."""
+    from app.core import domain_registry as dr
+    from app.core.domain import DomainDescriptor, NavItem
+    from app.domains.chat.integrations.list_pages_handler import (
+        list_pages_handler,
+    )
+
+    dr.reset_registry()
+    try:
+        dr._domains.append(DomainDescriptor(
+            name="d1",
+            nav_items=[NavItem(
+                label="Стр A", url="/a", icon_svg="<svg/>",
+                description="Описание A",
+            )],
+        ))
+        dr._domains.append(DomainDescriptor(
+            name="d2",
+            nav_items=[NavItem(
+                label="Стр B", url="/b", icon_svg="<svg/>",
+                description="Описание B",
+            )],
+        ))
+        # NavItem без description — не должен попасть в текстовый список
+        dr._domains.append(DomainDescriptor(
+            name="d3",
+            nav_items=[NavItem(label="Стр C", url="/c", icon_svg="<svg/>")],
+        ))
+
+        raw = await list_pages_handler()
+        blocks = json.loads(raw)
+
+        assert isinstance(blocks, list)
+        assert len(blocks) == 2
+        text_block = blocks[0]
+        assert text_block["type"] == "text"
+        text = text_block["text"]
+        # Intro: упоминание ассистента и базы знаний
+        assert "ассистент" in text.lower() or "audit workstation" in text.lower()
+        # Список разделов: label + description присутствуют
+        assert "Стр A" in text
+        assert "Описание A" in text
+        assert "Стр B" in text
+        assert "Описание B" in text
+        # Без description — в текст не попадает
+        assert "Стр C" not in text
+        # Спец-возможности
+        assert "КМ" in text  # упоминание КМ-номера
+    finally:
+        dr.reset_registry()
+
+
+async def test_list_pages_emits_buttons_after_text():
+    """Второй блок — buttons со всеми NavItem (включая те, что без description)."""
     from app.core import domain_registry as dr
     from app.core.domain import DomainDescriptor, NavItem
     from app.domains.chat.integrations.list_pages_handler import (
@@ -185,15 +238,72 @@ async def test_list_pages_emits_buttons_with_all_nav_items():
         ))
 
         raw = await list_pages_handler()
-        block = json.loads(raw)
+        blocks = json.loads(raw)
 
-        assert block["type"] == "buttons"
-        assert isinstance(block["buttons"], list)
-        assert len(block["buttons"]) == 2
-        for btn in block["buttons"]:
+        assert blocks[0]["type"] == "text"
+        buttons_block = blocks[1]
+        assert buttons_block["type"] == "buttons"
+        assert isinstance(buttons_block["buttons"], list)
+        assert len(buttons_block["buttons"]) == 2
+        for btn in buttons_block["buttons"]:
             assert btn["action_id"] == "open_url"
             assert "url" in btn["params"]
-        urls = {b["params"]["url"] for b in block["buttons"]}
+        urls = {b["params"]["url"] for b in buttons_block["buttons"]}
         assert urls == {"/a", "/b"}
     finally:
         dr.reset_registry()
+
+
+# ── button translators ──
+
+
+async def test_button_translator_acts_open_act_page_resolves_valid_km(mock_conn):
+    from app.domains.acts.integrations.action_handlers import (
+        open_act_page_button_translator,
+    )
+    mock_conn.fetch.return_value = [
+        {"id": 42, "km_number": "КМ-12-32141",
+         "service_note": "100/2024", "part_number": 1},
+    ]
+    with _patch_get_db(mock_conn):
+        translated = await open_act_page_button_translator(
+            {"km_number": "КМ-12-32141"},
+        )
+    assert translated == {
+        "action": "open_url",
+        "params": {"url": "/constructor?act_id=42"},
+    }
+
+
+async def test_button_translator_acts_open_act_page_handles_missing(mock_conn):
+    from app.domains.acts.integrations.action_handlers import (
+        open_act_page_button_translator,
+    )
+    mock_conn.fetch.return_value = []
+    with _patch_get_db(mock_conn):
+        translated = await open_act_page_button_translator(
+            {"km_number": "КМ-99-99999"},
+        )
+    assert translated["action"] == "notify"
+    assert translated["params"]["level"] == "error"
+    assert "КМ-99-99999" in translated["params"]["message"]
+    assert "не найден" in translated["params"]["message"].lower()
+
+
+async def test_button_translator_acts_open_act_page_handles_multiple_matches(mock_conn):
+    """Если КМ найден в нескольких частях — translator считает это «не найдено»."""
+    from app.domains.acts.integrations.action_handlers import (
+        open_act_page_button_translator,
+    )
+    mock_conn.fetch.return_value = [
+        {"id": 42, "km_number": "КМ-12-32141",
+         "service_note": "100/2024", "part_number": 1},
+        {"id": 43, "km_number": "КМ-12-32141",
+         "service_note": "105/2024", "part_number": 2},
+    ]
+    with _patch_get_db(mock_conn):
+        translated = await open_act_page_button_translator(
+            {"km_number": "КМ-12-32141"},
+        )
+    assert translated["action"] == "notify"
+    assert translated["params"]["level"] == "error"
