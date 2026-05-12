@@ -249,9 +249,14 @@ async def resume_agent_request_stream(
                         block_index=block_index, block_type=btype,
                     )
                     if btype in ("text", "code"):
+                        content_key = "code" if btype == "code" else "text"
+                        delta = (
+                            raw_block.get(content_key)
+                            or raw_block.get("content", "")
+                        )
                         yield sse_block_delta(
                             block_index=block_index,
-                            delta=raw_block.get("content", ""),
+                            delta=delta,
                         )
                     yield sse_block_end(block_index=block_index)
                     block_index += 1
@@ -306,9 +311,14 @@ async def resume_agent_request_stream(
                                 block_index=block_index, block_type=btype,
                             )
                             if btype in ("text", "code"):
+                                content_key = "code" if btype == "code" else "text"
+                                delta = (
+                                    raw_block.get(content_key)
+                                    or raw_block.get("content", "")
+                                )
                                 yield sse_block_delta(
                                     block_index=block_index,
-                                    delta=raw_block.get("content", ""),
+                                    delta=delta,
                                 )
                             yield sse_block_end(block_index=block_index)
                             block_index += 1

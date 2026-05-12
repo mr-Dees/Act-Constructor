@@ -376,11 +376,17 @@ class Orchestrator:
                                 ),
                             )
                             if btype in ("text", "code"):
+                                # Агент использует ключ text/code, локальная схема — content
+                                content_key = "code" if btype == "code" else "text"
+                                delta = (
+                                    raw_block.get(content_key)
+                                    or raw_block.get("content", "")
+                                )
                                 yield (
                                     "sse",
                                     sse_block_delta(
                                         block_index=block_index,
-                                        delta=raw_block.get("content", ""),
+                                        delta=delta,
                                     ),
                                 )
                             # Остальные типы (file, image, buttons, client_action)
