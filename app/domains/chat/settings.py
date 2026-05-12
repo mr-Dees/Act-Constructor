@@ -18,7 +18,9 @@ class AgentBridgeSettings(BaseModel):
     """Настройки моста к внешнему ИИ-агенту через таблицы БД."""
 
     poll_interval_sec: float = Field(default=1.0, gt=0.0)
-    timeout_sec: int = Field(default=120, gt=0)
+    initial_response_timeout_sec: int = Field(default=300, gt=0)
+    event_timeout_sec: int = Field(default=120, gt=0)
+    max_total_duration_sec: int = Field(default=1800, gt=0)
     history_limit: int = Field(default=30, gt=0)
 
 

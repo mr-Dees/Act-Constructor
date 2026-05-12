@@ -272,7 +272,9 @@ async def resume_agent_request_stream(
                 async for upd in bridge.wait_for_completion(
                     request_id,
                     poll_interval_sec=settings.agent_bridge.poll_interval_sec,
-                    timeout_sec=settings.agent_bridge.timeout_sec,
+                    initial_response_timeout_sec=settings.agent_bridge.initial_response_timeout_sec,
+                    event_timeout_sec=settings.agent_bridge.event_timeout_sec,
+                    max_total_duration_sec=settings.agent_bridge.max_total_duration_sec,
                 ):
                     if upd.event:
                         ev = upd.event

@@ -92,20 +92,74 @@ class AgentBridgeService:
         request_id: str,
         *,
         poll_interval_sec: float,
-        timeout_sec: float,
+        initial_response_timeout_sec: int,
+        event_timeout_sec: int,
+        max_total_duration_sec: int,
     ) -> AsyncIterator[AgentBridgeUpdate]:
         """Async-генератор: yield events и финальный response по мере появления.
 
-        Опрашивает БД с интервалом poll_interval_sec. По таймауту:
+        Опрашивает БД с интервалом poll_interval_sec. По срабатыванию любого
+        из трёх гейтов (initial_response / event heartbeat / max total) —
         UPDATE agent_requests SET status='timeout' + raise AgentBridgeTimeout.
         """
-        deadline = asyncio.get_event_loop().time() + timeout_sec
+        loop = asyncio.get_event_loop()
+        started_at = loop.time()
+        last_event_at: float | None = None
         last_event_id: int | None = None
 
         while True:
+            now = loop.time()
+            elapsed = now - started_at
+
+            # Гейт 1: абсолютный максимум на запрос (всегда активен)
+            if elapsed > max_total_duration_sec:
+                await self._requests.update_status(
+                    request_id,
+                    status="timeout",
+                    error_message=(
+                        f"превышена максимальная длительность запроса "
+                        f"({max_total_duration_sec}с)"
+                    ),
+                )
+                raise AgentBridgeTimeout(
+                    f"max total duration {max_total_duration_sec}s exceeded"
+                )
+
+            # Гейт 2: первый ответ от агента (активен пока не пришло ни одного события)
+            if last_event_at is None and elapsed > initial_response_timeout_sec:
+                await self._requests.update_status(
+                    request_id,
+                    status="timeout",
+                    error_message=(
+                        f"агент не начал отвечать за "
+                        f"{initial_response_timeout_sec}с"
+                    ),
+                )
+                raise AgentBridgeTimeout(
+                    f"no initial response within {initial_response_timeout_sec}s"
+                )
+
+            # Гейт 3: heartbeat между событиями (активен после первого события)
+            if (
+                last_event_at is not None
+                and now - last_event_at > event_timeout_sec
+            ):
+                await self._requests.update_status(
+                    request_id,
+                    status="timeout",
+                    error_message=(
+                        f"нет событий от агента {event_timeout_sec}с "
+                        f"(heartbeat потерян)"
+                    ),
+                )
+                raise AgentBridgeTimeout(
+                    f"heartbeat lost — no event for {event_timeout_sec}s"
+                )
+
             new_events = await self.poll_events(request_id, since_id=last_event_id)
             for ev in new_events:
                 last_event_id = ev["id"]
+                last_event_at = loop.time()
                 yield AgentBridgeUpdate(event=ev)
 
             response = await self.poll_response(request_id)
@@ -113,15 +167,5 @@ class AgentBridgeService:
                 yield AgentBridgeUpdate(response=response)
                 await self._requests.update_status(request_id, status="done")
                 return
-
-            if asyncio.get_event_loop().time() > deadline:
-                await self._requests.update_status(
-                    request_id,
-                    status="timeout",
-                    error_message="agent did not respond within timeout",
-                )
-                raise AgentBridgeTimeout(
-                    f"agent did not respond within {timeout_sec}s"
-                )
 
             await asyncio.sleep(poll_interval_sec)

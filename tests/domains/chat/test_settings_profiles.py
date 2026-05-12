@@ -63,10 +63,14 @@ def test_nested_agent_bridge_overrides(monkeypatch):
     s = _load(monkeypatch,
               CHAT__API_BASE="http://x", CHAT__API_KEY="x", CHAT__MODEL="m",
               CHAT__AGENT_BRIDGE__POLL_INTERVAL_SEC="0.25",
-              CHAT__AGENT_BRIDGE__TIMEOUT_SEC="60",
+              CHAT__AGENT_BRIDGE__INITIAL_RESPONSE_TIMEOUT_SEC="60",
+              CHAT__AGENT_BRIDGE__EVENT_TIMEOUT_SEC="30",
+              CHAT__AGENT_BRIDGE__MAX_TOTAL_DURATION_SEC="900",
               CHAT__AGENT_BRIDGE__HISTORY_LIMIT="10")
     assert s.agent_bridge.poll_interval_sec == 0.25
-    assert s.agent_bridge.timeout_sec == 60
+    assert s.agent_bridge.initial_response_timeout_sec == 60
+    assert s.agent_bridge.event_timeout_sec == 30
+    assert s.agent_bridge.max_total_duration_sec == 900
     assert s.agent_bridge.history_limit == 10
 
 

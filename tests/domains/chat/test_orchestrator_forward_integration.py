@@ -78,7 +78,9 @@ async def test_forward_tool_call_streams_reasoning_and_final(monkeypatch):
         streaming_enabled=True,
     )
     settings.agent_bridge.poll_interval_sec = 0.01
-    settings.agent_bridge.timeout_sec = 5
+    settings.agent_bridge.initial_response_timeout_sec = 5
+    settings.agent_bridge.event_timeout_sec = 5
+    settings.agent_bridge.max_total_duration_sec = 5
 
     msg_service = AsyncMock()
     msg_service.get_history = AsyncMock(return_value=[])
@@ -108,7 +110,8 @@ async def test_forward_tool_call_streams_reasoning_and_final(monkeypatch):
     )
 
     async def fake_wait_for_completion(
-        self, request_id, *, poll_interval_sec, timeout_sec,
+        self, request_id, *, poll_interval_sec,
+        initial_response_timeout_sec, event_timeout_sec, max_total_duration_sec,
     ):
         yield AgentBridgeUpdate(event={
             "id": 1,
