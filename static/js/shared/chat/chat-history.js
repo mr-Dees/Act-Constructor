@@ -71,65 +71,63 @@ const ChatHistory = {
 
             this._conversations = await response.json();
 
-            // Автоматически выбираем самую свежую беседу
-            if (this._conversations.length > 0 && !this._currentId) {
-                this._currentId = this._conversations[0].id;
-            }
-
             this._render();
-
-            // Уведомляем ChatManager о выбранной беседе
-            if (this._currentId && this.onConversationChange) {
-                this.onConversationChange(this._currentId);
-            }
         } catch (err) {
             console.error('ChatHistory: ошибка загрузки бесед', err);
         }
     },
 
     /**
-     * Создаёт новую беседу
+     * Сбрасывает UI к пустому состоянию «новый чат» без вызова API.
+     * Реальное создание беседы происходит лениво в ChatContext.ensureConversation()
+     * при отправке первого сообщения.
+     */
+    resetToNew() {
+        this._currentId = null;
+        this._render();
+
+        if (this.onConversationChange) {
+            this.onConversationChange(null);
+        }
+    },
+
+    /**
+     * Создаёт беседу через API и добавляет в список.
+     * Вызывается только из ChatContext._createConversation().
      *
      * @param {string|null} domainName — домен для новой беседы
+     * @returns {Promise<Object>} объект созданной беседы
      */
     async createConversation(domainName = null) {
-        try {
-            const endpoint = '/api/v1/chat/conversations';
-            const url = (typeof AppConfig !== 'undefined')
-                ? AppConfig.api.getUrl(endpoint)
-                : endpoint;
+        const endpoint = '/api/v1/chat/conversations';
+        const url = (typeof AppConfig !== 'undefined')
+            ? AppConfig.api.getUrl(endpoint)
+            : endpoint;
 
-            const headers = {
-                'Content-Type': 'application/json',
-            };
-            if (typeof AuthManager !== 'undefined' && AuthManager.getCurrentUser()) {
-                Object.assign(headers, AuthManager.getAuthHeaders());
-            }
-
-            const body = {};
-            if (domainName) body.domain_name = domainName;
-
-            const response = await fetch(url, {
-                method: 'POST',
-                headers,
-                body: JSON.stringify(body),
-            });
-
-            if (!response.ok) {
-                throw new Error(`HTTP ${response.status}`);
-            }
-
-            const conversation = await response.json();
-            this._conversations.unshift(conversation);
-            this._currentId = conversation.id;
-            this._render();
-
-            if (this.onConversationChange) {
-                this.onConversationChange(conversation.id);
-            }
-        } catch (err) {
-            console.error('ChatHistory: ошибка создания беседы', err);
+        const headers = { 'Content-Type': 'application/json' };
+        if (typeof AuthManager !== 'undefined' && AuthManager.getCurrentUser()) {
+            Object.assign(headers, AuthManager.getAuthHeaders());
         }
+
+        const body = {};
+        if (domainName) body.domain_name = domainName;
+
+        const response = await fetch(url, {
+            method: 'POST',
+            headers,
+            body: JSON.stringify(body),
+        });
+
+        if (!response.ok) {
+            throw new Error(`HTTP ${response.status}`);
+        }
+
+        const conversation = await response.json();
+        this._conversations.unshift(conversation);
+        this._currentId = conversation.id;
+        this._render();
+
+        return conversation;
     },
 
     /**
@@ -160,14 +158,12 @@ const ChatHistory = {
 
             this._conversations = this._conversations.filter(c => c.id !== id);
 
-            // Если удалили активную беседу — сбрасываем
+            // Если удалили активную беседу — сбрасываем к пустому состоянию
             if (this._currentId === id) {
-                this._currentId = this._conversations.length > 0
-                    ? this._conversations[0].id
-                    : null;
+                this._currentId = null;
 
                 if (this.onConversationChange) {
-                    this.onConversationChange(this._currentId);
+                    this.onConversationChange(null);
                 }
             }
 
@@ -282,7 +278,7 @@ const ChatHistory = {
         const newBtn = this._container.querySelector('[data-action="new"]');
         if (newBtn) {
             newBtn.addEventListener('click', () => {
-                this.createConversation();
+                this.resetToNew();
             });
         }
 

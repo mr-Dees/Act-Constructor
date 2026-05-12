@@ -36,6 +36,10 @@ const ChatMessages = {
         ChatEventBus.on('chat:send-request', (data) => this._send(data));
         ChatEventBus.on('context:conversation-switched', (data) => {
             ChatStream.abort();
+            if (!data.conversationId) {
+                this._restoreWelcome();
+                return;
+            }
             this._renderConversationMessages(data);
         });
         ChatEventBus.on('context:conversation-cleared', () => {
