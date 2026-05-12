@@ -94,6 +94,20 @@ def sse_client_action(*, block: dict[str, Any]) -> str:
     return format_sse_event("client_action", {"block": block})
 
 
+def sse_block_complete(*, block_index: int, block: dict[str, Any]) -> str:
+    """Отдаёт цельный нестримуемый блок (file, image, plan, error, ...).
+
+    Стримуемые типы (text, code, reasoning) передаются триплетом
+    block_start/block_delta/block_end. Остальные блоки рендерятся
+    разом из payload — этот хелпер и используется фронтом, чтобы
+    показать их сразу при получении, не дожидаясь перезагрузки.
+    """
+    return format_sse_event("block_complete", {
+        "index": block_index,
+        "block": block,
+    })
+
+
 def sse_message_end(
     *,
     message_id: str,

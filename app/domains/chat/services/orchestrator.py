@@ -27,6 +27,7 @@ from app.domains.chat.services.llm_client import build_llm_client
 from app.domains.chat.services.message_service import MessageService
 from app.domains.chat.services.retry import retry_on_transient
 from app.domains.chat.services.streaming import (
+    sse_block_complete,
     sse_block_delta,
     sse_block_end,
     sse_block_start,
@@ -494,13 +495,14 @@ class Orchestrator:
                                     sse_client_action(block=raw_block),
                                 )
                                 continue
-                            yield (
-                                "sse",
-                                sse_block_start(
-                                    block_index=block_index, block_type=btype,
-                                ),
-                            )
                             if btype in ("text", "code"):
+                                yield (
+                                    "sse",
+                                    sse_block_start(
+                                        block_index=block_index,
+                                        block_type=btype,
+                                    ),
+                                )
                                 content_key = "code" if btype == "code" else "text"
                                 delta = raw_block.get(content_key, "")
                                 yield (
@@ -510,12 +512,22 @@ class Orchestrator:
                                         delta=delta,
                                     ),
                                 )
-                            # Остальные типы (file, image, ...) — block_start/end
-                            # без дельты; фронт возьмёт из сохранённого сообщения.
-                            yield (
-                                "sse",
-                                sse_block_end(block_index=block_index),
-                            )
+                                yield (
+                                    "sse",
+                                    sse_block_end(block_index=block_index),
+                                )
+                            else:
+                                # Нестримуемые блоки (file, image, plan, error, ...)
+                                # отдаём одним событием с полной полезной нагрузкой,
+                                # иначе фронт видит пустой start/end и рендерит блок
+                                # только после перезагрузки истории.
+                                yield (
+                                    "sse",
+                                    sse_block_complete(
+                                        block_index=block_index,
+                                        block=raw_block,
+                                    ),
+                                )
                             block_index += 1
                         yield (
                             "final",
@@ -1106,10 +1118,11 @@ class Orchestrator:
                                         yield sse_client_action(block=raw_block)
                                         emitted_blocks.append(raw_block)
                                         continue
-                                    yield sse_block_start(
-                                        block_index=block_index, block_type=btype,
-                                    )
                                     if btype in ("text", "code"):
+                                        yield sse_block_start(
+                                            block_index=block_index,
+                                            block_type=btype,
+                                        )
                                         content_key = (
                                             "code" if btype == "code" else "text"
                                         )
@@ -1117,15 +1130,19 @@ class Orchestrator:
                                         yield sse_block_delta(
                                             block_index=block_index, delta=delta,
                                         )
-                                    yield sse_block_end(block_index=block_index)
-                                    # Сохраняем блок для истории в едином формате
-                                    # (text → content)
-                                    if btype == "text":
-                                        emitted_blocks.append({
-                                            "type": "text",
-                                            "content": raw_block.get("text", ""),
-                                        })
+                                        yield sse_block_end(block_index=block_index)
+                                        if btype == "text":
+                                            emitted_blocks.append({
+                                                "type": "text",
+                                                "content": raw_block.get("text", ""),
+                                            })
+                                        else:
+                                            emitted_blocks.append(raw_block)
                                     else:
+                                        yield sse_block_complete(
+                                            block_index=block_index,
+                                            block=raw_block,
+                                        )
                                         emitted_blocks.append(raw_block)
                                     block_index += 1
                                 tool_result_for_llm = (
@@ -1301,10 +1318,11 @@ class Orchestrator:
                                     yield sse_client_action(block=raw_block)
                                     emitted_blocks.append(raw_block)
                                     continue
-                                yield sse_block_start(
-                                    block_index=block_index, block_type=btype,
-                                )
                                 if btype in ("text", "code"):
+                                    yield sse_block_start(
+                                        block_index=block_index,
+                                        block_type=btype,
+                                    )
                                     content_key = (
                                         "code" if btype == "code" else "text"
                                     )
@@ -1312,13 +1330,19 @@ class Orchestrator:
                                     yield sse_block_delta(
                                         block_index=block_index, delta=delta,
                                     )
-                                yield sse_block_end(block_index=block_index)
-                                if btype == "text":
-                                    emitted_blocks.append({
-                                        "type": "text",
-                                        "content": raw_block.get("text", ""),
-                                    })
+                                    yield sse_block_end(block_index=block_index)
+                                    if btype == "text":
+                                        emitted_blocks.append({
+                                            "type": "text",
+                                            "content": raw_block.get("text", ""),
+                                        })
+                                    else:
+                                        emitted_blocks.append(raw_block)
                                 else:
+                                    yield sse_block_complete(
+                                        block_index=block_index,
+                                        block=raw_block,
+                                    )
                                     emitted_blocks.append(raw_block)
                                 block_index += 1
                             tool_result_for_llm = (

@@ -152,6 +152,18 @@ const ChatMessages = {
                 break;
             }
 
+            case 'block_complete': {
+                // Нестримуемые блоки (file, image, plan, error, ...) приходят
+                // одним событием с полной нагрузкой. Рендерим сразу — иначе
+                // блок появился бы только после перезагрузки истории.
+                const block = event.data.block;
+                if (block) {
+                    const el = ChatRenderer.renderBlock(block);
+                    if (el) ChatRenderer.appendBlock(container, el);
+                }
+                break;
+            }
+
             case 'tool_call':
                 break;
 

@@ -704,3 +704,40 @@ async def test_orchestrator_logs_warning_for_unknown_button_action_id(
         "unknown.foo" in r.getMessage() and "button_translator" in r.getMessage()
         for r in caplog.records
     )
+
+
+async def test_file_block_emits_block_complete_with_full_payload(monkeypatch):
+    """Файл от агента приходит как одно event:block_complete с полным блоком.
+
+    Регрессия: раньше file-блок отправлялся пустой парой block_start+block_end,
+    из-за чего фронт ничего не рендерил до перезагрузки истории.
+    """
+    file_block = {
+        "type": "file",
+        "file_id": "f-1",
+        "filename": "отчёт.pdf",
+        "mime_type": "application/pdf",
+        "file_size": 1024,
+    }
+    events, _ = await _run_forward_and_collect_events(
+        monkeypatch,
+        response_blocks=[file_block],
+    )
+
+    complete_events = [
+        e for e in events
+        if isinstance(e, str) and e.startswith("event: block_complete")
+    ]
+    assert len(complete_events) == 1
+    payload = complete_events[0]
+    assert '"type": "file"' in payload
+    assert "отчёт.pdf" in payload
+    assert "f-1" in payload
+
+    # Никаких block_start/end для типа file — иначе фронт зарендерил бы
+    # пустой text-блок (createStreamingBlock не знает type=file).
+    assert not any(
+        isinstance(e, str)
+        and "block_start" in e and '"type": "file"' in e
+        for e in events
+    )
