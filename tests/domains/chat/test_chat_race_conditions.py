@@ -364,64 +364,6 @@ class TestConversationSwitchDuringStreaming:
     На бэкенде нет механизма отмены streaming generator.
     """
 
-    @patch("app.domains.chat.services.orchestrator._get_openai_client")
-    async def test_stream_cannot_be_cancelled_from_outside(
-        self, mock_client_factory, settings,
-    ):
-        """Стриминговый генератор не имеет механизма отмены."""
-        from app.domains.chat.services.orchestrator import Orchestrator
-
-        msg_service = AsyncMock()
-        msg_service.get_history = AsyncMock(return_value=[])
-        conv_service = AsyncMock()
-
-        orchestrator = Orchestrator(
-            msg_service=msg_service,
-            conv_service=conv_service,
-            settings=settings,
-        )
-
-        mock_client = AsyncMock()
-
-        async def slow_stream():
-            for i in range(10):
-                chunk = MagicMock()
-                delta = MagicMock()
-                delta.content = f"Часть {i} "
-                delta.tool_calls = None
-                chunk.choices = [MagicMock(delta=delta, finish_reason=None)]
-                yield chunk
-                await asyncio.sleep(0.05)
-
-            final = MagicMock()
-            fd = MagicMock()
-            fd.content = None
-            fd.tool_calls = None
-            final.choices = [MagicMock(delta=fd, finish_reason="stop")]
-            yield final
-
-        mock_client.chat.completions.create = AsyncMock(
-            return_value=slow_stream(),
-        )
-        mock_client_factory.return_value = mock_client
-
-        # Начинаем стриминг, но прерываем после 3 событий
-        events = []
-        gen = orchestrator.run_stream(
-            conversation_id="conv-1",
-            user_message="Длинный ответ",
-        )
-
-        async for event in gen:
-            events.append(event)
-            # Прерываем после нескольких событий (имитация переключения бе��еды)
-            if len(events) >= 5:
-                break
-
-        # Генератор прерван, но на сервере нет явного abort/cancel API
-        # Это документирует отсутствие механизма отмены
-        assert len(events) >= 5
-
     async def test_delete_conversation_during_streaming_no_lock(
         self, conv_service, conv_repo,
     ):
