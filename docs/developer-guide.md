@@ -69,6 +69,7 @@
   - [9.3 За reverse proxy (HTTPS)](#93-за-reverse-proxy-https)
   - [9.4 Конфигурация: .env и Pydantic Settings](#94-конфигурация-env-и-pydantic-settings)
   - [9.5 Полная таблица переменных окружения](#95-полная-таблица-переменных-окружения)
+  - [9.6 Retention agent-bridge таблиц](#96-retention-agent-bridge-таблиц)
 
 ---
 
@@ -2066,6 +2067,139 @@ ALTER TABLE agent_response_events
 
 Размер метаданных пары `(request, response)` — единицы килобайт; `agent_response_events` при стриме 50–100 чанков по 200 байт = ~10–20 KB на запрос. На 1000 запросов в день → ~20 MB/день именно событий, остальное — пренебрежимо.
 
+#### 7.8a Button Translator
+
+Внешний агент возвращает кнопки в **семантическом** виде — с `action_id`, равным имени серверного `ChatTool` (например, `acts.open_act_page`). Фронт такой `action_id` не понимает: его реестр (`window.ClientActionsRegistry`) знает только клиентские примитивы — `open_url`, `notify`, `trigger_sdk`. Между ними должен встать **резолвер**, который умеет ходить в БД и превращать «открой акт КМ-23-001» в `open_url` с готовым `/constructor?act_id=42`. Этим занимается `button_translator`.
+
+**Где применяется** (`app/domains/chat/services/button_translator.py`, 69 строк):
+- В оркестраторе перед эмитом SSE-события `event: buttons` в live-стриме.
+- В `agent_bridge_runner` перед сохранением финального ответа агента в `chat_messages.content` (`_translate_buttons_in_blocks`).
+- В resume-эндпоинте `GET /agent-request/{rid}/stream` при пересборке потока из БД.
+
+Кнопка без зарегистрированного `ChatTool` или без `button_translator` пропускается как есть (с WARN в логи) — пользователь увидит её, но клик не сработает.
+
+**Когда добавлять**: для любого нового `ChatTool` категории `action`, который LLM/агент будет предлагать в виде кнопки (`buttons`-блок). Если tool вызывается **только** через `tool_call` (LLM сама исполняет, не показывая кнопку), translator не нужен.
+
+**Регистрация** — поле `button_translator` в датакласс `ChatTool` (`app/core/chat/tools.py`):
+
+```python
+# app/domains/acts/integrations/action_handlers.py
+from app.core.chat.names import ACTION_NOTIFY, ACTION_OPEN_URL
+
+
+async def open_act_page_button_translator(params: dict) -> dict:
+    """Транслятор серверной кнопки acts.open_act_page → клиентский action.
+
+    Резолвит КМ/СЗ в URL акта; на успехе — open_url, иначе — notify уровня error.
+    Сигнатура фиксирована: принимает params самой кнопки, возвращает
+    {"action": <client-action>, "params": {...}} или None.
+    """
+    km = (params or {}).get("km_number")
+    sz = (params or {}).get("sz_number")
+    url = await resolve_act_url(km, sz)
+    if url:
+        return {"action": ACTION_OPEN_URL, "params": {"url": url}}
+    identifier = km or sz or "?"
+    return {
+        "action": ACTION_NOTIFY,
+        "params": {"message": f"Акт {identifier} не найден", "level": "error"},
+    }
+
+
+# app/domains/acts/integrations/chat_tools.py
+ChatTool(
+    name=TOOL_OPEN_ACT_PAGE,
+    domain="acts",
+    description="Открыть страницу конкретного акта…",
+    parameters=[...],
+    handler=open_act_page_handler,
+    category="action",
+    button_translator=open_act_page_button_translator,  # ← вот этот хук
+)
+```
+
+После трансляции SSE отдаёт фронту уже клиентский формат:
+
+```jsonc
+// До translator (что прислал агент):
+{"action_id": "acts.open_act_page", "label": "Открыть КМ-23-001",
+ "params": {"km_number": "КМ-23-001"}}
+
+// После translator (что получает chat-messages.js):
+{"action_id": "open_url", "label": "Открыть КМ-23-001",
+ "params": {"url": "/constructor?act_id=42"}}
+```
+
+Аналогичные пары handler/translator есть в `app/domains/ck_fin_res/integrations/action_handlers.py`, `app/domains/ck_client_exp/integrations/action_handlers.py`, `app/domains/admin/integrations/action_handlers.py` — они переиспользуют единый шаблон.
+
+#### 7.8b SSE Protocol Reference
+
+Все SSE-форматеры собраны в `app/domains/chat/services/streaming.py`. Каждое событие — это пара строк `event: <type>\ndata: <json>\n\n`. Канонические структуры блоков — в `app/core/chat/blocks.py` (Pydantic-модели `MessageBlock`).
+
+**Таблица событий:**
+
+| Событие | Payload (краткая схема) | Когда эмитится |
+|---|---|---|
+| `message_start` | `{conversation_id: str, message_id: str}` | Один раз в начале ответа ассистента |
+| `block_start` | `{index: int, type: str}` | Открытие стримуемого блока (`text` / `code` / `reasoning`) |
+| `block_delta` | `{index: int, delta: str}` | Инкремент текста стримуемого блока (много раз) |
+| `block_end` | `{index: int}` | Закрытие стримуемого блока |
+| `block_complete` | `{index: int, block: <MessageBlock>}` | Нестримуемый блок целиком (`file`, `image`, `plan`, `error`) |
+| `buttons` | `{buttons: [<ButtonsBlock.buttons>]}` | Группа кнопок (`action_id` уже транслирован сервером) |
+| `client_action` | `{block: <ClientActionBlock>}` | Команда фронту — исполняется **ровно один раз** |
+| `agent_request_started` | `{request_id: str, conversation_id: str}` | Один раз сразу после INSERT в `agent_requests` |
+| `plan_update` | `{steps: [{...}]}` | Обновление PlanBlock (опционально) |
+| `tool_call` / `tool_result` | `{tool_name, tool_call_id, arguments|result}` | Информационные; сейчас не рендерятся фронтом |
+| `error` | `{error: str, code?: str}` | Terminal-ошибка стрима |
+| `message_end` | `{message_id: str, model?: str, token_usage?: {...}}` | Один раз в конце |
+
+**Правила маршрутизации блоков:**
+- **Стримуемые** (`text`, `code`, `reasoning`) идут триплетом `block_start` + N×`block_delta` + `block_end`.
+- **Нестримуемые** (`file`, `image`, `plan`, `error`) — одним `block_complete` с полным payload. **Никогда не парой `block_start`+`block_end` без delta** — фронт создаст пустой text-контейнер, и блок появится только после перезагрузки истории (см. CLAUDE.md).
+- **Buttons** — собственное событие `event: buttons`.
+- **Client action** — собственное событие `event: client_action`; исполняется **ровно один раз** при получении, при рендере истории `{execute: false}` (см. §7.9).
+
+**Пример полного стрима** (диалог: пользователь спросил «Открой КМ-23-001 и расскажи о КСО», ответ: reasoning → forward к агенту → text → кнопка → конец):
+
+```jsonc
+// 1. Старт ответа
+event: message_start
+data: {"conversation_id":"a1b2…","message_id":"m1"}
+
+// 2. LLM стримит reasoning (триплет)
+event: block_start
+data: {"index":0,"type":"reasoning"}
+event: block_delta
+data: {"index":0,"delta":"Пользователь просит открыть акт и спрашивает про КСО. "}
+event: block_delta
+data: {"index":0,"delta":"Делегирую запрос про КСО агенту знаний."}
+event: block_end
+data: {"index":0}
+
+// 3. Форвард к внешнему агенту зарегистрирован
+event: agent_request_started
+data: {"request_id":"r-77c1…","conversation_id":"a1b2…"}
+
+// 4. Финальный текст ассистента (триплет)
+event: block_start
+data: {"index":1,"type":"text"}
+event: block_delta
+data: {"index":1,"delta":"КСО — корпоративная социальная ответственность…"}
+event: block_end
+data: {"index":1}
+
+// 5. Кнопка действия (action_id уже транслирован → клиентский)
+event: buttons
+data: {"buttons":[{"action_id":"open_url","label":"Открыть КМ-23-001",
+                    "params":{"url":"/constructor?act_id=42"}}]}
+
+// 6. Конец
+event: message_end
+data: {"message_id":"m1","model":"qwen-8b","token_usage":{"prompt":1230,"completion":340}}
+```
+
+При client-action (например, LLM хочет немедленно открыть страницу без кнопки) сразу после `block_end` пойдёт `event: client_action` с полным `ClientActionBlock`, и фронт исполнит редирект через `ClientActionsRegistry.execute(...)` без участия пользователя.
+
 ### 7.9 Action-handlers и ClientActionBlock
 
 Action-tools — это ChatTool'ы для **действий в интерфейсе** (открыть страницу, показать уведомление, навигировать, активировать SDK). Их handler возвращает JSON-сериализованный `ClientActionBlock`, оркестратор парсит ответ и эмитит SSE-событие `event: client_action`, фронт исполняет команду через `ClientActionsRegistry`.
@@ -2583,3 +2717,43 @@ ACTS__AUDIT_LOG__RETENTION_DAYS=365
 | | `ADMIN__USER_DIRECTORY__TABLE` | str | `t_db_oarb_ua_user` | Таблица пользователей |
 | | `ADMIN__USER_DIRECTORY__BRANCH_FILTER` | str | `Отдел аудита...` | Фильтр отделения |
 | | `ADMIN__USER_DIRECTORY__DEFAULT_ADMIN` | str | `22494524` | Админ по умолчанию |
+
+### 9.6 Retention agent-bridge таблиц
+
+Мост к внешнему ИИ-агенту использует три таблицы (см. §7.8) в основной БД:
+
+| Таблица | Что накапливается | Удалять можно |
+|---|---|---|
+| `agent_response_events` | Лента стрима (`reasoning`, `status`, `error`). 50–100 чанков на запрос, по 200 байт ≈ 10–20 KB | Да, после `done`/`error`/`timeout` |
+| `agent_responses` | Финальный JSON-ответ агента, ~единицы KB | Да, после `done`/`error`/`timeout` |
+| `agent_requests` | История запросов (history, files, knowledge_bases) | Да, по `status` + `finished_at` |
+
+**Ключевое утверждение**: финальные ответы внешнего ИИ-агента — `reasoning`, текст и ошибки — **агрегируются раннером** (`app/domains/chat/services/agent_bridge_runner.py:120-206`) и сохраняются в `chat_messages.content` (JSONB). Очистка `agent_*`-таблиц **НЕ удаляет** видимую пользователю историю чата: пользователь читает `chat_messages`, а не `agent_*`. `agent_*` нужны только в момент стрима + изредка для разбора инцидентов.
+
+**Правила безопасной очистки:**
+
+1. Удалять только записи с `status IN ('done', 'error', 'timeout')`.
+2. И только те, у которых `finished_at IS NOT NULL AND finished_at < now() - INTERVAL 'N days'` (рекомендация: 30 дней).
+3. **Не трогать** `pending`, `dispatched`, `in_progress` — это активные форварды. Их разрулят сам раннер (по таймауту) или lifespan reconcile при рестарте uvicorn (`agent_bridge_runner.schedule_pending(older_than_sec=30)`).
+
+**Каскад удалений** — формальных FK между `agent_*` нет, но логически:
+
+```
+agent_response_events.request_id  ──┐
+agent_responses.request_id        ──┤──► agent_requests.id
+```
+
+Поэтому удаляем сверху вниз: сначала `agent_response_events`, затем `agent_responses`, и только в конце сами `agent_requests`. Иначе orphan-строки в events/responses останутся и продолжат занимать место.
+
+**Команды** — отдельный скрипт `docs/agent-bridge-cleanup.sql` (совместим с PG и Greenplum 6.x). Плейсхолдеры `{SCHEMA}`/`{PREFIX}` подставляются вручную перед запуском:
+
+```bash
+sed 's/{SCHEMA}/s_grnplm_ld_audit_da_project_4/g; s/{PREFIX}/t_db_oarb_audit_act_/g' \
+    docs/agent-bridge-cleanup.sql | psql ...
+```
+
+Срок хранения задан фиксированной константой `INTERVAL '30 days'` (правится во всех трёх DELETE-ах одновременно — в шапке файла есть комментарий, где менять).
+
+**Рекомендация по частоте**: cron раз в неделю в окне низкой нагрузки. После массовой чистки — `VACUUM ANALYZE` (раскомментировать в конце скрипта). На GP `agent_response_events` имеет смысл партиционировать по `created_at` (RANGE month) — `DROP PARTITION` на порядок быстрее DELETE и не лочит таблицу; см. §7.8.6 для примера ALTER.
+
+Подробности по политике хранения (рекомендованные сроки на 30/180/365 дней, обоснование «почему ретеншена нет в коде», GP-стратегия) — в §7.8.6.
