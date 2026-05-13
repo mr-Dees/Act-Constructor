@@ -60,9 +60,18 @@ CREATE TABLE IF NOT EXISTS {SCHEMA}.{PREFIX}agent_requests (
     status            VARCHAR(20) NOT NULL DEFAULT 'pending'
                       CHECK (status IN ('pending','dispatched','in_progress','done','error','timeout')),
     error_message     TEXT,
+    -- Идентификатор воркера, заклеймившего запрос (UUID-строка).
+    -- NULL означает «никто ещё не взял»; устанавливается атомарным UPDATE
+    -- в claim_pending() и защищает от double-claim между раннерами.
+    worker_token      VARCHAR(64),
+    -- Optimistic locking: при каждом успешном update_status версия
+    -- инкрементируется. Параллельный апдейт со старой версией
+    -- получит «0 строк затронуто» и должен прервать итерацию.
+    version           INTEGER NOT NULL DEFAULT 0,
     created_at        TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
     started_at        TIMESTAMP,
-    finished_at       TIMESTAMP
+    finished_at       TIMESTAMP,
+    updated_at        TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
 
 CREATE INDEX IF NOT EXISTS idx_{PREFIX}agent_requests_status_created
@@ -71,6 +80,11 @@ CREATE INDEX IF NOT EXISTS idx_{PREFIX}agent_requests_conversation
     ON {SCHEMA}.{PREFIX}agent_requests(conversation_id, created_at DESC);
 CREATE INDEX IF NOT EXISTS idx_{PREFIX}agent_requests_message
     ON {SCHEMA}.{PREFIX}agent_requests(message_id);
+-- Индекс под claim_pending: WHERE status IN ('pending','dispatched')
+-- AND worker_token IS NULL — ищет «свободные» задачи на reconcile-проход.
+CREATE INDEX IF NOT EXISTS idx_{PREFIX}agent_requests_pending
+    ON {SCHEMA}.{PREFIX}agent_requests(status, updated_at)
+    WHERE worker_token IS NULL;
 
 -- ── Append-only лента событий от агента ────────────────────────────────
 CREATE TABLE IF NOT EXISTS {SCHEMA}.{PREFIX}agent_response_events (

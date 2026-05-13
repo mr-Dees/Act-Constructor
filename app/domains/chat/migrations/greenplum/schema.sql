@@ -92,9 +92,17 @@ CREATE TABLE IF NOT EXISTS {SCHEMA}.{PREFIX}agent_requests (
     status            VARCHAR(20) NOT NULL DEFAULT 'pending'
                       CHECK (status IN ('pending','dispatched','in_progress','done','error','timeout')),
     error_message     TEXT,
+    -- Идентификатор воркера, заклеймившего запрос (UUID-строка).
+    -- NULL = «свободна»; ставится атомарным UPDATE в claim_pending().
+    worker_token      VARCHAR(64),
+    -- Optimistic locking: версия инкрементируется при каждом успешном
+    -- update_status_versioned; параллельный апдейт со старой версией
+    -- получит 0 строк затронуто.
+    version           INTEGER NOT NULL DEFAULT 0,
     created_at        TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
     started_at        TIMESTAMP,
     finished_at       TIMESTAMP,
+    updated_at        TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
     PRIMARY KEY (id)
 )
 WITH (appendonly=false)
@@ -108,6 +116,11 @@ CREATE INDEX idx_{PREFIX}agent_requests_conversation
     ON {SCHEMA}.{PREFIX}agent_requests(conversation_id, created_at DESC);
 CREATE INDEX idx_{PREFIX}agent_requests_message
     ON {SCHEMA}.{PREFIX}agent_requests(message_id);
+-- Индекс под claim_pending: ищем строки со status pending/dispatched
+-- и пустым worker_token. В GP partial-индекс с WHERE поддерживается,
+-- но для надёжности и простоты — обычный композитный.
+CREATE INDEX idx_{PREFIX}agent_requests_pending
+    ON {SCHEMA}.{PREFIX}agent_requests(status, worker_token, updated_at);
 
 -- Append-only лента событий от агента.
 CREATE TABLE IF NOT EXISTS {SCHEMA}.{PREFIX}agent_response_events (

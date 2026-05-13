@@ -14,6 +14,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import uuid
 from typing import Any
 
 from app.domains.chat.settings import ChatDomainSettings
@@ -101,14 +102,28 @@ async def _run(
                 )
                 return
 
+            # Текущая версия для optimistic locking; при конфликте — abort.
+            current_version: int | None = request.get("version")
+
             # При первом запуске (а не при reconcile) — статус 'dispatched':
             # AW-раннер подхватил запрос и начал polling, но внешний агент
             # ещё не отвечает. 'in_progress' будет выставлен ниже, когда
             # придёт первое событие от агента.
             if request.get("status") == "pending":
-                await req_repo.update_status(
-                    request_id, status="dispatched",
+                new_version = await req_repo.update_status(
+                    request_id,
+                    status="dispatched",
+                    expected_version=current_version,
                 )
+                if new_version is None:
+                    logger.warning(
+                        "agent_bridge_runner: version conflict при "
+                        "переводе в dispatched, request_id=%s, "
+                        "expected_version=%s — итерация прервана",
+                        request_id, current_version,
+                    )
+                    return
+                current_version = new_version
 
             bridge = AgentBridgeService(conn)
             blocks: list[dict] = []
@@ -138,9 +153,21 @@ async def _run(
                         # dispatched → in_progress (наблюдаемая стадия
                         # «агент пишет events»).
                         if not agent_started:
-                            await req_repo.update_status(
-                                request_id, status="in_progress",
+                            new_version = await req_repo.update_status(
+                                request_id,
+                                status="in_progress",
+                                expected_version=current_version,
                             )
+                            if new_version is None:
+                                logger.warning(
+                                    "agent_bridge_runner: version "
+                                    "conflict при переводе в "
+                                    "in_progress, request_id=%s, "
+                                    "expected_version=%s — abort",
+                                    request_id, current_version,
+                                )
+                                return
+                            current_version = new_version
                             agent_started = True
                         ev = upd.event
                         et = ev.get("event_type")
@@ -238,9 +265,18 @@ async def schedule_pending(
     settings: ChatDomainSettings,
     older_than_sec: int = 30,
 ) -> int:
-    """Lifespan-reconcile: при старте перезапускает polling для всех
-    agent_requests, которые остались в pending/in_progress дольше
-    ``older_than_sec`` секунд.
+    """Lifespan-reconcile: при старте подхватывает зависшие запросы и
+    запускает polling-задачу на каждый.
+
+    Использует атомарный ``claim_pending`` (UPDATE ... RETURNING id) с
+    уникальным worker_token этого процесса. Если воркеров несколько и
+    одновременно поднялись после рестарта uvicorn — каждый получит
+    непересекающееся подмножество строк, double-claim физически
+    невозможен.
+
+    in-process защита через ``is_running`` оставлена на случай повторного
+    вызова в том же процессе (например, ручной перезапуск reconcile);
+    cross-worker защита — на уровне БД через worker_token.
 
     Возвращает количество запущенных задач.
     """
@@ -248,20 +284,21 @@ async def schedule_pending(
     from app.domains.chat.repositories.agent_request_repository import (
         AgentRequestRepository,
     )
+    worker_token = str(uuid.uuid4())
     async with get_db() as conn:
-        pending = await AgentRequestRepository(conn).find_pending(
-            older_than_sec,
+        claimed_ids = await AgentRequestRepository(conn).claim_pending(
+            worker_token=worker_token,
+            older_than_sec=older_than_sec,
         )
     count = 0
-    for req in pending:
-        rid = req["id"]
+    for rid in claimed_ids:
         if not is_running(rid):
             schedule(rid, settings=settings)
             count += 1
     if count:
         logger.info(
-            "agent_bridge_runner: reconcile запустил %d задач",
-            count,
+            "agent_bridge_runner: reconcile worker=%s запустил %d задач",
+            worker_token, count,
         )
     return count
 

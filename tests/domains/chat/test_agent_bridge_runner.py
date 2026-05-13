@@ -141,19 +141,17 @@ async def test_run_saves_assistant_message_with_collected_blocks():
     # 'dispatched' ставится сразу при подхвате запроса (наблюдаемость:
     # «AW взяла в работу, ждём агента»), 'in_progress' — при первом
     # событии от агента (наблюдаемость: «агент пишет»).
-    fake_req_repo.update_status.assert_any_call(
-        "rid-1", status="dispatched",
-    )
-    fake_req_repo.update_status.assert_any_call(
-        "rid-1", status="in_progress",
-    )
-    # Порядок именно такой: dispatched раньше in_progress.
+    # update_status вызывается с expected_version для optimistic locking.
     statuses_in_order = [
         c.kwargs.get("status")
         for c in fake_req_repo.update_status.call_args_list
         if c.kwargs.get("status") in ("dispatched", "in_progress")
     ]
     assert statuses_in_order == ["dispatched", "in_progress"]
+    # В обоих вызовах передан expected_version (optimistic locking).
+    for c in fake_req_repo.update_status.call_args_list:
+        if c.kwargs.get("status") in ("dispatched", "in_progress"):
+            assert "expected_version" in c.kwargs
 
     # save_assistant_message получил собранный content.
     save_mock.assert_called_once()
@@ -254,14 +252,13 @@ async def test_run_saves_timeout_error_block_on_bridge_timeout():
 # ── schedule_pending: lifespan-reconcile ──
 
 
-async def test_schedule_pending_runs_task_per_pending_row():
-    """schedule_pending получает из repo список pending-запросов и
-    запускает schedule() для каждого."""
+async def test_schedule_pending_runs_task_per_claimed_id():
+    """schedule_pending атомарно клеймит свободные pending/dispatched-
+    запросы через claim_pending и запускает schedule() для каждого
+    заклеймленного id."""
     mock_conn = AsyncMock()
     fake_req_repo = MagicMock()
-    fake_req_repo.find_pending = AsyncMock(return_value=[
-        {"id": "rid-1"}, {"id": "rid-2"},
-    ])
+    fake_req_repo.claim_pending = AsyncMock(return_value=["rid-1", "rid-2"])
     fake_adapter = MagicMock(get_table_name=lambda n: n)
 
     started = []
@@ -290,17 +287,20 @@ async def test_schedule_pending_runs_task_per_pending_row():
 
     assert count == 2
     assert started == ["rid-1", "rid-2"]
-    # find_pending был вызван с переданным значением порога.
-    fake_req_repo.find_pending.assert_awaited_once_with(30)
+    # claim_pending был вызван с уникальным worker_token и порогом.
+    fake_req_repo.claim_pending.assert_awaited_once()
+    kwargs = fake_req_repo.claim_pending.call_args.kwargs
+    assert kwargs["older_than_sec"] == 30
+    assert isinstance(kwargs["worker_token"], str)
+    assert len(kwargs["worker_token"]) == 36  # UUID4
 
 
 async def test_schedule_pending_skips_already_running():
-    """Если для request_id уже идёт задача, повторный schedule не выполняется."""
+    """Если для заклеймленного id уже идёт задача в этом процессе,
+    повторный schedule не выполняется (in-process защита поверх БД-claim)."""
     mock_conn = AsyncMock()
     fake_req_repo = MagicMock()
-    fake_req_repo.find_pending = AsyncMock(return_value=[
-        {"id": "rid-1"}, {"id": "rid-2"},
-    ])
+    fake_req_repo.claim_pending = AsyncMock(return_value=["rid-1", "rid-2"])
     fake_adapter = MagicMock(get_table_name=lambda n: n)
 
     # Помечаем rid-1 как уже идущую (живая task).

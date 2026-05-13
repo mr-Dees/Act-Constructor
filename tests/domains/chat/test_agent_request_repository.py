@@ -82,26 +82,32 @@ async def test_get_returns_none_when_missing(mock_conn):
 
 async def test_update_status_in_progress_sets_started_at(mock_conn):
     repo = AgentRequestRepository(mock_conn)
+    mock_conn.fetchval.return_value = 1
     await repo.update_status("r1", status="in_progress")
-    mock_conn.execute.assert_called_once()
-    sql = mock_conn.execute.call_args.args[0]
+    mock_conn.fetchval.assert_called_once()
+    sql = mock_conn.fetchval.call_args.args[0]
     assert "UPDATE" in sql
     assert "started_at" in sql
     assert "status" in sql
+    # version-инкремент и RETURNING — встроены в каждый update_status
+    assert "version = version + 1" in sql
+    assert "RETURNING version" in sql
 
 
 async def test_update_status_done_sets_finished_at(mock_conn):
     repo = AgentRequestRepository(mock_conn)
+    mock_conn.fetchval.return_value = 2
     await repo.update_status("r1", status="done")
-    sql = mock_conn.execute.call_args.args[0]
+    sql = mock_conn.fetchval.call_args.args[0]
     assert "finished_at" in sql
     assert "status" in sql
 
 
 async def test_update_status_error_stores_message(mock_conn):
     repo = AgentRequestRepository(mock_conn)
+    mock_conn.fetchval.return_value = 3
     await repo.update_status("r1", status="error", error_message="boom")
-    args = mock_conn.execute.call_args.args
+    args = mock_conn.fetchval.call_args.args
     sql = args[0]
     assert "finished_at" in sql
     assert "error_message" in sql
@@ -149,3 +155,99 @@ async def test_find_pending_returns_empty_list_when_no_rows(mock_conn):
     repo = AgentRequestRepository(mock_conn)
     mock_conn.fetch.return_value = []
     assert await repo.find_pending(older_than_sec=30) == []
+
+
+# ── claim_pending: атомарный UPDATE ... RETURNING id ──────────────────────
+
+
+async def test_claim_pending_atomicity(mock_conn):
+    """claim_pending выполняет один атомарный UPDATE с RETURNING id.
+
+    SQL должен:
+      - быть UPDATE-statement-ом (не SELECT-then-UPDATE);
+      - содержать RETURNING id;
+      - фильтровать по worker_token IS NULL и нужным статусам;
+      - использовать интервал в GP-совместимой форме.
+    """
+    repo = AgentRequestRepository(mock_conn)
+    mock_conn.fetch.return_value = [
+        {"id": "rid-1"}, {"id": "rid-2"},
+    ]
+    token = "worker-xyz"
+    ids = await repo.claim_pending(worker_token=token, older_than_sec=30)
+
+    # Один атомарный statement (без двойного round-trip SELECT+UPDATE).
+    mock_conn.fetch.assert_called_once()
+    sql, *params = mock_conn.fetch.call_args.args
+
+    # Это именно UPDATE ... RETURNING id, не SELECT.
+    assert "UPDATE" in sql
+    assert "RETURNING id" in sql
+    # SET worker_token и updated_at (для рестарт-window).
+    assert "worker_token = $1" in sql
+    assert "updated_at" in sql
+    # WHERE-условия: NULL token + допустимые статусы + временной интервал.
+    assert "worker_token IS NULL" in sql
+    assert "status IN ('pending', 'dispatched')" in sql
+    assert "interval '1 second'" in sql
+
+    # Параметры — token и порог.
+    assert params == [token, 30]
+    # Возвращённые id — те, что вернул UPDATE.
+    assert ids == ["rid-1", "rid-2"]
+
+
+async def test_claim_pending_returns_empty_when_nothing_to_claim(mock_conn):
+    """Если свободных строк нет — claim возвращает [], не падает."""
+    repo = AgentRequestRepository(mock_conn)
+    mock_conn.fetch.return_value = []
+    assert await repo.claim_pending(worker_token="w", older_than_sec=30) == []
+
+
+# ── update_status_versioned: optimistic locking ───────────────────────────
+
+
+async def test_update_status_versioned_success_returns_new_version(mock_conn):
+    """При совпадении версии — UPDATE проходит, version+1 возвращается."""
+    repo = AgentRequestRepository(mock_conn)
+    mock_conn.fetchval.return_value = 5  # новая version после инкремента
+    new_version = await repo.update_status(
+        "r1", status="in_progress", expected_version=4,
+    )
+    assert new_version == 5
+
+    sql, *params = mock_conn.fetchval.call_args.args
+    assert "UPDATE" in sql
+    assert "version = version + 1" in sql
+    assert "AND version = $" in sql
+    assert "RETURNING version" in sql
+    # expected_version пришёл последним параметром.
+    assert params[-1] == 4
+
+
+async def test_update_status_versioned_conflict_returns_none(mock_conn):
+    """При несовпадении версии (никакая строка не обновилась) — None."""
+    repo = AgentRequestRepository(mock_conn)
+    mock_conn.fetchval.return_value = None  # asyncpg вернёт NULL
+    new_version = await repo.update_status(
+        "r1", status="done", expected_version=999, error_message=None,
+    )
+    assert new_version is None
+
+    sql = mock_conn.fetchval.call_args.args[0]
+    assert "AND version = $" in sql
+    assert "RETURNING version" in sql
+
+
+async def test_update_status_without_expected_version_still_returns_version(
+    mock_conn,
+):
+    """Без expected_version SQL без AND version = ..., но RETURNING version
+    остаётся — вызывающий получает новую версию для последующих апдейтов."""
+    repo = AgentRequestRepository(mock_conn)
+    mock_conn.fetchval.return_value = 1
+    new_version = await repo.update_status("r1", status="in_progress")
+    assert new_version == 1
+    sql = mock_conn.fetchval.call_args.args[0]
+    assert "AND version = $" not in sql
+    assert "RETURNING version" in sql

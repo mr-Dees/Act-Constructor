@@ -139,9 +139,9 @@ async def test_wait_for_completion_yields_events_then_response(mock_conn):
     assert len(response_updates) == 1
     assert response_updates[0].response["blocks"] == [{"type": "text", "content": "done"}]
 
-    # После финала — UPDATE status='done'
+    # После финала — UPDATE status='done' (через fetchval с RETURNING version)
     update_calls = [
-        c for c in mock_conn.execute.call_args_list
+        c for c in mock_conn.fetchval.call_args_list
         if "UPDATE" in c.args[0] and "status" in c.args[0]
     ]
     assert any("done" in str(c.args) for c in update_calls)
@@ -211,7 +211,7 @@ async def test_wait_for_completion_yields_response_even_without_events(mock_conn
 def _timeout_update_calls(mock_conn):
     """Возвращает все UPDATE-вызовы, маркирующие запрос как timeout."""
     return [
-        c for c in mock_conn.execute.call_args_list
+        c for c in mock_conn.fetchval.call_args_list
         if "UPDATE" in c.args[0] and "timeout" in str(c.args)
     ]
 
