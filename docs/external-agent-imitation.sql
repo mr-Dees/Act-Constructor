@@ -3,9 +3,22 @@
 --  Хелпер-сниппеты для ручной имитации внешнего ИИ-агента в AuditWorkstation
 --  (используется при разработке/тестировании моста agent_requests/events/responses)
 --
---  Место: корень репозитория (НЕ часть продакшен-кода)
+--  Место: docs/external-agent-imitation.sql (НЕ часть продакшен-кода)
 --  Целевая БД: PostgreSQL (dev) и Greenplum (prod) — все запросы GP-совместимы
---  Связанная спека: docs/superpowers/specs/2026-05-11-external-agent-bridge-design.md
+--  Связанная документация: docs/developer-guide.md §7.8 (Мост к внешнему агенту)
+--
+--  ВАЖНО — различие форматов:
+--    • Поле `payload` в `agent_response_events` (тип `reasoning`/`status`/`error`)
+--      использует поля свободной формы: `text`, `is_chunk`, `stage`, `code`, `message`.
+--      Эти события стримятся фронту как промежуточные delta/heartbeat.
+--    • Поле `blocks` в `agent_responses` — это массив pydantic-моделей из
+--      `app/core/chat/blocks.py`. Каноническое поле для `text`/`code`/`reasoning`
+--      блоков — `content` (НЕ `text`/`code`).
+--
+--  ВАЖНО — Greenplum-плейсхолдеры:
+--    На GP реальные имена объектов — `{SCHEMA}.{PREFIX}<name>` (адаптер подставляет).
+--    В этой шпаргалке имена даны в развёрнутом виде для удобства; на GP замените
+--    `agent_response_events_id_seq` → `<schema>.<prefix>agent_response_events_id_seq`.
 -- ============================================================================
 
 
@@ -78,7 +91,7 @@ VALUES (
     md5(random()::text || clock_timestamp()::text),
     '<request_id>',
     '[
-        {"type":"text","text":"КСО — корпоративная социальная ответственность. По регламенту 2024 года..."}
+        {"type":"text","content":"КСО — корпоративная социальная ответственность. По регламенту 2024 года..."}
     ]'::jsonb,
     'stop',
     'imitated-agent',
@@ -97,12 +110,12 @@ WHERE id = '<request_id>';
 -- ────────────────────────────────────────────────────────────────────────────
 
 INSERT INTO agent_responses
-    (id, request_id, blocks, finish_reason, model, created_at)
+    (id, request_id, blocks, finish_reason, model, token_usage, created_at)
 VALUES (
     md5(random()::text || clock_timestamp()::text),
     '<request_id>',
     '[
-        {"type":"text","text":"Найдены 3 связанных акта:"},
+        {"type":"text","content":"Найдены 3 связанных акта:"},
         {"type":"buttons","buttons":[
             {"action_id":"acts.open_act_page","label":"Открыть КМ-23-001",
              "params":{"km_number":"КМ-23-001"}},
@@ -110,7 +123,10 @@ VALUES (
              "params":{"km_number":"КМ-23-002"}}
         ]}
     ]'::jsonb,
-    'stop', 'imitated-agent', now()
+    'stop',
+    'imitated-agent',
+    '{"prompt_tokens":80,"completion_tokens":40}'::jsonb,
+    now()
 );
 
 UPDATE agent_requests SET status = 'done', finished_at = now()
@@ -136,7 +152,7 @@ INSERT INTO agent_responses
 VALUES (
     md5(random()::text || clock_timestamp()::text),
     '<request_id>',
-    '[{"type":"text","text":"Не удалось получить ответ от баз знаний. Попробуйте позже."}]'::jsonb,
+    '[{"type":"text","content":"Не удалось получить ответ от баз знаний. Попробуйте позже."}]'::jsonb,
     'error',
     'imitated-agent',
     now()
@@ -225,7 +241,7 @@ SELECT
     '<request_id>',
     jsonb_build_array(
         jsonb_build_object('type', 'text',
-            'text', 'Сформировал отчёт, прикладываю файл:'),
+            'content', 'Сформировал отчёт, прикладываю файл:'),
         jsonb_build_object(
             'type',      'file',
             'file_id',   nf.id,
@@ -267,7 +283,7 @@ SELECT
     '<request_id>',
     jsonb_build_array(
         jsonb_build_object('type', 'text',
-            'text', 'Нашёл регламент в базе знаний:'),
+            'content', 'Нашёл регламент в базе знаний:'),
         jsonb_build_object(
             'type',      'file',
             'file_id',   nf.id,
@@ -310,7 +326,7 @@ SELECT
     '<request_id>',
     jsonb_build_array(
         jsonb_build_object('type', 'text',
-            'text', 'Подготовил выгрузку метрик в xlsx:'),
+            'content', 'Подготовил выгрузку метрик в xlsx:'),
         jsonb_build_object(
             'type',      'file',
             'file_id',   nf.id,

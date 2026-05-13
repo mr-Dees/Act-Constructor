@@ -70,12 +70,14 @@ python -m app.main
 **Production** (через Uvicorn):
 
 ```bash
-uvicorn app.main:app --host 0.0.0.0 --port 8000
+uvicorn app.main:app --host 0.0.0.0 --port 8005
 ```
 
-Приложение будет доступно по адресу `http://localhost:8000`.
+Приложение будет доступно по адресу `http://localhost:8005` (порт берётся из `SERVER__PORT` в `.env`; в `.env.example` задан `8005`).
 
 Схема базы данных создается автоматически при первом запуске.
+
+> Подробнее об архитектуре, доменах, плагинной системе и интеграциях — см. [docs/developer-guide.md](docs/developer-guide.md).
 
 ## Конфигурация
 
@@ -131,7 +133,7 @@ FastAPI Application
 - **Vanilla JavaScript** (ES6+) — без фреймворков
 - 3-зонная модульная архитектура: `shared/`, `portal/`, `constructor/`
 - Jinja2-шаблоны с двумя независимыми базовыми шаблонами
-- Чат-система: event-driven архитектура из 10 модулей (EventBus, UI, Files, Context, Messages, Manager, Stream, Renderer, History, Modal)
+- Чат-система: event-driven архитектура из 11 модулей (EventBus, UI, Files, Context, Messages, Manager, Stream, Renderer, History, Modal, ClientActions)
 
 ### Структура проекта
 
@@ -152,13 +154,14 @@ app/
 │   ├── admin/              — администрирование (роли, справочник пользователей)
 │   ├── chat/               — AI-ассистент (conversations, messages, files, actions)
 │   ├── ck_fin_res/         — ЦК Финансовый результат (верификация метрик FR)
-│   └── ck_client_exp/      — ЦК Клиентский опыт (верификация метрик CS)
+│   ├── ck_client_exp/      — ЦК Клиентский опыт (верификация метрик CS)
+│   └── ua_data/            — справочники УА (процессы, ТБ, подразделения)
 ├── schemas/                — общие модели (errors)
 └── formatters/             — общие утилиты форматирования
 static/
 ├── css/                    — модульные CSS (entry/ -> base/ + shared/ + zone/)
 └── js/                     — модульный JS (shared/ + portal/ + constructor/)
-    └── shared/chat/        — 10 модулей: event-bus, ui, files, context, messages, manager, stream, renderer, history, modal
+    └── shared/chat/        — 11 модулей: event-bus, ui, files, context, messages, manager, stream, renderer, history, modal, client-actions
 templates/
 ├── shared/                 — общие компоненты (chat, dialog, errors)
 ├── portal/                 — портал (landing, acts-manager)

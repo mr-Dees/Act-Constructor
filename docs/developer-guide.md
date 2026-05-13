@@ -1523,13 +1523,15 @@ SSE-события клиенту (message_start, block_delta, tool_call, tool_r
 **Persistence:** 3 таблицы БД (`chat_conversations`, `chat_messages`, `chat_files`).
 
 **SSE-события** (`app/domains/chat/services/streaming.py`):
-`message_start`, `block_start`, `block_delta`, `block_end`, `tool_call`, `tool_result`, `plan_update`, `buttons`, `message_end`, `error`.
+`message_start`, `block_start`, `block_delta`, `block_end`, `block_complete`, `tool_call`, `tool_result`, `plan_update`, `buttons`, `client_action`, `message_end`, `error`.
+
+Маршрутизация: стримуемые типы (`text`, `code`, `reasoning`) идут триплетом `block_start` + `block_delta` + `block_end`; нестримуемые (`file`, `image`, `plan`, `error`) — одним `block_complete` с полным payload; `buttons` и `client_action` — собственные SSE-события.
 
 **Блоки сообщений** (`app/core/chat/blocks.py`):
-`TextBlock`, `CodeBlock`, `ReasoningBlock`, `PlanBlock`, `FileBlock`, `ImageBlock`, `ButtonGroup`.
+`TextBlock`, `CodeBlock`, `ReasoningBlock`, `PlanBlock`, `FileBlock`, `ImageBlock`, `ButtonGroup`, `ClientActionBlock`, `ErrorBlock`. Каноническое поле для `TextBlock`/`CodeBlock`/`ReasoningBlock` — `content`.
 
 **Доменные исключения** (`app/domains/chat/exceptions.py`):
-`ConversationNotFoundError`, `ChatFileNotFoundError`, `ActionNotFoundError`, `ChatLimitError`, `ChatFileValidationError`.
+`ConversationNotFoundError`, `ChatFileNotFoundError`, `ChatLimitError`, `ChatFileValidationError`.
 
 ### 7.2 ChatTool и ChatToolParam
 
@@ -1819,7 +1821,157 @@ SSE → клиент (block_start type=reasoning → deltas → финальны
 - `app/domains/chat/repositories/agent_*_repository.py` — три CRUD-репозитория
 - `app/domains/chat/services/{llm_client,retry,tool_call_accumulator}.py` — провайдер-агностичная LLM-инфра (OpenRouter/SGLang quirks: `index=None` fallback, `reasoning_details` для MiniMax M2)
 
-Для имитации работы внешнего агента вручную (вставки в БД через DBeaver/psql) — см. `external-agent-imitation.sql` в корне репозитория: 6 секций (типичные сценарии успеха/ошибки/таймаута, работа с файлами, очистка, диагностика).
+**Гейты таймаутов** в `wait_for_completion`: три независимых, срабатывание любого → `status='timeout'` + `AgentBridgeTimeout`.
+
+| Гейт | Когда активен | Настройка |
+|---|---|---|
+| `initial_response` | Пока не пришло ни одного события | `CHAT__AGENT_BRIDGE__INITIAL_RESPONSE_TIMEOUT_SEC` |
+| `event_heartbeat` | После первого события (простой между событиями) | `CHAT__AGENT_BRIDGE__EVENT_TIMEOUT_SEC` |
+| `max_total` | Всегда (с момента INSERT) | `CHAT__AGENT_BRIDGE__MAX_TOTAL_DURATION_SEC` |
+
+#### Шпаргалка по имитации агента
+
+Полный SQL — в `external-agent-imitation.sql` в корне (DBeaver/psql).
+Ниже — минимум для понимания формата.
+
+**Что в `agent_requests` (вход агента):**
+
+```jsonc
+// history — усечённый диалог; reasoning-блоки в него не попадают
+[
+  {"role": "user",      "content": "Найди регламент по КСО"},
+  {"role": "assistant", "content": "..."}
+]
+
+// files — только метаданные. Тело файла — в chat_files по file_id
+[{"type":"file","file_id":"8f4c1...","filename":"акт.pdf",
+  "mime_type":"application/pdf","file_size":124533}]
+
+// knowledge_bases — ключи из UI-toggle + kb_hint от LLM
+["acts_default","regulations_2024"]
+```
+
+**Стрим reasoning** (можно несколько раз):
+
+```sql
+INSERT INTO agent_response_events
+    (id, request_id, seq, event_type, payload, created_at)
+VALUES (
+    nextval('agent_response_events_id_seq'),
+    '<request_id>', 1, 'reasoning',
+    '{"text":"Ищу регламент в acts_default."}'::jsonb,
+    now()
+);
+```
+
+**Финальный ответ** (без него фронт не закроет typing-индикатор):
+
+```sql
+INSERT INTO agent_responses
+    (id, request_id, blocks, finish_reason, model, created_at)
+VALUES (
+    md5(random()::text || clock_timestamp()::text),
+    '<request_id>',
+    '[{"type":"text","content":"КСО — корпоративная социальная ответственность..."}]'::jsonb,
+    'stop', 'imitated-agent', now()
+);
+
+UPDATE agent_requests SET status='done', finished_at=now()
+WHERE id='<request_id>';
+```
+
+**Типы блоков ответа** (из `app/core/chat/blocks.py`): `text`, `code`, `reasoning`, `plan`, `file`, `image`, `buttons`, `client_action`, `error`. Маршрутизация: стримуемые (`text`/`code`/`reasoning`) идут триплетом `block_start`+`block_delta`+`block_end`; нестримуемые (`file`, `image`, `plan`, `error`) — одним `block_complete` с полным payload; `buttons` и `client_action` — собственные SSE-события `event: buttons` и `event: client_action`.
+
+**Кнопки и client_action** — `action_id`/`action` берутся из реестра `window.ClientActionsRegistry`. Ходовые: `acts.open_act_page`, `open_url`, `notify`. См. §7.9.
+
+#### Шпаргалка по файлам
+
+**Агент читает файл пользователя** — JOIN по `conversation_id` (защита от чужих файлов):
+
+```sql
+SELECT cf.filename, cf.mime_type, cf.file_data
+FROM chat_files cf
+JOIN agent_requests ar ON ar.conversation_id = cf.conversation_id
+WHERE ar.id = '<request_id>' AND cf.id = '<file_id>';
+```
+
+**Агент отправляет файл пользователю** — два INSERT'а: байты в `chat_files`, потом `FileBlock` в `agent_responses.blocks`. `conversation_id` обязан совпадать с тем, что в `agent_requests` (иначе AW вернёт 404 — `FileService.get_file` проверяет владельца через `chat_conversations.user_id`).
+
+Для бинарников (pdf/xlsx) инлайн-SQL неудобен — XLSX это ZIP с несколькими XML внутри, руками не собрать. Удобнее Python-хелпер:
+
+```python
+# Использование:
+#   python -m scripts.imitate_agent_file <request_id> /tmp/metrics.xlsx \
+#       --text "Подготовил выгрузку метрик"
+import asyncio, mimetypes, uuid, json, os
+from pathlib import Path
+import asyncpg
+
+DSN = os.environ.get("DATABASE_URL", "postgresql://...localhost/audit_workstation")
+MIME_OVERRIDES = {
+    ".xlsx": "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+    ".docx": "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+}
+
+async def send_file_as_agent(request_id: str, path: Path, text: str) -> None:
+    data = path.read_bytes()
+    mime = MIME_OVERRIDES.get(path.suffix.lower()) \
+           or (mimetypes.guess_type(path.name)[0] or "application/octet-stream")
+    file_id = str(uuid.uuid4())
+    conn = await asyncpg.connect(DSN)
+    try:
+        row = await conn.fetchrow(
+            "SELECT conversation_id FROM agent_requests WHERE id=$1", request_id,
+        )
+        await conn.execute(
+            "INSERT INTO chat_files "
+            "(id, conversation_id, message_id, filename, mime_type, "
+            " file_size, file_data, created_at) "
+            "VALUES ($1, $2, NULL, $3, $4, $5, $6, now())",
+            file_id, row["conversation_id"], path.name, mime, len(data), data,
+        )
+        blocks = [
+            {"type": "text", "content": text},
+            {"type": "file", "file_id": file_id, "filename": path.name,
+             "mime_type": mime, "file_size": len(data)},
+        ]
+        await conn.execute(
+            "INSERT INTO agent_responses (id, request_id, blocks, "
+            "finish_reason, model, created_at) "
+            "VALUES ($1, $2, $3::jsonb, 'stop', 'imitated-agent', now())",
+            str(uuid.uuid4()), request_id,
+            json.dumps(blocks, ensure_ascii=False),
+        )
+        await conn.execute(
+            "UPDATE agent_requests SET status='done', finished_at=now() "
+            "WHERE id=$1", request_id,
+        )
+    finally:
+        await conn.close()
+```
+
+Реальный xlsx генерируется на лету через `openpyxl`:
+
+```python
+from openpyxl import Workbook
+wb = Workbook(); ws = wb.active
+ws.append(["КМ", "Метрика", "Значение"])
+ws.append(["КМ-12-32141", "Выручка", 14523000])
+wb.save("/tmp/metrics.xlsx")
+# затем asyncio.run(send_file_as_agent(rid, Path("/tmp/metrics.xlsx"), "Готово:"))
+```
+
+Файл появится в чате сразу (через SSE `block_complete`), без перезагрузки. Регрессия покрыта тестом `test_orchestrator_forward_integration.py::test_file_block_emits_block_complete_with_full_payload`.
+
+Для TXT хватит чистого SQL — `convert_to(...)` берёт обычную строку и не требует Python; см. §4a.1 в `external-agent-imitation.sql`.
+
+#### Когда «у меня не работает»
+
+- В чате тишина после вопроса → нет INSERT в `agent_requests` ⇒ LLM не решил форвардить (нет toggle базы знаний / system prompt не подсказал / handler не зарегистрирован для домена).
+- Reasoning-чанки не появляются → проверь `CHAT__AGENT_BRIDGE__POLL_INTERVAL_SEC` и логи `agent_bridge polling: ...`.
+- Запрос обрывается с `timeout` → `agent_requests.error_message` подскажет, какой из трёх гейтов сработал.
+- Файл не отображается до перезагрузки → SSE `block_complete` не дошёл. Регрессия в тесте выше; локально проверь `static/js/shared/chat/chat-messages.js` case `'block_complete'`.
+- Клик «Скачать» возвращает 404 → `chat_files.conversation_id` ≠ `agent_requests.conversation_id`. Бери из запроса, не выдумывай.
 
 ### 7.9 Action-handlers и ClientActionBlock
 
@@ -2278,20 +2430,33 @@ ACTS__AUDIT_LOG__RETENTION_DAYS=365
 | | `SECURITY__RATE_LIMIT_PER_MINUTE` | int | `1024` | Лимит запросов/мин на IP |
 | | `SECURITY__MAX_TRACKED_IPS` | int | `100` | Макс. отслеживаемых IP |
 | | `SECURITY__RATE_LIMIT_TTL` | int | `120` | TTL метрик (сек) |
-| **Чат** (доменные) | `CHAT__API_BASE` | str | (пусто) | Базовый URL LLM API |
+| **Чат** (доменные) | `CHAT__PROFILE` | str | `sglang` | Профиль LLM-провайдера: `sglang` (прод), `openrouter`/`openai` (dev) |
+| | `CHAT__API_BASE` | str | (пусто) | Базовый URL LLM API (без `/chat/completions` — SDK добавит сам) |
 | | `CHAT__API_KEY` | SecretStr | (пусто) | API-ключ |
 | | `CHAT__MODEL` | str | `gpt-4o` | Модель |
 | | `CHAT__TEMPERATURE` | float | `0.1` | Температура (0-2) |
 | | `CHAT__MAX_TOOL_ROUNDS` | int | `5` | Макс. раундов tool-calling |
 | | `CHAT__STREAMING_ENABLED` | bool | `True` | SSE-стриминг ответов |
+| | `CHAT__REQUEST_TIMEOUT` | int | `60` | Timeout запроса к LLM (сек) |
 | | `CHAT__TOOL_EXECUTION_TIMEOUT` | int | `30` | Timeout инструмента (сек) |
+| | `CHAT__SMALLTALK_MODE` | str | `local` | `local` — отвечает локальный LLM; `forward` — пробрасывать всё внешнему агенту |
 | | `CHAT__SYSTEM_PROMPT` | str | `Ты — AI-ассистент...` | Системный промпт |
 | | `CHAT__MAX_HISTORY_LENGTH` | int | `50` | Макс. сообщений в истории |
 | | `CHAT__MAX_MESSAGE_CONTENT_LENGTH` | int | `10000` | Макс. длина сообщения |
 | | `CHAT__MAX_FILE_SIZE` | int | `10485760` | Макс. размер файла (байт) |
 | | `CHAT__MAX_FILES_PER_MESSAGE` | int | `5` | Макс. файлов в сообщении |
+| | `CHAT__MAX_TOTAL_FILE_SIZE` | int | `31457280` | Макс. суммарный размер файлов в сообщении (байт) |
 | | `CHAT__MAX_CONVERSATIONS_PER_USER` | int | `100` | Макс. разговоров на пользователя |
 | | `CHAT__MAX_MESSAGES_PER_CONVERSATION` | int | `500` | Макс. сообщений в разговоре |
+| **Чат: Retry** | `CHAT__RETRY__ON_429` | bool | `True` | Повторять при 429 (rate-limit) |
+| | `CHAT__RETRY__ON_5XX` | bool | `True` | Повторять при 5xx |
+| | `CHAT__RETRY__MAX_ATTEMPTS` | int | `5` | Макс. попыток |
+| | `CHAT__RETRY__BACKOFF_BASE_SEC` | float | `2.0` | База экспоненциального backoff (сек) |
+| **Чат: Мост к агенту** | `CHAT__AGENT_BRIDGE__POLL_INTERVAL_SEC` | float | `1.0` | Интервал polling таблиц `agent_*` |
+| | `CHAT__AGENT_BRIDGE__INITIAL_RESPONSE_TIMEOUT_SEC` | int | `300` | Гейт 1: время до первого события/ответа |
+| | `CHAT__AGENT_BRIDGE__EVENT_TIMEOUT_SEC` | int | `120` | Гейт 2: heartbeat между событиями |
+| | `CHAT__AGENT_BRIDGE__MAX_TOTAL_DURATION_SEC` | int | `1800` | Гейт 3: общий таймаут запроса |
+| | `CHAT__AGENT_BRIDGE__HISTORY_LIMIT` | int | `30` | Лимит сообщений истории, передаваемой агенту |
 | **Акты: Блокировки** | `ACTS__LOCK__DURATION_MINUTES` | int | `15` | Длительность блокировки |
 | | `ACTS__LOCK__INACTIVITY_TIMEOUT_MINUTES` | float | `5.0` | Timeout неактивности |
 | | `ACTS__LOCK__INACTIVITY_CHECK_INTERVAL_SECONDS` | int | `60` | Интервал проверки |
