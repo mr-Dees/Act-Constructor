@@ -83,7 +83,7 @@ CREATE TABLE IF NOT EXISTS {SCHEMA}.{PREFIX}agent_requests (
     history           JSONB NOT NULL DEFAULT '[]'::jsonb,
     files             JSONB NOT NULL DEFAULT '[]'::jsonb,
     status            VARCHAR(20) NOT NULL DEFAULT 'pending'
-                      CHECK (status IN ('pending','in_progress','done','error','timeout')),
+                      CHECK (status IN ('pending','dispatched','in_progress','done','error','timeout')),
     error_message     TEXT,
     created_at        TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
     started_at        TIMESTAMP,

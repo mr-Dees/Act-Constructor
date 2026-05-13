@@ -137,10 +137,23 @@ async def test_run_saves_assistant_message_with_collected_blocks():
     ):
         await agent_bridge_runner._run("rid-1", settings=_settings())
 
-    # update_status('in_progress') был вызван (так как запрос был pending).
+    # Раннер прошёл фазами pending → dispatched → in_progress.
+    # 'dispatched' ставится сразу при подхвате запроса (наблюдаемость:
+    # «AW взяла в работу, ждём агента»), 'in_progress' — при первом
+    # событии от агента (наблюдаемость: «агент пишет»).
+    fake_req_repo.update_status.assert_any_call(
+        "rid-1", status="dispatched",
+    )
     fake_req_repo.update_status.assert_any_call(
         "rid-1", status="in_progress",
     )
+    # Порядок именно такой: dispatched раньше in_progress.
+    statuses_in_order = [
+        c.kwargs.get("status")
+        for c in fake_req_repo.update_status.call_args_list
+        if c.kwargs.get("status") in ("dispatched", "in_progress")
+    ]
+    assert statuses_in_order == ["dispatched", "in_progress"]
 
     # save_assistant_message получил собранный content.
     save_mock.assert_called_once()

@@ -35,13 +35,24 @@
 -- ────────────────────────────────────────────────────────────────────────────
 
 -- Что AW уже отправила, но ещё не обработано.
--- ВНИМАНИЕ: после C2.b (фоновый раннер polling-задач) AW сразу переводит
--- свежий запрос из 'pending' в 'in_progress' — фоновая задача начинает
--- polling. Поэтому фильтровать только по 'pending' = почти пустая выборка.
+--
+-- СТАДИИ status в agent_requests:
+--   pending     — INSERT от AW, фоновый раннер ещё не подхватил (~миллисекунды,
+--                 почти не наблюдается на dev).
+--   dispatched  — раннер запустил polling, ждёт первого события от внешнего
+--                 агента. Эта стадия видна пока ты ещё не вставил INSERT в
+--                 agent_response_events.
+--   in_progress — пришло первое событие от агента (raw reasoning или status).
+--                 Здесь видно «агент пишет».
+--   done        — финальный ответ сохранён, ассистент-сообщение записано.
+--   error       — раннер или агент сообщили об ошибке (error_message заполнен).
+--   timeout     — сработал один из трёх гейтов wait_for_completion.
+--
+-- Для наблюдения «всё, что в работе» выбирай pending/dispatched/in_progress.
 SELECT id, conversation_id, message_id, user_id, domain_name,
-       last_user_message, status, created_at
+       last_user_message, status, started_at, created_at
 FROM t_db_oarb_audit_act_agent_requests
-WHERE status IN ('pending', 'in_progress')
+WHERE status IN ('pending', 'dispatched', 'in_progress')
 ORDER BY created_at DESC
 LIMIT 20;
 
@@ -55,14 +66,14 @@ WHERE id = '<request_id>';
 -- 1. СЦЕНАРИЙ "успешный ответ агента" (нормальный поток)
 -- ────────────────────────────────────────────────────────────────────────────
 
--- Шаг 1.1 — больше НЕ нужен при ручной имитации.
--- AW сама ставит status='in_progress' через фоновый раннер (C2.b)
--- сразу после INSERT'а запроса. Если запускать UPDATE вручную, он
--- может пересечься с UPDATE из раннера — это безопасно (идемпотентно),
--- но смысла больше нет. Оставлено как справка по полю started_at.
--- UPDATE t_db_oarb_audit_act_agent_requests
--- SET status = 'in_progress', started_at = now()
--- WHERE id = '<request_id>';
+-- Шаг 1.1 — НЕ нужен при ручной имитации.
+-- AW сама проходит pending → dispatched → in_progress:
+--   * pending → dispatched ставит фоновый раннер при подхвате запроса
+--     (заполняет started_at).
+--   * dispatched → in_progress ставит раннер при получении первого
+--     INSERT в agent_response_events (то есть после шага 1.2 ниже).
+-- Вручную трогать status не нужно. Если очень хочется — UPDATE безопасен
+-- (идемпотентен), но не отражает реальный поток.
 
 -- Шаг 1.2 — стрим reasoning (несколько порций).
 -- ВАЖНО: id берётся из sequence; seq монотонно растёт в рамках request_id.

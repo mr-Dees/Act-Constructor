@@ -75,19 +75,23 @@ class AgentRequestRepository(BaseRepository):
         return self._parse_row(row) if row else None
 
     async def find_pending(self, older_than_sec: int) -> list[dict]:
-        """Возвращает agent_requests со статусом pending/in_progress, созданные
-        раньше now() - older_than_sec секунд. Используется lifespan-reconcile
-        при старте приложения: дотягивает polling-задачи, оборванные прошлым
-        процессом (например, после рестарта uvicorn).
+        """Возвращает незавершённые agent_requests, созданные раньше
+        now() - older_than_sec секунд. Используется lifespan-reconcile
+        при старте приложения: дотягивает polling-задачи, оборванные
+        прошлым процессом (например, после рестарта uvicorn).
+
+        Стадии, которые считаются незавершёнными:
+            pending     — INSERT от AW, раннер ещё не подхватил.
+            dispatched  — раннер запустил polling, ждёт первого event агента.
+            in_progress — внешний агент пишет события.
 
         GP-совместимо: без CTE, без window functions, без ON CONFLICT;
-        интервал собирается как `$1::int * interval '1 second'` — это
-        работает и в PG 9.4, и в Greenplum 6.
+        интервал — `$1::int * interval '1 second'` (работает в PG 9.4 и GP 6).
         """
         rows = await self.conn.fetch(
             f"""
             SELECT * FROM {self.table}
-            WHERE status IN ('pending', 'in_progress')
+            WHERE status IN ('pending', 'dispatched', 'in_progress')
               AND created_at < now() - ($1::int * interval '1 second')
             ORDER BY created_at
             """,
@@ -102,11 +106,18 @@ class AgentRequestRepository(BaseRepository):
         status: str,
         error_message: str | None = None,
     ) -> None:
-        """Обновляет статус запроса; для in_progress/done/error/timeout
-        дополнительно проставляет временные метки."""
-        if status == "in_progress":
+        """Обновляет статус запроса; для dispatched/in_progress/done/error/timeout
+        дополнительно проставляет временные метки.
+
+        started_at заполняется на первом переходе из 'pending' (через
+        COALESCE сохраняется первая отметка), finished_at — на терминальных.
+        """
+        if status in ("dispatched", "in_progress"):
             await self.conn.execute(
-                f"UPDATE {self.table} SET status = $2, started_at = now() WHERE id = $1",
+                f"""UPDATE {self.table}
+                    SET status = $2,
+                        started_at = COALESCE(started_at, now())
+                    WHERE id = $1""",
                 request_id, status,
             )
         elif status in ("done", "error", "timeout"):

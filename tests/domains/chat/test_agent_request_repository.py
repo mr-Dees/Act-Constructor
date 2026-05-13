@@ -134,7 +134,7 @@ async def test_find_pending_returns_parsed_rows(mock_conn):
 
     # SQL отфильтровал по нужным статусам и параметру older_than_sec
     sql, *params = mock_conn.fetch.call_args.args
-    assert "status IN ('pending', 'in_progress')" in sql
+    assert "status IN ('pending', 'dispatched', 'in_progress')" in sql
     assert "interval '1 second'" in sql
     assert params == [30]
 

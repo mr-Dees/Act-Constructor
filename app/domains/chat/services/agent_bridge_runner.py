@@ -101,16 +101,21 @@ async def _run(
                 )
                 return
 
-            # При первом запуске (а не при reconcile) пометим in_progress
-            # сразу, чтобы reconcile не подхватывал свежий запрос.
+            # При первом запуске (а не при reconcile) — статус 'dispatched':
+            # AW-раннер подхватил запрос и начал polling, но внешний агент
+            # ещё не отвечает. 'in_progress' будет выставлен ниже, когда
+            # придёт первое событие от агента.
             if request.get("status") == "pending":
                 await req_repo.update_status(
-                    request_id, status="in_progress",
+                    request_id, status="dispatched",
                 )
 
             bridge = AgentBridgeService(conn)
             blocks: list[dict] = []
             token_usage: dict = {}
+            agent_started = (
+                request.get("status") == "in_progress"
+            )  # уже считаем что агент пишет (reconcile-сценарий)
 
             try:
                 async for upd in bridge.wait_for_completion(
@@ -129,6 +134,14 @@ async def _run(
                     ),
                 ):
                     if upd.event:
+                        # Первое событие от агента — переключаем
+                        # dispatched → in_progress (наблюдаемая стадия
+                        # «агент пишет events»).
+                        if not agent_started:
+                            await req_repo.update_status(
+                                request_id, status="in_progress",
+                            )
+                            agent_started = True
                         ev = upd.event
                         et = ev.get("event_type")
                         payload = ev.get("payload") or {}
