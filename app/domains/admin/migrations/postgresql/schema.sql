@@ -1,4 +1,6 @@
 -- Схема базы данных для домена администрирования (PostgreSQL)
+-- Использует те же плейсхолдеры {SCHEMA}.{PREFIX}, что и GP-вариант:
+-- адаптер подменяет {SCHEMA}. на "" и {PREFIX} на DATABASE__TABLE_PREFIX.
 
 -- ============================================================================
 -- СПРАВОЧНИК ПОЛЬЗОВАТЕЛЕЙ (для локального тестирования)
@@ -41,21 +43,21 @@ ON CONFLICT DO NOTHING;
 -- ТАБЛИЦА РОЛЕЙ
 -- ============================================================================
 
-CREATE TABLE IF NOT EXISTS roles (
+CREATE TABLE IF NOT EXISTS {SCHEMA}.{PREFIX}roles (
     id SERIAL PRIMARY KEY,
     name VARCHAR(100) NOT NULL UNIQUE,
     domain_name VARCHAR(100),
     description TEXT NOT NULL DEFAULT ''
 );
 
-COMMENT ON TABLE roles IS 'Справочник ролей приложения';
-COMMENT ON COLUMN roles.id IS 'Уникальный идентификатор роли';
-COMMENT ON COLUMN roles.name IS 'Уникальное имя роли';
-COMMENT ON COLUMN roles.domain_name IS 'Домен, к которому относится роль (NULL = глобальная)';
-COMMENT ON COLUMN roles.description IS 'Описание роли';
+COMMENT ON TABLE {SCHEMA}.{PREFIX}roles IS 'Справочник ролей приложения';
+COMMENT ON COLUMN {SCHEMA}.{PREFIX}roles.id IS 'Уникальный идентификатор роли';
+COMMENT ON COLUMN {SCHEMA}.{PREFIX}roles.name IS 'Уникальное имя роли';
+COMMENT ON COLUMN {SCHEMA}.{PREFIX}roles.domain_name IS 'Домен, к которому относится роль (NULL = глобальная)';
+COMMENT ON COLUMN {SCHEMA}.{PREFIX}roles.description IS 'Описание роли';
 
 -- Заполняем ролями по умолчанию
-INSERT INTO roles (name, domain_name, description) VALUES
+INSERT INTO {SCHEMA}.{PREFIX}roles (name, domain_name, description) VALUES
     ('Админ', NULL, 'Полный доступ ко всем доменам и функциям'),
     ('Цифровой акт', 'acts', 'Доступ к домену актов'),
     ('ЦК финансовый результат', 'ck_fin_res', 'Доступ к ЦК Фин.Рез.'),
@@ -66,52 +68,44 @@ ON CONFLICT DO NOTHING;
 -- ТАБЛИЦА СВЯЗЕЙ ПОЛЬЗОВАТЕЛЬ — РОЛЬ
 -- ============================================================================
 
-CREATE TABLE IF NOT EXISTS user_roles (
+CREATE TABLE IF NOT EXISTS {SCHEMA}.{PREFIX}user_roles (
     id SERIAL PRIMARY KEY,
     username VARCHAR(50) NOT NULL,
-    role_id INTEGER NOT NULL REFERENCES roles(id) ON DELETE CASCADE,
+    role_id INTEGER NOT NULL REFERENCES {SCHEMA}.{PREFIX}roles(id) ON DELETE CASCADE,
     assigned_by VARCHAR(50) NOT NULL,
     assigned_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
 
     UNIQUE(username, role_id)
 );
 
-COMMENT ON TABLE user_roles IS 'Связь пользователей с ролями';
-COMMENT ON COLUMN user_roles.username IS 'Числовой логин пользователя';
-COMMENT ON COLUMN user_roles.role_id IS 'Ссылка на роль';
-COMMENT ON COLUMN user_roles.assigned_by IS 'Кто назначил роль';
-COMMENT ON COLUMN user_roles.assigned_at IS 'Дата и время назначения роли';
+COMMENT ON TABLE {SCHEMA}.{PREFIX}user_roles IS 'Связь пользователей с ролями';
+COMMENT ON COLUMN {SCHEMA}.{PREFIX}user_roles.username IS 'Числовой логин пользователя';
+COMMENT ON COLUMN {SCHEMA}.{PREFIX}user_roles.role_id IS 'Ссылка на роль';
+COMMENT ON COLUMN {SCHEMA}.{PREFIX}user_roles.assigned_by IS 'Кто назначил роль';
+COMMENT ON COLUMN {SCHEMA}.{PREFIX}user_roles.assigned_at IS 'Дата и время назначения роли';
 
 -- ============================================================================
 -- ИНДЕКСЫ
 -- ============================================================================
 
-CREATE INDEX IF NOT EXISTS idx_user_roles_username
-    ON user_roles(username);
+CREATE INDEX IF NOT EXISTS idx_{PREFIX}user_roles_username
+    ON {SCHEMA}.{PREFIX}user_roles(username);
 
-COMMENT ON INDEX idx_user_roles_username IS 'Индекс для быстрого поиска ролей пользователя';
+CREATE INDEX IF NOT EXISTS idx_{PREFIX}user_roles_role_id
+    ON {SCHEMA}.{PREFIX}user_roles(role_id);
 
-CREATE INDEX IF NOT EXISTS idx_user_roles_role_id
-    ON user_roles(role_id);
-
-COMMENT ON INDEX idx_user_roles_role_id IS 'Индекс для получения пользователей с определённой ролью';
-
-CREATE INDEX IF NOT EXISTS idx_roles_domain_name
-    ON roles(domain_name)
+CREATE INDEX IF NOT EXISTS idx_{PREFIX}roles_domain_name
+    ON {SCHEMA}.{PREFIX}roles(domain_name)
     WHERE domain_name IS NOT NULL;
-
-COMMENT ON INDEX idx_roles_domain_name IS 'Частичный индекс для поиска ролей по домену';
 
 CREATE INDEX IF NOT EXISTS idx_{REF_USER_TABLE}_branch
     ON {REF_USER_TABLE}(branch);
-
-COMMENT ON INDEX idx_{REF_USER_TABLE}_branch IS 'Индекс для фильтрации пользователей по подразделению';
 
 -- ============================================================================
 -- ТАБЛИЦА АУДИТ-ЛОГА АДМИНИСТРИРОВАНИЯ
 -- ============================================================================
 
-CREATE TABLE IF NOT EXISTS admin_audit_log (
+CREATE TABLE IF NOT EXISTS {SCHEMA}.{PREFIX}admin_audit_log (
     id SERIAL PRIMARY KEY,
     action VARCHAR(50) NOT NULL,
     target_username VARCHAR(50) NOT NULL,
@@ -122,17 +116,17 @@ CREATE TABLE IF NOT EXISTS admin_audit_log (
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
 
-COMMENT ON TABLE admin_audit_log IS 'Аудит-лог операций администрирования ролей';
-COMMENT ON COLUMN admin_audit_log.action IS 'Тип операции (assign_role, remove_role)';
-COMMENT ON COLUMN admin_audit_log.target_username IS 'Пользователь, над которым выполнена операция';
-COMMENT ON COLUMN admin_audit_log.admin_username IS 'Администратор, выполнивший операцию';
-COMMENT ON COLUMN admin_audit_log.role_id IS 'ID роли';
-COMMENT ON COLUMN admin_audit_log.role_name IS 'Имя роли (денормализовано)';
-COMMENT ON COLUMN admin_audit_log.details IS 'Дополнительная информация';
-COMMENT ON COLUMN admin_audit_log.created_at IS 'Дата и время операции';
+COMMENT ON TABLE {SCHEMA}.{PREFIX}admin_audit_log IS 'Аудит-лог операций администрирования ролей';
+COMMENT ON COLUMN {SCHEMA}.{PREFIX}admin_audit_log.action IS 'Тип операции (assign_role, remove_role)';
+COMMENT ON COLUMN {SCHEMA}.{PREFIX}admin_audit_log.target_username IS 'Пользователь, над которым выполнена операция';
+COMMENT ON COLUMN {SCHEMA}.{PREFIX}admin_audit_log.admin_username IS 'Администратор, выполнивший операцию';
+COMMENT ON COLUMN {SCHEMA}.{PREFIX}admin_audit_log.role_id IS 'ID роли';
+COMMENT ON COLUMN {SCHEMA}.{PREFIX}admin_audit_log.role_name IS 'Имя роли (денормализовано)';
+COMMENT ON COLUMN {SCHEMA}.{PREFIX}admin_audit_log.details IS 'Дополнительная информация';
+COMMENT ON COLUMN {SCHEMA}.{PREFIX}admin_audit_log.created_at IS 'Дата и время операции';
 
-CREATE INDEX IF NOT EXISTS idx_admin_audit_log_target
-    ON admin_audit_log(target_username);
+CREATE INDEX IF NOT EXISTS idx_{PREFIX}admin_audit_log_target
+    ON {SCHEMA}.{PREFIX}admin_audit_log(target_username);
 
-CREATE INDEX IF NOT EXISTS idx_admin_audit_log_created
-    ON admin_audit_log(created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_{PREFIX}admin_audit_log_created
+    ON {SCHEMA}.{PREFIX}admin_audit_log(created_at DESC);

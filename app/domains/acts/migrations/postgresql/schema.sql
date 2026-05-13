@@ -1,10 +1,12 @@
--- Схема базы данных для Audit Workstation
+-- Схема базы данных для Audit Workstation (PostgreSQL)
+-- Использует те же плейсхолдеры {SCHEMA}.{PREFIX}, что и GP-вариант:
+-- адаптер подменяет {SCHEMA}. на "" и {PREFIX} на DATABASE__TABLE_PREFIX.
 
 -- ============================================================================
 -- ОСНОВНАЯ ТАБЛИЦА АКТОВ
 -- ============================================================================
 
-CREATE TABLE IF NOT EXISTS acts (
+CREATE TABLE IF NOT EXISTS {SCHEMA}.{PREFIX}acts (
     id BIGSERIAL PRIMARY KEY,
 
     -- Номер КМ и части
@@ -80,43 +82,15 @@ CREATE TABLE IF NOT EXISTS acts (
     UNIQUE(km_number_digit, part_number)
 );
 
-COMMENT ON TABLE acts IS 'Основная таблица актов проверки с метаданными';
-
-COMMENT ON COLUMN acts.id IS 'Уникальный идентификатор акта';
-COMMENT ON COLUMN acts.km_number IS 'КМ номер в формате КМ-XX-XXXXX для отображения (НЕ меняется при добавлении СЗ)';
-COMMENT ON COLUMN acts.km_number_digit IS 'КМ номер только цифры (всегда 7 цифр) для быстрого поиска';
-COMMENT ON COLUMN acts.part_number IS 'Номер части акта (1,2,3... для актов без СЗ или 4 цифры из СЗ для актов с СЗ)';
-COMMENT ON COLUMN acts.total_parts IS 'Общее количество частей акта (актов с данным КМ)';
-COMMENT ON COLUMN acts.inspection_name IS 'Наименование проверки';
-COMMENT ON COLUMN acts.city IS 'Город проведения проверки';
-COMMENT ON COLUMN acts.created_date IS 'Дата составления акта (опционально)';
-COMMENT ON COLUMN acts.order_number IS 'Номер приказа о проверке';
-COMMENT ON COLUMN acts.order_date IS 'Дата приказа о проверке';
-COMMENT ON COLUMN acts.is_process_based IS 'Флаг: является ли проверка процессной';
-COMMENT ON COLUMN acts.inspection_start_date IS 'Дата начала проверки';
-COMMENT ON COLUMN acts.inspection_end_date IS 'Дата окончания проверки';
-COMMENT ON COLUMN acts.service_note IS 'Номер служебной записки в формате Текст/XXXX';
-COMMENT ON COLUMN acts.service_note_date IS 'Дата служебной записки';
-COMMENT ON COLUMN acts.needs_created_date IS 'Флаг валидации: требуется ли дата составления';
-COMMENT ON COLUMN acts.needs_directive_number IS 'Флаг валидации: требуется ли номер поручения';
-COMMENT ON COLUMN acts.needs_invoice_check IS 'Флаг валидации: требуется ли проверка фактуры';
-COMMENT ON COLUMN acts.needs_service_note IS 'Флаг валидации: требуется ли информация по служебной записке';
-COMMENT ON COLUMN acts.locked_by IS 'Username пользователя, заблокировавшего акт для редактирования';
-COMMENT ON COLUMN acts.locked_at IS 'Время начала блокировки';
-COMMENT ON COLUMN acts.lock_expires_at IS 'Время истечения блокировки (автоосвобождение)';
-COMMENT ON COLUMN acts.created_at IS 'Дата и время создания записи';
-COMMENT ON COLUMN acts.updated_at IS 'Дата и время последнего обновления метаданных';
-COMMENT ON COLUMN acts.created_by IS 'Числовой логин пользователя-создателя';
-COMMENT ON COLUMN acts.last_edited_by IS 'Числовой логин последнего редактора содержимого';
-COMMENT ON COLUMN acts.last_edited_at IS 'Дата и время последнего редактирования содержимого';
+COMMENT ON TABLE {SCHEMA}.{PREFIX}acts IS 'Основная таблица актов проверки с метаданными';
 
 -- ============================================================================
 -- ТАБЛИЦА АУДИТОРСКОЙ ГРУППЫ
 -- ============================================================================
 
-CREATE TABLE IF NOT EXISTS audit_team_members (
+CREATE TABLE IF NOT EXISTS {SCHEMA}.{PREFIX}audit_team_members (
     id BIGSERIAL PRIMARY KEY,
-    act_id INTEGER NOT NULL REFERENCES acts(id) ON DELETE CASCADE,
+    act_id INTEGER NOT NULL REFERENCES {SCHEMA}.{PREFIX}acts(id) ON DELETE CASCADE,
     audit_act_id VARCHAR(36),
     role VARCHAR(50) NOT NULL CHECK (role IN ('Куратор', 'Руководитель', 'Редактор', 'Участник')),
     full_name VARCHAR(255) NOT NULL,
@@ -129,24 +103,15 @@ CREATE TABLE IF NOT EXISTS audit_team_members (
         CHECK (order_index >= 0)
 );
 
-COMMENT ON TABLE audit_team_members IS 'Состав аудиторской группы для каждого акта';
-
-COMMENT ON COLUMN audit_team_members.id IS 'Уникальный идентификатор записи';
-COMMENT ON COLUMN audit_team_members.act_id IS 'Ссылка на акт';
-COMMENT ON COLUMN audit_team_members.role IS 'Роль члена группы: Куратор, Руководитель, Редактор или Участник';
-COMMENT ON COLUMN audit_team_members.full_name IS 'Полное имя члена группы (ФИО)';
-COMMENT ON COLUMN audit_team_members.position IS 'Должность члена группы';
-COMMENT ON COLUMN audit_team_members.username IS 'Числовой логин пользователя в системе';
-COMMENT ON COLUMN audit_team_members.order_index IS 'Порядок отображения члена группы (для сортировки)';
-COMMENT ON COLUMN audit_team_members.created_at IS 'Дата и время добавления в группу';
+COMMENT ON TABLE {SCHEMA}.{PREFIX}audit_team_members IS 'Состав аудиторской группы для каждого акта';
 
 -- ============================================================================
 -- ТАБЛИЦА ПОРУЧЕНИЙ
 -- ============================================================================
 
-CREATE TABLE IF NOT EXISTS act_directives (
+CREATE TABLE IF NOT EXISTS {SCHEMA}.{PREFIX}act_directives (
     id BIGSERIAL PRIMARY KEY,
-    act_id INTEGER NOT NULL REFERENCES acts(id) ON DELETE CASCADE,
+    act_id INTEGER NOT NULL REFERENCES {SCHEMA}.{PREFIX}acts(id) ON DELETE CASCADE,
     audit_act_id VARCHAR(36),
     audit_point_id VARCHAR(36),
     point_number VARCHAR(50) NOT NULL,
@@ -162,23 +127,15 @@ CREATE TABLE IF NOT EXISTS act_directives (
         CHECK (order_index >= 0)
 );
 
-COMMENT ON TABLE act_directives IS 'Действующие поручения, относящиеся к акту';
-
-COMMENT ON COLUMN act_directives.id IS 'Уникальный идентификатор поручения';
-COMMENT ON COLUMN act_directives.act_id IS 'Ссылка на акт';
-COMMENT ON COLUMN act_directives.point_number IS 'Номер пункта в акте (формат: 5.X или 5.X.Y или 5.X.Y.Z и т.д.)';
-COMMENT ON COLUMN act_directives.node_id IS 'ID узла в дереве для синхронизации point_number';
-COMMENT ON COLUMN act_directives.directive_number IS 'Номер действующего поручения';
-COMMENT ON COLUMN act_directives.order_index IS 'Порядок отображения поручения (для сортировки)';
-COMMENT ON COLUMN act_directives.created_at IS 'Дата и время создания записи';
+COMMENT ON TABLE {SCHEMA}.{PREFIX}act_directives IS 'Действующие поручения, относящиеся к акту';
 
 -- ============================================================================
 -- ТАБЛИЦА СТРУКТУРЫ ДЕРЕВА АКТА
 -- ============================================================================
 
-CREATE TABLE IF NOT EXISTS act_tree (
+CREATE TABLE IF NOT EXISTS {SCHEMA}.{PREFIX}act_tree (
     id BIGSERIAL PRIMARY KEY,
-    act_id INTEGER UNIQUE NOT NULL REFERENCES acts(id) ON DELETE CASCADE,
+    act_id INTEGER UNIQUE NOT NULL REFERENCES {SCHEMA}.{PREFIX}acts(id) ON DELETE CASCADE,
     tree_data JSONB NOT NULL,
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
@@ -187,21 +144,15 @@ CREATE TABLE IF NOT EXISTS act_tree (
         CHECK (jsonb_typeof(tree_data) = 'object')
 );
 
-COMMENT ON TABLE act_tree IS 'Иерархическая структура акта в формате JSONB дерева';
-
-COMMENT ON COLUMN act_tree.id IS 'Уникальный идентификатор записи';
-COMMENT ON COLUMN act_tree.act_id IS 'Ссылка на акт (один акт = одно дерево)';
-COMMENT ON COLUMN act_tree.tree_data IS 'JSONB структура дерева с узлами, метками и детьми';
-COMMENT ON COLUMN act_tree.created_at IS 'Дата и время создания дерева';
-COMMENT ON COLUMN act_tree.updated_at IS 'Дата и время последнего изменения структуры';
+COMMENT ON TABLE {SCHEMA}.{PREFIX}act_tree IS 'Иерархическая структура акта в формате JSONB дерева';
 
 -- ============================================================================
 -- ТАБЛИЦА ТАБЛИЦ (ДЕНОРМАЛИЗОВАННАЯ)
 -- ============================================================================
 
-CREATE TABLE IF NOT EXISTS act_tables (
+CREATE TABLE IF NOT EXISTS {SCHEMA}.{PREFIX}act_tables (
     id BIGSERIAL PRIMARY KEY,
-    act_id INTEGER NOT NULL REFERENCES acts(id) ON DELETE CASCADE,
+    act_id INTEGER NOT NULL REFERENCES {SCHEMA}.{PREFIX}acts(id) ON DELETE CASCADE,
     audit_act_id VARCHAR(36),
     audit_point_id VARCHAR(36),
     table_id VARCHAR(100) NOT NULL,
@@ -228,32 +179,15 @@ CREATE TABLE IF NOT EXISTS act_tables (
     UNIQUE(act_id, table_id)
 );
 
-COMMENT ON TABLE act_tables IS 'Таблицы внутри актов (денормализованное хранение для быстрого доступа)';
-
-COMMENT ON COLUMN act_tables.id IS 'Уникальный идентификатор записи';
-COMMENT ON COLUMN act_tables.act_id IS 'Ссылка на акт';
-COMMENT ON COLUMN act_tables.table_id IS 'Уникальный ID таблицы внутри акта';
-COMMENT ON COLUMN act_tables.node_id IS 'ID узла в дереве, к которому привязана таблица';
-COMMENT ON COLUMN act_tables.node_number IS 'Номер узла (например, 3.2.1) для аналитики';
-COMMENT ON COLUMN act_tables.table_label IS 'Название таблицы для поиска и навигации';
-COMMENT ON COLUMN act_tables.grid_data IS 'JSONB массив строк и ячеек таблицы';
-COMMENT ON COLUMN act_tables.col_widths IS 'JSONB массив ширин колонок в пикселях';
-COMMENT ON COLUMN act_tables.is_protected IS 'Флаг: защищена ли таблица от редактирования';
-COMMENT ON COLUMN act_tables.is_deletable IS 'Флаг: можно ли удалить таблицу';
-COMMENT ON COLUMN act_tables.is_metrics_table IS 'Флаг: таблица метрик';
-COMMENT ON COLUMN act_tables.is_main_metrics_table IS 'Флаг: основная таблица метрик';
-COMMENT ON COLUMN act_tables.is_regular_risk_table IS 'Флаг: таблица регулярных рисков';
-COMMENT ON COLUMN act_tables.is_operational_risk_table IS 'Флаг: таблица операционных рисков';
-COMMENT ON COLUMN act_tables.created_at IS 'Дата и время создания таблицы';
-COMMENT ON COLUMN act_tables.updated_at IS 'Дата и время последнего изменения таблицы';
+COMMENT ON TABLE {SCHEMA}.{PREFIX}act_tables IS 'Таблицы внутри актов (денормализованное хранение для быстрого доступа)';
 
 -- ============================================================================
 -- ТАБЛИЦА ТЕКСТОВЫХ БЛОКОВ
 -- ============================================================================
 
-CREATE TABLE IF NOT EXISTS act_textblocks (
+CREATE TABLE IF NOT EXISTS {SCHEMA}.{PREFIX}act_textblocks (
     id BIGSERIAL PRIMARY KEY,
-    act_id INTEGER NOT NULL REFERENCES acts(id) ON DELETE CASCADE,
+    act_id INTEGER NOT NULL REFERENCES {SCHEMA}.{PREFIX}acts(id) ON DELETE CASCADE,
     audit_act_id VARCHAR(36),
     audit_point_id VARCHAR(36),
     textblock_id VARCHAR(100) NOT NULL,
@@ -270,25 +204,15 @@ CREATE TABLE IF NOT EXISTS act_textblocks (
     UNIQUE(act_id, textblock_id)
 );
 
-COMMENT ON TABLE act_textblocks IS 'Текстовые блоки с форматированием внутри актов';
-
-COMMENT ON COLUMN act_textblocks.id IS 'Уникальный идентификатор записи';
-COMMENT ON COLUMN act_textblocks.act_id IS 'Ссылка на акт';
-COMMENT ON COLUMN act_textblocks.textblock_id IS 'Уникальный ID текстового блока внутри акта';
-COMMENT ON COLUMN act_textblocks.node_id IS 'ID узла в дереве, к которому привязан блок';
-COMMENT ON COLUMN act_textblocks.node_number IS 'Номер узла (например, 2.1) для аналитики';
-COMMENT ON COLUMN act_textblocks.content IS 'Текстовое содержимое блока';
-COMMENT ON COLUMN act_textblocks.formatting IS 'JSONB объект с информацией о форматировании (стили, выравнивание и т.д.)';
-COMMENT ON COLUMN act_textblocks.created_at IS 'Дата и время создания блока';
-COMMENT ON COLUMN act_textblocks.updated_at IS 'Дата и время последнего изменения блока';
+COMMENT ON TABLE {SCHEMA}.{PREFIX}act_textblocks IS 'Текстовые блоки с форматированием внутри актов';
 
 -- ============================================================================
 -- ТАБЛИЦА НАРУШЕНИЙ
 -- ============================================================================
 
-CREATE TABLE IF NOT EXISTS act_violations (
+CREATE TABLE IF NOT EXISTS {SCHEMA}.{PREFIX}act_violations (
     id BIGSERIAL PRIMARY KEY,
-    act_id INTEGER NOT NULL REFERENCES acts(id) ON DELETE CASCADE,
+    act_id INTEGER NOT NULL REFERENCES {SCHEMA}.{PREFIX}acts(id) ON DELETE CASCADE,
     audit_act_id VARCHAR(36),
     audit_point_id VARCHAR(36),
     violation_id VARCHAR(100) NOT NULL,
@@ -346,31 +270,15 @@ CREATE TABLE IF NOT EXISTS act_violations (
     UNIQUE(act_id, violation_id)
 );
 
-COMMENT ON TABLE act_violations IS 'Нарушения, выявленные в ходе проверки';
-
-COMMENT ON COLUMN act_violations.id IS 'Уникальный идентификатор записи';
-COMMENT ON COLUMN act_violations.act_id IS 'Ссылка на акт';
-COMMENT ON COLUMN act_violations.violation_id IS 'Уникальный ID нарушения внутри акта';
-COMMENT ON COLUMN act_violations.node_id IS 'ID узла в дереве, к которому привязано нарушение';
-COMMENT ON COLUMN act_violations.node_number IS 'Номер узла (например, 5.1.3) для аналитики';
-COMMENT ON COLUMN act_violations.violated IS 'Что нарушено (нормативная база)';
-COMMENT ON COLUMN act_violations.established IS 'Что установлено (факты нарушения)';
-COMMENT ON COLUMN act_violations.description_list IS 'JSONB объект с полями enabled и items для списка описаний';
-COMMENT ON COLUMN act_violations.additional_content IS 'JSONB объект с полями enabled и items для дополнительного содержимого';
-COMMENT ON COLUMN act_violations.reasons IS 'JSONB объект с полями enabled и content для причин нарушения';
-COMMENT ON COLUMN act_violations.consequences IS 'JSONB объект с полями enabled и content для последствий нарушения';
-COMMENT ON COLUMN act_violations.responsible IS 'JSONB объект с полями enabled и content для ответственных лиц';
-COMMENT ON COLUMN act_violations.recommendations IS 'JSONB объект с полями enabled и content для рекомендаций по устранению';
-COMMENT ON COLUMN act_violations.created_at IS 'Дата и время создания записи о нарушении';
-COMMENT ON COLUMN act_violations.updated_at IS 'Дата и время последнего изменения записи';
+COMMENT ON TABLE {SCHEMA}.{PREFIX}act_violations IS 'Нарушения, выявленные в ходе проверки';
 
 -- ============================================================================
 -- ТАБЛИЦА ФАКТУР
 -- ============================================================================
 
-CREATE TABLE IF NOT EXISTS act_invoices (
+CREATE TABLE IF NOT EXISTS {SCHEMA}.{PREFIX}act_invoices (
     id BIGSERIAL PRIMARY KEY,
-    act_id INTEGER NOT NULL REFERENCES acts(id) ON DELETE CASCADE,
+    act_id INTEGER NOT NULL REFERENCES {SCHEMA}.{PREFIX}acts(id) ON DELETE CASCADE,
     audit_act_id VARCHAR(36),
     audit_point_id VARCHAR(36),
     node_id VARCHAR(100) NOT NULL,
@@ -395,22 +303,7 @@ CREATE TABLE IF NOT EXISTS act_invoices (
     UNIQUE(act_id, node_id)
 );
 
-COMMENT ON TABLE act_invoices IS 'Фактуры, прикрепленные к пунктам акта';
-
-COMMENT ON COLUMN act_invoices.id IS 'Уникальный идентификатор записи';
-COMMENT ON COLUMN act_invoices.act_id IS 'Ссылка на акт';
-COMMENT ON COLUMN act_invoices.node_id IS 'ID узла в дереве, к которому привязана фактура';
-COMMENT ON COLUMN act_invoices.node_number IS 'Номер узла (например, 5.1.3) для аналитики';
-COMMENT ON COLUMN act_invoices.db_type IS 'Тип базы данных: hive или greenplum';
-COMMENT ON COLUMN act_invoices.schema_name IS 'Имя схемы в базе данных';
-COMMENT ON COLUMN act_invoices.table_name IS 'Имя таблицы в базе данных';
-COMMENT ON COLUMN act_invoices.metrics IS 'JSONB массив метрик [{metric_type, metric_code, metric_name}, ...] (до 5 элементов)';
-COMMENT ON COLUMN act_invoices.verification_status IS 'Статус верификации: pending, verified, rejected';
-COMMENT ON COLUMN act_invoices.created_at IS 'Дата и время создания записи';
-COMMENT ON COLUMN act_invoices.updated_at IS 'Дата и время последнего обновления';
-COMMENT ON COLUMN act_invoices.created_by IS 'Числовой логин пользователя-создателя';
-COMMENT ON COLUMN act_invoices.process IS 'JSONB массив процессов [{"process_code": "П6152"}, ...]';
-COMMENT ON COLUMN act_invoices.profile_div IS 'Подразделение профиля';
+COMMENT ON TABLE {SCHEMA}.{PREFIX}act_invoices IS 'Фактуры, прикрепленные к пунктам акта';
 
 -- ============================================================================
 -- РЕЕСТР HIVE-ТАБЛИЦ (для локального тестирования)
@@ -441,7 +334,7 @@ ON CONFLICT DO NOTHING;
 -- ТАБЛИЦА АУДИТ-ЛОГА
 -- ============================================================================
 
-CREATE TABLE IF NOT EXISTS audit_log (
+CREATE TABLE IF NOT EXISTS {SCHEMA}.{PREFIX}audit_log (
     id BIGSERIAL PRIMARY KEY,
     act_id INTEGER,
     action VARCHAR(50) NOT NULL,
@@ -451,21 +344,15 @@ CREATE TABLE IF NOT EXISTS audit_log (
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
 
-COMMENT ON TABLE audit_log IS 'Лог чувствительных операций для compliance';
-COMMENT ON COLUMN audit_log.act_id IS 'ID акта (NULL для системных событий)';
-COMMENT ON COLUMN audit_log.action IS 'Тип операции: create, update, delete, duplicate, lock, unlock';
-COMMENT ON COLUMN audit_log.username IS 'Пользователь, выполнивший операцию';
-COMMENT ON COLUMN audit_log.details IS 'JSONB с деталями операции';
-COMMENT ON COLUMN audit_log.changelog IS 'JSONB массив гранулярных изменений из конструктора';
-COMMENT ON COLUMN audit_log.created_at IS 'Время операции';
+COMMENT ON TABLE {SCHEMA}.{PREFIX}audit_log IS 'Лог чувствительных операций для compliance';
 
 -- ============================================================================
 -- ТАБЛИЦА ВЕРСИЙ СОДЕРЖИМОГО
 -- ============================================================================
 
-CREATE TABLE IF NOT EXISTS act_content_versions (
+CREATE TABLE IF NOT EXISTS {SCHEMA}.{PREFIX}act_content_versions (
     id BIGSERIAL PRIMARY KEY,
-    act_id INTEGER NOT NULL REFERENCES acts(id) ON DELETE CASCADE,
+    act_id INTEGER NOT NULL REFERENCES {SCHEMA}.{PREFIX}acts(id) ON DELETE CASCADE,
     version_number INTEGER NOT NULL,
     save_type VARCHAR(20) NOT NULL DEFAULT 'auto',
     username VARCHAR(50) NOT NULL,
@@ -477,249 +364,169 @@ CREATE TABLE IF NOT EXISTS act_content_versions (
     UNIQUE (act_id, version_number)
 );
 
-COMMENT ON TABLE act_content_versions IS 'Снэпшоты содержимого актов для просмотра истории и восстановления';
-COMMENT ON COLUMN act_content_versions.act_id IS 'ID акта';
-COMMENT ON COLUMN act_content_versions.version_number IS 'Порядковый номер версии (автоинкремент внутри act_id)';
-COMMENT ON COLUMN act_content_versions.save_type IS 'Тип сохранения: manual, periodic, auto';
-COMMENT ON COLUMN act_content_versions.username IS 'Пользователь, создавший версию';
-COMMENT ON COLUMN act_content_versions.tree_data IS 'Снэпшот дерева';
-COMMENT ON COLUMN act_content_versions.tables_data IS 'Снэпшот таблиц';
-COMMENT ON COLUMN act_content_versions.textblocks_data IS 'Снэпшот текстовых блоков';
-COMMENT ON COLUMN act_content_versions.violations_data IS 'Снэпшот нарушений';
-COMMENT ON COLUMN act_content_versions.created_at IS 'Время создания версии';
+COMMENT ON TABLE {SCHEMA}.{PREFIX}act_content_versions IS 'Снэпшоты содержимого актов для просмотра истории и восстановления';
 
 -- ============================================================================
 -- ИНДЕКСЫ ДЛЯ ОПТИМИЗАЦИИ ЗАПРОСОВ
 -- ============================================================================
 
 -- Индексы на acts
-CREATE INDEX IF NOT EXISTS idx_acts_km_digit
-    ON acts(km_number_digit);
+CREATE INDEX IF NOT EXISTS idx_{PREFIX}acts_km_digit
+    ON {SCHEMA}.{PREFIX}acts(km_number_digit);
 
-COMMENT ON INDEX idx_acts_km_digit IS 'Индекс для быстрого поиска по цифровой части КМ';
+CREATE INDEX IF NOT EXISTS idx_{PREFIX}acts_km_digit_part
+    ON {SCHEMA}.{PREFIX}acts(km_number_digit, part_number);
 
-CREATE INDEX IF NOT EXISTS idx_acts_km_digit_part
-    ON acts(km_number_digit, part_number);
-
-COMMENT ON INDEX idx_acts_km_digit_part IS 'Композитный индекс для поиска конкретной части КМ';
-
-CREATE INDEX IF NOT EXISTS idx_acts_service_note
-    ON acts(service_note)
+CREATE INDEX IF NOT EXISTS idx_{PREFIX}acts_service_note
+    ON {SCHEMA}.{PREFIX}acts(service_note)
     WHERE service_note IS NOT NULL;
 
-COMMENT ON INDEX idx_acts_service_note IS 'Частичный индекс на служебные записки (только не NULL значения)';
-
-CREATE INDEX IF NOT EXISTS idx_acts_service_note_date
-    ON acts(service_note_date)
+CREATE INDEX IF NOT EXISTS idx_{PREFIX}acts_service_note_date
+    ON {SCHEMA}.{PREFIX}acts(service_note_date)
     WHERE service_note_date IS NOT NULL;
 
-COMMENT ON INDEX idx_acts_service_note_date IS 'Частичный индекс на даты служебных записок';
+CREATE INDEX IF NOT EXISTS idx_{PREFIX}acts_created_by
+    ON {SCHEMA}.{PREFIX}acts(created_by);
 
-CREATE INDEX IF NOT EXISTS idx_acts_created_by
-    ON acts(created_by);
-
-COMMENT ON INDEX idx_acts_created_by IS 'Индекс для поиска актов по создателю';
-
-CREATE INDEX IF NOT EXISTS idx_acts_last_edited_at
-    ON acts(last_edited_at DESC NULLS LAST);
-
-COMMENT ON INDEX idx_acts_last_edited_at IS 'Индекс для сортировки по времени последнего редактирования';
+CREATE INDEX IF NOT EXISTS idx_{PREFIX}acts_last_edited_at
+    ON {SCHEMA}.{PREFIX}acts(last_edited_at DESC NULLS LAST);
 
 -- Индексы для блокировок
-CREATE INDEX IF NOT EXISTS idx_acts_locked_by
-    ON acts(locked_by)
+CREATE INDEX IF NOT EXISTS idx_{PREFIX}acts_locked_by
+    ON {SCHEMA}.{PREFIX}acts(locked_by)
     WHERE locked_by IS NOT NULL;
 
-COMMENT ON INDEX idx_acts_locked_by IS 'Частичный индекс для поиска заблокированных актов по пользователю';
-
-CREATE INDEX IF NOT EXISTS idx_acts_lock_expires
-    ON acts(lock_expires_at)
+CREATE INDEX IF NOT EXISTS idx_{PREFIX}acts_lock_expires
+    ON {SCHEMA}.{PREFIX}acts(lock_expires_at)
     WHERE lock_expires_at IS NOT NULL;
 
-COMMENT ON INDEX idx_acts_lock_expires IS 'Частичный индекс для поиска актов с истекающей блокировкой';
-
 -- Индексы на audit_team_members
-CREATE INDEX IF NOT EXISTS idx_audit_team_username
-    ON audit_team_members(username);
+CREATE INDEX IF NOT EXISTS idx_{PREFIX}audit_team_username
+    ON {SCHEMA}.{PREFIX}audit_team_members(username);
 
-COMMENT ON INDEX idx_audit_team_username IS 'Индекс для быстрого поиска актов пользователя';
+CREATE INDEX IF NOT EXISTS idx_{PREFIX}audit_team_act_id
+    ON {SCHEMA}.{PREFIX}audit_team_members(act_id);
 
-CREATE INDEX IF NOT EXISTS idx_audit_team_act_id
-    ON audit_team_members(act_id);
-
-COMMENT ON INDEX idx_audit_team_act_id IS 'Индекс для быстрого получения команды по акту';
-
-CREATE INDEX IF NOT EXISTS idx_audit_team_act_order
-    ON audit_team_members(act_id, order_index);
-
-COMMENT ON INDEX idx_audit_team_act_order IS 'Композитный индекс для сортировки членов группы';
+CREATE INDEX IF NOT EXISTS idx_{PREFIX}audit_team_act_order
+    ON {SCHEMA}.{PREFIX}audit_team_members(act_id, order_index);
 
 -- Индексы на act_directives
-CREATE INDEX IF NOT EXISTS idx_act_directives_act_id
-    ON act_directives(act_id);
+CREATE INDEX IF NOT EXISTS idx_{PREFIX}act_directives_act_id
+    ON {SCHEMA}.{PREFIX}act_directives(act_id);
 
-COMMENT ON INDEX idx_act_directives_act_id IS 'Индекс для быстрого получения поручений по акту';
-
-CREATE INDEX IF NOT EXISTS idx_act_directives_act_order
-    ON act_directives(act_id, order_index);
-
-COMMENT ON INDEX idx_act_directives_act_order IS 'Композитный индекс для сортировки поручений';
+CREATE INDEX IF NOT EXISTS idx_{PREFIX}act_directives_act_order
+    ON {SCHEMA}.{PREFIX}act_directives(act_id, order_index);
 
 -- Индексы на act_tables
-CREATE INDEX IF NOT EXISTS idx_act_tables_act_id
-    ON act_tables(act_id);
+CREATE INDEX IF NOT EXISTS idx_{PREFIX}act_tables_act_id
+    ON {SCHEMA}.{PREFIX}act_tables(act_id);
 
-COMMENT ON INDEX idx_act_tables_act_id IS 'Индекс для получения всех таблиц акта';
-
-CREATE INDEX IF NOT EXISTS idx_act_tables_node_number
-    ON act_tables(act_id, node_number)
+CREATE INDEX IF NOT EXISTS idx_{PREFIX}act_tables_node_number
+    ON {SCHEMA}.{PREFIX}act_tables(act_id, node_number)
     WHERE node_number IS NOT NULL;
 
-COMMENT ON INDEX idx_act_tables_node_number IS 'Частичный индекс для поиска таблиц по номеру узла';
-
-CREATE INDEX IF NOT EXISTS idx_act_tables_label
-    ON act_tables(act_id, table_label)
+CREATE INDEX IF NOT EXISTS idx_{PREFIX}act_tables_label
+    ON {SCHEMA}.{PREFIX}act_tables(act_id, table_label)
     WHERE table_label IS NOT NULL;
 
-COMMENT ON INDEX idx_act_tables_label IS 'Частичный индекс для поиска таблиц по названию';
-
-CREATE INDEX IF NOT EXISTS idx_act_tables_special_flags
-    ON act_tables(act_id)
+CREATE INDEX IF NOT EXISTS idx_{PREFIX}act_tables_special_flags
+    ON {SCHEMA}.{PREFIX}act_tables(act_id)
     WHERE is_metrics_table = TRUE
        OR is_main_metrics_table = TRUE
        OR is_regular_risk_table = TRUE
        OR is_operational_risk_table = TRUE;
 
-COMMENT ON INDEX idx_act_tables_special_flags IS 'Индекс для быстрого поиска специальных таблиц';
-
 -- Индексы на act_textblocks
-CREATE INDEX IF NOT EXISTS idx_act_textblocks_act_id
-    ON act_textblocks(act_id);
+CREATE INDEX IF NOT EXISTS idx_{PREFIX}act_textblocks_act_id
+    ON {SCHEMA}.{PREFIX}act_textblocks(act_id);
 
-COMMENT ON INDEX idx_act_textblocks_act_id IS 'Индекс для получения всех текстовых блоков акта';
-
-CREATE INDEX IF NOT EXISTS idx_act_textblocks_node_number
-    ON act_textblocks(act_id, node_number)
+CREATE INDEX IF NOT EXISTS idx_{PREFIX}act_textblocks_node_number
+    ON {SCHEMA}.{PREFIX}act_textblocks(act_id, node_number)
     WHERE node_number IS NOT NULL;
-
-COMMENT ON INDEX idx_act_textblocks_node_number IS 'Частичный индекс для поиска блоков по номеру узла';
 
 -- Индексы на act_violations
-CREATE INDEX IF NOT EXISTS idx_act_violations_act_id
-    ON act_violations(act_id);
+CREATE INDEX IF NOT EXISTS idx_{PREFIX}act_violations_act_id
+    ON {SCHEMA}.{PREFIX}act_violations(act_id);
 
-COMMENT ON INDEX idx_act_violations_act_id IS 'Индекс для получения всех нарушений акта';
-
-CREATE INDEX IF NOT EXISTS idx_act_violations_node_number
-    ON act_violations(act_id, node_number)
+CREATE INDEX IF NOT EXISTS idx_{PREFIX}act_violations_node_number
+    ON {SCHEMA}.{PREFIX}act_violations(act_id, node_number)
     WHERE node_number IS NOT NULL;
 
-COMMENT ON INDEX idx_act_violations_node_number IS 'Частичный индекс для поиска нарушений по номеру узла';
-
 -- Индексы на act_invoices
-CREATE INDEX IF NOT EXISTS idx_act_invoices_act_id
-    ON act_invoices(act_id);
+CREATE INDEX IF NOT EXISTS idx_{PREFIX}act_invoices_act_id
+    ON {SCHEMA}.{PREFIX}act_invoices(act_id);
 
-COMMENT ON INDEX idx_act_invoices_act_id IS 'Индекс для получения всех фактур акта';
-
-CREATE INDEX IF NOT EXISTS idx_act_invoices_node
-    ON act_invoices(act_id, node_id);
-
-COMMENT ON INDEX idx_act_invoices_node IS 'Индекс для поиска фактуры по узлу';
+CREATE INDEX IF NOT EXISTS idx_{PREFIX}act_invoices_node
+    ON {SCHEMA}.{PREFIX}act_invoices(act_id, node_id);
 
 -- Индексы на audit_act_id
-CREATE INDEX IF NOT EXISTS idx_acts_audit_act_id
-    ON acts(audit_act_id)
+CREATE INDEX IF NOT EXISTS idx_{PREFIX}acts_audit_act_id
+    ON {SCHEMA}.{PREFIX}acts(audit_act_id)
     WHERE audit_act_id IS NOT NULL;
 
-COMMENT ON INDEX idx_acts_audit_act_id IS 'Индекс для поиска по идентификатору аудита акта';
-
-CREATE INDEX IF NOT EXISTS idx_audit_team_audit_act_id
-    ON audit_team_members(audit_act_id)
+CREATE INDEX IF NOT EXISTS idx_{PREFIX}audit_team_audit_act_id
+    ON {SCHEMA}.{PREFIX}audit_team_members(audit_act_id)
     WHERE audit_act_id IS NOT NULL;
 
-COMMENT ON INDEX idx_audit_team_audit_act_id IS 'Индекс для поиска членов группы по идентификатору аудита';
-
-CREATE INDEX IF NOT EXISTS idx_act_directives_audit_act_id
-    ON act_directives(audit_act_id)
+CREATE INDEX IF NOT EXISTS idx_{PREFIX}act_directives_audit_act_id
+    ON {SCHEMA}.{PREFIX}act_directives(audit_act_id)
     WHERE audit_act_id IS NOT NULL;
 
-COMMENT ON INDEX idx_act_directives_audit_act_id IS 'Индекс для поиска поручений по идентификатору аудита';
-
-CREATE INDEX IF NOT EXISTS idx_act_tables_audit_act_id
-    ON act_tables(audit_act_id)
+CREATE INDEX IF NOT EXISTS idx_{PREFIX}act_tables_audit_act_id
+    ON {SCHEMA}.{PREFIX}act_tables(audit_act_id)
     WHERE audit_act_id IS NOT NULL;
 
-COMMENT ON INDEX idx_act_tables_audit_act_id IS 'Индекс для поиска таблиц по идентификатору аудита';
-
-CREATE INDEX IF NOT EXISTS idx_act_textblocks_audit_act_id
-    ON act_textblocks(audit_act_id)
+CREATE INDEX IF NOT EXISTS idx_{PREFIX}act_textblocks_audit_act_id
+    ON {SCHEMA}.{PREFIX}act_textblocks(audit_act_id)
     WHERE audit_act_id IS NOT NULL;
 
-COMMENT ON INDEX idx_act_textblocks_audit_act_id IS 'Индекс для поиска текстовых блоков по идентификатору аудита';
-
-CREATE INDEX IF NOT EXISTS idx_act_violations_audit_act_id
-    ON act_violations(audit_act_id)
+CREATE INDEX IF NOT EXISTS idx_{PREFIX}act_violations_audit_act_id
+    ON {SCHEMA}.{PREFIX}act_violations(audit_act_id)
     WHERE audit_act_id IS NOT NULL;
 
-COMMENT ON INDEX idx_act_violations_audit_act_id IS 'Индекс для поиска нарушений по идентификатору аудита';
-
-CREATE INDEX IF NOT EXISTS idx_act_invoices_audit_act_id
-    ON act_invoices(audit_act_id)
+CREATE INDEX IF NOT EXISTS idx_{PREFIX}act_invoices_audit_act_id
+    ON {SCHEMA}.{PREFIX}act_invoices(audit_act_id)
     WHERE audit_act_id IS NOT NULL;
-
-COMMENT ON INDEX idx_act_invoices_audit_act_id IS 'Индекс для поиска фактур по идентификатору аудита';
 
 -- Индексы на audit_log
-CREATE INDEX IF NOT EXISTS idx_audit_log_act_id
-    ON audit_log(act_id)
+CREATE INDEX IF NOT EXISTS idx_{PREFIX}audit_log_act_id
+    ON {SCHEMA}.{PREFIX}audit_log(act_id)
     WHERE act_id IS NOT NULL;
 
-CREATE INDEX IF NOT EXISTS idx_audit_log_username
-    ON audit_log(username);
+CREATE INDEX IF NOT EXISTS idx_{PREFIX}audit_log_username
+    ON {SCHEMA}.{PREFIX}audit_log(username);
 
-CREATE INDEX IF NOT EXISTS idx_audit_log_action
-    ON audit_log(action);
+CREATE INDEX IF NOT EXISTS idx_{PREFIX}audit_log_action
+    ON {SCHEMA}.{PREFIX}audit_log(action);
 
-CREATE INDEX IF NOT EXISTS idx_audit_log_created_at
-    ON audit_log(created_at);
+CREATE INDEX IF NOT EXISTS idx_{PREFIX}audit_log_created_at
+    ON {SCHEMA}.{PREFIX}audit_log(created_at);
 
-CREATE INDEX IF NOT EXISTS idx_audit_log_act_created
-    ON audit_log(act_id, created_at DESC)
+CREATE INDEX IF NOT EXISTS idx_{PREFIX}audit_log_act_created
+    ON {SCHEMA}.{PREFIX}audit_log(act_id, created_at DESC)
     WHERE act_id IS NOT NULL;
-
-COMMENT ON INDEX idx_audit_log_act_created IS 'Составной индекс для запросов аудит-лога по акту с сортировкой по времени';
 
 -- Индексы на act_content_versions
-CREATE INDEX IF NOT EXISTS idx_act_content_versions_act
-    ON act_content_versions(act_id, version_number DESC);
-
-COMMENT ON INDEX idx_act_content_versions_act IS 'Индекс для получения версий акта с сортировкой по номеру';
+CREATE INDEX IF NOT EXISTS idx_{PREFIX}act_content_versions_act
+    ON {SCHEMA}.{PREFIX}act_content_versions(act_id, version_number DESC);
 
 -- GIN индексы на JSONB для полнотекстового поиска
-CREATE INDEX IF NOT EXISTS idx_act_tree_data
-    ON act_tree USING GIN(tree_data);
+CREATE INDEX IF NOT EXISTS idx_{PREFIX}act_tree_data
+    ON {SCHEMA}.{PREFIX}act_tree USING GIN(tree_data);
 
-COMMENT ON INDEX idx_act_tree_data IS 'GIN индекс для быстрого поиска внутри структуры дерева';
+CREATE INDEX IF NOT EXISTS idx_{PREFIX}act_tables_grid_data
+    ON {SCHEMA}.{PREFIX}act_tables USING GIN(grid_data);
 
-CREATE INDEX IF NOT EXISTS idx_act_tables_grid_data
-    ON act_tables USING GIN(grid_data);
-
-COMMENT ON INDEX idx_act_tables_grid_data IS 'GIN индекс для поиска по содержимому таблиц';
-
-CREATE INDEX IF NOT EXISTS idx_violations_content
-    ON act_violations USING GIN(
+CREATE INDEX IF NOT EXISTS idx_{PREFIX}violations_content
+    ON {SCHEMA}.{PREFIX}act_violations USING GIN(
         description_list, additional_content, reasons,
         consequences, responsible, recommendations
     );
-
-COMMENT ON INDEX idx_violations_content IS 'Составной GIN индекс для полнотекстового поиска по всем полям нарушений';
 
 -- ============================================================================
 -- ТРИГГЕРЫ ДЛЯ АВТОМАТИЧЕСКОГО ОБНОВЛЕНИЯ updated_at
 -- ============================================================================
 
--- Функция для обновления updated_at
 CREATE OR REPLACE FUNCTION update_updated_at_column()
 RETURNS TRIGGER AS $$
 BEGIN
@@ -728,66 +535,44 @@ BEGIN
 END;
 $$ LANGUAGE plpgsql;
 
-COMMENT ON FUNCTION update_updated_at_column() IS
-    'Автоматически устанавливает updated_at = CURRENT_TIMESTAMP при UPDATE';
-
 -- Триггер для acts
-DROP TRIGGER IF EXISTS update_acts_updated_at ON acts;
-CREATE TRIGGER update_acts_updated_at
-    BEFORE UPDATE ON acts
+DROP TRIGGER IF EXISTS update_{PREFIX}acts_updated_at ON {SCHEMA}.{PREFIX}acts;
+CREATE TRIGGER update_{PREFIX}acts_updated_at
+    BEFORE UPDATE ON {SCHEMA}.{PREFIX}acts
     FOR EACH ROW
     EXECUTE FUNCTION update_updated_at_column();
-
-COMMENT ON TRIGGER update_acts_updated_at ON acts IS
-    'Автоматически обновляет поле updated_at при изменении метаданных акта';
 
 -- Триггер для act_tree
-DROP TRIGGER IF EXISTS update_act_tree_updated_at ON act_tree;
-CREATE TRIGGER update_act_tree_updated_at
-    BEFORE UPDATE ON act_tree
+DROP TRIGGER IF EXISTS update_{PREFIX}act_tree_updated_at ON {SCHEMA}.{PREFIX}act_tree;
+CREATE TRIGGER update_{PREFIX}act_tree_updated_at
+    BEFORE UPDATE ON {SCHEMA}.{PREFIX}act_tree
     FOR EACH ROW
     EXECUTE FUNCTION update_updated_at_column();
-
-COMMENT ON TRIGGER update_act_tree_updated_at ON act_tree IS
-    'Автоматически обновляет поле updated_at при изменении структуры дерева';
 
 -- Триггер для act_tables
-DROP TRIGGER IF EXISTS update_act_tables_updated_at ON act_tables;
-CREATE TRIGGER update_act_tables_updated_at
-    BEFORE UPDATE ON act_tables
+DROP TRIGGER IF EXISTS update_{PREFIX}act_tables_updated_at ON {SCHEMA}.{PREFIX}act_tables;
+CREATE TRIGGER update_{PREFIX}act_tables_updated_at
+    BEFORE UPDATE ON {SCHEMA}.{PREFIX}act_tables
     FOR EACH ROW
     EXECUTE FUNCTION update_updated_at_column();
-
-COMMENT ON TRIGGER update_act_tables_updated_at ON act_tables IS
-    'Автоматически обновляет поле updated_at при изменении таблицы';
 
 -- Триггер для act_textblocks
-DROP TRIGGER IF EXISTS update_act_textblocks_updated_at ON act_textblocks;
-CREATE TRIGGER update_act_textblocks_updated_at
-    BEFORE UPDATE ON act_textblocks
+DROP TRIGGER IF EXISTS update_{PREFIX}act_textblocks_updated_at ON {SCHEMA}.{PREFIX}act_textblocks;
+CREATE TRIGGER update_{PREFIX}act_textblocks_updated_at
+    BEFORE UPDATE ON {SCHEMA}.{PREFIX}act_textblocks
     FOR EACH ROW
     EXECUTE FUNCTION update_updated_at_column();
-
-COMMENT ON TRIGGER update_act_textblocks_updated_at ON act_textblocks IS
-    'Автоматически обновляет поле updated_at при изменении текстового блока';
 
 -- Триггер для act_violations
-DROP TRIGGER IF EXISTS update_act_violations_updated_at ON act_violations;
-CREATE TRIGGER update_act_violations_updated_at
-    BEFORE UPDATE ON act_violations
+DROP TRIGGER IF EXISTS update_{PREFIX}act_violations_updated_at ON {SCHEMA}.{PREFIX}act_violations;
+CREATE TRIGGER update_{PREFIX}act_violations_updated_at
+    BEFORE UPDATE ON {SCHEMA}.{PREFIX}act_violations
     FOR EACH ROW
     EXECUTE FUNCTION update_updated_at_column();
-
-COMMENT ON TRIGGER update_act_violations_updated_at ON act_violations IS
-    'Автоматически обновляет поле updated_at при изменении нарушения';
 
 -- Триггер для act_invoices
-DROP TRIGGER IF EXISTS update_act_invoices_updated_at ON act_invoices;
-CREATE TRIGGER update_act_invoices_updated_at
-    BEFORE UPDATE ON act_invoices
+DROP TRIGGER IF EXISTS update_{PREFIX}act_invoices_updated_at ON {SCHEMA}.{PREFIX}act_invoices;
+CREATE TRIGGER update_{PREFIX}act_invoices_updated_at
+    BEFORE UPDATE ON {SCHEMA}.{PREFIX}act_invoices
     FOR EACH ROW
     EXECUTE FUNCTION update_updated_at_column();
-
-COMMENT ON TRIGGER update_act_invoices_updated_at ON act_invoices IS
-    'Автоматически обновляет поле updated_at при изменении фактуры';
-

@@ -54,7 +54,7 @@ DATABASE__GP__HOST=gp_host
 DATABASE__GP__PORT=5432
 DATABASE__GP__DATABASE=capgp3
 DATABASE__GP__SCHEMA=your_schema
-DATABASE__GP__TABLE_PREFIX=t_db_oarb_audit_act_
+DATABASE__TABLE_PREFIX=t_db_oarb_audit_act_
 ```
 
 > При использовании Greenplum необходимо предварительно выполнить `kinit` для Kerberos-аутентификации.
@@ -88,7 +88,8 @@ uvicorn app.main:app --host 0.0.0.0 --port 8005
 | Приложение | `APP_TITLE`, `APP_VERSION` | Метаданные |
 | Сервер | `SERVER__HOST`, `SERVER__PORT`, `SERVER__LOG_LEVEL` | Параметры HTTP-сервера |
 | База данных | `DATABASE__TYPE`, `DATABASE__HOST`, `DATABASE__PORT`, `DATABASE__NAME`, `DATABASE__USER`, `DATABASE__PASSWORD` | Подключение к БД |
-| Greenplum | `DATABASE__GP__HOST`, `DATABASE__GP__SCHEMA`, `DATABASE__GP__TABLE_PREFIX` | Настройки GP (при `DATABASE__TYPE=greenplum`) |
+| Префикс таблиц | `DATABASE__TABLE_PREFIX` | Общий префикс таблиц приложения для PG и GP (`t_db_oarb_audit_act_`) |
+| Greenplum | `DATABASE__GP__HOST`, `DATABASE__GP__SCHEMA` | Настройки GP (при `DATABASE__TYPE=greenplum`) |
 | Безопасность | `SECURITY__MAX_REQUEST_SIZE`, `SECURITY__RATE_LIMIT_PER_MINUTE` | Лимиты запросов |
 | AI-чат | `CHAT__API_BASE`, `CHAT__API_KEY`, `CHAT__MODEL` | OpenAI-совместимый LLM API (опционально) |
 | Блокировки | `ACTS__LOCK__DURATION_MINUTES`, `ACTS__LOCK__INACTIVITY_TIMEOUT_MINUTES` | Управление блокировками актов |

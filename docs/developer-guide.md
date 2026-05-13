@@ -2291,7 +2291,7 @@ DATABASE__GP__HOST=gp_dns_pkap1123_audit.gp.df.sbrf.ru
 DATABASE__GP__PORT=5432
 DATABASE__GP__DATABASE=capgp3
 DATABASE__GP__SCHEMA=s_grnplm_ld_audit_da_project_4
-DATABASE__GP__TABLE_PREFIX=t_db_oarb_audit_act_
+DATABASE__TABLE_PREFIX=t_db_oarb_audit_act_
 SERVER__HOST=0.0.0.0
 SERVER__PORT=8000
 ```
@@ -2421,11 +2421,11 @@ ACTS__AUDIT_LOG__RETENTION_DAYS=365
 | **БД: Пул** | `DATABASE__POOL_MIN_SIZE` | int | `2` | Мин. соединений |
 | | `DATABASE__POOL_MAX_SIZE` | int | `10` | Макс. соединений |
 | | `DATABASE__COMMAND_TIMEOUT` | int | `60` | Timeout команд (сек) |
+| | `DATABASE__TABLE_PREFIX` | str | `t_db_oarb_audit_act_` | Общий префикс таблиц приложения (PG и GP) |
 | **БД: Greenplum** | `DATABASE__GP__HOST` | str | `gp_dns_...` | Хост GP |
 | | `DATABASE__GP__PORT` | int | `5432` | Порт GP |
 | | `DATABASE__GP__DATABASE` | str | `capgp3` | Имя БД GP |
 | | `DATABASE__GP__SCHEMA` | str | `s_grnplm_...` | Схема GP |
-| | `DATABASE__GP__TABLE_PREFIX` | str | `t_db_oarb_audit_act_` | Префикс таблиц |
 | **Безопасность** | `SECURITY__MAX_REQUEST_SIZE` | int | `10485760` | Макс. размер запроса (байт) |
 | | `SECURITY__RATE_LIMIT_PER_MINUTE` | int | `1024` | Лимит запросов/мин на IP |
 | | `SECURITY__MAX_TRACKED_IPS` | int | `100` | Макс. отслеживаемых IP |

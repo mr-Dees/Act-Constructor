@@ -48,7 +48,7 @@ def _make_settings(db_type="postgresql", jupyterhub_user="12345_user"):
     s.database.gp.port = 5433
     s.database.gp.database = "gpdb"
     s.database.gp.schema_name = "test_schema"
-    s.database.gp.table_prefix = "t_prefix_"
+    s.database.table_prefix = "t_prefix_"
     s.jupyterhub_user = jupyterhub_user
     return s
 
