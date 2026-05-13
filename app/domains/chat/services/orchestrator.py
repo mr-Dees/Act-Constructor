@@ -27,6 +27,7 @@ from app.domains.chat.services.llm_client import build_llm_client
 from app.domains.chat.services.message_service import MessageService
 from app.domains.chat.services.retry import retry_on_transient
 from app.domains.chat.services.streaming import (
+    sse_agent_request_started,
     sse_block_complete,
     sse_block_delta,
     sse_block_end,
@@ -345,19 +346,24 @@ class Orchestrator:
         arguments: dict,
         block_index: int,
     ) -> AsyncGenerator[tuple[str, Any], None]:
-        """Создаёт agent_request и стримит ответы внешнего агента как SSE.
+        """Создаёт agent_request, запускает фоновый раннер polling'а и
+        стримит ответы внешнего агента клиенту через SSE.
+
+        Сохранение ассистент-сообщения и обновление ``agent_requests.status``
+        делает фоновый раннер (``agent_bridge_runner``) независимо от
+        lifetime SSE-соединения. Если клиент закроет вкладку — раннер
+        дотянет ответ и сохранит его.
 
         Yield-ит кортежи (kind, payload):
           - ("sse", "...SSE-строка...") — событие для StreamingResponse
           - ("error", "...SSE-error...") — ошибка регистрации запроса
-          - ("final", {"blocks": [...], "token_usage": {...}}) — финальные данные
-            для сохранения ассистент-сообщения
         """
         from app.db.connection import get_db
         from app.domains.chat.integrations.forward_handler import (
             FORWARD_SENTINEL_PATTERN,
             build_forward_handler,
         )
+        from app.domains.chat.services import agent_bridge_runner
         from app.domains.chat.services.agent_bridge import (
             AgentBridgeService,
             AgentBridgeTimeout,
@@ -398,12 +404,24 @@ class Orchestrator:
                 request_id, knowledge_bases, len(history), len(files),
             )
 
+            # Запускаем producer'а в фоне (независимо от SSE-стрима).
+            # Producer сам откроет get_db() и сохранит финальное сообщение,
+            # даже если клиент закроет SSE-соединение.
+            agent_bridge_runner.schedule(
+                request_id, settings=self.settings,
+            )
+
+            # Сообщаем фронту request_id, чтобы при разрыве соединения он
+            # мог переоткрыть resume-стрим.
+            yield (
+                "sse",
+                sse_agent_request_started(
+                    request_id=request_id,
+                    conversation_id=conversation_id,
+                ),
+            )
+
             bridge = AgentBridgeService(conn)
-            # Аккумулятор блоков, которые пришли ДО финального ответа
-            # (reasoning-чанки и error-события). Нужен, чтобы сохранить их
-            # в content сообщения для отображения в истории — в живом потоке
-            # они уже отправлены, но без сохранения пропадают при перезагрузке.
-            pre_final_blocks: list[dict] = []
             try:
                 async for upd in bridge.wait_for_completion(
                     request_id,
@@ -443,9 +461,6 @@ class Orchestrator:
                                 sse_block_end(block_index=block_index),
                             )
                             block_index += 1
-                            pre_final_blocks.append(
-                                {"type": "reasoning", "content": chunk_text},
-                            )
                         elif ev["event_type"] == "error":
                             payload = ev["payload"] or {}
                             err_message = payload.get(
@@ -456,12 +471,6 @@ class Orchestrator:
                                 "sse",
                                 sse_error(error=err_message, code=err_code),
                             )
-                            err_block: dict = {
-                                "type": "error", "message": err_message,
-                            }
-                            if err_code:
-                                err_block["code"] = err_code
-                            pre_final_blocks.append(err_block)
                         # status — пока игнорируем
                     if upd.response:
                         logger.info(
@@ -481,9 +490,6 @@ class Orchestrator:
                                 translated = await self._translate_buttons(
                                     raw_block.get("buttons", []),
                                 )
-                                # Мутируем raw_block в response, чтобы в БД
-                                # сохранилась уже транслированная версия.
-                                raw_block["buttons"] = translated
                                 yield (
                                     "sse",
                                     sse_buttons(buttons=translated),
@@ -529,15 +535,6 @@ class Orchestrator:
                                     ),
                                 )
                             block_index += 1
-                        yield (
-                            "final",
-                            {
-                                "blocks": (
-                                    pre_final_blocks + list(upd.response["blocks"])
-                                ),
-                                "token_usage": upd.response.get("token_usage") or {},
-                            },
-                        )
                         return
             except AgentBridgeTimeout:
                 logger.warning(
@@ -552,14 +549,6 @@ class Orchestrator:
                     "sse",
                     sse_error(error=timeout_message, code="agent_timeout"),
                 )
-                # Сохраняем уже накопленные блоки + блок ошибки таймаута,
-                # чтобы при перезагрузке истории пользователь видел контекст.
-                pre_final_blocks.append({
-                    "type": "error",
-                    "message": timeout_message,
-                    "code": "agent_timeout",
-                })
-                yield ("final", {"blocks": pre_final_blocks, "token_usage": {}})
                 return
 
     def _parse_client_action_result(self, raw: str) -> dict | None:
@@ -1031,8 +1020,11 @@ class Orchestrator:
                                     and history_messages[-1].get("role") == "user"
                                 ):
                                     history_messages = history_messages[:-1]
-                                final_blocks_for_save: list[dict] = []
-                                final_token_usage: dict = {}
+                                # Forward к внешнему агенту: SSE-стрим идёт
+                                # из _handle_forward_call, сохранение
+                                # ассистент-сообщения делает фоновый раннер
+                                # (agent_bridge_runner) — даже если клиент
+                                # закроет соединение посреди ответа.
                                 async for kind, payload in self._handle_forward_call(
                                     conversation_id=conversation_id,
                                     message_id=message_id,
@@ -1046,27 +1038,11 @@ class Orchestrator:
                                 ):
                                     if kind in ("sse", "error"):
                                         yield payload
-                                    elif kind == "final":
-                                        final_blocks_for_save = payload["blocks"]
-                                        final_token_usage = payload["token_usage"]
                                 sources.append(tool_name)
-                                if final_blocks_for_save:
-                                    try:
-                                        await self._save_assistant_message(
-                                            conversation_id=conversation_id,
-                                            content_blocks=final_blocks_for_save,
-                                            token_usage=final_token_usage or None,
-                                        )
-                                    except Exception:
-                                        logger.exception(
-                                            "Не удалось сохранить ответ агента",
-                                        )
                                 yield sse_message_end(
                                     message_id=message_id,
                                     model=self.settings.model,
-                                    token_usage=(
-                                        final_token_usage if final_token_usage else None
-                                    ),
+                                    token_usage=None,
                                 )
                                 return
 
@@ -1214,8 +1190,11 @@ class Orchestrator:
                                 and history_messages[-1].get("role") == "user"
                             ):
                                 history_messages = history_messages[:-1]
-                            final_blocks_for_save: list[dict] = []
-                            final_token_usage: dict = {}
+                            # Forward к внешнему агенту: SSE-стрим идёт
+                            # из _handle_forward_call, сохранение
+                            # ассистент-сообщения делает фоновый раннер
+                            # (agent_bridge_runner) — даже если клиент
+                            # закроет соединение посреди ответа.
                             async for kind, payload in self._handle_forward_call(
                                 conversation_id=conversation_id,
                                 message_id=message_id,
@@ -1229,27 +1208,11 @@ class Orchestrator:
                             ):
                                 if kind in ("sse", "error"):
                                     yield payload
-                                elif kind == "final":
-                                    final_blocks_for_save = payload["blocks"]
-                                    final_token_usage = payload["token_usage"]
                             sources.append(tool_name)
-                            if final_blocks_for_save:
-                                try:
-                                    await self._save_assistant_message(
-                                        conversation_id=conversation_id,
-                                        content_blocks=final_blocks_for_save,
-                                        token_usage=final_token_usage or None,
-                                    )
-                                except Exception:
-                                    logger.exception(
-                                        "Не удалось сохранить ответ агента",
-                                    )
                             yield sse_message_end(
                                 message_id=message_id,
                                 model=self.settings.model,
-                                token_usage=(
-                                    final_token_usage if final_token_usage else None
-                                ),
+                                token_usage=None,
                             )
                             return
 

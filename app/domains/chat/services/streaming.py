@@ -108,6 +108,23 @@ def sse_block_complete(*, block_index: int, block: dict[str, Any]) -> str:
     })
 
 
+def sse_agent_request_started(
+    *,
+    request_id: str,
+    conversation_id: str,
+) -> str:
+    """Сигнал фронту: forward-запрос зарегистрирован, его id известен.
+
+    Фронт может сохранить request_id и при разрыве соединения переоткрыть
+    resume-стрим:
+        GET /api/v1/chat/conversations/{cid}/agent-request/{rid}/stream
+    """
+    return format_sse_event("agent_request_started", {
+        "request_id": request_id,
+        "conversation_id": conversation_id,
+    })
+
+
 def sse_message_end(
     *,
     message_id: str,

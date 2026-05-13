@@ -139,9 +139,6 @@ async def test_forward_tool_call_streams_reasoning_and_final(monkeypatch):
         fake_wait_for_completion,
     )
 
-    # Мокируем _save_assistant_message чтобы не лезть в реальную БД
-    orch._save_assistant_message = AsyncMock()
-
     # _handle_forward_call открывает get_db() — подсовываем фиктивное соединение.
     fake_conn = AsyncMock()
     ctx = AsyncMock()
@@ -150,10 +147,16 @@ async def test_forward_tool_call_streams_reasoning_and_final(monkeypatch):
     # AgentBridgeService/репозитории при инициализации зовут get_adapter().
     fake_adapter = MagicMock(get_table_name=lambda n: n)
 
+    # Сохранение ассистент-сообщения теперь делает фоновый раннер
+    # (agent_bridge_runner). В тесте мы не запускаем реальный раннер — только
+    # проверяем, что оркестратор корректно зарегистрировал задачу.
     events: list[str] = []
     with (
         patch("app.db.connection.get_db", return_value=ctx),
         patch("app.db.repositories.base.get_adapter", return_value=fake_adapter),
+        patch(
+            "app.domains.chat.services.agent_bridge_runner.schedule",
+        ) as runner_schedule,
     ):
         async for ev in orch.run_stream(
             conversation_id="conv-1",
@@ -175,6 +178,13 @@ async def test_forward_tool_call_streams_reasoning_and_final(monkeypatch):
     assert "КСО — это" in text  # финальный ответ
     assert "message_end" in text
 
+    # Должно быть событие agent_request_started с request_id — фронт его
+    # использует для resume-стрима при разрыве соединения.
+    assert any(
+        isinstance(e, str) and "agent_request_started" in e
+        for e in events
+    )
+
     # Один reasoning-чанк → один полный block_start/end триплет
     # с типом "reasoning".
     reasoning_starts = [
@@ -191,15 +201,12 @@ async def test_forward_tool_call_streams_reasoning_and_final(monkeypatch):
         for e in events
     )
 
-    # Финальные блоки агента + накопленные reasoning-чанки (в порядке прихода)
-    # должны быть переданы в _save_assistant_message, чтобы при перезагрузке
-    # истории пользователь видел те же reasoning, что и в живом стриме.
-    orch._save_assistant_message.assert_called_once()
-    saved_blocks = orch._save_assistant_message.call_args.kwargs["content_blocks"]
-    assert saved_blocks == [
-        {"type": "reasoning", "content": "Думаю..."},
-        {"type": "text", "content": "КСО — это ..."},
-    ]
+    # Оркестратор должен запустить фоновый раннер для этого request_id —
+    # именно он отвечает за сохранение ответа в БД, даже если клиент
+    # закрыл вкладку посреди стрима.
+    runner_schedule.assert_called_once()
+    call_kwargs = runner_schedule.call_args
+    assert call_kwargs.args[0] == "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee"
 
 
 async def test_forward_emits_separate_block_per_reasoning_chunk(monkeypatch):
@@ -272,6 +279,11 @@ async def test_forward_emits_separate_block_per_reasoning_chunk(monkeypatch):
         AgentBridgeService,
         "wait_for_completion",
         fake_wait_for_completion,
+    )
+    # Подменяем фоновый раннер — он тестируется отдельно.
+    monkeypatch.setattr(
+        "app.domains.chat.services.agent_bridge_runner.schedule",
+        lambda *a, **kw: None,
     )
 
     orch._save_assistant_message = AsyncMock()
@@ -378,6 +390,12 @@ def _setup_forward_with_response_blocks(monkeypatch, orch, response_blocks):
     )
 
     orch._save_assistant_message = AsyncMock()
+    # Подменяем фоновый раннер: в этих тестах нам важна только SSE-эмиссия,
+    # сохранение сообщения проверяется отдельным юнит-тестом на раннер.
+    monkeypatch.setattr(
+        "app.domains.chat.services.agent_bridge_runner.schedule",
+        lambda *a, **kw: None,
+    )
 
 
 async def test_buttons_block_emits_sse_buttons_not_block_start(monkeypatch):
