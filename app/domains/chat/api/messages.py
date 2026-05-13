@@ -278,11 +278,25 @@ async def resume_agent_request_stream(
     # Проверка владения беседой — те же права, что и при отправке сообщения
     await conv_service.get(conversation_id, username)
 
+    # Проверка владения agent_request: он должен принадлежать той же беседе.
+    # Без этой проверки авторизованный пользователь, перехватив UUID, мог
+    # бы прочитать чужой ответ агента, подставив свой conversation_id.
+    from app.db.connection import get_db
+    from app.domains.chat.exceptions import ConversationNotFoundError
+    from app.domains.chat.repositories.agent_request_repository import (
+        AgentRequestRepository,
+    )
+
+    async with get_db() as conn:
+        agent_request = await AgentRequestRepository(conn).get(request_id)
+    if agent_request is None or agent_request["conversation_id"] != conversation_id:
+        raise ConversationNotFoundError("Запрос агента не найден")
+
     async def event_stream():
         from app.core.settings_registry import get as get_domain_settings
-        from app.db.connection import get_db
         from app.domains.chat.services.agent_bridge import (
-            AgentBridgeService, AgentBridgeTimeout,
+            AgentBridgeService,
+            AgentBridgeTimeout,
         )
         from app.domains.chat.services.streaming import (
             sse_block_delta, sse_block_end, sse_block_start, sse_buttons,
