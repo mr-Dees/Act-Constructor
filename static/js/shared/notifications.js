@@ -372,5 +372,7 @@ class NotificationManager {
     }
 }
 
-// Создаем глобальный экземпляр
-const Notifications = new NotificationManager();
+// Создаем глобальный экземпляр.
+// Используем window.* — иначе const-переменная окажется в Script-scope
+// и НЕ будет видна как window.Notifications (см. chat-client-actions.js).
+window.Notifications = new NotificationManager();
