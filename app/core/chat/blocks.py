@@ -9,7 +9,23 @@ from __future__ import annotations
 
 from typing import Any, Literal, Union
 
-from pydantic import BaseModel
+from pydantic import BaseModel, model_validator
+
+# Whitelist разрешённых action-имён в ClientActionBlock.
+# LLM не может изобрести произвольное action — оно должно быть зарегистрировано
+# в JS-реестре `window.ClientActionsRegistry`. Если нужен новый action —
+# добавь его и сюда, и в chat-client-actions.js одновременно.
+ALLOWED_CLIENT_ACTIONS: frozenset[str] = frozenset({
+    "open_url",
+    "notify",
+    "trigger_sdk",
+})
+
+# Whitelist URL-схем для action='open_url'. Защищает от LLM-инжекций вида
+# javascript:..., data:text/html,..., vbscript:..., file:///...
+ALLOWED_OPEN_URL_SCHEMES: tuple[str, ...] = (
+    "http://", "https://", "mailto:", "/",
+)
 
 
 # ---------------------------------------------------------------------------
@@ -98,14 +114,43 @@ class ButtonGroup(BaseModel):
 class ClientActionBlock(BaseModel):
     """Команда фронту выполнить чисто-клиентское действие.
 
-    Типы action и формат params определяются реестром ClientActionsRegistry
-    на стороне браузера. Стандартные action: 'open_url', 'notify', 'trigger_sdk'.
+    action — имя из ALLOWED_CLIENT_ACTIONS (whitelist). Произвольные action
+    отвергаются на парсинге, чтобы LLM не мог запросить выполнение
+    незарегистрированного клиентского кода.
+
+    Для action='open_url' дополнительно валидируется params.url: схема
+    должна быть из ALLOWED_OPEN_URL_SCHEMES. Это защищает от LLM-инжекций
+    вроде javascript:..., data:text/html,..., file:///etc/passwd.
     """
 
     type: Literal["client_action"] = "client_action"
     action: str
     params: dict[str, Any] = {}
     label: str | None = None
+
+    @model_validator(mode="after")
+    def _validate_action_and_params(self) -> "ClientActionBlock":
+        if self.action not in ALLOWED_CLIENT_ACTIONS:
+            raise ValueError(
+                f"ClientActionBlock.action='{self.action}' не входит в "
+                f"whitelist {sorted(ALLOWED_CLIENT_ACTIONS)}",
+            )
+        if self.action == "open_url":
+            url = self.params.get("url")
+            if not isinstance(url, str) or not url:
+                raise ValueError(
+                    "ClientActionBlock(action='open_url') требует params.url",
+                )
+            if not any(
+                url.startswith(scheme)
+                for scheme in ALLOWED_OPEN_URL_SCHEMES
+            ):
+                raise ValueError(
+                    f"ClientActionBlock(action='open_url'): схема URL "
+                    f"'{url[:30]}...' запрещена; допустимые: "
+                    f"{ALLOWED_OPEN_URL_SCHEMES}",
+                )
+        return self
 
 
 class ErrorBlock(BaseModel):

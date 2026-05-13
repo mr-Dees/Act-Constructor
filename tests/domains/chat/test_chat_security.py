@@ -490,24 +490,42 @@ DANGEROUS_URL_SCHEMES = [
 
 
 class TestDangerousURLSchemes:
-    """`open_url` ClientAction должен отвергать опасные URL-схемы.
+    """`open_url` ClientAction отвергает опасные URL-схемы на парсинге.
 
-    Атака: LLM возвращает ClientActionBlock(action='open_url', url='javascript:...')
-    Сейчас бэкенд не валидирует, фронт делает window.location.href = url напрямую.
-    Фикс — в Sprint 2: whitelist схем (http/https/mailto) на парсинге ClientActionBlock.
+    Закрывает класс атак: LLM возвращает ClientActionBlock(action='open_url',
+    url='javascript:...'). Backend-валидация в ClientActionBlock + frontend
+    whitelist в chat-client-actions.js (defense in depth).
     """
 
-    @pytest.mark.xfail(
-        strict=True,
-        reason="Sprint 2: whitelist URL-схем для action='open_url' в backend-парсинге",
-    )
     @pytest.mark.parametrize("url", DANGEROUS_URL_SCHEMES)
     def test_open_url_rejects_dangerous_schemes(self, url):
-        """ClientActionBlock с опасным URL должен быть отброшен или вызвать ValidationError."""
+        """ClientActionBlock с опасным URL вызывает ValidationError."""
         from app.core.chat.blocks import ClientActionBlock
 
         with pytest.raises(ValidationError):
             ClientActionBlock(action="open_url", params={"url": url})
+
+    def test_open_url_accepts_https(self):
+        from app.core.chat.blocks import ClientActionBlock
+        block = ClientActionBlock(
+            action="open_url",
+            params={"url": "https://example.com/page"},
+        )
+        assert block.params["url"] == "https://example.com/page"
+
+    def test_open_url_accepts_relative_path(self):
+        from app.core.chat.blocks import ClientActionBlock
+        block = ClientActionBlock(
+            action="open_url",
+            params={"url": "/constructor?act_id=42"},
+        )
+        assert block.params["url"] == "/constructor?act_id=42"
+
+    def test_unknown_action_rejected(self):
+        """Произвольное action вне whitelist отвергается."""
+        from app.core.chat.blocks import ClientActionBlock
+        with pytest.raises(ValidationError):
+            ClientActionBlock(action="exec_arbitrary_js", params={})
 
 
 class TestFilenamePathTraversal:
