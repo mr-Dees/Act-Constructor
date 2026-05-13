@@ -23,11 +23,13 @@ def _load(monkeypatch, **env_vars) -> ChatDomainSettings:
     return _load_from_env("chat", ChatDomainSettings)
 
 
-def test_default_profile_is_sglang(monkeypatch):
-    s = _load(monkeypatch,
-              CHAT__API_BASE="http://localhost:30000/v1",
-              CHAT__API_KEY="dummy",
-              CHAT__MODEL="m")
+def test_default_profile_is_sglang():
+    # Прямое инстанцирование, чтобы тест документировал ДЕФОЛТЫ КЛАССА,
+    # а не текущее содержимое пользовательского .env (где у разработчика
+    # может стоять CHAT__PROFILE=openrouter).
+    s = ChatDomainSettings(
+        api_base="http://localhost:30000/v1", api_key="dummy", model="m",
+    )
     assert s.profile == "sglang"
     assert s.retry.on_429 is True
     assert s.retry.on_5xx is True
@@ -35,13 +37,16 @@ def test_default_profile_is_sglang(monkeypatch):
     assert s.agent_bridge.poll_interval_sec == 1.0
 
 
-def test_openrouter_profile_with_extra_headers(monkeypatch):
-    s = _load(monkeypatch,
-              CHAT__PROFILE="openrouter",
-              CHAT__API_BASE="https://openrouter.ai/api/v1",
-              CHAT__API_KEY="sk-or-x",
-              CHAT__MODEL="minimax/minimax-m2:free",
-              CHAT__EXTRA_HEADERS='{"HTTP-Referer":"https://aw.local"}')
+def test_openrouter_profile_with_extra_headers():
+    # Прямое инстанцирование, чтобы headers из пользовательского .env
+    # (X-Title и т.п.) не вмешивались в проверку парсинга dict.
+    s = ChatDomainSettings(
+        profile="openrouter",
+        api_base="https://openrouter.ai/api/v1",
+        api_key="sk-or-x",
+        model="minimax/minimax-m2:free",
+        extra_headers={"HTTP-Referer": "https://aw.local"},
+    )
     assert s.profile == "openrouter"
     assert s.extra_headers == {"HTTP-Referer": "https://aw.local"}
 

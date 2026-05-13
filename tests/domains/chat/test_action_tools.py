@@ -202,7 +202,7 @@ async def test_list_pages_emits_text_block_with_intro_and_descriptions():
         assert len(blocks) == 2
         text_block = blocks[0]
         assert text_block["type"] == "text"
-        text = text_block["text"]
+        text = text_block["content"]
         # Intro: упоминание ассистента и базы знаний
         assert "ассистент" in text.lower() or "audit workstation" in text.lower()
         # Список разделов: label + description присутствуют

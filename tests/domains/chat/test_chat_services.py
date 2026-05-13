@@ -3,8 +3,12 @@
 import pytest
 from unittest.mock import AsyncMock, MagicMock, patch
 
-from fastapi import HTTPException
-
+from app.domains.chat.exceptions import (
+    ChatFileNotFoundError,
+    ChatFileValidationError,
+    ChatLimitError,
+    ConversationNotFoundError,
+)
 from app.domains.chat.services.conversation_service import ConversationService
 from app.domains.chat.services.file_service import FileService
 from app.domains.chat.services.message_service import MessageService
@@ -67,13 +71,13 @@ class TestConversationServiceCreate:
         conv_repo.create.assert_called_once()
 
     async def test_create_exceeds_limit(self, service, conv_repo, settings):
-        """Превышение лимита бесед вызывает HTTPException 422."""
+        """Превышение лимита бесед вызывает ChatLimitError (status_code=422)."""
         conv_repo.count_by_user.return_value = settings.max_conversations_per_user
 
-        with pytest.raises(HTTPException) as exc_info:
+        with pytest.raises(ChatLimitError) as exc_info:
             await service.create(user_id="user1")
         assert exc_info.value.status_code == 422
-        assert "лимит" in exc_info.value.detail.lower()
+        assert "лимит" in str(exc_info.value).lower()
 
 
 class TestConversationServiceGet:
@@ -83,10 +87,10 @@ class TestConversationServiceGet:
         return ConversationService(conv_repo=conv_repo, settings=settings)
 
     async def test_get_not_found(self, service, conv_repo):
-        """Несуществующая беседа вызывает HTTPException 404."""
+        """Несуществующая беседа вызывает ConversationNotFoundError (404)."""
         conv_repo.get_by_id.return_value = None
 
-        with pytest.raises(HTTPException) as exc_info:
+        with pytest.raises(ConversationNotFoundError) as exc_info:
             await service.get("nonexistent-id", "user1")
         assert exc_info.value.status_code == 404
 
@@ -131,30 +135,30 @@ class TestMessageServiceSaveUser:
         conv_repo.touch.assert_called_once_with("conv-1")
 
     async def test_save_exceeds_length_limit(self, service, msg_repo):
-        """Слишком длинное сообщение вызывает HTTPException 422."""
+        """Слишком длинное сообщение вызывает ChatLimitError (422)."""
         long_content = "A" * (service.settings.max_message_content_length + 1)
 
-        with pytest.raises(HTTPException) as exc_info:
+        with pytest.raises(ChatLimitError) as exc_info:
             await service.save_user_message(
                 conversation_id="conv-1",
                 content=long_content,
                 user_id="user1",
             )
         assert exc_info.value.status_code == 422
-        assert "длинное" in exc_info.value.detail.lower()
+        assert "длинное" in str(exc_info.value).lower()
 
     async def test_save_exceeds_message_count_limit(self, service, msg_repo, settings):
-        """Превышение лимита сообщений вызывает HTTPException 422."""
+        """Превышение лимита сообщений вызывает ChatLimitError (422)."""
         msg_repo.count_by_conversation.return_value = settings.max_messages_per_conversation
 
-        with pytest.raises(HTTPException) as exc_info:
+        with pytest.raises(ChatLimitError) as exc_info:
             await service.save_user_message(
                 conversation_id="conv-1",
                 content="Текст",
                 user_id="user1",
             )
         assert exc_info.value.status_code == 422
-        assert "лимит" in exc_info.value.detail.lower()
+        assert "лимит" in str(exc_info.value).lower()
 
 
 class TestMessageServiceSaveAssistant:
@@ -213,26 +217,26 @@ class TestFileServiceValidate:
         )
 
     def test_validate_too_large(self, service, settings):
-        """Слишком большой файл вызывает HTTPException 422."""
-        with pytest.raises(HTTPException) as exc_info:
+        """Слишком большой файл вызывает ChatFileValidationError (422)."""
+        with pytest.raises(ChatFileValidationError) as exc_info:
             service.validate_file(
                 filename="huge.pdf",
                 mime_type="application/pdf",
                 file_size=settings.max_file_size + 1,
             )
         assert exc_info.value.status_code == 422
-        assert "большой" in exc_info.value.detail.lower()
+        assert "большой" in str(exc_info.value).lower()
 
     def test_validate_wrong_mime_type(self, service):
-        """Неподдерживаемый MIME-тип вызывает HTTPException 422."""
-        with pytest.raises(HTTPException) as exc_info:
+        """Неподдерживаемый MIME-тип вызывает ChatFileValidationError (422)."""
+        with pytest.raises(ChatFileValidationError) as exc_info:
             service.validate_file(
                 filename="malware.exe",
                 mime_type="application/x-msdownload",
                 file_size=100,
             )
         assert exc_info.value.status_code == 422
-        assert "не поддерживается" in exc_info.value.detail.lower()
+        assert "не поддерживается" in str(exc_info.value).lower()
 
 
 class TestFileServiceSave:
@@ -244,10 +248,10 @@ class TestFileServiceSave:
         )
 
     async def test_save_file_conversation_not_found(self, service, conv_repo):
-        """Загрузка файла в несуществующую беседу вызывает 404."""
+        """Загрузка файла в несуществующую беседу вызывает ConversationNotFoundError (404)."""
         conv_repo.get_by_id.return_value = None
 
-        with pytest.raises(HTTPException) as exc_info:
+        with pytest.raises(ConversationNotFoundError) as exc_info:
             await service.save_file(
                 conversation_id="nonexistent",
                 user_id="user1",
@@ -288,10 +292,10 @@ class TestFileServiceGet:
         )
 
     async def test_get_file_not_found(self, service, file_repo):
-        """Несуществующий файл вызывает HTTPException 404."""
+        """Несуществующий файл вызывает ChatFileNotFoundError (404)."""
         file_repo.get_file_data.return_value = None
 
-        with pytest.raises(HTTPException) as exc_info:
+        with pytest.raises(ChatFileNotFoundError) as exc_info:
             await service.get_file(file_id="nonexistent", user_id="user1")
         assert exc_info.value.status_code == 404
 
