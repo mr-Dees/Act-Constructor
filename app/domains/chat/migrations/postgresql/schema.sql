@@ -12,6 +12,10 @@ CREATE TABLE IF NOT EXISTS {SCHEMA}.{PREFIX}chat_conversations (
     updated_at      TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
 CREATE INDEX IF NOT EXISTS idx_{PREFIX}chat_conversations_user ON {SCHEMA}.{PREFIX}chat_conversations(user_id);
+-- Составной индекс под список бесед: get_by_user сортирует по updated_at DESC.
+-- Без него — seq-scan + sort при росте таблицы.
+CREATE INDEX IF NOT EXISTS idx_{PREFIX}chat_conversations_user_updated
+    ON {SCHEMA}.{PREFIX}chat_conversations(user_id, updated_at DESC);
 
 CREATE TABLE IF NOT EXISTS {SCHEMA}.{PREFIX}chat_messages (
     id              VARCHAR(36) PRIMARY KEY,

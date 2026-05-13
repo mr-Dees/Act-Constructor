@@ -20,6 +20,9 @@ DISTRIBUTED BY (id);
 
 CREATE INDEX idx_{PREFIX}chat_conversations_user
     ON {SCHEMA}.{PREFIX}chat_conversations(user_id);
+-- Составной индекс под список бесед: get_by_user сортирует по updated_at DESC.
+CREATE INDEX idx_{PREFIX}chat_conversations_user_updated
+    ON {SCHEMA}.{PREFIX}chat_conversations(user_id, updated_at DESC);
 
 -- ============================================================================
 -- ТАБЛИЦА СООБЩЕНИЙ
@@ -95,6 +98,10 @@ DISTRIBUTED BY (conversation_id);
 
 CREATE INDEX idx_{PREFIX}agent_requests_status_created
     ON {SCHEMA}.{PREFIX}agent_requests(status, created_at);
+-- В PG этот индекс был, в GP отсутствовал — agent_bridge ищет запросы
+-- беседы по conversation_id + сортирует по created_at DESC.
+CREATE INDEX idx_{PREFIX}agent_requests_conversation
+    ON {SCHEMA}.{PREFIX}agent_requests(conversation_id, created_at DESC);
 CREATE INDEX idx_{PREFIX}agent_requests_message
     ON {SCHEMA}.{PREFIX}agent_requests(message_id);
 
