@@ -349,10 +349,15 @@ class Orchestrator:
         """Создаёт agent_request, запускает фоновый раннер polling'а и
         стримит ответы внешнего агента клиенту через SSE.
 
-        Сохранение ассистент-сообщения и обновление ``agent_requests.status``
-        делает фоновый раннер (``agent_bridge_runner``) независимо от
-        lifetime SSE-соединения. Если клиент закроет вкладку — раннер
-        дотянет ответ и сохранит его.
+        Сохранение ассистент-сообщения, обновление ``agent_requests.status``
+        и все гейты таймаута делает фоновый раннер
+        (``agent_bridge_runner``) независимо от lifetime SSE-соединения.
+        Если клиент закроет вкладку — раннер дотянет ответ и сохранит его.
+
+        Оркестратор сам НЕ ведёт polling-state (gates, status updates) —
+        он только читает уже накопленные раннером события/ответ из БД и
+        транслирует их в SSE-стрим. Каждая итерация открывает свежий
+        ``get_db()``, чтобы не держать соединение из пула 30 минут.
 
         Yield-ит кортежи (kind, payload):
           - ("sse", "...SSE-строка...") — событие для StreamingResponse
@@ -363,14 +368,15 @@ class Orchestrator:
             FORWARD_SENTINEL_PATTERN,
             build_forward_handler,
         )
-        from app.domains.chat.services import agent_bridge_runner
-        from app.domains.chat.services.agent_bridge import (
-            AgentBridgeService,
-            AgentBridgeTimeout,
+        from app.domains.chat.repositories.agent_request_repository import (
+            AgentRequestRepository,
         )
+        from app.domains.chat.services import agent_bridge_runner
+        from app.domains.chat.services.agent_bridge import AgentBridgeService
+        from app.domains.chat.services.block_emitter import emit_response_blocks
 
-        # Открываем свежее соединение из пула — соединение из dependency
-        # может закрыться к моменту, когда мы окажемся внутри SSE-стрима.
+        # Регистрация запроса — отдельным соединением; держать его открытым
+        # на всё время polling нельзя (могут быть десятки минут).
         async with get_db() as conn:
             handler = build_forward_handler(
                 conn=conn,
@@ -383,173 +389,160 @@ class Orchestrator:
                 files=files,
             )
             sentinel = await handler(**arguments)
-            match = FORWARD_SENTINEL_PATTERN.match(sentinel)
-            if not match:
-                logger.warning(
-                    "Forward: не удалось зарегистрировать agent_request "
-                    "для conversation=%s",
-                    conversation_id,
-                )
-                yield (
-                    "error",
-                    sse_error(
-                        error="Не удалось переадресовать запрос внешнему агенту.",
-                    ),
-                )
-                return
-            request_id = match.group("request_id")
-            logger.info(
-                "Forward во внешний агент: request_id=%s, knowledge_bases=%s, "
-                "history_len=%d, files=%d",
-                request_id, knowledge_bases, len(history), len(files),
+        match = FORWARD_SENTINEL_PATTERN.match(sentinel)
+        if not match:
+            logger.warning(
+                "Forward: не удалось зарегистрировать agent_request "
+                "для conversation=%s",
+                conversation_id,
             )
-
-            # Запускаем producer'а в фоне (независимо от SSE-стрима).
-            # Producer сам откроет get_db() и сохранит финальное сообщение,
-            # даже если клиент закроет SSE-соединение.
-            agent_bridge_runner.schedule(
-                request_id, settings=self.settings,
-            )
-
-            # Сообщаем фронту request_id, чтобы при разрыве соединения он
-            # мог переоткрыть resume-стрим.
             yield (
-                "sse",
-                sse_agent_request_started(
-                    request_id=request_id,
-                    conversation_id=conversation_id,
+                "error",
+                sse_error(
+                    error="Не удалось переадресовать запрос внешнему агенту.",
                 ),
             )
+            return
+        request_id = match.group("request_id")
+        logger.info(
+            "Forward во внешний агент: request_id=%s, knowledge_bases=%s, "
+            "history_len=%d, files=%d",
+            request_id, knowledge_bases, len(history), len(files),
+        )
 
-            bridge = AgentBridgeService(conn)
-            try:
-                async for upd in bridge.wait_for_completion(
-                    request_id,
-                    poll_interval_sec=self.settings.agent_bridge.poll_interval_sec,
-                    initial_response_timeout_sec=self.settings.agent_bridge.initial_response_timeout_sec,
-                    event_timeout_sec=self.settings.agent_bridge.event_timeout_sec,
-                    max_total_duration_sec=self.settings.agent_bridge.max_total_duration_sec,
-                ):
-                    if upd.event:
-                        ev = upd.event
-                        if ev["event_type"] == "reasoning":
-                            chunk_text = (ev["payload"] or {}).get("text", "")
-                            if not chunk_text:
-                                continue
-                            logger.info(
-                                "Событие агента: тип=reasoning, длина=%d",
-                                len(chunk_text),
-                            )
-                            # Каждый reasoning-чанк — отдельный сворачиваемый
-                            # блок (start + delta + end), со своим block_index.
-                            yield (
-                                "sse",
-                                sse_block_start(
-                                    block_index=block_index,
-                                    block_type="reasoning",
-                                ),
-                            )
-                            yield (
-                                "sse",
-                                sse_block_delta(
-                                    block_index=block_index,
-                                    delta=chunk_text,
-                                ),
-                            )
-                            yield (
-                                "sse",
-                                sse_block_end(block_index=block_index),
-                            )
-                            block_index += 1
-                        elif ev["event_type"] == "error":
-                            payload = ev["payload"] or {}
-                            err_message = payload.get(
-                                "message", "Ошибка внешнего агента",
-                            )
-                            err_code = payload.get("code")
-                            yield (
-                                "sse",
-                                sse_error(error=err_message, code=err_code),
-                            )
-                        # status — пока игнорируем
-                    if upd.response:
-                        logger.info(
-                            "Финальный ответ агента: request_id=%s, "
-                            "blocks=%d, tokens=%s",
-                            request_id,
-                            len(upd.response.get("blocks") or []),
-                            upd.response.get("token_usage"),
-                        )
-                        # Финальные блоки от агента: эмитим их как SSE-блоки
-                        for raw_block in upd.response["blocks"]:
-                            btype = raw_block.get("type", "text")
-                            if btype == "buttons":
-                                # buttons — отдельный SSE-канал, без block_index;
-                                # серверные action_id (имена ChatTool) переводим
-                                # в клиентские действия через button_translator.
-                                translated = await self._translate_buttons(
-                                    raw_block.get("buttons", []),
-                                )
-                                yield (
-                                    "sse",
-                                    sse_buttons(buttons=translated),
-                                )
-                                continue
-                            if btype == "client_action":
-                                # client_action исполняется фронтом сразу
-                                yield (
-                                    "sse",
-                                    sse_client_action(block=raw_block),
-                                )
-                                continue
-                            if btype in ("text", "code"):
-                                yield (
-                                    "sse",
-                                    sse_block_start(
-                                        block_index=block_index,
-                                        block_type=btype,
-                                    ),
-                                )
-                                delta = raw_block.get("content", "")
-                                yield (
-                                    "sse",
-                                    sse_block_delta(
-                                        block_index=block_index,
-                                        delta=delta,
-                                    ),
-                                )
-                                yield (
-                                    "sse",
-                                    sse_block_end(block_index=block_index),
-                                )
-                            else:
-                                # Нестримуемые блоки (file, image, plan, error, ...)
-                                # отдаём одним событием с полной полезной нагрузкой,
-                                # иначе фронт видит пустой start/end и рендерит блок
-                                # только после перезагрузки истории.
-                                yield (
-                                    "sse",
-                                    sse_block_complete(
-                                        block_index=block_index,
-                                        block=raw_block,
-                                    ),
-                                )
-                            block_index += 1
-                        return
-            except AgentBridgeTimeout:
+        # Producer (раннер) сам откроет get_db() и сохранит финальное
+        # сообщение даже если клиент закроет SSE-соединение. Гейты
+        # таймаута и обновление статуса agent_requests — только в нём.
+        agent_bridge_runner.schedule(request_id, settings=self.settings)
+
+        # Сообщаем фронту request_id, чтобы при разрыве соединения он мог
+        # переоткрыть resume-стрим.
+        yield (
+            "sse",
+            sse_agent_request_started(
+                request_id=request_id,
+                conversation_id=conversation_id,
+            ),
+        )
+
+        last_seq: int | None = None
+        poll_interval = self.settings.agent_bridge.poll_interval_sec
+        # Аварийная защита от вечного цикла в самом оркестраторе на
+        # случай, если раннер по какой-то причине не финализирует запрос.
+        # Это запас сверх раннеровского max_total_duration_sec — раннер
+        # всё равно сам прервёт запрос гейтом и пометит status=timeout.
+        max_emit_seconds = (
+            self.settings.agent_bridge.max_total_duration_sec + 5
+        )
+        emit_deadline = asyncio.get_event_loop().time() + max_emit_seconds
+
+        while True:
+            if asyncio.get_event_loop().time() > emit_deadline:
                 logger.warning(
-                    "Forward: внешний агент не ответил вовремя, "
-                    "request_id=%s",
+                    "Forward: оркестратор завершает SSE-стрим по локальному "
+                    "deadline, request_id=%s (раннер продолжит в фоне)",
                     request_id,
-                )
-                timeout_message = (
-                    "Внешний агент не ответил вовремя. Попробуйте позже."
-                )
-                yield (
-                    "sse",
-                    sse_error(error=timeout_message, code="agent_timeout"),
                 )
                 return
+
+            # Открываем коннект только на ОДНУ итерацию — не держим
+            # соединение из пула между poll-тиками.
+            async with get_db() as conn:
+                bridge = AgentBridgeService(conn)
+                req_repo = AgentRequestRepository(conn)
+
+                events = await bridge.poll_events(
+                    request_id, since_seq=last_seq,
+                )
+                for ev in events:
+                    last_seq = ev["seq"]
+                    et = ev["event_type"]
+                    if et == "reasoning":
+                        chunk_text = (ev["payload"] or {}).get("text", "")
+                        if not chunk_text:
+                            continue
+                        logger.info(
+                            "Событие агента: тип=reasoning, длина=%d",
+                            len(chunk_text),
+                        )
+                        # Каждый reasoning-чанк — отдельный сворачиваемый
+                        # блок (start + delta + end), со своим block_index.
+                        yield (
+                            "sse",
+                            sse_block_start(
+                                block_index=block_index,
+                                block_type="reasoning",
+                            ),
+                        )
+                        yield (
+                            "sse",
+                            sse_block_delta(
+                                block_index=block_index,
+                                delta=chunk_text,
+                            ),
+                        )
+                        yield (
+                            "sse",
+                            sse_block_end(block_index=block_index),
+                        )
+                        block_index += 1
+                    elif et == "error":
+                        payload = ev["payload"] or {}
+                        err_message = payload.get(
+                            "message", "Ошибка внешнего агента",
+                        )
+                        err_code = payload.get("code")
+                        yield (
+                            "sse",
+                            sse_error(error=err_message, code=err_code),
+                        )
+                    # status — информационное событие, игнорируем
+
+                response = await bridge.poll_response(request_id)
+                if response is not None:
+                    logger.info(
+                        "Финальный ответ агента: request_id=%s, "
+                        "blocks=%d, tokens=%s",
+                        request_id,
+                        len(response.get("blocks") or []),
+                        response.get("token_usage"),
+                    )
+                    async for sse, idx in emit_response_blocks(
+                        response["blocks"],
+                        block_index_start=block_index,
+                    ):
+                        block_index = idx + 1
+                        yield ("sse", sse)
+                    return
+
+                # Финального ответа ещё нет. Проверяем статус: раннер
+                # мог уже прервать запрос таймаут-гейтом или фатальной
+                # ошибкой — тогда финализируем SSE error'ом и выходим.
+                req = await req_repo.get(request_id)
+                if req is not None and req.get("status") in (
+                    "error", "timeout",
+                ):
+                    status = req["status"]
+                    err_text = (
+                        req.get("error_message")
+                        or "Ошибка внешнего агента"
+                    )
+                    err_code = (
+                        "agent_timeout" if status == "timeout" else "agent_error"
+                    )
+                    if status == "timeout":
+                        err_text = (
+                            "Внешний агент не ответил вовремя. "
+                            "Попробуйте позже."
+                        )
+                    logger.warning(
+                        "Forward: раннер пометил request_id=%s как %s: %s",
+                        request_id, status, req.get("error_message"),
+                    )
+                    yield ("sse", sse_error(error=err_text, code=err_code))
+                    return
+
+            await asyncio.sleep(poll_interval)
 
     def _parse_client_action_result(self, raw: str) -> dict | None:
         """Если result tool'а — JSON-блок client_action, возвращает dict.

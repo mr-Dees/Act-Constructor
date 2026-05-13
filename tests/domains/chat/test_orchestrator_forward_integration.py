@@ -99,34 +99,40 @@ async def test_forward_tool_call_streams_reasoning_and_final(monkeypatch):
     )
     monkeypatch.setattr(orch, "_get_openai_client", lambda: fake_client)
 
-    # Мокируем мост: на send -> request_id; wait_for_completion -> один
-    # reasoning event и финальный response.
-    from app.domains.chat.services.agent_bridge import (
-        AgentBridgeService,
-        AgentBridgeUpdate,
-    )
+    # Мокируем мост: на send -> request_id; на poll_events/poll_response —
+    # имитация одного reasoning-события и финального response.
+    from app.domains.chat.services.agent_bridge import AgentBridgeService
 
-    async def fake_wait_for_completion(
-        self, request_id, *, poll_interval_sec,
-        initial_response_timeout_sec, event_timeout_sec, max_total_duration_sec,
-    ):
-        yield AgentBridgeUpdate(event={
-            "id": 1,
-            "request_id": request_id,
-            "seq": 1,
-            "event_type": "reasoning",
-            "payload": {"text": "Думаю..."},
-            "created_at": None,
-        })
-        yield AgentBridgeUpdate(response={
-            "id": "resp-1",
-            "request_id": request_id,
-            "blocks": [{"type": "text", "content": "КСО — это ..."}],
-            "finish_reason": "stop",
-            "token_usage": None,
-            "model": "imitated",
-            "created_at": None,
-        })
+    _poll_events_calls = {"n": 0}
+
+    async def fake_poll_events(self, request_id, *, since_seq):
+        _poll_events_calls["n"] += 1
+        if _poll_events_calls["n"] == 1:
+            return [{
+                "id": 1,
+                "request_id": request_id,
+                "seq": 1,
+                "event_type": "reasoning",
+                "payload": {"text": "Думаю..."},
+                "created_at": None,
+            }]
+        return []
+
+    _poll_response_calls = {"n": 0}
+
+    async def fake_poll_response(self, request_id):
+        _poll_response_calls["n"] += 1
+        if _poll_response_calls["n"] >= 2:
+            return {
+                "id": "resp-1",
+                "request_id": request_id,
+                "blocks": [{"type": "text", "content": "КСО — это ..."}],
+                "finish_reason": "stop",
+                "token_usage": None,
+                "model": "imitated",
+                "created_at": None,
+            }
+        return None
 
     monkeypatch.setattr(
         AgentBridgeService,
@@ -134,9 +140,19 @@ async def test_forward_tool_call_streams_reasoning_and_final(monkeypatch):
         AsyncMock(return_value="aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee"),
     )
     monkeypatch.setattr(
-        AgentBridgeService,
-        "wait_for_completion",
-        fake_wait_for_completion,
+        AgentBridgeService, "poll_events", fake_poll_events,
+    )
+    monkeypatch.setattr(
+        AgentBridgeService, "poll_response", fake_poll_response,
+    )
+    # AgentRequestRepository.get вызывается, когда poll_response None —
+    # моки возвращают «in_progress», чтобы оркестратор продолжил polling.
+    from app.domains.chat.repositories.agent_request_repository import (
+        AgentRequestRepository,
+    )
+    monkeypatch.setattr(
+        AgentRequestRepository, "get",
+        AsyncMock(return_value={"id": "x", "status": "in_progress"}),
     )
 
     # _handle_forward_call открывает get_db() — подсовываем фиктивное соединение.
@@ -240,35 +256,44 @@ async def test_forward_emits_separate_block_per_reasoning_chunk(monkeypatch):
     )
     monkeypatch.setattr(orch, "_get_openai_client", lambda: fake_client)
 
-    from app.domains.chat.services.agent_bridge import (
-        AgentBridgeService,
-        AgentBridgeUpdate,
-    )
+    from app.domains.chat.services.agent_bridge import AgentBridgeService
 
     chunks = ["Чанк 1.", "Чанк 2.", "Чанк 3."]
 
-    async def fake_wait_for_completion(
-        self, request_id, *, poll_interval_sec,
-        initial_response_timeout_sec, event_timeout_sec, max_total_duration_sec,
-    ):
-        for i, t in enumerate(chunks, start=1):
-            yield AgentBridgeUpdate(event={
+    # На первый poll_events отдаём все три события сразу, дальше — пусто.
+    _events_state = {"emitted": False}
+
+    async def fake_poll_events(self, request_id, *, since_seq):
+        if _events_state["emitted"]:
+            return []
+        _events_state["emitted"] = True
+        return [
+            {
                 "id": i,
                 "request_id": request_id,
                 "seq": i,
                 "event_type": "reasoning",
                 "payload": {"text": t},
                 "created_at": None,
-            })
-        yield AgentBridgeUpdate(response={
-            "id": "resp-1",
-            "request_id": request_id,
-            "blocks": [{"type": "text", "content": "Финал"}],
-            "finish_reason": "stop",
-            "token_usage": None,
-            "model": "imitated",
-            "created_at": None,
-        })
+            }
+            for i, t in enumerate(chunks, start=1)
+        ]
+
+    _resp_calls = {"n": 0}
+
+    async def fake_poll_response(self, request_id):
+        _resp_calls["n"] += 1
+        if _resp_calls["n"] >= 2:
+            return {
+                "id": "resp-1",
+                "request_id": request_id,
+                "blocks": [{"type": "text", "content": "Финал"}],
+                "finish_reason": "stop",
+                "token_usage": None,
+                "model": "imitated",
+                "created_at": None,
+            }
+        return None
 
     monkeypatch.setattr(
         AgentBridgeService,
@@ -276,9 +301,17 @@ async def test_forward_emits_separate_block_per_reasoning_chunk(monkeypatch):
         AsyncMock(return_value="aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee"),
     )
     monkeypatch.setattr(
-        AgentBridgeService,
-        "wait_for_completion",
-        fake_wait_for_completion,
+        AgentBridgeService, "poll_events", fake_poll_events,
+    )
+    monkeypatch.setattr(
+        AgentBridgeService, "poll_response", fake_poll_response,
+    )
+    from app.domains.chat.repositories.agent_request_repository import (
+        AgentRequestRepository,
+    )
+    monkeypatch.setattr(
+        AgentRequestRepository, "get",
+        AsyncMock(return_value={"id": "x", "status": "in_progress"}),
     )
     # Подменяем фоновый раннер — он тестируется отдельно.
     monkeypatch.setattr(
@@ -359,16 +392,13 @@ def _setup_forward_with_response_blocks(monkeypatch, orch, response_blocks):
     )
     monkeypatch.setattr(orch, "_get_openai_client", lambda: fake_client)
 
-    from app.domains.chat.services.agent_bridge import (
-        AgentBridgeService,
-        AgentBridgeUpdate,
-    )
+    from app.domains.chat.services.agent_bridge import AgentBridgeService
 
-    async def fake_wait_for_completion(
-        self, request_id, *, poll_interval_sec,
-        initial_response_timeout_sec, event_timeout_sec, max_total_duration_sec,
-    ):
-        yield AgentBridgeUpdate(response={
+    async def fake_poll_events(self, request_id, *, since_seq):
+        return []
+
+    async def fake_poll_response(self, request_id):
+        return {
             "id": "resp-1",
             "request_id": request_id,
             "blocks": response_blocks,
@@ -376,7 +406,7 @@ def _setup_forward_with_response_blocks(monkeypatch, orch, response_blocks):
             "token_usage": None,
             "model": "imitated",
             "created_at": None,
-        })
+        }
 
     monkeypatch.setattr(
         AgentBridgeService,
@@ -384,9 +414,17 @@ def _setup_forward_with_response_blocks(monkeypatch, orch, response_blocks):
         AsyncMock(return_value="aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee"),
     )
     monkeypatch.setattr(
-        AgentBridgeService,
-        "wait_for_completion",
-        fake_wait_for_completion,
+        AgentBridgeService, "poll_events", fake_poll_events,
+    )
+    monkeypatch.setattr(
+        AgentBridgeService, "poll_response", fake_poll_response,
+    )
+    from app.domains.chat.repositories.agent_request_repository import (
+        AgentRequestRepository,
+    )
+    monkeypatch.setattr(
+        AgentRequestRepository, "get",
+        AsyncMock(return_value={"id": "x", "status": "in_progress"}),
     )
 
     orch._save_assistant_message = AsyncMock()
