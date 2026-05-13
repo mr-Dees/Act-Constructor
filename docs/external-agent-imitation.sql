@@ -34,11 +34,14 @@
 -- 0. ПОДГОТОВКА: посмотреть свежие запросы от AW
 -- ────────────────────────────────────────────────────────────────────────────
 
--- Что AW уже отправила, но ещё не обработано:
+-- Что AW уже отправила, но ещё не обработано.
+-- ВНИМАНИЕ: после C2.b (фоновый раннер polling-задач) AW сразу переводит
+-- свежий запрос из 'pending' в 'in_progress' — фоновая задача начинает
+-- polling. Поэтому фильтровать только по 'pending' = почти пустая выборка.
 SELECT id, conversation_id, message_id, user_id, domain_name,
        last_user_message, status, created_at
 FROM t_db_oarb_audit_act_agent_requests
-WHERE status = 'pending'
+WHERE status IN ('pending', 'in_progress')
 ORDER BY created_at DESC
 LIMIT 20;
 
@@ -52,11 +55,14 @@ WHERE id = '<request_id>';
 -- 1. СЦЕНАРИЙ "успешный ответ агента" (нормальный поток)
 -- ────────────────────────────────────────────────────────────────────────────
 
--- Шаг 1.1 (опц.) — пометить, что агент взял в работу.
--- На GP UPDATE дорог; в продакшене реальный агент может сразу писать events.
-UPDATE t_db_oarb_audit_act_agent_requests
-SET status = 'in_progress', started_at = now()
-WHERE id = '<request_id>';
+-- Шаг 1.1 — больше НЕ нужен при ручной имитации.
+-- AW сама ставит status='in_progress' через фоновый раннер (C2.b)
+-- сразу после INSERT'а запроса. Если запускать UPDATE вручную, он
+-- может пересечься с UPDATE из раннера — это безопасно (идемпотентно),
+-- но смысла больше нет. Оставлено как справка по полю started_at.
+-- UPDATE t_db_oarb_audit_act_agent_requests
+-- SET status = 'in_progress', started_at = now()
+-- WHERE id = '<request_id>';
 
 -- Шаг 1.2 — стрим reasoning (несколько порций).
 -- ВАЖНО: id берётся из sequence; seq монотонно растёт в рамках request_id.
