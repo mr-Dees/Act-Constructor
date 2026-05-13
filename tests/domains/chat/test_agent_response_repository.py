@@ -20,7 +20,7 @@ async def test_insert_writes_jsonb_blocks_and_token_usage(mock_conn):
     await repo.insert(
         id="resp-1",
         request_id="req-1",
-        blocks=[{"type": "text", "text": "Привет"}],
+        blocks=[{"type": "text", "content": "Привет"}],
         finish_reason="stop",
         token_usage={"prompt_tokens": 10, "completion_tokens": 5},
         model="imitated",
@@ -33,7 +33,7 @@ async def test_insert_writes_jsonb_blocks_and_token_usage(mock_conn):
     assert len(params) == 6
     assert params[0] == "resp-1"
     assert params[1] == "req-1"
-    assert json.loads(params[2]) == [{"type": "text", "text": "Привет"}]
+    assert json.loads(params[2]) == [{"type": "text", "content": "Привет"}]
     assert params[3] == "stop"
     assert json.loads(params[4]) == {"prompt_tokens": 10, "completion_tokens": 5}
     assert params[5] == "imitated"
@@ -43,7 +43,7 @@ async def test_insert_handles_null_token_usage(mock_conn):
     repo = AgentResponseRepository(mock_conn)
     await repo.insert(
         id="resp-1", request_id="req-1",
-        blocks=[{"type": "text", "text": "x"}],
+        blocks=[{"type": "text", "content": "x"}],
         finish_reason="stop", token_usage=None, model=None,
     )
     params = mock_conn.execute.call_args.args[1:]
@@ -55,14 +55,14 @@ async def test_get_by_request_id_parses_jsonb(mock_conn):
     repo = AgentResponseRepository(mock_conn)
     mock_conn.fetchrow.return_value = {
         "id": "resp-1", "request_id": "req-1",
-        "blocks": '[{"type":"text","text":"Hi"}]',
+        "blocks": '[{"type":"text","content":"Hi"}]',
         "finish_reason": "stop",
         "token_usage": '{"prompt_tokens":12}',
         "model": "m", "created_at": None,
     }
     row = await repo.get_by_request_id("req-1")
     assert row is not None
-    assert row["blocks"] == [{"type": "text", "text": "Hi"}]
+    assert row["blocks"] == [{"type": "text", "content": "Hi"}]
     assert row["token_usage"] == {"prompt_tokens": 12}
 
 

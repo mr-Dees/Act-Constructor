@@ -237,7 +237,7 @@ const ChatRenderer = {
     _renderText(block) {
         const div = document.createElement('div');
         div.className = 'chat-block chat-block-text';
-        div.innerHTML = this._markdownToHtml(block.text || block.content || '');
+        div.innerHTML = this._markdownToHtml(block.content || '');
         return div;
     },
 
@@ -268,7 +268,7 @@ const ChatRenderer = {
         // Код
         const pre = document.createElement('pre');
         const code = document.createElement('code');
-        code.textContent = block.code || block.content || '';
+        code.textContent = block.content || '';
         pre.appendChild(code);
 
         wrapper.appendChild(header);
@@ -297,7 +297,7 @@ const ChatRenderer = {
 
         const content = document.createElement('div');
         content.className = 'chat-block-reasoning-content';
-        content.innerHTML = this._markdownToHtml(block.text || block.content || '');
+        content.innerHTML = this._markdownToHtml(block.content || '');
         details.appendChild(content);
 
         return details;

@@ -117,7 +117,7 @@ class TestMessageServiceSaveUser:
         msg_repo.create.return_value = {
             "id": "msg-1",
             "role": "user",
-            "content": [{"type": "text", "text": "Привет"}],
+            "content": [{"type": "text", "content": "Привет"}],
         }
 
         result = await service.save_user_message(
@@ -170,12 +170,12 @@ class TestMessageServiceSaveAssistant:
         msg_repo.create.return_value = {
             "id": "msg-2",
             "role": "assistant",
-            "content": [{"type": "text", "text": "Ответ"}],
+            "content": [{"type": "text", "content": "Ответ"}],
         }
 
         result = await service.save_assistant_message(
             conversation_id="conv-1",
-            content=[{"type": "text", "text": "Ответ"}],
+            content=[{"type": "text", "content": "Ответ"}],
             model="gpt-4o",
         )
 

@@ -69,7 +69,7 @@ async def list_pages_handler() -> str:
     text = "\n\n".join(text_parts)
 
     blocks = [
-        {"type": "text", "text": text},
+        {"type": "text", "content": text},
         {"type": "buttons", "buttons": buttons},
     ]
     return json.dumps(blocks, ensure_ascii=False)

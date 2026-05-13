@@ -121,7 +121,7 @@ async def test_forward_tool_call_streams_reasoning_and_final(monkeypatch):
         yield AgentBridgeUpdate(response={
             "id": "resp-1",
             "request_id": request_id,
-            "blocks": [{"type": "text", "text": "КСО — это ..."}],
+            "blocks": [{"type": "text", "content": "КСО — это ..."}],
             "finish_reason": "stop",
             "token_usage": None,
             "model": "imitated",
@@ -198,7 +198,7 @@ async def test_forward_tool_call_streams_reasoning_and_final(monkeypatch):
     saved_blocks = orch._save_assistant_message.call_args.kwargs["content_blocks"]
     assert saved_blocks == [
         {"type": "reasoning", "content": "Думаю..."},
-        {"type": "text", "text": "КСО — это ..."},
+        {"type": "text", "content": "КСО — это ..."},
     ]
 
 
@@ -256,7 +256,7 @@ async def test_forward_emits_separate_block_per_reasoning_chunk(monkeypatch):
         yield AgentBridgeUpdate(response={
             "id": "resp-1",
             "request_id": request_id,
-            "blocks": [{"type": "text", "text": "Финал"}],
+            "blocks": [{"type": "text", "content": "Финал"}],
             "finish_reason": "stop",
             "token_usage": None,
             "model": "imitated",
@@ -482,7 +482,7 @@ async def test_text_and_buttons_in_same_response_each_renders_correctly(monkeypa
     _setup_forward_with_response_blocks(
         monkeypatch, orch,
         response_blocks=[
-            {"type": "text", "text": "Готово."},
+            {"type": "text", "content": "Готово."},
             {"type": "buttons", "buttons": buttons_payload},
         ],
     )

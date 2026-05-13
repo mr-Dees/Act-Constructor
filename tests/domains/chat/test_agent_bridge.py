@@ -93,12 +93,12 @@ async def test_poll_response_returns_dict_when_present(mock_conn):
     svc = AgentBridgeService(mock_conn)
     mock_conn.fetchrow.return_value = {
         "id": "resp-1", "request_id": "r1",
-        "blocks": '[{"type":"text","text":"ok"}]',
+        "blocks": '[{"type":"text","content":"ok"}]',
         "finish_reason": "stop", "token_usage": None,
         "model": "imitated", "created_at": None,
     }
     row = await svc.poll_response("r1")
-    assert row["blocks"] == [{"type": "text", "text": "ok"}]
+    assert row["blocks"] == [{"type": "text", "content": "ok"}]
     assert row["finish_reason"] == "stop"
 
 
@@ -119,7 +119,7 @@ async def test_wait_for_completion_yields_events_then_response(mock_conn):
     ]
     response_seq = [None, {
         "id": "resp-1", "request_id": "r1",
-        "blocks": '[{"type":"text","text":"done"}]',
+        "blocks": '[{"type":"text","content":"done"}]',
         "finish_reason": "stop", "token_usage": None,
         "model": "imitated", "created_at": None,
     }]
@@ -137,7 +137,7 @@ async def test_wait_for_completion_yields_events_then_response(mock_conn):
     response_updates = [u for u in updates if u.response is not None]
     assert len(event_updates) == 2
     assert len(response_updates) == 1
-    assert response_updates[0].response["blocks"] == [{"type": "text", "text": "done"}]
+    assert response_updates[0].response["blocks"] == [{"type": "text", "content": "done"}]
 
     # После финала — UPDATE status='done'
     update_calls = [
@@ -186,7 +186,7 @@ async def test_wait_for_completion_yields_response_even_without_events(mock_conn
     mock_conn.fetch.return_value = []
     mock_conn.fetchrow.return_value = {
         "id": "x", "request_id": "r1",
-        "blocks": '[{"type":"text","text":"hi"}]',
+        "blocks": '[{"type":"text","content":"hi"}]',
         "finish_reason": "stop", "token_usage": None,
         "model": None, "created_at": None,
     }

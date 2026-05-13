@@ -236,11 +236,12 @@ class Orchestrator:
                         continue
                     block_type = block.get("type", "")
                     if block_type == "text":
-                        text_parts.append(block.get("content", block.get("text", "")))
+                        text_parts.append(block.get("content", ""))
                     elif block_type == "code":
                         lang = block.get("language", "")
-                        code = block.get("content", block.get("code", ""))
-                        text_parts.append(f"```{lang}\n{code}\n```")
+                        text_parts.append(
+                            f"```{lang}\n{block.get('content', '')}\n```",
+                        )
                     elif block_type == "file":
                         fname = block.get("filename", "файл")
                         text_parts.append(f"[Прикреплён файл: {fname}]")
@@ -503,8 +504,7 @@ class Orchestrator:
                                         block_type=btype,
                                     ),
                                 )
-                                content_key = "code" if btype == "code" else "text"
-                                delta = raw_block.get(content_key, "")
+                                delta = raw_block.get("content", "")
                                 yield (
                                     "sse",
                                     sse_block_delta(
@@ -1123,21 +1123,12 @@ class Orchestrator:
                                             block_index=block_index,
                                             block_type=btype,
                                         )
-                                        content_key = (
-                                            "code" if btype == "code" else "text"
-                                        )
-                                        delta = raw_block.get(content_key, "")
+                                        delta = raw_block.get("content", "")
                                         yield sse_block_delta(
                                             block_index=block_index, delta=delta,
                                         )
                                         yield sse_block_end(block_index=block_index)
-                                        if btype == "text":
-                                            emitted_blocks.append({
-                                                "type": "text",
-                                                "content": raw_block.get("text", ""),
-                                            })
-                                        else:
-                                            emitted_blocks.append(raw_block)
+                                        emitted_blocks.append(raw_block)
                                     else:
                                         yield sse_block_complete(
                                             block_index=block_index,
@@ -1323,21 +1314,12 @@ class Orchestrator:
                                         block_index=block_index,
                                         block_type=btype,
                                     )
-                                    content_key = (
-                                        "code" if btype == "code" else "text"
-                                    )
-                                    delta = raw_block.get(content_key, "")
+                                    delta = raw_block.get("content", "")
                                     yield sse_block_delta(
                                         block_index=block_index, delta=delta,
                                     )
                                     yield sse_block_end(block_index=block_index)
-                                    if btype == "text":
-                                        emitted_blocks.append({
-                                            "type": "text",
-                                            "content": raw_block.get("text", ""),
-                                        })
-                                    else:
-                                        emitted_blocks.append(raw_block)
+                                    emitted_blocks.append(raw_block)
                                 else:
                                     yield sse_block_complete(
                                         block_index=block_index,

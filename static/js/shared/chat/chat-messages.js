@@ -351,9 +351,7 @@ const ChatMessages = {
 
             if (msg.role === 'user') {
                 const textBlock = blocks.find(b => b.type === 'text');
-                const text = textBlock
-                    ? (textBlock.content || textBlock.text || '')
-                    : '';
+                const text = textBlock ? (textBlock.content || '') : '';
 
                 const fileBlocks = blocks.filter(b => b.type === 'file');
                 this._renderUserMessageWithFiles(text, fileBlocks);
