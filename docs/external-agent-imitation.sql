@@ -1,11 +1,24 @@
 -- ============================================================================
 --  external-agent-imitation.sql
 --  Хелпер-сниппеты для ручной имитации внешнего ИИ-агента в AuditWorkstation
---  (используется при разработке/тестировании моста agent_requests/events/responses)
+--  (используется при разработке/тестировании моста запросов/событий/ответов)
 --
 --  Место: docs/external-agent-imitation.sql (НЕ часть продакшен-кода)
 --  Целевая БД: PostgreSQL (dev) и Greenplum (prod) — все запросы GP-совместимы
 --  Связанная документация: docs/developer-guide.md §7.8 (Мост к внешнему агенту)
+--
+--  ВАЖНО — имена таблиц:
+--    Все таблицы приложения используют общий префикс `t_db_oarb_audit_act_`,
+--    задаваемый через env-переменную `DATABASE__TABLE_PREFIX`. Префикс одинаков
+--    для PG и GP. В сниппетах ниже имена указаны в полном виде, как они
+--    выглядят в базе при дефолтном префиксе:
+--      • t_db_oarb_audit_act_agent_requests
+--      • t_db_oarb_audit_act_agent_response_events
+--      • t_db_oarb_audit_act_agent_responses
+--      • t_db_oarb_audit_act_chat_files
+--      • t_db_oarb_audit_act_agent_response_events_id_seq  (sequence)
+--    Если в .env задан другой префикс — замени глобально.
+--    На GP к имени дополнительно прибавляется схема: `{SCHEMA}.<table>`.
 --
 --  ВАЖНО — различие форматов:
 --    • Поле `payload` в `agent_response_events` (тип `reasoning`/`status`/`error`)
@@ -14,11 +27,6 @@
 --    • Поле `blocks` в `agent_responses` — это массив pydantic-моделей из
 --      `app/core/chat/blocks.py`. Каноническое поле для `text`/`code`/`reasoning`
 --      блоков — `content` (НЕ `text`/`code`).
---
---  ВАЖНО — Greenplum-плейсхолдеры:
---    На GP реальные имена объектов — `{SCHEMA}.{PREFIX}<name>` (адаптер подставляет).
---    В этой шпаргалке имена даны в развёрнутом виде для удобства; на GP замените
---    `agent_response_events_id_seq` → `<schema>.<prefix>agent_response_events_id_seq`.
 -- ============================================================================
 
 
@@ -29,14 +37,14 @@
 -- Что AW уже отправила, но ещё не обработано:
 SELECT id, conversation_id, message_id, user_id, domain_name,
        last_user_message, status, created_at
-FROM agent_requests
+FROM t_db_oarb_audit_act_agent_requests
 WHERE status = 'pending'
 ORDER BY created_at DESC
 LIMIT 20;
 
 -- Полный payload одного запроса (история, файлы, knowledge_bases):
 SELECT id, knowledge_bases, history, files, last_user_message
-FROM agent_requests
+FROM t_db_oarb_audit_act_agent_requests
 WHERE id = '<request_id>';
 
 
@@ -46,15 +54,15 @@ WHERE id = '<request_id>';
 
 -- Шаг 1.1 (опц.) — пометить, что агент взял в работу.
 -- На GP UPDATE дорог; в продакшене реальный агент может сразу писать events.
-UPDATE agent_requests
+UPDATE t_db_oarb_audit_act_agent_requests
 SET status = 'in_progress', started_at = now()
 WHERE id = '<request_id>';
 
 -- Шаг 1.2 — стрим reasoning (несколько порций).
 -- ВАЖНО: id берётся из sequence; seq монотонно растёт в рамках request_id.
-INSERT INTO agent_response_events (id, request_id, seq, event_type, payload, created_at)
+INSERT INTO t_db_oarb_audit_act_agent_response_events (id, request_id, seq, event_type, payload, created_at)
 VALUES (
-    nextval('agent_response_events_id_seq'),
+    nextval('t_db_oarb_audit_act_agent_response_events_id_seq'),
     '<request_id>',
     1,
     'reasoning',
@@ -62,9 +70,9 @@ VALUES (
     now()
 );
 
-INSERT INTO agent_response_events (id, request_id, seq, event_type, payload, created_at)
+INSERT INTO t_db_oarb_audit_act_agent_response_events (id, request_id, seq, event_type, payload, created_at)
 VALUES (
-    nextval('agent_response_events_id_seq'),
+    nextval('t_db_oarb_audit_act_agent_response_events_id_seq'),
     '<request_id>',
     2,
     'reasoning',
@@ -73,9 +81,9 @@ VALUES (
 );
 
 -- Шаг 1.3 (опц.) — статус-event для прогресс-баннера в UI:
-INSERT INTO agent_response_events (id, request_id, seq, event_type, payload, created_at)
+INSERT INTO t_db_oarb_audit_act_agent_response_events (id, request_id, seq, event_type, payload, created_at)
 VALUES (
-    nextval('agent_response_events_id_seq'),
+    nextval('t_db_oarb_audit_act_agent_response_events_id_seq'),
     '<request_id>',
     3,
     'status',
@@ -85,7 +93,7 @@ VALUES (
 
 -- Шаг 1.4 — ФИНАЛЬНЫЙ ответ. UUID генерируется автоматически
 -- (md5(...) даёт уникальную строку, помещающуюся в VARCHAR(36); работает и на PG, и на GP).
-INSERT INTO agent_responses
+INSERT INTO t_db_oarb_audit_act_agent_responses
     (id, request_id, blocks, finish_reason, model, token_usage, created_at)
 VALUES (
     md5(random()::text || clock_timestamp()::text),
@@ -100,7 +108,7 @@ VALUES (
 );
 
 -- Шаг 1.5 — закрыть запрос:
-UPDATE agent_requests
+UPDATE t_db_oarb_audit_act_agent_requests
 SET status = 'done', finished_at = now()
 WHERE id = '<request_id>';
 
@@ -109,7 +117,7 @@ WHERE id = '<request_id>';
 -- 2. СЦЕНАРИЙ "ответ с кнопками" (агент возвращает ButtonGroup в blocks)
 -- ────────────────────────────────────────────────────────────────────────────
 
-INSERT INTO agent_responses
+INSERT INTO t_db_oarb_audit_act_agent_responses
     (id, request_id, blocks, finish_reason, model, token_usage, created_at)
 VALUES (
     md5(random()::text || clock_timestamp()::text),
@@ -129,7 +137,7 @@ VALUES (
     now()
 );
 
-UPDATE agent_requests SET status = 'done', finished_at = now()
+UPDATE t_db_oarb_audit_act_agent_requests SET status = 'done', finished_at = now()
 WHERE id = '<request_id>';
 
 
@@ -137,9 +145,9 @@ WHERE id = '<request_id>';
 -- 3. СЦЕНАРИЙ "ошибка" (агент не смог получить ответ)
 -- ────────────────────────────────────────────────────────────────────────────
 
-INSERT INTO agent_response_events (id, request_id, seq, event_type, payload, created_at)
+INSERT INTO t_db_oarb_audit_act_agent_response_events (id, request_id, seq, event_type, payload, created_at)
 VALUES (
-    nextval('agent_response_events_id_seq'),
+    nextval('t_db_oarb_audit_act_agent_response_events_id_seq'),
     '<request_id>',
     1,
     'error',
@@ -147,7 +155,7 @@ VALUES (
     now()
 );
 
-INSERT INTO agent_responses
+INSERT INTO t_db_oarb_audit_act_agent_responses
     (id, request_id, blocks, finish_reason, model, created_at)
 VALUES (
     md5(random()::text || clock_timestamp()::text),
@@ -158,7 +166,7 @@ VALUES (
     now()
 );
 
-UPDATE agent_requests
+UPDATE t_db_oarb_audit_act_agent_requests
 SET status = 'error',
     error_message = 'kb_unavailable',
     finished_at = now()
@@ -176,12 +184,12 @@ SELECT
     file ->> 'mime_type'      AS mime,
     (file ->> 'size')::bigint AS size,
     length(file ->> 'extracted_text') AS extracted_text_len
-FROM agent_requests, jsonb_array_elements(files) AS file
-WHERE agent_requests.id = '<request_id>';
+FROM t_db_oarb_audit_act_agent_requests, jsonb_array_elements(files) AS file
+WHERE t_db_oarb_audit_act_agent_requests.id = '<request_id>';
 
 -- Прочитать BYTEA бинарного файла (изображение и т.п.):
 SELECT filename, mime_type, length(file_data) AS bytes
-FROM chat_files
+FROM t_db_oarb_audit_act_chat_files
 WHERE id = '<file_uuid_из_files_jsonb>';
 
 
@@ -212,7 +220,7 @@ WHERE id = '<file_uuid_из_files_jsonb>';
 
 -- 4a.1 — TXT: простейший случай, тело — utf8 в convert_to():
 WITH new_file AS (
-    INSERT INTO chat_files
+    INSERT INTO t_db_oarb_audit_act_chat_files
         (id, conversation_id, message_id, filename,
          mime_type, file_size, file_data, created_at)
     SELECT
@@ -230,11 +238,11 @@ WITH new_file AS (
             'Документ сформирован агентом базы знаний.', 'UTF8'
         ),
         now()
-    FROM agent_requests r
+    FROM t_db_oarb_audit_act_agent_requests r
     WHERE r.id = '<request_id>'
     RETURNING id, filename, mime_type, file_size
 )
-INSERT INTO agent_responses
+INSERT INTO t_db_oarb_audit_act_agent_responses
     (id, request_id, blocks, finish_reason, model, created_at)
 SELECT
     md5(random()::text || clock_timestamp()::text),
@@ -253,14 +261,14 @@ SELECT
     'stop', 'imitated-agent', now()
 FROM new_file nf;
 
-UPDATE agent_requests SET status = 'done', finished_at = now()
+UPDATE t_db_oarb_audit_act_agent_requests SET status = 'done', finished_at = now()
 WHERE id = '<request_id>';
 
 
 -- 4a.2 — PDF: подкладываем только сигнатуру (для UI достаточно, чтобы
 -- определить mime; полноценное содержимое подставь сам).
 WITH new_file AS (
-    INSERT INTO chat_files
+    INSERT INTO t_db_oarb_audit_act_chat_files
         (id, conversation_id, message_id, filename,
          mime_type, file_size, file_data, created_at)
     SELECT
@@ -272,11 +280,11 @@ WITH new_file AS (
         octet_length(decode('255044462D312E340A25E2E3CFD30A', 'hex')),
         decode('255044462D312E340A25E2E3CFD30A', 'hex'),  -- "%PDF-1.4\n%...\n"
         now()
-    FROM agent_requests r
+    FROM t_db_oarb_audit_act_agent_requests r
     WHERE r.id = '<request_id>'
     RETURNING id, filename, mime_type, file_size
 )
-INSERT INTO agent_responses
+INSERT INTO t_db_oarb_audit_act_agent_responses
     (id, request_id, blocks, finish_reason, model, created_at)
 SELECT
     md5(random()::text || clock_timestamp()::text),
@@ -295,7 +303,7 @@ SELECT
     'stop', 'imitated-agent', now()
 FROM new_file nf;
 
-UPDATE agent_requests SET status = 'done', finished_at = now()
+UPDATE t_db_oarb_audit_act_agent_requests SET status = 'done', finished_at = now()
 WHERE id = '<request_id>';
 
 
@@ -303,7 +311,7 @@ WHERE id = '<request_id>';
 -- Excel сам файл не откроет, но в чате он отрендерится с иконкой и
 -- кнопкой "Скачать". Для боевого сценария подставь реальные bytes.
 WITH new_file AS (
-    INSERT INTO chat_files
+    INSERT INTO t_db_oarb_audit_act_chat_files
         (id, conversation_id, message_id, filename,
          mime_type, file_size, file_data, created_at)
     SELECT
@@ -315,11 +323,11 @@ WITH new_file AS (
         octet_length(decode('504B0304140000000000', 'hex')),
         decode('504B0304140000000000', 'hex'),  -- "PK\x03\x04..." — ZIP header
         now()
-    FROM agent_requests r
+    FROM t_db_oarb_audit_act_agent_requests r
     WHERE r.id = '<request_id>'
     RETURNING id, filename, mime_type, file_size
 )
-INSERT INTO agent_responses
+INSERT INTO t_db_oarb_audit_act_agent_responses
     (id, request_id, blocks, finish_reason, model, created_at)
 SELECT
     md5(random()::text || clock_timestamp()::text),
@@ -338,7 +346,7 @@ SELECT
     'stop', 'imitated-agent', now()
 FROM new_file nf;
 
-UPDATE agent_requests SET status = 'done', finished_at = now()
+UPDATE t_db_oarb_audit_act_agent_requests SET status = 'done', finished_at = now()
 WHERE id = '<request_id>';
 
 
@@ -347,25 +355,25 @@ WHERE id = '<request_id>';
 -- ────────────────────────────────────────────────────────────────────────────
 
 -- 5.1 — Удалить события старше 30 дней:
-DELETE FROM agent_response_events
+DELETE FROM t_db_oarb_audit_act_agent_response_events
 WHERE created_at < now() - INTERVAL '30 days';
 
 -- 5.2 — Удалить старые завершённые запросы и их финальные ответы (180 дней):
-DELETE FROM agent_responses
+DELETE FROM t_db_oarb_audit_act_agent_responses
 WHERE created_at < now() - INTERVAL '180 days';
 
-DELETE FROM agent_requests
+DELETE FROM t_db_oarb_audit_act_agent_requests
 WHERE created_at < now() - INTERVAL '180 days'
   AND status IN ('done', 'error', 'timeout');
 
 -- 5.3 — На Greenplum после массивных DELETE'ов запустить vacuum
 --       (PG он тоже не помешает, но обычно автовакуум справится):
-VACUUM ANALYZE agent_response_events;
-VACUUM ANALYZE agent_responses;
-VACUUM ANALYZE agent_requests;
+VACUUM ANALYZE t_db_oarb_audit_act_agent_response_events;
+VACUUM ANALYZE t_db_oarb_audit_act_agent_responses;
+VACUUM ANALYZE t_db_oarb_audit_act_agent_requests;
 
 -- 5.4 — Иногда нужно "зависшие" pending дольше N часов перевести в timeout:
-UPDATE agent_requests
+UPDATE t_db_oarb_audit_act_agent_requests
 SET status = 'timeout',
     error_message = 'manual cleanup: stuck in pending',
     finished_at = now()
@@ -378,14 +386,14 @@ WHERE status IN ('pending', 'in_progress')
 -- ────────────────────────────────────────────────────────────────────────────
 
 -- Сколько запросов в каком статусе:
-SELECT status, COUNT(*) FROM agent_requests
+SELECT status, COUNT(*) FROM t_db_oarb_audit_act_agent_requests
 GROUP BY status ORDER BY status;
 
 -- Самые медленные завершённые запросы (top 20):
 SELECT id, last_user_message,
        finished_at - created_at AS duration,
        status
-FROM agent_requests
+FROM t_db_oarb_audit_act_agent_requests
 WHERE finished_at IS NOT NULL
 ORDER BY duration DESC
 LIMIT 20;
@@ -396,6 +404,6 @@ SELECT
     MAX(cnt)                AS max_events
 FROM (
     SELECT request_id, COUNT(*) AS cnt
-    FROM agent_response_events
+    FROM t_db_oarb_audit_act_agent_response_events
     GROUP BY request_id
 ) t;

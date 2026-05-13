@@ -2,10 +2,12 @@
 
 Чек-лист ручной проверки моста к внешнему ИИ-агенту перед merge'ом ветки.
 
+> В тексте ниже имена `agent_requests`, `agent_response_events`, `agent_responses`, `chat_files` упоминаются без префикса для краткости. В БД они хранятся с префиксом `DATABASE__TABLE_PREFIX` (по умолчанию `t_db_oarb_audit_act_`).
+
 ## Подготовка
 
 1. Поднять PostgreSQL и применить миграцию (`app/domains/chat/migrations/postgresql/schema.sql`):
-   - Должны появиться таблицы `agent_requests`, `agent_response_events`, `agent_responses` и sequence `agent_response_events_id_seq`.
+   - Должны появиться таблицы `t_db_oarb_audit_act_agent_requests`, `t_db_oarb_audit_act_agent_response_events`, `t_db_oarb_audit_act_agent_responses` и sequence `t_db_oarb_audit_act_agent_response_events_id_seq` (префикс из `DATABASE__TABLE_PREFIX`).
 
 2. Заполнить `.env.local` (dev на OpenRouter):
    ```
@@ -29,7 +31,7 @@
 ### 1. Small-talk локально
 - Написать в чат: «Привет, как дела?»
 - Ожидаемо: LLM отвечает локально (без записи в `agent_requests`).
-- Проверить: `SELECT count(*) FROM agent_requests` — не должно увеличиться.
+- Проверить: `SELECT count(*) FROM t_db_oarb_audit_act_agent_requests` — не должно увеличиться.
 
 ### 2. Forward на внешнего агента
 - Написать: «Расскажи про регламент 2024 года».

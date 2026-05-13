@@ -270,8 +270,8 @@ for d in reversed(started):
 
 ```
 DatabaseAdapter (абстрактный)
-    ├── PostgreSQLAdapter   — простые имена таблиц, CASCADE, GIN-индексы
-    └── GreenplumAdapter    — квалифицированные имена, BIGSERIAL, Kerberos
+    ├── PostgreSQLAdapter   — имена с префиксом, CASCADE, GIN-индексы
+    └── GreenplumAdapter    — schema-квалифицированные имена с префиксом, BIGSERIAL, Kerberos
 ```
 
 Адаптер выбирается при старте по значению `DATABASE__TYPE` и доступен глобально через `get_adapter()`.
@@ -1119,6 +1119,8 @@ DomainDescriptor(
 
 ### 6.1 Схема: основные и справочные таблицы
 
+> **Префикс таблиц.** Все таблицы доменов `acts`, `chat` и `admin` имеют общий префикс из `DATABASE__TABLE_PREFIX` (по умолчанию `t_db_oarb_audit_act_`). В таблицах и в коде ниже имена приведены без префикса для краткости — реальное имя в БД: `t_db_oarb_audit_act_<имя>` (на GP дополнительно квалифицируется схемой `{SCHEMA}.`). Подстановкой занимаются адаптеры (`PostgreSQLAdapter.get_table_name`, `GreenplumAdapter.get_table_name`).
+
 **Домен актов — 11 таблиц:**
 
 | Таблица | Назначение | Связь |
@@ -1265,16 +1267,25 @@ class DatabaseAdapter(ABC):
 
 | Аспект | PostgreSQL | Greenplum |
 |--------|-----------|-----------|
-| Имена таблиц | `acts` | `{SCHEMA}.{PREFIX}acts` |
+| Имена таблиц | `{PREFIX}acts` | `{SCHEMA}.{PREFIX}acts` |
 | Auto-increment | `SERIAL` | `BIGSERIAL` |
 | CASCADE DELETE | Да | Нет (ручное управление) |
 | ON CONFLICT | Да | Нет (DELETE + INSERT) |
 | Индексы | GIN на JSONB | BTREE |
 | Аутентификация | Пароль | Kerberos (kinit) |
 
-**Greenplum adapter** использует плейсхолдеры `{SCHEMA}` и `{PREFIX}` в schema.sql, которые подставляются при создании таблиц:
+Оба адаптера используют общие плейсхолдеры `{SCHEMA}` и `{PREFIX}` в `schema.sql`. PG-адаптер подставляет `{SCHEMA}.` → `""` и `{PREFIX}` → `DATABASE__TABLE_PREFIX`; GP-адаптер — `{SCHEMA}` → реальную схему и `{PREFIX}` → тот же префикс. За счёт этого имена таблиц совпадают в обеих СУБД (минус schema-qualifier на PG).
 
 ```python
+class PostgreSQLAdapter(DatabaseAdapter):
+    def __init__(self, table_prefix: str = ""):
+        self.table_prefix = table_prefix  # t_db_oarb_audit_act_
+
+    def get_table_name(self, base_name: str) -> str:
+        return f"{self.table_prefix}{base_name}"
+        # → t_db_oarb_audit_act_acts
+
+
 class GreenplumAdapter(DatabaseAdapter):
     def __init__(self, schema: str, table_prefix: str):
         self.schema = schema              # s_grnplm_ld_audit_da_project_4
@@ -1293,7 +1304,9 @@ class GreenplumAdapter(DatabaseAdapter):
 async def init_db(settings: Settings) -> None:
     """Инициализирует пул и адаптер по типу БД."""
     if settings.database.type == "postgresql":
-        _adapter = PostgreSQLAdapter()
+        _adapter = PostgreSQLAdapter(
+            table_prefix=settings.database.table_prefix
+        )
         pool_kwargs = {
             "host": settings.database.host,
             "port": settings.database.port,
@@ -1302,7 +1315,10 @@ async def init_db(settings: Settings) -> None:
             "password": settings.database.password,
         }
     elif settings.database.type == "greenplum":
-        _adapter = GreenplumAdapter(...)
+        _adapter = GreenplumAdapter(
+            schema=settings.database.gp.schema_name,
+            table_prefix=settings.database.table_prefix,
+        )
         # username из JUPYTERHUB_USER
 
     _pool = await asyncpg.create_pool(
@@ -1786,6 +1802,8 @@ chat-modal.js / chat-popup.js
 ### 7.8 Внешний ИИ-агент через таблицы БД
 
 Для запросов про **данные/контент** (БЗ актов, регламенты, нормативы) локальная LLM делегирует работу внешнему ИИ-агенту коллег через очередь в основной БД. Агент-сервис разрабатывается отдельной командой; AW не делает HTTP-запросов к нему — взаимодействие исключительно через таблицы.
+
+> Имена `agent_requests`, `agent_response_events`, `agent_responses`, `chat_files` далее даны без префикса. В БД они хранятся с префиксом `DATABASE__TABLE_PREFIX` (по умолчанию `t_db_oarb_audit_act_`); полные имена SQL-сниппетов для копи-пасты — в `docs/external-agent-imitation.sql`.
 
 **Поток:**
 
