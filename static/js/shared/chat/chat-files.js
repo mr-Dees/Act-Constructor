@@ -33,14 +33,34 @@ const ChatFiles = {
         this._initFileInput();
         this._initDragAndDrop();
 
-        ChatEventBus.on('context:conversation-cleared', () => this.clear());
-        ChatEventBus.on('context:conversation-switched', () => this.clear());
+        // Сохраняем именованные ссылки, чтобы destroy() мог отписаться.
+        this._onConversationCleared = () => this.clear();
+        this._onConversationSwitched = () => this.clear();
+        ChatEventBus.on('context:conversation-cleared', this._onConversationCleared);
+        ChatEventBus.on('context:conversation-switched', this._onConversationSwitched);
 
         // Лимиты тянем с сервера — fire-and-forget; до ответа используются
         // дефолты (которые совпадают с дефолтами в settings.py).
         this._loadLimits();
 
         this._initialized = true;
+    },
+
+    /**
+     * Снимает подписки на шину событий. Идемпотентно: повторный вызов
+     * безопасен. Используется в тестах и при «горячем» переинит чата.
+     */
+    destroy() {
+        if (!this._initialized) return;
+        if (this._onConversationCleared) {
+            ChatEventBus.off('context:conversation-cleared', this._onConversationCleared);
+            this._onConversationCleared = null;
+        }
+        if (this._onConversationSwitched) {
+            ChatEventBus.off('context:conversation-switched', this._onConversationSwitched);
+            this._onConversationSwitched = null;
+        }
+        this._initialized = false;
     },
 
     /**

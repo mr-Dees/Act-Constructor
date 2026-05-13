@@ -10,6 +10,38 @@
 
     const handlers = {};
 
+    // Ключ sessionStorage для уже исполненных block_id.
+    // Идемпотентность нужна, чтобы перезагрузка страницы или повторный
+    // приём SSE-события не приводили к повторному redirect/notify.
+    const EXECUTED_STORAGE_KEY = 'chat:executedActions';
+    // Soft cap, чтобы Set не рос бесконечно.
+    const EXECUTED_MAX_SIZE = 500;
+
+    /** @type {Set<string>} */
+    const executed = (() => {
+        try {
+            const raw = sessionStorage.getItem(EXECUTED_STORAGE_KEY);
+            if (raw) {
+                const arr = JSON.parse(raw);
+                if (Array.isArray(arr)) return new Set(arr);
+            }
+        } catch (_) { /* sessionStorage недоступен или битый JSON */ }
+        return new Set();
+    })();
+
+    function _persistExecuted() {
+        try {
+            // При переполнении выкидываем самые старые (insertion order Set).
+            let arr = Array.from(executed);
+            if (arr.length > EXECUTED_MAX_SIZE) {
+                arr = arr.slice(arr.length - EXECUTED_MAX_SIZE);
+                executed.clear();
+                arr.forEach(id => executed.add(id));
+            }
+            sessionStorage.setItem(EXECUTED_STORAGE_KEY, JSON.stringify(arr));
+        } catch (_) { /* квота / приватный режим */ }
+    }
+
     const ClientActionsRegistry = {
         register(name, fn) {
             if (typeof fn !== 'function') {
@@ -34,12 +66,52 @@
             }
         },
 
+        /**
+         * Идемпотентное исполнение client_action.
+         *
+         * Если у блока есть {@code block_id} — сохраняем его в sessionStorage
+         * и при повторном вызове с тем же id молча выходим (отчёт в console).
+         * Если block_id отсутствует (старые сообщения / бэк ещё не передаёт) —
+         * выполняем как раньше, с warning'ом.
+         *
+         * Контракт с бэком: блок имеет вид {action, params, label, block_id}.
+         * Поле block_id (string uuid) проставляется на сервере; фронт его
+         * только читает и хранит.
+         *
+         * @param {{action: string, params?: Object, block_id?: string}} block
+         */
+        executeBlock(block) {
+            if (!block || typeof block !== 'object') return;
+            const blockId = block.block_id;
+            if (blockId) {
+                if (executed.has(blockId)) {
+                    return; // уже выполняли — молча выходим
+                }
+                executed.add(blockId);
+                _persistExecuted();
+            } else {
+                console.warn(
+                    'ClientActionsRegistry.executeBlock: block_id отсутствует;'
+                    + ' идемпотентность отключена для этого действия'
+                );
+            }
+            this.execute(block.action, block.params || {});
+        },
+
         isRegistered(action) {
             return typeof handlers[action] === 'function';
         },
 
         list() {
             return Object.keys(handlers);
+        },
+
+        /**
+         * Очищает кеш исполненных block_id (для тестов).
+         */
+        _resetExecuted() {
+            executed.clear();
+            try { sessionStorage.removeItem(EXECUTED_STORAGE_KEY); } catch (_) {}
         },
     };
 

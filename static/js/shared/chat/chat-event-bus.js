@@ -36,6 +36,18 @@ const ChatEventBus = {
     },
 
     /**
+     * Удаляет все обработчики указанного события.
+     *
+     * @param {string} event — имя события
+     */
+    offAll(event) {
+        if (this._listeners[event]) {
+            this._listeners[event].clear();
+            delete this._listeners[event];
+        }
+    },
+
+    /**
      * Публикация события
      *
      * @param {string} event — имя события

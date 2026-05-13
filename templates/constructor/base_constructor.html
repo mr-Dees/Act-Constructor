@@ -56,6 +56,9 @@
     <script src="{{ url_for('static', path='js/constructor/navigation-manager.js') }}"></script>
     <script src="{{ url_for('static', path='js/constructor/header/format-menu-manager.js') }}"></script>
     <script src="{{ url_for('static', path='js/constructor/header/settings-menu.js') }}"></script>
+    <!-- DOMPurify — санитизация HTML перед innerHTML в chat-renderer.
+         Должен загружаться ДО chat-renderer.js. -->
+    <script src="{{ url_for('static', path='vendor/dompurify/purify.min.js') }}"></script>
     <!-- chat-event-bus.js должен идти первым: остальные модули чата могут
          обращаться к шине на module-level (window.ChatEventBus.on ...). -->
     <script src="{{ url_for('static', path='js/shared/chat/chat-event-bus.js') }}"></script>

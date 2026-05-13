@@ -33,26 +33,56 @@ const ChatMessages = {
             this._welcomeHtml = welcomeEl.outerHTML;
         }
 
-        ChatEventBus.on('chat:send-request', (data) => this._send(data));
-        ChatEventBus.on('context:conversation-switched', (data) => {
+        // Сохраняем именованные ссылки на обработчики — нужно для destroy().
+        this._onSendRequest = (data) => this._send(data);
+        this._onConversationSwitched = (data) => {
             ChatStream.abort();
             if (!data.conversationId) {
                 this._restoreWelcome();
                 return;
             }
             this._renderConversationMessages(data);
-        });
-        ChatEventBus.on('context:conversation-cleared', () => {
+        };
+        this._onConversationCleared = () => {
             ChatStream.abort();
             this._restoreWelcome();
-        });
-        ChatEventBus.on('chat:clear', () => {
+        };
+        this._onChatClear = () => {
             ChatStream.abort();
             this._streamingBlocks = {};
             this._restoreWelcome();
-        });
+        };
+
+        ChatEventBus.on('chat:send-request', this._onSendRequest);
+        ChatEventBus.on('context:conversation-switched', this._onConversationSwitched);
+        ChatEventBus.on('context:conversation-cleared', this._onConversationCleared);
+        ChatEventBus.on('chat:clear', this._onChatClear);
 
         this._initialized = true;
+    },
+
+    /**
+     * Снимает все подписки на шину событий. Идемпотентно.
+     */
+    destroy() {
+        if (!this._initialized) return;
+        if (this._onSendRequest) {
+            ChatEventBus.off('chat:send-request', this._onSendRequest);
+            this._onSendRequest = null;
+        }
+        if (this._onConversationSwitched) {
+            ChatEventBus.off('context:conversation-switched', this._onConversationSwitched);
+            this._onConversationSwitched = null;
+        }
+        if (this._onConversationCleared) {
+            ChatEventBus.off('context:conversation-cleared', this._onConversationCleared);
+            this._onConversationCleared = null;
+        }
+        if (this._onChatClear) {
+            ChatEventBus.off('chat:clear', this._onChatClear);
+            this._onChatClear = null;
+        }
+        this._initialized = false;
     },
 
     /**

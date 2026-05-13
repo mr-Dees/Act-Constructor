@@ -8,6 +8,40 @@
 const ChatRenderer = {
 
     /**
+     * Безопасная установка innerHTML с санитизацией через DOMPurify.
+     *
+     * Все вызовы innerHTML с результатом _markdownToHtml() должны идти
+     * через эту функцию, чтобы XSS-полезная нагрузка из ответа LLM или
+     * внешнего агента не исполнилась в DOM.
+     *
+     * Если DOMPurify не подключён (vendor-файл отсутствует) — пишем warning
+     * в консоль и подставляем html как есть. На проде DOMPurify обязателен;
+     * fallback нужен только чтобы интерфейс не падал в dev-среде без vendor.
+     *
+     * @param {HTMLElement} el — DOM-элемент, в который ставим html
+     * @param {string} html — HTML-строка (после _markdownToHtml)
+     * @private
+     */
+    _safeSetHtml(el, html) {
+        if (!el) return;
+        if (window.DOMPurify && typeof window.DOMPurify.sanitize === 'function') {
+            el.innerHTML = window.DOMPurify.sanitize(html, {
+                USE_PROFILES: { html: true },
+            });
+            return;
+        }
+        if (!ChatRenderer._dompurifyWarned) {
+            console.warn(
+                'ChatRenderer: DOMPurify не подключён; HTML вставляется без'
+                + ' санитизации. Подключи static/vendor/dompurify/purify.min.js'
+                + ' до chat-renderer.js.'
+            );
+            ChatRenderer._dompurifyWarned = true;
+        }
+        el.innerHTML = html;
+    },
+
+    /**
      * Рендерит массив блоков в DOM-контейнер
      *
      * @param {HTMLElement} container — контейнер для отрисовки
@@ -163,10 +197,10 @@ const ChatRenderer = {
                 element: details,
                 appendText(text) {
                     accumulated += text;
-                    content.innerHTML = ChatRenderer._markdownToHtml(accumulated);
+                    ChatRenderer._safeSetHtml(content, ChatRenderer._markdownToHtml(accumulated));
                 },
                 finalize() {
-                    content.innerHTML = ChatRenderer._markdownToHtml(accumulated);
+                    ChatRenderer._safeSetHtml(content, ChatRenderer._markdownToHtml(accumulated));
                 },
             };
         }
@@ -181,10 +215,10 @@ const ChatRenderer = {
             element: div,
             appendText(text) {
                 accumulated += text;
-                div.innerHTML = ChatRenderer._markdownToHtml(accumulated);
+                ChatRenderer._safeSetHtml(div, ChatRenderer._markdownToHtml(accumulated));
             },
             finalize() {
-                div.innerHTML = ChatRenderer._markdownToHtml(accumulated);
+                ChatRenderer._safeSetHtml(div, ChatRenderer._markdownToHtml(accumulated));
             },
         };
     },
@@ -237,7 +271,7 @@ const ChatRenderer = {
     _renderText(block) {
         const div = document.createElement('div');
         div.className = 'chat-block chat-block-text';
-        div.innerHTML = this._markdownToHtml(block.content || '');
+        this._safeSetHtml(div, this._markdownToHtml(block.content || ''));
         return div;
     },
 
@@ -297,7 +331,7 @@ const ChatRenderer = {
 
         const content = document.createElement('div');
         content.className = 'chat-block-reasoning-content';
-        content.innerHTML = this._markdownToHtml(block.content || '');
+        this._safeSetHtml(content, this._markdownToHtml(block.content || ''));
         details.appendChild(content);
 
         return details;
@@ -521,16 +555,25 @@ const ChatRenderer = {
 
         const shouldExecute = !!(opts && opts.execute);
         if (shouldExecute) {
-            if (window.ClientActionsRegistry
-                && typeof window.ClientActionsRegistry.execute === 'function') {
+            const registry = window.ClientActionsRegistry;
+            if (!registry) {
+                console.warn('ChatRenderer: ClientActionsRegistry не подключён;'
+                    + ' проверь подключение chat-client-actions.js');
+            } else if (typeof registry.executeBlock === 'function') {
+                // Идемпотентный путь: registry сам сверится с sessionStorage
+                // по block.block_id и не выполнит команду повторно.
                 try {
-                    window.ClientActionsRegistry.execute(block.action, block.params);
+                    registry.executeBlock(block);
                 } catch (err) {
                     console.error('ChatRenderer: ошибка исполнения client_action:', err);
                 }
-            } else {
-                console.warn('ChatRenderer: ClientActionsRegistry не подключён;'
-                    + ' проверь подключение chat-client-actions.js');
+            } else if (typeof registry.execute === 'function') {
+                // Совместимость со старыми сборками реестра без executeBlock.
+                try {
+                    registry.execute(block.action, block.params);
+                } catch (err) {
+                    console.error('ChatRenderer: ошибка исполнения client_action:', err);
+                }
             }
         }
 
