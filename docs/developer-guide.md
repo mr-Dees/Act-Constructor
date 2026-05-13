@@ -1861,7 +1861,7 @@ SSE → клиент:
 - **Polling-only**, без LISTEN/NOTIFY и постоянных соединений (между AW и агент-сервисом нет прямой сети — оба общаются только через БД).
 - **Greenplum-first**: схема DDL построена под GP (VARCHAR(36) для id, `{SCHEMA}.{PREFIX}` placeholders, `DISTRIBUTED BY (conversation_id)` для requests и `(request_id)` для events/responses).
 - **Polling-задача отвязана от SSE-соединения**: при обрыве клиента раннер дописывает ответ в БД. При перезапуске uvicorn — lifespan reconcile через `agent_bridge_runner.schedule_pending()` (см. `app/main.py`).
-- **Retention** — задача администратора (см. `docs/external-agent-imitation.sql` для SQL-сниппетов).
+- **Retention** — задача администратора (в приложении НЕ реализован). См. §7.8.6 ниже и `docs/external-agent-imitation.sql` (раздел 5) для SQL-сниппетов.
 - **Восстановление SSE** после обрыва — endpoint `GET /conversations/{id}/agent-request/{rid}/stream?since={seq}` (`api/messages.py`). Курсор по `seq`.
 
 **Ключевые модули:**
@@ -2024,6 +2024,47 @@ wb.save("/tmp/metrics.xlsx")
 - Запрос обрывается с `timeout` → `agent_requests.error_message` подскажет, какой из трёх гейтов сработал.
 - Файл не отображается до перезагрузки → SSE `block_complete` не дошёл. Регрессия в тесте выше; локально проверь `static/js/shared/chat/chat-messages.js` case `'block_complete'`.
 - Клик «Скачать» возвращает 404 → `chat_files.conversation_id` ≠ `agent_requests.conversation_id`. Бери из запроса, не выдумывай.
+
+#### 7.8.6 Retention и очистка hot-таблиц
+
+В приложении НЕТ кода ретеншена — это сознательное решение: на проде GP таблицы партиционируются, а DELETE-ы под нагрузкой стоят дороже DROP PARTITION. Очистка — задача администратора БД, выполняется снаружи (pg_cron, Airflow, Datalab или ручной cron).
+
+**Рекомендуемые сроки** (дефолт; подстраивай под аудит-требования):
+
+| Таблица | Срок жизни | Что хранится |
+|---|---|---|
+| `agent_response_events` | 30 дней | Reasoning-чанки и status-события стрима. Используются только в момент стрима + изредка для аудита |
+| `agent_responses` | 180 дней | Финальные ответы. Уже скопированы в `chat_messages.content`, держим как «исходник» для разбора инцидентов |
+| `agent_requests` (`done`/`error`/`timeout`) | 180 дней | Входы агента (history, files, knowledge_bases). Дублируется в `chat_messages` пользователя |
+| `chat_files` | не трогать | Часть истории чата; удаление каскадно через `chat_messages` |
+
+**Запросы с `status IN ('pending', 'dispatched', 'in_progress')` НЕ ТРОГАЙ ретеншеном** — это активные форварды, lifespan reconcile подхватит их при рестарте. Удалять их можно только если они зависли дольше `CHAT__AGENT_BRIDGE__MAX_TOTAL_DURATION_SEC` × несколько раз (раннер сам пометит их `timeout`).
+
+**Стратегии:**
+
+- **PostgreSQL (dev / маленький объём)**: DELETE по `created_at` + `VACUUM ANALYZE` ночным cron'ом. Партиции не нужны — autovacuum справится. Снippets — раздел 5 в `docs/external-agent-imitation.sql`.
+- **Greenplum (prod / большие объёмы)**: `agent_response_events` рекомендуется партиционировать по `created_at` (RANGE, month). Снимать партиции `DROP PARTITION` вместо DELETE — на порядок быстрее и не лочит таблицу. `agent_responses`/`agent_requests` обычно растут медленнее, можно DELETE+VACUUM.
+
+**GP-партиционирование (пример для админа):**
+
+```sql
+ALTER TABLE agent_response_events
+    PARTITION BY RANGE (created_at)
+    (START (date '2026-01-01') INCLUSIVE
+     END   (date '2027-01-01') EXCLUSIVE
+     EVERY (INTERVAL '1 month'));
+-- Применяется в migration-один-раз, до того как таблица распухнет.
+-- Раз в месяц cron добавляет новую партицию (ALTER TABLE … ADD PARTITION).
+-- Старые партиции дропаются: ALTER TABLE … DROP PARTITION FOR (date '2026-04-01').
+```
+
+**Cron-периодичность:**
+
+- `agent_response_events` — ежедневно ночью (DELETE/DROP PARTITION).
+- `agent_responses` + `agent_requests` — еженедельно.
+- `VACUUM ANALYZE` — после каждой массивной чистки (PG); GP — `VACUUM FULL` только при заметной фрагментации.
+
+Размер метаданных пары `(request, response)` — единицы килобайт; `agent_response_events` при стриме 50–100 чанков по 200 байт = ~10–20 KB на запрос. На 1000 запросов в день → ~20 MB/день именно событий, остальное — пренебрежимо.
 
 ### 7.9 Action-handlers и ClientActionBlock
 
