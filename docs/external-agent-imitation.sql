@@ -191,6 +191,89 @@ WHERE id = '<request_id>';
 
 
 -- ────────────────────────────────────────────────────────────────────────────
+-- 3a. СЦЕНАРИИ TIMEOUT (три гейта wait_for_completion)
+-- ────────────────────────────────────────────────────────────────────────────
+--
+-- wait_for_completion отсчитывает таймауты от monotonic-времени старта раннера,
+-- НЕ от created_at в БД. Поэтому "состарить" запись UPDATE'ом нельзя — нужно
+-- либо физически ждать N секунд, либо временно уменьшить настройки в .env
+-- и перезапустить uvicorn:
+--
+--   CHAT__AGENT_BRIDGE__INITIAL_RESPONSE_TIMEOUT_SEC=10
+--   CHAT__AGENT_BRIDGE__EVENT_TIMEOUT_SEC=10
+--   CHAT__AGENT_BRIDGE__MAX_TOTAL_DURATION_SEC=20
+--
+-- После этого имитация:
+
+-- 3a.1 — Гейт "initial_response" (агент не ответил вовсе).
+-- Просто отправь запрос из AW и НЕ вставляй ничего в agent_response_events
+-- и agent_responses. Через initial_response_timeout_sec секунд раннер сам
+-- проставит status='timeout', error_message='агент не начал отвечать за …с'
+-- и сохранит ассистент-сообщение с error-блоком "Внешний агент не ответил
+-- вовремя".
+--
+-- Контроль:
+SELECT id, status, error_message, finished_at - created_at AS duration
+FROM t_db_oarb_audit_act_agent_requests
+WHERE id = '<request_id>';
+
+-- Ожидаемое: status='timeout', error_message LIKE '%не начал отвечать%'.
+
+
+-- 3a.2 — Гейт "event_timeout" (агент замолчал между событиями).
+-- Вставь одно reasoning-событие сразу, потом подожди event_timeout_sec секунд
+-- и НЕ вставляй больше ничего.
+INSERT INTO t_db_oarb_audit_act_agent_response_events
+    (id, request_id, seq, event_type, payload, created_at)
+VALUES (
+    nextval('t_db_oarb_audit_act_agent_response_events_id_seq'),
+    '<request_id>',
+    1,
+    'reasoning',
+    '{"text":"Начинаю обработку...","is_chunk":true}'::jsonb,
+    now()
+);
+-- ... больше ничего не вставляешь. Через event_timeout_sec секунд раннер
+-- проставит status='timeout', error_message='нет событий от агента …с
+-- (heartbeat потерян)'.
+
+
+-- 3a.3 — Гейт "max_total_duration" (агент стримит, но слишком долго).
+-- Вставляй reasoning-события каждые ~5 секунд (чтобы не сработал event_timeout),
+-- но НЕ вставляй финальный agent_responses. Через max_total_duration_sec
+-- секунд раннер проставит status='timeout', error_message='превышена
+-- максимальная длительность запроса (…с)'.
+--
+-- Минимальный keep-alive (запускай руками каждые 5с, или скриптом):
+INSERT INTO t_db_oarb_audit_act_agent_response_events
+    (id, request_id, seq, event_type, payload, created_at)
+SELECT
+    nextval('t_db_oarb_audit_act_agent_response_events_id_seq'),
+    '<request_id>',
+    COALESCE(MAX(seq), 0) + 1,
+    'reasoning',
+    '{"text":"...ещё думаю...","is_chunk":true}'::jsonb,
+    now()
+FROM t_db_oarb_audit_act_agent_response_events
+WHERE request_id = '<request_id>';
+
+
+-- 3a.4 — Что увидит пользователь во всех трёх случаях.
+-- В чат сохраняется ассистент-сообщение с единственным error-блоком:
+--   {"type":"error","message":"Внешний агент не ответил вовремя. Попробуйте
+--    позже.","code":"agent_timeout"}
+-- Можно проверить через:
+SELECT id, role, content
+FROM t_db_oarb_audit_act_chat_messages
+WHERE conversation_id = (
+    SELECT conversation_id FROM t_db_oarb_audit_act_agent_requests
+    WHERE id = '<request_id>'
+)
+ORDER BY created_at DESC
+LIMIT 2;
+
+
+-- ────────────────────────────────────────────────────────────────────────────
 -- 4. РАБОТА С ФАЙЛАМИ
 -- ────────────────────────────────────────────────────────────────────────────
 
