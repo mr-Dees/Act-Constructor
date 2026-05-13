@@ -267,7 +267,7 @@ class Orchestrator:
 
         from app.db.connection import get_db
         from app.domains.chat.repositories.file_repository import FileRepository
-        from app.domains.chat.services.file_extraction import extract_text
+        from app.domains.chat.services.file_extraction import extract_text_async
 
         parts = [user_message]
         async with get_db() as conn:
@@ -289,7 +289,7 @@ class Orchestrator:
                     )
                 if not row:
                     continue
-                text = extract_text(
+                text = await extract_text_async(
                     row["file_data"], row["mime_type"], row["filename"],
                 )
                 parts.append(f"\n--- Файл: {row['filename']} ---\n{text}")
