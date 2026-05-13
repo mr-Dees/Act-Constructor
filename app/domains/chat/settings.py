@@ -2,7 +2,7 @@
 
 from typing import Literal
 
-from pydantic import BaseModel, Field, SecretStr
+from pydantic import BaseModel, Field, SecretStr, field_validator
 
 
 class RetryPolicy(BaseModel):
@@ -59,15 +59,42 @@ class ChatDomainSettings(BaseModel):
 
     # Файлы
     max_file_size: int = Field(default=10 * 1024 * 1024, gt=0)
+    # Жёсткий whitelist точных MIME-типов (БЕЗ подстановок). Сравнение
+    # производится посимвольно — браузерные "text/html; charset=utf-8"
+    # отклоняются, что блокирует попытки залить HTML под видом текста.
     allowed_mime_types: list[str] = [
-        "text/*",
+        "text/plain",
+        "text/csv",
+        "text/markdown",
         "application/pdf",
-        "application/vnd.openxmlformats-officedocument.*",
+        "application/json",
+        "application/xml",
+        "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
         "application/vnd.ms-excel",
-        "image/*",
+        "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+        "image/jpeg",
+        "image/png",
+        "image/gif",
+        "image/webp",
     ]
     max_files_per_message: int = Field(default=5, gt=0)
     max_total_file_size: int = Field(default=30 * 1024 * 1024, gt=0)
+
+    @field_validator("allowed_mime_types")
+    @classmethod
+    def _no_wildcards_in_mime_types(cls, v: list[str]) -> list[str]:
+        """Запрещает подстановки и пустые элементы в whitelist."""
+        for item in v:
+            if not item or not item.strip():
+                raise ValueError(
+                    "allowed_mime_types: пустой элемент недопустим",
+                )
+            if "*" in item:
+                raise ValueError(
+                    f"allowed_mime_types: подстановки запрещены ('{item}'). "
+                    "Используй точные MIME-типы.",
+                )
+        return v
 
     # Хранение
     max_conversations_per_user: int = Field(default=100, gt=0)

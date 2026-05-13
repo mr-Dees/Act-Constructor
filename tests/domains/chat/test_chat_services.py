@@ -238,6 +238,28 @@ class TestFileServiceValidate:
         assert exc_info.value.status_code == 422
         assert "не поддерживается" in str(exc_info.value).lower()
 
+    def test_validate_text_html_rejected(self, service):
+        """text/html не входит в whitelist — отклоняется (защита от XSS)."""
+        with pytest.raises(ChatFileValidationError) as exc_info:
+            service.validate_file(
+                filename="page.html",
+                mime_type="text/html",
+                file_size=100,
+            )
+        assert exc_info.value.status_code == 422
+        assert "не поддерживается" in str(exc_info.value).lower()
+
+    def test_validate_mime_with_parameters_rejected(self, service):
+        """MIME-тип с параметрами ('text/plain; charset=utf-8') не проходит — точное сравнение."""
+        with pytest.raises(ChatFileValidationError) as exc_info:
+            service.validate_file(
+                filename="note.txt",
+                mime_type="text/plain; charset=utf-8",
+                file_size=100,
+            )
+        assert exc_info.value.status_code == 422
+        assert "не поддерживается" in str(exc_info.value).lower()
+
 
 class TestFileServiceSave:
 
@@ -309,3 +331,40 @@ class TestFileServiceGet:
 
         result = await service.get_file(file_id="file-1", user_id="user1")
         assert result["filename"] == "test.pdf"
+
+
+# -------------------------------------------------------------------------
+# Файловый эндпоинт: защитные заголовки при отдаче
+# -------------------------------------------------------------------------
+
+
+class TestDownloadFileResponseHeaders:
+    """Защитные заголовки для отдачи файлов (anti-XSS / anti-sniffing)."""
+
+    async def test_download_forces_octet_stream_and_nosniff(self):
+        """Content-Type принудительно octet-stream, X-Content-Type-Options: nosniff."""
+        from app.domains.chat.api.files import download_file
+
+        # Файл с "доверчивым" mime_type (text/html) — должен быть проигнорирован.
+        file_service = MagicMock()
+        file_service.get_file = AsyncMock(return_value={
+            "id": "file-1",
+            "filename": "evil.html",
+            "mime_type": "text/html",
+            "file_data": b"<script>alert(1)</script>",
+        })
+
+        response = await download_file(
+            file_id="file-1",
+            inline=False,
+            username="user1",
+            file_service=file_service,
+        )
+
+        assert response.media_type == "application/octet-stream"
+        assert response.headers["X-Content-Type-Options"] == "nosniff"
+        assert response.headers["Content-Disposition"].startswith(
+            "attachment; filename*=UTF-8''",
+        )
+        # Имя файла percent-encoded в Content-Disposition.
+        assert "evil.html" in response.headers["Content-Disposition"]

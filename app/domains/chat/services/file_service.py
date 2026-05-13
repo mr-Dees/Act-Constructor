@@ -1,6 +1,5 @@
 """Сервис управления файлами чата."""
 
-import fnmatch
 import logging
 import uuid
 
@@ -66,11 +65,9 @@ class FileService:
                 f"Файл '{filename}' слишком большой (максимум {max_mb:.0f} МБ).",
             )
 
-        allowed = any(
-            fnmatch.fnmatch(mime_type, pattern)
-            for pattern in self.settings.allowed_mime_types
-        )
-        if not allowed:
+        # Жёсткое сравнение: значения с параметрами ("text/html; charset=utf-8")
+        # отклоняются — это намеренно, чтобы клиент не мог обойти whitelist.
+        if mime_type not in self.settings.allowed_mime_types:
             raise ChatFileValidationError(
                 f"Тип файла '{mime_type}' не поддерживается.",
             )

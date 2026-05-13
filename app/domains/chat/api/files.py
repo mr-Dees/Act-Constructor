@@ -53,12 +53,16 @@ async def download_file(
 
     filename_encoded = quote(file_data["filename"])
     disposition = "inline" if inline else "attachment"
+    # Принудительно application/octet-stream + nosniff: не доверяем сохранённому
+    # mime_type, иначе браузер может отрендерить загруженный HTML/SVG в origin
+    # приложения (XSS). Контент всегда скачивается как бинарный blob.
     return Response(
         content=file_data["file_data"],
-        media_type=file_data["mime_type"],
+        media_type="application/octet-stream",
         headers={
             "Content-Disposition": (
                 f"{disposition}; filename*=UTF-8''{filename_encoded}"
             ),
+            "X-Content-Type-Options": "nosniff",
         },
     )
