@@ -29,9 +29,6 @@ _kb_warned = [False]  # one-time warning suppression
 router = APIRouter(dependencies=[Depends(require_domain_access("chat"))])
 
 
-from app.domains.chat.services.button_translator import translate_buttons as _translate_buttons
-
-
 @router.post(
     "/conversations/{conversation_id}/messages",
     summary="Отправить сообщение",
@@ -260,55 +257,19 @@ async def resume_agent_request_stream(
             AgentBridgeService,
             AgentBridgeTimeout,
         )
+        from app.domains.chat.services.block_emitter import emit_response_blocks
         from app.domains.chat.services.streaming import (
-            sse_block_complete, sse_block_delta, sse_block_end, sse_block_start,
-            sse_buttons, sse_client_action, sse_error, sse_message_end,
+            sse_block_delta,
+            sse_block_end,
+            sse_block_start,
+            sse_error,
+            sse_message_end,
         )
         from app.domains.chat.settings import ChatDomainSettings
 
         settings = get_domain_settings("chat", ChatDomainSettings)
-        # `_idx` хранит изменяемый индекс через замыкание (nonlocal в helper'е).
-        _idx = [0]
+        block_index = 0
         last_seen = since
-
-        # Стримуемые типы передаются триплетом start+delta+end; остальные —
-        # единым block_complete (см. streaming.sse_block_complete).
-        STREAMABLE = ("text", "code", "reasoning")
-
-        async def emit_response_blocks(blocks: list[dict]):
-            """Эмитит финальные блоки ответа агента в правильном SSE-формате.
-
-            - text/code/reasoning → block_start + block_delta + block_end
-            - file/image/plan/error → block_complete (одним событием)
-            - buttons → sse_buttons (с трансляцией action_id)
-            - client_action → sse_client_action (исполняется фронтом один раз)
-            """
-            for raw_block in blocks:
-                btype = raw_block.get("type", "text")
-                if btype == "buttons":
-                    translated = await _translate_buttons(
-                        raw_block.get("buttons", []),
-                    )
-                    yield sse_buttons(buttons=translated)
-                    continue
-                if btype == "client_action":
-                    yield sse_client_action(block=raw_block)
-                    continue
-                if btype in STREAMABLE:
-                    yield sse_block_start(
-                        block_index=_idx[0], block_type=btype,
-                    )
-                    delta = raw_block.get("content", "")
-                    if delta:
-                        yield sse_block_delta(
-                            block_index=_idx[0], delta=delta,
-                        )
-                    yield sse_block_end(block_index=_idx[0])
-                else:
-                    yield sse_block_complete(
-                        block_index=_idx[0], block=raw_block,
-                    )
-                _idx[0] += 1
 
         async with get_db() as conn:
             bridge = AgentBridgeService(conn)
@@ -325,11 +286,11 @@ async def resume_agent_request_stream(
                         continue
                     # Каждый reasoning-чанк — отдельный сворачиваемый блок.
                     yield sse_block_start(
-                        block_index=_idx[0], block_type="reasoning",
+                        block_index=block_index, block_type="reasoning",
                     )
-                    yield sse_block_delta(block_index=_idx[0], delta=text)
-                    yield sse_block_end(block_index=_idx[0])
-                    _idx[0] += 1
+                    yield sse_block_delta(block_index=block_index, delta=text)
+                    yield sse_block_end(block_index=block_index)
+                    block_index += 1
                 elif ev["event_type"] == "error":
                     payload = ev["payload"] or {}
                     yield sse_error(
@@ -340,8 +301,12 @@ async def resume_agent_request_stream(
             # Проверяем, не появился ли уже финальный ответ
             existing_response = await bridge.poll_response(request_id)
             if existing_response is not None:
-                async for chunk in emit_response_blocks(existing_response["blocks"]):
-                    yield chunk
+                async for sse, idx in emit_response_blocks(
+                    existing_response["blocks"],
+                    block_index_start=block_index,
+                ):
+                    block_index = idx + 1
+                    yield sse
                 yield sse_message_end(
                     message_id=str(request_id),
                     model=settings.model,
@@ -369,14 +334,14 @@ async def resume_agent_request_stream(
                             # Каждый reasoning-чанк — отдельный
                             # сворачиваемый блок.
                             yield sse_block_start(
-                                block_index=_idx[0],
+                                block_index=block_index,
                                 block_type="reasoning",
                             )
                             yield sse_block_delta(
-                                block_index=_idx[0], delta=text,
+                                block_index=block_index, delta=text,
                             )
-                            yield sse_block_end(block_index=_idx[0])
-                            _idx[0] += 1
+                            yield sse_block_end(block_index=block_index)
+                            block_index += 1
                         elif ev["event_type"] == "error":
                             payload = ev["payload"] or {}
                             yield sse_error(
@@ -384,8 +349,12 @@ async def resume_agent_request_stream(
                                 code=payload.get("code"),
                             )
                     if upd.response:
-                        async for chunk in emit_response_blocks(upd.response["blocks"]):
-                            yield chunk
+                        async for sse, idx in emit_response_blocks(
+                            upd.response["blocks"],
+                            block_index_start=block_index,
+                        ):
+                            block_index = idx + 1
+                            yield sse
                         yield sse_message_end(
                             message_id=str(request_id),
                             model=settings.model,

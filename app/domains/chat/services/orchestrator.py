@@ -1201,21 +1201,13 @@ class Orchestrator:
                             else self._parse_buttons_result(result)
                         )
                         if client_action is not None:
-                            # Эмитим client_action как полноценный блок ответа
-                            yield sse_block_start(
-                                block_index=block_index,
-                                block_type="client_action",
-                            )
-                            yield sse_block_delta(
-                                block_index=block_index,
-                                delta=json.dumps(
-                                    client_action, ensure_ascii=False,
-                                ),
-                            )
-                            yield sse_block_end(block_index=block_index)
-                            # Сохраняем для итогового _save_assistant_message
+                            # client_action идёт собственным SSE-каналом
+                            # (sse_client_action). block_index НЕ инкрементим:
+                            # это не блок контента в потоке, а одноразовая
+                            # команда фронту — он исполнит её один раз и
+                            # сохранит как чип в истории при пере-загрузке.
+                            yield sse_client_action(block=client_action)
                             emitted_blocks.append(client_action)
-                            block_index += 1
                             # LLM получает краткий итог, не JSON
                             tool_result_for_llm = (
                                 f"<выполнено: {tool_name}>"
