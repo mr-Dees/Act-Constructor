@@ -393,13 +393,10 @@ async def resume_agent_request_stream(
                     initial_response_timeout_sec=settings.agent_bridge.initial_response_timeout_sec,
                     event_timeout_sec=settings.agent_bridge.event_timeout_sec,
                     max_total_duration_sec=settings.agent_bridge.max_total_duration_sec,
+                    since_id=last_seen,
                 ):
                     if upd.event:
                         ev = upd.event
-                        # wait_for_completion начинает с since_id=None
-                        # (исправлено в C2.a) — отфильтруем уже виденные.
-                        if last_seen is not None and ev["id"] <= last_seen:
-                            continue
                         last_seen = ev["id"]
                         if ev["event_type"] == "reasoning":
                             text = (ev["payload"] or {}).get("text", "")

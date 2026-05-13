@@ -95,17 +95,22 @@ class AgentBridgeService:
         initial_response_timeout_sec: int,
         event_timeout_sec: int,
         max_total_duration_sec: int,
+        since_id: int | None = None,
     ) -> AsyncIterator[AgentBridgeUpdate]:
         """Async-генератор: yield events и финальный response по мере появления.
 
         Опрашивает БД с интервалом poll_interval_sec. По срабатыванию любого
         из трёх гейтов (initial_response / event heartbeat / max total) —
         UPDATE agent_requests SET status='timeout' + raise AgentBridgeTimeout.
+
+        since_id — курсор: события с id <= since_id не возвращаются. Нужен
+        для resume-сценариев, чтобы повторно подключающийся клиент не
+        получил уже виденные события.
         """
         loop = asyncio.get_event_loop()
         started_at = loop.time()
         last_event_at: float | None = None
-        last_event_id: int | None = None
+        last_event_id: int | None = since_id
 
         logger.info(
             "agent_bridge: ожидание ответа: request_id=%s, "
@@ -212,8 +217,11 @@ class AgentBridgeService:
                     len(response.get("blocks") or []),
                     request_id,
                 )
-                yield AgentBridgeUpdate(response=response)
+                # Статус выставляем ДО yield: иначе при отмене генератора
+                # (клиент закрыл вкладку) UPDATE не выполнится и запись
+                # навсегда останется в running/pending.
                 await self._requests.update_status(request_id, status="done")
+                yield AgentBridgeUpdate(response=response)
                 return
 
             await asyncio.sleep(poll_interval_sec)
