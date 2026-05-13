@@ -36,7 +36,37 @@ const ChatFiles = {
         ChatEventBus.on('context:conversation-cleared', () => this.clear());
         ChatEventBus.on('context:conversation-switched', () => this.clear());
 
+        // Лимиты тянем с сервера — fire-and-forget; до ответа используются
+        // дефолты (которые совпадают с дефолтами в settings.py).
+        this._loadLimits();
+
         this._initialized = true;
+    },
+
+    /**
+     * Загружает реальные лимиты с сервера. Тихо игнорирует ошибку —
+     * валидация на сервере всё равно сработает.
+     * @private
+     */
+    async _loadLimits() {
+        try {
+            const resp = await fetch('/api/v1/chat/limits', {
+                credentials: 'same-origin',
+            });
+            if (!resp.ok) return;
+            const data = await resp.json();
+            if (typeof data.max_file_size === 'number') {
+                this._FILE_LIMITS.maxFileSize = data.max_file_size;
+            }
+            if (typeof data.max_total_file_size === 'number') {
+                this._FILE_LIMITS.maxTotalFileSize = data.max_total_file_size;
+            }
+            if (typeof data.max_files_per_message === 'number') {
+                this._FILE_LIMITS.maxFilesPerMessage = data.max_files_per_message;
+            }
+        } catch (_) {
+            // Сеть/CORS — оставляем дефолты, серверная валидация прикроет.
+        }
     },
 
     /**

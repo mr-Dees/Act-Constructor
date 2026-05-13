@@ -18,6 +18,27 @@ router = APIRouter(dependencies=[Depends(require_domain_access("chat"))])
 
 
 @router.get(
+    "/limits",
+    summary="Лимиты файлов чата",
+)
+async def get_chat_limits(
+    file_service: FileService = Depends(get_file_service),
+    _: str = Depends(get_username),
+):
+    """Возвращает лимиты файлов из настроек чата.
+
+    Фронт читает один раз при инициализации, чтобы синхронизировать UI-валидацию
+    с серверной (та же ChatFileValidationError, что и в FileService.validate_file).
+    """
+    settings = file_service.settings
+    return {
+        "max_file_size": settings.max_file_size,
+        "max_total_file_size": settings.max_total_file_size,
+        "max_files_per_message": settings.max_files_per_message,
+    }
+
+
+@router.get(
     "/files/{file_id}",
     summary="Скачать файл",
 )
