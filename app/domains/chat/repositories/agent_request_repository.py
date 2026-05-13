@@ -74,6 +74,27 @@ class AgentRequestRepository(BaseRepository):
         )
         return self._parse_row(row) if row else None
 
+    async def find_pending(self, older_than_sec: int) -> list[dict]:
+        """Возвращает agent_requests со статусом pending/in_progress, созданные
+        раньше now() - older_than_sec секунд. Используется lifespan-reconcile
+        при старте приложения: дотягивает polling-задачи, оборванные прошлым
+        процессом (например, после рестарта uvicorn).
+
+        GP-совместимо: без CTE, без window functions, без ON CONFLICT;
+        интервал собирается как `$1::int * interval '1 second'` — это
+        работает и в PG 9.4, и в Greenplum 6.
+        """
+        rows = await self.conn.fetch(
+            f"""
+            SELECT * FROM {self.table}
+            WHERE status IN ('pending', 'in_progress')
+              AND created_at < now() - ($1::int * interval '1 second')
+            ORDER BY created_at
+            """,
+            older_than_sec,
+        )
+        return [self._parse_row(r) for r in rows]
+
     async def update_status(
         self,
         request_id: str,

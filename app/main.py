@@ -127,6 +127,30 @@ async def lifespan(app: FastAPI):
 
         logger.info("Приложение успешно инициализировано")
 
+        # Реconcile незавершённых polling-задач forward'а к внешнему агенту:
+        # если предыдущий запуск uvicorn упал или был перезапущен посреди
+        # polling'а, поднимаем фоновую задачу заново. Раннер сам подхватит
+        # ответ из мост-таблиц и сохранит ассистент-сообщение.
+        # Ошибки reconcile не блокируют старт приложения.
+        try:
+            from app.core.settings_registry import get as get_domain_settings
+            from app.domains.chat.services.agent_bridge_runner import (
+                schedule_pending,
+            )
+            from app.domains.chat.settings import ChatDomainSettings
+
+            chat_settings = get_domain_settings("chat", ChatDomainSettings)
+            count = await schedule_pending(settings=chat_settings)
+            logger.info(
+                "Lifespan reconcile: запущено %d polling-задач "
+                "для незавершённых agent_requests",
+                count,
+            )
+        except Exception:
+            logger.exception(
+                "Lifespan reconcile: ошибка (не блокирует старт)",
+            )
+
     except KerberosTokenExpiredError as e:
         logger.critical(
             "\n" + "=" * 80 + "\n"

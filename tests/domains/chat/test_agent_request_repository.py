@@ -106,3 +106,46 @@ async def test_update_status_error_stores_message(mock_conn):
     assert "finished_at" in sql
     assert "error_message" in sql
     assert "boom" in args
+
+
+async def test_find_pending_returns_parsed_rows(mock_conn):
+    """find_pending выбирает строки со status in (pending, in_progress),
+    парсит JSONB-поля и сортирует по created_at."""
+    repo = AgentRequestRepository(mock_conn)
+    mock_conn.fetch.return_value = [
+        {
+            "id": "r1", "conversation_id": "c1", "message_id": "m1",
+            "user_id": "u", "domain_name": None,
+            "knowledge_bases": "[]", "last_user_message": "Q1",
+            "history": "[]", "files": "[]",
+            "status": "pending", "error_message": None,
+            "created_at": None, "started_at": None, "finished_at": None,
+        },
+        {
+            "id": "r2", "conversation_id": "c2", "message_id": "m2",
+            "user_id": "u", "domain_name": "acts",
+            "knowledge_bases": '["acts_default"]', "last_user_message": "Q2",
+            "history": "[]", "files": "[]",
+            "status": "in_progress", "error_message": None,
+            "created_at": None, "started_at": None, "finished_at": None,
+        },
+    ]
+    rows = await repo.find_pending(older_than_sec=30)
+
+    # SQL отфильтровал по нужным статусам и параметру older_than_sec
+    sql, *params = mock_conn.fetch.call_args.args
+    assert "status IN ('pending', 'in_progress')" in sql
+    assert "interval '1 second'" in sql
+    assert params == [30]
+
+    # Возвращены распарсенные dict'ы (JSONB → Python)
+    assert len(rows) == 2
+    assert rows[0]["id"] == "r1"
+    assert rows[0]["knowledge_bases"] == []
+    assert rows[1]["knowledge_bases"] == ["acts_default"]
+
+
+async def test_find_pending_returns_empty_list_when_no_rows(mock_conn):
+    repo = AgentRequestRepository(mock_conn)
+    mock_conn.fetch.return_value = []
+    assert await repo.find_pending(older_than_sec=30) == []
