@@ -208,6 +208,14 @@ const ChatMessages = {
             case 'message_end':
                 this._streamingBlocks = {};
                 break;
+
+            case 'agent_request_started':
+                // Сигнал от backend: forward к внешнему агенту зарегистрирован.
+                // request_id уже сохранён в ChatStream — при разрыве соединения
+                // он автоматически переоткроет resume-стрим. Здесь только
+                // показываем индикатор «думает».
+                ChatEventBus.emit('ui:typing-show');
+                break;
         }
 
         ChatEventBus.emit('ui:scroll-bottom');
