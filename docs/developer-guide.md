@@ -1624,8 +1624,10 @@ def reset() -> None:
 Реализация в `app/domains/chat/services/orchestrator.py` (класс `Orchestrator`):
 
 ```python
-# Orchestrator получает настройки через DI (ChatDomainSettings)
-orchestrator = Orchestrator(settings, conv_service, msg_service, file_service)
+# Orchestrator получает msg_service, conv_service и settings через DI.
+# file_service подключается через get_db() внутри _build_user_content
+# (для извлечения текста файлов через extract_text_async).
+orchestrator = Orchestrator(msg_service, conv_service, settings)
 
 # run_stream() — SSE стриминг (основной режим)
 async for event in orchestrator.run_stream(conversation_id, message, files, domains):
@@ -1662,7 +1664,7 @@ KnowledgeBase(
 )
 ```
 
-Клиент собирает выбранные базы знаний на фронтенде (`ChatContext.getEnabledKnowledgeBases()`), но текущий API не принимает их в запросе. Это место для будущей RAG-интеграции.
+Клиент собирает выбранные базы знаний на фронтенде (`ChatContext.getEnabledKnowledgeBases()`) и передаёт их в `chat.forward_to_knowledge_agent` как параметр `knowledge_bases`. Forward-handler пишет их в `agent_requests.knowledge_bases` (JSONB) — внешний агент использует список как фильтр для своей RAG-логики. Управление доступными базами знаний — через `KnowledgeBase` в `DomainDescriptor` зарегистрированных доменов.
 
 ### 7.6 Пример: добавление нового chat tool
 
@@ -1750,54 +1752,60 @@ app/domains/<your_domain>/integrations/
 
 ### 7.7 Фронтенд: event-driven архитектура чата
 
-Фронтенд чата построен на event-driven архитектуре из 6 модулей, связанных через шину событий `ChatEventBus`. Три режима чата (inline на landing, modal в portal, popup в constructor) используют единый набор модулей.
+Фронтенд чата — vanilla ES6 без бандлера, **11 модулей** в `static/js/shared/chat/`, связанных через шину событий `ChatEventBus`. Три режима чата (inline на landing, modal в portal, popup в constructor) используют единый набор модулей.
 
-**Граф зависимостей:**
+**Модули и зоны ответственности:**
 
 ```
-ChatEventBus          — шина событий (pub/sub, синхронная)
-    ↑
-ChatUI                — typing-индикатор, блокировка ввода, scroll, авторесайз
-ChatFiles             — валидация файлов, drag-drop, превью, лимиты
-ChatContext           — управление беседами, knowledge bases, домены
-ChatMessages          — отправка через SSE, обработка SSE-событий, рендеринг сообщений
-    ↑
-ChatManager           — тонкий фасад: инициализирует модули, делегирует через EventBus
-    ↑
-ChatModalManager      — модальное окно (portal)
-ChatPopupManager      — popup окно (constructor)
+ChatEventBus           — шина событий (pub/sub, синхронная). Загружается ПЕРВОЙ.
+ChatRenderer           — рендеринг блоков и сообщений в DOM
+ChatClientActionsRegistry — реестр и исполнитель ClientActionBlock-команд
+                          (open_url, notify, trigger_sdk; whitelist на фронте)
+ChatStream             — SSE-клиент: POST /messages + GET resume-stream при разрыве
+ChatHistory            — список бесед, CRUD, сворачиваемая панель
+ChatUI                 — typing-индикатор, блокировка ввода, scroll, авторесайз
+ChatFiles              — валидация файлов, drag-drop, превью, лимиты
+ChatContext            — управление беседами, knowledge bases, домены
+ChatMessages           — обработка SSE-событий, рендеринг user/bot сообщений
+ChatManager            — тонкий фасад: инициализирует модули, делегирует через EventBus
+ChatModalManager       — модальное окно (portal)
+ChatPopupManager       — popup окно (constructor)
 ```
 
-**Карта событий:**
+**Карта SSE-событий (от backend к фронту):**
 
-| Событие | Отправитель | Подписчики |
-|---------|-------------|------------|
-| `chat:send-request` | ChatManager | ChatMessages |
-| `chat:clear` | ChatManager | ChatMessages, ChatContext |
-| `ui:processing` | ChatMessages | ChatUI |
-| `ui:typing-show` | ChatMessages | ChatUI |
-| `ui:typing-hide` | ChatMessages | ChatUI |
-| `ui:scroll-bottom` | ChatMessages | ChatUI |
-| `context:conversation-switched` | ChatContext | ChatMessages, ChatFiles |
-| `context:conversation-cleared` | ChatContext | ChatMessages, ChatFiles |
-| `files:changed` | ChatFiles | (extension point) |
-| `files:cleared` | ChatFiles | (extension point) |
+| Событие | Маршрутизация | Используется |
+|---------|---------------|--------------|
+| `message_start` | один раз в начале | сброс `_streamingBlocks`, скрытие typing |
+| `block_start` + `block_delta` + `block_end` | триплет | text, code, reasoning (стримуемые) |
+| `block_complete` | одно событие | file, image, plan, error (нестримуемые) |
+| `buttons` | одно событие | группа кнопок (action_id уже транслирован сервером) |
+| `client_action` | одно событие | ClientActionBlock — исполняется ровно один раз |
+| `agent_request_started` | один раз при forward | `request_id` для авто-resume при разрыве |
+| `plan_update` | по мере прогресса | обновление PlanBlock |
+| `tool_call` / `tool_result` | информационные | сейчас не рендерятся |
+| `error` | terminal | блок ErrorBlock |
+| `message_end` | один раз в конце | финализация |
 
 **Порядок загрузки скриптов** (в `base_portal.html` и `base_constructor.html`):
 
 ```
-chat-stream.js → chat-renderer.js → chat-history.js →
-chat-event-bus.js → chat-ui.js → chat-files.js →
+chat-event-bus.js → chat-renderer.js → chat-client-actions.js →
+chat-stream.js → chat-history.js → chat-ui.js → chat-files.js →
 chat-context.js → chat-messages.js → chat-manager.js →
 chat-modal.js / chat-popup.js
 ```
 
+`chat-event-bus.js` обязан идти ПЕРВЫМ — остальные модули могут публиковать `window.X = new ...` и подписываться на шину при загрузке.
+
 **Ключевые паттерны:**
 
-- **Защита от повторной инициализации**: каждый модуль хранит `_initialized` флаг и выходит из `init()` при повторном вызове (arrow-функции в `Set` не дедуплицируются)
+- **Защита от повторной инициализации**: каждый модуль хранит `_initialized` флаг и выходит из `init()` при повторном вызове
 - **Ленивая инициализация**: `ChatModalManager`/`ChatPopupManager` вызывают `ChatManager.init()` при первом открытии
-- **Публичный API фасада**: `ChatManager.init()`, `.sendMessage()`, `.sendQuickReply(value)`, `.executeAction(actionId, params)`, `.clearChat()` — обратная совместимость для всех точек интеграции
-- **Прямой fetch в executeAction**: actions используют отдельный API endpoint без SSE, поэтому не идут через event bus
+- **ClientAction исполняется ровно один раз**: в момент SSE-события `client_action` через `ChatRenderer.renderBlock(block, {execute: true})`. При рендере истории `{execute: false}` — только label-чип. Иначе пользователь застрянет в редирект-цикле
+- **Auto-resume при разрыве SSE**: `ChatStream` запоминает `request_id` из `agent_request_started` и при разрыве переоткрывает `GET /conversations/{cid}/agent-request/{rid}/stream?since=<seq>`. Курсор по `seq` (не id) — `id` в Greenplum не монотонен между сегментами
+- **DOM API в `chat-history`**: список бесед рендерится через `document.createElement`/`textContent`/`dataset`, не через `innerHTML` — защита от XSS через title беседы (= первое сообщение пользователя)
+- **Whitelist в `chat-client-actions`**: `open_url` принимает только `http:/https:/mailto:/relative`; `trigger_sdk` — только методы из `ALLOWED_SDK_METHODS` (по умолчанию пустой)
 
 ### 7.8 Внешний ИИ-агент через таблицы БД
 
@@ -1809,34 +1817,60 @@ chat-modal.js / chat-popup.js
 
 ```
 LLM-оркестратор → tool chat.forward_to_knowledge_agent
-    ↓ INSERT в agent_requests (history, files, last_user_message, kb_hint)
+    ↓ INSERT в agent_requests (status='pending', history, files, kb_hint)
     ↓ возвращает sentinel "<<forwarded_request:UUID>>"
-Orchestrator переключается в bridge stream:
-    ↓ AgentBridgeService.wait_for_completion(request_id)
-    ↓ polling: agent_response_events (reasoning chunks, status, error)
-    ↓ polling: agent_responses (финальный ответ — stop-сигнал)
-SSE → клиент (block_start type=reasoning → deltas → финальные блоки)
+
+Orchestrator:
+    ↓ agent_bridge_runner.schedule(request_id) — фоновая задача стартует
+    ↓ yield SSE: agent_request_started {request_id}
+    ↓ оркестратор сам ЧИТАЕТ из БД и эмитит SSE (НЕ держит polling-цикл)
+
+Фоновый раннер (agent_bridge_runner):
+    ↓ UPDATE status=dispatched, started_at=now()
+    ↓ polling agent_response_events (курсор по seq, не id)
+    ↓ при первом event: UPDATE status=in_progress
+    ↓ при agent_responses: UPDATE status=done, save_assistant_message в БД
+
+SSE → клиент:
+    ↓ agent_request_started → ChatStream запоминает request_id
+    ↓ reasoning deltas, финальные блоки
+    ↓ при разрыве — фронт переоткрывает GET /agent-request/{rid}/stream?since=<seq>
 ```
 
 **Таблицы** (`app/domains/chat/migrations/{postgresql,greenplum}/schema.sql`):
 
 | Таблица | Кто пишет | Назначение |
 |---|---|---|
-| `agent_requests` | AW | Очередь запросов к агенту (`status`: pending → in_progress → done/error/timeout) |
-| `agent_response_events` | агент | Append-only лента событий: `reasoning`, `status`, `error` (id из общей sequence) |
+| `agent_requests` | AW (raннер обновляет status) | Очередь запросов к агенту. Стадии status — см. ниже |
+| `agent_response_events` | агент | Append-only лента событий: `reasoning`, `status`, `error`. **Курсор polling — по `seq`, не `id`** (в GP id не монотонен между сегментами) |
 | `agent_responses` | агент | Однократный INSERT финального ответа (UNIQUE по `request_id` — stop-сигнал) |
+
+**Стадии `agent_requests.status`:**
+
+| Статус | Кто ставит | Что значит |
+|---|---|---|
+| `pending` | bridge.send() | INSERT только что произошёл, раннер ещё не подхватил (~миллисекунды) |
+| `dispatched` | раннер при старте polling | AW-раннер взял в работу, ждёт первого события от агента |
+| `in_progress` | раннер при первом event | Внешний агент пишет события |
+| `done` | раннер | Финальный ответ агента сохранён, ассистент-message в БД |
+| `error` | раннер | Ошибка раннера или агента (см. `error_message`) |
+| `timeout` | раннер | Сработал один из трёх гейтов `wait_for_completion` |
 
 **Архитектурные ограничения:**
 
 - **Polling-only**, без LISTEN/NOTIFY и постоянных соединений (между AW и агент-сервисом нет прямой сети — оба общаются только через БД).
 - **Greenplum-first**: схема DDL построена под GP (VARCHAR(36) для id, `{SCHEMA}.{PREFIX}` placeholders, `DISTRIBUTED BY (conversation_id)` для requests и `(request_id)` для events/responses).
-- **Retention** — задача администратора, в коде housekeeping не запускается (см. `external-agent-imitation.sql` в корне для SQL-сниппетов).
-- **Восстановление** после обрыва SSE — endpoint `GET /conversations/{id}/agent-request/{rid}/stream?since={event_id}` (`app/domains/chat/api/messages.py`).
+- **Polling-задача отвязана от SSE-соединения**: при обрыве клиента раннер дописывает ответ в БД. При перезапуске uvicorn — lifespan reconcile через `agent_bridge_runner.schedule_pending()` (см. `app/main.py`).
+- **Retention** — задача администратора (см. `docs/external-agent-imitation.sql` для SQL-сниппетов).
+- **Восстановление SSE** после обрыва — endpoint `GET /conversations/{id}/agent-request/{rid}/stream?since={seq}` (`api/messages.py`). Курсор по `seq`.
 
 **Ключевые модули:**
-- `app/domains/chat/services/agent_bridge.py` — `AgentBridgeService.send/poll_events/poll_response/wait_for_completion`
+- `app/domains/chat/services/agent_bridge.py` — `AgentBridgeService.send/poll_events/poll_response/wait_for_completion`. Курсор `since_seq`.
+- `app/domains/chat/services/agent_bridge_runner.py` — фоновый раннер polling+save: `schedule(rid, settings)`, `is_running(rid)`, `schedule_pending(settings, older_than_sec=30)` для lifespan-reconcile. Process-level registry `_running: dict[str, asyncio.Task]` защищает от дублей.
+- `app/domains/chat/services/button_translator.py` — общая трансляция action_id (имя ChatTool) → клиентский action. Используется в орк-е, раннере, resume-эндпоинте.
+- `app/domains/chat/services/block_emitter.py` — общий SSE-эмиттер блоков ответа агента (правила: text/code/reasoning → триплет; file/image/plan/error → block_complete; buttons → sse_buttons; client_action → sse_client_action).
 - `app/domains/chat/integrations/forward_handler.py` — фабрика `build_forward_handler(...)`, sentinel-pattern
-- `app/domains/chat/repositories/agent_*_repository.py` — три CRUD-репозитория
+- `app/domains/chat/repositories/agent_*_repository.py` — три CRUD-репозитория. `AgentRequestRepository.find_pending(older_than_sec)` для reconcile.
 - `app/domains/chat/services/{llm_client,retry,tool_call_accumulator}.py` — провайдер-агностичная LLM-инфра (OpenRouter/SGLang quirks: `index=None` fallback, `reasoning_details` для MiniMax M2)
 
 **Гейты таймаутов** в `wait_for_completion`: три независимых, срабатывание любого → `status='timeout'` + `AgentBridgeTimeout`.
