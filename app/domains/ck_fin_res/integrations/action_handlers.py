@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import uuid
 
 from app.core.chat.names import ACTION_OPEN_URL
 
@@ -16,6 +17,7 @@ async def open_ck_fin_res_page_handler() -> str:
         "action": ACTION_OPEN_URL,
         "params": {"url": _CK_FIN_RES_URL},
         "label": "ЦК Фин.Рез.",
+        "block_id": str(uuid.uuid4()),
     }
     return json.dumps(block, ensure_ascii=False)
 

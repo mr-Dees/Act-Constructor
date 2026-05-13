@@ -561,6 +561,11 @@ class Orchestrator:
         # Минимальная валидация
         if "action" not in obj:
             return None
+        # Гарантируем block_id для идемпотентности на фронте: handler'ы
+        # должны его проставлять, но защищаем case, когда tool вернул
+        # client_action без block_id (LLM-конструируемый JSON и т.п.).
+        if not obj.get("block_id"):
+            obj["block_id"] = str(uuid.uuid4())
         return obj
 
     def _parse_buttons_result(self, raw: str) -> dict | None:
@@ -593,6 +598,11 @@ class Orchestrator:
             return None
         if not all(isinstance(b, dict) and "type" in b for b in obj):
             return None
+        # Гарантируем block_id для каждого client_action внутри списка —
+        # фронт использует его для идемпотентного исполнения.
+        for b in obj:
+            if b.get("type") == "client_action" and not b.get("block_id"):
+                b["block_id"] = str(uuid.uuid4())
         return obj
 
     async def _translate_buttons(self, buttons: list[dict]) -> list[dict]:
@@ -643,9 +653,20 @@ class Orchestrator:
                 "Таймаут выполнения ChatTool %s (%dс)", tool_name, timeout,
             )
             return f"Ошибка: таймаут выполнения инструмента '{tool_name}'"
-        except Exception as exc:
-            logger.exception("Ошибка выполнения ChatTool %s", tool_name)
-            return f"Ошибка выполнения инструмента: {exc}"
+        except Exception:
+            # Никаких деталей exception в выходе LLM: stack trace, имена БД,
+            # SQL-фрагменты и пр. могут содержать чувствительные данные.
+            # Полный stack логируем под error_id; LLM получает нейтральный
+            # текст с этим id для трассировки администратором.
+            error_id = str(uuid.uuid4())[:8]
+            logger.exception(
+                "Ошибка выполнения tool=%s error_id=%s",
+                tool_name, error_id,
+            )
+            return (
+                f"Инструмент завершился с ошибкой. error_id={error_id}. "
+                "Сообщите администратору."
+            )
 
     async def run(
         self,
@@ -844,8 +865,15 @@ class Orchestrator:
         try:
             use_streaming = self.settings.streaming_enabled
             rounds = 0
+            # Семантика max_tool_rounds — максимальное число tool-call
+            # раундов (см. зеркальный non-streaming run()). Используем
+            # строгое `<` с пост-инкрементом внутри, чтобы при
+            # max_tool_rounds=N инструмент вызывался ровно N раз; на N+1
+            # итерации модель уже не получает шанс вызвать tool. Иначе
+            # стримящий путь делал N+1 раунд (off-by-one).
+            max_tool_rounds = self.settings.max_tool_rounds
 
-            while rounds <= self.settings.max_tool_rounds:
+            while rounds < max_tool_rounds:
                 if use_streaming:
                     # Стриминговый вызов LLM
                     try:

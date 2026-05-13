@@ -12,6 +12,7 @@
 """
 from __future__ import annotations
 
+import uuid
 from collections.abc import AsyncIterator
 
 # Стримуемые блоки: фронт собирает их инкрементально из дельт.
@@ -52,6 +53,10 @@ async def emit_response_blocks(
             yield sse_buttons(buttons=translated), idx
             continue
         if btype == "client_action":
+            # Гарантируем block_id для идемпотентности на фронте: если блок
+            # пришёл из истории/агента без block_id — генерируем его здесь.
+            if not raw_block.get("block_id"):
+                raw_block = {**raw_block, "block_id": str(uuid.uuid4())}
             yield sse_client_action(block=raw_block), idx
             continue
         if btype in STREAMABLE_BLOCK_TYPES:

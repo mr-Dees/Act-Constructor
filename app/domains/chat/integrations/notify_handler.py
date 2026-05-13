@@ -7,6 +7,7 @@
 from __future__ import annotations
 
 import json
+import uuid
 
 from app.core.chat.names import ACTION_NOTIFY
 
@@ -18,5 +19,6 @@ async def notify_handler(*, message: str, level: str = "info") -> str:
         "action": ACTION_NOTIFY,
         "params": {"message": message, "level": level},
         "label": message,
+        "block_id": str(uuid.uuid4()),
     }
     return json.dumps(block, ensure_ascii=False)

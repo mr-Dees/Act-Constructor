@@ -9,12 +9,12 @@ from app.domains.chat.integrations.notify_handler import notify_handler
 async def test_notify_handler_returns_client_action_json():
     raw = await notify_handler(message="Готово", level="success")
     block = json.loads(raw)
-    assert block == {
-        "type": "client_action",
-        "action": "notify",
-        "params": {"message": "Готово", "level": "success"},
-        "label": "Готово",
-    }
+    assert block["type"] == "client_action"
+    assert block["action"] == "notify"
+    assert block["params"] == {"message": "Готово", "level": "success"}
+    assert block["label"] == "Готово"
+    # block_id обязателен — это идемпотентный uuid для фронта.
+    assert block.get("block_id")
 
 
 async def test_notify_handler_default_level_info():

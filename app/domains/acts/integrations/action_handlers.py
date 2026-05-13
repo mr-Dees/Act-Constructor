@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import logging
+import uuid
 
 from app.core.chat.names import ACTION_NOTIFY, ACTION_OPEN_URL
 
@@ -12,7 +13,13 @@ logger = logging.getLogger("audit_workstation.domains.acts.integrations.action_h
 
 def _client_action(action: str, params: dict, label: str) -> str:
     return json.dumps(
-        {"type": "client_action", "action": action, "params": params, "label": label},
+        {
+            "type": "client_action",
+            "action": action,
+            "params": params,
+            "label": label,
+            "block_id": str(uuid.uuid4()),
+        },
         ensure_ascii=False,
     )
 

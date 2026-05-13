@@ -1,5 +1,6 @@
 """Эндпоинты сообщений чата."""
 
+import asyncio
 import json
 import logging
 import time
@@ -145,6 +146,10 @@ async def send_message(
         stream_started_at = time.monotonic()
 
         async def _instrumented_stream():
+            from app.domains.chat.services.streaming import (
+                sse_error,
+                sse_message_end,
+            )
             try:
                 async for chunk in orchestrator.run_stream(
                     conversation_id=conversation_id,
@@ -155,10 +160,40 @@ async def send_message(
                     knowledge_bases=[],
                 ):
                     yield chunk
+            except (asyncio.CancelledError, GeneratorExit):
+                # Клиент дисконнектнулся (закрыл вкладку, обрыв связи).
+                # Пытаемся отправить финальные SSE-события — если канал
+                # уже мёртв, yield бросит исключение, его глушим. Дальше
+                # пробрасываем исходное исключение, чтобы корректно
+                # завершить генератор и освободить ресурсы.
+                logger.info(
+                    "SSE-стрим отменён клиентом: conversation=%s",
+                    conversation_id,
+                )
+                try:
+                    yield sse_error(
+                        error="Соединение разорвано клиентом.",
+                        code="client_disconnected",
+                    )
+                    yield sse_message_end(message_id="")
+                except Exception:
+                    pass
+                raise
             except Exception:
                 logger.exception(
                     "Ошибка в SSE-стриме: conversation=%s", conversation_id,
                 )
+                # Гарантируем финальное message_end даже если оркестратор
+                # упал до того, как успел его эмитнуть. Падение yield
+                # внутри (мёртвый канал) — глушим.
+                try:
+                    yield sse_error(
+                        error="Внутренняя ошибка SSE-стрима.",
+                        code="stream_error",
+                    )
+                    yield sse_message_end(message_id="")
+                except Exception:
+                    pass
                 raise
             finally:
                 logger.info(

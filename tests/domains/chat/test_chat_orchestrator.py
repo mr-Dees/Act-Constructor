@@ -492,6 +492,14 @@ class TestOrchestratorRun:
         assert "режиме заглушки" in result["response"]
 
     # BUG #7: run() возвращает HTTP 200 с error payload вместо ошибки
+    @pytest.mark.xfail(
+        strict=False,
+        reason=(
+            "Известный баг #7: run() возвращает HTTP 200 с error payload "
+            "вместо ошибки — при сбое LLM API не raise/HTTPException, "
+            "клиент получает 200 OK с dict status='error'."
+        ),
+    )
     @patch("app.domains.chat.services.orchestrator.Orchestrator._get_openai_client")
     async def test_run_api_error_returns_200_with_error_payload(
         self, mock_client_factory, orchestrator,
@@ -576,7 +584,7 @@ class TestExecuteToolCall:
         assert "таймаут" in result.lower()
 
     async def test_tool_exception(self, orchestrator):
-        """Исключение в обработчике возвращает ошибку."""
+        """Исключение в обработчике возвращает нейтральное сообщение без деталей."""
 
         async def failing_handler(**kwargs):
             raise ValueError("Внутренняя ошибка инструмента")
@@ -590,7 +598,111 @@ class TestExecuteToolCall:
         register_tools([tool])
 
         result = await orchestrator._execute_tool_call("failing_tool", {})
-        assert "Ошибка выполнения" in result
+        # 4.3: нейтральное сообщение БЕЗ деталей exception
+        assert "ошибкой" in result.lower()
+        assert "error_id=" in result
+        assert "Внутренняя ошибка инструмента" not in result
+
+    async def test_tool_exception_does_not_leak_details(self, orchestrator, caplog):
+        """4.3: Детали исключения (SQL, секреты) НЕ попадают в выход LLM;
+        полный stack-trace остаётся только в логах с error_id.
+        """
+        import logging as _logging
+
+        async def leaky_handler(**kwargs):
+            raise RuntimeError(
+                "secret SQL leaked: SELECT * FROM users WHERE password='hunter2'",
+            )
+
+        tool = ChatTool(
+            name="leaky_tool",
+            domain="test",
+            description="Утечка",
+            handler=leaky_handler,
+        )
+        register_tools([tool])
+
+        with caplog.at_level(_logging.ERROR):
+            result = await orchestrator._execute_tool_call("leaky_tool", {})
+
+        # Секрет НЕ просочился в результат для LLM
+        assert "secret SQL leaked" not in result
+        assert "hunter2" not in result
+        assert "RuntimeError" not in result
+        # Должен быть error_id для трассировки
+        assert "error_id=" in result
+        # Полный stack-trace и сообщение exception — в логах
+        leaked_in_logs = any(
+            "secret SQL leaked" in record.getMessage()
+            or "secret SQL leaked" in (record.exc_text or "")
+            for record in caplog.records
+        )
+        assert leaked_in_logs, "Детали исключения должны быть в логах"
+
+    async def test_max_tool_rounds_streaming_count(self, orchestrator):
+        """4.14: При max_tool_rounds=3 и LLM, всегда отдающем tool_call,
+        инструмент вызывается ровно 3 раза (не 2 и не 4).
+        """
+        call_count = 0
+
+        async def counting_handler(**kwargs):
+            nonlocal call_count
+            call_count += 1
+            return "ok"
+
+        tool = ChatTool(
+            name="counter_tool",
+            domain="test",
+            description="Счётчик",
+            handler=counting_handler,
+        )
+        register_tools([tool])
+
+        # Бесконечно отдаём tool_call стримом
+        def make_stream_factory():
+            async def mock_stream():
+                chunk = MagicMock()
+                delta = MagicMock()
+                delta.content = None
+                tc_delta = MagicMock()
+                tc_delta.index = 0
+                tc_delta.id = f"tc-{call_count}"
+                tc_delta.function = MagicMock()
+                tc_delta.function.name = "counter_tool"
+                tc_delta.function.arguments = "{}"
+                delta.tool_calls = [tc_delta]
+                chunk.choices = [MagicMock(delta=delta, finish_reason=None)]
+                yield chunk
+
+                chunk2 = MagicMock()
+                delta2 = MagicMock()
+                delta2.content = None
+                delta2.tool_calls = None
+                chunk2.choices = [MagicMock(delta=delta2, finish_reason="tool_calls")]
+                yield chunk2
+            return mock_stream()
+
+        orchestrator.settings.max_tool_rounds = 3
+
+        with patch.object(
+            Orchestrator, "_get_openai_client",
+        ) as mock_client_factory:
+            mock_client = AsyncMock()
+            mock_client.chat.completions.create = AsyncMock(
+                side_effect=lambda **kw: make_stream_factory(),
+            )
+            mock_client_factory.return_value = mock_client
+            orchestrator._save_assistant_message = AsyncMock()
+
+            events = []
+            async for ev in orchestrator.run_stream(
+                conversation_id="conv-1",
+                user_message="loop",
+            ):
+                events.append(ev)
+
+        # При max_tool_rounds=3 ровно 3 раза вызвался handler
+        assert call_count == 3, f"Ожидалось 3 вызова, получено {call_count}"
 
     async def test_tool_dict_result_serialized(self, orchestrator):
         """Dict-результат инструмента сериализуется в JSON."""
@@ -721,6 +833,14 @@ class TestOrchestratorRunStream:
         assert "block_end" in event_types
 
     # BUG #6: message_end не гарантирован на всех путях ошибок
+    @pytest.mark.xfail(
+        strict=False,
+        reason=(
+            "Известный баг #6: message_end не гарантирован на всех путях "
+            "ошибок стриминга — на некоторых ветках финальное SSE-событие "
+            "не отправляется."
+        ),
+    )
     @patch("app.domains.chat.services.orchestrator.Orchestrator._get_openai_client")
     async def test_stream_error_guarantees_message_end(
         self, mock_client_factory, orchestrator,

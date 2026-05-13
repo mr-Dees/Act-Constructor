@@ -7,9 +7,10 @@
 
 from __future__ import annotations
 
+import uuid
 from typing import Any, Literal, Union
 
-from pydantic import BaseModel, model_validator
+from pydantic import BaseModel, Field, model_validator
 
 from app.core.chat.names import (
     ACTION_NOTIFY,
@@ -133,6 +134,11 @@ class ClientActionBlock(BaseModel):
     action: str
     params: dict[str, Any] = {}
     label: str | None = None
+    # Идемпотентный идентификатор: фронт хранит исполненные block_id в
+    # sessionStorage и пропускает повторное выполнение при resume/reload.
+    # Генерируется по умолчанию uuid4 — но может быть переопределён вручную
+    # (например, при ручной сборке dict в handler'ах).
+    block_id: str = Field(default_factory=lambda: str(uuid.uuid4()))
 
     @model_validator(mode="after")
     def _validate_action_and_params(self) -> "ClientActionBlock":

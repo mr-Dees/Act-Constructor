@@ -231,6 +231,67 @@ def test_client_action_block_in_discriminated_union():
     assert blocks[0].label is None
 
 
+def test_client_action_block_id_auto_generated():
+    """При создании без явного block_id — генерируется валидный uuid4."""
+    import uuid as _uuid
+    from app.core.chat.blocks import ClientActionBlock
+
+    block = ClientActionBlock(action="notify", params={"message": "Hi"})
+    assert block.block_id
+    # Проверяем, что это валидный uuid4 (парсится без исключений)
+    parsed = _uuid.UUID(block.block_id)
+    assert parsed.version == 4
+
+
+def test_client_action_block_id_explicit():
+    """Явно переданный block_id сохраняется без изменений."""
+    from app.core.chat.blocks import ClientActionBlock
+
+    explicit_id = "11111111-2222-3333-4444-555555555555"
+    block = ClientActionBlock(
+        action="notify",
+        params={"message": "Hi"},
+        block_id=explicit_id,
+    )
+    assert block.block_id == explicit_id
+
+
+def test_client_action_block_id_unique_per_instance():
+    """Два инстанса без явного block_id — получают разные uuid."""
+    from app.core.chat.blocks import ClientActionBlock
+
+    a = ClientActionBlock(action="notify", params={"message": "A"})
+    b = ClientActionBlock(action="notify", params={"message": "B"})
+    assert a.block_id != b.block_id
+
+
+def test_client_action_block_id_in_model_dump():
+    """block_id попадает в model_dump (это критично для SSE сериализации)."""
+    from app.core.chat.blocks import ClientActionBlock
+
+    block = ClientActionBlock(action="notify", params={"message": "Hi"})
+    data = block.model_dump()
+    assert "block_id" in data
+    assert data["block_id"] == block.block_id
+
+
+def test_client_action_block_id_via_discriminated_union():
+    """Парсинг через дискриминированное объединение сохраняет block_id."""
+    from app.core.chat.schemas import parse_message_blocks
+
+    blocks = parse_message_blocks([
+        {
+            "type": "client_action",
+            "action": "notify",
+            "params": {"message": "Hi"},
+            "label": None,
+            "block_id": "fixed-id-xxx",
+        },
+    ])
+    assert len(blocks) == 1
+    assert blocks[0].block_id == "fixed-id-xxx"
+
+
 def test_error_block_parses_with_code():
     from app.core.chat.blocks import ErrorBlock
     block = ErrorBlock(
