@@ -210,50 +210,72 @@ const ChatHistory = {
     },
 
     /**
-     * Перерисовывает панель истории
+     * Перерисовывает панель истории через DOM API.
+     * Никакого innerHTML с user-controlled данными — title беседы приходит
+     * из первого пользовательского сообщения, кавычки в нём ломали бы атрибут.
      * @private
      */
     _render() {
         if (!this._container) return;
 
-        const collapsedClass = this._collapsed ? ' chat-history--collapsed' : '';
-        let html = `<div class="chat-history${collapsedClass}">`;
+        const root = document.createElement('div');
+        root.className = 'chat-history' + (this._collapsed ? ' chat-history--collapsed' : '');
 
         // Кнопка toggle
-        const toggleIcon = this._collapsed
-            ? '<path d="M9 18l6-6-6-6" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>'
-            : '<path d="M15 18l-6-6 6-6" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>';
-        const toggleTitle = this._collapsed ? 'Показать беседы' : 'Скрыть беседы';
-        html += `<button class="chat-history-toggle" data-action="toggle" title="${toggleTitle}">`;
-        html += `<svg width="16" height="16" viewBox="0 0 24 24" fill="none">${toggleIcon}</svg>`;
-        html += '</button>';
+        const toggleBtn = document.createElement('button');
+        toggleBtn.className = 'chat-history-toggle';
+        toggleBtn.dataset.action = 'toggle';
+        toggleBtn.title = this._collapsed ? 'Показать беседы' : 'Скрыть беседы';
+        toggleBtn.innerHTML = this._collapsed
+            ? '<svg width="16" height="16" viewBox="0 0 24 24" fill="none"><path d="M9 18l6-6-6-6" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>'
+            : '<svg width="16" height="16" viewBox="0 0 24 24" fill="none"><path d="M15 18l-6-6 6-6" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>';
+        root.appendChild(toggleBtn);
 
         if (!this._collapsed) {
-            // Кнопка «Новый чат»
-            html += '<button class="chat-history-new" data-action="new">+ Новый чат</button>';
+            const newBtn = document.createElement('button');
+            newBtn.className = 'chat-history-new';
+            newBtn.dataset.action = 'new';
+            newBtn.textContent = '+ Новый чат';
+            root.appendChild(newBtn);
 
-            // Список бесед
-            html += '<div class="chat-history-list">';
+            const list = document.createElement('div');
+            list.className = 'chat-history-list';
 
             for (const conv of this._conversations) {
                 const isActive = conv.id === this._currentId;
-                const activeClass = isActive ? ' chat-history-item--active' : '';
-                const title = this._escapeHtml(this._truncateTitle(conv.title || 'Без названия'));
+                const title = this._truncateTitle(conv.title || 'Без названия');
                 const date = this._formatDate(conv.updated_at || conv.created_at);
 
-                html += `<div class="chat-history-item${activeClass}" data-id="${this._escapeHtml(conv.id)}">`;
-                html += `  <div class="chat-history-item-title" title="${title}">${title}</div>`;
-                html += `  <div class="chat-history-item-date">${date}</div>`;
-                html += `  <button class="chat-history-item-delete" data-action="delete" data-id="${this._escapeHtml(conv.id)}" title="Удалить">&times;</button>`;
-                html += '</div>';
+                const item = document.createElement('div');
+                item.className = 'chat-history-item' + (isActive ? ' chat-history-item--active' : '');
+                item.dataset.id = conv.id;
+
+                const titleEl = document.createElement('div');
+                titleEl.className = 'chat-history-item-title';
+                titleEl.title = title;
+                titleEl.textContent = title;
+                item.appendChild(titleEl);
+
+                const dateEl = document.createElement('div');
+                dateEl.className = 'chat-history-item-date';
+                dateEl.textContent = date;
+                item.appendChild(dateEl);
+
+                const delBtn = document.createElement('button');
+                delBtn.className = 'chat-history-item-delete';
+                delBtn.dataset.action = 'delete';
+                delBtn.dataset.id = conv.id;
+                delBtn.title = 'Удалить';
+                delBtn.innerHTML = '&times;';
+                item.appendChild(delBtn);
+
+                list.appendChild(item);
             }
 
-            html += '</div>';
+            root.appendChild(list);
         }
 
-        html += '</div>';
-
-        this._container.innerHTML = html;
+        this._container.replaceChildren(root);
 
         // Навешиваем обработчики
         this._bindEvents();
@@ -307,20 +329,6 @@ const ChatHistory = {
     // ========================================================
     //  Хелперы
     // ========================================================
-
-    /**
-     * Экранирует HTML-спецсимволы
-     *
-     * @param {string} text
-     * @returns {string}
-     * @private
-     */
-    _escapeHtml(text) {
-        if (!text) return '';
-        const el = document.createElement('div');
-        el.textContent = text;
-        return el.innerHTML;
-    },
 
     /**
      * Форматирует дату: сегодня — HH:MM, иначе — "6 апр."
