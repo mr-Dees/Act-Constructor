@@ -180,6 +180,11 @@ async def _run(
                     "code": "agent_timeout",
                 })
 
+            # Трансляция кнопок ответа агента в клиентские action ДО
+            # сохранения: иначе в БД попадут «семантические» action_id
+            # (acts.open_act_page и т.п.), фронт их не сможет обработать.
+            blocks = await _translate_buttons_in_blocks(blocks)
+
             # Сохраняем ассистент-сообщение через MessageService.
             # MessageService привязан к conn — собираем его прямо тут.
             msg_service = MessageService(
@@ -259,3 +264,24 @@ async def schedule_pending(
             count,
         )
     return count
+
+
+async def _translate_buttons_in_blocks(blocks: list[dict]) -> list[dict]:
+    """Транслирует кнопки внутри buttons-блоков ответа агента.
+
+    Для каждого блока type='buttons' заменяет buttons на переведённые
+    через button_translator (acts.open_act_page → open_url с реальным
+    URL, и т.п.). Остальные блоки возвращаются как есть.
+    """
+    from app.domains.chat.services.button_translator import translate_buttons
+
+    result: list[dict] = []
+    for block in blocks:
+        if isinstance(block, dict) and block.get("type") == "buttons":
+            translated = await translate_buttons(block.get("buttons") or [])
+            new_block = dict(block)
+            new_block["buttons"] = translated
+            result.append(new_block)
+        else:
+            result.append(block)
+    return result

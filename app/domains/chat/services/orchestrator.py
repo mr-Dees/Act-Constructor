@@ -602,50 +602,14 @@ class Orchestrator:
         return obj
 
     async def _translate_buttons(self, buttons: list[dict]) -> list[dict]:
-        """Транслирует серверные action_id (имена ChatTool) в клиентские действия.
+        """Транслирует серверные action_id в клиентские действия.
 
-        Для каждой кнопки:
-          - Если action_id — имя зарегистрированного ChatTool с button_translator,
-            вызывает транслятор и заменяет action_id+params результатом.
-          - Иначе пропускает кнопку без изменений. Если action_id похож на
-            имя tool'а (содержит точку), но транслятор не зарегистрирован —
-            пишет WARNING (это конфигурационный пробел).
+        Делегирует общему хелперу ``button_translator.translate_buttons``,
+        чтобы оркестратор, raннер и resume-эндпоинт использовали один и
+        тот же код.
         """
-        result: list[dict] = []
-        for btn in buttons:
-            if not isinstance(btn, dict):
-                result.append(btn)
-                continue
-            action_id = btn.get("action_id")
-            tool = get_tool(action_id) if action_id else None
-            if tool is not None:
-                translator = getattr(tool, "button_translator", None)
-                if translator is None:
-                    logger.warning(
-                        "Кнопка с action_id='%s' указывает на ChatTool, но "
-                        "button_translator не зарегистрирован — кнопка не "
-                        "будет обработана клиентом",
-                        action_id,
-                    )
-                    result.append(btn)
-                    continue
-                try:
-                    translated = await translator(btn.get("params") or {})
-                except Exception as exc:
-                    logger.exception(
-                        "button_translator '%s' завершился ошибкой: %s",
-                        action_id, exc,
-                    )
-                    translated = None
-                if translated:
-                    result.append({
-                        "action_id": translated["action"],
-                        "label": btn.get("label", ""),
-                        "params": translated.get("params", {}),
-                    })
-                    continue
-            result.append(btn)
-        return result
+        from app.domains.chat.services.button_translator import translate_buttons
+        return await translate_buttons(buttons)
 
     async def _execute_tool_call(
         self, tool_name: str, arguments: dict,
