@@ -11,14 +11,20 @@ from typing import Any, Literal, Union
 
 from pydantic import BaseModel, model_validator
 
+from app.core.chat.names import (
+    ACTION_NOTIFY,
+    ACTION_OPEN_URL,
+    ACTION_TRIGGER_SDK,
+)
+
 # Whitelist разрешённых action-имён в ClientActionBlock.
 # LLM не может изобрести произвольное action — оно должно быть зарегистрировано
 # в JS-реестре `window.ClientActionsRegistry`. Если нужен новый action —
-# добавь его и сюда, и в chat-client-actions.js одновременно.
+# добавь его в app/core/chat/names.py, в этот whitelist И в chat-client-actions.js.
 ALLOWED_CLIENT_ACTIONS: frozenset[str] = frozenset({
-    "open_url",
-    "notify",
-    "trigger_sdk",
+    ACTION_OPEN_URL,
+    ACTION_NOTIFY,
+    ACTION_TRIGGER_SDK,
 })
 
 # Whitelist URL-схем для action='open_url'. Защищает от LLM-инжекций вида

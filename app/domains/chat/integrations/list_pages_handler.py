@@ -10,6 +10,8 @@ from __future__ import annotations
 
 import json
 
+from app.core.chat.names import ACTION_OPEN_URL
+
 
 _INTRO = (
     "Я ассистент Audit Workstation. Помогаю работать с актами аудита, "
@@ -43,7 +45,7 @@ async def list_pages_handler() -> str:
     # Статические страницы (не привязаны к nav_items домена) — первыми.
     for page in STATIC_PAGES:
         buttons.append({
-            "action_id": "open_url",
+            "action_id": ACTION_OPEN_URL,
             "label": page["label"],
             "params": {"url": page["url"]},
         })
@@ -55,7 +57,7 @@ async def list_pages_handler() -> str:
             if not nav.url:
                 continue
             buttons.append({
-                "action_id": "open_url",
+                "action_id": ACTION_OPEN_URL,
                 "label": nav.label,
                 "params": {"url": nav.url},
             })

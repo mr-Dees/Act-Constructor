@@ -1,4 +1,5 @@
 """ChatTool-инструменты домена ck_fin_res."""
+from app.core.chat.names import TOOL_OPEN_CK_FIN_RES_PAGE
 from app.core.chat.tools import ChatTool
 from app.domains.ck_fin_res.integrations.action_handlers import (
     open_ck_fin_res_page_button_translator,
@@ -12,7 +13,7 @@ def get_chat_tools() -> list[ChatTool]:
     """Возвращает action-инструменты домена ck_fin_res."""
     return [
         ChatTool(
-            name="ck_fin_res.open_ck_fin_res_page",
+            name=TOOL_OPEN_CK_FIN_RES_PAGE,
             domain=_DOMAIN,
             description=(
                 "Открыть страницу ЦК Финансовых Результатов — верификация "

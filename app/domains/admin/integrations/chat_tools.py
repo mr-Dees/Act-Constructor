@@ -1,4 +1,5 @@
 """ChatTool-инструменты домена admin."""
+from app.core.chat.names import TOOL_OPEN_ADMIN_PANEL
 from app.core.chat.tools import ChatTool
 from app.domains.admin.integrations.action_handlers import (
     open_admin_panel_button_translator,
@@ -12,7 +13,7 @@ def get_chat_tools() -> list[ChatTool]:
     """Возвращает action-инструменты домена admin."""
     return [
         ChatTool(
-            name="admin.open_admin_panel",
+            name=TOOL_OPEN_ADMIN_PANEL,
             domain=_DOMAIN,
             description=(
                 "Открыть админ-панель — страницу управления пользователями "

@@ -5,6 +5,8 @@ from __future__ import annotations
 import json
 import logging
 
+from app.core.chat.names import ACTION_NOTIFY, ACTION_OPEN_URL
+
 logger = logging.getLogger("audit_workstation.domains.acts.integrations.action_handlers")
 
 
@@ -101,7 +103,7 @@ async def open_act_page_handler(
         row = rows[0]
         url = f"/constructor?act_id={row['id']}"
         return _client_action(
-            action="open_url",
+            action=ACTION_OPEN_URL,
             params={"url": url},
             label=f"Открываю акт {row['km_number']}…",
         )
@@ -128,10 +130,10 @@ async def open_act_page_button_translator(params: dict) -> dict:
     sz = (params or {}).get("sz_number")
     url = await resolve_act_url(km, sz)
     if url:
-        return {"action": "open_url", "params": {"url": url}}
+        return {"action": ACTION_OPEN_URL, "params": {"url": url}}
     identifier = km or sz or "?"
     return {
-        "action": "notify",
+        "action": ACTION_NOTIFY,
         "params": {
             "message": f"Акт {identifier} не найден",
             "level": "error",

@@ -4,6 +4,7 @@
 get_act_by_km и др. — всего 27) удалены: внешний агент сам ходит в БД.
 Здесь остаются только action-tools — команды интерфейса.
 """
+from app.core.chat.names import TOOL_OPEN_ACT_PAGE
 from app.core.chat.tools import ChatTool, ChatToolParam
 from app.domains.acts.integrations.action_handlers import (
     open_act_page_button_translator,
@@ -17,7 +18,7 @@ def get_chat_tools() -> list[ChatTool]:
     """Возвращает action-инструменты домена acts."""
     return [
         ChatTool(
-            name="acts.open_act_page",
+            name=TOOL_OPEN_ACT_PAGE,
             domain=_DOMAIN,
             description=(
                 "Открыть страницу конкретного акта в интерфейсе AuditWorkstation. "

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 
+from app.core.chat.names import ACTION_OPEN_URL
 
 _ADMIN_URL = "/admin"
 
@@ -12,7 +13,7 @@ async def open_admin_panel_handler() -> str:
     """Возвращает client_action-блок, открывающий админ-панель."""
     block = {
         "type": "client_action",
-        "action": "open_url",
+        "action": ACTION_OPEN_URL,
         "params": {"url": _ADMIN_URL},
         "label": "Администрирование",
     }
@@ -21,4 +22,4 @@ async def open_admin_panel_handler() -> str:
 
 async def open_admin_panel_button_translator(params: dict) -> dict:
     """Транслятор серверной кнопки admin.open_admin_panel → open_url."""
-    return {"action": "open_url", "params": {"url": _ADMIN_URL}}
+    return {"action": ACTION_OPEN_URL, "params": {"url": _ADMIN_URL}}

@@ -16,6 +16,7 @@ from collections.abc import AsyncGenerator
 from datetime import date
 from typing import Any
 
+from app.core.chat.names import TOOL_FORWARD_TO_KNOWLEDGE_AGENT
 from app.core.chat.tools import (
     get_openai_tools,
     get_tool,
@@ -965,7 +966,7 @@ class Orchestrator:
                                 arguments=arguments,
                             )
 
-                            if tool_name == "chat.forward_to_knowledge_agent":
+                            if tool_name == TOOL_FORWARD_TO_KNOWLEDGE_AGENT:
                                 # Терминальный tool: переключаемся в стрим из bridge
                                 history_messages = await self._get_history_messages(
                                     conversation_id,
@@ -1137,7 +1138,7 @@ class Orchestrator:
                             arguments=arguments,
                         )
 
-                        if tool_name == "chat.forward_to_knowledge_agent":
+                        if tool_name == TOOL_FORWARD_TO_KNOWLEDGE_AGENT:
                             # Терминальный tool: переключаемся в стрим из bridge
                             history_messages = await self._get_history_messages(
                                 conversation_id,

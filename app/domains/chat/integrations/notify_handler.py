@@ -8,12 +8,14 @@ from __future__ import annotations
 
 import json
 
+from app.core.chat.names import ACTION_NOTIFY
+
 
 async def notify_handler(*, message: str, level: str = "info") -> str:
     """Возвращает client_action-блок для всплывающего уведомления."""
     block = {
         "type": "client_action",
-        "action": "notify",
+        "action": ACTION_NOTIFY,
         "params": {"message": message, "level": level},
         "label": message,
     }
