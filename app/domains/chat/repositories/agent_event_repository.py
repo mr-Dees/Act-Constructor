@@ -63,19 +63,25 @@ class AgentEventRepository(BaseRepository):
         self,
         request_id: str,
         *,
-        since_id: int | None,
+        since_seq: int | None,
     ) -> list[dict]:
-        """Возвращает события запроса в порядке возрастания id.
+        """Возвращает события запроса в порядке возрастания seq.
 
-        Если since_id указан — только события с id > since_id (курсор polling'а).
+        Курсор по seq (а не по id): seq — монотонная нумерация в рамках
+        одного request_id, контролируемая писателем (внешним агентом). id
+        идёт из глобальной sequence, которая в Greenplum НЕ монотонна между
+        сегментами distributed-таблицы — два события с consecutive seq могут
+        получить id из разных сегментов в обратном порядке. Polling по id
+        в GP может пропустить или переставить события; polling по seq —
+        корректен и в PG, и в GP.
         """
-        if since_id is None:
+        if since_seq is None:
             rows = await self.conn.fetch(
                 f"""
                 SELECT id, request_id, seq, event_type, payload, created_at
                 FROM {self.table}
                 WHERE request_id = $1
-                ORDER BY id
+                ORDER BY seq
                 """,
                 request_id,
             )
@@ -84,16 +90,16 @@ class AgentEventRepository(BaseRepository):
                 f"""
                 SELECT id, request_id, seq, event_type, payload, created_at
                 FROM {self.table}
-                WHERE request_id = $1 AND id > $2
-                ORDER BY id
+                WHERE request_id = $1 AND seq > $2
+                ORDER BY seq
                 """,
                 request_id,
-                since_id,
+                since_seq,
             )
         if rows:
             logger.debug(
                 "agent_response_events: получено %d событий после seq=%s "
                 "для request=%s",
-                len(rows), since_id, request_id,
+                len(rows), since_seq, request_id,
             )
         return [self._parse_row(r) for r in rows]

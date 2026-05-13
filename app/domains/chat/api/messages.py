@@ -269,14 +269,15 @@ async def get_messages(
 async def resume_agent_request_stream(
     conversation_id: str,
     request_id: str,
-    since: int | None = Query(None, description="id последнего полученного события"),
+    since: int | None = Query(None, description="seq последнего полученного события"),
     username: str = Depends(get_username),
     conv_service: ConversationService = Depends(get_conversation_service),
 ):
-    """Стримит накопленные события (с id > since) и финал в виде SSE-блоков.
+    """Стримит накопленные события (с seq > since) и финал в виде SSE-блоков.
 
     Использовать, если клиент потерял соединение во время forward'а к
-    внешнему агенту: фронт перезапрашивает поток с курсором last_seen_event_id.
+    внешнему агенту: фронт перезапрашивает поток с курсором last_seen_seq.
+    Курсор по seq (не id), потому что id в GP не монотонен по distributed-таблице.
     """
     # Проверка владения беседой — те же права, что и при отправке сообщения
     await conv_service.get(conversation_id, username)
@@ -355,9 +356,11 @@ async def resume_agent_request_stream(
             bridge = AgentBridgeService(conn)
 
             # Сначала отдаём уже накопленные события (если они есть на старте)
-            existing = await bridge.poll_events(request_id, since_id=last_seen)
+            existing = await bridge.poll_events(
+                request_id, since_seq=last_seen,
+            )
             for ev in existing:
-                last_seen = ev["id"]
+                last_seen = ev["seq"]
                 if ev["event_type"] == "reasoning":
                     text = (ev["payload"] or {}).get("text", "")
                     if not text:
@@ -396,11 +399,11 @@ async def resume_agent_request_stream(
                     initial_response_timeout_sec=settings.agent_bridge.initial_response_timeout_sec,
                     event_timeout_sec=settings.agent_bridge.event_timeout_sec,
                     max_total_duration_sec=settings.agent_bridge.max_total_duration_sec,
-                    since_id=last_seen,
+                    since_seq=last_seen,
                 ):
                     if upd.event:
                         ev = upd.event
-                        last_seen = ev["id"]
+                        last_seen = ev["seq"]
                         if ev["event_type"] == "reasoning":
                             text = (ev["payload"] or {}).get("text", "")
                             if not text:

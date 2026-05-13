@@ -78,10 +78,14 @@ class AgentBridgeService:
         self,
         request_id: str,
         *,
-        since_id: int | None,
+        since_seq: int | None,
     ) -> list[dict]:
-        """Возвращает новые события агента (с id > since_id)."""
-        return await self._events.poll(request_id, since_id=since_id)
+        """Возвращает новые события агента (с seq > since_seq).
+
+        Курсор по seq, а не по id — id в GP не монотонен между сегментами
+        distributed-таблицы. См. AgentEventRepository.poll.
+        """
+        return await self._events.poll(request_id, since_seq=since_seq)
 
     async def poll_response(self, request_id: str) -> dict | None:
         """Возвращает финальный ответ агента или None, если ещё не готов."""
@@ -95,7 +99,7 @@ class AgentBridgeService:
         initial_response_timeout_sec: int,
         event_timeout_sec: int,
         max_total_duration_sec: int,
-        since_id: int | None = None,
+        since_seq: int | None = None,
     ) -> AsyncIterator[AgentBridgeUpdate]:
         """Async-генератор: yield events и финальный response по мере появления.
 
@@ -103,14 +107,15 @@ class AgentBridgeService:
         из трёх гейтов (initial_response / event heartbeat / max total) —
         UPDATE agent_requests SET status='timeout' + raise AgentBridgeTimeout.
 
-        since_id — курсор: события с id <= since_id не возвращаются. Нужен
-        для resume-сценариев, чтобы повторно подключающийся клиент не
-        получил уже виденные события.
+        since_seq — курсор по полю seq: события с seq <= since_seq не
+        возвращаются. Нужен для resume-сценариев, чтобы повторно
+        подключающийся клиент не получил уже виденные события. Курсор
+        по seq (а не по id) — id в GP не монотонен между сегментами.
         """
         loop = asyncio.get_event_loop()
         started_at = loop.time()
         last_event_at: float | None = None
-        last_event_id: int | None = since_id
+        last_event_seq: int | None = since_seq
 
         logger.info(
             "agent_bridge: ожидание ответа: request_id=%s, "
@@ -188,12 +193,14 @@ class AgentBridgeService:
             logger.debug(
                 "agent_bridge polling: request_id=%s, last_seq=%s, "
                 "elapsed=%.1fс",
-                request_id, last_event_id, elapsed,
+                request_id, last_event_seq, elapsed,
             )
 
-            new_events = await self.poll_events(request_id, since_id=last_event_id)
+            new_events = await self.poll_events(
+                request_id, since_seq=last_event_seq,
+            )
             for ev in new_events:
-                last_event_id = ev["id"]
+                last_event_seq = ev["seq"]
                 if last_event_at is None:
                     logger.info(
                         "agent_bridge: первое событие получено за %.2fс: "

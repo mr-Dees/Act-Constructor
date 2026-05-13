@@ -69,7 +69,7 @@ async def test_poll_events_delegates_to_repo(mock_conn):
         {"id": 1, "request_id": "r1", "seq": 1, "event_type": "reasoning",
          "payload": '{"text":"a"}', "created_at": None},
     ]
-    events = await svc.poll_events("r1", since_id=None)
+    events = await svc.poll_events("r1", since_seq=None)
     assert len(events) == 1
     assert events[0]["payload"] == {"text": "a"}
 
@@ -77,9 +77,9 @@ async def test_poll_events_delegates_to_repo(mock_conn):
 async def test_poll_events_with_cursor_passes_since_to_repo(mock_conn):
     svc = AgentBridgeService(mock_conn)
     mock_conn.fetch.return_value = []
-    await svc.poll_events("r1", since_id=10)
+    await svc.poll_events("r1", since_seq=10)
     sql, *params = mock_conn.fetch.call_args.args
-    assert "id > $2" in sql
+    assert "seq > $2" in sql
     assert params == ["r1", 10]
 
 
@@ -147,14 +147,18 @@ async def test_wait_for_completion_yields_events_then_response(mock_conn):
     assert any("done" in str(c.args) for c in update_calls)
 
 
-async def test_wait_for_completion_advances_cursor_with_last_event_id(mock_conn):
-    """Между итерациями courseur (since_id) обновляется до id последнего события."""
+async def test_wait_for_completion_advances_cursor_with_last_event_seq(mock_conn):
+    """Между итерациями courseur (since_seq) обновляется до seq последнего события.
+
+    Курсор именно по seq, не по id — id в GP не монотонен между сегментами
+    distributed-таблицы.
+    """
     svc = AgentBridgeService(mock_conn)
 
     mock_conn.fetch.side_effect = [
-        [{"id": 5, "request_id": "r1", "seq": 1, "event_type": "reasoning",
+        [{"id": 5, "request_id": "r1", "seq": 3, "event_type": "reasoning",
           "payload": "{}", "created_at": None}],
-        [{"id": 7, "request_id": "r1", "seq": 2, "event_type": "reasoning",
+        [{"id": 7, "request_id": "r1", "seq": 4, "event_type": "reasoning",
           "payload": "{}", "created_at": None}],
         [],
     ]
@@ -169,15 +173,15 @@ async def test_wait_for_completion_advances_cursor_with_last_event_id(mock_conn)
     ):
         pass
 
-    # poll_events вызывался 3 раза с since_id: None → 5 → 7
+    # poll_events вызывался 3 раза с курсором по seq: None → 3 → 4
     fetch_calls = mock_conn.fetch.call_args_list
     assert len(fetch_calls) == 3
-    # Первый вызов: WHERE request_id = $1 (без id > $2)
-    assert "id > $2" not in fetch_calls[0].args[0]
-    # Второй и третий: WHERE request_id = $1 AND id > $2, с правильным since_id
-    assert "id > $2" in fetch_calls[1].args[0]
-    assert fetch_calls[1].args[2] == 5
-    assert fetch_calls[2].args[2] == 7
+    # Первый вызов: WHERE request_id = $1 (без seq > $2)
+    assert "seq > $2" not in fetch_calls[0].args[0]
+    # Второй и третий: WHERE request_id = $1 AND seq > $2, с правильным seq
+    assert "seq > $2" in fetch_calls[1].args[0]
+    assert fetch_calls[1].args[2] == 3
+    assert fetch_calls[2].args[2] == 4
 
 
 async def test_wait_for_completion_yields_response_even_without_events(mock_conn):

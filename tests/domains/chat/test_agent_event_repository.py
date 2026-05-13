@@ -41,29 +41,29 @@ async def test_poll_without_since_returns_all_in_order(mock_conn):
         {"id": 2, "request_id": "r1", "seq": 2, "event_type": "reasoning",
          "payload": '{"text":"b"}', "created_at": None},
     ]
-    events = await repo.poll("r1", since_id=None)
+    events = await repo.poll("r1", since_seq=None)
     assert [e["id"] for e in events] == [1, 2]
     assert events[0]["payload"] == {"text": "a"}
     sql = mock_conn.fetch.call_args.args[0]
     assert "WHERE request_id = $1" in sql
-    assert "ORDER BY id" in sql
-    # since_id отсутствует — не должно быть "id > $2"
-    assert "id > $2" not in sql
+    assert "ORDER BY seq" in sql
+    # since_seq отсутствует — не должно быть "seq > $2"
+    assert "seq > $2" not in sql
 
 
 async def test_poll_with_since_filters_and_uses_cursor(mock_conn):
     repo = AgentEventRepository(mock_conn)
     mock_conn.fetch.return_value = []
-    await repo.poll("r1", since_id=10)
+    await repo.poll("r1", since_seq=10)
     sql, *params = mock_conn.fetch.call_args.args
-    assert "id > $2" in sql
+    assert "seq > $2" in sql
     assert params == ["r1", 10]
 
 
 async def test_poll_returns_empty_when_no_rows(mock_conn):
     repo = AgentEventRepository(mock_conn)
     mock_conn.fetch.return_value = []
-    assert await repo.poll("r1", since_id=None) == []
+    assert await repo.poll("r1", since_seq=None) == []
 
 
 async def test_payload_already_dict_is_passed_through(mock_conn):
@@ -73,5 +73,5 @@ async def test_payload_already_dict_is_passed_through(mock_conn):
         {"id": 1, "request_id": "r1", "seq": 1, "event_type": "status",
          "payload": {"stage": "search"}, "created_at": None},
     ]
-    events = await repo.poll("r1", since_id=None)
+    events = await repo.poll("r1", since_seq=None)
     assert events[0]["payload"] == {"stage": "search"}
