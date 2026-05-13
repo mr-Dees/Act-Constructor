@@ -6,12 +6,15 @@ from urllib.parse import quote
 from fastapi import APIRouter, Depends, Response
 
 from app.api.v1.deps.auth_deps import get_username
+from app.api.v1.deps.role_deps import require_domain_access
 from app.domains.chat.deps import get_file_service
 from app.domains.chat.services.file_service import FileService
 
 logger = logging.getLogger("audit_workstation.domains.chat.api.files")
 
-router = APIRouter()
+# Защита роли крепится явно на роутер (defense in depth) — см. конфигурацию
+# в conversations.py.
+router = APIRouter(dependencies=[Depends(require_domain_access("chat"))])
 
 
 @router.get(

@@ -5,6 +5,7 @@ import logging
 from fastapi import APIRouter, Depends, Query
 
 from app.api.v1.deps.auth_deps import get_username
+from app.api.v1.deps.role_deps import require_domain_access
 from app.domains.chat.deps import get_conversation_service
 from app.domains.chat.schemas.requests import (
     CreateConversationRequest,
@@ -18,7 +19,10 @@ from app.domains.chat.services.conversation_service import ConversationService
 
 logger = logging.getLogger("audit_workstation.domains.chat.api.conversations")
 
-router = APIRouter()
+# Защита роли крепится явно на роутер (defense in depth): domain_registry
+# навешивает ту же зависимость через include_router, но если кто-то
+# смонтирует роутер вне registry — auth останется.
+router = APIRouter(dependencies=[Depends(require_domain_access("chat"))])
 
 
 @router.post(

@@ -212,43 +212,43 @@ class TestFileAccessControl:
 
 
 # -------------------------------------------------------------------------
-# BUG #3: Отсутствие проверки доступа к домену на эндпоинтах
+# C7: Защита роли явно на каждом chat-роутере (defense in depth)
 # -------------------------------------------------------------------------
 
 
 class TestDomainAccessControl:
-    """BUG: Эндпоинты чата не используют require_domain_access('chat').
-    Любой авторизованный пользователь может использовать чат.
+    """Проверяет, что каждый чат-роутер содержит require_domain_access('chat')
+    как router-level dependency. domain_registry навешивает ту же зависимость
+    через include_router, но дублирование на самом роутере защищает от того,
+    что кто-то смонтирует чат-роутер вне register_domains.
     """
 
-    def test_no_domain_access_dependency_on_conversations_endpoint(self):
-        """Проверка что роутер бесед не содержит зависимости require_domain_access."""
+    @staticmethod
+    def _has_require_domain_access(router) -> bool:
+        for dep in getattr(router, "dependencies", []):
+            func = getattr(dep, "dependency", None)
+            name = getattr(func, "__name__", "")
+            if name == "require_domain_access" or "require_domain_access" in repr(func):
+                return True
+        return False
+
+    def test_conversations_router_has_domain_access_dependency(self):
         from app.domains.chat.api.conversations import router
+        assert self._has_require_domain_access(router), (
+            "Роутер бесед должен иметь require_domain_access('chat')"
+        )
 
-        # Проверяем зависимости роутов
-        for route in router.routes:
-            deps = getattr(route, "dependencies", [])
-            dep_names = [
-                getattr(d.dependency, "__name__", "")
-                for d in deps
-                if hasattr(d, "dependency")
-            ]
-            assert "require_domain_access" not in str(dep_names), (
-                "BUG: require_domain_access должен быть добавлен, но его нет"
-            )
-
-    def test_no_domain_access_dependency_on_messages_endpoint(self):
-        """Проверка что роутер сообщений не содержит зависимости require_domain_access."""
+    def test_messages_router_has_domain_access_dependency(self):
         from app.domains.chat.api.messages import router
+        assert self._has_require_domain_access(router), (
+            "Роутер сообщений должен иметь require_domain_access('chat')"
+        )
 
-        for route in router.routes:
-            deps = getattr(route, "dependencies", [])
-            dep_names = [
-                getattr(d.dependency, "__name__", "")
-                for d in deps
-                if hasattr(d, "dependency")
-            ]
-            assert "require_domain_access" not in str(dep_names)
+    def test_files_router_has_domain_access_dependency(self):
+        from app.domains.chat.api.files import router
+        assert self._has_require_domain_access(router), (
+            "Роутер файлов должен иметь require_domain_access('chat')"
+        )
 
 
 # -------------------------------------------------------------------------

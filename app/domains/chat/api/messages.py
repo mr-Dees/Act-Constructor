@@ -8,6 +8,7 @@ from fastapi import APIRouter, Depends, File, Form, Query, Request, UploadFile
 from fastapi.responses import StreamingResponse
 
 from app.api.v1.deps.auth_deps import get_username
+from app.api.v1.deps.role_deps import require_domain_access
 from app.domains.chat.deps import (
     get_conversation_service,
     get_file_service,
@@ -23,7 +24,9 @@ logger = logging.getLogger("audit_workstation.domains.chat.api.messages")
 
 _kb_warned = [False]  # one-time warning suppression
 
-router = APIRouter()
+# Защита роли крепится явно на роутер (defense in depth) — см. конфигурацию
+# в conversations.py.
+router = APIRouter(dependencies=[Depends(require_domain_access("chat"))])
 
 
 async def _translate_buttons(buttons: list[dict]) -> list[dict]:
