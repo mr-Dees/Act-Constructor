@@ -50,10 +50,14 @@ CREATE INDEX idx_{PREFIX}chat_messages_created
 -- ТАБЛИЦА ФАЙЛОВ
 -- ============================================================================
 
+-- В GP FK referential actions не enforce-ятся, поэтому REFERENCES
+-- и cascade-действия опущены — выровнено с acts/greenplum-схемой.
+-- Целостность поддерживается на уровне репозитория: conversation_repository
+-- сам удаляет файлы беседы.
 CREATE TABLE IF NOT EXISTS {SCHEMA}.{PREFIX}chat_files (
     id              VARCHAR(36) PRIMARY KEY,
-    conversation_id VARCHAR(36) NOT NULL REFERENCES {SCHEMA}.{PREFIX}chat_conversations(id),
-    message_id      VARCHAR(36) REFERENCES {SCHEMA}.{PREFIX}chat_messages(id) ON DELETE SET NULL,
+    conversation_id VARCHAR(36) NOT NULL,
+    message_id      VARCHAR(36),
     filename        VARCHAR(500) NOT NULL,
     mime_type       VARCHAR(200) NOT NULL,
     file_size       INTEGER NOT NULL CHECK (file_size > 0),
