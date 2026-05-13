@@ -536,13 +536,9 @@ class TestFilenamePathTraversal:
     эту строку и может ввести в заблуждение системы, читающие имя по сети
     (антивирусы, корпоративные прокси).
 
-    Фикс — в Sprint 2: sanitization filename в FileService.save_file.
+    Фикс: validate_file отвергает имена с разделителями пути и null-byte.
     """
 
-    @pytest.mark.xfail(
-        strict=True,
-        reason="Sprint 2: FileService.save_file должен sanitize filename",
-    )
     @pytest.mark.parametrize("filename", [
         "../../../etc/passwd",
         "..\\..\\windows\\system32\\config\\sam",

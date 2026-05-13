@@ -43,6 +43,18 @@ class FileService:
         Raises:
             ChatFileValidationError: если файл не проходит валидацию.
         """
+        # Имя файла не должно содержать разделителей пути и null-byte:
+        # хранилище — BYTEA в БД, но имя возвращается в Content-Disposition
+        # и попадает в логи/антивирусы/прокси, где может ввести в заблуждение.
+        if not filename or any(c in filename for c in ("/", "\\", "\x00")):
+            raise ChatFileValidationError(
+                "Имя файла содержит недопустимые символы.",
+            )
+        if filename in (".", ".."):
+            raise ChatFileValidationError(
+                "Имя файла содержит недопустимые символы.",
+            )
+
         if file_size <= 0:
             raise ChatFileValidationError(
                 f"Файл '{filename}' пуст или имеет некорректный размер.",
