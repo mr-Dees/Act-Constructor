@@ -4,7 +4,8 @@ DOMAIN_NAME = "chat"
 
 
 async def _on_chat_shutdown(app) -> None:
-    """Graceful shutdown polling-задач forward'а к внешнему агенту.
+    """Graceful shutdown polling-задач forward'а к внешнему агенту и
+    закрытие кэшированных LLM-клиентов (httpx connection pools).
 
     Без этого SIGTERM рубит ``agent_bridge_runner._running`` посреди
     polling-цикла, ``agent_requests`` могут зависнуть в промежуточном
@@ -12,7 +13,10 @@ async def _on_chat_shutdown(app) -> None:
     дать задачам ~5с дописать ассистент-сообщение в БД.
     """
     from app.domains.chat.services.agent_bridge_runner import shutdown_running
+    from app.domains.chat.services.llm_client import close_cached_clients
+
     await shutdown_running(timeout_sec=5.0)
+    await close_cached_clients()
 
 
 def _build_domain():

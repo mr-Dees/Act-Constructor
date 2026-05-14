@@ -1,8 +1,18 @@
 """Тесты фабрики LLM-клиента."""
+import pytest
 from pydantic import SecretStr
 
+from app.domains.chat.services import llm_client
 from app.domains.chat.services.llm_client import build_llm_client
 from app.domains.chat.settings import ChatDomainSettings
+
+
+@pytest.fixture(autouse=True)
+def _reset_clients_cache():
+    """Изоляция: кэш LLM-клиентов между тестами не должен протекать."""
+    llm_client._clients_cache.clear()
+    yield
+    llm_client._clients_cache.clear()
 
 
 def _settings(**overrides) -> ChatDomainSettings:
@@ -70,3 +80,33 @@ def test_non_gigachat_profile_returns_asyncopenai():
         client = build_llm_client(s)
         assert isinstance(client, AsyncOpenAI), \
             f"profile={profile} должен возвращать AsyncOpenAI"
+
+
+def test_clients_cached_by_settings_key():
+    """Повторный вызов с теми же настройками возвращает тот же объект
+    (один httpx.AsyncClient на (profile, base, key, headers, timeout)).
+    """
+    s = _settings(profile="openrouter")
+    c1 = build_llm_client(s)
+    c2 = build_llm_client(s)
+    assert c1 is c2
+
+    # Разные api_base → разные клиенты
+    s2 = _settings(profile="openrouter", api_base="https://other/v1")
+    c3 = build_llm_client(s2)
+    assert c3 is not c1
+
+
+@pytest.mark.asyncio
+async def test_close_cached_clients_clears_cache_and_closes_underlying():
+    """close_cached_clients() закрывает httpx-клиенты и очищает кэш."""
+    s = _settings(profile="openrouter")
+    client = build_llm_client(s)
+    assert len(llm_client._clients_cache) == 1
+
+    count = await llm_client.close_cached_clients()
+    assert count == 1
+    assert llm_client._clients_cache == {}
+
+    # Повторный вызов — нечего закрывать
+    assert await llm_client.close_cached_clients() == 0
