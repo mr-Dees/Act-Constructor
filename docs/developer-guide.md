@@ -1492,7 +1492,7 @@ GP-схема `app/domains/ua_data/migrations/greenplum/schema.sql` остаёт
 **Поток запроса (общая схема):**
 
 ```
-Browser (ChatManager + 11 модулей)
+Browser (ChatManager + 11 ядерных модулей + ChatPopupManager в constructor)
    │ HTTP POST /api/v1/chat/conversations/{id}/messages
    ▼
 FastAPI (api/messages.py)
@@ -1783,7 +1783,7 @@ app/domains/<your_domain>/integrations/
 
 ### 7.7 Фронтенд: event-driven архитектура чата
 
-Фронтенд чата — vanilla ES6 без бандлера, **11 модулей** в `static/js/shared/chat/`, связанных через шину событий `ChatEventBus`. Три режима чата (inline на landing, modal в portal, popup в constructor) используют единый набор модулей.
+Фронтенд чата — vanilla ES6 без бандлера, **11 ядерных модулей** в `static/js/shared/chat/` плюс региональный 12-й (`ChatPopupManager` в `static/js/constructor/header/chat-popup.js`), связанных через шину событий `ChatEventBus`. Три режима чата (inline на landing, modal в portal, popup в constructor) используют единый набор ядерных модулей.
 
 **Модули и зоны ответственности:**
 
@@ -1800,7 +1800,10 @@ ChatContext            — управление беседами, knowledge base
 ChatMessages           — обработка SSE-событий, рендеринг user/bot сообщений
 ChatManager            — тонкий фасад: инициализирует модули, делегирует через EventBus
 ChatModalManager       — модальное окно (portal)
-ChatPopupManager       — popup окно (constructor)
+
+# Региональный 12-й модуль (вне shared/chat/):
+ChatPopupManager       — popup окно для редактора актов
+                         (static/js/constructor/header/chat-popup.js)
 ```
 
 **Карта SSE-событий (от backend к фронту):**
@@ -1872,7 +1875,7 @@ SSE → клиент:
 
 | Таблица | Кто пишет | Назначение |
 |---|---|---|
-| `agent_requests` | AW (raннер обновляет status) | Очередь запросов к агенту. Стадии status — см. ниже |
+| `agent_requests` | AW (раннер обновляет status) | Очередь запросов к агенту. Стадии status — см. ниже |
 | `agent_response_events` | агент | Append-only лента событий: `reasoning`, `status`, `error`. **Курсор polling — по `seq`, не `id`** (в GP id не монотонен между сегментами) |
 | `agent_responses` | агент | Однократный INSERT финального ответа (UNIQUE по `request_id` — stop-сигнал) |
 
@@ -1901,7 +1904,7 @@ SSE → клиент:
 - `app/domains/chat/services/button_translator.py` — общая трансляция action_id (имя ChatTool) → клиентский action. Используется в орк-е, раннере, resume-эндпоинте.
 - `app/domains/chat/services/block_emitter.py` — общий SSE-эмиттер блоков ответа агента (правила: text/code/reasoning → триплет; file/image/plan/error → block_complete; buttons → sse_buttons; client_action → sse_client_action).
 - `app/domains/chat/integrations/forward_handler.py` — фабрика `build_forward_handler(...)`, sentinel-pattern
-- `app/domains/chat/repositories/agent_*_repository.py` — три CRUD-репозитория. `AgentRequestRepository.find_pending(older_than_sec)` для reconcile.
+- `app/domains/chat/repositories/agent_*_repository.py` — три CRUD-репозитория. `AgentRequestRepository.claim_pending(worker_token, older_than_sec)` для reconcile (атомарный UPDATE … RETURNING — каждый воркер получает непересекающееся подмножество, double-claim физически невозможен).
 - `app/domains/chat/services/{llm_client,retry,tool_call_accumulator}.py` — провайдер-агностичная LLM-инфра (OpenRouter/SGLang quirks: `index=None` fallback, `reasoning_details` для MiniMax M2)
 
 **Гейты таймаутов** в `wait_for_completion`: три независимых, срабатывание любого → `status='timeout'` + `AgentBridgeTimeout`.

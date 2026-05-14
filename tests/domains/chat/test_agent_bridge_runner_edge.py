@@ -1,6 +1,7 @@
 """Edge-case тесты фонового раннера AgentBridgeRunner.
 
-Покрывает сценарии из аудита `docs/chat-domain-audit-2026-05-13.md §4.5`:
+Покрывает три сценария, которые happy-path в `test_agent_bridge_runner.py`
+не трогает:
 
 1. Timeout по ``max_total_duration_sec`` — bridge сам ставит статус
    ``timeout`` перед raise; раннер должен сохранить error-блок и не

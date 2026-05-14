@@ -616,7 +616,7 @@ class Orchestrator:
         """Транслирует серверные action_id в клиентские действия.
 
         Делегирует общему хелперу ``button_translator.translate_buttons``,
-        чтобы оркестратор, raннер и resume-эндпоинт использовали один и
+        чтобы оркестратор, раннер и resume-эндпоинт использовали один и
         тот же код.
         """
         from app.domains.chat.services.button_translator import translate_buttons
