@@ -104,3 +104,26 @@ CREATE INDEX idx_{PREFIX}admin_audit_log_target
 
 CREATE INDEX idx_{PREFIX}admin_audit_log_created
     ON {SCHEMA}.{PREFIX}admin_audit_log(created_at DESC);
+
+-- ============================================================================
+-- ТАБЛИЦА SINGLETON-БЛОКИРОВКИ ИНСТАНСА ПРИЛОЖЕНИЯ
+-- Гарантирует, что в закрытой сети без Redis/etcd работает ровно один
+-- uvicorn-воркер с приложением. См. app/main.py lifespan startup.
+-- GP-нюанс: distribution key должен входить в PRIMARY KEY, что выполняется
+-- автоматически (service_name — единственный PK).
+-- ============================================================================
+
+CREATE TABLE IF NOT EXISTS {SCHEMA}.{PREFIX}app_singleton_lock (
+    service_name VARCHAR(64) PRIMARY KEY,
+    pid INTEGER NOT NULL,
+    started_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    host VARCHAR(255) NOT NULL DEFAULT ''
+)
+WITH (appendonly=false)
+DISTRIBUTED BY (service_name);
+
+COMMENT ON TABLE {SCHEMA}.{PREFIX}app_singleton_lock IS 'Блокировка singleton-инстанса приложения (защита от запуска второго воркера)';
+COMMENT ON COLUMN {SCHEMA}.{PREFIX}app_singleton_lock.service_name IS 'Имя сервиса (например, act_constructor)';
+COMMENT ON COLUMN {SCHEMA}.{PREFIX}app_singleton_lock.pid IS 'PID процесса-владельца блокировки';
+COMMENT ON COLUMN {SCHEMA}.{PREFIX}app_singleton_lock.started_at IS 'Время захвата блокировки (UTC)';
+COMMENT ON COLUMN {SCHEMA}.{PREFIX}app_singleton_lock.host IS 'Имя хоста процесса-владельца';
