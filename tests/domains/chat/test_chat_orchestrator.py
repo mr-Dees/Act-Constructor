@@ -531,6 +531,57 @@ class TestOrchestratorRun:
 
         assert result["response"] == "Ответ ассистента"
 
+    @patch("app.domains.chat.services.orchestrator.Orchestrator._get_openai_client")
+    async def test_run_handles_malformed_tool_arguments(
+        self, mock_client_factory, orchestrator,
+    ):
+        """Если LLM вернул битый JSON в tool_call.function.arguments,
+        orchestrator подставляет пустой dict и продолжает: tool вызывается,
+        round не прерывается. Без этого fallback'а одна кривая модель
+        ломала бы весь tool-loop.
+
+        Аналогичный fallback на стрим-путях (orchestrator.py:1010, 1202) —
+        идентичен по семантике; проверять каждое место не имеет смысла,
+        весь риск в строке ``except json.JSONDecodeError: arguments = {}``.
+        """
+        captured_args: dict[str, object] = {}
+
+        async def handler(**kwargs):
+            captured_args.update(kwargs)
+            return "ok"
+
+        test_tool = ChatTool(
+            name="probe",
+            domain="test",
+            description="Проба malformed args",
+            handler=handler,
+        )
+        register_tools([test_tool])
+
+        mock_client = AsyncMock()
+        tool_call = _make_tool_call(
+            name="probe",
+            arguments='{"query": "КМ-01"',  # незакрытая скобка → JSONDecodeError
+        )
+        response_with_tc = _make_mock_response(
+            content=None, tool_calls=[tool_call],
+        )
+        response_final = _make_mock_response(content="Готово")
+        mock_client.chat.completions.create = AsyncMock(
+            side_effect=[response_with_tc, response_final],
+        )
+        mock_client_factory.return_value = mock_client
+        orchestrator._save_assistant_message = AsyncMock()
+
+        result = await orchestrator.run(
+            conversation_id="conv-1",
+            user_message="Найди что-нибудь",
+        )
+
+        # Тool всё-таки выполнен, но с пустыми аргументами.
+        assert captured_args == {}
+        assert result["response"] == "Готово"
+
 
 # -------------------------------------------------------------------------
 # _execute_tool_call
