@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import json
+from typing import Any
 from unittest.mock import AsyncMock, patch
 
 import pytest
@@ -11,6 +12,7 @@ from app.domains.chat.services.gigachat_adapter import (
     GigaChatAdapterClient,
     _tools_to_functions,
     _translate_messages,
+    _translate_response,
 )
 
 
@@ -21,10 +23,22 @@ def _make_completion(
     finish_reason: str = "stop",
     usage: dict | None = None,
 ) -> ChatCompletion:
-    """Сборка openai.types.chat.ChatCompletion для тестов."""
+    """Сборка openai.types.chat.ChatCompletion для тестов.
+
+    GigaChat возвращает `function_call.arguments` как dict, что нарушает
+    OpenAI-схему (там str). Поэтому сначала валидируем payload со
+    строковым placeholder'ом, а затем подменяем поле через прямую мутацию
+    pydantic-модели — это эмулирует реальный ответ proxy.
+    """
     msg: dict = {"role": "assistant", "content": content}
+    fc_real_args: Any = None
     if function_call is not None:
-        msg["function_call"] = function_call
+        fc_real_args = function_call.get("arguments")
+        msg["function_call"] = {
+            "name": function_call.get("name", ""),
+            # placeholder-строка только для валидации схемы
+            "arguments": fc_real_args if isinstance(fc_real_args, str) else "",
+        }
     payload = {
         "id": "cmpl-test",
         "object": "chat.completion",
@@ -38,7 +52,11 @@ def _make_completion(
     }
     if usage is not None:
         payload["usage"] = usage
-    return ChatCompletion.model_validate(payload)
+    completion = ChatCompletion.model_validate(payload)
+    # Подменяем arguments на исходный (возможно dict), эмулируя GigaChat.
+    if function_call is not None and not isinstance(fc_real_args, str):
+        completion.choices[0].message.function_call.arguments = fc_real_args
+    return completion
 
 
 def test_adapter_exposes_chat_completions_create():
@@ -221,3 +239,63 @@ def test_translate_messages_assistant_pydantic_object_converts():
     )
     out = _translate_messages([msg])
     assert out[0]["function_call"]["name"] == "open_url"
+
+
+def test_translate_response_passthrough_when_no_function_call():
+    """Обычный текстовый ответ возвращается без изменений."""
+    resp = _make_completion(content="Привет!", finish_reason="stop")
+    out = _translate_response(resp)
+    assert out.choices[0].message.content == "Привет!"
+    assert out.choices[0].finish_reason == "stop"
+    assert out.choices[0].message.tool_calls is None
+
+
+def test_translate_response_dict_args_synthesizes_tool_calls():
+    """function_call с dict arguments → tool_calls с JSON-строкой."""
+    resp = _make_completion(
+        content="",
+        function_call={
+            "name": "get_weather",
+            "arguments": {"city": "Москва"},  # dict, не строка
+        },
+        finish_reason="function_call",
+    )
+    out = _translate_response(resp)
+    choice = out.choices[0]
+    assert choice.finish_reason == "tool_calls"
+    tcs = choice.message.tool_calls
+    assert tcs is not None and len(tcs) == 1
+    assert tcs[0].type == "function"
+    assert tcs[0].id.startswith("gc_")
+    assert tcs[0].function.name == "get_weather"
+    # arguments должны быть JSON-строкой, а не dict
+    assert isinstance(tcs[0].function.arguments, str)
+    assert json.loads(tcs[0].function.arguments) == {"city": "Москва"}
+    # function_call зануляется, чтобы оркестратор смотрел только в tool_calls
+    assert choice.message.function_call is None
+
+
+def test_translate_response_string_args_preserved():
+    """function_call с уже-строковыми arguments не теряет формат."""
+    resp = _make_completion(
+        function_call={
+            "name": "open_url",
+            "arguments": '{"url": "https://x.com"}',  # строка
+        },
+        finish_reason="function_call",
+    )
+    out = _translate_response(resp)
+    args = out.choices[0].message.tool_calls[0].function.arguments
+    assert isinstance(args, str)
+    assert json.loads(args) == {"url": "https://x.com"}
+
+
+def test_translate_response_non_ascii_args_keep_unicode():
+    """Русские символы в arguments не должны эскейпиться в \\u…."""
+    resp = _make_completion(
+        function_call={"name": "search", "arguments": {"q": "погода"}},
+        finish_reason="function_call",
+    )
+    out = _translate_response(resp)
+    args = out.choices[0].message.tool_calls[0].function.arguments
+    assert "погода" in args  # ensure_ascii=False

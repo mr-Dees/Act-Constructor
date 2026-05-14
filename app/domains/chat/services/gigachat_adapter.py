@@ -12,10 +12,17 @@ GigaChat-proxy частично OpenAI-совместим:
 """
 from __future__ import annotations
 
+import json
 import logging
+import uuid
 from typing import Any
 
 from openai import AsyncOpenAI
+from openai.types.chat import ChatCompletion
+from openai.types.chat.chat_completion_message_tool_call import (
+    ChatCompletionMessageToolCall,
+    Function,
+)
 
 logger = logging.getLogger(
     "audit_workstation.domains.chat.services.gigachat_adapter",
@@ -175,3 +182,40 @@ def _tools_to_functions(tools: list[dict]) -> list[dict]:
             flat["parameters"] = fn["parameters"]
         out.append(flat)
     return out
+
+
+def _translate_response(resp: ChatCompletion) -> ChatCompletion:
+    """Синтезирует OpenAI-style tool_calls[] из native function_call.
+
+    Если в ответе нет function_call — возвращает объект без изменений.
+    Иначе мутирует resp.choices[0].message: добавляет tool_calls[], зануляет
+    function_call, переводит finish_reason в "tool_calls".
+
+    Аргументы конвертируются в JSON-строку (GigaChat отдаёт dict — OpenAI
+    SDK ожидает строку).
+    """
+    if not resp.choices:
+        return resp
+    choice = resp.choices[0]
+    fc = getattr(choice.message, "function_call", None)
+    if fc is None:
+        return resp
+
+    args = fc.arguments
+    if not isinstance(args, str):
+        args = json.dumps(args, ensure_ascii=False)
+
+    synthetic_id = f"gc_{uuid.uuid4().hex[:12]}"
+    tool_call = ChatCompletionMessageToolCall(
+        id=synthetic_id,
+        type="function",
+        function=Function(name=fc.name, arguments=args),
+    )
+
+    # pydantic v2 модели в openai SDK 1.x mutable — патчим in-place.
+    # Если когда-нибудь станут frozen — упадём с TypeError, тогда fallback на
+    # ChatCompletion.model_construct (см. дизайн-спеку, §4.2 Вариант B).
+    choice.message.tool_calls = [tool_call]
+    choice.message.function_call = None
+    choice.finish_reason = "tool_calls"
+    return resp
