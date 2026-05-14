@@ -299,3 +299,131 @@ def test_translate_response_non_ascii_args_keep_unicode():
     out = _translate_response(resp)
     args = out.choices[0].message.tool_calls[0].function.arguments
     assert "погода" in args  # ensure_ascii=False
+
+
+@pytest.mark.asyncio
+async def test_create_translates_request_and_response():
+    """create() переводит tools→functions, function_call→tool_calls."""
+    adapter = GigaChatAdapterClient(
+        base_url="http://liveaccess/v1/gc",
+        api_key="t",
+        default_headers={},
+        timeout=60.0,
+    )
+    # Мокаем underlying AsyncOpenAI: проверяем что в неё ушёл native формат
+    fake_resp = _make_completion(
+        function_call={"name": "get_weather", "arguments": {"city": "Москва"}},
+        finish_reason="function_call",
+    )
+    with patch.object(
+        adapter._underlying.chat.completions, "create",
+        new=AsyncMock(return_value=fake_resp),
+    ) as mock_create:
+        out = await adapter.chat.completions.create(
+            model="GigaChat-3-Ultra",
+            messages=[{"role": "user", "content": "Погода?"}],
+            tools=[{
+                "type": "function",
+                "function": {
+                    "name": "get_weather",
+                    "description": "",
+                    "parameters": {"type": "object"},
+                },
+            }],
+            temperature=0.1,
+        )
+    # Что ушло на proxy
+    call_kwargs = mock_create.await_args.kwargs
+    assert call_kwargs["model"] == "GigaChat-3-Ultra"
+    assert "tools" not in call_kwargs
+    assert "stream" not in call_kwargs
+    assert call_kwargs["extra_body"]["functions"] == [{
+        "name": "get_weather",
+        "description": "",
+        "parameters": {"type": "object"},
+    }]
+    # Что вернулось в оркестратор
+    assert out.choices[0].finish_reason == "tool_calls"
+    assert out.choices[0].message.tool_calls[0].function.name == "get_weather"
+
+
+@pytest.mark.asyncio
+async def test_create_strips_stream_true_and_logs_warning(caplog):
+    """stream=True игнорируется, лог-warning присутствует."""
+    adapter = GigaChatAdapterClient(
+        base_url="http://x", api_key="t", default_headers={}, timeout=60.0,
+    )
+    fake_resp = _make_completion(content="ok")
+    with patch.object(
+        adapter._underlying.chat.completions, "create",
+        new=AsyncMock(return_value=fake_resp),
+    ) as mock_create, caplog.at_level("WARNING"):
+        await adapter.chat.completions.create(
+            model="m",
+            messages=[{"role": "user", "content": "x"}],
+            stream=True,
+        )
+    call_kwargs = mock_create.await_args.kwargs
+    assert "stream" not in call_kwargs
+    assert any("streaming" in rec.message.lower() for rec in caplog.records)
+
+
+@pytest.mark.asyncio
+async def test_create_drops_tool_choice():
+    """tool_choice не пробрасывается в native запрос."""
+    adapter = GigaChatAdapterClient(
+        base_url="http://x", api_key="t", default_headers={}, timeout=60.0,
+    )
+    fake_resp = _make_completion(content="ok")
+    with patch.object(
+        adapter._underlying.chat.completions, "create",
+        new=AsyncMock(return_value=fake_resp),
+    ) as mock_create:
+        await adapter.chat.completions.create(
+            model="m",
+            messages=[{"role": "user", "content": "x"}],
+            tool_choice="auto",
+        )
+    assert "tool_choice" not in mock_create.await_args.kwargs
+
+
+@pytest.mark.asyncio
+async def test_create_passes_temperature_and_model():
+    adapter = GigaChatAdapterClient(
+        base_url="http://x", api_key="t", default_headers={}, timeout=60.0,
+    )
+    fake_resp = _make_completion(content="ok")
+    with patch.object(
+        adapter._underlying.chat.completions, "create",
+        new=AsyncMock(return_value=fake_resp),
+    ) as mock_create:
+        await adapter.chat.completions.create(
+            model="GigaChat-3-Ultra",
+            messages=[{"role": "user", "content": "x"}],
+            temperature=0.42,
+        )
+    kw = mock_create.await_args.kwargs
+    assert kw["model"] == "GigaChat-3-Ultra"
+    assert kw["temperature"] == 0.42
+
+
+@pytest.mark.asyncio
+async def test_create_no_tools_no_extra_body():
+    """Без tools — extra_body не должен появиться (или пустой)."""
+    adapter = GigaChatAdapterClient(
+        base_url="http://x", api_key="t", default_headers={}, timeout=60.0,
+    )
+    fake_resp = _make_completion(content="ok")
+    with patch.object(
+        adapter._underlying.chat.completions, "create",
+        new=AsyncMock(return_value=fake_resp),
+    ) as mock_create:
+        await adapter.chat.completions.create(
+            model="m",
+            messages=[{"role": "user", "content": "x"}],
+        )
+    kw = mock_create.await_args.kwargs
+    # extra_body либо отсутствует, либо NOT_GIVEN sentinel из openai
+    from openai import NOT_GIVEN
+    assert kw.get("extra_body", NOT_GIVEN) in (NOT_GIVEN, None, {}) or \
+        "functions" not in (kw.get("extra_body") or {})

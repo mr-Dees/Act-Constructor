@@ -36,8 +36,32 @@ class _Completions:
         self._underlying = underlying
 
     async def create(self, **kwargs: Any):
-        # На этой задаче — простой проброс. Перевод появится в Task 3+.
-        return await self._underlying.chat.completions.create(**kwargs)
+        """Переводит OpenAI-style kwargs в native GigaChat и обратно.
+
+        Игнорирует stream=True (GigaChat-proxy не поддерживает SSE).
+        Дропает tool_choice (нет полной поддержки в proxy).
+        """
+        from openai import NOT_GIVEN
+
+        if kwargs.pop("stream", False):
+            logger.warning(
+                "GigaChat-proxy не поддерживает streaming; "
+                "выполняется non-streaming запрос.",
+            )
+        kwargs.pop("tool_choice", None)
+
+        tools = kwargs.pop("tools", None)
+        if tools and tools is not NOT_GIVEN:
+            functions = _tools_to_functions(tools)
+            extra = dict(kwargs.pop("extra_body", None) or {})
+            extra["functions"] = functions
+            kwargs["extra_body"] = extra
+
+        messages = kwargs.pop("messages", [])
+        kwargs["messages"] = _translate_messages(messages)
+
+        resp = await self._underlying.chat.completions.create(**kwargs)
+        return _translate_response(resp)
 
 
 class _Chat:
