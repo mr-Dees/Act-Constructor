@@ -584,6 +584,98 @@ class TestUploadFileInMessage:
         assert resp.status_code == 422, resp.text
         assert "не поддерживается" in resp.json()["detail"]
 
+    def test_send_message_rejects_excess_files(self):
+        """Превышение ``max_files_per_message`` → 422 до save_file.
+
+        Guard в messages.py:99 должен среагировать ДО чтения файлов и ДО
+        save_user_message: иначе можно протащить >N файлов и переполнить
+        storage.
+        """
+        settings = ChatDomainSettings(
+            api_base="",
+            api_key="",
+            model="gpt-4o",
+            max_files_per_message=2,
+        )
+        conv = _make_conv_service(settings)
+        conv.get.return_value = {
+            "id": "conv-1",
+            "user_id": USERNAME,
+            "title": None,
+            "domain_name": None,
+            "context": None,
+        }
+        msg = _make_msg_service(settings)
+        file_svc = _make_file_service(settings)
+
+        app = _build_app(
+            conv_service=conv,
+            msg_service=msg,
+            file_service=file_svc,
+        )
+
+        with TestClient(app) as client:
+            resp = client.post(
+                "/api/v1/chat/conversations/conv-1/messages",
+                data={"message": "три файла"},
+                files=[
+                    ("files", ("a.pdf", b"%PDF-1", "application/pdf")),
+                    ("files", ("b.pdf", b"%PDF-1", "application/pdf")),
+                    ("files", ("c.pdf", b"%PDF-1", "application/pdf")),
+                ],
+            )
+
+        assert resp.status_code == 422, resp.text
+        assert "Слишком много файлов" in resp.json()["detail"]
+        # save_file и save_user_message НЕ должны быть вызваны
+        file_svc.save_file.assert_not_awaited()
+        msg.save_user_message.assert_not_awaited()
+
+    def test_send_message_rejects_excess_total_size(self):
+        """Превышение суммарного размера файлов → 422 до save_file.
+
+        Guard в messages.py:113 должен среагировать после чтения всех
+        файлов, но ДО save_file: иначе можно растянуть storage до OOM.
+        """
+        settings = ChatDomainSettings(
+            api_base="",
+            api_key="",
+            model="gpt-4o",
+            max_files_per_message=5,
+            max_total_file_size=100,  # 100 байт — крошечный лимит
+        )
+        conv = _make_conv_service(settings)
+        conv.get.return_value = {
+            "id": "conv-1",
+            "user_id": USERNAME,
+            "title": None,
+            "domain_name": None,
+            "context": None,
+        }
+        msg = _make_msg_service(settings)
+        file_svc = _make_file_service(settings)
+
+        app = _build_app(
+            conv_service=conv,
+            msg_service=msg,
+            file_service=file_svc,
+        )
+
+        big = b"x" * 200  # одного файла достаточно для превышения 100Б
+        with TestClient(app) as client:
+            resp = client.post(
+                "/api/v1/chat/conversations/conv-1/messages",
+                data={"message": "тяжёлый"},
+                files=[
+                    ("files", ("big.pdf", big, "application/pdf")),
+                ],
+            )
+
+        assert resp.status_code == 422, resp.text
+        assert "Суммарный размер" in resp.json()["detail"]
+        file_svc.save_file.assert_not_awaited()
+        msg.save_user_message.assert_not_awaited()
+
 
 # -------------------------------------------------------------------------
 # GET /api/v1/chat/files/{file_id} — скачивание файла
