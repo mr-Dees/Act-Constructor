@@ -1489,6 +1489,27 @@ GP-схема `app/domains/ua_data/migrations/greenplum/schema.sql` остаёт
 
 ### 7.1 Архитектура: chat domain
 
+**Поток запроса (общая схема):**
+
+```
+Browser (ChatManager + 11 модулей)
+   │ HTTP POST /api/v1/chat/conversations/{id}/messages
+   ▼
+FastAPI (api/messages.py)
+   │  → save_user_message (с транзакцией)
+   │  → SSE generator (per-user семафор)
+   ▼
+ChatOrchestrator (services/orchestrator.py)
+   ├─→ OpenAI-compatible LLM (chat completions, streaming)
+   │    └─ tool_call → handler в domain.integrations.chat_tools
+   │
+   └─→ forward_to_knowledge_agent → AgentBridge
+        └─ INSERT agent_requests
+           AgentBridgeRunner (фоновая task):
+             ├─ polling agent_response_events (poll_interval_sec)
+             └─ при response → save_assistant_message
+```
+
 AI-ассистент реализован как доменный плагин `app/domains/chat/` с SSE-стримингом и agent loop. Локальная LLM (профиль `sglang` для прода / `openrouter` для dev — см. `app/domains/chat/services/llm_client.py`) выступает оркестратором: для **информационных запросов** (про данные/контент) решает форвардить во внешнего ИИ-агента через ChatTool `chat.forward_to_knowledge_agent` (см. [7.8](#78-внешний-ии-агент-через-таблицы-бд)); для **запросов на действие в интерфейсе** — вызывает локальный action-tool, возвращающий `ClientActionBlock` (см. [7.9](#79-action-handlers-и-clientactionblock)).
 
 ```
@@ -1750,6 +1771,15 @@ app/domains/<your_domain>/integrations/
 Каждый `export_*.py` содержит async-функцию, которая используется как `handler` в `ChatTool`. Функция получает соединение из пула, выполняет SQL через `act_queries.py` и форматирует результат через `ai_readable_formatter.py`.
 
 > **Важно:** для **информационных** запросов (про данные/контент актов и БЗ) локальные tools регистрировать НЕ нужно — это работа внешнего ИИ-агента (см. [7.8](#78-внешний-ии-агент-через-таблицы-бд)). Локальные tools оставлять только для **действий в интерфейсе** (открыть/создать/уведомить — см. [7.9](#79-action-handlers-и-clientactionblock)).
+
+**Чек-лист «новый action-tool»:**
+
+1. Константа имени в `app/core/chat/names.py` (`ACTION_*` или `TOOL_*`).
+2. Handler в `app/domains/<domain>/integrations/chat_tools.py` (для tool) или в фабрике `client_action` (для action).
+3. Регистрация в `app/core/chat/tools.py` registry.
+4. **Фронтенд:** добавить имя в whitelist `static/js/shared/chat/chat-client-actions.js` (если это `client_action`), плюс реализовать handler в `ChatClientActionsRegistry`.
+5. Если есть UI-кнопка из ассистента — см. **§7.8a button_translator** для маппинга текста кнопки → action.
+6. Тест: `tests/domains/chat/` — проверить, что action/tool регистрируется и выполняется без сырых строк.
 
 ### 7.7 Фронтенд: event-driven архитектура чата
 
@@ -2484,11 +2514,21 @@ python -m app.main
 uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload
 ```
 
-Для production (без перезагрузки, несколько воркеров):
+Для production (без перезагрузки, **только один воркер**):
 
 ```bash
-uvicorn app.main:app --host 127.0.0.1 --port 8000 --workers 4
+uvicorn app.main:app --host 127.0.0.1 --port 8000 --workers 1
 ```
+
+**Важно:** приложение разработано под single-worker деплой. На старте
+lifespan захватывает singleton-блокировку в таблице
+`{PREFIX}app_singleton_lock` (см. `app/core/singleton_lock.py`):
+второй воркер этого же сервиса упадёт с понятным сообщением. Это
+сознательное ограничение — в закрытой сети нет Redis/etcd, а
+process-level состояние (`agent_bridge_runner._running`, in-process
+SSE-семафор `_active_streams_per_user`) безопасно только при одном
+процессе. Stale-lock (после kill -9) автоматически перезахватывается
+через TTL=60с.
 
 ### 9.2 За JupyterHub proxy
 

@@ -69,3 +69,19 @@
 - Сменить `.env` на профиль `sglang` (внутренний адрес), перезапустить.
 - Повторить сценарии 1–4.
 - Ожидаемо: всё работает без правки кода.
+
+### 9. Сценарий: `CHAT__SMALLTALK_MODE=forward`
+
+Установить `CHAT__SMALLTALK_MODE=forward` в `.env`. Перезапустить uvicorn. Любое сообщение в чат должно идти через `forward_to_knowledge_agent` без обращения к LLM. Проверить:
+
+- Запрос с простым «привет» → запись в `agent_requests`, видна в QA-инструкции `docs/external-agent-imitation.sql`.
+- LLM-моки/`chat completions` НЕ вызываются.
+- SSE-стрим закрывается корректно после ответа агента.
+
+### 10. Сценарий: комбинация таймаутов
+
+Параметры: `INITIAL_RESPONSE_TIMEOUT_SEC`, `MAX_TOTAL_DURATION_SEC`, `max_tool_rounds`. Тест-кейсы:
+
+- `INITIAL_RESPONSE_TIMEOUT_SEC=5`, агент не отвечает → request в `error/timeout`, SSE отдаёт нейтральное сообщение.
+- `MAX_TOTAL_DURATION_SEC=10`, агент стримит долго → принудительный stop, ассистент-message сохраняется с накопленным текстом.
+- `max_tool_rounds=3`, LLM зацикливается в tool_call → ровно 3 раунда, потом fallback.
