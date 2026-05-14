@@ -24,16 +24,21 @@ COMMENT ON COLUMN {SCHEMA}.{PREFIX}roles.name IS 'Уникальное имя р
 COMMENT ON COLUMN {SCHEMA}.{PREFIX}roles.domain_name IS 'Домен, к которому относится роль (NULL = глобальная)';
 COMMENT ON COLUMN {SCHEMA}.{PREFIX}roles.description IS 'Описание роли';
 
--- Заполняем ролями по умолчанию (только если таблица пустая)
+-- Заполняем ролями по умолчанию (идемпотентно по name: при добавлении
+-- новой сидовой роли в обновлении приложения — она прорастёт без
+-- пересоздания таблицы; существующие имена не дублируются).
 INSERT INTO {SCHEMA}.{PREFIX}roles (name, domain_name, description)
-SELECT name, domain_name, description
+SELECT s.name, s.domain_name, s.description
 FROM (
     SELECT 'Админ'::varchar AS name, NULL::varchar AS domain_name, 'Полный доступ ко всем доменам и функциям'::text AS description
     UNION ALL SELECT 'Цифровой акт', 'acts', 'Доступ к домену актов'
     UNION ALL SELECT 'ЦК финансовый результат', 'ck_fin_res', 'Доступ к ЦК Фин.Рез.'
     UNION ALL SELECT 'ЦК клиентский опыт', 'ck_client_exp', 'Доступ к ЦК Клиентский опыт'
-) AS seed
-WHERE NOT EXISTS (SELECT 1 FROM {SCHEMA}.{PREFIX}roles);
+    UNION ALL SELECT 'Чат-ассистент', 'chat', 'Доступ к AI-чату'
+) AS s
+WHERE NOT EXISTS (
+    SELECT 1 FROM {SCHEMA}.{PREFIX}roles r WHERE r.name = s.name
+);
 
 -- ============================================================================
 -- ТАБЛИЦА СВЯЗЕЙ ПОЛЬЗОВАТЕЛЬ — РОЛЬ
