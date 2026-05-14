@@ -49,6 +49,7 @@
   - [6.8 Добавление UA-справочника](#68-добавление-ua-справочника)
 - [7. AI-ассистент](#7-ai-ассистент)
   - [7.1 Архитектура: chat endpoint -> LLM -> tool_calls](#71-архитектура-chat-endpoint---llm---tool_calls)
+  - [7.1a Профили LLM-провайдера (sglang/openrouter/openai/gigachat)](#71a-профили-llm-провайдера)
   - [7.2 ChatTool и ChatToolParam](#72-chattool-и-chattoolparam)
   - [7.3 Реестр chat tools](#73-реестр-chat-tools)
   - [7.4 Agent loop](#74-agent-loop)
@@ -1492,7 +1493,7 @@ GP-схема `app/domains/ua_data/migrations/greenplum/schema.sql` остаёт
 **Поток запроса (общая схема):**
 
 ```
-Browser (ChatManager + 11 ядерных модулей + ChatPopupManager в constructor)
+Browser (11 ядерных модулей в static/js/shared/chat/ + ChatPopupManager в constructor)
    │ HTTP POST /api/v1/chat/conversations/{id}/messages
    ▼
 FastAPI (api/messages.py)
@@ -1571,6 +1572,44 @@ SSE-события клиенту (message_start, block_delta, tool_call, tool_r
 **Доменные исключения** (`app/domains/chat/exceptions.py`):
 `ConversationNotFoundError`, `ChatFileNotFoundError`, `ChatLimitError`, `ChatFileValidationError`.
 
+#### 7.1a Профили LLM-провайдера
+
+`CHAT__PROFILE` (Literal в `app/domains/chat/settings.py`) переключает поведение LLM-клиента. Все профили внешне совместимы с OpenAI SDK, но имеют отличия в формате tool-calling и поддержке streaming.
+
+| Профиль | Транспорт | Streaming | Tool-calling | Где |
+|---|---|---|---|---|
+| `sglang` | OpenAI-совместимый REST | Да (SSE) | OpenAI `tools[]` + `tool_calls[]` | Прод (локальный inference) |
+| `openrouter` | OpenAI-совместимый REST | Да (SSE) | OpenAI `tools[]` + `tool_calls[]` | Dev (внешний marketplace) |
+| `openai` | Native OpenAI API | Да (SSE) | OpenAI `tools[]` + `tool_calls[]` | Опционально |
+| `gigachat` | Корпоративный proxy `http://liveaccess/v1/gc` | **Нет** (422 EventException) | Native `functions[]` + singular `function_call` с dict-args | Корпоративный inference |
+
+**Фабрика клиента** — `app/domains/chat/services/llm_client.py::build_llm_client(profile)`. Для `gigachat` возвращает `GigaChatAdapterClient` (duck-typed обёртка над `AsyncOpenAI`), все остальные — обычный `AsyncOpenAI`.
+
+**GigaChat-нюансы (`app/domains/chat/services/gigachat_adapter.py`):**
+
+- **Streaming не поддерживается** (proxy возвращает 422 EventException). Оркестратор форсирует non-streaming для этого профиля (`orchestrator.py:899`). Если в `.env` `STREAMING_ENABLED=true` — игнорируется для gigachat, в логи уходит одно warning на процесс.
+- **Tools → functions**: адаптер плющит OpenAI `[{type:"function", function:{name,...}}]` в native `[{name,...}]` и кладёт в `extra_body.functions`.
+- **Response: function_call → tool_calls**: GigaChat возвращает singular `function_call` (с args как dict). Адаптер синтезирует tool_call с id `gc_<hex>` и `json.dumps(args, ensure_ascii=False, default=str)`. `default=str` защищает от datetime/Decimal в args — согласовано с orchestrator `json.dumps` в логировании.
+- **1 function_call за раунд** — ограничение GigaChat. Оркестратор и так работает по одному tool за итерацию, но если LLM каким-то образом вернёт несколько `tool_calls` в истории — адаптер берёт первый и предупреждает в логах.
+- **Roundtrip multi-round**: ассистент-сообщение с синтетическим `tool_calls` возвращается в следующий раунд через `_translate_messages` — собирается обратно в native `function_call`.
+
+**Отладка GigaChat:**
+
+| Симптом | Причина | Решение |
+|---|---|---|
+| `422 EventException` в логах | LLM отправили `stream=True` или есть запрещённое поле | Адаптер уже глотает stream; проверить `tool_choice`/прочие незнакомые kwargs |
+| Tool вызвался с `arguments={}` | Сломанный JSON / dict с non-serializable | Логи содержат raw args; `default=str` гарантирует, что fall-через сработает |
+| Пустой ответ в SSE | Профиль `gigachat`, но фронт ждёт стрим | Это by design: SSE-генератор выдаст один блок `block_complete` с финальным текстом |
+| `unknown_function` в логах адаптера | tool_call_id в истории не имеет mapping (мост-сценарий) | Проверить, что history содержит assistant-сообщение с `tool_calls[]` перед tool-message |
+
+**Как добавить новый профиль:**
+
+1. Расширить Literal в `app/domains/chat/settings.py::profile`.
+2. Добавить ветку в `build_llm_client()` (`llm_client.py`). Если API не OpenAI-совместим — написать адаптер по образцу `gigachat_adapter.py`.
+3. Если профиль не поддерживает streaming — добавить guard в `orchestrator.py` `streaming_enabled and profile != "<new>"`. **Альтернатива** (TODO в backlog): вынести `is_streaming_supported: bool` в `ChatDomainSettings`.
+4. Документировать в `.env.example` (блок с примером URL и quirks) и в этой таблице.
+5. Покрыть тестами: трансляция request/response, retry на 5xx, edge cases (битый JSON args, non-serializable, multi-round roundtrip).
+
 ### 7.2 ChatTool и ChatToolParam
 
 Инструменты определяются через dataclass-ы в `app/core/chat/tools.py`:
@@ -1622,8 +1661,8 @@ def get_all_tools() -> list[ChatTool]:
 def get_tools_by_domain(domain: str) -> list[ChatTool]:
     return [t for t in _tools.values() if t.domain == domain]
 
-def get_openai_tools(domains: list[str] | None = None) -> list[dict]:
-    """Все инструменты в OpenAI function-calling формате (с фильтром по доменам)."""
+def get_openai_tools() -> list[dict]:
+    """Все инструменты в OpenAI function-calling формате."""
 
 def reset() -> None:
     """Для тестов: очистить реестр."""
@@ -2699,7 +2738,7 @@ ACTS__AUDIT_LOG__RETENTION_DAYS=365
 | | `SECURITY__RATE_LIMIT_PER_MINUTE` | int | `1024` | Лимит запросов/мин на IP |
 | | `SECURITY__MAX_TRACKED_IPS` | int | `100` | Макс. отслеживаемых IP |
 | | `SECURITY__RATE_LIMIT_TTL` | int | `120` | TTL метрик (сек) |
-| **Чат** (доменные) | `CHAT__PROFILE` | str | `sglang` | Профиль LLM-провайдера: `sglang` (прод), `openrouter`/`openai` (dev) |
+| **Чат** (доменные) | `CHAT__PROFILE` | str | `sglang` | Профиль LLM: `sglang` (прод), `openrouter`/`openai` (dev), `gigachat` (corp proxy без SSE). См. §7.1a |
 | | `CHAT__API_BASE` | str | (пусто) | Базовый URL LLM API (без `/chat/completions` — SDK добавит сам) |
 | | `CHAT__API_KEY` | SecretStr | (пусто) | API-ключ |
 | | `CHAT__MODEL` | str | `gpt-4o` | Модель |
