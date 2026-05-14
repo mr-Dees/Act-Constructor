@@ -353,6 +353,17 @@ async def resume_agent_request_stream(
         block_index = 0
         last_seen = since
 
+        # Подстраховка: гарантируем, что polling-задача для request_id
+        # точно работает. Реconcile в lifespan ловит зависшие запросы
+        # с лагом ≥30с — этот intervals ещё может быть «слепым»; явный
+        # schedule идемпотентен (registry в agent_bridge_runner проверяет
+        # is_running) и не запустит дублирующий polling, если runner уже
+        # крутится. Сохранение финального ассистент-сообщения — только
+        # на стороне runner'а (single source of truth), resume лишь
+        # транслирует события в SSE.
+        from app.domains.chat.services.agent_bridge_runner import schedule
+        schedule(request_id, settings=settings)
+
         async with get_db() as conn:
             bridge = AgentBridgeService(conn)
 
