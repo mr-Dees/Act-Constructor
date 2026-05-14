@@ -16,6 +16,7 @@ from typing import Final
 
 TOOL_FORWARD_TO_KNOWLEDGE_AGENT: Final[str] = "chat.forward_to_knowledge_agent"
 TOOL_NOTIFY: Final[str] = "chat.notify"
+TOOL_LIST_PAGES: Final[str] = "chat.list_pages"
 TOOL_OPEN_ACT_PAGE: Final[str] = "acts.open_act_page"
 TOOL_OPEN_ADMIN_PANEL: Final[str] = "admin.open_admin_panel"
 TOOL_OPEN_CK_FIN_RES_PAGE: Final[str] = "ck_fin_res.open_ck_fin_res_page"

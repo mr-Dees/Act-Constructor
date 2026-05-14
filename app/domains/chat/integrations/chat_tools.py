@@ -12,6 +12,7 @@ from __future__ import annotations
 
 from app.core.chat.names import (
     TOOL_FORWARD_TO_KNOWLEDGE_AGENT,
+    TOOL_LIST_PAGES,
     TOOL_NOTIFY,
 )
 from app.core.chat.tools import ChatTool, ChatToolParam
@@ -66,7 +67,7 @@ def get_chat_tools() -> list[ChatTool]:
             category="action",
         ),
         ChatTool(
-            name="chat.list_pages",
+            name=TOOL_LIST_PAGES,
             domain=_DOMAIN,
             description=(
                 "Покажи пользователю кнопки со всеми доступными страницами. "
