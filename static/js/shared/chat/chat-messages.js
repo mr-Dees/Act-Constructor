@@ -201,10 +201,6 @@ const ChatMessages = {
             case 'tool_result':
                 break;
 
-            case 'plan_update':
-                ChatRenderer.updatePlan(container, event.data.steps);
-                break;
-
             case 'buttons': {
                 const btnBlock = ChatRenderer.renderBlock({ type: 'buttons', ...event.data });
                 if (btnBlock) ChatRenderer.appendBlock(container, btnBlock);

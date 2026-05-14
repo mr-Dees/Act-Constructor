@@ -23,7 +23,6 @@ from app.domains.chat.services.streaming import (
     sse_error,
     sse_message_end,
     sse_message_start,
-    sse_plan_update,
     sse_tool_call,
     sse_tool_result,
 )
@@ -221,15 +220,6 @@ class TestSSEFormatting:
         data = _parse_event_data(event)
         assert data["error"] == "Сбой"
         assert "code" not in data
-
-    def test_plan_update_fields(self):
-        """plan_update содержит список шагов."""
-        event = sse_plan_update(steps=[
-            {"label": "Шаг 1", "status": "done"},
-            {"label": "Шаг 2", "status": "pending"},
-        ])
-        data = _parse_event_data(event)
-        assert len(data["steps"]) == 2
 
     def test_buttons_fields(self):
         """buttons содержит список кнопок."""

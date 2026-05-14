@@ -89,13 +89,6 @@ def sse_tool_error(
     })
 
 
-def sse_plan_update(*, steps: list[dict[str, Any]]) -> str:
-    """Обновление плана действий."""
-    return format_sse_event("plan_update", {
-        "steps": steps,
-    })
-
-
 def sse_buttons(*, buttons: list[dict[str, Any]]) -> str:
     """Кнопки действий для пользователя."""
     return format_sse_event("buttons", {

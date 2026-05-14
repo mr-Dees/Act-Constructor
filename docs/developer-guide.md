@@ -1561,7 +1561,7 @@ SSE-события клиенту (message_start, block_delta, tool_call, tool_r
 **Persistence:** 3 таблицы БД (`chat_conversations`, `chat_messages`, `chat_files`).
 
 **SSE-события** (`app/domains/chat/services/streaming.py`):
-`message_start`, `block_start`, `block_delta`, `block_end`, `block_complete`, `tool_call`, `tool_result`, `plan_update`, `buttons`, `client_action`, `message_end`, `error`.
+`message_start`, `block_start`, `block_delta`, `block_end`, `block_complete`, `tool_call`, `tool_result`, `tool_error`, `buttons`, `client_action`, `agent_request_started`, `message_end`, `error`.
 
 Маршрутизация: стримуемые типы (`text`, `code`, `reasoning`) идут триплетом `block_start` + `block_delta` + `block_end`; нестримуемые (`file`, `image`, `plan`, `error`) — одним `block_complete` с полным payload; `buttons` и `client_action` — собственные SSE-события.
 
@@ -1816,8 +1816,8 @@ ChatPopupManager       — popup окно для редактора актов
 | `buttons` | одно событие | группа кнопок (action_id уже транслирован сервером) |
 | `client_action` | одно событие | ClientActionBlock — исполняется идемпотентно по `block_id` |
 | `agent_request_started` | один раз при forward | `request_id` для авто-resume при разрыве |
-| `plan_update` | по мере прогресса | обновление PlanBlock |
 | `tool_call` / `tool_result` | информационные | сейчас не рендерятся |
+| `tool_error` | при ошибке tool | нейтральное сообщение, фронт не показывает stack |
 | `error` | terminal | блок ErrorBlock |
 | `message_end` | один раз в конце | финализация |
 
@@ -2181,7 +2181,6 @@ ChatTool(
 | `buttons` | `{buttons: [<ButtonsBlock.buttons>]}` | Группа кнопок (`action_id` уже транслирован сервером) |
 | `client_action` | `{block: <ClientActionBlock>}` | Команда фронту — исполняется **ровно один раз** |
 | `agent_request_started` | `{request_id: str, conversation_id: str}` | Один раз сразу после INSERT в `agent_requests` |
-| `plan_update` | `{steps: [{...}]}` | Обновление PlanBlock (опционально) |
 | `tool_call` / `tool_result` | `{tool_name, tool_call_id, arguments|result}` | Информационные; сейчас не рендерятся фронтом |
 | `error` | `{error: str, code?: str}` | Terminal-ошибка стрима |
 | `message_end` | `{message_id: str, model?: str, token_usage?: {...}}` | Один раз в конце |
