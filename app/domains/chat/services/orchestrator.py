@@ -23,6 +23,7 @@ from app.core.chat.tools import (
     get_tools_by_domain,
 )
 from app.core.settings_registry import get as get_domain_settings
+from app.domains.chat.exceptions import ChatToolValidationError
 from app.domains.chat.services.conversation_service import ConversationService
 from app.domains.chat.services.llm_client import build_llm_client
 from app.domains.chat.services.message_service import MessageService
@@ -39,6 +40,7 @@ from app.domains.chat.services.streaming import (
     sse_message_end,
     sse_message_start,
     sse_tool_call,
+    sse_tool_error,
     sse_tool_result,
 )
 from app.domains.chat.services.tool_call_accumulator import ToolCallAccumulator
@@ -64,6 +66,11 @@ def _convert_param(value: Any, param_type: str) -> Any:
     if param_type == "string":
         return str(value)
     return value
+
+
+TOOL_VALIDATION_NEUTRAL_MESSAGE = (
+    "Не удалось выполнить инструмент. Попробуйте переформулировать запрос."
+)
 
 
 BASE_SYSTEM_PROMPT = (
@@ -625,6 +632,17 @@ class Orchestrator:
         if chat_tool.handler is None:
             return f"Ошибка: инструмент '{tool_name}' не имеет обработчика"
 
+        # Валидация обязательных параметров. Если LLM не передал required-параметр,
+        # дальше нельзя — handler упадёт с TypeError или вернёт мусор.
+        # Кидаем доменное исключение, его ловит _run_loop и эмитит
+        # нейтральный tool_error SSE (без сырого текста для пользователя).
+        for param in chat_tool.parameters:
+            if param.required and param.name not in arguments:
+                raise ChatToolValidationError(
+                    f"Tool {tool_name}: отсутствует обязательный "
+                    f"параметр {param.name}",
+                )
+
         # Конвертация типов параметров
         param_types = {p.name: p.type for p in chat_tool.parameters}
         converted_args = {}
@@ -739,7 +757,18 @@ class Orchestrator:
                         "Tool call #%d: %s(%s)", rounds, tool_name,
                         ", ".join(f"{k}={v!r}" for k, v in arguments.items()),
                     )
-                    result = await self._execute_tool_call(tool_name, arguments)
+                    try:
+                        result = await self._execute_tool_call(
+                            tool_name, arguments,
+                        )
+                    except ChatToolValidationError as exc:
+                        # Сырой текст ошибки не показываем пользователю —
+                        # это инфо для логов. LLM получает нейтральный итог,
+                        # чтобы попытаться переформулировать вызов.
+                        logger.warning(
+                            "Tool validation error: %s", exc.message,
+                        )
+                        result = TOOL_VALIDATION_NEUTRAL_MESSAGE
                     sources.append(tool_name)
 
                     messages.append({
@@ -1032,9 +1061,29 @@ class Orchestrator:
                                 )
                                 return
 
-                            result = await self._execute_tool_call(
-                                tool_name, arguments,
-                            )
+                            try:
+                                result = await self._execute_tool_call(
+                                    tool_name, arguments,
+                                )
+                            except ChatToolValidationError as exc:
+                                # Валидация параметров tool'а упала. Сырой
+                                # текст ошибки ушёл только в лог; в SSE и
+                                # сообщении к LLM — нейтральная фраза.
+                                logger.warning(
+                                    "Tool validation error: %s", exc.message,
+                                )
+                                yield sse_tool_error(
+                                    tool_name=tool_name,
+                                    tool_call_id=tc.id,
+                                    message=TOOL_VALIDATION_NEUTRAL_MESSAGE,
+                                )
+                                messages.append({
+                                    "role": "tool",
+                                    "tool_call_id": tc.id,
+                                    "content": TOOL_VALIDATION_NEUTRAL_MESSAGE,
+                                })
+                                sources.append(tool_name)
+                                continue
                             sources.append(tool_name)
 
                             yield sse_tool_result(
@@ -1202,9 +1251,26 @@ class Orchestrator:
                             )
                             return
 
-                        result = await self._execute_tool_call(
-                            tool_name, arguments,
-                        )
+                        try:
+                            result = await self._execute_tool_call(
+                                tool_name, arguments,
+                            )
+                        except ChatToolValidationError as exc:
+                            logger.warning(
+                                "Tool validation error: %s", exc.message,
+                            )
+                            yield sse_tool_error(
+                                tool_name=tool_name,
+                                tool_call_id=tc.id,
+                                message=TOOL_VALIDATION_NEUTRAL_MESSAGE,
+                            )
+                            messages.append({
+                                "role": "tool",
+                                "tool_call_id": tc.id,
+                                "content": TOOL_VALIDATION_NEUTRAL_MESSAGE,
+                            })
+                            sources.append(tool_name)
+                            continue
                         sources.append(tool_name)
 
                         yield sse_tool_result(

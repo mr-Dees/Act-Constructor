@@ -491,21 +491,13 @@ class TestOrchestratorRun:
         assert "Привет" in result["response"]
         assert "режиме заглушки" in result["response"]
 
-    # BUG #7: run() возвращает HTTP 200 с error payload вместо ошибки
-    @pytest.mark.xfail(
-        strict=False,
-        reason=(
-            "Известный баг #7: run() возвращает HTTP 200 с error payload "
-            "вместо ошибки — при сбое LLM API не raise/HTTPException, "
-            "клиент получает 200 OK с dict status='error'."
-        ),
-    )
     @patch("app.domains.chat.services.orchestrator.Orchestrator._get_openai_client")
     async def test_run_api_error_returns_200_with_error_payload(
         self, mock_client_factory, orchestrator,
     ):
-        """BUG: При ошибке LLM API run() возвращает dict с 'status: error',
-        но HTTP-эндпоинт вернёт 200, а не 500/503.
+        """1.4 (BUG #7 закрыт как намеренное поведение): при ошибке LLM API
+        run() возвращает dict с 'status: error' и нейтральным сообщением;
+        для не-стрим режима это допустимо (внутренние детали не утекают).
         """
         mock_client = AsyncMock()
         mock_client.chat.completions.create = AsyncMock(
@@ -718,6 +710,53 @@ class TestExecuteToolCall:
         parsed = json.loads(result)
         assert parsed["status"] == "ok"
 
+    async def test_missing_required_param_raises_validation_error(self, orchestrator):
+        """1.3: Отсутствующий required-параметр → ChatToolValidationError."""
+        from app.domains.chat.exceptions import ChatToolValidationError
+
+        tool = ChatTool(
+            name="req_tool",
+            domain="test",
+            description="С обязательным параметром",
+            parameters=[
+                ChatToolParam(
+                    name="must_have",
+                    type="string",
+                    description="Обязательный",
+                    required=True,
+                ),
+            ],
+            handler=AsyncMock(return_value="ok"),
+        )
+        register_tools([tool])
+
+        with pytest.raises(ChatToolValidationError) as exc_info:
+            await orchestrator._execute_tool_call("req_tool", {})
+
+        assert "must_have" in str(exc_info.value)
+        assert exc_info.value.status_code == 400
+
+    async def test_optional_param_missing_does_not_raise(self, orchestrator):
+        """1.3: Отсутствие optional-параметра не считается ошибкой валидации."""
+        tool = ChatTool(
+            name="opt_tool",
+            domain="test",
+            description="С опциональным параметром",
+            parameters=[
+                ChatToolParam(
+                    name="maybe",
+                    type="string",
+                    description="Опциональный",
+                    required=False,
+                ),
+            ],
+            handler=AsyncMock(return_value="ok"),
+        )
+        register_tools([tool])
+
+        result = await orchestrator._execute_tool_call("opt_tool", {})
+        assert result == "ok"
+
     async def test_tool_param_type_conversion(self, orchestrator):
         """Параметры инструмента конвертируются в правильные типы."""
         received_args = {}
@@ -832,20 +871,15 @@ class TestOrchestratorRunStream:
         assert "block_delta" in event_types
         assert "block_end" in event_types
 
-    # BUG #6: message_end не гарантирован на всех путях ошибок
-    @pytest.mark.xfail(
-        strict=False,
-        reason=(
-            "Известный баг #6: message_end не гарантирован на всех путях "
-            "ошибок стриминга — на некоторых ветках финальное SSE-событие "
-            "не отправляется."
-        ),
-    )
     @patch("app.domains.chat.services.orchestrator.Orchestrator._get_openai_client")
     async def test_stream_error_guarantees_message_end(
         self, mock_client_factory, orchestrator,
     ):
-        """BUG: При ошибке стриминга message_end должен быть гарантирован."""
+        """1.4 (BUG #6 закрыт): при ошибке стриминга message_end гарантирован.
+
+        Оркестратор ловит generic Exception, эмитит нейтральный SSE error
+        и финализирует message_end в любом случае.
+        """
         mock_client = AsyncMock()
         mock_client.chat.completions.create = AsyncMock(
             side_effect=Exception("LLM API недоступен"),
@@ -979,6 +1013,81 @@ class TestOrchestratorRunStream:
 
             # Проверяем, что get_db вызывался (свежее соединение для сохранения)
             mock_get_db.assert_called()
+
+    @patch("app.domains.chat.services.orchestrator.Orchestrator._get_openai_client")
+    async def test_stream_tool_validation_error_emits_neutral_tool_error(
+        self, mock_client_factory, orchestrator,
+    ):
+        """1.3: При вызове tool'а без required параметра — SSE tool_error
+        с нейтральным сообщением; сырой текст ошибки не утекает.
+        """
+        tool = ChatTool(
+            name="strict_tool",
+            domain="test",
+            description="Требует параметр",
+            parameters=[
+                ChatToolParam(
+                    name="needed",
+                    type="string",
+                    description="Должен быть",
+                    required=True,
+                ),
+            ],
+            handler=AsyncMock(return_value="ok"),
+        )
+        register_tools([tool])
+
+        mock_client = AsyncMock()
+
+        # Стрим: LLM зовёт инструмент БЕЗ required-параметра.
+        async def stream_with_bad_tool():
+            chunk = MagicMock()
+            delta = MagicMock()
+            delta.content = None
+            tc_delta = MagicMock()
+            tc_delta.index = 0
+            tc_delta.id = "tc-bad"
+            tc_delta.function = MagicMock()
+            tc_delta.function.name = "strict_tool"
+            tc_delta.function.arguments = "{}"  # пустые args
+            delta.tool_calls = [tc_delta]
+            chunk.choices = [MagicMock(delta=delta, finish_reason=None)]
+            yield chunk
+
+            chunk2 = MagicMock()
+            delta2 = MagicMock()
+            delta2.content = None
+            delta2.tool_calls = None
+            chunk2.choices = [MagicMock(delta=delta2, finish_reason="tool_calls")]
+            yield chunk2
+
+        # Финальный ответ после ошибки tool'а
+        response_final = _make_mock_response(content="ok-final")
+        mock_client.chat.completions.create = AsyncMock(
+            side_effect=[stream_with_bad_tool(), response_final],
+        )
+        mock_client_factory.return_value = mock_client
+        orchestrator._save_assistant_message = AsyncMock()
+
+        events = []
+        async for ev in orchestrator.run_stream(
+            conversation_id="conv-1",
+            user_message="без параметра",
+        ):
+            events.append(ev)
+
+        event_types = [e.split("\n")[0].replace("event: ", "") for e in events]
+        # Должно быть tool_error, не tool_result для этого вызова
+        assert "tool_error" in event_types, f"events={event_types}"
+
+        # Сырой текст ошибки (имя параметра в технической формулировке) НЕ должен
+        # утекать наружу — в payload tool_error содержится нейтральное сообщение.
+        joined = "\n".join(events)
+        assert "Не удалось выполнить инструмент" in joined
+        assert "Попробуйте переформулировать" in joined
+        # "отсутствует обязательный параметр" (сырое сообщение исключения) —
+        # только в логах; в SSE его быть не должно.
+        assert "отсутствует обязательный параметр" not in joined
 
     async def test_stream_openai_not_installed(self, orchestrator):
         """При отсутствии openai пакета — fallback с сообщением."""

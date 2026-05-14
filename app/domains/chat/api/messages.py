@@ -15,7 +15,10 @@ from app.domains.chat.deps import (
     get_file_service,
     get_message_service,
 )
-from app.domains.chat.exceptions import ChatFileValidationError
+from app.domains.chat.exceptions import (
+    ChatFileValidationError,
+    ChatStreamAlreadyActiveError,
+)
 from app.domains.chat.schemas.responses import FileUploadResponse, MessageResponse
 from app.domains.chat.services.conversation_service import ConversationService
 from app.domains.chat.services.file_service import FileService
@@ -24,6 +27,23 @@ from app.domains.chat.services.message_service import MessageService
 logger = logging.getLogger("audit_workstation.domains.chat.api.messages")
 
 _kb_warned = [False]  # one-time warning suppression
+
+# Per-user счётчик активных SSE-стримов. Защищает от того, что один
+# пользователь параллельно держит несколько open-ended SSE-каналов
+# (например, открыл несколько вкладок и отправил сообщение в каждую).
+# Корректно работает только в режиме single-worker (см. app/core/singleton_lock.py
+# и app/main.py lifespan): в multi-worker дикт был бы у каждого процесса свой.
+_active_streams_per_user: dict[str, int] = {}
+
+
+def is_user_streaming(user_id: str) -> bool:
+    """Возвращает True, если у пользователя есть хотя бы один активный SSE-стрим.
+
+    Используется сервисами, которым нужно отказать в деструктивной операции
+    (например, удалении беседы) пока идёт генерация ответа ассистента.
+    """
+    return _active_streams_per_user.get(user_id, 0) > 0
+
 
 # Защита роли крепится явно на роутер (defense in depth) — см. конфигурацию
 # в conversations.py.
@@ -114,6 +134,22 @@ async def send_message(
             "file_size": saved["file_size"],
         })
 
+    # Per-user семафор: один пользователь — один открытый SSE-стрим.
+    # Проверка ДО save_user_message и Orchestrator: иначе одинаковое сообщение
+    # появится в БД дважды (попытка-1 уже сохранена, попытка-2 получила 429).
+    # Single-worker гарантируется acquire_singleton_lock в lifespan, поэтому
+    # in-process счётчика достаточно.
+    accept = request.headers.get("accept", "")
+    is_sse = "text/event-stream" in accept
+    if is_sse and _active_streams_per_user.get(username, 0) > 0:
+        logger.warning(
+            "SSE-стрим отклонён (429): user=%s, уже активен", username,
+        )
+        raise ChatStreamAlreadyActiveError(
+            "Уже идёт активный стрим. Дождитесь окончания или "
+            "отмените предыдущий.",
+        )
+
     # Сохраняем пользовательское сообщение
     await msg_service.save_user_message(
         conversation_id=conversation_id,
@@ -133,14 +169,18 @@ async def send_message(
     # Определяем режим ответа по Accept header
     # TODO(forward): пробросить список knowledge_bases из контекста беседы,
     # когда фронт начнёт передавать выбранные пользователем БЗ.
-    accept = request.headers.get("accept", "")
-    if "text/event-stream" in accept:
+    if is_sse:
         if not _kb_warned[0]:
             logger.warning(
                 "Forward'ы к внешнему агенту идут с пустым knowledge_bases — "
                 "пробросьте список БЗ из контекста беседы (один раз на процесс)"
             )
             _kb_warned[0] = True
+
+        # Захватываем слот семафора. Декремент — в finally генератора.
+        _active_streams_per_user[username] = (
+            _active_streams_per_user.get(username, 0) + 1
+        )
 
         logger.info("SSE-стрим открыт: conversation=%s", conversation_id)
         stream_started_at = time.monotonic()
@@ -196,6 +236,13 @@ async def send_message(
                     pass
                 raise
             finally:
+                # Декремент семафора независимо от пути выхода
+                # (нормальный конец / disconnect / exception).
+                current = _active_streams_per_user.get(username, 0)
+                if current <= 1:
+                    _active_streams_per_user.pop(username, None)
+                else:
+                    _active_streams_per_user[username] = current - 1
                 logger.info(
                     "SSE-стрим закрыт: conversation=%s, длительность=%.2fс",
                     conversation_id,

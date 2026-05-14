@@ -43,26 +43,51 @@ class AgentResponseRepository(BaseRepository):
         finish_reason: str = "stop",
         token_usage: dict | None = None,
         model: str | None = None,
-    ) -> None:
-        """Создаёт финальный ответ. Повторный INSERT для того же request_id
-        будет отвергнут UNIQUE-ограничением."""
-        await self.conn.execute(
-            f"""
-            INSERT INTO {self.table}
-                (id, request_id, blocks, finish_reason, token_usage, model)
-            VALUES ($1, $2, $3::jsonb, $4, $5::jsonb, $6)
-            """,
-            id,
-            request_id,
-            json.dumps(blocks, ensure_ascii=False),
-            finish_reason,
-            json.dumps(token_usage, ensure_ascii=False) if token_usage is not None else None,
-            model,
-        )
-        logger.debug(
-            "agent_responses: создан id=%s request=%s blocks=%d finish=%s",
-            id, request_id, len(blocks), finish_reason,
-        )
+    ) -> dict:
+        """Создаёт финальный ответ.
+
+        Идемпотентно: если запись для ``request_id`` уже существует
+        (UNIQUE-конфликт), это не ошибка — внешний агент мог дублировать
+        INSERT при сетевом retry или race-condition между раннером и
+        ретраем агента. В этом случае возвращаем уже существующую запись.
+        """
+        try:
+            await self.conn.execute(
+                f"""
+                INSERT INTO {self.table}
+                    (id, request_id, blocks, finish_reason, token_usage, model)
+                VALUES ($1, $2, $3::jsonb, $4, $5::jsonb, $6)
+                """,
+                id,
+                request_id,
+                json.dumps(blocks, ensure_ascii=False),
+                finish_reason,
+                json.dumps(token_usage, ensure_ascii=False) if token_usage is not None else None,
+                model,
+            )
+            logger.debug(
+                "agent_responses: создан id=%s request=%s blocks=%d finish=%s",
+                id, request_id, len(blocks), finish_reason,
+            )
+            return {
+                "id": id,
+                "request_id": request_id,
+                "blocks": blocks,
+                "finish_reason": finish_reason,
+                "token_usage": token_usage,
+                "model": model,
+            }
+        except asyncpg.UniqueViolationError:
+            logger.warning(
+                "agent_responses: UNIQUE-конфликт по request_id=%s — "
+                "возвращаем уже сохранённую запись (идемпотентно)",
+                request_id,
+            )
+            existing = await self.get_by_request_id(request_id)
+            if existing is None:
+                # Гонка: запись только что удалили — это аномалия, прокидываем.
+                raise
+            return existing
 
     async def get_by_request_id(self, request_id: str) -> dict | None:
         """Возвращает финальный ответ по request_id, либо None."""

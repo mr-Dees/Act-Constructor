@@ -26,16 +26,37 @@ def settings():
     return ChatDomainSettings()
 
 
+def _make_mock_repo_with_conn():
+    """Создаёт мок репозитория с привязанным conn, поддерживающим transaction().
+
+    MessageService теперь оборачивает create+touch в
+    ``async with msg_repo.conn.transaction()`` — поэтому мокам репозиториев
+    нужен валидный async-context-manager на ``.conn.transaction()``.
+
+    Также сбрасываем `get_by_user_and_title` в None по умолчанию: иначе
+    AsyncMock возвращает truthy MagicMock и server-side идемпотентность
+    в ConversationService.create неожиданно срабатывает в обычных тестах.
+    """
+    repo = AsyncMock()
+    tx = AsyncMock()
+    tx.__aenter__ = AsyncMock(return_value=tx)
+    tx.__aexit__ = AsyncMock(return_value=False)
+    repo.conn = MagicMock()
+    repo.conn.transaction = MagicMock(return_value=tx)
+    repo.get_by_user_and_title = AsyncMock(return_value=None)
+    return repo
+
+
 @pytest.fixture
 def conv_repo():
     """Mock ConversationRepository."""
-    return AsyncMock()
+    return _make_mock_repo_with_conn()
 
 
 @pytest.fixture
 def msg_repo():
     """Mock MessageRepository."""
-    return AsyncMock()
+    return _make_mock_repo_with_conn()
 
 
 @pytest.fixture
@@ -185,6 +206,48 @@ class TestMessageServiceSaveAssistant:
 
         assert result["role"] == "assistant"
         conv_repo.touch.assert_called_once_with("conv-1")
+
+    async def test_create_and_touch_in_single_transaction(
+        self, service, msg_repo, conv_repo,
+    ):
+        """1.2: create() и touch() выполняются в одной транзакции.
+
+        Проверяем, что async-context-manager ``msg_repo.conn.transaction()``
+        был открыт ровно один раз и обёртывает оба вызова.
+        """
+        msg_repo.create.return_value = {"id": "m", "role": "assistant"}
+
+        await service.save_assistant_message(
+            conversation_id="conv-tx",
+            content=[{"type": "text", "content": "x"}],
+        )
+
+        # Транзакция открывалась ровно один раз
+        assert msg_repo.conn.transaction.call_count == 1
+        msg_repo.create.assert_awaited_once()
+        conv_repo.touch.assert_awaited_once_with("conv-tx")
+
+    async def test_touch_failure_rolls_back_create(
+        self, service, msg_repo, conv_repo,
+    ):
+        """1.2: Если touch() падает, транзакция откатывается.
+
+        Проверяем именно поведение исключения: ``save_assistant_message``
+        должен пробросить ошибку наружу, а не проглотить (иначе вызывающий
+        код решит, что сообщение успешно сохранено).
+        """
+        msg_repo.create.return_value = {"id": "m", "role": "assistant"}
+        conv_repo.touch.side_effect = RuntimeError("touch упал")
+
+        with pytest.raises(RuntimeError, match="touch упал"):
+            await service.save_assistant_message(
+                conversation_id="conv-tx-fail",
+                content=[{"type": "text", "content": "x"}],
+            )
+
+        # Транзакция была открыта, но __aexit__ получит exception → BEGIN/ROLLBACK
+        assert msg_repo.conn.transaction.call_count == 1
+        msg_repo.create.assert_awaited_once()
 
 
 # -------------------------------------------------------------------------

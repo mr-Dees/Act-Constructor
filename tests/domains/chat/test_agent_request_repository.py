@@ -251,3 +251,34 @@ async def test_update_status_without_expected_version_still_returns_version(
     sql = mock_conn.fetchval.call_args.args[0]
     assert "AND version = $" not in sql
     assert "RETURNING version" in sql
+
+
+async def test_update_status_version_conflict_logs_context(mock_conn, caplog):
+    """1.9: При version-conflict warning содержит current_version и status.
+
+    Репозиторий обязан подсветить, кто перебил версию, чтобы при разборе
+    инцидентов в логах было видно конкурентов.
+    """
+    import logging as _logging
+
+    repo = AgentRequestRepository(mock_conn)
+    mock_conn.fetchval.return_value = None  # version conflict
+    mock_conn.fetchrow.return_value = {
+        "version": 7,
+        "status": "in_progress",
+        "worker_token": "worker-abc",
+    }
+
+    with caplog.at_level(_logging.WARNING):
+        result = await repo.update_status(
+            "r-conflict", status="done", expected_version=3,
+        )
+
+    assert result is None
+    # Должны увидеть и expected_version, и current_version, и worker_token
+    log_text = "\n".join(r.getMessage() for r in caplog.records)
+    assert "r-conflict" in log_text
+    assert "expected_version=3" in log_text
+    assert "current_version=7" in log_text
+    assert "current_status=in_progress" in log_text
+    assert "worker-abc" in log_text

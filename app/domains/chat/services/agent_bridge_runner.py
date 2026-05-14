@@ -24,7 +24,11 @@ logger = logging.getLogger(
 )
 
 # Process-level registry: один polling-task на agent_request.
-# Защищает от дублей при двойном reconcile или повторном forward.
+# Защищает от дублей при двойном reconcile или повторном forward в рамках
+# одного процесса. Single-worker гарантирован через таблицу
+# {PREFIX}app_singleton_lock (admin-миграция) + acquire_singleton_lock в
+# app/main.py lifespan — поэтому in-process защиты достаточно, cross-worker
+# гонок быть не должно.
 _running: dict[str, asyncio.Task] = {}
 
 
@@ -118,9 +122,23 @@ async def _run(
                 if new_version is None:
                     logger.warning(
                         "agent_bridge_runner: version conflict при "
-                        "переводе в dispatched, request_id=%s, "
-                        "expected_version=%s — итерация прервана",
-                        request_id, current_version,
+                        "переводе в dispatched, request_id=%s "
+                        "expected_version=%s status_at_read=%s "
+                        "worker_token_at_read=%s — итерация прервана "
+                        "(другой воркер уже владеет запросом)",
+                        request_id,
+                        current_version,
+                        request.get("status"),
+                        request.get("worker_token"),
+                        extra={
+                            "agent_request_id": request_id,
+                            "transition": "pending->dispatched",
+                            "expected_version": current_version,
+                            "status_at_read": request.get("status"),
+                            "worker_token_at_read": request.get(
+                                "worker_token",
+                            ),
+                        },
                     )
                     return
                 current_version = new_version
@@ -162,9 +180,18 @@ async def _run(
                                 logger.warning(
                                     "agent_bridge_runner: version "
                                     "conflict при переводе в "
-                                    "in_progress, request_id=%s, "
-                                    "expected_version=%s — abort",
-                                    request_id, current_version,
+                                    "in_progress, request_id=%s "
+                                    "expected_version=%s — abort "
+                                    "(другой воркер обновил agent_request)",
+                                    request_id,
+                                    current_version,
+                                    extra={
+                                        "agent_request_id": request_id,
+                                        "transition": (
+                                            "dispatched->in_progress"
+                                        ),
+                                        "expected_version": current_version,
+                                    },
                                 )
                                 return
                             current_version = new_version

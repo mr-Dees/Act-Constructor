@@ -157,10 +157,30 @@ class AgentRequestRepository(BaseRepository):
 
         new_version = await self.conn.fetchval(sql, *params)
         if expected_version is not None and new_version is None:
+            # Грузим текущее состояние строки для диагностики: кто
+            # перебил версию и в каком статусе она сейчас.
+            current = await self.conn.fetchrow(
+                f"SELECT version, status, worker_token "
+                f"FROM {self.table} WHERE id = $1",
+                request_id,
+            )
+            current_version = current["version"] if current else None
+            current_status = current["status"] if current else None
+            current_worker = current["worker_token"] if current else None
             logger.warning(
-                "agent_requests: version conflict id=%s status=%s "
-                "expected_version=%s — апдейт пропущен",
+                "agent_requests: version conflict id=%s attempted_status=%s "
+                "expected_version=%s current_version=%s current_status=%s "
+                "current_worker_token=%s — апдейт пропущен",
                 request_id, status, expected_version,
+                current_version, current_status, current_worker,
+                extra={
+                    "agent_request_id": request_id,
+                    "attempted_status": status,
+                    "expected_version": expected_version,
+                    "current_version": current_version,
+                    "current_status": current_status,
+                    "current_worker_token": current_worker,
+                },
             )
         else:
             logger.debug(

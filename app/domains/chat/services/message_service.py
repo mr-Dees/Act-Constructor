@@ -6,6 +6,7 @@ import uuid
 from app.domains.chat.exceptions import ChatLimitError
 from app.domains.chat.repositories.conversation_repository import ConversationRepository
 from app.domains.chat.repositories.message_repository import MessageRepository
+from app.domains.chat.services.conversation_service import _get_user_lock
 from app.domains.chat.settings import ChatDomainSettings
 
 logger = logging.getLogger("audit_workstation.domains.chat.service.message")
@@ -45,28 +46,35 @@ class MessageService:
                 f"(максимум {self.settings.max_message_content_length})."
             )
 
-        msg_count = await self.msg_repo.count_by_conversation(conversation_id)
-        if msg_count >= self.settings.max_messages_per_conversation:
-            raise ChatLimitError(
-                f"Достигнут лимит сообщений в беседе: "
-                f"{self.settings.max_messages_per_conversation}."
-            )
+        # Критическая секция (count + create) обёрнута в per-user lock —
+        # устраняет race condition при конкурентных send_message от одного
+        # пользователя (BUG #10).
+        async with _get_user_lock(user_id):
+            msg_count = await self.msg_repo.count_by_conversation(conversation_id)
+            if msg_count >= self.settings.max_messages_per_conversation:
+                raise ChatLimitError(
+                    f"Достигнут лимит сообщений в беседе: "
+                    f"{self.settings.max_messages_per_conversation}."
+                )
 
-        # Собираем блоки контента
-        blocks: list[dict] = [{"type": "text", "content": content}]
-        if file_blocks:
-            blocks.extend(file_blocks)
+            # Собираем блоки контента
+            blocks: list[dict] = [{"type": "text", "content": content}]
+            if file_blocks:
+                blocks.extend(file_blocks)
 
-        message_id = str(uuid.uuid4())
-        message = await self.msg_repo.create(
-            id=message_id,
-            conversation_id=conversation_id,
-            role="user",
-            content=blocks,
-        )
-
-        await self.conv_repo.touch(conversation_id)
-        return message
+            message_id = str(uuid.uuid4())
+            # Атомарность: вставка сообщения и touch беседы — единая транзакция.
+            # Если touch падает (например, FK или сетевой сбой), сообщение
+            # тоже откатывается, и updated_at не расходится с реальной историей.
+            async with self.msg_repo.conn.transaction():
+                message = await self.msg_repo.create(
+                    id=message_id,
+                    conversation_id=conversation_id,
+                    role="user",
+                    content=blocks,
+                )
+                await self.conv_repo.touch(conversation_id)
+            return message
 
     async def save_assistant_message(
         self,
@@ -78,16 +86,17 @@ class MessageService:
     ) -> dict:
         """Сохраняет сообщение ассистента."""
         message_id = str(uuid.uuid4())
-        message = await self.msg_repo.create(
-            id=message_id,
-            conversation_id=conversation_id,
-            role="assistant",
-            content=content,
-            model=model,
-            token_usage=token_usage,
-        )
-
-        await self.conv_repo.touch(conversation_id)
+        # Атомарность: см. комментарий в save_user_message.
+        async with self.msg_repo.conn.transaction():
+            message = await self.msg_repo.create(
+                id=message_id,
+                conversation_id=conversation_id,
+                role="assistant",
+                content=content,
+                model=model,
+                token_usage=token_usage,
+            )
+            await self.conv_repo.touch(conversation_id)
         return message
 
     async def get_history(

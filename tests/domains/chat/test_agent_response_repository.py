@@ -70,3 +70,60 @@ async def test_get_by_request_id_returns_none_when_absent(mock_conn):
     repo = AgentResponseRepository(mock_conn)
     mock_conn.fetchrow.return_value = None
     assert await repo.get_by_request_id("nope") is None
+
+
+async def test_insert_idempotent_on_unique_violation(mock_conn):
+    """1.7: Повторный INSERT для того же request_id не падает,
+    а возвращает уже существующую запись.
+    """
+    import asyncpg
+    repo = AgentResponseRepository(mock_conn)
+
+    # Первый вызов: успешный INSERT (без SELECT). Возвращается dict с
+    # переданными значениями.
+    first = await repo.insert(
+        id="resp-orig",
+        request_id="req-1",
+        blocks=[{"type": "text", "content": "orig"}],
+    )
+    assert first["id"] == "resp-orig"
+    assert first["request_id"] == "req-1"
+
+    # Второй вызов: INSERT падает с UniqueViolation, SELECT возвращает
+    # уже сохранённую первую запись.
+    mock_conn.execute.side_effect = asyncpg.UniqueViolationError(
+        "duplicate key",
+    )
+    mock_conn.fetchrow.return_value = {
+        "id": "resp-orig",
+        "request_id": "req-1",
+        "blocks": '[{"type":"text","content":"orig"}]',
+        "finish_reason": "stop",
+        "token_usage": None,
+        "model": "m",
+        "created_at": None,
+    }
+    second = await repo.insert(
+        id="resp-dup",
+        request_id="req-1",
+        blocks=[{"type": "text", "content": "duplicate attempt"}],
+    )
+    assert second["id"] == "resp-orig"
+    assert second["request_id"] == "req-1"
+
+
+async def test_insert_propagates_when_unique_conflict_and_no_existing(mock_conn):
+    """1.7: Если после UNIQUE-конфликта запись внезапно исчезла (гонка с DELETE),
+    исключение пробрасывается наружу — это нештатная ситуация.
+    """
+    import asyncpg
+    repo = AgentResponseRepository(mock_conn)
+    mock_conn.execute.side_effect = asyncpg.UniqueViolationError("duplicate")
+    mock_conn.fetchrow.return_value = None
+
+    with pytest.raises(asyncpg.UniqueViolationError):
+        await repo.insert(
+            id="x",
+            request_id="ghost",
+            blocks=[],
+        )

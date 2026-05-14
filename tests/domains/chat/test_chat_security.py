@@ -52,16 +52,33 @@ def settings():
     return ChatDomainSettings()
 
 
+def _mock_repo_with_conn():
+    """Создаёт мок репозитория с привязанным conn, поддерживающим transaction().
+
+    MessageService использует ``async with msg_repo.conn.transaction()`` для
+    атомарной обёртки create+touch, поэтому мок репозитория должен иметь
+    валидный async-context-manager.
+    """
+    from unittest.mock import MagicMock
+    repo = AsyncMock()
+    tx = AsyncMock()
+    tx.__aenter__ = AsyncMock(return_value=tx)
+    tx.__aexit__ = AsyncMock(return_value=False)
+    repo.conn = MagicMock()
+    repo.conn.transaction = MagicMock(return_value=tx)
+    return repo
+
+
 @pytest.fixture
 def conv_repo():
     """Mock ConversationRepository."""
-    return AsyncMock()
+    return _mock_repo_with_conn()
 
 
 @pytest.fixture
 def msg_repo():
     """Mock MessageRepository."""
-    return AsyncMock()
+    return _mock_repo_with_conn()
 
 
 @pytest.fixture

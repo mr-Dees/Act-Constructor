@@ -71,6 +71,24 @@ def sse_tool_result(
     })
 
 
+def sse_tool_error(
+    *,
+    tool_name: str,
+    tool_call_id: str,
+    message: str,
+) -> str:
+    """Ошибка вызова инструмента (валидация параметров, недопустимый tool).
+
+    Отличается от ``sse_tool_result`` тем, что фронт показывает пользователю
+    нейтральное сообщение и НЕ ожидает дальнейшего content по этому tool.
+    """
+    return format_sse_event("tool_error", {
+        "tool_name": tool_name,
+        "tool_call_id": tool_call_id,
+        "message": message,
+    })
+
+
 def sse_plan_update(*, steps: list[dict[str, Any]]) -> str:
     """Обновление плана действий."""
     return format_sse_event("plan_update", {
