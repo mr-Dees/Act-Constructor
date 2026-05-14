@@ -301,6 +301,33 @@ def test_translate_response_non_ascii_args_keep_unicode():
     assert "погода" in args  # ensure_ascii=False
 
 
+def test_translate_response_non_serializable_args_falls_back_to_str():
+    """Non-JSON-serializable значения в args (datetime/Decimal) не должны
+    обрывать SSE TypeError'ом из ``json.dumps``: ``default=str`` приводит
+    их к строке. Согласовано с orchestrator.py:1015.
+    """
+    from datetime import datetime
+    from decimal import Decimal
+
+    resp = _make_completion(
+        function_call={
+            "name": "log_event",
+            "arguments": {
+                "at": datetime(2026, 5, 14, 12, 0, 0),
+                "amount": Decimal("3.14"),
+            },
+        },
+        finish_reason="function_call",
+    )
+    # Не должно бросать TypeError.
+    out = _translate_response(resp)
+    args_str = out.choices[0].message.tool_calls[0].function.arguments
+    # default=str: datetime → "2026-05-14 12:00:00", Decimal → "3.14"
+    parsed = json.loads(args_str)
+    assert "2026-05-14" in parsed["at"]
+    assert parsed["amount"] == "3.14"
+
+
 @pytest.mark.asyncio
 async def test_create_translates_request_and_response():
     """create() переводит tools→functions, function_call→tool_calls."""
@@ -427,3 +454,116 @@ async def test_create_no_tools_no_extra_body():
     from openai import NOT_GIVEN
     assert kw.get("extra_body", NOT_GIVEN) in (NOT_GIVEN, None, {}) or \
         "functions" not in (kw.get("extra_body") or {})
+
+
+def test_translate_messages_roundtrip_synthesized_tool_calls_become_function_call():
+    """Multi-round сценарий: ответ адаптера (синтез tool_calls[]) кладётся
+    обратно в messages и снова пропускается через _translate_messages.
+
+    Это реальный путь в orchestrator.py:1195-1197 — assistant_msg с
+    синтетическим tool_calls возвращается в следующий раунд. Адаптер
+    обязан корректно собрать function_call назад и НЕ оставить ни
+    function_call=None (что попало бы как лишнее поле), ни дубль
+    tool_calls.
+    """
+    # Шаг 1: GigaChat вернул function_call с dict-args → синтез tool_calls
+    resp = _make_completion(
+        function_call={"name": "search", "arguments": {"q": "тест"}},
+        finish_reason="function_call",
+    )
+    translated = _translate_response(resp)
+    assistant_msg = translated.choices[0].message  # pydantic-объект
+
+    # Шаг 2: следующий раунд — добавляем assistant_msg в messages
+    next_round_messages = [
+        {"role": "user", "content": "Что нашёл?"},
+        assistant_msg,  # как кладёт orchestrator.run (строка 1197)
+        {
+            "role": "tool",
+            "tool_call_id": assistant_msg.tool_calls[0].id,
+            "content": "result",
+        },
+    ]
+
+    out = _translate_messages(next_round_messages)
+
+    # Assistant-сообщение должно превратиться обратно в function_call.
+    assistant_translated = next(
+        m for m in out if m.get("role") == "assistant"
+    )
+    assert "function_call" in assistant_translated
+    assert assistant_translated["function_call"]["name"] == "search"
+    # arguments — JSON-строка, парсится в исходный dict
+    assert (
+        json.loads(assistant_translated["function_call"]["arguments"])
+        == {"q": "тест"}
+    )
+    # tool_calls не должен утечь в native-формат
+    assert "tool_calls" not in assistant_translated
+
+    # tool → function с правильным name
+    func_translated = next(m for m in out if m.get("role") == "function")
+    assert func_translated["name"] == "search"
+    assert func_translated["content"] == "result"
+
+
+@pytest.mark.asyncio
+async def test_create_propagates_api_status_error_422_unchanged():
+    """GigaChat-proxy на streaming или невалидный запрос возвращает 422
+    (``EventException``/``ValidationError``). Адаптер не должен глотать
+    ошибку или конвертировать её — APIStatusError пробрасывается как есть,
+    чтобы retry-policy (которая ловит APIStatusError) решала сама.
+    422 — клиентская ошибка, retry НЕ должен срабатывать.
+    """
+    import httpx
+    from openai import APIStatusError
+
+    adapter = GigaChatAdapterClient(
+        base_url="http://liveaccess/v1/gc",
+        api_key="t",
+        default_headers={},
+        timeout=60.0,
+    )
+    request = httpx.Request("POST", "http://liveaccess/v1/gc/chat/completions")
+    response = httpx.Response(422, request=request, json={"detail": "EventException"})
+    raised = APIStatusError(
+        "EventException", response=response, body={"detail": "EventException"},
+    )
+
+    with patch.object(
+        adapter._underlying.chat.completions, "create",
+        new=AsyncMock(side_effect=raised),
+    ):
+        with pytest.raises(APIStatusError) as exc_info:
+            await adapter.chat.completions.create(
+                model="GigaChat-3-Ultra",
+                messages=[{"role": "user", "content": "x"}],
+            )
+
+    assert exc_info.value.status_code == 422
+
+
+@pytest.mark.asyncio
+async def test_create_tools_not_given_sentinel_does_not_add_functions():
+    """tools=NOT_GIVEN — синоним «без tools», не должен попадать как
+    functions в extra_body. Проверяет устойчивость _is_tools_provided
+    к sentinel-объекту openai SDK.
+    """
+    from openai import NOT_GIVEN
+
+    adapter = GigaChatAdapterClient(
+        base_url="http://x", api_key="t", default_headers={}, timeout=60.0,
+    )
+    fake_resp = _make_completion(content="ok")
+    with patch.object(
+        adapter._underlying.chat.completions, "create",
+        new=AsyncMock(return_value=fake_resp),
+    ) as mock_create:
+        await adapter.chat.completions.create(
+            model="m",
+            messages=[{"role": "user", "content": "x"}],
+            tools=NOT_GIVEN,
+        )
+    kw = mock_create.await_args.kwargs
+    # functions не должны добавиться, потому что tools==NOT_GIVEN
+    assert "functions" not in (kw.get("extra_body") or {})

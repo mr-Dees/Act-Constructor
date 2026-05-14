@@ -28,6 +28,25 @@ logger = logging.getLogger(
     "audit_workstation.domains.chat.services.gigachat_adapter",
 )
 
+# Module-level гард: warning о streaming показываем один раз на процесс.
+# Оркестратор уже форсирует non-streaming для gigachat (orchestrator.py:899),
+# поэтому штатно сюда stream=True не попадает; если попадёт — конфиг-баг,
+# и спам по логам на каждый раунд не нужен.
+_streaming_warning_emitted = False
+
+
+def _is_tools_provided(tools: Any) -> bool:
+    """Устойчивая проверка наличия tools: ни None, ни NOT_GIVEN, ни пусто.
+
+    bool(NOT_GIVEN) хрупкий: на разных версиях SDK поведение менялось.
+    Сравнение по identity (``is``) + явный None даёт стабильный результат.
+    """
+    from openai import NOT_GIVEN
+
+    if tools is None or tools is NOT_GIVEN:
+        return False
+    return bool(tools)
+
 
 class _Completions:
     """Прокси над `AsyncOpenAI.chat.completions`, переводящий формат."""
@@ -41,17 +60,19 @@ class _Completions:
         Игнорирует stream=True (GigaChat-proxy не поддерживает SSE).
         Дропает tool_choice (нет полной поддержки в proxy).
         """
-        from openai import NOT_GIVEN
+        global _streaming_warning_emitted
 
-        if kwargs.pop("stream", False):
+        if kwargs.pop("stream", False) and not _streaming_warning_emitted:
             logger.warning(
                 "GigaChat-proxy не поддерживает streaming; "
-                "выполняется non-streaming запрос.",
+                "выполняется non-streaming запрос. "
+                "(Сообщение показывается один раз на процесс.)",
             )
+            _streaming_warning_emitted = True
         kwargs.pop("tool_choice", None)
 
         tools = kwargs.pop("tools", None)
-        if tools and tools is not NOT_GIVEN:
+        if _is_tools_provided(tools):
             functions = _tools_to_functions(tools)
             extra = dict(kwargs.pop("extra_body", None) or {})
             extra["functions"] = functions
@@ -227,7 +248,9 @@ def _translate_response(resp: ChatCompletion) -> ChatCompletion:
 
     args = fc.arguments
     if not isinstance(args, str):
-        args = json.dumps(args, ensure_ascii=False)
+        # default=str — защита от datetime/Decimal в args, согласовано с
+        # orchestrator.py:1015 (там тоже default=str для tool_call args).
+        args = json.dumps(args, ensure_ascii=False, default=str)
 
     synthetic_id = f"gc_{uuid.uuid4().hex[:12]}"
     tool_call = ChatCompletionMessageToolCall(
@@ -238,7 +261,7 @@ def _translate_response(resp: ChatCompletion) -> ChatCompletion:
 
     # pydantic v2 модели в openai SDK 1.x mutable — патчим in-place.
     # Если когда-нибудь станут frozen — упадём с TypeError, тогда fallback на
-    # ChatCompletion.model_construct (см. дизайн-спеку, §4.2 Вариант B).
+    # ChatCompletion.model_construct.
     choice.message.tool_calls = [tool_call]
     choice.message.function_call = None
     choice.finish_reason = "tool_calls"
