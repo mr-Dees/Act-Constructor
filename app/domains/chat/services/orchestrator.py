@@ -892,7 +892,12 @@ class Orchestrator:
         emitted_blocks: list[dict] = []  # ClientActionBlock'и, эмитнутые до финала
 
         try:
-            use_streaming = self.settings.streaming_enabled
+            # GigaChat-proxy не поддерживает SSE — выключаем streaming
+            # для этого профиля даже если в .env стоит true.
+            use_streaming = (
+                self.settings.streaming_enabled
+                and self.settings.profile != "gigachat"
+            )
             rounds = 0
             # Семантика max_tool_rounds — максимальное число tool-call
             # раундов (см. зеркальный non-streaming run()). Используем

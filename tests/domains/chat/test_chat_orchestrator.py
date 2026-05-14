@@ -1262,3 +1262,64 @@ class TestFallbackResponse:
         result = orchestrator._fallback_response("Привет")
         assert "Доступно инструментов: 1" in result["response"]
         assert "CHAT__API_BASE" in result["response"]
+
+
+@pytest.mark.asyncio
+async def test_orchestrator_disables_streaming_for_gigachat_profile():
+    """Профиль gigachat принудительно non-streaming даже при streaming_enabled=True."""
+    from unittest.mock import AsyncMock, MagicMock, patch
+
+    from pydantic import SecretStr
+
+    from app.domains.chat.services.orchestrator import Orchestrator
+    from app.domains.chat.settings import ChatDomainSettings
+
+    settings = ChatDomainSettings(
+        profile="gigachat",
+        api_base="http://liveaccess/v1/gc",
+        api_key=SecretStr("t"),
+        model="GigaChat-3-Ultra",
+        streaming_enabled=True,  # включён в настройках
+    )
+    msg_service = MagicMock()
+    msg_service.get_history = AsyncMock(return_value=[])
+    conv_service = MagicMock()
+
+    orch = Orchestrator(
+        msg_service=msg_service,
+        conv_service=conv_service,
+        settings=settings,
+    )
+
+    # Мокаем underlying API — отдаём простой текстовый ответ
+    from openai.types.chat import ChatCompletion
+    fake_resp = ChatCompletion.model_validate({
+        "id": "x", "object": "chat.completion", "created": 0,
+        "model": "GigaChat-3-Ultra",
+        "choices": [{"index": 0, "message": {
+            "role": "assistant", "content": "Привет",
+        }, "finish_reason": "stop"}],
+    })
+
+    with patch(
+        "app.domains.chat.services.orchestrator.build_llm_client",
+    ) as mock_build:
+        fake_client = MagicMock()
+        fake_client.chat.completions.create = AsyncMock(return_value=fake_resp)
+        mock_build.return_value = fake_client
+
+        with patch.object(
+            orch, "_save_assistant_message", new=AsyncMock(),
+        ):
+            chunks = []
+            async for chunk in orch.run_stream(
+                conversation_id="c1",
+                user_message="привет",
+            ):
+                chunks.append(chunk)
+
+    # Проверяем: ни одного вызова с stream=True
+    for call in fake_client.chat.completions.create.await_args_list:
+        assert call.kwargs.get("stream", False) is False, (
+            "Оркестратор не должен звать LLM со stream=True для gigachat"
+        )
