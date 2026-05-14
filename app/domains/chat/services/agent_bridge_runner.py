@@ -287,6 +287,36 @@ async def _run(
             )
 
 
+async def shutdown_running(timeout_sec: float = 5.0) -> int:
+    """Graceful shutdown polling-задач при остановке приложения.
+
+    Отменяет все задачи в registry и ждёт их завершения с таймаутом.
+    Записи в ``agent_requests`` остаются в текущем статусе (``dispatched``
+    или ``in_progress``); следующий запуск подхватит их через
+    :func:`schedule_pending` reconcile (older_than_sec=30 по умолчанию).
+
+    Возвращает количество отменённых задач.
+    """
+    if not _running:
+        return 0
+    tasks = list(_running.values())
+    for task in tasks:
+        if not task.done():
+            task.cancel()
+    done, pending = await asyncio.wait(tasks, timeout=timeout_sec)
+    if pending:
+        logger.warning(
+            "agent_bridge_runner: shutdown — %d задач не успели завершиться "
+            "за %.1fs (reconcile подхватит при следующем старте)",
+            len(pending), timeout_sec,
+        )
+    logger.info(
+        "agent_bridge_runner: shutdown отменил %d задач (завершено=%d, висят=%d)",
+        len(tasks), len(done), len(pending),
+    )
+    return len(tasks)
+
+
 async def schedule_pending(
     *,
     settings: ChatDomainSettings,

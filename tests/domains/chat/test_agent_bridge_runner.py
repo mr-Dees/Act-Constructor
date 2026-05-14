@@ -340,3 +340,40 @@ async def test_schedule_pending_skips_already_running():
     # rid-1 уже шла → schedule НЕ вызвался для неё; для rid-2 — вызвался.
     assert count == 1
     assert called_with == ["rid-2"]
+
+
+# ── shutdown_running ──
+
+
+async def test_shutdown_running_empty_registry_returns_zero():
+    """Без активных задач — корректно возвращает 0, не падает."""
+    assert agent_bridge_runner._running == {}
+    cancelled = await agent_bridge_runner.shutdown_running(timeout_sec=1.0)
+    assert cancelled == 0
+
+
+async def test_shutdown_running_cancels_and_waits():
+    """Отменяет живые задачи и ждёт их завершения."""
+    cancelled_flags: dict[str, bool] = {}
+
+    async def long_run(rid, *, settings):  # noqa: ARG001
+        try:
+            await asyncio.sleep(10)
+        except asyncio.CancelledError:
+            cancelled_flags[rid] = True
+            raise
+
+    with patch.object(agent_bridge_runner, "_run", long_run):
+        agent_bridge_runner.schedule("rid-a", settings=_settings())
+        agent_bridge_runner.schedule("rid-b", settings=_settings())
+        # Дать задачам войти в sleep().
+        await asyncio.sleep(0.01)
+
+        count = await agent_bridge_runner.shutdown_running(timeout_sec=1.0)
+
+    assert count == 2
+    assert cancelled_flags == {"rid-a": True, "rid-b": True}
+    # add_done_callback должен убрать задачи из registry.
+    assert agent_bridge_runner._running == {}
+
+
