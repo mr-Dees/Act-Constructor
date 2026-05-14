@@ -342,6 +342,9 @@ const ChatHistory = {
 
         try {
             const date = new Date(dateStr);
+            // Невалидная дата (например, мусор из БД) → пустая строка вместо
+            // "Invalid Date" в UI.
+            if (isNaN(date.getTime())) return '';
             const now = new Date();
 
             const isToday = date.getFullYear() === now.getFullYear()

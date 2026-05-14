@@ -14,8 +14,8 @@ const ChatMessages = {
     /** @type {Object<number, {element: HTMLElement, appendText: function, finalize: function}>} */
     _streamingBlocks: {},
 
-    /** @type {string} HTML welcome-сообщения для восстановления при очистке */
-    _welcomeHtml: '',
+    /** @type {HTMLElement|null} DOM-узел welcome-сообщения для восстановления при очистке */
+    _welcomeNode: null,
 
     /**
      * Инициализация: кеширование DOM, подписка на события
@@ -27,10 +27,11 @@ const ChatMessages = {
         if (this._initialized) return;
         this._messagesContainer = messagesContainer;
 
-        // Кэшируем welcome-сообщение для восстановления при очистке
+        // Кэшируем welcome-сообщение как DOM-узел (не строку!) — иначе innerHTML
+        // даст путь для XSS, если в шаблоне когда-нибудь окажется untrusted-контент.
         const welcomeEl = this._messagesContainer.querySelector('.chat-message-bot');
         if (welcomeEl) {
-            this._welcomeHtml = welcomeEl.outerHTML;
+            this._welcomeNode = welcomeEl.cloneNode(true);
         }
 
         // Сохраняем именованные ссылки на обработчики — нужно для destroy().
@@ -382,7 +383,7 @@ const ChatMessages = {
      * @private
      */
     _renderConversationMessages({ conversationId, messages }) {
-        this._messagesContainer.innerHTML = '';
+        this._messagesContainer.replaceChildren();
 
         for (const msg of messages) {
             const blocks = Array.isArray(msg.content) ? msg.content : [];
@@ -411,7 +412,11 @@ const ChatMessages = {
      * @private
      */
     _restoreWelcome() {
-        this._messagesContainer.innerHTML = this._welcomeHtml;
+        this._messagesContainer.replaceChildren();
+        if (this._welcomeNode) {
+            // Клонируем повторно — оригинал нужен для следующих восстановлений.
+            this._messagesContainer.appendChild(this._welcomeNode.cloneNode(true));
+        }
     },
 };
 

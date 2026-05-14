@@ -7,8 +7,6 @@
 class ChatPopupManager {
     /** @type {boolean} */
     static _initialized = false;
-    /** @type {boolean} */
-    static _chatInitialized = false;
 
     static _storageKey = 'chat_popup_size';
     static _defaultWidth = 650;
@@ -77,10 +75,11 @@ class ChatPopupManager {
     static open() {
         if (!this._panel) return;
 
-        // Ленивая инициализация ChatManager при первом открытии
-        if (!this._chatInitialized && typeof ChatManager !== 'undefined') {
+        // Инициализируем ChatManager при каждом открытии — destroy() в close()
+        // снимает все listener'ы, поэтому повторный init даёт чистое состояние
+        // без накопления подписок.
+        if (typeof ChatManager !== 'undefined') {
             ChatManager.init();
-            this._chatInitialized = true;
         }
 
         this._panel.classList.remove('hidden');
@@ -101,6 +100,12 @@ class ChatPopupManager {
 
         this._panel.classList.add('hidden');
         this._btn.classList.remove('active');
+
+        // Снимаем все listener'ы ChatManager, чтобы избежать утечек и дублирования
+        // подписок при следующем открытии.
+        if (typeof ChatManager !== 'undefined' && ChatManager.destroy) {
+            ChatManager.destroy();
+        }
     }
 
     /**

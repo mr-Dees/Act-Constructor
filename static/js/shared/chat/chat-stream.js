@@ -166,24 +166,35 @@ const ChatStream = {
         const decoder = new TextDecoder('utf-8');
         let buffer = '';
 
-        while (true) {
-            const { done, value } = await reader.read();
-            if (done) {
-                if (buffer.trim()) {
-                    const { parsed } = this._parseSSE(buffer + '\n\n');
-                    for (const event of parsed) {
-                        if (onEvent) onEvent(event);
+        try {
+            while (true) {
+                const { done, value } = await reader.read();
+                if (done) {
+                    if (buffer.trim()) {
+                        const { parsed } = this._parseSSE(buffer + '\n\n');
+                        for (const event of parsed) {
+                            if (onEvent) onEvent(event);
+                        }
                     }
+                    break;
                 }
-                break;
-            }
 
-            buffer += decoder.decode(value, { stream: true });
-            const { parsed, remaining } = this._parseSSE(buffer);
-            buffer = remaining;
-            for (const event of parsed) {
-                if (onEvent) onEvent(event);
+                buffer += decoder.decode(value, { stream: true });
+                const { parsed, remaining } = this._parseSSE(buffer);
+                buffer = remaining;
+                for (const event of parsed) {
+                    if (onEvent) onEvent(event);
+                }
             }
+        } finally {
+            // Освобождаем reader: при abort() контроллера поток остаётся
+            // не освобождённым, и следующий fetch на тот же origin может
+            // зависнуть. Сначала cancel() (флашит underlying stream),
+            // затем releaseLock(). Оба вызова идемпотентны и завёрнуты
+            // в try, потому что на уже отменённом/освобождённом reader
+            // они бросают.
+            try { await reader.cancel(); } catch { /* ignore */ }
+            try { reader.releaseLock(); } catch { /* ignore */ }
         }
     },
 

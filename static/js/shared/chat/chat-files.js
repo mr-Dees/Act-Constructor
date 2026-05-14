@@ -14,6 +14,9 @@ const ChatFiles = {
     /** @type {HTMLElement|null} */
     _messagesContainer: null,
 
+    /** @type {AbortController|null} Снимает все DOM-listener'ы по abort() */
+    _abortController: null,
+
     /** Лимиты файлов (соответствуют серверным настройкам по умолчанию) */
     _FILE_LIMITS: {
         maxFileSize: 10 * 1024 * 1024,       // 10 МБ на файл
@@ -30,6 +33,7 @@ const ChatFiles = {
     init({ messagesContainer }) {
         if (this._initialized) return;
         this._messagesContainer = messagesContainer;
+        this._abortController = new AbortController();
         this._initFileInput();
         this._initDragAndDrop();
 
@@ -52,6 +56,12 @@ const ChatFiles = {
      */
     destroy() {
         if (!this._initialized) return;
+        // Снимаем все DOM-listener'ы (file input change, drag/drop, attach-кнопка)
+        // одним abort() — без именованных функций.
+        if (this._abortController) {
+            this._abortController.abort();
+            this._abortController = null;
+        }
         if (this._onConversationCleared) {
             ChatEventBus.off('context:conversation-cleared', this._onConversationCleared);
             this._onConversationCleared = null;
@@ -114,6 +124,8 @@ const ChatFiles = {
         const fileInput = document.getElementById('chatFileInput');
         if (!fileInput) return;
 
+        const signal = this._abortController?.signal;
+
         fileInput.addEventListener('change', () => {
             const validated = this._validateFiles([...fileInput.files]);
             for (const file of validated) {
@@ -122,7 +134,16 @@ const ChatFiles = {
             fileInput.value = '';
             this._renderFilePreview();
             ChatEventBus.emit('files:changed', { files: this._pendingFiles });
-        });
+        }, { signal });
+
+        // Открытие диалога выбора файлов через data-атрибут вместо inline onclick
+        // (inline-обработчики ломают CSP и затрудняют delegation).
+        const attachBtn = document.querySelector('[data-action="open-file-picker"]');
+        if (attachBtn) {
+            attachBtn.addEventListener('click', () => {
+                fileInput.click();
+            }, { signal });
+        }
     },
 
     /**
@@ -136,6 +157,7 @@ const ChatFiles = {
         const overlay = dropZone.querySelector('.chat-drop-overlay');
         if (!overlay) return;
 
+        const signal = this._abortController?.signal;
         let dragCounter = 0;
 
         dropZone.addEventListener('dragenter', (e) => {
@@ -143,12 +165,12 @@ const ChatFiles = {
             if (!this._hasDragFiles(e)) return;
             dragCounter++;
             if (dragCounter === 1) overlay.classList.remove('hidden');
-        });
+        }, { signal });
 
         dropZone.addEventListener('dragover', (e) => {
             e.preventDefault();
             if (this._hasDragFiles(e)) e.dataTransfer.dropEffect = 'copy';
-        });
+        }, { signal });
 
         dropZone.addEventListener('dragleave', (e) => {
             e.preventDefault();
@@ -157,7 +179,7 @@ const ChatFiles = {
                 dragCounter = 0;
                 overlay.classList.add('hidden');
             }
-        });
+        }, { signal });
 
         dropZone.addEventListener('drop', (e) => {
             e.preventDefault();
@@ -175,7 +197,7 @@ const ChatFiles = {
             }
             this._renderFilePreview();
             ChatEventBus.emit('files:changed', { files: this._pendingFiles });
-        });
+        }, { signal });
     },
 
     /**
