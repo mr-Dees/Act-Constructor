@@ -44,3 +44,29 @@ def test_request_timeout_propagated():
     # AsyncOpenAI хранит timeout в нескольких внутренних полях; на верхнем
     # уровне он доступен через атрибут .timeout
     assert client.timeout == 42
+
+
+def test_gigachat_profile_returns_adapter():
+    """Для profile=gigachat фабрика отдаёт GigaChatAdapterClient."""
+    from app.domains.chat.services.gigachat_adapter import GigaChatAdapterClient
+
+    s = _settings(
+        profile="gigachat",
+        api_base="http://liveaccess/v1/gc",
+        api_key=SecretStr("internal-token"),
+        model="GigaChat-3-Ultra",
+    )
+    client = build_llm_client(s)
+    assert isinstance(client, GigaChatAdapterClient)
+    assert str(client.base_url).startswith("http://liveaccess/v1/gc")
+
+
+def test_non_gigachat_profile_returns_asyncopenai():
+    """Для остальных профилей — обычный AsyncOpenAI."""
+    from openai import AsyncOpenAI
+
+    for profile in ("openrouter", "sglang", "openai"):
+        s = _settings(profile=profile)
+        client = build_llm_client(s)
+        assert isinstance(client, AsyncOpenAI), \
+            f"profile={profile} должен возвращать AsyncOpenAI"
