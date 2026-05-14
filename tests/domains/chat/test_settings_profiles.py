@@ -84,3 +84,26 @@ def test_smalltalk_mode_forward(monkeypatch):
               CHAT__API_BASE="http://x", CHAT__API_KEY="x", CHAT__MODEL="m",
               CHAT__SMALLTALK_MODE="forward")
     assert s.smalltalk_mode == "forward"
+
+
+def test_gigachat_profile_accepted():
+    """Профиль gigachat должен валидно создаваться."""
+    s = ChatDomainSettings(
+        profile="gigachat",
+        api_base="http://liveaccess/v1/gc",
+        api_key="dummy-token",
+        model="GigaChat-3-Ultra",
+    )
+    assert s.profile == "gigachat"
+
+
+def test_invalid_profile_rejected():
+    """Литерал отвергает значения вне whitelist'а."""
+    import pydantic
+    with pytest.raises(pydantic.ValidationError):
+        ChatDomainSettings(
+            profile="anthropic",  # нет в Literal
+            api_base="http://x",
+            api_key="x",
+            model="m",
+        )

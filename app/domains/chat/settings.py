@@ -28,7 +28,7 @@ class ChatDomainSettings(BaseModel):
     """Настройки AI-ассистента и чата."""
 
     # Профиль провайдера LLM
-    profile: Literal["openrouter", "sglang", "openai"] = "sglang"
+    profile: Literal["openrouter", "sglang", "openai", "gigachat"] = "sglang"
     extra_headers: dict[str, str] = Field(default_factory=dict)
 
     # LLM
