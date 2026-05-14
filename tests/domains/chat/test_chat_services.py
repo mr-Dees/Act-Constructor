@@ -33,9 +33,11 @@ def _make_mock_repo_with_conn():
     ``async with msg_repo.conn.transaction()`` — поэтому мокам репозиториев
     нужен валидный async-context-manager на ``.conn.transaction()``.
 
-    Также сбрасываем `get_by_user_and_title` в None по умолчанию: иначе
-    AsyncMock возвращает truthy MagicMock и server-side идемпотентность
-    в ConversationService.create неожиданно срабатывает в обычных тестах.
+    **Защита от mock drift**: AsyncMock по умолчанию возвращает truthy
+    MagicMock на любой await; для методов вида ``get_*`` / ``count_*`` /
+    ``find_*`` это ломает тесты, которые ожидают None/0/False. При
+    добавлении новых ``get_*``/``count_*`` методов в репозитории — добавь
+    им явный дефолт здесь.
     """
     repo = AsyncMock()
     tx = AsyncMock()
@@ -43,7 +45,10 @@ def _make_mock_repo_with_conn():
     tx.__aexit__ = AsyncMock(return_value=False)
     repo.conn = MagicMock()
     repo.conn.transaction = MagicMock(return_value=tx)
+    # Явные дефолты для известных идемпотентность-чувствительных методов.
     repo.get_by_user_and_title = AsyncMock(return_value=None)
+    repo.get_by_id = AsyncMock(return_value=None)
+    repo.count_by_user = AsyncMock(return_value=0)
     return repo
 
 
