@@ -810,10 +810,30 @@ class Orchestrator:
                 "token_usage": token_usage,
             }
 
-        except Exception as exc:
+        except Exception:
             logger.exception("Ошибка вызова LLM API")
+            # Сохраняем ErrorBlock в историю: без этого при перезагрузке
+            # страницы пользователь не увидит, что произошло — будет только
+            # его user-message без ответа. Сырые детали (stack/код провайдера)
+            # наружу не пробрасываем — только нейтральное сообщение.
+            error_message = "Временная ошибка AI-сервиса. Попробуйте позже."
+            try:
+                await self._save_assistant_message(
+                    conversation_id=conversation_id,
+                    content_blocks=[{
+                        "type": "error",
+                        "message": error_message,
+                        "code": "llm_unavailable",
+                    }],
+                )
+            except Exception:
+                # save может упасть, если БД тоже недоступна — это не фатально,
+                # ответ всё равно вернём.
+                logger.exception(
+                    "Не удалось сохранить error-block ассистент-сообщения",
+                )
             return {
-                "response": "Временная ошибка AI-сервиса. Попробуйте позже.",
+                "response": error_message,
                 "status": "error",
             }
 

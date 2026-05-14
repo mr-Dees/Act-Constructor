@@ -498,12 +498,15 @@ class TestOrchestratorRun:
         """1.4 (BUG #7 закрыт как намеренное поведение): при ошибке LLM API
         run() возвращает dict с 'status: error' и нейтральным сообщением;
         для не-стрим режима это допустимо (внутренние детали не утекают).
+        Дополнительно: ErrorBlock сохраняется в историю, чтобы пользователь
+        увидел причину при перезагрузке страницы.
         """
         mock_client = AsyncMock()
         mock_client.chat.completions.create = AsyncMock(
             side_effect=Exception("Connection refused"),
         )
         mock_client_factory.return_value = mock_client
+        orchestrator._save_assistant_message = AsyncMock()
 
         result = await orchestrator.run(
             conversation_id="conv-1",
@@ -514,6 +517,14 @@ class TestOrchestratorRun:
         assert result["status"] == "error"
         assert "Временная ошибка" in result["response"]
         # Нет HTTPException или raise — вызывающий код получит 200 OK
+        # ErrorBlock сохранён в историю.
+        orchestrator._save_assistant_message.assert_awaited_once()
+        kwargs = orchestrator._save_assistant_message.await_args.kwargs
+        saved_blocks = kwargs["content_blocks"]
+        assert len(saved_blocks) == 1
+        assert saved_blocks[0]["type"] == "error"
+        assert saved_blocks[0]["code"] == "llm_unavailable"
+        assert "Временная ошибка" in saved_blocks[0]["message"]
 
     @patch("app.domains.chat.services.orchestrator.Orchestrator._get_openai_client")
     async def test_run_strips_leading_newlines(self, mock_client_factory, orchestrator):
