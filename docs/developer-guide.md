@@ -1814,7 +1814,7 @@ ChatPopupManager       — popup окно для редактора актов
 | `block_start` + `block_delta` + `block_end` | триплет | text, code, reasoning (стримуемые) |
 | `block_complete` | одно событие | file, image, plan, error (нестримуемые) |
 | `buttons` | одно событие | группа кнопок (action_id уже транслирован сервером) |
-| `client_action` | одно событие | ClientActionBlock — исполняется ровно один раз |
+| `client_action` | одно событие | ClientActionBlock — исполняется идемпотентно по `block_id` |
 | `agent_request_started` | один раз при forward | `request_id` для авто-resume при разрыве |
 | `plan_update` | по мере прогресса | обновление PlanBlock |
 | `tool_call` / `tool_result` | информационные | сейчас не рендерятся |
@@ -1836,7 +1836,7 @@ chat-modal.js / chat-popup.js
 
 - **Защита от повторной инициализации**: каждый модуль хранит `_initialized` флаг и выходит из `init()` при повторном вызове
 - **Ленивая инициализация**: `ChatModalManager`/`ChatPopupManager` вызывают `ChatManager.init()` при первом открытии
-- **ClientAction исполняется ровно один раз**: в момент SSE-события `client_action` через `ChatRenderer.renderBlock(block, {execute: true})`. При рендере истории `{execute: false}` — только label-чип. Иначе пользователь застрянет в редирект-цикле
+- **ClientAction идемпотентен по `block_id`**: каждый `ClientActionBlock` несёт uuid `block_id` (бэк проставляет в `app/core/chat/blocks.py:141` через `default_factory=uuid4`). Фронт хранит исполненные id в `sessionStorage['chat:executedActions']` (max 500 элементов, FIFO eviction) — повторный SSE-event с тем же id, рендер истории или перезагрузка вкладки не вызовут повторного редиректа. Единая точка исполнения — `ClientActionsRegistry.executeBlock(block)`. **Не вызывай `.execute(...)` напрямую** — обойдёшь `block_id`-чек
 - **Auto-resume при разрыве SSE**: `ChatStream` запоминает `request_id` из `agent_request_started` и при разрыве переоткрывает `GET /conversations/{cid}/agent-request/{rid}/stream?since=<seq>`. Курсор по `seq` (не id) — `id` в Greenplum не монотонен между сегментами
 - **DOM API в `chat-history`**: список бесед рендерится через `document.createElement`/`textContent`/`dataset`, не через `innerHTML` — защита от XSS через title беседы (= первое сообщение пользователя)
 - **Whitelist в `chat-client-actions`**: `open_url` принимает только `http:/https:/mailto:/relative`; `trigger_sdk` — только методы из `ALLOWED_SDK_METHODS` (по умолчанию пустой)
@@ -2190,7 +2190,7 @@ ChatTool(
 - **Стримуемые** (`text`, `code`, `reasoning`) идут триплетом `block_start` + N×`block_delta` + `block_end`.
 - **Нестримуемые** (`file`, `image`, `plan`, `error`) — одним `block_complete` с полным payload. **Никогда не парой `block_start`+`block_end` без delta** — фронт создаст пустой text-контейнер, и блок появится только после перезагрузки истории (см. CLAUDE.md).
 - **Buttons** — собственное событие `event: buttons`.
-- **Client action** — собственное событие `event: client_action`; исполняется **ровно один раз** при получении, при рендере истории `{execute: false}` (см. §7.9).
+- **Client action** — собственное событие `event: client_action`; **идемпотентно по `block_id`** через `sessionStorage['chat:executedActions']` (см. §7.9). Повторный SSE-event с тем же `block_id`, рендер истории и перезагрузка вкладки — не приводят к повторному исполнению.
 
 **Пример полного стрима** (диалог: пользователь спросил «Открой КМ-23-001 и расскажи о КСО», ответ: reasoning → forward к агенту → text → кнопка → конец):
 
@@ -2260,7 +2260,7 @@ ChatRenderer.renderBlock(block, {execute: true})
 
 Регистрация дополнительных команд в JS: `ClientActionsRegistry.register('my_action', ({...params}) => {...})`.
 
-**Критическое правило**: `ClientActionBlock` исполняется **ровно один раз** в момент получения SSE-события. При рендере исторических сообщений (загрузка из `chat_messages.content`) фронт вызывает `ChatRenderer.renderBlocks(container, blocks, {execute: false})` — отображает только label-чип, без исполнения. Иначе пользователь застрянет в редирект-цикле.
+**Критическое правило**: `ClientActionBlock` идемпотентен по `block_id`. Каждый блок получает uuid `block_id` (бэк генерит `default_factory=uuid4` в `app/core/chat/blocks.py:141`), фронт хранит исполненные id в `sessionStorage['chat:executedActions']` (`static/js/shared/chat/chat-client-actions.js:13-30`, max 500 элементов, FIFO eviction). Повторное получение SSE-события с тем же `block_id`, рендер истории и перезагрузка вкладки — не приводят к повторному `window.location`/`Notifications.show`. Единая точка исполнения — `ClientActionsRegistry.executeBlock(block)`. **Не вызывай `.execute(action, params)` напрямую** — обойдёшь `block_id`-чек и получишь редирект-цикл.
 
 **Пример action-handler'а** (`app/domains/acts/integrations/action_handlers.py`):
 
