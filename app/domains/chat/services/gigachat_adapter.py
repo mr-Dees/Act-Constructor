@@ -61,3 +61,30 @@ class GigaChatAdapterClient:
     def base_url(self):
         """Проксируем base_url, чтобы тесты могли его проверять."""
         return self._underlying.base_url
+
+
+def _tools_to_functions(tools: list[dict]) -> list[dict]:
+    """Распаковывает OpenAI tools[] в native GigaChat functions[].
+
+    Вход:  [{"type":"function","function":{"name","description","parameters"}}]
+    Выход: [{"name","description","parameters"}]
+    """
+    out: list[dict] = []
+    for tool in tools:
+        if tool.get("type") != "function":
+            raise ValueError(
+                f"GigaChat-адаптер: ожидался type=function, получен "
+                f"{tool.get('type')!r}",
+            )
+        fn = tool.get("function")
+        if not fn:
+            raise ValueError(
+                "GigaChat-адаптер: отсутствует поле function в tool",
+            )
+        flat: dict = {"name": fn["name"]}
+        if "description" in fn:
+            flat["description"] = fn["description"]
+        if "parameters" in fn:
+            flat["parameters"] = fn["parameters"]
+        out.append(flat)
+    return out

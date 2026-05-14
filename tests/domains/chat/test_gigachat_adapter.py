@@ -7,7 +7,10 @@ from unittest.mock import AsyncMock, patch
 import pytest
 from openai.types.chat import ChatCompletion
 
-from app.domains.chat.services.gigachat_adapter import GigaChatAdapterClient
+from app.domains.chat.services.gigachat_adapter import (
+    GigaChatAdapterClient,
+    _tools_to_functions,
+)
 
 
 def _make_completion(
@@ -48,3 +51,61 @@ def test_adapter_exposes_chat_completions_create():
     assert hasattr(adapter, "chat")
     assert hasattr(adapter.chat, "completions")
     assert callable(adapter.chat.completions.create)
+
+
+def test_tools_to_functions_flattens_openai_format():
+    """[{type,function:{name,desc,params}}] -> [{name,desc,params}]"""
+    tools = [
+        {
+            "type": "function",
+            "function": {
+                "name": "get_weather",
+                "description": "Погода",
+                "parameters": {"type": "object", "properties": {}},
+            },
+        },
+        {
+            "type": "function",
+            "function": {
+                "name": "open_url",
+                "description": "Открыть URL",
+                "parameters": {
+                    "type": "object",
+                    "properties": {"url": {"type": "string"}},
+                    "required": ["url"],
+                },
+            },
+        },
+    ]
+    out = _tools_to_functions(tools)
+    assert out == [
+        {
+            "name": "get_weather",
+            "description": "Погода",
+            "parameters": {"type": "object", "properties": {}},
+        },
+        {
+            "name": "open_url",
+            "description": "Открыть URL",
+            "parameters": {
+                "type": "object",
+                "properties": {"url": {"type": "string"}},
+                "required": ["url"],
+            },
+        },
+    ]
+
+
+def test_tools_to_functions_empty_list_returns_empty():
+    assert _tools_to_functions([]) == []
+
+
+def test_tools_to_functions_rejects_non_function_type():
+    """Любой type != 'function' — ValueError."""
+    with pytest.raises(ValueError, match="ожидался type=function"):
+        _tools_to_functions([{"type": "code_interpreter", "function": {"name": "x"}}])
+
+
+def test_tools_to_functions_rejects_missing_function_key():
+    with pytest.raises(ValueError, match="отсутствует поле function"):
+        _tools_to_functions([{"type": "function"}])
