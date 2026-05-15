@@ -53,8 +53,8 @@ class CkClientExpConfig {
             { key: 'department_owner', source: 'department_owner' },
         ]},
         { row: [
-            { key: 'block_owner', label: 'Блок', type: 'readonly-text', computed: true },
-            { key: 'department_owner', label: 'Подразделение', type: 'readonly-text', computed: true },
+            { key: 'block_owner', label: 'Блок', type: 'readonly-text' },
+            { key: 'department_owner', label: 'Подразделение', type: 'readonly-text' },
         ]},
         { key: 'reestr_metric_id', label: 'ID реестра метрики', type: 'readonly-text' },
     ];

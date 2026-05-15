@@ -34,7 +34,8 @@ class FRValidationCreate(BaseModel):
     risk: str = Field(default="", max_length=500)
     rev_start_dt: Optional[datetime] = None
     rev_end_dt: Optional[datetime] = None
-    process_owner: str = Field(default="", max_length=500)
+    block_owner: str = Field(default="", max_length=500)
+    department_owner: str = Field(default="", max_length=500)
     sberdocs_ctrl_assgn_number: str = Field(default="", max_length=200)
     assigment_id: Optional[int] = None
     assigment_format: str = Field(default="", max_length=200)
@@ -69,4 +70,3 @@ class FRValidationView(FRValidationRecord):
     """Представление FR-валидации с вычисляемыми полями (JOIN по act_sub_number_id)."""
 
     act_sub_number: Optional[str] = None
-    department_owner: Optional[str] = None
