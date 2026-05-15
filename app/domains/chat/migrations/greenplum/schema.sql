@@ -103,7 +103,9 @@ CREATE TABLE IF NOT EXISTS {SCHEMA}.{PREFIX}agent_requests (
     started_at        TIMESTAMP,
     finished_at       TIMESTAMP,
     updated_at        TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    PRIMARY KEY (id)
+    -- GP-требование: DISTRIBUTED BY должен быть подмножеством PK.
+    -- id ведущий, чтобы lookups `WHERE id = $1` шли по PK-индексу.
+    PRIMARY KEY (id, conversation_id)
 )
 WITH (appendonly=false)
 DISTRIBUTED BY (conversation_id);
@@ -132,7 +134,8 @@ CREATE TABLE IF NOT EXISTS {SCHEMA}.{PREFIX}agent_response_events (
                   CHECK (event_type IN ('reasoning','status','error')),
     payload       JSONB NOT NULL,
     created_at    TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    PRIMARY KEY (id)
+    -- GP-требование: DISTRIBUTED BY должен быть подмножеством PK.
+    PRIMARY KEY (id, request_id)
 )
 WITH (appendonly=false)
 DISTRIBUTED BY (request_id);
@@ -150,7 +153,8 @@ CREATE TABLE IF NOT EXISTS {SCHEMA}.{PREFIX}agent_responses (
     token_usage    JSONB,
     model          VARCHAR(100),
     created_at     TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    PRIMARY KEY (id),
+    -- GP-требование: и PK, и UNIQUE должны содержать столбец DISTRIBUTED BY.
+    PRIMARY KEY (id, request_id),
     UNIQUE (request_id)
 )
 WITH (appendonly=false)
