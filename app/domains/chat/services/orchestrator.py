@@ -743,10 +743,28 @@ class Orchestrator:
                 and rounds < self.settings.max_tool_rounds
             ):
                 rounds += 1
-                assistant_msg = response.choices[0].message
+                raw_msg = response.choices[0].message
+                # Не передаём Pydantic-объект как есть: см. комментарий в
+                # run_stream — Qwen/SGLang и GigaChat-proxy не принимают
+                # null content при наличии tool_calls.
+                assistant_msg = {
+                    "role": "assistant",
+                    "content": raw_msg.content or "",
+                    "tool_calls": [
+                        {
+                            "id": tc.id,
+                            "type": "function",
+                            "function": {
+                                "name": tc.function.name,
+                                "arguments": tc.function.arguments,
+                            },
+                        }
+                        for tc in raw_msg.tool_calls
+                    ],
+                }
                 messages.append(assistant_msg)
 
-                for tc in assistant_msg.tool_calls:
+                for tc in raw_msg.tool_calls:
                     tool_name = tc.function.name
                     try:
                         arguments = json.loads(tc.function.arguments)
@@ -1013,9 +1031,13 @@ class Orchestrator:
                             for tc in finalized_tool_calls
                         ]
 
+                        # content="" (не None) — иначе Qwen/SGLang chat-template
+                        # рендерит пустой документ (400 "zero-length"), а
+                        # GigaChat-proxy отдаёт 422 на null content. OpenAI-spec
+                        # null разрешает, но эти провайдеры — нет.
                         assistant_msg = {
                             "role": "assistant",
-                            "content": accumulated_content or None,
+                            "content": accumulated_content or "",
                             "tool_calls": tool_calls_for_msg,
                         }
                         # MiniMax M2: пробрасываем reasoning_details обратно
@@ -1213,10 +1235,28 @@ class Orchestrator:
                 )
 
                 if response.choices[0].message.tool_calls:
-                    assistant_msg = response.choices[0].message
+                    raw_msg = response.choices[0].message
+                    # Не передаём Pydantic-объект как есть: его сериализация
+                    # с content=None ломает Qwen/SGLang (400) и GigaChat-proxy
+                    # (422). Собираем dict с гарантированно строковым content.
+                    assistant_msg = {
+                        "role": "assistant",
+                        "content": raw_msg.content or "",
+                        "tool_calls": [
+                            {
+                                "id": tc.id,
+                                "type": "function",
+                                "function": {
+                                    "name": tc.function.name,
+                                    "arguments": tc.function.arguments,
+                                },
+                            }
+                            for tc in raw_msg.tool_calls
+                        ],
+                    }
                     messages.append(assistant_msg)
 
-                    for tc in assistant_msg.tool_calls:
+                    for tc in raw_msg.tool_calls:
                         tool_name = tc.function.name
                         try:
                             arguments = json.loads(tc.function.arguments)

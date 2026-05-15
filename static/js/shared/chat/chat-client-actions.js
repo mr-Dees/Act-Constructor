@@ -128,12 +128,34 @@
         return ALLOWED_OPEN_URL_SCHEMES.some(s => url.startsWith(s));
     }
 
+    /**
+     * Разрешает относительные пути с учётом JupyterHub-прокси.
+     *
+     * Бэк-handler'ы (admin.open_admin_panel, acts.open_act_page и т.п.)
+     * отдают url'ы в виде "/admin", "/constructor?act_id=...". В деплое за
+     * JupyterHub proxy реальные ресурсы живут под /user/{user}/proxy/{port}/...
+     * Без подстановки префикса браузер уходит на корень origin'а (например
+     * /hub/admin), что 404.
+     *
+     * Абсолютные http(s)/mailto URL остаются как есть.
+     */
+    function resolveProxyUrl(url) {
+        if (typeof url !== 'string' || !url) return url;
+        if (!url.startsWith('/')) return url;
+        if (window.AppConfig
+            && AppConfig.api
+            && typeof AppConfig.api.getUrl === 'function') {
+            return AppConfig.api.getUrl(url);
+        }
+        return url;
+    }
+
     ClientActionsRegistry.register('open_url', ({ url }) => {
         if (!isAllowedUrl(url)) {
             console.warn(`open_url: запрещённая схема URL: ${String(url).slice(0, 40)}`);
             return;
         }
-        window.location.href = url;
+        window.location.href = resolveProxyUrl(url);
     });
 
     ClientActionsRegistry.register('notify', ({ message, level }) => {

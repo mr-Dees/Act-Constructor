@@ -140,7 +140,11 @@ def test_translate_messages_passthrough_user_and_system():
 
 
 def test_translate_messages_assistant_tool_calls_to_function_call():
-    """Assistant с tool_calls конвертируется в function_call (берётся первый)."""
+    """Assistant с tool_calls конвертируется в function_call (берётся первый).
+
+    None content нормализуется в "" — иначе GigaChat-proxy валит 422
+    RequestInputValidationException на следующем раунде.
+    """
     messages = [
         {"role": "user", "content": "Открой главную"},
         {
@@ -159,7 +163,7 @@ def test_translate_messages_assistant_tool_calls_to_function_call():
     out = _translate_messages(messages)
     assert out[1] == {
         "role": "assistant",
-        "content": None,
+        "content": "",
         "function_call": {
             "name": "open_url",
             "arguments": '{"url":"https://x.com"}',

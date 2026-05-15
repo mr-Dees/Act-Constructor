@@ -184,9 +184,12 @@ def _translate_messages(messages: list[Any]) -> list[dict]:
             tc = tcs[0] if isinstance(tcs[0], dict) else _msg_to_dict(tcs[0])
             fn = tc.get("function") or {}
             fn_d = fn if isinstance(fn, dict) else _msg_to_dict(fn)
+            # content="" (не None) — GigaChat-proxy отдаёт 422
+            # RequestInputValidationException на null content
+            # при наличии function_call.
             new_msg = {
                 "role": "assistant",
-                "content": md.get("content"),
+                "content": md.get("content") or "",
                 "function_call": {
                     "name": fn_d.get("name", ""),
                     "arguments": fn_d.get("arguments", ""),
