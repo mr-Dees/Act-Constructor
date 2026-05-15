@@ -69,6 +69,8 @@
   - [9.2 За JupyterHub proxy](#92-за-jupyterhub-proxy)
   - [9.3 За reverse proxy (HTTPS)](#93-за-reverse-proxy-https)
   - [9.4 Конфигурация: .env и Pydantic Settings](#94-конфигурация-env-и-pydantic-settings)
+    - [9.4.1 Примеры .env для LLM-профилей](#941-примеры-env-для-llm-профилей)
+    - [9.4.2 MIME-типы файлов чата (дефолт)](#942-mime-типы-файлов-чата-дефолт)
   - [9.5 Полная таблица переменных окружения](#95-полная-таблица-переменных-окружения)
   - [9.6 Retention agent-bridge таблиц](#96-retention-agent-bridge-таблиц)
 
@@ -2709,6 +2711,65 @@ ACTS__RESOURCE__MAX_TREE_DEPTH=50
 ACTS__AUDIT_LOG__RETENTION_DAYS=365
 ```
 
+#### 9.4.1 Примеры .env для LLM-профилей
+
+Все три профиля используют один и тот же оркестратор; различия инкапсулированы в фабрике клиента и адаптере GigaChat (см. §7.1a). Ниже — минимальные блоки, которые достаточно дописать в `.env` поверх дефолтов.
+
+**SGLang (прод, локальный inference):**
+
+```env
+CHAT__PROFILE=sglang
+CHAT__API_BASE=http://127.0.0.1:30000/v1            # БЕЗ /chat/completions
+CHAT__API_KEY=local-test-key
+CHAT__MODEL=/home/datalab/nfs/llm/Qwen-8B
+CHAT__RETRY__ON_429=false                           # локальный SGLang не rate-limit'ит
+```
+
+**OpenRouter (dev, бесплатные модели):**
+
+```env
+CHAT__PROFILE=openrouter
+CHAT__API_BASE=https://openrouter.ai/api/v1         # БЕЗ /chat/completions
+CHAT__API_KEY=sk-or-v1-...
+CHAT__MODEL=nvidia/nemotron-3-super-120b-a12b:free  # или minimax/minimax-m2.5:free
+CHAT__EXTRA_HEADERS={"HTTP-Referer":"https://aw.local","X-Title":"AuditWorkstation"}
+```
+
+**GigaChat (jupyter proxy):**
+
+```env
+CHAT__PROFILE=gigachat
+CHAT__API_BASE=http://liveaccess/v1/gc              # БЕЗ /chat/completions
+CHAT__API_KEY=${JPY_API_TOKEN}                      # внутренний токен из окружения JupyterHub
+CHAT__MODEL=GigaChat-3-Ultra
+CHAT__STREAMING_ENABLED=false                       # proxy не поддерживает SSE (422 EventException)
+```
+
+GigaChat-proxy частично OpenAI-совместим. Различия (`tools[]`↔`functions[]`, `tool_calls[]`↔singular `function_call`, dict-args↔JSON-args, отсутствие streaming) изолированы в `app/domains/chat/services/gigachat_adapter.py`. Ограничение: 1 function_call за раунд (оркестратор и так работает по одному tool за итерацию). Подробности и матрица «симптом → причина → решение» — §7.1a.
+
+**Типичные ошибки:**
+
+- `CHAT__API_BASE` с хвостом `/chat/completions` → 404 (SDK добавляет путь сам).
+- Незакомментированный `CHAT__STREAMING_ENABLED=true` для `gigachat` → молча игнорируется адаптером, в логи уходит одно warning на процесс.
+- Пустые `API_BASE`/`API_KEY`/`MODEL` → чат уходит в режим заглушки (`/api/v1/chat/health` вернёт `ok: false`).
+
+#### 9.4.2 MIME-типы файлов чата (дефолт)
+
+`CHAT__ALLOWED_MIME_TYPES` валидируется как whitelist точных значений — подстановки `*` запрещены. Если переменная не задана, разрешены:
+
+| Категория | MIME-типы |
+|---|---|
+| Текст | `text/plain`, `text/csv`, `text/markdown` |
+| Документы | `application/pdf`, `application/json`, `application/xml` |
+| Office | `application/vnd.openxmlformats-officedocument.spreadsheetml.sheet` (xlsx), `application/vnd.ms-excel` (xls), `application/vnd.openxmlformats-officedocument.wordprocessingml.document` (docx) |
+| Изображения | `image/jpeg`, `image/png`, `image/gif`, `image/webp` |
+
+Источник истины — `ChatDomainSettings.allowed_mime_types` в `app/domains/chat/settings.py`. Чтобы сузить список (например, оставить только PDF и PNG):
+
+```env
+CHAT__ALLOWED_MIME_TYPES=["application/pdf","image/png"]
+```
+
 ### 9.5 Полная таблица переменных окружения
 
 | Группа | Переменная | Тип | По умолчанию | Описание |
@@ -2730,10 +2791,10 @@ ACTS__AUDIT_LOG__RETENTION_DAYS=365
 | | `DATABASE__POOL_MAX_SIZE` | int | `10` | Макс. соединений |
 | | `DATABASE__COMMAND_TIMEOUT` | int | `60` | Timeout команд (сек) |
 | | `DATABASE__TABLE_PREFIX` | str | `t_db_oarb_audit_act_` | Общий префикс таблиц приложения (PG и GP) |
-| **БД: Greenplum** | `DATABASE__GP__HOST` | str | `gp_dns_...` | Хост GP |
+| **БД: Greenplum** | `DATABASE__GP__HOST` | str | `gp_dns_pkap1123_audit.gp.df.sbrf.ru` | Хост GP |
 | | `DATABASE__GP__PORT` | int | `5432` | Порт GP |
 | | `DATABASE__GP__DATABASE` | str | `capgp3` | Имя БД GP |
-| | `DATABASE__GP__SCHEMA` | str | `s_grnplm_...` | Схема GP |
+| | `DATABASE__GP__SCHEMA` | str | `s_grnplm_ld_audit_da_project_4` | Схема GP (alias для поля `schema_name`) |
 | **Безопасность** | `SECURITY__MAX_REQUEST_SIZE` | int | `10485760` | Макс. размер запроса (байт) |
 | | `SECURITY__RATE_LIMIT_PER_MINUTE` | int | `1024` | Лимит запросов/мин на IP |
 | | `SECURITY__MAX_TRACKED_IPS` | int | `100` | Макс. отслеживаемых IP |
@@ -2787,8 +2848,8 @@ ACTS__AUDIT_LOG__RETENTION_DAYS=365
 | | `ACTS__RESOURCE__SAVE_ACT_TIMEOUT` | int | `300` | Timeout сохранения акта |
 | | `ACTS__RESOURCE__MAX_TREE_DEPTH` | int | `50` | Макс. глубина дерева |
 | **Акты: Фактуры** | `ACTS__INVOICE__HIVE_SCHEMA` | str | `team_sva_oarb_3` | Hive-схема |
-| | `ACTS__INVOICE__GP_SCHEMA` | str | `s_grnplm_...` | GP-схема |
-| | `ACTS__INVOICE__HIVE_REGISTRY_SCHEMA` | str | `s_grnplm_...` | Реестр Hive |
+| | `ACTS__INVOICE__GP_SCHEMA` | str | `s_grnplm_ld_audit_da_sandbox_oarb` | GP-схема для списка таблиц |
+| | `ACTS__INVOICE__HIVE_REGISTRY_SCHEMA` | str | `s_grnplm_ld_audit_da_project_4` | Схема реестра Hive |
 | | `ACTS__INVOICE__HIVE_REGISTRY_TABLE` | str | `t_db_oarb_ua_hadoop_tables` | Таблица реестра Hive |
 | **Акты: Аудит-лог** | `ACTS__AUDIT_LOG__RETENTION_DAYS` | int | `365` | Дни хранения лога |
 | | `ACTS__AUDIT_LOG__MAX_CONTENT_VERSIONS` | int | `50` | Макс. версий содержимого |
