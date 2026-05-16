@@ -9,7 +9,7 @@ import pytest
 from app.core.chat.tools import ChatTool, ChatToolParam, register_tools, reset as reset_tools
 from app.core.domain_registry import reset_registry
 from app.core.settings_registry import reset as reset_settings
-from app.domains.chat.services.orchestrator import Orchestrator, _convert_param
+from app.domains.chat.services.orchestrator import Orchestrator, _convert_param, _safe_args
 from app.domains.chat.settings import ChatDomainSettings
 
 
@@ -161,6 +161,37 @@ class TestConvertParam:
     def test_convert_unknown_type(self):
         """Неизвестный тип возвращает значение как есть."""
         assert _convert_param([1, 2], "array") == [1, 2]
+
+
+# -------------------------------------------------------------------------
+# _safe_args
+# -------------------------------------------------------------------------
+
+
+class TestSafeArgs:
+    """Защита эхо-сообщения tool_call от пустых arguments.
+
+    LLM/аккумулятор отдают arguments="" для no-args вызовов; эхо такой
+    строки в следующий LLM-вызов ломает Qwen/SGLang chat-template
+    (json.loads("") → 400) и GigaChat-proxy (422). _safe_args нормализует
+    значение в валидную пустую JSON-строку "{}".
+    """
+
+    def test_empty_string_becomes_empty_object(self):
+        assert _safe_args("") == "{}"
+
+    def test_none_becomes_empty_object(self):
+        assert _safe_args(None) == "{}"
+
+    def test_non_string_becomes_empty_object(self):
+        # На случай если в Pydantic-объекте прилетит не строка
+        assert _safe_args({"already": "dict"}) == "{}"
+
+    def test_non_empty_string_preserved(self):
+        # Не валидируем JSON — оставляем upstream-логику для обработки
+        # битого JSON (там свой except JSONDecodeError → {}).
+        assert _safe_args('{"q": "x"}') == '{"q": "x"}'
+        assert _safe_args("anything") == "anything"
 
 
 # -------------------------------------------------------------------------

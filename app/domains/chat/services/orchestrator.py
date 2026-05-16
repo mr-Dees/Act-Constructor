@@ -49,6 +49,21 @@ from app.domains.chat.settings import ChatDomainSettings
 logger = logging.getLogger("audit_workstation.domains.chat.orchestrator")
 
 
+def _safe_args(raw: Any) -> str:
+    """Возвращает arguments tool_call'а как непустую JSON-строку.
+
+    SDK и streaming-аккумулятор отдают arguments="" для вызовов без параметров
+    (LLM не эмитит delta аргументов). При эхо такой пустой строки в следующий
+    LLM-вызов:
+      - Qwen/SGLang chat-template: json.loads("") → 400 "zero-length empty doc".
+      - GigaChat-proxy: 422 RequestInputValidationException.
+    Возвращаем "{}" — корректный пустой JSON-объект.
+    """
+    if isinstance(raw, str) and raw:
+        return raw
+    return "{}"
+
+
 def _convert_param(value: Any, param_type: str) -> Any:
     """Конвертация значения параметра из JSON в Python-тип."""
     if value is None:
@@ -746,7 +761,9 @@ class Orchestrator:
                 raw_msg = response.choices[0].message
                 # Не передаём Pydantic-объект как есть: см. комментарий в
                 # run_stream — Qwen/SGLang и GigaChat-proxy не принимают
-                # null content при наличии tool_calls.
+                # null content при наличии tool_calls. По той же причине
+                # arguments санитизируется через _safe_args (пустая строка
+                # → "{}", иначе провайдеры ломают чат-template).
                 assistant_msg = {
                     "role": "assistant",
                     "content": raw_msg.content or "",
@@ -756,7 +773,7 @@ class Orchestrator:
                             "type": "function",
                             "function": {
                                 "name": tc.function.name,
-                                "arguments": tc.function.arguments,
+                                "arguments": _safe_args(tc.function.arguments),
                             },
                         }
                         for tc in raw_msg.tool_calls
@@ -767,7 +784,7 @@ class Orchestrator:
                 for tc in raw_msg.tool_calls:
                     tool_name = tc.function.name
                     try:
-                        arguments = json.loads(tc.function.arguments)
+                        arguments = json.loads(_safe_args(tc.function.arguments))
                     except json.JSONDecodeError:
                         arguments = {}
 
@@ -1019,13 +1036,16 @@ class Orchestrator:
                         acc.finalize() if finish_reason == "tool_calls" else []
                     )
                     if finalized_tool_calls:
+                        # arguments через _safe_args: аккумулятор отдаёт ""
+                        # для no-args tool_call'ов, что ломает Qwen/SGLang
+                        # chat-template на следующем раунде (json.loads("")).
                         tool_calls_for_msg = [
                             {
                                 "id": tc.id,
                                 "type": "function",
                                 "function": {
                                     "name": tc.name,
-                                    "arguments": tc.arguments,
+                                    "arguments": _safe_args(tc.arguments),
                                 },
                             }
                             for tc in finalized_tool_calls
@@ -1049,7 +1069,7 @@ class Orchestrator:
                         for tc in finalized_tool_calls:
                             tool_name = tc.name
                             try:
-                                arguments = json.loads(tc.arguments)
+                                arguments = json.loads(_safe_args(tc.arguments))
                             except json.JSONDecodeError:
                                 arguments = {}
 
@@ -1238,7 +1258,8 @@ class Orchestrator:
                     raw_msg = response.choices[0].message
                     # Не передаём Pydantic-объект как есть: его сериализация
                     # с content=None ломает Qwen/SGLang (400) и GigaChat-proxy
-                    # (422). Собираем dict с гарантированно строковым content.
+                    # (422). Собираем dict с гарантированно строковым content и
+                    # arguments через _safe_args (no-args → "{}").
                     assistant_msg = {
                         "role": "assistant",
                         "content": raw_msg.content or "",
@@ -1248,7 +1269,7 @@ class Orchestrator:
                                 "type": "function",
                                 "function": {
                                     "name": tc.function.name,
-                                    "arguments": tc.function.arguments,
+                                    "arguments": _safe_args(tc.function.arguments),
                                 },
                             }
                             for tc in raw_msg.tool_calls
@@ -1259,7 +1280,7 @@ class Orchestrator:
                     for tc in raw_msg.tool_calls:
                         tool_name = tc.function.name
                         try:
-                            arguments = json.loads(tc.function.arguments)
+                            arguments = json.loads(_safe_args(tc.function.arguments))
                         except json.JSONDecodeError:
                             arguments = {}
 
