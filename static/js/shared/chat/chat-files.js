@@ -80,7 +80,7 @@ const ChatFiles = {
      */
     async _loadLimits() {
         try {
-            const resp = await fetch('/api/v1/chat/limits', {
+            const resp = await fetch(AppConfig.api.getUrl('/api/v1/chat/limits'), {
                 credentials: 'same-origin',
             });
             if (!resp.ok) return;
