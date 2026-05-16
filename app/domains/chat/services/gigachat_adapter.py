@@ -115,6 +115,28 @@ class GigaChatAdapterClient:
         return self._underlying.base_url
 
 
+def _args_to_dict(raw: Any) -> dict:
+    """Приводит arguments к dict для native GigaChat request-формата.
+
+    OpenAI хранит arguments как JSON-строку, GigaChat — как dict.
+    На пути ответа `_translate_response` делает dict→str. На пути запроса
+    (echo предыдущего function_call в history) делаем обратное str→dict.
+    GigaChat-proxy валидирует request-схему строго: string в поле arguments
+    даёт 422 RequestInputValidationException.
+
+    Битый JSON / пустая строка / None → {} (no-args вызов).
+    """
+    if isinstance(raw, dict):
+        return raw
+    if isinstance(raw, str) and raw:
+        try:
+            parsed = json.loads(raw)
+        except json.JSONDecodeError:
+            return {}
+        return parsed if isinstance(parsed, dict) else {}
+    return {}
+
+
 def _msg_to_dict(msg: Any) -> dict:
     """Pydantic-объект openai SDK → dict. dict → копия."""
     if isinstance(msg, dict):
@@ -186,13 +208,15 @@ def _translate_messages(messages: list[Any]) -> list[dict]:
             fn_d = fn if isinstance(fn, dict) else _msg_to_dict(fn)
             # content="" (не None) — GigaChat-proxy отдаёт 422
             # RequestInputValidationException на null content
-            # при наличии function_call.
+            # при наличии function_call. arguments в request-формате должен
+            # быть DICT (нативная схема GigaChat), не JSON-string как в
+            # OpenAI: proxy валидирует Pydantic-схему строго → 422 на string.
             new_msg = {
                 "role": "assistant",
                 "content": md.get("content") or "",
                 "function_call": {
                     "name": fn_d.get("name", ""),
-                    "arguments": fn_d.get("arguments", ""),
+                    "arguments": _args_to_dict(fn_d.get("arguments")),
                 },
             }
             out.append(new_msg)

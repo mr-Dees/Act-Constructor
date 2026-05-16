@@ -144,6 +144,9 @@ def test_translate_messages_assistant_tool_calls_to_function_call():
 
     None content нормализуется в "" — иначе GigaChat-proxy валит 422
     RequestInputValidationException на следующем раунде.
+
+    arguments в request-формате должен быть DICT (нативная схема GigaChat),
+    а не JSON-string как в OpenAI tools API. Иначе тоже 422.
     """
     messages = [
         {"role": "user", "content": "Открой главную"},
@@ -166,7 +169,7 @@ def test_translate_messages_assistant_tool_calls_to_function_call():
         "content": "",
         "function_call": {
             "name": "open_url",
-            "arguments": '{"url":"https://x.com"}',
+            "arguments": {"url": "https://x.com"},
         },
     }
     assert "tool_calls" not in out[1]
@@ -243,6 +246,85 @@ def test_translate_messages_assistant_pydantic_object_converts():
     )
     out = _translate_messages([msg])
     assert out[0]["function_call"]["name"] == "open_url"
+
+
+def test_translate_messages_assistant_empty_arguments_becomes_empty_dict():
+    """no-args tool_call (arguments="") → arguments={} в request.
+
+    Регрессия: SDK/стрим-аккумулятор отдают "" для вызовов без параметров.
+    GigaChat-proxy валидирует request-схему: arguments должен быть dict,
+    "" даёт 422 RequestInputValidationException. Также защита на случай,
+    если _safe_args в оркестраторе не отработал.
+    """
+    messages = [
+        {
+            "role": "assistant",
+            "content": None,
+            "tool_calls": [{
+                "id": "call_1",
+                "type": "function",
+                "function": {"name": "list_pages", "arguments": ""},
+            }],
+        },
+    ]
+    out = _translate_messages(messages)
+    assert out[0]["function_call"]["arguments"] == {}
+
+
+def test_translate_messages_assistant_none_arguments_becomes_empty_dict():
+    """arguments=None (отсутствует) → arguments={}, без падений."""
+    messages = [
+        {
+            "role": "assistant",
+            "content": "",
+            "tool_calls": [{
+                "id": "call_1",
+                "type": "function",
+                "function": {"name": "list_pages"},  # вообще нет arguments
+            }],
+        },
+    ]
+    out = _translate_messages(messages)
+    assert out[0]["function_call"]["arguments"] == {}
+
+
+def test_translate_messages_assistant_invalid_json_arguments_becomes_empty_dict():
+    """Битый JSON в arguments → {} вместо падения JSONDecodeError.
+
+    Защищаем от частично собранного стрима / поломанного LLM-вывода:
+    в худшем случае GigaChat получит пустые args и переспросит.
+    """
+    messages = [
+        {
+            "role": "assistant",
+            "content": "",
+            "tool_calls": [{
+                "id": "call_1",
+                "type": "function",
+                "function": {"name": "f", "arguments": "{not json"},
+            }],
+        },
+    ]
+    out = _translate_messages(messages)
+    assert out[0]["function_call"]["arguments"] == {}
+
+
+def test_translate_messages_assistant_dict_arguments_passthrough():
+    """Если arguments уже dict (например после _translate_response внутри
+    одного процесса) — пробрасываем без перепарсинга."""
+    messages = [
+        {
+            "role": "assistant",
+            "content": "",
+            "tool_calls": [{
+                "id": "c1",
+                "type": "function",
+                "function": {"name": "f", "arguments": {"x": 1}},
+            }],
+        },
+    ]
+    out = _translate_messages(messages)
+    assert out[0]["function_call"]["arguments"] == {"x": 1}
 
 
 def test_translate_response_passthrough_when_no_function_call():
@@ -497,11 +579,8 @@ def test_translate_messages_roundtrip_synthesized_tool_calls_become_function_cal
     )
     assert "function_call" in assistant_translated
     assert assistant_translated["function_call"]["name"] == "search"
-    # arguments — JSON-строка, парсится в исходный dict
-    assert (
-        json.loads(assistant_translated["function_call"]["arguments"])
-        == {"q": "тест"}
-    )
+    # arguments в request-формате GigaChat — DICT, не JSON-string.
+    assert assistant_translated["function_call"]["arguments"] == {"q": "тест"}
     # tool_calls не должен утечь в native-формат
     assert "tool_calls" not in assistant_translated
 
