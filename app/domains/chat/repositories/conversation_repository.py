@@ -157,6 +157,26 @@ class ConversationRepository(BaseRepository):
             )
         return result == "DELETE 1"
 
+    async def get_by_user_and_title(
+        self, user_id: str, title: str,
+    ) -> dict | None:
+        """Возвращает беседу пользователя по точному совпадению заголовка.
+
+        Используется сервисом для server-side идемпотентности при
+        конкурентных вызовах ensureConversation с одинаковым title.
+        """
+        row = await self.conn.fetchrow(
+            f"""
+            SELECT * FROM {self.table}
+            WHERE user_id = $1 AND title = $2
+            ORDER BY created_at ASC
+            LIMIT 1
+            """,
+            user_id,
+            title,
+        )
+        return self._parse_row(row) if row else None
+
     async def count_by_user(self, user_id: str) -> int:
         """Возвращает количество бесед пользователя."""
         return await self.conn.fetchval(

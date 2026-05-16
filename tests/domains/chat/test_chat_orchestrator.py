@@ -9,8 +9,7 @@ import pytest
 from app.core.chat.tools import ChatTool, ChatToolParam, register_tools, reset as reset_tools
 from app.core.domain_registry import reset_registry
 from app.core.settings_registry import reset as reset_settings
-from app.core.chat.buttons import reset_action_handlers
-from app.domains.chat.services.orchestrator import Orchestrator, _convert_param
+from app.domains.chat.services.orchestrator import Orchestrator, _convert_param, _safe_args
 from app.domains.chat.settings import ChatDomainSettings
 
 
@@ -25,12 +24,10 @@ def clean_registries():
     reset_registry()
     reset_settings()
     reset_tools()
-    reset_action_handlers()
     yield
     reset_registry()
     reset_settings()
     reset_tools()
-    reset_action_handlers()
 
 
 @pytest.fixture
@@ -83,6 +80,16 @@ def orchestrator_no_api(msg_service, conv_service, settings_no_api):
         msg_service=msg_service,
         conv_service=conv_service,
         settings=settings_no_api,
+    )
+
+
+@pytest.fixture
+def orchestrator_default_settings():
+    """Оркестратор с дефолтными настройками для проверки системного промпта."""
+    return Orchestrator(
+        msg_service=AsyncMock(),
+        conv_service=AsyncMock(),
+        settings=ChatDomainSettings(),
     )
 
 
@@ -157,6 +164,37 @@ class TestConvertParam:
 
 
 # -------------------------------------------------------------------------
+# _safe_args
+# -------------------------------------------------------------------------
+
+
+class TestSafeArgs:
+    """Защита эхо-сообщения tool_call от пустых arguments.
+
+    LLM/аккумулятор отдают arguments="" для no-args вызовов; эхо такой
+    строки в следующий LLM-вызов ломает Qwen/SGLang chat-template
+    (json.loads("") → 400) и GigaChat-proxy (422). _safe_args нормализует
+    значение в валидную пустую JSON-строку "{}".
+    """
+
+    def test_empty_string_becomes_empty_object(self):
+        assert _safe_args("") == "{}"
+
+    def test_none_becomes_empty_object(self):
+        assert _safe_args(None) == "{}"
+
+    def test_non_string_becomes_empty_object(self):
+        # На случай если в Pydantic-объекте прилетит не строка
+        assert _safe_args({"already": "dict"}) == "{}"
+
+    def test_non_empty_string_preserved(self):
+        # Не валидируем JSON — оставляем upstream-логику для обработки
+        # битого JSON (там свой except JSONDecodeError → {}).
+        assert _safe_args('{"q": "x"}') == '{"q": "x"}'
+        assert _safe_args("anything") == "anything"
+
+
+# -------------------------------------------------------------------------
 # _build_system_messages
 # -------------------------------------------------------------------------
 
@@ -168,7 +206,7 @@ class TestBuildSystemMessages:
         messages = orchestrator._build_system_messages(domains=None)
         assert len(messages) == 1
         assert messages[0]["role"] == "system"
-        assert "AI-ассистент" in messages[0]["content"]
+        assert "forward_to_knowledge_agent" in messages[0]["content"]
 
     def test_with_domain_prompts(self, orchestrator):
         """С доменами добавляются доменные промпты."""
@@ -190,7 +228,72 @@ class TestBuildSystemMessages:
         messages = orchestrator._build_system_messages(domains=["unknown_domain"])
         assert len(messages) == 1
         # Доменных промптов нет — только базовый
-        assert "AI-ассистент" in messages[0]["content"]
+        assert "forward_to_knowledge_agent" in messages[0]["content"]
+
+
+def test_system_prompt_includes_available_pages_section(orchestrator_default_settings):
+    """Системный промпт содержит раздел 'Доступные страницы' с NavItem всех доменов."""
+    from app.core.domain import DomainDescriptor, NavItem
+    from app.core.domain_registry import _domains
+
+    _domains.append(DomainDescriptor(
+        name="dom_with_desc",
+        nav_items=[
+            NavItem(
+                label="Страница A",
+                url="/a",
+                icon_svg="<svg/>",
+                description="Описание A",
+            ),
+        ],
+    ))
+    _domains.append(DomainDescriptor(
+        name="dom_without_desc",
+        nav_items=[
+            NavItem(label="Страница B", url="/b", icon_svg="<svg/>"),
+        ],
+    ))
+
+    msgs = orchestrator_default_settings._build_system_messages(None)
+    content = msgs[0]["content"]
+
+    assert "## Доступные страницы" in content
+    # С описанием
+    assert "- Страница A (/a) — Описание A" in content
+    # Без описания — без " — "
+    assert "- Страница B (/b)" in content
+    assert "- Страница B (/b) —" not in content
+
+
+def test_system_prompt_includes_open_page_instructions(orchestrator_default_settings):
+    """Системный промпт содержит инструкции про chat.list_pages и open_*."""
+    msgs = orchestrator_default_settings._build_system_messages(None)
+    content = msgs[0]["content"]
+
+    assert "## Открытие страниц" in content
+    assert "chat.list_pages" in content
+    assert "admin.open_admin_panel" in content
+    assert "acts.open_act_page" in content
+
+
+def test_system_prompt_mentions_forward_priority(orchestrator_default_settings):
+    """В system-промпте должно быть правило «по умолчанию forward_to_knowledge_agent»."""
+    msgs = orchestrator_default_settings._build_system_messages(None)
+    text = msgs[0]["content"]
+    assert "forward_to_knowledge_agent" in text
+    assert "по умолчанию" in text.lower() or "приоритет" in text.lower()
+
+
+def test_system_prompt_local_smalltalk_mentions_local(monkeypatch, orchestrator_default_settings):
+    orchestrator_default_settings.settings.smalltalk_mode = "local"
+    msgs = orchestrator_default_settings._build_system_messages(None)
+    assert "локальный" in msgs[0]["content"].lower() or "local" in msgs[0]["content"].lower()
+
+
+def test_system_prompt_forward_smalltalk_mentions_forwarding(orchestrator_default_settings):
+    orchestrator_default_settings.settings.smalltalk_mode = "forward"
+    msgs = orchestrator_default_settings._build_system_messages(None)
+    assert "forward_to_knowledge_agent" in msgs[0]["content"]
 
 
 # -------------------------------------------------------------------------
@@ -309,7 +412,7 @@ class TestBuildUserContent:
 
 class TestOrchestratorRun:
 
-    @patch("app.domains.chat.services.orchestrator._get_openai_client")
+    @patch("app.domains.chat.services.orchestrator.Orchestrator._get_openai_client")
     async def test_run_simple_response(self, mock_client_factory, orchestrator):
         """Простой ответ LLM без tool calls."""
         mock_client = AsyncMock()
@@ -336,7 +439,7 @@ class TestOrchestratorRun:
         assert result["token_usage"]["total_tokens"] == 30
         orchestrator._save_assistant_message.assert_called_once()
 
-    @patch("app.domains.chat.services.orchestrator._get_openai_client")
+    @patch("app.domains.chat.services.orchestrator.Orchestrator._get_openai_client")
     async def test_run_with_tool_calls(self, mock_client_factory, orchestrator):
         """Agent loop с вызовом инструмента."""
         # Регистрируем тестовый инструмент
@@ -377,7 +480,7 @@ class TestOrchestratorRun:
         assert "search_acts" in result["sources"]
         assert "КМ-01-00001" in result["response"]
 
-    @patch("app.domains.chat.services.orchestrator._get_openai_client")
+    @patch("app.domains.chat.services.orchestrator.Orchestrator._get_openai_client")
     async def test_run_max_tool_rounds_limit(self, mock_client_factory, orchestrator):
         """Agent loop останавливается при достижении лимита раундов."""
         test_tool = ChatTool(
@@ -419,19 +522,22 @@ class TestOrchestratorRun:
         assert "Привет" in result["response"]
         assert "режиме заглушки" in result["response"]
 
-    # BUG #7: run() возвращает HTTP 200 с error payload вместо ошибки
-    @patch("app.domains.chat.services.orchestrator._get_openai_client")
+    @patch("app.domains.chat.services.orchestrator.Orchestrator._get_openai_client")
     async def test_run_api_error_returns_200_with_error_payload(
         self, mock_client_factory, orchestrator,
     ):
-        """BUG: При ошибке LLM API run() возвращает dict с 'status: error',
-        но HTTP-эндпоинт вернёт 200, а не 500/503.
+        """1.4 (BUG #7 закрыт как намеренное поведение): при ошибке LLM API
+        run() возвращает dict с 'status: error' и нейтральным сообщением;
+        для не-стрим режима это допустимо (внутренние детали не утекают).
+        Дополнительно: ErrorBlock сохраняется в историю, чтобы пользователь
+        увидел причину при перезагрузке страницы.
         """
         mock_client = AsyncMock()
         mock_client.chat.completions.create = AsyncMock(
             side_effect=Exception("Connection refused"),
         )
         mock_client_factory.return_value = mock_client
+        orchestrator._save_assistant_message = AsyncMock()
 
         result = await orchestrator.run(
             conversation_id="conv-1",
@@ -442,8 +548,16 @@ class TestOrchestratorRun:
         assert result["status"] == "error"
         assert "Временная ошибка" in result["response"]
         # Нет HTTPException или raise — вызывающий код получит 200 OK
+        # ErrorBlock сохранён в историю.
+        orchestrator._save_assistant_message.assert_awaited_once()
+        kwargs = orchestrator._save_assistant_message.await_args.kwargs
+        saved_blocks = kwargs["content_blocks"]
+        assert len(saved_blocks) == 1
+        assert saved_blocks[0]["type"] == "error"
+        assert saved_blocks[0]["code"] == "llm_unavailable"
+        assert "Временная ошибка" in saved_blocks[0]["message"]
 
-    @patch("app.domains.chat.services.orchestrator._get_openai_client")
+    @patch("app.domains.chat.services.orchestrator.Orchestrator._get_openai_client")
     async def test_run_strips_leading_newlines(self, mock_client_factory, orchestrator):
         """Ведущие переносы строк убираются из ответа LLM."""
         mock_client = AsyncMock()
@@ -458,6 +572,57 @@ class TestOrchestratorRun:
         )
 
         assert result["response"] == "Ответ ассистента"
+
+    @patch("app.domains.chat.services.orchestrator.Orchestrator._get_openai_client")
+    async def test_run_handles_malformed_tool_arguments(
+        self, mock_client_factory, orchestrator,
+    ):
+        """Если LLM вернул битый JSON в tool_call.function.arguments,
+        orchestrator подставляет пустой dict и продолжает: tool вызывается,
+        round не прерывается. Без этого fallback'а одна кривая модель
+        ломала бы весь tool-loop.
+
+        Аналогичный fallback на стрим-путях (orchestrator.py:1010, 1202) —
+        идентичен по семантике; проверять каждое место не имеет смысла,
+        весь риск в строке ``except json.JSONDecodeError: arguments = {}``.
+        """
+        captured_args: dict[str, object] = {}
+
+        async def handler(**kwargs):
+            captured_args.update(kwargs)
+            return "ok"
+
+        test_tool = ChatTool(
+            name="probe",
+            domain="test",
+            description="Проба malformed args",
+            handler=handler,
+        )
+        register_tools([test_tool])
+
+        mock_client = AsyncMock()
+        tool_call = _make_tool_call(
+            name="probe",
+            arguments='{"query": "КМ-01"',  # незакрытая скобка → JSONDecodeError
+        )
+        response_with_tc = _make_mock_response(
+            content=None, tool_calls=[tool_call],
+        )
+        response_final = _make_mock_response(content="Готово")
+        mock_client.chat.completions.create = AsyncMock(
+            side_effect=[response_with_tc, response_final],
+        )
+        mock_client_factory.return_value = mock_client
+        orchestrator._save_assistant_message = AsyncMock()
+
+        result = await orchestrator.run(
+            conversation_id="conv-1",
+            user_message="Найди что-нибудь",
+        )
+
+        # Тool всё-таки выполнен, но с пустыми аргументами.
+        assert captured_args == {}
+        assert result["response"] == "Готово"
 
 
 # -------------------------------------------------------------------------
@@ -504,7 +669,7 @@ class TestExecuteToolCall:
         assert "таймаут" in result.lower()
 
     async def test_tool_exception(self, orchestrator):
-        """Исключение в обработчике возвращает ошибку."""
+        """Исключение в обработчике возвращает нейтральное сообщение без деталей."""
 
         async def failing_handler(**kwargs):
             raise ValueError("Внутренняя ошибка инструмента")
@@ -518,7 +683,111 @@ class TestExecuteToolCall:
         register_tools([tool])
 
         result = await orchestrator._execute_tool_call("failing_tool", {})
-        assert "Ошибка выполнения" in result
+        # 4.3: нейтральное сообщение БЕЗ деталей exception
+        assert "ошибкой" in result.lower()
+        assert "error_id=" in result
+        assert "Внутренняя ошибка инструмента" not in result
+
+    async def test_tool_exception_does_not_leak_details(self, orchestrator, caplog):
+        """4.3: Детали исключения (SQL, секреты) НЕ попадают в выход LLM;
+        полный stack-trace остаётся только в логах с error_id.
+        """
+        import logging as _logging
+
+        async def leaky_handler(**kwargs):
+            raise RuntimeError(
+                "secret SQL leaked: SELECT * FROM users WHERE password='hunter2'",
+            )
+
+        tool = ChatTool(
+            name="leaky_tool",
+            domain="test",
+            description="Утечка",
+            handler=leaky_handler,
+        )
+        register_tools([tool])
+
+        with caplog.at_level(_logging.ERROR):
+            result = await orchestrator._execute_tool_call("leaky_tool", {})
+
+        # Секрет НЕ просочился в результат для LLM
+        assert "secret SQL leaked" not in result
+        assert "hunter2" not in result
+        assert "RuntimeError" not in result
+        # Должен быть error_id для трассировки
+        assert "error_id=" in result
+        # Полный stack-trace и сообщение exception — в логах
+        leaked_in_logs = any(
+            "secret SQL leaked" in record.getMessage()
+            or "secret SQL leaked" in (record.exc_text or "")
+            for record in caplog.records
+        )
+        assert leaked_in_logs, "Детали исключения должны быть в логах"
+
+    async def test_max_tool_rounds_streaming_count(self, orchestrator):
+        """4.14: При max_tool_rounds=3 и LLM, всегда отдающем tool_call,
+        инструмент вызывается ровно 3 раза (не 2 и не 4).
+        """
+        call_count = 0
+
+        async def counting_handler(**kwargs):
+            nonlocal call_count
+            call_count += 1
+            return "ok"
+
+        tool = ChatTool(
+            name="counter_tool",
+            domain="test",
+            description="Счётчик",
+            handler=counting_handler,
+        )
+        register_tools([tool])
+
+        # Бесконечно отдаём tool_call стримом
+        def make_stream_factory():
+            async def mock_stream():
+                chunk = MagicMock()
+                delta = MagicMock()
+                delta.content = None
+                tc_delta = MagicMock()
+                tc_delta.index = 0
+                tc_delta.id = f"tc-{call_count}"
+                tc_delta.function = MagicMock()
+                tc_delta.function.name = "counter_tool"
+                tc_delta.function.arguments = "{}"
+                delta.tool_calls = [tc_delta]
+                chunk.choices = [MagicMock(delta=delta, finish_reason=None)]
+                yield chunk
+
+                chunk2 = MagicMock()
+                delta2 = MagicMock()
+                delta2.content = None
+                delta2.tool_calls = None
+                chunk2.choices = [MagicMock(delta=delta2, finish_reason="tool_calls")]
+                yield chunk2
+            return mock_stream()
+
+        orchestrator.settings.max_tool_rounds = 3
+
+        with patch.object(
+            Orchestrator, "_get_openai_client",
+        ) as mock_client_factory:
+            mock_client = AsyncMock()
+            mock_client.chat.completions.create = AsyncMock(
+                side_effect=lambda **kw: make_stream_factory(),
+            )
+            mock_client_factory.return_value = mock_client
+            orchestrator._save_assistant_message = AsyncMock()
+
+            events = []
+            async for ev in orchestrator.run_stream(
+                conversation_id="conv-1",
+                user_message="loop",
+            ):
+                events.append(ev)
+
+        # При max_tool_rounds=3 ровно 3 раза вызвался handler
+        assert call_count == 3, f"Ожидалось 3 вызова, получено {call_count}"
 
     async def test_tool_dict_result_serialized(self, orchestrator):
         """Dict-результат инструмента сериализуется в JSON."""
@@ -533,6 +802,53 @@ class TestExecuteToolCall:
         result = await orchestrator._execute_tool_call("json_tool", {})
         parsed = json.loads(result)
         assert parsed["status"] == "ok"
+
+    async def test_missing_required_param_raises_validation_error(self, orchestrator):
+        """1.3: Отсутствующий required-параметр → ChatToolValidationError."""
+        from app.domains.chat.exceptions import ChatToolValidationError
+
+        tool = ChatTool(
+            name="req_tool",
+            domain="test",
+            description="С обязательным параметром",
+            parameters=[
+                ChatToolParam(
+                    name="must_have",
+                    type="string",
+                    description="Обязательный",
+                    required=True,
+                ),
+            ],
+            handler=AsyncMock(return_value="ok"),
+        )
+        register_tools([tool])
+
+        with pytest.raises(ChatToolValidationError) as exc_info:
+            await orchestrator._execute_tool_call("req_tool", {})
+
+        assert "must_have" in str(exc_info.value)
+        assert exc_info.value.status_code == 400
+
+    async def test_optional_param_missing_does_not_raise(self, orchestrator):
+        """1.3: Отсутствие optional-параметра не считается ошибкой валидации."""
+        tool = ChatTool(
+            name="opt_tool",
+            domain="test",
+            description="С опциональным параметром",
+            parameters=[
+                ChatToolParam(
+                    name="maybe",
+                    type="string",
+                    description="Опциональный",
+                    required=False,
+                ),
+            ],
+            handler=AsyncMock(return_value="ok"),
+        )
+        register_tools([tool])
+
+        result = await orchestrator._execute_tool_call("opt_tool", {})
+        assert result == "ok"
 
     async def test_tool_param_type_conversion(self, orchestrator):
         """Параметры инструмента конвертируются в правильные типы."""
@@ -600,7 +916,7 @@ class TestOrchestratorRunStream:
         all_text = "".join(events)
         assert "Тестовое сообщение" in all_text
 
-    @patch("app.domains.chat.services.orchestrator._get_openai_client")
+    @patch("app.domains.chat.services.orchestrator.Orchestrator._get_openai_client")
     async def test_stream_normal_response(self, mock_client_factory, orchestrator):
         """Нормальный стриминг с текстовым ответом."""
         mock_client = AsyncMock()
@@ -648,12 +964,15 @@ class TestOrchestratorRunStream:
         assert "block_delta" in event_types
         assert "block_end" in event_types
 
-    # BUG #6: message_end не гарантирован на всех путях ошибок
-    @patch("app.domains.chat.services.orchestrator._get_openai_client")
+    @patch("app.domains.chat.services.orchestrator.Orchestrator._get_openai_client")
     async def test_stream_error_guarantees_message_end(
         self, mock_client_factory, orchestrator,
     ):
-        """BUG: При ошибке стриминга message_end должен быть гарантирован."""
+        """1.4 (BUG #6 закрыт): при ошибке стриминга message_end гарантирован.
+
+        Оркестратор ловит generic Exception, эмитит нейтральный SSE error
+        и финализирует message_end в любом случае.
+        """
         mock_client = AsyncMock()
         mock_client.chat.completions.create = AsyncMock(
             side_effect=Exception("LLM API недоступен"),
@@ -673,7 +992,7 @@ class TestOrchestratorRunStream:
         # Ошибка должна быть отправлена
         assert "error" in event_types
 
-    @patch("app.domains.chat.services.orchestrator._get_openai_client")
+    @patch("app.domains.chat.services.orchestrator.Orchestrator._get_openai_client")
     async def test_stream_with_tool_calls(self, mock_client_factory, orchestrator):
         """Стриминг с вызовом инструмента: tool_call и tool_result."""
         test_tool = ChatTool(
@@ -731,7 +1050,7 @@ class TestOrchestratorRunStream:
         assert "tool_result" in event_types
         assert event_types[-1] == "message_end"
 
-    @patch("app.domains.chat.services.orchestrator._get_openai_client")
+    @patch("app.domains.chat.services.orchestrator.Orchestrator._get_openai_client")
     async def test_stream_saves_assistant_message(
         self, mock_client_factory, orchestrator,
     ):
@@ -787,6 +1106,81 @@ class TestOrchestratorRunStream:
 
             # Проверяем, что get_db вызывался (свежее соединение для сохранения)
             mock_get_db.assert_called()
+
+    @patch("app.domains.chat.services.orchestrator.Orchestrator._get_openai_client")
+    async def test_stream_tool_validation_error_emits_neutral_tool_error(
+        self, mock_client_factory, orchestrator,
+    ):
+        """1.3: При вызове tool'а без required параметра — SSE tool_error
+        с нейтральным сообщением; сырой текст ошибки не утекает.
+        """
+        tool = ChatTool(
+            name="strict_tool",
+            domain="test",
+            description="Требует параметр",
+            parameters=[
+                ChatToolParam(
+                    name="needed",
+                    type="string",
+                    description="Должен быть",
+                    required=True,
+                ),
+            ],
+            handler=AsyncMock(return_value="ok"),
+        )
+        register_tools([tool])
+
+        mock_client = AsyncMock()
+
+        # Стрим: LLM зовёт инструмент БЕЗ required-параметра.
+        async def stream_with_bad_tool():
+            chunk = MagicMock()
+            delta = MagicMock()
+            delta.content = None
+            tc_delta = MagicMock()
+            tc_delta.index = 0
+            tc_delta.id = "tc-bad"
+            tc_delta.function = MagicMock()
+            tc_delta.function.name = "strict_tool"
+            tc_delta.function.arguments = "{}"  # пустые args
+            delta.tool_calls = [tc_delta]
+            chunk.choices = [MagicMock(delta=delta, finish_reason=None)]
+            yield chunk
+
+            chunk2 = MagicMock()
+            delta2 = MagicMock()
+            delta2.content = None
+            delta2.tool_calls = None
+            chunk2.choices = [MagicMock(delta=delta2, finish_reason="tool_calls")]
+            yield chunk2
+
+        # Финальный ответ после ошибки tool'а
+        response_final = _make_mock_response(content="ok-final")
+        mock_client.chat.completions.create = AsyncMock(
+            side_effect=[stream_with_bad_tool(), response_final],
+        )
+        mock_client_factory.return_value = mock_client
+        orchestrator._save_assistant_message = AsyncMock()
+
+        events = []
+        async for ev in orchestrator.run_stream(
+            conversation_id="conv-1",
+            user_message="без параметра",
+        ):
+            events.append(ev)
+
+        event_types = [e.split("\n")[0].replace("event: ", "") for e in events]
+        # Должно быть tool_error, не tool_result для этого вызова
+        assert "tool_error" in event_types, f"events={event_types}"
+
+        # Сырой текст ошибки (имя параметра в технической формулировке) НЕ должен
+        # утекать наружу — в payload tool_error содержится нейтральное сообщение.
+        joined = "\n".join(events)
+        assert "Не удалось выполнить инструмент" in joined
+        assert "Попробуйте переформулировать" in joined
+        # "отсутствует обязательный параметр" (сырое сообщение исключения) —
+        # только в логах; в SSE его быть не должно.
+        assert "отсутствует обязательный параметр" not in joined
 
     async def test_stream_openai_not_installed(self, orchestrator):
         """При отсутствии openai пакета — fallback с сообщением."""
@@ -892,6 +1286,47 @@ class TestGetHistoryMessages:
         result = await orchestrator._get_history_messages("conv-1")
         assert result[0]["content"] == "Просто строка"
 
+    async def test_reasoning_blocks_excluded_from_llm_context(
+        self, orchestrator, msg_service,
+    ):
+        """Reasoning сохранён в истории для UI, но в контекст LLM не идёт.
+
+        Иначе модель в следующем запросе увидит собственный chain-of-thought
+        предыдущего ответа и контекст будет засоряться.
+        """
+        msg_service.get_history.return_value = [
+            {
+                "role": "assistant",
+                "content": [
+                    {"type": "reasoning", "content": "Думаю про КСО"},
+                    {"type": "text", "content": "Ответ по КСО"},
+                ],
+            },
+        ]
+
+        result = await orchestrator._get_history_messages("conv-1")
+        assert len(result) == 1
+        assert result[0]["content"] == "Ответ по КСО"
+        assert "Думаю про КСО" not in result[0]["content"]
+
+    async def test_error_blocks_excluded_from_llm_context(
+        self, orchestrator, msg_service,
+    ):
+        """Сохранённые error-блоки в контекст LLM не передаются."""
+        msg_service.get_history.return_value = [
+            {
+                "role": "assistant",
+                "content": [
+                    {"type": "error", "message": "Сбой моста", "code": "x"},
+                    {"type": "text", "content": "Запросите позже."},
+                ],
+            },
+        ]
+
+        result = await orchestrator._get_history_messages("conv-1")
+        assert result[0]["content"] == "Запросите позже."
+        assert "Сбой моста" not in result[0]["content"]
+
 
 # -------------------------------------------------------------------------
 # _fallback_response
@@ -920,3 +1355,64 @@ class TestFallbackResponse:
         result = orchestrator._fallback_response("Привет")
         assert "Доступно инструментов: 1" in result["response"]
         assert "CHAT__API_BASE" in result["response"]
+
+
+@pytest.mark.asyncio
+async def test_orchestrator_disables_streaming_for_gigachat_profile():
+    """Профиль gigachat принудительно non-streaming даже при streaming_enabled=True."""
+    from unittest.mock import AsyncMock, MagicMock, patch
+
+    from pydantic import SecretStr
+
+    from app.domains.chat.services.orchestrator import Orchestrator
+    from app.domains.chat.settings import ChatDomainSettings
+
+    settings = ChatDomainSettings(
+        profile="gigachat",
+        api_base="http://liveaccess/v1/gc",
+        api_key=SecretStr("t"),
+        model="GigaChat-3-Ultra",
+        streaming_enabled=True,  # включён в настройках
+    )
+    msg_service = MagicMock()
+    msg_service.get_history = AsyncMock(return_value=[])
+    conv_service = MagicMock()
+
+    orch = Orchestrator(
+        msg_service=msg_service,
+        conv_service=conv_service,
+        settings=settings,
+    )
+
+    # Мокаем underlying API — отдаём простой текстовый ответ
+    from openai.types.chat import ChatCompletion
+    fake_resp = ChatCompletion.model_validate({
+        "id": "x", "object": "chat.completion", "created": 0,
+        "model": "GigaChat-3-Ultra",
+        "choices": [{"index": 0, "message": {
+            "role": "assistant", "content": "Привет",
+        }, "finish_reason": "stop"}],
+    })
+
+    with patch(
+        "app.domains.chat.services.orchestrator.build_llm_client",
+    ) as mock_build:
+        fake_client = MagicMock()
+        fake_client.chat.completions.create = AsyncMock(return_value=fake_resp)
+        mock_build.return_value = fake_client
+
+        with patch.object(
+            orch, "_save_assistant_message", new=AsyncMock(),
+        ):
+            chunks = []
+            async for chunk in orch.run_stream(
+                conversation_id="c1",
+                user_message="привет",
+            ):
+                chunks.append(chunk)
+
+    # Проверяем: ни одного вызова с stream=True
+    for call in fake_client.chat.completions.create.await_args_list:
+        assert call.kwargs.get("stream", False) is False, (
+            "Оркестратор не должен звать LLM со stream=True для gigachat"
+        )

@@ -18,6 +18,14 @@ class ChatManager {
     static _initialized = false;
     /** @type {HTMLInputElement|null} */
     static _input = null;
+    /** @type {AbortController|null} Снимает все DOM-listener'ы по abort() */
+    static _abortController = null;
+    /**
+     * @type {boolean} Атомарный флаг блокировки повторных sendMessage до первого await.
+     * Нужен, чтобы двойной клик/Enter не отправил два запроса (ChatUI.isProcessing
+     * становится true только после ui:processing — это уже после await'ов).
+     */
+    static _isSending = false;
 
     /**
      * Инициализация: кеширование DOM, запуск модулей
@@ -53,10 +61,14 @@ class ChatManager {
         ChatMessages.init(domRefs);
         ChatContext.init();
 
+        // Общий AbortController — снимает все DOM-listener'ы при destroy().
+        this._abortController = new AbortController();
+        const signal = this._abortController.signal;
+
         // Кнопка очистки чата
         const clearBtn = document.querySelector('.chat-clear-btn');
         if (clearBtn) {
-            clearBtn.addEventListener('click', () => this.clearChat());
+            clearBtn.addEventListener('click', () => this.clearChat(), { signal });
         }
 
         // Обработчики ввода
@@ -65,15 +77,15 @@ class ChatManager {
                 e.preventDefault();
                 this.sendMessage();
             }
-        });
+        }, { signal });
 
         input.addEventListener('input', () => {
             ChatUI.autoResizeInput();
-        });
+        }, { signal });
 
         sendBtn.addEventListener('click', () => {
             this.sendMessage();
-        });
+        }, { signal });
 
         this._input = input;
         this._initialized = true;
@@ -81,79 +93,52 @@ class ChatManager {
     }
 
     /**
-     * Отправляет сообщение пользователя
+     * Полная очистка ресурсов: снимает DOM-listener'ы, отписывает модули.
+     * Идемпотентно. Используется ChatPopupManager при закрытии panel'а,
+     * чтобы каждое открытие давало свежие listener'ы и AbortController.
+     */
+    static destroy() {
+        if (!this._initialized) return;
+        if (this._abortController) {
+            this._abortController.abort();
+            this._abortController = null;
+        }
+        // Каскадная очистка субмодулей (у ChatUI и ChatContext destroy() пока нет).
+        if (typeof ChatMessages !== 'undefined' && ChatMessages.destroy) {
+            ChatMessages.destroy();
+        }
+        if (typeof ChatFiles !== 'undefined' && ChatFiles.destroy) {
+            ChatFiles.destroy();
+        }
+        this._input = null;
+        this._isSending = false;
+        this._initialized = false;
+    }
+
+    /**
+     * Отправляет сообщение пользователя.
+     *
+     * ВАЖНО: проверка и установка _isSending выполняются строго до первого await —
+     * иначе двойной клик/Enter за один тик микрозадач отправит два запроса
+     * (ChatUI.isProcessing переключается только после ui:processing-эмита).
      */
     static async sendMessage() {
-        if (ChatUI.isProcessing()) return;
-
-        const text = this._input.value.trim();
-        if (!text) return;
-
-        const files = ChatFiles.getPendingFiles();
-
-        this._input.value = '';
-        ChatUI.autoResizeInput();
-
-        ChatEventBus.emit('chat:send-request', { text, files });
-    }
-
-    /**
-     * Отправляет быстрый ответ (quick reply) из кнопки ChatRenderer
-     * @param {string} value — текст быстрого ответа
-     */
-    static sendQuickReply(value) {
-        if (ChatUI.isProcessing() || !value) return;
-        this._input.value = value;
-        this.sendMessage();
-    }
-
-    /**
-     * Выполняет действие (action) из кнопки ChatRenderer
-     * @param {string} actionId — идентификатор действия
-     * @param {Object} params — параметры действия
-     */
-    static async executeAction(actionId, params = {}) {
-        if (ChatUI.isProcessing()) return;
-
-        ChatEventBus.emit('ui:processing', { state: true });
-        ChatEventBus.emit('ui:typing-show');
-
+        if (this._isSending) return;
+        this._isSending = true;
         try {
-            const conversationId = await ChatContext.ensureConversation();
-            const endpoint = `/api/v1/chat/conversations/${conversationId}/actions/${actionId}`;
-            const url = typeof AppConfig !== 'undefined'
-                ? AppConfig.api.getUrl(endpoint)
-                : endpoint;
+            if (ChatUI.isProcessing()) return;
 
-            const headers = {
-                'Content-Type': 'application/json',
-            };
-            if (typeof AuthManager !== 'undefined' && AuthManager.getCurrentUser()) {
-                Object.assign(headers, AuthManager.getAuthHeaders());
-            }
+            const text = this._input.value.trim();
+            if (!text) return;
 
-            const response = await fetch(url, {
-                method: 'POST',
-                headers,
-                body: JSON.stringify(params),
-            });
+            const files = ChatFiles.getPendingFiles();
 
-            ChatEventBus.emit('ui:typing-hide');
+            this._input.value = '';
+            ChatUI.autoResizeInput();
 
-            if (!response.ok) {
-                throw new Error(`HTTP ${response.status}`);
-            }
-
-            const data = await response.json();
-            if (data.message) {
-                ChatMessages.renderMessage('bot', data.message);
-            }
-        } catch (err) {
-            ChatEventBus.emit('ui:typing-hide');
-            console.error('ChatManager: ошибка выполнения действия', err);
-            ChatMessages.renderMessage('bot', 'Не удалось выполнить действие. Попробуйте ещё раз.');
+            ChatEventBus.emit('chat:send-request', { text, files });
         } finally {
-            ChatEventBus.emit('ui:processing', { state: false });
+            this._isSending = false;
         }
     }
 

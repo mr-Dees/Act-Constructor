@@ -7,30 +7,49 @@
 
 from __future__ import annotations
 
+import uuid
 from typing import Any, Literal, Union
 
-from pydantic import BaseModel
+from pydantic import BaseModel, Field, model_validator
+
+from app.core.chat.names import (
+    ACTION_NOTIFY,
+    ACTION_OPEN_URL,
+    ACTION_TRIGGER_SDK,
+)
+
+# Whitelist разрешённых action-имён в ClientActionBlock.
+# LLM не может изобрести произвольное action — оно должно быть зарегистрировано
+# в JS-реестре `window.ClientActionsRegistry`. Если нужен новый action —
+# добавь его в app/core/chat/names.py, в этот whitelist И в chat-client-actions.js.
+ALLOWED_CLIENT_ACTIONS: frozenset[str] = frozenset({
+    ACTION_OPEN_URL,
+    ACTION_NOTIFY,
+    ACTION_TRIGGER_SDK,
+})
+
+# Whitelist URL-схем для action='open_url'. Защищает от LLM-инжекций вида
+# javascript:..., data:text/html,..., vbscript:..., file:///...
+ALLOWED_OPEN_URL_SCHEMES: tuple[str, ...] = (
+    "http://", "https://", "mailto:", "/",
+)
 
 
 # ---------------------------------------------------------------------------
 # Вспомогательные модели (не являются самостоятельными блоками)
 # ---------------------------------------------------------------------------
 
-class QuickReplyButton(BaseModel):
-    """Кнопка быстрого ответа — отправляет ``value`` как сообщение."""
+class Button(BaseModel):
+    """Кнопка чата — клик исполняется через ClientActionsRegistry на фронте.
 
+    ``action_id`` должен соответствовать имени обработчика, зарегистрированного
+    в ``window.ClientActionsRegistry`` на стороне браузера. Никаких HTTP-запросов
+    на сервер по клику не делается.
+    """
+
+    action_id: str
     label: str
-    value: str
-
-
-class ActionButton(BaseModel):
-    """Кнопка действия — вызывает серверный обработчик."""
-
-    id: str
-    label: str
-    domain: str
     params: dict[str, Any] = {}
-    confirm: bool = False
 
 
 class PlanStep(BaseModel):
@@ -92,11 +111,70 @@ class ImageBlock(BaseModel):
 
 
 class ButtonGroup(BaseModel):
-    """Группа кнопок — быстрые ответы или действия."""
+    """Группа кнопок — клик каждой кнопки исполняется через
+    ClientActionsRegistry на фронте."""
 
     type: Literal["buttons"] = "buttons"
-    variant: Literal["quick_reply", "action"]
-    buttons: list[Union[QuickReplyButton, ActionButton]]
+    buttons: list[Button]
+
+
+class ClientActionBlock(BaseModel):
+    """Команда фронту выполнить чисто-клиентское действие.
+
+    action — имя из ALLOWED_CLIENT_ACTIONS (whitelist). Произвольные action
+    отвергаются на парсинге, чтобы LLM не мог запросить выполнение
+    незарегистрированного клиентского кода.
+
+    Для action='open_url' дополнительно валидируется params.url: схема
+    должна быть из ALLOWED_OPEN_URL_SCHEMES. Это защищает от LLM-инжекций
+    вроде javascript:..., data:text/html,..., file:///etc/passwd.
+    """
+
+    type: Literal["client_action"] = "client_action"
+    action: str
+    params: dict[str, Any] = {}
+    label: str | None = None
+    # Идемпотентный идентификатор: фронт хранит исполненные block_id в
+    # sessionStorage и пропускает повторное выполнение при resume/reload.
+    # Генерируется по умолчанию uuid4 — но может быть переопределён вручную
+    # (например, при ручной сборке dict в handler'ах).
+    block_id: str = Field(default_factory=lambda: str(uuid.uuid4()))
+
+    @model_validator(mode="after")
+    def _validate_action_and_params(self) -> "ClientActionBlock":
+        if self.action not in ALLOWED_CLIENT_ACTIONS:
+            raise ValueError(
+                f"ClientActionBlock.action='{self.action}' не входит в "
+                f"whitelist {sorted(ALLOWED_CLIENT_ACTIONS)}",
+            )
+        if self.action == "open_url":
+            url = self.params.get("url")
+            if not isinstance(url, str) or not url:
+                raise ValueError(
+                    "ClientActionBlock(action='open_url') требует params.url",
+                )
+            if not any(
+                url.startswith(scheme)
+                for scheme in ALLOWED_OPEN_URL_SCHEMES
+            ):
+                raise ValueError(
+                    f"ClientActionBlock(action='open_url'): схема URL "
+                    f"'{url[:30]}...' запрещена; допустимые: "
+                    f"{ALLOWED_OPEN_URL_SCHEMES}",
+                )
+        return self
+
+
+class ErrorBlock(BaseModel):
+    """Блок сообщения об ошибке (например, от внешнего агента).
+
+    Сохраняется в истории сообщения для отображения; в контекст LLM
+    при формировании истории не попадает.
+    """
+
+    type: Literal["error"] = "error"
+    message: str
+    code: str | None = None
 
 
 # ---------------------------------------------------------------------------
@@ -111,4 +189,6 @@ MessageBlock = Union[
     FileBlock,
     ImageBlock,
     ButtonGroup,
+    ClientActionBlock,
+    ErrorBlock,
 ]

@@ -8,6 +8,10 @@
 class ChatModalManager {
     static _overlay = null;
     static _chatInitialized = false;
+    /** @type {(e: KeyboardEvent) => void | null} */
+    static _escapeHandler = null;
+    /** @type {boolean} Привязан ли _escapeHandler сейчас к document */
+    static _escapeAttached = false;
 
     /**
      * Открывает модальное окно чата
@@ -25,6 +29,13 @@ class ChatModalManager {
             this._chatInitialized = true;
         }
 
+        // Подписываем Escape только на время открытия модалки.
+        // Защита от двойного addEventListener — флагом _escapeAttached.
+        if (this._escapeHandler && !this._escapeAttached) {
+            document.addEventListener('keydown', this._escapeHandler);
+            this._escapeAttached = true;
+        }
+
         const input = this._overlay.querySelector('.chat-input');
         if (input && !input.disabled) setTimeout(() => input.focus(), 100);
     }
@@ -36,6 +47,13 @@ class ChatModalManager {
         if (!this._overlay) return;
         this._overlay.classList.add('hidden');
         document.body.classList.remove('chat-modal-open');
+
+        // Снимаем глобальный keydown — чтобы Escape не срабатывал,
+        // пока модалка скрыта, и не оставались утечки слушателей.
+        if (this._escapeHandler && this._escapeAttached) {
+            document.removeEventListener('keydown', this._escapeHandler);
+            this._escapeAttached = false;
+        }
     }
 
     /**
@@ -54,12 +72,15 @@ class ChatModalManager {
             if (e.target === this._overlay) this.close();
         });
 
-        // Escape
-        document.addEventListener('keydown', (e) => {
-            if (e.key === 'Escape' && this._overlay && !this._overlay.classList.contains('hidden')) {
+        // Escape — отдельная именованная функция, чтобы её можно было
+        // снять через removeEventListener при close().
+        this._escapeHandler = (e) => {
+            if (e.key === 'Escape'
+                && this._overlay
+                && !this._overlay.classList.contains('hidden')) {
                 this.close();
             }
-        });
+        };
     }
 }
 

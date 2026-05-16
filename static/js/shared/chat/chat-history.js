@@ -71,65 +71,63 @@ const ChatHistory = {
 
             this._conversations = await response.json();
 
-            // Автоматически выбираем самую свежую беседу
-            if (this._conversations.length > 0 && !this._currentId) {
-                this._currentId = this._conversations[0].id;
-            }
-
             this._render();
-
-            // Уведомляем ChatManager о выбранной беседе
-            if (this._currentId && this.onConversationChange) {
-                this.onConversationChange(this._currentId);
-            }
         } catch (err) {
             console.error('ChatHistory: ошибка загрузки бесед', err);
         }
     },
 
     /**
-     * Создаёт новую беседу
+     * Сбрасывает UI к пустому состоянию «новый чат» без вызова API.
+     * Реальное создание беседы происходит лениво в ChatContext.ensureConversation()
+     * при отправке первого сообщения.
+     */
+    resetToNew() {
+        this._currentId = null;
+        this._render();
+
+        if (this.onConversationChange) {
+            this.onConversationChange(null);
+        }
+    },
+
+    /**
+     * Создаёт беседу через API и добавляет в список.
+     * Вызывается только из ChatContext._createConversation().
      *
      * @param {string|null} domainName — домен для новой беседы
+     * @returns {Promise<Object>} объект созданной беседы
      */
     async createConversation(domainName = null) {
-        try {
-            const endpoint = '/api/v1/chat/conversations';
-            const url = (typeof AppConfig !== 'undefined')
-                ? AppConfig.api.getUrl(endpoint)
-                : endpoint;
+        const endpoint = '/api/v1/chat/conversations';
+        const url = (typeof AppConfig !== 'undefined')
+            ? AppConfig.api.getUrl(endpoint)
+            : endpoint;
 
-            const headers = {
-                'Content-Type': 'application/json',
-            };
-            if (typeof AuthManager !== 'undefined' && AuthManager.getCurrentUser()) {
-                Object.assign(headers, AuthManager.getAuthHeaders());
-            }
-
-            const body = {};
-            if (domainName) body.domain_name = domainName;
-
-            const response = await fetch(url, {
-                method: 'POST',
-                headers,
-                body: JSON.stringify(body),
-            });
-
-            if (!response.ok) {
-                throw new Error(`HTTP ${response.status}`);
-            }
-
-            const conversation = await response.json();
-            this._conversations.unshift(conversation);
-            this._currentId = conversation.id;
-            this._render();
-
-            if (this.onConversationChange) {
-                this.onConversationChange(conversation.id);
-            }
-        } catch (err) {
-            console.error('ChatHistory: ошибка создания беседы', err);
+        const headers = { 'Content-Type': 'application/json' };
+        if (typeof AuthManager !== 'undefined' && AuthManager.getCurrentUser()) {
+            Object.assign(headers, AuthManager.getAuthHeaders());
         }
+
+        const body = {};
+        if (domainName) body.domain_name = domainName;
+
+        const response = await fetch(url, {
+            method: 'POST',
+            headers,
+            body: JSON.stringify(body),
+        });
+
+        if (!response.ok) {
+            throw new Error(`HTTP ${response.status}`);
+        }
+
+        const conversation = await response.json();
+        this._conversations.unshift(conversation);
+        this._currentId = conversation.id;
+        this._render();
+
+        return conversation;
     },
 
     /**
@@ -160,14 +158,12 @@ const ChatHistory = {
 
             this._conversations = this._conversations.filter(c => c.id !== id);
 
-            // Если удалили активную беседу — сбрасываем
+            // Если удалили активную беседу — сбрасываем к пустому состоянию
             if (this._currentId === id) {
-                this._currentId = this._conversations.length > 0
-                    ? this._conversations[0].id
-                    : null;
+                this._currentId = null;
 
                 if (this.onConversationChange) {
-                    this.onConversationChange(this._currentId);
+                    this.onConversationChange(null);
                 }
             }
 
@@ -214,50 +210,72 @@ const ChatHistory = {
     },
 
     /**
-     * Перерисовывает панель истории
+     * Перерисовывает панель истории через DOM API.
+     * Никакого innerHTML с user-controlled данными — title беседы приходит
+     * из первого пользовательского сообщения, кавычки в нём ломали бы атрибут.
      * @private
      */
     _render() {
         if (!this._container) return;
 
-        const collapsedClass = this._collapsed ? ' chat-history--collapsed' : '';
-        let html = `<div class="chat-history${collapsedClass}">`;
+        const root = document.createElement('div');
+        root.className = 'chat-history' + (this._collapsed ? ' chat-history--collapsed' : '');
 
         // Кнопка toggle
-        const toggleIcon = this._collapsed
-            ? '<path d="M9 18l6-6-6-6" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>'
-            : '<path d="M15 18l-6-6 6-6" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>';
-        const toggleTitle = this._collapsed ? 'Показать беседы' : 'Скрыть беседы';
-        html += `<button class="chat-history-toggle" data-action="toggle" title="${toggleTitle}">`;
-        html += `<svg width="16" height="16" viewBox="0 0 24 24" fill="none">${toggleIcon}</svg>`;
-        html += '</button>';
+        const toggleBtn = document.createElement('button');
+        toggleBtn.className = 'chat-history-toggle';
+        toggleBtn.dataset.action = 'toggle';
+        toggleBtn.title = this._collapsed ? 'Показать беседы' : 'Скрыть беседы';
+        toggleBtn.innerHTML = this._collapsed
+            ? '<svg width="16" height="16" viewBox="0 0 24 24" fill="none"><path d="M9 18l6-6-6-6" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>'
+            : '<svg width="16" height="16" viewBox="0 0 24 24" fill="none"><path d="M15 18l-6-6 6-6" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>';
+        root.appendChild(toggleBtn);
 
         if (!this._collapsed) {
-            // Кнопка «Новый чат»
-            html += '<button class="chat-history-new" data-action="new">+ Новый чат</button>';
+            const newBtn = document.createElement('button');
+            newBtn.className = 'chat-history-new';
+            newBtn.dataset.action = 'new';
+            newBtn.textContent = '+ Новый чат';
+            root.appendChild(newBtn);
 
-            // Список бесед
-            html += '<div class="chat-history-list">';
+            const list = document.createElement('div');
+            list.className = 'chat-history-list';
 
             for (const conv of this._conversations) {
                 const isActive = conv.id === this._currentId;
-                const activeClass = isActive ? ' chat-history-item--active' : '';
-                const title = this._escapeHtml(this._truncateTitle(conv.title || 'Без названия'));
+                const title = this._truncateTitle(conv.title || 'Без названия');
                 const date = this._formatDate(conv.updated_at || conv.created_at);
 
-                html += `<div class="chat-history-item${activeClass}" data-id="${this._escapeHtml(conv.id)}">`;
-                html += `  <div class="chat-history-item-title" title="${title}">${title}</div>`;
-                html += `  <div class="chat-history-item-date">${date}</div>`;
-                html += `  <button class="chat-history-item-delete" data-action="delete" data-id="${this._escapeHtml(conv.id)}" title="Удалить">&times;</button>`;
-                html += '</div>';
+                const item = document.createElement('div');
+                item.className = 'chat-history-item' + (isActive ? ' chat-history-item--active' : '');
+                item.dataset.id = conv.id;
+
+                const titleEl = document.createElement('div');
+                titleEl.className = 'chat-history-item-title';
+                titleEl.title = title;
+                titleEl.textContent = title;
+                item.appendChild(titleEl);
+
+                const dateEl = document.createElement('div');
+                dateEl.className = 'chat-history-item-date';
+                dateEl.textContent = date;
+                item.appendChild(dateEl);
+
+                const delBtn = document.createElement('button');
+                delBtn.className = 'chat-history-item-delete';
+                delBtn.dataset.action = 'delete';
+                delBtn.dataset.id = conv.id;
+                delBtn.title = 'Удалить';
+                delBtn.innerHTML = '&times;';
+                item.appendChild(delBtn);
+
+                list.appendChild(item);
             }
 
-            html += '</div>';
+            root.appendChild(list);
         }
 
-        html += '</div>';
-
-        this._container.innerHTML = html;
+        this._container.replaceChildren(root);
 
         // Навешиваем обработчики
         this._bindEvents();
@@ -282,7 +300,7 @@ const ChatHistory = {
         const newBtn = this._container.querySelector('[data-action="new"]');
         if (newBtn) {
             newBtn.addEventListener('click', () => {
-                this.createConversation();
+                this.resetToNew();
             });
         }
 
@@ -313,20 +331,6 @@ const ChatHistory = {
     // ========================================================
 
     /**
-     * Экранирует HTML-спецсимволы
-     *
-     * @param {string} text
-     * @returns {string}
-     * @private
-     */
-    _escapeHtml(text) {
-        if (!text) return '';
-        const el = document.createElement('div');
-        el.textContent = text;
-        return el.innerHTML;
-    },
-
-    /**
      * Форматирует дату: сегодня — HH:MM, иначе — "6 апр."
      *
      * @param {string} dateStr — строка даты (ISO 8601)
@@ -338,6 +342,9 @@ const ChatHistory = {
 
         try {
             const date = new Date(dateStr);
+            // Невалидная дата (например, мусор из БД) → пустая строка вместо
+            // "Invalid Date" в UI.
+            if (isNaN(date.getTime())) return '';
             const now = new Date();
 
             const isToday = date.getFullYear() === now.getFullYear()

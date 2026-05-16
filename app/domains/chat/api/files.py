@@ -6,12 +6,36 @@ from urllib.parse import quote
 from fastapi import APIRouter, Depends, Response
 
 from app.api.v1.deps.auth_deps import get_username
+from app.api.v1.deps.role_deps import require_domain_access
 from app.domains.chat.deps import get_file_service
 from app.domains.chat.services.file_service import FileService
 
 logger = logging.getLogger("audit_workstation.domains.chat.api.files")
 
-router = APIRouter()
+# Защита роли крепится явно на роутер (defense in depth) — см. конфигурацию
+# в conversations.py.
+router = APIRouter(dependencies=[Depends(require_domain_access("chat"))])
+
+
+@router.get(
+    "/limits",
+    summary="Лимиты файлов чата",
+)
+async def get_chat_limits(
+    file_service: FileService = Depends(get_file_service),
+    _: str = Depends(get_username),
+):
+    """Возвращает лимиты файлов из настроек чата.
+
+    Фронт читает один раз при инициализации, чтобы синхронизировать UI-валидацию
+    с серверной (та же ChatFileValidationError, что и в FileService.validate_file).
+    """
+    settings = file_service.settings
+    return {
+        "max_file_size": settings.max_file_size,
+        "max_total_file_size": settings.max_total_file_size,
+        "max_files_per_message": settings.max_files_per_message,
+    }
 
 
 @router.get(
@@ -29,12 +53,16 @@ async def download_file(
 
     filename_encoded = quote(file_data["filename"])
     disposition = "inline" if inline else "attachment"
+    # Принудительно application/octet-stream + nosniff: не доверяем сохранённому
+    # mime_type, иначе браузер может отрендерить загруженный HTML/SVG в origin
+    # приложения (XSS). Контент всегда скачивается как бинарный blob.
     return Response(
         content=file_data["file_data"],
-        media_type=file_data["mime_type"],
+        media_type="application/octet-stream",
         headers={
             "Content-Disposition": (
                 f"{disposition}; filename*=UTF-8''{filename_encoded}"
             ),
+            "X-Content-Type-Options": "nosniff",
         },
     )

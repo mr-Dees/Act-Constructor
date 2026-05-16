@@ -13,6 +13,7 @@ def _build_domain():
     from app.domains.admin.routes import get_html_routers
     from app.domains.admin._lifecycle import on_startup
     from app.core import settings_registry
+    from app.domains.admin.integrations.chat_tools import get_chat_tools
     from app.domains.admin.settings import AdminSettings
 
     return DomainDescriptor(
@@ -21,7 +22,14 @@ def _build_domain():
         html_routers=get_html_routers(),
         settings_class=AdminSettings,
         on_startup=on_startup,
+        chat_tools=get_chat_tools(),
         migration_substitutions={
             "{REF_USER_TABLE}": lambda: settings_registry.get("admin", AdminSettings).user_directory.table,
         },
+        nav_items=[],
+        chat_system_prompt=(
+            "В админ-панели администратор управляет пользователями, ролями "
+            "и доступом к доменам. Ты можешь подсказать, как туда попасть "
+            "и что там делать."
+        ),
     )

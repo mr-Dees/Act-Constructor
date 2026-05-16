@@ -14,8 +14,8 @@ const ChatMessages = {
     /** @type {Object<number, {element: HTMLElement, appendText: function, finalize: function}>} */
     _streamingBlocks: {},
 
-    /** @type {string} HTML welcome-сообщения для восстановления при очистке */
-    _welcomeHtml: '',
+    /** @type {HTMLElement|null} DOM-узел welcome-сообщения для восстановления при очистке */
+    _welcomeNode: null,
 
     /**
      * Инициализация: кеширование DOM, подписка на события
@@ -27,28 +27,63 @@ const ChatMessages = {
         if (this._initialized) return;
         this._messagesContainer = messagesContainer;
 
-        // Кэшируем welcome-сообщение для восстановления при очистке
+        // Кэшируем welcome-сообщение как DOM-узел (не строку!) — иначе innerHTML
+        // даст путь для XSS, если в шаблоне когда-нибудь окажется untrusted-контент.
         const welcomeEl = this._messagesContainer.querySelector('.chat-message-bot');
         if (welcomeEl) {
-            this._welcomeHtml = welcomeEl.outerHTML;
+            this._welcomeNode = welcomeEl.cloneNode(true);
         }
 
-        ChatEventBus.on('chat:send-request', (data) => this._send(data));
-        ChatEventBus.on('context:conversation-switched', (data) => {
+        // Сохраняем именованные ссылки на обработчики — нужно для destroy().
+        this._onSendRequest = (data) => this._send(data);
+        this._onConversationSwitched = (data) => {
             ChatStream.abort();
+            if (!data.conversationId) {
+                this._restoreWelcome();
+                return;
+            }
             this._renderConversationMessages(data);
-        });
-        ChatEventBus.on('context:conversation-cleared', () => {
+        };
+        this._onConversationCleared = () => {
             ChatStream.abort();
             this._restoreWelcome();
-        });
-        ChatEventBus.on('chat:clear', () => {
+        };
+        this._onChatClear = () => {
             ChatStream.abort();
             this._streamingBlocks = {};
             this._restoreWelcome();
-        });
+        };
+
+        ChatEventBus.on('chat:send-request', this._onSendRequest);
+        ChatEventBus.on('context:conversation-switched', this._onConversationSwitched);
+        ChatEventBus.on('context:conversation-cleared', this._onConversationCleared);
+        ChatEventBus.on('chat:clear', this._onChatClear);
 
         this._initialized = true;
+    },
+
+    /**
+     * Снимает все подписки на шину событий. Идемпотентно.
+     */
+    destroy() {
+        if (!this._initialized) return;
+        if (this._onSendRequest) {
+            ChatEventBus.off('chat:send-request', this._onSendRequest);
+            this._onSendRequest = null;
+        }
+        if (this._onConversationSwitched) {
+            ChatEventBus.off('context:conversation-switched', this._onConversationSwitched);
+            this._onConversationSwitched = null;
+        }
+        if (this._onConversationCleared) {
+            ChatEventBus.off('context:conversation-cleared', this._onConversationCleared);
+            this._onConversationCleared = null;
+        }
+        if (this._onChatClear) {
+            ChatEventBus.off('chat:clear', this._onChatClear);
+            this._onChatClear = null;
+        }
+        this._initialized = false;
     },
 
     /**
@@ -126,9 +161,13 @@ const ChatMessages = {
                 break;
 
             case 'block_start': {
+                if (event.data.type === 'client_action') {
+                    // client_action приходит как отдельное событие — игнорируем block_start
+                    break;
+                }
                 const sb = ChatRenderer.createStreamingBlock(event.data.type);
                 this._streamingBlocks[event.data.index] = sb;
-                container.appendChild(sb.element);
+                ChatRenderer.appendBlock(container, sb.element);
                 break;
             }
 
@@ -144,32 +183,65 @@ const ChatMessages = {
                 break;
             }
 
+            case 'block_complete': {
+                // Нестримуемые блоки (file, image, plan, error, ...) приходят
+                // одним событием с полной нагрузкой. Рендерим сразу — иначе
+                // блок появился бы только после перезагрузки истории.
+                const block = event.data.block;
+                if (block) {
+                    const el = ChatRenderer.renderBlock(block);
+                    if (el) ChatRenderer.appendBlock(container, el);
+                }
+                break;
+            }
+
             case 'tool_call':
                 break;
 
             case 'tool_result':
                 break;
 
-            case 'plan_update':
-                ChatRenderer.updatePlan(container, event.data.steps);
-                break;
-
             case 'buttons': {
                 const btnBlock = ChatRenderer.renderBlock({ type: 'buttons', ...event.data });
-                if (btnBlock) container.appendChild(btnBlock);
+                if (btnBlock) ChatRenderer.appendBlock(container, btnBlock);
+                break;
+            }
+
+            case 'client_action': {
+                // Команда выполняется немедленно (live-стрим).
+                const ca = event.data.block || {};
+                const el = ChatRenderer.renderBlock(
+                    { type: 'client_action', ...ca },
+                    { execute: true },
+                );
+                if (el) ChatRenderer.appendBlock(container, el);
                 break;
             }
 
             case 'error': {
-                const errDiv = document.createElement('div');
-                errDiv.className = 'chat-error';
-                errDiv.textContent = event.data.message;
-                container.appendChild(errDiv);
+                // Рендерим как ErrorBlock, чтобы стримовое и сохранённое
+                // отображение ошибки выглядело одинаково.
+                const message =
+                    event.data.error || event.data.message || 'Произошла ошибка';
+                const errBlock = ChatRenderer.renderBlock({
+                    type: 'error',
+                    message,
+                    code: event.data.code || null,
+                });
+                if (errBlock) ChatRenderer.appendBlock(container, errBlock);
                 break;
             }
 
             case 'message_end':
                 this._streamingBlocks = {};
+                break;
+
+            case 'agent_request_started':
+                // Сигнал от backend: forward к внешнему агенту зарегистрирован.
+                // request_id уже сохранён в ChatStream — при разрыве соединения
+                // он автоматически переоткроет resume-стрим. Здесь только
+                // показываем индикатор «думает».
+                ChatEventBus.emit('ui:typing-show');
                 break;
         }
 
@@ -307,23 +379,21 @@ const ChatMessages = {
      * @private
      */
     _renderConversationMessages({ conversationId, messages }) {
-        this._messagesContainer.innerHTML = '';
+        this._messagesContainer.replaceChildren();
 
         for (const msg of messages) {
             const blocks = Array.isArray(msg.content) ? msg.content : [];
 
             if (msg.role === 'user') {
                 const textBlock = blocks.find(b => b.type === 'text');
-                const text = textBlock
-                    ? (textBlock.content || textBlock.text || '')
-                    : '';
+                const text = textBlock ? (textBlock.content || '') : '';
 
                 const fileBlocks = blocks.filter(b => b.type === 'file');
                 this._renderUserMessageWithFiles(text, fileBlocks);
             } else if (msg.role === 'assistant') {
                 if (blocks.length > 0) {
                     const container = this._addBotMessageStreaming();
-                    ChatRenderer.renderBlocks(container, blocks);
+                    ChatRenderer.renderBlocks(container, blocks, { execute: false });
                 } else {
                     this.renderMessage('bot', '');
                 }
@@ -338,7 +408,11 @@ const ChatMessages = {
      * @private
      */
     _restoreWelcome() {
-        this._messagesContainer.innerHTML = this._welcomeHtml;
+        this._messagesContainer.replaceChildren();
+        if (this._welcomeNode) {
+            // Клонируем повторно — оригинал нужен для следующих восстановлений.
+            this._messagesContainer.appendChild(this._welcomeNode.cloneNode(true));
+        }
     },
 };
 

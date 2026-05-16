@@ -110,6 +110,61 @@ class TestGreenplumSchemaCompatibility:
             + "\n".join(violations)
         )
 
+    def test_distributed_by_subset_of_primary_key(self, gp_schema_files):
+        """GP 6: если у таблицы есть и PRIMARY KEY, и DISTRIBUTED BY,
+        то столбцы DISTRIBUTED BY обязаны быть подмножеством PRIMARY KEY
+        (то же правило для UNIQUE-констрейнтов). Нарушение → InvalidTableDefinitionError
+        при CREATE TABLE."""
+        pk_pattern = re.compile(r'PRIMARY\s+KEY\s*\(([^)]+)\)', re.IGNORECASE)
+        uq_pattern = re.compile(r'\bUNIQUE\s*\(([^)]+)\)', re.IGNORECASE)
+        dist_pattern = re.compile(r'DISTRIBUTED\s+BY\s*\(([^)]+)\)', re.IGNORECASE)
+        name_pattern = re.compile(
+            r'CREATE\s+TABLE\s+(?:IF\s+NOT\s+EXISTS\s+)?([^\s(]+)',
+            re.IGNORECASE,
+        )
+
+        def _cols(s):
+            return {c.strip().lower() for c in s.split(',') if c.strip()}
+
+        violations = []
+        for schema in gp_schema_files:
+            content = schema.read_text(encoding='utf-8')
+            # _split_sql_statements корректно игнорирует ; внутри комментариев
+            # и строковых литералов — нельзя резать regex'ом по ';'.
+            for raw_stmt in DatabaseAdapter._split_sql_statements(content):
+                # Вырезаем line-комментарии: они могут содержать
+                # документацию вида "-- DISTRIBUTED BY (col)" и сбить регекс.
+                stmt = re.sub(r'--[^\n]*', '', raw_stmt)
+                if not re.search(r'\bCREATE\s+TABLE\b', stmt, re.IGNORECASE):
+                    continue
+                dist_match = dist_pattern.search(stmt)
+                if not dist_match:
+                    continue
+                dist_cols = _cols(dist_match.group(1))
+                name_match = name_pattern.search(stmt)
+                table = name_match.group(1) if name_match else '?'
+
+                pk_match = pk_pattern.search(stmt)
+                if pk_match:
+                    pk_cols = _cols(pk_match.group(1))
+                    if not dist_cols.issubset(pk_cols):
+                        violations.append(
+                            f"{schema.parent.parent.parent.name}/{table}: "
+                            f"DIST {sorted(dist_cols)} ⊄ PK {sorted(pk_cols)}"
+                        )
+                for uq_match in uq_pattern.finditer(stmt):
+                    uq_cols = _cols(uq_match.group(1))
+                    if not dist_cols.issubset(uq_cols):
+                        violations.append(
+                            f"{schema.parent.parent.parent.name}/{table}: "
+                            f"DIST {sorted(dist_cols)} ⊄ UNIQUE {sorted(uq_cols)}"
+                        )
+
+        assert not violations, (
+            "GP-правило: DISTRIBUTED BY должен быть подмножеством PRIMARY KEY "
+            "и каждого UNIQUE-констрейнта.\n" + "\n".join(violations)
+        )
+
     def test_chat_domain_migration_discovered(self, gp_schema_files):
         """GP-миграция домена chat обнаруживается автоматически."""
         domain_names = {s.parent.parent.parent.name for s in gp_schema_files}
@@ -117,6 +172,31 @@ class TestGreenplumSchemaCompatibility:
             f"Миграция chat не найдена среди GP-схем. "
             f"Обнаруженные домены: {sorted(domain_names)}"
         )
+
+    def test_chat_gp_schema_has_agent_bridge_tables(self):
+        """Новые agent_* таблицы добавлены в GP-схему чата и используют {SCHEMA}.{PREFIX}."""
+        schema_path = (
+            Path(__file__).parent.parent
+            / "app" / "domains" / "chat" / "migrations" / "greenplum" / "schema.sql"
+        )
+        content = schema_path.read_text(encoding="utf-8")
+
+        # Все 3 таблицы должны присутствовать с placeholder'ами схемы и префикса
+        for table in ("agent_requests", "agent_response_events", "agent_responses"):
+            assert f"CREATE TABLE IF NOT EXISTS {{SCHEMA}}.{{PREFIX}}{table}" in content, \
+                f"Таблица {table} не найдена с {{SCHEMA}}.{{PREFIX}}-префиксом в GP-схеме"
+
+        # Sequence для events
+        assert "CREATE SEQUENCE {SCHEMA}.{PREFIX}agent_response_events_id_seq" in content
+
+        # Все индексы используют idx_{PREFIX}*.
+        # idx_{PREFIX}agent_responses_request не нужен: UNIQUE(request_id) уже создаёт индекс.
+        for idx_name in (
+            "idx_{PREFIX}agent_requests_status_created",
+            "idx_{PREFIX}agent_requests_message",
+            "idx_{PREFIX}agent_response_events_request",
+        ):
+            assert idx_name in content, f"Индекс {idx_name} не найден в GP-схеме"
 
 
 # ---------------------------------------------------------------------------

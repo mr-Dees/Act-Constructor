@@ -71,10 +71,21 @@ def sse_tool_result(
     })
 
 
-def sse_plan_update(*, steps: list[dict[str, Any]]) -> str:
-    """Обновление плана действий."""
-    return format_sse_event("plan_update", {
-        "steps": steps,
+def sse_tool_error(
+    *,
+    tool_name: str,
+    tool_call_id: str,
+    message: str,
+) -> str:
+    """Ошибка вызова инструмента (валидация параметров, недопустимый tool).
+
+    Отличается от ``sse_tool_result`` тем, что фронт показывает пользователю
+    нейтральное сообщение и НЕ ожидает дальнейшего content по этому tool.
+    """
+    return format_sse_event("tool_error", {
+        "tool_name": tool_name,
+        "tool_call_id": tool_call_id,
+        "message": message,
     })
 
 
@@ -82,6 +93,46 @@ def sse_buttons(*, buttons: list[dict[str, Any]]) -> str:
     """Кнопки действий для пользователя."""
     return format_sse_event("buttons", {
         "buttons": buttons,
+    })
+
+
+def sse_client_action(*, block: dict[str, Any]) -> str:
+    """Команда фронту выполнить чисто-клиентское действие сразу.
+
+    Содержит полный ClientActionBlock (action, params, label).
+    Фронт исполняет команду через ClientActionsRegistry один раз.
+    """
+    return format_sse_event("client_action", {"block": block})
+
+
+def sse_block_complete(*, block_index: int, block: dict[str, Any]) -> str:
+    """Отдаёт цельный нестримуемый блок (file, image, plan, error, ...).
+
+    Стримуемые типы (text, code, reasoning) передаются триплетом
+    block_start/block_delta/block_end. Остальные блоки рендерятся
+    разом из payload — этот хелпер и используется фронтом, чтобы
+    показать их сразу при получении, не дожидаясь перезагрузки.
+    """
+    return format_sse_event("block_complete", {
+        "index": block_index,
+        "block": block,
+    })
+
+
+def sse_agent_request_started(
+    *,
+    request_id: str,
+    conversation_id: str,
+) -> str:
+    """Сигнал фронту: forward-запрос зарегистрирован, его id известен.
+
+    Фронт может сохранить request_id и при разрыве соединения переоткрыть
+    resume-стрим:
+        GET /api/v1/chat/conversations/{cid}/agent-request/{rid}/stream
+    """
+    return format_sse_event("agent_request_started", {
+        "request_id": request_id,
+        "conversation_id": conversation_id,
     })
 
 

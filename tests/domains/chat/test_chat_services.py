@@ -3,8 +3,12 @@
 import pytest
 from unittest.mock import AsyncMock, MagicMock, patch
 
-from fastapi import HTTPException
-
+from app.domains.chat.exceptions import (
+    ChatFileNotFoundError,
+    ChatFileValidationError,
+    ChatLimitError,
+    ConversationNotFoundError,
+)
 from app.domains.chat.services.conversation_service import ConversationService
 from app.domains.chat.services.file_service import FileService
 from app.domains.chat.services.message_service import MessageService
@@ -22,16 +26,42 @@ def settings():
     return ChatDomainSettings()
 
 
+def _make_mock_repo_with_conn():
+    """Создаёт мок репозитория с привязанным conn, поддерживающим transaction().
+
+    MessageService теперь оборачивает create+touch в
+    ``async with msg_repo.conn.transaction()`` — поэтому мокам репозиториев
+    нужен валидный async-context-manager на ``.conn.transaction()``.
+
+    **Защита от mock drift**: AsyncMock по умолчанию возвращает truthy
+    MagicMock на любой await; для методов вида ``get_*`` / ``count_*`` /
+    ``find_*`` это ломает тесты, которые ожидают None/0/False. При
+    добавлении новых ``get_*``/``count_*`` методов в репозитории — добавь
+    им явный дефолт здесь.
+    """
+    repo = AsyncMock()
+    tx = AsyncMock()
+    tx.__aenter__ = AsyncMock(return_value=tx)
+    tx.__aexit__ = AsyncMock(return_value=False)
+    repo.conn = MagicMock()
+    repo.conn.transaction = MagicMock(return_value=tx)
+    # Явные дефолты для известных идемпотентность-чувствительных методов.
+    repo.get_by_user_and_title = AsyncMock(return_value=None)
+    repo.get_by_id = AsyncMock(return_value=None)
+    repo.count_by_user = AsyncMock(return_value=0)
+    return repo
+
+
 @pytest.fixture
 def conv_repo():
     """Mock ConversationRepository."""
-    return AsyncMock()
+    return _make_mock_repo_with_conn()
 
 
 @pytest.fixture
 def msg_repo():
     """Mock MessageRepository."""
-    return AsyncMock()
+    return _make_mock_repo_with_conn()
 
 
 @pytest.fixture
@@ -67,13 +97,13 @@ class TestConversationServiceCreate:
         conv_repo.create.assert_called_once()
 
     async def test_create_exceeds_limit(self, service, conv_repo, settings):
-        """Превышение лимита бесед вызывает HTTPException 422."""
+        """Превышение лимита бесед вызывает ChatLimitError (status_code=422)."""
         conv_repo.count_by_user.return_value = settings.max_conversations_per_user
 
-        with pytest.raises(HTTPException) as exc_info:
+        with pytest.raises(ChatLimitError) as exc_info:
             await service.create(user_id="user1")
         assert exc_info.value.status_code == 422
-        assert "лимит" in exc_info.value.detail.lower()
+        assert "лимит" in str(exc_info.value).lower()
 
 
 class TestConversationServiceGet:
@@ -83,10 +113,10 @@ class TestConversationServiceGet:
         return ConversationService(conv_repo=conv_repo, settings=settings)
 
     async def test_get_not_found(self, service, conv_repo):
-        """Несуществующая беседа вызывает HTTPException 404."""
+        """Несуществующая беседа вызывает ConversationNotFoundError (404)."""
         conv_repo.get_by_id.return_value = None
 
-        with pytest.raises(HTTPException) as exc_info:
+        with pytest.raises(ConversationNotFoundError) as exc_info:
             await service.get("nonexistent-id", "user1")
         assert exc_info.value.status_code == 404
 
@@ -117,7 +147,7 @@ class TestMessageServiceSaveUser:
         msg_repo.create.return_value = {
             "id": "msg-1",
             "role": "user",
-            "content": [{"type": "text", "text": "Привет"}],
+            "content": [{"type": "text", "content": "Привет"}],
         }
 
         result = await service.save_user_message(
@@ -131,30 +161,30 @@ class TestMessageServiceSaveUser:
         conv_repo.touch.assert_called_once_with("conv-1")
 
     async def test_save_exceeds_length_limit(self, service, msg_repo):
-        """Слишком длинное сообщение вызывает HTTPException 422."""
+        """Слишком длинное сообщение вызывает ChatLimitError (422)."""
         long_content = "A" * (service.settings.max_message_content_length + 1)
 
-        with pytest.raises(HTTPException) as exc_info:
+        with pytest.raises(ChatLimitError) as exc_info:
             await service.save_user_message(
                 conversation_id="conv-1",
                 content=long_content,
                 user_id="user1",
             )
         assert exc_info.value.status_code == 422
-        assert "длинное" in exc_info.value.detail.lower()
+        assert "длинное" in str(exc_info.value).lower()
 
     async def test_save_exceeds_message_count_limit(self, service, msg_repo, settings):
-        """Превышение лимита сообщений вызывает HTTPException 422."""
+        """Превышение лимита сообщений вызывает ChatLimitError (422)."""
         msg_repo.count_by_conversation.return_value = settings.max_messages_per_conversation
 
-        with pytest.raises(HTTPException) as exc_info:
+        with pytest.raises(ChatLimitError) as exc_info:
             await service.save_user_message(
                 conversation_id="conv-1",
                 content="Текст",
                 user_id="user1",
             )
         assert exc_info.value.status_code == 422
-        assert "лимит" in exc_info.value.detail.lower()
+        assert "лимит" in str(exc_info.value).lower()
 
 
 class TestMessageServiceSaveAssistant:
@@ -170,17 +200,59 @@ class TestMessageServiceSaveAssistant:
         msg_repo.create.return_value = {
             "id": "msg-2",
             "role": "assistant",
-            "content": [{"type": "text", "text": "Ответ"}],
+            "content": [{"type": "text", "content": "Ответ"}],
         }
 
         result = await service.save_assistant_message(
             conversation_id="conv-1",
-            content=[{"type": "text", "text": "Ответ"}],
+            content=[{"type": "text", "content": "Ответ"}],
             model="gpt-4o",
         )
 
         assert result["role"] == "assistant"
         conv_repo.touch.assert_called_once_with("conv-1")
+
+    async def test_create_and_touch_in_single_transaction(
+        self, service, msg_repo, conv_repo,
+    ):
+        """1.2: create() и touch() выполняются в одной транзакции.
+
+        Проверяем, что async-context-manager ``msg_repo.conn.transaction()``
+        был открыт ровно один раз и обёртывает оба вызова.
+        """
+        msg_repo.create.return_value = {"id": "m", "role": "assistant"}
+
+        await service.save_assistant_message(
+            conversation_id="conv-tx",
+            content=[{"type": "text", "content": "x"}],
+        )
+
+        # Транзакция открывалась ровно один раз
+        assert msg_repo.conn.transaction.call_count == 1
+        msg_repo.create.assert_awaited_once()
+        conv_repo.touch.assert_awaited_once_with("conv-tx")
+
+    async def test_touch_failure_rolls_back_create(
+        self, service, msg_repo, conv_repo,
+    ):
+        """1.2: Если touch() падает, транзакция откатывается.
+
+        Проверяем именно поведение исключения: ``save_assistant_message``
+        должен пробросить ошибку наружу, а не проглотить (иначе вызывающий
+        код решит, что сообщение успешно сохранено).
+        """
+        msg_repo.create.return_value = {"id": "m", "role": "assistant"}
+        conv_repo.touch.side_effect = RuntimeError("touch упал")
+
+        with pytest.raises(RuntimeError, match="touch упал"):
+            await service.save_assistant_message(
+                conversation_id="conv-tx-fail",
+                content=[{"type": "text", "content": "x"}],
+            )
+
+        # Транзакция была открыта, но __aexit__ получит exception → BEGIN/ROLLBACK
+        assert msg_repo.conn.transaction.call_count == 1
+        msg_repo.create.assert_awaited_once()
 
 
 # -------------------------------------------------------------------------
@@ -213,26 +285,48 @@ class TestFileServiceValidate:
         )
 
     def test_validate_too_large(self, service, settings):
-        """Слишком большой файл вызывает HTTPException 422."""
-        with pytest.raises(HTTPException) as exc_info:
+        """Слишком большой файл вызывает ChatFileValidationError (422)."""
+        with pytest.raises(ChatFileValidationError) as exc_info:
             service.validate_file(
                 filename="huge.pdf",
                 mime_type="application/pdf",
                 file_size=settings.max_file_size + 1,
             )
         assert exc_info.value.status_code == 422
-        assert "большой" in exc_info.value.detail.lower()
+        assert "большой" in str(exc_info.value).lower()
 
     def test_validate_wrong_mime_type(self, service):
-        """Неподдерживаемый MIME-тип вызывает HTTPException 422."""
-        with pytest.raises(HTTPException) as exc_info:
+        """Неподдерживаемый MIME-тип вызывает ChatFileValidationError (422)."""
+        with pytest.raises(ChatFileValidationError) as exc_info:
             service.validate_file(
                 filename="malware.exe",
                 mime_type="application/x-msdownload",
                 file_size=100,
             )
         assert exc_info.value.status_code == 422
-        assert "не поддерживается" in exc_info.value.detail.lower()
+        assert "не поддерживается" in str(exc_info.value).lower()
+
+    def test_validate_text_html_rejected(self, service):
+        """text/html не входит в whitelist — отклоняется (защита от XSS)."""
+        with pytest.raises(ChatFileValidationError) as exc_info:
+            service.validate_file(
+                filename="page.html",
+                mime_type="text/html",
+                file_size=100,
+            )
+        assert exc_info.value.status_code == 422
+        assert "не поддерживается" in str(exc_info.value).lower()
+
+    def test_validate_mime_with_parameters_rejected(self, service):
+        """MIME-тип с параметрами ('text/plain; charset=utf-8') не проходит — точное сравнение."""
+        with pytest.raises(ChatFileValidationError) as exc_info:
+            service.validate_file(
+                filename="note.txt",
+                mime_type="text/plain; charset=utf-8",
+                file_size=100,
+            )
+        assert exc_info.value.status_code == 422
+        assert "не поддерживается" in str(exc_info.value).lower()
 
 
 class TestFileServiceSave:
@@ -244,10 +338,10 @@ class TestFileServiceSave:
         )
 
     async def test_save_file_conversation_not_found(self, service, conv_repo):
-        """Загрузка файла в несуществующую беседу вызывает 404."""
+        """Загрузка файла в несуществующую беседу вызывает ConversationNotFoundError (404)."""
         conv_repo.get_by_id.return_value = None
 
-        with pytest.raises(HTTPException) as exc_info:
+        with pytest.raises(ConversationNotFoundError) as exc_info:
             await service.save_file(
                 conversation_id="nonexistent",
                 user_id="user1",
@@ -288,10 +382,10 @@ class TestFileServiceGet:
         )
 
     async def test_get_file_not_found(self, service, file_repo):
-        """Несуществующий файл вызывает HTTPException 404."""
+        """Несуществующий файл вызывает ChatFileNotFoundError (404)."""
         file_repo.get_file_data.return_value = None
 
-        with pytest.raises(HTTPException) as exc_info:
+        with pytest.raises(ChatFileNotFoundError) as exc_info:
             await service.get_file(file_id="nonexistent", user_id="user1")
         assert exc_info.value.status_code == 404
 
@@ -305,3 +399,40 @@ class TestFileServiceGet:
 
         result = await service.get_file(file_id="file-1", user_id="user1")
         assert result["filename"] == "test.pdf"
+
+
+# -------------------------------------------------------------------------
+# Файловый эндпоинт: защитные заголовки при отдаче
+# -------------------------------------------------------------------------
+
+
+class TestDownloadFileResponseHeaders:
+    """Защитные заголовки для отдачи файлов (anti-XSS / anti-sniffing)."""
+
+    async def test_download_forces_octet_stream_and_nosniff(self):
+        """Content-Type принудительно octet-stream, X-Content-Type-Options: nosniff."""
+        from app.domains.chat.api.files import download_file
+
+        # Файл с "доверчивым" mime_type (text/html) — должен быть проигнорирован.
+        file_service = MagicMock()
+        file_service.get_file = AsyncMock(return_value={
+            "id": "file-1",
+            "filename": "evil.html",
+            "mime_type": "text/html",
+            "file_data": b"<script>alert(1)</script>",
+        })
+
+        response = await download_file(
+            file_id="file-1",
+            inline=False,
+            username="user1",
+            file_service=file_service,
+        )
+
+        assert response.media_type == "application/octet-stream"
+        assert response.headers["X-Content-Type-Options"] == "nosniff"
+        assert response.headers["Content-Disposition"].startswith(
+            "attachment; filename*=UTF-8''",
+        )
+        # Имя файла percent-encoded в Content-Disposition.
+        assert "evil.html" in response.headers["Content-Disposition"]

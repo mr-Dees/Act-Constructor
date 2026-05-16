@@ -86,8 +86,8 @@ coverage.xml
 
 # Documentation
 DEVELOPER_GUIDE.md
-docs/
-!docs/plans/
+docs/plans/
+docs/superpowers/
 docs/_build/
 docs/_static/
 docs/_templates/
@@ -139,6 +139,4 @@ cython_debug/
 *.backup
 
 # Specific files
-Схема приложения.txt
-Описание приложения.md
 CLAUDE.md

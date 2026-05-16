@@ -2,10 +2,17 @@
 
 Поддерживает: текст, PDF, Excel (.xlsx), Word (.docx).
 Библиотеки опциональны — при отсутствии возвращается сообщение об ошибке.
+
+Все парсеры (pypdf/openpyxl/python-docx) синхронные и CPU-bound. Прямой
+вызов из async-функции блокирует event loop при больших файлах — на
+SSE-стримах это приводит к замиранию всех соединений до окончания парсинга.
+Используй ``extract_text_async`` из async-кода — он выполняет работу в
+thread pool через ``asyncio.to_thread``.
 """
 
 from __future__ import annotations
 
+import asyncio
 import io
 import logging
 
@@ -15,8 +22,21 @@ logger = logging.getLogger("audit_workstation.domains.chat.file_extraction")
 MAX_EXTRACTED_CHARS = 50_000
 
 
+async def extract_text_async(
+    file_data: bytes, mime_type: str, filename: str,
+) -> str:
+    """Async-обёртка над ``extract_text`` через ``asyncio.to_thread``.
+
+    Используй из async-кода (SSE-стримы, polling, orchestrator), чтобы
+    не блокировать event loop CPU-bound парсингом больших файлов.
+    """
+    return await asyncio.to_thread(extract_text, file_data, mime_type, filename)
+
+
 def extract_text(file_data: bytes, mime_type: str, filename: str) -> str:
-    """Извлекает текст из файла по MIME-типу.
+    """Извлекает текст из файла по MIME-типу. Синхронная, CPU-bound.
+
+    Из async-кода зови ``extract_text_async`` — иначе блокируется event loop.
 
     Returns:
         Извлечённый текст или сообщение об ошибке.

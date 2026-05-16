@@ -127,6 +127,59 @@
     border-top: var(--border-width-thin) solid var(--border-light);
 }
 
+/* Разделитель между двумя последовательными reasoning-блоками внутри группы */
+.chat-reasoning-separator {
+    border: none;
+    border-top: var(--border-width-thin) dashed var(--border-light);
+    margin: var(--spacing-xs) 0;
+    width: 100%;
+}
+
+/* ============================================
+   Группа reasoning-блоков (внешний контейнер)
+   ============================================ */
+
+.chat-reasoning-group {
+    border: var(--border-width-thin) solid var(--border-light);
+    border-radius: var(--radius-sm);
+    margin-bottom: var(--spacing-sm);
+    background: var(--bg-tertiary, var(--bg-secondary));
+}
+
+.chat-reasoning-group > summary {
+    padding: var(--spacing-xs) var(--spacing-sm);
+    cursor: pointer;
+    user-select: none;
+    font-weight: 500;
+    color: var(--text-primary);
+    list-style: none;
+}
+
+.chat-reasoning-group > summary::-webkit-details-marker {
+    display: none;
+}
+
+.chat-reasoning-group > summary::before {
+    content: '\25B6';
+    display: inline-block;
+    margin-right: var(--spacing-xs);
+    transition: transform var(--duration-fast, 150ms);
+    font-size: 0.7em;
+}
+
+.chat-reasoning-group[open] > summary::before {
+    transform: rotate(90deg);
+}
+
+.chat-reasoning-group-content {
+    padding: var(--spacing-xs) var(--spacing-sm) var(--spacing-sm);
+    border-top: var(--border-width-thin) solid var(--border-light);
+}
+
+.chat-reasoning-group-content > .chat-block-reasoning {
+    margin-bottom: 0;
+}
+
 /* ============================================
    Блок плана
    ============================================ */
@@ -305,16 +358,27 @@
     border-color: var(--border-medium);
 }
 
-/* Кнопки действий — акцентный стиль */
-.chat-block-buttons--action .chat-btn {
-    background: var(--primary);
-    color: var(--text-on-primary);
-    border-color: var(--primary);
+/* Бейдж выбранной кнопки — заменяет всю группу после клика */
+.chat-button-selected {
+    display: inline-block;
+    padding: var(--spacing-xs) var(--spacing-sm);
+    border: var(--border-width-thin) solid var(--border-light);
+    border-radius: var(--radius-sm);
+    background: var(--bg-secondary);
+    color: var(--text-secondary);
+    font-size: var(--font-size-sm);
+    font-style: italic;
 }
 
-.chat-block-buttons--action .chat-btn:hover {
-    background: var(--primary-hover);
-    border-color: var(--primary-hover);
+/* Сообщение об ошибке выполнения client-action */
+.chat-error,
+.chat-block-error {
+    padding: var(--spacing-xs) var(--spacing-sm);
+    border: var(--border-width-thin) solid var(--border-medium);
+    border-radius: var(--radius-sm);
+    background: var(--bg-secondary);
+    color: var(--text-error, #c00);
+    font-size: var(--font-size-sm);
 }
 
 /* ============================================

@@ -120,7 +120,6 @@ class GreenplumSettings(BaseModel):
         default="s_grnplm_ld_audit_da_project_4",
         alias="schema"
     )
-    table_prefix: str = Field(default="t_db_oarb_audit_act_")
 
     model_config = {"populate_by_name": True}
 
@@ -136,6 +135,8 @@ class DatabaseSettings(BaseModel):
     pool_min_size: int = Field(default=2, ge=1)
     pool_max_size: int = Field(default=10, ge=2)
     command_timeout: int = Field(default=60, gt=0)
+    # Префикс таблиц приложения — общий для PG и GP, чтобы имена совпадали.
+    table_prefix: str = Field(default="t_db_oarb_audit_act_")
     gp: GreenplumSettings = GreenplumSettings()
 
     @model_validator(mode="after")

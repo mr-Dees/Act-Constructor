@@ -24,16 +24,21 @@ COMMENT ON COLUMN {SCHEMA}.{PREFIX}roles.name IS 'Уникальное имя р
 COMMENT ON COLUMN {SCHEMA}.{PREFIX}roles.domain_name IS 'Домен, к которому относится роль (NULL = глобальная)';
 COMMENT ON COLUMN {SCHEMA}.{PREFIX}roles.description IS 'Описание роли';
 
--- Заполняем ролями по умолчанию (только если таблица пустая)
+-- Заполняем ролями по умолчанию (идемпотентно по name: при добавлении
+-- новой сидовой роли в обновлении приложения — она прорастёт без
+-- пересоздания таблицы; существующие имена не дублируются).
 INSERT INTO {SCHEMA}.{PREFIX}roles (name, domain_name, description)
-SELECT name, domain_name, description
+SELECT s.name, s.domain_name, s.description
 FROM (
     SELECT 'Админ'::varchar AS name, NULL::varchar AS domain_name, 'Полный доступ ко всем доменам и функциям'::text AS description
     UNION ALL SELECT 'Цифровой акт', 'acts', 'Доступ к домену актов'
     UNION ALL SELECT 'ЦК финансовый результат', 'ck_fin_res', 'Доступ к ЦК Фин.Рез.'
     UNION ALL SELECT 'ЦК клиентский опыт', 'ck_client_exp', 'Доступ к ЦК Клиентский опыт'
-) AS seed
-WHERE NOT EXISTS (SELECT 1 FROM {SCHEMA}.{PREFIX}roles);
+    UNION ALL SELECT 'Чат-ассистент', 'chat', 'Доступ к AI-чату'
+) AS s
+WHERE NOT EXISTS (
+    SELECT 1 FROM {SCHEMA}.{PREFIX}roles r WHERE r.name = s.name
+);
 
 -- ============================================================================
 -- ТАБЛИЦА СВЯЗЕЙ ПОЛЬЗОВАТЕЛЬ — РОЛЬ
@@ -104,3 +109,26 @@ CREATE INDEX idx_{PREFIX}admin_audit_log_target
 
 CREATE INDEX idx_{PREFIX}admin_audit_log_created
     ON {SCHEMA}.{PREFIX}admin_audit_log(created_at DESC);
+
+-- ============================================================================
+-- ТАБЛИЦА SINGLETON-БЛОКИРОВКИ ИНСТАНСА ПРИЛОЖЕНИЯ
+-- Гарантирует, что в закрытой сети без Redis/etcd работает ровно один
+-- uvicorn-воркер с приложением. См. app/main.py lifespan startup.
+-- GP-нюанс: distribution key должен входить в PRIMARY KEY, что выполняется
+-- автоматически (service_name — единственный PK).
+-- ============================================================================
+
+CREATE TABLE IF NOT EXISTS {SCHEMA}.{PREFIX}app_singleton_lock (
+    service_name VARCHAR(64) PRIMARY KEY,
+    pid INTEGER NOT NULL,
+    started_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    host VARCHAR(255) NOT NULL DEFAULT ''
+)
+WITH (appendonly=false)
+DISTRIBUTED BY (service_name);
+
+COMMENT ON TABLE {SCHEMA}.{PREFIX}app_singleton_lock IS 'Блокировка singleton-инстанса приложения (защита от запуска второго воркера)';
+COMMENT ON COLUMN {SCHEMA}.{PREFIX}app_singleton_lock.service_name IS 'Имя сервиса (например, act_constructor)';
+COMMENT ON COLUMN {SCHEMA}.{PREFIX}app_singleton_lock.pid IS 'PID процесса-владельца блокировки';
+COMMENT ON COLUMN {SCHEMA}.{PREFIX}app_singleton_lock.started_at IS 'Время захвата блокировки (UTC)';
+COMMENT ON COLUMN {SCHEMA}.{PREFIX}app_singleton_lock.host IS 'Имя хоста процесса-владельца';

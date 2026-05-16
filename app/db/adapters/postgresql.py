@@ -19,6 +19,15 @@ logger = logging.getLogger("audit_workstation.db.adapters.postgresql")
 class PostgreSQLAdapter(DatabaseAdapter):
     """Адаптер для работы с PostgreSQL."""
 
+    def __init__(self, table_prefix: str = ""):
+        """
+        Args:
+            table_prefix: Префикс таблиц приложения (например, t_db_oarb_audit_act_).
+                          Используется симметрично с GP, чтобы имена совпадали.
+        """
+        self.table_prefix = table_prefix
+        logger.info(f"PostgreSQL адаптер инициализирован: prefix={table_prefix!r}")
+
     async def _get_existing_tables(
         self,
         conn: asyncpg.Connection,
@@ -45,6 +54,11 @@ class PostgreSQLAdapter(DatabaseAdapter):
                 continue
 
             schema_sql = schema_path.read_text(encoding='utf-8')
+
+            # Подставляем префикс и схему (для PG schema = public, выражается пустой строкой —
+            # имена остаются неквалифицированными, как и было).
+            schema_sql = schema_sql.replace("{PREFIX}", self.table_prefix)
+            schema_sql = schema_sql.replace("{SCHEMA}.", "")
 
             # Подстановка плейсхолдеров справочных таблиц
             if substitutions:
@@ -105,8 +119,11 @@ class PostgreSQLAdapter(DatabaseAdapter):
             )
 
     def get_table_name(self, base_name: str) -> str:
-        """Возвращает имя таблицы без префиксов."""
-        return base_name
+        """Возвращает имя таблицы с префиксом приложения.
+
+        Пример: t_db_oarb_audit_act_acts
+        """
+        return f"{self.table_prefix}{base_name}"
 
     def qualify_table_name(self, full_name: str, schema: str = "") -> str:
         """Квалифицирует схемой если указана, иначе возвращает как есть."""

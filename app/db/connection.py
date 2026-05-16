@@ -135,7 +135,9 @@ async def init_db(settings: Settings) -> None:
     try:
         # Определяем тип БД и создаем адаптер
         if settings.database.type == "postgresql":
-            _adapter = PostgreSQLAdapter()
+            _adapter = PostgreSQLAdapter(
+                table_prefix=settings.database.table_prefix
+            )
 
             pool_kwargs = dict(
                 host=settings.database.host,
@@ -153,7 +155,7 @@ async def init_db(settings: Settings) -> None:
         elif settings.database.type == "greenplum":
             _adapter = GreenplumAdapter(
                 schema=settings.database.gp.schema_name,
-                table_prefix=settings.database.gp.table_prefix
+                table_prefix=settings.database.table_prefix
             )
 
             # Получаем username из JUPYTERHUB_USER

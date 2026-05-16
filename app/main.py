@@ -106,6 +106,24 @@ async def lifespan(app: FastAPI):
         await create_tables_if_not_exist(domains)
         logger.info("Схема базы данных проверена")
 
+        # SINGLETON-БЛОКИРОВКА ИНСТАНСА ПРИЛОЖЕНИЯ
+        # В закрытой сети без Redis multi-worker деплой повредил бы
+        # process-level состояние (например, agent_bridge_runner._running).
+        # Lock в БД гарантирует ровно одного активного воркера.
+        from app.core.singleton_lock import (
+            acquire_singleton_lock,
+            SingletonLockBusyError,
+        )
+        from app.db.connection import get_adapter, get_db
+        adapter = get_adapter()
+        singleton_table = adapter.get_table_name("app_singleton_lock")
+        try:
+            async with get_db() as conn:
+                await acquire_singleton_lock(conn, singleton_table)
+        except SingletonLockBusyError as exc:
+            logger.critical("Не удалось захватить singleton-lock: %s", exc)
+            raise RuntimeError(str(exc)) from exc
+
         # Запуск доменов с откатом при частичной ошибке:
         # если on_startup домена N падает, вызываем on_shutdown для 1..N-1
         try:
@@ -126,6 +144,30 @@ async def lifespan(app: FastAPI):
             raise
 
         logger.info("Приложение успешно инициализировано")
+
+        # Реconcile незавершённых polling-задач forward'а к внешнему агенту:
+        # если предыдущий запуск uvicorn упал или был перезапущен посреди
+        # polling'а, поднимаем фоновую задачу заново. Раннер сам подхватит
+        # ответ из мост-таблиц и сохранит ассистент-сообщение.
+        # Ошибки reconcile не блокируют старт приложения.
+        try:
+            from app.core.settings_registry import get as get_domain_settings
+            from app.domains.chat.services.agent_bridge_runner import (
+                schedule_pending,
+            )
+            from app.domains.chat.settings import ChatDomainSettings
+
+            chat_settings = get_domain_settings("chat", ChatDomainSettings)
+            count = await schedule_pending(settings=chat_settings)
+            logger.info(
+                "Lifespan reconcile: запущено %d polling-задач "
+                "для незавершённых agent_requests",
+                count,
+            )
+        except Exception:
+            logger.exception(
+                "Lifespan reconcile: ошибка (не блокирует старт)",
+            )
 
     except KerberosTokenExpiredError as e:
         logger.critical(
@@ -160,6 +202,19 @@ async def lifespan(app: FastAPI):
                 await d.on_shutdown(app)
             except Exception:
                 logger.exception(f"Ошибка при завершении домена {d.name}")
+
+    # Освобождаем singleton-блокировку (best-effort, до закрытия пула).
+    try:
+        from app.core.singleton_lock import release_singleton_lock
+        from app.db.connection import get_adapter, get_db
+        adapter = get_adapter()
+        singleton_table = adapter.get_table_name("app_singleton_lock")
+        async with get_db() as conn:
+            await release_singleton_lock(conn, singleton_table)
+    except Exception:
+        logger.exception(
+            "Не удалось освободить singleton-lock (не блокирует shutdown)",
+        )
 
     # Закрываем пул БД
     await close_db()

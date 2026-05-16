@@ -4,7 +4,7 @@ import pytest
 from pydantic import ValidationError
 
 from app.core.chat.blocks import (
-    ActionButton,
+    Button,
     ButtonGroup,
     CodeBlock,
     FileBlock,
@@ -12,7 +12,6 @@ from app.core.chat.blocks import (
     MessageBlock,
     PlanBlock,
     PlanStep,
-    QuickReplyButton,
     ReasoningBlock,
     TextBlock,
 )
@@ -112,43 +111,23 @@ class TestImageBlock:
 class TestButtonGroup:
     """Тесты группы кнопок."""
 
-    def test_quick_reply_variant(self):
+    def test_create_with_buttons(self):
         buttons = [
-            QuickReplyButton(label="Да", value="yes"),
-            QuickReplyButton(label="Нет", value="no"),
+            Button(action_id="acts.open_act_page", label="Открыть КМ-23-001",
+                   params={"km_number": "КМ-23-001"}),
+            Button(action_id="acts.open_act_page", label="Открыть КМ-23-002",
+                   params={"km_number": "КМ-23-002"}),
         ]
-        group = ButtonGroup(variant="quick_reply", buttons=buttons)
+        group = ButtonGroup(buttons=buttons)
         assert group.type == "buttons"
-        assert group.variant == "quick_reply"
         assert len(group.buttons) == 2
-        assert group.buttons[0].label == "Да"
-        assert group.buttons[0].value == "yes"
+        assert group.buttons[0].action_id == "acts.open_act_page"
+        assert group.buttons[0].label == "Открыть КМ-23-001"
+        assert group.buttons[0].params == {"km_number": "КМ-23-001"}
 
-    def test_action_variant(self):
-        buttons = [
-            ActionButton(
-                id="act-1",
-                label="Запустить проверку",
-                domain="acts",
-                params={"km": "КМ-01-00001"},
-                confirm=True,
-            ),
-        ]
-        group = ButtonGroup(variant="action", buttons=buttons)
-        assert group.type == "buttons"
-        assert group.variant == "action"
-        assert len(group.buttons) == 1
-        btn = group.buttons[0]
-        assert btn.id == "act-1"
-        assert btn.label == "Запустить проверку"
-        assert btn.domain == "acts"
-        assert btn.params == {"km": "КМ-01-00001"}
-        assert btn.confirm is True
-
-    def test_action_button_defaults(self):
-        btn = ActionButton(id="a1", label="Тест", domain="admin")
+    def test_button_defaults(self):
+        btn = Button(action_id="a1", label="Тест")
         assert btn.params == {}
-        assert btn.confirm is False
 
 
 class TestMessageBlockUnion:
@@ -183,8 +162,9 @@ class TestMessageBlockUnion:
             {"type": "image", "file_id": "i1", "alt": "График"},
             {
                 "type": "buttons",
-                "variant": "quick_reply",
-                "buttons": [{"label": "OK", "value": "ok"}],
+                "buttons": [{"action_id": "acts.open_act_page",
+                             "label": "Открыть",
+                             "params": {"km_number": "КМ-01-00001"}}],
             },
         ]
         blocks = parse_message_blocks(raw)
@@ -223,3 +203,121 @@ class TestMessageBlockUnion:
         blocks2 = parse_message_blocks(serialized)
         serialized2 = serialize_message_blocks(blocks2)
         assert serialized == serialized2
+
+
+def test_client_action_block_parses():
+    from app.core.chat.blocks import ClientActionBlock
+    block = ClientActionBlock(
+        action="open_url",
+        params={"url": "/acts/КМ-23-001"},
+        label="Открываю акт КМ-23-001…",
+    )
+    assert block.type == "client_action"
+    assert block.action == "open_url"
+    assert block.params == {"url": "/acts/КМ-23-001"}
+    assert block.label == "Открываю акт КМ-23-001…"
+
+
+def test_client_action_block_in_discriminated_union():
+    """Дискриминированное объединение должно знать про client_action."""
+    from app.core.chat.schemas import parse_message_blocks
+    blocks = parse_message_blocks([
+        {"type": "client_action", "action": "notify",
+         "params": {"message": "Привет"}, "label": None},
+    ])
+    assert len(blocks) == 1
+    assert blocks[0].type == "client_action"
+    assert blocks[0].action == "notify"
+    assert blocks[0].label is None
+
+
+def test_client_action_block_id_auto_generated():
+    """При создании без явного block_id — генерируется валидный uuid4."""
+    import uuid as _uuid
+    from app.core.chat.blocks import ClientActionBlock
+
+    block = ClientActionBlock(action="notify", params={"message": "Hi"})
+    assert block.block_id
+    # Проверяем, что это валидный uuid4 (парсится без исключений)
+    parsed = _uuid.UUID(block.block_id)
+    assert parsed.version == 4
+
+
+def test_client_action_block_id_explicit():
+    """Явно переданный block_id сохраняется без изменений."""
+    from app.core.chat.blocks import ClientActionBlock
+
+    explicit_id = "11111111-2222-3333-4444-555555555555"
+    block = ClientActionBlock(
+        action="notify",
+        params={"message": "Hi"},
+        block_id=explicit_id,
+    )
+    assert block.block_id == explicit_id
+
+
+def test_client_action_block_id_unique_per_instance():
+    """Два инстанса без явного block_id — получают разные uuid."""
+    from app.core.chat.blocks import ClientActionBlock
+
+    a = ClientActionBlock(action="notify", params={"message": "A"})
+    b = ClientActionBlock(action="notify", params={"message": "B"})
+    assert a.block_id != b.block_id
+
+
+def test_client_action_block_id_in_model_dump():
+    """block_id попадает в model_dump (это критично для SSE сериализации)."""
+    from app.core.chat.blocks import ClientActionBlock
+
+    block = ClientActionBlock(action="notify", params={"message": "Hi"})
+    data = block.model_dump()
+    assert "block_id" in data
+    assert data["block_id"] == block.block_id
+
+
+def test_client_action_block_id_via_discriminated_union():
+    """Парсинг через дискриминированное объединение сохраняет block_id."""
+    from app.core.chat.schemas import parse_message_blocks
+
+    blocks = parse_message_blocks([
+        {
+            "type": "client_action",
+            "action": "notify",
+            "params": {"message": "Hi"},
+            "label": None,
+            "block_id": "fixed-id-xxx",
+        },
+    ])
+    assert len(blocks) == 1
+    assert blocks[0].block_id == "fixed-id-xxx"
+
+
+def test_error_block_parses_with_code():
+    from app.core.chat.blocks import ErrorBlock
+    block = ErrorBlock(
+        message="База знаний недоступна",
+        code="kb_unavailable",
+    )
+    assert block.type == "error"
+    assert block.message == "База знаний недоступна"
+    assert block.code == "kb_unavailable"
+
+
+def test_error_block_parses_without_code():
+    from app.core.chat.blocks import ErrorBlock
+    block = ErrorBlock(message="Что-то пошло не так")
+    assert block.type == "error"
+    assert block.code is None
+
+
+def test_error_block_in_discriminated_union():
+    """Дискриминированное объединение должно знать про error."""
+    from app.core.chat.schemas import parse_message_blocks
+    blocks = parse_message_blocks([
+        {"type": "error", "message": "Сбой", "code": "kb_unavailable"},
+        {"type": "error", "message": "Сбой без кода"},
+    ])
+    assert len(blocks) == 2
+    assert blocks[0].type == "error"
+    assert blocks[0].code == "kb_unavailable"
+    assert blocks[1].code is None

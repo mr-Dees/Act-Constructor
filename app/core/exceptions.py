@@ -25,4 +25,7 @@ CHECK_CONSTRAINT_MESSAGES: dict[str, str] = {
     "check_service_note_consistency": (
         "Служебная записка и дата должны быть указаны вместе или отсутствовать вместе"
     ),
+    "agent_requests_status_check": "Недопустимый статус запроса к ИИ-агенту.",
+    "agent_response_events_event_type_check": "Недопустимый тип события агента.",
+    "agent_responses_finish_reason_check": "Недопустимый код завершения ответа агента.",
 }

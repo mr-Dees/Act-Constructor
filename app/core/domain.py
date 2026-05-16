@@ -38,6 +38,7 @@ class NavItem:
     active_page: str = ""  # значение для {{ active_page }} в шаблоне
     chat_domains: list[str] = field(default_factory=list)  # домены для фильтрации chat tools
     group: str = ""     # группа в sidebar (пустая строка = без группы)
+    description: str = ""  # короткое описание страницы для AI-ассистента и подсказок
 
 
 @dataclass

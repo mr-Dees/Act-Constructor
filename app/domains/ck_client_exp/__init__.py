@@ -7,6 +7,7 @@ def _build_domain():
     """Ленивое построение DomainDescriptor."""
     from app.core.domain import DomainDescriptor, NavItem
     from app.domains.ck_client_exp.api import get_api_routers
+    from app.domains.ck_client_exp.integrations.chat_tools import get_chat_tools
     from app.domains.ck_client_exp.routes import get_html_routers
     from app.domains.ck_client_exp.settings import CkClientExpSettings
 
@@ -16,6 +17,7 @@ def _build_domain():
         html_routers=get_html_routers(),
         settings_class=CkClientExpSettings,
         dependencies=["admin", "ua_data"],
+        chat_tools=get_chat_tools(),
         nav_items=[
             NavItem(
                 label="ЦК Клиентский опыт",
@@ -32,6 +34,11 @@ def _build_domain():
                 active_page="ck_client_experience",
                 chat_domains=[DOMAIN_NAME, "acts"],
                 group="Центры компетенций",
+                description="Контрольная карта верификации клиентского опыта",
             ),
         ],
+        chat_system_prompt=(
+            "ЦК Клиентского Опыта — страница верификации метрик "
+            "клиентского опыта."
+        ),
     )

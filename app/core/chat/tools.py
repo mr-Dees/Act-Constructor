@@ -50,6 +50,12 @@ class ChatTool:
     parameters: list[ChatToolParam] = field(default_factory=list)
     handler: Callable[..., Awaitable[str]] | None = field(default=None)
     category: str = ""
+    # Транслятор кнопки: принимает params серверной кнопки (action_id=имя tool'а),
+    # возвращает {"action": <client-action-id>, "params": {...}} или None
+    # (если транслировать нечего — кнопка передаётся как есть).
+    button_translator: (
+        Callable[[dict], Awaitable[dict | None]] | None
+    ) = field(default=None)
 
     def to_openai_tool(self) -> dict:
         """Конвертация в OpenAI function-calling формат."""

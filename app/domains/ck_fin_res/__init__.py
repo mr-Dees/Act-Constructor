@@ -7,6 +7,7 @@ def _build_domain():
     """Ленивое построение DomainDescriptor."""
     from app.core.domain import DomainDescriptor, NavItem
     from app.domains.ck_fin_res.api import get_api_routers
+    from app.domains.ck_fin_res.integrations.chat_tools import get_chat_tools
     from app.domains.ck_fin_res.routes import get_html_routers
     from app.domains.ck_fin_res.settings import CkFinResSettings
 
@@ -16,6 +17,7 @@ def _build_domain():
         html_routers=get_html_routers(),
         settings_class=CkFinResSettings,
         dependencies=["admin", "ua_data"],
+        chat_tools=get_chat_tools(),
         nav_items=[
             NavItem(
                 label="ЦК Фин.Рез.",
@@ -32,6 +34,12 @@ def _build_domain():
                 active_page="ck_fin_res",
                 chat_domains=[DOMAIN_NAME, "acts"],
                 group="Центры компетенций",
+                description="Контрольная карта верификации финансовых результатов",
             ),
         ],
+        chat_system_prompt=(
+            "ЦК Финансовых Результатов — это страница верификации метрик "
+            "финансовых результатов. Метрики хранятся в реестре с кодами "
+            "формата ФР00001."
+        ),
     )

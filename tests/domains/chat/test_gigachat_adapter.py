@@ -1,0 +1,652 @@
+"""Тесты адаптера GigaChat-proxy (native functions[] ↔ OpenAI tools[])."""
+from __future__ import annotations
+
+import json
+from typing import Any
+from unittest.mock import AsyncMock, patch
+
+import pytest
+from openai.types.chat import ChatCompletion
+
+from app.domains.chat.services.gigachat_adapter import (
+    GigaChatAdapterClient,
+    _tools_to_functions,
+    _translate_messages,
+    _translate_response,
+)
+
+
+def _make_completion(
+    *,
+    content: str | None = None,
+    function_call: dict | None = None,
+    finish_reason: str = "stop",
+    usage: dict | None = None,
+) -> ChatCompletion:
+    """Сборка openai.types.chat.ChatCompletion для тестов.
+
+    GigaChat возвращает `function_call.arguments` как dict, что нарушает
+    OpenAI-схему (там str). Поэтому сначала валидируем payload со
+    строковым placeholder'ом, а затем подменяем поле через прямую мутацию
+    pydantic-модели — это эмулирует реальный ответ proxy.
+    """
+    msg: dict = {"role": "assistant", "content": content}
+    fc_real_args: Any = None
+    if function_call is not None:
+        fc_real_args = function_call.get("arguments")
+        msg["function_call"] = {
+            "name": function_call.get("name", ""),
+            # placeholder-строка только для валидации схемы
+            "arguments": fc_real_args if isinstance(fc_real_args, str) else "",
+        }
+    payload = {
+        "id": "cmpl-test",
+        "object": "chat.completion",
+        "created": 0,
+        "model": "GigaChat-3-Ultra",
+        "choices": [{
+            "index": 0,
+            "message": msg,
+            "finish_reason": finish_reason,
+        }],
+    }
+    if usage is not None:
+        payload["usage"] = usage
+    completion = ChatCompletion.model_validate(payload)
+    # Подменяем arguments на исходный (возможно dict), эмулируя GigaChat.
+    if function_call is not None and not isinstance(fc_real_args, str):
+        completion.choices[0].message.function_call.arguments = fc_real_args
+    return completion
+
+
+def test_adapter_exposes_chat_completions_create():
+    """Адаптер должен дакать AsyncOpenAI: .chat.completions.create."""
+    adapter = GigaChatAdapterClient(
+        base_url="http://liveaccess/v1/gc",
+        api_key="t",
+        default_headers={},
+        timeout=60.0,
+    )
+    assert hasattr(adapter, "chat")
+    assert hasattr(adapter.chat, "completions")
+    assert callable(adapter.chat.completions.create)
+
+
+def test_tools_to_functions_flattens_openai_format():
+    """[{type,function:{name,desc,params}}] -> [{name,desc,params}]"""
+    tools = [
+        {
+            "type": "function",
+            "function": {
+                "name": "get_weather",
+                "description": "Погода",
+                "parameters": {"type": "object", "properties": {}},
+            },
+        },
+        {
+            "type": "function",
+            "function": {
+                "name": "open_url",
+                "description": "Открыть URL",
+                "parameters": {
+                    "type": "object",
+                    "properties": {"url": {"type": "string"}},
+                    "required": ["url"],
+                },
+            },
+        },
+    ]
+    out = _tools_to_functions(tools)
+    assert out == [
+        {
+            "name": "get_weather",
+            "description": "Погода",
+            "parameters": {"type": "object", "properties": {}},
+        },
+        {
+            "name": "open_url",
+            "description": "Открыть URL",
+            "parameters": {
+                "type": "object",
+                "properties": {"url": {"type": "string"}},
+                "required": ["url"],
+            },
+        },
+    ]
+
+
+def test_tools_to_functions_empty_list_returns_empty():
+    assert _tools_to_functions([]) == []
+
+
+def test_tools_to_functions_rejects_non_function_type():
+    """Любой type != 'function' — ValueError."""
+    with pytest.raises(ValueError, match="ожидался type=function"):
+        _tools_to_functions([{"type": "code_interpreter", "function": {"name": "x"}}])
+
+
+def test_tools_to_functions_rejects_missing_function_key():
+    with pytest.raises(ValueError, match="отсутствует поле function"):
+        _tools_to_functions([{"type": "function"}])
+
+
+def test_translate_messages_passthrough_user_and_system():
+    """User и system сообщения не трогаются."""
+    messages = [
+        {"role": "system", "content": "Ты ассистент."},
+        {"role": "user", "content": "Привет"},
+    ]
+    assert _translate_messages(messages) == messages
+
+
+def test_translate_messages_assistant_tool_calls_to_function_call():
+    """Assistant с tool_calls конвертируется в function_call (берётся первый).
+
+    None content нормализуется в "" — иначе GigaChat-proxy валит 422
+    RequestInputValidationException на следующем раунде.
+
+    arguments в request-формате должен быть DICT (нативная схема GigaChat),
+    а не JSON-string как в OpenAI tools API. Иначе тоже 422.
+    """
+    messages = [
+        {"role": "user", "content": "Открой главную"},
+        {
+            "role": "assistant",
+            "content": None,
+            "tool_calls": [{
+                "id": "call_1",
+                "type": "function",
+                "function": {
+                    "name": "open_url",
+                    "arguments": '{"url":"https://x.com"}',
+                },
+            }],
+        },
+    ]
+    out = _translate_messages(messages)
+    assert out[1] == {
+        "role": "assistant",
+        "content": "",
+        "function_call": {
+            "name": "open_url",
+            "arguments": {"url": "https://x.com"},
+        },
+    }
+    assert "tool_calls" not in out[1]
+
+
+def test_translate_messages_tool_role_to_function_role():
+    """Сообщение role=tool становится role=function с name из mapping."""
+    messages = [
+        {"role": "user", "content": "?"},
+        {
+            "role": "assistant",
+            "content": None,
+            "tool_calls": [{
+                "id": "call_1",
+                "type": "function",
+                "function": {"name": "open_url", "arguments": "{}"},
+            }],
+        },
+        {"role": "tool", "tool_call_id": "call_1", "content": "ok"},
+    ]
+    out = _translate_messages(messages)
+    assert out[2] == {
+        "role": "function",
+        "name": "open_url",
+        "content": "ok",
+    }
+
+
+def test_translate_messages_unmapped_tool_call_id_uses_unknown_name(caplog):
+    """Tool без mapping'а получает name='unknown_function' и warning в лог."""
+    messages = [
+        {"role": "tool", "tool_call_id": "ghost", "content": "result"},
+    ]
+    with caplog.at_level("WARNING"):
+        out = _translate_messages(messages)
+    assert out[0]["role"] == "function"
+    assert out[0]["name"] == "unknown_function"
+    assert any("ghost" in rec.message for rec in caplog.records)
+
+
+def test_translate_messages_multiple_tool_calls_takes_first_with_warning(caplog):
+    """Если в одном assistant >1 tool_calls — берём первый, остальные в warning."""
+    messages = [
+        {
+            "role": "assistant",
+            "content": None,
+            "tool_calls": [
+                {"id": "c1", "type": "function",
+                 "function": {"name": "a", "arguments": "{}"}},
+                {"id": "c2", "type": "function",
+                 "function": {"name": "b", "arguments": "{}"}},
+            ],
+        },
+    ]
+    with caplog.at_level("WARNING"):
+        out = _translate_messages(messages)
+    assert out[0]["function_call"]["name"] == "a"
+    assert any("параллельных" in rec.message.lower() for rec in caplog.records)
+
+
+def test_translate_messages_assistant_pydantic_object_converts():
+    """Если в истории прилетел pydantic-объект (как от openai SDK), он сериализуется."""
+    from openai.types.chat import ChatCompletionMessage
+    from openai.types.chat.chat_completion_message_tool_call import (
+        ChatCompletionMessageToolCall, Function,
+    )
+    msg = ChatCompletionMessage(
+        role="assistant",
+        content=None,
+        tool_calls=[ChatCompletionMessageToolCall(
+            id="call_1", type="function",
+            function=Function(name="open_url", arguments="{}"),
+        )],
+    )
+    out = _translate_messages([msg])
+    assert out[0]["function_call"]["name"] == "open_url"
+
+
+def test_translate_messages_assistant_empty_arguments_becomes_empty_dict():
+    """no-args tool_call (arguments="") → arguments={} в request.
+
+    Регрессия: SDK/стрим-аккумулятор отдают "" для вызовов без параметров.
+    GigaChat-proxy валидирует request-схему: arguments должен быть dict,
+    "" даёт 422 RequestInputValidationException. Также защита на случай,
+    если _safe_args в оркестраторе не отработал.
+    """
+    messages = [
+        {
+            "role": "assistant",
+            "content": None,
+            "tool_calls": [{
+                "id": "call_1",
+                "type": "function",
+                "function": {"name": "list_pages", "arguments": ""},
+            }],
+        },
+    ]
+    out = _translate_messages(messages)
+    assert out[0]["function_call"]["arguments"] == {}
+
+
+def test_translate_messages_assistant_none_arguments_becomes_empty_dict():
+    """arguments=None (отсутствует) → arguments={}, без падений."""
+    messages = [
+        {
+            "role": "assistant",
+            "content": "",
+            "tool_calls": [{
+                "id": "call_1",
+                "type": "function",
+                "function": {"name": "list_pages"},  # вообще нет arguments
+            }],
+        },
+    ]
+    out = _translate_messages(messages)
+    assert out[0]["function_call"]["arguments"] == {}
+
+
+def test_translate_messages_assistant_invalid_json_arguments_becomes_empty_dict():
+    """Битый JSON в arguments → {} вместо падения JSONDecodeError.
+
+    Защищаем от частично собранного стрима / поломанного LLM-вывода:
+    в худшем случае GigaChat получит пустые args и переспросит.
+    """
+    messages = [
+        {
+            "role": "assistant",
+            "content": "",
+            "tool_calls": [{
+                "id": "call_1",
+                "type": "function",
+                "function": {"name": "f", "arguments": "{not json"},
+            }],
+        },
+    ]
+    out = _translate_messages(messages)
+    assert out[0]["function_call"]["arguments"] == {}
+
+
+def test_translate_messages_assistant_dict_arguments_passthrough():
+    """Если arguments уже dict (например после _translate_response внутри
+    одного процесса) — пробрасываем без перепарсинга."""
+    messages = [
+        {
+            "role": "assistant",
+            "content": "",
+            "tool_calls": [{
+                "id": "c1",
+                "type": "function",
+                "function": {"name": "f", "arguments": {"x": 1}},
+            }],
+        },
+    ]
+    out = _translate_messages(messages)
+    assert out[0]["function_call"]["arguments"] == {"x": 1}
+
+
+def test_translate_response_passthrough_when_no_function_call():
+    """Обычный текстовый ответ возвращается без изменений."""
+    resp = _make_completion(content="Привет!", finish_reason="stop")
+    out = _translate_response(resp)
+    assert out.choices[0].message.content == "Привет!"
+    assert out.choices[0].finish_reason == "stop"
+    assert out.choices[0].message.tool_calls is None
+
+
+def test_translate_response_dict_args_synthesizes_tool_calls():
+    """function_call с dict arguments → tool_calls с JSON-строкой."""
+    resp = _make_completion(
+        content="",
+        function_call={
+            "name": "get_weather",
+            "arguments": {"city": "Москва"},  # dict, не строка
+        },
+        finish_reason="function_call",
+    )
+    out = _translate_response(resp)
+    choice = out.choices[0]
+    assert choice.finish_reason == "tool_calls"
+    tcs = choice.message.tool_calls
+    assert tcs is not None and len(tcs) == 1
+    assert tcs[0].type == "function"
+    assert tcs[0].id.startswith("gc_")
+    assert tcs[0].function.name == "get_weather"
+    # arguments должны быть JSON-строкой, а не dict
+    assert isinstance(tcs[0].function.arguments, str)
+    assert json.loads(tcs[0].function.arguments) == {"city": "Москва"}
+    # function_call зануляется, чтобы оркестратор смотрел только в tool_calls
+    assert choice.message.function_call is None
+
+
+def test_translate_response_string_args_preserved():
+    """function_call с уже-строковыми arguments не теряет формат."""
+    resp = _make_completion(
+        function_call={
+            "name": "open_url",
+            "arguments": '{"url": "https://x.com"}',  # строка
+        },
+        finish_reason="function_call",
+    )
+    out = _translate_response(resp)
+    args = out.choices[0].message.tool_calls[0].function.arguments
+    assert isinstance(args, str)
+    assert json.loads(args) == {"url": "https://x.com"}
+
+
+def test_translate_response_non_ascii_args_keep_unicode():
+    """Русские символы в arguments не должны эскейпиться в \\u…."""
+    resp = _make_completion(
+        function_call={"name": "search", "arguments": {"q": "погода"}},
+        finish_reason="function_call",
+    )
+    out = _translate_response(resp)
+    args = out.choices[0].message.tool_calls[0].function.arguments
+    assert "погода" in args  # ensure_ascii=False
+
+
+def test_translate_response_non_serializable_args_falls_back_to_str():
+    """Non-JSON-serializable значения в args (datetime/Decimal) не должны
+    обрывать SSE TypeError'ом из ``json.dumps``: ``default=str`` приводит
+    их к строке. Согласовано с orchestrator.py:1015.
+    """
+    from datetime import datetime
+    from decimal import Decimal
+
+    resp = _make_completion(
+        function_call={
+            "name": "log_event",
+            "arguments": {
+                "at": datetime(2026, 5, 14, 12, 0, 0),
+                "amount": Decimal("3.14"),
+            },
+        },
+        finish_reason="function_call",
+    )
+    # Не должно бросать TypeError.
+    out = _translate_response(resp)
+    args_str = out.choices[0].message.tool_calls[0].function.arguments
+    # default=str: datetime → "2026-05-14 12:00:00", Decimal → "3.14"
+    parsed = json.loads(args_str)
+    assert "2026-05-14" in parsed["at"]
+    assert parsed["amount"] == "3.14"
+
+
+@pytest.mark.asyncio
+async def test_create_translates_request_and_response():
+    """create() переводит tools→functions, function_call→tool_calls."""
+    adapter = GigaChatAdapterClient(
+        base_url="http://liveaccess/v1/gc",
+        api_key="t",
+        default_headers={},
+        timeout=60.0,
+    )
+    # Мокаем underlying AsyncOpenAI: проверяем что в неё ушёл native формат
+    fake_resp = _make_completion(
+        function_call={"name": "get_weather", "arguments": {"city": "Москва"}},
+        finish_reason="function_call",
+    )
+    with patch.object(
+        adapter._underlying.chat.completions, "create",
+        new=AsyncMock(return_value=fake_resp),
+    ) as mock_create:
+        out = await adapter.chat.completions.create(
+            model="GigaChat-3-Ultra",
+            messages=[{"role": "user", "content": "Погода?"}],
+            tools=[{
+                "type": "function",
+                "function": {
+                    "name": "get_weather",
+                    "description": "",
+                    "parameters": {"type": "object"},
+                },
+            }],
+            temperature=0.1,
+        )
+    # Что ушло на proxy
+    call_kwargs = mock_create.await_args.kwargs
+    assert call_kwargs["model"] == "GigaChat-3-Ultra"
+    assert "tools" not in call_kwargs
+    assert "stream" not in call_kwargs
+    assert call_kwargs["extra_body"]["functions"] == [{
+        "name": "get_weather",
+        "description": "",
+        "parameters": {"type": "object"},
+    }]
+    # Что вернулось в оркестратор
+    assert out.choices[0].finish_reason == "tool_calls"
+    assert out.choices[0].message.tool_calls[0].function.name == "get_weather"
+
+
+@pytest.mark.asyncio
+async def test_create_strips_stream_true_and_logs_warning(caplog):
+    """stream=True игнорируется, лог-warning присутствует."""
+    adapter = GigaChatAdapterClient(
+        base_url="http://x", api_key="t", default_headers={}, timeout=60.0,
+    )
+    fake_resp = _make_completion(content="ok")
+    with patch.object(
+        adapter._underlying.chat.completions, "create",
+        new=AsyncMock(return_value=fake_resp),
+    ) as mock_create, caplog.at_level("WARNING"):
+        await adapter.chat.completions.create(
+            model="m",
+            messages=[{"role": "user", "content": "x"}],
+            stream=True,
+        )
+    call_kwargs = mock_create.await_args.kwargs
+    assert "stream" not in call_kwargs
+    assert any("streaming" in rec.message.lower() for rec in caplog.records)
+
+
+@pytest.mark.asyncio
+async def test_create_drops_tool_choice():
+    """tool_choice не пробрасывается в native запрос."""
+    adapter = GigaChatAdapterClient(
+        base_url="http://x", api_key="t", default_headers={}, timeout=60.0,
+    )
+    fake_resp = _make_completion(content="ok")
+    with patch.object(
+        adapter._underlying.chat.completions, "create",
+        new=AsyncMock(return_value=fake_resp),
+    ) as mock_create:
+        await adapter.chat.completions.create(
+            model="m",
+            messages=[{"role": "user", "content": "x"}],
+            tool_choice="auto",
+        )
+    assert "tool_choice" not in mock_create.await_args.kwargs
+
+
+@pytest.mark.asyncio
+async def test_create_passes_temperature_and_model():
+    adapter = GigaChatAdapterClient(
+        base_url="http://x", api_key="t", default_headers={}, timeout=60.0,
+    )
+    fake_resp = _make_completion(content="ok")
+    with patch.object(
+        adapter._underlying.chat.completions, "create",
+        new=AsyncMock(return_value=fake_resp),
+    ) as mock_create:
+        await adapter.chat.completions.create(
+            model="GigaChat-3-Ultra",
+            messages=[{"role": "user", "content": "x"}],
+            temperature=0.42,
+        )
+    kw = mock_create.await_args.kwargs
+    assert kw["model"] == "GigaChat-3-Ultra"
+    assert kw["temperature"] == 0.42
+
+
+@pytest.mark.asyncio
+async def test_create_no_tools_no_extra_body():
+    """Без tools — extra_body не должен появиться (или пустой)."""
+    adapter = GigaChatAdapterClient(
+        base_url="http://x", api_key="t", default_headers={}, timeout=60.0,
+    )
+    fake_resp = _make_completion(content="ok")
+    with patch.object(
+        adapter._underlying.chat.completions, "create",
+        new=AsyncMock(return_value=fake_resp),
+    ) as mock_create:
+        await adapter.chat.completions.create(
+            model="m",
+            messages=[{"role": "user", "content": "x"}],
+        )
+    kw = mock_create.await_args.kwargs
+    # extra_body либо отсутствует, либо NOT_GIVEN sentinel из openai
+    from openai import NOT_GIVEN
+    assert kw.get("extra_body", NOT_GIVEN) in (NOT_GIVEN, None, {}) or \
+        "functions" not in (kw.get("extra_body") or {})
+
+
+def test_translate_messages_roundtrip_synthesized_tool_calls_become_function_call():
+    """Multi-round сценарий: ответ адаптера (синтез tool_calls[]) кладётся
+    обратно в messages и снова пропускается через _translate_messages.
+
+    Это реальный путь в orchestrator.py:1195-1197 — assistant_msg с
+    синтетическим tool_calls возвращается в следующий раунд. Адаптер
+    обязан корректно собрать function_call назад и НЕ оставить ни
+    function_call=None (что попало бы как лишнее поле), ни дубль
+    tool_calls.
+    """
+    # Шаг 1: GigaChat вернул function_call с dict-args → синтез tool_calls
+    resp = _make_completion(
+        function_call={"name": "search", "arguments": {"q": "тест"}},
+        finish_reason="function_call",
+    )
+    translated = _translate_response(resp)
+    assistant_msg = translated.choices[0].message  # pydantic-объект
+
+    # Шаг 2: следующий раунд — добавляем assistant_msg в messages
+    next_round_messages = [
+        {"role": "user", "content": "Что нашёл?"},
+        assistant_msg,  # как кладёт orchestrator.run (строка 1197)
+        {
+            "role": "tool",
+            "tool_call_id": assistant_msg.tool_calls[0].id,
+            "content": "result",
+        },
+    ]
+
+    out = _translate_messages(next_round_messages)
+
+    # Assistant-сообщение должно превратиться обратно в function_call.
+    assistant_translated = next(
+        m for m in out if m.get("role") == "assistant"
+    )
+    assert "function_call" in assistant_translated
+    assert assistant_translated["function_call"]["name"] == "search"
+    # arguments в request-формате GigaChat — DICT, не JSON-string.
+    assert assistant_translated["function_call"]["arguments"] == {"q": "тест"}
+    # tool_calls не должен утечь в native-формат
+    assert "tool_calls" not in assistant_translated
+
+    # tool → function с правильным name
+    func_translated = next(m for m in out if m.get("role") == "function")
+    assert func_translated["name"] == "search"
+    assert func_translated["content"] == "result"
+
+
+@pytest.mark.asyncio
+async def test_create_propagates_api_status_error_422_unchanged():
+    """GigaChat-proxy на streaming или невалидный запрос возвращает 422
+    (``EventException``/``ValidationError``). Адаптер не должен глотать
+    ошибку или конвертировать её — APIStatusError пробрасывается как есть,
+    чтобы retry-policy (которая ловит APIStatusError) решала сама.
+    422 — клиентская ошибка, retry НЕ должен срабатывать.
+    """
+    import httpx
+    from openai import APIStatusError
+
+    adapter = GigaChatAdapterClient(
+        base_url="http://liveaccess/v1/gc",
+        api_key="t",
+        default_headers={},
+        timeout=60.0,
+    )
+    request = httpx.Request("POST", "http://liveaccess/v1/gc/chat/completions")
+    response = httpx.Response(422, request=request, json={"detail": "EventException"})
+    raised = APIStatusError(
+        "EventException", response=response, body={"detail": "EventException"},
+    )
+
+    with patch.object(
+        adapter._underlying.chat.completions, "create",
+        new=AsyncMock(side_effect=raised),
+    ):
+        with pytest.raises(APIStatusError) as exc_info:
+            await adapter.chat.completions.create(
+                model="GigaChat-3-Ultra",
+                messages=[{"role": "user", "content": "x"}],
+            )
+
+    assert exc_info.value.status_code == 422
+
+
+@pytest.mark.asyncio
+async def test_create_tools_not_given_sentinel_does_not_add_functions():
+    """tools=NOT_GIVEN — синоним «без tools», не должен попадать как
+    functions в extra_body. Проверяет устойчивость _is_tools_provided
+    к sentinel-объекту openai SDK.
+    """
+    from openai import NOT_GIVEN
+
+    adapter = GigaChatAdapterClient(
+        base_url="http://x", api_key="t", default_headers={}, timeout=60.0,
+    )
+    fake_resp = _make_completion(content="ok")
+    with patch.object(
+        adapter._underlying.chat.completions, "create",
+        new=AsyncMock(return_value=fake_resp),
+    ) as mock_create:
+        await adapter.chat.completions.create(
+            model="m",
+            messages=[{"role": "user", "content": "x"}],
+            tools=NOT_GIVEN,
+        )
+    kw = mock_create.await_args.kwargs
+    # functions не должны добавиться, потому что tools==NOT_GIVEN
+    assert "functions" not in (kw.get("extra_body") or {})

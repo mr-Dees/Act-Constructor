@@ -14,6 +14,9 @@ const ChatFiles = {
     /** @type {HTMLElement|null} */
     _messagesContainer: null,
 
+    /** @type {AbortController|null} Снимает все DOM-listener'ы по abort() */
+    _abortController: null,
+
     /** Лимиты файлов (соответствуют серверным настройкам по умолчанию) */
     _FILE_LIMITS: {
         maxFileSize: 10 * 1024 * 1024,       // 10 МБ на файл
@@ -30,13 +33,70 @@ const ChatFiles = {
     init({ messagesContainer }) {
         if (this._initialized) return;
         this._messagesContainer = messagesContainer;
+        this._abortController = new AbortController();
         this._initFileInput();
         this._initDragAndDrop();
 
-        ChatEventBus.on('context:conversation-cleared', () => this.clear());
-        ChatEventBus.on('context:conversation-switched', () => this.clear());
+        // Сохраняем именованные ссылки, чтобы destroy() мог отписаться.
+        this._onConversationCleared = () => this.clear();
+        this._onConversationSwitched = () => this.clear();
+        ChatEventBus.on('context:conversation-cleared', this._onConversationCleared);
+        ChatEventBus.on('context:conversation-switched', this._onConversationSwitched);
+
+        // Лимиты тянем с сервера — fire-and-forget; до ответа используются
+        // дефолты (которые совпадают с дефолтами в settings.py).
+        this._loadLimits();
 
         this._initialized = true;
+    },
+
+    /**
+     * Снимает подписки на шину событий. Идемпотентно: повторный вызов
+     * безопасен. Используется в тестах и при «горячем» переинит чата.
+     */
+    destroy() {
+        if (!this._initialized) return;
+        // Снимаем все DOM-listener'ы (file input change, drag/drop, attach-кнопка)
+        // одним abort() — без именованных функций.
+        if (this._abortController) {
+            this._abortController.abort();
+            this._abortController = null;
+        }
+        if (this._onConversationCleared) {
+            ChatEventBus.off('context:conversation-cleared', this._onConversationCleared);
+            this._onConversationCleared = null;
+        }
+        if (this._onConversationSwitched) {
+            ChatEventBus.off('context:conversation-switched', this._onConversationSwitched);
+            this._onConversationSwitched = null;
+        }
+        this._initialized = false;
+    },
+
+    /**
+     * Загружает реальные лимиты с сервера. Тихо игнорирует ошибку —
+     * валидация на сервере всё равно сработает.
+     * @private
+     */
+    async _loadLimits() {
+        try {
+            const resp = await fetch(AppConfig.api.getUrl('/api/v1/chat/limits'), {
+                credentials: 'same-origin',
+            });
+            if (!resp.ok) return;
+            const data = await resp.json();
+            if (typeof data.max_file_size === 'number') {
+                this._FILE_LIMITS.maxFileSize = data.max_file_size;
+            }
+            if (typeof data.max_total_file_size === 'number') {
+                this._FILE_LIMITS.maxTotalFileSize = data.max_total_file_size;
+            }
+            if (typeof data.max_files_per_message === 'number') {
+                this._FILE_LIMITS.maxFilesPerMessage = data.max_files_per_message;
+            }
+        } catch (_) {
+            // Сеть/CORS — оставляем дефолты, серверная валидация прикроет.
+        }
     },
 
     /**
@@ -64,6 +124,8 @@ const ChatFiles = {
         const fileInput = document.getElementById('chatFileInput');
         if (!fileInput) return;
 
+        const signal = this._abortController?.signal;
+
         fileInput.addEventListener('change', () => {
             const validated = this._validateFiles([...fileInput.files]);
             for (const file of validated) {
@@ -72,7 +134,16 @@ const ChatFiles = {
             fileInput.value = '';
             this._renderFilePreview();
             ChatEventBus.emit('files:changed', { files: this._pendingFiles });
-        });
+        }, { signal });
+
+        // Открытие диалога выбора файлов через data-атрибут вместо inline onclick
+        // (inline-обработчики ломают CSP и затрудняют delegation).
+        const attachBtn = document.querySelector('[data-action="open-file-picker"]');
+        if (attachBtn) {
+            attachBtn.addEventListener('click', () => {
+                fileInput.click();
+            }, { signal });
+        }
     },
 
     /**
@@ -86,6 +157,7 @@ const ChatFiles = {
         const overlay = dropZone.querySelector('.chat-drop-overlay');
         if (!overlay) return;
 
+        const signal = this._abortController?.signal;
         let dragCounter = 0;
 
         dropZone.addEventListener('dragenter', (e) => {
@@ -93,12 +165,12 @@ const ChatFiles = {
             if (!this._hasDragFiles(e)) return;
             dragCounter++;
             if (dragCounter === 1) overlay.classList.remove('hidden');
-        });
+        }, { signal });
 
         dropZone.addEventListener('dragover', (e) => {
             e.preventDefault();
             if (this._hasDragFiles(e)) e.dataTransfer.dropEffect = 'copy';
-        });
+        }, { signal });
 
         dropZone.addEventListener('dragleave', (e) => {
             e.preventDefault();
@@ -107,7 +179,7 @@ const ChatFiles = {
                 dragCounter = 0;
                 overlay.classList.add('hidden');
             }
-        });
+        }, { signal });
 
         dropZone.addEventListener('drop', (e) => {
             e.preventDefault();
@@ -125,7 +197,7 @@ const ChatFiles = {
             }
             this._renderFilePreview();
             ChatEventBus.emit('files:changed', { files: this._pendingFiles });
-        });
+        }, { signal });
     },
 
     /**

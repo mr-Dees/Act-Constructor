@@ -8,17 +8,121 @@
 const ChatRenderer = {
 
     /**
+     * Безопасная установка innerHTML с санитизацией через DOMPurify.
+     *
+     * Все вызовы innerHTML с результатом _markdownToHtml() должны идти
+     * через эту функцию, чтобы XSS-полезная нагрузка из ответа LLM или
+     * внешнего агента не исполнилась в DOM.
+     *
+     * Если DOMPurify не подключён (vendor-файл отсутствует) — пишем warning
+     * в консоль и подставляем html как есть. На проде DOMPurify обязателен;
+     * fallback нужен только чтобы интерфейс не падал в dev-среде без vendor.
+     *
+     * @param {HTMLElement} el — DOM-элемент, в который ставим html
+     * @param {string} html — HTML-строка (после _markdownToHtml)
+     * @private
+     */
+    _safeSetHtml(el, html) {
+        if (!el) return;
+        if (window.DOMPurify && typeof window.DOMPurify.sanitize === 'function') {
+            el.innerHTML = window.DOMPurify.sanitize(html, {
+                USE_PROFILES: { html: true },
+            });
+            return;
+        }
+        if (!ChatRenderer._dompurifyWarned) {
+            console.warn(
+                'ChatRenderer: DOMPurify не подключён; HTML вставляется без'
+                + ' санитизации. Подключи static/vendor/dompurify/purify.min.js'
+                + ' до chat-renderer.js.'
+            );
+            ChatRenderer._dompurifyWarned = true;
+        }
+        el.innerHTML = html;
+    },
+
+    /**
      * Рендерит массив блоков в DOM-контейнер
      *
      * @param {HTMLElement} container — контейнер для отрисовки
      * @param {Array<Object>} blocks — массив блоков {type, ...data}
+     * @param {Object} [opts] — опции рендера (например, opts.execute для client_action)
      */
-    renderBlocks(container, blocks) {
+    renderBlocks(container, blocks, opts) {
         if (!container || !Array.isArray(blocks)) return;
 
         for (const block of blocks) {
-            const el = this.renderBlock(block);
-            if (el) container.appendChild(el);
+            const el = this.renderBlock(block, opts);
+            if (el) this.appendBlock(container, el);
+        }
+    },
+
+    /**
+     * Добавляет DOM-элемент блока в контейнер.
+     *
+     * Reasoning-блоки группируются во внешний <details class="chat-reasoning-group">,
+     * чтобы всю цепочку рассуждений можно было свернуть одним кликом.
+     * Каждый непрерывный run reasoning-блоков образует одну группу;
+     * как только появляется блок другого типа — группа финализируется,
+     * и следующий reasoning создаёт новую группу.
+     *
+     * Используется и live-стримом, и историей.
+     *
+     * @param {HTMLElement} container
+     * @param {HTMLElement} el
+     */
+    appendBlock(container, el) {
+        if (!container || !el) return;
+
+        const isReasoning = el.classList
+            && el.classList.contains('chat-block-reasoning');
+
+        if (isReasoning) {
+            // Ищем активную (не финализированную) группу среди потомков container'а.
+            // Группа считается активной только если она — последний дочерний элемент.
+            const lastChild = container.lastElementChild;
+            const isActiveGroup = lastChild
+                && lastChild.classList
+                && lastChild.classList.contains('chat-reasoning-group')
+                && !lastChild.dataset.finalized;
+
+            if (isActiveGroup) {
+                // Добавляем разделитель, если в группе уже есть reasoning-блоки
+                const groupContent = lastChild.querySelector('.chat-reasoning-group-content');
+                if (groupContent.lastElementChild) {
+                    const sep = document.createElement('hr');
+                    sep.className = 'chat-reasoning-separator';
+                    groupContent.appendChild(sep);
+                }
+                groupContent.appendChild(el);
+            } else {
+                // Создаём новую группу
+                const group = document.createElement('details');
+                group.className = 'chat-reasoning-group';
+                group.open = true;
+
+                const summary = document.createElement('summary');
+                summary.textContent = 'Рассуждение агента';
+                group.appendChild(summary);
+
+                const groupContent = document.createElement('div');
+                groupContent.className = 'chat-reasoning-group-content';
+                groupContent.appendChild(el);
+                group.appendChild(groupContent);
+
+                container.appendChild(group);
+            }
+        } else {
+            // Финализируем активную группу, чтобы следующий reasoning начал новую
+            const lastChild = container.lastElementChild;
+            if (lastChild
+                && lastChild.classList
+                && lastChild.classList.contains('chat-reasoning-group')
+                && !lastChild.dataset.finalized) {
+                lastChild.dataset.finalized = 'true';
+            }
+
+            container.appendChild(el);
         }
     },
 
@@ -26,10 +130,12 @@ const ChatRenderer = {
      * Рендерит один блок в DOM-элемент
      *
      * @param {Object} block — блок {type, ...data}
+     * @param {Object} [opts] — опции рендера (например, opts.execute для client_action)
      * @returns {HTMLElement|null}
      */
-    renderBlock(block) {
+    renderBlock(block, opts) {
         if (!block || !block.type) return null;
+        const options = opts || {};
 
         switch (block.type) {
             case 'text':
@@ -46,6 +152,10 @@ const ChatRenderer = {
                 return this._renderImage(block);
             case 'buttons':
                 return this._renderButtons(block);
+            case 'client_action':
+                return this._renderClientAction(block, options);
+            case 'error':
+                return this._renderError(block);
             default:
                 console.warn('ChatRenderer: неизвестный тип блока', block.type);
                 return null;
@@ -55,6 +165,10 @@ const ChatRenderer = {
     /**
      * Создаёт стриминговый блок для инкрементального отображения SSE-данных
      *
+     * Для reasoning-блока: каждый вызов создаёт НОВЫЙ <details>-элемент
+     * (изначально раскрытый), чтобы каждый reasoning-чанк отображался
+     * как отдельный сворачиваемый блок.
+     *
      * @param {string} blockType — тип блока ('text' или 'reasoning')
      * @returns {{ element: HTMLElement, appendText: function(string): void, finalize: function(): void }}
      */
@@ -62,12 +176,11 @@ const ChatRenderer = {
         if (blockType === 'reasoning') {
             const details = document.createElement('details');
             details.className = 'chat-block chat-block-reasoning';
+            // По умолчанию каждый чанк раскрыт; пользователь сворачивает руками.
+            details.open = true;
 
-            const displayMode = this._getReasoningDisplayMode();
-            if (displayMode === 'hidden') {
+            if (this._getReasoningDisplayMode() === 'hidden') {
                 details.style.display = 'none';
-            } else if (displayMode === 'expanded') {
-                details.open = true;
             }
 
             const summary = document.createElement('summary');
@@ -84,10 +197,10 @@ const ChatRenderer = {
                 element: details,
                 appendText(text) {
                     accumulated += text;
-                    content.innerHTML = ChatRenderer._markdownToHtml(accumulated);
+                    ChatRenderer._safeSetHtml(content, ChatRenderer._markdownToHtml(accumulated));
                 },
                 finalize() {
-                    content.innerHTML = ChatRenderer._markdownToHtml(accumulated);
+                    ChatRenderer._safeSetHtml(content, ChatRenderer._markdownToHtml(accumulated));
                 },
             };
         }
@@ -102,10 +215,10 @@ const ChatRenderer = {
             element: div,
             appendText(text) {
                 accumulated += text;
-                div.innerHTML = ChatRenderer._markdownToHtml(accumulated);
+                ChatRenderer._safeSetHtml(div, ChatRenderer._markdownToHtml(accumulated));
             },
             finalize() {
-                div.innerHTML = ChatRenderer._markdownToHtml(accumulated);
+                ChatRenderer._safeSetHtml(div, ChatRenderer._markdownToHtml(accumulated));
             },
         };
     },
@@ -158,7 +271,7 @@ const ChatRenderer = {
     _renderText(block) {
         const div = document.createElement('div');
         div.className = 'chat-block chat-block-text';
-        div.innerHTML = this._markdownToHtml(block.text || block.content || '');
+        this._safeSetHtml(div, this._markdownToHtml(block.content || ''));
         return div;
     },
 
@@ -189,7 +302,7 @@ const ChatRenderer = {
         // Код
         const pre = document.createElement('pre');
         const code = document.createElement('code');
-        code.textContent = block.code || block.content || '';
+        code.textContent = block.content || '';
         pre.appendChild(code);
 
         wrapper.appendChild(header);
@@ -199,18 +312,17 @@ const ChatRenderer = {
     },
 
     /**
-     * Блок рассуждений (сворачиваемый details/summary)
+     * Блок рассуждений (сворачиваемый details/summary).
+     * По умолчанию раскрыт; пользователь сворачивает руками.
      * @private
      */
     _renderReasoning(block) {
         const details = document.createElement('details');
         details.className = 'chat-block chat-block-reasoning';
+        details.open = true;
 
-        const displayMode = this._getReasoningDisplayMode();
-        if (displayMode === 'hidden') {
+        if (this._getReasoningDisplayMode() === 'hidden') {
             details.style.display = 'none';
-        } else if (displayMode === 'expanded') {
-            details.open = true;
         }
 
         const summary = document.createElement('summary');
@@ -219,7 +331,7 @@ const ChatRenderer = {
 
         const content = document.createElement('div');
         content.className = 'chat-block-reasoning-content';
-        content.innerHTML = this._markdownToHtml(block.text || block.content || '');
+        this._safeSetHtml(content, this._markdownToHtml(block.content || ''));
         details.appendChild(content);
 
         return details;
@@ -353,44 +465,136 @@ const ChatRenderer = {
     },
 
     /**
-     * Блок кнопок (quick_reply или action)
+     * Блок кнопок: каждая кнопка — клиентское действие через
+     * ClientActionsRegistry. Никаких сообщений в чат не отправляется,
+     * никаких HTTP-запросов на сервер не делается.
+     *
+     * После клика вся группа кнопок заменяется на статический бейдж
+     * "Выбрано: <label>", чтобы пользователь не мог нажать повторно
+     * и видел подтверждение выбора.
+     *
      * @private
      */
     _renderButtons(block) {
-        const variant = block.variant || 'quick_reply';
-        const div = document.createElement('div');
-        div.className = `chat-block chat-block-buttons chat-block-buttons--${variant}`;
+        const wrapper = document.createElement('div');
+        wrapper.className = 'chat-block chat-block-buttons';
 
-        const buttons = block.buttons || [];
+        const buttons = Array.isArray(block.buttons) ? block.buttons : [];
         for (const btn of buttons) {
             const button = document.createElement('button');
             button.className = 'chat-btn';
-            button.textContent = btn.label || btn.text || '';
+            button.type = 'button';
+            button.textContent = btn.label || btn.action_id || '';
 
-            if (variant === 'quick_reply') {
-                button.addEventListener('click', () => {
-                    if (typeof ChatManager !== 'undefined' && ChatManager.sendQuickReply) {
-                        ChatManager.sendQuickReply(btn.value || btn.label || '');
-                    }
-                });
-            } else if (variant === 'action') {
-                button.addEventListener('click', () => {
-                    if (btn.confirm) {
-                        const confirmed = window.confirm(
-                            typeof btn.confirm === 'string' ? btn.confirm : 'Выполнить действие?'
-                        );
-                        if (!confirmed) return;
-                    }
-                    if (typeof ChatManager !== 'undefined' && ChatManager.executeAction) {
-                        ChatManager.executeAction(btn.id, btn.params || {});
-                    }
-                });
-            }
+            button.addEventListener('click', () => {
+                this._handleButtonClick(wrapper, btn);
+            });
 
-            div.appendChild(button);
+            wrapper.appendChild(button);
         }
 
-        return div;
+        return wrapper;
+    },
+
+    /**
+     * Обработчик клика по кнопке группы.
+     * Исполняет client-action через реестр и заменяет группу на бейдж.
+     *
+     * @param {HTMLElement} wrapper — DOM-элемент группы кнопок
+     * @param {Object} btn — описание кнопки {action_id, label, params}
+     * @private
+     */
+    _handleButtonClick(wrapper, btn) {
+        const actionId = btn.action_id;
+        const label = btn.label || actionId || '';
+        const registry = window.ClientActionsRegistry;
+
+        const isRegistered = !!actionId
+            && !!registry
+            && typeof registry.isRegistered === 'function'
+            && registry.isRegistered(actionId);
+
+        if (!isRegistered) {
+            const errDiv = document.createElement('div');
+            errDiv.className = 'chat-block chat-error';
+            errDiv.textContent = `Действие "${actionId || '(без id)'}" не поддерживается`;
+            wrapper.replaceWith(errDiv);
+            return;
+        }
+
+        try {
+            registry.execute(actionId, btn.params || {});
+        } catch (err) {
+            console.error('ClientActionsRegistry: ошибка исполнения кнопки', err);
+            const errDiv = document.createElement('div');
+            errDiv.className = 'chat-block chat-error';
+            errDiv.textContent = `Ошибка выполнения действия "${actionId}": ${(err && err.message) || err}`;
+            wrapper.replaceWith(errDiv);
+            return;
+        }
+
+        const selected = document.createElement('div');
+        selected.className = 'chat-block chat-button-selected';
+        selected.textContent = `Выбрано: ${label}`;
+        wrapper.replaceWith(selected);
+    },
+
+    /**
+     * Рендерит блок client_action: показывает label-чип в чате.
+     * Выполняет команду через ClientActionsRegistry только если opts.execute=true
+     * (по умолчанию false — чтобы при загрузке истории команды не реэкзекьютились).
+     *
+     * @param {Object} block — {action, params, label}
+     * @param {Object} [opts] — {execute: boolean}
+     * @returns {HTMLElement}
+     */
+    _renderClientAction(block, opts) {
+        const el = document.createElement('div');
+        el.className = 'chat-block chat-block-client-action';
+        el.textContent = block.label || 'Выполняю команду…';
+
+        const shouldExecute = !!(opts && opts.execute);
+        if (shouldExecute) {
+            const registry = window.ClientActionsRegistry;
+            if (!registry) {
+                console.warn('ChatRenderer: ClientActionsRegistry не подключён;'
+                    + ' проверь подключение chat-client-actions.js');
+            } else if (typeof registry.executeBlock === 'function') {
+                // Идемпотентный путь: registry сам сверится с sessionStorage
+                // по block.block_id и не выполнит команду повторно.
+                try {
+                    registry.executeBlock(block);
+                } catch (err) {
+                    console.error('ChatRenderer: ошибка исполнения client_action:', err);
+                }
+            } else if (typeof registry.execute === 'function') {
+                // Совместимость со старыми сборками реестра без executeBlock.
+                try {
+                    registry.execute(block.action, block.params);
+                } catch (err) {
+                    console.error('ChatRenderer: ошибка исполнения client_action:', err);
+                }
+            }
+        }
+
+        return el;
+    },
+
+    /**
+     * Блок ошибки — сообщение об ошибке от внешнего агента или внутреннее.
+     *
+     * @param {Object} block — { type: 'error', message, code? }
+     * @returns {HTMLElement}
+     * @private
+     */
+    _renderError(block) {
+        const el = document.createElement('div');
+        el.className = 'chat-block chat-block-error';
+        el.textContent = block.message || 'Произошла ошибка';
+        if (block.code) {
+            el.dataset.code = block.code;
+        }
+        return el;
     },
 
     // ========================================================

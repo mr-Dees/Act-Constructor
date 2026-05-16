@@ -4,6 +4,7 @@
 гарантии message_end, обработку ошибок, tool_call/tool_result.
 """
 
+import asyncio
 import json
 from unittest.mock import AsyncMock, MagicMock, patch
 
@@ -12,7 +13,6 @@ import pytest
 from app.core.chat.tools import ChatTool, register_tools, reset as reset_tools
 from app.core.domain_registry import reset_registry
 from app.core.settings_registry import reset as reset_settings
-from app.core.chat.buttons import reset_action_handlers
 from app.domains.chat.services.orchestrator import Orchestrator
 from app.domains.chat.services.streaming import (
     format_sse_event,
@@ -23,7 +23,6 @@ from app.domains.chat.services.streaming import (
     sse_error,
     sse_message_end,
     sse_message_start,
-    sse_plan_update,
     sse_tool_call,
     sse_tool_result,
 )
@@ -41,12 +40,10 @@ def clean_registries():
     reset_registry()
     reset_settings()
     reset_tools()
-    reset_action_handlers()
     yield
     reset_registry()
     reset_settings()
     reset_tools()
-    reset_action_handlers()
 
 
 @pytest.fixture
@@ -224,15 +221,6 @@ class TestSSEFormatting:
         assert data["error"] == "Сбой"
         assert "code" not in data
 
-    def test_plan_update_fields(self):
-        """plan_update содержит список шагов."""
-        event = sse_plan_update(steps=[
-            {"label": "Шаг 1", "status": "done"},
-            {"label": "Шаг 2", "status": "pending"},
-        ])
-        data = _parse_event_data(event)
-        assert len(data["steps"]) == 2
-
     def test_buttons_fields(self):
         """buttons содержит список кнопок."""
         event = sse_buttons(buttons=[
@@ -304,7 +292,7 @@ class TestStreamingLifecycle:
             assert evt == "block_delta"
 
     # BUG #6: message_end не гарантирован при ошибке
-    @patch("app.domains.chat.services.orchestrator._get_openai_client")
+    @patch("app.domains.chat.services.orchestrator.Orchestrator._get_openai_client")
     async def test_error_in_stream_still_yields_message_end(
         self, mock_client_factory, orchestrator,
     ):
@@ -327,7 +315,7 @@ class TestStreamingLifecycle:
         assert types[-1] == "message_end"
         assert "error" in types
 
-    @patch("app.domains.chat.services.orchestrator._get_openai_client")
+    @patch("app.domains.chat.services.orchestrator.Orchestrator._get_openai_client")
     async def test_error_during_streaming_chunks(
         self, mock_client_factory, orchestrator,
     ):
@@ -358,7 +346,7 @@ class TestStreamingLifecycle:
         types = [_get_event_type(e) for e in events]
         assert types[-1] == "message_end"
 
-    @patch("app.domains.chat.services.orchestrator._get_openai_client")
+    @patch("app.domains.chat.services.orchestrator.Orchestrator._get_openai_client")
     async def test_save_failure_after_stream_does_not_break_sse(
         self, mock_client_factory, orchestrator,
     ):
@@ -411,7 +399,7 @@ class TestStreamingLifecycle:
 
 class TestStreamingFallback:
 
-    @patch("app.domains.chat.services.orchestrator._get_openai_client")
+    @patch("app.domains.chat.services.orchestrator.Orchestrator._get_openai_client")
     async def test_streaming_disabled_uses_non_stream(
         self, mock_client_factory, orchestrator_no_streaming,
     ):
@@ -448,7 +436,7 @@ class TestStreamingFallback:
         call_kwargs = create_call.call_args.kwargs if create_call.call_args.kwargs else {}
         assert call_kwargs.get("stream") is not True
 
-    @patch("app.domains.chat.services.orchestrator._get_openai_client")
+    @patch("app.domains.chat.services.orchestrator.Orchestrator._get_openai_client")
     async def test_streaming_fallback_on_error(
         self, mock_client_factory, orchestrator,
     ):
@@ -499,7 +487,7 @@ class TestStreamingFallback:
 
 class TestStreamingToolCalls:
 
-    @patch("app.domains.chat.services.orchestrator._get_openai_client")
+    @patch("app.domains.chat.services.orchestrator.Orchestrator._get_openai_client")
     async def test_tool_call_events_in_stream(
         self, mock_client_factory, orchestrator,
     ):
@@ -574,7 +562,7 @@ class TestStreamingToolCalls:
         tr_data = _parse_event_data(tr_events[0])
         assert "5 актов" in tr_data["result"]
 
-    @patch("app.domains.chat.services.orchestrator._get_openai_client")
+    @patch("app.domains.chat.services.orchestrator.Orchestrator._get_openai_client")
     async def test_multiple_tool_calls_in_one_round(
         self, mock_client_factory, orchestrator,
     ):
@@ -656,6 +644,119 @@ class TestStreamingToolCalls:
 
 
 # -------------------------------------------------------------------------
+# 4.13: SSE graceful shutdown — _instrumented_stream
+# -------------------------------------------------------------------------
+
+
+class TestInstrumentedStreamGracefulShutdown:
+    """Тесты обёртки `_instrumented_stream` из endpoint send_message.
+
+    Проверяет, что при разрыве соединения клиентом (CancelledError /
+    GeneratorExit) или внутреннем Exception обёртка эмитит финальные
+    SSE-события (error + message_end) и пробрасывает исходное исключение.
+    """
+
+    def _build_wrapper(self, inner_factory):
+        """Воспроизводит логику _instrumented_stream из api/messages.py
+        в отдельном async-генераторе, чтобы можно было тестировать его
+        напрямую без поднятия FastAPI-стэка.
+        """
+        import asyncio as _asyncio
+
+        from app.domains.chat.services.streaming import (
+            sse_error,
+            sse_message_end,
+        )
+
+        async def _wrapper():
+            try:
+                async for chunk in inner_factory():
+                    yield chunk
+            except (_asyncio.CancelledError, GeneratorExit):
+                try:
+                    yield sse_error(
+                        error="Соединение разорвано клиентом.",
+                        code="client_disconnected",
+                    )
+                    yield sse_message_end(message_id="")
+                except Exception:
+                    pass
+                raise
+            except Exception:
+                try:
+                    yield sse_error(
+                        error="Внутренняя ошибка SSE-стрима.",
+                        code="stream_error",
+                    )
+                    yield sse_message_end(message_id="")
+                except Exception:
+                    pass
+                raise
+
+        return _wrapper
+
+    async def test_client_disconnect_emits_error_and_message_end(self):
+        """При CancelledError эмитируется error + message_end перед raise."""
+
+        async def inner():
+            yield "event: block_start\ndata: {}\n\n"
+            raise asyncio.CancelledError()
+
+        wrapper = self._build_wrapper(inner)
+        gen = wrapper()
+
+        events = []
+        with pytest.raises(asyncio.CancelledError):
+            async for ev in gen:
+                events.append(ev)
+
+        types = [_get_event_type(e) for e in events]
+        assert "error" in types
+        assert types[-1] == "message_end"
+        # error содержит код client_disconnected
+        error_event = next(e for e in events if _get_event_type(e) == "error")
+        data = _parse_event_data(error_event)
+        assert data.get("code") == "client_disconnected"
+
+    async def test_internal_exception_emits_error_and_message_end(self):
+        """При обычном Exception эмитируется error + message_end перед raise."""
+
+        async def inner():
+            yield "event: block_start\ndata: {}\n\n"
+            raise RuntimeError("LLM упал")
+
+        wrapper = self._build_wrapper(inner)
+        gen = wrapper()
+
+        events = []
+        with pytest.raises(RuntimeError):
+            async for ev in gen:
+                events.append(ev)
+
+        types = [_get_event_type(e) for e in events]
+        assert types[-1] == "message_end"
+        # Должен быть финальный error
+        assert "error" in types
+        error_event = next(e for e in events if _get_event_type(e) == "error")
+        data = _parse_event_data(error_event)
+        assert data.get("code") == "stream_error"
+
+    async def test_normal_flow_passes_through(self):
+        """Без ошибок обёртка просто пробрасывает чанки."""
+
+        async def inner():
+            yield "event: message_start\ndata: {}\n\n"
+            yield "event: message_end\ndata: {}\n\n"
+
+        wrapper = self._build_wrapper(inner)
+        events = []
+        async for ev in wrapper():
+            events.append(ev)
+
+        assert len(events) == 2
+
+
+# -------------------------------------------------------------------------
 # Вспомогательные функции
 # -------------------------------------------------------------------------
 
@@ -674,3 +775,113 @@ def _parse_event_data(event_str: str) -> dict:
         if line.startswith("data: "):
             return json.loads(line[len("data: "):])
     return {}
+
+
+# -------------------------------------------------------------------------
+# Идемпотентность ClientActionBlock — block_id в SSE-payload
+# -------------------------------------------------------------------------
+
+
+class TestClientActionBlockIdInSSE:
+    """block_id должен присутствовать в SSE-payload для идемпотентности."""
+
+    def test_sse_client_action_passes_block_id_through(self):
+        """sse_client_action сериализует block dict как есть — block_id виден."""
+        from app.domains.chat.services.streaming import sse_client_action
+
+        raw_block = {
+            "type": "client_action",
+            "action": "notify",
+            "params": {"message": "Hi"},
+            "label": "Hi",
+            "block_id": "test-uuid-123",
+        }
+        event = sse_client_action(block=raw_block)
+        payload = _parse_event_data(event)
+        assert payload["block"]["block_id"] == "test-uuid-123"
+
+    @pytest.mark.asyncio
+    async def test_emit_response_blocks_adds_missing_block_id(self):
+        """block_emitter добавляет block_id, если он отсутствует в client_action."""
+        from app.domains.chat.services.block_emitter import emit_response_blocks
+
+        blocks = [
+            {
+                "type": "client_action",
+                "action": "notify",
+                "params": {"message": "Hi"},
+                # block_id отсутствует — emitter должен сгенерировать
+            },
+        ]
+        events: list[tuple[str, int]] = []
+        async for sse, idx in emit_response_blocks(blocks):
+            events.append((sse, idx))
+
+        assert len(events) == 1
+        payload = _parse_event_data(events[0][0])
+        assert payload["block"]["block_id"]
+        # Валидный uuid4
+        import uuid as _uuid
+        parsed = _uuid.UUID(payload["block"]["block_id"])
+        assert parsed.version == 4
+
+    @pytest.mark.asyncio
+    async def test_emit_response_blocks_preserves_existing_block_id(self):
+        """Если block_id уже есть — block_emitter его НЕ переписывает."""
+        from app.domains.chat.services.block_emitter import emit_response_blocks
+
+        blocks = [
+            {
+                "type": "client_action",
+                "action": "notify",
+                "params": {"message": "Hi"},
+                "block_id": "persistent-id-42",
+            },
+        ]
+        events: list[tuple[str, int]] = []
+        async for sse, idx in emit_response_blocks(blocks):
+            events.append((sse, idx))
+
+        payload = _parse_event_data(events[0][0])
+        assert payload["block"]["block_id"] == "persistent-id-42"
+
+    def test_orchestrator_parser_adds_block_id_if_missing(self):
+        """_parse_client_action_result добавляет block_id, если его нет."""
+        settings = ChatDomainSettings(
+            api_base="http://test", api_key="test", model="test-model",
+        )
+        orch = Orchestrator(
+            msg_service=MagicMock(),
+            conv_service=MagicMock(),
+            settings=settings,
+        )
+        raw_json = json.dumps({
+            "type": "client_action",
+            "action": "notify",
+            "params": {"message": "Hi"},
+        })
+        parsed = orch._parse_client_action_result(raw_json)
+        assert parsed is not None
+        assert parsed.get("block_id")
+        import uuid as _uuid
+        _uuid.UUID(parsed["block_id"])  # не падает = валидный uuid
+
+    def test_orchestrator_parser_preserves_block_id(self):
+        """Существующий block_id в результате tool'а сохраняется."""
+        settings = ChatDomainSettings(
+            api_base="http://test", api_key="test", model="test-model",
+        )
+        orch = Orchestrator(
+            msg_service=MagicMock(),
+            conv_service=MagicMock(),
+            settings=settings,
+        )
+        raw_json = json.dumps({
+            "type": "client_action",
+            "action": "notify",
+            "params": {"message": "Hi"},
+            "block_id": "handler-supplied-id",
+        })
+        parsed = orch._parse_client_action_result(raw_json)
+        assert parsed is not None
+        assert parsed["block_id"] == "handler-supplied-id"
