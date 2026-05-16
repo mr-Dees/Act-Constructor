@@ -23,6 +23,10 @@ CREATE TABLE IF NOT EXISTS t_db_oarb_ck_cs_validation (
     act_item_number TEXT NOT NULL DEFAULT '',
     process_number TEXT NOT NULL DEFAULT '',
     process_name TEXT NOT NULL DEFAULT '',
+    -- Блок-владелец процесса (фиксируется на момент создания записи)
+    block_owner TEXT NOT NULL DEFAULT '',
+    -- Подразделение-владелец процесса (фиксируется на момент создания записи)
+    department_owner TEXT NOT NULL DEFAULT '',
     ck_comment TEXT NOT NULL DEFAULT '',
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     updated_at TIMESTAMP,
@@ -39,19 +43,17 @@ CREATE INDEX IF NOT EXISTS idx_ck_cs_validation_act_sub_number_id ON t_db_oarb_c
 
 -- ============================================================================
 -- VIEW CS-ВАЛИДАЦИИ
--- Присоединяет номер акта из справочника служебных записок по act_sub_number_id
--- и владельца блока/подразделения из справочника процессов по process_number.
+-- Присоединяет номер акта из справочника служебных записок по act_sub_number_id.
+-- Поля block_owner/department_owner хранятся в самой таблице
+-- (фиксируются на момент создания записи).
 -- ============================================================================
 
 CREATE OR REPLACE VIEW v_db_oarb_ck_cs_validation AS
 SELECT
     cs.*,
-    sn.act_sub_number,
-    pd.block_owner AS block_owner,
-    pd.department_owner AS department_owner
+    sn.act_sub_number
 FROM t_db_oarb_ck_cs_validation cs
 LEFT JOIN t_db_oarb_ua_sub_number sn ON sn.id = cs.act_sub_number_id
-LEFT JOIN t_db_oarb_ua_process_dict pd ON pd.process_code = cs.process_number
 WHERE cs.is_actual = true;
 
 -- ============================================================================
@@ -62,53 +64,53 @@ INSERT INTO t_db_oarb_ck_cs_validation (
     act_sub_number_id, reestr_metric_id, neg_finder_tb_id, metric_code,
     metric_unic_clients, metric_element_counts, metric_amount_rubles,
     is_sent_to_top_brass, km_id, num_sz, dt_sz, act_item_number,
-    process_number, process_name, ck_comment, created_by
+    process_number, process_name, block_owner, department_owner, ck_comment, created_by
 ) SELECT
     NULL, NULL, '14', '101', 25, 30, 500000.00, true,
     'КМ-09-41726', 'ЦА 36-мо0255', '2026-01-15', '3.1.1',
-    '3119', 'Работа с обратной связью клиентов', 'Комментарий', '22494524'
+    '3119', 'Работа с обратной связью клиентов', 'Розничный бизнес', 'Клиентский сервис', 'Комментарий', '22494524'
 WHERE NOT EXISTS (SELECT 1 FROM t_db_oarb_ck_cs_validation LIMIT 1);
 
 INSERT INTO t_db_oarb_ck_cs_validation (
     act_sub_number_id, reestr_metric_id, neg_finder_tb_id, metric_code,
     metric_unic_clients, metric_element_counts, metric_amount_rubles,
     is_sent_to_top_brass, km_id, num_sz, dt_sz, act_item_number,
-    process_number, process_name, ck_comment, created_by
+    process_number, process_name, block_owner, department_owner, ck_comment, created_by
 ) SELECT
     NULL, NULL, '7', '102', 10, 15, 200000.50, false,
     'КМ-07-30001', 'МСК 12-мо0100', '2026-02-10', '2.2.3',
-    '5010', 'Осуществление переводов', '', '22501001'
+    '5010', 'Осуществление переводов', 'Транзакционный бизнес', 'Платежи и переводы', '', '22501001'
 WHERE NOT EXISTS (SELECT 1 FROM t_db_oarb_ck_cs_validation LIMIT 1);
 
 INSERT INTO t_db_oarb_ck_cs_validation (
     act_sub_number_id, reestr_metric_id, neg_finder_tb_id, metric_code,
     metric_unic_clients, metric_element_counts, metric_amount_rubles,
     is_sent_to_top_brass, km_id, num_sz, dt_sz, act_item_number,
-    process_number, process_name, ck_comment, created_by
+    process_number, process_name, block_owner, department_owner, ck_comment, created_by
 ) SELECT
     NULL, NULL, '4', '103', 50, 75, 1500000.00, true,
     'КМ-14-50001', 'ЦА 50-мо0300', '2026-03-01', '4.1.1',
-    '2014', 'Программа лояльности', 'Требует внимания', '22501002'
+    '2014', 'Программа лояльности', 'Розничный бизнес', 'Маркетинг', 'Требует внимания', '22501002'
 WHERE NOT EXISTS (SELECT 1 FROM t_db_oarb_ck_cs_validation LIMIT 1);
 
 INSERT INTO t_db_oarb_ck_cs_validation (
     act_sub_number_id, reestr_metric_id, neg_finder_tb_id, metric_code,
     metric_unic_clients, metric_element_counts, metric_amount_rubles,
     is_sent_to_top_brass, km_id, num_sz, dt_sz, act_item_number,
-    process_number, process_name, ck_comment, created_by
+    process_number, process_name, block_owner, department_owner, ck_comment, created_by
 ) SELECT
     NULL, NULL, '14', '17', 5, 8, 0, false,
     'КМ-09-41726', 'ЦА 36-мо0255', '2025-11-20', '1.3.2',
-    '1010', 'Управление операционным риском', '', '22494524'
+    '1010', 'Управление операционным риском', 'Риски', 'Управление операционных рисков', '', '22494524'
 WHERE NOT EXISTS (SELECT 1 FROM t_db_oarb_ck_cs_validation LIMIT 1);
 
 INSERT INTO t_db_oarb_ck_cs_validation (
     act_sub_number_id, reestr_metric_id, neg_finder_tb_id, metric_code,
     metric_unic_clients, metric_element_counts, metric_amount_rubles,
     is_sent_to_top_brass, km_id, num_sz, dt_sz, act_item_number,
-    process_number, process_name, ck_comment, created_by
+    process_number, process_name, block_owner, department_owner, ck_comment, created_by
 ) SELECT
     NULL, NULL, '8', '19', 15, 20, 350000.25, false,
     'КМ-07-30001', 'МСК 12-мо0100', '2025-12-05', '5.2.1',
-    '7010', 'Ведение кредитных сделок', 'Рекомендация выдана', '22501003'
+    '7010', 'Ведение кредитных сделок', 'Кредитование', 'Департамент кредитования ЮЛ', 'Рекомендация выдана', '22501003'
 WHERE NOT EXISTS (SELECT 1 FROM t_db_oarb_ck_cs_validation LIMIT 1);

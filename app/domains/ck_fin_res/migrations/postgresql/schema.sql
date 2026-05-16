@@ -82,8 +82,11 @@ CREATE TABLE IF NOT EXISTS t_db_oarb_ck_fr_validation (
     -- Дата окончания проверки
     rev_end_dt TIMESTAMP,
 
-    -- Владелец процесса
-    process_owner TEXT NOT NULL DEFAULT '',
+    -- Блок-владелец процесса (фиксируется на момент создания записи)
+    block_owner TEXT NOT NULL DEFAULT '',
+
+    -- Подразделение-владелец процесса (фиксируется на момент создания записи)
+    department_owner TEXT NOT NULL DEFAULT '',
 
     -- Номер контрольного задания в СберДокс
     sberdocs_ctrl_assgn_number TEXT NOT NULL DEFAULT '',
@@ -142,17 +145,16 @@ CREATE INDEX IF NOT EXISTS idx_ck_fr_validation_act_sub_number_id
 
 -- ============================================================================
 -- VIEW FR-ВАЛИДАЦИИ
--- Присоединяет номер акта из справочника служебных записок по act_sub_number_id
--- и владельца-подразделения из справочника процессов по process_number.
+-- Присоединяет номер акта из справочника служебных записок по act_sub_number_id.
+-- Поля block_owner/department_owner хранятся в самой таблице
+-- (фиксируются на момент создания записи).
 -- ============================================================================
 
 CREATE OR REPLACE VIEW v_db_oarb_ck_fr_validation AS
 SELECT fr.*,
-       sn.act_sub_number,
-       pd.department_owner AS department_owner
+       sn.act_sub_number
 FROM t_db_oarb_ck_fr_validation fr
 LEFT JOIN t_db_oarb_ua_sub_number sn ON sn.id = fr.act_sub_number_id
-LEFT JOIN t_db_oarb_ua_process_dict pd ON pd.process_code = fr.process_number
 WHERE fr.is_actual = true;
 
 -- ============================================================================
@@ -187,7 +189,7 @@ INSERT INTO t_db_oarb_ck_fr_validation (
     process_number, process_name,
     deviation_description, deviation_reason, deviation_consequence,
     real_loss, ck_comment, pocket, risk,
-    rev_start_dt, rev_end_dt, process_owner,
+    rev_start_dt, rev_end_dt, block_owner, department_owner,
     sberdocs_ctrl_assgn_number, assigment_id, assigment_format,
     inspection_name, assigment_recommendation, execution_deadline,
     used_pm_lib, etl_loading_id, row_hash, applied_into_ua,
@@ -200,7 +202,7 @@ INSERT INTO t_db_oarb_ck_fr_validation (
     '3015', 'Осуществление переводов',
     'Некорректное проведение валютных переводов', 'Ошибка оператора', 'Задержка зачисления средств',
     true, 'Требуется доработка процедуры контроля', 'Городская', 'Операционный риск',
-    '2025-01-15 00:00:00', '2025-03-01 00:00:00', 'Козлов А.В.',
+    '2025-01-15 00:00:00', '2025-03-01 00:00:00', 'Транзакционный бизнес', 'Платежи и переводы',
     'SD-2025-00142', 1001, 'Предписание',
     'Проверка переводов СР банк 2025', 'Усилить контроль валютных операций', '2025-06-30 00:00:00',
     'PM-LIB-3.2', NULL, 'a1b2c3d4e5f6', false,
@@ -216,7 +218,7 @@ INSERT INTO t_db_oarb_ck_fr_validation (
     process_number, process_name,
     deviation_description, deviation_reason, deviation_consequence,
     real_loss, ck_comment, pocket, risk,
-    rev_start_dt, rev_end_dt, process_owner,
+    rev_start_dt, rev_end_dt, block_owner, department_owner,
     sberdocs_ctrl_assgn_number, assigment_id, assigment_format,
     inspection_name, assigment_recommendation, execution_deadline,
     used_pm_lib, etl_loading_id, row_hash, applied_into_ua,
@@ -229,7 +231,7 @@ INSERT INTO t_db_oarb_ck_fr_validation (
     '2019', 'Управление рисками сделок',
     'Неполная оценка кредитного риска', 'Недостаток информации о заёмщике', 'Увеличение просроченной задолженности',
     false, '', 'Корпоративная', 'Кредитный риск',
-    '2025-01-10 00:00:00', '2025-02-15 00:00:00', 'Смирнова Е.П.',
+    '2025-01-10 00:00:00', '2025-02-15 00:00:00', 'Риски', 'Управление рисками',
     'SD-2025-00098', 1002, 'Рекомендация',
     'Проверка управления рисками МСК 2025', 'Обновить модель оценки рисков', '2025-07-31 00:00:00',
     'PM-LIB-3.2', NULL, 'b2c3d4e5f6a1', false,
@@ -245,7 +247,7 @@ INSERT INTO t_db_oarb_ck_fr_validation (
     process_number, process_name,
     deviation_description, deviation_reason, deviation_consequence,
     real_loss, ck_comment, pocket, risk,
-    rev_start_dt, rev_end_dt, process_owner,
+    rev_start_dt, rev_end_dt, block_owner, department_owner,
     sberdocs_ctrl_assgn_number, assigment_id, assigment_format,
     inspection_name, assigment_recommendation, execution_deadline,
     used_pm_lib, etl_loading_id, row_hash, applied_into_ua,
@@ -258,7 +260,7 @@ INSERT INTO t_db_oarb_ck_fr_validation (
     '2014', 'Риск-менеджмент',
     'Превышение лимитов операционных расходов', 'Рост затрат на устранение инцидентов', 'Перерасход бюджета подразделения',
     true, 'Необходим пересмотр лимитов', 'Региональная', 'Операционный риск',
-    '2025-02-01 00:00:00', '2025-04-10 00:00:00', 'Николаев Д.С.',
+    '2025-02-01 00:00:00', '2025-04-10 00:00:00', 'Риски', 'Управление рисками',
     'SD-2025-00201', 1003, 'Предписание',
     'Проверка риск-менеджмента ПВ банк 2025', 'Пересмотреть лимиты расходов', '2025-09-30 00:00:00',
     'PM-LIB-3.1', NULL, 'c3d4e5f6a1b2', true,
@@ -274,7 +276,7 @@ INSERT INTO t_db_oarb_ck_fr_validation (
     process_number, process_name,
     deviation_description, deviation_reason, deviation_consequence,
     real_loss, ck_comment, pocket, risk,
-    rev_start_dt, rev_end_dt, process_owner,
+    rev_start_dt, rev_end_dt, block_owner, department_owner,
     sberdocs_ctrl_assgn_number, assigment_id, assigment_format,
     inspection_name, assigment_recommendation, execution_deadline,
     used_pm_lib, etl_loading_id, row_hash, applied_into_ua,
@@ -287,7 +289,7 @@ INSERT INTO t_db_oarb_ck_fr_validation (
     '1014', 'Работа с обратной связью клиентов',
     'Несвоевременная обработка обращений клиентов', 'Нехватка персонала', 'Снижение лояльности клиентов',
     false, 'Рекомендовано увеличить штат', 'Городская', 'Репутационный риск',
-    '2025-01-15 00:00:00', '2025-03-01 00:00:00', 'Козлов А.В.',
+    '2025-01-15 00:00:00', '2025-03-01 00:00:00', 'Розничный бизнес', 'Клиентский сервис',
     'SD-2025-00143', NULL, 'Рекомендация',
     'Проверка переводов СР банк 2025', 'Оптимизировать процесс обработки обращений', '2025-06-30 00:00:00',
     'PM-LIB-3.2', NULL, 'd4e5f6a1b2c3', false,
@@ -303,7 +305,7 @@ INSERT INTO t_db_oarb_ck_fr_validation (
     process_number, process_name,
     deviation_description, deviation_reason, deviation_consequence,
     real_loss, ck_comment, pocket, risk,
-    rev_start_dt, rev_end_dt, process_owner,
+    rev_start_dt, rev_end_dt, block_owner, department_owner,
     sberdocs_ctrl_assgn_number, assigment_id, assigment_format,
     inspection_name, assigment_recommendation, execution_deadline,
     used_pm_lib, etl_loading_id, row_hash, applied_into_ua,
@@ -316,7 +318,7 @@ INSERT INTO t_db_oarb_ck_fr_validation (
     '1013', 'Ведение кредитных сделок',
     'Нарушение порядка оформления кредитных договоров', 'Несоблюдение внутренних регламентов', 'Рост просроченной задолженности',
     true, 'Критичное нарушение, требуется немедленное устранение', 'Корпоративная', 'Кредитный риск',
-    '2025-01-10 00:00:00', '2025-02-15 00:00:00', 'Смирнова Е.П.',
+    '2025-01-10 00:00:00', '2025-02-15 00:00:00', 'Кредитование', 'Департамент кредитования ЮЛ',
     'SD-2025-00099', 1004, 'Предписание',
     'Проверка управления рисками МСК 2025', 'Провести обучение сотрудников', '2025-05-31 00:00:00',
     'PM-LIB-3.2', NULL, 'e5f6a1b2c3d4', false,

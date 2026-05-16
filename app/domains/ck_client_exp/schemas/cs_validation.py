@@ -24,6 +24,8 @@ class CSValidationCreate(BaseModel):
     act_item_number: str = Field(default="", max_length=200)
     process_number: str = Field(default="", max_length=200)
     process_name: str = Field(default="", max_length=500)
+    block_owner: str = Field(default="", max_length=500)
+    department_owner: str = Field(default="", max_length=500)
     ck_comment: str = Field(default="", max_length=10000)
 
 
@@ -46,8 +48,6 @@ class CSValidationRecord(CSValidationCreate):
 
 
 class CSValidationView(CSValidationRecord):
-    """Представление CS-валидации с вычисляемыми полями."""
+    """Представление CS-валидации с вычисляемыми полями (JOIN по act_sub_number_id)."""
 
     act_sub_number: Optional[str] = None
-    block_owner: Optional[str] = None
-    department_owner: Optional[str] = None

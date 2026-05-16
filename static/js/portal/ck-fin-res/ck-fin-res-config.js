@@ -30,9 +30,15 @@ class CkFinResConfig {
         return Number(val).toLocaleString('ru-RU', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
     }
 
+    static formatTerbank(val, dicts) {
+        if (val == null || val === '') return '';
+        const t = (dicts.terbanks || []).find(t => String(t.tb_id) === String(val));
+        return t ? t.short_name : String(val);
+    }
+
     static columns = [
         { key: 'id', label: 'ID', width: '60px' },
-        { key: 'neg_finder_tb_id', label: 'ТБ', width: '50px' },
+        { key: 'neg_finder_tb_id', label: 'ТБ', width: '50px', format: (v, dicts) => CkFinResConfig.formatTerbank(v, dicts) },
         { key: 'metric_code', label: 'Код метрики', width: '90px' },
         { key: 'created_at', label: 'Создано', format: (v) => CkFinResConfig.formatDate(v) },
         { key: 'metric_name', label: 'Метрика' },
@@ -60,12 +66,12 @@ class CkFinResConfig {
         ]},
         { key: 'ck_comment', label: 'Комментарий ЦК ФР', type: 'textarea', rows: 2 },
         { key: 'process_number', label: 'Процесс', type: 'process-picker', required: true, paired: 'process_name', paired_extras: [
-            { key: 'process_owner', source: 'block_owner' },
+            { key: 'block_owner', source: 'block_owner' },
             { key: 'department_owner', source: 'department_owner' },
         ]},
         { row: [
-            { key: 'process_owner', label: 'Блок', type: 'readonly-text' },
-            { key: 'department_owner', label: 'Подразделение', type: 'readonly-text', computed: true },
+            { key: 'block_owner', label: 'Блок', type: 'readonly-text' },
+            { key: 'department_owner', label: 'Подразделение', type: 'readonly-text' },
         ]},
         { row: [
             { key: 'pocket', label: 'Карман', type: 'text' },

@@ -55,6 +55,8 @@ _INSERT_FIELDS = (
     "act_item_number",
     "process_number",
     "process_name",
+    "block_owner",
+    "department_owner",
     "ck_comment",
     "created_by",
 )
