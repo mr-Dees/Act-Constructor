@@ -1593,13 +1593,17 @@ SSE-события клиенту (message_start, block_delta, tool_call, tool_r
 - **Tools → functions**: адаптер плющит OpenAI `[{type:"function", function:{name,...}}]` в native `[{name,...}]` и кладёт в `extra_body.functions`.
 - **Response: function_call → tool_calls**: GigaChat возвращает singular `function_call` (с args как dict). Адаптер синтезирует tool_call с id `gc_<hex>` и `json.dumps(args, ensure_ascii=False, default=str)`. `default=str` защищает от datetime/Decimal в args — согласовано с orchestrator `json.dumps` в логировании.
 - **1 function_call за раунд** — ограничение GigaChat. Оркестратор и так работает по одному tool за итерацию, но если LLM каким-то образом вернёт несколько `tool_calls` в истории — адаптер берёт первый и предупреждает в логах.
-- **Roundtrip multi-round**: ассистент-сообщение с синтетическим `tool_calls` возвращается в следующий раунд через `_translate_messages` — собирается обратно в native `function_call`.
+- **Roundtrip multi-round**: ассистент-сообщение с синтетическим `tool_calls` возвращается в следующий раунд через `_translate_messages` — собирается обратно в native `function_call`. На request-стороне `arguments` обязан быть **dict** (`_args_to_dict`), а не JSON-string: GigaChat-proxy валидирует request-схему строго и отдаёт 422 на string. На путь ответа конвертация наоборот — `dict → JSON-string` (под OpenAI SDK-схему).
+- **content=null + tool_calls недопустим**: GigaChat-proxy отдаёт 422 `RequestInputValidationException` на ассистент-сообщение с `content: null` при наличии `function_call`, хотя OpenAI-spec это разрешает. Оркестратор санитизирует `content = raw_msg.content or ""` во всех трёх ветках (`run`, `run_stream` streaming, non-streaming fallback) + `_translate_messages` подстраховывает на случай Pydantic-объекта из истории.
+- **arguments="" недопустим**: симметрично — для no-args вызовов (`chat.list_pages()`, `*.open_*_page()` и т.п.) SDK и стрим-аккумулятор отдают `arguments=""`. Эхо в следующий LLM-вызов ломает Qwen/SGLang chat-template (`json.loads("")` → 400 "zero-length, empty document") и GigaChat-proxy (422). Хелпер `_safe_args(raw)` в `orchestrator.py` нормализует пустые значения в `"{}"`; применяется в эхо tool_calls и в `json.loads(...)` перед вызовом handler'а.
 
 **Отладка GigaChat:**
 
 | Симптом | Причина | Решение |
 |---|---|---|
 | `422 EventException` в логах | LLM отправили `stream=True` или есть запрещённое поле | Адаптер уже глотает stream; проверить `tool_choice`/прочие незнакомые kwargs |
+| `422 RequestInputValidationException` на 2-м LLM-вызове после tool_call | В echo-сообщении `content=null` или `arguments` как JSON-string (а не dict) | Проверить, что оркестратор собирает assistant_msg вручную через `_safe_args(...)` и не делает `messages.append(raw_msg)`; в адаптере — что `_translate_messages` использует `_args_to_dict(...)` |
+| SGLang/Qwen `400 "Input is a zero-length, empty document"` на 2-м вызове после no-args tool_call | `arguments=""` уходит в эхо, Qwen chat-template падает на `json.loads("")` | Те же `_safe_args(...)` в orchestrator.py — нормализует пустые args в `"{}"` |
 | Tool вызвался с `arguments={}` | Сломанный JSON / dict с non-serializable | Логи содержат raw args; `default=str` гарантирует, что fall-через сработает |
 | Пустой ответ в SSE | Профиль `gigachat`, но фронт ждёт стрим | Это by design: SSE-генератор выдаст один блок `block_complete` с финальным текстом |
 | `unknown_function` в логах адаптера | tool_call_id в истории не имеет mapping (мост-сценарий) | Проверить, что history содержит assistant-сообщение с `tool_calls[]` перед tool-message |
@@ -2585,6 +2589,8 @@ if settings.database.type == 'greenplum':
 ```
 
 Все пути автоматически префиксируются: `/user/{user}/proxy/{port}/api/v1/acts`.
+
+**Фронт обязан использовать `AppConfig.api.getUrl(...)`** для любых `fetch(...)`, `window.location.href = ...` и `<a href>` с относительными путями (`/api/v1/...`, `/admin`, `/ck-fin-res` и т.п.). Прямой относительный URL браузер резолвит против origin — JupyterHub роутит на `/hub/...` минуя `/user/{user}/proxy/{port}/` и отдаёт 404. Для client-action `open_url` тот же резолвер локально называется `resolveProxyUrl` (`static/js/shared/chat/chat-client-actions.js`). Регрессия: после правки grep по `fetch\s*\(\s*['"\`]/api` должен возвращать пусто.
 
 **Требуется Kerberos:**
 
