@@ -3,7 +3,6 @@
 """
 
 import logging
-import os
 import re
 import subprocess as _subprocess
 from contextlib import asynccontextmanager
@@ -158,12 +157,9 @@ async def init_db(settings: Settings) -> None:
                 table_prefix=settings.database.table_prefix
             )
 
-            # Получаем username из JUPYTERHUB_USER
-            username = os.environ.get('JUPYTERHUB_USER')
-
-            if not username or username == 'unknown_user':
-                # Fallback на значение из .env для разработки
-                username = settings.jupyterhub_user
+            # Получаем username из settings (Pydantic читает JUPYTERHUB_USER
+            # из env-shell и из .env одинаково — единый источник для PG и GP).
+            username = settings.jupyterhub_user
 
             # Извлекаем только цифры из username
             username_digits = re.sub(r'\D', '', username.split('_')[0])
