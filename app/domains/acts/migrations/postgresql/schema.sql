@@ -92,7 +92,7 @@ CREATE TABLE IF NOT EXISTS {SCHEMA}.{PREFIX}audit_team_members (
     id BIGSERIAL PRIMARY KEY,
     act_id INTEGER NOT NULL REFERENCES {SCHEMA}.{PREFIX}acts(id) ON DELETE CASCADE,
     audit_act_id VARCHAR(36),
-    role VARCHAR(50) NOT NULL CHECK (role IN ('Куратор', 'Руководитель', 'Редактор', 'Участник')),
+    role VARCHAR(50) NOT NULL CONSTRAINT check_audit_team_role_values CHECK (role IN ('Куратор', 'Руководитель', 'Редактор', 'Участник')),
     full_name VARCHAR(255) NOT NULL,
     position VARCHAR(255) NOT NULL,
     username VARCHAR(50) NOT NULL,
@@ -283,13 +283,14 @@ CREATE TABLE IF NOT EXISTS {SCHEMA}.{PREFIX}act_invoices (
     audit_point_id VARCHAR(36),
     node_id VARCHAR(100) NOT NULL,
     node_number VARCHAR(50),
-    db_type VARCHAR(20) NOT NULL CHECK (db_type IN ('hive', 'greenplum')),
+    db_type VARCHAR(20) NOT NULL CONSTRAINT check_act_invoices_db_type_values CHECK (db_type IN ('hive', 'greenplum')),
     schema_name VARCHAR(255) NOT NULL,
     table_name VARCHAR(255) NOT NULL,
     metrics JSONB NOT NULL DEFAULT '[]',
     process JSONB DEFAULT NULL,
     profile_div TEXT DEFAULT NULL,
     verification_status VARCHAR(20) NOT NULL DEFAULT 'pending'
+        CONSTRAINT check_act_invoices_verification_status_values
         CHECK (verification_status IN ('pending', 'verified', 'rejected')),
 
     CONSTRAINT check_metrics_is_array
