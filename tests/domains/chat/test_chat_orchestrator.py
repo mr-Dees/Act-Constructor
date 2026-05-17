@@ -1087,6 +1087,7 @@ class TestOrchestratorRunStream:
             "token_usage": None,
             "created_at": "2025-01-01T00:00:00",
         })
+        mock_conn.transaction = MagicMock(return_value=AsyncMock())
         ctx = AsyncMock()
         ctx.__aenter__ = AsyncMock(return_value=mock_conn)
         ctx.__aexit__ = AsyncMock(return_value=False)
