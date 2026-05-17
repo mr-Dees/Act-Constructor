@@ -189,6 +189,69 @@ class AgentRequestRepository(BaseRepository):
             )
         return new_version
 
+    async def finalize(
+        self,
+        request_id: str,
+        expected_version: int,
+        *,
+        error_message: str | None = None,
+        status: str = "done",
+    ) -> bool:
+        """Атомарно финализирует agent_request, проверяя optimistic lock.
+
+        Выполняет UPDATE с ``WHERE id = $1 AND version = $expected_version``.
+        Возвращает ``True`` при успехе, ``False`` при конфликте версии (другой
+        воркер уже обновил строку). Предназначен для вызова внутри транзакции
+        вместе с сохранением ассистент-сообщения, чтобы оба шага были атомарными.
+
+        :param request_id: идентификатор запроса.
+        :param expected_version: версия, при которой был прочитан запрос.
+        :param error_message: опциональное сообщение об ошибке (для status='error').
+        :param status: целевой статус («done», «error», «timeout»).
+        """
+        if status in ("done", "error", "timeout"):
+            set_clause = (
+                "status = $2, error_message = $3, finished_at = now(), "
+                "updated_at = now(), version = version + 1"
+            )
+            params: list = [request_id, status, error_message, expected_version]
+        else:
+            set_clause = (
+                "status = $2, updated_at = now(), version = version + 1"
+            )
+            params = [request_id, status, error_message, expected_version]
+
+        sql = (
+            f"UPDATE {self.table} SET {set_clause} "
+            f"WHERE id = $1 AND version = $4 RETURNING version"
+        )
+        new_version = await self.conn.fetchval(sql, *params)
+        success = new_version is not None
+        if success:
+            logger.debug(
+                "agent_requests: finalize id=%s status=%s new_version=%s",
+                request_id, status, new_version,
+            )
+        else:
+            current = await self.conn.fetchrow(
+                f"SELECT version, status FROM {self.table} WHERE id = $1",
+                request_id,
+            )
+            logger.warning(
+                "agent_requests: finalize version conflict id=%s "
+                "expected_version=%s current_version=%s current_status=%s",
+                request_id, expected_version,
+                current["version"] if current else None,
+                current["status"] if current else None,
+                extra={
+                    "agent_request_id": request_id,
+                    "expected_version": expected_version,
+                    "current_version": current["version"] if current else None,
+                    "current_status": current["status"] if current else None,
+                },
+            )
+        return success
+
     async def claim_pending(
         self,
         worker_token: str,
