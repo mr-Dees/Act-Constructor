@@ -59,7 +59,7 @@ CREATE TABLE IF NOT EXISTS {SCHEMA}.{PREFIX}chat_files (
     message_id      VARCHAR(36),
     filename        VARCHAR(500) NOT NULL,
     mime_type       VARCHAR(200) NOT NULL,
-    file_size       INTEGER NOT NULL CHECK (file_size > 0),
+    file_size       INTEGER NOT NULL CONSTRAINT check_chat_files_file_size_positive CHECK (file_size > 0),
     file_data       BYTEA NOT NULL,
     created_at      TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
 )
@@ -89,6 +89,7 @@ CREATE TABLE IF NOT EXISTS {SCHEMA}.{PREFIX}agent_requests (
     history           JSONB NOT NULL DEFAULT '[]'::jsonb,
     files             JSONB NOT NULL DEFAULT '[]'::jsonb,
     status            VARCHAR(20) NOT NULL DEFAULT 'pending'
+                      CONSTRAINT check_agent_requests_status_values
                       CHECK (status IN ('pending','dispatched','in_progress','done','error','timeout')),
     error_message     TEXT,
     -- Идентификатор воркера, заклеймившего запрос (UUID-строка).
@@ -130,6 +131,7 @@ CREATE TABLE IF NOT EXISTS {SCHEMA}.{PREFIX}agent_response_events (
     request_id    VARCHAR(36) NOT NULL,
     seq           INTEGER NOT NULL,
     event_type    VARCHAR(20) NOT NULL
+                  CONSTRAINT check_agent_response_events_event_type_values
                   CHECK (event_type IN ('reasoning','status','error')),
     payload       JSONB NOT NULL,
     created_at    TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
@@ -148,6 +150,7 @@ CREATE TABLE IF NOT EXISTS {SCHEMA}.{PREFIX}agent_responses (
     request_id     VARCHAR(36) NOT NULL,
     blocks         JSONB NOT NULL,
     finish_reason  VARCHAR(20) NOT NULL DEFAULT 'stop'
+                   CONSTRAINT check_agent_responses_finish_reason_values
                    CHECK (finish_reason IN ('stop','length','content_filter','error')),
     token_usage    JSONB,
     model          VARCHAR(100),
