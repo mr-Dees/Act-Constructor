@@ -1416,3 +1416,409 @@ async def test_orchestrator_disables_streaming_for_gigachat_profile():
         assert call.kwargs.get("stream", False) is False, (
             "Оркестратор не должен звать LLM со stream=True для gigachat"
         )
+
+
+# -------------------------------------------------------------------------
+# 4.2.3 — Lazy-loading истории (history_full_context_depth)
+# -------------------------------------------------------------------------
+
+
+class TestLazyHistory:
+    """Тесты lazy-loading: последние N сообщений — полный контент,
+    остальные — placeholder вместо file/image-блоков."""
+
+    async def test_recent_messages_get_full_content(self, orchestrator, msg_service):
+        """Последние depth сообщений имеют полный file-контент."""
+        orchestrator.settings.history_full_context_depth = 3
+        history = [
+            {
+                "role": "user",
+                "content": [
+                    {"type": "text", "content": f"Msg {i}"},
+                    {"type": "file", "filename": f"file{i}.pdf", "size": 1048576},
+                ],
+            }
+            for i in range(5)
+        ]
+        msg_service.get_history.return_value = history
+
+        result = await orchestrator._get_history_messages("conv-1")
+        # Все 5 сообщений присутствуют
+        assert len(result) == 5
+        # Последние 3 (индексы 2,3,4) имеют «Прикреплён файл»
+        for idx in [2, 3, 4]:
+            assert "Прикреплён файл" in result[idx]["content"], (
+                f"msg {idx} должен иметь полный file-контент"
+            )
+        # Первые 2 (индексы 0,1) имеют placeholder «не загружен в этом ходу»
+        for idx in [0, 1]:
+            assert "не загружен в этом ходу" in result[idx]["content"], (
+                f"msg {idx} должен иметь placeholder"
+            )
+
+    async def test_old_messages_get_placeholder(self, orchestrator, msg_service):
+        """Старые сообщения получают placeholder вместо file-контента."""
+        orchestrator.settings.history_full_context_depth = 2
+        msg_service.get_history.return_value = [
+            {
+                "role": "user",
+                "content": [
+                    {"type": "file", "filename": "old.pdf", "size": 2097152},
+                ],
+            },
+            {
+                "role": "user",
+                "content": [
+                    {"type": "file", "filename": "new.pdf", "size": 1048576},
+                ],
+            },
+            {
+                "role": "user",
+                "content": [
+                    {"type": "file", "filename": "newest.pdf", "size": 512000},
+                ],
+            },
+        ]
+
+        result = await orchestrator._get_history_messages("conv-1")
+        # depth=2: последние 2 (индексы 1,2) — полные
+        assert "Прикреплён файл: new.pdf" in result[1]["content"]
+        assert "Прикреплён файл: newest.pdf" in result[2]["content"]
+        # Первое (индекс 0) — placeholder
+        assert "не загружен в этом ходу" in result[0]["content"]
+        assert "old.pdf" in result[0]["content"]
+
+    async def test_depth_larger_than_history_all_full(self, orchestrator, msg_service):
+        """Если depth > len(history), все сообщения получают полный контент."""
+        orchestrator.settings.history_full_context_depth = 10
+        msg_service.get_history.return_value = [
+            {
+                "role": "user",
+                "content": [
+                    {"type": "file", "filename": "f.pdf", "size": 1048576},
+                ],
+            },
+            {
+                "role": "user",
+                "content": [
+                    {"type": "file", "filename": "g.pdf", "size": 2097152},
+                ],
+            },
+        ]
+
+        result = await orchestrator._get_history_messages("conv-1")
+        for r in result:
+            assert "Прикреплён файл" in r["content"], (
+                "Все сообщения должны иметь полный контент при depth > len"
+            )
+
+    async def test_text_blocks_always_full(self, orchestrator, msg_service):
+        """Text-блоки присутствуют в полном виде независимо от depth."""
+        orchestrator.settings.history_full_context_depth = 1
+        msg_service.get_history.return_value = [
+            {
+                "role": "user",
+                "content": [
+                    {"type": "text", "content": "Старый текст"},
+                    {"type": "file", "filename": "old.txt"},
+                ],
+            },
+            {
+                "role": "user",
+                "content": [
+                    {"type": "text", "content": "Новый текст"},
+                ],
+            },
+        ]
+
+        result = await orchestrator._get_history_messages("conv-1")
+        # Первое сообщение — shallow mode: text присутствует, file — placeholder
+        assert "Старый текст" in result[0]["content"]
+        assert "не загружен в этом ходу" in result[0]["content"]
+        # Второе — full: text полный
+        assert "Новый текст" in result[1]["content"]
+
+    async def test_image_blocks_get_placeholder_in_old_messages(
+        self, orchestrator, msg_service,
+    ):
+        """Image-блоки тоже заменяются placeholder'ами в старых сообщениях."""
+        orchestrator.settings.history_full_context_depth = 1
+        msg_service.get_history.return_value = [
+            {
+                "role": "user",
+                "content": [
+                    {"type": "image", "filename": "photo.png", "size": 1048576},
+                ],
+            },
+            {
+                "role": "user",
+                "content": [{"type": "text", "content": "новое"}],
+            },
+        ]
+
+        result = await orchestrator._get_history_messages("conv-1")
+        assert "не загружен в этом ходу" in result[0]["content"]
+        assert "photo.png" in result[0]["content"]
+
+
+# -------------------------------------------------------------------------
+# 4.2.1 — GigaChat parallel tool_calls queue (run() — non-streaming)
+# -------------------------------------------------------------------------
+
+
+class TestGigaChatQueue:
+    """GigaChat поддерживает только 1 function_call за раунд.
+    При >1 tool_calls оркестратор выполняет их по очереди."""
+
+    @patch("app.domains.chat.services.orchestrator.Orchestrator._get_openai_client")
+    async def test_run_gigachat_executes_multiple_tool_calls_sequentially(
+        self, mock_client_factory,
+    ):
+        """Если GigaChat вернул 2 tool_calls, оба исполняются по очереди."""
+        from pydantic import SecretStr
+
+        settings = ChatDomainSettings(
+            profile="gigachat",
+            api_base="http://liveaccess/v1/gc",
+            api_key=SecretStr("t"),
+            model="GigaChat-3-Ultra",
+            max_tool_rounds=5,
+        )
+        call_order: list[str] = []
+
+        async def handler_a(**kwargs):
+            call_order.append("A")
+            return "result_a"
+
+        async def handler_b(**kwargs):
+            call_order.append("B")
+            return "result_b"
+
+        tool_a = ChatTool(name="tool_a", domain="test", description="A", handler=handler_a)
+        tool_b = ChatTool(name="tool_b", domain="test", description="B", handler=handler_b)
+        register_tools([tool_a, tool_b])
+
+        msg_svc = AsyncMock()
+        msg_svc.get_history = AsyncMock(return_value=[])
+        orch = Orchestrator(
+            msg_service=msg_svc, conv_service=AsyncMock(), settings=settings,
+        )
+        orch._save_assistant_message = AsyncMock()
+
+        # LLM вернул 2 tool_calls (как они бы пришли после _translate_response)
+        tc_a = _make_tool_call(name="tool_a", arguments="{}", tc_id="tc-a")
+        tc_b = _make_tool_call(name="tool_b", arguments="{}", tc_id="tc-b")
+        resp_with_two_tcs = _make_mock_response(tool_calls=[tc_a, tc_b])
+        resp_final = _make_mock_response(content="Готово")
+
+        mock_client = AsyncMock()
+        mock_client.chat.completions.create = AsyncMock(
+            side_effect=[resp_with_two_tcs, resp_final],
+        )
+        mock_client_factory.return_value = mock_client
+
+        result = await orch.run(conversation_id="conv-1", user_message="два tool_call")
+
+        assert "A" in call_order
+        assert "B" in call_order
+        assert call_order.index("A") < call_order.index("B"), (
+            "tool_a должен исполниться до tool_b"
+        )
+        assert result["response"] == "Готово"
+
+    @patch("app.domains.chat.services.orchestrator.Orchestrator._get_openai_client")
+    async def test_run_non_gigachat_executes_all_parallel(
+        self, mock_client_factory, orchestrator,
+    ):
+        """Для не-GigaChat профилей все tool_calls исполняются в одном раунде."""
+        call_order: list[str] = []
+
+        async def handler_x(**kwargs):
+            call_order.append("X")
+            return "rx"
+
+        async def handler_y(**kwargs):
+            call_order.append("Y")
+            return "ry"
+
+        tool_x = ChatTool(name="tool_x", domain="test", description="X", handler=handler_x)
+        tool_y = ChatTool(name="tool_y", domain="test", description="Y", handler=handler_y)
+        register_tools([tool_x, tool_y])
+        orchestrator._save_assistant_message = AsyncMock()
+
+        tc_x = _make_tool_call(name="tool_x", arguments="{}", tc_id="tc-x")
+        tc_y = _make_tool_call(name="tool_y", arguments="{}", tc_id="tc-y")
+        resp_with_two_tcs = _make_mock_response(tool_calls=[tc_x, tc_y])
+        resp_final = _make_mock_response(content="Финал")
+
+        mock_client = AsyncMock()
+        mock_client.chat.completions.create = AsyncMock(
+            side_effect=[resp_with_two_tcs, resp_final],
+        )
+        mock_client_factory.return_value = mock_client
+
+        result = await orchestrator.run(conversation_id="conv-1", user_message="параллельно")
+        # Оба tool_call исполнены
+        assert set(call_order) == {"X", "Y"}
+        # LLM вызван дважды: 1 раз с tool_calls, 1 раз финальный
+        assert mock_client.chat.completions.create.call_count == 2
+
+
+# -------------------------------------------------------------------------
+# 4.3.3 — Tool-loop exit на 2 одинаковых ошибках валидации
+# -------------------------------------------------------------------------
+
+
+class TestToolLoopExit:
+    """При 2 подряд одинаковых ошибках валидации — break loop с error-блоком."""
+
+    @patch("app.domains.chat.services.orchestrator.Orchestrator._get_openai_client")
+    async def test_run_exits_on_repeated_validation_error(
+        self, mock_client_factory, orchestrator,
+    ):
+        """run() прерывает цикл при 2 одинаковых ValidationError подряд."""
+        tool = ChatTool(
+            name="strict",
+            domain="test",
+            description="Строгий",
+            parameters=[
+                ChatToolParam(
+                    name="must", type="string", description="Обязательный", required=True,
+                ),
+            ],
+            handler=AsyncMock(return_value="ok"),
+        )
+        register_tools([tool])
+        orchestrator._save_assistant_message = AsyncMock()
+
+        # LLM раз за разом не передаёт required-параметр
+        tc_bad = _make_tool_call(name="strict", arguments="{}", tc_id="tc-bad")
+        resp_bad = _make_mock_response(tool_calls=[tc_bad])
+
+        mock_client = AsyncMock()
+        # Отдаём бесконечно bad tool_call, чтобы проверить что loop breaks
+        mock_client.chat.completions.create = AsyncMock(
+            side_effect=[resp_bad] * 10,
+        )
+        mock_client_factory.return_value = mock_client
+
+        result = await orchestrator.run(
+            conversation_id="conv-1",
+            user_message="вызови strict без параметра",
+        )
+
+        # LLM вызван НЕ 10 раз (loop вышел раньше)
+        assert mock_client.chat.completions.create.call_count < 10
+        # Возврат содержит ошибку
+        assert result.get("status") == "error" or "strict" in result.get("response", "")
+
+    @patch("app.domains.chat.services.orchestrator.Orchestrator._get_openai_client")
+    async def test_run_stream_exits_on_repeated_validation_error(
+        self, mock_client_factory,
+    ):
+        """run_stream() (non-streaming branch) прерывает цикл на 2 одинаковых ошибках."""
+        from pydantic import SecretStr
+
+        settings = ChatDomainSettings(
+            api_base="http://test:8000/v1",
+            api_key=SecretStr("t"),
+            max_tool_rounds=10,
+            streaming_enabled=False,  # Используем non-streaming для предсказуемости
+        )
+        tool = ChatTool(
+            name="strict2",
+            domain="test",
+            description="Строгий2",
+            parameters=[
+                ChatToolParam(
+                    name="must2", type="string", description="Обязательный2", required=True,
+                ),
+            ],
+            handler=AsyncMock(return_value="ok"),
+        )
+        register_tools([tool])
+
+        msg_svc = AsyncMock()
+        msg_svc.get_history = AsyncMock(return_value=[])
+        orch = Orchestrator(
+            msg_service=msg_svc, conv_service=AsyncMock(), settings=settings,
+        )
+        orch._save_assistant_message = AsyncMock()
+
+        tc_bad = _make_tool_call(name="strict2", arguments="{}", tc_id="tc-bad2")
+        resp_bad = _make_mock_response(tool_calls=[tc_bad])
+
+        mock_client = AsyncMock()
+        mock_client.chat.completions.create = AsyncMock(
+            side_effect=[resp_bad] * 10,
+        )
+        mock_client_factory.return_value = mock_client
+
+        events: list[str] = []
+        async for ev in orch.run_stream(
+            conversation_id="conv-1",
+            user_message="вызови strict2 без параметра",
+        ):
+            events.append(ev)
+
+        # LLM вызван не 10 раз — loop exit отработал
+        assert mock_client.chat.completions.create.call_count < 10
+        # SSE содержит error или tool_error
+        event_types = [e.split("\n")[0].replace("event: ", "") for e in events]
+        has_error = "error" in event_types or "tool_error" in event_types
+        assert has_error, f"Ожидался error/tool_error, получили: {event_types}"
+        # message_end должен быть в конце
+        assert event_types[-1] == "message_end"
+
+    @patch("app.domains.chat.services.orchestrator.Orchestrator._get_openai_client")
+    async def test_different_errors_do_not_trigger_early_exit(
+        self, mock_client_factory, orchestrator,
+    ):
+        """Разные ошибки валидации не вызывают преждевременный выход из цикла."""
+        call_count = 0
+
+        async def handler_a(**kwargs):
+            return "ok"
+
+        # tool_a требует param_x, tool_b требует param_y
+        tool_a = ChatTool(
+            name="tool_diff_a",
+            domain="test",
+            description="A",
+            parameters=[
+                ChatToolParam(name="px", type="string", description="px", required=True),
+            ],
+            handler=handler_a,
+        )
+        tool_b = ChatTool(
+            name="tool_diff_b",
+            domain="test",
+            description="B",
+            parameters=[
+                ChatToolParam(name="py", type="string", description="py", required=True),
+            ],
+            handler=handler_a,
+        )
+        register_tools([tool_a, tool_b])
+        orchestrator._save_assistant_message = AsyncMock()
+        orchestrator.settings.max_tool_rounds = 3
+
+        # LLM чередует разные tools без параметров — разные ошибки
+        tc_a = _make_tool_call(name="tool_diff_a", arguments="{}", tc_id="tc-da")
+        tc_b = _make_tool_call(name="tool_diff_b", arguments="{}", tc_id="tc-db")
+        resp_a = _make_mock_response(tool_calls=[tc_a])
+        resp_b = _make_mock_response(tool_calls=[tc_b])
+        resp_final = _make_mock_response(content="Финал после разных ошибок")
+
+        mock_client = AsyncMock()
+        mock_client.chat.completions.create = AsyncMock(
+            side_effect=[resp_a, resp_b, resp_a, resp_final],
+        )
+        mock_client_factory.return_value = mock_client
+
+        result = await orchestrator.run(
+            conversation_id="conv-1",
+            user_message="чередуй ошибки",
+        )
+        # Не упал раньше max_tool_rounds из-за разных ошибок
+        assert mock_client.chat.completions.create.call_count >= 3
