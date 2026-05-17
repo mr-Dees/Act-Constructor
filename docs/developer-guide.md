@@ -1388,6 +1388,73 @@ app/domains/<name>/migrations/
 
 Для Greenplum используются плейсхолдеры `{SCHEMA}`, `{PREFIX}`, `{REF_*}`, которые подставляются адаптером из `migration_substitutions` домена.
 
+### 6.5a Как добавить CHECK constraint
+
+CHECK constraint'ы защищают инварианты данных на уровне БД и одновременно дают пользователю понятное сообщение об ошибке через глобальный обработчик `CheckViolationError` в `app/main.py`.
+
+CI-тест `tests/test_check_constraints_complete.py` автоматически проверяет, что каждый именованный CHECK в `schema.sql` имеет маппинг в `CHECK_CONSTRAINT_MESSAGES` — билд упадёт, если что-то пропустить.
+
+#### Шаг 1. Дать constraint явное имя
+
+Соглашение об именовании: `CONSTRAINT check_<table>_<purpose> CHECK (...)`.
+
+Примеры:
+- `CONSTRAINT check_acts_km_number_format CHECK (km_number ~ '^КМ-\d{2}-\d{5}$')`
+- `CONSTRAINT check_chat_files_file_size_positive CHECK (file_size > 0)`
+- `CONSTRAINT check_act_invoices_db_type_values CHECK (db_type IN ('hive', 'greenplum'))`
+
+**Нельзя**: безымянный `CHECK (...)` в строке колонки — PostgreSQL сгенерирует нестабильное имя вида `<table>_<col>_check`, которое невозможно надёжно замапить. Тест `test_no_unnamed_checks_in_pg_schemas` упадёт.
+
+#### Шаг 2. Добавить constraint в обе схемы (PG и GP)
+
+`app/domains/<domain>/migrations/postgresql/schema.sql`:
+
+```sql
+CONSTRAINT check_act_invoices_db_type_values
+    CHECK (db_type IN ('hive', 'greenplum'))
+```
+
+`app/domains/<domain>/migrations/greenplum/schema.sql` — то же самое. GP 6.x синтаксически поддерживает `CHECK`, логику НЕ меняем, только имя. Убедиться, что constraint-имена одинаковы в обоих файлах (иначе потребуются два маппинга).
+
+#### Шаг 3. Добавить маппинг в CHECK_CONSTRAINT_MESSAGES
+
+Файл `app/core/exceptions.py`, словарь `CHECK_CONSTRAINT_MESSAGES`:
+
+```python
+"check_act_invoices_db_type_values": (
+    "Недопустимый тип базы данных фактуры. Допустимые значения: hive, greenplum"
+),
+```
+
+Правила хорошего сообщения:
+- На русском языке, без технического жаргона.
+- Если constraint проверяет допустимые значения — перечислить их явно.
+- Если constraint проверяет формат — привести пример корректного значения.
+
+#### Шаг 4. Добавить негативный тест
+
+В тест-файле домена (или в новом) проверить, что вставка невалидного значения приводит к читаемой ошибке:
+
+```python
+import asyncpg
+import pytest
+
+async def test_invalid_db_type_raises_check_violation(mock_repo):
+    with pytest.raises(asyncpg.CheckViolationError) as exc_info:
+        await mock_repo.create_invoice(act_id=1, db_type="oracle", ...)
+    assert exc_info.value.constraint_name == "check_act_invoices_db_type_values"
+```
+
+#### Шаг 5. Убедиться, что CI-lint проходит
+
+```bash
+pytest tests/test_check_constraints_complete.py -v
+```
+
+Тест `test_all_constraints_are_mapped` упадёт, если новый constraint не добавлен в маппинг.
+Тест `test_no_orphan_keys_in_mapping` упадёт, если в маппинге остался ключ от удалённого constraint'а.
+Тест `test_no_unnamed_checks_in_pg_schemas` упадёт, если в PG-схеме есть безымянный CHECK.
+
 ### 6.6 JSON/JSONB утилиты
 
 Файл `app/db/utils/json_db_utils.py` содержит утилиты для конвертации JSON/JSONB данных из asyncpg в Python dict. Asyncpg возвращает JSON-поля как строки — утилиты автоматически парсят их.
