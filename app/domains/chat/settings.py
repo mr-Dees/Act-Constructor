@@ -96,6 +96,9 @@ class ChatDomainSettings(BaseModel):
                 )
         return v
 
+    # Per-user rate limit на отправку сообщений
+    rate_limit_messages_per_minute_per_user: int = Field(default=10, ge=1)
+
     # Хранение
     max_conversations_per_user: int = Field(default=100, gt=0)
     max_messages_per_conversation: int = Field(default=500, gt=0)
