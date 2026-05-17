@@ -46,3 +46,14 @@ class ConversationLockedError(AppError):
     писать сообщения в уже удалённую беседу.
     """
     status_code = 409
+
+
+class OptimisticLockFailed(AppError):
+    """Optimistic locking конфликт при финализации agent_request.
+
+    Бросается внутри транзакции в agent_bridge_runner._run, когда
+    finalize обнаруживает, что версия строки уже изменена другим
+    воркером. Транзакция откатывается, assistant-message НЕ сохраняется,
+    статус остаётся in_progress — reconcile подхватит при следующем старте.
+    """
+    status_code = 409

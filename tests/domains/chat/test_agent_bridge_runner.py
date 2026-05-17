@@ -79,6 +79,8 @@ async def test_run_saves_assistant_message_with_collected_blocks():
     # mock_conn в этом тесте мы не вытаскиваем из фикстуры (run сам зовёт
     # get_db()), а готовим вручную, чтобы запатчить.
     mock_conn = AsyncMock()
+    # conn.transaction() должен поддерживать async with.
+    mock_conn.transaction = MagicMock(return_value=AsyncMock())
 
     # AgentRequestRepository.get → возвращает запрос со status='pending'.
     request_row = {
@@ -87,10 +89,12 @@ async def test_run_saves_assistant_message_with_collected_blocks():
         "message_id": "msg-1",
         "user_id": "u",
         "status": "pending",
+        "version": 1,
     }
     fake_req_repo = MagicMock()
     fake_req_repo.get = AsyncMock(return_value=request_row)
-    fake_req_repo.update_status = AsyncMock()
+    fake_req_repo.update_status = AsyncMock(return_value=2)
+    fake_req_repo.finalize = AsyncMock(return_value=True)
 
     # bridge.wait_for_completion → yield reasoning event + final response.
     from app.domains.chat.services.agent_bridge import AgentBridgeUpdate
@@ -205,11 +209,14 @@ async def test_run_saves_timeout_error_block_on_bridge_timeout():
     from app.domains.chat.services.agent_bridge import AgentBridgeTimeout
 
     mock_conn = AsyncMock()
+    mock_conn.transaction = MagicMock(return_value=AsyncMock())
     fake_req_repo = MagicMock()
     fake_req_repo.get = AsyncMock(return_value={
         "id": "rid-1", "conversation_id": "conv-1", "status": "pending",
+        "version": 1,
     })
-    fake_req_repo.update_status = AsyncMock()
+    fake_req_repo.update_status = AsyncMock(return_value=2)
+    fake_req_repo.finalize = AsyncMock(return_value=True)
     save_mock = AsyncMock()
 
     async def fake_wait(self, *a, **kw):

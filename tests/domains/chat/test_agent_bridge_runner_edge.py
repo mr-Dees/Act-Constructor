@@ -99,12 +99,14 @@ async def test_run_max_total_timeout_saves_error_and_clears_registry():
     from app.domains.chat.services.agent_bridge import AgentBridgeTimeout
 
     mock_conn = AsyncMock()
+    mock_conn.transaction = MagicMock(return_value=AsyncMock())
     fake_req_repo = MagicMock()
     fake_req_repo.get = AsyncMock(return_value={
         "id": "rid-mtd", "conversation_id": "conv-mtd", "status": "pending",
         "version": 1,
     })
     fake_req_repo.update_status = AsyncMock(return_value=2)
+    fake_req_repo.finalize = AsyncMock(return_value=True)
     save_mock = AsyncMock()
     fake_adapter = MagicMock(get_table_name=lambda n: n)
 
@@ -398,6 +400,7 @@ async def test_concurrent_requests_on_same_conversation_both_save():
     from app.domains.chat.services.agent_bridge import AgentBridgeUpdate
 
     mock_conn = AsyncMock()
+    mock_conn.transaction = MagicMock(return_value=AsyncMock())
     fake_adapter = MagicMock(get_table_name=lambda n: n)
 
     # Один общий conversation_id, разные request_id.
@@ -417,6 +420,7 @@ async def test_concurrent_requests_on_same_conversation_both_save():
         side_effect=lambda rid: requests_by_id.get(rid),
     )
     fake_req_repo.update_status = AsyncMock(return_value=2)
+    fake_req_repo.finalize = AsyncMock(return_value=True)
 
     async def fake_wait(self, *a, **kw):
         # Каждый раннер мгновенно получает свой финальный ответ.
