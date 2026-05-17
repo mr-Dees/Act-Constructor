@@ -13,9 +13,7 @@ from app.domains.ck_client_exp.exceptions import CSRecordNotFoundError
 from app.domains.ck_client_exp.repositories.cs_validation_repository import (
     CSValidationRepository,
 )
-from app.domains.ua_data.repositories.dictionary_repository import (
-    DictionaryRepository,
-)
+from app.domains.ua_data.interfaces import IDictionaryRepository
 
 logger = logging.getLogger("audit_workstation.domains.ck_client_exp.service")
 
@@ -37,7 +35,7 @@ class CSValidationService:
     def __init__(
         self,
         cs_repo: CSValidationRepository,
-        dict_repo: DictionaryRepository,
+        dict_repo: IDictionaryRepository,
     ):
         self.cs_repo = cs_repo
         self.dict_repo = dict_repo

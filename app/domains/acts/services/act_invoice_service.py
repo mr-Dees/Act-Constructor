@@ -10,7 +10,6 @@ import logging
 import asyncpg
 
 from app.core.config import Settings
-from app.core.settings_registry import get as get_domain_settings
 from app.domains.acts.exceptions import InvoiceError
 from app.domains.acts.repositories.act_access import ActAccessRepository
 from app.domains.acts.repositories.act_audit_log import ActAuditLogRepository
@@ -18,7 +17,7 @@ from app.domains.acts.repositories.act_invoice import ActInvoiceRepository
 from app.domains.acts.repositories.act_lock import ActLockRepository
 from app.domains.acts.services.access_guard import AccessGuard
 from app.domains.acts.settings import ActsSettings
-from app.domains.ua_data.settings import UaDataSettings
+from app.domains.ua_data.interfaces import UaInvoiceTableNames
 
 logger = logging.getLogger("audit_workstation.service.acts.invoice")
 
@@ -32,6 +31,7 @@ class ActInvoiceService:
         settings: Settings,
         *,
         acts_settings: ActsSettings,
+        ua_tables: UaInvoiceTableNames,
         access: ActAccessRepository | None = None,
         lock: ActLockRepository | None = None,
         invoice: ActInvoiceRepository | None = None,
@@ -39,6 +39,7 @@ class ActInvoiceService:
         self.conn = conn
         self.settings = settings
         self.acts_settings = acts_settings
+        self.ua_tables = ua_tables
         self._access = access or ActAccessRepository(conn)
         self._lock = lock or ActLockRepository(conn)
         self._invoice = invoice or ActInvoiceRepository(conn)
@@ -53,35 +54,32 @@ class ActInvoiceService:
 
     async def list_metrics(self) -> list[dict]:
         """Возвращает справочник метрик (таблица из ua_data)."""
-        ua = get_domain_settings("ua_data", UaDataSettings)
         registry_schema = self._resolve_schema(
             self.acts_settings.invoice.hive_registry_schema
         )
         return await self._invoice.list_metric_dict(
             registry_schema=registry_schema,
-            metric_table=ua.violation_metric_dict,
+            metric_table=self.ua_tables.violation_metric_dict,
         )
 
     async def list_processes(self) -> list[dict]:
         """Возвращает справочник процессов (таблица из ua_data)."""
-        ua = get_domain_settings("ua_data", UaDataSettings)
         registry_schema = self._resolve_schema(
             self.acts_settings.invoice.hive_registry_schema
         )
         return await self._invoice.list_process_dict(
             registry_schema=registry_schema,
-            process_table=ua.process_dict,
+            process_table=self.ua_tables.process_dict,
         )
 
     async def list_subsidiaries(self) -> list[dict]:
         """Возвращает справочник подразделений (таблица из ua_data)."""
-        ua = get_domain_settings("ua_data", UaDataSettings)
         registry_schema = self._resolve_schema(
             self.acts_settings.invoice.hive_registry_schema
         )
         return await self._invoice.list_subsidiary_dict(
             registry_schema=registry_schema,
-            subsidiary_table=ua.subsidiary_dict,
+            subsidiary_table=self.ua_tables.subsidiary_dict,
         )
 
     async def list_tables(self, db_type: str) -> list[dict]:

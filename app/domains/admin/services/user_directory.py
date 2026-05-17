@@ -1,12 +1,27 @@
-"""Репозиторий поиска пользователей в справочнике."""
+"""
+Сервис справочника пользователей.
 
-from app.db.repositories.base import BaseRepository
+Реализует IUserDirectory — публичный интерфейс для поиска пользователей
+другими доменами (например, acts). Инкапсулирует AdminSettings внутри
+admin-домена.
+"""
+
+import logging
+
 from app.core.settings_registry import get as get_domain_settings
+from app.db.repositories.base import BaseRepository
 from app.domains.admin.settings import AdminSettings
 
+logger = logging.getLogger("audit_workstation.domains.admin.user_directory")
 
-class ActUsersRepository(BaseRepository):
-    """Поиск пользователей в справочнике для формирования аудиторской группы."""
+
+class UserDirectoryRepository(BaseRepository):
+    """
+    Репозиторий поиска пользователей в справочнике.
+
+    Реализует IUserDirectory. Инициализируется с подключением к БД;
+    имя таблицы берётся из AdminSettings внутри admin-домена.
+    """
 
     def __init__(self, conn):
         super().__init__(conn)
