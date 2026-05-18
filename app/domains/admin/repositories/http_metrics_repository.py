@@ -1,6 +1,7 @@
 """Репозиторий HTTP-метрик запросов."""
 
 import logging
+from dataclasses import dataclass
 
 import asyncpg
 
@@ -9,6 +10,17 @@ from app.db.repositories.base import BaseRepository
 logger = logging.getLogger(
     "audit_workstation.domains.admin.repo.http_metrics"
 )
+
+
+@dataclass(frozen=True, slots=True)
+class HttpMetricRecord:
+    """Одна HTTP-метрика для bulk-записи через ``record_many``."""
+    method: str
+    path: str
+    status_code: int
+    latency_ms: int
+    username: str | None
+    request_id: str | None
 
 
 class HttpMetricsRepository(BaseRepository):
@@ -49,3 +61,31 @@ class HttpMetricsRepository(BaseRepository):
             username,
             request_id,
         )
+
+    async def record_many(self, records: list[HttpMetricRecord]) -> None:
+        """Bulk-INSERT пакета HTTP-метрик одним ``executemany`` в транзакции.
+
+        Пустой список — no-op (не открываем транзакцию зря).
+        """
+        if not records:
+            return
+        params = [
+            (
+                r.method,
+                r.path,
+                int(r.status_code),
+                int(r.latency_ms),
+                r.username,
+                r.request_id,
+            )
+            for r in records
+        ]
+        async with self.conn.transaction():
+            await self.conn.executemany(
+                f"""
+                INSERT INTO {self.table}
+                    (method, path, status_code, latency_ms, username, request_id)
+                VALUES ($1, $2, $3, $4, $5, $6)
+                """,
+                params,
+            )

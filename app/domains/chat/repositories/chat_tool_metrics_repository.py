@@ -1,6 +1,7 @@
 """Репозиторий метрик выполнения ChatTool'ов."""
 
 import logging
+from dataclasses import dataclass
 
 import asyncpg
 
@@ -9,6 +10,17 @@ from app.db.repositories.base import BaseRepository
 logger = logging.getLogger(
     "audit_workstation.domains.chat.repo.tool_metrics"
 )
+
+
+@dataclass(frozen=True, slots=True)
+class ChatToolMetricRecord:
+    """Одна tool-метрика для bulk-записи через ``record_many``."""
+    tool_name: str
+    status: str
+    latency_ms: int
+    username: str | None = None
+    conversation_id: str | None = None
+    error_message: str | None = None
 
 
 class ChatToolMetricsRepository(BaseRepository):
@@ -51,3 +63,32 @@ class ChatToolMetricsRepository(BaseRepository):
             conversation_id,
             error_message,
         )
+
+    async def record_many(self, records: list[ChatToolMetricRecord]) -> None:
+        """Bulk-INSERT пакета tool-метрик одним ``executemany`` в транзакции.
+
+        Пустой список — no-op.
+        """
+        if not records:
+            return
+        params = [
+            (
+                r.tool_name,
+                r.status,
+                int(r.latency_ms),
+                r.username,
+                r.conversation_id,
+                r.error_message,
+            )
+            for r in records
+        ]
+        async with self.conn.transaction():
+            await self.conn.executemany(
+                f"""
+                INSERT INTO {self.table}
+                    (tool_name, status, latency_ms, username,
+                     conversation_id, error_message)
+                VALUES ($1, $2, $3, $4, $5, $6)
+                """,
+                params,
+            )

@@ -128,3 +128,47 @@ async def test_record_latency_float_coerced_to_int(mock_conn):
     _, *params = mock_conn.execute.call_args.args
     assert isinstance(params[2], int)
     assert params[2] == 12
+
+
+async def test_record_many_executes_executemany(mock_conn):
+    """Bulk-INSERT: один executemany с правильным списком кортежей."""
+    from app.domains.chat.repositories.chat_tool_metrics_repository import (
+        ChatToolMetricRecord,
+    )
+
+    repo = ChatToolMetricsRepository(mock_conn)
+    records = [
+        ChatToolMetricRecord(
+            tool_name="chat.list_pages",
+            status="success",
+            latency_ms=10,
+            username="u1",
+            conversation_id="c1",
+            error_message=None,
+        ),
+        ChatToolMetricRecord(
+            tool_name="acts.open_act_page",
+            status="error",
+            latency_ms=20,
+            username=None,
+            conversation_id=None,
+            error_message="boom",
+        ),
+    ]
+    await repo.record_many(records)
+    mock_conn.executemany.assert_awaited_once()
+    sql, params = mock_conn.executemany.call_args.args
+    assert "INSERT INTO" in sql
+    assert "chat_tool_metrics" in sql
+    assert params == [
+        ("chat.list_pages", "success", 10, "u1", "c1", None),
+        ("acts.open_act_page", "error", 20, None, None, "boom"),
+    ]
+
+
+async def test_record_many_empty_is_noop(mock_conn):
+    """Пустой список — не вызывается executemany, не открывается транзакция."""
+    repo = ChatToolMetricsRepository(mock_conn)
+    await repo.record_many([])
+    mock_conn.executemany.assert_not_called()
+    mock_conn.transaction.assert_not_called()

@@ -79,3 +79,47 @@ async def test_log_details_serialized_as_json_with_unicode(mock_conn):
     # ensure_ascii=False — кириллица в плейн-формате
     assert "Привет" in params[3]
     assert json.loads(params[3]) == {"text": "Привет, мир"}
+
+
+async def test_log_many_executes_executemany(mock_conn):
+    """Bulk-INSERT: один executemany с правильным списком кортежей."""
+    from app.domains.chat.repositories.chat_audit_log_repository import (
+        ChatAuditLogRecord,
+    )
+
+    repo = ChatAuditLogRepository(mock_conn)
+    records = [
+        ChatAuditLogRecord(
+            username="user1",
+            action="conversation_created",
+            conversation_id="c1",
+            details={"title": "Привет"},
+        ),
+        ChatAuditLogRecord(
+            username="user1",
+            action="conversation_deleted",
+            conversation_id="c1",
+            details=None,
+        ),
+    ]
+    await repo.log_many(records)
+    mock_conn.executemany.assert_awaited_once()
+    sql, params = mock_conn.executemany.call_args.args
+    assert "INSERT INTO" in sql
+    assert "chat_audit_log" in sql
+    assert len(params) == 2
+    # Первая запись с details_json
+    assert params[0][0] == "user1"
+    assert params[0][1] == "conversation_created"
+    assert params[0][2] == "c1"
+    assert json.loads(params[0][3]) == {"title": "Привет"}
+    # Вторая — details=None → details_json=None
+    assert params[1] == ("user1", "conversation_deleted", "c1", None)
+
+
+async def test_log_many_empty_is_noop(mock_conn):
+    """Пустой список — не вызывается executemany, не открывается транзакция."""
+    repo = ChatAuditLogRepository(mock_conn)
+    await repo.log_many([])
+    mock_conn.executemany.assert_not_called()
+    mock_conn.transaction.assert_not_called()

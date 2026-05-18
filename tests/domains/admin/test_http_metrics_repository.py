@@ -102,3 +102,47 @@ async def test_record_propagates_db_error(mock_conn):
             username=None,
             request_id=None,
         )
+
+
+async def test_record_many_executes_executemany(mock_conn):
+    """Bulk-INSERT: один executemany с правильным списком кортежей."""
+    from app.domains.admin.repositories.http_metrics_repository import (
+        HttpMetricRecord,
+    )
+
+    repo = HttpMetricsRepository(mock_conn)
+    records = [
+        HttpMetricRecord(
+            method="GET",
+            path="/api/v1/a",
+            status_code=200,
+            latency_ms=10,
+            username="u1",
+            request_id="r1",
+        ),
+        HttpMetricRecord(
+            method="POST",
+            path="/api/v1/b",
+            status_code=201,
+            latency_ms=20,
+            username=None,
+            request_id=None,
+        ),
+    ]
+    await repo.record_many(records)
+    mock_conn.executemany.assert_awaited_once()
+    sql, params = mock_conn.executemany.call_args.args
+    assert "INSERT INTO" in sql
+    assert "admin_http_metrics" in sql
+    assert params == [
+        ("GET", "/api/v1/a", 200, 10, "u1", "r1"),
+        ("POST", "/api/v1/b", 201, 20, None, None),
+    ]
+
+
+async def test_record_many_empty_is_noop(mock_conn):
+    """Пустой список — не вызывается executemany, не открывается транзакция."""
+    repo = HttpMetricsRepository(mock_conn)
+    await repo.record_many([])
+    mock_conn.executemany.assert_not_called()
+    mock_conn.transaction.assert_not_called()
