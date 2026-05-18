@@ -85,6 +85,35 @@ class SecuritySettings(BaseModel):
     rate_limit_ttl: int = 120
 
 
+class ObservabilitySettings(BaseModel):
+    """Параметры батчинга записи метрик в БД.
+
+    Применяется для трёх потоков метрик: HTTP-запросы (admin), tool-метрики
+    чата и audit-лог чата. Параметры общие — каждый поток создаёт свой
+    ``MetricsBatcher`` с этими настройками.
+    """
+    metrics_batch_size: int = Field(
+        default=100,
+        ge=1,
+        le=10000,
+        description="Размер пакета метрик для bulk-INSERT",
+    )
+    metrics_flush_interval_sec: float = Field(
+        default=5.0,
+        ge=0.5,
+        le=300.0,
+        description="Интервал flush метрик в секундах",
+    )
+    metrics_max_buffer_size: int = Field(
+        default=10000,
+        ge=100,
+        description=(
+            "Защитный потолок буфера; при переполнении старые записи "
+            "дропаются с warning-логом"
+        ),
+    )
+
+
 class Settings(BaseSettings):
     """
     Класс настроек приложения на основе Pydantic.
@@ -110,6 +139,7 @@ class Settings(BaseSettings):
     server: ServerSettings = ServerSettings()
     database: DatabaseSettings = DatabaseSettings()
     security: SecuritySettings = SecuritySettings()
+    observability: ObservabilitySettings = ObservabilitySettings()
     # Базовая директория проекта.
     # Относительный путь от конфига до корня проекта.
     base_dir: ClassVar[Path] = Path(__file__).resolve().parent.parent.parent
