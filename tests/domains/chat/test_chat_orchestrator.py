@@ -880,6 +880,142 @@ class TestExecuteToolCall:
 
 
 # -------------------------------------------------------------------------
+# Метрики выполнения tool'ов (4.5.1)
+# -------------------------------------------------------------------------
+
+
+class TestExecuteToolCallMetrics:
+    """Проверяем, что _execute_tool_call вызывает _record_tool_metric с
+    правильным статусом и неотрицательным latency в каждой ветке."""
+
+    async def test_success_records_success_metric(self, orchestrator):
+        """Успешное выполнение → record(status='success', latency_ms>=0)."""
+        tool = ChatTool(
+            name="ok_tool",
+            domain="test",
+            description="OK",
+            handler=AsyncMock(return_value="result"),
+        )
+        register_tools([tool])
+
+        # Контекст: должны попасть в record как username/conversation_id
+        orchestrator._current_user_id = "user1"
+        orchestrator._current_conversation_id = "conv-1"
+
+        with patch.object(
+            orchestrator, "_record_tool_metric", new=AsyncMock(),
+        ) as mock_record:
+            result = await orchestrator._execute_tool_call("ok_tool", {})
+
+        assert result == "result"
+        mock_record.assert_awaited_once()
+        kwargs = mock_record.call_args.kwargs
+        assert kwargs["tool_name"] == "ok_tool"
+        assert kwargs["status"] == "success"
+        assert kwargs["latency_ms"] >= 0
+        assert kwargs["error_message"] is None
+
+    async def test_exception_records_error_metric_with_message(self, orchestrator):
+        """Exception в handler → status='error', error_message обрезается до 1000."""
+        async def failing_handler(**kwargs):
+            raise ValueError("x" * 2000)
+
+        tool = ChatTool(
+            name="fail_tool",
+            domain="test",
+            description="Сбойный",
+            handler=failing_handler,
+        )
+        register_tools([tool])
+
+        with patch.object(
+            orchestrator, "_record_tool_metric", new=AsyncMock(),
+        ) as mock_record:
+            await orchestrator._execute_tool_call("fail_tool", {})
+
+        mock_record.assert_awaited_once()
+        kwargs = mock_record.call_args.kwargs
+        assert kwargs["status"] == "error"
+        # error_message обрезан до 1000 символов
+        assert kwargs["error_message"] is not None
+        assert len(kwargs["error_message"]) <= 1000
+
+    async def test_validation_error_records_validation_error_metric(self, orchestrator):
+        """Отсутствие required-параметра → record(status='validation_error')
+        + ChatToolValidationError проброшен наружу."""
+        from app.domains.chat.exceptions import ChatToolValidationError
+
+        tool = ChatTool(
+            name="req2_tool",
+            domain="test",
+            description="С required",
+            parameters=[
+                ChatToolParam(
+                    name="must", type="string", description="must",
+                    required=True,
+                ),
+            ],
+            handler=AsyncMock(return_value="ok"),
+        )
+        register_tools([tool])
+
+        with patch.object(
+            orchestrator, "_record_tool_metric", new=AsyncMock(),
+        ) as mock_record:
+            with pytest.raises(ChatToolValidationError):
+                await orchestrator._execute_tool_call("req2_tool", {})
+
+        mock_record.assert_awaited_once()
+        kwargs = mock_record.call_args.kwargs
+        assert kwargs["status"] == "validation_error"
+        assert kwargs["latency_ms"] == 0
+
+    async def test_timeout_records_error_metric(self, orchestrator):
+        """asyncio.TimeoutError → status='error', error_message содержит timeout."""
+        async def slow_handler(**kwargs):
+            await asyncio.sleep(100)
+            return "x"
+
+        tool = ChatTool(
+            name="slow2_tool",
+            domain="test",
+            description="Медленный",
+            handler=slow_handler,
+        )
+        register_tools([tool])
+
+        with patch.object(
+            orchestrator, "_record_tool_metric", new=AsyncMock(),
+        ) as mock_record:
+            await orchestrator._execute_tool_call("slow2_tool", {})
+
+        mock_record.assert_awaited_once()
+        kwargs = mock_record.call_args.kwargs
+        assert kwargs["status"] == "error"
+        assert "timeout" in kwargs["error_message"].lower()
+
+    async def test_record_metric_failure_does_not_break_tool_loop(self, orchestrator):
+        """Сбой записи метрики → tool-loop продолжает работать (результат возвращается)."""
+        tool = ChatTool(
+            name="ok2_tool",
+            domain="test",
+            description="OK",
+            handler=AsyncMock(return_value="payload"),
+        )
+        register_tools([tool])
+
+        # Имитируем недоступность DI / репозитория
+        with patch(
+            "app.domains.chat.deps.get_tool_metrics_repository",
+            side_effect=RuntimeError("DB unavailable"),
+        ):
+            result = await orchestrator._execute_tool_call("ok2_tool", {})
+
+        # Результат tool'а вернулся несмотря на сбой метрики
+        assert result == "payload"
+
+
+# -------------------------------------------------------------------------
 # run_stream() — стриминговый agent loop
 # -------------------------------------------------------------------------
 
