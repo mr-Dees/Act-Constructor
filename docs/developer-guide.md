@@ -44,9 +44,11 @@
   - [6.3 Пул подключений (asyncpg)](#63-пул-подключений-asyncpg)
   - [6.4 BaseRepository: паттерн работы с БД](#64-baserepository-паттерн-работы-с-бд)
   - [6.5 Миграции](#65-миграции)
+  - [6.5a Как добавить CHECK constraint](#65a-как-добавить-check-constraint)
   - [6.6 JSON/JSONB утилиты](#66-jsonjsonb-утилиты)
-  - [6.7 Пример: добавление новой таблицы](#67-пример-добавление-новой-таблицы)
-  - [6.8 Добавление UA-справочника](#68-добавление-ua-справочника)
+  - [6.7 Как добавить новое поле в таблицу](#67-как-добавить-новое-поле-в-таблицу)
+  - [6.8 Пример: добавление новой таблицы](#68-пример-добавление-новой-таблицы)
+  - [6.9 Добавление UA-справочника](#69-добавление-ua-справочника)
 - [7. AI-ассистент](#7-ai-ассистент)
   - [7.1 Архитектура: chat endpoint -> LLM -> tool_calls](#71-архитектура-chat-endpoint---llm---tool_calls)
   - [7.1a Профили LLM-провайдера (sglang/openrouter/openai/gigachat)](#71a-профили-llm-провайдера)
@@ -71,8 +73,19 @@
   - [9.4 Конфигурация: .env и Pydantic Settings](#94-конфигурация-env-и-pydantic-settings)
     - [9.4.1 Примеры .env для LLM-профилей](#941-примеры-env-для-llm-профилей)
     - [9.4.2 MIME-типы файлов чата (дефолт)](#942-mime-типы-файлов-чата-дефолт)
+    - [9.4.3 Settings-архитектура по доменам](#943-settings-архитектура-по-доменам)
   - [9.5 Полная таблица переменных окружения](#95-полная-таблица-переменных-окружения)
   - [9.6 Retention agent-bridge таблиц](#96-retention-agent-bridge-таблиц)
+- [10. Acts domain deep-dive](#10-acts-domain-deep-dive)
+  - [10.1 Доменная терминология](#101-доменная-терминология)
+  - [10.2 Структура дерева акта](#102-структура-дерева-акта)
+  - [10.3 Жизненный цикл акта](#103-жизненный-цикл-акта)
+  - [10.4 Lock-механизм и inactivity dialog](#104-lock-механизм-и-inactivity-dialog)
+  - [10.5 Версионирование и аудит-лог](#105-версионирование-и-аудит-лог)
+  - [10.6 Экспорт](#106-экспорт)
+  - [10.7 Фактуры (invoice attachment)](#107-фактуры-invoice-attachment)
+  - [10.8 URL страницы акта](#108-url-страницы-акта)
+  - [10.9 Фронтенд: AppState и StorageManager](#109-фронтенд-appstate-и-storagemanager)
 
 ---
 
@@ -1386,7 +1399,86 @@ app/domains/<name>/migrations/
 
 Таблицы создаются автоматически при старте приложения через `create_tables_if_not_exist(domains)`. Каждый `schema.sql` содержит `CREATE TABLE IF NOT EXISTS`, поэтому повторный запуск безопасен.
 
-Для Greenplum используются плейсхолдеры `{SCHEMA}`, `{PREFIX}`, `{REF_*}`, которые подставляются адаптером из `migration_substitutions` домена.
+> **Важно**: в приложении НЕТ механизма ALTER-миграций (Alembic / Yoyo / самописный runner). Все схемы declarative — `CREATE TABLE IF NOT EXISTS`. При добавлении новой колонки на свежей БД она появится автоматически. Для существующих БД админ выполняет `ALTER TABLE … ADD COLUMN …` вручную (или дамп → пересоздание). Это сознательное ограничение для проекта в закрытой сети без CI/CD-deploy-tooling. Backfill дефолтов решается через `DEFAULT … NOT NULL` в DDL — PG/GP заполнят существующие строки при добавлении колонки.
+
+#### Placeholder-паттерн `{SCHEMA}.{PREFIX}<table>`
+
+И PG, и GP-схемы используют единые плейсхолдеры — это позволяет одной DDL-форме работать в обоих окружениях. Подстановки делают адаптеры:
+
+| Плейсхолдер | PostgreSQL (`app/db/adapters/postgresql.py:60-67`) | Greenplum (`app/db/adapters/greenplum.py:74-83`) |
+|---|---|---|
+| `{SCHEMA}.` | `""` (схема `public`, имена остаются неквалифицированными) | Реальная схема (`DATABASE__GP__SCHEMA`) |
+| `{PREFIX}` | `DATABASE__TABLE_PREFIX` | `DATABASE__TABLE_PREFIX` |
+| `{REF_*}` (например `{REF_USER_TABLE}`, `{REF_HADOOP_TABLES}`) | Резолвится из `migration_substitutions` домена | То же |
+
+Bare table names в миграциях (без `{PREFIX}`) — баг: имена разойдутся между PG и GP, и репозитории через `self.adapter.get_table_name("acts")` перестанут находить таблицу.
+
+#### `migration_substitutions` в `DomainDescriptor`
+
+Поле `migration_substitutions: dict[str, str | Callable[[], str]]` (`app/core/domain.py:64`) — словарь плейсхолдеров для внешних таблиц, не принадлежащих текущему домену (например, справочник пользователей `t_db_oarb_ua_user`, имя которого живёт в `ADMIN__USER_DIRECTORY__TABLE`). Значение может быть **строкой** (резолвится при регистрации) или `Callable[[], str]` (lazy-eval — резолвится во время `create_tables`, после загрузки settings).
+
+Пример из `app/domains/admin/__init__.py:47-49`:
+
+```python
+migration_substitutions={
+    "{REF_USER_TABLE}": lambda: settings_registry.get(
+        "admin", AdminSettings
+    ).user_directory.table,
+},
+```
+
+Адаптер во время `create_tables` собирает substitutions из всех доменов в один словарь (`app/db/connection.py:377`) и применяет к каждой схеме.
+
+#### Ограничения Greenplum 6.x (PG 9.4)
+
+Greenplum 6.x = PostgreSQL 9.4. В GP-схемах НЕЛЬЗЯ использовать:
+
+| Конструкция | Доступно с | Замена для GP |
+|---|---|---|
+| `CREATE INDEX IF NOT EXISTS` | PG 9.5 | `CREATE INDEX idx_...` без `IF NOT EXISTS`; адаптер ловит `DuplicateObjectError` |
+| `CREATE SEQUENCE IF NOT EXISTS` | PG 9.5 | `CREATE SEQUENCE seq_...`; адаптер ловит дубликат |
+| `INSERT … ON CONFLICT DO UPDATE` | PG 9.5 | Отдельный UPDATE + INSERT в коде; для сидов — `INSERT` без guard'а (либо ETL заполняет) |
+| `ALTER TABLE … ADD COLUMN IF NOT EXISTS` | PG 9.6 | Не использовать. На GP колонки добавляются ручным ALTER вне приложения |
+| `jsonb_set(...)`, `jsonb_pretty(...)` | PG 9.5 | Обработка JSONB только в Python-коде; в SQL — обычный `=`-апдейт целого поля |
+| `gen_random_uuid()` (pgcrypto) | По умолчанию недоступен в GP | `str(uuid.uuid4())` в Python + передача параметром |
+| `EXECUTE FUNCTION` (в триггерах) | PG 11 | `EXECUTE PROCEDURE` (GP 6.x синтаксис) |
+| `BIGSERIAL` в комбинации с `DISTRIBUTED BY` | Конфликт | Отдельная sequence: `CREATE SEQUENCE seq_<table>_id;` + `id BIGINT DEFAULT nextval('seq_<table>_id')` |
+
+Адаптер GP выполняет SQL по одному statement и ловит `DuplicateTableError` / `DuplicateObjectError` (`app/db/adapters/greenplum.py`). Тесты регрессии — `tests/test_gp_compatibility.py`.
+
+#### Правило `DISTRIBUTED BY` ⊆ `PRIMARY KEY` ⊆ каждый `UNIQUE`
+
+В Greenplum ключ распределения (`DISTRIBUTED BY (col)`) обязан быть **подмножеством** каждого `PRIMARY KEY` и каждого `UNIQUE`-констрейнта на таблице. Иначе `CREATE TABLE` падает с `InvalidTableDefinitionError`.
+
+Для co-location строк по foreign-key (например, все сообщения одного `conversation_id` лежат на одном сегменте) используется составной PK `(id, foreign_id)` с `id` ведущим, и `DISTRIBUTED BY (foreign_id)`:
+
+```sql
+CREATE TABLE {SCHEMA}.{PREFIX}chat_messages (
+    id            VARCHAR(36) NOT NULL,
+    conversation_id VARCHAR(36) NOT NULL,
+    ...
+    PRIMARY KEY (id, conversation_id)
+)
+DISTRIBUTED BY (conversation_id);
+```
+
+Lookups `WHERE id = $1` идут по PK-индексу (`id` ведущий — PostgreSQL/GP умеют использовать PK для prefix-запросов). Регрессия — `tests/test_gp_compatibility.py::test_distributed_by_subset_of_primary_key`.
+
+#### UUID-id как `VARCHAR(36)`
+
+UUID-первичные ключи хранятся как `VARCHAR(36)`, а не как PG-тип `UUID`. Причина: единый код Python-репозиториев генерит ID через `str(uuid.uuid4())` и передаёт параметром как строку. Использование PG `UUID` потребовало бы явного приведения в каждом запросе и обвязки в asyncpg. `VARCHAR(36)` работает одинаково в PG и GP без приведений. Это касается **и PG-миграций для consistency** — даже на PG используется `VARCHAR(36)`.
+
+#### Конвенция имён
+
+| Объект | Шаблон |
+|---|---|
+| Таблица | `{PREFIX}<base_name>` (`{PREFIX}` = `DATABASE__TABLE_PREFIX`) |
+| Индекс | `idx_{PREFIX}<table>_<purpose>` (например `idx_{PREFIX}acts_locked_by`) |
+| Триггер `updated_at` | `update_{PREFIX}<table>_updated_at` |
+| CHECK constraint | `check_<table>_<purpose>` (без `{PREFIX}` — попадает в `CHECK_CONSTRAINT_MESSAGES`, см. §6.5a) |
+| Sequence (только GP) | `seq_<table>_id` |
+
+Список ограничений GP синхронизирован с `CLAUDE.md` (раздел «Greenplum Compatibility»). При расхождении правьте оба места одновременно.
 
 ### 6.5a Как добавить CHECK constraint
 
@@ -1459,7 +1551,66 @@ pytest tests/test_check_constraints_complete.py -v
 
 Файл `app/db/utils/json_db_utils.py` содержит утилиты для конвертации JSON/JSONB данных из asyncpg в Python dict. Asyncpg возвращает JSON-поля как строки — утилиты автоматически парсят их.
 
-### 6.7 Пример: добавление новой таблицы
+### 6.7 Как добавить новое поле в таблицу
+
+Пример: добавить колонку `priority INT DEFAULT 0 NOT NULL` в таблицу `acts`.
+
+> **Напоминание**: в приложении нет ALTER-миграций (см. §6.5). На свежей БД новая колонка появится автоматически из обновлённой `schema.sql`. Для существующих БД админ выполняет `ALTER TABLE … ADD COLUMN priority INT DEFAULT 0 NOT NULL;` руками — `DEFAULT 0 NOT NULL` гарантирует backfill существующих строк.
+
+**Шаг 1. Обновить PG-схему** — `app/domains/acts/migrations/postgresql/schema.sql`, в блок `CREATE TABLE … acts`:
+
+```sql
+CREATE TABLE IF NOT EXISTS {SCHEMA}.{PREFIX}acts (
+    id BIGSERIAL PRIMARY KEY,
+    ...
+    priority INT DEFAULT 0 NOT NULL,
+    ...
+);
+```
+
+**Шаг 2. Обновить GP-схему** — `app/domains/acts/migrations/greenplum/schema.sql`, тот же блок. Избегать запрещённого синтаксиса (см. §6.5). `INT DEFAULT 0 NOT NULL` — совместимо с GP 6.x.
+
+**Шаг 3. Если поле требует валидации** — добавить именованный CHECK constraint и маппинг в `CHECK_CONSTRAINT_MESSAGES`. См. §6.5a.
+
+```sql
+priority INT DEFAULT 0 NOT NULL,
+CONSTRAINT check_acts_priority_range
+    CHECK (priority BETWEEN 0 AND 10),
+```
+
+**Шаг 4. Обновить Pydantic-схему** — `app/domains/acts/schemas.py` (если поле сериализуется в API):
+
+```python
+class ActOut(BaseModel):
+    id: int
+    km_number: str
+    ...
+    priority: int = 0
+```
+
+Если поле опциональное в input — добавить в соответствующий `ActUpdate`/`ActCreate`.
+
+**Шаг 5. Обновить репозиторий** — `app/domains/acts/repositories/act_crud.py` (или соответствующий):
+
+- В `INSERT`: добавить колонку и `$N`-параметр.
+- В `UPDATE`: добавить `SET priority = $N` (если поле редактируется).
+- В `SELECT *`: явно — обычно ничего не меняется, потому что `*` подтянет новую колонку. Если в репозитории явный список колонок (`SELECT id, km_number, ...`) — дописать `priority`.
+- В маппинге row → dict (если есть): дописать ключ.
+
+**Шаг 6. Бэкфилл существующих строк**. Два варианта:
+
+- **Предпочтительно**: `DEFAULT 0 NOT NULL` в DDL — PG/GP заполнят существующие строки нулём при `ADD COLUMN`. Никаких UPDATE'ов не нужно.
+- **Плохая практика**: `NOT NULL` без `DEFAULT` и UPDATE на стартапе из lifespan. Race-условие при первом запуске, лишняя транзакция, no-op после первого старта. Не делайте так.
+
+**Шаг 7. Тесты**.
+
+- Если есть CHECK — негативный тест на невалидное значение (см. §6.5a, шаг 4).
+- Тесты сервиса/репозитория, использующие `mock_conn.fetch.return_value = [...]`, обновить — добавить ключ `"priority"` в моки строк, иначе KeyError при маппинге.
+- E2E-тесты API, проверяющие сериализацию `ActOut`, — обновить ожидаемые ответы.
+
+**Шаг 8. Документировать** в `.env.example`, если поле управляется конфигом (новая `ACTS__*`-настройка). См. §9.4.3.
+
+### 6.8 Пример: добавление новой таблицы
 
 **Шаг 1.** Добавить SQL в `app/domains/acts/migrations/postgresql/schema.sql`:
 
@@ -1495,7 +1646,7 @@ class ActAttachmentRepository(BaseRepository):
 
 **Шаг 4.** Перезапустить приложение — таблица создастся автоматически.
 
-### 6.8 Добавление UA-справочника
+### 6.9 Добавление UA-справочника
 
 Справочники UA (процессы, тербанки, метрики, типы риска и т.п.) — read-only-таблицы домена `ua_data`, используемые из других доменов через `DictionaryRepository`. На PostgreSQL они создаются автоматически по миграции; на Greenplum таблицы и view создаются вручную (наполняются ETL).
 
@@ -2212,6 +2363,8 @@ ALTER TABLE agent_response_events
 
 Размер метаданных пары `(request, response)` — единицы килобайт; `agent_response_events` при стриме 50–100 чанков по 200 байт = ~10–20 KB на запрос. На 1000 запросов в день → ~20 MB/день именно событий, остальное — пренебрежимо.
 
+> Готовый SQL-скрипт для периодической очистки `agent_requests`/`agent_response_events`/`agent_responses` (например, через cron на стороне DBA) — [`docs/agent-bridge-cleanup.sql`](agent-bridge-cleanup.sql). Retention по умолчанию — 30 дней; меняется параметром в начале скрипта. Подробности использования и плейсхолдеры `{SCHEMA}`/`{PREFIX}` — в §9.6.
+
 #### 7.8a Button Translator
 
 Внешний агент возвращает кнопки в **семантическом** виде — с `action_id`, равным имени серверного `ChatTool` (например, `acts.open_act_page`). Фронт такой `action_id` не понимает: его реестр (`window.ClientActionsRegistry`) знает только клиентские примитивы — `open_url`, `notify`, `trigger_sdk`. Между ними должен встать **резолвер**, который умеет ходить в БД и превращать «открой акт КМ-23-001» в `open_url` с готовым `/constructor?act_id=42`. Этим занимается `button_translator`.
@@ -2885,6 +3038,109 @@ GigaChat-proxy частично OpenAI-совместим. Различия (`to
 CHAT__ALLOWED_MIME_TYPES=["application/pdf","image/png"]
 ```
 
+#### 9.4.3 Settings-архитектура по доменам
+
+Pydantic Settings разделены на два уровня — **shared** (общие для всех доменов) и **domain** (доменно-специфичные), регистрируемые через `settings_registry`.
+
+##### Shared Settings
+
+Корневой класс `Settings(BaseSettings)` в `app/core/config.py` — **единственный** `BaseSettings` в проекте. Все вложенные группы — обычные `BaseModel`:
+
+```python
+class Settings(BaseSettings):
+    app_title: str = "Audit Workstation"
+    server: ServerSettings = ServerSettings()
+    database: DatabaseSettings = DatabaseSettings()
+    security: SecuritySettings = SecuritySettings()
+    observability: ObservabilitySettings = ObservabilitySettings()
+    log_format: Literal["text", "json"] = "text"
+
+    model_config = SettingsConfigDict(
+        env_file=".env",
+        env_nested_delimiter="__",
+        case_sensitive=False,
+        extra="ignore",
+    )
+```
+
+- `env_nested_delimiter="__"` — `DATABASE__HOST` → `Settings.database.host`, `DATABASE__GP__PORT` → `Settings.database.gp.port`.
+- `extra="ignore"` — неизвестные переменные не валятся, а тихо игнорируются.
+- Получение: `from app.core.config import get_settings; settings = get_settings()`. Кэшируется через `@lru_cache()` — в тестах сбрасывать `get_settings.cache_clear()`.
+
+##### Domain Settings
+
+Каждый домен определяет свой класс `*DomainSettings(BaseModel)` и регистрирует его через `DomainDescriptor.settings_class`. При старте `app/core/settings_registry.py` инстанцирует класс с префиксом из имени домена (snake_case) — `ChatDomainSettings` → префикс `CHAT__`, `ActsSettings` → `ACTS__`.
+
+```python
+# app/domains/chat/settings.py
+class ChatDomainSettings(BaseModel):
+    profile: Literal["sglang", "openrouter", "openai", "gigachat"] = "sglang"
+    api_base: str = ""
+    api_key: SecretStr = SecretStr("")
+    model: str = "gpt-4o"
+    temperature: float = 0.1
+    streaming_enabled: bool = True
+    retry: RetrySettings = RetrySettings()
+    agent_bridge: AgentBridgeSettings = AgentBridgeSettings()
+    # ...
+
+# Доступ из кода:
+from app.core.settings_registry import get as get_domain_settings
+chat_settings = get_domain_settings("chat", ChatDomainSettings)
+chat_settings.api_key.get_secret_value()  # для SecretStr
+```
+
+`settings_registry.register(cls)` — регистрирует класс настроек домена. `settings_registry.reset()` — для тестов (сбрасывает закешированные инстансы).
+
+##### Доменные префиксы env-vars
+
+| Домен | Класс настроек | Префикс |
+|---|---|---|
+| `acts` | `ActsSettings` (`app/domains/acts/settings.py`) | `ACTS__` |
+| `chat` | `ChatDomainSettings` (`app/domains/chat/settings.py`) | `CHAT__` |
+| `admin` | `AdminSettings` (`app/domains/admin/settings.py`) | `ADMIN__` |
+| `ck_fin_res` | `CkFinResSettings` | `CK_FIN_RES__` |
+| `ck_client_exp` | `CkClientExpSettings` | `CK_CLIENT_EXP__` |
+| `ua_data` | `UaDataSettings` | `UA_DATA__` |
+
+##### Особые случаи
+
+- **`DATABASE__GP__SCHEMA`** — поле в `GreenplumSettings` называется `schema_name` (Python keyword `schema` нельзя использовать как имя поля). Привязка к env-var — через `alias="schema"`:
+
+  ```python
+  class GreenplumSettings(BaseModel):
+      schema_name: str = Field(default="...", alias="schema")
+  ```
+
+  Доступ из кода: `settings.database.gp.schema_name` (НЕ `.schema`).
+
+- **`DATABASE__TABLE_PREFIX`** — общий для всех доменов префикс таблиц приложения (acts, chat, admin). Поле в `DatabaseSettings`, **не** в `GreenplumSettings` — действует и в PG, и в GP, чтобы имена таблиц совпадали. Дефолт — `t_db_oarb_audit_act_`.
+
+##### Профили LLM
+
+Профили `sglang` / `openrouter` / `openai` / `gigachat` управляются через `CHAT__PROFILE` и связанные `CHAT__API_BASE` / `CHAT__API_KEY` / `CHAT__MODEL`. Детальные различия (streaming, tool-calling форматы, quirks) — §7.1a. Примеры `.env` — §9.4.1.
+
+##### Тесты доменных Settings
+
+Не используйте `_load_from_env` для проверки дефолтов: pydantic-settings подсасывает реальный `.env` пользователя, и тест начинает зависеть от конфига разработчика. Инстанцируйте модель напрямую:
+
+```python
+def test_chat_settings_defaults():
+    s = ChatDomainSettings(api_base="x", api_key="y", model="z")
+    assert s.temperature == 0.1
+    assert s.retry.on_429 is True
+```
+
+`_load_from_env` оставляйте для проверки nested env-override (`monkeypatch.setenv("CHAT__RETRY__ON_429", "false")` и т.п.) — там monkeypatch перекрывает `.env`.
+
+##### При добавлении новой переменной
+
+1. Добавить поле в соответствующий `*Settings`-класс.
+2. Дописать в `.env.example` (с комментарием по-русски, дефолтное значение, рамки допустимых).
+3. Если поле управляет именем таблицы / справочника — может потребоваться `migration_substitutions` в `DomainDescriptor` (см. §6.5).
+4. Обновить таблицу в §9.5.
+5. Тесты домена — `_load_from_env` с `monkeypatch.setenv` для проверки парсинга.
+
 ### 9.5 Полная таблица переменных окружения
 
 | Группа | Переменная | Тип | По умолчанию | Описание |
@@ -2895,7 +3151,8 @@ CHAT__ALLOWED_MIME_TYPES=["application/pdf","image/png"]
 | **Сервер** | `SERVER__HOST` | str | `0.0.0.0` | IP для привязки |
 | | `SERVER__PORT` | int | `8000` | TCP порт (1-65535) |
 | | `SERVER__API_V1_PREFIX` | str | `/api/v1` | Префикс API |
-| | `SERVER__LOG_LEVEL` | str | `INFO` | Уровень логирования |
+| | `SERVER__LOG_LEVEL` | str | `INFO` | Уровень логирования (`DEBUG`/`INFO`/`WARNING`/`ERROR`) |
+| | `LOG_FORMAT` | str | `text` | `text` (для разработки) или `json` (структурированный для агрегаторов) |
 | **БД: Выбор** | `DATABASE__TYPE` | str | `postgresql` | `postgresql` или `greenplum` |
 | **БД: Основные** | `DATABASE__HOST` | str | `localhost` | Хост |
 | | `DATABASE__PORT` | int | `5432` | Порт |
@@ -2905,6 +3162,7 @@ CHAT__ALLOWED_MIME_TYPES=["application/pdf","image/png"]
 | **БД: Пул** | `DATABASE__POOL_MIN_SIZE` | int | `2` | Мин. соединений |
 | | `DATABASE__POOL_MAX_SIZE` | int | `10` | Макс. соединений |
 | | `DATABASE__COMMAND_TIMEOUT` | int | `60` | Timeout команд (сек) |
+| | `DATABASE__POOL_WARMUP_ENABLED` | bool | `True` | Прогрев пула при старте (открыть `pool_min_size` соединений до первых запросов) |
 | | `DATABASE__TABLE_PREFIX` | str | `t_db_oarb_audit_act_` | Общий префикс таблиц приложения (PG и GP) |
 | **БД: Greenplum** | `DATABASE__GP__HOST` | str | `gp_dns_pkap1123_audit.gp.df.sbrf.ru` | Хост GP |
 | | `DATABASE__GP__PORT` | int | `5432` | Порт GP |
@@ -2914,6 +3172,9 @@ CHAT__ALLOWED_MIME_TYPES=["application/pdf","image/png"]
 | | `SECURITY__RATE_LIMIT_PER_MINUTE` | int | `1024` | Лимит запросов/мин на IP |
 | | `SECURITY__MAX_TRACKED_IPS` | int | `100` | Макс. отслеживаемых IP |
 | | `SECURITY__RATE_LIMIT_TTL` | int | `120` | TTL метрик (сек) |
+| **Observability** | `OBSERVABILITY__METRICS_BATCH_SIZE` | int | `100` | Размер пакета для flush в БД. Триггер 1: при достижении пакета — немедленный flush трёх потоков метрик (HTTP-запросы, tool-метрики чата, audit-лог) |
+| | `OBSERVABILITY__METRICS_FLUSH_INTERVAL_SEC` | float | `5.0` | Интервал принудительного flush. Триггер 2: даже если пакет не полный — flush раз в N секунд, чтобы метрики не зависали в буфере |
+| | `OBSERVABILITY__METRICS_MAX_BUFFER_SIZE` | int | `10000` | Защитный потолок буфера: при переполнении старые записи дропаются (защита от OOM, если БД недоступна) |
 | **Чат** (доменные) | `CHAT__PROFILE` | str | `sglang` | Профиль LLM: `sglang` (прод), `openrouter`/`openai` (dev), `gigachat` (corp proxy без SSE). См. §7.1a |
 | | `CHAT__API_BASE` | str | (пусто) | Базовый URL LLM API (без `/chat/completions` — SDK добавит сам) |
 | | `CHAT__API_KEY` | SecretStr | (пусто) | API-ключ |
@@ -2927,15 +3188,28 @@ CHAT__ALLOWED_MIME_TYPES=["application/pdf","image/png"]
 | | `CHAT__SYSTEM_PROMPT` | str | `Ты — AI-ассистент...` | Системный промпт |
 | | `CHAT__MAX_HISTORY_LENGTH` | int | `50` | Макс. сообщений в истории |
 | | `CHAT__MAX_MESSAGE_CONTENT_LENGTH` | int | `10000` | Макс. длина сообщения |
-| | `CHAT__MAX_FILE_SIZE` | int | `10485760` | Макс. размер файла (байт) |
+| | `CHAT__HISTORY_FULL_CONTEXT_DEPTH` | int | `5` | Кол-во последних сообщений с полным контентом (file/image-блоки); более старые получают placeholder |
+| | `CHAT__EXTRA_HEADERS` | JSON | `{}` | Доп. заголовки для primary-провайдера. OpenRouter принимает `HTTP-Referer`/`X-Title` для атрибуции |
+| **Чат: Per-user rate limit** | `CHAT__RATE_LIMIT_MESSAGES_PER_MINUTE_PER_USER` | int | `10` | Лимит POST `/messages` на пользователя в минуту (скользящее окно 60 сек) |
+| **Чат: SSE delta-блоки** | `CHAT__DELTA_CHUNK_FLUSH_BYTES` | int | `65536` | Порог буфера delta (байт): по достижении эмитим `block_delta`; гигантские входящие чанки также режутся на куски этого размера |
+| | `CHAT__DELTA_BLOCK_MAX_BYTES` | int | `5242880` | Общий лимит на один блок (байт, 5 МБ): при превышении блок усекается маркером и закрывается; последующие deltas игнорируются (защита от self-DoS) |
+| **Чат: Файлы** | `CHAT__MAX_FILE_SIZE` | int | `10485760` | Макс. размер файла (байт) |
 | | `CHAT__MAX_FILES_PER_MESSAGE` | int | `5` | Макс. файлов в сообщении |
 | | `CHAT__MAX_TOTAL_FILE_SIZE` | int | `31457280` | Макс. суммарный размер файлов в сообщении (байт) |
-| | `CHAT__MAX_CONVERSATIONS_PER_USER` | int | `100` | Макс. разговоров на пользователя |
+| | `CHAT__ALLOWED_MIME_TYPES` | JSON-list | (см. §9.4.2) | Whitelist точных MIME-типов; подстановки `*` запрещены |
+| **Чат: Хранение** | `CHAT__MAX_CONVERSATIONS_PER_USER` | int | `100` | Макс. разговоров на пользователя |
 | | `CHAT__MAX_MESSAGES_PER_CONVERSATION` | int | `500` | Макс. сообщений в разговоре |
 | **Чат: Retry** | `CHAT__RETRY__ON_429` | bool | `True` | Повторять при 429 (rate-limit) |
 | | `CHAT__RETRY__ON_5XX` | bool | `True` | Повторять при 5xx |
 | | `CHAT__RETRY__MAX_ATTEMPTS` | int | `5` | Макс. попыток |
 | | `CHAT__RETRY__BACKOFF_BASE_SEC` | float | `2.0` | База экспоненциального backoff (сек) |
+| **Чат: Fallback** | `CHAT__FALLBACK_PROFILE` | str | (пусто) | Профиль fallback-провайдера (`sglang`/`openrouter`/`openai`/`gigachat`); пусто = отключено |
+| | `CHAT__FALLBACK_API_BASE` | str | (пусто) | Base URL fallback-провайдера (без `/chat/completions`) |
+| | `CHAT__FALLBACK_API_KEY` | SecretStr | (пусто) | API-ключ fallback-провайдера |
+| | `CHAT__FALLBACK_MODEL` | str | (пусто) | Модель fallback |
+| | `CHAT__FALLBACK_EXTRA_HEADERS` | JSON | `{}` | Доп. заголовки для fallback |
+| **Чат: Circuit breaker** | `CHAT__CIRCUIT_BREAKER_FAILURE_THRESHOLD` | int | `5` | Подряд ошибок primary до размыкания circuit (переход на fallback) |
+| | `CHAT__CIRCUIT_BREAKER_RECOVERY_TIMEOUT_SEC` | int | `60` | Сек, через которое circuit пробует primary снова (half-open) |
 | **Чат: Мост к агенту** | `CHAT__AGENT_BRIDGE__POLL_INTERVAL_SEC` | float | `1.0` | Интервал polling таблиц `agent_*` |
 | | `CHAT__AGENT_BRIDGE__INITIAL_RESPONSE_TIMEOUT_SEC` | int | `300` | Гейт 1: время до первого события/ответа |
 | | `CHAT__AGENT_BRIDGE__EVENT_TIMEOUT_SEC` | int | `120` | Гейт 2: heartbeat между событиями |
@@ -2974,6 +3248,25 @@ CHAT__ALLOWED_MIME_TYPES=["application/pdf","image/png"]
 | | `ADMIN__USER_DIRECTORY__TABLE` | str | `t_db_oarb_ua_user` | Таблица пользователей |
 | | `ADMIN__USER_DIRECTORY__BRANCH_FILTER` | str | `Отдел аудита...` | Фильтр отделения |
 | | `ADMIN__USER_DIRECTORY__DEFAULT_ADMIN` | str | `22494524` | Админ по умолчанию |
+| | `ADMIN__HTTP_METRICS_ENABLED` | bool | `False` | Включить запись HTTP-метрик в БД (через Observability batched-writer) |
+| **UA-справочники** | `UA_DATA__SCHEMA_NAME` | str | `""` | Схема UA-справочников (пустая — основная GP) |
+| | `UA_DATA__PROCESS_DICT` | str | `t_db_oarb_ua_process_dict` | Справочник процессов |
+| | `UA_DATA__TERBANK_DICT` | str | `t_db_oarb_ua_terbank_dict` | Справочник территориальных банков |
+| | `UA_DATA__VIOLATION_METRIC_DICT` | str | `t_db_oarb_ua_violation_metric_dict` | Справочник метрик нарушений |
+| | `UA_DATA__DEPARTMENTS` | str | `t_db_oarb_ua_departments` | Справочник подразделений |
+| | `UA_DATA__GOSB_DICT` | str | `t_db_oarb_ua_gosb_dict` | Справочник ГОСБов |
+| | `UA_DATA__VSP_DICT` | str | `t_db_oarb_ua_vsp_dict` | Справочник ВСП |
+| | `UA_DATA__CHANNEL_DICT` | str | `t_db_oarb_ua_channel_dict` | Справочник каналов |
+| | `UA_DATA__PRODUCT_DICT` | str | `t_db_oarb_ua_product_dict` | Справочник продуктов |
+| | `UA_DATA__TEAM_DICT` | str | `t_db_oarb_ua_team_dict` | Справочник команд аудита |
+| | `UA_DATA__SUBSIDIARY_DICT` | str | `t_db_oarb_ua_subsidiary_dict` | Справочник дочерних организаций |
+| | `UA_DATA__VIOLATION_RISK_TYPE_DICT` | str | `t_db_oarb_ua_violation_risk_type_dict` | Справочник типов риска (ЦК Фин.Рез.) |
+| **ЦК Фин.Рез.** | `CK_FIN_RES__SCHEMA_NAME` | str | `""` | Схема таблиц ЦК Фин.Рез. (пустая — основная GP) |
+| | `CK_FIN_RES__FR_VALIDATION_TABLE` | str | `t_db_oarb_ck_fr_validation` | Таблица валидации фин. результатов |
+| | `CK_FIN_RES__FR_VALIDATION_VIEW` | str | `v_db_oarb_ck_fr_validation` | Представление валидации фин. результатов |
+| **ЦК Клиентский опыт** | `CK_CLIENT_EXP__SCHEMA_NAME` | str | `""` | Схема таблиц ЦК Клиентский опыт (пустая — основная GP) |
+| | `CK_CLIENT_EXP__CS_VALIDATION_TABLE` | str | `t_db_oarb_ck_cs_validation` | Таблица валидации клиентского опыта |
+| | `CK_CLIENT_EXP__CS_VALIDATION_VIEW` | str | `v_db_oarb_ck_cs_validation` | Представление валидации клиентского опыта |
 
 ### 9.6 Retention agent-bridge таблиц
 
@@ -3014,3 +3307,162 @@ sed 's/{SCHEMA}/s_grnplm_ld_audit_da_project_4/g; s/{PREFIX}/t_db_oarb_audit_act
 **Рекомендация по частоте**: cron раз в неделю в окне низкой нагрузки. После массовой чистки — `VACUUM ANALYZE` (раскомментировать в конце скрипта). На GP `agent_response_events` имеет смысл партиционировать по `created_at` (RANGE month) — `DROP PARTITION` на порядок быстрее DELETE и не лочит таблицу; см. §7.8.6 для примера ALTER.
 
 Подробности по политике хранения (рекомендованные сроки на 30/180/365 дней, обоснование «почему ретеншена нет в коде», GP-стратегия) — в §7.8.6.
+
+---
+
+## 10. Acts domain deep-dive
+
+Домен `acts` — ядро приложения. Этот раздел собирает в одном месте доменную семантику, жизненный цикл акта, lock-механизм, аудит-лог и фронтенд-state, на которые ссылаются другие разделы гайда.
+
+### 10.1 Доменная терминология
+
+| Термин | Формат / описание |
+|---|---|
+| **КМ-номер** | Номер контрольного мероприятия. Формат `КМ-XX-XXXXX` (валидируется CHECK `check_km_number_format`). В БД хранится дважды: строкой `km_number VARCHAR(50)` и числом `km_number_digit INTEGER` (7 знаков, ведущий ноль значим) — для поиска по цифровой части |
+| **Служебная записка (СЗ)** | Номер документа для актов, отправленных на рассмотрение. Формат `Text/YYYY` (`<любая строка>/<4 цифры года>`), валидируется CHECK `check_service_note_format`. NULL — пока акт не отправлен |
+| **Часть акта** | Один акт может состоять из нескольких частей (`part_number`, `total_parts`). Уникальность — пара `(km_number_digit, part_number)`, констрейнт `UNIQUE(km_number_digit, part_number)` |
+| **Тип проверки** | `is_process_based BOOLEAN`: `TRUE` — процессная (строгая структура секций 1-5), `FALSE` — непроцессная (структура свободнее). Бэк-валидация в `app/domains/acts/services/act_content_service.py` различает варианты |
+| **Предписания** | Задачи на исправление/улучшение для подразделений. Таблица `act_directives` (`app/domains/acts/migrations/postgresql/schema.sql:112`); валидация в `app/domains/acts/services/access_guard.py` (поручения от роли «Куратор»/«Руководитель») |
+| **Роли в акте** | `Куратор`, `Руководитель`, `Редактор`, `Участник`. Таблица `audit_team_members`, CHECK `check_audit_team_role_values`. Доступ к редактированию проверяет `AccessGuard` |
+| **audit_act_id** | UUID связи акта с внешним audit-id-service для последующего сопоставления с фактурами Hive/GP |
+
+### 10.2 Структура дерева акта
+
+Содержимое акта — иерархическое дерево узлов (`act_tree` таблица, JSONB-структура хранится в `tree_data`). Дерево строго делится на:
+
+- **Секции 1-5** — корневые узлы. **Protected nodes**: помечены `node.protected = true`, не удаляются и не перемещаются. Фронтенд блокирует drag-and-drop через `node.protected` check (`static/js/constructor/tree/tree-drag-drop.js:85`). Рендерер добавляет CSS-класс `.protected` (`tree-renderer.js:89`).
+- **Pinned tables** — спецтаблицы, закреплённые **в начале** children-массива своей секции:
+  - **Metrics tables** (главная и подчинённые) — pinned, доступны для редактирования.
+  - **Risk tables** (operational risk и regular risk) — pinned + **запрет на перетаскивание** (`dragstart` блокируется на фронте).
+  - Утилита `TreeUtils.isPinnedTable(node)` (`static/js/constructor/tree/tree-utils.js`) — единственная точка истины для проверки.
+  - Вставка не-pinned детей идёт через `AppState._getFirstNonPinnedIndex(parent)` — гарантирует, что pinned-таблицы остаются вверху.
+
+Под секцией 5 («leaf nodes») к узлам прикрепляются **фактуры** — см. §10.7.
+
+Глубина дерева ограничена `ACTS__RESOURCE__MAX_TREE_DEPTH=50`. Реструктуризация секций 1-5 — отдельный сервис `app/domains/acts/services/act_content_service.py` + тесты `tests/domains/acts/test_restructure_tree.py`.
+
+### 10.3 Жизненный цикл акта
+
+```
+[1] Создание                              POST /api/v1/acts
+        ↓
+[2] Редактирование под act_lock          PATCH /api/v1/acts/{id}/content
+        ↓                                 (требует активный lock на пользователя)
+[3] Сохранение версий контента           StorageManager → debounce 3s + periodic 2min
+        ↓                                 → act_content_versions snapshot (max 50)
+[4] Отправка на рассмотрение             POST /api/v1/acts/{id}/send (получение СЗ-номера)
+        ↓                                 → service_note + service_note_date
+[5] Принятие / отклонение
+        ↓
+[6] Экспорт                              GET /api/v1/acts/{id}/export?format=...
+```
+
+На каждом шаге `audit_log` пишет запись (см. §10.5). Lock автоматически отпускается при истечении или явном `release`.
+
+### 10.4 Lock-механизм и inactivity dialog
+
+Источник истины — поля **прямо в таблице `acts`** (`migrations/postgresql/schema.sql:39-41`):
+
+| Поле | Назначение |
+|---|---|
+| `locked_by VARCHAR(50)` | Username держателя блокировки. `NULL` = акт свободен |
+| `locked_at TIMESTAMP` | Когда блокировка взята |
+| `lock_expires_at TIMESTAMP` | До какого момента валидна |
+
+Сервис — `app/domains/acts/services/act_lock_service.py`. Репозиторий — `app/domains/acts/repositories/act_lock.py`. На GP таблица имеет partial-индекс `idx_{PREFIX}acts_locked_by WHERE locked_by IS NOT NULL` для быстрого поиска чужих блокировок (`migrations/greenplum/schema.sql:494-496`).
+
+**Поведение:**
+
+- При попытке открыть акт сервис проверяет `lock_expires_at > now()`. Если занят другим — возврат `LockConflictError` (HTTP 423) с именем держателя.
+- При своём существующем lock — продление до `now() + DURATION_MINUTES`. Не чаще, чем раз в `MIN_EXTENSION_INTERVAL_MINUTES` (антифлуд).
+- При истечении lock — следующий запрос на любое изменение возвращает 403 / 423. Пользователь должен заново «взять» акт.
+- **Inactivity dialog**: фронт по таймеру `INACTIVITY_TIMEOUT_MINUTES` без активности (нет клика/keypress) показывает диалог «Продолжить?». Если пользователь не ответил за `INACTIVITY_DIALOG_TIMEOUT_SECONDS` — lock отпускается, фронт уходит в read-only.
+
+| Env-var | Назначение |
+|---|---|
+| `ACTS__LOCK__DURATION_MINUTES=15` | Срок жизни одного lock'а |
+| `ACTS__LOCK__INACTIVITY_TIMEOUT_MINUTES=5` | Через сколько без активности — диалог |
+| `ACTS__LOCK__INACTIVITY_CHECK_INTERVAL_SECONDS=60` | Период опроса серверной inactivity-логики |
+| `ACTS__LOCK__MIN_EXTENSION_INTERVAL_MINUTES=5` | Анти-флуд продлений |
+| `ACTS__LOCK__INACTIVITY_DIALOG_TIMEOUT_SECONDS=30` | Если не ответил на диалог — lock отпускается |
+
+### 10.5 Версионирование и аудит-лог
+
+Две независимые системы:
+
+**1. Снэпшоты контента — `{PREFIX}act_content_versions`** (`migrations/postgresql/schema.sql:354`). Каждое сохранение содержимого создаёт запись со снимком `tree_data` (JSONB), `version_number` инкрементируется. Используется для просмотра истории редактирования акта и восстановления. Сервис — `app/domains/acts/services/act_content_service.py`, репозиторий — `app/domains/acts/repositories/act_content_version.py`. Индекс `idx_{PREFIX}act_content_versions_act(act_id, version_number DESC)` для быстрой выборки последних N версий.
+
+**2. Аудит-лог — `{PREFIX}audit_log`** (`migrations/postgresql/schema.sql:338`). Запись о каждом действии (создание, редактирование, lock, отправка СЗ, экспорт). Сервис — `app/domains/acts/services/audit_log_service.py`. Здесь же лежит diff между версиями (по элементам дерева и ячейкам таблиц).
+
+**Лимиты:**
+
+| Env-var | Значение | Назначение |
+|---|---|---|
+| `ACTS__AUDIT_LOG__RETENTION_DAYS` | `365` | Срок хранения записей аудит-лога |
+| `ACTS__AUDIT_LOG__MAX_CONTENT_VERSIONS` | `50` | Макс. версий снэпшота на один акт (старые ротируются) |
+| `ACTS__AUDIT_LOG__MAX_DIFF_ELEMENTS` | `20` | Макс. элементов в diff |
+| `ACTS__AUDIT_LOG__MAX_DIFF_CELLS_PER_TABLE` | `50` | Макс. ячеек diff на одну таблицу |
+
+Чистка просроченных записей — на стороне DBA (по аналогии с agent-bridge-таблицами, §9.6), в коде нет background-job ретеншена.
+
+### 10.6 Экспорт
+
+Сервис — `app/domains/acts/services/export_service.py`. Поддерживаемые форматы: **DOCX**, **Markdown**, **HTML**, **plain text**. Конкретный формат выбирается query-параметром эндпоинта экспорта.
+
+Параметры форматирования управляются настройками `ACTS__FORMATTING__*` (см. §9.5):
+
+- **DOCX**: `DOCX_IMAGE_WIDTH=4.0` (дюймы), `DOCX_CAPTION_FONT_SIZE=10`, `DOCX_MAX_HEADING_LEVEL=9`, `MAX_IMAGE_SIZE_MB=10.0`.
+- **Markdown**: `MARKDOWN_MAX_HEADING_LEVEL=6` (MD `#` ограничено 6).
+- **HTML**: `HTML_PARSE_TIMEOUT=30`, `MAX_HTML_DEPTH=100`, `HTML_PARSE_CHUNK_SIZE=1000` — защита от bomb-нагрузки на парсер.
+- **Plain text**: `TEXT_HEADER_WIDTH=80`, `TEXT_INDENT_SIZE=2`.
+- Общие retry: `MAX_RETRIES=3`, `RETRY_DELAY=0.5` для нестабильных операций (например, загрузка картинок).
+
+### 10.7 Фактуры (invoice attachment)
+
+Под секцией 5 («leaf nodes») к узлам прикрепляются **фактуры** — ссылки на строки внешних таблиц Hive или Greenplum, использованные как доказательная база нарушения.
+
+**Хранение:**
+- На фронте: `node.invoice` в `tree_data` (структура с типом БД, схемой, таблицей, фильтрами).
+- На бэке: таблица `{PREFIX}act_invoices` (`migrations/postgresql/schema.sql:279`). CHECK `check_act_invoices_db_type_values` ограничивает `db_type IN ('hive', 'greenplum')`.
+- Реестр Hive-таблиц: `{REF_HADOOP_TABLES}` (placeholder, резолвится из `ACTS__INVOICE__HIVE_REGISTRY_SCHEMA` + `HIVE_REGISTRY_TABLE`).
+
+**Сервис:** `app/domains/acts/services/act_invoice_service.py`.
+
+**Настройки:**
+
+| Env-var | Назначение |
+|---|---|
+| `ACTS__INVOICE__HIVE_SCHEMA` | Hive-схема для фактур (`team_sva_oarb_3`) |
+| `ACTS__INVOICE__GP_SCHEMA` | GP-схема для списка таблиц (`s_grnplm_ld_audit_da_sandbox_oarb`) |
+| `ACTS__INVOICE__HIVE_REGISTRY_SCHEMA` | Где лежит реестр Hive-таблиц |
+| `ACTS__INVOICE__HIVE_REGISTRY_TABLE` | Имя таблицы реестра (`t_db_oarb_ua_hadoop_tables`) |
+
+### 10.8 URL страницы акта
+
+Канонический формат: **`/constructor?act_id={int}`**, где `id` — `INTEGER` из `{PREFIX}acts.id` (BIGSERIAL).
+
+> **Важно**: НЕ `/acts/{km_number}`. КМ-номер — это бизнес-идентификатор, а не маршрут. Поиск по КМ/СЗ резолвит в `acts.id` через `acts`-репозиторий, и только потом строится URL.
+
+Это используется во всех client-action handler'ах (`acts.open_act_page`, button-translator), в `chat-client-actions.js` (`resolveProxyUrl`) и в навигации из чата. См. §7.8a (Button Translator) и §7.9.
+
+### 10.9 Фронтенд: AppState и StorageManager
+
+**Proxy-based change tracking — `AppState`** (`static/js/constructor/state/state-core.js` + `state-tree.js` + `state-content.js`). Глобальный объект `window.AppState`, обёрнутый Proxy: любая запись свойства автоматически вызывает `markAsUnsaved()`. Это даёт «без пропусков» отслеживание изменений — не надо явно вызывать setter в каждом обработчике.
+
+```js
+AppState.tree[0].title = 'Новое название';  // → автоматически markAsUnsaved()
+```
+
+`AppState` — plain object (не класс), расширяемый через `Object.assign()` из модулей `state-tree.js` и `state-content.js`. Подробности — §4.5.
+
+**Dual-tracking save — `StorageManager`** (`static/js/constructor/storage/`). Хранит две независимые ленты состояния и индикаторы:
+
+| Состояние | Где | Триггер | Индикатор |
+|---|---|---|---|
+| **Unsaved (красный)** | в памяти, не дошло до localStorage | пользователь только что напечатал | красная точка |
+| **Local (жёлтый)** | localStorage, не дошло до сервера | debounce 3s после остановки ввода | жёлтая точка |
+| **Saved (белый/без точки)** | на сервере (БД) | periodic 2min + при отправке СЗ | без индикатора |
+
+Это даёт устойчивость к закрытию вкладки (localStorage переживёт reload) и к флапу сети (фронт повторит отправку при следующем тике). Подробности — §4.6.
+
+**Связь с lock-механизмом**: StorageManager умеет различать «отправка не удалась, потому что lock истёк» и поднимает inactivity-dialog заново.
