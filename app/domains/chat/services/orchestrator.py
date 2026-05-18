@@ -1164,7 +1164,12 @@ class Orchestrator:
 
         except asyncio.TimeoutError:
             logger.warning(
-                "Таймаут LLM/tool в run(): conversation=%s", conversation_id,
+                "LLM timeout",
+                extra={
+                    "stage": "run",
+                    "model": self.settings.model,
+                    "conversation_id": conversation_id,
+                },
             )
             error_message = "Временная ошибка AI-сервиса. Попробуйте позже."
             try:
@@ -2120,8 +2125,13 @@ class Orchestrator:
 
         except asyncio.TimeoutError:
             logger.warning(
-                "Таймаут LLM/tool в стриминговом agent loop: "
-                "conversation=%s", conversation_id,
+                "LLM timeout",
+                extra={
+                    "stage": "run_stream",
+                    "model": self.settings.model,
+                    "elapsed_sec": time.monotonic() - run_started,
+                    "conversation_id": conversation_id,
+                },
             )
             yield sse_error(error="Временная ошибка AI-сервиса. Попробуйте позже.")
         except Exception as exc:

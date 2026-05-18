@@ -393,3 +393,67 @@ async def test_max_total_duration_fires_even_with_heartbeat(mock_conn):
     timeout_calls = _timeout_update_calls(mock_conn)
     assert timeout_calls
     assert any("максимальная длительность" in str(c.args) for c in timeout_calls)
+
+
+# ── 5.3.2: структурированные warning-логи на таймауты гейтов ──
+
+
+async def test_initial_response_gate_emits_structured_llm_timeout_warning(
+    mock_conn, caplog,
+):
+    """5.3.2: гейт initial_response эмитит logger.warning('LLM timeout', extra=...)
+    со stage='agent_bridge_initial' и elapsed_sec/request_id."""
+    svc = AgentBridgeService(mock_conn)
+    mock_conn.fetch.return_value = []
+    mock_conn.fetchrow.return_value = None
+
+    with caplog.at_level("WARNING"):
+        with pytest.raises(AgentBridgeTimeout):
+            async for _ in svc.wait_for_completion(
+                "r-initial",
+                poll_interval_sec=0.05,
+                initial_response_timeout_sec=0.2,
+                event_timeout_sec=10,
+                max_total_duration_sec=10,
+            ):
+                pass
+
+    records = [r for r in caplog.records if r.getMessage() == "LLM timeout"]
+    assert len(records) == 1
+    rec = records[0]
+    assert rec.levelname == "WARNING"
+    assert rec.__dict__.get("stage") == "agent_bridge_initial"
+    assert rec.__dict__.get("request_id") == "r-initial"
+    assert isinstance(rec.__dict__.get("elapsed_sec"), float)
+
+
+async def test_max_total_gate_emits_structured_llm_timeout_warning(
+    mock_conn, caplog,
+):
+    """5.3.2: гейт max_total эмитит 'LLM timeout' со stage='agent_bridge_total'."""
+    svc = AgentBridgeService(mock_conn)
+
+    def make_event(eid):
+        return {
+            "id": eid, "request_id": "r-total", "seq": eid,
+            "event_type": "reasoning", "payload": "{}", "created_at": None,
+        }
+
+    mock_conn.fetch.side_effect = [[make_event(i)] for i in range(1, 1000)]
+    mock_conn.fetchrow.return_value = None
+
+    with caplog.at_level("WARNING"):
+        with pytest.raises(AgentBridgeTimeout):
+            async for _ in svc.wait_for_completion(
+                "r-total",
+                poll_interval_sec=0.05,
+                initial_response_timeout_sec=10,
+                event_timeout_sec=10,
+                max_total_duration_sec=0.3,
+            ):
+                pass
+
+    records = [r for r in caplog.records if r.getMessage() == "LLM timeout"]
+    assert len(records) == 1
+    assert records[0].__dict__.get("stage") == "agent_bridge_total"
+    assert records[0].__dict__.get("request_id") == "r-total"

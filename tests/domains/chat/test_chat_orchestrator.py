@@ -558,6 +558,40 @@ class TestOrchestratorRun:
         assert "Временная ошибка" in saved_blocks[0]["message"]
 
     @patch("app.domains.chat.services.orchestrator.Orchestrator._get_openai_client")
+    async def test_run_timeout_emits_structured_warning(
+        self, mock_client_factory, orchestrator, caplog,
+    ):
+        """5.3.2: при asyncio.TimeoutError в run() логируется warning
+        'LLM timeout' с extra-полями stage/model/conversation_id."""
+        mock_client = AsyncMock()
+        mock_client.chat.completions.create = AsyncMock(
+            side_effect=asyncio.TimeoutError(),
+        )
+        mock_client_factory.return_value = mock_client
+        orchestrator._save_assistant_message = AsyncMock()
+
+        with caplog.at_level("WARNING"):
+            result = await orchestrator.run(
+                conversation_id="conv-timeout",
+                user_message="Привет",
+            )
+
+        assert result["status"] == "error"
+
+        timeout_records = [
+            r for r in caplog.records
+            if r.getMessage() == "LLM timeout"
+        ]
+        assert len(timeout_records) == 1, (
+            "Должна быть ровно одна запись 'LLM timeout'"
+        )
+        record = timeout_records[0]
+        assert record.levelname == "WARNING"
+        assert record.__dict__.get("stage") == "run"
+        assert record.__dict__.get("conversation_id") == "conv-timeout"
+        assert "model" in record.__dict__
+
+    @patch("app.domains.chat.services.orchestrator.Orchestrator._get_openai_client")
     async def test_run_strips_leading_newlines(self, mock_client_factory, orchestrator):
         """Ведущие переносы строк убираются из ответа LLM."""
         mock_client = AsyncMock()
