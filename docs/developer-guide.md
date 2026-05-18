@@ -2409,68 +2409,47 @@ async def open_act_page_handler(
 
 ### 8.1 Стек и структура
 
-| Инструмент | Версия | Назначение |
-|-----------|--------|-----------|
-| pytest | — | Фреймворк тестирования |
-| pytest-asyncio | — | Поддержка async тестов |
-| httpx / TestClient | — | Тестирование HTTP API |
-| unittest.mock | — | Моки и патчи |
+| Инструмент | Назначение |
+|-----------|-----------|
+| pytest | Фреймворк (1291 тест в проекте) |
+| pytest-asyncio | Async-тесты |
+| httpx / TestClient | API-тесты (через `dependency_overrides`) |
+| unittest.mock (AsyncMock, MagicMock) | Моки репозиториев и сервисов |
+
+**Иерархия тестов** (≈92 файла, ~1291 тест):
 
 ```
 tests/
 ├── conftest.py                       — общие фикстуры (mock_conn, mock_adapter)
-├── test_chat_tools.py                — тесты ChatTool реестра
-├── test_domain_registry.py           — тесты domain_registry
-├── test_settings_registry.py         — тесты settings_registry
-├── test_settings_env_parsing.py      — тесты парсинга переменных окружения
-├── test_auth_deps.py                 — тесты авторизации
-├── test_km_utils.py                  — тесты KM-утилит
-├── test_middleware.py                — тесты middleware
-├── test_act_tree_utils.py            — тесты утилит дерева актов
-├── test_directives_validator.py      — тесты валидации поручений
-├── test_access_guard.py              — тесты AccessGuard
-├── test_exceptions.py                — тесты исключений
-├── test_schemas.py                   — тесты Pydantic-схем актов
-├── test_admin_schemas.py             — тесты схем администрирования
-├── test_admin_service.py             — тесты AdminService
-├── test_db_utils.py                  — тесты JSON/SQL утилит БД
-├── test_db_adapters.py               — тесты адаптеров PostgreSQL/Greenplum
-├── test_connection.py                — тесты пула подключений
-├── test_navigation.py                — тесты навигации (NavItem, sidebar)
-├── test_gp_compatibility.py          — тесты совместимости с Greenplum
-├── core/
-│   ├── test_chat_blocks.py           — тесты блоков сообщений
-│   └── test_chat_buttons.py          — тесты action button реестра
+├── core/                             — тесты ядра (DomainDescriptor, chat blocks)
+├── db/                               — адаптеры PG/GP и init_db
 ├── domains/
-│   ├── acts/
-│   │   └── test_restructure_tree.py  — тесты реструктуризации дерева
-│   └── chat/
-│       ├── test_chat_services.py     — тесты сервисов чата
-│       ├── test_chat_integration.py  — интеграционные тесты чата
-│       ├── test_chat_orchestrator.py — тесты Orchestrator (agent loop)
-│       ├── test_chat_streaming.py    — тесты SSE-стриминга
-│       ├── test_chat_file_extraction.py — тесты извлечения текста из файлов
-│       ├── test_chat_security.py     — тесты безопасности чата
-│       └── test_chat_race_conditions.py — тесты race conditions
-├── test_admin/
-│   ├── test_admin_audit_log.py       — тесты аудит-лога администрирования
-│   ├── test_admin_repository.py      — тесты репозитория admin
-│   └── test_admin_service.py         — тесты AdminService (расширенные)
-├── test_ck_fin_res/
-│   ├── test_fr_repository.py         — тесты репозитория ЦК ФинРез
-│   ├── test_fr_schemas.py            — тесты схем ЦК ФинРез
-│   └── test_fr_service.py            — тесты сервиса ЦК ФинРез
-├── test_ck_client_exp/
-│   ├── test_cs_repository.py         — тесты репозитория ЦК КлОпыт
-│   ├── test_cs_schemas.py            — тесты схем ЦК КлОпыт
-│   └── test_cs_service.py            — тесты сервиса ЦК КлОпыт
-└── test_ua_data/
-    └── test_dictionary_repository.py — тесты репозитория справочников
+│   ├── acts/                         — lock/audit-log/export/restructure/invoice + e2e API (10 файлов)
+│   ├── admin/                        — http_metrics repository/service (2 файла)
+│   ├── chat/                         — 30+ файлов: orchestrator, streaming, agent_bridge,
+│   │                                   GigaChat adapter, retry, circuit breaker, LLM fallback,
+│   │                                   audit-log, tool-метрики, rate-limit, SSE-блоки
+│   └── ua_data/                      — dictionary service + e2e API
+├── test_admin/                       — admin repository + service + audit-log
+├── test_ck_fin_res/, test_ck_client_exp/, test_ua_data/  — ЦК-домены и UA-справочники
+└── (на верхнем уровне)               — горизонтальные: middleware, navigation, settings,
+                                        schemas, arch reliability, GP compatibility,
+                                        CHECK constraints, no cross-domain imports,
+                                        role deps, per-domain health, singleton lock,
+                                        metrics batcher, logging, http_metrics middleware
 ```
+
+Сводный счёт по слоям:
+- Backend unit (мокированные репо/сервисы): ~80% тестов
+- E2E API через `dependency_overrides`: ~10%
+- GP compatibility / архитектурные lint'ы: ~5%
+- Прочее (utils, schemas, exceptions): ~5%
+
+Каждая категория — по 1-2 строки. Полный список ищите через `Glob: tests/**/*.py` — фактическое количество файлов меняется быстрее, чем этот документ.
 
 ### 8.2 Фикстуры: сброс реестров
 
-Доменная система использует глобальное состояние. Между тестами его нужно сбрасывать. Каждый тест-файл определяет свою `autouse`-фикстуру, сбрасывающую только используемые реестры:
+Доменная система использует глобальное состояние. Между тестами его нужно сбрасывать. **Паттерн**: каждый тест-файл определяет свою `autouse`-фикстуру, сбрасывающую **только** используемые реестры — не «всё на всякий случай», иначе тесты становятся медленнее и теряют изоляцию причин.
 
 ```python
 # Пример: в тест-файле chat tools
@@ -2483,10 +2462,12 @@ def clean():
     reset_chat_tools()
 ```
 
-Доступные функции сброса:
-- `domain_registry.reset_registry()` — для тестов доменов
+Доступные точки сброса:
+- `domain_registry.reset_registry()` — для тестов доменов и навигации
 - `settings_registry.reset()` — для тестов настроек
 - `app.core.chat.tools.reset()` — для тестов chat tools
+- `_user_locks.clear()` — для тестов сервисов с in-process `asyncio.Lock` (см. `conversation_service`, `message_service`); сбрасывается через autouse-фикстуру в `test_singleton_lock.py`
+- `get_settings.cache_clear()` — обязательно, если тест меняет env: `get_settings()` помечен `@lru_cache` (см. `app/core/config.py`), без сброса soak'нется значение от предыдущего теста
 
 Общие фикстуры в `tests/conftest.py`:
 
@@ -2518,9 +2499,12 @@ def mock_adapter():
     return adapter
 ```
 
-### 8.3 Тестирование API
+### 8.3 Тестирование API (УСТАРЕВШИЙ паттерн)
+
+> **УСТАРЕВШИЙ ПАТТЕРН.** Прямой `from app.main import app` + `TestClient(app)` тянет реальный `lifespan` (БД, LLM, миграции), что ломает тесты в CI. Сохранено для исторической справки. Актуальный паттерн — в [§8.5](#85-пример-тест-для-нового-эндпоинта) (минимальный FastAPI app + `dependency_overrides`).
 
 ```python
+# НЕ ДЕЛАЙТЕ ТАК в новых тестах
 from fastapi.testclient import TestClient
 from app.main import app
 
@@ -2529,40 +2513,45 @@ client = TestClient(app)
 def test_health_check():
     response = client.get("/api/v1/system/health")
     assert response.status_code == 200
-    data = response.json()
-    assert data["status"] == "ok"
-
-def test_chat_fallback():
-    """Тест chat endpoint при отсутствии LLM API."""
-    # 1. Создать разговор
-    conv = client.post("/api/v1/chat/conversations", json={})
-    conversation_id = conv.json()["id"]
-    # 2. Отправить сообщение (FormData)
-    response = client.post(
-        f"/api/v1/chat/conversations/{conversation_id}/messages",
-        data={"message": "Привет", "domains": "acts"},
-    )
-    assert response.status_code == 200
 ```
 
 ### 8.4 Тестирование сервисов и репозиториев
 
+**Базовый паттерн репозитория** (`mock_conn` + autouse-патч `get_adapter`):
+
 ```python
 import pytest
-from app.domains.acts.services.act_crud_service import ActCrudService
+from unittest.mock import patch
+from app.domains.acts.repositories.act_repository import ActRepository
+
+@pytest.fixture(autouse=True)
+def _patch_adapter(mock_adapter):
+    with patch("app.db.repositories.base.get_adapter", return_value=mock_adapter):
+        yield
 
 @pytest.mark.asyncio
-async def test_list_acts(mock_conn):
-    mock_conn.fetch.return_value = [
-        {"id": 1, "km_number": "КМ-12-12345", "inspection_name": "Тест"}
-    ]
-
-    service = ActCrudService(conn=mock_conn, settings=MagicMock())
-    result = await service.list_acts("test_user")
-
-    assert len(result) == 1
-    mock_conn.fetch.assert_called_once()
+async def test_get_by_id(mock_conn):
+    mock_conn.fetchrow.return_value = {"id": 1, "km_number": "КМ-24-12345"}
+    repo = ActRepository(mock_conn)
+    act = await repo.get_by_id(1)
+    assert act["km_number"] == "КМ-24-12345"
 ```
+
+Реального `db_conn` нет — integration-фикстуры с поднятой БД отсутствуют. Integration-тесты делаются через мокирование БД и LLM (см. `tests/domains/chat/test_orchestrator_forward_integration.py`).
+
+**Важные правила:**
+
+- **Новый метод в `*Repository`** — обновить `_make_mock_repo_with_conn()` (или эквивалентную фабрику mock-репо) в тест-файлах, прописав явный `mock.<new_method>.return_value = <sensible_default>`. Иначе `AsyncMock` вернёт truthy-объект и сломает существующие тесты, которые ожидают `None`/`False` от нового метода. См. `tests/domains/chat/test_chat_services.py` как образец.
+
+- **Handler-функции с `get_db`/`get_adapter`** (например, action-handlers) — импортируй их **внутри функции**, не на module-level. Это позволяет тестам патчить через `patch.multiple("app.db.connection", get_db=..., get_adapter=...)`. Module-level импорт связывает имена при старте и обходит patch.
+
+- **Тесты доменных Settings (`*DomainSettings`)** — НЕ через `_load_from_env` для проверки дефолтов: pydantic-settings подсасывает реальный `.env` пользователя, и тест зависит от конфига разработчика. Инстанцируй модель напрямую: `ChatDomainSettings(api_base="...", api_key="...", model="...")`. `_load_from_env` оставь только для nested env-override (`CHAT__RETRY__ON_429` и т.п.) с `monkeypatch.setenv`.
+
+- **`@pytest.mark.xfail(strict=False)` запрещён.** Проходит и когда тест падает, и когда проходит — регрессия не ловится. Используй `strict=True` (тест станет ошибкой, если кейс внезапно начнёт работать) или фикси баг и переводи в pass.
+
+- **Тесты могут фиксировать БАГ как ожидаемое поведение.** Прошлый автор мог зашить текущее (багованное) поведение как «должно быть». При фиксе бага проверяй, что тест ассертит **правильную** семантику — обновляй старые ассерты, а не только добавляй новые сценарии. Пример: `test_translate_messages_assistant_tool_calls_to_function_call` ожидал `arguments` как JSON-string (был баг → 422 GigaChat); при фиксе обновлён на DICT.
+
+**Парсинг SQL-схем в тестах** — `DatabaseAdapter._split_sql_statements()` (учитывает `;` в комментариях, строках, dollar-quoting), не `split(';')`. Перед regex-поиском констрейнтов вырезай line-комментарии (`re.sub(r'--[^\n]*', '', stmt)`) — иначе `-- DISTRIBUTED BY (col)` шадовит реальный clause.
 
 **Тестирование ChatTool реестра:**
 
@@ -2576,40 +2565,93 @@ def clean():
     reset()
 
 def test_register_and_get():
-    tool = ChatTool(name="test_tool", domain="test", description="desc")
+    tool = ChatTool(name="test_tool", description="desc")
     register_tools([tool])
     assert get_tool("test_tool") is tool
-
-def test_duplicate_raises():
-    register_tools([ChatTool(name="dup", domain="a", description="x")])
-    with pytest.raises(RuntimeError, match="уже зарегистрирован"):
-        register_tools([ChatTool(name="dup", domain="b", description="y")])
 ```
 
 ### 8.5 Пример: тест для нового эндпоинта
 
+Тесты эндпоинтов в проекте **НЕ** используют `app.main.create_app()` / `app.main.app` напрямую — это тянет `lifespan` с реальной БД и LLM. Вместо этого собирают **минимальный** `FastAPI()`, подключают нужные роутеры и переопределяют зависимости через `app.dependency_overrides`.
+
 ```python
 import pytest
-from unittest.mock import AsyncMock, patch, MagicMock
+from unittest.mock import AsyncMock, MagicMock
+from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
-def test_get_act_status():
-    """Тест получения статуса акта."""
+from app.api.v1.deps.auth_deps import get_username, get_user_roles
+from app.domains.acts.api.endpoints import router as acts_router
+from app.domains.acts.deps import get_acts_service
+
+
+@pytest.fixture
+def test_app():
+    app = FastAPI()
+    app.include_router(acts_router, prefix="/api/v1/acts")
+
     mock_service = AsyncMock()
-    mock_service.get_act.return_value = MagicMock(
-        id=1, locked_by="user1"
-    )
+    mock_service.list_acts.return_value = [
+        {"id": 1, "km_number": "КМ-24-12345"}
+    ]
 
-    with patch("app.domains.acts.deps.get_crud_service", return_value=mock_service):
-        with patch("app.api.v1.deps.auth_deps.get_username", return_value="test_user"):
-            from app.main import app
-            client = TestClient(app)
-            response = client.get("/api/v1/acts/1/status")
+    app.dependency_overrides[get_username] = lambda: "12345678"
+    app.dependency_overrides[get_user_roles] = lambda: [{"role_id": "admin"}]
+    app.dependency_overrides[get_acts_service] = lambda: mock_service
 
-            assert response.status_code == 200
-            data = response.json()
-            assert data["act_id"] == 1
-            assert data["locked"] is True
+    yield app, mock_service
+
+    app.dependency_overrides.clear()
+
+
+def test_list_acts_returns_data(test_app):
+    app, mock_service = test_app
+    client = TestClient(app)
+
+    response = client.get("/api/v1/acts/")
+
+    assert response.status_code == 200
+    assert response.json()[0]["km_number"] == "КМ-24-12345"
+    mock_service.list_acts.assert_called_once()
+```
+
+**Стримы (SSE)** — читать через `client.stream(...)` + чтение первых N строк:
+
+```python
+def test_chat_stream_emits_block_complete(test_app):
+    app, mock_orchestrator = test_app
+    mock_orchestrator.run_stream.return_value = async_iter([
+        b"data: {\"event\": \"block_complete\", ...}\n\n",
+        b"data: {\"event\": \"done\"}\n\n",
+    ])
+
+    client = TestClient(app)
+    with client.stream("POST", "/api/v1/chat/messages", json={...}) as response:
+        lines = []
+        for line in response.iter_lines():
+            lines.append(line)
+            if "done" in line:
+                break
+    assert any("block_complete" in l for l in lines)
+```
+
+Реальные примеры паттерна:
+- `tests/domains/chat/test_chat_api_e2e.py` — чат-эндпоинты, SSE-стрим, `dependency_overrides` для сервисов
+- `tests/domains/acts/test_acts_api_e2e.py` — CRUD актов
+- `tests/domains/acts/test_content_api_e2e.py` — контент акта (auth + service override)
+- `tests/domains/ua_data/test_ua_data_api_e2e.py` — справочники
+
+**Доменные исключения чата** — сервисы кидают `ChatLimitError`/`ChatFileValidationError`/`ConversationNotFoundError`/`ChatFileNotFoundError` (`app/domains/chat/exceptions.py`, наследники `AppError` со зашитым `status_code`), **НЕ** `fastapi.HTTPException`. Тестируется через `pytest.raises(ChatLimitError)` + проверка `exc.status_code` и `str(exc)`:
+
+```python
+from app.domains.chat.exceptions import ChatLimitError
+
+@pytest.mark.asyncio
+async def test_message_limit_exceeded(service):
+    with pytest.raises(ChatLimitError) as exc_info:
+        await service.send_message(user_id="u1", text="...")
+    assert exc_info.value.status_code == 429
+    assert "лимит" in str(exc_info.value).lower()
 ```
 
 ---
