@@ -82,19 +82,19 @@ def discover_domains(domains_dir: Path) -> list[DomainDescriptor]:
         if descriptor.settings_class is not None:
             from app.core.settings_registry import register
             register(descriptor.name, descriptor.settings_class)
-            logger.info(f"Настройки домена {descriptor.name} загружены")
+            logger.debug(f"Настройки домена {descriptor.name} загружены")
 
         # Регистрация chat tools
         if descriptor.chat_tools:
             from app.core.chat.tools import register_tools
             register_tools(descriptor.chat_tools)
-            logger.info(
+            logger.debug(
                 f"Chat tools домена {descriptor.name}: "
                 f"{len(descriptor.chat_tools)}"
             )
 
         discovered.append(descriptor)
-        logger.info(f"Обнаружен домен: {descriptor.name}")
+        logger.debug(f"Обнаружен домен: {descriptor.name}")
 
     # Проверка обязательных доменов
     discovered_names = {d.name for d in discovered}
@@ -208,7 +208,9 @@ def register_domains(
                 registered_exc_classes[exc_class] = d.name
                 logger.debug(f"Домен {d.name}: обработчик {exc_class.__name__}")
 
-    logger.info(f"Роутеры зарегистрированы: {api_count} API, {html_count} HTML")
+    logger.debug(
+        f"Роутеры зарегистрированы: {api_count} API, {html_count} HTML",
+    )
 
 
 def get_domain(name: str) -> DomainDescriptor | None:

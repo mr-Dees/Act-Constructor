@@ -157,7 +157,7 @@ def make_adapter(settings: Settings) -> tuple[DatabaseAdapter, dict]:
             user=settings.database.user,
             password=settings.database.password.get_secret_value(),
         )
-        logger.info(
+        logger.debug(
             f"Инициализация PostgreSQL: "
             f"{settings.database.host}:{settings.database.port}/{settings.database.name}"
         )
@@ -181,7 +181,7 @@ def make_adapter(settings: Settings) -> tuple[DatabaseAdapter, dict]:
             database=settings.database.gp.database,
             user=username_digits,
         )
-        logger.info(
+        logger.debug(
             f"Инициализация Greenplum: "
             f"{settings.database.gp.host}:{settings.database.gp.port}/{settings.database.gp.database}, "
             f"schema={settings.database.gp.schema_name}, user={username_digits}"
@@ -249,8 +249,10 @@ async def open_pool(
         raise RuntimeError(f"Не удалось создать пул подключений: {e}") from e
 
     logger.info(
-        f"Database pool создан для {settings.database.type} "
-        f"(min={settings.database.pool_min_size}, max={settings.database.pool_max_size})"
+        "Database pool ready: %s (min=%d, max=%d)",
+        settings.database.type,
+        settings.database.pool_min_size,
+        settings.database.pool_max_size,
     )
     return pool
 
