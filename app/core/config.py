@@ -135,6 +135,9 @@ class DatabaseSettings(BaseModel):
     pool_min_size: int = Field(default=2, ge=1)
     pool_max_size: int = Field(default=10, ge=2)
     command_timeout: int = Field(default=60, gt=0)
+    # При старте — выполнить count=pool_min_size холостых acquire() параллельно,
+    # чтобы первые запросы пользователя не платили TCP-handshake.
+    pool_warmup_enabled: bool = Field(default=True)
     # Префикс таблиц приложения — общий для PG и GP, чтобы имена совпадали.
     table_prefix: str = Field(default="t_db_oarb_audit_act_")
     gp: GreenplumSettings = GreenplumSettings()
