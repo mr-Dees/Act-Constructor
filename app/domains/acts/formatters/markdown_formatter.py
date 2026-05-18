@@ -7,8 +7,8 @@
 
 from app.core.config import Settings
 from app.domains.acts.settings import ActsSettings
-from app.formatters.base_formatter import BaseFormatter
-from app.formatters.utils import HTMLUtils, TableUtils, FormattingUtils
+from .base_formatter import BaseFormatter
+from .utils import HTMLUtils, TableUtils, FormattingUtils
 
 
 class MarkdownFormatter(BaseFormatter):
