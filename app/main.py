@@ -95,7 +95,11 @@ async def lifespan(app: FastAPI):
     # discover_domains() вызывается повторно (первый раз — в create_app для роутеров).
     # Результат кэшируется в _domains, здесь нужен для lifecycle и БД.
     domains = discover_domains(_domains_dir)
-    logger.info(f"Обнаружено доменов: {len(domains)}")
+    logger.info(
+        "Зарегистрировано доменов: %d (%s)",
+        len(domains),
+        ", ".join(d.name for d in domains),
+    )
 
     # Список успешно стартовавших доменов — используется и в startup-откате, и в shutdown
     started: list = []
@@ -103,7 +107,7 @@ async def lifespan(app: FastAPI):
     # ИНИЦИАЛИЗАЦИЯ БД
     try:
         await init_db(settings)
-        logger.info("База данных инициализирована")
+        logger.debug("База данных инициализирована")
 
         # ПРОГРЕВ ПУЛА — устраняет TCP-handshake-задержку первых запросов
         if settings.database.pool_warmup_enabled:
@@ -111,7 +115,7 @@ async def lifespan(app: FastAPI):
 
         # СОЗДАНИЕ ТАБЛИЦ ЕСЛИ НЕ СУЩЕСТВУЮТ
         await create_tables_if_not_exist(domains)
-        logger.info("Схема базы данных проверена")
+        logger.debug("Схема базы данных проверена")
 
         # SINGLETON-БЛОКИРОВКА ИНСТАНСА ПРИЛОЖЕНИЯ
         # В закрытой сети без Redis multi-worker деплой повредил бы
@@ -150,7 +154,7 @@ async def lifespan(app: FastAPI):
                         logger.exception(f"Ошибка при откате домена {d.name}")
             raise
 
-        logger.info("Приложение успешно инициализировано")
+        logger.info("Application startup complete")
 
         # Реconcile незавершённых polling-задач forward'а к внешнему агенту:
         # если предыдущий запуск uvicorn упал или был перезапущен посреди
