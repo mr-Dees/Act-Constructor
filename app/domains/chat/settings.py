@@ -40,6 +40,39 @@ class ChatDomainSettings(BaseModel):
     streaming_enabled: bool = True
     request_timeout: int = Field(default=60, gt=0)
 
+    # Fallback-провайдер на случай сбоя primary (circuit breaker).
+    # Поля используют default_factory=lambda: None: settings_registry
+    # пропускает поля с default=None при подъёме .env-loader'а, и они
+    # становятся required (вместо желаемых Optional). default_factory
+    # обходит эту особенность.
+    fallback_profile: Literal["openrouter", "sglang", "openai", "gigachat"] | None = Field(
+        default_factory=lambda: None,
+        description=(
+            "Профиль провайдера для fallback при сбое primary. "
+            "None = fallback отключён."
+        ),
+    )
+    fallback_api_base: str | None = Field(default_factory=lambda: None)
+    fallback_api_key: SecretStr | None = Field(default_factory=lambda: None)
+    fallback_model: str | None = Field(default_factory=lambda: None)
+    fallback_extra_headers: dict[str, str] = Field(default_factory=dict)
+
+    circuit_breaker_failure_threshold: int = Field(
+        default=5,
+        ge=1,
+        description=(
+            "Подряд ошибок primary, после которого circuit размыкается"
+        ),
+    )
+    circuit_breaker_recovery_timeout_sec: int = Field(
+        default=60,
+        ge=10,
+        description=(
+            "Сколько секунд circuit остаётся разомкнутым, "
+            "пока probe не попробует primary"
+        ),
+    )
+
     # Поведение small-talk
     smalltalk_mode: Literal["local", "forward"] = "local"
 
