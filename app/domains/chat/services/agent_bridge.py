@@ -10,6 +10,7 @@ from typing import AsyncIterator
 
 import asyncpg
 
+from app.core.config import request_id_var
 from app.domains.chat.repositories.agent_event_repository import (
     AgentEventRepository,
 )
@@ -55,8 +56,19 @@ class AgentBridgeService:
         history: list[dict],
         files: list[dict],
     ) -> str:
-        """Создаёт строку в agent_requests, возвращает свежий request_id."""
+        """Создаёт строку в agent_requests, возвращает свежий request_id.
+
+        Если есть активный HTTP-контекст (RequestIdMiddleware проставил
+        ``request_id_var``) — записываем его в ``parent_request_id`` для
+        сквозной трассировки HTTP-запрос → строка agent_requests → логи
+        фонового runner'а. Дефолтное значение ContextVar — "-" (когда
+        вызов вне HTTP-контекста, например из reconcile); такое значение
+        в БД не пишем — оставляем NULL.
+        """
         request_id = str(uuid.uuid4())
+        parent = request_id_var.get()
+        if parent in (None, "", "-"):
+            parent = None
         await self._requests.create(
             id=request_id,
             conversation_id=conversation_id,
@@ -67,10 +79,11 @@ class AgentBridgeService:
             history=history,
             files=files,
             last_user_message=last_user_message,
+            parent_request_id=parent,
         )
         logger.debug(
-            "agent_request создан: id=%s conv=%s msg=%s",
-            request_id, conversation_id, message_id,
+            "agent_request создан: id=%s conv=%s msg=%s parent=%s",
+            request_id, conversation_id, message_id, parent,
         )
         return request_id
 
