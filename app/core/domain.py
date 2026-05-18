@@ -62,3 +62,4 @@ class DomainDescriptor:
     knowledge_bases: list[KnowledgeBase] = field(default_factory=list)
     chat_system_prompt: str = ""
     migration_substitutions: dict[str, str | Callable[[], str]] = field(default_factory=dict)
+    health_check: Callable[[], Awaitable[dict]] | None = None

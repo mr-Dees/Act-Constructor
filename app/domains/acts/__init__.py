@@ -12,6 +12,31 @@ CRUD, блокировки, содержимое, экспорт, фактуры
 DOMAIN_NAME = "acts"
 
 
+async def _health_check() -> dict:
+    """Health-проверка домена актов: пинг БД и наличие таблицы acts.
+
+    Возвращает структуру:
+        {"status": "ok"|"error", "db": "reachable"|<msg>, "tables": "present"|"missing"}
+    """
+    from app.db.connection import get_db, get_adapter
+
+    result: dict = {"status": "ok", "db": "reachable", "tables": "present"}
+
+    try:
+        adapter = get_adapter()
+        async with get_db() as conn:
+            await conn.fetchval("SELECT 1")
+            expected = adapter.get_table_name("acts").split(".")[-1]
+            existing = await adapter._get_existing_tables(conn, [expected])
+            if expected not in existing:
+                result["status"] = "error"
+                result["tables"] = "missing"
+    except Exception as exc:
+        return {"status": "error", "db": str(exc), "tables": "unknown"}
+
+    return result
+
+
 def _build_domain():
     """Ленивое построение DomainDescriptor (вызывается из domain_registry)."""
     from app.core.domain import DomainDescriptor, KnowledgeBase, NavItem
@@ -34,6 +59,7 @@ def _build_domain():
         migration_substitutions={
             "{REF_HADOOP_TABLES}": lambda: settings_registry.get(DOMAIN_NAME, ActsSettings).invoice.hive_registry_table,
         },
+        health_check=_health_check,
         nav_items=[
             NavItem(
                 label="Управление актами",
