@@ -3,6 +3,47 @@
 DOMAIN_NAME = "chat"
 
 
+async def _health_check() -> dict:
+    """Health-проверка чата: БД и (если есть) состояние circuit breaker'а LLM.
+
+    Возвращает:
+        {"status": "ok"|"degraded"|"error",
+         "db": "reachable"|<msg>,
+         "llm_circuit": "closed"|"open"|"half_open"|"not_configured"}
+    """
+    from app.db.connection import get_db
+
+    result: dict = {"status": "ok", "db": "reachable", "llm_circuit": "not_configured"}
+
+    try:
+        async with get_db() as conn:
+            await conn.fetchval("SELECT 1")
+    except Exception as exc:
+        return {"status": "error", "db": str(exc), "llm_circuit": "unknown"}
+
+    # Circuit breaker: импорт опциональный — компонент может быть не введён в репо.
+    try:
+        from app.domains.chat.services.circuit_breaker import get_breaker  # type: ignore
+
+        breaker = get_breaker()
+        state = getattr(breaker, "state", None)
+        if state is not None:
+            state_str = str(state).lower()
+            result["llm_circuit"] = state_str
+            if "open" in state_str and "half" not in state_str:
+                result["status"] = "degraded"
+                result["note"] = "primary unreachable, fallback active"
+    except ImportError:
+        # Circuit breaker ещё не реализован — это не ошибка.
+        pass
+    except Exception as exc:
+        # Поломка breaker'а — degraded, но БД жива.
+        result["status"] = "degraded"
+        result["llm_circuit"] = f"error: {exc}"
+
+    return result
+
+
 async def _on_chat_shutdown(app) -> None:
     """Graceful shutdown polling-задач forward'а к внешнему агенту и
     закрытие кэшированных LLM-клиентов (httpx connection pools).
@@ -34,4 +75,5 @@ def _build_domain():
         dependencies=[],
         chat_tools=get_chat_tools(),
         on_shutdown=_on_chat_shutdown,
+        health_check=_health_check,
     )
