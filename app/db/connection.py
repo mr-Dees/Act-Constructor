@@ -2,9 +2,11 @@
 Управление подключением к базе данных с поддержкой PostgreSQL и Greenplum.
 """
 
+import asyncio
 import logging
 import re
 import subprocess as _subprocess
+import time
 from contextlib import asynccontextmanager
 from typing import AsyncGenerator
 
@@ -79,6 +81,19 @@ def _is_kerberos_ticket_valid() -> bool:
         return True
 
 
+def _log_kerberos_instructions() -> None:
+    """Печатает в лог стандартную инструкцию по обновлению Kerberos билета."""
+    logger.error(
+        "\n" + "=" * 80 + "\n"
+        "ОШИБКА: Kerberos билет отсутствует или истёк!\n"
+        "=" * 80 + "\n"
+        "Для продолжения работы выполните в терминале:\n\n"
+        "    kinit\n\n"
+        "После ввода пароля перезапустите приложение.\n"
+        "=" * 80
+    )
+
+
 def get_pool() -> Pool:
     """
     Возвращает текущий пул подключений к БД.
@@ -113,9 +128,138 @@ def get_adapter() -> DatabaseAdapter:
     return _adapter
 
 
+def make_adapter(settings: Settings) -> tuple[DatabaseAdapter, dict]:
+    """
+    Создаёт адаптер по типу БД и формирует pool_kwargs для asyncpg.
+
+    Чистая функция: не открывает пул и не пишет в глобалы.
+
+    Args:
+        settings: Настройки приложения
+
+    Returns:
+        Кортеж (adapter, pool_kwargs) для последующего вызова open_pool
+
+    Raises:
+        ValueError: Если тип БД не поддерживается или не удалось извлечь
+            username для Greenplum
+    """
+    db_type = settings.database.type
+
+    if db_type == "postgresql":
+        adapter: DatabaseAdapter = PostgreSQLAdapter(
+            table_prefix=settings.database.table_prefix
+        )
+        pool_kwargs = dict(
+            host=settings.database.host,
+            port=settings.database.port,
+            database=settings.database.name,
+            user=settings.database.user,
+            password=settings.database.password.get_secret_value(),
+        )
+        logger.info(
+            f"Инициализация PostgreSQL: "
+            f"{settings.database.host}:{settings.database.port}/{settings.database.name}"
+        )
+        return adapter, pool_kwargs
+
+    if db_type == "greenplum":
+        adapter = GreenplumAdapter(
+            schema=settings.database.gp.schema_name,
+            table_prefix=settings.database.table_prefix
+        )
+        # username из settings (Pydantic читает JUPYTERHUB_USER из env-shell и .env)
+        username = settings.jupyterhub_user
+        username_digits = re.sub(r'\D', '', username.split('_')[0])
+        if not username_digits:
+            raise ValueError(
+                f"Не удалось извлечь username для Greenplum: {username}"
+            )
+        pool_kwargs = dict(
+            host=settings.database.gp.host,
+            port=settings.database.gp.port,
+            database=settings.database.gp.database,
+            user=username_digits,
+        )
+        logger.info(
+            f"Инициализация Greenplum: "
+            f"{settings.database.gp.host}:{settings.database.gp.port}/{settings.database.gp.database}, "
+            f"schema={settings.database.gp.schema_name}, user={username_digits}"
+        )
+        return adapter, pool_kwargs
+
+    raise ValueError(f"Неподдерживаемый тип БД: {db_type}")
+
+
+async def open_pool(
+    settings: Settings,
+    adapter: DatabaseAdapter,
+    pool_kwargs: dict,
+) -> Pool:
+    """
+    Открывает asyncpg.Pool с обработкой Kerberos-ошибок.
+
+    Не сохраняет результат в глобалы — это делает init_db.
+
+    Args:
+        settings: Настройки приложения (для типа БД и параметров пула)
+        adapter: Адаптер (используется для определения типа БД, например GP-ветка)
+        pool_kwargs: Параметры подключения от make_adapter
+
+    Returns:
+        Открытый пул подключений
+
+    Raises:
+        KerberosTokenExpiredError: Если Kerberos билет отсутствует/истёк
+        RuntimeError: При прочих ошибках подключения
+    """
+    is_greenplum = isinstance(adapter, GreenplumAdapter)
+
+    # Pre-flight Kerberos check для Greenplum — даём понятную ошибку
+    if is_greenplum and not _is_kerberos_ticket_valid():
+        _log_kerberos_instructions()
+        raise KerberosTokenExpiredError(
+            "Kerberos билет отсутствует или истёк. Выполните 'kinit' для обновления."
+        )
+
+    try:
+        pool = await asyncpg.create_pool(
+            **pool_kwargs,
+            min_size=settings.database.pool_min_size,
+            max_size=settings.database.pool_max_size,
+            command_timeout=settings.database.command_timeout,
+        )
+    except asyncpg.PostgresError as e:
+        error_message = str(e)
+        if _is_kerberos_token_expired(error_message):
+            _log_kerberos_instructions()
+            raise KerberosTokenExpiredError(
+                "Kerberos токен протух. Выполните 'kinit' для обновления."
+            ) from e
+        logger.error(f"Ошибка PostgreSQL при создании пула: {e}")
+        raise RuntimeError(f"Не удалось подключиться к БД: {e}") from e
+    except Exception as e:
+        # Для Greenplum: OSError / ConnectionRefused часто означает протухший билет
+        if is_greenplum and not _is_kerberos_ticket_valid():
+            _log_kerberos_instructions()
+            raise KerberosTokenExpiredError(
+                "Kerberos билет отсутствует или истёк. Выполните 'kinit' для обновления."
+            ) from e
+        logger.error(f"Неожиданная ошибка при создании пула: {e}")
+        raise RuntimeError(f"Не удалось создать пул подключений: {e}") from e
+
+    logger.info(
+        f"Database pool создан для {settings.database.type} "
+        f"(min={settings.database.pool_min_size}, max={settings.database.pool_max_size})"
+    )
+    return pool
+
+
 async def init_db(settings: Settings) -> None:
     """
     Инициализирует пул подключений и адаптер для выбранной СУБД.
+
+    Тонкий координатор: вызывает make_adapter, open_pool, сохраняет в глобалы.
 
     Args:
         settings: Настройки приложения с параметрами БД
@@ -131,143 +275,37 @@ async def init_db(settings: Settings) -> None:
         logger.warning("Database pool уже инициализирован")
         return
 
-    try:
-        # Определяем тип БД и создаем адаптер
-        if settings.database.type == "postgresql":
-            _adapter = PostgreSQLAdapter(
-                table_prefix=settings.database.table_prefix
-            )
+    adapter, pool_kwargs = make_adapter(settings)
+    pool = await open_pool(settings, adapter, pool_kwargs)
 
-            pool_kwargs = dict(
-                host=settings.database.host,
-                port=settings.database.port,
-                database=settings.database.name,
-                user=settings.database.user,
-                password=settings.database.password.get_secret_value(),
-            )
+    _adapter = adapter
+    _pool = pool
 
-            logger.info(
-                f"Инициализация PostgreSQL: "
-                f"{settings.database.host}:{settings.database.port}/{settings.database.name}"
-            )
 
-        elif settings.database.type == "greenplum":
-            _adapter = GreenplumAdapter(
-                schema=settings.database.gp.schema_name,
-                table_prefix=settings.database.table_prefix
-            )
+async def warmup_pool(pool: Pool, count: int) -> None:
+    """
+    Открывает count соединений предзаранее для устранения TCP-handshake-задержки.
 
-            # Получаем username из settings (Pydantic читает JUPYTERHUB_USER
-            # из env-shell и из .env одинаково — единый источник для PG и GP).
-            username = settings.jupyterhub_user
+    asyncpg.Pool создаётся лениво — первый acquire() делает handshake. При старте
+    приложения это означает, что первые N запросов будут на 50-200мс медленнее.
+    Прогрев выполняет N холостых acquire() параллельно (с SELECT 1), после чего
+    соединения возвращаются в пул и готовы к использованию.
 
-            # Извлекаем только цифры из username
-            username_digits = re.sub(r'\D', '', username.split('_')[0])
+    Args:
+        pool: Открытый asyncpg.Pool
+        count: Количество соединений для прогрева
+    """
+    if count <= 0:
+        return
 
-            if not username_digits:
-                raise ValueError(
-                    f"Не удалось извлечь username для Greenplum: {username}"
-                )
+    async def _noop() -> None:
+        async with pool.acquire() as conn:
+            await conn.fetchval("SELECT 1")
 
-            pool_kwargs = dict(
-                host=settings.database.gp.host,
-                port=settings.database.gp.port,
-                database=settings.database.gp.database,
-                user=username_digits,
-            )
-
-            logger.info(
-                f"Инициализация Greenplum: "
-                f"{settings.database.gp.host}:{settings.database.gp.port}/{settings.database.gp.database}, "
-                f"schema={settings.database.gp.schema_name}, user={username_digits}"
-            )
-
-        else:
-            raise ValueError(f"Неподдерживаемый тип БД: {settings.database.type}")
-
-        # Для Greenplum: проверяем Kerberos билет до подключения,
-        # чтобы выдать понятную ошибку вместо низкоуровневых Connection refused / GSS failure
-        if settings.database.type == "greenplum" and not _is_kerberos_ticket_valid():
-            logger.error(
-                "\n" + "=" * 80 + "\n"
-                "ОШИБКА: Kerberos билет отсутствует или истёк!\n"
-                "=" * 80 + "\n"
-                "Для продолжения работы выполните в терминале:\n\n"
-                "    kinit\n\n"
-                "После ввода пароля перезапустите приложение.\n"
-                "=" * 80
-            )
-            raise KerberosTokenExpiredError(
-                "Kerberos билет отсутствует или истёк. Выполните 'kinit' для обновления."
-            )
-
-        # Создаем пул подключений
-        try:
-            _pool = await asyncpg.create_pool(
-                **pool_kwargs,
-                min_size=settings.database.pool_min_size,
-                max_size=settings.database.pool_max_size,
-                command_timeout=settings.database.command_timeout
-            )
-
-            logger.info(
-                f"Database pool создан для {settings.database.type} "
-                f"(min={settings.database.pool_min_size}, max={settings.database.pool_max_size})"
-            )
-
-        except asyncpg.PostgresError as e:
-            error_message = str(e)
-
-            # Проверяем протухший токен Kerberos
-            if _is_kerberos_token_expired(error_message):
-                logger.error(
-                    "=" * 80 + "\n"
-                               "ОШИБКА: Kerberos токен авторизации протух!\n"
-                               "=" * 80 + "\n"
-                                          "Для продолжения работы выполните в терминале команду:\n\n"
-                                          "    kinit\n\n"
-                                          "После ввода пароля токен будет обновлен и приложение\n"
-                                          "сможет подключиться к базе данных.\n"
-                                          "=" * 80 + "\n"
-                                                     f"Детали ошибки: {error_message}\n"
-                                                     "=" * 80
-                )
-                raise KerberosTokenExpiredError(
-                    "Kerberos токен протух. Выполните 'kinit' для обновления."
-                ) from e
-
-            # Прокидываем другие ошибки PostgreSQL
-            logger.error(f"Ошибка PostgreSQL при создании пула: {e}")
-            raise RuntimeError(f"Не удалось подключиться к БД: {e}") from e
-
-        except Exception as e:
-            # Для Greenplum: OSError / ConnectionRefused часто означает протухший билет
-            if settings.database.type == "greenplum" and not _is_kerberos_ticket_valid():
-                logger.error(
-                    "\n" + "=" * 80 + "\n"
-                    "ОШИБКА: Kerberos билет отсутствует или истёк!\n"
-                    "=" * 80 + "\n"
-                    "Для продолжения работы выполните в терминале:\n\n"
-                    "    kinit\n\n"
-                    "После ввода пароля перезапустите приложение.\n"
-                    "=" * 80
-                )
-                raise KerberosTokenExpiredError(
-                    "Kerberos билет отсутствует или истёк. Выполните 'kinit' для обновления."
-                ) from e
-            logger.error(f"Неожиданная ошибка при создании пула: {e}")
-            raise RuntimeError(f"Не удалось создать пул подключений: {e}") from e
-
-    except KerberosTokenExpiredError:
-        # Пробрасываем Kerberos ошибку без изменений
-        raise
-    except ValueError as e:
-        # Пробрасываем ошибки валидации
-        logger.error(f"Ошибка конфигурации БД: {e}")
-        raise
-    except Exception as e:
-        logger.exception(f"Неожиданная ошибка инициализации БД: {e}")
-        raise RuntimeError(f"Не удалось инициализировать БД: {e}") from e
+    started = time.perf_counter()
+    await asyncio.gather(*(_noop() for _ in range(count)))
+    elapsed_ms = (time.perf_counter() - started) * 1000.0
+    logger.info(f"Прогрев пула: {count} соединений за {elapsed_ms:.1f}мс")
 
 
 async def close_db() -> None:

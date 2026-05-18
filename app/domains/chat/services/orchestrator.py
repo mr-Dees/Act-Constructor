@@ -24,8 +24,12 @@ from app.core.chat.tools import (
 )
 from app.core.settings_registry import get as get_domain_settings
 from app.domains.chat.exceptions import ChatToolValidationError
+from app.domains.chat.services.circuit_breaker import get_breaker
 from app.domains.chat.services.conversation_service import ConversationService
-from app.domains.chat.services.llm_client import build_llm_client
+from app.domains.chat.services.llm_client import (
+    build_fallback_client,
+    build_llm_client,
+)
 from app.domains.chat.services.message_service import MessageService
 from app.domains.chat.services.retry import retry_on_transient
 from app.domains.chat.services.streaming import (
@@ -384,6 +388,151 @@ class Orchestrator:
     def _get_openai_client(self):
         """Возвращает AsyncOpenAI клиент согласно профильным настройкам."""
         return build_llm_client(self.settings)
+
+    def _get_fallback_client(self):
+        """Возвращает fallback-клиент или None, если fallback не настроен."""
+        return build_fallback_client(self.settings)
+
+    def _has_fallback(self) -> bool:
+        """True если все необходимые fallback-настройки заданы."""
+        return (
+            self.settings.fallback_profile is not None
+            and bool(self.settings.fallback_api_base)
+            and self.settings.fallback_api_key is not None
+            and bool(self.settings.fallback_api_key.get_secret_value())
+        )
+
+    def _fallback_is_gigachat(self) -> bool:
+        """True если fallback-профиль — gigachat (нельзя streaming)."""
+        return self.settings.fallback_profile == "gigachat"
+
+    @staticmethod
+    def _is_provider_failure(exc: BaseException) -> bool:
+        """Считается ли исключение сбоем primary-провайдера.
+
+        Условия (true → инкремент circuit breaker, может тригерить fallback):
+          - openai.APIConnectionError / APITimeoutError (транспорт)
+          - asyncio.TimeoutError (наш request_timeout)
+          - openai.APIStatusError со status_code >= 500
+
+        4xx (auth, rate-limit, validation) — это клиентские ошибки,
+        НЕ считаются сбоем провайдера. Логика retry на 429 уже есть
+        в retry_on_transient; здесь её дублировать нельзя.
+        """
+        try:
+            from openai import (
+                APIConnectionError,
+                APIStatusError,
+                APITimeoutError,
+            )
+        except ImportError:  # pragma: no cover
+            return False
+
+        if isinstance(exc, APITimeoutError):
+            return True
+        if isinstance(exc, APIConnectionError):
+            return True
+        if isinstance(exc, asyncio.TimeoutError):
+            return True
+        if isinstance(exc, APIStatusError):
+            code = getattr(exc, "status_code", None)
+            return code is not None and 500 <= code < 600
+        return False
+
+    def _get_circuit_breaker(self):
+        """Возвращает singleton-breaker с актуальной конфигурацией."""
+        return get_breaker(
+            failure_threshold=self.settings.circuit_breaker_failure_threshold,
+            recovery_timeout_sec=(
+                self.settings.circuit_breaker_recovery_timeout_sec
+            ),
+        )
+
+    async def _llm_call_with_fallback(
+        self,
+        client,
+        *,
+        force_non_streaming: bool = False,
+        **kwargs,
+    ) -> tuple[Any, bool, Any]:
+        """Вызывает LLM с поддержкой fallback при сбое primary.
+
+        Возвращает кортеж ``(result, fallback_used, active_client)``, где
+        ``active_client`` — клиент, через который реально прошёл вызов
+        (primary либо fallback). При успешном primary fallback_used=False.
+
+        Логика:
+          1. Если circuit-breaker open (и fallback есть) — сразу fallback.
+          2. Иначе пробуем primary. На provider-failure инкрементим
+             счётчик breaker'а; если fallback настроен — пробуем fallback.
+             4xx (auth/validation/etc.) пробрасываем без fallback.
+          3. На успехе primary — record_success.
+
+        ``force_non_streaming`` — если True и fallback=gigachat, перед
+        вызовом fallback'а удаляется stream=True из kwargs.
+        """
+        breaker = self._get_circuit_breaker()
+        has_fallback = self._has_fallback()
+
+        # Если circuit разомкнут — primary даже не дёргаем (fast-path)
+        if has_fallback and await breaker.is_open():
+            fb_client = self._get_fallback_client()
+            if fb_client is not None:
+                fb_kwargs = self._adjust_kwargs_for_fallback(
+                    kwargs, force_non_streaming=force_non_streaming,
+                )
+                logger.warning(
+                    "Circuit breaker open — вызов идёт через fallback "
+                    "(profile=%s)",
+                    self.settings.fallback_profile,
+                )
+                result = await self._completions_create(
+                    fb_client, **fb_kwargs,
+                )
+                return result, True, fb_client
+
+        try:
+            result = await self._completions_create(client, **kwargs)
+        except Exception as exc:
+            if not self._is_provider_failure(exc):
+                # Клиентская ошибка / NotFound / 4xx — fallback не помогает
+                raise
+            await breaker.record_failure(exc)
+            if not has_fallback:
+                raise
+            fb_client = self._get_fallback_client()
+            if fb_client is None:
+                raise
+            fb_kwargs = self._adjust_kwargs_for_fallback(
+                kwargs, force_non_streaming=force_non_streaming,
+            )
+            logger.warning(
+                "Primary LLM упал (%s); fallback на profile=%s",
+                type(exc).__name__, self.settings.fallback_profile,
+            )
+            result = await self._completions_create(fb_client, **fb_kwargs)
+            return result, True, fb_client
+
+        await breaker.record_success()
+        return result, False, client
+
+    def _adjust_kwargs_for_fallback(
+        self, kwargs: dict, *, force_non_streaming: bool,
+    ) -> dict:
+        """Перестраивает kwargs LLM-вызова под fallback-провайдера.
+
+        Подменяет model на fallback_model (если задан). Если fallback —
+        GigaChat и ``force_non_streaming`` True (или kwargs содержит
+        stream=True) — выключает streaming, иначе GigaChat-proxy отдаст
+        422 EventException.
+        """
+        out = dict(kwargs)
+        if self.settings.fallback_model:
+            out["model"] = self.settings.fallback_model
+        if self._fallback_is_gigachat():
+            if force_non_streaming or out.get("stream"):
+                out.pop("stream", None)
+        return out
 
     async def _save_assistant_message(
         self,
@@ -813,13 +962,16 @@ class Orchestrator:
         _consecutive_validation_errors = 0
 
         try:
-            response = await self._completions_create(
+            response, _fb_used, client = await self._llm_call_with_fallback(
                 client,
                 model=self.settings.model,
                 messages=messages,
                 tools=tools if tools else NOT_GIVEN,
                 temperature=self.settings.temperature,
             )
+            if _fb_used and self._fallback_is_gigachat():
+                # После переключения на GigaChat — соблюдаем его ограничения
+                is_gigachat = True
 
             # Agent loop
             rounds = 0
@@ -851,13 +1003,15 @@ class Orchestrator:
                     if pending_tool_calls:
                         continue
                     # Очередь опустела — вызываем LLM с обновлённой историей
-                    response = await self._completions_create(
+                    response, _fb_used, client = await self._llm_call_with_fallback(
                         client,
                         model=self.settings.model,
                         messages=messages,
                         tools=tools if tools else NOT_GIVEN,
                         temperature=self.settings.temperature,
                     )
+                    if _fb_used and self._fallback_is_gigachat():
+                        is_gigachat = True
                     # Переходим к началу цикла: проверяем новый ответ LLM
                     continue
 
@@ -973,13 +1127,15 @@ class Orchestrator:
                 # переходим к следующей итерации, где очередь будет обработана.
                 if pending_tool_calls:
                     continue
-                response = await self._completions_create(
+                response, _fb_used, client = await self._llm_call_with_fallback(
                     client,
                     model=self.settings.model,
                     messages=messages,
                     tools=tools if tools else NOT_GIVEN,
                     temperature=self.settings.temperature,
                 )
+                if _fb_used and self._fallback_is_gigachat():
+                    is_gigachat = True
 
             answer = (response.choices[0].message.content or "").lstrip("\n")
 
@@ -1242,17 +1398,25 @@ class Orchestrator:
                             )
                             use_streaming = False
                     if not use_streaming:
-                        response = await self._completions_create(
+                        response, _fb_used, client = await self._llm_call_with_fallback(
                             client,
                             model=self.settings.model,
                             messages=messages,
                             tools=tools if tools else NOT_GIVEN,
                             temperature=self.settings.temperature,
+                            force_non_streaming=True,
                         )
+                        if _fb_used and self._fallback_is_gigachat():
+                            is_gigachat = True
                     continue
 
                 if use_streaming:
-                    # Стриминговый вызов LLM
+                    # Стриминговый вызов LLM. При сбое primary до первого
+                    # чанка может сработать fallback: если он gigachat —
+                    # перейдём на non-streaming, иначе — повторим streaming
+                    # через fallback-клиента. Уже эмитированные блоки
+                    # делают fallback невозможным; если стрим начался и
+                    # сорвался — оригинальный exception пробрасывается.
                     try:
                         response_stream = await self._completions_create(
                             client,
@@ -1263,13 +1427,65 @@ class Orchestrator:
                             stream=True,
                         )
                     except Exception as exc:
-                        logger.warning(
-                            "Стриминг не удался, фолбек на обычный вызов: "
-                            "%s: %s",
-                            type(exc).__name__,
-                            exc,
-                        )
-                        use_streaming = False
+                        is_provider = self._is_provider_failure(exc)
+                        if is_provider:
+                            breaker = self._get_circuit_breaker()
+                            await breaker.record_failure(exc)
+                        # Pre-stream fallback (только если ни одного блока
+                        # ещё не yield-нули клиенту).
+                        if (
+                            is_provider
+                            and not emitted_blocks
+                            and block_index == 0
+                            and self._has_fallback()
+                        ):
+                            fb_client = self._get_fallback_client()
+                            if fb_client is not None:
+                                logger.warning(
+                                    "Streaming primary упал (%s); "
+                                    "fallback на profile=%s",
+                                    type(exc).__name__,
+                                    self.settings.fallback_profile,
+                                )
+                                client = fb_client
+                                if self._fallback_is_gigachat():
+                                    use_streaming = False
+                                    is_gigachat = True
+                                    # Переход на non-streaming-ветку ниже.
+                                else:
+                                    try:
+                                        response_stream = (
+                                            await self._completions_create(
+                                                client,
+                                                model=(
+                                                    self.settings.fallback_model
+                                                    or self.settings.model
+                                                ),
+                                                messages=messages,
+                                                tools=(
+                                                    tools if tools else NOT_GIVEN
+                                                ),
+                                                temperature=(
+                                                    self.settings.temperature
+                                                ),
+                                                stream=True,
+                                            )
+                                        )
+                                    except Exception as exc2:
+                                        logger.warning(
+                                            "Streaming fallback тоже упал "
+                                            "(%s); переход на non-streaming",
+                                            type(exc2).__name__,
+                                        )
+                                        use_streaming = False
+                        else:
+                            logger.warning(
+                                "Стриминг не удался, фолбек на обычный вызов: "
+                                "%s: %s",
+                                type(exc).__name__,
+                                exc,
+                            )
+                            use_streaming = False
 
                 if use_streaming:
                     # Собираем стриминговый ответ
@@ -1603,13 +1819,16 @@ class Orchestrator:
                     break
 
                 # Non-streaming вызов (фолбек или tool-call раунды)
-                response = await self._completions_create(
+                response, _fb_used, client = await self._llm_call_with_fallback(
                     client,
                     model=self.settings.model,
                     messages=messages,
                     tools=tools if tools else NOT_GIVEN,
                     temperature=self.settings.temperature,
+                    force_non_streaming=True,
                 )
+                if _fb_used and self._fallback_is_gigachat():
+                    is_gigachat = True
 
                 if response.choices[0].message.tool_calls:
                     raw_msg = response.choices[0].message
