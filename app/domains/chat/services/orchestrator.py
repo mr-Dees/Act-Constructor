@@ -33,6 +33,8 @@ from app.domains.chat.services.llm_client import (
 from app.domains.chat.services.message_service import MessageService
 from app.domains.chat.services.retry import retry_on_transient
 from app.domains.chat.services.streaming import (
+    BlockDeltaLimiter,
+    emit_text_block_with_limit,
     sse_agent_request_started,
     sse_block_complete,
     sse_block_delta,
@@ -701,24 +703,18 @@ class Orchestrator:
                         )
                         # Каждый reasoning-чанк — отдельный сворачиваемый
                         # блок (start + delta + end), со своим block_index.
-                        yield (
-                            "sse",
-                            sse_block_start(
-                                block_index=block_index,
-                                block_type="reasoning",
+                        for sse in emit_text_block_with_limit(
+                            block_index=block_index,
+                            block_type="reasoning",
+                            text=chunk_text,
+                            chunk_flush_bytes=(
+                                self.settings.delta_chunk_flush_bytes
                             ),
-                        )
-                        yield (
-                            "sse",
-                            sse_block_delta(
-                                block_index=block_index,
-                                delta=chunk_text,
+                            block_max_bytes=(
+                                self.settings.delta_block_max_bytes
                             ),
-                        )
-                        yield (
-                            "sse",
-                            sse_block_end(block_index=block_index),
-                        )
+                        ):
+                            yield ("sse", sse)
                         block_index += 1
                     elif et == "error":
                         payload = ev["payload"] or {}
@@ -1492,6 +1488,7 @@ class Orchestrator:
                     accumulated_content = ""
                     acc = ToolCallAccumulator()
                     block_started = False
+                    limiter: BlockDeltaLimiter | None = None
                     finish_reason = None
                     first_chunk_at: float | None = None
                     stream_started_at = time.monotonic()
@@ -1525,14 +1522,30 @@ class Orchestrator:
                                         block_type="text",
                                     )
                                     block_started = True
-                                yield sse_block_delta(
-                                    block_index=block_index,
-                                    delta=text,
-                                )
+                                    limiter = BlockDeltaLimiter(
+                                        block_index=block_index,
+                                        chunk_flush_bytes=(
+                                            self.settings.delta_chunk_flush_bytes
+                                        ),
+                                        block_max_bytes=(
+                                            self.settings.delta_block_max_bytes
+                                        ),
+                                        block_type="text",
+                                    )
+                                # Сохраняем полный текст для истории — лимит
+                                # касается только сетевого SSE-стрима.
                                 accumulated_content += text
+                                if limiter is not None and not limiter.closed:
+                                    for sse in limiter.push(text):
+                                        yield sse
 
                     if block_started:
-                        yield sse_block_end(block_index=block_index)
+                        if limiter is not None and not limiter.closed:
+                            for sse in limiter.flush_remaining():
+                                yield sse
+                            yield sse_block_end(block_index=block_index)
+                        # Если limiter сам закрыл блок (truncate) — block_end
+                        # уже отправлен внутри push().
                         block_index += 1
 
                     # Обработка tool calls из стриминга
@@ -1770,15 +1783,18 @@ class Orchestrator:
                                         emitted_blocks.append(raw_block)
                                         continue
                                     if btype in ("text", "code"):
-                                        yield sse_block_start(
+                                        for sse in emit_text_block_with_limit(
                                             block_index=block_index,
                                             block_type=btype,
-                                        )
-                                        delta = raw_block.get("content", "")
-                                        yield sse_block_delta(
-                                            block_index=block_index, delta=delta,
-                                        )
-                                        yield sse_block_end(block_index=block_index)
+                                            text=raw_block.get("content", ""),
+                                            chunk_flush_bytes=(
+                                                self.settings.delta_chunk_flush_bytes
+                                            ),
+                                            block_max_bytes=(
+                                                self.settings.delta_block_max_bytes
+                                            ),
+                                        ):
+                                            yield sse
                                         emitted_blocks.append(raw_block)
                                     else:
                                         yield sse_block_complete(
@@ -2042,15 +2058,18 @@ class Orchestrator:
                                     emitted_blocks.append(raw_block)
                                     continue
                                 if btype in ("text", "code"):
-                                    yield sse_block_start(
+                                    for sse in emit_text_block_with_limit(
                                         block_index=block_index,
                                         block_type=btype,
-                                    )
-                                    delta = raw_block.get("content", "")
-                                    yield sse_block_delta(
-                                        block_index=block_index, delta=delta,
-                                    )
-                                    yield sse_block_end(block_index=block_index)
+                                        text=raw_block.get("content", ""),
+                                        chunk_flush_bytes=(
+                                            self.settings.delta_chunk_flush_bytes
+                                        ),
+                                        block_max_bytes=(
+                                            self.settings.delta_block_max_bytes
+                                        ),
+                                    ):
+                                        yield sse
                                     emitted_blocks.append(raw_block)
                                 else:
                                     yield sse_block_complete(
@@ -2087,9 +2106,14 @@ class Orchestrator:
 
                 # Финальный текстовый ответ (non-streaming)
                 answer = (response.choices[0].message.content or "").lstrip("\n")
-                yield sse_block_start(block_index=block_index, block_type="text")
-                yield sse_block_delta(block_index=block_index, delta=answer)
-                yield sse_block_end(block_index=block_index)
+                for sse in emit_text_block_with_limit(
+                    block_index=block_index,
+                    block_type="text",
+                    text=answer,
+                    chunk_flush_bytes=self.settings.delta_chunk_flush_bytes,
+                    block_max_bytes=self.settings.delta_block_max_bytes,
+                ):
+                    yield sse
                 full_answer = answer
 
                 if response.usage:
