@@ -146,9 +146,12 @@ class AgentBridgeService:
             # Гейт 1: абсолютный максимум на запрос (всегда активен)
             if elapsed > max_total_duration_sec:
                 logger.warning(
-                    "agent_bridge: гейт max_total сработал за %.1fс: "
-                    "request_id=%s",
-                    elapsed, request_id,
+                    "LLM timeout",
+                    extra={
+                        "stage": "agent_bridge_total",
+                        "elapsed_sec": elapsed,
+                        "request_id": request_id,
+                    },
                 )
                 await self._requests.update_status(
                     request_id,
@@ -165,9 +168,12 @@ class AgentBridgeService:
             # Гейт 2: первый ответ от агента (активен пока не пришло ни одного события)
             if last_event_at is None and elapsed > initial_response_timeout_sec:
                 logger.warning(
-                    "agent_bridge: гейт initial_response сработал за %.1fс: "
-                    "request_id=%s",
-                    elapsed, request_id,
+                    "LLM timeout",
+                    extra={
+                        "stage": "agent_bridge_initial",
+                        "elapsed_sec": elapsed,
+                        "request_id": request_id,
+                    },
                 )
                 await self._requests.update_status(
                     request_id,
@@ -187,9 +193,12 @@ class AgentBridgeService:
                 and now - last_event_at > event_timeout_sec
             ):
                 logger.warning(
-                    "agent_bridge: гейт heartbeat сработал за %.1fс простоя: "
-                    "request_id=%s",
-                    now - last_event_at, request_id,
+                    "LLM timeout",
+                    extra={
+                        "stage": "agent_bridge_heartbeat",
+                        "elapsed_sec": now - last_event_at,
+                        "request_id": request_id,
+                    },
                 )
                 await self._requests.update_status(
                     request_id,

@@ -157,9 +157,42 @@ const ChatRenderer = {
             case 'error':
                 return this._renderError(block);
             default:
-                console.warn('ChatRenderer: неизвестный тип блока', block.type);
-                return null;
+                console.warn('ChatRenderer: неизвестный тип блока', block.type, block);
+                return this._renderUnknown(block);
         }
+    },
+
+    /**
+     * Fallback-рендер для блоков неизвестного типа.
+     *
+     * История из БД могла прийти со старого бэка, у которого появились новые
+     * типы блоков, ещё не поддержанные фронтом. Вместо `return null`
+     * (блок молча пропадает) показываем плашку «обновите страницу» и
+     * полный payload в `<pre>` для отладки.
+     *
+     * @param {Object} block — блок с неизвестным `type`
+     * @returns {HTMLElement}
+     * @private
+     */
+    _renderUnknown(block) {
+        const wrapper = document.createElement('div');
+        wrapper.className = 'chat-block chat-block-unknown';
+
+        const notice = document.createElement('div');
+        notice.className = 'chat-block-unknown-notice';
+        notice.textContent = `⚠ Блок неизвестного типа: ${block && block.type}. Обновите страницу.`;
+        wrapper.appendChild(notice);
+
+        const pre = document.createElement('pre');
+        pre.className = 'chat-block-unknown-payload';
+        try {
+            pre.textContent = JSON.stringify(block, null, 2);
+        } catch {
+            pre.textContent = String(block);
+        }
+        wrapper.appendChild(pre);
+
+        return wrapper;
     },
 
     /**

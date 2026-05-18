@@ -185,3 +185,68 @@ CREATE TABLE IF NOT EXISTS {SCHEMA}.{PREFIX}agent_responses (
 )
 WITH (appendonly=false)
 DISTRIBUTED BY (request_id);
+
+-- ============================================================================
+-- МЕТРИКИ ВЫПОЛНЕНИЯ CHATTOOL'ОВ
+-- ============================================================================
+
+-- Sequence для id метрик; BIGSERIAL недоступен в GP-схеме PK + DISTRIBUTED.
+-- Адаптер ловит DuplicateObjectError при повторном CREATE.
+CREATE SEQUENCE {SCHEMA}.{PREFIX}chat_tool_metrics_id_seq;
+
+-- Append-only журнал latency/status/ошибок tool-вызовов. conversation_id
+-- хранится как VARCHAR(36) БЕЗ FK — метрики переживают удаление беседы.
+CREATE TABLE IF NOT EXISTS {SCHEMA}.{PREFIX}chat_tool_metrics (
+    id              BIGINT NOT NULL
+                    DEFAULT nextval('{SCHEMA}.{PREFIX}chat_tool_metrics_id_seq'),
+    tool_name       VARCHAR(128) NOT NULL,
+    status          VARCHAR(32) NOT NULL
+                    CONSTRAINT check_chat_tool_metrics_status_values
+                    CHECK (status IN ('success','error','validation_error')),
+    latency_ms      INTEGER NOT NULL
+                    CONSTRAINT check_chat_tool_metrics_latency_nonneg
+                    CHECK (latency_ms >= 0),
+    username        VARCHAR(64),
+    conversation_id VARCHAR(36),
+    error_message   TEXT,
+    created_at      TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    PRIMARY KEY (id)
+)
+WITH (appendonly=false)
+DISTRIBUTED BY (id);
+
+CREATE INDEX idx_{PREFIX}chat_tool_metrics_tool_created
+    ON {SCHEMA}.{PREFIX}chat_tool_metrics(tool_name, created_at);
+CREATE INDEX idx_{PREFIX}chat_tool_metrics_status_created
+    ON {SCHEMA}.{PREFIX}chat_tool_metrics(status, created_at);
+
+-- ============================================================================
+-- AUDIT-ЛОГ ЖИЗНЕННОГО ЦИКЛА БЕСЕДЫ
+-- ============================================================================
+
+-- Sequence для id audit-записей.
+CREATE SEQUENCE {SCHEMA}.{PREFIX}chat_audit_log_id_seq;
+
+-- Append-only журнал действий пользователей. Пишется глушащим сервисом:
+-- сбой записи не должен ломать основную операцию (см. AuditService).
+-- conversation_id хранится как VARCHAR(36) БЕЗ FK — записи о DELETE
+-- беседы остаются после её удаления (forensic-trail).
+CREATE TABLE IF NOT EXISTS {SCHEMA}.{PREFIX}chat_audit_log (
+    id              BIGINT NOT NULL
+                    DEFAULT nextval('{SCHEMA}.{PREFIX}chat_audit_log_id_seq'),
+    username        VARCHAR(64) NOT NULL,
+    action          VARCHAR(64) NOT NULL,
+    conversation_id VARCHAR(36),
+    details_json    JSONB,
+    created_at      TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    PRIMARY KEY (id)
+)
+WITH (appendonly=false)
+DISTRIBUTED BY (id);
+
+CREATE INDEX idx_{PREFIX}chat_audit_log_username_created
+    ON {SCHEMA}.{PREFIX}chat_audit_log(username, created_at);
+CREATE INDEX idx_{PREFIX}chat_audit_log_action_created
+    ON {SCHEMA}.{PREFIX}chat_audit_log(action, created_at);
+CREATE INDEX idx_{PREFIX}chat_audit_log_conversation_created
+    ON {SCHEMA}.{PREFIX}chat_audit_log(conversation_id, created_at);

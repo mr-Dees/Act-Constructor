@@ -6,6 +6,7 @@ import uuid
 from app.domains.chat.exceptions import ChatLimitError
 from app.domains.chat.repositories.conversation_repository import ConversationRepository
 from app.domains.chat.repositories.message_repository import MessageRepository
+from app.domains.chat.services.chat_audit_service import ChatAuditService
 from app.domains.chat.services.conversation_service import _get_user_lock
 from app.domains.chat.settings import ChatDomainSettings
 
@@ -21,10 +22,13 @@ class MessageService:
         msg_repo: MessageRepository,
         conv_repo: ConversationRepository,
         settings: ChatDomainSettings,
+        audit_service: ChatAuditService | None = None,
     ):
         self.msg_repo = msg_repo
         self.conv_repo = conv_repo
         self.settings = settings
+        # audit_service опционален; см. ConversationService.__init__.
+        self.audit_service = audit_service
 
     async def save_user_message(
         self,
@@ -74,6 +78,14 @@ class MessageService:
                     content=blocks,
                 )
                 await self.conv_repo.touch(conversation_id)
+            if self.audit_service is not None:
+                await self.audit_service.log_message_sent(
+                    username=user_id,
+                    conversation_id=conversation_id,
+                    message_id=message_id,
+                    content_length=len(content),
+                    files_count=len(file_blocks or []),
+                )
             return message
 
     async def save_assistant_message(

@@ -28,3 +28,16 @@ TOOL_OPEN_CK_CLIENT_EXP_PAGE: Final[str] = "ck_client_exp.open_ck_client_exp_pag
 ACTION_OPEN_URL: Final[str] = "open_url"
 ACTION_NOTIFY: Final[str] = "notify"
 ACTION_TRIGGER_SDK: Final[str] = "trigger_sdk"
+
+
+# ── Имена событий audit-лога жизненного цикла чата ───────────────────────────
+# Используются как значение колонки `action` в таблице chat_audit_log.
+
+AUDIT_CONVERSATION_CREATED: Final[str] = "conversation_created"
+AUDIT_CONVERSATION_DELETED: Final[str] = "conversation_deleted"
+AUDIT_MESSAGE_SENT: Final[str] = "message_sent"
+AUDIT_FILE_UPLOADED: Final[str] = "file_uploaded"
+AUDIT_FILE_DELETED: Final[str] = "file_deleted"
+AUDIT_STREAM_STARTED: Final[str] = "stream_started"
+AUDIT_STREAM_COMPLETED: Final[str] = "stream_completed"
+AUDIT_STREAM_ABORTED: Final[str] = "stream_aborted"
