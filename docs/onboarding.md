@@ -1,6 +1,6 @@
 # Onboarding нового разработчика
 
-Гид по входу в проект Act Constructor. Рассчитан на ~2-4 недели до состояния «работаю самостоятельно». При первых вопросах сначала ищи в `docs/developer-guide.md` (он — основной справочник), потом в `CLAUDE.md` (per-developer контекст, не коммитится), и только потом спрашивай команду.
+Гид по входу в проект Act Constructor. Рассчитан на ~2-4 недели до состояния «работаю самостоятельно». При первых вопросах сначала ищи в `docs/developer-guide.md` (он — основной справочник), потом в `docs/troubleshooting.md` для частых проблем, и только потом спрашивай команду.
 
 ---
 
@@ -26,15 +26,21 @@
    DATABASE__NAME=audit_workstation
    DATABASE__USER=postgres
    DATABASE__PASSWORD=<твой_пароль>
-   JUPYTERHUB_USER=22494524_local-dev    # любые цифры + суффикс
+   JUPYTERHUB_USER=22494524_local-dev    # формат «цифры_суффикс»
    ```
    Дефолт `.env.example` — `DATABASE__TYPE=greenplum`, для локалки это не подойдёт (требует Kerberos и сетевой доступ к GP).
 
+   Про `JUPYTERHUB_USER`: формат значения — «цифры_суффикс» (например `22494524_local-dev`). Из этой строки `extract_username_digits()` извлекает **только цифры** — они идут как `PGUSER` при подключении к Greenplum под Kerberos. Суффикс — для удобства разработчика (видно, чей это user), он не влияет на аутентификацию.
+
+   **Минимум для чата (dev):** если `CHAT__API_KEY` не задан, чат падает на init. Либо закомментируй все `CHAT__*` в `.env` (тогда чат-эндпоинты будут отдавать ошибку, но остальное приложение работает), либо укажи любой ключ OpenRouter / GigaChat / SGLang под нужный профиль (`CHAT__PROFILE=openrouter` для dev — самый простой вариант).
+
 3. **PostgreSQL локально** — `docker-compose.yml` в репозитории нет, поднимай нативно (любой стандартный PostgreSQL 13+) или через свой docker-контейнер. Создай пустую базу `audit_workstation`; схемы и таблицы приложение создаст само при старте (`create_tables_if_not_exist`).
 
-4. **Запуск сервера** (см. `developer-guide.md §9.1`):
+4. **Запуск сервера** (см. `developer-guide.md §9.1`). Два равнозначных способа:
    ```bash
    uvicorn app.main:app --reload --port 8005
+   # или
+   python -m app.main
    ```
    В логе должна появиться строка `Database pool ready: ...` — без неё API будет отдавать `RuntimeError: Database pool не инициализирован`.
 
@@ -56,7 +62,7 @@
 
 2. **Доменная плагин-система** — открой `app/domains/acts/__init__.py` и `app/domains/chat/__init__.py`, посмотри как экспортируется `domain: DomainDescriptor`. Каждый домен сам регистрирует свои роуты, схемы БД, навигацию, настройки. Реестр — `app/core/domain_registry.py`.
 
-3. **Доменная терминология** (см. `CLAUDE.md` → Project Overview):
+3. **Доменная терминология** (см. `docs/developer-guide.md` §1.1 «Доменная терминология»):
    - КМ-номера: `КМ-XX-XXXXX` (русские буквы, 2+5 цифр) — номера аудиторских мероприятий.
    - Служебные записки: `Text/YYYY` — для отправленных на рассмотрение актов.
    - Уникальность акта: пара `(km_number_digit, part_number)`.
@@ -85,7 +91,12 @@
 - **Добавить новый chat tool** (handler + регистрация в реестре) — см. `§7.6`. Имена tools держатся в `app/core/chat/names.py`, при необходимости синхронизировать с фронтендом.
 - **Починить мелкий баг с тестом-репродукцией** — TDD: сначала тест, который красный, потом фикс.
 
-Перед каждой задачей проверь раздел Key Patterns в `CLAUDE.md` — там собраны неочевидные правила (например, что нельзя отдавать assistant с `content=null` в LLM, или что фронт обязан гонять `/api/v1/...` через `AppConfig.api.getUrl`).
+Перед каждой задачей сверься с ключевыми неочевидными правилами проекта (полный список — в `docs/developer-guide.md` «Key Patterns»):
+
+- **LLM-эхо tool_call'ов.** Assistant с `content=null` или `arguments=""` в `tool_calls` валит Qwen/SGLang (400 «zero-length, empty document») и GigaChat-proxy (422 `RequestInputValidationException`). Не делать `messages.append(response.choices[0].message)` напрямую — собирать dict вручную с `content=raw_msg.content or ""`, прогоняя `arguments` через `_safe_args(raw)` (`app/domains/chat/services/orchestrator.py`).
+- **Frontend fetch под JupyterHub-proxy.** Все `fetch('/api/v1/...')` ОБЯЗАНЫ идти через `AppConfig.api.getUrl('/api/v1/...')`. Прямой относительный URL роутится JupyterHub'ом на `/hub/...` минуя `/user/{user}/proxy/{port}/` → 404. То же для client_action `open_url` (через `resolveProxyUrl`).
+- **Глобальные синглтоны на фронте.** `window.X = new ...` (или `window.X = X` после `const`/`class`). `const X = new ...` создаёт переменную в Script-scope и `window.X.method()` падает в undefined.
+- **Greenplum 6.x = PostgreSQL 9.4.** В GP-схемах запрещены `CREATE INDEX IF NOT EXISTS`, `ADD COLUMN IF NOT EXISTS`, `CREATE SEQUENCE IF NOT EXISTS`, `ON CONFLICT`, `gen_random_uuid()`, `jsonb_set()`. Адаптер GP идёт statement-by-statement и ловит `Duplicate*Error` — дубликаты безопасны.
 
 ---
 
@@ -97,5 +108,4 @@
 - [ ] Знаю про `migration_substitutions` (`{SCHEMA}.{PREFIX}<table>`) и зачем они в `schema.sql`.
 - [ ] Знаю, какие env-vars обязательны (см. `.env.example`: `DATABASE__*`, `JUPYTERHUB_USER`, опционально `CHAT__*`).
 - [ ] Могу написать тест с `mock_conn` + `dependency_overrides` для FastAPI-эндпоинта.
-- [ ] Знаю про `CLAUDE.md` (per-developer, в `.gitignore`) и его роль как живого свода неочевидных правил.
 - [ ] Знаю, где искать решения частых проблем (`docs/troubleshooting.md`).
