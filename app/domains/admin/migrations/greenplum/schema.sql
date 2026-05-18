@@ -132,3 +132,46 @@ COMMENT ON COLUMN {SCHEMA}.{PREFIX}app_singleton_lock.service_name IS 'Имя с
 COMMENT ON COLUMN {SCHEMA}.{PREFIX}app_singleton_lock.pid IS 'PID процесса-владельца блокировки';
 COMMENT ON COLUMN {SCHEMA}.{PREFIX}app_singleton_lock.started_at IS 'Время захвата блокировки (UTC)';
 COMMENT ON COLUMN {SCHEMA}.{PREFIX}app_singleton_lock.host IS 'Имя хоста процесса-владельца';
+
+-- ============================================================================
+-- HTTP-МЕТРИКИ ЗАПРОСОВ
+-- ============================================================================
+
+-- Sequence для id метрик; BIGSERIAL недоступен в GP-схеме PK + DISTRIBUTED.
+-- Адаптер ловит DuplicateObjectError при повторном CREATE.
+CREATE SEQUENCE {SCHEMA}.{PREFIX}admin_http_metrics_id_seq;
+
+-- Append-only журнал HTTP-запросов: method/path/status/latency/username/request_id.
+-- Используется для наблюдаемости (медленные эндпоинты, спайки 5xx, активность
+-- пользователей). Запись делается опциональным middleware'ом и проглатывает
+-- исключения, чтобы сбой метрики не ломал основной запрос.
+CREATE TABLE IF NOT EXISTS {SCHEMA}.{PREFIX}admin_http_metrics (
+    id          BIGINT NOT NULL
+                DEFAULT nextval('{SCHEMA}.{PREFIX}admin_http_metrics_id_seq'),
+    method      VARCHAR(8) NOT NULL,
+    path        VARCHAR(512) NOT NULL,
+    status_code SMALLINT NOT NULL,
+    latency_ms  INTEGER NOT NULL,
+    username    VARCHAR(64),
+    request_id  VARCHAR(64),
+    created_at  TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    PRIMARY KEY (id)
+)
+WITH (appendonly=false)
+DISTRIBUTED BY (id);
+
+COMMENT ON TABLE {SCHEMA}.{PREFIX}admin_http_metrics IS 'HTTP-метрики запросов: latency / status / пользователь';
+COMMENT ON COLUMN {SCHEMA}.{PREFIX}admin_http_metrics.method IS 'HTTP-метод (GET, POST, ...)';
+COMMENT ON COLUMN {SCHEMA}.{PREFIX}admin_http_metrics.path IS 'Путь запроса без query string';
+COMMENT ON COLUMN {SCHEMA}.{PREFIX}admin_http_metrics.status_code IS 'HTTP-статус ответа';
+COMMENT ON COLUMN {SCHEMA}.{PREFIX}admin_http_metrics.latency_ms IS 'Длительность обработки запроса (мс)';
+COMMENT ON COLUMN {SCHEMA}.{PREFIX}admin_http_metrics.username IS 'Username (может быть NULL для unauthenticated)';
+COMMENT ON COLUMN {SCHEMA}.{PREFIX}admin_http_metrics.request_id IS 'Идентификатор запроса из RequestIdMiddleware';
+COMMENT ON COLUMN {SCHEMA}.{PREFIX}admin_http_metrics.created_at IS 'Время записи метрики';
+
+CREATE INDEX idx_{PREFIX}admin_http_metrics_path_created
+    ON {SCHEMA}.{PREFIX}admin_http_metrics(path, created_at);
+CREATE INDEX idx_{PREFIX}admin_http_metrics_status_created
+    ON {SCHEMA}.{PREFIX}admin_http_metrics(status_code, created_at);
+CREATE INDEX idx_{PREFIX}admin_http_metrics_username_created
+    ON {SCHEMA}.{PREFIX}admin_http_metrics(username, created_at);

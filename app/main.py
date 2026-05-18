@@ -24,6 +24,7 @@ from app.core.middleware import (
     RequestIdMiddleware,
     RequestSizeLimitMiddleware
 )
+from app.core.middlewares.http_metrics import HttpMetricsMiddleware
 import asyncpg
 from asyncpg import CheckViolationError, UniqueViolationError
 
@@ -264,7 +265,24 @@ def create_app() -> FastAPI:
         settings=settings
     )
 
-    # 4. Request ID — самый последний, запускается первым: охватывает всю цепочку middleware
+    # 4. HTTP-метрики — внутри RequestIdMiddleware, чтобы видеть выставленный request_id.
+    # Если admin.http_metrics_enabled=False, сервис передаётся None и middleware
+    # лишь меряет latency без записи в БД.
+    _http_metrics_service = None
+    try:
+        from app.core.settings_registry import get as _get_domain_settings
+        from app.domains.admin.deps import get_http_metrics_service
+        from app.domains.admin.settings import AdminSettings
+        _admin_settings = _get_domain_settings("admin", AdminSettings)
+        if _admin_settings.http_metrics_enabled:
+            _http_metrics_service = get_http_metrics_service()
+    except Exception:
+        logger.exception(
+            "Не удалось инициализировать HttpMetricsService — метрики отключены",
+        )
+    app.add_middleware(HttpMetricsMiddleware, service=_http_metrics_service)
+
+    # 5. Request ID — самый последний, запускается первым: охватывает всю цепочку middleware
     app.add_middleware(RequestIdMiddleware)
 
     # Подключение статических файлов (доступны по URL /static/*)
