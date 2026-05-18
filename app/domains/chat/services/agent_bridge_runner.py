@@ -69,8 +69,13 @@ async def _run(
 
     Сами события и финальный response в БД уже пишет внешний агент
     (через мост-таблицы); раннер только финализирует сообщение и статус.
+
+    После загрузки строки agent_requests читает ``parent_request_id`` и
+    проставляет в :data:`app.core.config.request_id_var`, чтобы все логи
+    внутри runner'а несли тот же correlation_id, что и исходный HTTP-запрос.
     """
     # Импорты внутри функции — чтобы тесты могли патчить get_db().
+    from app.core.config import request_id_var
     from app.db.connection import get_db
     from app.domains.chat.repositories.agent_request_repository import (
         AgentRequestRepository,
@@ -87,6 +92,7 @@ async def _run(
     )
     from app.domains.chat.services.message_service import MessageService
 
+    ctx_token = None
     try:
         async with get_db() as conn:
             req_repo = AgentRequestRepository(conn)
@@ -97,6 +103,18 @@ async def _run(
                     request_id,
                 )
                 return
+
+            # Связываем логи runner'а с HTTP-запросом, который создал
+            # agent_request. Если parent отсутствует (reconcile или
+            # background-вызов) — оставляем дефолтный "-".
+            parent = request.get("parent_request_id")
+            if parent:
+                ctx_token = request_id_var.set(parent)
+                logger.info(
+                    "agent_bridge_runner: подхватили correlation_id=%s "
+                    "для request_id=%s",
+                    parent, request_id,
+                )
 
             # Если запрос уже финализирован — не делаем повторного polling.
             if request.get("status") in ("done", "error", "timeout"):
@@ -310,6 +328,14 @@ async def _run(
             logger.exception(
                 "agent_bridge_runner: не удалось пометить статус error",
             )
+    finally:
+        # Откатываем correlation_id, чтобы ContextVar не «протёк» в чужие
+        # короутины. ContextVar в asyncio.Task изолирован per-task, но reset
+        # обязателен на случай, если runner запущен в общем контексте
+        # (например, тесты вызывают _run напрямую без create_task).
+        if ctx_token is not None:
+            from app.core.config import request_id_var as _rid
+            _rid.reset(ctx_token)
 
 
 async def shutdown_running(timeout_sec: float = 5.0) -> int:

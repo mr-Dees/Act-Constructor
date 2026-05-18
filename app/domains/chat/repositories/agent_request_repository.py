@@ -42,14 +42,22 @@ class AgentRequestRepository(BaseRepository):
         knowledge_bases: list[str] | None = None,
         history: list[dict] | None = None,
         files: list[dict] | None = None,
+        parent_request_id: str | None = None,
     ) -> None:
-        """Создаёт запись запроса со статусом 'pending'."""
+        """Создаёт запись запроса со статусом 'pending'.
+
+        ``parent_request_id`` — id HTTP-запроса (X-Request-ID), в рамках
+        которого создан agent_request. Используется для сквозной трассировки
+        HTTP → строка agent_requests → логи фонового runner'а. None допустим
+        (вызов вне HTTP-контекста).
+        """
         await self.conn.execute(
             f"""
             INSERT INTO {self.table}
                 (id, conversation_id, message_id, user_id, domain_name,
-                 knowledge_bases, last_user_message, history, files)
-            VALUES ($1, $2, $3, $4, $5, $6::jsonb, $7, $8::jsonb, $9::jsonb)
+                 knowledge_bases, last_user_message, history, files,
+                 parent_request_id)
+            VALUES ($1, $2, $3, $4, $5, $6::jsonb, $7, $8::jsonb, $9::jsonb, $10)
             """,
             id,
             conversation_id,
@@ -60,10 +68,11 @@ class AgentRequestRepository(BaseRepository):
             last_user_message,
             json.dumps(history or [], ensure_ascii=False),
             json.dumps(files or [], ensure_ascii=False),
+            parent_request_id,
         )
         logger.debug(
-            "agent_requests: создан id=%s conv=%s status=pending",
-            id, conversation_id,
+            "agent_requests: создан id=%s conv=%s status=pending parent=%s",
+            id, conversation_id, parent_request_id,
         )
 
     async def get(self, request_id: str) -> dict | None:

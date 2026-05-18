@@ -43,14 +43,16 @@ async def test_create_inserts_row_with_jsonb_fields(mock_conn):
     assert "INSERT INTO" in sql
     assert "agent_requests" in sql
     # id, conversation_id, message_id, user_id, domain_name, knowledge_bases,
-    # last_user_message, history, files — 9 параметров
-    assert len(params) == 9
+    # last_user_message, history, files, parent_request_id — 10 параметров
+    assert len(params) == 10
     assert params[0] == rid
     assert params[1] == "conv-1"
     # knowledge_bases / history / files передаются как JSON-строки
     assert json.loads(params[5]) == ["acts_default"]
     assert json.loads(params[7]) == [{"role": "user", "content": "Hello"}]
     assert json.loads(params[8]) == []
+    # parent_request_id не передан — должен быть None.
+    assert params[9] is None
 
 
 async def test_get_returns_parsed_jsonb_or_none(mock_conn):
