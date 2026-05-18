@@ -403,9 +403,9 @@ app/domains/acts/api/
 | `MarkdownFormatter` | `markdown_formatter.py` | Экспорт акта в Markdown |
 | `TextFormatter` | `text_formatter.py` | Экспорт акта в plain text |
 
-Базовый класс форматтеров — `app/formatters/base_formatter.py` (общий интерфейс и обход дерева).
+Базовый класс форматтеров — `app/domains/acts/formatters/base_formatter.py` (общий интерфейс и обход дерева).
 
-Общие утилиты в `app/formatters/utils/`:
+Общие утилиты в `app/domains/acts/formatters/utils/`:
 
 | Утилита | Файл | Назначение |
 |---------|------|-----------|

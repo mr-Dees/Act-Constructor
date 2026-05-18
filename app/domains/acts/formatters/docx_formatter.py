@@ -24,8 +24,8 @@ from docx.shared import Inches, Pt
 from app.core.config import Settings
 from app.domains.acts.settings import ActsSettings
 from app.domains.acts.exceptions import ActValidationError
-from app.formatters.base_formatter import BaseFormatter
-from app.formatters.utils import HTMLUtils
+from .base_formatter import BaseFormatter
+from .utils import HTMLUtils
 
 logger = logging.getLogger("audit_workstation.formatter.docx")
 
