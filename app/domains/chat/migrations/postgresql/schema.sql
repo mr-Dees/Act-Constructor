@@ -81,7 +81,9 @@ CREATE TABLE IF NOT EXISTS {SCHEMA}.{PREFIX}agent_requests (
 );
 
 -- Идемпотентная миграция колонки для уже существующих БД, где CREATE TABLE
--- IF NOT EXISTS выше не сработал. Работает в PG 9.4+ (нет ADD COLUMN IF NOT EXISTS).
+-- IF NOT EXISTS выше не сработал. DO-блок работает в PG 9.4+ — синтаксис
+-- ADD-COLUMN-IF-NOT-EXISTS появился только в 9.6, так что использовать
+-- его нельзя.
 DO $$
 BEGIN
     IF NOT EXISTS (

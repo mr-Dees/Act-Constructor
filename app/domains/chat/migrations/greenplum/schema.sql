@@ -116,7 +116,8 @@ WITH (appendonly=false)
 DISTRIBUTED BY (conversation_id);
 
 -- Идемпотентная миграция колонки для существующих GP-таблиц.
--- GP 6.x = PG 9.4, нет ADD COLUMN IF NOT EXISTS, поэтому DO-блок.
+-- В GP 6.x (PG 9.4) синтаксис ADD-COLUMN-IF-NOT-EXISTS недоступен,
+-- поэтому используем DO-блок с pg_attribute lookup.
 DO $$
 BEGIN
     IF NOT EXISTS (
