@@ -381,6 +381,36 @@
     font-size: var(--font-size-sm);
 }
 
+/* Fallback-блок для типов, ещё не поддержанных этой версией фронта */
+.chat-block-unknown {
+    padding: var(--spacing-sm);
+    border: var(--border-width-thin) solid var(--warning);
+    border-left: var(--border-width-thick) solid var(--warning);
+    border-radius: var(--radius-sm);
+    background: var(--warning-subtle);
+    color: var(--text-primary);
+    font-size: var(--font-size-sm);
+}
+
+.chat-block-unknown-notice {
+    font-style: italic;
+    color: var(--warning-hover);
+    margin-bottom: var(--spacing-xs);
+}
+
+.chat-block-unknown-payload {
+    margin: 0;
+    padding: var(--spacing-xs);
+    background: var(--bg-primary);
+    border: var(--border-width-thin) solid var(--border-light);
+    border-radius: var(--radius-sm);
+    font-family: var(--font-family-mono, monospace);
+    font-size: var(--font-size-xs);
+    white-space: pre-wrap;
+    word-break: break-word;
+    overflow-x: auto;
+}
+
 /* ============================================
    Просмотрщик файлов (модальное окно)
    ============================================ */

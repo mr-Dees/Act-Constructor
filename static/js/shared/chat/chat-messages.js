@@ -4,7 +4,33 @@
  * Отправка сообщений через SSE, обработка событий стриминга,
  * рендеринг user/bot сообщений в DOM.
  */
+
+/**
+ * Whitelist известных типов блоков сообщений.
+ * Если бэк добавит новый тип, а фронт ещё не обновлён, _handleSSEEvent
+ * и ChatRenderer.renderBlock падают на default-ветку с fallback-блоком
+ * («⚠ Блок неизвестного типа …»), а не ломают сообщение целиком.
+ *
+ * Синхронизировать с `MessageBlock` union из `app/core/chat/blocks.py`
+ * И с `_DiscriminatedBlock` из `app/core/chat/schemas.py`.
+ */
+const KNOWN_BLOCK_TYPES = new Set([
+    'text',
+    'code',
+    'reasoning',
+    'file',
+    'image',
+    'plan',
+    'error',
+    'buttons',
+    'client_action',
+]);
+
 const ChatMessages = {
+
+    /** @type {Set<string>} */
+    KNOWN_BLOCK_TYPES,
+
 
     /** @type {boolean} */
     _initialized: false,
@@ -165,7 +191,22 @@ const ChatMessages = {
                     // client_action приходит как отдельное событие — игнорируем block_start
                     break;
                 }
-                const sb = ChatRenderer.createStreamingBlock(event.data.type);
+                const startType = event.data.type;
+                if (!KNOWN_BLOCK_TYPES.has(startType)) {
+                    // Бэк прислал блок неизвестного типа — рендерим fallback
+                    // вместо обычного streaming-контейнера, чтобы старый фронт
+                    // не падал на новых типах блоков.
+                    console.warn(
+                        'ChatMessages: unknown block type',
+                        startType,
+                        event.data,
+                    );
+                    const sb = this._createUnknownStreamingBlock(startType);
+                    this._streamingBlocks[event.data.index] = sb;
+                    ChatRenderer.appendBlock(container, sb.element);
+                    break;
+                }
+                const sb = ChatRenderer.createStreamingBlock(startType);
                 this._streamingBlocks[event.data.index] = sb;
                 ChatRenderer.appendBlock(container, sb.element);
                 break;
@@ -189,8 +230,18 @@ const ChatMessages = {
                 // блок появился бы только после перезагрузки истории.
                 const block = event.data.block;
                 if (block) {
-                    const el = ChatRenderer.renderBlock(block);
-                    if (el) ChatRenderer.appendBlock(container, el);
+                    if (block.type && !KNOWN_BLOCK_TYPES.has(block.type)) {
+                        console.warn(
+                            'ChatMessages: unknown block type',
+                            block.type,
+                            block,
+                        );
+                        const el = this._renderUnknownBlock(block);
+                        ChatRenderer.appendBlock(container, el);
+                    } else {
+                        const el = ChatRenderer.renderBlock(block);
+                        if (el) ChatRenderer.appendBlock(container, el);
+                    }
                 }
                 break;
             }
@@ -246,6 +297,87 @@ const ChatMessages = {
         }
 
         ChatEventBus.emit('ui:scroll-bottom');
+    },
+
+    /**
+     * Создаёт fallback-блок для стриминга неизвестного типа.
+     *
+     * Совместим по интерфейсу с ChatRenderer.createStreamingBlock:
+     * возвращает { element, appendText, finalize }. Delta-чанки склеиваются
+     * как plain-text (формат payload неизвестен — пытаемся вытащить
+     * `text`/`content`, иначе JSON.stringify).
+     *
+     * @param {string} unknownType — пришедший с бэка тип
+     * @returns {{element: HTMLElement, appendText: function(*): void, finalize: function(): void}}
+     * @private
+     */
+    _createUnknownStreamingBlock(unknownType) {
+        const wrapper = document.createElement('div');
+        wrapper.className = 'chat-block chat-block-unknown';
+
+        const notice = document.createElement('div');
+        notice.className = 'chat-block-unknown-notice';
+        notice.textContent = `⚠ Блок неизвестного типа: ${unknownType}. Обновите страницу.`;
+        wrapper.appendChild(notice);
+
+        const pre = document.createElement('pre');
+        pre.className = 'chat-block-unknown-payload';
+        wrapper.appendChild(pre);
+
+        let accumulated = '';
+        return {
+            element: wrapper,
+            appendText(delta) {
+                let chunk;
+                if (delta == null) {
+                    chunk = '';
+                } else if (typeof delta === 'string') {
+                    chunk = delta;
+                } else if (typeof delta === 'object' && typeof delta.text === 'string') {
+                    chunk = delta.text;
+                } else {
+                    try {
+                        chunk = JSON.stringify(delta);
+                    } catch {
+                        chunk = String(delta);
+                    }
+                }
+                accumulated += chunk;
+                pre.textContent = accumulated;
+            },
+            finalize() {
+                pre.textContent = accumulated;
+            },
+        };
+    },
+
+    /**
+     * Рендерит fallback-блок для нестримуемого блока неизвестного типа.
+     * Полный payload показывается в <pre> для отладки.
+     *
+     * @param {Object} block — блок с неизвестным `type`
+     * @returns {HTMLElement}
+     * @private
+     */
+    _renderUnknownBlock(block) {
+        const wrapper = document.createElement('div');
+        wrapper.className = 'chat-block chat-block-unknown';
+
+        const notice = document.createElement('div');
+        notice.className = 'chat-block-unknown-notice';
+        notice.textContent = `⚠ Блок неизвестного типа: ${block && block.type}. Обновите страницу.`;
+        wrapper.appendChild(notice);
+
+        const pre = document.createElement('pre');
+        pre.className = 'chat-block-unknown-payload';
+        try {
+            pre.textContent = JSON.stringify(block, null, 2);
+        } catch {
+            pre.textContent = String(block);
+        }
+        wrapper.appendChild(pre);
+
+        return wrapper;
     },
 
     /**
