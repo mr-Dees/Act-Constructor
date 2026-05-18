@@ -351,6 +351,12 @@ def create_app() -> FastAPI:
         root_path=root_path
     )
 
+    # Обнаружение доменов выполняем до настройки middleware: discover_domains()
+    # регистрирует доменные настройки в settings_registry, без чего HttpMetricsMiddleware
+    # (использующий AdminSettings) не может инициализироваться. Результат кэшируется,
+    # повторный вызов в register_domains ниже отдаёт тот же список.
+    domains = discover_domains(_domains_dir)
+
     # Добавляем middleware в правильном порядке (первый = последний в цепочке)
     # 1. HTTPS redirect (самый первый - работает с исходным запросом)
     app.add_middleware(HTTPSRedirectMiddleware)
@@ -494,9 +500,8 @@ def create_app() -> FastAPI:
         prefix=settings.server.api_v1_prefix
     )
 
-    # discover_domains() вызывается здесь для регистрации роутеров при создании app.
-    # Повторный вызов в lifespan() (для БД и lifecycle) использует кэш _domains.
-    domains = discover_domains(_domains_dir)
+    # domains обнаружены выше до middleware-секции. Повторный вызов в lifespan()
+    # (для БД и lifecycle) использует кэш _domains.
     register_domains(app, domains, settings.server.api_v1_prefix)
 
     return app

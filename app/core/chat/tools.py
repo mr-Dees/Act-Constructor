@@ -49,6 +49,10 @@ class ChatTool:
     description: str
     parameters: list[ChatToolParam] = field(default_factory=list)
     handler: Callable[..., Awaitable[str]] | None = field(default=None)
+    # True — handler намеренно None, оркестратор строит его per-request
+    # (например, forward к внешнему агенту нуждается в conn/conversation_id).
+    # Подавляет startup-warning и сигнализирует «handler не утечка, а контракт».
+    per_request_handler: bool = False
     category: str = ""
     # Транслятор кнопки: принимает params серверной кнопки (action_id=имя tool'а),
     # возвращает {"action": <client-action-id>, "params": {...}} или None
@@ -105,7 +109,7 @@ def register_tools(tools: list[ChatTool]) -> None:
                 f"ChatTool '{tool.name}' уже зарегистрирован "
                 f"доменом '{_tools[tool.name].domain}'"
             )
-        if tool.handler is None:
+        if tool.handler is None and not tool.per_request_handler:
             logger.warning(
                 "ChatTool '%s' (домен '%s') зарегистрирован без handler — "
                 "вызов инструмента LLM вернёт ошибку",

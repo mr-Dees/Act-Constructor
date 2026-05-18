@@ -46,6 +46,7 @@ def get_chat_tools() -> list[ChatTool]:
                 ),
             ],
             handler=None,  # подставляется оркестратором per-request
+            per_request_handler=True,
             category="forward",
         ),
         ChatTool(
