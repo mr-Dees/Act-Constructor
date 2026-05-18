@@ -24,6 +24,7 @@ from app.core.middleware import (
     RequestIdMiddleware,
     RequestSizeLimitMiddleware
 )
+from app.core.middlewares.http_metrics import HttpMetricsMiddleware
 import asyncpg
 from asyncpg import CheckViolationError, UniqueViolationError
 
@@ -95,15 +96,23 @@ async def lifespan(app: FastAPI):
     # discover_domains() вызывается повторно (первый раз — в create_app для роутеров).
     # Результат кэшируется в _domains, здесь нужен для lifecycle и БД.
     domains = discover_domains(_domains_dir)
-    logger.info(f"Обнаружено доменов: {len(domains)}")
+    logger.info(
+        "Зарегистрировано доменов: %d (%s)",
+        len(domains),
+        ", ".join(d.name for d in domains),
+    )
 
     # Список успешно стартовавших доменов — используется и в startup-откате, и в shutdown
     started: list = []
 
+    # Батчеры метрик — инициализируются ниже, останавливаются в shutdown.
+    # Объявлены здесь, чтобы быть видимыми и в finally-shutdown ветке.
+    started_batchers: list = []
+
     # ИНИЦИАЛИЗАЦИЯ БД
     try:
         await init_db(settings)
-        logger.info("База данных инициализирована")
+        logger.debug("База данных инициализирована")
 
         # ПРОГРЕВ ПУЛА — устраняет TCP-handshake-задержку первых запросов
         if settings.database.pool_warmup_enabled:
@@ -111,7 +120,7 @@ async def lifespan(app: FastAPI):
 
         # СОЗДАНИЕ ТАБЛИЦ ЕСЛИ НЕ СУЩЕСТВУЮТ
         await create_tables_if_not_exist(domains)
-        logger.info("Схема базы данных проверена")
+        logger.debug("Схема базы данных проверена")
 
         # SINGLETON-БЛОКИРОВКА ИНСТАНСА ПРИЛОЖЕНИЯ
         # В закрытой сети без Redis multi-worker деплой повредил бы
@@ -130,6 +139,81 @@ async def lifespan(app: FastAPI):
         except SingletonLockBusyError as exc:
             logger.critical("Не удалось захватить singleton-lock: %s", exc)
             raise RuntimeError(str(exc)) from exc
+
+        # Инициализация батчеров метрик до старта доменов: лимит
+        # observability — общий, читаем из settings. Каждый поток метрик
+        # получает свой батчер; flush-callback берёт соединение из пула на
+        # время bulk-INSERT.
+        from app.core.metrics_batcher import MetricsBatcher
+        from app.db.connection import get_db
+        from app.domains.admin.deps import set_http_metrics_batcher
+        from app.domains.admin.repositories.http_metrics_repository import (
+            HttpMetricRecord,
+            HttpMetricsRepository,
+        )
+        from app.domains.chat.deps import (
+            set_audit_log_batcher,
+            set_tool_metrics_batcher,
+        )
+        from app.domains.chat.repositories.chat_audit_log_repository import (
+            ChatAuditLogRecord,
+            ChatAuditLogRepository,
+        )
+        from app.domains.chat.repositories.chat_tool_metrics_repository import (
+            ChatToolMetricRecord,
+            ChatToolMetricsRepository,
+        )
+
+        obs = settings.observability
+
+        async def _flush_http_metrics(records: list[HttpMetricRecord]) -> None:
+            async with get_db() as conn:
+                await HttpMetricsRepository(conn).record_many(records)
+
+        async def _flush_tool_metrics(records: list[ChatToolMetricRecord]) -> None:
+            async with get_db() as conn:
+                await ChatToolMetricsRepository(conn).record_many(records)
+
+        async def _flush_audit_log(records: list[ChatAuditLogRecord]) -> None:
+            async with get_db() as conn:
+                await ChatAuditLogRepository(conn).log_many(records)
+
+        http_metrics_batcher = MetricsBatcher(
+            flush_callback=_flush_http_metrics,
+            max_batch_size=obs.metrics_batch_size,
+            flush_interval_sec=obs.metrics_flush_interval_sec,
+            max_buffer_size=obs.metrics_max_buffer_size,
+            name="admin_http_metrics",
+        )
+        chat_tool_metrics_batcher = MetricsBatcher(
+            flush_callback=_flush_tool_metrics,
+            max_batch_size=obs.metrics_batch_size,
+            flush_interval_sec=obs.metrics_flush_interval_sec,
+            max_buffer_size=obs.metrics_max_buffer_size,
+            name="chat_tool_metrics",
+        )
+        chat_audit_log_batcher = MetricsBatcher(
+            flush_callback=_flush_audit_log,
+            max_batch_size=obs.metrics_batch_size,
+            flush_interval_sec=obs.metrics_flush_interval_sec,
+            max_buffer_size=obs.metrics_max_buffer_size,
+            name="chat_audit_log",
+        )
+
+        await http_metrics_batcher.start()
+        started_batchers.append(http_metrics_batcher)
+        await chat_tool_metrics_batcher.start()
+        started_batchers.append(chat_tool_metrics_batcher)
+        await chat_audit_log_batcher.start()
+        started_batchers.append(chat_audit_log_batcher)
+
+        set_http_metrics_batcher(http_metrics_batcher)
+        set_tool_metrics_batcher(chat_tool_metrics_batcher)
+        set_audit_log_batcher(chat_audit_log_batcher)
+
+        app.state.http_metrics_batcher = http_metrics_batcher
+        app.state.chat_tool_metrics_batcher = chat_tool_metrics_batcher
+        app.state.chat_audit_log_batcher = chat_audit_log_batcher
 
         # Запуск доменов с откатом при частичной ошибке:
         # если on_startup домена N падает, вызываем on_shutdown для 1..N-1
@@ -150,7 +234,7 @@ async def lifespan(app: FastAPI):
                         logger.exception(f"Ошибка при откате домена {d.name}")
             raise
 
-        logger.info("Приложение успешно инициализировано")
+        logger.info("Application startup complete")
 
         # Реconcile незавершённых polling-задач forward'а к внешнему агенту:
         # если предыдущий запуск uvicorn упал или был перезапущен посреди
@@ -213,6 +297,26 @@ async def lifespan(app: FastAPI):
             except Exception:
                 logger.exception(f"Ошибка при завершении домена {d.name}")
 
+    # Финальный flush батчеров метрик: дописываем накопленные записи в БД
+    # до закрытия пула. Сбрасываем module-level ссылки в deps, чтобы новые
+    # сервисы (если их случайно создадут после shutdown) ушли в legacy-fallback.
+    try:
+        from app.domains.admin.deps import set_http_metrics_batcher
+        from app.domains.chat.deps import (
+            set_audit_log_batcher,
+            set_tool_metrics_batcher,
+        )
+        set_http_metrics_batcher(None)
+        set_tool_metrics_batcher(None)
+        set_audit_log_batcher(None)
+    except Exception:
+        logger.exception("Не удалось сбросить ссылки на батчеры метрик")
+    for batcher in reversed(started_batchers):
+        try:
+            await batcher.stop()
+        except Exception:
+            logger.exception("Ошибка при остановке батчера метрик")
+
     # Освобождаем singleton-блокировку (best-effort, до закрытия пула).
     try:
         from app.core.singleton_lock import release_singleton_lock
@@ -264,7 +368,24 @@ def create_app() -> FastAPI:
         settings=settings
     )
 
-    # 4. Request ID — самый последний, запускается первым: охватывает всю цепочку middleware
+    # 4. HTTP-метрики — внутри RequestIdMiddleware, чтобы видеть выставленный request_id.
+    # Если admin.http_metrics_enabled=False, сервис передаётся None и middleware
+    # лишь меряет latency без записи в БД.
+    _http_metrics_service = None
+    try:
+        from app.core.settings_registry import get as _get_domain_settings
+        from app.domains.admin.deps import get_http_metrics_service
+        from app.domains.admin.settings import AdminSettings
+        _admin_settings = _get_domain_settings("admin", AdminSettings)
+        if _admin_settings.http_metrics_enabled:
+            _http_metrics_service = get_http_metrics_service()
+    except Exception:
+        logger.exception(
+            "Не удалось инициализировать HttpMetricsService — метрики отключены",
+        )
+    app.add_middleware(HttpMetricsMiddleware, service=_http_metrics_service)
+
+    # 5. Request ID — самый последний, запускается первым: охватывает всю цепочку middleware
     app.add_middleware(RequestIdMiddleware)
 
     # Подключение статических файлов (доступны по URL /static/*)

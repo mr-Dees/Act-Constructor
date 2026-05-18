@@ -33,6 +33,8 @@ from app.domains.chat.services.llm_client import (
 from app.domains.chat.services.message_service import MessageService
 from app.domains.chat.services.retry import retry_on_transient
 from app.domains.chat.services.streaming import (
+    BlockDeltaLimiter,
+    emit_text_block_with_limit,
     sse_agent_request_started,
     sse_block_complete,
     sse_block_delta,
@@ -125,6 +127,12 @@ class Orchestrator:
             max_attempts=self.settings.retry.max_attempts,
             backoff_base=self.settings.retry.backoff_base_sec,
         )
+        # Контекст для метрик: устанавливается в run/run_stream перед
+        # agent loop и читается в _execute_tool_call. Так избегаем менять
+        # сигнатуру _execute_tool_call и передачу параметров через все
+        # 5 callsite'ов внутри agent loop.
+        self._current_conversation_id: str | None = None
+        self._current_user_id: str | None = None
 
     async def _completions_create(self, client, **kwargs):
         """Обёрнутый retry'ем вызов chat.completions.create."""
@@ -701,24 +709,18 @@ class Orchestrator:
                         )
                         # Каждый reasoning-чанк — отдельный сворачиваемый
                         # блок (start + delta + end), со своим block_index.
-                        yield (
-                            "sse",
-                            sse_block_start(
-                                block_index=block_index,
-                                block_type="reasoning",
+                        for sse in emit_text_block_with_limit(
+                            block_index=block_index,
+                            block_type="reasoning",
+                            text=chunk_text,
+                            chunk_flush_bytes=(
+                                self.settings.delta_chunk_flush_bytes
                             ),
-                        )
-                        yield (
-                            "sse",
-                            sse_block_delta(
-                                block_index=block_index,
-                                delta=chunk_text,
+                            block_max_bytes=(
+                                self.settings.delta_block_max_bytes
                             ),
-                        )
-                        yield (
-                            "sse",
-                            sse_block_end(block_index=block_index),
-                        )
+                        ):
+                            yield ("sse", sse)
                         block_index += 1
                     elif et == "error":
                         payload = ev["payload"] or {}
@@ -848,6 +850,68 @@ class Orchestrator:
         from app.domains.chat.services.button_translator import translate_buttons
         return await translate_buttons(buttons)
 
+    async def _record_tool_metric(
+        self,
+        *,
+        tool_name: str,
+        status: str,
+        latency_ms: int,
+        error_message: str | None = None,
+    ) -> None:
+        """Пишет одну метрику выполнения tool'а через DI-фабрику.
+
+        Сбой записи метрик НЕ должен ломать tool-loop: исключения
+        проглатываются, ошибка логируется warning'ом.
+        """
+        try:
+            # Lazy-import: deps зависит от services, импорт на module-level
+            # создал бы цикл и завязал бы orchestrator на DI-инфраструктуру.
+            from app.domains.chat.deps import (
+                get_tool_metrics_batcher,
+                get_tool_metrics_repository,
+            )
+            from app.domains.chat.repositories.chat_tool_metrics_repository import (
+                ChatToolMetricRecord,
+            )
+
+            batcher = get_tool_metrics_batcher()
+            if batcher is not None:
+                await batcher.add(
+                    ChatToolMetricRecord(
+                        tool_name=tool_name,
+                        status=status,
+                        latency_ms=int(latency_ms),
+                        username=self._current_user_id,
+                        conversation_id=self._current_conversation_id,
+                        error_message=error_message,
+                    )
+                )
+                return
+            # Fallback: батчер не инициализирован (тесты, dev без lifespan).
+            agen = get_tool_metrics_repository()
+            repo = await agen.__anext__()
+            try:
+                await repo.record(
+                    tool_name=tool_name,
+                    status=status,
+                    latency_ms=latency_ms,
+                    username=self._current_user_id,
+                    conversation_id=self._current_conversation_id,
+                    error_message=error_message,
+                )
+            finally:
+                # Закрываем async-generator, освобождая соединение в пул.
+                try:
+                    await agen.aclose()
+                except Exception:
+                    pass
+        except Exception:
+            logger.warning(
+                "Не удалось записать tool-метрику",
+                extra={"tool_name": tool_name},
+                exc_info=True,
+            )
+
     async def _execute_tool_call(
         self, tool_name: str, arguments: dict,
     ) -> str:
@@ -864,10 +928,20 @@ class Orchestrator:
         # нейтральный tool_error SSE (без сырого текста для пользователя).
         for param in chat_tool.parameters:
             if param.required and param.name not in arguments:
-                raise ChatToolValidationError(
+                err_msg = (
                     f"Tool {tool_name}: отсутствует обязательный "
-                    f"параметр {param.name}",
+                    f"параметр {param.name}"
                 )
+                # Метрика валидации фиксируется до raise (latency=0 — handler
+                # ещё не запускался). Это нужно для observability таких
+                # случаев в отдельном статусе.
+                await self._record_tool_metric(
+                    tool_name=tool_name,
+                    status="validation_error",
+                    latency_ms=0,
+                    error_message=err_msg[:1000],
+                )
+                raise ChatToolValidationError(err_msg)
 
         # Конвертация типов параметров
         param_types = {p.name: p.type for p in chat_tool.parameters}
@@ -876,8 +950,11 @@ class Orchestrator:
             if key in param_types:
                 converted_args[key] = _convert_param(value, param_types[key])
 
+        timeout = self.settings.tool_execution_timeout
+        started = time.perf_counter()
+        status = "success"
+        error_message: str | None = None
         try:
-            timeout = self.settings.tool_execution_timeout
             result = await asyncio.wait_for(
                 chat_tool.handler(**converted_args),
                 timeout=timeout,
@@ -893,11 +970,15 @@ class Orchestrator:
             )
             return out
         except asyncio.TimeoutError:
+            status = "error"
+            error_message = f"timeout {timeout}s"
             logger.warning(
                 "Таймаут выполнения ChatTool %s (%dс)", tool_name, timeout,
             )
             return f"Ошибка: таймаут выполнения инструмента '{tool_name}'"
-        except Exception:
+        except Exception as exc:
+            status = "error"
+            error_message = str(exc)[:1000]
             # Никаких деталей exception в выходе LLM: stack trace, имена БД,
             # SQL-фрагменты и пр. могут содержать чувствительные данные.
             # Полный stack логируем под error_id; LLM получает нейтральный
@@ -911,6 +992,14 @@ class Orchestrator:
                 f"Инструмент завершился с ошибкой. error_id={error_id}. "
                 "Сообщите администратору."
             )
+        finally:
+            latency_ms = int((time.perf_counter() - started) * 1000)
+            await self._record_tool_metric(
+                tool_name=tool_name,
+                status=status,
+                latency_ms=latency_ms,
+                error_message=error_message,
+            )
 
     async def run(
         self,
@@ -919,12 +1008,17 @@ class Orchestrator:
         user_message: str,
         domains: list[str] | None = None,
         file_blocks: list[dict] | None = None,
+        user_id: str | None = None,
     ) -> dict[str, Any]:
         """
         Полный (не стриминговый) agent loop.
 
         Возвращает dict с полями: response, sources, model, token_usage.
         """
+        # Фиксируем контекст для метрик; читается из _execute_tool_call.
+        self._current_conversation_id = conversation_id
+        self._current_user_id = user_id
+
         # Fallback при отсутствии настроек API
         if not self.settings.api_base or not self.settings.api_key.get_secret_value():
             return self._fallback_response(user_message)
@@ -1164,7 +1258,12 @@ class Orchestrator:
 
         except asyncio.TimeoutError:
             logger.warning(
-                "Таймаут LLM/tool в run(): conversation=%s", conversation_id,
+                "LLM timeout",
+                extra={
+                    "stage": "run",
+                    "model": self.settings.model,
+                    "conversation_id": conversation_id,
+                },
             )
             error_message = "Временная ошибка AI-сервиса. Попробуйте позже."
             try:
@@ -1230,6 +1329,9 @@ class Orchestrator:
         замыкание-handler с контекстом текущего сообщения.
         """
         message_id = message_id or str(uuid.uuid4())
+        # Фиксируем контекст для метрик; читается из _execute_tool_call.
+        self._current_conversation_id = conversation_id
+        self._current_user_id = user_id
         run_started = time.monotonic()
         logger.info(
             "Старт оркестрации: conversation=%s, message=%s, домены=%s, "
@@ -1492,6 +1594,7 @@ class Orchestrator:
                     accumulated_content = ""
                     acc = ToolCallAccumulator()
                     block_started = False
+                    limiter: BlockDeltaLimiter | None = None
                     finish_reason = None
                     first_chunk_at: float | None = None
                     stream_started_at = time.monotonic()
@@ -1525,14 +1628,30 @@ class Orchestrator:
                                         block_type="text",
                                     )
                                     block_started = True
-                                yield sse_block_delta(
-                                    block_index=block_index,
-                                    delta=text,
-                                )
+                                    limiter = BlockDeltaLimiter(
+                                        block_index=block_index,
+                                        chunk_flush_bytes=(
+                                            self.settings.delta_chunk_flush_bytes
+                                        ),
+                                        block_max_bytes=(
+                                            self.settings.delta_block_max_bytes
+                                        ),
+                                        block_type="text",
+                                    )
+                                # Сохраняем полный текст для истории — лимит
+                                # касается только сетевого SSE-стрима.
                                 accumulated_content += text
+                                if limiter is not None and not limiter.closed:
+                                    for sse in limiter.push(text):
+                                        yield sse
 
                     if block_started:
-                        yield sse_block_end(block_index=block_index)
+                        if limiter is not None and not limiter.closed:
+                            for sse in limiter.flush_remaining():
+                                yield sse
+                            yield sse_block_end(block_index=block_index)
+                        # Если limiter сам закрыл блок (truncate) — block_end
+                        # уже отправлен внутри push().
                         block_index += 1
 
                     # Обработка tool calls из стриминга
@@ -1770,15 +1889,18 @@ class Orchestrator:
                                         emitted_blocks.append(raw_block)
                                         continue
                                     if btype in ("text", "code"):
-                                        yield sse_block_start(
+                                        for sse in emit_text_block_with_limit(
                                             block_index=block_index,
                                             block_type=btype,
-                                        )
-                                        delta = raw_block.get("content", "")
-                                        yield sse_block_delta(
-                                            block_index=block_index, delta=delta,
-                                        )
-                                        yield sse_block_end(block_index=block_index)
+                                            text=raw_block.get("content", ""),
+                                            chunk_flush_bytes=(
+                                                self.settings.delta_chunk_flush_bytes
+                                            ),
+                                            block_max_bytes=(
+                                                self.settings.delta_block_max_bytes
+                                            ),
+                                        ):
+                                            yield sse
                                         emitted_blocks.append(raw_block)
                                     else:
                                         yield sse_block_complete(
@@ -2042,15 +2164,18 @@ class Orchestrator:
                                     emitted_blocks.append(raw_block)
                                     continue
                                 if btype in ("text", "code"):
-                                    yield sse_block_start(
+                                    for sse in emit_text_block_with_limit(
                                         block_index=block_index,
                                         block_type=btype,
-                                    )
-                                    delta = raw_block.get("content", "")
-                                    yield sse_block_delta(
-                                        block_index=block_index, delta=delta,
-                                    )
-                                    yield sse_block_end(block_index=block_index)
+                                        text=raw_block.get("content", ""),
+                                        chunk_flush_bytes=(
+                                            self.settings.delta_chunk_flush_bytes
+                                        ),
+                                        block_max_bytes=(
+                                            self.settings.delta_block_max_bytes
+                                        ),
+                                    ):
+                                        yield sse
                                     emitted_blocks.append(raw_block)
                                 else:
                                     yield sse_block_complete(
@@ -2087,9 +2212,14 @@ class Orchestrator:
 
                 # Финальный текстовый ответ (non-streaming)
                 answer = (response.choices[0].message.content or "").lstrip("\n")
-                yield sse_block_start(block_index=block_index, block_type="text")
-                yield sse_block_delta(block_index=block_index, delta=answer)
-                yield sse_block_end(block_index=block_index)
+                for sse in emit_text_block_with_limit(
+                    block_index=block_index,
+                    block_type="text",
+                    text=answer,
+                    chunk_flush_bytes=self.settings.delta_chunk_flush_bytes,
+                    block_max_bytes=self.settings.delta_block_max_bytes,
+                ):
+                    yield sse
                 full_answer = answer
 
                 if response.usage:
@@ -2120,8 +2250,13 @@ class Orchestrator:
 
         except asyncio.TimeoutError:
             logger.warning(
-                "Таймаут LLM/tool в стриминговом agent loop: "
-                "conversation=%s", conversation_id,
+                "LLM timeout",
+                extra={
+                    "stage": "run_stream",
+                    "model": self.settings.model,
+                    "elapsed_sec": time.monotonic() - run_started,
+                    "conversation_id": conversation_id,
+                },
             )
             yield sse_error(error="Временная ошибка AI-сервиса. Попробуйте позже.")
         except Exception as exc:

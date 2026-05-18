@@ -105,4 +105,12 @@ CHECK_CONSTRAINT_MESSAGES: dict[str, str] = {
         "Недопустимый код завершения ответа агента. "
         "Допустимые значения: stop, length, content_filter, error"
     ),
+    # ── chat: chat_tool_metrics ──────────────────────────────────────────────
+    "check_chat_tool_metrics_status_values": (
+        "Недопустимый статус выполнения tool'а. "
+        "Допустимые значения: success, error, validation_error"
+    ),
+    "check_chat_tool_metrics_latency_nonneg": (
+        "Длительность выполнения tool'а не может быть отрицательной"
+    ),
 }

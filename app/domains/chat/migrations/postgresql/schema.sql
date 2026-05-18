@@ -139,3 +139,49 @@ CREATE TABLE IF NOT EXISTS {SCHEMA}.{PREFIX}agent_responses (
     model          VARCHAR(100),
     created_at     TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
+
+-- ── Метрики выполнения ChatTool'ов ────────────────────────────────────
+-- Append-only журнал latency / status / ошибок для каждого вызова tool'а
+-- из оркестратора. Используется для наблюдаемости (медленные tool'ы,
+-- частые validation_error от LLM, спайки error-rate).
+-- conversation_id хранится как VARCHAR(36) БЕЗ FK: метрики переживают
+-- удаление беседы, чтобы не было каскадного исчезновения исторических
+-- данных при cleanup'е чатов.
+CREATE TABLE IF NOT EXISTS {SCHEMA}.{PREFIX}chat_tool_metrics (
+    id              BIGSERIAL PRIMARY KEY,
+    tool_name       VARCHAR(128) NOT NULL,
+    status          VARCHAR(32) NOT NULL
+                    CONSTRAINT check_chat_tool_metrics_status_values
+                    CHECK (status IN ('success','error','validation_error')),
+    latency_ms      INTEGER NOT NULL
+                    CONSTRAINT check_chat_tool_metrics_latency_nonneg
+                    CHECK (latency_ms >= 0),
+    username        VARCHAR(64),
+    conversation_id VARCHAR(36),
+    error_message   TEXT,
+    created_at      TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+CREATE INDEX IF NOT EXISTS idx_{PREFIX}chat_tool_metrics_tool_created
+    ON {SCHEMA}.{PREFIX}chat_tool_metrics(tool_name, created_at);
+CREATE INDEX IF NOT EXISTS idx_{PREFIX}chat_tool_metrics_status_created
+    ON {SCHEMA}.{PREFIX}chat_tool_metrics(status, created_at);
+
+-- ── Audit-лог жизненного цикла беседы/файлов/стримов ──────────────────
+-- Append-only журнал действий пользователя. Пишется глушащим сервисом:
+-- сбой записи не должен ломать основную операцию (см. AuditService).
+-- conversation_id хранится как VARCHAR(36) БЕЗ FK: записи о DELETE
+-- беседы остаются после её удаления (forensic-trail).
+CREATE TABLE IF NOT EXISTS {SCHEMA}.{PREFIX}chat_audit_log (
+    id              BIGSERIAL PRIMARY KEY,
+    username        VARCHAR(64) NOT NULL,
+    action          VARCHAR(64) NOT NULL,
+    conversation_id VARCHAR(36),
+    details_json    JSONB,
+    created_at      TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+CREATE INDEX IF NOT EXISTS idx_{PREFIX}chat_audit_log_username_created
+    ON {SCHEMA}.{PREFIX}chat_audit_log(username, created_at);
+CREATE INDEX IF NOT EXISTS idx_{PREFIX}chat_audit_log_action_created
+    ON {SCHEMA}.{PREFIX}chat_audit_log(action, created_at);
+CREATE INDEX IF NOT EXISTS idx_{PREFIX}chat_audit_log_conversation_created
+    ON {SCHEMA}.{PREFIX}chat_audit_log(conversation_id, created_at);

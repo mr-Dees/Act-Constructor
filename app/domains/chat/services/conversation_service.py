@@ -10,6 +10,7 @@ from app.domains.chat.exceptions import (
     ConversationNotFoundError,
 )
 from app.domains.chat.repositories.conversation_repository import ConversationRepository
+from app.domains.chat.services.chat_audit_service import ChatAuditService
 from app.domains.chat.settings import ChatDomainSettings
 
 logger = logging.getLogger("audit_workstation.domains.chat.service.conversation")
@@ -44,9 +45,13 @@ class ConversationService:
         *,
         conv_repo: ConversationRepository,
         settings: ChatDomainSettings,
+        audit_service: ChatAuditService | None = None,
     ):
         self.conv_repo = conv_repo
         self.settings = settings
+        # audit_service опционален — упрощает существующие unit-тесты и
+        # позволяет создавать ConversationService без подключённого audit'а.
+        self.audit_service = audit_service
 
     async def create(
         self,
@@ -82,13 +87,21 @@ class ConversationService:
                 )
 
             conversation_id = str(uuid.uuid4())
-            return await self.conv_repo.create(
+            created = await self.conv_repo.create(
                 id=conversation_id,
                 user_id=user_id,
                 title=title,
                 domain_name=domain_name,
                 context=context,
             )
+            if self.audit_service is not None:
+                await self.audit_service.log_conversation_created(
+                    username=user_id,
+                    conversation_id=conversation_id,
+                    title=title,
+                    domain_name=domain_name,
+                )
+            return created
 
     async def get_list(
         self,
@@ -138,4 +151,10 @@ class ConversationService:
                 "Невозможно удалить беседу: идёт генерация ответа ассистента. "
                 "Дождитесь окончания стрима и повторите."
             )
-        return await self.conv_repo.delete(conversation_id, user_id)
+        deleted = await self.conv_repo.delete(conversation_id, user_id)
+        if deleted and self.audit_service is not None:
+            await self.audit_service.log_conversation_deleted(
+                username=user_id,
+                conversation_id=conversation_id,
+            )
+        return deleted

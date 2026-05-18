@@ -10,6 +10,7 @@ from app.domains.chat.exceptions import (
 )
 from app.domains.chat.repositories.conversation_repository import ConversationRepository
 from app.domains.chat.repositories.file_repository import FileRepository
+from app.domains.chat.services.chat_audit_service import ChatAuditService
 from app.domains.chat.settings import ChatDomainSettings
 
 logger = logging.getLogger("audit_workstation.domains.chat.service.file")
@@ -24,10 +25,13 @@ class FileService:
         file_repo: FileRepository,
         conv_repo: ConversationRepository,
         settings: ChatDomainSettings,
+        audit_service: ChatAuditService | None = None,
     ):
         self.file_repo = file_repo
         self.conv_repo = conv_repo
         self.settings = settings
+        # audit_service опционален; см. ConversationService.__init__.
+        self.audit_service = audit_service
 
     def validate_file(
         self,
@@ -96,7 +100,7 @@ class FileService:
         self.validate_file(filename=filename, mime_type=mime_type, file_size=file_size)
 
         file_id = str(uuid.uuid4())
-        return await self.file_repo.create(
+        saved = await self.file_repo.create(
             id=file_id,
             conversation_id=conversation_id,
             filename=filename,
@@ -104,6 +108,16 @@ class FileService:
             file_size=file_size,
             file_data=file_data,
         )
+        if self.audit_service is not None:
+            await self.audit_service.log_file_uploaded(
+                username=user_id,
+                conversation_id=conversation_id,
+                file_id=file_id,
+                filename=filename,
+                file_size=file_size,
+                mime_type=mime_type,
+            )
+        return saved
 
     async def get_file(self, *, file_id: str, user_id: str) -> dict:
         """

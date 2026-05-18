@@ -5,93 +5,17 @@
 Использует переменные окружения из .env файла.
 """
 
-import contextvars
-import logging
-import sys
 import warnings
 from functools import lru_cache
-from logging.handlers import RotatingFileHandler
 from pathlib import Path
 from typing import ClassVar, Literal
 
 from pydantic import BaseModel, Field, SecretStr, field_validator, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
-# ContextVar для хранения request_id в асинхронном контексте запроса.
-# Значение по умолчанию «-» используется вне контекста HTTP-запроса (startup, shutdown и т.д.)
-request_id_var: contextvars.ContextVar[str] = contextvars.ContextVar("request_id", default="-")
-
-
-class RequestIdFilter(logging.Filter):
-    """Инжектирует request_id текущего запроса в каждую запись лога."""
-
-    def filter(self, record: logging.LogRecord) -> bool:
-        record.request_id = request_id_var.get()
-        return True
-
-def setup_logging(log_level: str = "INFO") -> logging.Logger:
-    """
-    Настраивает систему логирования для приложения.
-
-    Args:
-        log_level: Уровень логирования (DEBUG, INFO, WARNING, ERROR,
-            CRITICAL)
-
-    Returns:
-        Настроенный logger
-    """
-    logger = logging.getLogger("audit_workstation")
-
-    # Проверяем что логирование еще не настроено.
-    # Защита от повторной настройки в workers.
-    if logger.handlers:
-        return logger
-
-    logger.setLevel(getattr(logging, log_level.upper()))
-
-    # Создаем форматер для логов
-    formatter = logging.Formatter(
-        '%(levelname)s:     [%(asctime)s] [%(request_id)s] %(name)s - %(message)s',
-        datefmt='%Y-%m-%d %H:%M:%S'
-    )
-
-    # Настраиваем консольный handler
-    console_handler = logging.StreamHandler(sys.stdout)
-    console_handler.setFormatter(formatter)
-    console_handler.setLevel(getattr(logging, log_level.upper()))
-
-    # Настраиваем файловый handler с автоматической ротацией
-    log_dir = Path(__file__).resolve().parent.parent.parent / "logs"
-    log_dir.mkdir(exist_ok=True)
-
-    # RotatingFileHandler: автоматическая ротация при достижении
-    # maxBytes.
-    # Хранит до backupCount старых файлов (app.log.1, app.log.2, ...).
-    file_handler = RotatingFileHandler(
-        log_dir / "app.log",
-        maxBytes=10 * 1024 * 1024,  # 10MB на файл
-        backupCount=5,  # Храним 5 старых файлов
-        encoding='utf-8'
-    )
-    file_handler.setFormatter(formatter)
-    file_handler.setLevel(getattr(logging, log_level.upper()))
-
-    # Инжектируем request_id в каждую запись через handlers, а не через logger.
-    # Причина: при propagation от дочерних логгеров Python вызывает callHandlers()
-    # на родительском логгере, минуя его собственные filters. Фильтр на handler
-    # гарантированно срабатывает непосредственно перед emit().
-    request_id_filter = RequestIdFilter()
-    console_handler.addFilter(request_id_filter)
-    file_handler.addFilter(request_id_filter)
-
-    # Добавляем handlers
-    logger.addHandler(console_handler)
-    logger.addHandler(file_handler)
-
-    # False: не пропускать сообщения в root logger (избегаем дублей с uvicorn)
-    logger.propagate = False
-
-    return logger
+# Реэкспорт для обратной совместимости: исторически request_id_var,
+# RequestIdFilter и setup_logging жили в этом модуле.
+from app.core.logging import RequestIdFilter, request_id_var, setup_logging  # noqa: F401
 
 
 # === Вложенные модели настроек ===
@@ -161,6 +85,35 @@ class SecuritySettings(BaseModel):
     rate_limit_ttl: int = 120
 
 
+class ObservabilitySettings(BaseModel):
+    """Параметры батчинга записи метрик в БД.
+
+    Применяется для трёх потоков метрик: HTTP-запросы (admin), tool-метрики
+    чата и audit-лог чата. Параметры общие — каждый поток создаёт свой
+    ``MetricsBatcher`` с этими настройками.
+    """
+    metrics_batch_size: int = Field(
+        default=100,
+        ge=1,
+        le=10000,
+        description="Размер пакета метрик для bulk-INSERT",
+    )
+    metrics_flush_interval_sec: float = Field(
+        default=5.0,
+        ge=0.5,
+        le=300.0,
+        description="Интервал flush метрик в секундах",
+    )
+    metrics_max_buffer_size: int = Field(
+        default=10000,
+        ge=100,
+        description=(
+            "Защитный потолок буфера; при переполнении старые записи "
+            "дропаются с warning-логом"
+        ),
+    )
+
+
 class Settings(BaseSettings):
     """
     Класс настроек приложения на основе Pydantic.
@@ -186,6 +139,7 @@ class Settings(BaseSettings):
     server: ServerSettings = ServerSettings()
     database: DatabaseSettings = DatabaseSettings()
     security: SecuritySettings = SecuritySettings()
+    observability: ObservabilitySettings = ObservabilitySettings()
     # Базовая директория проекта.
     # Относительный путь от конфига до корня проекта.
     base_dir: ClassVar[Path] = Path(__file__).resolve().parent.parent.parent

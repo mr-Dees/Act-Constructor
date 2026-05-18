@@ -189,11 +189,30 @@ async def send_message(
         logger.info("SSE-стрим открыт: conversation=%s", conversation_id)
         stream_started_at = time.monotonic()
 
+        # Audit-сервис подцепили через conv_service в deps; используем
+        # его же для записи событий жизненного цикла SSE-стрима. Изоляция
+        # try/except — defense in depth: audit-сервис уже глушит свои
+        # исключения внутри, но в тестах audit_service может быть подменён
+        # MagicMock'ом без AsyncMock для конкретных методов.
+        audit_service = getattr(conv_service, "audit_service", None)
+        if audit_service is not None:
+            try:
+                await audit_service.log_stream_started(
+                    username=username,
+                    conversation_id=conversation_id,
+                )
+            except Exception:
+                logger.warning(
+                    "Не удалось записать audit log_stream_started",
+                    exc_info=True,
+                )
+
         async def _instrumented_stream():
             from app.domains.chat.services.streaming import (
                 sse_error,
                 sse_message_end,
             )
+            stream_outcome = "completed"
             try:
                 async for chunk in orchestrator.run_stream(
                     conversation_id=conversation_id,
@@ -210,6 +229,7 @@ async def send_message(
                 # уже мёртв, yield бросит исключение, его глушим. Дальше
                 # пробрасываем исходное исключение, чтобы корректно
                 # завершить генератор и освободить ресурсы.
+                stream_outcome = "client_disconnected"
                 logger.info(
                     "SSE-стрим отменён клиентом: conversation=%s",
                     conversation_id,
@@ -224,6 +244,7 @@ async def send_message(
                     pass
                 raise
             except Exception:
+                stream_outcome = "stream_error"
                 logger.exception(
                     "Ошибка в SSE-стриме: conversation=%s", conversation_id,
                 )
@@ -247,11 +268,31 @@ async def send_message(
                     _active_streams_per_user.pop(username, None)
                 else:
                     _active_streams_per_user[username] = current - 1
+                duration = time.monotonic() - stream_started_at
                 logger.info(
                     "SSE-стрим закрыт: conversation=%s, длительность=%.2fс",
-                    conversation_id,
-                    time.monotonic() - stream_started_at,
+                    conversation_id, duration,
                 )
+                if audit_service is not None:
+                    try:
+                        if stream_outcome == "completed":
+                            await audit_service.log_stream_completed(
+                                username=username,
+                                conversation_id=conversation_id,
+                                duration_sec=duration,
+                            )
+                        else:
+                            await audit_service.log_stream_aborted(
+                                username=username,
+                                conversation_id=conversation_id,
+                                reason=stream_outcome,
+                                duration_sec=duration,
+                            )
+                    except Exception:
+                        logger.warning(
+                            "Не удалось записать audit финала SSE-стрима",
+                            exc_info=True,
+                        )
 
         return StreamingResponse(
             _instrumented_stream(),

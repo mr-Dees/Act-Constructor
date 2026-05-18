@@ -23,3 +23,7 @@ class UserDirectorySettings(BaseModel):
 class AdminSettings(BaseModel):
     """Корневая модель настроек домена администрирования."""
     user_directory: UserDirectorySettings = UserDirectorySettings()
+    http_metrics_enabled: bool = Field(
+        default=False,
+        description="Включить запись HTTP-метрик в БД",
+    )
