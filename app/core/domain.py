@@ -47,13 +47,17 @@ class DomainDescriptor:
     Описание домена для авто-регистрации.
 
     Каждый домен экспортирует объект `domain` этого типа из своего __init__.py.
+
+    Формат `dependencies`: `{"<имя_домена>": "<зачем>"}` — ключ задаёт порядок
+    регистрации (топосортировка), значение — короткое описание причины зависимости
+    для самодокументируемости связности доменов.
     """
     name: str
     api_routers: list[tuple[APIRouter, str, list[str]]] = field(default_factory=list)
     html_routers: list[APIRouter] = field(default_factory=list)
     settings_class: type[BaseModel] | None = None
     exception_handlers: dict[type[Exception], Callable] | None = None
-    dependencies: list[str] = field(default_factory=list)
+    dependencies: dict[str, str] = field(default_factory=dict)
     on_startup: Callable[[FastAPI], Awaitable[None]] | None = None
     on_shutdown: Callable[[FastAPI], Awaitable[None]] | None = None
     package_path: Path | None = None

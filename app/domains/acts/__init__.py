@@ -52,7 +52,10 @@ def _build_domain():
         api_routers=get_api_routers(),
         html_routers=get_html_routers(),
         settings_class=ActsSettings,
-        dependencies=["admin", "ua_data"],
+        dependencies={
+            "admin": "роли/доступ к домену, справочник пользователей (IUserDirectory) для атрибуции авторов актов",
+            "ua_data": "имена таблиц фактур (UaInvoiceTableNames) и справочники подразделений/контрагентов",
+        },
         on_startup=on_startup,
         on_shutdown=on_shutdown,
         chat_tools=get_chat_tools(),

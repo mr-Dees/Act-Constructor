@@ -16,7 +16,10 @@ def _build_domain():
         api_routers=get_api_routers(),
         html_routers=get_html_routers(),
         settings_class=CkFinResSettings,
-        dependencies=["admin", "ua_data"],
+        dependencies={
+            "admin": "роли и доступ к домену для проверки прав на верификацию метрик",
+            "ua_data": "справочник подразделений (IDictionaryRepository) для связки записей с act_sub_number_id",
+        },
         chat_tools=get_chat_tools(),
         nav_items=[
             NavItem(

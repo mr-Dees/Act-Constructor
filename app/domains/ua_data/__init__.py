@@ -11,7 +11,9 @@ def _build_domain():
     return DomainDescriptor(
         name=DOMAIN_NAME,
         settings_class=UaDataSettings,
-        dependencies=["admin"],
+        dependencies={
+            "admin": "проверки доступа require_domain_access опираются на таблицу roles, создаваемую админ-доменом",
+        },
         chat_system_prompt=(
             "У тебя есть доступ к справочным данным UA: список подразделений "
             "и контрагентов."

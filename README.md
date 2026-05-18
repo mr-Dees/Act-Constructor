@@ -55,9 +55,11 @@ DATABASE__GP__PORT=5432
 DATABASE__GP__DATABASE=capgp3
 DATABASE__GP__SCHEMA=your_schema
 DATABASE__TABLE_PREFIX=t_db_oarb_audit_act_
+JUPYTERHUB_USER=22494524_local-dev
 ```
 
 > При использовании Greenplum необходимо предварительно выполнить `kinit` для Kerberos-аутентификации.
+> `JUPYTERHUB_USER` — имя пользователя в формате «цифры_суффикс»; из значения извлекаются только цифры — они идут как PostgreSQL user под Greenplum.
 
 ### 3. Запуск
 
@@ -77,7 +79,14 @@ uvicorn app.main:app --host 0.0.0.0 --port 8005
 
 Схема базы данных создается автоматически при первом запуске.
 
-> Подробнее об архитектуре, доменах, плагинной системе и интеграциях — см. [docs/developer-guide.md](docs/developer-guide.md).
+## Документация
+
+- [docs/developer-guide.md](docs/developer-guide.md) — основной справочник: архитектура, домены, плагинная система, БД, миграции, тестирование, deploy, env-vars.
+- [docs/onboarding.md](docs/onboarding.md) — гид для нового разработчика: день 1 / неделя 1 / неделя 2-4 + чек-лист «работаю самостоятельно».
+- [docs/troubleshooting.md](docs/troubleshooting.md) — типовые проблемы и решения (Kerberos, GP, JupyterHub-proxy, LLM, тесты, чат).
+- [docs/chat-frontend-architecture.md](docs/chat-frontend-architecture.md) — deep-dive по фронт-архитектуре чата: 11 модулей, шина событий, SSE-протокол, режимы inline/modal/popup, client actions.
+- [docs/manual-qa-external-agent-bridge.md](docs/manual-qa-external-agent-bridge.md) — ручная QA-проверка интеграции с внешним ИИ-агентом.
+- [docs/manual-qa-frontend-unknown-block.md](docs/manual-qa-frontend-unknown-block.md) — ручная QA-проверка fallback для неизвестных типов блоков чата.
 
 ## Конфигурация
 
@@ -185,8 +194,8 @@ templates/
 
 Интерактивная документация доступна после запуска:
 
-- **Swagger UI**: `http://localhost:8000/docs`
-- **ReDoc**: `http://localhost:8000/redoc`
+- **Swagger UI**: `http://localhost:8005/docs`
+- **ReDoc**: `http://localhost:8005/redoc`
 
 ### Основные группы API
 
