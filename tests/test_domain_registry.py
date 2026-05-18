@@ -14,7 +14,8 @@ def clean_registry():
 
 
 def _desc(name, deps=None):
-    return DomainDescriptor(name=name, dependencies=deps or [])
+    deps_dict = {d: "test" for d in (deps or [])}
+    return DomainDescriptor(name=name, dependencies=deps_dict)
 
 
 # ── _toposort ──

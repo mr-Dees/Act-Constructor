@@ -72,7 +72,7 @@ def _build_domain():
         api_routers=get_api_routers(),
         html_routers=[],
         settings_class=ChatDomainSettings,
-        dependencies=[],
+        dependencies={},
         chat_tools=get_chat_tools(),
         on_shutdown=_on_chat_shutdown,
         health_check=_health_check,
