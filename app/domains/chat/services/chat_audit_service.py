@@ -19,7 +19,9 @@ from app.core.chat.names import (
     AUDIT_STREAM_COMPLETED,
     AUDIT_STREAM_STARTED,
 )
+from app.core.metrics_batcher import MetricsBatcher
 from app.domains.chat.repositories.chat_audit_log_repository import (
+    ChatAuditLogRecord,
     ChatAuditLogRepository,
 )
 
@@ -32,10 +34,19 @@ class ChatAuditService:
     Все методы безопасны: если запись в БД упала (сетевая ошибка, схема не
     создана, и т.п.), исключение проглатывается с warning-логом — сбой
     audit-лога не должен валить основную операцию пользователя.
+
+    Если передан ``batcher`` — записи накапливаются в нём для bulk-INSERT.
+    Иначе fallback на синхронный путь через ``repo.log()``.
     """
 
-    def __init__(self, *, repo: ChatAuditLogRepository):
+    def __init__(
+        self,
+        *,
+        repo: ChatAuditLogRepository,
+        batcher: MetricsBatcher[ChatAuditLogRecord] | None = None,
+    ):
         self.repo = repo
+        self._batcher = batcher
 
     async def _safe_log(
         self,
@@ -47,6 +58,16 @@ class ChatAuditService:
     ) -> None:
         """Внутренний хелпер: пишет в БД, глуша любое исключение."""
         try:
+            if self._batcher is not None:
+                await self._batcher.add(
+                    ChatAuditLogRecord(
+                        username=username,
+                        action=action,
+                        conversation_id=conversation_id,
+                        details=details,
+                    )
+                )
+                return
             await self.repo.log(
                 username=username,
                 action=action,

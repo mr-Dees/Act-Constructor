@@ -194,3 +194,36 @@ async def test_details_with_unicode_passed_through(service, repo):
     )
     kwargs = repo.log.call_args.kwargs
     assert kwargs["details"]["title"] == "Тестовая беседа"
+
+
+async def test_service_with_batcher_does_not_call_repo(repo):
+    """Если в конструктор передан batcher — пишем в него, repo.log() НЕ зовётся."""
+    batcher = AsyncMock()
+    batcher.add = AsyncMock()
+    svc = ChatAuditService(repo=repo, batcher=batcher)
+    await svc.log_conversation_created(
+        username="user1",
+        conversation_id="conv-1",
+        title="T",
+    )
+    batcher.add.assert_awaited_once()
+    record = batcher.add.call_args.args[0]
+    assert record.username == "user1"
+    assert record.action == AUDIT_CONVERSATION_CREATED
+    assert record.conversation_id == "conv-1"
+    assert record.details == {"title": "T"}
+    repo.log.assert_not_called()
+
+
+async def test_service_with_batcher_swallows_batcher_exception(repo, caplog):
+    """Если batcher.add() падает — наружу не пробрасывается, есть warning."""
+    batcher = AsyncMock()
+    batcher.add = AsyncMock(side_effect=RuntimeError("batcher broken"))
+    svc = ChatAuditService(repo=repo, batcher=batcher)
+    # Не должно подняться исключение
+    await svc.log_conversation_deleted(username="u", conversation_id="c")
+    assert any(
+        "audit-log" in record.getMessage().lower()
+        for record in caplog.records
+    )
+    repo.log.assert_not_called()

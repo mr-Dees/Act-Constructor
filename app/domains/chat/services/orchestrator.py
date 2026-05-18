@@ -866,7 +866,28 @@ class Orchestrator:
         try:
             # Lazy-import: deps зависит от services, импорт на module-level
             # создал бы цикл и завязал бы orchestrator на DI-инфраструктуру.
-            from app.domains.chat.deps import get_tool_metrics_repository
+            from app.domains.chat.deps import (
+                get_tool_metrics_batcher,
+                get_tool_metrics_repository,
+            )
+            from app.domains.chat.repositories.chat_tool_metrics_repository import (
+                ChatToolMetricRecord,
+            )
+
+            batcher = get_tool_metrics_batcher()
+            if batcher is not None:
+                await batcher.add(
+                    ChatToolMetricRecord(
+                        tool_name=tool_name,
+                        status=status,
+                        latency_ms=int(latency_ms),
+                        username=self._current_user_id,
+                        conversation_id=self._current_conversation_id,
+                        error_message=error_message,
+                    )
+                )
+                return
+            # Fallback: батчер не инициализирован (тесты, dev без lifespan).
             agen = get_tool_metrics_repository()
             repo = await agen.__anext__()
             try:

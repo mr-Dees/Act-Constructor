@@ -7,12 +7,15 @@ DI-зависимости домена чата.
 
 from collections.abc import AsyncGenerator
 
+from app.core.metrics_batcher import MetricsBatcher
 from app.core.settings_registry import get as get_domain_settings
 from app.db.connection import get_db
 from app.domains.chat.repositories.chat_audit_log_repository import (
+    ChatAuditLogRecord,
     ChatAuditLogRepository,
 )
 from app.domains.chat.repositories.chat_tool_metrics_repository import (
+    ChatToolMetricRecord,
     ChatToolMetricsRepository,
 )
 from app.domains.chat.repositories.conversation_repository import ConversationRepository
@@ -28,6 +31,38 @@ from app.domains.chat.settings import ChatDomainSettings
 # Singleton лимитера — создаётся при первом обращении, limit читается из settings.
 # Lazy init: при смене настроек в тестах достаточно выставить _rate_limiter = None.
 _rate_limiter: UserRateLimiter | None = None
+
+# Батчеры метрик — инициализируются в lifespan приложения и используются
+# оркестратором (tool-метрики) и audit-сервисом. None — fallback на синхронный
+# путь (используется в тестах и при отключённом батчинге).
+_tool_metrics_batcher: MetricsBatcher[ChatToolMetricRecord] | None = None
+_audit_log_batcher: MetricsBatcher[ChatAuditLogRecord] | None = None
+
+
+def set_tool_metrics_batcher(
+    batcher: MetricsBatcher[ChatToolMetricRecord] | None,
+) -> None:
+    """Устанавливает (или сбрасывает) батчер tool-метрик. Зовётся из lifespan."""
+    global _tool_metrics_batcher
+    _tool_metrics_batcher = batcher
+
+
+def get_tool_metrics_batcher() -> MetricsBatcher[ChatToolMetricRecord] | None:
+    """Возвращает активный батчер tool-метрик (или None, если не инициализирован)."""
+    return _tool_metrics_batcher
+
+
+def set_audit_log_batcher(
+    batcher: MetricsBatcher[ChatAuditLogRecord] | None,
+) -> None:
+    """Устанавливает (или сбрасывает) батчер audit-лога. Зовётся из lifespan."""
+    global _audit_log_batcher
+    _audit_log_batcher = batcher
+
+
+def get_audit_log_batcher() -> MetricsBatcher[ChatAuditLogRecord] | None:
+    """Возвращает активный батчер audit-лога (или None, если не инициализирован)."""
+    return _audit_log_batcher
 
 
 def _get_chat_settings() -> ChatDomainSettings:
@@ -60,7 +95,10 @@ async def get_conversation_service() -> AsyncGenerator[ConversationService, None
     идёт в той же сессии БД, что и основная операция сервиса.
     """
     async with get_db() as conn:
-        audit = ChatAuditService(repo=ChatAuditLogRepository(conn))
+        audit = ChatAuditService(
+            repo=ChatAuditLogRepository(conn),
+            batcher=_audit_log_batcher,
+        )
         yield ConversationService(
             conv_repo=ConversationRepository(conn),
             settings=_get_chat_settings(),
@@ -71,7 +109,10 @@ async def get_conversation_service() -> AsyncGenerator[ConversationService, None
 async def get_message_service() -> AsyncGenerator[MessageService, None]:
     """Создаёт MessageService с подключением из пула."""
     async with get_db() as conn:
-        audit = ChatAuditService(repo=ChatAuditLogRepository(conn))
+        audit = ChatAuditService(
+            repo=ChatAuditLogRepository(conn),
+            batcher=_audit_log_batcher,
+        )
         yield MessageService(
             msg_repo=MessageRepository(conn),
             conv_repo=ConversationRepository(conn),
@@ -83,7 +124,10 @@ async def get_message_service() -> AsyncGenerator[MessageService, None]:
 async def get_file_service() -> AsyncGenerator[FileService, None]:
     """Создаёт FileService с подключением из пула."""
     async with get_db() as conn:
-        audit = ChatAuditService(repo=ChatAuditLogRepository(conn))
+        audit = ChatAuditService(
+            repo=ChatAuditLogRepository(conn),
+            batcher=_audit_log_batcher,
+        )
         yield FileService(
             file_repo=FileRepository(conn),
             conv_repo=ConversationRepository(conn),

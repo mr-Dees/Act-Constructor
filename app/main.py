@@ -105,6 +105,10 @@ async def lifespan(app: FastAPI):
     # Список успешно стартовавших доменов — используется и в startup-откате, и в shutdown
     started: list = []
 
+    # Батчеры метрик — инициализируются ниже, останавливаются в shutdown.
+    # Объявлены здесь, чтобы быть видимыми и в finally-shutdown ветке.
+    started_batchers: list = []
+
     # ИНИЦИАЛИЗАЦИЯ БД
     try:
         await init_db(settings)
@@ -135,6 +139,81 @@ async def lifespan(app: FastAPI):
         except SingletonLockBusyError as exc:
             logger.critical("Не удалось захватить singleton-lock: %s", exc)
             raise RuntimeError(str(exc)) from exc
+
+        # Инициализация батчеров метрик до старта доменов: лимит
+        # observability — общий, читаем из settings. Каждый поток метрик
+        # получает свой батчер; flush-callback берёт соединение из пула на
+        # время bulk-INSERT.
+        from app.core.metrics_batcher import MetricsBatcher
+        from app.db.connection import get_db
+        from app.domains.admin.deps import set_http_metrics_batcher
+        from app.domains.admin.repositories.http_metrics_repository import (
+            HttpMetricRecord,
+            HttpMetricsRepository,
+        )
+        from app.domains.chat.deps import (
+            set_audit_log_batcher,
+            set_tool_metrics_batcher,
+        )
+        from app.domains.chat.repositories.chat_audit_log_repository import (
+            ChatAuditLogRecord,
+            ChatAuditLogRepository,
+        )
+        from app.domains.chat.repositories.chat_tool_metrics_repository import (
+            ChatToolMetricRecord,
+            ChatToolMetricsRepository,
+        )
+
+        obs = settings.observability
+
+        async def _flush_http_metrics(records: list[HttpMetricRecord]) -> None:
+            async with get_db() as conn:
+                await HttpMetricsRepository(conn).record_many(records)
+
+        async def _flush_tool_metrics(records: list[ChatToolMetricRecord]) -> None:
+            async with get_db() as conn:
+                await ChatToolMetricsRepository(conn).record_many(records)
+
+        async def _flush_audit_log(records: list[ChatAuditLogRecord]) -> None:
+            async with get_db() as conn:
+                await ChatAuditLogRepository(conn).log_many(records)
+
+        http_metrics_batcher = MetricsBatcher(
+            flush_callback=_flush_http_metrics,
+            max_batch_size=obs.metrics_batch_size,
+            flush_interval_sec=obs.metrics_flush_interval_sec,
+            max_buffer_size=obs.metrics_max_buffer_size,
+            name="admin_http_metrics",
+        )
+        chat_tool_metrics_batcher = MetricsBatcher(
+            flush_callback=_flush_tool_metrics,
+            max_batch_size=obs.metrics_batch_size,
+            flush_interval_sec=obs.metrics_flush_interval_sec,
+            max_buffer_size=obs.metrics_max_buffer_size,
+            name="chat_tool_metrics",
+        )
+        chat_audit_log_batcher = MetricsBatcher(
+            flush_callback=_flush_audit_log,
+            max_batch_size=obs.metrics_batch_size,
+            flush_interval_sec=obs.metrics_flush_interval_sec,
+            max_buffer_size=obs.metrics_max_buffer_size,
+            name="chat_audit_log",
+        )
+
+        await http_metrics_batcher.start()
+        started_batchers.append(http_metrics_batcher)
+        await chat_tool_metrics_batcher.start()
+        started_batchers.append(chat_tool_metrics_batcher)
+        await chat_audit_log_batcher.start()
+        started_batchers.append(chat_audit_log_batcher)
+
+        set_http_metrics_batcher(http_metrics_batcher)
+        set_tool_metrics_batcher(chat_tool_metrics_batcher)
+        set_audit_log_batcher(chat_audit_log_batcher)
+
+        app.state.http_metrics_batcher = http_metrics_batcher
+        app.state.chat_tool_metrics_batcher = chat_tool_metrics_batcher
+        app.state.chat_audit_log_batcher = chat_audit_log_batcher
 
         # Запуск доменов с откатом при частичной ошибке:
         # если on_startup домена N падает, вызываем on_shutdown для 1..N-1
@@ -217,6 +296,26 @@ async def lifespan(app: FastAPI):
                 await d.on_shutdown(app)
             except Exception:
                 logger.exception(f"Ошибка при завершении домена {d.name}")
+
+    # Финальный flush батчеров метрик: дописываем накопленные записи в БД
+    # до закрытия пула. Сбрасываем module-level ссылки в deps, чтобы новые
+    # сервисы (если их случайно создадут после shutdown) ушли в legacy-fallback.
+    try:
+        from app.domains.admin.deps import set_http_metrics_batcher
+        from app.domains.chat.deps import (
+            set_audit_log_batcher,
+            set_tool_metrics_batcher,
+        )
+        set_http_metrics_batcher(None)
+        set_tool_metrics_batcher(None)
+        set_audit_log_batcher(None)
+    except Exception:
+        logger.exception("Не удалось сбросить ссылки на батчеры метрик")
+    for batcher in reversed(started_batchers):
+        try:
+            await batcher.stop()
+        except Exception:
+            logger.exception("Ошибка при остановке батчера метрик")
 
     # Освобождаем singleton-блокировку (best-effort, до закрытия пула).
     try:
