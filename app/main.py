@@ -32,6 +32,8 @@ from app.db.connection import (
     init_db,
     close_db,
     create_tables_if_not_exist,
+    warmup_pool,
+    get_pool,
     KerberosTokenExpiredError
 )
 from app.routes.errors import router as error_router
@@ -102,6 +104,10 @@ async def lifespan(app: FastAPI):
     try:
         await init_db(settings)
         logger.info("База данных инициализирована")
+
+        # ПРОГРЕВ ПУЛА — устраняет TCP-handshake-задержку первых запросов
+        if settings.database.pool_warmup_enabled:
+            await warmup_pool(get_pool(), settings.database.pool_min_size)
 
         # СОЗДАНИЕ ТАБЛИЦ ЕСЛИ НЕ СУЩЕСТВУЮТ
         await create_tables_if_not_exist(domains)
