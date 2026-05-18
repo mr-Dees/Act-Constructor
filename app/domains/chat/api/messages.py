@@ -14,6 +14,7 @@ from app.domains.chat.deps import (
     get_conversation_service,
     get_file_service,
     get_message_service,
+    get_rate_limiter,
 )
 from app.domains.chat.exceptions import (
     ChatFileValidationError,
@@ -85,6 +86,9 @@ async def send_message(
 
     # Проверяем, что беседа существует и принадлежит пользователю
     await conv_service.get(conversation_id, username)
+
+    # Per-user rate limit: защита от злоупотребления (до сохранения сообщения)
+    await get_rate_limiter().check_and_consume(username)
 
     # Парсим домены из JSON-строки
     domains_list: list[str] | None = None

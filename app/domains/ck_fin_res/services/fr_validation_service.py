@@ -13,9 +13,7 @@ from app.domains.ck_fin_res.exceptions import FRRecordNotFoundError
 from app.domains.ck_fin_res.repositories.fr_validation_repository import (
     FRValidationRepository,
 )
-from app.domains.ua_data.repositories.dictionary_repository import (
-    DictionaryRepository,
-)
+from app.domains.ua_data.interfaces import IDictionaryRepository
 
 logger = logging.getLogger("audit_workstation.domains.ck_fin_res.service")
 
@@ -38,7 +36,7 @@ class FRValidationService:
     def __init__(
         self,
         fr_repo: FRValidationRepository,
-        dict_repo: DictionaryRepository,
+        dict_repo: IDictionaryRepository,
     ):
         self.fr_repo = fr_repo
         self.dict_repo = dict_repo

@@ -21,8 +21,10 @@ from app.domains.acts.services.act_crud_service import ActCrudService
 from app.domains.acts.services.act_lock_service import ActLockService
 from app.domains.acts.services.act_content_service import ActContentService
 from app.domains.acts.services.act_invoice_service import ActInvoiceService
-from app.domains.acts.repositories.act_users import ActUsersRepository
 from app.domains.acts.settings import ActsSettings
+from app.domains.admin.interfaces import IUserDirectory
+from app.domains.admin.services.user_directory import UserDirectoryRepository
+from app.domains.ua_data.factories import make_invoice_table_names
 
 
 def _get_acts_settings() -> ActsSettings:
@@ -59,7 +61,12 @@ async def get_invoice_service(
 ) -> AsyncGenerator[ActInvoiceService, None]:
     """Создает ActInvoiceService с подключением из пула."""
     async with get_db() as conn:
-        yield ActInvoiceService(conn=conn, settings=settings, acts_settings=_get_acts_settings())
+        yield ActInvoiceService(
+            conn=conn,
+            settings=settings,
+            acts_settings=_get_acts_settings(),
+            ua_tables=make_invoice_table_names(),
+        )
 
 
 async def get_audit_log_deps() -> AsyncGenerator[tuple[AccessGuard, ActAuditLogRepository, ActContentVersionRepository], None]:
@@ -86,7 +93,7 @@ async def get_audit_log_service() -> AsyncGenerator:
         yield AuditLogService(guard, audit_repo, versions_repo, conn)
 
 
-async def get_users_repository() -> AsyncGenerator[ActUsersRepository, None]:
-    """Создает ActUsersRepository с подключением из пула."""
+async def get_users_repository() -> AsyncGenerator[IUserDirectory, None]:
+    """Создает UserDirectoryRepository с подключением из пула."""
     async with get_db() as conn:
-        yield ActUsersRepository(conn)
+        yield UserDirectoryRepository(conn)

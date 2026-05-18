@@ -24,6 +24,7 @@ from app.core.middleware import (
     RequestIdMiddleware,
     RequestSizeLimitMiddleware
 )
+import asyncpg
 from asyncpg import CheckViolationError, UniqueViolationError
 
 from app.core.exceptions import AppError, CHECK_CONSTRAINT_MESSAGES
@@ -186,6 +187,9 @@ async def lifespan(app: FastAPI):
             "Приложение не может запуститься без валидного Kerberos токена. "
             "Выполните 'kinit' в терминале."
         ) from e
+    except asyncpg.PostgresError as e:
+        logger.critical(f"Ошибка PostgreSQL при запуске приложения: {e}")
+        raise RuntimeError(f"Не удалось инициализировать БД при старте: {e}") from e
     except Exception as e:
         logger.critical(f"Критическая ошибка при запуске приложения: {e}")
         raise

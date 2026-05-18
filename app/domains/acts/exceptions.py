@@ -76,6 +76,16 @@ class UnsupportedFormatError(AppError):
     status_code = 400
 
 
+class ActExportValidationError(AppError):
+    """Ошибка бизнес-валидации при экспорте акта (например, превышена глубина дерева)."""
+    status_code = 400
+
+
+class ActExportTimeoutError(AppError):
+    """Операция экспорта акта превысила допустимое время ожидания."""
+    status_code = 408
+
+
 class ManagementRoleRequiredError(AppError):
     """Операция доступна только для Куратора или Руководителя."""
     status_code = 403

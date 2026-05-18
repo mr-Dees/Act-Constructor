@@ -34,7 +34,7 @@ def _build_domain():
                 active_page="ck_fin_res",
                 chat_domains=[DOMAIN_NAME, "acts"],
                 group="Центры компетенций",
-                description="Контрольная карта верификации финансовых результатов",
+                description="Центр компетенций по верификации метрик финансовых результатов",
             ),
         ],
         chat_system_prompt=(

@@ -56,6 +56,9 @@ class ChatDomainSettings(BaseModel):
     max_history_length: int = Field(default=50, gt=0)
     max_message_content_length: int = Field(default=10000, gt=0)
     tool_execution_timeout: int = Field(default=30, gt=0)
+    # Количество последних сообщений истории с полным контентом (включая file/image-блоки).
+    # Более старые сообщения получают placeholder вместо бинарного контента.
+    history_full_context_depth: int = Field(default=5, ge=1)
 
     # Файлы
     max_file_size: int = Field(default=10 * 1024 * 1024, gt=0)
@@ -95,6 +98,9 @@ class ChatDomainSettings(BaseModel):
                     "Используй точные MIME-типы.",
                 )
         return v
+
+    # Per-user rate limit на отправку сообщений
+    rate_limit_messages_per_minute_per_user: int = Field(default=10, ge=1)
 
     # Хранение
     max_conversations_per_user: int = Field(default=100, gt=0)

@@ -227,6 +227,63 @@ class Orchestrator:
             return [t.to_openai_tool() for t in tools_list]
         return get_openai_tools()
 
+    @staticmethod
+    def _format_block_full(block: dict) -> str | None:
+        """Конвертирует блок контента в текст (полный режим)."""
+        block_type = block.get("type", "")
+        if block_type == "text":
+            return block.get("content", "") or None
+        if block_type == "code":
+            lang = block.get("language", "")
+            return f"```{lang}\n{block.get('content', '')}\n```"
+        if block_type == "file":
+            fname = block.get("filename", "файл")
+            size = block.get("size")
+            if size:
+                try:
+                    size_mb = int(size) / (1024 * 1024)
+                    size_str = f"{size_mb:.1f} МБ"
+                except (TypeError, ValueError):
+                    size_str = str(size)
+            else:
+                size_str = ""
+            return f"[Прикреплён файл: {fname}" + (f", {size_str}" if size_str else "") + "]"
+        if block_type == "image":
+            fname = block.get("filename", "изображение")
+            return f"[Прикреплено изображение: {fname}]"
+        return None
+
+    @staticmethod
+    def _format_block_shallow(block: dict) -> str | None:
+        """Конвертирует блок контента в текст (shallow режим — без бинарных данных).
+
+        file/image блоки заменяются на placeholder без base64/бинарного контента.
+        """
+        block_type = block.get("type", "")
+        if block_type == "text":
+            return block.get("content", "") or None
+        if block_type == "code":
+            lang = block.get("language", "")
+            return f"```{lang}\n{block.get('content', '')}\n```"
+        if block_type in ("file", "image"):
+            fname = block.get("filename", "файл" if block_type == "file" else "изображение")
+            size = block.get("size")
+            if size:
+                try:
+                    size_mb = int(size) / (1024 * 1024)
+                    size_str = f"{size_mb:.1f} МБ"
+                except (TypeError, ValueError):
+                    size_str = str(size)
+            else:
+                size_str = ""
+            label = "файл" if block_type == "file" else "изображение"
+            parts = [fname]
+            if size_str:
+                parts.append(size_str)
+            parts.append("не загружен в этом ходу")
+            return f"[{label}: {', '.join(parts)}]"
+        return None
+
     async def _get_history_messages(
         self, conversation_id: str,
     ) -> list[dict[str, str]]:
@@ -236,21 +293,31 @@ class Orchestrator:
         Извлекает текст из блоков контента:
         - text → текст
         - code → markdown fenced code block
+        - file/image → placeholder (только для сообщений вне ``history_full_context_depth``)
 
         Блоки reasoning и error сохранены в истории только для отображения
         в UI; в контекст модели они не попадают (чтобы не засорять контекст
         служебной информацией).
+
+        Lazy-loading: последние ``history_full_context_depth`` сообщений
+        передаются с полным контентом; более старые — с placeholder'ами
+        вместо file/image-блоков, чтобы не расходовать RAM на base64.
         """
         history = await self.msg_service.get_history(conversation_id)
-        messages: list[dict[str, str]] = []
 
         # Ограничиваем историю по настройкам
         if len(history) > self.settings.max_history_length:
             history = history[-self.settings.max_history_length:]
 
-        for msg in history:
+        depth = self.settings.history_full_context_depth
+        cutoff = max(0, len(history) - depth)
+
+        messages: list[dict[str, str]] = []
+
+        for idx, msg in enumerate(history):
             role = msg.get("role", "user")
             content_blocks = msg.get("content", [])
+            full_mode = idx >= cutoff  # True — полный контент, False — shallow
 
             # Собираем текст из блоков
             text_parts: list[str] = []
@@ -258,17 +325,12 @@ class Orchestrator:
                 for block in content_blocks:
                     if not isinstance(block, dict):
                         continue
-                    block_type = block.get("type", "")
-                    if block_type == "text":
-                        text_parts.append(block.get("content", ""))
-                    elif block_type == "code":
-                        lang = block.get("language", "")
-                        text_parts.append(
-                            f"```{lang}\n{block.get('content', '')}\n```",
-                        )
-                    elif block_type == "file":
-                        fname = block.get("filename", "файл")
-                        text_parts.append(f"[Прикреплён файл: {fname}]")
+                    if full_mode:
+                        part = self._format_block_full(block)
+                    else:
+                        part = self._format_block_shallow(block)
+                    if part:
+                        text_parts.append(part)
             elif isinstance(content_blocks, str):
                 text_parts.append(content_blocks)
 
@@ -741,6 +803,14 @@ class Orchestrator:
 
         sources: list[str] = []
         token_usage: dict[str, Any] = {}
+        # GigaChat поддерживает только 1 function_call за раунд. Если LLM
+        # вернул >1 tool_call, первый исполняем сейчас, остальные — в очередь.
+        pending_tool_calls: list[Any] = []
+        is_gigachat = self.settings.profile == "gigachat"
+        # Отслеживание повторяющихся ошибок валидации tool'ов.
+        # Формат: (error_message_key, tool_name)
+        _last_validation_error: tuple[str, str] | None = None
+        _consecutive_validation_errors = 0
 
         try:
             response = await self._completions_create(
@@ -753,11 +823,47 @@ class Orchestrator:
 
             # Agent loop
             rounds = 0
-            while (
-                response.choices[0].message.tool_calls
-                and rounds < self.settings.max_tool_rounds
-            ):
-                rounds += 1
+            while rounds < self.settings.max_tool_rounds:
+                # Если очередь GigaChat не пуста — берём следующий tool без LLM
+                if pending_tool_calls:
+                    tc = pending_tool_calls.pop(0)
+                    tool_name = tc.function.name
+                    try:
+                        arguments = json.loads(_safe_args(tc.function.arguments))
+                    except json.JSONDecodeError:
+                        arguments = {}
+                    logger.info(
+                        "GigaChat queue tool call #%d: %s(%s)", rounds, tool_name,
+                        ", ".join(f"{k}={v!r}" for k, v in arguments.items()),
+                    )
+                    try:
+                        result = await self._execute_tool_call(tool_name, arguments)
+                    except ChatToolValidationError as exc:
+                        logger.warning("Tool validation error: %s", exc.message)
+                        result = TOOL_VALIDATION_NEUTRAL_MESSAGE
+                    sources.append(tool_name)
+                    messages.append({
+                        "role": "tool",
+                        "tool_call_id": tc.id,
+                        "content": result,
+                    })
+                    rounds += 1
+                    if pending_tool_calls:
+                        continue
+                    # Очередь опустела — вызываем LLM с обновлённой историей
+                    response = await self._completions_create(
+                        client,
+                        model=self.settings.model,
+                        messages=messages,
+                        tools=tools if tools else NOT_GIVEN,
+                        temperature=self.settings.temperature,
+                    )
+                    # Переходим к началу цикла: проверяем новый ответ LLM
+                    continue
+
+                if not response.choices[0].message.tool_calls:
+                    break
+
                 raw_msg = response.choices[0].message
                 # Не передаём Pydantic-объект как есть: см. комментарий в
                 # run_stream — Qwen/SGLang и GigaChat-proxy не принимают
@@ -781,7 +887,16 @@ class Orchestrator:
                 }
                 messages.append(assistant_msg)
 
-                for tc in raw_msg.tool_calls:
+                # GigaChat: ≤1 tool за раунд; лишние — в очередь
+                if is_gigachat and len(raw_msg.tool_calls) > 1:
+                    logger.info(
+                        "GigaChat: %d tool_calls → исполняем 1, %d в очередь",
+                        len(raw_msg.tool_calls), len(raw_msg.tool_calls) - 1,
+                    )
+                    pending_tool_calls = list(raw_msg.tool_calls[1:])
+                tcs_this_round = raw_msg.tool_calls[:1] if is_gigachat else raw_msg.tool_calls
+
+                for tc in tcs_this_round:
                     tool_name = tc.function.name
                     try:
                         arguments = json.loads(_safe_args(tc.function.arguments))
@@ -796,13 +911,54 @@ class Orchestrator:
                         result = await self._execute_tool_call(
                             tool_name, arguments,
                         )
+                        _last_validation_error = None
+                        _consecutive_validation_errors = 0
                     except ChatToolValidationError as exc:
-                        # Сырой текст ошибки не показываем пользователю —
-                        # это инфо для логов. LLM получает нейтральный итог,
-                        # чтобы попытаться переформулировать вызов.
+                        # Отслеживаем повторяющиеся ошибки валидации.
+                        # Ключ: сообщение ошибки + имя tool (охватывает
+                        # класс ошибки + имя параметра + имя инструмента).
+                        error_key = (exc.message, tool_name)
+                        if _last_validation_error == error_key:
+                            _consecutive_validation_errors += 1
+                        else:
+                            _last_validation_error = error_key
+                            _consecutive_validation_errors = 1
                         logger.warning(
-                            "Tool validation error: %s", exc.message,
+                            "Tool validation error: %s (consecutive=%d)",
+                            exc.message, _consecutive_validation_errors,
                         )
+                        if _consecutive_validation_errors >= 2:
+                            logger.warning(
+                                "Tool-loop exit: 2 одинаковых ошибки валидации "
+                                "подряд для tool=%s, прерываем цикл",
+                                tool_name,
+                            )
+                            messages.append({
+                                "role": "tool",
+                                "tool_call_id": tc.id,
+                                "content": TOOL_VALIDATION_NEUTRAL_MESSAGE,
+                            })
+                            sources.append(tool_name)
+                            # Финальный ответ — error block
+                            error_answer = (
+                                f"Модель не смогла корректно вызвать инструмент "
+                                f"`{tool_name}`. Перефразируйте запрос."
+                            )
+                            await self._save_assistant_message(
+                                conversation_id=conversation_id,
+                                content_blocks=[{
+                                    "type": "error",
+                                    "message": error_answer,
+                                    "code": "tool_validation_loop",
+                                }],
+                                token_usage=None,
+                            )
+                            return {
+                                "response": error_answer,
+                                "sources": list(dict.fromkeys(sources)),
+                                "model": self.settings.model,
+                                "token_usage": token_usage,
+                            }
                         result = TOOL_VALIDATION_NEUTRAL_MESSAGE
                     sources.append(tool_name)
 
@@ -812,6 +968,11 @@ class Orchestrator:
                         "content": result,
                     })
 
+                rounds += 1
+                # Если в очереди GigaChat ещё есть tool_call'ы — не зовём LLM,
+                # переходим к следующей итерации, где очередь будет обработана.
+                if pending_tool_calls:
+                    continue
                 response = await self._completions_create(
                     client,
                     model=self.settings.model,
@@ -845,6 +1006,25 @@ class Orchestrator:
                 "token_usage": token_usage,
             }
 
+        except asyncio.TimeoutError:
+            logger.warning(
+                "Таймаут LLM/tool в run(): conversation=%s", conversation_id,
+            )
+            error_message = "Временная ошибка AI-сервиса. Попробуйте позже."
+            try:
+                await self._save_assistant_message(
+                    conversation_id=conversation_id,
+                    content_blocks=[{
+                        "type": "error",
+                        "message": error_message,
+                        "code": "llm_unavailable",
+                    }],
+                )
+            except Exception:
+                logger.exception(
+                    "Не удалось сохранить error-block ассистент-сообщения",
+                )
+            return {"response": error_message, "status": "error"}
         except Exception:
             logger.exception("Ошибка вызова LLM API")
             # Сохраняем ErrorBlock в историю: без этого при перезагрузке
@@ -945,6 +1125,13 @@ class Orchestrator:
         full_answer = ""
         block_index = 0
         emitted_blocks: list[dict] = []  # ClientActionBlock'и, эмитнутые до финала
+        # GigaChat поддерживает только 1 function_call за раунд. Если LLM
+        # вернул >1 tool_call, первый исполняем сейчас, остальные — в очередь.
+        pending_tool_calls: list[Any] = []
+        is_gigachat = self.settings.profile == "gigachat"
+        # Отслеживание повторяющихся ошибок валидации tool'ов.
+        _last_validation_error: tuple[str, str] | None = None
+        _consecutive_validation_errors = 0
 
         try:
             # GigaChat-proxy не поддерживает SSE — выключаем streaming
@@ -963,6 +1150,107 @@ class Orchestrator:
             max_tool_rounds = self.settings.max_tool_rounds
 
             while rounds < max_tool_rounds:
+                # Если очередь GigaChat не пуста — исполняем следующий tool
+                # без вызова LLM. Очередь заполняется ниже, когда профиль
+                # gigachat и LLM вернул >1 tool_call.
+                if pending_tool_calls:
+                    tc = pending_tool_calls.pop(0)
+                    tool_name = tc["name"] if isinstance(tc, dict) else tc.name
+                    tc_id = tc["id"] if isinstance(tc, dict) else tc.id
+                    raw_args = (tc.get("arguments") if isinstance(tc, dict)
+                                else getattr(getattr(tc, "function", None), "arguments", ""))
+                    try:
+                        arguments = json.loads(_safe_args(raw_args))
+                    except json.JSONDecodeError:
+                        arguments = {}
+                    logger.info(
+                        "GigaChat queue tool call #%d: %s(%s)", rounds, tool_name,
+                        ", ".join(f"{k}={v!r}" for k, v in arguments.items()),
+                    )
+                    yield sse_tool_call(
+                        tool_name=tool_name,
+                        tool_call_id=tc_id,
+                        arguments=arguments,
+                    )
+                    try:
+                        result = await self._execute_tool_call(tool_name, arguments)
+                        _last_validation_error = None
+                        _consecutive_validation_errors = 0
+                    except ChatToolValidationError as exc:
+                        error_key = (exc.message, tool_name)
+                        if _last_validation_error == error_key:
+                            _consecutive_validation_errors += 1
+                        else:
+                            _last_validation_error = error_key
+                            _consecutive_validation_errors = 1
+                        logger.warning(
+                            "Tool validation error (queue): %s (consecutive=%d)",
+                            exc.message, _consecutive_validation_errors,
+                        )
+                        if _consecutive_validation_errors >= 2:
+                            error_answer = (
+                                f"Модель не смогла корректно вызвать инструмент "
+                                f"`{tool_name}`. Перефразируйте запрос."
+                            )
+                            yield sse_error(error=error_answer, code="tool_validation_loop")
+                            content_blocks = list(emitted_blocks)
+                            content_blocks.append({
+                                "type": "error",
+                                "message": error_answer,
+                                "code": "tool_validation_loop",
+                            })
+                            await self._save_assistant_message(
+                                conversation_id=conversation_id,
+                                content_blocks=content_blocks,
+                                token_usage=token_usage,
+                            )
+                            yield sse_message_end(
+                                message_id=message_id,
+                                model=self.settings.model,
+                                token_usage=token_usage if token_usage else None,
+                            )
+                            return
+                        result = TOOL_VALIDATION_NEUTRAL_MESSAGE
+                        yield sse_tool_error(
+                            tool_name=tool_name,
+                            tool_call_id=tc_id,
+                            message=TOOL_VALIDATION_NEUTRAL_MESSAGE,
+                        )
+                    sources.append(tool_name)
+                    yield sse_tool_result(
+                        tool_name=tool_name, tool_call_id=tc_id, result=result,
+                    )
+                    messages.append({"role": "tool", "tool_call_id": tc_id, "content": result})
+                    rounds += 1
+                    if pending_tool_calls:
+                        continue
+                    # Очередь опустела — звоним LLM
+                    if use_streaming:
+                        try:
+                            response_stream = await self._completions_create(
+                                client,
+                                model=self.settings.model,
+                                messages=messages,
+                                tools=tools if tools else NOT_GIVEN,
+                                temperature=self.settings.temperature,
+                                stream=True,
+                            )
+                        except Exception as exc:
+                            logger.warning(
+                                "Стриминг не удался после GigaChat-queue, "
+                                "фолбек: %s: %s", type(exc).__name__, exc,
+                            )
+                            use_streaming = False
+                    if not use_streaming:
+                        response = await self._completions_create(
+                            client,
+                            model=self.settings.model,
+                            messages=messages,
+                            tools=tools if tools else NOT_GIVEN,
+                            temperature=self.settings.temperature,
+                        )
+                    continue
+
                 if use_streaming:
                     # Стриминговый вызов LLM
                     try:
@@ -1066,7 +1354,31 @@ class Orchestrator:
                             assistant_msg["reasoning_details"] = acc.reasoning_details
                         messages.append(assistant_msg)
 
-                        for tc in finalized_tool_calls:
+                        # GigaChat: ≤1 tool за раунд; лишние — в очередь
+                        if is_gigachat and len(finalized_tool_calls) > 1:
+                            logger.info(
+                                "GigaChat: %d tool_calls из стрима → "
+                                "исполняем 1, %d в очередь",
+                                len(finalized_tool_calls),
+                                len(finalized_tool_calls) - 1,
+                            )
+                            # Сохраняем в очередь как dict (не pydantic)
+                            pending_tool_calls = [
+                                {
+                                    "id": tc.id,
+                                    "name": tc.name,
+                                    "arguments": _safe_args(tc.arguments),
+                                }
+                                for tc in finalized_tool_calls[1:]
+                            ]
+                        tcs_this_round = (
+                            finalized_tool_calls[:1]
+                            if is_gigachat
+                            else finalized_tool_calls
+                        )
+
+                        loop_broken_streaming = False
+                        for tc in tcs_this_round:
                             tool_name = tc.name
                             try:
                                 arguments = json.loads(_safe_args(tc.arguments))
@@ -1132,13 +1444,58 @@ class Orchestrator:
                                 result = await self._execute_tool_call(
                                     tool_name, arguments,
                                 )
+                                _last_validation_error = None
+                                _consecutive_validation_errors = 0
                             except ChatToolValidationError as exc:
-                                # Валидация параметров tool'а упала. Сырой
-                                # текст ошибки ушёл только в лог; в SSE и
-                                # сообщении к LLM — нейтральная фраза.
+                                # Валидация параметров tool'а упала.
+                                error_key = (exc.message, tool_name)
+                                if _last_validation_error == error_key:
+                                    _consecutive_validation_errors += 1
+                                else:
+                                    _last_validation_error = error_key
+                                    _consecutive_validation_errors = 1
                                 logger.warning(
-                                    "Tool validation error: %s", exc.message,
+                                    "Tool validation error: %s (consecutive=%d)",
+                                    exc.message, _consecutive_validation_errors,
                                 )
+                                if _consecutive_validation_errors >= 2:
+                                    logger.warning(
+                                        "Tool-loop exit: 2 одинаковых ошибки "
+                                        "валидации подряд для tool=%s",
+                                        tool_name,
+                                    )
+                                    error_answer = (
+                                        f"Модель не смогла корректно вызвать "
+                                        f"инструмент `{tool_name}`. "
+                                        f"Перефразируйте запрос."
+                                    )
+                                    yield sse_error(
+                                        error=error_answer,
+                                        code="tool_validation_loop",
+                                    )
+                                    content_blocks = list(emitted_blocks)
+                                    content_blocks.append({
+                                        "type": "error",
+                                        "message": error_answer,
+                                        "code": "tool_validation_loop",
+                                    })
+                                    try:
+                                        await self._save_assistant_message(
+                                            conversation_id=conversation_id,
+                                            content_blocks=content_blocks,
+                                            token_usage=token_usage,
+                                        )
+                                    except Exception:
+                                        logger.exception(
+                                            "Не удалось сохранить error-block "
+                                            "при tool-loop exit",
+                                        )
+                                    yield sse_message_end(
+                                        message_id=message_id,
+                                        model=self.settings.model,
+                                        token_usage=token_usage if token_usage else None,
+                                    )
+                                    return
                                 yield sse_tool_error(
                                     tool_name=tool_name,
                                     tool_call_id=tc.id,
@@ -1277,7 +1634,23 @@ class Orchestrator:
                     }
                     messages.append(assistant_msg)
 
-                    for tc in raw_msg.tool_calls:
+                    # GigaChat: ≤1 tool за раунд; лишние — в очередь
+                    if is_gigachat and len(raw_msg.tool_calls) > 1:
+                        logger.info(
+                            "GigaChat: %d tool_calls (non-stream) → "
+                            "исполняем 1, %d в очередь",
+                            len(raw_msg.tool_calls),
+                            len(raw_msg.tool_calls) - 1,
+                        )
+                        pending_tool_calls = list(raw_msg.tool_calls[1:])
+                    tcs_this_round = (
+                        raw_msg.tool_calls[:1]
+                        if is_gigachat
+                        else raw_msg.tool_calls
+                    )
+
+                    loop_broken_ns = False
+                    for tc in tcs_this_round:
                         tool_name = tc.function.name
                         try:
                             arguments = json.loads(_safe_args(tc.function.arguments))
@@ -1341,10 +1714,57 @@ class Orchestrator:
                             result = await self._execute_tool_call(
                                 tool_name, arguments,
                             )
+                            _last_validation_error = None
+                            _consecutive_validation_errors = 0
                         except ChatToolValidationError as exc:
+                            error_key = (exc.message, tool_name)
+                            if _last_validation_error == error_key:
+                                _consecutive_validation_errors += 1
+                            else:
+                                _last_validation_error = error_key
+                                _consecutive_validation_errors = 1
                             logger.warning(
-                                "Tool validation error: %s", exc.message,
+                                "Tool validation error: %s (consecutive=%d)",
+                                exc.message, _consecutive_validation_errors,
                             )
+                            if _consecutive_validation_errors >= 2:
+                                logger.warning(
+                                    "Tool-loop exit: 2 одинаковых ошибки "
+                                    "валидации подряд для tool=%s",
+                                    tool_name,
+                                )
+                                error_answer = (
+                                    f"Модель не смогла корректно вызвать "
+                                    f"инструмент `{tool_name}`. "
+                                    f"Перефразируйте запрос."
+                                )
+                                yield sse_error(
+                                    error=error_answer,
+                                    code="tool_validation_loop",
+                                )
+                                content_blocks = list(emitted_blocks)
+                                content_blocks.append({
+                                    "type": "error",
+                                    "message": error_answer,
+                                    "code": "tool_validation_loop",
+                                })
+                                try:
+                                    await self._save_assistant_message(
+                                        conversation_id=conversation_id,
+                                        content_blocks=content_blocks,
+                                        token_usage=token_usage,
+                                    )
+                                except Exception:
+                                    logger.exception(
+                                        "Не удалось сохранить error-block "
+                                        "при tool-loop exit",
+                                    )
+                                yield sse_message_end(
+                                    message_id=message_id,
+                                    model=self.settings.model,
+                                    token_usage=token_usage if token_usage else None,
+                                )
+                                return
                             yield sse_tool_error(
                                 tool_name=tool_name,
                                 tool_call_id=tc.id,
@@ -1474,9 +1894,17 @@ class Orchestrator:
                         content_blocks=content_blocks,
                         token_usage=token_usage,
                     )
+                except (OSError, asyncio.TimeoutError):
+                    logger.exception("Не удалось сохранить сообщение ассистента")
                 except Exception:
                     logger.exception("Не удалось сохранить сообщение ассистента")
 
+        except asyncio.TimeoutError:
+            logger.warning(
+                "Таймаут LLM/tool в стриминговом agent loop: "
+                "conversation=%s", conversation_id,
+            )
+            yield sse_error(error="Временная ошибка AI-сервиса. Попробуйте позже.")
         except Exception as exc:
             logger.exception("Ошибка стримингового agent loop")
             yield sse_error(error="Временная ошибка AI-сервиса. Попробуйте позже.")

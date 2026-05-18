@@ -17,6 +17,7 @@ from app.core.config import get_settings, Settings
 from app.core.exceptions import AppError
 from app.db.connection import get_db
 from app.domains.acts.deps import _get_acts_settings
+from app.domains.acts.exceptions import ActExportValidationError, ActExportTimeoutError
 from app.domains.acts.repositories.act_access import ActAccessRepository
 from app.domains.acts.repositories.act_audit_log import ActAuditLogRepository
 from app.domains.acts.settings import ActsSettings
@@ -107,9 +108,8 @@ async def save_act(
         tree_depth = ActTreeUtils.calculate_tree_depth(data.tree)
         if tree_depth > acts_cfg.resource.max_tree_depth:
             logger.warning(f"Превышена максимальная глубина дерева: {tree_depth}")
-            raise HTTPException(
-                status_code=400,
-                detail=f"Глубина дерева ({tree_depth}) превышает максимум ({acts_cfg.resource.max_tree_depth})"
+            raise ActExportValidationError(
+                f"Глубина дерева ({tree_depth}) превышает максимум ({acts_cfg.resource.max_tree_depth})"
             )
 
         # Используем mode='python' для оптимизации.
@@ -130,10 +130,9 @@ async def save_act(
             )
         except asyncio.TimeoutError:
             logger.error(f"Timeout при сохранении акта (>{acts_cfg.resource.save_act_timeout}s)")
-            raise HTTPException(
-                status_code=408,
-                detail=f"Обработка акта заняла слишком много времени "
-                       f"(>{acts_cfg.resource.save_act_timeout}s). Попробуйте упростить структуру."
+            raise ActExportTimeoutError(
+                f"Обработка акта заняла слишком много времени "
+                f"(>{acts_cfg.resource.save_act_timeout}s). Попробуйте упростить структуру."
             )
 
         logger.info(f"Акт успешно сохранен: {result.filename}")
@@ -155,18 +154,12 @@ async def save_act(
 
         return result
 
-    except HTTPException:
-        raise
     except AppError:
         raise
     except Exception as e:
         # Неожиданная ошибка при сохранении
         logger.exception(f"Неожиданная ошибка при сохранении акта: {e}")
-        # В production не показываем внутренние детали
-        raise HTTPException(
-            status_code=500,
-            detail="Произошла ошибка при сохранении акта. Попробуйте позже."
-        )
+        raise AppError("Произошла ошибка при сохранении акта. Попробуйте позже.") from e
 
 
 @router.get(
@@ -260,11 +253,8 @@ async def download_act(
                 media_type=media_type,
                 filename=filename
             )
-        except HTTPException:
+        except AppError:
             raise
         except Exception as e:
             logger.exception(f"Ошибка при скачивании файла {filename}: {e}")
-            raise HTTPException(
-                status_code=500,
-                detail="Произошла ошибка при скачивании файла"
-            )
+            raise AppError("Произошла ошибка при скачивании файла") from e

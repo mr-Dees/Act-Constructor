@@ -15,6 +15,15 @@ from app.db.repositories.base import BaseRepository
 
 logger = logging.getLogger("audit_workstation.db.repository.audit_log")
 
+# Разрешённые поля для динамической фильтрации в get_log.
+# Любое имя поля вне этого множества → ValueError (защита от SQL-инъекции).
+_ALLOWED_FILTER_FIELDS: frozenset[str] = frozenset({
+    "act_id",
+    "action",
+    "username",
+    "created_at",
+})
+
 
 class ActAuditLogRepository(BaseRepository):
     """Запись и чтение операций аудит-лога."""
@@ -87,28 +96,41 @@ class ActAuditLogRepository(BaseRepository):
         params: list = [act_id]
         idx = 2
 
+        def _check_field(field_name: str) -> str:
+            """Проверяет имя поля по whitelist. Защита от SQL-инъекции."""
+            if field_name not in _ALLOWED_FILTER_FIELDS:
+                raise ValueError(
+                    f"Недопустимое поле фильтрации: '{field_name}'. "
+                    f"Разрешены: {sorted(_ALLOWED_FILTER_FIELDS)}"
+                )
+            return field_name
+
         if action:
             actions = [a.strip() for a in action.split(",") if a.strip()]
+            col = _check_field("action")
             if len(actions) == 1:
-                where.append(f"action = ${idx}")
+                where.append(f"{col} = ${idx}")
                 params.append(actions[0])
                 idx += 1
             elif actions:
                 placeholders = ", ".join(f"${idx + i}" for i in range(len(actions)))
-                where.append(f"action IN ({placeholders})")
+                where.append(f"{col} IN ({placeholders})")
                 params.extend(actions)
                 idx += len(actions)
         if username:
-            where.append(f"username ILIKE ${idx}")
+            col = _check_field("username")
+            where.append(f"{col} ILIKE ${idx}")
             params.append(f"%{username}%")
             idx += 1
         if from_date:
-            where.append(f"created_at >= ${idx}")
+            col = _check_field("created_at")
+            where.append(f"{col} >= ${idx}")
             parsed = datetime.fromisoformat(from_date) if "T" in from_date else datetime.combine(date.fromisoformat(from_date), datetime.min.time())
             params.append(parsed)
             idx += 1
         if to_date:
-            where.append(f"created_at <= ${idx}")
+            col = _check_field("created_at")
+            where.append(f"{col} <= ${idx}")
             parsed = datetime.fromisoformat(to_date) if "T" in to_date else datetime.combine(date.fromisoformat(to_date), datetime.max.time().replace(microsecond=0))
             params.append(parsed)
             idx += 1

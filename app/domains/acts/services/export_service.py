@@ -122,8 +122,12 @@ class ExportService:
                 )
             except AppError:
                 raise
-            except Exception as e:
+            except (MemoryError, ValueError, AttributeError, KeyError, TypeError) as e:
                 logger.exception(f"Ошибка форматирования акта в формат {fmt}: {e}")
+                raise AppError(f"Не удалось отформатировать акт в формат {fmt.upper()}") from e
+            except Exception as e:
+                # Непредвиденная ошибка из форматера (сторонняя библиотека)
+                logger.exception(f"Неожиданная ошибка форматирования акта в формат {fmt}: {e}")
                 raise AppError(f"Не удалось отформатировать акт в формат {fmt.upper()}") from e
 
             # Сохранение в зависимости от формата
@@ -140,8 +144,12 @@ class ExportService:
                     )
             except AppError:
                 raise
-            except Exception as e:
+            except (OSError, PermissionError, MemoryError) as e:
                 logger.exception(f"Ошибка сохранения файла акта ({fmt}): {e}")
+                raise AppError("Не удалось сохранить файл акта") from e
+            except Exception as e:
+                # Непредвиденная ошибка при сохранении (например, из python-docx)
+                logger.exception(f"Неожиданная ошибка сохранения файла акта ({fmt}): {e}")
                 raise AppError("Не удалось сохранить файл акта") from e
 
             # Формирование успешного ответа

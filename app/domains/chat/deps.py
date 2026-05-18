@@ -15,12 +15,35 @@ from app.domains.chat.repositories.message_repository import MessageRepository
 from app.domains.chat.services.conversation_service import ConversationService
 from app.domains.chat.services.file_service import FileService
 from app.domains.chat.services.message_service import MessageService
+from app.domains.chat.services.user_rate_limiter import UserRateLimiter
 from app.domains.chat.settings import ChatDomainSettings
+
+# Singleton лимитера — создаётся при первом обращении, limit читается из settings.
+# Lazy init: при смене настроек в тестах достаточно выставить _rate_limiter = None.
+_rate_limiter: UserRateLimiter | None = None
 
 
 def _get_chat_settings() -> ChatDomainSettings:
     """Возвращает настройки домена чата из реестра."""
     return get_domain_settings("chat", ChatDomainSettings)
+
+
+def get_rate_limiter() -> UserRateLimiter:
+    """Возвращает singleton UserRateLimiter с лимитом из текущих настроек.
+
+    Если домен chat не зарегистрирован в settings_registry (например, в тестах),
+    создаёт лимитер с дефолтными значениями ChatDomainSettings.
+    """
+    global _rate_limiter
+    if _rate_limiter is None:
+        try:
+            settings = _get_chat_settings()
+        except KeyError:
+            settings = ChatDomainSettings()
+        _rate_limiter = UserRateLimiter(
+            limit=settings.rate_limit_messages_per_minute_per_user,
+        )
+    return _rate_limiter
 
 
 async def get_conversation_service() -> AsyncGenerator[ConversationService, None]:

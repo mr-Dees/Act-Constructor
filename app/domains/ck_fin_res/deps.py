@@ -14,6 +14,7 @@ from app.domains.ck_fin_res.repositories.fr_validation_repository import (
 from app.domains.ck_fin_res.services.fr_validation_service import (
     FRValidationService,
 )
+from app.domains.ua_data.interfaces import IDictionaryRepository
 from app.domains.ua_data.repositories.dictionary_repository import (
     DictionaryRepository,
 )
@@ -23,5 +24,5 @@ async def get_fr_validation_service() -> AsyncGenerator[FRValidationService, Non
     """Создаёт FRValidationService с подключением из пула."""
     async with get_db() as conn:
         fr_repo = FRValidationRepository(conn)
-        dict_repo = DictionaryRepository(conn)
+        dict_repo: IDictionaryRepository = DictionaryRepository(conn)
         yield FRValidationService(fr_repo=fr_repo, dict_repo=dict_repo)

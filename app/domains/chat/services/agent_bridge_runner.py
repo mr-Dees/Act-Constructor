@@ -239,24 +239,49 @@ async def _run(
             # (acts.open_act_page и т.п.), фронт их не сможет обработать.
             blocks = await _translate_buttons_in_blocks(blocks)
 
-            # Сохраняем ассистент-сообщение через MessageService.
-            # MessageService привязан к conn — собираем его прямо тут.
+            from app.domains.chat.exceptions import OptimisticLockFailed
+
+            # Атомарная финализация: save_assistant_message + finalize
+            # выполняются в одной транзакции. Если finalize не проходит
+            # optimistic lock (другой воркер уже финализировал запрос),
+            # поднимаем OptimisticLockFailed → транзакция откатывается →
+            # message НЕ сохранён, статус остаётся in_progress для reconcile.
             msg_service = MessageService(
                 msg_repo=MessageRepository(conn),
                 conv_repo=ConversationRepository(conn),
                 settings=settings,
             )
             try:
-                await msg_service.save_assistant_message(
-                    conversation_id=request["conversation_id"],
-                    content=blocks,
-                    model=settings.model,
-                    token_usage=token_usage if token_usage else None,
-                )
+                async with conn.transaction():
+                    await msg_service.save_assistant_message(
+                        conversation_id=request["conversation_id"],
+                        content=blocks,
+                        model=settings.model,
+                        token_usage=token_usage if token_usage else None,
+                    )
+                    success = await req_repo.finalize(
+                        request_id,
+                        current_version,
+                    )
+                    if not success:
+                        raise OptimisticLockFailed(
+                            f"agent_request finalize version conflict "
+                            f"request_id={request_id} "
+                            f"expected_version={current_version}",
+                        )
                 logger.info(
                     "agent_bridge_runner: ответ агента сохранён "
                     "request_id=%s, blocks=%d",
                     request_id, len(blocks),
+                )
+            except OptimisticLockFailed:
+                # Транзакция уже откатилась. Message не сохранён.
+                # Статус остаётся in_progress — reconcile подхватит.
+                logger.warning(
+                    "agent_bridge_runner: optimistic lock conflict при "
+                    "финализации request_id=%s expected_version=%s — "
+                    "rollback, reconcile подхватит",
+                    request_id, current_version,
                 )
             except Exception:
                 logger.exception(

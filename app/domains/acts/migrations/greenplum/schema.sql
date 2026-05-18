@@ -108,7 +108,7 @@ COMMENT ON COLUMN {SCHEMA}.{PREFIX}acts.last_edited_at IS 'Дата и врем�
 
 CREATE TABLE IF NOT EXISTS {SCHEMA}.{PREFIX}audit_team_members (
     id BIGSERIAL NOT NULL,
-    act_id BIGINT NOT NULL,
+    act_id BIGINT NOT NULL REFERENCES {SCHEMA}.{PREFIX}acts(id),
     audit_act_id VARCHAR(36),
     role VARCHAR(50) NOT NULL,
     full_name VARCHAR(255) NOT NULL,
@@ -143,7 +143,7 @@ COMMENT ON COLUMN {SCHEMA}.{PREFIX}audit_team_members.created_at IS 'Дата и
 
 CREATE TABLE IF NOT EXISTS {SCHEMA}.{PREFIX}act_directives (
     id BIGSERIAL NOT NULL,
-    act_id BIGINT NOT NULL,
+    act_id BIGINT NOT NULL REFERENCES {SCHEMA}.{PREFIX}acts(id),
     audit_act_id VARCHAR(36),
     audit_point_id VARCHAR(36),
     point_number VARCHAR(50) NOT NULL,
@@ -177,7 +177,7 @@ COMMENT ON COLUMN {SCHEMA}.{PREFIX}act_directives.created_at IS 'Дата и в�
 
 CREATE TABLE IF NOT EXISTS {SCHEMA}.{PREFIX}act_tree (
     id BIGSERIAL NOT NULL,
-    act_id BIGINT NOT NULL,
+    act_id BIGINT NOT NULL REFERENCES {SCHEMA}.{PREFIX}acts(id),
     tree_data JSONB NOT NULL,
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
@@ -205,7 +205,7 @@ COMMENT ON COLUMN {SCHEMA}.{PREFIX}act_tree.updated_at IS 'Дата и врем�
 
 CREATE TABLE IF NOT EXISTS {SCHEMA}.{PREFIX}act_tables (
     id BIGSERIAL NOT NULL,
-    act_id BIGINT NOT NULL,
+    act_id BIGINT NOT NULL REFERENCES {SCHEMA}.{PREFIX}acts(id),
     audit_act_id VARCHAR(36),
     audit_point_id VARCHAR(36),
     table_id VARCHAR(100) NOT NULL,
@@ -259,7 +259,7 @@ COMMENT ON COLUMN {SCHEMA}.{PREFIX}act_tables.updated_at IS 'Дата и вре�
 
 CREATE TABLE IF NOT EXISTS {SCHEMA}.{PREFIX}act_textblocks (
     id BIGSERIAL NOT NULL,
-    act_id BIGINT NOT NULL,
+    act_id BIGINT NOT NULL REFERENCES {SCHEMA}.{PREFIX}acts(id),
     audit_act_id VARCHAR(36),
     audit_point_id VARCHAR(36),
     textblock_id VARCHAR(100) NOT NULL,
@@ -297,7 +297,7 @@ COMMENT ON COLUMN {SCHEMA}.{PREFIX}act_textblocks.updated_at IS 'Дата и в�
 
 CREATE TABLE IF NOT EXISTS {SCHEMA}.{PREFIX}act_violations (
     id BIGSERIAL NOT NULL,
-    act_id BIGINT NOT NULL,
+    act_id BIGINT NOT NULL REFERENCES {SCHEMA}.{PREFIX}acts(id),
     audit_act_id VARCHAR(36),
     audit_point_id VARCHAR(36),
     violation_id VARCHAR(100) NOT NULL,
@@ -357,7 +357,7 @@ COMMENT ON COLUMN {SCHEMA}.{PREFIX}act_violations.updated_at IS 'Дата и в�
 
 CREATE TABLE IF NOT EXISTS {SCHEMA}.{PREFIX}act_invoices (
     id BIGSERIAL NOT NULL,
-    act_id BIGINT NOT NULL,
+    act_id BIGINT NOT NULL REFERENCES {SCHEMA}.{PREFIX}acts(id),
     audit_act_id VARCHAR(36),
     audit_point_id VARCHAR(36),
     node_id VARCHAR(100) NOT NULL,
@@ -435,7 +435,7 @@ COMMENT ON COLUMN {SCHEMA}.{PREFIX}audit_log.created_at IS 'Время опер�
 
 CREATE TABLE IF NOT EXISTS {SCHEMA}.{PREFIX}act_content_versions (
     id BIGSERIAL NOT NULL,
-    act_id BIGINT NOT NULL,
+    act_id BIGINT NOT NULL REFERENCES {SCHEMA}.{PREFIX}acts(id),
     version_number BIGINT NOT NULL,
     save_type VARCHAR(20) NOT NULL DEFAULT 'auto',
     username VARCHAR(50) NOT NULL,

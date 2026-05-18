@@ -650,3 +650,69 @@ async def test_create_tools_not_given_sentinel_does_not_add_functions():
     kw = mock_create.await_args.kwargs
     # functions не должны добавиться, потому что tools==NOT_GIVEN
     assert "functions" not in (kw.get("extra_body") or {})
+
+
+# -------------------------------------------------------------------------
+# Тесты для parallel tool_calls — адаптер отдаёт только первый function_call
+# -------------------------------------------------------------------------
+
+
+def test_translate_messages_multiple_tool_calls_only_first_sent_to_gigachat(caplog):
+    """При >1 tool_calls в assistant — в native-запрос идёт только первый.
+
+    Оркестратор берёт лишние tool_calls в очередь (4.2.1).
+    Адаптер должен warning-логировать и не крашиться.
+    """
+    messages = [
+        {
+            "role": "assistant",
+            "content": None,
+            "tool_calls": [
+                {"id": "c1", "type": "function",
+                 "function": {"name": "func_a", "arguments": '{"x": 1}'}},
+                {"id": "c2", "type": "function",
+                 "function": {"name": "func_b", "arguments": '{"y": 2}'}},
+                {"id": "c3", "type": "function",
+                 "function": {"name": "func_c", "arguments": "{}"}},
+            ],
+        },
+    ]
+    with caplog.at_level("WARNING"):
+        out = _translate_messages(messages)
+
+    # В native-запросе только первый function_call
+    assert len(out) == 1
+    assert out[0]["function_call"]["name"] == "func_a"
+    assert out[0]["function_call"]["arguments"] == {"x": 1}
+    # Warning содержит информацию о количестве потерянных tool_calls
+    assert any("параллельных" in rec.message.lower() for rec in caplog.records)
+
+
+def test_translate_messages_parallel_tool_calls_tool_results_mapped_correctly():
+    """При >1 tool_calls в assistant — tool-сообщения правильно маппятся
+    по tool_call_id через id_to_name из ВСЕХ tool_calls, не только первого.
+
+    Это важно когда оркестратор кладёт в history несколько tool-результатов
+    (для non-gigachat) и адаптер должен их все правильно перевести.
+    """
+    messages = [
+        {
+            "role": "assistant",
+            "content": "",
+            "tool_calls": [
+                {"id": "call_a", "type": "function",
+                 "function": {"name": "func_a", "arguments": "{}"}},
+                {"id": "call_b", "type": "function",
+                 "function": {"name": "func_b", "arguments": "{}"}},
+            ],
+        },
+        {"role": "tool", "tool_call_id": "call_a", "content": "result_a"},
+        {"role": "tool", "tool_call_id": "call_b", "content": "result_b"},
+    ]
+    out = _translate_messages(messages)
+
+    # id_to_name строится по ВСЕМ tool_calls (не только первому)
+    func_messages = [m for m in out if m.get("role") == "function"]
+    func_names = {m["name"] for m in func_messages}
+    assert "func_a" in func_names
+    assert "func_b" in func_names
