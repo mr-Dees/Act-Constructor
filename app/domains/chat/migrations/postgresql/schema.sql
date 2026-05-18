@@ -72,8 +72,28 @@ CREATE TABLE IF NOT EXISTS {SCHEMA}.{PREFIX}agent_requests (
     created_at        TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
     started_at        TIMESTAMP,
     finished_at       TIMESTAMP,
-    updated_at        TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
+    updated_at        TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    -- Идентификатор HTTP-запроса (из RequestIdMiddleware / X-Request-ID),
+    -- в рамках которого был создан agent_request. Нужен для сквозной
+    -- трассировки: HTTP-запрос ↔ строка agent_requests ↔ логи фонового
+    -- runner'а. NULL — если запрос создан вне HTTP-контекста.
+    parent_request_id VARCHAR(64)
 );
+
+-- Идемпотентная миграция колонки для уже существующих БД, где CREATE TABLE
+-- IF NOT EXISTS выше не сработал. Работает в PG 9.4+ (нет ADD COLUMN IF NOT EXISTS).
+DO $$
+BEGIN
+    IF NOT EXISTS (
+        SELECT 1 FROM pg_attribute
+        WHERE attrelid = '{SCHEMA}.{PREFIX}agent_requests'::regclass
+          AND attname = 'parent_request_id'
+          AND NOT attisdropped
+    ) THEN
+        ALTER TABLE {SCHEMA}.{PREFIX}agent_requests
+            ADD COLUMN parent_request_id VARCHAR(64);
+    END IF;
+END$$;
 
 CREATE INDEX IF NOT EXISTS idx_{PREFIX}agent_requests_status_created
     ON {SCHEMA}.{PREFIX}agent_requests(status, created_at);
@@ -86,6 +106,9 @@ CREATE INDEX IF NOT EXISTS idx_{PREFIX}agent_requests_message
 CREATE INDEX IF NOT EXISTS idx_{PREFIX}agent_requests_pending
     ON {SCHEMA}.{PREFIX}agent_requests(status, updated_at)
     WHERE worker_token IS NULL;
+-- Индекс под фильтр по parent_request_id (трассировка HTTP-запрос → agent_requests).
+CREATE INDEX IF NOT EXISTS idx_{PREFIX}agent_requests_parent_request_id
+    ON {SCHEMA}.{PREFIX}agent_requests(parent_request_id);
 
 -- ── Append-only лента событий от агента ────────────────────────────────
 CREATE TABLE IF NOT EXISTS {SCHEMA}.{PREFIX}agent_response_events (

@@ -103,12 +103,32 @@ CREATE TABLE IF NOT EXISTS {SCHEMA}.{PREFIX}agent_requests (
     started_at        TIMESTAMP,
     finished_at       TIMESTAMP,
     updated_at        TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    -- Идентификатор HTTP-запроса (из RequestIdMiddleware / X-Request-ID),
+    -- в рамках которого был создан agent_request. Нужен для сквозной
+    -- трассировки: HTTP-запрос ↔ строка agent_requests ↔ логи фонового
+    -- runner'а. NULL — если запрос создан вне HTTP-контекста.
+    parent_request_id VARCHAR(64),
     -- GP-требование: DISTRIBUTED BY должен быть подмножеством PK.
     -- id ведущий, чтобы lookups `WHERE id = $1` шли по PK-индексу.
     PRIMARY KEY (id, conversation_id)
 )
 WITH (appendonly=false)
 DISTRIBUTED BY (conversation_id);
+
+-- Идемпотентная миграция колонки для существующих GP-таблиц.
+-- GP 6.x = PG 9.4, нет ADD COLUMN IF NOT EXISTS, поэтому DO-блок.
+DO $$
+BEGIN
+    IF NOT EXISTS (
+        SELECT 1 FROM pg_attribute
+        WHERE attrelid = '{SCHEMA}.{PREFIX}agent_requests'::regclass
+          AND attname = 'parent_request_id'
+          AND NOT attisdropped
+    ) THEN
+        ALTER TABLE {SCHEMA}.{PREFIX}agent_requests
+            ADD COLUMN parent_request_id VARCHAR(64);
+    END IF;
+END$$;
 
 CREATE INDEX idx_{PREFIX}agent_requests_status_created
     ON {SCHEMA}.{PREFIX}agent_requests(status, created_at);
@@ -123,6 +143,9 @@ CREATE INDEX idx_{PREFIX}agent_requests_message
 -- но для надёжности и простоты — обычный композитный.
 CREATE INDEX idx_{PREFIX}agent_requests_pending
     ON {SCHEMA}.{PREFIX}agent_requests(status, worker_token, updated_at);
+-- Индекс под фильтр по parent_request_id (трассировка HTTP-запрос → agent_requests).
+CREATE INDEX idx_{PREFIX}agent_requests_parent_request_id
+    ON {SCHEMA}.{PREFIX}agent_requests(parent_request_id);
 
 -- Append-only лента событий от агента.
 CREATE TABLE IF NOT EXISTS {SCHEMA}.{PREFIX}agent_response_events (
