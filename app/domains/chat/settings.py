@@ -15,9 +15,22 @@ class RetryPolicy(BaseModel):
 
 
 class AgentBridgeSettings(BaseModel):
-    """Настройки моста к внешнему ИИ-агенту через таблицы БД."""
+    """Настройки моста к внешнему ИИ-агенту через таблицы БД.
 
-    poll_interval_sec: float = Field(default=1.0, gt=0.0)
+    Polling выполняется единым координатором (:class:`PollCoordinator`),
+    который батчит SELECT для всех активных `request_id` в один запрос и
+    адаптивно меняет интервал по exponential backoff: при активности —
+    `poll_min_interval_sec`, при тишине растёт до `poll_max_interval_sec`
+    с шагом `poll_backoff_multiplier`.
+    """
+
+    # Минимальный интервал polling (используется и как стартовый
+    # интервал координатора, и как floor при exponential backoff).
+    poll_min_interval_sec: float = Field(default=1.0, gt=0.0)
+    # Максимальный интервал polling при отсутствии событий от агента.
+    poll_max_interval_sec: float = Field(default=10.0, gt=0.0)
+    # Множитель роста интервала между пустыми тиками polling.
+    poll_backoff_multiplier: float = Field(default=1.5, gt=1.0)
     initial_response_timeout_sec: int = Field(default=300, gt=0)
     event_timeout_sec: int = Field(default=120, gt=0)
     max_total_duration_sec: int = Field(default=1800, gt=0)

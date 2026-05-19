@@ -25,6 +25,7 @@ from app.domains.chat.services.chat_audit_service import ChatAuditService
 from app.domains.chat.services.conversation_service import ConversationService
 from app.domains.chat.services.file_service import FileService
 from app.domains.chat.services.message_service import MessageService
+from app.domains.chat.services.poll_coordinator import PollCoordinator
 from app.domains.chat.services.user_rate_limiter import UserRateLimiter
 from app.domains.chat.settings import ChatDomainSettings
 
@@ -63,6 +64,23 @@ def set_audit_log_batcher(
 def get_audit_log_batcher() -> MetricsBatcher[ChatAuditLogRecord] | None:
     """Возвращает активный батчер audit-лога (или None, если не инициализирован)."""
     return _audit_log_batcher
+
+
+# Singleton координатора polling событий внешнего ИИ-агента.
+# Инициализируется в lifespan (см. _register_lifespan_hooks); раннеры и
+# оркестратор подхватывают его через get_poll_coordinator().
+_poll_coordinator: PollCoordinator | None = None
+
+
+def set_poll_coordinator(coordinator: PollCoordinator | None) -> None:
+    """Устанавливает (или сбрасывает) общий PollCoordinator. Зовётся из lifespan."""
+    global _poll_coordinator
+    _poll_coordinator = coordinator
+
+
+def get_poll_coordinator() -> PollCoordinator | None:
+    """Возвращает активный PollCoordinator (или None, если не инициализирован)."""
+    return _poll_coordinator
 
 
 def _get_chat_settings() -> ChatDomainSettings:

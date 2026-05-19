@@ -442,6 +442,7 @@ async def resume_agent_request_stream(
                 async for sse, idx in emit_response_blocks(
                     existing_response["blocks"],
                     block_index_start=block_index,
+                    message_id=str(request_id),
                 ):
                     block_index = idx + 1
                     yield sse
@@ -456,7 +457,7 @@ async def resume_agent_request_stream(
             try:
                 async for upd in bridge.wait_for_completion(
                     request_id,
-                    poll_interval_sec=settings.agent_bridge.poll_interval_sec,
+                    poll_min_interval_sec=settings.agent_bridge.poll_min_interval_sec,
                     initial_response_timeout_sec=settings.agent_bridge.initial_response_timeout_sec,
                     event_timeout_sec=settings.agent_bridge.event_timeout_sec,
                     max_total_duration_sec=settings.agent_bridge.max_total_duration_sec,
@@ -490,6 +491,7 @@ async def resume_agent_request_stream(
                         async for sse, idx in emit_response_blocks(
                             upd.response["blocks"],
                             block_index_start=block_index,
+                            message_id=str(request_id),
                         ):
                             block_index = idx + 1
                             yield sse

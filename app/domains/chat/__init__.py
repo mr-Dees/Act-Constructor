@@ -60,12 +60,184 @@ async def _on_chat_shutdown(app) -> None:
     await close_cached_clients()
 
 
+def _register_lifespan_hooks() -> None:
+    """
+    Регистрирует startup/shutdown hooks чата в общем lifespan-реестре.
+
+    Хуки поднимают/останавливают:
+
+    * ``chat.tool_metrics_batcher`` — батчер метрик чат-tool'ов
+      (записи времени исполнения tool'ов).
+    * ``chat.audit_log_batcher`` — батчер audit-лога чата (перенесён
+      из ``main.py`` во второй волне рефакторинга).
+
+    Сам ``_on_chat_shutdown`` остаётся на ``DomainDescriptor.on_shutdown`` —
+    он работает с polling-задачами форварда, а не с инфраструктурными
+    батчерами.
+    """
+    from fastapi import FastAPI
+
+    from app.core.domain_registry import register_shutdown_hook, register_startup_hook
+    from app.core.metrics_batcher import MetricsBatcher
+    from app.db.connection import get_db
+    from app.domains.chat.deps import (
+        set_audit_log_batcher,
+        set_poll_coordinator,
+        set_tool_metrics_batcher,
+    )
+    from app.domains.chat.repositories.chat_audit_log_repository import (
+        ChatAuditLogRecord,
+        ChatAuditLogRepository,
+    )
+    from app.domains.chat.repositories.chat_tool_metrics_repository import (
+        ChatToolMetricRecord,
+        ChatToolMetricsRepository,
+    )
+
+    async def _start_tool_metrics_batcher(app: FastAPI) -> None:
+        """Поднимает батчер chat-tool метрик."""
+        from app.core.config import get_settings
+
+        obs = get_settings().observability
+
+        async def _flush(records: list[ChatToolMetricRecord]) -> None:
+            async with get_db() as conn:
+                await ChatToolMetricsRepository(conn).record_many(records)
+
+        batcher = MetricsBatcher(
+            flush_callback=_flush,
+            max_batch_size=obs.metrics_batch_size,
+            flush_interval_sec=obs.metrics_flush_interval_sec,
+            max_buffer_size=obs.metrics_max_buffer_size,
+            name="chat_tool_metrics",
+        )
+        await batcher.start()
+        set_tool_metrics_batcher(batcher)
+        app.state.chat_tool_metrics_batcher = batcher
+
+    async def _stop_tool_metrics_batcher(app: FastAPI) -> None:
+        """Останавливает батчер chat-tool метрик и сбрасывает ссылку в deps."""
+        import logging
+
+        logger = logging.getLogger("audit_workstation.domains.chat.lifecycle")
+        batcher = getattr(app.state, "chat_tool_metrics_batcher", None)
+        try:
+            set_tool_metrics_batcher(None)
+        except Exception:
+            logger.exception("Не удалось сбросить ссылку на батчер tool-метрик")
+        if batcher is not None:
+            try:
+                await batcher.stop()
+            except Exception:
+                logger.exception("Ошибка при остановке батчера chat-tool метрик")
+
+    async def _start_audit_log_batcher(app: FastAPI) -> None:
+        """Поднимает батчер audit-лога чата."""
+        from app.core.config import get_settings
+
+        obs = get_settings().observability
+
+        async def _flush(records: list[ChatAuditLogRecord]) -> None:
+            async with get_db() as conn:
+                await ChatAuditLogRepository(conn).log_many(records)
+
+        batcher = MetricsBatcher(
+            flush_callback=_flush,
+            max_batch_size=obs.metrics_batch_size,
+            flush_interval_sec=obs.metrics_flush_interval_sec,
+            max_buffer_size=obs.metrics_max_buffer_size,
+            name="chat_audit_log",
+        )
+        await batcher.start()
+        set_audit_log_batcher(batcher)
+        app.state.chat_audit_log_batcher = batcher
+
+    async def _stop_audit_log_batcher(app: FastAPI) -> None:
+        """Останавливает батчер audit-лога чата и сбрасывает ссылку в deps."""
+        import logging
+
+        logger = logging.getLogger("audit_workstation.domains.chat.lifecycle")
+        batcher = getattr(app.state, "chat_audit_log_batcher", None)
+        try:
+            set_audit_log_batcher(None)
+        except Exception:
+            logger.exception("Не удалось сбросить ссылку на батчер audit-лога")
+        if batcher is not None:
+            try:
+                await batcher.stop()
+            except Exception:
+                logger.exception("Ошибка при остановке батчера audit-лога чата")
+
+    async def _start_poll_coordinator(app: FastAPI) -> None:
+        """Поднимает PollCoordinator — единый фоновый цикл polling событий
+        внешнего ИИ-агента.
+
+        Координатор подписывается на полный список активных ``request_id``
+        и выполняет один SELECT за тик; раннеры читают события из
+        ``asyncio.Queue``. Без координатора каждый раннер делал бы
+        собственный SELECT/сек на свой ``request_id``.
+        """
+        from app.core.settings_registry import get as get_domain_settings
+        from app.db.connection import get_db
+        from app.domains.chat.services.agent_bridge import AgentBridgeService
+        from app.domains.chat.services.poll_coordinator import PollCoordinator
+        from app.domains.chat.settings import ChatDomainSettings
+
+        chat_settings = get_domain_settings("chat", ChatDomainSettings)
+        bridge_settings = chat_settings.agent_bridge
+
+        async def _poll_batch_fn(
+            request_ids: list[str],
+        ) -> dict[str, list[dict]]:
+            """Один SELECT по всем активным request_id (новый коннект на тик)."""
+            async with get_db() as conn:
+                bridge = AgentBridgeService(conn)
+                return await bridge.poll_events_batch(request_ids)
+
+        coordinator = PollCoordinator(
+            poll_batch_fn=_poll_batch_fn,
+            poll_min_interval_sec=bridge_settings.poll_min_interval_sec,
+            poll_max_interval_sec=bridge_settings.poll_max_interval_sec,
+            poll_backoff_multiplier=bridge_settings.poll_backoff_multiplier,
+        )
+        await coordinator.start()
+        set_poll_coordinator(coordinator)
+        app.state.chat_poll_coordinator = coordinator
+
+    async def _stop_poll_coordinator(app: FastAPI) -> None:
+        """Останавливает PollCoordinator и сбрасывает ссылку в deps."""
+        import logging
+
+        logger = logging.getLogger("audit_workstation.domains.chat.lifecycle")
+        coordinator = getattr(app.state, "chat_poll_coordinator", None)
+        try:
+            set_poll_coordinator(None)
+        except Exception:
+            logger.exception("Не удалось сбросить ссылку на PollCoordinator")
+        if coordinator is not None:
+            try:
+                await coordinator.stop()
+            except Exception:
+                logger.exception("Ошибка при остановке PollCoordinator")
+
+    register_startup_hook("chat.tool_metrics_batcher", _start_tool_metrics_batcher)
+    register_shutdown_hook("chat.tool_metrics_batcher", _stop_tool_metrics_batcher)
+
+    register_startup_hook("chat.poll_coordinator", _start_poll_coordinator)
+    register_shutdown_hook("chat.poll_coordinator", _stop_poll_coordinator)
+
+    register_startup_hook("chat.audit_log_batcher", _start_audit_log_batcher)
+    register_shutdown_hook("chat.audit_log_batcher", _stop_audit_log_batcher)
+
+
 def _build_domain():
     """Ленивая инициализация домена."""
     from app.core.domain import DomainDescriptor
     from app.domains.chat.api import get_api_routers
     from app.domains.chat.integrations.chat_tools import get_chat_tools
     from app.domains.chat.settings import ChatDomainSettings
+
+    _register_lifespan_hooks()
 
     return DomainDescriptor(
         name=DOMAIN_NAME,
