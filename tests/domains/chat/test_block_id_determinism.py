@@ -113,15 +113,14 @@ def test_handler_supplied_block_id_is_overwritten():
 
 
 def test_run_accepts_message_id_and_uses_it_for_save():
-    """run() (non-streaming) принимает message_id и пробрасывает его в
-    ``_save_assistant_message`` — id блок-структуры в БД совпадает с id,
+    """run() (non-streaming) обязан принимать message_id и пробрасывать его
+    в ``_save_assistant_message`` — id блок-структуры в БД совпадает с id,
     использованным для построения ClientActionBlock.block_id.
 
     До этого фикса run() генерил собственный uuid внутри метода: фронт после
     reload видел в БД «новый» message_id, не совпадающий с тем, что был в
     ``sessionStorage['chat:executedActions']`` ⇒ повторное исполнение action.
     """
-    import asyncio
     import inspect
 
     sig = inspect.signature(Orchestrator.run)
@@ -129,19 +128,6 @@ def test_run_accepts_message_id_and_uses_it_for_save():
         "Orchestrator.run() должен принимать message_id для согласования "
         "с frontend dedup'ом client_action-блоков"
     )
-
-    captured: dict = {}
-
-    async def _capture_save(self, *, conversation_id, content_blocks,
-                            token_usage=None, message_id=None):
-        captured["message_id"] = message_id
-
-    orch = _orch()
-    orch._save_assistant_message = _capture_save.__get__(orch, Orchestrator)
-    # API не настроен → run уходит в _fallback_response без вызова LLM,
-    # но _save_assistant_message не вызывается; чтобы проверить проброс,
-    # имитируем минимальный путь через fallback с patch — здесь достаточно
-    # убедиться, что run() сохраняет переданный message_id в локальную
-    # переменную и не генерит новый, если он передан явно.
-    # Полное e2e покрытие — выше через _parse_client_action_result + run_stream.
-    assert sig.parameters["message_id"].default is None
+    # message_id обязателен (без default) — API-эндпоинт генерирует id и
+    # пробрасывает его, fallback внутри run() убран.
+    assert sig.parameters["message_id"].default is inspect.Parameter.empty

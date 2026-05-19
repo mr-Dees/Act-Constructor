@@ -430,6 +430,7 @@ class TestOrchestratorRun:
         orchestrator._save_assistant_message = AsyncMock()
 
         result = await orchestrator.run(
+            message_id="test-msg-id",
             conversation_id="conv-1",
             user_message="Привет",
         )
@@ -473,6 +474,7 @@ class TestOrchestratorRun:
         orchestrator._save_assistant_message = AsyncMock()
 
         result = await orchestrator.run(
+            message_id="test-msg-id",
             conversation_id="conv-1",
             user_message="Найди акт КМ-01",
         )
@@ -504,6 +506,7 @@ class TestOrchestratorRun:
         orchestrator._save_assistant_message = AsyncMock()
 
         result = await orchestrator.run(
+            message_id="test-msg-id",
             conversation_id="conv-1",
             user_message="Тест лимита",
         )
@@ -514,6 +517,7 @@ class TestOrchestratorRun:
     async def test_run_fallback_no_api(self, orchestrator_no_api):
         """Без настроек API возвращается fallback-ответ."""
         result = await orchestrator_no_api.run(
+            message_id="test-msg-id",
             conversation_id="conv-1",
             user_message="Привет",
         )
@@ -540,6 +544,7 @@ class TestOrchestratorRun:
         orchestrator._save_assistant_message = AsyncMock()
 
         result = await orchestrator.run(
+            message_id="test-msg-id",
             conversation_id="conv-1",
             user_message="Привет",
         )
@@ -572,6 +577,7 @@ class TestOrchestratorRun:
 
         with caplog.at_level("WARNING"):
             result = await orchestrator.run(
+                message_id="test-msg-id",
                 conversation_id="conv-timeout",
                 user_message="Привет",
             )
@@ -601,6 +607,7 @@ class TestOrchestratorRun:
         orchestrator._save_assistant_message = AsyncMock()
 
         result = await orchestrator.run(
+            message_id="test-msg-id",
             conversation_id="conv-1",
             user_message="Вопрос",
         )
@@ -650,6 +657,7 @@ class TestOrchestratorRun:
         orchestrator._save_assistant_message = AsyncMock()
 
         result = await orchestrator.run(
+            message_id="test-msg-id",
             conversation_id="conv-1",
             user_message="Найди что-нибудь",
         )
@@ -815,6 +823,7 @@ class TestExecuteToolCall:
 
             events = []
             async for ev in orchestrator.run_stream(
+                message_id="test-msg-id",
                 conversation_id="conv-1",
                 user_message="loop",
             ):
@@ -1060,6 +1069,7 @@ class TestOrchestratorRunStream:
         """Без API: message_start → block_start → delta → block_end → message_end."""
         events = []
         async for event in orchestrator_no_api.run_stream(
+            message_id="test-msg-id",
             conversation_id="conv-1",
             user_message="Привет",
         ):
@@ -1078,6 +1088,7 @@ class TestOrchestratorRunStream:
         """Fallback-стриминг содержит текст сообщения пользователя."""
         events = []
         async for event in orchestrator_no_api.run_stream(
+            message_id="test-msg-id",
             conversation_id="conv-1",
             user_message="Тестовое сообщение",
         ):
@@ -1122,6 +1133,7 @@ class TestOrchestratorRunStream:
 
         events = []
         async for event in orchestrator.run_stream(
+            message_id="test-msg-id",
             conversation_id="conv-1",
             user_message="Привет",
         ):
@@ -1151,6 +1163,7 @@ class TestOrchestratorRunStream:
 
         events = []
         async for event in orchestrator.run_stream(
+            message_id="test-msg-id",
             conversation_id="conv-1",
             user_message="Привет",
         ):
@@ -1210,6 +1223,7 @@ class TestOrchestratorRunStream:
 
         events = []
         async for event in orchestrator.run_stream(
+            message_id="test-msg-id",
             conversation_id="conv-1",
             user_message="Используй инструмент",
         ):
@@ -1270,6 +1284,7 @@ class TestOrchestratorRunStream:
             patch("app.db.repositories.base.get_adapter", return_value=mock_adapter),
         ):
             async for event in orchestrator.run_stream(
+                message_id="test-msg-id",
                 conversation_id="conv-1",
                 user_message="Привет",
             ):
@@ -1335,6 +1350,7 @@ class TestOrchestratorRunStream:
 
         events = []
         async for ev in orchestrator.run_stream(
+            message_id="test-msg-id",
             conversation_id="conv-1",
             user_message="без параметра",
         ):
@@ -1367,6 +1383,7 @@ class TestOrchestratorRunStream:
         events = []
         with patch("builtins.__import__", side_effect=mock_import):
             async for event in orchestrator.run_stream(
+                message_id="test-msg-id",
                 conversation_id="conv-1",
                 user_message="Привет",
             ):
@@ -1577,6 +1594,7 @@ async def test_orchestrator_disables_streaming_for_gigachat_profile():
         ):
             chunks = []
             async for chunk in orch.run_stream(
+                message_id="test-msg-id",
                 conversation_id="c1",
                 user_message="привет",
             ):
@@ -1788,7 +1806,7 @@ class TestGigaChatQueue:
         )
         mock_client_factory.return_value = mock_client
 
-        result = await orch.run(conversation_id="conv-1", user_message="два tool_call")
+        result = await orch.run(message_id="test-msg-id", conversation_id="conv-1", user_message="два tool_call")
 
         assert "A" in call_order
         assert "B" in call_order
@@ -1828,7 +1846,7 @@ class TestGigaChatQueue:
         )
         mock_client_factory.return_value = mock_client
 
-        result = await orchestrator.run(conversation_id="conv-1", user_message="параллельно")
+        result = await orchestrator.run(message_id="test-msg-id", conversation_id="conv-1", user_message="параллельно")
         # Оба tool_call исполнены
         assert set(call_order) == {"X", "Y"}
         # LLM вызван дважды: 1 раз с tool_calls, 1 раз финальный
@@ -1874,6 +1892,7 @@ class TestToolLoopExit:
         mock_client_factory.return_value = mock_client
 
         result = await orchestrator.run(
+            message_id="test-msg-id",
             conversation_id="conv-1",
             user_message="вызови strict без параметра",
         )
@@ -1927,6 +1946,7 @@ class TestToolLoopExit:
 
         events: list[str] = []
         async for ev in orch.run_stream(
+            message_id="test-msg-id",
             conversation_id="conv-1",
             user_message="вызови strict2 без параметра",
         ):
@@ -1988,6 +2008,7 @@ class TestToolLoopExit:
         mock_client_factory.return_value = mock_client
 
         result = await orchestrator.run(
+            message_id="test-msg-id",
             conversation_id="conv-1",
             user_message="чередуй ошибки",
         )

@@ -247,6 +247,7 @@ class TestStreamingLifecycle:
 
         events = []
         async for event in orchestrator.run_stream(
+            message_id="test-msg-id",
             conversation_id="conv-1",
             user_message="Привет",
         ):
@@ -262,6 +263,7 @@ class TestStreamingLifecycle:
 
         events = []
         async for event in orchestrator.run_stream(
+            message_id="test-msg-id",
             conversation_id="conv-1",
             user_message="Привет",
         ):
@@ -277,6 +279,7 @@ class TestStreamingLifecycle:
 
         events = []
         async for event in orchestrator.run_stream(
+            message_id="test-msg-id",
             conversation_id="conv-1",
             user_message="Привет",
         ):
@@ -305,6 +308,7 @@ class TestStreamingLifecycle:
 
         events = []
         async for event in orchestrator.run_stream(
+            message_id="test-msg-id",
             conversation_id="conv-1",
             user_message="Привет",
         ):
@@ -338,6 +342,7 @@ class TestStreamingLifecycle:
 
         events = []
         async for event in orchestrator.run_stream(
+            message_id="test-msg-id",
             conversation_id="conv-1",
             user_message="Привет",
         ):
@@ -382,6 +387,7 @@ class TestStreamingLifecycle:
         events = []
         with patch("app.db.connection.get_db", return_value=ctx):
             async for event in orchestrator.run_stream(
+                message_id="test-msg-id",
                 conversation_id="conv-1",
                 user_message="Привет",
             ):
@@ -419,6 +425,7 @@ class TestStreamingFallback:
 
         events = []
         async for event in orchestrator_no_streaming.run_stream(
+            message_id="test-msg-id",
             conversation_id="conv-1",
             user_message="Привет",
         ):
@@ -469,6 +476,7 @@ class TestStreamingFallback:
 
         events = []
         async for event in orchestrator.run_stream(
+            message_id="test-msg-id",
             conversation_id="conv-1",
             user_message="Тест фолбека",
         ):
@@ -543,6 +551,7 @@ class TestStreamingToolCalls:
 
         events = []
         async for event in orchestrator.run_stream(
+            message_id="test-msg-id",
             conversation_id="conv-1",
             user_message="Найди акты",
         ):
@@ -632,6 +641,7 @@ class TestStreamingToolCalls:
 
         events = []
         async for event in orchestrator.run_stream(
+            message_id="test-msg-id",
             conversation_id="conv-1",
             user_message="Используй оба",
         ):

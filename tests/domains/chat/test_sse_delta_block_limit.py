@@ -473,6 +473,7 @@ async def test_orchestrator_stream_truncates_huge_llm_chunk(
 
     events: list[str] = []
     async for event in orch.run_stream(
+        message_id="test-msg-id",
         conversation_id="conv-1",
         user_message="дай много текста",
     ):

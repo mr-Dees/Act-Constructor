@@ -153,6 +153,7 @@ async def test_gigachat_orchestrator_executes_tool_round():
     ):
         chunks: list[str] = []
         async for chunk in orch.run_stream(
+            message_id="test-msg-id",
             conversation_id="conv-1",
             user_message="Открой example.com",
             domains=["chat"],

@@ -500,7 +500,7 @@ class Orchestrator:
         conversation_id: str,
         content_blocks: list[dict],
         token_usage: dict | None,
-        message_id: str | None = None,
+        message_id: str,
     ) -> None:
         """Сохраняет сообщение ассистента с отдельным соединением из пула.
 
@@ -819,20 +819,17 @@ class Orchestrator:
         *,
         conversation_id: str,
         user_message: str,
+        message_id: str,
         domains: list[str] | None = None,
         file_blocks: list[dict] | None = None,
         user_id: str | None = None,
-        message_id: str | None = None,
     ) -> dict[str, Any]:
         """
         Полный (не стриминговый) agent loop.
 
-        ``message_id`` нужен для детерминированного ``block_id`` ClientActionBlock
-        (``f"{message_id}:ca:{i}"``) — тот же id должен быть использован и в
-        ``_save_assistant_message``, и при парсинге tool-результатов. Если
-        вызывающий код уже сгенерировал id (``MessageService.send_message`` —
-        обычный путь), он обязан передать его сюда; иначе сгенерируем сами
-        для тестовых сценариев.
+        ``message_id`` обязателен и должен быть тем же id, что попадёт в БД
+        через ``_save_assistant_message``: на нём строится детерминированный
+        ``block_id`` ClientActionBlock (``f"{message_id}:ca:{i}"``).
 
         Возвращает dict с полями: response, sources, model, token_usage.
         """
@@ -875,12 +872,9 @@ class Orchestrator:
         # Формат: (error_message_key, tool_name)
         _last_validation_error: tuple[str, str] | None = None
         _consecutive_validation_errors = 0
-        # Идентификатор сообщения и счётчик client_action-блоков —
-        # используются для построения детерминированного block_id
-        # (см. _parse_client_action_result). Если вызывающий передал
-        # message_id — используем его (тот же id должен быть и в БД через
-        # _save_assistant_message). Иначе генерируем для тестов / standalone.
-        message_id = message_id or str(uuid.uuid4())
+        # Счётчик client_action-блоков для построения детерминированного
+        # block_id (см. _parse_client_action_result). message_id передан
+        # вызывающим — тот же id будет использован в _save_assistant_message.
         ca_counter: list[int] = [0]
 
         try:
@@ -1146,9 +1140,9 @@ class Orchestrator:
         *,
         conversation_id: str,
         user_message: str,
+        message_id: str,
         domains: list[str] | None = None,
         file_blocks: list[dict] | None = None,
-        message_id: str | None = None,
         user_id: str | None = None,
         knowledge_bases: list[str] | None = None,
     ) -> AsyncGenerator[str, None]:
@@ -1158,11 +1152,10 @@ class Orchestrator:
         Если streaming_enabled, использует stream=True с автофолбеком.
         Всегда yield-ит message_start/message_end.
 
-        message_id, user_id, knowledge_bases используются для tool-call
-        chat.forward_to_knowledge_agent — оркестратор подставляет
-        замыкание-handler с контекстом текущего сообщения.
+        ``message_id`` обязателен — тот же id, что попадёт в БД через
+        ``_save_assistant_message`` (используется для детерминированного
+        ``block_id`` и для контекста forward'а к внешнему агенту).
         """
-        message_id = message_id or str(uuid.uuid4())
         # Фиксируем контекст для метрик; читается из _execute_tool_call.
         self._current_conversation_id = conversation_id
         self._current_user_id = user_id

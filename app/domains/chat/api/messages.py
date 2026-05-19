@@ -4,6 +4,7 @@ import asyncio
 import json
 import logging
 import time
+import uuid
 
 from fastapi import APIRouter, Depends, File, Form, Query, Request, UploadFile
 from fastapi.responses import StreamingResponse
@@ -170,6 +171,11 @@ async def send_message(
         conv_service=conv_service,
     )
 
+    # ID будущего assistant-сообщения. Генерируем здесь, чтобы он совпадал
+    # с тем, что попадёт в БД через _save_assistant_message — на нём строится
+    # детерминированный block_id ClientActionBlock.
+    assistant_message_id = str(uuid.uuid4())
+
     # Определяем режим ответа по Accept header
     # TODO(forward): пробросить список knowledge_bases из контекста беседы,
     # когда фронт начнёт передавать выбранные пользователем БЗ.
@@ -217,6 +223,7 @@ async def send_message(
                 async for chunk in orchestrator.run_stream(
                     conversation_id=conversation_id,
                     user_message=message,
+                    message_id=assistant_message_id,
                     domains=domains_list,
                     file_blocks=file_blocks if file_blocks else None,
                     user_id=username,
@@ -309,6 +316,7 @@ async def send_message(
         result = await orchestrator.run(
             conversation_id=conversation_id,
             user_message=message,
+            message_id=assistant_message_id,
             domains=domains_list,
             file_blocks=file_blocks if file_blocks else None,
         )
