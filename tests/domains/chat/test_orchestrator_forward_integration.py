@@ -155,7 +155,7 @@ async def test_forward_tool_call_streams_reasoning_and_final(monkeypatch):
         AsyncMock(return_value={"id": "x", "status": "in_progress"}),
     )
 
-    # _handle_forward_call открывает get_db() — подсовываем фиктивное соединение.
+    # handle_forward_call открывает get_db() — подсовываем фиктивное соединение.
     fake_conn = AsyncMock()
     ctx = AsyncMock()
     ctx.__aenter__ = AsyncMock(return_value=fake_conn)

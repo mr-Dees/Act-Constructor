@@ -25,6 +25,7 @@ from app.core.settings_registry import get as get_domain_settings
 from app.domains.chat.exceptions import ChatToolValidationError
 from app.domains.chat.services.circuit_breaker import get_breaker
 from app.domains.chat.services.conversation_service import ConversationService
+from app.domains.chat.services.forward_bridge import handle_forward_call
 from app.domains.chat.services.llm_client import (
     build_fallback_client,
     build_llm_client,
@@ -533,43 +534,6 @@ class Orchestrator:
                 token_usage=token_usage if token_usage else None,
                 message_id=message_id,
             )
-
-    async def _handle_forward_call(
-        self,
-        *,
-        conversation_id: str,
-        message_id: str,
-        user_id: str,
-        domain_name: str | None,
-        knowledge_bases: list[str],
-        history: list[dict],
-        files: list[dict],
-        arguments: dict,
-        block_index: int,
-    ) -> AsyncGenerator[tuple[str, Any], None]:
-        """Делегирует forward-bridge в отдельный модуль (``forward_bridge``).
-
-        Подробное описание контракта см. в ``forward_bridge.handle_forward_call``.
-        Метод оставлен тонкой обёрткой для обратной совместимости тестов и
-        чтобы вызывающий код мог обращаться к оркестратору единообразно.
-        """
-        from app.domains.chat.services.forward_bridge import (
-            handle_forward_call,
-        )
-
-        async for item in handle_forward_call(
-            settings=self.settings,
-            conversation_id=conversation_id,
-            message_id=message_id,
-            user_id=user_id,
-            domain_name=domain_name,
-            knowledge_bases=knowledge_bases,
-            history=history,
-            files=files,
-            arguments=arguments,
-            block_index=block_index,
-        ):
-            yield item
 
     def _parse_client_action_result(
         self,
@@ -1582,11 +1546,12 @@ class Orchestrator:
                                 ):
                                     history_messages = history_messages[:-1]
                                 # Forward к внешнему агенту: SSE-стрим идёт
-                                # из _handle_forward_call, сохранение
-                                # ассистент-сообщения делает фоновый раннер
-                                # (agent_bridge_runner) — даже если клиент
-                                # закроет соединение посреди ответа.
-                                async for kind, payload in self._handle_forward_call(
+                                # из forward_bridge.handle_forward_call,
+                                # сохранение ассистент-сообщения делает фоновый
+                                # раннер (agent_bridge_runner) — даже если
+                                # клиент закроет соединение посреди ответа.
+                                async for kind, payload in handle_forward_call(
+                                    settings=self.settings,
                                     conversation_id=conversation_id,
                                     message_id=message_id,
                                     user_id=user_id or "",
@@ -1863,11 +1828,12 @@ class Orchestrator:
                             ):
                                 history_messages = history_messages[:-1]
                             # Forward к внешнему агенту: SSE-стрим идёт
-                            # из _handle_forward_call, сохранение
-                            # ассистент-сообщения делает фоновый раннер
-                            # (agent_bridge_runner) — даже если клиент
-                            # закроет соединение посреди ответа.
-                            async for kind, payload in self._handle_forward_call(
+                            # из forward_bridge.handle_forward_call,
+                            # сохранение ассистент-сообщения делает фоновый
+                            # раннер (agent_bridge_runner) — даже если
+                            # клиент закроет соединение посреди ответа.
+                            async for kind, payload in handle_forward_call(
+                                settings=self.settings,
                                 conversation_id=conversation_id,
                                 message_id=message_id,
                                 user_id=user_id or "",
