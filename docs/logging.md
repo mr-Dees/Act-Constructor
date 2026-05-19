@@ -80,13 +80,13 @@ datefmt="%Y-%m-%dT%H:%M:%S"
 автоматически как ключи верхнего уровня (свойство `python-json-logger`,
 протестировано в `tests/test_logging.py:76-96`).
 
-Пример реальной строки (из `app/domains/chat/services/orchestrator.py:1292-1299`):
+Пример реальной строки (из `app/domains/chat/services/agent_loop.py`, лог LLM timeout):
 
 ```json
 {
   "timestamp": "2026-05-19T14:23:11",
   "level": "WARNING",
-  "name": "audit_workstation.domains.chat.services.orchestrator",
+  "name": "audit_workstation.domains.chat.services.agent_loop",
   "message": "LLM timeout",
   "request_id": "a3f9c1d2",
   "stage": "run",
@@ -96,15 +96,15 @@ datefmt="%Y-%m-%dT%H:%M:%S"
 ```
 
 Поля `stage`, `model`, `conversation_id` пришли из `extra={...}` в коде
-оркестратора.
+agent loop'а.
 
-Ещё один пример с `error_id` (`app/domains/chat/services/orchestrator.py:1012-1016`):
+Ещё один пример с `error_id` (`app/domains/chat/services/tool_executor.py`):
 
 ```json
 {
   "timestamp": "2026-05-19T14:24:02",
   "level": "ERROR",
-  "name": "audit_workstation.domains.chat.services.orchestrator",
+  "name": "audit_workstation.domains.chat.services.tool_executor",
   "message": "Ошибка выполнения tool=acts.open_act_page error_id=7a2b9c4d",
   "request_id": "a3f9c1d2",
   "exc_info": "Traceback (most recent call last): ..."
@@ -370,20 +370,21 @@ LIMIT 100;
   превышен (`middleware.py:97`), запрос отклонён по размеру
   (`middleware.py:153, 172`), `Kerberos` токен протух во время запроса
   (`main.py:358`), `UniqueViolationError` / `CheckViolationError`
-  (`main.py:395, 405`), LLM timeout (`orchestrator.py:1292-1299, 2296-2304`,
+  (`main.py:395, 405`), LLM timeout (`agent_loop.py`, `stream_loop.py`,
   `agent_bridge.py:170-176, 192-198, 217-223`), SSE-блок усечён
   (`streaming.py:291-298`).
 - **ERROR / ERROR через `logger.exception`** — `logger.exception(...)` пишет
   traceback автоматически. Используется для всех необработанных исключений
   (`main.py:425`), откатов lifespan-hooks и доменов (`main.py:155, 179, 186,
-  251, 260`), ошибок tool-вызовов с `error_id` (`orchestrator.py:1013`),
-  падений сохранения сообщений (`orchestrator.py:2291-2293`).
+  251, 260`), ошибок tool-вызовов с `error_id` (`tool_executor.py`),
+  падений сохранения сообщений (`stream_loop.py`, два соседних `logger.exception`
+  для `(OSError, asyncio.TimeoutError)` и `Exception`).
 - **CRITICAL** — невосстановимые состояния на старте: Kerberos на startup
   (`main.py:217`), `PostgresError` (`main.py:234`), singleton-lock не
   захватили (`main.py:141`), любая необработанная ошибка lifespan
   (`main.py:237`).
 
-**Замеченное возможное место для доработки:** в `orchestrator.py:2291-2293`
+**Замеченное возможное место для доработки:** в `stream_loop.py`
 один и тот же текст `"Не удалось сохранить сообщение ассистента"` логируется
 двумя `logger.exception` подряд (для `(OSError, asyncio.TimeoutError)` и
 `Exception`) — обе ветки visually идентичны, отличить причину можно только
@@ -396,16 +397,16 @@ LIMIT 100;
 - **Содержимое сообщений пользователя в чате.** В `messages.py:82`
   логируется только превью (`message=%r, domains=%r`) с пометкой
   `truncated`. Полный текст в логи не идёт.
-- **Tool-аргументы при стриминге.** В `orchestrator.py:1763, 2045`
+- **Tool-аргументы при стриминге.** В `stream_loop.py` (две точки эмита)
   `args_str` обрезается до 200 символов перед эмитом в лог:
   `args_str[:200] + "..." if len(args_str) > 200 else args_str`.
-- **Tool-вывод.** В `orchestrator.py:992` превью аналогично режется до 200
+- **Tool-вывод.** В `tool_executor.py` превью аналогично режется до 200
   символов.
 - **Stack traces в ответе LLM.** Полный traceback exception'а tool'а пишется
   в лог под `error_id`, а LLM получает только нейтральное сообщение
   `f"Инструмент завершился с ошибкой. error_id={error_id}. Сообщите
-  администратору."` (`orchestrator.py:1010-1020`). Имена БД, SQL-фрагменты и
-  прочие чувствительные данные не утекают в чат.
+  администратору."` (формируется в `tool_executor.py`). Имена БД,
+  SQL-фрагменты и прочие чувствительные данные не утекают в чат.
 - **Пароли БД.** `DatabaseSettings.password: SecretStr`
   (`app/core/config.py:80`). Pydantic `SecretStr` при `repr()` отдаёт
   `**********` — не попадает ни в логи, ни в трейсы исключений pydantic.

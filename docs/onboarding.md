@@ -93,7 +93,7 @@
 
 Перед каждой задачей сверься с ключевыми неочевидными правилами проекта (полный список — в `docs/developer-guide.md` «Key Patterns»):
 
-- **LLM-эхо tool_call'ов.** Assistant с `content=null` или `arguments=""` в `tool_calls` валит Qwen/SGLang (400 «zero-length, empty document») и GigaChat-proxy (422 `RequestInputValidationException`). Не делать `messages.append(response.choices[0].message)` напрямую — собирать dict вручную с `content=raw_msg.content or ""`, прогоняя `arguments` через `_safe_args(raw)` (`app/domains/chat/services/orchestrator.py`).
+- **LLM-эхо tool_call'ов.** Assistant с `content=null` или `arguments=""` в `tool_calls` валит Qwen/SGLang (400 «zero-length, empty document») и GigaChat-proxy (422 `RequestInputValidationException`). Не делать `messages.append(response.choices[0].message)` напрямую — собирать dict вручную с `content=raw_msg.content or ""`, прогоняя `arguments` через `safe_args(raw)` из `app/domains/chat/services/orchestrator_helpers.py`.
 - **Frontend fetch под JupyterHub-proxy.** Все `fetch('/api/v1/...')` ОБЯЗАНЫ идти через `AppConfig.api.getUrl('/api/v1/...')`. Прямой относительный URL роутится JupyterHub'ом на `/hub/...` минуя `/user/{user}/proxy/{port}/` → 404. То же для client_action `open_url` (через `resolveProxyUrl`).
 - **Глобальные синглтоны на фронте.** `window.X = new ...` (или `window.X = X` после `const`/`class`). `const X = new ...` создаёт переменную в Script-scope и `window.X.method()` падает в undefined.
 - **Greenplum 6.x = PostgreSQL 9.4.** В GP-схемах запрещены `CREATE INDEX IF NOT EXISTS`, `ADD COLUMN IF NOT EXISTS`, `CREATE SEQUENCE IF NOT EXISTS`, `ON CONFLICT`, `gen_random_uuid()`, `jsonb_set()`. Адаптер GP идёт statement-by-statement и ловит `Duplicate*Error` — дубликаты безопасны.
