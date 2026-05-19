@@ -608,7 +608,6 @@ class Orchestrator:
         from app.db.connection import get_db
         from app.domains.chat.integrations.forward_handler import (
             FORWARD_SENTINEL_PATTERN,
-            build_forward_handler,
         )
         from app.domains.chat.repositories.agent_request_repository import (
             AgentRequestRepository,
@@ -616,11 +615,14 @@ class Orchestrator:
         from app.domains.chat.services import agent_bridge_runner
         from app.domains.chat.services.agent_bridge import AgentBridgeService
         from app.domains.chat.services.block_emitter import emit_response_blocks
+        from app.domains.chat.services.forward_tool_factory import (
+            build_forward_tool,
+        )
 
         # Регистрация запроса — отдельным соединением; держать его открытым
         # на всё время polling нельзя (могут быть десятки минут).
         async with get_db() as conn:
-            handler = build_forward_handler(
+            forward_tool = build_forward_tool(
                 conn=conn,
                 conversation_id=conversation_id,
                 message_id=message_id,
@@ -630,7 +632,8 @@ class Orchestrator:
                 history=history,
                 files=files,
             )
-            sentinel = await handler(**arguments)
+            assert forward_tool.handler is not None
+            sentinel = await forward_tool.handler(**arguments)
         match = FORWARD_SENTINEL_PATTERN.match(sentinel)
         if not match:
             logger.warning(
@@ -668,7 +671,7 @@ class Orchestrator:
         )
 
         last_seq: int | None = None
-        poll_interval = self.settings.agent_bridge.poll_interval_sec
+        poll_interval = self.settings.agent_bridge.poll_min_interval_sec
         # Аварийная защита от вечного цикла в самом оркестраторе на
         # случай, если раннер по какой-то причине не финализирует запрос.
         # Это запас сверх раннеровского max_total_duration_sec — раннер
@@ -746,6 +749,7 @@ class Orchestrator:
                     async for sse, idx in emit_response_blocks(
                         response["blocks"],
                         block_index_start=block_index,
+                        message_id=message_id,
                     ):
                         block_index = idx + 1
                         yield ("sse", sse)
@@ -780,10 +784,24 @@ class Orchestrator:
 
             await asyncio.sleep(poll_interval)
 
-    def _parse_client_action_result(self, raw: str) -> dict | None:
+    def _parse_client_action_result(
+        self,
+        raw: str,
+        *,
+        message_id: str,
+        ca_counter: list[int],
+    ) -> dict | None:
         """Если result tool'а — JSON-блок client_action, возвращает dict.
 
         Иначе возвращает None (это обычный текстовый результат tool'а).
+
+        ``block_id`` всегда переписывается на детерминированный
+        ``f"{message_id}:ca:{index}"`` (даже если handler выставил свой uuid):
+        это гарантирует, что при перезагрузке вкладки и реплее истории
+        фронт получит ТОТ ЖЕ id и пропустит повторное исполнение через
+        ``sessionStorage['chat:executedActions']``. ``ca_counter`` — список-
+        обёртка из одного int (для shared-state между вызовами в рамках
+        одного ассистент-сообщения).
         """
         try:
             obj = json.loads(raw)
@@ -796,11 +814,9 @@ class Orchestrator:
         # Минимальная валидация
         if "action" not in obj:
             return None
-        # Гарантируем block_id для идемпотентности на фронте: handler'ы
-        # должны его проставлять, но защищаем case, когда tool вернул
-        # client_action без block_id (LLM-конструируемый JSON и т.п.).
-        if not obj.get("block_id"):
-            obj["block_id"] = str(uuid.uuid4())
+        idx = ca_counter[0]
+        ca_counter[0] = idx + 1
+        obj["block_id"] = f"{message_id}:ca:{idx}"
         return obj
 
     def _parse_buttons_result(self, raw: str) -> dict | None:
@@ -820,10 +836,20 @@ class Orchestrator:
             return None
         return obj
 
-    def _parse_blocks_list_result(self, raw: str) -> list[dict] | None:
+    def _parse_blocks_list_result(
+        self,
+        raw: str,
+        *,
+        message_id: str,
+        ca_counter: list[int],
+    ) -> list[dict] | None:
         """Если result tool'а — JSON-список блоков, возвращает список dict.
 
         Иначе None.
+
+        Для каждого client_action внутри списка ``block_id`` переписывается
+        детерминированно как ``f"{message_id}:ca:{index}"`` (см. doc-string
+        :meth:`_parse_client_action_result`).
         """
         try:
             obj = json.loads(raw)
@@ -833,11 +859,11 @@ class Orchestrator:
             return None
         if not all(isinstance(b, dict) and "type" in b for b in obj):
             return None
-        # Гарантируем block_id для каждого client_action внутри списка —
-        # фронт использует его для идемпотентного исполнения.
         for b in obj:
-            if b.get("type") == "client_action" and not b.get("block_id"):
-                b["block_id"] = str(uuid.uuid4())
+            if b.get("type") == "client_action":
+                idx = ca_counter[0]
+                ca_counter[0] = idx + 1
+                b["block_id"] = f"{message_id}:ca:{idx}"
         return obj
 
     async def _translate_buttons(self, buttons: list[dict]) -> list[dict]:
@@ -1054,6 +1080,12 @@ class Orchestrator:
         # Формат: (error_message_key, tool_name)
         _last_validation_error: tuple[str, str] | None = None
         _consecutive_validation_errors = 0
+        # Идентификатор сообщения и счётчик client_action-блоков —
+        # используются для построения детерминированного block_id
+        # (см. _parse_client_action_result). run() не получает message_id
+        # снаружи, поэтому генерируем; в run_stream() он передаётся явно.
+        message_id = str(uuid.uuid4())
+        ca_counter: list[int] = [0]
 
         try:
             response, _fb_used, client = await self._llm_call_with_fallback(
@@ -1382,6 +1414,10 @@ class Orchestrator:
         token_usage: dict[str, Any] = {}
         full_answer = ""
         block_index = 0
+        # Счётчик client_action-блоков для детерминированного block_id
+        # ``f"{message_id}:ca:{i}"``. Обёрнут в list, чтобы parser-методы
+        # могли инкрементировать его in-place.
+        ca_counter: list[int] = [0]
         emitted_blocks: list[dict] = []  # ClientActionBlock'и, эмитнутые до финала
         # GigaChat поддерживает только 1 function_call за раунд. Если LLM
         # вернул >1 tool_call, первый исполняем сейчас, остальные — в очередь.
@@ -1851,10 +1887,14 @@ class Orchestrator:
                                 result=result,
                             )
 
-                            client_action = self._parse_client_action_result(result)
+                            client_action = self._parse_client_action_result(
+                                result, message_id=message_id, ca_counter=ca_counter,
+                            )
                             blocks_list = (
                                 None if client_action is not None
-                                else self._parse_blocks_list_result(result)
+                                else self._parse_blocks_list_result(
+                                    result, message_id=message_id, ca_counter=ca_counter,
+                                )
                             )
                             buttons_block = (
                                 None if (client_action is not None or blocks_list is not None)
@@ -2126,10 +2166,14 @@ class Orchestrator:
                             result=result,
                         )
 
-                        client_action = self._parse_client_action_result(result)
+                        client_action = self._parse_client_action_result(
+                            result, message_id=message_id, ca_counter=ca_counter,
+                        )
                         blocks_list = (
                             None if client_action is not None
-                            else self._parse_blocks_list_result(result)
+                            else self._parse_blocks_list_result(
+                                result, message_id=message_id, ca_counter=ca_counter,
+                            )
                         )
                         buttons_block = (
                             None if (client_action is not None or blocks_list is not None)

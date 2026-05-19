@@ -7,7 +7,6 @@
 
 from __future__ import annotations
 
-import uuid
 from typing import Any, Literal, Union
 
 from pydantic import BaseModel, Field, model_validator
@@ -136,9 +135,12 @@ class ClientActionBlock(BaseModel):
     label: str | None = None
     # Идемпотентный идентификатор: фронт хранит исполненные block_id в
     # sessionStorage и пропускает повторное выполнение при resume/reload.
-    # Генерируется по умолчанию uuid4 — но может быть переопределён вручную
-    # (например, при ручной сборке dict в handler'ах).
-    block_id: str = Field(default_factory=lambda: str(uuid.uuid4()))
+    # Поле обязательное (без дефолта): на стороне сервера id выставляется
+    # детерминированно как ``f"{message_id}:{block_index}"`` в оркестраторе,
+    # либо явно передаётся handler'ом. Идентичный block_id между запусками
+    # / перезагрузками вкладки → frontend `executedActions` корректно
+    # дедуплицирует повторное исполнение.
+    block_id: str
 
     @model_validator(mode="after")
     def _validate_action_and_params(self) -> "ClientActionBlock":

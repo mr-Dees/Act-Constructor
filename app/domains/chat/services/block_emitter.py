@@ -12,7 +12,6 @@
 """
 from __future__ import annotations
 
-import uuid
 from collections.abc import AsyncIterator
 
 # Стримуемые блоки: фронт собирает их инкрементально из дельт.
@@ -26,6 +25,7 @@ async def emit_response_blocks(
     blocks: list[dict],
     *,
     block_index_start: int = 0,
+    message_id: str | None = None,
 ) -> AsyncIterator[tuple[str, int]]:
     """Async-генератор SSE-строк для финальных блоков ответа агента.
 
@@ -46,6 +46,7 @@ async def emit_response_blocks(
     )
 
     idx = block_index_start
+    ca_counter = 0
     for raw_block in blocks:
         btype = raw_block.get("type", "text")
         if btype == "buttons":
@@ -53,10 +54,17 @@ async def emit_response_blocks(
             yield sse_buttons(buttons=translated), idx
             continue
         if btype == "client_action":
-            # Гарантируем block_id для идемпотентности на фронте: если блок
-            # пришёл из истории/агента без block_id — генерируем его здесь.
+            # Гарантируем block_id для идемпотентности на фронте. Если блок
+            # пришёл из истории / ответа агента без block_id — выставляем
+            # детерминированно от message_id (или fallback от block_index,
+            # если message_id не передан — старые callsite'ы).
             if not raw_block.get("block_id"):
-                raw_block = {**raw_block, "block_id": str(uuid.uuid4())}
+                if message_id:
+                    new_id = f"{message_id}:ca:{ca_counter}"
+                else:
+                    new_id = f"agent:ca:{idx}:{ca_counter}"
+                raw_block = {**raw_block, "block_id": new_id}
+            ca_counter += 1
             yield sse_client_action(block=raw_block), idx
             continue
         if btype in STREAMABLE_BLOCK_TYPES:
