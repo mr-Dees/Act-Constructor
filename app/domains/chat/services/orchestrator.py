@@ -13,7 +13,6 @@ import logging
 import time
 import uuid
 from collections.abc import AsyncGenerator
-from datetime import date
 from typing import Any
 
 from app.core.chat.names import TOOL_FORWARD_TO_KNOWLEDGE_AGENT
@@ -31,6 +30,12 @@ from app.domains.chat.services.llm_client import (
     build_llm_client,
 )
 from app.domains.chat.services.message_service import MessageService
+from app.domains.chat.services.orchestrator_helpers import (
+    BASE_SYSTEM_PROMPT,
+    TOOL_VALIDATION_NEUTRAL_MESSAGE,
+    convert_param as _convert_param,
+    safe_args as _safe_args,
+)
 from app.domains.chat.services.retry import retry_on_transient
 from app.domains.chat.services.streaming import (
     BlockDeltaLimiter,
@@ -53,59 +58,6 @@ from app.domains.chat.services.tool_call_accumulator import ToolCallAccumulator
 from app.domains.chat.settings import ChatDomainSettings
 
 logger = logging.getLogger("audit_workstation.domains.chat.orchestrator")
-
-
-def _safe_args(raw: Any) -> str:
-    """Возвращает arguments tool_call'а как непустую JSON-строку.
-
-    SDK и streaming-аккумулятор отдают arguments="" для вызовов без параметров
-    (LLM не эмитит delta аргументов). При эхо такой пустой строки в следующий
-    LLM-вызов:
-      - Qwen/SGLang chat-template: json.loads("") → 400 "zero-length empty doc".
-      - GigaChat-proxy: 422 RequestInputValidationException.
-    Возвращаем "{}" — корректный пустой JSON-объект.
-    """
-    if isinstance(raw, str) and raw:
-        return raw
-    return "{}"
-
-
-def _convert_param(value: Any, param_type: str) -> Any:
-    """Конвертация значения параметра из JSON в Python-тип."""
-    if value is None:
-        return None
-    if param_type == "boolean":
-        if isinstance(value, bool):
-            return value
-        return str(value).lower() in ("true", "1")
-    if param_type == "integer":
-        return int(value)
-    if param_type == "date":
-        if isinstance(value, str):
-            return date.fromisoformat(value)
-        return value
-    if param_type == "string":
-        return str(value)
-    return value
-
-
-TOOL_VALIDATION_NEUTRAL_MESSAGE = (
-    "Не удалось выполнить инструмент. Попробуйте переформулировать запрос."
-)
-
-
-BASE_SYSTEM_PROMPT = (
-    "Ты — ассистент в AuditWorkstation.\n\n"
-    "ВАЖНОЕ ПРАВИЛО ПРИОРИТЕТА:\n"
-    "По умолчанию любые вопросы пользователя про данные, контент, акты, "
-    "нормативы, регламенты, фактуры, нарушения, метрики, реестры — "
-    "передавай через chat.forward_to_knowledge_agent. Внешний агент сам "
-    "найдёт информацию.\n\n"
-    "Локальные action-tools (open_*, navigate_*, notify, ...) — вызывай "
-    "ТОЛЬКО когда пользователь явно просит что-то сделать в интерфейсе "
-    "(\"открой\", \"создай\", \"перейди\", \"покажи на странице\").\n\n"
-    "Не сочиняй данные из БЗ — всегда передавай вопрос внешнему агенту."
-)
 
 
 class Orchestrator:
