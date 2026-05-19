@@ -2988,15 +2988,65 @@ async def test_get_by_id(mock_conn):
 
 - **Новый метод в `*Repository`** — обновить `_make_mock_repo_with_conn()` (или эквивалентную фабрику mock-репо) в тест-файлах, прописав явный `mock.<new_method>.return_value = <sensible_default>`. Иначе `AsyncMock` вернёт truthy-объект и сломает существующие тесты, которые ожидают `None`/`False` от нового метода. См. `tests/domains/chat/test_chat_services.py` как образец.
 
-- **Handler-функции с `get_db`/`get_adapter`** (например, action-handlers) — импортируй их **внутри функции**, не на module-level. Это позволяет тестам патчить через `patch.multiple("app.db.connection", get_db=..., get_adapter=...)`. Module-level импорт связывает имена при старте и обходит patch.
+- **Handler-функции с `get_db`/`get_adapter`** (например, action-handlers) — импортируй их **внутри функции**, не на module-level. Module-level импорт связывает имена при старте модуля и обходит `patch.multiple("app.db.connection", get_db=..., get_adapter=...)` — патч заменяет атрибуты в `app.db.connection`, но handler уже держит свои локальные ссылки.
+
+  ```python
+  # Нельзя — module-level импорт обойдёт patch:
+  from app.db.connection import get_db, get_adapter
+
+  async def handle_open_act_page(args, user_id):
+      async with get_db() as conn:   # эта ссылка зафиксирована при импорте
+          ...
+
+  # Нужно — импорт внутри функции, patch.multiple срабатывает:
+  async def handle_open_act_page(args, user_id):
+      from app.db.connection import get_db, get_adapter
+      async with get_db() as conn:
+          ...
+  ```
 
 - **Тесты доменных Settings (`*DomainSettings`)** — НЕ через `_load_from_env` для проверки дефолтов: pydantic-settings подсасывает реальный `.env` пользователя, и тест зависит от конфига разработчика. Инстанцируй модель напрямую: `ChatDomainSettings(api_base="...", api_key="...", model="...")`. `_load_from_env` оставь только для nested env-override (`CHAT__RETRY__ON_429` и т.п.) с `monkeypatch.setenv`.
 
-- **`@pytest.mark.xfail(strict=False)` запрещён.** Проходит и когда тест падает, и когда проходит — регрессия не ловится. Используй `strict=True` (тест станет ошибкой, если кейс внезапно начнёт работать) или фикси баг и переводи в pass.
+- **`@pytest.mark.xfail(strict=False)` запрещён** для известных багов. Маркер проходит и когда тест падает (XFAIL), и когда внезапно начинает проходить (XPASS) — регрессия в обе стороны не ловится. Используй `strict=True` (XPASS становится ошибкой и сигнализирует, что баг исправлен и пора убирать маркер) либо фикси баг и переводи тест в обычный pass.
+
+  ```python
+  # Нельзя — XPASS пройдёт молча, регрессия не заметна:
+  @pytest.mark.xfail(strict=False, reason="GigaChat 422 на arguments=string")
+  def test_translate_messages_assistant_tool_calls():
+      ...
+
+  # Нужно — либо strict=True:
+  @pytest.mark.xfail(strict=True, reason="GigaChat 422 на arguments=string")
+  def test_translate_messages_assistant_tool_calls():
+      ...
+
+  # Либо фикс бага + обычный тест без маркера:
+  def test_translate_messages_assistant_tool_calls():
+      ...
+  ```
 
 - **Тесты могут фиксировать БАГ как ожидаемое поведение.** Прошлый автор мог зашить текущее (багованное) поведение как «должно быть». При фиксе бага проверяй, что тест ассертит **правильную** семантику — обновляй старые ассерты, а не только добавляй новые сценарии. Пример: `test_translate_messages_assistant_tool_calls_to_function_call` ожидал `arguments` как JSON-string (был баг → 422 GigaChat); при фиксе обновлён на DICT.
 
-**Парсинг SQL-схем в тестах** — `DatabaseAdapter._split_sql_statements()` (учитывает `;` в комментариях, строках, dollar-quoting), не `split(';')`. Перед regex-поиском констрейнтов вырезай line-комментарии (`re.sub(r'--[^\n]*', '', stmt)`) — иначе `-- DISTRIBUTED BY (col)` шадовит реальный clause.
+- **Парсинг SQL-схем в тестах — через `DatabaseAdapter._split_sql_statements()`**, не `split(';')`. Наивный split по `;` не учитывает `;` внутри строковых литералов, line-комментариев и dollar-quoting → statement бьётся на куски и regex-поиск констрейнтов даёт false-positive матчи. Дополнительно перед regex-поиском вырезай line-комментарии (`re.sub(r'--[^\n]*', '', stmt)`) — иначе документация вида `-- DISTRIBUTED BY (col)` шадовит реальный clause.
+
+  ```python
+  # Нельзя — split(';') рвёт dollar-quoted body и не убирает комментарии:
+  with open(schema_path) as f:
+      statements = f.read().split(";")
+  for stmt in statements:
+      if re.search(r"DISTRIBUTED BY \((\w+)\)", stmt):
+          ...
+
+  # Нужно — split через адаптер + вырезание комментариев перед regex:
+  from app.db.adapters.base import DatabaseAdapter
+
+  with open(schema_path) as f:
+      sql = f.read()
+  for stmt in DatabaseAdapter._split_sql_statements(sql):
+      clean = re.sub(r"--[^\n]*", "", stmt)
+      if re.search(r"DISTRIBUTED BY \((\w+)\)", clean):
+          ...
+  ```
 
 **Тестирование ChatTool реестра:**
 
