@@ -165,6 +165,24 @@ class TestGreenplumSchemaCompatibility:
             "и каждого UNIQUE-констрейнта.\n" + "\n".join(violations)
         )
 
+    def test_no_pl_pgsql_triggers(self, gp_schema_files):
+        """В GP 6 PL/pgSQL-триггеры исполняются только на координаторе → каждый
+        UPDATE превращается в RPC на мастер. Для метки ``updated_at`` это лишний
+        overhead: значение проще выставлять явно в SQL репозиториев. Регрессия —
+        запрещаем CREATE TRIGGER и LANGUAGE plpgsql в GP-схемах."""
+        trigger_pattern = re.compile(r'\bCREATE\s+TRIGGER\b', re.IGNORECASE)
+        plpgsql_pattern = re.compile(r'\bLANGUAGE\s+plpgsql\b', re.IGNORECASE)
+        trigger_violations = self._find_violations(gp_schema_files, trigger_pattern)
+        plpgsql_violations = self._find_violations(gp_schema_files, plpgsql_pattern)
+        assert not trigger_violations, (
+            "CREATE TRIGGER на GP даёт coordinator-only исполнение. "
+            "Перенеси логику в SQL репозиториев:\n" + "\n".join(trigger_violations)
+        )
+        assert not plpgsql_violations, (
+            "PL/pgSQL-функции на GP исполняются только на координаторе:\n"
+            + "\n".join(plpgsql_violations)
+        )
+
     def test_chat_domain_migration_discovered(self, gp_schema_files):
         """GP-миграция домена chat обнаруживается автоматически."""
         domain_names = {s.parent.parent.parent.name for s in gp_schema_files}

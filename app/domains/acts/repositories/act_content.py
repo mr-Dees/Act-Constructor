@@ -419,7 +419,8 @@ class ActContentRepository(BaseRepository):
                     UPDATE {self.invoices}
                     SET node_number = COALESCE($1, node_number),
                         audit_act_id = $4,
-                        audit_point_id = $5
+                        audit_point_id = $5,
+                        updated_at = CURRENT_TIMESTAMP
                     WHERE act_id = $2 AND node_id = $3
                     """,
                     node_number, act_id, nid,
@@ -478,7 +479,9 @@ class ActContentRepository(BaseRepository):
         await self.conn.execute(
             f"""
             UPDATE {self.acts}
-            SET last_edited_by = $1, last_edited_at = CURRENT_TIMESTAMP
+            SET last_edited_by = $1,
+                last_edited_at = CURRENT_TIMESTAMP,
+                updated_at = CURRENT_TIMESTAMP
             WHERE id = $2
             """,
             username,

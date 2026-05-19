@@ -112,7 +112,8 @@ class ExpiredLocksCleanupTask:
                 UPDATE {acts_table}
                 SET locked_by = NULL,
                     locked_at = NULL,
-                    lock_expires_at = NULL
+                    lock_expires_at = NULL,
+                    updated_at = CURRENT_TIMESTAMP
                 WHERE lock_expires_at <= CURRENT_TIMESTAMP
                   AND locked_by IS NOT NULL
                 """,

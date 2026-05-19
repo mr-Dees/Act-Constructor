@@ -646,6 +646,7 @@ class ActCrudService:
 
         _add("last_edited_by", username)
         updates.append("last_edited_at = CURRENT_TIMESTAMP")
+        updates.append("updated_at = CURRENT_TIMESTAMP")
 
         return updates, values
 
