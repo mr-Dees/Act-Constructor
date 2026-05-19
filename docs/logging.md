@@ -1,0 +1,459 @@
+# Логирование Act Constructor
+
+## 1. Введение
+
+Этот документ — руководство по логам приложения Act Constructor. Аудитория:
+
+- **Разработчик** — понимает, как локально включить нужный формат, где смотреть
+  логи, как добавить структурированное поле в свою запись.
+- **On-call / администратор** — расследует инцидент в проде: ищет ошибки за час,
+  трассирует конкретный запрос end-to-end, кросс-референсит логи с
+  `admin_http_metrics`.
+
+Основная единица логирования — корневой логгер `audit_workstation` и его
+дочерние (`audit_workstation.middleware`, `audit_workstation.domains.<...>` и
+т.д.). Все они настроены централизованно в `app/core/logging.py` и пишут в
+один и тот же набор handler'ов (stdout + ротируемый файл).
+
+Сквозная трассировка обеспечена `request_id`-полем, которое ставит middleware
+и которое автоматически инжектируется во все записи логов внутри одного
+HTTP-запроса.
+
+## 2. Конфигурация
+
+Переменные окружения (все читаются из `.env`):
+
+| Переменная | По умолчанию | Назначение |
+|---|---|---|
+| `SERVER__LOG_LEVEL` | `INFO` | Уровень корневого логгера приложения и uvicorn (`DEBUG` / `INFO` / `WARNING` / `ERROR` / `CRITICAL`). |
+| `LOG_FORMAT` | `text` | Формат вывода: `text` (человекочитаемый, dev) или `json` (структурированный, prod / агрегаторы). |
+
+Где это резолвится:
+
+- `SERVER__LOG_LEVEL` — `app/core/config.py:29` (`ServerSettings.log_level`,
+  `Literal["DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"]`, валидируется через
+  `field_validator` на `.upper()` — регистр не важен).
+- `LOG_FORMAT` — `app/core/logging.py:74-76` (`_resolve_format`, читает
+  `os.getenv("LOG_FORMAT", "text")`, нормализует `.strip().lower()`).
+- Инициализация логгера происходит на module-level в `app/main.py:49-50`:
+  `settings = get_settings(); logger = setup_logging(settings.server.log_level)`.
+- Уровень uvicorn синхронизирован с `SERVER__LOG_LEVEL` — `app/main.py:469-470`.
+
+Защита от повторной настройки в дочерних воркерах uvicorn — `setup_logging`
+возвращает уже сконфигурированный логгер, если у него есть handler'ы
+(`app/core/logging.py:92-93`).
+
+Пример `.env` (см. `.env.example:25-26`):
+
+```
+SERVER__LOG_LEVEL=INFO
+LOG_FORMAT=text                      # для разработки
+# LOG_FORMAT=json                    # для прода / агрегаторов
+```
+
+## 3. Формат JSON-лога
+
+JSON-формат включается через `LOG_FORMAT=json`. Используется
+`python-json-logger` (`pythonjsonlogger.json.JsonFormatter`; в старой 2.x —
+`pythonjsonlogger.jsonlogger`, поддерживаются обе ветки —
+`app/core/logging.py:58-61`).
+
+Базовый набор полей форматтера (`app/core/logging.py:64-71`):
+
+```
+"%(asctime)s %(levelname)s %(name)s %(message)s %(request_id)s"
+rename_fields={"asctime": "timestamp", "levelname": "level"}
+datefmt="%Y-%m-%dT%H:%M:%S"
+```
+
+Поля JSON-строки:
+
+| Поле | Источник | Описание |
+|---|---|---|
+| `timestamp` | `asctime` → `rename_fields` | Метка времени, формат `YYYY-MM-DDTHH:MM:SS`. |
+| `level` | `levelname` → `rename_fields` | `DEBUG` / `INFO` / `WARNING` / `ERROR` / `CRITICAL`. |
+| `name` | `logger.name` | Иерархическое имя: `audit_workstation.<...>`. |
+| `message` | `logger.<...>("...")` | Текст сообщения (после `%`-форматирования). |
+| `request_id` | `request_id_var.get()` | Подставляется фильтром `RequestIdFilter` (`app/core/logging.py:31-36`). Вне HTTP-контекста — `"-"`. |
+
+Любые дополнительные поля, переданные через `extra={...}`, попадают в JSON
+автоматически как ключи верхнего уровня (свойство `python-json-logger`,
+протестировано в `tests/test_logging.py:76-96`).
+
+Пример реальной строки (из `app/domains/chat/services/orchestrator.py:1292-1299`):
+
+```json
+{
+  "timestamp": "2026-05-19T14:23:11",
+  "level": "WARNING",
+  "name": "audit_workstation.domains.chat.services.orchestrator",
+  "message": "LLM timeout",
+  "request_id": "a3f9c1d2",
+  "stage": "run",
+  "model": "qwen2.5-coder-32b-instruct",
+  "conversation_id": "b4e7..."
+}
+```
+
+Поля `stage`, `model`, `conversation_id` пришли из `extra={...}` в коде
+оркестратора.
+
+Ещё один пример с `error_id` (`app/domains/chat/services/orchestrator.py:1012-1016`):
+
+```json
+{
+  "timestamp": "2026-05-19T14:24:02",
+  "level": "ERROR",
+  "name": "audit_workstation.domains.chat.services.orchestrator",
+  "message": "Ошибка выполнения tool=acts.open_act_page error_id=7a2b9c4d",
+  "request_id": "a3f9c1d2",
+  "exc_info": "Traceback (most recent call last): ..."
+}
+```
+
+`error_id` НЕ передан через `extra={}` — он зашит в `message` форматной
+строкой. Это сделано осознанно: тот же id отдаётся в результат tool'а, чтобы
+LLM мог передать его пользователю для трассировки администратором.
+
+Поля `user`, `username` НЕ являются стандартными полями форматтера. Они
+появятся в JSON только если конкретное место кода пробросит их через
+`extra={"username": ...}` (так делает `chat_audit_service.py:80`).
+
+## 4. Формат текстового лога
+
+Текстовый формат (`LOG_FORMAT=text` или не задан) — `app/core/logging.py:39-45`:
+
+```
+"%(levelname)s:     [%(asctime)s] [%(request_id)s] %(name)s - %(message)s"
+datefmt="%Y-%m-%d %H:%M:%S"
+```
+
+Пример строки:
+
+```
+WARNING:     [2026-05-19 14:23:11] [a3f9c1d2] audit_workstation.domains.chat.services.orchestrator - LLM timeout
+```
+
+Структура:
+
+- `WARNING:` — уровень, пять пробелов после двоеточия для выравнивания с
+  форматом uvicorn.
+- `[2026-05-19 14:23:11]` — локальное время.
+- `[a3f9c1d2]` — `request_id`. Вне HTTP-контекста (startup, shutdown,
+  фоновые задачи) — `[-]`.
+- `audit_workstation.<...>` — имя логгера.
+- `LLM timeout` — текст сообщения.
+
+В текстовом формате `extra={...}` НЕ выводится в строку лога (форматная
+строка их не упоминает). Для dev это приемлемо, но в проде поля доступны
+только при `LOG_FORMAT=json`.
+
+## 5. Сквозная трассировка через `request_id`
+
+### Где живёт значение
+
+`request_id_var` — это `contextvars.ContextVar[str]` с дефолтом `"-"`
+(`app/core/logging.py:26-28`). Реэкспортируется из `app/core/config.py:18`
+для обратной совместимости.
+
+`asyncio.Task` копирует контекст при создании, поэтому значение
+автоматически наследуется всеми await'ами внутри обработки одного запроса.
+
+### Цепочка вызовов
+
+1. **HTTP-запрос приходит.** `RequestIdMiddleware`
+   (`app/core/middleware.py:209-246`) — самый внешний middleware в цепочке
+   (добавлен последним, `app/main.py:337` — комментарий: «запускается первым,
+   охватывает всю цепочку middleware»).
+
+2. **Middleware проставляет id.** Читается заголовок `X-Request-ID`
+   (`app/core/middleware.py:228-231`) — для сквозной трассировки через
+   внешние прокси. Если заголовка нет — генерируется
+   `uuid.uuid4().hex[:8]` (8-символьный hex, `app/core/middleware.py:234`).
+   Значение пишется в ContextVar: `request_id_var.set(request_id)`
+   (`app/core/middleware.py:236`).
+
+3. **Response header.** Тот же `request_id` возвращается клиенту в заголовке
+   `X-Request-ID` (`app/core/middleware.py:239-243`) — клиент видит id своего
+   запроса, может сообщить его в багрепорте.
+
+4. **Handler, repositories, services.** Любой `logger.<level>(...)` внутри
+   запроса автоматически получает `record.request_id = request_id_var.get()`
+   через `RequestIdFilter` (`app/core/logging.py:34-36`). Фильтр повешен на
+   handler, а не на logger — это важно: при propagation от дочерних логгеров
+   Python вызывает `callHandlers()` на родительском, минуя его фильтры на
+   logger; фильтр на handler гарантированно отрабатывает перед `emit()`
+   (комментарий `app/core/logging.py:122-125`).
+
+5. **Запись в `admin_http_metrics`.** `HttpMetricsMiddleware`
+   (`app/core/middlewares/http_metrics.py:33-81`) на завершении запроса
+   читает `request_id_var.get()` (`app/core/middlewares/http_metrics.py:71`),
+   нормализует `"-"` → `None` (`:72-73`) и передаёт в
+   `HttpMetricsService.record(..., request_id=...)`. Дальше
+   `HttpMetricsRepository.record`
+   (`app/domains/admin/repositories/http_metrics_repository.py:33-63`)
+   делает `INSERT INTO {prefix}admin_http_metrics (... request_id) VALUES (...)`.
+
+6. **Forward к внешнему агенту.** `AgentBridgeService.send`
+   (`app/domains/chat/services/agent_bridge.py:62-69`) при создании
+   `agent_request` пишет текущий `request_id_var.get()` в
+   `parent_request_id` записи. Когда `agent_bridge_runner` стартует
+   фоновую задачу (вне HTTP-контекста), он восстанавливает значение из БД и
+   ставит обратно в ContextVar
+   (`app/domains/chat/services/agent_bridge_runner.py:93-131`) — все логи
+   раннера несут тот же `request_id`, что и исходный HTTP-запрос. Это
+   единственный нетривиальный кейс пробрасывания id через границу процесса
+   (через БД).
+
+### Диаграмма
+
+```
+HTTP Request
+   |
+   v
+RequestIdMiddleware  --(X-Request-ID или uuid4().hex[:8])-->  request_id_var.set("a3f9c1d2")
+   |                                                                |
+   v                                                                |
+HttpMetricsMiddleware                                                |
+   |                                                                |
+   v                                                                |
+... handler / service / repository ...                              |
+   |                                                                |
+   |  logger.warning(...)                                           |
+   |          |                                                     |
+   |          v                                                     |
+   |    RequestIdFilter -- record.request_id = "a3f9c1d2"           |
+   |          |                                                     |
+   |          v                                                     |
+   |    stdout + logs/app.log                                       |
+   |                                                                |
+   v                                                                |
+HttpMetricsMiddleware (finally):                                    |
+   |  request_id = request_id_var.get()  ----------------------------+
+   |  INSERT INTO admin_http_metrics(..., request_id) VALUES (..., 'a3f9c1d2')
+   v
+Response (с заголовком X-Request-ID: a3f9c1d2)
+```
+
+## 6. Поиск по `request_id`
+
+### JSON-логи (prod) — через `jq`
+
+Все записи одного запроса:
+
+```bash
+cat logs/app.log | jq -c 'select(.request_id == "a3f9c1d2")'
+```
+
+Только ошибки этого запроса:
+
+```bash
+cat logs/app.log | jq -c 'select(.request_id == "a3f9c1d2" and .level == "ERROR")'
+```
+
+Все `request_id`, по которым были ошибки:
+
+```bash
+cat logs/app.log | jq -r 'select(.level == "ERROR") | .request_id' | sort -u
+```
+
+### Текстовые логи (dev) — через `grep`
+
+`request_id` выводится в квадратных скобках сразу после времени:
+
+```bash
+grep '\[a3f9c1d2\]' logs/app.log
+```
+
+### Из `admin_http_metrics` → в лог
+
+В БД есть таблица `{prefix}admin_http_metrics` с полями `method`, `path`,
+`status_code`, `latency_ms`, `username`, `request_id`. Типичный сценарий —
+найти медленные запросы и подтянуть детали из лога:
+
+```sql
+SELECT request_id, method, path, status_code, latency_ms, username
+FROM t_db_oarb_audit_act_admin_http_metrics
+WHERE latency_ms > 5000
+ORDER BY ts DESC
+LIMIT 50;
+```
+
+Затем по списку `request_id` ищем в логах:
+
+```bash
+for rid in a3f9c1d2 b4e7c2f1 c5f8d3a2; do
+  echo "=== $rid ==="
+  jq -c "select(.request_id == \"$rid\")" logs/app.log
+done
+```
+
+## 7. Типовые задачи
+
+### Найти все ошибки за последний час
+
+JSON:
+
+```bash
+jq -c '
+  select(.level == "ERROR" or .level == "CRITICAL")
+  | select(.timestamp >= (now - 3600 | strftime("%Y-%m-%dT%H:%M:%S")))
+' logs/app.log
+```
+
+Текст (грубо, по дате/часу):
+
+```bash
+grep -E '^(ERROR|CRITICAL):' logs/app.log | grep "$(date '+%Y-%m-%d %H')"
+```
+
+### Трассировать конкретный запрос end-to-end
+
+```bash
+# 1. Из заголовка ответа или из admin_http_metrics получили request_id = "a3f9c1d2"
+jq -c 'select(.request_id == "a3f9c1d2")' logs/app.log
+```
+
+Если запрос форвардился на внешнего агента — раннер тоже логирует под этим
+же `request_id` (см. раздел 5, шаг 6).
+
+### Найти медленные запросы
+
+Текущий формат лога **не содержит поля `duration_ms`** для HTTP-запросов —
+оно живёт только в `admin_http_metrics.latency_ms` (см. SQL выше). Кросс-
+референс через `request_id`:
+
+```sql
+SELECT request_id, path, latency_ms
+FROM t_db_oarb_audit_act_admin_http_metrics
+WHERE latency_ms > 1000 AND ts >= NOW() - INTERVAL '1 hour'
+ORDER BY latency_ms DESC;
+```
+
+Чисто по логу медленные запросы найти нельзя — это требует доработки
+(`HttpMetricsMiddleware` мог бы дополнительно эмитить `logger.info` с
+`extra={"latency_ms": ..., "path": ...}` после порога).
+
+### Найти ошибки конкретного пользователя
+
+В большинстве записей логов поля `username` нет — оно не входит в
+форматтер. Путь — через `admin_http_metrics`:
+
+```sql
+SELECT request_id, method, path, status_code, latency_ms
+FROM t_db_oarb_audit_act_admin_http_metrics
+WHERE username = '12345' AND status_code >= 400
+ORDER BY ts DESC
+LIMIT 100;
+```
+
+Затем по `request_id` подтянуть лог-строки. **Требует доработки**, если
+хочется фильтровать пользователя сразу в `jq` — нужно либо унести username
+в `request_id_var`-аналог через ContextVar и инжектить фильтром, либо
+систематически добавлять `extra={"username": ...}` в `logger.<...>` вызовы
+(сейчас это делают только `chat_audit_service.py:80` и единичные другие
+места).
+
+## 8. Уровни логирования
+
+Корневой логгер `audit_workstation` настраивается на уровень из
+`SERVER__LOG_LEVEL` (`app/core/logging.py:95-96`). По уровням сейчас в
+коде используется примерно так:
+
+- **DEBUG** — диагностика инициализации (`logger.debug("База данных
+  инициализирована")`, `app/main.py:116, 124`). На проде шумно, выключено
+  дефолтом.
+- **INFO** — жизненный цикл приложения (старт/стоп, число доменов,
+  reconcile polling-задач, инициализация rate-limit'а, размер пула). См.
+  `app/main.py:98, 104, 190, 206, 243, 277` и `app/core/middleware.py:72-75`.
+- **WARNING** — ожидаемые, но потенциально проблемные события: rate-limit
+  превышен (`middleware.py:97`), запрос отклонён по размеру
+  (`middleware.py:153, 172`), `Kerberos` токен протух во время запроса
+  (`main.py:358`), `UniqueViolationError` / `CheckViolationError`
+  (`main.py:395, 405`), LLM timeout (`orchestrator.py:1292-1299, 2296-2304`,
+  `agent_bridge.py:170-176, 192-198, 217-223`), SSE-блок усечён
+  (`streaming.py:291-298`).
+- **ERROR / ERROR через `logger.exception`** — `logger.exception(...)` пишет
+  traceback автоматически. Используется для всех необработанных исключений
+  (`main.py:425`), откатов lifespan-hooks и доменов (`main.py:155, 179, 186,
+  251, 260`), ошибок tool-вызовов с `error_id` (`orchestrator.py:1013`),
+  падений сохранения сообщений (`orchestrator.py:2291-2293`).
+- **CRITICAL** — невосстановимые состояния на старте: Kerberos на startup
+  (`main.py:217`), `PostgresError` (`main.py:234`), singleton-lock не
+  захватили (`main.py:141`), любая необработанная ошибка lifespan
+  (`main.py:237`).
+
+**Замеченное возможное место для доработки:** в `orchestrator.py:2291-2293`
+один и тот же текст `"Не удалось сохранить сообщение ассистента"` логируется
+двумя `logger.exception` подряд (для `(OSError, asyncio.TimeoutError)` и
+`Exception`) — обе ветки visually идентичны, отличить причину можно только
+по traceback. Не баг, но при просмотре логов выглядит как дубль.
+
+## 9. PII и безопасность
+
+В логи **намеренно не попадают**:
+
+- **Содержимое сообщений пользователя в чате.** В `messages.py:82`
+  логируется только превью (`message=%r, domains=%r`) с пометкой
+  `truncated`. Полный текст в логи не идёт.
+- **Tool-аргументы при стриминге.** В `orchestrator.py:1763, 2045`
+  `args_str` обрезается до 200 символов перед эмитом в лог:
+  `args_str[:200] + "..." if len(args_str) > 200 else args_str`.
+- **Tool-вывод.** В `orchestrator.py:992` превью аналогично режется до 200
+  символов.
+- **Stack traces в ответе LLM.** Полный traceback exception'а tool'а пишется
+  в лог под `error_id`, а LLM получает только нейтральное сообщение
+  `f"Инструмент завершился с ошибкой. error_id={error_id}. Сообщите
+  администратору."` (`orchestrator.py:1010-1020`). Имена БД, SQL-фрагменты и
+  прочие чувствительные данные не утекают в чат.
+- **Пароли БД.** `DatabaseSettings.password: SecretStr`
+  (`app/core/config.py:80`). Pydantic `SecretStr` при `repr()` отдаёт
+  `**********` — не попадает ни в логи, ни в трейсы исключений pydantic.
+- **Generic exception handler** возвращает клиенту только
+  `{"detail": "Внутренняя ошибка сервера"}`, а полный traceback пишет в лог
+  через `logger.exception(...)` (`main.py:423-431`).
+
+Если вы добавляете новое место логирования с пользовательским контентом —
+проверьте, что обрезаете его до разумного размера (паттерн `[:200]`) и не
+кладёте в `message`, если поле может содержать секрет.
+
+## 10. Чтение логов в JupyterHub
+
+### Файловый handler
+
+`RotatingFileHandler` (`app/core/logging.py:110-118`):
+
+- **Директория:** `<project_root>/logs/` — путь резолвится как
+  `Path(__file__).resolve().parent.parent.parent / "logs"`, то есть
+  относительно `app/core/logging.py` это `<repo>/logs/`. Создаётся при
+  старте (`log_dir.mkdir(exist_ok=True)`, `app/core/logging.py:111`).
+- **Файл:** `logs/app.log` — активный лог.
+- **Ротация:** `maxBytes=10 * 1024 * 1024` (10 МБ на файл),
+  `backupCount=5`. Когда `app.log` достигает 10 МБ, он ротируется в
+  `app.log.1`, старый `.1` сдвигается в `.2`, и так до `.5` — `.6`-й
+  удаляется. Итого на диске максимум ~60 МБ.
+- **Кодировка:** UTF-8.
+
+### Консоль
+
+`StreamHandler(sys.stdout)` — все записи дублируются в stdout. Под
+JupyterHub stdout пишется в служебные логи воркера; точное расположение
+зависит от конфигурации JupyterHub (обычно `/var/log/jupyterhub/` или
+аналог), и проверять физический путь нужно у администратора кластера. В
+самом приложении этот путь не сконфигурирован.
+
+### Под локальным запуском (PostgreSQL)
+
+При запуске через `python -m app.main` или `uvicorn app.main:app` stdout
+печатает в текущий терминал, файл — `<repo>/logs/app.log`.
+
+### Под JupyterHub (Greenplum)
+
+Файл `<repo>/logs/app.log` пишется в директорию проекта пользователя
+JupyterHub. Доступ — по тому же пути в файловом дереве Jupyter (через
+терминал или файловый менеджер). Stdout уходит в журналы JupyterHub-воркера.
+
+Внешние агрегаторы (Loki / ELK / ClickHouse) в коде проекта не
+сконфигурированы — это уровень инфраструктуры. Для отправки в агрегатор
+включается `LOG_FORMAT=json` и stdout пайпится сторонним коллектором
+(filebeat / promtail / fluent-bit).
