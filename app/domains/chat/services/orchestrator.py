@@ -416,66 +416,18 @@ class Orchestrator:
         force_non_streaming: bool = False,
         **kwargs,
     ) -> tuple[Any, bool, Any]:
-        """Вызывает LLM с поддержкой fallback при сбое primary.
+        """Тонкий wrapper: делегирует в ``llm_call.call_llm_with_fallback``.
 
-        Возвращает кортеж ``(result, fallback_used, active_client)``, где
-        ``active_client`` — клиент, через который реально прошёл вызов
-        (primary либо fallback). При успешном primary fallback_used=False.
-
-        Логика:
-          1. Если circuit-breaker open (и fallback есть) — сразу fallback.
-          2. Иначе пробуем primary. На provider-failure инкрементим
-             счётчик breaker'а; если fallback настроен — пробуем fallback.
-             4xx (auth/validation/etc.) пробрасываем без fallback.
-          3. На успехе primary — record_success.
-
-        ``force_non_streaming`` — если True и fallback=gigachat, перед
-        вызовом fallback'а удаляется stream=True из kwargs.
+        Pure-функция получает ссылку на ``self`` и зовёт circuit-breaker,
+        fallback-клиента и ``_completions_create`` через методы класса —
+        существующие patch'и тестов продолжают работать.
         """
-        breaker = self._get_circuit_breaker()
-        has_fallback = self._has_fallback()
-
-        # Если circuit разомкнут — primary даже не дёргаем (fast-path)
-        if has_fallback and await breaker.is_open():
-            fb_client = self._get_fallback_client()
-            if fb_client is not None:
-                fb_kwargs = self._adjust_kwargs_for_fallback(
-                    kwargs, force_non_streaming=force_non_streaming,
-                )
-                logger.warning(
-                    "Circuit breaker open — вызов идёт через fallback "
-                    "(profile=%s)",
-                    self.settings.fallback_profile,
-                )
-                result = await self._completions_create(
-                    fb_client, **fb_kwargs,
-                )
-                return result, True, fb_client
-
-        try:
-            result = await self._completions_create(client, **kwargs)
-        except Exception as exc:
-            if not self._is_provider_failure(exc):
-                # Клиентская ошибка / NotFound / 4xx — fallback не помогает
-                raise
-            await breaker.record_failure(exc)
-            if not has_fallback:
-                raise
-            fb_client = self._get_fallback_client()
-            if fb_client is None:
-                raise
-            fb_kwargs = self._adjust_kwargs_for_fallback(
-                kwargs, force_non_streaming=force_non_streaming,
-            )
-            logger.warning(
-                "Primary LLM упал (%s); fallback на profile=%s",
-                type(exc).__name__, self.settings.fallback_profile,
-            )
-            result = await self._completions_create(fb_client, **fb_kwargs)
-            return result, True, fb_client
-
-        await breaker.record_success()
-        return result, False, client
+        from app.domains.chat.services.llm_call import call_llm_with_fallback
+        return await call_llm_with_fallback(
+            self, client,
+            force_non_streaming=force_non_streaming,
+            **kwargs,
+        )
 
     def _adjust_kwargs_for_fallback(
         self, kwargs: dict, *, force_non_streaming: bool,
