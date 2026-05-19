@@ -474,6 +474,75 @@ class ActContentRepository(BaseRepository):
                     audit_act_id, dir_audit_point_id,
                 )
 
+    # -------------------------------------------------------------------------
+    # ПЕРЕСТРУКТУРИЗАЦИЯ ДЕРЕВА (вызывается из ActCrudService._apply_tree_restructure)
+    # -------------------------------------------------------------------------
+
+    async def delete_nodes_content(
+        self,
+        act_id: int,
+        *,
+        table_ids: list[str] | None = None,
+        textblock_ids: list[str] | None = None,
+        violation_ids: list[str] | None = None,
+    ) -> None:
+        """Массово удаляет таблицы / текстовые блоки / нарушения по их id.
+
+        Используется при перестройке разделов 1-2 (смена типа проверки):
+        контент удаляемых узлов вычищается из соответствующих таблиц.
+        Пустые списки игнорируются — лишних DELETE'ов не делаем.
+        """
+        if table_ids:
+            await self.conn.execute(
+                f"DELETE FROM {self.tables} "
+                f"WHERE act_id = $1 AND table_id = ANY($2::varchar[])",
+                act_id, table_ids,
+            )
+        if textblock_ids:
+            await self.conn.execute(
+                f"DELETE FROM {self.textblocks} "
+                f"WHERE act_id = $1 AND textblock_id = ANY($2::varchar[])",
+                act_id, textblock_ids,
+            )
+        if violation_ids:
+            await self.conn.execute(
+                f"DELETE FROM {self.violations} "
+                f"WHERE act_id = $1 AND violation_id = ANY($2::varchar[])",
+                act_id, violation_ids,
+            )
+
+    async def insert_table(
+        self,
+        act_id: int,
+        *,
+        table_id: str,
+        node_id: str,
+        grid_data: list | dict,
+        col_widths: list | dict,
+        is_protected: bool,
+        is_deletable: bool,
+    ) -> None:
+        """Вставляет одну системную таблицу (qualityAssessment и т.п.).
+
+        Используется при перестройке разделов 1-2: при переходе на процессный
+        тип проверки добавляются специальные таблицы оценки качества.
+        """
+        await self.conn.execute(
+            f"""
+            INSERT INTO {self.tables}
+                (act_id, table_id, node_id, grid_data, col_widths,
+                 is_protected, is_deletable)
+            VALUES ($1, $2, $3, $4, $5, $6, $7)
+            """,
+            act_id,
+            table_id,
+            node_id,
+            json.dumps(grid_data),
+            json.dumps(col_widths),
+            is_protected,
+            is_deletable,
+        )
+
     async def _update_edit_timestamp(self, act_id: int, username: str) -> None:
         """Обновляет метку последнего редактирования."""
         await self.conn.execute(

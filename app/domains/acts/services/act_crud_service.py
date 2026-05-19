@@ -4,7 +4,6 @@
 Создание, чтение, обновление, удаление, дублирование актов.
 """
 
-import json
 import logging
 import re
 import uuid
@@ -731,38 +730,23 @@ class ActCrudService:
 
         # Удаляем контент из разделов 1-2
         ids = result["content_ids_to_delete"]
-        if ids["table_ids"]:
-            await self.conn.execute(
-                f"DELETE FROM {content_repo.tables} WHERE act_id = $1 AND table_id = ANY($2::varchar[])",
-                act_id, ids["table_ids"],
-            )
-        if ids["textblock_ids"]:
-            await self.conn.execute(
-                f"DELETE FROM {content_repo.textblocks} WHERE act_id = $1 AND textblock_id = ANY($2::varchar[])",
-                act_id, ids["textblock_ids"],
-            )
-        if ids["violation_ids"]:
-            await self.conn.execute(
-                f"DELETE FROM {content_repo.violations} WHERE act_id = $1 AND violation_id = ANY($2::varchar[])",
-                act_id, ids["violation_ids"],
-            )
+        await content_repo.delete_nodes_content(
+            act_id,
+            table_ids=ids["table_ids"],
+            textblock_ids=ids["textblock_ids"],
+            violation_ids=ids["violation_ids"],
+        )
 
         # Вставляем новые таблицы (qualityAssessment для процессной)
         for table in result["tables_to_insert"]:
-            await self.conn.execute(
-                f"""
-                INSERT INTO {content_repo.tables}
-                    (act_id, table_id, node_id, grid_data, col_widths,
-                     is_protected, is_deletable)
-                VALUES ($1, $2, $3, $4, $5, $6, $7)
-                """,
+            await content_repo.insert_table(
                 act_id,
-                table["table_id"],
-                table["node_id"],
-                json.dumps(table["grid"]),
-                json.dumps(table["col_widths"]),
-                table["protected"],
-                table["deletable"],
+                table_id=table["table_id"],
+                node_id=table["node_id"],
+                grid_data=table["grid"],
+                col_widths=table["col_widths"],
+                is_protected=table["protected"],
+                is_deletable=table["deletable"],
             )
 
         logger.info(
