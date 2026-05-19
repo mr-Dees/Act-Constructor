@@ -548,11 +548,17 @@ class Orchestrator:
         conversation_id: str,
         content_blocks: list[dict],
         token_usage: dict | None,
+        message_id: str | None = None,
     ) -> None:
         """Сохраняет сообщение ассистента с отдельным соединением из пула.
 
         StreamingResponse может пережить dependency-соединение,
         поэтому для сохранения берём свежее соединение.
+
+        ``message_id`` обязан совпадать с id, который оркестратор использовал
+        в ``_parse_client_action_result`` для построения детерминированного
+        ``block_id``. Иначе после reload фронт увидит «новый» message id и
+        повторно исполнит уже отработанные client_action-блоки.
         """
         from app.db.connection import get_db
         from app.domains.chat.repositories.conversation_repository import (
@@ -573,6 +579,7 @@ class Orchestrator:
                 content=content_blocks,
                 model=self.settings.model,
                 token_usage=token_usage if token_usage else None,
+                message_id=message_id,
             )
 
     async def _handle_forward_call(
@@ -1035,9 +1042,17 @@ class Orchestrator:
         domains: list[str] | None = None,
         file_blocks: list[dict] | None = None,
         user_id: str | None = None,
+        message_id: str | None = None,
     ) -> dict[str, Any]:
         """
         Полный (не стриминговый) agent loop.
+
+        ``message_id`` нужен для детерминированного ``block_id`` ClientActionBlock
+        (``f"{message_id}:ca:{i}"``) — тот же id должен быть использован и в
+        ``_save_assistant_message``, и при парсинге tool-результатов. Если
+        вызывающий код уже сгенерировал id (``MessageService.send_message`` —
+        обычный путь), он обязан передать его сюда; иначе сгенерируем сами
+        для тестовых сценариев.
 
         Возвращает dict с полями: response, sources, model, token_usage.
         """
@@ -1082,9 +1097,10 @@ class Orchestrator:
         _consecutive_validation_errors = 0
         # Идентификатор сообщения и счётчик client_action-блоков —
         # используются для построения детерминированного block_id
-        # (см. _parse_client_action_result). run() не получает message_id
-        # снаружи, поэтому генерируем; в run_stream() он передаётся явно.
-        message_id = str(uuid.uuid4())
+        # (см. _parse_client_action_result). Если вызывающий передал
+        # message_id — используем его (тот же id должен быть и в БД через
+        # _save_assistant_message). Иначе генерируем для тестов / standalone.
+        message_id = message_id or str(uuid.uuid4())
         ca_counter: list[int] = [0]
 
         try:
@@ -1232,6 +1248,7 @@ class Orchestrator:
                                     "code": "tool_validation_loop",
                                 }],
                                 token_usage=None,
+                                message_id=message_id,
                             )
                             return {
                                 "response": error_answer,
@@ -1279,6 +1296,7 @@ class Orchestrator:
                 conversation_id=conversation_id,
                 content_blocks=content_blocks,
                 token_usage=token_usage if token_usage else None,
+                message_id=message_id,
             )
 
             return {
@@ -1306,6 +1324,8 @@ class Orchestrator:
                         "message": error_message,
                         "code": "llm_unavailable",
                     }],
+                    token_usage=None,
+                    message_id=message_id,
                 )
             except Exception:
                 logger.exception(
@@ -1327,6 +1347,8 @@ class Orchestrator:
                         "message": error_message,
                         "code": "llm_unavailable",
                     }],
+                    token_usage=None,
+                    message_id=message_id,
                 )
             except Exception:
                 # save может упасть, если БД тоже недоступна — это не фатально,
@@ -1497,6 +1519,7 @@ class Orchestrator:
                                 conversation_id=conversation_id,
                                 content_blocks=content_blocks,
                                 token_usage=token_usage,
+                                message_id=message_id,
                             )
                             yield sse_message_end(
                                 message_id=message_id,
@@ -1855,6 +1878,7 @@ class Orchestrator:
                                             conversation_id=conversation_id,
                                             content_blocks=content_blocks,
                                             token_usage=token_usage,
+                                            message_id=message_id,
                                         )
                                     except Exception:
                                         logger.exception(
@@ -2134,6 +2158,7 @@ class Orchestrator:
                                         conversation_id=conversation_id,
                                         content_blocks=content_blocks,
                                         token_usage=token_usage,
+                                        message_id=message_id,
                                     )
                                 except Exception:
                                     logger.exception(
@@ -2286,6 +2311,7 @@ class Orchestrator:
                         conversation_id=conversation_id,
                         content_blocks=content_blocks,
                         token_usage=token_usage,
+                        message_id=message_id,
                     )
                 except (OSError, asyncio.TimeoutError):
                     logger.exception("Не удалось сохранить сообщение ассистента")

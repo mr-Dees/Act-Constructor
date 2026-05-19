@@ -34,7 +34,7 @@ def test_default_profile_is_sglang():
     assert s.retry.on_429 is True
     assert s.retry.on_5xx is True
     assert s.smalltalk_mode == "local"
-    assert s.agent_bridge.poll_min_interval_sec == 1.0
+    assert s.agent_bridge.poll_min_interval_sec == 5.0
     assert s.agent_bridge.poll_max_interval_sec == 10.0
     assert s.agent_bridge.poll_backoff_multiplier == 1.5
 

@@ -95,9 +95,19 @@ class MessageService:
         content: list[dict],
         model: str | None = None,
         token_usage: dict | None = None,
+        message_id: str | None = None,
     ) -> dict:
-        """Сохраняет сообщение ассистента."""
-        message_id = str(uuid.uuid4())
+        """Сохраняет сообщение ассистента.
+
+        ``message_id`` опционален. Если передан — используется как id записи,
+        иначе генерируется. Вызывающий должен передать id, если ему нужно,
+        чтобы детерминированные ``block_id`` для ClientActionBlock
+        (``f"{message_id}:ca:{i}"``) совпадали с id записи в БД — иначе после
+        reload фронт получит новый id и пометит block как «не исполнен»,
+        что даст редирект-цикл (см. backend-audit §1.3.1).
+        """
+        if message_id is None:
+            message_id = str(uuid.uuid4())
         # Атомарность: см. комментарий в save_user_message.
         async with self.msg_repo.conn.transaction():
             message = await self.msg_repo.create(
