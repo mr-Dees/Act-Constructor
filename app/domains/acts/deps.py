@@ -24,7 +24,6 @@ from app.domains.acts.services.act_content_service import ActContentService
 from app.domains.acts.services.act_invoice_service import ActInvoiceService
 from app.domains.acts.settings import ActsSettings
 from app.domains.admin.interfaces import IUserDirectory
-from app.domains.ua_data.factories import make_invoice_table_names
 
 if TYPE_CHECKING:
     from app.domains.acts.services.audit_log_batcher import ActAuditLogBatcher
@@ -81,13 +80,20 @@ async def get_content_service(
 async def get_invoice_service(
     settings: Settings = Depends(get_settings),
 ) -> AsyncGenerator[ActInvoiceService, None]:
-    """Создает ActInvoiceService с подключением из пула."""
+    """Создает ActInvoiceService с подключением из пула.
+
+    Имена таблиц фактур ua_data разрешаются через ``get_factory`` —
+    зависимость идёт через ключ реестра, без прямого импорта helper'а
+    ``make_invoice_table_names``.
+    """
+    from app.core.domain_registry import get_factory
+
     async with get_db() as conn:
         yield ActInvoiceService(
             conn=conn,
             settings=settings,
             acts_settings=_get_acts_settings(),
-            ua_tables=make_invoice_table_names(),
+            ua_tables=get_factory("ua_data.invoice_table_names")(),
         )
 
 

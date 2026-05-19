@@ -15,14 +15,19 @@ from app.domains.ck_client_exp.services.cs_validation_service import (
     CSValidationService,
 )
 from app.domains.ua_data.interfaces import IDictionaryRepository
-from app.domains.ua_data.repositories.dictionary_repository import (
-    DictionaryRepository,
-)
 
 
 async def get_cs_validation_service() -> AsyncGenerator[CSValidationService, None]:
-    """Создаёт CSValidationService с подключением из пула."""
+    """Создаёт CSValidationService с подключением из пула.
+
+    DictionaryRepository разрешается через ``domain_registry.get_factory`` —
+    cross-domain зависимость идёт через Protocol, без прямого импорта класса.
+    """
+    from app.core.domain_registry import get_factory
+
     async with get_db() as conn:
         cs_repo = CSValidationRepository(conn)
-        dict_repo: IDictionaryRepository = DictionaryRepository(conn)
+        dict_repo: IDictionaryRepository = get_factory(
+            "ua_data.dictionary_repository"
+        )(conn)
         yield CSValidationService(cs_repo=cs_repo, dict_repo=dict_repo)
