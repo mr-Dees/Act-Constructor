@@ -23,7 +23,6 @@ from app.domains.acts.services.act_content_service import ActContentService
 from app.domains.acts.services.act_invoice_service import ActInvoiceService
 from app.domains.acts.settings import ActsSettings
 from app.domains.admin.interfaces import IUserDirectory
-from app.domains.admin.services.user_directory import UserDirectoryRepository
 from app.domains.ua_data.factories import make_invoice_table_names
 
 
@@ -94,6 +93,15 @@ async def get_audit_log_service() -> AsyncGenerator:
 
 
 async def get_users_repository() -> AsyncGenerator[IUserDirectory, None]:
-    """Создает UserDirectoryRepository с подключением из пула."""
-    async with get_db() as conn:
-        yield UserDirectoryRepository(conn)
+    """Возвращает реализацию IUserDirectory из admin-домена через фабрику.
+
+    Кросс-доменная связь — через ``domain_registry.get_factory(...)``,
+    без прямого импорта конкретного класса репозитория. Это сохраняет
+    границу доменов и проходит через топосортировку discover_domains
+    (admin регистрирует фабрику в _build_domain, до создания акт-сервисов).
+    """
+    from app.core.domain_registry import get_factory
+
+    factory = get_factory("admin.user_directory")
+    async for repo in factory():
+        yield repo

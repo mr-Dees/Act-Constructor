@@ -7,6 +7,88 @@ from fastapi import FastAPI
 logger = logging.getLogger("audit_workstation.domains.admin.lifecycle")
 
 
+def register_factories() -> None:
+    """
+    Регистрирует фабрики, экспортируемые admin-доменом для других доменов.
+
+    Вызывается на этапе сборки DomainDescriptor (``_build_domain``) — это
+    гарантирует, что фабрики доступны до старта lifespan'а потребителей.
+    Идемпотентна: повторный вызов перезаписывает фабрики.
+    """
+    from app.core.domain_registry import register_factory
+    from app.db.connection import get_db
+    from app.domains.admin.services.user_directory import UserDirectoryRepository
+
+    def _user_directory_factory():
+        """Создаёт UserDirectoryRepository, оборачивая get_db() в async-генератор.
+
+        Возвращает async-генератор — потребители используют его
+        в FastAPI Depends или как ``async with`` через ``contextlib``.
+        """
+        async def _gen():
+            async with get_db() as conn:
+                yield UserDirectoryRepository(conn)
+        return _gen()
+
+    register_factory("admin.user_directory", _user_directory_factory)
+
+
+def register_lifespan_hooks() -> None:
+    """
+    Регистрирует startup/shutdown hooks admin-домена в общем lifespan-реестре.
+
+    Вызывается на этапе сборки DomainDescriptor. Сам ``on_startup`` домена
+    отрабатывает в общем цикле lifespan (через ``DomainDescriptor.on_startup``);
+    здесь регистрируются дополнительные hooks для инфраструктурных задач
+    (батчер HTTP-метрик).
+    """
+    from app.core.domain_registry import register_shutdown_hook, register_startup_hook
+    from app.core.metrics_batcher import MetricsBatcher
+    from app.db.connection import get_db
+    from app.domains.admin.deps import set_http_metrics_batcher
+    from app.domains.admin.repositories.http_metrics_repository import (
+        HttpMetricRecord,
+        HttpMetricsRepository,
+    )
+
+    async def _start_http_metrics_batcher(app: FastAPI) -> None:
+        """Поднимает батчер HTTP-метрик и кладёт его в deps + app.state."""
+        from app.core.config import get_settings
+
+        obs = get_settings().observability
+
+        async def _flush(records: list[HttpMetricRecord]) -> None:
+            async with get_db() as conn:
+                await HttpMetricsRepository(conn).record_many(records)
+
+        batcher = MetricsBatcher(
+            flush_callback=_flush,
+            max_batch_size=obs.metrics_batch_size,
+            flush_interval_sec=obs.metrics_flush_interval_sec,
+            max_buffer_size=obs.metrics_max_buffer_size,
+            name="admin_http_metrics",
+        )
+        await batcher.start()
+        set_http_metrics_batcher(batcher)
+        app.state.http_metrics_batcher = batcher
+
+    async def _stop_http_metrics_batcher(app: FastAPI) -> None:
+        """Останавливает батчер HTTP-метрик и сбрасывает ссылку в deps."""
+        batcher = getattr(app.state, "http_metrics_batcher", None)
+        try:
+            set_http_metrics_batcher(None)
+        except Exception:
+            logger.exception("Не удалось сбросить ссылку на батчер HTTP-метрик")
+        if batcher is not None:
+            try:
+                await batcher.stop()
+            except Exception:
+                logger.exception("Ошибка при остановке батчера HTTP-метрик")
+
+    register_startup_hook("admin.http_metrics_batcher", _start_http_metrics_batcher)
+    register_shutdown_hook("admin.http_metrics_batcher", _stop_http_metrics_batcher)
+
+
 async def on_startup(app: FastAPI) -> None:
     """
     Инициализация домена при старте приложения.
