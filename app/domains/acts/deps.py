@@ -6,6 +6,7 @@ DI-зависимости для сервисов актов.
 """
 
 from collections.abc import AsyncGenerator
+from typing import TYPE_CHECKING
 
 from fastapi import Depends
 
@@ -24,6 +25,28 @@ from app.domains.acts.services.act_invoice_service import ActInvoiceService
 from app.domains.acts.settings import ActsSettings
 from app.domains.admin.interfaces import IUserDirectory
 from app.domains.ua_data.factories import make_invoice_table_names
+
+if TYPE_CHECKING:
+    from app.domains.acts.services.audit_log_batcher import ActAuditLogBatcher
+
+# Батчер аудит-лога актов. Инициализируется в lifespan
+# (см. ``app/domains/acts/_lifecycle.py``). ``None`` — fallback на
+# синхронный путь записи через одиночный INSERT.
+_audit_log_batcher: "ActAuditLogBatcher | None" = None
+
+
+def set_audit_log_batcher(batcher: "ActAuditLogBatcher | None") -> None:
+    """Устанавливает (или сбрасывает) батчер audit-лога актов.
+
+    Зовётся из lifespan-хуков домена актов.
+    """
+    global _audit_log_batcher
+    _audit_log_batcher = batcher
+
+
+def get_audit_log_batcher() -> "ActAuditLogBatcher | None":
+    """Возвращает активный батчер audit-лога актов (или ``None``)."""
+    return _audit_log_batcher
 
 
 def _get_acts_settings() -> ActsSettings:

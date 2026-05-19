@@ -7,11 +7,22 @@
 
 import json
 import logging
+from dataclasses import dataclass
 from datetime import date, datetime
 
 import asyncpg
 
 from app.db.repositories.base import BaseRepository
+
+
+@dataclass(frozen=True, slots=True)
+class ActAuditLogRecord:
+    """Одна запись аудит-лога актов для bulk-INSERT через ``log_many``."""
+    action: str
+    username: str
+    act_id: int | None = None
+    details: dict | None = None
+    changelog: list[dict] | None = None
 
 logger = logging.getLogger("audit_workstation.db.repository.audit_log")
 
@@ -54,7 +65,39 @@ class ActAuditLogRepository(BaseRepository):
             act_id: ID акта (опционально)
             details: Дополнительные данные (опционально)
             changelog: Гранулярный лог локальных изменений (опционально)
+
+        Если в процессе уже стартовал ``ActAuditLogBatcher``, запись уходит
+        в батчер для bulk-INSERT'а пакетами. Иначе — fallback на одиночный
+        INSERT (тесты, ранний startup, отключённый батчер).
         """
+        # Ленивый импорт — избегаем циклической зависимости с deps.py.
+        try:
+            from app.domains.acts.deps import get_audit_log_batcher
+            batcher = get_audit_log_batcher()
+        except Exception:
+            batcher = None
+
+        if batcher is not None:
+            try:
+                await batcher.add(
+                    ActAuditLogRecord(
+                        action=action,
+                        username=username,
+                        act_id=act_id,
+                        details=details,
+                        changelog=changelog,
+                    )
+                )
+                return
+            except Exception:
+                # Падение батчера не должно блокировать основную операцию —
+                # пишем синхронным fallback'ом.
+                logger.warning(
+                    "Не удалось положить запись в audit-log батчер, "
+                    "fallback на синхронный INSERT",
+                    exc_info=True,
+                )
+
         details_json = json.dumps(details or {}, ensure_ascii=False, default=str)
         changelog_json = json.dumps(changelog or [], ensure_ascii=False, default=str)
         try:
@@ -74,6 +117,33 @@ class ActAuditLogRepository(BaseRepository):
             logger.exception(
                 f"Не удалось записать аудит-лог: action={action}, "
                 f"act_id={act_id}, username={username}"
+            )
+
+    async def log_many(self, records: list[ActAuditLogRecord]) -> None:
+        """Bulk-INSERT пакета записей аудит-лога одним ``executemany``
+        в транзакции.
+
+        Используется батчером (``ActAuditLogBatcher``) для снижения числа
+        одиночных INSERT'ов на Greenplum: десятки операций пользователя
+        в минуту → один пакет в 30 секунд или при наборе ``batch_size``.
+
+        Пустой список — no-op. JSON-сериализация ``details`` / ``changelog``
+        выполняется по тем же правилам, что и в ``log()``.
+        """
+        if not records:
+            return
+        params = []
+        for r in records:
+            details_json = json.dumps(r.details or {}, ensure_ascii=False, default=str)
+            changelog_json = json.dumps(r.changelog or [], ensure_ascii=False, default=str)
+            params.append((r.act_id, r.action, r.username, details_json, changelog_json))
+        async with self.conn.transaction():
+            await self.conn.executemany(
+                f"""
+                INSERT INTO {self.audit_log} (act_id, action, username, details, changelog)
+                VALUES ($1, $2, $3, $4::jsonb, $5::jsonb)
+                """,
+                params,
             )
 
     # -------------------------------------------------------------------------
@@ -184,21 +254,26 @@ class ActAuditLogRepository(BaseRepository):
             dict с информацией об изменениях в tree, tables, textblocks, violations
         """
         try:
-            # Последовательные запросы — asyncpg не поддерживает параллельные
-            # операции на одном соединении
-            db_tables = await self.conn.fetch(
-                f"SELECT table_id, md5(grid_data::text) AS hash "
-                f"FROM {self._tables} WHERE act_id = $1",
-                act_id,
-            )
-            db_textblocks = await self.conn.fetch(
-                f"SELECT textblock_id, md5(content) AS hash "
-                f"FROM {self._textblocks} WHERE act_id = $1",
-                act_id,
-            )
-            db_violations = await self.conn.fetch(
-                f"SELECT violation_id, md5(COALESCE(violated, '') || COALESCE(established, '')) AS hash "
-                f"FROM {self._violations} WHERE act_id = $1",
+            # Один UNION ALL вместо четырёх отдельных SELECT'ов — экономит
+            # 3 round-trip'а к БД на каждое сохранение содержимого. Все
+            # три таблицы фильтруются по одному ``act_id``, проекция
+            # унифицирована до ``(kind, id, hash)``; ``tree`` идёт пятым
+            # SELECT'ом, потому что возвращает другой тип данных
+            # (``tree_data`` целиком, а не пара id+hash).
+            content_rows = await self.conn.fetch(
+                f"""
+                SELECT 'table' AS kind, table_id AS id,
+                       md5(grid_data::text) AS hash
+                FROM {self._tables} WHERE act_id = $1
+                UNION ALL
+                SELECT 'textblock' AS kind, textblock_id AS id,
+                       md5(content) AS hash
+                FROM {self._textblocks} WHERE act_id = $1
+                UNION ALL
+                SELECT 'violation' AS kind, violation_id AS id,
+                       md5(COALESCE(violated, '') || COALESCE(established, '')) AS hash
+                FROM {self._violations} WHERE act_id = $1
+                """,
                 act_id,
             )
             db_tree_row = await self.conn.fetchrow(
@@ -206,8 +281,19 @@ class ActAuditLogRepository(BaseRepository):
                 act_id,
             )
 
+            db_table_ids: dict = {}
+            db_tb_ids: dict = {}
+            db_viol_ids: dict = {}
+            for r in content_rows:
+                kind = r["kind"]
+                if kind == "table":
+                    db_table_ids[r["id"]] = r["hash"]
+                elif kind == "textblock":
+                    db_tb_ids[r["id"]] = r["hash"]
+                elif kind == "violation":
+                    db_viol_ids[r["id"]] = r["hash"]
+
             # Tables diff
-            db_table_ids = {r["table_id"]: r["hash"] for r in db_tables}
             new_table_ids = set(data.tables.keys())
             old_table_ids = set(db_table_ids.keys())
 
@@ -216,12 +302,10 @@ class ActAuditLogRepository(BaseRepository):
             tables_possibly_changed = len(new_table_ids & old_table_ids)
 
             # Textblocks diff
-            db_tb_ids = {r["textblock_id"]: r["hash"] for r in db_textblocks}
             new_tb_ids = set(data.textBlocks.keys())
             old_tb_ids = set(db_tb_ids.keys())
 
             # Violations diff
-            db_viol_ids = {r["violation_id"]: r["hash"] for r in db_violations}
             new_viol_ids = set(data.violations.keys())
             old_viol_ids = set(db_viol_ids.keys())
 
