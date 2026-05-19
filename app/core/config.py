@@ -105,6 +105,11 @@ class SecuritySettings(BaseModel):
     rate_limit_per_minute: int = Field(default=1024, gt=0)
     max_tracked_ips: int = 100
     rate_limit_ttl: int = 120
+    # TTL «stale» singleton-lock'а в секундах. Если строка старше — старый
+    # воркер считается мёртвым, новый перезаписывает блокировку.
+    # Уменьшать только если deploy достаточно быстрый, чтобы корректный
+    # shutdown гарантированно успел вызвать ``release_singleton_lock``.
+    singleton_lock_stale_ttl_sec: int = Field(default=60, gt=0)
 
 
 class ObservabilitySettings(BaseModel):

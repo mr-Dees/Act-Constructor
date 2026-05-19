@@ -136,7 +136,11 @@ async def lifespan(app: FastAPI):
         singleton_table = adapter.get_table_name("app_singleton_lock")
         try:
             async with get_db() as conn:
-                await acquire_singleton_lock(conn, singleton_table)
+                await acquire_singleton_lock(
+                    conn,
+                    singleton_table,
+                    stale_ttl_sec=settings.security.singleton_lock_stale_ttl_sec,
+                )
         except SingletonLockBusyError as exc:
             logger.critical("Не удалось захватить singleton-lock: %s", exc)
             raise RuntimeError(str(exc)) from exc
