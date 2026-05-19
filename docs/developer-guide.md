@@ -174,7 +174,7 @@ cp .env.example .env
 python -m app.main
 ```
 
-Приложение будет доступно по адресу `http://localhost:8000`.
+Приложение будет доступно по адресу `http://localhost:8005` (порт берётся из `SERVER__PORT`; в `.env.example` задан `8005`).
 
 **DataLab / JupyterHub (Greenplum):**
 
@@ -254,6 +254,55 @@ FastAPI Application (app/main.py)
 - API-эндпоинты тонкие — только вызов сервисов и возврат результата
 - Домены изолированы друг от друга (кроме явных зависимостей)
 
+**ER-диаграмма ключевых таблиц домена `acts`:**
+
+```mermaid
+erDiagram
+    acts ||--o{ audit_team_members : "имеет состав"
+    acts ||--o{ act_directives : "содержит поручения"
+    acts ||--|| act_tree : "имеет дерево (UNIQUE act_id)"
+    acts ||--o{ act_tables : "содержит таблицы"
+    acts ||--o{ act_textblocks : "содержит текстблоки"
+    acts ||--o{ act_violations : "содержит нарушения"
+    acts ||--o{ act_invoices : "имеет привязки фактур"
+    acts ||--o{ audit_log : "пишет аудит-лог"
+    acts ||--o{ act_content_versions : "версии содержимого"
+
+    acts {
+        INTEGER id PK
+        VARCHAR km_number "формат КМ-XX-XXXXX"
+        VARCHAR km_number_digit "7 цифр"
+        INTEGER part_number
+        VARCHAR service_note "СЗ: Text/YYYY"
+        BOOLEAN is_process_based
+        VARCHAR locked_by
+        TIMESTAMP lock_expires_at
+    }
+    act_tree {
+        INTEGER act_id FK
+        JSONB tree_data
+    }
+    act_invoices {
+        INTEGER act_id FK
+        VARCHAR node_id "путь в дереве"
+        JSONB invoice_data
+    }
+    act_directives {
+        INTEGER act_id FK
+        VARCHAR division
+        TEXT directive_text
+    }
+    audit_log {
+        INTEGER act_id FK
+        VARCHAR action
+        VARCHAR username
+        JSONB details
+        JSONB changelog
+    }
+```
+
+> Уникальность акта обеспечивается парой `(km_number_digit, part_number)` **на уровне приложения** (`ActCrudService.create_act`), а не БД-констрейнтом: на Greenplum `DISTRIBUTED BY` должен быть подмножеством каждого `UNIQUE` (см. §6.5), а DB-UNIQUE по этой паре потребовал бы либо `DISTRIBUTED REPLICATED` (копия на каждом сегменте), либо смены distribution с потерей co-location. Это сознательный компромисс, не баг.
+
 ### 2.2 Жизненный цикл приложения
 
 Приложение управляется фабрикой `create_app()` в `app/main.py`.
@@ -263,26 +312,41 @@ FastAPI Application (app/main.py)
 ```
 1. Settings         — загрузка конфигурации из .env
 2. Logging          — настройка уровня логирования
-3. Middleware       — добавление в обратном порядке (см. раздел 2.5)
-4. Static files     — монтирование /static и /favicon.ico
-5. Exception handlers — регистрация обработчиков ошибок
-6. Router registration:
+3. discover_domains() — сканирование app/domains/* с регистрацией Settings и chat_tools
+4. Middleware       — добавление в обратном порядке (см. раздел 2.5)
+5. Static files     — монтирование /static и /favicon.ico
+6. Exception handlers — регистрация обработчиков ошибок
+7. Router registration:
    ├── Shared HTML routes
    ├── Shared API routes
    └── Domain API/HTML routes    — автоматически через domain_registry
-7. Lifespan startup (при запуске ASGI-сервера):
-   ├── ensure_directories()      — проверка templates/ и static/
-   ├── init_db(settings)                    — создание asyncpg пула
+8. Lifespan startup (при запуске ASGI-сервера):
+   ├── ensure_directories()                — проверка templates/ и static/
+   ├── init_db(settings)                   — создание asyncpg пула
    ├── create_tables_if_not_exist(domains) — автосоздание таблиц из schema.sql
-   └── domain.on_startup()       — для каждого домена (с откатом при ошибке)
+   ├── domain.on_startup()                 — per-domain, в порядке топосорта
+   ├── get_startup_hooks()                 — инфраструктурные hooks (см. §5.7)
+   └── singleton_lock.acquire()            — захват per-process блокировки
 ```
+
+**Финальный порядок инфраструктурных startup-hooks** (регистрируются в `_build_domain`, выполняются в порядке регистрации):
+
+1. `acts.audit_log_batcher` — bulk-INSERT аудит-лога актов (см. §7.4a Resilience).
+2. `acts.expired_locks_cleanup` — фоновое снятие просроченных блокировок (см. §7.4a).
+3. `admin.http_metrics_batcher` — batched HTTP-метрики (см. §9.5a).
+4. `chat.tool_metrics_batcher` — batched метрики использования tool'ов.
+5. `chat.poll_coordinator` — единый цикл polling событий внешнего ИИ-агента (см. §7.8 и §6.3).
+6. `chat.audit_log_batcher` — batched аудит-лог чата.
 
 **Порядок остановки:**
 
 ```
-1. domain.on_shutdown()  — в обратном порядке (только стартовавшие домены)
-2. close_db()            — закрытие asyncpg пула
+1. get_shutdown_hooks() — в обратном порядке регистрации
+2. domain.on_shutdown() — в обратном порядке (только стартовавшие домены)
+3. close_db()           — закрытие asyncpg пула
 ```
+
+> **Важно:** startup-hooks вызываются **после** `discover_domains` / `settings_registry` / `init_db`, но **до** singleton-lock. Это нужно, чтобы инфраструктурные сервисы (батчеры, фоновые таски) видели готовый pool и зарегистрированные Settings, но не работали в воркере, у которого singleton-lock уже занят другим процессом.
 
 **Защита от частичного старта:** если домен N падает при startup, вызываются `on_shutdown()` для доменов 1..N-1:
 
@@ -1118,20 +1182,69 @@ KnowledgeBase(
 
 ### 5.7 Жизненный цикл домена
 
-Опциональные хуки `on_startup` и `on_shutdown`:
+Есть два механизма управления lifespan-логикой домена:
+
+**1. Per-domain hooks (`DomainDescriptor.on_startup` / `on_shutdown`)** — высокоуровневые. Вызываются с откатом: если N-й домен упал — для доменов 1..N-1 отрабатывают `on_shutdown`.
 
 ```python
 # _lifecycle.py
 async def on_startup(app: FastAPI) -> None:
     """Вызывается при старте приложения."""
-    # Инициализация ресурсов, ThreadPoolExecutor и т.д.
+    # Инициализация ресурсов, ThreadPoolExecutor, начальные данные.
 
 async def on_shutdown(app: FastAPI) -> None:
     """Вызывается при остановке."""
-    # Очистка ресурсов
+    # Очистка ресурсов.
 ```
 
-Домен `acts` использует `on_startup` для создания ThreadPoolExecutor (экспорт) и `on_shutdown` для его остановки.
+Домен `acts` использует `on_startup` для создания ThreadPoolExecutor (экспорт) и `on_shutdown` для его остановки. Домен `admin` — для seed'а ролей из справочника пользователей.
+
+**2. Инфраструктурные hooks (`register_startup_hook` / `register_shutdown_hook`)** — для фоновых задач, батчеров, координаторов. Регистрируются доменом в момент `_build_domain()` (через локальную функцию `register_lifespan_hooks`); `app/main.py` итерирует их в общем lifespan-цикле через `get_startup_hooks()` / `get_shutdown_hooks()`. Контракт:
+
+- Startup-hooks выполняются **после** `discover_domains` / `settings_registry` / `init_db`, но **до** singleton-lock.
+- Shutdown-hooks — в **обратном порядке регистрации**.
+- При падении startup-hook'а — частичный откат через уже выполненные shutdown-hooks.
+
+Образец — `app/domains/admin/_lifecycle.py::register_lifespan_hooks` (HTTP-метрик батчер):
+
+```python
+def register_lifespan_hooks() -> None:
+    from app.core.domain_registry import register_shutdown_hook, register_startup_hook
+
+    async def _start_http_metrics_batcher(app: FastAPI) -> None:
+        batcher = MetricsBatcher(flush_callback=..., max_batch_size=..., ...)
+        await batcher.start()
+        set_http_metrics_batcher(batcher)
+        app.state.http_metrics_batcher = batcher
+
+    async def _stop_http_metrics_batcher(app: FastAPI) -> None:
+        batcher = getattr(app.state, "http_metrics_batcher", None)
+        set_http_metrics_batcher(None)
+        if batcher is not None:
+            await batcher.stop()
+
+    register_startup_hook("admin.http_metrics_batcher", _start_http_metrics_batcher)
+    register_shutdown_hook("admin.http_metrics_batcher", _stop_http_metrics_batcher)
+```
+
+Текущие зарегистрированные hooks (порядок startup) — см. §2.2.
+
+**3. Cross-domain factory-registry (`register_factory` / `get_factory` / `has_factory`)** — реестр фабрик доменных компонентов под строковым ключом (конвенция: `"<домен>.<компонент>"`). Используется для cross-domain DI без прямого импорта классов.
+
+```python
+# admin регистрирует фабрику справочника пользователей
+register_factory("admin.user_directory", _user_directory_factory)
+
+# acts использует её через get_factory без import UserDirectoryRepository
+from app.core.domain_registry import get_factory
+factory = get_factory("admin.user_directory")
+async for repo in factory():
+    users = await repo.search(query)
+```
+
+Это позволяет домену `acts` зависеть от `admin` через **интерфейс** (контракт фабрики), а не через прямой импорт реализации. Регистрация — на этапе `_build_domain()` (через `register_factories()`), до того как любой потребитель запросит фабрику в Depends.
+
+**4. `add_domain_change_listener(listener)`** — callback-инвалидаторы для кешей, зависящих от состава доменов. Вызываются при `register_domains` / `reset_registry`. Используется навигационным кешем (`app/core/navigation.py`, TTL 60 сек) — при изменении состава доменов nav-кеш сбрасывается немедленно.
 
 ### 5.8 Зависимости между доменами
 
@@ -1146,6 +1259,14 @@ DomainDescriptor(
 ```
 
 Циклические зависимости и ссылки на незарегистрированные домены вызывают `RuntimeError` при старте. Порядок регистрации виден в логах `lifespan` — полезно для отладки «почему мой домен инициализируется до своей зависимости».
+
+**DI между доменами — через factory-registry, не через прямые импорты.** Раньше `acts/deps.py` напрямую импортировал `UserDirectoryRepository` из `admin.services`; теперь `get_users_repository()` идёт через `domain_registry.get_factory("admin.user_directory")`. Контракт фабрики — async-генератор репозитория, готовый к использованию в FastAPI Depends. Преимущества:
+
+- `acts` зависит от **интерфейса** (фабрика возвращает что-то, что умеет `search()`), а не от конкретного класса `UserDirectoryRepository`.
+- Тесты `acts` могут зарегистрировать стаб через `register_factory("admin.user_directory", fake_factory)` без monkey-patch'а импортов.
+- Перестановка реализации в admin не ломает acts, пока контракт фабрики стабилен.
+
+См. §5.7 пункт 3 для деталей API.
 
 ---
 
@@ -1247,8 +1368,10 @@ CONSTRAINT check_inspection_dates
     CHECK (inspection_end_date >= inspection_start_date),
 CONSTRAINT check_service_note_consistency
     CHECK (service_note IS NULL OR sent_for_review = true),
-UNIQUE(km_number_digit, part_number)
+UNIQUE(km_number_digit, part_number)  -- только в PG-схеме; на GP — app-level (см. §6.5)
 ```
+
+> **Уникальность `(km_number_digit, part_number)` на Greenplum обеспечивается на уровне приложения** (`ActCrudService.create_act` проверяет наличие активного дубля перед INSERT), а не БД-констрейнтом. Причина — правило `DISTRIBUTED BY ⊆ UNIQUE` (§6.5): для DB-UNIQUE пришлось бы либо `DISTRIBUTED REPLICATED` (копия на каждом сегменте — приемлемо для маленьких таблиц, но требует миграции данных), либо composite-PK с обязательным `id` (меняет distribution). Это сознательный выбор, не баг.
 
 **Роли в `audit_team_members`:**
 
@@ -1376,6 +1499,45 @@ async def get_db() -> AsyncGenerator[asyncpg.Connection, None]:
 - `init_db(settings)` — инициализация при старте
 - `close_db()` — закрытие при shutdown
 - `create_tables_if_not_exist(domains)` — автосоздание таблиц
+
+**Размер пула** (`DATABASE__POOL_MIN_SIZE` / `DATABASE__POOL_MAX_SIZE`, дефолты `5` / `20`). Обоснование: одновременных коннектов нужно достаточно, чтобы покрыть параллельные SSE-стримы чата + фоновые задачи (`PollCoordinator`, `ActAuditLogBatcher`, `ExpiredLocksCleanupTask`, HTTP-метрика батчер) + горячий путь CRUD-эндпоинтов. Старые дефолты `2/10` стабильно упирались в `TooManyConnectionsError` при нагрузке от нескольких одновременных пользователей чата (см. troubleshooting №17). Под GP при необходимости поднимать до `30+` (см. `DatabaseSettings` docstring).
+
+**Partial-индекс `idx_{PREFIX}acts_lock_expires`** на `acts(lock_expires_at)` с `WHERE lock_expires_at IS NOT NULL` — отдельный индекс, который дешёво находит блокировки, которые можно снять. Используется фоновой задачей `ExpiredLocksCleanupTask` (см. §7.4a). Индекс уже присутствует в обеих схемах (PG и GP), регрессий миграции не требуется.
+
+**Polling-цикл агент-моста (`PollCoordinator`):**
+
+```mermaid
+sequenceDiagram
+    participant U as Пользователь
+    participant API as POST /messages (FastAPI)
+    participant O as Orchestrator
+    participant T as forward tool handler
+    participant R as agent_bridge_runner (фоновая task)
+    participant PC as PollCoordinator
+    participant DB as agent_response_events
+
+    U->>API: POST /conversations/{id}/messages
+    API->>O: run_stream(...)
+    O->>T: tool_call(chat.forward_to_knowledge_agent)
+    T->>DB: INSERT agent_requests (status=pending)
+    T-->>O: sentinel "<<forwarded_request:rid>>"
+    O->>R: schedule(rid)
+    R->>PC: subscribe(rid) → asyncio.Queue
+    O-->>U: SSE event: agent_request_started
+
+    loop Adaptive backoff (1-10 сек)
+        PC->>DB: SELECT events WHERE request_id = ANY([r1, r2, ...])
+        DB-->>PC: events_by_id: {r1:[...], r2:[...]}
+        PC->>R: queue.put(event) для каждого подписчика
+    end
+
+    R->>O: events (через poll_events) → SSE block_delta/complete
+    O-->>U: SSE events
+    R->>R: save_assistant_message в chat_messages
+    R->>PC: unsubscribe(rid)
+```
+
+Один SELECT за тик батчит все активные `request_id` (через `WHERE request_id = ANY($1)`). При наличии событий interval сбрасывается в `poll_min_interval_sec` (1.0 сек); при пустом тике — растёт умножением на `poll_backoff_multiplier` (1.5) до `poll_max_interval_sec` (10.0). Без подписчиков координатор спит минимальный интервал. Координатор поднимается на startup через hook `chat.poll_coordinator`.
 
 ### 6.4 BaseRepository: паттерн работы с БД
 
@@ -1748,7 +1910,8 @@ ChatOrchestrator (services/orchestrator.py)
    └─→ forward_to_knowledge_agent → AgentBridge
         └─ INSERT agent_requests
            AgentBridgeRunner (фоновая task):
-             ├─ polling agent_response_events (poll_interval_sec)
+             ├─ subscribe(rid) → PollCoordinator (один SELECT на тик по всем подписчикам)
+             ├─ events из asyncio.Queue → BlockEmitter → SSE
              └─ при response → save_assistant_message
 ```
 
@@ -2001,6 +2164,84 @@ LLM call
 
 Метрики circuit breaker (состояние, число переключений) пишутся в `OBSERVABILITY__METRICS_*` (см. §9.5a) — удобно для алертов на затяжное `open`-состояние.
 
+**Покрытие Retry — что ретраится / что нет** (`app/domains/chat/services/retry.py`):
+
+| Класс ошибки | Ретраится | Условие |
+|---|---|---|
+| `408 Request Timeout` | Да | Всегда |
+| `429 Too Many Requests` | Да | Если `CHAT__RETRY__ON_429=true` |
+| `5xx` (включая 503) | Да | Если `CHAT__RETRY__ON_5XX=true` |
+| `httpx.ConnectTimeout` / `ReadTimeout` / `WriteTimeout` / `PoolTimeout` | Да | Всегда |
+| `httpx.ConnectError` / `RemoteProtocolError` | Да | Всегда |
+| `openai.APITimeoutError` / `APIConnectionError` | Да | Всегда |
+| `400` / `401` / `403` / `404` / `422` | **Нет** | Это ошибки запроса — повтор не поможет |
+| `ChatLimitError` / `ChatFileValidationError` / `ChatRateLimitError` | **Нет** | Доменные ошибки бизнес-логики |
+
+Полные сценарии и edge-case'ы — `docs/retry-test-scenarios.md`.
+
+#### 7.4b Resilience доменных батчеров и фоновых задач
+
+Помимо LLM-слоя, у приложения есть несколько фоновых сервисов, написанных по единому паттерну: batched write через `MetricsBatcher` + lifespan hook + ленивый fallback в репозитории. Цель — не блокировать горячий путь (HTTP-ответ, SSE-стрим) одиночным INSERT'ом и пережить перезапуски без потери данных.
+
+**1. `ActAuditLogBatcher`** (`app/domains/acts/services/audit_log_batcher.py`). Накапливает `ActAuditLogRecord` и flush'ит пакет в `audit_log` через `executemany`:
+
+| Параметр | Значение | Смысл |
+|---|---|---|
+| `batch_size` | `50` | Триггер flush по размеру пакета |
+| `flush_interval_sec` | `30.0` | Триггер flush по времени |
+| `max_buffer_size` | `5000` | Защитный потолок — при переполнении дропаются старые записи |
+
+Управляется hook'ом `acts.audit_log_batcher` (startup/shutdown). **Ленивый fallback в `ActAuditLogRepository.log()`**: если активный батчер из `deps.get_audit_log_batcher()` есть — пишет через него; если нет — одиночный INSERT прямо в БД. Это нужно тестам (нет lifespan'а) и раннему startup (до того, как hook отработал). При падении самого батчера `.add()` репозиторий тоже падает в fallback.
+
+**2. `ExpiredLocksCleanupTask`** (`app/domains/acts/services/expired_locks_cleanup.py`). Фоновый asyncio-таск, раз в 60 сек делает один UPDATE:
+
+```sql
+UPDATE {acts}
+SET locked_by = NULL, locked_at = NULL, lock_expires_at = NULL
+WHERE lock_expires_at <= CURRENT_TIMESTAMP AND locked_by IS NOT NULL
+```
+
+Опирается на partial-индекс `idx_{PREFIX}acts_lock_expires` с `WHERE lock_expires_at IS NOT NULL` (см. §6.3) — поиск кандидатов дешёвый. Раз в час (60 циклов × 60 сек) пишет суммарную статистику в INFO-лог («за последние N циклов снято M блокировок»). Управляется hook'ом `acts.expired_locks_cleanup`.
+
+> Это **подстраховка** — основной путь снятия блокировок остаётся через `ActLockService.unlock()` и автопродление через `inactivity_check`. Cleanup-таск ловит сценарии: kill -9 во время редактирования, обрыв сети с lock'ом на сервере, баг в логике inactivity-watcher'а.
+
+**3. `PollCoordinator`** (`app/domains/chat/services/poll_coordinator.py`). Adaptive backoff для polling событий внешнего ИИ-агента (см. §6.3 sequence-diagram). Формула:
+
+```
+interval = poll_min_interval_sec  # при наличии событий или без подписчиков
+interval = min(interval * poll_backoff_multiplier, poll_max_interval_sec)  # при пустом тике
+```
+
+Параметры через `CHAT__AGENT_BRIDGE__*`:
+
+| Env-переменная | Дефолт | Смысл |
+|---|---|---|
+| `POLL_MIN_INTERVAL_SEC` | `1.0` | Минимальный интервал (при активных событиях) |
+| `POLL_MAX_INTERVAL_SEC` | `10.0` | Максимальный (при тишине от агента) |
+| `POLL_BACKOFF_MULTIPLIER` | `1.5` | Шаг роста при пустом тике |
+
+При появлении любого события — interval сбрасывается в `poll_min`. Управляется hook'ом `chat.poll_coordinator`.
+
+> **Удалена** старая `CHAT__AGENT_BRIDGE__POLL_INTERVAL_SEC` (фиксированный 1 сек). Если она осталась в `.env` — игнорируется без ошибки, но в логи поднимется warning от pydantic-settings.
+
+**Общий паттерн lifespan hooks для батчеров:**
+
+```python
+async def _start_my_batcher(app: FastAPI) -> None:
+    batcher = MyBatcher(...)
+    await batcher.start()
+    set_my_batcher(batcher)               # положить в deps
+    app.state.my_batcher = batcher        # запомнить для shutdown
+
+async def _stop_my_batcher(app: FastAPI) -> None:
+    batcher = getattr(app.state, "my_batcher", None)
+    set_my_batcher(None)
+    if batcher is not None:
+        await batcher.stop()
+```
+
+Все четыре батчера (`acts.audit_log`, `chat.tool_metrics`, `chat.audit_log`, `admin.http_metrics`) написаны по этому шаблону.
+
 ### 7.5 Knowledge bases
 
 `KnowledgeBase` определяется в `DomainDescriptor` и отображается в UI как toggle в настройках:
@@ -2163,7 +2404,7 @@ chat-modal.js / chat-popup.js
 
 - **Защита от повторной инициализации**: каждый модуль хранит `_initialized` флаг и выходит из `init()` при повторном вызове
 - **Ленивая инициализация**: `ChatModalManager`/`ChatPopupManager` вызывают `ChatManager.init()` при первом открытии
-- **ClientAction идемпотентен по `block_id`**: каждый `ClientActionBlock` несёт uuid `block_id` (бэк проставляет в `app/core/chat/blocks.py:141` через `default_factory=uuid4`). Фронт хранит исполненные id в `sessionStorage['chat:executedActions']` (max 500 элементов, FIFO eviction) — повторный SSE-event с тем же id, рендер истории или перезагрузка вкладки не вызовут повторного редиректа. Единая точка исполнения — `ClientActionsRegistry.executeBlock(block)`. **Не вызывай `.execute(...)` напрямую** — обойдёшь `block_id`-чек
+- **ClientAction идемпотентен по `block_id`**: каждый `ClientActionBlock` несёт `block_id` — **обязательное поле** (без `default_factory`). Оркестратор переписывает его на детерминированный формат `f"{message_id}:ca:{i}"` в `_parse_client_action_result` (где `i` — индекс client_action-блока в сообщении). При перезагрузке вкладки фронт получает **тот же id** → `sessionStorage['chat:executedActions']` (max 500 элементов, FIFO eviction) сматчит → action не выполняется повторно. Без детерминизма (старая семантика `default_factory=uuid4`) после reload каждый раз генерировался новый uuid, что вызывало бесконечный редирект-цикл. Единая точка исполнения — `ClientActionsRegistry.executeBlock(block)`. **Не вызывай `.execute(...)` напрямую** — обойдёшь `block_id`-чек. Фронт-логика не менялась — id хранится так же, изменилось только то, как он генерируется на бэке
 - **Auto-resume при разрыве SSE**: `ChatStream` запоминает `request_id` из `agent_request_started` и при разрыве переоткрывает `GET /conversations/{cid}/agent-request/{rid}/stream?since=<seq>`. Курсор по `seq` (не id) — `id` в Greenplum не монотонен между сегментами
 - **DOM API в `chat-history`**: список бесед рендерится через `document.createElement`/`textContent`/`dataset`, не через `innerHTML` — защита от XSS через title беседы (= первое сообщение пользователя)
 - **Whitelist в `chat-client-actions`**: `open_url` принимает только `http:/https:/mailto:/relative`; `trigger_sdk` — только методы из `ALLOWED_SDK_METHODS` (по умолчанию пустой)
@@ -2188,9 +2429,10 @@ Orchestrator:
 
 Фоновый раннер (agent_bridge_runner):
     ↓ UPDATE status=dispatched, started_at=now()
-    ↓ polling agent_response_events (курсор по seq, не id)
-    ↓ при первом event: UPDATE status=in_progress
+    ↓ PollCoordinator.subscribe(rid) → asyncio.Queue (единый цикл polling по batch)
+    ↓ при первом event из queue: UPDATE status=in_progress
     ↓ при agent_responses: UPDATE status=done, save_assistant_message в БД
+    ↓ PollCoordinator.unsubscribe(rid)
 
 SSE → клиент:
     ↓ agent_request_started → ChatStream запоминает request_id
@@ -2226,11 +2468,13 @@ SSE → клиент:
 - **Восстановление SSE** после обрыва — endpoint `GET /conversations/{id}/agent-request/{rid}/stream?since={seq}` (`api/messages.py`). Курсор по `seq`.
 
 **Ключевые модули:**
-- `app/domains/chat/services/agent_bridge.py` — `AgentBridgeService.send/poll_events/poll_response/wait_for_completion`. Курсор `since_seq`.
-- `app/domains/chat/services/agent_bridge_runner.py` — фоновый раннер polling+save: `schedule(rid, settings)`, `is_running(rid)`, `schedule_pending(settings, older_than_sec=30)` для lifespan-reconcile. Process-level registry `_running: dict[str, asyncio.Task]` защищает от дублей.
+- `app/domains/chat/services/agent_bridge.py` — `AgentBridgeService.send/poll_events/poll_response/wait_for_completion`. Курсор `since_seq`. **`poll_events_batch(request_ids, since_seqs=None)`** — один SELECT для всех подписчиков `PollCoordinator`'а (одно `WHERE request_id = ANY($1)`).
+- `app/domains/chat/services/poll_coordinator.py` — единый фоновый цикл polling событий, exponential backoff, подписка через `subscribe(rid) → asyncio.Queue` (идемпотентно), `unsubscribe(rid)`. Стартует через hook `chat.poll_coordinator`. Один SELECT за тик независимо от числа параллельных forward'ов.
+- `app/domains/chat/services/agent_bridge_runner.py` — фоновый раннер polling+save: `schedule(rid, settings)`, `is_running(rid)`, `schedule_pending(settings, older_than_sec=30)` для lifespan-reconcile. Process-level registry `_running: dict[str, asyncio.Task]` защищает от дублей. Подписывается на `PollCoordinator` вместо собственного цикла SELECT'ов.
+- `app/domains/chat/services/forward_tool_factory.py` — фабрика per-request инструмента `chat.forward_to_knowledge_agent`. Два API: `build_forward_tool_descriptor()` (handler=None, `per_request_handler=True`) — для статической регистрации через `discover_domains`; `build_forward_tool(conn, conversation_id, message_id, user_id, domain_name, knowledge_bases, history, files)` — собирает `ChatTool` с замыканием под текущее сообщение, оркестратор вызывает на каждой итерации. Handler возвращает sentinel `<<forwarded_request:UUID>>` → оркестратор распознаёт и переключается в bridge-stream режим.
 - `app/domains/chat/services/button_translator.py` — общая трансляция action_id (имя ChatTool) → клиентский action. Используется в орк-е, раннере, resume-эндпоинте.
 - `app/domains/chat/services/block_emitter.py` — общий SSE-эмиттер блоков ответа агента (правила: text/code/reasoning → триплет; file/image/plan/error → block_complete; buttons → sse_buttons; client_action → sse_client_action).
-- `app/domains/chat/integrations/forward_handler.py` — фабрика `build_forward_handler(...)`, sentinel-pattern
+- `app/domains/chat/integrations/forward_handler.py` — sentinel-pattern (`FORWARD_SENTINEL_PATTERN`, `make_forward_sentinel(rid)`); раньше тут жил inline-builder, теперь логика вынесена в `forward_tool_factory.py`.
 - `app/domains/chat/repositories/agent_*_repository.py` — три CRUD-репозитория. `AgentRequestRepository.claim_pending(worker_token, older_than_sec)` для reconcile (атомарный UPDATE … RETURNING — каждый воркер получает непересекающееся подмножество, double-claim физически невозможен).
 - `app/domains/chat/services/{llm_client,retry,tool_call_accumulator}.py` — провайдер-агностичная LLM-инфра (OpenRouter/SGLang quirks: `index=None` fallback, `reasoning_details` для MiniMax M2)
 
@@ -2381,7 +2625,7 @@ wb.save("/tmp/metrics.xlsx")
 #### Когда «у меня не работает»
 
 - В чате тишина после вопроса → нет INSERT в `agent_requests` ⇒ LLM не решил форвардить (нет toggle базы знаний / system prompt не подсказал / handler не зарегистрирован для домена).
-- Reasoning-чанки не появляются → проверь `CHAT__AGENT_BRIDGE__POLL_INTERVAL_SEC` и логи `agent_bridge polling: ...`.
+- Reasoning-чанки не появляются → проверь, что `PollCoordinator` стартовал (`chat.poll_coordinator` hook в логах startup) и что подписка `subscribe(rid)` прошла. Параметры цикла — `CHAT__AGENT_BRIDGE__POLL_MIN_INTERVAL_SEC` / `POLL_MAX_INTERVAL_SEC` / `POLL_BACKOFF_MULTIPLIER`. Старая `POLL_INTERVAL_SEC` удалена.
 - Запрос обрывается с `timeout` → `agent_requests.error_message` подскажет, какой из трёх гейтов сработал.
 - Файл не отображается до перезагрузки → SSE `block_complete` не дошёл. Регрессия в тесте выше; локально проверь `static/js/shared/chat/chat-messages.js` case `'block_complete'`.
 - Клик «Скачать» возвращает 404 → `chat_files.conversation_id` ≠ `agent_requests.conversation_id`. Бери из запроса, не выдумывай.
@@ -2588,7 +2832,7 @@ ChatRenderer.renderBlock(block, {execute: true})
 
 Регистрация дополнительных команд в JS: `ClientActionsRegistry.register('my_action', ({...params}) => {...})`.
 
-**Критическое правило**: `ClientActionBlock` идемпотентен по `block_id`. Каждый блок получает uuid `block_id` (бэк генерит `default_factory=uuid4` в `app/core/chat/blocks.py:141`), фронт хранит исполненные id в `sessionStorage['chat:executedActions']` (`static/js/shared/chat/chat-client-actions.js:13-30`, max 500 элементов, FIFO eviction). Повторное получение SSE-события с тем же `block_id`, рендер истории и перезагрузка вкладки — не приводят к повторному `window.location`/`Notifications.show`. Единая точка исполнения — `ClientActionsRegistry.executeBlock(block)`. **Не вызывай `.execute(action, params)` напрямую** — обойдёшь `block_id`-чек и получишь редирект-цикл.
+**Критическое правило**: `ClientActionBlock` идемпотентен по `block_id`. Поле `block_id` в `app/core/chat/blocks.py` — **обязательное** (без `default_factory`); оркестратор переписывает его на детерминированный `f"{message_id}:ca:{i}"` в `_parse_client_action_result`. Фронт хранит исполненные id в `sessionStorage['chat:executedActions']` (`static/js/shared/chat/chat-client-actions.js:13-30`, max 500 элементов, FIFO eviction). Повторное получение SSE-события с тем же `block_id`, рендер истории и **перезагрузка вкладки** — не приводят к повторному `window.location`/`Notifications.show` (id стабильный между сессиями). Единая точка исполнения — `ClientActionsRegistry.executeBlock(block)`. **Не вызывай `.execute(action, params)` напрямую** — обойдёшь `block_id`-чек и получишь редирект-цикл.
 
 **Пример action-handler'а** (`app/domains/acts/integrations/action_handlers.py`):
 
@@ -2870,13 +3114,13 @@ async def test_message_limit_exceeded(service):
 python -m app.main
 
 # Способ 2: uvicorn напрямую
-uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload
+uvicorn app.main:app --host 0.0.0.0 --port 8005 --reload
 ```
 
 Для production (без перезагрузки, **только один воркер**):
 
 ```bash
-uvicorn app.main:app --host 127.0.0.1 --port 8000 --workers 1
+uvicorn app.main:app --host 127.0.0.1 --port 8005 --workers 1
 ```
 
 **Важно:** приложение разработано под single-worker деплой. На старте
@@ -2921,7 +3165,7 @@ DATABASE__GP__DATABASE=capgp3
 DATABASE__GP__SCHEMA=s_grnplm_ld_audit_da_project_4
 DATABASE__TABLE_PREFIX=t_db_oarb_audit_act_
 SERVER__HOST=0.0.0.0
-SERVER__PORT=8000
+SERVER__PORT=8005
 ```
 
 ### 9.3 За reverse proxy (HTTPS)
@@ -2939,7 +3183,7 @@ server {
     ssl_certificate_key /path/to/key.pem;
 
     location / {
-        proxy_pass http://127.0.0.1:8000;
+        proxy_pass http://127.0.0.1:8005;
         proxy_set_header Host $host;
         proxy_set_header X-Real-IP $remote_addr;
         proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
@@ -3005,7 +3249,7 @@ APP_VERSION=1.0.0
 JUPYTERHUB_USER=00000000_omega-sbrf-ru
 
 SERVER__HOST=0.0.0.0
-SERVER__PORT=8000
+SERVER__PORT=8005
 SERVER__LOG_LEVEL=INFO
 
 DATABASE__TYPE=postgresql
@@ -3208,7 +3452,7 @@ def test_chat_settings_defaults():
 | Переменная | Тип | По умолчанию | Описание |
 |-----------|-----|-------------|----------|
 | `SERVER__HOST` | str | `0.0.0.0` | IP для привязки |
-| `SERVER__PORT` | int | `8000` | TCP порт (1-65535) |
+| `SERVER__PORT` | int | `8005` | TCP порт (1-65535). В `.env.example` задан `8005`; Swagger по адресу `http://localhost:8005/docs` |
 | `SERVER__API_V1_PREFIX` | str | `/api/v1` | Префикс API |
 | `SERVER__LOG_LEVEL` | str | `INFO` | Уровень логирования (`DEBUG`/`INFO`/`WARNING`/`ERROR`) |
 | `LOG_FORMAT` | str | `text` | `text` (разработка) или `json` (для агрегаторов) |
@@ -3223,8 +3467,8 @@ def test_chat_settings_defaults():
 | `DATABASE__NAME` | str | `audit_workstation` | Имя БД |
 | `DATABASE__USER` | str | `postgres` | Пользователь |
 | `DATABASE__PASSWORD` | str | (пусто) | Пароль |
-| `DATABASE__POOL_MIN_SIZE` | int | `2` | Мин. соединений |
-| `DATABASE__POOL_MAX_SIZE` | int | `10` | Макс. соединений |
+| `DATABASE__POOL_MIN_SIZE` | int | `5` | Мин. соединений. Подобран под параллельные SSE-стримы чата + фоновые задачи (PollCoordinator, audit-log batcher, expired-locks cleanup, HTTP-metrics batcher) + горячий путь CRUD |
+| `DATABASE__POOL_MAX_SIZE` | int | `20` | Макс. соединений. Старые дефолты `2/10` упирались в `TooManyConnectionsError` при нагрузке (см. troubleshooting №17) |
 | `DATABASE__COMMAND_TIMEOUT` | int | `60` | Timeout команд (сек) |
 | `DATABASE__POOL_WARMUP_ENABLED` | bool | `True` | Прогрев пула при старте |
 | `DATABASE__TABLE_PREFIX` | str | `t_db_oarb_audit_act_` | Общий префикс таблиц приложения (PG и GP) |
@@ -3284,7 +3528,9 @@ def test_chat_settings_defaults():
 
 | Переменная | Тип | По умолчанию | Описание |
 |-----------|-----|-------------|----------|
-| `CHAT__AGENT_BRIDGE__POLL_INTERVAL_SEC` | float | `1.0` | Интервал polling таблиц `agent_*` |
+| `CHAT__AGENT_BRIDGE__POLL_MIN_INTERVAL_SEC` | float | `1.0` | Минимальный интервал polling (при активных событиях) `PollCoordinator` (см. §7.4b) |
+| `CHAT__AGENT_BRIDGE__POLL_MAX_INTERVAL_SEC` | float | `10.0` | Максимальный интервал polling (при тишине от агента) |
+| `CHAT__AGENT_BRIDGE__POLL_BACKOFF_MULTIPLIER` | float | `1.5` | Шаг роста интервала при пустом тике (> 1.0) |
 | `CHAT__AGENT_BRIDGE__INITIAL_RESPONSE_TIMEOUT_SEC` | int | `300` | Гейт 1: время до первого события/ответа |
 | `CHAT__AGENT_BRIDGE__EVENT_TIMEOUT_SEC` | int | `120` | Гейт 2: heartbeat между событиями |
 | `CHAT__AGENT_BRIDGE__MAX_TOTAL_DURATION_SEC` | int | `1800` | Гейт 3: общий таймаут запроса |
@@ -3389,17 +3635,30 @@ def test_chat_settings_defaults():
 
 Защитный потолок — `OBSERVABILITY__METRICS_MAX_BUFFER_SIZE` (10000). При переполнении старые записи дропаются (защита от OOM, если БД недоступна).
 
-**Три источника, использующие батчер:**
+**Четыре источника, использующие батчер** (все управляются через единые lifespan hooks — см. §2.2):
 
-| Источник | Файл | Что пишет | Куда |
-|---|---|---|---|
-| HTTP-запросы | `app/core/middlewares/http_metrics.py` | path, method, status, latency_ms, user, request_id | `http_metrics` (admin domain) |
-| Chat tool-метрики | `ChatAuditService` (`app/domains/chat/services/chat_audit_service.py`) | tool_name, user, latency, success, error | `chat_tool_metrics` |
-| Acts audit-log | `audit_log_service.py` | act_id, action, details (JSONB), user | `audit_log` |
+| Источник | Файл | Hook | Что пишет | Куда |
+|---|---|---|---|---|
+| HTTP-запросы | `app/core/middlewares/http_metrics.py` | `admin.http_metrics_batcher` | path, method, status, latency_ms, user, request_id | `http_metrics` |
+| Chat tool-метрики | `ChatAuditService` (`app/domains/chat/services/chat_audit_service.py`) | `chat.tool_metrics_batcher` | tool_name, user, latency, success, error | `chat_tool_metrics` |
+| Chat audit-log | `app/domains/chat/services/chat_audit_log_service.py` | `chat.audit_log_batcher` | event_type, conversation_id, user, payload | `chat_audit_log` |
+| Acts audit-log | `ActAuditLogBatcher` (`app/domains/acts/services/audit_log_batcher.py`) | `acts.audit_log_batcher` | act_id, action, details (JSONB), user | `audit_log` |
 
 HTTP metrics middleware **выключен по умолчанию** — включить через `ADMIN__HTTP_METRICS_ENABLED=true`. Это сделано потому, что в DataLab/JupyterHub нагрузка низкая, и метрики на каждый запрос — overkill; включается для троттлинг-расследований.
 
 **Сервис чтения** — `app/domains/admin/services/http_metrics_service.py` — отдаёт агрегаты для админ-панели (top-N медленных эндпоинтов, частота ошибок 5xx и т.п.).
+
+**Дополнительные фоновые сервисы (без отдельных метрик, только логи):**
+
+- `ExpiredLocksCleanupTask` (`acts.expired_locks_cleanup`) — раз в час INFO-лог «за последние N циклов снято M блокировок». Не пишет в БД, но даёт видимость в проде, что cleanup работает (см. §7.4b).
+- `PollCoordinator` (`chat.poll_coordinator`) — INFO на start/stop, exception-логи при сбоях SELECT'а. Полезно для отладки «почему reasoning-чанки не появляются».
+
+**Параметры `ActAuditLogBatcher`** (`acts.audit_log_batcher`) отличаются от общих `OBSERVABILITY__*`:
+- `batch_size=50` (а не 100 — операций пользователей в среднем меньше, чем HTTP-запросов).
+- `flush_interval_sec=30.0` (а не 5.0 — допустимо потерять до 50 записей при крэше; типичная сессия в редакторе длиннее flush-интервала).
+- `max_buffer_size=5000`.
+
+Эти значения зашиты в коде батчера (`audit_log_batcher.py`) — менять через env пока не требуется.
 
 ### 9.6 Retention agent-bridge таблиц
 
@@ -3617,8 +3876,10 @@ AppState.tree[0].title = 'Новое название';  // → автомати
 | `gigachat_adapter` | Duck-typed wrapper над `AsyncOpenAI` для GigaChat-proxy: tools↔functions, function_call↔tool_calls | — |
 | `retry` | Экспоненциальный backoff на 429/5xx/timeout | settings |
 | `circuit_breaker` | FSM closed/open/half-open для primary↔fallback (см. §7.4a) | settings |
-| `agent_bridge` | CRUD-фасад над таблицами `agent_*`: send, poll_events, poll_response, wait_for_completion | репозитории |
-| `agent_bridge_runner` | Фоновая asyncio-задача polling + save_assistant_message; process-level `_running` registry | `agent_bridge`, `MessageService` |
+| `agent_bridge` | CRUD-фасад над таблицами `agent_*`: send, poll_events, poll_response, `poll_events_batch`, wait_for_completion | репозитории |
+| `poll_coordinator` | Единый фоновый цикл polling событий (batch SELECT по всем `request_id`, exponential backoff). Подписчики читают события из `asyncio.Queue` | `agent_bridge.poll_events_batch` |
+| `agent_bridge_runner` | Per-request asyncio task: подписывается на `PollCoordinator`, сохраняет ассистент-message по финальному `agent_responses`. Process-level `_running` registry | `poll_coordinator`, `agent_bridge`, `MessageService` |
+| `forward_tool_factory` | Фабрика `build_forward_tool(...)` — собирает per-request `ChatTool` с замыканием на conn/conversation/message/files. Заменил inline-builder в orchestrator | `agent_bridge` |
 | `button_translator` | Транслирует `action_id` (имя ChatTool) → клиентский action для UI-кнопок | реестр ChatTool |
 | `block_emitter` | Единый SSE-эмиттер блоков: правила маршрутизации `text/code/reasoning` → триплет, `file/image/plan/error` → `block_complete` | — |
 | `tool_call_accumulator` | Накапливает fragments стрима OpenAI-tool_calls в полноценный объект | — |
@@ -3706,18 +3967,33 @@ class ToolCallAccumulator:
 
 **Зачем единая точка:** без неё каждое из трёх мест эмитит блоки по-своему — фронт получит то пустые text-контейнеры (block_start+block_end без delta для file), то двойные исполнения client_action (block_complete + client_action на один блок). При добавлении нового типа блока в `app/core/chat/blocks.py` — правка только в одном месте.
 
-### 11.6 agent_bridge_runner: фоновая задача
+### 11.6 agent_bridge_runner и PollCoordinator: фоновое сохранение ассистент-сообщений
 
-`agent_bridge_runner.py` — единственное место, которое держит долгоживущий polling-цикл и сохраняет ассистент-message от внешнего агента. Оркестратор НЕ ждёт ответа агента — он только эмитит `agent_request_started` и читает накопленные events/response из БД через `poll_events`/`poll_response` уже в рамках следующих SSE-событий.
+`agent_bridge_runner.py` — единственное место, которое сохраняет ассистент-message от внешнего агента в БД. Оркестратор НЕ ждёт ответа агента — он только эмитит `agent_request_started` и читает накопленные events/response из БД через `poll_events`/`poll_response` уже в рамках следующих SSE-событий.
 
 **Ключевая идея — разделение ответственности:**
 
 | Кто | Что делает |
 |---|---|
 | Оркестратор | INSERT в `agent_requests`, эмитит `agent_request_started`, читает events/response из БД, эмитит SSE |
-| `agent_bridge_runner` (фоновая task) | Polling `agent_response_events`, при финальном `agent_responses` — `save_assistant_message` в `chat_messages` |
+| `PollCoordinator` | Один фоновый цикл polling событий, **batch SELECT по всем активным `request_id`**, раздаёт события подписчикам через `asyncio.Queue` |
+| `agent_bridge_runner` (per-request asyncio task) | Подписывается на `PollCoordinator`, читает события из своей очереди, при финальном `agent_responses` — `save_assistant_message` в `chat_messages` |
 | `schedule_pending(older_than_sec=30)` в lifespan | Подхватывает зависшие запросы после рестарта uvicorn |
 
-**Process-level `_running: dict[str, asyncio.Task]`** защищает от дублей: повторный `schedule(rid)` для уже запущенного запроса возвращает существующий task. После завершения task удаляется из словаря.
+**Зачем `PollCoordinator`** (вариант B: координатор + подписчики). До рефакторинга каждый `agent_bridge_runner` крутил свой собственный SELECT раз в секунду. При N параллельных forward'ов = N SELECT'ов/сек, без батчинга. С координатором — **один** SELECT за тик `WHERE request_id = ANY([r1, r2, ...])`, события раздаются подписчикам через `asyncio.Queue` (см. §6.3 sequence-diagram). Координатор работает с adaptive backoff (1.0 → 10.0 сек × 1.5 при пустых тиках, сброс при появлении событий).
+
+**Контракт подписки (`PollCoordinator`):**
+
+```python
+queue = await coordinator.subscribe(request_id)  # идемпотентно — повторная подписка вернёт существующую
+try:
+    while not finished:
+        event = await queue.get()  # блокирующее чтение
+        # ... обработка
+finally:
+    await coordinator.unsubscribe(request_id)  # тоже идемпотентно
+```
+
+**Process-level `_running: dict[str, asyncio.Task]`** в раннере защищает от дублей: повторный `schedule(rid)` для уже запущенного запроса возвращает существующий task. После завершения task удаляется из словаря.
 
 **Worker token (`claim_pending`)** — атомарный `UPDATE … RETURNING` с `worker_token` гарантирует, что при multi-worker сценарии каждый раннер получает непересекающееся подмножество запросов. Для single-worker (текущая конфигурация) этот механизм избыточен, но позволяет масштабироваться без переписывания.

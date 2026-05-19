@@ -375,11 +375,22 @@ toggle'ов.
 
 ### Идемпотентность через `block_id`
 
-Бэк генерирует `block_id: uuid4` на каждый `ClientActionBlock`
-(`app/core/chat/blocks.py:141`). Фронт ведёт `Set<string>` исполненных id,
-сериализуется в `sessionStorage['chat:executedActions']`
-(`chat-client-actions.js:13-43`). Soft cap — 500 элементов, при
-переполнении выкидываются самые старые.
+Бэк проставляет `block_id` на каждый `ClientActionBlock` — это **обязательное** поле
+без `default_factory`. Оркестратор переписывает его на детерминированный формат
+`f"{message_id}:ca:{i}"` в `_parse_client_action_result` (где `i` — индекс
+client_action-блока в сообщении).
+
+> **Гарантия идемпотентности при reload.** При перезагрузке вкладки фронт получает
+> **тот же id** (он стабильно выводится из `message_id`), `sessionStorage`-чек
+> сматчит → action не выполняется повторно. До рефакторинга `block_id` генерился
+> через `default_factory=uuid4`, и при каждом reload получался новый uuid — это
+> вызывало бесконечный редирект-цикл для `open_url` actions из истории.
+
+Фронт ведёт `Set<string>` исполненных id, сериализуется в
+`sessionStorage['chat:executedActions']` (`chat-client-actions.js:13-43`). Soft
+cap — 500 элементов, при переполнении выкидываются самые старые. Фронт-логика
+не меняется — id хранится так же, изменилось только то, как он генерируется
+на бэке.
 
 `ClientActionsRegistry.executeBlock(block)` (`chat-client-actions.js:83-99`)
 — **единая точка** для исполнения с идемпотентностью:

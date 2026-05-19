@@ -68,8 +68,25 @@
 1. По тексту ошибки определи, какой гейт сработал (упомянут конкретный таймаут в секундах).
 2. Если внешний агент действительно отвечает медленнее — поднять соответствующий `CHAT__AGENT_BRIDGE__*` в `.env`.
 3. Если агент не запущен / не подхватывает запросы — проверить `agent_requests`-таблицу (есть ли записи в статусе `pending`) и agent_bridge_runner (фоновая задача lifespan).
+4. **Параметры polling** — `CHAT__AGENT_BRIDGE__POLL_MIN_INTERVAL_SEC` (1.0), `POLL_MAX_INTERVAL_SEC` (10.0), `POLL_BACKOFF_MULTIPLIER` (1.5). Старая `POLL_INTERVAL_SEC` удалена; если осталась в `.env` — игнорируется.
 
 **См. также:** `developer-guide.md §7.8`, `docs/manual-qa-external-agent-bridge.md`.
+
+---
+
+### 4a. Чат не подписан на агента (нет reasoning-чанков)
+
+**Симптом:** После форварда к внешнему ИИ-агенту фронт показывает `agent_request_started`, но reasoning-чанки не приходят. В БД `agent_response_events` события есть (внешний агент пишет), но `chat_messages` не пополняется, статус `agent_requests.status` застрял в `dispatched`.
+
+**Причина:** `PollCoordinator` не стартовал или не подписался на `request_id`. Координатор — единственный, кто делает SELECT по `agent_response_events` и раздаёт события подписчикам через `asyncio.Queue`. Если он не запущен — `agent_bridge_runner` подписывается «вникуда», и события не доходят.
+
+**Решение:**
+1. Проверь логи startup на наличие строки `poll_coordinator: запущен (min=1.00с, max=10.00с, mult=1.50)`. Если её нет — hook `chat.poll_coordinator` не отработал (см. порядок hooks в `docs/developer-guide.md §2.2`).
+2. Если hook есть, но события не идут — проверь, что `agent_bridge_runner.schedule(rid)` действительно вызвался: в логах должна быть строка `poll_coordinator: подписан request_id=...`.
+3. Параметры backoff: при пустом тике интервал растёт от `POLL_MIN_INTERVAL_SEC` до `POLL_MAX_INTERVAL_SEC` × `POLL_BACKOFF_MULTIPLIER`. При появлении любого события сбрасывается в min. Если события появляются медленно (раз в 15+ сек), задержка может выглядеть как «нет ответа».
+4. Reconcile зависших запросов — `schedule_pending(older_than_sec=30)` в lifespan; при рестарте uvicorn все `pending`/`dispatched` старше 30 сек подхватываются заново.
+
+**См. также:** `developer-guide.md §7.4b`, §11.6, `app/domains/chat/services/poll_coordinator.py`.
 
 ---
 
@@ -266,10 +283,10 @@
 
 **Симптом:** Под нагрузкой или при большом числе одновременных пользователей — `asyncpg.exceptions.TooManyConnectionsError` или таймауты получения connection из пула.
 
-**Причина:** Пул `asyncpg` исчерпан — все connection'ы заняты долгими транзакциями или зависшими запросами. Дефолт `DATABASE__POOL_MAX_SIZE` рассчитан на скромную одновременную нагрузку.
+**Причина:** Пул `asyncpg` исчерпан — все connection'ы заняты долгими транзакциями или зависшими запросами. Дефолты подобраны под параллельные SSE-стримы чата + фоновые задачи (PollCoordinator, ActAuditLogBatcher, ExpiredLocksCleanupTask, HTTP-metrics batcher) + горячий путь CRUD: `DATABASE__POOL_MIN_SIZE=5`, `POOL_MAX_SIZE=20`.
 
 **Решение:**
-1. Увеличить `DATABASE__POOL_MAX_SIZE` в `.env` (например с 10 до 30).
+1. Увеличить `DATABASE__POOL_MAX_SIZE` в `.env` (например с 20 до 40).
 2. Найти долгоиграющие транзакции на сервере:
    ```sql
    SELECT pid, now() - query_start AS duration, state, query
