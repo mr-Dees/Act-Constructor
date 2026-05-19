@@ -26,7 +26,9 @@ class AgentBridgeSettings(BaseModel):
 
     # Минимальный интервал polling (используется и как стартовый
     # интервал координатора, и как floor при exponential backoff).
-    poll_min_interval_sec: float = Field(default=1.0, gt=0.0)
+    # 5 сек — компромисс между отзывчивостью чата и нагрузкой на GP
+    # (SELECT раз в секунду = 60 запросов/мин на каждый активный forward).
+    poll_min_interval_sec: float = Field(default=5.0, gt=0.0)
     # Максимальный интервал polling при отсутствии событий от агента.
     poll_max_interval_sec: float = Field(default=10.0, gt=0.0)
     # Множитель роста интервала между пустыми тиками polling.
