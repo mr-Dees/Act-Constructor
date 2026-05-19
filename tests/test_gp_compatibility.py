@@ -183,6 +183,25 @@ class TestGreenplumSchemaCompatibility:
             + "\n".join(plpgsql_violations)
         )
 
+    def test_pg_acts_schema_no_updated_at_trigger(self):
+        """PG- и GP-схемы acts синхронизированы: updated_at выставляется явно
+        в SQL репозиториев, функция ``update_updated_at_column`` и связанные
+        CREATE TRIGGER в обеих схемах отсутствуют."""
+        base = Path(__file__).parent.parent / "app" / "domains" / "acts" / "migrations"
+        for db_type in ("postgresql", "greenplum"):
+            schema = base / db_type / "schema.sql"
+            content = schema.read_text(encoding="utf-8")
+            # Вырезаем комментарии — допускаем упоминание в пояснительных секциях.
+            stripped = re.sub(r'--[^\n]*', '', content)
+            stripped = re.sub(r'/\*.*?\*/', '', stripped, flags=re.DOTALL)
+            assert "update_updated_at_column" not in stripped, (
+                f"{db_type}/schema.sql: функция update_updated_at_column "
+                f"должна быть удалена (updated_at выставляется в SQL репозиториев)"
+            )
+            assert not re.search(r'\bCREATE\s+TRIGGER\b', stripped, re.IGNORECASE), (
+                f"{db_type}/schema.sql: CREATE TRIGGER должен быть удалён"
+            )
+
     def test_chat_domain_migration_discovered(self, gp_schema_files):
         """GP-миграция домена chat обнаруживается автоматически."""
         domain_names = {s.parent.parent.parent.name for s in gp_schema_files}

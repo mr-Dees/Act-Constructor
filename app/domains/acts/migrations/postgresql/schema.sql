@@ -525,55 +525,8 @@ CREATE INDEX IF NOT EXISTS idx_{PREFIX}violations_content
     );
 
 -- ============================================================================
--- ТРИГГЕРЫ ДЛЯ АВТОМАТИЧЕСКОГО ОБНОВЛЕНИЯ updated_at
+-- updated_at — устанавливается явным SET updated_at = CURRENT_TIMESTAMP в коде
 -- ============================================================================
-
-CREATE OR REPLACE FUNCTION update_updated_at_column()
-RETURNS TRIGGER AS $$
-BEGIN
-    NEW.updated_at = CURRENT_TIMESTAMP;
-    RETURN NEW;
-END;
-$$ LANGUAGE plpgsql;
-
--- Триггер для acts
-DROP TRIGGER IF EXISTS update_{PREFIX}acts_updated_at ON {SCHEMA}.{PREFIX}acts;
-CREATE TRIGGER update_{PREFIX}acts_updated_at
-    BEFORE UPDATE ON {SCHEMA}.{PREFIX}acts
-    FOR EACH ROW
-    EXECUTE FUNCTION update_updated_at_column();
-
--- Триггер для act_tree
-DROP TRIGGER IF EXISTS update_{PREFIX}act_tree_updated_at ON {SCHEMA}.{PREFIX}act_tree;
-CREATE TRIGGER update_{PREFIX}act_tree_updated_at
-    BEFORE UPDATE ON {SCHEMA}.{PREFIX}act_tree
-    FOR EACH ROW
-    EXECUTE FUNCTION update_updated_at_column();
-
--- Триггер для act_tables
-DROP TRIGGER IF EXISTS update_{PREFIX}act_tables_updated_at ON {SCHEMA}.{PREFIX}act_tables;
-CREATE TRIGGER update_{PREFIX}act_tables_updated_at
-    BEFORE UPDATE ON {SCHEMA}.{PREFIX}act_tables
-    FOR EACH ROW
-    EXECUTE FUNCTION update_updated_at_column();
-
--- Триггер для act_textblocks
-DROP TRIGGER IF EXISTS update_{PREFIX}act_textblocks_updated_at ON {SCHEMA}.{PREFIX}act_textblocks;
-CREATE TRIGGER update_{PREFIX}act_textblocks_updated_at
-    BEFORE UPDATE ON {SCHEMA}.{PREFIX}act_textblocks
-    FOR EACH ROW
-    EXECUTE FUNCTION update_updated_at_column();
-
--- Триггер для act_violations
-DROP TRIGGER IF EXISTS update_{PREFIX}act_violations_updated_at ON {SCHEMA}.{PREFIX}act_violations;
-CREATE TRIGGER update_{PREFIX}act_violations_updated_at
-    BEFORE UPDATE ON {SCHEMA}.{PREFIX}act_violations
-    FOR EACH ROW
-    EXECUTE FUNCTION update_updated_at_column();
-
--- Триггер для act_invoices
-DROP TRIGGER IF EXISTS update_{PREFIX}act_invoices_updated_at ON {SCHEMA}.{PREFIX}act_invoices;
-CREATE TRIGGER update_{PREFIX}act_invoices_updated_at
-    BEFORE UPDATE ON {SCHEMA}.{PREFIX}act_invoices
-    FOR EACH ROW
-    EXECUTE FUNCTION update_updated_at_column();
+-- Поведение синхронизировано с GP-схемой: PL/pgSQL-триггер не нужен, обновление
+-- метки времени делается явно в SQL-запросах репозиториев (act_content.py,
+-- act_crud.py, act_lock.py, act_invoice.py, act_crud_service._build_update_query).
