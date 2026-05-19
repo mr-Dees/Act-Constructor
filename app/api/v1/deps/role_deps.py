@@ -17,15 +17,17 @@ from app.db.connection import get_db, get_adapter
 
 logger = logging.getLogger("audit_workstation.api.deps.roles")
 
-# Кеш ролей: maxsize=256, ttl=10 секунд
-_roles_cache: TTLCache = TTLCache(maxsize=256, ttl=10)
+# Кеш ролей: maxsize=256, ttl=5 секунд.
+# TTL короткий — это последняя линия защиты от устаревших прав при отсутствии
+# межпроцессной инвалидации (см. invalidate_user_roles_cache).
+_roles_cache: TTLCache = TTLCache(maxsize=256, ttl=5)
 
 
 async def get_user_roles(username: str = Depends(get_username)) -> list[dict]:
     """
     Возвращает список ролей текущего пользователя.
 
-    Кешируется на 10 секунд. Если у пользователя нет ролей,
+    Кешируется на 5 секунд. Если у пользователя нет ролей,
     автоматически назначает роль 'Цифровой акт'.
     """
     if username in _roles_cache:
@@ -127,6 +129,14 @@ def require_admin() -> Callable:
     return _check
 
 
-def invalidate_roles_cache(username: str) -> None:
-    """Инвалидация кеша ролей при назначении/снятии."""
+def invalidate_user_roles_cache(username: str) -> None:
+    """Явная инвалидация кеша ролей при назначении/снятии роли.
+
+    ВАЖНО: инвалидация работает только в пределах текущего процесса.
+    В multi-process / multi-instance деплое (в первую очередь JupyterHub,
+    где каждый пользователь запускает собственный процесс приложения)
+    очистка кеша в одном процессе НЕ затронет кеш в других процессах.
+    Для таких случаев единственной защитой остаётся короткий TTL (5 сек)
+    — это сознательный компромисс между свежестью прав и нагрузкой на БД.
+    """
     _roles_cache.pop(username, None)
