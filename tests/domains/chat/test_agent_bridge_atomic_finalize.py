@@ -39,7 +39,7 @@ def _settings() -> ChatDomainSettings:
         api_base="http://test-llm:8000/v1",
         api_key="test-key",
     )
-    s.agent_bridge.poll_interval_sec = 0.01
+    s.agent_bridge.poll_min_interval_sec = 0.01
     s.agent_bridge.initial_response_timeout_sec = 5
     s.agent_bridge.event_timeout_sec = 5
     s.agent_bridge.max_total_duration_sec = 5

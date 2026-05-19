@@ -211,11 +211,13 @@ def test_client_action_block_parses():
         action="open_url",
         params={"url": "/acts/КМ-23-001"},
         label="Открываю акт КМ-23-001…",
+        block_id="b-1",
     )
     assert block.type == "client_action"
     assert block.action == "open_url"
     assert block.params == {"url": "/acts/КМ-23-001"}
     assert block.label == "Открываю акт КМ-23-001…"
+    assert block.block_id == "b-1"
 
 
 def test_client_action_block_in_discriminated_union():
@@ -223,24 +225,34 @@ def test_client_action_block_in_discriminated_union():
     from app.core.chat.schemas import parse_message_blocks
     blocks = parse_message_blocks([
         {"type": "client_action", "action": "notify",
-         "params": {"message": "Привет"}, "label": None},
+         "params": {"message": "Привет"}, "label": None,
+         "block_id": "u-1"},
     ])
     assert len(blocks) == 1
     assert blocks[0].type == "client_action"
     assert blocks[0].action == "notify"
     assert blocks[0].label is None
+    assert blocks[0].block_id == "u-1"
 
 
-def test_client_action_block_id_auto_generated():
-    """При создании без явного block_id — генерируется валидный uuid4."""
-    import uuid as _uuid
+def test_client_action_block_id_required():
+    """Wave 2: block_id обязательное поле (без default_factory=uuid4).
+
+    Семантика поменялась: фабрика id переехала в оркестратор
+    (``f"{message_id}:ca:{i}"``), сама модель больше не генерирует
+    uuid4 автоматически. Это гарантирует детерминизм id между
+    запусками для sessionStorage-дедупликации на фронте.
+    """
+    import pydantic
     from app.core.chat.blocks import ClientActionBlock
 
-    block = ClientActionBlock(action="notify", params={"message": "Hi"})
-    assert block.block_id
-    # Проверяем, что это валидный uuid4 (парсится без исключений)
-    parsed = _uuid.UUID(block.block_id)
-    assert parsed.version == 4
+    with pytest.raises(pydantic.ValidationError) as exc_info:
+        ClientActionBlock(action="notify", params={"message": "Hi"})
+    # Ошибка должна явно указывать на отсутствие block_id
+    assert any(
+        e["loc"] == ("block_id",) and e["type"] == "missing"
+        for e in exc_info.value.errors()
+    )
 
 
 def test_client_action_block_id_explicit():
@@ -256,12 +268,18 @@ def test_client_action_block_id_explicit():
     assert block.block_id == explicit_id
 
 
-def test_client_action_block_id_unique_per_instance():
-    """Два инстанса без явного block_id — получают разные uuid."""
+def test_client_action_block_id_preserved_distinct_values():
+    """Два инстанса с разными явными block_id — сохраняют их."""
     from app.core.chat.blocks import ClientActionBlock
 
-    a = ClientActionBlock(action="notify", params={"message": "A"})
-    b = ClientActionBlock(action="notify", params={"message": "B"})
+    a = ClientActionBlock(
+        action="notify", params={"message": "A"}, block_id="id-a",
+    )
+    b = ClientActionBlock(
+        action="notify", params={"message": "B"}, block_id="id-b",
+    )
+    assert a.block_id == "id-a"
+    assert b.block_id == "id-b"
     assert a.block_id != b.block_id
 
 
@@ -269,10 +287,11 @@ def test_client_action_block_id_in_model_dump():
     """block_id попадает в model_dump (это критично для SSE сериализации)."""
     from app.core.chat.blocks import ClientActionBlock
 
-    block = ClientActionBlock(action="notify", params={"message": "Hi"})
+    block = ClientActionBlock(
+        action="notify", params={"message": "Hi"}, block_id="dump-id",
+    )
     data = block.model_dump()
-    assert "block_id" in data
-    assert data["block_id"] == block.block_id
+    assert data["block_id"] == "dump-id"
 
 
 def test_client_action_block_id_via_discriminated_union():

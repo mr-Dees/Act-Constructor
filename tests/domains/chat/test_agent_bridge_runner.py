@@ -28,7 +28,7 @@ def _settings() -> ChatDomainSettings:
         api_base="http://test-llm:8000/v1",
         api_key="test-key",
     )
-    s.agent_bridge.poll_interval_sec = 0.01
+    s.agent_bridge.poll_min_interval_sec = 0.01
     s.agent_bridge.initial_response_timeout_sec = 5
     s.agent_bridge.event_timeout_sec = 5
     s.agent_bridge.max_total_duration_sec = 5
@@ -53,7 +53,7 @@ async def test_schedule_is_idempotent():
     # «живой» и при втором вызове schedule её должны вернуть.
     started = asyncio.Event()
 
-    async def fake_run(_rid, *, settings):  # noqa: ARG001
+    async def fake_run(_rid, *, settings, coordinator=None):  # noqa: ARG001
         started.set()
         await asyncio.sleep(10)
 
@@ -270,7 +270,7 @@ async def test_schedule_pending_runs_task_per_claimed_id():
 
     started = []
 
-    def fake_schedule(rid, *, settings):  # noqa: ARG001
+    def fake_schedule(rid, *, settings, coordinator=None):  # noqa: ARG001
         started.append(rid)
         # Возвращаем заглушку Task-подобного объекта.
         return MagicMock()
@@ -318,7 +318,7 @@ async def test_schedule_pending_skips_already_running():
 
     called_with: list[str] = []
 
-    def fake_schedule(rid, *, settings):  # noqa: ARG001
+    def fake_schedule(rid, *, settings, coordinator=None):  # noqa: ARG001
         called_with.append(rid)
         return MagicMock()
 
@@ -363,7 +363,7 @@ async def test_shutdown_running_cancels_and_waits():
     """Отменяет живые задачи и ждёт их завершения."""
     cancelled_flags: dict[str, bool] = {}
 
-    async def long_run(rid, *, settings):  # noqa: ARG001
+    async def long_run(rid, *, settings, coordinator=None):  # noqa: ARG001
         try:
             await asyncio.sleep(10)
         except asyncio.CancelledError:

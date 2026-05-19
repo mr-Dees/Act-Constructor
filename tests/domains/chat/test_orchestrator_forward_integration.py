@@ -74,7 +74,7 @@ async def test_forward_tool_call_streams_reasoning_and_final(monkeypatch):
         api_key="test-key",
         streaming_enabled=True,
     )
-    settings.agent_bridge.poll_interval_sec = 0.01
+    settings.agent_bridge.poll_min_interval_sec = 0.01
     settings.agent_bridge.initial_response_timeout_sec = 5
     settings.agent_bridge.event_timeout_sec = 5
     settings.agent_bridge.max_total_duration_sec = 5
@@ -232,7 +232,7 @@ async def test_forward_emits_separate_block_per_reasoning_chunk(monkeypatch):
         api_key="test-key",
         streaming_enabled=True,
     )
-    settings.agent_bridge.poll_interval_sec = 0.01
+    settings.agent_bridge.poll_min_interval_sec = 0.01
     settings.agent_bridge.initial_response_timeout_sec = 5
     settings.agent_bridge.event_timeout_sec = 5
     settings.agent_bridge.max_total_duration_sec = 5
@@ -443,7 +443,7 @@ async def test_buttons_block_emits_sse_buttons_not_block_start(monkeypatch):
         api_key="test-key",
         streaming_enabled=True,
     )
-    settings.agent_bridge.poll_interval_sec = 0.01
+    settings.agent_bridge.poll_min_interval_sec = 0.01
     settings.agent_bridge.initial_response_timeout_sec = 5
     settings.agent_bridge.event_timeout_sec = 5
     settings.agent_bridge.max_total_duration_sec = 5
@@ -517,7 +517,7 @@ async def test_text_and_buttons_in_same_response_each_renders_correctly(monkeypa
         api_key="test-key",
         streaming_enabled=True,
     )
-    settings.agent_bridge.poll_interval_sec = 0.01
+    settings.agent_bridge.poll_min_interval_sec = 0.01
     settings.agent_bridge.initial_response_timeout_sec = 5
     settings.agent_bridge.event_timeout_sec = 5
     settings.agent_bridge.max_total_duration_sec = 5
@@ -616,7 +616,7 @@ async def _run_forward_and_collect_events(monkeypatch, response_blocks):
         api_key="test-key",
         streaming_enabled=True,
     )
-    settings.agent_bridge.poll_interval_sec = 0.01
+    settings.agent_bridge.poll_min_interval_sec = 0.01
     settings.agent_bridge.initial_response_timeout_sec = 5
     settings.agent_bridge.event_timeout_sec = 5
     settings.agent_bridge.max_total_duration_sec = 5

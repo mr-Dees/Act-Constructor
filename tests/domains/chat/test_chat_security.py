@@ -527,6 +527,7 @@ class TestDangerousURLSchemes:
         block = ClientActionBlock(
             action="open_url",
             params={"url": "https://example.com/page"},
+            block_id="b1",
         )
         assert block.params["url"] == "https://example.com/page"
 
@@ -535,6 +536,7 @@ class TestDangerousURLSchemes:
         block = ClientActionBlock(
             action="open_url",
             params={"url": "/constructor?act_id=42"},
+            block_id="b2",
         )
         assert block.params["url"] == "/constructor?act_id=42"
 

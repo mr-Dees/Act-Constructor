@@ -802,7 +802,13 @@ class TestClientActionBlockIdInSSE:
 
     @pytest.mark.asyncio
     async def test_emit_response_blocks_adds_missing_block_id(self):
-        """block_emitter добавляет block_id, если он отсутствует в client_action."""
+        """block_emitter добавляет детерминированный block_id для client_action.
+
+        Семантика после Wave 2: фабрика id переключилась с uuid4 на детерминированный
+        ``f"{message_id}:ca:{i}"`` (или ``agent:ca:{idx}:{i}"`` без message_id),
+        чтобы при resume/reload фронт получал тот же id и применял sessionStorage-
+        дедупликацию.
+        """
         from app.domains.chat.services.block_emitter import emit_response_blocks
 
         blocks = [
@@ -814,16 +820,12 @@ class TestClientActionBlockIdInSSE:
             },
         ]
         events: list[tuple[str, int]] = []
-        async for sse, idx in emit_response_blocks(blocks):
+        async for sse, idx in emit_response_blocks(blocks, message_id="msg-99"):
             events.append((sse, idx))
 
         assert len(events) == 1
         payload = _parse_event_data(events[0][0])
-        assert payload["block"]["block_id"]
-        # Валидный uuid4
-        import uuid as _uuid
-        parsed = _uuid.UUID(payload["block"]["block_id"])
-        assert parsed.version == 4
+        assert payload["block"]["block_id"] == "msg-99:ca:0"
 
     @pytest.mark.asyncio
     async def test_emit_response_blocks_preserves_existing_block_id(self):
@@ -846,7 +848,10 @@ class TestClientActionBlockIdInSSE:
         assert payload["block"]["block_id"] == "persistent-id-42"
 
     def test_orchestrator_parser_adds_block_id_if_missing(self):
-        """_parse_client_action_result добавляет block_id, если его нет."""
+        """_parse_client_action_result добавляет детерминированный block_id.
+
+        Wave 2: формат стал ``f"{message_id}:ca:{idx}"`` (вместо uuid4).
+        """
         settings = ChatDomainSettings(
             api_base="http://test", api_key="test", model="test-model",
         )
@@ -860,14 +865,20 @@ class TestClientActionBlockIdInSSE:
             "action": "notify",
             "params": {"message": "Hi"},
         })
-        parsed = orch._parse_client_action_result(raw_json)
+        parsed = orch._parse_client_action_result(
+            raw_json, message_id="m-1", ca_counter=[0],
+        )
         assert parsed is not None
-        assert parsed.get("block_id")
-        import uuid as _uuid
-        _uuid.UUID(parsed["block_id"])  # не падает = валидный uuid
+        assert parsed["block_id"] == "m-1:ca:0"
 
     def test_orchestrator_parser_preserves_block_id(self):
-        """Существующий block_id в результате tool'а сохраняется."""
+        """Wave 2: парсер ВСЕГДА переписывает block_id детерминированно.
+
+        Это нужно для идемпотентности между запусками — id формируется как
+        ``f"{message_id}:ca:{i}"`` независимо от того, выставил ли его handler.
+        Старое поведение (preserve) теперь устарело: только централизованная
+        нумерация в оркестраторе гарантирует одинаковый id при reload истории.
+        """
         settings = ChatDomainSettings(
             api_base="http://test", api_key="test", model="test-model",
         )
@@ -882,6 +893,9 @@ class TestClientActionBlockIdInSSE:
             "params": {"message": "Hi"},
             "block_id": "handler-supplied-id",
         })
-        parsed = orch._parse_client_action_result(raw_json)
+        parsed = orch._parse_client_action_result(
+            raw_json, message_id="m-1", ca_counter=[3],
+        )
         assert parsed is not None
-        assert parsed["block_id"] == "handler-supplied-id"
+        # handler-supplied id отбрасывается, используется counter-based
+        assert parsed["block_id"] == "m-1:ca:3"
