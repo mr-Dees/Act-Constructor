@@ -83,6 +83,32 @@ class AgentRequestRepository(BaseRepository):
         )
         return self._parse_row(row) if row else None
 
+    async def get_active_for_conversation(
+        self,
+        conversation_id: str,
+        user_id: str,
+    ) -> dict | None:
+        """Самый свежий активный forward-запрос беседы или None.
+
+        «Активный» = status IN ('pending','dispatched','in_progress'),
+        принадлежит указанному пользователю. Используется resume-логикой
+        фронта при перезагрузке страницы — чтобы переоткрыть SSE-стрим
+        ответа внешнего агента.
+        """
+        row = await self.conn.fetchrow(
+            f"""
+            SELECT id, status, created_at, message_id
+            FROM {self.table}
+            WHERE conversation_id = $1 AND user_id = $2
+              AND status IN ('pending', 'dispatched', 'in_progress')
+            ORDER BY created_at DESC
+            LIMIT 1
+            """,
+            conversation_id,
+            user_id,
+        )
+        return self._parse_row(row) if row else None
+
     async def find_pending(self, older_than_sec: int) -> list[dict]:
         """Возвращает незавершённые agent_requests, созданные раньше
         now() - older_than_sec секунд. Используется lifespan-reconcile

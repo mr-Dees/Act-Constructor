@@ -255,6 +255,36 @@ async def test_update_status_without_expected_version_still_returns_version(
     assert "RETURNING version" in sql
 
 
+async def test_get_active_for_conversation_returns_row(mock_conn):
+    """Активный forward — pending/dispatched/in_progress — возвращается dict'ом."""
+    repo = AgentRequestRepository(mock_conn)
+    mock_conn.fetchrow.return_value = {
+        "id": "r1",
+        "status": "in_progress",
+        "created_at": None,
+        "message_id": "m1",
+    }
+    row = await repo.get_active_for_conversation("conv-1", "user-1")
+    assert row is not None
+    assert row["id"] == "r1"
+    assert row["status"] == "in_progress"
+
+    sql, *params = mock_conn.fetchrow.call_args.args
+    assert "SELECT id, status, created_at, message_id" in sql
+    assert "status IN ('pending', 'dispatched', 'in_progress')" in sql
+    assert "ORDER BY created_at DESC" in sql
+    assert "LIMIT 1" in sql
+    assert params == ["conv-1", "user-1"]
+
+
+async def test_get_active_for_conversation_returns_none_when_no_rows(mock_conn):
+    """Если активных нет — None (без ошибок)."""
+    repo = AgentRequestRepository(mock_conn)
+    mock_conn.fetchrow.return_value = None
+    row = await repo.get_active_for_conversation("conv-1", "user-1")
+    assert row is None
+
+
 async def test_update_status_version_conflict_logs_context(mock_conn, caplog):
     """1.9: При version-conflict warning содержит current_version и status.
 
