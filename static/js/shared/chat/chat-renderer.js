@@ -42,6 +42,36 @@ const ChatRenderer = {
     },
 
     /**
+     * Создаёт DOM-плейсхолдер с тремя анимированными точками.
+     * Используется внутри bot-bubble как индикатор «бот думает».
+     * Удаляется при первом блоке ответа через `removeTypingPlaceholder()`.
+     *
+     * @returns {HTMLElement}
+     */
+    createTypingPlaceholder() {
+        const placeholder = document.createElement('div');
+        placeholder.className = 'chat-typing-placeholder';
+        for (let i = 0; i < 3; i++) {
+            const dot = document.createElement('span');
+            dot.className = 'chat-typing-dot';
+            placeholder.appendChild(dot);
+        }
+        return placeholder;
+    },
+
+    /**
+     * Удаляет typing-плейсхолдер из контейнера, если он там есть.
+     * Идемпотентен — повторный вызов безопасен.
+     *
+     * @param {HTMLElement} container — контейнер bot-сообщения
+     */
+    removeTypingPlaceholder(container) {
+        if (!container) return;
+        const placeholder = container.querySelector(':scope > .chat-typing-placeholder');
+        if (placeholder) placeholder.remove();
+    },
+
+    /**
      * Рендерит массив блоков в DOM-контейнер
      *
      * @param {HTMLElement} container — контейнер для отрисовки

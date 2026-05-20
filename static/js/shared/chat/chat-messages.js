@@ -124,7 +124,7 @@ const ChatMessages = {
         ChatEventBus.emit('ui:processing', { state: true });
 
         try {
-            const conversationId = await ChatContext.ensureConversation();
+            const conversationId = await ChatContext.ensureConversation(text, files);
 
             // Рендерим user-сообщение
             if (files.length > 0) {
@@ -137,9 +137,10 @@ const ChatMessages = {
             }
 
             ChatFiles.clear();
-            ChatEventBus.emit('ui:typing-show');
 
-            const botContainer = this._addBotMessageStreaming({ hidden: true });
+            // Bot-bubble виден сразу: внутри живёт typing-плейсхолдер с тремя
+            // анимированными точками. При первом блоке ответа плейсхолдер удаляется.
+            const botContainer = this._addBotMessageStreaming();
 
             await ChatStream.send(conversationId, text, files, {
                 domains: ChatContext.detectDomains(),
@@ -147,27 +148,61 @@ const ChatMessages = {
                     this._handleSSEEvent(event, botContainer);
                 },
                 onError: (err) => {
-                    console.error('ChatMessages: ошибка стриминга', err);
-                    ChatEventBus.emit('ui:typing-hide');
-                    const msgEl = botContainer.closest('.chat-message');
-                    if (msgEl) msgEl.style.display = '';
-                    const errDiv = document.createElement('div');
-                    errDiv.className = 'chat-error';
-                    errDiv.textContent = 'Произошла ошибка. Попробуйте ещё раз.';
-                    botContainer.appendChild(errDiv);
+                    this._onStreamError(err, botContainer);
                 },
                 onDone: () => {
-                    ChatEventBus.emit('ui:typing-hide');
                     ChatEventBus.emit('ui:scroll-bottom');
                 },
             });
         } catch (err) {
-            ChatEventBus.emit('ui:typing-hide');
             console.error('ChatMessages: ошибка отправки', err);
             this.renderMessage('bot', 'Произошла ошибка. Попробуйте ещё раз.');
         } finally {
             ChatEventBus.emit('ui:processing', { state: false });
         }
+    },
+
+    /**
+     * Обработчик ошибки стрима: различает дружелюбный 429 (ChatRateLimitedError)
+     * и прочие сбои. В обоих случаях заменяет typing-плейсхолдер на error-блок,
+     * чтобы пользователь увидел проблему прямо в bot-bubble.
+     *
+     * @param {Error} err — ошибка стрима
+     * @param {HTMLElement} botContainer — контейнер bot-сообщения
+     * @private
+     */
+    _onStreamError(err, botContainer) {
+        const isRateLimited = typeof ChatRateLimitedError !== 'undefined'
+            && err instanceof ChatRateLimitedError;
+
+        if (isRateLimited) {
+            console.warn('ChatMessages: лимит параллельных стримов', err.userMessage);
+            ChatRenderer.removeTypingPlaceholder(botContainer);
+            const errBlock = ChatRenderer.renderBlock({
+                type: 'error',
+                message: err.userMessage,
+                code: 'rate_limited',
+            });
+            if (errBlock) ChatRenderer.appendBlock(botContainer, errBlock);
+
+            // Дополнительно — тост, чтобы пользователь увидел уведомление
+            // даже если переключился в другую беседу.
+            if (typeof window !== 'undefined'
+                && window.Notifications
+                && typeof window.Notifications.warning === 'function') {
+                try {
+                    window.Notifications.warning(err.userMessage);
+                } catch { /* notification subsystem не критична */ }
+            }
+            return;
+        }
+
+        console.error('ChatMessages: ошибка стриминга', err);
+        ChatRenderer.removeTypingPlaceholder(botContainer);
+        const errDiv = document.createElement('div');
+        errDiv.className = 'chat-error';
+        errDiv.textContent = 'Произошла ошибка. Попробуйте ещё раз.';
+        botContainer.appendChild(errDiv);
     },
 
     /**
@@ -178,12 +213,23 @@ const ChatMessages = {
      * @private
      */
     _handleSSEEvent(event, container) {
+        // Любой блок, начавший появляться, должен скрыть «три точки».
+        // Кроме служебных событий (message_start, message_end, agent_request_started)
+        // — они сами по себе не означают, что бот начал отвечать.
+        const isContentEvent =
+            event.type === 'block_start'
+            || event.type === 'block_delta'
+            || event.type === 'block_complete'
+            || event.type === 'buttons'
+            || event.type === 'client_action'
+            || event.type === 'error';
+        if (isContentEvent) {
+            ChatRenderer.removeTypingPlaceholder(container);
+        }
+
         switch (event.type) {
             case 'message_start':
                 this._streamingBlocks = {};
-                ChatEventBus.emit('ui:typing-hide');
-                const msgEl = container.closest('.chat-message');
-                if (msgEl) msgEl.style.display = '';
                 break;
 
             case 'block_start': {
@@ -288,11 +334,8 @@ const ChatMessages = {
                 break;
 
             case 'agent_request_started':
-                // Сигнал от backend: forward к внешнему агенту зарегистрирован.
-                // request_id уже сохранён в ChatStream — при разрыве соединения
-                // он автоматически переоткроет resume-стрим. Здесь только
-                // показываем индикатор «думает».
-                ChatEventBus.emit('ui:typing-show');
+                // Forward к внешнему агенту зарегистрирован. Typing-плейсхолдер
+                // уже внутри bot-bubble, ничего дополнительно показывать не нужно.
                 break;
         }
 
@@ -381,14 +424,21 @@ const ChatMessages = {
     },
 
     /**
-     * Создаёт пустой DOM бот-сообщения для стриминга
+     * Создаёт DOM бот-сообщения для стриминга.
+     *
+     * Контейнер виден сразу и содержит typing-плейсхолдер с тремя анимированными
+     * точками. Первое же содержимое (block_start / block_delta / block_complete и т.п.)
+     * приведёт к удалению плейсхолдера в `_handleSSEEvent`.
+     *
+     * @param {Object} [options]
+     * @param {boolean} [options.withPlaceholder=true] — добавить ли typing-плейсхолдер.
+     *   Для рендера сохранённой истории передаём false — там сразу идут готовые блоки.
      * @returns {HTMLElement} — контейнер .chat-message-content
      * @private
      */
-    _addBotMessageStreaming({ hidden = false } = {}) {
+    _addBotMessageStreaming({ withPlaceholder = true } = {}) {
         const msg = document.createElement('div');
         msg.className = 'chat-message chat-message-bot';
-        if (hidden) msg.style.display = 'none';
 
         const avatar = document.createElement('div');
         avatar.className = 'chat-message-avatar';
@@ -399,6 +449,10 @@ const ChatMessages = {
 
         const content = document.createElement('div');
         content.className = 'chat-message-content';
+
+        if (withPlaceholder) {
+            content.appendChild(ChatRenderer.createTypingPlaceholder());
+        }
 
         msg.appendChild(avatar);
         msg.appendChild(content);
@@ -524,7 +578,7 @@ const ChatMessages = {
                 this._renderUserMessageWithFiles(text, fileBlocks);
             } else if (msg.role === 'assistant') {
                 if (blocks.length > 0) {
-                    const container = this._addBotMessageStreaming();
+                    const container = this._addBotMessageStreaming({ withPlaceholder: false });
                     ChatRenderer.renderBlocks(container, blocks, { execute: false });
                 } else {
                     this.renderMessage('bot', '');
