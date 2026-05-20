@@ -78,8 +78,16 @@ async def stream_forward_events(
             )
             return
 
-        # Открываем коннект только на ОДНУ итерацию — не держим
-        # соединение из пула между poll-тиками.
+        # Сначала ТОЛЬКО читаем БД и собираем «снимок» тика — никаких
+        # yield'ов внутри `async with get_db()`. Yield внутри держал бы
+        # коннект из пула на каждое SSE-событие; при нескольких
+        # параллельных forward'ах под нагрузкой это приводит к
+        # contention'у в пуле и зависанию обычных HTTP-запросов
+        # (см. CLAUDE.md «yield внутри async with»).
+        events_to_emit: list[dict] = []
+        response_to_emit: dict | None = None
+        terminal_status: tuple[str, str | None] | None = None
+
         async with get_db() as conn:
             bridge = AgentBridgeService(conn)
             req_repo = AgentRequestRepository(conn)
@@ -89,81 +97,79 @@ async def stream_forward_events(
             )
             for ev in events:
                 last_seq = ev["seq"]
-                et = ev["event_type"]
-                if et == "reasoning":
-                    chunk_text = (ev["payload"] or {}).get("text", "")
-                    if not chunk_text:
-                        continue
-                    logger.info(
-                        "Событие агента: тип=reasoning, длина=%d",
-                        len(chunk_text),
-                    )
-                    # Каждый reasoning-чанк — отдельный сворачиваемый
-                    # блок (start + delta + end), со своим block_index.
-                    for sse in emit_text_block_with_limit(
-                        block_index=block_index,
-                        block_type="reasoning",
-                        text=chunk_text,
-                        chunk_flush_bytes=settings.delta_chunk_flush_bytes,
-                        block_max_bytes=settings.delta_block_max_bytes,
-                    ):
-                        yield ("sse", sse)
-                    block_index += 1
-                elif et == "error":
-                    payload = ev["payload"] or {}
-                    err_message = payload.get(
-                        "message", "Ошибка внешнего агента",
-                    )
-                    err_code = payload.get("code")
-                    yield (
-                        "sse",
-                        sse_error(error=err_message, code=err_code),
-                    )
-                # status — информационное событие, игнорируем
+                events_to_emit.append(ev)
 
-            response = await bridge.poll_response(request_id)
-            if response is not None:
-                logger.info(
-                    "Финальный ответ агента: request_id=%s, "
-                    "blocks=%d, tokens=%s",
-                    request_id,
-                    len(response.get("blocks") or []),
-                    response.get("token_usage"),
-                )
-                async for sse, idx in emit_response_blocks(
-                    response["blocks"],
-                    block_index_start=block_index,
-                    message_id=message_id,
+            response_to_emit = await bridge.poll_response(request_id)
+            if response_to_emit is None:
+                req = await req_repo.get(request_id)
+                if req is not None and req.get("status") in (
+                    "error", "timeout",
                 ):
-                    block_index = idx + 1
-                    yield ("sse", sse)
-                return
-
-            # Финального ответа ещё нет. Проверяем статус: раннер
-            # мог уже прервать запрос таймаут-гейтом или фатальной
-            # ошибкой — тогда финализируем SSE error'ом и выходим.
-            req = await req_repo.get(request_id)
-            if req is not None and req.get("status") in (
-                "error", "timeout",
-            ):
-                status = req["status"]
-                err_text = (
-                    req.get("error_message")
-                    or "Ошибка внешнего агента"
-                )
-                err_code = (
-                    "agent_timeout" if status == "timeout" else "agent_error"
-                )
-                if status == "timeout":
-                    err_text = (
-                        "Внешний агент не ответил вовремя. "
-                        "Попробуйте позже."
+                    terminal_status = (
+                        req["status"], req.get("error_message"),
                     )
-                logger.warning(
-                    "stream_forward_events: request_id=%s помечен как %s: %s",
-                    request_id, status, req.get("error_message"),
+
+        # БД-коннект освобождён. Теперь — yield-им то, что собрали.
+        for ev in events_to_emit:
+            et = ev["event_type"]
+            if et == "reasoning":
+                chunk_text = (ev["payload"] or {}).get("text", "")
+                if not chunk_text:
+                    continue
+                logger.info(
+                    "Событие агента: тип=reasoning, длина=%d",
+                    len(chunk_text),
                 )
-                yield ("sse", sse_error(error=err_text, code=err_code))
-                return
+                for sse in emit_text_block_with_limit(
+                    block_index=block_index,
+                    block_type="reasoning",
+                    text=chunk_text,
+                    chunk_flush_bytes=settings.delta_chunk_flush_bytes,
+                    block_max_bytes=settings.delta_block_max_bytes,
+                ):
+                    yield ("sse", sse)
+                block_index += 1
+            elif et == "error":
+                payload = ev["payload"] or {}
+                err_message = payload.get(
+                    "message", "Ошибка внешнего агента",
+                )
+                err_code = payload.get("code")
+                yield ("sse", sse_error(error=err_message, code=err_code))
+            # status — информационное событие, игнорируем
+
+        if response_to_emit is not None:
+            logger.info(
+                "Финальный ответ агента: request_id=%s, "
+                "blocks=%d, tokens=%s",
+                request_id,
+                len(response_to_emit.get("blocks") or []),
+                response_to_emit.get("token_usage"),
+            )
+            async for sse, idx in emit_response_blocks(
+                response_to_emit["blocks"],
+                block_index_start=block_index,
+                message_id=message_id,
+            ):
+                block_index = idx + 1
+                yield ("sse", sse)
+            return
+
+        if terminal_status is not None:
+            status, error_message = terminal_status
+            if status == "timeout":
+                err_text = (
+                    "Внешний агент не ответил вовремя. Попробуйте позже."
+                )
+                err_code = "agent_timeout"
+            else:
+                err_text = error_message or "Ошибка внешнего агента"
+                err_code = "agent_error"
+            logger.warning(
+                "stream_forward_events: request_id=%s помечен как %s: %s",
+                request_id, status, error_message,
+            )
+            yield ("sse", sse_error(error=err_text, code=err_code))
+            return
 
         await asyncio.sleep(poll_interval)
