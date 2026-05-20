@@ -22,7 +22,10 @@ from typing import TYPE_CHECKING, Any
 from app.domains.chat.exceptions import ChatToolValidationError
 from app.domains.chat.services.orchestrator_helpers import (
     TOOL_VALIDATION_NEUTRAL_MESSAGE,
+    ToolValidationTracker,
+    build_tool_loop_exit_answer,
     safe_args as _safe_args,
+    unpack_pending_tool_call,
 )
 
 if TYPE_CHECKING:
@@ -86,14 +89,7 @@ async def run_agent_loop(
     # вернул >1 tool_call, первый исполняем сейчас, остальные — в очередь.
     pending_tool_calls: list[Any] = []
     is_gigachat = orch.settings.profile == "gigachat"
-    # Отслеживание повторяющихся ошибок валидации tool'ов.
-    # Формат: (error_message_key, tool_name)
-    _last_validation_error: tuple[str, str] | None = None
-    _consecutive_validation_errors = 0
-    # Счётчик client_action-блоков для построения детерминированного
-    # block_id (см. _parse_client_action_result). message_id передан
-    # вызывающим — тот же id будет использован в _save_assistant_message.
-    ca_counter: list[int] = [0]  # noqa: F841 (не используется в non-streaming, но симметрия с stream_loop)
+    validation_tracker = ToolValidationTracker()
 
     try:
         response, _fb_used, client = await orch._llm_call_with_fallback(
@@ -113,9 +109,9 @@ async def run_agent_loop(
             # Если очередь GigaChat не пуста — берём следующий tool без LLM
             if pending_tool_calls:
                 tc = pending_tool_calls.pop(0)
-                tool_name = tc.function.name
+                tool_name, tc_id, raw_args = unpack_pending_tool_call(tc)
                 try:
-                    arguments = json.loads(_safe_args(tc.function.arguments))
+                    arguments = json.loads(_safe_args(raw_args))
                 except json.JSONDecodeError:
                     arguments = {}
                 logger.info(
@@ -132,7 +128,7 @@ async def run_agent_loop(
                 sources.append(tool_name)
                 messages.append({
                     "role": "tool",
-                    "tool_call_id": tc.id,
+                    "tool_call_id": tc_id,
                     "content": result,
                 })
                 rounds += 1
@@ -203,23 +199,14 @@ async def run_agent_loop(
                     result = await orch._execute_tool_call(
                         tool_name, arguments,
                     )
-                    _last_validation_error = None
-                    _consecutive_validation_errors = 0
+                    validation_tracker.reset()
                 except ChatToolValidationError as exc:
-                    # Отслеживаем повторяющиеся ошибки валидации.
-                    # Ключ: сообщение ошибки + имя tool (охватывает
-                    # класс ошибки + имя параметра + имя инструмента).
-                    error_key = (exc.message, tool_name)
-                    if _last_validation_error == error_key:
-                        _consecutive_validation_errors += 1
-                    else:
-                        _last_validation_error = error_key
-                        _consecutive_validation_errors = 1
+                    consecutive = validation_tracker.track(exc.message, tool_name)
                     logger.warning(
                         "Tool validation error: %s (consecutive=%d)",
-                        exc.message, _consecutive_validation_errors,
+                        exc.message, consecutive,
                     )
-                    if _consecutive_validation_errors >= 2:
+                    if validation_tracker.should_exit:
                         logger.warning(
                             "Tool-loop exit: 2 одинаковых ошибки валидации "
                             "подряд для tool=%s, прерываем цикл",
@@ -231,11 +218,7 @@ async def run_agent_loop(
                             "content": TOOL_VALIDATION_NEUTRAL_MESSAGE,
                         })
                         sources.append(tool_name)
-                        # Финальный ответ — error block
-                        error_answer = (
-                            f"Модель не смогла корректно вызвать инструмент "
-                            f"`{tool_name}`. Перефразируйте запрос."
-                        )
+                        error_answer = build_tool_loop_exit_answer(tool_name)
                         await orch._save_assistant_message(
                             conversation_id=conversation_id,
                             content_blocks=[{

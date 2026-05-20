@@ -1965,7 +1965,7 @@ SSE-события клиенту (message_start, block_delta, tool_call, tool_r
 | `llm_call` | `llm_call.py` | `call_llm_with_fallback`: retry + circuit breaker + переключение primary/fallback. Вызывается из обоих циклов |
 | `tool_executor` | `tool_executor.py` | `execute_tool_call`: валидация args, конвертация типов, `asyncio.wait_for(TOOL_EXECUTION_TIMEOUT)`, запись `tool_metric` через `MetricsBatcher`. Враппер `Orchestrator._execute_tool_call` оставлен для совместимости с тестами, патчащими его на инстансе |
 | `forward_bridge` | `forward_bridge.py` | `handle_forward_call(...)`: INSERT в `agent_requests`, эмит `agent_request_started`, стриминг SSE-блоков от внешнего агента через `PollCoordinator`. Заменил inline-метод `Orchestrator._handle_forward_call` |
-| `orchestrator_helpers` | `orchestrator_helpers.py` | Чистые хелперы и константы: `safe_args`, `convert_param`, `BASE_SYSTEM_PROMPT`, `TOOL_VALIDATION_NEUTRAL_MESSAGE` |
+| `orchestrator_helpers` | `orchestrator_helpers.py` | Чистые хелперы и константы: `safe_args`, `convert_param`, `unpack_pending_tool_call` (dict / Pydantic-`function` / плоский FinalizedToolCall), `ToolValidationTracker` + `build_tool_loop_exit_answer` (выход из tool-loop'а при 2 одинаковых ChatToolValidationError'ах подряд), `BASE_SYSTEM_PROMPT`, `TOOL_VALIDATION_NEUTRAL_MESSAGE`, `TOOL_VALIDATION_LOOP_THRESHOLD` |
 | `BlockEmitter` | `block_emitter.py` | Единая точка эмита SSE-блоков по типу: стримуемые (`text`/`code`/`reasoning`) → триплет, нестримуемые (`file`/`image`/`plan`/`error`) → `block_complete`, `buttons`/`client_action` → собственные SSE-события. Используется в орк-е, agent-bridge-runner и resume-эндпоинте (см. §11.5) |
 | `UserRateLimiter` | `user_rate_limiter.py` | Per-user скользящее окно 60 сек на POST `/messages` (лимит — `CHAT__RATE_LIMIT_MESSAGES_PER_MINUTE_PER_USER`). При превышении — `ChatLimitError(429)` |
 | `ChatAuditService` | `chat_audit_service.py` | Метрики использования tool'ов: `tool_name`, `user`, `latency_ms`, `success`. Пишет через общий `MetricsBatcher` (см. §9.5a) — не блокирует горячий путь |
@@ -2108,7 +2108,7 @@ def reset() -> None:
 | `llm_call.py` (~93) | `call_llm_with_fallback(...)` — retry + circuit breaker + primary↔fallback переключение |
 | `tool_executor.py` (~126) | `execute_tool_call(...)` — валидация args, конвертация типов, `asyncio.wait_for`, запись `tool_metric` |
 | `forward_bridge.py` (~232) | `handle_forward_call(...)` — INSERT в `agent_requests`, эмит `agent_request_started`, стрим SSE-блоков от внешнего агента через `PollCoordinator` |
-| `orchestrator_helpers.py` (~80) | Чистые хелперы: `safe_args`, `convert_param`, `BASE_SYSTEM_PROMPT`, `TOOL_VALIDATION_NEUTRAL_MESSAGE` |
+| `orchestrator_helpers.py` (~140) | Чистые хелперы: `safe_args`, `convert_param`, `unpack_pending_tool_call`, `ToolValidationTracker`, `build_tool_loop_exit_answer`, `BASE_SYSTEM_PROMPT`, `TOOL_VALIDATION_NEUTRAL_MESSAGE`, `TOOL_VALIDATION_LOOP_THRESHOLD` |
 
 ```python
 # Orchestrator получает msg_service, conv_service и settings через DI.
@@ -3950,7 +3950,7 @@ AppState.tree[0].title = 'Новое название';  // → автомати
 | `llm_call` | `call_llm_with_fallback`: оборачивает primary-вызов в retry + circuit breaker, при `open` переключает на fallback-провайдера | `retry`, `circuit_breaker`, settings |
 | `tool_executor` | `execute_tool_call`: валидация args, конвертация типов через `convert_param`, `asyncio.wait_for(TOOL_EXECUTION_TIMEOUT)`, запись `tool_metric` через `MetricsBatcher` | `orchestrator_helpers`, реестр ChatTool |
 | `forward_bridge` | `handle_forward_call(...)`: INSERT в `agent_requests`, эмит `agent_request_started`, стрим SSE-блоков от внешнего агента. Заменил вырезанный метод `Orchestrator._handle_forward_call` | `agent_bridge`, `PollCoordinator`, `BlockEmitter` |
-| `orchestrator_helpers` | Чистые функции и константы: `safe_args`, `convert_param`, `BASE_SYSTEM_PROMPT`, `TOOL_VALIDATION_NEUTRAL_MESSAGE` | — |
+| `orchestrator_helpers` | Чистые функции и константы: `safe_args`, `convert_param`, `unpack_pending_tool_call`, `ToolValidationTracker` (счётчик повторяющихся `ChatToolValidationError`'ов, выход из tool-loop'а при `consecutive >= TOOL_VALIDATION_LOOP_THRESHOLD`), `build_tool_loop_exit_answer`, `BASE_SYSTEM_PROMPT`, `TOOL_VALIDATION_NEUTRAL_MESSAGE` | — |
 | `LLM client` (`llm_client.build_llm_client`) | Фабрика провайдер-агностичного клиента; для `gigachat` возвращает адаптер | `ChatDomainSettings` |
 | `gigachat_adapter` | Duck-typed wrapper над `AsyncOpenAI` для GigaChat-proxy: tools↔functions, function_call↔tool_calls | — |
 | `retry` | Экспоненциальный backoff на 429/5xx/timeout | settings |

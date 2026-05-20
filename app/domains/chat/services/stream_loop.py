@@ -30,7 +30,10 @@ from app.domains.chat.exceptions import ChatToolValidationError
 from app.domains.chat.services.forward_bridge import handle_forward_call
 from app.domains.chat.services.orchestrator_helpers import (
     TOOL_VALIDATION_NEUTRAL_MESSAGE,
+    ToolValidationTracker,
+    build_tool_loop_exit_answer,
     safe_args as _safe_args,
+    unpack_pending_tool_call,
 )
 from app.domains.chat.services.streaming import (
     BlockDeltaLimiter,
@@ -140,9 +143,7 @@ async def run_stream_loop(
     # вернул >1 tool_call, первый исполняем сейчас, остальные — в очередь.
     pending_tool_calls: list[Any] = []
     is_gigachat = orch.settings.profile == "gigachat"
-    # Отслеживание повторяющихся ошибок валидации tool'ов.
-    _last_validation_error: tuple[str, str] | None = None
-    _consecutive_validation_errors = 0
+    validation_tracker = ToolValidationTracker()
 
     try:
         # GigaChat-proxy не поддерживает SSE — выключаем streaming
@@ -166,10 +167,7 @@ async def run_stream_loop(
             # gigachat и LLM вернул >1 tool_call.
             if pending_tool_calls:
                 tc = pending_tool_calls.pop(0)
-                tool_name = tc["name"] if isinstance(tc, dict) else tc.name
-                tc_id = tc["id"] if isinstance(tc, dict) else tc.id
-                raw_args = (tc.get("arguments") if isinstance(tc, dict)
-                            else getattr(getattr(tc, "function", None), "arguments", ""))
+                tool_name, tc_id, raw_args = unpack_pending_tool_call(tc)
                 try:
                     arguments = json.loads(_safe_args(raw_args))
                 except json.JSONDecodeError:
@@ -185,24 +183,15 @@ async def run_stream_loop(
                 )
                 try:
                     result = await orch._execute_tool_call(tool_name, arguments)
-                    _last_validation_error = None
-                    _consecutive_validation_errors = 0
+                    validation_tracker.reset()
                 except ChatToolValidationError as exc:
-                    error_key = (exc.message, tool_name)
-                    if _last_validation_error == error_key:
-                        _consecutive_validation_errors += 1
-                    else:
-                        _last_validation_error = error_key
-                        _consecutive_validation_errors = 1
+                    consecutive = validation_tracker.track(exc.message, tool_name)
                     logger.warning(
                         "Tool validation error (queue): %s (consecutive=%d)",
-                        exc.message, _consecutive_validation_errors,
+                        exc.message, consecutive,
                     )
-                    if _consecutive_validation_errors >= 2:
-                        error_answer = (
-                            f"Модель не смогла корректно вызвать инструмент "
-                            f"`{tool_name}`. Перефразируйте запрос."
-                        )
+                    if validation_tracker.should_exit:
+                        error_answer = build_tool_loop_exit_answer(tool_name)
                         yield sse_error(error=error_answer, code="tool_validation_loop")
                         content_blocks = list(emitted_blocks)
                         content_blocks.append({
@@ -533,30 +522,23 @@ async def run_stream_loop(
                             result = await orch._execute_tool_call(
                                 tool_name, arguments,
                             )
-                            _last_validation_error = None
-                            _consecutive_validation_errors = 0
+                            validation_tracker.reset()
                         except ChatToolValidationError as exc:
-                            # Валидация параметров tool'а упала.
-                            error_key = (exc.message, tool_name)
-                            if _last_validation_error == error_key:
-                                _consecutive_validation_errors += 1
-                            else:
-                                _last_validation_error = error_key
-                                _consecutive_validation_errors = 1
+                            consecutive = validation_tracker.track(
+                                exc.message, tool_name,
+                            )
                             logger.warning(
                                 "Tool validation error: %s (consecutive=%d)",
-                                exc.message, _consecutive_validation_errors,
+                                exc.message, consecutive,
                             )
-                            if _consecutive_validation_errors >= 2:
+                            if validation_tracker.should_exit:
                                 logger.warning(
                                     "Tool-loop exit: 2 одинаковых ошибки "
                                     "валидации подряд для tool=%s",
                                     tool_name,
                                 )
-                                error_answer = (
-                                    f"Модель не смогла корректно вызвать "
-                                    f"инструмент `{tool_name}`. "
-                                    f"Перефразируйте запрос."
+                                error_answer = build_tool_loop_exit_answer(
+                                    tool_name,
                                 )
                                 yield sse_error(
                                     error=error_answer,
@@ -814,29 +796,23 @@ async def run_stream_loop(
                         result = await orch._execute_tool_call(
                             tool_name, arguments,
                         )
-                        _last_validation_error = None
-                        _consecutive_validation_errors = 0
+                        validation_tracker.reset()
                     except ChatToolValidationError as exc:
-                        error_key = (exc.message, tool_name)
-                        if _last_validation_error == error_key:
-                            _consecutive_validation_errors += 1
-                        else:
-                            _last_validation_error = error_key
-                            _consecutive_validation_errors = 1
+                        consecutive = validation_tracker.track(
+                            exc.message, tool_name,
+                        )
                         logger.warning(
                             "Tool validation error: %s (consecutive=%d)",
-                            exc.message, _consecutive_validation_errors,
+                            exc.message, consecutive,
                         )
-                        if _consecutive_validation_errors >= 2:
+                        if validation_tracker.should_exit:
                             logger.warning(
                                 "Tool-loop exit: 2 одинаковых ошибки "
                                 "валидации подряд для tool=%s",
                                 tool_name,
                             )
-                            error_answer = (
-                                f"Модель не смогла корректно вызвать "
-                                f"инструмент `{tool_name}`. "
-                                f"Перефразируйте запрос."
+                            error_answer = build_tool_loop_exit_answer(
+                                tool_name,
                             )
                             yield sse_error(
                                 error=error_answer,
@@ -1008,8 +984,6 @@ async def run_stream_loop(
                     token_usage=token_usage,
                     message_id=message_id,
                 )
-            except (OSError, asyncio.TimeoutError):
-                logger.exception("Не удалось сохранить сообщение ассистента")
             except Exception:
                 logger.exception("Не удалось сохранить сообщение ассистента")
 

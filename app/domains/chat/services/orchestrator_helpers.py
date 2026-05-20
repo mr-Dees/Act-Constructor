@@ -16,6 +16,7 @@ import ...`` — это единственный публичный путь.
 
 from __future__ import annotations
 
+from dataclasses import dataclass, field
 from datetime import date
 from typing import Any
 
@@ -25,6 +26,84 @@ from typing import Any
 TOOL_VALIDATION_NEUTRAL_MESSAGE = (
     "Не удалось выполнить инструмент. Попробуйте переформулировать запрос."
 )
+
+
+# Порог выхода из tool-loop'а: столько одинаковых ChatToolValidationError'ов
+# подряд для одного tool'а → прерываем цикл и финализируем сообщение
+# ошибкой. Жил локально в agent_loop/stream_loop как «магическая» 2.
+TOOL_VALIDATION_LOOP_THRESHOLD = 2
+
+
+@dataclass
+class ToolValidationTracker:
+    """Считает повторяющиеся ChatToolValidationError'ы tool-loop'а.
+
+    Ключ повторения — пара ``(error_message, tool_name)``: охватывает класс
+    ошибки + имя параметра + имя инструмента. При двух подряд одинаковых
+    ошибках ``should_exit`` становится True — оркестратор финализирует
+    сообщение ошибкой и завершает цикл (см. зеркальные ветки в
+    ``agent_loop.run_agent_loop`` и ``stream_loop.run_stream_loop``).
+
+    Инстанс на одну итерацию ``run``/``run_stream``: создаётся локально,
+    не шарится между запросами.
+    """
+
+    _last_key: tuple[str, str] | None = field(default=None)
+    _consecutive: int = field(default=0)
+
+    def track(self, error_message: str, tool_name: str) -> int:
+        """Регистрирует очередную validation-ошибку, возвращает счётчик."""
+        key = (error_message, tool_name)
+        if self._last_key == key:
+            self._consecutive += 1
+        else:
+            self._last_key = key
+            self._consecutive = 1
+        return self._consecutive
+
+    def reset(self) -> None:
+        """Успешный tool-вызов — сбрасываем счётчик."""
+        self._last_key = None
+        self._consecutive = 0
+
+    @property
+    def consecutive(self) -> int:
+        return self._consecutive
+
+    @property
+    def should_exit(self) -> bool:
+        return self._consecutive >= TOOL_VALIDATION_LOOP_THRESHOLD
+
+
+def build_tool_loop_exit_answer(tool_name: str) -> str:
+    """Текст ErrorBlock'а при выходе из tool-loop'а по validation-петле."""
+    return (
+        f"Модель не смогла корректно вызвать инструмент "
+        f"`{tool_name}`. Перефразируйте запрос."
+    )
+
+
+def unpack_pending_tool_call(tc: Any) -> tuple[str, str, Any]:
+    """Распаковывает элемент очереди ``pending_tool_calls``.
+
+    Очередь GigaChat-ветки может содержать три формы tool_call:
+
+    * dict ``{"name", "id", "arguments"}`` — кладёт ``stream_loop`` после
+      сборки tool_calls из стрима;
+    * Pydantic ``ChatCompletionMessageToolCall`` — кладёт ``stream_loop``
+      из non-streaming-ветки и ``agent_loop`` (имя/args через ``.function``);
+    * плоский ``FinalizedToolCall`` из ``ToolCallAccumulator`` (на случай
+      повторной перекладки) — поля ``.name`` / ``.id`` / ``.arguments``.
+
+    Возвращает ``(tool_name, tool_call_id, raw_arguments)`` — последнее
+    значение пригодно для ``safe_args(...)`` и ``json.loads(...)``.
+    """
+    if isinstance(tc, dict):
+        return tc["name"], tc["id"], tc.get("arguments") or ""
+    func = getattr(tc, "function", None)
+    if func is not None:
+        return func.name, tc.id, func.arguments
+    return tc.name, tc.id, tc.arguments
 
 
 # Базовый system-prompt оркестратора. Дописывается per-domain-промптами в
