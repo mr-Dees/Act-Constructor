@@ -1,4 +1,20 @@
 /**
+ * Ошибка дружелюбного 429: бэк отдал лимит параллельных стримов на пользователя.
+ * `userMessage` — человеко-читаемый текст из поля `detail`/`error` тела ответа.
+ * ChatMessages._onStreamError различает этот класс и заменяет typing-плейсхолдер
+ * на красивый error-блок «лимит достигнут», без сырого «HTTP 429».
+ */
+class ChatRateLimitedError extends Error {
+    constructor(userMessage) {
+        super(userMessage);
+        this.name = 'ChatRateLimitedError';
+        this.userMessage = userMessage;
+    }
+}
+
+window.ChatRateLimitedError = ChatRateLimitedError;
+
+/**
  * SSE-клиент для стриминга сообщений чата
  *
  * Отправляет сообщения через FormData и обрабатывает Server-Sent Events
@@ -67,6 +83,9 @@ const ChatStream = {
             });
 
             if (!response.ok) {
+                if (response.status === 429) {
+                    throw await this._buildRateLimitError(response);
+                }
                 throw new Error(`HTTP ${response.status}: ${response.statusText}`);
             }
 
@@ -124,6 +143,27 @@ const ChatStream = {
         }
         // Backend пока не пробрасывает event_id агента во фронт; держим стартовое 0.
         // Если в будущем events будут содержать id — обновлять здесь.
+    },
+
+    /**
+     * Строит ChatRateLimitedError из тела 429-ответа.
+     * Пытаемся прочитать поле `detail` или `error` из JSON; если тело пустое
+     * или не парсится — используем fallback-текст.
+     *
+     * @param {Response} response — 429-ответ
+     * @returns {Promise<ChatRateLimitedError>}
+     * @private
+     */
+    async _buildRateLimitError(response) {
+        const fallback = 'Достигнут лимит одновременных запросов. Дождитесь окончания одного из них.';
+        let userMessage = fallback;
+        try {
+            const body = await response.json();
+            if (body && typeof body === 'object') {
+                userMessage = body.detail || body.error || fallback;
+            }
+        } catch { /* тело пустое или не JSON — fallback */ }
+        return new ChatRateLimitedError(userMessage);
     },
 
     /** @private */
