@@ -7,18 +7,19 @@
   helper :func:`stream_forward_events` (тот же, что и основной
   ``forward_bridge``), поэтому формат SSE 1:1 совпадает.
 
-Семантика per-user семафора — как в основном SSE-эндпоинте
-(``api.messages``): инкремент при открытии стрима, декремент в
-``finally``. Используется тот же глобальный счётчик
-``messages._active_streams_per_user``, чтобы лимит
-``CHAT__MAX_PARALLEL_STREAMS_PER_USER`` учитывал и обычные сообщения,
-и resume-стримы суммарно.
+Resume-стрим **не учитывается** в семафоре
+``CHAT__MAX_PARALLEL_STREAMS_PER_USER`` — это read-only наблюдатель за
+уже зарегистрированным ``agent_request``, а не новое пользовательское
+сообщение. Иначе при ``POST /messages``-forward'е, который ещё в полёте,
++ переключении обратно на ту же беседу (Resume) счётчик удваивался бы
+для одного и того же forward'а, и юзер ловил 429 просто при просмотре
+своих чатов. Лимит остаётся осмысленным: 3 параллельных forward'а ↔
+3 POST /messages SSE одновременно.
 """
 
 from __future__ import annotations
 
 import logging
-import time
 
 from fastapi import APIRouter, Depends, Response
 from fastapi.responses import StreamingResponse
@@ -26,10 +27,7 @@ from fastapi.responses import StreamingResponse
 from app.api.v1.deps.auth_deps import get_username
 from app.api.v1.deps.role_deps import require_domain_access
 from app.domains.chat.deps import get_conversation_service
-from app.domains.chat.exceptions import (
-    ChatStreamAlreadyActiveError,
-    ConversationNotFoundError,
-)
+from app.domains.chat.exceptions import ConversationNotFoundError
 from app.domains.chat.services.conversation_service import ConversationService
 
 logger = logging.getLogger("audit_workstation.domains.chat.api.forward_resume")
@@ -120,24 +118,7 @@ async def stream_forward_resume(
 
     message_id = agent_request.get("message_id") or ""
 
-    # Per-user семафор: используем общий счётчик из messages.py, чтобы
-    # лимит max_parallel_streams_per_user учитывал и обычные сообщения,
-    # и resume-стримы суммарно.
-    from app.domains.chat.api import messages as messages_module
-    max_streams = chat_settings.max_parallel_streams_per_user
-    if messages_module._active_streams_per_user.get(username, 0) >= max_streams:
-        logger.warning(
-            "Resume SSE-стрим отклонён (429): user=%s, лимит %d",
-            username, max_streams,
-        )
-        raise ChatStreamAlreadyActiveError(
-            f"Достигнут лимит одновременных запросов ({max_streams}). "
-            "Дождитесь завершения одного из них.",
-        )
-
-    messages_module._active_streams_per_user[username] = (
-        messages_module._active_streams_per_user.get(username, 0) + 1
-    )
+    import time
     stream_started_at = time.monotonic()
     logger.info(
         "Resume SSE-стрим открыт: conversation=%s, request_id=%s",
@@ -187,15 +168,6 @@ async def stream_forward_resume(
                 pass
             raise
         finally:
-            current = messages_module._active_streams_per_user.get(
-                username, 0,
-            )
-            if current <= 1:
-                messages_module._active_streams_per_user.pop(username, None)
-            else:
-                messages_module._active_streams_per_user[username] = (
-                    current - 1
-                )
             duration = time.monotonic() - stream_started_at
             logger.info(
                 "Resume SSE-стрим закрыт: conversation=%s, request_id=%s, "

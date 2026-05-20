@@ -368,8 +368,18 @@ class TestForwardStreamResume:
         assert resp.status_code == 404
         assert resp.json() == {"detail": "Запрос агента не найден"}
 
-    def test_forward_stream_429_when_user_already_streaming(self):
-        """При достижении лимита параллельных SSE-стримов — 429."""
+    def test_forward_stream_ignores_post_messages_semaphore(self):
+        """Resume SSE НЕ учитывается в семафоре _active_streams_per_user.
+
+        Семафор лимитирует число активных user-message запросов
+        (POST /messages). Resume — read-only наблюдатель уже
+        зарегистрированного agent_request, не «новый запрос», и при
+        заполненном до лимита POST-семафоре всё равно должен открываться.
+
+        Иначе при POST forward'е, ещё в полёте, + переключении обратно
+        на ту же беседу счётчик удваивался бы (POST+Resume для одного
+        forward'а) и юзер ловил 429 просто просматривая свои чаты.
+        """
         from app.domains.chat.api import messages as messages_module
 
         settings = _make_settings()
@@ -385,29 +395,50 @@ class TestForwardStreamResume:
             "knowledge_bases": [], "history": [], "files": [],
         }
 
+        # Забиваем POST-семафор до лимита — Resume всё равно должен
+        # открыться, потому что больше не считает себя в этот же счётчик.
         max_streams = settings.max_parallel_streams_per_user
         messages_module._active_streams_per_user[USERNAME] = max_streams
 
         fake_conn = AsyncMock()
         fake_adapter = MagicMock(get_table_name=lambda n: n)
-        with patch(
-            "app.db.connection.get_db", return_value=_make_db_ctx(fake_conn),
-        ), patch(
-            "app.db.repositories.base.get_adapter", return_value=fake_adapter,
-        ), patch(
-            "app.domains.chat.repositories.agent_request_repository."
-            "AgentRequestRepository.get",
-            new=AsyncMock(return_value=agent_request_row),
-        ), patch(
-            "app.core.settings_registry.get", return_value=settings,
-        ):
-            with TestClient(app) as client:
-                resp = client.get(
-                    "/api/v1/chat/conversations/conv-1/forward-stream/"
-                    "agent-req-1",
-                )
 
-        assert resp.status_code == 429, resp.text
-        body = resp.json()
-        assert "лимит" in body["detail"].lower()
-        assert f"({max_streams})" in body["detail"]
+        async def _empty_events(**_kwargs):
+            # Сразу завершаем — нас интересует только что 429 не было.
+            return
+            yield  # pragma: no cover
+
+        try:
+            with patch(
+                "app.db.connection.get_db", return_value=_make_db_ctx(fake_conn),
+            ), patch(
+                "app.db.repositories.base.get_adapter", return_value=fake_adapter,
+            ), patch(
+                "app.domains.chat.repositories.agent_request_repository."
+                "AgentRequestRepository.get",
+                new=AsyncMock(return_value=agent_request_row),
+            ), patch(
+                "app.core.settings_registry.get", return_value=settings,
+            ), patch(
+                "app.domains.chat.services.forward_stream."
+                "stream_forward_events",
+                _empty_events,
+            ):
+                with TestClient(app) as client:
+                    resp = client.get(
+                        "/api/v1/chat/conversations/conv-1/forward-stream/"
+                        "agent-req-1",
+                    )
+
+            assert resp.status_code == 200, resp.text
+            assert resp.headers["content-type"].startswith(
+                "text/event-stream",
+            )
+            # POST-счётчик должен остаться нетронутым: Resume его не
+            # инкрементил и не декрементил.
+            assert (
+                messages_module._active_streams_per_user.get(USERNAME)
+                == max_streams
+            )
+        finally:
+            messages_module._active_streams_per_user.pop(USERNAME, None)
