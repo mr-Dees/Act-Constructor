@@ -4,10 +4,11 @@
 подключаем нужные роутеры, переопределяем DI через
 ``app.dependency_overrides``. См. CLAUDE.md → раздел Testing.
 
-Покрытие первого коммита (active-forward):
-* 200 с pending/in_progress request_id,
-* 204 при отсутствии активных,
-* 404 на чужую беседу (ownership-проверка в conv_service).
+Покрытие:
+* ``GET /active-forward`` — 200/204/чужой пользователь.
+* ``GET /forward-stream/{request_id}`` — SSE с накопленными
+  reasoning + final response, 404 на неизвестный request_id,
+  429 при превышении лимита параллельных стримов.
 """
 
 from __future__ import annotations
@@ -34,6 +35,7 @@ from app.domains.chat.settings import ChatDomainSettings
 
 
 USERNAME = "12345"
+OTHER_USER = "99999"
 
 
 @pytest.fixture(autouse=True)
@@ -46,6 +48,15 @@ def clean_registries():
     reset_registry()
     reset_settings()
     reset_tools()
+
+
+@pytest.fixture(autouse=True)
+def _reset_streams_counter():
+    """Между тестами сбрасываем per-user счётчик активных SSE-стримов."""
+    from app.domains.chat.api import messages as messages_module
+    messages_module._active_streams_per_user.clear()
+    yield
+    messages_module._active_streams_per_user.clear()
 
 
 def _make_settings() -> ChatDomainSettings:
@@ -87,12 +98,20 @@ def _build_app(
     return app
 
 
+# ── helpers для патча БД ──────────────────────────────────────────────────
+
+
 def _make_db_ctx(conn: AsyncMock) -> AsyncMock:
     """async-context-manager, возвращающий заданный conn."""
     ctx = AsyncMock()
     ctx.__aenter__ = AsyncMock(return_value=conn)
     ctx.__aexit__ = AsyncMock(return_value=False)
     return ctx
+
+
+# =========================================================================
+# GET /active-forward
+# =========================================================================
 
 
 class TestActiveForward:
@@ -113,6 +132,7 @@ class TestActiveForward:
 
         app = _build_app(conv_service=conv)
 
+        # Патчим get_db и репозиторий
         fake_conn = AsyncMock()
         fake_adapter = MagicMock(get_table_name=lambda n: n)
         with patch(
@@ -179,3 +199,215 @@ class TestActiveForward:
 
         assert resp.status_code == 404
         assert resp.json() == {"detail": "Беседа не найдена"}
+
+
+# =========================================================================
+# GET /forward-stream/{request_id}
+# =========================================================================
+
+
+class TestForwardStreamResume:
+    """E2E: ``GET /conversations/{cid}/forward-stream/{rid}``."""
+
+    def test_forward_stream_emits_existing_events_and_response(self):
+        """Endpoint эмитит reasoning блоки + emit_response_blocks.
+
+        Заранее «положили» событие reasoning и финальный response —
+        helper stream_forward_events должен выдать их в SSE-формате.
+        """
+        settings = _make_settings()
+        conv = _make_conv_service(settings)
+        app = _build_app(conv_service=conv)
+
+        # Полная история agent_request, conversation и user должны совпадать
+        agent_request_row = {
+            "id": "agent-req-1",
+            "conversation_id": "conv-1",
+            "message_id": "msg-1",
+            "user_id": USERNAME,
+            "status": "in_progress",
+            "knowledge_bases": [],
+            "history": [],
+            "files": [],
+        }
+
+        # Стенд: первый тик возвращает событие reasoning и финальный response;
+        # после yield'a response stream_forward_events завершится.
+        reasoning_event = {
+            "seq": 1,
+            "event_type": "reasoning",
+            "payload": {"text": "Думаю над ответом"},
+        }
+        final_response = {
+            "blocks": [
+                {"type": "text", "content": "Окончательный ответ"},
+            ],
+            "token_usage": None,
+        }
+
+        fake_conn = AsyncMock()
+        fake_adapter = MagicMock(get_table_name=lambda n: n)
+
+        # poll_events — первый вызов возвращает event, дальше пусто.
+        poll_events_mock = AsyncMock(side_effect=[
+            [reasoning_event],
+            [],
+        ])
+        poll_response_mock = AsyncMock(return_value=final_response)
+        # AgentRequestRepository.get вызывается ДО stream'а (для валидации)
+        # и потенциально внутри stream_forward_events (когда poll_response None).
+        # Мы возвращаем agent_request на оба пути.
+        agent_request_get_mock = AsyncMock(return_value=agent_request_row)
+
+        with patch(
+            "app.db.connection.get_db", return_value=_make_db_ctx(fake_conn),
+        ), patch(
+            "app.db.repositories.base.get_adapter", return_value=fake_adapter,
+        ), patch(
+            "app.core.settings_registry.get", return_value=settings,
+        ), patch(
+            "app.domains.chat.repositories.agent_request_repository."
+            "AgentRequestRepository.get",
+            new=agent_request_get_mock,
+        ), patch(
+            "app.domains.chat.services.agent_bridge.AgentBridgeService."
+            "poll_events",
+            new=poll_events_mock,
+        ), patch(
+            "app.domains.chat.services.agent_bridge.AgentBridgeService."
+            "poll_response",
+            new=poll_response_mock,
+        ):
+            with TestClient(app) as client:
+                with client.stream(
+                    "GET",
+                    "/api/v1/chat/conversations/conv-1/forward-stream/agent-req-1",
+                ) as resp:
+                    assert resp.status_code == 200, resp.read()
+                    assert "text/event-stream" in resp.headers["content-type"]
+                    collected: list[str] = []
+                    for line in resp.iter_lines():
+                        collected.append(line)
+                        # Достаточно ~30 строк, чтобы захватить финал.
+                        if len(collected) >= 60:
+                            break
+
+        joined = "\n".join(collected)
+        # Стрим начинается с agent_request_started.
+        assert "event: agent_request_started" in joined
+        # Reasoning-чанк отдан триплетом block_start/delta/end с type=reasoning.
+        assert "event: block_start" in joined
+        assert '"type": "reasoning"' in joined
+        assert "Думаю над ответом" in joined
+        # Финальный response пришёл text-блоком.
+        assert "Окончательный ответ" in joined
+        # Терминальное событие — message_end.
+        assert "event: message_end" in joined
+
+    def test_forward_stream_404_for_unknown_request(self):
+        """Несуществующий request_id → 404."""
+        settings = _make_settings()
+        conv = _make_conv_service(settings)
+        app = _build_app(conv_service=conv)
+
+        fake_conn = AsyncMock()
+        fake_adapter = MagicMock(get_table_name=lambda n: n)
+        with patch(
+            "app.db.connection.get_db", return_value=_make_db_ctx(fake_conn),
+        ), patch(
+            "app.db.repositories.base.get_adapter", return_value=fake_adapter,
+        ), patch(
+            "app.core.settings_registry.get", return_value=settings,
+        ), patch(
+            "app.domains.chat.repositories.agent_request_repository."
+            "AgentRequestRepository.get",
+            new=AsyncMock(return_value=None),
+        ):
+            with TestClient(app) as client:
+                resp = client.get(
+                    "/api/v1/chat/conversations/conv-1/forward-stream/missing",
+                )
+
+        assert resp.status_code == 404
+        assert resp.json() == {"detail": "Запрос агента не найден"}
+
+    def test_forward_stream_404_when_request_belongs_to_other_user(self):
+        """Чужой request_id — но в нашей беседе — тоже 404."""
+        settings = _make_settings()
+        conv = _make_conv_service(settings)
+        app = _build_app(conv_service=conv)
+
+        agent_request_row = {
+            "id": "agent-req-foreign",
+            "conversation_id": "conv-1",
+            "message_id": "msg-x",
+            "user_id": OTHER_USER,  # другой пользователь
+            "status": "in_progress",
+            "knowledge_bases": [], "history": [], "files": [],
+        }
+
+        fake_conn = AsyncMock()
+        fake_adapter = MagicMock(get_table_name=lambda n: n)
+        with patch(
+            "app.db.connection.get_db", return_value=_make_db_ctx(fake_conn),
+        ), patch(
+            "app.db.repositories.base.get_adapter", return_value=fake_adapter,
+        ), patch(
+            "app.core.settings_registry.get", return_value=settings,
+        ), patch(
+            "app.domains.chat.repositories.agent_request_repository."
+            "AgentRequestRepository.get",
+            new=AsyncMock(return_value=agent_request_row),
+        ):
+            with TestClient(app) as client:
+                resp = client.get(
+                    "/api/v1/chat/conversations/conv-1/forward-stream/"
+                    "agent-req-foreign",
+                )
+
+        assert resp.status_code == 404
+        assert resp.json() == {"detail": "Запрос агента не найден"}
+
+    def test_forward_stream_429_when_user_already_streaming(self):
+        """При достижении лимита параллельных SSE-стримов — 429."""
+        from app.domains.chat.api import messages as messages_module
+
+        settings = _make_settings()
+        conv = _make_conv_service(settings)
+        app = _build_app(conv_service=conv)
+
+        agent_request_row = {
+            "id": "agent-req-1",
+            "conversation_id": "conv-1",
+            "message_id": "msg-1",
+            "user_id": USERNAME,
+            "status": "in_progress",
+            "knowledge_bases": [], "history": [], "files": [],
+        }
+
+        max_streams = settings.max_parallel_streams_per_user
+        messages_module._active_streams_per_user[USERNAME] = max_streams
+
+        fake_conn = AsyncMock()
+        fake_adapter = MagicMock(get_table_name=lambda n: n)
+        with patch(
+            "app.db.connection.get_db", return_value=_make_db_ctx(fake_conn),
+        ), patch(
+            "app.db.repositories.base.get_adapter", return_value=fake_adapter,
+        ), patch(
+            "app.domains.chat.repositories.agent_request_repository."
+            "AgentRequestRepository.get",
+            new=AsyncMock(return_value=agent_request_row),
+        ), patch(
+            "app.core.settings_registry.get", return_value=settings,
+        ):
+            with TestClient(app) as client:
+                resp = client.get(
+                    "/api/v1/chat/conversations/conv-1/forward-stream/"
+                    "agent-req-1",
+                )
+
+        assert resp.status_code == 429, resp.text
+        body = resp.json()
+        assert "лимит" in body["detail"].lower()
+        assert f"({max_streams})" in body["detail"]
