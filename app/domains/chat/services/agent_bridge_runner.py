@@ -92,10 +92,27 @@ async def _run(
     После загрузки строки agent_requests читает ``parent_request_id`` и
     проставляет в :data:`app.core.config.request_id_var`, чтобы все логи
     внутри runner'а несли тот же correlation_id, что и исходный HTTP-запрос.
+
+    Жизненный цикл pool-коннекта разнесён на три фазы, и **ни одна** не
+    держит коннект во время ``await queue.get()`` polling'а:
+
+    1. **Initial**: короткая ``async with get_db()`` — прочитать
+       agent_request, выставить ``dispatched``, забрать ``version``.
+    2. **Polling**: либо subscribe к PollCoordinator (события приходят
+       через ``asyncio.Queue``; коннект НЕ удерживается между событиями),
+       либо fallback ``wait_for_completion`` (тесты без координатора —
+       единственное место, где runner держит коннект на polling).
+    3. **Finalize**: короткая ``async with get_db()`` —
+       ``save_assistant_message`` + ``finalize`` в одной транзакции.
+
+    Иначе при N>=pool_max−batchers параллельных forward'ах PollCoordinator
+    не получает коннект для SELECT'а событий → события не доходят до
+    runner-очередей → runner'ы вечно ждут → классический pool deadlock.
     """
     # Импорты внутри функции — чтобы тесты могли патчить get_db().
     from app.core.config import request_id_var
     from app.db.connection import get_db
+    from app.domains.chat.exceptions import OptimisticLockFailed
     from app.domains.chat.repositories.agent_request_repository import (
         AgentRequestRepository,
     )
@@ -113,6 +130,7 @@ async def _run(
 
     ctx_token = None
     try:
+        # ── Phase 1: initial read + dispatch status update ──
         async with get_db() as conn:
             req_repo = AgentRequestRepository(conn)
             request = await req_repo.get(request_id)
@@ -123,9 +141,6 @@ async def _run(
                 )
                 return
 
-            # Связываем логи runner'а с HTTP-запросом, который создал
-            # agent_request. Если parent отсутствует (reconcile или
-            # background-вызов) — оставляем дефолтный "-".
             parent = request.get("parent_request_id")
             if parent:
                 ctx_token = request_id_var.set(parent)
@@ -135,7 +150,6 @@ async def _run(
                     parent, request_id,
                 )
 
-            # Если запрос уже финализирован — не делаем повторного polling.
             if request.get("status") in ("done", "error", "timeout"):
                 logger.info(
                     "agent_bridge_runner: request_id=%s уже %s, пропускаем",
@@ -143,13 +157,10 @@ async def _run(
                 )
                 return
 
-            # Текущая версия для optimistic locking; при конфликте — abort.
             current_version: int | None = request.get("version")
+            conversation_id = request["conversation_id"]
+            agent_started = (request.get("status") == "in_progress")
 
-            # При первом запуске (а не при reconcile) — статус 'dispatched':
-            # AW-раннер подхватил запрос и начал polling, но внешний агент
-            # ещё не отвечает. 'in_progress' будет выставлен ниже, когда
-            # придёт первое событие от агента.
             if request.get("status") == "pending":
                 new_version = await req_repo.update_status(
                     request_id,
@@ -180,131 +191,111 @@ async def _run(
                     return
                 current_version = new_version
 
-            bridge = AgentBridgeService(conn)
-            blocks: list[dict] = []
-            token_usage: dict = {}
-            agent_started = (
-                request.get("status") == "in_progress"
-            )  # уже считаем что агент пишет (reconcile-сценарий)
+        # ── Phase 2: polling БЕЗ удержания pool-коннекта ──
+        blocks: list[dict] = []
+        token_usage: dict = {}
 
-            # Источник событий: либо общий PollCoordinator (батч SELECT
-            # на всех активных request_id), либо собственный цикл
-            # wait_for_completion (резервный путь без координатора).
-            if coordinator is not None:
-                upd_iter = _wait_via_coordinator(
-                    bridge=bridge,
-                    coordinator=coordinator,
-                    request_id=request_id,
-                    req_repo=req_repo,
-                    settings=settings,
-                )
-            else:
-                upd_iter = bridge.wait_for_completion(
-                    request_id,
-                    poll_min_interval_sec=(
-                        settings.agent_bridge.poll_min_interval_sec
-                    ),
-                    initial_response_timeout_sec=(
-                        settings.agent_bridge.initial_response_timeout_sec
-                    ),
-                    event_timeout_sec=(
-                        settings.agent_bridge.event_timeout_sec
-                    ),
-                    max_total_duration_sec=(
-                        settings.agent_bridge.max_total_duration_sec
-                    ),
-                )
-            try:
-                async for upd in upd_iter:
-                    if upd.event:
-                        # Первое событие от агента — переключаем
-                        # dispatched → in_progress (наблюдаемая стадия
-                        # «агент пишет events»).
-                        if not agent_started:
-                            new_version = await req_repo.update_status(
+        if coordinator is not None:
+            upd_iter = _wait_via_coordinator(
+                coordinator=coordinator,
+                request_id=request_id,
+                settings=settings,
+            )
+        else:
+            # Fallback (только тесты): держим один conn на polling.
+            # В проде coordinator всегда поднят через lifespan-hook.
+            upd_iter = _wait_via_fallback(
+                request_id=request_id,
+                settings=settings,
+            )
+
+        try:
+            async for upd in upd_iter:
+                if upd.event:
+                    if not agent_started:
+                        async with get_db() as conn:
+                            new_version = await AgentRequestRepository(
+                                conn,
+                            ).update_status(
                                 request_id,
                                 status="in_progress",
                                 expected_version=current_version,
                             )
-                            if new_version is None:
-                                logger.warning(
-                                    "agent_bridge_runner: version "
-                                    "conflict при переводе в "
-                                    "in_progress, request_id=%s "
-                                    "expected_version=%s — abort "
-                                    "(другой воркер обновил agent_request)",
-                                    request_id,
-                                    current_version,
-                                    extra={
-                                        "agent_request_id": request_id,
-                                        "transition": (
-                                            "dispatched->in_progress"
-                                        ),
-                                        "expected_version": current_version,
-                                    },
-                                )
-                                return
-                            current_version = new_version
-                            agent_started = True
-                        ev = upd.event
-                        et = ev.get("event_type")
-                        payload = ev.get("payload") or {}
-                        if et == "reasoning":
-                            text = payload.get("text", "")
-                            if text:
-                                blocks.append({
-                                    "type": "reasoning", "content": text,
-                                })
-                        elif et == "error":
-                            err_block: dict[str, Any] = {
-                                "type": "error",
-                                "message": payload.get(
-                                    "message", "Ошибка внешнего агента",
-                                ),
-                            }
-                            if payload.get("code"):
-                                err_block["code"] = payload["code"]
-                            blocks.append(err_block)
-                        # status — игнорируем (информационное событие)
-                    if upd.response:
-                        blocks.extend(upd.response.get("blocks") or [])
-                        token_usage = upd.response.get("token_usage") or {}
-                        break
-            except AgentBridgeTimeout as exc:
-                logger.warning(
-                    "agent_bridge_runner: timeout request_id=%s: %s",
-                    request_id, exc,
-                )
-                blocks.append({
-                    "type": "error",
-                    "message": (
-                        "Внешний агент не ответил вовремя. "
-                        "Попробуйте позже."
-                    ),
-                    "code": "agent_timeout",
-                })
+                        if new_version is None:
+                            logger.warning(
+                                "agent_bridge_runner: version "
+                                "conflict при переводе в "
+                                "in_progress, request_id=%s "
+                                "expected_version=%s — abort "
+                                "(другой воркер обновил agent_request)",
+                                request_id,
+                                current_version,
+                                extra={
+                                    "agent_request_id": request_id,
+                                    "transition": (
+                                        "dispatched->in_progress"
+                                    ),
+                                    "expected_version": current_version,
+                                },
+                            )
+                            return
+                        current_version = new_version
+                        agent_started = True
+                    ev = upd.event
+                    et = ev.get("event_type")
+                    payload = ev.get("payload") or {}
+                    if et == "reasoning":
+                        text = payload.get("text", "")
+                        if text:
+                            blocks.append({
+                                "type": "reasoning", "content": text,
+                            })
+                    elif et == "error":
+                        err_block: dict[str, Any] = {
+                            "type": "error",
+                            "message": payload.get(
+                                "message", "Ошибка внешнего агента",
+                            ),
+                        }
+                        if payload.get("code"):
+                            err_block["code"] = payload["code"]
+                        blocks.append(err_block)
+                    # status — игнорируем (информационное событие)
+                if upd.response:
+                    blocks.extend(upd.response.get("blocks") or [])
+                    token_usage = upd.response.get("token_usage") or {}
+                    break
+        except AgentBridgeTimeout as exc:
+            logger.warning(
+                "agent_bridge_runner: timeout request_id=%s: %s",
+                request_id, exc,
+            )
+            blocks.append({
+                "type": "error",
+                "message": (
+                    "Внешний агент не ответил вовремя. "
+                    "Попробуйте позже."
+                ),
+                "code": "agent_timeout",
+            })
 
-            # Трансляция кнопок ответа агента в клиентские action ДО
-            # сохранения: иначе в БД попадут «семантические» action_id
-            # (acts.open_act_page и т.п.), фронт их не сможет обработать.
-            blocks = await _translate_buttons_in_blocks(blocks)
+        # Трансляция кнопок ответа агента в клиентские action ДО
+        # сохранения: иначе в БД попадут «семантические» action_id
+        # (acts.open_act_page и т.п.), фронт их не сможет обработать.
+        blocks = await _translate_buttons_in_blocks(blocks)
 
-            from app.domains.chat.exceptions import OptimisticLockFailed
-
-            # Атомарная финализация: save_assistant_message + finalize
-            # выполняются в одной транзакции. Если finalize не проходит
-            # optimistic lock (другой воркер уже финализировал запрос),
-            # поднимаем OptimisticLockFailed → транзакция откатывается →
-            # message НЕ сохранён, статус остаётся in_progress для reconcile.
+        # ── Phase 3: финальная транзакция save+finalize ──
+        async with get_db() as conn:
             msg_service = MessageService(
                 msg_repo=MessageRepository(conn),
                 conv_repo=ConversationRepository(conn),
                 settings=settings,
             )
+            req_repo = AgentRequestRepository(conn)
             try:
                 async with conn.transaction():
                     await msg_service.save_assistant_message(
-                        conversation_id=request["conversation_id"],
+                        conversation_id=conversation_id,
                         content=blocks,
                         model=settings.model,
                         token_usage=token_usage if token_usage else None,
@@ -325,8 +316,6 @@ async def _run(
                     request_id, len(blocks),
                 )
             except OptimisticLockFailed:
-                # Транзакция уже откатилась. Message не сохранён.
-                # Статус остаётся in_progress — reconcile подхватит.
                 logger.warning(
                     "agent_bridge_runner: optimistic lock conflict при "
                     "финализации request_id=%s expected_version=%s — "
@@ -400,16 +389,53 @@ async def shutdown_running(timeout_sec: float = 5.0) -> int:
     return len(tasks)
 
 
+async def _mark_timeout(request_id: str, error_message: str) -> None:
+    """Открывает короткий ``async with get_db()`` и пишет статус timeout.
+
+    Вынесено отдельно, чтобы в ``_wait_via_coordinator`` не было трёх
+    повторяющихся одинаковых блоков. Импорты внутри — для удобства
+    патчинга get_db в тестах.
+    """
+    from app.db.connection import get_db
+    from app.domains.chat.repositories.agent_request_repository import (
+        AgentRequestRepository,
+    )
+
+    async with get_db() as conn:
+        await AgentRequestRepository(conn).update_status(
+            request_id,
+            status="timeout",
+            error_message=error_message,
+        )
+
+
+async def _poll_response_short_conn(request_id: str):
+    """Открывает короткий ``async with get_db()`` для одного poll_response.
+
+    Принципиально важно: коннект НЕ удерживается между poll'ами; каждый
+    вызов сам берёт и возвращает conn в пул. Иначе при множественных
+    параллельных runner'ах PollCoordinator не сможет получить коннект.
+    """
+    from app.db.connection import get_db
+    from app.domains.chat.services.agent_bridge import AgentBridgeService
+
+    async with get_db() as conn:
+        return await AgentBridgeService(conn).poll_response(request_id)
+
+
 async def _wait_via_coordinator(
     *,
-    bridge: Any,
     coordinator: PollCoordinator,
     request_id: str,
-    req_repo: Any,
     settings: ChatDomainSettings,
 ):
     """Адаптер: тянет события из очереди координатора + сам опрашивает
     финальный response, эмулируя контракт ``wait_for_completion``.
+
+    Между ``await queue.get()`` и точечными ``async with get_db()`` для
+    poll_response/update_status pool-коннект НЕ удерживается. Это и
+    отличает coordinator-путь от fallback'а — runner отдаёт коннект в
+    пул на всё время ожидания событий.
 
     События берутся из ``asyncio.Queue`` подписки, response — отдельным
     SELECT после каждой пачки событий и периодически по таймауту. Гейты
@@ -437,13 +463,10 @@ async def _wait_via_coordinator(
             now = loop.time()
             elapsed = now - started_at
             if elapsed > max_total:
-                await req_repo.update_status(
+                await _mark_timeout(
                     request_id,
-                    status="timeout",
-                    error_message=(
-                        f"превышена максимальная длительность запроса "
-                        f"({max_total}с)"
-                    ),
+                    f"превышена максимальная длительность запроса "
+                    f"({max_total}с)",
                 )
                 raise AgentBridgeTimeout(
                     f"max total duration {max_total}s exceeded",
@@ -461,12 +484,9 @@ async def _wait_via_coordinator(
                 # Сработал гейт — определяем какой именно.
                 now2 = loop.time()
                 if last_event_at is None and now2 - started_at > initial_timeout:
-                    await req_repo.update_status(
+                    await _mark_timeout(
                         request_id,
-                        status="timeout",
-                        error_message=(
-                            f"агент не начал отвечать за {initial_timeout}с"
-                        ),
+                        f"агент не начал отвечать за {initial_timeout}с",
                     )
                     raise AgentBridgeTimeout(
                         f"no initial response within {initial_timeout}s",
@@ -475,19 +495,16 @@ async def _wait_via_coordinator(
                     last_event_at is not None
                     and now2 - last_event_at > event_timeout
                 ):
-                    await req_repo.update_status(
+                    await _mark_timeout(
                         request_id,
-                        status="timeout",
-                        error_message=(
-                            f"нет событий от агента {event_timeout}с "
-                            f"(heartbeat потерян)"
-                        ),
+                        f"нет событий от агента {event_timeout}с "
+                        f"(heartbeat потерян)",
                     )
                     raise AgentBridgeTimeout(
                         f"heartbeat lost — no event for {event_timeout}s",
                     )
-                # Иначе проверим финальный response.
-                response = await bridge.poll_response(request_id)
+                # Иначе проверим финальный response (короткий conn).
+                response = await _poll_response_short_conn(request_id)
                 if response is not None:
                     # Статус 'done' выставляется ТОЛЬКО внутри
                     # req_repo.finalize(...) в той же транзакции, что и
@@ -503,13 +520,47 @@ async def _wait_via_coordinator(
 
             # После каждого события проверяем, не появился ли финальный
             # response (агент дописал в agent_responses).
-            response = await bridge.poll_response(request_id)
+            response = await _poll_response_short_conn(request_id)
             if response is not None:
                 # См. коммент выше: 'done' ставит только finalize().
                 yield AgentBridgeUpdate(response=response)
                 return
     finally:
         await coordinator.unsubscribe(request_id)
+
+
+async def _wait_via_fallback(
+    *,
+    request_id: str,
+    settings: ChatDomainSettings,
+):
+    """Резервный path без PollCoordinator (только для тестов).
+
+    Держит **один** pool-коннект на всё время polling — это OK потому что
+    в проде coordinator всегда поднят через lifespan-hook
+    ``chat.poll_coordinator`` и сюда мы не попадаем. Существование этого
+    пути нужно только чтобы тесты могли вызывать ``_run(...)`` напрямую,
+    не поднимая координатор.
+    """
+    from app.db.connection import get_db
+    from app.domains.chat.services.agent_bridge import AgentBridgeService
+
+    async with get_db() as conn:
+        bridge = AgentBridgeService(conn)
+        async for upd in bridge.wait_for_completion(
+            request_id,
+            poll_min_interval_sec=(
+                settings.agent_bridge.poll_min_interval_sec
+            ),
+            initial_response_timeout_sec=(
+                settings.agent_bridge.initial_response_timeout_sec
+            ),
+            event_timeout_sec=settings.agent_bridge.event_timeout_sec,
+            max_total_duration_sec=(
+                settings.agent_bridge.max_total_duration_sec
+            ),
+        ):
+            yield upd
 
 
 async def schedule_pending(

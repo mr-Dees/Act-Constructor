@@ -175,10 +175,17 @@ async def test_run_max_total_timeout_saves_error_and_clears_registry():
 async def test_run_marks_error_on_poll_runtime_exception():
     """Если ``wait_for_completion`` падает с RuntimeError (не Timeout),
     runner ловит на outer-except и помечает request status='error'
-    через отдельный get_db()-контекст. Реестр чистится."""
+    через отдельный get_db()-контекст. Реестр чистится.
+
+    После декомпозиции ``_run()`` на фазы коннектов берётся три:
+    Phase 1 (initial read + dispatch), Phase 2 fallback path (`_wait_via_fallback`
+    сам открывает свой `async with get_db()` под bridge.wait_for_completion),
+    и резервный outer-except для пометки status='error'.
+    """
 
     mock_conn = AsyncMock()
-    mock_conn2 = AsyncMock()  # для второго get_db()-вызова (error path)
+    mock_conn2 = AsyncMock()  # Phase 2 fallback (wait_for_completion)
+    mock_conn3 = AsyncMock()  # outer-except recovery (mark error)
     fake_req_repo = MagicMock()
     fake_req_repo.get = AsyncMock(return_value={
         "id": "rid-err", "conversation_id": "conv-err", "status": "pending",
@@ -195,7 +202,7 @@ async def test_run_marks_error_on_poll_runtime_exception():
     with (
         patch(
             "app.db.connection.get_db",
-            _fake_get_db_ctx_multi([mock_conn, mock_conn2]),
+            _fake_get_db_ctx_multi([mock_conn, mock_conn2, mock_conn3]),
         ),
         patch(
             "app.db.repositories.base.get_adapter",
