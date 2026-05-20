@@ -489,7 +489,11 @@ async def _wait_via_coordinator(
                 # Иначе проверим финальный response.
                 response = await bridge.poll_response(request_id)
                 if response is not None:
-                    await req_repo.update_status(request_id, status="done")
+                    # Статус 'done' выставляется ТОЛЬКО внутри
+                    # req_repo.finalize(...) в той же транзакции, что и
+                    # save_assistant_message. Если поставить done здесь —
+                    # инкрементится version и finalize упадёт с
+                    # OptimisticLockFailed, ассистент-сообщение не сохранится.
                     yield AgentBridgeUpdate(response=response)
                     return
                 continue
@@ -501,7 +505,7 @@ async def _wait_via_coordinator(
             # response (агент дописал в agent_responses).
             response = await bridge.poll_response(request_id)
             if response is not None:
-                await req_repo.update_status(request_id, status="done")
+                # См. коммент выше: 'done' ставит только finalize().
                 yield AgentBridgeUpdate(response=response)
                 return
     finally:

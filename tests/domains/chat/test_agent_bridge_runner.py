@@ -203,6 +203,210 @@ async def test_run_skips_when_request_already_done():
     save_mock.assert_not_called()
 
 
+async def test_runner_saves_message_when_response_arrives_via_coordinator(
+    caplog,
+):
+    """Регрессия Bug 1: после получения response через coordinator
+    runner должен успешно сохранить ассистент-message (не падать на
+    OptimisticLockFailed).
+
+    Сценарий: coordinator yield'ит сначала event (reasoning), потом
+    response. Раннер обязан собрать blocks и сохранить сообщение в
+    одной транзакции с finalize(), без version-конфликта.
+    """
+    mock_conn = AsyncMock()
+    mock_conn.transaction = MagicMock(return_value=AsyncMock())
+
+    request_row = {
+        "id": "rid-coord",
+        "conversation_id": "conv-1",
+        "message_id": "msg-1",
+        "user_id": "u",
+        "status": "pending",
+        "version": 1,
+    }
+    fake_req_repo = MagicMock()
+    fake_req_repo.get = AsyncMock(return_value=request_row)
+    # update_status: pending->dispatched -> v2; dispatched->in_progress
+    # -> v3. Никаких дальнейших update_status('done') здесь быть не
+    # должно — это и есть фикс Bug 1.
+    fake_req_repo.update_status = AsyncMock(side_effect=[2, 3])
+    fake_req_repo.finalize = AsyncMock(return_value=True)
+
+    # Мокаем PollCoordinator: subscribe возвращает Queue, в которую мы
+    # положим reasoning-событие. Финальный response отдаёт bridge.poll_response.
+    from app.domains.chat.services.poll_coordinator import PollCoordinator
+
+    queue: asyncio.Queue = asyncio.Queue()
+    await queue.put({
+        "id": 1, "event_type": "reasoning",
+        "payload": {"text": "Думаю..."},
+    })
+    fake_coordinator = MagicMock(spec=PollCoordinator)
+    fake_coordinator.subscribe = AsyncMock(return_value=queue)
+    fake_coordinator.unsubscribe = AsyncMock()
+
+    # bridge.poll_response: после получения reasoning-события раннер
+    # сразу зовёт poll_response — отдаём финальный response.
+    final_response = {
+        "blocks": [{"type": "text", "content": "Ответ"}],
+        "token_usage": {"in": 10, "out": 5},
+    }
+
+    async def fake_poll(self, _rid):  # noqa: ARG001
+        return final_response
+
+    save_mock = AsyncMock()
+    fake_adapter = MagicMock(get_table_name=lambda n: n)
+
+    with (
+        patch(
+            "app.db.connection.get_db",
+            _fake_get_db_ctx(mock_conn),
+        ),
+        patch(
+            "app.db.repositories.base.get_adapter",
+            return_value=fake_adapter,
+        ),
+        patch(
+            "app.domains.chat.repositories.agent_request_repository."
+            "AgentRequestRepository",
+            return_value=fake_req_repo,
+        ),
+        patch(
+            "app.domains.chat.services.agent_bridge."
+            "AgentBridgeService.poll_response",
+            fake_poll,
+        ),
+        patch(
+            "app.domains.chat.services.message_service."
+            "MessageService.save_assistant_message",
+            save_mock,
+        ),
+    ):
+        import logging
+        caplog.set_level(
+            logging.WARNING,
+            logger="audit_workstation.domains.chat.agent_bridge_runner",
+        )
+        await agent_bridge_runner._run(
+            "rid-coord",
+            settings=_settings(),
+            coordinator=fake_coordinator,
+        )
+
+    # save_assistant_message вызван один раз с правильными blocks.
+    save_mock.assert_called_once()
+    kw = save_mock.call_args.kwargs
+    assert kw["conversation_id"] == "conv-1"
+    assert kw["content"] == [
+        {"type": "reasoning", "content": "Думаю..."},
+        {"type": "text", "content": "Ответ"},
+    ]
+    assert kw["token_usage"] == {"in": 10, "out": 5}
+
+    # finalize вызван и вернул True (нет version-конфликта).
+    fake_req_repo.finalize.assert_awaited_once()
+    finalize_call = fake_req_repo.finalize.call_args
+    # Позиционные args: (request_id, expected_version)
+    assert finalize_call.args[0] == "rid-coord"
+
+    # update_status НЕ вызывался со status='done' (это и есть фикс).
+    done_calls = [
+        c for c in fake_req_repo.update_status.call_args_list
+        if c.kwargs.get("status") == "done"
+    ]
+    assert done_calls == []
+
+    # В логах нет 'optimistic lock conflict'.
+    assert "optimistic lock conflict" not in caplog.text.lower()
+
+
+async def test_status_stays_in_progress_until_finalize():
+    """Инвариант: до вызова finalize() статус в БД остаётся 'in_progress'.
+
+    Между моментом, когда координатор отдал финальный response, и
+    моментом коммита транзакции finalize+save_assistant_message — статус
+    не успевает стать 'done' через update_status. 'done' появляется
+    ТОЛЬКО внутри finalize().
+    """
+    mock_conn = AsyncMock()
+    mock_conn.transaction = MagicMock(return_value=AsyncMock())
+
+    request_row = {
+        "id": "rid-inv",
+        "conversation_id": "conv-1",
+        "message_id": "msg-1",
+        "user_id": "u",
+        "status": "pending",
+        "version": 1,
+    }
+    fake_req_repo = MagicMock()
+    fake_req_repo.get = AsyncMock(return_value=request_row)
+    fake_req_repo.update_status = AsyncMock(side_effect=[2, 3])
+    fake_req_repo.finalize = AsyncMock(return_value=True)
+
+    from app.domains.chat.services.poll_coordinator import PollCoordinator
+
+    queue: asyncio.Queue = asyncio.Queue()
+    await queue.put({
+        "id": 1, "event_type": "reasoning",
+        "payload": {"text": "T"},
+    })
+    fake_coordinator = MagicMock(spec=PollCoordinator)
+    fake_coordinator.subscribe = AsyncMock(return_value=queue)
+    fake_coordinator.unsubscribe = AsyncMock()
+
+    final_response = {
+        "blocks": [{"type": "text", "content": "Ok"}], "token_usage": {},
+    }
+
+    async def fake_poll(self, _rid):  # noqa: ARG001
+        return final_response
+
+    save_mock = AsyncMock()
+    fake_adapter = MagicMock(get_table_name=lambda n: n)
+
+    with (
+        patch("app.db.connection.get_db", _fake_get_db_ctx(mock_conn)),
+        patch(
+            "app.db.repositories.base.get_adapter",
+            return_value=fake_adapter,
+        ),
+        patch(
+            "app.domains.chat.repositories.agent_request_repository."
+            "AgentRequestRepository",
+            return_value=fake_req_repo,
+        ),
+        patch(
+            "app.domains.chat.services.agent_bridge."
+            "AgentBridgeService.poll_response",
+            fake_poll,
+        ),
+        patch(
+            "app.domains.chat.services.message_service."
+            "MessageService.save_assistant_message",
+            save_mock,
+        ),
+    ):
+        await agent_bridge_runner._run(
+            "rid-inv",
+            settings=_settings(),
+            coordinator=fake_coordinator,
+        )
+
+    # Все статусы, прошедшие через update_status: только
+    # dispatched и in_progress. 'done' — ни разу.
+    statuses = [
+        c.kwargs.get("status")
+        for c in fake_req_repo.update_status.call_args_list
+    ]
+    assert statuses == ["dispatched", "in_progress"]
+    assert "done" not in statuses
+    # finalize() — единственная точка перевода в done.
+    fake_req_repo.finalize.assert_awaited_once()
+
+
 async def test_run_saves_timeout_error_block_on_bridge_timeout():
     """Если bridge выбрасывает AgentBridgeTimeout, раннер всё равно
     сохраняет сообщение с блоком-ошибкой (чтобы пользователь увидел контекст)."""
