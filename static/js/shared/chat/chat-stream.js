@@ -26,6 +26,18 @@ const ChatStream = {
     _abortController: null,
 
     /**
+     * @type {AbortController|null} Отдельный контроллер resume-стрима (refresh-сценарий).
+     * Живёт параллельно с `_abortController` (основной стрим), отменяется тем же `abort()`.
+     */
+    _resumeAbortController: null,
+
+    /**
+     * @type {string|null} request_id активного resume-стрима. Используется как
+     * idempotency-ключ — повторный `resume(...)` для того же request_id отбрасывается.
+     */
+    _resumeRequestId: null,
+
+    /**
      * @type {string|null} Идентификатор agent_request, который сейчас обрабатывает
      * внешний агент. Приходит из SSE-события `agent_request_started`. Используется
      * для авто-переоткрытия resume-стрима при разрыве соединения.
@@ -239,12 +251,101 @@ const ChatStream = {
     },
 
     /**
-     * Отменяет текущий SSE-стрим, если он активен
+     * Отменяет текущий SSE-стрим, если он активен. Покрывает и основной
+     * (`send`), и resume-стрим (`resume`) — оба используются параллельно
+     * в режиме refresh во время forward'а.
      */
     abort() {
         if (this._abortController) {
             this._abortController.abort();
             this._abortController = null;
+        }
+        if (this._resumeAbortController) {
+            this._resumeAbortController.abort();
+            this._resumeAbortController = null;
+        }
+        this._resumeRequestId = null;
+    },
+
+    /**
+     * Подключается к активному forward'у (внешний агент) после перезагрузки
+     * страницы. Открывает read-only SSE-стрим на `/forward-stream/{request_id}`
+     * и маршрутизирует события через переданный `onEvent` — формат SSE
+     * идентичен основному POST /messages-стриму.
+     *
+     * Идемпотентен по request_id: если для того же `requestId` уже открыт
+     * resume-стрим — повторный вызов отбрасывается (no-op). Это защита
+     * от двойного открытия при гонке `_renderConversationMessages` /
+     * `_onConversationSwitched`.
+     *
+     * @param {string} conversationId — ID беседы
+     * @param {string} requestId — agent_requests.id активного forward'а
+     * @param {Object} options
+     * @param {function({type: string, data: *}): void} [options.onEvent]
+     * @param {function(Error): void} [options.onError]
+     * @param {function(): void} [options.onDone]
+     */
+    async resume(conversationId, requestId, options = {}) {
+        const { onEvent, onError, onDone } = options;
+
+        if (!conversationId || !requestId) {
+            if (onDone) onDone();
+            return;
+        }
+
+        // Idempotency: тот же request_id уже стримится — не открываем второй.
+        if (this._resumeRequestId === requestId && this._resumeAbortController) {
+            console.warn('ChatStream: resume для', requestId, 'уже активен — игнорируем');
+            return;
+        }
+
+        // Если активен другой resume-стрим — отменяем его, новый перебивает.
+        if (this._resumeAbortController) {
+            this._resumeAbortController.abort();
+            this._resumeAbortController = null;
+        }
+
+        const controller = new AbortController();
+        this._resumeAbortController = controller;
+        this._resumeRequestId = requestId;
+
+        try {
+            const endpoint =
+                `/api/v1/chat/conversations/${conversationId}` +
+                `/forward-stream/${requestId}`;
+            const url = (typeof AppConfig !== 'undefined')
+                ? AppConfig.api.getUrl(endpoint)
+                : endpoint;
+            const headers = this._buildHeaders('text/event-stream');
+
+            const response = await fetch(url, {
+                method: 'GET',
+                headers,
+                signal: controller.signal,
+            });
+
+            if (!response.ok) {
+                if (response.status === 429) {
+                    throw await this._buildRateLimitError(response);
+                }
+                throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+            }
+
+            await this._readSSE(response, controller, onEvent);
+
+            if (onDone) onDone();
+        } catch (err) {
+            if (err.name === 'AbortError') {
+                if (onDone) onDone();
+                return;
+            }
+            console.error('ChatStream: ошибка resume-стрима', err);
+            if (onError) onError(err);
+        } finally {
+            if (this._resumeAbortController === controller) {
+                this._resumeAbortController = null;
+                this._resumeRequestId = null;
+            }
         }
     },
 

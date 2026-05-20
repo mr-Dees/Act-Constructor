@@ -211,6 +211,42 @@ const ChatContext = {
     },
 
     /**
+     * Опрашивает бэк — есть ли для беседы активный forward к внешнему
+     * агенту (статус `pending|dispatched|in_progress`). Используется при
+     * переключении/загрузке беседы, чтобы после перезагрузки страницы
+     * фронт мог подключиться к уже идущему ответу через resume-SSE.
+     *
+     * Возвращает `null` при 204 (нет активных), любой не-ok ответ
+     * (404/403/5xx/сеть) — graceful no-op: возвращаем null, UI не валим.
+     *
+     * @param {string} conversationId
+     * @returns {Promise<{request_id: string, status: string, created_at: string}|null>}
+     */
+    async checkActiveForward(conversationId) {
+        if (!conversationId) return null;
+        try {
+            const endpoint =
+                `/api/v1/chat/conversations/${conversationId}/active-forward`;
+            const url = (typeof AppConfig !== 'undefined')
+                ? AppConfig.api.getUrl(endpoint)
+                : endpoint;
+
+            const headers = {};
+            if (typeof AuthManager !== 'undefined' && AuthManager.getCurrentUser()) {
+                Object.assign(headers, AuthManager.getAuthHeaders());
+            }
+
+            const response = await fetch(url, { headers });
+            if (response.status === 204) return null;
+            if (!response.ok) return null;
+            return await response.json();
+        } catch (err) {
+            console.warn('ChatContext: ошибка проверки active-forward', err);
+            return null;
+        }
+    },
+
+    /**
      * Загружает маппинг key->label баз знаний из DOM
      * @returns {Object<string, string>}
      * @private

@@ -69,6 +69,12 @@ const ChatMessages = {
                 return;
             }
             this._renderConversationMessages(data);
+            // После рендера истории проверяем, не идёт ли в этой беседе
+            // forward к внешнему агенту (refresh-сценарий) — если да,
+            // подключаемся к уже работающему SSE-стриму.
+            // Fire-and-forget: ошибки checkActiveForward уже проглатываются
+            // там, проверка не блокирует UI.
+            this._maybeResumeActiveForward(data.conversationId);
         };
         this._onConversationCleared = () => {
             ChatStream.abort();
@@ -427,6 +433,42 @@ const ChatMessages = {
         wrapper.appendChild(pre);
 
         return wrapper;
+    },
+
+    /**
+     * Проверяет, есть ли в беседе активный forward к внешнему агенту,
+     * и если есть — открывает resume-SSE и привязывает события к новому
+     * bot-bubble с typing-плейсхолдером. Используется при загрузке беседы,
+     * чтобы после перезагрузки страницы пользователь увидел продолжение
+     * ответа без потери reasoning-чанков.
+     *
+     * Идемпотентность обеспечивается на уровне `ChatStream.resume(...)` —
+     * повторный вызов для того же request_id будет no-op.
+     *
+     * @param {string} conversationId
+     * @private
+     */
+    async _maybeResumeActiveForward(conversationId) {
+        const active = await ChatContext.checkActiveForward(conversationId);
+        if (!active || !active.request_id) return;
+
+        // Беседа могла смениться, пока шёл запрос — не открываем resume для
+        // устаревшей беседы.
+        if (ChatContext.getCurrentConversationId() !== conversationId) return;
+
+        const botContainer = this._addBotMessageStreaming();
+
+        await ChatStream.resume(conversationId, active.request_id, {
+            onEvent: (event) => {
+                this._handleSSEEvent(event, botContainer);
+            },
+            onError: (err) => {
+                this._onStreamError(err, botContainer);
+            },
+            onDone: () => {
+                ChatEventBus.emit('ui:scroll-bottom');
+            },
+        });
     },
 
     /**
