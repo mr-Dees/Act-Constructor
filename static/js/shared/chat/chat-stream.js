@@ -186,30 +186,44 @@ const ChatStream = {
     },
 
     /**
-     * Переоткрывает SSE через GET resume-эндпоинт. Используется после разрыва.
+     * Переоткрывает SSE через GET resume-эндпоинт. Используется после разрыва
+     * основного `send()`-стрима внутри его catch-блока.
+     *
+     * Контроллер кладётся в `_resumeAbortController`, НЕ в `_abortController`.
+     * Иначе перетёр бы основной контроллер: основной fetch уже выбросил
+     * исключение и до своего `finally` ещё не дошёл, и при последующем
+     * `abort()` отменился бы только resume — orphan-сокет на бэке.
      * @private
      */
     async _resumeAgentRequest(conversationId, requestId, sinceId, onEvent) {
         const controller = new AbortController();
-        this._abortController = controller;
+        this._resumeAbortController = controller;
+        this._resumeRequestId = requestId;
 
-        const endpoint =
-            `/api/v1/chat/conversations/${conversationId}` +
-            `/agent-request/${requestId}/stream?since=${sinceId}`;
-        const url = (typeof AppConfig !== 'undefined')
-            ? AppConfig.api.getUrl(endpoint)
-            : endpoint;
-        const headers = this._buildHeaders('text/event-stream');
+        try {
+            const endpoint =
+                `/api/v1/chat/conversations/${conversationId}` +
+                `/agent-request/${requestId}/stream?since=${sinceId}`;
+            const url = (typeof AppConfig !== 'undefined')
+                ? AppConfig.api.getUrl(endpoint)
+                : endpoint;
+            const headers = this._buildHeaders('text/event-stream');
 
-        const response = await fetch(url, {
-            method: 'GET',
-            headers,
-            signal: controller.signal,
-        });
-        if (!response.ok) {
-            throw new Error(`resume HTTP ${response.status}`);
+            const response = await fetch(url, {
+                method: 'GET',
+                headers,
+                signal: controller.signal,
+            });
+            if (!response.ok) {
+                throw new Error(`resume HTTP ${response.status}`);
+            }
+            await this._readSSE(response, controller, onEvent);
+        } finally {
+            if (this._resumeAbortController === controller) {
+                this._resumeAbortController = null;
+                this._resumeRequestId = null;
+            }
         }
-        await this._readSSE(response, controller, onEvent);
     },
 
     /** @private */
