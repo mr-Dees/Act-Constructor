@@ -1,12 +1,13 @@
 """Тесты гонок (race conditions) домена чата.
 
 Покрывает: конкурентное создание бесед/сообщений с обходом лимитов,
-дублирование бесед при ensureConversation, удаление во время стриминга.
+удаление во время стриминга.
 
-Все сценарии проверяют, что соответствующие баги (BUG #9, #10, #14, #15)
-ИСПРАВЛЕНЫ: критические секции защищены per-user asyncio.Lock в сервисах,
-ensureConversation идемпотентен по title, а delete блокируется при
-активном SSE-стриме (ConversationLockedError, 409).
+Критические секции защищены per-user asyncio.Lock в сервисах, delete
+блокируется при активном SSE-стриме (ConversationLockedError, 409).
+Дедупликация бесед по title в сервисе намеренно отсутствует — title
+это пользовательский текст, защита от случайных дублей при
+конкурентных ensureConversation лежит на фронте.
 """
 
 import asyncio
@@ -69,11 +70,7 @@ def _mock_repo_with_conn():
 @pytest.fixture
 def conv_repo():
     """Mock ConversationRepository."""
-    repo = _mock_repo_with_conn()
-    # По умолчанию беседы с таким title не существует — идемпотентность
-    # не срабатывает, тесты могут переопределить.
-    repo.get_by_user_and_title = AsyncMock(return_value=None)
-    return repo
+    return _mock_repo_with_conn()
 
 
 @pytest.fixture
@@ -111,7 +108,6 @@ class TestConversationLimitRaceCondition:
         второй получает ChatLimitError.
         """
         conv_repo = _mock_repo_with_conn()
-        conv_repo.get_by_user_and_title = AsyncMock(return_value=None)
         actual_count = 1  # В БД уже 1 беседа (лимит=2)
 
         async def mock_count(user_id):
@@ -144,7 +140,6 @@ class TestConversationLimitRaceCondition:
     async def test_race_with_asyncio_tasks(self, settings):
         """Параллельные 3 create при лимите=2 — 2 проходят, 1 падает."""
         conv_repo = _mock_repo_with_conn()
-        conv_repo.get_by_user_and_title = AsyncMock(return_value=None)
         creation_count = 0
 
         async def mock_count_by_user(user_id):
@@ -180,7 +175,6 @@ class TestConversationLimitRaceCondition:
         режиме (см. app/core/singleton_lock.py).
         """
         conv_repo = _mock_repo_with_conn()
-        conv_repo.get_by_user_and_title = AsyncMock(return_value=None)
         real_count = 1
 
         async def mock_count(user_id):
@@ -298,69 +292,44 @@ class TestMessageLimitRaceCondition:
 
 
 # -------------------------------------------------------------------------
-# BUG #14: ensureConversation — server-side идемпотентность по title
+# Title-дедупликация удалена: сервис создаёт разные беседы даже при
+# совпадающих title. Защита от случайных дублей при конкурентных
+# ensureConversation лежит на фронте (ChatContext._pendingEnsure).
 # -------------------------------------------------------------------------
 
 
-class TestEnsureConversationRace:
-    """ConversationService.create под per-user lock'ом проверяет
-    get_by_user_and_title до вставки — конкурентные ensureConversation
-    с одинаковым title возвращают одну и ту же беседу.
-    """
-
-    async def test_concurrent_creates_dedup_by_title(self, settings):
-        """Конкурентные create с одинаковым title возвращают один объект —
-        дубликатов в БД нет (server-side идемпотентность).
-        """
+class TestNoTitleDedup:
+    async def test_same_title_creates_separate_conversations(self, settings):
+        """Две беседы с одинаковым title — реально разные записи в БД."""
         conv_repo = _mock_repo_with_conn()
         creation_count = 0
-        # Имитация состояния БД: после первого create запись доступна
-        # для get_by_user_and_title.
-        existing_by_title: dict[tuple[str, str], dict] = {}
-
-        async def mock_get_by_user_and_title(user_id, title):
-            return existing_by_title.get((user_id, title))
 
         async def mock_count(user_id):
             return creation_count
 
         async def mock_create(**kwargs):
             nonlocal creation_count
-            await asyncio.sleep(0.01)
             creation_count += 1
-            row = {
+            return {
                 "id": f"conv-{creation_count}",
                 "user_id": kwargs["user_id"],
                 "title": kwargs.get("title"),
             }
-            existing_by_title[(kwargs["user_id"], kwargs["title"])] = row
-            return row
 
-        conv_repo.get_by_user_and_title = mock_get_by_user_and_title
         conv_repo.count_by_user = mock_count
         conv_repo.create = mock_create
 
         service = ConversationService(conv_repo=conv_repo, settings=settings)
 
-        tasks = [service.create(user_id="user1", title="Дубликат") for _ in range(2)]
-        results = await asyncio.gather(*tasks, return_exceptions=True)
-        successful = [r for r in results if not isinstance(r, Exception)]
+        first = await service.create(user_id="user1", title="Привет!")
+        second = await service.create(user_id="user1", title="Привет!")
 
-        assert len(successful) == 2
-        # Оба вызова вернули один и тот же объект — дубликата в БД нет.
-        assert successful[0]["id"] == successful[1]["id"]
-        assert successful[0]["title"] == successful[1]["title"] == "Дубликат"
-        assert creation_count == 1, (
-            f"Создание выполнено {creation_count} раз — ожидалось 1"
-        )
+        assert first["id"] != second["id"]
+        assert creation_count == 2
 
     async def test_concurrent_ensure_respects_limit(self, settings):
-        """ensureConversation без title не подлежит дедупликации,
-        но лимит беседы по-прежнему соблюдается — из 3 параллельных
-        вызовов проходят только 2 (limit=2).
-        """
+        """Из 3 параллельных вызовов проходят только 2 (limit=2)."""
         conv_repo = _mock_repo_with_conn()
-        conv_repo.get_by_user_and_title = AsyncMock(return_value=None)
         creation_count = 0
 
         async def mock_count(user_id):

@@ -65,20 +65,15 @@ class ConversationService:
 
         Критическая секция (count_by_user + create) обёрнута в per-user
         asyncio.Lock — это устраняет race condition при конкурентных
-        запросах одного пользователя (BUG #9, #14): счётчик и факт
-        существования беседы по title читаются и обновляются атомарно.
+        запросах одного пользователя: счётчик и факт вставки сериализуются.
 
-        Если у пользователя уже есть беседа с тем же `title` — она и
-        возвращается (server-side идемпотентность для ensureConversation).
+        Дедупликация по title намеренно отсутствует: title — это
+        пользовательский текст, и совпадение с уже существующей беседой
+        не должно объединять два разных «Новых чата». Защита от
+        случайных дублей при конкурентных ensureConversation лежит на
+        фронте (`_pendingEnsure` в ChatContext).
         """
         async with _get_user_lock(user_id):
-            # Server-side идемпотентность: при заданном title не плодим
-            # дубликатов от конкурентных ensureConversation на фронте.
-            if title is not None and hasattr(self.conv_repo, "get_by_user_and_title"):
-                existing = await self.conv_repo.get_by_user_and_title(user_id, title)
-                if existing:
-                    return existing
-
             count = await self.conv_repo.count_by_user(user_id)
             if count >= self.settings.max_conversations_per_user:
                 raise ChatLimitError(

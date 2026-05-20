@@ -45,8 +45,6 @@ def _make_mock_repo_with_conn():
     tx.__aexit__ = AsyncMock(return_value=False)
     repo.conn = MagicMock()
     repo.conn.transaction = MagicMock(return_value=tx)
-    # Явные дефолты для известных идемпотентность-чувствительных методов.
-    repo.get_by_user_and_title = AsyncMock(return_value=None)
     repo.get_by_id = AsyncMock(return_value=None)
     repo.count_by_user = AsyncMock(return_value=0)
     return repo
