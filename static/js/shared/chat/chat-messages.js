@@ -213,16 +213,22 @@ const ChatMessages = {
      * @private
      */
     _handleSSEEvent(event, container) {
-        // Любой блок, начавший появляться, должен скрыть «три точки».
-        // Кроме служебных событий (message_start, message_end, agent_request_started)
-        // — они сами по себе не означают, что бот начал отвечать.
-        const isContentEvent =
+        // Любой блок видимого ответа должен скрыть «три точки».
+        // Reasoning — это «бот всё ещё думает», не финальный ответ:
+        // блоки reasoning рендерятся выше точек, а точки остаются внизу
+        // bot-bubble. Только text/code/buttons/file/image/plan/client_action/error
+        // — финальный контент, при их появлении плейсхолдер убирается.
+        const isReasoningBlock = (
+            (event.type === 'block_start' && event.data?.type === 'reasoning')
+            || (event.type === 'block_complete' && event.data?.block?.type === 'reasoning')
+        );
+        const isContentEvent = !isReasoningBlock && (
             event.type === 'block_start'
-            || event.type === 'block_delta'
             || event.type === 'block_complete'
             || event.type === 'buttons'
             || event.type === 'client_action'
-            || event.type === 'error';
+            || event.type === 'error'
+        );
         if (isContentEvent) {
             ChatRenderer.removeTypingPlaceholder(container);
         }

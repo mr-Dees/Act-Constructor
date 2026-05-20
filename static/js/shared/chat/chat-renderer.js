@@ -107,18 +107,33 @@ const ChatRenderer = {
         const isReasoning = el.classList
             && el.classList.contains('chat-block-reasoning');
 
+        // Если в контейнере живёт typing-плейсхолдер (бот ещё «думает»,
+        // например reasoning-чанки во время forward'а), удерживаем его
+        // ВНИЗУ bot-bubble — все вновь добавленные блоки уходят ВЫШЕ него.
+        // Сам плейсхолдер не трогаем — его удаление управляется только
+        // из `_handleSSEEvent` по приходу финального content-блока.
+        const placeholder = container.querySelector(
+            ':scope > .chat-typing-placeholder',
+        );
+
+        // Для логики reasoning-группы placeholder в конце — невидимый
+        // «хвост»; реальным последним блоком считаем предыдущий элемент.
+        const lastBlock = (placeholder && container.lastElementChild === placeholder)
+            ? placeholder.previousElementSibling
+            : container.lastElementChild;
+
         if (isReasoning) {
             // Ищем активную (не финализированную) группу среди потомков container'а.
-            // Группа считается активной только если она — последний дочерний элемент.
-            const lastChild = container.lastElementChild;
-            const isActiveGroup = lastChild
-                && lastChild.classList
-                && lastChild.classList.contains('chat-reasoning-group')
-                && !lastChild.dataset.finalized;
+            // Группа считается активной только если она — последний дочерний элемент
+            // (placeholder не учитывается).
+            const isActiveGroup = lastBlock
+                && lastBlock.classList
+                && lastBlock.classList.contains('chat-reasoning-group')
+                && !lastBlock.dataset.finalized;
 
             if (isActiveGroup) {
                 // Добавляем разделитель, если в группе уже есть reasoning-блоки
-                const groupContent = lastChild.querySelector('.chat-reasoning-group-content');
+                const groupContent = lastBlock.querySelector('.chat-reasoning-group-content');
                 if (groupContent.lastElementChild) {
                     const sep = document.createElement('hr');
                     sep.className = 'chat-reasoning-separator';
@@ -144,15 +159,21 @@ const ChatRenderer = {
             }
         } else {
             // Финализируем активную группу, чтобы следующий reasoning начал новую
-            const lastChild = container.lastElementChild;
-            if (lastChild
-                && lastChild.classList
-                && lastChild.classList.contains('chat-reasoning-group')
-                && !lastChild.dataset.finalized) {
-                lastChild.dataset.finalized = 'true';
+            if (lastBlock
+                && lastBlock.classList
+                && lastBlock.classList.contains('chat-reasoning-group')
+                && !lastBlock.dataset.finalized) {
+                lastBlock.dataset.finalized = 'true';
             }
 
             container.appendChild(el);
+        }
+
+        // Если плейсхолдер остался — переносим его в конец, чтобы три точки
+        // оказались под только что добавленным блоком (типичный кейс — поток
+        // reasoning-чанков от внешнего агента).
+        if (placeholder && container.lastElementChild !== placeholder) {
+            container.appendChild(placeholder);
         }
     },
 
