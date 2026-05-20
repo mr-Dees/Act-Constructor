@@ -203,8 +203,10 @@ async def stream_forward_resume(
                 conversation_id, request_id, duration,
             )
 
+    from app.domains.chat.services.streaming import with_heartbeat
+
     return StreamingResponse(
-        _resume_stream(),
+        with_heartbeat(_resume_stream()),
         media_type="text/event-stream",
         headers={
             "Cache-Control": "no-cache",

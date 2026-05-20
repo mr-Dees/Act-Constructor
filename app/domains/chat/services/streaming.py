@@ -2,12 +2,23 @@
 
 from __future__ import annotations
 
+import asyncio
 import logging
+from collections.abc import AsyncGenerator, AsyncIterator
 from dataclasses import dataclass, field
 import json
 from typing import Any
 
 logger = logging.getLogger(__name__)
+
+# SSE-комментарий: строки, начинающиеся с двоеточия, игнорируются клиентом
+# (EventSource/SSE-парсер). Используется как heartbeat — даёт серверу повод
+# вызвать write на сокет, чтобы uvicorn заметил оборванное соединение
+# и подал http.disconnect в ASGI. Без heartbeat в silent-период (например,
+# 5 минут polling'а внешнего агента без событий) клиентский abort не
+# доходит до сервера, и orchestrator продолжает крутиться впустую,
+# держа per-user-семафор и нагружая БД.
+SSE_HEARTBEAT_PAYLOAD = ": keep-alive\n\n"
 
 # Маркер усечения, добавляемый к последней delta при переполнении блока.
 TRUNCATION_MARKER = "\n\n[…усечено: блок превысил {limit_mb:.1f} МБ…]"
@@ -345,3 +356,60 @@ def emit_text_block_with_limit(
         events.extend(limiter.flush_remaining())
         events.append(sse_block_end(block_index=block_index))
     return events
+
+
+async def with_heartbeat(
+    source: AsyncIterator[str],
+    *,
+    interval_sec: float = 15.0,
+) -> AsyncGenerator[str, None]:
+    """Прозрачно прокидывает SSE-стрим, вставляя heartbeat'ы в тишине.
+
+    Если ``source`` молчит дольше ``interval_sec`` — yield-ит
+    :data:`SSE_HEARTBEAT_PAYLOAD`. Это заставляет uvicorn выполнить
+    реальный write на сокет; для оборванного соединения write поднимет
+    EOF и ASGI пробросит ``http.disconnect``, что в свою очередь
+    отменит StreamingResponse-генератор. Без этого silent-периоды
+    (polling внешнего ИИ-агента) держат серверный orchestrator живым
+    до 5-минутного таймаута, даже если клиент давно ушёл.
+
+    Источник крутится в отдельной задаче через ``asyncio.Queue`` —
+    так heartbeat не прерывает текущий ``await`` источника (типа
+    ``poll_events``-SQL), а просто сосуществует с ним. Это безопаснее,
+    чем ``asyncio.wait_for(source.__anext__())``, которая отменила бы
+    активную транзакцию.
+    """
+    queue: asyncio.Queue[tuple[str, Any]] = asyncio.Queue()
+
+    async def _drain() -> None:
+        try:
+            async for item in source:
+                await queue.put(("item", item))
+        except BaseException as exc:  # CancelledError тоже сюда
+            await queue.put(("error", exc))
+            return
+        await queue.put(("done", None))
+
+    drainer = asyncio.create_task(_drain(), name="sse-heartbeat-drain")
+    try:
+        while True:
+            try:
+                kind, value = await asyncio.wait_for(
+                    queue.get(), timeout=interval_sec,
+                )
+            except asyncio.TimeoutError:
+                yield SSE_HEARTBEAT_PAYLOAD
+                continue
+            if kind == "item":
+                yield value
+            elif kind == "done":
+                return
+            else:  # "error"
+                raise value
+    finally:
+        if not drainer.done():
+            drainer.cancel()
+        try:
+            await drainer
+        except BaseException:
+            pass

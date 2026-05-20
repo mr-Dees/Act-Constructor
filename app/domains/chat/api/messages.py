@@ -224,10 +224,11 @@ async def send_message(
             from app.domains.chat.services.streaming import (
                 sse_error,
                 sse_message_end,
+                with_heartbeat,
             )
             stream_outcome = "completed"
             try:
-                async for chunk in orchestrator.run_stream(
+                inner = orchestrator.run_stream(
                     conversation_id=conversation_id,
                     user_message=message,
                     message_id=assistant_message_id,
@@ -235,7 +236,12 @@ async def send_message(
                     file_blocks=file_blocks if file_blocks else None,
                     user_id=username,
                     knowledge_bases=[],
-                ):
+                )
+                # Heartbeat обязателен, иначе silent forward (polling
+                # внешнего агента без событий) скрывает client disconnect
+                # на 5 минут — orchestrator занимает per-user семафор
+                # впустую, см. CLAUDE.md «Heartbeat обязателен в SSE».
+                async for chunk in with_heartbeat(inner):
                     yield chunk
             except (asyncio.CancelledError, GeneratorExit):
                 # Клиент дисконнектнулся (закрыл вкладку, обрыв связи).
