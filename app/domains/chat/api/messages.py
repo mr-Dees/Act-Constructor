@@ -146,14 +146,21 @@ async def send_message(
     # in-process счётчика достаточно.
     accept = request.headers.get("accept", "")
     is_sse = "text/event-stream" in accept
-    if is_sse and _active_streams_per_user.get(username, 0) > 0:
-        logger.warning(
-            "SSE-стрим отклонён (429): user=%s, уже активен", username,
-        )
-        raise ChatStreamAlreadyActiveError(
-            "Уже идёт активный стрим. Дождитесь окончания или "
-            "отмените предыдущий.",
-        )
+    if is_sse:
+        from app.core.settings_registry import get as get_domain_settings
+        from app.domains.chat.settings import ChatDomainSettings
+
+        chat_settings = get_domain_settings("chat", ChatDomainSettings)
+        max_streams = chat_settings.max_parallel_streams_per_user
+        if _active_streams_per_user.get(username, 0) >= max_streams:
+            logger.warning(
+                "SSE-стрим отклонён (429): user=%s, достигнут лимит %d",
+                username, max_streams,
+            )
+            raise ChatStreamAlreadyActiveError(
+                f"Достигнут лимит одновременных запросов ({max_streams}). "
+                "Дождитесь завершения одного из них.",
+            )
 
     # Сохраняем пользовательское сообщение
     await msg_service.save_user_message(

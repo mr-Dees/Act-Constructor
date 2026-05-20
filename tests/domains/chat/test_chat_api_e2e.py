@@ -309,15 +309,16 @@ class TestSendMessageSSE:
     """E2E: SSE-стрим открывается и первые события корректны."""
 
     def test_sse_stream_returns_429_when_user_already_streaming(self):
-        """1.8: Второй параллельный SSE от того же пользователя — 429.
+        """1.8: При достижении лимита параллельных SSE-стримов — 429.
 
-        Имитируем «уже активный стрим» через предзаполнение
-        ``_active_streams_per_user[username]``: per-user семафор должен
-        вернуть 429 без открытия стрима.
+        Лимит конфигурируется через ``CHAT__MAX_PARALLEL_STREAMS_PER_USER``
+        (default=3). Предзаполняем ``_active_streams_per_user`` на величину
+        лимита и проверяем, что новый запрос отклоняется без открытия стрима.
         """
         from app.domains.chat.api import messages as messages_module
 
         settings = _make_settings()
+        max_streams = settings.max_parallel_streams_per_user
         conv = _make_conv_service(settings)
         conv.get.return_value = {
             "id": "conv-1",
@@ -340,18 +341,91 @@ class TestSendMessageSSE:
             file_service=file_svc,
         )
 
-        # Предзаполняем счётчик — будто у user уже идёт SSE
-        messages_module._active_streams_per_user[USERNAME] = 1
+        # Предзаполняем счётчик до лимита — следующий запрос должен получить 429
+        messages_module._active_streams_per_user[USERNAME] = max_streams
         try:
-            with TestClient(app) as client:
-                resp = client.post(
-                    "/api/v1/chat/conversations/conv-1/messages",
-                    data={"message": "Привет"},
-                    headers={"Accept": "text/event-stream"},
-                )
+            with patch(
+                "app.core.settings_registry.get", return_value=settings,
+            ):
+                with TestClient(app) as client:
+                    resp = client.post(
+                        "/api/v1/chat/conversations/conv-1/messages",
+                        data={"message": "Привет"},
+                        headers={"Accept": "text/event-stream"},
+                    )
             assert resp.status_code == 429, resp.text
             body = resp.json()
-            assert "активный стрим" in body["detail"].lower()
+            assert "лимит" in body["detail"].lower()
+            assert f"({max_streams})" in body["detail"]
+        finally:
+            messages_module._active_streams_per_user.pop(USERNAME, None)
+
+    def test_sse_stream_respects_parallel_limit_boundary(self):
+        """1.8: При count == limit-1 ещё можно открыть стрим, при count == limit — нельзя."""
+        from app.domains.chat.api import messages as messages_module
+
+        settings = _make_settings()
+        max_streams = settings.max_parallel_streams_per_user
+        conv = _make_conv_service(settings)
+        conv.get.return_value = {
+            "id": "conv-1",
+            "user_id": USERNAME,
+            "title": None,
+            "domain_name": None,
+            "context": None,
+        }
+        msg = _make_msg_service(settings)
+        msg.save_user_message.return_value = {
+            "id": "m-1",
+            "role": "user",
+            "content": [],
+        }
+        msg.save_assistant_message = AsyncMock(
+            return_value={"id": "m-2", "role": "assistant", "content": []},
+        )
+        file_svc = _make_file_service(settings)
+
+        app = _build_app(
+            conv_service=conv,
+            msg_service=msg,
+            file_service=file_svc,
+        )
+
+        # На границе limit-1 запрос ещё пропускается (но мы прервём чтение
+        # стрима сразу, чтобы не гонять оркестратор).
+        messages_module._active_streams_per_user.pop(USERNAME, None)
+        messages_module._active_streams_per_user[USERNAME] = max_streams - 1
+        try:
+            with patch(
+                "app.core.settings_registry.get", return_value=settings,
+            ), patch(
+                "app.domains.chat.services.orchestrator.get_domain_settings",
+                return_value=settings,
+            ):
+                with TestClient(app) as client:
+                    with client.stream(
+                        "POST",
+                        "/api/v1/chat/conversations/conv-1/messages",
+                        data={"message": "Привет"},
+                        headers={"Accept": "text/event-stream"},
+                    ) as resp:
+                        assert resp.status_code == 200, resp.read()
+        finally:
+            messages_module._active_streams_per_user.pop(USERNAME, None)
+
+        # На самой границе limit — отказ.
+        messages_module._active_streams_per_user[USERNAME] = max_streams
+        try:
+            with patch(
+                "app.core.settings_registry.get", return_value=settings,
+            ):
+                with TestClient(app) as client:
+                    resp = client.post(
+                        "/api/v1/chat/conversations/conv-1/messages",
+                        data={"message": "Привет"},
+                        headers={"Accept": "text/event-stream"},
+                    )
+            assert resp.status_code == 429, resp.text
         finally:
             messages_module._active_streams_per_user.pop(USERNAME, None)
 
@@ -388,6 +462,9 @@ class TestSendMessageSSE:
         messages_module._active_streams_per_user.pop(USERNAME, None)
 
         with patch(
+            "app.core.settings_registry.get",
+            return_value=settings,
+        ), patch(
             "app.domains.chat.services.orchestrator.get_domain_settings",
             return_value=settings,
         ):
@@ -442,7 +519,11 @@ class TestSendMessageSSE:
         )
 
         # Патчим settings_registry, чтобы Orchestrator подхватил пустые api_*
+        # и чтобы endpoint достал max_parallel_streams_per_user из настроек.
         with patch(
+            "app.core.settings_registry.get",
+            return_value=settings,
+        ), patch(
             "app.domains.chat.services.orchestrator.get_domain_settings",
             return_value=settings,
         ):
