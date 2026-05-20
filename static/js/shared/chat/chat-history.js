@@ -96,9 +96,11 @@ const ChatHistory = {
      * Вызывается только из ChatContext._createConversation().
      *
      * @param {string|null} domainName — домен для новой беседы
+     * @param {Object} [options] — опциональные параметры
+     * @param {string|null} [options.title] — title беседы (если не задан, бэк проставит дефолт)
      * @returns {Promise<Object>} объект созданной беседы
      */
-    async createConversation(domainName = null) {
+    async createConversation(domainName = null, options = {}) {
         const endpoint = '/api/v1/chat/conversations';
         const url = (typeof AppConfig !== 'undefined')
             ? AppConfig.api.getUrl(endpoint)
@@ -111,6 +113,7 @@ const ChatHistory = {
 
         const body = {};
         if (domainName) body.domain_name = domainName;
+        if (options && options.title) body.title = options.title;
 
         const response = await fetch(url, {
             method: 'POST',
@@ -331,7 +334,8 @@ const ChatHistory = {
     // ========================================================
 
     /**
-     * Форматирует дату: сегодня — HH:MM, иначе — "6 апр."
+     * Форматирует дату как "DD.MM.YYYY HH:MM" — единый формат для всех бесед,
+     * чтобы пользователь сразу видел и день, и время последней активности.
      *
      * @param {string} dateStr — строка даты (ISO 8601)
      * @returns {string}
@@ -345,23 +349,16 @@ const ChatHistory = {
             // Невалидная дата (например, мусор из БД) → пустая строка вместо
             // "Invalid Date" в UI.
             if (isNaN(date.getTime())) return '';
-            const now = new Date();
 
-            const isToday = date.getFullYear() === now.getFullYear()
-                && date.getMonth() === now.getMonth()
-                && date.getDate() === now.getDate();
-
-            if (isToday) {
-                return date.toLocaleTimeString('ru', {
-                    hour: '2-digit',
-                    minute: '2-digit',
-                });
-            }
-
-            return date.toLocaleDateString('ru', {
-                day: 'numeric',
-                month: 'short',
-            });
+            // Собираем строку вручную: toLocaleString('ru', ...) в разных браузерах
+            // может вставить запятую/нестандартный разделитель между датой и временем.
+            const pad = (n) => String(n).padStart(2, '0');
+            const day = pad(date.getDate());
+            const month = pad(date.getMonth() + 1);
+            const year = date.getFullYear();
+            const hours = pad(date.getHours());
+            const minutes = pad(date.getMinutes());
+            return `${day}.${month}.${year} ${hours}:${minutes}`;
         } catch {
             return '';
         }

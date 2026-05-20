@@ -40,10 +40,17 @@ const ChatContext = {
     },
 
     /**
-     * Создаёт беседу, если ещё нет активной, и возвращает ID
+     * Создаёт беседу, если ещё нет активной, и возвращает ID.
+     *
+     * Опциональные аргументы пробрасываются в `_createConversation()`,
+     * чтобы фронт мог сразу задать осмысленный title (см. ChatTitle.derive).
+     * Если аргументы не переданы — title не отправляем, бэк проставит дефолт.
+     *
+     * @param {string} [firstMessageText] — текст первого сообщения пользователя
+     * @param {Array<{name?: string}>} [files] — прикреплённые файлы
      * @returns {Promise<string>}
      */
-    async ensureConversation() {
+    async ensureConversation(firstMessageText, files) {
         if (this._currentConversationId) {
             return this._currentConversationId;
         }
@@ -53,7 +60,7 @@ const ChatContext = {
             return this._pendingEnsure;
         }
 
-        this._pendingEnsure = this._createConversation();
+        this._pendingEnsure = this._createConversation(firstMessageText, files);
         try {
             return await this._pendingEnsure;
         } finally {
@@ -62,18 +69,31 @@ const ChatContext = {
     },
 
     /**
-     * Внутренний метод создания беседы
+     * Внутренний метод создания беседы.
+     *
+     * @param {string} [firstMessageText] — текст первого сообщения пользователя
+     * @param {Array<{name?: string}>} [files] — прикреплённые файлы
      * @returns {Promise<string>}
      * @private
      */
-    async _createConversation() {
+    async _createConversation(firstMessageText, files) {
+        // Title вычисляем только если есть исходные данные первого сообщения;
+        // без них бэк проставит дефолтное название (не ломаем обратную
+        // совместимость для вызовов вроде resetToNew/loadConversations).
+        const hasFirstInput = firstMessageText !== undefined
+            || (Array.isArray(files) && files.length > 0);
+        const title = hasFirstInput
+            && typeof ChatTitle !== 'undefined'
+            ? ChatTitle.derive(firstMessageText || '', files || [])
+            : null;
+
         // Создаём беседу через ChatHistory, если доступен.
         // Подавляем callback, чтобы _onConversationSwitch
         // не очистил DOM с сообщениями.
         if (typeof ChatHistory !== 'undefined') {
             const origCallback = ChatHistory.onConversationChange;
             ChatHistory.onConversationChange = null;
-            await ChatHistory.createConversation();
+            await ChatHistory.createConversation(null, { title });
             ChatHistory.onConversationChange = origCallback;
             this._currentConversationId = ChatHistory.getCurrentId();
         } else {
@@ -88,10 +108,13 @@ const ChatContext = {
                 Object.assign(headers, AuthManager.getAuthHeaders());
             }
 
+            const body = {};
+            if (title) body.title = title;
+
             const response = await fetch(url, {
                 method: 'POST',
                 headers,
-                body: JSON.stringify({}),
+                body: JSON.stringify(body),
             });
 
             if (!response.ok) throw new Error(`HTTP ${response.status}`);
