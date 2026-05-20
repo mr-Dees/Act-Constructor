@@ -2,6 +2,15 @@
 
 LLM возвращает tool-call chat.forward_to_knowledge_agent.
 Параллельный «агент» симулируется через мокирование AgentBridgeService.
+
+После архитектурного фикса «POST SSE короткий для forward'а» (Chrome
+HTTP/1.1 per-origin connection limit) ``orch.run_stream`` при forward
+yield-ит только ``agent_request_started`` и завершается; реальный стрим
+блоков агента идёт через :func:`stream_forward_events` (Resume SSE).
+Тесты, проверяющие эмиссию reasoning/buttons/files, гоняют **обе** фазы
+последовательно через :func:`_collect_forward_events` — это сохраняет
+end-to-end-проверку формата SSE: то, что увидит фронт по сумме
+POST→Resume.
 """
 from __future__ import annotations
 
@@ -13,6 +22,7 @@ from app.core.chat.tools import register_tools, reset as reset_tools
 from app.core.domain_registry import reset_registry
 from app.core.settings_registry import reset as reset_settings
 from app.domains.chat.integrations.chat_tools import get_chat_tools
+from app.domains.chat.services.forward_stream import stream_forward_events
 from app.domains.chat.services.orchestrator import Orchestrator
 from app.domains.chat.settings import ChatDomainSettings
 
@@ -65,6 +75,33 @@ def _stream_chunks(tool_call_id: str, args_json: str):
 async def _async_iter(items):
     for x in items:
         yield x
+
+
+_FAKE_REQUEST_ID = "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee"
+
+
+async def _drain_resume_stream(message_id: str, block_index_start: int = 0):
+    """Гоняет :func:`stream_forward_events` для тестов после ``run_stream``.
+
+    После архитектурного фикса POST SSE короткий: оркестратор yield-ит
+    только ``agent_request_started`` и завершается. Реальные блоки агента
+    приходят на следующем GET /forward-stream через
+    ``stream_forward_events``. Тесты эмиссии (reasoning/buttons/files)
+    должны проверить **сумму** обеих фаз — то, что видит фронт.
+    """
+    sse_events: list[str] = []
+    async for kind, payload in stream_forward_events(
+        settings=ChatDomainSettings(
+            api_base="http://test-llm:8000/v1",
+            api_key="test-key",
+        ),
+        request_id=_FAKE_REQUEST_ID,
+        message_id=message_id,
+        block_index_start=block_index_start,
+    ):
+        if kind in ("sse", "error"):
+            sse_events.append(payload)
+    return sse_events
 
 
 async def test_forward_tool_call_streams_reasoning_and_final(monkeypatch):
@@ -184,6 +221,8 @@ async def test_forward_tool_call_streams_reasoning_and_final(monkeypatch):
             knowledge_bases=["acts_default"],
         ):
             events.append(ev)
+        # Phase 2: Resume SSE стримит реальные блоки агента.
+        events.extend(await _drain_resume_stream(message_id="msg-1"))
 
     # SSE-стрим должен содержать tool_call для forward, затем reasoning-блок
     # (полный триплет start+delta+end на один чанк), затем финальный
@@ -342,6 +381,8 @@ async def test_forward_emits_separate_block_per_reasoning_chunk(monkeypatch):
             knowledge_bases=["acts_default"],
         ):
             events.append(ev)
+        # Phase 2: Resume SSE стримит реальные блоки агента.
+        events.extend(await _drain_resume_stream(message_id="msg-1"))
 
     # Должно быть ровно 3 reasoning block_start события — по одному на чанк,
     # с уникальными индексами.
@@ -487,6 +528,8 @@ async def test_buttons_block_emits_sse_buttons_not_block_start(monkeypatch):
             knowledge_bases=["acts_default"],
         ):
             events.append(ev)
+        # Phase 2: Resume SSE стримит реальные блоки агента.
+        events.extend(await _drain_resume_stream(message_id="msg-1"))
 
     # Ровно одно event: buttons с нужным payload
     buttons_events = [
@@ -564,6 +607,8 @@ async def test_text_and_buttons_in_same_response_each_renders_correctly(monkeypa
             knowledge_bases=["acts_default"],
         ):
             events.append(ev)
+        # Phase 2: Resume SSE стримит реальные блоки агента.
+        events.extend(await _drain_resume_stream(message_id="msg-1"))
 
     # Text-блок: block_start(index=0,type=text) + block_delta + block_end(index=0)
     assert any(
@@ -610,7 +655,16 @@ async def test_text_and_buttons_in_same_response_each_renders_correctly(monkeypa
 
 
 async def _run_forward_and_collect_events(monkeypatch, response_blocks):
-    """Гоняет run_stream через forward с заданными response_blocks; возвращает events."""
+    """Гоняет POST SSE (run_stream) + Resume SSE (stream_forward_events) и
+    возвращает сумму событий — то, что суммарно увидит фронт.
+
+    POST SSE сейчас даёт только ``agent_request_started`` и завершается;
+    реальные блоки агента приходят на следующем Resume SSE через
+    :func:`stream_forward_events`. Хелпер прогоняет обе фазы
+    последовательно с одним и тем же набором mock'ов
+    AgentBridgeService, чтобы тесты эмиссии проверяли фактический
+    наблюдаемый поток.
+    """
     settings = ChatDomainSettings(
         api_base="http://test-llm:8000/v1",
         api_key="test-key",
@@ -653,6 +707,8 @@ async def _run_forward_and_collect_events(monkeypatch, response_blocks):
             knowledge_bases=["acts_default"],
         ):
             events.append(ev)
+        # Phase 2: Resume SSE стримит реальные блоки.
+        events.extend(await _drain_resume_stream(message_id="msg-1"))
     return events, orch
 
 

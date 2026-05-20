@@ -103,6 +103,30 @@ const ChatStream = {
 
             await this._readSSE(response, controller, wrappedOnEvent);
 
+            // Если внутри стрима пришёл agent_request_started — POST SSE
+            // штатно закрылся короткой парой `agent_request_started`,
+            // дальше реальный ответ агента стримит Resume SSE. Открываем
+            // его прямо здесь — с тем же onEvent — чтобы UI не остался
+            // в режиме «typing» без событий.
+            // Делаем это ДО onDone(): для вызывающего кода forward — это
+            // один логический стрим, completion = «агент дописал ответ».
+            if (this._pendingAgentRequestId) {
+                const requestId = this._pendingAgentRequestId;
+                const convId = this._pendingConversationId;
+                // Освобождаем основной контроллер: POST SSE завершён.
+                // Resume использует _resumeAbortController.
+                if (this._abortController === controller) {
+                    this._abortController = null;
+                }
+                // Сбрасываем pending до resume, иначе catch ниже
+                // (на случай разрыва Resume) попытается переоткрыть
+                // через _resumeAgentRequest и устроит гонку.
+                this._clearPending();
+                await this.resume(convId, requestId, {
+                    onEvent: wrappedOnEvent,
+                });
+            }
+
             if (onDone) onDone();
             this._clearPending();
         } catch (err) {

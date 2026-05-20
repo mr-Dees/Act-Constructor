@@ -1,4 +1,4 @@
-"""Forward-bridge: трансляция стрима внешнего ИИ-агента в SSE-стрим клиента.
+"""Forward-bridge: регистрация запроса к внешнему ИИ-агенту.
 
 Логика жила как ``Orchestrator._handle_forward_call`` (~210 строк). Вынесена
 сюда отдельной свободной async-генератор-функцией:
@@ -14,9 +14,20 @@
 * Регистрирует ``agent_request`` через ``build_forward_tool`` + handler.
 * Запускает фоновый раннер (``agent_bridge_runner.schedule``) — он держит
   таймауты и сохраняет финальное сообщение независимо от SSE-соединения.
-* Сам polling-цикл открывает БД-соединение только на один тик
-  (``async with get_db() as conn``) — не держит коннект из пула до 30 минут.
-* Yield-ит пары ``(kind, payload)``:
+* Yield-ит ровно одно SSE-событие ``agent_request_started`` и
+  завершается. **Polling событий внешнего агента живёт не здесь**: фронт
+  по получению ``agent_request_started`` открывает Resume SSE-эндпоинт
+  (``/forward-stream/{request_id}``), который стримит дальше через
+  :func:`stream_forward_events`.
+
+Почему так: раньше POST /messages SSE оставался открытым на всё время
+polling'а (могут быть минуты), и при переключении между чатами в
+браузере накапливалось 4-6 живых SSE на один origin (POST chat A +
+POST chat B + Resume chat A + Resume chat B + …). Chrome HTTP/1.1
+per-origin connection limit = 6, и юзер ловил UI freeze. С коротким
+POST SSE на каждый forward живёт ровно 1 Resume.
+
+Yield-ит пары ``(kind, payload)``:
     * ``("sse", "...SSE-строка...")`` — событие для StreamingResponse;
     * ``("error", "...SSE-error...")`` — фатальная ошибка регистрации.
 """
@@ -27,7 +38,6 @@ import logging
 from collections.abc import AsyncGenerator
 from typing import Any
 
-from app.domains.chat.services.forward_stream import stream_forward_events
 from app.domains.chat.services.streaming import (
     sse_agent_request_started,
     sse_error,
@@ -50,13 +60,18 @@ async def handle_forward_call(
     arguments: dict,
     block_index: int,
 ) -> AsyncGenerator[tuple[str, Any], None]:
-    """Регистрирует agent_request и стримит ответы внешнего агента клиенту.
+    """Регистрирует agent_request и yield-ит ``agent_request_started``.
 
-    См. doc-string модуля. Параметры идентичны прежнему
-    ``Orchestrator._handle_forward_call``, плюс явно проброшенный ``settings``.
+    После этого завершается — стрим событий внешнего агента идёт через
+    Resume SSE-эндпоинт, который фронт открывает по получению
+    ``agent_request_started``. Раннер (фон) сохраняет финальное сообщение.
+
+    ``block_index`` оставлен в сигнатуре для совместимости вызывающего
+    кода, но больше не используется: подсчёт block_index делает Resume.
     """
     # Лениво импортируем тяжёлые внутренности — модуль остаётся дешёвым на
     # этапе сборки приложения.
+    del block_index  # больше не нужен: подсчёт блоков в Resume SSE
     from app.db.connection import get_db
     from app.domains.chat.integrations.forward_handler import (
         FORWARD_SENTINEL_PATTERN,
@@ -66,8 +81,7 @@ async def handle_forward_call(
         build_forward_tool,
     )
 
-    # Регистрация запроса — отдельным соединением; держать его открытым
-    # на всё время polling нельзя (могут быть десятки минут).
+    # Регистрация запроса — отдельным коротким соединением.
     async with get_db() as conn:
         forward_tool = build_forward_tool(
             conn=conn,
@@ -103,12 +117,11 @@ async def handle_forward_call(
     )
 
     # Producer (раннер) сам откроет get_db() и сохранит финальное
-    # сообщение даже если клиент закроет SSE-соединение. Гейты
-    # таймаута и обновление статуса agent_requests — только в нём.
+    # сообщение независимо от SSE-соединения.
     agent_bridge_runner.schedule(request_id, settings=settings)
 
-    # Сообщаем фронту request_id, чтобы при разрыве соединения он мог
-    # переоткрыть resume-стрим.
+    # Единственное SSE-событие: сообщаем фронту request_id. Дальше фронт
+    # открывает Resume SSE через GET /forward-stream/{request_id}.
     yield (
         "sse",
         sse_agent_request_started(
@@ -116,14 +129,3 @@ async def handle_forward_call(
             conversation_id=conversation_id,
         ),
     )
-
-    # Сам polling-цикл (poll_events / poll_response / req.status) живёт
-    # в общем helper'е stream_forward_events: тот же код переиспользует
-    # resume-эндпоинт SSE — чтобы форматы событий совпадали 1:1.
-    async for kind, payload in stream_forward_events(
-        settings=settings,
-        request_id=request_id,
-        message_id=message_id,
-        block_index_start=block_index,
-    ):
-        yield (kind, payload)

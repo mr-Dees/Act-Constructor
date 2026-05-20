@@ -770,6 +770,7 @@ async def run_stream_loop(
                         # сохранение ассистент-сообщения делает фоновый
                         # раннер (agent_bridge_runner) — даже если
                         # клиент закроет соединение посреди ответа.
+                        forward_failed = False
                         async for kind, payload in handle_forward_call(
                             settings=orch.settings,
                             conversation_id=conversation_id,
@@ -782,14 +783,24 @@ async def run_stream_loop(
                             arguments=arguments,
                             block_index=block_index,
                         ):
+                            if kind == "error":
+                                forward_failed = True
                             if kind in ("sse", "error"):
                                 yield payload
                         sources.append(tool_name)
-                        yield sse_message_end(
-                            message_id=message_id,
-                            model=orch.settings.model,
-                            token_usage=None,
-                        )
+                        if forward_failed:
+                            # Регистрация forward'а упала — закрываем
+                            # стрим штатно, чтобы фронт не висел в режиме
+                            # «typing».
+                            yield sse_message_end(
+                                message_id=message_id,
+                                model=orch.settings.model,
+                                token_usage=None,
+                            )
+                        # Если forward зарегистрирован — message_end НЕ
+                        # шлём: реальный ответ агента стримит Resume SSE
+                        # (фронт открывает /forward-stream по получению
+                        # agent_request_started), там же будет message_end.
                         return
 
                     try:
