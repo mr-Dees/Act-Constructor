@@ -654,6 +654,115 @@ class TestStreamingToolCalls:
 
 
 # -------------------------------------------------------------------------
+# 4.12b: Terminal-tool контракт — не зовём LLM после tool с client_action
+# -------------------------------------------------------------------------
+
+
+class TestTerminalToolContract:
+    """Tool, эмитнувший client_action / blocks_list / buttons, считается
+    «терминальным»: оркестратор НЕ должен звать LLM повторно после такого
+    раунда. Иначе LLM получает короткий итог `<выполнено: name>` и
+    сгенерит ненужную «сводку» поверх готового контента (английский хвост
+    к ``chat.list_pages`` — типичный симптом этого бага).
+    """
+
+    @patch("app.domains.chat.services.orchestrator.Orchestrator._get_openai_client")
+    async def test_client_action_terminates_loop(
+        self, mock_client_factory, orchestrator,
+    ):
+        """После tool с client_action LLM не вызывается повторно."""
+        # Tool возвращает JSON-блок ClientActionBlock.
+        action_json = json.dumps({
+            "type": "client_action",
+            "action": "notify",
+            "params": {"message": "ok"},
+        })
+        tool = ChatTool(
+            name="open_thing",
+            domain="test",
+            description="Открывает thing",
+            handler=AsyncMock(return_value=action_json),
+        )
+        register_tools([tool])
+
+        # Первый stream-вызов LLM: возвращает tool_call к open_thing.
+        async def mock_stream():
+            chunk = MagicMock()
+            delta = MagicMock()
+            delta.content = None
+            tc = MagicMock()
+            tc.index = 0
+            tc.id = "tc-1"
+            tc.function = MagicMock()
+            tc.function.name = "open_thing"
+            tc.function.arguments = "{}"
+            delta.tool_calls = [tc]
+            chunk.choices = [MagicMock(delta=delta, finish_reason=None)]
+
+            chunk2 = MagicMock()
+            delta2 = MagicMock()
+            delta2.content = None
+            delta2.tool_calls = None
+            chunk2.choices = [
+                MagicMock(delta=delta2, finish_reason="tool_calls"),
+            ]
+
+            for c in [chunk, chunk2]:
+                yield c
+
+        mock_client = AsyncMock()
+        # Если оркестратор зовёт LLM второй раз — этот side_effect выдаст
+        # ответ-«сводку», и тест поймает регрессию: содержательного
+        # текстового block_start/block_delta после tool_result быть не должно.
+        followup_msg = MagicMock()
+        followup_msg.content = "Я открыл страницу. Вот что доступно..."
+        followup_msg.tool_calls = None
+        followup_choice = MagicMock()
+        followup_choice.message = followup_msg
+        followup_choice.finish_reason = "stop"
+        followup_response = MagicMock()
+        followup_response.choices = [followup_choice]
+        followup_response.usage = None
+
+        mock_client.chat.completions.create = AsyncMock(
+            side_effect=[mock_stream(), followup_response],
+        )
+        mock_client_factory.return_value = mock_client
+
+        events = []
+        async for event in orchestrator.run_stream(
+            message_id="msg-id",
+            conversation_id="conv-1",
+            user_message="open thing",
+        ):
+            events.append(event)
+
+        # client_action должен попасть в стрим.
+        types = [_get_event_type(e) for e in events]
+        assert "client_action" in types
+
+        # Регрессия: следующего LLM-вызова быть не должно — значит
+        # ни одного text block_start (LLM-сводки) после tool_result.
+        # mock_client.create вызывается ровно 1 раз (первый стрим).
+        assert mock_client.chat.completions.create.call_count == 1, (
+            f"LLM вызывалась {mock_client.chat.completions.create.call_count} "
+            f"раз, ожидался 1 (terminal-tool контракт)"
+        )
+
+        # Дополнительно: текстовых block_start от LLM-сводки нет.
+        # (block_start от reasoning/code допустимы, но не text.)
+        text_block_starts = [
+            e for e in events
+            if _get_event_type(e) == "block_start"
+            and _parse_event_data(e).get("type") == "text"
+        ]
+        assert text_block_starts == [], (
+            "После terminal tool не должно быть text block_start "
+            "от LLM-сводки"
+        )
+
+
+# -------------------------------------------------------------------------
 # 4.13: SSE graceful shutdown — _instrumented_stream
 # -------------------------------------------------------------------------
 

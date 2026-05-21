@@ -506,6 +506,14 @@ async def run_stream_loop(
                         else finalized_tool_calls
                     )
 
+                    # Terminal-tool флаг: если в этом раунде tool вернул
+                    # client_action / blocks_list / buttons — контент уже
+                    # отправлен пользователю, и второй LLM-вызов сгенерит
+                    # вредную «сводку» (англоязычные хвосты на «Что ты
+                    # умеешь?»). После цикла по tcs_this_round мы break'аем
+                    # из while и сразу сохраняем accumulated emitted_blocks.
+                    tool_was_terminal = False
+
                     for tc in tcs_this_round:
                         tool_name = tc.name
                         try:
@@ -664,6 +672,7 @@ async def run_stream_loop(
                             tool_result_for_llm = (
                                 f"<выполнено: {tool_name}>"
                             )
+                            tool_was_terminal = True
                         elif blocks_list is not None:
                             for raw_block in blocks_list:
                                 btype = raw_block.get("type", "text")
@@ -704,6 +713,7 @@ async def run_stream_loop(
                             tool_result_for_llm = (
                                 f"<выполнено: {tool_name}>"
                             )
+                            tool_was_terminal = True
                         elif buttons_block is not None:
                             # Группа кнопок — отдельный SSE-канал
                             translated = await orch._translate_buttons(
@@ -716,6 +726,7 @@ async def run_stream_loop(
                             tool_result_for_llm = (
                                 f"<выполнено: {tool_name}>"
                             )
+                            tool_was_terminal = True
                         else:
                             tool_result_for_llm = result
 
@@ -726,6 +737,13 @@ async def run_stream_loop(
                         })
 
                     rounds += 1
+                    if tool_was_terminal and not pending_tool_calls:
+                        # Tool уже выдал готовый контент пользователю — не
+                        # зовём LLM ещё раз, иначе она сгенерит «сводку»
+                        # (например, английский хвост к chat.list_pages).
+                        # full_answer остаётся пустым, save'ятся только
+                        # emitted_blocks.
+                        break
                     continue
 
                 # Финальный ответ (без tool calls)
@@ -781,6 +799,9 @@ async def run_stream_loop(
                     if is_gigachat
                     else raw_msg.tool_calls
                 )
+
+                # См. комментарий в streaming-ветке: terminal-tool флаг.
+                tool_was_terminal = False
 
                 for tc in tcs_this_round:
                     tool_name = tc.function.name
@@ -949,6 +970,7 @@ async def run_stream_loop(
                         tool_result_for_llm = (
                             f"<выполнено: {tool_name}>"
                         )
+                        tool_was_terminal = True
                     elif blocks_list is not None:
                         for raw_block in blocks_list:
                             btype = raw_block.get("type", "text")
@@ -989,6 +1011,7 @@ async def run_stream_loop(
                         tool_result_for_llm = (
                             f"<выполнено: {tool_name}>"
                         )
+                        tool_was_terminal = True
                     elif buttons_block is not None:
                         translated = await orch._translate_buttons(
                             buttons_block.get("buttons", []),
@@ -1000,6 +1023,7 @@ async def run_stream_loop(
                         tool_result_for_llm = (
                             f"<выполнено: {tool_name}>"
                         )
+                        tool_was_terminal = True
                     else:
                         tool_result_for_llm = result
 
@@ -1010,6 +1034,10 @@ async def run_stream_loop(
                     })
 
                 rounds += 1
+                if tool_was_terminal and not pending_tool_calls:
+                    # См. комментарий в streaming-ветке: не зовём LLM,
+                    # чтобы избежать «сводки» поверх готового контента.
+                    break
                 continue
 
             # Финальный текстовый ответ (non-streaming)
