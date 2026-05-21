@@ -923,3 +923,121 @@ class TestGetMessagesStatus:
         assert streaming["role"] == "assistant"
         assert len(streaming["content"]) == 1
         assert streaming["content"][0]["block_id"] == "r1"
+
+
+# -------------------------------------------------------------------------
+# GET /api/v1/chat/conversations/{id}/messages — multi-chat switching
+# -------------------------------------------------------------------------
+
+
+class TestMultiChatSwitchingStreamingState:
+    """Phase 4 «D»: воспроизведение бага, ради которого делали рефактор.
+
+    Сценарий: открыты ДВЕ беседы (A, B) с активными forward'ами; reasoning-блоки
+    лежат в ``chat_messages.content`` со ``status='streaming'``. Переключение
+    между чатами не теряет накопленный state, потому что фронт получает блоки
+    через GET /messages, а не из SSE-курсора. После прихода нового reasoning'а
+    в A повторный GET возвращает обновлённый список.
+
+    До рефактора (Variant D) фронт держал глобальный ``_lastReasoningSeq``,
+    который мог дать seq-перекос между разными forward'ами — после switch'а
+    Resume SSE открывался с неверным курсором и UI терял рассуждения. Теперь
+    GET /messages — единственный источник истины для streaming-state.
+    """
+
+    def test_two_active_streaming_messages_visible_via_get_messages(self):
+        """Каждая беседа отдаёт свой streaming-message со своими блоками."""
+        settings = _make_settings()
+        conv = _make_conv_service(settings)
+        now = dt.datetime(2026, 1, 1, 12, 0, 0)
+
+        # get(conv_id, user_id) — ownership-проверка перед GET /messages
+        async def fake_get(conv_id: str, user_id: str):
+            return {
+                "id": conv_id,
+                "user_id": user_id,
+                "title": f"Беседа {conv_id}",
+                "domain_name": None,
+                "context": None,
+                "created_at": now,
+                "updated_at": now,
+            }
+
+        conv.get = AsyncMock(side_effect=fake_get)
+
+        msg = _make_msg_service(settings)
+
+        # Имитируем БД-state: чат A — 2 reasoning'а, чат B — 1 reasoning.
+        state = {
+            "conv-A": [
+                {"type": "reasoning", "block_id": "a-r1", "content": "думаю об A.1"},
+                {"type": "reasoning", "block_id": "a-r2", "content": "думаю об A.2"},
+            ],
+            "conv-B": [
+                {"type": "reasoning", "block_id": "b-r1", "content": "думаю об B.1"},
+            ],
+        }
+
+        async def fake_get_history(conv_id: str, *_args, **_kwargs):
+            blocks = state.get(conv_id, [])
+            return [
+                {
+                    "id": f"msg-{conv_id}",
+                    "conversation_id": conv_id,
+                    "role": "assistant",
+                    "content": list(blocks),  # копия — иначе тест зависит от mutation
+                    "model": "gpt-4",
+                    "token_usage": None,
+                    "status": "streaming",
+                    "created_at": now,
+                },
+            ]
+
+        msg.get_history = AsyncMock(side_effect=fake_get_history)
+
+        app = _build_app(
+            conv_service=conv,
+            msg_service=msg,
+            file_service=_make_file_service(settings),
+        )
+
+        with TestClient(app) as client:
+            # 1. GET для A — 2 reasoning-блока, status='streaming'
+            resp_a = client.get("/api/v1/chat/conversations/conv-A/messages")
+            assert resp_a.status_code == 200, resp_a.text
+            items_a = resp_a.json()
+            assert len(items_a) == 1
+            assert items_a[0]["status"] == "streaming"
+            assert [b["block_id"] for b in items_a[0]["content"]] == ["a-r1", "a-r2"]
+
+            # 2. GET для B — 1 reasoning-блок, status='streaming'
+            resp_b = client.get("/api/v1/chat/conversations/conv-B/messages")
+            assert resp_b.status_code == 200, resp_b.text
+            items_b = resp_b.json()
+            assert len(items_b) == 1
+            assert items_b[0]["status"] == "streaming"
+            assert [b["block_id"] for b in items_b[0]["content"]] == ["b-r1"]
+
+            # 3. Симулируем добавление нового reasoning'а в A (как сделал бы
+            #    runner через MessageRepository.append_block в БД).
+            state["conv-A"].append(
+                {"type": "reasoning", "block_id": "a-r3", "content": "думаю об A.3"},
+            )
+
+            # 4. Повторный GET для A — теперь 3 блока. **Это ядро теста**:
+            #    до рефактора фронт зависел от seq-курсора в SSE и не
+            #    переиспользовал GET /messages как источник правды.
+            resp_a2 = client.get("/api/v1/chat/conversations/conv-A/messages")
+            assert resp_a2.status_code == 200, resp_a2.text
+            items_a2 = resp_a2.json()
+            assert len(items_a2) == 1
+            assert items_a2[0]["status"] == "streaming"
+            assert [b["block_id"] for b in items_a2[0]["content"]] == [
+                "a-r1", "a-r2", "a-r3",
+            ]
+
+            # 5. GET для B не изменился — изоляция чатов сохраняется.
+            resp_b2 = client.get("/api/v1/chat/conversations/conv-B/messages")
+            assert resp_b2.status_code == 200, resp_b2.text
+            items_b2 = resp_b2.json()
+            assert [b["block_id"] for b in items_b2[0]["content"]] == ["b-r1"]
