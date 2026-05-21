@@ -209,6 +209,13 @@ async def stream_forward_events(
             # БД-коннект освобождён. Теперь — yield-им то, что собрали.
             for ev in events_to_emit:
                 et = ev["event_type"]
+                if et == "final":
+                    # Служебный маркер от внешнего агента: agent_responses
+                    # уже записан той же транзакцией. Не рендерим как
+                    # отдельный блок — финальный response эмитится ниже
+                    # через emit_response_blocks. Игнор симметричен с
+                    # event_type='status'.
+                    continue
                 if et == "reasoning":
                     chunk_text = (ev["payload"] or {}).get("text", "")
                     if not chunk_text:

@@ -600,3 +600,358 @@ async def test_shutdown_running_cancels_and_waits():
     assert agent_bridge_runner._running == {}
 
 
+# ── _wait_via_coordinator: A+D — push 'final' event + fallback poll ──
+
+
+def _make_coord_with_events(events: list[dict]):
+    """Возвращает (coordinator, queue) с предзаряженными событиями."""
+    from app.domains.chat.services.poll_coordinator import PollCoordinator
+
+    queue: asyncio.Queue = asyncio.Queue()
+    for ev in events:
+        queue.put_nowait(ev)
+    coordinator = MagicMock(spec=PollCoordinator)
+    coordinator.subscribe = AsyncMock(return_value=queue)
+    coordinator.unsubscribe = AsyncMock()
+    return coordinator, queue
+
+
+def _request_row(rid: str = "rid-X", message_id: str = "msg-1"):
+    return {
+        "id": rid,
+        "conversation_id": "conv-1",
+        "message_id": message_id,
+        "user_id": "u",
+        "status": "pending",
+        "version": 1,
+    }
+
+
+def _patch_runner_deps(*, mock_conn, fake_req_repo, save_mock, poll_response_fn):
+    """Возвращает контекст-менеджер с patch'ами для _run.
+
+    poll_response_fn — async-функция (self, request_id) → dict | None.
+    """
+    from contextlib import ExitStack
+    fake_adapter = MagicMock(get_table_name=lambda n: n)
+    stack = ExitStack()
+    stack.enter_context(
+        patch("app.db.connection.get_db", _fake_get_db_ctx(mock_conn)),
+    )
+    stack.enter_context(
+        patch(
+            "app.db.repositories.base.get_adapter",
+            return_value=fake_adapter,
+        ),
+    )
+    stack.enter_context(
+        patch(
+            "app.domains.chat.repositories.agent_request_repository."
+            "AgentRequestRepository",
+            return_value=fake_req_repo,
+        ),
+    )
+    stack.enter_context(
+        patch(
+            "app.domains.chat.services.agent_bridge."
+            "AgentBridgeService.poll_response",
+            poll_response_fn,
+        ),
+    )
+    stack.enter_context(
+        patch(
+            "app.domains.chat.services.message_service."
+            "MessageService.save_assistant_message",
+            save_mock,
+        ),
+    )
+    return stack
+
+
+async def test_final_event_triggers_immediate_save():
+    """Фикс D (primary push): 'final' event в очереди координатора →
+    runner сразу делает poll_response и сохраняет ассистент-сообщение,
+    не дожидаясь срабатывания event_timeout.
+
+    Сценарий: reasoning → 'final' → save с правильным content.
+    """
+    mock_conn = AsyncMock()
+    mock_conn.transaction = MagicMock(return_value=AsyncMock())
+
+    fake_req_repo = MagicMock()
+    fake_req_repo.get = AsyncMock(return_value=_request_row("rid-final"))
+    fake_req_repo.update_status = AsyncMock(side_effect=[2, 3])
+    fake_req_repo.finalize = AsyncMock(return_value=True)
+
+    coordinator, _ = _make_coord_with_events([
+        {
+            "id": 1, "seq": 1, "event_type": "reasoning",
+            "payload": {"text": "Думаю..."},
+        },
+        {
+            "id": 2, "seq": 2, "event_type": "final",
+            "payload": {},
+        },
+    ])
+
+    final_response = {
+        "blocks": [{"type": "text", "content": "Ответ"}],
+        "token_usage": {"in": 10, "out": 5},
+    }
+    poll_calls: list[str] = []
+
+    async def fake_poll(self, rid):  # noqa: ARG001
+        poll_calls.append(rid)
+        return final_response
+
+    save_mock = AsyncMock()
+
+    settings = _settings()
+    # event_timeout специально большой: если бы фикс не работал,
+    # runner ждал бы N секунд после reasoning'а до проверки response.
+    settings.agent_bridge.event_timeout_sec = 60
+
+    with _patch_runner_deps(
+        mock_conn=mock_conn,
+        fake_req_repo=fake_req_repo,
+        save_mock=save_mock,
+        poll_response_fn=fake_poll,
+    ):
+        await asyncio.wait_for(
+            agent_bridge_runner._run(
+                "rid-final",
+                settings=settings,
+                coordinator=coordinator,
+            ),
+            timeout=2.0,  # реальный timeout теста — не event_timeout
+        )
+
+    # save был вызван один раз с reasoning + text от final response.
+    save_mock.assert_called_once()
+    content = save_mock.call_args.kwargs["content"]
+    assert content == [
+        {
+            "type": "reasoning",
+            "content": "Думаю...",
+            "block_id": "msg-1:reasoning:1",
+        },
+        {"type": "text", "content": "Ответ"},
+    ]
+    # 'final' event сам по себе НЕ попал в blocks (служебный маркер).
+    assert all(b.get("type") != "final" for b in content)
+    # poll_response был вызван — runner среагировал на 'final'.
+    assert len(poll_calls) >= 1
+
+
+async def test_fallback_poll_picks_response_without_final_event():
+    """Фикс A (fallback poll): если 'final' event не пришёл (старая
+    версия агента, ошибка записи и т.п.), runner всё равно подхватывает
+    response через периодический poll_response — в пределах нескольких
+    poll_interval-тиков, НЕ event_timeout.
+
+    Сценарий: reasoning → тишина в queue, poll_response сначала None,
+    потом response → save быстро.
+    """
+    mock_conn = AsyncMock()
+    mock_conn.transaction = MagicMock(return_value=AsyncMock())
+
+    fake_req_repo = MagicMock()
+    fake_req_repo.get = AsyncMock(return_value=_request_row("rid-fallback"))
+    fake_req_repo.update_status = AsyncMock(side_effect=[2, 3])
+    fake_req_repo.finalize = AsyncMock(return_value=True)
+
+    coordinator, _ = _make_coord_with_events([
+        {
+            "id": 1, "seq": 1, "event_type": "reasoning",
+            "payload": {"text": "Размышляю"},
+        },
+    ])
+
+    final_response = {
+        "blocks": [{"type": "text", "content": "Готово"}],
+        "token_usage": {},
+    }
+    poll_calls = [0]
+
+    async def fake_poll(self, _rid):  # noqa: ARG001
+        poll_calls[0] += 1
+        # Первые 2 вызова — None (response ещё не записан),
+        # затем — final_response.
+        if poll_calls[0] < 3:
+            return None
+        return final_response
+
+    save_mock = AsyncMock()
+
+    settings = _settings()
+    settings.agent_bridge.poll_min_interval_sec = 0.01
+    # event_timeout большой — если бы fallback не работал, тест бы упал
+    # на wait_for(timeout=2.0).
+    settings.agent_bridge.event_timeout_sec = 60
+
+    with _patch_runner_deps(
+        mock_conn=mock_conn,
+        fake_req_repo=fake_req_repo,
+        save_mock=save_mock,
+        poll_response_fn=fake_poll,
+    ):
+        await asyncio.wait_for(
+            agent_bridge_runner._run(
+                "rid-fallback",
+                settings=settings,
+                coordinator=coordinator,
+            ),
+            timeout=2.0,
+        )
+
+    # save с собранными blocks.
+    save_mock.assert_called_once()
+    content = save_mock.call_args.kwargs["content"]
+    assert content == [
+        {
+            "type": "reasoning",
+            "content": "Размышляю",
+            "block_id": "msg-1:reasoning:1",
+        },
+        {"type": "text", "content": "Готово"},
+    ]
+    # poll_response вызван несколько раз (fallback работает).
+    assert poll_calls[0] >= 3
+
+
+async def test_final_event_with_unwritten_response_continues_polling():
+    """Race: 'final' event приходит, но agent_responses ещё не виден
+    (репликация / snapshot isolation). Runner должен continue в цикл
+    и подхватить response на следующем тике через fallback poll.
+    """
+    mock_conn = AsyncMock()
+    mock_conn.transaction = MagicMock(return_value=AsyncMock())
+
+    fake_req_repo = MagicMock()
+    fake_req_repo.get = AsyncMock(return_value=_request_row("rid-race"))
+    fake_req_repo.update_status = AsyncMock(side_effect=[2, 3])
+    fake_req_repo.finalize = AsyncMock(return_value=True)
+
+    coordinator, _ = _make_coord_with_events([
+        {
+            "id": 1, "seq": 1, "event_type": "final",
+            "payload": {},
+        },
+    ])
+
+    final_response = {
+        "blocks": [{"type": "text", "content": "Ответ после race"}],
+        "token_usage": {},
+    }
+    call_counter = [0]
+
+    async def fake_poll(self, _rid):  # noqa: ARG001
+        call_counter[0] += 1
+        # Первый вызов (сразу после 'final') — None.
+        # Последующие вызовы (fallback poll) — response.
+        if call_counter[0] == 1:
+            return None
+        return final_response
+
+    save_mock = AsyncMock()
+    settings = _settings()
+    settings.agent_bridge.poll_min_interval_sec = 0.01
+    settings.agent_bridge.event_timeout_sec = 60
+
+    with _patch_runner_deps(
+        mock_conn=mock_conn,
+        fake_req_repo=fake_req_repo,
+        save_mock=save_mock,
+        poll_response_fn=fake_poll,
+    ):
+        await asyncio.wait_for(
+            agent_bridge_runner._run(
+                "rid-race",
+                settings=settings,
+                coordinator=coordinator,
+            ),
+            timeout=2.0,
+        )
+
+    # save сделан — runner не упал на гонке.
+    save_mock.assert_called_once()
+    content = save_mock.call_args.kwargs["content"]
+    # reasoning'а в blocks нет — был только 'final', который НЕ блок.
+    assert content == [{"type": "text", "content": "Ответ после race"}]
+    # Минимум 2 вызова poll_response: после 'final' и из fallback poll.
+    assert call_counter[0] >= 2
+
+
+async def test_no_save_delay_after_last_event():
+    """Регрессия описанного бага: между последним reasoning-событием и
+    save'ом ассистент-сообщения проходит ≪ event_timeout_sec.
+
+    До фикса A: после последнего события runner спал в queue.get() до
+    срабатывания event_timeout (например, 110 сек) и только потом
+    проверял response → save откладывался на ~event_timeout.
+    После фикса A: wait_for ограничен poll_interval, response
+    опрашивается каждый тик → save идёт за ≤ N×poll_interval.
+    """
+    mock_conn = AsyncMock()
+    mock_conn.transaction = MagicMock(return_value=AsyncMock())
+
+    fake_req_repo = MagicMock()
+    fake_req_repo.get = AsyncMock(return_value=_request_row("rid-delay"))
+    fake_req_repo.update_status = AsyncMock(side_effect=[2, 3])
+    fake_req_repo.finalize = AsyncMock(return_value=True)
+
+    coordinator, queue_ref = _make_coord_with_events([
+        {
+            "id": 1, "seq": 1, "event_type": "reasoning",
+            "payload": {"text": "Один"},
+        },
+    ])
+
+    response_available_at: list[float] = []
+    response_picked_up_at: list[float] = []
+    final_response = {
+        "blocks": [{"type": "text", "content": "End"}],
+        "token_usage": {},
+    }
+
+    async def fake_poll(self, _rid):  # noqa: ARG001
+        now = asyncio.get_event_loop().time()
+        # Делаем response доступным через короткое время после старта.
+        if not response_available_at:
+            response_available_at.append(now)
+            return None
+        response_picked_up_at.append(now)
+        return final_response
+
+    save_mock = AsyncMock()
+    settings = _settings()
+    settings.agent_bridge.poll_min_interval_sec = 0.02
+    # КЛЮЧЕВОЕ: event_timeout большой. Если фикс не работает, save
+    # произойдёт через ~event_timeout секунд после reasoning'а, и
+    # asyncio.wait_for ниже упадёт с TimeoutError.
+    settings.agent_bridge.event_timeout_sec = 10
+
+    with _patch_runner_deps(
+        mock_conn=mock_conn,
+        fake_req_repo=fake_req_repo,
+        save_mock=save_mock,
+        poll_response_fn=fake_poll,
+    ):
+        await asyncio.wait_for(
+            agent_bridge_runner._run(
+                "rid-delay",
+                settings=settings,
+                coordinator=coordinator,
+            ),
+            timeout=1.0,  # сильно меньше event_timeout
+        )
+
+    save_mock.assert_called_once()
+    # Реакция уложилась в несколько poll_interval, не в event_timeout.
+    assert response_available_at and response_picked_up_at
+    reaction_delay = response_picked_up_at[0] - response_available_at[0]
+    assert reaction_delay < 1.0, (
+        f"save отложился на {reaction_delay:.3f}s — больше разумного "
+        f"числа poll_interval (= {settings.agent_bridge.poll_min_interval_sec}s)"
+    )
+

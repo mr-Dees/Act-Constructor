@@ -454,14 +454,25 @@ async def _wait_via_coordinator(
     финальный response, эмулируя контракт ``wait_for_completion``.
 
     Между ``await queue.get()`` и точечными ``async with get_db()`` для
-    poll_response/update_status pool-коннект НЕ удерживается. Это и
-    отличает coordinator-путь от fallback'а — runner отдаёт коннект в
-    пул на всё время ожидания событий.
+    poll_response/update_status pool-коннект НЕ удерживается.
 
-    События берутся из ``asyncio.Queue`` подписки, response — отдельным
-    SELECT после каждой пачки событий и периодически по таймауту. Гейты
-    таймаута (initial / heartbeat / total) считаются здесь так же, как в
-    ``AgentBridgeService.wait_for_completion``.
+    Реакция на финальный response — двухслойная:
+
+    1. **Primary (push)** — внешний агент после INSERT в ``agent_responses``
+       вставляет событие ``event_type='final'`` в ``agent_response_events``
+       (той же транзакцией). Координатор доставляет это событие в queue,
+       runner мгновенно зовёт ``poll_response`` и завершает Phase 2.
+    2. **Fallback (poll)** — раз в ``poll_min_interval_sec`` секунд runner
+       вызывает ``poll_response`` независимо от того, пришло событие или
+       нет. Если 'final' event потерян (старая версия агента, ошибка
+       записи) — fallback подхватит response за один-два тика.
+
+    ``wait_for`` ограничен сверху ``poll_min_interval_sec``: длинные сны
+    между событиями недопустимы, иначе после последнего reasoning'а до
+    срабатывания event_timeout-гейта runner не видел бы готовый
+    ``agent_responses`` и save ассистент-сообщения откладывался бы на
+    десятки секунд. Гейты initial/event/total проверяются по
+    накопленному ``elapsed`` в начале каждой итерации.
     """
     from app.domains.chat.services.agent_bridge import (
         AgentBridgeTimeout,
@@ -476,13 +487,13 @@ async def _wait_via_coordinator(
         initial_timeout = settings.agent_bridge.initial_response_timeout_sec
         event_timeout = settings.agent_bridge.event_timeout_sec
         max_total = settings.agent_bridge.max_total_duration_sec
+        poll_interval = settings.agent_bridge.poll_min_interval_sec
 
         while True:
-            # Допустимое время до следующего события — минимум среди всех
-            # гейтов, чтобы asyncio.wait_for() прервал ожидание ровно
-            # тогда, когда сработает гейт.
             now = loop.time()
             elapsed = now - started_at
+
+            # ── Гейты на накопленном elapsed ──
             if elapsed > max_total:
                 await _mark_timeout(
                     request_id,
@@ -492,58 +503,66 @@ async def _wait_via_coordinator(
                 raise AgentBridgeTimeout(
                     f"max total duration {max_total}s exceeded",
                 )
-            if last_event_at is None:
-                remaining = initial_timeout - elapsed
-            else:
-                remaining = event_timeout - (now - last_event_at)
+            if last_event_at is None and elapsed > initial_timeout:
+                await _mark_timeout(
+                    request_id,
+                    f"агент не начал отвечать за {initial_timeout}с",
+                )
+                raise AgentBridgeTimeout(
+                    f"no initial response within {initial_timeout}s",
+                )
+            if (
+                last_event_at is not None
+                and (now - last_event_at) > event_timeout
+            ):
+                await _mark_timeout(
+                    request_id,
+                    f"нет событий от агента {event_timeout}с "
+                    f"(heartbeat потерян)",
+                )
+                raise AgentBridgeTimeout(
+                    f"heartbeat lost — no event for {event_timeout}s",
+                )
+
+            # ── Короткий wait_for: poll_interval, обрезанный гейтами ──
+            time_to_gate = (
+                initial_timeout - elapsed
+                if last_event_at is None
+                else event_timeout - (now - last_event_at)
+            )
             total_remaining = max_total - elapsed
-            wait_for = max(0.0, min(remaining, total_remaining))
+            wait_for = max(
+                0.0, min(poll_interval, time_to_gate, total_remaining),
+            )
 
             try:
                 ev = await asyncio.wait_for(queue.get(), timeout=wait_for)
+                last_event_at = loop.time()
+                et = ev.get("event_type")
+                if et == "final":
+                    # Служебный маркер: agent_responses записан той же
+                    # транзакцией. Не эмитим наружу — финальный response
+                    # пойдёт отдельным AgentBridgeUpdate(response=...).
+                    response = await _poll_response_short_conn(request_id)
+                    if response is not None:
+                        # Статус 'done' выставляется ТОЛЬКО в
+                        # req_repo.finalize(...) в одной транзакции с
+                        # save_assistant_message — иначе version
+                        # инкрементится и finalize падает с OptimisticLockFailed.
+                        yield AgentBridgeUpdate(response=response)
+                        return
+                    # Гонка: 'final' пришёл, но agent_responses ещё не
+                    # видно (репликация, snapshot isolation). Fallback
+                    # poll ниже подхватит на следующем тике.
+                    continue
+                yield AgentBridgeUpdate(event=ev)
             except asyncio.TimeoutError:
-                # Сработал гейт — определяем какой именно.
-                now2 = loop.time()
-                if last_event_at is None and now2 - started_at > initial_timeout:
-                    await _mark_timeout(
-                        request_id,
-                        f"агент не начал отвечать за {initial_timeout}с",
-                    )
-                    raise AgentBridgeTimeout(
-                        f"no initial response within {initial_timeout}s",
-                    )
-                if (
-                    last_event_at is not None
-                    and now2 - last_event_at > event_timeout
-                ):
-                    await _mark_timeout(
-                        request_id,
-                        f"нет событий от агента {event_timeout}с "
-                        f"(heartbeat потерян)",
-                    )
-                    raise AgentBridgeTimeout(
-                        f"heartbeat lost — no event for {event_timeout}s",
-                    )
-                # Иначе проверим финальный response (короткий conn).
-                response = await _poll_response_short_conn(request_id)
-                if response is not None:
-                    # Статус 'done' выставляется ТОЛЬКО внутри
-                    # req_repo.finalize(...) в той же транзакции, что и
-                    # save_assistant_message. Если поставить done здесь —
-                    # инкрементится version и finalize упадёт с
-                    # OptimisticLockFailed, ассистент-сообщение не сохранится.
-                    yield AgentBridgeUpdate(response=response)
-                    return
-                continue
+                # Тик без события — нормально; ниже сделаем fallback poll.
+                pass
 
-            last_event_at = loop.time()
-            yield AgentBridgeUpdate(event=ev)
-
-            # После каждого события проверяем, не появился ли финальный
-            # response (агент дописал в agent_responses).
+            # ── Fallback poll: каждый тик опрашиваем agent_responses ──
             response = await _poll_response_short_conn(request_id)
             if response is not None:
-                # См. коммент выше: 'done' ставит только finalize().
                 yield AgentBridgeUpdate(response=response)
                 return
     finally:

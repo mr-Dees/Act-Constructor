@@ -67,6 +67,40 @@
   ```
 - Ожидаемо: стрим возобновляется, видны накопленные events + финал.
 
+### 7a. Регрессия: задержка save после финала
+Сценарий проверяет, что ассистент-сообщение появляется в БД сразу после
+получения финального ответа от агента — не через `event_timeout` секунд
+после последнего reasoning-события. До фикса runner спал в `queue.get()`
+до срабатывания таймаута, и при reload в этом окне история была пустой.
+
+- Forward'нуть вопрос («Расскажи про регламент 2024 года»).
+- В DBeaver выполнить §1 из `external-agent-imitation.sql`:
+  reasoning-события, затем **одна транзакция** INSERT в `agent_responses`
+  + INSERT `event_type='final'` в `agent_response_events` (см. шаг 1.4
+  имитации).
+- **Сразу после COMMIT** проверить:
+  ```sql
+  SELECT created_at, role, jsonb_array_length(content) AS blocks
+  FROM t_db_oarb_audit_act_chat_messages
+  WHERE conversation_id = '<id>' AND role = 'assistant'
+  ORDER BY created_at DESC LIMIT 1;
+  ```
+  Ассистент-сообщение должно появиться в течение ≤ 2 секунд после
+  COMMIT'а (а не через `event_timeout` секунд).
+- Реload страницы сразу же — ответ должен быть виден в истории.
+
+### 7b. Fallback poll без 'final'-события
+Эмулирует старую версию агента, не вставляющую `event_type='final'`.
+Проверяет, что runner всё равно подхватывает финал через периодический
+`poll_response` (защита от потери push-сигнала).
+
+- Forward'нуть вопрос.
+- Имитировать reasoning + INSERT в `agent_responses` **БЕЗ** INSERT
+  'final' (закомментировать вторую часть транзакции в §1.4).
+- Ассистент-сообщение должно появиться в течение ≤ `poll_min_interval_sec`
+  × N тиков (≤ 5 секунд при дефолтных настройках), а не через
+  `event_timeout`.
+
 ### 8. Profile-switch на SGLang
 - Сменить `.env` на профиль `sglang` (внутренний адрес), перезапустить.
 - Повторить сценарии 1–4.
