@@ -149,6 +149,10 @@ CREATE INDEX idx_{PREFIX}agent_requests_parent_request_id
     ON {SCHEMA}.{PREFIX}agent_requests(parent_request_id);
 
 -- Append-only лента событий от агента.
+-- UNIQUE(request_id, seq) защищает от сетевого retry внешнего агента:
+-- если он повторно INSERT-нёт событие с тем же seq, СУБД отвергнет дубль,
+-- polling не размножит его на фронт двойным reasoning-блоком. GP-требование
+-- (DISTRIBUTED BY ⊆ UNIQUE) соблюдено: request_id входит в (request_id, seq).
 CREATE TABLE IF NOT EXISTS {SCHEMA}.{PREFIX}agent_response_events (
     id            BIGINT NOT NULL
                   DEFAULT nextval('{SCHEMA}.{PREFIX}agent_response_events_id_seq'),
@@ -159,14 +163,17 @@ CREATE TABLE IF NOT EXISTS {SCHEMA}.{PREFIX}agent_response_events (
                   CHECK (event_type IN ('reasoning','status','error')),
     payload       JSONB NOT NULL,
     created_at    TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    -- GP-требование: DISTRIBUTED BY должен быть подмножеством PK.
-    PRIMARY KEY (id, request_id)
+    -- GP-требование: DISTRIBUTED BY должен быть подмножеством PK и UNIQUE.
+    PRIMARY KEY (id, request_id),
+    UNIQUE (request_id, seq)
 )
 WITH (appendonly=false)
 DISTRIBUTED BY (request_id);
 
-CREATE INDEX idx_{PREFIX}agent_response_events_request
-    ON {SCHEMA}.{PREFIX}agent_response_events(request_id, id);
+-- Индекс под polling-запрос: WHERE request_id = $1 AND seq > $2 ORDER BY seq.
+-- Был (request_id, id) — фильтр по seq шёл в памяти после index scan.
+-- UNIQUE-констрейнт выше сам создаёт btree-индекс на (request_id, seq),
+-- так что отдельный CREATE INDEX больше не нужен.
 
 -- Финальный ответ агента (однократный INSERT, stop-сигнал).
 CREATE TABLE IF NOT EXISTS {SCHEMA}.{PREFIX}agent_responses (

@@ -228,12 +228,19 @@ class TestGreenplumSchemaCompatibility:
 
         # Все индексы используют idx_{PREFIX}*.
         # idx_{PREFIX}agent_responses_request не нужен: UNIQUE(request_id) уже создаёт индекс.
+        # idx_{PREFIX}agent_response_events_request тоже больше не нужен:
+        # UNIQUE(request_id, seq) сам создаёт нужный btree-индекс.
         for idx_name in (
             "idx_{PREFIX}agent_requests_status_created",
             "idx_{PREFIX}agent_requests_message",
-            "idx_{PREFIX}agent_response_events_request",
         ):
             assert idx_name in content, f"Индекс {idx_name} не найден в GP-схеме"
+
+        # UNIQUE(request_id, seq) на agent_response_events — гарантия от дублей
+        # при сетевом retry внешнего агента.
+        assert "UNIQUE (request_id, seq)" in content, (
+            "UNIQUE(request_id, seq) на agent_response_events не найден в GP-схеме"
+        )
 
 
 # ---------------------------------------------------------------------------
