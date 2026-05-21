@@ -23,12 +23,14 @@ def _coordinator(
     poll_min_interval_sec: float = 0.01,
     poll_max_interval_sec: float = 0.05,
     poll_backoff_multiplier: float = 2.0,
+    watchdog_stale_factor: float = 3.0,
 ) -> PollCoordinator:
     return PollCoordinator(
         poll_batch_fn=poll_batch_fn,
         poll_min_interval_sec=poll_min_interval_sec,
         poll_max_interval_sec=poll_max_interval_sec,
         poll_backoff_multiplier=poll_backoff_multiplier,
+        watchdog_stale_factor=watchdog_stale_factor,
     )
 
 
@@ -251,6 +253,89 @@ async def test_event_advances_since_seq_cursor():
     await asyncio.sleep(0.05)
     await pc.stop()
     assert pc._since_seqs.get("r1") == 10
+
+
+async def test_watchdog_restarts_dead_poll_loop():
+    """Watchdog перезапускает _poll_loop, если он завершился (task.done)."""
+    async def empty_poll(rids):
+        return {r: [] for r in rids}
+
+    pc = _coordinator(
+        empty_poll,
+        poll_min_interval_sec=0.01,
+        poll_max_interval_sec=0.03,  # watchdog тикает каждые 30мс
+        watchdog_stale_factor=2.0,
+    )
+    await pc.subscribe("r1")
+    await pc.start()
+    original_task = pc._task
+
+    # Принудительно убиваем _poll_loop — watchdog должен заметить и
+    # рестартануть.
+    assert original_task is not None
+    original_task.cancel()
+    try:
+        await original_task
+    except asyncio.CancelledError:
+        pass
+
+    # Ждём, пока watchdog заметит task.done() и сделает рестарт.
+    # Watchdog тикает каждые 30мс — двух тиков с запасом достаточно.
+    for _ in range(20):
+        if pc._restart_count > 0:
+            break
+        await asyncio.sleep(0.02)
+
+    assert pc._restart_count >= 1, (
+        f"watchdog не рестартовал мёртвый task за 400мс "
+        f"(restart_count={pc._restart_count})"
+    )
+    assert pc._task is not None and not pc._task.done(), (
+        "после рестарта _task должен быть жив"
+    )
+    # Подписчик должен сохраниться — рестарт не теряет подписки.
+    assert "r1" in pc._subscribers
+
+    await pc.stop()
+
+
+async def test_watchdog_does_not_restart_healthy_loop():
+    """Watchdog НЕ рестартует _poll_loop, если heartbeat свежий."""
+    async def empty_poll(rids):
+        return {r: [] for r in rids}
+
+    pc = _coordinator(
+        empty_poll,
+        poll_min_interval_sec=0.005,
+        poll_max_interval_sec=0.02,
+        watchdog_stale_factor=3.0,  # threshold = 60мс
+    )
+    await pc.subscribe("r1")
+    await pc.start()
+
+    # Цикл крутится, heartbeat обновляется. За 100мс watchdog не должен
+    # сработать.
+    await asyncio.sleep(0.1)
+
+    assert pc._restart_count == 0, (
+        f"watchdog ложно рестартовал живой цикл (restart_count={pc._restart_count})"
+    )
+    await pc.stop()
+
+
+async def test_watchdog_validates_stale_factor():
+    """watchdog_stale_factor < 1.5 — конструктор отказывает."""
+    async def empty_poll(rids):
+        return {}
+
+    with pytest.raises(ValueError, match="watchdog_stale_factor"):
+        PollCoordinator(
+            poll_batch_fn=empty_poll,
+            poll_min_interval_sec=1.0,
+            poll_max_interval_sec=10.0,
+            poll_backoff_multiplier=2.0,
+            watchdog_stale_factor=1.0,
+        )
 
 
 async def test_unsubscribed_during_poll_does_not_crash():

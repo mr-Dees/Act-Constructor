@@ -57,6 +57,7 @@ class PollCoordinator:
         poll_min_interval_sec: float = 1.0,
         poll_max_interval_sec: float = 10.0,
         poll_backoff_multiplier: float = 1.5,
+        watchdog_stale_factor: float = 3.0,
     ) -> None:
         if poll_max_interval_sec < poll_min_interval_sec:
             raise ValueError(
@@ -66,16 +67,31 @@ class PollCoordinator:
             raise ValueError(
                 "poll_backoff_multiplier должен быть > 1.0",
             )
+        if watchdog_stale_factor < 1.5:
+            raise ValueError(
+                "watchdog_stale_factor должен быть >= 1.5 — иначе watchdog "
+                "будет рестартовать координатор от естественных пауз backoff'а",
+            )
         self._poll_batch_fn = poll_batch_fn
         self._poll_min_interval_sec = poll_min_interval_sec
         self._poll_max_interval_sec = poll_max_interval_sec
         self._backoff_multiplier = poll_backoff_multiplier
+        self._watchdog_stale_factor = watchdog_stale_factor
 
         self._subscribers: dict[str, asyncio.Queue] = {}
         self._since_seqs: dict[str, int | None] = {}
         self._lock = asyncio.Lock()
         self._stop_event = asyncio.Event()
         self._task: asyncio.Task | None = None
+        # Heartbeat-метка: monotonic timestamp последнего успешного тика
+        # `_poll_loop`. Используется watchdog'ом для детекции зависшего
+        # цикла (например, при сетевом обрыве к GP внутри
+        # `_poll_batch_fn`, который не даёт исключения, а просто висит).
+        self._last_tick_at: float | None = None
+        self._watchdog_task: asyncio.Task | None = None
+        # Счётчик перезапусков координатора watchdog'ом за весь run приложения.
+        # Полезен для мониторинга / алертинга.
+        self._restart_count: int = 0
 
     async def subscribe(self, request_id: str) -> asyncio.Queue:
         """Подписывает request_id и возвращает очередь событий.
@@ -107,22 +123,43 @@ class PollCoordinator:
             )
 
     async def start(self) -> None:
-        """Запускает фоновый цикл. Идемпотентно."""
+        """Запускает фоновый цикл и watchdog. Идемпотентно."""
         if self._task is not None and not self._task.done():
             return
         self._stop_event.clear()
+        # Инициализируем heartbeat до старта цикла — иначе watchdog мог бы
+        # сработать в первые секунды, ещё до того, как _poll_loop сделал
+        # первый тик.
+        self._last_tick_at = asyncio.get_event_loop().time()
         self._task = asyncio.create_task(
             self._poll_loop(), name="chat-poll-coordinator",
         )
+        self._watchdog_task = asyncio.create_task(
+            self._watchdog_loop(), name="chat-poll-coordinator-watchdog",
+        )
         logger.info(
-            "poll_coordinator: запущен (min=%.2fс, max=%.2fс, mult=%.2f)",
+            "poll_coordinator: запущен (min=%.2fс, max=%.2fс, mult=%.2f, "
+            "watchdog_threshold=%.1fс)",
             self._poll_min_interval_sec,
             self._poll_max_interval_sec,
             self._backoff_multiplier,
+            self._poll_max_interval_sec * self._watchdog_stale_factor,
         )
 
     async def stop(self) -> None:
-        """Останавливает фоновый цикл и ждёт его завершения."""
+        """Останавливает watchdog и фоновый цикл, ждёт их завершения.
+
+        Watchdog останавливается ПЕРВЫМ, иначе он мог бы рестартовать
+        основной цикл прямо в момент его cancel'а и оставить orphan-task.
+        """
+        if self._watchdog_task is not None:
+            self._watchdog_task.cancel()
+            try:
+                await self._watchdog_task
+            except (asyncio.CancelledError, Exception):
+                pass
+            self._watchdog_task = None
+
         if self._task is None:
             return
         self._stop_event.set()
@@ -144,6 +181,9 @@ class PollCoordinator:
         """Фоновый цикл: один SELECT на тик, exponential backoff между тиками."""
         interval = self._poll_min_interval_sec
         while not self._stop_event.is_set():
+            # Обновляем heartbeat в начале каждой итерации — watchdog
+            # увидит, что цикл жив, даже если в этом тике никаких событий.
+            self._last_tick_at = asyncio.get_event_loop().time()
             try:
                 async with self._lock:
                     active_ids = list(self._subscribers.keys())
@@ -198,3 +238,83 @@ class PollCoordinator:
             await asyncio.wait_for(self._stop_event.wait(), timeout=sec)
         except asyncio.TimeoutError:
             return
+
+    async def _watchdog_loop(self) -> None:
+        """Сторожевой цикл: рестартует ``_poll_loop`` если он завис.
+
+        Поведение:
+
+        * Проверяет heartbeat (``_last_tick_at``) раз в
+          ``_poll_max_interval_sec`` секунд.
+        * Если последний тик был более ``stale_threshold`` секунд назад —
+          координатор считается «зависшим»: cancel'аем старую задачу и
+          запускаем новую.
+        * stale_threshold = ``_poll_max_interval_sec * _watchdog_stale_factor``
+          (по умолчанию 30с = 10с × 3). Достаточный зазор, чтобы не
+          трогать естественные паузы backoff'а в режиме простоя.
+
+        Почему отдельная задача, а не просто try/except в ``_poll_loop``:
+        в цикле уже есть ``try/except Exception`` (он переживает любую
+        ошибку внутри ``_poll_batch_fn``). Но `await` может **зависнуть**
+        без исключения — например, если asyncpg-соединение прекратит
+        отвечать без обрыва TCP. Тут ``try/except`` не поможет, нужен
+        внешний наблюдатель с собственным таймером.
+        """
+        check_interval = self._poll_max_interval_sec
+        stale_threshold = (
+            self._poll_max_interval_sec * self._watchdog_stale_factor
+        )
+        loop = asyncio.get_event_loop()
+
+        while not self._stop_event.is_set():
+            try:
+                await asyncio.sleep(check_interval)
+            except asyncio.CancelledError:
+                return
+
+            if self._stop_event.is_set():
+                return
+            if self._task is None or self._task.done():
+                # _poll_loop завершился (исключением или вернулся). Сам
+                # цикл не возвращается без stop_event, так что это —
+                # аномалия. Перезапускаем.
+                logger.warning(
+                    "poll_coordinator watchdog: _poll_loop умер "
+                    "(task.done=%s) — рестарт",
+                    self._task is not None and self._task.done(),
+                )
+                self._restart_poll_loop()
+                continue
+
+            last_tick = self._last_tick_at
+            now = loop.time()
+            if last_tick is None or (now - last_tick) > stale_threshold:
+                logger.warning(
+                    "poll_coordinator watchdog: heartbeat устарел "
+                    "(%.1fс > %.1fс) — рестарт _poll_loop",
+                    (now - last_tick) if last_tick is not None else -1.0,
+                    stale_threshold,
+                )
+                self._restart_poll_loop()
+
+    def _restart_poll_loop(self) -> None:
+        """Cancel'ит зависший ``_poll_loop`` и запускает новый.
+
+        Подписчики и курсоры сохраняются — после рестарта новый цикл
+        продолжит polling тех же ``request_id`` с того же ``since_seqs``.
+        """
+        old_task = self._task
+        if old_task is not None and not old_task.done():
+            old_task.cancel()
+        # Сбрасываем heartbeat: новый цикл сам обновит при первом тике.
+        self._last_tick_at = asyncio.get_event_loop().time()
+        self._task = asyncio.create_task(
+            self._poll_loop(), name="chat-poll-coordinator",
+        )
+        self._restart_count += 1
+        logger.info(
+            "poll_coordinator: цикл перезапущен (всего рестартов=%d, "
+            "активных подписчиков=%d)",
+            self._restart_count,
+            len(self._subscribers),
+        )
