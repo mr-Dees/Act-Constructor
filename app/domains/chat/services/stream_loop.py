@@ -59,6 +59,51 @@ if TYPE_CHECKING:
 logger = logging.getLogger("audit_workstation.domains.chat.stream_loop")
 
 
+async def _save_error_assistant_if_needed(
+    orch: "Orchestrator",
+    *,
+    assistant_saved: bool,
+    conversation_id: str,
+    message_id: str,
+    emitted_blocks: list[dict],
+    full_answer: str,
+    code: str,
+) -> None:
+    """Сохраняет ErrorBlock как assistant-message при сбое стрима.
+
+    Если ассистент-message уже в БД (``assistant_saved=True``) — no-op:
+    частичный ответ дороже, чем ErrorBlock. Если нет — пишем то, что
+    успели накопить (``emitted_blocks`` + опционально ``full_answer``),
+    плюс ErrorBlock в конце. Так юзер при reload видит, что произошло,
+    а не висящий user-message без ответа.
+
+    Ошибка save'а проглатывается (защита от БД-сбоев — иначе на проде
+    каждый сбой LLM ронял бы ещё и логирование сбоя).
+    """
+    if assistant_saved:
+        return
+    error_message = "Временная ошибка AI-сервиса. Попробуйте позже."
+    content_blocks: list[dict] = list(emitted_blocks)
+    if full_answer:
+        content_blocks.append({"type": "text", "content": full_answer})
+    content_blocks.append({
+        "type": "error",
+        "message": error_message,
+        "code": code,
+    })
+    try:
+        await orch._save_assistant_message(
+            conversation_id=conversation_id,
+            content_blocks=content_blocks,
+            token_usage=None,
+            message_id=message_id,
+        )
+    except Exception:
+        logger.exception(
+            "Не удалось сохранить error-block ассистент-сообщения",
+        )
+
+
 async def run_stream_loop(
     orch: "Orchestrator",
     *,
@@ -139,6 +184,12 @@ async def run_stream_loop(
     # могли инкрементировать его in-place.
     ca_counter: list[int] = [0]
     emitted_blocks: list[dict] = []  # ClientActionBlock'и, эмитнутые до финала
+    # Флаг «ассистент-сообщение уже в БД». Ставится в True после успешного
+    # save'а в нормальном пути. В `except` ветке ниже мы используем его,
+    # чтобы НЕ перезаписывать сохранённый частичный ответ ErrorBlock'ом.
+    # Tool-loop-exit ветки (validation/loop) выходят через return и
+    # сюда не доходят — флаг им не нужен.
+    assistant_saved = False
     # GigaChat поддерживает только 1 function_call за раунд. Если LLM
     # вернул >1 tool_call, первый исполняем сейчас, остальные — в очередь.
     pending_tool_calls: list[Any] = []
@@ -995,6 +1046,7 @@ async def run_stream_loop(
                     token_usage=token_usage,
                     message_id=message_id,
                 )
+                assistant_saved = True
             except Exception:
                 logger.exception("Не удалось сохранить сообщение ассистента")
 
@@ -1009,9 +1061,27 @@ async def run_stream_loop(
             },
         )
         yield sse_error(error="Временная ошибка AI-сервиса. Попробуйте позже.")
+        await _save_error_assistant_if_needed(
+            orch,
+            assistant_saved=assistant_saved,
+            conversation_id=conversation_id,
+            message_id=message_id,
+            emitted_blocks=emitted_blocks,
+            full_answer=full_answer,
+            code="llm_unavailable",
+        )
     except Exception:
         logger.exception("Ошибка стримингового agent loop")
         yield sse_error(error="Временная ошибка AI-сервиса. Попробуйте позже.")
+        await _save_error_assistant_if_needed(
+            orch,
+            assistant_saved=assistant_saved,
+            conversation_id=conversation_id,
+            message_id=message_id,
+            emitted_blocks=emitted_blocks,
+            full_answer=full_answer,
+            code="stream_error",
+        )
 
     logger.info(
         "Оркестрация завершена: conversation=%s, длительность=%.2fс, "
