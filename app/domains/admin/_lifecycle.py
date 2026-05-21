@@ -88,6 +88,35 @@ def register_lifespan_hooks() -> None:
     register_startup_hook("admin.http_metrics_batcher", _start_http_metrics_batcher)
     register_shutdown_hook("admin.http_metrics_batcher", _stop_http_metrics_batcher)
 
+    # Мониторинг asyncpg-пула: WARNING-лог, когда acquired >= warn_ratio×max.
+    # Без БД-таблицы — только в логи (Loki/syslog построит алёрт).
+    from app.core.settings_registry import get as get_domain_settings
+    from app.domains.admin.services.db_pool_monitor import DbPoolMonitor
+    from app.domains.admin.settings import AdminSettings
+
+    async def _start_db_pool_monitor(app: FastAPI) -> None:
+        admin_settings = get_domain_settings("admin", AdminSettings)
+        if not admin_settings.db_pool_monitor.enabled:
+            logger.info("db_pool_monitor выключен в настройках, пропуск старта")
+            return
+        monitor = DbPoolMonitor(
+            check_interval_sec=admin_settings.db_pool_monitor.check_interval_sec,
+            warn_ratio=admin_settings.db_pool_monitor.warn_ratio,
+        )
+        await monitor.start()
+        app.state.db_pool_monitor = monitor
+
+    async def _stop_db_pool_monitor(app: FastAPI) -> None:
+        monitor = getattr(app.state, "db_pool_monitor", None)
+        if monitor is not None:
+            try:
+                await monitor.stop()
+            except Exception:
+                logger.exception("Ошибка при остановке db_pool_monitor")
+
+    register_startup_hook("admin.db_pool_monitor", _start_db_pool_monitor)
+    register_shutdown_hook("admin.db_pool_monitor", _stop_db_pool_monitor)
+
 
 async def on_startup(app: FastAPI) -> None:
     """

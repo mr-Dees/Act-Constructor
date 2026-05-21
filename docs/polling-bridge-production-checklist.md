@@ -136,7 +136,29 @@ Worst case: 30 минут от начала до жёсткого timeout. На 
 | Orphan сообщений | `SELECT count(*) FROM chat_files WHERE conversation_id NOT IN (SELECT id FROM chat_conversations)` | > 0 |
 | Watchdog рестарты | grep `poll_coordinator: цикл перезапущен` в логах | > 1/день |
 
-### 3.3. Логи, на которые смотреть
+### 3.3. WARNING'и по приближению к лимиту пула
+
+`DbPoolMonitor` (admin-домен, lifespan-hook `admin.db_pool_monitor`) раз
+в 30 секунд проверяет `pool.get_size()` / `pool.get_idle_size()`.
+Когда `acquired/max_size >= warn_ratio` (default 0.9) — WARNING в лог:
+
+```
+db_pool_monitor: пул близок к лимиту — acquired=18/20 (size=20, idle=2, ratio=0.90)
+```
+
+Throttle: один WARNING на серию подряд идущих high-usage замеров; при
+возврате к норме — INFO «нагрузка на пул нормализована». Логи доступны
+для агрегатора (Loki/syslog), там и строится алёрт.
+
+Конфиг (`.env`):
+
+```
+ADMIN__DB_POOL_MONITOR__ENABLED=true
+ADMIN__DB_POOL_MONITOR__CHECK_INTERVAL_SEC=30.0
+ADMIN__DB_POOL_MONITOR__WARN_RATIO=0.9
+```
+
+### 3.4. Логи, на которые смотреть
 
 ```
 # Запущенные/упавшие подзадачи (info / warning)

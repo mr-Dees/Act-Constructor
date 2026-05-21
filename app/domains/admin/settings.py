@@ -20,6 +20,35 @@ class UserDirectorySettings(BaseModel):
     default_admin: str = "22494524"
 
 
+class DbPoolMonitorSettings(BaseModel):
+    """Настройки фонового мониторинга использования asyncpg-пула.
+
+    Раз в ``check_interval_sec`` снимает ``pool.get_size()`` /
+    ``pool.get_idle_size()`` и пишет в лог WARNING, если занято больше
+    ``warn_ratio`` × ``POOL_MAX_SIZE`` коннектов. Без БД-таблицы —
+    просто наблюдатель в логах (Loki/syslog могут построить алёрт).
+    """
+
+    enabled: bool = Field(
+        default=True,
+        description="Запускать фоновый мониторинг пула",
+    )
+    check_interval_sec: float = Field(
+        default=30.0,
+        ge=5.0,
+        description="Интервал между замерами (секунд)",
+    )
+    warn_ratio: float = Field(
+        default=0.9,
+        gt=0.0,
+        le=1.0,
+        description=(
+            "Доля от POOL_MAX_SIZE, при превышении которой эмитим WARNING. "
+            "0.9 = алёрт при 18 acquired из 20"
+        ),
+    )
+
+
 class AdminSettings(BaseModel):
     """Корневая модель настроек домена администрирования."""
     user_directory: UserDirectorySettings = UserDirectorySettings()
@@ -27,3 +56,4 @@ class AdminSettings(BaseModel):
         default=False,
         description="Включить запись HTTP-метрик в БД",
     )
+    db_pool_monitor: DbPoolMonitorSettings = DbPoolMonitorSettings()
