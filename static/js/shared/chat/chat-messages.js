@@ -54,26 +54,6 @@ const ChatMessages = {
     _activeResumePromises: {},
 
     /**
-     * @type {Set<string>}
-     * block_id reasoning-блоков, уже отрендеренных в текущей беседе.
-     * Backend forward'а присылает каждый reasoning-чанк с детерминированным
-     * id `{message_id}:reasoning:{seq}`. Если при resume SSE прилетает
-     * тот же id (повторное проигрывание истории) — фронт молча отбрасывает
-     * block_start, и block_delta/block_end становятся no-op. Без этого
-     * один логический шаг рассуждения дублировался 2-3 раза при reload.
-     * Сбрасывается при смене беседы и `chat:clear`.
-     */
-    _seenReasoningBlockIds: new Set(),
-
-    /**
-     * @type {number} Максимальный seq уже отрендеренных reasoning-блоков
-     * последнего assistant-message в активной беседе. Используется как
-     * курсор для `?since_seq=N` при открытии Resume SSE. 0 — нет
-     * отрендеренного reasoning'а (Resume получит всё с самого начала).
-     */
-    _lastReasoningSeq: 0,
-
-    /**
      * Инициализация: кеширование DOM, подписка на события
      *
      * @param {Object} data
@@ -108,15 +88,11 @@ const ChatMessages = {
         };
         this._onConversationCleared = () => {
             ChatStream.abort();
-            this._seenReasoningBlockIds = new Set();
-            this._lastReasoningSeq = 0;
             this._restoreWelcome();
         };
         this._onChatClear = () => {
             ChatStream.abort();
             this._streamingBlocks = {};
-            this._seenReasoningBlockIds = new Set();
-            this._lastReasoningSeq = 0;
             this._restoreWelcome();
         };
 
@@ -284,30 +260,20 @@ const ChatMessages = {
                     break;
                 }
                 const startType = event.data.type;
-                // Дедуп reasoning по block_id: если тот же блок уже
-                // отрисован (история / предыдущий Resume SSE), не
-                // создаём streamingBlock — соответствующие block_delta
-                // и block_end станут no-op в ветках ниже (там стоит
-                // `if (block)` / `if (endBlock)`).
+                // Дедуп по data-block-id в DOM: если блок с тем же id
+                // уже отрисован (история из GET /messages или предыдущий
+                // SSE), не создаём streamingBlock — соответствующие
+                // block_delta и block_end станут no-op в ветках ниже
+                // (там стоит `if (block)` / `if (endBlock)`). Используется
+                // в первую очередь для reasoning при Resume SSE, но
+                // безопасно для любого блока с block_id.
                 const incomingBlockId = event.data.block_id;
-                if (
-                    startType === 'reasoning'
-                    && typeof incomingBlockId === 'string'
-                ) {
-                    if (this._seenReasoningBlockIds.has(incomingBlockId)) {
-                        break;
-                    }
+                if (typeof incomingBlockId === 'string' && incomingBlockId) {
                     const existing = container.querySelector(
                         `[data-block-id="${CSS.escape(incomingBlockId)}"]`,
                     );
                     if (existing) {
-                        this._seenReasoningBlockIds.add(incomingBlockId);
                         break;
-                    }
-                    this._seenReasoningBlockIds.add(incomingBlockId);
-                    const seq = this._parseReasoningSeq(incomingBlockId);
-                    if (seq > this._lastReasoningSeq) {
-                        this._lastReasoningSeq = seq;
                     }
                 }
                 if (!KNOWN_BLOCK_TYPES.has(startType)) {
@@ -528,13 +494,11 @@ const ChatMessages = {
 
             const botContainer = this._addBotMessageStreaming();
 
-            // Курсор reasoning: если в истории уже есть отрендеренные
-            // reasoning-блоки этого forward'а, не запрашиваем их снова.
-            // 0 = резюм с самого начала.
-            const sinceSeq = this._lastReasoningSeq || 0;
-
+            // Resume SSE без курсора: backend всегда стримит с начала
+            // open-стороны queue (live-push для real-time), а уже
+            // отрендеренные блоки из истории дедупаются в DOM по
+            // data-block-id в `_handleSSEEvent::block_start`.
             await ChatStream.resume(conversationId, active.request_id, {
-                sinceSeq,
                 onEvent: (event) => {
                     this._handleSSEEvent(event, botContainer);
                 },
@@ -554,22 +518,6 @@ const ChatMessages = {
             // Освобождаем lock на случай повторного forward'а в той же беседе.
             delete this._activeResumePromises[conversationId];
         }
-    },
-
-    /**
-     * Парсит seq из block_id формата `{message_id}:reasoning:{seq}`.
-     * Возвращает 0 при не-числовом или невалидном формате.
-     *
-     * @param {string} blockId
-     * @returns {number}
-     * @private
-     */
-    _parseReasoningSeq(blockId) {
-        if (typeof blockId !== 'string') return 0;
-        const parts = blockId.split(':');
-        if (parts.length < 3) return 0;
-        const seq = Number(parts[parts.length - 1]);
-        return Number.isFinite(seq) && seq > 0 ? seq : 0;
     },
 
     /**
@@ -715,9 +663,9 @@ const ChatMessages = {
      */
     _renderConversationMessages({ conversationId, messages }) {
         this._messagesContainer.replaceChildren();
-        // Дедуп reasoning синхронизируется с DOM: после wipe'а контейнера Set
-        // не сбрасываем — он самонаполнится ниже из reasoning-блоков истории,
-        // а уцелевшие записи безопасны (DOM-fallback в block_start сверится).
+        // Дедуп блоков работает по data-block-id в DOM: Resume SSE при
+        // получении block_start с уже отрисованным id молча скипает
+        // (см. `_handleSSEEvent::block_start`). Никаких внешних Set/курсоров.
 
         for (const msg of messages) {
             const blocks = Array.isArray(msg.content) ? msg.content : [];
@@ -729,21 +677,21 @@ const ChatMessages = {
                 const fileBlocks = blocks.filter(b => b.type === 'file');
                 this._renderUserMessageWithFiles(text, fileBlocks);
             } else if (msg.role === 'assistant') {
-                if (blocks.length > 0) {
-                    const container = this._addBotMessageStreaming({ withPlaceholder: false });
+                const isStreaming = msg.status === 'streaming';
+                const isFailed = msg.status === 'failed';
+
+                if (blocks.length > 0 || isStreaming) {
+                    // withPlaceholder=true для streaming-сообщений: typing-точки
+                    // живут в bot-bubble, пока Resume SSE (если активен) не
+                    // приедет с content-блоком. После него removeTypingPlaceholder
+                    // в `_handleSSEEvent` уберёт их.
+                    const container = this._addBotMessageStreaming({
+                        withPlaceholder: isStreaming,
+                    });
                     ChatRenderer.renderBlocks(container, blocks, { execute: false });
-                    // Собираем block_id уже отрендеренных reasoning-блоков,
-                    // чтобы Resume SSE через ?since_seq= не присылал их повторно
-                    // и block_start с тем же id молча отбрасывался.
-                    for (const block of blocks) {
-                        if (block && block.type === 'reasoning'
-                            && typeof block.block_id === 'string') {
-                            this._seenReasoningBlockIds.add(block.block_id);
-                            const seq = this._parseReasoningSeq(block.block_id);
-                            if (seq > this._lastReasoningSeq) {
-                                this._lastReasoningSeq = seq;
-                            }
-                        }
+                    if (isFailed) {
+                        const msgEl = container.parentElement;
+                        if (msgEl) msgEl.classList.add('chat-message--failed');
                     }
                 } else {
                     this.renderMessage('bot', '');
