@@ -91,9 +91,11 @@ def _fake_get_db_ctx_multi(conns):
 async def test_run_max_total_timeout_saves_error_and_clears_registry():
     """Когда bridge раскрывает AgentBridgeTimeout для max_total, runner:
 
-    * сохраняет ассистент-сообщение с error-блоком ``agent_timeout``;
-    * не вызывает повторный update_status (status='timeout' уже
+    * зовёт fail_assistant_message с error-блоком ``agent_timeout`` —
+      chat_messages.status='failed', блок дописан;
+    * не вызывает повторный update_status(timeout) (status уже
       выставлен bridge'ем внутри гейта);
+    * не вызывает finalize_assistant_message (стрим не успешен);
     * после завершения задачи запись чистится из ``_running``.
     """
     from app.domains.chat.services.agent_bridge import AgentBridgeTimeout
@@ -102,21 +104,24 @@ async def test_run_max_total_timeout_saves_error_and_clears_registry():
     mock_conn.transaction = MagicMock(return_value=AsyncMock())
     fake_req_repo = MagicMock()
     fake_req_repo.get = AsyncMock(return_value={
-        "id": "rid-mtd", "conversation_id": "conv-mtd", "status": "pending",
-        "version": 1,
+        "id": "rid-mtd", "conversation_id": "conv-mtd",
+        "message_id": "msg-mtd", "status": "pending", "version": 1,
     })
     fake_req_repo.update_status = AsyncMock(return_value=2)
     fake_req_repo.finalize = AsyncMock(return_value=True)
-    save_mock = AsyncMock()
+    fake_msg_repo = MagicMock()
+    fake_msg_repo.append_block = AsyncMock(return_value=True)
+    fail_mock = AsyncMock(return_value=True)
+    finalize_msg_mock = AsyncMock(return_value=True)
+    start_mock = AsyncMock(return_value={
+        "id": "msg-mtd", "status": "streaming", "content": [],
+    })
     fake_adapter = MagicMock(get_table_name=lambda n: n)
 
     async def fake_wait(self, *a, **kw):
         # Имитация гейта max_total: bridge сам ставит status='timeout',
-        # затем raise. В нашем моке status-update пропускаем — проверяем
-        # реакцию runner'а на исключение.
-        raise AgentBridgeTimeout(
-            "max total duration 5s exceeded",
-        )
+        # затем raise.
+        raise AgentBridgeTimeout("max total duration 5s exceeded")
         yield  # pragma: no cover
 
     with (
@@ -131,37 +136,49 @@ async def test_run_max_total_timeout_saves_error_and_clears_registry():
             return_value=fake_req_repo,
         ),
         patch(
+            "app.domains.chat.repositories.message_repository."
+            "MessageRepository",
+            return_value=fake_msg_repo,
+        ),
+        patch(
             "app.domains.chat.services.agent_bridge."
             "AgentBridgeService.wait_for_completion",
             fake_wait,
         ),
         patch(
             "app.domains.chat.services.message_service."
-            "MessageService.save_assistant_message",
-            save_mock,
+            "MessageService.start_streaming_assistant_message",
+            start_mock,
+        ),
+        patch(
+            "app.domains.chat.services.message_service."
+            "MessageService.fail_assistant_message",
+            fail_mock,
+        ),
+        patch(
+            "app.domains.chat.services.message_service."
+            "MessageService.finalize_assistant_message",
+            finalize_msg_mock,
         ),
     ):
-        # Прогоняем через schedule(), чтобы покрыть и регистрацию в _running.
         task = agent_bridge_runner.schedule("rid-mtd", settings=_settings())
         await asyncio.wait_for(task, timeout=2.0)
 
-    # Сохранили ровно один error-блок с правильным кодом.
-    save_mock.assert_called_once()
-    content = save_mock.call_args.kwargs["content"]
-    assert any(
-        b.get("type") == "error" and b.get("code") == "agent_timeout"
-        for b in content
-    ), f"ожидался error-блок agent_timeout, получено: {content}"
+    # fail_assistant_message вызван с error-блоком agent_timeout.
+    fail_mock.assert_awaited_once()
+    error_block = fail_mock.call_args.kwargs["error_block"]
+    assert error_block["type"] == "error"
+    assert error_block["code"] == "agent_timeout"
+
+    # finalize_assistant_message не вызывался (стрим не успешен).
+    finalize_msg_mock.assert_not_awaited()
 
     # Runner НЕ вызывает update_status(timeout) сам — это работа bridge'а.
     statuses_set = [
         c.kwargs.get("status")
         for c in fake_req_repo.update_status.call_args_list
     ]
-    assert "timeout" not in statuses_set, (
-        "runner не должен сам выставлять timeout — это делает bridge "
-        f"внутри гейта; получено: {statuses_set}"
-    )
+    assert "timeout" not in statuses_set
 
     # Реестр почищен done_callback'ом.
     assert "rid-mtd" not in agent_bridge_runner._running
@@ -177,22 +194,28 @@ async def test_run_marks_error_on_poll_runtime_exception():
     runner ловит на outer-except и помечает request status='error'
     через отдельный get_db()-контекст. Реестр чистится.
 
-    После декомпозиции ``_run()`` на фазы коннектов берётся три:
-    Phase 1 (initial read + dispatch), Phase 2 fallback path (`_wait_via_fallback`
-    сам открывает свой `async with get_db()` под bridge.wait_for_completion),
+    После декомпозиции ``_run()`` на фазы коннектов берётся четыре:
+    Phase 1 (initial read + dispatch), Phase 1b (start_streaming —
+    Phase 1 «D»), Phase 2 fallback path (`_wait_via_fallback` сам
+    открывает свой `async with get_db()` под bridge.wait_for_completion),
     и резервный outer-except для пометки status='error'.
     """
 
     mock_conn = AsyncMock()
-    mock_conn2 = AsyncMock()  # Phase 2 fallback (wait_for_completion)
+    mock_conn_stream = AsyncMock()  # Phase 1b (start_streaming)
+    mock_conn2 = AsyncMock()  # Phase 2 fallback
     mock_conn3 = AsyncMock()  # outer-except recovery (mark error)
     fake_req_repo = MagicMock()
     fake_req_repo.get = AsyncMock(return_value={
-        "id": "rid-err", "conversation_id": "conv-err", "status": "pending",
-        "version": 1,
+        "id": "rid-err", "conversation_id": "conv-err",
+        "message_id": "msg-err", "status": "pending", "version": 1,
     })
     fake_req_repo.update_status = AsyncMock(return_value=2)
-    save_mock = AsyncMock()
+    finalize_msg_mock = AsyncMock()
+    fail_mock = AsyncMock()
+    start_mock = AsyncMock(return_value={
+        "id": "msg-err", "status": "streaming", "content": [],
+    })
     fake_adapter = MagicMock(get_table_name=lambda n: n)
 
     async def fake_wait_raises(self, *a, **kw):
@@ -202,7 +225,9 @@ async def test_run_marks_error_on_poll_runtime_exception():
     with (
         patch(
             "app.db.connection.get_db",
-            _fake_get_db_ctx_multi([mock_conn, mock_conn2, mock_conn3]),
+            _fake_get_db_ctx_multi(
+                [mock_conn, mock_conn_stream, mock_conn2, mock_conn3],
+            ),
         ),
         patch(
             "app.db.repositories.base.get_adapter",
@@ -220,15 +245,29 @@ async def test_run_marks_error_on_poll_runtime_exception():
         ),
         patch(
             "app.domains.chat.services.message_service."
-            "MessageService.save_assistant_message",
-            save_mock,
+            "MessageService.start_streaming_assistant_message",
+            start_mock,
+        ),
+        patch(
+            "app.domains.chat.services.message_service."
+            "MessageService.finalize_assistant_message",
+            finalize_msg_mock,
+        ),
+        patch(
+            "app.domains.chat.services.message_service."
+            "MessageService.fail_assistant_message",
+            fail_mock,
         ),
     ):
         task = agent_bridge_runner.schedule("rid-err", settings=_settings())
         await asyncio.wait_for(task, timeout=2.0)
 
-    # save_assistant_message не вызывался (мы упали ДО _translate_buttons/save).
-    save_mock.assert_not_called()
+    # finalize_assistant_message не вызывался (упали ДО финала).
+    finalize_msg_mock.assert_not_awaited()
+    # fail_assistant_message тоже — runner упал на RuntimeError, не на
+    # AgentBridgeTimeout, поэтому идёт по outer-except path, а не по
+    # явному timeout-handler'у.
+    fail_mock.assert_not_awaited()
 
     # Был хотя бы один вызов update_status со status='error'.
     error_calls = [
@@ -396,14 +435,10 @@ async def test_schedule_pending_does_not_duplicate_running_task():
 async def test_concurrent_requests_on_same_conversation_both_save():
     """Документирует текущее поведение: при двух подряд forward-вызовах
     в одну conversation_id создаются ДВА разных request_id, оба
-    раннера работают независимо и оба зовут save_assistant_message.
+    раннера работают независимо и оба зовут finalize_assistant_message
+    с разными message_id.
 
-    «Cancel previous request» сейчас не реализован — это сознательное
-    проектное решение: внешний агент уже потратил ресурсы на R1,
-    дожидаемся ответа. Пользователь увидит обе реплики в истории.
-
-    Если в будущем добавим cancel-previous — этот тест должен
-    обновиться, чтобы R1 завершался без save_assistant_message.
+    «Cancel previous request» сейчас не реализован.
     """
     from app.domains.chat.services.agent_bridge import AgentBridgeUpdate
 
@@ -411,15 +446,14 @@ async def test_concurrent_requests_on_same_conversation_both_save():
     mock_conn.transaction = MagicMock(return_value=AsyncMock())
     fake_adapter = MagicMock(get_table_name=lambda n: n)
 
-    # Один общий conversation_id, разные request_id.
     requests_by_id = {
         "R1": {
             "id": "R1", "conversation_id": "conv-shared",
-            "status": "pending", "version": 1,
+            "message_id": "msg-R1", "status": "pending", "version": 1,
         },
         "R2": {
             "id": "R2", "conversation_id": "conv-shared",
-            "status": "pending", "version": 1,
+            "message_id": "msg-R2", "status": "pending", "version": 1,
         },
     }
 
@@ -429,15 +463,19 @@ async def test_concurrent_requests_on_same_conversation_both_save():
     )
     fake_req_repo.update_status = AsyncMock(return_value=2)
     fake_req_repo.finalize = AsyncMock(return_value=True)
+    fake_msg_repo = MagicMock()
+    fake_msg_repo.append_block = AsyncMock(return_value=True)
 
     async def fake_wait(self, *a, **kw):
-        # Каждый раннер мгновенно получает свой финальный ответ.
         yield AgentBridgeUpdate(response={
             "blocks": [{"type": "text", "content": "ответ"}],
             "token_usage": {},
         })
 
-    save_mock = AsyncMock()
+    start_mock = AsyncMock(return_value={
+        "id": "msg-stub", "status": "streaming", "content": [],
+    })
+    finalize_msg_mock = AsyncMock(return_value=True)
 
     with (
         patch("app.db.connection.get_db", _fake_get_db_ctx(mock_conn)),
@@ -451,19 +489,28 @@ async def test_concurrent_requests_on_same_conversation_both_save():
             return_value=fake_req_repo,
         ),
         patch(
+            "app.domains.chat.repositories.message_repository."
+            "MessageRepository",
+            return_value=fake_msg_repo,
+        ),
+        patch(
             "app.domains.chat.services.agent_bridge."
             "AgentBridgeService.wait_for_completion",
             fake_wait,
         ),
         patch(
             "app.domains.chat.services.message_service."
-            "MessageService.save_assistant_message",
-            save_mock,
+            "MessageService.start_streaming_assistant_message",
+            start_mock,
+        ),
+        patch(
+            "app.domains.chat.services.message_service."
+            "MessageService.finalize_assistant_message",
+            finalize_msg_mock,
         ),
     ):
         t1 = agent_bridge_runner.schedule("R1", settings=_settings())
         t2 = agent_bridge_runner.schedule("R2", settings=_settings())
-        # Разные task'и в registry.
         assert t1 is not t2
         assert agent_bridge_runner._running["R1"] is t1
         assert agent_bridge_runner._running["R2"] is t2
@@ -473,16 +520,20 @@ async def test_concurrent_requests_on_same_conversation_both_save():
             asyncio.wait_for(t2, timeout=2.0),
         )
 
-    # Оба runner'а сохранили сообщение — это и есть зафиксированное
-    # текущее поведение (no cancel-previous semantics).
-    assert save_mock.await_count == 2
+    # Оба runner'а финализировали сообщения для общего conv_id.
+    assert finalize_msg_mock.await_count == 2
     saved_convs = [
         c.kwargs["conversation_id"]
-        for c in save_mock.await_args_list
+        for c in finalize_msg_mock.await_args_list
     ]
     assert saved_convs == ["conv-shared", "conv-shared"]
+    # Но message_id'ы разные.
+    message_ids = sorted(
+        c.kwargs["message_id"]
+        for c in finalize_msg_mock.await_args_list
+    )
+    assert message_ids == ["msg-R1", "msg-R2"]
 
-    # Реестр почищен по обоим request'ам.
     assert "R1" not in agent_bridge_runner._running
     assert "R2" not in agent_bridge_runner._running
 

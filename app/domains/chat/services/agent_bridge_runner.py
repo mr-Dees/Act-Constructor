@@ -83,31 +83,33 @@ async def _run(
     settings: ChatDomainSettings,
     coordinator: PollCoordinator | None = None,
 ) -> None:
-    """Producer: тянет polling, сохраняет финальный ассистент-message,
-    обновляет ``agent_requests.status``.
+    """Producer: тянет polling, инкрементально материализует ассистент-message
+    в ``chat_messages``, обновляет ``agent_requests.status``.
 
-    Сами события и финальный response в БД уже пишет внешний агент
-    (через мост-таблицы); раннер только финализирует сообщение и статус.
+    Phase 1 «D»: вместо накопления ``blocks: list[dict]`` в памяти runner'а
+    и одного INSERT'а на финале, runner:
+
+    1. ДО первого события создаёт draft assistant-сообщение со
+       ``status='streaming'`` (``start_streaming_assistant_message``).
+    2. На каждом reasoning/error-событии — короткая транзакция
+       ``append_block`` (RMW под FOR UPDATE, дедуп по ``block_id``).
+    3. На финале — общая транзакция ``finalize_assistant_message`` +
+       ``req_repo.finalize`` (MERGE финальных блоков с уже накопленными
+       reasoning'ами на стороне MessageRepository.finalize).
+    4. На таймауте — отдельная короткая транзакция
+       ``fail_assistant_message`` (chat_messages.status='failed' +
+       error-block). Сам ``agent_requests.status='timeout'`` уже выставлен
+       внутри ``_mark_timeout`` (см. ``_wait_via_coordinator``).
+
+    Жизненный цикл pool-коннекта: **ни одна фаза не держит коннект во
+    время ``await queue.get()``**. Каждое событие — отдельная короткая
+    ``async with get_db()``. Иначе при N параллельных forward'ах
+    PollCoordinator не получит коннект для SELECT'а → события не дойдут
+    до runner-очередей → классический pool deadlock.
 
     После загрузки строки agent_requests читает ``parent_request_id`` и
     проставляет в :data:`app.core.config.request_id_var`, чтобы все логи
     внутри runner'а несли тот же correlation_id, что и исходный HTTP-запрос.
-
-    Жизненный цикл pool-коннекта разнесён на три фазы, и **ни одна** не
-    держит коннект во время ``await queue.get()`` polling'а:
-
-    1. **Initial**: короткая ``async with get_db()`` — прочитать
-       agent_request, выставить ``dispatched``, забрать ``version``.
-    2. **Polling**: либо subscribe к PollCoordinator (события приходят
-       через ``asyncio.Queue``; коннект НЕ удерживается между событиями),
-       либо fallback ``wait_for_completion`` (тесты без координатора —
-       единственное место, где runner держит коннект на polling).
-    3. **Finalize**: короткая ``async with get_db()`` —
-       ``save_assistant_message`` + ``finalize`` в одной транзакции.
-
-    Иначе при N>=pool_max−batchers параллельных forward'ах PollCoordinator
-    не получает коннект для SELECT'а событий → события не доходят до
-    runner-очередей → runner'ы вечно ждут → классический pool deadlock.
     """
     # Импорты внутри функции — чтобы тесты могли патчить get_db().
     from app.core.config import request_id_var
@@ -123,11 +125,18 @@ async def _run(
         MessageRepository,
     )
     from app.domains.chat.services.agent_bridge import (
-        AgentBridgeService,
         AgentBridgeTimeout,
     )
     from app.domains.chat.services.forward_limit import release
     from app.domains.chat.services.message_service import MessageService
+
+    def _msg_service(conn) -> MessageService:
+        """MessageService на переданном conn (для коротких транзакций)."""
+        return MessageService(
+            msg_repo=MessageRepository(conn),
+            conv_repo=ConversationRepository(conn),
+            settings=settings,
+        )
 
     ctx_token = None
     user_id_for_release: str | None = None
@@ -201,9 +210,23 @@ async def _run(
                     return
                 current_version = new_version
 
+        # ── Phase 1b: draft assistant-message со status='streaming' ──
+        # ДО первого события — иначе при мгновенном финале (агент уже
+        # дописал response пока runner стартовал) у нас не было бы записи,
+        # к которой делать append_block. Идемпотентно по message_id:
+        # репозиторий ловит UniqueViolation и возвращает existing row
+        # (crash-recovery после рестарта uvicorn между genuid и save).
+        async with get_db() as conn:
+            await _msg_service(conn).start_streaming_assistant_message(
+                message_id=request_message_id,
+                conversation_id=conversation_id,
+                model=settings.model,
+            )
+
         # ── Phase 2: polling БЕЗ удержания pool-коннекта ──
-        blocks: list[dict] = []
+        final_blocks: list[dict] = []
         token_usage: dict = {}
+        timed_out = False
 
         if coordinator is not None:
             upd_iter = _wait_via_coordinator(
@@ -254,30 +277,46 @@ async def _run(
                     ev = upd.event
                     et = ev.get("event_type")
                     payload = ev.get("payload") or {}
+                    block: dict[str, Any] | None = None
                     if et == "reasoning":
                         text = payload.get("text", "")
                         if text:
-                            blocks.append({
+                            block = {
                                 "type": "reasoning",
                                 "content": text,
                                 "block_id": (
                                     f"{request_message_id}:reasoning:"
                                     f"{ev.get('seq')}"
                                 ),
-                            })
+                            }
                     elif et == "error":
-                        err_block: dict[str, Any] = {
+                        block = {
                             "type": "error",
                             "message": payload.get(
                                 "message", "Ошибка внешнего агента",
                             ),
+                            "block_id": (
+                                f"{request_message_id}:error:"
+                                f"{ev.get('seq')}"
+                            ),
                         }
                         if payload.get("code"):
-                            err_block["code"] = payload["code"]
-                        blocks.append(err_block)
+                            block["code"] = payload["code"]
                     # status — игнорируем (информационное событие)
+
+                    if block is not None:
+                        # Короткая транзакция на каждый event: RMW под
+                        # FOR UPDATE + дедуп по block_id внутри repo.
+                        # При рестарте runner'а тот же seq повторно
+                        # вернётся через PollCoordinator, append_block
+                        # дедупит по block_id (no-op).
+                        async with get_db() as conn:
+                            await MessageRepository(conn).append_block(
+                                message_id=request_message_id,
+                                block=block,
+                            )
                 if upd.response:
-                    blocks.extend(upd.response.get("blocks") or [])
+                    final_blocks = list(upd.response.get("blocks") or [])
                     token_usage = upd.response.get("token_usage") or {}
                     break
         except AgentBridgeTimeout as exc:
@@ -285,36 +324,61 @@ async def _run(
                 "agent_bridge_runner: timeout request_id=%s: %s",
                 request_id, exc,
             )
-            blocks.append({
+            timed_out = True
+
+        if timed_out:
+            # _mark_timeout уже выставил agent_requests.status='timeout'.
+            # Помечаем chat_messages.status='failed' + дописываем
+            # error-блок отдельной короткой транзакцией.
+            error_block = {
                 "type": "error",
                 "message": (
                     "Внешний агент не ответил вовремя. "
                     "Попробуйте позже."
                 ),
                 "code": "agent_timeout",
-            })
+                "block_id": f"{request_message_id}:error:1",
+            }
+            async with get_db() as conn:
+                await _msg_service(conn).fail_assistant_message(
+                    message_id=request_message_id,
+                    conversation_id=conversation_id,
+                    error_block=error_block,
+                )
+            return
 
         # Трансляция кнопок ответа агента в клиентские action ДО
         # сохранения: иначе в БД попадут «семантические» action_id
         # (acts.open_act_page и т.п.), фронт их не сможет обработать.
-        blocks = await _translate_buttons_in_blocks(blocks)
+        final_blocks = await _translate_buttons_in_blocks(final_blocks)
 
-        # ── Phase 3: финальная транзакция save+finalize ──
+        # ── Phase 3: финальная транзакция finalize_message + req.finalize ──
+        # finalize_assistant_message мержит final_blocks с уже накопленными
+        # reasoning'ами (дедуп по block_id внутри MessageRepository.finalize).
         async with get_db() as conn:
-            msg_service = MessageService(
-                msg_repo=MessageRepository(conn),
-                conv_repo=ConversationRepository(conn),
-                settings=settings,
-            )
             req_repo = AgentRequestRepository(conn)
             try:
                 async with conn.transaction():
-                    await msg_service.save_assistant_message(
+                    ok = await _msg_service(
+                        conn,
+                    ).finalize_assistant_message(
+                        message_id=request_message_id,
                         conversation_id=conversation_id,
-                        content=blocks,
+                        final_blocks=final_blocks,
                         model=settings.model,
                         token_usage=token_usage if token_usage else None,
                     )
+                    if not ok:
+                        # chat_messages уже complete/failed (race с другим
+                        # runner'ом / reconcile). Лог уже эмиттится внутри
+                        # сервиса; req.finalize ниже всё равно переведёт
+                        # agent_requests.status='done' (если version совпадёт).
+                        logger.info(
+                            "agent_bridge_runner: "
+                            "finalize_assistant_message вернул False "
+                            "(сообщение уже не streaming) request_id=%s",
+                            request_id,
+                        )
                     success = await req_repo.finalize(
                         request_id,
                         current_version,
@@ -327,8 +391,8 @@ async def _run(
                         )
                 logger.info(
                     "agent_bridge_runner: ответ агента сохранён "
-                    "request_id=%s, blocks=%d",
-                    request_id, len(blocks),
+                    "request_id=%s, final_blocks=%d",
+                    request_id, len(final_blocks),
                 )
             except OptimisticLockFailed:
                 logger.warning(
