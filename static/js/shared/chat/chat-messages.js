@@ -44,6 +44,16 @@ const ChatMessages = {
     _welcomeNode: null,
 
     /**
+     * @type {Object<string, Promise<void>>}
+     * Promise-lock per conversation_id для `_maybeResumeActiveForward`.
+     * Без него rapid navigation (A → B → A) приводит к двум параллельным
+     * `checkActiveForward(A)` → двум `_addBotMessageStreaming()` → двум
+     * bot-bubble в DOM до того, как сработает idempotency-чек в
+     * `ChatStream.resume` по `_resumeRequestId`.
+     */
+    _activeResumePromises: {},
+
+    /**
      * Инициализация: кеширование DOM, подписка на события
      *
      * @param {Object} data
@@ -449,26 +459,42 @@ const ChatMessages = {
      * @private
      */
     async _maybeResumeActiveForward(conversationId) {
-        const active = await ChatContext.checkActiveForward(conversationId);
-        if (!active || !active.request_id) return;
+        // Уже идёт resume для этой беседы — переиспользуем promise.
+        // Защищает от двух bot-bubble при rapid switch'ах между чатами.
+        if (this._activeResumePromises[conversationId]) {
+            return this._activeResumePromises[conversationId];
+        }
 
-        // Беседа могла смениться, пока шёл запрос — не открываем resume для
-        // устаревшей беседы.
-        if (ChatContext.getCurrentConversationId() !== conversationId) return;
+        const promise = (async () => {
+            const active = await ChatContext.checkActiveForward(conversationId);
+            if (!active || !active.request_id) return;
 
-        const botContainer = this._addBotMessageStreaming();
+            // Беседа могла смениться, пока шёл запрос — не открываем resume
+            // для устаревшей беседы.
+            if (ChatContext.getCurrentConversationId() !== conversationId) return;
 
-        await ChatStream.resume(conversationId, active.request_id, {
-            onEvent: (event) => {
-                this._handleSSEEvent(event, botContainer);
-            },
-            onError: (err) => {
-                this._onStreamError(err, botContainer);
-            },
-            onDone: () => {
-                ChatEventBus.emit('ui:scroll-bottom');
-            },
-        });
+            const botContainer = this._addBotMessageStreaming();
+
+            await ChatStream.resume(conversationId, active.request_id, {
+                onEvent: (event) => {
+                    this._handleSSEEvent(event, botContainer);
+                },
+                onError: (err) => {
+                    this._onStreamError(err, botContainer);
+                },
+                onDone: () => {
+                    ChatEventBus.emit('ui:scroll-bottom');
+                },
+            });
+        })();
+
+        this._activeResumePromises[conversationId] = promise;
+        try {
+            await promise;
+        } finally {
+            // Освобождаем lock на случай повторного forward'а в той же беседе.
+            delete this._activeResumePromises[conversationId];
+        }
     },
 
     /**
