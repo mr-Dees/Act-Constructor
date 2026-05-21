@@ -293,14 +293,17 @@ const ChatMessages = {
                 if (
                     startType === 'reasoning'
                     && typeof incomingBlockId === 'string'
-                    && this._seenReasoningBlockIds.has(incomingBlockId)
                 ) {
-                    break;
-                }
-                if (
-                    startType === 'reasoning'
-                    && typeof incomingBlockId === 'string'
-                ) {
+                    if (this._seenReasoningBlockIds.has(incomingBlockId)) {
+                        break;
+                    }
+                    const existing = container.querySelector(
+                        `[data-block-id="${CSS.escape(incomingBlockId)}"]`,
+                    );
+                    if (existing) {
+                        this._seenReasoningBlockIds.add(incomingBlockId);
+                        break;
+                    }
                     this._seenReasoningBlockIds.add(incomingBlockId);
                     const seq = this._parseReasoningSeq(incomingBlockId);
                     if (seq > this._lastReasoningSeq) {
@@ -321,7 +324,10 @@ const ChatMessages = {
                     ChatRenderer.appendBlock(container, sb.element);
                     break;
                 }
-                const sb = ChatRenderer.createStreamingBlock(startType);
+                const sb = ChatRenderer.createStreamingBlock(
+                    startType,
+                    startType === 'reasoning' ? incomingBlockId : undefined,
+                );
                 this._streamingBlocks[event.data.index] = sb;
                 ChatRenderer.appendBlock(container, sb.element);
                 break;
@@ -709,10 +715,9 @@ const ChatMessages = {
      */
     _renderConversationMessages({ conversationId, messages }) {
         this._messagesContainer.replaceChildren();
-        // Новая беседа → сбрасываем дедуп reasoning и курсор seq.
-        // Заполнится ниже из reasoning-блоков последнего ассистент-сообщения.
-        this._seenReasoningBlockIds = new Set();
-        this._lastReasoningSeq = 0;
+        // Дедуп reasoning синхронизируется с DOM: после wipe'а контейнера Set
+        // не сбрасываем — он самонаполнится ниже из reasoning-блоков истории,
+        // а уцелевшие записи безопасны (DOM-fallback в block_start сверится).
 
         for (const msg of messages) {
             const blocks = Array.isArray(msg.content) ? msg.content : [];

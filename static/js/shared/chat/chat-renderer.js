@@ -254,14 +254,18 @@ const ChatRenderer = {
      * как отдельный сворачиваемый блок.
      *
      * @param {string} blockType — тип блока ('text' или 'reasoning')
+     * @param {string} [blockId] — идентификатор блока (для reasoning тегируется в data-block-id)
      * @returns {{ element: HTMLElement, appendText: function(string): void, finalize: function(): void }}
      */
-    createStreamingBlock(blockType) {
+    createStreamingBlock(blockType, blockId) {
         if (blockType === 'reasoning') {
             const details = document.createElement('details');
             details.className = 'chat-block chat-block-reasoning';
             // По умолчанию каждый чанк раскрыт; пользователь сворачивает руками.
             details.open = true;
+            if (typeof blockId === 'string' && blockId) {
+                details.dataset.blockId = blockId;
+            }
 
             if (this._getReasoningDisplayMode() === 'hidden') {
                 details.style.display = 'none';
@@ -404,6 +408,9 @@ const ChatRenderer = {
         const details = document.createElement('details');
         details.className = 'chat-block chat-block-reasoning';
         details.open = true;
+        if (typeof block.block_id === 'string' && block.block_id) {
+            details.dataset.blockId = block.block_id;
+        }
 
         if (this._getReasoningDisplayMode() === 'hidden') {
             details.style.display = 'none';
