@@ -132,3 +132,94 @@ class MessageService:
         return await self.msg_repo.get_by_conversation(
             conversation_id, limit=limit, offset=offset,
         )
+
+    # ── Phase 1 «D»: инкрементальная запись ассистент-сообщений ────────────
+    # Сценарий forward'а к внешнему агенту: вместо накопления reasoning'ов в
+    # памяти runner'а и одного save_assistant_message на финале, runner
+    # пишет каждый reasoning в БД отдельной короткой транзакцией. Финал
+    # мержит финальные блоки агента с уже накопленными reasoning'ами через
+    # MessageRepository.finalize (дедуп по block_id внутри репозитория).
+
+    async def start_streaming_assistant_message(
+        self,
+        *,
+        message_id: str,
+        conversation_id: str,
+        model: str | None = None,
+    ) -> dict:
+        """Создаёт пустое assistant-сообщение со status='streaming'.
+
+        Идемпотентен на crash-recovery: при гонке (рестарт runner'а между
+        генерацией message_id и INSERT'ом) репозиторий ловит
+        ``UniqueViolation`` и возвращает существующую запись —
+        runner продолжит материализацию того же message_id.
+        """
+        return await self.msg_repo.create_streaming(
+            message_id=message_id,
+            conversation_id=conversation_id,
+            model=model,
+        )
+
+    async def finalize_assistant_message(
+        self,
+        *,
+        message_id: str,
+        conversation_id: str,
+        final_blocks: list[dict],
+        model: str | None = None,
+        token_usage: dict | None = None,
+    ) -> bool:
+        """Финализирует streaming-сообщение: merge финальных блоков + touch беседы.
+
+        MERGE-семантика на стороне репозитория: уже сохранённые через
+        ``append_block`` reasoning'и остаются, к ним дописываются финальные
+        блоки агента, дедуп по ``block_id``.
+
+        Возвращает True если статус переведён в 'complete'. False — если
+        сообщение уже не 'streaming' (повторный вызов — лог WARNING, не
+        падаем).
+        """
+        async with self.msg_repo.conn.transaction():
+            success = await self.msg_repo.finalize(
+                message_id=message_id,
+                final_blocks=final_blocks,
+                model=model,
+                token_usage=token_usage,
+            )
+            if not success:
+                logger.warning(
+                    "finalize_assistant_message: message_id=%s уже не "
+                    "в статусе 'streaming' — пропускаем",
+                    message_id,
+                )
+                return False
+            await self.conv_repo.touch(conversation_id)
+        return True
+
+    async def fail_assistant_message(
+        self,
+        *,
+        message_id: str,
+        conversation_id: str,
+        error_block: dict,
+    ) -> bool:
+        """Помечает streaming-сообщение failed + дописывает error-блок.
+
+        Используется при таймауте или ошибке внешнего агента. Возвращает
+        False если сообщение уже не 'streaming' (idempotent на повторный
+        вызов).
+        """
+        async with self.msg_repo.conn.transaction():
+            success = await self.msg_repo.mark_failed(
+                message_id=message_id,
+                error_block=error_block,
+            )
+            if not success:
+                logger.warning(
+                    "fail_assistant_message: message_id=%s уже не "
+                    "в статусе 'streaming' — пропускаем",
+                    message_id,
+                )
+                return False
+            await self.conv_repo.touch(conversation_id)
+        return True

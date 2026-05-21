@@ -268,6 +268,155 @@ class TestMessageServiceSaveAssistant:
         msg_repo.create.assert_awaited_once()
 
 
+class TestMessageServiceStreamingLifecycle:
+    """Phase 1 «D»: streaming-методы для forward'а к внешнему агенту."""
+
+    @pytest.fixture
+    def service(self, msg_repo, conv_repo, settings):
+        return MessageService(
+            msg_repo=msg_repo, conv_repo=conv_repo, settings=settings,
+        )
+
+    async def test_start_streaming_assistant_message_creates_record(
+        self, service, msg_repo,
+    ):
+        """start_streaming делегирует в репозиторий и возвращает запись."""
+        msg_repo.create_streaming.return_value = {
+            "id": "msg-stream",
+            "conversation_id": "conv-1",
+            "role": "assistant",
+            "content": [],
+            "status": "streaming",
+            "model": "gpt-4o",
+        }
+
+        result = await service.start_streaming_assistant_message(
+            message_id="msg-stream",
+            conversation_id="conv-1",
+            model="gpt-4o",
+        )
+
+        assert result["status"] == "streaming"
+        assert result["id"] == "msg-stream"
+        msg_repo.create_streaming.assert_awaited_once_with(
+            message_id="msg-stream",
+            conversation_id="conv-1",
+            model="gpt-4o",
+        )
+
+    async def test_start_streaming_recovers_on_unique_violation(
+        self, service, msg_repo,
+    ):
+        """Crash-recovery: UniqueViolation ловится в репозитории, сервис
+        прозрачно получает существующую запись.
+
+        Сам сервис не реализует recovery — он делегирует в репозиторий,
+        который при UniqueViolation возвращает existing row. Этот тест
+        фиксирует контракт: сервис передаёт прежний message_id и не
+        падает, даже если запись уже была.
+        """
+        existing = {
+            "id": "msg-existing",
+            "conversation_id": "conv-1",
+            "role": "assistant",
+            "content": [{"type": "reasoning", "content": "уже было"}],
+            "status": "streaming",
+        }
+        msg_repo.create_streaming.return_value = existing
+
+        result = await service.start_streaming_assistant_message(
+            message_id="msg-existing",
+            conversation_id="conv-1",
+        )
+
+        assert result is existing
+        assert result["content"] == [
+            {"type": "reasoning", "content": "уже было"},
+        ]
+
+    async def test_finalize_assistant_message_happy_path(
+        self, service, msg_repo, conv_repo,
+    ):
+        """finalize мержит финальные блоки и тригерит touch беседы."""
+        msg_repo.finalize.return_value = True
+
+        final_blocks = [{"type": "text", "content": "Готовый ответ"}]
+        ok = await service.finalize_assistant_message(
+            message_id="msg-1",
+            conversation_id="conv-1",
+            final_blocks=final_blocks,
+            model="gpt-4o",
+            token_usage={"prompt": 10, "completion": 20},
+        )
+
+        assert ok is True
+        msg_repo.finalize.assert_awaited_once_with(
+            message_id="msg-1",
+            final_blocks=final_blocks,
+            model="gpt-4o",
+            token_usage={"prompt": 10, "completion": 20},
+        )
+        conv_repo.touch.assert_awaited_once_with("conv-1")
+        # Финализация в одной транзакции с touch
+        assert msg_repo.conn.transaction.call_count == 1
+
+    async def test_finalize_returns_false_when_already_complete(
+        self, service, msg_repo, conv_repo,
+    ):
+        """Повторный finalize (race с другим runner'ом) — лог WARNING + False,
+        без touch и без падения."""
+        msg_repo.finalize.return_value = False
+
+        ok = await service.finalize_assistant_message(
+            message_id="msg-1",
+            conversation_id="conv-1",
+            final_blocks=[],
+        )
+
+        assert ok is False
+        msg_repo.finalize.assert_awaited_once()
+        conv_repo.touch.assert_not_awaited()
+
+    async def test_fail_assistant_message_happy_path(
+        self, service, msg_repo, conv_repo,
+    ):
+        """fail помечает запись failed + дописывает error-блок + touch."""
+        msg_repo.mark_failed.return_value = True
+        error_block = {
+            "type": "error",
+            "message": "timeout",
+            "block_id": "msg-1:error:1",
+        }
+
+        ok = await service.fail_assistant_message(
+            message_id="msg-1",
+            conversation_id="conv-1",
+            error_block=error_block,
+        )
+
+        assert ok is True
+        msg_repo.mark_failed.assert_awaited_once_with(
+            message_id="msg-1",
+            error_block=error_block,
+        )
+        conv_repo.touch.assert_awaited_once_with("conv-1")
+
+    async def test_fail_assistant_message_returns_false_when_not_streaming(
+        self, service, msg_repo, conv_repo,
+    ):
+        """Race-сценарий: finalize уже сработал, fail — no-op."""
+        msg_repo.mark_failed.return_value = False
+
+        ok = await service.fail_assistant_message(
+            message_id="msg-1",
+            conversation_id="conv-1",
+            error_block={"type": "error", "message": "x"},
+        )
+
+        assert ok is False
+        conv_repo.touch.assert_not_awaited()
+
+
 # -------------------------------------------------------------------------
 # FileService
 # -------------------------------------------------------------------------
