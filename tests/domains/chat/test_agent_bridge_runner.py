@@ -480,6 +480,7 @@ async def test_schedule_pending_runs_task_per_claimed_id():
     mock_conn = AsyncMock()
     fake_req_repo = MagicMock()
     fake_req_repo.claim_pending = AsyncMock(return_value=["rid-1", "rid-2"])
+    fake_req_repo.get = AsyncMock(return_value={"user_id": "u1"})
     fake_adapter = MagicMock(get_table_name=lambda n: n)
 
     started = []
@@ -522,6 +523,7 @@ async def test_schedule_pending_skips_already_running():
     mock_conn = AsyncMock()
     fake_req_repo = MagicMock()
     fake_req_repo.claim_pending = AsyncMock(return_value=["rid-1", "rid-2"])
+    fake_req_repo.get = AsyncMock(return_value={"user_id": "u1"})
     fake_adapter = MagicMock(get_table_name=lambda n: n)
 
     # Помечаем rid-1 как уже идущую (живая task).

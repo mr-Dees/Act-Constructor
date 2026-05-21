@@ -126,9 +126,11 @@ async def _run(
         AgentBridgeService,
         AgentBridgeTimeout,
     )
+    from app.domains.chat.services.forward_limit import release
     from app.domains.chat.services.message_service import MessageService
 
     ctx_token = None
+    user_id_for_release: str | None = None
     try:
         # ── Phase 1: initial read + dispatch status update ──
         async with get_db() as conn:
@@ -149,6 +151,8 @@ async def _run(
                     "для request_id=%s",
                     parent, request_id,
                 )
+
+            user_id_for_release = request.get("user_id")
 
             if request.get("status") in ("done", "error", "timeout"):
                 logger.info(
@@ -361,6 +365,12 @@ async def _run(
                 "agent_bridge_runner: не удалось пометить статус error",
             )
     finally:
+        # Декремент per-user счётчика активных forward'ов: гарантируем
+        # релиз при любом терминальном пути (success / error / timeout /
+        # crash до Phase 3). Если user_id не успели прочитать (request
+        # не найден до первого SELECT'а) — релизить нечего.
+        if user_id_for_release:
+            release(user_id_for_release)
         # Откатываем correlation_id, чтобы ContextVar не «протёк» в чужие
         # короутины. ContextVar в asyncio.Task изолирован per-task, но reset
         # обязателен на случай, если runner запущен в общем контексте
@@ -599,18 +609,33 @@ async def schedule_pending(
     from app.domains.chat.repositories.agent_request_repository import (
         AgentRequestRepository,
     )
+    from app.domains.chat.services.forward_limit import acquire_no_check
     if coordinator is None:
         from app.domains.chat.deps import get_poll_coordinator
         coordinator = get_poll_coordinator()
     worker_token = str(uuid.uuid4())
     async with get_db() as conn:
-        claimed_ids = await AgentRequestRepository(conn).claim_pending(
+        req_repo = AgentRequestRepository(conn)
+        claimed_ids = await req_repo.claim_pending(
             worker_token=worker_token,
             older_than_sec=older_than_sec,
         )
+        # Подгружаем user_id для каждого подхваченного запроса, чтобы
+        # синхронизировать per-user счётчик forward_limit с тем, что
+        # реально живёт в БД. Без этого после рестарта uvicorn юзер
+        # сможет создать LIMIT+N форвардов одновременно (счётчик 0,
+        # хотя в БД N pending).
+        user_ids_by_rid: dict[str, str] = {}
+        for rid in claimed_ids:
+            row = await req_repo.get(rid)
+            if row and row.get("user_id"):
+                user_ids_by_rid[rid] = row["user_id"]
     count = 0
     for rid in claimed_ids:
         if not is_running(rid):
+            uid = user_ids_by_rid.get(rid)
+            if uid:
+                acquire_no_check(uid)
             schedule(rid, settings=settings, coordinator=coordinator)
             count += 1
     if count:

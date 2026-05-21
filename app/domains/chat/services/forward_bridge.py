@@ -38,6 +38,11 @@ import logging
 from collections.abc import AsyncGenerator
 from typing import Any
 
+from app.domains.chat.exceptions import ChatLimitError
+from app.domains.chat.services.forward_limit import (
+    check_and_acquire,
+    release,
+)
 from app.domains.chat.services.streaming import (
     sse_agent_request_started,
     sse_error,
@@ -81,20 +86,39 @@ async def handle_forward_call(
         build_forward_tool,
     )
 
-    # Регистрация запроса — отдельным коротким соединением.
-    async with get_db() as conn:
-        forward_tool = build_forward_tool(
-            conn=conn,
-            conversation_id=conversation_id,
-            message_id=message_id,
-            user_id=user_id,
-            domain_name=domain_name,
-            knowledge_bases=knowledge_bases,
-            history=history,
-            files=files,
+    # Per-user лимит активных forward'ов. POST SSE короткий — семафор
+    # `_active_streams_per_user` в api/messages.py не лимитирует число
+    # реальных forward'ов в полёте; считаем их здесь, декремент в
+    # agent_bridge_runner._run finally.
+    try:
+        check_and_acquire(user_id, settings.max_parallel_streams_per_user)
+    except ChatLimitError as exc:
+        logger.warning(
+            "Forward отклонён (лимит): user=%s, limit=%d",
+            user_id, settings.max_parallel_streams_per_user,
         )
-        assert forward_tool.handler is not None
-        sentinel = await forward_tool.handler(**arguments)
+        yield ("error", sse_error(error=str(exc), code="forward_limit"))
+        return
+
+    # Регистрация запроса — отдельным коротким соединением.
+    try:
+        async with get_db() as conn:
+            forward_tool = build_forward_tool(
+                conn=conn,
+                conversation_id=conversation_id,
+                message_id=message_id,
+                user_id=user_id,
+                domain_name=domain_name,
+                knowledge_bases=knowledge_bases,
+                history=history,
+                files=files,
+            )
+            assert forward_tool.handler is not None
+            sentinel = await forward_tool.handler(**arguments)
+    except Exception:
+        # Регистрация упала — раннер не стартует, finally release не вызовется.
+        release(user_id)
+        raise
     match = FORWARD_SENTINEL_PATTERN.match(sentinel)
     if not match:
         logger.warning(

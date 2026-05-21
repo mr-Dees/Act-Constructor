@@ -346,6 +346,7 @@ async def test_schedule_pending_does_not_duplicate_running_task():
     mock_conn = AsyncMock()
     fake_req_repo = MagicMock()
     fake_req_repo.claim_pending = AsyncMock(return_value=["rid-live"])
+    fake_req_repo.get = AsyncMock(return_value={"user_id": "u1"})
     fake_adapter = MagicMock(get_table_name=lambda n: n)
 
     # Регистрируем "живую" задачу под этим id ДО reconcile.

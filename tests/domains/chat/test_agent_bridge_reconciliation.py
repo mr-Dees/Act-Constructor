@@ -97,6 +97,7 @@ async def test_schedule_pending_claims_only_old():
             [],
         ],
     )
+    fake_req_repo.get = AsyncMock(return_value={"user_id": "u1"})
 
     # _run должен висеть до отмены, чтобы задача считалась "живой" между
     # двумя вызовами schedule_pending.
