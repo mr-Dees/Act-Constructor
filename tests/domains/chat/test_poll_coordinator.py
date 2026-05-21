@@ -36,7 +36,7 @@ def _coordinator(
 
 async def test_subscribe_returns_queue():
     """Подписка возвращает asyncio.Queue; повторная подписка — та же очередь."""
-    async def empty_poll(rids):
+    async def empty_poll(rids, _since_seqs=None):
         return {}
     pc = _coordinator(empty_poll)
     q1 = await pc.subscribe("rid-1")
@@ -47,7 +47,7 @@ async def test_subscribe_returns_queue():
 
 async def test_unsubscribe_removes_subscriber():
     """После unsubscribe подписчика нет в списке активных."""
-    async def empty_poll(rids):
+    async def empty_poll(rids, _since_seqs=None):
         return {}
     pc = _coordinator(empty_poll)
     await pc.subscribe("rid-1")
@@ -65,7 +65,7 @@ async def test_poll_loop_batches_multiple_subscribers():
     event_for_r1 = {"seq": 1, "event_type": "reasoning", "payload": {"t": "a"}}
     done = asyncio.Event()
 
-    async def poll(rids):
+    async def poll(rids, _since_seqs=None):
         received_calls.append(list(rids))
         if len(received_calls) == 1:
             result = {"r1": [event_for_r1], "r2": [], "r3": []}
@@ -104,7 +104,7 @@ async def test_no_subscribers_idle():
     """Без подписчиков poll_batch_fn не вызывается."""
     calls = []
 
-    async def poll(rids):
+    async def poll(rids, _since_seqs=None):
         calls.append(list(rids))
         return {}
 
@@ -123,7 +123,7 @@ async def test_backoff_grows_on_empty_polls():
     Эмулирует цикл вручную, чтобы не зависеть от реального scheduler'а.
     Проверяет именно расчёт нового интервала после пустого тика.
     """
-    async def poll(rids):
+    async def poll(rids, _since_seqs=None):
         return {r: [] for r in rids}
 
     pc = _coordinator(
@@ -139,7 +139,7 @@ async def test_backoff_grows_on_empty_polls():
     interval = pc._poll_min_interval_sec
     sleeps = [interval]
     for _ in range(5):
-        events_by_id = await pc._poll_batch_fn(["r1"])
+        events_by_id = await pc._poll_batch_fn(["r1"], {})
         any_events = any(events_by_id.values())
         if any_events:
             interval = pc._poll_min_interval_sec
@@ -159,7 +159,7 @@ async def test_backoff_resets_on_event():
     call_n = {"n": 0}
     event = {"seq": 5, "event_type": "reasoning", "payload": {}}
 
-    async def poll(rids):
+    async def poll(rids, _since_seqs=None):
         call_n["n"] += 1
         if call_n["n"] == 3:
             return {"r1": [event]}
@@ -176,7 +176,7 @@ async def test_backoff_resets_on_event():
     interval = pc._poll_min_interval_sec
     intervals = [interval]
     for _ in range(5):
-        events_by_id = await pc._poll_batch_fn(["r1"])
+        events_by_id = await pc._poll_batch_fn(["r1"], {})
         any_events = any(events_by_id.values())
         if any_events:
             interval = pc._poll_min_interval_sec
@@ -193,7 +193,7 @@ async def test_backoff_resets_on_event():
 
 async def test_stop_cancels_background_task():
     """stop() отменяет фоновую задачу, повторный start/stop — корректные."""
-    async def empty_poll(rids):
+    async def empty_poll(rids, _since_seqs=None):
         return {}
     pc = _coordinator(empty_poll)
     await pc.subscribe("r1")
@@ -215,7 +215,7 @@ async def test_stop_cancels_background_task():
 
 def test_invalid_intervals_raise():
     """Конструктор валидирует параметры: min<=max, multiplier>1.0."""
-    async def empty_poll(rids):
+    async def empty_poll(rids, _since_seqs=None):
         return {}
 
     with pytest.raises(ValueError):
@@ -234,12 +234,46 @@ def test_invalid_intervals_raise():
         )
 
 
+async def test_poll_batch_receives_cursors_after_event():
+    """После event с seq=N координатор передаёт {rid: N} в следующий вызов poll_batch_fn.
+
+    Регрессия: до фикса координатор сохранял курсор в памяти, но не пробрасывал
+    его в SQL — каждый тик читал все события с начала, runner-очередь
+    накапливала дубликаты (видели до 10× повтор одного reasoning-блока в
+    сохранённом ассистент-сообщении).
+    """
+    seen_cursors: list[dict] = []
+    e1 = {"seq": 7, "event_type": "reasoning", "payload": {}}
+    state = {"n": 0}
+
+    async def poll(rids, since_seqs=None):
+        seen_cursors.append(dict(since_seqs or {}))
+        state["n"] += 1
+        if state["n"] == 1:
+            return {"r1": [e1]}
+        return {"r1": []}
+
+    pc = _coordinator(poll, poll_min_interval_sec=0.005,
+                      poll_max_interval_sec=0.02)
+    await pc.subscribe("r1")
+    await pc.start()
+    for _ in range(20):
+        if len(seen_cursors) >= 2:
+            break
+        await asyncio.sleep(0.02)
+    await pc.stop()
+
+    assert len(seen_cursors) >= 2, "должны быть хотя бы 2 тика"
+    assert seen_cursors[0].get("r1") is None
+    assert seen_cursors[1].get("r1") == 7
+
+
 async def test_event_advances_since_seq_cursor():
     """Получив event с seq=N, координатор сохраняет курсор для request_id."""
     state = {"n": 0}
     e1 = {"seq": 10, "event_type": "reasoning", "payload": {}}
 
-    async def poll(rids):
+    async def poll(rids, _since_seqs=None):
         state["n"] += 1
         if state["n"] == 1:
             return {"r1": [e1]}
@@ -257,7 +291,7 @@ async def test_event_advances_since_seq_cursor():
 
 async def test_watchdog_restarts_dead_poll_loop():
     """Watchdog перезапускает _poll_loop, если он завершился (task.done)."""
-    async def empty_poll(rids):
+    async def empty_poll(rids, _since_seqs=None):
         return {r: [] for r in rids}
 
     pc = _coordinator(
@@ -301,7 +335,7 @@ async def test_watchdog_restarts_dead_poll_loop():
 
 async def test_watchdog_does_not_restart_healthy_loop():
     """Watchdog НЕ рестартует _poll_loop, если heartbeat свежий."""
-    async def empty_poll(rids):
+    async def empty_poll(rids, _since_seqs=None):
         return {r: [] for r in rids}
 
     pc = _coordinator(
@@ -331,7 +365,7 @@ async def test_observer_receives_events_fanout():
     """
     events_to_return = [{"seq": 1, "event_type": "reasoning", "payload": {}}]
 
-    async def poll(rids):
+    async def poll(rids, _since_seqs=None):
         return {rid: events_to_return for rid in rids}
 
     pc = _coordinator(poll)
@@ -356,7 +390,7 @@ async def test_observer_receives_events_fanout():
 
 async def test_unsubscribe_observer_removes_only_target_queue():
     """unsubscribe_observer удаляет конкретную очередь, остальные живут."""
-    async def empty_poll(rids):
+    async def empty_poll(rids, _since_seqs=None):
         return {}
 
     pc = _coordinator(empty_poll)
@@ -379,7 +413,7 @@ async def test_observer_does_not_advance_cursor_without_runner():
     """
     events = [{"seq": 5, "event_type": "reasoning", "payload": {}}]
 
-    async def poll(rids):
+    async def poll(rids, _since_seqs=None):
         return {rid: events for rid in rids}
 
     pc = _coordinator(poll)
@@ -400,7 +434,7 @@ async def test_watchdog_skips_restart_after_stop_event_set():
     после "Shutting down" (видели в проде: "рестартов=1" уже после
     сигнала остановки). После фикса рестарт — no-op при stop_event set.
     """
-    async def empty_poll(rids):
+    async def empty_poll(rids, _since_seqs=None):
         return {r: [] for r in rids}
 
     pc = _coordinator(empty_poll)
@@ -418,7 +452,7 @@ async def test_watchdog_skips_restart_after_stop_event_set():
 
 async def test_watchdog_validates_stale_factor():
     """watchdog_stale_factor < 1.5 — конструктор отказывает."""
-    async def empty_poll(rids):
+    async def empty_poll(rids, _since_seqs=None):
         return {}
 
     with pytest.raises(ValueError, match="watchdog_stale_factor"):
@@ -436,7 +470,7 @@ async def test_unsubscribed_during_poll_does_not_crash():
     poll_called = asyncio.Event()
     state = {"unsubscribed": False}
 
-    async def poll(rids):
+    async def poll(rids, _since_seqs=None):
         # Имитируем "медленный" poll: между вычислением active_ids
         # и доставкой подписчик может отписаться.
         poll_called.set()

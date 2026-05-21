@@ -188,11 +188,14 @@ def _register_lifespan_hooks() -> None:
 
         async def _poll_batch_fn(
             request_ids: list[str],
+            since_seqs: dict[str, int | None],
         ) -> dict[str, list[dict]]:
             """Один SELECT по всем активным request_id (новый коннект на тик)."""
             async with get_db() as conn:
                 bridge = AgentBridgeService(conn)
-                return await bridge.poll_events_batch(request_ids)
+                return await bridge.poll_events_batch(
+                    request_ids, since_seqs=since_seqs,
+                )
 
         coordinator = PollCoordinator(
             poll_batch_fn=_poll_batch_fn,

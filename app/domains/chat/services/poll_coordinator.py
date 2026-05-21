@@ -27,11 +27,14 @@ logger = logging.getLogger(
 )
 
 
-# Сигнатура батч-функции: список request_id → dict[request_id -> events].
+# Сигнатура батч-функции: список request_id + per-id курсоры → dict[request_id -> events].
+# Курсоры передаются в SQL (WHERE seq > cursor), иначе каждый тик возвращает
+# все события с начала, и runner-очередь копит дубликаты.
 # Параметризовано Callable, чтобы координатор не тащил жёсткую зависимость
 # от AgentBridgeService и был легко тестируем.
 PollBatchFn = Callable[
-    [list[str]], Awaitable[dict[str, list[dict]]],
+    [list[str], dict[str, int | None]],
+    Awaitable[dict[str, list[dict]]],
 ]
 
 
@@ -259,7 +262,13 @@ class PollCoordinator:
                 ids_for_batch = list(
                     set(active_ids) | set(self._observers.keys()),
                 )
-                events_by_id = await self._poll_batch_fn(ids_for_batch)
+                # Курсоры из snapshot'а cursors: SQL фильтрует WHERE
+                # seq > cursor. Без этого каждый тик читает ВСЕ события
+                # request_id с начала и пушит их в очередь runner'а →
+                # `blocks` накапливает 5x-10x дубликатов одного reasoning.
+                events_by_id = await self._poll_batch_fn(
+                    ids_for_batch, cursors,
+                )
                 any_events = False
                 async with self._lock:
                     for rid, events in events_by_id.items():
