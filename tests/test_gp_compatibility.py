@@ -210,6 +210,47 @@ class TestGreenplumSchemaCompatibility:
             f"Обнаруженные домены: {sorted(domain_names)}"
         )
 
+    def test_chat_messages_has_status_column(self):
+        """chat_messages в обеих схемах содержит колонку status с CHECK-констрейнтом
+        check_chat_messages_status_values (Phase 0 «D»: server-authoritative state)."""
+        base = Path(__file__).parent.parent / "app" / "domains" / "chat" / "migrations"
+        for db_type in ("postgresql", "greenplum"):
+            schema_path = base / db_type / "schema.sql"
+            content = schema_path.read_text(encoding="utf-8")
+
+            # Используем splitter — он корректно игнорирует ; внутри
+            # комментариев / строк / dollar-quoting.
+            stmts = DatabaseAdapter._split_sql_statements(content)
+            create_stmt = None
+            for raw in stmts:
+                # Срезаем line-комментарии — иначе документация может шадовить.
+                cleaned = re.sub(r'--[^\n]*', '', raw)
+                if (
+                    re.search(r'\bCREATE\s+TABLE\b', cleaned, re.IGNORECASE)
+                    and "{PREFIX}chat_messages" in cleaned
+                    and "agent" not in cleaned  # отсекаем chat_audit_log/etc, не нужно
+                ):
+                    create_stmt = cleaned
+                    break
+
+            assert create_stmt is not None, (
+                f"{db_type}/schema.sql: CREATE TABLE chat_messages не найдено"
+            )
+            assert re.search(r'\bstatus\b\s+VARCHAR', create_stmt, re.IGNORECASE), (
+                f"{db_type}/schema.sql: колонка status не найдена в "
+                f"CREATE TABLE chat_messages"
+            )
+            assert "check_chat_messages_status_values" in create_stmt, (
+                f"{db_type}/schema.sql: CHECK-констрейнт "
+                f"check_chat_messages_status_values не найден в "
+                f"CREATE TABLE chat_messages"
+            )
+            # Допустимые значения статуса
+            for v in ("streaming", "complete", "failed"):
+                assert f"'{v}'" in create_stmt, (
+                    f"{db_type}/schema.sql: значение '{v}' отсутствует в CHECK"
+                )
+
     def test_chat_gp_schema_has_agent_bridge_tables(self):
         """Новые agent_* таблицы добавлены в GP-схему чата и используют {SCHEMA}.{PREFIX}."""
         schema_path = (

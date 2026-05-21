@@ -24,10 +24,47 @@ CREATE TABLE IF NOT EXISTS {SCHEMA}.{PREFIX}chat_messages (
     content         JSONB NOT NULL,
     model           VARCHAR(100),
     token_usage     JSONB,
+    -- Жизненный цикл assistant-сообщения: streaming → complete (или failed).
+    -- 'streaming' — сообщение материализуется по мере прихода блоков от LLM/
+    -- внешнего агента; 'complete' — финализированное; 'failed' — оборвалось
+    -- с ошибкой. User-сообщения создаются сразу со статусом 'complete'.
+    status          VARCHAR(20) NOT NULL DEFAULT 'complete'
+                    CONSTRAINT check_chat_messages_status_values
+                    CHECK (status IN ('streaming','complete','failed')),
     created_at      TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
 CREATE INDEX IF NOT EXISTS idx_{PREFIX}chat_messages_conversation ON {SCHEMA}.{PREFIX}chat_messages(conversation_id);
 CREATE INDEX IF NOT EXISTS idx_{PREFIX}chat_messages_created ON {SCHEMA}.{PREFIX}chat_messages(conversation_id, created_at);
+-- Partial-индекс под выборку «висящих» streaming-сообщений беседы при
+-- ресанье/восстановлении. Поддерживается с PG 9.4.
+CREATE INDEX IF NOT EXISTS idx_{PREFIX}chat_messages_streaming
+    ON {SCHEMA}.{PREFIX}chat_messages(conversation_id, status)
+    WHERE status = 'streaming';
+
+-- Идемпотентная миграция status-колонки для уже существующих БД, где
+-- CREATE TABLE IF NOT EXISTS выше не сработал. DO-блок работает в PG 9.4+;
+-- ADD COLUMN IF NOT EXISTS появилось только в 9.6.
+DO $$
+BEGIN
+    IF NOT EXISTS (
+        SELECT 1 FROM pg_attribute
+        WHERE attrelid = '{SCHEMA}.{PREFIX}chat_messages'::regclass
+          AND attname = 'status'
+          AND NOT attisdropped
+    ) THEN
+        ALTER TABLE {SCHEMA}.{PREFIX}chat_messages
+            ADD COLUMN status VARCHAR(20) NOT NULL DEFAULT 'complete';
+    END IF;
+    IF NOT EXISTS (
+        SELECT 1 FROM pg_constraint
+        WHERE conrelid = '{SCHEMA}.{PREFIX}chat_messages'::regclass
+          AND conname = 'check_chat_messages_status_values'
+    ) THEN
+        ALTER TABLE {SCHEMA}.{PREFIX}chat_messages
+            ADD CONSTRAINT check_chat_messages_status_values
+            CHECK (status IN ('streaming','complete','failed'));
+    END IF;
+END$$;
 
 CREATE TABLE IF NOT EXISTS {SCHEMA}.{PREFIX}chat_files (
     id              VARCHAR(36) PRIMARY KEY,
@@ -122,7 +159,7 @@ CREATE TABLE IF NOT EXISTS {SCHEMA}.{PREFIX}agent_response_events (
     seq           INTEGER NOT NULL,
     event_type    VARCHAR(20) NOT NULL
                   CONSTRAINT check_agent_response_events_event_type_values
-                  CHECK (event_type IN ('reasoning','status','error')),
+                  CHECK (event_type IN ('reasoning','status','error','final')),
     payload       JSONB NOT NULL,
     created_at    TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
     CONSTRAINT uniq_{PREFIX}agent_response_events_request_seq

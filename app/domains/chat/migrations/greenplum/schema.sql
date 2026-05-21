@@ -35,16 +35,37 @@ CREATE TABLE IF NOT EXISTS {SCHEMA}.{PREFIX}chat_messages (
     content         JSONB NOT NULL,
     model           VARCHAR(100),
     token_usage     JSONB,
+    -- Жизненный цикл assistant-сообщения: streaming → complete (или failed).
+    -- User-сообщения создаются сразу со статусом 'complete'.
+    status          VARCHAR(20) NOT NULL DEFAULT 'complete'
+                    CONSTRAINT check_chat_messages_status_values
+                    CHECK (status IN ('streaming','complete','failed')),
     created_at      TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
 )
 WITH (appendonly=false)
 DISTRIBUTED BY (id);
+
+-- Идемпотентная миграция для существующих GP-таблиц. GP 6.x (PG 9.4)
+-- не поддерживает ADD COLUMN/CONSTRAINT IF NOT EXISTS — выполняем
+-- безусловно и полагаемся на GreenplumAdapter, который ловит
+-- DuplicateColumnError / DuplicateObjectError.
+ALTER TABLE {SCHEMA}.{PREFIX}chat_messages
+    ADD COLUMN status VARCHAR(20) NOT NULL DEFAULT 'complete';
+
+ALTER TABLE {SCHEMA}.{PREFIX}chat_messages
+    ADD CONSTRAINT check_chat_messages_status_values
+    CHECK (status IN ('streaming','complete','failed'));
 
 CREATE INDEX idx_{PREFIX}chat_messages_conversation
     ON {SCHEMA}.{PREFIX}chat_messages(conversation_id);
 
 CREATE INDEX idx_{PREFIX}chat_messages_created
     ON {SCHEMA}.{PREFIX}chat_messages(conversation_id, created_at);
+
+-- Под выборку «висящих» streaming-сообщений беседы. На GP partial-индексы
+-- (WHERE ...) не используем — полный композитный надёжнее.
+CREATE INDEX idx_{PREFIX}chat_messages_status
+    ON {SCHEMA}.{PREFIX}chat_messages(conversation_id, status);
 
 -- ============================================================================
 -- ТАБЛИЦА ФАЙЛОВ
@@ -160,7 +181,7 @@ CREATE TABLE IF NOT EXISTS {SCHEMA}.{PREFIX}agent_response_events (
     seq           INTEGER NOT NULL,
     event_type    VARCHAR(20) NOT NULL
                   CONSTRAINT check_agent_response_events_event_type_values
-                  CHECK (event_type IN ('reasoning','status','error')),
+                  CHECK (event_type IN ('reasoning','status','error','final')),
     payload       JSONB NOT NULL,
     created_at    TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
     -- GP-требование: DISTRIBUTED BY должен быть подмножеством PK и UNIQUE.

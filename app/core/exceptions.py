@@ -91,6 +91,11 @@ CHECK_CONSTRAINT_MESSAGES: dict[str, str] = {
     "check_metrics_is_array": "Поле metrics должно быть массивом JSON",
     # ── chat: chat_files ─────────────────────────────────────────────────────
     "check_chat_files_file_size_positive": "Размер файла должен быть больше нуля",
+    # ── chat: chat_messages ──────────────────────────────────────────────────
+    "check_chat_messages_status_values": (
+        "Недопустимый статус сообщения. "
+        "Допустимые значения: streaming, complete, failed"
+    ),
     # ── chat: agent_requests ─────────────────────────────────────────────────
     "check_agent_requests_status_values": (
         "Недопустимый статус запроса к ИИ-агенту. "
@@ -98,7 +103,8 @@ CHECK_CONSTRAINT_MESSAGES: dict[str, str] = {
     ),
     # ── chat: agent_response_events ──────────────────────────────────────────
     "check_agent_response_events_event_type_values": (
-        "Недопустимый тип события агента. Допустимые значения: reasoning, status, error"
+        "Недопустимый тип события агента. "
+        "Допустимые значения: reasoning, status, error, final"
     ),
     # ── chat: agent_responses ────────────────────────────────────────────────
     "check_agent_responses_finish_reason_values": (
