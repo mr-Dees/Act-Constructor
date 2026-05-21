@@ -323,6 +323,99 @@ async def test_watchdog_does_not_restart_healthy_loop():
     await pc.stop()
 
 
+async def test_observer_receives_events_fanout():
+    """subscribe_observer получает копии всех событий рядом с runner-subscribe.
+
+    Это и есть смысл observer-канала: N Resume SSE на один request_id
+    получают тот же поток событий через fan-out, без N×SELECT'ов.
+    """
+    events_to_return = [{"seq": 1, "event_type": "reasoning", "payload": {}}]
+
+    async def poll(rids):
+        return {rid: events_to_return for rid in rids}
+
+    pc = _coordinator(poll)
+    runner_q = await pc.subscribe("rid-fanout")
+    observer_q = await pc.subscribe_observer("rid-fanout")
+    await pc.start()
+
+    # Ждём хотя бы один тик
+    await asyncio.sleep(0.05)
+
+    # Runner и observer оба получили одно и то же событие
+    assert not runner_q.empty(), "runner-очередь должна получить событие"
+    assert not observer_q.empty(), "observer-очередь должна получить копию"
+
+    runner_ev = await runner_q.get()
+    observer_ev = await observer_q.get()
+    assert runner_ev["seq"] == 1
+    assert observer_ev["seq"] == 1
+
+    await pc.stop()
+
+
+async def test_unsubscribe_observer_removes_only_target_queue():
+    """unsubscribe_observer удаляет конкретную очередь, остальные живут."""
+    async def empty_poll(rids):
+        return {}
+
+    pc = _coordinator(empty_poll)
+    q1 = await pc.subscribe_observer("rid-1")
+    q2 = await pc.subscribe_observer("rid-1")
+
+    assert len(pc._observers["rid-1"]) == 2
+
+    await pc.unsubscribe_observer("rid-1", q1)
+    assert q2 in pc._observers["rid-1"]
+    assert q1 not in pc._observers["rid-1"]
+    assert len(pc._observers["rid-1"]) == 1
+
+
+async def test_observer_does_not_advance_cursor_without_runner():
+    """Если runner ещё не подписан, observer'у события идут, но cursor НЕ двигается.
+
+    Регрессия: иначе подписавшийся позже runner начал бы с пустоты,
+    т.к. координатор уже выбрал события из БД и обновил курсор.
+    """
+    events = [{"seq": 5, "event_type": "reasoning", "payload": {}}]
+
+    async def poll(rids):
+        return {rid: events for rid in rids}
+
+    pc = _coordinator(poll)
+    await pc.subscribe_observer("rid-obs-only")
+    await pc.start()
+    await asyncio.sleep(0.05)
+
+    # Курсор должен остаться None (нет runner-подписки)
+    assert pc._since_seqs.get("rid-obs-only") is None
+    await pc.stop()
+
+
+async def test_watchdog_skips_restart_after_stop_event_set():
+    """Watchdog не рестартует _poll_loop, если в этот момент stop_event set.
+
+    Регрессия: при graceful shutdown lifespan-shutdown задерживается
+    активными SSE-стримами, и watchdog успевал рестартовать координатор
+    после "Shutting down" (видели в проде: "рестартов=1" уже после
+    сигнала остановки). После фикса рестарт — no-op при stop_event set.
+    """
+    async def empty_poll(rids):
+        return {r: [] for r in rids}
+
+    pc = _coordinator(empty_poll)
+
+    # Эмулируем shutdown: stop_event set, _restart_poll_loop вызывают как
+    # вызвал бы watchdog. Не должен ничего создавать.
+    pc._stop_event.set()
+    pc._restart_poll_loop()
+
+    assert pc._task is None, "рестарт не должен создавать новую задачу при stop_event set"
+    assert pc._restart_count == 0, (
+        f"restart_count не инкрементируется (got={pc._restart_count})"
+    )
+
+
 async def test_watchdog_validates_stale_factor():
     """watchdog_stale_factor < 1.5 — конструктор отказывает."""
     async def empty_poll(rids):

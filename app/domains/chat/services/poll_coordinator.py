@@ -79,6 +79,12 @@ class PollCoordinator:
         self._watchdog_stale_factor = watchdog_stale_factor
 
         self._subscribers: dict[str, asyncio.Queue] = {}
+        # Наблюдатели (Resume SSE) — fan-out копий событий без влияния
+        # на cursor координатора. На один request_id может быть N очередей
+        # (несколько вкладок/окон одного клиента). Сам координатор не
+        # эмитит финальный response — наблюдатели опрашивают agent_responses
+        # сами коротким SELECT'ом (как и обычный subscriber).
+        self._observers: dict[str, list[asyncio.Queue]] = {}
         self._since_seqs: dict[str, int | None] = {}
         self._lock = asyncio.Lock()
         self._stop_event = asyncio.Event()
@@ -113,13 +119,61 @@ class PollCoordinator:
             return queue
 
     async def unsubscribe(self, request_id: str) -> None:
-        """Удаляет подписку. Идемпотентно (повторный вызов — no-op)."""
+        """Удаляет подписку. Идемпотентно (повторный вызов — no-op).
+
+        Курсор и observer'ы НЕ удаляются — observer'ы независимы от
+        runner'ского subscribe, и могут пережить runner (например, если
+        Resume SSE дочитывает события после save'а ассистент-сообщения).
+        """
         async with self._lock:
             self._subscribers.pop(request_id, None)
             self._since_seqs.pop(request_id, None)
             logger.debug(
                 "poll_coordinator: отписан request_id=%s (осталось=%d)",
                 request_id, len(self._subscribers),
+            )
+
+    async def subscribe_observer(self, request_id: str) -> asyncio.Queue:
+        """Подписывает наблюдателя (Resume SSE) — отдельная очередь fan-out.
+
+        Каждый вызов создаёт НОВУЮ очередь — в отличие от :meth:`subscribe`,
+        которая идемпотентна. Несколько Resume SSE для одного request_id
+        получат каждый свою очередь, через которую координатор fan-out'ит
+        копии событий.
+
+        Backfill (события, поступившие ДО подписки) — задача вызывающего:
+        перед subscribe сделать один SELECT через ``poll_events(since_seq)``
+        и затем фильтровать дубли через сравнение seq. Координатор истории
+        не хранит.
+        """
+        queue: asyncio.Queue = asyncio.Queue()
+        async with self._lock:
+            self._observers.setdefault(request_id, []).append(queue)
+            logger.debug(
+                "poll_coordinator: observer подписан на request_id=%s "
+                "(observers=%d)",
+                request_id, len(self._observers[request_id]),
+            )
+        return queue
+
+    async def unsubscribe_observer(
+        self, request_id: str, queue: asyncio.Queue,
+    ) -> None:
+        """Снимает конкретного наблюдателя. Идемпотентно."""
+        async with self._lock:
+            queues = self._observers.get(request_id)
+            if queues is None:
+                return
+            try:
+                queues.remove(queue)
+            except ValueError:
+                return
+            if not queues:
+                self._observers.pop(request_id, None)
+            logger.debug(
+                "poll_coordinator: observer отписан от request_id=%s "
+                "(осталось=%d)",
+                request_id, len(self._observers.get(request_id, [])),
             )
 
     async def start(self) -> None:
@@ -198,22 +252,42 @@ class PollCoordinator:
                     await self._wait(interval)
                     continue
 
-                events_by_id = await self._poll_batch_fn(active_ids)
+                # Объединяем активные id подписчиков и наблюдателей:
+                # наблюдатели тоже хотят live-события, даже если runner
+                # уже отписался (например, Resume SSE открыли после
+                # сохранения ассистент-сообщения для дочитывания).
+                ids_for_batch = list(
+                    set(active_ids) | set(self._observers.keys()),
+                )
+                events_by_id = await self._poll_batch_fn(ids_for_batch)
                 any_events = False
                 async with self._lock:
                     for rid, events in events_by_id.items():
                         if not events:
                             continue
                         queue = self._subscribers.get(rid)
-                        if queue is None:
-                            # Подписчик отписался прямо во время polling'а —
-                            # события не попадут в очередь, это нормально.
+                        observers = self._observers.get(rid) or []
+                        if queue is None and not observers:
+                            # Никого нет — события игнорируем (cursor НЕ
+                            # двигаем; если позже подпишется кто-то, он
+                            # сделает свой backfill SELECT).
                             continue
                         any_events = True
                         for ev in events:
-                            await queue.put(ev)
+                            if queue is not None:
+                                await queue.put(ev)
+                            for obs_q in observers:
+                                # put_nowait безопасен: Queue без maxsize
+                                # не блокируется. Если наблюдатель завис
+                                # на get() — события копятся в его очереди
+                                # и будут обработаны при разморозке.
+                                obs_q.put_nowait(ev)
                             seq = ev.get("seq")
-                            if seq is not None:
+                            if seq is not None and queue is not None:
+                                # Курсор двигаем только при наличии runner-
+                                # подписчика. Иначе наблюдатель «съел» бы
+                                # события, и подписавшийся позже runner
+                                # начал бы с пустоты.
                                 self._since_seqs[rid] = seq
 
                 # Adaptive backoff
@@ -267,8 +341,13 @@ class PollCoordinator:
         loop = asyncio.get_event_loop()
 
         while not self._stop_event.is_set():
+            # _wait прерывается stop_event'ом — graceful shutdown будит
+            # watchdog мгновенно, без ожидания полного check_interval.
+            # Иначе watchdog мог рестартовать _poll_loop прямо во время
+            # shutdown'а (наблюдалось в проде: «рестартов=1» после
+            # "Shutting down").
             try:
-                await asyncio.sleep(check_interval)
+                await self._wait(check_interval)
             except asyncio.CancelledError:
                 return
 
@@ -302,7 +381,18 @@ class PollCoordinator:
 
         Подписчики и курсоры сохраняются — после рестарта новый цикл
         продолжит polling тех же ``request_id`` с того же ``since_seqs``.
+
+        No-op если ``stop_event`` уже set — это означает, что приложение
+        в shutdown'е и новый цикл создавать незачем. Без этой проверки
+        watchdog рестартовал _poll_loop прямо во время graceful shutdown,
+        потому что lifespan-shutdown задерживается ожидающими SSE-стримами.
         """
+        if self._stop_event.is_set():
+            logger.info(
+                "poll_coordinator: рестарт отменён — stop_event set "
+                "(shutdown в процессе)",
+            )
+            return
         old_task = self._task
         if old_task is not None and not old_task.done():
             old_task.cancel()
