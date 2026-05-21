@@ -49,6 +49,15 @@ router = APIRouter(dependencies=[Depends(require_domain_access("chat"))])
 _active_resume_cancels: dict[str, asyncio.Event] = {}
 
 
+# Однократный warn про устаревший since_seq: с переходом на
+# server-authoritative state (chat_messages.content хранит reasoning'и
+# через инкрементальный append_block) фронт получает историю через
+# GET /messages, и Resume SSE НЕ должен повторно отдавать reasoning'и.
+# Параметр оставлен для совместимости со старыми фронтами до выкладки
+# frontend-changes; внутри ВСЕГДА игнорируется (since_seq=None).
+_since_seq_warned = False
+
+
 @router.get(
     "/conversations/{conversation_id}/active-forward",
     summary="Активный forward-запрос внешнего агента (для resume)",
@@ -99,11 +108,16 @@ async def stream_forward_resume(
     request_id: str,
     since_seq: int | None = Query(
         None,
+        deprecated=True,
         description=(
-            "Курсор: отдавать только события с seq > since_seq. Фронт "
-            "передаёт максимальный seq уже отрендеренных reasoning-блоков "
-            "(парсит из block_id), чтобы не получить их повторно при "
-            "переоткрытии чата."
+            "DEPRECATED (Phase 1 «D»): с переходом на server-authoritative "
+            "state весь reasoning хранится в chat_messages.content; фронт "
+            "получает историю через GET /messages. Resume SSE больше НЕ "
+            "должен повторно отдавать reasoning'и через события — это "
+            "лишний трафик и потенциальный дубль (фронт идемпотентно "
+            "отмерджит по block_id, но). Параметр принимается для "
+            "совместимости с пока не обновлённым фронтом, внутри "
+            "ИГНОРИРУЕТСЯ. Через 1–2 релиза будет удалён."
         ),
     ),
     username: str = Depends(get_username),
@@ -117,6 +131,18 @@ async def stream_forward_resume(
     """
     # Ownership беседы: 404 если чужая или отсутствует.
     await conv_service.get(conversation_id, username)
+
+    # Однократный warn про устаревший since_seq — чтобы не засорять логи.
+    global _since_seq_warned
+    if since_seq is not None and not _since_seq_warned:
+        logger.warning(
+            "Параметр since_seq в /forward-stream устарел "
+            "(Phase 1 «D»: server-authoritative state). Получено "
+            "since_seq=%s — игнорируется. Этот warning эмитится один "
+            "раз на запуск процесса.",
+            since_seq,
+        )
+        _since_seq_warned = True
 
     from app.core.settings_registry import get as get_domain_settings
     from app.db.connection import get_db
@@ -187,12 +213,14 @@ async def stream_forward_resume(
                 coordinator = get_poll_coordinator()
             except RuntimeError:
                 coordinator = None  # тесты без поднятого координатора
+            # since_seq игнорируем (Phase 1 «D»): reasoning'и теперь в
+            # chat_messages.content, фронт получает их через GET /messages.
             async for kind, payload in stream_forward_events(
                 settings=chat_settings,
                 request_id=request_id,
                 message_id=message_id,
                 block_index_start=0,
-                since_seq=since_seq,
+                since_seq=None,
                 cancel_event=cancel_event,
                 coordinator=coordinator,
             ):
