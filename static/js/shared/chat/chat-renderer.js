@@ -72,6 +72,30 @@ const ChatRenderer = {
     },
 
     /**
+     * Добавляет typing-индикатор в конец контейнера, если его там ещё нет.
+     * Используется при рендере streaming-assistant-сообщения из истории
+     * (`msg.status === 'streaming'`).
+     *
+     * @param {HTMLElement} container — контейнер bot-сообщения
+     */
+    appendTypingIndicator(container) {
+        if (!container) return;
+        const existing = container.querySelector(':scope > .chat-typing-placeholder');
+        if (existing) return;
+        container.appendChild(this.createTypingPlaceholder());
+    },
+
+    /**
+     * Алиас для `removeTypingPlaceholder` — публичный API для финализации
+     * streaming-сообщения.
+     *
+     * @param {HTMLElement} container
+     */
+    removeTypingIndicator(container) {
+        this.removeTypingPlaceholder(container);
+    },
+
+    /**
      * Рендерит массив блоков в DOM-контейнер
      *
      * @param {HTMLElement} container — контейнер для отрисовки
@@ -103,6 +127,22 @@ const ChatRenderer = {
      */
     appendBlock(container, el) {
         if (!container || !el) return;
+
+        // Идемпотентный merge по data-block-id: если блок с тем же id
+        // уже есть в контейнере, заменяем его. Это нужно для случая
+        // «при reload пришёл финал с тем же block_id, что был streaming-
+        // партиал, — заменить полным телом». Live-стрим избегает этой
+        // ветки через DOM-дедуп в ChatMessages._handleSSEEvent (не вызывает
+        // appendBlock для существующего id).
+        if (el.dataset && el.dataset.blockId) {
+            const existing = container.querySelector(
+                `[data-block-id="${CSS.escape(el.dataset.blockId)}"]`,
+            );
+            if (existing) {
+                existing.replaceWith(el);
+                return;
+            }
+        }
 
         const isReasoning = el.classList
             && el.classList.contains('chat-block-reasoning');
@@ -188,29 +228,39 @@ const ChatRenderer = {
         if (!block || !block.type) return null;
         const options = opts || {};
 
+        let el;
         switch (block.type) {
             case 'text':
-                return this._renderText(block);
+                el = this._renderText(block); break;
             case 'code':
-                return this._renderCode(block);
+                el = this._renderCode(block); break;
             case 'reasoning':
-                return this._renderReasoning(block);
+                el = this._renderReasoning(block); break;
             case 'plan':
-                return this._renderPlan(block);
+                el = this._renderPlan(block); break;
             case 'file':
-                return this._renderFile(block);
+                el = this._renderFile(block); break;
             case 'image':
-                return this._renderImage(block);
+                el = this._renderImage(block); break;
             case 'buttons':
-                return this._renderButtons(block);
+                el = this._renderButtons(block); break;
             case 'client_action':
-                return this._renderClientAction(block, options);
+                el = this._renderClientAction(block, options); break;
             case 'error':
-                return this._renderError(block);
+                el = this._renderError(block); break;
             default:
                 console.warn('ChatRenderer: неизвестный тип блока', block.type, block);
-                return this._renderUnknown(block);
+                el = this._renderUnknown(block);
         }
+
+        // Прокидываем block_id в dataset для идемпотентного merge в `appendBlock`
+        // и для DOM-дедупа в ChatMessages._handleSSEEvent. Перетирает только
+        // если у конкретного renderer'а ещё не выставлен (reasoning делает это сам).
+        if (el && typeof block.block_id === 'string' && block.block_id
+            && !el.dataset.blockId) {
+            el.dataset.blockId = block.block_id;
+        }
+        return el;
     },
 
     /**
