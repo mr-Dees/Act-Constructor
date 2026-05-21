@@ -84,3 +84,185 @@ class MessageRepository(BaseRepository):
             f"SELECT COUNT(*) FROM {self.table} WHERE conversation_id = $1",
             conversation_id,
         )
+
+    # ── streaming-методы (Phase 0 «D»: server-authoritative state) ──────────
+    # Стратегия: read-modify-write под FOR UPDATE — на GP 6.x / PG 9.4 нет
+    # jsonb_set и оператора `||` для jsonb. Транзакция гарантирует, что
+    # параллельный append/finalize не перетрёт друг друга.
+
+    async def create_streaming(
+        self,
+        *,
+        message_id: str,
+        conversation_id: str,
+        role: str = "assistant",
+        model: str | None = None,
+    ) -> dict:
+        """Создаёт пустое сообщение со status='streaming'.
+
+        Идемпотентен на crash-recovery: при UniqueViolation на id (рестарт
+        процесса между генерацией id и сохранением) делает SELECT
+        существующей записи и возвращает её — runner продолжит
+        материализацию того же message_id, а не создаст новый.
+        """
+        try:
+            row = await self.conn.fetchrow(
+                f"""
+                INSERT INTO {self.table}
+                    (id, conversation_id, role, content, model, status)
+                VALUES ($1, $2, $3, '[]'::jsonb, $4, 'streaming')
+                RETURNING *
+                """,
+                message_id,
+                conversation_id,
+                role,
+                model,
+            )
+            return self._parse_row(row)
+        except asyncpg.UniqueViolationError:
+            # Crash-recovery: запись уже есть (например, после рестарта
+            # uvicorn между genuid и save). Возвращаем существующую.
+            logger.info(
+                "MessageRepository.create_streaming: запись %s уже существует, "
+                "возвращаем существующую (crash-recovery)",
+                message_id,
+            )
+            row = await self.conn.fetchrow(
+                f"SELECT * FROM {self.table} WHERE id = $1",
+                message_id,
+            )
+            return self._parse_row(row)
+
+    async def append_block(self, *, message_id: str, block: dict) -> bool:
+        """Дописывает блок в content streaming-сообщения.
+
+        Возвращает True если блок добавлен (или уже был — идемпотентно
+        по block_id), False если сообщение не в статусе 'streaming'
+        (гонка с finalize / mark_failed).
+        """
+        async with self.conn.transaction():
+            row = await self.conn.fetchrow(
+                f"SELECT content, status FROM {self.table} WHERE id = $1 FOR UPDATE",
+                message_id,
+            )
+            if not row or row["status"] != "streaming":
+                return False
+            raw_content = row["content"]
+            if isinstance(raw_content, str):
+                try:
+                    content = json.loads(raw_content)
+                except json.JSONDecodeError:
+                    content = []
+            else:
+                content = list(raw_content or [])
+            # Дедуп по block_id: повторный append того же блока — no-op.
+            block_id = block.get("block_id") if isinstance(block, dict) else None
+            if block_id and any(
+                isinstance(b, dict) and b.get("block_id") == block_id
+                for b in content
+            ):
+                return True
+            content.append(block)
+            await self.conn.execute(
+                f"UPDATE {self.table} SET content = $1::jsonb WHERE id = $2",
+                json.dumps(content, ensure_ascii=False),
+                message_id,
+            )
+        return True
+
+    async def finalize(
+        self,
+        *,
+        message_id: str,
+        final_blocks: list[dict],
+        model: str | None = None,
+        token_usage: dict | None = None,
+    ) -> bool:
+        """Переводит сообщение из 'streaming' в 'complete' и мержит финальные блоки.
+
+        MERGE-логика: накопленные через append_block блоки (reasoning'и и пр.)
+        сохраняются, к ним дописываются финальные блоки агента. Дедуп по
+        block_id — если final-блок с тем же id уже в existing, не дублируем.
+
+        Возвращает False если сообщение уже не 'streaming' (повторный вызов —
+        idempotent no-op).
+        """
+        async with self.conn.transaction():
+            row = await self.conn.fetchrow(
+                f"SELECT content, status FROM {self.table} WHERE id = $1 FOR UPDATE",
+                message_id,
+            )
+            if not row or row["status"] != "streaming":
+                return False
+            raw_content = row["content"]
+            if isinstance(raw_content, str):
+                try:
+                    existing = json.loads(raw_content)
+                except json.JSONDecodeError:
+                    existing = []
+            else:
+                existing = list(raw_content or [])
+            existing_ids = {
+                b.get("block_id")
+                for b in existing
+                if isinstance(b, dict) and b.get("block_id")
+            }
+            to_append = [
+                b
+                for b in (final_blocks or [])
+                if not (
+                    isinstance(b, dict)
+                    and b.get("block_id")
+                    and b["block_id"] in existing_ids
+                )
+            ]
+            merged = existing + to_append
+            await self.conn.execute(
+                f"""
+                UPDATE {self.table}
+                SET content = $1::jsonb,
+                    status = 'complete',
+                    model = COALESCE($2, model),
+                    token_usage = $3::jsonb
+                WHERE id = $4
+                """,
+                json.dumps(merged, ensure_ascii=False),
+                model,
+                json.dumps(token_usage, ensure_ascii=False) if token_usage else None,
+                message_id,
+            )
+        return True
+
+    async def mark_failed(self, *, message_id: str, error_block: dict) -> bool:
+        """Дописывает error-блок и переводит сообщение в 'failed' одной транзакцией.
+
+        Возвращает False если сообщение уже не 'streaming' (повторный вызов
+        или race с finalize — idempotent).
+        """
+        async with self.conn.transaction():
+            row = await self.conn.fetchrow(
+                f"SELECT content, status FROM {self.table} WHERE id = $1 FOR UPDATE",
+                message_id,
+            )
+            if not row or row["status"] != "streaming":
+                return False
+            raw_content = row["content"]
+            if isinstance(raw_content, str):
+                try:
+                    content = json.loads(raw_content)
+                except json.JSONDecodeError:
+                    content = []
+            else:
+                content = list(raw_content or [])
+            content.append(error_block)
+            await self.conn.execute(
+                f"""
+                UPDATE {self.table}
+                SET content = $1::jsonb,
+                    status = 'failed'
+                WHERE id = $2
+                """,
+                json.dumps(content, ensure_ascii=False),
+                message_id,
+            )
+        return True

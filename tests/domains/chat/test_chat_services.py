@@ -47,6 +47,21 @@ def _make_mock_repo_with_conn():
     repo.conn.transaction = MagicMock(return_value=tx)
     repo.get_by_id = AsyncMock(return_value=None)
     repo.count_by_user = AsyncMock(return_value=0)
+    # Phase 0 «D» streaming-методы MessageRepository — дефолты, чтобы новые
+    # тесты могли monkey-patchить лишь то, что реально нужно для конкретного
+    # кейса, а вызывающие сервисы не получали truthy-MagicMock по умолчанию.
+    repo.create_streaming = AsyncMock(return_value={
+        "id": "msg-stub",
+        "conversation_id": "conv-stub",
+        "role": "assistant",
+        "content": [],
+        "model": None,
+        "token_usage": None,
+        "status": "streaming",
+    })
+    repo.append_block = AsyncMock(return_value=True)
+    repo.finalize = AsyncMock(return_value=True)
+    repo.mark_failed = AsyncMock(return_value=True)
     return repo
 
 
