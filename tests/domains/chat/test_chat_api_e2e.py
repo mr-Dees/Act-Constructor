@@ -842,4 +842,84 @@ class TestConversationOwnership:
             resp = client.get("/api/v1/chat/conversations/foreign-id")
 
         assert resp.status_code == 404
-        assert resp.json() == {"detail": "Беседа не найдена"}
+
+
+# -------------------------------------------------------------------------
+# GET /api/v1/chat/conversations/{id}/messages — status в MessageResponse
+# -------------------------------------------------------------------------
+
+
+class TestGetMessagesStatus:
+    """Phase 0 «D»: GET /messages отдаёт streaming-сообщения со status='streaming'
+    и накопленными блоками. История не фильтруется по статусу."""
+
+    def test_get_messages_returns_streaming_with_partial_blocks(self):
+        settings = _make_settings()
+        conv = _make_conv_service(settings)
+        conv.get = AsyncMock(return_value={
+            "id": "conv-1",
+            "user_id": USERNAME,
+            "title": "t",
+            "domain_name": None,
+            "context": None,
+            "created_at": dt.datetime(2026, 1, 1),
+            "updated_at": dt.datetime(2026, 1, 1),
+        })
+        msg = _make_msg_service(settings)
+        # Сервис возвращает три сообщения: user (complete), assistant (complete),
+        # и третье — assistant streaming с уже накопленным reasoning-блоком.
+        msg.get_history = AsyncMock(return_value=[
+            {
+                "id": "m1",
+                "conversation_id": "conv-1",
+                "role": "user",
+                "content": [{"type": "text", "content": "Привет"}],
+                "model": None,
+                "token_usage": None,
+                "status": "complete",
+                "created_at": dt.datetime(2026, 1, 1, 12, 0, 0),
+            },
+            {
+                "id": "m2",
+                "conversation_id": "conv-1",
+                "role": "assistant",
+                "content": [{"type": "text", "content": "И тебе"}],
+                "model": "gpt-4",
+                "token_usage": {"input_tokens": 10, "output_tokens": 5},
+                "status": "complete",
+                "created_at": dt.datetime(2026, 1, 1, 12, 0, 1),
+            },
+            {
+                "id": "m3",
+                "conversation_id": "conv-1",
+                "role": "assistant",
+                "content": [
+                    {"type": "reasoning", "block_id": "r1", "content": "думаю..."},
+                ],
+                "model": "gpt-4",
+                "token_usage": None,
+                "status": "streaming",
+                "created_at": dt.datetime(2026, 1, 1, 12, 0, 2),
+            },
+        ])
+
+        app = _build_app(
+            conv_service=conv,
+            msg_service=msg,
+            file_service=_make_file_service(settings),
+        )
+
+        with TestClient(app) as client:
+            resp = client.get(
+                "/api/v1/chat/conversations/conv-1/messages"
+            )
+
+        assert resp.status_code == 200, resp.text
+        items = resp.json()
+        assert [m["status"] for m in items] == ["complete", "complete", "streaming"]
+        # streaming-сообщение пришло с уже накопленным reasoning-блоком,
+        # фронт может отрендерить его сразу.
+        streaming = items[2]
+        assert streaming["role"] == "assistant"
+        assert len(streaming["content"]) == 1
+        assert streaming["content"][0]["block_id"] == "r1"

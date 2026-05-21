@@ -32,6 +32,11 @@ class MessageResponse(BaseModel):
     content: list[dict[str, Any]]
     model: str | None
     token_usage: dict[str, Any] | None
+    # Жизненный цикл assistant-сообщения (Phase 0 «D»):
+    # streaming → complete (норма) или streaming → failed.
+    # User-сообщения всегда 'complete'. Опционально для обратной
+    # совместимости со старыми клиентами и таблицами без колонки status.
+    status: str | None = None
     created_at: datetime
 
 
