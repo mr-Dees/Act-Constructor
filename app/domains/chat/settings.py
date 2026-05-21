@@ -38,6 +38,15 @@ class AgentBridgeSettings(BaseModel):
     max_total_duration_sec: int = Field(default=1800, gt=0)
     history_limit: int = Field(default=30, gt=0)
 
+    # Фоновая очистка устаревших agent_response_events для done-запросов.
+    # Без неё таблица растёт безгранично: каждый forward пишет N reasoning'ов
+    # (часто десятки), а исторических данных нужны только пока runner ещё
+    # дочитывает их. После done — события можно удалять с задержкой
+    # (Resume SSE подхватывает финальный response из chat_messages, не из
+    # agent_response_events).
+    agent_events_cleanup_interval_sec: int = Field(default=3600, gt=0)
+    agent_events_cleanup_ttl_hours: int = Field(default=24, gt=0)
+
 
 class ChatDomainSettings(BaseModel):
     """Настройки AI-ассистента и чата."""

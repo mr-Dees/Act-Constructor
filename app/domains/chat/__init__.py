@@ -223,6 +223,43 @@ def _register_lifespan_hooks() -> None:
             except Exception:
                 logger.exception("Ошибка при остановке PollCoordinator")
 
+    async def _start_agent_events_cleanup(app: FastAPI) -> None:
+        """Поднимает фоновую очистку устаревших agent_response_events.
+
+        Без задачи таблица растёт безгранично: каждый forward пишет
+        десятки reasoning-событий, после done они не нужны (финальный
+        response в chat_messages, Phase 1 «D»).
+        """
+        from app.core.settings_registry import get as get_domain_settings
+        from app.domains.chat.services.agent_events_cleanup import (
+            AgentEventsCleanupTask,
+        )
+        from app.domains.chat.settings import ChatDomainSettings
+
+        chat_settings = get_domain_settings("chat", ChatDomainSettings)
+        bridge_settings = chat_settings.agent_bridge
+
+        task = AgentEventsCleanupTask(
+            interval_sec=bridge_settings.agent_events_cleanup_interval_sec,
+            ttl_hours=bridge_settings.agent_events_cleanup_ttl_hours,
+        )
+        await task.start()
+        app.state.chat_agent_events_cleanup = task
+
+    async def _stop_agent_events_cleanup(app: FastAPI) -> None:
+        """Останавливает фоновую очистку agent_response_events."""
+        import logging
+
+        logger = logging.getLogger("audit_workstation.domains.chat.lifecycle")
+        task = getattr(app.state, "chat_agent_events_cleanup", None)
+        if task is not None:
+            try:
+                await task.stop()
+            except Exception:
+                logger.exception(
+                    "Ошибка при остановке cleanup agent_response_events",
+                )
+
     register_startup_hook("chat.tool_metrics_batcher", _start_tool_metrics_batcher)
     register_shutdown_hook("chat.tool_metrics_batcher", _stop_tool_metrics_batcher)
 
@@ -231,6 +268,13 @@ def _register_lifespan_hooks() -> None:
 
     register_startup_hook("chat.audit_log_batcher", _start_audit_log_batcher)
     register_shutdown_hook("chat.audit_log_batcher", _stop_audit_log_batcher)
+
+    register_startup_hook(
+        "chat.agent_events_cleanup", _start_agent_events_cleanup,
+    )
+    register_shutdown_hook(
+        "chat.agent_events_cleanup", _stop_agent_events_cleanup,
+    )
 
 
 def _build_domain():
