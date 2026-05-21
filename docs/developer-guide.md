@@ -100,7 +100,8 @@
   - [11.3 ToolCallAccumulator: сборка стрим-fragments](#113-toolcallaccumulator-сборка-стрим-fragments)
   - [11.4 GigaChat-адаптер: native functions[] под капотом](#114-gigachat-адаптер-native-functions-под-капотом)
   - [11.5 BlockEmitter: единый эмиттер SSE-блоков](#115-blockemitter-единый-эмиттер-sse-блоков)
-  - [11.6 agent_bridge_runner: фоновая задача](#116-agent_bridge_runner-фоновая-задача)
+  - [11.6 agent_bridge_runner и PollCoordinator (с watchdog'ом)](#116-agent_bridge_runner-и-pollcoordinator-фоновое-сохранение-ассистент-сообщений)
+  - [11.7 Дедуп reasoning при reload](#117-дедуп-reasoning-при-reload-deterministic-block_id--since_seq)
 
 ---
 
@@ -3993,6 +3994,10 @@ AppState.tree[0].title = 'Новое название';  // → автомати
 - `max_tool_rounds` — защита от бесконечной рекурсии LLM ↔ tool. При исчерпании эмитится `error` с пояснением.
 - Tool timeout — `CHAT__TOOL_EXECUTION_TIMEOUT` (default 30 сек) через `asyncio.wait_for` внутри `tool_executor.execute_tool_call`. Превышение → `tool_result` с `error: "timeout"`.
 
+**Terminal-tool контракт (`stream_loop.py`).** Если tool вернул `client_action`, `blocks_list` или `buttons` (т.е. эмитнул блоки видимые пользователю), оркестратор **не зовёт LLM повторно** в этом раунде — после `messages.append({"role": "tool", ...})` мы делаем `break` из while, минуя следующий `_completions_create`. Иначе LLM получает короткий итог `<выполнено: {tool_name}>` и генерит вредную «сводку» (классический симптом — английский хвост к ответу `chat.list_pages`). Флаг `tool_was_terminal` ставится в каждой ветке `if client_action / elif blocks_list / elif buttons_block`; `break` срабатывает только если `not pending_tool_calls` (для GigaChat-queue: если ещё остались отложенные tool'ы, цикл продолжается). Регрессия — `tests/domains/chat/test_chat_streaming.py::TestTerminalToolContract::test_client_action_terminates_loop`.
+
+**Сохранение ErrorBlock при сбое стрима (`stream_loop.py::_save_error_assistant_if_needed`).** Если до `_save_assistant_message` стрим упал (`asyncio.TimeoutError` или произвольный `Exception`), оркестратор сохраняет в БД pseudo-ассистент-message: `[*emitted_blocks, ?{type:text}, {type:error}]`. Это нужно, чтобы при reload юзер увидел красный блок «Временная ошибка AI-сервиса», а не молчаливо висящий user-message без ответа. Флаг `assistant_saved` отслеживает, был ли нормальный save в `try` (чтобы `except` не перезаписал частичный ответ ErrorBlock'ом). Симметричный механизм в `agent_loop.run_agent_loop` уже был — теперь и в стримовой ветке.
+
 ### 11.3 ToolCallAccumulator: сборка стрим-fragments
 
 OpenAI/SGLang в streaming-режиме отдают `tool_calls` по кускам: первый chunk — `{index, id, function: {name}}`, следующие — `{index, function: {arguments: "..."}}`. Аккумулятор (`tool_call_accumulator.py`) склеивает их по `index`:
@@ -4076,3 +4081,30 @@ finally:
 **Process-level `_running: dict[str, asyncio.Task]`** в раннере защищает от дублей: повторный `schedule(rid)` для уже запущенного запроса возвращает существующий task. После завершения task удаляется из словаря.
 
 **Worker token (`claim_pending`)** — атомарный `UPDATE … RETURNING` с `worker_token` гарантирует, что при multi-worker сценарии каждый раннер получает непересекающееся подмножество запросов. Для single-worker (текущая конфигурация) этот механизм избыточен, но позволяет масштабироваться без переписывания.
+
+**Watchdog для `PollCoordinator`.** Координатор — один task на процесс, и если он зависнет внутри `_poll_batch_fn` без исключения (например, asyncpg-соединение прекратит отвечать без обрыва TCP), все подписчики повиснут на `queue.get()`. Поэтому при `start()` поднимается отдельная задача `_watchdog_loop`:
+
+* `_last_tick_at: float` — heartbeat-метка, обновляется в начале каждой итерации `_poll_loop`.
+* Раз в `poll_max_interval_sec` секунд watchdog проверяет: если последний тик был более `poll_max_interval_sec * watchdog_stale_factor` (default 3.0) секунд назад — координатор считается «зависшим». Cancel'аем старый task, запускаем новый `_poll_loop`. Подписчики и `since_seqs` сохраняются — новый цикл продолжит polling с того же места.
+* `_restart_count` — счётчик перезапусков для метрик. При `stop()` watchdog останавливается **первым**, чтобы он не рестартовал координатор в момент его cancel'а.
+
+Без watchdog'а единственный fallback от зависшего цикла — рестарт uvicorn. С ним сетевой обрыв в polling-SELECT превращается в «один пропущенный тик» с info-логом. Регрессионные тесты — `tests/domains/chat/test_poll_coordinator.py::test_watchdog_restarts_dead_poll_loop` и `test_watchdog_does_not_restart_healthy_loop`.
+
+### 11.7 Дедуп reasoning при reload (deterministic `block_id` + `?since_seq=`)
+
+Reasoning-чанки от внешнего ИИ-агента хранятся в `agent_response_events` (append-only, `seq` монотонен per `request_id`). Полная цепочка: агент INSERT'ит N событий → `agent_bridge_runner` сохраняет их как N `ReasoningBlock` в `messages.content` → frontend `ChatRenderer.appendBlock` группирует подряд идущие reasoning-блоки в один `<details class="chat-reasoning-group">` с `<hr>`-разделителями между этапами.
+
+**Проблема до фикса.** При reload вкладки фронт открывает Resume SSE (`GET /forward-stream/{rid}`), который читал `agent_response_events` с `since_seq=None` и эмитил **все** события заново. Юзер видел один логический шаг рассуждения N+1 раз: 1 раз отрисовано из истории + N раз из Resume SSE.
+
+**Решение.** Детерминированный `block_id = f"{message_id}:reasoning:{seq}"` на трёх уровнях:
+
+1. **Backend сохранение** (`agent_bridge_runner._run`): при collect'е reasoning-блоков добавляется `block_id` в dict. Поле `block_id` в `ReasoningBlock` (`app/core/chat/blocks.py`) опционально — у LLM-стримов (где нет внешнего `seq`) оно остаётся None.
+2. **Backend Resume SSE** (`forward_stream.stream_forward_events`, эндпоинты `forward_resume.stream_forward_resume` и legacy `resume_agent_request_stream`): функция принимает параметр `since_seq: int | None`, который инициализирует `last_seq` для `poll_events`. Сам `block_id` пробрасывается через расширенный `sse_block_start(*, block_index, block_type, block_id)` и `emit_text_block_with_limit(*, block_id)`.
+3. **Frontend** (`chat-messages.js`):
+    * `_seenReasoningBlockIds: Set<string>` — id уже отрендеренных reasoning-блоков. Заполняется при рендере истории в `_renderConversationMessages` (по `block_id` reasoning-блоков последнего assistant-message).
+    * `_lastReasoningSeq: number` — максимальный seq из этого Set'а; передаётся в `ChatStream.resume(..., {sinceSeq})`, оттуда — в query `?since_seq=N`.
+    * В `_handleSSEEvent` для `block_start` с `block_type='reasoning'` и известным `block_id`: если уже видели — НЕ создаём `_streamingBlocks[index]`, тогда `block_delta`/`block_end` становятся no-op (там стоит `if (block)`).
+
+**UNIQUE-констрейнт** на `(request_id, seq)` в `agent_response_events` (PG и GP) защищает от дубля на уровне БД: если внешний агент по сетевому retry попытается INSERT'ить тот же `seq` дважды — СУБД отвергнет вторую вставку. GP-правило `DISTRIBUTED BY ⊆ UNIQUE` соблюдено: `request_id` входит в констрейнт. Миграции для существующих БД — `docs/migrations/agent-response-events-unique-{pg,gp}.sql`.
+
+**Что НЕ меняется.** Формат `messages.content` остаётся «N reasoning-блоков», группировка во фронтовом `<details>` с `<hr>` между этапами сохраняется (фишка визуального разделения этапов рассуждения). Серверной агрегации чанков в один большой блок **не делалось** — это сломало бы `<hr>`-разделители.
