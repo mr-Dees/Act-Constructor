@@ -78,10 +78,18 @@ class CodeBlock(BaseModel):
 
 
 class ReasoningBlock(BaseModel):
-    """Блок рассуждений модели (chain-of-thought)."""
+    """Блок рассуждений модели (chain-of-thought).
+
+    ``block_id`` — детерминированный идентификатор для дедупа при resume
+    SSE: фронт хранит Set уже отрендеренных id и молча отбрасывает
+    повторы. Формат: ``{message_id}:reasoning:{seq}``. Опционален —
+    у LLM-стримов чанков id не выставляется (там нет seq внешнего
+    агента), и фронт-дедуп для них не нужен.
+    """
 
     type: Literal["reasoning"] = "reasoning"
     content: str
+    block_id: str | None = None
 
 
 class PlanBlock(BaseModel):

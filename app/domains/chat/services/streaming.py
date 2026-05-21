@@ -38,12 +38,28 @@ def sse_message_start(*, conversation_id: str, message_id: str) -> str:
     })
 
 
-def sse_block_start(*, block_index: int, block_type: str) -> str:
-    """Начало нового блока контента."""
-    return format_sse_event("block_start", {
+def sse_block_start(
+    *,
+    block_index: int,
+    block_type: str,
+    block_id: str | None = None,
+) -> str:
+    """Начало нового блока контента.
+
+    ``block_id`` — детерминированный идентификатор блока (используется
+    для дедупа при resume SSE: фронт хранит Set уже отрендеренных id и
+    игнорирует повторы). Сейчас задаётся только для reasoning-блоков
+    в forward-стриме (``f"{message_id}:reasoning:{seq}"``); для прочих
+    блоков остаётся None — у них своя идемпотентность (ClientActionBlock
+    имеет собственное поле block_id).
+    """
+    payload: dict[str, Any] = {
         "index": block_index,
         "type": block_type,
-    })
+    }
+    if block_id is not None:
+        payload["block_id"] = block_id
+    return format_sse_event("block_start", payload)
 
 
 def sse_block_delta(*, block_index: int, delta: str) -> str:
@@ -333,6 +349,7 @@ def emit_text_block_with_limit(
     text: str,
     chunk_flush_bytes: int,
     block_max_bytes: int,
+    block_id: str | None = None,
 ) -> list[str]:
     """Сериализует готовый текстовый блок в триплет
     block_start + (block_delta)* + block_end, применяя лимиты.
@@ -341,9 +358,17 @@ def emit_text_block_with_limit(
     (non-streaming ответ LLM, текстовые блоки от tool-handler'ов).
     Большие блоки нарезаются на несколько delta, переполненные — усекаются
     с маркером.
+
+    ``block_id`` пробрасывается в ``sse_block_start``: для reasoning-блоков
+    от внешнего агента (forward-стрим) это id вида ``f"{message_id}:reasoning:{seq}"``,
+    по которому фронт дедупит повторы при reconnect/reload.
     """
     events: list[str] = [
-        sse_block_start(block_index=block_index, block_type=block_type),
+        sse_block_start(
+            block_index=block_index,
+            block_type=block_type,
+            block_id=block_id,
+        ),
     ]
     limiter = BlockDeltaLimiter(
         block_index=block_index,

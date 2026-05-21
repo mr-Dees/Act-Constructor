@@ -159,6 +159,12 @@ async def _run(
 
             current_version: int | None = request.get("version")
             conversation_id = request["conversation_id"]
+            # message_id из agent_request — он же используется для
+            # детерминированного block_id reasoning-блоков:
+            # `{message_id}:reasoning:{seq}`. Фронт дедупит по нему при
+            # reload, иначе Resume SSE накладывал бы reasoning поверх
+            # уже сохранённых N+1 раз.
+            request_message_id = request.get("message_id") or ""
             agent_started = (request.get("status") == "in_progress")
 
             if request.get("status") == "pending":
@@ -248,7 +254,12 @@ async def _run(
                         text = payload.get("text", "")
                         if text:
                             blocks.append({
-                                "type": "reasoning", "content": text,
+                                "type": "reasoning",
+                                "content": text,
+                                "block_id": (
+                                    f"{request_message_id}:reasoning:"
+                                    f"{ev.get('seq')}"
+                                ),
                             })
                     elif et == "error":
                         err_block: dict[str, Any] = {

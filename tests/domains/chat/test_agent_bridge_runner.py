@@ -101,7 +101,7 @@ async def test_run_saves_assistant_message_with_collected_blocks():
 
     async def fake_wait(self, *a, **kw):
         yield AgentBridgeUpdate(event={
-            "id": 1, "event_type": "reasoning",
+            "id": 1, "seq": 1, "event_type": "reasoning",
             "payload": {"text": "Думаю..."},
         })
         yield AgentBridgeUpdate(response={
@@ -158,11 +158,17 @@ async def test_run_saves_assistant_message_with_collected_blocks():
             assert "expected_version" in c.kwargs
 
     # save_assistant_message получил собранный content.
+    # Reasoning-блоки идут с детерминированным block_id
+    # `{message_id}:reasoning:{seq}` — фронт дедупит по нему при Resume.
     save_mock.assert_called_once()
     kw = save_mock.call_args.kwargs
     assert kw["conversation_id"] == "conv-1"
     assert kw["content"] == [
-        {"type": "reasoning", "content": "Думаю..."},
+        {
+            "type": "reasoning",
+            "content": "Думаю...",
+            "block_id": "msg-1:reasoning:1",
+        },
         {"type": "text", "content": "Ответ"},
     ]
     assert kw["token_usage"] == {"in": 10, "out": 5}
@@ -239,7 +245,7 @@ async def test_runner_saves_message_when_response_arrives_via_coordinator(
 
     queue: asyncio.Queue = asyncio.Queue()
     await queue.put({
-        "id": 1, "event_type": "reasoning",
+        "id": 1, "seq": 1, "event_type": "reasoning",
         "payload": {"text": "Думаю..."},
     })
     fake_coordinator = MagicMock(spec=PollCoordinator)
@@ -300,7 +306,11 @@ async def test_runner_saves_message_when_response_arrives_via_coordinator(
     kw = save_mock.call_args.kwargs
     assert kw["conversation_id"] == "conv-1"
     assert kw["content"] == [
-        {"type": "reasoning", "content": "Думаю..."},
+        {
+            "type": "reasoning",
+            "content": "Думаю...",
+            "block_id": "msg-1:reasoning:1",
+        },
         {"type": "text", "content": "Ответ"},
     ]
     assert kw["token_usage"] == {"in": 10, "out": 5}

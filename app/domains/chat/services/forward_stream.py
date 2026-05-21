@@ -43,6 +43,7 @@ async def stream_forward_events(
     request_id: str,
     message_id: str,
     block_index_start: int = 0,
+    since_seq: int | None = None,
 ) -> AsyncGenerator[tuple[str, Any], None]:
     """Поллит мост-таблицы и yield'ит SSE-события для request_id.
 
@@ -50,9 +51,14 @@ async def stream_forward_events(
     :param request_id: идентификатор forward-запроса (agent_requests.id).
     :param message_id: идентификатор будущего ассистент-сообщения —
         пробрасывается в ``emit_response_blocks`` для детерминированного
-        ``block_id`` ClientActionBlock'ов.
+        ``block_id`` ClientActionBlock'ов и в ``block_id`` reasoning-блоков
+        (``f"{message_id}:reasoning:{seq}"``).
     :param block_index_start: начальный индекс блока в SSE-стриме
         (для resume — 0, для основного forward — текущий счётчик).
+    :param since_seq: курсор «отдавать только события с seq > since_seq».
+        Используется Resume SSE: фронт передаёт последний полученный seq,
+        чтобы не получить уже отрисованный reasoning повторно. None —
+        выдать всё с самого начала.
     """
     from app.db.connection import get_db
     from app.domains.chat.repositories.agent_request_repository import (
@@ -61,7 +67,7 @@ async def stream_forward_events(
     from app.domains.chat.services.agent_bridge import AgentBridgeService
     from app.domains.chat.services.block_emitter import emit_response_blocks
 
-    last_seq: int | None = None
+    last_seq: int | None = since_seq
     block_index = block_index_start
     poll_interval = settings.agent_bridge.poll_min_interval_sec
     # Аварийная защита от вечного цикла на стороне SSE: раннер сам имеет
@@ -120,12 +126,18 @@ async def stream_forward_events(
                     "Событие агента: тип=reasoning, длина=%d",
                     len(chunk_text),
                 )
+                # Детерминированный block_id: {message_id}:reasoning:{seq}.
+                # При reconnect/reload фронт хранит Set уже отрендеренных
+                # id и молча отбрасывает повторы. Без этого Resume SSE
+                # перерисовывал reasoning N+1 раз при каждом открытии чата.
+                reasoning_block_id = f"{message_id}:reasoning:{ev['seq']}"
                 for sse in emit_text_block_with_limit(
                     block_index=block_index,
                     block_type="reasoning",
                     text=chunk_text,
                     chunk_flush_bytes=settings.delta_chunk_flush_bytes,
                     block_max_bytes=settings.delta_block_max_bytes,
+                    block_id=reasoning_block_id,
                 ):
                     yield ("sse", sse)
                 block_index += 1

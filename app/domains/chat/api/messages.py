@@ -444,8 +444,16 @@ async def resume_agent_request_stream(
                     if not text:
                         continue
                     # Каждый reasoning-чанк — отдельный сворачиваемый блок.
+                    # block_id формата {message_id}:reasoning:{seq} — фронт
+                    # дедупит по нему при reload, чтобы Resume не дублировал.
+                    reasoning_block_id = (
+                        f"{agent_request.get('message_id') or request_id}"
+                        f":reasoning:{ev['seq']}"
+                    )
                     yield sse_block_start(
-                        block_index=block_index, block_type="reasoning",
+                        block_index=block_index,
+                        block_type="reasoning",
+                        block_id=reasoning_block_id,
                     )
                     yield sse_block_delta(block_index=block_index, delta=text)
                     yield sse_block_end(block_index=block_index)
@@ -492,10 +500,17 @@ async def resume_agent_request_stream(
                             if not text:
                                 continue
                             # Каждый reasoning-чанк — отдельный
-                            # сворачиваемый блок.
+                            # сворачиваемый блок. block_id для дедупа
+                            # при reload, см. resume_agent_request_stream
+                            # выше.
+                            reasoning_block_id = (
+                                f"{agent_request.get('message_id') or request_id}"
+                                f":reasoning:{ev['seq']}"
+                            )
                             yield sse_block_start(
                                 block_index=block_index,
                                 block_type="reasoning",
+                                block_id=reasoning_block_id,
                             )
                             yield sse_block_delta(
                                 block_index=block_index, delta=text,

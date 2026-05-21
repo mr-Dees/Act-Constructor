@@ -322,9 +322,14 @@ const ChatStream = {
      * @param {function({type: string, data: *}): void} [options.onEvent]
      * @param {function(Error): void} [options.onError]
      * @param {function(): void} [options.onDone]
+     * @param {number|null} [options.sinceSeq] — курсор reasoning'а: backend
+     *   отдаст только события с seq > sinceSeq. Фронт собирает максимальный
+     *   seq из block_id уже отрендеренных reasoning-блоков (см.
+     *   ChatMessages._maybeResumeActiveForward), чтобы Resume SSE не
+     *   присылал тот же reasoning повторно при reload.
      */
     async resume(conversationId, requestId, options = {}) {
-        const { onEvent, onError, onDone } = options;
+        const { onEvent, onError, onDone, sinceSeq } = options;
 
         if (!conversationId || !requestId) {
             if (onDone) onDone();
@@ -348,9 +353,12 @@ const ChatStream = {
         this._resumeRequestId = requestId;
 
         try {
-            const endpoint =
+            let endpoint =
                 `/api/v1/chat/conversations/${conversationId}` +
                 `/forward-stream/${requestId}`;
+            if (typeof sinceSeq === 'number' && sinceSeq > 0) {
+                endpoint += `?since_seq=${sinceSeq}`;
+            }
             const url = (typeof AppConfig !== 'undefined')
                 ? AppConfig.api.getUrl(endpoint)
                 : endpoint;

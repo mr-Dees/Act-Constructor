@@ -21,7 +21,7 @@ from __future__ import annotations
 
 import logging
 
-from fastapi import APIRouter, Depends, Response
+from fastapi import APIRouter, Depends, Query, Response
 from fastapi.responses import StreamingResponse
 
 from app.api.v1.deps.auth_deps import get_username
@@ -84,6 +84,15 @@ async def get_active_forward(
 async def stream_forward_resume(
     conversation_id: str,
     request_id: str,
+    since_seq: int | None = Query(
+        None,
+        description=(
+            "Курсор: отдавать только события с seq > since_seq. Фронт "
+            "передаёт максимальный seq уже отрендеренных reasoning-блоков "
+            "(парсит из block_id), чтобы не получить их повторно при "
+            "переоткрытии чата."
+        ),
+    ),
     username: str = Depends(get_username),
     conv_service: ConversationService = Depends(get_conversation_service),
 ):
@@ -148,6 +157,7 @@ async def stream_forward_resume(
                 request_id=request_id,
                 message_id=message_id,
                 block_index_start=0,
+                since_seq=since_seq,
             ):
                 if kind in ("sse", "error"):
                     yield payload
