@@ -19,6 +19,7 @@ Resume-стрим **не учитывается** в семафоре
 
 from __future__ import annotations
 
+import asyncio
 import logging
 
 from fastapi import APIRouter, Depends, Query, Response
@@ -34,6 +35,18 @@ logger = logging.getLogger("audit_workstation.domains.chat.api.forward_resume")
 
 
 router = APIRouter(dependencies=[Depends(require_domain_access("chat"))])
+
+
+# Server-side dedup: при новом Resume SSE для того же request_id старый
+# получает set() этого event'а и завершается мгновенно. Иначе старый
+# серверный Resume крутил бы свой polling-цикл до heartbeat-disconnect'а
+# (≈7с) — при быстрых tab switch'ах накапливалось до 4+ параллельных
+# Resume SSE на один request_id, каждый со своим SELECT каждые
+# poll_min_interval_sec секунд. Pool 20 коннектов захлёбывался.
+#
+# Ключ — только request_id: он уникален в системе, владелец проверяется
+# до регистрации (ownership-чек agent_request.user_id == username).
+_active_resume_cancels: dict[str, asyncio.Event] = {}
 
 
 @router.get(
@@ -134,6 +147,18 @@ async def stream_forward_resume(
         conversation_id, request_id,
     )
 
+    # Регистрируем cancel-event ДО запуска генератора: новый Resume для
+    # того же request_id вытеснит уже бегущий старый.
+    cancel_event = asyncio.Event()
+    old_cancel = _active_resume_cancels.pop(request_id, None)
+    if old_cancel is not None and not old_cancel.is_set():
+        old_cancel.set()
+        logger.info(
+            "Вытеснение предыдущего Resume SSE: request_id=%s",
+            request_id,
+        )
+    _active_resume_cancels[request_id] = cancel_event
+
     async def _resume_stream():
         from app.domains.chat.services.forward_stream import (
             stream_forward_events,
@@ -152,15 +177,31 @@ async def stream_forward_resume(
                 request_id=request_id,
                 conversation_id=conversation_id,
             )
+            # PollCoordinator подписка: live-события приходят через
+            # общий fan-out из одного SELECT'а раз в poll-тик. До этого
+            # каждый Resume SSE делал свой собственный SELECT каждые
+            # poll_min_interval секунд — при N параллельных Resume SSE
+            # на pool 20 это давало saturation.
+            from app.domains.chat.deps import get_poll_coordinator
+            try:
+                coordinator = get_poll_coordinator()
+            except RuntimeError:
+                coordinator = None  # тесты без поднятого координатора
             async for kind, payload in stream_forward_events(
                 settings=chat_settings,
                 request_id=request_id,
                 message_id=message_id,
                 block_index_start=0,
                 since_seq=since_seq,
+                cancel_event=cancel_event,
+                coordinator=coordinator,
             ):
                 if kind in ("sse", "error"):
                     yield payload
+            # Если вытеснены — НЕ отправляем message_end, иначе фронт
+            # подумает что forward завершён и закроет typing-bubble.
+            if cancel_event.is_set():
+                return
             # Терминальное событие — как в основном forward-пути.
             yield sse_message_end(message_id=message_id)
         except Exception:
@@ -178,6 +219,11 @@ async def stream_forward_resume(
                 pass
             raise
         finally:
+            # Снимаем регистрацию ТОЛЬКО если это всё ещё наш event:
+            # после вытеснения новым Resume в dict уже лежит чужой event,
+            # затирать его нельзя.
+            if _active_resume_cancels.get(request_id) is cancel_event:
+                _active_resume_cancels.pop(request_id, None)
             duration = time.monotonic() - stream_started_at
             logger.info(
                 "Resume SSE-стрим закрыт: conversation=%s, request_id=%s, "

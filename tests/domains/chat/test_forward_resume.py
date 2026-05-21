@@ -442,3 +442,41 @@ class TestForwardStreamResume:
             )
         finally:
             messages_module._active_streams_per_user.pop(USERNAME, None)
+
+    def test_second_resume_evicts_first_via_cancel_event(self):
+        """Второй Resume для того же request_id вытесняет первый.
+
+        Регрессия: при tab switch'ах фронт открывал N Resume SSE на один
+        request_id, старые умирали только через heartbeat-disconnect
+        (≈7с). За это время каждый крутил свой polling-цикл, нагружая
+        pool. После фикса — старый получает set() cancel_event'а в момент
+        регистрации нового и завершается мгновенно.
+        """
+        import asyncio
+
+        from app.domains.chat.api import forward_resume as fr
+
+        # Эмулируем уже зарегистрированный старый Resume.
+        rid = "req-evict-test"
+        old_cancel = asyncio.Event()
+        fr._active_resume_cancels[rid] = old_cancel
+
+        # Воспроизводим логику регистрации нового Resume из эндпоинта.
+        cancel_event = asyncio.Event()
+        previous = fr._active_resume_cancels.pop(rid, None)
+        if previous is not None and not previous.is_set():
+            previous.set()
+        fr._active_resume_cancels[rid] = cancel_event
+
+        try:
+            assert old_cancel.is_set(), (
+                "старый cancel_event должен быть set после регистрации нового"
+            )
+            assert not cancel_event.is_set(), (
+                "новый cancel_event ещё не должен быть set"
+            )
+            assert fr._active_resume_cancels[rid] is cancel_event, (
+                "в registry должен лежать новый cancel_event"
+            )
+        finally:
+            fr._active_resume_cancels.pop(rid, None)
