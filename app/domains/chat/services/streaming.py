@@ -386,7 +386,7 @@ def emit_text_block_with_limit(
 async def with_heartbeat(
     source: AsyncIterator[str],
     *,
-    interval_sec: float = 15.0,
+    interval_sec: float = 7.0,
 ) -> AsyncGenerator[str, None]:
     """Прозрачно прокидывает SSE-стрим, вставляя heartbeat'ы в тишине.
 
