@@ -23,6 +23,7 @@ import logging
 import uuid
 from typing import Any
 
+from app.core.chat.block_id_generator import BlockIdGenerator
 from app.domains.chat.services.poll_coordinator import PollCoordinator
 from app.domains.chat.settings import ChatDomainSettings
 
@@ -43,6 +44,65 @@ def is_running(request_id: str) -> bool:
     """True, если для этого request_id уже крутится фоновая задача."""
     task = _running.get(request_id)
     return task is not None and not task.done()
+
+
+# Маркер, дописываемый в конец обрезанного текста блока. Должен помещаться
+# в UTF-8 байтах < max_size — иначе после re-encode суммарный размер всё
+# равно превысит лимит. 16 байт с запасом.
+_TRIM_MARKER = " …[обрезано]"
+_TRIM_MARKER_BYTES = len(_TRIM_MARKER.encode("utf-8"))
+
+
+def _trim_text_if_oversized(
+    *,
+    text: str,
+    max_size: int,
+    request_id: str,
+    block_type: str,
+) -> str:
+    """Обрезает ``text`` до ``max_size`` UTF-8 байт + маркер ``…[обрезано]``.
+
+    Защита от malicious / broken external агента, который мог бы прислать
+    raw reasoning размером в сотни MB и положить SSE-канал / DB / фронт.
+
+    UTF-8 safe: режем по байтам, затем сдвигаемся назад до начала
+    предыдущего code-point (старшие биты ``10xxxxxx``). Без этого можно
+    разрубить multibyte-символ и получить ``UnicodeDecodeError`` при
+    последующей сериализации.
+
+    Если ``text`` помещается — возвращается как есть (быстрый путь без
+    encode).
+    """
+    if not text:
+        return text
+    encoded = text.encode("utf-8")
+    if len(encoded) <= max_size:
+        return text
+    original_size = len(encoded)
+    # Резервируем место под маркер.
+    cut_at = max_size - _TRIM_MARKER_BYTES
+    if cut_at <= 0:
+        # max_size настолько мал, что даже маркер не лезет — отдаём
+        # только маркер (граничный случай, не должен случаться при
+        # дефолтных 256 KB, но настройка может быть кастомной).
+        return _TRIM_MARKER.strip()
+    truncated_bytes = encoded[:cut_at]
+    # UTF-8 safety: если последний байт — start/continuation multibyte
+    # символа, сдвигаемся назад до начала предыдущего code-point.
+    while truncated_bytes and (truncated_bytes[-1] & 0xC0) == 0x80:
+        truncated_bytes = truncated_bytes[:-1]
+    # Дополнительно: если последний байт — head multibyte-символа без
+    # хвоста (0b11xxxxxx) — тоже отбрасываем.
+    if truncated_bytes and (truncated_bytes[-1] & 0xC0) == 0xC0:
+        truncated_bytes = truncated_bytes[:-1]
+    truncated_text = truncated_bytes.decode("utf-8", errors="ignore")
+    result = truncated_text + _TRIM_MARKER
+    logger.warning(
+        "agent_bridge_runner: блок обрезан с %d до %d байт, "
+        "request_id=%s, type=%s",
+        original_size, len(result.encode("utf-8")), request_id, block_type,
+    )
+    return result
 
 
 def schedule(
@@ -178,6 +238,14 @@ async def _run(
             # reload, иначе Resume SSE накладывал бы reasoning поверх
             # уже сохранённых N+1 раз.
             request_message_id = request.get("message_id") or ""
+            # Единый генератор block_id для всех событий runner'а.
+            # ``with_seq`` использует seq из agent_response_events
+            # (глобально уникален в рамках request_id), counter-метод
+            # не используется тут — все блоки runner'а имеют seq.
+            block_id_gen = (
+                BlockIdGenerator(message_id=request_message_id)
+                if request_message_id else None
+            )
             agent_started = (request.get("status") == "in_progress")
 
             if request.get("status") == "pending":
@@ -277,27 +345,44 @@ async def _run(
                     ev = upd.event
                     et = ev.get("event_type")
                     payload = ev.get("payload") or {}
+                    seq = ev.get("seq")
                     block: dict[str, Any] | None = None
+                    max_size = settings.agent_bridge.max_block_text_size
                     if et == "reasoning":
                         text = payload.get("text", "")
                         if text:
+                            text = _trim_text_if_oversized(
+                                text=text,
+                                max_size=max_size,
+                                request_id=request_id,
+                                block_type="reasoning",
+                            )
                             block = {
                                 "type": "reasoning",
                                 "content": text,
                                 "block_id": (
-                                    f"{request_message_id}:reasoning:"
-                                    f"{ev.get('seq')}"
+                                    block_id_gen.with_seq("reasoning", seq)
+                                    if block_id_gen is not None
+                                    else f"{request_message_id}:reasoning:{seq}"
                                 ),
                             }
                     elif et == "error":
+                        message_text = payload.get(
+                            "message", "Ошибка внешнего агента",
+                        )
+                        message_text = _trim_text_if_oversized(
+                            text=message_text,
+                            max_size=max_size,
+                            request_id=request_id,
+                            block_type="error",
+                        )
                         block = {
                             "type": "error",
-                            "message": payload.get(
-                                "message", "Ошибка внешнего агента",
-                            ),
+                            "message": message_text,
                             "block_id": (
-                                f"{request_message_id}:error:"
-                                f"{ev.get('seq')}"
+                                block_id_gen.with_seq("error", seq)
+                                if block_id_gen is not None
+                                else f"{request_message_id}:error:{seq}"
                             ),
                         }
                         if payload.get("code"):

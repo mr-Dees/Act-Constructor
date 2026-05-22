@@ -14,6 +14,7 @@ import time
 from collections.abc import AsyncGenerator
 from typing import Any
 
+from app.core.chat.block_id_generator import BlockIdGenerator
 from app.core.chat.tools import (
     get_openai_tools,
     get_tools_by_domain,
@@ -472,20 +473,18 @@ class Orchestrator:
         self,
         raw: str,
         *,
-        message_id: str,
-        ca_counter: list[int],
+        block_id_gen: BlockIdGenerator,
     ) -> dict | None:
         """Если result tool'а — JSON-блок client_action, возвращает dict.
 
         Иначе возвращает None (это обычный текстовый результат tool'а).
 
         ``block_id`` всегда переписывается на детерминированный
-        ``f"{message_id}:ca:{index}"`` (даже если handler выставил свой uuid):
-        это гарантирует, что при перезагрузке вкладки и реплее истории
-        фронт получит ТОТ ЖЕ id и пропустит повторное исполнение через
-        ``sessionStorage['chat:executedActions']``. ``ca_counter`` — список-
-        обёртка из одного int (для shared-state между вызовами в рамках
-        одного ассистент-сообщения).
+        ``f"{message_id}:client_action:{index}"`` через ``block_id_gen``
+        (даже если handler выставил свой uuid): это гарантирует, что при
+        перезагрузке вкладки и реплее истории фронт получит ТОТ ЖЕ id и
+        пропустит повторное исполнение через
+        ``sessionStorage['chat:executedActions']``.
         """
         try:
             obj = json.loads(raw)
@@ -498,9 +497,7 @@ class Orchestrator:
         # Минимальная валидация
         if "action" not in obj:
             return None
-        idx = ca_counter[0]
-        ca_counter[0] = idx + 1
-        obj["block_id"] = f"{message_id}:ca:{idx}"
+        obj["block_id"] = block_id_gen.next("client_action")
         return obj
 
     def _parse_buttons_result(self, raw: str) -> dict | None:
@@ -524,16 +521,15 @@ class Orchestrator:
         self,
         raw: str,
         *,
-        message_id: str,
-        ca_counter: list[int],
+        block_id_gen: BlockIdGenerator,
     ) -> list[dict] | None:
         """Если result tool'а — JSON-список блоков, возвращает список dict.
 
         Иначе None.
 
         Для каждого client_action внутри списка ``block_id`` переписывается
-        детерминированно как ``f"{message_id}:ca:{index}"`` (см. doc-string
-        :meth:`_parse_client_action_result`).
+        детерминированно через ``block_id_gen``. См. doc-string
+        :meth:`_parse_client_action_result`.
         """
         try:
             obj = json.loads(raw)
@@ -544,10 +540,9 @@ class Orchestrator:
         if not all(isinstance(b, dict) and "type" in b for b in obj):
             return None
         for b in obj:
-            if b.get("type") == "client_action":
-                idx = ca_counter[0]
-                ca_counter[0] = idx + 1
-                b["block_id"] = f"{message_id}:ca:{idx}"
+            if b.get("type") != "client_action":
+                continue
+            b["block_id"] = block_id_gen.next("client_action")
         return obj
 
     async def _translate_buttons(self, buttons: list[dict]) -> list[dict]:
@@ -651,7 +646,7 @@ class Orchestrator:
 
         ``message_id`` обязателен и должен быть тем же id, что попадёт в БД
         через ``_save_assistant_message``: на нём строится детерминированный
-        ``block_id`` ClientActionBlock (``f"{message_id}:ca:{i}"``).
+        ``block_id`` ClientActionBlock (``f"{message_id}:client_action:{i}"``).
 
         Возвращает dict с полями: response, sources, model, token_usage; на
         ошибку — dict с ``status="error"``.

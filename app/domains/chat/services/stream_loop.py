@@ -25,6 +25,7 @@ import time
 from collections.abc import AsyncGenerator
 from typing import TYPE_CHECKING, Any
 
+from app.core.chat.block_id_generator import BlockIdGenerator
 from app.core.chat.names import TOOL_FORWARD_TO_KNOWLEDGE_AGENT
 from app.domains.chat.exceptions import ChatToolValidationError
 from app.domains.chat.services.forward_bridge import handle_forward_call
@@ -179,10 +180,10 @@ async def run_stream_loop(
     token_usage: dict[str, Any] = {}
     full_answer = ""
     block_index = 0
-    # Счётчик client_action-блоков для детерминированного block_id
-    # ``f"{message_id}:ca:{i}"``. Обёрнут в list, чтобы parser-методы
-    # могли инкрементировать его in-place.
-    ca_counter: list[int] = [0]
+    # Единый генератор детерминированных ``block_id`` для всех типов блоков,
+    # эмитируемых в рамках сообщения. Унифицирует нумерацию между
+    # ``orchestrator._parse_*`` (client_action) и любыми другими источниками.
+    block_id_gen = BlockIdGenerator(message_id=message_id)
     emitted_blocks: list[dict] = []  # ClientActionBlock'и, эмитнутые до финала
     # Флаг «ассистент-сообщение уже в БД». Ставится в True после успешного
     # save'а в нормальном пути. В `except` ветке ниже мы используем его,
@@ -648,12 +649,12 @@ async def run_stream_loop(
                         )
 
                         client_action = orch._parse_client_action_result(
-                            result, message_id=message_id, ca_counter=ca_counter,
+                            result, block_id_gen=block_id_gen,
                         )
                         blocks_list = (
                             None if client_action is not None
                             else orch._parse_blocks_list_result(
-                                result, message_id=message_id, ca_counter=ca_counter,
+                                result, block_id_gen=block_id_gen,
                             )
                         )
                         buttons_block = (
@@ -946,12 +947,12 @@ async def run_stream_loop(
                     )
 
                     client_action = orch._parse_client_action_result(
-                        result, message_id=message_id, ca_counter=ca_counter,
+                        result, block_id_gen=block_id_gen,
                     )
                     blocks_list = (
                         None if client_action is not None
                         else orch._parse_blocks_list_result(
-                            result, message_id=message_id, ca_counter=ca_counter,
+                            result, block_id_gen=block_id_gen,
                         )
                     )
                     buttons_block = (

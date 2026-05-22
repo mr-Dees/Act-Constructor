@@ -47,6 +47,15 @@ class AgentBridgeSettings(BaseModel):
     agent_events_cleanup_interval_sec: int = Field(default=3600, gt=0)
     agent_events_cleanup_ttl_hours: int = Field(default=24, gt=0)
 
+    # Лимит размера текста одного блока от внешнего агента (UTF-8 байт).
+    # Защищает от malicious / broken payload'ов: bloated reasoning может
+    # раздуть chat_messages.content до сотен MB, нагрузить SSE-канал,
+    # сорвать рендер фронта. Превышение → блок обрезается с маркером
+    # "…[обрезано]" + WARNING в лог. 256 KB — компромисс: укладывается в
+    # одно SSE-сообщение без deflate, достаточный для нормального
+    # reasoning'а (50-100 KB обычно).
+    max_block_text_size: int = Field(default=262144, gt=0)
+
 
 class ChatDomainSettings(BaseModel):
     """Настройки AI-ассистента и чата."""

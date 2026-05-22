@@ -73,6 +73,7 @@ async def stream_forward_events(
         накопившихся до подписки, всё равно делается. Финальный response
         и terminal_status опрашиваются как и раньше.
     """
+    from app.core.chat.block_id_generator import BlockIdGenerator
     from app.db.connection import get_db
     from app.domains.chat.repositories.agent_request_repository import (
         AgentRequestRepository,
@@ -82,6 +83,7 @@ async def stream_forward_events(
 
     last_seq: int | None = since_seq
     block_index = block_index_start
+    block_id_gen = BlockIdGenerator(message_id=message_id)
     poll_interval = settings.agent_bridge.poll_min_interval_sec
     # Аварийная защита от вечного цикла на стороне SSE: раннер сам имеет
     # max_total_duration_sec — даём небольшой запас сверху.
@@ -265,7 +267,7 @@ async def stream_forward_events(
                 async for sse, idx in emit_response_blocks(
                     response_to_emit["blocks"],
                     block_index_start=block_index,
-                    message_id=message_id,
+                    block_id_gen=block_id_gen,
                 ):
                     block_index = idx + 1
                     yield ("sse", sse)
