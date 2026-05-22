@@ -56,6 +56,16 @@ class DbPoolMonitor:
         # высокой нагрузке. Сброс — когда usage упал ниже threshold.
         self._warning_active = False
 
+    def get_status(self) -> dict:
+        """Снимок состояния монитора для diagnostics-endpoint'а."""
+        return {
+            "name": "admin.db_pool_monitor",
+            "running": self._task is not None and not self._task.done(),
+            "check_interval_sec": self._check_interval_sec,
+            "warn_ratio": self._warn_ratio,
+            "warning_active": self._warning_active,
+        }
+
     async def start(self) -> None:
         """Запускает фоновый цикл. Идемпотентно."""
         if self._task is not None and not self._task.done():

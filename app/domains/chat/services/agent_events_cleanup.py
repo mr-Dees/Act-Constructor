@@ -56,6 +56,17 @@ class AgentEventsCleanupTask:
         self._cycles_since_log = 0
         self._deleted_since_log = 0
 
+    def get_status(self) -> dict:
+        """Снимок состояния задачи для diagnostics-endpoint'а."""
+        return {
+            "name": "chat.agent_events_cleanup",
+            "running": self._task is not None and not self._task.done(),
+            "interval_sec": self._interval_sec,
+            "ttl_hours": self._ttl_hours,
+            "cycles_since_log": self._cycles_since_log,
+            "deleted_since_log": self._deleted_since_log,
+        }
+
     async def start(self) -> None:
         """Стартует фоновую задачу. Идемпотентно."""
         if self._task is not None and not self._task.done():

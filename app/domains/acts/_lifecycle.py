@@ -23,6 +23,12 @@ def register_lifespan_hooks() -> None:
       очищающий просроченные блокировки актов.
     """
     from app.core.domain_registry import register_shutdown_hook, register_startup_hook
+    from app.core.observability_registry import (
+        register_background_task,
+        register_batcher,
+        unregister_background_task,
+        unregister_batcher,
+    )
     from app.domains.acts.deps import set_audit_log_batcher
     from app.domains.acts.services.audit_log_batcher import ActAuditLogBatcher
     from app.domains.acts.services.expired_locks_cleanup import (
@@ -38,11 +44,13 @@ def register_lifespan_hooks() -> None:
         await batcher.start()
         set_audit_log_batcher(batcher)
         app.state.acts_audit_log_batcher = batcher
+        register_batcher("acts.audit_log_batcher", batcher)
         logger.info("Батчер аудит-лога актов запущен")
 
     async def _stop_audit_log_batcher(app: FastAPI) -> None:
         """Останавливает батчер аудит-лога с финальным flush'ем."""
         batcher = getattr(app.state, "acts_audit_log_batcher", None)
+        unregister_batcher("acts.audit_log_batcher")
         try:
             set_audit_log_batcher(None)
         except Exception:
@@ -60,11 +68,15 @@ def register_lifespan_hooks() -> None:
         task = ExpiredLocksCleanupTask(interval_sec=60.0)
         await task.start()
         app.state.acts_expired_locks_task = task
+        register_background_task(
+            "acts.expired_locks_cleanup", task.get_status,
+        )
         logger.info("Фоновая очистка просроченных блокировок запущена")
 
     async def _stop_expired_locks_cleanup(app: FastAPI) -> None:
         """Останавливает фоновую задачу очистки просроченных блокировок."""
         task = getattr(app.state, "acts_expired_locks_task", None)
+        unregister_background_task("acts.expired_locks_cleanup")
         app.state.acts_expired_locks_task = None
         if task is not None:
             try:
