@@ -14,6 +14,8 @@ from __future__ import annotations
 
 from collections.abc import AsyncIterator
 
+from app.core.chat.block_id_generator import BlockIdGenerator
+
 # Стримуемые блоки: фронт собирает их инкрементально из дельт.
 # Все прочие нестримуемые типы (file, image, plan, error, …) уходят
 # одним сообщением через block_complete с полным payload — иначе фронт
@@ -24,8 +26,8 @@ STREAMABLE_BLOCK_TYPES = ("text", "code", "reasoning")
 async def emit_response_blocks(
     blocks: list[dict],
     *,
+    block_id_gen: BlockIdGenerator,
     block_index_start: int = 0,
-    message_id: str | None = None,
 ) -> AsyncIterator[tuple[str, int]]:
     """Async-генератор SSE-строк для финальных блоков ответа агента.
 
@@ -34,6 +36,11 @@ async def emit_response_blocks(
     использован для следующего блока вне этого вызова. Buttons и
     client_action идут по собственным SSE-каналам и block_index НЕ
     инкрементируют.
+
+    ``block_id_gen`` обязателен — единый источник детерминированных
+    ``block_id`` для всех источников эмиссии в рамках сообщения
+    (streaming, finalize, agent_bridge_runner). Без него нельзя
+    гарантировать одинаковый id между live-стримом и resume.
     """
     from app.domains.chat.services.button_translator import translate_buttons
     from app.domains.chat.services.streaming import (
@@ -46,7 +53,6 @@ async def emit_response_blocks(
     )
 
     idx = block_index_start
-    ca_counter = 0
     for raw_block in blocks:
         btype = raw_block.get("type", "text")
         if btype == "buttons":
@@ -56,15 +62,12 @@ async def emit_response_blocks(
         if btype == "client_action":
             # Гарантируем block_id для идемпотентности на фронте. Если блок
             # пришёл из истории / ответа агента без block_id — выставляем
-            # детерминированно от message_id (или fallback от block_index,
-            # если message_id не передан — старые callsite'ы).
+            # детерминированно через генератор.
             if not raw_block.get("block_id"):
-                if message_id:
-                    new_id = f"{message_id}:ca:{ca_counter}"
-                else:
-                    new_id = f"agent:ca:{idx}:{ca_counter}"
-                raw_block = {**raw_block, "block_id": new_id}
-            ca_counter += 1
+                raw_block = {
+                    **raw_block,
+                    "block_id": block_id_gen.next("client_action"),
+                }
             yield sse_client_action(block=raw_block), idx
             continue
         if btype in STREAMABLE_BLOCK_TYPES:

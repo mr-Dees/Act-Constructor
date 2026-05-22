@@ -923,11 +923,11 @@ class TestClientActionBlockIdInSSE:
     async def test_emit_response_blocks_adds_missing_block_id(self):
         """block_emitter добавляет детерминированный block_id для client_action.
 
-        Семантика после Wave 2: фабрика id переключилась с uuid4 на детерминированный
-        ``f"{message_id}:ca:{i}"`` (или ``agent:ca:{idx}:{i}"`` без message_id),
-        чтобы при resume/reload фронт получал тот же id и применял sessionStorage-
-        дедупликацию.
+        Формат: ``f"{message_id}:client_action:{i}"`` через единый
+        :class:`BlockIdGenerator`, чтобы при resume/reload фронт получал
+        тот же id и применял sessionStorage-дедупликацию.
         """
+        from app.core.chat.block_id_generator import BlockIdGenerator
         from app.domains.chat.services.block_emitter import emit_response_blocks
 
         blocks = [
@@ -939,16 +939,19 @@ class TestClientActionBlockIdInSSE:
             },
         ]
         events: list[tuple[str, int]] = []
-        async for sse, idx in emit_response_blocks(blocks, message_id="msg-99"):
+        async for sse, idx in emit_response_blocks(
+            blocks, block_id_gen=BlockIdGenerator(message_id="msg-99"),
+        ):
             events.append((sse, idx))
 
         assert len(events) == 1
         payload = _parse_event_data(events[0][0])
-        assert payload["block"]["block_id"] == "msg-99:ca:0"
+        assert payload["block"]["block_id"] == "msg-99:client_action:0"
 
     @pytest.mark.asyncio
     async def test_emit_response_blocks_preserves_existing_block_id(self):
         """Если block_id уже есть — block_emitter его НЕ переписывает."""
+        from app.core.chat.block_id_generator import BlockIdGenerator
         from app.domains.chat.services.block_emitter import emit_response_blocks
 
         blocks = [
@@ -960,7 +963,9 @@ class TestClientActionBlockIdInSSE:
             },
         ]
         events: list[tuple[str, int]] = []
-        async for sse, idx in emit_response_blocks(blocks):
+        async for sse, idx in emit_response_blocks(
+            blocks, block_id_gen=BlockIdGenerator(message_id="msg-x"),
+        ):
             events.append((sse, idx))
 
         payload = _parse_event_data(events[0][0])
@@ -969,8 +974,10 @@ class TestClientActionBlockIdInSSE:
     def test_orchestrator_parser_adds_block_id_if_missing(self):
         """_parse_client_action_result добавляет детерминированный block_id.
 
-        Wave 2: формат стал ``f"{message_id}:ca:{idx}"`` (вместо uuid4).
+        Формат: ``f"{message_id}:client_action:{idx}"`` через генератор.
         """
+        from app.core.chat.block_id_generator import BlockIdGenerator
+
         settings = ChatDomainSettings(
             api_base="http://test", api_key="test", model="test-model",
         )
@@ -985,19 +992,21 @@ class TestClientActionBlockIdInSSE:
             "params": {"message": "Hi"},
         })
         parsed = orch._parse_client_action_result(
-            raw_json, message_id="m-1", ca_counter=[0],
+            raw_json, block_id_gen=BlockIdGenerator(message_id="m-1"),
         )
         assert parsed is not None
-        assert parsed["block_id"] == "m-1:ca:0"
+        assert parsed["block_id"] == "m-1:client_action:0"
 
-    def test_orchestrator_parser_preserves_block_id(self):
-        """Wave 2: парсер ВСЕГДА переписывает block_id детерминированно.
+    def test_orchestrator_parser_overwrites_supplied_block_id(self):
+        """Парсер ВСЕГДА переписывает block_id детерминированно.
 
         Это нужно для идемпотентности между запусками — id формируется как
-        ``f"{message_id}:ca:{i}"`` независимо от того, выставил ли его handler.
-        Старое поведение (preserve) теперь устарело: только централизованная
-        нумерация в оркестраторе гарантирует одинаковый id при reload истории.
+        ``f"{message_id}:client_action:{i}"`` независимо от того, выставил
+        ли его handler. Только централизованная нумерация в оркестраторе
+        гарантирует одинаковый id при reload истории.
         """
+        from app.core.chat.block_id_generator import BlockIdGenerator
+
         settings = ChatDomainSettings(
             api_base="http://test", api_key="test", model="test-model",
         )
@@ -1012,9 +1021,11 @@ class TestClientActionBlockIdInSSE:
             "params": {"message": "Hi"},
             "block_id": "handler-supplied-id",
         })
-        parsed = orch._parse_client_action_result(
-            raw_json, message_id="m-1", ca_counter=[3],
-        )
+        gen = BlockIdGenerator(message_id="m-1")
+        # «Прокрутили» генератор на 3 — следующий id должен быть :3
+        for _ in range(3):
+            gen.next("client_action")
+        parsed = orch._parse_client_action_result(raw_json, block_id_gen=gen)
         assert parsed is not None
-        # handler-supplied id отбрасывается, используется counter-based
-        assert parsed["block_id"] == "m-1:ca:3"
+        # handler-supplied id отбрасывается, используется генератор
+        assert parsed["block_id"] == "m-1:client_action:3"

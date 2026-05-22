@@ -4,7 +4,8 @@
 * В Pydantic-модели ``ClientActionBlock.block_id`` — обязательное поле
   (раньше был ``default_factory=uuid4``).
 * Оркестратор переписывает ``block_id`` на детерминированный
-  ``f"{message_id}:ca:{i}"`` через ``_parse_client_action_result`` —
+  ``f"{message_id}:client_action:{i}"`` через единый
+  :class:`BlockIdGenerator` в ``_parse_client_action_result`` —
   это гарантирует одинаковый id между запусками для frontend
   ``sessionStorage['chat:executedActions']``-дедупликации.
 """
@@ -16,6 +17,7 @@ from unittest.mock import AsyncMock
 import pydantic
 import pytest
 
+from app.core.chat.block_id_generator import BlockIdGenerator
 from app.core.chat.blocks import ClientActionBlock
 from app.domains.chat.services.orchestrator import Orchestrator
 from app.domains.chat.settings import ChatDomainSettings
@@ -42,9 +44,9 @@ def test_block_id_required_in_pydantic_model():
 
 
 def test_orchestrator_assigns_deterministic_id():
-    """3 client_action в одном ответе → id: msg-1:ca:0, :ca:1, :ca:2."""
+    """3 client_action в одном ответе → id: msg-1:client_action:0..2."""
     orch = _orch()
-    counter = [0]
+    gen = BlockIdGenerator(message_id="msg-1")
     ids = []
     for _ in range(3):
         raw = json.dumps({
@@ -52,15 +54,17 @@ def test_orchestrator_assigns_deterministic_id():
             "action": "notify",
             "params": {"message": "x"},
         })
-        parsed = orch._parse_client_action_result(
-            raw, message_id="msg-1", ca_counter=counter,
-        )
+        parsed = orch._parse_client_action_result(raw, block_id_gen=gen)
         ids.append(parsed["block_id"])
-    assert ids == ["msg-1:ca:0", "msg-1:ca:1", "msg-1:ca:2"]
+    assert ids == [
+        "msg-1:client_action:0",
+        "msg-1:client_action:1",
+        "msg-1:client_action:2",
+    ]
 
 
-def test_repeated_parse_with_same_counter_state_yields_same_ids():
-    """Повторный парсинг с тем же стартовым counter даёт те же id (детерминизм)."""
+def test_repeated_parse_with_same_generator_state_yields_same_ids():
+    """Повторный парсинг с тем же стартовым состоянием даёт те же id (детерминизм)."""
     orch = _orch()
     raw = json.dumps({
         "type": "client_action",
@@ -69,16 +73,16 @@ def test_repeated_parse_with_same_counter_state_yields_same_ids():
     })
 
     # Прогон 1
-    counter1 = [0]
-    a1 = orch._parse_client_action_result(raw, message_id="m", ca_counter=counter1)
-    a2 = orch._parse_client_action_result(raw, message_id="m", ca_counter=counter1)
-    # Прогон 2 (новая сессия — тот же msg_id, тот же стартовый counter)
-    counter2 = [0]
-    b1 = orch._parse_client_action_result(raw, message_id="m", ca_counter=counter2)
-    b2 = orch._parse_client_action_result(raw, message_id="m", ca_counter=counter2)
+    gen1 = BlockIdGenerator(message_id="m")
+    a1 = orch._parse_client_action_result(raw, block_id_gen=gen1)
+    a2 = orch._parse_client_action_result(raw, block_id_gen=gen1)
+    # Прогон 2 (новая сессия — тот же msg_id, свежий генератор)
+    gen2 = BlockIdGenerator(message_id="m")
+    b1 = orch._parse_client_action_result(raw, block_id_gen=gen2)
+    b2 = orch._parse_client_action_result(raw, block_id_gen=gen2)
 
-    assert a1["block_id"] == b1["block_id"] == "m:ca:0"
-    assert a2["block_id"] == b2["block_id"] == "m:ca:1"
+    assert a1["block_id"] == b1["block_id"] == "m:client_action:0"
+    assert a2["block_id"] == b2["block_id"] == "m:client_action:1"
 
 
 def test_different_message_ids_produce_different_block_ids():
@@ -89,16 +93,20 @@ def test_different_message_ids_produce_different_block_ids():
         "action": "notify",
         "params": {"message": "x"},
     })
-    a = orch._parse_client_action_result(raw, message_id="m-A", ca_counter=[0])
-    b = orch._parse_client_action_result(raw, message_id="m-B", ca_counter=[0])
-    assert a["block_id"] == "m-A:ca:0"
-    assert b["block_id"] == "m-B:ca:0"
+    a = orch._parse_client_action_result(
+        raw, block_id_gen=BlockIdGenerator(message_id="m-A"),
+    )
+    b = orch._parse_client_action_result(
+        raw, block_id_gen=BlockIdGenerator(message_id="m-B"),
+    )
+    assert a["block_id"] == "m-A:client_action:0"
+    assert b["block_id"] == "m-B:client_action:0"
     assert a["block_id"] != b["block_id"]
 
 
 def test_handler_supplied_block_id_is_overwritten():
     """Wave 2: даже если handler выставил свой block_id — оркестратор
-    переписывает его на детерминированный (см. orchestrator.py:798-819)."""
+    переписывает его на детерминированный."""
     orch = _orch()
     raw = json.dumps({
         "type": "client_action",
@@ -106,10 +114,12 @@ def test_handler_supplied_block_id_is_overwritten():
         "params": {"message": "x"},
         "block_id": "handler-provided-uuid-1234",
     })
-    parsed = orch._parse_client_action_result(
-        raw, message_id="m", ca_counter=[5],
-    )
-    assert parsed["block_id"] == "m:ca:5"
+    gen = BlockIdGenerator(message_id="m")
+    # «Прокрутили» генератор на 5 — следующее значение должно быть :5
+    for _ in range(5):
+        gen.next("client_action")
+    parsed = orch._parse_client_action_result(raw, block_id_gen=gen)
+    assert parsed["block_id"] == "m:client_action:5"
 
 
 def test_run_accepts_message_id_and_uses_it_for_save():

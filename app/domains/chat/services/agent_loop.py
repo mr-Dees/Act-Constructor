@@ -51,7 +51,7 @@ async def run_agent_loop(
 
     ``message_id`` обязателен и должен быть тем же id, что попадёт в БД
     через ``_save_assistant_message``: на нём строится детерминированный
-    ``block_id`` ClientActionBlock (``f"{message_id}:ca:{i}"``).
+    ``block_id`` ClientActionBlock (``f"{message_id}:client_action:{i}"``).
     """
     # Fallback при отсутствии настроек API
     if (

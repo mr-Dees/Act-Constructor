@@ -556,3 +556,185 @@ async def test_schedule_same_request_id_returns_same_task():
 
     assert t1 is t2
     t1.cancel()
+
+
+# -------------------------------------------------------------------------
+# 5. Лимит размера текста блока (CH-1 / DB-1)
+# -------------------------------------------------------------------------
+
+
+def test_trim_text_if_oversized_trims_oversized_reasoning(caplog):
+    """Reasoning >max_size обрезается, маркер дописан, WARNING в лог."""
+    import logging
+
+    max_size = 256 * 1024  # 256 KB
+    # 300 KB ASCII (1 байт/символ)
+    big_text = "a" * (300 * 1024)
+
+    caplog.set_level(
+        logging.WARNING,
+        logger="audit_workstation.domains.chat.agent_bridge_runner",
+    )
+    result = agent_bridge_runner._trim_text_if_oversized(
+        text=big_text,
+        max_size=max_size,
+        request_id="rid-trim",
+        block_type="reasoning",
+    )
+
+    # Размер укладывается в лимит (с учётом маркера)
+    assert len(result.encode("utf-8")) <= max_size
+    # Маркер на месте
+    assert result.endswith("…[обрезано]")
+    # Содержание начала сохранено
+    assert result.startswith("aaaa")
+    # WARNING зафиксирован
+    assert any(
+        "блок обрезан" in r.message and "rid-trim" in r.message
+        and "reasoning" in r.message
+        for r in caplog.records
+    )
+
+
+def test_trim_text_if_oversized_passes_through_small_text(caplog):
+    """Текст в пределах лимита не обрезается, WARNING не эмитится."""
+    import logging
+
+    caplog.set_level(
+        logging.WARNING,
+        logger="audit_workstation.domains.chat.agent_bridge_runner",
+    )
+    small_text = "Короткое reasoning от агента."
+    result = agent_bridge_runner._trim_text_if_oversized(
+        text=small_text,
+        max_size=256 * 1024,
+        request_id="rid-small",
+        block_type="reasoning",
+    )
+    assert result == small_text
+    # WARNING не должен эмититься для небольших блоков
+    assert not any("блок обрезан" in r.message for r in caplog.records)
+
+
+def test_trim_text_preserves_utf8_boundary():
+    """Обрезка не разрывает UTF-8 multibyte-символ.
+
+    Кириллица — 2 байта/символ. После обрезки результат должен оставаться
+    валидным UTF-8 (декодируется без ошибок).
+    """
+    # 200000 кириллических символов = 400000 байт (> 256 KB)
+    big_text = "я" * 200000
+    result = agent_bridge_runner._trim_text_if_oversized(
+        text=big_text,
+        max_size=256 * 1024,
+        request_id="rid-utf8",
+        block_type="reasoning",
+    )
+    # Декодируется ровно (без UnicodeDecodeError)
+    encoded = result.encode("utf-8")
+    encoded.decode("utf-8")  # raises если граница битая
+    assert len(encoded) <= 256 * 1024
+    assert result.endswith("…[обрезано]")
+
+
+def test_trim_text_empty_returns_empty():
+    """Пустой текст возвращается как есть (быстрый путь без encode)."""
+    result = agent_bridge_runner._trim_text_if_oversized(
+        text="",
+        max_size=1024,
+        request_id="rid-empty",
+        block_type="reasoning",
+    )
+    assert result == ""
+
+
+# -------------------------------------------------------------------------
+# 6. forward_limit декрементится в finally при exception в середине стрима
+# -------------------------------------------------------------------------
+
+
+async def test_run_releases_forward_limit_on_mid_stream_exception():
+    """Если runner падает с RuntimeError ПОСЛЕ acquire — счётчик должен
+    декрементироваться в finally блоке ``_run``.
+
+    Регрессия: без release в finally при сбое БД / runner crash юзер
+    остаётся с инкрементированным счётчиком навсегда — новые forward'ы
+    отбиваются 429 до рестарта uvicorn.
+    """
+    from app.domains.chat.services import forward_limit
+
+    # Симулируем acquire: счётчик=1, как будто handle_forward_call успел
+    # инкрементировать перед schedule().
+    forward_limit.reset()
+    forward_limit.acquire_no_check("user-mid-fail")
+    assert forward_limit.get_count("user-mid-fail") == 1
+
+    mock_conn = AsyncMock()
+    mock_conn_stream = AsyncMock()
+    mock_conn2 = AsyncMock()
+    mock_conn3 = AsyncMock()
+    fake_req_repo = MagicMock()
+    fake_req_repo.get = AsyncMock(return_value={
+        "id": "rid-mid", "conversation_id": "conv-mid",
+        "message_id": "msg-mid", "status": "pending", "version": 1,
+        "user_id": "user-mid-fail",
+    })
+    fake_req_repo.update_status = AsyncMock(return_value=2)
+    finalize_msg_mock = AsyncMock()
+    fail_mock = AsyncMock()
+    start_mock = AsyncMock(return_value={
+        "id": "msg-mid", "status": "streaming", "content": [],
+    })
+    fake_adapter = MagicMock(get_table_name=lambda n: n)
+
+    async def fake_wait_raises(self, *a, **kw):
+        # Бросаем RuntimeError В СЕРЕДИНЕ стрима после того, как
+        # runner уже принял request и пометил его dispatched.
+        raise RuntimeError("DB пропала посреди стрима")
+        yield  # pragma: no cover
+
+    with (
+        patch(
+            "app.db.connection.get_db",
+            _fake_get_db_ctx_multi(
+                [mock_conn, mock_conn_stream, mock_conn2, mock_conn3],
+            ),
+        ),
+        patch(
+            "app.db.repositories.base.get_adapter",
+            return_value=fake_adapter,
+        ),
+        patch(
+            "app.domains.chat.repositories.agent_request_repository."
+            "AgentRequestRepository",
+            return_value=fake_req_repo,
+        ),
+        patch(
+            "app.domains.chat.services.agent_bridge."
+            "AgentBridgeService.wait_for_completion",
+            fake_wait_raises,
+        ),
+        patch(
+            "app.domains.chat.services.message_service."
+            "MessageService.start_streaming_assistant_message",
+            start_mock,
+        ),
+        patch(
+            "app.domains.chat.services.message_service."
+            "MessageService.finalize_assistant_message",
+            finalize_msg_mock,
+        ),
+        patch(
+            "app.domains.chat.services.message_service."
+            "MessageService.fail_assistant_message",
+            fail_mock,
+        ),
+    ):
+        task = agent_bridge_runner.schedule("rid-mid", settings=_settings())
+        await asyncio.wait_for(task, timeout=2.0)
+
+    # finally в _run обязан декрементировать счётчик до 0
+    assert forward_limit.get_count("user-mid-fail") == 0, (
+        "forward_limit.release не вызван в finally — юзер «застрял» в лимите"
+    )
+    forward_limit.reset()

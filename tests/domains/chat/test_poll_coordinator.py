@@ -488,3 +488,87 @@ async def test_unsubscribed_during_poll_does_not_crash():
     # Координатор не должен упасть — task всё ещё живой
     assert pc._task is not None and not pc._task.done()
     await pc.stop()
+
+
+async def test_watchdog_restarts_hung_poll_loop_by_stale_heartbeat():
+    """Watchdog рестартует зависший _poll_loop по устаревшему heartbeat.
+
+    Отличие от ``test_watchdog_restarts_dead_poll_loop`` (где task.done()
+    из-за cancel): здесь task жив, но висит внутри ``poll_batch_fn``
+    (например, asyncpg-соединение перестало отвечать без обрыва). В этом
+    случае ``try/except`` в ``_poll_loop`` бесполезен — спасает только
+    отдельный watchdog с собственным таймером.
+    """
+    hang_event = asyncio.Event()
+
+    async def hanging_poll(_rids, _since_seqs=None):
+        # Первый вызов виснет навсегда — имитация stuck-await.
+        hang_event.set()
+        await asyncio.sleep(60.0)
+        return {}
+
+    pc = _coordinator(
+        hanging_poll,
+        poll_min_interval_sec=0.01,
+        poll_max_interval_sec=0.03,  # watchdog тикает каждые 30мс
+        watchdog_stale_factor=2.0,   # threshold = 60мс
+    )
+    await pc.subscribe("r1")
+    await pc.start()
+    # Дожидаемся, что _poll_loop успел зайти в hanging_poll
+    await asyncio.wait_for(hang_event.wait(), timeout=2.0)
+
+    # Ждём, пока watchdog заметит stale heartbeat (60мс threshold + проверка)
+    for _ in range(50):
+        if pc._restart_count >= 1:
+            break
+        await asyncio.sleep(0.02)
+
+    assert pc._restart_count >= 1, (
+        f"watchdog не заметил stale heartbeat за ~1с "
+        f"(restart_count={pc._restart_count})"
+    )
+    # Новый _task создан, подписки сохранены
+    assert pc._task is not None
+    assert "r1" in pc._subscribers
+
+    await pc.stop()
+
+
+async def test_subscribe_observer_concurrent_with_poll_loop_is_atomic():
+    """Параллельный subscribe_observer + активный _poll_loop не падает.
+
+    subscribe_observer берёт self._lock, _poll_loop делает batch и
+    доставку под self._lock. Тест эмулирует race: пока координатор
+    крутится и pump-ит события, наблюдатель подписывается. Ожидаем:
+    либо observer успел подписаться ДО доставки и получил событие,
+    либо подписался ПОСЛЕ — тогда событие пропустил. Главное — не
+    падает с исключением (атомарность через lock).
+    """
+    events_to_return = [{"seq": 1, "event_type": "reasoning", "payload": {}}]
+
+    async def poll(rids, _since_seqs=None):
+        return {rid: events_to_return for rid in rids}
+
+    pc = _coordinator(poll, poll_min_interval_sec=0.005,
+                      poll_max_interval_sec=0.02)
+    await pc.subscribe("rid-race")
+    await pc.start()
+
+    # Параллельно делаем 20 subscribe_observer'ов — race с _poll_loop
+    observer_queues: list[asyncio.Queue] = []
+
+    async def subscribe_one():
+        q = await pc.subscribe_observer("rid-race")
+        observer_queues.append(q)
+
+    await asyncio.gather(*(subscribe_one() for _ in range(20)))
+
+    # Координатор всё ещё жив
+    assert pc._task is not None and not pc._task.done()
+    # Каждый observer получил свою очередь
+    assert len(observer_queues) == 20
+    # Все очереди уникальны (race не дал shared-state)
+    assert len({id(q) for q in observer_queues}) == 20
+
+    await pc.stop()

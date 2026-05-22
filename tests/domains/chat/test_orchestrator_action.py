@@ -1,6 +1,7 @@
 """Тест парсинга ClientActionBlock из handler'ов action-tools."""
 import json
 
+from app.core.chat.block_id_generator import BlockIdGenerator
 from app.domains.chat.services.orchestrator import Orchestrator
 from app.domains.chat.settings import ChatDomainSettings
 
@@ -15,11 +16,10 @@ def _orch() -> Orchestrator:
 
 
 def _parse(raw: str):
-    """Хелпер: вызов парсера с детерминированным message_id и счётчиком."""
+    """Хелпер: вызов парсера с детерминированным генератором block_id."""
     return _orch()._parse_client_action_result(
         raw,
-        message_id="msg-test",
-        ca_counter=[0],
+        block_id_gen=BlockIdGenerator(message_id="msg-test"),
     )
 
 
@@ -33,8 +33,8 @@ def test_parse_client_action_result_recognizes_block():
     obj = _parse(raw)
     assert obj is not None
     assert obj["action"] == "notify"
-    # block_id должен быть переписан детерминированно
-    assert obj["block_id"] == "msg-test:ca:0"
+    # block_id должен быть переписан детерминированно через генератор
+    assert obj["block_id"] == "msg-test:client_action:0"
 
 
 def test_parse_client_action_result_ignores_plain_text():
@@ -56,23 +56,18 @@ def test_parse_client_action_result_ignores_invalid_json():
 
 
 def test_parse_client_action_result_counter_increments():
-    """ca_counter должен увеличиваться между вызовами на одном message_id."""
+    """Генератор должен инкрементить per-type счётчик между вызовами."""
     orch = _orch()
-    counter = [0]
+    gen = BlockIdGenerator(message_id="m1")
     raw = json.dumps({
         "type": "client_action",
         "action": "notify",
         "params": {"message": "x"},
     })
-    a = orch._parse_client_action_result(
-        raw, message_id="m1", ca_counter=counter,
-    )
-    b = orch._parse_client_action_result(
-        raw, message_id="m1", ca_counter=counter,
-    )
-    assert a["block_id"] == "m1:ca:0"
-    assert b["block_id"] == "m1:ca:1"
-    assert counter[0] == 2
+    a = orch._parse_client_action_result(raw, block_id_gen=gen)
+    b = orch._parse_client_action_result(raw, block_id_gen=gen)
+    assert a["block_id"] == "m1:client_action:0"
+    assert b["block_id"] == "m1:client_action:1"
 
 
 def test_parse_blocks_list_result_rewrites_client_action_ids():
@@ -92,9 +87,9 @@ def test_parse_blocks_list_result_rewrites_client_action_ids():
     ])
     orch = _orch()
     result = orch._parse_blocks_list_result(
-        raw, message_id="m2", ca_counter=[0],
+        raw, block_id_gen=BlockIdGenerator(message_id="m2"),
     )
     assert result is not None
     assert result[0]["type"] == "text"
-    assert result[1]["block_id"] == "m2:ca:0"
-    assert result[2]["block_id"] == "m2:ca:1"
+    assert result[1]["block_id"] == "m2:client_action:0"
+    assert result[2]["block_id"] == "m2:client_action:1"
