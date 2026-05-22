@@ -487,7 +487,7 @@ isPinnedTable(node) {
 
 - Поле `version` или аналог в `tree_data` отсутствует — ни Pydantic-схема (`ActDataSchema`, `ActItemSchema`), ни таблица `act_tree` не содержат такого поля.
 - Эволюция структуры идёт через:
-  1. SQL-миграции — изменения схемы таблиц (`migrations/postgresql/schema.sql`, `migrations/greenplum/schema.sql`); схема исполняется при старте через `create_tables_if_not_exist` (см. CLAUDE.md).
+  1. SQL-миграции — изменения схемы таблиц (`migrations/postgresql/schema.sql`, `migrations/greenplum/schema.sql`); схема исполняется при старте через `create_tables_if_not_exist` (см. [`developer-guide.md §6.5`](developer-guide.md#65-миграции)).
   2. Pydantic-валидаторы — `ActItemSchema.model_rebuild()` после декларации (`act_content.py:376`) и `field_validator`'ы на `TableSchema.grid`/`colWidths`. При несовместимом изменении схемы валидация старых документов упадёт с `ValidationError` — обратная совместимость держится на том, что новые поля добавляются как опциональные с `default=`.
   3. Денормализация — если меняется набор флагов в `act_tables` (например, новый тип спец-таблицы), нужно одновременно обновить SQL-миграции (новая колонка, индекс при необходимости) и `ActContentRepository._load_tables`/`_save_tables`.
 
@@ -499,5 +499,5 @@ isPinnedTable(node) {
 - Удаление полей делать в два шага: сначала перевод в опциональные, миграция данных, потом удаление.
 - При добавлении нового `node.type` — обновлять `Literal[...]` в `ActItemSchema.type`, фронтовый `AppConfig.nodeTypes`, проверки `_isInformationalNode` / `canAcceptAsChild` и сериализатор `_serializeTree`.
 - При добавлении нового флага спец-таблицы — добавлять колонку в `act_tables` (миграции PG + GP), маппинг в `_load_tables`/`_save_tables`, поле в `TableSchema` и учёт в `TreeUtils.isPinnedTable`, если таблица должна быть pinned.
-- CHECK-констрейнты в SQL: при добавлении нового CHECK обязательно зарегистрировать сообщение в `CHECK_CONSTRAINT_MESSAGES` (`app/core/exceptions.py`) — см. CLAUDE.md, раздел Backend.
+- CHECK-констрейнты в SQL: при добавлении нового CHECK обязательно зарегистрировать сообщение в `CHECK_CONSTRAINT_MESSAGES` (`app/core/exceptions.py`) — см. [`developer-guide.md §6.5a`](developer-guide.md#65a-как-добавить-check-constraint).
 - Greenplum: помнить про PG 9.4 (нет `IF NOT EXISTS` для индексов, нет `gen_random_uuid()`, UUID-id — `VARCHAR(36)`); `DISTRIBUTED BY` должен быть подмножеством каждого `UNIQUE`.

@@ -2101,17 +2101,17 @@ def reset() -> None:
 
 ### 7.4 Agent loop
 
-После рефакторинга 3.4 (`backend-hardening`) `orchestrator.py` (~739 строк) — тонкий фасад. Все циклы вынесены в отдельные модули `app/domains/chat/services/`:
+После рефакторинга 3.4 (`backend-hardening`) `orchestrator.py` — тонкий фасад. Все циклы вынесены в отдельные модули `app/domains/chat/services/`:
 
 | Модуль | Что внутри |
 |---|---|
-| `orchestrator.py` (~739) | Класс `Orchestrator`: DI, history-load, system-prompt, делегирование в `agent_loop`/`stream_loop`. Wrapper-методы `_execute_tool_call`, `_llm_call_with_fallback` оставлены **только** для совместимости с тестами, которые патчат их через `orch._method = AsyncMock()` |
-| `agent_loop.py` (~358) | Pure-функция `run_agent_loop(...)` — non-streaming тело `Orchestrator.run()` |
-| `stream_loop.py` (~1041) | Pure-функция `run_stream_loop(...)` — SSE-стрим, ветка GigaChat non-streaming fallback, интеграция с `forward_bridge` |
-| `llm_call.py` (~93) | `call_llm_with_fallback(...)` — retry + circuit breaker + primary↔fallback переключение |
-| `tool_executor.py` (~126) | `execute_tool_call(...)` — валидация args, конвертация типов, `asyncio.wait_for`, запись `tool_metric` |
-| `forward_bridge.py` (~232) | `handle_forward_call(...)` — INSERT в `agent_requests`, эмит `agent_request_started`, стрим SSE-блоков от внешнего агента через `PollCoordinator` |
-| `orchestrator_helpers.py` (~140) | Чистые хелперы: `safe_args`, `convert_param`, `unpack_pending_tool_call`, `ToolValidationTracker`, `build_tool_loop_exit_answer`, `BASE_SYSTEM_PROMPT`, `TOOL_VALIDATION_NEUTRAL_MESSAGE`, `TOOL_VALIDATION_LOOP_THRESHOLD` |
+| `orchestrator.py` | Класс `Orchestrator`: DI, history-load, system-prompt, делегирование в `agent_loop`/`stream_loop`. Wrapper-методы `_execute_tool_call`, `_llm_call_with_fallback` оставлены **только** для совместимости с тестами, которые патчат их через `orch._method = AsyncMock()` |
+| `agent_loop.py` | Pure-функция `run_agent_loop(...)` — non-streaming тело `Orchestrator.run()` |
+| `stream_loop.py` | Pure-функция `run_stream_loop(...)` — SSE-стрим, ветка GigaChat non-streaming fallback, интеграция с `forward_bridge` |
+| `llm_call.py` | `call_llm_with_fallback(...)` — retry + circuit breaker + primary↔fallback переключение |
+| `tool_executor.py` | `execute_tool_call(...)` — валидация args, конвертация типов, `asyncio.wait_for`, запись `tool_metric` |
+| `forward_bridge.py` | `handle_forward_call(...)` — INSERT в `agent_requests`, эмит `agent_request_started`, стрим SSE-блоков от внешнего агента через `PollCoordinator` |
+| `orchestrator_helpers.py` | Чистые хелперы: `safe_args`, `convert_param`, `unpack_pending_tool_call`, `ToolValidationTracker`, `build_tool_loop_exit_answer`, `BASE_SYSTEM_PROMPT`, `TOOL_VALIDATION_NEUTRAL_MESSAGE`, `TOOL_VALIDATION_LOOP_THRESHOLD` |
 
 ```python
 # Orchestrator получает msg_service, conv_service и settings через DI.
@@ -4124,9 +4124,9 @@ finally:
 
 **Streaming-индикатор.** `MessageResponse` отдаёт `status` наружу; фронт показывает typing-облако на сообщениях со `status='streaming'` (через `chat-message-bot--streaming` класс-маркер) — без него нельзя было бы отличить «forward в полёте» от «forward завершён» при рендере из истории. `chat-messages.js::_handleSSEEvent` снимает маркер при первом контентом блоке (`block_start` reasoning'а), `_maybeResumeActiveForward` переиспользует существующий маркированный bubble вместо создания нового.
 
-**Schema/миграции.** Колонка `status` добавлена в `chat_messages` обеих СУБД с `DEFAULT 'complete'` + `CHECK (status IN ('streaming','complete','failed'))`. На PG — partial-индекс `idx_{PREFIX}chat_messages_streaming` (`WHERE status='streaming'`) для быстрого recovery. Для существующих БД — `docs/migrations/chat-messages-status-{pg,gp}.sql`.
+**Schema/миграции.** Колонка `status` добавлена в `chat_messages` обеих СУБД с `DEFAULT 'complete'` + `CHECK (status IN ('streaming','complete','failed'))`. На PG — partial-индекс `idx_{PREFIX}chat_messages_streaming` (`WHERE status='streaming'`) для быстрого recovery. На новых инсталляциях обе колонки и индекс создаются стартовым `create_tables_if_not_exist` (`schema.sql` каждого домена идемпотентен). Для старых БД, на которых таблица уже существовала без этих полей, выполнить ALTER TABLE вручную (см. `app/domains/chat/migrations/{postgresql,greenplum}/schema.sql` как образец).
 
-**UNIQUE-констрейнт** на `(request_id, seq)` в `agent_response_events` остаётся независимой защитой от дублей на уровне БД при retry внешнего агента. GP-правило `DISTRIBUTED BY ⊆ UNIQUE` соблюдено: `request_id` входит в констрейнт. Миграции — `docs/migrations/agent-response-events-unique-{pg,gp}.sql`.
+**UNIQUE-констрейнт** на `(request_id, seq)` в `agent_response_events` остаётся независимой защитой от дублей на уровне БД при retry внешнего агента. GP-правило `DISTRIBUTED BY ⊆ UNIQUE` соблюдено: `request_id` входит в констрейнт. На новых инсталляциях констрейнт создаётся `schema.sql`. Для старых БД, в которых констрейнта ещё нет — добавить вручную через `ALTER TABLE ... ADD CONSTRAINT uniq_{PREFIX}agent_response_events_request_seq UNIQUE (request_id, seq)`, предварительно убрав дубли.
 
 **Что НЕ меняется.** Формат `messages.content` остаётся «N reasoning-блоков»; группировка во фронтовом `<details class="chat-reasoning-group">` с `<hr>`-разделителями между этапами сохраняется. Серверной агрегации чанков в один большой блок не делалось — это сломало бы визуальное разделение этапов.
 

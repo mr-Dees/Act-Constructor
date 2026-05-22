@@ -9,7 +9,7 @@
 См. также:
 - `app/core/domain_registry.py` — реестр доменов и фабрик
 - `app/core/chat/names.py` — централизованные имена ChatTool и client-actions
-- `CLAUDE.md` — основные паттерны проекта
+- [`docs/developer-guide.md`](developer-guide.md) — детальное описание архитектуры и паттернов
 
 ---
 
@@ -115,7 +115,7 @@ $ grep -rn "from app.domains.acts" app/domains/admin
 | **Формат** | `f"{message_id}:ca:{i}"` (детерминированный) |
 | **Генерируется в** | `Orchestrator._parse_client_action_result` (`stream_loop.py` для streaming, `agent_loop.py` для non-streaming) и `block_emitter.emit_response_blocks` (forward-путь) |
 | **Используется на фронте** | `chat-client-actions.js::executeBlock` — Set исполненных id в `sessionStorage` под ключом `chat:executedActions` |
-| **Что сломается, если изменить формат** | Фронт перестанет распознавать «уже исполненный» при reload вкладки → бесконечный redirect-цикл (action `open_url` будет каждый раз заново переходить по URL). См. CLAUDE.md, раздел про `ClientActionBlock идемпотентен по block_id` |
+| **Что сломается, если изменить формат** | Фронт перестанет распознавать «уже исполненный» при reload вкладки → бесконечный redirect-цикл (action `open_url` будет каждый раз заново переходить по URL). Подробнее — [`developer-guide.md §7.9`](developer-guide.md#79-action-handlers-и-clientactionblock) |
 
 **Симметрично для `block_id` reasoning-блоков** (форвард):
 - Формат: `f"{message_id}:reasoning:{seq}"`
@@ -155,8 +155,9 @@ $ grep -rn "from app.domains.acts" app/domains/admin
 | Открытие админ-панели | `admin.open_admin_panel` → `/admin` | то же |
 | API fetch от фронта | `chat-stream.js`, любые `fetch(...)` | Обязательно через `AppConfig.api.getUrl(endpoint)`, иначе под JupyterHub → 404 |
 
-Подробнее — CLAUDE.md, разделы про `open_url` и про `Frontend fetch к
-API под JupyterHub proxy`.
+Подробнее — [`developer-guide.md §7.9`](developer-guide.md#79-action-handlers-и-clientactionblock)
+(client-action `open_url`) и [`developer-guide.md §9.2`](developer-guide.md#92-за-jupyterhub-proxy)
+(frontend fetch через `AppConfig.api.getUrl`).
 
 ---
 

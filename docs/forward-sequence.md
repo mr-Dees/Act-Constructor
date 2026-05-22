@@ -6,9 +6,10 @@
 перезагрузки страницы) и refresh после обрыва соединения.
 
 См. также:
-- `docs/developer-guide.md §11.6` — `agent_bridge_runner` + `PollCoordinator`
-- `docs/developer-guide.md §11.7` — server-authoritative state и `chat_messages.status`
-- `CLAUDE.md` строки про forward, polling-only мост, разделение фаз раннера
+- [`docs/developer-guide.md §7.8`](developer-guide.md#78-внешний-ии-агент-через-таблицы-бд) — внешний ИИ-агент через таблицы БД (обзор)
+- [`docs/developer-guide.md §11.6`](developer-guide.md#116-agent_bridge_runner-и-pollcoordinator-фоновое-сохранение-ассистент-сообщений) — `agent_bridge_runner` + `PollCoordinator` (детали)
+- [`docs/developer-guide.md §11.7`](developer-guide.md#117-server-authoritative-state-для-forwardа-chat_messagesstatus) — server-authoritative state и `chat_messages.status`
+- [`docs/chat-frontend-architecture.md`](chat-frontend-architecture.md) — frontend SSE-клиент и Resume-стрим
 
 ---
 

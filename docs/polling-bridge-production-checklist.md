@@ -110,7 +110,11 @@ Worst case: 30 минут от начала до жёсткого timeout. На 
 ### 2.3. Per-user лимиты
 
 - `CHAT__MAX_PARALLEL_STREAMS_PER_USER` (default 3) — одновременных POST SSE.
-  Resume SSE НЕ учитывается в этом счётчике (см. CLAUDE.md).
+  Resume SSE (`/forward-stream/{rid}`) НЕ учитывается в этом счётчике — это
+  read-only наблюдатель уже зарегистрированного `agent_request`, а не «новый
+  запрос». Иначе при POST forward'е, ещё в полёте, + переключении обратно
+  на ту же беседу счётчик удваивался бы и пользователь ловил 429 просто
+  просматривая свои чаты.
 - `UserRateLimiter` — скользящее окно 60с на POST `/messages`.
 
 ---
@@ -241,9 +245,9 @@ warning в лог.
 
 ### 5.5. «UNIQUE-нарушение при INSERT в agent_response_events»
 
-Это ОЖИДАЕМОЕ поведение после миграции
-`docs/migrations/agent-response-events-unique-{pg,gp}.sql` — внешний
-агент пытается дважды записать одно событие (network retry).
+Это ОЖИДАЕМОЕ поведение: на таблице висит `UNIQUE (request_id, seq)`
+(определён в `app/domains/chat/migrations/{postgresql,greenplum}/schema.sql`)
+— внешний агент пытается дважды записать одно событие (network retry).
 Приложение этим не управляет. Если ошибка прорастает в логи
 сервиса агента — это сигнал ему включить idempotent-INSERT (например,
 через `ON CONFLICT DO NOTHING` или предварительный SELECT).

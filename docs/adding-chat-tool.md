@@ -66,8 +66,9 @@ async def open_act_page_handler(*, km_number: str) -> str:
 
 - Чисто `async def`, возвращает `str`. Если возвращаешь dict — оркестратор
   не будет парсить.
-- Импорты `get_db` / `get_adapter` — **внутри функции** (см. CLAUDE.md),
-  чтобы тесты могли патчить через `patch.multiple("app.db.connection", ...)`.
+- Импорты `get_db` / `get_adapter` — **внутри функции**, а не на module-level:
+  module-level импорт связывает имена при старте и обходит patch. Тесты
+  патчат через `patch.multiple("app.db.connection", get_db=..., get_adapter=...)`.
 - Для action-тулов возвращай валидный JSON `ClientActionBlock`:
   `{"type": "client_action", "action": ..., "params": {...}, "label": ...}`.
   Сервер припишет `block_id` детерминированно (`{message_id}:ca:{i}`).
@@ -274,7 +275,7 @@ grep -r "TOOL_GET_USER_ACTS\|acts.get_user_acts" \
   кнопку** — фронт получит кнопку с `action_id=acts.get_user_acts`, а
   ClientActionsRegistry такого имени не знает → кнопка не работает.
 - **Action `open_url` с относительным URL без `getUrl`** — фронт под
-  JupyterHub-proxy уходит на `/hub/...`, 404. См. CLAUDE.md.
+  JupyterHub-proxy уходит на `/hub/...`, 404. См. [`developer-guide.md §9.2`](developer-guide.md#92-за-jupyterhub-proxy).
 - **Не помечать terminal-tool** — оркестратор сам определит по типу
   возвращаемого значения (`client_action` / `blocks_list` / `buttons`).
   Никакого `terminal=True` флага в `ChatTool` нет.
