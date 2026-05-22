@@ -10,7 +10,7 @@ from typing import Callable
 
 import asyncpg
 from cachetools import TTLCache
-from fastapi import Depends, HTTPException
+from fastapi import Depends, HTTPException, Request
 
 from app.api.v1.deps.auth_deps import get_username
 from app.db.connection import get_db, get_adapter
@@ -119,14 +119,74 @@ def require_domain_access(domain_name: str) -> Callable:
     """
     Фабрика зависимости: проверяет доступ пользователя к домену.
 
-    Админ имеет доступ ко всем доменам.
+    Админ имеет доступ ко всем доменам. При отказе доступа факт записывается
+    в ``access_denied_audit`` через батчер (без блокировки запроса). Если
+    батчер не поднят (например, в тестах) — отказ логируется в warning.
     """
-    async def _check(roles: list[dict] = Depends(get_user_roles)):
+    async def _check(
+        request: Request,
+        username: str = Depends(get_username),
+        roles: list[dict] = Depends(get_user_roles),
+    ):
         if any(r["name"] == "Админ" for r in roles):
             return
         if not any(r["domain_name"] == domain_name for r in roles):
+            await _log_access_denied(
+                request=request,
+                username=username,
+                domain=domain_name,
+                roles=roles,
+            )
             raise HTTPException(status_code=403, detail="Нет доступа к разделу")
     return _check
+
+
+async def _log_access_denied(
+    *,
+    request: Request,
+    username: str,
+    domain: str,
+    roles: list[dict],
+) -> None:
+    """Кладёт запись об отказе доступа в батчер.
+
+    Поглощает любые исключения батчера: цель — не помешать 403-ответу.
+    """
+    role_names = sorted({r.get("name", "") for r in roles if r.get("name")})
+    reason = (
+        f"roles=[{', '.join(role_names) or '<none>'}], "
+        f"missing domain_name='{domain}'"
+    )
+
+    from app.domains.admin.deps import get_access_denied_audit_batcher
+    from app.domains.admin.repositories.access_denied_audit import (
+        AccessDeniedRecord,
+    )
+
+    batcher = get_access_denied_audit_batcher()
+    if batcher is None:
+        logger.warning(
+            "Отказ доступа username=%s domain=%s path=%s method=%s reason=%s "
+            "(батчер аудита не поднят — запись пропущена)",
+            username, domain, request.url.path, request.method, reason,
+        )
+        return
+
+    try:
+        await batcher.add(
+            AccessDeniedRecord(
+                username=username,
+                domain=domain,
+                path=str(request.url.path),
+                method=request.method,
+                reason=reason,
+            )
+        )
+    except Exception:
+        logger.exception(
+            "Не удалось записать отказ доступа в аудит: username=%s domain=%s",
+            username, domain,
+        )
 
 
 def require_admin() -> Callable:

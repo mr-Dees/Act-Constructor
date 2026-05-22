@@ -88,6 +88,56 @@ def register_lifespan_hooks() -> None:
     register_startup_hook("admin.http_metrics_batcher", _start_http_metrics_batcher)
     register_shutdown_hook("admin.http_metrics_batcher", _stop_http_metrics_batcher)
 
+    # Батчер аудита отказов доступа: переиспользует параметры observability
+    # (batch_size / flush_interval / max_buffer) — поток событий маленький
+    # (только 403), отдельные настройки не нужны.
+    from app.domains.admin.deps import set_access_denied_audit_batcher
+    from app.domains.admin.repositories.access_denied_audit import (
+        AccessDeniedAuditRepository,
+        AccessDeniedRecord,
+    )
+
+    async def _start_access_denied_audit_batcher(app: FastAPI) -> None:
+        from app.core.config import get_settings
+
+        obs = get_settings().observability
+
+        async def _flush(records: list[AccessDeniedRecord]) -> None:
+            async with get_db() as conn:
+                await AccessDeniedAuditRepository(conn).log_many(records)
+
+        batcher = MetricsBatcher(
+            flush_callback=_flush,
+            max_batch_size=obs.metrics_batch_size,
+            flush_interval_sec=obs.metrics_flush_interval_sec,
+            max_buffer_size=obs.metrics_max_buffer_size,
+            name="admin_access_denied_audit",
+        )
+        await batcher.start()
+        set_access_denied_audit_batcher(batcher)
+        app.state.access_denied_audit_batcher = batcher
+
+    async def _stop_access_denied_audit_batcher(app: FastAPI) -> None:
+        batcher = getattr(app.state, "access_denied_audit_batcher", None)
+        try:
+            set_access_denied_audit_batcher(None)
+        except Exception:
+            logger.exception("Не удалось сбросить ссылку на батчер аудита отказов")
+        if batcher is not None:
+            try:
+                await batcher.stop()
+            except Exception:
+                logger.exception("Ошибка при остановке батчера аудита отказов")
+
+    register_startup_hook(
+        "admin.access_denied_audit_batcher",
+        _start_access_denied_audit_batcher,
+    )
+    register_shutdown_hook(
+        "admin.access_denied_audit_batcher",
+        _stop_access_denied_audit_batcher,
+    )
+
     # Мониторинг asyncpg-пула: WARNING-лог, когда acquired >= warn_ratio×max.
     # Без БД-таблицы — только в логи (Loki/syslog построит алёрт).
     from app.core.settings_registry import get as get_domain_settings

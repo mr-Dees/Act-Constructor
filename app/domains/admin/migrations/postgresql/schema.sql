@@ -185,3 +185,40 @@ CREATE INDEX IF NOT EXISTS idx_{PREFIX}admin_http_metrics_status_created
     ON {SCHEMA}.{PREFIX}admin_http_metrics(status_code, created_at);
 CREATE INDEX IF NOT EXISTS idx_{PREFIX}admin_http_metrics_username_created
     ON {SCHEMA}.{PREFIX}admin_http_metrics(username, created_at);
+
+-- ============================================================================
+-- АУДИТ-ЛОГ ОТКАЗОВ ДОСТУПА К ДОМЕНАМ
+-- ============================================================================
+
+-- Append-only журнал случаев, когда require_domain_access вернул 403. Нужен
+-- для observability в закрытой сети: разбор инцидентов «у меня перестало
+-- работать», поиск подозрительной активности (массовые попытки достучаться
+-- до чужого домена). Запись делается через батчер, чтобы 403-ответ не
+-- задерживался на ожидании INSERT.
+CREATE SEQUENCE IF NOT EXISTS {SCHEMA}.{PREFIX}access_denied_audit_id_seq;
+
+CREATE TABLE IF NOT EXISTS {SCHEMA}.{PREFIX}access_denied_audit (
+    id         BIGINT NOT NULL
+               DEFAULT nextval('{SCHEMA}.{PREFIX}access_denied_audit_id_seq'),
+    username   VARCHAR(64) NOT NULL,
+    domain     VARCHAR(64) NOT NULL,
+    path       TEXT NOT NULL,
+    method     VARCHAR(8) NOT NULL,
+    reason     TEXT,
+    created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    PRIMARY KEY (id)
+);
+
+COMMENT ON TABLE {SCHEMA}.{PREFIX}access_denied_audit IS 'Аудит-лог отказов доступа к доменам (require_domain_access → 403)';
+COMMENT ON COLUMN {SCHEMA}.{PREFIX}access_denied_audit.username IS 'Пользователь, которому отказано в доступе';
+COMMENT ON COLUMN {SCHEMA}.{PREFIX}access_denied_audit.domain IS 'Запрошенный домен (acts, chat, ck_fin_res, ...)';
+COMMENT ON COLUMN {SCHEMA}.{PREFIX}access_denied_audit.path IS 'HTTP-путь запроса';
+COMMENT ON COLUMN {SCHEMA}.{PREFIX}access_denied_audit.method IS 'HTTP-метод запроса';
+COMMENT ON COLUMN {SCHEMA}.{PREFIX}access_denied_audit.reason IS 'Краткое описание причины отказа';
+COMMENT ON COLUMN {SCHEMA}.{PREFIX}access_denied_audit.created_at IS 'Время отказа';
+
+CREATE INDEX IF NOT EXISTS idx_{PREFIX}access_denied_audit_username
+    ON {SCHEMA}.{PREFIX}access_denied_audit(username, created_at DESC);
+
+CREATE INDEX IF NOT EXISTS idx_{PREFIX}access_denied_audit_domain
+    ON {SCHEMA}.{PREFIX}access_denied_audit(domain, created_at DESC);
