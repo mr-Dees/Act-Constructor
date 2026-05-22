@@ -47,9 +47,6 @@ const ChatStream = {
     /** @type {string|null} ID беседы, для которой активен _pendingAgentRequestId. */
     _pendingConversationId: null,
 
-    /** @type {number} Последний полученный id события агента (для ?since=). */
-    _lastAgentEventId: 0,
-
     /**
      * Отправляет сообщение и читает SSE-поток ответа
      *
@@ -71,7 +68,6 @@ const ChatStream = {
         // Сбрасываем состояние forward'а — новое сообщение начинает с чистого листа.
         this._pendingAgentRequestId = null;
         this._pendingConversationId = conversationId;
-        this._lastAgentEventId = 0;
 
         const controller = new AbortController();
         this._abortController = controller;
@@ -120,7 +116,7 @@ const ChatStream = {
                 }
                 // Сбрасываем pending до resume, иначе catch ниже
                 // (на случай разрыва Resume) попытается переоткрыть
-                // через _resumeAgentRequest и устроит гонку.
+                // ещё раз и устроит гонку.
                 this._clearPending();
                 await this.resume(convId, requestId, {
                     onEvent: wrappedOnEvent,
@@ -141,19 +137,18 @@ const ChatStream = {
             // Здесь пробуем переоткрыть resume-стрим, чтобы дотянуть ответ
             // в текущем UI без перезагрузки страницы.
             if (this._pendingAgentRequestId) {
+                const requestId = this._pendingAgentRequestId;
+                const convId = this._pendingConversationId;
                 console.warn(
                     'ChatStream: разрыв соединения, переоткрываем resume для',
-                    this._pendingAgentRequestId,
+                    requestId,
                 );
+                this._clearPending();
                 try {
-                    await this._resumeAgentRequest(
-                        this._pendingConversationId,
-                        this._pendingAgentRequestId,
-                        this._lastAgentEventId,
-                        wrappedOnEvent,
-                    );
+                    await this.resume(convId, requestId, {
+                        onEvent: wrappedOnEvent,
+                    });
                     if (onDone) onDone();
-                    this._clearPending();
                     return;
                 } catch (resumeErr) {
                     console.error('ChatStream: resume не удался', resumeErr);
@@ -170,15 +165,15 @@ const ChatStream = {
     },
 
     /**
-     * Перехватчик SSE: запоминает agent_request_started и обновляет last_event_id.
+     * Перехватчик SSE: запоминает request_id из agent_request_started, чтобы
+     * `send()` мог переключиться в `resume()` после нормального завершения
+     * POST SSE или из catch-блока при разрыве.
      * @private
      */
     _trackAgentEvent(event) {
         if (event.type === 'agent_request_started' && event.data) {
             this._pendingAgentRequestId = event.data.request_id || null;
         }
-        // Backend пока не пробрасывает event_id агента во фронт; держим стартовое 0.
-        // Если в будущем events будут содержать id — обновлять здесь.
     },
 
     /**
@@ -206,48 +201,6 @@ const ChatStream = {
     _clearPending() {
         this._pendingAgentRequestId = null;
         this._pendingConversationId = null;
-        this._lastAgentEventId = 0;
-    },
-
-    /**
-     * Переоткрывает SSE через GET resume-эндпоинт. Используется после разрыва
-     * основного `send()`-стрима внутри его catch-блока.
-     *
-     * Контроллер кладётся в `_resumeAbortController`, НЕ в `_abortController`.
-     * Иначе перетёр бы основной контроллер: основной fetch уже выбросил
-     * исключение и до своего `finally` ещё не дошёл, и при последующем
-     * `abort()` отменился бы только resume — orphan-сокет на бэке.
-     * @private
-     */
-    async _resumeAgentRequest(conversationId, requestId, sinceId, onEvent) {
-        const controller = new AbortController();
-        this._resumeAbortController = controller;
-        this._resumeRequestId = requestId;
-
-        try {
-            const endpoint =
-                `/api/v1/chat/conversations/${conversationId}` +
-                `/agent-request/${requestId}/stream?since=${sinceId}`;
-            const url = (typeof AppConfig !== 'undefined')
-                ? AppConfig.api.getUrl(endpoint)
-                : endpoint;
-            const headers = this._buildHeaders('text/event-stream');
-
-            const response = await fetch(url, {
-                method: 'GET',
-                headers,
-                signal: controller.signal,
-            });
-            if (!response.ok) {
-                throw new Error(`resume HTTP ${response.status}`);
-            }
-            await this._readSSE(response, controller, onEvent);
-        } finally {
-            if (this._resumeAbortController === controller) {
-                this._resumeAbortController = null;
-                this._resumeRequestId = null;
-            }
-        }
     },
 
     /** @private */

@@ -160,9 +160,9 @@ def sse_agent_request_started(
 ) -> str:
     """Сигнал фронту: forward-запрос зарегистрирован, его id известен.
 
-    Фронт может сохранить request_id и при разрыве соединения переоткрыть
-    resume-стрим:
-        GET /api/v1/chat/conversations/{cid}/agent-request/{rid}/stream
+    Фронт сохраняет request_id и после нормального завершения POST SSE
+    (или при разрыве соединения) переключается на resume-стрим:
+        GET /api/v1/chat/conversations/{cid}/forward-stream/{rid}
     """
     return format_sse_event("agent_request_started", {
         "request_id": request_id,
