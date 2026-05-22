@@ -65,6 +65,17 @@ class MetricsBatcher(Generic[T]):
         # flush не пересекался с фоновым.
         self._flush_in_progress = asyncio.Lock()
 
+        # Observability-счётчики. Доступны через get_status() — endpoint
+        # /admin/diagnostics возвращает снимок состояния всех батчеров.
+        # Общее число дропнутых записей за всё время жизни батчера.
+        self._dropped_count: int = 0
+        # Монотонное время последнего успешного flush'а
+        # (asyncio.get_event_loop().time()). None — flush'ей ещё не было.
+        self._last_flush_at: float | None = None
+        # Текст последнего исключения flush_callback'а; обнуляется при
+        # следующем успешном flush'е.
+        self._last_error: str | None = None
+
     async def add(self, record: T) -> None:
         """Добавляет запись в буфер; при достижении ``max_batch_size`` — flush.
 
@@ -76,10 +87,17 @@ class MetricsBatcher(Generic[T]):
             if len(self._buffer) > self._max_buffer_size:
                 dropped = len(self._buffer) - self._max_buffer_size
                 self._buffer = self._buffer[-self._max_buffer_size:]
+                self._dropped_count += dropped
                 logger.warning(
                     "Батчер %s: буфер переполнен, дропнуто %d старых записей",
                     self._name,
                     dropped,
+                    extra={
+                        "batcher_name": self._name,
+                        "buffer_size": len(self._buffer),
+                        "dropped_now": dropped,
+                        "dropped_count_total": self._dropped_count,
+                    },
                 )
             if len(self._buffer) >= self._max_batch_size:
                 await self._flush_locked()
@@ -154,10 +172,88 @@ class MetricsBatcher(Generic[T]):
         self._buffer = []
         try:
             await self._flush_callback(batch)
-        except Exception:
+        except Exception as exc:
+            # Каждая запись из batch'а потеряна — учитываем как дроп.
+            self._dropped_count += len(batch)
+            self._last_error = f"{type(exc).__name__}: {exc}"
             logger.warning(
                 "Батчер %s: flush_callback упал, %d записей потеряно",
                 self._name,
                 len(batch),
                 exc_info=True,
+                extra={
+                    "batcher_name": self._name,
+                    "lost_now": len(batch),
+                    "dropped_count_total": self._dropped_count,
+                },
             )
+        else:
+            self._last_flush_at = asyncio.get_event_loop().time()
+            self._last_error = None
+
+    # ------------------------------------------------------------------
+    # Observability — публичные геттеры состояния
+    # ------------------------------------------------------------------
+
+    @property
+    def name(self) -> str:
+        """Имя батчера (как передано в конструктор)."""
+        return self._name
+
+    @property
+    def buffer_size(self) -> int:
+        """Текущий размер буфера (число накопленных записей)."""
+        return len(self._buffer)
+
+    @property
+    def dropped_count(self) -> int:
+        """Сколько записей потеряно за всё время жизни батчера.
+
+        Включает и записи, дропнутые при переполнении ``max_buffer_size``,
+        и записи batch'ей, на которых упал ``flush_callback``.
+        """
+        return self._dropped_count
+
+    @property
+    def last_flush_at(self) -> float | None:
+        """Монотонное время последнего успешного flush'а или ``None``."""
+        return self._last_flush_at
+
+    @property
+    def last_error(self) -> str | None:
+        """Текст последнего исключения flush'а; ``None`` если последний flush
+        прошёл успешно.
+        """
+        return self._last_error
+
+    def get_status(self) -> dict:
+        """Снимок состояния батчера для diagnostics-endpoint'а.
+
+        Поля:
+
+        * ``name`` — имя батчера;
+        * ``buffer_size`` — текущая длина буфера;
+        * ``max_buffer_size`` / ``max_batch_size`` / ``flush_interval_sec`` —
+          сконфигурированные пороги;
+        * ``dropped_count`` — суммарно потеряно записей;
+        * ``last_flush_ago_sec`` — сколько секунд назад был последний
+          успешный flush; ``None`` если flush'ей ещё не было;
+        * ``last_error`` — текст последнего исключения или ``None``;
+        * ``running`` — жива ли фоновая задача периодического flush'а.
+        """
+        if self._last_flush_at is not None:
+            now = asyncio.get_event_loop().time()
+            last_flush_ago: float | None = now - self._last_flush_at
+        else:
+            last_flush_ago = None
+        return {
+            "name": self._name,
+            "buffer_size": len(self._buffer),
+            "max_buffer_size": self._max_buffer_size,
+            "max_batch_size": self._max_batch_size,
+            "flush_interval_sec": self._flush_interval_sec,
+            "dropped_count": self._dropped_count,
+            "last_flush_ago_sec": last_flush_ago,
+            "last_error": self._last_error,
+            "running": self._task is not None and not self._task.done(),
+        }

@@ -102,6 +102,24 @@ class PollCoordinator:
         # Полезен для мониторинга / алертинга.
         self._restart_count: int = 0
 
+    def get_status(self) -> dict:
+        """Снимок состояния координатора для diagnostics-endpoint'а."""
+        return {
+            "name": "chat.poll_coordinator",
+            "running": self._task is not None and not self._task.done(),
+            "watchdog_running": (
+                self._watchdog_task is not None
+                and not self._watchdog_task.done()
+            ),
+            "restart_count": self._restart_count,
+            "active_subscribers": len(self._subscribers),
+            "active_observers": sum(
+                len(q) for q in self._observers.values()
+            ),
+            "poll_min_interval_sec": self._poll_min_interval_sec,
+            "poll_max_interval_sec": self._poll_max_interval_sec,
+        }
+
     async def subscribe(self, request_id: str) -> asyncio.Queue:
         """Подписывает request_id и возвращает очередь событий.
 

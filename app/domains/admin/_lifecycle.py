@@ -44,6 +44,12 @@ def register_lifespan_hooks() -> None:
     """
     from app.core.domain_registry import register_shutdown_hook, register_startup_hook
     from app.core.metrics_batcher import MetricsBatcher
+    from app.core.observability_registry import (
+        register_background_task,
+        register_batcher,
+        unregister_background_task,
+        unregister_batcher,
+    )
     from app.db.connection import get_db
     from app.domains.admin.deps import set_http_metrics_batcher
     from app.domains.admin.repositories.http_metrics_repository import (
@@ -71,10 +77,12 @@ def register_lifespan_hooks() -> None:
         await batcher.start()
         set_http_metrics_batcher(batcher)
         app.state.http_metrics_batcher = batcher
+        register_batcher("admin.http_metrics_batcher", batcher)
 
     async def _stop_http_metrics_batcher(app: FastAPI) -> None:
         """Останавливает батчер HTTP-метрик и сбрасывает ссылку в deps."""
         batcher = getattr(app.state, "http_metrics_batcher", None)
+        unregister_batcher("admin.http_metrics_batcher")
         try:
             set_http_metrics_batcher(None)
         except Exception:
@@ -105,9 +113,11 @@ def register_lifespan_hooks() -> None:
         )
         await monitor.start()
         app.state.db_pool_monitor = monitor
+        register_background_task("admin.db_pool_monitor", monitor.get_status)
 
     async def _stop_db_pool_monitor(app: FastAPI) -> None:
         monitor = getattr(app.state, "db_pool_monitor", None)
+        unregister_background_task("admin.db_pool_monitor")
         if monitor is not None:
             try:
                 await monitor.stop()

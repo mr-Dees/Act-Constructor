@@ -79,6 +79,12 @@ def _register_lifespan_hooks() -> None:
 
     from app.core.domain_registry import register_shutdown_hook, register_startup_hook
     from app.core.metrics_batcher import MetricsBatcher
+    from app.core.observability_registry import (
+        register_background_task,
+        register_batcher,
+        unregister_background_task,
+        unregister_batcher,
+    )
     from app.db.connection import get_db
     from app.domains.chat.deps import (
         set_audit_log_batcher,
@@ -114,6 +120,7 @@ def _register_lifespan_hooks() -> None:
         await batcher.start()
         set_tool_metrics_batcher(batcher)
         app.state.chat_tool_metrics_batcher = batcher
+        register_batcher("chat.tool_metrics_batcher", batcher)
 
     async def _stop_tool_metrics_batcher(app: FastAPI) -> None:
         """Останавливает батчер chat-tool метрик и сбрасывает ссылку в deps."""
@@ -121,6 +128,7 @@ def _register_lifespan_hooks() -> None:
 
         logger = logging.getLogger("audit_workstation.domains.chat.lifecycle")
         batcher = getattr(app.state, "chat_tool_metrics_batcher", None)
+        unregister_batcher("chat.tool_metrics_batcher")
         try:
             set_tool_metrics_batcher(None)
         except Exception:
@@ -151,6 +159,7 @@ def _register_lifespan_hooks() -> None:
         await batcher.start()
         set_audit_log_batcher(batcher)
         app.state.chat_audit_log_batcher = batcher
+        register_batcher("chat.audit_log_batcher", batcher)
 
     async def _stop_audit_log_batcher(app: FastAPI) -> None:
         """Останавливает батчер audit-лога чата и сбрасывает ссылку в deps."""
@@ -158,6 +167,7 @@ def _register_lifespan_hooks() -> None:
 
         logger = logging.getLogger("audit_workstation.domains.chat.lifecycle")
         batcher = getattr(app.state, "chat_audit_log_batcher", None)
+        unregister_batcher("chat.audit_log_batcher")
         try:
             set_audit_log_batcher(None)
         except Exception:
@@ -206,6 +216,9 @@ def _register_lifespan_hooks() -> None:
         await coordinator.start()
         set_poll_coordinator(coordinator)
         app.state.chat_poll_coordinator = coordinator
+        register_background_task(
+            "chat.poll_coordinator", coordinator.get_status,
+        )
 
     async def _stop_poll_coordinator(app: FastAPI) -> None:
         """Останавливает PollCoordinator и сбрасывает ссылку в deps."""
@@ -213,6 +226,7 @@ def _register_lifespan_hooks() -> None:
 
         logger = logging.getLogger("audit_workstation.domains.chat.lifecycle")
         coordinator = getattr(app.state, "chat_poll_coordinator", None)
+        unregister_background_task("chat.poll_coordinator")
         try:
             set_poll_coordinator(None)
         except Exception:
@@ -245,6 +259,9 @@ def _register_lifespan_hooks() -> None:
         )
         await task.start()
         app.state.chat_agent_events_cleanup = task
+        register_background_task(
+            "chat.agent_events_cleanup", task.get_status,
+        )
 
     async def _stop_agent_events_cleanup(app: FastAPI) -> None:
         """Останавливает фоновую очистку agent_response_events."""
@@ -252,6 +269,7 @@ def _register_lifespan_hooks() -> None:
 
         logger = logging.getLogger("audit_workstation.domains.chat.lifecycle")
         task = getattr(app.state, "chat_agent_events_cleanup", None)
+        unregister_background_task("chat.agent_events_cleanup")
         if task is not None:
             try:
                 await task.stop()

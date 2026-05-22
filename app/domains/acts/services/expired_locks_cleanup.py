@@ -46,6 +46,16 @@ class ExpiredLocksCleanupTask:
         self._cycles_since_log = 0
         self._cleaned_since_log = 0
 
+    def get_status(self) -> dict:
+        """Снимок состояния задачи для diagnostics-endpoint'а."""
+        return {
+            "name": "acts.expired_locks_cleanup",
+            "running": self._task is not None and not self._task.done(),
+            "interval_sec": self._interval_sec,
+            "cycles_since_log": self._cycles_since_log,
+            "cleaned_since_log": self._cleaned_since_log,
+        }
+
     async def start(self) -> None:
         """Стартует фоновую задачу. Идемпотентно."""
         if self._task is not None and not self._task.done():
