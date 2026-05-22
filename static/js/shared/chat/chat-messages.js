@@ -247,6 +247,9 @@ const ChatMessages = {
         );
         if (isContentEvent) {
             ChatRenderer.removeTypingPlaceholder(container);
+            // Снимаем streaming-маркер: bubble больше не пустой,
+            // следующий Resume SSE не должен в него попасть как в активный.
+            container.parentElement?.classList.remove('chat-message-bot--streaming');
         }
 
         switch (event.type) {
@@ -492,7 +495,16 @@ const ChatMessages = {
             // для устаревшей беседы.
             if (ChatContext.getCurrentConversationId() !== conversationId) return;
 
-            const botContainer = this._addBotMessageStreaming();
+            // Переиспользуем streaming-bubble, если он уже отрисован
+            // (например, `_renderConversationMessages` поставил его из
+            // БД для msg.status='streaming', или `_send()` создал
+            // оптимистический). Без этого Resume SSE плодит новые
+            // пустые bubble'ы при каждом switch'е беседы.
+            const existingStreaming = this._messagesContainer.querySelector(
+                '.chat-message-bot--streaming:last-of-type .chat-message-content',
+            );
+            const botContainer = existingStreaming
+                || this._addBotMessageStreaming();
 
             // Resume SSE без курсора: backend всегда стримит с начала
             // open-стороны queue (live-push для real-time), а уже
@@ -536,6 +548,11 @@ const ChatMessages = {
     _addBotMessageStreaming({ withPlaceholder = true } = {}) {
         const msg = document.createElement('div');
         msg.className = 'chat-message chat-message-bot';
+        if (withPlaceholder) {
+            // Маркер для `_maybeResumeActiveForward`: чтобы Resume SSE
+            // переиспользовал уже созданный typing-bubble, а не плодил дубли.
+            msg.classList.add('chat-message-bot--streaming');
+        }
 
         const avatar = document.createElement('div');
         avatar.className = 'chat-message-avatar';
