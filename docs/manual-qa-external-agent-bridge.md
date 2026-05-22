@@ -63,9 +63,9 @@
 - Forward'нуть вопрос, во время ожидания перезагрузить страницу.
 - В DevTools / curl выполнить:
   ```
-  GET /api/v1/chat/conversations/<id>/agent-request/<rid>/stream?since=0
+  GET /api/v1/chat/conversations/<id>/forward-stream/<rid>
   ```
-- Ожидаемо: стрим возобновляется, видны накопленные events + финал.
+- Ожидаемо: стрим возобновляется, видны live-события + финал. Накопленные reasoning'и до момента reload отображаются из истории беседы (`chat_messages.content` со `status='streaming'`), Resume SSE идёт без cursor'а.
 
 ### 7a. Регрессия: задержка save после финала
 Сценарий проверяет, что ассистент-сообщение появляется в БД сразу после

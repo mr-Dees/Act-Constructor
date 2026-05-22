@@ -16,7 +16,7 @@
    для них дубль-задачу к живому раннеру.
 4. Конкурентные ``request_id`` на одной ``conversation_id`` — текущее
    поведение: cancel previous request не реализован, оба runner'а
-   доходят до ``save_assistant_message`` независимо. Этот тест
+   доходят до ``finalize_assistant_message`` независимо. Этот тест
    документирует поведение, чтобы регрессии замечались.
 """
 from __future__ import annotations

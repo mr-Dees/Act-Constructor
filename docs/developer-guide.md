@@ -101,7 +101,7 @@
   - [11.4 GigaChat-адаптер: native functions[] под капотом](#114-gigachat-адаптер-native-functions-под-капотом)
   - [11.5 BlockEmitter: единый эмиттер SSE-блоков](#115-blockemitter-единый-эмиттер-sse-блоков)
   - [11.6 agent_bridge_runner и PollCoordinator (с watchdog'ом)](#116-agent_bridge_runner-и-pollcoordinator-фоновое-сохранение-ассистент-сообщений)
-  - [11.7 Дедуп reasoning при reload](#117-дедуп-reasoning-при-reload-deterministic-block_id--since_seq)
+  - [11.7 Server-authoritative state для forward'а (chat_messages.status)](#117-server-authoritative-state-для-forwardа-chat_messagesstatus)
 
 ---
 
@@ -1534,7 +1534,8 @@ sequenceDiagram
 
     R->>O: events (через poll_events) → SSE block_delta/complete
     O-->>U: SSE events
-    R->>R: save_assistant_message в chat_messages
+    R->>R: append_block в chat_messages (status=streaming) per reasoning
+    R->>R: finalize → status=complete, merge финальных блоков
     R->>PC: unsubscribe(rid)
 ```
 
@@ -1912,8 +1913,9 @@ ChatOrchestrator (services/orchestrator.py — фасад)
         └─ INSERT agent_requests
            AgentBridgeRunner (фоновая task):
              ├─ subscribe(rid) → PollCoordinator (один SELECT на тик по всем подписчикам)
-             ├─ events из asyncio.Queue → BlockEmitter → SSE
-             └─ при response → save_assistant_message
+             ├─ create_streaming → chat_messages (status='streaming')
+             ├─ events из asyncio.Queue → append_block + BlockEmitter → SSE
+             └─ при response → finalize (status='complete', merge блоков)
 ```
 
 AI-ассистент реализован как доменный плагин `app/domains/chat/` с SSE-стримингом и agent loop. Локальная LLM (профиль `sglang` для прода / `openrouter` для dev — см. `app/domains/chat/services/llm_client.py`) выступает оркестратором: для **информационных запросов** (про данные/контент) решает форвардить во внешнего ИИ-агента через ChatTool `chat.forward_to_knowledge_agent` (см. [7.8](#78-внешний-ии-агент-через-таблицы-бд)); для **запросов на действие в интерфейсе** — вызывает локальный action-tool, возвращающий `ClientActionBlock` (см. [7.9](#79-action-handlers-и-clientactionblock)).
@@ -2430,7 +2432,7 @@ chat-modal.js / chat-popup.js
 - **Защита от повторной инициализации**: каждый модуль хранит `_initialized` флаг и выходит из `init()` при повторном вызове
 - **Ленивая инициализация**: `ChatModalManager`/`ChatPopupManager` вызывают `ChatManager.init()` при первом открытии
 - **ClientAction идемпотентен по `block_id`**: каждый `ClientActionBlock` несёт `block_id` — **обязательное поле** (без `default_factory`). Оркестратор переписывает его на детерминированный формат `f"{message_id}:ca:{i}"` в `_parse_client_action_result` (где `i` — индекс client_action-блока в сообщении). При перезагрузке вкладки фронт получает **тот же id** → `sessionStorage['chat:executedActions']` (max 500 элементов, FIFO eviction) сматчит → action не выполняется повторно. Без детерминизма (старая семантика `default_factory=uuid4`) после reload каждый раз генерировался новый uuid, что вызывало бесконечный редирект-цикл. Единая точка исполнения — `ClientActionsRegistry.executeBlock(block)`. **Не вызывай `.execute(...)` напрямую** — обойдёшь `block_id`-чек. Фронт-логика не менялась — id хранится так же, изменилось только то, как он генерируется на бэке
-- **Auto-resume при разрыве SSE**: `ChatStream` запоминает `request_id` из `agent_request_started` и при разрыве переоткрывает `GET /conversations/{cid}/agent-request/{rid}/stream?since=<seq>`. Курсор по `seq` (не id) — `id` в Greenplum не монотонен между сегментами
+- **Auto-resume при разрыве SSE / переключении чата**: `ChatStream` запоминает `request_id` из `agent_request_started` и при разрыве (или возврате в беседу с активным forward'ом) переоткрывает `GET /conversations/{cid}/forward-stream/{rid}` без cursor'а. State accumulated reasoning'ов фронт уже подтянул из `GET /messages` (сообщения со `status='streaming'` отдаются как обычные); Resume SSE только догоняет real-time события до финала, фронт идемпотентно мерджит по `data-block-id`
 - **DOM API в `chat-history`**: список бесед рендерится через `document.createElement`/`textContent`/`dataset`, не через `innerHTML` — защита от XSS через title беседы (= первое сообщение пользователя)
 - **Whitelist в `chat-client-actions`**: `open_url` принимает только `http:/https:/mailto:/relative`; `trigger_sdk` — только методы из `ALLOWED_SDK_METHODS` (по умолчанию пустой)
 
@@ -2454,15 +2456,18 @@ Orchestrator:
 
 Фоновый раннер (agent_bridge_runner):
     ↓ UPDATE status=dispatched, started_at=now()
+    ↓ MessageService.start_streaming → chat_messages (status='streaming', пустой content)
     ↓ PollCoordinator.subscribe(rid) → asyncio.Queue (единый цикл polling по batch)
-    ↓ при первом event из queue: UPDATE status=in_progress
-    ↓ при agent_responses: UPDATE status=done, save_assistant_message в БД
+    ↓ при первом event из queue: UPDATE agent_requests.status=in_progress
+    ↓ per reasoning-event: append_block → chat_messages.content (RMW, дедуп по block_id)
+    ↓ при agent_responses: UPDATE agent_requests.status=done, finalize chat_messages (status='complete', merge блоков)
     ↓ PollCoordinator.unsubscribe(rid)
 
 SSE → клиент:
     ↓ agent_request_started → ChatStream запоминает request_id
     ↓ reasoning deltas, финальные блоки
-    ↓ при разрыве — фронт переоткрывает GET /agent-request/{rid}/stream?since=<seq>
+    ↓ при разрыве/switch'е — фронт переоткрывает GET /conversations/{cid}/forward-stream/{rid}
+      (без cursor'а: пропущенные блоки восстановятся из БД при следующем GET /messages)
 ```
 
 **Таблицы** (`app/domains/chat/migrations/{postgresql,greenplum}/schema.sql`):
@@ -2490,7 +2495,7 @@ SSE → клиент:
 - **Greenplum-first**: схема DDL построена под GP (VARCHAR(36) для id, `{SCHEMA}.{PREFIX}` placeholders, `DISTRIBUTED BY (conversation_id)` для requests и `(request_id)` для events/responses).
 - **Polling-задача отвязана от SSE-соединения**: при обрыве клиента раннер дописывает ответ в БД. При перезапуске uvicorn — lifespan reconcile через `agent_bridge_runner.schedule_pending()` (см. `app/main.py`).
 - **Retention** — задача администратора (в приложении НЕ реализован). См. §7.8.6 ниже и `docs/external-agent-imitation.sql` (раздел 5) для SQL-сниппетов.
-- **Восстановление SSE** после обрыва — endpoint `GET /conversations/{id}/agent-request/{rid}/stream?since={seq}` (`api/messages.py`). Курсор по `seq`.
+- **Восстановление SSE** после обрыва / переключения чатов — endpoint `GET /conversations/{cid}/forward-stream/{rid}` (`api/forward_resume.py`). Без cursor'а: фронт уже подтянул накопленный state из `GET /messages` (см. §11.7); Resume SSE нужен только для real-time UX-добивки до финала.
 
 **Ключевые модули:**
 - `app/domains/chat/services/agent_bridge.py` — `AgentBridgeService.send/poll_events/poll_response/wait_for_completion`. Курсор `since_seq`. **`poll_events_batch(request_ids, since_seqs=None)`** — один SELECT для всех подписчиков `PollCoordinator`'а (одно `WHERE request_id = ANY($1)`).
@@ -2705,7 +2710,7 @@ ALTER TABLE agent_response_events
 **Где применяется** (`app/domains/chat/services/button_translator.py`, 69 строк):
 - В оркестраторе перед эмитом SSE-события `event: buttons` в live-стриме.
 - В `agent_bridge_runner` перед сохранением финального ответа агента в `chat_messages.content` (`_translate_buttons_in_blocks`).
-- В resume-эндпоинте `GET /agent-request/{rid}/stream` при пересборке потока из БД.
+- В resume-эндпоинте `GET /conversations/{cid}/forward-stream/{rid}` при пересборке потока из БД.
 
 Кнопка без зарегистрированного `ChatTool` или без `button_translator` пропускается как есть (с WARN в логи) — пользователь увидит её, но клик не сработает.
 
@@ -4061,7 +4066,7 @@ class ToolCallAccumulator:
 |---|---|
 | `forward_bridge.handle_forward_call` (вызов из agent loop / stream loop) | INSERT в `agent_requests`, эмитит `agent_request_started`, читает events/response из БД, эмитит SSE |
 | `PollCoordinator` | Один фоновый цикл polling событий, **batch SELECT по всем активным `request_id`**, раздаёт события подписчикам через `asyncio.Queue` |
-| `agent_bridge_runner` (per-request asyncio task) | Подписывается на `PollCoordinator`, читает события из своей очереди, при финальном `agent_responses` — `save_assistant_message` в `chat_messages` |
+| `agent_bridge_runner` (per-request asyncio task) | Подписывается на `PollCoordinator`. **Phase 1 «D»**: `start_streaming` создаёт `chat_messages` (status='streaming') до polling'а → `append_block` per reasoning-событие (RMW под FOR UPDATE) → `finalize` на финале (status='complete', merge финальных блоков). См. §11.7. |
 | `schedule_pending(older_than_sec=30)` в lifespan | Подхватывает зависшие запросы после рестарта uvicorn |
 
 **Зачем `PollCoordinator`** (вариант B: координатор + подписчики). До рефакторинга каждый `agent_bridge_runner` крутил свой собственный SELECT раз в секунду. При N параллельных forward'ов = N SELECT'ов/сек, без батчинга. С координатором — **один** SELECT за тик `WHERE request_id = ANY([r1, r2, ...])`, события раздаются подписчикам через `asyncio.Queue` (см. §6.3 sequence-diagram). Координатор работает с adaptive backoff (`poll_min_interval_sec` → `poll_max_interval_sec` × `poll_backoff_multiplier` при пустых тиках, сброс при появлении событий).
@@ -4090,21 +4095,39 @@ finally:
 
 Без watchdog'а единственный fallback от зависшего цикла — рестарт uvicorn. С ним сетевой обрыв в polling-SELECT превращается в «один пропущенный тик» с info-логом. Регрессионные тесты — `tests/domains/chat/test_poll_coordinator.py::test_watchdog_restarts_dead_poll_loop` и `test_watchdog_does_not_restart_healthy_loop`.
 
-### 11.7 Дедуп reasoning при reload (deterministic `block_id` + `?since_seq=`)
+### 11.7 Server-authoritative state для forward'а (`chat_messages.status`)
 
-Reasoning-чанки от внешнего ИИ-агента хранятся в `agent_response_events` (append-only, `seq` монотонен per `request_id`). Полная цепочка: агент INSERT'ит N событий → `agent_bridge_runner` сохраняет их как N `ReasoningBlock` в `messages.content` → frontend `ChatRenderer.appendBlock` группирует подряд идущие reasoning-блоки в один `<details class="chat-reasoning-group">` с `<hr>`-разделителями между этапами.
+Источник истины reasoning-блоков, накапливаемых во время forward'а к внешнему агенту — `chat_messages.content` в БД, не SSE-сокет. Любая страница (включая открытие со swich'ем чатов) восстанавливает состояние через `GET /messages`, фронт идемпотентно мерджит блоки по `data-block-id`. SSE используется как канал real-time UX поверх БД-state, **не как load-bearing**.
 
-**Проблема до фикса.** При reload вкладки фронт открывает Resume SSE (`GET /forward-stream/{rid}`), который читал `agent_response_events` с `since_seq=None` и эмитил **все** события заново. Юзер видел один логический шаг рассуждения N+1 раз: 1 раз отрисовано из истории + N раз из Resume SSE.
+**Проблема до Variant D.** Reasoning-блоки агент эмитил только через SSE; `chat_messages` создавался **на финале** runner'ом через `save_assistant_message`. Между приходом первого reasoning'а и финалом запись в БД отсутствовала. Симптомы:
 
-**Решение.** Детерминированный `block_id = f"{message_id}:reasoning:{seq}"` на трёх уровнях:
+- Switch на другой чат в момент forward'а → reasoning из DOM терялся; при возврате — пустой UI с typing-индикатором, восстановить было неоткуда (`GET /messages` ничего не отдавал).
+- Фронт держал глобальный `_lastReasoningSeq` per ChatStream, который при rapid switching'е давал seq-перекос между разными forward'ами.
+- Reload вкладки в активном forward'е — то же самое: история без forward-блоков, Resume SSE открывал курсор `since_seq=0` и эмитил все события заново → дубликаты в DOM.
 
-1. **Backend сохранение** (`agent_bridge_runner._run`): при collect'е reasoning-блоков добавляется `block_id` в dict. Поле `block_id` в `ReasoningBlock` (`app/core/chat/blocks.py`) опционально — у LLM-стримов (где нет внешнего `seq`) оно остаётся None.
-2. **Backend Resume SSE** (`forward_stream.stream_forward_events`, эндпоинты `forward_resume.stream_forward_resume` и legacy `resume_agent_request_stream`): функция принимает параметр `since_seq: int | None`, который инициализирует `last_seq` для `poll_events`. Сам `block_id` пробрасывается через расширенный `sse_block_start(*, block_index, block_type, block_id)` и `emit_text_block_with_limit(*, block_id)`.
-3. **Frontend** (`chat-messages.js`):
-    * `_seenReasoningBlockIds: Set<string>` — id уже отрендеренных reasoning-блоков. Заполняется при рендере истории в `_renderConversationMessages` (по `block_id` reasoning-блоков последнего assistant-message).
-    * `_lastReasoningSeq: number` — максимальный seq из этого Set'а; передаётся в `ChatStream.resume(..., {sinceSeq})`, оттуда — в query `?since_seq=N`.
-    * В `_handleSSEEvent` для `block_start` с `block_type='reasoning'` и известным `block_id`: если уже видели — НЕ создаём `_streamingBlocks[index]`, тогда `block_delta`/`block_end` становятся no-op (там стоит `if (block)`).
+**Решение — state machine `chat_messages.status`** (`streaming` | `complete` | `failed`):
 
-**UNIQUE-констрейнт** на `(request_id, seq)` в `agent_response_events` (PG и GP) защищает от дубля на уровне БД: если внешний агент по сетевому retry попытается INSERT'ить тот же `seq` дважды — СУБД отвергнет вторую вставку. GP-правило `DISTRIBUTED BY ⊆ UNIQUE` соблюдено: `request_id` входит в констрейнт. Миграции для существующих БД — `docs/migrations/agent-response-events-unique-{pg,gp}.sql`.
+1. **`MessageRepository.create_streaming`** — runner создаёт запись со `status='streaming'` и пустым `content` СРАЗУ при подписке на координатор (до первого события агента). `UniqueViolation` ловится → возвращается существующая запись, что даёт crash-recovery без идентификатора worker'а.
+2. **`MessageRepository.append_block`** — на каждое reasoning-событие runner делает RMW под `SELECT FOR UPDATE`: читает текущий `content`, декодирует JSON, добавляет блок с дедупом по `block_id` (повторный INSERT того же события — no-op), пишет обратно. Read-Modify-Write на стороне Python нужен потому, что GP 6.x / PG 9.4 не имеют `jsonb_set`/`||` для jsonb.
+3. **`MessageRepository.finalize`** — на финале (`agent_responses` или 'final'-event) runner MERGE'ит финальные блоки агента с уже накопленными reasoning'ами (дедуп по `block_id`), переводит `status='streaming' → 'complete'`, ставит `model`/`token_usage`.
+4. **`MessageRepository.mark_failed`** — на timeout/ошибку дописывает `ErrorBlock` и переводит `status='failed'`.
 
-**Что НЕ меняется.** Формат `messages.content` остаётся «N reasoning-блоков», группировка во фронтовом `<details>` с `<hr>` между этапами сохраняется (фишка визуального разделения этапов рассуждения). Серверной агрегации чанков в один большой блок **не делалось** — это сломало бы `<hr>`-разделители.
+**Идемпотентный merge во фронте по `data-block-id`** (`static/js/shared/chat/chat-renderer.js`):
+
+- `ChatRenderer.appendBlock` ищет `[data-block-id="..."]` в контейнере: если уже отрендерен — `replaceWith` (не append). Это работает и при рендере из `GET /messages`, и при SSE.
+- `ChatRenderer.appendTypingIndicator`/`removeTypingIndicator` — управление typing-«облаком» из любого источника.
+- Старая курсорная логика выкинута: ни `_lastReasoningSeq`, ни `_seenReasoningBlockIds` во фронте больше нет. Resume SSE идёт без cursor'а.
+
+**SSE как UX-канал.** Push-only события (`block_start`/`block_delta`/`block_end`) продолжают эмититься runner'ом и Resume SSE для real-time отрисовки. Если SSE-сокет порвался / юзер переключился — следующий `GET /messages` восстановит точный state из БД. Это значит, что contract вида «триплет start/delta/end» больше **не load-bearing**; пропуск любого события не теряет состояние.
+
+**Deterministic `block_id`.** Формат `f"{message_id}:reasoning:{seq}"` остался как был — он держит дедуп в `append_block` (повторная вставка того же события no-op) и идемпотентность во фронте. Полная цепочка id — раздел про [block_emitter](#115-blockemitter-единый-эмиттер-sse-блоков) и `app/domains/chat/services/block_emitter.py`.
+
+**Streaming-индикатор.** `MessageResponse` отдаёт `status` наружу; фронт показывает typing-облако на сообщениях со `status='streaming'` (через `chat-message-bot--streaming` класс-маркер) — без него нельзя было бы отличить «forward в полёте» от «forward завершён» при рендере из истории. `chat-messages.js::_handleSSEEvent` снимает маркер при первом контентом блоке (`block_start` reasoning'а), `_maybeResumeActiveForward` переиспользует существующий маркированный bubble вместо создания нового.
+
+**Schema/миграции.** Колонка `status` добавлена в `chat_messages` обеих СУБД с `DEFAULT 'complete'` + `CHECK (status IN ('streaming','complete','failed'))`. На PG — partial-индекс `idx_{PREFIX}chat_messages_streaming` (`WHERE status='streaming'`) для быстрого recovery. Для существующих БД — `docs/migrations/chat-messages-status-{pg,gp}.sql`.
+
+**UNIQUE-констрейнт** на `(request_id, seq)` в `agent_response_events` остаётся независимой защитой от дублей на уровне БД при retry внешнего агента. GP-правило `DISTRIBUTED BY ⊆ UNIQUE` соблюдено: `request_id` входит в констрейнт. Миграции — `docs/migrations/agent-response-events-unique-{pg,gp}.sql`.
+
+**Что НЕ меняется.** Формат `messages.content` остаётся «N reasoning-блоков»; группировка во фронтовом `<details class="chat-reasoning-group">` с `<hr>`-разделителями между этапами сохраняется. Серверной агрегации чанков в один большой блок не делалось — это сломало бы визуальное разделение этапов.
+
+**`save_assistant_message` всё ещё используется** на LLM-only пути (без forward'а) — в `agent_loop.run_agent_loop` и `stream_loop.run_stream_loop` ответ от LLM сохраняется одним INSERT'ом сразу финальным, без streaming-статуса. Дискриминация: forward → `start_streaming` + `append_block` + `finalize`; LLM локальный — `save_assistant_message`.

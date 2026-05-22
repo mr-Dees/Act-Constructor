@@ -7,7 +7,7 @@
 
 См. также:
 - `docs/developer-guide.md §11.6` — `agent_bridge_runner` + `PollCoordinator`
-- `docs/developer-guide.md §11.7` — дедуп reasoning при reload
+- `docs/developer-guide.md §11.7` — server-authoritative state и `chat_messages.status`
 - `CLAUDE.md` строки про forward, polling-only мост, разделение фаз раннера
 
 ---
@@ -40,16 +40,18 @@ sequenceDiagram
     Note over FB: handle_forward_call ВОЗВРАЩАЕТСЯ —<br/>POST SSE завершается. Реальный ответ<br/>стримит Resume SSE (см. шаг 14).
 
     par фоновый раннер
+        RUN->>DB: create_streaming<br/>(chat_messages, status='streaming')
         RUN->>POLL: subscribe(request_id)<br/>→ asyncio.Queue
-        loop пока нет финального response
+        loop per reasoning-event
             RUN->>RUN: await queue.get()
+            RUN->>DB: append_block (RMW под FOR UPDATE,<br/>дедуп по block_id)
         end
     and внешний агент
         EXT->>DB: UPDATE agent_requests<br/>status='in_progress'
         loop пока думает
             EXT->>DB: INSERT agent_response_events<br/>(reasoning, seq=N)
         end
-        EXT->>DB: INSERT agent_responses<br/>(blocks, token_usage)
+        EXT->>DB: INSERT agent_responses + 'final'-event<br/>(одна транзакция)
     and координатор polling
         loop adaptive backoff
             POLL->>DB: SELECT WHERE request_id = ANY([...])<br/>(batch для всех подписчиков)
@@ -59,8 +61,8 @@ sequenceDiagram
     end
 
     Note over F: F закрыл POST SSE,<br/>теперь ChatStream.resume(...)
-    F->>API: GET /forward-stream/{rid}<br/>?since_seq=0 (или maxSeq из истории)
-    API->>FB: stream_forward_events(since_seq=...)
+    F->>API: GET /forward-stream/{rid}<br/>(без cursor'а — state в БД)
+    API->>FB: stream_forward_events(since_seq=None)
     loop пока нет финального response
         FB->>DB: poll_events(request_id, since_seq=N)
         DB-->>FB: events[]
@@ -74,7 +76,7 @@ sequenceDiagram
     FB-->>F: event: message_end
 
     Note over RUN: финальный response получен
-    RUN->>DB: BEGIN TRANSACTION<br/>save_assistant_message + finalize<br/>(status='done', version++)
+    RUN->>DB: finalize chat_messages<br/>(status='streaming'→'complete',<br/>merge финальных блоков с accumulated)
     RUN->>POLL: unsubscribe(request_id)
     Note over RUN: task завершается,<br/>удаляется из registry
 ```
@@ -92,59 +94,62 @@ sequenceDiagram
 
 ---
 
-## 2. Reload-сценарий: пользователь перезагрузил вкладку посреди ответа
+## 2. Reload/switch-сценарий: пользователь перезагрузил вкладку или переключил чат посреди ответа
+
+Phase 1 «D»: state восстанавливается из БД через `GET /messages`, потому что
+runner инкрементально пишет reasoning'и в `chat_messages.content` со
+`status='streaming'`. Фронт идемпотентно мерджит блоки по `data-block-id`;
+курсорная логика во фронте удалена.
 
 ```mermaid
 sequenceDiagram
     autonumber
     actor U as User
     participant F as Frontend
-    participant API as Backend
     participant MSG as GET /messages<br/>(история беседы)
     participant AF as GET /active-forward
     participant FB as Resume SSE<br/>(stream_forward_events)
     participant DB as Greenplum
     participant RUN as agent_bridge_runner<br/>(всё ещё крутится в фоне)
 
-    Note over RUN: 30 сек назад юзер ушёл,<br/>но runner продолжил polling
-    U->>F: Reload вкладки
+    Note over RUN: runner продолжал append_block<br/>пока юзер был в другом чате/вкладке
+    U->>F: Reload вкладки / switch обратно
     F->>MSG: загрузить историю беседы
     MSG->>DB: SELECT chat_messages
-    DB-->>MSG: messages (с partial reasoning)
-    MSG-->>F: messages
+    DB-->>MSG: messages (вкл. streaming-сообщение со<br/>всеми накопленными reasoning'ами)
+    MSG-->>F: messages [..., {role:'assistant', status:'streaming', content:[N×reasoning]}]
 
-    Note over F: _renderConversationMessages:<br/>собирает _seenReasoningBlockIds<br/>из block_id reasoning-блоков<br/>последнего assistant-message.<br/>_lastReasoningSeq = max(seq).
+    Note over F: ChatRenderer.appendBlock рисует<br/>reasoning'и из истории;<br/>сообщение со status='streaming'<br/>получает typing-облако.
 
     F->>AF: GET /active-forward?conversation_id=X
     AF->>DB: SELECT agent_requests<br/>WHERE conversation_id AND status IN<br/>('pending','dispatched','in_progress')
     DB-->>AF: agent_request (still running)
     AF-->>F: {request_id, status, created_at}
 
-    F->>FB: GET /forward-stream/{rid}<br/>?since_seq=<lastReasoningSeq>
-    Note over FB: курсор: пропускаем уже отрисованное
+    F->>FB: GET /forward-stream/{rid}<br/>(без cursor'а)
+    Note over FB: since_seq=None — Resume SSE отдаёт<br/>все события заново, фронт идемпотентно<br/>мерджит по data-block-id (no-op для уже отрисованных)
 
     loop пока нет финального response
-        FB->>DB: poll_events(since_seq=N)
-        DB-->>FB: events с seq > N
         FB-->>F: block_start (block_id={msg}:reasoning:{seq})
-        Note over F: _handleSSEEvent:<br/>если block_id ∈ _seenReasoningBlockIds<br/>→ НЕ создаём streamingBlock<br/>(block_delta/block_end no-op)
-        FB-->>F: block_delta (text)
-        FB-->>F: block_end
+        Note over F: ChatRenderer.appendBlock:<br/>если [data-block-id] уже в DOM →<br/>replaceWith вместо append (no-op для<br/>идентичного контента)
+        FB-->>F: block_delta + block_end
     end
     FB->>DB: poll_response(request_id)
     DB-->>FB: финальный response (если уже готов)
     FB-->>F: block_complete + message_end
 
-    Note over RUN: продолжает crun в фоне,<br/>сохранит result в БД через save_assistant_message.
+    RUN->>DB: finalize chat_messages<br/>(status='complete', merge финальных блоков)
 ```
 
-**Ключевые контракты дедупа:**
+**Ключевые контракты:**
 
 - `block_id = "{message_id}:reasoning:{seq}"` — детерминированный.
-  При одном и том же `(message_id, seq)` фронт получит тот же id.
-- Lock в `_maybeResumeActiveForward(conv_id)` (`chat-messages.js`) —
-  promise-lock per conversation_id, защищает от двух bot-bubble при
-  rapid navigation (A → B → A).
+  При одном и том же `(message_id, seq)` фронт получит тот же id, и
+  `ChatRenderer.appendBlock` сделает replaceWith вместо append.
+- `chat-message-bot--streaming` класс-маркер на корневом `<div>`
+  сообщения, рендеримого со `status='streaming'`. `_maybeResumeActiveForward`
+  ищет существующий маркированный bubble прежде чем создавать новый,
+  `_handleSSEEvent` снимает маркер при первом контентом блоке.
 - `_active_streams_per_user` семафор лимитирует **только** POST SSE,
   Resume SSE не учитывается. Иначе при reload счётчик удваивался бы.
 
@@ -168,15 +173,15 @@ sequenceDiagram
     F->>F: catch (err)<br/>_pendingAgentRequestId есть?
     Note over F: ДА → _resumeAgentRequest()<br/>с _resumeAbortController<br/>(основной _abortController<br/>НЕ перетираем)
 
-    F->>API: GET /agent-request/{rid}/stream<br/>?since=<last_seq>
-    Note over API: legacy endpoint —<br/>тот же контракт, что<br/>/forward-stream выше
-    API->>FB: event_stream()
+    F->>API: GET /conversations/{cid}/forward-stream/{rid}<br/>(без cursor'а)
+    Note over API: Resume SSE из forward_resume.py
+    API->>FB: stream_forward_events(since_seq=None)
     loop события агента
         FB-->>F: block_start / delta / end
     end
     FB-->>F: message_end
 
-    Note over RUN: всё это время<br/>раннер крутился в фоне,<br/>финализирует сообщение независимо.
+    Note over RUN: всё это время<br/>раннер append_block'ал в БД,<br/>finalize после финального response.
 ```
 
 ---
@@ -186,8 +191,8 @@ sequenceDiagram
 | Случай | Что произойдёт |
 |---|---|
 | Раннер уже сохранил response в БД к моменту открытия Resume SSE | Resume SSE прочитает `agent_responses` через `poll_response` и сразу эмитит `block_complete` + `message_end` без polling-петли |
-| `since_seq` больше максимального `seq` в БД | `poll_events` вернёт пустой список — Resume пойдёт сразу к `poll_response` |
-| Раннер упал между сохранением events и `save_assistant_message` | Reconcile в lifespan (`schedule_pending`, `older_than_sec=30`) подхватит зависший запрос при следующем старте uvicorn |
+| Раннер упал после `create_streaming` до `finalize` | Reconcile в lifespan (`schedule_pending`, `older_than_sec=30`) подхватит зависший запрос при следующем старте uvicorn. `chat_messages` со `status='streaming'` остаются видимыми в истории; повторный INSERT того же `message_id` ловит `UniqueViolation` → runner продолжает с тем же id |
+| Раннер упал между `append_block`'ами | Часть reasoning'ов уже в БД, фронт видит их в истории; runner после restart'а продолжит `append_block` поверх (дедуп по `block_id` гарантирует, что повторные события не задвоятся) |
 | Внешний агент сделал retry с тем же `seq` | UNIQUE(request_id, seq) на `agent_response_events` отвергнет дубль на уровне БД (`UniqueViolation`); polling даже не увидит лишнее событие |
 | PollCoordinator завис внутри SELECT | Watchdog (`_watchdog_loop`) детектит heartbeat-stale, делает cancel + start нового `_poll_loop`. Подписчики и `since_seqs` сохраняются. Лог `restart_count=N` |
 | User отправил два forward'а параллельно в разных вкладках | Каждый получит свой `request_id`. `_active_streams_per_user` семафор лимитирует одновременные POST SSE (default 3). Resume SSE не лимитируется |
@@ -200,9 +205,10 @@ sequenceDiagram
 - Orchestrator stream loop — `app/domains/chat/services/stream_loop.py`
 - forward_bridge.handle_forward_call — `app/domains/chat/services/forward_bridge.py`
 - forward_stream — `app/domains/chat/services/forward_stream.py`
-- Resume SSE — `app/domains/chat/api/forward_resume.py` (новый) + `messages.py::resume_agent_request_stream` (legacy `?since=`)
-- agent_bridge_runner — `app/domains/chat/services/agent_bridge_runner.py`
+- Resume SSE — `app/domains/chat/api/forward_resume.py` (`since_seq` параметр оставлен deprecated, игнорируется)
+- agent_bridge_runner — `app/domains/chat/services/agent_bridge_runner.py` (фазы: `create_streaming` → `append_block` per event → `finalize`/`mark_failed`)
+- MessageRepository streaming-методы — `app/domains/chat/repositories/message_repository.py::create_streaming/append_block/finalize/mark_failed`
 - PollCoordinator + watchdog — `app/domains/chat/services/poll_coordinator.py`
 - Frontend SSE-клиент — `static/js/shared/chat/chat-stream.js`
 - Frontend обработчик событий — `static/js/shared/chat/chat-messages.js`
-- Frontend дедуп reasoning — `_seenReasoningBlockIds` в `chat-messages.js`
+- Frontend идемпотентный merge — `ChatRenderer.appendBlock` (`static/js/shared/chat/chat-renderer.js`), дедуп по `data-block-id` в DOM

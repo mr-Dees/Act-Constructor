@@ -119,8 +119,8 @@ $ grep -rn "from app.domains.acts" app/domains/admin
 
 **Симметрично для `block_id` reasoning-блоков** (форвард):
 - Формат: `f"{message_id}:reasoning:{seq}"`
-- Использует: `chat-messages.js::_seenReasoningBlockIds` Set
-- Что сломается: дублирование reasoning при reload (см. `docs/developer-guide.md §11.7`)
+- Используется: (a) `MessageRepository.append_block` для server-side дедупа повторных reasoning-событий; (b) `ChatRenderer.appendBlock` для DOM-дедупа через `data-block-id` (replaceWith вместо append при коллизии).
+- Что сломается: невозможность восстановить reasoning-блоки при reload/switch чатов из `GET /messages`; дубликаты в DOM при повторных Resume SSE (см. `docs/developer-guide.md §11.7`).
 
 ---
 
