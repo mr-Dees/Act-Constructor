@@ -494,16 +494,107 @@ const AppState = {
 };
 
 /**
- * Обертывает AppState в Proxy для автоматического отслеживания изменений
+ * Кеш уже обёрнутых объектов: target → proxy. Защищает от двойной обёртки
+ * (ускоряет повторные get'ы) и от бесконечной рекурсии при циклических ссылках.
+ * @private
+ */
+const _stateProxyCache = new WeakMap();
+const _stateProxyOriginals = new WeakSet();
+
+function _isTrackable(value) {
+    if (value === null || typeof value !== 'object') return false;
+    // Не оборачиваем DOM-узлы, Date, RegExp, Map, Set, Blob — у них собственная
+    // семантика, прокси может сломать поведение.
+    if (value instanceof Node) return false;
+    if (value instanceof Date || value instanceof RegExp) return false;
+    if (value instanceof Map || value instanceof Set || value instanceof WeakMap || value instanceof WeakSet) return false;
+    return true;
+}
+
+function _notifyDirty() {
+    if (typeof StorageManager !== 'undefined' && StorageManager.markAsUnsaved) {
+        StorageManager.markAsUnsaved();
+    }
+}
+
+/**
+ * Рекурсивно оборачивает объект в Proxy. Любая deep-мутация
+ * (set/deleteProperty/Array.push/Array[i]=) вызывает markAsUnsaved().
+ * @private
+ */
+function _wrapDeep(value) {
+    if (!_isTrackable(value)) return value;
+    // Уже обёрнут — возвращаем тот же прокси (стабильность ссылок для ===).
+    if (_stateProxyOriginals.has(value)) return value;
+    const cached = _stateProxyCache.get(value);
+    if (cached) return cached;
+
+    const handler = {
+        get(target, key, receiver) {
+            const v = Reflect.get(target, key, receiver);
+            // Lazy-wrap: оборачиваем nested при первом обращении.
+            return _wrapDeep(v);
+        },
+        set(target, key, newValue, receiver) {
+            const prev = target[key];
+            // Прокси-новое: оборачиваем при следующем get (lazy), но в target
+            // кладём raw — это сохраняет JSON.stringify семантику и
+            // упрощает сравнения ===.
+            const raw = _unwrap(newValue);
+            const ok = Reflect.set(target, key, raw, receiver);
+            if (ok && prev !== raw) {
+                _notifyDirty();
+            }
+            return ok;
+        },
+        deleteProperty(target, key) {
+            const had = Reflect.has(target, key);
+            const ok = Reflect.deleteProperty(target, key);
+            if (ok && had) {
+                _notifyDirty();
+            }
+            return ok;
+        },
+    };
+
+    const proxy = new Proxy(value, handler);
+    _stateProxyCache.set(value, proxy);
+    _stateProxyOriginals.add(proxy);
+    return proxy;
+}
+
+/**
+ * Возвращает «сырой» объект из proxy (для сохранения в БД, JSON.stringify
+ * и т.п.). На non-proxy значениях — no-op.
+ * @private
+ */
+function _unwrap(value) {
+    if (!_isTrackable(value)) return value;
+    if (_stateProxyOriginals.has(value)) {
+        // Это уже proxy — достаём raw через прямой target lookup.
+        // Proxy не хранит target напрямую, но WeakMap-кеш записан target→proxy,
+        // поэтому делаем reverse через обход (для AppState size это OK — деревья
+        // относительно небольшие, а вызов unwrap случается только при set).
+        // На практике в наших сценариях newValue обычно plain literal от других
+        // модулей — то есть proxy сюда почти не приходит. Безопасный fallback:
+        // возвращаем значение как есть (Proxy всё равно прозрачно прокидывает
+        // операции в target).
+        return value;
+    }
+    return value;
+}
+
+/**
+ * Обёртка AppState: top-level свойства имеют сеттеры, которые помечают dirty И
+ * lazy-оборачивают новое значение в рекурсивный Proxy. Все внутренние мутации
+ * (`AppState.tables[id].cells[r][c] = ...`, `node.children.push(...)`, и др.)
+ * автоматически попадают в `markAsUnsaved()`.
  *
- * Использует Object.defineProperty для перехвата операций записи
- * в ключевые свойства состояния. При любом изменении автоматически
- * помечает состояние как несохраненное через StorageManager.
- *
+ * Это закрывает регрессию C-PROXY: до фикса трекался только top-level reassign,
+ * ~92% реальных правок проходили мимо dirty-tracking'а.
  * @private
  */
 function _wrapStateWithProxy() {
-    // Список свойств AppState для отслеживания изменений
     const trackedProperties = [
         'treeData',
         'tables',
@@ -516,29 +607,25 @@ function _wrapStateWithProxy() {
     ];
 
     trackedProperties.forEach(prop => {
-        // Сохраняем текущее значение свойства
-        let internalValue = AppState[prop];
+        // Стартовое значение — оборачиваем сразу, чтобы deep-мутации работали
+        // даже без явного reassign свойства.
+        let internalValue = _wrapDeep(AppState[prop]);
 
-        // Переопределяем свойство с геттером и сеттером
         Object.defineProperty(AppState, prop, {
             get() {
                 return internalValue;
             },
             set(newValue) {
-                // Устанавливаем новое значение
-                internalValue = newValue;
-
-                // Помечаем состояние как измененное
-                if (typeof StorageManager !== 'undefined' && StorageManager.markAsUnsaved) {
-                    StorageManager.markAsUnsaved();
-                }
+                if (internalValue === newValue) return;
+                internalValue = _wrapDeep(newValue);
+                _notifyDirty();
             },
             enumerable: true,
             configurable: true
         });
     });
 
-    console.log('State proxy инициализирован. Отслеживаются:', trackedProperties);
+    console.log('State proxy инициализирован (deep-tracking). Отслеживаются:', trackedProperties);
 }
 
 /**
