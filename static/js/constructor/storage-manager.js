@@ -140,12 +140,43 @@ class StorageManager {
     }
 
     /**
-     * Настраивает перехват попыток навигации
+     * Настраивает перехват попыток навигации.
+     * Покрывает:
+     *  - клик по `<a href>` (внутренние ссылки) — кастомный диалог;
+     *  - back/forward (popstate) — кастомный диалог с восстановлением истории;
+     *  - закрытие вкладки/прямой URL-ввод — браузерный beforeunload (см. _setupEventHandlers).
+     * Программное `window.location.href = ...` всё равно отлавливается beforeunload —
+     * перехватить set'тер location напрямую браузер не даёт.
      * @private
      */
     static _setupNavigationInterception() {
         // Флаг разрешения навигации (для программных переходов)
         window._allowNavigation = false;
+
+        // popstate-страж: при back/forward с unsynced правками показываем
+        // кастомный confirm. Если юзер подтверждает уход — пускаем; иначе
+        // pushState восстанавливает URL.
+        history.replaceState({_lockNavGuard: true}, '', window.location.href);
+        window.addEventListener('popstate', async (event) => {
+            if (window._allowNavigation) return;
+            if (!this.hasUnsyncedChanges()) return;
+
+            // Возвращаем URL обратно, чтобы юзер физически не ушёл со страницы,
+            // пока думает над диалогом.
+            history.pushState({_lockNavGuard: true}, '', window.location.href);
+
+            const confirmed = await DialogManager.show({
+                title: 'Несохраненные изменения',
+                message: 'У вас есть несохранённые изменения. Вернуться к предыдущей странице без сохранения?',
+                icon: '⚠️',
+                confirmText: 'Уйти без сохранения',
+                cancelText: 'Остаться'
+            });
+            if (confirmed) {
+                window._allowNavigation = true;
+                history.back();
+            }
+        });
 
         // Перехватываем клики по ссылкам
         document.addEventListener('click', async (e) => {
