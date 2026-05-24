@@ -9,6 +9,7 @@ Middleware для FastAPI приложения.
 - Ограничения частоты запросов (RateLimitMiddleware)
 - Ограничения размера тела запроса (RequestSizeLimitMiddleware)
 - Назначения request_id (RequestIdMiddleware)
+- Выставления security response headers (SecurityHeadersMiddleware)
 """
 
 import asyncio
@@ -204,6 +205,80 @@ class RequestSizeLimitMiddleware:
             "type": "http.response.body",
             "body": body,
         })
+
+
+class SecurityHeadersMiddleware:
+    """
+    Выставляет security response headers на каждый HTTP-ответ.
+
+    Управляется settings.security.*:
+    - CSP (Content-Security-Policy) — пока в report-only по умолчанию;
+    - HSTS (Strict-Transport-Security) — только для HTTPS-ответов;
+    - X-Content-Type-Options: nosniff — всегда;
+    - X-Frame-Options — защита от clickjacking;
+    - Referrer-Policy — ограничивает утечку URL во внешние ресурсы;
+    - Permissions-Policy — отключает не используемые browser-features.
+
+    Заголовки добавляются НЕ перезаписывая уже выставленные приложением
+    (например, если эндпоинт явно сменил CSP).
+    """
+
+    def __init__(self, app, settings: Settings):
+        self.app = app
+        sec = settings.security
+        self._csp_enabled = sec.csp_enabled
+        self._csp_header_name = (
+            b"content-security-policy-report-only"
+            if sec.csp_report_only
+            else b"content-security-policy"
+        )
+        self._csp_value = sec.csp_policy.encode()
+        self._hsts_enabled = sec.hsts_enabled
+        hsts_directives = [f"max-age={sec.hsts_max_age}"]
+        if sec.hsts_include_subdomains:
+            hsts_directives.append("includeSubDomains")
+        self._hsts_value = "; ".join(hsts_directives).encode()
+        self._frame_options = sec.frame_options.encode()
+        self._referrer_policy = sec.referrer_policy.encode()
+        self._permissions_policy = sec.permissions_policy.encode()
+
+        logger.info(
+            "Security headers инициализированы: CSP=%s (%s), HSTS=%s, X-Frame=%s",
+            "on" if self._csp_enabled else "off",
+            "report-only" if sec.csp_report_only else "enforce",
+            "on" if self._hsts_enabled else "off",
+            sec.frame_options,
+        )
+
+    async def __call__(self, scope, receive, send):
+        if scope["type"] != "http":
+            await self.app(scope, receive, send)
+            return
+
+        is_https = scope.get("scheme") == "https"
+
+        async def send_wrapper(message):
+            if message["type"] == "http.response.start":
+                headers = list(message.get("headers", []))
+                existing = {name for name, _ in headers}
+
+                def add(name: bytes, value: bytes):
+                    if name not in existing:
+                        headers.append([name, value])
+
+                add(b"x-content-type-options", b"nosniff")
+                add(b"x-frame-options", self._frame_options)
+                add(b"referrer-policy", self._referrer_policy)
+                add(b"permissions-policy", self._permissions_policy)
+                if self._csp_enabled:
+                    add(self._csp_header_name, self._csp_value)
+                if self._hsts_enabled and is_https:
+                    add(b"strict-transport-security", self._hsts_value)
+
+                message = {**message, "headers": headers}
+            await send(message)
+
+        await self.app(scope, receive, send_wrapper)
 
 
 class RequestIdMiddleware:

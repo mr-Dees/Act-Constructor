@@ -27,7 +27,8 @@ from app.core.middleware import (
     HTTPSRedirectMiddleware,
     RateLimitMiddleware,
     RequestIdMiddleware,
-    RequestSizeLimitMiddleware
+    RequestSizeLimitMiddleware,
+    SecurityHeadersMiddleware,
 )
 from app.core.middlewares.http_metrics import HttpMetricsMiddleware
 import asyncpg
@@ -303,24 +304,29 @@ def create_app() -> FastAPI:
     # повторный вызов в register_domains ниже отдаёт тот же список.
     domains = discover_domains(_domains_dir)
 
-    # Добавляем middleware в правильном порядке (первый = последний в цепочке)
-    # 1. HTTPS redirect (самый первый - работает с исходным запросом)
+    # Добавляем middleware в правильном порядке (первый add_middleware = outermost,
+    # т.е. видит request первым и response последним).
+    # 1. HTTPS redirect — outermost, нужен для корректного scope.scheme до SecurityHeaders.
     app.add_middleware(HTTPSRedirectMiddleware)
 
-    # 2. Request size limit
+    # 2. Security headers — оборачивает все остальные, чтобы CSP/HSTS/X-Frame
+    #    выставлялись и на 413/429-ответы от RequestSize/RateLimit middlewares.
+    app.add_middleware(SecurityHeadersMiddleware, settings=settings)
+
+    # 3. Request size limit
     app.add_middleware(
         RequestSizeLimitMiddleware,
         max_size=settings.security.max_request_size
     )
 
-    # 3. Rate limiting
+    # 4. Rate limiting
     app.add_middleware(
         RateLimitMiddleware,
         rate_limit=settings.security.rate_limit_per_minute,
         settings=settings
     )
 
-    # 4. HTTP-метрики — внутри RequestIdMiddleware, чтобы видеть выставленный request_id.
+    # 5. HTTP-метрики — внутри RequestIdMiddleware, чтобы видеть выставленный request_id.
     # Если admin.http_metrics_enabled=False, сервис передаётся None и middleware
     # лишь меряет latency без записи в БД.
     _http_metrics_service = None
@@ -337,7 +343,7 @@ def create_app() -> FastAPI:
         )
     app.add_middleware(HttpMetricsMiddleware, service=_http_metrics_service)
 
-    # 5. Request ID — самый последний, запускается первым: охватывает всю цепочку middleware
+    # 6. Request ID — innermost: добавляется последним, оборачивается всеми остальными.
     app.add_middleware(RequestIdMiddleware)
 
     # Подключение статических файлов (доступны по URL /static/*)

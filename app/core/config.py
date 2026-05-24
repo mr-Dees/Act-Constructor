@@ -111,6 +111,37 @@ class SecuritySettings(BaseModel):
     # shutdown гарантированно успел вызвать ``release_singleton_lock``.
     singleton_lock_stale_ttl_sec: int = Field(default=60, gt=0)
 
+    # === Security response headers ===
+    # CSP пока в report-only — в шаблонах ещё много inline-обработчиков (onclick/onchange).
+    # После их выноса в JS можно переключить csp_report_only=False для enforce-режима.
+    csp_enabled: bool = True
+    csp_report_only: bool = True
+    csp_policy: str = (
+        "default-src 'self'; "
+        "script-src 'self' 'unsafe-inline'; "
+        "style-src 'self' 'unsafe-inline'; "
+        "img-src 'self' data: blob:; "
+        "font-src 'self' data:; "
+        "connect-src 'self'; "
+        "frame-ancestors 'self'; "
+        "base-uri 'self'; "
+        "form-action 'self'; "
+        "object-src 'none'"
+    )
+    # HSTS добавляется только для HTTPS-ответов (scope.scheme=='https' или X-Forwarded-Proto).
+    hsts_enabled: bool = True
+    hsts_max_age: int = Field(default=31536000, gt=0)  # 1 год
+    hsts_include_subdomains: bool = True
+    # Clickjacking — SAMEORIGIN покрывает JupyterHub-iframe-сценарий.
+    frame_options: Literal["DENY", "SAMEORIGIN"] = "SAMEORIGIN"
+    # Referrer не отправляется на cross-origin, но шлётся в полном виде для same-origin.
+    referrer_policy: str = "strict-origin-when-cross-origin"
+    # Минимально разрешающий Permissions-Policy: всё блокируется по умолчанию.
+    permissions_policy: str = (
+        "camera=(), microphone=(), geolocation=(), payment=(), "
+        "usb=(), magnetometer=(), gyroscope=(), accelerometer=()"
+    )
+
 
 class ObservabilitySettings(BaseModel):
     """Параметры батчинга записи метрик в БД.
