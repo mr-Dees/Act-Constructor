@@ -38,6 +38,10 @@ class NotificationManager {
     _createContainer() {
         const container = document.createElement('div');
         container.className = 'notification-container';
+        // Контейнер озвучивается screen reader'ами как ARIA live region.
+        // Per-notification роль (alert/status) ставится в _buildNotificationElement.
+        container.setAttribute('role', 'region');
+        container.setAttribute('aria-label', 'Уведомления');
         return container;
     }
 
@@ -161,6 +165,17 @@ class NotificationManager {
         const notification = document.createElement('div');
         notification.className = `notification ${type}`;
         notification.dataset.notificationId = id;
+
+        // Error → assertive (role=alert), остальные — polite (role=status).
+        // Screen reader дочитает текущую реплику, потом озвучит уведомление.
+        if (type === 'error') {
+            notification.setAttribute('role', 'alert');
+            notification.setAttribute('aria-live', 'assertive');
+        } else {
+            notification.setAttribute('role', 'status');
+            notification.setAttribute('aria-live', 'polite');
+        }
+        notification.setAttribute('aria-atomic', 'true');
 
         notification.appendChild(this._createIcon(type));
         notification.appendChild(this._createContent(message));
