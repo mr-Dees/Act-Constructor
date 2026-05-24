@@ -335,3 +335,61 @@
 3. Если тест проверяет дефолты доменной модели — инстанцируй её напрямую, минуя `_load_from_env` (см. п.13).
 
 **См. также:** `app/core/config.py::get_settings`, `app/core/settings_registry.py`.
+
+---
+
+### 20. Singleton-lock — приложение не стартует / зависший процесс
+
+**Симптом:** при старте процесс падает с критичным логом `Не удалось захватить singleton-lock: ...` и `RuntimeError` в lifespan. Тело сообщения обычно `lock уже держит другой воркер pid=N host=...`.
+
+**Причина:** `acquire_singleton_lock()` (`app/core/singleton_lock.py:38-86`) пишет строку в таблицу `{PREFIX}app_singleton_lock` с PK по `service_name`. В JupyterHub-деплое допустим **ровно один** процесс на пользователя — это защищает `_running`-registry раннера и in-process `asyncio.Lock`'и от двойной активации. При мягком shutdown lifespan делает DELETE строки (`app/main.py:266-280`). При жёстком kill -9 / OOM-killer'е строка остаётся; следующий старт через `stale_ttl_sec` (`SECURITY__SINGLETON_LOCK_STALE_TTL_SEC`, default 60 сек) перезапишет её. Внутри окна TTL — старт упадёт.
+
+**Что делать:**
+
+1. Проверить, действительно ли есть второй живой процесс:
+   ```bash
+   ps -u <user> -f | grep "uvicorn\|app.main"
+   ```
+
+2. Если процесса нет — посмотреть в таблице singleton:
+   ```sql
+   SELECT service_name, pid, host, started_at,
+          now() - started_at AS age
+   FROM {SCHEMA}.{PREFIX}app_singleton_lock
+   WHERE service_name = 'act_constructor';
+   ```
+
+3. Если запись «зависла» (`age > 60 sec`) и реального процесса нет — можно дождаться авто-перезаписи (повторный старт через минуту пройдёт) либо ускорить очисткой вручную:
+   ```sql
+   DELETE FROM {SCHEMA}.{PREFIX}app_singleton_lock
+   WHERE service_name = 'act_constructor';
+   ```
+
+4. Если процесс действительно жив — найти его и остановить (`kill <pid>`); при корректном SIGTERM lifespan сам удалит строку.
+
+**См. также:** `app/main.py:130-146` (захват), `app/main.py:266-280` (release), `app/core/singleton_lock.py`, `docs/operations-recovery.md` (полный playbook).
+
+---
+
+### 21. Записи в audit_log / metrics пропадают — что проверить
+
+**Симптом:** ожидаемых записей нет в одной из таблиц: `audit_log` (acts), `chat_audit_log`, `http_metrics`, `chat_tool_metrics`, `access_denied_audit`.
+
+**Причина:** все эти потоки идут через общий `MetricsBatcher` (`app/core/metrics_batcher.py`). При переполнении `max_buffer_size` (default 10000, либо переопределённое значение — например 5000 у `acts.audit_log_batcher`) батчер дропает старые записи с WARNING-логом (`Батчер ...: буфер переполнен, дропнуто N старых записей`). Также возможна более редкая причина — `flush_callback` стабильно падает (БД недоступна, нарушен CHECK), запись зависает в буфере и потом отбрасывается.
+
+**Что делать:**
+
+1. Получить состояние батчеров через diagnostics-endpoint (нужна роль `Админ`):
+   ```bash
+   curl -X GET "http://<host>/<proxy>/api/v1/admin/diagnostics" | jq
+   ```
+
+2. В ответе — `batchers.<имя>.dropped_count`. Если ≠ 0 — записи теряются. Также интересны `last_error` (текст последнего исключения flush'а) и `last_flush_ago_sec` (когда был последний успешный flush).
+
+3. В логах найти строки `Батчер ...: буфер переполнен` (overflow) и `Батчер ...: flush_callback упал` (ошибка записи в БД). В overflow-логе `extra` содержит `batcher_name`, `dropped_now`, `dropped_count_total`.
+
+4. Митигация:
+   - При overflow — поднять `OBSERVABILITY__METRICS_MAX_BUFFER_SIZE` или `OBSERVABILITY__METRICS_BATCH_SIZE` (быстрее опустошение), либо уменьшить нагрузку, генерирующую события (имя видно в `batcher.name`).
+   - При `last_error` — устранить корневую причину (например, CHECK constraint без mapping в `CHECK_CONSTRAINT_MESSAGES`).
+
+**См. также:** `app/core/metrics_batcher.py::get_status`, `app/core/observability_registry.py`, `app/api/v1/endpoints/admin_diagnostics.py`, `docs/developer-guide.md` §9.5a / §9.5b.

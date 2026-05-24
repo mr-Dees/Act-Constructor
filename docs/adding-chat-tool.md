@@ -71,7 +71,7 @@ async def open_act_page_handler(*, km_number: str) -> str:
   патчат через `patch.multiple("app.db.connection", get_db=..., get_adapter=...)`.
 - Для action-тулов возвращай валидный JSON `ClientActionBlock`:
   `{"type": "client_action", "action": ..., "params": {...}, "label": ...}`.
-  Сервер припишет `block_id` детерминированно (`{message_id}:ca:{i}`).
+  Сервер припишет `block_id` детерминированно (`{message_id}:client_action:{i}`).
 - При ошибке валидации параметров `raise ChatToolValidationError(...)` —
   оркестратор поймает и эмитит `tool_error` без падения чата.
 

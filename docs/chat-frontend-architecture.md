@@ -381,8 +381,9 @@ toggle'ов.
 
 Бэк проставляет `block_id` на каждый `ClientActionBlock` — это **обязательное** поле
 без `default_factory`. Оркестратор переписывает его на детерминированный формат
-`f"{message_id}:ca:{i}"` в `_parse_client_action_result` (где `i` — индекс
-client_action-блока в сообщении).
+`f"{message_id}:client_action:{i}"` в `_parse_client_action_result` (где `i` — индекс
+client_action-блока в сообщении; нумерацию ведёт `BlockIdGenerator`,
+`app/core/chat/block_id_generator.py`).
 
 > **Гарантия идемпотентности при reload.** При перезагрузке вкладки фронт получает
 > **тот же id** (он стабильно выводится из `message_id`), `sessionStorage`-чек
