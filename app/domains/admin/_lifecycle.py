@@ -124,9 +124,11 @@ def register_lifespan_hooks() -> None:
         await batcher.start()
         set_access_denied_audit_batcher(batcher)
         app.state.access_denied_audit_batcher = batcher
+        register_batcher("admin.access_denied_audit_batcher", batcher)
 
     async def _stop_access_denied_audit_batcher(app: FastAPI) -> None:
         batcher = getattr(app.state, "access_denied_audit_batcher", None)
+        unregister_batcher("admin.access_denied_audit_batcher")
         try:
             set_access_denied_audit_batcher(None)
         except Exception:
