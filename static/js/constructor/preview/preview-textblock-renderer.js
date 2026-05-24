@@ -38,7 +38,8 @@ class PreviewTextBlockRenderer {
         content.className = 'preview-textblock-content';
 
         this._applyFormatting(content, textBlock.formatting);
-        content.innerHTML = textBlock.content;
+        // textBlock.content — пользовательский HTML, см. C-XSS-1.
+        SafeHTML.set(content, textBlock.content);
 
         return content;
     }

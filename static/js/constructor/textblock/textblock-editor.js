@@ -24,7 +24,10 @@ Object.assign(TextBlockManager.prototype, {
         editor.className = 'textblock-editor';
         editor.dataset.textBlockId = textBlock.id;
         editor.dataset.placeholder = 'Введите текст...';
-        editor.innerHTML = textBlock.content || '';
+        // Sanitize: textBlock.content приходит из БД, мог быть сохранён до того,
+        // как backend начнёт чистить через bleach. DOMPurify обрабатывает любой
+        // вектор stored-XSS на клиенте.
+        SafeHTML.set(editor, textBlock.content || '');
 
         // Привязываем tooltip к ссылкам/сноскам сразу при создании
         this._attachInitialTooltipHandlers(editor);

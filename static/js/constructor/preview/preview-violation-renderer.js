@@ -180,7 +180,9 @@ class PreviewViolationRenderer {
 
         const line = document.createElement('div');
         line.className = 'preview-violation-line';
-        line.innerHTML = `${label}: ${this._trim(text, trimLength)}`;
+        // label статичен; text — пользовательское поле нарушения, escape перед склейкой.
+        const safeText = SafeHTML.escapeHtml(this._trim(text, trimLength));
+        line.innerHTML = `${label}: ${safeText}`;
         container.appendChild(line);
     }
 
