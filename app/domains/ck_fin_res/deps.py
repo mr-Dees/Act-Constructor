@@ -15,14 +15,19 @@ from app.domains.ck_fin_res.services.fr_validation_service import (
     FRValidationService,
 )
 from app.domains.ua_data.interfaces import IDictionaryRepository
-from app.domains.ua_data.repositories.dictionary_repository import (
-    DictionaryRepository,
-)
 
 
 async def get_fr_validation_service() -> AsyncGenerator[FRValidationService, None]:
-    """Создаёт FRValidationService с подключением из пула."""
+    """Создаёт FRValidationService с подключением из пула.
+
+    DictionaryRepository разрешается через ``domain_registry.get_factory`` —
+    cross-domain зависимость идёт через Protocol, без прямого импорта класса.
+    """
+    from app.core.domain_registry import get_factory
+
     async with get_db() as conn:
         fr_repo = FRValidationRepository(conn)
-        dict_repo: IDictionaryRepository = DictionaryRepository(conn)
+        dict_repo: IDictionaryRepository = get_factory(
+            "ua_data.dictionary_repository"
+        )(conn)
         yield FRValidationService(fr_repo=fr_repo, dict_repo=dict_repo)

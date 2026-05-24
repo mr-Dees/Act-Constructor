@@ -18,7 +18,9 @@
    CHAT__SMALLTALK_MODE=local
    CHAT__RETRY__ON_429=true
    CHAT__RETRY__ON_5XX=true
-   CHAT__AGENT_BRIDGE__POLL_INTERVAL_SEC=1.0
+   CHAT__AGENT_BRIDGE__POLL_MIN_INTERVAL_SEC=1.0
+   CHAT__AGENT_BRIDGE__POLL_MAX_INTERVAL_SEC=10.0
+   CHAT__AGENT_BRIDGE__POLL_BACKOFF_MULTIPLIER=1.5
    CHAT__AGENT_BRIDGE__INITIAL_RESPONSE_TIMEOUT_SEC=300
    CHAT__AGENT_BRIDGE__EVENT_TIMEOUT_SEC=120
    CHAT__AGENT_BRIDGE__MAX_TOTAL_DURATION_SEC=1800
@@ -61,9 +63,71 @@
 - Forward'нуть вопрос, во время ожидания перезагрузить страницу.
 - В DevTools / curl выполнить:
   ```
-  GET /api/v1/chat/conversations/<id>/agent-request/<rid>/stream?since=0
+  GET /api/v1/chat/conversations/<id>/forward-stream/<rid>
   ```
-- Ожидаемо: стрим возобновляется, видны накопленные events + финал.
+- Ожидаемо: стрим возобновляется, видны live-события + финал. Накопленные reasoning'и до момента reload отображаются из истории беседы (`chat_messages.content` со `status='streaming'`), Resume SSE идёт без cursor'а.
+
+### 7a. Регрессия: задержка save после финала
+Сценарий проверяет, что ассистент-сообщение появляется в БД сразу после
+получения финального ответа от агента — не через `event_timeout` секунд
+после последнего reasoning-события. До фикса runner спал в `queue.get()`
+до срабатывания таймаута, и при reload в этом окне история была пустой.
+
+- Forward'нуть вопрос («Расскажи про регламент 2024 года»).
+- В DBeaver выполнить §1 из `external-agent-imitation.sql`:
+  reasoning-события, затем **одна транзакция** INSERT в `agent_responses`
+  + INSERT `event_type='final'` в `agent_response_events` (см. шаг 1.4
+  имитации).
+- **Сразу после COMMIT** проверить:
+  ```sql
+  SELECT created_at, role, jsonb_array_length(content) AS blocks
+  FROM t_db_oarb_audit_act_chat_messages
+  WHERE conversation_id = '<id>' AND role = 'assistant'
+  ORDER BY created_at DESC LIMIT 1;
+  ```
+  Ассистент-сообщение должно появиться в течение ≤ 2 секунд после
+  COMMIT'а (а не через `event_timeout` секунд).
+- Реload страницы сразу же — ответ должен быть виден в истории.
+
+### 7b. Fallback poll без 'final'-события
+Эмулирует старую версию агента, не вставляющую `event_type='final'`.
+Проверяет, что runner всё равно подхватывает финал через периодический
+`poll_response` (защита от потери push-сигнала).
+
+- Forward'нуть вопрос.
+- Имитировать reasoning + INSERT в `agent_responses` **БЕЗ** INSERT
+  'final' (закомментировать вторую часть транзакции в §1.4).
+- Ассистент-сообщение должно появиться в течение ≤ `poll_min_interval_sec`
+  × N тиков (≤ 5 секунд при дефолтных настройках), а не через
+  `event_timeout`.
+
+### 7c. Регрессия: switching между чатами с активными forward'ами
+
+Проверяет, что reasoning-блоки внешнего агента не «пропадают» при переключении
+между беседами с параллельными forward'ами. До рефактора Phase 1 (Variant D)
+фронт держал глобальный `_lastReasoningSeq`, который мог дать seq-перекос
+между разными forward'ами — после switch'а Resume SSE открывался с неверным
+курсором и UI терял рассуждения. Теперь streaming-сообщения видны через
+`GET /messages` независимо от SSE — switch гарантированно показывает накопленный
+state.
+
+Шаги:
+1. Открыть беседу A, задать вопрос → forward в полёте.
+2. В DBeaver вставить 2 reasoning-события (§1.1–1.3 из `external-agent-imitation.sql`).
+3. **БЕЗ INSERT в `agent_responses`**, открыть НОВУЮ беседу B, задать другой
+   вопрос → второй forward в полёте.
+4. В DBeaver вставить 1 reasoning-событие для B.
+5. Переключиться на A: ОЖИДАЕТСЯ 2 reasoning-блока + индикатор печати.
+6. Переключиться на B: ОЖИДАЕТСЯ 1 reasoning-блок + индикатор печати.
+7. Переключаться туда-обратно — данные не пропадают.
+8. Завершить оба forward'а (§1.4) — в обоих чатах появятся финальные ответы.
+9. Reload страницы — оба чата показывают полную историю.
+
+Под капотом: `agent_bridge_runner` инкрементально дописывает блоки в
+`chat_messages.content` через `MessageRepository.append_block`
+(status='streaming'). `GET /messages` отдаёт streaming-сообщения как обычные
+записи, фронт идемпотентно мерджит по `data-block-id` поверх того, что уже
+есть в DOM.
 
 ### 8. Profile-switch на SGLang
 - Сменить `.env` на профиль `sglang` (внутренний адрес), перезапустить.

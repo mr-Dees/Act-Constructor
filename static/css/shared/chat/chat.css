@@ -251,14 +251,11 @@
     border-top-left-radius: 2px;
 }
 
-/* Typing-индикатор (три точки) */
-.chat-typing-indicator .chat-message-content {
-    display: flex;
+/* Typing-плейсхолдер (три точки внутри bot-bubble) */
+.chat-typing-placeholder {
+    display: inline-flex;
     align-items: center;
     gap: 4px;
-    padding: var(--spacing-md) var(--spacing-lg);
-    background: var(--bg-secondary);
-    border-radius: var(--radius-md);
 }
 
 .chat-typing-dot {

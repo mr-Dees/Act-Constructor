@@ -139,6 +139,7 @@ async def test_primary_succeeds_no_fallback():
     with patch.object(orch, "_get_openai_client", return_value=primary), \
          patch.object(orch, "_get_fallback_client", side_effect=_no_fallback):
         result = await orch.run(
+            message_id="test-msg-id",
             conversation_id="conv-1", user_message="привет",
         )
 
@@ -170,6 +171,7 @@ async def test_primary_5xx_triggers_fallback():
     with patch.object(orch, "_get_openai_client", return_value=primary), \
          patch.object(orch, "_get_fallback_client", return_value=fallback):
         result = await orch.run(
+            message_id="test-msg-id",
             conversation_id="conv-1", user_message="привет",
         )
 
@@ -206,6 +208,7 @@ async def test_threshold_failures_open_circuit_then_skip_primary():
     with patch.object(orch, "_get_openai_client", return_value=primary), \
          patch.object(orch, "_get_fallback_client", return_value=fallback):
         result = await orch.run(
+            message_id="test-msg-id",
             conversation_id="conv-1", user_message="привет",
         )
 
@@ -236,6 +239,7 @@ async def test_4xx_does_not_trigger_fallback():
     with patch.object(orch, "_get_openai_client", return_value=primary), \
          patch.object(orch, "_get_fallback_client", return_value=fallback):
         result = await orch.run(
+            message_id="test-msg-id",
             conversation_id="conv-1", user_message="hi",
         )
 
@@ -262,6 +266,7 @@ async def test_no_fallback_propagates_provider_failure():
 
     with patch.object(orch, "_get_openai_client", return_value=primary):
         result = await orch.run(
+            message_id="test-msg-id",
             conversation_id="conv-1", user_message="hi",
         )
 
@@ -325,6 +330,7 @@ async def test_fallback_gigachat_called_non_streaming_from_run_stream():
          patch.object(orch, "_get_fallback_client", return_value=fallback):
         events: list[str] = []
         async for ev in orch.run_stream(
+            message_id="test-msg-id",
             conversation_id="conv-1", user_message="hi",
         ):
             events.append(ev)

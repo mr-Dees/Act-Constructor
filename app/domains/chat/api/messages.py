@@ -4,6 +4,7 @@ import asyncio
 import json
 import logging
 import time
+import uuid
 
 from fastapi import APIRouter, Depends, File, Form, Query, Request, UploadFile
 from fastapi.responses import StreamingResponse
@@ -145,14 +146,21 @@ async def send_message(
     # in-process счётчика достаточно.
     accept = request.headers.get("accept", "")
     is_sse = "text/event-stream" in accept
-    if is_sse and _active_streams_per_user.get(username, 0) > 0:
-        logger.warning(
-            "SSE-стрим отклонён (429): user=%s, уже активен", username,
-        )
-        raise ChatStreamAlreadyActiveError(
-            "Уже идёт активный стрим. Дождитесь окончания или "
-            "отмените предыдущий.",
-        )
+    if is_sse:
+        from app.core.settings_registry import get as get_domain_settings
+        from app.domains.chat.settings import ChatDomainSettings
+
+        chat_settings = get_domain_settings("chat", ChatDomainSettings)
+        max_streams = chat_settings.max_parallel_streams_per_user
+        if _active_streams_per_user.get(username, 0) >= max_streams:
+            logger.warning(
+                "SSE-стрим отклонён (429): user=%s, достигнут лимит %d",
+                username, max_streams,
+            )
+            raise ChatStreamAlreadyActiveError(
+                f"Достигнут лимит одновременных запросов ({max_streams}). "
+                "Дождитесь завершения одного из них.",
+            )
 
     # Сохраняем пользовательское сообщение
     await msg_service.save_user_message(
@@ -169,6 +177,11 @@ async def send_message(
         msg_service=msg_service,
         conv_service=conv_service,
     )
+
+    # ID будущего assistant-сообщения. Генерируем здесь, чтобы он совпадал
+    # с тем, что попадёт в БД через _save_assistant_message — на нём строится
+    # детерминированный block_id ClientActionBlock.
+    assistant_message_id = str(uuid.uuid4())
 
     # Определяем режим ответа по Accept header
     # TODO(forward): пробросить список knowledge_bases из контекста беседы,
@@ -211,17 +224,24 @@ async def send_message(
             from app.domains.chat.services.streaming import (
                 sse_error,
                 sse_message_end,
+                with_heartbeat,
             )
             stream_outcome = "completed"
             try:
-                async for chunk in orchestrator.run_stream(
+                inner = orchestrator.run_stream(
                     conversation_id=conversation_id,
                     user_message=message,
+                    message_id=assistant_message_id,
                     domains=domains_list,
                     file_blocks=file_blocks if file_blocks else None,
                     user_id=username,
                     knowledge_bases=[],
-                ):
+                )
+                # Heartbeat обязателен, иначе silent forward (polling
+                # внешнего агента без событий) скрывает client disconnect
+                # на 5 минут — orchestrator занимает per-user семафор
+                # впустую, см. CLAUDE.md «Heartbeat обязателен в SSE».
+                async for chunk in with_heartbeat(inner):
                     yield chunk
             except (asyncio.CancelledError, GeneratorExit):
                 # Клиент дисконнектнулся (закрыл вкладку, обрыв связи).
@@ -309,6 +329,7 @@ async def send_message(
         result = await orchestrator.run(
             conversation_id=conversation_id,
             user_message=message,
+            message_id=assistant_message_id,
             domains=domains_list,
             file_blocks=file_blocks if file_blocks else None,
         )
@@ -344,165 +365,12 @@ async def get_messages(
     )
 
 
-@router.get(
-    "/conversations/{conversation_id}/agent-request/{request_id}/stream",
-    summary="Возобновить SSE-стрим ответа агента после обрыва соединения",
-)
-async def resume_agent_request_stream(
-    conversation_id: str,
-    request_id: str,
-    since: int | None = Query(None, description="seq последнего полученного события"),
-    username: str = Depends(get_username),
-    conv_service: ConversationService = Depends(get_conversation_service),
-):
-    """Стримит накопленные события (с seq > since) и финал в виде SSE-блоков.
-
-    Использовать, если клиент потерял соединение во время forward'а к
-    внешнему агенту: фронт перезапрашивает поток с курсором last_seen_seq.
-    Курсор по seq (не id), потому что id в GP не монотонен по distributed-таблице.
-    """
-    # Проверка владения беседой — те же права, что и при отправке сообщения
-    await conv_service.get(conversation_id, username)
-
-    # Проверка владения agent_request: он должен принадлежать той же беседе.
-    # Без этой проверки авторизованный пользователь, перехватив UUID, мог
-    # бы прочитать чужой ответ агента, подставив свой conversation_id.
-    from app.db.connection import get_db
-    from app.domains.chat.exceptions import ConversationNotFoundError
-    from app.domains.chat.repositories.agent_request_repository import (
-        AgentRequestRepository,
-    )
-
-    async with get_db() as conn:
-        agent_request = await AgentRequestRepository(conn).get(request_id)
-    if agent_request is None or agent_request["conversation_id"] != conversation_id:
-        raise ConversationNotFoundError("Запрос агента не найден")
-
-    async def event_stream():
-        from app.core.settings_registry import get as get_domain_settings
-        from app.domains.chat.services.agent_bridge import (
-            AgentBridgeService,
-            AgentBridgeTimeout,
-        )
-        from app.domains.chat.services.block_emitter import emit_response_blocks
-        from app.domains.chat.services.streaming import (
-            sse_block_delta,
-            sse_block_end,
-            sse_block_start,
-            sse_error,
-            sse_message_end,
-        )
-        from app.domains.chat.settings import ChatDomainSettings
-
-        settings = get_domain_settings("chat", ChatDomainSettings)
-        block_index = 0
-        last_seen = since
-
-        # Подстраховка: гарантируем, что polling-задача для request_id
-        # точно работает. Реconcile в lifespan ловит зависшие запросы
-        # с лагом ≥30с — этот intervals ещё может быть «слепым»; явный
-        # schedule идемпотентен (registry в agent_bridge_runner проверяет
-        # is_running) и не запустит дублирующий polling, если runner уже
-        # крутится. Сохранение финального ассистент-сообщения — только
-        # на стороне runner'а (single source of truth), resume лишь
-        # транслирует события в SSE.
-        from app.domains.chat.services.agent_bridge_runner import schedule
-        schedule(request_id, settings=settings)
-
-        async with get_db() as conn:
-            bridge = AgentBridgeService(conn)
-
-            # Сначала отдаём уже накопленные события (если они есть на старте)
-            existing = await bridge.poll_events(
-                request_id, since_seq=last_seen,
-            )
-            for ev in existing:
-                last_seen = ev["seq"]
-                if ev["event_type"] == "reasoning":
-                    text = (ev["payload"] or {}).get("text", "")
-                    if not text:
-                        continue
-                    # Каждый reasoning-чанк — отдельный сворачиваемый блок.
-                    yield sse_block_start(
-                        block_index=block_index, block_type="reasoning",
-                    )
-                    yield sse_block_delta(block_index=block_index, delta=text)
-                    yield sse_block_end(block_index=block_index)
-                    block_index += 1
-                elif ev["event_type"] == "error":
-                    payload = ev["payload"] or {}
-                    yield sse_error(
-                        error=payload.get("message", "Ошибка внешнего агента"),
-                        code=payload.get("code"),
-                    )
-
-            # Проверяем, не появился ли уже финальный ответ
-            existing_response = await bridge.poll_response(request_id)
-            if existing_response is not None:
-                async for sse, idx in emit_response_blocks(
-                    existing_response["blocks"],
-                    block_index_start=block_index,
-                ):
-                    block_index = idx + 1
-                    yield sse
-                yield sse_message_end(
-                    message_id=str(request_id),
-                    model=settings.model,
-                    token_usage=existing_response.get("token_usage") or None,
-                )
-                return
-
-            # Иначе — ждём дальше через wait_for_completion
-            try:
-                async for upd in bridge.wait_for_completion(
-                    request_id,
-                    poll_interval_sec=settings.agent_bridge.poll_interval_sec,
-                    initial_response_timeout_sec=settings.agent_bridge.initial_response_timeout_sec,
-                    event_timeout_sec=settings.agent_bridge.event_timeout_sec,
-                    max_total_duration_sec=settings.agent_bridge.max_total_duration_sec,
-                    since_seq=last_seen,
-                ):
-                    if upd.event:
-                        ev = upd.event
-                        last_seen = ev["seq"]
-                        if ev["event_type"] == "reasoning":
-                            text = (ev["payload"] or {}).get("text", "")
-                            if not text:
-                                continue
-                            # Каждый reasoning-чанк — отдельный
-                            # сворачиваемый блок.
-                            yield sse_block_start(
-                                block_index=block_index,
-                                block_type="reasoning",
-                            )
-                            yield sse_block_delta(
-                                block_index=block_index, delta=text,
-                            )
-                            yield sse_block_end(block_index=block_index)
-                            block_index += 1
-                        elif ev["event_type"] == "error":
-                            payload = ev["payload"] or {}
-                            yield sse_error(
-                                error=payload.get("message", "Ошибка внешнего агента"),
-                                code=payload.get("code"),
-                            )
-                    if upd.response:
-                        async for sse, idx in emit_response_blocks(
-                            upd.response["blocks"],
-                            block_index_start=block_index,
-                        ):
-                            block_index = idx + 1
-                            yield sse
-                        yield sse_message_end(
-                            message_id=str(request_id),
-                            model=settings.model,
-                            token_usage=upd.response.get("token_usage") or None,
-                        )
-                        return
-            except AgentBridgeTimeout:
-                yield sse_error(
-                    error="Внешний агент не ответил вовремя. Попробуйте позже.",
-                    code="agent_timeout",
-                )
-
-    return StreamingResponse(event_stream(), media_type="text/event-stream")
+# Легаси-эндпоинт `/agent-request/{request_id}/stream` удалён в Phase 2 «D»:
+# его полностью заменил `/forward-stream/{request_id}` (см.
+# app.domains.chat.api.forward_resume). Старый путь дублировал логику
+# Resume SSE, не использовал PollCoordinator и обходил server-authoritative
+# state — после рефакторинга оба эти отличия стали критичны.
+#
+# Фронт (chat-stream.js::resume()) уже использует `/forward-stream/...`
+# как primary path. Catch-fallback `_resumeAgentRequest` (вызывающий
+# старый URL) будет удалён в Phase 3 — параллельно работает frontend-агент.

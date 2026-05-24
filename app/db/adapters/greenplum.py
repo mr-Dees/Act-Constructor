@@ -121,6 +121,8 @@ class GreenplumAdapter(DatabaseAdapter):
                     logger.debug("Greenplum: таблица уже существует, пропускаем")
                 except asyncpg.DuplicateObjectError:
                     logger.debug("Greenplum: объект уже существует, пропускаем")
+                except asyncpg.DuplicateColumnError:
+                    logger.debug("Greenplum: колонка уже существует, пропускаем")
                 except Exception as e:
                     logger.error(f"Greenplum: ошибка выполнения оператора: {e}")
                     raise

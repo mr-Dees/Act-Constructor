@@ -247,6 +247,7 @@ class TestStreamingLifecycle:
 
         events = []
         async for event in orchestrator.run_stream(
+            message_id="test-msg-id",
             conversation_id="conv-1",
             user_message="Привет",
         ):
@@ -262,6 +263,7 @@ class TestStreamingLifecycle:
 
         events = []
         async for event in orchestrator.run_stream(
+            message_id="test-msg-id",
             conversation_id="conv-1",
             user_message="Привет",
         ):
@@ -277,6 +279,7 @@ class TestStreamingLifecycle:
 
         events = []
         async for event in orchestrator.run_stream(
+            message_id="test-msg-id",
             conversation_id="conv-1",
             user_message="Привет",
         ):
@@ -305,6 +308,7 @@ class TestStreamingLifecycle:
 
         events = []
         async for event in orchestrator.run_stream(
+            message_id="test-msg-id",
             conversation_id="conv-1",
             user_message="Привет",
         ):
@@ -338,6 +342,7 @@ class TestStreamingLifecycle:
 
         events = []
         async for event in orchestrator.run_stream(
+            message_id="test-msg-id",
             conversation_id="conv-1",
             user_message="Привет",
         ):
@@ -382,6 +387,7 @@ class TestStreamingLifecycle:
         events = []
         with patch("app.db.connection.get_db", return_value=ctx):
             async for event in orchestrator.run_stream(
+                message_id="test-msg-id",
                 conversation_id="conv-1",
                 user_message="Привет",
             ):
@@ -419,6 +425,7 @@ class TestStreamingFallback:
 
         events = []
         async for event in orchestrator_no_streaming.run_stream(
+            message_id="test-msg-id",
             conversation_id="conv-1",
             user_message="Привет",
         ):
@@ -469,6 +476,7 @@ class TestStreamingFallback:
 
         events = []
         async for event in orchestrator.run_stream(
+            message_id="test-msg-id",
             conversation_id="conv-1",
             user_message="Тест фолбека",
         ):
@@ -543,6 +551,7 @@ class TestStreamingToolCalls:
 
         events = []
         async for event in orchestrator.run_stream(
+            message_id="test-msg-id",
             conversation_id="conv-1",
             user_message="Найди акты",
         ):
@@ -632,6 +641,7 @@ class TestStreamingToolCalls:
 
         events = []
         async for event in orchestrator.run_stream(
+            message_id="test-msg-id",
             conversation_id="conv-1",
             user_message="Используй оба",
         ):
@@ -641,6 +651,115 @@ class TestStreamingToolCalls:
         # Два tool_call и два tool_result
         assert types.count("tool_call") == 2
         assert types.count("tool_result") == 2
+
+
+# -------------------------------------------------------------------------
+# 4.12b: Terminal-tool контракт — не зовём LLM после tool с client_action
+# -------------------------------------------------------------------------
+
+
+class TestTerminalToolContract:
+    """Tool, эмитнувший client_action / blocks_list / buttons, считается
+    «терминальным»: оркестратор НЕ должен звать LLM повторно после такого
+    раунда. Иначе LLM получает короткий итог `<выполнено: name>` и
+    сгенерит ненужную «сводку» поверх готового контента (английский хвост
+    к ``chat.list_pages`` — типичный симптом этого бага).
+    """
+
+    @patch("app.domains.chat.services.orchestrator.Orchestrator._get_openai_client")
+    async def test_client_action_terminates_loop(
+        self, mock_client_factory, orchestrator,
+    ):
+        """После tool с client_action LLM не вызывается повторно."""
+        # Tool возвращает JSON-блок ClientActionBlock.
+        action_json = json.dumps({
+            "type": "client_action",
+            "action": "notify",
+            "params": {"message": "ok"},
+        })
+        tool = ChatTool(
+            name="open_thing",
+            domain="test",
+            description="Открывает thing",
+            handler=AsyncMock(return_value=action_json),
+        )
+        register_tools([tool])
+
+        # Первый stream-вызов LLM: возвращает tool_call к open_thing.
+        async def mock_stream():
+            chunk = MagicMock()
+            delta = MagicMock()
+            delta.content = None
+            tc = MagicMock()
+            tc.index = 0
+            tc.id = "tc-1"
+            tc.function = MagicMock()
+            tc.function.name = "open_thing"
+            tc.function.arguments = "{}"
+            delta.tool_calls = [tc]
+            chunk.choices = [MagicMock(delta=delta, finish_reason=None)]
+
+            chunk2 = MagicMock()
+            delta2 = MagicMock()
+            delta2.content = None
+            delta2.tool_calls = None
+            chunk2.choices = [
+                MagicMock(delta=delta2, finish_reason="tool_calls"),
+            ]
+
+            for c in [chunk, chunk2]:
+                yield c
+
+        mock_client = AsyncMock()
+        # Если оркестратор зовёт LLM второй раз — этот side_effect выдаст
+        # ответ-«сводку», и тест поймает регрессию: содержательного
+        # текстового block_start/block_delta после tool_result быть не должно.
+        followup_msg = MagicMock()
+        followup_msg.content = "Я открыл страницу. Вот что доступно..."
+        followup_msg.tool_calls = None
+        followup_choice = MagicMock()
+        followup_choice.message = followup_msg
+        followup_choice.finish_reason = "stop"
+        followup_response = MagicMock()
+        followup_response.choices = [followup_choice]
+        followup_response.usage = None
+
+        mock_client.chat.completions.create = AsyncMock(
+            side_effect=[mock_stream(), followup_response],
+        )
+        mock_client_factory.return_value = mock_client
+
+        events = []
+        async for event in orchestrator.run_stream(
+            message_id="msg-id",
+            conversation_id="conv-1",
+            user_message="open thing",
+        ):
+            events.append(event)
+
+        # client_action должен попасть в стрим.
+        types = [_get_event_type(e) for e in events]
+        assert "client_action" in types
+
+        # Регрессия: следующего LLM-вызова быть не должно — значит
+        # ни одного text block_start (LLM-сводки) после tool_result.
+        # mock_client.create вызывается ровно 1 раз (первый стрим).
+        assert mock_client.chat.completions.create.call_count == 1, (
+            f"LLM вызывалась {mock_client.chat.completions.create.call_count} "
+            f"раз, ожидался 1 (terminal-tool контракт)"
+        )
+
+        # Дополнительно: текстовых block_start от LLM-сводки нет.
+        # (block_start от reasoning/code допустимы, но не text.)
+        text_block_starts = [
+            e for e in events
+            if _get_event_type(e) == "block_start"
+            and _parse_event_data(e).get("type") == "text"
+        ]
+        assert text_block_starts == [], (
+            "После terminal tool не должно быть text block_start "
+            "от LLM-сводки"
+        )
 
 
 # -------------------------------------------------------------------------
@@ -802,7 +921,13 @@ class TestClientActionBlockIdInSSE:
 
     @pytest.mark.asyncio
     async def test_emit_response_blocks_adds_missing_block_id(self):
-        """block_emitter добавляет block_id, если он отсутствует в client_action."""
+        """block_emitter добавляет детерминированный block_id для client_action.
+
+        Формат: ``f"{message_id}:client_action:{i}"`` через единый
+        :class:`BlockIdGenerator`, чтобы при resume/reload фронт получал
+        тот же id и применял sessionStorage-дедупликацию.
+        """
+        from app.core.chat.block_id_generator import BlockIdGenerator
         from app.domains.chat.services.block_emitter import emit_response_blocks
 
         blocks = [
@@ -814,20 +939,19 @@ class TestClientActionBlockIdInSSE:
             },
         ]
         events: list[tuple[str, int]] = []
-        async for sse, idx in emit_response_blocks(blocks):
+        async for sse, idx in emit_response_blocks(
+            blocks, block_id_gen=BlockIdGenerator(message_id="msg-99"),
+        ):
             events.append((sse, idx))
 
         assert len(events) == 1
         payload = _parse_event_data(events[0][0])
-        assert payload["block"]["block_id"]
-        # Валидный uuid4
-        import uuid as _uuid
-        parsed = _uuid.UUID(payload["block"]["block_id"])
-        assert parsed.version == 4
+        assert payload["block"]["block_id"] == "msg-99:client_action:0"
 
     @pytest.mark.asyncio
     async def test_emit_response_blocks_preserves_existing_block_id(self):
         """Если block_id уже есть — block_emitter его НЕ переписывает."""
+        from app.core.chat.block_id_generator import BlockIdGenerator
         from app.domains.chat.services.block_emitter import emit_response_blocks
 
         blocks = [
@@ -839,14 +963,21 @@ class TestClientActionBlockIdInSSE:
             },
         ]
         events: list[tuple[str, int]] = []
-        async for sse, idx in emit_response_blocks(blocks):
+        async for sse, idx in emit_response_blocks(
+            blocks, block_id_gen=BlockIdGenerator(message_id="msg-x"),
+        ):
             events.append((sse, idx))
 
         payload = _parse_event_data(events[0][0])
         assert payload["block"]["block_id"] == "persistent-id-42"
 
     def test_orchestrator_parser_adds_block_id_if_missing(self):
-        """_parse_client_action_result добавляет block_id, если его нет."""
+        """_parse_client_action_result добавляет детерминированный block_id.
+
+        Формат: ``f"{message_id}:client_action:{idx}"`` через генератор.
+        """
+        from app.core.chat.block_id_generator import BlockIdGenerator
+
         settings = ChatDomainSettings(
             api_base="http://test", api_key="test", model="test-model",
         )
@@ -860,14 +991,22 @@ class TestClientActionBlockIdInSSE:
             "action": "notify",
             "params": {"message": "Hi"},
         })
-        parsed = orch._parse_client_action_result(raw_json)
+        parsed = orch._parse_client_action_result(
+            raw_json, block_id_gen=BlockIdGenerator(message_id="m-1"),
+        )
         assert parsed is not None
-        assert parsed.get("block_id")
-        import uuid as _uuid
-        _uuid.UUID(parsed["block_id"])  # не падает = валидный uuid
+        assert parsed["block_id"] == "m-1:client_action:0"
 
-    def test_orchestrator_parser_preserves_block_id(self):
-        """Существующий block_id в результате tool'а сохраняется."""
+    def test_orchestrator_parser_overwrites_supplied_block_id(self):
+        """Парсер ВСЕГДА переписывает block_id детерминированно.
+
+        Это нужно для идемпотентности между запусками — id формируется как
+        ``f"{message_id}:client_action:{i}"`` независимо от того, выставил
+        ли его handler. Только централизованная нумерация в оркестраторе
+        гарантирует одинаковый id при reload истории.
+        """
+        from app.core.chat.block_id_generator import BlockIdGenerator
+
         settings = ChatDomainSettings(
             api_base="http://test", api_key="test", model="test-model",
         )
@@ -882,6 +1021,11 @@ class TestClientActionBlockIdInSSE:
             "params": {"message": "Hi"},
             "block_id": "handler-supplied-id",
         })
-        parsed = orch._parse_client_action_result(raw_json)
+        gen = BlockIdGenerator(message_id="m-1")
+        # «Прокрутили» генератор на 3 — следующий id должен быть :3
+        for _ in range(3):
+            gen.next("client_action")
+        parsed = orch._parse_client_action_result(raw_json, block_id_gen=gen)
         assert parsed is not None
-        assert parsed["block_id"] == "handler-supplied-id"
+        # handler-supplied id отбрасывается, используется генератор
+        assert parsed["block_id"] == "m-1:client_action:3"

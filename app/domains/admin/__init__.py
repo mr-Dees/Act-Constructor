@@ -32,10 +32,19 @@ def _build_domain():
     from app.core.domain import DomainDescriptor
     from app.domains.admin.api import get_api_routers
     from app.domains.admin.routes import get_html_routers
-    from app.domains.admin._lifecycle import on_startup
+    from app.domains.admin._lifecycle import (
+        on_startup,
+        register_factories,
+        register_lifespan_hooks,
+    )
     from app.core import settings_registry
     from app.domains.admin.integrations.chat_tools import get_chat_tools
     from app.domains.admin.settings import AdminSettings
+
+    # Экспортируем фабрики и hooks до возврата DomainDescriptor — потребители
+    # (например, acts.deps.get_users_repository) разрешают фабрику через ключ.
+    register_factories()
+    register_lifespan_hooks()
 
     return DomainDescriptor(
         name="admin",

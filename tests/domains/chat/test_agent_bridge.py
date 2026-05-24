@@ -128,7 +128,7 @@ async def test_wait_for_completion_yields_events_then_response(mock_conn):
 
     updates = []
     async for upd in svc.wait_for_completion(
-        "r1", poll_interval_sec=0.0, **_LARGE_GATE_KWARGS,
+        "r1", poll_min_interval_sec=0.0, **_LARGE_GATE_KWARGS,
     ):
         updates.append(upd)
 
@@ -169,7 +169,7 @@ async def test_wait_for_completion_advances_cursor_with_last_event_seq(mock_conn
     }]
 
     async for _ in svc.wait_for_completion(
-        "r1", poll_interval_sec=0.0, **_LARGE_GATE_KWARGS,
+        "r1", poll_min_interval_sec=0.0, **_LARGE_GATE_KWARGS,
     ):
         pass
 
@@ -197,7 +197,7 @@ async def test_wait_for_completion_yields_response_even_without_events(mock_conn
 
     updates = []
     async for upd in svc.wait_for_completion(
-        "r1", poll_interval_sec=0.0, **_LARGE_GATE_KWARGS,
+        "r1", poll_min_interval_sec=0.0, **_LARGE_GATE_KWARGS,
     ):
         updates.append(upd)
 
@@ -226,7 +226,7 @@ async def test_initial_response_gate_fires_when_no_events(mock_conn):
     with pytest.raises(AgentBridgeTimeout) as exc_info:
         async for _ in svc.wait_for_completion(
             "r1",
-            poll_interval_sec=0.05,
+            poll_min_interval_sec=0.05,
             initial_response_timeout_sec=0.3,
             event_timeout_sec=10,
             max_total_duration_sec=10,
@@ -268,7 +268,7 @@ async def test_initial_response_gate_disarmed_after_first_event(mock_conn):
     updates = []
     async for upd in svc.wait_for_completion(
         "r1",
-        poll_interval_sec=0.1,
+        poll_min_interval_sec=0.1,
         initial_response_timeout_sec=0.3,
         event_timeout_sec=10,
         max_total_duration_sec=10,
@@ -302,7 +302,7 @@ async def test_heartbeat_gate_fires_when_events_stop(mock_conn):
     with pytest.raises(AgentBridgeTimeout) as exc_info:
         async for _ in svc.wait_for_completion(
             "r1",
-            poll_interval_sec=0.05,
+            poll_min_interval_sec=0.05,
             initial_response_timeout_sec=10,
             event_timeout_sec=0.3,
             max_total_duration_sec=10,
@@ -347,7 +347,7 @@ async def test_heartbeat_resets_on_each_event(mock_conn):
     updates = []
     async for upd in svc.wait_for_completion(
         "r1",
-        poll_interval_sec=0.2,
+        poll_min_interval_sec=0.2,
         initial_response_timeout_sec=10,
         event_timeout_sec=0.5,
         max_total_duration_sec=10,
@@ -382,7 +382,7 @@ async def test_max_total_duration_fires_even_with_heartbeat(mock_conn):
     with pytest.raises(AgentBridgeTimeout) as exc_info:
         async for _ in svc.wait_for_completion(
             "r1",
-            poll_interval_sec=0.1,
+            poll_min_interval_sec=0.1,
             initial_response_timeout_sec=10,
             event_timeout_sec=10,
             max_total_duration_sec=0.5,
@@ -411,7 +411,7 @@ async def test_initial_response_gate_emits_structured_llm_timeout_warning(
         with pytest.raises(AgentBridgeTimeout):
             async for _ in svc.wait_for_completion(
                 "r-initial",
-                poll_interval_sec=0.05,
+                poll_min_interval_sec=0.05,
                 initial_response_timeout_sec=0.2,
                 event_timeout_sec=10,
                 max_total_duration_sec=10,
@@ -446,7 +446,7 @@ async def test_max_total_gate_emits_structured_llm_timeout_warning(
         with pytest.raises(AgentBridgeTimeout):
             async for _ in svc.wait_for_completion(
                 "r-total",
-                poll_interval_sec=0.05,
+                poll_min_interval_sec=0.05,
                 initial_response_timeout_sec=10,
                 event_timeout_sec=10,
                 max_total_duration_sec=0.3,

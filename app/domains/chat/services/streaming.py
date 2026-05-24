@@ -2,12 +2,23 @@
 
 from __future__ import annotations
 
+import asyncio
 import logging
+from collections.abc import AsyncGenerator, AsyncIterator
 from dataclasses import dataclass, field
 import json
 from typing import Any
 
 logger = logging.getLogger(__name__)
+
+# SSE-комментарий: строки, начинающиеся с двоеточия, игнорируются клиентом
+# (EventSource/SSE-парсер). Используется как heartbeat — даёт серверу повод
+# вызвать write на сокет, чтобы uvicorn заметил оборванное соединение
+# и подал http.disconnect в ASGI. Без heartbeat в silent-период (например,
+# 5 минут polling'а внешнего агента без событий) клиентский abort не
+# доходит до сервера, и orchestrator продолжает крутиться впустую,
+# держа per-user-семафор и нагружая БД.
+SSE_HEARTBEAT_PAYLOAD = ": keep-alive\n\n"
 
 # Маркер усечения, добавляемый к последней delta при переполнении блока.
 TRUNCATION_MARKER = "\n\n[…усечено: блок превысил {limit_mb:.1f} МБ…]"
@@ -27,12 +38,28 @@ def sse_message_start(*, conversation_id: str, message_id: str) -> str:
     })
 
 
-def sse_block_start(*, block_index: int, block_type: str) -> str:
-    """Начало нового блока контента."""
-    return format_sse_event("block_start", {
+def sse_block_start(
+    *,
+    block_index: int,
+    block_type: str,
+    block_id: str | None = None,
+) -> str:
+    """Начало нового блока контента.
+
+    ``block_id`` — детерминированный идентификатор блока (используется
+    для дедупа при resume SSE: фронт хранит Set уже отрендеренных id и
+    игнорирует повторы). Сейчас задаётся только для reasoning-блоков
+    в forward-стриме (``f"{message_id}:reasoning:{seq}"``); для прочих
+    блоков остаётся None — у них своя идемпотентность (ClientActionBlock
+    имеет собственное поле block_id).
+    """
+    payload: dict[str, Any] = {
         "index": block_index,
         "type": block_type,
-    })
+    }
+    if block_id is not None:
+        payload["block_id"] = block_id
+    return format_sse_event("block_start", payload)
 
 
 def sse_block_delta(*, block_index: int, delta: str) -> str:
@@ -133,9 +160,9 @@ def sse_agent_request_started(
 ) -> str:
     """Сигнал фронту: forward-запрос зарегистрирован, его id известен.
 
-    Фронт может сохранить request_id и при разрыве соединения переоткрыть
-    resume-стрим:
-        GET /api/v1/chat/conversations/{cid}/agent-request/{rid}/stream
+    Фронт сохраняет request_id и после нормального завершения POST SSE
+    (или при разрыве соединения) переключается на resume-стрим:
+        GET /api/v1/chat/conversations/{cid}/forward-stream/{rid}
     """
     return format_sse_event("agent_request_started", {
         "request_id": request_id,
@@ -322,6 +349,7 @@ def emit_text_block_with_limit(
     text: str,
     chunk_flush_bytes: int,
     block_max_bytes: int,
+    block_id: str | None = None,
 ) -> list[str]:
     """Сериализует готовый текстовый блок в триплет
     block_start + (block_delta)* + block_end, применяя лимиты.
@@ -330,9 +358,17 @@ def emit_text_block_with_limit(
     (non-streaming ответ LLM, текстовые блоки от tool-handler'ов).
     Большие блоки нарезаются на несколько delta, переполненные — усекаются
     с маркером.
+
+    ``block_id`` пробрасывается в ``sse_block_start``: для reasoning-блоков
+    от внешнего агента (forward-стрим) это id вида ``f"{message_id}:reasoning:{seq}"``,
+    по которому фронт дедупит повторы при reconnect/reload.
     """
     events: list[str] = [
-        sse_block_start(block_index=block_index, block_type=block_type),
+        sse_block_start(
+            block_index=block_index,
+            block_type=block_type,
+            block_id=block_id,
+        ),
     ]
     limiter = BlockDeltaLimiter(
         block_index=block_index,
@@ -345,3 +381,60 @@ def emit_text_block_with_limit(
         events.extend(limiter.flush_remaining())
         events.append(sse_block_end(block_index=block_index))
     return events
+
+
+async def with_heartbeat(
+    source: AsyncIterator[str],
+    *,
+    interval_sec: float = 7.0,
+) -> AsyncGenerator[str, None]:
+    """Прозрачно прокидывает SSE-стрим, вставляя heartbeat'ы в тишине.
+
+    Если ``source`` молчит дольше ``interval_sec`` — yield-ит
+    :data:`SSE_HEARTBEAT_PAYLOAD`. Это заставляет uvicorn выполнить
+    реальный write на сокет; для оборванного соединения write поднимет
+    EOF и ASGI пробросит ``http.disconnect``, что в свою очередь
+    отменит StreamingResponse-генератор. Без этого silent-периоды
+    (polling внешнего ИИ-агента) держат серверный orchestrator живым
+    до 5-минутного таймаута, даже если клиент давно ушёл.
+
+    Источник крутится в отдельной задаче через ``asyncio.Queue`` —
+    так heartbeat не прерывает текущий ``await`` источника (типа
+    ``poll_events``-SQL), а просто сосуществует с ним. Это безопаснее,
+    чем ``asyncio.wait_for(source.__anext__())``, которая отменила бы
+    активную транзакцию.
+    """
+    queue: asyncio.Queue[tuple[str, Any]] = asyncio.Queue()
+
+    async def _drain() -> None:
+        try:
+            async for item in source:
+                await queue.put(("item", item))
+        except BaseException as exc:  # CancelledError тоже сюда
+            await queue.put(("error", exc))
+            return
+        await queue.put(("done", None))
+
+    drainer = asyncio.create_task(_drain(), name="sse-heartbeat-drain")
+    try:
+        while True:
+            try:
+                kind, value = await asyncio.wait_for(
+                    queue.get(), timeout=interval_sec,
+                )
+            except asyncio.TimeoutError:
+                yield SSE_HEARTBEAT_PAYLOAD
+                continue
+            if kind == "item":
+                yield value
+            elif kind == "done":
+                return
+            else:  # "error"
+                raise value
+    finally:
+        if not drainer.done():
+            drainer.cancel()
+        try:
+            await drainer
+        except BaseException:
+            pass

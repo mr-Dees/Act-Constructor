@@ -42,6 +42,60 @@ const ChatRenderer = {
     },
 
     /**
+     * Создаёт DOM-плейсхолдер с тремя анимированными точками.
+     * Используется внутри bot-bubble как индикатор «бот думает».
+     * Удаляется при первом блоке ответа через `removeTypingPlaceholder()`.
+     *
+     * @returns {HTMLElement}
+     */
+    createTypingPlaceholder() {
+        const placeholder = document.createElement('div');
+        placeholder.className = 'chat-typing-placeholder';
+        for (let i = 0; i < 3; i++) {
+            const dot = document.createElement('span');
+            dot.className = 'chat-typing-dot';
+            placeholder.appendChild(dot);
+        }
+        return placeholder;
+    },
+
+    /**
+     * Удаляет typing-плейсхолдер из контейнера, если он там есть.
+     * Идемпотентен — повторный вызов безопасен.
+     *
+     * @param {HTMLElement} container — контейнер bot-сообщения
+     */
+    removeTypingPlaceholder(container) {
+        if (!container) return;
+        const placeholder = container.querySelector(':scope > .chat-typing-placeholder');
+        if (placeholder) placeholder.remove();
+    },
+
+    /**
+     * Добавляет typing-индикатор в конец контейнера, если его там ещё нет.
+     * Используется при рендере streaming-assistant-сообщения из истории
+     * (`msg.status === 'streaming'`).
+     *
+     * @param {HTMLElement} container — контейнер bot-сообщения
+     */
+    appendTypingIndicator(container) {
+        if (!container) return;
+        const existing = container.querySelector(':scope > .chat-typing-placeholder');
+        if (existing) return;
+        container.appendChild(this.createTypingPlaceholder());
+    },
+
+    /**
+     * Алиас для `removeTypingPlaceholder` — публичный API для финализации
+     * streaming-сообщения.
+     *
+     * @param {HTMLElement} container
+     */
+    removeTypingIndicator(container) {
+        this.removeTypingPlaceholder(container);
+    },
+
+    /**
      * Рендерит массив блоков в DOM-контейнер
      *
      * @param {HTMLElement} container — контейнер для отрисовки
@@ -74,21 +128,52 @@ const ChatRenderer = {
     appendBlock(container, el) {
         if (!container || !el) return;
 
+        // Идемпотентный merge по data-block-id: если блок с тем же id
+        // уже есть в контейнере, заменяем его. Это нужно для случая
+        // «при reload пришёл финал с тем же block_id, что был streaming-
+        // партиал, — заменить полным телом». Live-стрим избегает этой
+        // ветки через DOM-дедуп в ChatMessages._handleSSEEvent (не вызывает
+        // appendBlock для существующего id).
+        if (el.dataset && el.dataset.blockId) {
+            const existing = container.querySelector(
+                `[data-block-id="${CSS.escape(el.dataset.blockId)}"]`,
+            );
+            if (existing) {
+                existing.replaceWith(el);
+                return;
+            }
+        }
+
         const isReasoning = el.classList
             && el.classList.contains('chat-block-reasoning');
 
+        // Если в контейнере живёт typing-плейсхолдер (бот ещё «думает»,
+        // например reasoning-чанки во время forward'а), удерживаем его
+        // ВНИЗУ bot-bubble — все вновь добавленные блоки уходят ВЫШЕ него.
+        // Сам плейсхолдер не трогаем — его удаление управляется только
+        // из `_handleSSEEvent` по приходу финального content-блока.
+        const placeholder = container.querySelector(
+            ':scope > .chat-typing-placeholder',
+        );
+
+        // Для логики reasoning-группы placeholder в конце — невидимый
+        // «хвост»; реальным последним блоком считаем предыдущий элемент.
+        const lastBlock = (placeholder && container.lastElementChild === placeholder)
+            ? placeholder.previousElementSibling
+            : container.lastElementChild;
+
         if (isReasoning) {
             // Ищем активную (не финализированную) группу среди потомков container'а.
-            // Группа считается активной только если она — последний дочерний элемент.
-            const lastChild = container.lastElementChild;
-            const isActiveGroup = lastChild
-                && lastChild.classList
-                && lastChild.classList.contains('chat-reasoning-group')
-                && !lastChild.dataset.finalized;
+            // Группа считается активной только если она — последний дочерний элемент
+            // (placeholder не учитывается).
+            const isActiveGroup = lastBlock
+                && lastBlock.classList
+                && lastBlock.classList.contains('chat-reasoning-group')
+                && !lastBlock.dataset.finalized;
 
             if (isActiveGroup) {
                 // Добавляем разделитель, если в группе уже есть reasoning-блоки
-                const groupContent = lastChild.querySelector('.chat-reasoning-group-content');
+                const groupContent = lastBlock.querySelector('.chat-reasoning-group-content');
                 if (groupContent.lastElementChild) {
                     const sep = document.createElement('hr');
                     sep.className = 'chat-reasoning-separator';
@@ -114,15 +199,21 @@ const ChatRenderer = {
             }
         } else {
             // Финализируем активную группу, чтобы следующий reasoning начал новую
-            const lastChild = container.lastElementChild;
-            if (lastChild
-                && lastChild.classList
-                && lastChild.classList.contains('chat-reasoning-group')
-                && !lastChild.dataset.finalized) {
-                lastChild.dataset.finalized = 'true';
+            if (lastBlock
+                && lastBlock.classList
+                && lastBlock.classList.contains('chat-reasoning-group')
+                && !lastBlock.dataset.finalized) {
+                lastBlock.dataset.finalized = 'true';
             }
 
             container.appendChild(el);
+        }
+
+        // Если плейсхолдер остался — переносим его в конец, чтобы три точки
+        // оказались под только что добавленным блоком (типичный кейс — поток
+        // reasoning-чанков от внешнего агента).
+        if (placeholder && container.lastElementChild !== placeholder) {
+            container.appendChild(placeholder);
         }
     },
 
@@ -137,29 +228,39 @@ const ChatRenderer = {
         if (!block || !block.type) return null;
         const options = opts || {};
 
+        let el;
         switch (block.type) {
             case 'text':
-                return this._renderText(block);
+                el = this._renderText(block); break;
             case 'code':
-                return this._renderCode(block);
+                el = this._renderCode(block); break;
             case 'reasoning':
-                return this._renderReasoning(block);
+                el = this._renderReasoning(block); break;
             case 'plan':
-                return this._renderPlan(block);
+                el = this._renderPlan(block); break;
             case 'file':
-                return this._renderFile(block);
+                el = this._renderFile(block); break;
             case 'image':
-                return this._renderImage(block);
+                el = this._renderImage(block); break;
             case 'buttons':
-                return this._renderButtons(block);
+                el = this._renderButtons(block); break;
             case 'client_action':
-                return this._renderClientAction(block, options);
+                el = this._renderClientAction(block, options); break;
             case 'error':
-                return this._renderError(block);
+                el = this._renderError(block); break;
             default:
                 console.warn('ChatRenderer: неизвестный тип блока', block.type, block);
-                return this._renderUnknown(block);
+                el = this._renderUnknown(block);
         }
+
+        // Прокидываем block_id в dataset для идемпотентного merge в `appendBlock`
+        // и для DOM-дедупа в ChatMessages._handleSSEEvent. Перетирает только
+        // если у конкретного renderer'а ещё не выставлен (reasoning делает это сам).
+        if (el && typeof block.block_id === 'string' && block.block_id
+            && !el.dataset.blockId) {
+            el.dataset.blockId = block.block_id;
+        }
+        return el;
     },
 
     /**
@@ -203,14 +304,18 @@ const ChatRenderer = {
      * как отдельный сворачиваемый блок.
      *
      * @param {string} blockType — тип блока ('text' или 'reasoning')
+     * @param {string} [blockId] — идентификатор блока (для reasoning тегируется в data-block-id)
      * @returns {{ element: HTMLElement, appendText: function(string): void, finalize: function(): void }}
      */
-    createStreamingBlock(blockType) {
+    createStreamingBlock(blockType, blockId) {
         if (blockType === 'reasoning') {
             const details = document.createElement('details');
             details.className = 'chat-block chat-block-reasoning';
             // По умолчанию каждый чанк раскрыт; пользователь сворачивает руками.
             details.open = true;
+            if (typeof blockId === 'string' && blockId) {
+                details.dataset.blockId = blockId;
+            }
 
             if (this._getReasoningDisplayMode() === 'hidden') {
                 details.style.display = 'none';
@@ -353,6 +458,9 @@ const ChatRenderer = {
         const details = document.createElement('details');
         details.className = 'chat-block chat-block-reasoning';
         details.open = true;
+        if (typeof block.block_id === 'string' && block.block_id) {
+            details.dataset.blockId = block.block_id;
+        }
 
         if (this._getReasoningDisplayMode() === 'hidden') {
             details.style.display = 'none';

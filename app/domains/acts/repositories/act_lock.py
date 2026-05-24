@@ -41,7 +41,8 @@ class ActLockRepository(BaseRepository):
             UPDATE {self.acts}
             SET locked_by = $1::VARCHAR,
                 locked_at = CURRENT_TIMESTAMP,
-                lock_expires_at = CURRENT_TIMESTAMP + $2 * interval '1 minute'
+                lock_expires_at = CURRENT_TIMESTAMP + $2 * interval '1 minute',
+                updated_at = CURRENT_TIMESTAMP
             WHERE id = $3
               AND (locked_by IS NULL OR locked_by = $1::VARCHAR OR lock_expires_at <= CURRENT_TIMESTAMP)
             RETURNING locked_by, locked_at, lock_expires_at
@@ -76,7 +77,8 @@ class ActLockRepository(BaseRepository):
             f"""
             WITH attempt AS (
                 UPDATE {self.acts}
-                SET lock_expires_at = CURRENT_TIMESTAMP + $1 * interval '1 minute'
+                SET lock_expires_at = CURRENT_TIMESTAMP + $1 * interval '1 minute',
+                    updated_at = CURRENT_TIMESTAMP
                 WHERE id = $2
                   AND locked_by = $3
                   AND lock_expires_at > CURRENT_TIMESTAMP
@@ -132,7 +134,8 @@ class ActLockRepository(BaseRepository):
             UPDATE {self.acts}
             SET locked_by = NULL,
                 locked_at = NULL,
-                lock_expires_at = NULL
+                lock_expires_at = NULL,
+                updated_at = CURRENT_TIMESTAMP
             WHERE id = $1 AND locked_by = $2
             """,
             act_id,

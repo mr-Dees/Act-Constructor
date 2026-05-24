@@ -10,23 +10,28 @@ from typing import Callable
 
 import asyncpg
 from cachetools import TTLCache
-from fastapi import Depends, HTTPException
+from fastapi import Depends, HTTPException, Request
 
 from app.api.v1.deps.auth_deps import get_username
 from app.db.connection import get_db, get_adapter
 
 logger = logging.getLogger("audit_workstation.api.deps.roles")
 
-# Кеш ролей: maxsize=256, ttl=10 секунд
-_roles_cache: TTLCache = TTLCache(maxsize=256, ttl=10)
+# Кеш ролей: maxsize=256, ttl=5 секунд.
+# TTL короткий — это последняя линия защиты от устаревших прав при отсутствии
+# межпроцессной инвалидации (см. invalidate_user_roles_cache).
+_roles_cache: TTLCache = TTLCache(maxsize=256, ttl=5)
+
+# Роли, автоматически назначаемые пользователю при первом обращении.
+DEFAULT_ROLE_NAMES: tuple[str, ...] = ("Цифровой акт", "Чат-ассистент")
 
 
 async def get_user_roles(username: str = Depends(get_username)) -> list[dict]:
     """
     Возвращает список ролей текущего пользователя.
 
-    Кешируется на 10 секунд. Если у пользователя нет ролей,
-    автоматически назначает роль 'Цифровой акт'.
+    Кешируется на 5 секунд. Если у пользователя нет ролей,
+    автоматически назначает дефолтные роли (см. DEFAULT_ROLE_NAMES).
     """
     if username in _roles_cache:
         return _roles_cache[username]
@@ -47,52 +52,57 @@ async def get_user_roles(username: str = Depends(get_username)) -> list[dict]:
         )
 
         if not rows:
-            rows = await _auto_assign_default_role(conn, username, roles_table, user_roles_table)
+            rows = await _auto_assign_default_roles(conn, username, roles_table, user_roles_table)
 
     result = [dict(r) for r in rows]
     _roles_cache[username] = result
     return result
 
 
-async def _auto_assign_default_role(conn, username, roles_table, user_roles_table):
+async def _auto_assign_default_roles(conn, username, roles_table, user_roles_table):
     """
-    Автоматически назначает роль 'Цифровой акт' пользователю без ролей.
+    Автоматически назначает дефолтные роли (DEFAULT_ROLE_NAMES) пользователю без ролей.
     """
-    role_row = await conn.fetchrow(
-        f"SELECT id FROM {roles_table} WHERE name = $1",
-        "Цифровой акт",
+    role_rows = await conn.fetch(
+        f"SELECT id, name FROM {roles_table} WHERE name = ANY($1::text[])",
+        list(DEFAULT_ROLE_NAMES),
     )
-    if not role_row:
-        logger.warning("Роль 'Цифровой акт' не найдена для auto-assign")
-        return []
+    found_names = {r["name"] for r in role_rows}
+    missing = [n for n in DEFAULT_ROLE_NAMES if n not in found_names]
+    for name in missing:
+        logger.warning(f"Роль '{name}' не найдена для auto-assign")
 
-    role_id = role_row["id"]
+    if not role_rows:
+        return []
 
     from app.db.connection import get_adapter as _get_adapter
     adapter = _get_adapter()
 
-    if adapter.supports_on_conflict():
-        await conn.execute(
-            f"""
-            INSERT INTO {user_roles_table} (username, role_id, assigned_by)
-            VALUES ($1, $2, 'auto')
-            ON CONFLICT (username, role_id) DO NOTHING
-            """,
-            username, role_id,
-        )
-    else:
-        try:
+    for role_row in role_rows:
+        role_id = role_row["id"]
+        if adapter.supports_on_conflict():
             await conn.execute(
                 f"""
                 INSERT INTO {user_roles_table} (username, role_id, assigned_by)
                 VALUES ($1, $2, 'auto')
+                ON CONFLICT (username, role_id) DO NOTHING
                 """,
                 username, role_id,
             )
-        except asyncpg.UniqueViolationError:
-            pass  # Already assigned by concurrent request
+        else:
+            try:
+                await conn.execute(
+                    f"""
+                    INSERT INTO {user_roles_table} (username, role_id, assigned_by)
+                    VALUES ($1, $2, 'auto')
+                    """,
+                    username, role_id,
+                )
+            except asyncpg.UniqueViolationError:
+                pass  # Already assigned by concurrent request
 
-    logger.info(f"Auto-assign: роль 'Цифровой акт' назначена пользователю {username}")
+    assigned_names = ", ".join(sorted(found_names))
+    logger.info(f"Auto-assign: роли [{assigned_names}] назначены пользователю {username}")
 
     return await conn.fetch(
         f"""
@@ -109,14 +119,74 @@ def require_domain_access(domain_name: str) -> Callable:
     """
     Фабрика зависимости: проверяет доступ пользователя к домену.
 
-    Админ имеет доступ ко всем доменам.
+    Админ имеет доступ ко всем доменам. При отказе доступа факт записывается
+    в ``access_denied_audit`` через батчер (без блокировки запроса). Если
+    батчер не поднят (например, в тестах) — отказ логируется в warning.
     """
-    async def _check(roles: list[dict] = Depends(get_user_roles)):
+    async def _check(
+        request: Request,
+        username: str = Depends(get_username),
+        roles: list[dict] = Depends(get_user_roles),
+    ):
         if any(r["name"] == "Админ" for r in roles):
             return
         if not any(r["domain_name"] == domain_name for r in roles):
+            await _log_access_denied(
+                request=request,
+                username=username,
+                domain=domain_name,
+                roles=roles,
+            )
             raise HTTPException(status_code=403, detail="Нет доступа к разделу")
     return _check
+
+
+async def _log_access_denied(
+    *,
+    request: Request,
+    username: str,
+    domain: str,
+    roles: list[dict],
+) -> None:
+    """Кладёт запись об отказе доступа в батчер.
+
+    Поглощает любые исключения батчера: цель — не помешать 403-ответу.
+    """
+    role_names = sorted({r.get("name", "") for r in roles if r.get("name")})
+    reason = (
+        f"roles=[{', '.join(role_names) or '<none>'}], "
+        f"missing domain_name='{domain}'"
+    )
+
+    from app.domains.admin.deps import get_access_denied_audit_batcher
+    from app.domains.admin.repositories.access_denied_audit import (
+        AccessDeniedRecord,
+    )
+
+    batcher = get_access_denied_audit_batcher()
+    if batcher is None:
+        logger.warning(
+            "Отказ доступа username=%s domain=%s path=%s method=%s reason=%s "
+            "(батчер аудита не поднят — запись пропущена)",
+            username, domain, request.url.path, request.method, reason,
+        )
+        return
+
+    try:
+        await batcher.add(
+            AccessDeniedRecord(
+                username=username,
+                domain=domain,
+                path=str(request.url.path),
+                method=request.method,
+                reason=reason,
+            )
+        )
+    except Exception:
+        logger.exception(
+            "Не удалось записать отказ доступа в аудит: username=%s domain=%s",
+            username, domain,
+        )
 
 
 def require_admin() -> Callable:
@@ -127,6 +197,14 @@ def require_admin() -> Callable:
     return _check
 
 
-def invalidate_roles_cache(username: str) -> None:
-    """Инвалидация кеша ролей при назначении/снятии."""
+def invalidate_user_roles_cache(username: str) -> None:
+    """Явная инвалидация кеша ролей при назначении/снятии роли.
+
+    ВАЖНО: инвалидация работает только в пределах текущего процесса.
+    В multi-process / multi-instance деплое (в первую очередь JupyterHub,
+    где каждый пользователь запускает собственный процесс приложения)
+    очистка кеша в одном процессе НЕ затронет кеш в других процессах.
+    Для таких случаев единственной защитой остаётся короткий TTL (5 сек)
+    — это сознательный компромисс между свежестью прав и нагрузкой на БД.
+    """
     _roles_cache.pop(username, None)

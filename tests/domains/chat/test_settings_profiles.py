@@ -34,7 +34,9 @@ def test_default_profile_is_sglang():
     assert s.retry.on_429 is True
     assert s.retry.on_5xx is True
     assert s.smalltalk_mode == "local"
-    assert s.agent_bridge.poll_interval_sec == 1.0
+    assert s.agent_bridge.poll_min_interval_sec == 5.0
+    assert s.agent_bridge.poll_max_interval_sec == 10.0
+    assert s.agent_bridge.poll_backoff_multiplier == 1.5
 
 
 def test_openrouter_profile_with_extra_headers():
@@ -67,12 +69,16 @@ def test_nested_retry_overrides(monkeypatch):
 def test_nested_agent_bridge_overrides(monkeypatch):
     s = _load(monkeypatch,
               CHAT__API_BASE="http://x", CHAT__API_KEY="x", CHAT__MODEL="m",
-              CHAT__AGENT_BRIDGE__POLL_INTERVAL_SEC="0.25",
+              CHAT__AGENT_BRIDGE__POLL_MIN_INTERVAL_SEC="0.25",
+              CHAT__AGENT_BRIDGE__POLL_MAX_INTERVAL_SEC="5.0",
+              CHAT__AGENT_BRIDGE__POLL_BACKOFF_MULTIPLIER="2.0",
               CHAT__AGENT_BRIDGE__INITIAL_RESPONSE_TIMEOUT_SEC="60",
               CHAT__AGENT_BRIDGE__EVENT_TIMEOUT_SEC="30",
               CHAT__AGENT_BRIDGE__MAX_TOTAL_DURATION_SEC="900",
               CHAT__AGENT_BRIDGE__HISTORY_LIMIT="10")
-    assert s.agent_bridge.poll_interval_sec == 0.25
+    assert s.agent_bridge.poll_min_interval_sec == 0.25
+    assert s.agent_bridge.poll_max_interval_sec == 5.0
+    assert s.agent_bridge.poll_backoff_multiplier == 2.0
     assert s.agent_bridge.initial_response_timeout_sec == 60
     assert s.agent_bridge.event_timeout_sec == 30
     assert s.agent_bridge.max_total_duration_sec == 900

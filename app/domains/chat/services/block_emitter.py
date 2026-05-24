@@ -12,8 +12,9 @@
 """
 from __future__ import annotations
 
-import uuid
 from collections.abc import AsyncIterator
+
+from app.core.chat.block_id_generator import BlockIdGenerator
 
 # Стримуемые блоки: фронт собирает их инкрементально из дельт.
 # Все прочие нестримуемые типы (file, image, plan, error, …) уходят
@@ -25,6 +26,7 @@ STREAMABLE_BLOCK_TYPES = ("text", "code", "reasoning")
 async def emit_response_blocks(
     blocks: list[dict],
     *,
+    block_id_gen: BlockIdGenerator,
     block_index_start: int = 0,
 ) -> AsyncIterator[tuple[str, int]]:
     """Async-генератор SSE-строк для финальных блоков ответа агента.
@@ -34,6 +36,11 @@ async def emit_response_blocks(
     использован для следующего блока вне этого вызова. Buttons и
     client_action идут по собственным SSE-каналам и block_index НЕ
     инкрементируют.
+
+    ``block_id_gen`` обязателен — единый источник детерминированных
+    ``block_id`` для всех источников эмиссии в рамках сообщения
+    (streaming, finalize, agent_bridge_runner). Без него нельзя
+    гарантировать одинаковый id между live-стримом и resume.
     """
     from app.domains.chat.services.button_translator import translate_buttons
     from app.domains.chat.services.streaming import (
@@ -53,10 +60,14 @@ async def emit_response_blocks(
             yield sse_buttons(buttons=translated), idx
             continue
         if btype == "client_action":
-            # Гарантируем block_id для идемпотентности на фронте: если блок
-            # пришёл из истории/агента без block_id — генерируем его здесь.
+            # Гарантируем block_id для идемпотентности на фронте. Если блок
+            # пришёл из истории / ответа агента без block_id — выставляем
+            # детерминированно через генератор.
             if not raw_block.get("block_id"):
-                raw_block = {**raw_block, "block_id": str(uuid.uuid4())}
+                raw_block = {
+                    **raw_block,
+                    "block_id": block_id_gen.next("client_action"),
+                }
             yield sse_client_action(block=raw_block), idx
             continue
         if btype in STREAMABLE_BLOCK_TYPES:

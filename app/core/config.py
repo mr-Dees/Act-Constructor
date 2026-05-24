@@ -49,15 +49,37 @@ class GreenplumSettings(BaseModel):
 
 
 class DatabaseSettings(BaseModel):
-    """Настройки базы данных."""
+    """Настройки базы данных.
+
+    Размер пула рассчитан под одно-воркерный деплой (singleton-lock).
+    Активные потребители соединений:
+
+    * HTTP-запросы пользователей — каждый берёт коннект из пула через ``get_db()``;
+      типичная нагрузка десятки одновременных запросов на чтение/запись актов.
+    * Фоновые батчеры метрик (``admin.http_metrics``, ``chat.tool_metrics``,
+      ``chat.audit_log``, ``acts.audit_log``) — каждый при flush берёт один
+      коннект на короткое время (раз в ``flush_interval_sec`` секунд или при
+      переполнении пакета).
+    * Polling-runners forward'а к внешнему агенту (``chat.agent_bridge_runner``)
+      — асинхронные задачи на каждый pending ``agent_request``; держат коннект
+      короткими порциями (poll каждые N секунд).
+    * Фоновый cleanup expired locks (``acts.expired_locks_cleanup``) — один
+      коннект раз в 60 сек.
+
+    Дефолты ``pool_min_size=5`` / ``pool_max_size=20`` подобраны эмпирически:
+    минимум держит несколько прогретых коннектов под типичный фон,
+    максимум — потолок для всплесков (несколько одновременных HTTP +
+    параллельные batcher-flush + polling-runners). Под Greenplum брать
+    больше 20 нецелесообразно — GP плохо масштабируется на число коннектов.
+    """
     type: Literal["postgresql", "greenplum"] = Field(default="postgresql")
     host: str = Field(default="localhost")
     port: int = Field(default=5432, ge=1, le=65535)
     name: str = Field(default="audit_workstation")
     user: str = Field(default="postgres")
     password: SecretStr = SecretStr("")
-    pool_min_size: int = Field(default=2, ge=1)
-    pool_max_size: int = Field(default=10, ge=2)
+    pool_min_size: int = Field(default=5, ge=1)
+    pool_max_size: int = Field(default=20, ge=2)
     command_timeout: int = Field(default=60, gt=0)
     # При старте — выполнить count=pool_min_size холостых acquire() параллельно,
     # чтобы первые запросы пользователя не платили TCP-handshake.
@@ -83,6 +105,11 @@ class SecuritySettings(BaseModel):
     rate_limit_per_minute: int = Field(default=1024, gt=0)
     max_tracked_ips: int = 100
     rate_limit_ttl: int = 120
+    # TTL «stale» singleton-lock'а в секундах. Если строка старше — старый
+    # воркер считается мёртвым, новый перезаписывает блокировку.
+    # Уменьшать только если deploy достаточно быстрый, чтобы корректный
+    # shutdown гарантированно успел вызвать ``release_singleton_lock``.
+    singleton_lock_stale_ttl_sec: int = Field(default=60, gt=0)
 
 
 class ObservabilitySettings(BaseModel):

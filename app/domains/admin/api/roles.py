@@ -12,7 +12,7 @@ from fastapi import APIRouter, Depends, Query
 logger = logging.getLogger("audit_workstation.api.admin.roles")
 
 from app.api.v1.deps.auth_deps import get_username
-from app.api.v1.deps.role_deps import invalidate_roles_cache, require_admin
+from app.api.v1.deps.role_deps import invalidate_user_roles_cache, require_admin
 from app.domains.admin.deps import get_admin_service
 from app.domains.admin.schemas.admin import (
     AuditLogResponse,
@@ -73,7 +73,7 @@ async def assign_role(
     """Назначает роль пользователю."""
     assigned = await service.assign_role(username, body.role_id, admin_username)
     if assigned:
-        invalidate_roles_cache(username)
+        invalidate_user_roles_cache(username)
         logger.info("Роль id=%s назначена пользователю %s админом %s", body.role_id, username, admin_username)
     return {
         "assigned": assigned,
@@ -91,7 +91,7 @@ async def remove_role(
     """Снимает роль с пользователя."""
     removed = await service.remove_role(username, role_id, admin_username)
     if removed:
-        invalidate_roles_cache(username)
+        invalidate_user_roles_cache(username)
         logger.info("Роль id=%s снята с пользователя %s админом %s", role_id, username, admin_username)
     return {
         "removed": removed,

@@ -27,11 +27,15 @@ async def get_admin_service() -> AsyncGenerator[AdminService, None]:
 # Батчер HTTP-метрик — инициализируется в lifespan и подкладывается в сервис.
 # None — fallback на синхронный путь (используется в тестах).
 from app.core.metrics_batcher import MetricsBatcher
+from app.domains.admin.repositories.access_denied_audit import (
+    AccessDeniedRecord,
+)
 from app.domains.admin.repositories.http_metrics_repository import (
     HttpMetricRecord,
 )
 
 _http_metrics_batcher: MetricsBatcher[HttpMetricRecord] | None = None
+_access_denied_audit_batcher: MetricsBatcher[AccessDeniedRecord] | None = None
 
 
 def set_http_metrics_batcher(
@@ -45,6 +49,23 @@ def set_http_metrics_batcher(
 def get_http_metrics_batcher() -> MetricsBatcher[HttpMetricRecord] | None:
     """Возвращает активный батчер HTTP-метрик."""
     return _http_metrics_batcher
+
+
+def set_access_denied_audit_batcher(
+    batcher: MetricsBatcher[AccessDeniedRecord] | None,
+) -> None:
+    """Устанавливает (или сбрасывает) батчер аудита отказов. Зовётся из lifespan."""
+    global _access_denied_audit_batcher
+    _access_denied_audit_batcher = batcher
+
+
+def get_access_denied_audit_batcher() -> MetricsBatcher[AccessDeniedRecord] | None:
+    """Возвращает активный батчер аудита отказов доступа.
+
+    Возвращает None, если батчер не поднят (например, в тестах).
+    Потребители должны корректно обрабатывать этот случай.
+    """
+    return _access_denied_audit_batcher
 
 
 def get_http_metrics_service() -> HttpMetricsService:

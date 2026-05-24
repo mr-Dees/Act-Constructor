@@ -24,10 +24,47 @@ CREATE TABLE IF NOT EXISTS {SCHEMA}.{PREFIX}chat_messages (
     content         JSONB NOT NULL,
     model           VARCHAR(100),
     token_usage     JSONB,
+    -- Жизненный цикл assistant-сообщения: streaming → complete (или failed).
+    -- 'streaming' — сообщение материализуется по мере прихода блоков от LLM/
+    -- внешнего агента; 'complete' — финализированное; 'failed' — оборвалось
+    -- с ошибкой. User-сообщения создаются сразу со статусом 'complete'.
+    status          VARCHAR(20) NOT NULL DEFAULT 'complete'
+                    CONSTRAINT check_chat_messages_status_values
+                    CHECK (status IN ('streaming','complete','failed')),
     created_at      TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
 CREATE INDEX IF NOT EXISTS idx_{PREFIX}chat_messages_conversation ON {SCHEMA}.{PREFIX}chat_messages(conversation_id);
 CREATE INDEX IF NOT EXISTS idx_{PREFIX}chat_messages_created ON {SCHEMA}.{PREFIX}chat_messages(conversation_id, created_at);
+-- Partial-индекс под выборку «висящих» streaming-сообщений беседы при
+-- ресанье/восстановлении. Поддерживается с PG 9.4.
+CREATE INDEX IF NOT EXISTS idx_{PREFIX}chat_messages_streaming
+    ON {SCHEMA}.{PREFIX}chat_messages(conversation_id, status)
+    WHERE status = 'streaming';
+
+-- Идемпотентная миграция status-колонки для уже существующих БД, где
+-- CREATE TABLE IF NOT EXISTS выше не сработал. DO-блок работает в PG 9.4+;
+-- ADD COLUMN IF NOT EXISTS появилось только в 9.6.
+DO $$
+BEGIN
+    IF NOT EXISTS (
+        SELECT 1 FROM pg_attribute
+        WHERE attrelid = '{SCHEMA}.{PREFIX}chat_messages'::regclass
+          AND attname = 'status'
+          AND NOT attisdropped
+    ) THEN
+        ALTER TABLE {SCHEMA}.{PREFIX}chat_messages
+            ADD COLUMN status VARCHAR(20) NOT NULL DEFAULT 'complete';
+    END IF;
+    IF NOT EXISTS (
+        SELECT 1 FROM pg_constraint
+        WHERE conrelid = '{SCHEMA}.{PREFIX}chat_messages'::regclass
+          AND conname = 'check_chat_messages_status_values'
+    ) THEN
+        ALTER TABLE {SCHEMA}.{PREFIX}chat_messages
+            ADD CONSTRAINT check_chat_messages_status_values
+            CHECK (status IN ('streaming','complete','failed'));
+    END IF;
+END$$;
 
 CREATE TABLE IF NOT EXISTS {SCHEMA}.{PREFIX}chat_files (
     id              VARCHAR(36) PRIMARY KEY,
@@ -113,19 +150,26 @@ CREATE INDEX IF NOT EXISTS idx_{PREFIX}agent_requests_parent_request_id
     ON {SCHEMA}.{PREFIX}agent_requests(parent_request_id);
 
 -- ── Append-only лента событий от агента ────────────────────────────────
+-- UNIQUE(request_id, seq) защищает от сетевого retry внешнего агента:
+-- если он повторно INSERT-нёт событие с тем же seq, СУБД отвергнет дубль,
+-- polling не размножит его на фронт двойным reasoning-блоком.
 CREATE TABLE IF NOT EXISTS {SCHEMA}.{PREFIX}agent_response_events (
     id            BIGINT PRIMARY KEY DEFAULT nextval('{SCHEMA}.{PREFIX}agent_response_events_id_seq'),
     request_id    VARCHAR(36) NOT NULL,
     seq           INTEGER NOT NULL,
     event_type    VARCHAR(20) NOT NULL
                   CONSTRAINT check_agent_response_events_event_type_values
-                  CHECK (event_type IN ('reasoning','status','error')),
+                  CHECK (event_type IN ('reasoning','status','error','final')),
     payload       JSONB NOT NULL,
-    created_at    TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
+    created_at    TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    CONSTRAINT uniq_{PREFIX}agent_response_events_request_seq
+        UNIQUE (request_id, seq)
 );
 
-CREATE INDEX IF NOT EXISTS idx_{PREFIX}agent_response_events_request
-    ON {SCHEMA}.{PREFIX}agent_response_events(request_id, id);
+-- Индекс под polling-запрос: WHERE request_id = $1 AND seq > $2 ORDER BY seq.
+-- Был (request_id, id) — фильтр по seq шёл в памяти после index scan.
+-- UNIQUE-констрейнт выше сам создаёт btree-индекс на (request_id, seq),
+-- так что отдельный CREATE INDEX больше не нужен.
 
 -- ── Финальный ответ агента (однократный INSERT, stop-сигнал) ──────────
 CREATE TABLE IF NOT EXISTS {SCHEMA}.{PREFIX}agent_responses (

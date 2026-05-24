@@ -36,9 +36,11 @@
 --   Или, если префикс и схема стабильны, скопировать файл и заменить один раз.
 --
 -- Срок хранения
---   Фиксированный интервал ниже — 30 дней. Для других сроков замените
---   "INTERVAL '30 days'" во всех трёх DELETE-ах. (Один параметр сверху —
---   единственный, который рекомендуется править под аудит-требования.)
+--   Дефолты соответствуют рекомендациям в developer-guide.md §7.8.6:
+--     agent_response_events  — 30 дней  (reasoning-чанки, объёмные, ценность падает быстро)
+--     agent_responses        — 180 дней (финальные ответы; «исходник» для разбора инцидентов)
+--     agent_requests         — 180 дней (входы агента — history/files/knowledge_bases)
+--   Подстройте интервалы ниже под свои аудит-требования.
 --
 -- Порядок удаления (важно)
 --   Между таблицами agent_response_events / agent_responses / agent_requests
@@ -66,21 +68,21 @@ WHERE request_id IN (
       AND finished_at < CURRENT_TIMESTAMP - INTERVAL '30 days'
 );
 
--- ── 2. Финальные ответы агента ───────────────────────────────────────────────
+-- ── 2. Финальные ответы агента (180 дней — хранятся дольше как «исходник») ──
 DELETE FROM {SCHEMA}.{PREFIX}agent_responses
 WHERE request_id IN (
     SELECT id
     FROM {SCHEMA}.{PREFIX}agent_requests
     WHERE status IN ('done', 'error', 'timeout')
       AND finished_at IS NOT NULL
-      AND finished_at < CURRENT_TIMESTAMP - INTERVAL '30 days'
+      AND finished_at < CURRENT_TIMESTAMP - INTERVAL '180 days'
 );
 
--- ── 3. Сами запросы (после events/responses) ─────────────────────────────────
+-- ── 3. Сами запросы (после events/responses; 180 дней) ──────────────────────
 DELETE FROM {SCHEMA}.{PREFIX}agent_requests
 WHERE status IN ('done', 'error', 'timeout')
   AND finished_at IS NOT NULL
-  AND finished_at < CURRENT_TIMESTAMP - INTERVAL '30 days';
+  AND finished_at < CURRENT_TIMESTAMP - INTERVAL '180 days';
 
 COMMIT;
 

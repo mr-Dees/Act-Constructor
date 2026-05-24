@@ -3,13 +3,28 @@
 
 Сканирует app/domains/*/, импортирует DomainDescriptor из каждого пакета,
 регистрирует роутеры и обработчики ошибок в приложении FastAPI.
+
+Дополнительно содержит вспомогательные реестры межсоменного взаимодействия:
+
+* ``register_factory``/``get_factory`` — реестр фабрик доменных компонентов.
+  Позволяет потребителям получать инстанс по строковому ключу
+  (например, ``"admin.user_directory"``) без прямого импорта класса.
+
+* ``register_startup_hook``/``register_shutdown_hook`` —
+  ``app/main.py`` итерирует зарегистрированные hooks в lifespan вместо
+  явных импортов доменных ``set_*_batcher``. ``on_startup``-hooks
+  вызываются ПОСЛЕ ``discover_domains()``, ПОСЛЕ ``settings_registry``,
+  ПОСЛЕ инициализации DB pool, но ДО захвата singleton-lock.
+  ``on_shutdown``-hooks вызываются в обратном порядке регистрации.
 """
 
 import importlib
 import logging
 from bisect import insort
 from collections import deque
+from collections.abc import Awaitable, Callable
 from pathlib import Path
+from typing import Any
 
 from fastapi import Depends, FastAPI
 
@@ -19,6 +34,19 @@ logger = logging.getLogger("audit_workstation.core.domain_registry")
 
 _domains: list[DomainDescriptor] = []
 _registered_app_ids: set[int] = set()
+
+# Реестр фабрик доменных компонентов: ключ → callable, возвращающий инстанс.
+# Используется для cross-domain DI без прямого импорта классов реализации.
+_factories: dict[str, Callable[..., Any]] = {}
+
+# Lifespan-hooks доменов. Сохраняем порядок регистрации; на shutdown
+# проходим в обратном порядке. Имя — для логов и идемпотентности.
+_startup_hooks: list[tuple[str, Callable[[FastAPI], Awaitable[None]]]] = []
+_shutdown_hooks: list[tuple[str, Callable[[FastAPI], Awaitable[None]]]] = []
+
+# Callback-инвалидаторы, вызываемые при изменении состава доменов
+# (используется навигационным кешем).
+_domain_change_listeners: list[Callable[[], None]] = []
 
 REQUIRED_DOMAINS = {"acts"}
 
@@ -108,6 +136,7 @@ def discover_domains(domains_dir: Path) -> list[DomainDescriptor]:
     discovered = _toposort(discovered)
 
     _domains = discovered
+    _notify_domain_change()
     return _domains
 
 
@@ -231,3 +260,106 @@ def reset_registry() -> None:
     global _domains, _registered_app_ids
     _domains = []
     _registered_app_ids = set()
+    _factories.clear()
+    _startup_hooks.clear()
+    _shutdown_hooks.clear()
+    # Слушателей уведомляем перед очисткой их списка: пусть инвалидируют
+    # кеши, которые могли наполниться от старого набора доменов.
+    _notify_domain_change()
+    _domain_change_listeners.clear()
+
+
+# --- Реестр фабрик доменных компонентов ---------------------------------
+
+def register_factory(key: str, factory: Callable[..., Any]) -> None:
+    """
+    Регистрирует фабрику доменного компонента под строковым ключом.
+
+    Конвенция ключа: ``"<домен>.<компонент>"`` (например,
+    ``"admin.user_directory"``). Повторная регистрация под тем же ключом
+    перезаписывает предыдущую — это полезно для тестов и стабов.
+    """
+    if not key or "." not in key:
+        raise ValueError(
+            f"Ключ фабрики должен иметь формат '<домен>.<компонент>', получено: {key!r}"
+        )
+    _factories[key] = factory
+    logger.debug("Зарегистрирована фабрика: %s", key)
+
+
+def get_factory(key: str) -> Callable[..., Any]:
+    """
+    Возвращает зарегистрированную фабрику по ключу.
+
+    Бросает ``KeyError``, если фабрика не зарегистрирована — это
+    программная ошибка (отсутствует зависимость домена), а не runtime.
+    """
+    try:
+        return _factories[key]
+    except KeyError as exc:
+        raise KeyError(
+            f"Фабрика '{key}' не зарегистрирована. "
+            f"Проверьте, что соответствующий домен инициализирован."
+        ) from exc
+
+
+def has_factory(key: str) -> bool:
+    """Проверяет наличие фабрики (для условной логики и тестов)."""
+    return key in _factories
+
+
+# --- Реестр lifespan-hooks ----------------------------------------------
+
+def register_startup_hook(
+    name: str,
+    callback: Callable[[FastAPI], Awaitable[None]],
+) -> None:
+    """
+    Регистрирует startup-hook. Вызывается из lifespan приложения после
+    инициализации БД и регистрации доменных Settings, но до singleton-lock.
+    Порядок вызовов соответствует порядку регистрации.
+    """
+    _startup_hooks.append((name, callback))
+    logger.debug("Зарегистрирован startup-hook: %s", name)
+
+
+def register_shutdown_hook(
+    name: str,
+    callback: Callable[[FastAPI], Awaitable[None]],
+) -> None:
+    """
+    Регистрирует shutdown-hook. Вызывается из lifespan приложения
+    в обратном порядке регистрации.
+    """
+    _shutdown_hooks.append((name, callback))
+    logger.debug("Зарегистрирован shutdown-hook: %s", name)
+
+
+def get_startup_hooks() -> list[tuple[str, Callable[[FastAPI], Awaitable[None]]]]:
+    """Возвращает список startup-hooks в порядке регистрации."""
+    return list(_startup_hooks)
+
+
+def get_shutdown_hooks() -> list[tuple[str, Callable[[FastAPI], Awaitable[None]]]]:
+    """Возвращает список shutdown-hooks в порядке регистрации."""
+    return list(_shutdown_hooks)
+
+
+# --- Слушатели изменений состава доменов --------------------------------
+
+def add_domain_change_listener(listener: Callable[[], None]) -> None:
+    """
+    Регистрирует callback-инвалидатор, вызываемый при изменении
+    состава доменов (см. ``register_domains``/``reset_registry``).
+    Используется кешами, зависящими от ``get_all_domains()``.
+    """
+    _domain_change_listeners.append(listener)
+
+
+def _notify_domain_change() -> None:
+    """Вызывает всех слушателей изменения состава доменов."""
+    for listener in _domain_change_listeners:
+        try:
+            listener()
+        except Exception:
+            logger.exception("Ошибка в domain change listener")

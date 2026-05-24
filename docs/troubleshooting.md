@@ -68,8 +68,25 @@
 1. По тексту ошибки определи, какой гейт сработал (упомянут конкретный таймаут в секундах).
 2. Если внешний агент действительно отвечает медленнее — поднять соответствующий `CHAT__AGENT_BRIDGE__*` в `.env`.
 3. Если агент не запущен / не подхватывает запросы — проверить `agent_requests`-таблицу (есть ли записи в статусе `pending`) и agent_bridge_runner (фоновая задача lifespan).
+4. **Параметры polling** — `CHAT__AGENT_BRIDGE__POLL_MIN_INTERVAL_SEC` (1.0), `POLL_MAX_INTERVAL_SEC` (10.0), `POLL_BACKOFF_MULTIPLIER` (1.5). Старая `POLL_INTERVAL_SEC` удалена; если осталась в `.env` — игнорируется.
 
 **См. также:** `developer-guide.md §7.8`, `docs/manual-qa-external-agent-bridge.md`.
+
+---
+
+### 4a. Чат не подписан на агента (нет reasoning-чанков)
+
+**Симптом:** После форварда к внешнему ИИ-агенту фронт показывает `agent_request_started`, но reasoning-чанки не приходят. В БД `agent_response_events` события есть (внешний агент пишет), но `chat_messages` не пополняется, статус `agent_requests.status` застрял в `dispatched`.
+
+**Причина:** `PollCoordinator` не стартовал или не подписался на `request_id`. Координатор — единственный, кто делает SELECT по `agent_response_events` и раздаёт события подписчикам через `asyncio.Queue`. Если он не запущен — `agent_bridge_runner` подписывается «вникуда», и события не доходят.
+
+**Решение:**
+1. Проверь логи startup на наличие строки `poll_coordinator: запущен (min=1.00с, max=10.00с, mult=1.50)`. Если её нет — hook `chat.poll_coordinator` не отработал (см. порядок hooks в `docs/developer-guide.md §2.2`).
+2. Если hook есть, но события не идут — проверь, что `agent_bridge_runner.schedule(rid)` действительно вызвался: в логах должна быть строка `poll_coordinator: подписан request_id=...`.
+3. Параметры backoff: при пустом тике интервал растёт от `POLL_MIN_INTERVAL_SEC` до `POLL_MAX_INTERVAL_SEC` × `POLL_BACKOFF_MULTIPLIER`. При появлении любого события сбрасывается в min. Если события появляются медленно (раз в 15+ сек), задержка может выглядеть как «нет ответа».
+4. Reconcile зависших запросов — `schedule_pending(older_than_sec=30)` в lifespan; при рестарте uvicorn все `pending`/`dispatched` старше 30 сек подхватываются заново.
+
+**См. также:** `developer-guide.md §7.4b`, §11.6, `app/domains/chat/services/poll_coordinator.py`.
 
 ---
 
@@ -82,10 +99,10 @@
 - `arguments=""` для no-args tool_call'ов (`chat.list_pages` и т.п.) попало в эхо.
 
 **Решение:**
-1. Обнови ветку до актуального master — оба бага закрыты (`_safe_args`, явная сборка dict с `content=raw_msg.content or ""`).
+1. Обнови ветку до актуального master — оба бага закрыты (`safe_args` в `orchestrator_helpers.py`, явная сборка dict с `content=raw_msg.content or ""`).
 2. Если фикс уже есть, а ошибка повторяется — проверь, не делает ли твой новый код `messages.append(response.choices[0].message)` напрямую (Pydantic `ChatCompletionMessage` сериализует `content` как `null`).
 
-**См. также:** правила «assistant с `content=null` + tool_calls недопустим для Qwen/SGLang (400) и GigaChat-proxy (422)» и «`arguments=""` для no-args tool_call'ов даёт тот же класс падений — оба эха собираются вручную через `_safe_args()` в `app/domains/chat/services/orchestrator.py` (хелпер в верху файла) и применяются во всех трёх ветках оркестратора (`run`, `run_stream` streaming, non-streaming fallback)».
+**См. также:** правила «assistant с `content=null` + tool_calls недопустим для Qwen/SGLang (400) и GigaChat-proxy (422)» и «`arguments=""` для no-args tool_call'ов даёт тот же класс падений — оба эха собираются вручную через `safe_args()` (хелпер в `app/domains/chat/services/orchestrator_helpers.py`) и применяются во всех трёх ветках agent loop'а (`run_agent_loop`, `run_stream_loop` streaming, ветка GigaChat non-streaming fallback)».
 
 ---
 
@@ -266,10 +283,10 @@
 
 **Симптом:** Под нагрузкой или при большом числе одновременных пользователей — `asyncpg.exceptions.TooManyConnectionsError` или таймауты получения connection из пула.
 
-**Причина:** Пул `asyncpg` исчерпан — все connection'ы заняты долгими транзакциями или зависшими запросами. Дефолт `DATABASE__POOL_MAX_SIZE` рассчитан на скромную одновременную нагрузку.
+**Причина:** Пул `asyncpg` исчерпан — все connection'ы заняты долгими транзакциями или зависшими запросами. Дефолты подобраны под параллельные SSE-стримы чата + фоновые задачи (PollCoordinator, ActAuditLogBatcher, ExpiredLocksCleanupTask, HTTP-metrics batcher) + горячий путь CRUD: `DATABASE__POOL_MIN_SIZE=5`, `POOL_MAX_SIZE=20`.
 
 **Решение:**
-1. Увеличить `DATABASE__POOL_MAX_SIZE` в `.env` (например с 10 до 30).
+1. Увеличить `DATABASE__POOL_MAX_SIZE` в `.env` (например с 20 до 40).
 2. Найти долгоиграющие транзакции на сервере:
    ```sql
    SELECT pid, now() - query_start AS duration, state, query
@@ -318,3 +335,61 @@
 3. Если тест проверяет дефолты доменной модели — инстанцируй её напрямую, минуя `_load_from_env` (см. п.13).
 
 **См. также:** `app/core/config.py::get_settings`, `app/core/settings_registry.py`.
+
+---
+
+### 20. Singleton-lock — приложение не стартует / зависший процесс
+
+**Симптом:** при старте процесс падает с критичным логом `Не удалось захватить singleton-lock: ...` и `RuntimeError` в lifespan. Тело сообщения обычно `lock уже держит другой воркер pid=N host=...`.
+
+**Причина:** `acquire_singleton_lock()` (`app/core/singleton_lock.py:38-86`) пишет строку в таблицу `{PREFIX}app_singleton_lock` с PK по `service_name`. В JupyterHub-деплое допустим **ровно один** процесс на пользователя — это защищает `_running`-registry раннера и in-process `asyncio.Lock`'и от двойной активации. При мягком shutdown lifespan делает DELETE строки (`app/main.py:266-280`). При жёстком kill -9 / OOM-killer'е строка остаётся; следующий старт через `stale_ttl_sec` (`SECURITY__SINGLETON_LOCK_STALE_TTL_SEC`, default 60 сек) перезапишет её. Внутри окна TTL — старт упадёт.
+
+**Что делать:**
+
+1. Проверить, действительно ли есть второй живой процесс:
+   ```bash
+   ps -u <user> -f | grep "uvicorn\|app.main"
+   ```
+
+2. Если процесса нет — посмотреть в таблице singleton:
+   ```sql
+   SELECT service_name, pid, host, started_at,
+          now() - started_at AS age
+   FROM {SCHEMA}.{PREFIX}app_singleton_lock
+   WHERE service_name = 'act_constructor';
+   ```
+
+3. Если запись «зависла» (`age > 60 sec`) и реального процесса нет — можно дождаться авто-перезаписи (повторный старт через минуту пройдёт) либо ускорить очисткой вручную:
+   ```sql
+   DELETE FROM {SCHEMA}.{PREFIX}app_singleton_lock
+   WHERE service_name = 'act_constructor';
+   ```
+
+4. Если процесс действительно жив — найти его и остановить (`kill <pid>`); при корректном SIGTERM lifespan сам удалит строку.
+
+**См. также:** `app/main.py:130-146` (захват), `app/main.py:266-280` (release), `app/core/singleton_lock.py`, `docs/operations-recovery.md` (полный playbook).
+
+---
+
+### 21. Записи в audit_log / metrics пропадают — что проверить
+
+**Симптом:** ожидаемых записей нет в одной из таблиц: `audit_log` (acts), `chat_audit_log`, `http_metrics`, `chat_tool_metrics`, `access_denied_audit`.
+
+**Причина:** все эти потоки идут через общий `MetricsBatcher` (`app/core/metrics_batcher.py`). При переполнении `max_buffer_size` (default 10000, либо переопределённое значение — например 5000 у `acts.audit_log_batcher`) батчер дропает старые записи с WARNING-логом (`Батчер ...: буфер переполнен, дропнуто N старых записей`). Также возможна более редкая причина — `flush_callback` стабильно падает (БД недоступна, нарушен CHECK), запись зависает в буфере и потом отбрасывается.
+
+**Что делать:**
+
+1. Получить состояние батчеров через diagnostics-endpoint (нужна роль `Админ`):
+   ```bash
+   curl -X GET "http://<host>/<proxy>/api/v1/admin/diagnostics" | jq
+   ```
+
+2. В ответе — `batchers.<имя>.dropped_count`. Если ≠ 0 — записи теряются. Также интересны `last_error` (текст последнего исключения flush'а) и `last_flush_ago_sec` (когда был последний успешный flush).
+
+3. В логах найти строки `Батчер ...: буфер переполнен` (overflow) и `Батчер ...: flush_callback упал` (ошибка записи в БД). В overflow-логе `extra` содержит `batcher_name`, `dropped_now`, `dropped_count_total`.
+
+4. Митигация:
+   - При overflow — поднять `OBSERVABILITY__METRICS_MAX_BUFFER_SIZE` или `OBSERVABILITY__METRICS_BATCH_SIZE` (быстрее опустошение), либо уменьшить нагрузку, генерирующую события (имя видно в `batcher.name`).
+   - При `last_error` — устранить корневую причину (например, CHECK constraint без mapping в `CHECK_CONSTRAINT_MESSAGES`).
+
+**См. также:** `app/core/metrics_batcher.py::get_status`, `app/core/observability_registry.py`, `app/api/v1/endpoints/admin_diagnostics.py`, `docs/developer-guide.md` §9.5a / §9.5b.

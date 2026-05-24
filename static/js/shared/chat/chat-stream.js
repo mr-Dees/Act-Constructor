@@ -1,4 +1,20 @@
 /**
+ * Ошибка дружелюбного 429: бэк отдал лимит параллельных стримов на пользователя.
+ * `userMessage` — человеко-читаемый текст из поля `detail`/`error` тела ответа.
+ * ChatMessages._onStreamError различает этот класс и заменяет typing-плейсхолдер
+ * на красивый error-блок «лимит достигнут», без сырого «HTTP 429».
+ */
+class ChatRateLimitedError extends Error {
+    constructor(userMessage) {
+        super(userMessage);
+        this.name = 'ChatRateLimitedError';
+        this.userMessage = userMessage;
+    }
+}
+
+window.ChatRateLimitedError = ChatRateLimitedError;
+
+/**
  * SSE-клиент для стриминга сообщений чата
  *
  * Отправляет сообщения через FormData и обрабатывает Server-Sent Events
@@ -10,6 +26,18 @@ const ChatStream = {
     _abortController: null,
 
     /**
+     * @type {AbortController|null} Отдельный контроллер resume-стрима (refresh-сценарий).
+     * Живёт параллельно с `_abortController` (основной стрим), отменяется тем же `abort()`.
+     */
+    _resumeAbortController: null,
+
+    /**
+     * @type {string|null} request_id активного resume-стрима. Используется как
+     * idempotency-ключ — повторный `resume(...)` для того же request_id отбрасывается.
+     */
+    _resumeRequestId: null,
+
+    /**
      * @type {string|null} Идентификатор agent_request, который сейчас обрабатывает
      * внешний агент. Приходит из SSE-события `agent_request_started`. Используется
      * для авто-переоткрытия resume-стрима при разрыве соединения.
@@ -18,9 +46,6 @@ const ChatStream = {
 
     /** @type {string|null} ID беседы, для которой активен _pendingAgentRequestId. */
     _pendingConversationId: null,
-
-    /** @type {number} Последний полученный id события агента (для ?since=). */
-    _lastAgentEventId: 0,
 
     /**
      * Отправляет сообщение и читает SSE-поток ответа
@@ -43,7 +68,6 @@ const ChatStream = {
         // Сбрасываем состояние forward'а — новое сообщение начинает с чистого листа.
         this._pendingAgentRequestId = null;
         this._pendingConversationId = conversationId;
-        this._lastAgentEventId = 0;
 
         const controller = new AbortController();
         this._abortController = controller;
@@ -67,10 +91,37 @@ const ChatStream = {
             });
 
             if (!response.ok) {
+                if (response.status === 429) {
+                    throw await this._buildRateLimitError(response);
+                }
                 throw new Error(`HTTP ${response.status}: ${response.statusText}`);
             }
 
             await this._readSSE(response, controller, wrappedOnEvent);
+
+            // Если внутри стрима пришёл agent_request_started — POST SSE
+            // штатно закрылся короткой парой `agent_request_started`,
+            // дальше реальный ответ агента стримит Resume SSE. Открываем
+            // его прямо здесь — с тем же onEvent — чтобы UI не остался
+            // в режиме «typing» без событий.
+            // Делаем это ДО onDone(): для вызывающего кода forward — это
+            // один логический стрим, completion = «агент дописал ответ».
+            if (this._pendingAgentRequestId) {
+                const requestId = this._pendingAgentRequestId;
+                const convId = this._pendingConversationId;
+                // Освобождаем основной контроллер: POST SSE завершён.
+                // Resume использует _resumeAbortController.
+                if (this._abortController === controller) {
+                    this._abortController = null;
+                }
+                // Сбрасываем pending до resume, иначе catch ниже
+                // (на случай разрыва Resume) попытается переоткрыть
+                // ещё раз и устроит гонку.
+                this._clearPending();
+                await this.resume(convId, requestId, {
+                    onEvent: wrappedOnEvent,
+                });
+            }
 
             if (onDone) onDone();
             this._clearPending();
@@ -86,19 +137,18 @@ const ChatStream = {
             // Здесь пробуем переоткрыть resume-стрим, чтобы дотянуть ответ
             // в текущем UI без перезагрузки страницы.
             if (this._pendingAgentRequestId) {
+                const requestId = this._pendingAgentRequestId;
+                const convId = this._pendingConversationId;
                 console.warn(
                     'ChatStream: разрыв соединения, переоткрываем resume для',
-                    this._pendingAgentRequestId,
+                    requestId,
                 );
+                this._clearPending();
                 try {
-                    await this._resumeAgentRequest(
-                        this._pendingConversationId,
-                        this._pendingAgentRequestId,
-                        this._lastAgentEventId,
-                        wrappedOnEvent,
-                    );
+                    await this.resume(convId, requestId, {
+                        onEvent: wrappedOnEvent,
+                    });
                     if (onDone) onDone();
-                    this._clearPending();
                     return;
                 } catch (resumeErr) {
                     console.error('ChatStream: resume не удался', resumeErr);
@@ -115,49 +165,42 @@ const ChatStream = {
     },
 
     /**
-     * Перехватчик SSE: запоминает agent_request_started и обновляет last_event_id.
+     * Перехватчик SSE: запоминает request_id из agent_request_started, чтобы
+     * `send()` мог переключиться в `resume()` после нормального завершения
+     * POST SSE или из catch-блока при разрыве.
      * @private
      */
     _trackAgentEvent(event) {
         if (event.type === 'agent_request_started' && event.data) {
             this._pendingAgentRequestId = event.data.request_id || null;
         }
-        // Backend пока не пробрасывает event_id агента во фронт; держим стартовое 0.
-        // Если в будущем events будут содержать id — обновлять здесь.
+    },
+
+    /**
+     * Строит ChatRateLimitedError из тела 429-ответа.
+     * Пытаемся прочитать поле `detail` или `error` из JSON; если тело пустое
+     * или не парсится — используем fallback-текст.
+     *
+     * @param {Response} response — 429-ответ
+     * @returns {Promise<ChatRateLimitedError>}
+     * @private
+     */
+    async _buildRateLimitError(response) {
+        const fallback = 'Достигнут лимит одновременных запросов. Дождитесь окончания одного из них.';
+        let userMessage = fallback;
+        try {
+            const body = await response.json();
+            if (body && typeof body === 'object') {
+                userMessage = body.detail || body.error || fallback;
+            }
+        } catch { /* тело пустое или не JSON — fallback */ }
+        return new ChatRateLimitedError(userMessage);
     },
 
     /** @private */
     _clearPending() {
         this._pendingAgentRequestId = null;
         this._pendingConversationId = null;
-        this._lastAgentEventId = 0;
-    },
-
-    /**
-     * Переоткрывает SSE через GET resume-эндпоинт. Используется после разрыва.
-     * @private
-     */
-    async _resumeAgentRequest(conversationId, requestId, sinceId, onEvent) {
-        const controller = new AbortController();
-        this._abortController = controller;
-
-        const endpoint =
-            `/api/v1/chat/conversations/${conversationId}` +
-            `/agent-request/${requestId}/stream?since=${sinceId}`;
-        const url = (typeof AppConfig !== 'undefined')
-            ? AppConfig.api.getUrl(endpoint)
-            : endpoint;
-        const headers = this._buildHeaders('text/event-stream');
-
-        const response = await fetch(url, {
-            method: 'GET',
-            headers,
-            signal: controller.signal,
-        });
-        if (!response.ok) {
-            throw new Error(`resume HTTP ${response.status}`);
-        }
-        await this._readSSE(response, controller, onEvent);
     },
 
     /** @private */
@@ -199,12 +242,101 @@ const ChatStream = {
     },
 
     /**
-     * Отменяет текущий SSE-стрим, если он активен
+     * Отменяет текущий SSE-стрим, если он активен. Покрывает и основной
+     * (`send`), и resume-стрим (`resume`) — оба используются параллельно
+     * в режиме refresh во время forward'а.
      */
     abort() {
         if (this._abortController) {
             this._abortController.abort();
             this._abortController = null;
+        }
+        if (this._resumeAbortController) {
+            this._resumeAbortController.abort();
+            this._resumeAbortController = null;
+        }
+        this._resumeRequestId = null;
+    },
+
+    /**
+     * Подключается к активному forward'у (внешний агент) после перезагрузки
+     * страницы. Открывает read-only SSE-стрим на `/forward-stream/{request_id}`
+     * и маршрутизирует события через переданный `onEvent` — формат SSE
+     * идентичен основному POST /messages-стриму.
+     *
+     * Идемпотентен по request_id: если для того же `requestId` уже открыт
+     * resume-стрим — повторный вызов отбрасывается (no-op). Это защита
+     * от двойного открытия при гонке `_renderConversationMessages` /
+     * `_onConversationSwitched`.
+     *
+     * @param {string} conversationId — ID беседы
+     * @param {string} requestId — agent_requests.id активного forward'а
+     * @param {Object} options
+     * @param {function({type: string, data: *}): void} [options.onEvent]
+     * @param {function(Error): void} [options.onError]
+     * @param {function(): void} [options.onDone]
+     */
+    async resume(conversationId, requestId, options = {}) {
+        const { onEvent, onError, onDone } = options;
+
+        if (!conversationId || !requestId) {
+            if (onDone) onDone();
+            return;
+        }
+
+        // Idempotency: тот же request_id уже стримится — не открываем второй.
+        if (this._resumeRequestId === requestId && this._resumeAbortController) {
+            console.warn('ChatStream: resume для', requestId, 'уже активен — игнорируем');
+            return;
+        }
+
+        // Если активен другой resume-стрим — отменяем его, новый перебивает.
+        if (this._resumeAbortController) {
+            this._resumeAbortController.abort();
+            this._resumeAbortController = null;
+        }
+
+        const controller = new AbortController();
+        this._resumeAbortController = controller;
+        this._resumeRequestId = requestId;
+
+        try {
+            const endpoint =
+                `/api/v1/chat/conversations/${conversationId}` +
+                `/forward-stream/${requestId}`;
+            const url = (typeof AppConfig !== 'undefined')
+                ? AppConfig.api.getUrl(endpoint)
+                : endpoint;
+            const headers = this._buildHeaders('text/event-stream');
+
+            const response = await fetch(url, {
+                method: 'GET',
+                headers,
+                signal: controller.signal,
+            });
+
+            if (!response.ok) {
+                if (response.status === 429) {
+                    throw await this._buildRateLimitError(response);
+                }
+                throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+            }
+
+            await this._readSSE(response, controller, onEvent);
+
+            if (onDone) onDone();
+        } catch (err) {
+            if (err.name === 'AbortError') {
+                if (onDone) onDone();
+                return;
+            }
+            console.error('ChatStream: ошибка resume-стрима', err);
+            if (onError) onError(err);
+        } finally {
+            if (this._resumeAbortController === controller) {
+                this._resumeAbortController = null;
+                this._resumeRequestId = null;
+            }
         }
     },
 

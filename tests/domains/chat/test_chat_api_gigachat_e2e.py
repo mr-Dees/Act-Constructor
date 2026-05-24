@@ -106,11 +106,12 @@ async def test_gigachat_orchestrator_executes_tool_round():
 
     # Перехватываем сохранение ассистент-сообщения (orchestrator вызывает
     # его через self._save_assistant_message — instance-assignment работает).
-    async def fake_save(*, conversation_id, content_blocks, token_usage):
+    async def fake_save(*, conversation_id, content_blocks, token_usage, message_id=None):
         save_calls.append({
             "conv": conversation_id,
             "blocks": content_blocks,
             "usage": token_usage,
+            "message_id": message_id,
         })
     orch._save_assistant_message = fake_save  # type: ignore[assignment]
 
@@ -152,6 +153,7 @@ async def test_gigachat_orchestrator_executes_tool_round():
     ):
         chunks: list[str] = []
         async for chunk in orch.run_stream(
+            message_id="test-msg-id",
             conversation_id="conv-1",
             user_message="Открой example.com",
             domains=["chat"],

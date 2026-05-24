@@ -59,6 +59,45 @@ class AgentEventRepository(BaseRepository):
         )
         return int(new_id)
 
+    async def poll_batch(
+        self,
+        request_ids: list[str],
+        *,
+        since_seqs: dict[str, int | None] | None = None,
+    ) -> dict[str, list[dict]]:
+        """Возвращает события для нескольких request_id одним SELECT.
+
+        Используется PollCoordinator'ом, чтобы вместо N отдельных запросов
+        (по одному на активный request_id) делать один SELECT WHERE
+        request_id = ANY($1). Группирует результат в dict[request_id ->
+        list[event]] и заполняет пустые списки для request_id без новых
+        событий — чтобы вызывающая сторона не делала проверку на None.
+
+        ``since_seqs`` — опциональный курсор per-request: события с
+        seq <= since_seqs[request_id] фильтруются. Для request_id без
+        курсора возвращаются все события.
+        """
+        result: dict[str, list[dict]] = {rid: [] for rid in request_ids}
+        if not request_ids:
+            return result
+        rows = await self.conn.fetch(
+            f"""
+            SELECT id, request_id, seq, event_type, payload, created_at
+            FROM {self.table}
+            WHERE request_id = ANY($1::varchar[])
+            ORDER BY request_id, seq
+            """,
+            request_ids,
+        )
+        seqs = since_seqs or {}
+        for row in rows:
+            rid = row["request_id"]
+            cursor = seqs.get(rid)
+            if cursor is not None and row["seq"] <= cursor:
+                continue
+            result.setdefault(rid, []).append(self._parse_row(row))
+        return result
+
     async def poll(
         self,
         request_id: str,

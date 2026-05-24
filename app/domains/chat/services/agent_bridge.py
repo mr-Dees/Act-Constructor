@@ -100,6 +100,23 @@ class AgentBridgeService:
         """
         return await self._events.poll(request_id, since_seq=since_seq)
 
+    async def poll_events_batch(
+        self,
+        request_ids: list[str],
+        *,
+        since_seqs: dict[str, int | None] | None = None,
+    ) -> dict[str, list[dict]]:
+        """Батч-запрос событий по списку request_id (один SELECT на всех).
+
+        Используется :class:`PollCoordinator` для уплотнения polling-нагрузки
+        на GP: вместо N отдельных SELECT — один с ``WHERE request_id = ANY($1)``.
+        Возвращает dict[request_id -> list[event]]; для request_id без новых
+        событий список пуст.
+        """
+        return await self._events.poll_batch(
+            request_ids, since_seqs=since_seqs,
+        )
+
     async def poll_response(self, request_id: str) -> dict | None:
         """Возвращает финальный ответ агента или None, если ещё не готов."""
         return await self._responses.get_by_request_id(request_id)
@@ -108,7 +125,7 @@ class AgentBridgeService:
         self,
         request_id: str,
         *,
-        poll_interval_sec: float,
+        poll_min_interval_sec: float,
         initial_response_timeout_sec: int,
         event_timeout_sec: int,
         max_total_duration_sec: int,
@@ -116,9 +133,14 @@ class AgentBridgeService:
     ) -> AsyncIterator[AgentBridgeUpdate]:
         """Async-генератор: yield events и финальный response по мере появления.
 
-        Опрашивает БД с интервалом poll_interval_sec. По срабатыванию любого
-        из трёх гейтов (initial_response / event heartbeat / max total) —
-        UPDATE agent_requests SET status='timeout' + raise AgentBridgeTimeout.
+        Опрашивает БД с интервалом ``poll_min_interval_sec``. По срабатыванию
+        любого из трёх гейтов (initial_response / event heartbeat / max total)
+        — UPDATE agent_requests SET status='timeout' + raise AgentBridgeTimeout.
+
+        ВНИМАНИЕ: этот метод оставлен для resume-эндпоинта SSE-ремонта
+        (одиночное соединение клиента к существующему request_id).
+        Основной поток polling в фоне идёт через :class:`PollCoordinator`,
+        где adaptive backoff реализован централизованно.
 
         since_seq — курсор по полю seq: события с seq <= since_seq не
         возвращаются. Нужен для resume-сценариев, чтобы повторно
@@ -253,4 +275,4 @@ class AgentBridgeService:
                 yield AgentBridgeUpdate(response=response)
                 return
 
-            await asyncio.sleep(poll_interval_sec)
+            await asyncio.sleep(poll_min_interval_sec)

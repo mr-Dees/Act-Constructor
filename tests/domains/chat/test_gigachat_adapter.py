@@ -716,3 +716,160 @@ def test_translate_messages_parallel_tool_calls_tool_results_mapped_correctly():
     func_names = {m["name"] for m in func_messages}
     assert "func_a" in func_names
     assert "func_b" in func_names
+
+
+# -------------------------------------------------------------------------
+# Request-side roundtrip: response → history (list[dict]) → next request.
+# Закрывает слепое пятно прошлых тестов — раньше покрывалась только
+# response-сторона, а edge-cases возвращения assistant-сообщения в history
+# как dict (так история хранится в БД) проходили только через
+# pydantic-объект `assistant_msg`.
+# -------------------------------------------------------------------------
+
+
+def _assistant_dict_from_translated_response(resp) -> dict:
+    """Эмулирует пересохранение assistant-message из ответа адаптера в БД-историю.
+
+    Оркестратор сериализует pydantic ChatCompletionMessage в dict при записи
+    в `messages`-таблицу. Воспроизводим тот же путь: model_dump → dict, который
+    дальше скармливается обратно в `_translate_messages` следующим раундом.
+    """
+    msg = resp.choices[0].message
+    return msg.model_dump(exclude_none=False)
+
+
+def test_roundtrip_dict_args_via_dict_history():
+    """Базовый roundtrip через dict-историю: dict-args сохраняются.
+
+    GigaChat -> _translate_response -> JSON-string в OpenAI-формате ->
+    история как list[dict] -> _translate_messages -> снова dict, идентичный
+    исходному. Это реальный путь, когда история восстанавливается из БД,
+    а не пересылается pydantic-объектом в рамках одного процесса.
+    """
+    original_args = {"city": "Москва", "units": "metric"}
+    resp = _make_completion(
+        function_call={"name": "get_weather", "arguments": original_args},
+        finish_reason="function_call",
+    )
+    translated = _translate_response(resp)
+    assistant_dict = _assistant_dict_from_translated_response(translated)
+
+    # На этом этапе arguments — JSON-string (OpenAI-формат)
+    assert isinstance(
+        assistant_dict["tool_calls"][0]["function"]["arguments"], str,
+    )
+
+    history = [
+        {"role": "user", "content": "Погода?"},
+        assistant_dict,
+        {
+            "role": "tool",
+            "tool_call_id": assistant_dict["tool_calls"][0]["id"],
+            "content": "ок",
+        },
+    ]
+    out = _translate_messages(history)
+
+    assistant_out = next(m for m in out if m.get("role") == "assistant")
+    assert assistant_out["function_call"]["name"] == "get_weather"
+    assert assistant_out["function_call"]["arguments"] == original_args
+    assert isinstance(assistant_out["function_call"]["arguments"], dict)
+
+
+def test_roundtrip_null_string_arguments_becomes_empty_dict():
+    """arguments='null' (literal JSON null) → {} без падений.
+
+    json.loads('null') возвращает None, что не является dict — адаптер
+    должен сконвертировать в пустой dict, иначе на пути к GigaChat будет
+    422 (arguments=None невалидно).
+    """
+    history = [
+        {
+            "role": "assistant",
+            "content": "",
+            "tool_calls": [{
+                "id": "call_1",
+                "type": "function",
+                "function": {"name": "list_pages", "arguments": "null"},
+            }],
+        },
+    ]
+    out = _translate_messages(history)
+    assert out[0]["function_call"]["arguments"] == {}
+
+
+def test_roundtrip_nested_dict_arguments_preserved():
+    """Вложенный dict в args сохраняет структуру через response→history→request."""
+    original_args = {
+        "filters": {"status": "active", "tags": ["audit", "ck"]},
+        "limit": 10,
+    }
+    resp = _make_completion(
+        function_call={"name": "search", "arguments": original_args},
+        finish_reason="function_call",
+    )
+    translated = _translate_response(resp)
+    assistant_dict = _assistant_dict_from_translated_response(translated)
+
+    history = [assistant_dict]
+    out = _translate_messages(history)
+
+    assert out[0]["function_call"]["arguments"] == original_args
+    # Глубинная структура сохранена
+    assert out[0]["function_call"]["arguments"]["filters"]["tags"] == \
+        ["audit", "ck"]
+
+
+def test_roundtrip_empty_dict_arguments_no_args_tool():
+    """Tool без аргументов: arguments={} в request, {} в response, {} на роли request."""
+    resp = _make_completion(
+        function_call={"name": "list_pages", "arguments": {}},
+        finish_reason="function_call",
+    )
+    translated = _translate_response(resp)
+    assistant_dict = _assistant_dict_from_translated_response(translated)
+
+    # После _translate_response args — это строка "{}"
+    assert assistant_dict["tool_calls"][0]["function"]["arguments"] == "{}"
+
+    out = _translate_messages([assistant_dict])
+    assert out[0]["function_call"]["arguments"] == {}
+
+
+def test_roundtrip_unicode_arguments_preserved():
+    """UTF-8 в args (кириллица) проходит roundtrip без mojibake."""
+    original_args = {"query": "проверка ЦК", "user": "Аудитор Петров"}
+    resp = _make_completion(
+        function_call={"name": "search", "arguments": original_args},
+        finish_reason="function_call",
+    )
+    translated = _translate_response(resp)
+    assistant_dict = _assistant_dict_from_translated_response(translated)
+
+    # ensure_ascii=False — кириллица остаётся в строке как есть
+    assert "проверка" in assistant_dict["tool_calls"][0]["function"]["arguments"]
+
+    out = _translate_messages([assistant_dict])
+    assert out[0]["function_call"]["arguments"] == original_args
+    assert out[0]["function_call"]["arguments"]["query"] == "проверка ЦК"
+
+
+def test_args_to_dict_null_literal_string_returns_empty_dict():
+    """Юнит-чек хелпера: 'null' → {}, а не None (что сломало бы request-схему)."""
+    from app.domains.chat.services.gigachat_adapter import _args_to_dict
+
+    assert _args_to_dict("null") == {}
+
+
+def test_args_to_dict_json_array_string_returns_empty_dict():
+    """arguments='[1,2,3]' — валидный JSON, но не dict → {} (safety net)."""
+    from app.domains.chat.services.gigachat_adapter import _args_to_dict
+
+    assert _args_to_dict("[1, 2, 3]") == {}
+
+
+def test_args_to_dict_json_number_string_returns_empty_dict():
+    """arguments='42' — валидный JSON, но не dict → {}."""
+    from app.domains.chat.services.gigachat_adapter import _args_to_dict
+
+    assert _args_to_dict("42") == {}

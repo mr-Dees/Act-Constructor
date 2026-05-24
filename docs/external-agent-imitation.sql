@@ -21,12 +21,35 @@
 --    На GP к имени дополнительно прибавляется схема: `{SCHEMA}.<table>`.
 --
 --  ВАЖНО — различие форматов:
---    • Поле `payload` в `agent_response_events` (тип `reasoning`/`status`/`error`)
+--    • Поле `payload` в `agent_response_events` (тип `reasoning`/`status`/`error`/`final`)
 --      использует поля свободной формы: `text`, `is_chunk`, `stage`, `code`, `message`.
 --      Эти события стримятся фронту как промежуточные delta/heartbeat.
 --    • Поле `blocks` в `agent_responses` — это массив pydantic-моделей из
 --      `app/core/chat/blocks.py`. Каноническое поле для `text`/`code`/`reasoning`
 --      блоков — `content` (НЕ `text`/`code`).
+--
+--  ВАЖНО — событие `final`:
+--    После INSERT в `agent_responses` ОБЯЗАТЕЛЬНО вставить событие
+--    `event_type='final'` в `agent_response_events` той же транзакцией
+--    (см. сценарий 1 ниже). Это push-сигнал для фонового раннера
+--    Act Constructor — он мгновенно подхватывает финальный ответ и
+--    финализирует ассистент-сообщение (UPDATE status='complete'), не
+--    дожидаясь срабатывания fallback-таймера. Без `final`-события раннер
+--    всё равно завершит сообщение (через периодический poll раз в
+--    poll_min_interval_sec), но с задержкой до ~event_timeout. payload
+--    может быть пустым `{}`.
+--
+--  ВАЖНО — реактивное наполнение chat_messages.content:
+--    После рефактора Phase 1 «D» раннер не накапливает блоки в памяти, а
+--    инкрементально дописывает каждое reasoning-событие в
+--    `chat_messages.content` (status='streaming') через
+--    `MessageRepository.append_block`. Поэтому уже после INSERT'ов 1.2/1.3
+--    содержимое будущего ассистент-сообщения видно через
+--    `GET /api/v1/chat/conversations/{id}/messages` — фронт может
+--    переключиться на другой чат и вернуться, не теряя накопленные
+--    рассуждения. После шага 1.4 раннер делает `finalize_assistant_message`:
+--    мержит финальные блоки агента с уже накопленными (дедуп по `block_id`)
+--    и переводит сообщение в status='complete'.
 -- ============================================================================
 
 
@@ -108,8 +131,13 @@ VALUES (
     now()
 );
 
--- Шаг 1.4 — ФИНАЛЬНЫЙ ответ. UUID генерируется автоматически
--- (md5(...) даёт уникальную строку, помещающуюся в VARCHAR(36); работает и на PG, и на GP).
+-- Шаг 1.4 — ФИНАЛЬНЫЙ ответ + 'final'-событие (push-сигнал раннеру).
+-- ОБЕ вставки в ОДНОЙ транзакции — раннер мгновенно увидит финал
+-- через очередь PollCoordinator и сохранит ассистент-сообщение без
+-- задержки. Без 'final'-события раннер всё равно подхватит ответ
+-- через периодический poll (fallback), но с лагом до event_timeout.
+BEGIN;
+
 INSERT INTO t_db_oarb_audit_act_agent_responses
     (id, request_id, blocks, finish_reason, model, token_usage, created_at)
 VALUES (
@@ -124,10 +152,31 @@ VALUES (
     now()
 );
 
--- Шаг 1.5 — закрыть запрос:
-UPDATE t_db_oarb_audit_act_agent_requests
-SET status = 'done', finished_at = now()
-WHERE id = '<request_id>';
+-- 'final' — служебное событие, не рендерится фронту. seq продолжает
+-- общую нумерацию в рамках request_id; payload пустой.
+INSERT INTO t_db_oarb_audit_act_agent_response_events
+    (id, request_id, seq, event_type, payload, created_at)
+SELECT
+    nextval('t_db_oarb_audit_act_agent_response_events_id_seq'),
+    '<request_id>',
+    COALESCE(MAX(seq), 0) + 1,
+    'final',
+    '{}'::jsonb,
+    now()
+FROM t_db_oarb_audit_act_agent_response_events
+WHERE request_id = '<request_id>';
+
+COMMIT;
+
+-- Шаг 1.5 — закрыть запрос. status='done' раннер выставит сам внутри
+-- одной транзакции с finalize_assistant_message (UPDATE chat_messages
+-- SET status='complete' + MERGE финальных блоков с накопленными
+-- reasoning'ами, дедуп по block_id).
+-- Этот UPDATE — резервный путь для имитации, если по какой-то причине
+-- раннер не подхватил (например, отключён).
+-- UPDATE t_db_oarb_audit_act_agent_requests
+-- SET status = 'done', finished_at = now()
+-- WHERE id = '<request_id>';
 
 
 -- ────────────────────────────────────────────────────────────────────────────

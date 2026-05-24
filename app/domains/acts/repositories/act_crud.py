@@ -361,7 +361,8 @@ class ActCrudRepository(BaseRepository):
             await self.conn.execute(
                 f"""
                 UPDATE {self.tree}
-                SET tree_data = src.tree_data
+                SET tree_data = src.tree_data,
+                    updated_at = CURRENT_TIMESTAMP
                 FROM (SELECT tree_data FROM {self.tree} WHERE act_id = $1) src
                 WHERE {self.tree}.act_id = $2
                 """,

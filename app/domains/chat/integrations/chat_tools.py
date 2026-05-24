@@ -5,19 +5,19 @@
   - chat.notify                     — показать уведомление пользователю
 
 Handler для forward — фабричный (зависит от контекста сообщения), поэтому
-здесь регистрируется без handler'а; оркестратор на каждом запросе сам
-подставляет замыкание через build_forward_handler.
+здесь регистрируется без handler'а через :func:`build_forward_tool_descriptor`;
+оркестратор на каждом запросе сам подставляет замыкание через
+``forward_tool_factory.build_forward_tool``.
 """
 from __future__ import annotations
 
-from app.core.chat.names import (
-    TOOL_FORWARD_TO_KNOWLEDGE_AGENT,
-    TOOL_LIST_PAGES,
-    TOOL_NOTIFY,
-)
+from app.core.chat.names import TOOL_LIST_PAGES, TOOL_NOTIFY
 from app.core.chat.tools import ChatTool, ChatToolParam
 from app.domains.chat.integrations.list_pages_handler import list_pages_handler
 from app.domains.chat.integrations.notify_handler import notify_handler
+from app.domains.chat.services.forward_tool_factory import (
+    build_forward_tool_descriptor,
+)
 
 _DOMAIN = "chat"
 
@@ -25,30 +25,7 @@ _DOMAIN = "chat"
 def get_chat_tools() -> list[ChatTool]:
     """Возвращает инструменты домена chat для регистрации в реестре."""
     return [
-        ChatTool(
-            name=TOOL_FORWARD_TO_KNOWLEDGE_AGENT,
-            domain=_DOMAIN,
-            description=(
-                "Передать вопрос пользователя внешнему ИИ-агенту коллег для "
-                "ответа на основе баз знаний (акты, регламенты, нормативы и т.п.). "
-                "Использовать для любых вопросов о ДАННЫХ/КОНТЕНТЕ; не использовать "
-                "для команд интерфейса (открой/создай/настрой)."
-            ),
-            parameters=[
-                ChatToolParam(
-                    "question", "string",
-                    "Полный текст вопроса пользователя",
-                ),
-                ChatToolParam(
-                    "kb_hint", "string",
-                    "Опц. подсказка какой БЗ касается вопрос",
-                    required=False,
-                ),
-            ],
-            handler=None,  # подставляется оркестратором per-request
-            per_request_handler=True,
-            category="forward",
-        ),
+        build_forward_tool_descriptor(),
         ChatTool(
             name=TOOL_NOTIFY,
             domain=_DOMAIN,

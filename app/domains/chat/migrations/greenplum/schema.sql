@@ -35,16 +35,37 @@ CREATE TABLE IF NOT EXISTS {SCHEMA}.{PREFIX}chat_messages (
     content         JSONB NOT NULL,
     model           VARCHAR(100),
     token_usage     JSONB,
+    -- Жизненный цикл assistant-сообщения: streaming → complete (или failed).
+    -- User-сообщения создаются сразу со статусом 'complete'.
+    status          VARCHAR(20) NOT NULL DEFAULT 'complete'
+                    CONSTRAINT check_chat_messages_status_values
+                    CHECK (status IN ('streaming','complete','failed')),
     created_at      TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
 )
 WITH (appendonly=false)
 DISTRIBUTED BY (id);
+
+-- Идемпотентная миграция для существующих GP-таблиц. GP 6.x (PG 9.4)
+-- не поддерживает ADD COLUMN/CONSTRAINT IF NOT EXISTS — выполняем
+-- безусловно и полагаемся на GreenplumAdapter, который ловит
+-- DuplicateColumnError / DuplicateObjectError.
+ALTER TABLE {SCHEMA}.{PREFIX}chat_messages
+    ADD COLUMN status VARCHAR(20) NOT NULL DEFAULT 'complete';
+
+ALTER TABLE {SCHEMA}.{PREFIX}chat_messages
+    ADD CONSTRAINT check_chat_messages_status_values
+    CHECK (status IN ('streaming','complete','failed'));
 
 CREATE INDEX idx_{PREFIX}chat_messages_conversation
     ON {SCHEMA}.{PREFIX}chat_messages(conversation_id);
 
 CREATE INDEX idx_{PREFIX}chat_messages_created
     ON {SCHEMA}.{PREFIX}chat_messages(conversation_id, created_at);
+
+-- Под выборку «висящих» streaming-сообщений беседы. На GP partial-индексы
+-- (WHERE ...) не используем — полный композитный надёжнее.
+CREATE INDEX idx_{PREFIX}chat_messages_status
+    ON {SCHEMA}.{PREFIX}chat_messages(conversation_id, status);
 
 -- ============================================================================
 -- ТАБЛИЦА ФАЙЛОВ
@@ -149,6 +170,10 @@ CREATE INDEX idx_{PREFIX}agent_requests_parent_request_id
     ON {SCHEMA}.{PREFIX}agent_requests(parent_request_id);
 
 -- Append-only лента событий от агента.
+-- UNIQUE(request_id, seq) защищает от сетевого retry внешнего агента:
+-- если он повторно INSERT-нёт событие с тем же seq, СУБД отвергнет дубль,
+-- polling не размножит его на фронт двойным reasoning-блоком. GP-требование
+-- (DISTRIBUTED BY ⊆ UNIQUE) соблюдено: request_id входит в (request_id, seq).
 CREATE TABLE IF NOT EXISTS {SCHEMA}.{PREFIX}agent_response_events (
     id            BIGINT NOT NULL
                   DEFAULT nextval('{SCHEMA}.{PREFIX}agent_response_events_id_seq'),
@@ -156,17 +181,20 @@ CREATE TABLE IF NOT EXISTS {SCHEMA}.{PREFIX}agent_response_events (
     seq           INTEGER NOT NULL,
     event_type    VARCHAR(20) NOT NULL
                   CONSTRAINT check_agent_response_events_event_type_values
-                  CHECK (event_type IN ('reasoning','status','error')),
+                  CHECK (event_type IN ('reasoning','status','error','final')),
     payload       JSONB NOT NULL,
     created_at    TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    -- GP-требование: DISTRIBUTED BY должен быть подмножеством PK.
-    PRIMARY KEY (id, request_id)
+    -- GP-требование: DISTRIBUTED BY должен быть подмножеством PK и UNIQUE.
+    PRIMARY KEY (id, request_id),
+    UNIQUE (request_id, seq)
 )
 WITH (appendonly=false)
 DISTRIBUTED BY (request_id);
 
-CREATE INDEX idx_{PREFIX}agent_response_events_request
-    ON {SCHEMA}.{PREFIX}agent_response_events(request_id, id);
+-- Индекс под polling-запрос: WHERE request_id = $1 AND seq > $2 ORDER BY seq.
+-- Был (request_id, id) — фильтр по seq шёл в памяти после index scan.
+-- UNIQUE-констрейнт выше сам создаёт btree-индекс на (request_id, seq),
+-- так что отдельный CREATE INDEX больше не нужен.
 
 -- Финальный ответ агента (однократный INSERT, stop-сигнал).
 CREATE TABLE IF NOT EXISTS {SCHEMA}.{PREFIX}agent_responses (

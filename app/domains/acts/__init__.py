@@ -42,10 +42,18 @@ def _build_domain():
     from app.core.domain import DomainDescriptor, KnowledgeBase, NavItem
     from app.domains.acts.api import get_api_routers
     from app.domains.acts.routes import get_html_routers
-    from app.domains.acts._lifecycle import on_startup, on_shutdown
+    from app.domains.acts._lifecycle import (
+        on_shutdown,
+        on_startup,
+        register_lifespan_hooks,
+    )
     from app.core import settings_registry
     from app.domains.acts.settings import ActsSettings
     from app.domains.acts.integrations.chat_tools import get_chat_tools
+
+    # Регистрация инфраструктурных lifespan-hooks (батчер аудит-лога,
+    # очистка просроченных блокировок) в общем реестре.
+    register_lifespan_hooks()
 
     return DomainDescriptor(
         name=DOMAIN_NAME,

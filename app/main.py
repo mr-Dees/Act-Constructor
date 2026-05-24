@@ -17,7 +17,12 @@ from fastapi.staticfiles import StaticFiles
 from app.api.v1.endpoints.auth import get_current_user_from_env
 from app.api.v1.routes import api_router as api_v1_router
 from app.core.config import get_settings, setup_logging
-from app.core.domain_registry import discover_domains, register_domains
+from app.core.domain_registry import (
+    discover_domains,
+    get_shutdown_hooks,
+    get_startup_hooks,
+    register_domains,
+)
 from app.core.middleware import (
     HTTPSRedirectMiddleware,
     RateLimitMiddleware,
@@ -105,10 +110,6 @@ async def lifespan(app: FastAPI):
     # Список успешно стартовавших доменов — используется и в startup-откате, и в shutdown
     started: list = []
 
-    # Батчеры метрик — инициализируются ниже, останавливаются в shutdown.
-    # Объявлены здесь, чтобы быть видимыми и в finally-shutdown ветке.
-    started_batchers: list = []
-
     # ИНИЦИАЛИЗАЦИЯ БД
     try:
         await init_db(settings)
@@ -135,85 +136,41 @@ async def lifespan(app: FastAPI):
         singleton_table = adapter.get_table_name("app_singleton_lock")
         try:
             async with get_db() as conn:
-                await acquire_singleton_lock(conn, singleton_table)
+                await acquire_singleton_lock(
+                    conn,
+                    singleton_table,
+                    stale_ttl_sec=settings.security.singleton_lock_stale_ttl_sec,
+                )
         except SingletonLockBusyError as exc:
             logger.critical("Не удалось захватить singleton-lock: %s", exc)
             raise RuntimeError(str(exc)) from exc
 
-        # Инициализация батчеров метрик до старта доменов: лимит
-        # observability — общий, читаем из settings. Каждый поток метрик
-        # получает свой батчер; flush-callback берёт соединение из пула на
-        # время bulk-INSERT.
-        from app.core.metrics_batcher import MetricsBatcher
-        from app.db.connection import get_db
-        from app.domains.admin.deps import set_http_metrics_batcher
-        from app.domains.admin.repositories.http_metrics_repository import (
-            HttpMetricRecord,
-            HttpMetricsRepository,
-        )
-        from app.domains.chat.deps import (
-            set_audit_log_batcher,
-            set_tool_metrics_batcher,
-        )
-        from app.domains.chat.repositories.chat_audit_log_repository import (
-            ChatAuditLogRecord,
-            ChatAuditLogRepository,
-        )
-        from app.domains.chat.repositories.chat_tool_metrics_repository import (
-            ChatToolMetricRecord,
-            ChatToolMetricsRepository,
-        )
-
-        obs = settings.observability
-
-        async def _flush_http_metrics(records: list[HttpMetricRecord]) -> None:
-            async with get_db() as conn:
-                await HttpMetricsRepository(conn).record_many(records)
-
-        async def _flush_tool_metrics(records: list[ChatToolMetricRecord]) -> None:
-            async with get_db() as conn:
-                await ChatToolMetricsRepository(conn).record_many(records)
-
-        async def _flush_audit_log(records: list[ChatAuditLogRecord]) -> None:
-            async with get_db() as conn:
-                await ChatAuditLogRepository(conn).log_many(records)
-
-        http_metrics_batcher = MetricsBatcher(
-            flush_callback=_flush_http_metrics,
-            max_batch_size=obs.metrics_batch_size,
-            flush_interval_sec=obs.metrics_flush_interval_sec,
-            max_buffer_size=obs.metrics_max_buffer_size,
-            name="admin_http_metrics",
-        )
-        chat_tool_metrics_batcher = MetricsBatcher(
-            flush_callback=_flush_tool_metrics,
-            max_batch_size=obs.metrics_batch_size,
-            flush_interval_sec=obs.metrics_flush_interval_sec,
-            max_buffer_size=obs.metrics_max_buffer_size,
-            name="chat_tool_metrics",
-        )
-        chat_audit_log_batcher = MetricsBatcher(
-            flush_callback=_flush_audit_log,
-            max_batch_size=obs.metrics_batch_size,
-            flush_interval_sec=obs.metrics_flush_interval_sec,
-            max_buffer_size=obs.metrics_max_buffer_size,
-            name="chat_audit_log",
-        )
-
-        await http_metrics_batcher.start()
-        started_batchers.append(http_metrics_batcher)
-        await chat_tool_metrics_batcher.start()
-        started_batchers.append(chat_tool_metrics_batcher)
-        await chat_audit_log_batcher.start()
-        started_batchers.append(chat_audit_log_batcher)
-
-        set_http_metrics_batcher(http_metrics_batcher)
-        set_tool_metrics_batcher(chat_tool_metrics_batcher)
-        set_audit_log_batcher(chat_audit_log_batcher)
-
-        app.state.http_metrics_batcher = http_metrics_batcher
-        app.state.chat_tool_metrics_batcher = chat_tool_metrics_batcher
-        app.state.chat_audit_log_batcher = chat_audit_log_batcher
+        # Lifespan-hooks доменов: каждый домен в своём _build_domain()
+        # регистрирует свои startup/shutdown через app.core.domain_registry.
+        # На этом этапе уже инициализированы БД, settings_registry, доменные
+        # Settings — но ещё НЕ захвачен singleton-lock. Hooks вызываются
+        # в порядке регистрации, ошибка hook'а откатывает уже стартовавшие.
+        started_startup_hooks: list[tuple[str, object]] = []
+        try:
+            for hook_name, hook in get_startup_hooks():
+                await hook(app)
+                started_startup_hooks.append((hook_name, hook))
+        except Exception:
+            logger.exception(
+                "Ошибка в startup-hook, откат уже выполненных hooks",
+            )
+            for name, _ in reversed(started_startup_hooks):
+                # Подбираем парный shutdown-hook по имени и вызываем его.
+                for sd_name, sd_hook in reversed(get_shutdown_hooks()):
+                    if sd_name == name:
+                        try:
+                            await sd_hook(app)
+                        except Exception:
+                            logger.exception(
+                                "Ошибка отката shutdown-hook %s", sd_name,
+                            )
+                        break
+            raise
 
         # Запуск доменов с откатом при частичной ошибке:
         # если on_startup домена N падает, вызываем on_shutdown для 1..N-1
@@ -297,25 +254,14 @@ async def lifespan(app: FastAPI):
             except Exception:
                 logger.exception(f"Ошибка при завершении домена {d.name}")
 
-    # Финальный flush батчеров метрик: дописываем накопленные записи в БД
-    # до закрытия пула. Сбрасываем module-level ссылки в deps, чтобы новые
-    # сервисы (если их случайно создадут после shutdown) ушли в legacy-fallback.
-    try:
-        from app.domains.admin.deps import set_http_metrics_batcher
-        from app.domains.chat.deps import (
-            set_audit_log_batcher,
-            set_tool_metrics_batcher,
-        )
-        set_http_metrics_batcher(None)
-        set_tool_metrics_batcher(None)
-        set_audit_log_batcher(None)
-    except Exception:
-        logger.exception("Не удалось сбросить ссылки на батчеры метрик")
-    for batcher in reversed(started_batchers):
+    # Lifespan shutdown-hooks доменов — вызываются в обратном порядке
+    # регистрации. Каждый домен останавливает свои батчеры и сбрасывает
+    # ссылки в собственных deps.
+    for hook_name, hook in reversed(get_shutdown_hooks()):
         try:
-            await batcher.stop()
+            await hook(app)
         except Exception:
-            logger.exception("Ошибка при остановке батчера метрик")
+            logger.exception("Ошибка в shutdown-hook %s", hook_name)
 
     # Освобождаем singleton-блокировку (best-effort, до закрытия пула).
     try:

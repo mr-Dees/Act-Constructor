@@ -622,70 +622,12 @@ CREATE INDEX idx_{PREFIX}act_content_versions_act
     ON {SCHEMA}.{PREFIX}act_content_versions(act_id, version_number DESC);
 
 -- ============================================================================
--- ТРИГГЕРЫ ДЛЯ АВТОМАТИЧЕСКОГО ОБНОВЛЕНИЯ updated_at
+-- updated_at — устанавливается явным SET updated_at = CURRENT_TIMESTAMP в коде
 -- ============================================================================
-
-CREATE OR REPLACE FUNCTION {SCHEMA}.update_updated_at_column()
-RETURNS TRIGGER AS $$
-BEGIN
-    NEW.updated_at = CURRENT_TIMESTAMP;
-    RETURN NEW;
-END;
-$$ LANGUAGE plpgsql;
-
-COMMENT ON FUNCTION {SCHEMA}.update_updated_at_column() IS
-    'Автоматически устанавливает updated_at = CURRENT_TIMESTAMP при UPDATE';
-
-DROP TRIGGER IF EXISTS update_{PREFIX}acts_updated_at ON {SCHEMA}.{PREFIX}acts;
-CREATE TRIGGER update_{PREFIX}acts_updated_at
-    BEFORE UPDATE ON {SCHEMA}.{PREFIX}acts
-    FOR EACH ROW
-    EXECUTE PROCEDURE {SCHEMA}.update_updated_at_column();
-
-COMMENT ON TRIGGER update_{PREFIX}acts_updated_at ON {SCHEMA}.{PREFIX}acts IS
-    'Автоматически обновляет поле updated_at при изменении метаданных акта';
-
-DROP TRIGGER IF EXISTS update_{PREFIX}act_tree_updated_at ON {SCHEMA}.{PREFIX}act_tree;
-CREATE TRIGGER update_{PREFIX}act_tree_updated_at
-    BEFORE UPDATE ON {SCHEMA}.{PREFIX}act_tree
-    FOR EACH ROW
-    EXECUTE PROCEDURE {SCHEMA}.update_updated_at_column();
-
-COMMENT ON TRIGGER update_{PREFIX}act_tree_updated_at ON {SCHEMA}.{PREFIX}act_tree IS
-    'Автоматически обновляет поле updated_at при изменении структуры дерева';
-
-DROP TRIGGER IF EXISTS update_{PREFIX}act_tables_updated_at ON {SCHEMA}.{PREFIX}act_tables;
-CREATE TRIGGER update_{PREFIX}act_tables_updated_at
-    BEFORE UPDATE ON {SCHEMA}.{PREFIX}act_tables
-    FOR EACH ROW
-    EXECUTE PROCEDURE {SCHEMA}.update_updated_at_column();
-
-COMMENT ON TRIGGER update_{PREFIX}act_tables_updated_at ON {SCHEMA}.{PREFIX}act_tables IS
-    'Автоматически обновляет поле updated_at при изменении таблицы';
-
-DROP TRIGGER IF EXISTS update_{PREFIX}act_textblocks_updated_at ON {SCHEMA}.{PREFIX}act_textblocks;
-CREATE TRIGGER update_{PREFIX}act_textblocks_updated_at
-    BEFORE UPDATE ON {SCHEMA}.{PREFIX}act_textblocks
-    FOR EACH ROW
-    EXECUTE PROCEDURE {SCHEMA}.update_updated_at_column();
-
-COMMENT ON TRIGGER update_{PREFIX}act_textblocks_updated_at ON {SCHEMA}.{PREFIX}act_textblocks IS
-    'Автоматически обновляет поле updated_at при изменении текстового блока';
-
-DROP TRIGGER IF EXISTS update_{PREFIX}act_violations_updated_at ON {SCHEMA}.{PREFIX}act_violations;
-CREATE TRIGGER update_{PREFIX}act_violations_updated_at
-    BEFORE UPDATE ON {SCHEMA}.{PREFIX}act_violations
-    FOR EACH ROW
-    EXECUTE PROCEDURE {SCHEMA}.update_updated_at_column();
-
-COMMENT ON TRIGGER update_{PREFIX}act_violations_updated_at ON {SCHEMA}.{PREFIX}act_violations IS
-    'Автоматически обновляет поле updated_at при изменении нарушения';
-
-DROP TRIGGER IF EXISTS update_{PREFIX}act_invoices_updated_at ON {SCHEMA}.{PREFIX}act_invoices;
-CREATE TRIGGER update_{PREFIX}act_invoices_updated_at
-    BEFORE UPDATE ON {SCHEMA}.{PREFIX}act_invoices
-    FOR EACH ROW
-    EXECUTE PROCEDURE {SCHEMA}.update_updated_at_column();
-
-COMMENT ON TRIGGER update_{PREFIX}act_invoices_updated_at ON {SCHEMA}.{PREFIX}act_invoices IS
-    'Автоматически обновляет поле updated_at при изменении фактуры';
+-- На Greenplum 6 PL/pgSQL-триггеры исполняются только на координаторе → каждый
+-- UPDATE превращается в RPC к мастер-узлу. Чтобы не платить эту цену, обновление
+-- метки времени делается явно в SQL-запросах репозиториев (см. act_content.py,
+-- act_crud.py, act_lock.py, act_invoice.py, act_crud_service._build_update_query).
+-- PG-схема (postgresql/schema.sql) — отдельный путь dev/локального деплоя;
+-- триггер там тоже не нужен (тот же контракт), но менять PG-схему сейчас
+-- не обязательно — поведение совпадает.

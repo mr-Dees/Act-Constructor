@@ -59,7 +59,7 @@ def _settings() -> ChatDomainSettings:
         api_base="http://test-llm:8000/v1",
         api_key="test-key",
     )
-    s.agent_bridge.poll_interval_sec = 0.01
+    s.agent_bridge.poll_min_interval_sec = 0.01
     s.agent_bridge.initial_response_timeout_sec = 5
     s.agent_bridge.event_timeout_sec = 5
     s.agent_bridge.max_total_duration_sec = 5
@@ -97,12 +97,13 @@ async def test_schedule_pending_claims_only_old():
             [],
         ],
     )
+    fake_req_repo.get = AsyncMock(return_value={"user_id": "u1"})
 
     # _run должен висеть до отмены, чтобы задача считалась "живой" между
     # двумя вызовами schedule_pending.
     started = asyncio.Event()
 
-    async def fake_run(_rid, *, settings):  # noqa: ARG001
+    async def fake_run(_rid, *, settings, coordinator=None):  # noqa: ARG001
         started.set()
         await asyncio.sleep(10)
 

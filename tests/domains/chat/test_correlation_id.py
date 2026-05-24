@@ -159,7 +159,12 @@ async def test_runner_propagates_correlation_id_into_context_var(caplog):
     fake_req_repo.update_status = AsyncMock(return_value=2)
     fake_req_repo.finalize = AsyncMock(return_value=True)
 
-    save_mock = AsyncMock()
+    finalize_msg_mock = AsyncMock(return_value=True)
+    start_mock = AsyncMock(return_value={
+        "id": "msg-1", "status": "streaming", "content": [],
+    })
+    fake_msg_repo = MagicMock()
+    fake_msg_repo.append_block = AsyncMock(return_value=True)
     fake_adapter = MagicMock(get_table_name=lambda n: n)
 
     # Перед запуском _run значение ContextVar — дефолтное "-".
@@ -180,14 +185,24 @@ async def test_runner_propagates_correlation_id_into_context_var(caplog):
             return_value=fake_req_repo,
         ),
         patch(
+            "app.domains.chat.repositories.message_repository."
+            "MessageRepository",
+            return_value=fake_msg_repo,
+        ),
+        patch(
             "app.domains.chat.services.agent_bridge."
             "AgentBridgeService.wait_for_completion",
             fake_wait,
         ),
         patch(
             "app.domains.chat.services.message_service."
-            "MessageService.save_assistant_message",
-            save_mock,
+            "MessageService.start_streaming_assistant_message",
+            start_mock,
+        ),
+        patch(
+            "app.domains.chat.services.message_service."
+            "MessageService.finalize_assistant_message",
+            finalize_msg_mock,
         ),
     ):
         await agent_bridge_runner._run("rid-1", settings=_settings())
@@ -235,7 +250,12 @@ async def test_runner_does_not_set_context_var_when_parent_is_none():
     })
     fake_req_repo.update_status = AsyncMock(return_value=2)
     fake_req_repo.finalize = AsyncMock(return_value=True)
-    save_mock = AsyncMock()
+    finalize_msg_mock = AsyncMock(return_value=True)
+    start_mock = AsyncMock(return_value={
+        "id": "msg-1", "status": "streaming", "content": [],
+    })
+    fake_msg_repo = MagicMock()
+    fake_msg_repo.append_block = AsyncMock(return_value=True)
     fake_adapter = MagicMock(get_table_name=lambda n: n)
 
     with (
@@ -249,14 +269,24 @@ async def test_runner_does_not_set_context_var_when_parent_is_none():
             return_value=fake_req_repo,
         ),
         patch(
+            "app.domains.chat.repositories.message_repository."
+            "MessageRepository",
+            return_value=fake_msg_repo,
+        ),
+        patch(
             "app.domains.chat.services.agent_bridge."
             "AgentBridgeService.wait_for_completion",
             fake_wait,
         ),
         patch(
             "app.domains.chat.services.message_service."
-            "MessageService.save_assistant_message",
-            save_mock,
+            "MessageService.start_streaming_assistant_message",
+            start_mock,
+        ),
+        patch(
+            "app.domains.chat.services.message_service."
+            "MessageService.finalize_assistant_message",
+            finalize_msg_mock,
         ),
     ):
         await agent_bridge_runner._run("rid-1", settings=_settings())

@@ -165,6 +165,43 @@ class TestGreenplumSchemaCompatibility:
             "и каждого UNIQUE-констрейнта.\n" + "\n".join(violations)
         )
 
+    def test_no_pl_pgsql_triggers(self, gp_schema_files):
+        """В GP 6 PL/pgSQL-триггеры исполняются только на координаторе → каждый
+        UPDATE превращается в RPC на мастер. Для метки ``updated_at`` это лишний
+        overhead: значение проще выставлять явно в SQL репозиториев. Регрессия —
+        запрещаем CREATE TRIGGER и LANGUAGE plpgsql в GP-схемах."""
+        trigger_pattern = re.compile(r'\bCREATE\s+TRIGGER\b', re.IGNORECASE)
+        plpgsql_pattern = re.compile(r'\bLANGUAGE\s+plpgsql\b', re.IGNORECASE)
+        trigger_violations = self._find_violations(gp_schema_files, trigger_pattern)
+        plpgsql_violations = self._find_violations(gp_schema_files, plpgsql_pattern)
+        assert not trigger_violations, (
+            "CREATE TRIGGER на GP даёт coordinator-only исполнение. "
+            "Перенеси логику в SQL репозиториев:\n" + "\n".join(trigger_violations)
+        )
+        assert not plpgsql_violations, (
+            "PL/pgSQL-функции на GP исполняются только на координаторе:\n"
+            + "\n".join(plpgsql_violations)
+        )
+
+    def test_pg_acts_schema_no_updated_at_trigger(self):
+        """PG- и GP-схемы acts синхронизированы: updated_at выставляется явно
+        в SQL репозиториев, функция ``update_updated_at_column`` и связанные
+        CREATE TRIGGER в обеих схемах отсутствуют."""
+        base = Path(__file__).parent.parent / "app" / "domains" / "acts" / "migrations"
+        for db_type in ("postgresql", "greenplum"):
+            schema = base / db_type / "schema.sql"
+            content = schema.read_text(encoding="utf-8")
+            # Вырезаем комментарии — допускаем упоминание в пояснительных секциях.
+            stripped = re.sub(r'--[^\n]*', '', content)
+            stripped = re.sub(r'/\*.*?\*/', '', stripped, flags=re.DOTALL)
+            assert "update_updated_at_column" not in stripped, (
+                f"{db_type}/schema.sql: функция update_updated_at_column "
+                f"должна быть удалена (updated_at выставляется в SQL репозиториев)"
+            )
+            assert not re.search(r'\bCREATE\s+TRIGGER\b', stripped, re.IGNORECASE), (
+                f"{db_type}/schema.sql: CREATE TRIGGER должен быть удалён"
+            )
+
     def test_chat_domain_migration_discovered(self, gp_schema_files):
         """GP-миграция домена chat обнаруживается автоматически."""
         domain_names = {s.parent.parent.parent.name for s in gp_schema_files}
@@ -172,6 +209,47 @@ class TestGreenplumSchemaCompatibility:
             f"Миграция chat не найдена среди GP-схем. "
             f"Обнаруженные домены: {sorted(domain_names)}"
         )
+
+    def test_chat_messages_has_status_column(self):
+        """chat_messages в обеих схемах содержит колонку status с CHECK-констрейнтом
+        check_chat_messages_status_values (Phase 0 «D»: server-authoritative state)."""
+        base = Path(__file__).parent.parent / "app" / "domains" / "chat" / "migrations"
+        for db_type in ("postgresql", "greenplum"):
+            schema_path = base / db_type / "schema.sql"
+            content = schema_path.read_text(encoding="utf-8")
+
+            # Используем splitter — он корректно игнорирует ; внутри
+            # комментариев / строк / dollar-quoting.
+            stmts = DatabaseAdapter._split_sql_statements(content)
+            create_stmt = None
+            for raw in stmts:
+                # Срезаем line-комментарии — иначе документация может шадовить.
+                cleaned = re.sub(r'--[^\n]*', '', raw)
+                if (
+                    re.search(r'\bCREATE\s+TABLE\b', cleaned, re.IGNORECASE)
+                    and "{PREFIX}chat_messages" in cleaned
+                    and "agent" not in cleaned  # отсекаем chat_audit_log/etc, не нужно
+                ):
+                    create_stmt = cleaned
+                    break
+
+            assert create_stmt is not None, (
+                f"{db_type}/schema.sql: CREATE TABLE chat_messages не найдено"
+            )
+            assert re.search(r'\bstatus\b\s+VARCHAR', create_stmt, re.IGNORECASE), (
+                f"{db_type}/schema.sql: колонка status не найдена в "
+                f"CREATE TABLE chat_messages"
+            )
+            assert "check_chat_messages_status_values" in create_stmt, (
+                f"{db_type}/schema.sql: CHECK-констрейнт "
+                f"check_chat_messages_status_values не найден в "
+                f"CREATE TABLE chat_messages"
+            )
+            # Допустимые значения статуса
+            for v in ("streaming", "complete", "failed"):
+                assert f"'{v}'" in create_stmt, (
+                    f"{db_type}/schema.sql: значение '{v}' отсутствует в CHECK"
+                )
 
     def test_chat_gp_schema_has_agent_bridge_tables(self):
         """Новые agent_* таблицы добавлены в GP-схему чата и используют {SCHEMA}.{PREFIX}."""
@@ -191,12 +269,19 @@ class TestGreenplumSchemaCompatibility:
 
         # Все индексы используют idx_{PREFIX}*.
         # idx_{PREFIX}agent_responses_request не нужен: UNIQUE(request_id) уже создаёт индекс.
+        # idx_{PREFIX}agent_response_events_request тоже больше не нужен:
+        # UNIQUE(request_id, seq) сам создаёт нужный btree-индекс.
         for idx_name in (
             "idx_{PREFIX}agent_requests_status_created",
             "idx_{PREFIX}agent_requests_message",
-            "idx_{PREFIX}agent_response_events_request",
         ):
             assert idx_name in content, f"Индекс {idx_name} не найден в GP-схеме"
+
+        # UNIQUE(request_id, seq) на agent_response_events — гарантия от дублей
+        # при сетевом retry внешнего агента.
+        assert "UNIQUE (request_id, seq)" in content, (
+            "UNIQUE(request_id, seq) на agent_response_events не найден в GP-схеме"
+        )
 
 
 # ---------------------------------------------------------------------------
