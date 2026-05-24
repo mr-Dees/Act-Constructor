@@ -46,7 +46,6 @@ class AuthManager {
         if (savedUser && this._isSessionActive()) {
             this._currentUser = savedUser;
             this._isAuthenticated = true;
-            console.log('Username загружен из localStorage:', savedUser);
         } else {
             // Сессия истекла или username отсутствует
             this._clearStorage();
