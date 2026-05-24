@@ -297,13 +297,12 @@ class VersionPreviewOverlay extends DialogBase {
         if (!confirmed) return;
 
         try {
-            await APIClient.lockAct(this._actId);
-            try {
-                const result = await APIClient.restoreVersion(this._actId, versionId);
-                Notifications.success(result.message || 'Содержимое восстановлено');
-            } finally {
-                await APIClient.unlockAct(this._actId).catch(() => {});
-            }
+            // Lock уже держит родительский AuditLogDialog (LockManager.init при show).
+            // Повторный lockAct + unlockAct в finally глобально снимет блокировку —
+            // LockManager-heartbeat начнёт получать «вы не владеете блокировкой»
+            // и через 1-2 мин выкинет юзера фейковой «Сессия завершена».
+            const result = await APIClient.restoreVersion(this._actId, versionId);
+            Notifications.success(result.message || 'Содержимое восстановлено');
 
             // Закрываем превью и обновляем диалог
             this._close();

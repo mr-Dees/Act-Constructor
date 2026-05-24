@@ -153,6 +153,11 @@ class CreateActDialog extends DialogBase {
      * @param {Object|null} status - Статус акта (опционально)
      */
     static _showActDialog(actData, status = null) {
+        // Сбрасываем in-progress флаг при каждом открытии диалога —
+        // защищает от «застрявшего» _isSaving из предыдущей сессии
+        // (актуально для create-flow, где safeClose-перехвата нет).
+        this._isSaving = false;
+
         const isEdit = !!actData;
         const currentUser = window.env?.JUPYTERHUB_USER || AppConfig?.auth?.jupyterhubUser || "";
 
@@ -1252,6 +1257,10 @@ class CreateActDialog extends DialogBase {
      * @private
      */
     static async _handleSubmitSuccess(data, isEdit, actId, dialog) {
+        // Маркируем сохранение завершённым ДО _closeDialog(), чтобы перехватчик
+        // safeClose в acts-manager-page.js::editAct увидел флаг и не запустил
+        // повторный PATCH-через-_handleFormSubmit. safeClose в finally сбросит _isSaving.
+        this._isSaving = true;
         this._closeDialog();
 
         if (typeof Notifications !== 'undefined') {
@@ -1307,7 +1316,7 @@ class CreateActDialog extends DialogBase {
         });
 
         if (confirmed) {
-            await this._createWithNewPart(AppConfig.api.getUrl('/api/v1/acts/create'), body, currentUser);
+            await this._createWithNewPart('/api/v1/acts/create', body, currentUser);
         }
     }
 
