@@ -161,7 +161,6 @@ class AuthManager {
             // Сохраняем в localStorage для последующих операций
             if (data.authenticated && data.username) {
                 this._saveToStorage(data.username);
-                console.log('Username сохранён в localStorage:', data.username);
             } else {
                 this._clearStorage();
             }
@@ -194,7 +193,6 @@ class AuthManager {
             return false;
         }
 
-        console.log(`Авторизован как: ${authData.username}`);
         return true;
     }
 
