@@ -6,6 +6,16 @@
  */
 class ItemsRenderer {
     /**
+     * Индекс адресуемых DOM-узлов: id -> HTMLElement.
+     * Заполняется в _createItemContainer / renderTable / при отрисовке textblock/violation.
+     * Очищается в начале renderAll() и при удалении узлов через updateItem с отсутствующим node.
+     * Используется per-node API (updateItem/updateTable/updateTextBlock/updateViolation/updateNodeTitle)
+     * для адресного апдейта без пересборки всего поддерева.
+     * @type {Map<string, HTMLElement>}
+     */
+    static _domIndex = new Map();
+
+    /**
      * Полная отрисовка всех элементов из дерева документа в контейнер.
      * Очищает предыдущее содержимое, рендерит структуру заново,
      * привязывает события и восстанавливает сохраненные размеры таблиц.
@@ -14,6 +24,7 @@ class ItemsRenderer {
         const container = document.getElementById('itemsContainer');
         if (!container) return;
 
+        this._domIndex.clear();
         container.innerHTML = '';
         tableManager.clearSelection();
 
@@ -57,7 +68,9 @@ class ItemsRenderer {
         if (node.type === 'table') {
             const table = AppState.tables[node.tableId];
             if (table) {
-                itemDiv.appendChild(this.renderTable(table, node));
+                const section = this.renderTable(table, node);
+                itemDiv.appendChild(section);
+                this._domIndex.set(`table:${table.id}`, section);
             }
             return itemDiv;
         }
@@ -65,7 +78,9 @@ class ItemsRenderer {
         if (node.type === 'textblock') {
             const textBlock = AppState.textBlocks[node.textBlockId];
             if (textBlock) {
-                itemDiv.appendChild(textBlockManager.createTextBlockElement(textBlock, node));
+                const tbEl = textBlockManager.createTextBlockElement(textBlock, node);
+                itemDiv.appendChild(tbEl);
+                this._domIndex.set(`textblock:${textBlock.id}`, tbEl);
             }
             return itemDiv;
         }
@@ -73,7 +88,9 @@ class ItemsRenderer {
         if (node.type === 'violation') {
             const violation = AppState.violations[node.violationId];
             if (violation) {
-                itemDiv.appendChild(violationManager.createViolationElement(violation, node));
+                const vEl = violationManager.createViolationElement(violation, node);
+                itemDiv.appendChild(vEl);
+                this._domIndex.set(`violation:${violation.id}`, vEl);
             }
             return itemDiv;
         }
@@ -94,6 +111,7 @@ class ItemsRenderer {
         const itemDiv = document.createElement('div');
         itemDiv.className = `item-block level-${level}`;
         itemDiv.dataset.nodeId = node.id;
+        this._domIndex.set(`item:${node.id}`, itemDiv);
         return itemDiv;
     }
 
