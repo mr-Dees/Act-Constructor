@@ -53,6 +53,28 @@ class PreviewManager {
     static _previewTooltipTimeout = null;
 
     /**
+     * Debounce-таймер для typing-flow (textblock/violation input).
+     * @private
+     */
+    static _typingTimer = null;
+    static _TYPING_DEBOUNCE_MS = 150;
+
+    /**
+     * Планирует обновление предпросмотра с debounce 150 мс.
+     * Используется в typing-handler'ах (textblock-editor, violation textarea),
+     * чтобы серия input-событий не запускала рендер на каждый кадр.
+     *
+     * @param {Object|string} options - Настройки отображения
+     */
+    static scheduleTyping(options = {}) {
+        clearTimeout(this._typingTimer);
+        this._typingTimer = setTimeout(() => {
+            this._typingTimer = null;
+            this.update(options);
+        }, this._TYPING_DEBOUNCE_MS);
+    }
+
+    /**
      * Выполняет обновление предпросмотра
      * @private
      * @param {number} previewTrim - Максимальная длина текста

@@ -67,7 +67,7 @@ class ViolationManager {
                 if (typeof ChangelogTracker !== 'undefined') {
                     ChangelogTracker._recordDebounced('modify_violation', violation.id, '', {field: 'violated'}, 5000);
                 }
-                PreviewManager.update();
+                PreviewManager.scheduleTyping();
             });
         }
 
@@ -99,7 +99,7 @@ class ViolationManager {
                 if (typeof ChangelogTracker !== 'undefined') {
                     ChangelogTracker._recordDebounced('modify_violation', violation.id, '', {field: 'established'}, 5000);
                 }
-                PreviewManager.update();
+                PreviewManager.scheduleTyping();
             });
         }
 
@@ -254,7 +254,7 @@ class ViolationManager {
             // Настраиваем обработку клавиш
             this.setupTextareaHandlers(textarea, (value) => {
                 violation[fieldName].content = value;
-                PreviewManager.update();
+                PreviewManager.scheduleTyping();
             });
 
             contentContainer.appendChild(textarea);
@@ -288,7 +288,7 @@ class ViolationManager {
             // Обновляем массив при вводе
             input.addEventListener('input', () => {
                 violation[fieldName].items[index] = input.value;
-                PreviewManager.update();
+                PreviewManager.scheduleTyping();
             });
 
             // Обработка горячих клавиш для элементов списка
