@@ -70,6 +70,18 @@ class TableManager {
     attachEventListeners() {
         const container = document.getElementById('itemsContainer');
         if (!container) return;
+        this.attachEventListenersToContainer(container);
+    }
+
+    /**
+     * Привязка cell/handle-обработчиков ТОЛЬКО к ячейкам внутри указанного контейнера.
+     * Используется per-node API в ItemsRenderer (updateTable/updateItem), чтобы НЕ навешивать
+     * слушатели повторно на все таблицы в #itemsContainer (это привело бы к мульти-срабатыванию).
+     * Контейнер должен содержать только что созданные cell-элементы без существующих листенеров.
+     * @param {HTMLElement} container - DOM-элемент, в котором искать td/th/resize-handle
+     */
+    attachEventListenersToContainer(container) {
+        if (!container) return;
 
         // Обработка событий на ячейках
         container.querySelectorAll('td, th').forEach(cell => {
