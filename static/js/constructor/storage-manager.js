@@ -247,14 +247,20 @@ class StorageManager {
         this._setupNavigationInterception();
 
         // Периодическое автосохранение в localStorage (каждые 2 минуты при наличии изменений)
+        // E-6: пропускаем тик, если идёт drag-and-drop — иначе сохраним промежуточное
+        // состояние treeData во время mutation, в которой parent.children в неконсистентном виде.
+        // Через периодический интервал следующий тик подберёт изменения.
         this._periodicSaveInterval = setInterval(() => {
+            if (AppState._dragInProgress) return;
             if (this._hasUnsavedChanges) {
                 this.saveState(true);
             }
         }, AppConfig.localStorage.periodicSaveInterval);
 
         // Периодическое сохранение в БД (каждые 2 минуты при наличии несинхронизированных данных)
+        // E-6: та же защита от race с drag'ом.
         this._periodicDbSaveInterval = setInterval(async () => {
+            if (AppState._dragInProgress) return;
             if (this.hasUnsyncedChanges() && window.currentActId) {
                 try {
                     await APIClient.saveActContent(window.currentActId, { saveType: 'periodic' });

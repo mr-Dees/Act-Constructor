@@ -94,6 +94,30 @@ class TableCellsOperations {
     }
 
     /**
+     * H5-A: коммитит pending-редактирование ячейки, если оно есть.
+     * Используется перед сохранением (Ctrl+S), чтобы значение из textarea
+     * успело попасть в AppState.tables[id].grid[r][c].content до saveState.
+     *
+     * Каждая `.editing`-ячейка содержит textarea, у которой listener 'blur'
+     * вызывает finishEditing → cellData.content = textarea.value.trim().
+     * Достаточно сделать blur — он триггерит весь pipeline синхронно.
+     *
+     * @returns {boolean} true если был хотя бы один pending edit
+     */
+    commitPendingEdit() {
+        let committed = false;
+        const editingCells = document.querySelectorAll('#itemsContainer td.editing, #itemsContainer th.editing');
+        editingCells.forEach(cell => {
+            const textarea = cell.querySelector('textarea');
+            if (textarea) {
+                textarea.blur();
+                committed = true;
+            }
+        });
+        return committed;
+    }
+
+    /**
      * Вставляет новую строку выше выбранной ячейки.
      * Учитывает объединенные ячейки и запрещает вставку выше заголовка.
      */
@@ -163,7 +187,7 @@ class TableCellsOperations {
         }
 
         this.clearSelection();
-        ItemsRenderer.renderAll();
+        ItemsRenderer.updateTable(tableId);
         PreviewManager.update();
     }
 
@@ -239,7 +263,7 @@ class TableCellsOperations {
         }
 
         this.clearSelection();
-        ItemsRenderer.renderAll();
+        ItemsRenderer.updateTable(tableId);
         PreviewManager.update();
     }
 
@@ -356,7 +380,7 @@ class TableCellsOperations {
 
         this._redistributeColumnWidths(table);
         this.clearSelection();
-        ItemsRenderer.renderAll();
+        ItemsRenderer.updateTable(tableId);
         PreviewManager.update();
     }
 
@@ -443,7 +467,7 @@ class TableCellsOperations {
 
         this._redistributeColumnWidths(table);
         this.clearSelection();
-        ItemsRenderer.renderAll();
+        ItemsRenderer.updateTable(tableId);
         PreviewManager.update();
     }
 
@@ -505,7 +529,7 @@ class TableCellsOperations {
         }
 
         this.clearSelection();
-        ItemsRenderer.renderAll();
+        ItemsRenderer.updateTable(tableId);
         PreviewManager.update();
     }
 
@@ -569,7 +593,7 @@ class TableCellsOperations {
 
         this._redistributeColumnWidths(table);
         this.clearSelection();
-        ItemsRenderer.renderAll();
+        ItemsRenderer.updateTable(tableId);
         PreviewManager.update();
     }
 
@@ -802,7 +826,7 @@ class TableCellsOperations {
         }
 
         this.clearSelection();
-        ItemsRenderer.renderAll();
+        ItemsRenderer.updateTable(tableId);
         PreviewManager.update();
         Notifications.success('Ячейки объединены');
     }
@@ -867,7 +891,7 @@ class TableCellsOperations {
         }
 
         this.clearSelection();
-        ItemsRenderer.renderAll();
+        ItemsRenderer.updateTable(tableId);
         PreviewManager.update();
         Notifications.success('Ячейка разъединена');
     }

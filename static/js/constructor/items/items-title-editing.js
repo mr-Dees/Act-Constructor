@@ -106,8 +106,15 @@ class ItemsTitleEditing {
      */
     static _updateUI(node, titleElement) {
         titleElement.textContent = node.label;
+        // Лёгкое обновление DOM-заголовка без полного PreviewManager.update —
+        // textSpan в items уже обновлён локально, остаётся только дерево.
+        if (typeof ItemsRenderer !== 'undefined') {
+            ItemsRenderer.updateNodeTitle(node.id, node.label);
+        }
         treeManager.render();
-        PreviewManager.update();
+        // Preview-зона перерисовывается дешёвым trim-режимом; для редактирования
+        // заголовка пункта это адекватная стоимость.
+        PreviewManager.update('previewTrim');
     }
 
     /**

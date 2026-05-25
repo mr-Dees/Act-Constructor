@@ -6,6 +6,16 @@
  */
 class ItemsRenderer {
     /**
+     * Индекс адресуемых DOM-узлов: id -> HTMLElement.
+     * Заполняется в _createItemContainer / renderTable / при отрисовке textblock/violation.
+     * Очищается в начале renderAll() и при удалении узлов через updateItem с отсутствующим node.
+     * Используется per-node API (updateItem/updateTable/updateTextBlock/updateViolation/updateNodeTitle)
+     * для адресного апдейта без пересборки всего поддерева.
+     * @type {Map<string, HTMLElement>}
+     */
+    static _domIndex = new Map();
+
+    /**
      * Полная отрисовка всех элементов из дерева документа в контейнер.
      * Очищает предыдущее содержимое, рендерит структуру заново,
      * привязывает события и восстанавливает сохраненные размеры таблиц.
@@ -14,6 +24,7 @@ class ItemsRenderer {
         const container = document.getElementById('itemsContainer');
         if (!container) return;
 
+        this._domIndex.clear();
         container.innerHTML = '';
         tableManager.clearSelection();
 
@@ -25,6 +36,184 @@ class ItemsRenderer {
 
         tableManager.attachEventListeners();
         this._restoreTableSizes();
+    }
+
+    /**
+     * Per-node API: пересоздаёт DOM поддерева одного item-узла адресно, без renderAll.
+     * Используется после структурных изменений в пределах одного узла (add/delete child, move).
+     * Fallback на renderAll если узел не найден в _domIndex или в AppState.
+     * @param {string} nodeId - ID узла дерева для обновления
+     */
+    static updateItem(nodeId) {
+        if (!nodeId) return this.renderAll();
+
+        const oldEl = this._domIndex.get(`item:${nodeId}`);
+        const node = AppState.findNodeById(nodeId);
+
+        if (!oldEl || !node || !oldEl.parentNode) {
+            console.warn('[ItemsRenderer.updateItem] узел не найден в _domIndex или AppState, fallback на renderAll:', nodeId);
+            return this.renderAll();
+        }
+
+        // Чистим индекс по всему поддереву старого DOM перед заменой
+        this._purgeSubtreeFromIndex(oldEl);
+
+        // Определяем level из CSS-класса item-block (level-N)
+        const levelMatch = (oldEl.className.match(/level-(\d+)/) || [null, '1']);
+        const level = parseInt(levelMatch[1], 10) || 1;
+
+        const newEl = this.renderItem(node, level);
+        oldEl.parentNode.replaceChild(newEl, oldEl);
+
+        // Восстанавливаем listeners и размеры таблиц только в новом поддереве
+        tableManager.attachEventListenersToContainer(newEl);
+        this._restoreTableSizesInContainer(newEl);
+    }
+
+    /**
+     * Per-node API: пересоздаёт только указанную table-section, сохраняя размеры колонок/строк.
+     * @param {string} tableId - ID таблицы
+     */
+    static updateTable(tableId) {
+        if (!tableId) return this.renderAll();
+
+        const oldSection = this._domIndex.get(`table:${tableId}`);
+        const table = AppState.tables[tableId];
+
+        if (!oldSection || !table || !oldSection.parentNode) {
+            console.warn('[ItemsRenderer.updateTable] таблица не найдена в _domIndex или AppState, fallback на renderAll:', tableId);
+            return this.renderAll();
+        }
+
+        const tableNode = this._findNodeById(table.nodeId);
+        if (!tableNode) return this.renderAll();
+
+        const savedSizes = tableManager.preserveTableSizes(oldSection.querySelector('.editable-table'));
+
+        const newSection = this.renderTable(table, tableNode);
+        oldSection.parentNode.replaceChild(newSection, oldSection);
+        this._domIndex.set(`table:${tableId}`, newSection);
+
+        tableManager.attachEventListenersToContainer(newSection);
+        this._restoreSingleTableSizes(tableId, savedSizes);
+    }
+
+    /**
+     * Per-node API: пересоздаёт textblock-секцию для одного блока.
+     * @param {string} textBlockId - ID текстового блока
+     */
+    static updateTextBlock(textBlockId) {
+        if (!textBlockId) return this.renderAll();
+
+        const oldEl = this._domIndex.get(`textblock:${textBlockId}`);
+        const textBlock = AppState.textBlocks[textBlockId];
+
+        if (!oldEl || !textBlock || !oldEl.parentNode) {
+            console.warn('[ItemsRenderer.updateTextBlock] блок не найден, fallback на renderAll:', textBlockId);
+            return this.renderAll();
+        }
+
+        // Находим связанный node — textBlock.nodeId хранится в данных
+        const nodeId = textBlock.nodeId;
+        const node = nodeId ? AppState.findNodeById(nodeId) : null;
+        if (!node) return this.renderAll();
+
+        const newEl = textBlockManager.createTextBlockElement(textBlock, node);
+        oldEl.parentNode.replaceChild(newEl, oldEl);
+        this._domIndex.set(`textblock:${textBlockId}`, newEl);
+    }
+
+    /**
+     * Per-node API: пересоздаёт violation-секцию для одного нарушения.
+     * @param {string} violationId - ID нарушения
+     */
+    static updateViolation(violationId) {
+        if (!violationId) return this.renderAll();
+
+        const oldEl = this._domIndex.get(`violation:${violationId}`);
+        const violation = AppState.violations[violationId];
+
+        if (!oldEl || !violation || !oldEl.parentNode) {
+            console.warn('[ItemsRenderer.updateViolation] нарушение не найдено, fallback на renderAll:', violationId);
+            return this.renderAll();
+        }
+
+        const nodeId = violation.nodeId;
+        const node = nodeId ? AppState.findNodeById(nodeId) : null;
+        if (!node) return this.renderAll();
+
+        const newEl = violationManager.createViolationElement(violation, node);
+        oldEl.parentNode.replaceChild(newEl, oldEl);
+        this._domIndex.set(`violation:${violationId}`, newEl);
+    }
+
+    /**
+     * Лёгкая версия per-node API: обновляет ТОЛЬКО текст заголовка пункта.
+     * Дешевле updateItem — не пересоздаёт DOM-поддерево, не перепривязывает listeners.
+     * @param {string} nodeId - ID узла
+     * @param {string} newTitle - Новый текст заголовка
+     */
+    static updateNodeTitle(nodeId, newTitle) {
+        const itemEl = this._domIndex.get(`item:${nodeId}`);
+        if (!itemEl) {
+            console.warn('[ItemsRenderer.updateNodeTitle] узел не найден в _domIndex:', nodeId);
+            return;
+        }
+
+        const textSpan = itemEl.querySelector(':scope > .item-header .item-title-text');
+        if (textSpan) {
+            textSpan.textContent = newTitle;
+        }
+    }
+
+    /**
+     * Удаляет все ключи _domIndex для DOM-поддерева — вызывается перед replaceChild
+     * на старом элементе, чтобы индекс не содержал «висячих» ссылок.
+     * @param {HTMLElement} rootEl
+     * @private
+     */
+    static _purgeSubtreeFromIndex(rootEl) {
+        // item-block элементы
+        rootEl.querySelectorAll('.item-block').forEach(el => {
+            const id = el.dataset.nodeId;
+            if (id) this._domIndex.delete(`item:${id}`);
+        });
+        if (rootEl.matches && rootEl.matches('.item-block') && rootEl.dataset.nodeId) {
+            this._domIndex.delete(`item:${rootEl.dataset.nodeId}`);
+        }
+        // table-section
+        rootEl.querySelectorAll('.table-section').forEach(el => {
+            const id = el.dataset.tableId;
+            if (id) this._domIndex.delete(`table:${id}`);
+        });
+        // textblock-editor / text-block-section
+        rootEl.querySelectorAll('[data-text-block-id]').forEach(el => {
+            const id = el.dataset.textBlockId;
+            if (id) this._domIndex.delete(`textblock:${id}`);
+        });
+        // violation-section
+        rootEl.querySelectorAll('.violation-section').forEach(el => {
+            const id = el.dataset.violationId;
+            if (id) this._domIndex.delete(`violation:${id}`);
+        });
+    }
+
+    /**
+     * Восстанавливает размеры колонок/строк для всех таблиц внутри контейнера.
+     * Вызывается после updateItem на поддереве с таблицами.
+     * @param {HTMLElement} container
+     * @private
+     */
+    static _restoreTableSizesInContainer(container) {
+        setTimeout(() => {
+            container.querySelectorAll('.table-section').forEach(section => {
+                const tableId = section.dataset.tableId;
+                const tableEl = section.querySelector('.editable-table');
+                if (tableId && tableEl) {
+                    tableManager.applyPersistedSizes(tableId, tableEl);
+                }
+            });
+        }, 0);
     }
 
     /**
@@ -57,7 +246,9 @@ class ItemsRenderer {
         if (node.type === 'table') {
             const table = AppState.tables[node.tableId];
             if (table) {
-                itemDiv.appendChild(this.renderTable(table, node));
+                const section = this.renderTable(table, node);
+                itemDiv.appendChild(section);
+                this._domIndex.set(`table:${table.id}`, section);
             }
             return itemDiv;
         }
@@ -65,7 +256,9 @@ class ItemsRenderer {
         if (node.type === 'textblock') {
             const textBlock = AppState.textBlocks[node.textBlockId];
             if (textBlock) {
-                itemDiv.appendChild(textBlockManager.createTextBlockElement(textBlock, node));
+                const tbEl = textBlockManager.createTextBlockElement(textBlock, node);
+                itemDiv.appendChild(tbEl);
+                this._domIndex.set(`textblock:${textBlock.id}`, tbEl);
             }
             return itemDiv;
         }
@@ -73,7 +266,9 @@ class ItemsRenderer {
         if (node.type === 'violation') {
             const violation = AppState.violations[node.violationId];
             if (violation) {
-                itemDiv.appendChild(violationManager.createViolationElement(violation, node));
+                const vEl = violationManager.createViolationElement(violation, node);
+                itemDiv.appendChild(vEl);
+                this._domIndex.set(`violation:${violation.id}`, vEl);
             }
             return itemDiv;
         }
@@ -94,6 +289,7 @@ class ItemsRenderer {
         const itemDiv = document.createElement('div');
         itemDiv.className = `item-block level-${level}`;
         itemDiv.dataset.nodeId = node.id;
+        this._domIndex.set(`item:${node.id}`, itemDiv);
         return itemDiv;
     }
 

@@ -28,10 +28,8 @@ import { test, expect, openAct, SEED_ACTS } from '../fixtures';
 test.describe('Ctrl+S during edit @smoke', () => {
   test('Ctrl+S во время редактирования ячейки сохраняет значение после reload',
     async ({ page }) => {
-      test.fail(true,
-        'H5-A: Ctrl+S не коммитит pending textarea edit перед save. ' +
-        'Закрывается агентом per-node-rendering-api.');
-
+      // Регрессия H5-A закрыта: Ctrl+S теперь коммитит pending textarea edit
+      // через tableManager.cellsOps.commitPendingEdit() перед forceSaveAsync.
       await openAct(page, SEED_ACTS.withContent);
       await page.locator('.step[data-step="2"]').click();
 
