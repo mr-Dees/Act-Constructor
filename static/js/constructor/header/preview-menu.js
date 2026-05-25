@@ -340,11 +340,4 @@ class PreviewMenuManager {
 // Инициализация при загрузке страницы
 document.addEventListener('DOMContentLoaded', () => {
     window.previewMenuManager = new PreviewMenuManager();
-
-    // Автообновление при изменениях в AppState (опционально)
-    document.addEventListener('app:state-changed', () => {
-        if (window.previewMenuManager?.isOpen) {
-            window.previewMenuManager.forceUpdate();
-        }
-    });
 });
