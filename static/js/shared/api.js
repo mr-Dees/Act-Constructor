@@ -727,9 +727,10 @@ class APIClient {
      * Сохраняет фактуру (UPSERT по act_id + node_id)
      *
      * @param {Object} data - Данные фактуры
+     * @param {AbortSignal} [signal] - Сигнал отмены запроса
      * @returns {Promise<Object>} Сохраненная фактура
      */
-    static async saveInvoice(data) {
+    static async saveInvoice(data, signal) {
         const username = AuthManager.getCurrentUser();
 
         const response = await fetch(AppConfig.api.getUrl('/api/v1/acts/invoice/save'), {
@@ -739,6 +740,7 @@ class APIClient {
                 'X-JupyterHub-User': username,
             },
             body: JSON.stringify(data),
+            signal,
         });
 
         if (!response.ok) {
@@ -753,9 +755,10 @@ class APIClient {
      *
      * @param {number} invoiceId - ID фактуры
      * @param {number} actId - ID акта для проверки доступа
+     * @param {AbortSignal} [signal] - Сигнал отмены запроса
      * @returns {Promise<Object>} Результат верификации
      */
-    static async verifyInvoice(invoiceId, actId) {
+    static async verifyInvoice(invoiceId, actId, signal) {
         const username = AuthManager.getCurrentUser();
 
         const response = await fetch(AppConfig.api.getUrl('/api/v1/acts/invoice/verify'), {
@@ -765,6 +768,7 @@ class APIClient {
                 'X-JupyterHub-User': username,
             },
             body: JSON.stringify({ invoice_id: invoiceId, act_id: actId }),
+            signal,
         });
 
         if (!response.ok) {

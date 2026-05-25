@@ -15,6 +15,15 @@ class InvoiceDialog extends DialogBase {
     static _currentOverlay = null;
 
     /**
+     * AbortController для текущего save+verify-запроса. При закрытии диалога
+     * или повторном открытии прерываем «висящий» запрос, иначе ответ
+     * прилетит уже закрытому или другому экземпляру диалога.
+     * @private
+     * @type {AbortController|null}
+     */
+    static _saveAbort = null;
+
+    /**
      * Текущий узел дерева
      * @private
      */
@@ -1129,8 +1138,19 @@ class InvoiceDialog extends DialogBase {
             saveBtn.textContent = 'Сохранение...';
         }
 
+        // Прерываем предыдущий save (если по какой-то причине он ещё в полёте).
+        if (this._saveAbort) {
+            this._saveAbort.abort();
+        }
+        this._saveAbort = new AbortController();
+        const signal = this._saveAbort.signal;
+        const expectedOverlay = overlay;
+
         try {
-            const result = await APIClient.saveInvoice(data);
+            const result = await APIClient.saveInvoice(data, signal);
+
+            // Race-guard: пока ждали ответ, диалог уже закрыли — выходим.
+            if (!this._currentOverlay || this._currentOverlay !== expectedOverlay) return;
 
             // Сохраняем в структуру дерева
             if (this._currentNode) {
@@ -1144,12 +1164,18 @@ class InvoiceDialog extends DialogBase {
                 };
             }
 
-            // Вызываем верификацию (заглушка)
+            // Вызываем верификацию (заглушка) — backend пока возвращает status only.
+            // Когда добавит warnings:string[] — surface через Notifications.warning.
             if (result && result.id) {
                 try {
-                    const verifyResult = await APIClient.verifyInvoice(result.id, data.act_id);
+                    const verifyResult = await APIClient.verifyInvoice(result.id, data.act_id, signal);
                     console.log('Результат верификации (заглушка):', verifyResult);
+                    if (this._currentOverlay !== expectedOverlay) return;
+                    if (Array.isArray(verifyResult?.warnings) && verifyResult.warnings.length > 0) {
+                        Notifications.warning(verifyResult.warnings.join('; '));
+                    }
                 } catch (verifyErr) {
+                    if (verifyErr?.name === 'AbortError') return;
                     console.warn('Ошибка верификации (заглушка):', verifyErr);
                 }
             }
@@ -1174,10 +1200,14 @@ class InvoiceDialog extends DialogBase {
             }
 
         } catch (err) {
+            if (err?.name === 'AbortError') {
+                // Диалог закрыли / новый save запустили — тихо выходим.
+                return;
+            }
             console.error('Ошибка сохранения фактуры:', err);
             Notifications.error(`Ошибка сохранения: ${err.message}`);
 
-            if (saveBtn) {
+            if (saveBtn && this._currentOverlay === expectedOverlay) {
                 saveBtn.disabled = false;
                 saveBtn.textContent = 'Сохранить';
             }
@@ -1190,6 +1220,12 @@ class InvoiceDialog extends DialogBase {
      */
     static _close() {
         if (!this._currentOverlay) return;
+
+        // Прерываем все висящие save/verify-запросы.
+        if (this._saveAbort) {
+            this._saveAbort.abort();
+            this._saveAbort = null;
+        }
 
         this._removeEscapeHandler(this._currentOverlay);
         this._hideDialog(this._currentOverlay);
