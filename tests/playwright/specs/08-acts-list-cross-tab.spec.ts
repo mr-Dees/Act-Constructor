@@ -2,22 +2,25 @@ import { test, expect } from '../fixtures';
 
 /**
  * Регрессия H-N3-ACTS: список актов на /acts не обновляется в других
- * вкладках после удаления акта — нет cross-tab sync (BroadcastChannel /
- * storage event на удаление акта отсутствуют, см. acts-manager-page.js
- * — после deleteAct() вызывается только локальный `this.loadActs()`).
+ * вкладках после удаления акта. После `deleteAct()` в `acts-manager-page.js`
+ * вызывается только локальный `this.loadActs()` — нет BroadcastChannel /
+ * storage-event, контекст B не получает invalidation.
  *
  * test.fail() — документация регрессии. После агента acts-cross-tab-sync
- * убрать .fail(), сценарий должен пройти.
+ * (добавит broadcast в `deleteAct` и listener в `loadActs`/init) убрать
+ * `.fail()`, сценарий должен пройти.
  *
- * DOM-flow:
+ * DOM-flow (разведано через MCP):
  *  - /acts рендерит `#actsListContainer` с `.act-card` для каждого акта.
- *  - .act-card НЕ имеет data-act-id; идентификация — через текст
+ *  - .act-card НЕ имеет `data-act-id`; идентификация — по тексту
  *    `[data-field="inspection_name"]` (название акта).
- *  - Удаление — кнопка `[data-action="delete"]` внутри карточки, после
- *    подтверждения DialogManager → DELETE /api/v1/acts/{id}.
- *  - В этом тесте мы для надёжности зовём DELETE напрямую через fetch
- *    из контекста A (минуя UI-диалог) — проверяем что контекст B НЕ
- *    обновился сам ≤ 500ms.
+ *  - Кнопка удаления: `.act-card [data-action="delete"]`.
+ *  - После click → DialogManager.show() добавляет в body
+ *    `.custom-dialog-overlay.visible > .custom-dialog`. Кнопки:
+ *      `.btn.btn-primary.dialog-confirm` (текст «Удалить»),
+ *      `.btn.btn-secondary.dialog-cancel` (текст «Отмена»).
+ *  - После confirm → DELETE /api/v1/acts/{id} → reload локального списка.
+ *    Cross-tab уведомления НЕТ.
  */
 test.describe('Acts list cross-tab sync @smoke', () => {
   test('/acts открывается в двух контекстах без console-ошибок', async ({ browser }) => {
@@ -50,6 +53,7 @@ test.describe('Acts list cross-tab sync @smoke', () => {
       test.fail(true,
         'H-N3-ACTS: нет cross-tab инвалидации списка актов после DELETE. ' +
         'Закрывается агентом acts-cross-tab-sync.');
+
       const ctxA = await browser.newContext();
       const ctxB = await browser.newContext();
       try {
@@ -58,24 +62,31 @@ test.describe('Acts list cross-tab sync @smoke', () => {
 
         await Promise.all([pageA.goto('/acts'), pageB.goto('/acts')]);
 
-        // Дождаться рендера карточек в обеих вкладках.
-        // SEED_ACTS.forDelete (999003) — это "E2E: акт для cross-tab удаления".
-        const cardSelector = '.act-card:has([data-field="inspection_name"]:text-is("E2E: акт для cross-tab удаления"))';
+        // Дождаться рендера карточек в обеих вкладках. SEED_ACTS.forDelete
+        // (999003) — это "E2E: акт для cross-tab удаления".
+        const cardSelector =
+          '.act-card:has([data-field="inspection_name"]:text-is("E2E: акт для cross-tab удаления"))';
         await expect(pageA.locator(cardSelector)).toBeVisible({ timeout: 10000 });
         await expect(pageB.locator(cardSelector)).toBeVisible({ timeout: 10000 });
 
-        // Удаляем акт через прямой DELETE в контексте A (минуем UI-диалог).
-        const delStatus = await pageA.evaluate(async () => {
-          const r = await fetch('/api/v1/acts/999003', {
-            method: 'DELETE',
-            headers: { 'X-JupyterHub-User': '22494524' },
-          });
-          return r.status;
-        });
-        expect(delStatus, 'DELETE должен вернуть 2xx').toBeLessThan(300);
+        // Real-flow: click кнопки [data-action="delete"] на карточке в ctxA.
+        await pageA.locator(`${cardSelector} [data-action="delete"]`).click();
 
-        // В контексте B ожидаем что карточка исчезнет ≤ 500ms.
-        // Без cross-tab sync — карточка остаётся → test.fail() ожидает FAIL.
+        // Появляется DialogManager confirm-диалог. Жмём «Удалить»
+        // — это запустит safeClick → deleteAct() → DELETE /api/v1/acts/999003
+        // → loadActs() (только в ctxA).
+        const confirmBtn = pageA.locator('.btn.btn-primary.dialog-confirm');
+        await expect(confirmBtn).toBeVisible({ timeout: 3000 });
+        await confirmBtn.click();
+
+        // Дождаться что в ctxA карточка действительно ушла из DOM
+        // (валидация что real-flow доделал работу до конца).
+        await expect(pageA.locator(cardSelector)).toHaveCount(0, {
+          timeout: 5000,
+        });
+
+        // В ctxB ожидаем что карточка исчезнет ≤ 500ms. Без cross-tab
+        // sync — карточка остаётся → expect валится → test.fail() = pass.
         await expect(pageB.locator(cardSelector)).toHaveCount(0, {
           timeout: 500,
         });
