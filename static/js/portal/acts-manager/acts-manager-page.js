@@ -457,6 +457,10 @@ class ActsManagerPage {
         }
         this._editingActInProgress = true;
 
+        // Признак, что diалог реально открылся и сброс _editingActInProgress
+        // должен случиться внутри safeClose. Иначе finally сбросит флаг сразу.
+        let dialogOpened = false;
+
         try {
             const username = AuthManager.getCurrentUser();
             if (!username) throw new Error('Пользователь не авторизован');
@@ -497,8 +501,25 @@ class ActsManagerPage {
 
             // сохраняем ссылку, чтобы использовать корректный контекст
             const dialogClass = CreateActDialog;
+            const pageClass = this;
+
+            // Запоминаем overlay этого диалога, чтобы safeClose не перезатёр
+            // _closeDialog для следующего диалога, открытого поверх (race).
+            let expectedOverlay = null;
 
             CreateActDialog._closeDialog = async function safeClose() {
+                // Race-guard: если поверх нас уже открыли другой диалог
+                // (CreateActDialog._currentDialog указывает на иной overlay),
+                // делегируем оригиналу без сайд-эффектов — этот editAct
+                // больше не «владеет» состоянием диалога.
+                if (expectedOverlay && dialogClass._currentDialog !== expectedOverlay) {
+                    console.warn('[ActsManagerPage] safeClose: overlay изменился — оригинальный close без unlock');
+                    CreateActDialog._closeDialog = originalClose;
+                    pageClass._editingActInProgress = false;
+                    originalClose();
+                    return;
+                }
+
                 try {
                     if (!dialogClass._isSaving && lockAcquired) {
                         dialogClass._isSaving = true;
@@ -529,17 +550,27 @@ class ActsManagerPage {
                     // 3️⃣ восстанавливаем оригинальное закрытие
                     CreateActDialog._closeDialog = originalClose;
                     dialogClass._isSaving = false;
+                    // Защиту _editingActInProgress держим до фактического
+                    // закрытия диалога — иначе второй клик «Редактировать»
+                    // во время открытого диалога перерегистрирует safeClose.
+                    pageClass._editingActInProgress = false;
                     console.log('[ActsManagerPage] Закрытие диалога после сохранения и unlock');
                     originalClose();
                 }
             };
 
             CreateActDialog.showEdit(actData, status);
+            expectedOverlay = dialogClass._currentDialog;
+            dialogOpened = true;
         } catch (err) {
             console.error('Ошибка editAct:', err);
             Notifications.error(err.message);
         } finally {
-            this._editingActInProgress = false;
+            // Сбрасываем флаг только если diалог НЕ открылся (early-return / ошибка).
+            // Если открылся — сброс делает safeClose при фактическом закрытии.
+            if (!dialogOpened) {
+                this._editingActInProgress = false;
+            }
         }
     }
 

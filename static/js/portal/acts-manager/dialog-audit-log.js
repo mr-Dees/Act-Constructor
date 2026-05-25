@@ -412,7 +412,7 @@ class AuditLogDialog extends DialogBase {
             <div class="audit-log-entry">
                 <div class="audit-log-entry-header">
                     <span class="audit-log-entry-action">${action}</span>
-                    <span class="audit-log-entry-meta">${entry.username} &mdash; ${date}</span>
+                    <span class="audit-log-entry-meta">${this._escapeHtml(entry.username || '')} &mdash; ${date}</span>
                 </div>
                 ${details ? `<div class="audit-log-entry-details">${details}</div>` : ''}
                 ${changelog}
@@ -500,7 +500,7 @@ class AuditLogDialog extends DialogBase {
             <div class="audit-log-entry">
                 <div class="audit-log-entry-header">
                     <span class="audit-log-entry-action">Версия #${v.version_number}</span>
-                    <span class="audit-log-entry-meta">${saveType} &mdash; ${v.username} &mdash; ${date}</span>
+                    <span class="audit-log-entry-meta">${saveType} &mdash; ${this._escapeHtml(v.username || '')} &mdash; ${date}</span>
                 </div>
                 <div class="audit-log-entry-actions">
                     <button class="btn btn-sm btn-secondary" data-action="view-version" data-version-id="${v.id}">
