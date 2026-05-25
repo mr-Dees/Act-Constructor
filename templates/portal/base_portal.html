@@ -47,6 +47,11 @@
 <script defer src="{{ url_for('static', path='js/shared/auth.js') | versioned }}"></script>
 <script defer src="{{ url_for('static', path='js/shared/api.js') | versioned }}"></script>
 <script defer src="{{ url_for('static', path='js/shared/notifications.js') | versioned }}"></script>
+<!-- Глобальный error boundary: ловит window.onerror + unhandledrejection.
+     Должен идти СРАЗУ после notifications.js — boundary использует
+     window.Notifications для toast'ов, поэтому Notifications обязан
+     быть инициализирован раньше. -->
+<script defer src="{{ url_for('static', path='js/shared/error-boundary.js') | versioned }}"></script>
 <script defer src="{{ url_for('static', path='js/shared/dialog/dialog-base.js') | versioned }}"></script>
 <script defer src="{{ url_for('static', path='js/shared/dialog/dialog-confirm.js') | versioned }}"></script>
 <script defer src="{{ url_for('static', path='js/portal/portal-sidebar.js') | versioned }}"></script>
