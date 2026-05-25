@@ -602,7 +602,7 @@ class LockManager {
                 } else {
                     window.location.href = exitUrl;
                 }
-            }, 300);
+            }, AppConfig.timings.redirectAfterUnlock);
         }
     }
 }

@@ -483,7 +483,7 @@ class StorageManager {
                     // Разблокируем отслеживание
                     this._trackingDisabled = false;
                     resolve(result);
-                }, 100);
+                }, AppConfig.timings.enableTrackingAfterSave);
             });
         });
     }
@@ -587,6 +587,17 @@ class StorageManager {
         const label = document.getElementById('saveIndicatorLabel');
 
         if (!button || !label) return;
+
+        // Read-only режим: индикатор всегда заблокирован,
+        // никакие изменения не сохраняются.
+        if (typeof AppConfig !== 'undefined' && AppConfig.readOnlyMode?.isReadOnly) {
+            button.classList.remove('unsaved', 'local-only');
+            button.classList.add('saved');
+            button.disabled = true;
+            button.title = 'Режим только для чтения';
+            label.textContent = 'Только чтение';
+            return;
+        }
 
         // Удаляем все классы состояний
         button.classList.remove('saved', 'local-only', 'unsaved');

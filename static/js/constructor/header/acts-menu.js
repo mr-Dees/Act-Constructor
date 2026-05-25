@@ -544,7 +544,7 @@ class ActsMenuManager {
             } else {
                 window.location.href = url;
             }
-        }, 1500);
+        }, AppConfig.timings.redirectAfterDelete);
     }
 
     static async _autoLoadAct(actId) {
@@ -589,6 +589,21 @@ class ActsMenuManager {
         const deleteBtn = document.getElementById('deleteActBtn');
 
         this._setupEscapeHandler();
+
+        // Подписка на cross-tab события: при удалении/дублировании акта
+        // в другой вкладке инвалидируем кеш меню и обновляем открытый список.
+        if (window.ActsBroadcast) {
+            window.ActsBroadcast.subscribe((data) => {
+                const type = data?.type;
+                if (type === 'act:deleted' || type === 'act:duplicated') {
+                    this._clearCache();
+                    const menu = document.getElementById('actsMenuDropdown');
+                    if (menu && !menu.classList.contains('hidden')) {
+                        this.renderActsList(true);
+                    }
+                }
+            });
+        }
 
         menuBtn?.addEventListener('click', e => {
             e.stopPropagation();

@@ -132,6 +132,27 @@ class AppConfig {
         file: (fileId) => `/api/v1/chat/files/${fileId}`,
     };
 
+    /**
+     * Тайминги магических setTimeout'ов из разных модулей.
+     * Вынесены сюда чтобы не плодить unnamed-числа по коду; меняются в одном месте.
+     *
+     *  - enableTrackingAfterLoad: пауза перед re-enable Proxy-tracking после loadActContent
+     *    (нужна, чтобы мутации внутри AppState.importData/PreviewManager не подняли _hasUnsavedChanges).
+     *  - enableTrackingAfterGenerate / enableTrackingAfterSave: то же, но после генерации/сохранения акта.
+     *  - redirectAfterUnlock: задержка перед редиректом на /acts после LockManager._initiateExit
+     *    (даёт UI время показать notification «сессия завершена»).
+     *  - redirectAfterDelete: задержка перед редиректом после успешного удаления акта.
+     *  - showMenuRetry: задержка перед ActsMenuManager.show() при первом открытии конструктора без act_id.
+     */
+    static timings = {
+        enableTrackingAfterLoad: 500,
+        enableTrackingAfterGenerate: 100,
+        enableTrackingAfterSave: 100,
+        redirectAfterUnlock: 300,
+        redirectAfterDelete: 1500,
+        showMenuRetry: 500
+    };
+
     static lock = {
         // Продолжительность блокировки на сервере (минуты) - фолбэк значение
         lockDurationMinutes: 30,
