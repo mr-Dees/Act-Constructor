@@ -104,11 +104,50 @@ class InvoiceDialog extends DialogBase {
     /** Кэш справочника подразделений */
     static _cachedSubsidiaryDict = null;
 
+    /** Timestamp'ы кешей (ключ — имя поля) для TTL-инвалидации. */
+    static _cacheTimestamps = {};
+
+    /** TTL кешей (15 минут): дольше держать рискованно — внешние словари меняются ETL. */
+    static _cacheTtlMs = 15 * 60 * 1000;
+
     /** Выбранные процессы [{process_code, process_name}] */
     static _selectedProcesses = [];
 
     /** Выбранное подразделение (строка) */
     static _selectedSubsidiary = null;
+
+    /**
+     * Помечает указанный кеш текущим временем (для TTL-проверки).
+     * @private
+     */
+    static _markCacheTimestamp(key) {
+        this._cacheTimestamps[key] = Date.now();
+    }
+
+    /**
+     * Проверяет, не устарел ли кеш по своему timestamp'у.
+     * @private
+     */
+    static _isCacheFresh(key) {
+        const ts = this._cacheTimestamps[key];
+        if (!ts) return false;
+        return (Date.now() - ts) <= this._cacheTtlMs;
+    }
+
+    /**
+     * Инвалидирует все устаревшие кеши по TTL. Вызывается из show().
+     * @private
+     */
+    static _invalidateStaleCaches() {
+        const keys = ['_invoiceConfig', '_cachedTables', '_cachedMetricDict',
+                      '_cachedProcessDict', '_cachedSubsidiaryDict'];
+        for (const key of keys) {
+            if (this[key] !== null && !this._isCacheFresh(key)) {
+                this[key] = null;
+                delete this._cacheTimestamps[key];
+            }
+        }
+    }
 
     /**
      * Показывает диалог для указанного узла.
@@ -120,6 +159,10 @@ class InvoiceDialog extends DialogBase {
         if (this._currentOverlay) {
             this._close();
         }
+
+        // Инвалидируем устаревшие кеши: внешние словари (метрики/процессы/
+        // подразделения, конфиг фактур) могут поменяться ETL-ом между сессиями.
+        this._invalidateStaleCaches();
 
         this._currentNode = node;
         this._currentNodeId = nodeId;
@@ -187,6 +230,7 @@ class InvoiceDialog extends DialogBase {
                 const resp = await fetch(AppConfig.api.getUrl('/api/v1/acts/config/invoice'));
                 if (resp.ok) {
                     this._invoiceConfig = await resp.json();
+                    this._markCacheTimestamp('_invoiceConfig');
                 }
             } catch (err) {
                 console.error('Ошибка загрузки конфига фактур:', err);
@@ -222,9 +266,11 @@ class InvoiceDialog extends DialogBase {
 
         try {
             this._cachedTables = await APIClient.loadInvoiceTables(dbType);
+            this._markCacheTimestamp('_cachedTables');
         } catch (err) {
             console.error('Ошибка загрузки таблиц:', err);
-            this._cachedTables = [];
+            this._cachedTables = null;
+            Notifications.error('Не удалось загрузить список таблиц. Повторите позже.');
         }
 
         if (searchInput) {
@@ -235,36 +281,44 @@ class InvoiceDialog extends DialogBase {
 
     /**
      * Загружает справочник метрик (кэширует при первом вызове).
+     * При ошибке НЕ кешируем [] — иначе следующее открытие диалога молча
+     * покажет пустой список вместо повторной попытки загрузки.
      * @private
      */
     static async _loadMetricDict() {
-        if (this._cachedMetricDict !== null) return;
+        if (this._cachedMetricDict !== null && this._isCacheFresh('_cachedMetricDict')) return;
 
         try {
             this._cachedMetricDict = await APIClient.loadMetricDict();
+            this._markCacheTimestamp('_cachedMetricDict');
         } catch (err) {
             console.error('Ошибка загрузки справочника метрик:', err);
-            this._cachedMetricDict = [];
+            this._cachedMetricDict = null;
+            Notifications.error('Не удалось загрузить справочник метрик. Повторите позже.');
         }
     }
 
     static async _loadProcessDict() {
-        if (this._cachedProcessDict !== null) return;
+        if (this._cachedProcessDict !== null && this._isCacheFresh('_cachedProcessDict')) return;
         try {
             this._cachedProcessDict = await APIClient.loadProcessDict();
+            this._markCacheTimestamp('_cachedProcessDict');
         } catch (err) {
             console.error('Ошибка загрузки справочника процессов:', err);
-            this._cachedProcessDict = [];
+            this._cachedProcessDict = null;
+            Notifications.error('Не удалось загрузить справочник процессов. Повторите позже.');
         }
     }
 
     static async _loadSubsidiaryDict() {
-        if (this._cachedSubsidiaryDict !== null) return;
+        if (this._cachedSubsidiaryDict !== null && this._isCacheFresh('_cachedSubsidiaryDict')) return;
         try {
             this._cachedSubsidiaryDict = await APIClient.loadSubsidiaryDict();
+            this._markCacheTimestamp('_cachedSubsidiaryDict');
         } catch (err) {
             console.error('Ошибка загрузки справочника подразделений:', err);
-            this._cachedSubsidiaryDict = [];
+            this._cachedSubsidiaryDict = null;
+            Notifications.error('Не удалось загрузить справочник подразделений. Повторите позже.');
         }
     }
 
