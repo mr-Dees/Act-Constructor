@@ -129,6 +129,26 @@
     border: none;
 }
 
+/* Бейдж версии приложения (topbar портала + блок настроек конструктора) */
+.app-version-badge {
+    display: inline-block;
+    padding: 2px 8px;
+    font-size: 11px;
+    font-weight: var(--font-weight-medium, 500);
+    color: var(--text-secondary, #6b7280);
+    background: var(--gray-100, #f3f4f6);
+    border-radius: var(--radius-sm, 4px);
+    line-height: 1.4;
+    letter-spacing: 0.02em;
+    user-select: all;
+}
+
+.settings-version-row {
+    display: flex;
+    justify-content: flex-end;
+    padding: 4px 0;
+}
+
 /* Опция настройки */
 .settings-option {
     display: flex;
