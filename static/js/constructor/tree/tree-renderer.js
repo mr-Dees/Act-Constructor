@@ -23,25 +23,32 @@ class TreeRenderer {
      */
     render(node = AppState.treeData) {
         this.manager.container.innerHTML = '';
-        const ul = this.createTreeElement(node);
-        this.manager.container.appendChild(ul);
+        // Корневой #tree уже играет role="tree" (шаблон); рендерим прямо в него.
+        // node.children — секции 1-го уровня (aria-level=1).
+        if (node.children?.length) {
+            node.children.forEach(child => {
+                this.manager.container.appendChild(this.createNodeElement(child, 1));
+            });
+        }
+        // После рендера ровно один treeitem имеет tabindex=0 (roving).
+        this._applyRovingTabindex();
     }
 
     /**
-     * Создание элемента списка для дерева
-     *
-     * Генерирует ul с дочерними элементами узла.
+     * Создание элемента списка для дерева (используется для подгрупп).
      *
      * @param {Object} node - Узел с дочерними элементами
+     * @param {number} childLevel - aria-level для детей
      * @returns {HTMLUListElement} Элемент списка с деревом
      */
-    createTreeElement(node) {
+    createTreeElement(node, childLevel = 1) {
         const ul = document.createElement('ul');
         ul.className = 'tree';
+        ul.setAttribute('role', 'group');
 
         if (node.children?.length) {
             node.children.forEach(child => {
-                ul.appendChild(this.createNodeElement(child));
+                ul.appendChild(this.createNodeElement(child, childLevel));
             });
         }
 
@@ -54,10 +61,11 @@ class TreeRenderer {
      * Создает полный HTML-элемент узла со всеми обработчиками и иконками.
      *
      * @param {Object} node - Данные узла (id, label, type, children и т.д.)
+     * @param {number} level - aria-level (1 для секций, +1 на каждый уровень)
      * @returns {HTMLLIElement} Готовый элемент узла дерева
      */
-    createNodeElement(node) {
-        const li = this._createBaseLiElement(node);
+    createNodeElement(node, level = 1) {
+        const li = this._createBaseLiElement(node, level);
 
         // Добавляем элементы узла
         li.appendChild(this._createToggleIcon(node, li));
@@ -69,7 +77,7 @@ class TreeRenderer {
 
         // Рекурсивно создаем дочерние элементы
         if (node.children?.length) {
-            li.appendChild(this._createChildrenContainer(node));
+            li.appendChild(this._createChildrenContainer(node, level + 1));
         }
 
         return li;
@@ -81,10 +89,21 @@ class TreeRenderer {
      * @param {Object} node - Данные узла
      * @returns {HTMLLIElement} Базовый элемент li
      */
-    _createBaseLiElement(node) {
+    _createBaseLiElement(node, level = 1) {
         const li = document.createElement('li');
         li.className = 'tree-item';
         li.dataset.nodeId = node.id;
+
+        // ARIA-атрибуты для treeitem (https://www.w3.org/WAI/ARIA/apg/patterns/treeview/).
+        // aria-expanded ставится только для узлов с детьми; selected — false по умолчанию,
+        // обновляется в TreeManager.selectNode/clearSelection. tabindex=-1 (roving).
+        li.setAttribute('role', 'treeitem');
+        li.setAttribute('aria-level', String(level));
+        li.setAttribute('aria-selected', 'false');
+        li.setAttribute('tabindex', '-1');
+        if (node.children?.length) {
+            li.setAttribute('aria-expanded', 'true');
+        }
 
         if (node.protected) {
             li.classList.add('protected');
@@ -131,9 +150,12 @@ class TreeRenderer {
         toggle.addEventListener('click', (e) => {
             e.stopPropagation();
             li.classList.toggle('collapsed');
-            toggle.textContent = li.classList.contains('collapsed')
-                ? icons.collapsed
-                : icons.expanded;
+            const collapsed = li.classList.contains('collapsed');
+            toggle.textContent = collapsed ? icons.collapsed : icons.expanded;
+            // Синхронизируем ARIA-состояние для скринридеров.
+            if (li.hasAttribute('aria-expanded')) {
+                li.setAttribute('aria-expanded', collapsed ? 'false' : 'true');
+            }
         });
 
         return toggle;
@@ -190,15 +212,44 @@ class TreeRenderer {
      * @param {Object} node - Узел данных
      * @returns {HTMLElement} Контейнер с дочерними элементами
      */
-    _createChildrenContainer(node) {
+    _createChildrenContainer(node, childLevel = 2) {
         const childrenUl = document.createElement('ul');
         childrenUl.className = 'tree-children';
+        // role="group" — стандарт ARIA APG для подгрупп treeview.
+        childrenUl.setAttribute('role', 'group');
 
         node.children.forEach(child => {
-            childrenUl.appendChild(this.createNodeElement(child));
+            childrenUl.appendChild(this.createNodeElement(child, childLevel));
         });
 
         return childrenUl;
+    }
+
+    /**
+     * Гарантирует, что ровно один treeitem имеет tabindex=0 (roving tabindex).
+     * Если есть выделенный — он; иначе первый видимый.
+     * @private
+     */
+    _applyRovingTabindex() {
+        const container = this.manager.container;
+        if (!container) return;
+
+        const items = container.querySelectorAll('li.tree-item');
+        if (items.length === 0) return;
+
+        // Все на -1.
+        items.forEach(li => li.setAttribute('tabindex', '-1'));
+
+        // Выделенный (если есть в DOM) — приоритет.
+        const selectedId = this.manager.selectedNode;
+        let focusable = null;
+        if (selectedId) {
+            focusable = container.querySelector(`li.tree-item[data-node-id="${selectedId}"]`);
+        }
+        if (!focusable) {
+            focusable = items[0];
+        }
+        focusable.setAttribute('tabindex', '0');
     }
 
     /**
