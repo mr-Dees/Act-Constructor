@@ -525,6 +525,14 @@ class LockManager {
             if (typeof AppState !== 'undefined' && AppState?.exportData) {
                 try {
                     const data = AppState.exportData();
+                    // Прикрепляем changelog в тот же PUT — серверная аудит-запись синхронна
+                    // с фактическим сохранением контента, без отдельного запроса.
+                    if (typeof ChangelogTracker !== 'undefined' && typeof ChangelogTracker.flush === 'function') {
+                        const changelog = ChangelogTracker.flush();
+                        if (changelog && changelog.length > 0) {
+                            data.changelog = changelog;
+                        }
+                    }
                     const saveResp = await fetch(AppConfig.api.getUrl(`/api/v1/acts/${this._actId}/content`), {
                         method: 'PUT',
                         headers: {
