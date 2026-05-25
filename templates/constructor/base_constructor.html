@@ -20,37 +20,37 @@
     <!-- Основной контент страницы -->
     {% block content %}{% endblock %}
 
-    <!-- Скрипты конструктора грузятся синхронно (без defer): inline IIFE ниже
-         async-вызывает AuthManager.requireAuth(), а ActsMenuManager.init (внизу
-         body) сразу делает API-запросы, требующие записанного username в
-         localStorage. С defer body парсится за миллисекунды — fetch /auth/me
-         не успевает закрыться до DOMContentLoaded, и initial load конструктора
-         падает с "Пользователь не авторизован". Sync-загрузка ~70 файлов даёт
-         достаточный buffer (исторически работает). Defer применён только в
-         portal-шаблонах, где init_script сам await'ит requireAuth() до page.init(). -->
+    <!-- app-config.js и auth.js грузятся sync (без defer): сразу после них
+         идёт sync inline-скрипт, инициализирующий window.__authReady. Этот
+         promise обязаны await'ить все init-обработчики (acts-menu.js),
+         которым нужен AuthManager.getCurrentUser() ДО первого API-вызова.
+         Остальные ~70 файлов — defer, чтобы не блокировать парсинг HTML. -->
     <script src="{{ url_for('static', path='js/shared/app-config.js') | versioned }}"></script>
     <script src="{{ url_for('static', path='js/shared/auth.js') | versioned }}"></script>
-    <script src="{{ url_for('static', path='js/constructor/header/header-exit.js') | versioned }}"></script>
 
     <script>
         // Инициализируем глобальную переменную для метаданных акта
         // Будет заполнена при загрузке содержимого через APIClient.loadActContent()
         window.actMetadata = null;
 
-        // Проверка авторизации только при открытии акта (constructor)
-        (async function() {
-            const urlParams = new URLSearchParams(window.location.search);
-            const actId = urlParams.get('act_id');
-
-            // Если это страница конструктора — требуем свежую авторизацию из окружения
-            if (actId && window.location.pathname.endsWith('/constructor')) {
-                const isAuthorized = await AuthManager.requireAuth();
-                if (!isAuthorized) {
-                    throw new Error('Unauthorized');
-                }
+        // Единый promise готовности авторизации.
+        // Если в localStorage уже есть активная сессия — резолвится синхронно
+        // (без fetch). Иначе один fetch /auth/me на всю загрузку страницы.
+        // Все init-обработчики (acts-menu.js::init и др.), требующие
+        // getCurrentUser, должны await'ить window.__authReady ДО первого
+        // обращения к нему. Без этого при пустом/истёкшем localStorage
+        // (first-time users, очистка браузера, истечение 24h сессии)
+        // getCurrentUser() возвращает null и init падает с
+        // "Пользователь не авторизован".
+        window.__authReady = (async () => {
+            if (AuthManager.isAuthenticated()) {
+                return true;
             }
+            return await AuthManager.requireAuth();
         })();
     </script>
+
+    <script defer src="{{ url_for('static', path='js/constructor/header/header-exit.js') | versioned }}"></script>
 
     <!-- Базовые утилиты -->
     <script src="{{ url_for('static', path='js/shared/notifications.js') | versioned }}"></script>
