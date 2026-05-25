@@ -23,9 +23,13 @@ class AdminService:
         self.repo = AdminRepository(conn, settings)
         self.audit_log = AdminAuditLogRepository(conn)
 
-    async def get_all_roles(self) -> list[dict]:
-        """Возвращает все роли системы."""
-        return await self.repo.get_all_roles()
+    async def get_all_roles(
+        self, *, limit: int = 50, offset: int = 0,
+    ) -> tuple[list[dict], int]:
+        """Возвращает страницу ролей и общее количество."""
+        items = await self.repo.get_all_roles(limit=limit, offset=offset)
+        total = await self.repo.count_all_roles()
+        return items, total
 
     async def get_user_roles(self, username: str) -> dict:
         """Возвращает роли пользователя."""
@@ -105,17 +109,29 @@ class AdminService:
         """Возвращает записи аудит-лога с фильтрацией."""
         return await self.audit_log.get_log(**filters)
 
-    async def get_user_directory(self) -> list[dict]:
-        """Возвращает пользователей отдела + пользователей с ролями."""
+    async def get_user_directory(
+        self, *, limit: int = 50, offset: int = 0,
+    ) -> tuple[list[dict], int]:
+        """Возвращает страницу пользователей отдела + пользователей с ролями."""
         branch = self.settings.user_directory.branch_filter
-        return await self.repo.get_users_with_roles(branch)
+        items = await self.repo.get_users_with_roles(
+            branch, limit=limit, offset=offset,
+        )
+        total = await self.repo.count_users_with_roles(branch)
+        return items, total
 
-    async def search_users(self, query: str) -> list[dict]:
+    async def search_users(
+        self, query: str, *, limit: int = 50, offset: int = 0,
+    ) -> tuple[list[dict], int]:
         """Поиск пользователей в справочнике (исключая уже видимых)."""
         if len(query) < MIN_SEARCH_LENGTH:
-            return []
+            return [], 0
         branch = self.settings.user_directory.branch_filter
-        return await self.repo.search_users(query, branch)
+        items = await self.repo.search_users(
+            query, branch, limit=limit, offset=offset,
+        )
+        total = await self.repo.count_search_users(query, branch)
+        return items, total
 
     async def seed_initial_roles(self, branch_filter: str, default_admin: str) -> None:
         """Начальное заполнение ролей при первом запуске."""

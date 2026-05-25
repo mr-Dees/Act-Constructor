@@ -6,6 +6,7 @@ from fastapi import APIRouter, Depends, Query
 
 from app.api.v1.deps.auth_deps import get_username
 from app.api.v1.deps.role_deps import require_domain_access
+from app.core.responses import PaginatedResponse
 from app.domains.chat.deps import get_conversation_service
 from app.domains.chat.schemas.requests import CreateConversationRequest
 from app.domains.chat.schemas.responses import (
@@ -46,7 +47,7 @@ async def create_conversation(
 
 @router.get(
     "/conversations",
-    response_model=list[ConversationListItem],
+    response_model=PaginatedResponse[ConversationListItem],
     summary="Список бесед",
 )
 async def list_conversations(
@@ -57,11 +58,14 @@ async def list_conversations(
     service: ConversationService = Depends(get_conversation_service),
 ):
     """Возвращает список бесед пользователя."""
-    return await service.get_list(
+    items, total = await service.get_list(
         username,
         domain_name=domain_name,
         limit=limit,
         offset=offset,
+    )
+    return PaginatedResponse[ConversationListItem](
+        items=items, total=total, limit=limit, offset=offset,
     )
 
 

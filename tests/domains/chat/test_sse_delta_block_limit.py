@@ -440,7 +440,7 @@ async def test_orchestrator_stream_truncates_huge_llm_chunk(
         delta_block_max_bytes=65536,
     )
     msg_service = AsyncMock()
-    msg_service.get_history = AsyncMock(return_value=[])
+    msg_service.load_history_for_llm = AsyncMock(return_value=[])
     msg_service.save_assistant_message = AsyncMock(return_value={"id": "m1"})
     conv_service = AsyncMock()
     orch = Orchestrator(

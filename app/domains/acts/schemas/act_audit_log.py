@@ -15,12 +15,6 @@ class AuditLogEntry(BaseModel):
     created_at: datetime
 
 
-class AuditLogResponse(BaseModel):
-    """Список записей аудит-лога с пагинацией."""
-    items: list[AuditLogEntry]
-    total: int
-
-
 class ContentVersionEntry(BaseModel):
     """Запись версии содержимого (без данных)."""
     id: int
@@ -28,12 +22,6 @@ class ContentVersionEntry(BaseModel):
     save_type: str
     username: str
     created_at: datetime
-
-
-class ContentVersionsResponse(BaseModel):
-    """Список версий с пагинацией."""
-    items: list[ContentVersionEntry]
-    total: int
 
 
 class ContentVersionDetail(BaseModel):

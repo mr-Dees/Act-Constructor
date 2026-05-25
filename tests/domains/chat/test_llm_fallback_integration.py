@@ -94,7 +94,7 @@ def _make_response(content: str = "Привет"):
 
 def _make_orchestrator(settings: ChatDomainSettings) -> Orchestrator:
     return Orchestrator(
-        msg_service=AsyncMock(get_history=AsyncMock(return_value=[])),
+        msg_service=AsyncMock(load_history_for_llm=AsyncMock(return_value=[])),
         conv_service=AsyncMock(),
         settings=settings,
     )
