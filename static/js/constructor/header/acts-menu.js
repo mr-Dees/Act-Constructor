@@ -610,4 +610,16 @@ class ActsMenuManager {
 }
 
 window.ActsMenuManager = ActsMenuManager;
-document.addEventListener('DOMContentLoaded', () => ActsMenuManager.init());
+document.addEventListener('DOMContentLoaded', async () => {
+    // Ждём готовности авторизации: при пустом localStorage (first-time
+    // users, очистка браузера, истечение сессии) auth.js асинхронно
+    // делает fetch /auth/me. До его завершения AuthManager.getCurrentUser()
+    // возвращает null, и _autoLoadAct падает с "Пользователь не авторизован".
+    // Если promise resolved=false — AuthManager уже выполнил redirect на
+    // /error/401 в _showAuthError; init не нужен.
+    if (window.__authReady) {
+        const ok = await window.__authReady;
+        if (!ok) return;
+    }
+    ActsMenuManager.init();
+});
