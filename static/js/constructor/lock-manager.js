@@ -162,7 +162,11 @@ class LockManager {
             } catch {
                 error = {detail: `Акт заблокирован (${response.status})`};
             }
-            const lockedBy = this._extractUsernameFromError(error.detail);
+            // Envelope ActLockError: {detail, code: 'act-locked', extra: {locked_by, locked_until}}.
+            // Fallback на регекс по detail — для совместимости с не-AppError ответами.
+            const lockedBy = (error.code === 'act-locked' && error.extra?.locked_by)
+                ? error.extra.locked_by
+                : this._extractUsernameFromError(error.detail);
 
             await DialogManager.show({
                 title: 'Акт редактируется',
@@ -215,6 +219,7 @@ class LockManager {
      * @private
      */
     static _extractUsernameFromError(errorDetail) {
+        if (typeof errorDetail !== 'string') return 'другим пользователем';
         const match = errorDetail.match(/пользователем\s+([^\s.]+)/);
         return match ? match[1] : 'другим пользователем';
     }

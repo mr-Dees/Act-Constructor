@@ -228,11 +228,23 @@ class ActCrudService:
     # SIMPLE CRUD
     # -------------------------------------------------------------------------
 
-    async def list_acts(self, username: str) -> list[ActListItem]:
-        """Получает список актов пользователя."""
-        acts = await self._crud.get_user_acts(username)
-        logger.info(f"Получен список актов для {username}: {len(acts)} шт.")
-        return acts
+    async def list_acts(
+        self,
+        username: str,
+        *,
+        limit: int = 50,
+        offset: int = 0,
+    ) -> tuple[list[ActListItem], int]:
+        """Получает страницу актов пользователя и общее количество."""
+        total = await self._crud.count_user_acts(username)
+        acts = await self._crud.get_user_acts(
+            username, limit=limit, offset=offset,
+        )
+        logger.info(
+            "Получен список актов для %s: %s из %s (limit=%s, offset=%s)",
+            username, len(acts), total, limit, offset,
+        )
+        return acts, total
 
     async def get_act(self, act_id: int, username: str) -> ActResponse:
         """Получает полную информацию об акте."""

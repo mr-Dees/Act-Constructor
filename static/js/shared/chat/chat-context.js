@@ -221,7 +221,8 @@ const ChatContext = {
             const response = await fetch(url, { headers });
             if (!response.ok) throw new Error(`HTTP ${response.status}`);
 
-            const messages = await response.json();
+            const data = await response.json();
+            const messages = data.items || [];
 
             ChatEventBus.emit('context:conversation-switched', {
                 conversationId,

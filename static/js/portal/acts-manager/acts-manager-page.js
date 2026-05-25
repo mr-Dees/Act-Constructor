@@ -223,7 +223,8 @@ class ActsManagerPage {
                 throw new Error('Ошибка загрузки списка актов');
             }
 
-            const acts = await response.json();
+            const data = await response.json();
+            const acts = data.items || [];
 
             if (!acts.length) {
                 this._showEmptyState(container);

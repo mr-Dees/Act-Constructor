@@ -70,7 +70,7 @@ def settings_no_streaming():
 def msg_service():
     """Mock MessageService."""
     svc = AsyncMock()
-    svc.get_history = AsyncMock(return_value=[])
+    svc.load_history_for_llm = AsyncMock(return_value=[])
     svc.save_assistant_message = AsyncMock(return_value={"id": "msg-1"})
     return svc
 

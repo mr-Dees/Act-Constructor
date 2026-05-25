@@ -103,7 +103,8 @@ class ActsMenuManager {
         });
         if (!response.ok) throw new Error('Ошибка загрузки списка актов');
 
-        const acts = await response.json();
+        const data = await response.json();
+        const acts = data.items || [];
         this._saveToCache(acts);
         return acts;
     }

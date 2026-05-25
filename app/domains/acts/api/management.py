@@ -6,11 +6,12 @@ API эндпоинты для управления актами.
 
 import logging
 
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, Query
 
 logger = logging.getLogger("audit_workstation.api.acts.management")
 
 from app.api.v1.deps.auth_deps import get_username
+from app.core.responses import PaginatedResponse
 from app.domains.acts.deps import get_crud_service, get_lock_service, _get_acts_settings
 from app.domains.acts.schemas.act_metadata import ActCreate, ActUpdate, ActListItem, ActResponse, AuditPointIdsRequest
 from app.schemas.errors import ErrorDetail, LockErrorDetail, KmConflictDetail
@@ -27,13 +28,18 @@ from app.domains.acts.settings import ActsSettings
 router = APIRouter()
 
 
-@router.get("/list", response_model=list[ActListItem])
+@router.get("/list", response_model=PaginatedResponse[ActListItem])
 async def list_user_acts(
         username: str = Depends(get_username),
+        limit: int = Query(50, ge=1, le=200),
+        offset: int = Query(0, ge=0),
         service: ActCrudService = Depends(get_crud_service),
 ):
     """Получает список актов пользователя (только те, где участвует)."""
-    return await service.list_acts(username)
+    items, total = await service.list_acts(username, limit=limit, offset=offset)
+    return PaginatedResponse[ActListItem](
+        items=items, total=total, limit=limit, offset=offset,
+    )
 
 
 @router.post("/{act_id}/lock", response_model=LockResponse, status_code=200, responses={403: {"description": "Нет доступа к акту", "model": ErrorDetail}, 404: {"description": "Акт не найден", "model": ErrorDetail}, 409: {"description": "Акт заблокирован другим пользователем", "model": LockErrorDetail}})

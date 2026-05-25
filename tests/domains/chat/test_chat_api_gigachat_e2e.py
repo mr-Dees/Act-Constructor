@@ -94,7 +94,7 @@ async def test_gigachat_orchestrator_executes_tool_round():
     )
 
     msg_service = MagicMock()
-    msg_service.get_history = AsyncMock(return_value=[])
+    msg_service.load_history_for_llm = AsyncMock(return_value=[])
     conv_service = MagicMock()
     save_calls: list[dict] = []
 

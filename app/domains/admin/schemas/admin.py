@@ -54,9 +54,3 @@ class AuditLogEntry(BaseModel):
     role_name: str = ""
     details: str = ""
     created_at: datetime
-
-
-class AuditLogResponse(BaseModel):
-    """Ответ со списком записей аудит-лога."""
-    items: list[AuditLogEntry]
-    total: int

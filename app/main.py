@@ -397,7 +397,7 @@ def create_app() -> FastAPI:
         """Единый обработчик всех доменных исключений."""
         if _is_html_request(request):
             return _render_error_page(request, exc.status_code)
-        return JSONResponse(status_code=exc.status_code, content=exc.to_detail())
+        return JSONResponse(status_code=exc.status_code, content=exc.to_envelope())
 
     @app.exception_handler(UniqueViolationError)
     async def unique_violation_handler(request: Request, exc: UniqueViolationError) -> JSONResponse:
@@ -405,7 +405,10 @@ def create_app() -> FastAPI:
         logger.warning(f"UniqueViolationError: {exc} (path: {request.url.path})")
         return JSONResponse(
             status_code=409,
-            content={"detail": "Запись с такими данными уже существует"},
+            content={
+                "detail": "Запись с такими данными уже существует",
+                "code": "db-unique-violation",
+            },
         )
 
     @app.exception_handler(CheckViolationError)
@@ -420,14 +423,20 @@ def create_app() -> FastAPI:
                 detail = message
                 break
 
-        return JSONResponse(status_code=422, content={"detail": detail})
+        return JSONResponse(
+            status_code=422,
+            content={"detail": detail, "code": "db-check-violation"},
+        )
 
     @app.exception_handler(HTTPException)
     async def http_exception_handler(request: Request, exc: HTTPException):
         """HTTP-ошибки: HTML-страница для браузера, JSON для API."""
         if _is_html_request(request):
             return _render_error_page(request, exc.status_code)
-        return JSONResponse(status_code=exc.status_code, content={"detail": exc.detail})
+        return JSONResponse(
+            status_code=exc.status_code,
+            content={"detail": exc.detail, "code": "http-error"},
+        )
 
     @app.exception_handler(Exception)
     async def generic_exception_handler(request: Request, exc: Exception):
@@ -437,7 +446,10 @@ def create_app() -> FastAPI:
             return _render_error_page(request, 500)
         return JSONResponse(
             status_code=500,
-            content={"detail": "Внутренняя ошибка сервера"},
+            content={
+                "detail": "Внутренняя ошибка сервера",
+                "code": "internal-server-error",
+            },
         )
 
     # Подключение роута ошибок (до portal_router)

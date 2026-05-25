@@ -69,7 +69,8 @@ const ChatHistory = {
                 throw new Error(`HTTP ${response.status}`);
             }
 
-            this._conversations = await response.json();
+            const data = await response.json();
+            this._conversations = data.items || [];
 
             this._render();
         } catch (err) {

@@ -105,11 +105,15 @@ class ConversationService:
         domain_name: str | None = None,
         limit: int = 50,
         offset: int = 0,
-    ) -> list[dict]:
-        """Возвращает список бесед пользователя."""
-        return await self.conv_repo.get_by_user(
+    ) -> tuple[list[dict], int]:
+        """Возвращает страницу бесед пользователя и общее количество."""
+        items = await self.conv_repo.get_by_user(
             user_id, domain_name=domain_name, limit=limit, offset=offset,
         )
+        total = await self.conv_repo.count_by_user(
+            user_id, domain_name=domain_name,
+        )
+        return items, total
 
     async def get(self, conversation_id: str, user_id: str) -> dict:
         """

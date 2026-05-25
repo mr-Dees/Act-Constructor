@@ -51,11 +51,11 @@ class FRValidationService:
         end_date: date | None = None,
         metric_code: list[str] | None = None,
         process_code: list[str] | None = None,
-        limit: int = 100,
+        limit: int = 50,
         offset: int = 0,
-    ) -> list[dict]:
-        """Поиск записей FR-валидации по фильтрам."""
-        return await self.fr_repo.search(
+    ) -> tuple[list[dict], int]:
+        """Поиск записей FR-валидации: страница + общее количество."""
+        items = await self.fr_repo.search(
             start_date=start_date,
             end_date=end_date,
             metric_code=metric_code,
@@ -63,6 +63,13 @@ class FRValidationService:
             limit=limit,
             offset=offset,
         )
+        total = await self.fr_repo.count_search(
+            start_date=start_date,
+            end_date=end_date,
+            metric_code=metric_code,
+            process_code=process_code,
+        )
+        return items, total
 
     # ------------------------------------------------------------------
     # ПОЛУЧЕНИЕ ПО ID

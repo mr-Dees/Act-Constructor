@@ -29,10 +29,16 @@ class UserDirectoryRepository(BaseRepository):
         ud = settings.user_directory
         self.user_table = self.adapter.qualify_table_name(ud.table, ud.schema_name)
 
-    async def search_users(self, query: str, limit: int = 20) -> list[dict]:
-        """Поиск по ФИО (ILIKE) или логину (LIKE)."""
+    @staticmethod
+    def _build_pattern(query: str) -> str:
         escaped = query.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
-        pattern = f"%{escaped}%"
+        return f"%{escaped}%"
+
+    async def search_users(
+        self, query: str, limit: int = 20, offset: int = 0,
+    ) -> list[dict]:
+        """Поиск по ФИО (ILIKE) или логину (LIKE)."""
+        pattern = self._build_pattern(query)
         rows = await self.conn.fetch(
             f"""
             SELECT username, fullname, job FROM (
@@ -45,10 +51,26 @@ class UserDirectoryRepository(BaseRepository):
                 ORDER BY username
             ) sub
             ORDER BY fullname
-            LIMIT $3
+            LIMIT $3 OFFSET $4
             """,
             pattern,
             pattern,
             limit,
+            offset,
         )
         return [dict(r) for r in rows]
+
+    async def count_users(self, query: str) -> int:
+        """Считает количество DISTINCT username, удовлетворяющих фильтру."""
+        pattern = self._build_pattern(query)
+        return await self.conn.fetchval(
+            f"""
+            SELECT COUNT(*) FROM (
+                SELECT DISTINCT username
+                FROM {self.user_table}
+                WHERE fullname ILIKE $1 OR username LIKE $2
+            ) sub
+            """,
+            pattern,
+            pattern,
+        )

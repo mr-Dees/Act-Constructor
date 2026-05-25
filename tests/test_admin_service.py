@@ -33,19 +33,26 @@ class TestGetUserDirectory:
 
     async def test_passes_branch_filter(self, service, mock_repo):
         mock_repo.get_users_with_roles.return_value = []
-        result = await service.get_user_directory()
+        mock_repo.count_users_with_roles.return_value = 0
+        items, total = await service.get_user_directory()
         mock_repo.get_users_with_roles.assert_called_once_with(
-            "Отдел аудита розничного бизнеса"
+            "Отдел аудита розничного бизнеса", limit=50, offset=0,
         )
-        assert result == []
+        mock_repo.count_users_with_roles.assert_called_once_with(
+            "Отдел аудита розничного бизнеса",
+        )
+        assert items == []
+        assert total == 0
 
     async def test_returns_users(self, service, mock_repo):
         mock_repo.get_users_with_roles.return_value = [
             {"username": "22494524", "fullname": "Маштаков Д.Р.", "roles": [], "is_department": True},
         ]
-        result = await service.get_user_directory()
-        assert len(result) == 1
-        assert result[0]["username"] == "22494524"
+        mock_repo.count_users_with_roles.return_value = 1
+        items, total = await service.get_user_directory()
+        assert len(items) == 1
+        assert items[0]["username"] == "22494524"
+        assert total == 1
 
 
 class TestSearchUsers:
@@ -54,21 +61,28 @@ class TestSearchUsers:
         mock_repo.search_users.return_value = [
             {"username": "22501010", "fullname": "Захарова М.Д.", "job": "", "email": ""},
         ]
-        result = await service.search_users("Захарова")
+        mock_repo.count_search_users.return_value = 1
+        items, total = await service.search_users("Захарова")
         mock_repo.search_users.assert_called_once_with(
-            "Захарова", "Отдел аудита розничного бизнеса"
+            "Захарова", "Отдел аудита розничного бизнеса", limit=50, offset=0,
         )
-        assert len(result) == 1
+        mock_repo.count_search_users.assert_called_once_with(
+            "Захарова", "Отдел аудита розничного бизнеса",
+        )
+        assert len(items) == 1
+        assert total == 1
 
     async def test_empty_query_returns_empty(self, service, mock_repo):
-        result = await service.search_users("")
+        items, total = await service.search_users("")
         mock_repo.search_users.assert_not_called()
-        assert result == []
+        assert items == []
+        assert total == 0
 
     async def test_short_query_returns_empty(self, service, mock_repo):
-        result = await service.search_users("З")
+        items, total = await service.search_users("З")
         mock_repo.search_users.assert_not_called()
-        assert result == []
+        assert items == []
+        assert total == 0
 
 
 class TestAssignRoleValidation:

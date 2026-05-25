@@ -51,7 +51,7 @@ def _build_app(
 
     @app.exception_handler(AppError)
     async def _app_err_handler(_request, exc: AppError) -> JSONResponse:
-        return JSONResponse(status_code=exc.status_code, content=exc.to_detail())
+        return JSONResponse(status_code=exc.status_code, content=exc.to_envelope())
 
     app.include_router(content_router, prefix="/api/v1/acts")
     app.include_router(audit_router, prefix="/api/v1/acts")
@@ -224,8 +224,8 @@ class TestSaveActContent:
 
         assert resp.status_code == 409
         body = resp.json()
-        # to_detail() для ActLockError содержит locked_by/locked_until
-        assert body["locked_by"] == "other-user"
+        # to_envelope() для ActLockError кладёт locked_by/locked_until в extra
+        assert body["extra"]["locked_by"] == "other-user"
 
     def test_save_content_no_edit_permission_returns_403(self):
         """Роль 'Участник' (viewer) → 403 через InsufficientRightsError."""

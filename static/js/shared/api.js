@@ -824,12 +824,20 @@ class APIClient {
     }
 
     /**
-     * Создает ошибку API с кодом
+     * Создает ошибку API.
+     * Поля:
+     *   - `status` — HTTP-статус ответа.
+     *   - `code` — машинный код из envelope бэка (kebab-case, см. AppError.to_envelope).
+     *     `null`, если ответ без envelope (timeout 408, non-JSON).
+     *   - `extra` — словарь дополнительных полей envelope (locked_by, retry_after_sec и т.п.),
+     *     `null`, если бэк его не прислал.
      * @private
      */
-    static _createError(status, detail) {
+    static _createError(status, detail, code = null, extra = null) {
         const error = new Error(detail);
         error.status = status;
+        error.code = code;
+        error.extra = extra;
         return error;
     }
 
@@ -885,9 +893,21 @@ class APIClient {
      */
     static async _throwApiError(response, fallbackDetail) {
         let detail;
+        let code = null;
+        let extra = null;
         try {
             const body = await response.json();
             detail = body.detail;
+            // Унифицированный error envelope из AppError.to_envelope():
+            //   {detail: str, code: kebab-case-str, extra?: dict}.
+            // `code`/`extra` есть только если бэк бросил AppError;
+            // generic-ответы (timeout, не-AppError exception) приходят без них.
+            if (typeof body.code === 'string') {
+                code = body.code;
+            }
+            if (body.extra && typeof body.extra === 'object') {
+                extra = body.extra;
+            }
             // FastAPI 422 возвращает detail как массив ValidationError-объектов:
             // [{loc, msg, type, ...}, ...]. Без форматирования в UI прилетал
             // "[object Object]". Сворачиваем в человекочитаемую строку, msg
@@ -902,7 +922,9 @@ class APIClient {
         }
         throw this._createError(
             response.status,
-            detail || fallbackDetail || `Ошибка сервера (${response.status})`
+            detail || fallbackDetail || `Ошибка сервера (${response.status})`,
+            code,
+            extra,
         );
     }
 
@@ -1070,7 +1092,8 @@ class APIClient {
             headers: { 'X-JupyterHub-User': username }
         });
         if (!response.ok) throw this._createError(response.status, 'Ошибка загрузки ролей');
-        return response.json();
+        const data = await response.json();
+        return data.items || [];
     }
 
     /**
@@ -1083,7 +1106,8 @@ class APIClient {
             headers: { 'X-JupyterHub-User': username }
         });
         if (!response.ok) throw this._createError(response.status, 'Ошибка загрузки справочника');
-        return response.json();
+        const data = await response.json();
+        return data.items || [];
     }
 
     /**
@@ -1139,7 +1163,8 @@ class APIClient {
             { headers: { 'X-JupyterHub-User': username }, signal }
         );
         if (!response.ok) throw this._createError(response.status, 'Ошибка поиска пользователей');
-        return response.json();
+        const data = await response.json();
+        return data.items || [];
     }
 
     /**
@@ -1172,7 +1197,8 @@ class APIClient {
             { headers: { 'X-JupyterHub-User': username } }
         );
         if (!response.ok) throw this._createError(response.status, 'Ошибка поиска пользователей');
-        return response.json();
+        const data = await response.json();
+        return data.items || [];
     }
 
     /**
@@ -1249,7 +1275,7 @@ class APIClient {
         });
         if (!response.ok) await this._throwApiError(response);
         const json = await response.json();
-        return json.data;
+        return json.items || [];
     }
 
     /**

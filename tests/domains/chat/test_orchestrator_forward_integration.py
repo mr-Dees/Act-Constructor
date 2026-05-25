@@ -117,7 +117,7 @@ async def test_forward_tool_call_streams_reasoning_and_final(monkeypatch):
     settings.agent_bridge.max_total_duration_sec = 5
 
     msg_service = AsyncMock()
-    msg_service.get_history = AsyncMock(return_value=[])
+    msg_service.load_history_for_llm = AsyncMock(return_value=[])
     conv_service = AsyncMock()
 
     orch = Orchestrator(
@@ -277,7 +277,7 @@ async def test_forward_emits_separate_block_per_reasoning_chunk(monkeypatch):
     settings.agent_bridge.max_total_duration_sec = 5
 
     msg_service = AsyncMock()
-    msg_service.get_history = AsyncMock(return_value=[])
+    msg_service.load_history_for_llm = AsyncMock(return_value=[])
     conv_service = AsyncMock()
 
     orch = Orchestrator(
@@ -490,7 +490,7 @@ async def test_buttons_block_emits_sse_buttons_not_block_start(monkeypatch):
     settings.agent_bridge.max_total_duration_sec = 5
 
     msg_service = AsyncMock()
-    msg_service.get_history = AsyncMock(return_value=[])
+    msg_service.load_history_for_llm = AsyncMock(return_value=[])
     conv_service = AsyncMock()
 
     orch = Orchestrator(
@@ -566,7 +566,7 @@ async def test_text_and_buttons_in_same_response_each_renders_correctly(monkeypa
     settings.agent_bridge.max_total_duration_sec = 5
 
     msg_service = AsyncMock()
-    msg_service.get_history = AsyncMock(return_value=[])
+    msg_service.load_history_for_llm = AsyncMock(return_value=[])
     conv_service = AsyncMock()
 
     orch = Orchestrator(
@@ -676,7 +676,7 @@ async def _run_forward_and_collect_events(monkeypatch, response_blocks):
     settings.agent_bridge.max_total_duration_sec = 5
 
     msg_service = AsyncMock()
-    msg_service.get_history = AsyncMock(return_value=[])
+    msg_service.load_history_for_llm = AsyncMock(return_value=[])
     conv_service = AsyncMock()
 
     orch = Orchestrator(

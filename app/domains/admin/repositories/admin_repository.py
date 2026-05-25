@@ -36,12 +36,27 @@ class AdminRepository(BaseRepository):
     # РОЛИ
     # -------------------------------------------------------------------------
 
-    async def get_all_roles(self) -> list[dict]:
-        """Возвращает все роли."""
+    async def get_all_roles(
+        self, *, limit: int = 50, offset: int = 0,
+    ) -> list[dict]:
+        """Возвращает роли с пагинацией."""
         rows = await self.conn.fetch(
-            f"SELECT id, name, domain_name, description FROM {self.roles} ORDER BY id"
+            f"""
+            SELECT id, name, domain_name, description
+            FROM {self.roles}
+            ORDER BY id
+            LIMIT $1 OFFSET $2
+            """,
+            limit,
+            offset,
         )
         return [dict(r) for r in rows]
+
+    async def count_all_roles(self) -> int:
+        """Возвращает общее количество ролей."""
+        return await self.conn.fetchval(
+            f"SELECT COUNT(*) FROM {self.roles}"
+        )
 
     async def get_role_by_name(self, name: str) -> dict | None:
         """Возвращает роль по имени."""
@@ -163,7 +178,9 @@ class AdminRepository(BaseRepository):
         logger.info("Массовое назначение ролей: %s из %s успешно", count, len(assignments))
         return count
 
-    async def get_users_with_roles(self, branch: str) -> list[dict]:
+    async def get_users_with_roles(
+        self, branch: str, *, limit: int = 50, offset: int = 0,
+    ) -> list[dict]:
         """
         Возвращает пользователей отдела + пользователей с ролями.
 
@@ -200,8 +217,11 @@ class AdminRepository(BaseRepository):
             LEFT JOIN {self.roles} r ON r.id = ur.role_id
             GROUP BY base.username, d.fullname, d.job, d.tn, d.email, d.branch
             ORDER BY COALESCE(d.fullname, base.username)
+            LIMIT $2 OFFSET $3
             """,
             branch,
+            limit,
+            offset,
         )
         result = []
         for row in rows:
@@ -213,7 +233,27 @@ class AdminRepository(BaseRepository):
             result.append(d)
         return result
 
-    async def search_users(self, query: str, branch: str, limit: int = 20) -> list[dict]:
+    async def count_users_with_roles(self, branch: str) -> int:
+        """Считает общее количество пользователей в справочнике
+        (DISTINCT username отдела + с ролями)."""
+        return await self.conn.fetchval(
+            f"""
+            SELECT COUNT(*) FROM (
+                SELECT username FROM {self.user_table} WHERE branch = $1
+                UNION
+                SELECT DISTINCT username FROM {self.user_roles}
+            ) base
+            """,
+            branch,
+        )
+
+    async def search_users(
+        self,
+        query: str,
+        branch: str,
+        limit: int = 50,
+        offset: int = 0,
+    ) -> list[dict]:
         """
         Поиск пользователей в справочнике по ФИО или username.
 
@@ -240,14 +280,37 @@ class AdminRepository(BaseRepository):
                 ORDER BY username
             ) sub
             ORDER BY fullname
-            LIMIT $4
+            LIMIT $4 OFFSET $5
             """,
             pattern,
             pattern,
             branch,
             limit,
+            offset,
         )
         return [dict(r) for r in rows]
+
+    async def count_search_users(self, query: str, branch: str) -> int:
+        """Считает общее число пользователей, удовлетворяющих фильтру поиска."""
+        escaped = query.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
+        pattern = f"%{escaped}%"
+        return await self.conn.fetchval(
+            f"""
+            SELECT COUNT(*) FROM (
+                SELECT DISTINCT username
+                FROM {self.user_table}
+                WHERE (fullname ILIKE $1 OR username LIKE $2)
+                  AND username NOT IN (
+                      SELECT username FROM {self.user_table} WHERE branch = $3
+                      UNION
+                      SELECT DISTINCT username FROM {self.user_roles}
+                  )
+            ) sub
+            """,
+            pattern,
+            pattern,
+            branch,
+        )
 
     # -------------------------------------------------------------------------
     # СПРАВОЧНИК ПОЛЬЗОВАТЕЛЕЙ
