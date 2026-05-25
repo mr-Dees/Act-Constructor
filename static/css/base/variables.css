@@ -692,6 +692,10 @@
     --transition-all: all 200ms ease;
     --transition-ripple: 600ms ease-out;
 
+    /* Алиасы длительностей (используются как `transition: prop var(--duration-*) ease`) */
+    --duration-fast: 150ms;
+    --duration-normal: 300ms;
+
     /* Timing functions для более сложных анимаций */
     --ease-in-out-smooth: cubic-bezier(0.4, 0, 0.2, 1);
     --ease-out-back: cubic-bezier(0.34, 1.56, 0.64, 1);
@@ -723,7 +727,9 @@
     --z-fixed: 1200;
     --z-modal-backdrop: 1300;
     --z-modal: 1400;
+    --z-modal-elevated: 1450;
     --z-popover: 1500;
+    --z-popover-elevated: 1550;
     --z-tooltip: 1600;
     --z-notification: 1700;
 
