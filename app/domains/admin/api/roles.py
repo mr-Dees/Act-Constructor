@@ -13,9 +13,10 @@ logger = logging.getLogger("audit_workstation.api.admin.roles")
 
 from app.api.v1.deps.auth_deps import get_username
 from app.api.v1.deps.role_deps import invalidate_user_roles_cache, require_admin
+from app.core.responses import PaginatedResponse
 from app.domains.admin.deps import get_admin_service
 from app.domains.admin.schemas.admin import (
-    AuditLogResponse,
+    AuditLogEntry,
     RoleAssignRequest,
     RoleSchema,
     UserDirectoryItem,
@@ -29,29 +30,44 @@ _admin = Depends(require_admin())
 router = APIRouter()
 
 
-@router.get("/roles", response_model=list[RoleSchema], dependencies=[_admin])
+@router.get("/roles", response_model=PaginatedResponse[RoleSchema], dependencies=[_admin])
 async def list_roles(
+    limit: int = Query(50, ge=1, le=200),
+    offset: int = Query(0, ge=0),
     service: AdminService = Depends(get_admin_service),
 ):
     """Возвращает список всех ролей системы."""
-    return await service.get_all_roles()
+    items, total = await service.get_all_roles(limit=limit, offset=offset)
+    return PaginatedResponse[RoleSchema](
+        items=items, total=total, limit=limit, offset=offset,
+    )
 
 
-@router.get("/users/directory", response_model=list[UserDirectoryItem], dependencies=[_admin])
+@router.get("/users/directory", response_model=PaginatedResponse[UserDirectoryItem], dependencies=[_admin])
 async def get_user_directory(
+    limit: int = Query(50, ge=1, le=200),
+    offset: int = Query(0, ge=0),
     service: AdminService = Depends(get_admin_service),
 ):
     """Возвращает справочник пользователей с назначенными ролями."""
-    return await service.get_user_directory()
+    items, total = await service.get_user_directory(limit=limit, offset=offset)
+    return PaginatedResponse[UserDirectoryItem](
+        items=items, total=total, limit=limit, offset=offset,
+    )
 
 
-@router.get("/users/search", response_model=list[UserSearchResult], dependencies=[_admin])
+@router.get("/users/search", response_model=PaginatedResponse[UserSearchResult], dependencies=[_admin])
 async def search_users(
     q: str = "",
+    limit: int = Query(50, ge=1, le=200),
+    offset: int = Query(0, ge=0),
     service: AdminService = Depends(get_admin_service),
 ):
     """Поиск пользователей в справочнике для добавления в систему."""
-    return await service.search_users(q)
+    items, total = await service.search_users(q, limit=limit, offset=offset)
+    return PaginatedResponse[UserSearchResult](
+        items=items, total=total, limit=limit, offset=offset,
+    )
 
 
 @router.get("/users/{username}/roles", response_model=UserRolesResponse, dependencies=[_admin])
@@ -99,7 +115,7 @@ async def remove_role(
     }
 
 
-@router.get("/audit-log", response_model=AuditLogResponse, dependencies=[_admin])
+@router.get("/audit-log", response_model=PaginatedResponse[AuditLogEntry], dependencies=[_admin])
 async def get_audit_log(
     action: str | None = Query(None, description="Фильтр по типу операции"),
     target_username: str | None = Query(None, description="Фильтр по целевому пользователю"),
@@ -120,4 +136,6 @@ async def get_audit_log(
         limit=limit,
         offset=offset,
     )
-    return {"items": items, "total": total}
+    return PaginatedResponse[AuditLogEntry](
+        items=items, total=total, limit=limit, offset=offset,
+    )

@@ -443,7 +443,25 @@ class ActCrudRepository(BaseRepository):
     # ЧТЕНИЕ
     # -------------------------------------------------------------------------
 
-    async def get_user_acts(self, username: str) -> list[ActListItem]:
+    async def count_user_acts(self, username: str) -> int:
+        """Считает количество актов, где пользователь является участником."""
+        return await self.conn.fetchval(
+            f"""
+            SELECT COUNT(DISTINCT a.id)
+            FROM {self.acts} a
+            INNER JOIN {self.audit_team} atm ON a.id = atm.act_id
+            WHERE atm.username = $1
+            """,
+            username,
+        )
+
+    async def get_user_acts(
+        self,
+        username: str,
+        *,
+        limit: int = 50,
+        offset: int = 0,
+    ) -> list[ActListItem]:
         """Получает список актов, где пользователь является участником."""
         rows = await self.conn.fetch(
             f"""
@@ -494,8 +512,11 @@ class ActCrudRepository(BaseRepository):
             ORDER BY
                 COALESCE(a.last_edited_at, a.created_at) DESC,
                 a.created_at DESC
+            LIMIT $2 OFFSET $3
             """,
             username,
+            limit,
+            offset,
         )
 
         return [

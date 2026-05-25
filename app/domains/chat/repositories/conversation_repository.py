@@ -157,8 +157,19 @@ class ConversationRepository(BaseRepository):
             )
         return result == "DELETE 1"
 
-    async def count_by_user(self, user_id: str) -> int:
-        """Возвращает количество бесед пользователя."""
+    async def count_by_user(
+        self, user_id: str, *, domain_name: str | None = None,
+    ) -> int:
+        """Возвращает количество бесед пользователя (опционально по домену)."""
+        if domain_name:
+            return await self.conn.fetchval(
+                f"""
+                SELECT COUNT(*) FROM {self.table}
+                WHERE user_id = $1 AND domain_name = $2
+                """,
+                user_id,
+                domain_name,
+            )
         return await self.conn.fetchval(
             f"SELECT COUNT(*) FROM {self.table} WHERE user_id = $1",
             user_id,

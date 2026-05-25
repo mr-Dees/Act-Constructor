@@ -75,21 +75,14 @@ class CSValidationRepository(BaseRepository):
     # ПОИСК
     # ------------------------------------------------------------------
 
-    async def search(
+    def _build_search_where(
         self,
-        start_date: date | None = None,
-        end_date: date | None = None,
-        metric_code: list[str] | None = None,
-        process_code: list[str] | None = None,
-        limit: int = 100,
-        offset: int = 0,
-    ) -> list[dict]:
-        """
-        Поиск записей CS-валидации по фильтрам.
-
-        Динамический WHERE-конструктор с параметризованными запросами.
-        Запрашивает VIEW (с вычисляемыми полями).
-        """
+        start_date: date | None,
+        end_date: date | None,
+        metric_code: list[str] | None,
+        process_code: list[str] | None,
+    ) -> tuple[str, list, int]:
+        """Собирает WHERE-часть SQL для поиска. Возвращает (clause, params, next_idx)."""
         conditions: list[str] = []
         params: list = []
         idx = 1
@@ -117,6 +110,26 @@ class CSValidationRepository(BaseRepository):
             idx += len(process_code)
 
         where = f" WHERE {' AND '.join(conditions)}" if conditions else ""
+        return where, params, idx
+
+    async def search(
+        self,
+        start_date: date | None = None,
+        end_date: date | None = None,
+        metric_code: list[str] | None = None,
+        process_code: list[str] | None = None,
+        limit: int = 50,
+        offset: int = 0,
+    ) -> list[dict]:
+        """
+        Поиск записей CS-валидации по фильтрам.
+
+        Динамический WHERE-конструктор с параметризованными запросами.
+        Запрашивает VIEW (с вычисляемыми полями).
+        """
+        where, params, idx = self._build_search_where(
+            start_date, end_date, metric_code, process_code,
+        )
         query = (
             f"SELECT * FROM {self.view}{where} "
             f"ORDER BY id DESC LIMIT ${idx} OFFSET ${idx + 1}"
@@ -126,6 +139,22 @@ class CSValidationRepository(BaseRepository):
         logger.debug("Поиск CS-валидации: %s параметров", len(params))
         rows = await self.conn.fetch(query, *params)
         return [dict(r) for r in rows]
+
+    async def count_search(
+        self,
+        start_date: date | None = None,
+        end_date: date | None = None,
+        metric_code: list[str] | None = None,
+        process_code: list[str] | None = None,
+    ) -> int:
+        """Считает количество записей, удовлетворяющих фильтрам поиска."""
+        where, params, _ = self._build_search_where(
+            start_date, end_date, metric_code, process_code,
+        )
+        return await self.conn.fetchval(
+            f"SELECT COUNT(*) FROM {self.view}{where}",
+            *params,
+        )
 
     # ------------------------------------------------------------------
     # ПОЛУЧЕНИЕ ПО ID

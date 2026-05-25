@@ -11,6 +11,7 @@ from fastapi.responses import StreamingResponse
 
 from app.api.v1.deps.auth_deps import get_username
 from app.api.v1.deps.role_deps import require_domain_access
+from app.core.responses import PaginatedResponse
 from app.domains.chat.deps import (
     get_conversation_service,
     get_file_service,
@@ -343,12 +344,12 @@ async def send_message(
 
 @router.get(
     "/conversations/{conversation_id}/messages",
-    response_model=list[MessageResponse],
+    response_model=PaginatedResponse[MessageResponse],
     summary="История сообщений",
 )
 async def get_messages(
     conversation_id: str,
-    limit: int = Query(100, ge=1, le=500),
+    limit: int = Query(50, ge=1, le=200),
     offset: int = Query(0, ge=0),
     username: str = Depends(get_username),
     conv_service: ConversationService = Depends(get_conversation_service),
@@ -358,10 +359,13 @@ async def get_messages(
     # Проверяем принадлежность беседы пользователю
     await conv_service.get(conversation_id, username)
 
-    return await msg_service.get_history(
+    items, total = await msg_service.get_history(
         conversation_id,
         limit=limit,
         offset=offset,
+    )
+    return PaginatedResponse[MessageResponse](
+        items=items, total=total, limit=limit, offset=offset,
     )
 
 

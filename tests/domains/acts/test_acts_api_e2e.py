@@ -76,7 +76,7 @@ def _build_app(
 
 def _make_crud_service() -> MagicMock:
     svc = MagicMock()
-    svc.list_acts = AsyncMock(return_value=[])
+    svc.list_acts = AsyncMock(return_value=([], 0))
     svc.get_act = AsyncMock()
     svc.create_act = AsyncMock()
     svc.update_act_metadata = AsyncMock()
@@ -196,17 +196,18 @@ class TestListActs:
     """GET /api/v1/acts/list возвращает массив актов."""
 
     def test_list_returns_empty_array(self):
-        """Пустой список — 200, [], сервис вызван с username."""
+        """Пустой список — 200, PaginatedResponse с items=[], сервис вызван с username + дефолтной пагинацией."""
         crud = _make_crud_service()
-        crud.list_acts.return_value = []
+        crud.list_acts.return_value = ([], 0)
         app = _build_app(crud_service=crud)
 
         with TestClient(app) as client:
             resp = client.get("/api/v1/acts/list")
 
         assert resp.status_code == 200
-        assert resp.json() == []
-        crud.list_acts.assert_awaited_once_with(USERNAME)
+        body = resp.json()
+        assert body == {"items": [], "total": 0, "limit": 50, "offset": 0}
+        crud.list_acts.assert_awaited_once_with(USERNAME, limit=50, offset=0)
 
     def test_list_unauthorized_returns_401(self):
         """Без авторизации — 401, сервис не вызван."""

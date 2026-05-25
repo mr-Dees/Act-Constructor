@@ -50,11 +50,11 @@ class CSValidationService:
         end_date: date | None = None,
         metric_code: list[str] | None = None,
         process_code: list[str] | None = None,
-        limit: int = 100,
+        limit: int = 50,
         offset: int = 0,
-    ) -> list[dict]:
-        """Поиск записей CS-валидации по фильтрам."""
-        return await self.cs_repo.search(
+    ) -> tuple[list[dict], int]:
+        """Поиск записей CS-валидации: страница + общее количество."""
+        items = await self.cs_repo.search(
             start_date=start_date,
             end_date=end_date,
             metric_code=metric_code,
@@ -62,6 +62,13 @@ class CSValidationService:
             limit=limit,
             offset=offset,
         )
+        total = await self.cs_repo.count_search(
+            start_date=start_date,
+            end_date=end_date,
+            metric_code=metric_code,
+            process_code=process_code,
+        )
+        return items, total
 
     # ------------------------------------------------------------------
     # ПОЛУЧЕНИЕ ПО ID
