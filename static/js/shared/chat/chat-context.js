@@ -98,7 +98,7 @@ const ChatContext = {
             this._currentConversationId = ChatHistory.getCurrentId();
         } else {
             // Fallback: создаём напрямую
-            const endpoint = '/api/v1/chat/conversations';
+            const endpoint = AppConfig.chatEndpoints.conversations;
             const url = typeof AppConfig !== 'undefined'
                 ? AppConfig.api.getUrl(endpoint)
                 : endpoint;
@@ -186,7 +186,7 @@ const ChatContext = {
 
         // Загружаем сообщения выбранной беседы
         try {
-            const endpoint = `/api/v1/chat/conversations/${conversationId}/messages`;
+            const endpoint = AppConfig.chatEndpoints.messages(conversationId);
             const url = typeof AppConfig !== 'undefined'
                 ? AppConfig.api.getUrl(endpoint)
                 : endpoint;
@@ -225,8 +225,7 @@ const ChatContext = {
     async checkActiveForward(conversationId) {
         if (!conversationId) return null;
         try {
-            const endpoint =
-                `/api/v1/chat/conversations/${conversationId}/active-forward`;
+            const endpoint = AppConfig.chatEndpoints.activeForward(conversationId);
             const url = (typeof AppConfig !== 'undefined')
                 ? AppConfig.api.getUrl(endpoint)
                 : endpoint;
