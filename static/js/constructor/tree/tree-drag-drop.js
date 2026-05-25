@@ -49,6 +49,9 @@ class TreeDragDrop {
      * Использует MutationObserver для динамического обновления атрибутов
      */
     enableDraggableItems() {
+        // E-7: предохраняем от двойной подписки при повторных init.
+        this._mutationObserver?.disconnect();
+
         const observer = new MutationObserver(() => {
             this.manager.container.querySelectorAll('.tree-item:not(.protected)')
                 .forEach(item => item.setAttribute('draggable', 'true'));
@@ -59,9 +62,22 @@ class TreeDragDrop {
             subtree: true
         });
 
+        // Сохраняем ссылку для destroy() — иначе observer висит на time of process.
+        this._mutationObserver = observer;
+
         // Начальная установка
         this.manager.container.querySelectorAll('.tree-item:not(.protected)')
             .forEach(item => item.setAttribute('draggable', 'true'));
+    }
+
+    /**
+     * Освобождает ресурсы drag-drop: отключает MutationObserver, сбрасывает
+     * состояние активного drag'а. Безопасно вызывать многократно.
+     */
+    destroy() {
+        this._mutationObserver?.disconnect();
+        this._mutationObserver = null;
+        this.cleanup();
     }
 
     /**
