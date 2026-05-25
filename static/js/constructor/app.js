@@ -271,8 +271,12 @@ class App {
      * @private
      */
     static _setupScrollPersistence() {
-        // Сохраняем позиции при уходе со страницы
-        window.addEventListener('beforeunload', () => this._saveScrollPositions());
+        // Сохраняем позиции при уходе со страницы (через общий реестр beforeunload).
+        if (typeof LifecycleHelper !== 'undefined') {
+            LifecycleHelper.registerBeforeUnload('app:scroll', () => this._saveScrollPositions());
+        } else {
+            window.addEventListener('beforeunload', () => this._saveScrollPositions());
+        }
 
         // Восстанавливаем позиции после полной отрисовки
         requestAnimationFrame(() => this._restoreScrollPositions());

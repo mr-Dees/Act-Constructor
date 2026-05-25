@@ -385,7 +385,11 @@ class LockManager {
                 this.destroy();
             }
         };
-        window.addEventListener('beforeunload', this._beforeUnloadHandler);
+        if (typeof LifecycleHelper !== 'undefined') {
+            LifecycleHelper.registerBeforeUnload('lock:manual-unlock', this._beforeUnloadHandler);
+        } else {
+            window.addEventListener('beforeunload', this._beforeUnloadHandler);
+        }
     }
 
     /**
@@ -394,7 +398,11 @@ class LockManager {
      */
     static disableBeforeUnload() {
         if (this._beforeUnloadHandler) {
-            window.removeEventListener('beforeunload', this._beforeUnloadHandler);
+            if (typeof LifecycleHelper !== 'undefined') {
+                LifecycleHelper.unregister('lock:manual-unlock');
+            } else {
+                window.removeEventListener('beforeunload', this._beforeUnloadHandler);
+            }
             this._beforeUnloadHandler = null;
             console.log('LockManager.beforeunload отключен');
         }

@@ -97,8 +97,10 @@ class StorageManager {
      * @private
      */
     static _setupEventHandlers() {
-        // Предупреждение при попытке закрыть страницу с несохраненными данными
-        window.addEventListener('beforeunload', (e) => {
+        // Предупреждение при попытке закрыть страницу с несохраненными данными.
+        // Регистрируется через общий реестр LifecycleHelper, чтобы можно было
+        // централизованно снять обработчик при destroy/teardown.
+        const beforeUnloadHandler = (e) => {
             // Сохраняем в localStorage перед закрытием
             if (this._hasUnsavedChanges) {
                 this.saveState(true);
@@ -115,7 +117,12 @@ class StorageManager {
                 e.returnValue = 'У вас есть несохраненные изменения. Вы уверены, что хотите покинуть страницу?';
                 return e.returnValue;
             }
-        });
+        };
+        if (typeof LifecycleHelper !== 'undefined') {
+            LifecycleHelper.registerBeforeUnload('storage:unsaved-warning', beforeUnloadHandler);
+        } else {
+            window.addEventListener('beforeunload', beforeUnloadHandler);
+        }
 
         // Перехват попыток навигации (для показа кастомного диалога)
         this._setupNavigationInterception();
