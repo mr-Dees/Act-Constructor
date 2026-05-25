@@ -1,28 +1,62 @@
-import { test, expect } from '@playwright/test';
-import { openAct, SEED_ACTS } from '../fixtures';
+import { test, expect, openAct, SEED_ACTS } from '../fixtures';
 
 /**
- * Операции с ячейками таблицы: merge/unmerge/insertRow/insertCol через
- * контекстное меню.
+ * Операции с ячейками таблицы через контекстное меню.
  *
- * TODO Phase 1: разблокировать после разведки context-menu для step2-таблиц.
- * Селекторы и порядок действий (right-click → choose item → re-find cell)
- * требуют итеративной отладки в реальной странице, не подходит для
- * первоначального baseline-набора.
- *
- * Сценарий когда заработает:
- * 1. openAct(SEED_ACTS.withContent) → step2 → найти таблицу tbl-seed-1
- * 2. выделить ячейки [0,0]+[0,1], right-click → "Объединить ячейки"
- * 3. assert: одна ячейка с colspan=2
- * 4. right-click на merged → "Разъединить" → assert: две ячейки снова
- * 5. right-click → "Вставить строку выше" → assert: rows.length+1
- * 6. right-click → "Вставить столбец слева" → assert: cols.length+1
+ * DOM-flow (разведано через MCP):
+ *  - Таблица: `.table-section[data-table-id=X] table.editable-table`
+ *  - Ячейка: `td[data-table-id=X][data-row=R][data-col=C]` (header — `th`)
+ *  - Выделение: click + ctrl-click (table-core.js:77 — без ctrl сбрасывает,
+ *    с ctrl добавляет); selectedCells получает класс `.selected`.
+ *  - Context-menu: contextmenu-эвент на ячейке → `.context-menu` (block-display)
+ *    с пунктами «🔗 Объединить ячейки», «↩️ Разъединить ячейку»,
+ *    «⬆️ Вставить строку выше», «⬇️ Вставить строку ниже», «🗑️ Удалить строку»,
+ *    «⬅️ Вставить колонку слева», «➡️ Вставить колонку справа», «🗑️ Удалить колонку».
+ *  - После merge: ячейка с (data-row, data-col) первой получает colSpan=2,
+ *    вторая помечается isSpanned и из DOM удаляется.
  */
 test.describe('Table cell operations @smoke', () => {
-  test('merge/unmerge cells через context-menu', async ({ page }) => {
-    test.skip(true,
-      'TODO: требует разведки context-menu для step2-таблиц (Phase 1)');
+  test('merge cells через context-menu увеличивает colSpan', async ({ page }) => {
     await openAct(page, SEED_ACTS.withContent);
-    expect(true).toBe(true);
+    await page.locator('.step[data-step="2"]').click();
+
+    // Дождаться рендера таблицы.
+    const tableSection = page.locator('.table-section[data-table-id="tbl-seed-1"]');
+    await expect(tableSection).toBeVisible({ timeout: 5000 });
+
+    // Селекторы: [1,0] и [1,1] — это data-row="1" (вторая строка, body).
+    const cell00 = page.locator(
+      'td[data-table-id="tbl-seed-1"][data-row="1"][data-col="0"]'
+    );
+    const cell01 = page.locator(
+      'td[data-table-id="tbl-seed-1"][data-row="1"][data-col="1"]'
+    );
+
+    // Сначала проверяем что обе ячейки на месте (colspan атрибут может быть
+    // отсутствовать — это эквивалент 1; не проверяем явно).
+    await expect(cell00).toBeVisible();
+    await expect(cell01).toBeVisible();
+
+    // Выделение: click + ctrl-click.
+    await cell00.click();
+    await cell01.click({ modifiers: ['Control'] });
+
+    // Проверим что обе .selected.
+    await expect(cell00).toHaveClass(/\bselected\b/);
+    await expect(cell01).toHaveClass(/\bselected\b/);
+
+    // Right-click для контекстного меню.
+    await cell01.click({ button: 'right' });
+
+    // Меню .context-menu (block) с пунктом «🔗 Объединить ячейки».
+    const mergeItem = page.locator('.context-menu-item', {
+      hasText: 'Объединить ячейки',
+    }).and(page.locator(':not(.disabled)'));
+    await expect(mergeItem).toBeVisible();
+    await mergeItem.click();
+
+    // После merge: cell00 имеет colSpan=2, cell01 удалена из DOM.
+    await expect(cell00).toHaveAttribute('colspan', '2');
+    await expect(cell01).toHaveCount(0);
   });
 });

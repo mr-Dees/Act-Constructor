@@ -1,5 +1,4 @@
-import { test, expect } from '@playwright/test';
-import { openAct, SEED_ACTS, trackConsoleErrors } from '../fixtures';
+import { test, expect, openAct, SEED_ACTS, trackConsoleErrors } from '../fixtures';
 
 test.describe('Open existing act @smoke', () => {
   test('загружает конструктор без console-ошибок и рендерит ключевые селекторы', async ({ page }) => {
