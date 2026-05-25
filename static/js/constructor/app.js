@@ -14,6 +14,16 @@ class App {
      */
     static init() {
         try {
+            // С defer-загрузкой scripts state-core.js может успеть установить
+            // Proxy ДО App.init: его bottom-code в ветке `readyState !== 'loading'`
+            // ставит setTimeout(0), который выполняется до DOMContentLoaded-обработчика
+            // app.js. Без явного disableTracking() мутации внутри _initializeState()
+            // (AppState.initializeTree → generateNumbering → ...) трекаются Proxy
+            // и поднимают _hasUnsavedChanges=true ДО StorageManager.init(), из-за чего
+            // индикатор стартует в local-only/unsaved вместо saved.
+            // markAsSyncedWithDB() в финале сбрасывает оба флага в "чистое" состояние.
+            StorageManager.disableTracking();
+
             this._initializeState();
             this._initializeStorageManager();
             this._initializeManagers();
@@ -27,9 +37,18 @@ class App {
             if (AppConfig.readOnlyMode?.isReadOnly) {
                 this._applyReadOnlyMode();
             }
+
+            // Сбрасываем флаги после init: дефолтное дерево/таблицы — это не
+            // правки пользователя, а bootstrap-состояние. После loadActContent
+            // данные перезапишутся и тоже не должны считаться "грязными".
+            StorageManager.markAsSyncedWithDB();
+            StorageManager.enableTracking();
         } catch (err) {
             console.error('Критическая ошибка инициализации приложения:', err);
             Notifications.error(`Ошибка инициализации приложения: ${err.message}`);
+            // Даже при ошибке снимаем tracking-гард, иначе все последующие
+            // правки пользователя перестанут трекаться.
+            StorageManager.enableTracking();
         }
     }
 
