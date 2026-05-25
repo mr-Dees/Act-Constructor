@@ -1,26 +1,32 @@
 """Доменные исключения актов."""
 
+from typing import ClassVar
+
 from app.core.exceptions import AppError
 
 
 class ActNotFoundError(AppError):
     """Акт или связанный ресурс не найден."""
     status_code = 404
+    code: ClassVar[str] = "act-not-found"
 
 
 class AccessDeniedError(AppError):
     """Пользователь не имеет доступа к акту."""
     status_code = 403
+    code: ClassVar[str] = "access-denied"
 
 
 class InsufficientRightsError(AppError):
     """Пользователь имеет доступ, но не имеет прав на данную операцию."""
     status_code = 403
+    code: ClassVar[str] = "insufficient-rights"
 
 
 class ActLockError(AppError):
     """Акт заблокирован другим пользователем или блокировка нарушена."""
     status_code = 409
+    code: ClassVar[str] = "act-locked"
 
     def __init__(
         self,
@@ -31,18 +37,16 @@ class ActLockError(AppError):
         super().__init__(message)
         self.locked_by = locked_by
         self.locked_until = locked_until
-
-    def to_detail(self) -> dict:
-        return {
-            "detail": self.message,
-            "locked_by": self.locked_by,
-            "locked_until": self.locked_until,
+        self.extra = {
+            "locked_by": locked_by,
+            "locked_until": locked_until,
         }
 
 
 class KmConflictError(AppError):
     """Акт с таким КМ уже существует (конфликт уникальности)."""
     status_code = 409
+    code: ClassVar[str] = "km-number-exists"
 
     def __init__(
         self,
@@ -55,42 +59,44 @@ class KmConflictError(AppError):
         self.km_number = km_number
         self.current_parts = current_parts
         self.next_part = next_part
-
-    def to_detail(self) -> dict:
-        return {
-            "detail": self.message,
-            "type": "km_exists",
-            "km_number": self.km_number,
-            "current_parts": self.current_parts,
-            "next_part": self.next_part,
+        self.extra = {
+            "km_number": km_number,
+            "current_parts": current_parts,
+            "next_part": next_part,
         }
 
 
 class ActValidationError(AppError):
     """Ошибка бизнес-валидации данных акта."""
     status_code = 400
+    code: ClassVar[str] = "act-validation"
 
 
 class UnsupportedFormatError(AppError):
     """Запрошен неподдерживаемый формат экспорта."""
     status_code = 400
+    code: ClassVar[str] = "act-unsupported-format"
 
 
 class ActExportValidationError(AppError):
     """Ошибка бизнес-валидации при экспорте акта (например, превышена глубина дерева)."""
     status_code = 400
+    code: ClassVar[str] = "act-export-validation"
 
 
 class ActExportTimeoutError(AppError):
     """Операция экспорта акта превысила допустимое время ожидания."""
     status_code = 408
+    code: ClassVar[str] = "act-export-timeout"
 
 
 class ManagementRoleRequiredError(AppError):
     """Операция доступна только для Куратора или Руководителя."""
     status_code = 403
+    code: ClassVar[str] = "act-management-role-required"
 
 
 class InvoiceError(AppError):
     """Ошибка при работе с фактурой (неподдерживаемый тип БД и т.п.)."""
     status_code = 400
+    code: ClassVar[str] = "act-invoice-error"

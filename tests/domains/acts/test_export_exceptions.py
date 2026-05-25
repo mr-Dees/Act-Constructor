@@ -37,10 +37,13 @@ def test_act_export_validation_error_is_app_error():
     assert isinstance(err, AppError)
 
 
-def test_act_export_validation_error_to_detail():
-    """ActExportValidationError.to_detail() возвращает стандартный dict."""
+def test_act_export_validation_error_to_envelope():
+    """ActExportValidationError.to_envelope() возвращает стандартный envelope."""
     err = ActExportValidationError("глубина 51 > 50")
-    assert err.to_detail() == {"detail": "глубина 51 > 50"}
+    assert err.to_envelope() == {
+        "detail": "глубина 51 > 50",
+        "code": "act-export-validation",
+    }
 
 
 def test_act_export_timeout_error_status_code():
@@ -56,10 +59,13 @@ def test_act_export_timeout_error_is_app_error():
     assert isinstance(err, AppError)
 
 
-def test_act_export_timeout_error_to_detail():
-    """ActExportTimeoutError.to_detail() возвращает стандартный dict."""
+def test_act_export_timeout_error_to_envelope():
+    """ActExportTimeoutError.to_envelope() возвращает стандартный envelope."""
     err = ActExportTimeoutError("timeout >300s")
-    assert err.to_detail() == {"detail": "timeout >300s"}
+    assert err.to_envelope() == {
+        "detail": "timeout >300s",
+        "code": "act-export-timeout",
+    }
 
 
 # ── Хелперы для тестов ExportService ──

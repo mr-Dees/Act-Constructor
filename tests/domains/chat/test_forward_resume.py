@@ -85,7 +85,7 @@ def _build_app(
 
     @app.exception_handler(AppError)
     async def _app_err_handler(_request, exc: AppError) -> JSONResponse:
-        return JSONResponse(status_code=exc.status_code, content=exc.to_detail())
+        return JSONResponse(status_code=exc.status_code, content=exc.to_envelope())
 
     app.include_router(conv_router, prefix="/api/v1/chat")
     app.include_router(forward_resume_router, prefix="/api/v1/chat")
@@ -198,7 +198,10 @@ class TestActiveForward:
             )
 
         assert resp.status_code == 404
-        assert resp.json() == {"detail": "Беседа не найдена"}
+        assert resp.json() == {
+            "detail": "Беседа не найдена",
+            "code": "conversation-not-found",
+        }
 
 
 # =========================================================================
@@ -329,7 +332,10 @@ class TestForwardStreamResume:
                 )
 
         assert resp.status_code == 404
-        assert resp.json() == {"detail": "Запрос агента не найден"}
+        assert resp.json() == {
+            "detail": "Запрос агента не найден",
+            "code": "conversation-not-found",
+        }
 
     def test_forward_stream_404_when_request_belongs_to_other_user(self):
         """Чужой request_id — но в нашей беседе — тоже 404."""
@@ -366,7 +372,10 @@ class TestForwardStreamResume:
                 )
 
         assert resp.status_code == 404
-        assert resp.json() == {"detail": "Запрос агента не найден"}
+        assert resp.json() == {
+            "detail": "Запрос агента не найден",
+            "code": "conversation-not-found",
+        }
 
     def test_forward_stream_ignores_post_messages_semaphore(self):
         """Resume SSE НЕ учитывается в семафоре _active_streams_per_user.

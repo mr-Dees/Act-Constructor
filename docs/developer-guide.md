@@ -661,28 +661,70 @@ class MessageResponse(BaseModel):
 ```python
 class AppError(Exception):
     status_code: int = 500
+    code: ClassVar[str] = "app-error"  # kebab-case, уникальный на подкласс
 
     def __init__(self, message: str) -> None:
         self.message = message
+        self.extra: dict[str, Any] = {}  # доп. поля envelope-а
         super().__init__(message)
 
-    def to_detail(self) -> dict:
-        return {"detail": self.message}
+    def to_envelope(self) -> dict[str, Any]:
+        envelope = {"detail": self.message, "code": self.code}
+        if self.extra:
+            envelope["extra"] = self.extra
+        return envelope
 ```
 
-**Доменные исключения** (`app/domains/acts/exceptions.py`):
+**Унифицированный error envelope** для всех HTTP-ответов:
 
-| Исключение | HTTP-код | Назначение |
-|-----------|----------|-----------|
-| `ActNotFoundError` | 404 | Акт не найден |
-| `AccessDeniedError` | 403 | Нет доступа |
-| `InsufficientRightsError` | 403 | Роль не позволяет |
-| `ActLockError` | 409 | Конфликт блокировки |
-| `KmConflictError` | 409 | КМ уже существует |
-| `ActValidationError` | 400 | Бизнес-валидация |
-| `UnsupportedFormatError` | 400 | Неподдерживаемый формат экспорта |
-| `ManagementRoleRequiredError` | 403 | Требуется Куратор/Руководитель |
-| `InvoiceError` | 400 | Ошибка фактуры |
+```json
+{"detail": "Человекочитаемое сообщение", "code": "kebab-case-machine-code", "extra": {...}}
+```
+
+`extra` — опциональный объект с типизированными доп. полями (например `{"locked_by": "11111111", "locked_until": "..."}` для `ActLockError`). Если у исключения нет доп. полей, `extra` в envelope **отсутствует**, не `null`.
+
+**Доменные исключения**:
+
+| Исключение | HTTP-код | `code` | Назначение |
+|-----------|----------|--------|-----------|
+| `ActNotFoundError` | 404 | `act-not-found` | Акт не найден |
+| `AccessDeniedError` | 403 | `access-denied` | Нет доступа |
+| `InsufficientRightsError` | 403 | `insufficient-rights` | Роль не позволяет |
+| `ActLockError` | 409 | `act-locked` | Конфликт блокировки (extra: locked_by, locked_until) |
+| `KmConflictError` | 409 | `km-number-exists` | КМ уже существует (extra: km_number, current_parts, next_part) |
+| `ActValidationError` | 400 | `act-validation` | Бизнес-валидация |
+| `UnsupportedFormatError` | 400 | `act-unsupported-format` | Неподдерживаемый формат экспорта |
+| `ActExportValidationError` | 400 | `act-export-validation` | Бизнес-валидация при экспорте |
+| `ActExportTimeoutError` | 408 | `act-export-timeout` | Таймаут экспорта |
+| `ManagementRoleRequiredError` | 403 | `act-management-role-required` | Требуется Куратор/Руководитель |
+| `InvoiceError` | 400 | `act-invoice-error` | Ошибка фактуры |
+| `ChatLimitError` | 422 | `chat-limit-exceeded` | Превышен лимит чата |
+| `ChatFileValidationError` | 422 | `chat-file-validation` | Файл не прошёл валидацию |
+| `ChatFileNotFoundError` | 404 | `chat-file-not-found` | Файл чата не найден |
+| `ChatToolValidationError` | 400 | `chat-tool-validation` | ChatTool: невалидный вызов |
+| `ChatStreamAlreadyActiveError` | 429 | `chat-stream-already-active` | Уже идёт активный SSE |
+| `ChatRateLimitError` | 429 | `chat-rate-limit` | Per-user rate-limit (extra: retry_after_sec) |
+| `ConversationNotFoundError` | 404 | `conversation-not-found` | Беседа не найдена |
+| `ConversationLockedError` | 409 | `conversation-locked` | Беседа занята активным стримом |
+| `OptimisticLockFailed` | 409 | `chat-optimistic-lock-failed` | Optimistic lock в agent_request |
+| `UserNotFoundError` | 404 | `admin-user-not-found` | Пользователь не найден |
+| `RoleNotFoundError` | 404 | `admin-role-not-found` | Роль не найдена |
+| `AdminAccessDeniedError` | 403 | `admin-access-denied` | Не админ |
+| `LastAdminError` | 409 | `admin-last-admin` | Последний админ |
+| `FRRecordNotFoundError` | 404 | `ck-fin-res-record-not-found` | FR-запись не найдена |
+| `FRValidationError` | 400 | `ck-fin-res-validation` | FR-валидация |
+| `CSRecordNotFoundError` | 404 | `ck-client-exp-record-not-found` | CS-запись не найдена |
+| `CSValidationError` | 400 | `ck-client-exp-validation` | CS-валидация |
+
+`AppError` напрямую (без подкласса) → `code = "app-error"` (fallback, используется в обёртках OSError/MemoryError в `ExportService`).
+
+**Не-AppError-обработчики** в `main.py` тоже добавляют `code`:
+- `UniqueViolationError` → 409 + `code: db-unique-violation`
+- `CheckViolationError` → 422 + `code: db-check-violation`
+- `HTTPException` (FastAPI) → status + `code: http-error`
+- любой `Exception` → 500 + `code: internal-server-error`
+
+**Special-case** — Kerberos handler не меняет формат: возвращает `{"error": "kerberos_token_expired", "detail": ..., "instructions": [...], "action_required": "kinit"}`. Это сознательное исключение — фронт показывает развёрнутую инструкцию, формат завязан на UI.
 
 **Exception handlers** регистрируются в `main.py` и работают автоматически:
 
@@ -691,7 +733,7 @@ class AppError(Exception):
 async def app_error_handler(request, exc):
     if _is_html_request(request):
         return _render_error_page(request, exc.status_code)
-    return JSONResponse(status_code=exc.status_code, content=exc.to_detail())
+    return JSONResponse(status_code=exc.status_code, content=exc.to_envelope())
 ```
 
 Нет необходимости в try-except в эндпоинтах — достаточно бросить исключение из сервиса.

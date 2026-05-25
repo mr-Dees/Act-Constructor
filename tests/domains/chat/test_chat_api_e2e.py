@@ -81,7 +81,7 @@ def _build_app(
     # AppError-handler как в основном app/main.py
     @app.exception_handler(AppError)
     async def _app_err_handler(_request, exc: AppError) -> JSONResponse:
-        return JSONResponse(status_code=exc.status_code, content=exc.to_detail())
+        return JSONResponse(status_code=exc.status_code, content=exc.to_envelope())
 
     # Подключаем три chat-роутера под /api/v1/chat
     app.include_router(conv_router, prefix="/api/v1/chat")
@@ -822,7 +822,10 @@ class TestDownloadFile:
             resp = client.get("/api/v1/chat/files/missing")
 
         assert resp.status_code == 404, resp.text
-        assert resp.json() == {"detail": "Файл не найден"}
+        assert resp.json() == {
+            "detail": "Файл не найден",
+            "code": "chat-file-not-found",
+        }
 
 
 # -------------------------------------------------------------------------

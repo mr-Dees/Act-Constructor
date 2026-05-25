@@ -56,7 +56,7 @@ def _build_app(
     # Глобальный AppError-handler — как в app/main.py
     @app.exception_handler(AppError)
     async def _app_err_handler(_request, exc: AppError) -> JSONResponse:
-        return JSONResponse(status_code=exc.status_code, content=exc.to_detail())
+        return JSONResponse(status_code=exc.status_code, content=exc.to_envelope())
 
     app.include_router(management_router, prefix="/api/v1/acts")
     app.include_router(invoice_router, prefix="/api/v1/acts/invoice")
@@ -287,8 +287,8 @@ class TestCreateAct:
 
         assert resp.status_code == 409
         body = resp.json()
-        assert body["type"] == "km_exists"
-        assert body["next_part"] == 2
+        assert body["code"] == "km-number-exists"
+        assert body["extra"]["next_part"] == 2
 
     def test_create_audit_team_without_curator_returns_422(self):
         """Аудиторская группа без куратора — 422 (model_validator)."""
@@ -455,7 +455,7 @@ class TestDeleteAct:
 
         assert resp.status_code == 409
         body = resp.json()
-        assert body["locked_by"] == "11111111"
+        assert body["extra"]["locked_by"] == "11111111"
 
 
 # -------------------------------------------------------------------------
@@ -500,8 +500,8 @@ class TestLockEndpoints:
 
         assert resp.status_code == 409
         body = resp.json()
-        assert body["locked_by"] == "11111111"
-        assert body["locked_until"] == "2026-05-18T12:30:00"
+        assert body["extra"]["locked_by"] == "11111111"
+        assert body["extra"]["locked_until"] == "2026-05-18T12:30:00"
 
     def test_unlock_returns_200(self):
         """Успешный unlock — 200 + OperationResult."""
