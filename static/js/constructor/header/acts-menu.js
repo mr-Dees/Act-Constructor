@@ -569,7 +569,9 @@ class ActsMenuManager {
     static init() {
         const menuBtn = document.getElementById('actsMenuBtn');
         const closeBtn = document.getElementById('closeActsMenuBtn');
-        const createBtn = document.getElementById('createNewActBtn');
+        // ID переименован в `headerCreateNewActBtn`, чтобы не конфликтовать с одноимённой
+        // кнопкой в acts_manager.html (там id оставлен — он уникален внутри своей страницы).
+        const createBtn = document.getElementById('headerCreateNewActBtn');
         const editBtn = document.getElementById('editMetadataBtn');
         const duplicateBtn = document.getElementById('duplicateActBtn');
         const deleteBtn = document.getElementById('deleteActBtn');
