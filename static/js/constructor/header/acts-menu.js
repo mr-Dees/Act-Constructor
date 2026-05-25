@@ -360,6 +360,13 @@ class ActsMenuManager {
 
             this.currentActId = actId;
             window.currentActId = actId;
+            // Сброс per-act трекеров перед init нового акта:
+            //  - ChangelogTracker.destroy: иначе pending debounce/persist старого акта
+            //    запишут отложенный entry с уже сменённым _storageKey;
+            //  - violationManager — сброс через removeViolation на удаление узлов (state-tree).
+            if (typeof ChangelogTracker !== 'undefined' && typeof ChangelogTracker.destroy === 'function') {
+                ChangelogTracker.destroy();
+            }
             if (typeof ChangelogTracker !== 'undefined') ChangelogTracker.init(actId);
             window.history.pushState({actId}, '', AppConfig.api.getUrl(`/constructor?act_id=${actId}`));
             StorageManager.markAsSyncedWithDB();

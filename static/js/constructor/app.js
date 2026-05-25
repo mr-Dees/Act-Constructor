@@ -6,8 +6,44 @@
  * Интегрирован с StorageManager для автосохранения.
  */
 class App {
-    static _stepStorageKey = 'constructor_current_step';
-    static _scrollStorageKey = 'constructor_scroll_positions';
+    // Базовые префиксы LS-ключей. Реальные ключи строятся через _getStepKey/_getScrollKey
+    // и включают act_id, чтобы шаг и скролл одного акта не подтекали в другой.
+    // Старые ключи без суффикса удаляются в _migrateLegacyKeys() при init.
+    static _stepKeyPrefix = 'constructor_current_step';
+    static _scrollKeyPrefix = 'constructor_scroll_positions';
+    static _stepStorageKey = 'constructor_current_step';   // legacy (для миграции)
+    static _scrollStorageKey = 'constructor_scroll_positions'; // legacy
+
+    /**
+     * Возвращает per-act LS-ключ для текущего шага.
+     * Если currentActId ещё не задан — fallback на legacy-ключ.
+     * @private
+     */
+    static _getStepKey() {
+        const id = window.currentActId;
+        return id ? `${this._stepKeyPrefix}:${id}` : this._stepStorageKey;
+    }
+
+    /**
+     * Возвращает per-act LS-ключ для позиций скролла.
+     * @private
+     */
+    static _getScrollKey() {
+        const id = window.currentActId;
+        return id ? `${this._scrollKeyPrefix}:${id}` : this._scrollStorageKey;
+    }
+
+    /**
+     * Одноразовая миграция: удаляет legacy-ключи без actId, которые могли
+     * остаться от предыдущих версий и шадовить per-act ключи.
+     * @private
+     */
+    static _migrateLegacyKeys() {
+        try {
+            localStorage.removeItem(this._stepStorageKey);
+            localStorage.removeItem(this._scrollStorageKey);
+        } catch { /* ignore */ }
+    }
 
     /**
      * Инициализация приложения при загрузке страницы
@@ -29,9 +65,12 @@ class App {
             this._initializeManagers();
             this._setupEventHandlers();
 
-            // Восстанавливаем шаг и позицию скролла из localStorage
+            // Восстанавливаем шаг и позицию скролла из localStorage (per-act ключи).
             this._restoreStep();
             this._setupScrollPersistence();
+            // После _restoreStep/_restoreScroll legacy-значения уже подхвачены
+            // в per-act ключи — теперь чистим старые.
+            this._migrateLegacyKeys();
 
             // Применяем режим только чтения если активен
             if (AppConfig.readOnlyMode?.isReadOnly) {
@@ -202,7 +241,9 @@ class App {
     static goToStep(stepNum) {
         // Обновляем текущий шаг
         AppState.currentStep = stepNum;
-        localStorage.setItem(this._stepStorageKey, stepNum);
+        try {
+            localStorage.setItem(this._getStepKey(), stepNum);
+        } catch { /* quota — ignore */ }
 
         this._updateStepVisibility(stepNum);
         this._handleStepTransition(stepNum);
@@ -215,7 +256,11 @@ class App {
      * @private
      */
     static _restoreStep() {
-        const saved = localStorage.getItem(this._stepStorageKey);
+        let saved = localStorage.getItem(this._getStepKey());
+        if (!saved && window.currentActId) {
+            // Fallback на legacy-ключ — мигрируем значение в per-act, legacy потом удалится.
+            saved = localStorage.getItem(this._stepStorageKey);
+        }
         if (saved) {
             const step = parseInt(saved, 10);
             if (step === 2) {
@@ -298,15 +343,20 @@ class App {
         const step2 = document.getElementById('step2');
         if (step2) positions.step2 = step2.scrollTop;
 
-        localStorage.setItem(this._scrollStorageKey, JSON.stringify(positions));
+        try {
+            localStorage.setItem(this._getScrollKey(), JSON.stringify(positions));
+        } catch { /* quota — ignore */ }
     }
 
     /**
-     * Восстанавливает позиции скролла из localStorage
+     * Восстанавливает позиции скролла из localStorage (per-act ключ с fallback на legacy).
      * @private
      */
     static _restoreScrollPositions() {
-        const saved = localStorage.getItem(this._scrollStorageKey);
+        let saved = localStorage.getItem(this._getScrollKey());
+        if (!saved && window.currentActId) {
+            saved = localStorage.getItem(this._scrollStorageKey);
+        }
         if (!saved) return;
 
         try {

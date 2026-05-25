@@ -269,6 +269,11 @@ Object.assign(AppState, {
             delete this.textBlocks[node.textBlockId];
         } else if (node.type === 'violation' && node.violationId) {
             delete this.violations[node.violationId];
+            // Чистим зеркальный реестр ViolationManager.activeViolations,
+            // иначе Map копит мёртвые объекты при удалении узлов.
+            if (typeof violationManager !== 'undefined' && typeof violationManager.removeViolation === 'function') {
+                violationManager.removeViolation(node.violationId);
+            }
         }
     },
 
