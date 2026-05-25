@@ -7,7 +7,16 @@
  */
 class PreviewManager {
     /**
-     * Обновляет содержимое панели предпросмотра
+     * Флаг запланированного RAF-обновления (дедупликация в пределах одного кадра).
+     * @private
+     */
+    static _pendingUpdate = false;
+    static _pendingOptions = null;
+
+    /**
+     * Обновляет содержимое панели предпросмотра.
+     * Дедуплицирует подряд идущие вызовы в пределах одного animation frame:
+     * на N вызовов выполнится ровно один _performUpdate с последними опциями.
      *
      * @param {Object|string} options - Настройки отображения или строка 'previewTrim' для обратной совместимости
      */
@@ -17,10 +26,21 @@ class PreviewManager {
             options = {previewTrim: AppConfig.preview.defaultTrimLength};
         }
 
-        const {previewTrim = AppConfig.preview.defaultTrimLength} = options;
+        if (this._pendingUpdate) {
+            // Подряд идущий вызов в том же кадре — мержим опции и выходим,
+            // существующий RAF подберёт обновлённый _pendingOptions.
+            Object.assign(this._pendingOptions, options);
+            return;
+        }
 
-        // Используем requestAnimationFrame вместо setTimeout для лучшей производительности
+        this._pendingUpdate = true;
+        this._pendingOptions = {...options};
+
         requestAnimationFrame(() => {
+            const opts = this._pendingOptions;
+            this._pendingUpdate = false;
+            this._pendingOptions = null;
+            const {previewTrim = AppConfig.preview.defaultTrimLength} = opts || {};
             this._performUpdate(previewTrim);
         });
     }
