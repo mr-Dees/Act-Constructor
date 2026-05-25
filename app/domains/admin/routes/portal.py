@@ -1,7 +1,7 @@
 """HTML-роут страницы администрирования."""
 
 from fastapi import APIRouter, Depends, Request
-from fastapi.responses import HTMLResponse
+from fastapi.responses import HTMLResponse, RedirectResponse
 
 from app.api.v1.deps.role_deps import get_user_roles
 from app.core.navigation import get_chat_domains_for_page, get_knowledge_bases_as_dicts, get_nav_items_for_user
@@ -17,9 +17,15 @@ async def show_admin_page(request: Request, roles: list[dict] = Depends(get_user
     """
     Страница администрирования.
 
-    Отображает управление ролями пользователей.
-    Авторизация и проверка роли Админ выполняется фронтендом.
+    Доступ только для пользователей с ролью «Админ». Прочие
+    перенаправляются на /portal/acts (303), чтобы не показывать
+    пустой шаблон с сообщением «Не удалось загрузить данные
+    администрирования» (API возвращает 403 для всех вложенных вызовов).
     """
+    is_admin = any(r.get("name") == "Админ" for r in roles)
+    if not is_admin:
+        return RedirectResponse(url="/portal/acts", status_code=303)
+
     return templates.TemplateResponse(
         request,
         "portal/admin/admin.html",

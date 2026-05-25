@@ -254,6 +254,11 @@ class TestAuditLogServiceRestore:
         ) as content_cls:
             instance = content_cls.return_value
             instance.save_content = AsyncMock()
+            # restore_version делает pre-snapshot через get_content
+            # (lost-write guard) — мок обязателен, иначе TypeError на await.
+            # Здесь возвращаем None: проверяем что без текущего контента
+            # pre-snapshot пропускается.
+            instance.get_content = AsyncMock(return_value=None)
             result = await svc.restore_version(
                 act_id=42,
                 version_id=100,
@@ -270,7 +275,8 @@ class TestAuditLogServiceRestore:
         assert details["from_version"] == 5
         assert details["version_id"] == 100
 
-        # Новая версия создана (snapshot после восстановления)
+        # Новая версия создана (snapshot после восстановления, без pre-snapshot
+        # так как get_content вернул None).
         versions_repo.create_version.assert_awaited_once()
         # Ответ содержит restored_version
         assert result["restored_version"] == 5
@@ -300,6 +306,148 @@ class TestAuditLogServiceRestore:
         ) as content_cls:
             instance = content_cls.return_value
             instance.save_content = AsyncMock()
+            instance.get_content = AsyncMock(return_value=None)
             result = await svc.restore_version(1, 1, "12345")
 
         assert result["success"] is True
+
+
+# ── Pre-snapshot перед restore_version (lost-write guard) ──────────────────
+
+
+class TestRestoreVersionPreSnapshot:
+    """restore_version делает snapshot текущего контента ДО перезаписи.
+
+    Закрывает lost-write: если активный редактор не успел сохранить
+    свой state, его последняя версия остаётся доступной в истории.
+    """
+
+    def _make_service(self):
+        guard = MagicMock()
+        guard.require_management_role = AsyncMock()
+        guard.require_lock_owner = AsyncMock()
+        audit_repo = MagicMock()
+        audit_repo.log = AsyncMock()
+        versions_repo = MagicMock()
+        versions_repo.get_version = AsyncMock()
+        versions_repo.create_version = AsyncMock(return_value=2)
+        conn = AsyncMock()
+        return AuditLogService(guard, audit_repo, versions_repo, conn), versions_repo
+
+    async def test_pre_snapshot_created_from_current_content(self):
+        """Перед restore версии v_old фиксируем текущий v_now как auto-snapshot."""
+        svc, versions_repo = self._make_service()
+        # Старая версия, которую восстанавливаем (валидная для ActDataSchema)
+        versions_repo.get_version.return_value = {
+            "version_number": 1,
+            "tree_data": {"id": "root", "label": "v1", "children": []},
+            "tables_data": {},
+            "textblocks_data": {},
+            "violations_data": {},
+        }
+        # Текущее содержимое акта — это то, что должно попасть в pre-snapshot.
+        # Структуру намеренно делаем плоской: pre-snapshot пишется через
+        # versions_repo.create_version(**kwargs), без валидации Pydantic.
+        current_content = {
+            "tree": {"id": "root", "label": "v_current", "children": []},
+            "tables": {"t2": {"id": "t2", "nodeId": "n2"}},
+            "textBlocks": {"tb1": {"id": "tb1", "nodeId": "n1", "content": "WIP"}},
+            "violations": {},
+            "invoices": {},
+        }
+
+        with patch(
+            "app.domains.acts.services.audit_log_service.ActContentRepository"
+        ) as content_cls:
+            instance = content_cls.return_value
+            instance.save_content = AsyncMock()
+            instance.get_content = AsyncMock(return_value=current_content)
+
+            await svc.restore_version(act_id=42, version_id=1, username="12345")
+
+        # get_content должен быть вызван ДО save_content
+        instance.get_content.assert_awaited_once_with(42)
+
+        # create_version вызван дважды: pre-snapshot + post-restore
+        assert versions_repo.create_version.await_count == 2
+        first_call = versions_repo.create_version.await_args_list[0]
+        # Первый вызов — pre-snapshot с текущим контентом
+        assert first_call.kwargs["save_type"] == "auto"
+        assert first_call.kwargs["tree"]["label"] == "v_current"
+        assert first_call.kwargs["tables"] == {"t2": {"id": "t2", "nodeId": "n2"}}
+        assert first_call.kwargs["textblocks"] == {
+            "tb1": {"id": "tb1", "nodeId": "n1", "content": "WIP"}
+        }
+
+        # Второй вызов — post-restore snapshot с восстановленной версией
+        second_call = versions_repo.create_version.await_args_list[1]
+        assert second_call.kwargs["save_type"] == "manual"
+        assert second_call.kwargs["tree"]["label"] == "v1"
+
+    async def test_pre_snapshot_skipped_when_no_current_content(self):
+        """get_content вернул None/{} → pre-snapshot не создаётся."""
+        svc, versions_repo = self._make_service()
+        versions_repo.get_version.return_value = {
+            "version_number": 1,
+            "tree_data": {"id": "root", "children": []},
+            "tables_data": {},
+            "textblocks_data": {},
+            "violations_data": {},
+        }
+
+        with patch(
+            "app.domains.acts.services.audit_log_service.ActContentRepository"
+        ) as content_cls:
+            instance = content_cls.return_value
+            instance.save_content = AsyncMock()
+            instance.get_content = AsyncMock(return_value=None)
+
+            await svc.restore_version(act_id=1, version_id=1, username="12345")
+
+        instance.get_content.assert_awaited_once_with(1)
+        # Только post-restore snapshot, без pre-snapshot
+        assert versions_repo.create_version.await_count == 1
+        assert versions_repo.create_version.await_args.kwargs["save_type"] == "manual"
+
+    async def test_pre_snapshot_happens_before_save_content(self):
+        """Порядок: get_content → create_version(pre) → save_content → create_version(post)."""
+        svc, versions_repo = self._make_service()
+        versions_repo.get_version.return_value = {
+            "version_number": 3,
+            "tree_data": {"id": "root", "label": "restored"},
+            "tables_data": {},
+            "textblocks_data": {},
+            "violations_data": {},
+        }
+
+        call_log: list[str] = []
+
+        async def _get_content(act_id):
+            call_log.append("get_content")
+            return {"tree": {"id": "root", "label": "wip"}, "tables": {},
+                    "textBlocks": {}, "violations": {}}
+
+        async def _save_content(act_id, data, username):
+            call_log.append("save_content")
+
+        async def _create_version(**kwargs):
+            call_log.append(f"create_version:{kwargs['save_type']}")
+            return 1
+
+        versions_repo.create_version.side_effect = _create_version
+
+        with patch(
+            "app.domains.acts.services.audit_log_service.ActContentRepository"
+        ) as content_cls:
+            instance = content_cls.return_value
+            instance.get_content = AsyncMock(side_effect=_get_content)
+            instance.save_content = AsyncMock(side_effect=_save_content)
+
+            await svc.restore_version(act_id=1, version_id=3, username="12345")
+
+        assert call_log == [
+            "get_content",
+            "create_version:auto",   # pre-snapshot
+            "save_content",           # перезапись восстановленным контентом
+            "create_version:manual",  # post-restore snapshot
+        ]

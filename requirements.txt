@@ -1,4 +1,5 @@
 asyncpg==0.31.0
+bleach>=6.0
 cachetools==6.2.2
 fastapi==0.135.0
 gssapi==1.10.1
