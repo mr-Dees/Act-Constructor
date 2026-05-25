@@ -172,6 +172,11 @@
     {% include 'constructor/components/invoice_dialog.html' %}
     {% include 'portal/acts-manager/components/create_act_dialog.html' %}
     {% include 'portal/acts-manager/components/team_member_row.html' %}
+    {# acts-menu.js (бургер-меню конструктора) использует эти три шаблона для
+       rendering актов в выпадашке. Не удалять. #}
+    {% include 'portal/acts-manager/components/acts_loading.html' %}
+    {% include 'portal/acts-manager/components/acts_empty_state.html' %}
+    {% include 'portal/acts-manager/components/acts_error_state.html' %}
     {% include 'portal/acts-manager/components/directive_row.html' %}
 
     <!-- Дополнительные скрипты страницы -->
