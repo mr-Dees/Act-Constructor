@@ -145,7 +145,7 @@ Object.assign(AppState, {
             // Очищаем ТБ и фактуру у родителя, если он был листовым узлом в разделе 5
             if (TreeUtils.isUnderSection5(parent) && TreeUtils.isTbLeaf(parent)) {
                 delete parent.tb;
-                delete parent.invoice;
+                this.setNodeInvoice(parent.id, null, {changelog: false});
             }
             this._addAsChild(parent, newNode);
         } else {
@@ -398,7 +398,7 @@ Object.assign(AppState, {
         // Очищаем ТБ и фактуру у нового родителя, если он был листовым узлом в разделе 5
         if (wasNewParentTbLeaf) {
             delete newParent.tb;
-            delete newParent.invoice;
+            this.setNodeInvoice(newParent.id, null, {changelog: false});
         }
 
         // Очищаем ТБ у старого родителя, если он стал листовым узлом в разделе 5
@@ -884,6 +884,45 @@ Object.assign(AppState, {
     },
 
     /**
+     * Единая точка записи фактуры узла. Аналог setNodeTb для node.invoice.
+     * Пишет в changelog (если не каскад), эмитит 'node:invoice-changed' для
+     * targeted-обновления бейджа в дереве и items без полного render'а.
+     *
+     * @param {string} nodeId - ID узла
+     * @param {Object|null} invoiceData - Данные фактуры или null для удаления
+     * @param {Object} [opts] - Опции
+     * @param {boolean} [opts.changelog=true] - Записывать ли в changelog
+     *        (для каскадных cleanup при move/create передавать false —
+     *         родительская операция уже залогирована)
+     */
+    setNodeInvoice(nodeId, invoiceData, opts = {}) {
+        const {changelog = true} = opts;
+        const node = this.findNodeById(nodeId);
+        if (!node) return;
+
+        const had = !!node.invoice;
+        if (invoiceData) {
+            node.invoice = invoiceData;
+        } else if (had) {
+            delete node.invoice;
+        } else {
+            return;
+        }
+
+        if (changelog && typeof ChangelogTracker !== 'undefined') {
+            const action = invoiceData ? 'invoice_set' : 'invoice_remove';
+            ChangelogTracker.record(action, nodeId, node.label, {});
+        }
+
+        if (typeof StorageManager !== 'undefined' && StorageManager.markAsUnsaved) {
+            StorageManager.markAsUnsaved();
+        }
+
+        // Уведомляем подписчиков (TreeRenderer) о per-node изменении фактуры.
+        window.ChatEventBus?.emit?.('node:invoice-changed', {nodeId, attached: !!invoiceData});
+    },
+
+    /**
      * Рекурсивно очищает свойство tb у узла и всех его потомков
      * @private
      * @param {Object} node - Узел для очистки
@@ -901,13 +940,16 @@ Object.assign(AppState, {
     },
 
     /**
-     * Рекурсивно очищает свойство invoice у узла и всех его потомков
+     * Рекурсивно очищает свойство invoice у узла и всех его потомков.
+     * Каскадный путь — родительская операция (move/delete) уже в changelog,
+     * поэтому setNodeInvoice вызывается с {changelog: false}. События
+     * 'node:invoice-changed' эмитятся, чтобы UI снял бейджи фактур.
      * @private
      * @param {Object} node - Узел для очистки
      */
     _clearInvoiceRecursive(node) {
         if (node.invoice) {
-            delete node.invoice;
+            this.setNodeInvoice(node.id, null, {changelog: false});
         }
 
         if (node.children) {

@@ -12,6 +12,14 @@ class TreeRenderer {
     constructor(manager) {
         /** @type {TreeManager} */
         this.manager = manager;
+
+        // Точечный апдейт бейджа фактуры при изменении node.invoice
+        // через AppState.setNodeInvoice. Заменяет полный treeManager.render()
+        // после save в диалоге фактуры.
+        window.ChatEventBus?.on?.('node:invoice-changed', ({nodeId}) => {
+            const node = TreeUtils?.findNodeById?.(nodeId);
+            if (node) this.updateInvoiceBadge(node);
+        });
     }
 
     /**
@@ -466,6 +474,25 @@ class TreeRenderer {
         }
 
         return badge;
+    }
+
+    /**
+     * Обновляет бейдж фактуры в дереве для конкретного узла.
+     * Публичный API: вызывается subscriber'ом 'node:invoice-changed' —
+     * заменяет полный treeManager.render() после диалога фактуры.
+     * Снимает существующий бейдж и (если node.invoice) создаёт новый.
+     * @param {Object} node - Узел дерева
+     */
+    updateInvoiceBadge(node) {
+        const li = this.manager.container.querySelector(`[data-node-id="${node.id}"]`);
+        if (!li) return;
+        const label = li.querySelector(':scope > .tree-label');
+        if (!label) return;
+        const oldBadge = label.querySelector('.invoice-badge');
+        if (oldBadge) oldBadge.remove();
+        if (TreeUtils.isTbLeaf(node) && node.invoice) {
+            label.appendChild(this._createInvoiceBadge(node));
+        }
     }
 
     /**
