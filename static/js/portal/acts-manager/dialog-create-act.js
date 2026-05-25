@@ -58,7 +58,7 @@ class CreateActDialog extends DialogBase {
      */
     static async _loadSection5Points(actId) {
         try {
-            const currentUser = window.env?.JUPYTERHUB_USER || AppConfig?.auth?.jupyterhubUser || "";
+            const currentUser = AuthManager.getCurrentUser() || "";
 
             // Используем правильный префикс роутера
             const response = await fetch(AppConfig.api.getUrl(`/api/v1/acts/${actId}/content`), {
@@ -159,7 +159,7 @@ class CreateActDialog extends DialogBase {
         this._isSaving = false;
 
         const isEdit = !!actData;
-        const currentUser = window.env?.JUPYTERHUB_USER || AppConfig?.auth?.jupyterhubUser || "";
+        const currentUser = AuthManager.getCurrentUser() || "";
 
         // Клонируем template
         const fragment = this._cloneTemplate('createActDialogTemplate');

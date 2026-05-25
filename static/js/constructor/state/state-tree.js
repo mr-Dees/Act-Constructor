@@ -236,7 +236,7 @@ Object.assign(AppState, {
         this._removeFromParent(nodeId);
 
         if (isRiskTable) {
-            this._cleanupMetricsTablesAfterRiskTableDeleted(nodeId);
+            this._cleanupMetricsTablesAfterRiskTableDeleted();
         }
 
         this.generateNumbering();
@@ -794,7 +794,7 @@ Object.assign(AppState, {
         if (oldAncestor5x && newAncestor5x && oldAncestor5x.id === newAncestor5x.id) return;
 
         // Очистка старого: удаляет сводные таблицы у всех 5.X, где нет глубоких рисков
-        this._cleanupMetricsTablesAfterRiskTableDeleted(draggedNode.id);
+        this._cleanupMetricsTablesAfterRiskTableDeleted();
 
         // Создание сводной для нового предка 5.X, только если риски на глубоком уровне (5.X.X+)
         if (newAncestor5x) {

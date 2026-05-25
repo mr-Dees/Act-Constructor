@@ -301,9 +301,7 @@ const ChatStream = {
         this._resumeRequestId = requestId;
 
         try {
-            const endpoint =
-                `/api/v1/chat/conversations/${conversationId}` +
-                `/forward-stream/${requestId}`;
+            const endpoint = AppConfig.chatEndpoints.forwardStream(conversationId, requestId);
             const url = (typeof AppConfig !== 'undefined')
                 ? AppConfig.api.getUrl(endpoint)
                 : endpoint;
@@ -445,11 +443,10 @@ const ChatStream = {
      * @private
      */
     _buildUrl(conversationId) {
-        const endpoint = `/api/v1/chat/conversations/${conversationId}/messages`;
-        if (typeof AppConfig !== 'undefined') {
-            return AppConfig.api.getUrl(endpoint);
+        if (typeof AppConfig === 'undefined') {
+            return `/api/v1/chat/conversations/${conversationId}/messages`;
         }
-        return endpoint;
+        return AppConfig.api.getUrl(AppConfig.chatEndpoints.messages(conversationId));
     },
 
     /**

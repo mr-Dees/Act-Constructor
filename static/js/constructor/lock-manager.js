@@ -18,6 +18,8 @@ class LockManager {
     static _isExiting = false;
     static _manualUnlockTriggered = false;
     static _beforeUnloadHandler = null;
+    static _activityHandler = null;
+    static _activityEvents = ['mousedown', 'keydown', 'scroll', 'touchstart'];
 
     /**
      * Инициализирует менеджер для конкретного акта
@@ -288,14 +290,31 @@ class LockManager {
 
     /**
      * Отслеживание активности пользователя.
+     * Один handler reuse-ится для 4 событий и сохраняется в _activityHandler,
+     * чтобы destroy() мог снять listeners через removeEventListener.
      * @private
      */
     static _setupActivityTracking() {
-        const events = ['mousedown', 'keydown', 'scroll', 'touchstart'];
-        const updateActivity = () => (this._lastActivity = Date.now());
-        events.forEach(event =>
-            document.addEventListener(event, updateActivity, {passive: true})
+        // На случай повторной инициализации (init после destroy) — снять старые сначала.
+        this._teardownActivityTracking();
+        this._activityHandler = () => {
+            this._lastActivity = Date.now();
+        };
+        this._activityEvents.forEach(event =>
+            document.addEventListener(event, this._activityHandler, {passive: true})
         );
+    }
+
+    /**
+     * Снимает activity-listeners. Идемпотентен.
+     * @private
+     */
+    static _teardownActivityTracking() {
+        if (!this._activityHandler) return;
+        this._activityEvents.forEach(event =>
+            document.removeEventListener(event, this._activityHandler)
+        );
+        this._activityHandler = null;
     }
 
     /**
@@ -346,16 +365,23 @@ class LockManager {
      */
     static _setupBeforeUnload() {
         this._beforeUnloadHandler = () => {
-            if (this._isExiting || this._manualUnlockTriggered || !this._actId) return;
+            try {
+                if (this._isExiting || this._manualUnlockTriggered || !this._actId) return;
 
-            const username = AuthManager.getCurrentUser();
-            const blob = new Blob(
-                [JSON.stringify({username})],
-                {type: 'application/json'}
-            );
+                const username = AuthManager.getCurrentUser();
+                const blob = new Blob(
+                    [JSON.stringify({username})],
+                    {type: 'application/json'}
+                );
 
-            navigator.sendBeacon(AppConfig.api.getUrl(`/api/v1/acts/${this._actId}/unlock`), blob);
-            console.log('BeforeUnload → отправлен beacon для unlock');
+                navigator.sendBeacon(AppConfig.api.getUrl(`/api/v1/acts/${this._actId}/unlock`), blob);
+                console.log('BeforeUnload → отправлен beacon для unlock');
+            } finally {
+                // Снимаем document-listeners и таймеры даже если beacon не отправлен:
+                // навигация (переход на другой акт через JupyterHub-proxy, back-button)
+                // оставляла бы 4 listener'а на document плюс активные интервалы.
+                this.destroy();
+            }
         };
         window.addEventListener('beforeunload', this._beforeUnloadHandler);
     }
@@ -373,7 +399,8 @@ class LockManager {
     }
 
     /**
-     * Завершает все интервалы и таймеры.
+     * Завершает все интервалы, таймеры и снимает activity-listeners на document.
+     * Идемпотентен; безопасно вызывать повторно.
      */
     static destroy() {
         if (this._inactivityCheckInterval) {
@@ -392,6 +419,7 @@ class LockManager {
             clearInterval(this._countdownInterval);
             this._countdownInterval = null;
         }
+        this._teardownActivityTracking();
     }
 
     /**

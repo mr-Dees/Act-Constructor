@@ -129,7 +129,8 @@ Object.assign(TextBlockManager.prototype, {
             // Применяем форматирование к новым ссылкам и сноскам
             this.applyFormattingToNewNodes(editor);
 
-            PreviewManager.update();
+            // typing-flow: дополнительный 150 мс debounce поверх 500 мс save-debounce.
+            PreviewManager.scheduleTyping();
         }, 500);
     },
 

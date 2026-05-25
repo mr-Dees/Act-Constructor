@@ -44,13 +44,13 @@
 
 {% block extra_js %}
 <!-- Shared CK components -->
-<script src="{{ url_for('static', path='js/shared/ck/ck-table.js') }}"></script>
-<script src="{{ url_for('static', path='js/shared/ck/ck-pagination.js') }}"></script>
-<script src="{{ url_for('static', path='js/shared/ck/ck-form.js') }}"></script>
-<script src="{{ url_for('static', path='js/shared/ck/ck-process-picker.js') }}"></script>
+<script defer src="{{ url_for('static', path='js/shared/ck/ck-table.js') | versioned }}"></script>
+<script defer src="{{ url_for('static', path='js/shared/ck/ck-pagination.js') | versioned }}"></script>
+<script defer src="{{ url_for('static', path='js/shared/ck/ck-form.js') | versioned }}"></script>
+<script defer src="{{ url_for('static', path='js/shared/ck/ck-process-picker.js') | versioned }}"></script>
 <!-- CS-specific -->
-<script src="{{ url_for('static', path='js/portal/ck-client-exp/ck-client-exp-config.js') }}"></script>
-<script src="{{ url_for('static', path='js/portal/ck-client-exp/ck-client-exp-page.js') }}"></script>
+<script defer src="{{ url_for('static', path='js/portal/ck-client-exp/ck-client-exp-config.js') | versioned }}"></script>
+<script defer src="{{ url_for('static', path='js/portal/ck-client-exp/ck-client-exp-page.js') | versioned }}"></script>
 {% endblock %}
 
 {% block init_script %}

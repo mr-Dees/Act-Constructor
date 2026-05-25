@@ -151,6 +151,19 @@ class App {
                 e.preventDefault();
                 e.stopImmediatePropagation();
 
+                // H5-A: коммитим pending-редактирование ячейки до сохранения.
+                // Без этого Ctrl+S во время editing'а ячейки уходил бы с старым content,
+                // потому что textarea.value попадает в AppState только на blur/Enter.
+                if (typeof tableManager !== 'undefined' && tableManager.cellsOps?.commitPendingEdit) {
+                    tableManager.cellsOps.commitPendingEdit();
+                }
+                // Аналогично для активного textblock-редактора (его blur синхронит innerHTML
+                // в textBlock.content через handleEditorBlur).
+                const activeEl = document.activeElement;
+                if (activeEl && activeEl.classList?.contains('textblock-editor')) {
+                    activeEl.blur();
+                }
+
                 // Сохранение с блокировкой + генерация
                 await StorageManager.forceSaveAsync();
 

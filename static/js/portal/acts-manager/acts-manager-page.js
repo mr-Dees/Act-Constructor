@@ -591,6 +591,10 @@ class ActsManagerPage {
 
             Notifications.success(`Копия создана: ${newAct.inspection_name}`);
 
+            if (typeof ActsBroadcast !== 'undefined') {
+                ActsBroadcast.notify('act:duplicated', {sourceId: actId, newId: newAct.id});
+            }
+
             const openNewAct = await DialogManager.show({
                 title: 'Копия создана',
                 message: 'Хотите открыть новый акт сейчас?',
@@ -651,6 +655,10 @@ class ActsManagerPage {
 
             Notifications.success('Акт успешно удален');
 
+            if (typeof ActsBroadcast !== 'undefined') {
+                ActsBroadcast.notify('act:deleted', {actId});
+            }
+
             // Обновляем список актов
             await this.loadActs();
 
@@ -691,6 +699,27 @@ class ActsManagerPage {
             refreshBtn.addEventListener('click', () => {
                 this.loadActs();
             });
+        }
+
+        // Cross-tab синхронизация: при удалении/дублировании/обновлении акта
+        // в другой вкладке — перезагружаем список
+        if (typeof ActsBroadcast !== 'undefined') {
+            this._unsubscribeBroadcast = ActsBroadcast.subscribe((msg) => {
+                if (!msg || typeof msg.type !== 'string') return;
+                if (msg.type === 'act:deleted' || msg.type === 'act:duplicated' || msg.type === 'act:updated') {
+                    this.loadActs();
+                }
+            });
+        }
+    }
+
+    /**
+     * Освобождает подписки страницы. Вызывается перед уходом со страницы.
+     */
+    static destroy() {
+        if (typeof this._unsubscribeBroadcast === 'function') {
+            this._unsubscribeBroadcast();
+            this._unsubscribeBroadcast = null;
         }
     }
 

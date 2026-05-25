@@ -8,7 +8,7 @@
     <title>{% block title %}Конструктор актов{% endblock %}</title>
 
     <!-- Основные стили -->
-    <link rel="stylesheet" href="{{ url_for('static', path='css/entry/constructor.css') }}">
+    <link rel="stylesheet" href="{{ url_for('static', path='css/entry/constructor.css') | versioned }}">
 
     <!-- Дополнительные стили страницы -->
     {% block extra_css %}{% endblock %}
@@ -20,12 +20,17 @@
     <!-- Основной контент страницы -->
     {% block content %}{% endblock %}
 
-    <!-- Конфигурация приложения -->
-    <script src="{{ url_for('static', path='js/shared/app-config.js') }}"></script>
-
-    <!-- Авторизация (должна загружаться первой) -->
-    <script src="{{ url_for('static', path='js/shared/auth.js') }}"></script>
-    <script src="{{ url_for('static', path='js/constructor/header/header-exit.js') }}"></script>
+    <!-- Скрипты конструктора грузятся синхронно (без defer): inline IIFE ниже
+         async-вызывает AuthManager.requireAuth(), а ActsMenuManager.init (внизу
+         body) сразу делает API-запросы, требующие записанного username в
+         localStorage. С defer body парсится за миллисекунды — fetch /auth/me
+         не успевает закрыться до DOMContentLoaded, и initial load конструктора
+         падает с "Пользователь не авторизован". Sync-загрузка ~70 файлов даёт
+         достаточный buffer (исторически работает). Defer применён только в
+         portal-шаблонах, где init_script сам await'ит requireAuth() до page.init(). -->
+    <script src="{{ url_for('static', path='js/shared/app-config.js') | versioned }}"></script>
+    <script src="{{ url_for('static', path='js/shared/auth.js') | versioned }}"></script>
+    <script src="{{ url_for('static', path='js/constructor/header/header-exit.js') | versioned }}"></script>
 
     <script>
         // Инициализируем глобальную переменную для метаданных акта
@@ -48,105 +53,105 @@
     </script>
 
     <!-- Базовые утилиты -->
-    <script src="{{ url_for('static', path='js/shared/notifications.js') }}"></script>
-    <script src="{{ url_for('static', path='js/constructor/changelog-tracker.js') }}"></script>
-    <script src="{{ url_for('static', path='js/constructor/storage-manager.js') }}"></script>
-    <script src="{{ url_for('static', path='js/shared/api.js') }}"></script>
-    <script src="{{ url_for('static', path='js/constructor/app.js') }}"></script>
-    <script src="{{ url_for('static', path='js/constructor/navigation-manager.js') }}"></script>
-    <script src="{{ url_for('static', path='js/constructor/header/format-menu-manager.js') }}"></script>
-    <script src="{{ url_for('static', path='js/constructor/header/settings-menu.js') }}"></script>
+    <script src="{{ url_for('static', path='js/shared/notifications.js') | versioned }}"></script>
+    <script src="{{ url_for('static', path='js/constructor/changelog-tracker.js') | versioned }}"></script>
+    <script src="{{ url_for('static', path='js/constructor/storage-manager.js') | versioned }}"></script>
+    <script src="{{ url_for('static', path='js/shared/api.js') | versioned }}"></script>
+    <script src="{{ url_for('static', path='js/constructor/app.js') | versioned }}"></script>
+    <script src="{{ url_for('static', path='js/constructor/navigation-manager.js') | versioned }}"></script>
+    <script src="{{ url_for('static', path='js/constructor/header/format-menu-manager.js') | versioned }}"></script>
+    <script src="{{ url_for('static', path='js/constructor/header/settings-menu.js') | versioned }}"></script>
     <!-- DOMPurify — санитизация HTML перед innerHTML.
          Должен загружаться ДО SafeHTML и всех потребителей. -->
-    <script src="{{ url_for('static', path='vendor/dompurify/purify.min.js') }}"></script>
+    <script src="{{ url_for('static', path='vendor/dompurify/purify.min.js') | versioned }}"></script>
     <!-- SafeHTML — единый helper для безопасной вставки HTML, обёртка над DOMPurify
          с безопасным fallback на textContent (см. static/js/shared/sanitize.js). -->
-    <script src="{{ url_for('static', path='js/shared/sanitize.js') }}"></script>
+    <script src="{{ url_for('static', path='js/shared/sanitize.js') | versioned }}"></script>
     <!-- chat-event-bus.js должен идти первым: остальные модули чата могут
          обращаться к шине на module-level (window.ChatEventBus.on ...). -->
-    <script src="{{ url_for('static', path='js/shared/chat/chat-event-bus.js') }}"></script>
-    <script src="{{ url_for('static', path='js/shared/chat/chat-renderer.js') }}"></script>
-    <script src="{{ url_for('static', path='js/shared/chat/chat-client-actions.js') }}"></script>
-    <script src="{{ url_for('static', path='js/shared/chat/chat-stream.js') }}"></script>
-    <script src="{{ url_for('static', path='js/shared/chat/chat-history.js') }}"></script>
-    <script src="{{ url_for('static', path='js/shared/chat/chat-ui.js') }}"></script>
-    <script src="{{ url_for('static', path='js/shared/chat/chat-files.js') }}"></script>
-    <script src="{{ url_for('static', path='js/shared/chat/chat-title.js') }}"></script>
-    <script src="{{ url_for('static', path='js/shared/chat/chat-context.js') }}"></script>
-    <script src="{{ url_for('static', path='js/shared/chat/chat-messages.js') }}"></script>
-    <script src="{{ url_for('static', path='js/shared/chat/chat-manager.js') }}"></script>
-    <script src="{{ url_for('static', path='js/constructor/header/chat-popup.js') }}"></script>
+    <script src="{{ url_for('static', path='js/shared/chat/chat-event-bus.js') | versioned }}"></script>
+    <script src="{{ url_for('static', path='js/shared/chat/chat-renderer.js') | versioned }}"></script>
+    <script src="{{ url_for('static', path='js/shared/chat/chat-client-actions.js') | versioned }}"></script>
+    <script src="{{ url_for('static', path='js/shared/chat/chat-stream.js') | versioned }}"></script>
+    <script src="{{ url_for('static', path='js/shared/chat/chat-history.js') | versioned }}"></script>
+    <script src="{{ url_for('static', path='js/shared/chat/chat-ui.js') | versioned }}"></script>
+    <script src="{{ url_for('static', path='js/shared/chat/chat-files.js') | versioned }}"></script>
+    <script src="{{ url_for('static', path='js/shared/chat/chat-title.js') | versioned }}"></script>
+    <script src="{{ url_for('static', path='js/shared/chat/chat-context.js') | versioned }}"></script>
+    <script src="{{ url_for('static', path='js/shared/chat/chat-messages.js') | versioned }}"></script>
+    <script src="{{ url_for('static', path='js/shared/chat/chat-manager.js') | versioned }}"></script>
+    <script src="{{ url_for('static', path='js/constructor/header/chat-popup.js') | versioned }}"></script>
 
     <!-- Диалоговая система -->
-    <script src="{{ url_for('static', path='js/shared/dialog/dialog-base.js') }}"></script>
-    <script src="{{ url_for('static', path='js/shared/dialog/dialog-confirm.js') }}"></script>
-    <script src="{{ url_for('static', path='js/portal/acts-manager/team-member-search.js') }}"></script>
-    <script src="{{ url_for('static', path='js/portal/acts-manager/dialog-create-act.js') }}"></script>
-    <script src="{{ url_for('static', path='js/constructor/dialog/dialog-help.js') }}"></script>
-    <script src="{{ url_for('static', path='js/constructor/dialog/dialog-invoice.js') }}"></script>
+    <script src="{{ url_for('static', path='js/shared/dialog/dialog-base.js') | versioned }}"></script>
+    <script src="{{ url_for('static', path='js/shared/dialog/dialog-confirm.js') | versioned }}"></script>
+    <script src="{{ url_for('static', path='js/portal/acts-manager/team-member-search.js') | versioned }}"></script>
+    <script src="{{ url_for('static', path='js/portal/acts-manager/dialog-create-act.js') | versioned }}"></script>
+    <script src="{{ url_for('static', path='js/constructor/dialog/dialog-help.js') | versioned }}"></script>
+    <script src="{{ url_for('static', path='js/constructor/dialog/dialog-invoice.js') | versioned }}"></script>
 
     <!-- Контекстное меню -->
-    <script src="{{ url_for('static', path='js/constructor/context-menu/context-menu-core.js') }}"></script>
-    <script src="{{ url_for('static', path='js/constructor/context-menu/context-menu-tree.js') }}"></script>
-    <script src="{{ url_for('static', path='js/constructor/context-menu/context-menu-cells.js') }}"></script>
-    <script src="{{ url_for('static', path='js/constructor/context-menu/context-menu-violation.js') }}"></script>
-    <script src="{{ url_for('static', path='js/constructor/context-menu/context-menu-links-footnotes.js') }}"></script>
+    <script src="{{ url_for('static', path='js/constructor/context-menu/context-menu-core.js') | versioned }}"></script>
+    <script src="{{ url_for('static', path='js/constructor/context-menu/context-menu-tree.js') | versioned }}"></script>
+    <script src="{{ url_for('static', path='js/constructor/context-menu/context-menu-cells.js') | versioned }}"></script>
+    <script src="{{ url_for('static', path='js/constructor/context-menu/context-menu-violation.js') | versioned }}"></script>
+    <script src="{{ url_for('static', path='js/constructor/context-menu/context-menu-links-footnotes.js') | versioned }}"></script>
 
     <!-- Сервисы -->
-    <script src="{{ url_for('static', path='js/constructor/services/id-generator.js') }}"></script>
+    <script src="{{ url_for('static', path='js/constructor/services/id-generator.js') | versioned }}"></script>
 
     <!-- Управление состоянием -->
-    <script src="{{ url_for('static', path='js/constructor/state/state-core.js') }}"></script>
-    <script src="{{ url_for('static', path='js/constructor/state/state-tree.js') }}"></script>
-    <script src="{{ url_for('static', path='js/constructor/state/state-content.js') }}"></script>
+    <script src="{{ url_for('static', path='js/constructor/state/state-core.js') | versioned }}"></script>
+    <script src="{{ url_for('static', path='js/constructor/state/state-tree.js') | versioned }}"></script>
+    <script src="{{ url_for('static', path='js/constructor/state/state-content.js') | versioned }}"></script>
 
     <!-- Дерево структуры -->
-    <script src="{{ url_for('static', path='js/constructor/tree/tree-drag-drop.js') }}"></script>
-    <script src="{{ url_for('static', path='js/constructor/tree/tree-renderer.js') }}"></script>
-    <script src="{{ url_for('static', path='js/constructor/tree/tree-core.js') }}"></script>
-    <script src="{{ url_for('static', path='js/constructor/tree/tree-utils.js') }}"></script>
+    <script src="{{ url_for('static', path='js/constructor/tree/tree-drag-drop.js') | versioned }}"></script>
+    <script src="{{ url_for('static', path='js/constructor/tree/tree-renderer.js') | versioned }}"></script>
+    <script src="{{ url_for('static', path='js/constructor/tree/tree-core.js') | versioned }}"></script>
+    <script src="{{ url_for('static', path='js/constructor/tree/tree-utils.js') | versioned }}"></script>
 
     <!-- Элементы документа -->
-    <script src="{{ url_for('static', path='js/constructor/items/items-title-editing.js') }}"></script>
-    <script src="{{ url_for('static', path='js/constructor/items/items-renderer.js') }}"></script>
+    <script src="{{ url_for('static', path='js/constructor/items/items-title-editing.js') | versioned }}"></script>
+    <script src="{{ url_for('static', path='js/constructor/items/items-renderer.js') | versioned }}"></script>
 
     <!-- Таблицы -->
-    <script src="{{ url_for('static', path='js/constructor/table/table-cells-operations.js') }}"></script>
-    <script src="{{ url_for('static', path='js/constructor/table/table-sizes.js') }}"></script>
-    <script src="{{ url_for('static', path='js/constructor/table/table-core.js') }}"></script>
+    <script src="{{ url_for('static', path='js/constructor/table/table-cells-operations.js') | versioned }}"></script>
+    <script src="{{ url_for('static', path='js/constructor/table/table-sizes.js') | versioned }}"></script>
+    <script src="{{ url_for('static', path='js/constructor/table/table-core.js') | versioned }}"></script>
 
     <!-- Предпросмотр -->
-    <script src="{{ url_for('static', path='js/constructor/preview/preview.js') }}"></script>
-    <script src="{{ url_for('static', path='js/constructor/preview/preview-table-renderer.js') }}"></script>
-    <script src="{{ url_for('static', path='js/constructor/preview/preview-textblock-renderer.js') }}"></script>
-    <script src="{{ url_for('static', path='js/constructor/preview/preview-violation-renderer.js') }}"></script>
+    <script src="{{ url_for('static', path='js/constructor/preview/preview.js') | versioned }}"></script>
+    <script src="{{ url_for('static', path='js/constructor/preview/preview-table-renderer.js') | versioned }}"></script>
+    <script src="{{ url_for('static', path='js/constructor/preview/preview-textblock-renderer.js') | versioned }}"></script>
+    <script src="{{ url_for('static', path='js/constructor/preview/preview-violation-renderer.js') | versioned }}"></script>
 
     <!-- Текстовые блоки -->
-    <script src="{{ url_for('static', path='js/constructor/textblock/textblock-core.js') }}"></script>
-    <script src="{{ url_for('static', path='js/constructor/textblock/textblock-editor.js') }}"></script>
-    <script src="{{ url_for('static', path='js/constructor/textblock/textblock-formatting.js') }}"></script>
-    <script src="{{ url_for('static', path='js/constructor/textblock/textblock-toolbar.js') }}"></script>
-    <script src="{{ url_for('static', path='js/constructor/textblock/textblock-links-footnotes.js') }}"></script>
+    <script src="{{ url_for('static', path='js/constructor/textblock/textblock-core.js') | versioned }}"></script>
+    <script src="{{ url_for('static', path='js/constructor/textblock/textblock-editor.js') | versioned }}"></script>
+    <script src="{{ url_for('static', path='js/constructor/textblock/textblock-formatting.js') | versioned }}"></script>
+    <script src="{{ url_for('static', path='js/constructor/textblock/textblock-toolbar.js') | versioned }}"></script>
+    <script src="{{ url_for('static', path='js/constructor/textblock/textblock-links-footnotes.js') | versioned }}"></script>
 
     <!-- Нарушения -->
-    <script src="{{ url_for('static', path='js/constructor/violation/violation-core.js') }}"></script>
-    <script src="{{ url_for('static', path='js/constructor/violation/violation-paste.js') }}"></script>
-    <script src="{{ url_for('static', path='js/constructor/violation/violation-additional-content.js') }}"></script>
-    <script src="{{ url_for('static', path='js/constructor/violation/violation-rendering.js') }}"></script>
-    <script src="{{ url_for('static', path='js/constructor/violation/violation-drag-drop.js') }}"></script>
-    <script src="{{ url_for('static', path='js/constructor/violation/violation-file-upload.js') }}"></script>
-    <script src="{{ url_for('static', path='js/constructor/violation/violation-init.js') }}"></script>
+    <script src="{{ url_for('static', path='js/constructor/violation/violation-core.js') | versioned }}"></script>
+    <script src="{{ url_for('static', path='js/constructor/violation/violation-paste.js') | versioned }}"></script>
+    <script src="{{ url_for('static', path='js/constructor/violation/violation-additional-content.js') | versioned }}"></script>
+    <script src="{{ url_for('static', path='js/constructor/violation/violation-rendering.js') | versioned }}"></script>
+    <script src="{{ url_for('static', path='js/constructor/violation/violation-drag-drop.js') | versioned }}"></script>
+    <script src="{{ url_for('static', path='js/constructor/violation/violation-file-upload.js') | versioned }}"></script>
+    <script src="{{ url_for('static', path='js/constructor/violation/violation-init.js') | versioned }}"></script>
 
     <!-- Модули валидации -->
-    <script src="{{ url_for('static', path='js/constructor/validation/validation.js') }}"></script>
-    <script src="{{ url_for('static', path='js/constructor/validation/validation-act.js') }}"></script>
-    <script src="{{ url_for('static', path='js/constructor/validation/validation-core.js') }}"></script>
-    <script src="{{ url_for('static', path='js/constructor/validation/validation-table.js') }}"></script>
-    <script src="{{ url_for('static', path='js/constructor/validation/validation-tree.js') }}"></script>
+    <script src="{{ url_for('static', path='js/constructor/validation/validation.js') | versioned }}"></script>
+    <script src="{{ url_for('static', path='js/constructor/validation/validation-act.js') | versioned }}"></script>
+    <script src="{{ url_for('static', path='js/constructor/validation/validation-core.js') | versioned }}"></script>
+    <script src="{{ url_for('static', path='js/constructor/validation/validation-table.js') | versioned }}"></script>
+    <script src="{{ url_for('static', path='js/constructor/validation/validation-tree.js') | versioned }}"></script>
 
-    <script src="{{ url_for('static', path='js/constructor/lock-manager.js') }}"></script>
-    <script src="{{ url_for('static', path='js/constructor/header/acts-menu.js') }}"></script>
-    <script src="{{ url_for('static', path='js/constructor/header/preview-menu.js') }}"></script>
+    <script src="{{ url_for('static', path='js/constructor/lock-manager.js') | versioned }}"></script>
+    <script src="{{ url_for('static', path='js/constructor/header/acts-menu.js') | versioned }}"></script>
+    <script src="{{ url_for('static', path='js/constructor/header/preview-menu.js') | versioned }}"></script>
 
     <!-- Информация подсказок -->
     {% include 'constructor/header/help/step1.html' %}

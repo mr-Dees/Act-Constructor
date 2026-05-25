@@ -729,8 +729,10 @@ const ChatRenderer = {
      * @private
      */
     _getFileUrl(fileId) {
-        const path = `/api/v1/chat/files/${fileId}`;
-        return (typeof AppConfig !== 'undefined') ? AppConfig.api.getUrl(path) : path;
+        if (typeof AppConfig === 'undefined') {
+            return `/api/v1/chat/files/${fileId}`;
+        }
+        return AppConfig.api.getUrl(AppConfig.chatEndpoints.file(fileId));
     },
 
     /**

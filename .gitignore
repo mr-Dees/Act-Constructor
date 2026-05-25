@@ -20,9 +20,14 @@ parts/
 sdist/
 var/
 node_modules/
-package.json
-package-*.json
 wheels/
+
+# Playwright
+playwright-report/
+test-results/
+playwright/.cache/
+tests/playwright/.uvicorn.pid
+tests/playwright/.uvicorn.log
 share/python-wheels/
 *.egg-info/
 .installed.cfg

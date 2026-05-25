@@ -216,11 +216,62 @@ templates/
 
 ## Тестирование
 
+### Backend (pytest)
+
 ```bash
 pytest
 ```
 
 Тесты используют `pytest` + `pytest-asyncio` + `httpx` (для тестирования FastAPI).
+
+### E2E (Playwright)
+
+Браузерный smoke-набор для фронта (vanilla JS без бандлера). Поднимает
+локальный uvicorn на `127.0.0.1:8005`, применяет seed-данные через
+`tests/playwright/seed.py` и гоняет сценарии в headless Chromium.
+
+```bash
+# Однократная установка
+npm install
+npx playwright install chromium
+
+# Прогон
+npm run e2e
+
+# С UI-режимом / отладкой
+npm run e2e:ui
+npm run e2e:debug
+
+# HTML-отчёт после прогона
+npx playwright test --reporter=html && npm run e2e:report
+```
+
+Требования:
+
+- Локальный PostgreSQL с параметрами из `.env` (`DATABASE__HOST`, `__PORT`,
+  `__USER`, `__PASSWORD`, `__NAME`, `__TABLE_PREFIX`). Перед каждым прогоном
+  seed-скрипт удаляет акты с ID `999001`/`999002`/`999003` и пересоздаёт их.
+- Чистый порт 8005 — uvicorn запускается на нём.
+- `JUPYTERHUB_USER` в setup переопределяется на `22494524_e2e-test`
+  (из digits извлекается `22494524` — admin из дефолтного `.env`).
+
+Структура:
+
+- `playwright.config.ts` — конфиг, baseURL=`http://127.0.0.1:8005`, chromium only.
+- `tests/playwright/global-setup.ts` / `global-teardown.ts` — старт/стоп uvicorn,
+  PID хранится в `tests/playwright/.uvicorn.pid`, лог в `.uvicorn.log` (gitignored).
+- `tests/playwright/seed.py` — создаёт 3 акта (`SEED_ACTS` в `fixtures.ts`).
+- `tests/playwright/fixtures.ts` — общие helpers (`openAct`, `waitForSaveComplete`).
+- `tests/playwright/specs/*.spec.ts` — 8 baseline-сценариев (`@smoke`-теги).
+
+Скип/fail-семантика baseline:
+
+- Часть сценариев (table-cell ops, tree DnD, contenteditable textblock,
+  inline-edit заголовка, cross-tab удаление) помечены `test.skip` с
+  TODO-комментарием — разблокируются агентами Phase 1
+  (`per-node-rendering-api`, `acts-cross-tab-sync` и др.).
+- Регрессионный smoke `notifications-storm` сейчас **проходит**: дедупликация
+  через `.notification-counter` уже реализована в `static/js/shared/notifications.js`.
 
 ## Деплой
 

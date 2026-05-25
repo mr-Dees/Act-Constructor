@@ -127,6 +127,16 @@ class NotificationManager {
      * @returns {string} ID уведомления
      */
     _createNotification(message, type, duration, cacheKey) {
+        // H-N8-UX: глобальный cap. При переполнении вытесняем самый старый
+        // (Map хранит порядок вставки, keys().next() → oldest) синхронно,
+        // без hide()-анимации — иначе DOM-узел висит ещё ~250 мс и cap течёт.
+        const cap = AppConfig.notifications.maxConcurrent;
+        while (this.notifications.size >= cap) {
+            const oldestId = this.notifications.keys().next().value;
+            if (!oldestId) break;
+            this._evictImmediate(oldestId);
+        }
+
         const id = this._generateId();
         const notification = this._buildNotificationElement(id, message, type);
 
@@ -140,6 +150,29 @@ class NotificationManager {
         this.messageCache.set(cacheKey, {id, count: 1, timer});
 
         return id;
+    }
+
+    /**
+     * Синхронно удаляет уведомление и чистит кеш (без hide-анимации).
+     * Используется для FIFO-вытеснения при переполнении cap.
+     * @private
+     * @param {string} id - ID уведомления
+     */
+    _evictImmediate(id) {
+        const notification = this.notifications.get(id);
+        if (notification && notification.parentNode) {
+            notification.remove();
+        }
+        this.notifications.delete(id);
+        // Чистим cache-entry и его pending-таймер, чтобы не выстрелил hide()
+        // на уже удалённый id.
+        for (const [key, value] of this.messageCache.entries()) {
+            if (value.id === id) {
+                if (value.timer) clearTimeout(value.timer);
+                this.messageCache.delete(key);
+                break;
+            }
+        }
     }
 
     /**

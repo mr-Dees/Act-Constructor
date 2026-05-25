@@ -99,6 +99,39 @@ class AppConfig {
         }
     };
 
+    /**
+     * Константы chat-эндпоинтов
+     *
+     * Все пути относительные (без origin/proxy-префикса); итоговый URL
+     * получается через AppConfig.api.getUrl(...), который оборачивает
+     * путь под JupyterHub-proxy при необходимости.
+     *
+     * Параметризованные пути — функции (cid/mid/rid/fileId).
+     * Статические — строки.
+     */
+    static chatEndpoints = {
+        // CRUD бесед
+        conversations: '/api/v1/chat/conversations',
+        conversation: (cid) => `/api/v1/chat/conversations/${cid}`,
+
+        // Сообщения беседы
+        messages: (cid) => `/api/v1/chat/conversations/${cid}/messages`,
+
+        // Активный forward к внешнему агенту (для resume после reload)
+        activeForward: (cid) =>
+            `/api/v1/chat/conversations/${cid}/active-forward`,
+
+        // Resume SSE для forward-запроса (привязан к беседе)
+        forwardStream: (cid, rid) =>
+            `/api/v1/chat/conversations/${cid}/forward-stream/${rid}`,
+
+        // Лимиты файлов (размер, типы)
+        limits: '/api/v1/chat/limits',
+
+        // Скачивание/просмотр файла чата
+        file: (fileId) => `/api/v1/chat/files/${fileId}`,
+    };
+
     static lock = {
         // Продолжительность блокировки на сервере (минуты) - фолбэк значение
         lockDurationMinutes: 30,
@@ -193,6 +226,11 @@ class AppConfig {
      * Настройки уведомлений
      */
     static notifications = {
+        // H-N8-UX: глобальный cap одновременно показываемых уведомлений.
+        // При шторме РАЗНЫХ сообщений (cacheKey не совпадает → дедуп не срабатывает)
+        // самый старый вытесняется по FIFO. Иначе DOM забивается на сотни узлов.
+        maxConcurrent: 15,
+
         // Длительности показа уведомлений (мс)
         duration: {
             error: 7000,

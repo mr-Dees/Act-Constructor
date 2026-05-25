@@ -49,7 +49,7 @@ const ChatHistory = {
      */
     async loadConversations(domainName = null) {
         try {
-            let endpoint = '/api/v1/chat/conversations';
+            let endpoint = AppConfig.chatEndpoints.conversations;
             if (domainName) {
                 endpoint += `?domain_name=${encodeURIComponent(domainName)}`;
             }
@@ -101,7 +101,7 @@ const ChatHistory = {
      * @returns {Promise<Object>} объект созданной беседы
      */
     async createConversation(domainName = null, options = {}) {
-        const endpoint = '/api/v1/chat/conversations';
+        const endpoint = AppConfig.chatEndpoints.conversations;
         const url = (typeof AppConfig !== 'undefined')
             ? AppConfig.api.getUrl(endpoint)
             : endpoint;
@@ -140,7 +140,7 @@ const ChatHistory = {
      */
     async deleteConversation(id) {
         try {
-            const endpoint = `/api/v1/chat/conversations/${id}`;
+            const endpoint = AppConfig.chatEndpoints.conversation(id);
             const url = (typeof AppConfig !== 'undefined')
                 ? AppConfig.api.getUrl(endpoint)
                 : endpoint;
