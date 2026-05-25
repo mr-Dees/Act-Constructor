@@ -1,14 +1,20 @@
 /**
- * Ошибка дружелюбного 429: бэк отдал лимит параллельных стримов на пользователя.
- * `userMessage` — человеко-читаемый текст из поля `detail`/`error` тела ответа.
+ * Ошибка дружелюбного 429: бэк отдал лимит параллельных стримов на пользователя
+ * (envelope `chat-stream-already-active`) либо per-user rate-limit
+ * (envelope `chat-rate-limit`, extra.retry_after_sec).
+ * `userMessage` — человеко-читаемый текст из поля `detail` тела ответа.
+ * `code`/`extra` — поля error envelope (см. AppError.to_envelope), могут быть null
+ * для старых ответов без envelope.
  * ChatMessages._onStreamError различает этот класс и заменяет typing-плейсхолдер
  * на красивый error-блок «лимит достигнут», без сырого «HTTP 429».
  */
 class ChatRateLimitedError extends Error {
-    constructor(userMessage) {
+    constructor(userMessage, code = null, extra = null) {
         super(userMessage);
         this.name = 'ChatRateLimitedError';
         this.userMessage = userMessage;
+        this.code = code;
+        this.extra = extra;
     }
 }
 
@@ -188,13 +194,17 @@ const ChatStream = {
     async _buildRateLimitError(response) {
         const fallback = 'Достигнут лимит одновременных запросов. Дождитесь окончания одного из них.';
         let userMessage = fallback;
+        let code = null;
+        let extra = null;
         try {
             const body = await response.json();
             if (body && typeof body === 'object') {
                 userMessage = body.detail || body.error || fallback;
+                if (typeof body.code === 'string') code = body.code;
+                if (body.extra && typeof body.extra === 'object') extra = body.extra;
             }
         } catch { /* тело пустое или не JSON — fallback */ }
-        return new ChatRateLimitedError(userMessage);
+        return new ChatRateLimitedError(userMessage, code, extra);
     },
 
     /** @private */
