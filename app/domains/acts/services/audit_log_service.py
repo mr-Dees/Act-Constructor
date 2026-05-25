@@ -18,7 +18,14 @@ class AuditLogService:
         self.conn = conn
 
     async def restore_version(self, act_id: int, version_id: int, username: str) -> dict:
-        """Восстанавливает содержимое акта из указанной версии."""
+        """Восстанавливает содержимое акта из указанной версии.
+
+        Перед перезаписью делает pre-snapshot текущего содержимого —
+        закрывает lost-write: если активный редактор не успел сохранить
+        свой state до restore, его последняя сохранённая версия остаётся
+        в истории как отдельная запись и доступна для последующего
+        восстановления.
+        """
         await self.guard.require_management_role(act_id, username)
         await self.guard.require_lock_owner(act_id, username)
 
@@ -28,6 +35,23 @@ class AuditLogService:
             raise ActNotFoundError(f"Версия {version_id} не найдена")
 
         content_repo = ActContentRepository(self.conn)
+
+        # Pre-snapshot текущего содержимого ДО перезаписи.
+        # get_content вернёт dict {tree, tables, textBlocks, violations, ...};
+        # сохраняем как auto-снимок — это не пользовательский save,
+        # значения manual/periodic зарезервированы за явными действиями
+        # редактора (см. saveType в ActDataSchema).
+        current = await content_repo.get_content(act_id)
+        if current:
+            await self.versions_repo.create_version(
+                act_id=act_id,
+                username=username,
+                save_type="auto",
+                tree=current.get("tree", {}),
+                tables=current.get("tables", {}),
+                textblocks=current.get("textBlocks", {}),
+                violations=current.get("violations", {}),
+            )
 
         restore_data = ActDataSchema(
             tree=version["tree_data"],
