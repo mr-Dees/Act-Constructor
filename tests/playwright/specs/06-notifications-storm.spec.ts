@@ -1,20 +1,21 @@
-import { test, expect } from '@playwright/test';
-import { openAct, SEED_ACTS } from '../fixtures';
+import { test, expect, openAct, SEED_ACTS } from '../fixtures';
 
 /**
- * Регрессия H-N8-UX (закрыта): при шторме одинаковых уведомлений ожидался
- * срыв в 100 DOM-нод. На фактическом коде дедупликация через
- * .notification-counter уже работает — тест проходит. Оставлен как
- * страховка от регрессии (если кто-то отключит counter-схлопывание).
+ * Регрессия H-N8-UX: при шторме РАЗНЫХ уведомлений (без cacheKey-совпадения)
+ * дедупликация в notifications.js не срабатывает — каждый show() добавляет
+ * новый DOM-узел. После 100 разных show() в DOM висит 100 .notification.
  *
- * Если в Phase 1 агент save-and-notifications-guards меняет порог сжатия —
- * только обновить максимум; сценарий должен остаться зелёным.
+ * Ожидаемое поведение после фикса (агент save-and-notifications-guards):
+ * глобальный лимит/пул показанных одновременно ≤ 15.
+ *
+ * test.fail() — документация регрессии; снять после закрытия H-N8-UX.
  */
 test.describe('Notifications storm @smoke', () => {
-  test('100 одинаковых notifications.show схлопываются в <=15 DOM-узлов', async ({ page }) => {
+  test('100 РАЗНЫХ notifications.show схлопываются в <=15 DOM-узлов', async ({ page }) => {
+    test.fail(true,
+      'H-N8-UX: 100 разных Notifications.show создают 100 DOM-нод. ' +
+      'Закрывается агентом save-and-notifications-guards.');
     await openAct(page, SEED_ACTS.empty);
-    // Notifications загружены глобально через shared/notifications.js на каждой
-    // странице портала/конструктора.
     await page.waitForFunction(
       () => typeof (window as unknown as { Notifications?: { show?: unknown } })
         .Notifications?.show === 'function',
@@ -24,12 +25,13 @@ test.describe('Notifications storm @smoke', () => {
       const N = (window as unknown as {
         Notifications: { show: (m: string, t: string) => void };
       }).Notifications;
-      for (let i = 0; i < 100; i++) N.show('Тестовое сообщение', 'info');
+      // ВАЖНО: разные message → cacheKey=type:message не совпадают → нет
+      // дедупликации через _handleDuplicate. Это и есть реальный H-N8-UX.
+      for (let i = 0; i < 100; i++) N.show(`msg ${i}`, 'info');
     });
-    // Даём рендеру стабилизироваться.
     await page.waitForTimeout(200);
     const count = await page.locator('.notification').count();
-    expect(count, `DOM-нод .notification после 100 одинаковых show: ${count}`)
+    expect(count, `DOM-нод .notification после 100 разных show: ${count}`)
       .toBeLessThanOrEqual(15);
   });
 });
