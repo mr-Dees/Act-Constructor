@@ -466,19 +466,10 @@ Object.assign(AppState, {
      * @returns {Array<Object>} Массив узлов таблиц рисков
      */
     _findRiskTablesInSubtree(node) {
-        let riskTables = [];
-
-        if (node.children) {
-            for (const child of node.children) {
-                if (child.type === AppConfig.nodeTypes.TABLE &&
-                    (child.isRegularRiskTable || child.isOperationalRiskTable)) {
-                    riskTables.push(child);
-                }
-                riskTables = riskTables.concat(this._findRiskTablesInSubtree(child));
-            }
-        }
-
-        return riskTables;
+        // E-4: делегируем единой утилите TreeUtils.findRiskTables.
+        // Сама функция оставлена ради обратной совместимости с context-menu-tree.js
+        // и state-tree.js, которые её зовут как AppState._findRiskTablesInSubtree.
+        return TreeUtils.findRiskTables(node);
     },
 
     /**

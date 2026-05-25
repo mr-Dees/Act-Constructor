@@ -111,28 +111,14 @@ class TreeDragDrop {
     }
 
     /**
-     * Проверяет наличие таблиц рисков в узле и его поддереве
+     * Проверяет наличие таблиц рисков в узле и его поддереве.
+     * E-4: hot-path drag, делегирует на TreeUtils.findRiskTables с firstOnly.
      * @private
      * @param {Object} node - Узел для проверки
      * @returns {boolean} true если найдены таблицы рисков
      */
     _hasRiskTablesInSubtree(node) {
-        // Если узел сам является таблицей риска (E-2: флаги на node)
-        if (node.type === AppConfig.nodeTypes.TABLE &&
-            (node.isRegularRiskTable || node.isOperationalRiskTable)) {
-            return true;
-        }
-
-        // Рекурсивно проверяем дочерние элементы
-        if (node.children?.length) {
-            for (const child of node.children) {
-                if (this._hasRiskTablesInSubtree(child)) {
-                    return true;
-                }
-            }
-        }
-
-        return false;
+        return TreeUtils.findRiskTables(node, {firstOnly: true}).length > 0;
     }
 
     /**

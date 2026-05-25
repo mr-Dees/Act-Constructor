@@ -319,6 +319,37 @@ const TreeUtils = {
     },
 
     /**
+     * Находит риск-таблицы в поддереве. E-4: единая утилита взамен двух дубликатов
+     * (state-content.js::_findRiskTablesInSubtree и tree-drag-drop.js::_hasRiskTablesInSubtree).
+     *
+     * @param {Object} node - Корневой узел поддерева
+     * @param {{firstOnly?: boolean}} [opts] - firstOnly:true — ранний выход после первой находки.
+     * @returns {Array<Object>} Массив узлов риск-таблиц (≤1 элемента при firstOnly).
+     */
+    findRiskTables(node, opts = {}) {
+        const result = [];
+        const firstOnly = !!opts.firstOnly;
+        const TABLE = AppConfig.nodeTypes.TABLE;
+
+        const walk = (n) => {
+            if (!n) return false;
+            if (n.type === TABLE && (n.isRegularRiskTable || n.isOperationalRiskTable)) {
+                result.push(n);
+                if (firstOnly) return true;
+            }
+            if (n.children) {
+                for (const child of n.children) {
+                    if (walk(child)) return true;
+                }
+            }
+            return false;
+        };
+
+        walk(node);
+        return result;
+    },
+
+    /**
      * Получает название узла с учетом связанных элементов
      * @param {string} nodeId - ID узла
      * @returns {string} Название узла

@@ -278,14 +278,14 @@ class TreeContextMenu {
                 result = AppState._createRegularRiskTable(nodeId);
                 if (result.valid) {
                     AppState.generateNumbering();
-                    AppState._updateMetricsTablesAfterRiskTableCreated(nodeId);
+                    MetricsRiskCoordinator.onRiskTableAdded(nodeId);
                 }
                 break;
             case 'operational-risk':
                 result = AppState._createOperationalRiskTable(nodeId);
                 if (result.valid) {
                     AppState.generateNumbering();
-                    AppState._updateMetricsTablesAfterRiskTableCreated(nodeId);
+                    MetricsRiskCoordinator.onRiskTableAdded(nodeId);
                 }
                 break;
             default:
