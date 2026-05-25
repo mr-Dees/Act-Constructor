@@ -37,3 +37,198 @@
 .admin-add-user-btn:hover {
     opacity: 0.85;
 }
+
+.admin-add-user-btn--ghost {
+    background: transparent;
+    color: var(--primary);
+}
+
+.admin-add-user-btn:disabled {
+    opacity: 0.4;
+    cursor: not-allowed;
+}
+
+/* Переключатель разделов администрирования */
+.admin-tabs {
+    display: flex;
+    gap: 4px;
+    border-bottom: 1px solid var(--border-light, #e5e7eb);
+    margin-bottom: 20px;
+    flex-wrap: wrap;
+}
+
+.admin-tab {
+    padding: 10px 18px;
+    background: transparent;
+    border: none;
+    border-bottom: 2px solid transparent;
+    cursor: pointer;
+    color: var(--text-secondary, #6b7280);
+    font-size: 0.9rem;
+    transition: color 0.15s, border-color 0.15s;
+}
+
+.admin-tab:hover {
+    color: var(--text-primary, #111827);
+}
+
+.admin-tab--active {
+    color: var(--primary, #2563eb);
+    border-bottom-color: var(--primary, #2563eb);
+    font-weight: 600;
+}
+
+.admin-tab-panel {
+    flex: 1;
+    min-height: 0;
+    display: flex;
+    flex-direction: column;
+}
+
+.admin-tab-panel[hidden] {
+    display: none;
+}
+
+/* Диагностика */
+.admin-diagnostics-content {
+    overflow: auto;
+}
+
+.admin-diagnostics-section {
+    margin-bottom: 28px;
+}
+
+.admin-diagnostics-section-title {
+    font-size: 1.05rem;
+    font-weight: 600;
+    color: var(--text-primary, #111827);
+    margin: 0 0 12px 0;
+}
+
+.admin-diagnostics-table {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 0.85rem;
+}
+
+.admin-diagnostics-table th,
+.admin-diagnostics-table td {
+    text-align: left;
+    padding: 8px 12px;
+    border-bottom: 1px solid var(--border-light, #e5e7eb);
+    vertical-align: top;
+}
+
+.admin-diagnostics-table th {
+    background: var(--gray-50, #f9fafb);
+    font-weight: 600;
+    color: var(--text-secondary, #6b7280);
+}
+
+.admin-diagnostics-ok {
+    color: #047857;
+}
+
+.admin-diagnostics-warn {
+    color: #b91c1c;
+}
+
+.admin-diagnostics-empty {
+    color: var(--text-secondary, #6b7280);
+    font-style: italic;
+    padding: 8px 0;
+}
+
+.admin-diagnostics-error {
+    color: #b91c1c;
+    padding: 12px;
+    background: #fef2f2;
+    border-radius: 6px;
+}
+
+.admin-diagnostics-card {
+    border: 1px solid var(--border-light, #e5e7eb);
+    border-radius: 8px;
+    padding: 12px 14px;
+    margin-bottom: 10px;
+    background: var(--gray-50, #f9fafb);
+}
+
+.admin-diagnostics-card-title {
+    font-weight: 600;
+    color: var(--text-primary, #111827);
+    margin-bottom: 4px;
+}
+
+.admin-diagnostics-card-status {
+    font-size: 0.8rem;
+    color: var(--text-secondary, #6b7280);
+    margin-bottom: 8px;
+}
+
+.admin-diagnostics-card-json,
+.admin-diagnostics-raw-json {
+    background: #0f172a;
+    color: #f1f5f9;
+    font-family: ui-monospace, Menlo, Consolas, monospace;
+    font-size: 0.78rem;
+    padding: 10px 12px;
+    border-radius: 6px;
+    overflow: auto;
+    margin: 0;
+    white-space: pre;
+}
+
+.admin-diagnostics-raw {
+    margin-top: 12px;
+}
+
+/* Журнал админ-операций */
+.admin-audit-filters {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+    margin-bottom: 12px;
+    align-items: center;
+}
+
+.admin-audit-filters .admin-search-input {
+    flex: 0 1 200px;
+}
+
+.admin-audit-meta {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 12px;
+    font-size: 0.85rem;
+    color: var(--text-secondary, #6b7280);
+}
+
+.admin-audit-pager {
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+}
+
+.admin-audit-log-table {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 0.85rem;
+}
+
+.admin-audit-log-table th,
+.admin-audit-log-table td {
+    text-align: left;
+    padding: 8px 12px;
+    border-bottom: 1px solid var(--border-light, #e5e7eb);
+    vertical-align: top;
+}
+
+.admin-audit-log-table th {
+    background: var(--gray-50, #f9fafb);
+    font-weight: 600;
+    color: var(--text-secondary, #6b7280);
+    position: sticky;
+    top: 0;
+}
