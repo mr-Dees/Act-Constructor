@@ -680,9 +680,12 @@ class CreateActDialog extends DialogBase {
             const exact = users.find(u => u.username === username);
             if (exact) {
                 search.fillFromUser(exact);
+            } else {
+                Notifications.warning(`Пользователь ${username} не найден в справочнике`);
             }
         } catch (err) {
             console.error('Автозаполнение пользователя:', err);
+            Notifications.warning(`Не удалось найти пользователя ${username} в справочнике`);
         }
     }
 

@@ -761,9 +761,10 @@ class APIClient {
      * Сохраняет фактуру (UPSERT по act_id + node_id)
      *
      * @param {Object} data - Данные фактуры
+     * @param {AbortSignal} [signal] - Сигнал отмены запроса
      * @returns {Promise<Object>} Сохраненная фактура
      */
-    static async saveInvoice(data) {
+    static async saveInvoice(data, signal) {
         const username = AuthManager.getCurrentUser();
 
         const response = await fetch(AppConfig.api.getUrl('/api/v1/acts/invoice/save'), {
@@ -773,6 +774,7 @@ class APIClient {
                 'X-JupyterHub-User': username,
             },
             body: JSON.stringify(data),
+            signal,
         });
 
         if (!response.ok) {
@@ -787,9 +789,10 @@ class APIClient {
      *
      * @param {number} invoiceId - ID фактуры
      * @param {number} actId - ID акта для проверки доступа
+     * @param {AbortSignal} [signal] - Сигнал отмены запроса
      * @returns {Promise<Object>} Результат верификации
      */
-    static async verifyInvoice(invoiceId, actId) {
+    static async verifyInvoice(invoiceId, actId, signal) {
         const username = AuthManager.getCurrentUser();
 
         const response = await fetch(AppConfig.api.getUrl('/api/v1/acts/invoice/verify'), {
@@ -799,6 +802,7 @@ class APIClient {
                 'X-JupyterHub-User': username,
             },
             body: JSON.stringify({ invoice_id: invoiceId, act_id: actId }),
+            signal,
         });
 
         if (!response.ok) {
@@ -1060,15 +1064,34 @@ class APIClient {
     /**
      * Поиск пользователей в справочнике (для добавления в систему)
      * @param {string} query - Строка поиска (мин. 2 символа)
+     * @param {AbortSignal} [signal] - Сигнал отмены запроса
      * @returns {Promise<Array<{username: string, fullname: string, job: string, email: string}>>}
      */
-    static async searchUsers(query) {
+    static async searchUsers(query, signal) {
         const username = AuthManager.getCurrentUser();
         const response = await fetch(
             AppConfig.api.getUrl(`/api/v1/admin/users/search?q=${encodeURIComponent(query)}`),
-            { headers: { 'X-JupyterHub-User': username } }
+            { headers: { 'X-JupyterHub-User': username }, signal }
         );
         if (!response.ok) throw this._createError(response.status, 'Ошибка поиска пользователей');
+        return response.json();
+    }
+
+    /**
+     * Загружает актуальный список ролей пользователя (для повторной синхронизации
+     * после неуспешного assign/remove — серверный rollback на app-уровне).
+     * @param {string} targetUsername - Имя пользователя
+     * @returns {Promise<{username: string, roles: Array<{id:number, name:string, code?:string}>}>}
+     */
+    static async getUserRoles(targetUsername) {
+        const username = AuthManager.getCurrentUser();
+        const response = await fetch(
+            AppConfig.api.getUrl(`/api/v1/admin/users/${targetUsername}/roles`),
+            { headers: { 'X-JupyterHub-User': username } }
+        );
+        if (!response.ok) {
+            await this._throwApiError(response);
+        }
         return response.json();
     }
 

@@ -293,6 +293,11 @@ class PreviewManager {
      * @param {HTMLElement} element - Элемент ссылки или сноски
      */
     static _showPreviewTooltip(element) {
+        // Guard: элемент мог быть удалён из DOM пока ждали debounce/hover-timeout
+        // (например, перерендер preview). Без проверки getBoundingClientRect
+        // вернёт нули, tooltip окажется в углу с position:fixed.
+        if (!element || !document.body.contains(element)) return;
+
         this._hidePreviewTooltip();
 
         const isLink = element.classList.contains('text-link');

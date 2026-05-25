@@ -297,12 +297,42 @@ class AdminRoles {
                 }
             }
         } catch (error) {
-            // Откат при ошибке
+            // Откат при ошибке: оптимистично сняли/добавили — возвращаем визуал.
             chip.classList.toggle('active');
             Notifications.error(`Ошибка: ${error.message}`);
+
+            // Сверяем локальное состояние с сервером: серверный rollback
+            // мог разойтись с нашим оптимистичным изменением (например,
+            // другой админ параллельно тронул того же юзера). Берём истину из API.
+            try {
+                const fresh = await APIClient.getUserRoles(username);
+                const user = this._users.find(u => u.username === username);
+                if (user && fresh) {
+                    user.roles = fresh.roles || [];
+                    this._refreshUserRow(user);
+                }
+            } catch (syncErr) {
+                console.error('Не удалось пересинхронизировать роли пользователя:', syncErr);
+            }
         } finally {
             chip.disabled = false;
         }
+    }
+
+    /**
+     * Перерисовывает строку конкретного пользователя без полного _renderAll
+     * (нужно после серверной ресинхронизации ролей в catch _toggleRole).
+     * @param {Object} user
+     * @private
+     */
+    static _refreshUserRow(user) {
+        if (!this._tableEl) return;
+        const row = this._tableEl.querySelector(`.admin-roles-row[data-username="${CSS.escape(user.username)}"]`);
+        if (!row) return;
+        row.innerHTML = this._renderRow(user);
+        row.querySelectorAll('.admin-role-chip').forEach(chip => {
+            chip.addEventListener('click', () => this._toggleRole(user.username, chip));
+        });
     }
 
     /**

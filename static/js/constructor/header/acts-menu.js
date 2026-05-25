@@ -578,6 +578,21 @@ class ActsMenuManager {
 
         this._setupEscapeHandler();
 
+        // Подписка на cross-tab события: при удалении/дублировании акта
+        // в другой вкладке инвалидируем кеш меню и обновляем открытый список.
+        if (window.ActsBroadcast) {
+            window.ActsBroadcast.subscribe((data) => {
+                const type = data?.type;
+                if (type === 'act:deleted' || type === 'act:duplicated') {
+                    this._clearCache();
+                    const menu = document.getElementById('actsMenuDropdown');
+                    if (menu && !menu.classList.contains('hidden')) {
+                        this.renderActsList(true);
+                    }
+                }
+            });
+        }
+
         menuBtn?.addEventListener('click', e => {
             e.stopPropagation();
             this.toggle();
