@@ -18,6 +18,14 @@ const ChatContext = {
     _pendingEnsure: null,
 
     /**
+     * Стабильная ссылка на обработчик `chat:clear` — нужна для парного `off()`
+     * в `destroy()`. Анонимная стрелка ломала бы симметрию: подписаться можно,
+     * отписаться — нет (handler-ссылку взять негде, повторный `init()` создал бы
+     * второй listener, утечка слушателей при горячей переинициализации).
+     */
+    _onChatClear: null,
+
+    /**
      * Инициализация: подключение ChatHistory callback
      */
     init() {
@@ -31,12 +39,26 @@ const ChatContext = {
             ChatHistory.loadConversations();
         }
 
-        ChatEventBus.on('chat:clear', () => {
+        this._onChatClear = () => {
             this._currentConversationId = null;
             this._pendingEnsure = null;
-        });
+        };
+        ChatEventBus.on('chat:clear', this._onChatClear);
 
         this._initialized = true;
+    },
+
+    /**
+     * Снимает подписки и сбрасывает флаг инициализации.
+     * Парно `init()` — для случаев hot-reload и тестов.
+     */
+    destroy() {
+        if (!this._initialized) return;
+        if (this._onChatClear) {
+            ChatEventBus.off('chat:clear', this._onChatClear);
+            this._onChatClear = null;
+        }
+        this._initialized = false;
     },
 
     /**

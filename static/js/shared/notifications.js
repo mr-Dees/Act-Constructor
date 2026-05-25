@@ -291,7 +291,17 @@ class NotificationManager {
      * @returns {number|null} ID таймера или null
      */
     _setupAutoHide(id, duration, cacheKey) {
-        if (duration <= 0) return null;
+        if (duration <= 0) {
+            // Sticky-уведомление: само не скрывается, но без TTL на messageCache
+            // запись остаётся навсегда, пока юзер не нажмёт крестик. При частых
+            // sticky-сообщениях с уникальным текстом cache растёт без границ.
+            // Дедуп нужен только в коротком окне — после 60 сек считаем дубль
+            // отдельным уведомлением (юзер вряд ли заметит «склейку» через минуту).
+            const STICKY_DEDUP_TTL_MS = 60_000;
+            return setTimeout(() => {
+                this.messageCache.delete(cacheKey);
+            }, STICKY_DEDUP_TTL_MS);
+        }
 
         return setTimeout(() => {
             this.hide(id);
