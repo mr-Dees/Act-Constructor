@@ -538,12 +538,15 @@ class ActsMenuManager {
 
     static _redirectToActsManager() {
         const url = AppConfig.api.getUrl('/acts');
+        // Акт удалён — confirmNavigation не нужен: его диалог «сохранить
+        // несохранённые изменения» некорректен, сохранять нечего и некуда.
+        // Снимаем guard'ы beforeunload и редиректим напрямую.
+        if (typeof StorageManager !== 'undefined' && typeof StorageManager.allowUnload === 'function') {
+            StorageManager.allowUnload();
+        }
+        window._allowNavigation = true;
         setTimeout(() => {
-            if (typeof StorageManager !== 'undefined' && typeof StorageManager.confirmNavigation === 'function') {
-                StorageManager.confirmNavigation(url, { url });
-            } else {
-                window.location.href = url;
-            }
+            window.location.href = url;
         }, AppConfig.timings.redirectAfterDelete);
     }
 
