@@ -180,6 +180,14 @@ async def seed() -> None:
     )
     conn = await asyncpg.connect(dsn)
     try:
+        # Чистим stale singleton-lock: если предыдущий uvicorn упал/был убит
+        # taskkill-ом, lifespan-shutdown мог не успеть отпустить блокировку.
+        # TTL=60s, но мы не хотим ждать его при последовательных прогонах.
+        try:
+            await conn.execute(f"DELETE FROM {PREFIX}app_singleton_lock")
+        except asyncpg.UndefinedTableError:
+            pass  # Таблица создаётся при первом старте — это норма.
+
         async with conn.transaction():
             for act_id in SEED_ACT_IDS:
                 await _delete_act_if_exists(conn, act_id)
