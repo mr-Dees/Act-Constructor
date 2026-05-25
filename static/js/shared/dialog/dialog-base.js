@@ -27,11 +27,109 @@ class DialogBase {
     }
 
     /**
-     * Показывает диалог с анимацией
+     * Селектор focusable-элементов внутри overlay'а (для focus-trap'а и
+     * автофокуса при открытии диалога). Исключаем элементы с tabindex="-1"
+     * (программно фокусируемые, но не tab-доступные) и disabled.
+     * @private
+     */
+    static _FOCUSABLE_SELECTOR = [
+        'a[href]',
+        'button:not([disabled])',
+        'input:not([disabled]):not([type="hidden"])',
+        'textarea:not([disabled])',
+        'select:not([disabled])',
+        '[tabindex]:not([tabindex="-1"])'
+    ].join(',');
+
+    /**
+     * Возвращает все видимые focusable-элементы внутри overlay'а.
+     * Видимость определяем по offsetParent (учитывает display:none/visibility:hidden
+     * у предков). Достаточно для нашего набора диалогов — в overlay'е почти всегда
+     * один блок с кнопками.
+     * @private
+     */
+    static _getFocusableElements(overlay) {
+        const all = overlay.querySelectorAll(this._FOCUSABLE_SELECTOR);
+        return Array.from(all).filter(el => el.offsetParent !== null || el === overlay);
+    }
+
+    /** @private */
+    static _getFirstFocusable(overlay) {
+        const list = this._getFocusableElements(overlay);
+        return list[0] || null;
+    }
+
+    /** @private */
+    static _getLastFocusable(overlay) {
+        const list = this._getFocusableElements(overlay);
+        return list[list.length - 1] || null;
+    }
+
+    /**
+     * Вешает Tab focus-trap на overlay. Tab на последнем — переводит на первый,
+     * Shift+Tab на первом — переводит на последний. Handler хранится в
+     * overlay._trapHandler — удаляется в _hideDialog.
+     * @private
+     */
+    static _setupFocusTrap(overlay) {
+        const handler = (e) => {
+            if (e.key !== 'Tab') return;
+            // Trap должен работать только на самом верхнем диалоге; если поверх
+            // открыт ещё один — не вмешиваемся.
+            if (this._activeDialogs[this._activeDialogs.length - 1] !== overlay) return;
+
+            const focusables = this._getFocusableElements(overlay);
+            if (focusables.length === 0) {
+                // Нечего трапить — но и Tab не должен «убежать» из модала.
+                e.preventDefault();
+                return;
+            }
+            const first = focusables[0];
+            const last = focusables[focusables.length - 1];
+            const active = document.activeElement;
+
+            if (e.shiftKey) {
+                if (active === first || !overlay.contains(active)) {
+                    e.preventDefault();
+                    last.focus();
+                }
+            } else {
+                if (active === last || !overlay.contains(active)) {
+                    e.preventDefault();
+                    first.focus();
+                }
+            }
+        };
+        overlay.addEventListener('keydown', handler);
+        overlay._trapHandler = handler;
+    }
+
+    /** @private */
+    static _removeFocusTrap(overlay) {
+        if (overlay._trapHandler) {
+            overlay.removeEventListener('keydown', overlay._trapHandler);
+            delete overlay._trapHandler;
+        }
+    }
+
+    /**
+     * Показывает диалог с анимацией.
+     *
+     * Дополнительно настраивает a11y:
+     * - role="dialog" + aria-modal="true" (если не заданы вызывающим кодом);
+     * - aria-labelledby на первый заголовок диалога (data-dialog-title|h1..h4);
+     * - сохраняет previousFocus и переводит фокус на первый focusable;
+     * - вешает Tab focus-trap.
+     *
      * @protected
      * @param {HTMLElement} overlay - Overlay элемент
      */
     static _showDialog(overlay) {
+        // Сохраняем элемент, у которого был фокус до открытия — вернём после _hideDialog.
+        overlay._previousFocus = document.activeElement instanceof HTMLElement
+            ? document.activeElement
+            : null;
+
         document.body.appendChild(overlay);
         this._activeDialogs.push(overlay);
         this._lockBodyScroll();
@@ -39,10 +137,49 @@ class DialogBase {
         // Принудительный reflow для анимации (void — явное выражение, чтобы линтеры/минификаторы не выкинули его как «unused expression»)
         void overlay.offsetHeight;
         overlay.classList.add('visible');
+
+        // ARIA-маркеры модального диалога. role/aria-modal не перетираем,
+        // если уже выставлены вызывающим кодом.
+        if (!overlay.hasAttribute('role')) {
+            overlay.setAttribute('role', 'dialog');
+        }
+        if (!overlay.hasAttribute('aria-modal')) {
+            overlay.setAttribute('aria-modal', 'true');
+        }
+        if (!overlay.hasAttribute('aria-labelledby')) {
+            const heading = overlay.querySelector('[data-dialog-title], h1, h2, h3, h4');
+            if (heading) {
+                if (!heading.id) {
+                    heading.id = `dialog-title-${Date.now()}-${Math.floor(Math.random() * 1e6)}`;
+                }
+                overlay.setAttribute('aria-labelledby', heading.id);
+            }
+        }
+
+        // Фокус-менеджмент. setTimeout(0) — даём DOM дорисоваться после reflow
+        // и смены классов visibility (иначе focus() уходит «в никуда» при
+        // первом открытии диалога, когда внутренний блок только-только появился).
+        setTimeout(() => {
+            const first = this._getFirstFocusable(overlay);
+            if (first) {
+                try { first.focus(); } catch (_) { /* noop */ }
+            } else {
+                // Нет focusable — фокус на сам overlay, чтобы Esc/Tab продолжили работать.
+                if (!overlay.hasAttribute('tabindex')) {
+                    overlay.setAttribute('tabindex', '-1');
+                }
+                try { overlay.focus(); } catch (_) { /* noop */ }
+            }
+        }, 0);
+
+        // Focus-trap: Tab/Shift+Tab циклит фокус внутри overlay'а.
+        this._setupFocusTrap(overlay);
     }
 
     /**
-     * Скрывает и удаляет диалог с анимацией
+     * Скрывает и удаляет диалог с анимацией. После удаления возвращает
+     * фокус на _previousFocus (если элемент ещё в DOM).
+     *
      * @protected
      * @param {HTMLElement} overlay - Overlay элемент для удаления
      * @param {number} [delay] - Задержка перед удалением (мс)
@@ -55,12 +192,17 @@ class DialogBase {
             this._activeDialogs.splice(index, 1);
         }
 
-        // Унифицированно снимаем escape-handler здесь, чтобы подклассы не дублировали логику
-        // и не оставляли «висячий» keydown-listener при принудительном закрытии (closeAllDialogs).
+        // Унифицированно снимаем escape-handler и focus-trap здесь, чтобы подклассы не дублировали
+        // логику и keydown-listener'ы не висели на оторванной DOM-ноде после закрытия (включая closeAllDialogs).
         this._removeEscapeHandler(overlay);
+        this._removeFocusTrap(overlay);
 
         overlay.classList.add('closing');
         overlay.classList.remove('visible');
+
+        // previousFocus захватываем здесь — после remove() ссылка на overlay уже не нужна.
+        const previousFocus = overlay._previousFocus;
+        delete overlay._previousFocus;
 
         setTimeout(() => {
             if (overlay.parentNode) {
@@ -70,6 +212,13 @@ class DialogBase {
             // Разблокируем прокрутку только если нет других активных диалогов
             if (this._activeDialogs.length === 0) {
                 this._unlockBodyScroll();
+            }
+
+            // Возвращаем фокус — только если элемент ещё в DOM и видим.
+            // Без isConnected проверки .focus() на оторванном узле — no-op,
+            // но фокус уходит на body (теряется контекст для скринридера).
+            if (previousFocus && previousFocus.isConnected && typeof previousFocus.focus === 'function') {
+                try { previousFocus.focus(); } catch (_) { /* noop */ }
             }
         }, delay);
     }
@@ -277,6 +426,7 @@ class DialogBase {
     static closeAllDialogs() {
         const dialogs = [...this._activeDialogs]; // Копия для безопасной итерации
         dialogs.forEach(dialog => {
+            this._removeFocusTrap(dialog);
             this._hideDialog(dialog, 0);
         });
         this._activeDialogs = [];

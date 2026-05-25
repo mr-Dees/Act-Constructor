@@ -19,7 +19,9 @@
     {% include 'constructor/header/header.html' %}
 
     <!-- Основной контент страницы -->
-    {% block content %}{% endblock %}
+    <main class="constructor-main">
+        {% block content %}{% endblock %}
+    </main>
 
     <!-- app-config.js и auth.js грузятся sync (без defer): сразу после них
          идёт sync inline-скрипт, инициализирующий window.__authReady. Этот
