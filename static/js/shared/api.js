@@ -6,6 +6,13 @@
  * загрузки/сохранения содержимого из БД, а также удаления актов.
  */
 class APIClient {
+    /**
+     * Флаг in-flight PUT /content (H-N1-UX). Защищает от двойного запроса
+     * при mash'е Ctrl+S/клике "Сохранить" — повторные вызовы saveActContent
+     * пока предыдущий не завершился (resolve/reject) молча отбрасываются.
+     */
+    static _saveInFlight = false;
+
     static async lockAct(actId) {
         const username = AuthManager.getCurrentUser();
 
@@ -490,6 +497,15 @@ class APIClient {
             throw new Error('Пользователь не авторизован');
         }
 
+        // H-N1-UX: гард от двойного PUT при mash'е Ctrl+S / клике "Сохранить".
+        // Без него каждый повторный вызов уходил отдельным запросом на /content,
+        // пока предыдущий ещё в полёте — лишняя нагрузка и risk race-condition'ов.
+        if (APIClient._saveInFlight) {
+            console.log('saveActContent уже в процессе — пропускаем повторный вызов');
+            return null;
+        }
+        APIClient._saveInFlight = true;
+
         try {
             // Блокируем отслеживание на время сохранения
             StorageManager.disableTracking();
@@ -529,6 +545,7 @@ class APIClient {
             Notifications.error(`Не удалось сохранить акт: ${err.message}`);
             throw err;
         } finally {
+            APIClient._saveInFlight = false;
             // Включаем отслеживание обратно
             setTimeout(() => {
                 StorageManager.enableTracking();
