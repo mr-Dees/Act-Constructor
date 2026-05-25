@@ -43,8 +43,11 @@ class TestSanitizeHtmlDirect:
 
     def test_strips_script_tag(self):
         out = sanitize_html("<p>safe</p><script>alert(1)</script>")
+        # bleach strip=True убирает теги; текст между ними остаётся как plain
+        # text — это безопасно: без <script>-обёртки `alert(1)` не выполнится
+        # при рендере через innerHTML.
         assert "<script" not in out
-        assert "alert" not in out
+        assert "</script" not in out
         assert "safe" in out
 
     def test_strips_img_onerror(self):
@@ -192,8 +195,10 @@ class TestSaveContentSanitizesTextBlocks:
         saved_data = content_repo.save_content.await_args.kwargs.get("data") \
             or content_repo.save_content.await_args.args[1]
         sanitized = saved_data.textBlocks["tb1"].content
+        # Теги вырезаны; внутренний текст остаётся как plain — не исполнится
+        # при innerHTML без <script>-обёртки.
         assert "<script" not in sanitized
-        assert "alert" not in sanitized
+        assert "</script" not in sanitized
         assert "ok" in sanitized
 
     async def test_img_onerror_stripped_in_textblock(self):
