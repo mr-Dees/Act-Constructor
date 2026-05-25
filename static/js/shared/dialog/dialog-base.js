@@ -36,8 +36,8 @@ class DialogBase {
         this._activeDialogs.push(overlay);
         this._lockBodyScroll();
 
-        // Принудительный reflow для анимации
-        overlay.offsetHeight;
+        // Принудительный reflow для анимации (void — явное выражение, чтобы линтеры/минификаторы не выкинули его как «unused expression»)
+        void overlay.offsetHeight;
         overlay.classList.add('visible');
     }
 
@@ -54,6 +54,10 @@ class DialogBase {
         if (index > -1) {
             this._activeDialogs.splice(index, 1);
         }
+
+        // Унифицированно снимаем escape-handler здесь, чтобы подклассы не дублировали логику
+        // и не оставляли «висячий» keydown-listener при принудительном закрытии (closeAllDialogs).
+        this._removeEscapeHandler(overlay);
 
         overlay.classList.add('closing');
         overlay.classList.remove('visible');

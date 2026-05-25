@@ -8,6 +8,8 @@ class ChangelogTracker {
     static _storageKey = null;
     static _debounceTimers = {};
     static MAX_ENTRIES = 500;
+    /** Одноразовый флаг показа уведомления о квоте, чтобы не спамить юзера каждые 1 сек debounce. */
+    static _quotaWarned = false;
 
     /**
      * Инициализация с actId, загрузка из localStorage
@@ -112,7 +114,20 @@ class ChangelogTracker {
             if (!this._storageKey) return;
             try {
                 localStorage.setItem(this._storageKey, JSON.stringify(this._entries));
-            } catch { /* quota exceeded — ignore */ }
+            } catch (err) {
+                // QuotaExceededError: localStorage переполнен. Молча игнорировать опасно —
+                // юзер не поймёт, почему журнал изменений «забывает» операции после reload.
+                // Показываем уведомление один раз за сессию, чтобы не спамить.
+                if (err && err.name === 'QuotaExceededError' && !this._quotaWarned) {
+                    this._quotaWarned = true;
+                    if (typeof Notifications !== 'undefined') {
+                        Notifications.warning(
+                            'Заполнено локальное хранилище — журнал изменений не сохраняется. '
+                            + 'Сохраните акт и перезагрузите страницу.'
+                        );
+                    }
+                }
+            }
         }, 1000);
     }
 }
