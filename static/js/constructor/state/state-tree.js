@@ -225,6 +225,29 @@ Object.assign(AppState, {
         const node = this.findNodeById(nodeId);
         if (!node) return false;
 
+        // Страховка API-уровня над UI-проверкой: защищённые узлы (секции 1-5)
+        // нельзя удалить прямым вызовом, даже из консоли/undo/миграции.
+        if (node.protected || node.deletable === false) {
+            if (typeof Notifications !== 'undefined') {
+                Notifications.error('Этот элемент защищён от удаления');
+            }
+            return false;
+        }
+
+        return this._deleteNodeUnchecked(node, nodeId);
+    },
+
+    /**
+     * Внутреннее удаление узла без проверки protected/deletable.
+     * Используется для каскадного удаления потомков: дети защищённых узлов
+     * (например, metrics-таблица у 5.X) удаляются вместе с родителем
+     * по бизнес-смыслу «родителя нет — детям незачем».
+     * @private
+     * @param {Object} node - Узел для удаления
+     * @param {string} nodeId - ID узла
+     * @returns {boolean} true если удаление успешно
+     */
+    _deleteNodeUnchecked(node, nodeId) {
         const isRiskTable = this._isRiskTable(node);
 
         if (typeof ChangelogTracker !== 'undefined') {
@@ -284,7 +307,9 @@ Object.assign(AppState, {
 
         const childrenToDelete = [...node.children];
         for (const child of childrenToDelete) {
-            this.deleteNode(child.id);
+            // Каскадное удаление: НЕ проверяем protected/deletable у потомков,
+            // иначе protected metrics-таблица заблокирует удаление родителя.
+            this._deleteNodeUnchecked(child, child.id);
         }
     },
 
