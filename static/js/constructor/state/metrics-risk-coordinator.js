@@ -1,33 +1,101 @@
 /**
  * MetricsRiskCoordinator — фасад над каскадной логикой metrics ↔ risk-таблиц.
  *
- * E-3 (краткая версия): полная экстракция reconcile-логики из state-content.js /
- * state-tree.js / context-menu-tree.js / tree-drag-drop.js признана высокорисковой
- * без покрытия e2e (5+ инвариантов: «metrics на 5.X ⇔ deep risks», «main metrics на
- * §5 ⇔ any risks», «5.X-only OR 5.X.Y-only», ...). Документ ver-3-tree-isolation §F-9
- * прямо предупреждает: «оправдана только если бизнес добавит ещё каскады. Сейчас
- * работает — не трогать без триггера».
+ * Полная экстракция reconcile-логики из state-content.js / state-tree.js /
+ * context-menu-tree.js / tree-drag-drop.js признана высокорисковой без покрытия
+ * e2e (5+ инвариантов: «metrics на 5.X ⇔ deep risks», «main metrics на §5 ⇔
+ * any risks», «5.X-only OR 5.X.Y-only», ...). Документ ver-3-tree-isolation §F-9
+ * прямо предупреждает: «оправдана только если бизнес добавит ещё каскады.
+ * Сейчас работает — не трогать без триггера».
  *
- * Эта версия — тонкий фасад: делегирует на существующие методы AppState,
- * предоставляя seam для будущей экстракции и единую точку API для вызовов
- * из context-menu / drag-drop / тестов. Полный перенос — отдельная веха (TODO в отчёте).
+ * Поэтому coordinator — единая точка входа в каскад, но реализация
+ * по-прежнему делегирована методам AppState. Что даёт фасад поверх делегации:
+ *
+ * 1) Единая точка для callsite'ов (context-menu / state-tree.deleteNode /
+ *    state-tree.moveNode / state-content.deleteTableFromNode) — раньше часть
+ *    обходила coordinator и звала AppState._...AfterRiskTableDeleted напрямую.
+ *
+ * 2) Snapshot/rollback safety: каждый хук обёрнут в _withSnapshot, который
+ *    делает поверхностный snapshot затронутых частей дерева и откатывается,
+ *    если внутренний шаг бросил исключение. Закрывает основную дыру D3
+ *    из constructor-domain-audit.md: «при прерывании операции возможен
+ *    partial-state».
+ *
+ * 3) Seam для будущей экстракции / юнит-тестов: тесты могут заменять методы
+ *    AppState mock'ами и проверять coordinator в изоляции.
  */
 const MetricsRiskCoordinator = {
+    /**
+     * Снимает поверхностный snapshot частей дерева, которые могут быть затронуты
+     * каскадом: §5 (главная сводная таблица) и поддеревья 5.X (per-section
+     * сводные). Возвращает функцию rollback(), которая восстанавливает узлы.
+     *
+     * Используется shallow JSON-копия — каскад модифицирует только children
+     * и table-данные ссылочно, поэтому snapshot небольшой (десятки KB).
+     * @private
+     * @returns {{rollback: function}}
+     */
+    _snapshotSection5() {
+        if (typeof AppState === 'undefined' || !AppState.treeData) {
+            return {rollback: () => {}};
+        }
+        const node5 = AppState.findNodeById?.('5');
+        const tables5 = node5 ? JSON.parse(JSON.stringify(node5.children || [])) : null;
+        // Сохраняем также таблицы (AppState.tables) — каскад может удалять
+        // metrics-таблицы через delete this.tables[id].
+        const tablesCopy = AppState.tables ? JSON.parse(JSON.stringify(AppState.tables)) : null;
+        return {
+            rollback: () => {
+                if (node5 && tables5) node5.children = tables5;
+                if (tablesCopy) AppState.tables = tablesCopy;
+            }
+        };
+    },
+
+    /**
+     * Обёртка: snapshot → fn() → on error: rollback + log + Notifications.error.
+     * Возвращает true при успехе, false при rollback'е.
+     * @private
+     * @param {string} hookName - Имя хука для логирования.
+     * @param {Function} fn - Внутренняя операция каскада.
+     * @returns {boolean}
+     */
+    _withSnapshot(hookName, fn) {
+        const snap = this._snapshotSection5();
+        try {
+            fn();
+            return true;
+        } catch (err) {
+            console.error(`MetricsRiskCoordinator.${hookName} failed, откатываем snapshot:`, err);
+            snap.rollback();
+            if (typeof Notifications !== 'undefined' && Notifications.error) {
+                Notifications.error('Ошибка обновления сводных таблиц метрик — изменения откачены');
+            }
+            return false;
+        }
+    },
+
     /**
      * Хук «риск-таблица добавлена». Создаёт metrics на 5.X (если risk на 5.X.Y+)
      * и main metrics в §5.
      * @param {string} nodeId - ID узла, в который добавлена risk-таблица.
+     * @returns {boolean} true при успехе, false если был rollback.
      */
     onRiskTableAdded(nodeId) {
-        AppState._updateMetricsTablesAfterRiskTableCreated(nodeId);
+        return this._withSnapshot('onRiskTableAdded', () => {
+            AppState._updateMetricsTablesAfterRiskTableCreated(nodeId);
+        });
     },
 
     /**
      * Хук «риск-таблица удалена». Реконсилит metrics во всём §5 (функция работает
      * глобально, удалённый nodeId уже не нужен — см. M7).
+     * @returns {boolean} true при успехе, false если был rollback.
      */
     onRiskTableRemoved() {
-        AppState._cleanupMetricsTablesAfterRiskTableDeleted();
+        return this._withSnapshot('onRiskTableRemoved', () => {
+            AppState._cleanupMetricsTablesAfterRiskTableDeleted();
+        });
     },
 
     /**
@@ -35,9 +103,12 @@ const MetricsRiskCoordinator = {
      * и нового предка 5.X.
      * @param {Object} draggedNode - Перемещённый узел.
      * @param {Object|null} oldAncestor5x - Предок 5.X до перемещения.
+     * @returns {boolean} true при успехе, false если был rollback.
      */
     onSubtreeMoved(draggedNode, oldAncestor5x) {
-        AppState._reconcileMetricsTablesAfterMove(draggedNode, oldAncestor5x);
+        return this._withSnapshot('onSubtreeMoved', () => {
+            AppState._reconcileMetricsTablesAfterMove(draggedNode, oldAncestor5x);
+        });
     },
 
     /**

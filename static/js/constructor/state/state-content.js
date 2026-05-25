@@ -95,7 +95,8 @@ Object.assign(AppState, {
 
         // Обновляем таблицы метрик если удалили таблицу рисков
         if (isRiskTable) {
-            this._cleanupMetricsTablesAfterRiskTableDeleted();
+            // Через coordinator: snapshot/rollback safety.
+            MetricsRiskCoordinator.onRiskTableRemoved();
         }
 
         return ValidationCore.success();

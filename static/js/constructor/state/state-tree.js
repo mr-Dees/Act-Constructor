@@ -258,7 +258,8 @@ Object.assign(AppState, {
         this._removeFromParent(nodeId);
 
         if (isRiskTable) {
-            this._cleanupMetricsTablesAfterRiskTableDeleted();
+            // Единая точка входа в каскад metrics↔risk: snapshot/rollback safety.
+            MetricsRiskCoordinator.onRiskTableRemoved();
         }
 
         this.generateNumbering();
@@ -412,8 +413,9 @@ Object.assign(AppState, {
             this._clearInvoiceRecursive(draggedNode);
         }
 
-        // Пересчитываем сводные таблицы метрик при перемещении внутри раздела 5
-        this._reconcileMetricsTablesAfterMove(draggedNode, oldAncestor5x);
+        // Пересчитываем сводные таблицы метрик при перемещении внутри раздела 5.
+        // Через coordinator: snapshot/rollback при exception во время reconcile.
+        MetricsRiskCoordinator.onSubtreeMoved(draggedNode, oldAncestor5x);
 
         return ValidationCore.success();
     },
