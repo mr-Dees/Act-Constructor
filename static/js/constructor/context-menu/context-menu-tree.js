@@ -235,7 +235,8 @@ class TreeContextMenu {
 
         const result = AppState.addNode(nodeId, '', true);
         if (result.valid) {
-            this.updateTreeViews();
+            // Добавление потомка → пересборка поддерева самого nodeId
+            this.updateTreeViews(nodeId);
         } else {
             Notifications.error(result.message || 'Не удалось добавить элемент');
         }
@@ -253,7 +254,9 @@ class TreeContextMenu {
 
         const result = AppState.addNode(nodeId, '', false);
         if (result.valid) {
-            this.updateTreeViews();
+            // Добавление сиблинга → пересборка поддерева общего родителя
+            const parent = AppState.findParentNode(nodeId);
+            this.updateTreeViews(parent ? parent.id : undefined);
         } else {
             Notifications.error(result.message || 'Не удалось добавить элемент');
         }
@@ -290,7 +293,10 @@ class TreeContextMenu {
         }
 
         if (result.valid) {
-            this.updateTreeViews();
+            // Регулярные/операционные риск-таблицы влияют на метрики-таблицы
+            // других узлов раздела 5 → полный renderAll. Обычная таблица — узкая.
+            const scope = (tableType === 'regular') ? nodeId : undefined;
+            this.updateTreeViews(scope);
         } else {
             Notifications.error(result.message || 'Ошибка при добавлении таблицы');
         }
@@ -305,7 +311,7 @@ class TreeContextMenu {
 
         const result = AppState.addTextBlockToNode(nodeId);
         if (result.valid) {
-            this.updateTreeViews();
+            this.updateTreeViews(nodeId);
         } else {
             Notifications.error(result.message || 'Ошибка при добавлении текстового блока');
         }
@@ -320,7 +326,7 @@ class TreeContextMenu {
 
         const result = AppState.addViolationToNode(nodeId);
         if (result.valid) {
-            this.updateTreeViews();
+            this.updateTreeViews(nodeId);
         } else {
             Notifications.error(result.message || 'Ошибка при добавлении нарушения');
         }
@@ -370,6 +376,15 @@ class TreeContextMenu {
             }
         }
 
+        // Захватываем parentId ДО удаления, иначе AppState.findParentNode вернёт null
+        const parentBeforeDelete = AppState.findParentNode(nodeId);
+        const parentId = parentBeforeDelete ? parentBeforeDelete.id : null;
+
+        // Удаление таблицы рисков триггерит _cleanupMetricsTablesAfterRiskTableDeleted,
+        // которая может удалить метрики-таблицы из ДРУГИХ узлов раздела 5 → fallback на renderAll.
+        const isRiskTableDelete = node.type === 'table' && node.tableId &&
+            (AppState.tables[node.tableId]?.isRegularRiskTable || AppState.tables[node.tableId]?.isOperationalRiskTable);
+
         DialogManager.show({
             title: 'Удаление элемента',
             message: 'Удалить этот элемент?',
@@ -379,7 +394,7 @@ class TreeContextMenu {
         }).then(userConfirmed => {
             if (userConfirmed) {
                 AppState.deleteNode(nodeId);
-                this.updateTreeViews();
+                this.updateTreeViews(isRiskTableDelete ? undefined : parentId);
                 Notifications.info('Элемент удалён');
             }
         });
@@ -401,12 +416,21 @@ class TreeContextMenu {
         return null;
     }
 
-    /** Обновление UI */
-    updateTreeViews() {
+    /**
+     * Обновление UI после изменения дерева.
+     * @param {string} [scopeNodeId] - ID узла-родителя, чьё поддерево достаточно перерисовать.
+     *   Если не указан — fallback на полный renderAll (используется для рисковых таблиц,
+     *   которые затрагивают метрики-таблицы в произвольных местах раздела 5).
+     */
+    updateTreeViews(scopeNodeId) {
         treeManager.render();
         PreviewManager.update('previewTrim', 30);
         if (AppState.currentStep === 2) {
-            ItemsRenderer.renderAll();
+            if (scopeNodeId) {
+                ItemsRenderer.updateItem(scopeNodeId);
+            } else {
+                ItemsRenderer.renderAll();
+            }
         }
     }
 }
