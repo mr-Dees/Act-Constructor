@@ -26,7 +26,7 @@ Object.assign(AppState, {
         if (!validation.valid) return validation;
 
         const tableId = this._generateId('table');
-        const tableNode = this._createContentNode(nodeId, tableId, 'table', '', false, true);
+        const tableNode = this._createContentNode(nodeId, tableId, AppConfig.nodeTypes.TABLE, '', false, true);
 
         node.children.push(tableNode);
 
@@ -60,7 +60,7 @@ Object.assign(AppState, {
      */
     removeTable(tableNodeId) {
         const tableNode = this.findNodeById(tableNodeId);
-        if (!tableNode || tableNode.type !== 'table') {
+        if (!tableNode || tableNode.type !== AppConfig.nodeTypes.TABLE) {
             return ValidationCore.failure(AppConfig.content.errors.notFound('Таблица'));
         }
 
@@ -119,7 +119,7 @@ Object.assign(AppState, {
         if (!validation.valid) return validation;
 
         const textBlockId = this._generateId('textblock');
-        const textBlockNode = this._createContentNode(nodeId, textBlockId, 'textblock');
+        const textBlockNode = this._createContentNode(nodeId, textBlockId, AppConfig.nodeTypes.TEXTBLOCK);
 
         node.children.push(textBlockNode);
 
@@ -151,7 +151,7 @@ Object.assign(AppState, {
         if (!validation.valid) return validation;
 
         const violationId = this._generateId('violation');
-        const violationNode = this._createContentNode(nodeId, violationId, 'violation');
+        const violationNode = this._createContentNode(nodeId, violationId, AppConfig.nodeTypes.VIOLATION);
 
         node.children.push(violationNode);
 
@@ -289,7 +289,7 @@ Object.assign(AppState, {
         const tableId = this._generateId('table');
         const tableLabel = `Объем выявленных отклонений (В метриках) по ${nodeNumber}`;
 
-        const tableNode = this._createContentNode(nodeId, tableId, 'table', tableLabel, true, true);
+        const tableNode = this._createContentNode(nodeId, tableId, AppConfig.nodeTypes.TABLE, tableLabel, true, true);
         tableNode.isMetricsTable = true;
 
         node.children.unshift(tableNode);
@@ -424,7 +424,7 @@ Object.assign(AppState, {
         }
 
         const existingTable = node5.children?.find(
-            child => child.type === 'table' && child.isMainMetricsTable === true
+            child => child.type === AppConfig.nodeTypes.TABLE && child.isMainMetricsTable === true
         );
 
         if (existingTable) {
@@ -436,7 +436,7 @@ Object.assign(AppState, {
         const tableId = this._generateId('table');
         const tableLabel = 'Объем выявленных отклонений';
 
-        const tableNode = this._createContentNode('5', tableId, 'table', tableLabel, true, true);
+        const tableNode = this._createContentNode('5', tableId, AppConfig.nodeTypes.TABLE, tableLabel, true, true);
         tableNode.isMainMetricsTable = true;
 
         node5.children.unshift(tableNode);
@@ -469,7 +469,7 @@ Object.assign(AppState, {
 
         if (node.children) {
             for (const child of node.children) {
-                if (child.type === 'table' && child.tableId) {
+                if (child.type === AppConfig.nodeTypes.TABLE && child.tableId) {
                     const table = this.tables[child.tableId];
                     if (table && (table.isRegularRiskTable || table.isOperationalRiskTable)) {
                         riskTables.push(child);
@@ -504,7 +504,7 @@ Object.assign(AppState, {
         if (parentNode?.id === '5' && ancestorNode.number?.match(/^5\.\d+$/)) {
             if (nodeId !== ancestorNode.id) {
                 const hasMetricsTable = ancestorNode.children?.some(
-                    child => child.type === 'table' && child.isMetricsTable === true
+                    child => child.type === AppConfig.nodeTypes.TABLE && child.isMetricsTable === true
                 );
 
                 if (!hasMetricsTable) {
@@ -528,8 +528,9 @@ Object.assign(AppState, {
         const node5 = this.findNodeById('5');
         if (!node5?.children) return;
 
+        const {TABLE, ITEM} = AppConfig.nodeTypes;
         const firstLevelNodes = node5.children.filter(child =>
-            child.type === 'item' && child.number?.match(/^5\.\d+$/)
+            child.type === ITEM && child.number?.match(/^5\.\d+$/)
         );
 
         // Проверяем каждый узел первого уровня
@@ -537,7 +538,7 @@ Object.assign(AppState, {
             // Считаем только таблицы рисков в дочерних item-узлах (5.*.* и глубже)
             let deepRiskTables = [];
             for (const child of firstLevelNode.children || []) {
-                if (child.type === 'item') {
+                if (child.type === ITEM) {
                     deepRiskTables = deepRiskTables.concat(this._findRiskTablesInSubtree(child));
                 }
             }
@@ -545,7 +546,7 @@ Object.assign(AppState, {
             // Если нет глубоких таблиц рисков, удаляем таблицу метрик
             if (deepRiskTables.length === 0) {
                 const metricsTableNode = firstLevelNode.children?.find(
-                    child => child.type === 'table' && child.isMetricsTable === true
+                    child => child.type === TABLE && child.isMetricsTable === true
                 );
 
                 if (metricsTableNode) {
@@ -562,7 +563,7 @@ Object.assign(AppState, {
 
         if (allRiskTables.length === 0) {
             const mainMetricsTableNode = node5.children?.find(
-                child => child.type === 'table' && child.isMainMetricsTable === true
+                child => child.type === TABLE && child.isMainMetricsTable === true
             );
 
             if (mainMetricsTableNode) {
@@ -591,7 +592,7 @@ Object.assign(AppState, {
         const preset = AppConfig.content.tablePresets.regularRisk;
         const tableId = this._generateId('table');
 
-        const tableNode = this._createContentNode(nodeId, tableId, 'table', preset.label, true, true);
+        const tableNode = this._createContentNode(nodeId, tableId, AppConfig.nodeTypes.TABLE, preset.label, true, true);
 
         const insertIdx = this._getFirstNonPinnedIndex(node);
         node.children.splice(insertIdx, 0, tableNode);
@@ -627,7 +628,7 @@ Object.assign(AppState, {
         const preset = AppConfig.content.tablePresets.operationalRisk;
         const tableId = this._generateId('table');
 
-        const tableNode = this._createContentNode(nodeId, tableId, 'table', preset.label, true, true);
+        const tableNode = this._createContentNode(nodeId, tableId, AppConfig.nodeTypes.TABLE, preset.label, true, true);
 
         const insertIdx = this._getFirstNonPinnedIndex(node);
         node.children.splice(insertIdx, 0, tableNode);

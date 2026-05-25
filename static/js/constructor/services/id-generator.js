@@ -103,10 +103,10 @@ class AuditIdService {
     static _collectMissingNodes(node, result) {
         if (!node) return;
 
-        const type = node.type || 'item';
+        const type = node.type || AppConfig.nodeTypes.ITEM;
 
         // Собираем только item-узлы (не content-узлы и не root)
-        if (type === 'item' && node.id !== 'root' && !node.auditPointId) {
+        if (type === AppConfig.nodeTypes.ITEM && node.id !== 'root' && !node.auditPointId) {
             result.push(node);
         }
 

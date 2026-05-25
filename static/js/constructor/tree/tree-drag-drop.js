@@ -118,7 +118,7 @@ class TreeDragDrop {
      */
     _hasRiskTablesInSubtree(node) {
         // Если узел сам является таблицей риска
-        if (node.type === 'table' && node.tableId) {
+        if (node.type === AppConfig.nodeTypes.TABLE && node.tableId) {
             const table = AppState.tables[node.tableId];
             if (table && (table.isRegularRiskTable || table.isOperationalRiskTable)) {
                 return true;
@@ -145,7 +145,8 @@ class TreeDragDrop {
      */
     canAcceptAsChild(targetNode, draggedNode) {
         // Информационные элементы не могут иметь детей
-        const informationalTypes = ['table', 'textblock', 'violation'];
+        const {TABLE, TEXTBLOCK, VIOLATION} = AppConfig.nodeTypes;
+        const informationalTypes = [TABLE, TEXTBLOCK, VIOLATION];
         return !informationalTypes.includes(targetNode.type);
     }
 
@@ -207,7 +208,8 @@ class TreeDragDrop {
 
         // Для информационных элементов при наведении на их родителя всегда предлагаем вставку как child
         const draggedParent = AppState.findParentNode(this.draggedNode.id);
-        const isDraggedInformational = ['table', 'textblock', 'violation'].includes(this.draggedNode.type);
+        const {TABLE: T, TEXTBLOCK: TB, VIOLATION: V} = AppConfig.nodeTypes;
+        const isDraggedInformational = [T, TB, V].includes(this.draggedNode.type);
 
         if (isDraggedInformational && draggedParent && draggedParent.id === targetNode.id) {
             return 'child';
