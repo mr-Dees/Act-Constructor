@@ -15,10 +15,8 @@ Object.assign(AppState, {
      * @returns {Object} Результат создания таблицы с полями valid, message
      */
     addTableToNode(nodeId, rows = 3, cols = 3) {
-        // Блокируем добавление в режиме только чтения
-        if (AppConfig.readOnlyMode?.isReadOnly) {
-            return ValidationCore.failure(AppConfig.readOnlyMode.messages.cannotAddContent);
-        }
+        const guard = ValidationCore.requireWrite('cannotAddContent');
+        if (guard) return guard;
 
         const node = this.findNodeById(nodeId);
 
@@ -109,10 +107,8 @@ Object.assign(AppState, {
      * @returns {Object} Результат создания с полями valid, message
      */
     addTextBlockToNode(nodeId) {
-        // Блокируем добавление в режиме только чтения
-        if (AppConfig.readOnlyMode?.isReadOnly) {
-            return ValidationCore.failure(AppConfig.readOnlyMode.messages.cannotAddContent);
-        }
+        const guard = ValidationCore.requireWrite('cannotAddContent');
+        if (guard) return guard;
 
         const node = this.findNodeById(nodeId);
 
@@ -141,10 +137,8 @@ Object.assign(AppState, {
      * @returns {Object} Результат создания с полями valid, message
      */
     addViolationToNode(nodeId) {
-        // Блокируем добавление в режиме только чтения
-        if (AppConfig.readOnlyMode?.isReadOnly) {
-            return ValidationCore.failure(AppConfig.readOnlyMode.messages.cannotAddContent);
-        }
+        const guard = ValidationCore.requireWrite('cannotAddContent');
+        if (guard) return guard;
 
         const node = this.findNodeById(nodeId);
 
