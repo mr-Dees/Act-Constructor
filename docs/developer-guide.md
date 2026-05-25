@@ -107,6 +107,11 @@
   - [11.5 BlockEmitter: единый эмиттер SSE-блоков](#115-blockemitter-единый-эмиттер-sse-блоков)
   - [11.6 agent_bridge_runner и PollCoordinator (с watchdog'ом)](#116-agent_bridge_runner-и-pollcoordinator-фоновое-сохранение-ассистент-сообщений)
   - [11.7 Server-authoritative state для forward'а (chat_messages.status)](#117-server-authoritative-state-для-forwardа-chat_messagesstatus)
+- [14. API contracts (list, limits, error envelope)](#14-api-contracts-list-limits-error-envelope)
+  - [14.1 Paginated response](#141-paginated-response)
+  - [14.2 Pagination limits и UI-паттерн Load More](#142-pagination-limits-и-ui-паттерн-load-more)
+  - [14.3 Error envelope](#143-error-envelope)
+  - [14.4 Kerberos handler — special-case](#144-kerberos-handler--special-case)
 
 ---
 
@@ -4289,3 +4294,82 @@ finally:
 **Что НЕ меняется.** Формат `messages.content` остаётся «N reasoning-блоков»; группировка во фронтовом `<details class="chat-reasoning-group">` с `<hr>`-разделителями между этапами сохраняется. Серверной агрегации чанков в один большой блок не делалось — это сломало бы визуальное разделение этапов.
 
 **`save_assistant_message` всё ещё используется** на LLM-only пути (без forward'а) — в `agent_loop.run_agent_loop` и `stream_loop.run_stream_loop` ответ от LLM сохраняется одним INSERT'ом сразу финальным, без streaming-статуса. Дискриминация: forward → `start_streaming` + `append_block` + `finalize`; LLM локальный — `save_assistant_message`.
+
+---
+
+## 14. API contracts (list, limits, error envelope)
+
+Глава фиксирует единые контракты HTTP-API: shape пагинированных ответов, диапазоны пагинации и envelope ошибок. До Wave 4 контракт-унификации эти зоны были разнородны (см. историю в чек-листе `docs/frontend-constructor-checklist.md`, пункты CONTRACT-LIST/LIMITS/ERROR); сейчас — единое правило для всех новых эндпоинтов и фронт-консьюмеров.
+
+### 14.1 Paginated response
+
+**Все list-эндпоинты возвращают `PaginatedResponse[T]`** — generic-обёртку из `app/core/responses.py`:
+
+```python
+class PaginatedResponse(BaseModel, Generic[T]):
+    items: list[T]
+    total: int
+    limit: int
+    offset: int
+```
+
+Поля:
+- `items` — страница результатов (≤ `limit` штук, начиная с `offset`).
+- `total` — общее количество записей под текущим фильтром (для пагинатора/Load More).
+- `limit` — размер запрошенной страницы (эхо для удобства клиента, фронту не нужно держать своё состояние).
+- `offset` — смещение запрошенной страницы (эхо).
+
+**Эндпоинты, отдающие `PaginatedResponse[T]`:**
+
+| Endpoint | T |
+|---|---|
+| `GET /api/v1/acts/list` | `ActListItem` |
+| `GET /api/v1/acts/users/search` | `UserSearchResult` |
+| `GET /api/v1/acts/{id}/audit-log` | `AuditLogEntry` |
+| `GET /api/v1/acts/{id}/versions` | `ContentVersionEntry` |
+| `GET /api/v1/admin/roles` | `RoleSchema` |
+| `GET /api/v1/admin/users/directory` | `UserDirectoryItem` |
+| `GET /api/v1/admin/users/search` | `UserSearchResult` |
+| `GET /api/v1/admin/audit-log` | `AuditLogEntry` |
+| `GET /api/v1/chat/conversations` | `ConversationListItem` |
+| `GET /api/v1/chat/conversations/{id}/messages` | `MessageResponse` |
+| `POST /api/v1/ck-fin-res/records/search` | `dict` (FR-запись) |
+| `POST /api/v1/ck-client-exp/records/search` | `dict` (CS-запись) |
+
+До Wave 4 часть эндпоинтов возвращала «голый список» (`list[...]`), CK — `{data: [...]}`, что приводило к зоопарку парсеров на фронте. После унификации **фронт-консьюмеры всегда читают `.items`** (см. `static/js/shared/api.js` и доменные модули).
+
+**Правило для новых list-эндпоинтов:** возвращай `PaginatedResponse[YourSchema]`, не пиши свою обёртку. SSE-стримы и bulk-операции — отдельный контракт (см. §14 раздел про SSE/Bulk в `frontend-constructor-as-is.md`), они **не** под `PaginatedResponse`.
+
+### 14.2 Pagination limits и UI-паттерн Load More
+
+**Единый диапазон лимита для всех list-эндпоинтов:** `limit: int = Query(50, ge=1, le=200)`, `offset: int = Query(0, ge=0)`. До Wave 4 разброс был от 200 до 2000 без видимой системы (acts audit-log/versions держали `le=2000`, chat/messages — `le=500`, admin/audit-log — `le=200`); это позволяло фронту грузить «всё сразу» вместо честной пагинации. Теперь — единый верхний предел 200, дефолт 50.
+
+**Pagination UI: Load More паттерн** применён в диалогах, которые раньше делали `limit=2000`:
+- `static/js/portal/acts-manager/dialog-audit-log.js` — обе вкладки диалога (журнал операций и версии содержимого; отдельного `dialog-versions.js` нет, всё в одном модуле).
+
+Поведение: начальная загрузка `limit=50`, при достижении конца списка кнопка «Загрузить ещё» дотягивает следующие 50 (`offset += limit`). `total` из ответа используется для счётчика «Показано N из total» и скрытия кнопки на последней странице. Состояние сбрасывается при закрытии диалога — повторное открытие снова идёт с `offset=0`.
+
+**Контракт-тесты:** `tests/test_paginated_response.py` (unit на сам shape) + `tests/domains/acts/test_acts_api_e2e.py::TestListActs::test_list_limit_over_200_returns_422` (boundary 200/300 → 422 на уровне Query-валидации).
+
+**Регрессионный поиск** «грузим всё одной страницей»: `grep -rn "limit=2000\|limit=1000\|limit=500" static/js/`. Должно быть 0 — иначе вернулся старый паттерн.
+
+### 14.3 Error envelope
+
+Унифицированный envelope ошибок — см. §3.6 «Обработка ошибок». Кратко: все 4xx/5xx (включая `AppError`-подклассы и не-AppError-обработчики в `main.py`) возвращают `{detail: string, code: string, extra?: object}`; `code` — kebab-case машинный идентификатор, уникальный на подкласс; `extra` — опциональный объект с типизированными доп. полями (`locked_by`/`retry_after_sec`/…).
+
+**Фронт-парсер** (`static/js/shared/api.js::_throwApiError`) читает `code` и `extra` из ответа и кладёт их в throw'нутый `Error` (`err.code`, `err.extra`). Консьюмеры (`lock-manager.js`, `chat-stream.js`, dialogs) переключают ветки по `err.code` вместо хрупких regex-проверок по `detail`. Старые ветки парсинга `errData.type === 'km_exists'` / regex по тексту удалены.
+
+### 14.4 Kerberos handler — special-case
+
+Единственное сознательное исключение из унифицированного envelope — Kerberos handler в `main.py`. При `kerberos_token_expired` он возвращает развёрнутую структуру:
+
+```json
+{
+  "error": "kerberos_token_expired",
+  "detail": "...",
+  "instructions": ["kinit ...", "..."],
+  "action_required": "kinit"
+}
+```
+
+Причина: UI показывает пользователю пошаговую инструкцию по `kinit` (массив `instructions`), формат жёстко завязан на этот UX и шире, чем `{detail, code, extra}`. Менять Kerberos-формат «ради консистентности» нельзя — сломается шаблон ошибки. Если добавляешь новый infra-handler с похожей UX-нагрузкой (инструкции для админа) — рассмотри тот же приём, но **не** распространяй его на доменные ошибки: для них envelope `{detail, code, extra}` обязателен.
