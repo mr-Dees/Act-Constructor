@@ -1,0 +1,69 @@
+{% extends "portal/base_portal.html" %}
+
+{% block title %}{% block ck_title %}{% endblock %}{% endblock %}
+
+{% block content %}
+<div class="ck-page">
+    <!-- 1. Toolbar -->
+    <div class="ck-toolbar">
+        <button class="btn btn-primary" id="ckAddRecordBtn">+ Добавить запись</button>
+        <button class="btn btn-secondary" id="ckResetFiltersBtn">Сброс фильтров</button>
+        <div class="ck-toolbar__user">
+            Пользователь: <b id="ckUsername"></b>
+        </div>
+    </div>
+
+    <!-- 2. Sub-header -->
+    <div class="ck-subheader">
+        <div class="ck-subheader__left">
+            <input type="text" class="ck-search-input" id="ckSearchInput"
+                   placeholder="🔍 Поиск: введите искомое значение">
+        </div>
+        <div class="ck-subheader__right">
+            <span class="ck-subheader__record-title" id="ckRecordTitle"></span>
+            <span class="ck-subheader__record-meta" id="ckRecordMeta"></span>
+        </div>
+    </div>
+
+    <!-- 3. Content -->
+    <div class="ck-content">
+        <div class="ck-content__table-panel" id="ckTablePanel"></div>
+        <div class="ck-content__form-panel" id="ckFormPanel"></div>
+    </div>
+
+    <!-- 4. Footer -->
+    <div class="ck-footer">
+        <div class="ck-footer__left" id="ckPaginationContainer"></div>
+        <div class="ck-footer__right">
+            <button class="btn btn-primary" id="ckSaveBtn" style="padding:5px 20px; font-size:12px;">Сохранить</button>
+            <button class="btn btn-secondary" id="ckDeleteBtn" style="padding:5px 14px; font-size:12px; color:var(--error); border-color:var(--error);">Удалить</button>
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block extra_js %}
+<!-- Shared CK components -->
+<script defer src="{{ url_for('static', path='js/shared/ck/ck-table.js') | versioned }}"></script>
+<script defer src="{{ url_for('static', path='js/shared/ck/ck-pagination.js') | versioned }}"></script>
+<script defer src="{{ url_for('static', path='js/shared/ck/ck-form.js') | versioned }}"></script>
+<script defer src="{{ url_for('static', path='js/shared/ck/ck-process-picker.js') | versioned }}"></script>
+{% block ck_scripts %}{% endblock %}
+{% endblock %}
+
+{% block init_script %}
+<script>
+    document.addEventListener('DOMContentLoaded', async () => {
+        const isAuthorized = await AuthManager.requireAuth();
+        if (isAuthorized) {
+            LandingSidebar.init();
+            LandingSettingsManager.init();
+
+            const usernameEl = document.getElementById('ckUsername');
+            if (usernameEl) usernameEl.textContent = AuthManager.getCurrentUser();
+
+            {% block ck_init %}{% endblock %}
+        }
+    });
+</script>
+{% endblock %}
