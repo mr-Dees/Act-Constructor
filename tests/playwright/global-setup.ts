@@ -117,6 +117,9 @@ export default async function globalSetup(): Promise<void> {
     // 'test_22494524' даст '' (тест не пройдёт), нужен формат '<digits>_<остаток>'.
     JUPYTERHUB_USER: '22494524_e2e-test',
     PYTHONUNBUFFERED: '1',
+    // Снимаем rate-limit для тестов: ~90 JS-файлов × N reload'ов уходят за
+    // 1024 req/min из дефолтного .env, → 429 на /static/js/* → тесты падают.
+    SECURITY__RATE_LIMIT_PER_MINUTE: '100000',
   };
 
   runSeed(env);

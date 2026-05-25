@@ -55,26 +55,38 @@ def _build_default_tree(label: str) -> dict:
 
 
 def _build_tree_with_table_and_textblock(label: str) -> dict:
-    """Дерево с одной таблицей и одним текстблоком в секции 2 — для table/textblock сценариев."""
+    """Дерево с одной таблицей и одним текстблоком в секции 2.
+
+    Поля узлов согласованы с items-renderer.js (`node.type === 'table'/'textblock'`),
+    tree-utils.js (TABLE/TEXTBLOCK константы) и API ответом `loadActContent`
+    (`AppState.tables[node.tableId]`, `AppState.textBlocks[node.textBlockId]`).
+    """
     tree = _build_default_tree(label)
     section2 = tree["children"][1]
     section2["children"] = [
         {
             "id": "2.1",
+            "type": "item",
             "label": "Тестовый пункт",
+            "deletable": True,
+            "protected": False,
             "children": [
                 {
                     "id": "tbl-seed-1",
+                    "type": "table",
                     "label": "Таблица: тестовые данные",
-                    "isTable": True,
                     "tableId": "tbl-seed-1",
+                    "deletable": True,
+                    "protected": False,
                     "children": [],
                 },
                 {
                     "id": "txt-seed-1",
+                    "type": "textblock",
                     "label": "Текстовый блок: примечание",
-                    "isTextBlock": True,
-                    "textblockId": "txt-seed-1",
+                    "textBlockId": "txt-seed-1",
+                    "deletable": True,
+                    "protected": False,
                     "children": [],
                 },
             ],
@@ -139,12 +151,26 @@ async def _insert_team(conn: asyncpg.Connection, act_id: int) -> None:
 
 
 async def _insert_table(conn: asyncpg.Connection, act_id: int) -> None:
-    """Простая 2x2 таблица для table-cell-operations сценария."""
+    """Простая 2x2 таблица для table-cell-operations сценария.
+
+    Формат ячеек согласован с items-renderer.js (`cellData.content`,
+    `colSpan`/`rowSpan`/`isHeader`/`isSpanned`/`originRow`/`originCol`/`spanOrigin`).
+    """
+    def cell(content: str, is_header: bool = False) -> dict:
+        return {
+            "content": content,
+            "colSpan": 1,
+            "rowSpan": 1,
+            "isHeader": is_header,
+            "isSpanned": False,
+            "originRow": None,
+            "originCol": None,
+            "spanOrigin": None,
+        }
+
     grid = [
-        [{"text": "Колонка A", "rowspan": 1, "colspan": 1},
-         {"text": "Колонка B", "rowspan": 1, "colspan": 1}],
-        [{"text": "Значение 1", "rowspan": 1, "colspan": 1},
-         {"text": "Значение 2", "rowspan": 1, "colspan": 1}],
+        [cell("Колонка A", True), cell("Колонка B", True)],
+        [cell("Значение 1"), cell("Значение 2")],
     ]
     col_widths = [50, 50]
     await conn.execute(
