@@ -163,7 +163,7 @@ class TableCellsOperations {
         }
 
         this.clearSelection();
-        ItemsRenderer.renderAll();
+        ItemsRenderer.updateTable(tableId);
         PreviewManager.update();
     }
 
@@ -239,7 +239,7 @@ class TableCellsOperations {
         }
 
         this.clearSelection();
-        ItemsRenderer.renderAll();
+        ItemsRenderer.updateTable(tableId);
         PreviewManager.update();
     }
 
@@ -356,7 +356,7 @@ class TableCellsOperations {
 
         this._redistributeColumnWidths(table);
         this.clearSelection();
-        ItemsRenderer.renderAll();
+        ItemsRenderer.updateTable(tableId);
         PreviewManager.update();
     }
 
@@ -443,7 +443,7 @@ class TableCellsOperations {
 
         this._redistributeColumnWidths(table);
         this.clearSelection();
-        ItemsRenderer.renderAll();
+        ItemsRenderer.updateTable(tableId);
         PreviewManager.update();
     }
 
@@ -505,7 +505,7 @@ class TableCellsOperations {
         }
 
         this.clearSelection();
-        ItemsRenderer.renderAll();
+        ItemsRenderer.updateTable(tableId);
         PreviewManager.update();
     }
 
@@ -569,7 +569,7 @@ class TableCellsOperations {
 
         this._redistributeColumnWidths(table);
         this.clearSelection();
-        ItemsRenderer.renderAll();
+        ItemsRenderer.updateTable(tableId);
         PreviewManager.update();
     }
 
@@ -802,7 +802,7 @@ class TableCellsOperations {
         }
 
         this.clearSelection();
-        ItemsRenderer.renderAll();
+        ItemsRenderer.updateTable(tableId);
         PreviewManager.update();
         Notifications.success('Ячейки объединены');
     }
@@ -867,7 +867,7 @@ class TableCellsOperations {
         }
 
         this.clearSelection();
-        ItemsRenderer.renderAll();
+        ItemsRenderer.updateTable(tableId);
         PreviewManager.update();
         Notifications.success('Ячейка разъединена');
     }
