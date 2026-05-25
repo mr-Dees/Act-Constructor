@@ -839,6 +839,15 @@ class APIClient {
         try {
             const body = await response.json();
             detail = body.detail;
+            // FastAPI 422 возвращает detail как массив ValidationError-объектов:
+            // [{loc, msg, type, ...}, ...]. Без форматирования в UI прилетал
+            // "[object Object]". Сворачиваем в человекочитаемую строку, msg
+            // у pydantic-валидаторов уже на русском.
+            if (Array.isArray(detail)) {
+                detail = detail
+                    .map(d => d?.msg || JSON.stringify(d))
+                    .join('; ');
+            }
         } catch {
             // Сервер вернул не-JSON ответ
         }
