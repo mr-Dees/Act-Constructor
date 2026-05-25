@@ -225,6 +225,29 @@ class TestListActs:
         assert resp.status_code == 401
         crud.list_acts.assert_not_awaited()
 
+    def test_list_limit_over_200_returns_422(self):
+        """Лимит >200 отвергается на этапе валидации Query — сервис не вызван."""
+        crud = _make_crud_service()
+        app = _build_app(crud_service=crud)
+
+        with TestClient(app) as client:
+            resp = client.get("/api/v1/acts/list?limit=300")
+
+        assert resp.status_code == 422
+        crud.list_acts.assert_not_awaited()
+
+    def test_list_limit_200_accepted(self):
+        """Лимит ровно 200 — валиден, сервис вызван с limit=200."""
+        crud = _make_crud_service()
+        crud.list_acts.return_value = ([], 0)
+        app = _build_app(crud_service=crud)
+
+        with TestClient(app) as client:
+            resp = client.get("/api/v1/acts/list?limit=200")
+
+        assert resp.status_code == 200
+        crud.list_acts.assert_awaited_once_with(USERNAME, limit=200, offset=0)
+
 
 # -------------------------------------------------------------------------
 # POST /create — создание акта
