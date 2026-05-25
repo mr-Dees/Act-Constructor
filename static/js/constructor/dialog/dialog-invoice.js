@@ -1206,16 +1206,18 @@ class InvoiceDialog extends DialogBase {
             // Race-guard: пока ждали ответ, диалог уже закрыли — выходим.
             if (!this._currentOverlay || this._currentOverlay !== expectedOverlay) return;
 
-            // Сохраняем в структуру дерева
+            // Сохраняем в структуру дерева через единую точку записи:
+            // setNodeInvoice пишет в changelog ('invoice_set'), эмитит
+            // 'node:invoice-changed', помечает stage как unsaved.
             if (this._currentNode) {
-                this._currentNode.invoice = {
+                AppState.setNodeInvoice(this._currentNode.id, {
                     db_type: data.db_type,
                     schema_name: data.schema_name,
                     table_name: data.table_name,
                     metrics: data.metrics,
                     process: data.process,
                     profile_div: data.profile_div,
-                };
+                });
             }
 
             // Вызываем верификацию (заглушка) — backend пока возвращает status only.
@@ -1236,10 +1238,9 @@ class InvoiceDialog extends DialogBase {
 
             Notifications.success('Фактура успешно прикреплена');
 
-            // Обновляем дерево чтобы показать/обновить бейдж фактуры
-            if (typeof treeManager !== 'undefined') {
-                treeManager.render();
-            }
+            // Бейдж фактуры в дереве обновляется TreeRenderer'ом через подписку
+            // на 'node:invoice-changed' (эмитится setNodeInvoice выше). Полный
+            // treeManager.render() здесь больше не нужен.
 
             this._close();
 
