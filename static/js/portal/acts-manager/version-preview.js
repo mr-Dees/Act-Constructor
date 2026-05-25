@@ -309,8 +309,8 @@ class VersionPreviewOverlay extends DialogBase {
 
             // Обновляем данные в AuditLogDialog если он открыт
             if (typeof AuditLogDialog !== 'undefined' && AuditLogDialog._overlay) {
-                AuditLogDialog._loadAllData();
-                AuditLogDialog._loadAllVersions();
+                AuditLogDialog._loadInitialLog();
+                AuditLogDialog._loadInitialVersions();
             }
         } catch (err) {
             console.error('Ошибка восстановления:', err);
