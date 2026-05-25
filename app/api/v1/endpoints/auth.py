@@ -10,7 +10,6 @@ from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
 
 from app.core.config import get_settings
-from app.schemas.errors import ErrorDetail
 
 logger = logging.getLogger("audit_workstation.api.auth")
 router = APIRouter()
@@ -116,22 +115,3 @@ async def get_current_user():
         username=username,
         display_name=f"Пользователь {username}"
     )
-
-
-@router.get("/validate", responses={401: {"description": "Требуется авторизация", "model": ErrorDetail}})
-async def validate_session():
-    """
-    Проверяет валидность текущей сессии.
-
-    Возвращает 401 если пользователь не авторизован.
-    Используется для защищенных маршрутов.
-    """
-    username = get_current_user_from_env()
-
-    if not username:
-        raise HTTPException(
-            status_code=401,
-            detail="Требуется авторизация"
-        )
-
-    return {"valid": True, "username": username}

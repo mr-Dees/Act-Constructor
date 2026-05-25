@@ -12,11 +12,10 @@ logger = logging.getLogger("audit_workstation.api.acts.content")
 
 from app.api.v1.deps.auth_deps import get_username
 from app.schemas.errors import ErrorDetail
-from app.domains.acts.deps import get_content_service, get_invoice_service
+from app.domains.acts.deps import get_content_service
 from app.domains.acts.schemas.act_content import ActDataSchema
 from app.domains.acts.schemas.act_responses import SaveContentResponse
 from app.domains.acts.services.act_content_service import ActContentService
-from app.domains.acts.services.act_invoice_service import ActInvoiceService
 
 router = APIRouter()
 
@@ -57,19 +56,3 @@ async def save_act_content(
     result = await service.save_content(act_id, data, username)
     logger.info("Сохранено содержимое акта id=%s пользователем %s", act_id, username)
     return result
-
-
-@router.get(
-    "/{act_id}/invoices",
-    responses={
-        403: {"description": "Нет доступа к акту", "model": ErrorDetail},
-        404: {"description": "Акт не найден", "model": ErrorDetail},
-    },
-)
-async def get_act_invoices(
-    act_id: int,
-    username: str = Depends(get_username),
-    service: ActInvoiceService = Depends(get_invoice_service),
-) -> list[dict]:
-    """Получает список всех фактур для акта."""
-    return await service.get_invoices(act_id, username)
