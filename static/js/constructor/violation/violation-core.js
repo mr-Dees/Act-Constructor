@@ -7,7 +7,10 @@ class ViolationManager {
         this.selectedViolation = null;
         // Переменная для отслеживания последней позиции при drag
         this.lastDragOverIndex = null;
-        // Хранилище активных violation для быстрого доступа
+        // Хранилище активных violation для быстрого доступа.
+        // Запись добавляется в createAdditionalContentField (violation-additional-content.js);
+        // удаляется через removeViolation при разрушении узла дерева — без этого Map
+        // рос бесконтрольно при switch'е между актами / удалении нарушений.
         this.activeViolations = new Map();
         // Текущий активный контейнер для paste (только когда мышь внутри)
         this.currentActiveContainer = null;
@@ -24,6 +27,28 @@ class ViolationManager {
         this.setupPasteHandler();
         // Настраиваем обработчик ESC для сброса активной зоны
         this.setupEscapeHandler();
+    }
+
+    /**
+     * Удаляет нарушение из реестра активных. Идемпотентен.
+     * Вызывать при разрушении DOM-секции нарушения / удалении узла дерева.
+     * @param {string} violationId
+     */
+    removeViolation(violationId) {
+        if (!violationId) return;
+        this.activeViolations.delete(violationId);
+    }
+
+    /**
+     * Полный сброс реестра активных нарушений.
+     * Безопасно вызывать при switch'е акта или teardown.
+     */
+    destroy() {
+        this.activeViolations.clear();
+        this.currentActiveContainer = null;
+        this.cursorInsertPosition = null;
+        this.selectedViolation = null;
+        this.lastDragOverIndex = null;
     }
 
     /**

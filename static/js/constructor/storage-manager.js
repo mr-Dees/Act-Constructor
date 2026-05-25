@@ -29,7 +29,24 @@ class StorageManager {
     static _periodicDbSaveInterval = null;
 
     /**
+     * Единое состояние persistence-индикатора.
+     * Возможные значения:
+     *  - 'saved'      — синхронизировано с localStorage И БД (белый);
+     *  - 'local-only' — сохранено только в localStorage, не в БД (жёлтый);
+     *  - 'unsaved'    — есть изменения, ещё не сохранённые даже локально (красный).
+     *
+     * Старые булевы флаги (_hasUnsavedChanges, _isSyncedWithDB) остаются как
+     * computed-зеркала через _setState — массивы load-bearing consumer'ов
+     * (beforeunload, периодические таймеры, hasUnsavedChanges()) продолжают
+     * работать без массовой замены проверок.
+     * @private
+     * @type {'saved'|'local-only'|'unsaved'}
+     */
+    static _state = 'saved';
+
+    /**
      * Флаг для отслеживания несохраненных изменений в localStorage
+     * (зеркало _state === 'unsaved'). Управляется через _setState.
      * @private
      * @type {boolean}
      */
@@ -37,6 +54,7 @@ class StorageManager {
 
     /**
      * Флаг для отслеживания синхронизации с БД
+     * (зеркало _state === 'saved'). Управляется через _setState.
      * @private
      * @type {boolean}
      */
@@ -98,7 +116,8 @@ class StorageManager {
      */
     static _setupEventHandlers() {
         // Предупреждение при попытке закрыть страницу с несохраненными данными.
-        // Через общий реестр beforeunload-обработчиков LifecycleHelper.
+        // Регистрируется через общий реестр beforeunload-обработчиков LifecycleHelper,
+        // чтобы можно было централизованно снять обработчик при destroy/teardown.
         const beforeUnloadHandler = (e) => {
             // Сохраняем в localStorage перед закрытием
             if (this._hasUnsavedChanges) {
@@ -254,47 +273,61 @@ class StorageManager {
     }
 
     /**
+     * Единственная точка перевода persistence-state в новое значение.
+     * Синхронно обновляет зеркальные булевы флаги и индикатор.
+     * Старые API-методы (markAsUnsaved / _markAsSaved / markAsSyncedWithDB)
+     * — обёртки над _setState.
+     *
+     * @private
+     * @param {'saved'|'local-only'|'unsaved'} newState
+     */
+    static _setState(newState) {
+        if (newState !== 'saved' && newState !== 'local-only' && newState !== 'unsaved') {
+            console.warn('StorageManager._setState: неизвестное состояние', newState);
+            return;
+        }
+        this._state = newState;
+        // Зеркала для обратной совместимости с консьюмерами, читающими булевы поля
+        // напрямую (beforeunload-warning, _updateSaveIndicator, hasUnsavedChanges).
+        this._hasUnsavedChanges = (newState === 'unsaved');
+        this._isSyncedWithDB = (newState === 'saved');
+        this._updateSaveIndicator();
+    }
+
+    /**
      * Помечает состояние как измененное и запускает дебаунс сохранения
      *
      * Автоматически вызывается через Proxy при изменении AppState.
      * Игнорируется если отслеживание временно отключено.
      */
     static markAsUnsaved() {
-        // Игнорируем если отслеживание отключено
         if (this._trackingDisabled) {
             return;
         }
-
-        // Устанавливаем оба флага одновременно
-        this._hasUnsavedChanges = true;
-        this._isSyncedWithDB = false;
-
-        // Обновляем индикатор
-        this._updateSaveIndicator();
-
+        this._setState('unsaved');
         // Запускаем дебаунс автосохранения
         this._debouncedSave();
     }
 
     /**
-     * Помечает состояние как сохраненное в localStorage
+     * Помечает состояние как сохраненное в localStorage (но не обязательно в БД).
      * @private
      */
     static _markAsSaved() {
-        // Сбрасываем только флаг несохраненных изменений
-        // Флаг синхронизации с БД остается как есть
-        this._hasUnsavedChanges = false;
-        this._updateSaveIndicator();
+        // Если уже синхронизировано с БД — состояние не должно деградировать в 'local-only'.
+        // _markAsSaved вызывается из saveState (всегда после mutation), поэтому
+        // прежнее состояние почти всегда было 'unsaved'. Сохраняем 'saved' если оно было.
+        if (this._state === 'saved') {
+            return;
+        }
+        this._setState('local-only');
     }
 
     /**
      * Помечает состояние как синхронизированное с БД
      */
     static markAsSyncedWithDB() {
-        // При синхронизации с БД оба флага сбрасываются
-        this._hasUnsavedChanges = false;
-        this._isSyncedWithDB = true;
-        this._updateSaveIndicator();
+        this._setState('saved');
     }
 
     /**
@@ -422,9 +455,8 @@ class StorageManager {
         if (success) {
             Notifications.success('Изменения сохранены');
         } else {
-            // Если сохранение не удалось, возвращаем флаг
-            this._hasUnsavedChanges = true;
-            this._updateSaveIndicator();
+            // Если сохранение не удалось, возвращаем state в 'unsaved'.
+            this._setState('unsaved');
         }
 
         return success;
@@ -451,7 +483,7 @@ class StorageManager {
                     // Разблокируем отслеживание
                     this._trackingDisabled = false;
                     resolve(result);
-                }, 100);
+                }, AppConfig.timings.enableTrackingAfterSave);
             });
         });
     }
@@ -513,11 +545,8 @@ class StorageManager {
             localStorage.removeItem(AppConfig.localStorage.stateKey);
             localStorage.removeItem(AppConfig.localStorage.timestampKey);
 
-            // При очистке сбрасываем оба флага
-            this._hasUnsavedChanges = false;
-            this._isSyncedWithDB = true;
-
-            this._updateSaveIndicator();
+            // При очистке возвращаемся в чистое состояние.
+            this._setState('saved');
             console.log('localStorage очищен');
         } catch (error) {
             console.error('Ошибка очистки localStorage:', error);
@@ -559,6 +588,17 @@ class StorageManager {
 
         if (!button || !label) return;
 
+        // Read-only режим: индикатор всегда заблокирован,
+        // никакие изменения не сохраняются.
+        if (typeof AppConfig !== 'undefined' && AppConfig.readOnlyMode?.isReadOnly) {
+            button.classList.remove('unsaved', 'local-only');
+            button.classList.add('saved');
+            button.disabled = true;
+            button.title = 'Режим только для чтения';
+            label.textContent = 'Только чтение';
+            return;
+        }
+
         // Удаляем все классы состояний
         button.classList.remove('saved', 'local-only', 'unsaved');
 
@@ -598,6 +638,34 @@ class StorageManager {
      */
     static hasUnsavedChanges() {
         return this._hasUnsavedChanges;
+    }
+
+    /**
+     * Универсальное подтверждение программной навигации.
+     * Если несохранённых в БД изменений нет — возвращает true сразу.
+     * Иначе показывает diaglog; при подтверждении и наличии opts.url
+     * выставляет _allowNavigation и выполняет редирект.
+     *
+     * @param {string} [targetUrl] - URL для редиректа (информационно, фактический переход через opts.url)
+     * @param {{url?: string}} [opts]
+     * @returns {Promise<boolean>}
+     */
+    static async confirmNavigation(targetUrl, opts = {}) {
+        if (!this.hasUnsyncedChanges()) return true;
+        const ok = await DialogManager.show({
+            type: 'confirm',
+            title: 'Несохраненные изменения',
+            message: 'У вас есть несохранённые изменения. Уйти со страницы?',
+            icon: '⚠️',
+            confirmText: 'Уйти',
+            cancelText: 'Остаться'
+        });
+        if (ok && opts.url) {
+            window._allowNavigation = true;
+            this.allowUnload();
+            window.location.href = opts.url;
+        }
+        return ok;
     }
 
     /**

@@ -123,7 +123,7 @@ class APIClient {
         } finally {
             setTimeout(() => {
                 StorageManager.enableTracking();
-            }, 100);
+            }, AppConfig.timings.enableTrackingAfterGenerate);
         }
     }
 
@@ -436,7 +436,7 @@ class APIClient {
             // Включаем tracking обратно с задержкой
             setTimeout(() => {
                 StorageManager.enableTracking();
-            }, 500);
+            }, AppConfig.timings.enableTrackingAfterLoad);
 
             // Показываем баннер и применяем режим просмотра если нет прав на редактирование
             if (AppConfig.readOnlyMode.isReadOnly) {
@@ -565,7 +565,7 @@ class APIClient {
             // Включаем отслеживание обратно
             setTimeout(() => {
                 StorageManager.enableTracking();
-            }, 100);
+            }, AppConfig.timings.enableTrackingAfterSave);
         }
     }
 

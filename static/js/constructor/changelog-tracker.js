@@ -130,6 +130,30 @@ class ChangelogTracker {
             }
         }, 1000);
     }
+
+    /**
+     * Полный сброс трекера. Вызывать перед init(newActId) при switch'е акта,
+     * иначе debounce-таймеры старого акта запишут отложенный entry с уже
+     * сменённым _storageKey, а pending-_persistTimer запишет чужие entries.
+     */
+    static destroy() {
+        if (this._debounceTimers) {
+            for (const key of Object.keys(this._debounceTimers)) {
+                const pending = this._debounceTimers[key];
+                if (pending?.timer) clearTimeout(pending.timer);
+            }
+        }
+        this._debounceTimers = {};
+
+        if (this._persistTimer) {
+            clearTimeout(this._persistTimer);
+            this._persistTimer = null;
+        }
+
+        this._entries = [];
+        this._actId = null;
+        this._storageKey = null;
+    }
 }
 
 // Глобальный доступ

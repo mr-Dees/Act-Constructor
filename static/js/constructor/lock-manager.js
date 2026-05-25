@@ -176,11 +176,12 @@ class LockManager {
             });
 
             // Разрешаем навигацию без предупреждения браузера
-            if (typeof StorageManager !== 'undefined' && typeof StorageManager.allowUnload === 'function') {
-                StorageManager.allowUnload();
+            const acts409Url = AppConfig.api.getUrl('/acts');
+            if (typeof StorageManager !== 'undefined' && typeof StorageManager.confirmNavigation === 'function') {
+                await StorageManager.confirmNavigation(acts409Url, { url: acts409Url });
+            } else {
+                window.location.href = acts409Url;
             }
-
-            window.location.href = AppConfig.api.getUrl('/acts');
             throw new Error('ACT_LOCKED');
         }
 
@@ -196,11 +197,12 @@ class LockManager {
                 allowOverlayClose: false
             });
 
-            if (typeof StorageManager !== 'undefined' && typeof StorageManager.allowUnload === 'function') {
-                StorageManager.allowUnload();
+            const acts500Url = AppConfig.api.getUrl('/acts');
+            if (typeof StorageManager !== 'undefined' && typeof StorageManager.confirmNavigation === 'function') {
+                await StorageManager.confirmNavigation(acts500Url, { url: acts500Url });
+            } else {
+                window.location.href = acts500Url;
             }
-
-            window.location.href = AppConfig.api.getUrl('/acts');
             throw new Error('LOCK_FAILED');
         }
 
@@ -383,7 +385,11 @@ class LockManager {
                 this.destroy();
             }
         };
-        window.addEventListener('beforeunload', this._beforeUnloadHandler);
+        if (typeof LifecycleHelper !== 'undefined') {
+            LifecycleHelper.registerBeforeUnload('lock:manual-unlock', this._beforeUnloadHandler);
+        } else {
+            window.addEventListener('beforeunload', this._beforeUnloadHandler);
+        }
     }
 
     /**
@@ -392,7 +398,11 @@ class LockManager {
      */
     static disableBeforeUnload() {
         if (this._beforeUnloadHandler) {
-            window.removeEventListener('beforeunload', this._beforeUnloadHandler);
+            if (typeof LifecycleHelper !== 'undefined') {
+                LifecycleHelper.unregister('lock:manual-unlock');
+            } else {
+                window.removeEventListener('beforeunload', this._beforeUnloadHandler);
+            }
             this._beforeUnloadHandler = null;
             console.log('LockManager.beforeunload отключен');
         }
@@ -523,6 +533,14 @@ class LockManager {
             if (typeof AppState !== 'undefined' && AppState?.exportData) {
                 try {
                     const data = AppState.exportData();
+                    // Прикрепляем changelog в тот же PUT — серверная аудит-запись синхронна
+                    // с фактическим сохранением контента, без отдельного запроса.
+                    if (typeof ChangelogTracker !== 'undefined' && typeof ChangelogTracker.flush === 'function') {
+                        const changelog = ChangelogTracker.flush();
+                        if (changelog && changelog.length > 0) {
+                            data.changelog = changelog;
+                        }
+                    }
                     const saveResp = await fetch(AppConfig.api.getUrl(`/api/v1/acts/${this._actId}/content`), {
                         method: 'PUT',
                         headers: {
@@ -577,7 +595,14 @@ class LockManager {
             const closedId = this._actId;
             this._actId = null;
             console.log(`LockManager: завершение выхода для акта ${closedId}`);
-            setTimeout(() => window.location.href = AppConfig.api.getUrl('/acts'), 300);
+            const exitUrl = AppConfig.api.getUrl('/acts');
+            setTimeout(() => {
+                if (typeof StorageManager !== 'undefined' && typeof StorageManager.confirmNavigation === 'function') {
+                    StorageManager.confirmNavigation(exitUrl, { url: exitUrl });
+                } else {
+                    window.location.href = exitUrl;
+                }
+            }, AppConfig.timings.redirectAfterUnlock);
         }
     }
 }
