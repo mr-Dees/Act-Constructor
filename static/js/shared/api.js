@@ -1053,6 +1053,59 @@ class APIClient {
         return response.json();
     }
 
+    /**
+     * Загружает состояние батчеров и фоновых задач (admin observability).
+     * Возвращает снимок {batchers: {...}, background_tasks: {...}}.
+     * @returns {Promise<{batchers: Object, background_tasks: Object}>}
+     */
+    static async loadDiagnostics() {
+        const username = AuthManager.getCurrentUser();
+        const response = await fetch(AppConfig.api.getUrl('/api/v1/admin/diagnostics'), {
+            headers: { 'X-JupyterHub-User': username }
+        });
+        if (!response.ok) await this._throwApiError(response);
+        return response.json();
+    }
+
+    /**
+     * Загружает журнал админ-операций с фильтрами и пагинацией.
+     * @param {Object} [filters]
+     * @param {string} [filters.action]
+     * @param {string} [filters.targetUsername]
+     * @param {string} [filters.adminUsername]
+     * @param {string} [filters.fromDate] - YYYY-MM-DD
+     * @param {string} [filters.toDate] - YYYY-MM-DD
+     * @param {number} [filters.limit=50] - 1..200
+     * @param {number} [filters.offset=0]
+     * @returns {Promise<{items: Array, total: number}>}
+     */
+    static async loadAdminAuditLog({
+        action,
+        targetUsername,
+        adminUsername,
+        fromDate,
+        toDate,
+        limit = 50,
+        offset = 0,
+    } = {}) {
+        const username = AuthManager.getCurrentUser();
+        const query = new URLSearchParams();
+        if (action) query.set('action', action);
+        if (targetUsername) query.set('target_username', targetUsername);
+        if (adminUsername) query.set('admin_username', adminUsername);
+        if (fromDate) query.set('from_date', fromDate);
+        if (toDate) query.set('to_date', toDate);
+        query.set('limit', String(limit));
+        query.set('offset', String(offset));
+
+        const response = await fetch(
+            AppConfig.api.getUrl(`/api/v1/admin/audit-log?${query}`),
+            { headers: { 'X-JupyterHub-User': username } }
+        );
+        if (!response.ok) await this._throwApiError(response);
+        return response.json();
+    }
+
     // ========================================================================
     // ЦК домены (Фин.Рез. / Клиентский опыт)
     // ========================================================================

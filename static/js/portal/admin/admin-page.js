@@ -1,9 +1,18 @@
 /**
- * Главный контроллер страницы администрирования ролей
+ * Главный контроллер страницы администрирования.
+ *
+ * Управляет тремя разделами:
+ *   - "roles"       — управление ролями пользователей (исходный функционал);
+ *   - "diagnostics" — observability батчеров и фоновых задач (lazy);
+ *   - "audit-log"   — журнал админ-операций (lazy).
+ *
+ * Lazy-инициализация: тяжёлые tabs подгружают данные только при первом
+ * переключении, чтобы не нагружать страницу при открытии "Роли".
  */
 class AdminPage {
     static _usersDirectory = [];
     static _allRoles = [];
+    static _initializedTabs = new Set();
 
     static async init() {
         try {
@@ -18,6 +27,8 @@ class AdminPage {
             AdminRoles.init(this._allRoles);
             AdminRoles.setUsers(this._usersDirectory);
             this._initAddUserButton();
+            this._initTabs();
+            this._initializedTabs.add('roles');
 
             console.log('AdminPage: инициализация завершена');
         } catch (error) {
@@ -36,7 +47,7 @@ class AdminPage {
     }
 
     /**
-     * Инициализирует кнопку добавления пользователя
+     * Инициализирует кнопку добавления пользователя.
      * @private
      */
     static _initAddUserButton() {
@@ -45,6 +56,53 @@ class AdminPage {
             btn.addEventListener('click', () => {
                 AdminAddUserDialog.show(this._allRoles);
             });
+        }
+    }
+
+    /**
+     * Привязывает обработчики переключения tabs.
+     * @private
+     */
+    static _initTabs() {
+        const tabs = document.querySelectorAll('.admin-tab');
+        tabs.forEach(tab => {
+            tab.addEventListener('click', () => {
+                const name = tab.dataset.tab;
+                this._switchTab(name);
+            });
+        });
+    }
+
+    /**
+     * Активирует указанный таб и при первом открытии инициализирует
+     * соответствующий модуль.
+     * @private
+     */
+    static _switchTab(name) {
+        document.querySelectorAll('.admin-tab').forEach(t => {
+            const active = t.dataset.tab === name;
+            t.classList.toggle('admin-tab--active', active);
+            t.setAttribute('aria-selected', active ? 'true' : 'false');
+        });
+        document.querySelectorAll('.admin-tab-panel').forEach(p => {
+            const active = p.dataset.tabPanel === name;
+            p.classList.toggle('admin-tab-panel--active', active);
+            if (active) {
+                p.removeAttribute('hidden');
+            } else {
+                p.setAttribute('hidden', '');
+            }
+        });
+
+        if (this._initializedTabs.has(name)) {
+            return;
+        }
+        this._initializedTabs.add(name);
+
+        if (name === 'diagnostics' && typeof AdminDiagnostics !== 'undefined') {
+            AdminDiagnostics.init();
+        } else if (name === 'audit-log' && typeof AdminAuditLog !== 'undefined') {
+            AdminAuditLog.init();
         }
     }
 }
