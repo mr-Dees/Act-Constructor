@@ -1026,15 +1026,34 @@ class APIClient {
     /**
      * Поиск пользователей в справочнике (для добавления в систему)
      * @param {string} query - Строка поиска (мин. 2 символа)
+     * @param {AbortSignal} [signal] - Сигнал отмены запроса
      * @returns {Promise<Array<{username: string, fullname: string, job: string, email: string}>>}
      */
-    static async searchUsers(query) {
+    static async searchUsers(query, signal) {
         const username = AuthManager.getCurrentUser();
         const response = await fetch(
             AppConfig.api.getUrl(`/api/v1/admin/users/search?q=${encodeURIComponent(query)}`),
-            { headers: { 'X-JupyterHub-User': username } }
+            { headers: { 'X-JupyterHub-User': username }, signal }
         );
         if (!response.ok) throw this._createError(response.status, 'Ошибка поиска пользователей');
+        return response.json();
+    }
+
+    /**
+     * Загружает актуальный список ролей пользователя (для повторной синхронизации
+     * после неуспешного assign/remove — серверный rollback на app-уровне).
+     * @param {string} targetUsername - Имя пользователя
+     * @returns {Promise<{username: string, roles: Array<{id:number, name:string, code?:string}>}>}
+     */
+    static async getUserRoles(targetUsername) {
+        const username = AuthManager.getCurrentUser();
+        const response = await fetch(
+            AppConfig.api.getUrl(`/api/v1/admin/users/${targetUsername}/roles`),
+            { headers: { 'X-JupyterHub-User': username } }
+        );
+        if (!response.ok) {
+            await this._throwApiError(response);
+        }
         return response.json();
     }
 
