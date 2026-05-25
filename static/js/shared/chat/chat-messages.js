@@ -192,8 +192,10 @@ const ChatMessages = {
             && err instanceof ChatRateLimitedError;
 
         if (isRateLimited) {
-            console.warn('ChatMessages: лимит параллельных стримов', err.userMessage);
+            console.warn('ChatMessages: лимит параллельных стримов', err.userMessage, err.code);
             ChatRenderer.removeTypingPlaceholder(botContainer);
+            // err.code из envelope: 'chat-stream-already-active' либо 'chat-rate-limit'.
+            // Для UI оставляем локальный код 'rate_limited' (legacy ключ для error-блока).
             const errBlock = ChatRenderer.renderBlock({
                 type: 'error',
                 message: err.userMessage,
