@@ -308,12 +308,14 @@ const TreeUtils = {
      */
     isPinnedTable(node) {
         if (node.type !== AppConfig.nodeTypes.TABLE) return false;
-        if (node.isMetricsTable || node.isMainMetricsTable) return true;
-        if (node.tableId) {
-            const table = AppState.tables[node.tableId];
-            if (table && (table.isRegularRiskTable || table.isOperationalRiskTable)) return true;
-        }
-        return false;
+        // E-2: все pinned-флаги читаем с node (унифицировано с metrics).
+        // Risk-флаги мигрируются на node в api.js::loadActContent для старых актов.
+        return !!(
+            node.isMetricsTable ||
+            node.isMainMetricsTable ||
+            node.isRegularRiskTable ||
+            node.isOperationalRiskTable
+        );
     },
 
     /**

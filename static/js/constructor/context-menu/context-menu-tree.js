@@ -100,9 +100,9 @@ class TreeContextMenu {
     _hasDirectRiskTables(node) {
         if (!node.children) return false;
         return node.children.some(child => {
-            if (child.type !== AppConfig.nodeTypes.TABLE || !child.tableId) return false;
-            const table = AppState.tables[child.tableId];
-            return table && (table.isRegularRiskTable || table.isOperationalRiskTable);
+            if (child.type !== AppConfig.nodeTypes.TABLE) return false;
+            // E-2: risk-флаги читаем с node (унифицировано с metrics).
+            return !!(child.isRegularRiskTable || child.isOperationalRiskTable);
         });
     }
 
@@ -384,8 +384,8 @@ class TreeContextMenu {
 
         // Удаление таблицы рисков триггерит _cleanupMetricsTablesAfterRiskTableDeleted,
         // которая может удалить метрики-таблицы из ДРУГИХ узлов раздела 5 → fallback на renderAll.
-        const isRiskTableDelete = node.type === AppConfig.nodeTypes.TABLE && node.tableId &&
-            (AppState.tables[node.tableId]?.isRegularRiskTable || AppState.tables[node.tableId]?.isOperationalRiskTable);
+        const isRiskTableDelete = node.type === AppConfig.nodeTypes.TABLE &&
+            !!(node.isRegularRiskTable || node.isOperationalRiskTable);
 
         DialogManager.show({
             title: 'Удаление элемента',

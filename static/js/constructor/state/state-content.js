@@ -78,7 +78,8 @@ Object.assign(AppState, {
             return ValidationCore.failure(AppConfig.tree.validation.parentNotFound);
         }
 
-        const isRiskTable = table && (table.isRegularRiskTable || table.isOperationalRiskTable);
+        // E-2: pinned-флаги читаем с node, не с table-объекта.
+        const isRiskTable = !!(tableNode.isRegularRiskTable || tableNode.isOperationalRiskTable);
 
         if (typeof ChangelogTracker !== 'undefined') {
             ChangelogTracker.record('delete_table', tableNode.tableId, tableNode.label || 'Таблица', {nodeId: tableNode.parentId});
@@ -469,11 +470,9 @@ Object.assign(AppState, {
 
         if (node.children) {
             for (const child of node.children) {
-                if (child.type === AppConfig.nodeTypes.TABLE && child.tableId) {
-                    const table = this.tables[child.tableId];
-                    if (table && (table.isRegularRiskTable || table.isOperationalRiskTable)) {
-                        riskTables.push(child);
-                    }
+                if (child.type === AppConfig.nodeTypes.TABLE &&
+                    (child.isRegularRiskTable || child.isOperationalRiskTable)) {
+                    riskTables.push(child);
                 }
                 riskTables = riskTables.concat(this._findRiskTablesInSubtree(child));
             }
@@ -593,6 +592,8 @@ Object.assign(AppState, {
         const tableId = this._generateId('table');
 
         const tableNode = this._createContentNode(nodeId, tableId, AppConfig.nodeTypes.TABLE, preset.label, true, true);
+        // E-2: pinned-флаг на node (структурное свойство), а не только на table-объекте.
+        tableNode.isRegularRiskTable = true;
 
         const insertIdx = this._getFirstNonPinnedIndex(node);
         node.children.splice(insertIdx, 0, tableNode);
@@ -629,6 +630,8 @@ Object.assign(AppState, {
         const tableId = this._generateId('table');
 
         const tableNode = this._createContentNode(nodeId, tableId, AppConfig.nodeTypes.TABLE, preset.label, true, true);
+        // E-2: pinned-флаг на node.
+        tableNode.isOperationalRiskTable = true;
 
         const insertIdx = this._getFirstNonPinnedIndex(node);
         node.children.splice(insertIdx, 0, tableNode);

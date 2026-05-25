@@ -117,12 +117,10 @@ class TreeDragDrop {
      * @returns {boolean} true если найдены таблицы рисков
      */
     _hasRiskTablesInSubtree(node) {
-        // Если узел сам является таблицей риска
-        if (node.type === AppConfig.nodeTypes.TABLE && node.tableId) {
-            const table = AppState.tables[node.tableId];
-            if (table && (table.isRegularRiskTable || table.isOperationalRiskTable)) {
-                return true;
-            }
+        // Если узел сам является таблицей риска (E-2: флаги на node)
+        if (node.type === AppConfig.nodeTypes.TABLE &&
+            (node.isRegularRiskTable || node.isOperationalRiskTable)) {
+            return true;
         }
 
         // Рекурсивно проверяем дочерние элементы

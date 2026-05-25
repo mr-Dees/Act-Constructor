@@ -274,10 +274,9 @@ Object.assign(AppState, {
      * @returns {boolean} true если это таблица риска
      */
     _isRiskTable(node) {
-        if (node.type !== AppConfig.nodeTypes.TABLE || !node.tableId) return false;
-
-        const table = this.tables[node.tableId];
-        return table && (table.isRegularRiskTable || table.isOperationalRiskTable);
+        if (node.type !== AppConfig.nodeTypes.TABLE) return false;
+        // E-2: pinned-флаги читаем с node.
+        return !!(node.isRegularRiskTable || node.isOperationalRiskTable);
     },
 
     /**

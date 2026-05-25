@@ -401,6 +401,11 @@ class APIClient {
                 // Миграция: strip числового префикса из label для item-узлов
                 this._migrateStripNumberFromLabels(AppState.treeData);
 
+                // E-2 миграция: переносим isRegularRiskTable/isOperationalRiskTable
+                // с table-объекта на table-node (унифицировано с metrics-флагами).
+                // Для актов, сохранённых до E-2, флаги лежали только в tables[id].
+                this._migrateRiskFlagsToNode(AppState.treeData, AppState.tables);
+
                 AppState.generateNumbering();
 
                 // Привязываем фактуры к узлам дерева
@@ -605,13 +610,42 @@ class APIClient {
         if (node.children) {
             for (const child of node.children) {
                 // Только для item-узлов (не table/textblock/violation)
-                if (!child.type || child.type === 'item') {
+                if (!child.type || child.type === AppConfig.nodeTypes.ITEM) {
                     const match = child.label?.match(/^\d+(?:\.\d+)*\.\s*(.+)$/);
                     if (match) {
                         child.label = match[1];
                     }
                 }
                 this._migrateStripNumberFromLabels(child);
+            }
+        }
+    }
+
+    /**
+     * E-2 миграция: для старых актов risk-флаги (isRegularRiskTable /
+     * isOperationalRiskTable) лежали только в tables[id]. Унификация требует
+     * флаг на node — пробрасываем для table-нод по tableId.
+     * Idempotent: если флаги уже на node, no-op.
+     * @private
+     * @param {Object} node - Узел дерева
+     * @param {Object} tables - AppState.tables словарь
+     */
+    static _migrateRiskFlagsToNode(node, tables) {
+        if (!node) return;
+        if (node.type === AppConfig.nodeTypes.TABLE && node.tableId) {
+            const table = tables[node.tableId];
+            if (table) {
+                if (table.isRegularRiskTable && !node.isRegularRiskTable) {
+                    node.isRegularRiskTable = true;
+                }
+                if (table.isOperationalRiskTable && !node.isOperationalRiskTable) {
+                    node.isOperationalRiskTable = true;
+                }
+            }
+        }
+        if (node.children) {
+            for (const child of node.children) {
+                this._migrateRiskFlagsToNode(child, tables);
             }
         }
     }
