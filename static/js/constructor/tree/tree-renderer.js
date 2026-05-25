@@ -531,18 +531,9 @@ class TreeRenderer {
      * @param {boolean} checked - Выбран ли
      */
     _onTbCheckboxChange(node, abbr, checked) {
-        if (!node.tb) node.tb = [];
-
-        if (checked) {
-            if (!node.tb.includes(abbr)) {
-                node.tb.push(abbr);
-            }
-        } else {
-            node.tb = node.tb.filter(t => t !== abbr);
-        }
-
-        // Помечаем изменения
-        StorageManager.markAsUnsaved();
+        // Делегируем единой точке: AppState.setNodeTb обновит node.tb,
+        // запишет в changelog и эмитит 'node:tb-changed' для подписчиков.
+        AppState.setNodeTb(node.id, abbr, checked);
     }
 
     /**

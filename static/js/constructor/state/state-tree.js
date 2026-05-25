@@ -848,6 +848,42 @@ Object.assign(AppState, {
     },
 
     /**
+     * Единая точка записи ТБ-флагов узла. Обновляет node.tb, пишет в changelog
+     * и эмитит событие 'node:tb-changed' через ChatEventBus (если доступен) —
+     * подписчики (TreeRenderer, ItemsRenderer) обновляют свои представления.
+     *
+     * Заменяет прямые мутации node.tb в tree-renderer и items-renderer.
+     * @param {string} nodeId - ID узла
+     * @param {string} abbr - Аббревиатура территориального банка
+     * @param {boolean} checked - Назначить (true) или снять (false)
+     */
+    setNodeTb(nodeId, abbr, checked) {
+        const node = this.findNodeById(nodeId);
+        if (!node) return;
+
+        if (!node.tb) node.tb = [];
+
+        if (checked) {
+            if (!node.tb.includes(abbr)) node.tb.push(abbr);
+        } else {
+            node.tb = node.tb.filter(t => t !== abbr);
+        }
+
+        if (typeof ChangelogTracker !== 'undefined') {
+            ChangelogTracker.record('tb_change', nodeId, node.label, {abbr, checked});
+        }
+
+        if (typeof StorageManager !== 'undefined' && StorageManager.markAsUnsaved) {
+            StorageManager.markAsUnsaved();
+        }
+
+        // Уведомляем подписчиков (TreeRenderer/ItemsRenderer) о per-node изменении.
+        // ChatEventBus задействован как ad-hoc общий event-bus; optional chaining
+        // защищает от случая, когда chat-модуль ещё не загружен.
+        window.ChatEventBus?.emit?.('node:tb-changed', {nodeId, abbr, checked});
+    },
+
+    /**
      * Рекурсивно очищает свойство tb у узла и всех его потомков
      * @private
      * @param {Object} node - Узел для очистки

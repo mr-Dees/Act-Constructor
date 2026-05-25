@@ -474,15 +474,8 @@ class ItemsRenderer {
             checkbox.type = 'checkbox';
             checkbox.checked = currentTb.includes(bank.abbr);
             checkbox.addEventListener('change', () => {
-                // Обновляем node.tb
-                if (!node.tb) node.tb = [];
-                if (checkbox.checked) {
-                    if (!node.tb.includes(bank.abbr)) node.tb.push(bank.abbr);
-                } else {
-                    node.tb = node.tb.filter(t => t !== bank.abbr);
-                }
-
-                StorageManager.markAsUnsaved();
+                // Единая точка записи ТБ + changelog + 'node:tb-changed' событие.
+                AppState.setNodeTb(node.id, bank.abbr, checkbox.checked);
 
                 // Обновляем бейдж в items
                 this._updateTbBadgeInItems(badge, node);
