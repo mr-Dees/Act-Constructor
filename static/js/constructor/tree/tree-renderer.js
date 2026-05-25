@@ -25,11 +25,12 @@ class TreeRenderer {
         this.manager.container.innerHTML = '';
         // Корневой #tree уже играет role="tree" (шаблон); рендерим прямо в него.
         // node.children — секции 1-го уровня (aria-level=1).
-        if (node.children?.length) {
-            node.children.forEach(child => {
-                this.manager.container.appendChild(this.createNodeElement(child, 1));
-            });
-        }
+        const siblings = node.children || [];
+        siblings.forEach((child, idx) => {
+            this.manager.container.appendChild(
+                this.createNodeElement(child, 1, idx + 1, siblings.length)
+            );
+        });
         // После рендера ровно один treeitem имеет tabindex=0 (roving).
         this._applyRovingTabindex();
     }
@@ -46,11 +47,10 @@ class TreeRenderer {
         ul.className = 'tree';
         ul.setAttribute('role', 'group');
 
-        if (node.children?.length) {
-            node.children.forEach(child => {
-                ul.appendChild(this.createNodeElement(child, childLevel));
-            });
-        }
+        const siblings = node.children || [];
+        siblings.forEach((child, idx) => {
+            ul.appendChild(this.createNodeElement(child, childLevel, idx + 1, siblings.length));
+        });
 
         return ul;
     }
@@ -62,10 +62,12 @@ class TreeRenderer {
      *
      * @param {Object} node - Данные узла (id, label, type, children и т.д.)
      * @param {number} level - aria-level (1 для секций, +1 на каждый уровень)
+     * @param {number} [posinset=1] - aria-posinset (позиция в группе сиблингов, 1-based)
+     * @param {number} [setsize=1] - aria-setsize (всего сиблингов в группе)
      * @returns {HTMLLIElement} Готовый элемент узла дерева
      */
-    createNodeElement(node, level = 1) {
-        const li = this._createBaseLiElement(node, level);
+    createNodeElement(node, level = 1, posinset = 1, setsize = 1) {
+        const li = this._createBaseLiElement(node, level, posinset, setsize);
 
         // Добавляем элементы узла
         li.appendChild(this._createToggleIcon(node, li));
@@ -89,7 +91,7 @@ class TreeRenderer {
      * @param {Object} node - Данные узла
      * @returns {HTMLLIElement} Базовый элемент li
      */
-    _createBaseLiElement(node, level = 1) {
+    _createBaseLiElement(node, level = 1, posinset = 1, setsize = 1) {
         const li = document.createElement('li');
         li.className = 'tree-item';
         li.dataset.nodeId = node.id;
@@ -99,6 +101,8 @@ class TreeRenderer {
         // обновляется в TreeManager.selectNode/clearSelection. tabindex=-1 (roving).
         li.setAttribute('role', 'treeitem');
         li.setAttribute('aria-level', String(level));
+        li.setAttribute('aria-posinset', String(posinset));
+        li.setAttribute('aria-setsize', String(setsize));
         li.setAttribute('aria-selected', 'false');
         li.setAttribute('tabindex', '-1');
         if (node.children?.length) {
