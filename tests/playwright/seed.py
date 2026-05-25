@@ -45,8 +45,8 @@ def _build_default_tree(label: str) -> dict:
         {
             "id": s["id"],
             "label": s["label"],
-            "isProtected": True,
-            "isDeletable": False,
+            "protected": True,
+            "deletable": False,
             "children": [],
         }
         for s in sections
