@@ -96,7 +96,7 @@ Object.assign(AppState, {
 
         // Обновляем таблицы метрик если удалили таблицу рисков
         if (isRiskTable) {
-            this._cleanupMetricsTablesAfterRiskTableDeleted(tableNodeId);
+            this._cleanupMetricsTablesAfterRiskTableDeleted();
         }
 
         return ValidationCore.success();
@@ -519,11 +519,12 @@ Object.assign(AppState, {
     },
 
     /**
-     * Удаляет таблицы метрик после удаления таблицы рисков
+     * Удаляет таблицы метрик после удаления таблицы рисков.
+     * Параметр deletedNodeId был дед-кодом (не использовался внутри тела) — удалён.
+     * Функция обходит весь раздел 5 и пересчитывает наличие метрик-таблиц.
      * @private
-     * @param {string} deletedNodeId - ID удаленного узла
      */
-    _cleanupMetricsTablesAfterRiskTableDeleted(deletedNodeId) {
+    _cleanupMetricsTablesAfterRiskTableDeleted() {
         const node5 = this.findNodeById('5');
         if (!node5?.children) return;
 
