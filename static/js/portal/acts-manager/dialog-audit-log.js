@@ -14,7 +14,7 @@ class AuditLogDialog extends DialogBase {
     static _cachedLog = null;
     static _cachedVersions = null;
     static _filteredLog = [];
-    static _maxLoadLimit = 2000;
+    static _maxLoadLimit = 200;
     static _lockAcquired = false;
 
     /**

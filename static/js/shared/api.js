@@ -1070,7 +1070,8 @@ class APIClient {
             headers: { 'X-JupyterHub-User': username }
         });
         if (!response.ok) throw this._createError(response.status, 'Ошибка загрузки ролей');
-        return response.json();
+        const data = await response.json();
+        return data.items || [];
     }
 
     /**
@@ -1083,7 +1084,8 @@ class APIClient {
             headers: { 'X-JupyterHub-User': username }
         });
         if (!response.ok) throw this._createError(response.status, 'Ошибка загрузки справочника');
-        return response.json();
+        const data = await response.json();
+        return data.items || [];
     }
 
     /**
@@ -1139,7 +1141,8 @@ class APIClient {
             { headers: { 'X-JupyterHub-User': username }, signal }
         );
         if (!response.ok) throw this._createError(response.status, 'Ошибка поиска пользователей');
-        return response.json();
+        const data = await response.json();
+        return data.items || [];
     }
 
     /**
@@ -1172,7 +1175,8 @@ class APIClient {
             { headers: { 'X-JupyterHub-User': username } }
         );
         if (!response.ok) throw this._createError(response.status, 'Ошибка поиска пользователей');
-        return response.json();
+        const data = await response.json();
+        return data.items || [];
     }
 
     /**
@@ -1249,7 +1253,7 @@ class APIClient {
         });
         if (!response.ok) await this._throwApiError(response);
         const json = await response.json();
-        return json.data;
+        return json.items || [];
     }
 
     /**
