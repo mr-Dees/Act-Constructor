@@ -118,9 +118,20 @@ class AuditLogDialog extends DialogBase {
             toggleBtn.addEventListener('click', () => this._toggleAllFilters());
         }
 
-        // Дата и пользователь
+        // Дата и пользователь — debounce 300ms: чтобы перерендер не дёргался
+        // на каждой нажатой клавише в поле поиска по username.
+        if (!this._debouncedFilterChange) {
+            let t = null;
+            this._debouncedFilterChange = () => {
+                if (t) clearTimeout(t);
+                t = setTimeout(() => {
+                    t = null;
+                    this._onFilterChange();
+                }, 300);
+            };
+        }
         filters.querySelectorAll('input[type="date"], input[type="text"]').forEach(input => {
-            input.addEventListener('input', () => this._onFilterChange());
+            input.addEventListener('input', () => this._debouncedFilterChange());
         });
 
         // Сворачивание/раскрытие фильтров
@@ -223,7 +234,7 @@ class AuditLogDialog extends DialogBase {
         const list = this._overlay.querySelector('#auditLogList');
         if (!list) return;
 
-        // Собираем активные типы действий
+        // Собираем активные типы действий (chip может покрывать несколько action'ов через CSV).
         const chips = this._overlay.querySelectorAll('.audit-log-chip');
         const activeActions = new Set();
         chips.forEach(c => {
@@ -232,34 +243,22 @@ class AuditLogDialog extends DialogBase {
             }
         });
 
-        // Пустое состояние при снятии всех фильтров
+        // Пустое состояние при снятии всех фильтров.
         if (activeActions.size === 0) {
             list.innerHTML = '<div class="audit-log-empty">Выберите хотя бы один тип операции</div>';
             this._clearPagination('auditLogPagination');
             return;
         }
 
-        // Фильтрация по типу действия
-        let filtered = this._cachedLog.filter(e => activeActions.has(e.action));
+        const username = this._overlay.querySelector('[data-filter="username"]')?.value?.trim() || '';
+        const fromDate = this._overlay.querySelector('[data-filter="from-date"]')?.value || '';
+        const toDate = this._overlay.querySelector('[data-filter="to-date"]')?.value || '';
 
-        // Фильтрация по имени пользователя (регистронезависимая подстрока)
-        const username = this._overlay.querySelector('[data-filter="username"]')?.value?.trim();
-        if (username) {
-            const lower = username.toLowerCase();
-            filtered = filtered.filter(e => e.username?.toLowerCase().includes(lower));
-        }
-
-        // Фильтрация по дате
-        const fromDate = this._overlay.querySelector('[data-filter="from-date"]')?.value;
-        const toDate = this._overlay.querySelector('[data-filter="to-date"]')?.value;
-        if (fromDate) {
-            const from = new Date(fromDate);
-            filtered = filtered.filter(e => new Date(e.created_at) >= from);
-        }
-        if (toDate) {
-            const to = new Date(toDate + 'T23:59:59');
-            filtered = filtered.filter(e => new Date(e.created_at) <= to);
-        }
+        const filtered = FilterEngine.apply(this._cachedLog, [
+            { type: 'set', field: 'action', values: Array.from(activeActions) },
+            { type: 'text', field: 'username', query: username },
+            { type: 'date-range', field: 'created_at', from: fromDate, to: toDate },
+        ]);
 
         this._filteredLog = filtered;
         this._renderFilteredPage(0);
