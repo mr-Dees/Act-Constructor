@@ -276,6 +276,10 @@ class ActsManagerPage {
         if (errorState) {
             container.innerHTML = '';
             container.appendChild(errorState);
+            const reloadBtn = container.querySelector('[data-action="reload-acts"]');
+            if (reloadBtn) {
+                reloadBtn.addEventListener('click', () => this.loadActs());
+            }
         }
     }
 

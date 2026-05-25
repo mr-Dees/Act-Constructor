@@ -272,6 +272,10 @@ class ActsMenuManager {
         if (e) {
             c.innerHTML = '';
             c.appendChild(e);
+            const reloadBtn = c.querySelector('[data-action="reload-acts"]');
+            if (reloadBtn) {
+                reloadBtn.addEventListener('click', () => this.renderActsList(true));
+            }
         }
     }
 

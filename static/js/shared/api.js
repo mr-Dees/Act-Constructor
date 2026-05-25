@@ -955,18 +955,6 @@ class APIClient {
     }
 
     /**
-     * Проверяет режим только чтения и показывает уведомление
-     * @returns {boolean} true если режим только чтения активен
-     */
-    static checkReadOnlyMode() {
-        if (AppConfig.readOnlyMode?.isReadOnly) {
-            Notifications.warning(AppConfig.readOnlyMode.messages.cannotEdit);
-            return true;
-        }
-        return false;
-    }
-
-    /**
      * Загружает содержимое акта (raw JSON) без побочных эффектов.
      * Используется для diff-сравнения версий.
      * @param {number} actId
