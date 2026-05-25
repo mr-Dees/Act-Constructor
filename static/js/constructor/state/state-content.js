@@ -15,10 +15,8 @@ Object.assign(AppState, {
      * @returns {Object} Результат создания таблицы с полями valid, message
      */
     addTableToNode(nodeId, rows = 3, cols = 3) {
-        // Блокируем добавление в режиме только чтения
-        if (AppConfig.readOnlyMode?.isReadOnly) {
-            return ValidationCore.failure(AppConfig.readOnlyMode.messages.cannotAddContent);
-        }
+        const guard = ValidationCore.requireWrite('cannotAddContent');
+        if (guard) return guard;
 
         const node = this.findNodeById(nodeId);
 
@@ -26,7 +24,7 @@ Object.assign(AppState, {
         if (!validation.valid) return validation;
 
         const tableId = this._generateId('table');
-        const tableNode = this._createContentNode(nodeId, tableId, 'table', '', false, true);
+        const tableNode = this._createContentNode(nodeId, tableId, AppConfig.nodeTypes.TABLE, '', false, true);
 
         node.children.push(tableNode);
 
@@ -60,7 +58,7 @@ Object.assign(AppState, {
      */
     removeTable(tableNodeId) {
         const tableNode = this.findNodeById(tableNodeId);
-        if (!tableNode || tableNode.type !== 'table') {
+        if (!tableNode || tableNode.type !== AppConfig.nodeTypes.TABLE) {
             return ValidationCore.failure(AppConfig.content.errors.notFound('Таблица'));
         }
 
@@ -78,7 +76,8 @@ Object.assign(AppState, {
             return ValidationCore.failure(AppConfig.tree.validation.parentNotFound);
         }
 
-        const isRiskTable = table && (table.isRegularRiskTable || table.isOperationalRiskTable);
+        // E-2: pinned-флаги читаем с node, не с table-объекта.
+        const isRiskTable = !!(tableNode.isRegularRiskTable || tableNode.isOperationalRiskTable);
 
         if (typeof ChangelogTracker !== 'undefined') {
             ChangelogTracker.record('delete_table', tableNode.tableId, tableNode.label || 'Таблица', {nodeId: tableNode.parentId});
@@ -108,10 +107,8 @@ Object.assign(AppState, {
      * @returns {Object} Результат создания с полями valid, message
      */
     addTextBlockToNode(nodeId) {
-        // Блокируем добавление в режиме только чтения
-        if (AppConfig.readOnlyMode?.isReadOnly) {
-            return ValidationCore.failure(AppConfig.readOnlyMode.messages.cannotAddContent);
-        }
+        const guard = ValidationCore.requireWrite('cannotAddContent');
+        if (guard) return guard;
 
         const node = this.findNodeById(nodeId);
 
@@ -119,7 +116,7 @@ Object.assign(AppState, {
         if (!validation.valid) return validation;
 
         const textBlockId = this._generateId('textblock');
-        const textBlockNode = this._createContentNode(nodeId, textBlockId, 'textblock');
+        const textBlockNode = this._createContentNode(nodeId, textBlockId, AppConfig.nodeTypes.TEXTBLOCK);
 
         node.children.push(textBlockNode);
 
@@ -140,10 +137,8 @@ Object.assign(AppState, {
      * @returns {Object} Результат создания с полями valid, message
      */
     addViolationToNode(nodeId) {
-        // Блокируем добавление в режиме только чтения
-        if (AppConfig.readOnlyMode?.isReadOnly) {
-            return ValidationCore.failure(AppConfig.readOnlyMode.messages.cannotAddContent);
-        }
+        const guard = ValidationCore.requireWrite('cannotAddContent');
+        if (guard) return guard;
 
         const node = this.findNodeById(nodeId);
 
@@ -151,7 +146,7 @@ Object.assign(AppState, {
         if (!validation.valid) return validation;
 
         const violationId = this._generateId('violation');
-        const violationNode = this._createContentNode(nodeId, violationId, 'violation');
+        const violationNode = this._createContentNode(nodeId, violationId, AppConfig.nodeTypes.VIOLATION);
 
         node.children.push(violationNode);
 
@@ -289,7 +284,7 @@ Object.assign(AppState, {
         const tableId = this._generateId('table');
         const tableLabel = `Объем выявленных отклонений (В метриках) по ${nodeNumber}`;
 
-        const tableNode = this._createContentNode(nodeId, tableId, 'table', tableLabel, true, true);
+        const tableNode = this._createContentNode(nodeId, tableId, AppConfig.nodeTypes.TABLE, tableLabel, true, true);
         tableNode.isMetricsTable = true;
 
         node.children.unshift(tableNode);
@@ -424,7 +419,7 @@ Object.assign(AppState, {
         }
 
         const existingTable = node5.children?.find(
-            child => child.type === 'table' && child.isMainMetricsTable === true
+            child => child.type === AppConfig.nodeTypes.TABLE && child.isMainMetricsTable === true
         );
 
         if (existingTable) {
@@ -436,7 +431,7 @@ Object.assign(AppState, {
         const tableId = this._generateId('table');
         const tableLabel = 'Объем выявленных отклонений';
 
-        const tableNode = this._createContentNode('5', tableId, 'table', tableLabel, true, true);
+        const tableNode = this._createContentNode('5', tableId, AppConfig.nodeTypes.TABLE, tableLabel, true, true);
         tableNode.isMainMetricsTable = true;
 
         node5.children.unshift(tableNode);
@@ -465,21 +460,10 @@ Object.assign(AppState, {
      * @returns {Array<Object>} Массив узлов таблиц рисков
      */
     _findRiskTablesInSubtree(node) {
-        let riskTables = [];
-
-        if (node.children) {
-            for (const child of node.children) {
-                if (child.type === 'table' && child.tableId) {
-                    const table = this.tables[child.tableId];
-                    if (table && (table.isRegularRiskTable || table.isOperationalRiskTable)) {
-                        riskTables.push(child);
-                    }
-                }
-                riskTables = riskTables.concat(this._findRiskTablesInSubtree(child));
-            }
-        }
-
-        return riskTables;
+        // E-4: делегируем единой утилите TreeUtils.findRiskTables.
+        // Сама функция оставлена ради обратной совместимости с context-menu-tree.js
+        // и state-tree.js, которые её зовут как AppState._findRiskTablesInSubtree.
+        return TreeUtils.findRiskTables(node);
     },
 
     /**
@@ -504,7 +488,7 @@ Object.assign(AppState, {
         if (parentNode?.id === '5' && ancestorNode.number?.match(/^5\.\d+$/)) {
             if (nodeId !== ancestorNode.id) {
                 const hasMetricsTable = ancestorNode.children?.some(
-                    child => child.type === 'table' && child.isMetricsTable === true
+                    child => child.type === AppConfig.nodeTypes.TABLE && child.isMetricsTable === true
                 );
 
                 if (!hasMetricsTable) {
@@ -528,8 +512,9 @@ Object.assign(AppState, {
         const node5 = this.findNodeById('5');
         if (!node5?.children) return;
 
+        const {TABLE, ITEM} = AppConfig.nodeTypes;
         const firstLevelNodes = node5.children.filter(child =>
-            child.type === 'item' && child.number?.match(/^5\.\d+$/)
+            child.type === ITEM && child.number?.match(/^5\.\d+$/)
         );
 
         // Проверяем каждый узел первого уровня
@@ -537,7 +522,7 @@ Object.assign(AppState, {
             // Считаем только таблицы рисков в дочерних item-узлах (5.*.* и глубже)
             let deepRiskTables = [];
             for (const child of firstLevelNode.children || []) {
-                if (child.type === 'item') {
+                if (child.type === ITEM) {
                     deepRiskTables = deepRiskTables.concat(this._findRiskTablesInSubtree(child));
                 }
             }
@@ -545,7 +530,7 @@ Object.assign(AppState, {
             // Если нет глубоких таблиц рисков, удаляем таблицу метрик
             if (deepRiskTables.length === 0) {
                 const metricsTableNode = firstLevelNode.children?.find(
-                    child => child.type === 'table' && child.isMetricsTable === true
+                    child => child.type === TABLE && child.isMetricsTable === true
                 );
 
                 if (metricsTableNode) {
@@ -562,7 +547,7 @@ Object.assign(AppState, {
 
         if (allRiskTables.length === 0) {
             const mainMetricsTableNode = node5.children?.find(
-                child => child.type === 'table' && child.isMainMetricsTable === true
+                child => child.type === TABLE && child.isMainMetricsTable === true
             );
 
             if (mainMetricsTableNode) {
@@ -591,7 +576,9 @@ Object.assign(AppState, {
         const preset = AppConfig.content.tablePresets.regularRisk;
         const tableId = this._generateId('table');
 
-        const tableNode = this._createContentNode(nodeId, tableId, 'table', preset.label, true, true);
+        const tableNode = this._createContentNode(nodeId, tableId, AppConfig.nodeTypes.TABLE, preset.label, true, true);
+        // E-2: pinned-флаг на node (структурное свойство), а не только на table-объекте.
+        tableNode.isRegularRiskTable = true;
 
         const insertIdx = this._getFirstNonPinnedIndex(node);
         node.children.splice(insertIdx, 0, tableNode);
@@ -627,7 +614,9 @@ Object.assign(AppState, {
         const preset = AppConfig.content.tablePresets.operationalRisk;
         const tableId = this._generateId('table');
 
-        const tableNode = this._createContentNode(nodeId, tableId, 'table', preset.label, true, true);
+        const tableNode = this._createContentNode(nodeId, tableId, AppConfig.nodeTypes.TABLE, preset.label, true, true);
+        // E-2: pinned-флаг на node.
+        tableNode.isOperationalRiskTable = true;
 
         const insertIdx = this._getFirstNonPinnedIndex(node);
         node.children.splice(insertIdx, 0, tableNode);

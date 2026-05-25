@@ -49,6 +49,9 @@ class TreeDragDrop {
      * Использует MutationObserver для динамического обновления атрибутов
      */
     enableDraggableItems() {
+        // E-7: предохраняем от двойной подписки при повторных init.
+        this._mutationObserver?.disconnect();
+
         const observer = new MutationObserver(() => {
             this.manager.container.querySelectorAll('.tree-item:not(.protected)')
                 .forEach(item => item.setAttribute('draggable', 'true'));
@@ -59,9 +62,22 @@ class TreeDragDrop {
             subtree: true
         });
 
+        // Сохраняем ссылку для destroy() — иначе observer висит на time of process.
+        this._mutationObserver = observer;
+
         // Начальная установка
         this.manager.container.querySelectorAll('.tree-item:not(.protected)')
             .forEach(item => item.setAttribute('draggable', 'true'));
+    }
+
+    /**
+     * Освобождает ресурсы drag-drop: отключает MutationObserver, сбрасывает
+     * состояние активного drag'а. Безопасно вызывать многократно.
+     */
+    destroy() {
+        this._mutationObserver?.disconnect();
+        this._mutationObserver = null;
+        this.cleanup();
     }
 
     /**
@@ -111,30 +127,14 @@ class TreeDragDrop {
     }
 
     /**
-     * Проверяет наличие таблиц рисков в узле и его поддереве
+     * Проверяет наличие таблиц рисков в узле и его поддереве.
+     * E-4: hot-path drag, делегирует на TreeUtils.findRiskTables с firstOnly.
      * @private
      * @param {Object} node - Узел для проверки
      * @returns {boolean} true если найдены таблицы рисков
      */
     _hasRiskTablesInSubtree(node) {
-        // Если узел сам является таблицей риска
-        if (node.type === 'table' && node.tableId) {
-            const table = AppState.tables[node.tableId];
-            if (table && (table.isRegularRiskTable || table.isOperationalRiskTable)) {
-                return true;
-            }
-        }
-
-        // Рекурсивно проверяем дочерние элементы
-        if (node.children?.length) {
-            for (const child of node.children) {
-                if (this._hasRiskTablesInSubtree(child)) {
-                    return true;
-                }
-            }
-        }
-
-        return false;
+        return TreeUtils.findRiskTables(node, {firstOnly: true}).length > 0;
     }
 
     /**
@@ -145,7 +145,8 @@ class TreeDragDrop {
      */
     canAcceptAsChild(targetNode, draggedNode) {
         // Информационные элементы не могут иметь детей
-        const informationalTypes = ['table', 'textblock', 'violation'];
+        const {TABLE, TEXTBLOCK, VIOLATION} = AppConfig.nodeTypes;
+        const informationalTypes = [TABLE, TEXTBLOCK, VIOLATION];
         return !informationalTypes.includes(targetNode.type);
     }
 
@@ -207,7 +208,8 @@ class TreeDragDrop {
 
         // Для информационных элементов при наведении на их родителя всегда предлагаем вставку как child
         const draggedParent = AppState.findParentNode(this.draggedNode.id);
-        const isDraggedInformational = ['table', 'textblock', 'violation'].includes(this.draggedNode.type);
+        const {TABLE: T, TEXTBLOCK: TB, VIOLATION: V} = AppConfig.nodeTypes;
+        const isDraggedInformational = [T, TB, V].includes(this.draggedNode.type);
 
         if (isDraggedInformational && draggedParent && draggedParent.id === targetNode.id) {
             return 'child';

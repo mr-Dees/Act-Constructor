@@ -70,7 +70,7 @@ class TreeContextMenu {
 
     /** Проверяет, разрешено ли создавать таблицу риска */
     _isRiskTableAllowedForNode(node) {
-        if (node.type && node.type !== 'item') return false;
+        if (node.type && node.type !== AppConfig.nodeTypes.ITEM) return false;
         if (!node.number) return false;
         if (!/^5\.\d+/.test(node.number)) return false;
         // Нельзя создать вторую таблицу рисков на одном узле
@@ -100,9 +100,9 @@ class TreeContextMenu {
     _hasDirectRiskTables(node) {
         if (!node.children) return false;
         return node.children.some(child => {
-            if (child.type !== 'table' || !child.tableId) return false;
-            const table = AppState.tables[child.tableId];
-            return table && (table.isRegularRiskTable || table.isOperationalRiskTable);
+            if (child.type !== AppConfig.nodeTypes.TABLE) return false;
+            // E-2: risk-флаги читаем с node (унифицировано с metrics).
+            return !!(child.isRegularRiskTable || child.isOperationalRiskTable);
         });
     }
 
@@ -110,7 +110,7 @@ class TreeContextMenu {
     _hasChildItemRiskTables(node) {
         if (!node.children) return false;
         for (const child of node.children) {
-            if (child.type === 'item' && AppState._findRiskTablesInSubtree(child).length > 0) {
+            if (child.type === AppConfig.nodeTypes.ITEM && AppState._findRiskTablesInSubtree(child).length > 0) {
                 return true;
             }
         }
@@ -122,7 +122,7 @@ class TreeContextMenu {
         const node5 = AppState.findNodeById('5');
         if (!node5?.children) return false;
         return node5.children.some(child =>
-            child.type === 'item' && child.number?.match(/^5\.\d+$/) && this._hasDirectRiskTables(child)
+            child.type === AppConfig.nodeTypes.ITEM && child.number?.match(/^5\.\d+$/) && this._hasDirectRiskTables(child)
         );
     }
 
@@ -131,7 +131,7 @@ class TreeContextMenu {
         const node5 = AppState.findNodeById('5');
         if (!node5?.children) return false;
         return node5.children.some(child =>
-            child.type === 'item' && child.number?.match(/^5\.\d+$/) && this._hasChildItemRiskTables(child)
+            child.type === AppConfig.nodeTypes.ITEM && child.number?.match(/^5\.\d+$/) && this._hasChildItemRiskTables(child)
         );
     }
 
@@ -139,11 +139,11 @@ class TreeContextMenu {
     _hasBothLevelsAvailable() {
         const node5 = AppState.findNodeById('5');
         if (!node5?.children) return false;
-        const items = node5.children.filter(c => !c.type || c.type === 'item');
+        const items = node5.children.filter(c => !c.type || c.type === AppConfig.nodeTypes.ITEM);
         let hasLeafAt5x = false;
         let hasNodesAt5xx = false;
         for (const child of items) {
-            const itemKids = (child.children || []).filter(gc => !gc.type || gc.type === 'item');
+            const itemKids = (child.children || []).filter(gc => !gc.type || gc.type === AppConfig.nodeTypes.ITEM);
             if (itemKids.length === 0) hasLeafAt5x = true;
             else hasNodesAt5xx = true;
             if (hasLeafAt5x && hasNodesAt5xx) return true;
@@ -222,7 +222,7 @@ class TreeContextMenu {
 
     /** Добавляет дочерний элемент */
     handleAddChild(node, nodeId) {
-        if (node.type === 'table') {
+        if (node.type === AppConfig.nodeTypes.TABLE) {
             Notifications.error('Нельзя добавлять дочерние элементы к таблице');
             return;
         }
@@ -264,7 +264,7 @@ class TreeContextMenu {
 
     /** Добавляет таблицу к узлу */
     handleAddTable(node, nodeId, tableType = 'regular') {
-        if (node.type === 'table') {
+        if (node.type === AppConfig.nodeTypes.TABLE) {
             Notifications.error('Нельзя добавлять таблицу к таблице');
             return;
         }
@@ -278,14 +278,14 @@ class TreeContextMenu {
                 result = AppState._createRegularRiskTable(nodeId);
                 if (result.valid) {
                     AppState.generateNumbering();
-                    AppState._updateMetricsTablesAfterRiskTableCreated(nodeId);
+                    MetricsRiskCoordinator.onRiskTableAdded(nodeId);
                 }
                 break;
             case 'operational-risk':
                 result = AppState._createOperationalRiskTable(nodeId);
                 if (result.valid) {
                     AppState.generateNumbering();
-                    AppState._updateMetricsTablesAfterRiskTableCreated(nodeId);
+                    MetricsRiskCoordinator.onRiskTableAdded(nodeId);
                 }
                 break;
             default:
@@ -304,7 +304,8 @@ class TreeContextMenu {
 
     /** Добавляет текстовый блок */
     handleAddTextBlock(node, nodeId) {
-        if (['table', 'textblock'].includes(node.type)) {
+        const {TABLE, TEXTBLOCK} = AppConfig.nodeTypes;
+        if ([TABLE, TEXTBLOCK].includes(node.type)) {
             Notifications.error('Нельзя добавлять текстовый блок к этому элементу');
             return;
         }
@@ -319,7 +320,8 @@ class TreeContextMenu {
 
     /** Добавляет нарушение */
     handleAddViolation(node, nodeId) {
-        if (['table', 'textblock', 'violation'].includes(node.type)) {
+        const {TABLE, TEXTBLOCK, VIOLATION} = AppConfig.nodeTypes;
+        if ([TABLE, TEXTBLOCK, VIOLATION].includes(node.type)) {
             Notifications.error('Нельзя добавлять нарушение к этому элементу');
             return;
         }
@@ -345,7 +347,7 @@ class TreeContextMenu {
         }
 
         // Проверка удаления таблиц метрик
-        if (node.type === 'table' && node.tableId) {
+        if (node.type === AppConfig.nodeTypes.TABLE && node.tableId) {
             const table = AppState.tables[node.tableId];
 
             // Проверка под узлом 5.*
@@ -354,7 +356,7 @@ class TreeContextMenu {
                 if (parentUnder5) {
                     let hasDeepRisks = false;
                     for (const child of parentUnder5.children || []) {
-                        if (child.type === 'item' && AppState._findRiskTablesInSubtree(child).length > 0) {
+                        if (child.type === AppConfig.nodeTypes.ITEM && AppState._findRiskTablesInSubtree(child).length > 0) {
                             hasDeepRisks = true;
                             break;
                         }
@@ -382,8 +384,8 @@ class TreeContextMenu {
 
         // Удаление таблицы рисков триггерит _cleanupMetricsTablesAfterRiskTableDeleted,
         // которая может удалить метрики-таблицы из ДРУГИХ узлов раздела 5 → fallback на renderAll.
-        const isRiskTableDelete = node.type === 'table' && node.tableId &&
-            (AppState.tables[node.tableId]?.isRegularRiskTable || AppState.tables[node.tableId]?.isOperationalRiskTable);
+        const isRiskTableDelete = node.type === AppConfig.nodeTypes.TABLE &&
+            !!(node.isRegularRiskTable || node.isOperationalRiskTable);
 
         DialogManager.show({
             title: 'Удаление элемента',

@@ -177,7 +177,7 @@ const AppState = {
         const node = {
             id: `${parentId}_table_${Date.now()}_${Math.random().toString(36).substring(2, 9)}`,
             label: label || AppConfig.tree.labels.table,
-            type: 'table',
+            type: AppConfig.nodeTypes.TABLE,
             tableId,
             parentId,
             protected,
@@ -362,17 +362,18 @@ const AppState = {
         const serialized = {
             id: node.id,
             label: node.label,
-            type: node.type || 'item',
+            type: node.type || AppConfig.nodeTypes.ITEM,
             protected: node.protected || false,
             deletable: node.deletable !== undefined ? node.deletable : true
         };
 
         // Добавляем ID связанного контента
-        if (node.type === 'table' && node.tableId) {
+        const {TABLE, TEXTBLOCK, VIOLATION} = AppConfig.nodeTypes;
+        if (node.type === TABLE && node.tableId) {
             serialized.tableId = node.tableId;
-        } else if (node.type === 'textblock' && node.textBlockId) {
+        } else if (node.type === TEXTBLOCK && node.textBlockId) {
             serialized.textBlockId = node.textBlockId;
-        } else if (node.type === 'violation' && node.violationId) {
+        } else if (node.type === VIOLATION && node.violationId) {
             serialized.violationId = node.violationId;
         } else {
             serialized.content = node.content || '';

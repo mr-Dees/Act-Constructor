@@ -243,7 +243,8 @@ class ItemsRenderer {
         const itemDiv = this._createItemContainer(node, level);
 
         // Проверяем специальные типы узлов
-        if (node.type === 'table') {
+        const {TABLE, TEXTBLOCK, VIOLATION} = AppConfig.nodeTypes;
+        if (node.type === TABLE) {
             const table = AppState.tables[node.tableId];
             if (table) {
                 const section = this.renderTable(table, node);
@@ -253,7 +254,7 @@ class ItemsRenderer {
             return itemDiv;
         }
 
-        if (node.type === 'textblock') {
+        if (node.type === TEXTBLOCK) {
             const textBlock = AppState.textBlocks[node.textBlockId];
             if (textBlock) {
                 const tbEl = textBlockManager.createTextBlockElement(textBlock, node);
@@ -263,7 +264,7 @@ class ItemsRenderer {
             return itemDiv;
         }
 
-        if (node.type === 'violation') {
+        if (node.type === VIOLATION) {
             const violation = AppState.violations[node.violationId];
             if (violation) {
                 const vEl = violationManager.createViolationElement(violation, node);
@@ -473,15 +474,8 @@ class ItemsRenderer {
             checkbox.type = 'checkbox';
             checkbox.checked = currentTb.includes(bank.abbr);
             checkbox.addEventListener('change', () => {
-                // Обновляем node.tb
-                if (!node.tb) node.tb = [];
-                if (checkbox.checked) {
-                    if (!node.tb.includes(bank.abbr)) node.tb.push(bank.abbr);
-                } else {
-                    node.tb = node.tb.filter(t => t !== bank.abbr);
-                }
-
-                StorageManager.markAsUnsaved();
+                // Единая точка записи ТБ + changelog + 'node:tb-changed' событие.
+                AppState.setNodeTb(node.id, bank.abbr, checkbox.checked);
 
                 // Обновляем бейдж в items
                 this._updateTbBadgeInItems(badge, node);
@@ -602,7 +596,8 @@ class ItemsRenderer {
         const childrenDiv = document.createElement('div');
         childrenDiv.className = 'item-children';
 
-        const specialTypes = new Set(['table', 'textblock', 'violation']);
+        const {TABLE, TEXTBLOCK, VIOLATION} = AppConfig.nodeTypes;
+        const specialTypes = new Set([TABLE, TEXTBLOCK, VIOLATION]);
 
         children.forEach(child => {
             const childLevel = specialTypes.has(child.type) ? parentLevel : parentLevel + 1;

@@ -14,12 +14,13 @@ Object.assign(AppState, {
     generateNumbering(node = this.treeData, prefix = '') {
         if (!node.children) return;
 
+        const {TABLE, TEXTBLOCK, VIOLATION} = AppConfig.nodeTypes;
         node.children.forEach((child, index) => {
-            if (child.type === 'table') {
+            if (child.type === TABLE) {
                 this._numberTable(child, node);
-            } else if (child.type === 'textblock') {
+            } else if (child.type === TEXTBLOCK) {
                 this._numberTextBlock(child, node);
-            } else if (child.type === 'violation') {
+            } else if (child.type === VIOLATION) {
                 this._numberViolation(child, node);
             } else {
                 this._numberItem(child, node, prefix, index);
@@ -34,7 +35,7 @@ Object.assign(AppState, {
      * @param {Object} parent - Родительский узел
      */
     _numberTable(child, parent) {
-        const parentTables = parent.children.filter(c => c.type === 'table');
+        const parentTables = parent.children.filter(c => c.type === AppConfig.nodeTypes.TABLE);
         const tableIndex = parentTables.indexOf(child) + 1;
 
         child.number = `Таблица ${tableIndex}`;
@@ -47,7 +48,7 @@ Object.assign(AppState, {
      * @param {Object} parent - Родительский узел
      */
     _numberTextBlock(child, parent) {
-        const parentTextBlocks = parent.children.filter(c => c.type === 'textblock');
+        const parentTextBlocks = parent.children.filter(c => c.type === AppConfig.nodeTypes.TEXTBLOCK);
         const textBlockIndex = parentTextBlocks.indexOf(child) + 1;
 
         child.number = `Текстовый блок ${textBlockIndex}`;
@@ -60,7 +61,7 @@ Object.assign(AppState, {
      * @param {Object} parent - Родительский узел
      */
     _numberViolation(child, parent) {
-        const parentViolations = parent.children.filter(c => c.type === 'violation');
+        const parentViolations = parent.children.filter(c => c.type === AppConfig.nodeTypes.VIOLATION);
         const violationIndex = parentViolations.indexOf(child) + 1;
 
         child.number = `Нарушение ${violationIndex}`;
@@ -75,7 +76,7 @@ Object.assign(AppState, {
      * @param {number} index - Индекс среди siblings
      */
     _numberItem(child, parent, prefix, index) {
-        const itemChildren = parent.children.filter(c => !c.type || c.type === 'item');
+        const itemChildren = parent.children.filter(c => !c.type || c.type === AppConfig.nodeTypes.ITEM);
         const itemIndex = itemChildren.indexOf(child);
 
         if (itemIndex === -1) return;
@@ -104,7 +105,7 @@ Object.assign(AppState, {
         if (!node?.children) return;
 
         const metricsTableNode = node.children.find(child =>
-            child.type === 'table' && child.isMetricsTable === true
+            child.type === AppConfig.nodeTypes.TABLE && child.isMetricsTable === true
         );
 
         if (metricsTableNode && node.number) {
@@ -122,10 +123,8 @@ Object.assign(AppState, {
      * @returns {Object} Результат создания узла с полями valid, message
      */
     addNode(parentId, label, isChild = true) {
-        // Блокируем добавление в режиме только чтения
-        if (AppConfig.readOnlyMode?.isReadOnly) {
-            return ValidationCore.failure(AppConfig.readOnlyMode.messages.cannotModifyTree);
-        }
+        const guard = ValidationCore.requireWrite('cannotModifyTree');
+        if (guard) return guard;
 
         const parent = this.findNodeById(parentId);
         if (!parent) {
@@ -179,7 +178,7 @@ Object.assign(AppState, {
             label: label || AppConfig.tree.labels.newItem,
             children: [],
             content: '',
-            type: 'item'
+            type: AppConfig.nodeTypes.ITEM
         };
     },
 
@@ -224,6 +223,29 @@ Object.assign(AppState, {
         const node = this.findNodeById(nodeId);
         if (!node) return false;
 
+        // Страховка API-уровня над UI-проверкой: защищённые узлы (секции 1-5)
+        // нельзя удалить прямым вызовом, даже из консоли/undo/миграции.
+        if (node.protected || node.deletable === false) {
+            if (typeof Notifications !== 'undefined') {
+                Notifications.error('Этот элемент защищён от удаления');
+            }
+            return false;
+        }
+
+        return this._deleteNodeUnchecked(node, nodeId);
+    },
+
+    /**
+     * Внутреннее удаление узла без проверки protected/deletable.
+     * Используется для каскадного удаления потомков: дети защищённых узлов
+     * (например, metrics-таблица у 5.X) удаляются вместе с родителем
+     * по бизнес-смыслу «родителя нет — детям незачем».
+     * @private
+     * @param {Object} node - Узел для удаления
+     * @param {string} nodeId - ID узла
+     * @returns {boolean} true если удаление успешно
+     */
+    _deleteNodeUnchecked(node, nodeId) {
         const isRiskTable = this._isRiskTable(node);
 
         if (typeof ChangelogTracker !== 'undefined') {
@@ -250,10 +272,9 @@ Object.assign(AppState, {
      * @returns {boolean} true если это таблица риска
      */
     _isRiskTable(node) {
-        if (node.type !== 'table' || !node.tableId) return false;
-
-        const table = this.tables[node.tableId];
-        return table && (table.isRegularRiskTable || table.isOperationalRiskTable);
+        if (node.type !== AppConfig.nodeTypes.TABLE) return false;
+        // E-2: pinned-флаги читаем с node.
+        return !!(node.isRegularRiskTable || node.isOperationalRiskTable);
     },
 
     /**
@@ -262,12 +283,13 @@ Object.assign(AppState, {
      * @param {Object} node - Узел для удаления данных
      */
     _deleteNodeData(node) {
-        if (node.type === 'table' && node.tableId) {
+        const {TABLE, TEXTBLOCK, VIOLATION} = AppConfig.nodeTypes;
+        if (node.type === TABLE && node.tableId) {
             delete this.tables[node.tableId];
             delete this.tableUISizes?.[node.tableId];
-        } else if (node.type === 'textblock' && node.textBlockId) {
+        } else if (node.type === TEXTBLOCK && node.textBlockId) {
             delete this.textBlocks[node.textBlockId];
-        } else if (node.type === 'violation' && node.violationId) {
+        } else if (node.type === VIOLATION && node.violationId) {
             delete this.violations[node.violationId];
         }
     },
@@ -282,7 +304,9 @@ Object.assign(AppState, {
 
         const childrenToDelete = [...node.children];
         for (const child of childrenToDelete) {
-            this.deleteNode(child.id);
+            // Каскадное удаление: НЕ проверяем protected/deletable у потомков,
+            // иначе protected metrics-таблица заблокирует удаление родителя.
+            this._deleteNodeUnchecked(child, child.id);
         }
     },
 
@@ -307,10 +331,8 @@ Object.assign(AppState, {
      * @returns {Promise<Object>} Результат операции с полями valid, message
      */
     async moveNode(draggedNodeId, targetNodeId, position) {
-        // Блокируем перемещение в режиме только чтения
-        if (AppConfig.readOnlyMode?.isReadOnly) {
-            return ValidationCore.failure(AppConfig.readOnlyMode.messages.cannotModifyTree);
-        }
+        const guard = ValidationCore.requireWrite('cannotModifyTree');
+        if (guard) return guard;
 
         if (draggedNodeId === targetNodeId) {
             return ValidationCore.failure(AppConfig.tree.validation.cannotMoveToSelf);
@@ -357,7 +379,7 @@ Object.assign(AppState, {
 
         // Запоминаем, был ли новый родитель листовым узлом в разделе 5
         const wasNewParentTbLeaf = position === 'child' &&
-            (!draggedNode.type || draggedNode.type === 'item') &&
+            (!draggedNode.type || draggedNode.type === AppConfig.nodeTypes.ITEM) &&
             TreeUtils.isUnderSection5(newParent) &&
             TreeUtils.isTbLeaf(newParent);
 
@@ -454,7 +476,7 @@ Object.assign(AppState, {
      */
     async _checkMetricsTableDeletion(draggedNode, newParent) {
         const hasMetricsTable = draggedNode.children?.some(
-            child => child.type === 'table' && child.isMetricsTable === true
+            child => child.type === AppConfig.nodeTypes.TABLE && child.isMetricsTable === true
         );
 
         if (!hasMetricsTable) return ValidationCore.success();
@@ -483,7 +505,7 @@ Object.assign(AppState, {
      */
     _removeMetricsTable(node) {
         const metricsTableNode = node.children.find(
-            child => child.type === 'table' && child.isMetricsTable === true
+            child => child.type === AppConfig.nodeTypes.TABLE && child.isMetricsTable === true
         );
 
         if (metricsTableNode) {
@@ -505,7 +527,8 @@ Object.assign(AppState, {
      */
     _checkDepthConstraints(draggedNode, targetNode, targetNodeId, position) {
         // Информационные узлы не учитываются в глубине
-        const isInformational = ['table', 'textblock', 'violation'].includes(draggedNode.type);
+        const {TABLE, TEXTBLOCK, VIOLATION} = AppConfig.nodeTypes;
+        const isInformational = [TABLE, TEXTBLOCK, VIOLATION].includes(draggedNode.type);
         if (isInformational) return ValidationCore.success();
 
         const targetDepth = this._calculateTargetDepth(targetNode, targetNodeId, position);
@@ -594,7 +617,7 @@ Object.assign(AppState, {
      * @returns {Object} Результат проверки
      */
     _checkSection5RiskConstraints(draggedNode, newParent) {
-        if (draggedNode.type && draggedNode.type !== 'item') return ValidationCore.success();
+        if (draggedNode.type && draggedNode.type !== AppConfig.nodeTypes.ITEM) return ValidationCore.success();
 
         const node5 = this.findNodeById('5');
         if (!node5?.children) return ValidationCore.success();
@@ -616,7 +639,7 @@ Object.assign(AppState, {
         // 1. Оставшиеся узлы — определяем уровень рисков, исключая перемещаемое поддерево
         const checkRemaining = (node) => {
             if (draggedIds.has(node.id)) return;
-            if ((!node.type || node.type === 'item') && node.number?.match(/^5\.\d+/)) {
+            if ((!node.type || node.type === AppConfig.nodeTypes.ITEM) && node.number?.match(/^5\.\d+/)) {
                 if (node.children?.some(c => !draggedIds.has(c.id) && this._isRiskTable(c))) {
                     if (getDepth(node) === 1) hasPointLevel = true;
                     else hasSubpointLevel = true;
@@ -637,7 +660,7 @@ Object.assign(AppState, {
                 else hasSubpointLevel = true;
             }
             node.children?.forEach(child => {
-                if (!child.type || child.type === 'item') {
+                if (!child.type || child.type === AppConfig.nodeTypes.ITEM) {
                     checkDragged(child, depth + 1);
                 }
             });
@@ -722,13 +745,14 @@ Object.assign(AppState, {
         // Сводная таблица на 5.X нужна только при наличии рисков на глубоком уровне (5.X.X+)
         if (!node.number?.match(/^5\.\d+$/)) return;
 
+        const {TABLE, ITEM} = AppConfig.nodeTypes;
         const hasDeepRisks = (node.children || []).some(child =>
-            child.type === 'item' && this._findRiskTablesInSubtree(child).length > 0
+            child.type === ITEM && this._findRiskTablesInSubtree(child).length > 0
         );
         if (!hasDeepRisks) return;
 
         const hasTable = node.children?.some(
-            child => child.type === 'table' && child.isMetricsTable === true
+            child => child.type === TABLE && child.isMetricsTable === true
         );
 
         if (!hasTable) {
@@ -799,7 +823,7 @@ Object.assign(AppState, {
         // Создание сводной для нового предка 5.X, только если риски на глубоком уровне (5.X.X+)
         if (newAncestor5x) {
             const hasDeepRisks = (newAncestor5x.children || []).some(child =>
-                child.type === 'item' && this._findRiskTablesInSubtree(child).length > 0
+                child.type === AppConfig.nodeTypes.ITEM && this._findRiskTablesInSubtree(child).length > 0
             );
             if (hasDeepRisks) {
                 this._handleMetricsTableForNode(newAncestor5x);
@@ -816,6 +840,42 @@ Object.assign(AppState, {
         }
 
         this.generateNumbering();
+    },
+
+    /**
+     * Единая точка записи ТБ-флагов узла. Обновляет node.tb, пишет в changelog
+     * и эмитит событие 'node:tb-changed' через ChatEventBus (если доступен) —
+     * подписчики (TreeRenderer, ItemsRenderer) обновляют свои представления.
+     *
+     * Заменяет прямые мутации node.tb в tree-renderer и items-renderer.
+     * @param {string} nodeId - ID узла
+     * @param {string} abbr - Аббревиатура территориального банка
+     * @param {boolean} checked - Назначить (true) или снять (false)
+     */
+    setNodeTb(nodeId, abbr, checked) {
+        const node = this.findNodeById(nodeId);
+        if (!node) return;
+
+        if (!node.tb) node.tb = [];
+
+        if (checked) {
+            if (!node.tb.includes(abbr)) node.tb.push(abbr);
+        } else {
+            node.tb = node.tb.filter(t => t !== abbr);
+        }
+
+        if (typeof ChangelogTracker !== 'undefined') {
+            ChangelogTracker.record('tb_change', nodeId, node.label, {abbr, checked});
+        }
+
+        if (typeof StorageManager !== 'undefined' && StorageManager.markAsUnsaved) {
+            StorageManager.markAsUnsaved();
+        }
+
+        // Уведомляем подписчиков (TreeRenderer/ItemsRenderer) о per-node изменении.
+        // ChatEventBus задействован как ad-hoc общий event-bus; optional chaining
+        // защищает от случая, когда chat-модуль ещё не загружен.
+        window.ChatEventBus?.emit?.('node:tb-changed', {nodeId, abbr, checked});
     },
 
     /**
