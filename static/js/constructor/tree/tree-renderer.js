@@ -516,7 +516,7 @@ class TreeRenderer {
             checkbox.addEventListener('change', () => {
                 this._onTbCheckboxChange(node, bank.abbr, checkbox.checked);
                 // Обновляем бейдж в дереве
-                this._updateTbBadgeInTree(node);
+                this.updateTbBadge(node);
                 // Обновляем селектор на шаге 2 если виден
                 this._syncTbToStep2(node);
             });
@@ -592,11 +592,12 @@ class TreeRenderer {
     }
 
     /**
-     * Обновляет бейдж ТБ в дереве для узла и его родителей
-     * @private
+     * Обновляет бейдж ТБ в дереве для узла и его родителей.
+     * Публичный API: вызывается ItemsRenderer'ом из обработчика TB-чекбокса
+     * шага 2 вместо полного `treeManager.render()` — точечный апдейт DOM.
      * @param {Object} node - Узел дерева
      */
-    _updateTbBadgeInTree(node) {
+    updateTbBadge(node) {
         // Обновляем бейдж текущего узла
         const li = this.manager.container.querySelector(`[data-node-id="${node.id}"]`);
         if (li) {

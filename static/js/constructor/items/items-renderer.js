@@ -481,8 +481,12 @@ class ItemsRenderer {
                 this._updateTbBadgeInItems(badge, node);
                 // Обновляем бейджи родителей в items
                 this._updateParentTbInItems(node);
-                // Перерисовываем дерево
-                treeManager.render();
+                // Точечный апдейт бейджей в дереве (без полного renderAll).
+                // Симметрично пути из tree-renderer.js (TB-чекбокс там) — обе зоны
+                // обновляются через TreeRenderer.updateTbBadge.
+                if (typeof treeManager !== 'undefined' && treeManager?.renderer?.updateTbBadge) {
+                    treeManager.renderer.updateTbBadge(node);
+                }
             });
 
             const nameSpan = document.createElement('span');
