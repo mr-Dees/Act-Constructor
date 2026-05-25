@@ -93,132 +93,6 @@ class StorageManager {
     }
 
     /**
-     * Восстанавливает сохраненное состояние из localStorage
-     * Публичный метод, вызываемый явно из ActsMenuManager
-     * @returns {boolean} true если восстановление успешно
-     */
-    static restoreSavedState() {
-        const savedState = this._loadState();
-
-        if (!savedState) {
-            console.log('Нет сохраненного состояния для восстановления');
-            return false;
-        }
-
-        try {
-            // Отключаем отслеживание на время восстановления
-            this._trackingDisabled = true;
-
-            // Восстанавливаем данные в AppState
-            AppState.treeData = savedState.tree;
-            AppState.tables = savedState.tables || {};
-            AppState.textBlocks = savedState.textBlocks || {};
-            AppState.violations = savedState.violations || {};
-            AppState.tableUISizes = savedState.tableUISizes || {};
-
-            // Восстанавливаем текущий шаг БЕЗ вызова App.goToStep
-            const savedStep = savedState.currentStep || 1;
-            AppState.currentStep = savedStep;
-
-            // Восстанавливаем выбранный узел
-            if (savedState.selectedNodeId) {
-                AppState.selectedNode = AppState.findNodeById(savedState.selectedNodeId);
-            } else {
-                AppState.selectedNode = null;
-            }
-
-            // Восстанавливаем форматы сохранения
-            if (savedState.selectedFormats) {
-                setTimeout(() => {
-                    this._restoreSelectedFormats(savedState.selectedFormats);
-                }, 100);
-            }
-
-            // Перегенерируем нумерацию для консистентности
-            AppState.generateNumbering();
-
-            // Обновляем UI шагов в заголовке
-            this._updateStepUI(savedStep);
-
-            console.log('Состояние успешно восстановлено из localStorage');
-
-            // Устанавливаем правильные флаги
-            // После восстановления из localStorage:
-            // - нет несохраненных изменений В ЛОКАЛСТОРАДЖ
-            // - но данные НЕ синхронизированы с БД
-            this._hasUnsavedChanges = false;
-            this._isSyncedWithDB = false;
-
-            // Включаем отслеживание ПОСЛЕ установки флагов
-            this._trackingDisabled = false;
-
-            // Обновляем индикатор ПОСЛЕ включения отслеживания
-            this._updateSaveIndicator();
-
-            return true;
-
-        } catch (error) {
-            this._trackingDisabled = false;
-            console.error('Ошибка восстановления состояния:', error);
-            Notifications.error('Не удалось восстановить сохраненное состояние');
-            this._clearStorage();
-            return false;
-        }
-    }
-
-    /**
-     * Загружает состояние из localStorage
-     * @private
-     * @returns {Object|null} Сохраненное состояние или null
-     */
-    static _loadState() {
-        try {
-            const stateJson = localStorage.getItem(AppConfig.localStorage.stateKey);
-
-            if (!stateJson) return null;
-
-            return JSON.parse(stateJson);
-        } catch (error) {
-            console.error('Ошибка чтения из localStorage:', error);
-            return null;
-        }
-    }
-
-    /**
-     * Обновляет UI индикаторов шагов в заголовке
-     * @private
-     * @param {number} stepNum - Номер активного шага
-     */
-    static _updateStepUI(stepNum) {
-        // Обновляем классы активности для индикаторов шагов
-        document.querySelectorAll('.step').forEach(step => {
-            const isActive = parseInt(step.dataset.step) === stepNum;
-            step.classList.toggle('active', isActive);
-            step.setAttribute('aria-selected', isActive.toString());
-        });
-
-        // Показываем/скрываем контент шагов
-        document.querySelectorAll('.step-content').forEach(content => {
-            content.classList.add('hidden');
-        });
-
-        const currentContent = document.getElementById(`step${stepNum}`);
-        currentContent?.classList.remove('hidden');
-
-        // Обрабатываем специфичную логику шага 2
-        if (stepNum === 2) {
-            setTimeout(() => {
-                if (typeof textBlockManager !== 'undefined' && textBlockManager.initGlobalToolbar) {
-                    textBlockManager.initGlobalToolbar();
-                }
-                if (typeof ItemsRenderer !== 'undefined' && ItemsRenderer.renderAll) {
-                    ItemsRenderer.renderAll();
-                }
-            }, 100);
-        }
-    }
-
-    /**
      * Настраивает обработчики событий для автосохранения
      * @private
      */
@@ -266,12 +140,43 @@ class StorageManager {
     }
 
     /**
-     * Настраивает перехват попыток навигации
+     * Настраивает перехват попыток навигации.
+     * Покрывает:
+     *  - клик по `<a href>` (внутренние ссылки) — кастомный диалог;
+     *  - back/forward (popstate) — кастомный диалог с восстановлением истории;
+     *  - закрытие вкладки/прямой URL-ввод — браузерный beforeunload (см. _setupEventHandlers).
+     * Программное `window.location.href = ...` всё равно отлавливается beforeunload —
+     * перехватить set'тер location напрямую браузер не даёт.
      * @private
      */
     static _setupNavigationInterception() {
         // Флаг разрешения навигации (для программных переходов)
         window._allowNavigation = false;
+
+        // popstate-страж: при back/forward с unsynced правками показываем
+        // кастомный confirm. Если юзер подтверждает уход — пускаем; иначе
+        // pushState восстанавливает URL.
+        history.replaceState({_lockNavGuard: true}, '', window.location.href);
+        window.addEventListener('popstate', async (event) => {
+            if (window._allowNavigation) return;
+            if (!this.hasUnsyncedChanges()) return;
+
+            // Возвращаем URL обратно, чтобы юзер физически не ушёл со страницы,
+            // пока думает над диалогом.
+            history.pushState({_lockNavGuard: true}, '', window.location.href);
+
+            const confirmed = await DialogManager.show({
+                title: 'Несохраненные изменения',
+                message: 'У вас есть несохранённые изменения. Вернуться к предыдущей странице без сохранения?',
+                icon: '⚠️',
+                confirmText: 'Уйти без сохранения',
+                cancelText: 'Остаться'
+            });
+            if (confirmed) {
+                window._allowNavigation = true;
+                history.back();
+            }
+        });
 
         // Перехватываем клики по ссылкам
         document.addEventListener('click', async (e) => {
@@ -479,26 +384,6 @@ class StorageManager {
         });
 
         return selectedFormats;
-    }
-
-    /**
-     * Восстанавливает выбранные форматы в UI
-     * @private
-     * @param {string[]} formats - Массив форматов для восстановления
-     */
-    static _restoreSelectedFormats(formats) {
-        if (!formats || !Array.isArray(formats)) return;
-
-        const formatCheckboxes = document.querySelectorAll('.format-option input[type="checkbox"]');
-
-        formatCheckboxes.forEach(checkbox => {
-            checkbox.checked = formats.includes(checkbox.value);
-        });
-
-        // Обновляем индикатор количества форматов на кнопке
-        if (typeof FormatMenuManager !== 'undefined' && FormatMenuManager.updateIndicator) {
-            FormatMenuManager.updateIndicator();
-        }
     }
 
     /**

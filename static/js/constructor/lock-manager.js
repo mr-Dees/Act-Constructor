@@ -216,8 +216,19 @@ class LockManager {
     }
 
     /**
-     * Продлевает блокировку по API
+     * Максимум подряд-неудач extend перед инициацией выхода.
+     * Транзиентная сетевая ошибка (DNS, proxy reset) не должна сразу выкидывать
+     * пользователя — retry на следующем тике auto-extension даёт шанс восстановиться.
+     */
+    static _MAX_EXTEND_FAILURES = 3;
+
+    /**
+     * Продлевает блокировку по API.
      * @private
+     * @returns {Promise<{ok: boolean, fatal: boolean}>}
+     *   - ok=true            — продление прошло
+     *   - ok=false fatal=true — сервер явно отверг (4xx: lock потерян, юзер сменился)
+     *   - ok=false fatal=false — транзиентная ошибка (5xx, network) — стоит retry
      */
     static async _extendLock() {
         const username = AuthManager.getCurrentUser();
@@ -229,29 +240,50 @@ class LockManager {
                     'X-JupyterHub-User': username
                 }
             });
-            if (!response.ok) throw new Error('Не удалось продлить блокировку');
+            if (!response.ok) {
+                // 4xx — серверное отвержение (403/404/409 = блокировка чужая/снята). Fatal.
+                // 5xx — серверная ошибка, разумно retry.
+                const fatal = response.status >= 400 && response.status < 500;
+                console.error(
+                    `Продление блокировки HTTP ${response.status}`
+                    + (fatal ? ' (fatal — lock потерян)' : ' (транзиентная)')
+                );
+                return { ok: false, fatal };
+            }
             const data = await response.json();
             console.log('Блокировка продлена до', data.locked_until);
-            return true;
+            return { ok: true, fatal: false };
         } catch (error) {
-            console.error('Ошибка продления блокировки:', error);
-            return false;
+            // Сетевая ошибка (fetch reject) — почти всегда транзиентная.
+            console.error('Сетевая ошибка продления блокировки:', error);
+            return { ok: false, fatal: false };
         }
     }
 
     /**
-     * Безопасное продление с обработкой ошибок
+     * Безопасное продление с подсчётом подряд-неудач.
      * @private
+     * @returns {Promise<{ok: boolean, shouldExit: boolean}>}
      */
     static async _extendLockSafely() {
-        try {
-            const ok = await this._extendLock();
-            if (ok) this._lastExtensionAt = Date.now();
-            return ok;
-        } catch (e) {
-            console.error('Ошибка автопродления блокировки:', e);
-            return false;
+        const result = await this._extendLock();
+        if (result.ok) {
+            this._lastExtensionAt = Date.now();
+            this._extendConsecutiveFailures = 0;
+            return { ok: true, shouldExit: false };
         }
+        // Fatal — выходим сразу. Transient — копим до MAX_EXTEND_FAILURES.
+        if (result.fatal) {
+            return { ok: false, shouldExit: true };
+        }
+        this._extendConsecutiveFailures = (this._extendConsecutiveFailures || 0) + 1;
+        const shouldExit = this._extendConsecutiveFailures >= LockManager._MAX_EXTEND_FAILURES;
+        console.warn(
+            `Транзиентная ошибка продления: попытка ${this._extendConsecutiveFailures}`
+            + `/${LockManager._MAX_EXTEND_FAILURES}`
+            + (shouldExit ? ' — лимит исчерпан, выходим' : ' — retry на следующем тике')
+        );
+        return { ok: false, shouldExit };
     }
 
     /**
@@ -298,8 +330,8 @@ class LockManager {
                 sinceExtension >= this._config.minExtensionIntervalMinutes
             ) {
                 console.log('Пользователь активен → продлеваем блокировку');
-                const ok = await this._extendLockSafely();
-                if (!ok) {
+                const result = await this._extendLockSafely();
+                if (result.shouldExit) {
                     console.error('Автопродление не удалось → выход');
                     this._initiateExit('extensionFailed');
                 }
@@ -417,8 +449,11 @@ class LockManager {
         }
 
         if (stay) {
-            const extended = await this._extendLockSafely();
-            if (extended) {
+            // В диалоге «остаться?» юзер явно нажал «Да» — это интерактивная точка,
+            // здесь retry-стратегия неуместна (юзер ждёт мгновенный ответ).
+            // shouldExit учитывает оба варианта: fatal-4xx или исчерпан лимит retry.
+            const result = await this._extendLockSafely();
+            if (result.ok) {
                 this._lastActivity = Date.now();
                 if (Notifications) Notifications.success(cfg.messages.sessionExtended);
                 this._startInactivityCheck();
