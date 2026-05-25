@@ -106,7 +106,7 @@
 {% endblock %}
 
 {% block extra_js %}
-<script src="{{ url_for('static', path='js/portal/landing/landing-page.js') }}"></script>
+<script defer src="{{ url_for('static', path='js/portal/landing/landing-page.js') | versioned }}"></script>
 {% endblock %}
 
 {% block init_script %}
