@@ -50,15 +50,14 @@ test.describe('Acts list cross-tab sync @smoke', () => {
 
   test('удаление акта в одной вкладке обновляет список в другой ≤ 500ms',
     async ({ browser }) => {
-      test.fail(true,
-        'H-N3-ACTS: нет cross-tab инвалидации списка актов после DELETE. ' +
-        'Закрывается агентом acts-cross-tab-sync.');
-
-      const ctxA = await browser.newContext();
-      const ctxB = await browser.newContext();
+      // Реальный сценарий: один пользователь открыл две вкладки одного браузера
+      // — поэтому single context с двумя page'ами. Разные BrowserContext'ы
+      // в Playwright изолированы как incognito-профили, BroadcastChannel
+      // между ними не работает by design (см. HTML spec, agent cluster).
+      const ctx = await browser.newContext();
       try {
-        const pageA = await ctxA.newPage();
-        const pageB = await ctxB.newPage();
+        const pageA = await ctx.newPage();
+        const pageB = await ctx.newPage();
 
         await Promise.all([pageA.goto('/acts'), pageB.goto('/acts')]);
 
@@ -69,30 +68,30 @@ test.describe('Acts list cross-tab sync @smoke', () => {
         await expect(pageA.locator(cardSelector)).toBeVisible({ timeout: 10000 });
         await expect(pageB.locator(cardSelector)).toBeVisible({ timeout: 10000 });
 
-        // Real-flow: click кнопки [data-action="delete"] на карточке в ctxA.
+        // Real-flow: click кнопки [data-action="delete"] на карточке в pageA.
         await pageA.locator(`${cardSelector} [data-action="delete"]`).click();
 
         // Появляется DialogManager confirm-диалог. Жмём «Удалить»
         // — это запустит safeClick → deleteAct() → DELETE /api/v1/acts/999003
-        // → loadActs() (только в ctxA).
+        // → ActsBroadcast.notify('act:deleted') → loadActs() (только в pageA).
         const confirmBtn = pageA.locator('.btn.btn-primary.dialog-confirm');
         await expect(confirmBtn).toBeVisible({ timeout: 3000 });
         await confirmBtn.click();
 
-        // Дождаться что в ctxA карточка действительно ушла из DOM
+        // Дождаться что в pageA карточка действительно ушла из DOM
         // (валидация что real-flow доделал работу до конца).
         await expect(pageA.locator(cardSelector)).toHaveCount(0, {
           timeout: 5000,
         });
 
-        // В ctxB ожидаем что карточка исчезнет ≤ 500ms. Без cross-tab
-        // sync — карточка остаётся → expect валится → test.fail() = pass.
+        // В pageB ожидаем что карточка исчезнет ≤ 500ms через BroadcastChannel.
+        // Подписчик в init() ActsManagerPage слышит 'act:deleted' и вызывает
+        // loadActs() — карточка пропадает из DOM.
         await expect(pageB.locator(cardSelector)).toHaveCount(0, {
           timeout: 500,
         });
       } finally {
-        await ctxA.close();
-        await ctxB.close();
+        await ctx.close();
       }
     });
 });
