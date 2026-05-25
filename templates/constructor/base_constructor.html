@@ -20,10 +20,15 @@
     <!-- Основной контент страницы -->
     {% block content %}{% endblock %}
 
-    <!-- Конфигурация приложения -->
+    <!-- Скрипты конструктора грузятся синхронно (без defer): inline IIFE ниже
+         async-вызывает AuthManager.requireAuth(), а ActsMenuManager.init (внизу
+         body) сразу делает API-запросы, требующие записанного username в
+         localStorage. С defer body парсится за миллисекунды — fetch /auth/me
+         не успевает закрыться до DOMContentLoaded, и initial load конструктора
+         падает с "Пользователь не авторизован". Sync-загрузка ~70 файлов даёт
+         достаточный buffer (исторически работает). Defer применён только в
+         portal-шаблонах, где init_script сам await'ит requireAuth() до page.init(). -->
     <script src="{{ url_for('static', path='js/shared/app-config.js') }}"></script>
-
-    <!-- Авторизация (должна загружаться первой) -->
     <script src="{{ url_for('static', path='js/shared/auth.js') }}"></script>
     <script src="{{ url_for('static', path='js/constructor/header/header-exit.js') }}"></script>
 
