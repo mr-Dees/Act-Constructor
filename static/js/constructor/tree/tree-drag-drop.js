@@ -97,6 +97,10 @@ class TreeDragDrop {
         this.draggedNode = node;
         this.draggedElement = treeItem;
 
+        // E-5: маркер активного drag'а — глобальный, чтобы periodic save / drop-handler могли
+        // среагировать. НЕ входит в trackedProperties (state-core.js), markAsUnsaved не дёргается.
+        AppState._dragInProgress = true;
+
         treeItem.classList.add('dragging');
         e.dataTransfer.effectAllowed = 'move';
         e.dataTransfer.setData('text/plain', nodeId);
@@ -151,7 +155,8 @@ class TreeDragDrop {
      * @param {DragEvent} e - Событие dragover
      */
     handleDragOver(e) {
-        if (!this.draggedNode) return;
+        // E-5: если drag в процессе обработки drop'а — больше не реагируем на dragover.
+        if (!this.draggedNode || !AppState._dragInProgress) return;
 
         e.preventDefault();
         e.stopPropagation();
@@ -304,10 +309,27 @@ class TreeDragDrop {
         e.preventDefault();
         e.stopPropagation();
 
+        // E-5: защита от двойного drop. Если другой drop уже начал обработку
+        // (между preventDefault и cleanup) — игнорируем второй.
+        // Также: если drop пришёл, когда _dragInProgress уже сброшен (race с cleanup) — игнорируем.
+        if (this._dropInProgress || !AppState._dragInProgress) {
+            return;
+        }
+        this._dropInProgress = true;
+
         if (!this.draggedNode || !this.dropTargetNode || !this.dropPosition) {
             this.cleanup();
             return;
         }
+
+        // Захватываем oldParent ДО move; newParent вычисляется из target+position
+        // (target сам становится новым родителем для 'child', иначе — родитель target'а).
+        const oldParent = AppState.findParentNode(this.draggedNode.id);
+        const oldParentId = oldParent ? oldParent.id : null;
+
+        const newParentId = this.dropPosition === 'child'
+            ? this.dropTargetNode.id
+            : (AppState.findParentNode(this.dropTargetNode.id)?.id ?? null);
 
         const result = await AppState.moveNode(
             this.draggedNode.id,
@@ -320,7 +342,16 @@ class TreeDragDrop {
             PreviewManager.update('previewTrim', 30);
 
             if (AppState.currentStep === 2) {
-                ItemsRenderer.renderAll();
+                // Пересобираем оба поддерева: старый родитель и новый.
+                // Если они совпадают — достаточно одного updateItem.
+                if (oldParentId && newParentId && oldParentId === newParentId) {
+                    ItemsRenderer.updateItem(oldParentId);
+                } else {
+                    if (oldParentId) ItemsRenderer.updateItem(oldParentId);
+                    if (newParentId && newParentId !== oldParentId) ItemsRenderer.updateItem(newParentId);
+                    // Если хотя бы один parent — root, или мы не смогли его определить, fallback на renderAll.
+                    if (!oldParentId || !newParentId) ItemsRenderer.renderAll();
+                }
             }
 
             Notifications.success('Элемент успешно перемещен');
@@ -353,5 +384,9 @@ class TreeDragDrop {
 
         this.draggedNode = null;
         this.draggedElement = null;
+
+        // E-5: сбрасываем флаги после полного завершения drag-цикла
+        this._dropInProgress = false;
+        AppState._dragInProgress = false;
     }
 }
