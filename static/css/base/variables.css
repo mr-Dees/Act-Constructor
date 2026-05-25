@@ -692,6 +692,10 @@
     --transition-all: all 200ms ease;
     --transition-ripple: 600ms ease-out;
 
+    /* Алиасы длительностей (используются как `transition: prop var(--duration-*) ease`) */
+    --duration-fast: 150ms;
+    --duration-normal: 300ms;
+
     /* Timing functions для более сложных анимаций */
     --ease-in-out-smooth: cubic-bezier(0.4, 0, 0.2, 1);
     --ease-out-back: cubic-bezier(0.34, 1.56, 0.64, 1);
