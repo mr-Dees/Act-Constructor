@@ -595,6 +595,34 @@ class StorageManager {
     }
 
     /**
+     * Универсальное подтверждение программной навигации.
+     * Если несохранённых в БД изменений нет — возвращает true сразу.
+     * Иначе показывает diaglog; при подтверждении и наличии opts.url
+     * выставляет _allowNavigation и выполняет редирект.
+     *
+     * @param {string} [targetUrl] - URL для редиректа (информационно, фактический переход через opts.url)
+     * @param {{url?: string}} [opts]
+     * @returns {Promise<boolean>}
+     */
+    static async confirmNavigation(targetUrl, opts = {}) {
+        if (!this.hasUnsyncedChanges()) return true;
+        const ok = await DialogManager.show({
+            type: 'confirm',
+            title: 'Несохраненные изменения',
+            message: 'У вас есть несохранённые изменения. Уйти со страницы?',
+            icon: '⚠️',
+            confirmText: 'Уйти',
+            cancelText: 'Остаться'
+        });
+        if (ok && opts.url) {
+            window._allowNavigation = true;
+            this.allowUnload();
+            window.location.href = opts.url;
+        }
+        return ok;
+    }
+
+    /**
      * Очищает все таймеры при уничтожении
      */
     static destroy() {

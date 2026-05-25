@@ -176,11 +176,12 @@ class LockManager {
             });
 
             // Разрешаем навигацию без предупреждения браузера
-            if (typeof StorageManager !== 'undefined' && typeof StorageManager.allowUnload === 'function') {
-                StorageManager.allowUnload();
+            const acts409Url = AppConfig.api.getUrl('/acts');
+            if (typeof StorageManager !== 'undefined' && typeof StorageManager.confirmNavigation === 'function') {
+                await StorageManager.confirmNavigation(acts409Url, { url: acts409Url });
+            } else {
+                window.location.href = acts409Url;
             }
-
-            window.location.href = AppConfig.api.getUrl('/acts');
             throw new Error('ACT_LOCKED');
         }
 
@@ -196,11 +197,12 @@ class LockManager {
                 allowOverlayClose: false
             });
 
-            if (typeof StorageManager !== 'undefined' && typeof StorageManager.allowUnload === 'function') {
-                StorageManager.allowUnload();
+            const acts500Url = AppConfig.api.getUrl('/acts');
+            if (typeof StorageManager !== 'undefined' && typeof StorageManager.confirmNavigation === 'function') {
+                await StorageManager.confirmNavigation(acts500Url, { url: acts500Url });
+            } else {
+                window.location.href = acts500Url;
             }
-
-            window.location.href = AppConfig.api.getUrl('/acts');
             throw new Error('LOCK_FAILED');
         }
 
@@ -577,7 +579,14 @@ class LockManager {
             const closedId = this._actId;
             this._actId = null;
             console.log(`LockManager: завершение выхода для акта ${closedId}`);
-            setTimeout(() => window.location.href = AppConfig.api.getUrl('/acts'), 300);
+            const exitUrl = AppConfig.api.getUrl('/acts');
+            setTimeout(() => {
+                if (typeof StorageManager !== 'undefined' && typeof StorageManager.confirmNavigation === 'function') {
+                    StorageManager.confirmNavigation(exitUrl, { url: exitUrl });
+                } else {
+                    window.location.href = exitUrl;
+                }
+            }, 300);
         }
     }
 }

@@ -32,7 +32,12 @@ class HeaderExit {
     static async _handleExit() {
         // Read-only пользователи просто выходят без вопросов о сохранении
         if (AppConfig.readOnlyMode?.isReadOnly) {
-            window.location.href = AppConfig.api.getUrl('/acts');
+            const url = AppConfig.api.getUrl('/acts');
+            if (typeof StorageManager !== 'undefined' && typeof StorageManager.confirmNavigation === 'function') {
+                await StorageManager.confirmNavigation(url, { url });
+            } else {
+                window.location.href = url;
+            }
             return;
         }
 
@@ -124,7 +129,12 @@ class HeaderExit {
             // Read-only пользователи не сохраняют и не разблокируют
             if (AppConfig.readOnlyMode?.isReadOnly) {
                 console.log('HeaderExit: read-only режим, пропускаем сохранение и unlock');
-                window.location.href = AppConfig.api.getUrl('/acts');
+                const url = AppConfig.api.getUrl('/acts');
+                if (typeof StorageManager !== 'undefined' && typeof StorageManager.confirmNavigation === 'function') {
+                    await StorageManager.confirmNavigation(url, { url });
+                } else {
+                    window.location.href = url;
+                }
                 return;
             }
 
@@ -144,7 +154,12 @@ class HeaderExit {
             }
 
             // Переходим на главную
-            window.location.href = AppConfig.api.getUrl('/acts');
+            const url = AppConfig.api.getUrl('/acts');
+            if (typeof StorageManager !== 'undefined' && typeof StorageManager.confirmNavigation === 'function') {
+                await StorageManager.confirmNavigation(url, { url });
+            } else {
+                window.location.href = url;
+            }
 
         } catch (error) {
             console.error('Ошибка при выходе:', error);

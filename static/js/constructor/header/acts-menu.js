@@ -530,7 +530,14 @@ class ActsMenuManager {
     }
 
     static _redirectToActsManager() {
-        setTimeout(() => (window.location.href = AppConfig.api.getUrl('/acts')), 1500);
+        const url = AppConfig.api.getUrl('/acts');
+        setTimeout(() => {
+            if (typeof StorageManager !== 'undefined' && typeof StorageManager.confirmNavigation === 'function') {
+                StorageManager.confirmNavigation(url, { url });
+            } else {
+                window.location.href = url;
+            }
+        }, 1500);
     }
 
     static async _autoLoadAct(actId) {
