@@ -7,7 +7,7 @@ from pydantic import BaseModel, ConfigDict, Field, field_validator, model_valida
 
 class AuditTeamMember(BaseModel):
     """Член аудиторской группы"""
-    role: Literal["Куратор", "Руководитель", "Редактор", "Участник"]
+    role: Literal["Куратор", "Руководитель", "Редактор", "Участник", "AppendixRef"]
     full_name: str = Field(min_length=1, max_length=255)
     position: str = Field(min_length=1, max_length=255)
     username: str = Field(min_length=1, max_length=255)
