@@ -92,7 +92,7 @@ CREATE TABLE IF NOT EXISTS {SCHEMA}.{PREFIX}audit_team_members (
     id BIGSERIAL PRIMARY KEY,
     act_id INTEGER NOT NULL REFERENCES {SCHEMA}.{PREFIX}acts(id) ON DELETE CASCADE,
     audit_act_id VARCHAR(36),
-    role VARCHAR(50) NOT NULL CONSTRAINT check_audit_team_role_values CHECK (role IN ('Куратор', 'Руководитель', 'Редактор', 'Участник')),
+    role VARCHAR(50) NOT NULL CONSTRAINT check_audit_team_role_values CHECK (role IN ('Куратор', 'Руководитель', 'Редактор', 'Участник', 'AppendixRef')),
     full_name VARCHAR(255) NOT NULL,
     position VARCHAR(255) NOT NULL,
     username VARCHAR(50) NOT NULL,
