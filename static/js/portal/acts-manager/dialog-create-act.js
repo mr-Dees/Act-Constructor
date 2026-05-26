@@ -753,7 +753,6 @@ class CreateActDialog extends DialogBase {
         rowElement._teamMemberSearch = search;
 
         // Listener на смену роли — обработка выбора AppendixRef
-        const roleSelect = rowElement.querySelector('[name="role"]');
         if (roleSelect) {
             roleSelect.addEventListener('change', async (e) => {
                 if (e.target.value !== 'AppendixRef') {
