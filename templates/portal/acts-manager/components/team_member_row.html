@@ -1,11 +1,12 @@
 <template id="teamMemberRowTemplate">
     <div class="team-member-row">
         <select name="role" required class="team-member-role">
+            <option value="" disabled selected hidden>Выберите роль</option>
             <option value="Руководитель">Руководитель</option>
             <option value="Куратор">Куратор</option>
             <option value="Редактор">Редактор</option>
             <option value="Участник">Участник</option>
-            <option value="AppendixRef">Участники в соответствии с приложением</option>
+            <option value="AppendixRef">Участники</option>
         </select>
         <div class="team-member-name-wrapper">
             <input type="text" name="full_name" placeholder="ФИО *" required class="team-member-name" data-field="full_name" autocomplete="off">

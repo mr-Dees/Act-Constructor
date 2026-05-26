@@ -718,7 +718,7 @@ class CreateActDialog extends DialogBase {
      * Добавляет члена аудиторской группы
      * @private
      */
-    static _addTeamMember(dialog, role = 'Участник', fullName = '', position = '', username = '') {
+    static _addTeamMember(dialog, role = '', fullName = '', position = '', username = '') {
         const container = dialog.querySelector('#auditTeamContainer');
         if (!container) return null;
 
@@ -752,35 +752,36 @@ class CreateActDialog extends DialogBase {
         // Сохраняем ссылку на search для последующего destroy при трансформации в AppendixRef
         rowElement._teamMemberSearch = search;
 
-        // Listener на смену роли — обработка выбора AppendixRef
+        // Listener на смену роли — переход в/из AppendixRef-режима
         if (roleSelect) {
             roleSelect.addEventListener('change', async (e) => {
-                if (e.target.value !== 'AppendixRef') {
-                    this._updateRoleSelectAvailability(dialog);
-                    return;
-                }
+                const newRole = e.target.value;
+                const isAppendix = newRole === 'AppendixRef';
+                const wasAppendix = rowElement.classList.contains('team-member-row--appendix-ref');
 
-                // Подтверждение замены обычных участников
-                const regulars = this._getRegularParticipantRows(dialog).filter(r => r !== rowElement);
-                if (regulars.length > 0) {
-                    const confirmed = await DialogManager.show({
-                        title: 'Замена обычных участников',
-                        message: 'Все обычные сотрудники будут удалены из списка. Нажмите OK для удаления или Отмена для смены их роли вручную.',
-                        icon: '⚠️',
-                        confirmText: 'OK',
-                        cancelText: 'Отмена',
-                        type: 'warning'
-                    });
-                    if (!confirmed) {
-                        // rollback на дефолтную роль
-                        e.target.value = 'Участник';
-                        this._updateRoleSelectAvailability(dialog);
-                        return;
+                if (isAppendix && !wasAppendix) {
+                    const regulars = this._getRegularParticipantRows(dialog).filter(r => r !== rowElement);
+                    if (regulars.length > 0) {
+                        const confirmed = await DialogManager.show({
+                            title: 'Замена обычных участников',
+                            message: 'Все обычные сотрудники будут удалены из списка. Нажмите OK для удаления или Отмена для смены их роли вручную.',
+                            icon: '⚠️',
+                            confirmText: 'OK',
+                            cancelText: 'Отмена',
+                            type: 'warning'
+                        });
+                        if (!confirmed) {
+                            e.target.value = '';
+                            this._updateRoleSelectAvailability(dialog);
+                            return;
+                        }
+                        this._removeRegularParticipants(dialog);
                     }
-                    this._removeRegularParticipants(dialog);
+                    this._transformRowToAppendixRef(rowElement, { x: '', dialog });
+                } else if (!isAppendix && wasAppendix) {
+                    this._transformRowToRegular(rowElement, dialog);
                 }
 
-                this._transformRowToAppendixRef(rowElement, { x: '', dialog });
                 this._updateRoleSelectAvailability(dialog);
             });
         }
@@ -863,28 +864,15 @@ class CreateActDialog extends DialogBase {
             row._teamMemberSearch = null;
         }
 
-        // Удаляем поля и clear-кнопку
+        // Удаляем поля и clear-кнопку — role-select остаётся видимым,
+        // чтобы пользователь мог перевыбрать роль обратно.
         row.querySelector('.team-member-name-wrapper')?.remove();
         row.querySelector('input[name="position"]')?.remove();
         row.querySelector('input[name="username"]')?.remove();
         row.querySelector('.clear-member-btn')?.remove();
 
-        // Скрываем role-select и фиксируем value
         const roleSelect = row.querySelector('[name="role"]');
-        if (roleSelect) {
-            roleSelect.value = 'AppendixRef';
-            roleSelect.hidden = true;
-        }
-
-        // Вставляем role-label "Участники" перед скрытым select'ом
-        const roleLabel = document.createElement('span');
-        roleLabel.className = 'team-member-row__role-label';
-        roleLabel.textContent = 'Участники';
-        if (roleSelect) {
-            row.insertBefore(roleLabel, roleSelect);
-        } else {
-            row.insertBefore(roleLabel, row.firstChild);
-        }
+        if (roleSelect) roleSelect.value = 'AppendixRef';
 
         // Inline-блок: "В соответствии с приложением №" [dropdown] "к распоряжению УВА от {date} № {number}"
         const inline = document.createElement('div');
@@ -935,6 +923,80 @@ class CreateActDialog extends DialogBase {
                     row._appendixDropdown.destroy();
                     row._appendixDropdown = null;
                 }
+                row.remove();
+                this._updateRoleSelectAvailability(dialog);
+            };
+        }
+    }
+
+    /**
+     * Обратное превращение AppendixRef-строки в обычную: удаляем inline-блок и dropdown,
+     * восстанавливаем inputs ФИО/Должность/Логин + clear-кнопку, реинициализируем TeamMemberSearch.
+     * role-select остаётся видимым со значением, которое выбрал пользователь.
+     * @private
+     */
+    static _transformRowToRegular(row, dialog) {
+        if (!row || !row.classList.contains('team-member-row--appendix-ref')) return;
+
+        if (row._appendixDropdown && typeof row._appendixDropdown.destroy === 'function') {
+            row._appendixDropdown.destroy();
+            row._appendixDropdown = null;
+        }
+
+        row.querySelector('.team-member-row__appendix-inline')?.remove();
+        // На случай рудиментов старой версии (label-замена select'а):
+        row.querySelector('.team-member-row__role-label')?.remove();
+
+        row.classList.remove('team-member-row--appendix-ref');
+
+        const nameWrapper = document.createElement('div');
+        nameWrapper.className = 'team-member-name-wrapper';
+        const fullNameInput = document.createElement('input');
+        fullNameInput.type = 'text';
+        fullNameInput.name = 'full_name';
+        fullNameInput.placeholder = 'ФИО *';
+        fullNameInput.required = true;
+        fullNameInput.className = 'team-member-name';
+        fullNameInput.dataset.field = 'full_name';
+        fullNameInput.autocomplete = 'off';
+        nameWrapper.appendChild(fullNameInput);
+
+        const positionInput = document.createElement('input');
+        positionInput.type = 'text';
+        positionInput.name = 'position';
+        positionInput.placeholder = 'Должность *';
+        positionInput.required = true;
+        positionInput.className = 'team-member-position';
+        positionInput.dataset.field = 'position';
+
+        const usernameInput = document.createElement('input');
+        usernameInput.type = 'text';
+        usernameInput.name = 'username';
+        usernameInput.placeholder = 'Логин *';
+        usernameInput.required = true;
+        usernameInput.className = 'team-member-username';
+        usernameInput.dataset.field = 'username';
+
+        const clearBtn = document.createElement('button');
+        clearBtn.type = 'button';
+        clearBtn.className = 'btn btn-ghost clear-member-btn';
+        clearBtn.title = 'Сбросить выбор';
+        clearBtn.innerHTML = '<svg width="14" height="14" viewBox="0 0 24 24" fill="none">'
+            + '<path d="M3 12h18M3 12l6-6M3 12l6 6" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>'
+            + '</svg>';
+
+        const deleteBtn = row.querySelector('.delete-member-btn');
+        row.insertBefore(nameWrapper, deleteBtn);
+        row.insertBefore(positionInput, deleteBtn);
+        row.insertBefore(usernameInput, deleteBtn);
+        row.insertBefore(clearBtn, deleteBtn);
+
+        const search = new TeamMemberSearch(row);
+        row._teamMemberSearch = search;
+
+        if (deleteBtn) {
+            deleteBtn.onclick = () => {
+                search.destroy();
                 row.remove();
                 this._updateRoleSelectAvailability(dialog);
             };
@@ -1178,8 +1240,17 @@ class CreateActDialog extends DialogBase {
             return false;
         }
 
-        // Проверяем наличие куратора и руководителя
+        // Проверяем что у каждой строки выбрана роль (placeholder = '')
         const roles = teamMembers.map(row => row.querySelector('[name="role"]').value);
+        if (roles.some(r => !r)) {
+            if (typeof Notifications !== 'undefined') {
+                Notifications.warning('Выберите роль для каждого члена группы или удалите строку');
+            } else {
+                alert('Выберите роль для каждого члена группы или удалите строку');
+            }
+            return false;
+        }
+
         const hasCurator = roles.includes('Куратор');
         const hasLeader = roles.includes('Руководитель');
 
