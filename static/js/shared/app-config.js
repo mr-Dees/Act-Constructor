@@ -542,6 +542,31 @@ class AppConfig {
                 colWidths: [120, 150, 180, 150, 150, 150],
                 rows: 2,
                 label: 'Выявленные отклонения с признаками операционного риска'
+            },
+
+            taxRisk: {
+                headers: {
+                    row1: [
+                        {content: 'Выявлены налоговые риски', colspan: 6, rowspan: 1}
+                    ],
+                    row2: [
+                        {content: 'Код процесса (номер-название)', colspan: 1, rowspan: 1},
+                        {content: 'Клиентский путь (номер-название)', colspan: 1, rowspan: 1},
+                        {content: 'Наименование нормативно-правового акта (НПА), который был нарушен', colspan: 1, rowspan: 1},
+                        {content: 'Статья/пункт НПА', colspan: 1, rowspan: 1},
+                        {content: 'Налоговые последствия', colspan: 1, rowspan: 1},
+                        {content: 'Сумма последствий, руб.', colspan: 1, rowspan: 1}
+                    ]
+                },
+                colWidths: [140, 160, 260, 120, 220, 120],
+                rows: 2,
+                label: 'Выявленные инциденты налогового риска'
+            },
+
+            otherRisk: {
+                // Headers/colWidths наследуются от metrics preset через _createOtherRiskTable
+                // в state-content.js. Здесь только label, чтобы у узла было осмысленное имя.
+                label: 'Прочие риски'
             }
         },
 
