@@ -445,8 +445,6 @@ class CreateActDialog extends DialogBase {
             };
         }
 
-        this._bindAppendixRefHandlers(dialog);
-
         // Настраиваем интерактивные обработчики для полей СЗ
         this._setupServiceNoteInteractiveHandlers(dialog);
     }
@@ -661,14 +659,18 @@ class CreateActDialog extends DialogBase {
                 if (member.role === 'AppendixRef') {
                     const parsed = this._parseAppendixRefText(member.full_name);
                     if (parsed && !appendixApplied) {
-                        this._showAppendixRefRow(dialog, parsed.x);
-                        appendixApplied = true;
+                        const result = this._addTeamMember(dialog, 'AppendixRef', '', '', '');
+                        if (result && result.rowElement) {
+                            this._transformRowToAppendixRef(result.rowElement, { x: parsed.x, dialog });
+                            appendixApplied = true;
+                        }
                     }
                     // role='AppendixRef' с невалидным текстом или второй маркер — игнорируем.
                     continue;
                 }
                 this._addTeamMember(dialog, member.role, member.full_name, member.position, member.username);
             }
+            this._updateRoleSelectAvailability(dialog);
         } else {
             // 3 строки по умолчанию
             this._addTeamMember(dialog, 'Куратор', '', '', '');
@@ -747,14 +749,54 @@ class CreateActDialog extends DialogBase {
             search.setSelected();
         }
 
+        // Сохраняем ссылку на search для последующего destroy при трансформации в AppendixRef
+        rowElement._teamMemberSearch = search;
+
+        // Listener на смену роли — обработка выбора AppendixRef
+        const roleSelect = rowElement.querySelector('[name="role"]');
+        if (roleSelect) {
+            roleSelect.addEventListener('change', async (e) => {
+                if (e.target.value !== 'AppendixRef') {
+                    this._updateRoleSelectAvailability(dialog);
+                    return;
+                }
+
+                // Подтверждение замены обычных участников
+                const regulars = this._getRegularParticipantRows(dialog).filter(r => r !== rowElement);
+                if (regulars.length > 0) {
+                    const confirmed = await DialogManager.show({
+                        title: 'Замена обычных участников',
+                        message: 'Все обычные сотрудники будут удалены из списка. Нажмите OK для удаления или Отмена для смены их роли вручную.',
+                        icon: '⚠️',
+                        confirmText: 'OK',
+                        cancelText: 'Отмена',
+                        type: 'warning'
+                    });
+                    if (!confirmed) {
+                        // rollback на дефолтную роль
+                        e.target.value = 'Участник';
+                        this._updateRoleSelectAvailability(dialog);
+                        return;
+                    }
+                    this._removeRegularParticipants(dialog);
+                }
+
+                this._transformRowToAppendixRef(rowElement, { x: '', dialog });
+                this._updateRoleSelectAvailability(dialog);
+            });
+        }
+
         // Обработчик удаления (с очисткой глобальных listeners)
         const deleteBtn = rowElement.querySelector('.delete-member-btn');
         if (deleteBtn) {
             deleteBtn.onclick = () => {
                 search.destroy();
                 rowElement.remove();
+                this._updateRoleSelectAvailability(dialog);
             };
         }
+
+        this._updateRoleSelectAvailability(dialog);
 
         return { rowElement, search };
     }
@@ -802,93 +844,133 @@ class CreateActDialog extends DialogBase {
         });
     }
 
-    /** Показывает контейнер строки-маркера с указанным значением X. */
-    static _showAppendixRefRow(dialog, x) {
-        const container = dialog.querySelector('#appendixRefContainer');
-        if (container) container.style.display = '';
+    /**
+     * Превращает обычную team-member-row в AppendixRef-строку:
+     *  - удаляет inputs ФИО/position/username и кнопку clear
+     *  - role-select становится hidden (data сохраняется как value=AppendixRef)
+     *  - вставляет role-label "Участники" и inline-блок с dropdown'ом и текстом orderDate/orderNumber
+     *  - инициализирует AppendixNumberDropdown
+     * @private
+     */
+    static _transformRowToAppendixRef(row, { x, dialog }) {
+        if (!row || row.classList.contains('team-member-row--appendix-ref')) return;
 
-        const input = dialog.querySelector('#appendixRefNumberInput');
-        if (input) input.value = (x !== undefined && x !== null && x !== '') ? String(x) : '';
+        row.classList.add('team-member-row--appendix-ref');
 
-        this._refreshAppendixRefPreview(dialog);
-    }
+        // Уничтожаем TeamMemberSearch если был — он держит listeners на name-input,
+        // который мы сейчас удалим из DOM.
+        if (row._teamMemberSearch && typeof row._teamMemberSearch.destroy === 'function') {
+            row._teamMemberSearch.destroy();
+            row._teamMemberSearch = null;
+        }
 
-    /** Скрывает контейнер строки-маркера и очищает поля. */
-    static _hideAppendixRefRow(dialog) {
-        const container = dialog.querySelector('#appendixRefContainer');
-        if (container) container.style.display = 'none';
+        // Удаляем поля и clear-кнопку
+        row.querySelector('.team-member-name-wrapper')?.remove();
+        row.querySelector('input[name="position"]')?.remove();
+        row.querySelector('input[name="username"]')?.remove();
+        row.querySelector('.clear-member-btn')?.remove();
 
-        const input = dialog.querySelector('#appendixRefNumberInput');
-        if (input) input.value = '';
+        // Скрываем role-select и фиксируем value
+        const roleSelect = row.querySelector('[name="role"]');
+        if (roleSelect) {
+            roleSelect.value = 'AppendixRef';
+            roleSelect.hidden = true;
+        }
 
-        const preview = dialog.querySelector('#appendixRefPreview');
-        if (preview) preview.textContent = '';
-    }
+        // Вставляем role-label "Участники" перед скрытым select'ом
+        const roleLabel = document.createElement('span');
+        roleLabel.className = 'team-member-row__role-label';
+        roleLabel.textContent = 'Участники';
+        if (roleSelect) {
+            row.insertBefore(roleLabel, roleSelect);
+        } else {
+            row.insertBefore(roleLabel, row.firstChild);
+        }
 
-    /** Видим ли сейчас контейнер маркера. */
-    static _isAppendixRefVisible(dialog) {
-        const container = dialog.querySelector('#appendixRefContainer');
-        return !!container && container.style.display !== 'none';
-    }
+        // Inline-блок: "В соответствии с приложением №" [dropdown] "к распоряжению УВА от {date} № {number}"
+        const inline = document.createElement('div');
+        inline.className = 'team-member-row__appendix-inline';
+        inline.innerHTML = `
+            <span class="team-member-row__appendix-inline-text">В соответствии с приложением №</span>
+            <div class="team-member-row__appendix-number-host"></div>
+            <span class="team-member-row__appendix-inline-meta" data-role="meta"></span>
+        `;
+        const deleteBtn = row.querySelector('.delete-member-btn');
+        if (deleteBtn) {
+            row.insertBefore(inline, deleteBtn);
+        } else {
+            row.appendChild(inline);
+        }
 
-    /** Перерисовывает текст превью маркера на основе текущих значений из формы. */
-    static _refreshAppendixRefPreview(dialog) {
-        if (!this._isAppendixRefVisible(dialog)) return;
+        // Инициализируем dropdown
+        const host = inline.querySelector('.team-member-row__appendix-number-host');
+        const xNum = Number(x);
+        const initialValue = (Number.isFinite(xNum) && xNum >= 1 && xNum <= 5) ? xNum : 1;
+        const dropdown = new AppendixNumberDropdown(host, {
+            initialValue,
+            onChange: () => this._refreshAppendixInlineMeta(row, dialog)
+        });
+        row._appendixDropdown = dropdown;
 
-        const xInput = dialog.querySelector('#appendixRefNumberInput');
-        const orderDateInput = dialog.querySelector('input[name="order_date"]');
-        const orderNumberInput = dialog.querySelector('input[name="order_number"]');
+        // Обновляем текст "к распоряжению УВА от ..."
+        this._refreshAppendixInlineMeta(row, dialog);
 
-        const x = xInput ? xInput.value.trim() : '';
-        const orderDate = orderDateInput ? orderDateInput.value.trim() : '';
-        const orderNumber = orderNumberInput ? orderNumberInput.value.trim() : '';
+        // Подписываемся на изменения order_date / order_number — один раз на диалог
+        if (!dialog._appendixOrderListenersBound) {
+            const orderDateInput = dialog.querySelector('input[name="order_date"]');
+            const orderNumberInput = dialog.querySelector('input[name="order_number"]');
+            const refreshAll = () => {
+                dialog.querySelectorAll('.team-member-row--appendix-ref').forEach(r =>
+                    this._refreshAppendixInlineMeta(r, dialog)
+                );
+            };
+            orderDateInput?.addEventListener('input', refreshAll);
+            orderNumberInput?.addEventListener('input', refreshAll);
+            dialog._appendixOrderListenersBound = true;
+        }
 
-        const preview = dialog.querySelector('#appendixRefPreview');
-        if (preview) preview.textContent = this._formatAppendixRefText(x, orderDate, orderNumber);
-    }
-
-    /** Привязывает обработчики кнопок и input-событий для appendix-маркера. */
-    static _bindAppendixRefHandlers(dialog) {
-        const addBtn = dialog.querySelector('#addAppendixRefBtn');
-        const removeBtn = dialog.querySelector('#appendixRefContainer .appendix-ref-remove-btn');
-        const numberInput = dialog.querySelector('#appendixRefNumberInput');
-        const orderDateInput = dialog.querySelector('input[name="order_date"]');
-        const orderNumberInput = dialog.querySelector('input[name="order_number"]');
-
-        if (addBtn) {
-            addBtn.addEventListener('click', async () => {
-                if (this._isAppendixRefVisible(dialog)) return;
-
-                const regulars = this._getRegularParticipantRows(dialog);
-                if (regulars.length > 0) {
-                    const confirmed = await DialogManager.show({
-                        title: 'Замена обычных участников',
-                        message: 'Все обычные сотрудники будут удалены из списка. Нажмите OK для удаления или Отмена для смены их роли вручную.',
-                        icon: '⚠️',
-                        confirmText: 'OK',
-                        cancelText: 'Отмена',
-                        type: 'warning'
-                    });
-                    if (!confirmed) return;
-                    this._removeRegularParticipants(dialog);
+        // Кнопка delete должна также вызывать destroy dropdown'а
+        if (deleteBtn) {
+            deleteBtn.onclick = () => {
+                if (row._appendixDropdown && typeof row._appendixDropdown.destroy === 'function') {
+                    row._appendixDropdown.destroy();
+                    row._appendixDropdown = null;
                 }
-                this._showAppendixRefRow(dialog, '');
-            });
+                row.remove();
+                this._updateRoleSelectAvailability(dialog);
+            };
         }
+    }
 
-        if (removeBtn) {
-            removeBtn.addEventListener('click', () => this._hideAppendixRefRow(dialog));
-        }
+    /**
+     * Обновляет meta-span с актуальными order_date/order_number из формы.
+     * @private
+     */
+    static _refreshAppendixInlineMeta(row, dialog) {
+        const meta = row.querySelector('[data-role="meta"]');
+        if (!meta) return;
+        const orderDate = dialog.querySelector('input[name="order_date"]')?.value || '';
+        const orderNumber = dialog.querySelector('input[name="order_number"]')?.value || '';
+        meta.textContent = `к распоряжению УВА от ${orderDate} № ${orderNumber}`;
+    }
 
-        if (numberInput) {
-            numberInput.addEventListener('input', () => this._refreshAppendixRefPreview(dialog));
-        }
-        if (orderDateInput) {
-            orderDateInput.addEventListener('input', () => this._refreshAppendixRefPreview(dialog));
-        }
-        if (orderNumberInput) {
-            orderNumberInput.addEventListener('input', () => this._refreshAppendixRefPreview(dialog));
-        }
+    /** Есть ли в составе AppendixRef-строка. @private */
+    static _hasAppendixRefRow(dialog) {
+        return !!dialog.querySelector('.team-member-row--appendix-ref');
+    }
+
+    /**
+     * Обновляет disabled-флаги опций "Участник" и "AppendixRef" в role-select'ах всех остальных строк.
+     * @private
+     */
+    static _updateRoleSelectAvailability(dialog) {
+        const hasAppendix = this._hasAppendixRefRow(dialog);
+        dialog.querySelectorAll('.team-member-row:not(.team-member-row--appendix-ref) select[name="role"]').forEach(select => {
+            const participantOption = select.querySelector('option[value="Участник"]');
+            const appendixOption = select.querySelector('option[value="AppendixRef"]');
+            if (participantOption) participantOption.disabled = hasAppendix;
+            if (appendixOption) appendixOption.disabled = hasAppendix;
+        });
     }
 
     /**
@@ -1301,33 +1383,26 @@ class CreateActDialog extends DialogBase {
      * @private
      */
     static _collectAuditTeam(dialog) {
-        const members = Array.from(dialog.querySelectorAll('.team-member-row')).map(row => ({
-            role: row.querySelector('[name="role"]').value,
-            full_name: row.querySelector('[name="full_name"]').value,
-            position: row.querySelector('[name="position"]').value,
-            username: row.querySelector('[name="username"]').value
-        }));
-
-        if (this._isAppendixRefVisible(dialog)) {
-            const xInput = dialog.querySelector('#appendixRefNumberInput');
-            const orderDateInput = dialog.querySelector('input[name="order_date"]');
-            const orderNumberInput = dialog.querySelector('input[name="order_number"]');
-
-            const text = this._formatAppendixRefText(
-                xInput ? xInput.value.trim() : '',
-                orderDateInput ? orderDateInput.value.trim() : '',
-                orderNumberInput ? orderNumberInput.value.trim() : ''
-            );
-
-            members.push({
-                role: 'AppendixRef',
-                full_name: text,
-                position: '-',
-                username: '-'
-            });
-        }
-
-        return members;
+        return Array.from(dialog.querySelectorAll('.team-member-row')).map(row => {
+            if (row.classList.contains('team-member-row--appendix-ref')) {
+                const dropdown = row._appendixDropdown;
+                const x = dropdown ? dropdown.value : 1;
+                const orderDate = dialog.querySelector('input[name="order_date"]')?.value?.trim() || '';
+                const orderNumber = dialog.querySelector('input[name="order_number"]')?.value?.trim() || '';
+                return {
+                    role: 'AppendixRef',
+                    full_name: this._formatAppendixRefText(x, orderDate, orderNumber),
+                    position: '-',
+                    username: '-'
+                };
+            }
+            return {
+                role: row.querySelector('[name="role"]').value,
+                full_name: row.querySelector('[name="full_name"]').value,
+                position: row.querySelector('[name="position"]').value,
+                username: row.querySelector('[name="username"]').value
+            };
+        });
     }
 
     /**
