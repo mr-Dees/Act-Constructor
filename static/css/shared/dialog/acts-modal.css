@@ -521,9 +521,11 @@
 }
 
 /* Строка AppendixRef — переопределяет колонки .team-member-row:
-   role-select остаётся видимым (можно перевыбрать роль), на его месте — inline-блок, затем delete. */
+   role-select остаётся видимым (можно перевыбрать роль), на его месте — inline-блок, затем delete.
+   Первая колонка совпадает с обычной строкой (10rem), чтобы select не отличался по ширине.
+   overflow: visible обязателен, иначе popup кастомного dropdown'а № обрезается родителем. */
 .team-member-row--appendix-ref {
-    grid-template-columns: var(--team-member-role-width, 180px) 1fr var(--button-size-sm);
+    grid-template-columns: 10rem 1fr var(--button-size-sm);
     position: relative;
     z-index: 20;
 }
@@ -536,8 +538,7 @@
     font-size: var(--font-size-sm);
     color: var(--text-primary);
     white-space: nowrap;
-    overflow: hidden;
-    text-overflow: ellipsis;
+    min-width: 0;
 }
 
 .team-member-row__appendix-inline-text {
@@ -546,7 +547,7 @@
 
 .team-member-row__appendix-inline-meta {
     flex: 1;
-    color: var(--text-secondary);
+    min-width: 0;
     overflow: hidden;
     text-overflow: ellipsis;
 }
