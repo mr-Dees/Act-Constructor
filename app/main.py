@@ -358,6 +358,14 @@ def create_app() -> FastAPI:
         favicon_path = settings.static_dir / "favicon.ico"
         return FileResponse(favicon_path)
 
+    # Корневой /health для внешних поллеров (Docker/k8s/Prometheus/JupyterHub
+    # proxy). Под /api/v1/system/health остаётся развёрнутая версия с
+    # per-domain health-check'ами. HttpMetricsMiddleware фильтрует /health —
+    # лог не пухнет.
+    @app.get("/health", include_in_schema=False)
+    async def root_health():
+        return {"status": "ok"}
+
     # Обработчик ошибки Kerberos токена
     @app.exception_handler(KerberosTokenExpiredError)
     async def kerberos_token_expired_handler(
