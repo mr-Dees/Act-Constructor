@@ -445,6 +445,8 @@ class CreateActDialog extends DialogBase {
             };
         }
 
+        this._bindAppendixRefHandlers(dialog);
+
         // Настраиваем интерактивные обработчики для полей СЗ
         this._setupServiceNoteInteractiveHandlers(dialog);
     }
@@ -654,16 +656,25 @@ class CreateActDialog extends DialogBase {
      */
     static async _initializeAuditTeam(dialog, actData, currentUser) {
         if (actData && actData.audit_team && actData.audit_team.length > 0) {
-            actData.audit_team.forEach(member => {
+            let appendixApplied = false;
+            for (const member of actData.audit_team) {
+                if (member.role === 'AppendixRef') {
+                    const parsed = this._parseAppendixRefText(member.full_name);
+                    if (parsed && !appendixApplied) {
+                        this._showAppendixRefRow(dialog, parsed.x);
+                        appendixApplied = true;
+                    }
+                    // role='AppendixRef' с невалидным текстом или второй маркер — игнорируем.
+                    continue;
+                }
                 this._addTeamMember(dialog, member.role, member.full_name, member.position, member.username);
-            });
+            }
         } else {
             // 3 строки по умолчанию
             this._addTeamMember(dialog, 'Куратор', '', '', '');
             const leader = this._addTeamMember(dialog, 'Руководитель', '', '', '');
             this._addTeamMember(dialog, 'Участник', '', '', '');
 
-            // Автозаполнение текущего пользователя в строку "Руководитель"
             if (currentUser && leader) {
                 this._autoFillUser(leader, currentUser);
             }
@@ -746,6 +757,138 @@ class CreateActDialog extends DialogBase {
         }
 
         return { rowElement, search };
+    }
+
+    /**
+     * Regex строки-маркера. Источник истины — спека acts-features-bundle.
+     * Формат: «В соответствии с приложением №X к распоряжению УВА от {date} № {number}».
+     */
+    static APPENDIX_REF_REGEX = /^В соответствии с приложением №(\d+) к распоряжению УВА от (.+?) № (.+)$/;
+
+    /** Собирает текст строки-маркера по правилам спеки. */
+    static _formatAppendixRefText(x, orderDate, orderNumber) {
+        const xPart = Number.isFinite(Number(x)) && Number(x) > 0 ? Number(x) : '';
+        const datePart = orderDate || '';
+        const numberPart = orderNumber || '';
+        return `В соответствии с приложением №${xPart} к распоряжению УВА от ${datePart} № ${numberPart}`;
+    }
+
+    /** Парсит full_name с бэка обратно в {x, orderDate, orderNumber} или null если не маркер. */
+    static _parseAppendixRefText(text) {
+        if (!text || typeof text !== 'string') return null;
+        const m = text.match(this.APPENDIX_REF_REGEX);
+        if (!m) return null;
+        return { x: parseInt(m[1], 10), orderDate: m[2], orderNumber: m[3] };
+    }
+
+    /** Возвращает обычных «Участников» (без AppendixRef). */
+    static _getRegularParticipantRows(dialog) {
+        return Array.from(dialog.querySelectorAll('.team-member-row')).filter(row => {
+            const r = row.querySelector('[name="role"]');
+            return r && r.value === 'Участник';
+        });
+    }
+
+    /** Удаляет все строки role='Участник'. Кураторов/руководителей/редакторов не трогает. */
+    static _removeRegularParticipants(dialog) {
+        this._getRegularParticipantRows(dialog).forEach(row => {
+            // Триггерим клик delete-кнопки, чтобы корректно зачистить TeamMemberSearch listeners.
+            const deleteBtn = row.querySelector('.delete-member-btn');
+            if (deleteBtn && typeof deleteBtn.onclick === 'function') {
+                deleteBtn.onclick();
+            } else {
+                row.remove();
+            }
+        });
+    }
+
+    /** Показывает контейнер строки-маркера с указанным значением X. */
+    static _showAppendixRefRow(dialog, x) {
+        const container = dialog.querySelector('#appendixRefContainer');
+        if (container) container.style.display = '';
+
+        const input = dialog.querySelector('#appendixRefNumberInput');
+        if (input) input.value = (x !== undefined && x !== null && x !== '') ? String(x) : '';
+
+        this._refreshAppendixRefPreview(dialog);
+    }
+
+    /** Скрывает контейнер строки-маркера и очищает поля. */
+    static _hideAppendixRefRow(dialog) {
+        const container = dialog.querySelector('#appendixRefContainer');
+        if (container) container.style.display = 'none';
+
+        const input = dialog.querySelector('#appendixRefNumberInput');
+        if (input) input.value = '';
+
+        const preview = dialog.querySelector('#appendixRefPreview');
+        if (preview) preview.textContent = '';
+    }
+
+    /** Видим ли сейчас контейнер маркера. */
+    static _isAppendixRefVisible(dialog) {
+        const container = dialog.querySelector('#appendixRefContainer');
+        return !!container && container.style.display !== 'none';
+    }
+
+    /** Перерисовывает текст превью маркера на основе текущих значений из формы. */
+    static _refreshAppendixRefPreview(dialog) {
+        if (!this._isAppendixRefVisible(dialog)) return;
+
+        const xInput = dialog.querySelector('#appendixRefNumberInput');
+        const orderDateInput = dialog.querySelector('input[name="order_date"]');
+        const orderNumberInput = dialog.querySelector('input[name="order_number"]');
+
+        const x = xInput ? xInput.value.trim() : '';
+        const orderDate = orderDateInput ? orderDateInput.value.trim() : '';
+        const orderNumber = orderNumberInput ? orderNumberInput.value.trim() : '';
+
+        const preview = dialog.querySelector('#appendixRefPreview');
+        if (preview) preview.textContent = this._formatAppendixRefText(x, orderDate, orderNumber);
+    }
+
+    /** Привязывает обработчики кнопок и input-событий для appendix-маркера. */
+    static _bindAppendixRefHandlers(dialog) {
+        const addBtn = dialog.querySelector('#addAppendixRefBtn');
+        const removeBtn = dialog.querySelector('#appendixRefContainer .appendix-ref-remove-btn');
+        const numberInput = dialog.querySelector('#appendixRefNumberInput');
+        const orderDateInput = dialog.querySelector('input[name="order_date"]');
+        const orderNumberInput = dialog.querySelector('input[name="order_number"]');
+
+        if (addBtn) {
+            addBtn.addEventListener('click', async () => {
+                if (this._isAppendixRefVisible(dialog)) return;
+
+                const regulars = this._getRegularParticipantRows(dialog);
+                if (regulars.length > 0) {
+                    const confirmed = await DialogManager.show({
+                        title: 'Замена обычных участников',
+                        message: 'Все обычные сотрудники будут удалены из списка. Нажмите OK для удаления или Отмена для смены их роли вручную.',
+                        icon: '⚠️',
+                        confirmText: 'OK',
+                        cancelText: 'Отмена',
+                        type: 'warning'
+                    });
+                    if (!confirmed) return;
+                    this._removeRegularParticipants(dialog);
+                }
+                this._showAppendixRefRow(dialog, '');
+            });
+        }
+
+        if (removeBtn) {
+            removeBtn.addEventListener('click', () => this._hideAppendixRefRow(dialog));
+        }
+
+        if (numberInput) {
+            numberInput.addEventListener('input', () => this._refreshAppendixRefPreview(dialog));
+        }
+        if (orderDateInput) {
+            orderDateInput.addEventListener('input', () => this._refreshAppendixRefPreview(dialog));
+        }
+        if (orderNumberInput) {
+            orderNumberInput.addEventListener('input', () => this._refreshAppendixRefPreview(dialog));
+        }
     }
 
     /**
@@ -1158,12 +1301,33 @@ class CreateActDialog extends DialogBase {
      * @private
      */
     static _collectAuditTeam(dialog) {
-        return Array.from(dialog.querySelectorAll('.team-member-row')).map(row => ({
+        const members = Array.from(dialog.querySelectorAll('.team-member-row')).map(row => ({
             role: row.querySelector('[name="role"]').value,
             full_name: row.querySelector('[name="full_name"]').value,
             position: row.querySelector('[name="position"]').value,
             username: row.querySelector('[name="username"]').value
         }));
+
+        if (this._isAppendixRefVisible(dialog)) {
+            const xInput = dialog.querySelector('#appendixRefNumberInput');
+            const orderDateInput = dialog.querySelector('input[name="order_date"]');
+            const orderNumberInput = dialog.querySelector('input[name="order_number"]');
+
+            const text = this._formatAppendixRefText(
+                xInput ? xInput.value.trim() : '',
+                orderDateInput ? orderDateInput.value.trim() : '',
+                orderNumberInput ? orderNumberInput.value.trim() : ''
+            );
+
+            members.push({
+                role: 'AppendixRef',
+                full_name: text,
+                position: '-',
+                username: '-'
+            });
+        }
+
+        return members;
     }
 
     /**

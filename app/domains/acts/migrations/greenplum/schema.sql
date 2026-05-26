@@ -119,8 +119,8 @@ CREATE TABLE IF NOT EXISTS {SCHEMA}.{PREFIX}audit_team_members (
 
     -- Constraints
     PRIMARY KEY (act_id, id),
-    CONSTRAINT check_role_values
-        CHECK (role IN ('Куратор', 'Руководитель', 'Редактор', 'Участник')),
+    CONSTRAINT check_audit_team_role_values
+        CHECK (role IN ('Куратор', 'Руководитель', 'Редактор', 'Участник', 'AppendixRef')),
     CONSTRAINT check_order_index_non_negative
         CHECK (order_index >= 0)
 )
