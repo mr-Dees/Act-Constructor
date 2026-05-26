@@ -819,5 +819,46 @@ Object.assign(AppState, {
         }
 
         return grid;
+    },
+
+    /**
+     * Создаёт таблицу «Прочие риски». Шапка и сетка 1:1 со сводной таблицей метрик
+     * (использует общий конструктор `_createMetricsGrid`), но НЕ автогенерируется
+     * `metrics-risk-coordinator`-ом, НЕ агрегирует данные дочерних метрик и НЕ
+     * влияет на иерархию пунктов под разделом 5.
+     * @private
+     * @param {string} nodeId
+     * @returns {Object} результат ValidationCore.success()/failure()
+     */
+    _createOtherRiskTable(nodeId) {
+        const node = this.findNodeById(nodeId);
+
+        const validation = ValidationTree.canAddContent(node, AppConfig.nodeTypes.TABLE);
+        if (!validation.valid) return validation;
+
+        const metricsPreset = AppConfig.content.tablePresets.metrics;
+        const otherPreset = AppConfig.content.tablePresets.otherRisk;
+        const tableId = this._generateId('table');
+
+        const tableNode = this._createContentNode(nodeId, tableId, AppConfig.nodeTypes.TABLE, otherPreset.label, true, true);
+        tableNode.isOtherRiskTable = true;
+
+        const insertIdx = this._getFirstNonPinnedIndex(node);
+        node.children.splice(insertIdx, 0, tableNode);
+
+        const grid = this._createMetricsGrid();
+
+        const table = {
+            id: tableId,
+            nodeId: tableNode.id,
+            grid,
+            colWidths: metricsPreset.colWidths,
+            protected: true,
+            deletable: true,
+            isOtherRiskTable: true
+        };
+
+        this.tables[tableId] = table;
+        return ValidationCore.success();
     }
 });
