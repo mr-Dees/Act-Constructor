@@ -310,17 +310,23 @@ const TreeUtils = {
         if (node.type !== AppConfig.nodeTypes.TABLE) return false;
         // E-2: все pinned-флаги читаем с node (унифицировано с metrics).
         // Risk-флаги мигрируются на node в api.js::loadActContent для старых актов.
+        // Tax и Other — новые типы (acts-features-bundle): оба тоже pinned.
         return !!(
             node.isMetricsTable ||
             node.isMainMetricsTable ||
             node.isRegularRiskTable ||
-            node.isOperationalRiskTable
+            node.isOperationalRiskTable ||
+            node.isTaxRiskTable ||
+            node.isOtherRiskTable
         );
     },
 
     /**
      * Находит риск-таблицы в поддереве. E-4: единая утилита взамен двух дубликатов
      * (state-content.js::_findRiskTablesInSubtree и tree-drag-drop.js::_hasRiskTablesInSubtree).
+     *
+     * Учитывает regular / operational / tax. Other-таблицы — отдельный пул
+     * («прочие отклонения») и НЕ считаются риском для metrics-risk-coordinator.
      *
      * @param {Object} node - Корневой узел поддерева
      * @param {{firstOnly?: boolean}} [opts] - firstOnly:true — ранний выход после первой находки.
@@ -333,7 +339,8 @@ const TreeUtils = {
 
         const walk = (n) => {
             if (!n) return false;
-            if (n.type === TABLE && (n.isRegularRiskTable || n.isOperationalRiskTable)) {
+            // Tax считается риском для metrics-risk-coordinator; Other — НЕТ.
+            if (n.type === TABLE && (n.isRegularRiskTable || n.isOperationalRiskTable || n.isTaxRiskTable)) {
                 result.push(n);
                 if (firstOnly) return true;
             }
