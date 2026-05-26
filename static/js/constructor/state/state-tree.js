@@ -275,7 +275,8 @@ Object.assign(AppState, {
     _isRiskTable(node) {
         if (node.type !== AppConfig.nodeTypes.TABLE) return false;
         // E-2: pinned-флаги читаем с node.
-        return !!(node.isRegularRiskTable || node.isOperationalRiskTable);
+        // Tax учитывается как риск; Other — отдельный пул, не риск.
+        return !!(node.isRegularRiskTable || node.isOperationalRiskTable || node.isTaxRiskTable);
     },
 
     /**

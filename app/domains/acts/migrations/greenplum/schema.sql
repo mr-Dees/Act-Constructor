@@ -220,6 +220,8 @@ CREATE TABLE IF NOT EXISTS {SCHEMA}.{PREFIX}act_tables (
     is_main_metrics_table BOOLEAN DEFAULT FALSE,
     is_regular_risk_table BOOLEAN DEFAULT FALSE,
     is_operational_risk_table BOOLEAN DEFAULT FALSE,
+    is_tax_risk_table BOOLEAN DEFAULT FALSE,
+    is_other_risk_table BOOLEAN DEFAULT FALSE,
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
 
@@ -250,6 +252,8 @@ COMMENT ON COLUMN {SCHEMA}.{PREFIX}act_tables.is_metrics_table IS 'Флаг: т�
 COMMENT ON COLUMN {SCHEMA}.{PREFIX}act_tables.is_main_metrics_table IS 'Флаг: основная таблица метрик';
 COMMENT ON COLUMN {SCHEMA}.{PREFIX}act_tables.is_regular_risk_table IS 'Флаг: таблица регулярных рисков';
 COMMENT ON COLUMN {SCHEMA}.{PREFIX}act_tables.is_operational_risk_table IS 'Флаг: таблица операционных рисков';
+COMMENT ON COLUMN {SCHEMA}.{PREFIX}act_tables.is_tax_risk_table IS 'Флаг: таблица налоговых рисков';
+COMMENT ON COLUMN {SCHEMA}.{PREFIX}act_tables.is_other_risk_table IS 'Флаг: таблица прочих рисков';
 COMMENT ON COLUMN {SCHEMA}.{PREFIX}act_tables.created_at IS 'Дата и время создания таблицы';
 COMMENT ON COLUMN {SCHEMA}.{PREFIX}act_tables.updated_at IS 'Дата и время последнего изменения таблицы';
 
@@ -540,7 +544,9 @@ CREATE INDEX idx_{PREFIX}act_tables_special_flags
     WHERE is_metrics_table = TRUE
        OR is_main_metrics_table = TRUE
        OR is_regular_risk_table = TRUE
-       OR is_operational_risk_table = TRUE;
+       OR is_operational_risk_table = TRUE
+       OR is_tax_risk_table = TRUE
+       OR is_other_risk_table = TRUE;
 
 -- Индексы на act_textblocks
 CREATE INDEX idx_{PREFIX}act_textblocks_act_id

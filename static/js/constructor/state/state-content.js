@@ -77,7 +77,8 @@ Object.assign(AppState, {
         }
 
         // E-2: pinned-флаги читаем с node, не с table-объекта.
-        const isRiskTable = !!(tableNode.isRegularRiskTable || tableNode.isOperationalRiskTable);
+        // Tax учитывается как риск (триггерит metrics-coordinator); Other — нет.
+        const isRiskTable = !!(tableNode.isRegularRiskTable || tableNode.isOperationalRiskTable || tableNode.isTaxRiskTable);
 
         if (typeof ChangelogTracker !== 'undefined') {
             ChangelogTracker.record('delete_table', tableNode.tableId, tableNode.label || 'Таблица', {nodeId: tableNode.parentId});
@@ -733,5 +734,132 @@ Object.assign(AppState, {
         }
 
         return grid;
+    },
+
+    /**
+     * Создаёт таблицу налоговых рисков.
+     * Шапка двухслойная (как у operational risk): одна объединённая ячейка
+     * «Выявлены налоговые риски» сверху + 6 колонок-заголовков снизу.
+     * Тело — обычные пустые редактируемые ячейки (без фикс. строк «Недоплата/Переплата»).
+     * @private
+     * @param {string} nodeId
+     * @returns {Object} результат ValidationCore.success()/failure()
+     */
+    _createTaxRiskTable(nodeId) {
+        const node = this.findNodeById(nodeId);
+
+        const validation = ValidationTree.canAddContent(node, AppConfig.nodeTypes.TABLE);
+        if (!validation.valid) return validation;
+
+        const preset = AppConfig.content.tablePresets.taxRisk;
+        const tableId = this._generateId('table');
+
+        const tableNode = this._createContentNode(nodeId, tableId, AppConfig.nodeTypes.TABLE, preset.label, true, true);
+        tableNode.isTaxRiskTable = true;
+
+        const insertIdx = this._getFirstNonPinnedIndex(node);
+        node.children.splice(insertIdx, 0, tableNode);
+
+        const grid = this._createTaxRiskGrid();
+
+        const table = {
+            id: tableId,
+            nodeId: tableNode.id,
+            grid,
+            colWidths: preset.colWidths,
+            protected: true,
+            deletable: true,
+            isTaxRiskTable: true
+        };
+
+        this.tables[tableId] = table;
+        return ValidationCore.success();
+    },
+
+    /**
+     * Строит сетку таблицы налоговых рисков.
+     * row1: объединённая «Выявлены налоговые риски» (colSpan=6).
+     * row2: 6 колонок-заголовков.
+     * Далее 2 строки пустых текстовых ячеек.
+     * @private
+     * @returns {Array<Array>}
+     */
+    _createTaxRiskGrid() {
+        const grid = [];
+
+        const headerRow1 = [
+            {content: 'Выявлены налоговые риски', isHeader: true, colSpan: 6, rowSpan: 1, originRow: 0, originCol: 0}
+        ];
+        for (let c = 1; c < 6; c++) {
+            headerRow1.push({
+                content: '',
+                isHeader: true,
+                colSpan: 1,
+                rowSpan: 1,
+                isSpanned: true,
+                spanOrigin: {row: 0, col: 0},
+                originRow: 0,
+                originCol: c
+            });
+        }
+        grid.push(headerRow1);
+
+        const headerRow2 = [
+            {content: 'Код процесса (номер-название)', isHeader: true, colSpan: 1, rowSpan: 1, originRow: 1, originCol: 0},
+            {content: 'Клиентский путь (номер-название)', isHeader: true, colSpan: 1, rowSpan: 1, originRow: 1, originCol: 1},
+            {content: 'Наименование нормативно-правового акта (НПА), который был нарушен', isHeader: true, colSpan: 1, rowSpan: 1, originRow: 1, originCol: 2},
+            {content: 'Статья/пункт НПА', isHeader: true, colSpan: 1, rowSpan: 1, originRow: 1, originCol: 3},
+            {content: 'Налоговые последствия', isHeader: true, colSpan: 1, rowSpan: 1, originRow: 1, originCol: 4},
+            {content: 'Сумма последствий, руб.', isHeader: true, colSpan: 1, rowSpan: 1, originRow: 1, originCol: 5}
+        ];
+        grid.push(headerRow2);
+
+        // Тело: 2 пустые строки.
+        for (let r = 2; r < 4; r++) {
+            grid.push(this._createDataRow(r, 6));
+        }
+
+        return grid;
+    },
+
+    /**
+     * Создаёт таблицу «Прочие риски». Шапка и сетка 1:1 со сводной таблицей метрик
+     * (использует общий конструктор `_createMetricsGrid`), но НЕ автогенерируется
+     * `metrics-risk-coordinator`-ом, НЕ агрегирует данные дочерних метрик и НЕ
+     * влияет на иерархию пунктов под разделом 5.
+     * @private
+     * @param {string} nodeId
+     * @returns {Object} результат ValidationCore.success()/failure()
+     */
+    _createOtherRiskTable(nodeId) {
+        const node = this.findNodeById(nodeId);
+
+        const validation = ValidationTree.canAddContent(node, AppConfig.nodeTypes.TABLE);
+        if (!validation.valid) return validation;
+
+        const metricsPreset = AppConfig.content.tablePresets.metrics;
+        const otherPreset = AppConfig.content.tablePresets.otherRisk;
+        const tableId = this._generateId('table');
+
+        const tableNode = this._createContentNode(nodeId, tableId, AppConfig.nodeTypes.TABLE, otherPreset.label, true, true);
+        tableNode.isOtherRiskTable = true;
+
+        const insertIdx = this._getFirstNonPinnedIndex(node);
+        node.children.splice(insertIdx, 0, tableNode);
+
+        const grid = this._createMetricsGrid();
+
+        const table = {
+            id: tableId,
+            nodeId: tableNode.id,
+            grid,
+            colWidths: metricsPreset.colWidths,
+            protected: true,
+            deletable: true,
+            isOtherRiskTable: true
+        };
+
+        this.tables[tableId] = table;
+        return ValidationCore.success();
     }
 });

@@ -120,7 +120,8 @@ class ActContentRepository(BaseRepository):
             f"""
             SELECT table_id, node_id, grid_data, col_widths, is_protected,
                    is_deletable, is_metrics_table, is_main_metrics_table,
-                   is_regular_risk_table, is_operational_risk_table
+                   is_regular_risk_table, is_operational_risk_table,
+                   is_tax_risk_table, is_other_risk_table
             FROM {self.tables}
             WHERE act_id = $1
             """,
@@ -137,7 +138,9 @@ class ActContentRepository(BaseRepository):
                 'isMetricsTable': row['is_metrics_table'],
                 'isMainMetricsTable': row['is_main_metrics_table'],
                 'isRegularRiskTable': row['is_regular_risk_table'],
-                'isOperationalRiskTable': row['is_operational_risk_table']
+                'isOperationalRiskTable': row['is_operational_risk_table'],
+                'isTaxRiskTable': row['is_tax_risk_table'],
+                'isOtherRiskTable': row['is_other_risk_table']
             }
             for row in rows
         }
@@ -286,6 +289,8 @@ class ActContentRepository(BaseRepository):
                 getattr(table_data, 'isMainMetricsTable', False),
                 getattr(table_data, 'isRegularRiskTable', False),
                 getattr(table_data, 'isOperationalRiskTable', False),
+                getattr(table_data, 'isTaxRiskTable', False),
+                getattr(table_data, 'isOtherRiskTable', False),
             ))
 
         if args:
@@ -296,9 +301,10 @@ class ActContentRepository(BaseRepository):
                     table_id, node_id, node_number, table_label,
                     grid_data, col_widths, is_protected, is_deletable,
                     is_metrics_table, is_main_metrics_table,
-                    is_regular_risk_table, is_operational_risk_table
+                    is_regular_risk_table, is_operational_risk_table,
+                    is_tax_risk_table, is_other_risk_table
                 )
-                VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15)
+                VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17)
                 """,
                 args,
             )
