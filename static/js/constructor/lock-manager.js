@@ -453,6 +453,7 @@ class LockManager {
      * @private
      */
     static async _handleInactivity(minutesInactive) {
+        const capturedActId = this._actId;
         const cfg = AppConfig.lock;
         const timeoutSeconds = this._config.inactivityDialogTimeoutSeconds;
 
@@ -492,6 +493,14 @@ class LockManager {
         }, 1000);
 
         const stay = await dialogPromise;
+
+        // Если за время ожидания диалога _actId сменился (переключение акта) или
+        // менеджер уже завершает работу — диалог «осиротел» и его результат
+        // не относится к текущему состоянию. Тихо прерываем.
+        if (this._actId !== capturedActId || this._isExiting) {
+            console.warn('[LockManager] _handleInactivity: orphan dialog (actId changed or already exiting), abort');
+            return;
+        }
 
         if (this._inactivityDialogTimeout) {
             clearTimeout(this._inactivityDialogTimeout);
