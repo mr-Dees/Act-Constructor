@@ -6,7 +6,14 @@ from pydantic import BaseModel, ConfigDict, Field, field_validator, model_valida
 
 
 class AuditTeamMember(BaseModel):
-    """Член аудиторской группы"""
+    """Член аудиторской группы.
+
+    Роль ``"AppendixRef"`` — служебное машинно-читаемое значение для строки-маркера
+    «В соответствии с приложением №X к распоряжению УВА от <дата> № <номер>»: вместо
+    отдельного человека в команде хранится одна запись с этой ролью, текстом маркера
+    в ``full_name`` и заглушками в ``position``/``username``. Пользователю эта роль
+    не отображается — фронт парсит ``full_name`` и рендерит специальный UI.
+    """
     role: Literal["Куратор", "Руководитель", "Редактор", "Участник", "AppendixRef"]
     full_name: str = Field(min_length=1, max_length=255)
     position: str = Field(min_length=1, max_length=255)
