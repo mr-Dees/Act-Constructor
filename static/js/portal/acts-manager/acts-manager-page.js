@@ -354,23 +354,12 @@ class ActsManagerPage {
         // Проверяем, может ли пользователь редактировать (не Участник)
         const canEdit = act.user_role !== 'Участник';
 
-        // Деактивируем кнопки для роли "Участник"
-        // Примечание: кнопка "Дублировать" остаётся активной - Участник может
+        // Скрываем кнопки редактирования и удаления для роли "Участник"
+        // Примечание: кнопка "Дублировать" остаётся активной — Участник может
         // дублировать акт и станет Редактором в новом акте
         if (!canEdit) {
-            const readOnlyTooltip = 'Редактирование недоступно для роли "Участник"';
-
-            if (editBtn) {
-                editBtn.disabled = true;
-                editBtn.classList.add('disabled');
-                editBtn.title = readOnlyTooltip;
-            }
-            // duplicateBtn остаётся активной для Участника
-            if (deleteBtn) {
-                deleteBtn.disabled = true;
-                deleteBtn.classList.add('disabled');
-                deleteBtn.title = 'Удаление недоступно для роли "Участник"';
-            }
+            if (editBtn) editBtn.hidden = true;
+            if (deleteBtn) deleteBtn.hidden = true;
         }
 
         // Универсальный helper для безопасного клика по кнопке
