@@ -733,5 +733,91 @@ Object.assign(AppState, {
         }
 
         return grid;
+    },
+
+    /**
+     * Создаёт таблицу налоговых рисков.
+     * Шапка двухслойная (как у operational risk): одна объединённая ячейка
+     * «Выявлены налоговые риски» сверху + 6 колонок-заголовков снизу.
+     * Тело — обычные пустые редактируемые ячейки (без фикс. строк «Недоплата/Переплата»).
+     * @private
+     * @param {string} nodeId
+     * @returns {Object} результат ValidationCore.success()/failure()
+     */
+    _createTaxRiskTable(nodeId) {
+        const node = this.findNodeById(nodeId);
+
+        const validation = ValidationTree.canAddContent(node, AppConfig.nodeTypes.TABLE);
+        if (!validation.valid) return validation;
+
+        const preset = AppConfig.content.tablePresets.taxRisk;
+        const tableId = this._generateId('table');
+
+        const tableNode = this._createContentNode(nodeId, tableId, AppConfig.nodeTypes.TABLE, preset.label, true, true);
+        tableNode.isTaxRiskTable = true;
+
+        const insertIdx = this._getFirstNonPinnedIndex(node);
+        node.children.splice(insertIdx, 0, tableNode);
+
+        const grid = this._createTaxRiskGrid();
+
+        const table = {
+            id: tableId,
+            nodeId: tableNode.id,
+            grid,
+            colWidths: preset.colWidths,
+            protected: true,
+            deletable: true,
+            isTaxRiskTable: true
+        };
+
+        this.tables[tableId] = table;
+        return ValidationCore.success();
+    },
+
+    /**
+     * Строит сетку таблицы налоговых рисков.
+     * row1: объединённая «Выявлены налоговые риски» (colSpan=6).
+     * row2: 6 колонок-заголовков.
+     * Далее 2 строки пустых текстовых ячеек.
+     * @private
+     * @returns {Array<Array>}
+     */
+    _createTaxRiskGrid() {
+        const grid = [];
+
+        const headerRow1 = [
+            {content: 'Выявлены налоговые риски', isHeader: true, colSpan: 6, rowSpan: 1, originRow: 0, originCol: 0}
+        ];
+        for (let c = 1; c < 6; c++) {
+            headerRow1.push({
+                content: '',
+                isHeader: true,
+                colSpan: 1,
+                rowSpan: 1,
+                isSpanned: true,
+                spanOrigin: {row: 0, col: 0},
+                originRow: 0,
+                originCol: c
+            });
+        }
+        grid.push(headerRow1);
+
+        const headerRow2 = [
+            {content: 'Код процесса (номер-название)', isHeader: true, colSpan: 1, rowSpan: 1, originRow: 1, originCol: 0},
+            {content: 'Клиентский путь (номер-название)', isHeader: true, colSpan: 1, rowSpan: 1, originRow: 1, originCol: 1},
+            {content: 'Наименование нормативно-правового акта (НПА), который был нарушен', isHeader: true, colSpan: 1, rowSpan: 1, originRow: 1, originCol: 2},
+            {content: 'Статья/пункт НПА', isHeader: true, colSpan: 1, rowSpan: 1, originRow: 1, originCol: 3},
+            {content: 'Налоговые последствия', isHeader: true, colSpan: 1, rowSpan: 1, originRow: 1, originCol: 4},
+            {content: 'Сумма последствий, руб.', isHeader: true, colSpan: 1, rowSpan: 1, originRow: 1, originCol: 5}
+        ];
+        grid.push(headerRow2);
+
+        // Тело: 2 пустые строки.
+        for (let r = 2; r < 4; r++) {
+            grid.push(this._createDataRow(r, 6));
+        }
+
+        return grid;
     }
 });
