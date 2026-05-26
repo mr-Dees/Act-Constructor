@@ -16,6 +16,7 @@ class LockManager {
     static _lastExtensionAt = Date.now();
     static _warningShown = false;
     static _isExiting = false;
+    static _exitPromise = null;
     static _manualUnlockTriggered = false;
     static _beforeUnloadHandler = null;
     static _activityHandler = null;
@@ -33,6 +34,11 @@ class LockManager {
             return;
         }
 
+        if (!Number.isInteger(actId) || actId <= 0) {
+            console.warn('[LockManager] init вызван с невалидным actId:', actId, new Error().stack);
+            throw new Error('INVALID_ACT_ID');
+        }
+
         this._actId = actId;
         this._resetState();
 
@@ -45,7 +51,7 @@ class LockManager {
             this._startAutoExtension();
             this._setupBeforeUnload();
 
-            console.log('LockManager инициализирован для акта', actId);
+            console.log('[LockManager] init OK для actId=', actId);
             console.log('Настройки блокировок:', this._config);
         } catch (error) {
             console.error('Ошибка инициализации LockManager:', error);
@@ -138,6 +144,7 @@ class LockManager {
         this._lastExtensionAt = Date.now();
         this._warningShown = false;
         this._isExiting = false;
+        this._exitPromise = null;
         this._manualUnlockTriggered = false;
     }
 
@@ -240,6 +247,10 @@ class LockManager {
      *   - ok=false fatal=false — транзиентная ошибка (5xx, network) — стоит retry
      */
     static async _extendLock() {
+        if (!this._actId || !Number.isInteger(this._actId)) {
+            console.error('[LockManager] _extendLock без валидного actId:', this._actId);
+            return { ok: false, fatal: true };
+        }
         const username = AuthManager.getCurrentUser();
         try {
             const response = await fetch(AppConfig.api.getUrl(`/api/v1/acts/${this._actId}/extend-lock`), {
@@ -514,101 +525,113 @@ class LockManager {
      * @private
      */
     static async _initiateExit(action) {
-        if (this._isExiting) return;
+        if (this._isExiting) return this._exitPromise;
         this._isExiting = true;
-        this._manualUnlockTriggered = true; // 🚫 блокируем sendBeacon
+        this._exitPromise = (async () => {
+            this._manualUnlockTriggered = true; // блокируем sendBeacon
 
-        this.destroy();
-        this.disableBeforeUnload();
+            this.destroy();
+            this.disableBeforeUnload();
 
-        // Разрешаем навигацию без предупреждения браузера
-        if (typeof StorageManager !== 'undefined' && typeof StorageManager.allowUnload === 'function') {
-            StorageManager.allowUnload();
-        }
-
-        const username = AuthManager?.getCurrentUser?.() || null;
-        const messageFlag = action === 'autoExit'
-            ? 'sessionAutoExited'
-            : 'sessionExitedWithSave';
-
-        console.log(`LockManager: выход (${action}) начат…`);
-
-        try {
-            // --- 1️⃣ Сохраняем акт ТОЛЬКО если есть AppState (значит открыт в конструкторе) ---
-            if (typeof AppState !== 'undefined' && AppState?.exportData) {
-                try {
-                    const data = AppState.exportData();
-                    // Прикрепляем changelog в тот же PUT — серверная аудит-запись синхронна
-                    // с фактическим сохранением контента, без отдельного запроса.
-                    if (typeof ChangelogTracker !== 'undefined' && typeof ChangelogTracker.flush === 'function') {
-                        const changelog = ChangelogTracker.flush();
-                        if (changelog && changelog.length > 0) {
-                            data.changelog = changelog;
-                        }
-                    }
-                    const saveResp = await fetch(AppConfig.api.getUrl(`/api/v1/acts/${this._actId}/content`), {
-                        method: 'PUT',
-                        headers: {
-                            'Content-Type': 'application/json',
-                            'X-JupyterHub-User': username
-                        },
-                        body: JSON.stringify(data)
-                    });
-
-                    if (!saveResp.ok) {
-                        console.error(`[LockManager] Ошибка сохранения контента (код ${saveResp.status})`);
-                    } else {
-                        console.log('[LockManager] Контент акта сохранён');
-                        // Синхронизируем флаг StorageManager после успешного сохранения
-                        if (typeof StorageManager !== 'undefined' && typeof StorageManager.markAsSyncedWithDB === 'function') {
-                            StorageManager.markAsSyncedWithDB();
-                        }
-                    }
-                } catch (saveErr) {
-                    console.error('LockManager: ошибка при сохранении контента конструктора:', saveErr);
-                }
-            } else {
-                console.log('[LockManager] AppState отсутствует — пропускаем сохранение (страница метаданных)');
+            // Разрешаем навигацию без предупреждения браузера
+            if (typeof StorageManager !== 'undefined' && typeof StorageManager.allowUnload === 'function') {
+                StorageManager.allowUnload();
             }
 
-            // --- 2️⃣ Снимаем блокировку ---
-            if (this._actId && username) {
-                try {
-                    const resp = await fetch(AppConfig.api.getUrl(`/api/v1/acts/${this._actId}/unlock`), {
-                        method: 'POST',
-                        headers: {
-                            'Content-Type': 'application/json',
-                            'X-JupyterHub-User': username
-                        }
-                    });
+            const effectiveActId = this._actId || (typeof window !== 'undefined' ? window.currentActId : null);
+            const username = AuthManager?.getCurrentUser?.() || null;
+            const messageFlag = action === 'autoExit'
+                ? 'sessionAutoExited'
+                : 'sessionExitedWithSave';
 
-                    if (!resp.ok) {
-                        console.warn(`[LockManager] Ошибка unlock (код ${resp.status})`);
-                    } else {
-                        console.log(`[LockManager] Акт ${this._actId} успешно разблокирован (exit)`);
-                    }
-                } catch (unlockErr) {
-                    console.error('[LockManager] Ошибка сети при unlock:', unlockErr);
-                }
+            console.log(`LockManager: выход (${action}) начат… effectiveActId=${effectiveActId}`);
+
+            if (typeof Notifications !== 'undefined' && Notifications.warning) {
+                Notifications.warning('Сессия истекла. Сохраняем акт…');
             }
 
-            sessionStorage.setItem(messageFlag, 'true');
-        } catch (err) {
-            console.error('[LockManager] Ошибка выхода:', err);
-            sessionStorage.setItem(messageFlag, 'true');
-        } finally {
-            const closedId = this._actId;
-            this._actId = null;
-            console.log(`LockManager: завершение выхода для акта ${closedId}`);
-            const exitUrl = AppConfig.api.getUrl('/acts');
-            setTimeout(() => {
-                if (typeof StorageManager !== 'undefined' && typeof StorageManager.confirmNavigation === 'function') {
-                    StorageManager.confirmNavigation(exitUrl, { url: exitUrl });
+            try {
+                // --- 1️⃣ Сохраняем акт ТОЛЬКО если есть AppState (значит открыт в конструкторе) ---
+                if (typeof AppState !== 'undefined' && AppState?.exportData) {
+                    if (Number.isInteger(effectiveActId) && effectiveActId > 0) {
+                        try {
+                            const data = AppState.exportData();
+                            // Прикрепляем changelog в тот же PUT — серверная аудит-запись синхронна
+                            // с фактическим сохранением контента, без отдельного запроса.
+                            if (typeof ChangelogTracker !== 'undefined' && typeof ChangelogTracker.flush === 'function') {
+                                const changelog = ChangelogTracker.flush();
+                                if (changelog && changelog.length > 0) {
+                                    data.changelog = changelog;
+                                }
+                            }
+                            const saveResp = await fetch(AppConfig.api.getUrl(`/api/v1/acts/${effectiveActId}/content`), {
+                                method: 'PUT',
+                                headers: {
+                                    'Content-Type': 'application/json',
+                                    'X-JupyterHub-User': username
+                                },
+                                body: JSON.stringify(data)
+                            });
+
+                            if (!saveResp.ok) {
+                                console.error(`[LockManager] Ошибка сохранения контента (код ${saveResp.status})`);
+                            } else {
+                                console.log('[LockManager] Контент акта сохранён');
+                                // Синхронизируем флаг StorageManager после успешного сохранения
+                                if (typeof StorageManager !== 'undefined' && typeof StorageManager.markAsSyncedWithDB === 'function') {
+                                    StorageManager.markAsSyncedWithDB();
+                                }
+                            }
+                        } catch (saveErr) {
+                            console.error('LockManager: ошибка при сохранении контента конструктора:', saveErr);
+                        }
+                    } else {
+                        console.warn('[LockManager] _initiateExit: actId невалиден, save пропущен');
+                    }
                 } else {
-                    window.location.href = exitUrl;
+                    console.log('[LockManager] AppState отсутствует — пропускаем сохранение (страница метаданных)');
                 }
-            }, AppConfig.timings.redirectAfterUnlock);
-        }
+
+                // --- 2️⃣ Снимаем блокировку ---
+                if (Number.isInteger(effectiveActId) && effectiveActId > 0 && username) {
+                    try {
+                        const resp = await fetch(AppConfig.api.getUrl(`/api/v1/acts/${effectiveActId}/unlock`), {
+                            method: 'POST',
+                            headers: {
+                                'Content-Type': 'application/json',
+                                'X-JupyterHub-User': username
+                            }
+                        });
+
+                        if (!resp.ok) {
+                            console.warn(`[LockManager] Ошибка unlock (код ${resp.status})`);
+                        } else {
+                            console.log(`[LockManager] Акт ${effectiveActId} успешно разблокирован (exit)`);
+                        }
+                    } catch (unlockErr) {
+                        console.error('[LockManager] Ошибка сети при unlock:', unlockErr);
+                    }
+                }
+
+                sessionStorage.setItem(messageFlag, 'true');
+            } catch (err) {
+                console.error('[LockManager] Ошибка выхода:', err);
+                sessionStorage.setItem(messageFlag, 'true');
+            } finally {
+                const closedId = this._actId;
+                this._actId = null;
+                console.log(`LockManager: завершение выхода для акта ${closedId}`);
+                const exitUrl = AppConfig.api.getUrl('/acts');
+                setTimeout(() => {
+                    if (typeof StorageManager !== 'undefined' && typeof StorageManager.confirmNavigation === 'function') {
+                        StorageManager.confirmNavigation(exitUrl, { url: exitUrl });
+                    } else {
+                        window.location.href = exitUrl;
+                    }
+                }, AppConfig.timings.redirectAfterUnlock);
+            }
+        })();
+        return this._exitPromise;
     }
 }
 

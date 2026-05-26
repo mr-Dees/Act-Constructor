@@ -348,6 +348,11 @@ class ActsMenuManager {
                         console.log('Акт занят другим пользователем');
                         return;
                     }
+                    if (lockError.message === 'INVALID_ACT_ID') {
+                        console.error('[ActsMenu] INVALID_ACT_ID при переключении на акт:', actId);
+                        if (typeof Notifications !== 'undefined') Notifications.error('Не удалось переключиться на акт');
+                        return;
+                    }
                     throw lockError;
                 }
             }
@@ -556,6 +561,11 @@ class ActsMenuManager {
     }
 
     static async _autoLoadAct(actId) {
+        if (!Number.isInteger(actId) || actId <= 0) {
+            console.error('[ActsMenu] _autoLoadAct с невалидным actId:', actId);
+            window.location.href = AppConfig.api.getUrl('/acts');
+            return;
+        }
         if (this._initialLoadInProgress) return;
         this._initialLoadInProgress = true;
         this.currentActId = actId;
@@ -643,8 +653,15 @@ class ActsMenuManager {
         });
 
         const param = new URLSearchParams(window.location.search).get('act_id');
-        if (param) this._autoLoadAct(parseInt(param));
-        else setTimeout(() => this.show(), 500);
+        const actId = parseInt(param, 10);
+        if (param && Number.isInteger(actId) && actId > 0) {
+            this._autoLoadAct(actId);
+        } else if (param) {
+            console.warn('[ActsMenu] невалидный act_id в URL:', param);
+            window.location.href = AppConfig.api.getUrl('/acts');
+        } else {
+            setTimeout(() => this.show(), 500);
+        }
     }
 }
 
