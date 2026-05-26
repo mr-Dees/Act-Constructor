@@ -331,7 +331,13 @@
     box-shadow: var(--input-focus-shadow);
 }
 
-/* Кнопка удаления члена группы */
+/* Кнопка удаления члена группы — всегда в последней колонке grid'а,
+   чтобы × не «гулял» влево когда clear-btn (←) скрыт search-компонентом. */
+.team-member-row .delete-member-btn {
+    grid-column: -2 / -1;
+    justify-self: end;
+}
+
 .delete-member-btn {
     width: var(--button-size-sm);
     height: var(--button-size-sm);
