@@ -105,8 +105,7 @@ class LockManager {
             const resp = await fetch(AppConfig.api.getUrl(`/api/v1/acts/${this._actId}/unlock`), {
                 method: 'POST',
                 headers: {
-                    'Content-Type': 'application/json',
-                    'X-JupyterHub-User': username
+                    'Content-Type': 'application/json'
                 }
             });
 
@@ -160,12 +159,10 @@ class LockManager {
      * @private
      */
     static async _lockAct() {
-        const username = AuthManager.getCurrentUser();
         const response = await fetch(AppConfig.api.getUrl(`/api/v1/acts/${this._actId}/lock`), {
             method: 'POST',
             headers: {
-                'Content-Type': 'application/json',
-                'X-JupyterHub-User': username
+                'Content-Type': 'application/json'
             }
         });
 
@@ -258,13 +255,11 @@ class LockManager {
             console.error('[LockManager] _extendLock без валидного actId:', this._actId);
             return { ok: false, fatal: true };
         }
-        const username = AuthManager.getCurrentUser();
         try {
             const response = await fetch(AppConfig.api.getUrl(`/api/v1/acts/${this._actId}/extend-lock`), {
                 method: 'POST',
                 headers: {
-                    'Content-Type': 'application/json',
-                    'X-JupyterHub-User': username
+                    'Content-Type': 'application/json'
                 }
             });
             if (!response.ok) {
@@ -688,8 +683,7 @@ class LockManager {
                             const saveResp = await fetch(AppConfig.api.getUrl(`/api/v1/acts/${effectiveActId}/content`), {
                                 method: 'PUT',
                                 headers: {
-                                    'Content-Type': 'application/json',
-                                    'X-JupyterHub-User': username
+                                    'Content-Type': 'application/json'
                                 },
                                 body: JSON.stringify(data)
                             });
@@ -719,8 +713,7 @@ class LockManager {
                         const resp = await fetch(AppConfig.api.getUrl(`/api/v1/acts/${effectiveActId}/unlock`), {
                             method: 'POST',
                             headers: {
-                                'Content-Type': 'application/json',
-                                'X-JupyterHub-User': username
+                                'Content-Type': 'application/json'
                             }
                         });
 

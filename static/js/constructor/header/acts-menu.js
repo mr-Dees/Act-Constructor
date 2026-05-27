@@ -99,7 +99,7 @@ class ActsMenuManager {
         if (!username) throw new Error('Пользователь не авторизован');
 
         const response = await fetch(AppConfig.api.getUrl('/api/v1/acts/list'), {
-            headers: {'X-JupyterHub-User': username}
+            headers: {}
         });
         if (!response.ok) throw new Error('Ошибка загрузки списка актов');
 
@@ -436,9 +436,8 @@ class ActsMenuManager {
         }
 
         try {
-            const username = AuthManager.getCurrentUser();
             const response = await fetch(AppConfig.api.getUrl(`/api/v1/acts/${actId}`), {
-                headers: {'X-JupyterHub-User': username}
+                headers: {}
             });
             if (!response.ok) throw new Error('Ошибка загрузки данных акта');
             const actData = await response.json();
@@ -476,10 +475,9 @@ class ActsMenuManager {
         if (!confirmed) return;
 
         try {
-            const username = AuthManager.getCurrentUser();
             const response = await fetch(AppConfig.api.getUrl(`/api/v1/acts/${actId}/duplicate`), {
                 method: 'POST',
-                headers: {'X-JupyterHub-User': username}
+                headers: {}
             });
             if (!response.ok) {
                 let error;

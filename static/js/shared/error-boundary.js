@@ -58,20 +58,11 @@ class ErrorBoundary {
                 currentActId: window.currentActId ?? null,
             };
 
-            const username = (typeof AuthManager !== 'undefined' && AuthManager.getCurrentUser)
-                ? AuthManager.getCurrentUser()
-                : null;
-
-            const headers = {'Content-Type': 'application/json'};
-            if (username) {
-                headers['X-JupyterHub-User'] = username;
-            }
-
             // keepalive: запрос уйдёт даже если пользователь закрывает вкладку
             // в момент ошибки (полезно для onerror в beforeunload-ситуациях).
             fetch(url, {
                 method: 'POST',
-                headers,
+                headers: {'Content-Type': 'application/json'},
                 body: JSON.stringify(body),
                 keepalive: true,
             }).catch(() => {

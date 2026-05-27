@@ -475,18 +475,8 @@ class ItemsRenderer {
             checkbox.checked = currentTb.includes(bank.abbr);
             checkbox.addEventListener('change', () => {
                 // Единая точка записи ТБ + changelog + 'node:tb-changed' событие.
+                // Бейджи в items и в дереве обновляют подписчики на событие.
                 AppState.setNodeTb(node.id, bank.abbr, checkbox.checked);
-
-                // Обновляем бейдж в items
-                this._updateTbBadgeInItems(badge, node);
-                // Обновляем бейджи родителей в items
-                this._updateParentTbInItems(node);
-                // Точечный апдейт бейджей в дереве (без полного renderAll).
-                // Симметрично пути из tree-renderer.js (TB-чекбокс там) — обе зоны
-                // обновляются через TreeRenderer.updateTbBadge.
-                if (typeof treeManager !== 'undefined' && treeManager?.renderer?.updateTbBadge) {
-                    treeManager.renderer.updateTbBadge(node);
-                }
             });
 
             const nameSpan = document.createElement('span');
@@ -985,3 +975,19 @@ class ItemsRenderer {
         });
     }
 }
+
+// Подписчик на 'node:tb-changed' — обновляет бейджи ТБ на шаге 2 без полного
+// renderAll. Симметричен подписчику в TreeRenderer (он обновляет дерево).
+// AppState.setNodeTb эмитит событие, оба подписчика срабатывают независимо.
+window.ChatEventBus?.on?.('node:tb-changed', ({nodeId}) => {
+    const node = typeof TreeUtils !== 'undefined' ? TreeUtils.findNodeById?.(nodeId) : null;
+    if (!node) return;
+
+    const itemBlock = document.querySelector(`.item-block[data-node-id="${nodeId}"]`);
+    if (itemBlock) {
+        const badge = itemBlock.querySelector(':scope > .item-header .tb-selector-badge');
+        if (badge) ItemsRenderer._updateTbBadgeInItems(badge, node);
+    }
+
+    ItemsRenderer._updateParentTbInItems(node);
+});

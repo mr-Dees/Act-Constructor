@@ -62,9 +62,7 @@ class CreateActDialog extends DialogBase {
 
             // Используем правильный префикс роутера
             const response = await fetch(AppConfig.api.getUrl(`/api/v1/acts/${actId}/content`), {
-                headers: {
-                    'X-JupyterHub-User': currentUser
-                }
+                headers: {}
             });
 
             if (!response.ok) {
@@ -1544,8 +1542,7 @@ class CreateActDialog extends DialogBase {
         const response = await fetch(endpoint, {
             method: method,
             headers: {
-                'Content-Type': 'application/json',
-                'X-JupyterHub-User': currentUser
+                'Content-Type': 'application/json'
             },
             body: JSON.stringify(body)
         });
@@ -1696,8 +1693,7 @@ class CreateActDialog extends DialogBase {
             const resp = await fetch(AppConfig.api.getUrl(`${endpoint}?force_new_part=true`), {
                 method: 'POST',
                 headers: {
-                    'Content-Type': 'application/json',
-                    'X-JupyterHub-User': currentUser
+                    'Content-Type': 'application/json'
                 },
                 body: JSON.stringify(body)
             });

@@ -253,14 +253,13 @@ class AuthManager {
     }
 
     /**
-     * Возвращает заголовки для API-запросов
+     * Возвращает заголовки для API-запросов.
+     * Auth — server-side через env-var JUPYTERHUB_USER; фронт не шлёт заголовков.
+     * Метод оставлен ради API-совместимости с чат-модулями (Object.assign).
      * @returns {Object}
      */
     static getAuthHeaders() {
-        const username = this.getCurrentUser();
-        return {
-            'X-JupyterHub-User': username || ''
-        };
+        return {};
     }
 
     /**

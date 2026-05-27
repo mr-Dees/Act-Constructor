@@ -20,6 +20,13 @@ class TreeRenderer {
             const node = TreeUtils?.findNodeById?.(nodeId);
             if (node) this.updateInvoiceBadge(node);
         });
+
+        // Точечный апдейт бейджа ТБ при изменении node.tb через AppState.setNodeTb.
+        // Подписчик отвечает за обновление и текущего узла, и родителей под §5.
+        window.ChatEventBus?.on?.('node:tb-changed', ({nodeId}) => {
+            const node = TreeUtils?.findNodeById?.(nodeId);
+            if (node) this.updateTbBadge(node);
+        });
     }
 
     /**
@@ -542,10 +549,8 @@ class TreeRenderer {
             checkbox.checked = currentTb.includes(bank.abbr);
             checkbox.addEventListener('change', () => {
                 this._onTbCheckboxChange(node, bank.abbr, checkbox.checked);
-                // Обновляем бейдж в дереве
-                this.updateTbBadge(node);
-                // Обновляем селектор на шаге 2 если виден
-                this._syncTbToStep2(node);
+                // Бейджи в дереве и в items обновляются подписчиками
+                // на событие 'node:tb-changed', которое эмитит AppState.setNodeTb.
             });
 
             const nameSpan = document.createElement('span');
@@ -652,22 +657,4 @@ class TreeRenderer {
         }
     }
 
-    /**
-     * Синхронизирует изменения ТБ из дерева к шагу 2
-     * @private
-     * @param {Object} node - Узел дерева
-     */
-    _syncTbToStep2(node) {
-        const itemBlock = document.querySelector(`.item-block[data-node-id="${node.id}"]`);
-        if (!itemBlock) return;
-
-        const oldSelector = itemBlock.querySelector(':scope > .item-header .tb-selector');
-        if (oldSelector) {
-            const newSelector = ItemsRenderer._createTbSelector(node);
-            oldSelector.replaceWith(newSelector);
-        }
-
-        // Обновляем родительские TB-селекторы в items
-        ItemsRenderer._updateParentTbInItems(node);
-    }
 }

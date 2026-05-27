@@ -31,13 +31,11 @@ class APIClient {
     static _saveInFlight = false;
 
     static async lockAct(actId) {
-        const username = AuthManager.getCurrentUser();
 
         const response = await this._fetchWithTimeout(AppConfig.api.getUrl(`/api/v1/acts/${actId}/lock`), {
             method: 'POST',
             headers: {
-                'Content-Type': 'application/json',
-                'X-JupyterHub-User': username
+                'Content-Type': 'application/json'
             }
         });
 
@@ -49,13 +47,11 @@ class APIClient {
     }
 
     static async unlockAct(actId) {
-        const username = AuthManager.getCurrentUser();
 
         const response = await this._fetchWithTimeout(AppConfig.api.getUrl(`/api/v1/acts/${actId}/unlock`), {
             method: 'POST',
             headers: {
-                'Content-Type': 'application/json',
-                'X-JupyterHub-User': username
+                'Content-Type': 'application/json'
             }
         });
 
@@ -67,13 +63,11 @@ class APIClient {
     }
 
     static async extendLock(actId) {
-        const username = AuthManager.getCurrentUser();
 
         const response = await this._fetchWithTimeout(AppConfig.api.getUrl(`/api/v1/acts/${actId}/extend-lock`), {
             method: 'POST',
             headers: {
-                'Content-Type': 'application/json',
-                'X-JupyterHub-User': username
+                'Content-Type': 'application/json'
             }
         });
 
@@ -333,7 +327,7 @@ class APIClient {
 
         try {
             const resp = await this._fetchWithTimeout(AppConfig.api.getUrl(`/api/v1/acts/${actId}/content`), {
-                headers: {'X-JupyterHub-User': username}
+                headers: {}
             });
 
             if (!resp.ok) {
@@ -486,8 +480,7 @@ class APIClient {
             const resp = await this._fetchWithTimeout(AppConfig.api.getUrl(`/api/v1/acts/${actId}/content`), {
                 method: 'PUT',
                 headers: {
-                    'Content-Type': 'application/json',
-                    'X-JupyterHub-User': username
+                    'Content-Type': 'application/json'
                 },
                 body: JSON.stringify(data)
             });
@@ -550,8 +543,7 @@ class APIClient {
             const resp = await this._fetchWithTimeout(AppConfig.api.getUrl(`/api/v1/acts/${actId}/content`), {
                 method: 'PUT',
                 headers: {
-                    'Content-Type': 'application/json',
-                    'X-JupyterHub-User': username
+                    'Content-Type': 'application/json'
                 },
                 body: JSON.stringify(data)
             });
@@ -612,7 +604,7 @@ class APIClient {
         try {
             const resp = await this._fetchWithTimeout(AppConfig.api.getUrl(`/api/v1/acts/${actId}`), {
                 method: 'DELETE',
-                headers: {'X-JupyterHub-User': username}
+                headers: {}
             });
 
             if (!resp.ok) {
@@ -724,12 +716,11 @@ class APIClient {
      * @returns {Promise<Array<{code: string, metric_name: string, metric_group: string|null}>>}
      */
     static async loadMetricDict() {
-        const username = AuthManager.getCurrentUser();
 
         const response = await this._fetchWithTimeout(
             AppConfig.api.getUrl('/api/v1/acts/invoice/metrics'),
             {
-                headers: { 'X-JupyterHub-User': username }
+                headers: {}
             }
         );
 
@@ -745,10 +736,9 @@ class APIClient {
      * @returns {Promise<Array<{process_code: string, process_name: string}>>}
      */
     static async loadProcessDict() {
-        const username = AuthManager.getCurrentUser();
         const response = await this._fetchWithTimeout(
             AppConfig.api.getUrl('/api/v1/acts/invoice/processes'),
-            { headers: { 'X-JupyterHub-User': username } }
+            { headers: {} }
         );
         if (!response.ok) {
             await this._throwApiError(response);
@@ -761,10 +751,9 @@ class APIClient {
      * @returns {Promise<Array<{name: string}>>}
      */
     static async loadSubsidiaryDict() {
-        const username = AuthManager.getCurrentUser();
         const response = await this._fetchWithTimeout(
             AppConfig.api.getUrl('/api/v1/acts/invoice/subsidiaries'),
-            { headers: { 'X-JupyterHub-User': username } }
+            { headers: {} }
         );
         if (!response.ok) {
             await this._throwApiError(response);
@@ -779,12 +768,11 @@ class APIClient {
      * @returns {Promise<Array<{table_name: string}>>}
      */
     static async loadInvoiceTables(dbType) {
-        const username = AuthManager.getCurrentUser();
 
         const response = await this._fetchWithTimeout(
             AppConfig.api.getUrl(`/api/v1/acts/invoice/tables/${dbType}`),
             {
-                headers: { 'X-JupyterHub-User': username }
+                headers: {}
             }
         );
 
@@ -803,13 +791,11 @@ class APIClient {
      * @returns {Promise<Object>} Сохраненная фактура
      */
     static async saveInvoice(data, signal) {
-        const username = AuthManager.getCurrentUser();
 
         const response = await this._fetchWithTimeout(AppConfig.api.getUrl('/api/v1/acts/invoice/save'), {
             method: 'POST',
             headers: {
                 'Content-Type': 'application/json',
-                'X-JupyterHub-User': username,
             },
             body: JSON.stringify(data),
             signal,
@@ -831,13 +817,11 @@ class APIClient {
      * @returns {Promise<Object>} Результат верификации
      */
     static async verifyInvoice(invoiceId, actId, signal) {
-        const username = AuthManager.getCurrentUser();
 
         const response = await this._fetchWithTimeout(AppConfig.api.getUrl('/api/v1/acts/invoice/verify'), {
             method: 'POST',
             headers: {
                 'Content-Type': 'application/json',
-                'X-JupyterHub-User': username,
             },
             body: JSON.stringify({ invoice_id: invoiceId, act_id: actId }),
             signal,
@@ -988,9 +972,8 @@ class APIClient {
      * @returns {Promise<Object>}
      */
     static async loadActContentRaw(actId) {
-        const username = AuthManager.getCurrentUser();
         const resp = await this._fetchWithTimeout(AppConfig.api.getUrl(`/api/v1/acts/${actId}/content`), {
-            headers: { 'X-JupyterHub-User': username }
+            headers: {}
         });
         if (!resp.ok) throw this._createError(resp.status, `HTTP ${resp.status}`);
         return resp.json();
@@ -1007,7 +990,6 @@ class APIClient {
      * @returns {Promise<{items: Array, total: number}>}
      */
     static async getAuditLog(actId, { action, username, fromDate, toDate, limit = 50, offset = 0 } = {}) {
-        const currentUser = AuthManager.getCurrentUser();
         const query = new URLSearchParams();
         if (action) query.set('action', action);
         if (username) query.set('username', username);
@@ -1017,7 +999,7 @@ class APIClient {
         query.set('offset', offset);
 
         const resp = await this._fetchWithTimeout(AppConfig.api.getUrl(`/api/v1/acts/${actId}/audit-log?${query}`), {
-            headers: { 'X-JupyterHub-User': currentUser }
+            headers: {}
         });
         if (!resp.ok) throw this._createError(resp.status, 'Ошибка загрузки аудит-лога');
         return resp.json();
@@ -1030,10 +1012,9 @@ class APIClient {
      * @returns {Promise<{items: Array, total: number}>}
      */
     static async getVersions(actId, { limit = 50, offset = 0 } = {}) {
-        const username = AuthManager.getCurrentUser();
         const resp = await this._fetchWithTimeout(
             AppConfig.api.getUrl(`/api/v1/acts/${actId}/versions?limit=${limit}&offset=${offset}`),
-            { headers: { 'X-JupyterHub-User': username } }
+            { headers: {} }
         );
         if (!resp.ok) throw this._createError(resp.status, 'Ошибка загрузки версий');
         return resp.json();
@@ -1046,10 +1027,9 @@ class APIClient {
      * @returns {Promise<Object>}
      */
     static async getVersion(actId, versionId) {
-        const username = AuthManager.getCurrentUser();
         const resp = await this._fetchWithTimeout(
             AppConfig.api.getUrl(`/api/v1/acts/${actId}/versions/${versionId}`),
-            { headers: { 'X-JupyterHub-User': username } }
+            { headers: {} }
         );
         if (!resp.ok) throw this._createError(resp.status, 'Ошибка загрузки версии');
         return resp.json();
@@ -1062,14 +1042,12 @@ class APIClient {
      * @returns {Promise<Object>}
      */
     static async restoreVersion(actId, versionId) {
-        const username = AuthManager.getCurrentUser();
         const resp = await this._fetchWithTimeout(
             AppConfig.api.getUrl(`/api/v1/acts/${actId}/versions/${versionId}/restore`),
             {
                 method: 'POST',
                 headers: {
-                    'Content-Type': 'application/json',
-                    'X-JupyterHub-User': username
+                    'Content-Type': 'application/json'
                 }
             }
         );
@@ -1089,9 +1067,8 @@ class APIClient {
      * @returns {Promise<{is_admin: boolean, roles: Array}>}
      */
     static async loadMyRoles() {
-        const username = AuthManager.getCurrentUser();
         const response = await this._fetchWithTimeout(AppConfig.api.getUrl('/api/v1/roles/my-roles'), {
-            headers: { 'X-JupyterHub-User': username }
+            headers: {}
         });
         if (!response.ok) throw this._createError(response.status, 'Ошибка загрузки ролей');
         return response.json();
@@ -1102,9 +1079,8 @@ class APIClient {
      * @returns {Promise<Array<{id: number, name: string, description: string}>>}
      */
     static async loadAllRoles() {
-        const username = AuthManager.getCurrentUser();
         const response = await this._fetchWithTimeout(AppConfig.api.getUrl('/api/v1/admin/roles'), {
-            headers: { 'X-JupyterHub-User': username }
+            headers: {}
         });
         if (!response.ok) throw this._createError(response.status, 'Ошибка загрузки ролей');
         const data = await response.json();
@@ -1116,9 +1092,8 @@ class APIClient {
      * @returns {Promise<Array<{username: string, fullname: string, email: string, job: string, roles: Array}>>}
      */
     static async loadUserDirectory() {
-        const username = AuthManager.getCurrentUser();
         const response = await this._fetchWithTimeout(AppConfig.api.getUrl('/api/v1/admin/users/directory'), {
-            headers: { 'X-JupyterHub-User': username }
+            headers: {}
         });
         if (!response.ok) throw this._createError(response.status, 'Ошибка загрузки справочника');
         const data = await response.json();
@@ -1132,12 +1107,10 @@ class APIClient {
      * @returns {Promise<Object>}
      */
     static async assignRole(targetUsername, roleId) {
-        const username = AuthManager.getCurrentUser();
         const response = await this._fetchWithTimeout(AppConfig.api.getUrl(`/api/v1/admin/users/${targetUsername}/roles`), {
             method: 'POST',
             headers: {
-                'Content-Type': 'application/json',
-                'X-JupyterHub-User': username
+                'Content-Type': 'application/json'
             },
             body: JSON.stringify({ role_id: roleId })
         });
@@ -1154,10 +1127,9 @@ class APIClient {
      * @returns {Promise<Object>}
      */
     static async removeRole(targetUsername, roleId) {
-        const username = AuthManager.getCurrentUser();
         const response = await this._fetchWithTimeout(AppConfig.api.getUrl(`/api/v1/admin/users/${targetUsername}/roles/${roleId}`), {
             method: 'DELETE',
-            headers: { 'X-JupyterHub-User': username }
+            headers: {}
         });
         if (!response.ok) {
             await this._throwApiError(response);
@@ -1172,10 +1144,9 @@ class APIClient {
      * @returns {Promise<Array<{username: string, fullname: string, job: string, email: string}>>}
      */
     static async searchUsers(query, signal) {
-        const username = AuthManager.getCurrentUser();
         const response = await this._fetchWithTimeout(
             AppConfig.api.getUrl(`/api/v1/admin/users/search?q=${encodeURIComponent(query)}`),
-            { headers: { 'X-JupyterHub-User': username }, signal }
+            { headers: {}, signal }
         );
         if (!response.ok) throw this._createError(response.status, 'Ошибка поиска пользователей');
         const data = await response.json();
@@ -1189,10 +1160,9 @@ class APIClient {
      * @returns {Promise<{username: string, roles: Array<{id:number, name:string, code?:string}>}>}
      */
     static async getUserRoles(targetUsername) {
-        const username = AuthManager.getCurrentUser();
         const response = await fetch(
             AppConfig.api.getUrl(`/api/v1/admin/users/${targetUsername}/roles`),
-            { headers: { 'X-JupyterHub-User': username } }
+            { headers: {} }
         );
         if (!response.ok) {
             await this._throwApiError(response);
@@ -1206,10 +1176,9 @@ class APIClient {
      * @returns {Promise<Array<{username: string, fullname: string, job: string}>>}
      */
     static async searchTeamUsers(query) {
-        const username = AuthManager.getCurrentUser();
         const response = await this._fetchWithTimeout(
             AppConfig.api.getUrl(`/api/v1/acts/users/search?q=${encodeURIComponent(query)}`),
-            { headers: { 'X-JupyterHub-User': username } }
+            { headers: {} }
         );
         if (!response.ok) throw this._createError(response.status, 'Ошибка поиска пользователей');
         const data = await response.json();
@@ -1222,9 +1191,8 @@ class APIClient {
      * @returns {Promise<{batchers: Object, background_tasks: Object}>}
      */
     static async loadDiagnostics() {
-        const username = AuthManager.getCurrentUser();
         const response = await fetch(AppConfig.api.getUrl('/api/v1/admin/diagnostics'), {
-            headers: { 'X-JupyterHub-User': username }
+            headers: {}
         });
         if (!response.ok) await this._throwApiError(response);
         return response.json();
@@ -1251,7 +1219,6 @@ class APIClient {
         limit = 50,
         offset = 0,
     } = {}) {
-        const username = AuthManager.getCurrentUser();
         const query = new URLSearchParams();
         if (action) query.set('action', action);
         if (targetUsername) query.set('target_username', targetUsername);
@@ -1263,7 +1230,7 @@ class APIClient {
 
         const response = await fetch(
             AppConfig.api.getUrl(`/api/v1/admin/audit-log?${query}`),
-            { headers: { 'X-JupyterHub-User': username } }
+            { headers: {} }
         );
         if (!response.ok) await this._throwApiError(response);
         return response.json();
@@ -1279,12 +1246,10 @@ class APIClient {
      * @param {Object} filters - {start_date?, end_date?, metric_code?, process_code?}
      */
     static async searchCkRecords(prefix, filters = {}) {
-        const username = AuthManager.getCurrentUser();
         const response = await this._fetchWithTimeout(AppConfig.api.getUrl(`/api/v1/${prefix}/records/search`), {
             method: 'POST',
             headers: {
-                'Content-Type': 'application/json',
-                'X-JupyterHub-User': username
+                'Content-Type': 'application/json'
             },
             body: JSON.stringify(filters)
         });
@@ -1299,9 +1264,8 @@ class APIClient {
      * @param {number} id
      */
     static async getCkRecord(prefix, id) {
-        const username = AuthManager.getCurrentUser();
         const response = await this._fetchWithTimeout(AppConfig.api.getUrl(`/api/v1/${prefix}/records/${id}`), {
-            headers: { 'X-JupyterHub-User': username }
+            headers: {}
         });
         if (!response.ok) await this._throwApiError(response);
         return response.json();
@@ -1313,12 +1277,10 @@ class APIClient {
      * @param {Object} data
      */
     static async createCkRecord(prefix, data) {
-        const username = AuthManager.getCurrentUser();
         const response = await this._fetchWithTimeout(AppConfig.api.getUrl(`/api/v1/${prefix}/records`), {
             method: 'POST',
             headers: {
-                'Content-Type': 'application/json',
-                'X-JupyterHub-User': username
+                'Content-Type': 'application/json'
             },
             body: JSON.stringify(data)
         });
@@ -1332,12 +1294,10 @@ class APIClient {
      * @param {Array} items - [{id, ...fields}]
      */
     static async updateCkRecords(prefix, items) {
-        const username = AuthManager.getCurrentUser();
         const response = await this._fetchWithTimeout(AppConfig.api.getUrl(`/api/v1/${prefix}/records/batch-update`), {
             method: 'POST',
             headers: {
-                'Content-Type': 'application/json',
-                'X-JupyterHub-User': username
+                'Content-Type': 'application/json'
             },
             body: JSON.stringify(items)
         });
@@ -1351,10 +1311,9 @@ class APIClient {
      * @param {number} id
      */
     static async deleteCkRecord(prefix, id) {
-        const username = AuthManager.getCurrentUser();
         const response = await this._fetchWithTimeout(AppConfig.api.getUrl(`/api/v1/${prefix}/records/${id}`), {
             method: 'DELETE',
-            headers: { 'X-JupyterHub-User': username }
+            headers: {}
         });
         if (!response.ok) await this._throwApiError(response);
         return response.json();
@@ -1366,9 +1325,8 @@ class APIClient {
      * @param {string} name - 'processes', 'terbanks', 'metrics', 'departments', 'channels', 'products', 'teams'
      */
     static async getCkDictionary(prefix, name) {
-        const username = AuthManager.getCurrentUser();
         const response = await this._fetchWithTimeout(AppConfig.api.getUrl(`/api/v1/${prefix}/dictionaries/${name}`), {
-            headers: { 'X-JupyterHub-User': username }
+            headers: {}
         });
         if (!response.ok) await this._throwApiError(response);
         const json = await response.json();

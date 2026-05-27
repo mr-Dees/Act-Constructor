@@ -216,7 +216,7 @@ class ActsManagerPage {
             }
 
             const response = await fetch(AppConfig.api.getUrl('/api/v1/acts/list'), {
-                headers: {'X-JupyterHub-User': username}
+                headers: {}
             });
 
             if (!response.ok) {
@@ -460,7 +460,7 @@ class ActsManagerPage {
             if (!username) throw new Error('Пользователь не авторизован');
 
             const response = await fetch(AppConfig.api.getUrl(`/api/v1/acts/${actId}`), {
-                headers: {'X-JupyterHub-User': username}
+                headers: {}
             });
             if (!response.ok) throw new Error('Ошибка загрузки акта');
 
@@ -593,7 +593,7 @@ class ActsManagerPage {
 
             const response = await fetch(AppConfig.api.getUrl(`/api/v1/acts/${actId}/duplicate`), {
                 method: 'POST',
-                headers: {'X-JupyterHub-User': username}
+                headers: {}
             });
 
             if (!response.ok) {
@@ -666,7 +666,7 @@ class ActsManagerPage {
 
             const response = await fetch(AppConfig.api.getUrl(`/api/v1/acts/${actId}`), {
                 method: 'DELETE',
-                headers: {'X-JupyterHub-User': username}
+                headers: {}
             });
 
             if (!response.ok) {

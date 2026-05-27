@@ -56,7 +56,7 @@
     document.addEventListener('DOMContentLoaded', async () => {
         const isAuthorized = await AuthManager.requireAuth();
         if (isAuthorized) {
-            LandingSidebar.init();
+            PortalSidebar.init();
             LandingSettingsManager.init();
 
             const usernameEl = document.getElementById('ckUsername');
