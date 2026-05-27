@@ -580,8 +580,9 @@ class InvoiceDialog extends DialogBase {
      * @private
      */
     static _switchFocus(overlay, metricType) {
-        // Снять active с предыдущего focused чипа (если есть),
-        // сделать его configured если у него есть код
+        // Снять active с предыдущего focused чипа (если есть).
+        // configured ставим только при наличии данных метрики — иначе чип чистим
+        // (зеркало логики _unfocusMetric: null-state не должен выглядеть как настроенный).
         if (this._focusedMetric && this._focusedMetric !== metricType) {
             const prevChip = overlay.querySelector(`.invoice-chip[data-metric="${this._focusedMetric}"]`);
             if (prevChip) {
@@ -589,8 +590,9 @@ class InvoiceDialog extends DialogBase {
                 if (this._selectedMetrics[this._focusedMetric]) {
                     prevChip.classList.add('configured');
                 } else {
-                    // Нет кода — оставить configured (без бейджа, но выбран)
-                    prevChip.classList.add('configured');
+                    delete this._selectedMetrics[this._focusedMetric];
+                    prevChip.classList.remove('configured');
+                    this._removeChipBadge(prevChip);
                 }
             }
         }
