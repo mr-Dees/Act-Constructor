@@ -1,5 +1,7 @@
 # Polling-bridge: production-checklist
 
+См. также: [developer-guide.md §11.6](developer-guide.md#116-agent_bridge_runner-и-pollcoordinator-фоновое-сохранение-ассистент-сообщений) — внутреннее устройство agent_bridge_runner и PollCoordinator.
+
 Чек-лист для эксплуатации моста к внешнему ИИ-агенту через таблицы
 `agent_requests` / `agent_response_events` / `agent_responses` в
 Greenplum. Покрывает: ручную retention-чистку, мониторинг, ёмкости,
@@ -191,7 +193,8 @@ audit_workstation.domains.chat.agent_loop           # exception в non-stream п
 4. `chat.tool_metrics_batcher` — батч-INSERT в `chat_tool_metrics`
 5. `chat.poll_coordinator` + **watchdog** — единый цикл polling + heartbeat-стораж
 6. `chat.audit_log_batcher` — батч-INSERT в `chat_audit_log`
-7. (lifespan) `agent_bridge_runner.schedule_pending` — reconcile зависших forward'ов после рестарта
+7. `chat.agent_events_cleanup` — фоновая чистка `agent_response_events` от записей старше TTL (по умолчанию 24h). Интервал — `agent_events_cleanup_interval_sec` (3600s). Цель: hot-таблица не распухает между регулярными SELECT'ами от PollCoordinator.
+8. (lifespan) `agent_bridge_runner.schedule_pending` — reconcile зависших forward'ов после рестарта
 
 **Shutdown** — в обратном порядке. Если что-то не остановилось за 5с —
 warning в лог.

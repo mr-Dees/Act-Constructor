@@ -25,9 +25,9 @@ class LockSettings(BaseModel):
     """
     duration_minutes: int = Field(default=15, gt=0)
     inactivity_timeout_minutes: float = Field(default=5.0, gt=0)
-    inactivity_check_interval_seconds: int = Field(default=60, gt=0)
+    inactivity_check_interval_seconds: int = Field(default=30, gt=0)
     min_extension_interval_minutes: float = Field(default=5.0, gt=0)
-    inactivity_dialog_timeout_seconds: int = Field(default=30, gt=0)
+    inactivity_dialog_timeout_seconds: int = Field(default=15, gt=0)
 
 
 class FormattingSettings(BaseModel):

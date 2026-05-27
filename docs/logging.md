@@ -150,90 +150,49 @@ WARNING:     [2026-05-19 14:23:11] [a3f9c1d2] audit_workstation.domains.chat.ser
 
 ## 5. Сквозная трассировка через `request_id`
 
-### Где живёт значение
+`request_id` — короткий идентификатор, который сопровождает все логи и
+метрики одного HTTP-запроса. Это единственный надёжный способ связать
+строку из `logs/app.log`, запись в `admin_http_metrics` и (для форвардов
+к внешнему агенту) логи фоновой задачи `agent_bridge_runner`.
 
-`request_id_var` — это `contextvars.ContextVar[str]` с дефолтом `"-"`
-(`app/core/logging.py:26-28`). Реэкспортируется из `app/core/config.py:18`
+**Где живёт значение.** `request_id_var` — `contextvars.ContextVar[str]`
+с дефолтом `"-"` (`app/core/logging.py`). `asyncio.Task` копирует контекст
+при создании, поэтому значение автоматически наследуется всеми await'ами
+внутри обработки одного запроса. Реэкспортируется из `app/core/config.py`
 для обратной совместимости.
 
-`asyncio.Task` копирует контекст при создании, поэтому значение
-автоматически наследуется всеми await'ами внутри обработки одного запроса.
+**Как генерируется.** `RequestIdMiddleware` (`app/core/middleware.py`) —
+самый внешний middleware в цепочке. На входе он читает заголовок
+`X-Request-ID` (для сквозной трассировки через внешние прокси), либо при
+его отсутствии генерирует `uuid.uuid4().hex[:8]` (8-символьный hex).
+Значение пишется в ContextVar `request_id_var.set(...)` и возвращается
+клиенту в response-заголовке `X-Request-ID` — клиент видит id своего
+запроса и может сообщить его в багрепорте.
 
-### Цепочка вызовов
+**Как попадает в лог.** Любой `logger.<level>(...)` внутри запроса
+автоматически получает `record.request_id = request_id_var.get()` через
+`RequestIdFilter` (`app/core/logging.py`). Фильтр повешен на **handler**,
+а не на logger: при propagation от дочерних логгеров Python вызывает
+`callHandlers()` на родительском, минуя фильтры на logger; фильтр на
+handler гарантированно отрабатывает перед `emit()`. Вне HTTP-контекста
+(startup, shutdown, фоновые задачи без восстановления) — `"-"`.
 
-1. **HTTP-запрос приходит.** `RequestIdMiddleware`
-   (`app/core/middleware.py:209-246`) — самый внешний middleware в цепочке
-   (добавлен последним, `app/main.py:337` — комментарий: «запускается первым,
-   охватывает всю цепочку middleware»).
+**Как попадает в БД.** `HttpMetricsMiddleware`
+(`app/core/middlewares/http_metrics.py`) на завершении запроса читает
+`request_id_var.get()`, нормализует `"-"` → `None` и передаёт в
+`HttpMetricsService.record(..., request_id=...)`. Дальше
+`HttpMetricsRepository.record` делает `INSERT INTO {prefix}admin_http_metrics
+(... request_id) VALUES (...)`. Поэтому SQL-запрос по `admin_http_metrics`
+даёт список `request_id` под фильтром по пути / статусу / латентности.
 
-2. **Middleware проставляет id.** Читается заголовок `X-Request-ID`
-   (`app/core/middleware.py:228-231`) — для сквозной трассировки через
-   внешние прокси. Если заголовка нет — генерируется
-   `uuid.uuid4().hex[:8]` (8-символьный hex, `app/core/middleware.py:234`).
-   Значение пишется в ContextVar: `request_id_var.set(request_id)`
-   (`app/core/middleware.py:236`).
-
-3. **Response header.** Тот же `request_id` возвращается клиенту в заголовке
-   `X-Request-ID` (`app/core/middleware.py:239-243`) — клиент видит id своего
-   запроса, может сообщить его в багрепорте.
-
-4. **Handler, repositories, services.** Любой `logger.<level>(...)` внутри
-   запроса автоматически получает `record.request_id = request_id_var.get()`
-   через `RequestIdFilter` (`app/core/logging.py:34-36`). Фильтр повешен на
-   handler, а не на logger — это важно: при propagation от дочерних логгеров
-   Python вызывает `callHandlers()` на родительском, минуя его фильтры на
-   logger; фильтр на handler гарантированно отрабатывает перед `emit()`
-   (комментарий `app/core/logging.py:122-125`).
-
-5. **Запись в `admin_http_metrics`.** `HttpMetricsMiddleware`
-   (`app/core/middlewares/http_metrics.py:33-81`) на завершении запроса
-   читает `request_id_var.get()` (`app/core/middlewares/http_metrics.py:71`),
-   нормализует `"-"` → `None` (`:72-73`) и передаёт в
-   `HttpMetricsService.record(..., request_id=...)`. Дальше
-   `HttpMetricsRepository.record`
-   (`app/domains/admin/repositories/http_metrics_repository.py:33-63`)
-   делает `INSERT INTO {prefix}admin_http_metrics (... request_id) VALUES (...)`.
-
-6. **Forward к внешнему агенту.** `AgentBridgeService.send`
-   (`app/domains/chat/services/agent_bridge.py:62-69`) при создании
-   `agent_request` пишет текущий `request_id_var.get()` в
-   `parent_request_id` записи. Когда `agent_bridge_runner` стартует
-   фоновую задачу (вне HTTP-контекста), он восстанавливает значение из БД и
-   ставит обратно в ContextVar
-   (`app/domains/chat/services/agent_bridge_runner.py:93-131`) — все логи
-   раннера несут тот же `request_id`, что и исходный HTTP-запрос. Это
-   единственный нетривиальный кейс пробрасывания id через границу процесса
-   (через БД).
-
-### Диаграмма
-
-```
-HTTP Request
-   |
-   v
-RequestIdMiddleware  --(X-Request-ID или uuid4().hex[:8])-->  request_id_var.set("a3f9c1d2")
-   |                                                                |
-   v                                                                |
-HttpMetricsMiddleware                                                |
-   |                                                                |
-   v                                                                |
-... handler / service / repository ...                              |
-   |                                                                |
-   |  logger.warning(...)                                           |
-   |          |                                                     |
-   |          v                                                     |
-   |    RequestIdFilter -- record.request_id = "a3f9c1d2"           |
-   |          |                                                     |
-   |          v                                                     |
-   |    stdout + logs/app.log                                       |
-   |                                                                |
-   v                                                                |
-HttpMetricsMiddleware (finally):                                    |
-   |  request_id = request_id_var.get()  ----------------------------+
-   |  INSERT INTO admin_http_metrics(..., request_id) VALUES (..., 'a3f9c1d2')
-   v
-Response (с заголовком X-Request-ID: a3f9c1d2)
-```
+**Форвард к внешнему агенту.** `AgentBridgeService.send`
+(`app/domains/chat/services/agent_bridge.py`) при создании `agent_request`
+пишет текущий `request_id_var.get()` в `parent_request_id` записи. Когда
+`agent_bridge_runner` стартует фоновую задачу (вне HTTP-контекста), он
+восстанавливает значение из БД и ставит обратно в ContextVar — все логи
+раннера несут тот же `request_id`, что и исходный HTTP-запрос. Это
+единственный нетривиальный кейс пробрасывания id через границу процесса
+(через БД).
 
 ## 6. Поиск по `request_id`
 
@@ -357,38 +316,23 @@ LIMIT 100;
 ## 8. Уровни логирования
 
 Корневой логгер `audit_workstation` настраивается на уровень из
-`SERVER__LOG_LEVEL` (`app/core/logging.py:95-96`). По уровням сейчас в
-коде используется примерно так:
+`SERVER__LOG_LEVEL`. По уровням сейчас в коде используется примерно так:
 
-- **DEBUG** — диагностика инициализации (`logger.debug("База данных
-  инициализирована")`, `app/main.py:116, 124`). На проде шумно, выключено
-  дефолтом.
-- **INFO** — жизненный цикл приложения (старт/стоп, число доменов,
-  reconcile polling-задач, инициализация rate-limit'а, размер пула). См.
-  `app/main.py:98, 104, 190, 206, 243, 277` и `app/core/middleware.py:72-75`.
+- **DEBUG** — диагностика инициализации (например, `logger.debug("База
+  данных инициализирована")`). На проде шумно, выключено дефолтом.
+- **INFO** — жизненный цикл приложения: старт/стоп, число доменов,
+  reconcile polling-задач, инициализация rate-limit'а, размер пула.
 - **WARNING** — ожидаемые, но потенциально проблемные события: rate-limit
-  превышен (`middleware.py:97`), запрос отклонён по размеру
-  (`middleware.py:153, 172`), `Kerberos` токен протух во время запроса
-  (`main.py:358`), `UniqueViolationError` / `CheckViolationError`
-  (`main.py:395, 405`), LLM timeout (`agent_loop.py`, `stream_loop.py`,
-  `agent_bridge.py:170-176, 192-198, 217-223`), SSE-блок усечён
-  (`streaming.py:291-298`).
-- **ERROR / ERROR через `logger.exception`** — `logger.exception(...)` пишет
-  traceback автоматически. Используется для всех необработанных исключений
-  (`main.py:425`), откатов lifespan-hooks и доменов (`main.py:155, 179, 186,
-  251, 260`), ошибок tool-вызовов с `error_id` (`tool_executor.py`),
-  падений сохранения сообщений (`stream_loop.py`, два соседних `logger.exception`
-  для `(OSError, asyncio.TimeoutError)` и `Exception`).
-- **CRITICAL** — невосстановимые состояния на старте: Kerberos на startup
-  (`main.py:217`), `PostgresError` (`main.py:234`), singleton-lock не
-  захватили (`main.py:141`), любая необработанная ошибка lifespan
-  (`main.py:237`).
-
-**Замеченное возможное место для доработки:** в `stream_loop.py`
-один и тот же текст `"Не удалось сохранить сообщение ассистента"` логируется
-двумя `logger.exception` подряд (для `(OSError, asyncio.TimeoutError)` и
-`Exception`) — обе ветки visually идентичны, отличить причину можно только
-по traceback. Не баг, но при просмотре логов выглядит как дубль.
+  превышен, запрос отклонён по размеру, Kerberos-токен протух во время
+  запроса, `UniqueViolationError` / `CheckViolationError` из БД, LLM
+  timeout (в agent_loop / stream_loop / agent_bridge), SSE-блок усечён.
+- **ERROR / `logger.exception`** — `logger.exception(...)` пишет traceback
+  автоматически. Используется для всех необработанных исключений в
+  request-обработчике, откатов lifespan-hooks и доменов, ошибок
+  tool-вызовов с `error_id`, падений сохранения сообщений ассистента.
+- **CRITICAL** — невосстановимые состояния на старте: Kerberos в lifespan
+  startup, `PostgresError` на инициализации пула, не захватили
+  singleton-lock, любая необработанная ошибка lifespan.
 
 ## 9. PII и безопасность
 

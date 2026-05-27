@@ -40,11 +40,18 @@ GROUP BY request_id;
 2. **Если рестартовали uvicorn** — `schedule_pending(older_than_sec=30)` в lifespan автоматически подхватит зависшие `pending`/`dispatched` запросы (`app/domains/chat/services/agent_bridge_runner.py:755`). Дождаться 30 сек после старта.
 3. **Forcibly закрыть.** Если runner точно мёртв и автоматика не помогает:
    ```sql
-   -- Перевести сообщение в failed с error-блоком.
+   -- PostgreSQL (поддерживает || для jsonb):
    UPDATE {SCHEMA}.{PREFIX}chat_messages
    SET status = 'failed',
        content = COALESCE(content, '[]'::jsonb) ||
                  '[{"type":"error","message":"runner timeout (manual recovery)","block_id":"recovery:1"}]'::jsonb
+   WHERE id = '<message_id>';
+
+   -- Greenplum 6.x (PG 9.4, без ||):
+   -- jsonb-конкатенация не поддерживается. Простейший вариант — пометить status,
+   -- блоки оставить как есть; финализирующий блок добавит lifespan reconcile при следующем рестарте:
+   UPDATE {SCHEMA}.{PREFIX}chat_messages
+   SET status = 'failed'
    WHERE id = '<message_id>';
 
    -- Перевести запрос в timeout.
@@ -52,6 +59,8 @@ GROUP BY request_id;
    SET status = 'timeout', finished_at = now()
    WHERE id = '<request_id>';
    ```
+   На GP блок с error-сообщением не дописывается inline. Если нужен — выполнить Python-recovery через `MessageRepository.append_block(..., type='error', ...)` или дождаться рестарта приложения (lifespan reconcile подхватит зависшие через `schedule_pending(older_than_sec=30)`).
+
    После этого фронт при reload увидит ErrorBlock вместо typing-индикатора.
 
 **См. также:** dev-guide §11.6, §11.7 (`chat_messages.status` state machine), `docs/forward-sequence.md`.
