@@ -142,7 +142,7 @@
     function resolveProxyUrl(url) {
         if (typeof url !== 'string' || !url) return url;
         if (!url.startsWith('/')) return url;
-        if (window.AppConfig
+        if (typeof AppConfig !== 'undefined'
             && AppConfig.api
             && typeof AppConfig.api.getUrl === 'function') {
             return AppConfig.api.getUrl(url);

@@ -1673,10 +1673,6 @@ class CreateActDialog extends DialogBase {
         if (window.currentActId === actId && window.APIClient) {
             await window.APIClient.loadActContent(actId);
 
-            if (window.StorageManager && typeof window.StorageManager.markAsSyncedWithDB === 'function') {
-                window.StorageManager.markAsSyncedWithDB();
-            }
-
             if (typeof Notifications !== 'undefined') {
                 Notifications.info('Данные акта обновлены');
             }
