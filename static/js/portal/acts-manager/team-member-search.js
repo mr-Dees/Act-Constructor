@@ -61,11 +61,7 @@ class TeamMemberSearch {
         };
         document.addEventListener('click', this._onDocumentClick);
 
-        this._nameInput.addEventListener('keydown', (e) => {
-            if (e.key === 'Escape') {
-                this._hideDropdown();
-            }
-        });
+        // ESC закрывает dropdown — через EscapeStack (push при show, unsub при hide).
     }
 
     /**
@@ -230,6 +226,10 @@ class TeamMemberSearch {
         if (this._onDocumentClick) {
             document.removeEventListener('click', this._onDocumentClick);
         }
+        if (this._escapeUnsub) {
+            this._escapeUnsub();
+            this._escapeUnsub = null;
+        }
         clearTimeout(this._debounceTimer);
     }
 
@@ -260,11 +260,18 @@ class TeamMemberSearch {
     /** @private */
     _showDropdown() {
         this._dropdown.classList.add('visible');
+        if (!this._escapeUnsub) {
+            this._escapeUnsub = EscapeStack.push(() => this._hideDropdown());
+        }
     }
 
     /** @private */
     _hideDropdown() {
         this._dropdown.classList.remove('visible');
+        if (this._escapeUnsub) {
+            this._escapeUnsub();
+            this._escapeUnsub = null;
+        }
     }
 
     /**

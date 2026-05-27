@@ -761,13 +761,9 @@ const ChatRenderer = {
             if (e.target === overlay) ChatRenderer._closeFileViewer();
         });
 
-        ChatRenderer._fileViewerEscHandler = (e) => {
-            if (e.key === 'Escape') {
-                e.stopImmediatePropagation();
-                ChatRenderer._closeFileViewer();
-            }
-        };
-        document.addEventListener('keydown', ChatRenderer._fileViewerEscHandler);
+        ChatRenderer._fileViewerEscUnsub = EscapeStack.push(() => {
+            ChatRenderer._closeFileViewer();
+        });
 
         // Модальный контейнер
         const modal = document.createElement('div');
@@ -866,9 +862,9 @@ const ChatRenderer = {
     _closeFileViewer() {
         const existing = document.querySelector('.chat-file-viewer-overlay');
         if (existing) existing.remove();
-        if (ChatRenderer._fileViewerEscHandler) {
-            document.removeEventListener('keydown', ChatRenderer._fileViewerEscHandler);
-            ChatRenderer._fileViewerEscHandler = null;
+        if (ChatRenderer._fileViewerEscUnsub) {
+            ChatRenderer._fileViewerEscUnsub();
+            ChatRenderer._fileViewerEscUnsub = null;
         }
     },
 

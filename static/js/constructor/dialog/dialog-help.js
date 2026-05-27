@@ -1,28 +1,15 @@
 /**
- * Менеджер системы помощи и инструкций
+ * Менеджер системы помощи и инструкций.
  *
- * Управляет отображением контекстных инструкций для пользователя
- * на разных этапах работы с конструктором актов.
- * Наследует базовый функционал от DialogBase.
+ * Содержимое helpModal лежит статически в шаблоне (не клонируется). Показ/скрытие
+ * идёт через DialogBase._showDialog/_hideDialog с opt'ом appendToBody=false —
+ * единый стек _activeDialogs, focus-trap, aria-modal, EscapeStack и
+ * _previousFocus работают так же, как для остальных диалогов.
  */
 class HelpManager extends DialogBase {
-    /**
-     * Текущее модальное окно
-     * @private
-     * @type {HTMLElement|null}
-     */
-    static _currentModal = null;
-
-    /**
-     * Сохранённые позиции прокрутки по номеру шага
-     * @private
-     * @type {Object<number, number>}
-     */
+    /** Сохранённые позиции прокрутки по номеру шага */
     static _scrollPositions = {};
 
-    /**
-     * Инициализирует менеджер помощи
-     */
     static init() {
         try {
             const elements = this._getElements();
@@ -39,11 +26,6 @@ class HelpManager extends DialogBase {
         }
     }
 
-    /**
-     * Получает все нужные DOM-элементы
-     * @private
-     * @returns {{helpBtn: HTMLElement|null, modal: HTMLElement|null, closeBtn: HTMLElement|null}} Элементы интерфейса помощи
-     */
     static _getElements() {
         return {
             helpBtn: document.getElementById('helpBtn'),
@@ -52,28 +34,15 @@ class HelpManager extends DialogBase {
         };
     }
 
-    /**
-     * Проверяет наличие обязательных элементов
-     * @private
-     * @param {{helpBtn: HTMLElement|null, modal: HTMLElement|null, closeBtn: HTMLElement|null}} elements - Объекты DOM элементов
-     * @returns {boolean} true если все элементы найдены, иначе false
-     */
     static _validateElements(elements) {
         return !!(elements.helpBtn && elements.modal);
     }
 
-    /**
-     * Назначает события на элементы управления
-     * @private
-     * @param {{helpBtn: HTMLElement, modal: HTMLElement, closeBtn: HTMLElement|null}} elements - DOM-элементы
-     */
     static _setupEventHandlers(elements) {
         const {helpBtn, modal, closeBtn} = elements;
 
-        // Открытие по кнопке помощи
         helpBtn.addEventListener('click', () => this.show());
 
-        // Непрерывное отслеживание позиции прокрутки
         const modalBody = modal.querySelector('.help-modal-body');
         if (modalBody) {
             modalBody.addEventListener('scroll', () => {
@@ -84,33 +53,14 @@ class HelpManager extends DialogBase {
             });
         }
 
-        // Закрытие по кнопке крестика
         if (closeBtn) {
             closeBtn.addEventListener('click', () => this.hide());
         }
 
-        // Закрытие по клику на оверлей (сам modal является оверлеем)
         this._setupOverlayClickHandler(modal, modal.querySelector('.help-modal-content'), () => this.hide());
-
-        // Закрытие по Escape
-        this._setupModalEscapeHandler(modal);
+        this._setupEscapeHandler(modal, () => this.hide());
     }
 
-    /**
-     * Настраивает обработчик Escape для модального окна помощи
-     * @private
-     */
-    static _setupModalEscapeHandler(modal) {
-        document.addEventListener('keydown', (e) => {
-            if (e.key === 'Escape' && !modal.classList.contains('hidden')) {
-                this.hide();
-            }
-        });
-    }
-
-    /**
-     * Отображает модальное окно инструкции для текущего шага
-     */
     static show() {
         try {
             const currentStep = AppState.currentStep || 1;
@@ -129,7 +79,11 @@ class HelpManager extends DialogBase {
             }
 
             this._updateModalContent(elements, currentStep, contentElement.innerHTML);
-            this._showModalHelp(elements.modal);
+
+            elements.modal.classList.remove('hidden');
+            this._showDialog(elements.modal, {appendToBody: false});
+
+            this._restoreScrollPosition(elements.modal, currentStep);
         } catch (error) {
             console.error(`Ошибка показа помощи: ${error.message}`);
             if (typeof Notifications !== 'undefined') {
@@ -138,11 +92,6 @@ class HelpManager extends DialogBase {
         }
     }
 
-    /**
-     * Находит внутренние элементы модального окна
-     * @private
-     * @returns {{modal: HTMLElement, title: HTMLElement, body: HTMLElement}|null} Элементы модального окна или null
-     */
     static _getModalElements() {
         const modal = document.getElementById('helpModal');
         const title = document.getElementById('helpModalTitle');
@@ -156,59 +105,31 @@ class HelpManager extends DialogBase {
         return {modal, title, body};
     }
 
-    /**
-     * Обновляет содержимое модального окна
-     * @private
-     * @param {{title: HTMLElement, body: HTMLElement}} elements - Ссылки на элементы модального окна
-     * @param {number} step - Номер шага
-     * @param {string} content - HTML содержимое
-     */
     static _updateModalContent(elements, step, content) {
         const title = AppConfig.help.titles[step] || 'Инструкция';
         elements.title.textContent = title;
         elements.body.innerHTML = content;
     }
 
-    /**
-     * Показывает модальное окно помощи
-     * @private
-     * @param {HTMLElement} modal - Элемент модального окна
-     */
-    static _showModalHelp(modal) {
-        modal.classList.remove('hidden');
-        this._currentModal = modal;
-        this._lockBodyScroll();
-
+    static _restoreScrollPosition(modal, step) {
         const modalBody = modal.querySelector('.help-modal-body');
-        if (modalBody) {
-            const currentStep = AppState.currentStep || 1;
-            const savedPosition = this._scrollPositions[currentStep] || 0;
-
+        if (!modalBody) return;
+        const savedPosition = this._scrollPositions[step] || 0;
+        requestAnimationFrame(() => {
+            modalBody.style.scrollBehavior = 'auto';
+            modalBody.scrollTop = savedPosition;
             requestAnimationFrame(() => {
-                modalBody.style.scrollBehavior = 'auto';
-                modalBody.scrollTop = savedPosition;
-                requestAnimationFrame(() => {
-                    modalBody.style.scrollBehavior = '';
-                });
+                modalBody.style.scrollBehavior = '';
             });
-        }
+        });
     }
 
-    /**
-     * Скрывает модальное окно
-     */
     static hide() {
         const modal = document.getElementById('helpModal');
-        if (modal) {
-            modal.classList.add('hidden');
-            this._currentModal = null;
-            this._unlockBodyScroll();
-        }
+        if (!modal) return;
+        this._hideDialog(modal);
     }
 
-    /**
-     * Обновляет всплывающую подсказку у кнопки помощи
-     */
     static updateTooltip() {
         const helpBtn = document.getElementById('helpBtn');
         if (!helpBtn) return;
@@ -220,10 +141,8 @@ class HelpManager extends DialogBase {
     }
 }
 
-// Глобальный доступ
 window.HelpManager = HelpManager;
 
-// Инициализация при загрузке DOM
 document.addEventListener('DOMContentLoaded', () => {
     HelpManager.init();
 });

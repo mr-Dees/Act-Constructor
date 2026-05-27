@@ -206,28 +206,22 @@ class LinkFootnoteContextMenu {
             return true;
         };
 
-        // Обработчики клавиш для textInput
+        // Обработчики клавиш для textInput (ESC закрывается через EscapeStack)
         textInput.addEventListener('keydown', (e) => {
             if (e.key === 'Enter') {
                 e.preventDefault();
                 textarea.focus();
                 textarea.select();
-            } else if (e.key === 'Escape') {
-                e.preventDefault();
-                this.hide();
             }
         });
 
-        // Обработчики клавиш для textarea
+        // Обработчики клавиш для textarea (ESC закрывается через EscapeStack)
         textarea.addEventListener('keydown', (e) => {
             if (e.key === 'Enter' && !e.shiftKey) {
                 e.preventDefault();
                 if (saveChanges()) {
                     this.hide();
                 }
-            } else if (e.key === 'Escape') {
-                e.preventDefault();
-                this.hide();
             }
         });
 
@@ -274,9 +268,6 @@ class LinkFootnoteContextMenu {
                 }
 
                 this.hide();
-                document.removeEventListener('click', clickHandler);
-                document.removeEventListener('mousedown', globalMouseDownHandler);
-                document.removeEventListener('keydown', escapeHandler);
             }
 
             selectionStartedInside = false;
@@ -286,20 +277,14 @@ class LinkFootnoteContextMenu {
             document.addEventListener('click', clickHandler);
         }, 0);
 
-        const escapeHandler = (e) => {
-            if (e.key === 'Escape') {
-                this.hide();
-                document.removeEventListener('keydown', escapeHandler);
-                document.removeEventListener('click', clickHandler);
-                document.removeEventListener('mousedown', globalMouseDownHandler);
-            }
-        };
-
-        document.addEventListener('keydown', escapeHandler);
+        // ESC — через EscapeStack: верхний слой LIFO.
+        const escapeUnsub = EscapeStack.push(() => {
+            this.hide();
+        });
 
         // Сохраняем обработчики для последующей очистки
         popup._cleanupHandlers = () => {
-            document.removeEventListener('keydown', escapeHandler);
+            escapeUnsub();
             document.removeEventListener('click', clickHandler);
             document.removeEventListener('mousedown', globalMouseDownHandler);
         };

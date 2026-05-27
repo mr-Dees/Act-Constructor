@@ -61,6 +61,9 @@
          Должен идти СРАЗУ после notifications.js — boundary использует
          window.Notifications для toast'ов. -->
     <script defer src="{{ url_for('static', path='js/shared/error-boundary.js') | versioned }}"></script>
+    <!-- EscapeStack — централизованный LIFO-стек ESC-обработчиков
+         (диалоги, контекстные меню, дропдауны). До любых потребителей. -->
+    <script defer src="{{ url_for('static', path='js/shared/escape-stack.js') | versioned }}"></script>
     <script defer src="{{ url_for('static', path='js/constructor/changelog-tracker.js') | versioned }}"></script>
     <script defer src="{{ url_for('static', path='js/constructor/lifecycle-helper.js') | versioned }}"></script>
     <script defer src="{{ url_for('static', path='js/constructor/storage-manager.js') | versioned }}"></script>

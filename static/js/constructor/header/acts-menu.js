@@ -14,17 +14,6 @@ class ActsMenuManager {
     static _cacheKey = 'acts_menu_cache';
     static _cacheExpiry = 1 * 60 * 1000;
 
-    static _setupEscapeHandler() {
-        document.addEventListener('keydown', (e) => {
-            if (e.key === 'Escape') {
-                const menu = document.getElementById('actsMenuDropdown');
-                if (menu && !menu.classList.contains('hidden')) {
-                    this.hide();
-                }
-            }
-        });
-    }
-
     static show() {
         const menu = document.getElementById('actsMenuDropdown');
         const btn = document.getElementById('actsMenuBtn');
@@ -32,6 +21,9 @@ class ActsMenuManager {
             menu.classList.remove('hidden');
             if (btn) btn.classList.add('active');
             this.renderActsList();
+            if (!this._escapeUnsub) {
+                this._escapeUnsub = EscapeStack.push(() => this.hide());
+            }
         }
     }
 
@@ -40,6 +32,10 @@ class ActsMenuManager {
         const btn = document.getElementById('actsMenuBtn');
         if (menu) menu.classList.add('hidden');
         if (btn) btn.classList.remove('active');
+        if (this._escapeUnsub) {
+            this._escapeUnsub();
+            this._escapeUnsub = null;
+        }
     }
 
     static toggle() {
@@ -605,8 +601,6 @@ class ActsMenuManager {
         const editBtn = document.getElementById('editMetadataBtn');
         const duplicateBtn = document.getElementById('duplicateActBtn');
         const deleteBtn = document.getElementById('deleteActBtn');
-
-        this._setupEscapeHandler();
 
         // Подписка на cross-tab события: при удалении/дублировании акта
         // в другой вкладке инвалидируем кеш меню и обновляем открытый список.

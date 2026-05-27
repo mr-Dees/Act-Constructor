@@ -73,12 +73,7 @@ class PreviewMenuManager {
             }
         });
 
-        // Закрытие по Escape
-        document.addEventListener('keydown', (e) => {
-            if (e.key === 'Escape' && this.isOpen) {
-                this.close();
-            }
-        });
+        // Закрытие по Escape — через EscapeStack (push при open, pop при close).
 
         // Обновление максимальной ширины при изменении размера окна (с debounce)
         let resizeTimeout;
@@ -249,6 +244,7 @@ class PreviewMenuManager {
         this.menu.classList.remove('hidden');
         this.openButton.classList.add('active');
         this.isOpen = true;
+        this._escapeUnsub = EscapeStack.push(() => this.close());
 
         // Обновляем содержимое
         this.updateContent();
@@ -264,6 +260,10 @@ class PreviewMenuManager {
         this.menu.classList.add('hidden');
         this.openButton.classList.remove('active');
         this.isOpen = false;
+        if (this._escapeUnsub) {
+            this._escapeUnsub();
+            this._escapeUnsub = null;
+        }
 
         // Уведомляем о событии
         this._dispatchEvent('preview-menu:closed');

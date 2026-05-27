@@ -23,7 +23,7 @@ class AppendixNumberDropdown {
 
         this._isOpen = false;
         this._onDocumentClick = this._onDocumentClick.bind(this);
-        this._onDocumentKeydown = this._onDocumentKeydown.bind(this);
+        this._escapeUnsub = null;
 
         this._render();
         this._bindEvents();
@@ -47,7 +47,6 @@ class AppendixNumberDropdown {
     destroy() {
         this._closePopup();
         document.removeEventListener('click', this._onDocumentClick, true);
-        document.removeEventListener('keydown', this._onDocumentKeydown, true);
         if (this._root && this._root.parentNode) {
             this._root.parentNode.removeChild(this._root);
         }
@@ -142,7 +141,10 @@ class AppendixNumberDropdown {
         this._trigger.setAttribute('aria-expanded', 'true');
         this._menu.hidden = false;
         document.addEventListener('click', this._onDocumentClick, true);
-        document.addEventListener('keydown', this._onDocumentKeydown, true);
+        this._escapeUnsub = EscapeStack.push(() => {
+            this._closePopup();
+            this._trigger?.focus();
+        });
     }
 
     _closePopup() {
@@ -152,20 +154,16 @@ class AppendixNumberDropdown {
         this._trigger.setAttribute('aria-expanded', 'false');
         this._menu.hidden = true;
         document.removeEventListener('click', this._onDocumentClick, true);
-        document.removeEventListener('keydown', this._onDocumentKeydown, true);
+        if (this._escapeUnsub) {
+            this._escapeUnsub();
+            this._escapeUnsub = null;
+        }
     }
 
     _onDocumentClick(e) {
         if (!this._root) return;
         if (!this._root.contains(e.target)) {
             this._closePopup();
-        }
-    }
-
-    _onDocumentKeydown(e) {
-        if (e.key === 'Escape') {
-            this._closePopup();
-            this._trigger?.focus();
         }
     }
 }

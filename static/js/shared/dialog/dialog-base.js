@@ -124,18 +124,23 @@ class DialogBase {
      * @protected
      * @param {HTMLElement} overlay - Overlay элемент
      */
-    static _showDialog(overlay) {
+    static _showDialog(overlay, opts = {}) {
+        const {appendToBody = true, animate = true} = opts;
+
         // Сохраняем элемент, у которого был фокус до открытия — вернём после _hideDialog.
         overlay._previousFocus = document.activeElement instanceof HTMLElement
             ? document.activeElement
             : null;
 
-        document.body.appendChild(overlay);
+        if (appendToBody) document.body.appendChild(overlay);
         this._activeDialogs.push(overlay);
         this._lockBodyScroll();
 
+        // Признак "уже в DOM" — _hideDialog не будет удалять.
+        overlay._preserveInDom = !appendToBody;
+
         // Принудительный reflow для анимации (void — явное выражение, чтобы линтеры/минификаторы не выкинули его как «unused expression»)
-        void overlay.offsetHeight;
+        if (animate) void overlay.offsetHeight;
         overlay.classList.add('visible');
 
         // ARIA-маркеры модального диалога. role/aria-modal не перетираем,
@@ -205,7 +210,13 @@ class DialogBase {
         delete overlay._previousFocus;
 
         setTimeout(() => {
-            if (overlay.parentNode) {
+            const preserveInDom = overlay._preserveInDom;
+            delete overlay._preserveInDom;
+            if (preserveInDom) {
+                // Существующая в шаблоне нода — скрываем, не удаляем.
+                overlay.classList.remove('closing');
+                overlay.classList.add('hidden');
+            } else if (overlay.parentNode) {
                 overlay.remove();
             }
 
@@ -247,25 +258,16 @@ class DialogBase {
     }
 
     /**
-     * Настраивает обработчик закрытия по клавише Escape
+     * Настраивает обработчик закрытия по клавише Escape через EscapeStack.
+     * Стек LIFO: срабатывает только верхний хэндлер, событие гасится через
+     * stopImmediatePropagation — старые legacy-listener'ы не отрабатывают.
      * @protected
      * @param {HTMLElement} overlay - Overlay элемент
      * @param {Function} onClose - Callback при закрытии
      */
     static _setupEscapeHandler(overlay, onClose) {
-        const escapeHandler = (e) => {
-            if (e.key === 'Escape') {
-                // Закрываем только самый верхний диалог
-                if (this._activeDialogs[this._activeDialogs.length - 1] === overlay) {
-                    onClose();
-                    document.removeEventListener('keydown', escapeHandler);
-                }
-            }
-        };
-        document.addEventListener('keydown', escapeHandler);
-
-        // Сохраняем ссылку на handler для возможности удаления
-        overlay._escapeHandler = escapeHandler;
+        const unsub = EscapeStack.push(() => onClose());
+        overlay._escapeUnsub = unsub;
     }
 
     /**
@@ -274,9 +276,9 @@ class DialogBase {
      * @param {HTMLElement} overlay - Overlay элемент
      */
     static _removeEscapeHandler(overlay) {
-        if (overlay._escapeHandler) {
-            document.removeEventListener('keydown', overlay._escapeHandler);
-            delete overlay._escapeHandler;
+        if (overlay._escapeUnsub) {
+            overlay._escapeUnsub();
+            delete overlay._escapeUnsub;
         }
     }
 

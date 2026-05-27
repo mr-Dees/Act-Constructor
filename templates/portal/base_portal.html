@@ -52,6 +52,10 @@
      window.Notifications для toast'ов, поэтому Notifications обязан
      быть инициализирован раньше. -->
 <script defer src="{{ url_for('static', path='js/shared/error-boundary.js') | versioned }}"></script>
+<!-- EscapeStack — централизованный LIFO-стек ESC-обработчиков для диалогов,
+     контекстных меню, дропдаунов. Должен загружаться ДО dialog-base и
+     остальных потребителей. -->
+<script defer src="{{ url_for('static', path='js/shared/escape-stack.js') | versioned }}"></script>
 <script defer src="{{ url_for('static', path='js/shared/dialog/dialog-base.js') | versioned }}"></script>
 <script defer src="{{ url_for('static', path='js/shared/dialog/dialog-confirm.js') | versioned }}"></script>
 <script defer src="{{ url_for('static', path='js/portal/portal-sidebar.js') | versioned }}"></script>
