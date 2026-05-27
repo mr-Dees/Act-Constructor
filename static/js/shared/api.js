@@ -1,4 +1,21 @@
 /**
+ * Ошибка "лок акта потерян": сервер вернул 409 на PUT /content.
+ * Типовой сценарий — пока вкладка была в фоне, сработал autoExit
+ * (через background-throttled таймер), снял блокировку и сохранил акт.
+ * Юзер видит UI акта, но фактически уже не владеет локом — следующий Save → 409.
+ * Вызывающая сторона ловит этот тип и делает редирект на список с плашкой,
+ * идентичной той, что показывается при штатном autoExit'е.
+ */
+class LockLostError extends Error {
+    constructor() {
+        super('Блокировка акта потеряна');
+        this.name = 'LockLostError';
+        this.code = 'lock-lost';
+    }
+}
+window.LockLostError = LockLostError;
+
+/**
  * Клиент для взаимодействия с API
  *
  * Обрабатывает все HTTP-запросы к серверу для работы с актами.
@@ -544,6 +561,12 @@ class APIClient {
                     throw new Error('Нет доступа к акту');
                 } else if (resp.status === 404) {
                     throw new Error('Акт не найден');
+                } else if (resp.status === 409) {
+                    // Лок потерян (автовыход по неактивности успел снять блокировку
+                    // пока вкладка была в фоне). Кидаем типизированную ошибку,
+                    // вызывающая сторона (navigation-manager) делает редирект на список
+                    // с тем же sessionStorage-флагом, что и autoExit.
+                    throw new LockLostError();
                 }
                 throw new Error('Ошибка сохранения');
             }
@@ -558,7 +581,11 @@ class APIClient {
 
         } catch (err) {
             console.error('Ошибка сохранения акта в БД:', err);
-            Notifications.error(`Не удалось сохранить акт: ${err.message}`);
+            // Для LockLostError не показываем toast — вызывающая сторона сделает
+            // редирект на список с плашкой autoExit (одинаковый UX с фоновым autoExit'ом).
+            if (!(err instanceof LockLostError)) {
+                Notifications.error(`Не удалось сохранить акт: ${err.message}`);
+            }
             throw err;
         } finally {
             APIClient._saveInFlight = false;

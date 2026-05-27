@@ -10,7 +10,6 @@ class LockManager {
     static _config = null;
     static _inactivityCheckInterval = null;
     static _extensionInterval = null;
-    static _inactivityDialogTimeout = null;
     static _countdownInterval = null;
     static _lastActivity = Date.now();
     static _lastExtensionAt = Date.now();
@@ -21,6 +20,13 @@ class LockManager {
     static _beforeUnloadHandler = null;
     static _activityHandler = null;
     static _activityEvents = ['mousedown', 'keydown', 'scroll', 'touchstart'];
+    // Дедлайн диалога неактивности (Date.now() + timeoutSeconds*1000). null = диалог не показан.
+    // Хранится статически, чтобы _handleVisibilityChange мог решить — пора ли выкидывать.
+    static _inactivityDialogDeadline = null;
+    // Программный close активного диалога неактивности (получаем из DialogManager.onMount).
+    static _inactivityDialogClose = null;
+    // Bound-обработчик visibilitychange (для корректного removeEventListener в destroy).
+    static _visibilityHandler = null;
 
     /**
      * Инициализирует менеджер для конкретного акта
@@ -50,6 +56,7 @@ class LockManager {
             this._startInactivityCheck();
             this._startAutoExtension();
             this._setupBeforeUnload();
+            this._setupVisibilityHandling();
 
             console.log('[LockManager] init OK для actId=', actId);
             console.log('Настройки блокировок:', this._config);
@@ -437,15 +444,101 @@ class LockManager {
             clearInterval(this._extensionInterval);
             this._extensionInterval = null;
         }
-        if (this._inactivityDialogTimeout) {
-            clearTimeout(this._inactivityDialogTimeout);
-            this._inactivityDialogTimeout = null;
-        }
         if (this._countdownInterval) {
             clearInterval(this._countdownInterval);
             this._countdownInterval = null;
         }
+        this._inactivityDialogDeadline = null;
+        this._inactivityDialogClose = null;
+        this._teardownVisibilityHandling();
         this._teardownActivityTracking();
+    }
+
+    /**
+     * Подписка на visibilitychange. Когда вкладка возвращается из фона, throttle браузера
+     * мог "сдвинуть" таймеры — пересчитываем по реальному времени без обращений к бэку.
+     * @private
+     */
+    static _setupVisibilityHandling() {
+        this._teardownVisibilityHandling();
+        this._visibilityHandler = () => this._handleVisibilityChange();
+        document.addEventListener('visibilitychange', this._visibilityHandler);
+    }
+
+    /**
+     * Снимает visibilitychange-listener. Идемпотентен.
+     * @private
+     */
+    static _teardownVisibilityHandling() {
+        if (!this._visibilityHandler) return;
+        document.removeEventListener('visibilitychange', this._visibilityHandler);
+        this._visibilityHandler = null;
+    }
+
+    /**
+     * Реакция на возврат вкладки в активное состояние.
+     * Chrome/Edge в фоне throttle'ят setInterval/setTimeout (вплоть до ~раза в минуту),
+     * поэтому диалог неактивности может "застрять" с устаревшим countdown'ом, либо
+     * порог неактивности мог быть превышен пока fired-таймер ещё не успел сработать.
+     * Никаких HTTP-запросов здесь не делаем — лок на бэке мог быть уже снят
+     * предыдущим autoExit'ом, и Save обработает 409 отдельно.
+     * @private
+     */
+    static _handleVisibilityChange() {
+        if (document.hidden) return;
+        if (this._isExiting) return;
+        if (!this._actId) return;
+
+        // Случай A: диалог открыт и его дедлайн уже прошёл → немедленный autoExit.
+        if (this._inactivityDialogDeadline !== null
+            && Date.now() >= this._inactivityDialogDeadline) {
+            console.log('[LockManager] visibilitychange: дедлайн диалога просрочен, инициируем autoExit');
+            this._closeInactivityDialog();
+            this._initiateExit('autoExit');
+            return;
+        }
+
+        // Случай B: диалога нет, но порог неактивности уже превышен →
+        // сразу autoExit без промежуточного диалога «Продолжить?».
+        // Юзер был неактивен дольше threshold; бэк мог уже снять лок через
+        // expired_locks_cleanup (TTL lockDurationMinutes). Спрашивать «остаться?»
+        // бессмысленно: extend всё равно упадёт 4xx → fatal → _initiateExit.
+        if (this._inactivityDialogDeadline === null) {
+            const idleMs = Date.now() - this._lastActivity;
+            const idleThresholdMs = this._config.inactivityTimeoutMinutes * 60 * 1000;
+            if (idleMs >= idleThresholdMs) {
+                console.log('[LockManager] visibilitychange: порог неактивности превышен, autoExit');
+                if (this._inactivityCheckInterval) {
+                    clearInterval(this._inactivityCheckInterval);
+                    this._inactivityCheckInterval = null;
+                }
+                this._initiateExit('autoExit');
+            }
+        }
+    }
+
+    /**
+     * Принудительно закрывает диалог неактивности (если открыт), очищает countdown и дедлайн.
+     * Используется при autoExit'е из setInterval'а countdown'а либо из visibilitychange,
+     * чтобы overlay не "висел" поверх редиректа.
+     * @private
+     */
+    static _closeInactivityDialog() {
+        if (this._countdownInterval) {
+            clearInterval(this._countdownInterval);
+            this._countdownInterval = null;
+        }
+        this._inactivityDialogDeadline = null;
+        if (typeof this._inactivityDialogClose === 'function') {
+            try {
+                // Резолвим dialogPromise значением `false` (как cancel) — после await guard
+                // _isExiting=true перехватит ветку и extend не пойдёт. Любое значение здесь подходит.
+                this._inactivityDialogClose(false);
+            } catch (e) {
+                console.warn('[LockManager] _closeInactivityDialog: ошибка close-handle:', e);
+            }
+            this._inactivityDialogClose = null;
+        }
     }
 
     /**
@@ -457,10 +550,13 @@ class LockManager {
         const cfg = AppConfig.lock;
         const timeoutSeconds = this._config.inactivityDialogTimeoutSeconds;
 
-        this._inactivityDialogTimeout = setTimeout(() => {
-            console.log('Истекло время подтверждения, автосохранение и выход.');
-            this._initiateExit('autoExit');
-        }, timeoutSeconds * 1000);
+        // Дедлайн считаем по реальному времени. Это критично для фоновой вкладки:
+        // Chrome throttle'ит setInterval/setTimeout до ~раза в минуту, и старый
+        // decrement-counter (remaining--) разъезжается с реальностью.
+        // setInterval здесь — только для обновления UI; решение о выходе принимается
+        // по Date.now() >= deadline, что устойчиво к любому throttling.
+        const deadline = Date.now() + timeoutSeconds * 1000;
+        this._inactivityDialogDeadline = deadline;
 
         const dialogPromise = DialogManager.show({
             title: cfg.messages.inactivityTitle,
@@ -468,29 +564,44 @@ class LockManager {
             icon: '💤',
             type: 'warning',
             confirmText: 'Продолжить',
-            cancelText: 'Сохранить и выйти'
+            cancelText: 'Сохранить и выйти',
+            onMount: ({ overlay, close }) => {
+                // Сохраняем close-handle, чтобы _closeInactivityDialog мог программно
+                // закрыть overlay при autoExit (race-free, без querySelector).
+                this._inactivityDialogClose = close;
+
+                const messageEl = overlay?.querySelector('.dialog-message');
+                let countdownEl = null;
+                if (messageEl) {
+                    countdownEl = document.createElement('p');
+                    countdownEl.className = 'dialog-message';
+                    countdownEl.style.marginTop = '4px';
+                    countdownEl.style.fontWeight = 'bold';
+                    countdownEl.textContent = `Авто-выход через ${timeoutSeconds} сек.`;
+                    messageEl.after(countdownEl);
+                }
+
+                // Тикаем чаще 1 сек, чтобы при возврате видимости UI догнал реальность
+                // не позже чем за 250 мс. Решение о выходе тоже принимает этот же
+                // setInterval — отдельный setTimeout убран, иначе таймеры расходятся
+                // при throttling.
+                this._countdownInterval = setInterval(() => {
+                    const remainingMs = deadline - Date.now();
+                    const remaining = Math.max(0, Math.ceil(remainingMs / 1000));
+                    if (countdownEl) countdownEl.textContent = `Авто-выход через ${remaining} сек.`;
+                    if (remainingMs <= 0) {
+                        clearInterval(this._countdownInterval);
+                        this._countdownInterval = null;
+                        console.log('Истекло время подтверждения, автосохранение и выход.');
+                        // Закрываем overlay программно перед редиректом, иначе
+                        // диалог остаётся "висящим" поверх (особенно если interval
+                        // сработал в фоне с задержкой).
+                        this._closeInactivityDialog();
+                        this._initiateExit('autoExit');
+                    }
+                }, 250);
+            }
         });
-
-        // Добавляем элемент с живым обратным отсчётом
-        const overlay = document.querySelector('.custom-dialog-overlay:last-child');
-        const messageEl = overlay?.querySelector('.dialog-message');
-        let countdownEl = null;
-        if (messageEl) {
-            countdownEl = document.createElement('p');
-            countdownEl.className = 'dialog-message';
-            countdownEl.style.marginTop = '4px';
-            countdownEl.style.fontWeight = 'bold';
-            countdownEl.textContent = `Авто-выход через ${timeoutSeconds} сек.`;
-            messageEl.after(countdownEl);
-        }
-
-        let remaining = timeoutSeconds;
-        this._countdownInterval = setInterval(() => {
-            remaining--;
-            if (remaining < 0) remaining = 0;
-            if (countdownEl) countdownEl.textContent = `Авто-выход через ${remaining} сек.`;
-            if (remaining <= 0) clearInterval(this._countdownInterval);
-        }, 1000);
 
         const stay = await dialogPromise;
 
@@ -502,14 +613,12 @@ class LockManager {
             return;
         }
 
-        if (this._inactivityDialogTimeout) {
-            clearTimeout(this._inactivityDialogTimeout);
-            this._inactivityDialogTimeout = null;
-        }
         if (this._countdownInterval) {
             clearInterval(this._countdownInterval);
             this._countdownInterval = null;
         }
+        this._inactivityDialogDeadline = null;
+        this._inactivityDialogClose = null;
 
         if (stay) {
             // В диалоге «остаться?» юзер явно нажал «Да» — это интерактивная точка,
@@ -536,6 +645,9 @@ class LockManager {
     static async _initiateExit(action) {
         if (this._isExiting) return this._exitPromise;
         this._isExiting = true;
+        // Закрываем диалог неактивности ДО destroy() — destroy сбросит _inactivityDialogClose,
+        // и закрыть overlay программно станет невозможно (overlay остался бы висеть).
+        this._closeInactivityDialog();
         this._exitPromise = (async () => {
             this._manualUnlockTriggered = true; // блокируем sendBeacon
 
@@ -631,12 +743,14 @@ class LockManager {
                 this._actId = null;
                 console.log(`LockManager: завершение выхода для акта ${closedId}`);
                 const exitUrl = AppConfig.api.getUrl('/acts');
+                // Жёсткий редирект без confirmNavigation: сессия завершается
+                // принудительно (autoExit / extensionFailed / manualExit).
+                // Если save выше упал (например 409 при чужом локе),
+                // markAsSyncedWithDB не вызвался → confirmNavigation показал бы
+                // плашку «Несохранённые изменения. Уйти?» и блокировал бы
+                // навигацию. allowUnload() уже снят выше.
                 setTimeout(() => {
-                    if (typeof StorageManager !== 'undefined' && typeof StorageManager.confirmNavigation === 'function') {
-                        StorageManager.confirmNavigation(exitUrl, { url: exitUrl });
-                    } else {
-                        window.location.href = exitUrl;
-                    }
+                    window.location.href = exitUrl;
                 }, AppConfig.timings.redirectAfterUnlock);
             }
         })();

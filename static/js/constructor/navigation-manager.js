@@ -105,6 +105,25 @@ class NavigationManager {
             }
 
         } catch (error) {
+            // 409 Conflict на save: лок был снят фоновым autoExit'ом (вкладка была в фоне).
+            // Делаем то же что и LockManager._initiateExit('autoExit'): ставим тот же
+            // sessionStorage-флаг (`sessionAutoExited` — читается acts-manager-page._checkSessionExit)
+            // и редиректим на список. Юзер увидит ту же плашку "сессия завершена, изменения сохранены".
+            if (typeof LockLostError !== 'undefined' && error instanceof LockLostError) {
+                console.warn('[NavigationManager] LockLostError на save → редирект на список актов');
+                sessionStorage.setItem('sessionAutoExited', 'true');
+                // Снимаем браузерный beforeunload-warning.
+                if (typeof StorageManager !== 'undefined' && typeof StorageManager.allowUnload === 'function') {
+                    StorageManager.allowUnload();
+                }
+                // Жёсткий редирект без confirmNavigation: save вернул 409,
+                // markAsSyncedWithDB не вызвался, hasUnsavedChanges=true →
+                // confirmNavigation показал бы кастомную плашку «Несохранённые
+                // изменения. Уйти?» и блокировал бы навигацию. Сессия уже
+                // завершена — спрашивать поздно.
+                window.location.href = AppConfig.api.getUrl('/acts');
+                return;
+            }
             console.error('Ошибка при обработке:', error);
             Notifications.error(
                 `Произошла ошибка: ${error.message}`,
