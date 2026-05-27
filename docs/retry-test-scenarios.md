@@ -37,6 +37,35 @@
 | 26 | Без ошибок | функция возвращает результат сразу | Один вызов, результат отдан |
 | 27 | Backoff растёт экспоненциально | retryable 3 раза подряд | Задержки `B*1`, `B*2`, `B*4` (+ jitter), capped at 60s |
 
+## Пример теста
+
+Минимальный сценарий — 5xx ретраится, успех на N-й попытке (см. `tests/domains/chat/test_retry.py`):
+
+```python
+from openai import APIStatusError
+from httpx import Request, Response
+from app.domains.chat.services.retry import retry_on_transient
+
+def _fake_status_error(code: int) -> APIStatusError:
+    resp = Response(code, request=Request("POST", "http://x"))
+    return APIStatusError(message="x", response=resp, body=None)
+
+async def test_retries_on_5xx_then_succeeds():
+    calls = {"n": 0}
+
+    @retry_on_transient(on_429=False, on_5xx=True, max_attempts=3, backoff_base=0.0)
+    async def fn():
+        calls["n"] += 1
+        if calls["n"] < 2:
+            raise _fake_status_error(503)
+        return "ok"
+
+    assert await fn() == "ok"
+    assert calls["n"] == 2   # одна неудачная попытка + одна успешная
+```
+
+Ключевое: `backoff_base=0.0` убирает реальный sleep (остаётся только jitter `[0, 0.5)`), счётчик `calls["n"]` проверяет ровно столько обращений, сколько ожидаем. Для негативных сценариев (типа «404 не ретраится») вместо счётчика — `pytest.raises(APIStatusError)`.
+
 ## Edge-cases
 
 - `code is None` в `APIStatusError` — не ретраить (на всякий случай защищены).

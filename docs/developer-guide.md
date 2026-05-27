@@ -1410,35 +1410,22 @@ class ActCrudRepository(BaseRepository):
 
 ### 6.5 Миграции
 
-SQL-схемы хранятся в каждом домене:
+#### 6.5.1 Правила миграций
 
-```
-app/domains/<name>/migrations/
-├── postgresql/schema.sql
-└── greenplum/schema.sql
-```
+- SQL-схемы лежат в `app/domains/<name>/migrations/postgresql/schema.sql` и `.../greenplum/schema.sql`.
+- Таблицы создаются на старте через `create_tables_if_not_exist(domains)`. Всё через `CREATE TABLE IF NOT EXISTS` — повторный запуск безопасен.
+- ALTER-миграций (Alembic и т.п.) НЕТ. Новая колонка появится сама на свежей БД; на существующей админ делает `ALTER TABLE` руками. `DEFAULT … NOT NULL` в DDL заполнит старые строки.
+- Плейсхолдеры в SQL: `{SCHEMA}.` (префикс схемы), `{PREFIX}` (`DATABASE__TABLE_PREFIX`), `{REF_*}` (ссылки на внешние таблицы из `migration_substitutions`). Bare-имена без `{PREFIX}` — баг: имена разойдутся PG/GP.
+- UUID-id хранятся как `VARCHAR(36)`, не как PG-тип `UUID`. Python шлёт `str(uuid.uuid4())` строкой; одно правило для PG и GP.
+- В Greenplum 6.x (= PG 9.4) НЕЛЬЗЯ: `CREATE INDEX/SEQUENCE IF NOT EXISTS`, `ON CONFLICT DO UPDATE`, `ADD COLUMN IF NOT EXISTS`, `jsonb_set/jsonb_pretty`, `gen_random_uuid()`, `EXECUTE FUNCTION` в триггерах, `BIGSERIAL` вместе с `DISTRIBUTED BY`. GP-адаптер исполняет SQL по одному statement и глотает `DuplicateTableError`/`DuplicateObjectError`. Регрессии — `tests/test_gp_compatibility.py`.
+- В Greenplum `DISTRIBUTED BY (col)` должен быть подмножеством каждого `PRIMARY KEY` и `UNIQUE`. Для co-location по foreign-key используют составной PK `(id, foreign_id)` с `id` ведущим и `DISTRIBUTED BY (foreign_id)`. Пример — `agent_requests` в `app/domains/chat/migrations/greenplum/schema.sql`. Регрессия — `test_distributed_by_subset_of_primary_key`.
+- Имена: таблицы `{PREFIX}<name>`, индексы `idx_{PREFIX}<table>_<purpose>`, sequence (только GP) `seq_<table>_id`, CHECK `check_<table>_<purpose>` (без `{PREFIX}`, см. §6.5a).
 
-Таблицы создаются автоматически при старте приложения через `create_tables_if_not_exist(domains)`. Каждый `schema.sql` содержит `CREATE TABLE IF NOT EXISTS`, поэтому повторный запуск безопасен.
+#### 6.5.2 Как `discover_domains` подставляет значения
 
-> **Важно**: в приложении НЕТ механизма ALTER-миграций (Alembic / Yoyo / самописный runner). Все схемы declarative — `CREATE TABLE IF NOT EXISTS`. При добавлении новой колонки на свежей БД она появится автоматически. Для существующих БД админ выполняет `ALTER TABLE … ADD COLUMN …` вручную (или дамп → пересоздание). Это сознательное ограничение для проекта в закрытой сети без CI/CD-deploy-tooling. Backfill дефолтов решается через `DEFAULT … NOT NULL` в DDL — PG/GP заполнят существующие строки при добавлении колонки.
+Плейсхолдеры подставляет адаптер во время `create_tables`. `{SCHEMA}.` в PG превращается в пустую строку (используется схема `public`), в GP — в реальную схему из `DATABASE__GP__SCHEMA`. `{PREFIX}` в обоих превращается в `DATABASE__TABLE_PREFIX`. Итог: `{SCHEMA}.{PREFIX}acts` → `t_db_oarb_audit_act_acts` в PG и `gpadmin.t_db_oarb_audit_act_acts` в GP.
 
-#### Placeholder-паттерн `{SCHEMA}.{PREFIX}<table>`
-
-И PG, и GP-схемы используют единые плейсхолдеры — это позволяет одной DDL-форме работать в обоих окружениях. Подстановки делают адаптеры:
-
-| Плейсхолдер | PostgreSQL (`app/db/adapters/postgresql.py:60-67`) | Greenplum (`app/db/adapters/greenplum.py:74-83`) |
-|---|---|---|
-| `{SCHEMA}.` | `""` (схема `public`, имена остаются неквалифицированными) | Реальная схема (`DATABASE__GP__SCHEMA`) |
-| `{PREFIX}` | `DATABASE__TABLE_PREFIX` | `DATABASE__TABLE_PREFIX` |
-| `{REF_*}` (например `{REF_USER_TABLE}`, `{REF_HADOOP_TABLES}`) | Резолвится из `migration_substitutions` домена | То же |
-
-Bare table names в миграциях (без `{PREFIX}`) — баг: имена разойдутся между PG и GP, и репозитории через `self.adapter.get_table_name("acts")` перестанут находить таблицу.
-
-#### `migration_substitutions` в `DomainDescriptor`
-
-Поле `migration_substitutions: dict[str, str | Callable[[], str]]` (`app/core/domain.py:68`) — словарь плейсхолдеров для внешних таблиц, не принадлежащих текущему домену (например, справочник пользователей `t_db_oarb_ua_user`, имя которого живёт в `ADMIN__USER_DIRECTORY__TABLE`). Значение может быть **строкой** (резолвится при регистрации) или `Callable[[], str]` (lazy-eval — резолвится во время `create_tables`, после загрузки settings).
-
-Пример из `app/domains/admin/__init__.py:47-49`:
+Плейсхолдеры `{REF_*}` указывают на внешние таблицы (например, `{REF_USER_TABLE}` для справочника пользователей). Они описаны в поле `migration_substitutions` каждого `DomainDescriptor` (`app/core/domain.py`). Значение — строка или функция без аргументов. Функция нужна, когда имя берётся из settings, которые ещё не загружены при регистрации домена — оно подставляется при первом запуске `create_tables`. Пример из домена `admin`:
 
 ```python
 migration_substitutions={
@@ -1448,61 +1435,11 @@ migration_substitutions={
 },
 ```
 
-Адаптер во время `create_tables` собирает substitutions из всех доменов в один словарь (`app/db/connection.py:377`) и применяет к каждой схеме.
+Перед созданием таблиц адаптер сливает `migration_substitutions` всех доменов в один словарь (`app/db/connection.py`) и применяет к каждой схеме.
 
-#### Ограничения Greenplum 6.x (PG 9.4)
+#### 6.5.3 Как добавить таблицу
 
-Greenplum 6.x = PostgreSQL 9.4. В GP-схемах НЕЛЬЗЯ использовать:
-
-| Конструкция | Доступно с | Замена для GP |
-|---|---|---|
-| `CREATE INDEX IF NOT EXISTS` | PG 9.5 | `CREATE INDEX idx_...` без `IF NOT EXISTS`; адаптер ловит `DuplicateObjectError` |
-| `CREATE SEQUENCE IF NOT EXISTS` | PG 9.5 | `CREATE SEQUENCE seq_...`; адаптер ловит дубликат |
-| `INSERT … ON CONFLICT DO UPDATE` | PG 9.5 | Отдельный UPDATE + INSERT в коде; для сидов — `INSERT` без guard'а (либо ETL заполняет) |
-| `ALTER TABLE … ADD COLUMN IF NOT EXISTS` | PG 9.6 | Не использовать. На GP колонки добавляются ручным ALTER вне приложения |
-| `jsonb_set(...)`, `jsonb_pretty(...)` | PG 9.5 | Обработка JSONB только в Python-коде; в SQL — обычный `=`-апдейт целого поля |
-| `gen_random_uuid()` (pgcrypto) | По умолчанию недоступен в GP | `str(uuid.uuid4())` в Python + передача параметром |
-| `EXECUTE FUNCTION` (в триггерах) | PG 11 | `EXECUTE PROCEDURE` (GP 6.x синтаксис) |
-| `BIGSERIAL` в комбинации с `DISTRIBUTED BY` | Конфликт | Отдельная sequence: `CREATE SEQUENCE seq_<table>_id;` + `id BIGINT DEFAULT nextval('seq_<table>_id')` |
-
-Адаптер GP выполняет SQL по одному statement и ловит `DuplicateTableError` / `DuplicateObjectError` (`app/db/adapters/greenplum.py`). Тесты регрессии — `tests/test_gp_compatibility.py`.
-
-#### Правило `DISTRIBUTED BY` ⊆ `PRIMARY KEY` ⊆ каждый `UNIQUE`
-
-В Greenplum ключ распределения (`DISTRIBUTED BY (col)`) обязан быть **подмножеством** каждого `PRIMARY KEY` и каждого `UNIQUE`-констрейнта на таблице. Иначе `CREATE TABLE` падает с `InvalidTableDefinitionError`.
-
-Для co-location строк по foreign-key (например, все запросы агента одного `conversation_id` лежат на одном сегменте) используется составной PK `(id, foreign_id)` с `id` ведущим, и `DISTRIBUTED BY (foreign_id)`. Реальный пример из `app/domains/chat/migrations/greenplum/schema.sql` (таблица `agent_requests`):
-
-```sql
-CREATE TABLE IF NOT EXISTS {SCHEMA}.{PREFIX}agent_requests (
-    id                VARCHAR(36) NOT NULL,
-    conversation_id   VARCHAR(36) NOT NULL,
-    message_id        VARCHAR(36) NOT NULL,
-    ...
-    -- GP-требование: DISTRIBUTED BY должен быть подмножеством PK.
-    -- id ведущий, чтобы lookups `WHERE id = $1` шли по PK-индексу.
-    PRIMARY KEY (id, conversation_id)
-)
-WITH (appendonly=false)
-DISTRIBUTED BY (conversation_id);
-```
-
-Lookups `WHERE id = $1` идут по PK-индексу (`id` ведущий — PostgreSQL/GP умеют использовать PK для prefix-запросов). Регрессия — `tests/test_gp_compatibility.py::test_distributed_by_subset_of_primary_key`.
-
-> Не для каждой таблицы нужен составной PK. `chat_messages` распределяется `DISTRIBUTED BY (id)` с обычным `PRIMARY KEY (id)` — там lookups в основном по `conversation_id` через индекс, co-location строк беседы не критично.
-
-#### UUID-id как `VARCHAR(36)`
-
-UUID-первичные ключи хранятся как `VARCHAR(36)`, а не как PG-тип `UUID`. Причина: единый код Python-репозиториев генерит ID через `str(uuid.uuid4())` и передаёт параметром как строку. Использование PG `UUID` потребовало бы явного приведения в каждом запросе и обвязки в asyncpg. `VARCHAR(36)` работает одинаково в PG и GP без приведений. Это касается **и PG-миграций для consistency** — даже на PG используется `VARCHAR(36)`.
-
-#### Конвенция имён
-
-| Объект | Шаблон |
-|---|---|
-| Таблица | `{PREFIX}<base_name>` (`{PREFIX}` = `DATABASE__TABLE_PREFIX`) |
-| Индекс | `idx_{PREFIX}<table>_<purpose>` (например `idx_{PREFIX}acts_locked_by`) |
-| CHECK constraint | `check_<table>_<purpose>` (без `{PREFIX}` — попадает в `CHECK_CONSTRAINT_MESSAGES`, см. §6.5a) |
-| Sequence (только GP) | `seq_<table>_id` |
+См. §6.8 — пошаговый рецепт.
 
 ### 6.5a Как добавить CHECK constraint
 
