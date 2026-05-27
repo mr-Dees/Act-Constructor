@@ -473,7 +473,8 @@ class TableCellsOperations {
 
     /**
      * Удаляет выбранную строку из таблицы.
-     * Проверяет защиту заголовков и наличие объединенных ячеек.
+     * Если строка содержит объединённые ячейки (origin или spanned-в-неё),
+     * сначала автоматически разъединяет их, потом удаляет строку.
      */
     deleteRow() {
         if (this.tableManager.selectedCells.length === 0) return;
@@ -491,17 +492,14 @@ class TableCellsOperations {
             return;
         }
 
-        // Проверяем наличие объединенных ячеек в строке
-        const hasMergedCells = this._rowHasAnyMergedCells(table, rowIndex);
-        if (hasMergedCells) {
-            return;
-        }
-
         // Проверяем, что в таблице остается хотя бы одна строка данных
         const headerRowCount = table.grid.filter(row => row.some(c => c.isHeader === true)).length;
         if (table.grid.length - headerRowCount <= 1) {
             return;
         }
+
+        // Smart auto-unmerge: разъединяем все ячейки, которые покрывают удаляемую строку.
+        this._autoUnmergeRow(table, rowIndex);
 
         // Уменьшаем rowSpan для ячеек, которые охватывают удаляемую строку
         for (let r = 0; r < rowIndex; r++) {
@@ -856,43 +854,69 @@ class TableCellsOperations {
         const cellData = table.grid[row][col];
 
         // Проверка наличия объединения
-        if (cellData.colSpan <= 1 && cellData.rowSpan <= 1) {
+        if ((cellData.colSpan || 1) <= 1 && (cellData.rowSpan || 1) <= 1) {
             return;
         }
 
-        const rowspan = cellData.rowSpan || 1;
-        const colspan = cellData.colSpan || 1;
-
-        // Сохраняем флаг isHeader из исходной ячейки
-        const isHeaderCell = cellData.isHeader || false;
-
-        // Восстановление всех ячеек в области объединения
-        for (let r = row; r < row + rowspan; r++) {
-            for (let c = col; c < col + colspan; c++) {
-                if (table.grid[r] && table.grid[r][c]) {
-                    if (r === row && c === col) {
-                        // Главная ячейка - сброс colspan/rowspan, но сохраняем isHeader
-                        table.grid[r][c].colSpan = 1;
-                        table.grid[r][c].rowSpan = 1;
-                        // isHeader остается без изменений
-                    } else {
-                        // Создание новых пустых ячеек с сохранением флага заголовка
-                        table.grid[r][c] = {
-                            content: '',
-                            isHeader: isHeaderCell,  // Наследуем флаг заголовка
-                            colSpan: 1,
-                            rowSpan: 1,
-                            originRow: r,
-                            originCol: c
-                        };
-                    }
-                }
-            }
-        }
+        this._unmergeAtOrigin(table, row, col);
 
         this.clearSelection();
         ItemsRenderer.updateTable(tableId);
         PreviewManager.update();
         Notifications.success('Ячейка разъединена');
+    }
+
+    /**
+     * Разъединяет ячейку, заданную координатами origin'а: сбрасывает rowSpan/colSpan
+     * и создаёт пустые ячейки на месте spanned.
+     * @private
+     */
+    _unmergeAtOrigin(table, row, col) {
+        const cellData = table.grid[row][col];
+        const rowspan = cellData.rowSpan || 1;
+        const colspan = cellData.colSpan || 1;
+        const isHeaderCell = cellData.isHeader || false;
+
+        for (let r = row; r < row + rowspan; r++) {
+            for (let c = col; c < col + colspan; c++) {
+                if (!table.grid[r] || !table.grid[r][c]) continue;
+                if (r === row && c === col) {
+                    table.grid[r][c].colSpan = 1;
+                    table.grid[r][c].rowSpan = 1;
+                } else {
+                    table.grid[r][c] = {
+                        content: '',
+                        isHeader: isHeaderCell,
+                        colSpan: 1,
+                        rowSpan: 1,
+                        originRow: r,
+                        originCol: c
+                    };
+                }
+            }
+        }
+    }
+
+    /**
+     * Перед удалением строки разъединяет все ячейки, чьи объединения покрывают
+     * эту строку — origin внутри строки или spanned-в-неё из строк выше.
+     * @private
+     */
+    _autoUnmergeRow(table, rowIndex) {
+        const originsToUnmerge = new Set();
+        for (let c = 0; c < table.grid[rowIndex].length; c++) {
+            const cellData = table.grid[rowIndex][c];
+            if (cellData.isSpanned) {
+                const oR = cellData.originRow;
+                const oC = cellData.originCol;
+                if (oR != null && oC != null) originsToUnmerge.add(`${oR}:${oC}`);
+            } else if ((cellData.rowSpan || 1) > 1 || (cellData.colSpan || 1) > 1) {
+                originsToUnmerge.add(`${rowIndex}:${c}`);
+            }
+        }
+        for (const key of originsToUnmerge) {
+            const [r, c] = key.split(':').map(Number);
+            this._unmergeAtOrigin(table, r, c);
+        }
     }
 }

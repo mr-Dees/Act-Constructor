@@ -17,6 +17,7 @@ DictionaryName = Literal[
     "processes", "terbanks", "metrics",
     "departments", "channels", "products", "teams",
     "risk_types",
+    "assignment_formats", "used_pm_options",
 ]
 
 _access = Depends(require_domain_access("ck_fin_res"))

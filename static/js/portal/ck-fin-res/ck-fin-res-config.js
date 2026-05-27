@@ -1,17 +1,8 @@
 /**
  * Конфигурация страницы ЦК Фин.Рез.
- * Определяет колонки таблицы, поля формы и hardcoded-списки.
+ * Определяет колонки таблицы и поля формы. Все справочники — через API
+ * (включая статические перечисления assignment_formats, used_pm_options).
  */
-
-// TODO: перенести в API-справочники когда потребуется динамика
-const FR_ASSIGNMENT_FORMAT_OPTIONS = [
-    'Централизованный контроль',
-    'Самостоятельный контроль',
-    'Нет поручения',
-];
-
-// TODO: перенести в API-справочники когда потребуется динамика
-const FR_USED_PM_OPTIONS = ['Да', 'Нет'];
 
 class CkFinResConfig {
     static apiPrefix = 'ck-fin-res';
@@ -89,15 +80,18 @@ class CkFinResConfig {
         { key: 'sberdocs_ctrl_assgn_number', label: '№ контр. поручения SberDocs', type: 'text' },
         { row: [
             { key: 'assigment_id', label: 'ИД поручения УВА', type: 'number' },
-            { key: 'assigment_format', label: 'Формат поручения', type: 'select', options: FR_ASSIGNMENT_FORMAT_OPTIONS },
+            { key: 'assigment_format', label: 'Формат поручения', type: 'dictionary', dict: 'assignment_formats' },
         ]},
         { key: 'assigment_recommendation', label: 'Формулировка поручения', type: 'textarea', rows: 2 },
         { key: 'execution_deadline', label: 'Срок контроля исполнения поручения', type: 'date' },
-        { key: 'used_pm_lib', label: 'Использование PM', type: 'select', options: FR_USED_PM_OPTIONS },
+        { key: 'used_pm_lib', label: 'Использование PM', type: 'dictionary', dict: 'used_pm_options' },
         { key: 'reestr_metric_id', label: 'ID реестра метрики', type: 'readonly-text' },
     ];
 
-    static dictNames = ['metrics', 'terbanks', 'processes', 'risk_types'];
+    static dictNames = [
+        'metrics', 'terbanks', 'processes', 'risk_types',
+        'assignment_formats', 'used_pm_options',
+    ];
 }
 
 window.CkFinResConfig = CkFinResConfig;
