@@ -1,11 +1,11 @@
-"""Seed демо-акта «Овернайт-выписки корпклиентов» (КМ-99-99999) в БД.
+"""Seed демо-акта КМ-99-99999 «Овернайт-выписки корпклиентов».
 
-Использует доменные сервисы и репозитории, уважает .env, идемпотентен.
+Используется двумя способами:
+* CLI: `python -m scripts.seed_demo_act [--replace]` — для ручного re-seed.
+* Lifespan-хук: `ensure_demo_act()` вызывается из app/domains/acts/_lifecycle.py
+  при старте сервера. Idempotent: жёсткий skip если КМ-99-99999 уже есть.
 
-Запуск:
-    python -m scripts.seed_demo_act                    # создать, выйти если уже есть
-    python -m scripts.seed_demo_act --replace          # удалить старый и создать заново
-    python -m scripts.seed_demo_act --username NNNN   # задать username создателя
+Структура определена спекой docs/superpowers/specs/2026-05-28-demo-act-v2-and-docx-fixes.md §3.
 """
 import argparse
 import asyncio
@@ -14,39 +14,38 @@ import sys
 from datetime import date
 
 from app.core.config import get_settings
-from app.db.connection import init_db, get_pool, close_db
-from app.domains.acts.repositories.act_crud import ActCrudRepository
+from app.db.connection import close_db, get_pool, init_db
 from app.domains.acts.repositories.act_content import ActContentRepository
-from app.domains.acts.services.act_crud_service import ActCrudService
-from app.domains.acts.settings import ActsSettings
-from app.domains.acts.schemas.act_metadata import ActCreate, AuditTeamMember
+from app.domains.acts.repositories.act_crud import ActCrudRepository
 from app.domains.acts.schemas.act_content import (
     ActDataSchema,
-    TableSchema,
     TableCellSchema,
-    TextBlockSchema,
+    TableSchema,
     TextBlockFormattingSchema,
-    ViolationSchema,
+    TextBlockSchema,
+    ViolationAdditionalContentSchema,
+    ViolationContentItemSchema,
+    ViolationDescriptionListSchema,
     ViolationOptionalFieldSchema,
+    ViolationSchema,
 )
+from app.domains.acts.schemas.act_metadata import ActCreate, AuditTeamMember
+from app.domains.acts.services.act_crud_service import ActCrudService
 
 logger = logging.getLogger("seed_demo_act")
-logging.basicConfig(level=logging.INFO, format="%(levelname)s %(message)s")
 
 DEMO_KM = "КМ-99-99999"
-DEMO_USERNAME = "99999999"
+_DEMO_KM_DIGIT = 9999999
+_MY_USERNAME = "22494524"
 
 
-async def main(replace: bool, username: str) -> int:
+async def main(replace: bool) -> int:
     settings = get_settings()
     await init_db(settings)
     try:
         pool = get_pool()
         async with pool.acquire() as conn:
-            # Ищем существующий демо-акт напрямую через репозиторий
-            crud_repo = ActCrudRepository(conn)
-            existing_id = await _find_demo_act(conn, crud_repo)
-
+            existing_id = await _find_demo_act_by_digit(conn)
             if existing_id is not None:
                 if not replace:
                     logger.info(
@@ -56,10 +55,10 @@ async def main(replace: bool, username: str) -> int:
                     )
                     return 0
                 logger.info("Удаляем существующий демо-акт (act_id=%d)...", existing_id)
-                await _delete_demo_act(conn, crud_repo, existing_id)
+                await _delete_demo_act(conn, existing_id)
 
-            act_id = await _create_act(conn, settings, username)
-            await _fill_content(conn, act_id, username)
+            act_id = await _create_act(conn, settings, _MY_USERNAME)
+            await _fill_content(conn, act_id, _MY_USERNAME)
             logger.info("Демо-акт создан: act_id=%d, KM=%s", act_id, DEMO_KM)
             return 0
     except Exception:
@@ -69,414 +68,496 @@ async def main(replace: bool, username: str) -> int:
         await close_db()
 
 
-async def _find_demo_act(conn, crud_repo: ActCrudRepository) -> int | None:
-    """Ищет существующий акт КМ-99-99999, часть 1. Возвращает id или None."""
-    from app.domains.acts.utils import KMUtils
-    km_digit = KMUtils.extract_km_digits(DEMO_KM)
+async def ensure_demo_act() -> None:
+    """Idempotent seed для lifespan-хука.
+
+    Жёсткий skip: если КМ-99-99999 уже есть — выходим тихо.
+    Ошибки логируем но НЕ пробрасываем (стартап не должен валиться).
+    """
+    settings = get_settings()
+    try:
+        pool = get_pool()
+    except RuntimeError:
+        logger.warning("ensure_demo_act: пул БД не инициализирован, пропускаем")
+        return
+    try:
+        async with pool.acquire() as conn:
+            existing_id = await _find_demo_act_by_digit(conn)
+            if existing_id is not None:
+                logger.info(
+                    "Демо-акт %s уже существует (id=%d), skip", DEMO_KM, existing_id
+                )
+                return
+            act_id = await _create_act(conn, settings, _MY_USERNAME)
+            await _fill_content(conn, act_id, _MY_USERNAME)
+            logger.info("Демо-акт %s создан: id=%d", DEMO_KM, act_id)
+    except Exception:
+        logger.exception("ensure_demo_act: ошибка создания (глотаем)")
+
+
+async def _find_demo_act_by_digit(conn) -> int | None:
+    settings = get_settings()
+    prefix = settings.database.table_prefix
     row = await conn.fetchrow(
-        f"SELECT id FROM {crud_repo.acts} WHERE km_number_digit = $1 AND part_number = 1",
-        km_digit,
+        f"SELECT id FROM {prefix}acts WHERE km_number_digit = $1 AND part_number = 1",
+        _DEMO_KM_DIGIT,
     )
     return row["id"] if row else None
 
 
-async def _delete_demo_act(conn, crud_repo: ActCrudRepository, act_id: int) -> None:
-    """Удаляет демо-акт и все связанные данные напрямую через репозиторий."""
-    from app.domains.acts.utils import KMUtils
-    km_digit = KMUtils.extract_km_digits(DEMO_KM)
+async def _delete_demo_act(conn, act_id: int) -> None:
+    crud_repo = ActCrudRepository(conn)
     async with conn.transaction():
         await conn.execute(
             f"DELETE FROM {crud_repo.acts} WHERE id = $1",
             act_id,
         )
-        await crud_repo.update_total_parts_for_km(km_digit)
-    logger.info("Демо-акт act_id=%d удалён.", act_id)
+        await crud_repo.update_total_parts_for_km(_DEMO_KM_DIGIT)
+    logger.info("Демо-акт act_id=%d удалён", act_id)
 
 
 async def _create_act(conn, settings, username: str) -> int:
-    """Создаёт акт через ActCrudService и возвращает его id."""
     crud = ActCrudService(conn, settings)
-
     payload = ActCreate(
         km_number=DEMO_KM,
-        inspection_name=(
-            "Проверка регулярности исполнения овернайт-выписок по "
-            "расчётным счетам корпоративных клиентов"
-        ),
+        inspection_name="Овернайт-выписки корпоративных клиентов",
         city="Москва",
-        order_number="Text/2026/15-Б",
-        order_date=date(2026, 2, 20),
+        order_number="АА-99/999-АА",
+        order_date=date(2026, 4, 10),
         audit_team=[
-            AuditTeamMember(
-                role="Куратор",
-                full_name="Иванов Иван Иванович",
-                position="Старший аудитор",
-                username=username,
-            ),
-            AuditTeamMember(
-                role="Руководитель",
-                full_name="Петров Пётр Петрович",
-                position="Ведущий аудитор",
-                username="99888888",
-            ),
-            AuditTeamMember(
-                role="Участник",
-                full_name="Сидорова Светлана Сергеевна",
-                position="Аудитор",
-                username="99777777",
-            ),
+            AuditTeamMember(role="Куратор", full_name="А.А. Куратова",
+                            position="Начальник УВА", username="99000001"),
+            AuditTeamMember(role="Руководитель", full_name="Б.Б. Иванов",
+                            position="Главный аудитор УВА", username="99000002"),
+            AuditTeamMember(role="Участник", full_name="В.В. Петров",
+                            position="Аудитор УВА", username="99000003"),
+            AuditTeamMember(role="Редактор", full_name="Д.Д. Сидоров",
+                            position="Аудитор УВА", username=_MY_USERNAME),
         ],
-        inspection_start_date=date(2026, 3, 1),
-        inspection_end_date=date(2026, 4, 30),
+        inspection_start_date=date(2026, 4, 10),
+        inspection_end_date=date(2026, 5, 15),
         is_process_based=False,
-        service_note=None,
-        service_note_date=None,
     )
-
     act = await crud.create_act(payload, username)
     return act.id
 
 
 async def _fill_content(conn, act_id: int, username: str) -> None:
-    """Заполняет содержимое акта напрямую через ActContentRepository.
-
-    Используем репозиторий напрямую, чтобы обойти проверку блокировки —
-    seed-скрипт является привилегированной операцией.
-    """
-    tree = _build_tree()
-    tables = _build_tables()
-    text_blocks = _build_text_blocks()
-    violations = _build_violations()
-
     data = ActDataSchema(
-        tree=tree,
-        tables=tables,
-        textBlocks=text_blocks,
-        violations=violations,
+        tree=_build_tree(),
+        tables=_build_tables(),
+        textBlocks=_build_text_blocks(),
+        violations=_build_violations(),
         saveType="manual",
     )
-
     content_repo = ActContentRepository(conn)
     await content_repo.save_content(act_id, data, username)
 
 
 # ---------------------------------------------------------------------------
-# Публичные фабричные функции — импортируются в test_e2e_demo.py (Task 13)
+# Структура демо-акта (pure-функции)
 # ---------------------------------------------------------------------------
 
+
 def _build_tree() -> dict:
-    """Строит дерево структуры демо-акта (6 разделов, непроцессная проверка)."""
     return {
         "id": "root",
         "label": "Акт",
         "children": [
-            {
-                "id": "1",
-                "label": "Характеристика проверяемого направления",
-                "protected": True,
-                "deletable": False,
-                "children": [
-                    {
-                        "id": "1_textblock_1",
-                        "label": "Описание объекта проверки",
-                        "customLabel": "Описание объекта проверки",
-                        "type": "textblock",
-                        "textBlockId": "tb-1-1",
-                        "parentId": "1",
-                    },
-                    {
-                        "id": "1_table_1",
-                        "label": "Источники данных",
-                        "customLabel": "Источники данных",
-                        "type": "table",
-                        "tableId": "tbl-1-2",
-                        "parentId": "1",
-                    },
-                ],
-            },
-            {
-                "id": "2",
-                "label": "Оценка качества проверенного направления",
-                "protected": True,
-                "deletable": False,
-                "children": [
-                    {
-                        "id": "2_textblock_1",
-                        "label": "Подход к проверке",
-                        "customLabel": "Подход к проверке",
-                        "type": "textblock",
-                        "textBlockId": "tb-2-1",
-                        "parentId": "2",
-                    },
-                    {
-                        "id": "2_table_main_metrics",
-                        "label": "Главная таблица метрик",
-                        "customLabel": "Главная таблица метрик",
-                        "type": "table",
-                        "tableId": "tbl-2-2",
-                        "isMainMetricsTable": True,
-                        "parentId": "2",
-                    },
-                ],
-            },
-            {
-                "id": "3",
-                "label": "Применённые технологии",
-                "protected": True,
-                "deletable": False,
-                "children": [
-                    {
-                        "id": "3_table_1",
-                        "label": "Репозитории",
-                        "customLabel": "Репозитории",
-                        "type": "table",
-                        "tableId": "tbl-3-1",
-                        "parentId": "3",
-                    },
-                    {
-                        "id": "3_table_2",
-                        "label": "Технологии",
-                        "customLabel": "Технологии",
-                        "type": "table",
-                        "tableId": "tbl-3-2",
-                        "parentId": "3",
-                    },
-                    {
-                        "id": "3_table_3",
-                        "label": "Инструменты",
-                        "customLabel": "Инструменты",
-                        "type": "table",
-                        "tableId": "tbl-3-3",
-                        "parentId": "3",
-                    },
-                ],
-            },
-            {
-                "id": "4",
-                "label": "Основные выводы",
-                "protected": True,
-                "deletable": False,
-                "children": [
-                    {
-                        "id": "4_textblock_1",
-                        "label": "Выводы",
-                        "customLabel": "Выводы",
-                        "type": "textblock",
-                        "textBlockId": "tb-4-1",
-                        "parentId": "4",
-                    },
-                ],
-            },
-            {
-                "id": "5",
-                "label": "Результаты проверки",
-                "protected": True,
-                "deletable": False,
-                "children": [
-                    {
-                        "id": "5_table_op_risk",
-                        "label": "Операционные риски",
-                        "customLabel": "Операционные риски",
-                        "type": "table",
-                        "tableId": "tbl-5-3",
-                        "isOperationalRiskTable": True,
-                        "parentId": "5",
-                    },
-                    {
-                        "id": "5_item_v1",
-                        "label": "Несвоевременное формирование выписок",
-                        "customLabel": "Несвоевременное формирование выписок",
-                        "parentId": "5",
-                        "children": [
-                            {
-                                "id": "5_item_v1_violation",
-                                "label": "Нарушение",
-                                "type": "violation",
-                                "violationId": "v-5-1",
-                                "parentId": "5_item_v1",
-                            },
-                        ],
-                    },
-                    {
-                        "id": "5_item_v2",
-                        "label": "Расхождение остатков",
-                        "customLabel": "Расхождение остатков",
-                        "parentId": "5",
-                        "children": [
-                            {
-                                "id": "5_item_v2_violation",
-                                "label": "Нарушение",
-                                "type": "violation",
-                                "violationId": "v-5-2",
-                                "parentId": "5_item_v2",
-                            },
-                        ],
-                    },
-                ],
-            },
-            {
-                "id": "6",
-                "label": (
-                    "Оценка процесса по результатам исследования "
-                    "методом Process Mining"
-                ),
-                "protected": False,
-                "deletable": True,
-                "children": [],
-            },
+            _section_1(),
+            _section_2(),
+            _section_3(),
+            _section_4(),
+            _section_5(),
+            _section_6(),
         ],
     }
 
 
-def _build_tables() -> dict[str, TableSchema]:
-    """Строит все таблицы демо-акта."""
+def _section_1() -> dict:
     return {
-        "tbl-1-2": _table(
-            "tbl-1-2",
-            "1_table_1",
-            rows=[
-                ["Система", "БД", "Кол-во записей"],
-                ["АБС «Гранат»", "Greenplum core_abs", "12 480 217"],
-                ["Шина транзакций", "Hive logs_abs", "48 920 113"],
-                ["DWH", "Greenplum dwh", "3 281 044"],
-            ],
-        ),
-        "tbl-2-2": _table(
-            "tbl-2-2",
-            "2_table_main_metrics",
-            rows=[
-                ["№", "Метрика", "План", "Факт", "Отклонение", "Норма", "Статус"],
-                ["1", "Доля сформированных выписок в срок", "100%", "97.8%", "-2.2%", "≥99%", "Несоотв."],
-                ["2", "Среднее время формирования, мин", "10", "8.4", "-16%", "≤15", "Соотв."],
-                ["3", "Кол-во расхождений остатков", "0", "37", "+37", "0", "Несоотв."],
-                ["4", "Своевременность доставки в ЛК", "100%", "99.6%", "-0.4%", "≥99%", "Соотв."],
-            ],
-            main=True,
-        ),
-        "tbl-3-1": _table(
-            "tbl-3-1",
-            "3_table_1",
-            rows=[
-                ["Репозиторий", "Назначение", "URL"],
-                ["audit-workstation", "Конструктор актов", "git.bank/audit-ws"],
-                ["dwh-overnight", "DWH-витрина", "git.bank/dwh-overnight"],
-                ["data-quality", "Контроли качества данных", "git.bank/dq"],
-            ],
-        ),
-        "tbl-3-2": _table(
-            "tbl-3-2",
-            "3_table_2",
-            rows=[
-                ["Технология", "Версия", "Использование"],
-                ["Greenplum", "6.25", "Хранение и витрины"],
-                ["Apache Hive", "3.1", "Логи транзакций"],
-                ["Apache Airflow", "2.9", "Оркестрация ETL"],
-            ],
-        ),
-        "tbl-3-3": _table(
-            "tbl-3-3",
-            "3_table_3",
-            rows=[
-                ["Инструмент", "Назначение"],
-                ["Tableau", "Дашборды и сверка показателей"],
-                ["Jupyter Notebook", "Ad-hoc-исследование данных"],
-                ["dbt", "Тестирование моделей DWH"],
-            ],
-        ),
-        "tbl-5-3": _table(
-            "tbl-5-3",
-            "5_table_op_risk",
-            rows=[
-                ["Риск", "Вероятность", "Влияние", "Уровень"],
-                ["Несоответствие требованиям ЦБ 716-П", "Средняя", "Высокое", "Высокий"],
-                ["Финансовые потери клиентов", "Низкая", "Высокое", "Средний"],
-            ],
-            operational_risk=True,
-        ),
+        "id": "1",
+        "label": "Краткое описание объекта проверки",
+        "protected": True, "deletable": False, "type": "item",
+        "children": [
+            {"id": "1.1", "label": "Перечень проверяемых процессов",
+             "customLabel": "Перечень проверяемых процессов",
+             "type": "textblock", "textBlockId": "tb-1-1",
+             "parentId": "1", "protected": True, "deletable": False},
+            {"id": "1.2", "label": "Период исследования и источники данных",
+             "customLabel": "Период исследования и источники данных",
+             "type": "textblock", "textBlockId": "tb-1-2",
+             "parentId": "1", "protected": True, "deletable": False},
+        ],
     }
 
 
-def _table(
-    tid: str,
-    node_id: str,
-    *,
-    rows: list[list[str]],
-    main: bool = False,
-    operational_risk: bool = False,
-) -> TableSchema:
-    """Вспомогательная функция: строит TableSchema из списка строк."""
+def _section_2() -> dict:
+    return {
+        "id": "2",
+        "label": "Методология проведения проверки",
+        "protected": True, "deletable": False, "type": "item",
+        "children": [
+            {"id": "2_text", "label": "Методология",
+             "customLabel": "Методология",
+             "type": "textblock", "textBlockId": "tb-2-1",
+             "parentId": "2", "protected": True, "deletable": False},
+        ],
+    }
+
+
+def _section_3() -> dict:
+    return {
+        "id": "3",
+        "label": "Основные количественные показатели",
+        "protected": True, "deletable": False, "type": "item",
+        "children": [
+            {"id": "3_main_metrics", "label": "Главная таблица метрик",
+             "customLabel": "Главная таблица метрик",
+             "type": "table", "tableId": "tbl-3-main",
+             "isMetricsTable": True, "isMainMetricsTable": True,
+             "parentId": "3", "protected": True, "deletable": False},
+            {"id": "3_text", "label": "Комментарий к показателям",
+             "customLabel": "Комментарий к показателям",
+             "type": "textblock", "textBlockId": "tb-3-1",
+             "parentId": "3", "protected": True, "deletable": False},
+        ],
+    }
+
+
+def _section_4() -> dict:
+    return {
+        "id": "4",
+        "label": "Выводы по результатам исследования",
+        "protected": True, "deletable": False, "type": "item",
+        "children": [
+            {"id": "4_text_intro", "label": "Введение",
+             "customLabel": "Введение",
+             "type": "textblock", "textBlockId": "tb-4-1",
+             "parentId": "4", "protected": True, "deletable": False},
+            {"id": "4_table", "label": "Сводка по статусам",
+             "customLabel": "Сводка по статусам",
+             "type": "table", "tableId": "tbl-4-1",
+             "parentId": "4", "protected": True, "deletable": False},
+            {"id": "4_text_after", "label": "Комментарий",
+             "customLabel": "Комментарий",
+             "type": "textblock", "textBlockId": "tb-4-2",
+             "parentId": "4", "protected": True, "deletable": False},
+        ],
+    }
+
+
+def _section_5() -> dict:
+    return {
+        "id": "5",
+        "label": "Результаты проверки",
+        "protected": True, "deletable": False, "type": "item",
+        "children": [
+            _risk_node("5_risk_reg", "Регуляторный риск (свод по §5)",
+                       "tbl-5-risk-reg", "isRegularRiskTable", parent="5"),
+            _risk_node("5_risk_op", "Операционный риск (свод по §5)",
+                       "tbl-5-risk-op", "isOperationalRiskTable", parent="5"),
+            _risk_node("5_risk_tax", "Налоговый риск (свод по §5)",
+                       "tbl-5-risk-tax", "isTaxRiskTable", parent="5"),
+            _risk_node("5_risk_other", "Прочий риск (свод по §5)",
+                       "tbl-5-risk-other", "isOtherRiskTable", parent="5"),
+            _node_5_1(),
+            _node_5_2(),
+        ],
+    }
+
+
+def _node_5_1() -> dict:
+    return {
+        "id": "5.1",
+        "label": "Управление лимитами овернайт",
+        "customLabel": "Управление лимитами овернайт",
+        "type": "item", "parentId": "5",
+        "children": [
+            _risk_node("5.1_risk_reg", "Регуляторный риск (свод по §5.1)",
+                       "tbl-5-1-risk-reg", "isRegularRiskTable", parent="5.1"),
+            _risk_node("5.1_risk_op", "Операционный риск (свод по §5.1)",
+                       "tbl-5-1-risk-op", "isOperationalRiskTable", parent="5.1"),
+            _node_5_1_1(),
+            _node_5_1_2(),
+        ],
+    }
+
+
+def _node_5_1_1() -> dict:
+    return {
+        "id": "5.1.1",
+        "label": "Превышения лимитов овернайт в Сибирском ТБ",
+        "customLabel": "Превышения лимитов овернайт в Сибирском ТБ",
+        "type": "item", "tb": ["СибБ"], "parentId": "5.1",
+        "children": [
+            _risk_node("5.1.1_risk_reg", "Регуляторный риск",
+                       "tbl-5-1-1-reg", "isRegularRiskTable", parent="5.1.1"),
+            _risk_node("5.1.1_risk_tax", "Налоговый риск",
+                       "tbl-5-1-1-tax", "isTaxRiskTable", parent="5.1.1"),
+            _risk_node("5.1.1_risk_other", "Прочий риск",
+                       "tbl-5-1-1-other", "isOtherRiskTable", parent="5.1.1"),
+            {"id": "5.1.1_violation", "label": "Нарушение",
+             "type": "violation", "violationId": "v-5-1-1", "parentId": "5.1.1"},
+        ],
+    }
+
+
+def _node_5_1_2() -> dict:
+    return {
+        "id": "5.1.2",
+        "label": "Несвоевременная пролонгация в Московском Б",
+        "customLabel": "Несвоевременная пролонгация в Московском Б",
+        "type": "item", "tb": ["МБ"], "parentId": "5.1",
+        "children": [
+            _risk_node("5.1.2_risk_op", "Операционный риск",
+                       "tbl-5-1-2-op", "isOperationalRiskTable", parent="5.1.2"),
+            _risk_node("5.1.2_risk_reg", "Регуляторный риск",
+                       "tbl-5-1-2-reg", "isRegularRiskTable", parent="5.1.2"),
+            {"id": "5.1.2_violation", "label": "Нарушение",
+             "type": "violation", "violationId": "v-5-1-2", "parentId": "5.1.2"},
+        ],
+    }
+
+
+def _node_5_2() -> dict:
+    return {
+        "id": "5.2",
+        "label": "Расчётные операции по овернайту",
+        "customLabel": "Расчётные операции по овернайту",
+        "type": "item", "parentId": "5",
+        "children": [
+            _risk_node("5.2_risk_tax", "Налоговый риск (свод по §5.2)",
+                       "tbl-5-2-risk-tax", "isTaxRiskTable", parent="5.2"),
+            _node_5_2_1(),
+        ],
+    }
+
+
+def _node_5_2_1() -> dict:
+    return {
+        "id": "5.2.1",
+        "label": "Налоговые расхождения в Среднерусском ТБ",
+        "customLabel": "Налоговые расхождения в Среднерусском ТБ",
+        "type": "item", "tb": ["СРБ"], "parentId": "5.2",
+        "children": [
+            _risk_node("5.2.1_risk_tax", "Налоговый риск",
+                       "tbl-5-2-1-tax", "isTaxRiskTable", parent="5.2.1"),
+            {"id": "5.2.1_violation", "label": "Нарушение",
+             "type": "violation", "violationId": "v-5-2-1", "parentId": "5.2.1"},
+        ],
+    }
+
+
+def _section_6() -> dict:
+    return {
+        "id": "6",
+        "label": "Оценка процесса по результатам исследования методом Process Mining",
+        "protected": False, "deletable": True, "type": "item",
+        "children": [
+            {"id": "6_text_intro", "label": "Введение", "customLabel": "Введение",
+             "type": "textblock", "textBlockId": "tb-6-1", "parentId": "6"},
+            {"id": "6_table", "label": "Метрики процесса",
+             "customLabel": "Метрики процесса",
+             "type": "table", "tableId": "tbl-6-1", "parentId": "6"},
+            {"id": "6_text_after", "label": "Комментарий",
+             "customLabel": "Комментарий",
+             "type": "textblock", "textBlockId": "tb-6-2", "parentId": "6"},
+        ],
+    }
+
+
+def _risk_node(node_id: str, label: str, table_id: str, risk_flag: str, *, parent: str) -> dict:
+    return {
+        "id": node_id, "label": label, "customLabel": label,
+        "type": "table", "tableId": table_id,
+        risk_flag: True, "parentId": parent,
+    }
+
+
+def _build_tables() -> dict[str, TableSchema]:
+    tables = {}
+
+    tables["tbl-3-main"] = _table(
+        "tbl-3-main", "3_main_metrics",
+        rows=[
+            ["№", "Метрика", "План", "Факт", "Отклонение", "Статус"],
+            ["1", "Доля сформированных выписок в срок", "100%", "97.8%", "-2.2%", "Не соотв."],
+            ["2", "Среднее время формирования, мин", "10", "8.4", "-16%", "Соотв."],
+            ["3", "Кол-во расхождений остатков", "0", "37", "+37", "Не соотв."],
+            ["4", "Своевременность доставки в ЛК", "100%", "99.6%", "-0.4%", "Соотв."],
+        ],
+        flags={"isMetricsTable": True, "isMainMetricsTable": True},
+    )
+
+    tables["tbl-4-1"] = _table(
+        "tbl-4-1", "4_table",
+        rows=[
+            ["№", "Категория замечания", "Кол-во"],
+            ["1", "Регуляторные нарушения", "2"],
+            ["2", "Операционные риски", "1"],
+            ["3", "Налоговые расхождения", "1"],
+        ],
+    )
+
+    tables["tbl-6-1"] = _table(
+        "tbl-6-1", "6_table",
+        rows=[
+            ["Метрика процесса", "Значение"],
+            ["Среднее время цикла", "12.4 мин"],
+            ["Кол-во ручных вмешательств", "18"],
+            ["Доля автоматизации", "84.6%"],
+        ],
+    )
+
+    _add_risk(tables, "tbl-5-risk-reg", "5_risk_reg", "isRegularRiskTable",
+              [["Регуляторное требование", "Степень несоответствия"],
+               ["ЦБ 716-П, п. 4.2", "Высокая"],
+               ["ЦБ 590-П, п. 5.1", "Средняя"]])
+    _add_risk(tables, "tbl-5-risk-op", "5_risk_op", "isOperationalRiskTable",
+              [["Риск", "Уровень"],
+               ["Финансовые потери клиентов", "Средний"],
+               ["Сбои ETL в пиковые периоды", "Высокий"]])
+    _add_risk(tables, "tbl-5-risk-tax", "5_risk_tax", "isTaxRiskTable",
+              [["Источник", "Сумма расхождения, тыс. руб."],
+               ["НК РФ, ст. 269", "1 240"]])
+    _add_risk(tables, "tbl-5-risk-other", "5_risk_other", "isOtherRiskTable",
+              [["Источник риска", "Описание"],
+               ["Доступ к данным", "Расширенные права у 12 пользователей"]])
+
+    _add_risk(tables, "tbl-5-1-risk-reg", "5.1_risk_reg", "isRegularRiskTable",
+              [["Регуляторное требование", "Степень несоответствия"],
+               ["ЦБ 716-П, п. 4.2", "Высокая"]])
+    _add_risk(tables, "tbl-5-1-risk-op", "5.1_risk_op", "isOperationalRiskTable",
+              [["Риск", "Уровень"],
+               ["Сбои ETL", "Высокий"]])
+    _add_risk(tables, "tbl-5-2-risk-tax", "5.2_risk_tax", "isTaxRiskTable",
+              [["Источник", "Сумма расхождения, тыс. руб."],
+               ["НК РФ, ст. 269", "1 240"]])
+
+    _add_risk(tables, "tbl-5-1-1-reg", "5.1.1_risk_reg", "isRegularRiskTable",
+              [["Требование", "Нарушение"],
+               ["ВНД РК-1247, п. 5.2.3", "Превышение лимита"]])
+    _add_risk(tables, "tbl-5-1-1-tax", "5.1.1_risk_tax", "isTaxRiskTable",
+              [["Источник", "Доначисление, тыс. руб."],
+               ["НК РФ, ст. 269", "320"]])
+    _add_risk(tables, "tbl-5-1-1-other", "5.1.1_risk_other", "isOtherRiskTable",
+              [["Описание", "Влияние"],
+               ["Потеря лояльности клиента", "Среднее"]])
+    _add_risk(tables, "tbl-5-1-2-op", "5.1.2_risk_op", "isOperationalRiskTable",
+              [["Риск", "Уровень"],
+               ["Просрочка пролонгации", "Высокий"]])
+    _add_risk(tables, "tbl-5-1-2-reg", "5.1.2_risk_reg", "isRegularRiskTable",
+              [["Требование", "Нарушение"],
+               ["ВНД РК-1247, п. 6.1", "Несвоевременная пролонгация"]])
+    _add_risk(tables, "tbl-5-2-1-tax", "5.2.1_risk_tax", "isTaxRiskTable",
+              [["Источник", "Сумма, тыс. руб."],
+               ["НК РФ, ст. 269 п. 1.1", "920"]])
+
+    return tables
+
+
+def _table(tid: str, node_id: str, *, rows: list[list[str]],
+           flags: dict | None = None) -> TableSchema:
     grid = [
-        [
-            TableCellSchema(content=cell, isHeader=(row_idx == 0))
-            for cell in row
-        ]
-        for row_idx, row in enumerate(rows)
+        [TableCellSchema(content=cell, isHeader=(r_idx == 0)) for cell in row]
+        for r_idx, row in enumerate(rows)
     ]
     return TableSchema(
-        id=tid,
-        nodeId=node_id,
-        grid=grid,
+        id=tid, nodeId=node_id, grid=grid,
         colWidths=[150] * len(rows[0]),
-        isMainMetricsTable=main,
-        isOperationalRiskTable=operational_risk,
+        **(flags or {}),
     )
 
 
+def _add_risk(tables: dict, tid: str, node_id: str,
+              risk_flag: str, rows: list[list[str]]) -> None:
+    tables[tid] = _table(tid, node_id, rows=rows, flags={risk_flag: True})
+
+
 def _build_text_blocks() -> dict[str, TextBlockSchema]:
-    """Строит текстовые блоки демо-акта."""
     return {
         "tb-1-1": TextBlockSchema(
-            id="tb-1-1",
-            nodeId="1_textblock_1",
+            id="tb-1-1", nodeId="1.1",
             content=(
                 "Объект проверки — процесс ежедневного формирования и доставки "
-                "<b>овернайт-выписок</b> по расчётным счетам корпоративных "
-                "клиентов в период с 01.03.2026 по 30.04.2026. "
-                "Проверка охватывает операционную цепочку: "
-                "закрытие опердня в АБС «Гранат» → формирование выписки "
-                "в модуле overnight_summary → доставка клиенту через "
-                "личный кабинет. "
-                "Объём генеральной совокупности — 123 расчётных счёта "
-                "корпоративных клиентов сегмента крупнейшего бизнеса "
-                "(остаток ≥ 1 млрд руб. на начало периода). "
-                "Нормативная база: Регламент РК-1247 «Порядок формирования "
-                "и доставки овернайт-выписок», SLA с подразделением "
-                "«Корпоративный бизнес» от 15.01.2025."
+                "<b>овернайт-выписок</b> по расчётным счетам корпоративных клиентов. "
+                "Нормативная база: "
+                '<a href="https://confluence.sberbank.local/x/abc123">'
+                "Регламент РК-1247</a> от 12.03.2024, "
+                'SLA с подразделением <a href="https://confluence.sberbank.local/x/def456">'
+                "«Корпоративный бизнес»</a> от 15.01.2025."
+            ),
+            formatting=TextBlockFormattingSchema(fontSize=16),
+        ),
+        "tb-1-2": TextBlockSchema(
+            id="tb-1-2", nodeId="1.2",
+            content=(
+                "Период исследования: с 01.03.2026 по 30.04.2026 включительно. "
+                "Источники данных: АБС «Гранат», шина транзакций (Hive logs_abs) и DWH "
+                "(подробнее — "
+                '<a href="https://confluence.sberbank.local/x/dwh001">'
+                "карточка DWH</a>)."
             ),
             formatting=TextBlockFormattingSchema(fontSize=16),
         ),
         "tb-2-1": TextBlockSchema(
-            id="tb-2-1",
-            nodeId="2_textblock_1",
+            id="tb-2-1", nodeId="2_text",
             content=(
                 "Проверка проведена методом <b>выборочного контроля</b> по "
-                "<i>123 расчётным счетам</i> крупнейших клиентов сегмента "
-                "<u>«Корпоративный бизнес»</u>. "
-                "Использованы данные из трёх источников: "
-                "АБС «Гранат» (Greenplum core_abs), "
-                "шина транзакций (Hive logs_abs) и DWH. "
-                "Сверка проводилась автоматически средствами Airflow DAG "
-                "audit_overnight_reconcile за каждый рабочий день периода "
-                "01.03.2026–30.04.2026 (43 рабочих дня). "
-                "Критерии соответствия: факт ≥ норма для каждой метрики "
-                "согласно таблице раздела 2.2."
+                "<i>123 расчётным счетам</i> крупнейших клиентов. "
+                "Критерии соответствия установлены в "
+                '<a href="https://confluence.sberbank.local/x/crit789">'
+                "матрице контролей</a>. "
+                "Использованы данные за 43 рабочих дня периода 01.03.2026–30.04.2026."
+            ),
+            formatting=TextBlockFormattingSchema(fontSize=16),
+        ),
+        "tb-3-1": TextBlockSchema(
+            id="tb-3-1", nodeId="3_text",
+            content=(
+                "Доля сформированных в срок выписок составила <b>97.8%</b> при норме "
+                "≥99%. Отклонение связано преимущественно с конце-месячными пиками. "
+                "Зафиксировано 37 случаев расхождений остатков, что отражено в "
+                '<a href="https://cbr.ru/finmarket/supervision/sv_lic/">'
+                "регуляторных требованиях ЦБ РФ</a>."
             ),
             formatting=TextBlockFormattingSchema(fontSize=16),
         ),
         "tb-4-1": TextBlockSchema(
-            id="tb-4-1",
-            nodeId="4_textblock_1",
+            id="tb-4-1", nodeId="4_text_intro",
             content=(
-                "По результатам проверки выявлено два систематических нарушения "
-                "регламента РК-1247. "
-                "Первое — несвоевременное формирование выписок (п. 4.2): "
-                "в 17 из 123 случаев (13.8%) время формирования превысило 08:00 МСК. "
-                "Второе — расхождение остатков (п. 5.3): "
-                "зафиксировано 37 случаев расхождения между АБС и выпиской, "
-                "среднее отклонение составило 0.04% от остатка. "
-                "Оба нарушения связаны с гонкой условий в ETL-процессе overnight_summary "
-                "при пиковых объёмах транзакций в конце месяца. "
-                "Требуется доработка расписания ETL и пересмотр SLA с владельцем процесса."
+                "По результатам проверки выявлены систематические нарушения "
+                "регламента РК-1247, требующие планового устранения в срок до 01.07.2026."
+            ),
+            formatting=TextBlockFormattingSchema(fontSize=16),
+        ),
+        "tb-4-2": TextBlockSchema(
+            id="tb-4-2", nodeId="4_text_after",
+            content=(
+                "Все выявленные категории замечаний переданы владельцам процесса "
+                "и зафиксированы в "
+                '<a href="https://jira.sberbank.local/projects/AUDIT">'
+                "Jira AUDIT</a>."
+            ),
+            formatting=TextBlockFormattingSchema(fontSize=16),
+        ),
+        "tb-6-1": TextBlockSchema(
+            id="tb-6-1", nodeId="6_text_intro",
+            content=(
+                "Process Mining-анализ проведён на логах "
+                '<a href="https://confluence.sberbank.local/x/pm001">'
+                "процесса overnight_summary</a> "
+                "за период 01.03.2026–30.04.2026."
+            ),
+            formatting=TextBlockFormattingSchema(fontSize=16),
+        ),
+        "tb-6-2": TextBlockSchema(
+            id="tb-6-2", nodeId="6_text_after",
+            content=(
+                "Дашборд процесса доступен в "
+                '<a href="https://tableau.sberbank.local/views/overnight">'
+                "Tableau</a>. Рекомендуется ежемесячный обзор владельцем процесса."
             ),
             formatting=TextBlockFormattingSchema(fontSize=16),
         ),
@@ -484,98 +565,141 @@ def _build_text_blocks() -> dict[str, TextBlockSchema]:
 
 
 def _build_violations() -> dict[str, ViolationSchema]:
-    """Строит нарушения демо-акта (2 нарушения с заполненными опциональными полями)."""
     return {
-        "v-5-1": ViolationSchema(
-            id="v-5-1",
-            nodeId="5_item_v1_violation",
-            violated="Регламент формирования выписок (п. 4.2 РК-1247)",
+        "v-5-1-1": ViolationSchema(
+            id="v-5-1-1", nodeId="5.1.1_violation",
+            violated=(
+                "<u>Требования ВНД:</u> Регламент управления лимитами овернайт "
+                "№ВНД-1247 от 12.03.2024, п. 5.2.3 "
+                '(<a href="https://confluence.sberbank.local/x/abc123">'
+                "текст регламента</a>)."
+            ),
             established=(
-                "В период проверки в 17 случаях из 123 (13.8%) выписки "
-                "сформированы позже 08:00 МСК. "
-                "Максимальная задержка составила 47 минут (счёт № *** 4471 "
-                "на дату 31.03.2026)."
+                "В период 01.03.2026–30.04.2026 в Сибирском ТБ зафиксировано "
+                "8 случаев превышения лимита овернайт по корпоративным клиентам. "
+                "Максимальное превышение — 12.4% от установленного лимита."
+            ),
+            descriptionList=ViolationDescriptionListSchema(
+                enabled=True,
+                items=[
+                    "Превышение лимита по счёту № *** 4471 (15.03.2026)",
+                    "Превышение лимита по счёту № *** 8813 (28.03.2026)",
+                    "Аналогичные нарушения по 6 другим счетам",
+                ],
             ),
             reasons=ViolationOptionalFieldSchema(
                 enabled=True,
                 content=(
-                    "Перегрузка ETL-задачи overnight_summary при пиковых "
-                    "объёмах транзакций в конце месяца. "
-                    "Задача запускается без приоритизации наравне с другими "
-                    "ETL-процессами пула Airflow."
+                    "Отсутствие предупредительной валидации лимитов на стороне "
+                    "ETL-процесса overnight_summary; контроль выполняется "
+                    "только post-factum при формировании выписки."
                 ),
             ),
             consequences=ViolationOptionalFieldSchema(
                 enabled=True,
                 content=(
-                    "Клиенты не имеют возможности использовать выписки "
-                    "для отчётности до 09:00 МСК, что нарушает п. 3.1 SLA. "
-                    "Потенциальный ущерб репутации — риск перевода счетов "
-                    "в другой банк (3 из 17 клиентов направили претензии)."
+                    "Потенциальные финансовые потери клиентов, "
+                    "риск регуляторных санкций со стороны ЦБ РФ."
                 ),
             ),
             responsible=ViolationOptionalFieldSchema(
                 enabled=True,
-                content=(
-                    "Куратор процесса overnight_summary: "
-                    "Кузнецов А.В., начальник Управления операционных систем."
-                ),
+                content="Кузнецов А.В., начальник УОС.",
             ),
             recommendations=ViolationOptionalFieldSchema(
                 enabled=True,
                 content=(
-                    "Пересмотреть расписание ETL overnight_summary: "
-                    "выделить отдельный пул Airflow workers с приоритетом HIGH, "
-                    "ввести предварительный прогрев данных в 07:00 МСК. "
-                    "Согласовать с владельцем DWH увеличение ресурсов пула "
-                    "до 16 vCPU / 64 GiB RAM в ночное окно конца месяца. "
+                    "Внедрить предупредительную валидацию лимитов в ETL "
+                    "overnight_summary до момента формирования выписки. "
                     "Срок: до 01.07.2026."
                 ),
             ),
         ),
-        "v-5-2": ViolationSchema(
-            id="v-5-2",
-            nodeId="5_item_v2_violation",
-            violated="Контроль соответствия остатков (п. 5.3 РК-1247)",
+        "v-5-1-2": ViolationSchema(
+            id="v-5-1-2", nodeId="5.1.2_violation",
+            violated=(
+                "<u>Требования ВНД:</u> Регламент управления лимитами овернайт "
+                "№ВНД-1247 от 12.03.2024, п. 6.1 "
+                '(<a href="https://confluence.sberbank.local/x/abc123">'
+                "текст регламента</a>)."
+            ),
             established=(
-                "Зафиксировано 37 случаев расхождения остатков в выписке "
-                "и АБС за период проверки. "
-                "Среднее расхождение составило 0.04% от остатка, "
-                "максимальное — 0.12% (счёт № *** 8813, дата 28.04.2026)."
+                "В Московском Б зафиксировано 4 случая несвоевременной пролонгации "
+                "лимита овернайт. Средняя задержка — 2.3 рабочих дня."
+            ),
+            additionalContent=ViolationAdditionalContentSchema(
+                enabled=True,
+                items=[
+                    ViolationContentItemSchema(
+                        id="case-5-1-2-1", type="case",
+                        content=(
+                            "Счёт № *** 5512: лимит истёк 12.03.2026, "
+                            "пролонгирован 17.03.2026 (задержка 3 рабочих дня)."
+                        ),
+                        order=0,
+                    ),
+                ],
             ),
             reasons=ViolationOptionalFieldSchema(
                 enabled=True,
                 content=(
-                    "Гонка условий (race condition) между фиксацией "
-                    "overnight-сверки в АБС и закрытием опердня: "
-                    "выписка публикуется до завершения транзакции сверки, "
-                    "что приводит к использованию промежуточного состояния остатка."
+                    "Отсутствие автоматических уведомлений о приближающемся "
+                    "истечении срока лимита; контроль ведётся вручную."
+                ),
+            ),
+            consequences=ViolationOptionalFieldSchema(
+                enabled=True,
+                content="Простой расчётных операций клиентов, репутационный риск.",
+            ),
+            responsible=ViolationOptionalFieldSchema(
+                enabled=True,
+                content="Морозова Е.А., Центр технологий расчётного бизнеса.",
+            ),
+            recommendations=ViolationOptionalFieldSchema(
+                enabled=True,
+                content=(
+                    "Настроить автоматические уведомления за 5 рабочих дней "
+                    "до истечения срока лимита. Срок: до 15.06.2026."
+                ),
+            ),
+        ),
+        "v-5-2-1": ViolationSchema(
+            id="v-5-2-1", nodeId="5.2.1_violation",
+            violated=(
+                "<u>Требования законодательства:</u> Налоговый кодекс РФ, "
+                "ст. 269 п. 1.1 "
+                '(<a href="https://www.consultant.ru/document/cons_doc_LAW_28165/">'
+                "КонсультантПлюс</a>)."
+            ),
+            established=(
+                "В Среднерусском ТБ зафиксировано 5 случаев расхождения сумм "
+                "налогообложения при расчётных операциях по овернайту. "
+                "Общая сумма расхождений составила 920 тыс. руб."
+            ),
+            reasons=ViolationOptionalFieldSchema(
+                enabled=True,
+                content=(
+                    "Неверная классификация процентного дохода по овернайт-операциям "
+                    "при формировании налоговой отчётности."
                 ),
             ),
             consequences=ViolationOptionalFieldSchema(
                 enabled=True,
                 content=(
-                    "Риск выставления некорректной отчётности контрагентам. "
-                    "В 3 случаях клиенты уже использовали выписку с ошибочным остатком "
-                    "в качестве обеспечения для получения краткосрочного кредита."
+                    "Риск налоговых доначислений и штрафов со стороны ФНС. "
+                    "Потенциальный размер доначисления — до 1.2 млн руб."
                 ),
             ),
             responsible=ViolationOptionalFieldSchema(
                 enabled=True,
-                content=(
-                    "Главный архитектор АБС: Морозова Е.А., "
-                    "Центр технологий расчётного бизнеса."
-                ),
+                content="Соколова Т.Н., Управление налогообложения.",
             ),
             recommendations=ViolationOptionalFieldSchema(
                 enabled=True,
                 content=(
-                    "Добавить блокировку публикации выписки до завершения "
-                    "overnight-сверки (distributed lock на уровне Greenplum). "
-                    "Настроить мониторинг расхождений > 0.01% с алертом "
-                    "в Telegram-канал команды операций. "
-                    "Провести ретроспективный анализ за 2025 год "
-                    "и передать в СБ при расхождениях > 0.1%. "
+                    "Уточнить классификатор процентного дохода для овернайт-операций "
+                    "в соответствии со ст. 269 НК РФ. "
+                    "Провести ретроспективный перерасчёт за 2025 год. "
                     "Срок: до 15.06.2026."
                 ),
             ),
@@ -592,10 +716,6 @@ if __name__ == "__main__":
         action="store_true",
         help="Удалить существующий демо-акт перед созданием нового",
     )
-    parser.add_argument(
-        "--username",
-        default=DEMO_USERNAME,
-        help="Username создателя акта (по умолчанию: 99999999)",
-    )
     args = parser.parse_args()
-    sys.exit(asyncio.run(main(args.replace, args.username)))
+    logging.basicConfig(level=logging.INFO, format="%(levelname)s %(message)s")
+    sys.exit(asyncio.run(main(args.replace)))
