@@ -6,11 +6,10 @@ Unit-тесты ExportService (happy-path и выбор форматера).
 - корректный выбор форматера по типу
 - передача данных и вызов storage.save / storage.save_docx
 - структура ActSaveResponse
-- пустые данные (форматер вызывается, файл сохраняется)
 """
 
 from pathlib import Path
-from unittest.mock import MagicMock, patch
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
@@ -25,7 +24,7 @@ from app.domains.acts.settings import ActsSettings
 
 
 def _make_export_service(storage=None):
-    """Создаёт ExportService с заглушками форматеров и storage."""
+    """Создаёт ExportService с заглушками форматеров, storage и сервисов БД."""
     mock_settings = MagicMock(spec=Settings)
     mock_settings.storage_dir = Path("/tmp/test_storage_export")
     acts_settings = ActsSettings()
@@ -35,6 +34,9 @@ def _make_export_service(storage=None):
         storage.save.return_value = "act_20260101_120000_abcd.txt"
         storage.save_docx.return_value = "act_20260101_120000_abcd.docx"
 
+    mock_crud = AsyncMock()
+    mock_content_svc = AsyncMock()
+
     with patch("app.domains.acts.services.export_service.TextFormatter"), \
          patch("app.domains.acts.services.export_service.MarkdownFormatter"), \
          patch("app.domains.acts.services.export_service.DocxFormatter"):
@@ -42,22 +44,28 @@ def _make_export_service(storage=None):
             storage=storage,
             settings=mock_settings,
             acts_settings=acts_settings,
+            act_crud_service=mock_crud,
+            act_content_service=mock_content_svc,
         )
     return svc
 
 
-def _minimal_act_data() -> dict:
+def _minimal_content_dict() -> dict:
     return {
         "tree": {"id": "root", "label": "Акт", "children": []},
         "tables": {},
         "textBlocks": {},
         "violations": {},
-        "metadata": {"km_number": "КМ-01-0000001", "title": "Тестовый акт"},
     }
 
 
-def _empty_act_data() -> dict:
-    return {"tree": {}, "tables": {}, "textBlocks": {}, "violations": {}}
+def _make_mock_metadata():
+    """Минимальный metadata-объект с model_dump."""
+    from datetime import date
+    meta = MagicMock()
+    meta.km_number = "КМ-01-0000001"
+    meta.model_dump.return_value = {"km_number": "КМ-01-0000001"}
+    return meta
 
 
 # ── Кэширование и состав форматеров ────────────────────────────────────────
@@ -81,18 +89,19 @@ async def test_export_to_text_success():
     svc._formatters["txt"] = MagicMock()
     svc._formatters["txt"].format.return_value = "TXT-CONTENT"
 
+    # Настраиваем mock-сервисы
+    svc.act_crud_service.get_act = AsyncMock(return_value=_make_mock_metadata())
+    svc.act_content_service.get_content = AsyncMock(return_value=_minimal_content_dict())
+
     with patch(
         "app.domains.acts.services.export_service.get_executor",
         return_value=None,
     ):
-        result = await svc.save_act(_minimal_act_data(), fmt="txt")
+        result = await svc.save_act(42, "testuser", fmt="txt")
 
-    # Форматер вызван с данными акта
     svc._formatters["txt"].format.assert_called_once()
-    # storage.save вызван с правильным extension
     storage.save.assert_called_once_with("TXT-CONTENT", prefix="act", extension="txt")
     storage.save_docx.assert_not_called()
-    # Ответ — ActSaveResponse с filename
     assert isinstance(result, ActSaveResponse)
     assert result.status == "success"
     assert result.filename == "act_test.txt"
@@ -108,11 +117,14 @@ async def test_export_to_markdown_success():
     svc._formatters["md"] = MagicMock()
     svc._formatters["md"].format.return_value = "# Markdown"
 
+    svc.act_crud_service.get_act = AsyncMock(return_value=_make_mock_metadata())
+    svc.act_content_service.get_content = AsyncMock(return_value=_minimal_content_dict())
+
     with patch(
         "app.domains.acts.services.export_service.get_executor",
         return_value=None,
     ):
-        result = await svc.save_act(_minimal_act_data(), fmt="md")
+        result = await svc.save_act(42, "testuser", fmt="md")
 
     svc._formatters["md"].format.assert_called_once()
     storage.save.assert_called_once_with("# Markdown", prefix="act", extension="md")
@@ -127,18 +139,20 @@ async def test_export_to_docx_success():
     storage.save_docx.return_value = "act_test.docx"
     svc = _make_export_service(storage=storage)
     svc._formatters["docx"] = MagicMock()
-    # DOCX-форматер возвращает bytes или объект Document — для теста любой объект
-    docx_blob = b"PK\x03\x04docx-bytes"
-    svc._formatters["docx"].format.return_value = docx_blob
+    docx_doc = MagicMock()
+    svc._formatters["docx"].format.return_value = docx_doc
+
+    svc.act_crud_service.get_act = AsyncMock(return_value=_make_mock_metadata())
+    svc.act_content_service.get_content = AsyncMock(return_value=_minimal_content_dict())
 
     with patch(
         "app.domains.acts.services.export_service.get_executor",
         return_value=None,
     ):
-        result = await svc.save_act(_minimal_act_data(), fmt="docx")
+        result = await svc.save_act(42, "testuser", fmt="docx")
 
-    # save_docx вызван (НЕ save) с правильным prefix
-    storage.save_docx.assert_called_once_with(docx_blob, prefix="act")
+    # save_docx вызван (НЕ save)
+    storage.save_docx.assert_called_once_with(docx_doc, prefix="act")
     storage.save.assert_not_called()
     assert result.filename == "act_test.docx"
     assert "DOCX" in result.message
@@ -152,10 +166,8 @@ async def test_export_with_invalid_format_raises():
     """save_act с неподдерживаемым форматом бросает UnsupportedFormatError."""
     svc = _make_export_service()
     with pytest.raises(UnsupportedFormatError) as exc_info:
-        await svc.save_act(_minimal_act_data(), fmt="pdf")  # type: ignore[arg-type]
-    # status_code 400 (по AppError-protocol)
+        await svc.save_act(42, "testuser", fmt="pdf")  # type: ignore[arg-type]
     assert exc_info.value.status_code == 400
-    # Сообщение содержит имя формата
     assert "pdf" in exc_info.value.message.lower()
 
 
@@ -164,36 +176,7 @@ async def test_export_with_empty_format_raises():
     """Пустая строка как формат также → UnsupportedFormatError."""
     svc = _make_export_service()
     with pytest.raises(UnsupportedFormatError):
-        await svc.save_act(_minimal_act_data(), fmt="")  # type: ignore[arg-type]
-
-
-# ── Пустой акт / минимальные данные ────────────────────────────────────────
-
-
-@pytest.mark.asyncio
-async def test_export_empty_act_still_invokes_formatter_and_storage():
-    """Пустой акт (без tree/tables) корректно проходит pipeline.
-
-    Контракт ExportService: проверка структуры данных лежит на форматере;
-    сам сервис только маршрутизирует. Если форматер не упал — сохраняем.
-    """
-    storage = MagicMock()
-    storage.save.return_value = "act_empty.txt"
-    svc = _make_export_service(storage=storage)
-    svc._formatters["txt"] = MagicMock()
-    svc._formatters["txt"].format.return_value = ""
-
-    with patch(
-        "app.domains.acts.services.export_service.get_executor",
-        return_value=None,
-    ):
-        result = await svc.save_act(_empty_act_data(), fmt="txt")
-
-    svc._formatters["txt"].format.assert_called_once()
-    storage.save.assert_called_once()
-    # Пустой контент → пустая строка ушла в storage
-    assert storage.save.call_args.args[0] == ""
-    assert result.status == "success"
+        await svc.save_act(42, "testuser", fmt="")  # type: ignore[arg-type]
 
 
 # ── Выбор форматера: txt/md/docx используют разные инстансы ─────────────────
@@ -212,44 +195,20 @@ async def test_export_uses_correct_formatter_per_type():
     docx_mock = MagicMock()
     txt_mock.format.return_value = "txt"
     md_mock.format.return_value = "md"
-    docx_mock.format.return_value = b"docx"
+    docx_mock.format.return_value = MagicMock()
     svc._formatters["txt"] = txt_mock
     svc._formatters["md"] = md_mock
     svc._formatters["docx"] = docx_mock
 
+    svc.act_crud_service.get_act = AsyncMock(return_value=_make_mock_metadata())
+    svc.act_content_service.get_content = AsyncMock(return_value=_minimal_content_dict())
+
     with patch(
         "app.domains.acts.services.export_service.get_executor",
         return_value=None,
     ):
-        await svc.save_act(_minimal_act_data(), fmt="md")
+        await svc.save_act(42, "testuser", fmt="md")
 
     md_mock.format.assert_called_once()
     txt_mock.format.assert_not_called()
     docx_mock.format.assert_not_called()
-
-
-# ── Данные акта передаются в форматер в первозданном виде ──────────────────
-
-
-@pytest.mark.asyncio
-async def test_export_passes_act_data_to_formatter_unchanged():
-    """ExportService не модифицирует данные перед вызовом форматера."""
-    storage = MagicMock()
-    storage.save.return_value = "x.txt"
-    svc = _make_export_service(storage=storage)
-    svc._formatters["txt"] = MagicMock()
-    svc._formatters["txt"].format.return_value = "ok"
-
-    data = _minimal_act_data()
-    with patch(
-        "app.domains.acts.services.export_service.get_executor",
-        return_value=None,
-    ):
-        await svc.save_act(data, fmt="txt")
-
-    # Первый позиционный аргумент format() — наши данные as-is
-    call_args = svc._formatters["txt"].format.call_args
-    passed = call_args.args[0]
-    assert passed is data
-    # Метаданные не вычищены, попадают форматеру для шапки
-    assert passed.get("metadata", {}).get("km_number") == "КМ-01-0000001"
