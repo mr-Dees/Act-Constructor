@@ -1,7 +1,7 @@
 """Inline HTML → docx runs.
 
 Поддерживает <b>, <strong>, <i>, <em>, <u>, <span style="font-size: ...">,
-<br>. Любой другой тег игнорируется (содержимое сохраняется).
+<br>, <a href="...">. Любой другой тег игнорируется (содержимое сохраняется).
 
 Размеры font-size:
     px → pt: умножение на 0.75 (16px → 12pt)
@@ -13,6 +13,9 @@ from dataclasses import dataclass, replace
 
 from docx.shared import Pt
 from docx.text.paragraph import Paragraph
+from docx.oxml import OxmlElement
+from docx.oxml.ns import qn
+from docx.opc.constants import RELATIONSHIP_TYPE
 
 from app.domains.acts.formatters.docx.styles import Fonts
 
@@ -42,6 +45,7 @@ class _InlineParser(HTMLParser):
         super().__init__(convert_charrefs=True)
         self.paragraph = paragraph
         self.stack: list[_RunState] = [_RunState(size_pt=base_size_pt)]
+        self._hyperlink: OxmlElement | None = None
 
     @property
     def state(self) -> _RunState:
@@ -49,6 +53,14 @@ class _InlineParser(HTMLParser):
 
     def handle_starttag(self, tag, attrs):
         current = self.state
+        if tag == "a":
+            href = dict(attrs).get("href", "")
+            if href:
+                self._open_hyperlink(href)
+                self.stack.append(replace(current, underline=True))
+                return
+            self.stack.append(current)
+            return
         if tag in ("b", "strong"):
             self.stack.append(replace(current, bold=True))
         elif tag in ("i", "em"):
@@ -73,6 +85,8 @@ class _InlineParser(HTMLParser):
             self.handle_endtag(tag)
 
     def handle_endtag(self, tag):
+        if tag == "a" and self._hyperlink is not None:
+            self._close_hyperlink()
         if len(self.stack) > 1:
             self.stack.pop()
 
@@ -80,14 +94,66 @@ class _InlineParser(HTMLParser):
         if data:
             self._add_run(data)
 
-    def _add_run(self, text: str):
-        run = self.paragraph.add_run(text)
-        run.font.name = Fonts.main
-        run.font.size = Pt(self.state.size_pt)
-        run.bold = self.state.bold
-        run.italic = self.state.italic
+    def _add_run(self, text: str) -> None:
+        # Вне <a> используем высокоуровневый API python-docx — он создаёт
+        # `w:r` с привычным порядком элементов (важно для обратной совместимости
+        # с тестами, читающими p.runs/run.bold/run.font.size).
+        if self._hyperlink is None:
+            run = self.paragraph.add_run(text)
+            run.font.name = Fonts.main
+            run.font.size = Pt(self.state.size_pt)
+            run.bold = self.state.bold
+            run.italic = self.state.italic
+            if self.state.underline:
+                run.underline = True
+            return
+
+        # Внутри <a> конструируем `w:r` напрямую через oxml,
+        # чтобы родителем стал именно `w:hyperlink`, а не `w:p`.
+        r_el = OxmlElement("w:r")
+        r_pr = OxmlElement("w:rPr")
+
+        rfonts = OxmlElement("w:rFonts")
+        rfonts.set(qn("w:ascii"), Fonts.main)
+        rfonts.set(qn("w:hAnsi"), Fonts.main)
+        r_pr.append(rfonts)
+
+        sz = OxmlElement("w:sz")
+        sz.set(qn("w:val"), str(int(self.state.size_pt * 2)))
+        r_pr.append(sz)
+
+        if self.state.bold:
+            r_pr.append(OxmlElement("w:b"))
+        if self.state.italic:
+            r_pr.append(OxmlElement("w:i"))
         if self.state.underline:
-            run.underline = True
+            u = OxmlElement("w:u")
+            u.set(qn("w:val"), "single")
+            r_pr.append(u)
+
+        color = OxmlElement("w:color")
+        color.set(qn("w:val"), "0563C1")
+        r_pr.append(color)
+
+        r_el.append(r_pr)
+
+        t_el = OxmlElement("w:t")
+        t_el.set(qn("xml:space"), "preserve")
+        t_el.text = text
+        r_el.append(t_el)
+
+        self._hyperlink.append(r_el)
+
+    def _open_hyperlink(self, href: str) -> None:
+        part = self.paragraph.part
+        r_id = part.relate_to(href, RELATIONSHIP_TYPE.HYPERLINK, is_external=True)
+        hyperlink = OxmlElement("w:hyperlink")
+        hyperlink.set(qn("r:id"), r_id)
+        self.paragraph._p.append(hyperlink)
+        self._hyperlink = hyperlink
+
+    def _close_hyperlink(self) -> None:
+        self._hyperlink = None
 
 
 def _extract_size_pt(attrs: dict) -> float | None:
