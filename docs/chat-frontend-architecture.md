@@ -4,10 +4,11 @@
 
 ## Обзор
 
-Чат AI-ассистента в Act Constructor — это vanilla-JS приложение (ES6+) без
-бандлера. Скрипты подключаются обычными `<script>`-тегами через Jinja2-шаблоны
-в строгом порядке (см. раздел «Глобальные синглтоны и порядок скриптов»),
-а модули общаются между собой через синхронную шину событий `ChatEventBus`.
+Чат AI-ассистента в Act Constructor — это vanilla-JS приложение (ES6+) на
+Native ES Modules без bundler'а. Каждый чат-модуль — отдельный JS-файл
+с `import`/`export`; entry-файлы (`portal-common.js`, `constructor.js`)
+импортят все 12 модулей в нужном порядке. Модули общаются между собой через
+синхронную шину событий `ChatEventBus`.
 
 Архитектура — event-driven, тонкий фасад `ChatManager` оркеструет 11 ядерных
 модулей в `static/js/shared/chat/` и опциональный региональный модуль
@@ -473,93 +474,60 @@ grep -rn "fetch(\s*['\"\`]/api" static/js/
 
 Каждый найденный `fetch` без `AppConfig.api.getUrl` — баг.
 
-## Глобальные синглтоны и порядок скриптов
+## ES-модули и публикация в window
 
-### Почему `window.X = ...`
+### export + window.X = X
 
-Все ядерные модули объявляют свой объект и публикуют его в `window`:
+Все ядерные модули объявляют свой объект, помечают `export`, и публикуют его в `window`:
 
 ```js
-const ChatEventBus = { ... };
+export const ChatEventBus = { ... };
 window.ChatEventBus = ChatEventBus;
 ```
 
-Это сделано **намеренно**. Если объявить просто `const ChatEventBus = ...`
-в `<script>`-блоке (без `window.X =`), переменная попадёт в Script-scope —
-изолированную область видимости тега `<script>`. Обращения вида
-`window.ChatEventBus.on(...)` из другого `<script>`-тега вернут `undefined`
-и упадут.
+Дублирование намеренное. `export` нужен для ESM-импортов в других модулях (`import { ChatEventBus } from '../chat-event-bus.js';`). `window.X = X` нужен для inline-скриптов в шаблонах, которые ссылаются на bare-names — без window-публикации `AuthManager.requireAuth()` в inline `<script>` упадёт `ReferenceError`.
 
-То же касается `class ChatManager { ... }` — это объявление **не** создаёт
-свойство `window.ChatManager` автоматически. Поэтому в конце каждого
-модуля стоит явное `window.ChatManager = ChatManager`.
+При добавлении нового чат-модуля **оба** требования обязательны: `export` И `window.X = X`.
 
-Правило: для синглгтона обязательно `window.X = new ...` (или `window.X = X`
-после объявления через `const`/`class`). `const X = new ...` в `<script>`-блоке
-создаёт переменную в Script-scope и НЕ становится свойством `window` —
-обращения вида `window.X.method()` из другого `<script>`-тега падают
-в `undefined`. Пропуск `window.X =` — типовая ошибка при добавлении нового
-модуля.
+### Порядок импортов в entry-модуле
 
-### Порядок подключения
+Порядок `<script>`-тегов больше не load-bearing — entry-модули (`portal-common.js` и `constructor.js`) импортят чат в нужной последовательности через `import`-граф. Хотя ESM сам резолвит зависимости, для предсказуемости side-effect'ов (например, `ChatEventBus` на module-level вешает listeners) entry-файл импортит чат явно в порядке:
 
-Без бандлера порядок `<script>`-тегов критичен. `ChatEventBus` нужен всем
-остальным, `ChatRenderer` — `ChatMessages`, `ClientActionsRegistry` — нужен
-`ChatRenderer` (на момент `executeBlock`), и так далее.
-
-Канонический порядок (`templates/portal/base_portal.html:57-67`,
-`templates/constructor/base_constructor.html:64-74`):
-
-```html
-<script src="js/shared/chat/chat-event-bus.js"></script>
-<script src="js/shared/chat/chat-renderer.js"></script>
-<script src="js/shared/chat/chat-client-actions.js"></script>
-<script src="js/shared/chat/chat-stream.js"></script>
-<script src="js/shared/chat/chat-history.js"></script>
-<script src="js/shared/chat/chat-ui.js"></script>
-<script src="js/shared/chat/chat-files.js"></script>
-<script src="js/shared/chat/chat-context.js"></script>
-<script src="js/shared/chat/chat-messages.js"></script>
-<script src="js/shared/chat/chat-manager.js"></script>
-<!-- portal-only: chat-modal.js -->
-<!-- constructor-only: js/constructor/header/chat-popup.js -->
+```js
+import '../shared/chat/chat-event-bus.js';
+import '../shared/chat/chat-renderer.js';
+import '../shared/chat/chat-client-actions.js';
+import '../shared/chat/chat-stream.js';
+import '../shared/chat/chat-history.js';
+import '../shared/chat/chat-ui.js';
+import '../shared/chat/chat-files.js';
+import '../shared/chat/chat-title.js';
+import '../shared/chat/chat-context.js';
+import '../shared/chat/chat-messages.js';
+import '../shared/chat/chat-manager.js';
+import '../shared/chat/chat-modal.js';        // portal
+// или
+import '../constructor/header/chat-popup.js'; // constructor
 ```
 
 Логика порядка:
 
-1. `chat-event-bus.js` — первым (его использует каждый).
-2. `chat-renderer.js` — раньше всех модулей, которые рендерят
-   (`ChatMessages`, `ChatHistory`).
-3. `chat-client-actions.js` — раньше `ChatRenderer._renderClientAction`
-   (фактически — раньше любого исполнения, но проще держать сразу за
-   renderer'ом).
-4. `chat-stream.js` — независим, но удобно поставить рядом с renderer.
-5. `chat-history.js` — используется `ChatContext.init`, поэтому раньше
-   `chat-context.js`.
-6. `chat-ui.js`, `chat-files.js` — слушают шину, могут быть в любом порядке
-   между event-bus и manager'ом, но `ChatFiles` использует
-   `ChatUI.isProcessing()` в drop-handler'е.
-7. `chat-context.js` — использует `ChatHistory`, но `ChatHistory.init`
-   вызывается уже из `ChatContext.init`, так что `ChatHistory` должен быть
-   определён к моменту вызова `ChatContext.init()` (а не к моменту
-   объявления).
-8. `chat-messages.js` — использует `ChatRenderer`, `ChatStream`, `ChatUI`,
-   `ChatFiles`, `ChatContext` через `init` — должен идти последним из
-   ядра.
-9. `chat-manager.js` — фасад, инициализирует все остальные.
-10. `chat-modal.js` (только в портале) — использует `ChatManager`.
-11. `chat-popup.js` (только в конструкторе) — использует `ChatManager`.
+1. `chat-event-bus.js` — первым (его использует каждый, шина создаётся на module-level).
+2. `chat-renderer.js` — раньше модулей, которые рендерят (`ChatMessages`, `ChatHistory`).
+3. `chat-client-actions.js` — раньше `ChatRenderer._renderClientAction`.
+4. `chat-stream.js` — независим, по соседству с renderer.
+5. `chat-history.js` — используется `ChatContext.init`.
+6. `chat-ui.js`, `chat-files.js` — слушают шину, любой порядок между event-bus и manager'ом.
+7. `chat-context.js` — использует `ChatHistory`.
+8. `chat-messages.js` — использует все предыдущие через `init` — последний из ядра.
+9. `chat-manager.js` — фасад, инициализирует остальные.
+10. `chat-modal.js` (portal) / `chat-popup.js` (constructor) — используют `ChatManager`.
 
 ### Точки риска при добавлении модуля
 
-- Забыть `window.X = X` → `undefined` при доступе из другого `<script>`.
-- Вставить `<script>` до `chat-event-bus.js` → ReferenceError на
-  `ChatEventBus` в `init()`.
-- Добавить новый тип блока на бэк, забыть `KNOWN_BLOCK_TYPES` и
-  `ChatRenderer.renderBlock` switch — пользователь увидит unknown-block
-  fallback. Это не критично (graceful), но повод обновить фронт.
-- Добавить новый client-action на бэк (`names.py`), забыть
-  `ClientActionsRegistry.register(...)` — действие молча перестанет
-  работать (console.warn).
-- Добавить новый fetch с относительным URL без `AppConfig.api.getUrl` →
-  404 под JupyterHub.
+- Забыть `export` → импорты из других файлов упадут с `Named export 'X' not found`.
+- Забыть `window.X = X` → inline-скрипты в шаблонах падают с `ReferenceError`.
+- Использовать reserved-word под strict mode (`protected`, `private`, `public`, `implements`, `interface`, `package`) как имя параметра/переменной → `SyntaxError` при загрузке модуля.
+- Добавить новый тип блока на бэк, забыть `KNOWN_BLOCK_TYPES` и `ChatRenderer.renderBlock` switch — пользователь увидит unknown-block fallback.
+- Добавить новый client-action на бэк (`names.py`), забыть `ClientActionsRegistry.register(...)` — действие молча перестанет работать.
+- Добавить новый fetch с относительным URL без `AppConfig.api.getUrl` → 404 под JupyterHub.

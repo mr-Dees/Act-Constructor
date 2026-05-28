@@ -6,7 +6,7 @@
 - [`docs/troubleshooting.md`](troubleshooting.md) — типовые проблемы (запуск, БД, чат, JupyterHub proxy) и решения.
 - [`docs/deployment-runbook.md`](deployment-runbook.md) — пошаговый чек-лист deploy / старт-проверка / rollback.
 - [`docs/operations-recovery.md`](operations-recovery.md) — operator playbook: что делать при инцидентах в проде (forward-runner завис, singleton-lock, batcher overflow, denied access).
-- [`docs/frontend-architecture.md`](frontend-architecture.md) — **единый deep-dive по фронту** (constructor + portal + shared): глобальные синглтоны, порядок скриптов, AppState/StorageManager/LockManager, per-node render API, диалоги, безопасность, a11y, CSS. Чат — отдельным документом ниже.
+- [`docs/frontend-architecture.md`](frontend-architecture.md) — **единый deep-dive по фронту** (constructor + portal + shared): ES-модули и entry-файлы, AppState/StorageManager/LockManager, per-node render API, диалоги, безопасность, a11y, CSS. Чат — отдельным документом ниже.
 - [`docs/chat-frontend-architecture.md`](chat-frontend-architecture.md) — deep-dive по фронт-архитектуре чата: 11 ядерных модулей, SSE-маршрутизация, режимы inline/modal/popup.
 - [`docs/external-agent-imitation.sql`](external-agent-imitation.sql) — SQL-сниппеты для имитации внешнего ИИ-агента (см. §7.8).
 - [`docs/agent-bridge-cleanup.sql`](agent-bridge-cleanup.sql) — готовый retention-скрипт для `agent_*` таблиц (см. §9.6).
@@ -762,13 +762,13 @@ async def app_error_handler(request, exc):
 
 ## 4. Frontend: 3-зонная архитектура
 
-> **Deep-dive по фронту — в [`docs/frontend-architecture.md`](frontend-architecture.md)** (15 глав, ~1200 строк): глобальные синглтоны и порядок скриптов, AppConfig и JupyterHub-proxy, AppState (Proxy deep-tracking), StorageManager (state machine + persistence), LockManager и inactivity, Tree/items/per-node render API, PreviewManager, диалоги, Acts manager, безопасность, accessibility, CSS-каскад, открытые техдолги. Этот §4 — короткое содержание для тех, кто пришёл за обзором.
+> **Deep-dive по фронту — в [`docs/frontend-architecture.md`](frontend-architecture.md)**: ES-модули и entry-файлы, AppConfig и JupyterHub-proxy, AppState (Proxy deep-tracking), StorageManager (state machine + persistence), LockManager и inactivity, Tree/items/per-node render API, PreviewManager, диалоги, Acts manager, безопасность, accessibility, CSS-каскад. Этот §4 — короткое содержание для тех, кто пришёл за обзором.
 >
 > **Чат-фронт — отдельно**: [`docs/chat-frontend-architecture.md`](chat-frontend-architecture.md), плюс event-driven раздел §7.7 ниже.
 
 ### 4.1 Зоны и страницы
 
-Vanilla JS (ES6+), **без бандлера и без npm-зависимостей**. Браузер грузит десятки `<script defer>` в строго заданном порядке, модули общаются через глобальные синглтоны на `window` (см. `frontend-architecture.md` §2). ES-modules не используются — упрощает деплой в JupyterHub без node-tooling'а.
+Vanilla JS (ES6+), **Native ES Modules без bundler'а**. Браузер сам резолвит `import`-граф через `<script type="module">`. Node на проде не нужен — отдаём статику как есть, новые файлы создаются на месте без сборки. Entry-модули: `static/js/entries/portal-common.js` (для портала) и `static/js/entries/constructor.js`. Шаблоны page-уровня (landing, acts-manager, admin, ck) подключают свой inline `<script type="module">` с импортом нужного page-класса.
 
 | Зона | `static/js/` | Назначение |
 |------|--------------|------------|
@@ -798,7 +798,7 @@ constructor.css → @import './shared.css' + constructor-specific (45 файло
 
 CSS-переменные (576 шт.) — `static/css/base/variables.css`. Cache-busting через Jinja-фильтр `versioned` (`{{ 'css/entry/...' | versioned }}`).
 
-**Jinja2** — две независимые базы наследования: `templates/portal/base_portal.html` и `templates/constructor/base_constructor.html`. Деталь и порядок `<script>` — `frontend-architecture.md` §2.
+**Jinja2** — две независимые базы наследования: `templates/portal/base_portal.html` и `templates/constructor/base_constructor.html`. Каждая загружает свой ESM-entry (`portal-common.js` / `constructor.js`). Деталь — `frontend-architecture.md` §2.
 
 <!-- 4.2-4.6 поглощены в frontend-architecture.md (§2, §3, §4, §5, §13). Эта секция оставлена тонкой как навигационная. -->
 
@@ -806,9 +806,9 @@ CSS-переменные (576 шт.) — `static/css/base/variables.css`. Cache-
 
 **Добавление JS-модуля:**
 
-1. Создать файл в соответствующей зоне: `static/js/<zone>/<module>.js`.
-2. Опубликовать singleton через `window.X = ...` (НЕ `const X = ...` — в `<script>`-блоке `const` создаёт Script-scope-переменную и **не** становится свойством `window`). Деталь и реестр всех singletons — `frontend-architecture.md` §2.
-3. Добавить `<script defer>` тег в базовый шаблон зоны (`base_portal.html` или `base_constructor.html`). **Порядок критичен** — зависимости раньше потребителей. Snapshot-тест: `tests/test_template_script_order.py`.
+1. Создать файл в соответствующей зоне: `static/js/<zone>/<module>.js`. Top-level декларации помечать `export class X` / `export const X = ...`. Импорты зависимостей — относительными путями с `.js` в конце: `import { AppConfig } from '../shared/app-config.js';`.
+2. Опубликовать singleton дополнительно как `window.X = X` в конце файла — для совместимости с inline-скриптами в шаблонах. Деталь — `frontend-architecture.md` §2.3.
+3. Добавить `import './path/to/module.js';` в соответствующий entry-файл (`static/js/entries/portal-common.js` или `static/js/entries/constructor.js`). Если модуль side-effect-only (мутирует чужой state) — этого достаточно. Если экспортит что-то нужное конкретной странице — добавь именованный `import` в inline `<script type="module">` шаблона страницы.
 4. Все `fetch` и навигации — через `AppConfig.api.getUrl()` (иначе 404 под JupyterHub-proxy). См. `frontend-architecture.md` §3.
 
 **Добавление CSS-компонента:**

@@ -7,7 +7,7 @@
 ## Оглавление
 
 1. [Обзор](#1-обзор)
-2. [Глобальные синглтоны и порядок скриптов](#2-глобальные-синглтоны-и-порядок-скриптов)
+2. [ES-модули и entry-файлы](#2-es-модули-и-entry-файлы)
 3. [`AppConfig` и проксирование (JupyterHub)](#3-appconfig-и-проксирование-jupyterhub)
 4. [`AppState` и состояние конструктора](#4-appstate-и-состояние-конструктора)
 5. [`StorageManager` и persistence](#5-storagemanager-и-persistence)
@@ -20,7 +20,6 @@
 12. [Accessibility и i18n](#12-accessibility-и-i18n)
 13. [CSS-архитектура](#13-css-архитектура)
 14. [Чат](#14-чат)
-15. [Открытые техдолги](#15-открытые-техдолги)
 
 ---
 
@@ -101,144 +100,107 @@ CSS повторяет тройное разделение — см. главу 
 - [`docs/developer-guide.md`](developer-guide.md) §10 — UX/persistence/lock.
 - [`docs/forward-sequence.md`](forward-sequence.md) — sequence-диаграммы forward'а к внешнему агенту.
 - [`docs/cross-domain-contracts.md`](cross-domain-contracts.md) — контракты между бэк-доменами.
-- `tests/test_template_script_order.py` — pytest snapshot инвариантов порядка `<script>` тегов.
+- `tests/playwright/` — Playwright e2e smoke-тесты (открытие акта, drag-and-drop, ctrl+s, focus-trap диалогов и т.п.).
 
 ---
 
-## 2. Глобальные синглтоны и порядок скриптов
+## 2. ES-модули и entry-файлы
 
-### 2.1 Почему так
+### 2.1 Архитектура модулей
 
-Без бандлера/ES-modules модули не могут импортировать друг друга. Контракт коммуникации:
+Фронт использует **Native ES Modules** без bundler'а. Каждый JS-файл — ESM-модуль с `import`/`export`. Браузер сам резолвит граф зависимостей через `<script type="module">`. Node.js на проде не нужен — статика отдаётся как есть.
 
-1. Каждый модуль на module-level либо явно публикует синглтон в `window` (`window.X = ...`), либо объявляет top-level `const X = ...`.
-2. Потребители обращаются к `window.X` или просто `X` (Script-scope в DOM-document'е).
-3. Порядок `<script defer>` тегов в шаблоне гарантирует, что зависимости загружены первыми.
+**Контракт коммуникации:**
 
-### 2.2 Ловушка `const` ≠ `window.X`
+1. Top-level декларации файла помечены `export`: `export class AuthManager`, `export const AppState = {...}`, `export const treeManager = new TreeManager(...)`.
+2. Потребители импортят явно: `import { AuthManager } from '../shared/auth.js';`.
+3. Зависимости резолвятся автоматически — порядок `<script>`-тегов в шаблоне load-bearing **только** для entry-модуля (один тег на зону) и vendor-DOMPurify (классический script, который должен встать раньше ESM-входа).
+4. Каждый ESM-модуль дополнительно публикует свой singleton на `window` (`window.AuthManager = AuthManager`) — для совместимости с inline-скриптами в шаблонах, которые ссылаются на bare-names. Без этого `AuthManager.requireAuth()` в inline `<script>` не работал бы (в classic-script bare-name резолвится через `window`).
 
-`const X = new ...` в `<script>`-блоке создаёт переменную в **Script-scope**, которая видна как голое имя `X`, но **не** становится свойством `window`. Обращения `window.X.method()` для таких объектов вернут `undefined`. Это load-bearing инвариант: при добавлении новых синглтонов выбирайте паттерн осознанно.
+### 2.2 Entry-модули
 
-Случаи в коде:
+Два entry-файла на зону:
 
-| Паттерн | Пример | Видно как |
+- **`static/js/entries/portal-common.js`** — импортит `shared/` (app-config, auth, api, notifications, error-boundary, escape-stack, sanitize, dialog-base, dialog-confirm), `portal/portal-sidebar`, `portal/portal-settings`, 12 чат-модулей. Подключается в `templates/portal/base_portal.html` одним тегом.
+
+- **`static/js/entries/constructor.js`** — импортит весь конструктор (state, tree, items, table, preview, textblock, violation, validation, lock-manager, header) + общие `shared/` + диалоги + чат + portal-cross-zone (team-member-search, dialog-create-act, acts-broadcast). Подключается в `templates/constructor/base_constructor.html`.
+
+Каждая page-template добавляет минимальный inline `<script type="module">` с импортом нужных страничных классов (`LandingPage`, `ActsManagerPage`, `AdminPage`, `CkFinResPage`, `CkClientExpPage`) и вызовом `init()` на `DOMContentLoaded`.
+
+**Vendor DOMPurify** грузится отдельным классическим `<script src="...purify.min.js">` ДО entry-модуля — он публикует `window.DOMPurify`, который потом использует `shared/sanitize.js`. Это единственный sync-script в шаблонах.
+
+### 2.3 Реестр публичных имён
+
+Каждый файл экспортирует один singleton + публикует его как `window.<Name>`. Имена соответствуют классам (PascalCase) или инстансам (camelCase).
+
+**`shared/` (доступны во всех зонах):**
+
+| Файл | Экспорт | Тип |
 |---|---|---|
-| `window.X = new ...` | `window.Notifications = new NotificationManager()` (`shared/notifications.js:436`) | `Notifications` (Script-scope) **и** `window.Notifications` |
-| `class X { static ... }; window.X = X;` | `window.AuthManager = AuthManager;` (`shared/auth.js:303`) | `AuthManager` **и** `window.AuthManager` |
-| `const X = new ...` | `const treeManager = new TreeManager('tree')` (`constructor/tree/tree-core.js:449`) | только `treeManager` (Script-scope) |
-| IIFE + `window.X = ...` | `(function(){ ... window.SafeHTML = {...}; })()` (`shared/sanitize.js:14,98`) | только `window.SafeHTML` |
-
-`new ...` на module-level выполняется **сразу** после загрузки скрипта — это значит, что `tree-core.js` упадёт с `TreeRenderer is not defined`, если `tree-renderer.js` ещё не загрузился. Поэтому порядок `<script>` в шаблоне load-bearing.
-
-### 2.3 Реестр window-экспортов
-
-**`shared/` (общедоступны на всех страницах):**
-
-| File:Line | Объект | Тип |
-|---|---|---|
+| `shared/app-config.js` | `AppConfig` | static class |
+| `shared/auth.js` | `AuthManager` | static class |
 | `shared/api.js` | `APIClient`, `LockLostError` | static class + Error subclass |
-| `shared/auth.js:303` | `window.AuthManager` | static class |
-| `shared/notifications.js:436` | `window.Notifications` | **instance** |
-| `shared/sanitize.js:98` | `window.SafeHTML` | object literal |
-| `shared/error-boundary.js:86` | `window.ErrorBoundary` | static class |
-| `shared/filter-engine.js:68` | `window.FilterEngine` | static class |
-| `shared/dialog/dialog-base.js:438` | `window.DialogBase` | static class |
-| `shared/dialog/dialog-confirm.js:296` | `window.DialogManager` | static class |
-| `shared/ck/ck-pagination.js` | `window.CkPagination` | static class |
-| `shared/ck/ck-table.js` | `window.CkTable` | static class |
-| `shared/ck/ck-form.js` | `window.CkForm` | static class |
-| `shared/ck/ck-process-picker.js` | `window.CkProcessPicker` | static class (extends DialogBase) |
+| `shared/notifications.js` | `NotificationManager`, `Notifications` (instance) | class + singleton-instance |
+| `shared/sanitize.js` | `SafeHTML` | object literal |
+| `shared/error-boundary.js` | `ErrorBoundary` | static class |
+| `shared/escape-stack.js` | `EscapeStack` | static class |
+| `shared/filter-engine.js` | `FilterEngine` | static class |
+| `shared/dialog/dialog-base.js` | `DialogBase` | static class |
+| `shared/dialog/dialog-confirm.js` | `DialogManager` | static class |
+| `shared/ck/{ck-table,ck-pagination,ck-form,ck-process-picker}.js` | `Ck*` | static classes |
 
-**`shared/chat/`** — 13 синглтонов на `window`. Полный реестр и подробности — [`docs/chat-frontend-architecture.md`](chat-frontend-architecture.md). Cross-zone-точки сцепки (`ChatEventBus`, `ChatPopupManager`, `ChatManager`, `ChatModalManager`) — см. §14.
+**`shared/chat/`** — 12 модулей (ChatEventBus, ChatRenderer, ChatClientActionsRegistry, ChatStream, ChatHistory, ChatUI, ChatFiles, ChatTitle, ChatContext, ChatMessages, ChatManager, ChatModalManager). Полный реестр — [`docs/chat-frontend-architecture.md`](chat-frontend-architecture.md).
 
-**Top-level classes, НЕ на `window`:**
+**`portal/`:**
 
-| File:Line | Объект | Где доступен |
-|---|---|---|
-| `shared/app-config.js:7` | `AppConfig` (`class AppConfig { static ... }`) | Везде, где загружен `app-config.js` (portal + constructor) |
-| `constructor/storage-manager.js` | `StorageManager` (`class StorageManager { static ... }`) | Только constructor-зона (`base_constructor.html`); в `portal/` НЕ существует |
-
-В classic-скрипте top-level `class X {}` доступен как **global binding** (голое имя `X`), но **не** становится свойством `window`. Поэтому `window.AppConfig` / `window.StorageManager` всегда `undefined` — проверки через `window.X` мертвы. Корректный гард: `typeof X !== 'undefined'`. Cross-zone обращения (например, из `portal/*` к `StorageManager`) всегда дают `undefined` — учитывай при добавлении новой логики.
-
-**`constructor/` — явные `window.X = ...`:**
-
-| File:Line | Объект |
+| Файл | Экспорт |
 |---|---|
-| `constructor/changelog-tracker.js:160` | `window.ChangelogTracker` |
-| `constructor/lifecycle-helper.js:58` | `window.LifecycleHelper` |
-| `constructor/lock-manager.js:761` | `window.LockManager` |
-| `constructor/state/metrics-risk-coordinator.js:141` | `window.MetricsRiskCoordinator` |
-| `constructor/dialog/dialog-help.js:229` | `window.HelpManager` |
-| `constructor/dialog/dialog-invoice.js:1302` | `window.InvoiceDialog` |
-| `constructor/header/acts-menu.js:668` | `window.ActsMenuManager` |
-| `constructor/header/chat-popup.js:219` | `window.ChatPopupManager` |
-| `constructor/header/header-exit.js:186` | `window.HeaderExit` |
-| `constructor/header/settings-menu.js:304` | `window.SettingsMenuManager` |
-| `constructor/header/preview-menu.js:342` | `window.previewMenuManager` (единственный lowercase singleton) |
+| `portal/portal-sidebar.js` | `PortalSidebar` |
+| `portal/portal-settings.js` | `LandingSettingsManager` |
+| `portal/landing/landing-page.js` | `LandingPage` |
+| `portal/acts-manager/*` | `ActsManagerPage`, `CreateActDialog`, `AuditLogDialog`, `VersionPreviewOverlay`, `DiffEngine`, `DiffRenderer`, `ActsBroadcast`, `TeamMemberSearch`, `AppendixNumberDropdown` |
+| `portal/admin/*` | `AdminPage`, `AdminRoles`, `AdminAddUserDialog`, `AdminDiagnostics`, `AdminAuditLog`, `AdminSearch` |
+| `portal/ck-fin-res/*`, `portal/ck-client-exp/*` | `Ck*Page`, `Ck*Config` |
 
-**`constructor/` — top-level `const` (НЕ свойства `window`):**
+**`constructor/`:**
 
-| File:Line | Объект |
+| Файл | Экспорт |
 |---|---|
-| `constructor/state/state-core.js:8` | `const AppState = {...}` |
-| `constructor/tree/tree-utils.js:7` | `const TreeUtils = {...}` |
-| `constructor/tree/tree-core.js:449` | `const treeManager = new TreeManager('tree')` |
-| `constructor/table/table-core.js:340` | `const tableManager = new TableManager('tablesContainer')` |
-| `constructor/textblock/textblock-core.js:106` | `const textBlockManager = new TextBlockManager()` |
-| `constructor/violation/violation-init.js:7` | `const violationManager = new ViolationManager(); violationManager.initialize();` |
-| `constructor/context-menu/context-menu-links-footnotes.js` (через `textblock-links-footnotes.js:6`) | `const linkFootnoteContextMenu = new LinkFootnoteContextMenu()` |
+| `constructor/app.js` | `App` |
+| `constructor/state/state-core.js` | `AppState` (с методами, расширенными в `state-tree.js`/`state-content.js` через `Object.assign`) |
+| `constructor/state/metrics-risk-coordinator.js` | `MetricsRiskCoordinator` |
+| `constructor/tree/tree-core.js` | `TreeManager`, `treeManager` (instance) |
+| `constructor/tree/tree-utils.js` | `TreeUtils` |
+| `constructor/table/table-core.js` | `TableManager`, `tableManager` |
+| `constructor/textblock/textblock-core.js` | `TextBlockManager`, `textBlockManager` |
+| `constructor/violation/violation-init.js` | `violationManager` (instance, инстанциируется при загрузке модуля) |
+| `constructor/items/items-renderer.js` | `ItemsRenderer` |
+| `constructor/preview/preview.js` | `PreviewManager` |
+| `constructor/lock-manager.js` | `LockManager` |
+| `constructor/storage-manager.js` | `StorageManager` |
+| `constructor/changelog-tracker.js` | `ChangelogTracker` |
+| `constructor/lifecycle-helper.js` | `LifecycleHelper` |
+| `constructor/dialog/dialog-help.js` | `HelpManager` (extends DialogBase) |
+| `constructor/dialog/dialog-invoice.js` | `InvoiceDialog` |
+| `constructor/header/{acts,settings,preview,chat,format,header}-*.js` | `ActsMenuManager`, `SettingsMenuManager`, `previewMenuManager`, `ChatPopupManager`, `FormatMenuManager`, `HeaderExit` |
 
-Доступ к ним — голое имя (`treeManager.render()`, `AppState.treeData`), `window.treeManager` вернёт `undefined`.
+### 2.4 Side-effect-модули
 
-Дополнительно `base_constructor.html:37` мутирует `window.actMetadata = null` (заполняется в `APIClient.loadActContent`) и `window.currentActId` (выставляется в `acts-menu.js`).
+Некоторые файлы не экспортируют ничего — они существуют ради побочного эффекта (мутации внешнего state):
 
-### 2.4 Канонический порядок `<script>`
+- **`constructor/state/state-tree.js`** и **`state-content.js`** делают `Object.assign(AppState, {...})`, добавляя методы к синглтону из `state-core.js`. Entry-модуль импортит их явно после `state-core.js` — иначе их module-level код не выполнится.
+- **`constructor/violation/violation-init.js`** инстанцирует `ViolationManager` и вызывает `initialize()`. Должен импортиться entry-модулем после всех violation-helpers.
+- **Inline-скрипт в `base_constructor.html`** инициализирует `window.actMetadata = null` и `window.__authReady` — promise готовности авторизации. Init-обработчики (`acts-menu.js`) `await window.__authReady` перед первым `AuthManager.getCurrentUser()`.
 
-#### `templates/portal/base_portal.html` (~23 тега, включая 12 chat-модулей)
+### 2.5 Strict-mode под ESM
 
-1. `app-config.js`, `auth.js`, `api.js`, `notifications.js` — базовая инфраструктура.
-2. `error-boundary.js` — **сразу** после `notifications.js` (boundary использует `Notifications.error` для toast'ов).
-3. `dialog/dialog-base.js`, `dialog/dialog-confirm.js`.
-4. `portal-sidebar.js`.
-5. `dompurify/purify.min.js` → `sanitize.js` (SafeHTML обязан видеть `window.DOMPurify`).
-6. `chat-event-bus.js` (первым среди чата — остальные модули подписываются на шину на module-level).
-7. Остальные 11 чат-модулей в порядке зависимостей (renderer → client-actions → stream → history → ui → files → title → context → messages → manager → modal).
-8. `portal-settings.js`.
+`<script type="module">` принудительно включает strict mode. Reserved-words нельзя использовать как имена биндингов:
 
-`base_portal.html:46-78`. Все теги — `defer`.
+- `protected`, `private`, `public`, `implements`, `interface`, `package` — не могут быть параметрами функций или именами `let`/`const`/`var`. Если такое имя нужно как ключ объекта (например, `{ protected: true }`), это OK — только биндинг запрещён.
+- `arguments` и `eval` не могут быть переприсвоены.
+- Объявление функции внутри блока (`if (...) { function foo(){} }`) разрешено, но scope другой.
 
-#### `templates/constructor/base_constructor.html` (~79 тегов)
-
-`app-config.js` и `auth.js` — sync (без `defer`), потому что следом идёт sync inline-блок (`base_constructor.html:34-54`), инициализирующий `window.__authReady` (promise готовности авторизации). Все init-обработчики, использующие `AuthManager.getCurrentUser()`, обязаны `await window.__authReady` — иначе при пустом/истёкшем localStorage первый API-вызов уйдёт без `X-JupyterHub-User`.
-
-После inline-блока (`base_constructor.html:56–165`) — defer-каскад:
-
-| Группа | Строки шаблона | Комментарий |
-|---|---|---|
-| `header-exit.js` | 56 | |
-| `notifications.js` → `error-boundary.js` | 59–63 | error-boundary СРАЗУ после Notifications |
-| `changelog-tracker.js`, `lifecycle-helper.js`, `storage-manager.js` | 64–66 | До `app.js` (использует все три) |
-| `api.js`, `app.js`, `navigation-manager.js`, `format-menu-manager.js`, `settings-menu.js` | 67–71 | |
-| `dompurify` → `sanitize.js` | 74–77 | |
-| 12 chat-модулей + `chat-popup.js` | 80–91 | `chat-event-bus.js` первым |
-| Диалоги: `dialog-base`, `dialog-confirm`, `team-member-search`, `appendix-number-dropdown`, `dialog-create-act`, `dialog-help`, `dialog-invoice` | 94–100 | |
-| Контекстные меню: `core` → tree/cells/violation/links-footnotes | 103–107 | core первым |
-| `services/id-generator.js` | 110 | |
-| State: `state-core` → `state-tree` → `state-content` → `metrics-risk-coordinator` | 113–116 | `state-tree`/`state-content` делают `Object.assign(AppState, ...)` — требуют state-core |
-| Tree: `tree-drag-drop` → `tree-renderer` → `tree-core` → `tree-utils` | 119–122 | `tree-core.js:449` создаёт singleton, требует все три |
-| Items: `items-title-editing` → `items-renderer` | 125–126 | |
-| Table: `table-cells-operations` → `table-sizes` → `table-core` | 129–131 | core инстанцирует TableCellsOperations и TableSizes |
-| Preview: `preview` → table/textblock/violation-renderer | 134–137 | |
-| Textblock: `core` → editor → formatting → toolbar → links-footnotes | 140–144 | |
-| Violation: `core` → paste → additional-content → rendering → drag-drop → file-upload → `violation-init` | 147–153 | `violation-init.js` ОБЯЗАН быть последним: `new ViolationManager().initialize()` |
-| Validation: `validation` → act → core → table → tree | 156–160 | |
-| `lock-manager.js`, `acts-broadcast.js`, `acts-menu.js`, `preview-menu.js` | 162–165 | `acts-menu.js` последним — на `DOMContentLoaded` парсит `?act_id=` и автозагружает акт (`acts-menu.js:655-664`) |
-
-После всех скриптов — render-time includes для шаблонов диалогов и контекстных меню (`base_constructor.html:168–181`).
-
-### 2.5 Snapshot-тест
-
-`tests/test_template_script_order.py` парсит оба `base_*.html` regex'ом по `<script>`-тегам и фиксирует инварианты (например, `dompurify` до `chat-renderer.js`, `chat-event-bus.js` до остальных chat-модулей). Тест работает на сыром HTML без рендеринга Jinja — при добавлении новых тегов или перестановке существующих обязательно прогнать `pytest tests/test_template_script_order.py`.
+При добавлении нового кода под ESM учитывай эти правила.
 
 ---
 
@@ -672,8 +634,10 @@ Per-node API (вместо полного `renderAll()`):
 | File:Line | Событие | Действие |
 |---|---|---|
 | `tree/tree-renderer.js:19-22` | `node:invoice-changed` | `this.updateInvoiceBadge(node)` |
+| `tree/tree-renderer.js:25-28` | `node:tb-changed` | `this.updateTbBadge(node)` — обновляет бейдж текущего узла + всех родителей под §5 |
+| `items/items-renderer.js` (module-level) | `node:tb-changed` | `ItemsRenderer._updateTbBadgeInItems` + `_updateParentTbInItems` — обновляет селектор ТБ на шаге 2 |
 
-Подписчика на `node:tb-changed` **нет**; обновление badge'а делается imperative-вызовами `updateTbBadge` / `_updateTbBadgeInItems` / `_updateParentTbInItems` из callsite'ов — technical debt, см. §15.
+Подписчики ставятся на module-level при загрузке файлов. ChatEventBus используется как универсальная шина, optional chaining (`window.ChatEventBus?.on?.(...)`) защищает на случай, если шина не загружена. Callsite'ы (TB-чекбокс в дереве и в items) только дёргают `AppState.setNodeTb` — каскадное обновление badge'ей делают подписчики.
 
 ---
 
@@ -783,9 +747,17 @@ const ok = await DialogManager.show({
 | `AdminAddUserDialog` | `portal/admin/admin-add-user-dialog.js` | 239 | Search → выбор → assign |
 | `CkProcessPicker` | `shared/ck/ck-process-picker.js` | 173 | Popup выбора БП для CkForm |
 
-### 9.5 HelpManager — параллельная иерархия (техдолг)
+### 9.5 HelpManager через DialogBase
 
-`HelpManager` наследуется от `DialogBase`, но реализует свой жизненный цикл (`window.HelpManager.show(stepNumber)`) — не использует общий `DialogManager.show()`. Историческое решение; ярких проблем нет, но при унификации UI-стека стоит переписать через `DialogManager`. Подробнее — §15.
+`HelpManager` (extends DialogBase) показывает существующий в DOM `<div id="helpModal">` через `DialogBase._showDialog(modal, {appendToBody: false})`. Опция `appendToBody: false` сообщает DialogBase, что overlay уже в DOM и не нужно его добавлять/удалять — только показать/скрыть через классы `.visible`/`.hidden`. Это даёт HelpManager:
+
+- Единый стек `_activeDialogs` (вложенность с другими диалогами работает корректно).
+- `aria-modal`, `role="dialog"`, `aria-labelledby` автоматически.
+- Focus-trap + восстановление `_previousFocus` при закрытии.
+- ESC через общий `EscapeStack` (см. §6.7 EscapeStack).
+- Lock body scroll.
+
+Раньше HelpManager имел свой `_showModalHelp` / `_currentModal` — отдельная иерархия, без focus-trap. Теперь унифицирован.
 
 ---
 
@@ -1071,7 +1043,19 @@ Constructor **не адаптивен** (0 media queries в `constructor/*`). Э
 
 ### 13.4 Переменные
 
-`static/css/base/variables.css` (1 файл, **576 переменных**) — единый файл с цветовой схемой, размерами, spacing, тенями, durations, z-index'ами. Декомпозиция этого файла на тематические части — в backlog (§15).
+`static/css/base/variables.css` — агрегатор-файл с `@import` на 7 тематических подфайлов в `static/css/base/variables/`:
+
+| Файл | Содержание |
+|---|---|
+| `colors.css` | Палитра, статусы, фоны, границы, тексты, кнопки, инпуты, оверлеи, градиенты, цвета таблиц/подсветок/ссылок/дерева/save-indicator/notifications/acts-states |
+| `typography.css` | font-family, font-size, font-weight, line-height, letter-spacing |
+| `spacing.css` | --spacing-*, --radius-*, --border-width-*, --translate-*, --opacity-*, scale-tokens |
+| `shadows.css` | --shadow-*, --text-shadow-*, --focus-ring, --focus-outline, --modal-blur-background, --tooltip-arrow-size |
+| `z-index.css` | Все --z-* (base, dropdown, sticky, modal, popover, tooltip, notification) включая `-elevated`-уровни |
+| `motion.css` | --transition-*, --duration-*, --ease-*, --rotate-*, --animation-iterations, --bounce-* |
+| `components.css` | Компонент-специфичные размеры (modal, preview, table, textblock, link-footnote, toolbar, acts-menu, save-indicator, tree, violation, settings-menu, theme-switch, help-modal, create-act-dialog, steps, status-tag, scrollbar, header, breakpoints, items, context-menu, dialog, button-sizes, icon-sizes) |
+
+Все 576 переменных по-прежнему доступны под прежними именами — это пере-разбиение, не переименование. `@import` в CSS — runtime-каскад, порядок резолва значений не зависит от порядка @import.
 
 ### 13.5 Z-index map
 
@@ -1117,52 +1101,3 @@ Jinja-фильтр `versioned` (применяется ко всем `url_for('s
 
 ---
 
-## 15. Открытые техдолги
-
-Перечень нереализованных пунктов с финального аудита.
-
-### Security
-
-| # | Описание | Где |
-|---|---|---|
-| M4-LS-EXPOSURE | localStorage содержит полное содержимое акта в clear-text. Опции: encrypt / IndexedDB / accept risk. Требует бизнес-решения | — |
-| L1-JUPYTERHUB-HEADER | `X-JupyterHub-User` header кое-где dead/misleading. Low-priority cleanup | — |
-| DOMPURIFY-CVE | Нет dependabot/snyk — обновление DOMPurify ручное | — |
-
-### Performance
-
-| # | Описание |
-|---|---|
-| K.2-LAZY-DIALOGS | Lazy-load `dialog-invoice.js` (1302 LOC) и `dialog-help.js` — грузятся всегда |
-| K.3-BUNDLER | Bundle через esbuild/vite — противоречит «без бандлера», но даёт treeshaking и source-maps. Не сделано |
-
-### Архитектурные
-
-| # | Описание | Где |
-|---|---|---|
-| E-3-MRC-EXTRACT | Полная extraction `MetricsRiskCoordinator` отложена (risk-too-high). Реализован только snapshot+rollback | — |
-| TB-EVENT-LISTENER | `node:tb-changed` эмитится, но подписчиков нет — реальное обновление imperative-вызовами (§7.6) | — |
-| L9-A-ESCAPE-STACK | 9 Escape listeners без `stopImmediatePropagation` — конфликты при вложенных диалогах. Современная Grep даёт 20 совпадений в 20 файлах. **Не закрывалось** | — |
-| M10-A-HELP-VS-DIALOG | `HelpManager` и `DialogBase` — параллельные иерархии. Унификация откладывалась | — |
-| CK-HARDCODED-LISTS | `ck-fin-res-config.js:7-14` — `FR_ASSIGNMENT_FORMAT_OPTIONS` / `FR_USED_PM_OPTIONS` hardcoded, надо вынести в API | — |
-
-### CSS
-
-| # | Описание |
-|---|---|
-| #6 — variables-decompose | 576 переменных в одном `variables.css` — нужна декомпозиция |
-| M-Z-CALC | Z-index `calc(var(--z-modal) + 1)` в `dialog-overlay.css`, `chat-blocks.css` — частично закрыто введением `-elevated`-уровней, остатки нужно проверить |
-| #8 — no-media-queries | Constructor desktop-only — задокументировано (§12.7), не считается багом |
-
-### UX
-
-| # | Описание |
-|---|---|
-| N9 — merge/delete UX | Smart auto-unmerge при удалении ряда — backlog |
-| N11 — configured-chip null | Configured-chip на null-state в Invoice dialog — backlog |
-
-### Infra
-
-| # | Описание |
-|---|---|
-| LandingSidebar-NAMING | Класс `LandingSidebar` (`portal/portal-sidebar.js:7`) обслуживает все portal-страницы, имя историческое — переименовать в `PortalSidebar` |
