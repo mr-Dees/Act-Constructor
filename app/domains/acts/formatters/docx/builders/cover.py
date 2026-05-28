@@ -1,4 +1,4 @@
-"""Cover-блок: таблица-реквизиты без видимых рамок + заголовок акта."""
+"""Cover-блок: borderless-таблица 2×4 под эталон + параграф «Акт … составлен на N листах»."""
 from datetime import date
 
 from docx.document import Document
@@ -11,49 +11,85 @@ from app.domains.acts.formatters.docx.styles import Fonts, Sizes
 
 
 def build_cover_block(doc: Document, metadata) -> None:
-    """Добавляет cover-таблицу и заголовок акта в начало документа."""
-    table = doc.add_table(rows=1, cols=2)
+    """Рендерит шапку акта под эталон.
+
+    1. Таблица 4×2 без видимых рамок.
+       Левая колонка — bold-лейблы, правая — значения из metadata.
+    2. Отдельный параграф под таблицей: «Акт аудиторской проверки составлен на N листах,
+       приложение на 1 листе.» где N — Word-поле NUMPAGES (пересчитывается при открытии).
+    """
+    table = doc.add_table(rows=4, cols=2)
+    table.autofit = False
     _set_invisible_borders(table)
 
-    left_lines = _build_meta_lines(metadata)
-    left_cell = table.rows[0].cells[0]
-    left_cell.text = ""  # сбрасываем default-параграф
-    for i, line in enumerate(left_lines):
-        para = left_cell.paragraphs[0] if i == 0 else left_cell.add_paragraph()
-        run = para.add_run(line)
-        run.font.name = Fonts.main
-        run.font.size = Pt(Sizes.label_pt)
+    rows = _build_rows(metadata)
+    for row_idx, (label, value_html) in enumerate(rows):
+        _fill_label_cell(table.rows[row_idx].cells[0], label)
+        _fill_value_cell(table.rows[row_idx].cells[1], value_html)
 
-    right_cell = table.rows[0].cells[1]
-    right_cell.text = ""
-    placeholder = right_cell.paragraphs[0].add_run("[ЛОГОТИП]")
-    placeholder.font.name = Fonts.main
-    placeholder.font.size = Pt(Sizes.label_pt)
-    right_cell.paragraphs[0].alignment = WD_ALIGN_PARAGRAPH.RIGHT
-
-    title = doc.add_paragraph()
-    title.alignment = WD_ALIGN_PARAGRAPH.CENTER
-    title_run = title.add_run(_build_title(metadata))
-    title_run.font.name = Fonts.main
-    title_run.font.size = Pt(Sizes.title_pt)
-    title_run.bold = True
+    _add_sheets_paragraph(doc)
+    doc.add_paragraph()  # воздух перед первым рубрикатором
 
 
-def _build_meta_lines(m) -> list:
-    type_label = "Процессная проверка" if m.is_process_based else "Непроцессная проверка"
-    start = m.inspection_start_date.strftime("%d.%m.%Y") if m.inspection_start_date else ""
-    end = m.inspection_end_date.strftime("%d.%m.%Y") if m.inspection_end_date else ""
+def _build_rows(m) -> list[tuple[str, str]]:
+    order_date = getattr(m, "order_date", None)
+    audit_team = getattr(m, "audit_team", None) or []
+    order_date_str = order_date.strftime("%d.%m.%Y") if order_date else ""
+    start_str = m.inspection_start_date.strftime("%d.%m.%Y") if m.inspection_start_date else ""
+    end_str = m.inspection_end_date.strftime("%d.%m.%Y") if m.inspection_end_date else ""
+
+    order_year = order_date.year if order_date else (m.inspection_start_date.year if m.inspection_start_date else "")
+    basis = (
+        f"П. 1 Раздела I Плана работы СВА на {order_year} год. "
+        f"Распоряжение от {order_date_str} №{m.order_number}."
+    )
+
+    team_lines = []
+    kurator = _first_role(audit_team, "Куратор")
+    leader = _first_role(audit_team, "Руководитель")
+    if kurator:
+        team_lines.append(f"Куратор – {kurator.full_name} ({kurator.position})")
+    if leader:
+        team_lines.append(f"Руководитель – {leader.full_name} ({leader.position})")
+    team_lines.append(
+        f"Участники – в соответствии с Приложением 1 к Распоряжению от {order_date_str} №{m.order_number}"
+    )
+    team_value = "\n".join(team_lines)
+
+    dates_value = f"Начата {start_str} и завершена {end_str}"
+
     return [
-        f"{m.km_number}, часть {m.part_number} из {m.total_parts}",
-        type_label,
-        f"Период проверки: {start} – {end}",
-        f"Распоряжение: {m.order_number}",
+        ("Основание аудиторской проверки:", basis),
+        ("Состав аудиторской группы:", team_value),
+        ("Сроки проведения аудиторской проверки:", dates_value),
+        ("Номер АП в АС СУП СВА:", m.km_number),
     ]
 
 
-def _build_title(m) -> str:
-    name = (m.inspection_name or "").strip()
-    return f"АКТ ПРОВЕРКИ\n{name}" if name else "АКТ ПРОВЕРКИ"
+def _first_role(team, role: str):
+    for member in team or []:
+        if getattr(member, "role", None) == role:
+            return member
+    return None
+
+
+def _fill_label_cell(cell, label: str) -> None:
+    cell.text = ""
+    para = cell.paragraphs[0]
+    run = para.add_run(label)
+    run.bold = True
+    run.font.name = Fonts.main
+    run.font.size = Pt(Sizes.cover_label_pt)
+
+
+def _fill_value_cell(cell, value: str) -> None:
+    cell.text = ""
+    lines = value.split("\n")
+    for idx, line in enumerate(lines):
+        para = cell.paragraphs[0] if idx == 0 else cell.add_paragraph()
+        run = para.add_run(line)
+        run.font.name = Fonts.main
+        run.font.size = Pt(Sizes.body_pt)
 
 
 def _set_invisible_borders(table) -> None:
@@ -64,3 +100,40 @@ def _set_invisible_borders(table) -> None:
         b.set(qn("w:val"), "nil")
         borders.append(b)
     tbl_pr.append(borders)
+
+
+def _add_sheets_paragraph(doc) -> None:
+    para = doc.add_paragraph()
+    para.alignment = WD_ALIGN_PARAGRAPH.LEFT
+
+    prefix_run = para.add_run("Акт аудиторской проверки составлен на ")
+    prefix_run.font.name = Fonts.main
+    prefix_run.font.size = Pt(Sizes.body_pt)
+
+    _append_field(para, "NUMPAGES")
+
+    suffix_run = para.add_run(" листах, приложение на 1 листе.")
+    suffix_run.font.name = Fonts.main
+    suffix_run.font.size = Pt(Sizes.body_pt)
+
+
+def _append_field(paragraph, instr: str) -> None:
+    """Вставляет Word-поле { instr } через w:fldChar в указанный параграф."""
+    run = paragraph.add_run()
+    r = run._r
+
+    fld_begin = OxmlElement("w:fldChar")
+    fld_begin.set(qn("w:fldCharType"), "begin")
+    r.append(fld_begin)
+
+    instr_text = OxmlElement("w:instrText")
+    instr_text.set(qn("xml:space"), "preserve")
+    instr_text.text = f" {instr} "
+    r.append(instr_text)
+
+    fld_end = OxmlElement("w:fldChar")
+    fld_end.set(qn("w:fldCharType"), "end")
+    r.append(fld_end)
+
+    run.font.name = Fonts.main
+    run.font.size = Pt(Sizes.body_pt)
