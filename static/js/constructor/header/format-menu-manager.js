@@ -116,7 +116,10 @@ export class FormatMenuManager {
      */
     static _restoreFormats(menu) {
         const saved = localStorage.getItem(this._storageKey);
-        if (!saved) return;
+        if (!saved) {
+            this._lockDbCheckbox(menu);
+            return;
+        }
 
         try {
             const formats = JSON.parse(saved);
@@ -124,10 +127,27 @@ export class FormatMenuManager {
 
             const checkboxes = menu.querySelectorAll('input[type="checkbox"]');
             checkboxes.forEach(checkbox => {
+                // DB-сохранение обязательно (export читает из БД), localStorage не управляет
+                if (checkbox.value === 'db') return;
                 checkbox.checked = formats.includes(checkbox.value);
             });
         } catch (e) {
             console.error('Ошибка восстановления форматов:', e);
+        } finally {
+            this._lockDbCheckbox(menu);
+        }
+    }
+
+    /**
+     * Принудительно ставит DB-чекбокс checked + disabled.
+     * Экспорт читает контент из БД, поэтому save в БД должен пройти всегда.
+     * @private
+     */
+    static _lockDbCheckbox(menu) {
+        const dbCheckbox = menu.querySelector('input[value="db"]');
+        if (dbCheckbox) {
+            dbCheckbox.checked = true;
+            dbCheckbox.disabled = true;
         }
     }
 
