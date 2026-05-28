@@ -6,18 +6,19 @@
  * Вызывающая сторона ловит этот тип и делает редирект на список с плашкой,
  * идентичной той, что показывается при штатном autoExit'е.
  */
-import { App } from '../constructor/app.js';
-import { ChangelogTracker } from '../constructor/changelog-tracker.js';
-import { ActsMenuManager } from '../constructor/header/acts-menu.js';
-import { ItemsRenderer } from '../constructor/items/items-renderer.js';
-import { PreviewManager } from '../constructor/preview/preview.js';
-import { AuditIdService } from '../constructor/services/id-generator.js';
-import { AppState } from '../constructor/state/state-core.js';
-import { StorageManager } from '../constructor/storage-manager.js';
 import { AppConfig } from './app-config.js';
 import { AuthManager } from './auth.js';
 import { DialogManager } from './dialog/dialog-confirm.js';
 import { Notifications } from './notifications.js';
+
+// Constructor-зона: lazy-доступ через window.
+// Прямые import'ы из ../constructor/* тянули весь constructor граф
+// (App, AppState, StorageManager, ChangelogTracker, ActsMenuManager,
+// ItemsRenderer, PreviewManager, AuditIdService) на любую portal-страницу
+// через цепочку portal-common.js → shared/api.js, и module-level подписки
+// constructor'а (App.init / _initStateTracking) стреляли где не нужно.
+// Сами классы публикуются на window своими модулями (constructor entry);
+// методы api.js, использующие их, вызываются только в constructor-сессии.
 
 export class LockLostError extends Error {
     constructor() {
@@ -98,12 +99,12 @@ export class APIClient {
      * @returns {Promise<boolean>} true если хотя бы один файл создан успешно
      */
     static async generateAct(formats = 'txt') {
-        StorageManager.disableTracking();
+        window.StorageManager.disableTracking();
 
         try {
-            StorageManager.saveState(true);
+            window.StorageManager.saveState(true);
 
-            const data = AppState.exportData();
+            const data = window.AppState.exportData();
             const formatList = Array.isArray(formats) ? formats : [formats];
 
             const validFormats = formatList.filter(fmt =>
@@ -146,7 +147,7 @@ export class APIClient {
             return false;
         } finally {
             setTimeout(() => {
-                StorageManager.enableTracking();
+                window.StorageManager.enableTracking();
             }, AppConfig.timings.enableTrackingAfterGenerate);
         }
     }
@@ -379,13 +380,14 @@ export class APIClient {
             console.log('Тип проверки:', isProcessBased ? 'процессная' : 'непроцессная');
 
             // Отключаем tracking на время загрузки
-            StorageManager.disableTracking();
+            window.StorageManager.disableTracking();
 
             // Проверяем, пустой ли акт
             const isEmpty = !content.tree ||
                 !Array.isArray(content.tree.children) ||
                 content.tree.children.length === 0;
 
+            const AppState = window.AppState;
             if (isEmpty) {
                 // Акт пуст, инициализируем дефолтную структуру
 
@@ -406,8 +408,8 @@ export class APIClient {
                 }
 
                 // Асинхронно присваиваем audit_point_id (не блокируем пользователя)
-                if (typeof AuditIdService !== 'undefined') {
-                    AuditIdService.assignMissingPointIds(actId, AppState.treeData);
+                if (window.AuditIdService) {
+                    window.AuditIdService.assignMissingPointIds(actId, AppState.treeData);
                 }
 
                 // Флаг: дефолтную структуру нужно сохранить после блокировки
@@ -438,8 +440,8 @@ export class APIClient {
                 }
 
                 // Асинхронно присваиваем audit_point_id (не блокируем пользователя)
-                if (typeof AuditIdService !== 'undefined') {
-                    AuditIdService.assignMissingPointIds(actId, AppState.treeData);
+                if (window.AuditIdService) {
+                    window.AuditIdService.assignMissingPointIds(actId, AppState.treeData);
                 }
             }
 
@@ -447,37 +449,37 @@ export class APIClient {
             if (typeof treeManager !== 'undefined') {
                 treeManager.render();
             }
-            if (typeof ItemsRenderer !== 'undefined') {
-                ItemsRenderer.renderAll();
+            if (window.ItemsRenderer) {
+                window.ItemsRenderer.renderAll();
             }
-            if (typeof PreviewManager !== 'undefined') {
-                PreviewManager.update();
+            if (window.PreviewManager) {
+                window.PreviewManager.update();
             }
 
             // Сохраняем в localStorage для локальной работы
-            StorageManager.saveState(true);
+            window.StorageManager.saveState(true);
 
             // Включаем tracking обратно с задержкой
             setTimeout(() => {
-                StorageManager.enableTracking();
+                window.StorageManager.enableTracking();
             }, AppConfig.timings.enableTrackingAfterLoad);
 
             // Показываем баннер и применяем режим просмотра если нет прав на редактирование
             if (AppConfig.readOnlyMode.isReadOnly) {
                 this._showReadOnlyBanner();
                 // Применяем read-only стили к интерфейсу
-                if (typeof App !== 'undefined' && App._applyReadOnlyMode) {
-                    App._applyReadOnlyMode();
+                if (window.App && window.App._applyReadOnlyMode) {
+                    window.App._applyReadOnlyMode();
                 }
                 // Применяем ограничения к меню актов
-                if (typeof ActsMenuManager !== 'undefined' && ActsMenuManager.applyReadOnlyRestrictions) {
-                    ActsMenuManager.applyReadOnlyRestrictions();
+                if (window.ActsMenuManager && window.ActsMenuManager.applyReadOnlyRestrictions) {
+                    window.ActsMenuManager.applyReadOnlyRestrictions();
                 }
             }
 
         } catch (err) {
             console.error('Ошибка загрузки акта:', err);
-            StorageManager.enableTracking();
+            window.StorageManager.enableTracking();
             throw err;
         }
     }
@@ -488,7 +490,7 @@ export class APIClient {
      */
     static async _saveDefaultStructure(actId, username) {
         try {
-            const data = AppState.exportData();
+            const data = window.AppState.exportData();
 
             const resp = await this._fetchWithTimeout(AppConfig.api.getUrl(`/api/v1/acts/${actId}/content`), {
                 method: 'PUT',
@@ -547,11 +549,11 @@ export class APIClient {
 
         try {
             // Блокируем отслеживание на время сохранения
-            StorageManager.disableTracking();
+            window.StorageManager.disableTracking();
 
-            const data = AppState.exportData();
+            const data = window.AppState.exportData();
             data.saveType = saveType;
-            data.changelog = typeof ChangelogTracker !== 'undefined' ? ChangelogTracker.flush() : [];
+            data.changelog = window.ChangelogTracker ? window.ChangelogTracker.flush() : [];
 
             const resp = await this._fetchWithTimeout(AppConfig.api.getUrl(`/api/v1/acts/${actId}/content`), {
                 method: 'PUT',
@@ -580,7 +582,7 @@ export class APIClient {
             console.log('Акт сохранен в БД:', result);
 
             // Помечаем как синхронизированное с БД
-            StorageManager.markAsSyncedWithDB();
+            window.StorageManager.markAsSyncedWithDB();
 
             Notifications.success('Акт сохранен в базу данных');
 
@@ -596,7 +598,7 @@ export class APIClient {
             APIClient._saveInFlight = false;
             // Включаем отслеживание обратно
             setTimeout(() => {
-                StorageManager.enableTracking();
+                window.StorageManager.enableTracking();
             }, AppConfig.timings.enableTrackingAfterSave);
         }
     }

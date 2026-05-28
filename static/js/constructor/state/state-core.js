@@ -652,16 +652,9 @@ export function _initStateTracking() {
     _wrapStateWithProxy();
 }
 
-// Автоматическая инициализация при загрузке DOM
-if (document.readyState === 'loading') {
-    document.addEventListener('DOMContentLoaded', () => {
-        // Небольшая задержка для гарантии загрузки всех модулей
-        setTimeout(_initStateTracking, 0);
-    });
-} else {
-    // DOM уже загружен
-    setTimeout(_initStateTracking, 0);
-}
+// _initStateTracking() вызывается из entries/constructor.js, не из module-level:
+// shared/api.js импортирует этот файл и через portal-common.js цепочка доходит
+// до portal-страниц, где Proxy-обёртка AppState не нужна и не работает.
 
 // Window-globals для совместимости с inline-скриптами в шаблонах.
 window.AppState = AppState;

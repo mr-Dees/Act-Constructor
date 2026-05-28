@@ -116,3 +116,20 @@ import '../constructor/lock-manager.js';
 import '../portal/acts-manager/acts-broadcast.js';
 import '../constructor/header/acts-menu.js';
 import '../constructor/header/preview-menu.js';
+
+// Bootstrap конструктора. Раньше app.js и state-core.js сами вешали
+// DOMContentLoaded на module-level, но shared/api.js косвенно тянет
+// constructor/* на portal-страницы — App.init там стрелял по AppState
+// без state-tree.js. Регистрация переехала в entry.
+import { App } from '../constructor/app.js';
+import { _initStateTracking } from '../constructor/state/state-core.js';
+
+if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', () => {
+        App.init();
+        setTimeout(_initStateTracking, 0);
+    });
+} else {
+    App.init();
+    setTimeout(_initStateTracking, 0);
+}

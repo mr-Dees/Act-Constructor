@@ -9,7 +9,8 @@
 import { ItemsRenderer } from './items/items-renderer.js';
 import { LifecycleHelper } from './lifecycle-helper.js';
 import { AppState } from './state/state-core.js';
-import { ActsManagerPage } from '../portal/acts-manager/acts-manager-page.js';
+// ActsManagerPage не импортируется: constructor → portal — неправильное направление
+// зон. Используем lazy через window.ActsManagerPage (см. invalidateCache-вызов ниже).
 import { APIClient } from '../shared/api.js';
 import { AppConfig } from '../shared/app-config.js';
 import { DialogManager } from '../shared/dialog/dialog-confirm.js';

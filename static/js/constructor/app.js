@@ -450,8 +450,9 @@ export class App {
     }
 }
 
-// Запуск приложения при загрузке DOM
-document.addEventListener('DOMContentLoaded', () => App.init());
-
 // Window-globals для совместимости с inline-скриптами в шаблонах.
+// App.init() запускается из entries/constructor.js, НЕ здесь:
+// shared/api.js импортирует этот файл косвенно из portal-entry, и
+// module-level DOMContentLoaded-подписка стреляла на portal-страницах,
+// падая на AppState.generateNumbering (state-tree.js в portal не входит).
 window.App = App;
