@@ -15,25 +15,27 @@ class Palette:
 
 
 class Fonts:
-    main = "Times New Roman"
+    main = "Calibri"
 
 
 class Sizes:
-    """Размеры в pt (НЕ half-points)."""
+    """Все размеры в pt (не half-points). Под эталон — единый 12pt."""
     body_pt = 12
-    label_pt = 11
-    table_data_pt = 9
-    table_header_pt = 9
-    footnote_pt = 10
-    title_pt = 14
+    label_pt = 12
+    table_data_pt = 12
+    table_header_pt = 12
+    footnote_pt = 12
+    title_pt = 12
+    cover_label_pt = 12
+    tb_inline_pt = 10  # «Территориальные банки: …» курсивом, чуть мельче
 
 
 class Margins:
-    """Поля страницы в сантиметрах."""
+    """Поля страницы в сантиметрах под эталон."""
     top_cm = 1.0
-    bottom_cm = 1.5
-    left_cm = 1.25
-    right_cm = 1.0
+    bottom_cm = 1.0
+    left_cm = 1.5
+    right_cm = 1.25
 
 
 class Spacing:
