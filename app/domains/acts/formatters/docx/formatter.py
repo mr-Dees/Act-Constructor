@@ -84,9 +84,28 @@ class DocxFormatter:
         run = para.add_run(label)
         run.font.name = Fonts.main
         run.font.size = Pt(Sizes.body_pt)
+
+        self._render_tb_line(doc, node)
+
         if node.get("content"):
             body_para = doc.add_paragraph()
             apply_inline_html(body_para, node["content"], base_size_pt=Sizes.body_pt)
+
+    def _render_tb_line(self, doc, node) -> None:
+        """Рендерит «Территориальные банки: A, B» курсивом 10pt, если node.tb непуст."""
+        tb = node.get("tb")
+        if not tb:
+            return
+        para = doc.add_paragraph()
+        label_run = para.add_run("Территориальные банки: ")
+        label_run.italic = True
+        label_run.font.name = Fonts.main
+        label_run.font.size = Pt(Sizes.tb_inline_pt)
+
+        value_run = para.add_run(", ".join(tb))
+        value_run.italic = True
+        value_run.font.name = Fonts.main
+        value_run.font.size = Pt(Sizes.tb_inline_pt)
 
     def _add_item_title(self, doc, node, *, num_id, ilvl) -> None:
         para = doc.add_paragraph()
