@@ -10,6 +10,7 @@ from app.domains.acts.formatters.docx.builders.cover import build_cover_block
 from app.domains.acts.formatters.docx.builders.header_footer import apply_header_footer
 from app.domains.acts.formatters.docx.builders.inline import apply_inline_html
 from app.domains.acts.formatters.docx.builders.rubricator import build_rubricator_plate
+from app.domains.acts.formatters.docx.builders.signature import build_signature
 from app.domains.acts.formatters.docx.builders.tables import build_table
 from app.domains.acts.formatters.docx.builders.violation import build_violation
 from app.domains.acts.formatters.docx.context import ExportContext
@@ -31,6 +32,7 @@ class DocxFormatter:
         build_cover_block(doc, ctx.metadata)
         num_id = ensure_rubricator(doc)
         self._render_tree(doc, ctx, num_id)
+        build_signature(doc, ctx.metadata)
         return doc
 
     def _render_tree(self, doc, ctx: ExportContext, num_id: int) -> None:
