@@ -10,7 +10,11 @@ from app.domains.acts.formatters.docx.styles import Fonts, Palette, Sizes
 
 
 def build_rubricator_plate(doc: Document, num_id: int, title: str) -> None:
-    """Добавляет плашку: таблицу 1×2, левая ячейка нумеруется, правая — заголовок."""
+    """Добавляет плашку: таблицу 1×2, левая ячейка нумеруется, правая — заголовок.
+
+    После плашки вставляется пустой абзац с space_after = 1pt — визуальный
+    отступ между плашкой и следующим контентом.
+    """
     table = doc.add_table(rows=1, cols=2)
     table.autofit = False
     cells = table.rows[0].cells
@@ -30,6 +34,10 @@ def build_rubricator_plate(doc: Document, num_id: int, title: str) -> None:
     run.font.name = Fonts.main
     run.font.size = Pt(Sizes.body_pt)
     run.bold = True
+
+    spacer = doc.add_paragraph()
+    spacer.paragraph_format.space_before = Pt(0)
+    spacer.paragraph_format.space_after = Pt(1)
 
 
 def _set_cell_shading(cell, fill_hex: str) -> None:
