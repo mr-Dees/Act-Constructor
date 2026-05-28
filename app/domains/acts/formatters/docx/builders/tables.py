@@ -4,7 +4,7 @@ from docx.oxml import OxmlElement
 from docx.oxml.ns import qn
 from docx.shared import Pt
 
-from app.domains.acts.formatters.docx.styles import Fonts, Palette, Sizes
+from app.domains.acts.formatters.docx.styles import Borders, Fonts, Palette, Sizes
 from app.domains.acts.schemas.act_content import TableSchema
 
 
@@ -34,8 +34,8 @@ def _apply_borders(table) -> None:
     borders = OxmlElement("w:tblBorders")
     for tag in ("top", "left", "bottom", "right", "insideH", "insideV"):
         b = OxmlElement(f"w:{tag}")
-        b.set(qn("w:val"), "single")
-        b.set(qn("w:sz"), "4")
+        b.set(qn("w:val"), Borders.table_default["val"])
+        b.set(qn("w:sz"), str(Borders.table_default["sz"]))  # 4 × 1/8pt = 0.5pt
         b.set(qn("w:color"), Palette.table_border)
         borders.append(b)
     tbl_pr.append(borders)
@@ -54,8 +54,7 @@ def _fill_cell(cell, text: str, *, is_header: bool) -> None:
         _set_cell_shade(cell, Palette.table_header_shade)
     para = cell.paragraphs[0]
     # Удаляем все существующие runs из XML-параграфа перед добавлением своего
-    from docx.oxml.ns import qn as _qn
-    for r_el in para._p.findall(_qn("w:r")):
+    for r_el in para._p.findall(qn("w:r")):
         para._p.remove(r_el)
     run = para.add_run(text or "")
     run.font.name = Fonts.main
