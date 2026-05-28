@@ -116,7 +116,7 @@ export const AppState = {
      * Создает таблицу из пресета
      * @private
      */
-    _createTableFromPreset(nodeId, preset, label, protected, deletable) {
+    _createTableFromPreset(nodeId, preset, label, isProtected, deletable) {
         if (!preset) {
             return ValidationCore.failure('Пресет не передан');
         }
@@ -126,7 +126,7 @@ export const AppState = {
             preset.rows,
             preset.cols,
             preset.headers,
-            protected,
+            isProtected,
             deletable,
             label
         );
@@ -139,12 +139,12 @@ export const AppState = {
      * @param {number} rows - Количество строк
      * @param {number} cols - Количество колонок
      * @param {string[]} [headers] - Заголовки колонок
-     * @param {boolean} [protected] - Защита от изменений
+     * @param {boolean} [isProtected] - Защита от изменений
      * @param {boolean} [deletable] - Возможность удаления
      * @param {string} [label] - Название таблицы
      * @returns {Object} Результат создания
      */
-    _createSimpleTable(nodeId, rows, cols, headers = [], protected = false, deletable = true, label = '') {
+    _createSimpleTable(nodeId, rows, cols, headers = [], isProtected = false, deletable = true, label = '') {
         const node = this.findNodeById(nodeId);
         if (!node) {
             return ValidationCore.failure(AppConfig.tree.validation.nodeNotFound);
@@ -156,12 +156,12 @@ export const AppState = {
         }
 
         const tableId = this._generateId('table');
-        const tableNode = this._createTableNode(nodeId, tableId, label, protected, deletable);
+        const tableNode = this._createTableNode(nodeId, tableId, label, isProtected, deletable);
 
         node.children.push(tableNode);
 
         const grid = this._createTableGrid(rows, cols, headers);
-        const table = this._createTableObject(tableId, tableNode.id, grid, cols, protected, deletable);
+        const table = this._createTableObject(tableId, tableNode.id, grid, cols, isProtected, deletable);
 
         this.tables[tableId] = table;
 
@@ -178,14 +178,14 @@ export const AppState = {
      * @param {boolean} deletable - Возможность удаления
      * @returns {Object} Узел таблицы
      */
-    _createTableNode(parentId, tableId, label, protected, deletable) {
+    _createTableNode(parentId, tableId, label, isProtected, deletable) {
         const node = {
             id: `${parentId}_table_${Date.now()}_${Math.random().toString(36).substring(2, 9)}`,
             label: label || AppConfig.tree.labels.table,
             type: AppConfig.nodeTypes.TABLE,
             tableId,
             parentId,
-            protected,
+            protected: isProtected,
             deletable
         };
 
@@ -267,13 +267,13 @@ export const AppState = {
      * @param {boolean} deletable - Возможность удаления
      * @returns {Object} Объект таблицы
      */
-    _createTableObject(tableId, nodeId, grid, cols, protected, deletable) {
+    _createTableObject(tableId, nodeId, grid, cols, isProtected, deletable) {
         return {
             id: tableId,
             nodeId,
             grid,
             colWidths: new Array(cols).fill(AppConfig.content.defaults.columnWidth),
-            protected,
+            protected: isProtected,
             deletable
         };
     },

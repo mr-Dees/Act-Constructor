@@ -105,10 +105,6 @@
 </div>
 {% endblock %}
 
-{% block extra_js %}
-<script defer src="{{ url_for('static', path='js/portal/landing/landing-page.js') | versioned }}"></script>
-{% endblock %}
-
 {% block init_script %}
 <script type="module">
     import { AuthManager } from '{{ url_for('static', path='js/shared/auth.js') | versioned }}';

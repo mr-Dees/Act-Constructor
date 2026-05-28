@@ -178,11 +178,11 @@ Object.assign(AppState, {
      * @param {string} contentId - ID контента
      * @param {'table'|'textblock'|'violation'} type - Тип контента
      * @param {string} [label=''] - Название узла
-     * @param {boolean} [protected=false] - Защита от изменений
+     * @param {boolean} [isProtected=false] - Защита от изменений
      * @param {boolean} [deletable=true] - Возможность удаления
      * @returns {Object} Узел контента
      */
-    _createContentNode(parentId, contentId, type, label = '', protected = false, deletable = true) {
+    _createContentNode(parentId, contentId, type, label = '', isProtected = false, deletable = true) {
         const defaultLabels = {
             table: AppConfig.tree.labels.table,
             textblock: AppConfig.tree.labels.textBlock,
@@ -201,7 +201,7 @@ Object.assign(AppState, {
             type,
             [idProps[type]]: contentId,
             parentId,
-            protected,
+            protected: isProtected,
             deletable
         };
 
