@@ -5,7 +5,14 @@
  * Обрабатывает события взаимодействия с узлами.
  * Все константы вынесены в AppConfig для централизованного управления.
  */
-class TreeRenderer {
+import { ContextMenuManager } from '../context-menu/context-menu-core.js';
+import { ItemsTitleEditing } from '../items/items-title-editing.js';
+import { AppState } from '../state/state-core.js';
+import { TreeUtils } from './tree-utils.js';
+import { AppConfig } from '../../shared/app-config.js';
+import { ChatEventBus } from '../../shared/chat/chat-event-bus.js';
+
+export class TreeRenderer {
     /**
      * @param {TreeManager} manager - Экземпляр менеджера дерева
      */
@@ -658,3 +665,6 @@ class TreeRenderer {
     }
 
 }
+
+// Window-globals для совместимости с inline-скриптами в шаблонах.
+window.TreeRenderer = TreeRenderer;

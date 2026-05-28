@@ -5,7 +5,10 @@
  * удалять и переключаться между беседами. Взаимодействует
  * с ChatManager через callback onConversationChange.
  */
-const ChatHistory = {
+import { AppConfig } from '../app-config.js';
+import { AuthManager } from '../auth.js';
+
+export const ChatHistory = {
 
     /** @type {Array<Object>} Список бесед */
     _conversations: [],

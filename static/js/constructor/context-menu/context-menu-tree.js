@@ -1,7 +1,18 @@
 /**
  * Обработчик контекстного меню для дерева.
  */
-class TreeContextMenu {
+import { ContextMenuManager } from './context-menu-core.js';
+import { InvoiceDialog } from '../dialog/dialog-invoice.js';
+import { ItemsRenderer } from '../items/items-renderer.js';
+import { PreviewManager } from '../preview/preview.js';
+import { MetricsRiskCoordinator } from '../state/metrics-risk-coordinator.js';
+import { AppState } from '../state/state-core.js';
+import { TreeUtils } from '../tree/tree-utils.js';
+import { AppConfig } from '../../shared/app-config.js';
+import { DialogManager } from '../../shared/dialog/dialog-confirm.js';
+import { Notifications } from '../../shared/notifications.js';
+
+export class TreeContextMenu {
     constructor(menu) {
         this.menu = menu;
         this.initHandlers();
@@ -489,3 +500,6 @@ class TreeContextMenu {
         }
     }
 }
+
+// Window-globals для совместимости с inline-скриптами в шаблонах.
+window.TreeContextMenu = TreeContextMenu;

@@ -5,7 +5,9 @@
  * Состояние сохраняется в localStorage.
  * Базы знаний читаются из DOM (data-атрибуты, сгенерированные бэкендом).
  */
-class LandingSettingsManager {
+import { EscapeStack } from '../shared/escape-stack.js';
+
+export class LandingSettingsManager {
     static _storageKey = 'assistant_knowledge_bases';
 
     /** @type {Object<string, {key: string, label: string}>} Загружается из DOM */

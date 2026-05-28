@@ -8,7 +8,10 @@
  * ChatMessages._onStreamError различает этот класс и заменяет typing-плейсхолдер
  * на красивый error-блок «лимит достигнут», без сырого «HTTP 429».
  */
-class ChatRateLimitedError extends Error {
+import { AppConfig } from '../app-config.js';
+import { AuthManager } from '../auth.js';
+
+export class ChatRateLimitedError extends Error {
     constructor(userMessage, code = null, extra = null) {
         super(userMessage);
         this.name = 'ChatRateLimitedError';
@@ -26,7 +29,7 @@ window.ChatRateLimitedError = ChatRateLimitedError;
  * Отправляет сообщения через FormData и обрабатывает Server-Sent Events
  * от бэкенда. Поддерживает два режима: стриминг (SSE) и полный JSON-ответ.
  */
-const ChatStream = {
+export const ChatStream = {
 
     /** @type {AbortController|null} Контроллер для отмены текущего стрима */
     _abortController: null,

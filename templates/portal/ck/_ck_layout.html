@@ -42,17 +42,15 @@
 </div>
 {% endblock %}
 
-{% block extra_js %}
-<!-- Shared CK components -->
-<script defer src="{{ url_for('static', path='js/shared/ck/ck-table.js') | versioned }}"></script>
-<script defer src="{{ url_for('static', path='js/shared/ck/ck-pagination.js') | versioned }}"></script>
-<script defer src="{{ url_for('static', path='js/shared/ck/ck-form.js') | versioned }}"></script>
-<script defer src="{{ url_for('static', path='js/shared/ck/ck-process-picker.js') | versioned }}"></script>
-{% block ck_scripts %}{% endblock %}
-{% endblock %}
-
 {% block init_script %}
-<script>
+<script type="module">
+    import { AuthManager } from '{{ url_for('static', path='js/shared/auth.js') | versioned }}';
+    import { PortalSidebar } from '{{ url_for('static', path='js/portal/portal-sidebar.js') | versioned }}';
+    import { LandingSettingsManager } from '{{ url_for('static', path='js/portal/portal-settings.js') | versioned }}';
+    // ck-страницы (fin-res, client-exp) подключают свои page-модули, которые
+    // в свою очередь импортят shared/ck/* (CkTable, CkPagination, CkForm, CkProcessPicker).
+    {% block ck_init_imports %}{% endblock %}
+
     document.addEventListener('DOMContentLoaded', async () => {
         const isAuthorized = await AuthManager.requireAuth();
         if (isAuthorized) {

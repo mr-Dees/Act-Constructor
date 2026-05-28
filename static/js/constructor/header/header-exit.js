@@ -6,7 +6,13 @@
  * - Снимает блокировку
  * - Переходит на главную страницу
  */
-class HeaderExit {
+import { LockManager } from '../lock-manager.js';
+import { StorageManager } from '../storage-manager.js';
+import { AppConfig } from '../../shared/app-config.js';
+import { DialogManager } from '../../shared/dialog/dialog-confirm.js';
+import { Notifications } from '../../shared/notifications.js';
+
+export class HeaderExit {
     /**
      * Инициализирует обработчик кнопки выхода
      */

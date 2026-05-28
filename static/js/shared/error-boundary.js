@@ -15,7 +15,10 @@
  * Подключается через <script defer src="..."> ПОСЛЕ notifications.js и
  * ДО основных доменных модулей, чтобы успеть поймать ошибки их инициализации.
  */
-class ErrorBoundary {
+import { AppConfig } from './app-config.js';
+import { Notifications } from './notifications.js';
+
+export class ErrorBoundary {
     /**
      * Минимальный интервал между отправками отчётов на сервер (мс).
      * Перехватчик ловит все ошибки, но сетевой репорт идёт не чаще раза в 5 сек.

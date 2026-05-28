@@ -4,7 +4,11 @@
  * Проверяет заполненность заголовков, наличие строк данных,
  * корректность структуры таблиц.
  */
-const ValidationTable = {
+import { AppState } from '../state/state-core.js';
+import { TreeUtils } from '../tree/tree-utils.js';
+import { ValidationCore } from './validation-core.js';
+
+export const ValidationTable = {
     /**
      * Проверяет заполненность заголовков всех таблиц
      * @returns {Object} Результат валидации с полями valid, message, isWarning
@@ -138,3 +142,6 @@ const ValidationTable = {
         return node?.label || `Таблица ${tableId}`;
     }
 };
+
+// Window-globals для совместимости с inline-скриптами в шаблонах.
+window.ValidationTable = ValidationTable;

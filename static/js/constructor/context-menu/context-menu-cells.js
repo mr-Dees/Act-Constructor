@@ -2,7 +2,12 @@
  * Обработчик контекстного меню для ячеек таблицы.
  * Управляет операциями с ячейками: объединение, разъединение, вставка/удаление строк и колонок.
  */
-class CellContextMenu {
+import { ContextMenuManager } from './context-menu-core.js';
+import { PreviewManager } from '../preview/preview.js';
+import { AppState } from '../state/state-core.js';
+import { Notifications } from '../../shared/notifications.js';
+
+export class CellContextMenu {
     constructor(menu) {
         this.menu = menu;
         this.initHandlers();
@@ -811,3 +816,6 @@ class CellContextMenu {
         }
     }
 }
+
+// Window-globals для совместимости с inline-скриптами в шаблонах.
+window.CellContextMenu = CellContextMenu;

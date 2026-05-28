@@ -7,7 +7,10 @@
  * При выборе заполняет ФИО (title case), должность и логин,
  * переводит поля в readonly.
  */
-class TeamMemberSearch {
+import { APIClient } from '../../shared/api.js';
+import { EscapeStack } from '../../shared/escape-stack.js';
+
+export class TeamMemberSearch {
     /**
      * @param {HTMLElement} rowElement - DOM-элемент .team-member-row
      */

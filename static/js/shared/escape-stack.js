@@ -19,7 +19,7 @@
  *
  * Возвращаемая функция-unsubscribe идемпотентна.
  */
-class EscapeStack {
+export class EscapeStack {
     static _stack = [];
     static _initialized = false;
 

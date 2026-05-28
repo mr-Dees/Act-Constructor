@@ -5,7 +5,10 @@
  * обеспечивает назначение/снятие ролей через API,
  * фильтрацию по тексту и ролям, сортировку по столбцам.
  */
-class AdminRoles {
+import { APIClient } from '../../shared/api.js';
+import { Notifications } from '../../shared/notifications.js';
+
+export class AdminRoles {
     static _allRoles = [];
     static _users = [];
     static _tableEl = null;

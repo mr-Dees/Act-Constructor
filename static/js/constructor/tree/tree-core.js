@@ -4,7 +4,16 @@
  * Управляет состоянием, выделением и координацией между модулями.
  * Делегирует рендеринг и drag-and-drop специализированным классам.
  */
-class TreeManager {
+import { App } from '../app.js';
+import { ContextMenuManager } from '../context-menu/context-menu-core.js';
+import { ItemsTitleEditing } from '../items/items-title-editing.js';
+import { AppState } from '../state/state-core.js';
+import { TreeDragDrop } from './tree-drag-drop.js';
+import { TreeRenderer } from './tree-renderer.js';
+import { TreeUtils } from './tree-utils.js';
+import { AppConfig } from '../../shared/app-config.js';
+
+export class TreeManager {
     /**
      * @param {string} containerId - ID элемента-контейнера для дерева
      */
@@ -446,4 +455,8 @@ class TreeManager {
 }
 
 // Создаем глобальный экземпляр менеджера дерева
-const treeManager = new TreeManager('tree');
+export const treeManager = new TreeManager('tree');
+
+// Window-globals для совместимости с inline-скриптами в шаблонах.
+window.TreeManager = TreeManager;
+window.treeManager = treeManager;

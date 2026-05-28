@@ -4,7 +4,12 @@
  * Валидация, drag-and-drop, превью прикреплённых файлов.
  * Публикует events при изменении списка файлов.
  */
-const ChatFiles = {
+import { AppConfig } from '../app-config.js';
+import { ChatEventBus } from './chat-event-bus.js';
+import { ChatUI } from './chat-ui.js';
+import { Notifications } from '../notifications.js';
+
+export const ChatFiles = {
 
     /** @type {boolean} */
     _initialized: false,

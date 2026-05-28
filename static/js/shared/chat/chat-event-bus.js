@@ -5,7 +5,7 @@
  * Модули подписываются на события и публикуют их,
  * не зная друг о друге напрямую.
  */
-const ChatEventBus = {
+export const ChatEventBus = {
 
     /** @type {Object<string, Set<function>>} */
     _listeners: {},

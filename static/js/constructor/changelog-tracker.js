@@ -2,7 +2,9 @@
  * Гранулярное отслеживание локальных изменений.
  * Накапливает записи об операциях, сбрасывает при сохранении в БД.
  */
-class ChangelogTracker {
+import { Notifications } from '../shared/notifications.js';
+
+export class ChangelogTracker {
     static _entries = [];
     static _actId = null;
     static _storageKey = null;

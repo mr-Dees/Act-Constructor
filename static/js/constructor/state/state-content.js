@@ -6,6 +6,14 @@
  * Делегирует валидацию модулю ValidationTree.
  */
 
+import { ChangelogTracker } from '../changelog-tracker.js';
+import { MetricsRiskCoordinator } from './metrics-risk-coordinator.js';
+import { AppState } from './state-core.js';
+import { TreeUtils } from '../tree/tree-utils.js';
+import { ValidationCore } from '../validation/validation-core.js';
+import { ValidationTree } from '../validation/validation-tree.js';
+import { AppConfig } from '../../shared/app-config.js';
+
 Object.assign(AppState, {
     /**
      * Добавляет таблицу к узлу дерева

@@ -5,7 +5,16 @@
  * Автоматически завершает сессию при бездействии пользователя.
  * Гарантирует одиночный unlock: предотвращает дублирующее снятие блокировки через sendBeacon.
  */
-class LockManager {
+import { ChangelogTracker } from './changelog-tracker.js';
+import { LifecycleHelper } from './lifecycle-helper.js';
+import { AppState } from './state/state-core.js';
+import { StorageManager } from './storage-manager.js';
+import { AppConfig } from '../shared/app-config.js';
+import { AuthManager } from '../shared/auth.js';
+import { DialogManager } from '../shared/dialog/dialog-confirm.js';
+import { Notifications } from '../shared/notifications.js';
+
+export class LockManager {
     static _actId = null;
     static _config = null;
     static _inactivityCheckInterval = null;

@@ -2,7 +2,11 @@
  * Управление нарушениями в документе
  * Создает и обрабатывает интерактивные формы для ввода нарушений
  */
-class ViolationManager {
+import { ChangelogTracker } from '../changelog-tracker.js';
+import { PreviewManager } from '../preview/preview.js';
+import { AppConfig } from '../../shared/app-config.js';
+
+export class ViolationManager {
     constructor() {
         this.selectedViolation = null;
         // Переменная для отслеживания последней позиции при drag
@@ -354,3 +358,6 @@ class ViolationManager {
         });
     }
 }
+
+// Window-globals для совместимости с inline-скриптами в шаблонах.
+window.ViolationManager = ViolationManager;

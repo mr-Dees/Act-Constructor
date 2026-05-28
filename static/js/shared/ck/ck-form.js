@@ -2,7 +2,7 @@
  * Компонент формы редактирования записи ЦК.
  * Рендерит поля по декларативному конфигу.
  */
-class CkForm {
+export class CkForm {
     static _config = null;
     static _currentRecord = null;
     static _mode = 'empty'; // 'empty' | 'create' | 'edit'

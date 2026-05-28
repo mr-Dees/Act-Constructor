@@ -42,44 +42,14 @@
 <!-- Дополнительные шаблоны страницы -->
 {% block templates %}{% endblock %}
 
-<!-- Общие скрипты портала -->
-<script defer src="{{ url_for('static', path='js/shared/app-config.js') | versioned }}"></script>
-<script defer src="{{ url_for('static', path='js/shared/auth.js') | versioned }}"></script>
-<script defer src="{{ url_for('static', path='js/shared/api.js') | versioned }}"></script>
-<script defer src="{{ url_for('static', path='js/shared/notifications.js') | versioned }}"></script>
-<!-- Глобальный error boundary: ловит window.onerror + unhandledrejection.
-     Должен идти СРАЗУ после notifications.js — boundary использует
-     window.Notifications для toast'ов, поэтому Notifications обязан
-     быть инициализирован раньше. -->
-<script defer src="{{ url_for('static', path='js/shared/error-boundary.js') | versioned }}"></script>
-<!-- EscapeStack — централизованный LIFO-стек ESC-обработчиков для диалогов,
-     контекстных меню, дропдаунов. Должен загружаться ДО dialog-base и
-     остальных потребителей. -->
-<script defer src="{{ url_for('static', path='js/shared/escape-stack.js') | versioned }}"></script>
-<script defer src="{{ url_for('static', path='js/shared/dialog/dialog-base.js') | versioned }}"></script>
-<script defer src="{{ url_for('static', path='js/shared/dialog/dialog-confirm.js') | versioned }}"></script>
-<script defer src="{{ url_for('static', path='js/portal/portal-sidebar.js') | versioned }}"></script>
-<!-- DOMPurify — санитизация HTML перед innerHTML.
-     Должен загружаться ДО SafeHTML и всех потребителей. -->
-<script defer src="{{ url_for('static', path='vendor/dompurify/purify.min.js') | versioned }}"></script>
-<!-- SafeHTML — единый helper для безопасной вставки HTML, обёртка над DOMPurify
-     с безопасным fallback на textContent (см. static/js/shared/sanitize.js). -->
-<script defer src="{{ url_for('static', path='js/shared/sanitize.js') | versioned }}"></script>
-<!-- chat-event-bus.js должен идти первым: остальные модули чата могут
-     обращаться к шине на module-level (window.ChatEventBus.on ...). -->
-<script defer src="{{ url_for('static', path='js/shared/chat/chat-event-bus.js') | versioned }}"></script>
-<script defer src="{{ url_for('static', path='js/shared/chat/chat-renderer.js') | versioned }}"></script>
-<script defer src="{{ url_for('static', path='js/shared/chat/chat-client-actions.js') | versioned }}"></script>
-<script defer src="{{ url_for('static', path='js/shared/chat/chat-stream.js') | versioned }}"></script>
-<script defer src="{{ url_for('static', path='js/shared/chat/chat-history.js') | versioned }}"></script>
-<script defer src="{{ url_for('static', path='js/shared/chat/chat-ui.js') | versioned }}"></script>
-<script defer src="{{ url_for('static', path='js/shared/chat/chat-files.js') | versioned }}"></script>
-<script defer src="{{ url_for('static', path='js/shared/chat/chat-title.js') | versioned }}"></script>
-<script defer src="{{ url_for('static', path='js/shared/chat/chat-context.js') | versioned }}"></script>
-<script defer src="{{ url_for('static', path='js/shared/chat/chat-messages.js') | versioned }}"></script>
-<script defer src="{{ url_for('static', path='js/shared/chat/chat-manager.js') | versioned }}"></script>
-<script defer src="{{ url_for('static', path='js/shared/chat/chat-modal.js') | versioned }}"></script>
-<script defer src="{{ url_for('static', path='js/portal/portal-settings.js') | versioned }}"></script>
+<!-- DOMPurify — vendor-библиотека, нужна на window.DOMPurify до SafeHTML.
+     Классический <script> ставит её на window синхронно перед ESM-entry. -->
+<script src="{{ url_for('static', path='vendor/dompurify/purify.min.js') | versioned }}"></script>
+<!-- ES-модуль: один entry для всех portal-страниц.
+     Импортирует shared/, portal-sidebar, portal-settings, чат-модули, диалоги.
+     Каждый импортируемый модуль публикует свои классы на window — inline-скрипты
+     в init_script-блоке шаблонов видят AuthManager, PortalSidebar и т.п. -->
+<script type="module" src="{{ url_for('static', path='js/entries/portal-common.js') | versioned }}"></script>
 
 <!-- Дополнительные скрипты страницы -->
 {% block extra_js %}{% endblock %}

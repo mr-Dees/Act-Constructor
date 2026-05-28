@@ -5,7 +5,11 @@
  * лимиты контента и отношения родитель-потомок.
  * НЕ содержит бизнес-логики акта.
  */
-const ValidationTree = {
+import { TreeUtils } from '../tree/tree-utils.js';
+import { ValidationCore } from './validation-core.js';
+import { AppConfig } from '../../shared/app-config.js';
+
+export const ValidationTree = {
     /**
      * Проверяет возможность добавления дочернего узла
      * @param {string} parentId - ID родительского узла
@@ -155,3 +159,6 @@ const ValidationTree = {
         return ValidationCore.validateLimit(existingCount, limit, limitName);
     }
 };
+
+// Window-globals для совместимости с inline-скриптами в шаблонах.
+window.ValidationTree = ValidationTree;

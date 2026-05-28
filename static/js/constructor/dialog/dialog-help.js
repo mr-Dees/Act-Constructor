@@ -6,7 +6,12 @@
  * единый стек _activeDialogs, focus-trap, aria-modal, EscapeStack и
  * _previousFocus работают так же, как для остальных диалогов.
  */
-class HelpManager extends DialogBase {
+import { AppState } from '../state/state-core.js';
+import { AppConfig } from '../../shared/app-config.js';
+import { DialogBase } from '../../shared/dialog/dialog-base.js';
+import { Notifications } from '../../shared/notifications.js';
+
+export class HelpManager extends DialogBase {
     /** Сохранённые позиции прокрутки по номеру шага */
     static _scrollPositions = {};
 

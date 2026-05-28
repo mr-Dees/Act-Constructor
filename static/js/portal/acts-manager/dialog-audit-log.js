@@ -4,7 +4,15 @@
  * Наследует DialogBase для стекирования, анимаций и Escape-обработки.
  * Доступен только для ролей Куратор и Руководитель.
  */
-class AuditLogDialog extends DialogBase {
+import { LockManager } from '../../constructor/lock-manager.js';
+import { VersionPreviewOverlay } from './version-preview.js';
+import { APIClient } from '../../shared/api.js';
+import { DialogBase } from '../../shared/dialog/dialog-base.js';
+import { DialogManager } from '../../shared/dialog/dialog-confirm.js';
+import { FilterEngine } from '../../shared/filter-engine.js';
+import { Notifications } from '../../shared/notifications.js';
+
+export class AuditLogDialog extends DialogBase {
     static _actId = null;
     static _actName = null;
     static _overlay = null;

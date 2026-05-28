@@ -9,7 +9,9 @@
  * Reload по кнопке #adminDiagRefreshBtn; авто-обновления нет, чтобы
  * не нагружать БД-пулы фоновым polling'ом на каждом открытии вкладки.
  */
-class AdminDiagnostics {
+import { APIClient } from '../../shared/api.js';
+
+export class AdminDiagnostics {
     static _container = null;
     static _refreshBtn = null;
     static _loading = false;

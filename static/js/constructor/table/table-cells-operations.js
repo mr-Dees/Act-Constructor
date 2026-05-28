@@ -3,7 +3,14 @@
  * Обрабатывает редактирование содержимого, выделение и объединение/разделение ячеек.
  * Работает с матричной grid-структурой таблиц в AppState.
  */
-class TableCellsOperations {
+import { ChangelogTracker } from '../changelog-tracker.js';
+import { ItemsRenderer } from '../items/items-renderer.js';
+import { PreviewManager } from '../preview/preview.js';
+import { AppState } from '../state/state-core.js';
+import { AppConfig } from '../../shared/app-config.js';
+import { Notifications } from '../../shared/notifications.js';
+
+export class TableCellsOperations {
     constructor(tableManager) {
         this.tableManager = tableManager;
     }
@@ -920,3 +927,6 @@ class TableCellsOperations {
         }
     }
 }
+
+// Window-globals для совместимости с inline-скриптами в шаблонах.
+window.TableCellsOperations = TableCellsOperations;

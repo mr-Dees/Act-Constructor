@@ -4,7 +4,17 @@
  * Управляет переходами между шагами конструктора,
  * обработкой кнопок навигации и валидацией данных перед сохранением.
  */
-class NavigationManager {
+import { App } from './app.js';
+import { FormatMenuManager } from './header/format-menu-manager.js';
+import { ItemsRenderer } from './items/items-renderer.js';
+import { StorageManager } from './storage-manager.js';
+import { ValidationAct } from './validation/validation-act.js';
+import { ValidationTable } from './validation/validation-table.js';
+import { APIClient, LockLostError } from '../shared/api.js';
+import { AppConfig } from '../shared/app-config.js';
+import { Notifications } from '../shared/notifications.js';
+
+export class NavigationManager {
     /**
      * Настройка обработчиков навигации
      */
@@ -221,3 +231,6 @@ class NavigationManager {
         return true;
     }
 }
+
+// Window-globals для совместимости с inline-скриптами в шаблонах.
+window.NavigationManager = NavigationManager;

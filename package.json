@@ -1,8 +1,8 @@
 {
-  "name": "act-constructor-e2e",
+  "name": "act-constructor",
   "version": "0.1.0",
   "private": true,
-  "description": "Playwright E2E suite для Act Constructor (vanilla JS фронт)",
+  "description": "Act Constructor — vanilla JS frontend (Native ES Modules, без bundler'а) + Playwright E2E",
   "scripts": {
     "e2e": "playwright test",
     "e2e:ui": "playwright test --ui",

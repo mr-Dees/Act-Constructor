@@ -9,7 +9,15 @@
  * Lazy-инициализация: тяжёлые tabs подгружают данные только при первом
  * переключении, чтобы не нагружать страницу при открытии "Роли".
  */
-class AdminPage {
+import { AdminAddUserDialog } from './admin-add-user-dialog.js';
+import { AdminAuditLog } from './admin-audit-log.js';
+import { AdminDiagnostics } from './admin-diagnostics.js';
+import { AdminRoles } from './admin-roles.js';
+import { AdminSearch } from './admin-search.js';
+import { APIClient } from '../../shared/api.js';
+import { Notifications } from '../../shared/notifications.js';
+
+export class AdminPage {
     static _usersDirectory = [];
     static _allRoles = [];
     static _initializedTabs = new Set();

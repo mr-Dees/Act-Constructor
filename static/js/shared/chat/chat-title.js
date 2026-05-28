@@ -5,7 +5,7 @@
  * (через ChatHistory.createConversation), чтобы беседа сразу появилась
  * в сайдбаре с осмысленным названием.
  */
-const ChatTitle = {
+export const ChatTitle = {
 
     /** Максимальная длина title до обрезки. */
     MAX_LENGTH: 40,

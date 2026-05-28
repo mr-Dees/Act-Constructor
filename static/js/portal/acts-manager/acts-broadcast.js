@@ -3,7 +3,7 @@
  * Подписчики получают сигналы об удалении/дублировании/сохранении актов,
  * чтобы инвалидировать локальные кеши списка без F5.
  */
-class ActsBroadcast {
+export class ActsBroadcast {
     static CHANNEL = 'acts';
     static _bc = null;
     static _listeners = new Set();

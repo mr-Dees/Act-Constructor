@@ -4,7 +4,13 @@
  * Поиск по справочнику → выбор пользователя → выбор роли → добавление.
  * Наследует базовый функционал от DialogBase.
  */
-class AdminAddUserDialog extends DialogBase {
+import { AdminPage } from './admin-page.js';
+import { AdminRoles } from './admin-roles.js';
+import { APIClient } from '../../shared/api.js';
+import { DialogBase } from '../../shared/dialog/dialog-base.js';
+import { Notifications } from '../../shared/notifications.js';
+
+export class AdminAddUserDialog extends DialogBase {
     static _currentDialog = null;
     static _allRoles = [];
     static _debounceTimer = null;

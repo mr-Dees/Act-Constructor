@@ -4,7 +4,13 @@
  * Управление текущей беседой, knowledge bases и доменами.
  * Интегрируется с ChatHistory через callback.
  */
-const ChatContext = {
+import { AppConfig } from '../app-config.js';
+import { AuthManager } from '../auth.js';
+import { ChatEventBus } from './chat-event-bus.js';
+import { ChatHistory } from './chat-history.js';
+import { ChatTitle } from './chat-title.js';
+
+export const ChatContext = {
 
     /** @type {boolean} */
     _initialized: false,

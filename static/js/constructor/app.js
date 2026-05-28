@@ -5,7 +5,19 @@
  * Делегирует специфичную логику соответствующим менеджерам.
  * Интегрирован с StorageManager для автосохранения.
  */
-class App {
+import { ContextMenuManager } from './context-menu/context-menu-core.js';
+import { HelpManager } from './dialog/dialog-help.js';
+import { FormatMenuManager } from './header/format-menu-manager.js';
+import { ItemsRenderer } from './items/items-renderer.js';
+import { LifecycleHelper } from './lifecycle-helper.js';
+import { NavigationManager } from './navigation-manager.js';
+import { PreviewManager } from './preview/preview.js';
+import { AppState } from './state/state-core.js';
+import { StorageManager } from './storage-manager.js';
+import { AppConfig } from '../shared/app-config.js';
+import { Notifications } from '../shared/notifications.js';
+
+export class App {
     // Базовые префиксы LS-ключей. Реальные ключи строятся через _getStepKey/_getScrollKey
     // и включают act_id, чтобы шаг и скролл одного акта не подтекали в другой.
     // Старые ключи без суффикса удаляются в _migrateLegacyKeys() при init.
@@ -440,3 +452,6 @@ class App {
 
 // Запуск приложения при загрузке DOM
 document.addEventListener('DOMContentLoaded', () => App.init());
+
+// Window-globals для совместимости с inline-скриптами в шаблонах.
+window.App = App;

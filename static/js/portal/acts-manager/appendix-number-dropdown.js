@@ -6,7 +6,9 @@
  * под остальные input/select'ы диалога. Не form control, поэтому не
  * участвует в HTML5-валидации (значение собирается JS-кодом из diálog'а).
  */
-class AppendixNumberDropdown {
+import { EscapeStack } from '../../shared/escape-stack.js';
+
+export class AppendixNumberDropdown {
     /**
      * @param {HTMLElement} container - Контейнер, в который монтируется dropdown.
      * @param {{initialValue?: number, onChange?: (value: number) => void}} options

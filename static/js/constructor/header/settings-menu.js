@@ -5,7 +5,10 @@
  * Обрабатывает переключение темы, настройки автосохранения,
  * параметры загрузки файлов и сохраняет все изменения в localStorage.
  */
-class SettingsMenuManager {
+import { StorageManager } from '../storage-manager.js';
+import { EscapeStack } from '../../shared/escape-stack.js';
+
+export class SettingsMenuManager {
     /** @private Состояние настроек приложения */
     static _state = {
         theme: 'light',

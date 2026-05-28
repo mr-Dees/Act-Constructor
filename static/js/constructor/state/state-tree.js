@@ -5,6 +5,19 @@
  * перемещением элементов и обновлением связанных данных.
  */
 
+import { ChangelogTracker } from '../changelog-tracker.js';
+import { AuditIdService } from '../services/id-generator.js';
+import { MetricsRiskCoordinator } from './metrics-risk-coordinator.js';
+import { AppState } from './state-core.js';
+import { StorageManager } from '../storage-manager.js';
+import { TreeUtils } from '../tree/tree-utils.js';
+import { ValidationCore } from '../validation/validation-core.js';
+import { ValidationTree } from '../validation/validation-tree.js';
+import { AppConfig } from '../../shared/app-config.js';
+import { ChatEventBus } from '../../shared/chat/chat-event-bus.js';
+import { DialogManager } from '../../shared/dialog/dialog-confirm.js';
+import { Notifications } from '../../shared/notifications.js';
+
 Object.assign(AppState, {
     /**
      * Генерирует иерархическую нумерацию для всех узлов дерева

@@ -2,10 +2,8 @@
 
 {% block ck_title %}ЦК Клиентский опыт{% endblock %}
 
-{% block ck_scripts %}
-<!-- CS-specific -->
-<script defer src="{{ url_for('static', path='js/portal/ck-client-exp/ck-client-exp-config.js') | versioned }}"></script>
-<script defer src="{{ url_for('static', path='js/portal/ck-client-exp/ck-client-exp-page.js') | versioned }}"></script>
+{% block ck_init_imports %}
+    import { CkClientExpPage } from '{{ url_for('static', path='js/portal/ck-client-exp/ck-client-exp-page.js') | versioned }}';
 {% endblock %}
 
 {% block ck_init %}await CkClientExpPage.init();{% endblock %}

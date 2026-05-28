@@ -5,7 +5,20 @@
  * Интегрирован с БД через API. Отвечает за автозагрузку акта при входе в конструктор.
  */
 
-class ActsMenuManager {
+import { ChangelogTracker } from '../changelog-tracker.js';
+import { ItemsRenderer } from '../items/items-renderer.js';
+import { LockManager } from '../lock-manager.js';
+import { StorageManager } from '../storage-manager.js';
+import { ActsBroadcast } from '../../portal/acts-manager/acts-broadcast.js';
+import { CreateActDialog } from '../../portal/acts-manager/dialog-create-act.js';
+import { APIClient } from '../../shared/api.js';
+import { AppConfig } from '../../shared/app-config.js';
+import { AuthManager } from '../../shared/auth.js';
+import { DialogManager } from '../../shared/dialog/dialog-confirm.js';
+import { EscapeStack } from '../../shared/escape-stack.js';
+import { Notifications } from '../../shared/notifications.js';
+
+export class ActsMenuManager {
     static currentActId = null;
     static selectedActId = null;
     static _initialLoadInProgress = false;

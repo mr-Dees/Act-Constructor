@@ -1,6 +1,8 @@
 /**
  * Расширение TextBlockManager для работы с форматированием
  */
+import { TextBlockManager } from './textblock-core.js';
+
 Object.assign(TextBlockManager.prototype, {
     /**
      * Применяет сохранённое форматирование к элементу редактора

@@ -13,7 +13,7 @@
  *     { type: 'date-range', field: 'created_at', from: '2025-01-01', to: '2025-12-31' },
  *   ]);
  */
-class FilterEngine {
+export class FilterEngine {
     /**
      * Применяет цепочку фильтров к массиву.
      * @param {Array<Object>} items - Исходный массив объектов

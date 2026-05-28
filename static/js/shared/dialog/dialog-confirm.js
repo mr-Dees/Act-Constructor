@@ -4,7 +4,9 @@
  * Создает модальные окна для подтверждения действий и информирования пользователя.
  * Наследует базовый функционал от DialogBase.
  */
-class DialogManager extends DialogBase {
+import { DialogBase } from './dialog-base.js';
+
+export class DialogManager extends DialogBase {
     /**
      * Показывает диалоговое окно с подтверждением
      *

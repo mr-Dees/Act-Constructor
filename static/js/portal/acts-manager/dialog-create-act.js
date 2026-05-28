@@ -4,7 +4,18 @@
  * Управляет сложной формой с динамическими списками (аудиторская группа, поручения).
  * Наследует базовый функционал от DialogBase.
  */
-class CreateActDialog extends DialogBase {
+import { ActsMenuManager } from '../../constructor/header/acts-menu.js';
+import { ActsManagerPage } from './acts-manager-page.js';
+import { AppendixNumberDropdown } from './appendix-number-dropdown.js';
+import { TeamMemberSearch } from './team-member-search.js';
+import { APIClient } from '../../shared/api.js';
+import { AppConfig } from '../../shared/app-config.js';
+import { AuthManager } from '../../shared/auth.js';
+import { DialogBase } from '../../shared/dialog/dialog-base.js';
+import { DialogManager } from '../../shared/dialog/dialog-confirm.js';
+import { Notifications } from '../../shared/notifications.js';
+
+export class CreateActDialog extends DialogBase {
     /**
      * Текущий активный диалог (overlay элемент)
      * @private

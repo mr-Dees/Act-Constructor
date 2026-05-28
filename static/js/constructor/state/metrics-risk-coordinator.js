@@ -1,15 +1,25 @@
 /**
  * MetricsRiskCoordinator — фасад над каскадной логикой metrics ↔ risk-таблиц.
  *
- * Полная экстракция reconcile-логики из state-content.js / state-tree.js /
- * context-menu-tree.js / tree-drag-drop.js признана высокорисковой без покрытия
- * e2e (5+ инвариантов: «metrics на 5.X ⇔ deep risks», «main metrics на §5 ⇔
- * any risks», «5.X-only OR 5.X.Y-only», ...). Документ ver-3-tree-isolation §F-9
- * прямо предупреждает: «оправдана только если бизнес добавит ещё каскады.
- * Сейчас работает — не трогать без триггера».
+ * АРХИТЕКТУРНОЕ РЕШЕНИЕ: полная экстракция reconcile-логики из state-content.js /
+ * state-tree.js / context-menu-tree.js / tree-drag-drop.js признана **сознательно
+ * нежелательной** на текущий момент. Причины:
  *
- * Поэтому coordinator — единая точка входа в каскад, но реализация
- * по-прежнему делегирована методам AppState. Что даёт фасад поверх делегации:
+ *  1. Reconcile использует AppState.tables / treeData / findNodeById / setNodeTb
+ *     ссылочно. Чистая экстракция требует либо параметризации (вся AppState
+ *     передаётся внутрь), либо переноса всех методов на coordinator с глобальным
+ *     доступом к AppState — оба варианта дают тот же объём, но в другом файле.
+ *  2. Фасад УЖЕ обеспечивает безопасность: snapshot/rollback в `_withSnapshot`
+ *     ловит исключение в любом из 3 хуков (added/removed/moved) и откатывает
+ *     §5 + AppState.tables целиком — partial-state невозможен.
+ *  3. Каскадные инварианты (5+) не покрыты e2e. Перетасовка кода без
+ *     поведенческого покрытия — высокий риск регрессий.
+ *
+ * Триггер для пересмотра: бизнес добавляет четвёртый каскад (например,
+ * metrics ↔ violations или metrics ↔ invoice) — тогда экстракция становится
+ * необходимостью, а написание e2e под это становится оправданным.
+ *
+ * Что даёт фасад поверх делегации в текущем виде:
  *
  * 1) Единая точка для callsite'ов (context-menu / state-tree.deleteNode /
  *    state-tree.moveNode / state-content.deleteTableFromNode) — раньше часть
@@ -24,7 +34,12 @@
  * 3) Seam для будущей экстракции / юнит-тестов: тесты могут заменять методы
  *    AppState mock'ами и проверять coordinator в изоляции.
  */
-const MetricsRiskCoordinator = {
+import { ContextMenuManager } from '../context-menu/context-menu-core.js';
+import { AppState } from './state-core.js';
+import { AppConfig } from '../../shared/app-config.js';
+import { Notifications } from '../../shared/notifications.js';
+
+export const MetricsRiskCoordinator = {
     /**
      * Снимает поверхностный snapshot частей дерева, которые могут быть затронуты
      * каскадом: §5 (главная сводная таблица) и поддеревья 5.X (per-section

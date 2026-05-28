@@ -6,7 +6,16 @@
  * Интегрирован с системой Proxy для автоматического отслеживания изменений.
  * Отслеживает синхронизацию с БД для предотвращения потери данных.
  */
-class StorageManager {
+import { ItemsRenderer } from './items/items-renderer.js';
+import { LifecycleHelper } from './lifecycle-helper.js';
+import { AppState } from './state/state-core.js';
+import { ActsManagerPage } from '../portal/acts-manager/acts-manager-page.js';
+import { APIClient } from '../shared/api.js';
+import { AppConfig } from '../shared/app-config.js';
+import { DialogManager } from '../shared/dialog/dialog-confirm.js';
+import { Notifications } from '../shared/notifications.js';
+
+export class StorageManager {
     /**
      * Таймер для дебаунса автосохранения
      * @private
@@ -697,3 +706,6 @@ class StorageManager {
         }
     }
 }
+
+// Window-globals для совместимости с inline-скриптами в шаблонах.
+window.StorageManager = StorageManager;

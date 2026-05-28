@@ -4,7 +4,7 @@
  * (включая статические перечисления assignment_formats, used_pm_options).
  */
 
-class CkFinResConfig {
+export class CkFinResConfig {
     static apiPrefix = 'ck-fin-res';
     static domainName = 'ck_fin_res';
     static pageTitle = 'ЦК Фин.Рез.';

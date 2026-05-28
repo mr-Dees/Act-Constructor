@@ -4,7 +4,10 @@
  * Объединяет все валидаторы и предоставляет единую точку входа
  * для выполнения полной проверки акта перед сохранением.
  */
-const ActValidation = {
+import { ValidationAct } from './validation-act.js';
+import { ValidationTable } from './validation-table.js';
+
+export const ActValidation = {
     /**
      * Список зарегистрированных валидаторов
      * Каждый валидатор должен возвращать объект с полями: valid, message, isWarning
@@ -75,3 +78,6 @@ const ActValidation = {
         };
     }
 };
+
+// Window-globals для совместимости с inline-скриптами в шаблонах.
+window.ActValidation = ActValidation;

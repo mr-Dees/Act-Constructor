@@ -1,7 +1,7 @@
 /**
  * Конфигурация страницы ЦК Клиентский опыт.
  */
-class CkClientExpConfig {
+export class CkClientExpConfig {
     static apiPrefix = 'ck-client-exp';
     static domainName = 'ck_client_exp';
     static pageTitle = 'ЦК Клиентский опыт';

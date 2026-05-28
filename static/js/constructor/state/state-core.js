@@ -5,7 +5,12 @@
  * методы поиска узлов и экспорта данных.
  * Делегирует специализированные операции модулям StateContent, StateTree и ValidationTree.
  */
-const AppState = {
+import { StorageManager } from '../storage-manager.js';
+import { ValidationCore } from '../validation/validation-core.js';
+import { ValidationTree } from '../validation/validation-tree.js';
+import { AppConfig } from '../../shared/app-config.js';
+
+export const AppState = {
     /** @type {number} Текущий шаг приложения (1 или 2) */
     currentStep: 1,
 
@@ -499,10 +504,10 @@ const AppState = {
  * (ускоряет повторные get'ы) и от бесконечной рекурсии при циклических ссылках.
  * @private
  */
-const _stateProxyCache = new WeakMap();
-const _stateProxyOriginals = new WeakSet();
+export const _stateProxyCache = new WeakMap();
+export const _stateProxyOriginals = new WeakSet();
 
-function _isTrackable(value) {
+export function _isTrackable(value) {
     if (value === null || typeof value !== 'object') return false;
     // Не оборачиваем DOM-узлы, Date, RegExp, Map, Set, Blob — у них собственная
     // семантика, прокси может сломать поведение.
@@ -512,7 +517,7 @@ function _isTrackable(value) {
     return true;
 }
 
-function _notifyDirty() {
+export function _notifyDirty() {
     if (typeof StorageManager !== 'undefined' && StorageManager.markAsUnsaved) {
         StorageManager.markAsUnsaved();
     }
@@ -523,7 +528,7 @@ function _notifyDirty() {
  * (set/deleteProperty/Array.push/Array[i]=) вызывает markAsUnsaved().
  * @private
  */
-function _wrapDeep(value) {
+export function _wrapDeep(value) {
     if (!_isTrackable(value)) return value;
     // Уже обёрнут — возвращаем тот же прокси (стабильность ссылок для ===).
     if (_stateProxyOriginals.has(value)) return value;
@@ -569,7 +574,7 @@ function _wrapDeep(value) {
  * и т.п.). На non-proxy значениях — no-op.
  * @private
  */
-function _unwrap(value) {
+export function _unwrap(value) {
     if (!_isTrackable(value)) return value;
     if (_stateProxyOriginals.has(value)) {
         // Это уже proxy — достаём raw через прямой target lookup.
@@ -595,7 +600,7 @@ function _unwrap(value) {
  * ~92% реальных правок проходили мимо dirty-tracking'а.
  * @private
  */
-function _wrapStateWithProxy() {
+export function _wrapStateWithProxy() {
     const trackedProperties = [
         'treeData',
         'tables',
@@ -636,7 +641,7 @@ function _wrapStateWithProxy() {
  * Обертывает критичные свойства AppState для автоматического
  * вызова markAsUnsaved() при любых изменениях.
  */
-function _initStateTracking() {
+export function _initStateTracking() {
     // Проверяем доступность StorageManager
     if (typeof StorageManager === 'undefined') {
         console.warn('StorageManager не найден. Автосохранение недоступно.');
@@ -657,3 +662,6 @@ if (document.readyState === 'loading') {
     // DOM уже загружен
     setTimeout(_initStateTracking, 0);
 }
+
+// Window-globals для совместимости с inline-скриптами в шаблонах.
+window.AppState = AppState;

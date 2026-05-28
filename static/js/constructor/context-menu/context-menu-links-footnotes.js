@@ -1,7 +1,9 @@
 /**
  * Обработчик контекстного меню для ссылок и сносок
  */
-class LinkFootnoteContextMenu {
+import { EscapeStack } from '../../shared/escape-stack.js';
+
+export class LinkFootnoteContextMenu {
     constructor() {
         this.currentPopup = null;
         this.textBlockManager = null;
@@ -313,3 +315,6 @@ class LinkFootnoteContextMenu {
         return div.innerHTML;
     }
 }
+
+// Window-globals для совместимости с inline-скриптами в шаблонах.
+window.LinkFootnoteContextMenu = LinkFootnoteContextMenu;

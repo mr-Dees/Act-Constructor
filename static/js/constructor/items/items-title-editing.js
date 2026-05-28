@@ -2,7 +2,11 @@
  * Модуль для редактирования заголовков элементов документа.
  * Обеспечивает inline-редактирование заголовков пунктов, названий таблиц и узлов дерева.
  */
-class ItemsTitleEditing {
+import { ChangelogTracker } from '../changelog-tracker.js';
+import { ItemsRenderer } from './items-renderer.js';
+import { PreviewManager } from '../preview/preview.js';
+
+export class ItemsTitleEditing {
     /**
      * Запускает режим редактирования заголовка обычного пункта документа.
      * Извлекает базовую метку без нумерации, позволяет отредактировать,
@@ -320,3 +324,6 @@ class ItemsTitleEditing {
         element.addEventListener('keydown', keydownHandler);
     }
 }
+
+// Window-globals для совместимости с inline-скриптами в шаблонах.
+window.ItemsTitleEditing = ItemsTitleEditing;

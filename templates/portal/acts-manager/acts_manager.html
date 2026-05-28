@@ -60,14 +60,15 @@
 {% endblock %}
 
 {% block init_script %}
-<script>
-    // Проверка авторизации при загрузке страницы менеджера актов
-    document.addEventListener('DOMContentLoaded', async () => {
-        // Требуем свежую авторизацию через API
-        const isAuthorized = await AuthManager.requireAuth();
+<script type="module">
+    import { AuthManager } from '{{ url_for('static', path='js/shared/auth.js') | versioned }}';
+    import { PortalSidebar } from '{{ url_for('static', path='js/portal/portal-sidebar.js') | versioned }}';
+    import { LandingSettingsManager } from '{{ url_for('static', path='js/portal/portal-settings.js') | versioned }}';
+    import { ActsManagerPage } from '{{ url_for('static', path='js/portal/acts-manager/acts-manager-page.js') | versioned }}';
 
+    document.addEventListener('DOMContentLoaded', async () => {
+        const isAuthorized = await AuthManager.requireAuth();
         if (isAuthorized) {
-            // Инициализируем sidebar, настройки и страницу после успешной авторизации
             PortalSidebar.init();
             LandingSettingsManager.init();
             ActsManagerPage.init();

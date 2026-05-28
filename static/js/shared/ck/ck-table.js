@@ -2,7 +2,7 @@
  * Компонент таблицы записей ЦК.
  * Рендерит таблицу с горизонтальной прокруткой, сортировкой и выделением строк.
  */
-class CkTable {
+export class CkTable {
     static _config = null;
     static _data = [];
     static _filteredData = [];

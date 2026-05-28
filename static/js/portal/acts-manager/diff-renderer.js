@@ -2,7 +2,9 @@
  * DOM-рендеринг diff с цветовой подсветкой.
  * Работает на основе результатов DiffEngine.compute().
  */
-class DiffRenderer {
+import { SafeHTML } from '../../shared/sanitize.js';
+
+export class DiffRenderer {
     /**
      * Рендерит полный diff в контейнер.
      * @param {HTMLElement} container

@@ -4,7 +4,11 @@
  * Запрашивает audit_point_id для узлов дерева через бэкенд.
  * Все вызовы асинхронные, ошибки логируются но не прерывают работу.
  */
-class AuditIdService {
+import { StorageManager } from '../storage-manager.js';
+import { AppConfig } from '../../shared/app-config.js';
+import { AuthManager } from '../../shared/auth.js';
+
+export class AuditIdService {
     /**
      * Запрашивает audit_point_id для списка node_id через бэкенд
      *
@@ -116,3 +120,6 @@ class AuditIdService {
         }
     }
 }
+
+// Window-globals для совместимости с inline-скриптами в шаблонах.
+window.AuditIdService = AuditIdService;

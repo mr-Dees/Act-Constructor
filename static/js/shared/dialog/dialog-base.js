@@ -7,7 +7,10 @@
  * - Блокировка прокрутки body
  * - Анимации открытия/закрытия
  */
-class DialogBase {
+import { AppConfig } from '../app-config.js';
+import { EscapeStack } from '../escape-stack.js';
+
+export class DialogBase {
     /**
      * Текущие активные диалоги (стек для вложенных диалогов)
      * @private

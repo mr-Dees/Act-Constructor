@@ -2,7 +2,13 @@
  * Core менеджер контекстных меню
  * Координирует работу специфичных менеджеров
  */
-class ContextMenuManager {
+import { CellContextMenu } from './context-menu-cells.js';
+import { TreeContextMenu } from './context-menu-tree.js';
+import { ViolationContextMenu } from './context-menu-violation.js';
+import { AppConfig } from '../../shared/app-config.js';
+import { Notifications } from '../../shared/notifications.js';
+
+export class ContextMenuManager {
     static menu = null;
     static cellMenu = null;
     static currentNodeId = null;
@@ -105,3 +111,6 @@ class ContextMenuManager {
         this.activeMenuType = null;
     }
 }
+
+// Window-globals для совместимости с inline-скриптами в шаблонах.
+window.ContextMenuManager = ContextMenuManager;

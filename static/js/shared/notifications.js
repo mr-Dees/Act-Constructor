@@ -4,7 +4,9 @@
  * Управляет всплывающими сообщениями в приложении с поддержкой
  * группировки повторяющихся уведомлений и автоматического скрытия.
  */
-class NotificationManager {
+import { AppConfig } from './app-config.js';
+
+export class NotificationManager {
     constructor() {
         /** @type {HTMLElement|null} Контейнер для уведомлений */
         this.container = null;
@@ -430,7 +432,8 @@ class NotificationManager {
     }
 }
 
-// Создаем глобальный экземпляр.
-// Используем window.* — иначе const-переменная окажется в Script-scope
-// и НЕ будет видна как window.Notifications (см. chat-client-actions.js).
-window.Notifications = new NotificationManager();
+// Создаём глобальный экземпляр. ESM-экспорт + window.* для совместимости с
+// inline-скриптами в шаблонах.
+export const Notifications = new NotificationManager();
+window.Notifications = Notifications;
+window.NotificationManager = NotificationManager;

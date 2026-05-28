@@ -4,7 +4,14 @@
  * таблиц, текстовых блоков и нарушений. Обеспечивает синхронизацию данных
  * между DOM и глобальным состоянием приложения.
  */
-class ItemsRenderer {
+import { ItemsTitleEditing } from './items-title-editing.js';
+import { AppState } from '../state/state-core.js';
+import { TreeUtils } from '../tree/tree-utils.js';
+import { AppConfig } from '../../shared/app-config.js';
+import { ChatEventBus } from '../../shared/chat/chat-event-bus.js';
+import { Notifications } from '../../shared/notifications.js';
+
+export class ItemsRenderer {
     /**
      * Индекс адресуемых DOM-узлов: id -> HTMLElement.
      * Заполняется в _createItemContainer / renderTable / при отрисовке textblock/violation.
@@ -991,3 +998,6 @@ window.ChatEventBus?.on?.('node:tb-changed', ({nodeId}) => {
 
     ItemsRenderer._updateParentTbInItems(node);
 });
+
+// Window-globals для совместимости с inline-скриптами в шаблонах.
+window.ItemsRenderer = ItemsRenderer;

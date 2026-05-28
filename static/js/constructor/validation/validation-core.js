@@ -4,7 +4,9 @@
  * Содержит базовые утилиты, общие интерфейсы и вспомогательные функции
  * для всех модулей валидации. Обеспечивает единообразие API.
  */
-const ValidationCore = {
+import { AppConfig } from '../../shared/app-config.js';
+
+export const ValidationCore = {
     /**
      * Создает успешный результат валидации
      * @param {string} [message='OK'] - Сообщение (опционально)
@@ -181,3 +183,6 @@ const ValidationCore = {
         return this.success();
     }
 };
+
+// Window-globals для совместимости с inline-скриптами в шаблонах.
+window.ValidationCore = ValidationCore;

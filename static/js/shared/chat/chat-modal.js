@@ -5,7 +5,10 @@
  * на страницах без встроенной чат-панели (acts-manager и др.).
  * ChatManager инициализируется лениво при первом открытии.
  */
-class ChatModalManager {
+import { ChatManager } from './chat-manager.js';
+import { EscapeStack } from '../escape-stack.js';
+
+export class ChatModalManager {
     static _overlay = null;
     static _chatInitialized = false;
     /** @type {(() => void) | null} EscapeStack unsubscribe handle */

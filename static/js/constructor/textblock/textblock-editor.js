@@ -1,6 +1,12 @@
 /**
  * Расширение для работы с редактором
  */
+import { ChangelogTracker } from '../changelog-tracker.js';
+import { PreviewManager } from '../preview/preview.js';
+import { TextBlockManager } from './textblock-core.js';
+import { AppConfig } from '../../shared/app-config.js';
+import { SafeHTML } from '../../shared/sanitize.js';
+
 Object.assign(TextBlockManager.prototype, {
     /**
      * Создаёт DOM-элемент текстового блока с редактором

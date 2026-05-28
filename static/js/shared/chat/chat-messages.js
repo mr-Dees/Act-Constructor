@@ -5,6 +5,13 @@
  * рендеринг user/bot сообщений в DOM.
  */
 
+import { ChatContext } from './chat-context.js';
+import { ChatEventBus } from './chat-event-bus.js';
+import { ChatFiles } from './chat-files.js';
+import { ChatRenderer } from './chat-renderer.js';
+import { ChatRateLimitedError, ChatStream } from './chat-stream.js';
+import { Notifications } from '../notifications.js';
+
 /**
  * Whitelist известных типов блоков сообщений.
  * Если бэк добавит новый тип, а фронт ещё не обновлён, _handleSSEEvent
@@ -14,7 +21,7 @@
  * Синхронизировать с `MessageBlock` union из `app/core/chat/blocks.py`
  * И с `_DiscriminatedBlock` из `app/core/chat/schemas.py`.
  */
-const KNOWN_BLOCK_TYPES = new Set([
+export const KNOWN_BLOCK_TYPES = new Set([
     'text',
     'code',
     'reasoning',
@@ -26,7 +33,7 @@ const KNOWN_BLOCK_TYPES = new Set([
     'client_action',
 ]);
 
-const ChatMessages = {
+export const ChatMessages = {
 
     /** @type {Set<string>} */
     KNOWN_BLOCK_TYPES,
@@ -735,3 +742,6 @@ const ChatMessages = {
 };
 
 window.ChatMessages = ChatMessages;
+
+// Window-globals для совместимости с inline-скриптами в шаблонах.
+window.KNOWN_BLOCK_TYPES = KNOWN_BLOCK_TYPES;

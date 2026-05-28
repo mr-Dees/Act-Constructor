@@ -4,7 +4,12 @@
  * Управляет открытием/закрытием меню и обновлением содержимого
  * Поддерживает изменение размера через drag-ручку
  */
-class PreviewMenuManager {
+import { PreviewManager } from '../preview/preview.js';
+import { AppState } from '../state/state-core.js';
+import { AppConfig } from '../../shared/app-config.js';
+import { EscapeStack } from '../../shared/escape-stack.js';
+
+export class PreviewMenuManager {
     constructor() {
         this.menu = null;
         this.menuBody = null;
@@ -341,3 +346,6 @@ class PreviewMenuManager {
 document.addEventListener('DOMContentLoaded', () => {
     window.previewMenuManager = new PreviewMenuManager();
 });
+
+// Window-globals для совместимости с inline-скриптами в шаблонах.
+window.PreviewMenuManager = PreviewMenuManager;

@@ -4,7 +4,7 @@
  * Централизованное хранилище всех настроек и констант приложения.
  * Обеспечивает единую точку для изменения параметров поведения системы.
  */
-class AppConfig {
+export class AppConfig {
     /**
      * Типы узлов дерева документа
      * @type {{ITEM: string, TABLE: string, TEXTBLOCK: string, VIOLATION: string}}
@@ -668,3 +668,6 @@ class AppConfig {
         maxStorageSize: 4 * 1024 * 1024, // 4MB
     };
 }
+
+// Window-globals для совместимости с inline-скриптами в шаблонах.
+window.AppConfig = AppConfig;

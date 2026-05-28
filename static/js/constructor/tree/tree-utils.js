@@ -4,7 +4,10 @@
  * Централизованные функции поиска, обхода и манипуляции узлами дерева.
  * Используется всеми модулями для избежания дублирования логики.
  */
-const TreeUtils = {
+import { AppState } from '../state/state-core.js';
+import { AppConfig } from '../../shared/app-config.js';
+
+export const TreeUtils = {
     /**
      * Находит узел по ID
      * @param {string} nodeId - ID искомого узла
@@ -381,3 +384,6 @@ const TreeUtils = {
         return node.label || `Узел ${nodeId}`;
     }
 };
+
+// Window-globals для совместимости с inline-скриптами в шаблонах.
+window.TreeUtils = TreeUtils;

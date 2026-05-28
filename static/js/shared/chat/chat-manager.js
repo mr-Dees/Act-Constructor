@@ -12,7 +12,13 @@
  *   ChatContext   — KB, домены, conversation management
  *   ChatMessages  — отправка, SSE-роутинг, рендеринг сообщений
  */
-class ChatManager {
+import { ChatContext } from './chat-context.js';
+import { ChatEventBus } from './chat-event-bus.js';
+import { ChatFiles } from './chat-files.js';
+import { ChatMessages } from './chat-messages.js';
+import { ChatUI } from './chat-ui.js';
+
+export class ChatManager {
 
     /** @type {boolean} */
     static _initialized = false;

@@ -4,7 +4,10 @@
  * Создает компактное текстовое представление нарушений
  * с обрезкой длинных текстов и подсчетом элементов.
  */
-class PreviewViolationRenderer {
+import { AppConfig } from '../../shared/app-config.js';
+import { SafeHTML } from '../../shared/sanitize.js';
+
+export class PreviewViolationRenderer {
     /**
      * Создает элемент нарушения
      *
@@ -212,3 +215,6 @@ class PreviewViolationRenderer {
         return many;
     }
 }
+
+// Window-globals для совместимости с inline-скриптами в шаблонах.
+window.PreviewViolationRenderer = PreviewViolationRenderer;

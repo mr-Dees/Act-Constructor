@@ -2,10 +2,8 @@
 
 {% block ck_title %}ЦК Фин.Рез.{% endblock %}
 
-{% block ck_scripts %}
-<!-- FR-specific -->
-<script defer src="{{ url_for('static', path='js/portal/ck-fin-res/ck-fin-res-config.js') | versioned }}"></script>
-<script defer src="{{ url_for('static', path='js/portal/ck-fin-res/ck-fin-res-page.js') | versioned }}"></script>
+{% block ck_init_imports %}
+    import { CkFinResPage } from '{{ url_for('static', path='js/portal/ck-fin-res/ck-fin-res-page.js') | versioned }}';
 {% endblock %}
 
 {% block ck_init %}await CkFinResPage.init();{% endblock %}

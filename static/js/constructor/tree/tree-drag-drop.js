@@ -4,7 +4,14 @@
  * Обеспечивает перетаскивание узлов внутри дерева с визуальными индикаторами.
  * Поддерживает валидацию перемещений и запрет на перетаскивание узлов с таблицами рисков.
  */
-class TreeDragDrop {
+import { ItemsRenderer } from '../items/items-renderer.js';
+import { PreviewManager } from '../preview/preview.js';
+import { AppState } from '../state/state-core.js';
+import { TreeUtils } from './tree-utils.js';
+import { AppConfig } from '../../shared/app-config.js';
+import { Notifications } from '../../shared/notifications.js';
+
+export class TreeDragDrop {
     /**
      * @param {TreeManager} manager - Экземпляр менеджера дерева
      */
@@ -392,3 +399,6 @@ class TreeDragDrop {
         AppState._dragInProgress = false;
     }
 }
+
+// Window-globals для совместимости с inline-скриптами в шаблонах.
+window.TreeDragDrop = TreeDragDrop;

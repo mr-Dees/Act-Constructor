@@ -5,7 +5,9 @@
  * Использует localStorage для кеширования username на 24 часа.
  * Обрабатывает ошибки Kerberos токена.
  */
-class AuthManager {
+import { AppConfig } from './app-config.js';
+
+export class AuthManager {
     /**
      * Ключ для хранения username в localStorage
      * @private

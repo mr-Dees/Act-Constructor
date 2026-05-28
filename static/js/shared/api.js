@@ -6,7 +6,20 @@
  * Вызывающая сторона ловит этот тип и делает редирект на список с плашкой,
  * идентичной той, что показывается при штатном autoExit'е.
  */
-class LockLostError extends Error {
+import { App } from '../constructor/app.js';
+import { ChangelogTracker } from '../constructor/changelog-tracker.js';
+import { ActsMenuManager } from '../constructor/header/acts-menu.js';
+import { ItemsRenderer } from '../constructor/items/items-renderer.js';
+import { PreviewManager } from '../constructor/preview/preview.js';
+import { AuditIdService } from '../constructor/services/id-generator.js';
+import { AppState } from '../constructor/state/state-core.js';
+import { StorageManager } from '../constructor/storage-manager.js';
+import { AppConfig } from './app-config.js';
+import { AuthManager } from './auth.js';
+import { DialogManager } from './dialog/dialog-confirm.js';
+import { Notifications } from './notifications.js';
+
+export class LockLostError extends Error {
     constructor() {
         super('Блокировка акта потеряна');
         this.name = 'LockLostError';
@@ -22,7 +35,7 @@ window.LockLostError = LockLostError;
  * Предоставляет методы для генерации и скачивания файлов актов,
  * загрузки/сохранения содержимого из БД, а также удаления актов.
  */
-class APIClient {
+export class APIClient {
     /**
      * Флаг in-flight PUT /content (H-N1-UX). Защищает от двойного запроса
      * при mash'е Ctrl+S/клике "Сохранить" — повторные вызовы saveActContent

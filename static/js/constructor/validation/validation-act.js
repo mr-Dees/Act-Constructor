@@ -3,7 +3,11 @@
  *
  * Проверяет базовые бизнес-правила на уровне акта как документа.
  */
-const ValidationAct = {
+import { AppState } from '../state/state-core.js';
+import { TreeUtils } from '../tree/tree-utils.js';
+import { ValidationCore } from './validation-core.js';
+
+export const ValidationAct = {
     /**
      * Проверяет наличие хотя бы одного раздела в структуре акта
      * @returns {Object} Результат валидации с полями valid, message, isWarning
@@ -81,3 +85,6 @@ const ValidationAct = {
         return ValidationCore.success();
     }
 };
+
+// Window-globals для совместимости с inline-скриптами в шаблонах.
+window.ValidationAct = ValidationAct;

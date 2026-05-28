@@ -5,7 +5,13 @@
  * Обрабатывает различные типы контента: таблицы, текстовые блоки,
  * нарушения и древовидную структуру с учетом вложенности.
  */
-class PreviewManager {
+import { PreviewTableRenderer } from './preview-table-renderer.js';
+import { PreviewTextBlockRenderer } from './preview-textblock-renderer.js';
+import { PreviewViolationRenderer } from './preview-violation-renderer.js';
+import { AppState } from '../state/state-core.js';
+import { AppConfig } from '../../shared/app-config.js';
+
+export class PreviewManager {
     /**
      * Флаг запланированного RAF-обновления (дедупликация в пределах одного кадра).
      * @private
@@ -354,3 +360,6 @@ class PreviewManager {
         }
     }
 }
+
+// Window-globals для совместимости с inline-скриптами в шаблонах.
+window.PreviewManager = PreviewManager;

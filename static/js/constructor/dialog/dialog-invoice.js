@@ -6,7 +6,13 @@
  * из справочника и сохранить фактуру.
  * Наследует базовый функционал от DialogBase.
  */
-class InvoiceDialog extends DialogBase {
+import { AppState } from '../state/state-core.js';
+import { APIClient } from '../../shared/api.js';
+import { AppConfig } from '../../shared/app-config.js';
+import { DialogBase } from '../../shared/dialog/dialog-base.js';
+import { Notifications } from '../../shared/notifications.js';
+
+export class InvoiceDialog extends DialogBase {
     /**
      * Текущий overlay диалога
      * @private

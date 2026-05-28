@@ -7,7 +7,9 @@
  *
  * Простая read-only HTML-таблица; никакой inline-редактуры.
  */
-class AdminAuditLog {
+import { APIClient } from '../../shared/api.js';
+
+export class AdminAuditLog {
     static PAGE_SIZE = 50;
 
     static _state = {

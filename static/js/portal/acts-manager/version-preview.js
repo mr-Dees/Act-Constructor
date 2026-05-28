@@ -2,7 +2,18 @@
  * Полноэкранный предпросмотр версии содержимого.
  * Стекируется поверх AuditLogDialog через DialogBase._activeDialogs.
  */
-class VersionPreviewOverlay extends DialogBase {
+import { PreviewTableRenderer } from '../../constructor/preview/preview-table-renderer.js';
+import { PreviewTextBlockRenderer } from '../../constructor/preview/preview-textblock-renderer.js';
+import { PreviewViolationRenderer } from '../../constructor/preview/preview-violation-renderer.js';
+import { AuditLogDialog } from './dialog-audit-log.js';
+import { DiffEngine } from './diff-engine.js';
+import { DiffRenderer } from './diff-renderer.js';
+import { APIClient } from '../../shared/api.js';
+import { DialogBase } from '../../shared/dialog/dialog-base.js';
+import { DialogManager } from '../../shared/dialog/dialog-confirm.js';
+import { Notifications } from '../../shared/notifications.js';
+
+export class VersionPreviewOverlay extends DialogBase {
     static _overlay = null;
     static _viewMode = 'ui';
     static _actId = null;

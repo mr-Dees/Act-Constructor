@@ -4,7 +4,12 @@
  * Управляет сворачиванием/разворачиванием sidebar,
  * навигацией между страницами и загрузкой информации о пользователе.
  */
-class PortalSidebar {
+import { LandingPage } from './landing/landing-page.js';
+import { AppConfig } from '../shared/app-config.js';
+import { AuthManager } from '../shared/auth.js';
+import { ChatModalManager } from '../shared/chat/chat-modal.js';
+
+export class PortalSidebar {
     static _storageKey = 'sidebar_collapsed';
 
     /**

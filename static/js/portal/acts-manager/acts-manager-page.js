@@ -5,7 +5,16 @@
  * дублирование и удаление. При редактировании метаданных выполняется логика блокировки
  * через LockManager и безопасного сохранения перед выходом, аналогично поведению конструктора.
  */
-class ActsManagerPage {
+import { LockManager } from '../../constructor/lock-manager.js';
+import { ActsBroadcast } from './acts-broadcast.js';
+import { AuditLogDialog } from './dialog-audit-log.js';
+import { CreateActDialog } from './dialog-create-act.js';
+import { AppConfig } from '../../shared/app-config.js';
+import { AuthManager } from '../../shared/auth.js';
+import { DialogManager } from '../../shared/dialog/dialog-confirm.js';
+import { Notifications } from '../../shared/notifications.js';
+
+export class ActsManagerPage {
     /* --- Утилиты форматирования --- */
 
     /**

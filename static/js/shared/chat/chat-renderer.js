@@ -5,7 +5,13 @@
  * текст с markdown, код с подсветкой, reasoning, plan, файлы, изображения, кнопки.
  * Поддерживает стриминг через createStreamingBlock().
  */
-const ChatRenderer = {
+import { AppConfig } from '../app-config.js';
+import { AuthManager } from '../auth.js';
+import { ClientActionsRegistry } from './chat-client-actions.js';
+import { EscapeStack } from '../escape-stack.js';
+import { SafeHTML } from '../sanitize.js';
+
+export const ChatRenderer = {
 
     /**
      * Безопасная установка innerHTML — делегируется в SafeHTML.set,

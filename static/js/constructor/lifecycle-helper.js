@@ -11,7 +11,7 @@
  *   LifecycleHelper.registerBeforeUnload('scroll', () => App._saveScrollPositions());
  *   LifecycleHelper.unregister('scroll');
  */
-const LifecycleHelper = {
+export const LifecycleHelper = {
     /**
      * Зарегистрированные beforeunload-обработчики
      * @private

@@ -4,7 +4,10 @@
  * Управляет открытием/закрытием popup, ленивой инициализацией ChatManager,
  * свободным изменением размера (corner grip) и сохранением размеров в localStorage.
  */
-class ChatPopupManager {
+import { ChatManager } from '../../shared/chat/chat-manager.js';
+import { EscapeStack } from '../../shared/escape-stack.js';
+
+export class ChatPopupManager {
     /** @type {boolean} */
     static _initialized = false;
 
