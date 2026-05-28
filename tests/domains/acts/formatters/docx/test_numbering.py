@@ -72,6 +72,23 @@ def test_num_format_decimal_on_all_levels(doc):
         assert fmt.get(qn("w:val")) == "decimal"
 
 
+def test_level_indent_matches_etalon(doc):
+    """Значения left/hanging для ilvl 0-2 совпадают с эталоном (abstractNumId=16)."""
+    ensure_rubricator(doc)
+    abstract = doc.part.numbering_part.element.findall(qn("w:abstractNum"))[-1]
+    levels = abstract.findall(qn("w:lvl"))
+    expected = [
+        (360, 360),   # ilvl 0
+        (792, 432),   # ilvl 1
+        (1224, 504),  # ilvl 2
+    ]
+    for ilvl, (exp_left, exp_hanging) in enumerate(expected):
+        ind = levels[ilvl].find(qn("w:pPr")).find(qn("w:ind"))
+        assert ind is not None, f"w:ind отсутствует для ilvl={ilvl}"
+        assert ind.get(qn("w:left")) == str(exp_left), f"left неверный для ilvl={ilvl}"
+        assert ind.get(qn("w:hanging")) == str(exp_hanging), f"hanging неверный для ilvl={ilvl}"
+
+
 def test_apply_numbering_attaches_numpr(doc):
     from app.domains.acts.formatters.docx.numbering import apply_numbering
     num_id = ensure_rubricator(doc)
