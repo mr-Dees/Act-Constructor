@@ -60,6 +60,7 @@ class _InlineParser(HTMLParser):
             self.stack.append(replace(current, size_pt=size) if size else current)
         elif tag == "br":
             self._add_run("\n")
+            self.stack.append(current)  # поглощает </br>, если придёт
         else:
             self.stack.append(current)
 

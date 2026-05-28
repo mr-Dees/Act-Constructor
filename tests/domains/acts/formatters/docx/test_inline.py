@@ -62,6 +62,25 @@ def test_br_creates_line_break(doc):
     assert "первая" in full_text and "вторая" in full_text
 
 
+def test_br_void_no_slash(doc):
+    """<br> без слэша должно вставить перевод строки (handle_starttag path)."""
+    p = _add_p(doc)
+    apply_inline_html(p, "первая<br>вторая", base_size_pt=12)
+    full_text = "".join(r.text for r in p.runs)
+    assert "первая" in full_text and "вторая" in full_text
+    assert "\n" in full_text
+
+
+def test_br_with_closing_tag_preserves_formatting(doc):
+    """<b>text<br></br>more</b> — </br> не должен сорвать bold-фрейм."""
+    p = _add_p(doc)
+    apply_inline_html(p, "<b>один<br></br>два</b>", base_size_pt=12)
+    # Все непустые runs внутри <b> должны быть bold
+    bold_runs = [r for r in p.runs if r.text.strip()]
+    assert len(bold_runs) >= 2
+    assert all(r.bold for r in bold_runs)
+
+
 def test_empty_html(doc):
     p = _add_p(doc)
     apply_inline_html(p, "", base_size_pt=12)
