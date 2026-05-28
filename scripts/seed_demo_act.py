@@ -174,18 +174,23 @@ def _build_tree() -> dict:
                 "id": "1",
                 "label": "Характеристика проверяемого направления",
                 "protected": True,
+                "deletable": False,
                 "children": [
                     {
-                        "id": "1.1",
-                        "label": "1.1 Описание объекта проверки",
+                        "id": "1_textblock_1",
+                        "label": "Описание объекта проверки",
+                        "customLabel": "Описание объекта проверки",
                         "type": "textblock",
                         "textBlockId": "tb-1-1",
+                        "parentId": "1",
                     },
                     {
-                        "id": "1.2",
-                        "label": "1.2 Источники данных",
+                        "id": "1_table_1",
+                        "label": "Источники данных",
+                        "customLabel": "Источники данных",
                         "type": "table",
                         "tableId": "tbl-1-2",
+                        "parentId": "1",
                     },
                 ],
             },
@@ -193,19 +198,24 @@ def _build_tree() -> dict:
                 "id": "2",
                 "label": "Оценка качества проверенного направления",
                 "protected": True,
+                "deletable": False,
                 "children": [
                     {
-                        "id": "2.1",
-                        "label": "2.1 Подход к проверке",
+                        "id": "2_textblock_1",
+                        "label": "Подход к проверке",
+                        "customLabel": "Подход к проверке",
                         "type": "textblock",
                         "textBlockId": "tb-2-1",
+                        "parentId": "2",
                     },
                     {
-                        "id": "2.2",
-                        "label": "2.2 Главная таблица метрик",
+                        "id": "2_table_main_metrics",
+                        "label": "Главная таблица метрик",
+                        "customLabel": "Главная таблица метрик",
                         "type": "table",
                         "tableId": "tbl-2-2",
                         "isMainMetricsTable": True,
+                        "parentId": "2",
                     },
                 ],
             },
@@ -213,24 +223,31 @@ def _build_tree() -> dict:
                 "id": "3",
                 "label": "Применённые технологии",
                 "protected": True,
+                "deletable": False,
                 "children": [
                     {
-                        "id": "3.1",
-                        "label": "3.1 Репозитории",
+                        "id": "3_table_1",
+                        "label": "Репозитории",
+                        "customLabel": "Репозитории",
                         "type": "table",
                         "tableId": "tbl-3-1",
+                        "parentId": "3",
                     },
                     {
-                        "id": "3.2",
-                        "label": "3.2 Технологии",
+                        "id": "3_table_2",
+                        "label": "Технологии",
+                        "customLabel": "Технологии",
                         "type": "table",
                         "tableId": "tbl-3-2",
+                        "parentId": "3",
                     },
                     {
-                        "id": "3.3",
-                        "label": "3.3 Инструменты",
+                        "id": "3_table_3",
+                        "label": "Инструменты",
+                        "customLabel": "Инструменты",
                         "type": "table",
                         "tableId": "tbl-3-3",
+                        "parentId": "3",
                     },
                 ],
             },
@@ -238,12 +255,15 @@ def _build_tree() -> dict:
                 "id": "4",
                 "label": "Основные выводы",
                 "protected": True,
+                "deletable": False,
                 "children": [
                     {
-                        "id": "4.1",
-                        "label": "4.1 Выводы",
+                        "id": "4_textblock_1",
+                        "label": "Выводы",
+                        "customLabel": "Выводы",
                         "type": "textblock",
                         "textBlockId": "tb-4-1",
+                        "parentId": "4",
                     },
                 ],
             },
@@ -251,25 +271,46 @@ def _build_tree() -> dict:
                 "id": "5",
                 "label": "Результаты проверки",
                 "protected": True,
+                "deletable": False,
                 "children": [
                     {
-                        "id": "5.1",
-                        "label": "5.1 Несвоевременное формирование выписок",
-                        "type": "violation",
-                        "violationId": "v-5-1",
-                    },
-                    {
-                        "id": "5.2",
-                        "label": "5.2 Расхождение остатков",
-                        "type": "violation",
-                        "violationId": "v-5-2",
-                    },
-                    {
-                        "id": "5.3",
-                        "label": "5.3 Операционные риски",
+                        "id": "5_table_op_risk",
+                        "label": "Операционные риски",
+                        "customLabel": "Операционные риски",
                         "type": "table",
                         "tableId": "tbl-5-3",
                         "isOperationalRiskTable": True,
+                        "parentId": "5",
+                    },
+                    {
+                        "id": "5_item_v1",
+                        "label": "Несвоевременное формирование выписок",
+                        "customLabel": "Несвоевременное формирование выписок",
+                        "parentId": "5",
+                        "children": [
+                            {
+                                "id": "5_item_v1_violation",
+                                "label": "Нарушение",
+                                "type": "violation",
+                                "violationId": "v-5-1",
+                                "parentId": "5_item_v1",
+                            },
+                        ],
+                    },
+                    {
+                        "id": "5_item_v2",
+                        "label": "Расхождение остатков",
+                        "customLabel": "Расхождение остатков",
+                        "parentId": "5",
+                        "children": [
+                            {
+                                "id": "5_item_v2_violation",
+                                "label": "Нарушение",
+                                "type": "violation",
+                                "violationId": "v-5-2",
+                                "parentId": "5_item_v2",
+                            },
+                        ],
                     },
                 ],
             },
@@ -292,7 +333,7 @@ def _build_tables() -> dict[str, TableSchema]:
     return {
         "tbl-1-2": _table(
             "tbl-1-2",
-            "1.2",
+            "1_table_1",
             rows=[
                 ["Система", "БД", "Кол-во записей"],
                 ["АБС «Гранат»", "Greenplum core_abs", "12 480 217"],
@@ -302,7 +343,7 @@ def _build_tables() -> dict[str, TableSchema]:
         ),
         "tbl-2-2": _table(
             "tbl-2-2",
-            "2.2",
+            "2_table_main_metrics",
             rows=[
                 ["№", "Метрика", "План", "Факт", "Отклонение", "Норма", "Статус"],
                 ["1", "Доля сформированных выписок в срок", "100%", "97.8%", "-2.2%", "≥99%", "Несоотв."],
@@ -314,7 +355,7 @@ def _build_tables() -> dict[str, TableSchema]:
         ),
         "tbl-3-1": _table(
             "tbl-3-1",
-            "3.1",
+            "3_table_1",
             rows=[
                 ["Репозиторий", "Назначение", "URL"],
                 ["audit-workstation", "Конструктор актов", "git.bank/audit-ws"],
@@ -324,7 +365,7 @@ def _build_tables() -> dict[str, TableSchema]:
         ),
         "tbl-3-2": _table(
             "tbl-3-2",
-            "3.2",
+            "3_table_2",
             rows=[
                 ["Технология", "Версия", "Использование"],
                 ["Greenplum", "6.25", "Хранение и витрины"],
@@ -334,7 +375,7 @@ def _build_tables() -> dict[str, TableSchema]:
         ),
         "tbl-3-3": _table(
             "tbl-3-3",
-            "3.3",
+            "3_table_3",
             rows=[
                 ["Инструмент", "Назначение"],
                 ["Tableau", "Дашборды и сверка показателей"],
@@ -344,7 +385,7 @@ def _build_tables() -> dict[str, TableSchema]:
         ),
         "tbl-5-3": _table(
             "tbl-5-3",
-            "5.3",
+            "5_table_op_risk",
             rows=[
                 ["Риск", "Вероятность", "Влияние", "Уровень"],
                 ["Несоответствие требованиям ЦБ 716-П", "Средняя", "Высокое", "Высокий"],
@@ -386,7 +427,7 @@ def _build_text_blocks() -> dict[str, TextBlockSchema]:
     return {
         "tb-1-1": TextBlockSchema(
             id="tb-1-1",
-            nodeId="1.1",
+            nodeId="1_textblock_1",
             content=(
                 "Объект проверки — процесс ежедневного формирования и доставки "
                 "<b>овернайт-выписок</b> по расчётным счетам корпоративных "
@@ -406,7 +447,7 @@ def _build_text_blocks() -> dict[str, TextBlockSchema]:
         ),
         "tb-2-1": TextBlockSchema(
             id="tb-2-1",
-            nodeId="2.1",
+            nodeId="2_textblock_1",
             content=(
                 "Проверка проведена методом <b>выборочного контроля</b> по "
                 "<i>123 расчётным счетам</i> крупнейших клиентов сегмента "
@@ -424,7 +465,7 @@ def _build_text_blocks() -> dict[str, TextBlockSchema]:
         ),
         "tb-4-1": TextBlockSchema(
             id="tb-4-1",
-            nodeId="4.1",
+            nodeId="4_textblock_1",
             content=(
                 "По результатам проверки выявлено два систематических нарушения "
                 "регламента РК-1247. "
@@ -447,7 +488,7 @@ def _build_violations() -> dict[str, ViolationSchema]:
     return {
         "v-5-1": ViolationSchema(
             id="v-5-1",
-            nodeId="5.1",
+            nodeId="5_item_v1_violation",
             violated="Регламент формирования выписок (п. 4.2 РК-1247)",
             established=(
                 "В период проверки в 17 случаях из 123 (13.8%) выписки "
@@ -494,7 +535,7 @@ def _build_violations() -> dict[str, ViolationSchema]:
         ),
         "v-5-2": ViolationSchema(
             id="v-5-2",
-            nodeId="5.2",
+            nodeId="5_item_v2_violation",
             violated="Контроль соответствия остатков (п. 5.3 РК-1247)",
             established=(
                 "Зафиксировано 37 случаев расхождения остатков в выписке "
