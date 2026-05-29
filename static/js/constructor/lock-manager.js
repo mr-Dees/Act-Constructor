@@ -161,6 +161,10 @@ export class LockManager {
         this._isExiting = false;
         this._exitPromise = null;
         this._manualUnlockTriggered = false;
+        // Счётчик подряд-неудач extend сбрасываем при старте сессии: иначе
+        // транзиентные фейлы прошлого акта (destroy()+init() в той же вкладке)
+        // переносятся и преждевременно достигают _MAX_EXTEND_FAILURES.
+        this._extendConsecutiveFailures = 0;
     }
 
     /**

@@ -652,16 +652,27 @@ export class StorageManager {
 
     /**
      * Универсальное подтверждение программной навигации.
-     * Если несохранённых в БД изменений нет — возвращает true сразу.
-     * Иначе показывает diaglog; при подтверждении и наличии opts.url
-     * выставляет _allowNavigation и выполняет редирект.
+     * Контракт: при необходимости спрашивает подтверждение, и если переход
+     * разрешён (несохранённых изменений нет ЛИБО пользователь подтвердил) —
+     * при наличии opts.url ОБЯЗАТЕЛЬНО выполняет редирект.
+     *
+     * Без перехода (return true без редиректа) пользователь застревал на
+     * странице при отсутствии несохранённого: вызывающие места (lock-manager
+     * 409/500, header-exit) делегируют переход сюда и сами не редиректят.
      *
      * @param {string} [targetUrl] - URL для редиректа (информационно, фактический переход через opts.url)
      * @param {{url?: string}} [opts]
      * @returns {Promise<boolean>}
      */
     static async confirmNavigation(targetUrl, opts = {}) {
-        if (!this.hasUnsyncedChanges()) return true;
+        if (!this.hasUnsyncedChanges()) {
+            if (opts.url) {
+                window._allowNavigation = true;
+                this.allowUnload();
+                window.location.href = opts.url;
+            }
+            return true;
+        }
         const ok = await DialogManager.show({
             type: 'confirm',
             title: 'Несохраненные изменения',

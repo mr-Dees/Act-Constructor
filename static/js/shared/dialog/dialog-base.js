@@ -136,8 +136,14 @@ export class DialogBase {
             : null;
 
         if (appendToBody) document.body.appendChild(overlay);
-        this._activeDialogs.push(overlay);
-        this._lockBodyScroll();
+        // Идемпотентность: повторный show() того же overlay без промежуточного
+        // hide() (напр. двойной клик по «Помощь») не должен дублировать запись
+        // в стеке — иначе один hide() не обнулит _activeDialogs и скролл body
+        // останется залочен. Разные overlay'и по-прежнему складываются в стек.
+        if (this._activeDialogs.indexOf(overlay) === -1) {
+            this._activeDialogs.push(overlay);
+            this._lockBodyScroll();
+        }
 
         // Признак "уже в DOM" — _hideDialog не будет удалять.
         overlay._preserveInDom = !appendToBody;
@@ -181,6 +187,9 @@ export class DialogBase {
         }, 0);
 
         // Focus-trap: Tab/Shift+Tab циклит фокус внутри overlay'а.
+        // Снимаем прежний trap перед установкой нового — при повторном show()
+        // того же overlay иначе утёк бы старый keydown-listener.
+        this._removeFocusTrap(overlay);
         this._setupFocusTrap(overlay);
     }
 
