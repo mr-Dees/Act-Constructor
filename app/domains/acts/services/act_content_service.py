@@ -21,7 +21,7 @@ from app.domains.acts.schemas.act_content import ActDataSchema
 from app.domains.acts.services.access_guard import AccessGuard
 from app.domains.acts.settings import ActsSettings
 from app.domains.acts.utils import ActTreeUtils
-from app.domains.acts.utils.html_sanitizer import sanitize_html
+from app.domains.acts.utils.html_sanitizer import sanitize_act_data, sanitize_tree_nodes
 
 logger = logging.getLogger("audit_workstation.service.acts.content")
 
@@ -137,37 +137,14 @@ class ActContentService:
         """
         Чистит все HTML-поля до безопасного подмножества тегов/атрибутов.
 
-        Покрывает:
-        - textBlocks[*].content
-        - violations[*].violated / established
-        - violations[*].additionalContent.items[*].content
-        - violations[*].{reasons, consequences, responsible, recommendations}.content
-        - tree nodes[*].content (рекурсивно — узлы могут содержать HTML)
+        Делегирует в utils/html_sanitizer.sanitize_act_data — общая логика
+        переиспользуется при восстановлении версий (AuditLogService).
         """
-        for block in data.textBlocks.values():
-            block.content = sanitize_html(block.content)
-
-        for violation in data.violations.values():
-            violation.violated = sanitize_html(violation.violated)
-            violation.established = sanitize_html(violation.established)
-            for item in violation.additionalContent.items:
-                item.content = sanitize_html(item.content)
-            for field_name in ("reasons", "consequences", "responsible", "recommendations"):
-                field = getattr(violation, field_name)
-                field.content = sanitize_html(field.content)
-
-        self._sanitize_tree_nodes(data.tree)
+        sanitize_act_data(data)
 
     def _sanitize_tree_nodes(self, node: dict) -> None:
         """Рекурсивно чистит content в узлах дерева (узлы хранятся как dict)."""
-        if not isinstance(node, dict):
-            return
-        if "content" in node and node["content"] is not None:
-            node["content"] = sanitize_html(node["content"])
-        children = node.get("children")
-        if isinstance(children, list):
-            for child in children:
-                self._sanitize_tree_nodes(child)
+        sanitize_tree_nodes(node)
 
     def _validate_tree(self, data: ActDataSchema) -> None:
         """Проверяет структуру дерева перед сохранением."""
