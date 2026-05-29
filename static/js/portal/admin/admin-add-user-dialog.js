@@ -9,6 +9,7 @@ import { AdminRoles } from './admin-roles.js';
 import { APIClient } from '../../shared/api.js';
 import { DialogBase } from '../../shared/dialog/dialog-base.js';
 import { Notifications } from '../../shared/notifications.js';
+import { SafeHTML } from '../../shared/sanitize.js';
 
 export class AdminAddUserDialog extends DialogBase {
     static _currentDialog = null;
@@ -131,11 +132,11 @@ export class AdminAddUserDialog extends DialogBase {
                 }
 
                 resultsEl.innerHTML = users.map(u => `
-                    <div class="admin-add-result-item" data-username="${u.username}">
-                        <div class="admin-add-result-name">${this._escapeHtml(u.fullname || u.username)}</div>
+                    <div class="admin-add-result-item" data-username="${SafeHTML.escapeHtml(u.username || '')}">
+                        <div class="admin-add-result-name">${SafeHTML.escapeHtml(u.fullname || u.username)}</div>
                         <div class="admin-add-result-details">
-                            ${this._escapeHtml(u.job || '')}
-                            ${u.email ? ' · ' + this._escapeHtml(u.email) : ''}
+                            ${SafeHTML.escapeHtml(u.job || '')}
+                            ${u.email ? ' · ' + SafeHTML.escapeHtml(u.email) : ''}
                         </div>
                     </div>
                 `).join('');
@@ -171,8 +172,8 @@ export class AdminAddUserDialog extends DialogBase {
         resultsEl.innerHTML = '';
         selectedEl.style.display = 'block';
         selectedUserEl.innerHTML = `
-            <strong>${this._escapeHtml(user.fullname || user.username)}</strong>
-            <span class="admin-add-selected-details">${this._escapeHtml(user.job || '')} · ${this._escapeHtml(user.username)}</span>
+            <strong>${SafeHTML.escapeHtml(user.fullname || user.username)}</strong>
+            <span class="admin-add-selected-details">${SafeHTML.escapeHtml(user.job || '')} · ${SafeHTML.escapeHtml(user.username)}</span>
         `;
         selectedEl.dataset.username = user.username;
         selectedEl.dataset.fullname = user.fullname || '';
@@ -232,13 +233,6 @@ export class AdminAddUserDialog extends DialogBase {
             this._hideDialog(this._currentDialog);
             this._currentDialog = null;
         }
-    }
-
-    /** @private */
-    static _escapeHtml(str) {
-        const div = document.createElement('div');
-        div.textContent = str;
-        return div.innerHTML;
     }
 }
 
