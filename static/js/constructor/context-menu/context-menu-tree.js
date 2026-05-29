@@ -139,15 +139,16 @@ export class TreeContextMenu {
     }
 
     /**
-     * Есть ли вообще риск-таблица среди прямых детей узла (regular/operational/tax;
-     * other — отдельный пул, в risk-логике не учитывается).
-     * Используется иерархическими _hasRiskTablesAtLevel5x / _hasRiskTablesBelowLevel5x.
+     * Есть ли вообще риск-таблица среди прямых детей узла (все 4 типа,
+     * включая «прочий»). Используется иерархическими
+     * _hasRiskTablesAtLevel5x / _hasRiskTablesBelowLevel5x — правило
+     * «риски только на одном уровне» симметрично по всем типам.
      */
     _hasAnyRiskTable(node) {
         if (!node.children) return false;
         return node.children.some(child => {
             if (child.type !== AppConfig.nodeTypes.TABLE) return false;
-            return !!(child.isRegularRiskTable || child.isOperationalRiskTable || child.isTaxRiskTable);
+            return !!(child.isRegularRiskTable || child.isOperationalRiskTable || child.isTaxRiskTable || child.isOtherRiskTable);
         });
     }
 
