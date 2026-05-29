@@ -1,7 +1,7 @@
 /**
  * Компонент пагинации ЦК.
  */
-class CkPagination {
+export class CkPagination {
     static _config = null;
     static _total = 0;
     static _page = 1;

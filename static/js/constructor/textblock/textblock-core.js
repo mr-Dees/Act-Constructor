@@ -2,7 +2,10 @@
  * Менеджер для управления текстовыми блоками
  * Современный подход с поддержкой расширенного форматирования как в Word
  */
-class TextBlockManager {
+import { PreviewManager } from '../preview/preview.js';
+import { AppState } from '../state/state-core.js';
+
+export class TextBlockManager {
     constructor() {
         this.selectedTextBlock = null;
         this.globalToolbar = null;
@@ -103,4 +106,8 @@ class TextBlockManager {
     }
 }
 
-const textBlockManager = new TextBlockManager();
+export const textBlockManager = new TextBlockManager();
+
+// Window-globals для совместимости с inline-скриптами в шаблонах.
+window.TextBlockManager = TextBlockManager;
+window.textBlockManager = textBlockManager;

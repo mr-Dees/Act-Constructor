@@ -2,7 +2,9 @@
  * DOM-рендеринг diff с цветовой подсветкой.
  * Работает на основе результатов DiffEngine.compute().
  */
-class DiffRenderer {
+import { SafeHTML } from '../../shared/sanitize.js';
+
+export class DiffRenderer {
     /**
      * Рендерит полный diff в контейнер.
      * @param {HTMLElement} container
@@ -195,20 +197,23 @@ class DiffRenderer {
         div.className = `diff-textblock diff-${tbDiff.status}`;
 
         if (tbDiff.status === 'added') {
-            div.innerHTML = tbDiff.newContent || '';
+            SafeHTML.set(div, tbDiff.newContent || '');
         } else if (tbDiff.status === 'removed') {
-            div.innerHTML = tbDiff.oldContent || '';
+            SafeHTML.set(div, tbDiff.oldContent || '');
         } else if (tbDiff.status === 'modified' && tbDiff.wordDiff) {
             div.className += ' diff-text';
+            // _escapeHtml уже экранирует payload, но обёртки <ins>/<del> должны
+            // проходить через DOMPurify — иначе вектор «текст содержит </ins><script>»
+            // мог бы сломать конструкцию. SafeHTML.set sanitize всю итоговую строку.
             const html = tbDiff.wordDiff.map(part => {
                 const escaped = this._escapeHtml(part.text);
                 if (part.type === 'insert') return `<ins>${escaped}</ins>`;
                 if (part.type === 'delete') return `<del>${escaped}</del>`;
                 return escaped;
             }).join(' ');
-            div.innerHTML = html;
+            SafeHTML.set(div, html);
         } else {
-            div.innerHTML = tbDiff.content || tbDiff.newContent || '';
+            SafeHTML.set(div, tbDiff.content || tbDiff.newContent || '');
         }
 
         container.appendChild(div);

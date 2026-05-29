@@ -52,7 +52,7 @@ def settings_no_api():
 def msg_service():
     """Mock MessageService."""
     svc = AsyncMock()
-    svc.get_history = AsyncMock(return_value=[])
+    svc.load_history_for_llm = AsyncMock(return_value=[])
     svc.save_assistant_message = AsyncMock(return_value={"id": "msg-1"})
     return svc
 
@@ -1402,13 +1402,13 @@ class TestGetHistoryMessages:
 
     async def test_empty_history(self, orchestrator, msg_service):
         """Пустая история возвращает пустой список."""
-        msg_service.get_history.return_value = []
+        msg_service.load_history_for_llm.return_value = []
         result = await orchestrator._get_history_messages("conv-1")
         assert result == []
 
     async def test_text_blocks_extracted(self, orchestrator, msg_service):
         """Текстовые блоки извлекаются в формат OpenAI."""
-        msg_service.get_history.return_value = [
+        msg_service.load_history_for_llm.return_value = [
             {
                 "role": "user",
                 "content": [{"type": "text", "content": "Вопрос"}],
@@ -1426,7 +1426,7 @@ class TestGetHistoryMessages:
 
     async def test_code_blocks_formatted(self, orchestrator, msg_service):
         """Code-блоки форматируются как markdown fenced code."""
-        msg_service.get_history.return_value = [
+        msg_service.load_history_for_llm.return_value = [
             {
                 "role": "assistant",
                 "content": [
@@ -1441,7 +1441,7 @@ class TestGetHistoryMessages:
 
     async def test_file_blocks_formatted(self, orchestrator, msg_service):
         """File-блоки форматируются как '[Прикреплён файл: ...]'."""
-        msg_service.get_history.return_value = [
+        msg_service.load_history_for_llm.return_value = [
             {
                 "role": "user",
                 "content": [
@@ -1457,7 +1457,7 @@ class TestGetHistoryMessages:
     async def test_history_truncated_to_max_length(self, orchestrator, msg_service):
         """История обрезается до max_history_length."""
         orchestrator.settings.max_history_length = 3
-        msg_service.get_history.return_value = [
+        msg_service.load_history_for_llm.return_value = [
             {"role": "user", "content": [{"type": "text", "content": f"Msg {i}"}]}
             for i in range(10)
         ]
@@ -1467,7 +1467,7 @@ class TestGetHistoryMessages:
 
     async def test_string_content_handled(self, orchestrator, msg_service):
         """Строковый контент (не список блоков) обрабатывается."""
-        msg_service.get_history.return_value = [
+        msg_service.load_history_for_llm.return_value = [
             {"role": "user", "content": "Просто строка"},
         ]
 
@@ -1482,7 +1482,7 @@ class TestGetHistoryMessages:
         Иначе модель в следующем запросе увидит собственный chain-of-thought
         предыдущего ответа и контекст будет засоряться.
         """
-        msg_service.get_history.return_value = [
+        msg_service.load_history_for_llm.return_value = [
             {
                 "role": "assistant",
                 "content": [
@@ -1501,7 +1501,7 @@ class TestGetHistoryMessages:
         self, orchestrator, msg_service,
     ):
         """Сохранённые error-блоки в контекст LLM не передаются."""
-        msg_service.get_history.return_value = [
+        msg_service.load_history_for_llm.return_value = [
             {
                 "role": "assistant",
                 "content": [
@@ -1563,7 +1563,7 @@ async def test_orchestrator_disables_streaming_for_gigachat_profile():
         streaming_enabled=True,  # включён в настройках
     )
     msg_service = MagicMock()
-    msg_service.get_history = AsyncMock(return_value=[])
+    msg_service.load_history_for_llm = AsyncMock(return_value=[])
     conv_service = MagicMock()
 
     orch = Orchestrator(
@@ -1629,7 +1629,7 @@ class TestLazyHistory:
             }
             for i in range(5)
         ]
-        msg_service.get_history.return_value = history
+        msg_service.load_history_for_llm.return_value = history
 
         result = await orchestrator._get_history_messages("conv-1")
         # Все 5 сообщений присутствуют
@@ -1648,7 +1648,7 @@ class TestLazyHistory:
     async def test_old_messages_get_placeholder(self, orchestrator, msg_service):
         """Старые сообщения получают placeholder вместо file-контента."""
         orchestrator.settings.history_full_context_depth = 2
-        msg_service.get_history.return_value = [
+        msg_service.load_history_for_llm.return_value = [
             {
                 "role": "user",
                 "content": [
@@ -1680,7 +1680,7 @@ class TestLazyHistory:
     async def test_depth_larger_than_history_all_full(self, orchestrator, msg_service):
         """Если depth > len(history), все сообщения получают полный контент."""
         orchestrator.settings.history_full_context_depth = 10
-        msg_service.get_history.return_value = [
+        msg_service.load_history_for_llm.return_value = [
             {
                 "role": "user",
                 "content": [
@@ -1704,7 +1704,7 @@ class TestLazyHistory:
     async def test_text_blocks_always_full(self, orchestrator, msg_service):
         """Text-блоки присутствуют в полном виде независимо от depth."""
         orchestrator.settings.history_full_context_depth = 1
-        msg_service.get_history.return_value = [
+        msg_service.load_history_for_llm.return_value = [
             {
                 "role": "user",
                 "content": [
@@ -1732,7 +1732,7 @@ class TestLazyHistory:
     ):
         """Image-блоки тоже заменяются placeholder'ами в старых сообщениях."""
         orchestrator.settings.history_full_context_depth = 1
-        msg_service.get_history.return_value = [
+        msg_service.load_history_for_llm.return_value = [
             {
                 "role": "user",
                 "content": [
@@ -1788,7 +1788,7 @@ class TestGigaChatQueue:
         register_tools([tool_a, tool_b])
 
         msg_svc = AsyncMock()
-        msg_svc.get_history = AsyncMock(return_value=[])
+        msg_svc.load_history_for_llm = AsyncMock(return_value=[])
         orch = Orchestrator(
             msg_service=msg_svc, conv_service=AsyncMock(), settings=settings,
         )
@@ -1929,7 +1929,7 @@ class TestToolLoopExit:
         register_tools([tool])
 
         msg_svc = AsyncMock()
-        msg_svc.get_history = AsyncMock(return_value=[])
+        msg_svc.load_history_for_llm = AsyncMock(return_value=[])
         orch = Orchestrator(
             msg_service=msg_svc, conv_service=AsyncMock(), settings=settings,
         )

@@ -165,6 +165,24 @@ class TestGreenplumSchemaCompatibility:
             "и каждого UNIQUE-констрейнта.\n" + "\n".join(violations)
         )
 
+    def test_gp_act_tables_has_tax_and_other_risk_flags(self, gp_schema_files):
+        """Регрессия: GP-схема act_tables объявляет is_tax_risk_table и is_other_risk_table.
+
+        Эти флаги обязаны быть в GP-схеме acts, иначе репозиторий, который пишет/читает
+        их через INSERT/SELECT, упадёт на старте.
+        """
+        acts_gp = next(
+            (s for s in gp_schema_files if 'acts' in s.parent.parent.parent.name),
+            None,
+        )
+        assert acts_gp is not None, "GP-схема acts не найдена среди gp_schema_files"
+
+        sql = acts_gp.read_text(encoding='utf-8')
+        assert 'is_tax_risk_table' in sql, \
+            f"GP-схема {acts_gp} не содержит is_tax_risk_table"
+        assert 'is_other_risk_table' in sql, \
+            f"GP-схема {acts_gp} не содержит is_other_risk_table"
+
     def test_no_pl_pgsql_triggers(self, gp_schema_files):
         """В GP 6 PL/pgSQL-триггеры исполняются только на координаторе → каждый
         UPDATE превращается в RPC на мастер. Для метки ``updated_at`` это лишний

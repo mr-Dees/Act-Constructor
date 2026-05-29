@@ -5,13 +5,14 @@
  * на страницах без встроенной чат-панели (acts-manager и др.).
  * ChatManager инициализируется лениво при первом открытии.
  */
-class ChatModalManager {
+import { ChatManager } from './chat-manager.js';
+import { EscapeStack } from '../escape-stack.js';
+
+export class ChatModalManager {
     static _overlay = null;
     static _chatInitialized = false;
-    /** @type {(e: KeyboardEvent) => void | null} */
-    static _escapeHandler = null;
-    /** @type {boolean} Привязан ли _escapeHandler сейчас к document */
-    static _escapeAttached = false;
+    /** @type {(() => void) | null} EscapeStack unsubscribe handle */
+    static _escapeUnsub = null;
 
     /**
      * Открывает модальное окно чата
@@ -29,11 +30,9 @@ class ChatModalManager {
             this._chatInitialized = true;
         }
 
-        // Подписываем Escape только на время открытия модалки.
-        // Защита от двойного addEventListener — флагом _escapeAttached.
-        if (this._escapeHandler && !this._escapeAttached) {
-            document.addEventListener('keydown', this._escapeHandler);
-            this._escapeAttached = true;
+        // Подписываем Escape только на время открытия модалки — через EscapeStack.
+        if (!this._escapeUnsub) {
+            this._escapeUnsub = EscapeStack.push(() => this.close());
         }
 
         const input = this._overlay.querySelector('.chat-input');
@@ -48,16 +47,16 @@ class ChatModalManager {
         this._overlay.classList.add('hidden');
         document.body.classList.remove('chat-modal-open');
 
-        // Снимаем глобальный keydown — чтобы Escape не срабатывал,
-        // пока модалка скрыта, и не оставались утечки слушателей.
-        if (this._escapeHandler && this._escapeAttached) {
-            document.removeEventListener('keydown', this._escapeHandler);
-            this._escapeAttached = false;
+        // Снимаем регистрацию в EscapeStack, чтобы ESC не срабатывал,
+        // пока модалка скрыта.
+        if (this._escapeUnsub) {
+            this._escapeUnsub();
+            this._escapeUnsub = null;
         }
     }
 
     /**
-     * Настраивает обработчики закрытия: крестик, оверлей, Escape
+     * Настраивает обработчики закрытия: крестик, оверлей
      * @private
      */
     static _setupCloseHandlers() {
@@ -72,15 +71,7 @@ class ChatModalManager {
             if (e.target === this._overlay) this.close();
         });
 
-        // Escape — отдельная именованная функция, чтобы её можно было
-        // снять через removeEventListener при close().
-        this._escapeHandler = (e) => {
-            if (e.key === 'Escape'
-                && this._overlay
-                && !this._overlay.classList.contains('hidden')) {
-                this.close();
-            }
-        };
+        // Escape — через EscapeStack (push в open, unsub в close).
     }
 }
 

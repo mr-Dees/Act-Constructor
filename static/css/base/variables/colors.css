@@ -1,0 +1,373 @@
+/*
+ * Цветовые переменные: палитра, статусы, фоны, границы, тексты,
+ * кнопки, инпуты, оверлеи, градиенты, таблицы, подсветки, ссылки,
+ * дерево, состояния актов, notifications, save-indicator, theme-switch.
+ */
+
+:root {
+    /* Основная цветовая палитра */
+    --primary: #5b6fa8;
+    --primary-hover: #4a5d8a;
+    --primary-light: #7890c7;
+    --primary-subtle: #dfe6f5;
+
+    --secondary: #6b7a99;
+
+    --accent: #4a9ab6;
+    --accent-hover: #3d8299;
+    --accent-light: #6bb5d0;
+
+    /* Статусные цвета */
+    --success: #52a876;
+    --success-hover: #448a63;
+    --success-light: #6bc493;
+    --success-bright: #10b981;
+    --success-subtle: #e8f5ee;
+
+    --warning: #d89849;
+    --warning-hover: #c5853d;
+    --warning-light: #e5b36f;
+    --warning-subtle: #fef3e7;
+
+    --error: #c75555;
+    --error-hover: #b54545;
+    --error-light: #d77979;
+    --error-subtle: #fdeaea;
+
+    --danger: #dc3545;
+    --danger-hover: #c82333;
+    --danger-light: #e4606d;
+    --danger-subtle: #fddede;
+
+    --info: #4a9ab6;
+    --info-hover: #3d8299;
+    --info-light: #6bb5d0;
+    --info-subtle: #e8f4f8;
+
+    /* Градации серого */
+    --gray-50: #f8fafb;
+    --gray-100: #f1f3f6;
+    --gray-200: #e4e7ec;
+    --gray-300: #cfd4dc;
+    --gray-400: #9ba3b3;
+    --gray-500: #6b7280;
+    --gray-600: #4a5568;
+    --gray-700: #2d3748;
+    --gray-800: #1a202c;
+    --gray-900: #0f1419;
+
+    /* Фоновые цвета */
+    --bg-primary: #ffffff;
+    --bg-secondary: #f8fafb;
+    --bg-tertiary: #f1f3f6;
+    --bg-hover: #f9fafb;
+    --bg-active: #e8ebf0;
+    --bg-disabled: #f1f3f6;
+
+    /* Цвета границ */
+    --border-light: #e8ebf0;
+    --border: #d4d9e2;
+    --border-medium: #bdc4d1;
+    --border-dark: #9ba3b3;
+    --border-focus: var(--primary);
+
+    /* Цвета текста для обеспечения контрастности */
+    --text-primary: #1a202c;
+    --text-secondary: #4a5568;
+    --text-tertiary: #7a8290;
+    --text-disabled: #cfd4dc;
+    --text-on-primary: #ffffff;
+    --text-on-dark: #ffffff;
+    --text-link: var(--primary);
+    --text-link-hover: var(--primary-hover);
+    --text-link-visited: var(--secondary);
+
+    /* Кнопки */
+    --button-bg: var(--primary);
+    --button-bg-hover: var(--primary-hover);
+    --button-bg-active: #3d4d73;
+    --button-text: var(--text-on-primary);
+    --button-border: transparent;
+    --button-disabled-bg: var(--gray-300);
+    --button-disabled-text: var(--text-tertiary);
+    --button-shadow: var(--shadow-sm);
+    --button-shadow-hover: var(--shadow);
+
+    --button-secondary-bg: var(--bg-secondary);
+    --button-secondary-bg-hover: var(--gray-200);
+    --button-secondary-text: var(--text-primary);
+    --button-secondary-border: var(--border);
+
+    --button-ghost-bg: transparent;
+    --button-ghost-bg-hover: rgba(91, 111, 168, 0.1);
+    --button-ghost-bg-active: rgba(91, 111, 168, 0.15);
+    --button-ghost-text: var(--primary);
+
+    --button-success-active: #3d8a5a;
+    --button-danger-active: #bd2130;
+
+    --save-dropdown-border: rgba(255, 255, 255, 0.3);
+
+    /* Инпуты и формы */
+    --input-bg: #ffffff;
+    --input-bg-disabled: var(--gray-100);
+    --input-border: var(--border);
+    --input-border-hover: var(--border-medium);
+    --input-border-focus: var(--primary);
+    --input-text: var(--text-primary);
+    --input-text-disabled: var(--text-disabled);
+    --input-placeholder: var(--text-tertiary);
+    --input-shadow-focus: 0 0 0 var(--spacing-xs) rgba(91, 111, 168, 0.15);
+    --input-focus-shadow: 0 0 0 var(--spacing-xs) rgba(91, 111, 168, 0.15);
+    --input-error-border: var(--error);
+    --input-error-bg: rgba(199, 85, 85, 0.05);
+    --input-error-shadow: 0 0 0 var(--spacing-xs) rgba(199, 85, 85, 0.15);
+    --input-success-border: var(--success);
+    --input-success-bg: rgba(82, 168, 118, 0.05);
+
+    --checkbox-bg: #ffffff;
+    --checkbox-bg-checked: var(--primary);
+    --checkbox-border: var(--border);
+    --checkbox-checkmark: #ffffff;
+
+    /* Оверлеи и полупрозрачные фоны */
+    --overlay-bg: rgba(26, 32, 44, 0.5);
+    --overlay-bg-dark: rgba(0, 0, 0, 0.7);
+    --overlay-bg-light: rgba(255, 255, 255, 0.9);
+    --overlay-bg-darker: rgba(26, 32, 44, 0.6);
+    --step-bg: rgba(255, 255, 255, 0.18);
+    --step-bg-hover: rgba(255, 255, 255, 0.25);
+    --step-border: rgba(255, 255, 255, 0.3);
+    --step-border-hover: rgba(255, 255, 255, 0.4);
+    --help-modal-overlay: rgba(0, 0, 0, 0.6);
+    --help-close-hover: rgba(255, 255, 255, 0.2);
+    --help-panel-border: #b8c9e8;
+    --tooltip-bg: #2c3e50;
+    --tooltip-text: #ffffff;
+
+    /* Градиенты */
+    --gradient-header: linear-gradient(135deg, #748fca 0%, #9d7cb8 100%);
+    --gradient-primary: linear-gradient(135deg, var(--primary) 0%, var(--primary-hover) 100%);
+    --gradient-accent: linear-gradient(135deg, var(--accent) 0%, #3d8299 100%);
+    --item-highlight-gradient: linear-gradient(
+            135deg,
+            rgba(102, 126, 234, 0.1) 0%,
+            rgba(102, 126, 234, 0.05) 50%,
+            rgba(102, 126, 234, 0.1) 100%
+    );
+    --table-header-gradient: linear-gradient(135deg, #748fca 0%, #9d7cb8 100%);
+    --table-header-gradient-hover: linear-gradient(135deg, #6a81ba 0%, #9170ab 100%);
+    --table-header-selected: linear-gradient(135deg, #6579b5 0%, #8b6aa5 100%);
+    --content-label-gradient: linear-gradient(135deg, rgba(79, 70, 229, 0.1) 0%, var(--bg-tertiary) 100%);
+    --drag-miniature-gradient: linear-gradient(135deg, var(--primary) 0%, #5b21b6 100%);
+    --insert-indicator-gradient: linear-gradient(
+            90deg,
+            transparent 0%,
+            rgba(79, 70, 229, 0.3) 20%,
+            rgba(79, 70, 229, 0.3) 80%,
+            transparent 100%
+    );
+    --level-connector-gradient: linear-gradient(
+            to bottom,
+            transparent 0%,
+            var(--border-light) 20%,
+            var(--border-light) 80%,
+            transparent 100%
+    );
+
+    /* Цвета таблиц */
+    --table-bg: #ffffff;
+    --table-border: var(--border-light);
+    --table-header-bg: var(--bg-tertiary);
+    --table-header-text: var(--text-primary);
+    --table-row-hover: var(--bg-hover);
+    --table-row-selected: rgba(91, 111, 168, 0.08);
+    --table-row-selected-hover: rgba(91, 111, 168, 0.12);
+    --table-protected-header-bg: #f9f9f9;
+    --resize-handle-bg: rgba(91, 111, 168, 0.3);
+    --resize-handle-bg-subtle: rgba(91, 111, 168, 0.2);
+    --resize-handle-border: rgba(91, 111, 168, 0.6);
+
+    /* Цвета подсветки */
+    --highlight-bg: rgba(255, 235, 59, 0.4);
+    --highlight-insert: #2ecc71;
+    --highlight-insert-shadow: 0 0 var(--spacing) rgba(46, 204, 113, 0.6);
+    --highlight-warning-shadow: 0 0 var(--spacing) rgba(243, 156, 18, 0.6);
+    --highlight-error: #e74c3c;
+    --highlight-error-shadow: 0 0 var(--spacing) rgba(231, 76, 60, 0.6);
+    --highlight-selection: rgba(91, 111, 168, 0.2);
+    --highlight-glow-color: rgba(102, 126, 234, 0.3);
+    --highlight-glow-spread: rgba(102, 126, 234, 0.45);
+
+    /* Цвета для ссылок и сносок */
+    --link-bg: rgba(91, 111, 168, 0.08);
+    --link-bg-hover: rgba(91, 111, 168, 0.15);
+    --link-border: rgba(91, 111, 168, 0.3);
+    --link-animation-shadow: rgba(91, 111, 168, 0.4);
+    --link-animation-ring: rgba(91, 111, 168, 0.2);
+    --footnote-bg: rgba(74, 154, 182, 0.08);
+    --footnote-bg-hover: rgba(74, 154, 182, 0.15);
+    --footnote-border: rgba(74, 154, 182, 0.3);
+    --footnote-focus-shadow: rgba(74, 154, 182, 0.2);
+    --delete-btn-hover-bg: rgba(199, 85, 85, 0.1);
+
+    /* Цвета для дерева */
+    --tree-node-bg: transparent;
+    --tree-node-bg-hover: rgba(91, 111, 168, 0.05);
+    --tree-node-bg-selected: rgba(91, 111, 168, 0.1);
+    --tree-node-border: transparent;
+    --tree-node-border-selected: var(--primary-light);
+    --tree-parent-selected-border: #aab9dc;
+    --tree-protected-bg: #fff8e8;
+    --drop-child-bg: rgba(0, 123, 255, 0.1);
+    --drop-child-border: #007bff;
+    --drop-indicator-shadow: rgba(0, 123, 255, 0.7);
+    --drop-indicator-glow: rgba(0, 123, 255, 0.4);
+    --tree-drag-active-bg: rgba(91, 111, 168, 0.03);
+    --tree-drop-zone-bg: rgba(91, 111, 168, 0.05);
+    --tree-badge-table-bg: rgba(74, 154, 182, 0.15);
+    --tree-badge-textblock-bg: rgba(120, 144, 199, 0.15);
+
+    /* Цвета для дополнительного контента нарушений */
+    --additional-content-hover-bg: rgba(79, 70, 229, 0.05);
+    --drag-over-bg: rgba(79, 70, 229, 0.15);
+    --drag-over-shadow: 0 0 var(--spacing-xl) rgba(79, 70, 229, 0.3);
+    --drag-text-shadow: 0 var(--spacing-xs) var(--spacing-lg) rgba(79, 70, 229, 0.2);
+    --content-item-hover-shadow: 0 var(--spacing-sm) var(--spacing-xl) rgba(0, 0, 0, 0.12);
+    --content-item-dragging-shadow: 0 var(--spacing-md) var(--spacing-2xl) rgba(79, 70, 229, 0.25);
+    --drag-miniature-shadow: 0 var(--spacing-sm) var(--spacing-xl) rgba(79, 70, 229, 0.4);
+
+    /* Цвета для индикатора сохранения */
+    --save-button-bg: rgba(255, 255, 255, 0.1);
+    --save-button-border: rgba(255, 255, 255, 0.2);
+    --save-button-text: rgba(255, 255, 255, 0.9);
+    --save-saved-bg: rgba(82, 168, 118, 0.15);
+    --save-saved-border: rgba(82, 168, 118, 0.3);
+    --save-saved-color: var(--success);
+    --save-saved-glow: rgba(255, 255, 255, 0.3);
+    --save-saved-white: #ffffff;
+    --save-saved-white-glow: rgba(255, 255, 255, 0.4);
+    --save-saved-white-bg: rgba(255, 255, 255, 0.2);
+    --save-saved-white-border: rgba(255, 255, 255, 0.4);
+    --save-saved-white-shadow: rgba(255, 255, 255, 0.6);
+    --save-unsaved-color: #fbbf24;
+    --save-unsaved-bg: rgba(251, 191, 36, 0.15);
+    --save-unsaved-border: rgba(251, 191, 36, 0.3);
+    --save-unsaved-bg-hover: rgba(251, 191, 36, 0.25);
+    --save-unsaved-border-hover: rgba(251, 191, 36, 0.4);
+    --save-unsaved-bg-enhanced: rgba(251, 191, 36, 0.25);
+    --save-unsaved-border-enhanced: rgba(251, 191, 36, 0.6);
+    --save-unsaved-glow: rgba(251, 191, 36, 0.3);
+    --save-unsaved-glow-enhanced: rgba(251, 191, 36, 0.4);
+    --save-unsaved-shadow: rgba(251, 191, 36, 0.6);
+    --save-unsaved-text-glow: rgba(251, 191, 36, 0.5);
+    --save-local-only-bg: rgba(251, 191, 36, 0.25);
+    --save-local-only-border: rgba(251, 191, 36, 0.6);
+    --save-local-only-glow: rgba(251, 191, 36, 0.3);
+    --save-local-only-glow-enhanced: rgba(251, 191, 36, 0.4);
+    --save-local-only-bg-hover: rgba(251, 191, 36, 0.35);
+    --save-local-only-border-hover: rgba(251, 191, 36, 0.8);
+    --save-local-only-shadow: rgba(251, 191, 36, 0.6);
+    --save-error-bg: rgba(199, 85, 85, 0.25);
+    --save-error-border: var(--error);
+    --save-error-bg-hover: rgba(199, 85, 85, 0.35);
+    --save-error-border-hover: var(--error-hover);
+    --save-error-glow: rgba(239, 68, 68, 0.3);
+    --save-error-glow-enhanced: rgba(239, 68, 68, 0.4);
+    --save-error-shadow: rgba(239, 68, 68, 0.6);
+    --save-error-text-glow: rgba(239, 68, 68, 0.5);
+    --save-saving-bg: rgba(74, 154, 182, 0.25);
+    --save-saving-border: var(--info);
+    --save-label-color: rgba(255, 255, 255, 0.8);
+    --save-ripple-bg: rgba(255, 255, 255, 0.3);
+
+    /* Скроллбар */
+    --scrollbar-bg: var(--gray-100);
+    --scrollbar-thumb: var(--primary-light);
+    --scrollbar-thumb-hover: var(--primary);
+
+    /* Лоадеры и спиннеры (цвета) */
+    --spinner-color: var(--primary);
+    --spinner-bg: var(--primary-subtle);
+    --skeleton-bg: var(--gray-200);
+    --skeleton-shimmer: linear-gradient(
+            90deg,
+            transparent 0%,
+            rgba(255, 255, 255, 0.6) 50%,
+            transparent 100%
+    );
+
+    /* Карточки */
+    --card-bg: #ffffff;
+    --card-border: var(--border-light);
+    --card-shadow: var(--shadow-sm);
+    --card-shadow-hover: var(--shadow);
+
+    /* Модальные окна (цвета) */
+    --modal-bg: #ffffff;
+    --modal-border: var(--border-light);
+    --modal-shadow: var(--shadow-xl);
+    --modal-header-bg: var(--bg-secondary);
+    --modal-footer-bg: var(--bg-secondary);
+
+    /* Уведомления (цвета) */
+    --notification-bg: #ffffff;
+    --notification-border: var(--border-light);
+    --notification-shadow: var(--shadow-lg);
+    --notification-success-bg: var(--success-subtle);
+    --notification-success-border: var(--success);
+    --notification-success-icon: var(--success);
+    --notification-warning-bg: var(--warning-subtle);
+    --notification-warning-border: var(--warning);
+    --notification-warning-icon: var(--warning);
+    --notification-error-bg: var(--error-subtle);
+    --notification-error-border: var(--error);
+    --notification-error-icon: var(--error);
+    --notification-info-bg: var(--info-subtle);
+    --notification-info-border: var(--info);
+    --notification-info-icon: var(--info);
+
+    /* Preview ресайз-цвета */
+    --preview-resize-handle-hover-bg: rgba(91, 111, 168, 0.05);
+    --preview-resize-handle-active-bg: rgba(91, 111, 168, 0.1);
+    --preview-resize-indicator-bg: var(--bg-secondary);
+    --preview-resize-indicator-hover-bg: var(--primary-subtle);
+    --preview-resize-indicator-active-bg: var(--primary-light);
+    --preview-resize-grip-color: var(--border-medium);
+    --preview-resize-grip-hover-color: var(--primary);
+    --preview-resize-grip-active-color: var(--primary-hover);
+
+    /* Цвета для заблокированных актов */
+    --act-locked-bg: var(--gray-100);
+    --act-locked-border: var(--gray-300);
+    --act-locked-text: var(--text-tertiary);
+    --act-locked-overlay: rgba(0, 0, 0, 0.05);
+    --act-locked-badge-bg: var(--gray-400);
+    --act-locked-badge-text: var(--text-on-primary);
+
+    /* Цвета для актов требующих внимания */
+    --act-attention-bg: rgba(251, 191, 36, 0.08);
+    --act-attention-border: rgba(251, 191, 36, 0.4);
+    --act-attention-text: var(--warning);
+    --act-attention-badge-bg: var(--warning);
+    --act-attention-badge-text: var(--text-on-primary);
+
+    /* Цвета для актов с критичными требованиями (фактура) */
+    --act-critical-bg: rgba(239, 68, 68, 0.08);
+    --act-critical-border: var(--error);
+    --act-critical-glow: rgba(239, 68, 68, 0.4);
+    --act-critical-badge-bg: var(--error);
+    --act-critical-badge-text: var(--text-on-primary);
+
+    /* Градиенты и фоны для предупреждений по фактуре */
+    --invoice-warning-bg-start: rgba(239, 68, 68, 0.1);
+    --invoice-warning-bg-end: rgba(239, 68, 68, 0.05);
+    --invoice-warning-bg-start-strong: rgba(239, 68, 68, 0.15);
+    --invoice-warning-bg-end-strong: rgba(239, 68, 68, 0.08);
+    --invoice-warning-border: rgba(239, 68, 68, 0.3);
+    --critical-pulse-outer-glow: rgba(239, 68, 68, 0.2);
+
+    /* Иконки (цвета) */
+    --icon-color: var(--text-secondary);
+    --icon-color-hover: var(--primary);
+}

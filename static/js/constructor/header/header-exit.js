@@ -6,7 +6,13 @@
  * - Снимает блокировку
  * - Переходит на главную страницу
  */
-class HeaderExit {
+import { LockManager } from '../lock-manager.js';
+import { StorageManager } from '../storage-manager.js';
+import { AppConfig } from '../../shared/app-config.js';
+import { DialogManager } from '../../shared/dialog/dialog-confirm.js';
+import { Notifications } from '../../shared/notifications.js';
+
+export class HeaderExit {
     /**
      * Инициализирует обработчик кнопки выхода
      */
@@ -32,7 +38,12 @@ class HeaderExit {
     static async _handleExit() {
         // Read-only пользователи просто выходят без вопросов о сохранении
         if (AppConfig.readOnlyMode?.isReadOnly) {
-            window.location.href = AppConfig.api.getUrl('/acts');
+            const url = AppConfig.api.getUrl('/acts');
+            if (typeof StorageManager !== 'undefined' && typeof StorageManager.confirmNavigation === 'function') {
+                await StorageManager.confirmNavigation(url, { url });
+            } else {
+                window.location.href = url;
+            }
             return;
         }
 
@@ -62,7 +73,11 @@ class HeaderExit {
     }
 
     /**
-     * Сохраняет акт и выходит
+     * Сохраняет акт и выходит.
+     * Делегирует save+unlock+redirect единой точке LockManager._initiateExit,
+     * которая делает один PUT /content (с прикреплённым changelog) и POST /unlock.
+     * Без делегирования получали бы два PUT'а: ручной save здесь + повторный save
+     * внутри _initiateExit под manualUnlock.
      * @private
      */
     static async _saveAndExit() {
@@ -72,13 +87,14 @@ class HeaderExit {
                 Notifications.info('Сохранение...', AppConfig.notifications.duration.info);
             }
 
-            // Сохраняем контент
-            if (window.currentActId && typeof APIClient !== 'undefined') {
-                await APIClient.saveActContent(window.currentActId, { saveType: 'manual' });
+            // _initiateExit делает: PUT /content (с changelog) → POST /unlock → redirect.
+            if (window.LockManager && typeof LockManager._initiateExit === 'function' && window.currentActId) {
+                await LockManager._initiateExit('manualExit');
+                return;
             }
 
-            // Успешно сохранили - теперь выходим
-            await this._performExit(true);
+            // Fallback: LockManager недоступен (страница метаданных и т.п.) — только unlock+redirect.
+            await this._performExit(false);
 
         } catch (error) {
             console.error('Ошибка сохранения при выходе:', error);
@@ -124,7 +140,12 @@ class HeaderExit {
             // Read-only пользователи не сохраняют и не разблокируют
             if (AppConfig.readOnlyMode?.isReadOnly) {
                 console.log('HeaderExit: read-only режим, пропускаем сохранение и unlock');
-                window.location.href = AppConfig.api.getUrl('/acts');
+                const url = AppConfig.api.getUrl('/acts');
+                if (typeof StorageManager !== 'undefined' && typeof StorageManager.confirmNavigation === 'function') {
+                    await StorageManager.confirmNavigation(url, { url });
+                } else {
+                    window.location.href = url;
+                }
                 return;
             }
 
@@ -144,7 +165,12 @@ class HeaderExit {
             }
 
             // Переходим на главную
-            window.location.href = AppConfig.api.getUrl('/acts');
+            const url = AppConfig.api.getUrl('/acts');
+            if (typeof StorageManager !== 'undefined' && typeof StorageManager.confirmNavigation === 'function') {
+                await StorageManager.confirmNavigation(url, { url });
+            } else {
+                window.location.href = url;
+            }
 
         } catch (error) {
             console.error('Ошибка при выходе:', error);

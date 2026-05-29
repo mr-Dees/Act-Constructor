@@ -2,43 +2,49 @@
 <div id="contextMenu" class="context-menu hidden" role="menu">
     <!-- Добавление элементов -->
     <div class="context-menu-item" data-action="add-child" role="menuitem">
-        ➕ Добавить подпункт
+        <span aria-hidden="true">➕</span> Добавить подпункт
     </div>
     <div class="context-menu-item" data-action="add-sibling" role="menuitem">
-        ➕ Добавить соседний пункт
+        <span aria-hidden="true">➕</span> Добавить соседний пункт
     </div>
     <div class="context-menu-separator" role="separator"></div>
 
     <!-- Типы таблиц -->
     <div class="context-menu-item" data-action="add-regular-table" role="menuitem">
-        📊 Добавить обычную таблицу
+        <span aria-hidden="true">📊</span> Добавить обычную таблицу
     </div>
     <div class="context-menu-item" data-action="add-regular-risk-table" role="menuitem">
-        ⚠️ Добавить таблицу регуляторного риска
+        <span aria-hidden="true">⚠️</span> Добавить таблицу регуляторного риска
     </div>
     <div class="context-menu-item" data-action="add-operational-risk-table" role="menuitem">
-        🔴 Добавить таблицу операционного риска
+        <span aria-hidden="true">🔴</span> Добавить таблицу операционного риска
+    </div>
+    <div class="context-menu-item" data-action="add-tax-risk-table" role="menuitem">
+        <span aria-hidden="true">🧾</span> Добавить таблицу налогового риска
+    </div>
+    <div class="context-menu-item" data-action="add-other-risk-table" role="menuitem">
+        <span aria-hidden="true">📋</span> Добавить таблицу прочих рисков
     </div>
     <div class="context-menu-separator" role="separator"></div>
 
     <!-- Другие типы содержимого -->
     <div class="context-menu-item" data-action="add-textblock" role="menuitem">
-        📝 Добавить текстовый блок
+        <span aria-hidden="true">📝</span> Добавить текстовый блок
     </div>
     <div class="context-menu-item" data-action="add-violation" role="menuitem">
-        ⚠️ Добавить нарушение
+        <span aria-hidden="true">⚠️</span> Добавить нарушение
     </div>
     <div class="context-menu-separator" role="separator"></div>
 
     <!-- Фактура -->
     <div class="context-menu-item" data-action="attach-invoice" role="menuitem" style="display: none;">
-        📎 Приложить фактуру
+        <span aria-hidden="true">📎</span> Приложить фактуру
     </div>
     <div class="context-menu-separator" data-action="attach-invoice-separator" role="separator" style="display: none;"></div>
 
     <!-- Удаление -->
     <div class="context-menu-item" data-action="delete" role="menuitem">
-        🗑️ Удалить
+        <span aria-hidden="true">🗑️</span> Удалить
     </div>
 </div>
 
@@ -46,33 +52,33 @@
 <div id="cellContextMenu" class="context-menu hidden" role="menu">
     <!-- Объединение ячеек -->
     <div class="context-menu-item" data-action="merge-cells" role="menuitem">
-        🔗 Объединить ячейки
+        <span aria-hidden="true">🔗</span> Объединить ячейки
     </div>
     <div class="context-menu-item" data-action="unmerge-cell" role="menuitem">
-        ↩️ Разъединить ячейку
+        <span aria-hidden="true">↩️</span> Разъединить ячейку
     </div>
     <div class="context-menu-separator" role="separator"></div>
 
     <!-- Операции со строками -->
     <div class="context-menu-item" data-action="insert-row-above" role="menuitem">
-        ⬆️ Вставить строку выше
+        <span aria-hidden="true">⬆️</span> Вставить строку выше
     </div>
     <div class="context-menu-item" data-action="insert-row-below" role="menuitem">
-        ⬇️ Вставить строку ниже
+        <span aria-hidden="true">⬇️</span> Вставить строку ниже
     </div>
     <div class="context-menu-item" data-action="delete-row" role="menuitem">
-        🗑️ Удалить строку
+        <span aria-hidden="true">🗑️</span> Удалить строку
     </div>
     <div class="context-menu-separator" role="separator"></div>
 
     <!-- Операции с колонками -->
     <div class="context-menu-item" data-action="insert-col-left" role="menuitem">
-        ⬅️ Вставить колонку слева
+        <span aria-hidden="true">⬅️</span> Вставить колонку слева
     </div>
     <div class="context-menu-item" data-action="insert-col-right" role="menuitem">
-        ➡️ Вставить колонку справа
+        <span aria-hidden="true">➡️</span> Вставить колонку справа
     </div>
     <div class="context-menu-item" data-action="delete-col" role="menuitem">
-        🗑️ Удалить колонку
+        <span aria-hidden="true">🗑️</span> Удалить колонку
     </div>
 </div>

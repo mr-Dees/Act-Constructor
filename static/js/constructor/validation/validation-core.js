@@ -4,7 +4,9 @@
  * Содержит базовые утилиты, общие интерфейсы и вспомогательные функции
  * для всех модулей валидации. Обеспечивает единообразие API.
  */
-const ValidationCore = {
+import { AppConfig } from '../../shared/app-config.js';
+
+export const ValidationCore = {
     /**
      * Создает успешный результат валидации
      * @param {string} [message='OK'] - Сообщение (опционально)
@@ -42,6 +44,27 @@ const ValidationCore = {
             message,
             isWarning: true
         };
+    },
+
+    /**
+     * Guard для блокировки записи в режиме «только чтение».
+     * Возвращает failure-результат с сообщением из AppConfig.readOnlyMode.messages
+     * или null, если запись разрешена.
+     *
+     * Использование:
+     *   const guard = ValidationCore.requireWrite('cannotEdit');
+     *   if (guard) return guard;
+     *
+     * @param {string} messageKey - Ключ из AppConfig.readOnlyMode.messages.
+     * @returns {Object|null} ValidationCore.failure(...) или null.
+     */
+    requireWrite(messageKey) {
+        if (AppConfig.readOnlyMode?.isReadOnly) {
+            const msg = AppConfig.readOnlyMode.messages?.[messageKey]
+                || 'Действие недоступно в режиме просмотра';
+            return this.failure(msg);
+        }
+        return null;
     },
 
     /**
@@ -160,3 +183,6 @@ const ValidationCore = {
         return this.success();
     }
 };
+
+// Window-globals для совместимости с inline-скриптами в шаблонах.
+window.ValidationCore = ValidationCore;

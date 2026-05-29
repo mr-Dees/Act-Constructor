@@ -2,12 +2,16 @@
  * Гранулярное отслеживание локальных изменений.
  * Накапливает записи об операциях, сбрасывает при сохранении в БД.
  */
-class ChangelogTracker {
+import { Notifications } from '../shared/notifications.js';
+
+export class ChangelogTracker {
     static _entries = [];
     static _actId = null;
     static _storageKey = null;
     static _debounceTimers = {};
     static MAX_ENTRIES = 500;
+    /** Одноразовый флаг показа уведомления о квоте, чтобы не спамить юзера каждые 1 сек debounce. */
+    static _quotaWarned = false;
 
     /**
      * Инициализация с actId, загрузка из localStorage
@@ -112,8 +116,45 @@ class ChangelogTracker {
             if (!this._storageKey) return;
             try {
                 localStorage.setItem(this._storageKey, JSON.stringify(this._entries));
-            } catch { /* quota exceeded — ignore */ }
+            } catch (err) {
+                // QuotaExceededError: localStorage переполнен. Молча игнорировать опасно —
+                // юзер не поймёт, почему журнал изменений «забывает» операции после reload.
+                // Показываем уведомление один раз за сессию, чтобы не спамить.
+                if (err && err.name === 'QuotaExceededError' && !this._quotaWarned) {
+                    this._quotaWarned = true;
+                    if (typeof Notifications !== 'undefined') {
+                        Notifications.warning(
+                            'Заполнено локальное хранилище — журнал изменений не сохраняется. '
+                            + 'Сохраните акт и перезагрузите страницу.'
+                        );
+                    }
+                }
+            }
         }, 1000);
+    }
+
+    /**
+     * Полный сброс трекера. Вызывать перед init(newActId) при switch'е акта,
+     * иначе debounce-таймеры старого акта запишут отложенный entry с уже
+     * сменённым _storageKey, а pending-_persistTimer запишет чужие entries.
+     */
+    static destroy() {
+        if (this._debounceTimers) {
+            for (const key of Object.keys(this._debounceTimers)) {
+                const pending = this._debounceTimers[key];
+                if (pending?.timer) clearTimeout(pending.timer);
+            }
+        }
+        this._debounceTimers = {};
+
+        if (this._persistTimer) {
+            clearTimeout(this._persistTimer);
+            this._persistTimer = null;
+        }
+
+        this._entries = [];
+        this._actId = null;
+        this._storageKey = null;
     }
 }
 

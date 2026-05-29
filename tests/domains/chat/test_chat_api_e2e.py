@@ -81,7 +81,7 @@ def _build_app(
     # AppError-handler как в основном app/main.py
     @app.exception_handler(AppError)
     async def _app_err_handler(_request, exc: AppError) -> JSONResponse:
-        return JSONResponse(status_code=exc.status_code, content=exc.to_detail())
+        return JSONResponse(status_code=exc.status_code, content=exc.to_envelope())
 
     # Подключаем три chat-роутера под /api/v1/chat
     app.include_router(conv_router, prefix="/api/v1/chat")
@@ -119,7 +119,7 @@ def _make_msg_service(settings: ChatDomainSettings) -> MagicMock:
     svc = MagicMock()
     svc.settings = settings
     svc.save_user_message = AsyncMock()
-    svc.get_history = AsyncMock(return_value=[])
+    svc.get_history = AsyncMock(return_value=([], 0))
     return svc
 
 
@@ -211,26 +211,29 @@ class TestListConversations:
     """E2E: список бесед возвращает массив ConversationListItem."""
 
     def test_list_conversations_returns_array(self):
-        """GET возвращает список бесед текущего пользователя."""
+        """GET возвращает PaginatedResponse[ConversationListItem]."""
         settings = _make_settings()
         conv = _make_conv_service(settings)
         now = dt.datetime(2026, 5, 14, 12, 0, 0)
-        conv.get_list.return_value = [
-            {
-                "id": "c1",
-                "title": "Первая",
-                "domain_name": None,
-                "created_at": now,
-                "updated_at": now,
-            },
-            {
-                "id": "c2",
-                "title": "Вторая",
-                "domain_name": "acts",
-                "created_at": now,
-                "updated_at": now,
-            },
-        ]
+        conv.get_list.return_value = (
+            [
+                {
+                    "id": "c1",
+                    "title": "Первая",
+                    "domain_name": None,
+                    "created_at": now,
+                    "updated_at": now,
+                },
+                {
+                    "id": "c2",
+                    "title": "Вторая",
+                    "domain_name": "acts",
+                    "created_at": now,
+                    "updated_at": now,
+                },
+            ],
+            2,
+        )
 
         app = _build_app(
             conv_service=conv,
@@ -243,10 +246,13 @@ class TestListConversations:
 
         assert resp.status_code == 200, resp.text
         body = resp.json()
-        assert isinstance(body, list)
-        assert len(body) == 2
-        assert body[0]["id"] == "c1"
-        assert body[1]["domain_name"] == "acts"
+        assert body["total"] == 2
+        assert body["limit"] == 50
+        assert body["offset"] == 0
+        items = body["items"]
+        assert len(items) == 2
+        assert items[0]["id"] == "c1"
+        assert items[1]["domain_name"] == "acts"
         # сервис вызывался с username
         assert conv.get_list.await_args.args[0] == USERNAME
 
@@ -816,7 +822,10 @@ class TestDownloadFile:
             resp = client.get("/api/v1/chat/files/missing")
 
         assert resp.status_code == 404, resp.text
-        assert resp.json() == {"detail": "Файл не найден"}
+        assert resp.json() == {
+            "detail": "Файл не найден",
+            "code": "chat-file-not-found",
+        }
 
 
 # -------------------------------------------------------------------------
@@ -868,7 +877,7 @@ class TestGetMessagesStatus:
         msg = _make_msg_service(settings)
         # Сервис возвращает три сообщения: user (complete), assistant (complete),
         # и третье — assistant streaming с уже накопленным reasoning-блоком.
-        msg.get_history = AsyncMock(return_value=[
+        history = [
             {
                 "id": "m1",
                 "conversation_id": "conv-1",
@@ -901,7 +910,8 @@ class TestGetMessagesStatus:
                 "status": "streaming",
                 "created_at": dt.datetime(2026, 1, 1, 12, 0, 2),
             },
-        ])
+        ]
+        msg.get_history = AsyncMock(return_value=(history, len(history)))
 
         app = _build_app(
             conv_service=conv,
@@ -915,7 +925,9 @@ class TestGetMessagesStatus:
             )
 
         assert resp.status_code == 200, resp.text
-        items = resp.json()
+        body = resp.json()
+        items = body["items"]
+        assert body["total"] == 3
         assert [m["status"] for m in items] == ["complete", "complete", "streaming"]
         # streaming-сообщение пришло с уже накопленным reasoning-блоком,
         # фронт может отрендерить его сразу.
@@ -980,7 +992,7 @@ class TestMultiChatSwitchingStreamingState:
 
         async def fake_get_history(conv_id: str, *_args, **_kwargs):
             blocks = state.get(conv_id, [])
-            return [
+            items = [
                 {
                     "id": f"msg-{conv_id}",
                     "conversation_id": conv_id,
@@ -992,6 +1004,7 @@ class TestMultiChatSwitchingStreamingState:
                     "created_at": now,
                 },
             ]
+            return items, len(items)
 
         msg.get_history = AsyncMock(side_effect=fake_get_history)
 
@@ -1005,7 +1018,7 @@ class TestMultiChatSwitchingStreamingState:
             # 1. GET для A — 2 reasoning-блока, status='streaming'
             resp_a = client.get("/api/v1/chat/conversations/conv-A/messages")
             assert resp_a.status_code == 200, resp_a.text
-            items_a = resp_a.json()
+            items_a = resp_a.json()["items"]
             assert len(items_a) == 1
             assert items_a[0]["status"] == "streaming"
             assert [b["block_id"] for b in items_a[0]["content"]] == ["a-r1", "a-r2"]
@@ -1013,7 +1026,7 @@ class TestMultiChatSwitchingStreamingState:
             # 2. GET для B — 1 reasoning-блок, status='streaming'
             resp_b = client.get("/api/v1/chat/conversations/conv-B/messages")
             assert resp_b.status_code == 200, resp_b.text
-            items_b = resp_b.json()
+            items_b = resp_b.json()["items"]
             assert len(items_b) == 1
             assert items_b[0]["status"] == "streaming"
             assert [b["block_id"] for b in items_b[0]["content"]] == ["b-r1"]
@@ -1029,7 +1042,7 @@ class TestMultiChatSwitchingStreamingState:
             #    переиспользовал GET /messages как источник правды.
             resp_a2 = client.get("/api/v1/chat/conversations/conv-A/messages")
             assert resp_a2.status_code == 200, resp_a2.text
-            items_a2 = resp_a2.json()
+            items_a2 = resp_a2.json()["items"]
             assert len(items_a2) == 1
             assert items_a2[0]["status"] == "streaming"
             assert [b["block_id"] for b in items_a2[0]["content"]] == [
@@ -1039,5 +1052,5 @@ class TestMultiChatSwitchingStreamingState:
             # 5. GET для B не изменился — изоляция чатов сохраняется.
             resp_b2 = client.get("/api/v1/chat/conversations/conv-B/messages")
             assert resp_b2.status_code == 200, resp_b2.text
-            items_b2 = resp_b2.json()
+            items_b2 = resp_b2.json()["items"]
             assert [b["block_id"] for b in items_b2[0]["content"]] == ["b-r1"]

@@ -4,7 +4,9 @@
  * Создает HTML-представление таблиц с поддержкой объединения ячеек
  * и обработкой заголовков.
  */
-class PreviewTableRenderer {
+import { AppConfig } from '../../shared/app-config.js';
+
+export class PreviewTableRenderer {
     /**
      * Создает элемент таблицы для предпросмотра
      *
@@ -140,3 +142,6 @@ class PreviewTableRenderer {
         return str.length > maxLength ? str.slice(0, maxLength) + '…' : str;
     }
 }
+
+// Window-globals для совместимости с inline-скриптами в шаблонах.
+window.PreviewTableRenderer = PreviewTableRenderer;

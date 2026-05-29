@@ -7,7 +7,11 @@
  * При выборе заполняет ФИО (title case), должность и логин,
  * переводит поля в readonly.
  */
-class TeamMemberSearch {
+import { APIClient } from '../../shared/api.js';
+import { EscapeStack } from '../../shared/escape-stack.js';
+import { SafeHTML } from '../../shared/sanitize.js';
+
+export class TeamMemberSearch {
     /**
      * @param {HTMLElement} rowElement - DOM-элемент .team-member-row
      */
@@ -61,11 +65,7 @@ class TeamMemberSearch {
         };
         document.addEventListener('click', this._onDocumentClick);
 
-        this._nameInput.addEventListener('keydown', (e) => {
-            if (e.key === 'Escape') {
-                this._hideDropdown();
-            }
-        });
+        // ESC закрывает dropdown — через EscapeStack (push при show, unsub при hide).
     }
 
     /**
@@ -131,13 +131,13 @@ class TeamMemberSearch {
         }
 
         this._dropdown.innerHTML = users.map(u => {
-            const name = this._escapeHtml(u.fullname || u.username);
-            const details = [u.job, u.username].filter(Boolean).map(s => this._escapeHtml(s)).join(' \u00b7 ');
+            const name = SafeHTML.escapeHtml(u.fullname || u.username);
+            const details = [u.job, u.username].filter(Boolean).map(s => SafeHTML.escapeHtml(s)).join(' \u00b7 ');
             return `
                 <div class="team-member-search-item"
-                     data-username="${this._escapeHtml(u.username || '')}"
-                     data-fullname="${this._escapeHtml(u.fullname || '')}"
-                     data-job="${this._escapeHtml(u.job || '')}">
+                     data-username="${SafeHTML.escapeHtml(u.username || '')}"
+                     data-fullname="${SafeHTML.escapeHtml(u.fullname || '')}"
+                     data-job="${SafeHTML.escapeHtml(u.job || '')}">
                     <div class="team-member-search-item-name">${name}</div>
                     <div class="team-member-search-item-details">${details}</div>
                 </div>
@@ -230,6 +230,10 @@ class TeamMemberSearch {
         if (this._onDocumentClick) {
             document.removeEventListener('click', this._onDocumentClick);
         }
+        if (this._escapeUnsub) {
+            this._escapeUnsub();
+            this._escapeUnsub = null;
+        }
         clearTimeout(this._debounceTimer);
     }
 
@@ -260,22 +264,18 @@ class TeamMemberSearch {
     /** @private */
     _showDropdown() {
         this._dropdown.classList.add('visible');
+        if (!this._escapeUnsub) {
+            this._escapeUnsub = EscapeStack.push(() => this._hideDropdown());
+        }
     }
 
     /** @private */
     _hideDropdown() {
         this._dropdown.classList.remove('visible');
-    }
-
-    /**
-     * @private
-     * @param {string} str
-     * @returns {string}
-     */
-    _escapeHtml(str) {
-        const div = document.createElement('div');
-        div.textContent = str;
-        return div.innerHTML;
+        if (this._escapeUnsub) {
+            this._escapeUnsub();
+            this._escapeUnsub = null;
+        }
     }
 }
 

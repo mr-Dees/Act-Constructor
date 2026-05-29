@@ -1,0 +1,44 @@
+/*
+ * Транзишены, длительности, easing-функции, углы поворота, итерации анимаций.
+ */
+
+:root {
+    /* Переходы для анимаций */
+    --transition-fast: 150ms ease;
+    --transition-base: 200ms ease;
+    --transition-slow: 300ms ease;
+    --transition-all: all 200ms ease;
+    --transition-ripple: 600ms ease-out;
+
+    /* Алиасы длительностей */
+    --duration-fast: 150ms;
+    --duration-normal: 300ms;
+
+    /* Timing functions для более сложных анимаций */
+    --ease-in-out-smooth: cubic-bezier(0.4, 0, 0.2, 1);
+    --ease-out-back: cubic-bezier(0.34, 1.56, 0.64, 1);
+    --ease-in-out-circ: cubic-bezier(0.785, 0.135, 0.15, 0.86);
+
+    /* Длительности анимаций */
+    --duration-pulse-urgent: 2s;
+    --duration-notification-slide: 0.3s;
+    --duration-border-pulse: 0.8s;
+    --duration-border-pulse-error: 0.6s;
+    --animation-pulse-error-iterations: 3;
+    --duration-spin: 1s;
+    --duration-shake: 0.5s;
+    --duration-drop-indicator-pulse: 0.8s;
+    --duration-editing-pulse: 0.3s;
+    --duration-highlight-flash: 1.2s;
+
+    /* Углы поворота */
+    --rotate-close-button: 90deg;
+    --rotate-spin-start: 0deg;
+    --rotate-spin-end: 360deg;
+    --rotate-toggle-expanded: 90deg;
+
+    /* Анимация подпрыгивания кнопки */
+    --bounce-translate-up: -0.5rem;
+    --bounce-translate-down: -0.25rem;
+    --bounce-duration: 1s;
+}

@@ -4,7 +4,7 @@
  * Управляет выпадающим меню выбора форматов,
  * индикаторами выбранных форматов и их визуализацией.
  */
-class FormatMenuManager {
+export class FormatMenuManager {
     static _storageKey = 'selected_formats';
 
     /**
@@ -200,3 +200,6 @@ class FormatMenuManager {
         generateBtn.title = 'Выберите хотя бы один формат';
     }
 }
+
+// Window-globals для совместимости с inline-скриптами в шаблонах.
+window.FormatMenuManager = FormatMenuManager;

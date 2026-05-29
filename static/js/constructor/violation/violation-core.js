@@ -2,12 +2,19 @@
  * Управление нарушениями в документе
  * Создает и обрабатывает интерактивные формы для ввода нарушений
  */
-class ViolationManager {
+import { ChangelogTracker } from '../changelog-tracker.js';
+import { PreviewManager } from '../preview/preview.js';
+import { AppConfig } from '../../shared/app-config.js';
+
+export class ViolationManager {
     constructor() {
         this.selectedViolation = null;
         // Переменная для отслеживания последней позиции при drag
         this.lastDragOverIndex = null;
-        // Хранилище активных violation для быстрого доступа
+        // Хранилище активных violation для быстрого доступа.
+        // Запись добавляется в createAdditionalContentField (violation-additional-content.js);
+        // удаляется через removeViolation при разрушении узла дерева — без этого Map
+        // рос бесконтрольно при switch'е между актами / удалении нарушений.
         this.activeViolations = new Map();
         // Текущий активный контейнер для paste (только когда мышь внутри)
         this.currentActiveContainer = null;
@@ -24,6 +31,28 @@ class ViolationManager {
         this.setupPasteHandler();
         // Настраиваем обработчик ESC для сброса активной зоны
         this.setupEscapeHandler();
+    }
+
+    /**
+     * Удаляет нарушение из реестра активных. Идемпотентен.
+     * Вызывать при разрушении DOM-секции нарушения / удалении узла дерева.
+     * @param {string} violationId
+     */
+    removeViolation(violationId) {
+        if (!violationId) return;
+        this.activeViolations.delete(violationId);
+    }
+
+    /**
+     * Полный сброс реестра активных нарушений.
+     * Безопасно вызывать при switch'е акта или teardown.
+     */
+    destroy() {
+        this.activeViolations.clear();
+        this.currentActiveContainer = null;
+        this.cursorInsertPosition = null;
+        this.selectedViolation = null;
+        this.lastDragOverIndex = null;
     }
 
     /**
@@ -67,7 +96,7 @@ class ViolationManager {
                 if (typeof ChangelogTracker !== 'undefined') {
                     ChangelogTracker._recordDebounced('modify_violation', violation.id, '', {field: 'violated'}, 5000);
                 }
-                PreviewManager.update();
+                PreviewManager.scheduleTyping();
             });
         }
 
@@ -99,7 +128,7 @@ class ViolationManager {
                 if (typeof ChangelogTracker !== 'undefined') {
                     ChangelogTracker._recordDebounced('modify_violation', violation.id, '', {field: 'established'}, 5000);
                 }
-                PreviewManager.update();
+                PreviewManager.scheduleTyping();
             });
         }
 
@@ -254,7 +283,7 @@ class ViolationManager {
             // Настраиваем обработку клавиш
             this.setupTextareaHandlers(textarea, (value) => {
                 violation[fieldName].content = value;
-                PreviewManager.update();
+                PreviewManager.scheduleTyping();
             });
 
             contentContainer.appendChild(textarea);
@@ -288,7 +317,7 @@ class ViolationManager {
             // Обновляем массив при вводе
             input.addEventListener('input', () => {
                 violation[fieldName].items[index] = input.value;
-                PreviewManager.update();
+                PreviewManager.scheduleTyping();
             });
 
             // Обработка горячих клавиш для элементов списка
@@ -329,3 +358,6 @@ class ViolationManager {
         });
     }
 }
+
+// Window-globals для совместимости с inline-скриптами в шаблонах.
+window.ViolationManager = ViolationManager;

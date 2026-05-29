@@ -4,17 +4,26 @@
  * Наследует DialogBase для стекирования, анимаций и Escape-обработки.
  * Доступен только для ролей Куратор и Руководитель.
  */
-class AuditLogDialog extends DialogBase {
+import { LockManager } from '../../constructor/lock-manager.js';
+import { VersionPreviewOverlay } from './version-preview.js';
+import { APIClient } from '../../shared/api.js';
+import { DialogBase } from '../../shared/dialog/dialog-base.js';
+import { DialogManager } from '../../shared/dialog/dialog-confirm.js';
+import { FilterEngine } from '../../shared/filter-engine.js';
+import { Notifications } from '../../shared/notifications.js';
+
+export class AuditLogDialog extends DialogBase {
     static _actId = null;
     static _actName = null;
     static _overlay = null;
-    static _logOffset = 0;
-    static _versionsOffset = 0;
-    static _pageSize = 20;
+    static _pageSize = 50;
     static _cachedLog = null;
     static _cachedVersions = null;
+    static _logTotal = null;
+    static _versionsTotal = null;
+    static _logLoading = false;
+    static _versionsLoading = false;
     static _filteredLog = [];
-    static _maxLoadLimit = 2000;
     static _lockAcquired = false;
 
     /**
@@ -25,10 +34,12 @@ class AuditLogDialog extends DialogBase {
     static async show(actId, actName) {
         this._actId = actId;
         this._actName = actName;
-        this._logOffset = 0;
-        this._versionsOffset = 0;
         this._cachedLog = null;
         this._cachedVersions = null;
+        this._logTotal = null;
+        this._versionsTotal = null;
+        this._logLoading = false;
+        this._versionsLoading = false;
         this._filteredLog = [];
         this._lockAcquired = false;
 
@@ -75,8 +86,14 @@ class AuditLogDialog extends DialogBase {
         // Фильтры
         this._initFilters();
 
+        // Кнопки «Загрузить ещё»
+        this._overlay.querySelector('[data-action="load-more-log"]')
+            ?.addEventListener('click', () => this._loadMoreLog());
+        this._overlay.querySelector('[data-action="load-more-versions"]')
+            ?.addEventListener('click', () => this._loadMoreVersions());
+
         // Загружаем данные
-        this._loadAllData();
+        this._loadInitialLog();
     }
 
     // =========================================================================
@@ -118,9 +135,20 @@ class AuditLogDialog extends DialogBase {
             toggleBtn.addEventListener('click', () => this._toggleAllFilters());
         }
 
-        // Дата и пользователь
+        // Дата и пользователь — debounce 300ms: чтобы перерендер не дёргался
+        // на каждой нажатой клавише в поле поиска по username.
+        if (!this._debouncedFilterChange) {
+            let t = null;
+            this._debouncedFilterChange = () => {
+                if (t) clearTimeout(t);
+                t = setTimeout(() => {
+                    t = null;
+                    this._onFilterChange();
+                }, 300);
+            };
+        }
         filters.querySelectorAll('input[type="date"], input[type="text"]').forEach(input => {
-            input.addEventListener('input', () => this._onFilterChange());
+            input.addEventListener('input', () => this._debouncedFilterChange());
         });
 
         // Сворачивание/раскрытие фильтров
@@ -162,7 +190,6 @@ class AuditLogDialog extends DialogBase {
     }
 
     static _onFilterChange() {
-        this._logOffset = 0;
         this._applyFiltersAndRender();
     }
 
@@ -181,8 +208,8 @@ class AuditLogDialog extends DialogBase {
         });
 
         if (tabName === 'versions') {
-            if (!this._cachedVersions) this._loadAllVersions();
-            else this._renderVersionsPage(this._versionsOffset);
+            if (!this._cachedVersions) this._loadInitialVersions();
+            else this._renderVersions();
         } else {
             this._applyFiltersAndRender();
         }
@@ -192,29 +219,60 @@ class AuditLogDialog extends DialogBase {
     // ЗАГРУЗКА ДАННЫХ
     // =========================================================================
 
-    static async _loadAllData() {
+    static async _loadInitialLog() {
         const list = this._overlay?.querySelector('#auditLogList');
         if (!list) return;
 
         list.innerHTML = '<div class="audit-log-loading">Загрузка...</div>';
+        this._cachedLog = [];
+        this._logTotal = null;
+        this._hideLoadMore('auditLogLoadMore');
 
         try {
             const data = await APIClient.getAuditLog(this._actId, {
-                limit: this._maxLoadLimit,
+                limit: this._pageSize,
                 offset: 0,
             });
             this._cachedLog = data.items || [];
-
-            if (data.total > this._maxLoadLimit) {
-                Notifications.info(
-                    `Загружено ${this._maxLoadLimit} из ${data.total} записей.`
-                );
-            }
-
+            this._logTotal = typeof data.total === 'number' ? data.total : this._cachedLog.length;
             this._applyFiltersAndRender();
         } catch (err) {
             console.error('Ошибка загрузки аудит-лога:', err);
             list.innerHTML = '<div class="audit-log-error">Ошибка загрузки</div>';
+        }
+    }
+
+    static async _loadMoreLog() {
+        if (this._logLoading) return;
+        if (!Array.isArray(this._cachedLog) || this._logTotal == null) return;
+        if (this._cachedLog.length >= this._logTotal) return;
+
+        const btn = this._overlay?.querySelector('[data-action="load-more-log"]');
+        const originalText = btn?.textContent;
+        this._logLoading = true;
+        if (btn) {
+            btn.disabled = true;
+            btn.textContent = 'Загружаю...';
+        }
+
+        try {
+            const data = await APIClient.getAuditLog(this._actId, {
+                limit: this._pageSize,
+                offset: this._cachedLog.length,
+            });
+            const newItems = data.items || [];
+            this._cachedLog = this._cachedLog.concat(newItems);
+            if (typeof data.total === 'number') this._logTotal = data.total;
+            this._applyFiltersAndRender();
+        } catch (err) {
+            console.error('Ошибка загрузки аудит-лога:', err);
+            Notifications.error('Не удалось загрузить ещё записи');
+        } finally {
+            this._logLoading = false;
+            if (btn) {
+                btn.disabled = false;
+                if (originalText) btn.textContent = originalText;
+            }
         }
     }
 
@@ -223,7 +281,7 @@ class AuditLogDialog extends DialogBase {
         const list = this._overlay.querySelector('#auditLogList');
         if (!list) return;
 
-        // Собираем активные типы действий
+        // Собираем активные типы действий (chip может покрывать несколько action'ов через CSV).
         const chips = this._overlay.querySelectorAll('.audit-log-chip');
         const activeActions = new Set();
         chips.forEach(c => {
@@ -232,101 +290,122 @@ class AuditLogDialog extends DialogBase {
             }
         });
 
-        // Пустое состояние при снятии всех фильтров
+        // Пустое состояние при снятии всех фильтров.
         if (activeActions.size === 0) {
             list.innerHTML = '<div class="audit-log-empty">Выберите хотя бы один тип операции</div>';
-            this._clearPagination('auditLogPagination');
+            this._hideLoadMore('auditLogLoadMore');
             return;
         }
 
-        // Фильтрация по типу действия
-        let filtered = this._cachedLog.filter(e => activeActions.has(e.action));
+        const username = this._overlay.querySelector('[data-filter="username"]')?.value?.trim() || '';
+        const fromDate = this._overlay.querySelector('[data-filter="from-date"]')?.value || '';
+        const toDate = this._overlay.querySelector('[data-filter="to-date"]')?.value || '';
 
-        // Фильтрация по имени пользователя (регистронезависимая подстрока)
-        const username = this._overlay.querySelector('[data-filter="username"]')?.value?.trim();
-        if (username) {
-            const lower = username.toLowerCase();
-            filtered = filtered.filter(e => e.username?.toLowerCase().includes(lower));
-        }
-
-        // Фильтрация по дате
-        const fromDate = this._overlay.querySelector('[data-filter="from-date"]')?.value;
-        const toDate = this._overlay.querySelector('[data-filter="to-date"]')?.value;
-        if (fromDate) {
-            const from = new Date(fromDate);
-            filtered = filtered.filter(e => new Date(e.created_at) >= from);
-        }
-        if (toDate) {
-            const to = new Date(toDate + 'T23:59:59');
-            filtered = filtered.filter(e => new Date(e.created_at) <= to);
-        }
+        const filtered = FilterEngine.apply(this._cachedLog, [
+            { type: 'set', field: 'action', values: Array.from(activeActions) },
+            { type: 'text', field: 'username', query: username },
+            { type: 'date-range', field: 'created_at', from: fromDate, to: toDate },
+        ]);
 
         this._filteredLog = filtered;
-        this._renderFilteredPage(0);
+        this._renderLog();
     }
 
-    static _renderFilteredPage(offset) {
-        this._logOffset = offset;
+    static _renderLog() {
         const list = this._overlay?.querySelector('#auditLogList');
         if (!list) return;
 
         if (this._filteredLog.length === 0) {
             list.innerHTML = '<div class="audit-log-empty">Нет записей</div>';
-            this._clearPagination('auditLogPagination');
-            return;
+        } else {
+            list.innerHTML = this._filteredLog.map(entry => this._renderEntry(entry)).join('');
+
+            // Обработчики сворачивания changelog
+            list.querySelectorAll('.audit-log-changelog-toggle').forEach(btn => {
+                btn.addEventListener('click', () => {
+                    const target = btn.nextElementSibling;
+                    if (target) {
+                        target.classList.toggle('hidden');
+                        btn.textContent = target.classList.contains('hidden')
+                            ? 'Показать подробности'
+                            : 'Скрыть подробности';
+                    }
+                });
+            });
         }
 
-        const page = this._filteredLog.slice(offset, offset + this._pageSize);
-        list.innerHTML = page.map(entry => this._renderEntry(entry)).join('');
-
-        // Обработчики сворачивания changelog
-        list.querySelectorAll('.audit-log-changelog-toggle').forEach(btn => {
-            btn.addEventListener('click', () => {
-                const target = btn.nextElementSibling;
-                if (target) {
-                    target.classList.toggle('hidden');
-                    btn.textContent = target.classList.contains('hidden')
-                        ? 'Показать подробности'
-                        : 'Скрыть подробности';
-                }
-            });
-        });
-
-        this._renderPagination('auditLogPagination', this._filteredLog.length, offset,
-            (o) => this._renderFilteredPage(o));
+        // Load-more управляется загруженным/общим объёмом, не отфильтрованным —
+        // иначе после узких фильтров кнопка пропадёт, хотя на сервере ещё есть.
+        this._updateLoadMore('auditLogLoadMore', this._cachedLog?.length || 0, this._logTotal || 0);
     }
 
-    static async _loadAllVersions() {
+    static async _loadInitialVersions() {
         const list = this._overlay?.querySelector('#versionsList');
         if (!list) return;
 
         list.innerHTML = '<div class="audit-log-loading">Загрузка...</div>';
+        this._cachedVersions = [];
+        this._versionsTotal = null;
+        this._hideLoadMore('versionsLoadMore');
 
         try {
             const data = await APIClient.getVersions(this._actId, {
-                limit: this._maxLoadLimit, offset: 0,
+                limit: this._pageSize, offset: 0,
             });
             this._cachedVersions = data.items || [];
-            this._renderVersionsPage(0);
+            this._versionsTotal = typeof data.total === 'number' ? data.total : this._cachedVersions.length;
+            this._renderVersions();
         } catch (err) {
             console.error('Ошибка загрузки версий:', err);
             list.innerHTML = '<div class="audit-log-error">Ошибка загрузки</div>';
         }
     }
 
-    static _renderVersionsPage(offset) {
-        this._versionsOffset = offset;
+    static async _loadMoreVersions() {
+        if (this._versionsLoading) return;
+        if (!Array.isArray(this._cachedVersions) || this._versionsTotal == null) return;
+        if (this._cachedVersions.length >= this._versionsTotal) return;
+
+        const btn = this._overlay?.querySelector('[data-action="load-more-versions"]');
+        const originalText = btn?.textContent;
+        this._versionsLoading = true;
+        if (btn) {
+            btn.disabled = true;
+            btn.textContent = 'Загружаю...';
+        }
+
+        try {
+            const data = await APIClient.getVersions(this._actId, {
+                limit: this._pageSize,
+                offset: this._cachedVersions.length,
+            });
+            const newItems = data.items || [];
+            this._cachedVersions = this._cachedVersions.concat(newItems);
+            if (typeof data.total === 'number') this._versionsTotal = data.total;
+            this._renderVersions();
+        } catch (err) {
+            console.error('Ошибка загрузки версий:', err);
+            Notifications.error('Не удалось загрузить ещё версии');
+        } finally {
+            this._versionsLoading = false;
+            if (btn) {
+                btn.disabled = false;
+                if (originalText) btn.textContent = originalText;
+            }
+        }
+    }
+
+    static _renderVersions() {
         const list = this._overlay?.querySelector('#versionsList');
         if (!list) return;
 
         if (!this._cachedVersions?.length) {
             list.innerHTML = '<div class="audit-log-empty">Нет версий</div>';
-            this._clearPagination('versionsPagination');
+            this._updateLoadMore('versionsLoadMore', 0, this._versionsTotal || 0);
             return;
         }
 
-        const page = this._cachedVersions.slice(offset, offset + this._pageSize);
-        list.innerHTML = page.map(v => this._renderVersion(v)).join('');
+        list.innerHTML = this._cachedVersions.map(v => this._renderVersion(v)).join('');
 
         list.querySelectorAll('[data-action="view-version"]').forEach(btn => {
             btn.addEventListener('click', () => this._viewVersion(parseInt(btn.dataset.versionId)));
@@ -337,8 +416,7 @@ class AuditLogDialog extends DialogBase {
 
         if (!this._lockAcquired) this._disableRestoreButtons();
 
-        this._renderPagination('versionsPagination', this._cachedVersions.length, offset,
-            (o) => this._renderVersionsPage(o));
+        this._updateLoadMore('versionsLoadMore', this._cachedVersions.length, this._versionsTotal || 0);
     }
 
     // =========================================================================
@@ -377,11 +455,13 @@ class AuditLogDialog extends DialogBase {
             const result = await APIClient.restoreVersion(this._actId, versionId);
             Notifications.success(result.message || 'Содержимое восстановлено');
 
-            // Инвалидация кешей и перезагрузка
+            // Инвалидация кешей и перезагрузка с первой страницы
             this._cachedLog = null;
             this._cachedVersions = null;
-            this._loadAllData();
-            this._loadAllVersions();
+            this._logTotal = null;
+            this._versionsTotal = null;
+            this._loadInitialLog();
+            this._loadInitialVersions();
         } catch (err) {
             console.error('Ошибка восстановления:', err);
             Notifications.error(err.status === 409
@@ -412,7 +492,7 @@ class AuditLogDialog extends DialogBase {
             <div class="audit-log-entry">
                 <div class="audit-log-entry-header">
                     <span class="audit-log-entry-action">${action}</span>
-                    <span class="audit-log-entry-meta">${entry.username} &mdash; ${date}</span>
+                    <span class="audit-log-entry-meta">${this._escapeHtml(entry.username || '')} &mdash; ${date}</span>
                 </div>
                 ${details ? `<div class="audit-log-entry-details">${details}</div>` : ''}
                 ${changelog}
@@ -500,7 +580,7 @@ class AuditLogDialog extends DialogBase {
             <div class="audit-log-entry">
                 <div class="audit-log-entry-header">
                     <span class="audit-log-entry-action">Версия #${v.version_number}</span>
-                    <span class="audit-log-entry-meta">${saveType} &mdash; ${v.username} &mdash; ${date}</span>
+                    <span class="audit-log-entry-meta">${saveType} &mdash; ${this._escapeHtml(v.username || '')} &mdash; ${date}</span>
                 </div>
                 <div class="audit-log-entry-actions">
                     <button class="btn btn-sm btn-secondary" data-action="view-version" data-version-id="${v.id}">
@@ -514,40 +594,24 @@ class AuditLogDialog extends DialogBase {
         `;
     }
 
-    static _renderPagination(containerId, total, currentOffset, onNavigate) {
+    static _updateLoadMore(containerId, loaded, total) {
         const container = this._overlay?.querySelector(`#${containerId}`);
         if (!container) return;
 
-        const totalPages = Math.ceil(total / this._pageSize);
-        const currentPage = Math.floor(currentOffset / this._pageSize) + 1;
-
-        if (totalPages <= 1) {
-            container.innerHTML = '';
+        // Скрываем, если всё уже загружено (или всего меньше первой страницы).
+        if (!total || loaded >= total) {
+            container.hidden = true;
             return;
         }
 
-        let html = '<div class="audit-log-pages">';
-        if (currentPage > 1) {
-            html += `<button class="btn btn-sm" data-page="${currentPage - 1}">&laquo;</button>`;
-        }
-        html += `<span class="audit-log-page-info">${currentPage} / ${totalPages} (${total})</span>`;
-        if (currentPage < totalPages) {
-            html += `<button class="btn btn-sm" data-page="${currentPage + 1}">&raquo;</button>`;
-        }
-        html += '</div>';
-
-        container.innerHTML = html;
-        container.querySelectorAll('[data-page]').forEach(btn => {
-            btn.addEventListener('click', () => {
-                const page = parseInt(btn.dataset.page);
-                onNavigate((page - 1) * this._pageSize);
-            });
-        });
+        const counter = container.querySelector('.load-more-counter');
+        if (counter) counter.textContent = `Показано ${loaded} из ${total}`;
+        container.hidden = false;
     }
 
-    static _clearPagination(containerId) {
+    static _hideLoadMore(containerId) {
         const container = this._overlay?.querySelector(`#${containerId}`);
-        if (container) container.innerHTML = '';
+        if (container) container.hidden = true;
     }
 
     // =========================================================================
@@ -664,6 +728,10 @@ class AuditLogDialog extends DialogBase {
         }
         this._cachedLog = null;
         this._cachedVersions = null;
+        this._logTotal = null;
+        this._versionsTotal = null;
+        this._logLoading = false;
+        this._versionsLoading = false;
         this._filteredLog = [];
     }
 }

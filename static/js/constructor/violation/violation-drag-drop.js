@@ -3,6 +3,9 @@
  * Перестановка элементов внутри дополнительного контента
  */
 
+import { PreviewManager } from '../preview/preview.js';
+import { ViolationManager } from './violation-core.js';
+
 // Расширение ViolationManager
 Object.assign(ViolationManager.prototype, {
     /**

@@ -29,6 +29,20 @@ _DICT_DISPATCH = {
     "risk_types": "get_risk_types",
 }
 
+# Статические доменные перечисления (домен FR-валидации). Возвращаются как
+# список объектов {value, label} для единообразного формата с DB-справочниками.
+_STATIC_DICTS: dict[str, list[dict]] = {
+    "assignment_formats": [
+        {"value": "Централизованный контроль", "label": "Централизованный контроль"},
+        {"value": "Самостоятельный контроль", "label": "Самостоятельный контроль"},
+        {"value": "Нет поручения", "label": "Нет поручения"},
+    ],
+    "used_pm_options": [
+        {"value": "Да", "label": "Да"},
+        {"value": "Нет", "label": "Нет"},
+    ],
+}
+
 
 class FRValidationService:
     """Сервис бизнес-логики FR-валидации."""
@@ -51,11 +65,11 @@ class FRValidationService:
         end_date: date | None = None,
         metric_code: list[str] | None = None,
         process_code: list[str] | None = None,
-        limit: int = 100,
+        limit: int = 50,
         offset: int = 0,
-    ) -> list[dict]:
-        """Поиск записей FR-валидации по фильтрам."""
-        return await self.fr_repo.search(
+    ) -> tuple[list[dict], int]:
+        """Поиск записей FR-валидации: страница + общее количество."""
+        items = await self.fr_repo.search(
             start_date=start_date,
             end_date=end_date,
             metric_code=metric_code,
@@ -63,6 +77,13 @@ class FRValidationService:
             limit=limit,
             offset=offset,
         )
+        total = await self.fr_repo.count_search(
+            start_date=start_date,
+            end_date=end_date,
+            metric_code=metric_code,
+            process_code=process_code,
+        )
+        return items, total
 
     # ------------------------------------------------------------------
     # ПОЛУЧЕНИЕ ПО ID
@@ -122,10 +143,14 @@ class FRValidationService:
         """
         Возвращает данные справочника по имени.
 
-        Известные справочники: processes, terbanks, metrics,
-        departments, channels, products, teams.
+        Известные DB-справочники: processes, terbanks, metrics,
+        departments, channels, products, teams, risk_types.
+        Известные статические перечисления: assignment_formats, used_pm_options.
         Неизвестное имя возвращает пустой список.
         """
+        if name in _STATIC_DICTS:
+            return _STATIC_DICTS[name]
+
         method_name = _DICT_DISPATCH.get(name)
         if method_name is None:
             logger.warning("Запрошен неизвестный справочник: %s", name)

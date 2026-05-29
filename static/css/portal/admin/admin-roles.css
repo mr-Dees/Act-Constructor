@@ -190,3 +190,9 @@
     border: 1px solid var(--border-color);
     vertical-align: middle;
 }
+
+/* Кнопка «Загрузить ещё» под таблицей ролей */
+.admin-load-more-btn {
+    display: block;
+    margin: var(--spacing-lg) auto 0;
+}

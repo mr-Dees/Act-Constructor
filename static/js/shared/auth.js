@@ -5,7 +5,9 @@
  * Использует localStorage для кеширования username на 24 часа.
  * Обрабатывает ошибки Kerberos токена.
  */
-class AuthManager {
+import { AppConfig } from './app-config.js';
+
+export class AuthManager {
     /**
      * Ключ для хранения username в localStorage
      * @private
@@ -46,7 +48,6 @@ class AuthManager {
         if (savedUser && this._isSessionActive()) {
             this._currentUser = savedUser;
             this._isAuthenticated = true;
-            console.log('Username загружен из localStorage:', savedUser);
         } else {
             // Сессия истекла или username отсутствует
             this._clearStorage();
@@ -161,7 +162,6 @@ class AuthManager {
             // Сохраняем в localStorage для последующих операций
             if (data.authenticated && data.username) {
                 this._saveToStorage(data.username);
-                console.log('Username сохранён в localStorage:', data.username);
             } else {
                 this._clearStorage();
             }
@@ -194,7 +194,6 @@ class AuthManager {
             return false;
         }
 
-        console.log(`Авторизован как: ${authData.username}`);
         return true;
     }
 
@@ -256,14 +255,13 @@ class AuthManager {
     }
 
     /**
-     * Возвращает заголовки для API-запросов
+     * Возвращает заголовки для API-запросов.
+     * Auth — server-side через env-var JUPYTERHUB_USER; фронт не шлёт заголовков.
+     * Метод оставлен ради API-совместимости с чат-модулями (Object.assign).
      * @returns {Object}
      */
     static getAuthHeaders() {
-        const username = this.getCurrentUser();
-        return {
-            'X-JupyterHub-User': username || ''
-        };
+        return {};
     }
 
     /**

@@ -4,7 +4,9 @@
  * Управляет всплывающими сообщениями в приложении с поддержкой
  * группировки повторяющихся уведомлений и автоматического скрытия.
  */
-class NotificationManager {
+import { AppConfig } from './app-config.js';
+
+export class NotificationManager {
     constructor() {
         /** @type {HTMLElement|null} Контейнер для уведомлений */
         this.container = null;
@@ -38,6 +40,10 @@ class NotificationManager {
     _createContainer() {
         const container = document.createElement('div');
         container.className = 'notification-container';
+        // Контейнер озвучивается screen reader'ами как ARIA live region.
+        // Per-notification роль (alert/status) ставится в _buildNotificationElement.
+        container.setAttribute('role', 'region');
+        container.setAttribute('aria-label', 'Уведомления');
         return container;
     }
 
@@ -123,6 +129,16 @@ class NotificationManager {
      * @returns {string} ID уведомления
      */
     _createNotification(message, type, duration, cacheKey) {
+        // H-N8-UX: глобальный cap. При переполнении вытесняем самый старый
+        // (Map хранит порядок вставки, keys().next() → oldest) синхронно,
+        // без hide()-анимации — иначе DOM-узел висит ещё ~250 мс и cap течёт.
+        const cap = AppConfig.notifications.maxConcurrent;
+        while (this.notifications.size >= cap) {
+            const oldestId = this.notifications.keys().next().value;
+            if (!oldestId) break;
+            this._evictImmediate(oldestId);
+        }
+
         const id = this._generateId();
         const notification = this._buildNotificationElement(id, message, type);
 
@@ -136,6 +152,29 @@ class NotificationManager {
         this.messageCache.set(cacheKey, {id, count: 1, timer});
 
         return id;
+    }
+
+    /**
+     * Синхронно удаляет уведомление и чистит кеш (без hide-анимации).
+     * Используется для FIFO-вытеснения при переполнении cap.
+     * @private
+     * @param {string} id - ID уведомления
+     */
+    _evictImmediate(id) {
+        const notification = this.notifications.get(id);
+        if (notification && notification.parentNode) {
+            notification.remove();
+        }
+        this.notifications.delete(id);
+        // Чистим cache-entry и его pending-таймер, чтобы не выстрелил hide()
+        // на уже удалённый id.
+        for (const [key, value] of this.messageCache.entries()) {
+            if (value.id === id) {
+                if (value.timer) clearTimeout(value.timer);
+                this.messageCache.delete(key);
+                break;
+            }
+        }
     }
 
     /**
@@ -161,6 +200,17 @@ class NotificationManager {
         const notification = document.createElement('div');
         notification.className = `notification ${type}`;
         notification.dataset.notificationId = id;
+
+        // Error → assertive (role=alert), остальные — polite (role=status).
+        // Screen reader дочитает текущую реплику, потом озвучит уведомление.
+        if (type === 'error') {
+            notification.setAttribute('role', 'alert');
+            notification.setAttribute('aria-live', 'assertive');
+        } else {
+            notification.setAttribute('role', 'status');
+            notification.setAttribute('aria-live', 'polite');
+        }
+        notification.setAttribute('aria-atomic', 'true');
 
         notification.appendChild(this._createIcon(type));
         notification.appendChild(this._createContent(message));
@@ -243,7 +293,17 @@ class NotificationManager {
      * @returns {number|null} ID таймера или null
      */
     _setupAutoHide(id, duration, cacheKey) {
-        if (duration <= 0) return null;
+        if (duration <= 0) {
+            // Sticky-уведомление: само не скрывается, но без TTL на messageCache
+            // запись остаётся навсегда, пока юзер не нажмёт крестик. При частых
+            // sticky-сообщениях с уникальным текстом cache растёт без границ.
+            // Дедуп нужен только в коротком окне — после 60 сек считаем дубль
+            // отдельным уведомлением (юзер вряд ли заметит «склейку» через минуту).
+            const STICKY_DEDUP_TTL_MS = 60_000;
+            return setTimeout(() => {
+                this.messageCache.delete(cacheKey);
+            }, STICKY_DEDUP_TTL_MS);
+        }
 
         return setTimeout(() => {
             this.hide(id);
@@ -372,7 +432,8 @@ class NotificationManager {
     }
 }
 
-// Создаем глобальный экземпляр.
-// Используем window.* — иначе const-переменная окажется в Script-scope
-// и НЕ будет видна как window.Notifications (см. chat-client-actions.js).
-window.Notifications = new NotificationManager();
+// Создаём глобальный экземпляр. ESM-экспорт + window.* для совместимости с
+// inline-скриптами в шаблонах.
+export const Notifications = new NotificationManager();
+window.Notifications = Notifications;
+window.NotificationManager = NotificationManager;

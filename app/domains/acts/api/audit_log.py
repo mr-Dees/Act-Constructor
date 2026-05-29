@@ -9,11 +9,12 @@ import logging
 from fastapi import APIRouter, Depends, Query
 
 from app.api.v1.deps.auth_deps import get_username
+from app.core.responses import PaginatedResponse
 from app.domains.acts.deps import get_audit_log_deps, get_audit_log_service
 from app.domains.acts.schemas.act_audit_log import (
-    AuditLogResponse,
+    AuditLogEntry,
     ContentVersionDetail,
-    ContentVersionsResponse,
+    ContentVersionEntry,
 )
 from app.domains.acts.schemas.act_responses import RestoreVersionResponse
 from app.schemas.errors import ErrorDetail
@@ -25,7 +26,7 @@ router = APIRouter()
 
 @router.get(
     "/{act_id}/audit-log",
-    response_model=AuditLogResponse,
+    response_model=PaginatedResponse[AuditLogEntry],
     responses={
         403: {"description": "Требуется роль Куратора или Руководителя", "model": ErrorDetail},
         404: {"description": "Акт не найден", "model": ErrorDetail},
@@ -38,10 +39,10 @@ async def get_audit_log(
     audit_username: str | None = Query(None, alias="username", description="Фильтр по пользователю"),
     from_date: str | None = Query(None, description="Дата начала (ISO)"),
     to_date: str | None = Query(None, description="Дата конца (ISO)"),
-    limit: int = Query(50, ge=1, le=2000),
+    limit: int = Query(50, ge=1, le=200),
     offset: int = Query(0, ge=0),
     service=Depends(get_audit_log_deps),
-) -> AuditLogResponse:
+) -> PaginatedResponse[AuditLogEntry]:
     """Получает записи аудит-лога акта с фильтрацией."""
     guard, audit_repo, _ = service
 
@@ -56,12 +57,14 @@ async def get_audit_log(
         limit=limit,
         offset=offset,
     )
-    return AuditLogResponse(items=items, total=total)
+    return PaginatedResponse[AuditLogEntry](
+        items=items, total=total, limit=limit, offset=offset,
+    )
 
 
 @router.get(
     "/{act_id}/versions",
-    response_model=ContentVersionsResponse,
+    response_model=PaginatedResponse[ContentVersionEntry],
     responses={
         403: {"description": "Требуется роль Куратора или Руководителя", "model": ErrorDetail},
         404: {"description": "Акт не найден", "model": ErrorDetail},
@@ -70,10 +73,10 @@ async def get_audit_log(
 async def get_versions(
     act_id: int,
     username: str = Depends(get_username),
-    limit: int = Query(50, ge=1, le=2000),
+    limit: int = Query(50, ge=1, le=200),
     offset: int = Query(0, ge=0),
     service=Depends(get_audit_log_deps),
-) -> ContentVersionsResponse:
+) -> PaginatedResponse[ContentVersionEntry]:
     """Получает список версий содержимого акта."""
     guard, _, versions_repo = service
 
@@ -82,7 +85,9 @@ async def get_versions(
     items, total = await versions_repo.get_versions_list(
         act_id, limit=limit, offset=offset,
     )
-    return ContentVersionsResponse(items=items, total=total)
+    return PaginatedResponse[ContentVersionEntry](
+        items=items, total=total, limit=limit, offset=offset,
+    )
 
 
 @router.get(

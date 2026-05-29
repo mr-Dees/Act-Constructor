@@ -5,9 +5,24 @@
  * Обрабатывает различные типы контента: таблицы, текстовые блоки,
  * нарушения и древовидную структуру с учетом вложенности.
  */
-class PreviewManager {
+import { PreviewTableRenderer } from './preview-table-renderer.js';
+import { PreviewTextBlockRenderer } from './preview-textblock-renderer.js';
+import { PreviewViolationRenderer } from './preview-violation-renderer.js';
+import { AppState } from '../state/state-core.js';
+import { AppConfig } from '../../shared/app-config.js';
+
+export class PreviewManager {
     /**
-     * Обновляет содержимое панели предпросмотра
+     * Флаг запланированного RAF-обновления (дедупликация в пределах одного кадра).
+     * @private
+     */
+    static _pendingUpdate = false;
+    static _pendingOptions = null;
+
+    /**
+     * Обновляет содержимое панели предпросмотра.
+     * Дедуплицирует подряд идущие вызовы в пределах одного animation frame:
+     * на N вызовов выполнится ровно один _performUpdate с последними опциями.
      *
      * @param {Object|string} options - Настройки отображения или строка 'previewTrim' для обратной совместимости
      */
@@ -17,10 +32,21 @@ class PreviewManager {
             options = {previewTrim: AppConfig.preview.defaultTrimLength};
         }
 
-        const {previewTrim = AppConfig.preview.defaultTrimLength} = options;
+        if (this._pendingUpdate) {
+            // Подряд идущий вызов в том же кадре — мержим опции и выходим,
+            // существующий RAF подберёт обновлённый _pendingOptions.
+            Object.assign(this._pendingOptions, options);
+            return;
+        }
 
-        // Используем requestAnimationFrame вместо setTimeout для лучшей производительности
+        this._pendingUpdate = true;
+        this._pendingOptions = {...options};
+
         requestAnimationFrame(() => {
+            const opts = this._pendingOptions;
+            this._pendingUpdate = false;
+            this._pendingOptions = null;
+            const {previewTrim = AppConfig.preview.defaultTrimLength} = opts || {};
             this._performUpdate(previewTrim);
         });
     }
@@ -31,6 +57,28 @@ class PreviewManager {
      */
     static _previewTooltip = null;
     static _previewTooltipTimeout = null;
+
+    /**
+     * Debounce-таймер для typing-flow (textblock/violation input).
+     * @private
+     */
+    static _typingTimer = null;
+    static _TYPING_DEBOUNCE_MS = 150;
+
+    /**
+     * Планирует обновление предпросмотра с debounce 150 мс.
+     * Используется в typing-handler'ах (textblock-editor, violation textarea),
+     * чтобы серия input-событий не запускала рендер на каждый кадр.
+     *
+     * @param {Object|string} options - Настройки отображения
+     */
+    static scheduleTyping(options = {}) {
+        clearTimeout(this._typingTimer);
+        this._typingTimer = setTimeout(() => {
+            this._typingTimer = null;
+            this.update(options);
+        }, this._TYPING_DEBOUNCE_MS);
+    }
 
     /**
      * Выполняет обновление предпросмотра
@@ -251,6 +299,11 @@ class PreviewManager {
      * @param {HTMLElement} element - Элемент ссылки или сноски
      */
     static _showPreviewTooltip(element) {
+        // Guard: элемент мог быть удалён из DOM пока ждали debounce/hover-timeout
+        // (например, перерендер preview). Без проверки getBoundingClientRect
+        // вернёт нули, tooltip окажется в углу с position:fixed.
+        if (!element || !document.body.contains(element)) return;
+
         this._hidePreviewTooltip();
 
         const isLink = element.classList.contains('text-link');
@@ -307,3 +360,6 @@ class PreviewManager {
         }
     }
 }
+
+// Window-globals для совместимости с inline-скриптами в шаблонах.
+window.PreviewManager = PreviewManager;

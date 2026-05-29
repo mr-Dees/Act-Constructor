@@ -1,6 +1,8 @@
 /**
  * Расширение для работы с панелью инструментов
  */
+import { TextBlockManager } from './textblock-core.js';
+
 Object.assign(TextBlockManager.prototype, {
     /**
      * Инициализирует глобальную панель инструментов

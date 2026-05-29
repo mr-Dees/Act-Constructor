@@ -20,9 +20,14 @@ parts/
 sdist/
 var/
 node_modules/
-package.json
-package-*.json
 wheels/
+
+# Playwright
+playwright-report/
+test-results/
+playwright/.cache/
+tests/playwright/.uvicorn.pid
+tests/playwright/.uvicorn.log
 share/python-wheels/
 *.egg-info/
 .installed.cfg
@@ -88,6 +93,8 @@ coverage.xml
 DEVELOPER_GUIDE.md
 docs/plans/
 docs/superpowers/
+docs/frontend-constructor-as-is.md
+docs/frontend-constructor-checklist.md
 docs/_build/
 docs/_static/
 docs/_templates/

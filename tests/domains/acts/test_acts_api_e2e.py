@@ -56,7 +56,7 @@ def _build_app(
     # Глобальный AppError-handler — как в app/main.py
     @app.exception_handler(AppError)
     async def _app_err_handler(_request, exc: AppError) -> JSONResponse:
-        return JSONResponse(status_code=exc.status_code, content=exc.to_detail())
+        return JSONResponse(status_code=exc.status_code, content=exc.to_envelope())
 
     app.include_router(management_router, prefix="/api/v1/acts")
     app.include_router(invoice_router, prefix="/api/v1/acts/invoice")
@@ -76,7 +76,7 @@ def _build_app(
 
 def _make_crud_service() -> MagicMock:
     svc = MagicMock()
-    svc.list_acts = AsyncMock(return_value=[])
+    svc.list_acts = AsyncMock(return_value=([], 0))
     svc.get_act = AsyncMock()
     svc.create_act = AsyncMock()
     svc.update_act_metadata = AsyncMock()
@@ -196,17 +196,18 @@ class TestListActs:
     """GET /api/v1/acts/list возвращает массив актов."""
 
     def test_list_returns_empty_array(self):
-        """Пустой список — 200, [], сервис вызван с username."""
+        """Пустой список — 200, PaginatedResponse с items=[], сервис вызван с username + дефолтной пагинацией."""
         crud = _make_crud_service()
-        crud.list_acts.return_value = []
+        crud.list_acts.return_value = ([], 0)
         app = _build_app(crud_service=crud)
 
         with TestClient(app) as client:
             resp = client.get("/api/v1/acts/list")
 
         assert resp.status_code == 200
-        assert resp.json() == []
-        crud.list_acts.assert_awaited_once_with(USERNAME)
+        body = resp.json()
+        assert body == {"items": [], "total": 0, "limit": 50, "offset": 0}
+        crud.list_acts.assert_awaited_once_with(USERNAME, limit=50, offset=0)
 
     def test_list_unauthorized_returns_401(self):
         """Без авторизации — 401, сервис не вызван."""
@@ -223,6 +224,29 @@ class TestListActs:
 
         assert resp.status_code == 401
         crud.list_acts.assert_not_awaited()
+
+    def test_list_limit_over_200_returns_422(self):
+        """Лимит >200 отвергается на этапе валидации Query — сервис не вызван."""
+        crud = _make_crud_service()
+        app = _build_app(crud_service=crud)
+
+        with TestClient(app) as client:
+            resp = client.get("/api/v1/acts/list?limit=300")
+
+        assert resp.status_code == 422
+        crud.list_acts.assert_not_awaited()
+
+    def test_list_limit_200_accepted(self):
+        """Лимит ровно 200 — валиден, сервис вызван с limit=200."""
+        crud = _make_crud_service()
+        crud.list_acts.return_value = ([], 0)
+        app = _build_app(crud_service=crud)
+
+        with TestClient(app) as client:
+            resp = client.get("/api/v1/acts/list?limit=200")
+
+        assert resp.status_code == 200
+        crud.list_acts.assert_awaited_once_with(USERNAME, limit=200, offset=0)
 
 
 # -------------------------------------------------------------------------
@@ -286,8 +310,8 @@ class TestCreateAct:
 
         assert resp.status_code == 409
         body = resp.json()
-        assert body["type"] == "km_exists"
-        assert body["next_part"] == 2
+        assert body["code"] == "km-number-exists"
+        assert body["extra"]["next_part"] == 2
 
     def test_create_audit_team_without_curator_returns_422(self):
         """Аудиторская группа без куратора — 422 (model_validator)."""
@@ -454,7 +478,7 @@ class TestDeleteAct:
 
         assert resp.status_code == 409
         body = resp.json()
-        assert body["locked_by"] == "11111111"
+        assert body["extra"]["locked_by"] == "11111111"
 
 
 # -------------------------------------------------------------------------
@@ -499,8 +523,8 @@ class TestLockEndpoints:
 
         assert resp.status_code == 409
         body = resp.json()
-        assert body["locked_by"] == "11111111"
-        assert body["locked_until"] == "2026-05-18T12:30:00"
+        assert body["extra"]["locked_by"] == "11111111"
+        assert body["extra"]["locked_until"] == "2026-05-18T12:30:00"
 
     def test_unlock_returns_200(self):
         """Успешный unlock — 200 + OperationResult."""

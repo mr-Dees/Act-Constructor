@@ -1,19 +1,55 @@
 /**
+ * Ошибка "лок акта потерян": сервер вернул 409 на PUT /content.
+ * Типовой сценарий — пока вкладка была в фоне, сработал autoExit
+ * (через background-throttled таймер), снял блокировку и сохранил акт.
+ * Юзер видит UI акта, но фактически уже не владеет локом — следующий Save → 409.
+ * Вызывающая сторона ловит этот тип и делает редирект на список с плашкой,
+ * идентичной той, что показывается при штатном autoExit'е.
+ */
+import { AppConfig } from './app-config.js';
+import { AuthManager } from './auth.js';
+import { DialogManager } from './dialog/dialog-confirm.js';
+import { Notifications } from './notifications.js';
+
+// Constructor-зона: lazy-доступ через window.
+// Прямые import'ы из ../constructor/* тянули весь constructor граф
+// (App, AppState, StorageManager, ChangelogTracker, ActsMenuManager,
+// ItemsRenderer, PreviewManager, AuditIdService) на любую portal-страницу
+// через цепочку portal-common.js → shared/api.js, и module-level подписки
+// constructor'а (App.init / _initStateTracking) стреляли где не нужно.
+// Сами классы публикуются на window своими модулями (constructor entry);
+// методы api.js, использующие их, вызываются только в constructor-сессии.
+
+export class LockLostError extends Error {
+    constructor() {
+        super('Блокировка акта потеряна');
+        this.name = 'LockLostError';
+        this.code = 'lock-lost';
+    }
+}
+window.LockLostError = LockLostError;
+
+/**
  * Клиент для взаимодействия с API
  *
  * Обрабатывает все HTTP-запросы к серверу для работы с актами.
  * Предоставляет методы для генерации и скачивания файлов актов,
  * загрузки/сохранения содержимого из БД, а также удаления актов.
  */
-class APIClient {
-    static async lockAct(actId) {
-        const username = AuthManager.getCurrentUser();
+export class APIClient {
+    /**
+     * Флаг in-flight PUT /content (H-N1-UX). Защищает от двойного запроса
+     * при mash'е Ctrl+S/клике "Сохранить" — повторные вызовы saveActContent
+     * пока предыдущий не завершился (resolve/reject) молча отбрасываются.
+     */
+    static _saveInFlight = false;
 
-        const response = await fetch(AppConfig.api.getUrl(`/api/v1/acts/${actId}/lock`), {
+    static async lockAct(actId) {
+
+        const response = await this._fetchWithTimeout(AppConfig.api.getUrl(`/api/v1/acts/${actId}/lock`), {
             method: 'POST',
             headers: {
-                'Content-Type': 'application/json',
-                'X-JupyterHub-User': username
+                'Content-Type': 'application/json'
             }
         });
 
@@ -25,13 +61,11 @@ class APIClient {
     }
 
     static async unlockAct(actId) {
-        const username = AuthManager.getCurrentUser();
 
-        const response = await fetch(AppConfig.api.getUrl(`/api/v1/acts/${actId}/unlock`), {
+        const response = await this._fetchWithTimeout(AppConfig.api.getUrl(`/api/v1/acts/${actId}/unlock`), {
             method: 'POST',
             headers: {
-                'Content-Type': 'application/json',
-                'X-JupyterHub-User': username
+                'Content-Type': 'application/json'
             }
         });
 
@@ -43,13 +77,11 @@ class APIClient {
     }
 
     static async extendLock(actId) {
-        const username = AuthManager.getCurrentUser();
 
-        const response = await fetch(AppConfig.api.getUrl(`/api/v1/acts/${actId}/extend-lock`), {
+        const response = await this._fetchWithTimeout(AppConfig.api.getUrl(`/api/v1/acts/${actId}/extend-lock`), {
             method: 'POST',
             headers: {
-                'Content-Type': 'application/json',
-                'X-JupyterHub-User': username
+                'Content-Type': 'application/json'
             }
         });
 
@@ -67,12 +99,12 @@ class APIClient {
      * @returns {Promise<boolean>} true если хотя бы один файл создан успешно
      */
     static async generateAct(formats = 'txt') {
-        StorageManager.disableTracking();
+        window.StorageManager.disableTracking();
 
         try {
-            StorageManager.saveState(true);
+            window.StorageManager.saveState(true);
 
-            const data = AppState.exportData();
+            const data = window.AppState.exportData();
             const formatList = Array.isArray(formats) ? formats : [formats];
 
             const validFormats = formatList.filter(fmt =>
@@ -115,8 +147,8 @@ class APIClient {
             return false;
         } finally {
             setTimeout(() => {
-                StorageManager.enableTracking();
-            }, 100);
+                window.StorageManager.enableTracking();
+            }, AppConfig.timings.enableTrackingAfterGenerate);
         }
     }
 
@@ -133,7 +165,7 @@ class APIClient {
                 url += `&act_id=${encodeURIComponent(actId)}`;
             }
 
-            const response = await fetch(AppConfig.api.getUrl(url),
+            const response = await this._fetchWithTimeout(AppConfig.api.getUrl(url),
                 {
                     method: 'POST',
                     headers: {'Content-Type': 'application/json'},
@@ -255,7 +287,7 @@ class APIClient {
      */
     static async downloadFile(filename) {
         try {
-            const response = await fetch(AppConfig.api.getUrl(
+            const response = await this._fetchWithTimeout(AppConfig.api.getUrl(
                 `/api/v1/acts/export/download/${filename}`)
             );
 
@@ -308,8 +340,8 @@ class APIClient {
         }
 
         try {
-            const resp = await fetch(AppConfig.api.getUrl(`/api/v1/acts/${actId}/content`), {
-                headers: {'X-JupyterHub-User': username}
+            const resp = await this._fetchWithTimeout(AppConfig.api.getUrl(`/api/v1/acts/${actId}/content`), {
+                headers: {}
             });
 
             if (!resp.ok) {
@@ -348,13 +380,14 @@ class APIClient {
             console.log('Тип проверки:', isProcessBased ? 'процессная' : 'непроцессная');
 
             // Отключаем tracking на время загрузки
-            StorageManager.disableTracking();
+            window.StorageManager.disableTracking();
 
             // Проверяем, пустой ли акт
             const isEmpty = !content.tree ||
                 !Array.isArray(content.tree.children) ||
                 content.tree.children.length === 0;
 
+            const AppState = window.AppState;
             if (isEmpty) {
                 // Акт пуст, инициализируем дефолтную структуру
 
@@ -375,8 +408,8 @@ class APIClient {
                 }
 
                 // Асинхронно присваиваем audit_point_id (не блокируем пользователя)
-                if (typeof AuditIdService !== 'undefined') {
-                    AuditIdService.assignMissingPointIds(actId, AppState.treeData);
+                if (window.AuditIdService) {
+                    window.AuditIdService.assignMissingPointIds(actId, AppState.treeData);
                 }
 
                 // Флаг: дефолтную структуру нужно сохранить после блокировки
@@ -394,6 +427,11 @@ class APIClient {
                 // Миграция: strip числового префикса из label для item-узлов
                 this._migrateStripNumberFromLabels(AppState.treeData);
 
+                // E-2 миграция: переносим isRegularRiskTable/isOperationalRiskTable
+                // с table-объекта на table-node (унифицировано с metrics-флагами).
+                // Для актов, сохранённых до E-2, флаги лежали только в tables[id].
+                this._migrateRiskFlagsToNode(AppState.treeData, AppState.tables);
+
                 AppState.generateNumbering();
 
                 // Привязываем фактуры к узлам дерева
@@ -402,8 +440,8 @@ class APIClient {
                 }
 
                 // Асинхронно присваиваем audit_point_id (не блокируем пользователя)
-                if (typeof AuditIdService !== 'undefined') {
-                    AuditIdService.assignMissingPointIds(actId, AppState.treeData);
+                if (window.AuditIdService) {
+                    window.AuditIdService.assignMissingPointIds(actId, AppState.treeData);
                 }
             }
 
@@ -411,37 +449,37 @@ class APIClient {
             if (typeof treeManager !== 'undefined') {
                 treeManager.render();
             }
-            if (typeof ItemsRenderer !== 'undefined') {
-                ItemsRenderer.renderAll();
+            if (window.ItemsRenderer) {
+                window.ItemsRenderer.renderAll();
             }
-            if (typeof PreviewManager !== 'undefined') {
-                PreviewManager.update();
+            if (window.PreviewManager) {
+                window.PreviewManager.update();
             }
 
             // Сохраняем в localStorage для локальной работы
-            StorageManager.saveState(true);
+            window.StorageManager.saveState(true);
 
             // Включаем tracking обратно с задержкой
             setTimeout(() => {
-                StorageManager.enableTracking();
-            }, 500);
+                window.StorageManager.enableTracking();
+            }, AppConfig.timings.enableTrackingAfterLoad);
 
             // Показываем баннер и применяем режим просмотра если нет прав на редактирование
             if (AppConfig.readOnlyMode.isReadOnly) {
                 this._showReadOnlyBanner();
                 // Применяем read-only стили к интерфейсу
-                if (typeof App !== 'undefined' && App._applyReadOnlyMode) {
-                    App._applyReadOnlyMode();
+                if (window.App && window.App._applyReadOnlyMode) {
+                    window.App._applyReadOnlyMode();
                 }
                 // Применяем ограничения к меню актов
-                if (typeof ActsMenuManager !== 'undefined' && ActsMenuManager.applyReadOnlyRestrictions) {
-                    ActsMenuManager.applyReadOnlyRestrictions();
+                if (window.ActsMenuManager && window.ActsMenuManager.applyReadOnlyRestrictions) {
+                    window.ActsMenuManager.applyReadOnlyRestrictions();
                 }
             }
 
         } catch (err) {
             console.error('Ошибка загрузки акта:', err);
-            StorageManager.enableTracking();
+            window.StorageManager.enableTracking();
             throw err;
         }
     }
@@ -452,13 +490,12 @@ class APIClient {
      */
     static async _saveDefaultStructure(actId, username) {
         try {
-            const data = AppState.exportData();
+            const data = window.AppState.exportData();
 
-            const resp = await fetch(AppConfig.api.getUrl(`/api/v1/acts/${actId}/content`), {
+            const resp = await this._fetchWithTimeout(AppConfig.api.getUrl(`/api/v1/acts/${actId}/content`), {
                 method: 'PUT',
                 headers: {
-                    'Content-Type': 'application/json',
-                    'X-JupyterHub-User': username
+                    'Content-Type': 'application/json'
                 },
                 body: JSON.stringify(data)
             });
@@ -470,8 +507,19 @@ class APIClient {
             }
 
         } catch (err) {
-            console.error('Ошибка сохранения дефолтной структуры:', err);
-            // Не бросаем ошибку выше, чтобы не прерывать работу
+            // Ранее ошибка глоталась "чтобы не прерывать работу", но это
+            // приводило к молчаливой потере состояния: пользователь видел
+            // пустой акт и думал что всё в порядке, при повторной правке
+            // ловил 404/409. Теперь предупреждаем явно и пробрасываем —
+            // вызывающий (acts-menu.js::_autoLoadAct) обязан обработать
+            // и не продолжать как ни в чём не бывало.
+            console.error('Не удалось сохранить начальную структуру:', err);
+            if (typeof Notifications !== 'undefined') {
+                Notifications.warning(
+                    'Не удалось сохранить начальную структуру акта — повторите вход'
+                );
+            }
+            throw err;
         }
     }
 
@@ -490,19 +538,27 @@ class APIClient {
             throw new Error('Пользователь не авторизован');
         }
 
+        // H-N1-UX: гард от двойного PUT при mash'е Ctrl+S / клике "Сохранить".
+        // Без него каждый повторный вызов уходил отдельным запросом на /content,
+        // пока предыдущий ещё в полёте — лишняя нагрузка и risk race-condition'ов.
+        if (APIClient._saveInFlight) {
+            console.log('saveActContent уже в процессе — пропускаем повторный вызов');
+            return null;
+        }
+        APIClient._saveInFlight = true;
+
         try {
             // Блокируем отслеживание на время сохранения
-            StorageManager.disableTracking();
+            window.StorageManager.disableTracking();
 
-            const data = AppState.exportData();
+            const data = window.AppState.exportData();
             data.saveType = saveType;
-            data.changelog = typeof ChangelogTracker !== 'undefined' ? ChangelogTracker.flush() : [];
+            data.changelog = window.ChangelogTracker ? window.ChangelogTracker.flush() : [];
 
-            const resp = await fetch(AppConfig.api.getUrl(`/api/v1/acts/${actId}/content`), {
+            const resp = await this._fetchWithTimeout(AppConfig.api.getUrl(`/api/v1/acts/${actId}/content`), {
                 method: 'PUT',
                 headers: {
-                    'Content-Type': 'application/json',
-                    'X-JupyterHub-User': username
+                    'Content-Type': 'application/json'
                 },
                 body: JSON.stringify(data)
             });
@@ -512,6 +568,12 @@ class APIClient {
                     throw new Error('Нет доступа к акту');
                 } else if (resp.status === 404) {
                     throw new Error('Акт не найден');
+                } else if (resp.status === 409) {
+                    // Лок потерян (автовыход по неактивности успел снять блокировку
+                    // пока вкладка была в фоне). Кидаем типизированную ошибку,
+                    // вызывающая сторона (navigation-manager) делает редирект на список
+                    // с тем же sessionStorage-флагом, что и autoExit.
+                    throw new LockLostError();
                 }
                 throw new Error('Ошибка сохранения');
             }
@@ -520,19 +582,24 @@ class APIClient {
             console.log('Акт сохранен в БД:', result);
 
             // Помечаем как синхронизированное с БД
-            StorageManager.markAsSyncedWithDB();
+            window.StorageManager.markAsSyncedWithDB();
 
             Notifications.success('Акт сохранен в базу данных');
 
         } catch (err) {
             console.error('Ошибка сохранения акта в БД:', err);
-            Notifications.error(`Не удалось сохранить акт: ${err.message}`);
+            // Для LockLostError не показываем toast — вызывающая сторона сделает
+            // редирект на список с плашкой autoExit (одинаковый UX с фоновым autoExit'ом).
+            if (!(err instanceof LockLostError)) {
+                Notifications.error(`Не удалось сохранить акт: ${err.message}`);
+            }
             throw err;
         } finally {
+            APIClient._saveInFlight = false;
             // Включаем отслеживание обратно
             setTimeout(() => {
-                StorageManager.enableTracking();
-            }, 100);
+                window.StorageManager.enableTracking();
+            }, AppConfig.timings.enableTrackingAfterSave);
         }
     }
 
@@ -550,9 +617,9 @@ class APIClient {
         }
 
         try {
-            const resp = await fetch(AppConfig.api.getUrl(`/api/v1/acts/${actId}`), {
+            const resp = await this._fetchWithTimeout(AppConfig.api.getUrl(`/api/v1/acts/${actId}`), {
                 method: 'DELETE',
-                headers: {'X-JupyterHub-User': username}
+                headers: {}
             });
 
             if (!resp.ok) {
@@ -588,13 +655,42 @@ class APIClient {
         if (node.children) {
             for (const child of node.children) {
                 // Только для item-узлов (не table/textblock/violation)
-                if (!child.type || child.type === 'item') {
+                if (!child.type || child.type === AppConfig.nodeTypes.ITEM) {
                     const match = child.label?.match(/^\d+(?:\.\d+)*\.\s*(.+)$/);
                     if (match) {
                         child.label = match[1];
                     }
                 }
                 this._migrateStripNumberFromLabels(child);
+            }
+        }
+    }
+
+    /**
+     * E-2 миграция: для старых актов risk-флаги (isRegularRiskTable /
+     * isOperationalRiskTable) лежали только в tables[id]. Унификация требует
+     * флаг на node — пробрасываем для table-нод по tableId.
+     * Idempotent: если флаги уже на node, no-op.
+     * @private
+     * @param {Object} node - Узел дерева
+     * @param {Object} tables - AppState.tables словарь
+     */
+    static _migrateRiskFlagsToNode(node, tables) {
+        if (!node) return;
+        if (node.type === AppConfig.nodeTypes.TABLE && node.tableId) {
+            const table = tables[node.tableId];
+            if (table) {
+                if (table.isRegularRiskTable && !node.isRegularRiskTable) {
+                    node.isRegularRiskTable = true;
+                }
+                if (table.isOperationalRiskTable && !node.isOperationalRiskTable) {
+                    node.isOperationalRiskTable = true;
+                }
+            }
+        }
+        if (node.children) {
+            for (const child of node.children) {
+                this._migrateRiskFlagsToNode(child, tables);
             }
         }
     }
@@ -635,12 +731,11 @@ class APIClient {
      * @returns {Promise<Array<{code: string, metric_name: string, metric_group: string|null}>>}
      */
     static async loadMetricDict() {
-        const username = AuthManager.getCurrentUser();
 
-        const response = await fetch(
+        const response = await this._fetchWithTimeout(
             AppConfig.api.getUrl('/api/v1/acts/invoice/metrics'),
             {
-                headers: { 'X-JupyterHub-User': username }
+                headers: {}
             }
         );
 
@@ -656,10 +751,9 @@ class APIClient {
      * @returns {Promise<Array<{process_code: string, process_name: string}>>}
      */
     static async loadProcessDict() {
-        const username = AuthManager.getCurrentUser();
-        const response = await fetch(
+        const response = await this._fetchWithTimeout(
             AppConfig.api.getUrl('/api/v1/acts/invoice/processes'),
-            { headers: { 'X-JupyterHub-User': username } }
+            { headers: {} }
         );
         if (!response.ok) {
             await this._throwApiError(response);
@@ -672,10 +766,9 @@ class APIClient {
      * @returns {Promise<Array<{name: string}>>}
      */
     static async loadSubsidiaryDict() {
-        const username = AuthManager.getCurrentUser();
-        const response = await fetch(
+        const response = await this._fetchWithTimeout(
             AppConfig.api.getUrl('/api/v1/acts/invoice/subsidiaries'),
-            { headers: { 'X-JupyterHub-User': username } }
+            { headers: {} }
         );
         if (!response.ok) {
             await this._throwApiError(response);
@@ -690,12 +783,11 @@ class APIClient {
      * @returns {Promise<Array<{table_name: string}>>}
      */
     static async loadInvoiceTables(dbType) {
-        const username = AuthManager.getCurrentUser();
 
-        const response = await fetch(
+        const response = await this._fetchWithTimeout(
             AppConfig.api.getUrl(`/api/v1/acts/invoice/tables/${dbType}`),
             {
-                headers: { 'X-JupyterHub-User': username }
+                headers: {}
             }
         );
 
@@ -710,18 +802,18 @@ class APIClient {
      * Сохраняет фактуру (UPSERT по act_id + node_id)
      *
      * @param {Object} data - Данные фактуры
+     * @param {AbortSignal} [signal] - Сигнал отмены запроса
      * @returns {Promise<Object>} Сохраненная фактура
      */
-    static async saveInvoice(data) {
-        const username = AuthManager.getCurrentUser();
+    static async saveInvoice(data, signal) {
 
-        const response = await fetch(AppConfig.api.getUrl('/api/v1/acts/invoice/save'), {
+        const response = await this._fetchWithTimeout(AppConfig.api.getUrl('/api/v1/acts/invoice/save'), {
             method: 'POST',
             headers: {
                 'Content-Type': 'application/json',
-                'X-JupyterHub-User': username,
             },
             body: JSON.stringify(data),
+            signal,
         });
 
         if (!response.ok) {
@@ -736,18 +828,18 @@ class APIClient {
      *
      * @param {number} invoiceId - ID фактуры
      * @param {number} actId - ID акта для проверки доступа
+     * @param {AbortSignal} [signal] - Сигнал отмены запроса
      * @returns {Promise<Object>} Результат верификации
      */
-    static async verifyInvoice(invoiceId, actId) {
-        const username = AuthManager.getCurrentUser();
+    static async verifyInvoice(invoiceId, actId, signal) {
 
-        const response = await fetch(AppConfig.api.getUrl('/api/v1/acts/invoice/verify'), {
+        const response = await this._fetchWithTimeout(AppConfig.api.getUrl('/api/v1/acts/invoice/verify'), {
             method: 'POST',
             headers: {
                 'Content-Type': 'application/json',
-                'X-JupyterHub-User': username,
             },
             body: JSON.stringify({ invoice_id: invoiceId, act_id: actId }),
+            signal,
         });
 
         if (!response.ok) {
@@ -758,13 +850,66 @@ class APIClient {
     }
 
     /**
-     * Создает ошибку API с кодом
+     * Создает ошибку API.
+     * Поля:
+     *   - `status` — HTTP-статус ответа.
+     *   - `code` — машинный код из envelope бэка (kebab-case, см. AppError.to_envelope).
+     *     `null`, если ответ без envelope (timeout 408, non-JSON).
+     *   - `extra` — словарь дополнительных полей envelope (locked_by, retry_after_sec и т.п.),
+     *     `null`, если бэк его не прислал.
      * @private
      */
-    static _createError(status, detail) {
+    static _createError(status, detail, code = null, extra = null) {
         const error = new Error(detail);
         error.status = status;
+        error.code = code;
+        error.extra = extra;
         return error;
+    }
+
+    /**
+     * Обёртка fetch с таймаутом через AbortController.
+     *
+     * При истечении таймаута сам fetch падает с DOMException "AbortError";
+     * вызывающие методы должны конвертировать его в _createError(408, ...).
+     * Если в opts уже передан signal — уважаем его, не подменяя на свой
+     * (комбинировать AbortSignal в браузере пока нельзя без полифилла,
+     * пользовательский abort приоритетнее).
+     *
+     * SSE-вызовы (chat-stream.js, forward-resume) НЕ должны использовать
+     * этот wrapper — у них свой жизненный цикл с долгим body-стримом.
+     *
+     * @param {string} url
+     * @param {RequestInit} [opts={}]
+     * @param {number} [timeoutMs=30000]
+     * @returns {Promise<Response>}
+     * @private
+     */
+    static async _fetchWithTimeout(url, opts = {}, timeoutMs = 30000) {
+        if (opts.signal) {
+            // Уже есть пользовательский AbortSignal — не оборачиваем.
+            return fetch(url, opts);
+        }
+        const controller = new AbortController();
+        let timedOut = false;
+        const timer = setTimeout(() => {
+            timedOut = true;
+            controller.abort();
+        }, timeoutMs);
+        try {
+            // Прямой нативный fetch — без рекурсии в _fetchWithTimeout.
+            return await fetch(url, {...opts, signal: controller.signal});
+        } catch (err) {
+            // Если abort вызван таймером — переводим в стандартный 408.
+            // AbortError name стабильный (DOM spec), code 20 — fallback для
+            // старых браузеров.
+            if (timedOut && (err?.name === 'AbortError' || err?.code === 20)) {
+                throw this._createError(408, 'Превышено время ожидания ответа сервера');
+            }
+            throw err;
+        } finally {
+            clearTimeout(timer);
+        }
     }
 
     /**
@@ -774,15 +919,38 @@ class APIClient {
      */
     static async _throwApiError(response, fallbackDetail) {
         let detail;
+        let code = null;
+        let extra = null;
         try {
             const body = await response.json();
             detail = body.detail;
+            // Унифицированный error envelope из AppError.to_envelope():
+            //   {detail: str, code: kebab-case-str, extra?: dict}.
+            // `code`/`extra` есть только если бэк бросил AppError;
+            // generic-ответы (timeout, не-AppError exception) приходят без них.
+            if (typeof body.code === 'string') {
+                code = body.code;
+            }
+            if (body.extra && typeof body.extra === 'object') {
+                extra = body.extra;
+            }
+            // FastAPI 422 возвращает detail как массив ValidationError-объектов:
+            // [{loc, msg, type, ...}, ...]. Без форматирования в UI прилетал
+            // "[object Object]". Сворачиваем в человекочитаемую строку, msg
+            // у pydantic-валидаторов уже на русском.
+            if (Array.isArray(detail)) {
+                detail = detail
+                    .map(d => d?.msg || JSON.stringify(d))
+                    .join('; ');
+            }
         } catch {
             // Сервер вернул не-JSON ответ
         }
         throw this._createError(
             response.status,
-            detail || fallbackDetail || `Ошибка сервера (${response.status})`
+            detail || fallbackDetail || `Ошибка сервера (${response.status})`,
+            code,
+            extra,
         );
     }
 
@@ -813,27 +981,14 @@ class APIClient {
     }
 
     /**
-     * Проверяет режим только чтения и показывает уведомление
-     * @returns {boolean} true если режим только чтения активен
-     */
-    static checkReadOnlyMode() {
-        if (AppConfig.readOnlyMode?.isReadOnly) {
-            Notifications.warning(AppConfig.readOnlyMode.messages.cannotEdit);
-            return true;
-        }
-        return false;
-    }
-
-    /**
      * Загружает содержимое акта (raw JSON) без побочных эффектов.
      * Используется для diff-сравнения версий.
      * @param {number} actId
      * @returns {Promise<Object>}
      */
     static async loadActContentRaw(actId) {
-        const username = AuthManager.getCurrentUser();
-        const resp = await fetch(AppConfig.api.getUrl(`/api/v1/acts/${actId}/content`), {
-            headers: { 'X-JupyterHub-User': username }
+        const resp = await this._fetchWithTimeout(AppConfig.api.getUrl(`/api/v1/acts/${actId}/content`), {
+            headers: {}
         });
         if (!resp.ok) throw this._createError(resp.status, `HTTP ${resp.status}`);
         return resp.json();
@@ -850,7 +1005,6 @@ class APIClient {
      * @returns {Promise<{items: Array, total: number}>}
      */
     static async getAuditLog(actId, { action, username, fromDate, toDate, limit = 50, offset = 0 } = {}) {
-        const currentUser = AuthManager.getCurrentUser();
         const query = new URLSearchParams();
         if (action) query.set('action', action);
         if (username) query.set('username', username);
@@ -859,8 +1013,8 @@ class APIClient {
         query.set('limit', limit);
         query.set('offset', offset);
 
-        const resp = await fetch(AppConfig.api.getUrl(`/api/v1/acts/${actId}/audit-log?${query}`), {
-            headers: { 'X-JupyterHub-User': currentUser }
+        const resp = await this._fetchWithTimeout(AppConfig.api.getUrl(`/api/v1/acts/${actId}/audit-log?${query}`), {
+            headers: {}
         });
         if (!resp.ok) throw this._createError(resp.status, 'Ошибка загрузки аудит-лога');
         return resp.json();
@@ -873,10 +1027,9 @@ class APIClient {
      * @returns {Promise<{items: Array, total: number}>}
      */
     static async getVersions(actId, { limit = 50, offset = 0 } = {}) {
-        const username = AuthManager.getCurrentUser();
-        const resp = await fetch(
+        const resp = await this._fetchWithTimeout(
             AppConfig.api.getUrl(`/api/v1/acts/${actId}/versions?limit=${limit}&offset=${offset}`),
-            { headers: { 'X-JupyterHub-User': username } }
+            { headers: {} }
         );
         if (!resp.ok) throw this._createError(resp.status, 'Ошибка загрузки версий');
         return resp.json();
@@ -889,10 +1042,9 @@ class APIClient {
      * @returns {Promise<Object>}
      */
     static async getVersion(actId, versionId) {
-        const username = AuthManager.getCurrentUser();
-        const resp = await fetch(
+        const resp = await this._fetchWithTimeout(
             AppConfig.api.getUrl(`/api/v1/acts/${actId}/versions/${versionId}`),
-            { headers: { 'X-JupyterHub-User': username } }
+            { headers: {} }
         );
         if (!resp.ok) throw this._createError(resp.status, 'Ошибка загрузки версии');
         return resp.json();
@@ -905,14 +1057,12 @@ class APIClient {
      * @returns {Promise<Object>}
      */
     static async restoreVersion(actId, versionId) {
-        const username = AuthManager.getCurrentUser();
-        const resp = await fetch(
+        const resp = await this._fetchWithTimeout(
             AppConfig.api.getUrl(`/api/v1/acts/${actId}/versions/${versionId}/restore`),
             {
                 method: 'POST',
                 headers: {
-                    'Content-Type': 'application/json',
-                    'X-JupyterHub-User': username
+                    'Content-Type': 'application/json'
                 }
             }
         );
@@ -932,9 +1082,8 @@ class APIClient {
      * @returns {Promise<{is_admin: boolean, roles: Array}>}
      */
     static async loadMyRoles() {
-        const username = AuthManager.getCurrentUser();
-        const response = await fetch(AppConfig.api.getUrl('/api/v1/roles/my-roles'), {
-            headers: { 'X-JupyterHub-User': username }
+        const response = await this._fetchWithTimeout(AppConfig.api.getUrl('/api/v1/roles/my-roles'), {
+            headers: {}
         });
         if (!response.ok) throw this._createError(response.status, 'Ошибка загрузки ролей');
         return response.json();
@@ -945,25 +1094,35 @@ class APIClient {
      * @returns {Promise<Array<{id: number, name: string, description: string}>>}
      */
     static async loadAllRoles() {
-        const username = AuthManager.getCurrentUser();
-        const response = await fetch(AppConfig.api.getUrl('/api/v1/admin/roles'), {
-            headers: { 'X-JupyterHub-User': username }
+        const response = await this._fetchWithTimeout(AppConfig.api.getUrl('/api/v1/admin/roles'), {
+            headers: {}
         });
         if (!response.ok) throw this._createError(response.status, 'Ошибка загрузки ролей');
-        return response.json();
+        const data = await response.json();
+        return data.items || [];
     }
 
     /**
-     * Загружает справочник пользователей (для админ-панели)
-     * @returns {Promise<Array<{username: string, fullname: string, email: string, job: string, roles: Array}>>}
+     * Загружает страницу справочника пользователей (для админ-панели).
+     * Возвращает весь пагинированный ответ, чтобы вызывающий мог реализовать
+     * подгрузку «Загрузить ещё» по total/offset.
+     * @param {number} [limit=50] - размер страницы
+     * @param {number} [offset=0] - смещение
+     * @returns {Promise<{items: Array, total: number, limit: number, offset: number}>}
      */
-    static async loadUserDirectory() {
-        const username = AuthManager.getCurrentUser();
-        const response = await fetch(AppConfig.api.getUrl('/api/v1/admin/users/directory'), {
-            headers: { 'X-JupyterHub-User': username }
-        });
+    static async loadUserDirectory(limit = 50, offset = 0) {
+        const url = AppConfig.api.getUrl(
+            `/api/v1/admin/users/directory?limit=${limit}&offset=${offset}`
+        );
+        const response = await this._fetchWithTimeout(url, { headers: {} });
         if (!response.ok) throw this._createError(response.status, 'Ошибка загрузки справочника');
-        return response.json();
+        const data = await response.json();
+        return {
+            items: data.items || [],
+            total: data.total ?? (data.items || []).length,
+            limit: data.limit ?? limit,
+            offset: data.offset ?? offset,
+        };
     }
 
     /**
@@ -973,12 +1132,10 @@ class APIClient {
      * @returns {Promise<Object>}
      */
     static async assignRole(targetUsername, roleId) {
-        const username = AuthManager.getCurrentUser();
-        const response = await fetch(AppConfig.api.getUrl(`/api/v1/admin/users/${targetUsername}/roles`), {
+        const response = await this._fetchWithTimeout(AppConfig.api.getUrl(`/api/v1/admin/users/${targetUsername}/roles`), {
             method: 'POST',
             headers: {
-                'Content-Type': 'application/json',
-                'X-JupyterHub-User': username
+                'Content-Type': 'application/json'
             },
             body: JSON.stringify({ role_id: roleId })
         });
@@ -995,10 +1152,9 @@ class APIClient {
      * @returns {Promise<Object>}
      */
     static async removeRole(targetUsername, roleId) {
-        const username = AuthManager.getCurrentUser();
-        const response = await fetch(AppConfig.api.getUrl(`/api/v1/admin/users/${targetUsername}/roles/${roleId}`), {
+        const response = await this._fetchWithTimeout(AppConfig.api.getUrl(`/api/v1/admin/users/${targetUsername}/roles/${roleId}`), {
             method: 'DELETE',
-            headers: { 'X-JupyterHub-User': username }
+            headers: {}
         });
         if (!response.ok) {
             await this._throwApiError(response);
@@ -1009,15 +1165,33 @@ class APIClient {
     /**
      * Поиск пользователей в справочнике (для добавления в систему)
      * @param {string} query - Строка поиска (мин. 2 символа)
+     * @param {AbortSignal} [signal] - Сигнал отмены запроса
      * @returns {Promise<Array<{username: string, fullname: string, job: string, email: string}>>}
      */
-    static async searchUsers(query) {
-        const username = AuthManager.getCurrentUser();
-        const response = await fetch(
+    static async searchUsers(query, signal) {
+        const response = await this._fetchWithTimeout(
             AppConfig.api.getUrl(`/api/v1/admin/users/search?q=${encodeURIComponent(query)}`),
-            { headers: { 'X-JupyterHub-User': username } }
+            { headers: {}, signal }
         );
         if (!response.ok) throw this._createError(response.status, 'Ошибка поиска пользователей');
+        const data = await response.json();
+        return data.items || [];
+    }
+
+    /**
+     * Загружает актуальный список ролей пользователя (для повторной синхронизации
+     * после неуспешного assign/remove — серверный rollback на app-уровне).
+     * @param {string} targetUsername - Имя пользователя
+     * @returns {Promise<{username: string, roles: Array<{id:number, name:string, code?:string}>}>}
+     */
+    static async getUserRoles(targetUsername) {
+        const response = await fetch(
+            AppConfig.api.getUrl(`/api/v1/admin/users/${targetUsername}/roles`),
+            { headers: {} }
+        );
+        if (!response.ok) {
+            await this._throwApiError(response);
+        }
         return response.json();
     }
 
@@ -1027,12 +1201,63 @@ class APIClient {
      * @returns {Promise<Array<{username: string, fullname: string, job: string}>>}
      */
     static async searchTeamUsers(query) {
-        const username = AuthManager.getCurrentUser();
-        const response = await fetch(
+        const response = await this._fetchWithTimeout(
             AppConfig.api.getUrl(`/api/v1/acts/users/search?q=${encodeURIComponent(query)}`),
-            { headers: { 'X-JupyterHub-User': username } }
+            { headers: {} }
         );
         if (!response.ok) throw this._createError(response.status, 'Ошибка поиска пользователей');
+        const data = await response.json();
+        return data.items || [];
+    }
+
+    /**
+     * Загружает состояние батчеров и фоновых задач (admin observability).
+     * Возвращает снимок {batchers: {...}, background_tasks: {...}}.
+     * @returns {Promise<{batchers: Object, background_tasks: Object}>}
+     */
+    static async loadDiagnostics() {
+        const response = await fetch(AppConfig.api.getUrl('/api/v1/admin/diagnostics'), {
+            headers: {}
+        });
+        if (!response.ok) await this._throwApiError(response);
+        return response.json();
+    }
+
+    /**
+     * Загружает журнал админ-операций с фильтрами и пагинацией.
+     * @param {Object} [filters]
+     * @param {string} [filters.action]
+     * @param {string} [filters.targetUsername]
+     * @param {string} [filters.adminUsername]
+     * @param {string} [filters.fromDate] - YYYY-MM-DD
+     * @param {string} [filters.toDate] - YYYY-MM-DD
+     * @param {number} [filters.limit=50] - 1..200
+     * @param {number} [filters.offset=0]
+     * @returns {Promise<{items: Array, total: number}>}
+     */
+    static async loadAdminAuditLog({
+        action,
+        targetUsername,
+        adminUsername,
+        fromDate,
+        toDate,
+        limit = 50,
+        offset = 0,
+    } = {}) {
+        const query = new URLSearchParams();
+        if (action) query.set('action', action);
+        if (targetUsername) query.set('target_username', targetUsername);
+        if (adminUsername) query.set('admin_username', adminUsername);
+        if (fromDate) query.set('from_date', fromDate);
+        if (toDate) query.set('to_date', toDate);
+        query.set('limit', String(limit));
+        query.set('offset', String(offset));
+
+        const response = await fetch(
+            AppConfig.api.getUrl(`/api/v1/admin/audit-log?${query}`),
+            { headers: {} }
+        );
+        if (!response.ok) await this._throwApiError(response);
         return response.json();
     }
 
@@ -1046,18 +1271,16 @@ class APIClient {
      * @param {Object} filters - {start_date?, end_date?, metric_code?, process_code?}
      */
     static async searchCkRecords(prefix, filters = {}) {
-        const username = AuthManager.getCurrentUser();
-        const response = await fetch(AppConfig.api.getUrl(`/api/v1/${prefix}/records/search`), {
+        const response = await this._fetchWithTimeout(AppConfig.api.getUrl(`/api/v1/${prefix}/records/search`), {
             method: 'POST',
             headers: {
-                'Content-Type': 'application/json',
-                'X-JupyterHub-User': username
+                'Content-Type': 'application/json'
             },
             body: JSON.stringify(filters)
         });
         if (!response.ok) await this._throwApiError(response);
         const json = await response.json();
-        return json.data;
+        return json.items || [];
     }
 
     /**
@@ -1066,9 +1289,8 @@ class APIClient {
      * @param {number} id
      */
     static async getCkRecord(prefix, id) {
-        const username = AuthManager.getCurrentUser();
-        const response = await fetch(AppConfig.api.getUrl(`/api/v1/${prefix}/records/${id}`), {
-            headers: { 'X-JupyterHub-User': username }
+        const response = await this._fetchWithTimeout(AppConfig.api.getUrl(`/api/v1/${prefix}/records/${id}`), {
+            headers: {}
         });
         if (!response.ok) await this._throwApiError(response);
         return response.json();
@@ -1080,12 +1302,10 @@ class APIClient {
      * @param {Object} data
      */
     static async createCkRecord(prefix, data) {
-        const username = AuthManager.getCurrentUser();
-        const response = await fetch(AppConfig.api.getUrl(`/api/v1/${prefix}/records`), {
+        const response = await this._fetchWithTimeout(AppConfig.api.getUrl(`/api/v1/${prefix}/records`), {
             method: 'POST',
             headers: {
-                'Content-Type': 'application/json',
-                'X-JupyterHub-User': username
+                'Content-Type': 'application/json'
             },
             body: JSON.stringify(data)
         });
@@ -1099,12 +1319,10 @@ class APIClient {
      * @param {Array} items - [{id, ...fields}]
      */
     static async updateCkRecords(prefix, items) {
-        const username = AuthManager.getCurrentUser();
-        const response = await fetch(AppConfig.api.getUrl(`/api/v1/${prefix}/records/batch-update`), {
+        const response = await this._fetchWithTimeout(AppConfig.api.getUrl(`/api/v1/${prefix}/records/batch-update`), {
             method: 'POST',
             headers: {
-                'Content-Type': 'application/json',
-                'X-JupyterHub-User': username
+                'Content-Type': 'application/json'
             },
             body: JSON.stringify(items)
         });
@@ -1118,10 +1336,9 @@ class APIClient {
      * @param {number} id
      */
     static async deleteCkRecord(prefix, id) {
-        const username = AuthManager.getCurrentUser();
-        const response = await fetch(AppConfig.api.getUrl(`/api/v1/${prefix}/records/${id}`), {
+        const response = await this._fetchWithTimeout(AppConfig.api.getUrl(`/api/v1/${prefix}/records/${id}`), {
             method: 'DELETE',
-            headers: { 'X-JupyterHub-User': username }
+            headers: {}
         });
         if (!response.ok) await this._throwApiError(response);
         return response.json();
@@ -1133,9 +1350,8 @@ class APIClient {
      * @param {string} name - 'processes', 'terbanks', 'metrics', 'departments', 'channels', 'products', 'teams'
      */
     static async getCkDictionary(prefix, name) {
-        const username = AuthManager.getCurrentUser();
-        const response = await fetch(AppConfig.api.getUrl(`/api/v1/${prefix}/dictionaries/${name}`), {
-            headers: { 'X-JupyterHub-User': username }
+        const response = await this._fetchWithTimeout(AppConfig.api.getUrl(`/api/v1/${prefix}/dictionaries/${name}`), {
+            headers: {}
         });
         if (!response.ok) await this._throwApiError(response);
         const json = await response.json();

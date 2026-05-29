@@ -5,7 +5,10 @@
  * удалять и переключаться между беседами. Взаимодействует
  * с ChatManager через callback onConversationChange.
  */
-const ChatHistory = {
+import { AppConfig } from '../app-config.js';
+import { AuthManager } from '../auth.js';
+
+export const ChatHistory = {
 
     /** @type {Array<Object>} Список бесед */
     _conversations: [],
@@ -49,7 +52,7 @@ const ChatHistory = {
      */
     async loadConversations(domainName = null) {
         try {
-            let endpoint = '/api/v1/chat/conversations';
+            let endpoint = AppConfig.chatEndpoints.conversations;
             if (domainName) {
                 endpoint += `?domain_name=${encodeURIComponent(domainName)}`;
             }
@@ -69,7 +72,8 @@ const ChatHistory = {
                 throw new Error(`HTTP ${response.status}`);
             }
 
-            this._conversations = await response.json();
+            const data = await response.json();
+            this._conversations = data.items || [];
 
             this._render();
         } catch (err) {
@@ -101,7 +105,7 @@ const ChatHistory = {
      * @returns {Promise<Object>} объект созданной беседы
      */
     async createConversation(domainName = null, options = {}) {
-        const endpoint = '/api/v1/chat/conversations';
+        const endpoint = AppConfig.chatEndpoints.conversations;
         const url = (typeof AppConfig !== 'undefined')
             ? AppConfig.api.getUrl(endpoint)
             : endpoint;
@@ -140,7 +144,7 @@ const ChatHistory = {
      */
     async deleteConversation(id) {
         try {
-            const endpoint = `/api/v1/chat/conversations/${id}`;
+            const endpoint = AppConfig.chatEndpoints.conversation(id);
             const url = (typeof AppConfig !== 'undefined')
                 ? AppConfig.api.getUrl(endpoint)
                 : endpoint;

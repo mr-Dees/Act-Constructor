@@ -4,7 +4,7 @@
  * Централизованное хранилище всех настроек и констант приложения.
  * Обеспечивает единую точку для изменения параметров поведения системы.
  */
-class AppConfig {
+export class AppConfig {
     /**
      * Типы узлов дерева документа
      * @type {{ITEM: string, TABLE: string, TEXTBLOCK: string, VIOLATION: string}}
@@ -97,6 +97,60 @@ class AppConfig {
         _resetCache() {
             this._baseUrlCache = null;
         }
+    };
+
+    /**
+     * Константы chat-эндпоинтов
+     *
+     * Все пути относительные (без origin/proxy-префикса); итоговый URL
+     * получается через AppConfig.api.getUrl(...), который оборачивает
+     * путь под JupyterHub-proxy при необходимости.
+     *
+     * Параметризованные пути — функции (cid/mid/rid/fileId).
+     * Статические — строки.
+     */
+    static chatEndpoints = {
+        // CRUD бесед
+        conversations: '/api/v1/chat/conversations',
+        conversation: (cid) => `/api/v1/chat/conversations/${cid}`,
+
+        // Сообщения беседы
+        messages: (cid) => `/api/v1/chat/conversations/${cid}/messages`,
+
+        // Активный forward к внешнему агенту (для resume после reload)
+        activeForward: (cid) =>
+            `/api/v1/chat/conversations/${cid}/active-forward`,
+
+        // Resume SSE для forward-запроса (привязан к беседе)
+        forwardStream: (cid, rid) =>
+            `/api/v1/chat/conversations/${cid}/forward-stream/${rid}`,
+
+        // Лимиты файлов (размер, типы)
+        limits: '/api/v1/chat/limits',
+
+        // Скачивание/просмотр файла чата
+        file: (fileId) => `/api/v1/chat/files/${fileId}`,
+    };
+
+    /**
+     * Тайминги магических setTimeout'ов из разных модулей.
+     * Вынесены сюда чтобы не плодить unnamed-числа по коду; меняются в одном месте.
+     *
+     *  - enableTrackingAfterLoad: пауза перед re-enable Proxy-tracking после loadActContent
+     *    (нужна, чтобы мутации внутри AppState.importData/PreviewManager не подняли _hasUnsavedChanges).
+     *  - enableTrackingAfterGenerate / enableTrackingAfterSave: то же, но после генерации/сохранения акта.
+     *  - redirectAfterUnlock: задержка перед редиректом на /acts после LockManager._initiateExit
+     *    (даёт UI время показать notification «сессия завершена»).
+     *  - redirectAfterDelete: задержка перед редиректом после успешного удаления акта.
+     *  - showMenuRetry: задержка перед ActsMenuManager.show() при первом открытии конструктора без act_id.
+     */
+    static timings = {
+        enableTrackingAfterLoad: 500,
+        enableTrackingAfterGenerate: 100,
+        enableTrackingAfterSave: 100,
+        redirectAfterUnlock: 300,
+        redirectAfterDelete: 1500,
+        showMenuRetry: 500
     };
 
     static lock = {
@@ -193,6 +247,11 @@ class AppConfig {
      * Настройки уведомлений
      */
     static notifications = {
+        // H-N8-UX: глобальный cap одновременно показываемых уведомлений.
+        // При шторме РАЗНЫХ сообщений (cacheKey не совпадает → дедуп не срабатывает)
+        // самый старый вытесняется по FIFO. Иначе DOM забивается на сотни узлов.
+        maxConcurrent: 15,
+
         // Длительности показа уведомлений (мс)
         duration: {
             error: 7000,
@@ -483,6 +542,31 @@ class AppConfig {
                 colWidths: [120, 150, 180, 150, 150, 150],
                 rows: 2,
                 label: 'Выявленные отклонения с признаками операционного риска'
+            },
+
+            taxRisk: {
+                headers: {
+                    row1: [
+                        {content: 'Выявлены налоговые риски', colspan: 6, rowspan: 1}
+                    ],
+                    row2: [
+                        {content: 'Код процесса (номер-название)', colspan: 1, rowspan: 1},
+                        {content: 'Клиентский путь (номер-название)', colspan: 1, rowspan: 1},
+                        {content: 'Наименование нормативно-правового акта (НПА), который был нарушен', colspan: 1, rowspan: 1},
+                        {content: 'Статья/пункт НПА', colspan: 1, rowspan: 1},
+                        {content: 'Налоговые последствия', colspan: 1, rowspan: 1},
+                        {content: 'Сумма последствий, руб.', colspan: 1, rowspan: 1}
+                    ]
+                },
+                colWidths: [140, 160, 260, 120, 220, 120],
+                rows: 2,
+                label: 'Выявленные инциденты налогового риска'
+            },
+
+            otherRisk: {
+                // Headers/colWidths наследуются от metrics preset через _createOtherRiskTable
+                // в state-content.js. Здесь только label, чтобы у узла было осмысленное имя.
+                label: 'Прочие риски'
             }
         },
 
@@ -584,3 +668,6 @@ class AppConfig {
         maxStorageSize: 4 * 1024 * 1024, // 4MB
     };
 }
+
+// Window-globals для совместимости с inline-скриптами в шаблонах.
+window.AppConfig = AppConfig;

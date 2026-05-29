@@ -8,7 +8,9 @@
  * как плейсхолдер `.chat-typing-placeholder` и удаляется при первом блоке
  * ответа (см. ChatRenderer.createTypingPlaceholder / removeTypingPlaceholder).
  */
-const ChatUI = {
+import { ChatEventBus } from './chat-event-bus.js';
+
+export const ChatUI = {
 
     /** @type {boolean} */
     _initialized: false,

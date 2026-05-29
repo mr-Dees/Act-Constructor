@@ -5,31 +5,101 @@
  * Делегирует специфичную логику соответствующим менеджерам.
  * Интегрирован с StorageManager для автосохранения.
  */
-class App {
-    static _stepStorageKey = 'constructor_current_step';
-    static _scrollStorageKey = 'constructor_scroll_positions';
+import { ContextMenuManager } from './context-menu/context-menu-core.js';
+import { HelpManager } from './dialog/dialog-help.js';
+import { FormatMenuManager } from './header/format-menu-manager.js';
+import { ItemsRenderer } from './items/items-renderer.js';
+import { LifecycleHelper } from './lifecycle-helper.js';
+import { NavigationManager } from './navigation-manager.js';
+import { PreviewManager } from './preview/preview.js';
+import { AppState } from './state/state-core.js';
+import { StorageManager } from './storage-manager.js';
+import { AppConfig } from '../shared/app-config.js';
+import { Notifications } from '../shared/notifications.js';
+
+export class App {
+    // Базовые префиксы LS-ключей. Реальные ключи строятся через _getStepKey/_getScrollKey
+    // и включают act_id, чтобы шаг и скролл одного акта не подтекали в другой.
+    // Старые ключи без суффикса удаляются в _migrateLegacyKeys() при init.
+    static _stepKeyPrefix = 'constructor_current_step';
+    static _scrollKeyPrefix = 'constructor_scroll_positions';
+    static _stepStorageKey = 'constructor_current_step';   // legacy (для миграции)
+    static _scrollStorageKey = 'constructor_scroll_positions'; // legacy
+
+    /**
+     * Возвращает per-act LS-ключ для текущего шага.
+     * Если currentActId ещё не задан — fallback на legacy-ключ.
+     * @private
+     */
+    static _getStepKey() {
+        const id = window.currentActId;
+        return id ? `${this._stepKeyPrefix}:${id}` : this._stepStorageKey;
+    }
+
+    /**
+     * Возвращает per-act LS-ключ для позиций скролла.
+     * @private
+     */
+    static _getScrollKey() {
+        const id = window.currentActId;
+        return id ? `${this._scrollKeyPrefix}:${id}` : this._scrollStorageKey;
+    }
+
+    /**
+     * Одноразовая миграция: удаляет legacy-ключи без actId, которые могли
+     * остаться от предыдущих версий и шадовить per-act ключи.
+     * @private
+     */
+    static _migrateLegacyKeys() {
+        try {
+            localStorage.removeItem(this._stepStorageKey);
+            localStorage.removeItem(this._scrollStorageKey);
+        } catch { /* ignore */ }
+    }
 
     /**
      * Инициализация приложения при загрузке страницы
      */
     static init() {
         try {
+            // С defer-загрузкой scripts state-core.js может успеть установить
+            // Proxy ДО App.init: его bottom-code в ветке `readyState !== 'loading'`
+            // ставит setTimeout(0), который выполняется до DOMContentLoaded-обработчика
+            // app.js. Без явного disableTracking() мутации внутри _initializeState()
+            // (AppState.initializeTree → generateNumbering → ...) трекаются Proxy
+            // и поднимают _hasUnsavedChanges=true ДО StorageManager.init(), из-за чего
+            // индикатор стартует в local-only/unsaved вместо saved.
+            // markAsSyncedWithDB() в финале сбрасывает оба флага в "чистое" состояние.
+            StorageManager.disableTracking();
+
             this._initializeState();
             this._initializeStorageManager();
             this._initializeManagers();
             this._setupEventHandlers();
 
-            // Восстанавливаем шаг и позицию скролла из localStorage
+            // Восстанавливаем шаг и позицию скролла из localStorage (per-act ключи).
             this._restoreStep();
             this._setupScrollPersistence();
+            // После _restoreStep/_restoreScroll legacy-значения уже подхвачены
+            // в per-act ключи — теперь чистим старые.
+            this._migrateLegacyKeys();
 
             // Применяем режим только чтения если активен
             if (AppConfig.readOnlyMode?.isReadOnly) {
                 this._applyReadOnlyMode();
             }
+
+            // Сбрасываем флаги после init: дефолтное дерево/таблицы — это не
+            // правки пользователя, а bootstrap-состояние. После loadActContent
+            // данные перезапишутся и тоже не должны считаться "грязными".
+            StorageManager.markAsSyncedWithDB();
+            StorageManager.enableTracking();
         } catch (err) {
             console.error('Критическая ошибка инициализации приложения:', err);
             Notifications.error(`Ошибка инициализации приложения: ${err.message}`);
+            // Даже при ошибке снимаем tracking-гард, иначе все последующие
+            // правки пользователя перестанут трекаться.
+            StorageManager.enableTracking();
         }
     }
 
@@ -151,6 +221,19 @@ class App {
                 e.preventDefault();
                 e.stopImmediatePropagation();
 
+                // H5-A: коммитим pending-редактирование ячейки до сохранения.
+                // Без этого Ctrl+S во время editing'а ячейки уходил бы с старым content,
+                // потому что textarea.value попадает в AppState только на blur/Enter.
+                if (typeof tableManager !== 'undefined' && tableManager.cellsOps?.commitPendingEdit) {
+                    tableManager.cellsOps.commitPendingEdit();
+                }
+                // Аналогично для активного textblock-редактора (его blur синхронит innerHTML
+                // в textBlock.content через handleEditorBlur).
+                const activeEl = document.activeElement;
+                if (activeEl && activeEl.classList?.contains('textblock-editor')) {
+                    activeEl.blur();
+                }
+
                 // Сохранение с блокировкой + генерация
                 await StorageManager.forceSaveAsync();
 
@@ -170,7 +253,9 @@ class App {
     static goToStep(stepNum) {
         // Обновляем текущий шаг
         AppState.currentStep = stepNum;
-        localStorage.setItem(this._stepStorageKey, stepNum);
+        try {
+            localStorage.setItem(this._getStepKey(), stepNum);
+        } catch { /* quota — ignore */ }
 
         this._updateStepVisibility(stepNum);
         this._handleStepTransition(stepNum);
@@ -183,7 +268,11 @@ class App {
      * @private
      */
     static _restoreStep() {
-        const saved = localStorage.getItem(this._stepStorageKey);
+        let saved = localStorage.getItem(this._getStepKey());
+        if (!saved && window.currentActId) {
+            // Fallback на legacy-ключ — мигрируем значение в per-act, legacy потом удалится.
+            saved = localStorage.getItem(this._stepStorageKey);
+        }
         if (saved) {
             const step = parseInt(saved, 10);
             if (step === 2) {
@@ -239,8 +328,12 @@ class App {
      * @private
      */
     static _setupScrollPersistence() {
-        // Сохраняем позиции при уходе со страницы
-        window.addEventListener('beforeunload', () => this._saveScrollPositions());
+        // Сохраняем позиции при уходе со страницы (через общий реестр beforeunload).
+        if (typeof LifecycleHelper !== 'undefined') {
+            LifecycleHelper.registerBeforeUnload('app:scroll', () => this._saveScrollPositions());
+        } else {
+            window.addEventListener('beforeunload', () => this._saveScrollPositions());
+        }
 
         // Восстанавливаем позиции после полной отрисовки
         requestAnimationFrame(() => this._restoreScrollPositions());
@@ -262,15 +355,20 @@ class App {
         const step2 = document.getElementById('step2');
         if (step2) positions.step2 = step2.scrollTop;
 
-        localStorage.setItem(this._scrollStorageKey, JSON.stringify(positions));
+        try {
+            localStorage.setItem(this._getScrollKey(), JSON.stringify(positions));
+        } catch { /* quota — ignore */ }
     }
 
     /**
-     * Восстанавливает позиции скролла из localStorage
+     * Восстанавливает позиции скролла из localStorage (per-act ключ с fallback на legacy).
      * @private
      */
     static _restoreScrollPositions() {
-        const saved = localStorage.getItem(this._scrollStorageKey);
+        let saved = localStorage.getItem(this._getScrollKey());
+        if (!saved && window.currentActId) {
+            saved = localStorage.getItem(this._scrollStorageKey);
+        }
         if (!saved) return;
 
         try {
@@ -352,5 +450,9 @@ class App {
     }
 }
 
-// Запуск приложения при загрузке DOM
-document.addEventListener('DOMContentLoaded', () => App.init());
+// Window-globals для совместимости с inline-скриптами в шаблонах.
+// App.init() запускается из entries/constructor.js, НЕ здесь:
+// shared/api.js импортирует этот файл косвенно из portal-entry, и
+// module-level DOMContentLoaded-подписка стреляла на portal-страницах,
+// падая на AppState.generateNumbering (state-tree.js в portal не входит).
+window.App = App;

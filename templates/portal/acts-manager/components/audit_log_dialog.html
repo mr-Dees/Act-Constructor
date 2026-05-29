@@ -64,13 +64,19 @@
                     </div>
                 </div>
                 <div class="audit-log-list" id="auditLogList"></div>
-                <div class="audit-log-pagination" id="auditLogPagination"></div>
+                <div class="load-more-container" id="auditLogLoadMore" hidden>
+                    <span class="load-more-counter"></span>
+                    <button class="btn btn-secondary load-more-btn" data-action="load-more-log">Загрузить ещё</button>
+                </div>
             </div>
 
             <!-- Вкладка: Версии -->
             <div class="audit-log-tab-content hidden" data-tab-content="versions">
                 <div class="audit-log-list" id="versionsList"></div>
-                <div class="audit-log-pagination" id="versionsPagination"></div>
+                <div class="load-more-container" id="versionsLoadMore" hidden>
+                    <span class="load-more-counter"></span>
+                    <button class="btn btn-secondary load-more-btn" data-action="load-more-versions">Загрузить ещё</button>
+                </div>
             </div>
         </div>
     </div>

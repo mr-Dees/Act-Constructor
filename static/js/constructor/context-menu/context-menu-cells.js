@@ -2,7 +2,12 @@
  * Обработчик контекстного меню для ячеек таблицы.
  * Управляет операциями с ячейками: объединение, разъединение, вставка/удаление строк и колонок.
  */
-class CellContextMenu {
+import { ContextMenuManager } from './context-menu-core.js';
+import { PreviewManager } from '../preview/preview.js';
+import { AppState } from '../state/state-core.js';
+import { Notifications } from '../../shared/notifications.js';
+
+export class CellContextMenu {
     constructor(menu) {
         this.menu = menu;
         this.initHandlers();
@@ -778,13 +783,18 @@ class CellContextMenu {
 
     /**
      * Восстанавливает размеры ВСЕХ таблиц после операции.
+     *
+     * После миграции на per-node API (updateTable) сами cellsOps.* уже перерисовали затронутую
+     * таблицу и применили persisted-размеры. Здесь дополнительно накатываем снапшот размеров,
+     * захваченный saveTableSizes() ДО мутации — это нужно для операций без изменения колонок,
+     * чтобы пользовательские resize'ы не сбрасывались к дефолту из AppState.
      * @param {Object|null} allTableSizes - Сохраненные размеры (null = не восстанавливать из снапшота)
      */
     restoreTableSizes(allTableSizes) {
         if (AppState.currentStep === 2) {
-            ItemsRenderer.renderAll();
-
-            setTimeout(() => {
+            // updateTable, вызванный из cellsOps, уже асинхронно (через setTimeout 0) применил
+            // applyPersistedSizes. Чтобы наш снапшот лёг ПОВЕРХ — ждём следующий кадр.
+            requestAnimationFrame(() => {
                 document.querySelectorAll('.table-section').forEach(section => {
                     const tableId = section.dataset.tableId;
                     const tableEl = section.querySelector('.editable-table');
@@ -794,16 +804,18 @@ class CellContextMenu {
                             // Применяем размеры из снапшота (для операций без изменения колонок)
                             tableManager.applyTableSizes(tableEl, allTableSizes[tableId]);
                             tableManager.persistTableSizes(tableId, tableEl);
-                        } else {
-                            // Применяем размеры из AppState (для операций с изменением колонок)
-                            tableManager.applyPersistedSizes(tableId, tableEl);
                         }
+                        // Для операций с изменением колонок (allTableSizes=null) ничего не делаем —
+                        // applyPersistedSizes внутри updateTable уже отработал.
                     }
                 });
-            }, 50);
+            });
         } else {
             tableManager.renderAll();
             PreviewManager.update('previewTrim', 30);
         }
     }
 }
+
+// Window-globals для совместимости с inline-скриптами в шаблонах.
+window.CellContextMenu = CellContextMenu;

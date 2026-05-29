@@ -4,7 +4,13 @@
  * Управление текущей беседой, knowledge bases и доменами.
  * Интегрируется с ChatHistory через callback.
  */
-const ChatContext = {
+import { AppConfig } from '../app-config.js';
+import { AuthManager } from '../auth.js';
+import { ChatEventBus } from './chat-event-bus.js';
+import { ChatHistory } from './chat-history.js';
+import { ChatTitle } from './chat-title.js';
+
+export const ChatContext = {
 
     /** @type {boolean} */
     _initialized: false,
@@ -16,6 +22,14 @@ const ChatContext = {
 
     /** @type {Promise<string>|null} Pending promise для ensureConversation (защита от дублей) */
     _pendingEnsure: null,
+
+    /**
+     * Стабильная ссылка на обработчик `chat:clear` — нужна для парного `off()`
+     * в `destroy()`. Анонимная стрелка ломала бы симметрию: подписаться можно,
+     * отписаться — нет (handler-ссылку взять негде, повторный `init()` создал бы
+     * второй listener, утечка слушателей при горячей переинициализации).
+     */
+    _onChatClear: null,
 
     /**
      * Инициализация: подключение ChatHistory callback
@@ -31,12 +45,26 @@ const ChatContext = {
             ChatHistory.loadConversations();
         }
 
-        ChatEventBus.on('chat:clear', () => {
+        this._onChatClear = () => {
             this._currentConversationId = null;
             this._pendingEnsure = null;
-        });
+        };
+        ChatEventBus.on('chat:clear', this._onChatClear);
 
         this._initialized = true;
+    },
+
+    /**
+     * Снимает подписки и сбрасывает флаг инициализации.
+     * Парно `init()` — для случаев hot-reload и тестов.
+     */
+    destroy() {
+        if (!this._initialized) return;
+        if (this._onChatClear) {
+            ChatEventBus.off('chat:clear', this._onChatClear);
+            this._onChatClear = null;
+        }
+        this._initialized = false;
     },
 
     /**
@@ -98,7 +126,7 @@ const ChatContext = {
             this._currentConversationId = ChatHistory.getCurrentId();
         } else {
             // Fallback: создаём напрямую
-            const endpoint = '/api/v1/chat/conversations';
+            const endpoint = AppConfig.chatEndpoints.conversations;
             const url = typeof AppConfig !== 'undefined'
                 ? AppConfig.api.getUrl(endpoint)
                 : endpoint;
@@ -186,7 +214,7 @@ const ChatContext = {
 
         // Загружаем сообщения выбранной беседы
         try {
-            const endpoint = `/api/v1/chat/conversations/${conversationId}/messages`;
+            const endpoint = AppConfig.chatEndpoints.messages(conversationId);
             const url = typeof AppConfig !== 'undefined'
                 ? AppConfig.api.getUrl(endpoint)
                 : endpoint;
@@ -199,7 +227,8 @@ const ChatContext = {
             const response = await fetch(url, { headers });
             if (!response.ok) throw new Error(`HTTP ${response.status}`);
 
-            const messages = await response.json();
+            const data = await response.json();
+            const messages = data.items || [];
 
             ChatEventBus.emit('context:conversation-switched', {
                 conversationId,
@@ -225,8 +254,7 @@ const ChatContext = {
     async checkActiveForward(conversationId) {
         if (!conversationId) return null;
         try {
-            const endpoint =
-                `/api/v1/chat/conversations/${conversationId}/active-forward`;
+            const endpoint = AppConfig.chatEndpoints.activeForward(conversationId);
             const url = (typeof AppConfig !== 'undefined')
                 ? AppConfig.api.getUrl(endpoint)
                 : endpoint;

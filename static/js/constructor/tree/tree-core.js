@@ -4,7 +4,16 @@
  * Управляет состоянием, выделением и координацией между модулями.
  * Делегирует рендеринг и drag-and-drop специализированным классам.
  */
-class TreeManager {
+import { App } from '../app.js';
+import { ContextMenuManager } from '../context-menu/context-menu-core.js';
+import { ItemsTitleEditing } from '../items/items-title-editing.js';
+import { AppState } from '../state/state-core.js';
+import { TreeDragDrop } from './tree-drag-drop.js';
+import { TreeRenderer } from './tree-renderer.js';
+import { TreeUtils } from './tree-utils.js';
+import { AppConfig } from '../../shared/app-config.js';
+
+export class TreeManager {
     /**
      * @param {string} containerId - ID элемента-контейнера для дерева
      */
@@ -24,6 +33,9 @@ class TreeManager {
 
         // Запускаем обработчики для снятия выделения
         this.initDeselectionHandlers();
+
+        // Клавиатурная навигация по дереву (WAI-ARIA Treeview pattern).
+        this.initKeyboardNavigation();
 
         // Инициализируем drag-and-drop
         this.dragDrop.init();
@@ -56,9 +68,12 @@ class TreeManager {
      * Убирает все классы выделения и сбрасывает ссылки на выбранный узел.
      */
     clearSelection() {
-        // Убираем класс selected со всех элементов
+        // Убираем класс selected со всех элементов и сбрасываем aria-selected.
         this.container.querySelectorAll('.tree-item.selected')
-            .forEach(el => el.classList.remove('selected'));
+            .forEach(el => {
+                el.classList.remove('selected');
+                el.setAttribute('aria-selected', 'false');
+            });
 
         // Убираем класс parent-selected со всех родительских элементов
         this.container.querySelectorAll('.tree-item.parent-selected')
@@ -67,6 +82,11 @@ class TreeManager {
         // Сбрасываем выбранный узел
         this.selectedNode = null;
         AppState.selectedNode = null;
+
+        // Roving tabindex: при отсутствии выделенного — первый элемент должен быть фокусируемым.
+        if (this.renderer?._applyRovingTabindex) {
+            this.renderer._applyRovingTabindex();
+        }
     }
 
     /**
@@ -80,17 +100,26 @@ class TreeManager {
     selectNode(itemElement) {
         // Снимаем выделение со всех элементов
         this.container.querySelectorAll('.tree-item.selected')
-            .forEach(el => el.classList.remove('selected'));
+            .forEach(el => {
+                el.classList.remove('selected');
+                el.setAttribute('aria-selected', 'false');
+            });
         this.container.querySelectorAll('.tree-item.parent-selected')
             .forEach(el => el.classList.remove('parent-selected'));
 
         // Выделяем текущий элемент
         itemElement.classList.add('selected');
+        itemElement.setAttribute('aria-selected', 'true');
         this.selectedNode = itemElement.dataset.nodeId;
         AppState.selectedNode = this.selectedNode;
 
         // Подсвечиваем родительские элементы
         this._highlightParentNodes(itemElement);
+
+        // Roving tabindex: только выделенный treeitem должен быть в tab-order.
+        if (this.renderer?._applyRovingTabindex) {
+            this.renderer._applyRovingTabindex();
+        }
     }
 
     /**
@@ -262,7 +291,172 @@ class TreeManager {
     render(node = AppState.treeData) {
         this.renderer.render(node);
     }
+
+    /**
+     * Клавиатурная навигация (WAI-ARIA Treeview pattern):
+     * ArrowDown/Up — следующий/предыдущий видимый treeitem,
+     * ArrowRight — раскрыть свёрнутый или перейти к первому ребёнку,
+     * ArrowLeft — свернуть раскрытый или перейти к родителю,
+     * Home/End — первый/последний видимый,
+     * Enter — выделить узел (эквивалент клика),
+     * F2 — войти в режим редактирования заголовка.
+     */
+    initKeyboardNavigation() {
+        this.container.addEventListener('keydown', (e) => {
+            // Не перехватываем клавиши, если идёт редактирование (label.contentEditable).
+            if (this.editingElement) return;
+            const active = document.activeElement;
+            if (!active || !this.container.contains(active)) return;
+
+            const li = active.closest('li.tree-item');
+            if (!li) return;
+
+            const key = e.key;
+            if (![
+                'ArrowDown', 'ArrowUp', 'ArrowRight', 'ArrowLeft',
+                'Home', 'End', 'Enter', 'F2'
+            ].includes(key)) return;
+
+            e.preventDefault();
+            e.stopPropagation();
+
+            switch (key) {
+                case 'ArrowDown': {
+                    const next = this._nextVisibleTreeItem(li);
+                    if (next) this._focusTreeItem(next);
+                    break;
+                }
+                case 'ArrowUp': {
+                    const prev = this._prevVisibleTreeItem(li);
+                    if (prev) this._focusTreeItem(prev);
+                    break;
+                }
+                case 'ArrowRight': {
+                    if (li.hasAttribute('aria-expanded')) {
+                        if (li.classList.contains('collapsed')) {
+                            this._setExpanded(li, true);
+                        } else {
+                            // Уже раскрыт → к первому ребёнку.
+                            const childUl = li.querySelector(':scope > ul.tree-children');
+                            const firstChild = childUl?.querySelector(':scope > li.tree-item');
+                            if (firstChild) this._focusTreeItem(firstChild);
+                        }
+                    }
+                    break;
+                }
+                case 'ArrowLeft': {
+                    if (li.hasAttribute('aria-expanded') && !li.classList.contains('collapsed')) {
+                        this._setExpanded(li, false);
+                    } else {
+                        // Перейти к родителю.
+                        const parentUl = li.parentElement;
+                        const parentLi = parentUl?.closest('li.tree-item');
+                        if (parentLi) this._focusTreeItem(parentLi);
+                    }
+                    break;
+                }
+                case 'Home': {
+                    const first = this.container.querySelector('li.tree-item');
+                    if (first) this._focusTreeItem(first);
+                    break;
+                }
+                case 'End': {
+                    const all = this._allVisibleTreeItems();
+                    if (all.length) this._focusTreeItem(all[all.length - 1]);
+                    break;
+                }
+                case 'Enter': {
+                    this.selectNode(li);
+                    break;
+                }
+                case 'F2': {
+                    // Запуск редактирования заголовка: дёргаем dblclick-подобный путь.
+                    const label = li.querySelector(':scope > .tree-label');
+                    if (label && !li.classList.contains('protected') && typeof ItemsTitleEditing !== 'undefined') {
+                        const nodeId = li.dataset.nodeId;
+                        const node = (typeof TreeUtils !== 'undefined')
+                            ? TreeUtils.findNodeById(nodeId)
+                            : null;
+                        if (node) {
+                            const editTarget = label.querySelector('.tree-node-text') || label;
+                            ItemsTitleEditing.startEditingTreeNode(editTarget, node, this);
+                        }
+                    }
+                    break;
+                }
+            }
+        });
+    }
+
+    /**
+     * Все «видимые» treeitem'ы — те, чьи предки не collapsed.
+     * @private
+     * @returns {HTMLElement[]}
+     */
+    _allVisibleTreeItems() {
+        const all = Array.from(this.container.querySelectorAll('li.tree-item'));
+        return all.filter(li => {
+            // Если любой предок-tree-item имеет .collapsed — li невидим.
+            let parentLi = li.parentElement?.closest('li.tree-item');
+            while (parentLi) {
+                if (parentLi.classList.contains('collapsed')) return false;
+                parentLi = parentLi.parentElement?.closest('li.tree-item');
+            }
+            return true;
+        });
+    }
+
+    /** @private */
+    _nextVisibleTreeItem(li) {
+        const list = this._allVisibleTreeItems();
+        const idx = list.indexOf(li);
+        return idx >= 0 && idx < list.length - 1 ? list[idx + 1] : null;
+    }
+
+    /** @private */
+    _prevVisibleTreeItem(li) {
+        const list = this._allVisibleTreeItems();
+        const idx = list.indexOf(li);
+        return idx > 0 ? list[idx - 1] : null;
+    }
+
+    /**
+     * Раскрывает/сворачивает узел синхронно с toggle-иконкой и aria-expanded.
+     * @private
+     */
+    _setExpanded(li, expanded) {
+        if (!li.hasAttribute('aria-expanded')) return;
+        const isCollapsed = li.classList.contains('collapsed');
+        if (expanded && isCollapsed) {
+            li.classList.remove('collapsed');
+        } else if (!expanded && !isCollapsed) {
+            li.classList.add('collapsed');
+        } else {
+            return;
+        }
+        li.setAttribute('aria-expanded', expanded ? 'true' : 'false');
+        const toggle = li.querySelector(':scope > .toggle-icon');
+        if (toggle && AppConfig?.tree?.interaction?.toggleIcons) {
+            const icons = AppConfig.tree.interaction.toggleIcons;
+            toggle.textContent = expanded ? icons.expanded : icons.collapsed;
+        }
+    }
+
+    /**
+     * Переводит roving tabindex на указанный li и устанавливает фокус.
+     * @private
+     */
+    _focusTreeItem(li) {
+        // Сбрасываем tabindex у всех, ставим 0 на целевой.
+        this.container.querySelectorAll('li.tree-item').forEach(el => el.setAttribute('tabindex', '-1'));
+        li.setAttribute('tabindex', '0');
+        li.focus();
+    }
 }
 
 // Создаем глобальный экземпляр менеджера дерева
-const treeManager = new TreeManager('tree');
+export const treeManager = new TreeManager('tree');
+
+// Window-globals для совместимости с inline-скриптами в шаблонах.
+window.TreeManager = TreeManager;
+window.treeManager = treeManager;

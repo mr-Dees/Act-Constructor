@@ -3,6 +3,10 @@
  * Поддержка Ctrl+V для изображений и текста
  */
 
+import { PreviewManager } from '../preview/preview.js';
+import { ViolationManager } from './violation-core.js';
+import { Notifications } from '../../shared/notifications.js';
+
 // Расширение ViolationManager
 Object.assign(ViolationManager.prototype, {
     /**

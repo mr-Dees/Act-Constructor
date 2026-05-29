@@ -5,7 +5,10 @@
  * Обрабатывает переключение темы, настройки автосохранения,
  * параметры загрузки файлов и сохраняет все изменения в localStorage.
  */
-class SettingsMenuManager {
+import { StorageManager } from '../storage-manager.js';
+import { EscapeStack } from '../../shared/escape-stack.js';
+
+export class SettingsMenuManager {
     /** @private Состояние настроек приложения */
     static _state = {
         theme: 'light',
@@ -58,8 +61,7 @@ class SettingsMenuManager {
         // Предотвращаем закрытие при клике внутри меню
         menu?.addEventListener('click', e => e.stopPropagation());
 
-        // Закрытие по Escape
-        this._setupEscapeHandler();
+        // Закрытие по Escape — через EscapeStack (push в show, unsub в hide).
 
         // Обработчик переключения темы
         themeToggle?.addEventListener('change', () => {
@@ -125,6 +127,9 @@ class SettingsMenuManager {
         if (btn) {
             btn.classList.add('active');
         }
+        if (!this._escapeUnsub) {
+            this._escapeUnsub = EscapeStack.push(() => this.hide());
+        }
     }
 
     /**
@@ -140,6 +145,10 @@ class SettingsMenuManager {
         if (btn) {
             btn.classList.remove('active');
         }
+        if (this._escapeUnsub) {
+            this._escapeUnsub();
+            this._escapeUnsub = null;
+        }
     }
 
     /**
@@ -152,21 +161,6 @@ class SettingsMenuManager {
         } else {
             this.hide();
         }
-    }
-
-    /**
-     * Настраивает обработчик закрытия меню по клавише Escape
-     * @private
-     */
-    static _setupEscapeHandler() {
-        document.addEventListener('keydown', (e) => {
-            if (e.key === 'Escape') {
-                const menu = document.getElementById('settingsMenu');
-                if (menu && !menu.classList.contains('hidden')) {
-                    this.hide();
-                }
-            }
-        });
     }
 
     /**

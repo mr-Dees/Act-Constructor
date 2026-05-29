@@ -4,7 +4,9 @@
  * Создает модальные окна для подтверждения действий и информирования пользователя.
  * Наследует базовый функционал от DialogBase.
  */
-class DialogManager extends DialogBase {
+import { DialogBase } from './dialog-base.js';
+
+export class DialogManager extends DialogBase {
     /**
      * Показывает диалоговое окно с подтверждением
      *
@@ -19,6 +21,10 @@ class DialogManager extends DialogBase {
      * @param {boolean} [options.hideConfirm=false] - Скрыть кнопку подтверждения
      * @param {boolean} [options.allowEscape=true] - Разрешить закрытие по Escape
      * @param {boolean} [options.allowOverlayClose=true] - Разрешить закрытие кликом вне диалога
+     * @param {Function} [options.onMount] - Колбэк, синхронно вызываемый сразу после добавления overlay в DOM.
+     *                                       Получает overlay-элемент и close-handle: `({ overlay, close })`.
+     *                                       `close(result)` программно закрывает диалог и резолвит промис.
+     *                                       Используйте вместо `querySelector('.custom-dialog-overlay:last-child')` — без race.
      * @returns {Promise<boolean>} Promise, который резолвится true при подтверждении, false при отмене
      */
     static show(options = {}) {
@@ -32,7 +38,8 @@ class DialogManager extends DialogBase {
             hideCancel = false,
             hideConfirm = false,
             allowEscape = true,
-            allowOverlayClose = true
+            allowOverlayClose = true,
+            onMount = null
         } = options;
 
         return new Promise((resolve) => {
@@ -62,6 +69,19 @@ class DialogManager extends DialogBase {
 
             // Показываем диалог
             this._showDialog(overlay);
+
+            // Колбэк монтирования: передаём overlay и программный close.
+            // Вызываем СИНХРОННО после _showDialog — overlay уже в DOM, race с querySelector исключён.
+            if (typeof onMount === 'function') {
+                const close = (result = false) => {
+                    this._closeAndResolve(overlay, resolve, result);
+                };
+                try {
+                    onMount({ overlay, close });
+                } catch (e) {
+                    console.error('DialogManager.show.onMount error:', e);
+                }
+            }
 
             // Определяем результат при закрытии Esc/overlay
             // hideCancel=true -> закрытие возвращает true (как подтверждение)

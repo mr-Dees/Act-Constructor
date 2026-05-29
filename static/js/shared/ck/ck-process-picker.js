@@ -2,7 +2,9 @@
  * Popup-диалог выбора бизнес-процесса.
  * Extends DialogBase — использует overlay, анимации, Escape.
  */
-class CkProcessPicker extends DialogBase {
+import { DialogBase } from '../dialog/dialog-base.js';
+
+export class CkProcessPicker extends DialogBase {
     static _overlay = null;
     static _processes = [];
     static _onSelect = null;

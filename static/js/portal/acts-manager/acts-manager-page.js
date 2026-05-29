@@ -5,7 +5,22 @@
  * дублирование и удаление. При редактировании метаданных выполняется логика блокировки
  * через LockManager и безопасного сохранения перед выходом, аналогично поведению конструктора.
  */
-class ActsManagerPage {
+import { LockManager } from '../../constructor/lock-manager.js';
+import { ActsBroadcast } from './acts-broadcast.js';
+import { AuditLogDialog } from './dialog-audit-log.js';
+import { CreateActDialog } from './dialog-create-act.js';
+import { AppConfig } from '../../shared/app-config.js';
+import { AuthManager } from '../../shared/auth.js';
+import { DialogManager } from '../../shared/dialog/dialog-confirm.js';
+import { Notifications } from '../../shared/notifications.js';
+
+export class ActsManagerPage {
+    /* --- Состояние пагинации (load-more) --- */
+    static _pageSize = 50;
+    static _offset = 0;
+    static _total = 0;
+    static _loadingMore = false;
+
     /* --- Утилиты форматирования --- */
 
     /**
@@ -205,6 +220,11 @@ class ActsManagerPage {
         const container = document.getElementById('actsListContainer');
         if (!container) return;
 
+        // Сбрасываем состояние пагинации — это всегда загрузка с нуля.
+        this._offset = 0;
+        this._total = 0;
+        this._loadingMore = false;
+
         // Показываем загрузку
         this._showLoading(container);
 
@@ -215,15 +235,19 @@ class ActsManagerPage {
                 throw new Error('Пользователь не авторизован');
             }
 
-            const response = await fetch(AppConfig.api.getUrl('/api/v1/acts/list'), {
-                headers: {'X-JupyterHub-User': username}
-            });
+            const url = AppConfig.api.getUrl(
+                `/api/v1/acts/list?limit=${this._pageSize}&offset=0`
+            );
+            const response = await fetch(url, { headers: {} });
 
             if (!response.ok) {
                 throw new Error('Ошибка загрузки списка актов');
             }
 
-            const acts = await response.json();
+            const data = await response.json();
+            const acts = data.items || [];
+            this._total = data.total || acts.length;
+            this._offset = acts.length;
 
             if (!acts.length) {
                 this._showEmptyState(container);
@@ -231,12 +255,91 @@ class ActsManagerPage {
             }
 
             this._renderActsGrid(acts, container);
+            this._renderLoadMore(container);
 
         } catch (error) {
             console.error('Ошибка загрузки актов:', error);
             this._showErrorState(container);
             Notifications.error('Ошибка загрузки списка актов');
         }
+    }
+
+    /**
+     * Подгружает следующую страницу актов и дописывает карточки в существующий грид.
+     * @private
+     */
+    static async _loadMore() {
+        if (this._loadingMore) return;
+        if (this._offset >= this._total) return;
+
+        const container = document.getElementById('actsListContainer');
+        if (!container) return;
+        const grid = container.querySelector('.acts-grid');
+        if (!grid) return;
+
+        this._loadingMore = true;
+        const btn = container.querySelector('.acts-load-more-btn');
+        if (btn) {
+            btn.disabled = true;
+            btn.textContent = 'Загрузка...';
+        }
+
+        try {
+            const url = AppConfig.api.getUrl(
+                `/api/v1/acts/list?limit=${this._pageSize}&offset=${this._offset}`
+            );
+            const response = await fetch(url, { headers: {} });
+            if (!response.ok) {
+                throw new Error('Ошибка загрузки списка актов');
+            }
+
+            const data = await response.json();
+            const acts = data.items || [];
+            this._total = data.total || this._total;
+            this._offset += acts.length;
+
+            acts.forEach(act => {
+                const card = this._createActCard(act);
+                if (card) grid.appendChild(card);
+            });
+
+            this._renderLoadMore(container);
+        } catch (error) {
+            console.error('Ошибка подгрузки актов:', error);
+            Notifications.error('Не удалось загрузить ещё акты');
+            if (btn) {
+                btn.disabled = false;
+                btn.textContent = 'Загрузить ещё';
+            }
+        } finally {
+            this._loadingMore = false;
+        }
+    }
+
+    /**
+     * Создаёт/обновляет кнопку «Загрузить ещё» под гридом.
+     * Скрывается (удаляется), когда загружены все акты (offset >= total).
+     * @private
+     * @param {HTMLElement} container - Контейнер списка актов
+     */
+    static _renderLoadMore(container) {
+        let btn = container.querySelector('.acts-load-more-btn');
+
+        if (this._offset >= this._total) {
+            if (btn) btn.remove();
+            return;
+        }
+
+        if (!btn) {
+            btn = document.createElement('button');
+            btn.type = 'button';
+            btn.className = 'btn btn-secondary acts-load-more-btn';
+            btn.addEventListener('click', () => this._loadMore());
+            container.appendChild(btn);
+        }
+        btn.disabled = false;
+        const remaining = this._total - this._offset;
+        btn.textContent = `Загрузить ещё (осталось ${remaining})`;
     }
 
     /**
@@ -275,6 +378,10 @@ class ActsManagerPage {
         if (errorState) {
             container.innerHTML = '';
             container.appendChild(errorState);
+            const reloadBtn = container.querySelector('[data-action="reload-acts"]');
+            if (reloadBtn) {
+                reloadBtn.addEventListener('click', () => this.loadActs());
+            }
         }
     }
 
@@ -349,23 +456,12 @@ class ActsManagerPage {
         // Проверяем, может ли пользователь редактировать (не Участник)
         const canEdit = act.user_role !== 'Участник';
 
-        // Деактивируем кнопки для роли "Участник"
-        // Примечание: кнопка "Дублировать" остаётся активной - Участник может
+        // Скрываем кнопки редактирования и удаления для роли "Участник"
+        // Примечание: кнопка "Дублировать" остаётся активной — Участник может
         // дублировать акт и станет Редактором в новом акте
         if (!canEdit) {
-            const readOnlyTooltip = 'Редактирование недоступно для роли "Участник"';
-
-            if (editBtn) {
-                editBtn.disabled = true;
-                editBtn.classList.add('disabled');
-                editBtn.title = readOnlyTooltip;
-            }
-            // duplicateBtn остаётся активной для Участника
-            if (deleteBtn) {
-                deleteBtn.disabled = true;
-                deleteBtn.classList.add('disabled');
-                deleteBtn.title = 'Удаление недоступно для роли "Участник"';
-            }
+            if (editBtn) editBtn.hidden = true;
+            if (deleteBtn) deleteBtn.hidden = true;
         }
 
         // Универсальный helper для безопасного клика по кнопке
@@ -457,12 +553,16 @@ class ActsManagerPage {
         }
         this._editingActInProgress = true;
 
+        // Признак, что diалог реально открылся и сброс _editingActInProgress
+        // должен случиться внутри safeClose. Иначе finally сбросит флаг сразу.
+        let dialogOpened = false;
+
         try {
             const username = AuthManager.getCurrentUser();
             if (!username) throw new Error('Пользователь не авторизован');
 
             const response = await fetch(AppConfig.api.getUrl(`/api/v1/acts/${actId}`), {
-                headers: {'X-JupyterHub-User': username}
+                headers: {}
             });
             if (!response.ok) throw new Error('Ошибка загрузки акта');
 
@@ -497,8 +597,25 @@ class ActsManagerPage {
 
             // сохраняем ссылку, чтобы использовать корректный контекст
             const dialogClass = CreateActDialog;
+            const pageClass = this;
+
+            // Запоминаем overlay этого диалога, чтобы safeClose не перезатёр
+            // _closeDialog для следующего диалога, открытого поверх (race).
+            let expectedOverlay = null;
 
             CreateActDialog._closeDialog = async function safeClose() {
+                // Race-guard: если поверх нас уже открыли другой диалог
+                // (CreateActDialog._currentDialog указывает на иной overlay),
+                // делегируем оригиналу без сайд-эффектов — этот editAct
+                // больше не «владеет» состоянием диалога.
+                if (expectedOverlay && dialogClass._currentDialog !== expectedOverlay) {
+                    console.warn('[ActsManagerPage] safeClose: overlay изменился — оригинальный close без unlock');
+                    CreateActDialog._closeDialog = originalClose;
+                    pageClass._editingActInProgress = false;
+                    originalClose();
+                    return;
+                }
+
                 try {
                     if (!dialogClass._isSaving && lockAcquired) {
                         dialogClass._isSaving = true;
@@ -529,17 +646,27 @@ class ActsManagerPage {
                     // 3️⃣ восстанавливаем оригинальное закрытие
                     CreateActDialog._closeDialog = originalClose;
                     dialogClass._isSaving = false;
+                    // Защиту _editingActInProgress держим до фактического
+                    // закрытия диалога — иначе второй клик «Редактировать»
+                    // во время открытого диалога перерегистрирует safeClose.
+                    pageClass._editingActInProgress = false;
                     console.log('[ActsManagerPage] Закрытие диалога после сохранения и unlock');
                     originalClose();
                 }
             };
 
             CreateActDialog.showEdit(actData, status);
+            expectedOverlay = dialogClass._currentDialog;
+            dialogOpened = true;
         } catch (err) {
             console.error('Ошибка editAct:', err);
             Notifications.error(err.message);
         } finally {
-            this._editingActInProgress = false;
+            // Сбрасываем флаг только если diалог НЕ открылся (early-return / ошибка).
+            // Если открылся — сброс делает safeClose при фактическом закрытии.
+            if (!dialogOpened) {
+                this._editingActInProgress = false;
+            }
         }
     }
 
@@ -568,7 +695,7 @@ class ActsManagerPage {
 
             const response = await fetch(AppConfig.api.getUrl(`/api/v1/acts/${actId}/duplicate`), {
                 method: 'POST',
-                headers: {'X-JupyterHub-User': username}
+                headers: {}
             });
 
             if (!response.ok) {
@@ -590,6 +717,10 @@ class ActsManagerPage {
             const newAct = await response.json();
 
             Notifications.success(`Копия создана: ${newAct.inspection_name}`);
+
+            if (typeof ActsBroadcast !== 'undefined') {
+                ActsBroadcast.notify('act:duplicated', {sourceId: actId, newId: newAct.id});
+            }
 
             const openNewAct = await DialogManager.show({
                 title: 'Копия создана',
@@ -637,7 +768,7 @@ class ActsManagerPage {
 
             const response = await fetch(AppConfig.api.getUrl(`/api/v1/acts/${actId}`), {
                 method: 'DELETE',
-                headers: {'X-JupyterHub-User': username}
+                headers: {}
             });
 
             if (!response.ok) {
@@ -650,6 +781,10 @@ class ActsManagerPage {
             }
 
             Notifications.success('Акт успешно удален');
+
+            if (typeof ActsBroadcast !== 'undefined') {
+                ActsBroadcast.notify('act:deleted', {actId});
+            }
 
             // Обновляем список актов
             await this.loadActs();
@@ -691,6 +826,27 @@ class ActsManagerPage {
             refreshBtn.addEventListener('click', () => {
                 this.loadActs();
             });
+        }
+
+        // Cross-tab синхронизация: при удалении/дублировании/обновлении акта
+        // в другой вкладке — перезагружаем список
+        if (typeof ActsBroadcast !== 'undefined') {
+            this._unsubscribeBroadcast = ActsBroadcast.subscribe((msg) => {
+                if (!msg || typeof msg.type !== 'string') return;
+                if (msg.type === 'act:deleted' || msg.type === 'act:duplicated' || msg.type === 'act:updated') {
+                    this.loadActs();
+                }
+            });
+        }
+    }
+
+    /**
+     * Освобождает подписки страницы. Вызывается перед уходом со страницы.
+     */
+    static destroy() {
+        if (typeof this._unsubscribeBroadcast === 'function') {
+            this._unsubscribeBroadcast();
+            this._unsubscribeBroadcast = null;
         }
     }
 

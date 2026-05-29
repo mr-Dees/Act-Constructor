@@ -5,40 +5,25 @@
  * текст с markdown, код с подсветкой, reasoning, plan, файлы, изображения, кнопки.
  * Поддерживает стриминг через createStreamingBlock().
  */
-const ChatRenderer = {
+import { AppConfig } from '../app-config.js';
+import { AuthManager } from '../auth.js';
+import { ClientActionsRegistry } from './chat-client-actions.js';
+import { EscapeStack } from '../escape-stack.js';
+import { SafeHTML } from '../sanitize.js';
+
+export const ChatRenderer = {
 
     /**
-     * Безопасная установка innerHTML с санитизацией через DOMPurify.
-     *
-     * Все вызовы innerHTML с результатом _markdownToHtml() должны идти
-     * через эту функцию, чтобы XSS-полезная нагрузка из ответа LLM или
-     * внешнего агента не исполнилась в DOM.
-     *
-     * Если DOMPurify не подключён (vendor-файл отсутствует) — пишем warning
-     * в консоль и подставляем html как есть. На проде DOMPurify обязателен;
-     * fallback нужен только чтобы интерфейс не падал в dev-среде без vendor.
+     * Безопасная установка innerHTML — делегируется в SafeHTML.set,
+     * см. static/js/shared/sanitize.js. Fallback при отсутствии DOMPurify
+     * пишет textContent (НЕ raw HTML — закрывает регрессию I-DOM-FB).
      *
      * @param {HTMLElement} el — DOM-элемент, в который ставим html
      * @param {string} html — HTML-строка (после _markdownToHtml)
      * @private
      */
     _safeSetHtml(el, html) {
-        if (!el) return;
-        if (window.DOMPurify && typeof window.DOMPurify.sanitize === 'function') {
-            el.innerHTML = window.DOMPurify.sanitize(html, {
-                USE_PROFILES: { html: true },
-            });
-            return;
-        }
-        if (!ChatRenderer._dompurifyWarned) {
-            console.warn(
-                'ChatRenderer: DOMPurify не подключён; HTML вставляется без'
-                + ' санитизации. Подключи static/vendor/dompurify/purify.min.js'
-                + ' до chat-renderer.js.'
-            );
-            ChatRenderer._dompurifyWarned = true;
-        }
-        el.innerHTML = html;
+        SafeHTML.set(el, html);
     },
 
     /**
@@ -750,8 +735,10 @@ const ChatRenderer = {
      * @private
      */
     _getFileUrl(fileId) {
-        const path = `/api/v1/chat/files/${fileId}`;
-        return (typeof AppConfig !== 'undefined') ? AppConfig.api.getUrl(path) : path;
+        if (typeof AppConfig === 'undefined') {
+            return `/api/v1/chat/files/${fileId}`;
+        }
+        return AppConfig.api.getUrl(AppConfig.chatEndpoints.file(fileId));
     },
 
     /**
@@ -780,13 +767,9 @@ const ChatRenderer = {
             if (e.target === overlay) ChatRenderer._closeFileViewer();
         });
 
-        ChatRenderer._fileViewerEscHandler = (e) => {
-            if (e.key === 'Escape') {
-                e.stopImmediatePropagation();
-                ChatRenderer._closeFileViewer();
-            }
-        };
-        document.addEventListener('keydown', ChatRenderer._fileViewerEscHandler);
+        ChatRenderer._fileViewerEscUnsub = EscapeStack.push(() => {
+            ChatRenderer._closeFileViewer();
+        });
 
         // Модальный контейнер
         const modal = document.createElement('div');
@@ -885,9 +868,9 @@ const ChatRenderer = {
     _closeFileViewer() {
         const existing = document.querySelector('.chat-file-viewer-overlay');
         if (existing) existing.remove();
-        if (ChatRenderer._fileViewerEscHandler) {
-            document.removeEventListener('keydown', ChatRenderer._fileViewerEscHandler);
-            ChatRenderer._fileViewerEscHandler = null;
+        if (ChatRenderer._fileViewerEscUnsub) {
+            ChatRenderer._fileViewerEscUnsub();
+            ChatRenderer._fileViewerEscUnsub = null;
         }
     },
 

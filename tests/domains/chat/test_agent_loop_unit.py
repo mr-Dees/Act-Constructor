@@ -77,7 +77,7 @@ def _make_response(*, content=None, tool_calls=None):
 
 def _make_orch():
     orch = Orchestrator(
-        msg_service=AsyncMock(get_history=AsyncMock(return_value=[])),
+        msg_service=AsyncMock(load_history_for_llm=AsyncMock(return_value=[])),
         conv_service=AsyncMock(),
         settings=_gigachat_settings(),
     )
@@ -153,7 +153,7 @@ async def test_non_gigachat_executes_all_tool_calls_in_single_round():
     ])
 
     orch = Orchestrator(
-        msg_service=AsyncMock(get_history=AsyncMock(return_value=[])),
+        msg_service=AsyncMock(load_history_for_llm=AsyncMock(return_value=[])),
         conv_service=AsyncMock(),
         settings=_gigachat_settings(profile="sglang"),
     )

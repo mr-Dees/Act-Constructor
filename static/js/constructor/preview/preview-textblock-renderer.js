@@ -4,7 +4,9 @@
  * Создает HTML-представление текстовых блоков с сохранением
  * форматирования и стилей.
  */
-class PreviewTextBlockRenderer {
+import { SafeHTML } from '../../shared/sanitize.js';
+
+export class PreviewTextBlockRenderer {
     /**
      * Создает элемент текстового блока
      *
@@ -38,7 +40,8 @@ class PreviewTextBlockRenderer {
         content.className = 'preview-textblock-content';
 
         this._applyFormatting(content, textBlock.formatting);
-        content.innerHTML = textBlock.content;
+        // textBlock.content — пользовательский HTML, см. C-XSS-1.
+        SafeHTML.set(content, textBlock.content);
 
         return content;
     }
@@ -59,3 +62,6 @@ class PreviewTextBlockRenderer {
         }
     }
 }
+
+// Window-globals для совместимости с inline-скриптами в шаблонах.
+window.PreviewTextBlockRenderer = PreviewTextBlockRenderer;

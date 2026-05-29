@@ -6,7 +6,10 @@
  * - Workflow dashboard с проектами (заглушка)
  * - AI-чат ассистент (заглушка)
  */
-class LandingPage {
+import { LandingSettingsManager } from '../portal-settings.js';
+import { ChatManager } from '../../shared/chat/chat-manager.js';
+
+export class LandingPage {
     static _chatCollapsed = false;
 
     /**

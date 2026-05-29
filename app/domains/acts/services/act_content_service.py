@@ -21,6 +21,7 @@ from app.domains.acts.schemas.act_content import ActDataSchema
 from app.domains.acts.services.access_guard import AccessGuard
 from app.domains.acts.settings import ActsSettings
 from app.domains.acts.utils import ActTreeUtils
+from app.domains.acts.utils.html_sanitizer import sanitize_act_data, sanitize_tree_nodes
 
 logger = logging.getLogger("audit_workstation.service.acts.content")
 
@@ -92,6 +93,10 @@ class ActContentService:
         # Валидация дерева перед сохранением
         self._validate_tree(data)
 
+        # XSS-санитизация всех HTML-полей (textBlocks/violations/дерево)
+        # перед записью в БД. Whitelist в utils/html_sanitizer.py.
+        self._sanitize_html_fields(data)
+
         # Вычисляем diff ДО сохранения
         diff = await self._audit.compute_content_diff(act_id, data)
         diff["save_type"] = data.saveType
@@ -127,6 +132,19 @@ class ActContentService:
             )
 
         return result
+
+    def _sanitize_html_fields(self, data: ActDataSchema) -> None:
+        """
+        Чистит все HTML-поля до безопасного подмножества тегов/атрибутов.
+
+        Делегирует в utils/html_sanitizer.sanitize_act_data — общая логика
+        переиспользуется при восстановлении версий (AuditLogService).
+        """
+        sanitize_act_data(data)
+
+    def _sanitize_tree_nodes(self, node: dict) -> None:
+        """Рекурсивно чистит content в узлах дерева (узлы хранятся как dict)."""
+        sanitize_tree_nodes(node)
 
     def _validate_tree(self, data: ActDataSchema) -> None:
         """Проверяет структуру дерева перед сохранением."""

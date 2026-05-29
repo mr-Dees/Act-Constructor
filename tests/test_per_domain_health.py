@@ -248,3 +248,24 @@ def test_existing_health_still_works():
     resp = client.get("/health")
     assert resp.status_code == 200
     assert resp.json()["status"] == "ok"
+
+
+def test_root_health_registered_without_api_prefix():
+    """Корневой /health должен быть доступен без префикса /api/v1.
+
+    Регрессия: api_v1_router монтируется с префиксом, поэтому
+    /api/v1/health работает, но внешние поллеры (Docker/k8s/JupyterHub
+    proxy) бьются в /health и получали 404 — лог пухнул. Корневой
+    роут регистрируется в create_app() рядом с favicon.
+    """
+    app = FastAPI()
+
+    @app.get("/health", include_in_schema=False)
+    async def root_health():
+        return {"status": "ok"}
+
+    app.include_router(system_router, prefix="/api/v1")
+
+    client = TestClient(app)
+    assert client.get("/health").status_code == 200
+    assert client.get("/api/v1/health").status_code == 200

@@ -56,10 +56,10 @@ body.dialog-open.has-scrollbar {
 
 /* Множественные оверлеи для вложенных диалогов */
 .custom-dialog-overlay[data-level="2"] {
-    z-index: calc(var(--z-modal-backdrop) + 100);
+    z-index: var(--z-modal-elevated);
     background: var(--overlay-bg-darker);
 }
 
 .custom-dialog-overlay[data-level="2"] > .custom-dialog {
-    z-index: calc(var(--z-modal) + 100);
+    z-index: var(--z-popover-elevated);
 }

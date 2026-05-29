@@ -3,7 +3,13 @@
  * Координирует рендеринг, редактирование и взаимодействие с ячейками.
  * Делегирует операции с ячейками в TableCellsOperations и изменение размеров в TableSizes.
  */
-class TableManager {
+import { ContextMenuManager } from '../context-menu/context-menu-core.js';
+import { AppState } from '../state/state-core.js';
+import { TableCellsOperations } from './table-cells-operations.js';
+import { TableSizes } from './table-sizes.js';
+import { Notifications } from '../../shared/notifications.js';
+
+export class TableManager {
     constructor(containerId) {
         // DOM-контейнер для отображения всех таблиц
         this.container = document.getElementById(containerId);
@@ -69,6 +75,18 @@ class TableManager {
      */
     attachEventListeners() {
         const container = document.getElementById('itemsContainer');
+        if (!container) return;
+        this.attachEventListenersToContainer(container);
+    }
+
+    /**
+     * Привязка cell/handle-обработчиков ТОЛЬКО к ячейкам внутри указанного контейнера.
+     * Используется per-node API в ItemsRenderer (updateTable/updateItem), чтобы НЕ навешивать
+     * слушатели повторно на все таблицы в #itemsContainer (это привело бы к мульти-срабатыванию).
+     * Контейнер должен содержать только что созданные cell-элементы без существующих листенеров.
+     * @param {HTMLElement} container - DOM-элемент, в котором искать td/th/resize-handle
+     */
+    attachEventListenersToContainer(container) {
         if (!container) return;
 
         // Обработка событий на ячейках
@@ -325,4 +343,8 @@ class TableManager {
 }
 
 // Глобальный экземпляр для управления всеми таблицами в приложении
-const tableManager = new TableManager('tablesContainer');
+export const tableManager = new TableManager('tablesContainer');
+
+// Window-globals для совместимости с inline-скриптами в шаблонах.
+window.TableManager = TableManager;
+window.tableManager = tableManager;

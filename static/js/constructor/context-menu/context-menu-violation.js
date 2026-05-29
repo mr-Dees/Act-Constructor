@@ -1,7 +1,10 @@
 /**
  * Обработчик контекстного меню для нарушений
  */
-class ViolationContextMenu {
+import { ContextMenuManager } from './context-menu-core.js';
+import { PreviewManager } from '../preview/preview.js';
+
+export class ViolationContextMenu {
     constructor() {
         this.currentMenu = null;
     }
@@ -172,3 +175,6 @@ class ViolationContextMenu {
         }
     }
 }
+
+// Window-globals для совместимости с inline-скриптами в шаблонах.
+window.ViolationContextMenu = ViolationContextMenu;

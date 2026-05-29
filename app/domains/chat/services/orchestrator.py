@@ -250,7 +250,7 @@ class Orchestrator:
         передаются с полным контентом; более старые — с placeholder'ами
         вместо file/image-блоков, чтобы не расходовать RAM на base64.
         """
-        history = await self.msg_service.get_history(conversation_id)
+        history = await self.msg_service.load_history_for_llm(conversation_id)
 
         # Ограничиваем историю по настройкам
         if len(history) > self.settings.max_history_length:

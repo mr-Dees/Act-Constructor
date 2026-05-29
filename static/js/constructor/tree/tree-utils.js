@@ -4,7 +4,10 @@
  * Централизованные функции поиска, обхода и манипуляции узлами дерева.
  * Используется всеми модулями для избежания дублирования логики.
  */
-const TreeUtils = {
+import { AppState } from '../state/state-core.js';
+import { AppConfig } from '../../shared/app-config.js';
+
+export const TreeUtils = {
     /**
      * Находит узел по ID
      * @param {string} nodeId - ID искомого узла
@@ -271,7 +274,7 @@ const TreeUtils = {
      * @returns {boolean} true если узел под разделом 5
      */
     isUnderSection5(node) {
-        return node.number && node.number.startsWith('5.') && (!node.type || node.type === 'item');
+        return node.number && node.number.startsWith('5.') && (!node.type || node.type === AppConfig.nodeTypes.ITEM);
     },
 
     /**
@@ -281,7 +284,7 @@ const TreeUtils = {
      */
     isTbLeaf(node) {
         if (!this.isUnderSection5(node)) return false;
-        const itemChildren = (node.children || []).filter(c => !c.type || c.type === 'item');
+        const itemChildren = (node.children || []).filter(c => !c.type || c.type === AppConfig.nodeTypes.ITEM);
         return itemChildren.length === 0;
     },
 
@@ -291,7 +294,7 @@ const TreeUtils = {
      * @returns {string[]} Массив аббревиатур ТБ
      */
     getComputedTb(node) {
-        const itemChildren = (node.children || []).filter(c => !c.type || c.type === 'item');
+        const itemChildren = (node.children || []).filter(c => !c.type || c.type === AppConfig.nodeTypes.ITEM);
         if (itemChildren.length === 0) return node.tb || [];
 
         const allTbs = new Set();
@@ -307,13 +310,54 @@ const TreeUtils = {
      * @returns {boolean} true если это закреплённая таблица
      */
     isPinnedTable(node) {
-        if (node.type !== 'table') return false;
-        if (node.isMetricsTable || node.isMainMetricsTable) return true;
-        if (node.tableId) {
-            const table = AppState.tables[node.tableId];
-            if (table && (table.isRegularRiskTable || table.isOperationalRiskTable)) return true;
-        }
-        return false;
+        if (node.type !== AppConfig.nodeTypes.TABLE) return false;
+        // E-2: все pinned-флаги читаем с node (унифицировано с metrics).
+        // Risk-флаги мигрируются на node в api.js::loadActContent для старых актов.
+        // Tax и Other — новые типы (acts-features-bundle): оба тоже pinned.
+        return !!(
+            node.isMetricsTable ||
+            node.isMainMetricsTable ||
+            node.isRegularRiskTable ||
+            node.isOperationalRiskTable ||
+            node.isTaxRiskTable ||
+            node.isOtherRiskTable
+        );
+    },
+
+    /**
+     * Находит риск-таблицы в поддереве. E-4: единая утилита взамен двух дубликатов
+     * (state-content.js::_findRiskTablesInSubtree и tree-drag-drop.js::_hasRiskTablesInSubtree).
+     *
+     * Учитывает regular / operational / tax / other. Все четыре типа —
+     * полноправные риски: участвуют в формировании/удержании сводных таблиц и
+     * блокируются от перемещения за пределы раздела 5.
+     *
+     * @param {Object} node - Корневой узел поддерева
+     * @param {{firstOnly?: boolean}} [opts] - firstOnly:true — ранний выход после первой находки.
+     * @returns {Array<Object>} Массив узлов риск-таблиц (≤1 элемента при firstOnly).
+     */
+    findRiskTables(node, opts = {}) {
+        const result = [];
+        const firstOnly = !!opts.firstOnly;
+        const TABLE = AppConfig.nodeTypes.TABLE;
+
+        const walk = (n) => {
+            if (!n) return false;
+            // Все 4 типа риск-таблиц учитываются (включая «прочий»).
+            if (n.type === TABLE && (n.isRegularRiskTable || n.isOperationalRiskTable || n.isTaxRiskTable || n.isOtherRiskTable)) {
+                result.push(n);
+                if (firstOnly) return true;
+            }
+            if (n.children) {
+                for (const child of n.children) {
+                    if (walk(child)) return true;
+                }
+            }
+            return false;
+        };
+
+        walk(node);
+        return result;
     },
 
     /**
@@ -341,3 +385,6 @@ const TreeUtils = {
         return node.label || `Узел ${nodeId}`;
     }
 };
+
+// Window-globals для совместимости с inline-скриптами в шаблонах.
+window.TreeUtils = TreeUtils;

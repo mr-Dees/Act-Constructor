@@ -15,7 +15,7 @@
 - [ ] **`JUPYTERHUB_USER`** в окружении процесса. Без неё username по умолчанию `unknown_user`, RBAC сломается. В JupyterHub Datalab переменная ставится автоматически; при запуске вне JupyterHub — выставить вручную (`export JUPYTERHUB_USER=<digits>_<...>`).
 - [ ] **`.env` сверен с `.env.example`**. После предыдущего деплоя в `.env.example` мог появиться обязательный ключ или поменяться дефолт. Команда быстрой сверки на Windows PowerShell:
   ```powershell
-  diff -u .env.example .env | Select-String "^[+-][^+-]"
+  Compare-Object (Get-Content .env.example) (Get-Content .env)
   ```
   Особо проверить: `CHAT__*`, `ACTS__*`, `OBSERVABILITY__*`, `SECURITY__*`. Wave 1 добавил `CHAT__AGENT_BRIDGE__MAX_BLOCK_TEXT_SIZE=262144` (см. dev-guide §9.5).
 - [ ] **`DATABASE__TABLE_PREFIX`** соответствует БД. Дефолт `t_db_oarb_audit_act_`. При смене окружения проверить, что таблицы существуют под тем же префиксом — иначе `create_tables_if_not_exist` поднимет новый набор пустых таблиц и фактические данные «исчезнут».
@@ -102,6 +102,8 @@ sed 's/{SCHEMA}/<gp_schema>/g; s/{PREFIX}/t_db_oarb_audit_act_/g' \
     app/domains/admin/migrations/greenplum/schema.sql | psql ...
 ```
 
+(Linux/JupyterHub окружение. Под Windows эквивалент — ручная замена в редакторе или PowerShell `(Get-Content ...) -replace ...`.)
+
 ---
 
 ## 4. Rollback protocol
@@ -112,13 +114,7 @@ sed 's/{SCHEMA}/<gp_schema>/g; s/{PREFIX}/t_db_oarb_audit_act_/g' \
 2. **`git checkout <previous-tag>`** в рабочем каталоге.
 3. **Проверить совместимость БД-схемы.** Если в новой версии были `ALTER TABLE` / новые колонки, и старая версия их не ждёт — это OK (старая версия читает подмножество колонок). Если же старая версия пишет в колонку, которой в новой версии нет — деплой нельзя откатывать без backup'а.
 4. **Старт по §2.**
-5. **Проверить zombie streaming-сообщения.** Если в момент рестарта были активные forward'ы, runner'ы оборвались. Reconcile подхватит их через `schedule_pending(older_than_sec=30)` автоматически. Но если новый код не запускается, а старый запущен — проверить:
-   ```sql
-   SELECT id, conversation_id, status, created_at
-   FROM {SCHEMA}.{PREFIX}chat_messages
-   WHERE status = 'streaming' AND created_at < now() - interval '5 minutes';
-   ```
-   Висящие записи разрулить как в `operations-recovery.md` §1.
+5. **Проверить zombie streaming-сообщения.** Подробный recovery для зависших streaming-сообщений — см. [operations-recovery.md §1](operations-recovery.md#1-зависший-forward-runner). Здесь — только проверка факта: `SELECT count(*) FROM t_db_oarb_audit_act_chat_messages WHERE status='streaming' AND created_at < now() - interval '5 minutes';`. Если ненулевое — открыть operations-recovery §1.
 
 ---
 

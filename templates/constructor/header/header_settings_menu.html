@@ -14,7 +14,7 @@
 
     <div id="settingsMenu" class="settings-menu hidden">
         <div class="settings-menu-header">
-            <h4>⚙️ Настройки</h4>
+            <h4><span aria-hidden="true">⚙️</span> Настройки</h4>
             <button id="closeSettingsMenuBtn" class="settings-menu-close" aria-label="Закрыть">&times;</button>
         </div>
         <div class="settings-menu-body">
@@ -79,6 +79,14 @@
                     </label>
                 </div>
                 {% endfor %}
+            </div>
+
+            <hr class="settings-divider">
+
+            <div class="settings-menu-section">
+                <div class="settings-version-row" title="Версия приложения">
+                    <span class="app-version-badge">v{{ app_version }}</span>
+                </div>
             </div>
         </div>
     </div>

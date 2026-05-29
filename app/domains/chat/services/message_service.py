@@ -125,10 +125,33 @@ class MessageService:
         self,
         conversation_id: str,
         *,
+        limit: int = 50,
+        offset: int = 0,
+    ) -> tuple[list[dict], int]:
+        """Возвращает страницу сообщений беседы и общее количество.
+
+        Используется API-эндпоинтом GET /messages. Для внутренней загрузки
+        истории в LLM-оркестратор используйте ``load_history_for_llm`` —
+        он не считает total и возвращает только список сообщений.
+        """
+        items = await self.msg_repo.get_by_conversation(
+            conversation_id, limit=limit, offset=offset,
+        )
+        total = await self.msg_repo.count_by_conversation(conversation_id)
+        return items, total
+
+    async def load_history_for_llm(
+        self,
+        conversation_id: str,
+        *,
         limit: int = 100,
         offset: int = 0,
     ) -> list[dict]:
-        """Возвращает историю сообщений беседы."""
+        """Загружает историю сообщений для передачи в LLM-оркестратор.
+
+        В отличие от ``get_history`` не делает COUNT — total для LLM не нужен,
+        а лишний запрос увеличивает p95 latency на каждом POST /messages.
+        """
         return await self.msg_repo.get_by_conversation(
             conversation_id, limit=limit, offset=offset,
         )

@@ -316,3 +316,9 @@
     border-top-color: var(--error);
     filter: drop-shadow(0 var(--border-width-thin) 0 var(--act-critical-border));
 }
+
+/* Кнопка «Загрузить ещё» под гридом актов */
+.acts-load-more-btn {
+    display: block;
+    margin: var(--spacing-lg) auto 0;
+}

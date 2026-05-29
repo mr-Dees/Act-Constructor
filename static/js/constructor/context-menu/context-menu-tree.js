@@ -1,7 +1,18 @@
 /**
  * Обработчик контекстного меню для дерева.
  */
-class TreeContextMenu {
+import { ContextMenuManager } from './context-menu-core.js';
+import { InvoiceDialog } from '../dialog/dialog-invoice.js';
+import { ItemsRenderer } from '../items/items-renderer.js';
+import { PreviewManager } from '../preview/preview.js';
+import { MetricsRiskCoordinator } from '../state/metrics-risk-coordinator.js';
+import { AppState } from '../state/state-core.js';
+import { TreeUtils } from '../tree/tree-utils.js';
+import { AppConfig } from '../../shared/app-config.js';
+import { DialogManager } from '../../shared/dialog/dialog-confirm.js';
+import { Notifications } from '../../shared/notifications.js';
+
+export class TreeContextMenu {
     constructor(menu) {
         this.menu = menu;
         this.initHandlers();
@@ -35,15 +46,18 @@ class TreeContextMenu {
         const node = AppState.findNodeById(nodeId);
         if (!node) return;
 
-        const isRiskTableAllowed = this._isRiskTableAllowedForNode(node);
-
-        const regularRiskItem = this.menu.querySelector('[data-action="add-regular-risk-table"]');
-        const operationalRiskItem = this.menu.querySelector('[data-action="add-operational-risk-table"]');
-
-        if (regularRiskItem)
-            regularRiskItem.classList.toggle('disabled', !isRiskTableAllowed);
-        if (operationalRiskItem)
-            operationalRiskItem.classList.toggle('disabled', !isRiskTableAllowed);
+        const riskItems = [
+            ['add-regular-risk-table',     'regular'],
+            ['add-operational-risk-table', 'operational'],
+            ['add-tax-risk-table',         'tax'],
+            ['add-other-risk-table',       'other'],
+        ];
+        for (const [action, riskType] of riskItems) {
+            const item = this.menu.querySelector(`[data-action="${action}"]`);
+            if (!item) continue;
+            const allowed = this._isRiskTableAllowedForNode(node, riskType);
+            item.classList.toggle('disabled', !allowed);
+        }
 
         // Показываем "Приложить фактуру" только для leaf-узлов раздела 5
         const attachInvoiceItem = this.menu.querySelector('[data-action="attach-invoice"]');
@@ -68,24 +82,38 @@ class TreeContextMenu {
         }
     }
 
-    /** Проверяет, разрешено ли создавать таблицу риска */
-    _isRiskTableAllowedForNode(node) {
-        if (node.type && node.type !== 'item') return false;
+    /**
+     * Проверяет, разрешено ли создавать таблицу риска данного типа на узле.
+     * Ограничение «одна на пункт» — теперь per-type (на одном узле может быть
+     * по одной каждого типа: regular + operational + tax + other).
+     * Иерархические ограничения остаются общими, не per-type.
+     *
+     * @param {Object} node
+     * @param {'regular'|'operational'|'tax'|'other'} riskType
+     */
+    _isRiskTableAllowedForNode(node, riskType) {
+        if (node.type && node.type !== AppConfig.nodeTypes.ITEM) return false;
         if (!node.number) return false;
         if (!/^5\.\d+/.test(node.number)) return false;
-        // Нельзя создать вторую таблицу рисков на одном узле
-        if (this._hasDirectRiskTables(node)) return false;
-        // На уровне 5.* нельзя, если где-либо в 5.*.* уже есть риски
+        // Нельзя создать вторую таблицу ОДНОГО типа на одном узле
+        if (this._hasDirectRiskTableOfType(node, riskType)) return false;
+        // Иерархические — общие (любая risk-таблица под 5.X.X блокирует 5.X)
         if (node.number.match(/^5\.\d+$/) && this._hasRiskTablesBelowLevel5x()) return false;
-        // На уровне 5.*.* нельзя, если где-либо на 5.* уже есть риски
         if (node.number.match(/^5\.\d+\.\d+/) && this._hasRiskTablesAtLevel5x()) return false;
         return true;
     }
 
     /** Возвращает причину блокировки создания таблицы рисков */
-    _getRiskTableBlockReason(node) {
-        if (this._hasDirectRiskTables(node)) {
-            return 'На одном пункте может быть только одна таблица рисков';
+    _getRiskTableBlockReason(node, riskType) {
+        const typeLabels = {
+            regular:     'регуляторного',
+            operational: 'операционного',
+            tax:         'налогового',
+            other:       'прочего',
+        };
+        if (this._hasDirectRiskTableOfType(node, riskType)) {
+            const label = typeLabels[riskType] || 'этого';
+            return `На одном пункте может быть только одна таблица ${label} риска`;
         }
         if (node.number?.match(/^5\.\d+$/) && this._hasRiskTablesBelowLevel5x()) {
             return 'Нельзя создать таблицу рисков: в подпунктах раздела 5 уже есть таблицы рисков';
@@ -96,13 +124,31 @@ class TreeContextMenu {
         return 'Таблицы рисков можно создавать только в подпунктах раздела 5';
     }
 
-    /** Проверяет, есть ли у узла прямые дочерние таблицы рисков */
-    _hasDirectRiskTables(node) {
+    /** Проверяет, есть ли у узла прямая дочерняя таблица риска данного типа. */
+    _hasDirectRiskTableOfType(node, riskType) {
+        if (!node.children) return false;
+        const flagByType = {
+            'regular':     'isRegularRiskTable',
+            'operational': 'isOperationalRiskTable',
+            'tax':         'isTaxRiskTable',
+            'other':       'isOtherRiskTable',
+        };
+        const flag = flagByType[riskType];
+        if (!flag) return false;
+        return node.children.some(child => child.type === AppConfig.nodeTypes.TABLE && !!child[flag]);
+    }
+
+    /**
+     * Есть ли вообще риск-таблица среди прямых детей узла (все 4 типа,
+     * включая «прочий»). Используется иерархическими
+     * _hasRiskTablesAtLevel5x / _hasRiskTablesBelowLevel5x — правило
+     * «риски только на одном уровне» симметрично по всем типам.
+     */
+    _hasAnyRiskTable(node) {
         if (!node.children) return false;
         return node.children.some(child => {
-            if (child.type !== 'table' || !child.tableId) return false;
-            const table = AppState.tables[child.tableId];
-            return table && (table.isRegularRiskTable || table.isOperationalRiskTable);
+            if (child.type !== AppConfig.nodeTypes.TABLE) return false;
+            return !!(child.isRegularRiskTable || child.isOperationalRiskTable || child.isTaxRiskTable || child.isOtherRiskTable);
         });
     }
 
@@ -110,7 +156,7 @@ class TreeContextMenu {
     _hasChildItemRiskTables(node) {
         if (!node.children) return false;
         for (const child of node.children) {
-            if (child.type === 'item' && AppState._findRiskTablesInSubtree(child).length > 0) {
+            if (child.type === AppConfig.nodeTypes.ITEM && AppState._findRiskTablesInSubtree(child).length > 0) {
                 return true;
             }
         }
@@ -122,7 +168,7 @@ class TreeContextMenu {
         const node5 = AppState.findNodeById('5');
         if (!node5?.children) return false;
         return node5.children.some(child =>
-            child.type === 'item' && child.number?.match(/^5\.\d+$/) && this._hasDirectRiskTables(child)
+            child.type === AppConfig.nodeTypes.ITEM && child.number?.match(/^5\.\d+$/) && this._hasAnyRiskTable(child)
         );
     }
 
@@ -131,7 +177,7 @@ class TreeContextMenu {
         const node5 = AppState.findNodeById('5');
         if (!node5?.children) return false;
         return node5.children.some(child =>
-            child.type === 'item' && child.number?.match(/^5\.\d+$/) && this._hasChildItemRiskTables(child)
+            child.type === AppConfig.nodeTypes.ITEM && child.number?.match(/^5\.\d+$/) && this._hasChildItemRiskTables(child)
         );
     }
 
@@ -139,11 +185,11 @@ class TreeContextMenu {
     _hasBothLevelsAvailable() {
         const node5 = AppState.findNodeById('5');
         if (!node5?.children) return false;
-        const items = node5.children.filter(c => !c.type || c.type === 'item');
+        const items = node5.children.filter(c => !c.type || c.type === AppConfig.nodeTypes.ITEM);
         let hasLeafAt5x = false;
         let hasNodesAt5xx = false;
         for (const child of items) {
-            const itemKids = (child.children || []).filter(gc => !gc.type || gc.type === 'item');
+            const itemKids = (child.children || []).filter(gc => !gc.type || gc.type === AppConfig.nodeTypes.ITEM);
             if (itemKids.length === 0) hasLeafAt5x = true;
             else hasNodesAt5xx = true;
             if (hasLeafAt5x && hasNodesAt5xx) return true;
@@ -190,21 +236,13 @@ class TreeContextMenu {
                 this.handleAddTable(node, nodeId, 'regular');
                 break;
             case 'add-regular-risk-table':
-                if (!this._isRiskTableAllowedForNode(node)) {
-                    return Notifications.error(this._getRiskTableBlockReason(node));
-                }
-                if (this._shouldShowRiskLevelWarning()) {
-                    await this._showRiskLevelWarning();
-                }
-                return this.handleAddTable(node, nodeId, 'regular-risk');
+                return this._handleRiskTableAction(node, nodeId, 'regular', 'regular-risk');
             case 'add-operational-risk-table':
-                if (!this._isRiskTableAllowedForNode(node)) {
-                    return Notifications.error(this._getRiskTableBlockReason(node));
-                }
-                if (this._shouldShowRiskLevelWarning()) {
-                    await this._showRiskLevelWarning();
-                }
-                return this.handleAddTable(node, nodeId, 'operational-risk');
+                return this._handleRiskTableAction(node, nodeId, 'operational', 'operational-risk');
+            case 'add-tax-risk-table':
+                return this._handleRiskTableAction(node, nodeId, 'tax', 'tax-risk');
+            case 'add-other-risk-table':
+                return this._handleRiskTableAction(node, nodeId, 'other', 'other-risk');
             case 'add-textblock':
                 this.handleAddTextBlock(node, nodeId);
                 break;
@@ -220,9 +258,20 @@ class TreeContextMenu {
         }
     }
 
+    /** Унифицированный обработчик добавления риск-таблицы любого типа. */
+    async _handleRiskTableAction(node, nodeId, riskType, tableType) {
+        if (!this._isRiskTableAllowedForNode(node, riskType)) {
+            return Notifications.error(this._getRiskTableBlockReason(node, riskType));
+        }
+        if (this._shouldShowRiskLevelWarning()) {
+            await this._showRiskLevelWarning();
+        }
+        return this.handleAddTable(node, nodeId, tableType);
+    }
+
     /** Добавляет дочерний элемент */
     handleAddChild(node, nodeId) {
-        if (node.type === 'table') {
+        if (node.type === AppConfig.nodeTypes.TABLE) {
             Notifications.error('Нельзя добавлять дочерние элементы к таблице');
             return;
         }
@@ -235,7 +284,8 @@ class TreeContextMenu {
 
         const result = AppState.addNode(nodeId, '', true);
         if (result.valid) {
-            this.updateTreeViews();
+            // Добавление потомка → пересборка поддерева самого nodeId
+            this.updateTreeViews(nodeId);
         } else {
             Notifications.error(result.message || 'Не удалось добавить элемент');
         }
@@ -253,7 +303,9 @@ class TreeContextMenu {
 
         const result = AppState.addNode(nodeId, '', false);
         if (result.valid) {
-            this.updateTreeViews();
+            // Добавление сиблинга → пересборка поддерева общего родителя
+            const parent = AppState.findParentNode(nodeId);
+            this.updateTreeViews(parent ? parent.id : undefined);
         } else {
             Notifications.error(result.message || 'Не удалось добавить элемент');
         }
@@ -261,7 +313,7 @@ class TreeContextMenu {
 
     /** Добавляет таблицу к узлу */
     handleAddTable(node, nodeId, tableType = 'regular') {
-        if (node.type === 'table') {
+        if (node.type === AppConfig.nodeTypes.TABLE) {
             Notifications.error('Нельзя добавлять таблицу к таблице');
             return;
         }
@@ -275,14 +327,29 @@ class TreeContextMenu {
                 result = AppState._createRegularRiskTable(nodeId);
                 if (result.valid) {
                     AppState.generateNumbering();
-                    AppState._updateMetricsTablesAfterRiskTableCreated(nodeId);
+                    MetricsRiskCoordinator.onRiskTableAdded(nodeId);
                 }
                 break;
             case 'operational-risk':
                 result = AppState._createOperationalRiskTable(nodeId);
                 if (result.valid) {
                     AppState.generateNumbering();
-                    AppState._updateMetricsTablesAfterRiskTableCreated(nodeId);
+                    MetricsRiskCoordinator.onRiskTableAdded(nodeId);
+                }
+                break;
+            case 'tax-risk':
+                result = AppState._createTaxRiskTable(nodeId);
+                if (result.valid) {
+                    AppState.generateNumbering();
+                    MetricsRiskCoordinator.onRiskTableAdded(nodeId);
+                }
+                break;
+            case 'other-risk':
+                result = AppState._createOtherRiskTable(nodeId);
+                if (result.valid) {
+                    AppState.generateNumbering();
+                    // «Прочий» риск — полноправный участник свода: триггерит coordinator.
+                    MetricsRiskCoordinator.onRiskTableAdded(nodeId);
                 }
                 break;
             default:
@@ -290,7 +357,10 @@ class TreeContextMenu {
         }
 
         if (result.valid) {
-            this.updateTreeViews();
+            // Регулярные/операционные риск-таблицы влияют на метрики-таблицы
+            // других узлов раздела 5 → полный renderAll. Обычная таблица — узкая.
+            const scope = (tableType === 'regular') ? nodeId : undefined;
+            this.updateTreeViews(scope);
         } else {
             Notifications.error(result.message || 'Ошибка при добавлении таблицы');
         }
@@ -298,14 +368,15 @@ class TreeContextMenu {
 
     /** Добавляет текстовый блок */
     handleAddTextBlock(node, nodeId) {
-        if (['table', 'textblock'].includes(node.type)) {
+        const {TABLE, TEXTBLOCK} = AppConfig.nodeTypes;
+        if ([TABLE, TEXTBLOCK].includes(node.type)) {
             Notifications.error('Нельзя добавлять текстовый блок к этому элементу');
             return;
         }
 
         const result = AppState.addTextBlockToNode(nodeId);
         if (result.valid) {
-            this.updateTreeViews();
+            this.updateTreeViews(nodeId);
         } else {
             Notifications.error(result.message || 'Ошибка при добавлении текстового блока');
         }
@@ -313,14 +384,15 @@ class TreeContextMenu {
 
     /** Добавляет нарушение */
     handleAddViolation(node, nodeId) {
-        if (['table', 'textblock', 'violation'].includes(node.type)) {
+        const {TABLE, TEXTBLOCK, VIOLATION} = AppConfig.nodeTypes;
+        if ([TABLE, TEXTBLOCK, VIOLATION].includes(node.type)) {
             Notifications.error('Нельзя добавлять нарушение к этому элементу');
             return;
         }
 
         const result = AppState.addViolationToNode(nodeId);
         if (result.valid) {
-            this.updateTreeViews();
+            this.updateTreeViews(nodeId);
         } else {
             Notifications.error(result.message || 'Ошибка при добавлении нарушения');
         }
@@ -339,7 +411,7 @@ class TreeContextMenu {
         }
 
         // Проверка удаления таблиц метрик
-        if (node.type === 'table' && node.tableId) {
+        if (node.type === AppConfig.nodeTypes.TABLE && node.tableId) {
             const table = AppState.tables[node.tableId];
 
             // Проверка под узлом 5.*
@@ -348,7 +420,7 @@ class TreeContextMenu {
                 if (parentUnder5) {
                     let hasDeepRisks = false;
                     for (const child of parentUnder5.children || []) {
-                        if (child.type === 'item' && AppState._findRiskTablesInSubtree(child).length > 0) {
+                        if (child.type === AppConfig.nodeTypes.ITEM && AppState._findRiskTablesInSubtree(child).length > 0) {
                             hasDeepRisks = true;
                             break;
                         }
@@ -370,17 +442,42 @@ class TreeContextMenu {
             }
         }
 
+        // Захватываем parentId ДО удаления, иначе AppState.findParentNode вернёт null
+        const parentBeforeDelete = AppState.findParentNode(nodeId);
+        const parentId = parentBeforeDelete ? parentBeforeDelete.id : null;
+
+        // Удаление таблицы рисков триггерит _cleanupMetricsTablesAfterRiskTableDeleted,
+        // которая может удалить метрики-таблицы из ДРУГИХ узлов раздела 5 → fallback на renderAll.
+        // Все 4 типа — полноправные риски, удаление любого перерисовывает дерево.
+        const isRiskTableDelete = node.type === AppConfig.nodeTypes.TABLE &&
+            !!(node.isRegularRiskTable || node.isOperationalRiskTable || node.isTaxRiskTable || node.isOtherRiskTable);
+
+        // Свод-предупреждение: если это последний риск на уровне, каскад удалит
+        // соответствующие сводные таблицы — честно сообщаем об этом в диалоге.
+        let message = 'Удалить этот элемент?';
+        if (isRiskTableDelete) {
+            const pred = this._predictSvodRemoval(node);
+            const warns = [];
+            if (pred.perPoint) warns.push(`сводная таблица по пункту ${pred.perPoint}`);
+            if (pred.mainSvod) warns.push('общая сводная таблица');
+            if (warns.length) {
+                message += `\n\nБудет также удалена ${warns.join(' и ')}, так как других таблиц рисков на уровне не останется.`;
+            }
+        }
+
         DialogManager.show({
             title: 'Удаление элемента',
-            message: 'Удалить этот элемент?',
+            message,
             icon: '⚠️',
             confirmText: 'Удалить',
             cancelText: 'Отмена'
         }).then(userConfirmed => {
             if (userConfirmed) {
-                AppState.deleteNode(nodeId);
-                this.updateTreeViews();
-                Notifications.info('Элемент удалён');
+                const deleted = AppState.deleteNode(nodeId);
+                if (deleted) {
+                    this.updateTreeViews(isRiskTableDelete ? undefined : parentId);
+                    Notifications.info('Элемент удалён');
+                }
             }
         });
     }
@@ -401,12 +498,68 @@ class TreeContextMenu {
         return null;
     }
 
-    /** Обновление UI */
-    updateTreeViews() {
+    /**
+     * Best-effort предсказание: какие сводные (metrics) таблицы будут удалены
+     * каскадом _cleanupMetricsTablesAfterRiskTableDeleted при удалении узла node.
+     * Read-only; источник истины — сам cleanup. Используется только для текста диалога.
+     * @param {Object} node - удаляемый узел (предполагается риск-таблица).
+     * @returns {{mainSvod: boolean, perPoint: string|null}}
+     *   mainSvod — будет удалена главная сводная §5; perPoint — номер пункта 5.X,
+     *   по которому будет удалена per-point сводная (или null).
+     */
+    _predictSvodRemoval(node) {
+        const empty = {mainSvod: false, perPoint: null};
+        const isRisk = !!(node.isRegularRiskTable || node.isOperationalRiskTable
+            || node.isTaxRiskTable || node.isOtherRiskTable);
+        if (!isRisk) return empty;
+
+        const node5 = AppState.findNodeById('5');
+        if (!node5) return empty;
+        const {TABLE, ITEM} = AppConfig.nodeTypes;
+
+        // Главная сводная: останутся ли риски в §5 кроме удаляемого?
+        const remaining = AppState._findRiskTablesInSubtree(node5).filter(n => n.id !== node.id);
+        const mainNode = node5.children?.find(c => c.type === TABLE && c.isMainMetricsTable === true);
+        const mainSvod = !!mainNode && remaining.length === 0;
+
+        // Per-point сводная по 5.X-предку (только для глубоких рисков 5.X.Y+).
+        let perPoint = null;
+        const ancestor5x = this._findParentFirstLevelUnderPoint5(node);
+        if (ancestor5x) {
+            let deep = [];
+            for (const child of ancestor5x.children || []) {
+                if (child.type === ITEM) {
+                    deep = deep.concat(AppState._findRiskTablesInSubtree(child));
+                }
+            }
+            deep = deep.filter(n => n.id !== node.id);
+            const perNode = ancestor5x.children?.find(c => c.type === TABLE && c.isMetricsTable === true);
+            if (perNode && deep.length === 0) {
+                perPoint = ancestor5x.number;
+            }
+        }
+
+        return {mainSvod, perPoint};
+    }
+
+    /**
+     * Обновление UI после изменения дерева.
+     * @param {string} [scopeNodeId] - ID узла-родителя, чьё поддерево достаточно перерисовать.
+     *   Если не указан — fallback на полный renderAll (используется для рисковых таблиц,
+     *   которые затрагивают метрики-таблицы в произвольных местах раздела 5).
+     */
+    updateTreeViews(scopeNodeId) {
         treeManager.render();
         PreviewManager.update('previewTrim', 30);
         if (AppState.currentStep === 2) {
-            ItemsRenderer.renderAll();
+            if (scopeNodeId) {
+                ItemsRenderer.updateItem(scopeNodeId);
+            } else {
+                ItemsRenderer.renderAll();
+            }
         }
     }
 }
+
+// Window-globals для совместимости с inline-скриптами в шаблонах.
+window.TreeContextMenu = TreeContextMenu;

@@ -5,10 +5,11 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <meta name="chat-domains" content="{{ chat_domains | tojson if chat_domains is defined else 'null' }}">
     <meta name="chat-knowledge-bases" content="{{ knowledge_bases | tojson if knowledge_bases is defined else '[]' }}">
+    <meta name="app-version" content="{{ app_version }}">
     <title>{% block title %}Портал{% endblock %}</title>
 
     <!-- Основные стили -->
-    <link rel="stylesheet" href="{{ url_for('static', path='css/entry/portal.css') }}">
+    <link rel="stylesheet" href="{{ url_for('static', path='css/entry/portal.css') | versioned }}">
     {% block extra_css %}{% endblock %}
 </head>
 <body>
@@ -41,32 +42,14 @@
 <!-- Дополнительные шаблоны страницы -->
 {% block templates %}{% endblock %}
 
-<!-- Общие скрипты портала -->
-<script src="{{ url_for('static', path='js/shared/app-config.js') }}"></script>
-<script src="{{ url_for('static', path='js/shared/auth.js') }}"></script>
-<script src="{{ url_for('static', path='js/shared/api.js') }}"></script>
-<script src="{{ url_for('static', path='js/shared/notifications.js') }}"></script>
-<script src="{{ url_for('static', path='js/shared/dialog/dialog-base.js') }}"></script>
-<script src="{{ url_for('static', path='js/shared/dialog/dialog-confirm.js') }}"></script>
-<script src="{{ url_for('static', path='js/portal/portal-sidebar.js') }}"></script>
-<!-- DOMPurify — санитизация HTML перед innerHTML в chat-renderer.
-     Должен загружаться ДО chat-renderer.js. -->
-<script src="{{ url_for('static', path='vendor/dompurify/purify.min.js') }}"></script>
-<!-- chat-event-bus.js должен идти первым: остальные модули чата могут
-     обращаться к шине на module-level (window.ChatEventBus.on ...). -->
-<script src="{{ url_for('static', path='js/shared/chat/chat-event-bus.js') }}"></script>
-<script src="{{ url_for('static', path='js/shared/chat/chat-renderer.js') }}"></script>
-<script src="{{ url_for('static', path='js/shared/chat/chat-client-actions.js') }}"></script>
-<script src="{{ url_for('static', path='js/shared/chat/chat-stream.js') }}"></script>
-<script src="{{ url_for('static', path='js/shared/chat/chat-history.js') }}"></script>
-<script src="{{ url_for('static', path='js/shared/chat/chat-ui.js') }}"></script>
-<script src="{{ url_for('static', path='js/shared/chat/chat-files.js') }}"></script>
-<script src="{{ url_for('static', path='js/shared/chat/chat-title.js') }}"></script>
-<script src="{{ url_for('static', path='js/shared/chat/chat-context.js') }}"></script>
-<script src="{{ url_for('static', path='js/shared/chat/chat-messages.js') }}"></script>
-<script src="{{ url_for('static', path='js/shared/chat/chat-manager.js') }}"></script>
-<script src="{{ url_for('static', path='js/shared/chat/chat-modal.js') }}"></script>
-<script src="{{ url_for('static', path='js/portal/portal-settings.js') }}"></script>
+<!-- DOMPurify — vendor-библиотека, нужна на window.DOMPurify до SafeHTML.
+     Классический <script> ставит её на window синхронно перед ESM-entry. -->
+<script src="{{ url_for('static', path='vendor/dompurify/purify.min.js') | versioned }}"></script>
+<!-- ES-модуль: один entry для всех portal-страниц.
+     Импортирует shared/, portal-sidebar, portal-settings, чат-модули, диалоги.
+     Каждый импортируемый модуль публикует свои классы на window — inline-скрипты
+     в init_script-блоке шаблонов видят AuthManager, PortalSidebar и т.п. -->
+<script type="module" src="{{ url_for('static', path='js/entries/portal-common.js') | versioned }}"></script>
 
 <!-- Дополнительные скрипты страницы -->
 {% block extra_js %}{% endblock %}

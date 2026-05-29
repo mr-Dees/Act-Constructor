@@ -132,7 +132,7 @@ $ grep -rn "from app.domains.acts" app/domains/admin
 | `block_start` | `{index, type, [block_id]}` | `chat-messages.js::_handleSSEEvent::case 'block_start'` — создание DOM-узла |
 | `block_delta` | `{index, delta}` | то же — `block.appendText(delta)` |
 | `block_end` | `{index}` | то же — `block.finalize()` |
-| `block_complete` | `{index, block}` | те же типы блоков, но cellsouten одним событием (file/image/plan/error) |
+| `block_complete` | `{index, block}` | те же типы блоков, но одним событием (file/image/plan/error) |
 | `client_action` | `{block}` | `chat-messages.js::case 'client_action'` — `ClientActionsRegistry.executeBlock(block)` |
 | `buttons` | `{buttons: [...]}` | `chat-messages.js::case 'buttons'` — рендер группы кнопок |
 | `tool_call` / `tool_result` / `tool_error` | `{tool_name, tool_call_id, ...}` | сейчас не используется фронтом (диагностические события) |
@@ -142,8 +142,8 @@ $ grep -rn "from app.domains.acts" app/domains/admin
 
 **Что сломается, если добавить новое событие на бэке без правки фронта**:
 фронт пропустит его в `switch` без handler'а, ошибки не будет, но
-функционал не отработает. Регрессия: TODO — добавить warning в `default`
-ветку `_handleSSEEvent`.
+функционал не отработает (дополнение: рассмотреть warning в default-ветке
+`_handleSSEEvent`).
 
 ---
 

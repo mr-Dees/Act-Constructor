@@ -1,16 +1,37 @@
 """Базовые исключения приложения."""
 
+from typing import Any, ClassVar
+
 
 class AppError(Exception):
-    """Базовый класс всех доменных исключений. Несёт HTTP-статус и detail."""
+    """Базовый класс всех доменных исключений.
+
+    Несёт HTTP-статус, человекочитаемое сообщение и машинный ``code``
+    (kebab-case) для унифицированного error envelope:
+
+        {"detail": "...", "code": "...", "extra": {...}?}
+
+    Каждый подкласс ОБЯЗАН переопределить ``code``. На базе оставлен
+    дефолт ``"app-error"`` как fallback для прямых инстансов ``AppError``
+    (например, обёртка OSError в ExportService).
+    """
+
     status_code: int = 500
+    code: ClassVar[str] = "app-error"
 
     def __init__(self, message: str) -> None:
         self.message = message
+        # ``extra`` — словарь дополнительных полей envelope-а (locked_by,
+        # km_number и т.п.). Подклассы заполняют в собственных ``__init__``.
+        self.extra: dict[str, Any] = {}
         super().__init__(message)
 
-    def to_detail(self) -> dict:
-        return {"detail": self.message}
+    def to_envelope(self) -> dict[str, Any]:
+        """Возвращает унифицированный error envelope для HTTP-ответа."""
+        envelope: dict[str, Any] = {"detail": self.message, "code": self.code}
+        if self.extra:
+            envelope["extra"] = self.extra
+        return envelope
 
 
 # Маппинг имён CHECK-ограничений БД → понятные сообщения для пользователя.
@@ -30,13 +51,10 @@ CHECK_CONSTRAINT_MESSAGES: dict[str, str] = {
         "Служебная записка и дата должны быть указаны вместе или отсутствовать вместе"
     ),
     # ── acts: audit_team_members ─────────────────────────────────────────────
-    # PG-имя (явное)
+    # Общее PG/GP-имя (с миграции docs/migrations/audit-team-role-appendix-ref-gp.sql
+    # GP-схема тоже использует это имя; AppendixRef — служебное значение для строки-
+    # маркера приложения, в user-facing сообщении не упоминаем).
     "check_audit_team_role_values": (
-        "Недопустимая роль участника аудиторской группы. "
-        "Допустимые значения: Куратор, Руководитель, Редактор, Участник"
-    ),
-    # GP-имя (уже было явным)
-    "check_role_values": (
         "Недопустимая роль участника аудиторской группы. "
         "Допустимые значения: Куратор, Руководитель, Редактор, Участник"
     ),

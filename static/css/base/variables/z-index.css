@@ -1,0 +1,23 @@
+/*
+ * Z-index слои. *-elevated уровни — для вложенных диалогов/попапов поверх
+ * базовых модалок. Все z-индексы в codebase должны ссылаться на одну из
+ * этих переменных, без calc() и magic numbers.
+ */
+
+:root {
+    --z-base: 1;
+    --z-base-elevated: 2;
+    --z-dropdown: 1000;
+    --z-sticky: 1100;
+    --z-sticky-elevated: 1120;
+    --z-sticky-high: 1121;
+    --z-fixed: 1200;
+    --z-modal-backdrop: 1300;
+    --z-modal-backdrop-elevated: 1310;
+    --z-modal: 1400;
+    --z-modal-elevated: 1450;
+    --z-popover: 1500;
+    --z-popover-elevated: 1550;
+    --z-tooltip: 1600;
+    --z-notification: 1700;
+}

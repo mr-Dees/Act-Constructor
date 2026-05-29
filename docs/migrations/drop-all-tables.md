@@ -62,6 +62,7 @@ DROP TABLE IF EXISTS t_db_oarb_ua_hadoop_tables;
 -- ╚══════════════════════════════════════════════════════════════════════╝
 DROP TABLE IF EXISTS t_db_oarb_audit_act_admin_http_metrics;
 DROP TABLE IF EXISTS t_db_oarb_audit_act_admin_audit_log;
+DROP TABLE IF EXISTS t_db_oarb_audit_act_access_denied_audit;
 DROP TABLE IF EXISTS t_db_oarb_audit_act_app_singleton_lock;
 DROP TABLE IF EXISTS t_db_oarb_audit_act_user_roles;
 DROP TABLE IF EXISTS t_db_oarb_audit_act_roles;
@@ -147,6 +148,7 @@ DROP TABLE IF EXISTS audit_workstation.t_db_oarb_audit_act_acts;
 -- ╚══════════════════════════════════════════════════════════════════════╝
 DROP TABLE IF EXISTS audit_workstation.t_db_oarb_audit_act_admin_http_metrics;
 DROP TABLE IF EXISTS audit_workstation.t_db_oarb_audit_act_admin_audit_log;
+DROP TABLE IF EXISTS audit_workstation.t_db_oarb_audit_act_access_denied_audit;
 DROP TABLE IF EXISTS audit_workstation.t_db_oarb_audit_act_app_singleton_lock;
 DROP TABLE IF EXISTS audit_workstation.t_db_oarb_audit_act_user_roles;
 DROP TABLE IF EXISTS audit_workstation.t_db_oarb_audit_act_roles;

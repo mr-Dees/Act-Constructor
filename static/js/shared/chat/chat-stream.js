@@ -1,14 +1,23 @@
 /**
- * Ошибка дружелюбного 429: бэк отдал лимит параллельных стримов на пользователя.
- * `userMessage` — человеко-читаемый текст из поля `detail`/`error` тела ответа.
+ * Ошибка дружелюбного 429: бэк отдал лимит параллельных стримов на пользователя
+ * (envelope `chat-stream-already-active`) либо per-user rate-limit
+ * (envelope `chat-rate-limit`, extra.retry_after_sec).
+ * `userMessage` — человеко-читаемый текст из поля `detail` тела ответа.
+ * `code`/`extra` — поля error envelope (см. AppError.to_envelope), могут быть null
+ * для старых ответов без envelope.
  * ChatMessages._onStreamError различает этот класс и заменяет typing-плейсхолдер
  * на красивый error-блок «лимит достигнут», без сырого «HTTP 429».
  */
-class ChatRateLimitedError extends Error {
-    constructor(userMessage) {
+import { AppConfig } from '../app-config.js';
+import { AuthManager } from '../auth.js';
+
+export class ChatRateLimitedError extends Error {
+    constructor(userMessage, code = null, extra = null) {
         super(userMessage);
         this.name = 'ChatRateLimitedError';
         this.userMessage = userMessage;
+        this.code = code;
+        this.extra = extra;
     }
 }
 
@@ -20,7 +29,7 @@ window.ChatRateLimitedError = ChatRateLimitedError;
  * Отправляет сообщения через FormData и обрабатывает Server-Sent Events
  * от бэкенда. Поддерживает два режима: стриминг (SSE) и полный JSON-ответ.
  */
-const ChatStream = {
+export const ChatStream = {
 
     /** @type {AbortController|null} Контроллер для отмены текущего стрима */
     _abortController: null,
@@ -188,13 +197,17 @@ const ChatStream = {
     async _buildRateLimitError(response) {
         const fallback = 'Достигнут лимит одновременных запросов. Дождитесь окончания одного из них.';
         let userMessage = fallback;
+        let code = null;
+        let extra = null;
         try {
             const body = await response.json();
             if (body && typeof body === 'object') {
                 userMessage = body.detail || body.error || fallback;
+                if (typeof body.code === 'string') code = body.code;
+                if (body.extra && typeof body.extra === 'object') extra = body.extra;
             }
         } catch { /* тело пустое или не JSON — fallback */ }
-        return new ChatRateLimitedError(userMessage);
+        return new ChatRateLimitedError(userMessage, code, extra);
     },
 
     /** @private */
@@ -301,9 +314,7 @@ const ChatStream = {
         this._resumeRequestId = requestId;
 
         try {
-            const endpoint =
-                `/api/v1/chat/conversations/${conversationId}` +
-                `/forward-stream/${requestId}`;
+            const endpoint = AppConfig.chatEndpoints.forwardStream(conversationId, requestId);
             const url = (typeof AppConfig !== 'undefined')
                 ? AppConfig.api.getUrl(endpoint)
                 : endpoint;
@@ -445,11 +456,10 @@ const ChatStream = {
      * @private
      */
     _buildUrl(conversationId) {
-        const endpoint = `/api/v1/chat/conversations/${conversationId}/messages`;
-        if (typeof AppConfig !== 'undefined') {
-            return AppConfig.api.getUrl(endpoint);
+        if (typeof AppConfig === 'undefined') {
+            return `/api/v1/chat/conversations/${conversationId}/messages`;
         }
-        return endpoint;
+        return AppConfig.api.getUrl(AppConfig.chatEndpoints.messages(conversationId));
     },
 
     /**

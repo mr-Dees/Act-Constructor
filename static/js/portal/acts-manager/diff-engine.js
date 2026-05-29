@@ -2,7 +2,7 @@
  * Вычисление структурного diff между двумя снэпшотами содержимого.
  * Чистый utility-класс без DOM-зависимостей.
  */
-class DiffEngine {
+export class DiffEngine {
     /**
      * Полный diff двух снэпшотов.
      * @param {Object} oldData - {tree_data, tables_data, textblocks_data, violations_data}

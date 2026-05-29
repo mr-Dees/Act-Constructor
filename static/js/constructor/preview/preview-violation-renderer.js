@@ -4,7 +4,10 @@
  * Создает компактное текстовое представление нарушений
  * с обрезкой длинных текстов и подсчетом элементов.
  */
-class PreviewViolationRenderer {
+import { AppConfig } from '../../shared/app-config.js';
+import { SafeHTML } from '../../shared/sanitize.js';
+
+export class PreviewViolationRenderer {
     /**
      * Создает элемент нарушения
      *
@@ -180,7 +183,9 @@ class PreviewViolationRenderer {
 
         const line = document.createElement('div');
         line.className = 'preview-violation-line';
-        line.innerHTML = `${label}: ${this._trim(text, trimLength)}`;
+        // label статичен; text — пользовательское поле нарушения, escape перед склейкой.
+        const safeText = SafeHTML.escapeHtml(this._trim(text, trimLength));
+        line.innerHTML = `${label}: ${safeText}`;
         container.appendChild(line);
     }
 
@@ -210,3 +215,6 @@ class PreviewViolationRenderer {
         return many;
     }
 }
+
+// Window-globals для совместимости с inline-скриптами в шаблонах.
+window.PreviewViolationRenderer = PreviewViolationRenderer;

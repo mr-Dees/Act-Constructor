@@ -5,13 +5,35 @@
  * Обрабатывает события взаимодействия с узлами.
  * Все константы вынесены в AppConfig для централизованного управления.
  */
-class TreeRenderer {
+import { ContextMenuManager } from '../context-menu/context-menu-core.js';
+import { ItemsTitleEditing } from '../items/items-title-editing.js';
+import { AppState } from '../state/state-core.js';
+import { TreeUtils } from './tree-utils.js';
+import { AppConfig } from '../../shared/app-config.js';
+import { ChatEventBus } from '../../shared/chat/chat-event-bus.js';
+
+export class TreeRenderer {
     /**
      * @param {TreeManager} manager - Экземпляр менеджера дерева
      */
     constructor(manager) {
         /** @type {TreeManager} */
         this.manager = manager;
+
+        // Точечный апдейт бейджа фактуры при изменении node.invoice
+        // через AppState.setNodeInvoice. Заменяет полный treeManager.render()
+        // после save в диалоге фактуры.
+        window.ChatEventBus?.on?.('node:invoice-changed', ({nodeId}) => {
+            const node = TreeUtils?.findNodeById?.(nodeId);
+            if (node) this.updateInvoiceBadge(node);
+        });
+
+        // Точечный апдейт бейджа ТБ при изменении node.tb через AppState.setNodeTb.
+        // Подписчик отвечает за обновление и текущего узла, и родителей под §5.
+        window.ChatEventBus?.on?.('node:tb-changed', ({nodeId}) => {
+            const node = TreeUtils?.findNodeById?.(nodeId);
+            if (node) this.updateTbBadge(node);
+        });
     }
 
     /**
@@ -23,27 +45,34 @@ class TreeRenderer {
      */
     render(node = AppState.treeData) {
         this.manager.container.innerHTML = '';
-        const ul = this.createTreeElement(node);
-        this.manager.container.appendChild(ul);
+        // Корневой #tree уже играет role="tree" (шаблон); рендерим прямо в него.
+        // node.children — секции 1-го уровня (aria-level=1).
+        const siblings = node.children || [];
+        siblings.forEach((child, idx) => {
+            this.manager.container.appendChild(
+                this.createNodeElement(child, 1, idx + 1, siblings.length)
+            );
+        });
+        // После рендера ровно один treeitem имеет tabindex=0 (roving).
+        this._applyRovingTabindex();
     }
 
     /**
-     * Создание элемента списка для дерева
-     *
-     * Генерирует ul с дочерними элементами узла.
+     * Создание элемента списка для дерева (используется для подгрупп).
      *
      * @param {Object} node - Узел с дочерними элементами
+     * @param {number} childLevel - aria-level для детей
      * @returns {HTMLUListElement} Элемент списка с деревом
      */
-    createTreeElement(node) {
+    createTreeElement(node, childLevel = 1) {
         const ul = document.createElement('ul');
         ul.className = 'tree';
+        ul.setAttribute('role', 'group');
 
-        if (node.children?.length) {
-            node.children.forEach(child => {
-                ul.appendChild(this.createNodeElement(child));
-            });
-        }
+        const siblings = node.children || [];
+        siblings.forEach((child, idx) => {
+            ul.appendChild(this.createNodeElement(child, childLevel, idx + 1, siblings.length));
+        });
 
         return ul;
     }
@@ -54,10 +83,13 @@ class TreeRenderer {
      * Создает полный HTML-элемент узла со всеми обработчиками и иконками.
      *
      * @param {Object} node - Данные узла (id, label, type, children и т.д.)
+     * @param {number} level - aria-level (1 для секций, +1 на каждый уровень)
+     * @param {number} [posinset=1] - aria-posinset (позиция в группе сиблингов, 1-based)
+     * @param {number} [setsize=1] - aria-setsize (всего сиблингов в группе)
      * @returns {HTMLLIElement} Готовый элемент узла дерева
      */
-    createNodeElement(node) {
-        const li = this._createBaseLiElement(node);
+    createNodeElement(node, level = 1, posinset = 1, setsize = 1) {
+        const li = this._createBaseLiElement(node, level, posinset, setsize);
 
         // Добавляем элементы узла
         li.appendChild(this._createToggleIcon(node, li));
@@ -69,7 +101,7 @@ class TreeRenderer {
 
         // Рекурсивно создаем дочерние элементы
         if (node.children?.length) {
-            li.appendChild(this._createChildrenContainer(node));
+            li.appendChild(this._createChildrenContainer(node, level + 1));
         }
 
         return li;
@@ -81,10 +113,23 @@ class TreeRenderer {
      * @param {Object} node - Данные узла
      * @returns {HTMLLIElement} Базовый элемент li
      */
-    _createBaseLiElement(node) {
+    _createBaseLiElement(node, level = 1, posinset = 1, setsize = 1) {
         const li = document.createElement('li');
         li.className = 'tree-item';
         li.dataset.nodeId = node.id;
+
+        // ARIA-атрибуты для treeitem (https://www.w3.org/WAI/ARIA/apg/patterns/treeview/).
+        // aria-expanded ставится только для узлов с детьми; selected — false по умолчанию,
+        // обновляется в TreeManager.selectNode/clearSelection. tabindex=-1 (roving).
+        li.setAttribute('role', 'treeitem');
+        li.setAttribute('aria-level', String(level));
+        li.setAttribute('aria-posinset', String(posinset));
+        li.setAttribute('aria-setsize', String(setsize));
+        li.setAttribute('aria-selected', 'false');
+        li.setAttribute('tabindex', '-1');
+        if (node.children?.length) {
+            li.setAttribute('aria-expanded', 'true');
+        }
 
         if (node.protected) {
             li.classList.add('protected');
@@ -131,9 +176,12 @@ class TreeRenderer {
         toggle.addEventListener('click', (e) => {
             e.stopPropagation();
             li.classList.toggle('collapsed');
-            toggle.textContent = li.classList.contains('collapsed')
-                ? icons.collapsed
-                : icons.expanded;
+            const collapsed = li.classList.contains('collapsed');
+            toggle.textContent = collapsed ? icons.collapsed : icons.expanded;
+            // Синхронизируем ARIA-состояние для скринридеров.
+            if (li.hasAttribute('aria-expanded')) {
+                li.setAttribute('aria-expanded', collapsed ? 'false' : 'true');
+            }
         });
 
         return toggle;
@@ -190,15 +238,44 @@ class TreeRenderer {
      * @param {Object} node - Узел данных
      * @returns {HTMLElement} Контейнер с дочерними элементами
      */
-    _createChildrenContainer(node) {
+    _createChildrenContainer(node, childLevel = 2) {
         const childrenUl = document.createElement('ul');
         childrenUl.className = 'tree-children';
+        // role="group" — стандарт ARIA APG для подгрупп treeview.
+        childrenUl.setAttribute('role', 'group');
 
         node.children.forEach(child => {
-            childrenUl.appendChild(this.createNodeElement(child));
+            childrenUl.appendChild(this.createNodeElement(child, childLevel));
         });
 
         return childrenUl;
+    }
+
+    /**
+     * Гарантирует, что ровно один treeitem имеет tabindex=0 (roving tabindex).
+     * Если есть выделенный — он; иначе первый видимый.
+     * @private
+     */
+    _applyRovingTabindex() {
+        const container = this.manager.container;
+        if (!container) return;
+
+        const items = container.querySelectorAll('li.tree-item');
+        if (items.length === 0) return;
+
+        // Все на -1.
+        items.forEach(li => li.setAttribute('tabindex', '-1'));
+
+        // Выделенный (если есть в DOM) — приоритет.
+        const selectedId = this.manager.selectedNode;
+        let focusable = null;
+        if (selectedId) {
+            focusable = container.querySelector(`li.tree-item[data-node-id="${selectedId}"]`);
+        }
+        if (!focusable) {
+            focusable = items[0];
+        }
+        focusable.setAttribute('tabindex', '0');
     }
 
     /**
@@ -414,6 +491,25 @@ class TreeRenderer {
     }
 
     /**
+     * Обновляет бейдж фактуры в дереве для конкретного узла.
+     * Публичный API: вызывается subscriber'ом 'node:invoice-changed' —
+     * заменяет полный treeManager.render() после диалога фактуры.
+     * Снимает существующий бейдж и (если node.invoice) создаёт новый.
+     * @param {Object} node - Узел дерева
+     */
+    updateInvoiceBadge(node) {
+        const li = this.manager.container.querySelector(`[data-node-id="${node.id}"]`);
+        if (!li) return;
+        const label = li.querySelector(':scope > .tree-label');
+        if (!label) return;
+        const oldBadge = label.querySelector('.invoice-badge');
+        if (oldBadge) oldBadge.remove();
+        if (TreeUtils.isTbLeaf(node) && node.invoice) {
+            label.appendChild(this._createInvoiceBadge(node));
+        }
+    }
+
+    /**
      * Создает бейдж фактуры
      * @private
      * @returns {HTMLElement} Элемент бейджа
@@ -460,10 +556,8 @@ class TreeRenderer {
             checkbox.checked = currentTb.includes(bank.abbr);
             checkbox.addEventListener('change', () => {
                 this._onTbCheckboxChange(node, bank.abbr, checkbox.checked);
-                // Обновляем бейдж в дереве
-                this._updateTbBadgeInTree(node);
-                // Обновляем селектор на шаге 2 если виден
-                this._syncTbToStep2(node);
+                // Бейджи в дереве и в items обновляются подписчиками
+                // на событие 'node:tb-changed', которое эмитит AppState.setNodeTb.
             });
 
             const nameSpan = document.createElement('span');
@@ -531,26 +625,18 @@ class TreeRenderer {
      * @param {boolean} checked - Выбран ли
      */
     _onTbCheckboxChange(node, abbr, checked) {
-        if (!node.tb) node.tb = [];
-
-        if (checked) {
-            if (!node.tb.includes(abbr)) {
-                node.tb.push(abbr);
-            }
-        } else {
-            node.tb = node.tb.filter(t => t !== abbr);
-        }
-
-        // Помечаем изменения
-        StorageManager.markAsUnsaved();
+        // Делегируем единой точке: AppState.setNodeTb обновит node.tb,
+        // запишет в changelog и эмитит 'node:tb-changed' для подписчиков.
+        AppState.setNodeTb(node.id, abbr, checked);
     }
 
     /**
-     * Обновляет бейдж ТБ в дереве для узла и его родителей
-     * @private
+     * Обновляет бейдж ТБ в дереве для узла и его родителей.
+     * Публичный API: вызывается ItemsRenderer'ом из обработчика TB-чекбокса
+     * шага 2 вместо полного `treeManager.render()` — точечный апдейт DOM.
      * @param {Object} node - Узел дерева
      */
-    _updateTbBadgeInTree(node) {
+    updateTbBadge(node) {
         // Обновляем бейдж текущего узла
         const li = this.manager.container.querySelector(`[data-node-id="${node.id}"]`);
         if (li) {
@@ -578,22 +664,7 @@ class TreeRenderer {
         }
     }
 
-    /**
-     * Синхронизирует изменения ТБ из дерева к шагу 2
-     * @private
-     * @param {Object} node - Узел дерева
-     */
-    _syncTbToStep2(node) {
-        const itemBlock = document.querySelector(`.item-block[data-node-id="${node.id}"]`);
-        if (!itemBlock) return;
-
-        const oldSelector = itemBlock.querySelector(':scope > .item-header .tb-selector');
-        if (oldSelector) {
-            const newSelector = ItemsRenderer._createTbSelector(node);
-            oldSelector.replaceWith(newSelector);
-        }
-
-        // Обновляем родительские TB-селекторы в items
-        ItemsRenderer._updateParentTbInItems(node);
-    }
 }
+
+// Window-globals для совместимости с inline-скриптами в шаблонах.
+window.TreeRenderer = TreeRenderer;

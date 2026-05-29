@@ -418,7 +418,7 @@
 .chat-file-viewer-overlay {
     position: fixed;
     inset: 0;
-    z-index: calc(var(--z-modal-backdrop, 1000) + 10);
+    z-index: var(--z-modal-backdrop-elevated);
     background: var(--overlay-bg, rgba(0, 0, 0, 0.6));
     backdrop-filter: blur(4px);
     display: flex;

@@ -6,13 +6,28 @@
  * из справочника и сохранить фактуру.
  * Наследует базовый функционал от DialogBase.
  */
-class InvoiceDialog extends DialogBase {
+import { AppState } from '../state/state-core.js';
+import { APIClient } from '../../shared/api.js';
+import { AppConfig } from '../../shared/app-config.js';
+import { DialogBase } from '../../shared/dialog/dialog-base.js';
+import { Notifications } from '../../shared/notifications.js';
+
+export class InvoiceDialog extends DialogBase {
     /**
      * Текущий overlay диалога
      * @private
      * @type {HTMLElement|null}
      */
     static _currentOverlay = null;
+
+    /**
+     * AbortController для текущего save+verify-запроса. При закрытии диалога
+     * или повторном открытии прерываем «висящий» запрос, иначе ответ
+     * прилетит уже закрытому или другому экземпляру диалога.
+     * @private
+     * @type {AbortController|null}
+     */
+    static _saveAbort = null;
 
     /**
      * Текущий узел дерева
@@ -95,11 +110,50 @@ class InvoiceDialog extends DialogBase {
     /** Кэш справочника подразделений */
     static _cachedSubsidiaryDict = null;
 
+    /** Timestamp'ы кешей (ключ — имя поля) для TTL-инвалидации. */
+    static _cacheTimestamps = {};
+
+    /** TTL кешей (15 минут): дольше держать рискованно — внешние словари меняются ETL. */
+    static _cacheTtlMs = 15 * 60 * 1000;
+
     /** Выбранные процессы [{process_code, process_name}] */
     static _selectedProcesses = [];
 
     /** Выбранное подразделение (строка) */
     static _selectedSubsidiary = null;
+
+    /**
+     * Помечает указанный кеш текущим временем (для TTL-проверки).
+     * @private
+     */
+    static _markCacheTimestamp(key) {
+        this._cacheTimestamps[key] = Date.now();
+    }
+
+    /**
+     * Проверяет, не устарел ли кеш по своему timestamp'у.
+     * @private
+     */
+    static _isCacheFresh(key) {
+        const ts = this._cacheTimestamps[key];
+        if (!ts) return false;
+        return (Date.now() - ts) <= this._cacheTtlMs;
+    }
+
+    /**
+     * Инвалидирует все устаревшие кеши по TTL. Вызывается из show().
+     * @private
+     */
+    static _invalidateStaleCaches() {
+        const keys = ['_invoiceConfig', '_cachedTables', '_cachedMetricDict',
+                      '_cachedProcessDict', '_cachedSubsidiaryDict'];
+        for (const key of keys) {
+            if (this[key] !== null && !this._isCacheFresh(key)) {
+                this[key] = null;
+                delete this._cacheTimestamps[key];
+            }
+        }
+    }
 
     /**
      * Показывает диалог для указанного узла.
@@ -111,6 +165,10 @@ class InvoiceDialog extends DialogBase {
         if (this._currentOverlay) {
             this._close();
         }
+
+        // Инвалидируем устаревшие кеши: внешние словари (метрики/процессы/
+        // подразделения, конфиг фактур) могут поменяться ETL-ом между сессиями.
+        this._invalidateStaleCaches();
 
         this._currentNode = node;
         this._currentNodeId = nodeId;
@@ -178,6 +236,7 @@ class InvoiceDialog extends DialogBase {
                 const resp = await fetch(AppConfig.api.getUrl('/api/v1/acts/config/invoice'));
                 if (resp.ok) {
                     this._invoiceConfig = await resp.json();
+                    this._markCacheTimestamp('_invoiceConfig');
                 }
             } catch (err) {
                 console.error('Ошибка загрузки конфига фактур:', err);
@@ -213,9 +272,11 @@ class InvoiceDialog extends DialogBase {
 
         try {
             this._cachedTables = await APIClient.loadInvoiceTables(dbType);
+            this._markCacheTimestamp('_cachedTables');
         } catch (err) {
             console.error('Ошибка загрузки таблиц:', err);
-            this._cachedTables = [];
+            this._cachedTables = null;
+            Notifications.error('Не удалось загрузить список таблиц. Повторите позже.');
         }
 
         if (searchInput) {
@@ -226,36 +287,44 @@ class InvoiceDialog extends DialogBase {
 
     /**
      * Загружает справочник метрик (кэширует при первом вызове).
+     * При ошибке НЕ кешируем [] — иначе следующее открытие диалога молча
+     * покажет пустой список вместо повторной попытки загрузки.
      * @private
      */
     static async _loadMetricDict() {
-        if (this._cachedMetricDict !== null) return;
+        if (this._cachedMetricDict !== null && this._isCacheFresh('_cachedMetricDict')) return;
 
         try {
             this._cachedMetricDict = await APIClient.loadMetricDict();
+            this._markCacheTimestamp('_cachedMetricDict');
         } catch (err) {
             console.error('Ошибка загрузки справочника метрик:', err);
-            this._cachedMetricDict = [];
+            this._cachedMetricDict = null;
+            Notifications.error('Не удалось загрузить справочник метрик. Повторите позже.');
         }
     }
 
     static async _loadProcessDict() {
-        if (this._cachedProcessDict !== null) return;
+        if (this._cachedProcessDict !== null && this._isCacheFresh('_cachedProcessDict')) return;
         try {
             this._cachedProcessDict = await APIClient.loadProcessDict();
+            this._markCacheTimestamp('_cachedProcessDict');
         } catch (err) {
             console.error('Ошибка загрузки справочника процессов:', err);
-            this._cachedProcessDict = [];
+            this._cachedProcessDict = null;
+            Notifications.error('Не удалось загрузить справочник процессов. Повторите позже.');
         }
     }
 
     static async _loadSubsidiaryDict() {
-        if (this._cachedSubsidiaryDict !== null) return;
+        if (this._cachedSubsidiaryDict !== null && this._isCacheFresh('_cachedSubsidiaryDict')) return;
         try {
             this._cachedSubsidiaryDict = await APIClient.loadSubsidiaryDict();
+            this._markCacheTimestamp('_cachedSubsidiaryDict');
         } catch (err) {
             console.error('Ошибка загрузки справочника подразделений:', err);
-            this._cachedSubsidiaryDict = [];
+            this._cachedSubsidiaryDict = null;
+            Notifications.error('Не удалось загрузить справочник подразделений. Повторите позже.');
         }
     }
 
@@ -517,8 +586,9 @@ class InvoiceDialog extends DialogBase {
      * @private
      */
     static _switchFocus(overlay, metricType) {
-        // Снять active с предыдущего focused чипа (если есть),
-        // сделать его configured если у него есть код
+        // Снять active с предыдущего focused чипа (если есть).
+        // configured ставим только при наличии данных метрики — иначе чип чистим
+        // (зеркало логики _unfocusMetric: null-state не должен выглядеть как настроенный).
         if (this._focusedMetric && this._focusedMetric !== metricType) {
             const prevChip = overlay.querySelector(`.invoice-chip[data-metric="${this._focusedMetric}"]`);
             if (prevChip) {
@@ -526,8 +596,9 @@ class InvoiceDialog extends DialogBase {
                 if (this._selectedMetrics[this._focusedMetric]) {
                     prevChip.classList.add('configured');
                 } else {
-                    // Нет кода — оставить configured (без бейджа, но выбран)
-                    prevChip.classList.add('configured');
+                    delete this._selectedMetrics[this._focusedMetric];
+                    prevChip.classList.remove('configured');
+                    this._removeChipBadge(prevChip);
                 }
             }
         }
@@ -1129,37 +1200,55 @@ class InvoiceDialog extends DialogBase {
             saveBtn.textContent = 'Сохранение...';
         }
 
-        try {
-            const result = await APIClient.saveInvoice(data);
+        // Прерываем предыдущий save (если по какой-то причине он ещё в полёте).
+        if (this._saveAbort) {
+            this._saveAbort.abort();
+        }
+        this._saveAbort = new AbortController();
+        const signal = this._saveAbort.signal;
+        const expectedOverlay = overlay;
 
-            // Сохраняем в структуру дерева
+        try {
+            const result = await APIClient.saveInvoice(data, signal);
+
+            // Race-guard: пока ждали ответ, диалог уже закрыли — выходим.
+            if (!this._currentOverlay || this._currentOverlay !== expectedOverlay) return;
+
+            // Сохраняем в структуру дерева через единую точку записи:
+            // setNodeInvoice пишет в changelog ('invoice_set'), эмитит
+            // 'node:invoice-changed', помечает stage как unsaved.
             if (this._currentNode) {
-                this._currentNode.invoice = {
+                AppState.setNodeInvoice(this._currentNode.id, {
                     db_type: data.db_type,
                     schema_name: data.schema_name,
                     table_name: data.table_name,
                     metrics: data.metrics,
                     process: data.process,
                     profile_div: data.profile_div,
-                };
+                });
             }
 
-            // Вызываем верификацию (заглушка)
+            // Вызываем верификацию (заглушка) — backend пока возвращает status only.
+            // Когда добавит warnings:string[] — surface через Notifications.warning.
             if (result && result.id) {
                 try {
-                    const verifyResult = await APIClient.verifyInvoice(result.id, data.act_id);
+                    const verifyResult = await APIClient.verifyInvoice(result.id, data.act_id, signal);
                     console.log('Результат верификации (заглушка):', verifyResult);
+                    if (this._currentOverlay !== expectedOverlay) return;
+                    if (Array.isArray(verifyResult?.warnings) && verifyResult.warnings.length > 0) {
+                        Notifications.warning(verifyResult.warnings.join('; '));
+                    }
                 } catch (verifyErr) {
+                    if (verifyErr?.name === 'AbortError') return;
                     console.warn('Ошибка верификации (заглушка):', verifyErr);
                 }
             }
 
             Notifications.success('Фактура успешно прикреплена');
 
-            // Обновляем дерево чтобы показать/обновить бейдж фактуры
-            if (typeof treeManager !== 'undefined') {
-                treeManager.render();
-            }
+            // Бейдж фактуры в дереве обновляется TreeRenderer'ом через подписку
+            // на 'node:invoice-changed' (эмитится setNodeInvoice выше). Полный
+            // treeManager.render() здесь больше не нужен.
 
             this._close();
 
@@ -1174,10 +1263,14 @@ class InvoiceDialog extends DialogBase {
             }
 
         } catch (err) {
+            if (err?.name === 'AbortError') {
+                // Диалог закрыли / новый save запустили — тихо выходим.
+                return;
+            }
             console.error('Ошибка сохранения фактуры:', err);
             Notifications.error(`Ошибка сохранения: ${err.message}`);
 
-            if (saveBtn) {
+            if (saveBtn && this._currentOverlay === expectedOverlay) {
                 saveBtn.disabled = false;
                 saveBtn.textContent = 'Сохранить';
             }
@@ -1190,6 +1283,12 @@ class InvoiceDialog extends DialogBase {
      */
     static _close() {
         if (!this._currentOverlay) return;
+
+        // Прерываем все висящие save/verify-запросы.
+        if (this._saveAbort) {
+            this._saveAbort.abort();
+            this._saveAbort = null;
+        }
 
         this._removeEscapeHandler(this._currentOverlay);
         this._hideDialog(this._currentOverlay);

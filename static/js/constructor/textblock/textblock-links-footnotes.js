@@ -2,8 +2,11 @@
  * Расширение TextBlockManager для работы с гиперссылками и сносками
  */
 
+import { LinkFootnoteContextMenu } from '../context-menu/context-menu-links-footnotes.js';
+import { TextBlockManager } from './textblock-core.js';
+
 // Создаем глобальный экземпляр менеджера контекстного меню
-const linkFootnoteContextMenu = new LinkFootnoteContextMenu();
+export const linkFootnoteContextMenu = new LinkFootnoteContextMenu();
 
 Object.assign(TextBlockManager.prototype, {
     /**
@@ -506,7 +509,7 @@ Object.assign(TextBlockManager.prototype, {
 /**
  * Расширяем обработчик фокуса редактора
  */
-const originalHandleEditorFocus = TextBlockManager.prototype.handleEditorFocus;
+export const originalHandleEditorFocus = TextBlockManager.prototype.handleEditorFocus;
 TextBlockManager.prototype.handleEditorFocus = function (editor, textBlock) {
     originalHandleEditorFocus.call(this, editor, textBlock);
     this.initLinkFootnoteManager();
@@ -516,3 +519,7 @@ TextBlockManager.prototype.handleEditorFocus = function (editor, textBlock) {
         this.applyFormattingToNewNodes(editor);
     }, 100);
 };
+
+// Window-globals для совместимости с inline-скриптами в шаблонах.
+window.linkFootnoteContextMenu = linkFootnoteContextMenu;
+window.originalHandleEditorFocus = originalHandleEditorFocus;

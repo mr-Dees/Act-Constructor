@@ -4,60 +4,117 @@
 
 {% block content %}
 <div class="admin-content">
-    <div class="admin-header">
-        <h1 class="admin-title">Управление ролями пользователей</h1>
-        <button id="adminAddUserBtn" class="admin-add-user-btn">+ Добавить пользователя</button>
+    <!-- Переключатель разделов администрирования -->
+    <div class="admin-tabs" role="tablist">
+        <button class="admin-tab admin-tab--active" data-tab="roles" role="tab" aria-selected="true">
+            Роли пользователей
+        </button>
+        <button class="admin-tab" data-tab="diagnostics" role="tab" aria-selected="false">
+            Диагностика
+        </button>
+        <button class="admin-tab" data-tab="audit-log" role="tab" aria-selected="false">
+            Журнал админ-операций
+        </button>
     </div>
 
-    <!-- Поиск пользователей -->
-    <div class="admin-search-section">
-        <div class="admin-search-wrapper">
-            <input type="text" id="adminSearchInput" class="admin-search-input"
-                   placeholder="Поиск по ФИО, логину, email..."
-                   autocomplete="off">
+    <!-- Панель: Роли пользователей -->
+    <section class="admin-tab-panel admin-tab-panel--active" data-tab-panel="roles">
+        <div class="admin-header">
+            <h1 class="admin-title">Управление ролями пользователей</h1>
+            <button id="adminAddUserBtn" class="admin-add-user-btn">+ Добавить пользователя</button>
         </div>
-    </div>
 
-    <!-- Панель фильтров по ролям -->
-    <div class="admin-filter-bar" id="adminFilterBar">
-        <!-- JS заполнит чипсами ролей -->
-    </div>
+        <!-- Поиск пользователей -->
+        <div class="admin-search-section">
+            <div class="admin-search-wrapper">
+                <input type="text" id="adminSearchInput" class="admin-search-input"
+                       placeholder="Поиск по ФИО, логину, email..."
+                       autocomplete="off">
+            </div>
+        </div>
 
-    <!-- Заголовок таблицы -->
-    <div class="admin-roles-header">
-        <div class="admin-header-cell sortable" data-sort="fullname">
-            ФИО <span class="sort-indicator"></span>
+        <!-- Панель фильтров по ролям -->
+        <div class="admin-filter-bar" id="adminFilterBar">
+            <!-- JS заполнит чипсами ролей -->
         </div>
-        <div class="admin-header-cell sortable" data-sort="roles">
-            Роли <span class="sort-indicator"></span>
-        </div>
-        <div class="admin-header-cell sortable" data-sort="username">
-            Логин <span class="sort-indicator"></span>
-        </div>
-    </div>
 
-    <!-- Таблица ролей -->
-    <div class="admin-roles-section">
-        <div id="adminRolesTable" class="admin-roles-table">
-            <!-- Заполняется из JS -->
+        <!-- Заголовок таблицы -->
+        <div class="admin-roles-header">
+            <div class="admin-header-cell sortable" data-sort="fullname">
+                ФИО <span class="sort-indicator"></span>
+            </div>
+            <div class="admin-header-cell sortable" data-sort="roles">
+                Роли <span class="sort-indicator"></span>
+            </div>
+            <div class="admin-header-cell sortable" data-sort="username">
+                Логин <span class="sort-indicator"></span>
+            </div>
         </div>
-    </div>
+
+        <!-- Таблица ролей -->
+        <div class="admin-roles-section">
+            <div id="adminRolesTable" class="admin-roles-table">
+                <!-- Заполняется из JS -->
+            </div>
+        </div>
+    </section>
+
+    <!-- Панель: Диагностика -->
+    <section class="admin-tab-panel" data-tab-panel="diagnostics" hidden>
+        <div class="admin-header">
+            <h1 class="admin-title">Диагностика батчеров и фоновых задач</h1>
+            <button id="adminDiagRefreshBtn" class="admin-add-user-btn" type="button">Обновить</button>
+        </div>
+        <div id="adminDiagnosticsContent" class="admin-diagnostics-content">
+            <!-- Заполняется из admin-diagnostics.js -->
+        </div>
+    </section>
+
+    <!-- Панель: Журнал админ-операций -->
+    <section class="admin-tab-panel" data-tab-panel="audit-log" hidden>
+        <div class="admin-header">
+            <h1 class="admin-title">Журнал админ-операций</h1>
+        </div>
+        <div class="admin-audit-filters">
+            <input type="text" id="adminAuditAction" class="admin-search-input"
+                   placeholder="Тип операции (action)" autocomplete="off">
+            <input type="text" id="adminAuditAdmin" class="admin-search-input"
+                   placeholder="Логин администратора" autocomplete="off">
+            <input type="text" id="adminAuditTarget" class="admin-search-input"
+                   placeholder="Логин цели" autocomplete="off">
+            <input type="date" id="adminAuditFrom" class="admin-search-input" placeholder="С даты">
+            <input type="date" id="adminAuditTo" class="admin-search-input" placeholder="По дату">
+            <button id="adminAuditApplyBtn" class="admin-add-user-btn" type="button">Применить</button>
+            <button id="adminAuditResetBtn" class="admin-add-user-btn admin-add-user-btn--ghost" type="button">Сбросить</button>
+        </div>
+        <div class="admin-audit-meta">
+            <span id="adminAuditTotal">Всего: 0</span>
+            <span class="admin-audit-pager">
+                <button id="adminAuditPrevBtn" class="admin-add-user-btn admin-add-user-btn--ghost" type="button">←</button>
+                <span id="adminAuditPageInfo">1</span>
+                <button id="adminAuditNextBtn" class="admin-add-user-btn admin-add-user-btn--ghost" type="button">→</button>
+            </span>
+        </div>
+        <div id="adminAuditTable" class="admin-audit-table">
+            <!-- Заполняется admin-audit-log.js -->
+        </div>
+    </section>
 </div>
 {% endblock %}
 
-{% block extra_js %}
-<script src="{{ url_for('static', path='js/portal/admin/admin-search.js') }}"></script>
-<script src="{{ url_for('static', path='js/portal/admin/admin-roles.js') }}"></script>
-<script src="{{ url_for('static', path='js/portal/admin/admin-add-user-dialog.js') }}"></script>
-<script src="{{ url_for('static', path='js/portal/admin/admin-page.js') }}"></script>
-{% endblock %}
-
 {% block init_script %}
-<script>
+<script type="module">
+    import { AuthManager } from '{{ url_for('static', path='js/shared/auth.js') | versioned }}';
+    import { PortalSidebar } from '{{ url_for('static', path='js/portal/portal-sidebar.js') | versioned }}';
+    import { LandingSettingsManager } from '{{ url_for('static', path='js/portal/portal-settings.js') | versioned }}';
+    // admin-page.js импортирует свои зависимости (admin-search, admin-roles,
+    // admin-add-user-dialog, admin-diagnostics, admin-audit-log) через граф ESM.
+    import { AdminPage } from '{{ url_for('static', path='js/portal/admin/admin-page.js') | versioned }}';
+
     document.addEventListener('DOMContentLoaded', async () => {
         const isAuthorized = await AuthManager.requireAuth();
         if (isAuthorized) {
-            LandingSidebar.init();
+            PortalSidebar.init();
             LandingSettingsManager.init();
             AdminPage.init();
         }

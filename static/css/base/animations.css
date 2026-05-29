@@ -423,3 +423,19 @@
 .animate-critical-glow {
     animation: criticalGlow 2s var(--ease-in-out-smooth) infinite;
 }
+
+/*
+ * Уважение системной настройки «уменьшить движение».
+ * Полностью отключает анимации, transitions и smooth-scroll для пользователей,
+ * включивших prefers-reduced-motion (вестибулярные нарушения, эпилепсия и т.д.).
+ */
+@media (prefers-reduced-motion: reduce) {
+    *,
+    *::before,
+    *::after {
+        animation-duration: 0.01ms !important;
+        animation-iteration-count: 1 !important;
+        transition-duration: 0.01ms !important;
+        scroll-behavior: auto !important;
+    }
+}

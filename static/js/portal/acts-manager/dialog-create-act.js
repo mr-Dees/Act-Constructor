@@ -4,7 +4,18 @@
  * Управляет сложной формой с динамическими списками (аудиторская группа, поручения).
  * Наследует базовый функционал от DialogBase.
  */
-class CreateActDialog extends DialogBase {
+import { ActsMenuManager } from '../../constructor/header/acts-menu.js';
+import { ActsManagerPage } from './acts-manager-page.js';
+import { AppendixNumberDropdown } from './appendix-number-dropdown.js';
+import { TeamMemberSearch } from './team-member-search.js';
+import { APIClient } from '../../shared/api.js';
+import { AppConfig } from '../../shared/app-config.js';
+import { AuthManager } from '../../shared/auth.js';
+import { DialogBase } from '../../shared/dialog/dialog-base.js';
+import { DialogManager } from '../../shared/dialog/dialog-confirm.js';
+import { Notifications } from '../../shared/notifications.js';
+
+export class CreateActDialog extends DialogBase {
     /**
      * Текущий активный диалог (overlay элемент)
      * @private
@@ -58,13 +69,11 @@ class CreateActDialog extends DialogBase {
      */
     static async _loadSection5Points(actId) {
         try {
-            const currentUser = window.env?.JUPYTERHUB_USER || AppConfig?.auth?.jupyterhubUser || "";
+            const currentUser = AuthManager.getCurrentUser() || "";
 
             // Используем правильный префикс роутера
             const response = await fetch(AppConfig.api.getUrl(`/api/v1/acts/${actId}/content`), {
-                headers: {
-                    'X-JupyterHub-User': currentUser
-                }
+                headers: {}
             });
 
             if (!response.ok) {
@@ -153,8 +162,13 @@ class CreateActDialog extends DialogBase {
      * @param {Object|null} status - Статус акта (опционально)
      */
     static _showActDialog(actData, status = null) {
+        // Сбрасываем in-progress флаг при каждом открытии диалога —
+        // защищает от «застрявшего» _isSaving из предыдущей сессии
+        // (актуально для create-flow, где safeClose-перехвата нет).
+        this._isSaving = false;
+
         const isEdit = !!actData;
-        const currentUser = window.env?.JUPYTERHUB_USER || AppConfig?.auth?.jupyterhubUser || "";
+        const currentUser = AuthManager.getCurrentUser() || "";
 
         // Клонируем template
         const fragment = this._cloneTemplate('createActDialogTemplate');
@@ -649,16 +663,29 @@ class CreateActDialog extends DialogBase {
      */
     static async _initializeAuditTeam(dialog, actData, currentUser) {
         if (actData && actData.audit_team && actData.audit_team.length > 0) {
-            actData.audit_team.forEach(member => {
+            let appendixApplied = false;
+            for (const member of actData.audit_team) {
+                if (member.role === 'AppendixRef') {
+                    const parsed = this._parseAppendixRefText(member.full_name);
+                    if (parsed && !appendixApplied) {
+                        const result = this._addTeamMember(dialog, 'AppendixRef', '', '', '');
+                        if (result && result.rowElement) {
+                            this._transformRowToAppendixRef(result.rowElement, { x: parsed.x, dialog });
+                            appendixApplied = true;
+                        }
+                    }
+                    // role='AppendixRef' с невалидным текстом или второй маркер — игнорируем.
+                    continue;
+                }
                 this._addTeamMember(dialog, member.role, member.full_name, member.position, member.username);
-            });
+            }
+            this._updateRoleSelectAvailability(dialog);
         } else {
             // 3 строки по умолчанию
             this._addTeamMember(dialog, 'Куратор', '', '', '');
             const leader = this._addTeamMember(dialog, 'Руководитель', '', '', '');
             this._addTeamMember(dialog, 'Участник', '', '', '');
 
-            // Автозаполнение текущего пользователя в строку "Руководитель"
             if (currentUser && leader) {
                 this._autoFillUser(leader, currentUser);
             }
@@ -675,9 +702,12 @@ class CreateActDialog extends DialogBase {
             const exact = users.find(u => u.username === username);
             if (exact) {
                 search.fillFromUser(exact);
+            } else {
+                Notifications.warning(`Пользователь ${username} не найден в справочнике`);
             }
         } catch (err) {
             console.error('Автозаполнение пользователя:', err);
+            Notifications.warning(`Не удалось найти пользователя ${username} в справочнике`);
         }
     }
 
@@ -697,7 +727,7 @@ class CreateActDialog extends DialogBase {
      * Добавляет члена аудиторской группы
      * @private
      */
-    static _addTeamMember(dialog, role = 'Участник', fullName = '', position = '', username = '') {
+    static _addTeamMember(dialog, role = '', fullName = '', position = '', username = '') {
         const container = dialog.querySelector('#auditTeamContainer');
         if (!container) return null;
 
@@ -728,16 +758,289 @@ class CreateActDialog extends DialogBase {
             search.setSelected();
         }
 
+        // Сохраняем ссылку на search для последующего destroy при трансформации в AppendixRef
+        rowElement._teamMemberSearch = search;
+
+        // Listener на смену роли — переход в/из AppendixRef-режима
+        if (roleSelect) {
+            roleSelect.addEventListener('change', async (e) => {
+                const newRole = e.target.value;
+                const isAppendix = newRole === 'AppendixRef';
+                const wasAppendix = rowElement.classList.contains('team-member-row--appendix-ref');
+
+                if (isAppendix && !wasAppendix) {
+                    const regulars = this._getRegularParticipantRows(dialog).filter(r => r !== rowElement);
+                    if (regulars.length > 0) {
+                        const confirmed = await DialogManager.show({
+                            title: 'Замена обычных участников',
+                            message: 'Все обычные сотрудники будут удалены из списка. Нажмите OK для удаления или Отмена для смены их роли вручную.',
+                            icon: '⚠️',
+                            confirmText: 'OK',
+                            cancelText: 'Отмена',
+                            type: 'warning'
+                        });
+                        if (!confirmed) {
+                            e.target.value = '';
+                            this._updateRoleSelectAvailability(dialog);
+                            return;
+                        }
+                        this._removeRegularParticipants(dialog);
+                    }
+                    this._transformRowToAppendixRef(rowElement, { x: '', dialog });
+                } else if (!isAppendix && wasAppendix) {
+                    this._transformRowToRegular(rowElement, dialog);
+                }
+
+                this._updateRoleSelectAvailability(dialog);
+            });
+        }
+
         // Обработчик удаления (с очисткой глобальных listeners)
         const deleteBtn = rowElement.querySelector('.delete-member-btn');
         if (deleteBtn) {
             deleteBtn.onclick = () => {
                 search.destroy();
                 rowElement.remove();
+                this._updateRoleSelectAvailability(dialog);
             };
         }
 
+        this._updateRoleSelectAvailability(dialog);
+
         return { rowElement, search };
+    }
+
+    /**
+     * Regex строки-маркера. Источник истины — спека acts-features-bundle.
+     * Формат: «В соответствии с приложением №X к распоряжению УВА от {date} № {number}».
+     */
+    static APPENDIX_REF_REGEX = /^В соответствии с приложением №(\d+) к распоряжению УВА от (.+?) № (.+)$/;
+
+    /** Собирает текст строки-маркера по правилам спеки. */
+    static _formatAppendixRefText(x, orderDate, orderNumber) {
+        const xPart = Number.isFinite(Number(x)) && Number(x) > 0 ? Number(x) : '';
+        const datePart = orderDate || '';
+        const numberPart = orderNumber || '';
+        return `В соответствии с приложением №${xPart} к распоряжению УВА от ${datePart} № ${numberPart}`;
+    }
+
+    /** Парсит full_name с бэка обратно в {x, orderDate, orderNumber} или null если не маркер. */
+    static _parseAppendixRefText(text) {
+        if (!text || typeof text !== 'string') return null;
+        const m = text.match(this.APPENDIX_REF_REGEX);
+        if (!m) return null;
+        return { x: parseInt(m[1], 10), orderDate: m[2], orderNumber: m[3] };
+    }
+
+    /** Возвращает обычных «Участников» (без AppendixRef). */
+    static _getRegularParticipantRows(dialog) {
+        return Array.from(dialog.querySelectorAll('.team-member-row')).filter(row => {
+            const r = row.querySelector('[name="role"]');
+            return r && r.value === 'Участник';
+        });
+    }
+
+    /** Удаляет все строки role='Участник'. Кураторов/руководителей/редакторов не трогает. */
+    static _removeRegularParticipants(dialog) {
+        this._getRegularParticipantRows(dialog).forEach(row => {
+            // Триггерим клик delete-кнопки, чтобы корректно зачистить TeamMemberSearch listeners.
+            const deleteBtn = row.querySelector('.delete-member-btn');
+            if (deleteBtn && typeof deleteBtn.onclick === 'function') {
+                deleteBtn.onclick();
+            } else {
+                row.remove();
+            }
+        });
+    }
+
+    /**
+     * Превращает обычную team-member-row в AppendixRef-строку:
+     *  - удаляет inputs ФИО/position/username и кнопку clear
+     *  - role-select становится hidden (data сохраняется как value=AppendixRef)
+     *  - вставляет role-label "Участники" и inline-блок с dropdown'ом и текстом orderDate/orderNumber
+     *  - инициализирует AppendixNumberDropdown
+     * @private
+     */
+    static _transformRowToAppendixRef(row, { x, dialog }) {
+        if (!row || row.classList.contains('team-member-row--appendix-ref')) return;
+
+        row.classList.add('team-member-row--appendix-ref');
+
+        // Уничтожаем TeamMemberSearch если был — он держит listeners на name-input,
+        // который мы сейчас удалим из DOM.
+        if (row._teamMemberSearch && typeof row._teamMemberSearch.destroy === 'function') {
+            row._teamMemberSearch.destroy();
+            row._teamMemberSearch = null;
+        }
+
+        // Удаляем поля и clear-кнопку — role-select остаётся видимым,
+        // чтобы пользователь мог перевыбрать роль обратно.
+        row.querySelector('.team-member-name-wrapper')?.remove();
+        row.querySelector('input[name="position"]')?.remove();
+        row.querySelector('input[name="username"]')?.remove();
+        row.querySelector('.clear-member-btn')?.remove();
+
+        const roleSelect = row.querySelector('[name="role"]');
+        if (roleSelect) roleSelect.value = 'AppendixRef';
+
+        // Inline-блок: "В соответствии с приложением №" [dropdown] "к распоряжению УВА от {date} № {number}"
+        const inline = document.createElement('div');
+        inline.className = 'team-member-row__appendix-inline';
+        inline.innerHTML = `
+            <span class="team-member-row__appendix-inline-text">В соответствии с приложением №</span>
+            <div class="team-member-row__appendix-number-host"></div>
+            <span class="team-member-row__appendix-inline-meta" data-role="meta"></span>
+        `;
+        const deleteBtn = row.querySelector('.delete-member-btn');
+        if (deleteBtn) {
+            row.insertBefore(inline, deleteBtn);
+        } else {
+            row.appendChild(inline);
+        }
+
+        // Инициализируем dropdown
+        const host = inline.querySelector('.team-member-row__appendix-number-host');
+        const xNum = Number(x);
+        const initialValue = (Number.isFinite(xNum) && xNum >= 1 && xNum <= 5) ? xNum : 1;
+        const dropdown = new AppendixNumberDropdown(host, {
+            initialValue,
+            onChange: () => this._refreshAppendixInlineMeta(row, dialog)
+        });
+        row._appendixDropdown = dropdown;
+
+        // Обновляем текст "к распоряжению УВА от ..."
+        this._refreshAppendixInlineMeta(row, dialog);
+
+        // Подписываемся на изменения order_date / order_number — один раз на диалог
+        if (!dialog._appendixOrderListenersBound) {
+            const orderDateInput = dialog.querySelector('input[name="order_date"]');
+            const orderNumberInput = dialog.querySelector('input[name="order_number"]');
+            const refreshAll = () => {
+                dialog.querySelectorAll('.team-member-row--appendix-ref').forEach(r =>
+                    this._refreshAppendixInlineMeta(r, dialog)
+                );
+            };
+            orderDateInput?.addEventListener('input', refreshAll);
+            orderNumberInput?.addEventListener('input', refreshAll);
+            dialog._appendixOrderListenersBound = true;
+        }
+
+        // Кнопка delete должна также вызывать destroy dropdown'а
+        if (deleteBtn) {
+            deleteBtn.onclick = () => {
+                if (row._appendixDropdown && typeof row._appendixDropdown.destroy === 'function') {
+                    row._appendixDropdown.destroy();
+                    row._appendixDropdown = null;
+                }
+                row.remove();
+                this._updateRoleSelectAvailability(dialog);
+            };
+        }
+    }
+
+    /**
+     * Обратное превращение AppendixRef-строки в обычную: удаляем inline-блок и dropdown,
+     * восстанавливаем inputs ФИО/Должность/Логин + clear-кнопку, реинициализируем TeamMemberSearch.
+     * role-select остаётся видимым со значением, которое выбрал пользователь.
+     * @private
+     */
+    static _transformRowToRegular(row, dialog) {
+        if (!row || !row.classList.contains('team-member-row--appendix-ref')) return;
+
+        if (row._appendixDropdown && typeof row._appendixDropdown.destroy === 'function') {
+            row._appendixDropdown.destroy();
+            row._appendixDropdown = null;
+        }
+
+        row.querySelector('.team-member-row__appendix-inline')?.remove();
+        // На случай рудиментов старой версии (label-замена select'а):
+        row.querySelector('.team-member-row__role-label')?.remove();
+
+        row.classList.remove('team-member-row--appendix-ref');
+
+        const nameWrapper = document.createElement('div');
+        nameWrapper.className = 'team-member-name-wrapper';
+        const fullNameInput = document.createElement('input');
+        fullNameInput.type = 'text';
+        fullNameInput.name = 'full_name';
+        fullNameInput.placeholder = 'ФИО *';
+        fullNameInput.required = true;
+        fullNameInput.className = 'team-member-name';
+        fullNameInput.dataset.field = 'full_name';
+        fullNameInput.autocomplete = 'off';
+        nameWrapper.appendChild(fullNameInput);
+
+        const positionInput = document.createElement('input');
+        positionInput.type = 'text';
+        positionInput.name = 'position';
+        positionInput.placeholder = 'Должность *';
+        positionInput.required = true;
+        positionInput.className = 'team-member-position';
+        positionInput.dataset.field = 'position';
+
+        const usernameInput = document.createElement('input');
+        usernameInput.type = 'text';
+        usernameInput.name = 'username';
+        usernameInput.placeholder = 'Логин *';
+        usernameInput.required = true;
+        usernameInput.className = 'team-member-username';
+        usernameInput.dataset.field = 'username';
+
+        const clearBtn = document.createElement('button');
+        clearBtn.type = 'button';
+        clearBtn.className = 'btn btn-ghost clear-member-btn';
+        clearBtn.title = 'Сбросить выбор';
+        clearBtn.innerHTML = '<svg width="14" height="14" viewBox="0 0 24 24" fill="none">'
+            + '<path d="M3 12h18M3 12l6-6M3 12l6 6" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>'
+            + '</svg>';
+
+        const deleteBtn = row.querySelector('.delete-member-btn');
+        row.insertBefore(nameWrapper, deleteBtn);
+        row.insertBefore(positionInput, deleteBtn);
+        row.insertBefore(usernameInput, deleteBtn);
+        row.insertBefore(clearBtn, deleteBtn);
+
+        const search = new TeamMemberSearch(row);
+        row._teamMemberSearch = search;
+
+        if (deleteBtn) {
+            deleteBtn.onclick = () => {
+                search.destroy();
+                row.remove();
+                this._updateRoleSelectAvailability(dialog);
+            };
+        }
+    }
+
+    /**
+     * Обновляет meta-span с актуальными order_date/order_number из формы.
+     * @private
+     */
+    static _refreshAppendixInlineMeta(row, dialog) {
+        const meta = row.querySelector('[data-role="meta"]');
+        if (!meta) return;
+        const orderDate = dialog.querySelector('input[name="order_date"]')?.value || '';
+        const orderNumber = dialog.querySelector('input[name="order_number"]')?.value || '';
+        meta.textContent = `к распоряжению УВА от ${orderDate} № ${orderNumber}`;
+    }
+
+    /** Есть ли в составе AppendixRef-строка. @private */
+    static _hasAppendixRefRow(dialog) {
+        return !!dialog.querySelector('.team-member-row--appendix-ref');
+    }
+
+    /**
+     * Обновляет disabled-флаги опций "Участник" и "AppendixRef" в role-select'ах всех остальных строк.
+     * @private
+     */
+    static _updateRoleSelectAvailability(dialog) {
+        const hasAppendix = this._hasAppendixRefRow(dialog);
+        dialog.querySelectorAll('.team-member-row:not(.team-member-row--appendix-ref) select[name="role"]').forEach(select => {
+            const participantOption = select.querySelector('option[value="Участник"]');
+            const appendixOption = select.querySelector('option[value="AppendixRef"]');
+            if (participantOption) participantOption.disabled = hasAppendix;
+            if (appendixOption) appendixOption.disabled = hasAppendix;
+        });
     }
 
     /**
@@ -946,8 +1249,17 @@ class CreateActDialog extends DialogBase {
             return false;
         }
 
-        // Проверяем наличие куратора и руководителя
+        // Проверяем что у каждой строки выбрана роль (placeholder = '')
         const roles = teamMembers.map(row => row.querySelector('[name="role"]').value);
+        if (roles.some(r => !r)) {
+            if (typeof Notifications !== 'undefined') {
+                Notifications.warning('Выберите роль для каждого члена группы или удалите строку');
+            } else {
+                alert('Выберите роль для каждого члена группы или удалите строку');
+            }
+            return false;
+        }
+
         const hasCurator = roles.includes('Куратор');
         const hasLeader = roles.includes('Руководитель');
 
@@ -1150,12 +1462,26 @@ class CreateActDialog extends DialogBase {
      * @private
      */
     static _collectAuditTeam(dialog) {
-        return Array.from(dialog.querySelectorAll('.team-member-row')).map(row => ({
-            role: row.querySelector('[name="role"]').value,
-            full_name: row.querySelector('[name="full_name"]').value,
-            position: row.querySelector('[name="position"]').value,
-            username: row.querySelector('[name="username"]').value
-        }));
+        return Array.from(dialog.querySelectorAll('.team-member-row')).map(row => {
+            if (row.classList.contains('team-member-row--appendix-ref')) {
+                const dropdown = row._appendixDropdown;
+                const x = dropdown ? dropdown.value : 1;
+                const orderDate = dialog.querySelector('input[name="order_date"]')?.value?.trim() || '';
+                const orderNumber = dialog.querySelector('input[name="order_number"]')?.value?.trim() || '';
+                return {
+                    role: 'AppendixRef',
+                    full_name: this._formatAppendixRefText(x, orderDate, orderNumber),
+                    position: '-',
+                    username: '-'
+                };
+            }
+            return {
+                role: row.querySelector('[name="role"]').value,
+                full_name: row.querySelector('[name="full_name"]').value,
+                position: row.querySelector('[name="position"]').value,
+                username: row.querySelector('[name="username"]').value
+            };
+        });
     }
 
     /**
@@ -1227,8 +1553,7 @@ class CreateActDialog extends DialogBase {
         const response = await fetch(endpoint, {
             method: method,
             headers: {
-                'Content-Type': 'application/json',
-                'X-JupyterHub-User': currentUser
+                'Content-Type': 'application/json'
             },
             body: JSON.stringify(body)
         });
@@ -1252,6 +1577,10 @@ class CreateActDialog extends DialogBase {
      * @private
      */
     static async _handleSubmitSuccess(data, isEdit, actId, dialog) {
+        // Маркируем сохранение завершённым ДО _closeDialog(), чтобы перехватчик
+        // safeClose в acts-manager-page.js::editAct увидел флаг и не запустил
+        // повторный PATCH-через-_handleFormSubmit. safeClose в finally сбросит _isSaving.
+        this._isSaving = true;
         this._closeDialog();
 
         if (typeof Notifications !== 'undefined') {
@@ -1274,8 +1603,9 @@ class CreateActDialog extends DialogBase {
      */
     static async _handleSubmitError(err, isEdit, currentUser, body, dialog) {
         // Проверяем специальный случай: КМ уже существует (только при создании)
-        if (!isEdit && err.response?.status === 409 && err.errData?.type === 'km_exists') {
-            await this._handleKmExistsError(err.errData, body, currentUser);
+        if (!isEdit && err.response?.status === 409 && err.errData?.code === 'km-number-exists') {
+            // Поля km_number/current_parts/next_part лежат в envelope.extra
+            await this._handleKmExistsError(err.errData?.extra || {}, body, currentUser);
             return;
         }
 
@@ -1307,7 +1637,7 @@ class CreateActDialog extends DialogBase {
         });
 
         if (confirmed) {
-            await this._createWithNewPart(AppConfig.api.getUrl('/api/v1/acts/create'), body, currentUser);
+            await this._createWithNewPart('/api/v1/acts/create', body, currentUser);
         }
     }
 
@@ -1351,10 +1681,6 @@ class CreateActDialog extends DialogBase {
         if (window.currentActId === actId && window.APIClient) {
             await window.APIClient.loadActContent(actId);
 
-            if (window.StorageManager && typeof window.StorageManager.markAsSyncedWithDB === 'function') {
-                window.StorageManager.markAsSyncedWithDB();
-            }
-
             if (typeof Notifications !== 'undefined') {
                 Notifications.info('Данные акта обновлены');
             }
@@ -1378,8 +1704,7 @@ class CreateActDialog extends DialogBase {
             const resp = await fetch(AppConfig.api.getUrl(`${endpoint}?force_new_part=true`), {
                 method: 'POST',
                 headers: {
-                    'Content-Type': 'application/json',
-                    'X-JupyterHub-User': currentUser
+                    'Content-Type': 'application/json'
                 },
                 body: JSON.stringify(body)
             });

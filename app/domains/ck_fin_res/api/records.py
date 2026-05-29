@@ -13,6 +13,7 @@ logger = logging.getLogger("audit_workstation.api.ck_fin_res.records")
 
 from app.api.v1.deps.auth_deps import get_username
 from app.api.v1.deps.role_deps import require_domain_access
+from app.core.responses import PaginatedResponse
 from app.domains.ck_fin_res.deps import get_fr_validation_service
 from app.domains.ck_fin_res.schemas.fr_validation import (
     FRValidationBatchItem,
@@ -28,13 +29,17 @@ _access = Depends(require_domain_access("ck_fin_res"))
 router = APIRouter()
 
 
-@router.post("/records/search", dependencies=[_access])
+@router.post(
+    "/records/search",
+    response_model=PaginatedResponse[dict],
+    dependencies=[_access],
+)
 async def search_records(
     body: ValidationSearchRequest,
     service: FRValidationService = Depends(get_fr_validation_service),
 ):
     """Поиск записей FR-валидации по фильтрам."""
-    data = await service.search_records(
+    items, total = await service.search_records(
         start_date=body.start_date,
         end_date=body.end_date,
         metric_code=body.metric_code or None,
@@ -42,7 +47,9 @@ async def search_records(
         limit=body.limit,
         offset=body.offset,
     )
-    return {"data": data}
+    return PaginatedResponse[dict](
+        items=items, total=total, limit=body.limit, offset=body.offset,
+    )
 
 
 @router.get("/records/{record_id}", dependencies=[_access])

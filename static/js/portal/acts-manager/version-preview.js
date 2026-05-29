@@ -2,7 +2,18 @@
  * Полноэкранный предпросмотр версии содержимого.
  * Стекируется поверх AuditLogDialog через DialogBase._activeDialogs.
  */
-class VersionPreviewOverlay extends DialogBase {
+import { PreviewTableRenderer } from '../../constructor/preview/preview-table-renderer.js';
+import { PreviewTextBlockRenderer } from '../../constructor/preview/preview-textblock-renderer.js';
+import { PreviewViolationRenderer } from '../../constructor/preview/preview-violation-renderer.js';
+import { AuditLogDialog } from './dialog-audit-log.js';
+import { DiffEngine } from './diff-engine.js';
+import { DiffRenderer } from './diff-renderer.js';
+import { APIClient } from '../../shared/api.js';
+import { DialogBase } from '../../shared/dialog/dialog-base.js';
+import { DialogManager } from '../../shared/dialog/dialog-confirm.js';
+import { Notifications } from '../../shared/notifications.js';
+
+export class VersionPreviewOverlay extends DialogBase {
     static _overlay = null;
     static _viewMode = 'ui';
     static _actId = null;
@@ -297,21 +308,20 @@ class VersionPreviewOverlay extends DialogBase {
         if (!confirmed) return;
 
         try {
-            await APIClient.lockAct(this._actId);
-            try {
-                const result = await APIClient.restoreVersion(this._actId, versionId);
-                Notifications.success(result.message || 'Содержимое восстановлено');
-            } finally {
-                await APIClient.unlockAct(this._actId).catch(() => {});
-            }
+            // Lock уже держит родительский AuditLogDialog (LockManager.init при show).
+            // Повторный lockAct + unlockAct в finally глобально снимет блокировку —
+            // LockManager-heartbeat начнёт получать «вы не владеете блокировкой»
+            // и через 1-2 мин выкинет юзера фейковой «Сессия завершена».
+            const result = await APIClient.restoreVersion(this._actId, versionId);
+            Notifications.success(result.message || 'Содержимое восстановлено');
 
             // Закрываем превью и обновляем диалог
             this._close();
 
             // Обновляем данные в AuditLogDialog если он открыт
             if (typeof AuditLogDialog !== 'undefined' && AuditLogDialog._overlay) {
-                AuditLogDialog._loadAllData();
-                AuditLogDialog._loadAllVersions();
+                AuditLogDialog._loadInitialLog();
+                AuditLogDialog._loadInitialVersions();
             }
         } catch (err) {
             console.error('Ошибка восстановления:', err);

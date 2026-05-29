@@ -6,7 +6,17 @@
  * Интегрирован с системой Proxy для автоматического отслеживания изменений.
  * Отслеживает синхронизацию с БД для предотвращения потери данных.
  */
-class StorageManager {
+import { ItemsRenderer } from './items/items-renderer.js';
+import { LifecycleHelper } from './lifecycle-helper.js';
+import { AppState } from './state/state-core.js';
+// ActsManagerPage не импортируется: constructor → portal — неправильное направление
+// зон. Используем lazy через window.ActsManagerPage (см. invalidateCache-вызов ниже).
+import { APIClient } from '../shared/api.js';
+import { AppConfig } from '../shared/app-config.js';
+import { DialogManager } from '../shared/dialog/dialog-confirm.js';
+import { Notifications } from '../shared/notifications.js';
+
+export class StorageManager {
     /**
      * Таймер для дебаунса автосохранения
      * @private
@@ -29,7 +39,24 @@ class StorageManager {
     static _periodicDbSaveInterval = null;
 
     /**
+     * Единое состояние persistence-индикатора.
+     * Возможные значения:
+     *  - 'saved'      — синхронизировано с localStorage И БД (белый);
+     *  - 'local-only' — сохранено только в localStorage, не в БД (жёлтый);
+     *  - 'unsaved'    — есть изменения, ещё не сохранённые даже локально (красный).
+     *
+     * Старые булевы флаги (_hasUnsavedChanges, _isSyncedWithDB) остаются как
+     * computed-зеркала через _setState — массивы load-bearing consumer'ов
+     * (beforeunload, периодические таймеры, hasUnsavedChanges()) продолжают
+     * работать без массовой замены проверок.
+     * @private
+     * @type {'saved'|'local-only'|'unsaved'}
+     */
+    static _state = 'saved';
+
+    /**
      * Флаг для отслеживания несохраненных изменений в localStorage
+     * (зеркало _state === 'unsaved'). Управляется через _setState.
      * @private
      * @type {boolean}
      */
@@ -37,6 +64,7 @@ class StorageManager {
 
     /**
      * Флаг для отслеживания синхронизации с БД
+     * (зеркало _state === 'saved'). Управляется через _setState.
      * @private
      * @type {boolean}
      */
@@ -93,138 +121,14 @@ class StorageManager {
     }
 
     /**
-     * Восстанавливает сохраненное состояние из localStorage
-     * Публичный метод, вызываемый явно из ActsMenuManager
-     * @returns {boolean} true если восстановление успешно
-     */
-    static restoreSavedState() {
-        const savedState = this._loadState();
-
-        if (!savedState) {
-            console.log('Нет сохраненного состояния для восстановления');
-            return false;
-        }
-
-        try {
-            // Отключаем отслеживание на время восстановления
-            this._trackingDisabled = true;
-
-            // Восстанавливаем данные в AppState
-            AppState.treeData = savedState.tree;
-            AppState.tables = savedState.tables || {};
-            AppState.textBlocks = savedState.textBlocks || {};
-            AppState.violations = savedState.violations || {};
-            AppState.tableUISizes = savedState.tableUISizes || {};
-
-            // Восстанавливаем текущий шаг БЕЗ вызова App.goToStep
-            const savedStep = savedState.currentStep || 1;
-            AppState.currentStep = savedStep;
-
-            // Восстанавливаем выбранный узел
-            if (savedState.selectedNodeId) {
-                AppState.selectedNode = AppState.findNodeById(savedState.selectedNodeId);
-            } else {
-                AppState.selectedNode = null;
-            }
-
-            // Восстанавливаем форматы сохранения
-            if (savedState.selectedFormats) {
-                setTimeout(() => {
-                    this._restoreSelectedFormats(savedState.selectedFormats);
-                }, 100);
-            }
-
-            // Перегенерируем нумерацию для консистентности
-            AppState.generateNumbering();
-
-            // Обновляем UI шагов в заголовке
-            this._updateStepUI(savedStep);
-
-            console.log('Состояние успешно восстановлено из localStorage');
-
-            // Устанавливаем правильные флаги
-            // После восстановления из localStorage:
-            // - нет несохраненных изменений В ЛОКАЛСТОРАДЖ
-            // - но данные НЕ синхронизированы с БД
-            this._hasUnsavedChanges = false;
-            this._isSyncedWithDB = false;
-
-            // Включаем отслеживание ПОСЛЕ установки флагов
-            this._trackingDisabled = false;
-
-            // Обновляем индикатор ПОСЛЕ включения отслеживания
-            this._updateSaveIndicator();
-
-            return true;
-
-        } catch (error) {
-            this._trackingDisabled = false;
-            console.error('Ошибка восстановления состояния:', error);
-            Notifications.error('Не удалось восстановить сохраненное состояние');
-            this._clearStorage();
-            return false;
-        }
-    }
-
-    /**
-     * Загружает состояние из localStorage
-     * @private
-     * @returns {Object|null} Сохраненное состояние или null
-     */
-    static _loadState() {
-        try {
-            const stateJson = localStorage.getItem(AppConfig.localStorage.stateKey);
-
-            if (!stateJson) return null;
-
-            return JSON.parse(stateJson);
-        } catch (error) {
-            console.error('Ошибка чтения из localStorage:', error);
-            return null;
-        }
-    }
-
-    /**
-     * Обновляет UI индикаторов шагов в заголовке
-     * @private
-     * @param {number} stepNum - Номер активного шага
-     */
-    static _updateStepUI(stepNum) {
-        // Обновляем классы активности для индикаторов шагов
-        document.querySelectorAll('.step').forEach(step => {
-            const isActive = parseInt(step.dataset.step) === stepNum;
-            step.classList.toggle('active', isActive);
-            step.setAttribute('aria-selected', isActive.toString());
-        });
-
-        // Показываем/скрываем контент шагов
-        document.querySelectorAll('.step-content').forEach(content => {
-            content.classList.add('hidden');
-        });
-
-        const currentContent = document.getElementById(`step${stepNum}`);
-        currentContent?.classList.remove('hidden');
-
-        // Обрабатываем специфичную логику шага 2
-        if (stepNum === 2) {
-            setTimeout(() => {
-                if (typeof textBlockManager !== 'undefined' && textBlockManager.initGlobalToolbar) {
-                    textBlockManager.initGlobalToolbar();
-                }
-                if (typeof ItemsRenderer !== 'undefined' && ItemsRenderer.renderAll) {
-                    ItemsRenderer.renderAll();
-                }
-            }, 100);
-        }
-    }
-
-    /**
      * Настраивает обработчики событий для автосохранения
      * @private
      */
     static _setupEventHandlers() {
-        // Предупреждение при попытке закрыть страницу с несохраненными данными
-        window.addEventListener('beforeunload', (e) => {
+        // Предупреждение при попытке закрыть страницу с несохраненными данными.
+        // Регистрируется через общий реестр beforeunload-обработчиков LifecycleHelper,
+        // чтобы можно было централизованно снять обработчик при destroy/teardown.
+        const beforeUnloadHandler = (e) => {
             // Сохраняем в localStorage перед закрытием
             if (this._hasUnsavedChanges) {
                 this.saveState(true);
@@ -241,20 +145,31 @@ class StorageManager {
                 e.returnValue = 'У вас есть несохраненные изменения. Вы уверены, что хотите покинуть страницу?';
                 return e.returnValue;
             }
-        });
+        };
+        if (typeof LifecycleHelper !== 'undefined') {
+            LifecycleHelper.registerBeforeUnload('storage:unsaved-warning', beforeUnloadHandler);
+        } else {
+            window.addEventListener('beforeunload', beforeUnloadHandler);
+        }
 
         // Перехват попыток навигации (для показа кастомного диалога)
         this._setupNavigationInterception();
 
         // Периодическое автосохранение в localStorage (каждые 2 минуты при наличии изменений)
+        // E-6: пропускаем тик, если идёт drag-and-drop — иначе сохраним промежуточное
+        // состояние treeData во время mutation, в которой parent.children в неконсистентном виде.
+        // Через периодический интервал следующий тик подберёт изменения.
         this._periodicSaveInterval = setInterval(() => {
+            if (AppState._dragInProgress) return;
             if (this._hasUnsavedChanges) {
                 this.saveState(true);
             }
         }, AppConfig.localStorage.periodicSaveInterval);
 
         // Периодическое сохранение в БД (каждые 2 минуты при наличии несинхронизированных данных)
+        // E-6: та же защита от race с drag'ом.
         this._periodicDbSaveInterval = setInterval(async () => {
+            if (AppState._dragInProgress) return;
             if (this.hasUnsyncedChanges() && window.currentActId) {
                 try {
                     await APIClient.saveActContent(window.currentActId, { saveType: 'periodic' });
@@ -266,12 +181,43 @@ class StorageManager {
     }
 
     /**
-     * Настраивает перехват попыток навигации
+     * Настраивает перехват попыток навигации.
+     * Покрывает:
+     *  - клик по `<a href>` (внутренние ссылки) — кастомный диалог;
+     *  - back/forward (popstate) — кастомный диалог с восстановлением истории;
+     *  - закрытие вкладки/прямой URL-ввод — браузерный beforeunload (см. _setupEventHandlers).
+     * Программное `window.location.href = ...` всё равно отлавливается beforeunload —
+     * перехватить set'тер location напрямую браузер не даёт.
      * @private
      */
     static _setupNavigationInterception() {
         // Флаг разрешения навигации (для программных переходов)
         window._allowNavigation = false;
+
+        // popstate-страж: при back/forward с unsynced правками показываем
+        // кастомный confirm. Если юзер подтверждает уход — пускаем; иначе
+        // pushState восстанавливает URL.
+        history.replaceState({_lockNavGuard: true}, '', window.location.href);
+        window.addEventListener('popstate', async (event) => {
+            if (window._allowNavigation) return;
+            if (!this.hasUnsyncedChanges()) return;
+
+            // Возвращаем URL обратно, чтобы юзер физически не ушёл со страницы,
+            // пока думает над диалогом.
+            history.pushState({_lockNavGuard: true}, '', window.location.href);
+
+            const confirmed = await DialogManager.show({
+                title: 'Несохраненные изменения',
+                message: 'У вас есть несохранённые изменения. Вернуться к предыдущей странице без сохранения?',
+                icon: '⚠️',
+                confirmText: 'Уйти без сохранения',
+                cancelText: 'Остаться'
+            });
+            if (confirmed) {
+                window._allowNavigation = true;
+                history.back();
+            }
+        });
 
         // Перехватываем клики по ссылкам
         document.addEventListener('click', async (e) => {
@@ -337,47 +283,61 @@ class StorageManager {
     }
 
     /**
+     * Единственная точка перевода persistence-state в новое значение.
+     * Синхронно обновляет зеркальные булевы флаги и индикатор.
+     * Старые API-методы (markAsUnsaved / _markAsSaved / markAsSyncedWithDB)
+     * — обёртки над _setState.
+     *
+     * @private
+     * @param {'saved'|'local-only'|'unsaved'} newState
+     */
+    static _setState(newState) {
+        if (newState !== 'saved' && newState !== 'local-only' && newState !== 'unsaved') {
+            console.warn('StorageManager._setState: неизвестное состояние', newState);
+            return;
+        }
+        this._state = newState;
+        // Зеркала для обратной совместимости с консьюмерами, читающими булевы поля
+        // напрямую (beforeunload-warning, _updateSaveIndicator, hasUnsavedChanges).
+        this._hasUnsavedChanges = (newState === 'unsaved');
+        this._isSyncedWithDB = (newState === 'saved');
+        this._updateSaveIndicator();
+    }
+
+    /**
      * Помечает состояние как измененное и запускает дебаунс сохранения
      *
      * Автоматически вызывается через Proxy при изменении AppState.
      * Игнорируется если отслеживание временно отключено.
      */
     static markAsUnsaved() {
-        // Игнорируем если отслеживание отключено
         if (this._trackingDisabled) {
             return;
         }
-
-        // Устанавливаем оба флага одновременно
-        this._hasUnsavedChanges = true;
-        this._isSyncedWithDB = false;
-
-        // Обновляем индикатор
-        this._updateSaveIndicator();
-
+        this._setState('unsaved');
         // Запускаем дебаунс автосохранения
         this._debouncedSave();
     }
 
     /**
-     * Помечает состояние как сохраненное в localStorage
+     * Помечает состояние как сохраненное в localStorage (но не обязательно в БД).
      * @private
      */
     static _markAsSaved() {
-        // Сбрасываем только флаг несохраненных изменений
-        // Флаг синхронизации с БД остается как есть
-        this._hasUnsavedChanges = false;
-        this._updateSaveIndicator();
+        // Если уже синхронизировано с БД — состояние не должно деградировать в 'local-only'.
+        // _markAsSaved вызывается из saveState (всегда после mutation), поэтому
+        // прежнее состояние почти всегда было 'unsaved'. Сохраняем 'saved' если оно было.
+        if (this._state === 'saved') {
+            return;
+        }
+        this._setState('local-only');
     }
 
     /**
      * Помечает состояние как синхронизированное с БД
      */
     static markAsSyncedWithDB() {
-        // При синхронизации с БД оба флага сбрасываются
-        this._hasUnsavedChanges = false;
-        this._isSyncedWithDB = true;
-        this._updateSaveIndicator();
+        this._setState('saved');
     }
 
     /**
@@ -482,26 +442,6 @@ class StorageManager {
     }
 
     /**
-     * Восстанавливает выбранные форматы в UI
-     * @private
-     * @param {string[]} formats - Массив форматов для восстановления
-     */
-    static _restoreSelectedFormats(formats) {
-        if (!formats || !Array.isArray(formats)) return;
-
-        const formatCheckboxes = document.querySelectorAll('.format-option input[type="checkbox"]');
-
-        formatCheckboxes.forEach(checkbox => {
-            checkbox.checked = formats.includes(checkbox.value);
-        });
-
-        // Обновляем индикатор количества форматов на кнопке
-        if (typeof FormatMenuManager !== 'undefined' && FormatMenuManager.updateIndicator) {
-            FormatMenuManager.updateIndicator();
-        }
-    }
-
-    /**
      * Принудительно сохраняет состояние (вызывается кнопкой или Ctrl+S)
      *
      * @returns {boolean} true если сохранение успешно
@@ -525,9 +465,8 @@ class StorageManager {
         if (success) {
             Notifications.success('Изменения сохранены');
         } else {
-            // Если сохранение не удалось, возвращаем флаг
-            this._hasUnsavedChanges = true;
-            this._updateSaveIndicator();
+            // Если сохранение не удалось, возвращаем state в 'unsaved'.
+            this._setState('unsaved');
         }
 
         return success;
@@ -554,7 +493,7 @@ class StorageManager {
                     // Разблокируем отслеживание
                     this._trackingDisabled = false;
                     resolve(result);
-                }, 100);
+                }, AppConfig.timings.enableTrackingAfterSave);
             });
         });
     }
@@ -616,11 +555,8 @@ class StorageManager {
             localStorage.removeItem(AppConfig.localStorage.stateKey);
             localStorage.removeItem(AppConfig.localStorage.timestampKey);
 
-            // При очистке сбрасываем оба флага
-            this._hasUnsavedChanges = false;
-            this._isSyncedWithDB = true;
-
-            this._updateSaveIndicator();
+            // При очистке возвращаемся в чистое состояние.
+            this._setState('saved');
             console.log('localStorage очищен');
         } catch (error) {
             console.error('Ошибка очистки localStorage:', error);
@@ -661,6 +597,17 @@ class StorageManager {
         const label = document.getElementById('saveIndicatorLabel');
 
         if (!button || !label) return;
+
+        // Read-only режим: индикатор всегда заблокирован,
+        // никакие изменения не сохраняются.
+        if (typeof AppConfig !== 'undefined' && AppConfig.readOnlyMode?.isReadOnly) {
+            button.classList.remove('unsaved', 'local-only');
+            button.classList.add('saved');
+            button.disabled = true;
+            button.title = 'Режим только для чтения';
+            label.textContent = 'Только чтение';
+            return;
+        }
 
         // Удаляем все классы состояний
         button.classList.remove('saved', 'local-only', 'unsaved');
@@ -704,6 +651,45 @@ class StorageManager {
     }
 
     /**
+     * Универсальное подтверждение программной навигации.
+     * Контракт: при необходимости спрашивает подтверждение, и если переход
+     * разрешён (несохранённых изменений нет ЛИБО пользователь подтвердил) —
+     * при наличии opts.url ОБЯЗАТЕЛЬНО выполняет редирект.
+     *
+     * Без перехода (return true без редиректа) пользователь застревал на
+     * странице при отсутствии несохранённого: вызывающие места (lock-manager
+     * 409/500, header-exit) делегируют переход сюда и сами не редиректят.
+     *
+     * @param {string} [targetUrl] - URL для редиректа (информационно, фактический переход через opts.url)
+     * @param {{url?: string}} [opts]
+     * @returns {Promise<boolean>}
+     */
+    static async confirmNavigation(targetUrl, opts = {}) {
+        if (!this.hasUnsyncedChanges()) {
+            if (opts.url) {
+                window._allowNavigation = true;
+                this.allowUnload();
+                window.location.href = opts.url;
+            }
+            return true;
+        }
+        const ok = await DialogManager.show({
+            type: 'confirm',
+            title: 'Несохраненные изменения',
+            message: 'У вас есть несохранённые изменения. Уйти со страницы?',
+            icon: '⚠️',
+            confirmText: 'Уйти',
+            cancelText: 'Остаться'
+        });
+        if (ok && opts.url) {
+            window._allowNavigation = true;
+            this.allowUnload();
+            window.location.href = opts.url;
+        }
+        return ok;
+    }
+
+    /**
      * Очищает все таймеры при уничтожении
      */
     static destroy() {
@@ -732,3 +718,6 @@ class StorageManager {
         }
     }
 }
+
+// Window-globals для совместимости с inline-скриптами в шаблонах.
+window.StorageManager = StorageManager;

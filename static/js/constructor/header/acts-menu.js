@@ -5,7 +5,20 @@
  * Интегрирован с БД через API. Отвечает за автозагрузку акта при входе в конструктор.
  */
 
-class ActsMenuManager {
+import { ChangelogTracker } from '../changelog-tracker.js';
+import { ItemsRenderer } from '../items/items-renderer.js';
+import { LockManager } from '../lock-manager.js';
+import { StorageManager } from '../storage-manager.js';
+import { ActsBroadcast } from '../../portal/acts-manager/acts-broadcast.js';
+import { CreateActDialog } from '../../portal/acts-manager/dialog-create-act.js';
+import { APIClient } from '../../shared/api.js';
+import { AppConfig } from '../../shared/app-config.js';
+import { AuthManager } from '../../shared/auth.js';
+import { DialogManager } from '../../shared/dialog/dialog-confirm.js';
+import { EscapeStack } from '../../shared/escape-stack.js';
+import { Notifications } from '../../shared/notifications.js';
+
+export class ActsMenuManager {
     static currentActId = null;
     static selectedActId = null;
     static _initialLoadInProgress = false;
@@ -13,17 +26,10 @@ class ActsMenuManager {
     static _clickDelay = 300;
     static _cacheKey = 'acts_menu_cache';
     static _cacheExpiry = 1 * 60 * 1000;
-
-    static _setupEscapeHandler() {
-        document.addEventListener('keydown', (e) => {
-            if (e.key === 'Escape') {
-                const menu = document.getElementById('actsMenuDropdown');
-                if (menu && !menu.classList.contains('hidden')) {
-                    this.hide();
-                }
-            }
-        });
-    }
+    static _pageSize = 50;
+    static _offset = 0;
+    static _total = 0;
+    static _loadingMore = false;
 
     static show() {
         const menu = document.getElementById('actsMenuDropdown');
@@ -32,6 +38,9 @@ class ActsMenuManager {
             menu.classList.remove('hidden');
             if (btn) btn.classList.add('active');
             this.renderActsList();
+            if (!this._escapeUnsub) {
+                this._escapeUnsub = EscapeStack.push(() => this.hide());
+            }
         }
     }
 
@@ -40,6 +49,10 @@ class ActsMenuManager {
         const btn = document.getElementById('actsMenuBtn');
         if (menu) menu.classList.add('hidden');
         if (btn) btn.classList.remove('active');
+        if (this._escapeUnsub) {
+            this._escapeUnsub();
+            this._escapeUnsub = null;
+        }
     }
 
     static toggle() {
@@ -58,7 +71,7 @@ class ActsMenuManager {
                 this._clearCache();
                 return null;
             }
-            return parsed.acts;
+            return parsed;
         } catch (error) {
             console.error('Ошибка чтения кеша актов меню:', error);
             this._clearCache();
@@ -66,10 +79,11 @@ class ActsMenuManager {
         }
     }
 
-    static _saveToCache(acts) {
+    static _saveToCache(acts, total) {
         try {
             const cacheData = {
                 acts,
+                total,
                 timestamp: Date.now()
             };
             localStorage.setItem(this._cacheKey, JSON.stringify(cacheData));
@@ -90,22 +104,92 @@ class ActsMenuManager {
         if (!forceRefresh) {
             const cached = this._loadFromCache();
             if (cached) {
-                console.log('Загружено из кеша (меню):', cached.length, 'актов');
-                return cached;
+                const acts = cached.acts || [];
+                console.log('Загружено из кеша (меню):', acts.length, 'актов');
+                this._total = cached.total ?? acts.length;
+                this._offset = acts.length;
+                return acts;
             }
         }
 
         const username = AuthManager.getCurrentUser();
         if (!username) throw new Error('Пользователь не авторизован');
 
-        const response = await fetch(AppConfig.api.getUrl('/api/v1/acts/list'), {
-            headers: {'X-JupyterHub-User': username}
-        });
+        const url = AppConfig.api.getUrl(
+            `/api/v1/acts/list?limit=${this._pageSize}&offset=0`
+        );
+        const response = await fetch(url, { headers: {} });
         if (!response.ok) throw new Error('Ошибка загрузки списка актов');
 
-        const acts = await response.json();
-        this._saveToCache(acts);
+        const data = await response.json();
+        const acts = data.items || [];
+        this._total = data.total || acts.length;
+        this._offset = acts.length;
+        this._saveToCache(acts, this._total);
         return acts;
+    }
+
+    /**
+     * Подгружает следующую страницу актов (только «Другие акты»), дописывает
+     * элементы в существующую секцию. Дополнительные страницы не кешируются —
+     * кеш хранит только первую страницу (1 минута).
+     * @private
+     * @param {HTMLElement} section - DOM-секция «Другие акты»
+     * @param {HTMLElement} btn - Кнопка «Загрузить ещё»
+     */
+    static async _loadMore(section, btn) {
+        if (this._loadingMore) return;
+        if (this._offset >= this._total) return;
+
+        this._loadingMore = true;
+        btn.disabled = true;
+        btn.textContent = 'Загрузка...';
+
+        try {
+            const url = AppConfig.api.getUrl(
+                `/api/v1/acts/list?limit=${this._pageSize}&offset=${this._offset}`
+            );
+            const response = await fetch(url, { headers: {} });
+            if (!response.ok) throw new Error('Ошибка загрузки списка актов');
+
+            const data = await response.json();
+            const acts = data.items || [];
+            this._total = data.total || this._total;
+            this._offset += acts.length;
+
+            acts
+                .filter(a => a.id !== this.currentActId)
+                .forEach(act =>
+                    section.insertBefore(
+                        this._createActListItem(act, false), btn
+                    )
+                );
+
+            this._updateLoadMoreBtn(btn);
+        } catch (err) {
+            console.error('Ошибка подгрузки актов (меню):', err);
+            if (typeof Notifications !== 'undefined')
+                Notifications.error('Не удалось загрузить ещё акты');
+            btn.disabled = false;
+            btn.textContent = 'Загрузить ещё';
+        } finally {
+            this._loadingMore = false;
+        }
+    }
+
+    /**
+     * Обновляет/убирает кнопку «Загрузить ещё» в зависимости от offset/total.
+     * @private
+     * @param {HTMLElement} btn
+     */
+    static _updateLoadMoreBtn(btn) {
+        if (this._offset >= this._total) {
+            btn.remove();
+            return;
+        }
+        btn.disabled = false;
+        const remaining = this._total - this._offset;
+        btn.textContent = `Загрузить ещё (осталось ${remaining})`;
     }
 
     static _formatDate(date) {
@@ -193,6 +277,25 @@ class ActsMenuManager {
                 otherActs.forEach(act =>
                     section.appendChild(this._createActListItem(act, false))
                 );
+
+                // Кнопка «Загрузить ещё» — когда на бэке остались акты сверх
+                // первой страницы (currentAct не учитывается в total, поэтому
+                // допускаем погрешность в 1: лучше показать лишнюю кнопку, чем
+                // спрятать недостижимые акты).
+                if (this._offset < this._total) {
+                    const btn = document.createElement('button');
+                    btn.type = 'button';
+                    btn.className = 'btn btn-secondary acts-menu-load-more-btn';
+                    const remaining = this._total - this._offset;
+                    btn.textContent = `Загрузить ещё (осталось ${remaining})`;
+                    btn.addEventListener('click', e => {
+                        e.preventDefault();
+                        e.stopPropagation();
+                        this._loadMore(section, btn);
+                    });
+                    section.appendChild(btn);
+                }
+
                 listContainer.appendChild(section);
             }
         } catch (err) {
@@ -271,6 +374,10 @@ class ActsMenuManager {
         if (e) {
             c.innerHTML = '';
             c.appendChild(e);
+            const reloadBtn = c.querySelector('[data-action="reload-acts"]');
+            if (reloadBtn) {
+                reloadBtn.addEventListener('click', () => this.renderActsList(true));
+            }
         }
     }
 
@@ -343,6 +450,11 @@ class ActsMenuManager {
                         console.log('Акт занят другим пользователем');
                         return;
                     }
+                    if (lockError.message === 'INVALID_ACT_ID') {
+                        console.error('[ActsMenu] INVALID_ACT_ID при переключении на акт:', actId);
+                        if (typeof Notifications !== 'undefined') Notifications.error('Не удалось переключиться на акт');
+                        return;
+                    }
                     throw lockError;
                 }
             }
@@ -360,6 +472,13 @@ class ActsMenuManager {
 
             this.currentActId = actId;
             window.currentActId = actId;
+            // Сброс per-act трекеров перед init нового акта:
+            //  - ChangelogTracker.destroy: иначе pending debounce/persist старого акта
+            //    запишут отложенный entry с уже сменённым _storageKey;
+            //  - violationManager — сброс через removeViolation на удаление узлов (state-tree).
+            if (typeof ChangelogTracker !== 'undefined' && typeof ChangelogTracker.destroy === 'function') {
+                ChangelogTracker.destroy();
+            }
             if (typeof ChangelogTracker !== 'undefined') ChangelogTracker.init(actId);
             window.history.pushState({actId}, '', AppConfig.api.getUrl(`/constructor?act_id=${actId}`));
             StorageManager.markAsSyncedWithDB();
@@ -419,9 +538,8 @@ class ActsMenuManager {
         }
 
         try {
-            const username = AuthManager.getCurrentUser();
             const response = await fetch(AppConfig.api.getUrl(`/api/v1/acts/${actId}`), {
-                headers: {'X-JupyterHub-User': username}
+                headers: {}
             });
             if (!response.ok) throw new Error('Ошибка загрузки данных акта');
             const actData = await response.json();
@@ -459,10 +577,9 @@ class ActsMenuManager {
         if (!confirmed) return;
 
         try {
-            const username = AuthManager.getCurrentUser();
             const response = await fetch(AppConfig.api.getUrl(`/api/v1/acts/${actId}/duplicate`), {
                 method: 'POST',
-                headers: {'X-JupyterHub-User': username}
+                headers: {}
             });
             if (!response.ok) {
                 let error;
@@ -530,10 +647,25 @@ class ActsMenuManager {
     }
 
     static _redirectToActsManager() {
-        setTimeout(() => (window.location.href = AppConfig.api.getUrl('/acts')), 1500);
+        const url = AppConfig.api.getUrl('/acts');
+        // Акт удалён — confirmNavigation не нужен: его диалог «сохранить
+        // несохранённые изменения» некорректен, сохранять нечего и некуда.
+        // Снимаем guard'ы beforeunload и редиректим напрямую.
+        if (typeof StorageManager !== 'undefined' && typeof StorageManager.allowUnload === 'function') {
+            StorageManager.allowUnload();
+        }
+        window._allowNavigation = true;
+        setTimeout(() => {
+            window.location.href = url;
+        }, AppConfig.timings.redirectAfterDelete);
     }
 
     static async _autoLoadAct(actId) {
+        if (!Number.isInteger(actId) || actId <= 0) {
+            console.error('[ActsMenu] _autoLoadAct с невалидным actId:', actId);
+            window.location.href = AppConfig.api.getUrl('/acts');
+            return;
+        }
         if (this._initialLoadInProgress) return;
         this._initialLoadInProgress = true;
         this.currentActId = actId;
@@ -569,12 +701,27 @@ class ActsMenuManager {
     static init() {
         const menuBtn = document.getElementById('actsMenuBtn');
         const closeBtn = document.getElementById('closeActsMenuBtn');
-        const createBtn = document.getElementById('createNewActBtn');
+        // ID переименован в `headerCreateNewActBtn`, чтобы не конфликтовать с одноимённой
+        // кнопкой в acts_manager.html (там id оставлен — он уникален внутри своей страницы).
+        const createBtn = document.getElementById('headerCreateNewActBtn');
         const editBtn = document.getElementById('editMetadataBtn');
         const duplicateBtn = document.getElementById('duplicateActBtn');
         const deleteBtn = document.getElementById('deleteActBtn');
 
-        this._setupEscapeHandler();
+        // Подписка на cross-tab события: при удалении/дублировании акта
+        // в другой вкладке инвалидируем кеш меню и обновляем открытый список.
+        if (window.ActsBroadcast) {
+            window.ActsBroadcast.subscribe((data) => {
+                const type = data?.type;
+                if (type === 'act:deleted' || type === 'act:duplicated') {
+                    this._clearCache();
+                    const menu = document.getElementById('actsMenuDropdown');
+                    if (menu && !menu.classList.contains('hidden')) {
+                        this.renderActsList(true);
+                    }
+                }
+            });
+        }
 
         menuBtn?.addEventListener('click', e => {
             e.stopPropagation();
@@ -604,10 +751,29 @@ class ActsMenuManager {
         });
 
         const param = new URLSearchParams(window.location.search).get('act_id');
-        if (param) this._autoLoadAct(parseInt(param));
-        else setTimeout(() => this.show(), 500);
+        const actId = parseInt(param, 10);
+        if (param && Number.isInteger(actId) && actId > 0) {
+            this._autoLoadAct(actId);
+        } else if (param) {
+            console.warn('[ActsMenu] невалидный act_id в URL:', param);
+            window.location.href = AppConfig.api.getUrl('/acts');
+        } else {
+            setTimeout(() => this.show(), 500);
+        }
     }
 }
 
 window.ActsMenuManager = ActsMenuManager;
-document.addEventListener('DOMContentLoaded', () => ActsMenuManager.init());
+document.addEventListener('DOMContentLoaded', async () => {
+    // Ждём готовности авторизации: при пустом localStorage (first-time
+    // users, очистка браузера, истечение сессии) auth.js асинхронно
+    // делает fetch /auth/me. До его завершения AuthManager.getCurrentUser()
+    // возвращает null, и _autoLoadAct падает с "Пользователь не авторизован".
+    // Если promise resolved=false — AuthManager уже выполнил redirect на
+    // /error/401 в _showAuthError; init не нужен.
+    if (window.__authReady) {
+        const ok = await window.__authReady;
+        if (!ok) return;
+    }
+    ActsMenuManager.init();
+});

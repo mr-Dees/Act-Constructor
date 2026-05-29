@@ -27,7 +27,8 @@ from app.core.middleware import (
     HTTPSRedirectMiddleware,
     RateLimitMiddleware,
     RequestIdMiddleware,
-    RequestSizeLimitMiddleware
+    RequestSizeLimitMiddleware,
+    SecurityHeadersMiddleware,
 )
 from app.core.middlewares.http_metrics import HttpMetricsMiddleware
 import asyncpg
@@ -303,24 +304,29 @@ def create_app() -> FastAPI:
     # повторный вызов в register_domains ниже отдаёт тот же список.
     domains = discover_domains(_domains_dir)
 
-    # Добавляем middleware в правильном порядке (первый = последний в цепочке)
-    # 1. HTTPS redirect (самый первый - работает с исходным запросом)
+    # Добавляем middleware в правильном порядке (первый add_middleware = outermost,
+    # т.е. видит request первым и response последним).
+    # 1. HTTPS redirect — outermost, нужен для корректного scope.scheme до SecurityHeaders.
     app.add_middleware(HTTPSRedirectMiddleware)
 
-    # 2. Request size limit
+    # 2. Security headers — оборачивает все остальные, чтобы CSP/HSTS/X-Frame
+    #    выставлялись и на 413/429-ответы от RequestSize/RateLimit middlewares.
+    app.add_middleware(SecurityHeadersMiddleware, settings=settings)
+
+    # 3. Request size limit
     app.add_middleware(
         RequestSizeLimitMiddleware,
         max_size=settings.security.max_request_size
     )
 
-    # 3. Rate limiting
+    # 4. Rate limiting
     app.add_middleware(
         RateLimitMiddleware,
         rate_limit=settings.security.rate_limit_per_minute,
         settings=settings
     )
 
-    # 4. HTTP-метрики — внутри RequestIdMiddleware, чтобы видеть выставленный request_id.
+    # 5. HTTP-метрики — внутри RequestIdMiddleware, чтобы видеть выставленный request_id.
     # Если admin.http_metrics_enabled=False, сервис передаётся None и middleware
     # лишь меряет latency без записи в БД.
     _http_metrics_service = None
@@ -337,7 +343,7 @@ def create_app() -> FastAPI:
         )
     app.add_middleware(HttpMetricsMiddleware, service=_http_metrics_service)
 
-    # 5. Request ID — самый последний, запускается первым: охватывает всю цепочку middleware
+    # 6. Request ID — innermost: добавляется последним, оборачивается всеми остальными.
     app.add_middleware(RequestIdMiddleware)
 
     # Подключение статических файлов (доступны по URL /static/*)
@@ -351,6 +357,14 @@ def create_app() -> FastAPI:
     async def favicon():
         favicon_path = settings.static_dir / "favicon.ico"
         return FileResponse(favicon_path)
+
+    # Корневой /health для внешних поллеров (Docker/k8s/Prometheus/JupyterHub
+    # proxy). Под /api/v1/system/health остаётся развёрнутая версия с
+    # per-domain health-check'ами. HttpMetricsMiddleware фильтрует /health —
+    # лог не пухнет.
+    @app.get("/health", include_in_schema=False)
+    async def root_health():
+        return {"status": "ok"}
 
     # Обработчик ошибки Kerberos токена
     @app.exception_handler(KerberosTokenExpiredError)
@@ -391,7 +405,7 @@ def create_app() -> FastAPI:
         """Единый обработчик всех доменных исключений."""
         if _is_html_request(request):
             return _render_error_page(request, exc.status_code)
-        return JSONResponse(status_code=exc.status_code, content=exc.to_detail())
+        return JSONResponse(status_code=exc.status_code, content=exc.to_envelope())
 
     @app.exception_handler(UniqueViolationError)
     async def unique_violation_handler(request: Request, exc: UniqueViolationError) -> JSONResponse:
@@ -399,7 +413,10 @@ def create_app() -> FastAPI:
         logger.warning(f"UniqueViolationError: {exc} (path: {request.url.path})")
         return JSONResponse(
             status_code=409,
-            content={"detail": "Запись с такими данными уже существует"},
+            content={
+                "detail": "Запись с такими данными уже существует",
+                "code": "db-unique-violation",
+            },
         )
 
     @app.exception_handler(CheckViolationError)
@@ -414,14 +431,20 @@ def create_app() -> FastAPI:
                 detail = message
                 break
 
-        return JSONResponse(status_code=422, content={"detail": detail})
+        return JSONResponse(
+            status_code=422,
+            content={"detail": detail, "code": "db-check-violation"},
+        )
 
     @app.exception_handler(HTTPException)
     async def http_exception_handler(request: Request, exc: HTTPException):
         """HTTP-ошибки: HTML-страница для браузера, JSON для API."""
         if _is_html_request(request):
             return _render_error_page(request, exc.status_code)
-        return JSONResponse(status_code=exc.status_code, content={"detail": exc.detail})
+        return JSONResponse(
+            status_code=exc.status_code,
+            content={"detail": exc.detail, "code": "http-error"},
+        )
 
     @app.exception_handler(Exception)
     async def generic_exception_handler(request: Request, exc: Exception):
@@ -431,7 +454,10 @@ def create_app() -> FastAPI:
             return _render_error_page(request, 500)
         return JSONResponse(
             status_code=500,
-            content={"detail": "Внутренняя ошибка сервера"},
+            content={
+                "detail": "Внутренняя ошибка сервера",
+                "code": "internal-server-error",
+            },
         )
 
     # Подключение роута ошибок (до portal_router)

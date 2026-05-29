@@ -4,7 +4,10 @@
  * Управляет открытием/закрытием popup, ленивой инициализацией ChatManager,
  * свободным изменением размера (corner grip) и сохранением размеров в localStorage.
  */
-class ChatPopupManager {
+import { ChatManager } from '../../shared/chat/chat-manager.js';
+import { EscapeStack } from '../../shared/escape-stack.js';
+
+export class ChatPopupManager {
     /** @type {boolean} */
     static _initialized = false;
 
@@ -55,12 +58,7 @@ class ChatPopupManager {
         // Предотвращаем закрытие при клике внутри
         this._panel.addEventListener('click', (e) => e.stopPropagation());
 
-        // Закрытие по Escape
-        document.addEventListener('keydown', (e) => {
-            if (e.key === 'Escape' && !this._panel.classList.contains('hidden')) {
-                this.close();
-            }
-        });
+        // Закрытие по Escape — через EscapeStack (push в open, unsub в close).
 
         // Corner resize (свободное изменение ширины и высоты)
         this._setupCornerResize();
@@ -85,6 +83,10 @@ class ChatPopupManager {
         this._panel.classList.remove('hidden');
         this._btn.classList.add('active');
 
+        if (!this._escapeUnsub) {
+            this._escapeUnsub = EscapeStack.push(() => this.close());
+        }
+
         // Фокус на поле ввода
         const input = this._panel.querySelector('.chat-input');
         if (input) {
@@ -100,6 +102,11 @@ class ChatPopupManager {
 
         this._panel.classList.add('hidden');
         this._btn.classList.remove('active');
+
+        if (this._escapeUnsub) {
+            this._escapeUnsub();
+            this._escapeUnsub = null;
+        }
 
         // Снимаем все listener'ы ChatManager, чтобы избежать утечек и дублирования
         // подписок при следующем открытии.

@@ -3,6 +3,9 @@
  * Обработка перетаскивания изображений из файлового менеджера
  */
 
+import { ViolationManager } from './violation-core.js';
+import { Notifications } from '../../shared/notifications.js';
+
 // Расширение ViolationManager
 Object.assign(ViolationManager.prototype, {
     /**

@@ -5,7 +5,9 @@
  * Состояние сохраняется в localStorage.
  * Базы знаний читаются из DOM (data-атрибуты, сгенерированные бэкендом).
  */
-class LandingSettingsManager {
+import { EscapeStack } from '../shared/escape-stack.js';
+
+export class LandingSettingsManager {
     static _storageKey = 'assistant_knowledge_bases';
 
     /** @type {Object<string, {key: string, label: string}>} Загружается из DOM */
@@ -25,7 +27,6 @@ class LandingSettingsManager {
         this._setupToggleButton();
         this._setupCloseButton();
         this._setupOutsideClick();
-        this._setupEscapeHandler();
         this._setupAssistantToggles();
 
         console.log('LandingSettingsManager: инициализация завершена');
@@ -58,6 +59,9 @@ class LandingSettingsManager {
         const btn = document.getElementById('landingSettingsBtn');
         if (menu) menu.classList.remove('hidden');
         if (btn) btn.classList.add('active');
+        if (!this._escapeUnsub) {
+            this._escapeUnsub = EscapeStack.push(() => this.hide());
+        }
     }
 
     /**
@@ -68,6 +72,10 @@ class LandingSettingsManager {
         const btn = document.getElementById('landingSettingsBtn');
         if (menu) menu.classList.add('hidden');
         if (btn) btn.classList.remove('active');
+        if (this._escapeUnsub) {
+            this._escapeUnsub();
+            this._escapeUnsub = null;
+        }
     }
 
     /**
@@ -146,21 +154,6 @@ class LandingSettingsManager {
 
             if (!menu.contains(e.target) && e.target !== btn && !btn.contains(e.target)) {
                 this.hide();
-            }
-        });
-    }
-
-    /**
-     * Escape → закрытие
-     * @private
-     */
-    static _setupEscapeHandler() {
-        document.addEventListener('keydown', (e) => {
-            if (e.key === 'Escape') {
-                const menu = document.getElementById('landingSettingsMenu');
-                if (menu && !menu.classList.contains('hidden')) {
-                    this.hide();
-                }
             }
         });
     }

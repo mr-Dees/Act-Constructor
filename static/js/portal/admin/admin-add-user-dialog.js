@@ -4,10 +4,18 @@
  * Поиск по справочнику → выбор пользователя → выбор роли → добавление.
  * Наследует базовый функционал от DialogBase.
  */
-class AdminAddUserDialog extends DialogBase {
+import { AdminPage } from './admin-page.js';
+import { AdminRoles } from './admin-roles.js';
+import { APIClient } from '../../shared/api.js';
+import { DialogBase } from '../../shared/dialog/dialog-base.js';
+import { Notifications } from '../../shared/notifications.js';
+import { SafeHTML } from '../../shared/sanitize.js';
+
+export class AdminAddUserDialog extends DialogBase {
     static _currentDialog = null;
     static _allRoles = [];
     static _debounceTimer = null;
+    static _searchAbort = null;
 
     /**
      * Показывает диалог добавления пользователя
@@ -106,9 +114,17 @@ class AdminAddUserDialog extends DialogBase {
                 return;
             }
 
+            // Отменяем предыдущий поиск: пользователь набрал новые символы
+            // быстрее, чем сервер ответил. Иначе устаревший ответ перезатрёт UI.
+            if (this._searchAbort) {
+                this._searchAbort.abort();
+            }
+            this._searchAbort = new AbortController();
+            const signal = this._searchAbort.signal;
+
             try {
                 resultsEl.innerHTML = '<div class="admin-add-loading">Поиск...</div>';
-                const users = await APIClient.searchUsers(query);
+                const users = await APIClient.searchUsers(query, signal);
 
                 if (users.length === 0) {
                     resultsEl.innerHTML = '<div class="admin-add-empty">Пользователи не найдены</div>';
@@ -116,11 +132,11 @@ class AdminAddUserDialog extends DialogBase {
                 }
 
                 resultsEl.innerHTML = users.map(u => `
-                    <div class="admin-add-result-item" data-username="${u.username}">
-                        <div class="admin-add-result-name">${this._escapeHtml(u.fullname || u.username)}</div>
+                    <div class="admin-add-result-item" data-username="${SafeHTML.escapeHtml(u.username || '')}">
+                        <div class="admin-add-result-name">${SafeHTML.escapeHtml(u.fullname || u.username)}</div>
                         <div class="admin-add-result-details">
-                            ${this._escapeHtml(u.job || '')}
-                            ${u.email ? ' · ' + this._escapeHtml(u.email) : ''}
+                            ${SafeHTML.escapeHtml(u.job || '')}
+                            ${u.email ? ' · ' + SafeHTML.escapeHtml(u.email) : ''}
                         </div>
                     </div>
                 `).join('');
@@ -132,8 +148,13 @@ class AdminAddUserDialog extends DialogBase {
                     });
                 });
             } catch (error) {
+                if (error?.name === 'AbortError') {
+                    // Запрос отменён следующим поиском — не показываем ошибку.
+                    return;
+                }
                 resultsEl.innerHTML = '<div class="admin-add-empty">Ошибка поиска</div>';
                 console.error('AdminAddUserDialog: ошибка поиска:', error);
+                Notifications.error('Не удалось выполнить поиск пользователей');
             }
         }, 300);
     }
@@ -151,8 +172,8 @@ class AdminAddUserDialog extends DialogBase {
         resultsEl.innerHTML = '';
         selectedEl.style.display = 'block';
         selectedUserEl.innerHTML = `
-            <strong>${this._escapeHtml(user.fullname || user.username)}</strong>
-            <span class="admin-add-selected-details">${this._escapeHtml(user.job || '')} · ${this._escapeHtml(user.username)}</span>
+            <strong>${SafeHTML.escapeHtml(user.fullname || user.username)}</strong>
+            <span class="admin-add-selected-details">${SafeHTML.escapeHtml(user.job || '')} · ${SafeHTML.escapeHtml(user.username)}</span>
         `;
         selectedEl.dataset.username = user.username;
         selectedEl.dataset.fullname = user.fullname || '';
@@ -203,17 +224,15 @@ class AdminAddUserDialog extends DialogBase {
      */
     static _close() {
         clearTimeout(this._debounceTimer);
+        // Прерываем активный поиск, чтобы ответ не пришёл уже закрытому диалогу.
+        if (this._searchAbort) {
+            this._searchAbort.abort();
+            this._searchAbort = null;
+        }
         if (this._currentDialog) {
             this._hideDialog(this._currentDialog);
             this._currentDialog = null;
         }
-    }
-
-    /** @private */
-    static _escapeHtml(str) {
-        const div = document.createElement('div');
-        div.textContent = str;
-        return div.innerHTML;
     }
 }
 

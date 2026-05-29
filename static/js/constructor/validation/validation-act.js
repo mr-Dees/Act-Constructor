@@ -3,7 +3,11 @@
  *
  * Проверяет базовые бизнес-правила на уровне акта как документа.
  */
-const ValidationAct = {
+import { AppState } from '../state/state-core.js';
+import { TreeUtils } from '../tree/tree-utils.js';
+import { ValidationCore } from './validation-core.js';
+
+export const ValidationAct = {
     /**
      * Проверяет наличие хотя бы одного раздела в структуре акта
      * @returns {Object} Результат валидации с полями valid, message, isWarning
@@ -20,6 +24,29 @@ const ValidationAct = {
 
         if (!validation.valid) {
             return ValidationCore.failure('Добавьте хотя бы один раздел в акт');
+        }
+
+        // Базовые секции 1-5 обязаны присутствовать и быть protected/неудаляемыми.
+        // Защищает от случаев, когда seed/миграция/DevTools-манипуляция оставила
+        // акт без корректной базовой структуры.
+        const expectedIds = ['1', '2', '3', '4', '5'];
+        const rootChildren = AppState.treeData.children;
+        const missing = expectedIds.filter(
+            id => !rootChildren.some(child => child.id === id)
+        );
+        if (missing.length > 0) {
+            return ValidationCore.failure(
+                `Базовая структура повреждена: отсутствуют разделы ${missing.join(', ')}`
+            );
+        }
+        const unprotected = expectedIds.filter(id => {
+            const child = rootChildren.find(c => c.id === id);
+            return !child.protected || child.deletable !== false;
+        });
+        if (unprotected.length > 0) {
+            return ValidationCore.failure(
+                `Базовая структура повреждена: разделы ${unprotected.join(', ')} не защищены от изменения`
+            );
         }
 
         return ValidationCore.success();
@@ -58,3 +85,6 @@ const ValidationAct = {
         return ValidationCore.success();
     }
 };
+
+// Window-globals для совместимости с inline-скриптами в шаблонах.
+window.ValidationAct = ValidationAct;

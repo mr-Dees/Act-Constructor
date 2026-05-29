@@ -19,7 +19,7 @@
     border-color: var(--tree-node-border-selected);
     box-shadow: var(--shadow-lg);
     font-weight: var(--font-weight-medium);
-    z-index: calc(var(--z-base) + 1);
+    z-index: var(--z-base-elevated);
 }
 
 /* Защищенный + выбранный = желтый фон сохраняется */

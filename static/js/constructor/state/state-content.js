@@ -6,6 +6,14 @@
  * Делегирует валидацию модулю ValidationTree.
  */
 
+import { ChangelogTracker } from '../changelog-tracker.js';
+import { MetricsRiskCoordinator } from './metrics-risk-coordinator.js';
+import { AppState } from './state-core.js';
+import { TreeUtils } from '../tree/tree-utils.js';
+import { ValidationCore } from '../validation/validation-core.js';
+import { ValidationTree } from '../validation/validation-tree.js';
+import { AppConfig } from '../../shared/app-config.js';
+
 Object.assign(AppState, {
     /**
      * Добавляет таблицу к узлу дерева
@@ -15,10 +23,8 @@ Object.assign(AppState, {
      * @returns {Object} Результат создания таблицы с полями valid, message
      */
     addTableToNode(nodeId, rows = 3, cols = 3) {
-        // Блокируем добавление в режиме только чтения
-        if (AppConfig.readOnlyMode?.isReadOnly) {
-            return ValidationCore.failure(AppConfig.readOnlyMode.messages.cannotAddContent);
-        }
+        const guard = ValidationCore.requireWrite('cannotAddContent');
+        if (guard) return guard;
 
         const node = this.findNodeById(nodeId);
 
@@ -26,7 +32,7 @@ Object.assign(AppState, {
         if (!validation.valid) return validation;
 
         const tableId = this._generateId('table');
-        const tableNode = this._createContentNode(nodeId, tableId, 'table', '', false, true);
+        const tableNode = this._createContentNode(nodeId, tableId, AppConfig.nodeTypes.TABLE, '', false, true);
 
         node.children.push(tableNode);
 
@@ -60,16 +66,21 @@ Object.assign(AppState, {
      */
     removeTable(tableNodeId) {
         const tableNode = this.findNodeById(tableNodeId);
-        if (!tableNode || tableNode.type !== 'table') {
+        if (!tableNode || tableNode.type !== AppConfig.nodeTypes.TABLE) {
             return ValidationCore.failure(AppConfig.content.errors.notFound('Таблица'));
         }
 
-        if (tableNode.protected) {
+        // tableNode.deletable === true — явное разрешение поверх protected
+        // (риск-таблицы). Override гейтим ИМЕННО по узлу: table-объекты сводных
+        // metrics-таблиц тоже имеют deletable:true, но их узлы — нет, поэтому
+        // сводные остаются неудаляемыми. protected продолжает блокировать
+        // редактирование структуры ячеек.
+        if (tableNode.protected && tableNode.deletable !== true) {
             return ValidationCore.failure(AppConfig.content.errors.protectedFromDeletion);
         }
 
         const table = this.tables[tableNode.tableId];
-        if (table?.protected) {
+        if (table?.protected && tableNode.deletable !== true) {
             return ValidationCore.failure(AppConfig.content.errors.protectedFromDeletion);
         }
 
@@ -78,7 +89,9 @@ Object.assign(AppState, {
             return ValidationCore.failure(AppConfig.tree.validation.parentNotFound);
         }
 
-        const isRiskTable = table && (table.isRegularRiskTable || table.isOperationalRiskTable);
+        // E-2: pinned-флаги читаем с node, не с table-объекта.
+        // Все 4 типа — риск (триггерит metrics-coordinator при удалении).
+        const isRiskTable = !!(tableNode.isRegularRiskTable || tableNode.isOperationalRiskTable || tableNode.isTaxRiskTable || tableNode.isOtherRiskTable);
 
         if (typeof ChangelogTracker !== 'undefined') {
             ChangelogTracker.record('delete_table', tableNode.tableId, tableNode.label || 'Таблица', {nodeId: tableNode.parentId});
@@ -96,7 +109,8 @@ Object.assign(AppState, {
 
         // Обновляем таблицы метрик если удалили таблицу рисков
         if (isRiskTable) {
-            this._cleanupMetricsTablesAfterRiskTableDeleted(tableNodeId);
+            // Через coordinator: snapshot/rollback safety.
+            MetricsRiskCoordinator.onRiskTableRemoved();
         }
 
         return ValidationCore.success();
@@ -108,10 +122,8 @@ Object.assign(AppState, {
      * @returns {Object} Результат создания с полями valid, message
      */
     addTextBlockToNode(nodeId) {
-        // Блокируем добавление в режиме только чтения
-        if (AppConfig.readOnlyMode?.isReadOnly) {
-            return ValidationCore.failure(AppConfig.readOnlyMode.messages.cannotAddContent);
-        }
+        const guard = ValidationCore.requireWrite('cannotAddContent');
+        if (guard) return guard;
 
         const node = this.findNodeById(nodeId);
 
@@ -119,7 +131,7 @@ Object.assign(AppState, {
         if (!validation.valid) return validation;
 
         const textBlockId = this._generateId('textblock');
-        const textBlockNode = this._createContentNode(nodeId, textBlockId, 'textblock');
+        const textBlockNode = this._createContentNode(nodeId, textBlockId, AppConfig.nodeTypes.TEXTBLOCK);
 
         node.children.push(textBlockNode);
 
@@ -140,10 +152,8 @@ Object.assign(AppState, {
      * @returns {Object} Результат создания с полями valid, message
      */
     addViolationToNode(nodeId) {
-        // Блокируем добавление в режиме только чтения
-        if (AppConfig.readOnlyMode?.isReadOnly) {
-            return ValidationCore.failure(AppConfig.readOnlyMode.messages.cannotAddContent);
-        }
+        const guard = ValidationCore.requireWrite('cannotAddContent');
+        if (guard) return guard;
 
         const node = this.findNodeById(nodeId);
 
@@ -151,7 +161,7 @@ Object.assign(AppState, {
         if (!validation.valid) return validation;
 
         const violationId = this._generateId('violation');
-        const violationNode = this._createContentNode(nodeId, violationId, 'violation');
+        const violationNode = this._createContentNode(nodeId, violationId, AppConfig.nodeTypes.VIOLATION);
 
         node.children.push(violationNode);
 
@@ -173,11 +183,11 @@ Object.assign(AppState, {
      * @param {string} contentId - ID контента
      * @param {'table'|'textblock'|'violation'} type - Тип контента
      * @param {string} [label=''] - Название узла
-     * @param {boolean} [protected=false] - Защита от изменений
+     * @param {boolean} [isProtected=false] - Защита от изменений
      * @param {boolean} [deletable=true] - Возможность удаления
      * @returns {Object} Узел контента
      */
-    _createContentNode(parentId, contentId, type, label = '', protected = false, deletable = true) {
+    _createContentNode(parentId, contentId, type, label = '', isProtected = false, deletable = true) {
         const defaultLabels = {
             table: AppConfig.tree.labels.table,
             textblock: AppConfig.tree.labels.textBlock,
@@ -196,7 +206,7 @@ Object.assign(AppState, {
             type,
             [idProps[type]]: contentId,
             parentId,
-            protected,
+            protected: isProtected,
             deletable
         };
 
@@ -289,7 +299,9 @@ Object.assign(AppState, {
         const tableId = this._generateId('table');
         const tableLabel = `Объем выявленных отклонений (В метриках) по ${nodeNumber}`;
 
-        const tableNode = this._createContentNode(nodeId, tableId, 'table', tableLabel, true, true);
+        // Сводная таблица неудаляема вручную (deletable=false): guard deleteNode
+        // блокирует её. Удаляется только автоматически каскадом при исчезновении рисков.
+        const tableNode = this._createContentNode(nodeId, tableId, AppConfig.nodeTypes.TABLE, tableLabel, true, false);
         tableNode.isMetricsTable = true;
 
         node.children.unshift(tableNode);
@@ -424,7 +436,7 @@ Object.assign(AppState, {
         }
 
         const existingTable = node5.children?.find(
-            child => child.type === 'table' && child.isMainMetricsTable === true
+            child => child.type === AppConfig.nodeTypes.TABLE && child.isMainMetricsTable === true
         );
 
         if (existingTable) {
@@ -436,7 +448,8 @@ Object.assign(AppState, {
         const tableId = this._generateId('table');
         const tableLabel = 'Объем выявленных отклонений';
 
-        const tableNode = this._createContentNode('5', tableId, 'table', tableLabel, true, true);
+        // Главная сводная таблица неудаляема вручную (deletable=false).
+        const tableNode = this._createContentNode('5', tableId, AppConfig.nodeTypes.TABLE, tableLabel, true, false);
         tableNode.isMainMetricsTable = true;
 
         node5.children.unshift(tableNode);
@@ -465,21 +478,10 @@ Object.assign(AppState, {
      * @returns {Array<Object>} Массив узлов таблиц рисков
      */
     _findRiskTablesInSubtree(node) {
-        let riskTables = [];
-
-        if (node.children) {
-            for (const child of node.children) {
-                if (child.type === 'table' && child.tableId) {
-                    const table = this.tables[child.tableId];
-                    if (table && (table.isRegularRiskTable || table.isOperationalRiskTable)) {
-                        riskTables.push(child);
-                    }
-                }
-                riskTables = riskTables.concat(this._findRiskTablesInSubtree(child));
-            }
-        }
-
-        return riskTables;
+        // E-4: делегируем единой утилите TreeUtils.findRiskTables.
+        // Сама функция оставлена ради обратной совместимости с context-menu-tree.js
+        // и state-tree.js, которые её зовут как AppState._findRiskTablesInSubtree.
+        return TreeUtils.findRiskTables(node);
     },
 
     /**
@@ -504,7 +506,7 @@ Object.assign(AppState, {
         if (parentNode?.id === '5' && ancestorNode.number?.match(/^5\.\d+$/)) {
             if (nodeId !== ancestorNode.id) {
                 const hasMetricsTable = ancestorNode.children?.some(
-                    child => child.type === 'table' && child.isMetricsTable === true
+                    child => child.type === AppConfig.nodeTypes.TABLE && child.isMetricsTable === true
                 );
 
                 if (!hasMetricsTable) {
@@ -519,16 +521,18 @@ Object.assign(AppState, {
     },
 
     /**
-     * Удаляет таблицы метрик после удаления таблицы рисков
+     * Удаляет таблицы метрик после удаления таблицы рисков.
+     * Параметр deletedNodeId был дед-кодом (не использовался внутри тела) — удалён.
+     * Функция обходит весь раздел 5 и пересчитывает наличие метрик-таблиц.
      * @private
-     * @param {string} deletedNodeId - ID удаленного узла
      */
-    _cleanupMetricsTablesAfterRiskTableDeleted(deletedNodeId) {
+    _cleanupMetricsTablesAfterRiskTableDeleted() {
         const node5 = this.findNodeById('5');
         if (!node5?.children) return;
 
+        const {TABLE, ITEM} = AppConfig.nodeTypes;
         const firstLevelNodes = node5.children.filter(child =>
-            child.type === 'item' && child.number?.match(/^5\.\d+$/)
+            child.type === ITEM && child.number?.match(/^5\.\d+$/)
         );
 
         // Проверяем каждый узел первого уровня
@@ -536,7 +540,7 @@ Object.assign(AppState, {
             // Считаем только таблицы рисков в дочерних item-узлах (5.*.* и глубже)
             let deepRiskTables = [];
             for (const child of firstLevelNode.children || []) {
-                if (child.type === 'item') {
+                if (child.type === ITEM) {
                     deepRiskTables = deepRiskTables.concat(this._findRiskTablesInSubtree(child));
                 }
             }
@@ -544,7 +548,7 @@ Object.assign(AppState, {
             // Если нет глубоких таблиц рисков, удаляем таблицу метрик
             if (deepRiskTables.length === 0) {
                 const metricsTableNode = firstLevelNode.children?.find(
-                    child => child.type === 'table' && child.isMetricsTable === true
+                    child => child.type === TABLE && child.isMetricsTable === true
                 );
 
                 if (metricsTableNode) {
@@ -561,7 +565,7 @@ Object.assign(AppState, {
 
         if (allRiskTables.length === 0) {
             const mainMetricsTableNode = node5.children?.find(
-                child => child.type === 'table' && child.isMainMetricsTable === true
+                child => child.type === TABLE && child.isMainMetricsTable === true
             );
 
             if (mainMetricsTableNode) {
@@ -590,7 +594,9 @@ Object.assign(AppState, {
         const preset = AppConfig.content.tablePresets.regularRisk;
         const tableId = this._generateId('table');
 
-        const tableNode = this._createContentNode(nodeId, tableId, 'table', preset.label, true, true);
+        const tableNode = this._createContentNode(nodeId, tableId, AppConfig.nodeTypes.TABLE, preset.label, true, true);
+        // E-2: pinned-флаг на node (структурное свойство), а не только на table-объекте.
+        tableNode.isRegularRiskTable = true;
 
         const insertIdx = this._getFirstNonPinnedIndex(node);
         node.children.splice(insertIdx, 0, tableNode);
@@ -626,7 +632,9 @@ Object.assign(AppState, {
         const preset = AppConfig.content.tablePresets.operationalRisk;
         const tableId = this._generateId('table');
 
-        const tableNode = this._createContentNode(nodeId, tableId, 'table', preset.label, true, true);
+        const tableNode = this._createContentNode(nodeId, tableId, AppConfig.nodeTypes.TABLE, preset.label, true, true);
+        // E-2: pinned-флаг на node.
+        tableNode.isOperationalRiskTable = true;
 
         const insertIdx = this._getFirstNonPinnedIndex(node);
         node.children.splice(insertIdx, 0, tableNode);
@@ -742,5 +750,132 @@ Object.assign(AppState, {
         }
 
         return grid;
+    },
+
+    /**
+     * Создаёт таблицу налоговых рисков.
+     * Шапка двухслойная (как у operational risk): одна объединённая ячейка
+     * «Выявлены налоговые риски» сверху + 6 колонок-заголовков снизу.
+     * Тело — обычные пустые редактируемые ячейки (без фикс. строк «Недоплата/Переплата»).
+     * @private
+     * @param {string} nodeId
+     * @returns {Object} результат ValidationCore.success()/failure()
+     */
+    _createTaxRiskTable(nodeId) {
+        const node = this.findNodeById(nodeId);
+
+        const validation = ValidationTree.canAddContent(node, AppConfig.nodeTypes.TABLE);
+        if (!validation.valid) return validation;
+
+        const preset = AppConfig.content.tablePresets.taxRisk;
+        const tableId = this._generateId('table');
+
+        const tableNode = this._createContentNode(nodeId, tableId, AppConfig.nodeTypes.TABLE, preset.label, true, true);
+        tableNode.isTaxRiskTable = true;
+
+        const insertIdx = this._getFirstNonPinnedIndex(node);
+        node.children.splice(insertIdx, 0, tableNode);
+
+        const grid = this._createTaxRiskGrid();
+
+        const table = {
+            id: tableId,
+            nodeId: tableNode.id,
+            grid,
+            colWidths: preset.colWidths,
+            protected: true,
+            deletable: true,
+            isTaxRiskTable: true
+        };
+
+        this.tables[tableId] = table;
+        return ValidationCore.success();
+    },
+
+    /**
+     * Строит сетку таблицы налоговых рисков.
+     * row1: объединённая «Выявлены налоговые риски» (colSpan=6).
+     * row2: 6 колонок-заголовков.
+     * Далее 2 строки пустых текстовых ячеек.
+     * @private
+     * @returns {Array<Array>}
+     */
+    _createTaxRiskGrid() {
+        const grid = [];
+
+        const headerRow1 = [
+            {content: 'Выявлены налоговые риски', isHeader: true, colSpan: 6, rowSpan: 1, originRow: 0, originCol: 0}
+        ];
+        for (let c = 1; c < 6; c++) {
+            headerRow1.push({
+                content: '',
+                isHeader: true,
+                colSpan: 1,
+                rowSpan: 1,
+                isSpanned: true,
+                spanOrigin: {row: 0, col: 0},
+                originRow: 0,
+                originCol: c
+            });
+        }
+        grid.push(headerRow1);
+
+        const headerRow2 = [
+            {content: 'Код процесса (номер-название)', isHeader: true, colSpan: 1, rowSpan: 1, originRow: 1, originCol: 0},
+            {content: 'Клиентский путь (номер-название)', isHeader: true, colSpan: 1, rowSpan: 1, originRow: 1, originCol: 1},
+            {content: 'Наименование нормативно-правового акта (НПА), который был нарушен', isHeader: true, colSpan: 1, rowSpan: 1, originRow: 1, originCol: 2},
+            {content: 'Статья/пункт НПА', isHeader: true, colSpan: 1, rowSpan: 1, originRow: 1, originCol: 3},
+            {content: 'Налоговые последствия', isHeader: true, colSpan: 1, rowSpan: 1, originRow: 1, originCol: 4},
+            {content: 'Сумма последствий, руб.', isHeader: true, colSpan: 1, rowSpan: 1, originRow: 1, originCol: 5}
+        ];
+        grid.push(headerRow2);
+
+        // Тело: 2 пустые строки.
+        for (let r = 2; r < 4; r++) {
+            grid.push(this._createDataRow(r, 6));
+        }
+
+        return grid;
+    },
+
+    /**
+     * Создаёт таблицу «Прочие риски». Шапка и сетка 1:1 со сводной таблицей метрик
+     * (использует общий конструктор `_createMetricsGrid`), но НЕ автогенерируется
+     * `metrics-risk-coordinator`-ом, НЕ агрегирует данные дочерних метрик и НЕ
+     * влияет на иерархию пунктов под разделом 5.
+     * @private
+     * @param {string} nodeId
+     * @returns {Object} результат ValidationCore.success()/failure()
+     */
+    _createOtherRiskTable(nodeId) {
+        const node = this.findNodeById(nodeId);
+
+        const validation = ValidationTree.canAddContent(node, AppConfig.nodeTypes.TABLE);
+        if (!validation.valid) return validation;
+
+        const metricsPreset = AppConfig.content.tablePresets.metrics;
+        const otherPreset = AppConfig.content.tablePresets.otherRisk;
+        const tableId = this._generateId('table');
+
+        const tableNode = this._createContentNode(nodeId, tableId, AppConfig.nodeTypes.TABLE, otherPreset.label, true, true);
+        tableNode.isOtherRiskTable = true;
+
+        const insertIdx = this._getFirstNonPinnedIndex(node);
+        node.children.splice(insertIdx, 0, tableNode);
+
+        const grid = this._createMetricsGrid();
+
+        const table = {
+            id: tableId,
+            nodeId: tableNode.id,
+            grid,
+            colWidths: metricsPreset.colWidths,
+            protected: true,
+            deletable: true,
+            isOtherRiskTable: true
+        };
+
+        this.tables[tableId] = table;
+        return ValidationCore.success();
     }
 });

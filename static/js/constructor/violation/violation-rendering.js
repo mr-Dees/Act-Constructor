@@ -3,6 +3,10 @@
  * Создание DOM-элементов для кейсов, изображений и текста
  */
 
+import { PreviewManager } from '../preview/preview.js';
+import { ViolationManager } from './violation-core.js';
+import { AppConfig } from '../../shared/app-config.js';
+
 // Расширение ViolationManager
 Object.assign(ViolationManager.prototype, {
     /**

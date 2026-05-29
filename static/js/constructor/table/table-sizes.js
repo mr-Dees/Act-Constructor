@@ -4,7 +4,9 @@
  * Сохраняет размеры в AppState для восстановления после перерисовки.
  * Использует относительные единицы (%) для адаптивности.
  */
-class TableSizes {
+import { AppState } from '../state/state-core.js';
+
+export class TableSizes {
     constructor(tableManager) {
         // Ссылка на TableManager для координации операций с таблицами
         this.tableManager = tableManager;
@@ -498,3 +500,6 @@ class TableSizes {
         });
     }
 }
+
+// Window-globals для совместимости с inline-скриптами в шаблонах.
+window.TableSizes = TableSizes;

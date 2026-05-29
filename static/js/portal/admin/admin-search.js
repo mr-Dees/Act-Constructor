@@ -3,7 +3,9 @@
  *
  * Фильтрует видимые строки таблицы ролей по ФИО, логину и email.
  */
-class AdminSearch {
+import { AdminRoles } from './admin-roles.js';
+
+export class AdminSearch {
     static _input = null;
     static _debounceTimer = null;
 

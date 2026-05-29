@@ -326,21 +326,31 @@
     color: var(--color-danger, #dc2626);
 }
 
-/* Пагинация */
-.audit-log-pagination {
-    padding: 10px 0;
-}
-
-.audit-log-pages {
+/* Load More — пагинация по принципу «загрузить ещё» */
+.load-more-container {
     display: flex;
     align-items: center;
     justify-content: center;
-    gap: 10px;
+    gap: 12px;
+    padding: 14px 0 6px;
 }
 
-.audit-log-page-info {
+.load-more-container[hidden] {
+    display: none;
+}
+
+.load-more-counter {
     font-size: 13px;
     color: var(--color-text-secondary, #888);
+}
+
+.load-more-btn {
+    min-width: 160px;
+}
+
+.load-more-btn:disabled {
+    opacity: 0.6;
+    cursor: progress;
 }
 
 /* Кнопки — синхронизация с пастельной палитрой проекта */

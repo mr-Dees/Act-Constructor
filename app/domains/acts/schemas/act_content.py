@@ -52,6 +52,8 @@ class TableSchema(BaseModel):
         isMainMetricsTable: Является ли главной таблицей метрик раздела 5
         isRegularRiskTable: Является ли таблицей регулярных рисков
         isOperationalRiskTable: Является ли таблицей операционных рисков
+        isTaxRiskTable: Является ли таблицей налоговых рисков
+        isOtherRiskTable: Является ли таблицей прочих рисков
     """
     id: str = Field(description="ID таблицы")
     nodeId: str = Field(description="ID узла дерева")
@@ -90,6 +92,14 @@ class TableSchema(BaseModel):
     isOperationalRiskTable: bool | None = Field(
         default=False,
         description="Таблица операционных рисков"
+    )
+    isTaxRiskTable: bool | None = Field(
+        default=False,
+        description="Таблица налоговых рисков"
+    )
+    isOtherRiskTable: bool | None = Field(
+        default=False,
+        description="Таблица прочих рисков"
     )
 
     @field_validator("grid")

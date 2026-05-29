@@ -92,7 +92,7 @@ CREATE TABLE IF NOT EXISTS {SCHEMA}.{PREFIX}audit_team_members (
     id BIGSERIAL PRIMARY KEY,
     act_id INTEGER NOT NULL REFERENCES {SCHEMA}.{PREFIX}acts(id) ON DELETE CASCADE,
     audit_act_id VARCHAR(36),
-    role VARCHAR(50) NOT NULL CONSTRAINT check_audit_team_role_values CHECK (role IN ('Куратор', 'Руководитель', 'Редактор', 'Участник')),
+    role VARCHAR(50) NOT NULL CONSTRAINT check_audit_team_role_values CHECK (role IN ('Куратор', 'Руководитель', 'Редактор', 'Участник', 'AppendixRef')),
     full_name VARCHAR(255) NOT NULL,
     position VARCHAR(255) NOT NULL,
     username VARCHAR(50) NOT NULL,
@@ -167,6 +167,8 @@ CREATE TABLE IF NOT EXISTS {SCHEMA}.{PREFIX}act_tables (
     is_main_metrics_table BOOLEAN DEFAULT FALSE,
     is_regular_risk_table BOOLEAN DEFAULT FALSE,
     is_operational_risk_table BOOLEAN DEFAULT FALSE,
+    is_tax_risk_table BOOLEAN DEFAULT FALSE,
+    is_other_risk_table BOOLEAN DEFAULT FALSE,
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
 
@@ -435,7 +437,9 @@ CREATE INDEX IF NOT EXISTS idx_{PREFIX}act_tables_special_flags
     WHERE is_metrics_table = TRUE
        OR is_main_metrics_table = TRUE
        OR is_regular_risk_table = TRUE
-       OR is_operational_risk_table = TRUE;
+       OR is_operational_risk_table = TRUE
+       OR is_tax_risk_table = TRUE
+       OR is_other_risk_table = TRUE;
 
 -- Индексы на act_textblocks
 CREATE INDEX IF NOT EXISTS idx_{PREFIX}act_textblocks_act_id

@@ -3,6 +3,11 @@
  * Кейсы, изображения, произвольный текст
  */
 
+import { ContextMenuManager } from '../context-menu/context-menu-core.js';
+import { PreviewManager } from '../preview/preview.js';
+import { ViolationManager } from './violation-core.js';
+import { Notifications } from '../../shared/notifications.js';
+
 // Расширение ViolationManager
 Object.assign(ViolationManager.prototype, {
     /**

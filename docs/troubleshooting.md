@@ -2,6 +2,31 @@
 
 Сборник симптомов и решений для частых ошибок. Если не нашёл свою проблему — проверь раздел «Key Patterns» в `docs/developer-guide.md` и логи uvicorn.
 
+## Оглавление
+
+1. [Kerberos билет протух (`kinit` expired)](#1-kerberos-билет-протух-kinit-expired)
+2. [Greenplum: connection refused / pool init failure](#2-greenplum-connection-refused--pool-init-failure)
+3. [File upload в чат: 413 Payload Too Large](#3-file-upload-в-чат-413-payload-too-large)
+4. [Agent bridge: запрос к внешнему агенту таймаутится](#4-agent-bridge-запрос-к-внешнему-агенту-таймаутится)
+4a. [Чат не подписан на агента (нет reasoning-чанков)](#4a-чат-не-подписан-на-агента-нет-reasoning-чанков)
+5. [LLM возвращает 4xx (включая GigaChat 422)](#5-llm-возвращает-4xx-включая-gigachat-422)
+6. [HTTP-метрики не пишутся в БД](#6-http-метрики-не-пишутся-в-бд)
+7. [404 на `/api/v1/...` под JupyterHub-proxy](#7-404-на-apiv1-под-jupyterhub-proxy)
+8. [Валидация КМ-номера падает](#8-валидация-км-номера-падает)
+9. [`RuntimeError: Database pool не инициализирован`](#9-runtimeerror-database-pool-не-инициализирован)
+10. [Greenplum: `InvalidTableDefinitionError` при `CREATE TABLE`](#10-greenplum-invalidtabledefinitionerror-при-create-table)
+11. [Тесты падают из-за состояния между тестами](#11-тесты-падают-из-за-состояния-между-тестами)
+12. [На фронте появился «⚠ Блок неизвестного типа»](#12-на-фронте-появился--блок-неизвестного-типа)
+13. [`pytest` падает на `test_settings_*`](#13-pytest-падает-на-test_settings_)
+14. [GigaChat: 422 `RequestInputValidationException` на втором tool-вызове](#14-gigachat-422-requestinputvalidationexception-на-втором-tool-вызове)
+15. [Акт не сохраняется (yellow → white не происходит)](#15-акт-не-сохраняется-yellow--white-не-происходит)
+16. [Тесты падают на pytest-asyncio: «Task attached to a different loop» / «There is no current event loop»](#16-тесты-падают-на-pytest-asyncio-task-attached-to-a-different-loop--there-is-no-current-event-loop)
+17. [`asyncpg.exceptions.TooManyConnectionsError` при долгих запросах](#17-asyncpgexceptionstoomanyconnectionserror-при-долгих-запросах)
+18. [Greenplum: `syntax error` в `CREATE INDEX IF NOT EXISTS` / `ADD COLUMN IF NOT EXISTS`](#18-greenplum-syntax-error-в-create-index-if-not-exists--add-column-if-not-exists)
+19. [Settings залипают между тестами (один тест видит env другого)](#19-settings-залипают-между-тестами-один-тест-видит-env-другого)
+20. [Singleton-lock — приложение не стартует / зависший процесс](#20-singleton-lock--приложение-не-стартует--зависший-процесс)
+21. [Записи в audit_log / metrics пропадают — что проверить](#21-записи-в-audit_log--metrics-пропадают--что-проверить)
+
 ---
 
 ### 1. Kerberos билет протух (`kinit` expired)
@@ -68,7 +93,7 @@
 1. По тексту ошибки определи, какой гейт сработал (упомянут конкретный таймаут в секундах).
 2. Если внешний агент действительно отвечает медленнее — поднять соответствующий `CHAT__AGENT_BRIDGE__*` в `.env`.
 3. Если агент не запущен / не подхватывает запросы — проверить `agent_requests`-таблицу (есть ли записи в статусе `pending`) и agent_bridge_runner (фоновая задача lifespan).
-4. **Параметры polling** — `CHAT__AGENT_BRIDGE__POLL_MIN_INTERVAL_SEC` (1.0), `POLL_MAX_INTERVAL_SEC` (10.0), `POLL_BACKOFF_MULTIPLIER` (1.5). Старая `POLL_INTERVAL_SEC` удалена; если осталась в `.env` — игнорируется.
+4. **Параметры polling** — `CHAT__AGENT_BRIDGE__POLL_MIN_INTERVAL_SEC` (5.0), `POLL_MAX_INTERVAL_SEC` (10.0), `POLL_BACKOFF_MULTIPLIER` (1.5). Старая `POLL_INTERVAL_SEC` удалена; если осталась в `.env` — игнорируется.
 
 **См. также:** `developer-guide.md §7.8`, `docs/manual-qa-external-agent-bridge.md`.
 
@@ -287,7 +312,7 @@
 
 **Решение:**
 1. Увеличить `DATABASE__POOL_MAX_SIZE` в `.env` (например с 20 до 40).
-2. Найти долгоиграющие транзакции на сервере:
+2. Найти долгоиграющие транзакции на сервере. Запрос работает на PostgreSQL ≥ 9.5 и Greenplum 6.x. На более старых версиях GP набор полей в `pg_stat_activity` отличается.
    ```sql
    SELECT pid, now() - query_start AS duration, state, query
    FROM pg_stat_activity

@@ -1,10 +1,15 @@
 /**
- * Общий менеджер sidebar для landing и acts-manager страниц
+ * Общий менеджер sidebar для всех portal-страниц (landing, acts-manager, admin, ck).
  *
  * Управляет сворачиванием/разворачиванием sidebar,
  * навигацией между страницами и загрузкой информации о пользователе.
  */
-class LandingSidebar {
+import { LandingPage } from './landing/landing-page.js';
+import { AppConfig } from '../shared/app-config.js';
+import { AuthManager } from '../shared/auth.js';
+import { ChatModalManager } from '../shared/chat/chat-modal.js';
+
+export class PortalSidebar {
     static _storageKey = 'sidebar_collapsed';
 
     /**
@@ -17,7 +22,7 @@ class LandingSidebar {
         this._setupChatButton();
         this._loadUserInfo();
 
-        console.log('LandingSidebar: инициализация завершена');
+        console.log('PortalSidebar: инициализация завершена');
     }
 
     /**
@@ -114,11 +119,10 @@ class LandingSidebar {
                 userNameElement.textContent = username;
             }
         } catch (error) {
-            console.error('LandingSidebar: ошибка загрузки информации о пользователе:', error);
+            console.error('PortalSidebar: ошибка загрузки информации о пользователе:', error);
         }
     }
 
 }
 
-// Экспортируем в глобальную область видимости
-window.LandingSidebar = LandingSidebar;
+window.PortalSidebar = PortalSidebar;

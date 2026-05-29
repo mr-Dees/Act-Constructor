@@ -5,19 +5,37 @@
  * Автоматически завершает сессию при бездействии пользователя.
  * Гарантирует одиночный unlock: предотвращает дублирующее снятие блокировки через sendBeacon.
  */
-class LockManager {
+import { ChangelogTracker } from './changelog-tracker.js';
+import { LifecycleHelper } from './lifecycle-helper.js';
+import { AppState } from './state/state-core.js';
+import { StorageManager } from './storage-manager.js';
+import { AppConfig } from '../shared/app-config.js';
+import { AuthManager } from '../shared/auth.js';
+import { DialogManager } from '../shared/dialog/dialog-confirm.js';
+import { Notifications } from '../shared/notifications.js';
+
+export class LockManager {
     static _actId = null;
     static _config = null;
     static _inactivityCheckInterval = null;
     static _extensionInterval = null;
-    static _inactivityDialogTimeout = null;
     static _countdownInterval = null;
     static _lastActivity = Date.now();
     static _lastExtensionAt = Date.now();
     static _warningShown = false;
     static _isExiting = false;
+    static _exitPromise = null;
     static _manualUnlockTriggered = false;
     static _beforeUnloadHandler = null;
+    static _activityHandler = null;
+    static _activityEvents = ['mousedown', 'keydown', 'scroll', 'touchstart'];
+    // Дедлайн диалога неактивности (Date.now() + timeoutSeconds*1000). null = диалог не показан.
+    // Хранится статически, чтобы _handleVisibilityChange мог решить — пора ли выкидывать.
+    static _inactivityDialogDeadline = null;
+    // Программный close активного диалога неактивности (получаем из DialogManager.onMount).
+    static _inactivityDialogClose = null;
+    // Bound-обработчик visibilitychange (для корректного removeEventListener в destroy).
+    static _visibilityHandler = null;
 
     /**
      * Инициализирует менеджер для конкретного акта
@@ -31,6 +49,11 @@ class LockManager {
             return;
         }
 
+        if (!Number.isInteger(actId) || actId <= 0) {
+            console.warn('[LockManager] init вызван с невалидным actId:', actId, new Error().stack);
+            throw new Error('INVALID_ACT_ID');
+        }
+
         this._actId = actId;
         this._resetState();
 
@@ -42,8 +65,9 @@ class LockManager {
             this._startInactivityCheck();
             this._startAutoExtension();
             this._setupBeforeUnload();
+            this._setupVisibilityHandling();
 
-            console.log('LockManager инициализирован для акта', actId);
+            console.log('[LockManager] init OK для actId=', actId);
             console.log('Настройки блокировок:', this._config);
         } catch (error) {
             console.error('Ошибка инициализации LockManager:', error);
@@ -90,8 +114,7 @@ class LockManager {
             const resp = await fetch(AppConfig.api.getUrl(`/api/v1/acts/${this._actId}/unlock`), {
                 method: 'POST',
                 headers: {
-                    'Content-Type': 'application/json',
-                    'X-JupyterHub-User': username
+                    'Content-Type': 'application/json'
                 }
             });
 
@@ -136,7 +159,12 @@ class LockManager {
         this._lastExtensionAt = Date.now();
         this._warningShown = false;
         this._isExiting = false;
+        this._exitPromise = null;
         this._manualUnlockTriggered = false;
+        // Счётчик подряд-неудач extend сбрасываем при старте сессии: иначе
+        // транзиентные фейлы прошлого акта (destroy()+init() в той же вкладке)
+        // переносятся и преждевременно достигают _MAX_EXTEND_FAILURES.
+        this._extendConsecutiveFailures = 0;
     }
 
     /**
@@ -144,12 +172,10 @@ class LockManager {
      * @private
      */
     static async _lockAct() {
-        const username = AuthManager.getCurrentUser();
         const response = await fetch(AppConfig.api.getUrl(`/api/v1/acts/${this._actId}/lock`), {
             method: 'POST',
             headers: {
-                'Content-Type': 'application/json',
-                'X-JupyterHub-User': username
+                'Content-Type': 'application/json'
             }
         });
 
@@ -160,7 +186,11 @@ class LockManager {
             } catch {
                 error = {detail: `Акт заблокирован (${response.status})`};
             }
-            const lockedBy = this._extractUsernameFromError(error.detail);
+            // Envelope ActLockError: {detail, code: 'act-locked', extra: {locked_by, locked_until}}.
+            // Fallback на регекс по detail — для совместимости с не-AppError ответами.
+            const lockedBy = (error.code === 'act-locked' && error.extra?.locked_by)
+                ? error.extra.locked_by
+                : this._extractUsernameFromError(error.detail);
 
             await DialogManager.show({
                 title: 'Акт редактируется',
@@ -174,11 +204,12 @@ class LockManager {
             });
 
             // Разрешаем навигацию без предупреждения браузера
-            if (typeof StorageManager !== 'undefined' && typeof StorageManager.allowUnload === 'function') {
-                StorageManager.allowUnload();
+            const acts409Url = AppConfig.api.getUrl('/acts');
+            if (typeof StorageManager !== 'undefined' && typeof StorageManager.confirmNavigation === 'function') {
+                await StorageManager.confirmNavigation(acts409Url, { url: acts409Url });
+            } else {
+                window.location.href = acts409Url;
             }
-
-            window.location.href = AppConfig.api.getUrl('/acts');
             throw new Error('ACT_LOCKED');
         }
 
@@ -194,11 +225,12 @@ class LockManager {
                 allowOverlayClose: false
             });
 
-            if (typeof StorageManager !== 'undefined' && typeof StorageManager.allowUnload === 'function') {
-                StorageManager.allowUnload();
+            const acts500Url = AppConfig.api.getUrl('/acts');
+            if (typeof StorageManager !== 'undefined' && typeof StorageManager.confirmNavigation === 'function') {
+                await StorageManager.confirmNavigation(acts500Url, { url: acts500Url });
+            } else {
+                window.location.href = acts500Url;
             }
-
-            window.location.href = AppConfig.api.getUrl('/acts');
             throw new Error('LOCK_FAILED');
         }
 
@@ -211,59 +243,111 @@ class LockManager {
      * @private
      */
     static _extractUsernameFromError(errorDetail) {
+        if (typeof errorDetail !== 'string') return 'другим пользователем';
         const match = errorDetail.match(/пользователем\s+([^\s.]+)/);
         return match ? match[1] : 'другим пользователем';
     }
 
     /**
-     * Продлевает блокировку по API
+     * Максимум подряд-неудач extend перед инициацией выхода.
+     * Транзиентная сетевая ошибка (DNS, proxy reset) не должна сразу выкидывать
+     * пользователя — retry на следующем тике auto-extension даёт шанс восстановиться.
+     */
+    static _MAX_EXTEND_FAILURES = 3;
+
+    /**
+     * Продлевает блокировку по API.
      * @private
+     * @returns {Promise<{ok: boolean, fatal: boolean}>}
+     *   - ok=true            — продление прошло
+     *   - ok=false fatal=true — сервер явно отверг (4xx: lock потерян, юзер сменился)
+     *   - ok=false fatal=false — транзиентная ошибка (5xx, network) — стоит retry
      */
     static async _extendLock() {
-        const username = AuthManager.getCurrentUser();
+        if (!this._actId || !Number.isInteger(this._actId)) {
+            console.error('[LockManager] _extendLock без валидного actId:', this._actId);
+            return { ok: false, fatal: true };
+        }
         try {
             const response = await fetch(AppConfig.api.getUrl(`/api/v1/acts/${this._actId}/extend-lock`), {
                 method: 'POST',
                 headers: {
-                    'Content-Type': 'application/json',
-                    'X-JupyterHub-User': username
+                    'Content-Type': 'application/json'
                 }
             });
-            if (!response.ok) throw new Error('Не удалось продлить блокировку');
+            if (!response.ok) {
+                // 4xx — серверное отвержение (403/404/409 = блокировка чужая/снята). Fatal.
+                // 5xx — серверная ошибка, разумно retry.
+                const fatal = response.status >= 400 && response.status < 500;
+                console.error(
+                    `Продление блокировки HTTP ${response.status}`
+                    + (fatal ? ' (fatal — lock потерян)' : ' (транзиентная)')
+                );
+                return { ok: false, fatal };
+            }
             const data = await response.json();
             console.log('Блокировка продлена до', data.locked_until);
-            return true;
+            return { ok: true, fatal: false };
         } catch (error) {
-            console.error('Ошибка продления блокировки:', error);
-            return false;
+            // Сетевая ошибка (fetch reject) — почти всегда транзиентная.
+            console.error('Сетевая ошибка продления блокировки:', error);
+            return { ok: false, fatal: false };
         }
     }
 
     /**
-     * Безопасное продление с обработкой ошибок
+     * Безопасное продление с подсчётом подряд-неудач.
      * @private
+     * @returns {Promise<{ok: boolean, shouldExit: boolean}>}
      */
     static async _extendLockSafely() {
-        try {
-            const ok = await this._extendLock();
-            if (ok) this._lastExtensionAt = Date.now();
-            return ok;
-        } catch (e) {
-            console.error('Ошибка автопродления блокировки:', e);
-            return false;
+        const result = await this._extendLock();
+        if (result.ok) {
+            this._lastExtensionAt = Date.now();
+            this._extendConsecutiveFailures = 0;
+            return { ok: true, shouldExit: false };
         }
+        // Fatal — выходим сразу. Transient — копим до MAX_EXTEND_FAILURES.
+        if (result.fatal) {
+            return { ok: false, shouldExit: true };
+        }
+        this._extendConsecutiveFailures = (this._extendConsecutiveFailures || 0) + 1;
+        const shouldExit = this._extendConsecutiveFailures >= LockManager._MAX_EXTEND_FAILURES;
+        console.warn(
+            `Транзиентная ошибка продления: попытка ${this._extendConsecutiveFailures}`
+            + `/${LockManager._MAX_EXTEND_FAILURES}`
+            + (shouldExit ? ' — лимит исчерпан, выходим' : ' — retry на следующем тике')
+        );
+        return { ok: false, shouldExit };
     }
 
     /**
      * Отслеживание активности пользователя.
+     * Один handler reuse-ится для 4 событий и сохраняется в _activityHandler,
+     * чтобы destroy() мог снять listeners через removeEventListener.
      * @private
      */
     static _setupActivityTracking() {
-        const events = ['mousedown', 'keydown', 'scroll', 'touchstart'];
-        const updateActivity = () => (this._lastActivity = Date.now());
-        events.forEach(event =>
-            document.addEventListener(event, updateActivity, {passive: true})
+        // На случай повторной инициализации (init после destroy) — снять старые сначала.
+        this._teardownActivityTracking();
+        this._activityHandler = () => {
+            this._lastActivity = Date.now();
+        };
+        this._activityEvents.forEach(event =>
+            document.addEventListener(event, this._activityHandler, {passive: true})
         );
+    }
+
+    /**
+     * Снимает activity-listeners. Идемпотентен.
+     * @private
+     */
+    static _teardownActivityTracking() {
+        if (!this._activityHandler) return;
+        this._activityEvents.forEach(event =>
+            document.removeEventListener(event, this._activityHandler)
+        );
+        this._activityHandler = null;
     }
 
     /**
@@ -298,8 +382,8 @@ class LockManager {
                 sinceExtension >= this._config.minExtensionIntervalMinutes
             ) {
                 console.log('Пользователь активен → продлеваем блокировку');
-                const ok = await this._extendLockSafely();
-                if (!ok) {
+                const result = await this._extendLockSafely();
+                if (result.shouldExit) {
                     console.error('Автопродление не удалось → выход');
                     this._initiateExit('extensionFailed');
                 }
@@ -314,18 +398,29 @@ class LockManager {
      */
     static _setupBeforeUnload() {
         this._beforeUnloadHandler = () => {
-            if (this._isExiting || this._manualUnlockTriggered || !this._actId) return;
+            try {
+                if (this._isExiting || this._manualUnlockTriggered || !this._actId) return;
 
-            const username = AuthManager.getCurrentUser();
-            const blob = new Blob(
-                [JSON.stringify({username})],
-                {type: 'application/json'}
-            );
+                const username = AuthManager.getCurrentUser();
+                const blob = new Blob(
+                    [JSON.stringify({username})],
+                    {type: 'application/json'}
+                );
 
-            navigator.sendBeacon(AppConfig.api.getUrl(`/api/v1/acts/${this._actId}/unlock`), blob);
-            console.log('BeforeUnload → отправлен beacon для unlock');
+                navigator.sendBeacon(AppConfig.api.getUrl(`/api/v1/acts/${this._actId}/unlock`), blob);
+                console.log('BeforeUnload → отправлен beacon для unlock');
+            } finally {
+                // Снимаем document-listeners и таймеры даже если beacon не отправлен:
+                // навигация (переход на другой акт через JupyterHub-proxy, back-button)
+                // оставляла бы 4 listener'а на document плюс активные интервалы.
+                this.destroy();
+            }
         };
-        window.addEventListener('beforeunload', this._beforeUnloadHandler);
+        if (typeof LifecycleHelper !== 'undefined') {
+            LifecycleHelper.registerBeforeUnload('lock:manual-unlock', this._beforeUnloadHandler);
+        } else {
+            window.addEventListener('beforeunload', this._beforeUnloadHandler);
+        }
     }
 
     /**
@@ -334,14 +429,19 @@ class LockManager {
      */
     static disableBeforeUnload() {
         if (this._beforeUnloadHandler) {
-            window.removeEventListener('beforeunload', this._beforeUnloadHandler);
+            if (typeof LifecycleHelper !== 'undefined') {
+                LifecycleHelper.unregister('lock:manual-unlock');
+            } else {
+                window.removeEventListener('beforeunload', this._beforeUnloadHandler);
+            }
             this._beforeUnloadHandler = null;
             console.log('LockManager.beforeunload отключен');
         }
     }
 
     /**
-     * Завершает все интервалы и таймеры.
+     * Завершает все интервалы, таймеры и снимает activity-listeners на document.
+     * Идемпотентен; безопасно вызывать повторно.
      */
     static destroy() {
         if (this._inactivityCheckInterval) {
@@ -352,13 +452,100 @@ class LockManager {
             clearInterval(this._extensionInterval);
             this._extensionInterval = null;
         }
-        if (this._inactivityDialogTimeout) {
-            clearTimeout(this._inactivityDialogTimeout);
-            this._inactivityDialogTimeout = null;
-        }
         if (this._countdownInterval) {
             clearInterval(this._countdownInterval);
             this._countdownInterval = null;
+        }
+        this._inactivityDialogDeadline = null;
+        this._inactivityDialogClose = null;
+        this._teardownVisibilityHandling();
+        this._teardownActivityTracking();
+    }
+
+    /**
+     * Подписка на visibilitychange. Когда вкладка возвращается из фона, throttle браузера
+     * мог "сдвинуть" таймеры — пересчитываем по реальному времени без обращений к бэку.
+     * @private
+     */
+    static _setupVisibilityHandling() {
+        this._teardownVisibilityHandling();
+        this._visibilityHandler = () => this._handleVisibilityChange();
+        document.addEventListener('visibilitychange', this._visibilityHandler);
+    }
+
+    /**
+     * Снимает visibilitychange-listener. Идемпотентен.
+     * @private
+     */
+    static _teardownVisibilityHandling() {
+        if (!this._visibilityHandler) return;
+        document.removeEventListener('visibilitychange', this._visibilityHandler);
+        this._visibilityHandler = null;
+    }
+
+    /**
+     * Реакция на возврат вкладки в активное состояние.
+     * Chrome/Edge в фоне throttle'ят setInterval/setTimeout (вплоть до ~раза в минуту),
+     * поэтому диалог неактивности может "застрять" с устаревшим countdown'ом, либо
+     * порог неактивности мог быть превышен пока fired-таймер ещё не успел сработать.
+     * Никаких HTTP-запросов здесь не делаем — лок на бэке мог быть уже снят
+     * предыдущим autoExit'ом, и Save обработает 409 отдельно.
+     * @private
+     */
+    static _handleVisibilityChange() {
+        if (document.hidden) return;
+        if (this._isExiting) return;
+        if (!this._actId) return;
+
+        // Случай A: диалог открыт и его дедлайн уже прошёл → немедленный autoExit.
+        if (this._inactivityDialogDeadline !== null
+            && Date.now() >= this._inactivityDialogDeadline) {
+            console.log('[LockManager] visibilitychange: дедлайн диалога просрочен, инициируем autoExit');
+            this._closeInactivityDialog();
+            this._initiateExit('autoExit');
+            return;
+        }
+
+        // Случай B: диалога нет, но порог неактивности уже превышен →
+        // сразу autoExit без промежуточного диалога «Продолжить?».
+        // Юзер был неактивен дольше threshold; бэк мог уже снять лок через
+        // expired_locks_cleanup (TTL lockDurationMinutes). Спрашивать «остаться?»
+        // бессмысленно: extend всё равно упадёт 4xx → fatal → _initiateExit.
+        if (this._inactivityDialogDeadline === null) {
+            const idleMs = Date.now() - this._lastActivity;
+            const idleThresholdMs = this._config.inactivityTimeoutMinutes * 60 * 1000;
+            if (idleMs >= idleThresholdMs) {
+                console.log('[LockManager] visibilitychange: порог неактивности превышен, autoExit');
+                if (this._inactivityCheckInterval) {
+                    clearInterval(this._inactivityCheckInterval);
+                    this._inactivityCheckInterval = null;
+                }
+                this._initiateExit('autoExit');
+            }
+        }
+    }
+
+    /**
+     * Принудительно закрывает диалог неактивности (если открыт), очищает countdown и дедлайн.
+     * Используется при autoExit'е из setInterval'а countdown'а либо из visibilitychange,
+     * чтобы overlay не "висел" поверх редиректа.
+     * @private
+     */
+    static _closeInactivityDialog() {
+        if (this._countdownInterval) {
+            clearInterval(this._countdownInterval);
+            this._countdownInterval = null;
+        }
+        this._inactivityDialogDeadline = null;
+        if (typeof this._inactivityDialogClose === 'function') {
+            try {
+                // Резолвим dialogPromise значением `false` (как cancel) — после await guard
+                // _isExiting=true перехватит ветку и extend не пойдёт. Любое значение здесь подходит.
+                this._inactivityDialogClose(false);
+            } catch (e) {
+                console.warn('[LockManager] _closeInactivityDialog: ошибка close-handle:', e);
+            }
+            this._inactivityDialogClose = null;
         }
     }
 
@@ -367,13 +554,17 @@ class LockManager {
      * @private
      */
     static async _handleInactivity(minutesInactive) {
+        const capturedActId = this._actId;
         const cfg = AppConfig.lock;
         const timeoutSeconds = this._config.inactivityDialogTimeoutSeconds;
 
-        this._inactivityDialogTimeout = setTimeout(() => {
-            console.log('Истекло время подтверждения, автосохранение и выход.');
-            this._initiateExit('autoExit');
-        }, timeoutSeconds * 1000);
+        // Дедлайн считаем по реальному времени. Это критично для фоновой вкладки:
+        // Chrome throttle'ит setInterval/setTimeout до ~раза в минуту, и старый
+        // decrement-counter (remaining--) разъезжается с реальностью.
+        // setInterval здесь — только для обновления UI; решение о выходе принимается
+        // по Date.now() >= deadline, что устойчиво к любому throttling.
+        const deadline = Date.now() + timeoutSeconds * 1000;
+        this._inactivityDialogDeadline = deadline;
 
         const dialogPromise = DialogManager.show({
             title: cfg.messages.inactivityTitle,
@@ -381,44 +572,68 @@ class LockManager {
             icon: '💤',
             type: 'warning',
             confirmText: 'Продолжить',
-            cancelText: 'Сохранить и выйти'
+            cancelText: 'Сохранить и выйти',
+            onMount: ({ overlay, close }) => {
+                // Сохраняем close-handle, чтобы _closeInactivityDialog мог программно
+                // закрыть overlay при autoExit (race-free, без querySelector).
+                this._inactivityDialogClose = close;
+
+                const messageEl = overlay?.querySelector('.dialog-message');
+                let countdownEl = null;
+                if (messageEl) {
+                    countdownEl = document.createElement('p');
+                    countdownEl.className = 'dialog-message';
+                    countdownEl.style.marginTop = '4px';
+                    countdownEl.style.fontWeight = 'bold';
+                    countdownEl.textContent = `Авто-выход через ${timeoutSeconds} сек.`;
+                    messageEl.after(countdownEl);
+                }
+
+                // Тикаем чаще 1 сек, чтобы при возврате видимости UI догнал реальность
+                // не позже чем за 250 мс. Решение о выходе тоже принимает этот же
+                // setInterval — отдельный setTimeout убран, иначе таймеры расходятся
+                // при throttling.
+                this._countdownInterval = setInterval(() => {
+                    const remainingMs = deadline - Date.now();
+                    const remaining = Math.max(0, Math.ceil(remainingMs / 1000));
+                    if (countdownEl) countdownEl.textContent = `Авто-выход через ${remaining} сек.`;
+                    if (remainingMs <= 0) {
+                        clearInterval(this._countdownInterval);
+                        this._countdownInterval = null;
+                        console.log('Истекло время подтверждения, автосохранение и выход.');
+                        // Закрываем overlay программно перед редиректом, иначе
+                        // диалог остаётся "висящим" поверх (особенно если interval
+                        // сработал в фоне с задержкой).
+                        this._closeInactivityDialog();
+                        this._initiateExit('autoExit');
+                    }
+                }, 250);
+            }
         });
-
-        // Добавляем элемент с живым обратным отсчётом
-        const overlay = document.querySelector('.custom-dialog-overlay:last-child');
-        const messageEl = overlay?.querySelector('.dialog-message');
-        let countdownEl = null;
-        if (messageEl) {
-            countdownEl = document.createElement('p');
-            countdownEl.className = 'dialog-message';
-            countdownEl.style.marginTop = '4px';
-            countdownEl.style.fontWeight = 'bold';
-            countdownEl.textContent = `Авто-выход через ${timeoutSeconds} сек.`;
-            messageEl.after(countdownEl);
-        }
-
-        let remaining = timeoutSeconds;
-        this._countdownInterval = setInterval(() => {
-            remaining--;
-            if (remaining < 0) remaining = 0;
-            if (countdownEl) countdownEl.textContent = `Авто-выход через ${remaining} сек.`;
-            if (remaining <= 0) clearInterval(this._countdownInterval);
-        }, 1000);
 
         const stay = await dialogPromise;
 
-        if (this._inactivityDialogTimeout) {
-            clearTimeout(this._inactivityDialogTimeout);
-            this._inactivityDialogTimeout = null;
+        // Если за время ожидания диалога _actId сменился (переключение акта) или
+        // менеджер уже завершает работу — диалог «осиротел» и его результат
+        // не относится к текущему состоянию. Тихо прерываем.
+        if (this._actId !== capturedActId || this._isExiting) {
+            console.warn('[LockManager] _handleInactivity: orphan dialog (actId changed or already exiting), abort');
+            return;
         }
+
         if (this._countdownInterval) {
             clearInterval(this._countdownInterval);
             this._countdownInterval = null;
         }
+        this._inactivityDialogDeadline = null;
+        this._inactivityDialogClose = null;
 
         if (stay) {
-            const extended = await this._extendLockSafely();
-            if (extended) {
+            // В диалоге «остаться?» юзер явно нажал «Да» — это интерактивная точка,
+            // здесь retry-стратегия неуместна (юзер ждёт мгновенный ответ).
+            // shouldExit учитывает оба варианта: fatal-4xx или исчерпан лимит retry.
+            const result = await this._extendLockSafely();
+            if (result.ok) {
                 this._lastActivity = Date.now();
                 if (Notifications) Notifications.success(cfg.messages.sessionExtended);
                 this._startInactivityCheck();
@@ -436,86 +651,116 @@ class LockManager {
      * @private
      */
     static async _initiateExit(action) {
-        if (this._isExiting) return;
+        if (this._isExiting) return this._exitPromise;
         this._isExiting = true;
-        this._manualUnlockTriggered = true; // 🚫 блокируем sendBeacon
+        // Закрываем диалог неактивности ДО destroy() — destroy сбросит _inactivityDialogClose,
+        // и закрыть overlay программно станет невозможно (overlay остался бы висеть).
+        this._closeInactivityDialog();
+        this._exitPromise = (async () => {
+            this._manualUnlockTriggered = true; // блокируем sendBeacon
 
-        this.destroy();
-        this.disableBeforeUnload();
+            this.destroy();
+            this.disableBeforeUnload();
 
-        // Разрешаем навигацию без предупреждения браузера
-        if (typeof StorageManager !== 'undefined' && typeof StorageManager.allowUnload === 'function') {
-            StorageManager.allowUnload();
-        }
-
-        const username = AuthManager?.getCurrentUser?.() || null;
-        const messageFlag = action === 'autoExit'
-            ? 'sessionAutoExited'
-            : 'sessionExitedWithSave';
-
-        console.log(`LockManager: выход (${action}) начат…`);
-
-        try {
-            // --- 1️⃣ Сохраняем акт ТОЛЬКО если есть AppState (значит открыт в конструкторе) ---
-            if (typeof AppState !== 'undefined' && AppState?.exportData) {
-                try {
-                    const data = AppState.exportData();
-                    const saveResp = await fetch(AppConfig.api.getUrl(`/api/v1/acts/${this._actId}/content`), {
-                        method: 'PUT',
-                        headers: {
-                            'Content-Type': 'application/json',
-                            'X-JupyterHub-User': username
-                        },
-                        body: JSON.stringify(data)
-                    });
-
-                    if (!saveResp.ok) {
-                        console.error(`[LockManager] Ошибка сохранения контента (код ${saveResp.status})`);
-                    } else {
-                        console.log('[LockManager] Контент акта сохранён');
-                        // Синхронизируем флаг StorageManager после успешного сохранения
-                        if (typeof StorageManager !== 'undefined' && typeof StorageManager.markAsSyncedWithDB === 'function') {
-                            StorageManager.markAsSyncedWithDB();
-                        }
-                    }
-                } catch (saveErr) {
-                    console.error('LockManager: ошибка при сохранении контента конструктора:', saveErr);
-                }
-            } else {
-                console.log('[LockManager] AppState отсутствует — пропускаем сохранение (страница метаданных)');
+            // Разрешаем навигацию без предупреждения браузера
+            if (typeof StorageManager !== 'undefined' && typeof StorageManager.allowUnload === 'function') {
+                StorageManager.allowUnload();
             }
 
-            // --- 2️⃣ Снимаем блокировку ---
-            if (this._actId && username) {
-                try {
-                    const resp = await fetch(AppConfig.api.getUrl(`/api/v1/acts/${this._actId}/unlock`), {
-                        method: 'POST',
-                        headers: {
-                            'Content-Type': 'application/json',
-                            'X-JupyterHub-User': username
-                        }
-                    });
+            const effectiveActId = this._actId || (typeof window !== 'undefined' ? window.currentActId : null);
+            const username = AuthManager?.getCurrentUser?.() || null;
+            const messageFlag = action === 'autoExit'
+                ? 'sessionAutoExited'
+                : 'sessionExitedWithSave';
 
-                    if (!resp.ok) {
-                        console.warn(`[LockManager] Ошибка unlock (код ${resp.status})`);
-                    } else {
-                        console.log(`[LockManager] Акт ${this._actId} успешно разблокирован (exit)`);
-                    }
-                } catch (unlockErr) {
-                    console.error('[LockManager] Ошибка сети при unlock:', unlockErr);
-                }
+            console.log(`LockManager: выход (${action}) начат… effectiveActId=${effectiveActId}`);
+
+            if (typeof Notifications !== 'undefined' && Notifications.warning) {
+                Notifications.warning('Сессия истекла. Сохраняем акт…');
             }
 
-            sessionStorage.setItem(messageFlag, 'true');
-        } catch (err) {
-            console.error('[LockManager] Ошибка выхода:', err);
-            sessionStorage.setItem(messageFlag, 'true');
-        } finally {
-            const closedId = this._actId;
-            this._actId = null;
-            console.log(`LockManager: завершение выхода для акта ${closedId}`);
-            setTimeout(() => window.location.href = AppConfig.api.getUrl('/acts'), 300);
-        }
+            try {
+                // --- 1️⃣ Сохраняем акт ТОЛЬКО если есть AppState (значит открыт в конструкторе) ---
+                if (typeof AppState !== 'undefined' && AppState?.exportData) {
+                    if (Number.isInteger(effectiveActId) && effectiveActId > 0) {
+                        try {
+                            const data = AppState.exportData();
+                            // Прикрепляем changelog в тот же PUT — серверная аудит-запись синхронна
+                            // с фактическим сохранением контента, без отдельного запроса.
+                            if (typeof ChangelogTracker !== 'undefined' && typeof ChangelogTracker.flush === 'function') {
+                                const changelog = ChangelogTracker.flush();
+                                if (changelog && changelog.length > 0) {
+                                    data.changelog = changelog;
+                                }
+                            }
+                            const saveResp = await fetch(AppConfig.api.getUrl(`/api/v1/acts/${effectiveActId}/content`), {
+                                method: 'PUT',
+                                headers: {
+                                    'Content-Type': 'application/json'
+                                },
+                                body: JSON.stringify(data)
+                            });
+
+                            if (!saveResp.ok) {
+                                console.error(`[LockManager] Ошибка сохранения контента (код ${saveResp.status})`);
+                            } else {
+                                console.log('[LockManager] Контент акта сохранён');
+                                // Синхронизируем флаг StorageManager после успешного сохранения
+                                if (typeof StorageManager !== 'undefined' && typeof StorageManager.markAsSyncedWithDB === 'function') {
+                                    StorageManager.markAsSyncedWithDB();
+                                }
+                            }
+                        } catch (saveErr) {
+                            console.error('LockManager: ошибка при сохранении контента конструктора:', saveErr);
+                        }
+                    } else {
+                        console.warn('[LockManager] _initiateExit: actId невалиден, save пропущен');
+                    }
+                } else {
+                    console.log('[LockManager] AppState отсутствует — пропускаем сохранение (страница метаданных)');
+                }
+
+                // --- 2️⃣ Снимаем блокировку ---
+                if (Number.isInteger(effectiveActId) && effectiveActId > 0 && username) {
+                    try {
+                        const resp = await fetch(AppConfig.api.getUrl(`/api/v1/acts/${effectiveActId}/unlock`), {
+                            method: 'POST',
+                            headers: {
+                                'Content-Type': 'application/json'
+                            }
+                        });
+
+                        if (!resp.ok) {
+                            console.warn(`[LockManager] Ошибка unlock (код ${resp.status})`);
+                        } else {
+                            console.log(`[LockManager] Акт ${effectiveActId} успешно разблокирован (exit)`);
+                        }
+                    } catch (unlockErr) {
+                        console.error('[LockManager] Ошибка сети при unlock:', unlockErr);
+                    }
+                }
+
+                sessionStorage.setItem(messageFlag, 'true');
+            } catch (err) {
+                console.error('[LockManager] Ошибка выхода:', err);
+                sessionStorage.setItem(messageFlag, 'true');
+            } finally {
+                const closedId = this._actId;
+                this._actId = null;
+                console.log(`LockManager: завершение выхода для акта ${closedId}`);
+                const exitUrl = AppConfig.api.getUrl('/acts');
+                // Жёсткий редирект без confirmNavigation: сессия завершается
+                // принудительно (autoExit / extensionFailed / manualExit).
+                // Если save выше упал (например 409 при чужом локе),
+                // markAsSyncedWithDB не вызвался → confirmNavigation показал бы
+                // плашку «Несохранённые изменения. Уйти?» и блокировал бы
+                // навигацию. allowUnload() уже снят выше.
+                setTimeout(() => {
+                    window.location.href = exitUrl;
+                }, AppConfig.timings.redirectAfterUnlock);
+            }
+        })();
+        return this._exitPromise;
     }
 }
 

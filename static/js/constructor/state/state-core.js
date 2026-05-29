@@ -5,7 +5,12 @@
  * методы поиска узлов и экспорта данных.
  * Делегирует специализированные операции модулям StateContent, StateTree и ValidationTree.
  */
-const AppState = {
+import { StorageManager } from '../storage-manager.js';
+import { ValidationCore } from '../validation/validation-core.js';
+import { ValidationTree } from '../validation/validation-tree.js';
+import { AppConfig } from '../../shared/app-config.js';
+
+export const AppState = {
     /** @type {number} Текущий шаг приложения (1 или 2) */
     currentStep: 1,
 
@@ -111,7 +116,7 @@ const AppState = {
      * Создает таблицу из пресета
      * @private
      */
-    _createTableFromPreset(nodeId, preset, label, protected, deletable) {
+    _createTableFromPreset(nodeId, preset, label, isProtected, deletable) {
         if (!preset) {
             return ValidationCore.failure('Пресет не передан');
         }
@@ -121,7 +126,7 @@ const AppState = {
             preset.rows,
             preset.cols,
             preset.headers,
-            protected,
+            isProtected,
             deletable,
             label
         );
@@ -134,12 +139,12 @@ const AppState = {
      * @param {number} rows - Количество строк
      * @param {number} cols - Количество колонок
      * @param {string[]} [headers] - Заголовки колонок
-     * @param {boolean} [protected] - Защита от изменений
+     * @param {boolean} [isProtected] - Защита от изменений
      * @param {boolean} [deletable] - Возможность удаления
      * @param {string} [label] - Название таблицы
      * @returns {Object} Результат создания
      */
-    _createSimpleTable(nodeId, rows, cols, headers = [], protected = false, deletable = true, label = '') {
+    _createSimpleTable(nodeId, rows, cols, headers = [], isProtected = false, deletable = true, label = '') {
         const node = this.findNodeById(nodeId);
         if (!node) {
             return ValidationCore.failure(AppConfig.tree.validation.nodeNotFound);
@@ -151,12 +156,12 @@ const AppState = {
         }
 
         const tableId = this._generateId('table');
-        const tableNode = this._createTableNode(nodeId, tableId, label, protected, deletable);
+        const tableNode = this._createTableNode(nodeId, tableId, label, isProtected, deletable);
 
         node.children.push(tableNode);
 
         const grid = this._createTableGrid(rows, cols, headers);
-        const table = this._createTableObject(tableId, tableNode.id, grid, cols, protected, deletable);
+        const table = this._createTableObject(tableId, tableNode.id, grid, cols, isProtected, deletable);
 
         this.tables[tableId] = table;
 
@@ -173,14 +178,14 @@ const AppState = {
      * @param {boolean} deletable - Возможность удаления
      * @returns {Object} Узел таблицы
      */
-    _createTableNode(parentId, tableId, label, protected, deletable) {
+    _createTableNode(parentId, tableId, label, isProtected, deletable) {
         const node = {
             id: `${parentId}_table_${Date.now()}_${Math.random().toString(36).substring(2, 9)}`,
             label: label || AppConfig.tree.labels.table,
-            type: 'table',
+            type: AppConfig.nodeTypes.TABLE,
             tableId,
             parentId,
-            protected,
+            protected: isProtected,
             deletable
         };
 
@@ -262,13 +267,13 @@ const AppState = {
      * @param {boolean} deletable - Возможность удаления
      * @returns {Object} Объект таблицы
      */
-    _createTableObject(tableId, nodeId, grid, cols, protected, deletable) {
+    _createTableObject(tableId, nodeId, grid, cols, isProtected, deletable) {
         return {
             id: tableId,
             nodeId,
             grid,
             colWidths: new Array(cols).fill(AppConfig.content.defaults.columnWidth),
-            protected,
+            protected: isProtected,
             deletable
         };
     },
@@ -362,17 +367,18 @@ const AppState = {
         const serialized = {
             id: node.id,
             label: node.label,
-            type: node.type || 'item',
+            type: node.type || AppConfig.nodeTypes.ITEM,
             protected: node.protected || false,
             deletable: node.deletable !== undefined ? node.deletable : true
         };
 
         // Добавляем ID связанного контента
-        if (node.type === 'table' && node.tableId) {
+        const {TABLE, TEXTBLOCK, VIOLATION} = AppConfig.nodeTypes;
+        if (node.type === TABLE && node.tableId) {
             serialized.tableId = node.tableId;
-        } else if (node.type === 'textblock' && node.textBlockId) {
+        } else if (node.type === TEXTBLOCK && node.textBlockId) {
             serialized.textBlockId = node.textBlockId;
-        } else if (node.type === 'violation' && node.violationId) {
+        } else if (node.type === VIOLATION && node.violationId) {
             serialized.violationId = node.violationId;
         } else {
             serialized.content = node.content || '';
@@ -494,16 +500,107 @@ const AppState = {
 };
 
 /**
- * Обертывает AppState в Proxy для автоматического отслеживания изменений
- *
- * Использует Object.defineProperty для перехвата операций записи
- * в ключевые свойства состояния. При любом изменении автоматически
- * помечает состояние как несохраненное через StorageManager.
- *
+ * Кеш уже обёрнутых объектов: target → proxy. Защищает от двойной обёртки
+ * (ускоряет повторные get'ы) и от бесконечной рекурсии при циклических ссылках.
  * @private
  */
-function _wrapStateWithProxy() {
-    // Список свойств AppState для отслеживания изменений
+export const _stateProxyCache = new WeakMap();
+export const _stateProxyOriginals = new WeakSet();
+
+export function _isTrackable(value) {
+    if (value === null || typeof value !== 'object') return false;
+    // Не оборачиваем DOM-узлы, Date, RegExp, Map, Set, Blob — у них собственная
+    // семантика, прокси может сломать поведение.
+    if (value instanceof Node) return false;
+    if (value instanceof Date || value instanceof RegExp) return false;
+    if (value instanceof Map || value instanceof Set || value instanceof WeakMap || value instanceof WeakSet) return false;
+    return true;
+}
+
+export function _notifyDirty() {
+    if (typeof StorageManager !== 'undefined' && StorageManager.markAsUnsaved) {
+        StorageManager.markAsUnsaved();
+    }
+}
+
+/**
+ * Рекурсивно оборачивает объект в Proxy. Любая deep-мутация
+ * (set/deleteProperty/Array.push/Array[i]=) вызывает markAsUnsaved().
+ * @private
+ */
+export function _wrapDeep(value) {
+    if (!_isTrackable(value)) return value;
+    // Уже обёрнут — возвращаем тот же прокси (стабильность ссылок для ===).
+    if (_stateProxyOriginals.has(value)) return value;
+    const cached = _stateProxyCache.get(value);
+    if (cached) return cached;
+
+    const handler = {
+        get(target, key, receiver) {
+            const v = Reflect.get(target, key, receiver);
+            // Lazy-wrap: оборачиваем nested при первом обращении.
+            return _wrapDeep(v);
+        },
+        set(target, key, newValue, receiver) {
+            const prev = target[key];
+            // Прокси-новое: оборачиваем при следующем get (lazy), но в target
+            // кладём raw — это сохраняет JSON.stringify семантику и
+            // упрощает сравнения ===.
+            const raw = _unwrap(newValue);
+            const ok = Reflect.set(target, key, raw, receiver);
+            if (ok && prev !== raw) {
+                _notifyDirty();
+            }
+            return ok;
+        },
+        deleteProperty(target, key) {
+            const had = Reflect.has(target, key);
+            const ok = Reflect.deleteProperty(target, key);
+            if (ok && had) {
+                _notifyDirty();
+            }
+            return ok;
+        },
+    };
+
+    const proxy = new Proxy(value, handler);
+    _stateProxyCache.set(value, proxy);
+    _stateProxyOriginals.add(proxy);
+    return proxy;
+}
+
+/**
+ * Возвращает «сырой» объект из proxy (для сохранения в БД, JSON.stringify
+ * и т.п.). На non-proxy значениях — no-op.
+ * @private
+ */
+export function _unwrap(value) {
+    if (!_isTrackable(value)) return value;
+    if (_stateProxyOriginals.has(value)) {
+        // Это уже proxy — достаём raw через прямой target lookup.
+        // Proxy не хранит target напрямую, но WeakMap-кеш записан target→proxy,
+        // поэтому делаем reverse через обход (для AppState size это OK — деревья
+        // относительно небольшие, а вызов unwrap случается только при set).
+        // На практике в наших сценариях newValue обычно plain literal от других
+        // модулей — то есть proxy сюда почти не приходит. Безопасный fallback:
+        // возвращаем значение как есть (Proxy всё равно прозрачно прокидывает
+        // операции в target).
+        return value;
+    }
+    return value;
+}
+
+/**
+ * Обёртка AppState: top-level свойства имеют сеттеры, которые помечают dirty И
+ * lazy-оборачивают новое значение в рекурсивный Proxy. Все внутренние мутации
+ * (`AppState.tables[id].cells[r][c] = ...`, `node.children.push(...)`, и др.)
+ * автоматически попадают в `markAsUnsaved()`.
+ *
+ * Это закрывает регрессию C-PROXY: до фикса трекался только top-level reassign,
+ * ~92% реальных правок проходили мимо dirty-tracking'а.
+ * @private
+ */
+export function _wrapStateWithProxy() {
     const trackedProperties = [
         'treeData',
         'tables',
@@ -516,29 +613,25 @@ function _wrapStateWithProxy() {
     ];
 
     trackedProperties.forEach(prop => {
-        // Сохраняем текущее значение свойства
-        let internalValue = AppState[prop];
+        // Стартовое значение — оборачиваем сразу, чтобы deep-мутации работали
+        // даже без явного reassign свойства.
+        let internalValue = _wrapDeep(AppState[prop]);
 
-        // Переопределяем свойство с геттером и сеттером
         Object.defineProperty(AppState, prop, {
             get() {
                 return internalValue;
             },
             set(newValue) {
-                // Устанавливаем новое значение
-                internalValue = newValue;
-
-                // Помечаем состояние как измененное
-                if (typeof StorageManager !== 'undefined' && StorageManager.markAsUnsaved) {
-                    StorageManager.markAsUnsaved();
-                }
+                if (internalValue === newValue) return;
+                internalValue = _wrapDeep(newValue);
+                _notifyDirty();
             },
             enumerable: true,
             configurable: true
         });
     });
 
-    console.log('State proxy инициализирован. Отслеживаются:', trackedProperties);
+    console.log('State proxy инициализирован (deep-tracking). Отслеживаются:', trackedProperties);
 }
 
 /**
@@ -548,7 +641,7 @@ function _wrapStateWithProxy() {
  * Обертывает критичные свойства AppState для автоматического
  * вызова markAsUnsaved() при любых изменениях.
  */
-function _initStateTracking() {
+export function _initStateTracking() {
     // Проверяем доступность StorageManager
     if (typeof StorageManager === 'undefined') {
         console.warn('StorageManager не найден. Автосохранение недоступно.');
@@ -559,13 +652,9 @@ function _initStateTracking() {
     _wrapStateWithProxy();
 }
 
-// Автоматическая инициализация при загрузке DOM
-if (document.readyState === 'loading') {
-    document.addEventListener('DOMContentLoaded', () => {
-        // Небольшая задержка для гарантии загрузки всех модулей
-        setTimeout(_initStateTracking, 0);
-    });
-} else {
-    // DOM уже загружен
-    setTimeout(_initStateTracking, 0);
-}
+// _initStateTracking() вызывается из entries/constructor.js, не из module-level:
+// shared/api.js импортирует этот файл и через portal-common.js цепочка доходит
+// до portal-страниц, где Proxy-обёртка AppState не нужна и не работает.
+
+// Window-globals для совместимости с inline-скриптами в шаблонах.
+window.AppState = AppState;

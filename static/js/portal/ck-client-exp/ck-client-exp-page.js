@@ -2,7 +2,16 @@
  * Контроллер страницы ЦК Клиентский опыт.
  * Аналогичен CkFinResPage, но использует CkClientExpConfig.
  */
-class CkClientExpPage {
+import { CkClientExpConfig } from './ck-client-exp-config.js';
+import { APIClient } from '../../shared/api.js';
+import { CkForm } from '../../shared/ck/ck-form.js';
+import { CkPagination } from '../../shared/ck/ck-pagination.js';
+import { CkProcessPicker } from '../../shared/ck/ck-process-picker.js';
+import { CkTable } from '../../shared/ck/ck-table.js';
+import { DialogManager } from '../../shared/dialog/dialog-confirm.js';
+import { Notifications } from '../../shared/notifications.js';
+
+export class CkClientExpPage {
     static _dictionaries = {};
     static _records = [];
 

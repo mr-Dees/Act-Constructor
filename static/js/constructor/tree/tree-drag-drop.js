@@ -4,7 +4,14 @@
  * Обеспечивает перетаскивание узлов внутри дерева с визуальными индикаторами.
  * Поддерживает валидацию перемещений и запрет на перетаскивание узлов с таблицами рисков.
  */
-class TreeDragDrop {
+import { ItemsRenderer } from '../items/items-renderer.js';
+import { PreviewManager } from '../preview/preview.js';
+import { AppState } from '../state/state-core.js';
+import { TreeUtils } from './tree-utils.js';
+import { AppConfig } from '../../shared/app-config.js';
+import { Notifications } from '../../shared/notifications.js';
+
+export class TreeDragDrop {
     /**
      * @param {TreeManager} manager - Экземпляр менеджера дерева
      */
@@ -49,6 +56,9 @@ class TreeDragDrop {
      * Использует MutationObserver для динамического обновления атрибутов
      */
     enableDraggableItems() {
+        // E-7: предохраняем от двойной подписки при повторных init.
+        this._mutationObserver?.disconnect();
+
         const observer = new MutationObserver(() => {
             this.manager.container.querySelectorAll('.tree-item:not(.protected)')
                 .forEach(item => item.setAttribute('draggable', 'true'));
@@ -59,9 +69,22 @@ class TreeDragDrop {
             subtree: true
         });
 
+        // Сохраняем ссылку для destroy() — иначе observer висит на time of process.
+        this._mutationObserver = observer;
+
         // Начальная установка
         this.manager.container.querySelectorAll('.tree-item:not(.protected)')
             .forEach(item => item.setAttribute('draggable', 'true'));
+    }
+
+    /**
+     * Освобождает ресурсы drag-drop: отключает MutationObserver, сбрасывает
+     * состояние активного drag'а. Безопасно вызывать многократно.
+     */
+    destroy() {
+        this._mutationObserver?.disconnect();
+        this._mutationObserver = null;
+        this.cleanup();
     }
 
     /**
@@ -97,6 +120,10 @@ class TreeDragDrop {
         this.draggedNode = node;
         this.draggedElement = treeItem;
 
+        // E-5: маркер активного drag'а — глобальный, чтобы periodic save / drop-handler могли
+        // среагировать. НЕ входит в trackedProperties (state-core.js), markAsUnsaved не дёргается.
+        AppState._dragInProgress = true;
+
         treeItem.classList.add('dragging');
         e.dataTransfer.effectAllowed = 'move';
         e.dataTransfer.setData('text/plain', nodeId);
@@ -107,30 +134,14 @@ class TreeDragDrop {
     }
 
     /**
-     * Проверяет наличие таблиц рисков в узле и его поддереве
+     * Проверяет наличие таблиц рисков в узле и его поддереве.
+     * E-4: hot-path drag, делегирует на TreeUtils.findRiskTables с firstOnly.
      * @private
      * @param {Object} node - Узел для проверки
      * @returns {boolean} true если найдены таблицы рисков
      */
     _hasRiskTablesInSubtree(node) {
-        // Если узел сам является таблицей риска
-        if (node.type === 'table' && node.tableId) {
-            const table = AppState.tables[node.tableId];
-            if (table && (table.isRegularRiskTable || table.isOperationalRiskTable)) {
-                return true;
-            }
-        }
-
-        // Рекурсивно проверяем дочерние элементы
-        if (node.children?.length) {
-            for (const child of node.children) {
-                if (this._hasRiskTablesInSubtree(child)) {
-                    return true;
-                }
-            }
-        }
-
-        return false;
+        return TreeUtils.findRiskTables(node, {firstOnly: true}).length > 0;
     }
 
     /**
@@ -141,7 +152,8 @@ class TreeDragDrop {
      */
     canAcceptAsChild(targetNode, draggedNode) {
         // Информационные элементы не могут иметь детей
-        const informationalTypes = ['table', 'textblock', 'violation'];
+        const {TABLE, TEXTBLOCK, VIOLATION} = AppConfig.nodeTypes;
+        const informationalTypes = [TABLE, TEXTBLOCK, VIOLATION];
         return !informationalTypes.includes(targetNode.type);
     }
 
@@ -151,7 +163,8 @@ class TreeDragDrop {
      * @param {DragEvent} e - Событие dragover
      */
     handleDragOver(e) {
-        if (!this.draggedNode) return;
+        // E-5: если drag в процессе обработки drop'а — больше не реагируем на dragover.
+        if (!this.draggedNode || !AppState._dragInProgress) return;
 
         e.preventDefault();
         e.stopPropagation();
@@ -202,7 +215,8 @@ class TreeDragDrop {
 
         // Для информационных элементов при наведении на их родителя всегда предлагаем вставку как child
         const draggedParent = AppState.findParentNode(this.draggedNode.id);
-        const isDraggedInformational = ['table', 'textblock', 'violation'].includes(this.draggedNode.type);
+        const {TABLE: T, TEXTBLOCK: TB, VIOLATION: V} = AppConfig.nodeTypes;
+        const isDraggedInformational = [T, TB, V].includes(this.draggedNode.type);
 
         if (isDraggedInformational && draggedParent && draggedParent.id === targetNode.id) {
             return 'child';
@@ -304,10 +318,27 @@ class TreeDragDrop {
         e.preventDefault();
         e.stopPropagation();
 
+        // E-5: защита от двойного drop. Если другой drop уже начал обработку
+        // (между preventDefault и cleanup) — игнорируем второй.
+        // Также: если drop пришёл, когда _dragInProgress уже сброшен (race с cleanup) — игнорируем.
+        if (this._dropInProgress || !AppState._dragInProgress) {
+            return;
+        }
+        this._dropInProgress = true;
+
         if (!this.draggedNode || !this.dropTargetNode || !this.dropPosition) {
             this.cleanup();
             return;
         }
+
+        // Захватываем oldParent ДО move; newParent вычисляется из target+position
+        // (target сам становится новым родителем для 'child', иначе — родитель target'а).
+        const oldParent = AppState.findParentNode(this.draggedNode.id);
+        const oldParentId = oldParent ? oldParent.id : null;
+
+        const newParentId = this.dropPosition === 'child'
+            ? this.dropTargetNode.id
+            : (AppState.findParentNode(this.dropTargetNode.id)?.id ?? null);
 
         const result = await AppState.moveNode(
             this.draggedNode.id,
@@ -320,7 +351,16 @@ class TreeDragDrop {
             PreviewManager.update('previewTrim', 30);
 
             if (AppState.currentStep === 2) {
-                ItemsRenderer.renderAll();
+                // Пересобираем оба поддерева: старый родитель и новый.
+                // Если они совпадают — достаточно одного updateItem.
+                if (oldParentId && newParentId && oldParentId === newParentId) {
+                    ItemsRenderer.updateItem(oldParentId);
+                } else {
+                    if (oldParentId) ItemsRenderer.updateItem(oldParentId);
+                    if (newParentId && newParentId !== oldParentId) ItemsRenderer.updateItem(newParentId);
+                    // Если хотя бы один parent — root, или мы не смогли его определить, fallback на renderAll.
+                    if (!oldParentId || !newParentId) ItemsRenderer.renderAll();
+                }
             }
 
             Notifications.success('Элемент успешно перемещен');
@@ -353,5 +393,12 @@ class TreeDragDrop {
 
         this.draggedNode = null;
         this.draggedElement = null;
+
+        // E-5: сбрасываем флаги после полного завершения drag-цикла
+        this._dropInProgress = false;
+        AppState._dragInProgress = false;
     }
 }
+
+// Window-globals для совместимости с inline-скриптами в шаблонах.
+window.TreeDragDrop = TreeDragDrop;
