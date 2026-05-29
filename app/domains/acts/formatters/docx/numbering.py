@@ -115,12 +115,11 @@ def _build_level(ilvl: int) -> OxmlElement:
 
     p_pr = OxmlElement("w:pPr")
     ind = OxmlElement("w:ind")
-    # Значения из эталона (abstractNumId=16 в docs/superpowers/specs/numbering-pattern.md).
-    # Уровни 0-2 взяты напрямую; 3-8 — экстраполяция того же паттерна.
-    _LEFT    = (360, 792, 1224, 1728, 2232, 2736, 3240, 3744, 4320)
-    _HANGING = (360, 432, 504,  648,  792,  936,  1080, 1224, 1440)
-    ind.set(qn("w:left"),    str(_LEFT[ilvl]))
-    ind.set(qn("w:hanging"), str(_HANGING[ilvl]))
+    # Эталон: все уровни прижаты к левому краю (left=0, firstLine=0),
+    # вне зависимости от глубины вложенности. Виден только номер (1.1.1.),
+    # но абзац не сдвигается вправо.
+    ind.set(qn("w:left"), "0")
+    ind.set(qn("w:firstLine"), "0")
     p_pr.append(ind)
     lvl.append(p_pr)
 

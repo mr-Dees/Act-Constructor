@@ -66,6 +66,25 @@ def test_two_footnote_spans_get_increasing_ids():
     assert ids == [1, 2]
 
 
+def test_footnote_span_marker_is_superscript_10pt():
+    """Циферка-маркер из inline-span — надстрочная и 10pt."""
+    doc = Document()
+    para = doc.add_paragraph()
+    apply_inline_html(
+        para,
+        'Текст<span class="text-footnote" data-footnote-text="Примечание">я</span>.',
+        base_size_pt=12.0,
+    )
+    ref = para._p.find(f".//{qn('w:footnoteReference')}")
+    run = ref.getparent()
+    vert = run.find(f"{qn('w:rPr')}/{qn('w:vertAlign')}")
+    assert vert is not None
+    assert vert.get(qn("w:val")) == "superscript"
+    sz = run.find(f"{qn('w:rPr')}/{qn('w:sz')}")
+    assert sz is not None
+    assert sz.get(qn("w:val")) == "20"
+
+
 def test_footnote_span_without_text_renders_plain():
     """span.text-footnote без data-footnote-text — просто текст, без сноски."""
     doc = Document()

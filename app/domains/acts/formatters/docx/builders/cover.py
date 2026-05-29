@@ -2,22 +2,32 @@
 from datetime import date
 
 from docx.document import Document
-from docx.enum.text import WD_ALIGN_PARAGRAPH
+from docx.enum.text import WD_ALIGN_PARAGRAPH, WD_TAB_ALIGNMENT
 from docx.oxml import OxmlElement
 from docx.oxml.ns import qn
-from docx.shared import Pt
+from docx.shared import Cm, Pt
 
 from app.domains.acts.formatters.docx.styles import Fonts, Sizes
+
+_MONTHS_GENITIVE = (
+    "января", "февраля", "марта", "апреля", "мая", "июня",
+    "июля", "августа", "сентября", "октября", "ноября", "декабря",
+)
 
 
 def build_cover_block(doc: Document, metadata) -> None:
     """Рендерит шапку акта под эталон.
 
+    0. Преамбула над таблицей: «Приложение 1» (вправо), строка «город + дата начала»
+       (город слева, дата справа через tab-stop) и центрированный заголовок
+       «Акт аудиторской проверки по {inspection_name}».
     1. Таблица 4×2 без видимых рамок.
        Левая колонка — bold-лейблы, правая — значения из metadata.
     2. Отдельный параграф под таблицей: «Акт аудиторской проверки составлен на N листах,
        приложение на 1 листе.» где N — Word-поле NUMPAGES (пересчитывается при открытии).
     """
+    _add_preamble(doc, metadata)
+
     table = doc.add_table(rows=4, cols=2)
     table.autofit = False
     _set_invisible_borders(table)
@@ -29,6 +39,39 @@ def build_cover_block(doc: Document, metadata) -> None:
 
     _add_sheets_paragraph(doc)
     doc.add_paragraph()  # воздух перед первым рубрикатором
+
+
+def _add_preamble(doc, m) -> None:
+    """Три элемента над таблицей параметров: «Приложение 1», город+дата, заголовок."""
+    # 1. «Приложение 1» — вправо.
+    app_para = doc.add_paragraph()
+    app_para.alignment = WD_ALIGN_PARAGRAPH.RIGHT
+    app_run = app_para.add_run("Приложение 1")
+    app_run.font.name = Fonts.main
+    app_run.font.size = Pt(Sizes.cover_label_pt)
+
+    # 2. Город слева, дата начала проверки справа через правый tab-stop.
+    city = getattr(m, "city", None) or ""
+    city_date_para = doc.add_paragraph()
+    city_date_para.alignment = WD_ALIGN_PARAGRAPH.LEFT
+    city_date_para.paragraph_format.tab_stops.add_tab_stop(Cm(17), WD_TAB_ALIGNMENT.RIGHT)
+    city_run = city_date_para.add_run(f"г. {city}\t{_format_start_date(m.inspection_start_date)}")
+    city_run.font.name = Fonts.main
+    city_run.font.size = Pt(Sizes.cover_label_pt)
+
+    # 3. Заголовок по центру, обычным начертанием.
+    title_para = doc.add_paragraph()
+    title_para.alignment = WD_ALIGN_PARAGRAPH.CENTER
+    title_run = title_para.add_run(f"Акт аудиторской проверки по {m.inspection_name}")
+    title_run.font.name = Fonts.main
+    title_run.font.size = Pt(Sizes.cover_label_pt)
+
+
+def _format_start_date(d) -> str:
+    """Дата начала проверки в формате «{день}» {месяц_род_падеж} {год} г."""
+    if not d:
+        return ""
+    return f"«{d.day}» {_MONTHS_GENITIVE[d.month - 1]} {d.year} г."
 
 
 def _build_rows(m) -> list[tuple[str, str]]:

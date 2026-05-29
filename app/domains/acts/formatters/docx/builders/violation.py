@@ -1,35 +1,19 @@
-"""Builder нарушений: «Проблема. ПNNNN.» + Нарушено/Установлено/Причины/...
+"""Builder нарушений: Нарушено/Установлено/Причины/...
+
+Заголовок и нумерация нарушения не выводятся: шаблон «Проблема. ПNNNN.»
+указывается в блоке пункта (item) и подставляется при сборке в formatter.py.
 
 Регрессия: рендеринг `recommendations` (раньше пропускалось).
 """
 from docx.document import Document
 from docx.shared import Pt
 
-from app.domains.acts.formatters.docx.numbering import apply_numbering
 from app.domains.acts.formatters.docx.styles import Fonts, Sizes
 from app.domains.acts.schemas.act_content import ViolationSchema
 
 
-def build_violation(
-    doc: Document,
-    violation: ViolationSchema,
-    *,
-    num_id: int,
-    ilvl: int,
-    problem_number: str,
-) -> None:
-    """Рендерит нарушение в документ.
-
-    problem_number — например «П00001», берётся из violation.nodeId-маппинга
-    либо генерируется снаружи (decoupling builder от counter'а).
-    """
-    header = doc.add_paragraph()
-    apply_numbering(header, num_id, ilvl=ilvl)
-    header_run = header.add_run(f"Проблема. {problem_number}.")
-    header_run.font.name = Fonts.main
-    header_run.font.size = Pt(Sizes.body_pt)
-    header_run.bold = True
-
+def build_violation(doc: Document, violation: ViolationSchema) -> None:
+    """Рендерит нарушение в документ (без заголовка и нумерации)."""
     _labeled_paragraph(doc, "Нарушено:", violation.violated)
     _labeled_paragraph(doc, "Установлено:", violation.established)
 

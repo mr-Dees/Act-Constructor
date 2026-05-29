@@ -1,5 +1,6 @@
 """Тесты builder'а нарушений."""
-from app.domains.acts.formatters.docx.numbering import ensure_rubricator
+from docx.oxml.ns import qn
+
 from app.domains.acts.formatters.docx.builders.violation import build_violation
 from app.domains.acts.schemas.act_content import (
     ViolationSchema, ViolationOptionalFieldSchema,
@@ -23,37 +24,49 @@ def _v(**overrides):
 
 def test_violation_renders_recommendations(doc):
     """Регрессия: recommendations раньше не рендерились."""
-    num_id = ensure_rubricator(doc)
-    build_violation(doc, _v(), num_id=num_id, ilvl=1, problem_number="П00001")
+    build_violation(doc, _v())
     text = "\n".join(p.text for p in doc.paragraphs)
     assert "Рекомендация-Z" in text
     assert "Рекомендации" in text
 
 
-def test_violation_header_is_bold_and_numbered(doc):
-    num_id = ensure_rubricator(doc)
-    build_violation(doc, _v(), num_id=num_id, ilvl=1, problem_number="П00001")
-    header = next(p for p in doc.paragraphs if "Проблема" in p.text)
-    assert header.runs[0].bold is True
-    from docx.oxml.ns import qn
-    num_pr = header._p.find(qn("w:pPr")).find(qn("w:numPr"))
-    assert num_pr is not None
-    assert num_pr.find(qn("w:ilvl")).get(qn("w:val")) == "1"
+def test_violation_renders_required_fields(doc):
+    """Поля «Нарушено:»/«Установлено:» присутствуют."""
+    build_violation(doc, _v())
+    text = "\n".join(p.text for p in doc.paragraphs)
+    assert "Нарушено:" in text
+    assert "Текст нарушения" in text
+    assert "Установлено:" in text
+    assert "Текст установлено" in text
+
+
+def test_violation_has_no_header_paragraph(doc):
+    """Нет абзаца, начинающегося со слова «Проблема»."""
+    build_violation(doc, _v())
+    assert not any(p.text.strip().startswith("Проблема") for p in doc.paragraphs)
+
+
+def test_violation_has_no_numbering(doc):
+    """Ни в одном абзаце нарушения нет numPr."""
+    build_violation(doc, _v())
+    for p in doc.paragraphs:
+        p_pr = p._p.find(qn("w:pPr"))
+        if p_pr is None:
+            continue
+        assert p_pr.find(qn("w:numPr")) is None
 
 
 def test_disabled_optional_fields_not_rendered(doc):
-    num_id = ensure_rubricator(doc)
     violation = _v(
         reasons=ViolationOptionalFieldSchema(enabled=False, content="скрытая"),
     )
-    build_violation(doc, violation, num_id=num_id, ilvl=1, problem_number="П00002")
+    build_violation(doc, violation)
     text = "\n".join(p.text for p in doc.paragraphs)
     assert "скрытая" not in text
 
 
 def test_labels_are_underlined(doc):
-    num_id = ensure_rubricator(doc)
-    build_violation(doc, _v(), num_id=num_id, ilvl=1, problem_number="П00003")
+    build_violation(doc, _v())
     label_runs = [
         r for p in doc.paragraphs for r in p.runs
         if r.text.strip() in {"Причины:", "Последствия:", "Ответственный:", "Рекомендации:"}

@@ -4,8 +4,10 @@ from datetime import date
 import pytest
 from docx.document import Document
 
+from docx.oxml.ns import qn
+
 from app.domains.acts.formatters.docx import DocxFormatter, ExportContext
-from app.domains.acts.schemas.act_content import ActDataSchema
+from app.domains.acts.schemas.act_content import ActDataSchema, TextBlockSchema
 
 
 class _Meta:
@@ -39,3 +41,47 @@ def test_facade_renders_6_rubricators():
     doc = fmt.format(ExportContext(metadata=_Meta(), content=content))
     # 1 cover-таблица + 6 рубрикаторов = 7 таблиц минимум
     assert len(doc.tables) >= 7
+
+
+def test_tb_is_not_rendered():
+    """#3: ТБ-узлы больше не выводятся («Территориальные банки: …» отсутствует)."""
+    fmt = DocxFormatter()
+    section = {
+        "id": "1", "label": "Раздел 1",
+        "children": [
+            {"id": "1.1", "type": "item", "label": "Пункт", "tb": ["ВВБ", "СЗБ"]},
+        ],
+    }
+    content = ActDataSchema(tree={"id": "root", "label": "Акт", "children": [section]})
+    doc = fmt.format(ExportContext(metadata=_Meta(), content=content))
+    assert not any("Территориальные банки" in p.text for p in doc.paragraphs)
+
+
+def test_textblock_has_no_title():
+    """#5: у текстового блока не выводится название узла — только содержимое."""
+    fmt = DocxFormatter()
+    section = {
+        "id": "1", "label": "Раздел 1",
+        "children": [
+            {"id": "1.1", "type": "textblock", "textBlockId": "tb1",
+             "label": "СЕКРЕТНЫЙ ЗАГОЛОВОК"},
+        ],
+    }
+    content = ActDataSchema(
+        tree={"id": "root", "label": "Акт", "children": [section]},
+        textBlocks={"tb1": TextBlockSchema(id="tb1", nodeId="1.1", content="Тело текста")},
+    )
+    doc = fmt.format(ExportContext(metadata=_Meta(), content=content))
+    texts = [p.text for p in doc.paragraphs]
+    assert any("Тело текста" in t for t in texts)
+    assert not any("СЕКРЕТНЫЙ ЗАГОЛОВОК" in t for t in texts)
+
+
+def test_update_fields_enabled():
+    """#8: документ помечен на пересчёт полей (NUMPAGES/PAGE) при открытии."""
+    fmt = DocxFormatter()
+    content = ActDataSchema(tree={"id": "root", "label": "Акт", "children": []})
+    doc = fmt.format(ExportContext(metadata=_Meta(), content=content))
+    update = doc.settings.element.find(qn("w:updateFields"))
+    assert update is not None
+    assert update.get(qn("w:val")) == "true"

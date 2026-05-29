@@ -2,6 +2,7 @@
 from datetime import date
 
 from docx import Document
+from docx.enum.text import WD_ALIGN_PARAGRAPH
 from docx.oxml.ns import qn
 
 from app.domains.acts.formatters.docx.builders.cover import build_cover_block
@@ -19,6 +20,7 @@ class _MetaStub:
     km_number = "КМ-99-99999"
     part_number = 1
     total_parts = 1
+    city = "Москва"
     inspection_name = "Овернайт-выписки корпоративных клиентов"
     is_process_based = False
     order_number = "АА-99/999-АА"
@@ -96,6 +98,38 @@ def test_cover_right_column_km_number():
     build_cover_block(doc, _MetaStub())
     km_value = doc.tables[0].rows[3].cells[1].text
     assert km_value.strip() == "КМ-99-99999"
+
+
+def test_cover_preamble_has_right_aligned_appendix_label():
+    doc = Document()
+    build_cover_block(doc, _MetaStub())
+    matches = [
+        p for p in doc.paragraphs
+        if p.text.strip() == "Приложение 1"
+        and p.alignment == WD_ALIGN_PARAGRAPH.RIGHT
+    ]
+    assert matches, "ожидался абзац «Приложение 1» с выравниванием вправо"
+
+
+def test_cover_preamble_has_city_and_start_date():
+    doc = Document()
+    build_cover_block(doc, _MetaStub())
+    matches = [p for p in doc.paragraphs if "г. Москва" in p.text]
+    assert matches, "ожидался абзац с «г. Москва»"
+    line = matches[0].text
+    assert "«10» апреля 2026 г." in line
+
+
+def test_cover_preamble_has_centered_title():
+    doc = Document()
+    build_cover_block(doc, _MetaStub())
+    expected = "Акт аудиторской проверки по Овернайт-выписки корпоративных клиентов"
+    matches = [
+        p for p in doc.paragraphs
+        if p.text.strip() == expected
+        and p.alignment == WD_ALIGN_PARAGRAPH.CENTER
+    ]
+    assert matches, "ожидался центрированный заголовок акта"
 
 
 def test_cover_includes_sheets_paragraph_with_numpages_field():

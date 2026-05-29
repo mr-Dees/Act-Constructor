@@ -85,7 +85,7 @@ def _append_footnote_element(footnotes_part: Part, footnote_id: int, text: str) 
         f'<w:p>'
         f'<w:pPr><w:pStyle w:val="FootnoteText"/></w:pPr>'
         f'<w:r>'
-        f'<w:rPr><w:rStyle w:val="FootnoteReference"/></w:rPr>'
+        f'<w:rPr><w:rStyle w:val="FootnoteReference"/><w:vertAlign w:val="superscript"/></w:rPr>'
         f'<w:footnoteRef/>'
         f'</w:r>'
         f'<w:r>'
@@ -105,10 +105,17 @@ def _append_footnote_element(footnotes_part: Part, footnote_id: int, text: str) 
 
 
 def _insert_reference(paragraph: Paragraph, footnote_id: int) -> None:
-    """Вставляет w:footnoteReference run в конец параграфа."""
+    """Вставляет w:footnoteReference run в конец параграфа.
+
+    Циферка-маркер делается надстрочной (vertAlign=superscript) и 10pt
+    под эталон — как степень, уменьшенная.
+    """
     run = paragraph.add_run()
     ref = OxmlElement("w:footnoteReference")
     ref.set(qn("w:id"), str(footnote_id))
     run._r.append(ref)
     run.font.name = Fonts.main
     run.font.size = Pt(Sizes.footnote_pt)
+    vert_align = OxmlElement("w:vertAlign")
+    vert_align.set(qn("w:val"), "superscript")
+    run._r.get_or_add_rPr().append(vert_align)

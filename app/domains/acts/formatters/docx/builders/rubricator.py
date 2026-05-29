@@ -8,18 +8,29 @@ from docx.shared import Cm, Pt
 from app.domains.acts.formatters.docx.numbering import apply_numbering
 from app.domains.acts.formatters.docx.styles import Fonts, Palette, Sizes
 
+# Рабочая ширина листа: A4 (21см) − левое поле 1.5см − правое 1.25см = 18.25см.
+USABLE_WIDTH_CM = 18.25
+LEFT_CELL_CM = 0.8
+RIGHT_CELL_CM = USABLE_WIDTH_CM - LEFT_CELL_CM  # 17.45см
+# Ширина таблицы в твипах (dxa): 1см = 567 твипов, 18.25см ≈ 10348 твипов.
+TABLE_WIDTH_DXA = round(USABLE_WIDTH_CM * 567)  # 10348
+
 
 def build_rubricator_plate(doc: Document, num_id: int, title: str) -> None:
     """Добавляет плашку: таблицу 1×2, левая ячейка нумеруется, правая — заголовок.
+
+    Плашка растянута на всю рабочую ширину листа (18.25см) с фиксированной
+    раскладкой.
 
     После плашки вставляется пустой абзац с space_after = 1pt — визуальный
     отступ между плашкой и следующим контентом.
     """
     table = doc.add_table(rows=1, cols=2)
     table.autofit = False
+    _set_table_width(table, TABLE_WIDTH_DXA)
     cells = table.rows[0].cells
-    cells[0].width = Cm(0.8)
-    cells[1].width = Cm(15.7)
+    cells[0].width = Cm(LEFT_CELL_CM)
+    cells[1].width = Cm(RIGHT_CELL_CM)
 
     for cell in cells:
         cell.vertical_alignment = WD_CELL_VERTICAL_ALIGNMENT.CENTER
@@ -38,6 +49,22 @@ def build_rubricator_plate(doc: Document, num_id: int, title: str) -> None:
     spacer = doc.add_paragraph()
     spacer.paragraph_format.space_before = Pt(0)
     spacer.paragraph_format.space_after = Pt(1)
+
+
+def _set_table_width(table, width_dxa: int) -> None:
+    """Задаёт явную ширину таблицы (w:tblW=dxa) и фиксированную раскладку."""
+    tbl_pr = table._tbl.tblPr
+    tbl_w = tbl_pr.find(qn("w:tblW"))
+    if tbl_w is None:
+        tbl_w = OxmlElement("w:tblW")
+        tbl_pr.append(tbl_w)
+    tbl_w.set(qn("w:type"), "dxa")
+    tbl_w.set(qn("w:w"), str(width_dxa))
+    tbl_layout = tbl_pr.find(qn("w:tblLayout"))
+    if tbl_layout is None:
+        tbl_layout = OxmlElement("w:tblLayout")
+        tbl_pr.append(tbl_layout)
+    tbl_layout.set(qn("w:type"), "fixed")
 
 
 def _set_cell_shading(cell, fill_hex: str) -> None:

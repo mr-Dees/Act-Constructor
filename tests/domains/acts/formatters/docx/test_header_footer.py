@@ -1,4 +1,4 @@
-"""Header содержит только «Конфиденциально» right; footer пуст; margins под эталон."""
+"""Header содержит только «Конфиденциально» right; footer — PAGE-поле по центру; margins под эталон."""
 from docx import Document
 from docx.enum.text import WD_ALIGN_PARAGRAPH
 from docx.shared import Cm
@@ -40,9 +40,12 @@ def test_header_does_not_contain_page_field():
     assert "NUMPAGES" not in xml
 
 
-def test_footer_is_empty():
+def test_footer_has_centered_page_field():
     doc = Document()
     apply_header_footer(doc, _MetaStub())
-    footer = doc.sections[0].footer
-    texts = [p.text for p in footer.paragraphs if p.text]
-    assert texts == []
+    footer_para = doc.sections[0].footer.paragraphs[0]
+    assert footer_para.alignment == WD_ALIGN_PARAGRAPH.CENTER
+    instr_texts = footer_para._p.findall(
+        ".//{http://schemas.openxmlformats.org/wordprocessingml/2006/main}instrText"
+    )
+    assert any("PAGE" in (el.text or "") for el in instr_texts)

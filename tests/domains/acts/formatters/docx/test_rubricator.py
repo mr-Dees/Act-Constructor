@@ -1,10 +1,16 @@
 """Тесты плашки-рубрикатора."""
 from docx import Document
 from docx.oxml.ns import qn
-from docx.shared import Pt
+from docx.shared import Cm, Pt
 
 from app.domains.acts.formatters.docx.numbering import ensure_rubricator
-from app.domains.acts.formatters.docx.builders.rubricator import build_rubricator_plate
+from app.domains.acts.formatters.docx.builders.rubricator import (
+    build_rubricator_plate,
+    LEFT_CELL_CM,
+    RIGHT_CELL_CM,
+    TABLE_WIDTH_DXA,
+    USABLE_WIDTH_CM,
+)
 from app.domains.acts.formatters.docx.styles import Palette, Fonts, Sizes
 
 
@@ -14,6 +20,32 @@ def test_plate_creates_table_1x2(doc):
     table = doc.tables[0]
     assert len(table.rows) == 1
     assert len(table.rows[0].cells) == 2
+
+
+def test_cell_widths_span_usable_width(doc):
+    num_id = ensure_rubricator(doc)
+    build_rubricator_plate(doc, num_id, "Предмет проверки")
+    cells = doc.tables[0].rows[0].cells
+    # python-docx хранит ширину ячейки в твипах, поэтому допускаем
+    # потерю на округлении EMU↔твипы (≈1 твип ≈ 635 EMU).
+    assert abs(cells[0].width - Cm(LEFT_CELL_CM)) < 700
+    assert abs(cells[1].width - Cm(RIGHT_CELL_CM)) < 700
+    # Сумма ширин ячеек ≈ рабочая ширина листа 18.25см.
+    assert abs((cells[0].width + cells[1].width) - Cm(USABLE_WIDTH_CM)) < 1400
+
+
+def test_table_has_fixed_width_in_dxa(doc):
+    num_id = ensure_rubricator(doc)
+    build_rubricator_plate(doc, num_id, "Предмет проверки")
+    tbl_pr = doc.tables[0]._tbl.tblPr
+    tbl_w = tbl_pr.find(qn("w:tblW"))
+    assert tbl_w is not None
+    assert tbl_w.get(qn("w:type")) == "dxa"
+    assert tbl_w.get(qn("w:w")) == str(TABLE_WIDTH_DXA)
+    assert TABLE_WIDTH_DXA == 10348
+    tbl_layout = tbl_pr.find(qn("w:tblLayout"))
+    assert tbl_layout is not None
+    assert tbl_layout.get(qn("w:type")) == "fixed"
 
 
 def test_both_cells_have_shading(doc):

@@ -36,5 +36,19 @@ def _resolve_leader_fio(metadata) -> str:
     team = getattr(metadata, "audit_team", None) or []
     for member in team:
         if getattr(member, "role", None) == "Руководитель":
-            return member.full_name
+            return _short_fio(member.full_name)
     return _LEADER_FALLBACK
+
+
+def _short_fio(full_name: str) -> str:
+    """Преобразует «Фамилия Имя Отчество» в «Фамилия И.О.».
+
+    2 слова → «Фамилия И.», 1 слово → возвращается как есть.
+    Инициалы — без пробелов между ними.
+    """
+    parts = full_name.split()
+    if len(parts) <= 1:
+        return full_name
+    surname = parts[0]
+    initials = "".join(f"{word[0]}." for word in parts[1:])
+    return f"{surname} {initials}"
