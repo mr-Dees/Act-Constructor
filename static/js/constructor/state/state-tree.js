@@ -241,7 +241,7 @@ Object.assign(AppState, {
         // Исключение: node.deletable === true — явное разрешение поверх protected
         // (используется риск-таблицами: protected продолжает блокировать drag и
         // структуру, но удаление разрешено). Сводные metrics-таблицы deletable не
-        // получают — остаются неудаляемыми вручную.
+        // получают deletable=false — остаются неудаляемыми вручную.
         if ((node.protected && node.deletable !== true) || node.deletable === false) {
             if (typeof Notifications !== 'undefined') {
                 Notifications.error('Этот элемент защищён от удаления');

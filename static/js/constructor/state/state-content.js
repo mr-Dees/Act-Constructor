@@ -299,7 +299,9 @@ Object.assign(AppState, {
         const tableId = this._generateId('table');
         const tableLabel = `Объем выявленных отклонений (В метриках) по ${nodeNumber}`;
 
-        const tableNode = this._createContentNode(nodeId, tableId, AppConfig.nodeTypes.TABLE, tableLabel, true, true);
+        // Сводная таблица неудаляема вручную (deletable=false): guard deleteNode
+        // блокирует её. Удаляется только автоматически каскадом при исчезновении рисков.
+        const tableNode = this._createContentNode(nodeId, tableId, AppConfig.nodeTypes.TABLE, tableLabel, true, false);
         tableNode.isMetricsTable = true;
 
         node.children.unshift(tableNode);
@@ -446,7 +448,8 @@ Object.assign(AppState, {
         const tableId = this._generateId('table');
         const tableLabel = 'Объем выявленных отклонений';
 
-        const tableNode = this._createContentNode('5', tableId, AppConfig.nodeTypes.TABLE, tableLabel, true, true);
+        // Главная сводная таблица неудаляема вручную (deletable=false).
+        const tableNode = this._createContentNode('5', tableId, AppConfig.nodeTypes.TABLE, tableLabel, true, false);
         tableNode.isMainMetricsTable = true;
 
         node5.children.unshift(tableNode);
