@@ -448,22 +448,36 @@ export class TreeContextMenu {
 
         // Удаление таблицы рисков триггерит _cleanupMetricsTablesAfterRiskTableDeleted,
         // которая может удалить метрики-таблицы из ДРУГИХ узлов раздела 5 → fallback на renderAll.
-        // Tax считается риском (триггерит metrics-coordinator при удалении тоже),
-        // Other — нет: его удаление не перерисовывает всё дерево.
+        // Все 4 типа — полноправные риски, удаление любого перерисовывает дерево.
         const isRiskTableDelete = node.type === AppConfig.nodeTypes.TABLE &&
-            !!(node.isRegularRiskTable || node.isOperationalRiskTable || node.isTaxRiskTable);
+            !!(node.isRegularRiskTable || node.isOperationalRiskTable || node.isTaxRiskTable || node.isOtherRiskTable);
+
+        // Свод-предупреждение: если это последний риск на уровне, каскад удалит
+        // соответствующие сводные таблицы — честно сообщаем об этом в диалоге.
+        let message = 'Удалить этот элемент?';
+        if (isRiskTableDelete) {
+            const pred = this._predictSvodRemoval(node);
+            const warns = [];
+            if (pred.perPoint) warns.push(`сводная таблица по пункту ${pred.perPoint}`);
+            if (pred.mainSvod) warns.push('общая сводная таблица');
+            if (warns.length) {
+                message += `\n\nБудет также удалена ${warns.join(' и ')}, так как других таблиц рисков на уровне не останется.`;
+            }
+        }
 
         DialogManager.show({
             title: 'Удаление элемента',
-            message: 'Удалить этот элемент?',
+            message,
             icon: '⚠️',
             confirmText: 'Удалить',
             cancelText: 'Отмена'
         }).then(userConfirmed => {
             if (userConfirmed) {
-                AppState.deleteNode(nodeId);
-                this.updateTreeViews(isRiskTableDelete ? undefined : parentId);
-                Notifications.info('Элемент удалён');
+                const deleted = AppState.deleteNode(nodeId);
+                if (deleted) {
+                    this.updateTreeViews(isRiskTableDelete ? undefined : parentId);
+                    Notifications.info('Элемент удалён');
+                }
             }
         });
     }
@@ -482,6 +496,50 @@ export class TreeContextMenu {
             return current;
         }
         return null;
+    }
+
+    /**
+     * Best-effort предсказание: какие сводные (metrics) таблицы будут удалены
+     * каскадом _cleanupMetricsTablesAfterRiskTableDeleted при удалении узла node.
+     * Read-only; источник истины — сам cleanup. Используется только для текста диалога.
+     * @param {Object} node - удаляемый узел (предполагается риск-таблица).
+     * @returns {{mainSvod: boolean, perPoint: string|null}}
+     *   mainSvod — будет удалена главная сводная §5; perPoint — номер пункта 5.X,
+     *   по которому будет удалена per-point сводная (или null).
+     */
+    _predictSvodRemoval(node) {
+        const empty = {mainSvod: false, perPoint: null};
+        const isRisk = !!(node.isRegularRiskTable || node.isOperationalRiskTable
+            || node.isTaxRiskTable || node.isOtherRiskTable);
+        if (!isRisk) return empty;
+
+        const node5 = AppState.findNodeById('5');
+        if (!node5) return empty;
+        const {TABLE, ITEM} = AppConfig.nodeTypes;
+
+        // Главная сводная: останутся ли риски в §5 кроме удаляемого?
+        const remaining = AppState._findRiskTablesInSubtree(node5).filter(n => n.id !== node.id);
+        const mainNode = node5.children?.find(c => c.type === TABLE && c.isMainMetricsTable === true);
+        const mainSvod = !!mainNode && remaining.length === 0;
+
+        // Per-point сводная по 5.X-предку (только для глубоких рисков 5.X.Y+).
+        let perPoint = null;
+        const ancestor5x = this._findParentFirstLevelUnderPoint5(node);
+        if (ancestor5x) {
+            let deep = [];
+            for (const child of ancestor5x.children || []) {
+                if (child.type === ITEM) {
+                    deep = deep.concat(AppState._findRiskTablesInSubtree(child));
+                }
+            }
+            deep = deep.filter(n => n.id !== node.id);
+            const perNode = ancestor5x.children?.find(c => c.type === TABLE && c.isMetricsTable === true);
+            if (perNode && deep.length === 0) {
+                perPoint = ancestor5x.number;
+            }
+        }
+
+        return {mainSvod, perPoint};
     }
 
     /**
