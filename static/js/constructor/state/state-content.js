@@ -70,12 +70,17 @@ Object.assign(AppState, {
             return ValidationCore.failure(AppConfig.content.errors.notFound('Таблица'));
         }
 
-        if (tableNode.protected) {
+        // tableNode.deletable === true — явное разрешение поверх protected
+        // (риск-таблицы). Override гейтим ИМЕННО по узлу: table-объекты сводных
+        // metrics-таблиц тоже имеют deletable:true, но их узлы — нет, поэтому
+        // сводные остаются неудаляемыми. protected продолжает блокировать
+        // редактирование структуры ячеек.
+        if (tableNode.protected && tableNode.deletable !== true) {
             return ValidationCore.failure(AppConfig.content.errors.protectedFromDeletion);
         }
 
         const table = this.tables[tableNode.tableId];
-        if (table?.protected) {
+        if (table?.protected && tableNode.deletable !== true) {
             return ValidationCore.failure(AppConfig.content.errors.protectedFromDeletion);
         }
 
