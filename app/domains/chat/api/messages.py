@@ -349,13 +349,18 @@ async def send_message(
 )
 async def get_messages(
     conversation_id: str,
-    limit: int = Query(50, ge=1, le=200),
+    limit: int = Query(10000, ge=1, le=10000),
     offset: int = Query(0, ge=0),
     username: str = Depends(get_username),
     conv_service: ConversationService = Depends(get_conversation_service),
     msg_service: MessageService = Depends(get_message_service),
 ):
-    """Возвращает историю сообщений беседы."""
+    """Возвращает историю сообщений беседы.
+
+    По умолчанию отдаёт всю историю (лимит практически неограничен) в порядке
+    ASC — клиент (chat-context.js) ничего не пагинирует. Усечение до 50
+    скрывало бы свежие сообщения активных бесед.
+    """
     # Проверяем принадлежность беседы пользователю
     await conv_service.get(conversation_id, username)
 

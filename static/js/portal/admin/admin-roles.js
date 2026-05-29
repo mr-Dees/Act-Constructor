@@ -339,6 +339,24 @@ export class AdminRoles {
     }
 
     /**
+     * Дописывает страницу пользователей (load-more) и перерисовывает таблицу.
+     * Дубли по username игнорируются (на случай пересечения страниц).
+     * @param {Array} users - Очередная страница пользователей
+     */
+    static appendUsers(users) {
+        const known = new Set(this._users.map(u => u.username));
+        for (const user of users) {
+            if (!known.has(user.username)) {
+                this._users.push(user);
+                known.add(user.username);
+            }
+        }
+        this._sortUsers();
+        this._renderAll();
+        this._applyFilters();
+    }
+
+    /**
      * Добавляет пользователя в список и перерисовывает таблицу
      * @param {Object} user - Данные пользователя с ролями
      */

@@ -22,19 +22,28 @@ export class AdminPage {
     static _allRoles = [];
     static _initializedTabs = new Set();
 
+    /* --- Состояние пагинации справочника (load-more) --- */
+    static _pageSize = 50;
+    static _dirOffset = 0;
+    static _dirTotal = 0;
+    static _dirLoadingMore = false;
+
     static async init() {
         try {
             const [directory, roles] = await Promise.all([
-                APIClient.loadUserDirectory(),
+                APIClient.loadUserDirectory(this._pageSize, 0),
                 APIClient.loadAllRoles(),
             ]);
-            this._usersDirectory = directory;
+            this._usersDirectory = directory.items;
+            this._dirTotal = directory.total;
+            this._dirOffset = directory.items.length;
             this._allRoles = roles;
 
             AdminSearch.init();
             AdminRoles.init(this._allRoles);
             AdminRoles.setUsers(this._usersDirectory);
             this._initAddUserButton();
+            this._renderLoadMore();
             this._initTabs();
             this._initializedTabs.add('roles');
 
@@ -43,6 +52,71 @@ export class AdminPage {
             console.error('AdminPage: ошибка инициализации:', error);
             Notifications.error('Не удалось загрузить данные администрирования');
         }
+    }
+
+    /**
+     * Подгружает следующую страницу справочника пользователей и дописывает
+     * её в таблицу ролей.
+     * @private
+     */
+    static async _loadMoreDirectory() {
+        if (this._dirLoadingMore) return;
+        if (this._dirOffset >= this._dirTotal) return;
+
+        this._dirLoadingMore = true;
+        const btn = document.getElementById('adminDirLoadMoreBtn');
+        if (btn) {
+            btn.disabled = true;
+            btn.textContent = 'Загрузка...';
+        }
+
+        try {
+            const page = await APIClient.loadUserDirectory(
+                this._pageSize, this._dirOffset,
+            );
+            this._dirTotal = page.total;
+            this._dirOffset += page.items.length;
+            this._usersDirectory.push(...page.items);
+            AdminRoles.appendUsers(page.items);
+            this._renderLoadMore();
+        } catch (error) {
+            console.error('AdminPage: ошибка подгрузки справочника:', error);
+            Notifications.error('Не удалось загрузить ещё пользователей');
+            if (btn) {
+                btn.disabled = false;
+                btn.textContent = 'Загрузить ещё';
+            }
+        } finally {
+            this._dirLoadingMore = false;
+        }
+    }
+
+    /**
+     * Создаёт/обновляет/убирает кнопку «Загрузить ещё» под таблицей ролей.
+     * @private
+     */
+    static _renderLoadMore() {
+        const section = document.querySelector('.admin-roles-section');
+        if (!section) return;
+
+        let btn = document.getElementById('adminDirLoadMoreBtn');
+
+        if (this._dirOffset >= this._dirTotal) {
+            if (btn) btn.remove();
+            return;
+        }
+
+        if (!btn) {
+            btn = document.createElement('button');
+            btn.id = 'adminDirLoadMoreBtn';
+            btn.type = 'button';
+            btn.className = 'btn btn-secondary admin-load-more-btn';
+            btn.addEventListener('click', () => this._loadMoreDirectory());
+            section.appendChild(btn);
+        }
+        btn.disabled = false;
+        const remaining = this._dirTotal - this._dirOffset;
+        btn.textContent = `Загрузить ещё (осталось ${remaining})`;
     }
 
     static updateUserRoles(username, roles) {

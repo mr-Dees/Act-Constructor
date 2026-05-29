@@ -1103,16 +1103,26 @@ export class APIClient {
     }
 
     /**
-     * Загружает справочник пользователей (для админ-панели)
-     * @returns {Promise<Array<{username: string, fullname: string, email: string, job: string, roles: Array}>>}
+     * Загружает страницу справочника пользователей (для админ-панели).
+     * Возвращает весь пагинированный ответ, чтобы вызывающий мог реализовать
+     * подгрузку «Загрузить ещё» по total/offset.
+     * @param {number} [limit=50] - размер страницы
+     * @param {number} [offset=0] - смещение
+     * @returns {Promise<{items: Array, total: number, limit: number, offset: number}>}
      */
-    static async loadUserDirectory() {
-        const response = await this._fetchWithTimeout(AppConfig.api.getUrl('/api/v1/admin/users/directory'), {
-            headers: {}
-        });
+    static async loadUserDirectory(limit = 50, offset = 0) {
+        const url = AppConfig.api.getUrl(
+            `/api/v1/admin/users/directory?limit=${limit}&offset=${offset}`
+        );
+        const response = await this._fetchWithTimeout(url, { headers: {} });
         if (!response.ok) throw this._createError(response.status, 'Ошибка загрузки справочника');
         const data = await response.json();
-        return data.items || [];
+        return {
+            items: data.items || [],
+            total: data.total ?? (data.items || []).length,
+            limit: data.limit ?? limit,
+            offset: data.offset ?? offset,
+        };
     }
 
     /**

@@ -26,6 +26,10 @@ export class ActsMenuManager {
     static _clickDelay = 300;
     static _cacheKey = 'acts_menu_cache';
     static _cacheExpiry = 1 * 60 * 1000;
+    static _pageSize = 50;
+    static _offset = 0;
+    static _total = 0;
+    static _loadingMore = false;
 
     static show() {
         const menu = document.getElementById('actsMenuDropdown');
@@ -67,7 +71,7 @@ export class ActsMenuManager {
                 this._clearCache();
                 return null;
             }
-            return parsed.acts;
+            return parsed;
         } catch (error) {
             console.error('Ошибка чтения кеша актов меню:', error);
             this._clearCache();
@@ -75,10 +79,11 @@ export class ActsMenuManager {
         }
     }
 
-    static _saveToCache(acts) {
+    static _saveToCache(acts, total) {
         try {
             const cacheData = {
                 acts,
+                total,
                 timestamp: Date.now()
             };
             localStorage.setItem(this._cacheKey, JSON.stringify(cacheData));
@@ -99,23 +104,92 @@ export class ActsMenuManager {
         if (!forceRefresh) {
             const cached = this._loadFromCache();
             if (cached) {
-                console.log('Загружено из кеша (меню):', cached.length, 'актов');
-                return cached;
+                const acts = cached.acts || [];
+                console.log('Загружено из кеша (меню):', acts.length, 'актов');
+                this._total = cached.total ?? acts.length;
+                this._offset = acts.length;
+                return acts;
             }
         }
 
         const username = AuthManager.getCurrentUser();
         if (!username) throw new Error('Пользователь не авторизован');
 
-        const response = await fetch(AppConfig.api.getUrl('/api/v1/acts/list'), {
-            headers: {}
-        });
+        const url = AppConfig.api.getUrl(
+            `/api/v1/acts/list?limit=${this._pageSize}&offset=0`
+        );
+        const response = await fetch(url, { headers: {} });
         if (!response.ok) throw new Error('Ошибка загрузки списка актов');
 
         const data = await response.json();
         const acts = data.items || [];
-        this._saveToCache(acts);
+        this._total = data.total || acts.length;
+        this._offset = acts.length;
+        this._saveToCache(acts, this._total);
         return acts;
+    }
+
+    /**
+     * Подгружает следующую страницу актов (только «Другие акты»), дописывает
+     * элементы в существующую секцию. Дополнительные страницы не кешируются —
+     * кеш хранит только первую страницу (1 минута).
+     * @private
+     * @param {HTMLElement} section - DOM-секция «Другие акты»
+     * @param {HTMLElement} btn - Кнопка «Загрузить ещё»
+     */
+    static async _loadMore(section, btn) {
+        if (this._loadingMore) return;
+        if (this._offset >= this._total) return;
+
+        this._loadingMore = true;
+        btn.disabled = true;
+        btn.textContent = 'Загрузка...';
+
+        try {
+            const url = AppConfig.api.getUrl(
+                `/api/v1/acts/list?limit=${this._pageSize}&offset=${this._offset}`
+            );
+            const response = await fetch(url, { headers: {} });
+            if (!response.ok) throw new Error('Ошибка загрузки списка актов');
+
+            const data = await response.json();
+            const acts = data.items || [];
+            this._total = data.total || this._total;
+            this._offset += acts.length;
+
+            acts
+                .filter(a => a.id !== this.currentActId)
+                .forEach(act =>
+                    section.insertBefore(
+                        this._createActListItem(act, false), btn
+                    )
+                );
+
+            this._updateLoadMoreBtn(btn);
+        } catch (err) {
+            console.error('Ошибка подгрузки актов (меню):', err);
+            if (typeof Notifications !== 'undefined')
+                Notifications.error('Не удалось загрузить ещё акты');
+            btn.disabled = false;
+            btn.textContent = 'Загрузить ещё';
+        } finally {
+            this._loadingMore = false;
+        }
+    }
+
+    /**
+     * Обновляет/убирает кнопку «Загрузить ещё» в зависимости от offset/total.
+     * @private
+     * @param {HTMLElement} btn
+     */
+    static _updateLoadMoreBtn(btn) {
+        if (this._offset >= this._total) {
+            btn.remove();
+            return;
+        }
+        btn.disabled = false;
+        const remaining = this._total - this._offset;
+        btn.textContent = `Загрузить ещё (осталось ${remaining})`;
     }
 
     static _formatDate(date) {
@@ -203,6 +277,25 @@ export class ActsMenuManager {
                 otherActs.forEach(act =>
                     section.appendChild(this._createActListItem(act, false))
                 );
+
+                // Кнопка «Загрузить ещё» — когда на бэке остались акты сверх
+                // первой страницы (currentAct не учитывается в total, поэтому
+                // допускаем погрешность в 1: лучше показать лишнюю кнопку, чем
+                // спрятать недостижимые акты).
+                if (this._offset < this._total) {
+                    const btn = document.createElement('button');
+                    btn.type = 'button';
+                    btn.className = 'btn btn-secondary acts-menu-load-more-btn';
+                    const remaining = this._total - this._offset;
+                    btn.textContent = `Загрузить ещё (осталось ${remaining})`;
+                    btn.addEventListener('click', e => {
+                        e.preventDefault();
+                        e.stopPropagation();
+                        this._loadMore(section, btn);
+                    });
+                    section.appendChild(btn);
+                }
+
                 listContainer.appendChild(section);
             }
         } catch (err) {

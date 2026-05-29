@@ -436,3 +436,10 @@
     border-color: var(--error-hover);
     box-shadow: 0 0 var(--spacing-md) var(--act-critical-glow);
 }
+
+/* Кнопка «Загрузить ещё» в выпадающем меню актов */
+.acts-menu-load-more-btn {
+    display: block;
+    width: 100%;
+    margin-top: var(--spacing-sm);
+}
