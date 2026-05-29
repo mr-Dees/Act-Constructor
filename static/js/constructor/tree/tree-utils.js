@@ -328,8 +328,9 @@ export const TreeUtils = {
      * Находит риск-таблицы в поддереве. E-4: единая утилита взамен двух дубликатов
      * (state-content.js::_findRiskTablesInSubtree и tree-drag-drop.js::_hasRiskTablesInSubtree).
      *
-     * Учитывает regular / operational / tax. Other-таблицы — отдельный пул
-     * («прочие отклонения») и НЕ считаются риском для metrics-risk-coordinator.
+     * Учитывает regular / operational / tax / other. Все четыре типа —
+     * полноправные риски: участвуют в формировании/удержании сводных таблиц и
+     * блокируются от перемещения за пределы раздела 5.
      *
      * @param {Object} node - Корневой узел поддерева
      * @param {{firstOnly?: boolean}} [opts] - firstOnly:true — ранний выход после первой находки.
@@ -342,8 +343,8 @@ export const TreeUtils = {
 
         const walk = (n) => {
             if (!n) return false;
-            // Tax считается риском для metrics-risk-coordinator; Other — НЕТ.
-            if (n.type === TABLE && (n.isRegularRiskTable || n.isOperationalRiskTable || n.isTaxRiskTable)) {
+            // Все 4 типа риск-таблиц учитываются (включая «прочий»).
+            if (n.type === TABLE && (n.isRegularRiskTable || n.isOperationalRiskTable || n.isTaxRiskTable || n.isOtherRiskTable)) {
                 result.push(n);
                 if (firstOnly) return true;
             }

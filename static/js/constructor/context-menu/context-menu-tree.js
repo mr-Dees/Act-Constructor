@@ -347,7 +347,8 @@ export class TreeContextMenu {
                 result = AppState._createOtherRiskTable(nodeId);
                 if (result.valid) {
                     AppState.generateNumbering();
-                    // Other-таблица НЕ триггерит metrics-risk-coordinator (см. спеку).
+                    // «Прочий» риск — полноправный участник свода: триггерит coordinator.
+                    MetricsRiskCoordinator.onRiskTableAdded(nodeId);
                 }
                 break;
             default:

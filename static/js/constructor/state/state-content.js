@@ -90,8 +90,8 @@ Object.assign(AppState, {
         }
 
         // E-2: pinned-флаги читаем с node, не с table-объекта.
-        // Tax учитывается как риск (триггерит metrics-coordinator); Other — нет.
-        const isRiskTable = !!(tableNode.isRegularRiskTable || tableNode.isOperationalRiskTable || tableNode.isTaxRiskTable);
+        // Все 4 типа — риск (триггерит metrics-coordinator при удалении).
+        const isRiskTable = !!(tableNode.isRegularRiskTable || tableNode.isOperationalRiskTable || tableNode.isTaxRiskTable || tableNode.isOtherRiskTable);
 
         if (typeof ChangelogTracker !== 'undefined') {
             ChangelogTracker.record('delete_table', tableNode.tableId, tableNode.label || 'Таблица', {nodeId: tableNode.parentId});
