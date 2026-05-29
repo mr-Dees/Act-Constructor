@@ -3,6 +3,12 @@
 Поддерживает <b>, <strong>, <i>, <em>, <u>, <span style="font-size: ...">,
 <br>, <a href="...">. Любой другой тег игнорируется (содержимое сохраняется).
 
+Спец-разметка редактора текстблоков:
+    <span class="text-footnote" data-footnote-text="...">якорь</span>
+        → видимый текст + нативная сноска Word после него.
+    <span class="text-link" data-link-url="https://...">текст</span>
+        → гиперссылка (как <a href>).
+
 Размеры font-size:
     px → pt: умножение на 0.75 (16px → 12pt)
     pt    : без изменений
@@ -17,7 +23,16 @@ from docx.oxml import OxmlElement
 from docx.oxml.ns import qn
 from docx.opc.constants import RELATIONSHIP_TYPE
 
+from app.domains.acts.formatters.docx.footnotes import add_footnote
 from app.domains.acts.formatters.docx.styles import Fonts
+
+
+# Протоколы, допустимые в гиперссылках DOCX (совпадает с html_sanitizer).
+_SAFE_LINK_PREFIXES = ("http://", "https://", "mailto:")
+
+
+def _is_safe_url(href: str) -> bool:
+    return href.strip().lower().startswith(_SAFE_LINK_PREFIXES)
 
 
 @dataclass(frozen=True)
@@ -46,6 +61,9 @@ class _InlineParser(HTMLParser):
         self.paragraph = paragraph
         self.stack: list[_RunState] = [_RunState(size_pt=base_size_pt)]
         self._hyperlink: OxmlElement | None = None
+        # Параллельно стеку span'ов: что делать при их закрытии.
+        # ("footnote", текст) | ("link", None) | ("plain", None)
+        self._span_kinds: list[tuple[str, str | None]] = []
 
     @property
     def state(self) -> _RunState:
@@ -55,8 +73,7 @@ class _InlineParser(HTMLParser):
         current = self.state
         if tag == "a":
             href = dict(attrs).get("href", "")
-            if href:
-                self._open_hyperlink(href)
+            if href and self._open_hyperlink(href):
                 self.stack.append(replace(current, underline=True))
                 return
             self.stack.append(current)
@@ -68,8 +85,7 @@ class _InlineParser(HTMLParser):
         elif tag == "u":
             self.stack.append(replace(current, underline=True))
         elif tag == "span":
-            size = _extract_size_pt(dict(attrs))
-            self.stack.append(replace(current, size_pt=size) if size else current)
+            self._open_span(dict(attrs), current)
         elif tag == "br":
             self._add_run("\n")
             self.stack.append(current)  # поглощает </br>, если придёт
@@ -84,9 +100,32 @@ class _InlineParser(HTMLParser):
             self.handle_starttag(tag, attrs)
             self.handle_endtag(tag)
 
+    def _open_span(self, attrs: dict, current: "_RunState") -> None:
+        """Открывает <span>: footnote-якорь, ссылку или обычный span."""
+        cls = attrs.get("class", "")
+        if "text-footnote" in cls:
+            # Якорь рендерим обычным текстом; сноску добавим при закрытии.
+            self._span_kinds.append(("footnote", attrs.get("data-footnote-text")))
+            self.stack.append(current)
+            return
+        url = attrs.get("data-link-url", "")
+        if "text-link" in cls and url and self._open_hyperlink(url):
+            self._span_kinds.append(("link", None))
+            self.stack.append(replace(current, underline=True))
+            return
+        size = _extract_size_pt(attrs)
+        self._span_kinds.append(("plain", None))
+        self.stack.append(replace(current, size_pt=size) if size else current)
+
     def handle_endtag(self, tag):
         if tag == "a" and self._hyperlink is not None:
             self._close_hyperlink()
+        if tag == "span" and self._span_kinds:
+            kind, payload = self._span_kinds.pop()
+            if kind == "footnote" and payload:
+                add_footnote(self.paragraph, payload)
+            elif kind == "link":
+                self._close_hyperlink()
         if len(self.stack) > 1:
             self.stack.pop()
 
@@ -144,13 +183,18 @@ class _InlineParser(HTMLParser):
 
         self._hyperlink.append(r_el)
 
-    def _open_hyperlink(self, href: str) -> None:
+    def _open_hyperlink(self, href: str) -> bool:
+        """Создаёт w:hyperlink с external relationship. Небезопасный
+        протокол (javascript: и т.п.) отклоняется → текст останется plain."""
+        if not _is_safe_url(href):
+            return False
         part = self.paragraph.part
         r_id = part.relate_to(href, RELATIONSHIP_TYPE.HYPERLINK, is_external=True)
         hyperlink = OxmlElement("w:hyperlink")
         hyperlink.set(qn("r:id"), r_id)
         self.paragraph._p.append(hyperlink)
         self._hyperlink = hyperlink
+        return True
 
     def _close_hyperlink(self) -> None:
         self._hyperlink = None

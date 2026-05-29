@@ -23,7 +23,15 @@ ALLOWED_TAGS = [
 
 ALLOWED_ATTRS = {
     "a": ["href", "title"],
-    "span": ["class", "style"],
+    # data-footnote-* / data-link-* несут текст сноски и URL ссылки —
+    # без них DOCX-экспорт теряет содержимое при сохранении контента.
+    # Значения безопасны: фронт рендерит их через textContent/escapeHtml,
+    # а экспорт фильтрует протокол ссылки (см. inline.py).
+    "span": [
+        "class", "style",
+        "data-footnote-id", "data-footnote-text",
+        "data-link-id", "data-link-url",
+    ],
     "div": ["class"],
     "*": ["class"],
 }
