@@ -238,7 +238,11 @@ Object.assign(AppState, {
 
         // Страховка API-уровня над UI-проверкой: защищённые узлы (секции 1-5)
         // нельзя удалить прямым вызовом, даже из консоли/undo/миграции.
-        if (node.protected || node.deletable === false) {
+        // Исключение: node.deletable === true — явное разрешение поверх protected
+        // (используется риск-таблицами: protected продолжает блокировать drag и
+        // структуру, но удаление разрешено). Сводные metrics-таблицы deletable не
+        // получают — остаются неудаляемыми вручную.
+        if ((node.protected && node.deletable !== true) || node.deletable === false) {
             if (typeof Notifications !== 'undefined') {
                 Notifications.error('Этот элемент защищён от удаления');
             }
