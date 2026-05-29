@@ -92,19 +92,6 @@ def register_lifespan_hooks() -> None:
     register_startup_hook("acts.expired_locks_cleanup", _start_expired_locks_cleanup)
     register_shutdown_hook("acts.expired_locks_cleanup", _stop_expired_locks_cleanup)
 
-    async def _seed_demo_act_hook(app: FastAPI) -> None:
-        """Создаёт демо-акт КМ-99-99999 при старте, если его нет.
-
-        Ошибки глотаем — стартап приложения не должен валиться из-за демо-данных.
-        """
-        try:
-            from scripts.seed_demo_act import ensure_demo_act
-            await ensure_demo_act()
-        except Exception:
-            logger.exception("Хук acts.demo_act_seed: ошибка (глотаем)")
-
-    register_startup_hook("acts.demo_act_seed", _seed_demo_act_hook)
-
 
 def get_executor() -> ThreadPoolExecutor:
     """Возвращает ThreadPoolExecutor домена актов.
