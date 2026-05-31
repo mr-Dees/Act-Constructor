@@ -1,0 +1,76 @@
+"""span.text-link в inline-HTML → w:hyperlink с external relationship.
+
+Фронт хранит ссылку как
+<span class="text-link" data-link-url="https://...">видимый текст</span>.
+"""
+from docx import Document
+from docx.oxml.ns import qn
+from docx.opc.constants import RELATIONSHIP_TYPE
+
+from app.domains.acts.formatters.docx.builders.inline import apply_inline_html
+
+
+def test_link_span_creates_hyperlink():
+    doc = Document()
+    para = doc.add_paragraph()
+    apply_inline_html(
+        para,
+        'См. <span class="text-link" data-link-url="https://cbr.ru/">сайт</span>.',
+        base_size_pt=12.0,
+    )
+    hyperlinks = para._p.findall(qn("w:hyperlink"))
+    assert len(hyperlinks) == 1
+
+
+def test_link_span_has_external_relationship():
+    doc = Document()
+    para = doc.add_paragraph()
+    apply_inline_html(
+        para,
+        '<span class="text-link" data-link-url="https://example.com/">t</span>',
+        base_size_pt=12.0,
+    )
+    hyperlink = para._p.find(qn("w:hyperlink"))
+    rel = para.part.rels[hyperlink.get(qn("r:id"))]
+    assert rel.target_ref == "https://example.com/"
+    assert rel.reltype == RELATIONSHIP_TYPE.HYPERLINK
+    assert rel.is_external
+
+
+def test_link_span_contains_visible_text():
+    doc = Document()
+    para = doc.add_paragraph()
+    apply_inline_html(
+        para,
+        '<span class="text-link" data-link-url="https://a.b/">ссылка</span>',
+        base_size_pt=12.0,
+    )
+    hyperlink = para._p.find(qn("w:hyperlink"))
+    texts = hyperlink.find(qn("w:r")).findall(qn("w:t"))
+    assert texts[0].text == "ссылка"
+
+
+def test_javascript_url_is_not_a_hyperlink():
+    """data-link-url с javascript:-схемой не должен стать гиперссылкой."""
+    doc = Document()
+    para = doc.add_paragraph()
+    apply_inline_html(
+        para,
+        '<span class="text-link" data-link-url="javascript:alert(1)">клик</span>',
+        base_size_pt=12.0,
+    )
+    assert para._p.find(qn("w:hyperlink")) is None
+    assert "клик" in para.text
+
+
+def test_a_tag_javascript_url_is_not_a_hyperlink():
+    """Тот же protocol-guard защищает и <a href>."""
+    doc = Document()
+    para = doc.add_paragraph()
+    apply_inline_html(
+        para,
+        '<a href="javascript:alert(1)">клик</a>',
+        base_size_pt=12.0,
+    )
+    assert para._p.find(qn("w:hyperlink")) is None
+    assert "клик" in para.text

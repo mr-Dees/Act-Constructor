@@ -1,5 +1,5 @@
 """
-Тесты доменных исключений экспорта актов и their поведения в ExportService.
+Тесты доменных исключений экспорта актов и их поведения в ExportService.
 
 Покрывает:
 - Классы ActExportValidationError, ActExportTimeoutError.
@@ -9,7 +9,7 @@
 import asyncio
 import pytest
 from pathlib import Path
-from unittest.mock import MagicMock, patch
+from unittest.mock import AsyncMock, MagicMock, patch
 
 from app.core.exceptions import AppError
 from app.domains.acts.exceptions import (
@@ -86,6 +86,9 @@ def _make_export_service(storage=None):
         storage.save.return_value = "act_20240101_120000_abcd.txt"
         storage.save_docx.return_value = "act_20240101_120000_abcd.docx"
 
+    mock_crud = AsyncMock()
+    mock_content_svc = AsyncMock()
+
     with patch("app.domains.acts.services.export_service.TextFormatter"), \
          patch("app.domains.acts.services.export_service.MarkdownFormatter"), \
          patch("app.domains.acts.services.export_service.DocxFormatter"):
@@ -93,11 +96,19 @@ def _make_export_service(storage=None):
             storage=storage,
             settings=mock_settings,
             acts_settings=acts_settings,
+            act_crud_service=mock_crud,
+            act_content_service=mock_content_svc,
         )
     return svc
 
 
-def _minimal_act_data() -> dict:
+def _make_mock_metadata():
+    meta = MagicMock()
+    meta.model_dump.return_value = {"km_number": "КМ-01-0000001"}
+    return meta
+
+
+def _minimal_content_dict() -> dict:
     return {
         "tree": {"id": "root", "label": "Акт", "children": []},
         "tables": {},
@@ -114,7 +125,7 @@ async def test_unsupported_format_raises():
     """save_act с неподдерживаемым форматом бросает UnsupportedFormatError."""
     svc = _make_export_service()
     with pytest.raises(UnsupportedFormatError):
-        await svc.save_act(_minimal_act_data(), fmt="pdf")  # type: ignore[arg-type]
+        await svc.save_act(42, "testuser", fmt="pdf")  # type: ignore[arg-type]
 
 
 @pytest.mark.asyncio
@@ -123,10 +134,12 @@ async def test_formatter_ose_rror_raises_app_error():
     svc = _make_export_service()
     svc._formatters["txt"] = MagicMock()
     svc._formatters["txt"].format.side_effect = OSError("disk error")
+    svc.act_crud_service.get_act = AsyncMock(return_value=_make_mock_metadata())
+    svc.act_content_service.get_content = AsyncMock(return_value=_minimal_content_dict())
 
     with patch("app.domains.acts.services.export_service.get_executor", return_value=None):
         with pytest.raises(AppError):
-            await svc.save_act(_minimal_act_data(), fmt="txt")
+            await svc.save_act(42, "testuser", fmt="txt")
 
 
 @pytest.mark.asyncio
@@ -135,10 +148,12 @@ async def test_formatter_memory_error_raises_app_error():
     svc = _make_export_service()
     svc._formatters["txt"] = MagicMock()
     svc._formatters["txt"].format.side_effect = MemoryError("out of memory")
+    svc.act_crud_service.get_act = AsyncMock(return_value=_make_mock_metadata())
+    svc.act_content_service.get_content = AsyncMock(return_value=_minimal_content_dict())
 
     with patch("app.domains.acts.services.export_service.get_executor", return_value=None):
         with pytest.raises(AppError):
-            await svc.save_act(_minimal_act_data(), fmt="txt")
+            await svc.save_act(42, "testuser", fmt="txt")
 
 
 @pytest.mark.asyncio
@@ -151,10 +166,12 @@ async def test_storage_oserror_raises_app_error():
     svc = _make_export_service(storage=storage)
     svc._formatters["txt"] = MagicMock()
     svc._formatters["txt"].format.return_value = "formatted text"
+    svc.act_crud_service.get_act = AsyncMock(return_value=_make_mock_metadata())
+    svc.act_content_service.get_content = AsyncMock(return_value=_minimal_content_dict())
 
     with patch("app.domains.acts.services.export_service.get_executor", return_value=None):
         with pytest.raises(AppError, match="Не удалось сохранить файл акта"):
-            await svc.save_act(_minimal_act_data(), fmt="txt")
+            await svc.save_act(42, "testuser", fmt="txt")
 
 
 @pytest.mark.asyncio
@@ -164,8 +181,10 @@ async def test_app_error_from_formatter_propagates():
     original = AppError("специфическая ошибка форматера")
     svc._formatters["md"] = MagicMock()
     svc._formatters["md"].format.side_effect = original
+    svc.act_crud_service.get_act = AsyncMock(return_value=_make_mock_metadata())
+    svc.act_content_service.get_content = AsyncMock(return_value=_minimal_content_dict())
 
     with patch("app.domains.acts.services.export_service.get_executor", return_value=None):
         with pytest.raises(AppError) as exc_info:
-            await svc.save_act(_minimal_act_data(), fmt="md")
+            await svc.save_act(42, "testuser", fmt="md")
         assert exc_info.value is original

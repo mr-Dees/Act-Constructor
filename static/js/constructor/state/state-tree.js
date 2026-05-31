@@ -606,22 +606,22 @@ Object.assign(AppState, {
         // Если узел уже на первом уровне, разрешаем перемещение
         if (draggedParent.id === 'root') return ValidationCore.success();
 
-        // Проверяем, есть ли уже кастомный пункт 6
+        // Проверяем, есть ли уже кастомный пункт 7
         const hasCustomFirstLevel = targetParent.children.some(child => {
             const num = child.number ? parseInt(child.number) : null;
-            return num === 6;
+            return num === 7;
         });
 
         if (hasCustomFirstLevel) {
-            return ValidationCore.failure('На первом уровне уже есть дополнительный пункт (6)');
+            return ValidationCore.failure('На первом уровне уже есть дополнительный пункт (7)');
         }
 
-        // Проверяем, что добавляем только после пункта 5 или перед пунктом 6
+        // Проверяем, что добавляем только после пункта 6 или перед пунктом 7
         const targetNumber = targetNode.number ? parseInt(targetNode.number) : null;
         if (!targetNumber) return ValidationCore.success();
 
-        if ((position === 'before' && targetNumber !== 6) ||
-            (position === 'after' && targetNumber !== 5)) {
+        if ((position === 'before' && targetNumber !== 7) ||
+            (position === 'after' && targetNumber !== 6)) {
             return ValidationCore.failure(AppConfig.tree.validation.firstLevelOnlyAtEnd);
         }
 

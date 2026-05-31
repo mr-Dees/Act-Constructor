@@ -16,13 +16,14 @@ from app.api.v1.deps.auth_deps import get_username
 from app.core.config import get_settings, Settings
 from app.core.exceptions import AppError
 from app.db.connection import get_db
-from app.domains.acts.deps import _get_acts_settings
-from app.domains.acts.exceptions import ActExportValidationError, ActExportTimeoutError
+from app.domains.acts.deps import _get_acts_settings, get_crud_service, get_content_service
+from app.domains.acts.exceptions import ActExportTimeoutError
 from app.domains.acts.repositories.act_access import ActAccessRepository
 from app.domains.acts.repositories.act_audit_log import ActAuditLogRepository
 from app.domains.acts.settings import ActsSettings
-from app.domains.acts.utils import ActTreeUtils
-from app.domains.acts.schemas.act_content import ActDataSchema, ActSaveResponse
+from app.domains.acts.schemas.act_content import ActSaveResponse
+from app.domains.acts.services.act_content_service import ActContentService
+from app.domains.acts.services.act_crud_service import ActCrudService
 from app.domains.acts.services.export_service import ExportService
 from app.domains.acts.services.storage_service import StorageService
 from app.schemas.errors import ErrorDetail
@@ -51,113 +52,96 @@ def get_act_service(
         storage: StorageService = Depends(get_storage_service),
         settings: Settings = Depends(get_settings),
         acts_settings: ActsSettings = Depends(_get_acts_settings),
+        act_crud_service: ActCrudService = Depends(get_crud_service),
+        act_content_service: ActContentService = Depends(get_content_service),
 ) -> ExportService:
     """Создает экземпляр ExportService для dependency injection."""
-    return ExportService(storage=storage, settings=settings, acts_settings=acts_settings)
+    return ExportService(
+        storage=storage,
+        settings=settings,
+        acts_settings=acts_settings,
+        act_crud_service=act_crud_service,
+        act_content_service=act_content_service,
+    )
 
 
 @router.post(
     "/save-act",
     response_model=ActSaveResponse,
     responses={
-        400: {"description": "Превышена глубина дерева или неподдерживаемый формат", "model": ErrorDetail},
+        400: {"description": "Неподдерживаемый формат или акт не найден", "model": ErrorDetail},
         408: {"description": "Таймаут обработки акта", "model": ErrorDetail},
         422: {"description": "Ошибка валидации входных данных"},
         500: {"description": "Внутренняя ошибка при сохранении", "model": ErrorDetail},
     },
 )
 async def save_act(
-        data: ActDataSchema,
+        act_id: int = Query(..., description="ID акта"),
         fmt: Literal["txt", "md", "docx"] = Query(
-            "txt",
+            "docx",
             description="Формат сохранения файла"
-        ),
-        act_id: int | None = Query(
-            None,
-            description="ID акта для контроля доступа при скачивании"
         ),
         username: str = Depends(get_username),
         act_service: ExportService = Depends(get_act_service),
         storage: StorageService = Depends(get_storage_service),
-        settings: Settings = Depends(get_settings),
         acts_cfg: ActsSettings = Depends(_get_acts_settings),
 ) -> ActSaveResponse:
     """
-    Сохраняет структуру акта в указанном формате.
+    Экспортирует акт в указанном формате.
+
+    Читает metadata и content из БД по act_id. Перед вызовом этого
+    эндпоинта фронт должен синхронизировать содержимое через POST /save-content.
 
     Args:
-        data: Данные акта (дерево структуры, таблицы, текстовые блоки,
-            нарушения)
-        fmt: Формат экспорта - 'txt', 'md' или 'docx'
-        act_id: ID акта для привязки файла к контролю доступа
+        act_id: ID акта (обязательный)
+        fmt: Формат экспорта — 'txt', 'md' или 'docx'
         username: Имя пользователя (из авторизации)
-        act_service: Сервис для работы с актами (injected)
+        act_service: Сервис экспорта (injected)
         storage: Сервис хранения файлов (injected)
-        settings: Настройки приложения (injected)
+        acts_cfg: Доменные настройки актов (injected)
 
     Returns:
         Результат операции с именем сохраненного файла
 
     Raises:
-        HTTPException: При ошибках валидации (400), timeout (408) или ошибке сохранения (500)
+        HTTPException: При ошибках (400 — формат/акт, 408 — timeout, 500 — ошибка)
     """
     try:
-        logger.info(f"Запрос на сохранение акта в формате {fmt}")
+        logger.info(f"Запрос на сохранение акта {act_id} в формате {fmt}")
 
-        # Валидация глубины дерева (защита от рекурсии)
-        tree_depth = ActTreeUtils.calculate_tree_depth(data.tree)
-        if tree_depth > acts_cfg.resource.max_tree_depth:
-            logger.warning(f"Превышена максимальная глубина дерева: {tree_depth}")
-            raise ActExportValidationError(
-                f"Глубина дерева ({tree_depth}) превышает максимум ({acts_cfg.resource.max_tree_depth})"
-            )
-
-        # Используем mode='python' для оптимизации.
-        # Конвертируем только необходимые поля без лишней сериализации.
-        data_dict = data.model_dump(mode='python')
-
-        # Проверяем что пришло
-        logger.debug(f"Получено таблиц: {len(data_dict.get('tables', {}))}")
-        logger.debug(f"Получено текстовых блоков: {len(data_dict.get('textBlocks', {}))}")
-        logger.debug(f"Получено нарушений: {len(data_dict.get('violations', {}))}")
-        logger.debug(f"Глубина дерева: {tree_depth}")
-
-        # Добавлен timeout для всей операции
         try:
             result = await asyncio.wait_for(
-                act_service.save_act(data_dict, fmt=fmt),
+                act_service.save_act(act_id, username, fmt=fmt),
                 timeout=acts_cfg.resource.save_act_timeout
             )
         except asyncio.TimeoutError:
             logger.error(f"Timeout при сохранении акта (>{acts_cfg.resource.save_act_timeout}s)")
             raise ActExportTimeoutError(
                 f"Обработка акта заняла слишком много времени "
-                f"(>{acts_cfg.resource.save_act_timeout}s). Попробуйте упростить структуру."
+                f"(>{acts_cfg.resource.save_act_timeout}s). Попробуйте позже."
             )
 
-        logger.info(f"Акт успешно сохранен: {result.filename}")
+        logger.info(f"Акт {act_id} сохранён: {result.filename}")
 
         # Регистрируем связь файла с актом для контроля доступа при скачивании
-        if act_id is not None:
-            storage.register_file(result.filename, act_id)
+        storage.register_file(result.filename, act_id)
 
-            # Аудит-лог экспорта
-            try:
-                async with get_db() as audit_conn:
-                    audit = ActAuditLogRepository(audit_conn)
-                    await audit.log("export", username, act_id, {
-                        "format": fmt,
-                        "filename": result.filename,
-                    })
-            except Exception:
-                logger.exception("Не удалось записать аудит-лог экспорта")
+        # Аудит-лог экспорта
+        try:
+            async with get_db() as audit_conn:
+                audit = ActAuditLogRepository(audit_conn)
+                await audit.log("export", username, act_id, {
+                    "format": fmt,
+                    "filename": result.filename,
+                })
+        except Exception:
+            logger.exception("Не удалось записать аудит-лог экспорта")
 
         return result
 
     except AppError:
         raise
     except Exception as e:
-        # Неожиданная ошибка при сохранении
         logger.exception(f"Неожиданная ошибка при сохранении акта: {e}")
         raise AppError("Произошла ошибка при сохранении акта. Попробуйте позже.") from e
 
@@ -236,13 +220,13 @@ async def download_act(
 
             # Определяем MIME-тип по расширению файла
             mime_types = {
-                '.txt': 'text/plain',
-                '.md': 'text/markdown',
-                '.docx': 'application/vnd.openxmlformats-officedocument.wordprocessingml.document'
+                ".txt": "text/plain",
+                ".md": "text/markdown",
+                ".docx": "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
             }
             media_type = mime_types.get(
                 file_path.suffix,
-                'application/octet-stream'
+                "application/octet-stream"
             )
 
             logger.info(f"Файл {filename} отправлен на скачивание пользователю {username}")

@@ -1,97 +1,77 @@
 """
-Бизнес-логика работы с актами.
+Сервис экспорта актов в различные форматы.
 
-Координирует работу форматеров и сервиса хранения для
-экспорта актов в различные форматы.
+Подтягивает metadata через ActCrudService и content через ActContentService,
+передаёт в форматер как ExportContext (для DOCX) или dict (для txt/md).
 """
 
 import asyncio
 import gc
 import logging
-import threading
-from typing import Literal
+from typing import TYPE_CHECKING, Literal
 
 from app.core.config import Settings
 from app.core.exceptions import AppError
-from app.domains.acts.exceptions import UnsupportedFormatError
-from app.domains.acts.formatters.docx_formatter import DocxFormatter
+from app.domains.acts.exceptions import ActNotFoundError, UnsupportedFormatError
+from app.domains.acts.formatters.docx import DocxFormatter, ExportContext
 from app.domains.acts.formatters.markdown_formatter import MarkdownFormatter
 from app.domains.acts.formatters.text_formatter import TextFormatter
-from app.domains.acts.schemas.act_content import ActSaveResponse
+from app.domains.acts.schemas.act_content import ActDataSchema, ActSaveResponse
 from app.domains.acts.services.storage_service import StorageService
-from app.domains.acts._lifecycle import get_executor
 from app.domains.acts.settings import ActsSettings
+from app.domains.acts._lifecycle import get_executor
+
+if TYPE_CHECKING:
+    from app.domains.acts.services.act_crud_service import ActCrudService
+    from app.domains.acts.services.act_content_service import ActContentService
 
 logger = logging.getLogger("audit_workstation.service.acts.export")
 
 
 class ExportService:
     """
-    Сервис для работы с актами.
+    Сервис экспорта актов.
 
-    Предоставляет высокоуровневые методы для сохранения актов
-    в разных форматах. Использует кэшированные форматеры и
-    ThreadPoolExecutor для неблокирующих операций.
+    Подтягивает metadata и content из БД по act_id/username,
+    форматирует через кэшированные форматеры и сохраняет через StorageService.
     """
 
-    def __init__(self, storage: StorageService, settings: Settings, acts_settings: ActsSettings):
-        """
-        Инициализация сервиса с форматерами и хранилищем.
-
-        Args:
-            storage: Сервис хранения файлов (dependency injection)
-            settings: Настройки приложения (dependency injection)
-            acts_settings: Доменные настройки актов (dependency injection)
-        """
+    def __init__(
+        self,
+        storage: StorageService,
+        settings: Settings,
+        acts_settings: ActsSettings,
+        act_crud_service: "ActCrudService | None" = None,
+        act_content_service: "ActContentService | None" = None,
+    ):
         self.storage = storage
         self.settings = settings
+        self.act_crud_service = act_crud_service
+        self.act_content_service = act_content_service
 
         # Кэшируем экземпляры форматеров (они stateless и thread-safe)
         self._formatters = {
-            'txt': TextFormatter(settings, acts_settings),
-            'md': MarkdownFormatter(settings, acts_settings),
-            'docx': DocxFormatter(settings, acts_settings)
+            "txt": TextFormatter(settings, acts_settings),
+            "md": MarkdownFormatter(settings, acts_settings),
+            "docx": DocxFormatter(settings, acts_settings),
         }
         logger.debug("ExportService инициализирован с кэшированными форматерами")
 
-    def _format_sync(
-            self,
-            data: dict,
-            fmt: Literal["txt", "md", "docx"]
-    ):
-        """
-        Синхронная версия форматирования для выполнения в executor.
-
-        Выполняется в отдельном потоке для предотвращения блокировки event loop.
-
-        Args:
-            data: Словарь с данными акта
-            fmt: Формат файла
-
-        Returns:
-            Отформатированный контент
-        """
-        formatter = self._formatters[fmt]
-        logger.debug(f"Форматирование в {fmt} (thread: {threading.current_thread().name})")
-        return formatter.format(data)
-
     async def save_act(
-            self,
-            data: dict,
-            fmt: Literal["txt", "md", "docx"] = "txt"
+        self,
+        act_id: int,
+        username: str,
+        fmt: Literal["txt", "md", "docx"] = "docx",
     ) -> ActSaveResponse:
         """
-        Асинхронно сохраняет акт в хранилище в выбранном формате.
+        Асинхронно экспортирует акт в выбранный формат.
 
-        Процесс:
-        1. Выбор кэшированного форматера по типу формата
-        2. Форматирование данных акта в отдельном потоке (не блокирует event loop)
-        3. Сохранение через StorageService
-        4. Очистка памяти
-        5. Возврат результата
+        Загружает metadata через ActCrudService.get_act и content через
+        ActContentService.get_content, затем форматирует и сохраняет файл.
 
         Args:
-            data: Словарь с данными акта (дерево, таблицы, блоки)
+            act_id: ID акта
+            username: Имя пользователя (для проверки доступа)
             fmt: Формат файла ('txt', 'md' или 'docx')
 
         Returns:
@@ -99,6 +79,7 @@ class ExportService:
 
         Raises:
             UnsupportedFormatError: Если указан неподдерживаемый формат
+            ActNotFoundError: Если акт не найден
         """
         if fmt not in self._formatters:
             raise UnsupportedFormatError(
@@ -106,41 +87,57 @@ class ExportService:
                 f"Используйте 'txt', 'md' или 'docx'."
             )
 
-        extension = fmt
-        logger.debug(f"Используется форматер: {self._formatters[fmt].__class__.__name__}")
-
         formatted_content = None
         try:
-            # Форматирование в отдельном потоке для не блокирования event loop.
+            # Загружаем metadata и content из БД
+            metadata = await self.act_crud_service.get_act(act_id, username)
+            if metadata is None:
+                raise ActNotFoundError(f"Акт {act_id} не найден")
+
+            raw_content = await self.act_content_service.get_content(act_id, username)
+            # ActContentService.get_content возвращает dict с лишними полями;
+            # берём только те, которые нужны ActDataSchema
+            content = ActDataSchema(
+                tree=raw_content.get("tree", {}),
+                tables=raw_content.get("tables", {}),
+                textBlocks=raw_content.get("textBlocks", {}),
+                violations=raw_content.get("violations", {}),
+            )
+
             loop = asyncio.get_running_loop()
             try:
-                formatted_content = await loop.run_in_executor(
-                    get_executor(),
-                    self._format_sync,
-                    data,
-                    fmt
-                )
+                if fmt == "docx":
+                    ctx = ExportContext(metadata=metadata, content=content)
+                    formatted_content = await loop.run_in_executor(
+                        get_executor(),
+                        self._formatters["docx"].format,
+                        ctx,
+                    )
+                else:
+                    data_dict = content.model_dump(mode="python")
+                    data_dict["metadata"] = metadata.model_dump(mode="python")
+                    formatted_content = await loop.run_in_executor(
+                        get_executor(),
+                        self._formatters[fmt].format,
+                        data_dict,
+                    )
             except AppError:
                 raise
             except (MemoryError, ValueError, AttributeError, KeyError, TypeError) as e:
                 logger.exception(f"Ошибка форматирования акта в формат {fmt}: {e}")
                 raise AppError(f"Не удалось отформатировать акт в формат {fmt.upper()}") from e
             except Exception as e:
-                # Непредвиденная ошибка из форматера (сторонняя библиотека)
                 logger.exception(f"Неожиданная ошибка форматирования акта в формат {fmt}: {e}")
                 raise AppError(f"Не удалось отформатировать акт в формат {fmt.upper()}") from e
 
-            # Сохранение в зависимости от формата
             try:
                 if fmt == "docx":
-                    # Для DOCX используем специальный метод
                     filename = self.storage.save_docx(formatted_content, prefix="act")
                 else:
-                    # Для текстовых форматов используем обычный метод
                     filename = self.storage.save(
                         formatted_content,
                         prefix="act",
-                        extension=extension
+                        extension=fmt,
                     )
             except AppError:
                 raise
@@ -148,18 +145,15 @@ class ExportService:
                 logger.exception(f"Ошибка сохранения файла акта ({fmt}): {e}")
                 raise AppError("Не удалось сохранить файл акта") from e
             except Exception as e:
-                # Непредвиденная ошибка при сохранении (например, из python-docx)
                 logger.exception(f"Неожиданная ошибка сохранения файла акта ({fmt}): {e}")
                 raise AppError("Не удалось сохранить файл акта") from e
 
-            # Формирование успешного ответа
             return ActSaveResponse(
                 status="success",
                 message=f"Акт успешно сохранён в формате {fmt.upper()}",
-                filename=filename
+                filename=filename,
             )
         finally:
-            # Явная очистка памяти после обработки
             formatted_content = None
             gc.collect()
             logger.debug("Память очищена после сохранения акта")

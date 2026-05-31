@@ -53,7 +53,7 @@ export const ValidationTree = {
     _validateFirstLevelSiblingAddition(parent, nodeId) {
         const hasCustomFirstLevel = parent.children.some(child => {
             const num = child.number ? parseInt(child.number) : null;
-            return num === 6;
+            return num === 7;
         });
 
         if (hasCustomFirstLevel) {
