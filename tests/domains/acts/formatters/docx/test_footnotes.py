@@ -30,30 +30,24 @@ def test_footnotes_part_contains_text(doc):
     assert b"XYZ123" in footnotes_part.blob
 
 
-def test_reference_marker_is_superscript(doc):
-    """Циферка-маркер в тексте абзаца — надстрочная (как степень)."""
+def test_reference_marker_uses_footnote_reference_style(doc):
+    """Циферка-маркер в тексте абзаца оформлена стилем FootnoteReference.
+
+    Надстрочность даёт символьный стиль (как в эталоне), а не inline-vertAlign.
+    """
     p = doc.add_paragraph("Текст")
     add_footnote(p, "Сноска")
     ref = p._p.find(f".//{qn('w:footnoteReference')}")
     run = ref.getparent()
-    vert = run.find(f"{qn('w:rPr')}/{qn('w:vertAlign')}")
-    assert vert is not None
-    assert vert.get(qn("w:val")) == "superscript"
+    rstyle = run.find(f"{qn('w:rPr')}/{qn('w:rStyle')}")
+    assert rstyle is not None
+    assert rstyle.get(qn("w:val")) == "FootnoteReference"
+    # inline-vertAlign на самой циферке не дублируется
+    assert run.find(f"{qn('w:rPr')}/{qn('w:vertAlign')}") is None
 
 
-def test_reference_marker_size_is_10pt(doc):
-    """Размер циферки-маркера в тексте = 10pt (val=20 half-points)."""
-    p = doc.add_paragraph("Текст")
-    add_footnote(p, "Сноска")
-    ref = p._p.find(f".//{qn('w:footnoteReference')}")
-    run = ref.getparent()
-    sz = run.find(f"{qn('w:rPr')}/{qn('w:sz')}")
-    assert sz is not None
-    assert sz.get(qn("w:val")) == str(Sizes.footnote_pt * 2)
-
-
-def test_footnote_text_size_is_10pt(doc):
-    """Расшифровка сноски рендерится 10pt (val=20 half-points)."""
+def test_footnote_text_size_is_9pt(doc):
+    """Расшифровка сноски рендерится 9pt (val=18 half-points)."""
     p = doc.add_paragraph()
     add_footnote(p, "Расшифровка")
     footnotes_part = doc.part.part_related_by(
@@ -64,8 +58,8 @@ def test_footnote_text_size_is_10pt(doc):
     assert str(Sizes.footnote_pt * 2) in vals
 
 
-def test_footnote_ref_in_part_is_superscript(doc):
-    """Циферка в начале расшифровки также надстрочная."""
+def test_footnote_ref_in_part_uses_reference_style(doc):
+    """Циферка в начале расшифровки оформлена стилем FootnoteReference."""
     p = doc.add_paragraph()
     add_footnote(p, "Расшифровка")
     footnotes_part = doc.part.part_related_by(
@@ -73,6 +67,6 @@ def test_footnote_ref_in_part_is_superscript(doc):
     )
     ref = footnotes_part._element.find(f".//{qn('w:footnoteRef')}")
     run = ref.getparent()
-    vert = run.find(f"{qn('w:rPr')}/{qn('w:vertAlign')}")
-    assert vert is not None
-    assert vert.get(qn("w:val")) == "superscript"
+    rstyle = run.find(f"{qn('w:rPr')}/{qn('w:rStyle')}")
+    assert rstyle is not None
+    assert rstyle.get(qn("w:val")) == "FootnoteReference"

@@ -5,9 +5,10 @@ from docx.document import Document
 from docx.enum.text import WD_ALIGN_PARAGRAPH, WD_TAB_ALIGNMENT
 from docx.oxml import OxmlElement
 from docx.oxml.ns import qn
-from docx.shared import Cm, Pt
+from docx.shared import Pt, Twips
 
-from app.domains.acts.formatters.docx.styles import Fonts, Sizes
+from app.domains.acts.formatters.docx.builders.tables import set_table_left_indent_zero
+from app.domains.acts.formatters.docx.styles import Fonts, Margins, Page, Sizes
 
 _MONTHS_GENITIVE = (
     "января", "февраля", "марта", "апреля", "мая", "июня",
@@ -31,6 +32,7 @@ def build_cover_block(doc: Document, metadata) -> None:
     table = doc.add_table(rows=4, cols=2)
     table.autofit = False
     _set_invisible_borders(table)
+    set_table_left_indent_zero(table)
 
     rows = _build_rows(metadata)
     for row_idx, (label, value_html) in enumerate(rows):
@@ -38,33 +40,45 @@ def build_cover_block(doc: Document, metadata) -> None:
         _fill_value_cell(table.rows[row_idx].cells[1], value_html)
 
     _add_sheets_paragraph(doc)
-    doc.add_paragraph()  # воздух перед первым рубрикатором
 
 
 def _add_preamble(doc, m) -> None:
-    """Три элемента над таблицей параметров: «Приложение 1», город+дата, заголовок."""
-    # 1. «Приложение 1» — вправо.
+    """Три элемента над таблицей параметров: «Приложение 1», город+дата, заголовок.
+
+    У всех трёх строк интервал после абзаца — 12pt.
+    """
+    # 1. «Приложение 1» — вправо, жирным.
     app_para = doc.add_paragraph()
     app_para.alignment = WD_ALIGN_PARAGRAPH.RIGHT
+    app_para.paragraph_format.space_after = Pt(12)
     app_run = app_para.add_run("Приложение 1")
     app_run.font.name = Fonts.main
     app_run.font.size = Pt(Sizes.cover_label_pt)
+    app_run.bold = True
 
     # 2. Город слева, дата начала проверки справа через правый tab-stop.
     city = getattr(m, "city", None) or ""
     city_date_para = doc.add_paragraph()
     city_date_para.alignment = WD_ALIGN_PARAGRAPH.LEFT
-    city_date_para.paragraph_format.tab_stops.add_tab_stop(Cm(17), WD_TAB_ALIGNMENT.RIGHT)
+    city_date_para.paragraph_format.space_after = Pt(12)
+    # Правый tab-stop — на рабочую ширину текста (страница − левое − правое поле),
+    # чтобы дата прижималась ровно к правой границе текста.
+    usable_twips = Page.width_twips - Margins.left - Margins.right
+    city_date_para.paragraph_format.tab_stops.add_tab_stop(
+        Twips(usable_twips), WD_TAB_ALIGNMENT.RIGHT
+    )
     city_run = city_date_para.add_run(f"г. {city}\t{_format_start_date(m.inspection_start_date)}")
     city_run.font.name = Fonts.main
     city_run.font.size = Pt(Sizes.cover_label_pt)
 
-    # 3. Заголовок по центру, обычным начертанием.
+    # 3. Заголовок по центру, жирным.
     title_para = doc.add_paragraph()
     title_para.alignment = WD_ALIGN_PARAGRAPH.CENTER
+    title_para.paragraph_format.space_after = Pt(12)
     title_run = title_para.add_run(f"Акт аудиторской проверки по {m.inspection_name}")
     title_run.font.name = Fonts.main
     title_run.font.size = Pt(Sizes.cover_label_pt)
+    title_run.bold = True
 
 
 def _format_start_date(d) -> str:
@@ -83,20 +97,34 @@ def _build_rows(m) -> list[tuple[str, str]]:
 
     order_year = order_date.year if order_date else (m.inspection_start_date.year if m.inspection_start_date else "")
     basis = (
-        f"П. 1 Раздела I Плана работы СВА на {order_year} год. "
+        f"План работы СВА на {order_year} год. "
         f"Распоряжение от {order_date_str} №{m.order_number}."
     )
 
     team_lines = []
-    kurator = _first_role(audit_team, "Куратор")
-    leader = _first_role(audit_team, "Руководитель")
-    if kurator:
-        team_lines.append(f"Куратор – {kurator.full_name} ({kurator.position})")
-    if leader:
-        team_lines.append(f"Руководитель – {leader.full_name} ({leader.position})")
-    team_lines.append(
-        f"Участники – в соответствии с Приложением 1 к Распоряжению от {order_date_str} №{m.order_number}"
+
+    # Каждый член группы — на отдельной строке (кураторы и руководители тоже,
+    # без перечисления через запятую).
+    for t in audit_team:
+        if getattr(t, "role", None) == "Куратор":
+            team_lines.append(f"Куратор – {t.full_name} ({t.position})")
+    for t in audit_team:
+        if getattr(t, "role", None) == "Руководитель":
+            team_lines.append(f"Руководитель – {t.full_name} ({t.position})")
+
+    # AppendixRef — служебная запись с готовым текстом «В соответствии с приложением…».
+    # Если она есть, участников не перечисляем, выводим её full_name одной строкой.
+    appendix_ref = next(
+        (t for t in audit_team if getattr(t, "role", None) == "AppendixRef"), None
     )
+    if appendix_ref is not None:
+        team_lines.append(f"Участники – {appendix_ref.full_name}")
+    else:
+        # Участники и редакторы — построчно, оба с подписью «Участник».
+        for t in audit_team:
+            if getattr(t, "role", None) in ("Участник", "Редактор"):
+                team_lines.append(f"Участник – {t.full_name} ({t.position})")
+
     team_value = "\n".join(team_lines)
 
     dates_value = f"Начата {start_str} и завершена {end_str}"
@@ -107,13 +135,6 @@ def _build_rows(m) -> list[tuple[str, str]]:
         ("Сроки проведения аудиторской проверки:", dates_value),
         ("Номер АП в АС СУП СВА:", m.km_number),
     ]
-
-
-def _first_role(team, role: str):
-    for member in team or []:
-        if getattr(member, "role", None) == role:
-            return member
-    return None
 
 
 def _fill_label_cell(cell, label: str) -> None:
@@ -161,22 +182,38 @@ def _add_sheets_paragraph(doc) -> None:
 
 
 def _append_field(paragraph, instr: str) -> None:
-    """Вставляет Word-поле { instr } через w:fldChar в указанный параграф."""
-    run = paragraph.add_run()
-    r = run._r
+    """Вставляет Word-поле { instr } каноническими отдельными run'ами.
+
+    begin → instrText → separate → результат → end, каждый в своём <w:r>.
+    Если свалить всё в один run, Word/LibreOffice не распознают поле и
+    показывают литерал кэша («1»), не пересчитывая NUMPAGES.
+    """
+    def _emit(child) -> None:
+        run = paragraph.add_run()
+        run.font.name = Fonts.main
+        run.font.size = Pt(Sizes.body_pt)
+        run._r.append(child)
 
     fld_begin = OxmlElement("w:fldChar")
     fld_begin.set(qn("w:fldCharType"), "begin")
-    r.append(fld_begin)
+    # w:dirty="true" заставляет Word пересчитать именно это поле при открытии.
+    fld_begin.set(qn("w:dirty"), "true")
+    _emit(fld_begin)
 
     instr_text = OxmlElement("w:instrText")
     instr_text.set(qn("xml:space"), "preserve")
     instr_text.text = f" {instr} "
-    r.append(instr_text)
+    _emit(instr_text)
+
+    fld_separate = OxmlElement("w:fldChar")
+    fld_separate.set(qn("w:fldCharType"), "separate")
+    _emit(fld_separate)
+
+    # Пустой кэш результата: не-пересчитывающий просмотрщик не напечатает неверную «1».
+    result = OxmlElement("w:t")
+    result.text = ""
+    _emit(result)
 
     fld_end = OxmlElement("w:fldChar")
     fld_end.set(qn("w:fldCharType"), "end")
-    r.append(fld_end)
-
-    run.font.name = Fonts.main
-    run.font.size = Pt(Sizes.body_pt)
+    _emit(fld_end)

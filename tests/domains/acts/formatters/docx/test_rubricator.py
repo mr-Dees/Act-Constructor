@@ -1,15 +1,16 @@
 """Тесты плашки-рубрикатора."""
 from docx import Document
+from docx.enum.table import WD_ROW_HEIGHT_RULE
 from docx.oxml.ns import qn
-from docx.shared import Cm, Pt
+from docx.shared import Cm, Pt, Twips
 
 from app.domains.acts.formatters.docx.numbering import ensure_rubricator
 from app.domains.acts.formatters.docx.builders.rubricator import (
     build_rubricator_plate,
     LEFT_CELL_CM,
+    PLATE_ROW_HEIGHT_TWIPS,
     RIGHT_CELL_CM,
     TABLE_WIDTH_DXA,
-    USABLE_WIDTH_CM,
 )
 from app.domains.acts.formatters.docx.styles import Palette, Fonts, Sizes
 
@@ -30,22 +31,34 @@ def test_cell_widths_span_usable_width(doc):
     # потерю на округлении EMU↔твипы (≈1 твип ≈ 635 EMU).
     assert abs(cells[0].width - Cm(LEFT_CELL_CM)) < 700
     assert abs(cells[1].width - Cm(RIGHT_CELL_CM)) < 700
-    # Сумма ширин ячеек ≈ рабочая ширина листа 18.25см.
-    assert abs((cells[0].width + cells[1].width) - Cm(USABLE_WIDTH_CM)) < 1400
+    # Сумма ширин ячеек ≈ рабочая ширина листа (10346 твипов).
+    assert abs((cells[0].width + cells[1].width) - Twips(TABLE_WIDTH_DXA)) < 1400
 
 
-def test_table_has_fixed_width_in_dxa(doc):
+def test_table_width_is_full_percent_no_indent(doc):
+    """Плашка на 100% колонки текста (tblW pct 5000), fixed, без tblInd — как в эталоне."""
     num_id = ensure_rubricator(doc)
     build_rubricator_plate(doc, num_id, "Предмет проверки")
     tbl_pr = doc.tables[0]._tbl.tblPr
     tbl_w = tbl_pr.find(qn("w:tblW"))
     assert tbl_w is not None
-    assert tbl_w.get(qn("w:type")) == "dxa"
-    assert tbl_w.get(qn("w:w")) == str(TABLE_WIDTH_DXA)
-    assert TABLE_WIDTH_DXA == 10348
+    assert tbl_w.get(qn("w:type")) == "pct"
+    assert tbl_w.get(qn("w:w")) == "5000"
+    assert TABLE_WIDTH_DXA == 10346
     tbl_layout = tbl_pr.find(qn("w:tblLayout"))
     assert tbl_layout is not None
     assert tbl_layout.get(qn("w:type")) == "fixed"
+    # Эталон не задаёт tblInd — края плашки совпадают с краями текста.
+    assert tbl_pr.find(qn("w:tblInd")) is None
+
+
+def test_plate_row_height_is_increased_at_least(doc):
+    assert PLATE_ROW_HEIGHT_TWIPS == 510
+    num_id = ensure_rubricator(doc)
+    build_rubricator_plate(doc, num_id, "Предмет проверки")
+    row = doc.tables[0].rows[0]
+    assert row.height == Twips(PLATE_ROW_HEIGHT_TWIPS)
+    assert row.height_rule == WD_ROW_HEIGHT_RULE.AT_LEAST
 
 
 def test_both_cells_have_shading(doc):

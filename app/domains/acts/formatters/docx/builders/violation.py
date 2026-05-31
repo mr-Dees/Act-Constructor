@@ -6,6 +6,7 @@
 Регрессия: рендеринг `recommendations` (раньше пропускалось).
 """
 from docx.document import Document
+from docx.enum.text import WD_ALIGN_PARAGRAPH
 from docx.shared import Pt
 
 from app.domains.acts.formatters.docx.styles import Fonts, Sizes
@@ -20,6 +21,7 @@ def build_violation(doc: Document, violation: ViolationSchema) -> None:
     if violation.descriptionList.enabled:
         for item in violation.descriptionList.items:
             bullet = doc.add_paragraph(style="List Bullet")
+            bullet.alignment = WD_ALIGN_PARAGRAPH.JUSTIFY
             run = bullet.add_run(item)
             run.font.name = Fonts.main
             run.font.size = Pt(Sizes.body_pt)
@@ -56,6 +58,7 @@ def _labeled_paragraph(
     if not body and not label:
         return
     para = doc.add_paragraph()
+    para.alignment = WD_ALIGN_PARAGRAPH.JUSTIFY
     if label:
         label_run = para.add_run(label + " ")
         label_run.font.name = Fonts.main

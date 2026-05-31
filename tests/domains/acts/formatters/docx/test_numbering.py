@@ -85,6 +85,30 @@ def test_all_levels_flush_left(doc):
         assert ind.get(qn("w:hanging")) is None, f"hanging не должен задаваться для ilvl={ilvl}"
 
 
+def test_level_alignment_rubricator_right_items_left(doc):
+    """ilvl=0 (рубрикатор) — номер вправо; ilvl>=1 (пункты) — влево."""
+    ensure_rubricator(doc)
+    abstract = doc.part.numbering_part.element.findall(qn("w:abstractNum"))[-1]
+    for ilvl, lvl in enumerate(abstract.findall(qn("w:lvl"))):
+        jc = lvl.find(qn("w:lvlJc"))
+        assert jc is not None, f"lvlJc отсутствует для ilvl={ilvl}"
+        expected = "right" if ilvl == 0 else "left"
+        assert jc.get(qn("w:val")) == expected, f"ilvl={ilvl} ожидался {expected}"
+
+
+def test_item_levels_have_space_suffix(doc):
+    """Пункты (ilvl>=1): текст идёт сразу после номера (w:suff=space)."""
+    ensure_rubricator(doc)
+    abstract = doc.part.numbering_part.element.findall(qn("w:abstractNum"))[-1]
+    levels = abstract.findall(qn("w:lvl"))
+    # ilvl=0 — без suff (рубрикатор), ilvl>=1 — suff=space
+    assert levels[0].find(qn("w:suff")) is None
+    for ilvl, lvl in enumerate(levels[1:], start=1):
+        suff = lvl.find(qn("w:suff"))
+        assert suff is not None, f"suff отсутствует для ilvl={ilvl}"
+        assert suff.get(qn("w:val")) == "space"
+
+
 def test_apply_numbering_attaches_numpr(doc):
     from app.domains.acts.formatters.docx.numbering import apply_numbering
     num_id = ensure_rubricator(doc)

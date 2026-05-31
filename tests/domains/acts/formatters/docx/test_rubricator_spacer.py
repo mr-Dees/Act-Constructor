@@ -1,29 +1,43 @@
-"""После build_rubricator_plate должен добавляться пустой параграф с space_after=1pt."""
-from docx import Document
-from docx.shared import Pt
+"""Пустые строки-распорки вокруг рубрикатора.
 
+build_rubricator_plate сам распорок НЕ добавляет — их вставляет formatter
+(пустая строка 6pt без интервалов до и после каждой плашки).
+"""
+from docx import Document
+from docx.oxml.ns import qn
+
+from app.domains.acts.formatters.docx import DocxFormatter, ExportContext
 from app.domains.acts.formatters.docx.builders.rubricator import build_rubricator_plate
 from app.domains.acts.formatters.docx.numbering import ensure_rubricator
+from app.domains.acts.schemas.act_content import ActDataSchema
+from tests.domains.acts.formatters.docx.test_formatter_facade import _Meta
 
 
-def test_spacer_paragraph_inserted_after_plate():
+def test_plate_alone_adds_no_spacer_paragraph():
+    """build_rubricator_plate создаёт только таблицу, без хвостового абзаца."""
     doc = Document()
     num_id = ensure_rubricator(doc)
     build_rubricator_plate(doc, num_id, "Раздел 1")
-
-    paragraphs = doc.paragraphs
-    assert len(paragraphs) >= 1
-    spacer = paragraphs[-1]
-    assert spacer.text == ""
-    assert spacer.paragraph_format.space_after == Pt(1)
-    assert spacer.paragraph_format.space_before == Pt(0)
+    assert doc.paragraphs == []
+    assert len(doc.tables) == 1
 
 
-def test_two_plates_produce_two_spacers():
-    doc = Document()
-    num_id = ensure_rubricator(doc)
-    build_rubricator_plate(doc, num_id, "Раздел 1")
-    build_rubricator_plate(doc, num_id, "Раздел 2")
+def test_formatter_wraps_plates_with_blank_lines():
+    """До и после каждой плашки — пустая строка 6pt без интервальных отступов."""
+    fmt = DocxFormatter()
+    sections = [{"id": "1", "label": "Раздел 1", "children": []}]
+    content = ActDataSchema(tree={"id": "root", "label": "Акт", "children": sections})
+    doc = fmt.format(ExportContext(metadata=_Meta(), content=content))
 
-    spacers = [p for p in doc.paragraphs if p.paragraph_format.space_after == Pt(1)]
-    assert len(spacers) == 2
+    blanks = []
+    for p in doc.paragraphs:
+        if p.text:
+            continue
+        r_pr = p._p.find(qn("w:pPr")).find(qn("w:rPr")) if p._p.find(qn("w:pPr")) is not None else None
+        sz = r_pr.find(qn("w:sz")) if r_pr is not None else None
+        if sz is not None and sz.get(qn("w:val")) == "12":  # 6pt
+            assert p.paragraph_format.space_before.pt == 0
+            assert p.paragraph_format.space_after.pt == 0
+            blanks.append(p)
+    # минимум две распорки на одну секцию (до и после плашки)
+    assert len(blanks) >= 2

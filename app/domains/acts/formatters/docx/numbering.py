@@ -105,19 +105,28 @@ def _build_level(ilvl: int) -> OxmlElement:
     fmt.set(qn("w:val"), "decimal")
     lvl.append(fmt)
 
+    # Порядок дочерних w:lvl по схеме: start, numFmt, [suff], lvlText, lvlJc, pPr.
+    if ilvl >= 1:
+        # Текст идёт сразу после номера (через пробел), а не по табстопу.
+        suff = OxmlElement("w:suff")
+        suff.set(qn("w:val"), "space")
+        lvl.append(suff)
+
     lvl_text = OxmlElement("w:lvlText")
     lvl_text.set(qn("w:val"), ".".join(f"%{i + 1}" for i in range(ilvl + 1)) + ".")
     lvl.append(lvl_text)
 
+    # ilvl=0 — номер рубрикатора в узкой ячейке плашки, прижат вправо (к заголовку).
+    # ilvl>=1 — номера пунктов прижаты к ЛЕВОМУ краю и нарастают вправо: «5.»
+    # стоит у поля, «5.1.1.» — длиннее, но левый край номера всегда на поле.
     lvl_jc = OxmlElement("w:lvlJc")
-    lvl_jc.set(qn("w:val"), "left")
+    lvl_jc.set(qn("w:val"), "right" if ilvl == 0 else "left")
     lvl.append(lvl_jc)
 
     p_pr = OxmlElement("w:pPr")
     ind = OxmlElement("w:ind")
-    # Эталон: все уровни прижаты к левому краю (left=0, firstLine=0),
-    # вне зависимости от глубины вложенности. Виден только номер (1.1.1.),
-    # но абзац не сдвигается вправо.
+    # Все уровни прижаты к левому краю (left=0, firstLine=0): за левое поле
+    # ничего не выходит, абзац не сдвигается вправо при углублении.
     ind.set(qn("w:left"), "0")
     ind.set(qn("w:firstLine"), "0")
     p_pr.append(ind)

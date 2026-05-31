@@ -66,8 +66,8 @@ def test_two_footnote_spans_get_increasing_ids():
     assert ids == [1, 2]
 
 
-def test_footnote_span_marker_is_superscript_10pt():
-    """Циферка-маркер из inline-span — надстрочная и 10pt."""
+def test_footnote_span_marker_uses_reference_style():
+    """Циферка-маркер из inline-span оформлена стилем FootnoteReference."""
     doc = Document()
     para = doc.add_paragraph()
     apply_inline_html(
@@ -77,12 +77,9 @@ def test_footnote_span_marker_is_superscript_10pt():
     )
     ref = para._p.find(f".//{qn('w:footnoteReference')}")
     run = ref.getparent()
-    vert = run.find(f"{qn('w:rPr')}/{qn('w:vertAlign')}")
-    assert vert is not None
-    assert vert.get(qn("w:val")) == "superscript"
-    sz = run.find(f"{qn('w:rPr')}/{qn('w:sz')}")
-    assert sz is not None
-    assert sz.get(qn("w:val")) == "20"
+    rstyle = run.find(f"{qn('w:rPr')}/{qn('w:rStyle')}")
+    assert rstyle is not None
+    assert rstyle.get(qn("w:val")) == "FootnoteReference"
 
 
 def test_footnote_span_without_text_renders_plain():

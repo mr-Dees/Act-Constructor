@@ -10,7 +10,6 @@ from docx.opc.packuri import PackURI
 from docx.opc.part import Part
 from docx.oxml import OxmlElement, parse_xml
 from docx.oxml.ns import nsmap, qn
-from docx.shared import Pt
 from docx.text.paragraph import Paragraph
 
 from app.domains.acts.formatters.docx.styles import Fonts, Sizes
@@ -85,7 +84,7 @@ def _append_footnote_element(footnotes_part: Part, footnote_id: int, text: str) 
         f'<w:p>'
         f'<w:pPr><w:pStyle w:val="FootnoteText"/></w:pPr>'
         f'<w:r>'
-        f'<w:rPr><w:rStyle w:val="FootnoteReference"/><w:vertAlign w:val="superscript"/></w:rPr>'
+        f'<w:rPr><w:rStyle w:val="FootnoteReference"/></w:rPr>'
         f'<w:footnoteRef/>'
         f'</w:r>'
         f'<w:r>'
@@ -107,15 +106,14 @@ def _append_footnote_element(footnotes_part: Part, footnote_id: int, text: str) 
 def _insert_reference(paragraph: Paragraph, footnote_id: int) -> None:
     """Вставляет w:footnoteReference run в конец параграфа.
 
-    Циферка-маркер делается надстрочной (vertAlign=superscript) и 10pt
-    под эталон — как степень, уменьшенная.
+    Циферка-маркер оформляется символьным стилем FootnoteReference (как в
+    эталоне) — он и даёт надстрочность; inline-vertAlign не используется.
     """
     run = paragraph.add_run()
+    r_pr = run._r.get_or_add_rPr()
+    rstyle = OxmlElement("w:rStyle")
+    rstyle.set(qn("w:val"), "FootnoteReference")
+    r_pr.append(rstyle)
     ref = OxmlElement("w:footnoteReference")
     ref.set(qn("w:id"), str(footnote_id))
     run._r.append(ref)
-    run.font.name = Fonts.main
-    run.font.size = Pt(Sizes.footnote_pt)
-    vert_align = OxmlElement("w:vertAlign")
-    vert_align.set(qn("w:val"), "superscript")
-    run._r.get_or_add_rPr().append(vert_align)

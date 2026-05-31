@@ -1,16 +1,21 @@
 """Подпись руководителя аудиторской проверки в конце документа.
 
 Формат: «Руководитель аудиторской проверки[TAB]ФИО»
-где TAB разнесён правым tab-stop'ом на 17 см от левого поля.
+где TAB разнесён правым tab-stop'ом на всю рабочую ширину текста, чтобы ФИО
+прижималось к правому полю.
 ФИО берётся из audit_team, role="Руководитель"; если такого нет — заглушка.
 """
 from docx.document import Document
 from docx.enum.text import WD_ALIGN_PARAGRAPH, WD_TAB_ALIGNMENT
-from docx.shared import Cm, Pt
+from docx.shared import Pt, Twips
 
-from app.domains.acts.formatters.docx.styles import Fonts, Sizes
+from app.domains.acts.formatters.docx.styles import Fonts, Margins, Page, Sizes
 
 _LEADER_FALLBACK = "_______________"
+
+# Рабочая ширина текста = ширина страницы − левое и правое поля (в твипах).
+# Правый tab-stop на этой позиции прижимает ФИО к правому полю.
+_USABLE_WIDTH_TWIPS = Page.width_twips - Margins.left - Margins.right
 
 
 def build_signature(doc: Document, metadata) -> None:
@@ -21,7 +26,9 @@ def build_signature(doc: Document, metadata) -> None:
 
     para = doc.add_paragraph()
     para.alignment = WD_ALIGN_PARAGRAPH.LEFT
-    para.paragraph_format.tab_stops.add_tab_stop(Cm(17), WD_TAB_ALIGNMENT.RIGHT)
+    para.paragraph_format.tab_stops.add_tab_stop(
+        Twips(_USABLE_WIDTH_TWIPS), WD_TAB_ALIGNMENT.RIGHT
+    )
 
     label_run = para.add_run("Руководитель аудиторской проверки\t")
     label_run.font.name = Fonts.main

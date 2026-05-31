@@ -1,10 +1,13 @@
 """build_signature рендерит подпись «Руководитель аудиторской проверки [ФИО]»."""
 from docx import Document
+from docx.enum.text import WD_TAB_ALIGNMENT
+from docx.shared import Twips
 
 from app.domains.acts.formatters.docx.builders.signature import (
     _short_fio,
     build_signature,
 )
+from app.domains.acts.formatters.docx.styles import Margins, Page
 
 
 class _Team:
@@ -56,6 +59,17 @@ def test_signature_falls_back_when_no_leader():
     full_text = "\n".join(p.text for p in doc.paragraphs)
     assert "Руководитель аудиторской проверки" in full_text
     assert "_" in full_text
+
+
+def test_signature_right_tab_stop_spans_usable_width():
+    doc = Document()
+    build_signature(doc, _Meta([_Team("Руководитель", "Иванов Иван Иванович")]))
+    sig_para = next(p for p in doc.paragraphs if "Руководитель" in p.text)
+    tab_stops = list(sig_para.paragraph_format.tab_stops)
+    assert len(tab_stops) == 1
+    usable = Page.width_twips - Margins.left - Margins.right
+    assert tab_stops[0].position == Twips(usable)
+    assert tab_stops[0].alignment == WD_TAB_ALIGNMENT.RIGHT
 
 
 def test_signature_inserts_blank_paragraph_for_air():
