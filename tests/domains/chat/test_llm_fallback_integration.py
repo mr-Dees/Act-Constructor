@@ -308,9 +308,8 @@ def test_adjust_kwargs_for_fallback_keeps_stream_for_non_gigachat():
     assert out.get("stream") is True
 
 
-async def test_fallback_gigachat_called_non_streaming_from_run_stream():
-    """В run_stream при сбое primary до первого блока fallback=gigachat
-    вызывается БЕЗ stream=True."""
+async def test_fallback_gigachat_called_non_streaming():
+    """При сбое primary fallback=gigachat вызывается БЕЗ stream=True."""
     settings = _settings_with_fallback(
         fallback_profile="gigachat", failure_threshold=10,
     )
@@ -328,12 +327,10 @@ async def test_fallback_gigachat_called_non_streaming_from_run_stream():
 
     with patch.object(orch, "_get_openai_client", return_value=primary), \
          patch.object(orch, "_get_fallback_client", return_value=fallback):
-        events: list[str] = []
-        async for ev in orch.run_stream(
+        result = await orch.run(
             message_id="test-msg-id",
             conversation_id="conv-1", user_message="hi",
-        ):
-            events.append(ev)
+        )
 
     # Fallback вызван без stream=True
     assert fallback.chat.completions.create.await_count >= 1
@@ -343,4 +340,4 @@ async def test_fallback_gigachat_called_non_streaming_from_run_stream():
             f"GigaChat fallback не должен вызываться со stream=True: {kwargs}"
         )
     # Что-то отдалось клиенту
-    assert any("gc answer" in e for e in events)
+    assert "gc answer" in result.get("response", "")

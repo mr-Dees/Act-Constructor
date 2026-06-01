@@ -151,14 +151,12 @@ async def test_gigachat_orchestrator_executes_tool_round():
         "app.domains.chat.services.orchestrator.build_llm_client",
         return_value=adapter,
     ):
-        chunks: list[str] = []
-        async for chunk in orch.run_stream(
+        await orch.run(
             message_id="test-msg-id",
             conversation_id="conv-1",
             user_message="Открой example.com",
             domains=["chat"],
-        ):
-            chunks.append(chunk)
+        )
 
     # 1) Никакого stream=True не должно было дойти до underlying client
     #    (оркестратор форсирует non-streaming для gigachat).

@@ -48,8 +48,8 @@ async def execute_tool_call(
 
     # Валидация обязательных параметров. Если LLM не передал required-параметр,
     # дальше нельзя — handler упадёт с TypeError или вернёт мусор.
-    # Кидаем доменное исключение, его ловит agent_loop / stream_loop и эмитит
-    # нейтральный tool_error SSE (без сырого текста для пользователя).
+    # Кидаем доменное исключение, его ловит agent_loop и возвращает
+    # нейтральный tool_error (без сырого текста для пользователя).
     for param in chat_tool.parameters:
         if param.required and param.name not in arguments:
             err_msg = (

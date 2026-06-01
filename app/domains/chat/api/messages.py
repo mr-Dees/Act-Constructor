@@ -276,14 +276,3 @@ async def get_messages(
     return PaginatedResponse[MessageResponse](
         items=items, total=total, limit=limit, offset=offset,
     )
-
-
-# Легаси-эндпоинт `/agent-request/{request_id}/stream` удалён в Phase 2 «D»:
-# его полностью заменил `/forward-stream/{request_id}` (см.
-# app.domains.chat.api.forward_resume). Старый путь дублировал логику
-# Resume SSE, не использовал PollCoordinator и обходил server-authoritative
-# state — после рефактора оба эти отличия стали критичны.
-#
-# Фронт (chat-stream.js::resume()) уже использует `/forward-stream/...`
-# как primary path. Catch-fallback `_resumeAgentRequest` (вызывающий
-# старый URL) будет удалён в Phase 3 — параллельно работает frontend-агент.

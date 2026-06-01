@@ -4,10 +4,9 @@
   - chat.forward_to_knowledge_agent — переадресация запроса внешнему ИИ-агенту
   - chat.notify                     — показать уведомление пользователю
 
-Handler для forward — фабричный (зависит от контекста сообщения), поэтому
-здесь регистрируется без handler'а через :func:`build_forward_tool_descriptor`;
-оркестратор на каждом запросе сам подставляет замыкание через
-``forward_tool_factory.build_forward_tool``.
+Forward-тул регистрируется без handler'а через
+:func:`build_forward_tool_descriptor`; реальный перехват вызова делает
+``agent_loop`` по имени тула (bus-канал ``agent_messages``).
 """
 from __future__ import annotations
 

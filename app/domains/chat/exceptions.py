@@ -64,12 +64,10 @@ class ConversationLockedError(AppError):
 
 
 class OptimisticLockFailed(AppError):
-    """Optimistic locking конфликт при финализации agent_request.
+    """Optimistic locking конфликт при финализации записи под версионным апдейтом.
 
-    Бросается внутри транзакции в agent_bridge_runner._run, когда
-    finalize обнаруживает, что версия строки уже изменена другим
-    воркером. Транзакция откатывается, assistant-message НЕ сохраняется,
-    статус остаётся in_progress — reconcile подхватит при следующем старте.
+    Бросается, когда finalize обнаруживает, что версия строки уже изменена
+    другим воркером. Транзакция откатывается, статус не меняется.
     """
     status_code = 409
     code: ClassVar[str] = "chat-optimistic-lock-failed"

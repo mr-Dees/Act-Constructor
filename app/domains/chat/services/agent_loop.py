@@ -229,8 +229,8 @@ async def run_agent_loop(
                 break
 
             raw_msg = response.choices[0].message
-            # Не передаём Pydantic-объект как есть: см. комментарий в
-            # run_stream — Qwen/SGLang и GigaChat-proxy не принимают
+            # Не передаём Pydantic-объект как есть: Qwen/SGLang и
+            # GigaChat-proxy не принимают
             # null content при наличии tool_calls. По той же причине
             # arguments санитизируется через _safe_args (пустая строка
             # → "{}", иначе провайдеры ломают чат-template).

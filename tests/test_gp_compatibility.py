@@ -285,37 +285,29 @@ class TestGreenplumSchemaCompatibility:
                 f"проверь тип колонки"
             )
 
-    def test_chat_gp_schema_has_agent_bridge_tables(self):
-        """Новые agent_* таблицы добавлены в GP-схему чата и используют {SCHEMA}.{PREFIX}."""
-        schema_path = (
-            Path(__file__).parent.parent
-            / "app" / "domains" / "chat" / "migrations" / "greenplum" / "schema.sql"
-        )
-        content = schema_path.read_text(encoding="utf-8")
+    def test_chat_schemas_have_no_legacy_agent_bridge_tables(self):
+        """Старые 3-табличные artefact'ы моста удалены из обеих схем чата.
 
-        # Все 3 таблицы должны присутствовать с placeholder'ами схемы и префикса
-        for table in ("agent_requests", "agent_response_events", "agent_responses"):
-            assert f"CREATE TABLE IF NOT EXISTS {{SCHEMA}}.{{PREFIX}}{table}" in content, \
-                f"Таблица {table} не найдена с {{SCHEMA}}.{{PREFIX}}-префиксом в GP-схеме"
+        Канал к внешнему агенту теперь — единственная bus-таблица
+        agent_messages; старые agent_requests / agent_response_events /
+        agent_responses (+ их sequence) не должны создаваться.
+        """
+        for db_type in ("postgresql", "greenplum"):
+            schema_path = (
+                Path(__file__).parent.parent
+                / "app" / "domains" / "chat" / "migrations" / db_type / "schema.sql"
+            )
+            content = schema_path.read_text(encoding="utf-8")
 
-        # Sequence для events
-        assert "CREATE SEQUENCE {SCHEMA}.{PREFIX}agent_response_events_id_seq" in content
+            for table in ("agent_requests", "agent_response_events", "agent_responses"):
+                assert f"{{PREFIX}}{table}" not in content, (
+                    f"{db_type}/schema.sql: легаси-таблица {table} всё ещё в схеме"
+                )
 
-        # Все индексы используют idx_{PREFIX}*.
-        # idx_{PREFIX}agent_responses_request не нужен: UNIQUE(request_id) уже создаёт индекс.
-        # idx_{PREFIX}agent_response_events_request тоже больше не нужен:
-        # UNIQUE(request_id, seq) сам создаёт нужный btree-индекс.
-        for idx_name in (
-            "idx_{PREFIX}agent_requests_status_created",
-            "idx_{PREFIX}agent_requests_message",
-        ):
-            assert idx_name in content, f"Индекс {idx_name} не найден в GP-схеме"
-
-        # UNIQUE(request_id, seq) на agent_response_events — гарантия от дублей
-        # при сетевом retry внешнего агента.
-        assert "UNIQUE (request_id, seq)" in content, (
-            "UNIQUE(request_id, seq) на agent_response_events не найден в GP-схеме"
-        )
+            assert "agent_response_events_id_seq" not in content, (
+                f"{db_type}/schema.sql: легаси-sequence agent_response_events_id_seq "
+                f"всё ещё в схеме"
+            )
 
     def test_agent_messages_gp_distribution_and_pk(self):
         """agent_messages в GP-схеме имеет DISTRIBUTED BY (chat_id) ⊆ PRIMARY KEY (id, chat_id)."""
