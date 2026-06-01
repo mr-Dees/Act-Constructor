@@ -225,14 +225,19 @@ export const ChatMessages = {
         if (msgEl) msgEl.classList.remove('chat-message-bot--streaming');
 
         console.error('ChatMessages: ошибка получения ответа', err);
+        // Показываем реальный текст ошибки (бэк уже отдаёт дружелюбное сообщение,
+        // напр. про лимит одновременных запросов), а не общую заглушку.
+        const text = (err && err.message)
+            ? err.message
+            : 'Не удалось получить ответ. Попробуйте ещё раз.';
         const errDiv = document.createElement('div');
         errDiv.className = 'chat-error';
-        errDiv.textContent = 'Не удалось получить ответ. Попробуйте ещё раз.';
+        errDiv.textContent = text;
         botContainer.appendChild(errDiv);
 
         // Тост — пусть пользователь увидит даже при переключении беседы
         if (typeof Notifications !== 'undefined' && typeof Notifications.error === 'function') {
-            try { Notifications.error('Не удалось получить ответ от сервера.'); } catch { /* некритично */ }
+            try { Notifications.error(text); } catch { /* некритично */ }
         }
     },
 
