@@ -229,9 +229,7 @@ export const ChatRenderer = {
         // Идемпотентный merge по data-block-id: если блок с тем же id
         // уже есть в контейнере, заменяем его. Это нужно для случая
         // «при reload пришёл финал с тем же block_id, что был streaming-
-        // партиал, — заменить полным телом». Live-стрим избегает этой
-        // ветки через DOM-дедуп в ChatMessages._handleSSEEvent (не вызывает
-        // appendBlock для существующего id).
+        // партиал, — заменить полным телом».
         if (el.dataset && el.dataset.blockId) {
             const existing = container.querySelector(
                 `[data-block-id="${CSS.escape(el.dataset.blockId)}"]`,
@@ -245,11 +243,10 @@ export const ChatRenderer = {
         const isReasoning = el.classList
             && el.classList.contains('chat-block-reasoning');
 
-        // Если в контейнере живёт typing-плейсхолдер (бот ещё «думает»,
-        // например reasoning-чанки во время forward'а), удерживаем его
-        // ВНИЗУ bot-bubble — все вновь добавленные блоки уходят ВЫШЕ него.
-        // Сам плейсхолдер не трогаем — его удаление управляется только
-        // из `_handleSSEEvent` по приходу финального content-блока.
+        // Если в контейнере живёт typing-плейсхолдер (бот ещё «думает»),
+        // удерживаем его ВНИЗУ bot-bubble — все вновь добавленные блоки
+        // уходят ВЫШЕ него. Сам плейсхолдер не трогаем — его удаление
+        // управляется из ChatMessages при получении готового ответа.
         const placeholder = container.querySelector(
             ':scope > .chat-typing-placeholder',
         );
@@ -351,9 +348,9 @@ export const ChatRenderer = {
                 el = this._renderUnknown(block);
         }
 
-        // Прокидываем block_id в dataset для идемпотентного merge в `appendBlock`
-        // и для DOM-дедупа в ChatMessages._handleSSEEvent. Перетирает только
-        // если у конкретного renderer'а ещё не выставлен (reasoning делает это сам).
+        // Прокидываем block_id в dataset для идемпотентного merge в `appendBlock`.
+        // Перетирает только если у конкретного renderer'а ещё не выставлен
+        // (reasoning делает это сам).
         if (el && typeof block.block_id === 'string' && block.block_id
             && !el.dataset.blockId) {
             el.dataset.blockId = block.block_id;

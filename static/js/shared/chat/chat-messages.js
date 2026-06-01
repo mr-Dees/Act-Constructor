@@ -157,6 +157,8 @@ export const ChatMessages = {
             const botContainer = this._addBotMessageStreaming();
 
             // Режим агента — появится в ChatContext позже; сейчас читаем защищённо
+            // TODO: ChatContext.getAgentMode появится при добавлении трёхрежимного
+            // переключателя ОАРБ; до тех пор всегда 'off'
             const agentMode = (window.ChatContext
                 && typeof ChatContext.getAgentMode === 'function'
                 && ChatContext.getAgentMode()) || 'off';

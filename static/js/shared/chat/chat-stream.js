@@ -73,7 +73,7 @@ export const ChatStream = {
      * @param {function(Error): void} [options.onError]
      * @param {AbortSignal} [options.signal]
      */
-    async pollMessage(conversationId, messageId, options = {}) {
+    pollMessage(conversationId, messageId, options = {}) {
         const { onReady, onError, signal } = options;
         const url = AppConfig.api.getUrl(
             `/api/v1/chat/conversations/${conversationId}/messages/${messageId}`,
@@ -82,36 +82,49 @@ export const ChatStream = {
         const TIMEOUT_MS = 11 * 60 * 1000; // чуть больше серверного answer_timeout (10 мин)
         const INTERVAL = 1500;
 
-        const tick = async () => {
-            if (signal && signal.aborted) return;
-
-            let msg;
-            try {
-                const r = await fetch(url, { headers: this._buildHeaders(), signal });
-                if (!r.ok) {
-                    if (onError) onError(await this._errorFromResponse(r));
+        // Возвращаем Promise, который резолвится в КАЖДОМ терминальном исходе:
+        // complete/failed, таймаут, сетевая ошибка, отмена через signal.
+        // Без этого `await sendAndPoll(...)` разблокировал бы ui:processing
+        // сразу после POST, пока polling ещё идёт.
+        return new Promise((resolve) => {
+            const tick = async () => {
+                if (signal && signal.aborted) {
+                    resolve();
                     return;
                 }
-                msg = await r.json();
-            } catch (e) {
-                if (onError) onError(e);
-                return;
-            }
 
-            if (msg.status === 'complete' || msg.status === 'failed') {
-                if (onReady) onReady(msg);
-                return;
-            }
+                let msg;
+                try {
+                    const r = await fetch(url, { headers: this._buildHeaders(), signal });
+                    if (!r.ok) {
+                        if (onError) onError(await this._errorFromResponse(r));
+                        resolve();
+                        return;
+                    }
+                    msg = await r.json();
+                } catch (e) {
+                    if (onError) onError(e);
+                    resolve();
+                    return;
+                }
 
-            if (Date.now() - started > TIMEOUT_MS) {
-                if (onError) onError(new Error('Превышено время ожидания ответа.'));
-                return;
-            }
+                if (msg.status === 'complete' || msg.status === 'failed') {
+                    if (onReady) onReady(msg);
+                    resolve();
+                    return;
+                }
 
-            setTimeout(tick, INTERVAL);
-        };
+                if (Date.now() - started > TIMEOUT_MS) {
+                    if (onError) onError(new Error('Превышено время ожидания ответа.'));
+                    resolve();
+                    return;
+                }
 
-        tick();
+                setTimeout(tick, INTERVAL);
+            };
+
+            tick();
+        });
     },
 
     /**
@@ -186,8 +199,10 @@ export const ChatStream = {
      * @private
      */
     _buildUrl(conversationId) {
+        // Голый путь под JupyterHub-proxy уходит на /hub/... → 404,
+        // поэтому только через AppConfig.api.getUrl, без fallback'а.
         if (typeof AppConfig === 'undefined') {
-            return `/api/v1/chat/conversations/${conversationId}/messages`;
+            throw new Error('AppConfig недоступен');
         }
         return AppConfig.api.getUrl(AppConfig.chatEndpoints.messages(conversationId));
     },
