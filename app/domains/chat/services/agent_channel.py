@@ -1,0 +1,277 @@
+"""Сервис канала к внешнему агенту через bus-таблицу agent_messages.
+
+Поток:
+  AW → submit() → INSERT вопрос (role='user', status='pending')
+                 + create_streaming draft (status='streaming', agent_ref=uid)
+  Агент → INSERT ответ + reply_to на вопросе + status='complete'
+  AW → try_finalize() → читает вопрос; если reply_to есть → финализирует draft.
+"""
+
+import logging
+import uuid
+
+import asyncpg
+
+from app.domains.chat.repositories.agent_message_repository import AgentMessageRepository
+from app.domains.chat.repositories.message_repository import MessageRepository
+from app.domains.chat.settings import ChatDomainSettings
+
+logger = logging.getLogger("audit_workstation.domains.chat.service.agent_channel")
+
+_TRIM_MARKER = " …[обрезано]"
+_TRIM_MARKER_BYTES = len(_TRIM_MARKER.encode("utf-8"))
+
+
+# ── Pure-функции ─────────────────────────────────────────────────────────────
+
+
+def _trim_text_if_oversized(*, text: str, max_size: int, uid: str, block_type: str) -> str:
+    """Обрезает ``text`` до ``max_size`` UTF-8 байт + маркер «…[обрезано]».
+
+    UTF-8-safe: режем по байтам, затем откатываемся до начала предыдущего
+    code-point (0b10xxxxxx — continuation byte; 0b11xxxxxx — lead без хвоста).
+    Если ``text`` помещается — быстрый путь без encode.
+    """
+    if not text:
+        return text
+    encoded = text.encode("utf-8")
+    if len(encoded) <= max_size:
+        return text
+    original_size = len(encoded)
+    cut_at = max_size - _TRIM_MARKER_BYTES
+    if cut_at <= 0:
+        return _TRIM_MARKER.strip()
+    truncated_bytes = encoded[:cut_at]
+    # Откат с continuation bytes (10xxxxxx).
+    while truncated_bytes and (truncated_bytes[-1] & 0xC0) == 0x80:
+        truncated_bytes = truncated_bytes[:-1]
+    # Откат с lead byte без хвоста (11xxxxxx).
+    if truncated_bytes and (truncated_bytes[-1] & 0xC0) == 0xC0:
+        truncated_bytes = truncated_bytes[:-1]
+    truncated_text = truncated_bytes.decode("utf-8", errors="ignore")
+    result = truncated_text + _TRIM_MARKER
+    logger.warning(
+        "agent_channel: блок обрезан с %d до %d байт, uid=%s, type=%s",
+        original_size,
+        len(result.encode("utf-8")),
+        uid,
+        block_type,
+    )
+    return result
+
+
+def _normalize_button(btn: dict, idx: int) -> dict:
+    """Нормализует одну кнопку из ответа агента с дефолтами."""
+    return {
+        "action_id": btn.get("action_id", f"btn_{idx}"),
+        "label": btn.get("label", ""),
+        "params": btn.get("params") or {},
+    }
+
+
+def map_answer_to_blocks(row: dict, max_block_text_size: int = 262144) -> list[dict]:
+    """Маппит строку-ответ agent_messages в блоки чата.
+
+    Порядок: reasoning (metadata.thinking) → text (content) → buttons → media.
+    block_id кнопок и reasoning: ``f"{row['id']}:btn:0"`` / ``f"{row['id']}:reasoning:0"``.
+    Тексты обрезаются через _trim_text_if_oversized.
+    """
+    row_id = row.get("id", "unknown")
+    blocks: list[dict] = []
+
+    # 1. reasoning из metadata.thinking
+    metadata = row.get("metadata") or {}
+    if isinstance(metadata, dict):
+        thinking = metadata.get("thinking")
+        if thinking and isinstance(thinking, str) and thinking.strip():
+            trimmed = _trim_text_if_oversized(
+                text=thinking.strip(),
+                max_size=max_block_text_size,
+                uid=row_id,
+                block_type="reasoning",
+            )
+            blocks.append({
+                "type": "reasoning",
+                "content": trimmed,
+                "block_id": f"{row_id}:reasoning:0",
+            })
+
+    # 2. text из content
+    content = row.get("content")
+    if content and isinstance(content, str) and content.strip():
+        trimmed = _trim_text_if_oversized(
+            text=content.strip(),
+            max_size=max_block_text_size,
+            uid=row_id,
+            block_type="text",
+        )
+        blocks.append({"type": "text", "content": trimmed})
+
+    # 3. buttons
+    buttons = row.get("buttons")
+    if buttons and isinstance(buttons, list) and len(buttons) > 0:
+        normalized = [_normalize_button(b, i) for i, b in enumerate(buttons)]
+        blocks.append({
+            "type": "buttons",
+            "buttons": normalized,
+            "block_id": f"{row_id}:btn:0",
+        })
+
+    # 4. media
+    media = row.get("media")
+    if media is not None:
+        # Одиночный объект → оборачиваем в список.
+        if isinstance(media, dict):
+            media = [media]
+        if isinstance(media, list):
+            for item in media:
+                if not isinstance(item, dict):
+                    continue
+                mime = item.get("mime_type", "")
+                file_id = item.get("file_id", item.get("url", ""))
+                filename = item.get("filename", item.get("name", ""))
+                if mime.startswith("image/"):
+                    blocks.append({
+                        "type": "image",
+                        "file_id": file_id,
+                        "alt": filename,
+                    })
+                else:
+                    blocks.append({
+                        "type": "file",
+                        "file_id": file_id,
+                        "filename": filename,
+                        "mime_type": mime,
+                        "file_size": int(item.get("file_size", 0)),
+                    })
+
+    return blocks
+
+
+def build_timeout_error_block() -> dict:
+    """Возвращает error-блок таймаута агента."""
+    return {
+        "type": "error",
+        "code": "agent_timeout",
+        "message": "Внешний агент не ответил вовремя. Попробуйте позже.",
+    }
+
+
+# ── Сервис ───────────────────────────────────────────────────────────────────
+
+
+class AgentChannelService:
+    """Сервис канала к внешнему агенту через bus-таблицу agent_messages.
+
+    Принимает ``conn`` (asyncpg.Connection) и ``settings`` (ChatDomainSettings).
+    Паттерн получения settings идентичен MessageService / ConversationService:
+    вызывающий код инжектирует настройки снаружи.
+    """
+
+    def __init__(self, conn: asyncpg.Connection, settings: ChatDomainSettings):
+        self._conn = conn
+        self._settings = settings
+
+    def _agent_repo(self) -> AgentMessageRepository:
+        return AgentMessageRepository(
+            self._conn,
+            self._settings.agent_channel.table_name,
+        )
+
+    def _message_repo(self) -> MessageRepository:
+        return MessageRepository(self._conn)
+
+    async def submit(
+        self,
+        *,
+        conversation_id: str,
+        user_id: str,
+        assistant_message_id: str,
+        text: str,
+        mode: str,
+        kb: str = "oarb",
+        media: list | None = None,
+    ) -> str:
+        """Кладёт вопрос в agent_messages и создаёт draft-сообщение в chat_messages.
+
+        Возвращает ``question_uid`` — conversation_id строки-вопроса в bus-таблице.
+        Вызывающий может сразу передать его поллеру без дополнительного SELECT;
+        draft в chat_messages хранит тот же uid в поле ``agent_ref``.
+        """
+        question_uid = str(uuid.uuid4())
+        question_id = str(uuid.uuid4())
+
+        await self._agent_repo().insert_question(
+            id=question_id,
+            chat_id=conversation_id,
+            user_id=user_id,
+            conversation_id=question_uid,
+            content=text,
+            metadata={"mode": mode, "kb": kb},
+            media=media,
+        )
+        await self._message_repo().create_streaming(
+            message_id=assistant_message_id,
+            conversation_id=conversation_id,
+            agent_ref=question_uid,
+        )
+        return question_uid
+
+    async def try_finalize(
+        self,
+        *,
+        assistant_message_id: str,
+        question_uid: str,
+    ) -> str:
+        """Проверяет готовность ответа и финализирует draft при наличии.
+
+        Читает строку-вопрос по ``question_uid``. Если ``reply_to`` не выставлен —
+        возвращает ``'pending'``. Если агент проставил ``reply_to``:
+        - читает строку-ответ (по reply_to как conversation_id);
+        - если answer.status == 'error' → mark_failed(error-блок);
+        - иначе → finalize(map_answer_to_blocks(answer)).
+        Возвращает ``'done'`` после финализации, ``'pending'`` если ответа ещё нет.
+        """
+        agent_repo = self._agent_repo()
+        message_repo = self._message_repo()
+
+        question = await agent_repo.get_by_uid(question_uid)
+        if not question:
+            logger.warning(
+                "try_finalize: вопрос %s не найден в bus-таблице", question_uid
+            )
+            return "pending"
+
+        reply_to = question.get("reply_to")
+        if not reply_to:
+            return "pending"
+
+        answer = await agent_repo.get_by_uid(reply_to)
+        if not answer:
+            logger.warning(
+                "try_finalize: ответ %s (reply_to) не найден в bus-таблице", reply_to
+            )
+            return "pending"
+
+        if answer.get("status") == "error":
+            error_message = answer.get("content") or "Внешний агент вернул ошибку."
+            error_block = {
+                "type": "error",
+                "code": "agent_error",
+                "message": error_message,
+            }
+            await message_repo.mark_failed(
+                message_id=assistant_message_id,
+                error_block=error_block,
+            )
+            return "done"
+
+        blocks = map_answer_to_blocks(
+            answer,
+            max_block_text_size=self._settings.agent_channel.max_block_text_size,
+        )
+        await message_repo.finalize(
+            message_id=assistant_message_id,
+            final_blocks=blocks,
+        )
+        return "done"
