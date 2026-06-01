@@ -97,6 +97,7 @@ class MessageRepository(BaseRepository):
         conversation_id: str,
         role: str = "assistant",
         model: str | None = None,
+        agent_ref: str | None = None,
     ) -> dict:
         """Создаёт пустое сообщение со status='streaming'.
 
@@ -104,19 +105,23 @@ class MessageRepository(BaseRepository):
         процесса между генерацией id и сохранением) делает SELECT
         существующей записи и возвращает её — runner продолжит
         материализацию того же message_id, а не создаст новый.
+
+        agent_ref — conversation_id строки-вопроса в agent_messages (uid
+        сообщения); если передан, связывает draft-сообщение с bus-таблицей.
         """
         try:
             row = await self.conn.fetchrow(
                 f"""
                 INSERT INTO {self.table}
-                    (id, conversation_id, role, content, model, status)
-                VALUES ($1, $2, $3, '[]'::jsonb, $4, 'streaming')
+                    (id, conversation_id, role, content, model, status, agent_ref)
+                VALUES ($1, $2, $3, '[]'::jsonb, $4, 'streaming', $5)
                 RETURNING *
                 """,
                 message_id,
                 conversation_id,
                 role,
                 model,
+                agent_ref,
             )
             return self._parse_row(row)
         except asyncpg.UniqueViolationError:
@@ -266,3 +271,13 @@ class MessageRepository(BaseRepository):
                 message_id,
             )
         return True
+
+    async def get_streaming_drafts(self) -> list[dict]:
+        """Draft-сообщения, ждущие ответа агента (для reconcile при старте).
+
+        Возвращает все сообщения со status='streaming' и непустым agent_ref.
+        """
+        rows = await self.conn.fetch(
+            f"SELECT * FROM {self.table} WHERE status = 'streaming' AND agent_ref IS NOT NULL"
+        )
+        return [self._parse_row(r) for r in rows]

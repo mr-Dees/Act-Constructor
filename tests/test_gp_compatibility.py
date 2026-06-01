@@ -269,6 +269,22 @@ class TestGreenplumSchemaCompatibility:
                     f"{db_type}/schema.sql: значение '{v}' отсутствует в CHECK"
                 )
 
+    def test_chat_messages_has_agent_ref_column(self):
+        """chat_messages в обеих схемах содержит колонку agent_ref VARCHAR(36)
+        (Phase 1: ссылка draft-сообщения на строку-вопрос в agent_messages)."""
+        base = Path(__file__).parent.parent / "app" / "domains" / "chat" / "migrations"
+        for db_type in ("postgresql", "greenplum"):
+            schema_path = base / db_type / "schema.sql"
+            content = schema_path.read_text(encoding="utf-8")
+            assert "agent_ref" in content, (
+                f"{db_type}/schema.sql: колонка agent_ref не найдена — "
+                f"ожидается ADD COLUMN agent_ref VARCHAR(36) для chat_messages"
+            )
+            assert "agent_ref VARCHAR(36)" in content, (
+                f"{db_type}/schema.sql: agent_ref VARCHAR(36) не найдено — "
+                f"проверь тип колонки"
+            )
+
     def test_chat_gp_schema_has_agent_bridge_tables(self):
         """Новые agent_* таблицы добавлены в GP-схему чата и используют {SCHEMA}.{PREFIX}."""
         schema_path = (
