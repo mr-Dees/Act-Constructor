@@ -77,8 +77,11 @@ async def send_message(
     agent_mode:
       - "always": AgentChannelService.submit → поллер.subscribe;
                   LLM-оркестратор не запускается.
-      - "off" / "adaptive" / любое другое: оркестратор.run синхронно.
-        (adaptive ≡ off до реализации adaptive-режима в Phase 2.)
+      - "adaptive": оркестратор.run синхронно; forward-тул доступен LLM,
+                    и при его вызове запрос форвардится внешнему агенту
+                    через bus-канал (AgentChannelService).
+      - "off" / любое другое: оркестратор.run синхронно, только локальный
+                    LLM/GigaChat — forward-тул скрыт от LLM.
     """
     logger.info(
         "Получен запрос пользователя: conversation=%s, message_len=%d, "

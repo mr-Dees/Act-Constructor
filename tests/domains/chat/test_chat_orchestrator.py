@@ -2216,6 +2216,8 @@ class TestAgentModeForward:
             )
 
         assert result.get("forwarded") is True
+        # Даже при poller=None draft создан submit'ом — двойного сохранения нет.
+        orchestrator._save_assistant_message.assert_not_awaited()
         # Warning залогирован
         assert any(
             "не инициализирован" in r.getMessage()
