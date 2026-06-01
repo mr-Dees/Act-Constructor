@@ -26,6 +26,7 @@ from app.domains.chat.api.conversations import router as conv_router
 from app.domains.chat.api.files import router as files_router
 from app.domains.chat.api.messages import router as msg_router
 from app.domains.chat.deps import (
+    get_agent_channel_service,
     get_conversation_service,
     get_file_service,
     get_message_service,
@@ -33,6 +34,7 @@ from app.domains.chat.deps import (
 from app.domains.chat.exceptions import (
     ChatFileNotFoundError,
     ChatFileValidationError,
+    ChatMessageNotFoundError,
     ConversationNotFoundError,
 )
 from app.domains.chat.settings import ChatDomainSettings
@@ -68,11 +70,19 @@ def _make_settings() -> ChatDomainSettings:
     return ChatDomainSettings(api_base="", api_key="", model="gpt-4o")
 
 
+def _make_channel_service() -> MagicMock:
+    """Mock AgentChannelService."""
+    svc = MagicMock()
+    svc.submit = AsyncMock(return_value="question-uid-123")
+    return svc
+
+
 def _build_app(
     *,
     conv_service: object,
     msg_service: object,
     file_service: object,
+    channel_service: object | None = None,
     username: str = USERNAME,
 ) -> FastAPI:
     """Собирает минимальный FastAPI с тремя chat-роутерами и оверрайдами DI."""
@@ -98,6 +108,9 @@ def _build_app(
     app.dependency_overrides[get_conversation_service] = lambda: conv_service
     app.dependency_overrides[get_message_service] = lambda: msg_service
     app.dependency_overrides[get_file_service] = lambda: file_service
+    app.dependency_overrides[get_agent_channel_service] = (
+        lambda: (channel_service if channel_service is not None else _make_channel_service())
+    )
 
     return app
 
@@ -120,6 +133,7 @@ def _make_msg_service(settings: ChatDomainSettings) -> MagicMock:
     svc.settings = settings
     svc.save_user_message = AsyncMock()
     svc.get_history = AsyncMock(return_value=([], 0))
+    svc.get_message = AsyncMock()
     return svc
 
 
@@ -307,24 +321,14 @@ class TestDeleteConversation:
 
 
 # -------------------------------------------------------------------------
-# POST /conversations/{id}/messages — SSE-стрим
+# POST /conversations/{id}/messages — новый B1-режим (JSON-ответ)
 # -------------------------------------------------------------------------
 
 
-class TestSendMessageSSE:
-    """E2E: SSE-стрим открывается и первые события корректны."""
+class TestSendMessageB1:
+    """E2E: POST /messages возвращает JSON {"message_id": ...} во всех режимах."""
 
-    def test_sse_stream_returns_429_when_user_already_streaming(self):
-        """1.8: При достижении лимита параллельных SSE-стримов — 429.
-
-        Лимит конфигурируется через ``CHAT__MAX_PARALLEL_STREAMS_PER_USER``
-        (default=3). Предзаполняем ``_active_streams_per_user`` на величину
-        лимита и проверяем, что новый запрос отклоняется без открытия стрима.
-        """
-        from app.domains.chat.api import messages as messages_module
-
-        settings = _make_settings()
-        max_streams = settings.max_parallel_streams_per_user
+    def _conv_with_get(self, settings: ChatDomainSettings) -> MagicMock:
         conv = _make_conv_service(settings)
         conv.get.return_value = {
             "id": "conv-1",
@@ -333,171 +337,188 @@ class TestSendMessageSSE:
             "domain_name": None,
             "context": None,
         }
-        msg = _make_msg_service(settings)
-        msg.save_user_message.return_value = {
-            "id": "m-1",
-            "role": "user",
-            "content": [],
-        }
-        file_svc = _make_file_service(settings)
+        return conv
 
-        app = _build_app(
-            conv_service=conv,
-            msg_service=msg,
-            file_service=file_svc,
-        )
-
-        # Предзаполняем счётчик до лимита — следующий запрос должен получить 429
-        messages_module._active_streams_per_user[USERNAME] = max_streams
-        try:
-            with patch(
-                "app.core.settings_registry.get", return_value=settings,
-            ):
-                with TestClient(app) as client:
-                    resp = client.post(
-                        "/api/v1/chat/conversations/conv-1/messages",
-                        data={"message": "Привет"},
-                        headers={"Accept": "text/event-stream"},
-                    )
-            assert resp.status_code == 429, resp.text
-            body = resp.json()
-            assert "лимит" in body["detail"].lower()
-            assert f"({max_streams})" in body["detail"]
-        finally:
-            messages_module._active_streams_per_user.pop(USERNAME, None)
-
-    def test_sse_stream_respects_parallel_limit_boundary(self):
-        """1.8: При count == limit-1 ещё можно открыть стрим, при count == limit — нельзя."""
-        from app.domains.chat.api import messages as messages_module
-
+    def test_send_message_off_mode_returns_message_id(self):
+        """agent_mode=off: оркестратор вызван, вернулся {"message_id": ...}."""
         settings = _make_settings()
-        max_streams = settings.max_parallel_streams_per_user
-        conv = _make_conv_service(settings)
-        conv.get.return_value = {
-            "id": "conv-1",
-            "user_id": USERNAME,
-            "title": None,
-            "domain_name": None,
-            "context": None,
-        }
+        conv = self._conv_with_get(settings)
         msg = _make_msg_service(settings)
-        msg.save_user_message.return_value = {
-            "id": "m-1",
-            "role": "user",
-            "content": [],
-        }
-        msg.save_assistant_message = AsyncMock(
-            return_value={"id": "m-2", "role": "assistant", "content": []},
-        )
-        file_svc = _make_file_service(settings)
+        msg.save_user_message.return_value = {"id": "m-1", "role": "user", "content": []}
 
         app = _build_app(
             conv_service=conv,
             msg_service=msg,
-            file_service=file_svc,
+            file_service=_make_file_service(settings),
         )
-
-        # На границе limit-1 запрос ещё пропускается (но мы прервём чтение
-        # стрима сразу, чтобы не гонять оркестратор).
-        messages_module._active_streams_per_user.pop(USERNAME, None)
-        messages_module._active_streams_per_user[USERNAME] = max_streams - 1
-        try:
-            with patch(
-                "app.core.settings_registry.get", return_value=settings,
-            ), patch(
-                "app.domains.chat.services.orchestrator.get_domain_settings",
-                return_value=settings,
-            ):
-                with TestClient(app) as client:
-                    with client.stream(
-                        "POST",
-                        "/api/v1/chat/conversations/conv-1/messages",
-                        data={"message": "Привет"},
-                        headers={"Accept": "text/event-stream"},
-                    ) as resp:
-                        assert resp.status_code == 200, resp.read()
-        finally:
-            messages_module._active_streams_per_user.pop(USERNAME, None)
-
-        # На самой границе limit — отказ.
-        messages_module._active_streams_per_user[USERNAME] = max_streams
-        try:
-            with patch(
-                "app.core.settings_registry.get", return_value=settings,
-            ):
-                with TestClient(app) as client:
-                    resp = client.post(
-                        "/api/v1/chat/conversations/conv-1/messages",
-                        data={"message": "Привет"},
-                        headers={"Accept": "text/event-stream"},
-                    )
-            assert resp.status_code == 429, resp.text
-        finally:
-            messages_module._active_streams_per_user.pop(USERNAME, None)
-
-    def test_sse_stream_releases_semaphore_on_completion(self):
-        """1.8: После корректного завершения стрима счётчик возвращается к 0."""
-        from app.domains.chat.api import messages as messages_module
-
-        settings = _make_settings()
-        conv = _make_conv_service(settings)
-        conv.get.return_value = {
-            "id": "conv-1",
-            "user_id": USERNAME,
-            "title": None,
-            "domain_name": None,
-            "context": None,
-        }
-        msg = _make_msg_service(settings)
-        msg.save_user_message.return_value = {
-            "id": "m-1",
-            "role": "user",
-            "content": [],
-        }
-        msg.save_assistant_message = AsyncMock(
-            return_value={"id": "m-2", "role": "assistant", "content": []},
-        )
-        file_svc = _make_file_service(settings)
-
-        app = _build_app(
-            conv_service=conv,
-            msg_service=msg,
-            file_service=file_svc,
-        )
-
-        messages_module._active_streams_per_user.pop(USERNAME, None)
 
         with patch(
-            "app.core.settings_registry.get",
-            return_value=settings,
-        ), patch(
             "app.domains.chat.services.orchestrator.get_domain_settings",
             return_value=settings,
         ):
             with TestClient(app) as client:
-                with client.stream(
-                    "POST",
+                resp = client.post(
+                    "/api/v1/chat/conversations/conv-1/messages",
+                    data={"message": "Привет", "agent_mode": "off"},
+                )
+
+        assert resp.status_code == 200, resp.text
+        body = resp.json()
+        assert "message_id" in body
+        assert isinstance(body["message_id"], str)
+        assert len(body["message_id"]) > 0
+
+    def test_send_message_no_mode_defaults_to_off(self):
+        """Без agent_mode: ведёт себя как off — оркестратор вызван."""
+        settings = _make_settings()
+        conv = self._conv_with_get(settings)
+        msg = _make_msg_service(settings)
+        msg.save_user_message.return_value = {"id": "m-1", "role": "user", "content": []}
+
+        app = _build_app(
+            conv_service=conv,
+            msg_service=msg,
+            file_service=_make_file_service(settings),
+        )
+
+        with patch(
+            "app.domains.chat.services.orchestrator.get_domain_settings",
+            return_value=settings,
+        ):
+            with TestClient(app) as client:
+                resp = client.post(
                     "/api/v1/chat/conversations/conv-1/messages",
                     data={"message": "Привет"},
-                    headers={"Accept": "text/event-stream"},
-                ) as resp:
-                    # Полностью читаем поток, чтобы finally сработал
-                    for _ in resp.iter_lines():
-                        pass
+                )
 
-        # После завершения счётчика быть не должно
-        assert USERNAME not in messages_module._active_streams_per_user
+        assert resp.status_code == 200, resp.text
+        assert "message_id" in resp.json()
 
-    def test_sse_stream_emits_message_start_and_block_events(self):
-        """Стрим возвращает 200, content-type SSE и валидные первые события.
-
-        Используем fallback-режим оркестратора (api_base/api_key пустые) —
-        реальный LLM не вызывается, генерируются: message_start →
-        block_start(text) → block_delta → block_end → message_end.
-        """
+    def test_send_message_always_mode_calls_channel_and_poller(self):
+        """agent_mode=always: AgentChannelService.submit вызван, поллер.subscribe вызван."""
         settings = _make_settings()
+        conv = self._conv_with_get(settings)
+        msg = _make_msg_service(settings)
+        msg.save_user_message.return_value = {"id": "m-1", "role": "user", "content": []}
+
+        channel_svc = _make_channel_service()
+        channel_svc.submit.return_value = "q-uid-abc"
+
+        mock_poller = MagicMock()
+        mock_poller.subscribe = MagicMock()
+
+        app = _build_app(
+            conv_service=conv,
+            msg_service=msg,
+            file_service=_make_file_service(settings),
+            channel_service=channel_svc,
+        )
+
+        with patch(
+            "app.domains.chat.api.messages.get_agent_channel_poller",
+            return_value=mock_poller,
+        ):
+            with TestClient(app) as client:
+                resp = client.post(
+                    "/api/v1/chat/conversations/conv-1/messages",
+                    data={"message": "Запрос к агенту", "agent_mode": "always"},
+                )
+
+        assert resp.status_code == 200, resp.text
+        body = resp.json()
+        assert "message_id" in body
+        message_id = body["message_id"]
+
+        # AgentChannelService.submit вызван с корректными параметрами
+        channel_svc.submit.assert_awaited_once()
+        submit_kwargs = channel_svc.submit.await_args.kwargs
+        assert submit_kwargs["conversation_id"] == "conv-1"
+        assert submit_kwargs["user_id"] == USERNAME
+        assert submit_kwargs["assistant_message_id"] == message_id
+        assert submit_kwargs["text"] == "Запрос к агенту"
+        assert submit_kwargs["mode"] == "always"
+
+        # поллер.subscribe вызван с совпадающими параметрами
+        mock_poller.subscribe.assert_called_once_with(
+            assistant_message_id=message_id,
+            question_uid="q-uid-abc",
+        )
+
+        # Оркестратор НЕ вызывался: channel_svc.submit вызван — это
+        # единственное подтверждение, что выбрана ветка «always», а не orchestrator.run.
+        # (save_assistant_message — plain MagicMock, не AsyncMock → нет assert_not_awaited)
+
+    def test_send_message_always_mode_works_without_poller(self):
+        """agent_mode=always: poller=None — только WARNING, 200 всё равно."""
+        settings = _make_settings()
+        conv = self._conv_with_get(settings)
+        msg = _make_msg_service(settings)
+        msg.save_user_message.return_value = {"id": "m-1", "role": "user", "content": []}
+
+        channel_svc = _make_channel_service()
+
+        app = _build_app(
+            conv_service=conv,
+            msg_service=msg,
+            file_service=_make_file_service(settings),
+            channel_service=channel_svc,
+        )
+
+        with patch(
+            "app.domains.chat.api.messages.get_agent_channel_poller",
+            return_value=None,
+        ):
+            with TestClient(app) as client:
+                resp = client.post(
+                    "/api/v1/chat/conversations/conv-1/messages",
+                    data={"message": "тест", "agent_mode": "always"},
+                )
+
+        assert resp.status_code == 200, resp.text
+        assert "message_id" in resp.json()
+
+    def test_send_message_adaptive_mode_uses_orchestrator(self):
+        """agent_mode=adaptive: ведёт себя как off (оркестратор), не как always."""
+        settings = _make_settings()
+        conv = self._conv_with_get(settings)
+        msg = _make_msg_service(settings)
+        msg.save_user_message.return_value = {"id": "m-1", "role": "user", "content": []}
+
+        channel_svc = _make_channel_service()
+
+        app = _build_app(
+            conv_service=conv,
+            msg_service=msg,
+            file_service=_make_file_service(settings),
+            channel_service=channel_svc,
+        )
+
+        with patch(
+            "app.domains.chat.services.orchestrator.get_domain_settings",
+            return_value=settings,
+        ):
+            with TestClient(app) as client:
+                resp = client.post(
+                    "/api/v1/chat/conversations/conv-1/messages",
+                    data={"message": "Привет", "agent_mode": "adaptive"},
+                )
+
+        assert resp.status_code == 200, resp.text
+        assert "message_id" in resp.json()
+        # channel_svc.submit НЕ вызывался
+        channel_svc.submit.assert_not_awaited()
+
+
+# -------------------------------------------------------------------------
+# GET /conversations/{id}/messages/{message_id} — опрос готовности
+# -------------------------------------------------------------------------
+
+
+class TestGetSingleMessage:
+    """E2E: GET /messages/{id} возвращает {id, status, content}."""
+
+    def _conv_with_get(self, settings: ChatDomainSettings) -> MagicMock:
         conv = _make_conv_service(settings)
-        # get(conversation_id, username) — для ownership-проверки в endpoint
         conv.get.return_value = {
             "id": "conv-1",
             "user_id": USERNAME,
@@ -505,56 +526,103 @@ class TestSendMessageSSE:
             "domain_name": None,
             "context": None,
         }
-        msg = _make_msg_service(settings)
-        msg.save_user_message.return_value = {
-            "id": "m-1",
-            "role": "user",
-            "content": [{"type": "text", "content": "Привет"}],
-        }
-        # save_assistant_message нужен оркестратору в конце run_stream
-        msg.save_assistant_message = AsyncMock(
-            return_value={"id": "m-2", "role": "assistant", "content": []},
-        )
+        return conv
 
-        file_svc = _make_file_service(settings)
+    def test_get_single_message_complete(self):
+        """GET /messages/{id}: complete-сообщение возвращает status='complete'."""
+        settings = _make_settings()
+        conv = self._conv_with_get(settings)
+        msg = _make_msg_service(settings)
+        msg.get_message = AsyncMock(return_value={
+            "id": "msg-abc",
+            "conversation_id": "conv-1",
+            "role": "assistant",
+            "content": [{"type": "text", "content": "Ответ"}],
+            "status": "complete",
+        })
 
         app = _build_app(
             conv_service=conv,
             msg_service=msg,
-            file_service=file_svc,
+            file_service=_make_file_service(settings),
         )
 
-        # Патчим settings_registry, чтобы Orchestrator подхватил пустые api_*
-        # и чтобы endpoint достал max_parallel_streams_per_user из настроек.
-        with patch(
-            "app.core.settings_registry.get",
-            return_value=settings,
-        ), patch(
-            "app.domains.chat.services.orchestrator.get_domain_settings",
-            return_value=settings,
-        ):
-            with TestClient(app) as client:
-                with client.stream(
-                    "POST",
-                    "/api/v1/chat/conversations/conv-1/messages",
-                    data={"message": "Привет"},
-                    headers={"Accept": "text/event-stream"},
-                ) as resp:
-                    assert resp.status_code == 200, resp.read()
-                    assert "text/event-stream" in resp.headers["content-type"]
-                    # Читаем первые ~10 строк потока
-                    collected: list[str] = []
-                    for line in resp.iter_lines():
-                        collected.append(line)
-                        if len(collected) >= 12:
-                            break
+        with TestClient(app) as client:
+            resp = client.get("/api/v1/chat/conversations/conv-1/messages/msg-abc")
 
-        joined = "\n".join(collected)
-        # Минимум: первое событие — message_start с conv-1
-        assert "event: message_start" in joined
-        assert "conv-1" in joined
-        # Должен быть хотя бы один block_start или block_delta
-        assert "event: block_" in joined
+        assert resp.status_code == 200, resp.text
+        body = resp.json()
+        assert body["id"] == "msg-abc"
+        assert body["status"] == "complete"
+        assert body["content"] == [{"type": "text", "content": "Ответ"}]
+
+    def test_get_single_message_streaming(self):
+        """GET /messages/{id}: streaming-сообщение возвращает status='streaming'."""
+        settings = _make_settings()
+        conv = self._conv_with_get(settings)
+        msg = _make_msg_service(settings)
+        msg.get_message = AsyncMock(return_value={
+            "id": "msg-xyz",
+            "conversation_id": "conv-1",
+            "role": "assistant",
+            "content": [{"type": "reasoning", "block_id": "r1", "content": "думаю..."}],
+            "status": "streaming",
+        })
+
+        app = _build_app(
+            conv_service=conv,
+            msg_service=msg,
+            file_service=_make_file_service(settings),
+        )
+
+        with TestClient(app) as client:
+            resp = client.get("/api/v1/chat/conversations/conv-1/messages/msg-xyz")
+
+        assert resp.status_code == 200, resp.text
+        body = resp.json()
+        assert body["id"] == "msg-xyz"
+        assert body["status"] == "streaming"
+        assert len(body["content"]) == 1
+        assert body["content"][0]["block_id"] == "r1"
+
+    def test_get_single_message_not_found_returns_404(self):
+        """GET /messages/{id}: несуществующий id → 404 ChatMessageNotFoundError."""
+        settings = _make_settings()
+        conv = self._conv_with_get(settings)
+        msg = _make_msg_service(settings)
+        msg.get_message = AsyncMock(
+            side_effect=ChatMessageNotFoundError("Сообщение не найдено.")
+        )
+
+        app = _build_app(
+            conv_service=conv,
+            msg_service=msg,
+            file_service=_make_file_service(settings),
+        )
+
+        with TestClient(app) as client:
+            resp = client.get("/api/v1/chat/conversations/conv-1/messages/no-such-id")
+
+        assert resp.status_code == 404, resp.text
+        assert "не найдено" in resp.json()["detail"].lower()
+
+    def test_get_single_message_wrong_conversation_returns_404(self):
+        """GET /messages/{id}: conv_service.get бросает 404 если беседа не принадлежит юзеру."""
+        settings = _make_settings()
+        conv = _make_conv_service(settings)
+        conv.get.side_effect = ConversationNotFoundError("Беседа не найдена")
+        msg = _make_msg_service(settings)
+
+        app = _build_app(
+            conv_service=conv,
+            msg_service=msg,
+            file_service=_make_file_service(settings),
+        )
+
+        with TestClient(app) as client:
+            resp = client.get("/api/v1/chat/conversations/foreign-conv/messages/msg-1")
+
+        assert resp.status_code == 404, resp.text
 
 
 # -------------------------------------------------------------------------

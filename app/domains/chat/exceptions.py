@@ -11,6 +11,12 @@ class ConversationNotFoundError(AppError):
     code: ClassVar[str] = "conversation-not-found"
 
 
+class ChatMessageNotFoundError(AppError):
+    """Сообщение чата не найдено."""
+    status_code = 404
+    code: ClassVar[str] = "chat-message-not-found"
+
+
 class ChatFileNotFoundError(AppError):
     """Файл чата не найден."""
     status_code = 404

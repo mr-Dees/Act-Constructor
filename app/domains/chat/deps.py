@@ -25,6 +25,7 @@ from app.domains.chat.services.chat_audit_service import ChatAuditService
 from app.domains.chat.services.conversation_service import ConversationService
 from app.domains.chat.services.file_service import FileService
 from app.domains.chat.services.message_service import MessageService
+from app.domains.chat.services.agent_channel import AgentChannelService
 from app.domains.chat.services.agent_channel_poller import AgentChannelPoller
 from app.domains.chat.services.poll_coordinator import PollCoordinator
 from app.domains.chat.services.user_rate_limiter import UserRateLimiter
@@ -168,6 +169,12 @@ async def get_file_service() -> AsyncGenerator[FileService, None]:
             settings=_get_chat_settings(),
             audit_service=audit,
         )
+
+
+async def get_agent_channel_service() -> AsyncGenerator[AgentChannelService, None]:
+    """Создаёт AgentChannelService с подключением из пула."""
+    async with get_db() as conn:
+        yield AgentChannelService(conn, _get_chat_settings())
 
 
 async def get_tool_metrics_repository() -> AsyncGenerator[

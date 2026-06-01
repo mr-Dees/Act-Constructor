@@ -85,6 +85,14 @@ class MessageRepository(BaseRepository):
             conversation_id,
         )
 
+    async def get_by_id(self, message_id: str) -> dict | None:
+        """Возвращает одно сообщение по id или None, если не найдено."""
+        row = await self.conn.fetchrow(
+            f"SELECT * FROM {self.table} WHERE id = $1",
+            message_id,
+        )
+        return self._parse_row(row) if row else None
+
     # ── streaming-методы (Phase 0 «D»: server-authoritative state) ──────────
     # Стратегия: read-modify-write под FOR UPDATE — на GP 6.x / PG 9.4 нет
     # jsonb_set и оператора `||` для jsonb. Транзакция гарантирует, что

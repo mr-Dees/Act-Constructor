@@ -3,7 +3,7 @@
 import logging
 import uuid
 
-from app.domains.chat.exceptions import ChatLimitError
+from app.domains.chat.exceptions import ChatLimitError, ChatMessageNotFoundError
 from app.domains.chat.repositories.conversation_repository import ConversationRepository
 from app.domains.chat.repositories.message_repository import MessageRepository
 from app.domains.chat.services.chat_audit_service import ChatAuditService
@@ -139,6 +139,21 @@ class MessageService:
         )
         total = await self.msg_repo.count_by_conversation(conversation_id)
         return items, total
+
+    async def get_message(
+        self,
+        conversation_id: str,
+        message_id: str,
+    ) -> dict:
+        """Возвращает одно сообщение, принадлежащее беседе.
+
+        Поднимает ChatMessageNotFoundError (404), если сообщение не найдено
+        или принадлежит другой беседе.
+        """
+        message = await self.msg_repo.get_by_id(message_id)
+        if message is None or message.get("conversation_id") != conversation_id:
+            raise ChatMessageNotFoundError("Сообщение не найдено.")
+        return message
 
     async def load_history_for_llm(
         self,
