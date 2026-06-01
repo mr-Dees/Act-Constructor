@@ -237,32 +237,36 @@ export class SettingsMenuManager {
     }
 
     /**
-     * Синхронизирует селект режима ОАРБ с localStorage
+     * Синхронизирует сегмент-контрол режима ОАРБ с localStorage
      * @private
      */
     static _applyOarbMode() {
-        const select = document.querySelector('[data-oarb-mode]');
-        if (select) {
-            select.value = this._getOarbMode();
+        const mode = this._getOarbMode();
+        const btns = document.querySelectorAll('[data-oarb-mode] [data-oarb-mode-option]');
+        for (const btn of btns) {
+            btn.setAttribute('aria-pressed', String(btn.dataset.oarbModeOption === mode));
         }
     }
 
     /**
-     * Обработчик изменения режима ОАРБ
+     * Обработчики клика по кнопкам сегмент-контрола режима ОАРБ
      * @private
      */
     static _setupOarbModeSelect() {
-        const select = document.querySelector('[data-oarb-mode]');
-        if (!select) return;
-
-        select.addEventListener('change', () => {
-            const val = this._validOarbModes.includes(select.value) ? select.value : 'off';
-            try {
-                localStorage.setItem(this._oarbModeKey, val);
-            } catch (e) {
-                console.warn('SettingsMenuManager: не удалось сохранить режим ОАРБ', e);
-            }
-        });
+        const btns = document.querySelectorAll('[data-oarb-mode] [data-oarb-mode-option]');
+        for (const btn of btns) {
+            btn.addEventListener('click', () => {
+                const val = this._validOarbModes.includes(btn.dataset.oarbModeOption)
+                    ? btn.dataset.oarbModeOption
+                    : 'off';
+                try {
+                    localStorage.setItem(this._oarbModeKey, val);
+                } catch (e) {
+                    console.warn('SettingsMenuManager: не удалось сохранить режим ОАРБ', e);
+                }
+                this._applyOarbMode();
+            });
+        }
     }
 
     /**

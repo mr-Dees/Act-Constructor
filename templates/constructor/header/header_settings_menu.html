@@ -74,11 +74,11 @@
                         <div class="settings-option-label">{{ kb.label }}</div>
                         <div class="settings-option-desc">{{ kb.description }}</div>
                     </div>
-                    <select data-oarb-mode class="oarb-mode-select">
-                        <option value="off">Выключен</option>
-                        <option value="adaptive">Адаптивный</option>
-                        <option value="always">Всегда</option>
-                    </select>
+                    <div data-oarb-mode class="oarb-mode-switch" role="group" aria-label="Режим ОАРБ">
+                        <button type="button" class="oarb-mode-switch__btn" data-oarb-mode-option="off" aria-pressed="true">Выкл</button>
+                        <button type="button" class="oarb-mode-switch__btn" data-oarb-mode-option="adaptive" aria-pressed="false">Адаптивный</button>
+                        <button type="button" class="oarb-mode-switch__btn" data-oarb-mode-option="always" aria-pressed="false">Всегда</button>
+                    </div>
                 </div>
                 {% else %}
                 <div class="settings-option settings-option--disabled" data-kb-key="{{ kb.key }}" data-kb-label="{{ kb.label }}">
