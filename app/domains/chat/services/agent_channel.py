@@ -224,6 +224,10 @@ class AgentChannelService:
         question_uid: str,
     ) -> None:
         """Помечает draft как failed (error-блок таймаута) и ставит вопросу status='timeout'."""
+        # Best-effort без общей транзакции: если set_status упадёт после
+        # mark_failed, строка в agent_messages останется в pending — побочных
+        # эффектов нет, reconcile её не подхватит (chat_message уже failed, а
+        # get_streaming_drafts отбирает только status='streaming').
         await self._message_repo().mark_failed(
             message_id=assistant_message_id,
             error_block=build_timeout_error_block(),

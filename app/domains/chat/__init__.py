@@ -292,6 +292,9 @@ def _register_lifespan_hooks() -> None:
         app.state.chat_agent_channel_poller = poller
         await poller.reconcile()
         poller.start()
+        register_background_task(
+            "chat.agent_channel_poller", poller.get_status,
+        )
 
     async def _stop_agent_channel_poller(app: FastAPI) -> None:
         """Останавливает AgentChannelPoller и сбрасывает ссылку в deps."""
@@ -299,6 +302,7 @@ def _register_lifespan_hooks() -> None:
 
         logger = logging.getLogger("audit_workstation.domains.chat.lifecycle")
         poller = getattr(app.state, "chat_agent_channel_poller", None)
+        unregister_background_task("chat.agent_channel_poller")
         try:
             set_agent_channel_poller(None)
         except Exception:

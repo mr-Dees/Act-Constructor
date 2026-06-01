@@ -148,6 +148,24 @@ class TestReconcile:
         assert len(poller._subscriptions) == 1
 
 
+# ── get_status ─────────────────────────────────────────────────────────────────
+
+
+class TestGetStatus:
+
+    def test_get_status_structure(self, settings):
+        poller = _make_poller(settings)
+        poller.subscribe(assistant_message_id="m1", question_uid="Q1")
+        status = poller.get_status()
+        assert status["name"] == "chat.agent_channel_poller"
+        assert status["running"] is False  # задача не запущена
+        assert status["active_subscriptions"] == 1
+        assert (
+            status["current_interval_sec"]
+            == settings.agent_channel.poll_min_interval_sec
+        )
+
+
 # ── _tick ──────────────────────────────────────────────────────────────────────
 
 

@@ -15,7 +15,6 @@ from __future__ import annotations
 import asyncio
 import logging
 import time as _time_module
-from contextlib import asynccontextmanager
 from typing import Any, Callable
 
 from app.domains.chat.settings import ChatDomainSettings
@@ -53,6 +52,17 @@ class AgentChannelPoller:
 
         self._stop = False
         self._task: asyncio.Task | None = None
+        # Текущий интервал backoff'а — для diagnostics-снимка (get_status).
+        self._current_interval: float = settings.agent_channel.poll_min_interval_sec
+
+    def get_status(self) -> dict:
+        """Снимок состояния поллера для diagnostics-endpoint'а."""
+        return {
+            "name": "chat.agent_channel_poller",
+            "running": self._task is not None and not self._task.done(),
+            "active_subscriptions": len(self._subscriptions),
+            "current_interval_sec": self._current_interval,
+        }
 
     def _get_db_cm(self):
         """Возвращает async-контекстменеджер коннекта.
@@ -211,12 +221,15 @@ class AgentChannelPoller:
                 )
                 interval = cfg.poll_min_interval_sec
 
+            self._current_interval = interval
             await asyncio.sleep(interval)
 
     # ── Lifecycle ─────────────────────────────────────────────────────────────
 
     def start(self) -> None:
-        """Создаёт asyncio-задачу фонового цикла."""
+        """Создаёт asyncio-задачу фонового цикла. Идемпотентно."""
+        if self._task is not None and not self._task.done():
+            return
         self._stop = False
         self._task = asyncio.create_task(
             self._run(), name="chat-agent-channel-poller",
