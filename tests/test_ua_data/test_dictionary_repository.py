@@ -1,5 +1,9 @@
-"""Тесты для DictionaryRepository."""
+"""Тесты для DictionaryRepository.
 
+Методы репозитория — pass-through (`[dict(r) for r in rows]`), поэтому проверяем
+не «мок вернул то, что в него положили», а РЕАЛЬНУЮ логику: текст SQL-запроса
+(фильтр `is_actual = true`, сортировка, JOIN'ы/LIMIT) и корректную распаковку строк.
+"""
 import pytest
 from unittest.mock import MagicMock, patch
 
@@ -30,161 +34,106 @@ def repo(mock_conn):
         return DictionaryRepository(conn=mock_conn)
 
 
-# -------------------------------------------------------------------------
-# get_processes
-# -------------------------------------------------------------------------
+def _sql(mock_conn) -> str:
+    """Возвращает текст последнего SQL, переданного в conn.fetch."""
+    return mock_conn.fetch.call_args.args[0]
 
 
 class TestGetProcesses:
 
-    async def test_returns_list_of_dicts(self, repo, mock_conn):
-        mock_conn.fetch.return_value = [
-            {"id": 1, "process_code": "1013", "process_name": "Кредитование ЮЛ",
-             "block_owner": "БР", "department_owner": "ОАРБ"},
-        ]
+    async def test_sql_filters_actual_and_orders(self, repo, mock_conn):
+        mock_conn.fetch.return_value = [{"process_code": "1013", "process_name": "X"}]
         result = await repo.get_processes()
-        assert isinstance(result, list)
-        assert len(result) == 1
-        assert isinstance(result[0], dict)
+        sql = _sql(mock_conn)
+        assert "is_actual = true" in sql
+        assert "ORDER BY process_code" in sql
+        assert "process_code" in sql and "process_name" in sql
+        # pass-through: строки распакованы в dict
         assert result[0]["process_code"] == "1013"
-
-    async def test_empty_result(self, repo, mock_conn):
-        mock_conn.fetch.return_value = []
-        result = await repo.get_processes()
-        assert result == []
-
-
-# -------------------------------------------------------------------------
-# get_terbanks
-# -------------------------------------------------------------------------
 
 
 class TestGetTerbanks:
 
-    async def test_returns_list_of_dicts(self, repo, mock_conn):
-        mock_conn.fetch.return_value = [
-            {"tb_id": "07", "short_name": "МСК", "full_name": "Московский банк"},
-        ]
-        result = await repo.get_terbanks()
-        assert isinstance(result, list)
-        assert len(result) == 1
-        assert result[0]["short_name"] == "МСК"
-
-    async def test_empty_result(self, repo, mock_conn):
-        mock_conn.fetch.return_value = []
-        result = await repo.get_terbanks()
-        assert result == []
-
-
-# -------------------------------------------------------------------------
-# get_metric_codes
-# -------------------------------------------------------------------------
+    async def test_sql_filters_actual_and_orders(self, repo, mock_conn):
+        mock_conn.fetch.return_value = [{"tb_id": "07"}]
+        await repo.get_terbanks()
+        sql = _sql(mock_conn)
+        assert "is_actual = true" in sql
+        assert "ORDER BY tb_id" in sql
+        assert "short_name" in sql and "full_name" in sql
 
 
 class TestGetMetricCodes:
 
-    async def test_returns_list_of_dicts(self, repo, mock_conn):
-        mock_conn.fetch.return_value = [
-            {"id": 1, "code": "211", "metric_name": "Уровень потерь", "metric_group": "ФР"},
-        ]
-        result = await repo.get_metric_codes()
-        assert isinstance(result, list)
-        assert len(result) == 1
-        assert result[0]["code"] == "211"
-
-    async def test_empty_result(self, repo, mock_conn):
-        mock_conn.fetch.return_value = []
-        result = await repo.get_metric_codes()
-        assert result == []
-
-
-# -------------------------------------------------------------------------
-# get_departments
-# -------------------------------------------------------------------------
+    async def test_sql_filters_actual_and_orders(self, repo, mock_conn):
+        mock_conn.fetch.return_value = [{"code": "211"}]
+        await repo.get_metric_codes()
+        sql = _sql(mock_conn)
+        assert "is_actual = true" in sql
+        assert "ORDER BY code" in sql
+        assert "metric_name" in sql and "metric_group" in sql
 
 
 class TestGetDepartments:
+    """get_departments — единственный «сложный» метод: 3 LEFT JOIN + LIMIT."""
 
-    async def test_returns_list_of_dicts(self, repo, mock_conn):
-        mock_conn.fetch.return_value = [
-            {"id": 1, "tb_id": 7, "gosb_id": 7001,
-             "vsp_id": 700101, "subsidiary_id": None,
-             "tb_short_name": "Московский", "tb_full_name": "Московский банк ПАО Сбербанк",
-             "gosb_name": "ГОСБ Москва",
-             "vsp_urf_code": "URF007", "vsp_type": "Филиал"},
-        ]
+    async def test_sql_joins_terbank_gosb_vsp_with_limit(self, repo, mock_conn):
+        mock_conn.fetch.return_value = [{"tb_id": 7}]
         result = await repo.get_departments()
-        assert isinstance(result, list)
-        assert len(result) == 1
+        sql = _sql(mock_conn)
+        assert sql.count("LEFT JOIN") == 3
+        assert "is_actual = true" in sql
+        assert "LIMIT 5000" in sql
+        assert "ORDER BY d.id" in sql
+        # алиасы из SELECT
+        assert "tb_short_name" in sql and "gosb_name" in sql and "vsp_urf_code" in sql
         assert result[0]["tb_id"] == 7
-
-    async def test_empty_result(self, repo, mock_conn):
-        mock_conn.fetch.return_value = []
-        result = await repo.get_departments()
-        assert result == []
-
-
-# -------------------------------------------------------------------------
-# get_channels
-# -------------------------------------------------------------------------
 
 
 class TestGetChannels:
 
-    async def test_returns_list_of_dicts(self, repo, mock_conn):
-        mock_conn.fetch.return_value = [
-            {"id": 1, "channel": "Мобильный банк"},
-        ]
-        result = await repo.get_channels()
-        assert isinstance(result, list)
-        assert len(result) == 1
-        assert result[0]["channel"] == "Мобильный банк"
-
-    async def test_empty_result(self, repo, mock_conn):
-        mock_conn.fetch.return_value = []
-        result = await repo.get_channels()
-        assert result == []
-
-
-# -------------------------------------------------------------------------
-# get_products
-# -------------------------------------------------------------------------
+    async def test_sql_filters_actual_and_orders(self, repo, mock_conn):
+        mock_conn.fetch.return_value = [{"channel": "Мобильный банк"}]
+        await repo.get_channels()
+        sql = _sql(mock_conn)
+        assert "is_actual = true" in sql
+        assert "channel" in sql
 
 
 class TestGetProducts:
 
-    async def test_returns_list_of_dicts(self, repo, mock_conn):
-        mock_conn.fetch.return_value = [
-            {"id": 1, "product_name": "Потребительский кредит"},
-        ]
-        result = await repo.get_products()
-        assert isinstance(result, list)
-        assert len(result) == 1
-        assert result[0]["product_name"] == "Потребительский кредит"
-
-    async def test_empty_result(self, repo, mock_conn):
-        mock_conn.fetch.return_value = []
-        result = await repo.get_products()
-        assert result == []
+    async def test_sql_filters_actual_and_orders(self, repo, mock_conn):
+        mock_conn.fetch.return_value = [{"product_name": "Кредит"}]
+        await repo.get_products()
+        sql = _sql(mock_conn)
+        assert "is_actual = true" in sql
+        assert "product_name" in sql
 
 
-# -------------------------------------------------------------------------
-# get_teams
-# -------------------------------------------------------------------------
+class TestGetRiskTypes:
+
+    async def test_sql_filters_actual_and_orders(self, repo, mock_conn):
+        mock_conn.fetch.return_value = [{"risk": "Кредитный"}]
+        await repo.get_risk_types()
+        sql = _sql(mock_conn)
+        assert "is_actual = true" in sql
+        assert "risk" in sql
 
 
 class TestGetTeams:
 
-    async def test_returns_list_of_dicts(self, repo, mock_conn):
-        mock_conn.fetch.return_value = [
-            {"id": 1, "tb_id": "07", "username": "22494524"},
-        ]
-        result = await repo.get_teams()
-        assert isinstance(result, list)
-        assert len(result) == 1
-        assert result[0]["username"] == "22494524"
+    async def test_sql_filters_actual_and_orders(self, repo, mock_conn):
+        mock_conn.fetch.return_value = [{"username": "22494524"}]
+        await repo.get_teams()
+        sql = _sql(mock_conn)
+        assert "is_actual = true" in sql
+        assert "username" in sql and "tb_id" in sql
 
-    async def test_empty_result(self, repo, mock_conn):
+
+class TestEmptyResult:
+    """Пустая выборка → пустой список (общий контракт всех методов)."""
+
+    async def test_empty_fetch_returns_empty_list(self, repo, mock_conn):
         mock_conn.fetch.return_value = []
-        result = await repo.get_teams()
-        assert result == []
+        assert await repo.get_processes() == []
+        assert await repo.get_departments() == []

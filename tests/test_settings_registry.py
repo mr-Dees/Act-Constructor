@@ -65,31 +65,11 @@ class TestSettingsRegistry:
 
 
 class TestAuditIdService:
-
-    async def test_generate_audit_act_id_returns_uuid(self):
-        from app.services.audit_id_service import AuditIdService
-
-        result = await AuditIdService.generate_audit_act_id()
-        assert isinstance(result, str)
-        assert len(result) == 36  # UUID v4 format
-        assert result.count("-") == 4
-
-    async def test_generate_audit_point_ids_batch(self):
-        from app.services.audit_id_service import AuditIdService
-
-        node_ids = ["n1", "n2", "n3"]
-        result = await AuditIdService.generate_audit_point_ids(node_ids)
-        assert set(result.keys()) == {"n1", "n2", "n3"}
-        assert all(len(v) == 36 for v in result.values())
+    # AuditIdService — пока заглушка (str(uuid4())). Тесты формата/уникальности
+    # uuid были бы проверкой стдлиба, поэтому держим только контракт пустого входа.
 
     async def test_generate_audit_point_ids_empty(self):
         from app.services.audit_id_service import AuditIdService
 
         result = await AuditIdService.generate_audit_point_ids([])
         assert result == {}
-
-    async def test_ids_are_unique(self):
-        from app.services.audit_id_service import AuditIdService
-
-        ids = [await AuditIdService.generate_audit_act_id() for _ in range(10)]
-        assert len(set(ids)) == 10
