@@ -231,7 +231,7 @@ export const ChatMessages = {
         botContainer.appendChild(errDiv);
 
         // Тост — пусть пользователь увидит даже при переключении беседы
-        if (window.Notifications && typeof Notifications.error === 'function') {
+        if (typeof Notifications !== 'undefined' && typeof Notifications.error === 'function') {
             try { Notifications.error('Не удалось получить ответ от сервера.'); } catch { /* некритично */ }
         }
     },
