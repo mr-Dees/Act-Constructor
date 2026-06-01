@@ -275,6 +275,23 @@ export const ChatContext = {
     },
 
     /**
+     * Возвращает выбранный режим агента ОАРБ.
+     * Читает из localStorage['assistant_oarb_mode'];
+     * если значение отсутствует или невалидно — возвращает 'off'.
+     *
+     * @returns {'off'|'adaptive'|'always'}
+     */
+    getAgentMode() {
+        const valid = ['off', 'adaptive', 'always'];
+        try {
+            const val = localStorage.getItem('assistant_oarb_mode');
+            return valid.includes(val) ? val : 'off';
+        } catch {
+            return 'off';
+        }
+    },
+
+    /**
      * Загружает маппинг key->label баз знаний из DOM
      * @returns {Object<string, string>}
      * @private

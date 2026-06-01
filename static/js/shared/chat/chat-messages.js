@@ -156,9 +156,7 @@ export const ChatMessages = {
             // Показываем typing-bubble сразу
             const botContainer = this._addBotMessageStreaming();
 
-            // Режим агента — появится в ChatContext позже; сейчас читаем защищённо
-            // TODO: ChatContext.getAgentMode появится при добавлении трёхрежимного
-            // переключателя ОАРБ; до тех пор всегда 'off'
+            // Режим агента: читает localStorage['assistant_oarb_mode'] через ChatContext
             const agentMode = (window.ChatContext
                 && typeof ChatContext.getAgentMode === 'function'
                 && ChatContext.getAgentMode()) || 'off';

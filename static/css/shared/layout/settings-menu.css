@@ -314,6 +314,37 @@
     color: var(--text-secondary);
 }
 
+/* Задизейбленная опция (базы знаний «источников» и «инструментов») */
+.settings-option--disabled {
+    opacity: 0.45;
+    cursor: default;
+    pointer-events: none;
+}
+
+/* Трёхрежимный селект для базы знаний ОАРБ */
+.oarb-mode-select {
+    font-size: var(--font-size-xs);
+    font-family: var(--font-family-base);
+    color: var(--text-primary);
+    background: var(--input-bg);
+    border: var(--border-width-thin) solid var(--input-border);
+    border-radius: var(--radius-sm);
+    padding: var(--spacing-xs) var(--spacing-sm);
+    cursor: pointer;
+    flex-shrink: 0;
+    transition: var(--transition-all);
+}
+
+.oarb-mode-select:hover {
+    border-color: var(--input-border-hover);
+}
+
+.oarb-mode-select:focus {
+    outline: none;
+    border-color: var(--input-border-focus);
+    box-shadow: var(--input-focus-shadow);
+}
+
 /* Иконка информации */
 .settings-menu .info-icon {
     color: var(--info);

@@ -9,16 +9,30 @@
             <h5 class="settings-section-title">AI Ассистенты</h5>
 
             {% for kb in knowledge_bases | default([]) %}
+            {% if kb.key == 'knowledge_base_oarb' %}
             <div class="settings-option" data-kb-key="{{ kb.key }}" data-kb-label="{{ kb.label }}">
                 <div class="settings-option-info">
                     <div class="settings-option-label">{{ kb.label }}</div>
                     <div class="settings-option-desc">{{ kb.description }}</div>
                 </div>
+                <select data-oarb-mode class="oarb-mode-select">
+                    <option value="off">Выключен</option>
+                    <option value="adaptive">Адаптивный</option>
+                    <option value="always">Всегда</option>
+                </select>
+            </div>
+            {% else %}
+            <div class="settings-option settings-option--disabled" data-kb-key="{{ kb.key }}" data-kb-label="{{ kb.label }}">
+                <div class="settings-option-info">
+                    <div class="settings-option-label">{{ kb.label }}</div>
+                    <div class="settings-option-desc">{{ kb.description }}</div>
+                </div>
                 <label class="theme-switch">
-                    <input type="checkbox" data-kb-key="{{ kb.key }}">
+                    <input type="checkbox" data-kb-key="{{ kb.key }}" disabled>
                     <span class="theme-slider"></span>
                 </label>
             </div>
+            {% endif %}
             {% endfor %}
         </div>
 
