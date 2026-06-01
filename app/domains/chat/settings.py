@@ -57,6 +57,17 @@ class AgentBridgeSettings(BaseModel):
     max_block_text_size: int = Field(default=262144, gt=0)
 
 
+class AgentChannelSettings(BaseModel):
+    """Параметры канала к внешнему агенту через bus-таблицу agent_messages."""
+
+    table_name: str = "agent_messages"
+    poll_min_interval_sec: float = 2.0
+    poll_max_interval_sec: float = 10.0
+    poll_backoff_multiplier: float = 1.5
+    answer_timeout_sec: int = 600  # 10 минут
+    max_block_text_size: int = 262144
+
+
 class ChatDomainSettings(BaseModel):
     """Настройки AI-ассистента и чата."""
 
@@ -109,9 +120,10 @@ class ChatDomainSettings(BaseModel):
     # Поведение small-talk
     smalltalk_mode: Literal["local", "forward"] = "local"
 
-    # Retry-политика и мост к внешнему агенту
+    # Retry-политика, мост к внешнему агенту и канал через bus-таблицу
     retry: RetryPolicy = Field(default_factory=RetryPolicy)
     agent_bridge: AgentBridgeSettings = Field(default_factory=AgentBridgeSettings)
+    agent_channel: AgentChannelSettings = Field(default_factory=AgentChannelSettings)
 
     # Оркестрация
     system_prompt: str = (

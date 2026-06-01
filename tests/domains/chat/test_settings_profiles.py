@@ -113,3 +113,14 @@ def test_invalid_profile_rejected():
             api_key="x",
             model="m",
         )
+
+
+def test_agent_channel_settings_defaults():
+    from app.domains.chat.settings import AgentChannelSettings
+    s = AgentChannelSettings()
+    assert s.table_name == "agent_messages"
+    assert s.answer_timeout_sec == 600
+    assert s.poll_min_interval_sec == 2.0
+    assert s.poll_max_interval_sec == 10.0
+    assert s.poll_backoff_multiplier == 1.5
+    assert s.max_block_text_size == 262144
