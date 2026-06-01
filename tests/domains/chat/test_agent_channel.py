@@ -300,20 +300,6 @@ class TestAgentChannelServiceSubmit:
 
 class TestAgentChannelServiceTryFinalize:
 
-    def _make_svc(self, mock_conn, settings, *, question=None, answer=None):
-        """Вспомогательный метод: создаёт сервис с запатченными репозиториями."""
-        svc = AgentChannelService(mock_conn, settings)
-
-        async def fake_get_by_uid(self_repo, uid):
-            if uid == "q-uid":
-                return question
-            if uid == "a-uid":
-                return answer
-            return None
-
-        svc._agent_repo = lambda: _FakeAgentRepo(question=question, answer=answer)
-        return svc
-
     async def test_no_reply_to_returns_pending(self, mock_conn, settings):
         """Если reply_to ещё нет — возвращает 'pending'."""
         question = {
