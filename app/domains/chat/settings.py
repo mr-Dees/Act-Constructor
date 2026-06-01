@@ -60,12 +60,12 @@ class AgentBridgeSettings(BaseModel):
 class AgentChannelSettings(BaseModel):
     """Параметры канала к внешнему агенту через bus-таблицу agent_messages."""
 
-    table_name: str = "agent_messages"
-    poll_min_interval_sec: float = 2.0
-    poll_max_interval_sec: float = 10.0
-    poll_backoff_multiplier: float = 1.5
-    answer_timeout_sec: int = 600  # 10 минут
-    max_block_text_size: int = 262144
+    table_name: str = Field(default="agent_messages")
+    poll_min_interval_sec: float = Field(default=2.0, gt=0.0)
+    poll_max_interval_sec: float = Field(default=10.0, gt=0.0)
+    poll_backoff_multiplier: float = Field(default=1.5, gt=1.0)
+    answer_timeout_sec: int = Field(default=600, gt=0)  # 10 минут
+    max_block_text_size: int = Field(default=262144, gt=0)
 
 
 class ChatDomainSettings(BaseModel):
