@@ -20,7 +20,6 @@ from app.domains.chat.deps import (
 )
 from app.domains.chat.exceptions import (
     ChatFileValidationError,
-    ChatMessageNotFoundError,
 )
 from app.domains.chat.schemas.responses import FileUploadResponse, MessageResponse
 from app.domains.chat.services.agent_channel import AgentChannelService
@@ -201,6 +200,7 @@ async def send_message(
             message_id=assistant_message_id,
             domains=domains_list,
             file_blocks=file_blocks if file_blocks else None,
+            user_id=username,
         )
     except Exception:
         logger.exception(
