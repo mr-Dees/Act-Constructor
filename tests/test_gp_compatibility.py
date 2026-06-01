@@ -301,6 +301,71 @@ class TestGreenplumSchemaCompatibility:
             "UNIQUE(request_id, seq) на agent_response_events не найден в GP-схеме"
         )
 
+    def test_agent_messages_gp_distribution_and_pk(self):
+        """agent_messages в GP-схеме имеет DISTRIBUTED BY (chat_id) ⊆ PRIMARY KEY (id, chat_id)."""
+        schema_path = (
+            Path(__file__).parent.parent
+            / "app" / "domains" / "chat" / "migrations" / "greenplum" / "schema.sql"
+        )
+        content = schema_path.read_text(encoding="utf-8")
+        stmts = DatabaseAdapter._split_sql_statements(content)
+
+        create_stmt = None
+        for raw in stmts:
+            cleaned = re.sub(r'--[^\n]*', '', raw)
+            if (
+                re.search(r'\bCREATE\s+TABLE\b', cleaned, re.IGNORECASE)
+                and "{PREFIX}agent_messages" in cleaned
+            ):
+                create_stmt = cleaned
+                break
+
+        assert create_stmt is not None, (
+            "GP-схема chat: CREATE TABLE agent_messages не найдено"
+        )
+
+        # DISTRIBUTED BY (chat_id) присутствует
+        assert re.search(
+            r'DISTRIBUTED\s+BY\s*\(\s*chat_id\s*\)', create_stmt, re.IGNORECASE
+        ), "DISTRIBUTED BY (chat_id) не найден в CREATE TABLE agent_messages"
+
+        # PRIMARY KEY содержит и id, и chat_id
+        pk_match = re.search(r'PRIMARY\s+KEY\s*\(([^)]+)\)', create_stmt, re.IGNORECASE)
+        assert pk_match is not None, (
+            "PRIMARY KEY не найден в CREATE TABLE agent_messages"
+        )
+        pk_cols = {c.strip().lower() for c in pk_match.group(1).split(',')}
+        assert 'chat_id' in pk_cols, (
+            f"chat_id отсутствует в PRIMARY KEY agent_messages: {pk_cols}"
+        )
+        assert 'id' in pk_cols, (
+            f"id отсутствует в PRIMARY KEY agent_messages: {pk_cols}"
+        )
+
+    def test_gp_schema_no_forbidden_constructs(self):
+        """GP-схема chat не содержит конструкций, запрещённых в GP 6.x / PG 9.4."""
+        schema_path = (
+            Path(__file__).parent.parent
+            / "app" / "domains" / "chat" / "migrations" / "greenplum" / "schema.sql"
+        )
+        content = schema_path.read_text(encoding="utf-8")
+        # Вырезаем line-комментарии перед проверкой
+        stripped = re.sub(r'--[^\n]*', '', content)
+
+        forbidden = {
+            'SKIP LOCKED': re.compile(r'\bSKIP\s+LOCKED\b', re.IGNORECASE),
+            'jsonb_set()': re.compile(r'\bjsonb_set\s*\(', re.IGNORECASE),
+            'ON CONFLICT': re.compile(r'\bON\s+CONFLICT\b', re.IGNORECASE),
+            'gen_random_uuid()': re.compile(r'\bgen_random_uuid\s*\(', re.IGNORECASE),
+        }
+        violations = [
+            name for name, pat in forbidden.items() if pat.search(stripped)
+        ]
+        assert not violations, (
+            f"GP-схема chat содержит конструкции, запрещённые в GP 6.x: "
+            + ", ".join(violations)
+        )
+
 
 # ---------------------------------------------------------------------------
 # 2. SQL Statement Splitter (_split_sql_statements)

@@ -56,6 +56,9 @@ ALTER TABLE {SCHEMA}.{PREFIX}chat_messages
     ADD CONSTRAINT check_chat_messages_status_values
     CHECK (status IN ('streaming','complete','failed'));
 
+-- agent_ref: безусловный ALTER, дубль глотает GreenplumAdapter.
+ALTER TABLE {SCHEMA}.{PREFIX}chat_messages ADD COLUMN agent_ref VARCHAR(36);
+
 CREATE INDEX idx_{PREFIX}chat_messages_conversation
     ON {SCHEMA}.{PREFIX}chat_messages(conversation_id);
 
@@ -213,6 +216,47 @@ CREATE TABLE IF NOT EXISTS {SCHEMA}.{PREFIX}agent_responses (
 )
 WITH (appendonly=false)
 DISTRIBUTED BY (request_id);
+
+-- ============================================================================
+-- BUS-ТАБЛИЦА КАНАЛА К ВНЕШНЕМУ АГЕНТУ (nanobot)
+-- ============================================================================
+
+-- «Провод» между AW и агентом. Имена колонок согласованы со стороной nanobot.
+-- chat_id = uid треда (= chat_messages.conversation_id); conversation_id = uid
+-- одного сообщения (на него ссылается reply_to). role 'tool' разрешён, но AW
+-- его пока не обрабатывает.
+CREATE TABLE IF NOT EXISTS {SCHEMA}.{PREFIX}agent_messages (
+    id              VARCHAR(36) NOT NULL,
+    chat_id         VARCHAR(36) NOT NULL,
+    user_id         VARCHAR(50) NOT NULL,
+    conversation_id VARCHAR(36) NOT NULL,
+    role            VARCHAR(20) NOT NULL
+                    CONSTRAINT check_agent_messages_role_values
+                    CHECK (role IN ('user','assistant','tool')),
+    content         TEXT,
+    media           JSONB,
+    metadata        JSONB,
+    reply_to        VARCHAR(36),
+    buttons         JSONB,
+    status          VARCHAR(20) NOT NULL DEFAULT 'pending'
+                    CONSTRAINT check_agent_messages_status_values
+                    CHECK (status IN ('pending','in_progress','complete','error','timeout')),
+    created_at      TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at      TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    -- GP-требование: DISTRIBUTED BY ⊆ PK. id ведущий (lookup WHERE id=$1 по PK).
+    PRIMARY KEY (id, chat_id)
+)
+WITH (appendonly=false)
+DISTRIBUTED BY (chat_id);
+
+CREATE INDEX idx_{PREFIX}agent_messages_chat
+    ON {SCHEMA}.{PREFIX}agent_messages(chat_id, created_at);
+CREATE INDEX idx_{PREFIX}agent_messages_conversation
+    ON {SCHEMA}.{PREFIX}agent_messages(conversation_id);
+CREATE INDEX idx_{PREFIX}agent_messages_status
+    ON {SCHEMA}.{PREFIX}agent_messages(status, created_at);
+CREATE INDEX idx_{PREFIX}agent_messages_reply_to
+    ON {SCHEMA}.{PREFIX}agent_messages(reply_to);
 
 -- ============================================================================
 -- МЕТРИКИ ВЫПОЛНЕНИЯ CHATTOOL'ОВ

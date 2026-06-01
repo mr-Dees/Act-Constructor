@@ -78,6 +78,18 @@ CREATE TABLE IF NOT EXISTS {SCHEMA}.{PREFIX}chat_files (
 );
 CREATE INDEX IF NOT EXISTS idx_{PREFIX}chat_files_conversation ON {SCHEMA}.{PREFIX}chat_files(conversation_id);
 
+-- Ссылка draft-сообщения на строку-вопрос в agent_messages (conversation_id вопроса).
+DO $$
+BEGIN
+    IF NOT EXISTS (
+        SELECT 1 FROM pg_attribute
+        WHERE attrelid = '{SCHEMA}.{PREFIX}chat_messages'::regclass
+          AND attname = 'agent_ref' AND NOT attisdropped
+    ) THEN
+        ALTER TABLE {SCHEMA}.{PREFIX}chat_messages ADD COLUMN agent_ref VARCHAR(36);
+    END IF;
+END$$;
+
 -- ── Sequence для id событий агента (генерация на нашей стороне или у агента) ──
 CREATE SEQUENCE IF NOT EXISTS {SCHEMA}.{PREFIX}agent_response_events_id_seq;
 
@@ -183,6 +195,40 @@ CREATE TABLE IF NOT EXISTS {SCHEMA}.{PREFIX}agent_responses (
     model          VARCHAR(100),
     created_at     TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
+
+-- ── Bus-таблица канала к внешнему агенту (nanobot) ─────────────────────
+-- «Провод» между AW и агентом. Имена колонок согласованы со стороной nanobot.
+-- chat_id = uid треда (= chat_messages.conversation_id); conversation_id = uid
+-- одного сообщения (на него ссылается reply_to). role 'tool' разрешён, но AW
+-- его пока не обрабатывает. Если таблица уже создана стороной агента —
+-- CREATE TABLE IF NOT EXISTS / адаптер делают это безопасно.
+CREATE TABLE IF NOT EXISTS {SCHEMA}.{PREFIX}agent_messages (
+    id              VARCHAR(36) PRIMARY KEY,
+    chat_id         VARCHAR(36) NOT NULL,
+    user_id         VARCHAR(50) NOT NULL,
+    conversation_id VARCHAR(36) NOT NULL,
+    role            VARCHAR(20) NOT NULL
+                    CONSTRAINT check_agent_messages_role_values
+                    CHECK (role IN ('user','assistant','tool')),
+    content         TEXT,
+    media           JSONB,
+    metadata        JSONB,
+    reply_to        VARCHAR(36),
+    buttons         JSONB,
+    status          VARCHAR(20) NOT NULL DEFAULT 'pending'
+                    CONSTRAINT check_agent_messages_status_values
+                    CHECK (status IN ('pending','in_progress','complete','error','timeout')),
+    created_at      TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at      TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+CREATE INDEX IF NOT EXISTS idx_{PREFIX}agent_messages_chat
+    ON {SCHEMA}.{PREFIX}agent_messages(chat_id, created_at);
+CREATE INDEX IF NOT EXISTS idx_{PREFIX}agent_messages_conversation
+    ON {SCHEMA}.{PREFIX}agent_messages(conversation_id);
+CREATE INDEX IF NOT EXISTS idx_{PREFIX}agent_messages_status
+    ON {SCHEMA}.{PREFIX}agent_messages(status, created_at);
+CREATE INDEX IF NOT EXISTS idx_{PREFIX}agent_messages_reply_to
+    ON {SCHEMA}.{PREFIX}agent_messages(reply_to);
 
 -- ── Метрики выполнения ChatTool'ов ────────────────────────────────────
 -- Append-only журнал latency / status / ошибок для каждого вызова tool'а
