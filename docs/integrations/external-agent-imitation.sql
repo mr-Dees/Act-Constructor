@@ -3,9 +3,9 @@
 --  Хелпер-сниппеты для ручной имитации внешнего ИИ-агента (nanobot) в AuditWorkstation
 --  (используется при разработке/тестировании канала agent_messages)
 --
---  Место: docs/external-agent-imitation.sql (НЕ часть продакшен-кода)
+--  Место: docs/integrations/external-agent-imitation.sql (НЕ часть продакшен-кода)
 --  Целевая БД: PostgreSQL (dev) и Greenplum (prod) — все запросы GP-совместимы
---  Связанная документация: docs/developer-guide.md (Chat domain deep-dive §11)
+--  Связанная документация: docs/guides/developer-guide.md (Chat domain deep-dive §11)
 --
 --  ВАЖНО — имена таблиц:
 --    Все таблицы приложения используют общий префикс `t_db_oarb_audit_act_`,

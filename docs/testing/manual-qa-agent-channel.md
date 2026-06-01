@@ -6,7 +6,7 @@
 
 ## Архитектура (кратко)
 
-- Канал к агенту — единая bus-таблица `agent_messages` (вопрос от AW = строка `role='user'`, ответ агента = строка `role='assistant'`). Подробная семантика колонок и сценарии имитации — `docs/external-agent-imitation.sql`.
+- Канал к агенту — единая bus-таблица `agent_messages` (вопрос от AW = строка `role='user'`, ответ агента = строка `role='assistant'`). Подробная семантика колонок и сценарии имитации — `docs/integrations/external-agent-imitation.sql`.
 - Транспорта SSE нет. POST сообщения возвращает `{message_id}`; фронт затем поллит `GET /api/v1/chat/conversations/{cid}/messages/{message_id}` до терминального статуса и рендерит ответ целиком с декоративным «эффектом печати» (токен-стриминга нет).
 - Режим работы задаётся form-параметром `agent_mode`:
   - `off` / `adaptive` — локальная LLM (или GigaChat) исполняется синхронно в POST через `orchestrator.run(...)`. В `adaptive` оркестратор сам решает форвардить (forward-tool в наборе).

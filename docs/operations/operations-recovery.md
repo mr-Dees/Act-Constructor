@@ -1,7 +1,7 @@
-# Operations Recovery Playbook — Act Constructor
+# Operations Recovery Playbook — Audit Workstation
 
 > Реальные сценарии «что-то не так в проде». У каждого: **симптом**, **как диагностировать**, **как починить**.
-> Документ — для оператора, не для разработчика. Глубокая архитектура — [`developer-guide.md`](developer-guide.md). Симптомы со стандартным фиксом — [`troubleshooting.md`](troubleshooting.md).
+> Документ — для оператора, не для разработчика. Глубокая архитектура — [`developer-guide.md`](../guides/developer-guide.md). Симптомы со стандартным фиксом — [`troubleshooting.md`](troubleshooting.md).
 > Плейсхолдеры в SQL: `{SCHEMA}` — `DATABASE__GP__SCHEMA` (например `s_grnplm_ld_audit_da_project_4`); `{PREFIX}` — `DATABASE__TABLE_PREFIX` (default `t_db_oarb_audit_act_`).
 
 ---
@@ -55,7 +55,7 @@ WHERE reply_to IN (... agent_ref из шага 1 ...);
    ```
    После этого фронт при reload/повторном поллинге увидит ErrorBlock вместо typing-индикатора. Чтобы добавить читаемый error-блок в content, лучше дождаться рестарта приложения (reconcile подхватит черновик) либо вызвать `AgentChannelService.mark_timeout(...)` из Python.
 
-**См. также:** dev-guide §11 (Chat domain), `docs/external-agent-imitation.sql` (имитация внешнего агента под единую таблицу).
+**См. также:** dev-guide §11 (Chat domain), `docs/integrations/external-agent-imitation.sql` (имитация внешнего агента под единую таблицу).
 
 ---
 

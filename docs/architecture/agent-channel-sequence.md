@@ -7,9 +7,9 @@
 ответ целиком с декоративным «эффектом печати» (token-стриминга нет).
 
 См. также:
-- [`docs/developer-guide.md §7.8`](developer-guide.md#78-внешний-ии-агент-через-таблицы-бд) — внешний ИИ-агент через таблицы БД (обзор)
-- [`docs/external-agent-imitation.sql`](external-agent-imitation.sql) — SQL-стенд имитации внешнего агента
-- [`docs/chat-frontend-architecture.md`](chat-frontend-architecture.md) — frontend-клиент чата
+- [`docs/guides/developer-guide.md §7.8`](../guides/developer-guide.md#78-внешний-ии-агент-через-таблицы-бд) — внешний ИИ-агент через таблицы БД (обзор)
+- [`docs/integrations/external-agent-imitation.sql`](../integrations/external-agent-imitation.sql) — SQL-стенд имитации внешнего агента
+- [`docs/architecture/chat-frontend-architecture.md`](chat-frontend-architecture.md) — frontend-клиент чата
 
 ---
 

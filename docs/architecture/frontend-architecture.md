@@ -1,6 +1,6 @@
-# Архитектура фронтенда Act Constructor
+# Архитектура фронтенда Audit Workstation
 
-> Единый документ по всему фронту проекта (зоны `shared/`, `portal/`, `constructor/`). Чат описан отдельно — см. главу 14 и [`docs/chat-frontend-architecture.md`](chat-frontend-architecture.md).
+> Единый документ по всему фронту проекта (зоны `shared/`, `portal/`, `constructor/`). Чат описан отдельно — см. главу 14 и [`docs/architecture/chat-frontend-architecture.md`](chat-frontend-architecture.md).
 >
 > Источник истины — код в `static/js/`, `static/css/`, `templates/`. Все ссылки `file:line` сверены grep'ом на момент написания. При расхождении документа и кода — источник истины код.
 
@@ -25,7 +25,7 @@
 
 ## 1. Обзор
 
-Act Constructor — Server-side rendered (Jinja2) + vanilla JS приложение **без бандлера и без npm-зависимостей**. Браузер грузит десятки `<script defer>`-тегов в строго заданном порядке; модули общаются через глобальные синглтоны на `window`. ES-modules не используются (исторически, чтобы упростить деплой в JupyterHub-окружении без node-tooling'а).
+Audit Workstation — Server-side rendered (Jinja2) + vanilla JS приложение **без бандлера и без npm-зависимостей**. Браузер грузит десятки `<script defer>`-тегов в строго заданном порядке; модули общаются через глобальные синглтоны на `window`. ES-modules не используются (исторически, чтобы упростить деплой в JupyterHub-окружении без node-tooling'а).
 
 ### 1.1 Цифры (на момент аудита)
 
@@ -51,7 +51,7 @@ static/js/
 │   │            #   FilterEngine, ck/* (CkTable, CkForm, CkPagination, CkProcessPicker)
 │   ├── dialog/  # DialogBase + DialogManager (confirm/alert)
 │   ├── ck/      # Реюзаемые компоненты ЦК-страниц
-│   └── chat/    # 12 модулей чата — реестр в docs/chat-frontend-architecture.md
+│   └── chat/    # 12 модулей чата — реестр в docs/architecture/chat-frontend-architecture.md
 │
 ├── portal/      # Sidebar-страницы: landing, acts-manager, admin, ck-fin-res, ck-client-exp
 │   ├── acts-manager/   # ActsManagerPage, CreateActDialog, AuditLogDialog,
@@ -95,11 +95,11 @@ CSS повторяет тройное разделение — см. главу 
 
 ### 1.4 Связанные документы
 
-- [`docs/chat-frontend-architecture.md`](chat-frontend-architecture.md) — чат-фронт (565 строк, 12 модулей, SSE).
-- [`docs/developer-guide.md`](developer-guide.md) §4 — высокоуровневый обзор фронта.
-- [`docs/developer-guide.md`](developer-guide.md) §10 — UX/persistence/lock.
-- [`docs/forward-sequence.md`](forward-sequence.md) — sequence-диаграммы forward'а к внешнему агенту.
-- [`docs/cross-domain-contracts.md`](cross-domain-contracts.md) — контракты между бэк-доменами.
+- [`docs/architecture/chat-frontend-architecture.md`](chat-frontend-architecture.md) — чат-фронт (565 строк, 12 модулей, SSE).
+- [`docs/guides/developer-guide.md`](../guides/developer-guide.md) §4 — высокоуровневый обзор фронта.
+- [`docs/guides/developer-guide.md`](../guides/developer-guide.md) §10 — UX/persistence/lock.
+- [`docs/architecture/agent-channel-sequence.md`](agent-channel-sequence.md) — sequence-диаграммы forward'а к внешнему агенту.
+- [`docs/architecture/cross-domain-contracts.md`](cross-domain-contracts.md) — контракты между бэк-доменами.
 - `tests/playwright/` — Playwright e2e smoke-тесты (открытие акта, drag-and-drop, ctrl+s, focus-trap диалогов и т.п.).
 
 ---
@@ -149,7 +149,7 @@ CSS повторяет тройное разделение — см. главу 
 | `shared/dialog/dialog-confirm.js` | `DialogManager` | static class |
 | `shared/ck/{ck-table,ck-pagination,ck-form,ck-process-picker}.js` | `Ck*` | static classes |
 
-**`shared/chat/`** — 12 модулей (ChatEventBus, ChatRenderer, ChatClientActionsRegistry, ChatStream, ChatHistory, ChatUI, ChatFiles, ChatTitle, ChatContext, ChatMessages, ChatManager, ChatModalManager). Полный реестр — [`docs/chat-frontend-architecture.md`](chat-frontend-architecture.md).
+**`shared/chat/`** — 12 модулей (ChatEventBus, ChatRenderer, ChatClientActionsRegistry, ChatStream, ChatHistory, ChatUI, ChatFiles, ChatTitle, ChatContext, ChatMessages, ChatManager, ChatModalManager). Полный реестр — [`docs/architecture/chat-frontend-architecture.md`](chat-frontend-architecture.md).
 
 **`portal/`:**
 
@@ -1073,7 +1073,7 @@ Jinja-фильтр `versioned` (применяется ко всем `url_for('s
 
 ## 14. Чат
 
-Полный гайд по чат-фронту — [`docs/chat-frontend-architecture.md`](chat-frontend-architecture.md) (565 строк, 12 модулей, SSE-маршрутизация, режимы inline/modal/popup, forward к внешнему агенту, типы блоков, ClientActionsRegistry, BlockEmitter, status state machine).
+Полный гайд по чат-фронту — [`docs/architecture/chat-frontend-architecture.md`](chat-frontend-architecture.md) (565 строк, 12 модулей, SSE-маршрутизация, режимы inline/modal/popup, forward к внешнему агенту, типы блоков, ClientActionsRegistry, BlockEmitter, status state machine).
 
 Здесь — только load-bearing **точки сцепки** с остальным фронтом:
 

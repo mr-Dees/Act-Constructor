@@ -9,7 +9,7 @@
 См. также:
 - `app/core/domain_registry.py` — реестр доменов и фабрик
 - `app/core/chat/names.py` — централизованные имена ChatTool и client-actions
-- [`docs/developer-guide.md`](developer-guide.md) — детальное описание архитектуры и паттернов
+- [`docs/guides/developer-guide.md`](../guides/developer-guide.md) — детальное описание архитектуры и паттернов
 
 ---
 
@@ -115,7 +115,7 @@ $ grep -rn "from app.domains.acts" app/domains/admin
 | **Формат** | `f"{message_id}:client_action:{i}"` (детерминированный, нумерация через `BlockIdGenerator`) |
 | **Генерируется в** | `Orchestrator._parse_client_action_result` (`stream_loop.py` для streaming, `agent_loop.py` для non-streaming) и `block_emitter.emit_response_blocks` (forward-путь). Per-message экземпляр `BlockIdGenerator` (`app/core/chat/block_id_generator.py`) — единый счётчик для всех источников эмиссии |
 | **Используется на фронте** | `chat-client-actions.js::executeBlock` — Set исполненных id в `sessionStorage` под ключом `chat:executedActions` |
-| **Что сломается, если изменить формат** | Фронт перестанет распознавать «уже исполненный» при reload вкладки → бесконечный redirect-цикл (action `open_url` будет каждый раз заново переходить по URL). Подробнее — [`developer-guide.md §7.9`](developer-guide.md#79-action-handlers-и-clientactionblock) |
+| **Что сломается, если изменить формат** | Фронт перестанет распознавать «уже исполненный» при reload вкладки → бесконечный redirect-цикл (action `open_url` будет каждый раз заново переходить по URL). Подробнее — [`developer-guide.md §7.9`](../guides/developer-guide.md#79-action-handlers-и-clientactionblock) |
 
 **`block_id` блоков из ответа внешнего агента** (форвард через шину `agent_messages`):
 - Формат задаётся в `AgentChannelService.map_answer_to_blocks` (`agent_channel.py`): кнопки — `f"{row['id']}:btn:0"`, reasoning — `f"{row['id']}:reasoning:0"`, где `row['id']` — uid строки-ответа в шине.
@@ -165,8 +165,8 @@ SSE в чате нет. Транспорт единый для всех режи
 | Открытие админ-панели | `admin.open_admin_panel` → `/admin` | то же |
 | API fetch от фронта | `chat-stream.js`, любые `fetch(...)` | Обязательно через `AppConfig.api.getUrl(endpoint)`, иначе под JupyterHub → 404 |
 
-Подробнее — [`developer-guide.md §7.9`](developer-guide.md#79-action-handlers-и-clientactionblock)
-(client-action `open_url`) и [`developer-guide.md §9.2`](developer-guide.md#92-за-jupyterhub-proxy)
+Подробнее — [`developer-guide.md §7.9`](../guides/developer-guide.md#79-action-handlers-и-clientactionblock)
+(client-action `open_url`) и [`developer-guide.md §9.2`](../guides/developer-guide.md#92-за-jupyterhub-proxy)
 (frontend fetch через `AppConfig.api.getUrl`).
 
 ---
@@ -205,7 +205,7 @@ SSE в чате нет. Транспорт единый для всех режи
 
 Единая bus-таблица — единственный канал к внешнему агенту (заменила прежние
 `agent_requests` / `agent_response_events` / `agent_responses`). Polling-only,
-постоянных соединений нет. SQL-стенд имитации агента — [`docs/external-agent-imitation.sql`](external-agent-imitation.sql).
+постоянных соединений нет. SQL-стенд имитации агента — [`docs/integrations/external-agent-imitation.sql`](../integrations/external-agent-imitation.sql).
 
 | Колонка | Тип | Назначение |
 |---|---|---|

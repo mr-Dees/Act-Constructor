@@ -1,6 +1,6 @@
 # Troubleshooting — типовые проблемы
 
-Сборник симптомов и решений для частых ошибок. Если не нашёл свою проблему — проверь раздел «Key Patterns» в `docs/developer-guide.md` и логи uvicorn.
+Сборник симптомов и решений для частых ошибок. Если не нашёл свою проблему — проверь раздел «Key Patterns» в `docs/guides/developer-guide.md` и логи uvicorn.
 
 ## Оглавление
 
@@ -92,7 +92,7 @@
 3. **Параметры polling** — `CHAT__AGENT_CHANNEL__POLL_MIN_INTERVAL_SEC` (2.0), `POLL_MAX_INTERVAL_SEC` (10.0), `POLL_BACKOFF_MULTIPLIER` (1.5). Интервал растёт от min к max при пустых тиках и сбрасывается при появлении ответа.
 4. Имя bus-таблицы настраивается через `CHAT__AGENT_CHANNEL__TABLE_NAME` (дефолт `agent_messages`).
 
-**См. также:** `app/domains/chat/services/agent_channel.py`, `agent_channel_poller.py`, `docs/external-agent-imitation.sql`.
+**См. также:** `app/domains/chat/services/agent_channel.py`, `agent_channel_poller.py`, `docs/integrations/external-agent-imitation.sql`.
 
 ---
 
@@ -158,7 +158,7 @@
 2. Симметрично client_action `open_url` — относительные URL прогонять через `resolveProxyUrl`.
 3. Найти дыры: `grep "fetch\(\s*['\"\`]/api"` по `static/js/`.
 
-**См. также:** `docs/developer-guide.md` §9.2.
+**См. также:** `docs/guides/developer-guide.md` §9.2.
 
 ---
 
@@ -201,7 +201,7 @@
 2. Lookups `WHERE id = $1` по-прежнему идут через PK-индекс (`id` стоит первым).
 3. Проверь регрессию: `tests/test_gp_compatibility.py::test_distributed_by_subset_of_primary_key`.
 
-**См. также:** `docs/developer-guide.md` §6.2 и §6.5.
+**См. также:** `docs/guides/developer-guide.md` §6.2 и §6.5.
 
 ---
 
@@ -219,7 +219,7 @@
    - `get_settings.cache_clear()` — если используется `@lru_cache()` декорированный геттер.
 2. In-process `asyncio.Lock` (например `_user_locks`) — сбрасывай через autouse-фикстуру, инициализируй lazily (НЕ `defaultdict(asyncio.Lock)`).
 
-**См. также:** `tests/conftest.py`, `docs/developer-guide.md` §8.2.
+**См. также:** `tests/conftest.py`, `docs/guides/developer-guide.md` §8.2.
 
 ---
 
@@ -234,7 +234,7 @@
 2. Добавить handler в `ChatRenderer.renderBlock` (`static/js/shared/chat/chat-renderer.js:136`).
 3. Параллельно на бэке тип должен быть зарегистрирован И в `MessageBlock` union (`app/core/chat/blocks.py`), И в `_DiscriminatedBlock` (`app/core/chat/schemas.py`) — иначе `parse_message_blocks` не распознает.
 
-**См. также:** `docs/manual-qa-frontend-unknown-block.md`. При добавлении нового блока обнови `MessageBlock` union в `app/core/chat/blocks.py` И `_DiscriminatedBlock` в `app/core/chat/schemas.py` — иначе `parse_message_blocks` не распознает тип.
+**См. также:** `docs/testing/manual-qa-frontend-unknown-block.md`. При добавлении нового блока обнови `MessageBlock` union в `app/core/chat/blocks.py` И `_DiscriminatedBlock` в `app/core/chat/schemas.py` — иначе `parse_message_blocks` не распознает тип.
 
 ---
 
@@ -248,7 +248,7 @@
 1. Для проверки дефолтов инстанцируй модель напрямую с минимально нужными required-полями: `ChatDomainSettings(api_base="...", api_key="...", model="...")`.
 2. `_load_from_env` используй ТОЛЬКО для проверки nested env-override (типа `CHAT__RETRY__ON_429`) с явным `monkeypatch.setenv(...)`.
 
-**См. также:** `docs/developer-guide.md` §8.4.
+**См. также:** `docs/guides/developer-guide.md` §8.4.
 
 ---
 
@@ -279,7 +279,7 @@
 3. Если запрос не уходит вообще — проверь, что `AppState.markAsUnsaved()` действительно дёргается (proxy-based tracking).
 4. В крайнем случае — `localStorage.getItem('act_<id>')` содержит последнюю валидную версию, можно восстановить.
 
-**См. также:** `docs/developer-guide.md` §4.6 (Dual-tracking save).
+**См. также:** `docs/guides/developer-guide.md` §4.6 (Dual-tracking save).
 
 ---
 
@@ -335,7 +335,7 @@
 **Решение:**
 1. В `app/domains/<domain>/migrations/greenplum/schema.sql` использовать обычный `CREATE INDEX ...` без `IF NOT EXISTS`. GP-адаптер исполняет SQL по одному statement и ловит `DuplicateTableError`/`DuplicateObjectError` — повторный накат безопасен.
 2. Для колонок — добавлять только в новые таблицы или через отдельный bootstrap, проверяющий `information_schema.columns`.
-3. Тот же запрет распространяется на `CREATE SEQUENCE IF NOT EXISTS`, `ON CONFLICT`, `jsonb_set()`, `gen_random_uuid()` — см. `docs/developer-guide.md` «Greenplum Compatibility».
+3. Тот же запрет распространяется на `CREATE SEQUENCE IF NOT EXISTS`, `ON CONFLICT`, `jsonb_set()`, `gen_random_uuid()` — см. `docs/guides/developer-guide.md` «Greenplum Compatibility».
 
 **См. также:** `tests/test_gp_compatibility.py`, `app/db/adapters/greenplum.py`.
 
@@ -393,7 +393,7 @@
 
 4. Если процесс действительно жив — найти его и остановить (`kill <pid>`); при корректном SIGTERM lifespan сам удалит строку.
 
-**См. также:** `app/main.py:130-146` (захват), `app/main.py:266-280` (release), `app/core/singleton_lock.py`, `docs/operations-recovery.md` (полный playbook).
+**См. также:** `app/main.py:130-146` (захват), `app/main.py:266-280` (release), `app/core/singleton_lock.py`, `docs/operations/operations-recovery.md` (полный playbook).
 
 ---
 
@@ -418,4 +418,4 @@
    - При overflow — поднять `OBSERVABILITY__METRICS_MAX_BUFFER_SIZE` или `OBSERVABILITY__METRICS_BATCH_SIZE` (быстрее опустошение), либо уменьшить нагрузку, генерирующую события (имя видно в `batcher.name`).
    - При `last_error` — устранить корневую причину (например, CHECK constraint без mapping в `CHECK_CONSTRAINT_MESSAGES`).
 
-**См. также:** `app/core/metrics_batcher.py::get_status`, `app/core/observability_registry.py`, `app/api/v1/endpoints/admin_diagnostics.py`, `docs/developer-guide.md` §9.5a / §9.5b.
+**См. также:** `app/core/metrics_batcher.py::get_status`, `app/core/observability_registry.py`, `app/api/v1/endpoints/admin_diagnostics.py`, `docs/guides/developer-guide.md` §9.5a / §9.5b.

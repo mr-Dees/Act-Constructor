@@ -1,9 +1,9 @@
-# Deployment Runbook — Act Constructor
+# Deployment Runbook — Audit Workstation
 
 > Closed-network deploy. JupyterHub Datalab + Greenplum 6.x для прода; PostgreSQL — для dev.
 > Single-tenant per process: один Python-процесс на JupyterHub-юзера, защита через singleton-lock в БД.
 
-Документ — пошаговый чек-лист «как развернуть» / «как обновить» / «как проверить, что взлетело». Глубокая архитектура — [`developer-guide.md`](developer-guide.md). Симптомы и фиксы — [`troubleshooting.md`](troubleshooting.md). Что делать когда сломалось — [`operations-recovery.md`](operations-recovery.md).
+Документ — пошаговый чек-лист «как развернуть» / «как обновить» / «как проверить, что взлетело». Глубокая архитектура — [`developer-guide.md`](../guides/developer-guide.md). Симптомы и фиксы — [`troubleshooting.md`](troubleshooting.md). Что делать когда сломалось — [`operations-recovery.md`](operations-recovery.md).
 
 ---
 
@@ -89,7 +89,7 @@ uvicorn app.main:create_app --factory --host 0.0.0.0 --port 8005
 |---|---|
 | `drop-all-tables.md` | Тотальная очистка под пересоздание схемы (только dev) |
 
-**Канал к внешнему ИИ-агенту** при апгрейде с версий со старой шиной (3 таблицы `agent_requests` / `agent_response_events` / `agent_responses`) требует ручных шагов: единая bus-таблица `agent_messages` создаётся `create_tables_if_not_exist` автоматически, но в `chat_messages` добавилась колонка `agent_ref VARCHAR(36)` — её нужно дописать ALTER'ом на существующей БД. Старые 3 таблицы можно дропнуть после миграции. Настройки канала живут только в коде (`CHAT__AGENT_CHANNEL__*`). Для имитации внешнего агента см. [`external-agent-imitation.sql`](external-agent-imitation.sql).
+**Канал к внешнему ИИ-агенту** при апгрейде с версий со старой шиной (3 таблицы `agent_requests` / `agent_response_events` / `agent_responses`) требует ручных шагов: единая bus-таблица `agent_messages` создаётся `create_tables_if_not_exist` автоматически, но в `chat_messages` добавилась колонка `agent_ref VARCHAR(36)` — её нужно дописать ALTER'ом на существующей БД. Старые 3 таблицы можно дропнуть после миграции. Настройки канала живут только в коде (`CHAT__AGENT_CHANNEL__*`). Для имитации внешнего агента см. [`external-agent-imitation.sql`](../integrations/external-agent-imitation.sql).
 
 **Если таблица не создалась автоматически** (старая версия create_tables, специфичные права):
 

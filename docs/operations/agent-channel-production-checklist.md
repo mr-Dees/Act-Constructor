@@ -16,7 +16,7 @@ retention-чистку, мониторинг, ёмкости, troubleshooting.
 черновик (`complete`/`failed`).
 
 См. также `app/domains/chat/services/agent_channel.py`,
-`agent_channel_poller.py` и `docs/external-agent-imitation.sql`
+`agent_channel_poller.py` и `docs/integrations/external-agent-imitation.sql`
 (SQL-стенд имитации внешнего агента под единую таблицу).
 
 ---

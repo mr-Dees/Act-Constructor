@@ -1,6 +1,6 @@
 """Декоратор повторных попыток для transient-ошибок LLM-провайдера.
 
-Сценарии retry (для agent-tests Волны 3 — см. docs/retry-test-scenarios.md):
+Сценарии retry (для agent-tests Волны 3 — см. docs/testing/retry-test-scenarios.md):
   - Ретраится: HTTP 408 (Request Timeout), 429 (Rate Limit, если on_429),
     500..599 (server errors, если on_5xx), сетевые ошибки httpx
     (ConnectError, ReadTimeout, WriteTimeout, RemoteProtocolError, PoolTimeout).

@@ -2,7 +2,7 @@
 
 Сбой записи audit-лога НЕ должен ломать основную операцию: каждый метод
 оборачивает обращение к репозиторию в ``try/except Exception`` и логирует
-warning. По принципу 2.4.3 в ``docs/backend-audit-final.md``.
+warning.
 """
 
 from __future__ import annotations

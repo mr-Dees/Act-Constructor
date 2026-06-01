@@ -2,20 +2,19 @@
 
 ## Связанные документы
 
-- [`docs/onboarding.md`](onboarding.md) — план онбординга нового разработчика (день 1 / неделя 1 / недели 2-4).
-- [`docs/troubleshooting.md`](troubleshooting.md) — типовые проблемы (запуск, БД, чат, JupyterHub proxy) и решения.
-- [`docs/deployment-runbook.md`](deployment-runbook.md) — пошаговый чек-лист deploy / старт-проверка / rollback.
-- [`docs/operations-recovery.md`](operations-recovery.md) — operator playbook: что делать при инцидентах в проде (forward-runner завис, singleton-lock, batcher overflow, denied access).
-- [`docs/frontend-architecture.md`](frontend-architecture.md) — **единый deep-dive по фронту** (constructor + portal + shared): ES-модули и entry-файлы, AppState/StorageManager/LockManager, per-node render API, диалоги, безопасность, a11y, CSS. Чат — отдельным документом ниже.
-- [`docs/chat-frontend-architecture.md`](chat-frontend-architecture.md) — deep-dive по фронт-архитектуре чата: 11 ядерных модулей, polling сообщений, режимы inline/modal/popup.
-- [`docs/external-agent-imitation.sql`](external-agent-imitation.sql) — SQL-сниппеты для имитации внешнего ИИ-агента (см. §7.8).
+- [`docs/operations/troubleshooting.md`](../operations/troubleshooting.md) — типовые проблемы (запуск, БД, чат, JupyterHub proxy) и решения.
+- [`docs/operations/deployment-runbook.md`](../operations/deployment-runbook.md) — пошаговый чек-лист deploy / старт-проверка / rollback.
+- [`docs/operations/operations-recovery.md`](../operations/operations-recovery.md) — operator playbook: что делать при инцидентах в проде (завис forward-запрос к агенту, singleton-lock, batcher overflow, denied access).
+- [`docs/architecture/frontend-architecture.md`](../architecture/frontend-architecture.md) — **единый deep-dive по фронту** (constructor + portal + shared): ES-модули и entry-файлы, AppState/StorageManager/LockManager, per-node render API, диалоги, безопасность, a11y, CSS. Чат — отдельным документом ниже.
+- [`docs/architecture/chat-frontend-architecture.md`](../architecture/chat-frontend-architecture.md) — deep-dive по фронт-архитектуре чата: 11 ядерных модулей, polling сообщений, режимы inline/modal/popup.
+- [`docs/integrations/external-agent-imitation.sql`](../integrations/external-agent-imitation.sql) — SQL-сниппеты для имитации внешнего ИИ-агента (см. §7.8).
 - Retention bus-таблицы `agent_messages` — см. §9.6 (кода ретеншена в приложении нет, очистка — задача DBA).
-- [`docs/manual-qa-external-agent-bridge.md`](manual-qa-external-agent-bridge.md) — чек-лист ручного QA моста к внешнему агенту.
-- [`docs/data-model-acts.md`](data-model-acts.md) — модель данных дерева актов.
-- [`docs/logging.md`](logging.md) — формат логов и `request_id`-трассировка.
-- [`docs/polling-bridge-production-checklist.md`](polling-bridge-production-checklist.md) — операторский чек-лист для forward-моста.
-- [`docs/adding-chat-tool.md`](adding-chat-tool.md) — краткий чек-лист добавления нового chat-tool.
-- [`docs/forward-sequence.md`](forward-sequence.md) — sequence-диаграммы forward'а (live / reload+switch / refresh, краевые случаи).
+- [`docs/testing/manual-qa-agent-channel.md`](../testing/manual-qa-agent-channel.md) — чек-лист ручного QA моста к внешнему агенту.
+- [`docs/architecture/data-model-acts.md`](../architecture/data-model-acts.md) — модель данных дерева актов.
+- [`docs/operations/logging.md`](../operations/logging.md) — формат логов и `request_id`-трассировка.
+- [`docs/operations/agent-channel-production-checklist.md`](../operations/agent-channel-production-checklist.md) — операторский чек-лист для forward-моста.
+- [`docs/guides/adding-chat-tool.md`](adding-chat-tool.md) — краткий чек-лист добавления нового chat-tool.
+- [`docs/architecture/agent-channel-sequence.md`](../architecture/agent-channel-sequence.md) — sequence-диаграммы forward'а (live / reload+switch / refresh, краевые случаи).
 
 ## Оглавление
 
@@ -760,9 +759,9 @@ async def app_error_handler(request, exc):
 
 ## 4. Frontend: 3-зонная архитектура
 
-> **Deep-dive по фронту — в [`docs/frontend-architecture.md`](frontend-architecture.md)**: ES-модули и entry-файлы, AppConfig и JupyterHub-proxy, AppState (Proxy deep-tracking), StorageManager (state machine + persistence), LockManager и inactivity, Tree/items/per-node render API, PreviewManager, диалоги, Acts manager, безопасность, accessibility, CSS-каскад. Этот §4 — короткое содержание для тех, кто пришёл за обзором.
+> **Deep-dive по фронту — в [`docs/architecture/frontend-architecture.md`](../architecture/frontend-architecture.md)**: ES-модули и entry-файлы, AppConfig и JupyterHub-proxy, AppState (Proxy deep-tracking), StorageManager (state machine + persistence), LockManager и inactivity, Tree/items/per-node render API, PreviewManager, диалоги, Acts manager, безопасность, accessibility, CSS-каскад. Этот §4 — короткое содержание для тех, кто пришёл за обзором.
 >
-> **Чат-фронт — отдельно**: [`docs/chat-frontend-architecture.md`](chat-frontend-architecture.md), плюс event-driven раздел §7.7 ниже.
+> **Чат-фронт — отдельно**: [`docs/architecture/chat-frontend-architecture.md`](../architecture/chat-frontend-architecture.md), плюс event-driven раздел §7.7 ниже.
 
 ### 4.1 Зоны и страницы
 
@@ -1966,7 +1965,7 @@ LLM call
 | `400` / `401` / `403` / `404` / `422` | **Нет** | Это ошибки запроса — повтор не поможет |
 | `ChatLimitError` / `ChatFileValidationError` / `ChatRateLimitError` | **Нет** | Доменные ошибки бизнес-логики |
 
-Полные сценарии и edge-case'ы — `docs/retry-test-scenarios.md`.
+Полные сценарии и edge-case'ы — `docs/testing/retry-test-scenarios.md`.
 
 #### 7.4b Resilience доменных батчеров и фоновых задач
 
@@ -2138,7 +2137,7 @@ app/domains/<your_domain>/integrations/
 
 ### 7.7 Фронтенд: event-driven архитектура чата
 
-> Этот раздел — про **доменную интеграцию** чата с бэком (polling сообщений, ClientAction идемпотентность). Архитектура самих модулей чата — в [`docs/chat-frontend-architecture.md`](chat-frontend-architecture.md). Общий каркас фронта (порядок `<script>`, window-singletons, AppConfig.chatEndpoints) — в [`docs/frontend-architecture.md`](frontend-architecture.md) §2 и §14.
+> Этот раздел — про **доменную интеграцию** чата с бэком (polling сообщений, ClientAction идемпотентность). Архитектура самих модулей чата — в [`docs/architecture/chat-frontend-architecture.md`](../architecture/chat-frontend-architecture.md). Общий каркас фронта (порядок `<script>`, window-singletons, AppConfig.chatEndpoints) — в [`docs/architecture/frontend-architecture.md`](../architecture/frontend-architecture.md) §2 и §14.
 
 Фронтенд чата — vanilla ES6 без бандлера, **11 ядерных модулей** в `static/js/shared/chat/` плюс региональный 12-й (`ChatPopupManager` в `static/js/constructor/header/chat-popup.js`), связанных через шину событий `ChatEventBus`. Три режима чата (inline на landing, modal в portal, popup в constructor) используют единый набор ядерных модулей.
 
@@ -2191,7 +2190,7 @@ chat-modal.js / chat-popup.js
 
 Для запросов про **данные/контент** (БЗ актов, регламенты, нормативы) запрос форвардится внешнему ИИ-агенту коллег через **единую bus-таблицу** `agent_messages` в основной БД. Агент-сервис разрабатывается отдельной командой; AW не делает HTTP-запросов к нему — взаимодействие исключительно через эту таблицу. Полная картина транспорта — §11.5–§11.7.
 
-> Имена `agent_messages`, `chat_messages`, `chat_files` далее даны без префикса. В БД они хранятся с префиксом `DATABASE__TABLE_PREFIX` (по умолчанию `t_db_oarb_audit_act_`); полные SQL-сниппеты для копи-пасты — в `docs/external-agent-imitation.sql`.
+> Имена `agent_messages`, `chat_messages`, `chat_files` далее даны без префикса. В БД они хранятся с префиксом `DATABASE__TABLE_PREFIX` (по умолчанию `t_db_oarb_audit_act_`); полные SQL-сниппеты для копи-пасты — в `docs/integrations/external-agent-imitation.sql`.
 
 **Поток** (SSE нигде нет):
 
@@ -2235,7 +2234,7 @@ chat-modal.js / chat-popup.js
 
 #### Шпаргалка по имитации агента
 
-Полный SQL — в `docs/external-agent-imitation.sql` (DBeaver/psql), уже обновлён под единую таблицу `agent_messages`. Минимум: найти черновик-вопрос пользователя в `agent_messages` (`role='user'`, `status='pending'`), затем вставить ответ агента (`role='assistant'`, `reply_to=<uid вопроса>`, `content`/`metadata.thinking`/`buttons`/`media` по необходимости) и перевести вопрос в `status='complete'`. `AgentChannelPoller` подхватит ответ и финализирует черновик `chat_messages`.
+Полный SQL — в `docs/integrations/external-agent-imitation.sql` (DBeaver/psql), уже обновлён под единую таблицу `agent_messages`. Минимум: найти черновик-вопрос пользователя в `agent_messages` (`role='user'`, `status='pending'`), затем вставить ответ агента (`role='assistant'`, `reply_to=<uid вопроса>`, `content`/`metadata.thinking`/`buttons`/`media` по необходимости) и перевести вопрос в `status='complete'`. `AgentChannelPoller` подхватит ответ и финализирует черновик `chat_messages`.
 
 #### Когда «у меня не работает»
 
@@ -3424,7 +3423,7 @@ LIMIT 20;
 - При истечении lock — следующий запрос на любое изменение возвращает 403 / 423. Пользователь должен заново «взять» акт.
 - **Inactivity dialog**: фронт по таймеру `INACTIVITY_TIMEOUT_MINUTES` без активности (нет клика/keypress) показывает диалог «Продолжить?». Если пользователь не ответил за `INACTIVITY_DIALOG_TIMEOUT_SECONDS` — lock отпускается, фронт уходит в read-only.
 
-> **Фронт-часть LockManager** (`static/js/constructor/lock-manager.js`, 762 строки) описана в [`docs/frontend-architecture.md`](frontend-architecture.md) §6: heartbeat + retry, countdown по `Date.now()` (устойчив к Chrome background throttling), `visibilitychange`-handler с autoExit, `_initiateExit` идемпотентен, capture `actId` в `_handleInactivity`, beacon-unlock через `navigator.sendBeacon`, жёсткий редирект на 409.
+> **Фронт-часть LockManager** (`static/js/constructor/lock-manager.js`, 762 строки) описана в [`docs/architecture/frontend-architecture.md`](../architecture/frontend-architecture.md) §6: heartbeat + retry, countdown по `Date.now()` (устойчив к Chrome background throttling), `visibilitychange`-handler с autoExit, `_initiateExit` идемпотентен, capture `actId` в `_handleInactivity`, beacon-unlock через `navigator.sendBeacon`, жёсткий редирект на 409.
 
 | Env-var | Назначение |
 |---|---|
@@ -3495,7 +3494,7 @@ LIMIT 20;
 
 ### 10.9 Фронтенд: AppState и StorageManager
 
-Deep-dive — [`docs/frontend-architecture.md`](frontend-architecture.md):
+Deep-dive — [`docs/architecture/frontend-architecture.md`](../architecture/frontend-architecture.md):
 - §4 «AppState и состояние конструктора» — рекурсивная Proxy-обёртка через `_wrapStateWithProxy` / `_wrapDeep`, `_stateProxyCache: WeakMap` для защиты от двойной обёртки, `Object.assign(AppState, ...)` расширение из `state-tree.js`/`state-content.js`, pinned tables (`isPinnedTable`, `_getFirstNonPinnedIndex`), protected nodes (секции 1-5).
 - §5 «StorageManager и persistence» — state machine `saved` / `local-only` / `unsaved` (Wave 3), debounce 3 сек + periodic 2 мин, `_dragInProgress` guard, `forceSaveAsync` для Ctrl+S, navigation interception (popstate + `confirmNavigation` + `_lockNavGuard`), per-act LS-ключи с префиксом `actId`.
 

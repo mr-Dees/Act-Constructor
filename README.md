@@ -81,12 +81,51 @@ uvicorn app.main:app --host 0.0.0.0 --port 8005
 
 ## Документация
 
-- [docs/developer-guide.md](docs/developer-guide.md) — основной справочник: архитектура, домены, плагинная система, БД, миграции, тестирование, deploy, env-vars.
-- [docs/onboarding.md](docs/onboarding.md) — гид для нового разработчика: день 1 / неделя 1 / неделя 2-4 + чек-лист «работаю самостоятельно».
-- [docs/troubleshooting.md](docs/troubleshooting.md) — типовые проблемы и решения (Kerberos, GP, JupyterHub-proxy, LLM, тесты, чат).
-- [docs/chat-frontend-architecture.md](docs/chat-frontend-architecture.md) — deep-dive по фронт-архитектуре чата: 11 модулей, шина событий, SSE-протокол, режимы inline/modal/popup, client actions.
-- [docs/manual-qa-external-agent-bridge.md](docs/manual-qa-external-agent-bridge.md) — ручная QA-проверка интеграции с внешним ИИ-агентом.
-- [docs/manual-qa-frontend-unknown-block.md](docs/manual-qa-frontend-unknown-block.md) — ручная QA-проверка fallback для неизвестных типов блоков чата.
+Доки сгруппированы по папкам в [`docs/`](docs/). Начните с [developer-guide](docs/guides/developer-guide.md) — это основной справочник.
+
+### 📘 Guides — справочники и how-to
+
+| Документ | О чём |
+|---|---|
+| [developer-guide.md](docs/guides/developer-guide.md) | Основной справочник: архитектура, домены, плагинная система, БД, миграции, тестирование, deploy, env-vars, deep-dive по чату. |
+| [adding-chat-tool.md](docs/guides/adding-chat-tool.md) | Как добавить новый ChatTool (function-calling инструмент ассистента). |
+
+### 🏗️ Architecture — устройство системы
+
+| Документ | О чём |
+|---|---|
+| [frontend-architecture.md](docs/architecture/frontend-architecture.md) | Фронт-архитектура: 3 зоны (shared/portal/constructor), ES-модули без бандлера, entry-модули, CSS. |
+| [chat-frontend-architecture.md](docs/architecture/chat-frontend-architecture.md) | Deep-dive по фронту чата: ядерные модули, шина событий, транспорт POST + polling, режимы inline/modal/popup, client actions. |
+| [cross-domain-contracts.md](docs/architecture/cross-domain-contracts.md) | Межсервисные контракты: factory-registry, ChatTool, канал к внешнему агенту, URL-контракты. |
+| [agent-channel-sequence.md](docs/architecture/agent-channel-sequence.md) | Sequence-диаграммы канала к внешнему ИИ-агенту: единая bus-таблица `agent_messages`, режимы `agent_mode`, poll-транспорт. |
+| [data-model-acts.md](docs/architecture/data-model-acts.md) | Модель данных домена актов: таблицы, связи, дерево содержимого. |
+
+### ⚙️ Operations — эксплуатация и деплой
+
+| Документ | О чём |
+|---|---|
+| [deployment-runbook.md](docs/operations/deployment-runbook.md) | Пошаговый деплой (PostgreSQL / Greenplum / JupyterHub), pre-deploy чек-лист, миграции. |
+| [troubleshooting.md](docs/operations/troubleshooting.md) | Типовые проблемы и решения (Kerberos, GP-pool, JupyterHub-proxy, 413, LLM, тесты, чат). |
+| [operations-recovery.md](docs/operations/operations-recovery.md) | Восстановление после сбоев: зависшие forward-запросы, singleton-lock, батчеры. |
+| [logging.md](docs/operations/logging.md) | Логирование: логгеры, `request_id`, JSON/text форматы, PII, файловый handler. |
+| [agent-channel-production-checklist.md](docs/operations/agent-channel-production-checklist.md) | Прод-чек-лист канала к внешнему агенту: retention, sizing, мониторинг по `agent_messages.status`. |
+
+### ✅ Testing — тестирование и ручной QA
+
+| Документ | О чём |
+|---|---|
+| [retry-test-scenarios.md](docs/testing/retry-test-scenarios.md) | Retry-сценарии оркестратора LLM (что ретраится, что нет). |
+| [manual-qa-agent-channel.md](docs/testing/manual-qa-agent-channel.md) | Ручная QA-проверка канала к внешнему ИИ-агенту (единая bus-таблица, poll-транспорт). |
+| [manual-qa-frontend-unknown-block.md](docs/testing/manual-qa-frontend-unknown-block.md) | Ручная QA-проверка fallback для неизвестных типов блоков чата. |
+| [manual-qa-risk-table-delete.md](docs/testing/manual-qa-risk-table-delete.md) | Ручная QA-проверка ограничений удаления risk-таблиц. |
+
+### 🔌 Integrations / Migrations — SQL-стенды и миграции
+
+| Документ | О чём |
+|---|---|
+| [integrations/external-agent-imitation.sql](docs/integrations/external-agent-imitation.sql) | SQL-стенд для имитации внешнего ИИ-агента (ответы в bus-таблицу `agent_messages`). |
+| [integrations/agent-channel-cleanup.sql](docs/integrations/agent-channel-cleanup.sql) | Очистка завершённых строк bus-таблицы канала. |
+| [migrations/drop-all-tables.md](docs/migrations/drop-all-tables.md) | DROP всех таблиц приложения для пересоздания схемы (только dev). |
 
 ## Конфигурация
 
@@ -123,7 +162,7 @@ FastAPI Application
     ├── Domain Plugin Registry
     │   ├── acts/ — CRUD, блокировки, содержимое, экспорт, фактуры, аудит-лог
     │   ├── admin/ — роли, справочник пользователей
-    │   ├── chat/ — AI-ассистент (SSE-стриминг, conversation persistence, function-calling)
+    │   ├── chat/ — AI-ассистент (POST + polling, conversation persistence, function-calling, канал к внешнему агенту)
     │   ├── ck_*/ — верификация метрик (ck_fin_res, ck_client_exp)
     │   └── ua_data/ — справочные данные УА (словари процессов, ТБ, подразделений)
     └── Database Layer

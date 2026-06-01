@@ -1,10 +1,10 @@
 # Frontend архитектура чата
 
-> См. также: `docs/developer-guide.md` §7.7 — общая роль чата в архитектуре.
+> См. также: `docs/guides/developer-guide.md` §7.7 — общая роль чата в архитектуре.
 
 ## Обзор
 
-Чат AI-ассистента в Act Constructor — это vanilla-JS приложение (ES6+) на
+Чат AI-ассистента в Audit Workstation — это vanilla-JS приложение (ES6+) на
 Native ES Modules без bundler'а. Каждый чат-модуль — отдельный JS-файл
 с `import`/`export`; entry-файлы (`portal-common.js`, `constructor.js`)
 импортят все 12 модулей в нужном порядке. Модули общаются между собой через
@@ -316,7 +316,7 @@ warning-бордер слева, моноширинный шрифт для payl
 
 Console.warn пишется для каждого неизвестного блока — без падения
 с trace'ом. Сценарий ручной проверки описан в
-`docs/manual-qa-frontend-unknown-block.md`.
+`docs/testing/manual-qa-frontend-unknown-block.md`.
 
 > **Синхронизация.** При добавлении нового типа блока в бэк
 > (`MessageBlock` union в `app/core/chat/blocks.py` И `_DiscriminatedBlock`

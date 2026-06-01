@@ -1,6 +1,6 @@
 # DROP-команды для всех таблиц приложения
 
-Скрипт для **ручной очистки БД** под Audit Workstation (Act Constructor).
+Скрипт для **ручной очистки БД** под Audit Workstation.
 Без `CASCADE`: таблицы дропаются в обратном порядке FK-зависимостей.
 
 **Префикс**: `t_db_oarb_audit_act_` (значение `DATABASE__TABLE_PREFIX` по умолчанию).
