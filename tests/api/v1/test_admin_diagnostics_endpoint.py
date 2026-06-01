@@ -58,9 +58,9 @@ def test_admin_role_returns_200_with_payload():
         ),
     )
     obs.register_background_task(
-        "chat.poll_coordinator",
+        "chat.agent_channel_poller",
         lambda: {
-            "name": "chat.poll_coordinator",
+            "name": "chat.agent_channel_poller",
             "running": True,
             "restart_count": 0,
             "active_subscribers": 2,
@@ -76,9 +76,9 @@ def test_admin_role_returns_200_with_payload():
     assert "background_tasks" in data
     assert "admin.http_metrics_batcher" in data["batchers"]
     assert data["batchers"]["admin.http_metrics_batcher"]["buffer_size"] == 12
-    assert "chat.poll_coordinator" in data["background_tasks"]
+    assert "chat.agent_channel_poller" in data["background_tasks"]
     assert (
-        data["background_tasks"]["chat.poll_coordinator"]["active_subscribers"]
+        data["background_tasks"]["chat.agent_channel_poller"]["active_subscribers"]
         == 2
     )
 

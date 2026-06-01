@@ -85,6 +85,14 @@ class MessageRepository(BaseRepository):
             conversation_id,
         )
 
+    async def get_by_id(self, message_id: str) -> dict | None:
+        """Возвращает одно сообщение по id или None, если не найдено."""
+        row = await self.conn.fetchrow(
+            f"SELECT * FROM {self.table} WHERE id = $1",
+            message_id,
+        )
+        return self._parse_row(row) if row else None
+
     # ── streaming-методы (Phase 0 «D»: server-authoritative state) ──────────
     # Стратегия: read-modify-write под FOR UPDATE — на GP 6.x / PG 9.4 нет
     # jsonb_set и оператора `||` для jsonb. Транзакция гарантирует, что
@@ -97,6 +105,7 @@ class MessageRepository(BaseRepository):
         conversation_id: str,
         role: str = "assistant",
         model: str | None = None,
+        agent_ref: str | None = None,
     ) -> dict:
         """Создаёт пустое сообщение со status='streaming'.
 
@@ -104,19 +113,23 @@ class MessageRepository(BaseRepository):
         процесса между генерацией id и сохранением) делает SELECT
         существующей записи и возвращает её — runner продолжит
         материализацию того же message_id, а не создаст новый.
+
+        agent_ref — conversation_id строки-вопроса в agent_messages (uid
+        сообщения); если передан, связывает draft-сообщение с bus-таблицей.
         """
         try:
             row = await self.conn.fetchrow(
                 f"""
                 INSERT INTO {self.table}
-                    (id, conversation_id, role, content, model, status)
-                VALUES ($1, $2, $3, '[]'::jsonb, $4, 'streaming')
+                    (id, conversation_id, role, content, model, status, agent_ref)
+                VALUES ($1, $2, $3, '[]'::jsonb, $4, 'streaming', $5)
                 RETURNING *
                 """,
                 message_id,
                 conversation_id,
                 role,
                 model,
+                agent_ref,
             )
             return self._parse_row(row)
         except asyncpg.UniqueViolationError:
@@ -266,3 +279,27 @@ class MessageRepository(BaseRepository):
                 message_id,
             )
         return True
+
+    async def get_streaming_drafts(self) -> list[dict]:
+        """Draft-сообщения, ждущие ответа агента (для reconcile при старте).
+
+        Возвращает все сообщения со status='streaming' и непустым agent_ref.
+        """
+        rows = await self.conn.fetch(
+            f"SELECT * FROM {self.table} WHERE status = 'streaming' AND agent_ref IS NOT NULL"
+        )
+        return [self._parse_row(r) for r in rows]
+
+    async def has_streaming_message(self, conversation_id: str) -> bool:
+        """True, если в беседе есть сообщение со status='streaming'.
+
+        Используется ConversationService.delete для защиты от удаления беседы,
+        пока фоновый поллер ещё дозаполняет ответ ассистента (BUG #15). Запрос
+        опирается на составной индекс (conversation_id, status).
+        """
+        val = await self.conn.fetchval(
+            f"SELECT 1 FROM {self.table} "
+            f"WHERE conversation_id = $1 AND status = 'streaming' LIMIT 1",
+            conversation_id,
+        )
+        return val is not None

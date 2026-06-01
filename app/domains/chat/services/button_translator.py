@@ -8,10 +8,7 @@
 ``button_translator`` и переписывает кнопку в клиентский формат:
     {"action_id": "open_url", "label": "...", "params": {"url": "/constructor?..."}}
 
-Используется в трёх местах:
-  * orchestrator (live SSE-стрим forward'а),
-  * agent_bridge_runner (сохранение финального ответа агента в БД),
-  * api/messages.py resume-эндпоинт.
+Используется оркестратором при сохранении финального ответа.
 """
 from __future__ import annotations
 

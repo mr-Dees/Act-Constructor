@@ -241,9 +241,9 @@ export const ChatContext = {
 
     /**
      * Опрашивает бэк — есть ли для беседы активный forward к внешнему
-     * агенту (статус `pending|dispatched|in_progress`). Используется при
+     * агенту (незавершённый запрос в шине). Используется при
      * переключении/загрузке беседы, чтобы после перезагрузки страницы
-     * фронт мог подключиться к уже идущему ответу через resume-SSE.
+     * фронт мог продолжить polling уже идущего ответа.
      *
      * Возвращает `null` при 204 (нет активных), любой не-ok ответ
      * (404/403/5xx/сеть) — graceful no-op: возвращаем null, UI не валим.
@@ -271,6 +271,23 @@ export const ChatContext = {
         } catch (err) {
             console.warn('ChatContext: ошибка проверки active-forward', err);
             return null;
+        }
+    },
+
+    /**
+     * Возвращает выбранный режим агента ОАРБ.
+     * Читает из localStorage['assistant_oarb_mode'];
+     * если значение отсутствует или невалидно — возвращает 'off'.
+     *
+     * @returns {'off'|'adaptive'|'always'}
+     */
+    getAgentMode() {
+        const valid = ['off', 'adaptive', 'always'];
+        try {
+            const val = localStorage.getItem('assistant_oarb_mode');
+            return valid.includes(val) ? val : 'off';
+        } catch {
+            return 'off';
         }
     },
 

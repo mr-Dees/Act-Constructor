@@ -4,8 +4,8 @@
 Библиотеки опциональны — при отсутствии возвращается сообщение об ошибке.
 
 Все парсеры (pypdf/openpyxl/python-docx) синхронные и CPU-bound. Прямой
-вызов из async-функции блокирует event loop при больших файлах — на
-SSE-стримах это приводит к замиранию всех соединений до окончания парсинга.
+вызов из async-функции блокирует event loop при больших файлах — это
+приводит к замиранию всех соединений до окончания парсинга.
 Используй ``extract_text_async`` из async-кода — он выполняет работу в
 thread pool через ``asyncio.to_thread``.
 """
@@ -27,8 +27,8 @@ async def extract_text_async(
 ) -> str:
     """Async-обёртка над ``extract_text`` через ``asyncio.to_thread``.
 
-    Используй из async-кода (SSE-стримы, polling, orchestrator), чтобы
-    не блокировать event loop CPU-bound парсингом больших файлов.
+    Используй из async-кода (polling, orchestrator, обработчики запросов),
+    чтобы не блокировать event loop CPU-bound парсингом больших файлов.
     """
     return await asyncio.to_thread(extract_text, file_data, mime_type, filename)
 

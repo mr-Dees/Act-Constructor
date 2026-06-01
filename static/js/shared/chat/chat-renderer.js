@@ -81,6 +81,119 @@ export const ChatRenderer = {
     },
 
     /**
+     * Последовательно проявляет блоки с декоративным эффектом печати.
+     *
+     * Для блоков text/reasoning — посимвольная анимация через createStreamingBlock.
+     * Для остальных типов (code, file, image, plan, buttons, client_action, error) —
+     * мгновенный рендер через renderBlock.
+     *
+     * При (prefers-reduced-motion: reduce) или отсутствии блоков — рендерит мгновенно.
+     *
+     * @param {HTMLElement} container — контейнер бот-сообщения
+     * @param {Array<Object>} blocks — массив блоков из {content}
+     * @param {Object} [options]
+     * @param {number} [options.speed=8] — символов за кадр (16 мс)
+     * @param {AbortSignal} [options.signal] — сигнал досрочного завершения
+     */
+    typeOutBlocks(container, blocks, options = {}) {
+        const { speed = 8, signal } = options;
+
+        if (!Array.isArray(blocks) || blocks.length === 0) return;
+
+        // Respect prefers-reduced-motion
+        if (window.matchMedia && matchMedia('(prefers-reduced-motion: reduce)').matches) {
+            this.renderBlocks(container, blocks, { execute: true });
+            return;
+        }
+
+        // Запускаем асинхронную очередь
+        this._typeOutQueue(container, blocks, speed, signal);
+    },
+
+    /**
+     * Асинхронная очередь анимации блоков.
+     * @private
+     */
+    async _typeOutQueue(container, blocks, speed, signal) {
+        for (const block of blocks) {
+            if (signal && signal.aborted) {
+                // Дорисовываем оставшиеся блоки мгновенно
+                const idx = blocks.indexOf(block);
+                const remaining = blocks.slice(idx);
+                this.renderBlocks(container, remaining, { execute: true });
+                return;
+            }
+
+            const type = block && block.type;
+
+            if (type === 'text' || type === 'reasoning') {
+                const text = block.content || '';
+                if (!text) {
+                    // Пустой блок — рендерим мгновенно
+                    const el = this.renderBlock(block, { execute: false });
+                    if (el) this.appendBlock(container, el);
+                    continue;
+                }
+
+                const sb = this.createStreamingBlock(
+                    type,
+                    typeof block.block_id === 'string' ? block.block_id : undefined,
+                );
+                this.appendBlock(container, sb.element);
+
+                // Посимвольная анимация
+                await this._animateText(sb, text, speed, signal);
+                sb.finalize();
+
+                if (signal && signal.aborted) {
+                    // Дорисовываем остаток
+                    const idx = blocks.indexOf(block);
+                    const remaining = blocks.slice(idx + 1);
+                    this.renderBlocks(container, remaining, { execute: true });
+                    return;
+                }
+            } else {
+                // Нестримуемые блоки — мгновенно
+                const el = this.renderBlock(block, { execute: true });
+                if (el) this.appendBlock(container, el);
+            }
+
+        }
+    },
+
+    /**
+     * Анимирует текст по speed символов каждые 16 мс.
+     * Возвращает Promise, который резолвится по завершении или при abort.
+     * @private
+     */
+    _animateText(sb, text, speed, signal) {
+        return new Promise((resolve) => {
+            let pos = 0;
+
+            const step = () => {
+                if (signal && signal.aborted) {
+                    sb.appendText(text.slice(pos));
+                    resolve();
+                    return;
+                }
+
+                if (pos >= text.length) {
+                    resolve();
+                    return;
+                }
+
+                const chunk = text.slice(pos, pos + speed);
+                sb.appendText(chunk);
+                pos += speed;
+
+                requestAnimationFrame(step);
+            };
+
+            requestAnimationFrame(step);
+        });
+    },
+
+    /**
      * Рендерит массив блоков в DOM-контейнер
      *
      * @param {HTMLElement} container — контейнер для отрисовки
@@ -114,11 +227,8 @@ export const ChatRenderer = {
         if (!container || !el) return;
 
         // Идемпотентный merge по data-block-id: если блок с тем же id
-        // уже есть в контейнере, заменяем его. Это нужно для случая
-        // «при reload пришёл финал с тем же block_id, что был streaming-
-        // партиал, — заменить полным телом». Live-стрим избегает этой
-        // ветки через DOM-дедуп в ChatMessages._handleSSEEvent (не вызывает
-        // appendBlock для существующего id).
+        // уже есть в контейнере, заменяем его. Защищает от дублей при
+        // повторном рендере того же ответа (например, после reload).
         if (el.dataset && el.dataset.blockId) {
             const existing = container.querySelector(
                 `[data-block-id="${CSS.escape(el.dataset.blockId)}"]`,
@@ -132,11 +242,10 @@ export const ChatRenderer = {
         const isReasoning = el.classList
             && el.classList.contains('chat-block-reasoning');
 
-        // Если в контейнере живёт typing-плейсхолдер (бот ещё «думает»,
-        // например reasoning-чанки во время forward'а), удерживаем его
-        // ВНИЗУ bot-bubble — все вновь добавленные блоки уходят ВЫШЕ него.
-        // Сам плейсхолдер не трогаем — его удаление управляется только
-        // из `_handleSSEEvent` по приходу финального content-блока.
+        // Если в контейнере живёт typing-плейсхолдер (бот ещё «думает»),
+        // удерживаем его ВНИЗУ bot-bubble — все вновь добавленные блоки
+        // уходят ВЫШЕ него. Сам плейсхолдер не трогаем — его удаление
+        // управляется из ChatMessages при получении готового ответа.
         const placeholder = container.querySelector(
             ':scope > .chat-typing-placeholder',
         );
@@ -238,9 +347,9 @@ export const ChatRenderer = {
                 el = this._renderUnknown(block);
         }
 
-        // Прокидываем block_id в dataset для идемпотентного merge в `appendBlock`
-        // и для DOM-дедупа в ChatMessages._handleSSEEvent. Перетирает только
-        // если у конкретного renderer'а ещё не выставлен (reasoning делает это сам).
+        // Прокидываем block_id в dataset для идемпотентного merge в `appendBlock`.
+        // Перетирает только если у конкретного renderer'а ещё не выставлен
+        // (reasoning делает это сам).
         if (el && typeof block.block_id === 'string' && block.block_id
             && !el.dataset.blockId) {
             el.dataset.blockId = block.block_id;
@@ -282,7 +391,7 @@ export const ChatRenderer = {
     },
 
     /**
-     * Создаёт стриминговый блок для инкрементального отображения SSE-данных
+     * Создаёт блок для посимвольного проявления (декоративный эффект печати)
      *
      * Для reasoning-блока: каждый вызов создаёт НОВЫЙ <details>-элемент
      * (изначально раскрытый), чтобы каждый reasoning-чанк отображался

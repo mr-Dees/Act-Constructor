@@ -2,7 +2,7 @@
 
 Сбой записи audit-лога НЕ должен ломать основную операцию: каждый метод
 оборачивает обращение к репозиторию в ``try/except Exception`` и логирует
-warning. По принципу 2.4.3 в ``docs/backend-audit-final.md``.
+warning.
 """
 
 from __future__ import annotations
@@ -15,9 +15,6 @@ from app.core.chat.names import (
     AUDIT_FILE_DELETED,
     AUDIT_FILE_UPLOADED,
     AUDIT_MESSAGE_SENT,
-    AUDIT_STREAM_ABORTED,
-    AUDIT_STREAM_COMPLETED,
-    AUDIT_STREAM_STARTED,
 )
 from app.core.metrics_batcher import MetricsBatcher
 from app.domains.chat.repositories.chat_audit_log_repository import (
@@ -183,58 +180,6 @@ class ChatAuditService:
         await self._safe_log(
             username=username,
             action=AUDIT_FILE_DELETED,
-            conversation_id=conversation_id,
-            details=details or None,
-        )
-
-    async def log_stream_started(
-        self,
-        *,
-        username: str,
-        conversation_id: str,
-    ) -> None:
-        """Логирует факт открытия SSE-стрима ответа ассистента."""
-        await self._safe_log(
-            username=username,
-            action=AUDIT_STREAM_STARTED,
-            conversation_id=conversation_id,
-        )
-
-    async def log_stream_completed(
-        self,
-        *,
-        username: str,
-        conversation_id: str,
-        duration_sec: float | None = None,
-    ) -> None:
-        """Логирует факт штатного завершения SSE-стрима."""
-        details: dict = {}
-        if duration_sec is not None:
-            details["duration_sec"] = round(float(duration_sec), 3)
-        await self._safe_log(
-            username=username,
-            action=AUDIT_STREAM_COMPLETED,
-            conversation_id=conversation_id,
-            details=details or None,
-        )
-
-    async def log_stream_aborted(
-        self,
-        *,
-        username: str,
-        conversation_id: str,
-        reason: str | None = None,
-        duration_sec: float | None = None,
-    ) -> None:
-        """Логирует прерывание SSE-стрима (disconnect клиента, exception)."""
-        details: dict = {}
-        if reason is not None:
-            details["reason"] = reason
-        if duration_sec is not None:
-            details["duration_sec"] = round(float(duration_sec), 3)
-        await self._safe_log(
-            username=username,
-            action=AUDIT_STREAM_ABORTED,
             conversation_id=conversation_id,
             details=details or None,
         )

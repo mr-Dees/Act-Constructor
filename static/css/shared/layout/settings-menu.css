@@ -314,6 +314,50 @@
     color: var(--text-secondary);
 }
 
+/* Задизейбленная опция (базы знаний «источников» и «инструментов») */
+.settings-option--disabled {
+    opacity: 0.45;
+    cursor: default;
+    pointer-events: none;
+}
+
+/* Трёхпозиционный сегмент-контрол для режима ОАРБ */
+.oarb-mode-switch {
+    display: inline-flex;
+    border: var(--border-width-thin) solid var(--input-border);
+    border-radius: var(--radius-sm);
+    overflow: hidden;
+    flex-shrink: 0;
+}
+
+.oarb-mode-switch__btn {
+    font-size: var(--font-size-xs);
+    font-family: var(--font-family-base);
+    color: var(--text-secondary);
+    background: var(--input-bg);
+    border: none;
+    border-right: var(--border-width-thin) solid var(--input-border);
+    padding: var(--spacing-xs) var(--spacing-sm);
+    cursor: pointer;
+    transition: background var(--transition-fast), color var(--transition-fast);
+    white-space: nowrap;
+    line-height: var(--line-height-tight);
+}
+
+.oarb-mode-switch__btn:last-child {
+    border-right: none;
+}
+
+.oarb-mode-switch__btn:hover {
+    background: var(--primary-subtle);
+    color: var(--primary);
+}
+
+.oarb-mode-switch__btn[aria-pressed="true"] {
+    background: var(--primary);
+    color: var(--text-on-primary);
+}
+
 /* Иконка информации */
 .settings-menu .info-icon {
     color: var(--info);

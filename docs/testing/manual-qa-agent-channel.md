@@ -1,0 +1,90 @@
+# Manual QA — канал к внешнему ИИ-агенту (agent_messages)
+
+Чек-лист ручной проверки канала к внешнему ИИ-агенту (база знаний ОАРБ) перед merge'ом ветки.
+
+> В тексте ниже имена таблиц (`agent_messages`, `chat_messages`, `chat_files`) упоминаются без префикса для краткости. В БД они хранятся с префиксом `DATABASE__TABLE_PREFIX` (по умолчанию `t_db_oarb_audit_act_`).
+
+## Архитектура (кратко)
+
+- Канал к агенту — единая bus-таблица `agent_messages` (вопрос от AW = строка `role='user'`, ответ агента = строка `role='assistant'`). Подробная семантика колонок и сценарии имитации — `docs/integrations/external-agent-imitation.sql`.
+- Транспорта SSE нет. POST сообщения возвращает `{message_id}`; фронт затем поллит `GET /api/v1/chat/conversations/{cid}/messages/{message_id}` до терминального статуса и рендерит ответ целиком с декоративным «эффектом печати» (токен-стриминга нет).
+- Режим работы задаётся form-параметром `agent_mode`:
+  - `off` / `adaptive` — локальная LLM (или GigaChat) исполняется синхронно в POST через `orchestrator.run(...)`. В `adaptive` оркестратор сам решает форвардить (forward-tool в наборе).
+  - `always` — прямой проброс вопроса в агента, минуя LLM.
+- Форвард создаёт черновик `chat_messages` (`status='streaming'`) + строку-вопрос в `agent_messages`; фоновый `AgentChannelPoller` поллит шину; `AgentChannelService.try_finalize` мапит ответ агента в блоки и финализирует черновик (`complete`/`failed`).
+- Тумблер «База знаний ОАРБ» в UI — 3 позиции: Выключен / Адаптивный / Всегда (localStorage-ключ `assistant_oarb_mode`). Две другие БЗ («источников», «инструментов») в UI выключены.
+
+## Подготовка
+
+1. Поднять PostgreSQL и применить миграцию (`app/domains/chat/migrations/postgresql/schema.sql`):
+   - Должна появиться таблица `t_db_oarb_audit_act_agent_messages` (префикс из `DATABASE__TABLE_PREFIX`).
+   - В `chat_messages` должна быть колонка `agent_ref VARCHAR(36)`.
+
+2. Заполнить `.env.local` (dev на OpenRouter):
+   ```
+   CHAT__PROFILE=openrouter
+   CHAT__API_BASE=https://openrouter.ai/api/v1
+   CHAT__API_KEY=<твой ключ>
+   CHAT__MODEL=minimax/minimax-m2:free
+   CHAT__RETRY__ON_429=true
+   CHAT__RETRY__ON_5XX=true
+   CHAT__MAX_PARALLEL_STREAMS_PER_USER=3
+   CHAT__AGENT_CHANNEL__TABLE_NAME=agent_messages
+   CHAT__AGENT_CHANNEL__POLL_MIN_INTERVAL_SEC=2.0
+   CHAT__AGENT_CHANNEL__POLL_MAX_INTERVAL_SEC=10.0
+   CHAT__AGENT_CHANNEL__POLL_BACKOFF_MULTIPLIER=1.5
+   CHAT__AGENT_CHANNEL__ANSWER_TIMEOUT_SEC=600
+   CHAT__AGENT_CHANNEL__MAX_BLOCK_TEXT_SIZE=262144
+   ```
+
+3. Запустить `uvicorn app.main:app --reload`, открыть портал в браузере.
+
+## Чек-лист
+
+### 1. Локальный ответ (тумблер «Выключен»)
+- Тумблер «База знаний ОАРБ» — в позиции «Выключен».
+- Написать в чат: «Привет, как дела?»
+- Ожидаемо: LLM отвечает синхронно (форварда нет, строк в `agent_messages` не появляется).
+- Проверить: `SELECT count(*) FROM t_db_oarb_audit_act_agent_messages` — не должно увеличиться.
+
+### 2. Прямой форвард на внешнего агента (тумблер «Всегда»)
+- Перевести тумблер в позицию «Всегда».
+- Написать: «Расскажи про регламент 2024 года».
+- Ожидаемо: появилась строка `role='user'`, `status='pending'` в `agent_messages`; в чате — облако-черновик с эффектом печати.
+- В DBeaver выполнить сценарий §1 из `external-agent-imitation.sql` (вставить ответ агента + закрыть вопрос: `reply_to`, `status='complete'`).
+- Ожидаемо: после ближайшего poll-тика (≤ `POLL_MAX_INTERVAL_SEC`) в чате появился финальный текст ответа; рассуждения из `metadata.thinking` отрисованы reasoning-блоком.
+
+### 3. Адаптивный форвард (тумблер «Адаптивный»)
+- Перевести тумблер в позицию «Адаптивный».
+- Написать вопрос, требующий знаний базы: «Что в регламенте 2024 года про КСО?».
+- Ожидаемо: оркестратор вызывает forward-tool, появляется строка-вопрос в `agent_messages`.
+- Завершить ответ агента (§1 имитации) — ответ отрисуется в чате.
+- Контрольный кейс: тривиальный вопрос («2+2?») в «Адаптивном» оркестратор отвечает локально без записи в шину.
+
+### 4. Ответ с кнопками
+- Форварднуть вопрос, ответ агента вставить по сценарию §2 из `external-agent-imitation.sql` (с `buttons`).
+- Ожидаемо: под текстом ответа отрисованы кнопки. Нажатие на кнопку `acts.open_act_page` переводит на `/constructor?act_id={id}` (где `id` — INTEGER из `acts.id`).
+- Под капотом: `button_translator.translate_buttons` мапит `action_id` ChatTool → client-action `open_url`.
+
+### 5. Ответ с файлом/медиа
+- Форварднуть вопрос, ответ агента вставить по сценарию §3 из `external-agent-imitation.sql` (с `media`).
+- Ожидаемо: `image/*` рендерится встроенным изображением; прочие mime — иконка + кнопка «Скачать» (через `GET /api/v1/chat/files/{file_id}`).
+
+### 6. Таймаут агента
+- Форварднуть вопрос, но НЕ имитировать ответ агента дольше `ANSWER_TIMEOUT_SEC` (по умолчанию 600с).
+- Ожидаемо: `AgentChannelService.mark_timeout` проставляет `status='timeout'` строке-вопросу; черновик `chat_messages` финализируется error-блоком («Внешний агент не ответил вовремя» — `build_timeout_error_block`).
+
+### 7. Восстановление после reload
+- Форварднуть вопрос, во время ожидания перезагрузить страницу.
+- Ожидаемо: облако-черновик восстанавливается из истории беседы — `GET /messages` отдаёт streaming-сообщение (`chat_messages.status='streaming'`) как обычную запись. После завершения ответа агента poll финализирует черновик, ответ виден в истории.
+- Под капотом: после рестарта uvicorn `AgentChannelPoller` реконсайлит активные форварды из streaming-черновиков (`start`/`subscribe`) — зависших облаков печати не остаётся.
+
+### 8. Лимит одновременных запросов
+- Открыть несколько бесед и форварднуть запросы, не завершая их, до достижения `CHAT__MAX_PARALLEL_STREAMS_PER_USER` (по умолчанию 3).
+- Следующий форвард: `AgentMessageRepository.count_active_for_user` возвращает `>= max`, бросается `ChatLimitError` ДО записей → HTTP 422 с дружелюбным сообщением.
+- Завершить один из активных форвардов — лимит освобождается, новый запрос проходит.
+
+### 9. Profile-switch на SGLang
+- Сменить `.env` на профиль `sglang` (внутренний адрес), перезапустить.
+- Повторить сценарии 1–3.
+- Ожидаемо: всё работает без правки кода.

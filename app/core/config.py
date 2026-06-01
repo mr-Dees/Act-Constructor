@@ -60,9 +60,8 @@ class DatabaseSettings(BaseModel):
       ``chat.audit_log``, ``acts.audit_log``) — каждый при flush берёт один
       коннект на короткое время (раз в ``flush_interval_sec`` секунд или при
       переполнении пакета).
-    * Polling-runners forward'а к внешнему агенту (``chat.agent_bridge_runner``)
-      — асинхронные задачи на каждый pending ``agent_request``; держат коннект
-      короткими порциями (poll каждые N секунд).
+    * Поллер канала к внешнему агенту (``chat.agent_channel_poller``)
+      — держит коннект короткими порциями (poll каждые N секунд).
     * Фоновый cleanup expired locks (``acts.expired_locks_cleanup``) — один
       коннект раз в 60 сек.
 

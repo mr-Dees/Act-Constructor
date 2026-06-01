@@ -56,6 +56,9 @@ ALTER TABLE {SCHEMA}.{PREFIX}chat_messages
     ADD CONSTRAINT check_chat_messages_status_values
     CHECK (status IN ('streaming','complete','failed'));
 
+-- agent_ref: безусловный ALTER, дубль глотает GreenplumAdapter.
+ALTER TABLE {SCHEMA}.{PREFIX}chat_messages ADD COLUMN agent_ref VARCHAR(36);
+
 CREATE INDEX idx_{PREFIX}chat_messages_conversation
     ON {SCHEMA}.{PREFIX}chat_messages(conversation_id);
 
@@ -91,128 +94,45 @@ CREATE INDEX idx_{PREFIX}chat_files_conversation
     ON {SCHEMA}.{PREFIX}chat_files(conversation_id);
 
 -- ============================================================================
--- ОЧЕРЕДЬ ЗАПРОСОВ К ВНЕШНЕМУ ИИ-АГЕНТУ
+-- BUS-ТАБЛИЦА КАНАЛА К ВНЕШНЕМУ АГЕНТУ (nanobot)
 -- ============================================================================
 
--- Sequence для id событий агента; адаптер ловит DuplicateObjectError
-CREATE SEQUENCE {SCHEMA}.{PREFIX}agent_response_events_id_seq;
-
--- Очередь запросов от AW к внешнему агенту.
--- DISTRIBUTED BY (conversation_id): данные одной беседы — на одном сегменте.
-CREATE TABLE IF NOT EXISTS {SCHEMA}.{PREFIX}agent_requests (
-    id                VARCHAR(36) NOT NULL,
-    conversation_id   VARCHAR(36) NOT NULL,
-    message_id        VARCHAR(36) NOT NULL,
-    user_id           VARCHAR(50) NOT NULL,
-    domain_name       VARCHAR(100),
-    knowledge_bases   JSONB NOT NULL DEFAULT '[]'::jsonb,
-    last_user_message TEXT NOT NULL,
-    history           JSONB NOT NULL DEFAULT '[]'::jsonb,
-    files             JSONB NOT NULL DEFAULT '[]'::jsonb,
-    status            VARCHAR(20) NOT NULL DEFAULT 'pending'
-                      CONSTRAINT check_agent_requests_status_values
-                      CHECK (status IN ('pending','dispatched','in_progress','done','error','timeout')),
-    error_message     TEXT,
-    -- Идентификатор воркера, заклеймившего запрос (UUID-строка).
-    -- NULL = «свободна»; ставится атомарным UPDATE в claim_pending().
-    worker_token      VARCHAR(64),
-    -- Optimistic locking: версия инкрементируется при каждом успешном
-    -- update_status_versioned; параллельный апдейт со старой версией
-    -- получит 0 строк затронуто.
-    version           INTEGER NOT NULL DEFAULT 0,
-    created_at        TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    started_at        TIMESTAMP,
-    finished_at       TIMESTAMP,
-    updated_at        TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    -- Идентификатор HTTP-запроса (из RequestIdMiddleware / X-Request-ID),
-    -- в рамках которого был создан agent_request. Нужен для сквозной
-    -- трассировки: HTTP-запрос ↔ строка agent_requests ↔ логи фонового
-    -- runner'а. NULL — если запрос создан вне HTTP-контекста.
-    parent_request_id VARCHAR(64),
-    -- GP-требование: DISTRIBUTED BY должен быть подмножеством PK.
-    -- id ведущий, чтобы lookups `WHERE id = $1` шли по PK-индексу.
-    PRIMARY KEY (id, conversation_id)
+-- «Провод» между AW и агентом. Имена колонок согласованы со стороной nanobot.
+-- chat_id = uid треда (= chat_messages.conversation_id); conversation_id = uid
+-- одного сообщения (на него ссылается reply_to). role 'tool' разрешён, но AW
+-- его пока не обрабатывает.
+CREATE TABLE IF NOT EXISTS {SCHEMA}.{PREFIX}agent_messages (
+    id              VARCHAR(36) NOT NULL,
+    chat_id         VARCHAR(36) NOT NULL,
+    user_id         VARCHAR(50) NOT NULL,
+    conversation_id VARCHAR(36) NOT NULL,
+    role            VARCHAR(20) NOT NULL
+                    CONSTRAINT check_agent_messages_role_values
+                    CHECK (role IN ('user','assistant','tool')),
+    content         TEXT,
+    media           JSONB,
+    metadata        JSONB,
+    reply_to        VARCHAR(36),
+    buttons         JSONB,
+    status          VARCHAR(20) NOT NULL DEFAULT 'pending'
+                    CONSTRAINT check_agent_messages_status_values
+                    CHECK (status IN ('pending','in_progress','complete','error','timeout')),
+    created_at      TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at      TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    -- GP-требование: DISTRIBUTED BY ⊆ PK. id ведущий (lookup WHERE id=$1 по PK).
+    PRIMARY KEY (id, chat_id)
 )
 WITH (appendonly=false)
-DISTRIBUTED BY (conversation_id);
+DISTRIBUTED BY (chat_id);
 
--- Идемпотентная миграция колонки для существующих GP-таблиц.
--- В GP 6.x (PG 9.4) синтаксис ADD-COLUMN-IF-NOT-EXISTS недоступен,
--- поэтому используем DO-блок с pg_attribute lookup.
-DO $$
-BEGIN
-    IF NOT EXISTS (
-        SELECT 1 FROM pg_attribute
-        WHERE attrelid = '{SCHEMA}.{PREFIX}agent_requests'::regclass
-          AND attname = 'parent_request_id'
-          AND NOT attisdropped
-    ) THEN
-        ALTER TABLE {SCHEMA}.{PREFIX}agent_requests
-            ADD COLUMN parent_request_id VARCHAR(64);
-    END IF;
-END$$;
-
-CREATE INDEX idx_{PREFIX}agent_requests_status_created
-    ON {SCHEMA}.{PREFIX}agent_requests(status, created_at);
--- В PG этот индекс был, в GP отсутствовал — agent_bridge ищет запросы
--- беседы по conversation_id + сортирует по created_at DESC.
-CREATE INDEX idx_{PREFIX}agent_requests_conversation
-    ON {SCHEMA}.{PREFIX}agent_requests(conversation_id, created_at DESC);
-CREATE INDEX idx_{PREFIX}agent_requests_message
-    ON {SCHEMA}.{PREFIX}agent_requests(message_id);
--- Индекс под claim_pending: ищем строки со status pending/dispatched
--- и пустым worker_token. В GP partial-индекс с WHERE поддерживается,
--- но для надёжности и простоты — обычный композитный.
-CREATE INDEX idx_{PREFIX}agent_requests_pending
-    ON {SCHEMA}.{PREFIX}agent_requests(status, worker_token, updated_at);
--- Индекс под фильтр по parent_request_id (трассировка HTTP-запрос → agent_requests).
-CREATE INDEX idx_{PREFIX}agent_requests_parent_request_id
-    ON {SCHEMA}.{PREFIX}agent_requests(parent_request_id);
-
--- Append-only лента событий от агента.
--- UNIQUE(request_id, seq) защищает от сетевого retry внешнего агента:
--- если он повторно INSERT-нёт событие с тем же seq, СУБД отвергнет дубль,
--- polling не размножит его на фронт двойным reasoning-блоком. GP-требование
--- (DISTRIBUTED BY ⊆ UNIQUE) соблюдено: request_id входит в (request_id, seq).
-CREATE TABLE IF NOT EXISTS {SCHEMA}.{PREFIX}agent_response_events (
-    id            BIGINT NOT NULL
-                  DEFAULT nextval('{SCHEMA}.{PREFIX}agent_response_events_id_seq'),
-    request_id    VARCHAR(36) NOT NULL,
-    seq           INTEGER NOT NULL,
-    event_type    VARCHAR(20) NOT NULL
-                  CONSTRAINT check_agent_response_events_event_type_values
-                  CHECK (event_type IN ('reasoning','status','error','final')),
-    payload       JSONB NOT NULL,
-    created_at    TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    -- GP-требование: DISTRIBUTED BY должен быть подмножеством PK и UNIQUE.
-    PRIMARY KEY (id, request_id),
-    UNIQUE (request_id, seq)
-)
-WITH (appendonly=false)
-DISTRIBUTED BY (request_id);
-
--- Индекс под polling-запрос: WHERE request_id = $1 AND seq > $2 ORDER BY seq.
--- Был (request_id, id) — фильтр по seq шёл в памяти после index scan.
--- UNIQUE-констрейнт выше сам создаёт btree-индекс на (request_id, seq),
--- так что отдельный CREATE INDEX больше не нужен.
-
--- Финальный ответ агента (однократный INSERT, stop-сигнал).
-CREATE TABLE IF NOT EXISTS {SCHEMA}.{PREFIX}agent_responses (
-    id             VARCHAR(36) NOT NULL,
-    request_id     VARCHAR(36) NOT NULL,
-    blocks         JSONB NOT NULL,
-    finish_reason  VARCHAR(20) NOT NULL DEFAULT 'stop'
-                   CONSTRAINT check_agent_responses_finish_reason_values
-                   CHECK (finish_reason IN ('stop','length','content_filter','error')),
-    token_usage    JSONB,
-    model          VARCHAR(100),
-    created_at     TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    -- GP-требование: и PK, и UNIQUE должны содержать столбец DISTRIBUTED BY.
-    PRIMARY KEY (id, request_id),
-    UNIQUE (request_id)
-)
-WITH (appendonly=false)
-DISTRIBUTED BY (request_id);
+CREATE INDEX idx_{PREFIX}agent_messages_chat
+    ON {SCHEMA}.{PREFIX}agent_messages(chat_id, created_at);
+CREATE INDEX idx_{PREFIX}agent_messages_conversation
+    ON {SCHEMA}.{PREFIX}agent_messages(conversation_id);
+CREATE INDEX idx_{PREFIX}agent_messages_status
+    ON {SCHEMA}.{PREFIX}agent_messages(status, created_at);
+CREATE INDEX idx_{PREFIX}agent_messages_reply_to
+    ON {SCHEMA}.{PREFIX}agent_messages(reply_to);
 
 -- ============================================================================
 -- МЕТРИКИ ВЫПОЛНЕНИЯ CHATTOOL'ОВ

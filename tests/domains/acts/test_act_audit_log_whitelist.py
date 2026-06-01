@@ -102,22 +102,14 @@ class TestGetLogWhitelistValidation:
         )
         assert total == 0
         sql = mock_conn.fetch.call_args.args[0]
-        # В SQL не должно быть инъекций — только разрешённые имена
-        for col in ("action", "username", "created_at"):
-            # каждый использованный в WHERE столбец — из whitelist
-            pass
+        # Значения идут параметризованными плейсхолдерами ($N), а не конкатенацией,
+        # поэтому инъекционные литералы не попадают в текст запроса.
         assert "; DROP TABLE" not in sql
         assert "OR 1=1" not in sql
 
 
 class TestCheckFieldWhitelistDirect:
     """Прямое тестирование логики whitelist через отдельную вспомогательную функцию."""
-
-    def test_allowed_fields_pass(self):
-        """Все поля из whitelist проходят проверку без исключений."""
-        for field in _ALLOWED_FILTER_FIELDS:
-            # Симулируем логику _check_field
-            assert field in _ALLOWED_FILTER_FIELDS
 
     def test_unknown_field_not_in_whitelist(self):
         """Произвольное поле не входит в whitelist."""

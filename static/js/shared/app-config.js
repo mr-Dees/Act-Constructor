@@ -117,13 +117,9 @@ export class AppConfig {
         // Сообщения беседы
         messages: (cid) => `/api/v1/chat/conversations/${cid}/messages`,
 
-        // Активный forward к внешнему агенту (для resume после reload)
+        // Активный forward к внешнему агенту (чтобы продолжить polling после reload)
         activeForward: (cid) =>
             `/api/v1/chat/conversations/${cid}/active-forward`,
-
-        // Resume SSE для forward-запроса (привязан к беседе)
-        forwardStream: (cid, rid) =>
-            `/api/v1/chat/conversations/${cid}/forward-stream/${rid}`,
 
         // Лимиты файлов (размер, типы)
         limits: '/api/v1/chat/limits',

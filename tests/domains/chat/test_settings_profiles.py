@@ -1,4 +1,4 @@
-"""Тесты конфигурации профилей и retry/agent_bridge."""
+"""Тесты конфигурации профилей и retry/agent_channel."""
 import pytest
 
 from app.core.settings_registry import _load_from_env, reset
@@ -34,9 +34,9 @@ def test_default_profile_is_sglang():
     assert s.retry.on_429 is True
     assert s.retry.on_5xx is True
     assert s.smalltalk_mode == "local"
-    assert s.agent_bridge.poll_min_interval_sec == 5.0
-    assert s.agent_bridge.poll_max_interval_sec == 10.0
-    assert s.agent_bridge.poll_backoff_multiplier == 1.5
+    assert s.agent_channel.poll_min_interval_sec == 2.0
+    assert s.agent_channel.poll_max_interval_sec == 10.0
+    assert s.agent_channel.poll_backoff_multiplier == 1.5
 
 
 def test_openrouter_profile_with_extra_headers():
@@ -66,23 +66,19 @@ def test_nested_retry_overrides(monkeypatch):
     assert s.retry.backoff_base_sec == 0.5
 
 
-def test_nested_agent_bridge_overrides(monkeypatch):
+def test_nested_agent_channel_overrides(monkeypatch):
     s = _load(monkeypatch,
               CHAT__API_BASE="http://x", CHAT__API_KEY="x", CHAT__MODEL="m",
-              CHAT__AGENT_BRIDGE__POLL_MIN_INTERVAL_SEC="0.25",
-              CHAT__AGENT_BRIDGE__POLL_MAX_INTERVAL_SEC="5.0",
-              CHAT__AGENT_BRIDGE__POLL_BACKOFF_MULTIPLIER="2.0",
-              CHAT__AGENT_BRIDGE__INITIAL_RESPONSE_TIMEOUT_SEC="60",
-              CHAT__AGENT_BRIDGE__EVENT_TIMEOUT_SEC="30",
-              CHAT__AGENT_BRIDGE__MAX_TOTAL_DURATION_SEC="900",
-              CHAT__AGENT_BRIDGE__HISTORY_LIMIT="10")
-    assert s.agent_bridge.poll_min_interval_sec == 0.25
-    assert s.agent_bridge.poll_max_interval_sec == 5.0
-    assert s.agent_bridge.poll_backoff_multiplier == 2.0
-    assert s.agent_bridge.initial_response_timeout_sec == 60
-    assert s.agent_bridge.event_timeout_sec == 30
-    assert s.agent_bridge.max_total_duration_sec == 900
-    assert s.agent_bridge.history_limit == 10
+              CHAT__AGENT_CHANNEL__POLL_MIN_INTERVAL_SEC="0.25",
+              CHAT__AGENT_CHANNEL__POLL_MAX_INTERVAL_SEC="5.0",
+              CHAT__AGENT_CHANNEL__POLL_BACKOFF_MULTIPLIER="2.0",
+              CHAT__AGENT_CHANNEL__ANSWER_TIMEOUT_SEC="900",
+              CHAT__AGENT_CHANNEL__MAX_BLOCK_TEXT_SIZE="1024")
+    assert s.agent_channel.poll_min_interval_sec == 0.25
+    assert s.agent_channel.poll_max_interval_sec == 5.0
+    assert s.agent_channel.poll_backoff_multiplier == 2.0
+    assert s.agent_channel.answer_timeout_sec == 900
+    assert s.agent_channel.max_block_text_size == 1024
 
 
 def test_smalltalk_mode_forward(monkeypatch):
@@ -113,3 +109,14 @@ def test_invalid_profile_rejected():
             api_key="x",
             model="m",
         )
+
+
+def test_agent_channel_settings_defaults():
+    from app.domains.chat.settings import AgentChannelSettings
+    s = AgentChannelSettings()
+    assert s.table_name == "agent_messages"
+    assert s.answer_timeout_sec == 600
+    assert s.poll_min_interval_sec == 2.0
+    assert s.poll_max_interval_sec == 10.0
+    assert s.poll_backoff_multiplier == 1.5
+    assert s.max_block_text_size == 262144

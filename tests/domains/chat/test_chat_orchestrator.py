@@ -766,72 +766,6 @@ class TestExecuteToolCall:
         )
         assert leaked_in_logs, "Детали исключения должны быть в логах"
 
-    async def test_max_tool_rounds_streaming_count(self, orchestrator):
-        """4.14: При max_tool_rounds=3 и LLM, всегда отдающем tool_call,
-        инструмент вызывается ровно 3 раза (не 2 и не 4).
-        """
-        call_count = 0
-
-        async def counting_handler(**kwargs):
-            nonlocal call_count
-            call_count += 1
-            return "ok"
-
-        tool = ChatTool(
-            name="counter_tool",
-            domain="test",
-            description="Счётчик",
-            handler=counting_handler,
-        )
-        register_tools([tool])
-
-        # Бесконечно отдаём tool_call стримом
-        def make_stream_factory():
-            async def mock_stream():
-                chunk = MagicMock()
-                delta = MagicMock()
-                delta.content = None
-                tc_delta = MagicMock()
-                tc_delta.index = 0
-                tc_delta.id = f"tc-{call_count}"
-                tc_delta.function = MagicMock()
-                tc_delta.function.name = "counter_tool"
-                tc_delta.function.arguments = "{}"
-                delta.tool_calls = [tc_delta]
-                chunk.choices = [MagicMock(delta=delta, finish_reason=None)]
-                yield chunk
-
-                chunk2 = MagicMock()
-                delta2 = MagicMock()
-                delta2.content = None
-                delta2.tool_calls = None
-                chunk2.choices = [MagicMock(delta=delta2, finish_reason="tool_calls")]
-                yield chunk2
-            return mock_stream()
-
-        orchestrator.settings.max_tool_rounds = 3
-
-        with patch.object(
-            Orchestrator, "_get_openai_client",
-        ) as mock_client_factory:
-            mock_client = AsyncMock()
-            mock_client.chat.completions.create = AsyncMock(
-                side_effect=lambda **kw: make_stream_factory(),
-            )
-            mock_client_factory.return_value = mock_client
-            orchestrator._save_assistant_message = AsyncMock()
-
-            events = []
-            async for ev in orchestrator.run_stream(
-                message_id="test-msg-id",
-                conversation_id="conv-1",
-                user_message="loop",
-            ):
-                events.append(ev)
-
-        # При max_tool_rounds=3 ровно 3 раза вызвался handler
-        assert call_count == 3, f"Ожидалось 3 вызова, получено {call_count}"
-
     async def test_tool_dict_result_serialized(self, orchestrator):
         """Dict-результат инструмента сериализуется в JSON."""
         tool = ChatTool(
@@ -1059,341 +993,6 @@ class TestExecuteToolCallMetrics:
 
 
 # -------------------------------------------------------------------------
-# run_stream() — стриминговый agent loop
-# -------------------------------------------------------------------------
-
-
-class TestOrchestratorRunStream:
-
-    async def test_stream_fallback_emits_full_lifecycle(self, orchestrator_no_api):
-        """Без API: message_start → block_start → delta → block_end → message_end."""
-        events = []
-        async for event in orchestrator_no_api.run_stream(
-            message_id="test-msg-id",
-            conversation_id="conv-1",
-            user_message="Привет",
-        ):
-            events.append(event)
-
-        event_types = [e.split("\n")[0].replace("event: ", "") for e in events]
-        assert event_types == [
-            "message_start",
-            "block_start",
-            "block_delta",
-            "block_end",
-            "message_end",
-        ]
-
-    async def test_stream_fallback_contains_message(self, orchestrator_no_api):
-        """Fallback-стриминг содержит текст сообщения пользователя."""
-        events = []
-        async for event in orchestrator_no_api.run_stream(
-            message_id="test-msg-id",
-            conversation_id="conv-1",
-            user_message="Тестовое сообщение",
-        ):
-            events.append(event)
-
-        all_text = "".join(events)
-        assert "Тестовое сообщение" in all_text
-
-    @patch("app.domains.chat.services.orchestrator.Orchestrator._get_openai_client")
-    async def test_stream_normal_response(self, mock_client_factory, orchestrator):
-        """Нормальный стриминг с текстовым ответом."""
-        mock_client = AsyncMock()
-
-        # Создаём async iterable для стриминга
-        async def mock_stream():
-            # Чанк 1: текстовое содержимое
-            chunk1 = MagicMock()
-            delta1 = MagicMock()
-            delta1.content = "Привет"
-            delta1.tool_calls = None
-            chunk1.choices = [MagicMock(delta=delta1, finish_reason=None)]
-
-            # Чанк 2: продолжение текста
-            chunk2 = MagicMock()
-            delta2 = MagicMock()
-            delta2.content = " мир!"
-            delta2.tool_calls = None
-            chunk2.choices = [MagicMock(delta=delta2, finish_reason=None)]
-
-            # Чанк 3: завершение
-            chunk3 = MagicMock()
-            delta3 = MagicMock()
-            delta3.content = None
-            delta3.tool_calls = None
-            chunk3.choices = [MagicMock(delta=delta3, finish_reason="stop")]
-
-            for chunk in [chunk1, chunk2, chunk3]:
-                yield chunk
-
-        mock_client.chat.completions.create = AsyncMock(return_value=mock_stream())
-        mock_client_factory.return_value = mock_client
-
-        events = []
-        async for event in orchestrator.run_stream(
-            message_id="test-msg-id",
-            conversation_id="conv-1",
-            user_message="Привет",
-        ):
-            events.append(event)
-
-        event_types = [e.split("\n")[0].replace("event: ", "") for e in events]
-        assert event_types[0] == "message_start"
-        assert event_types[-1] == "message_end"
-        assert "block_start" in event_types
-        assert "block_delta" in event_types
-        assert "block_end" in event_types
-
-    @patch("app.domains.chat.services.orchestrator.Orchestrator._get_openai_client")
-    async def test_stream_error_guarantees_message_end(
-        self, mock_client_factory, orchestrator,
-    ):
-        """1.4 (BUG #6 закрыт): при ошибке стриминга message_end гарантирован.
-
-        Оркестратор ловит generic Exception, эмитит нейтральный SSE error
-        и финализирует message_end в любом случае.
-        """
-        mock_client = AsyncMock()
-        mock_client.chat.completions.create = AsyncMock(
-            side_effect=Exception("LLM API недоступен"),
-        )
-        mock_client_factory.return_value = mock_client
-
-        events = []
-        async for event in orchestrator.run_stream(
-            message_id="test-msg-id",
-            conversation_id="conv-1",
-            user_message="Привет",
-        ):
-            events.append(event)
-
-        event_types = [e.split("\n")[0].replace("event: ", "") for e in events]
-        # message_end ДОЛЖЕН быть последним событием даже при ошибке
-        assert event_types[-1] == "message_end"
-        # Ошибка должна быть отправлена
-        assert "error" in event_types
-
-    @patch("app.domains.chat.services.orchestrator.Orchestrator._get_openai_client")
-    async def test_stream_with_tool_calls(self, mock_client_factory, orchestrator):
-        """Стриминг с вызовом инструмента: tool_call и tool_result."""
-        test_tool = ChatTool(
-            name="stream_tool",
-            domain="test",
-            description="Инструмент для стрим-теста",
-            handler=AsyncMock(return_value="Результат инструмента"),
-        )
-        register_tools([test_tool])
-
-        mock_client = AsyncMock()
-
-        # Первый вызов: стриминг с tool_call
-        async def mock_stream_with_tool():
-            # Чанк с tool_call дельтами
-            chunk1 = MagicMock()
-            delta1 = MagicMock()
-            delta1.content = None
-            tc_delta = MagicMock()
-            tc_delta.index = 0
-            tc_delta.id = "tc-stream-1"
-            tc_delta.function = MagicMock()
-            tc_delta.function.name = "stream_tool"
-            tc_delta.function.arguments = '{"query": "test"}'
-            delta1.tool_calls = [tc_delta]
-            chunk1.choices = [MagicMock(delta=delta1, finish_reason=None)]
-
-            # Финальный чанк
-            chunk2 = MagicMock()
-            delta2 = MagicMock()
-            delta2.content = None
-            delta2.tool_calls = None
-            chunk2.choices = [MagicMock(delta=delta2, finish_reason="tool_calls")]
-
-            for chunk in [chunk1, chunk2]:
-                yield chunk
-
-        # Второй вызов: финальный ответ (non-streaming после tool)
-        response_final = _make_mock_response(content="Ответ после инструмента")
-
-        mock_client.chat.completions.create = AsyncMock(
-            side_effect=[mock_stream_with_tool(), response_final],
-        )
-        mock_client_factory.return_value = mock_client
-
-        events = []
-        async for event in orchestrator.run_stream(
-            message_id="test-msg-id",
-            conversation_id="conv-1",
-            user_message="Используй инструмент",
-        ):
-            events.append(event)
-
-        event_types = [e.split("\n")[0].replace("event: ", "") for e in events]
-        assert "tool_call" in event_types
-        assert "tool_result" in event_types
-        assert event_types[-1] == "message_end"
-
-    @patch("app.domains.chat.services.orchestrator.Orchestrator._get_openai_client")
-    async def test_stream_saves_assistant_message(
-        self, mock_client_factory, orchestrator,
-    ):
-        """После стриминга сохраняется сообщение ассистента через свежее соединение."""
-        mock_client = AsyncMock()
-
-        async def mock_stream():
-            chunk = MagicMock()
-            delta = MagicMock()
-            delta.content = "Ответ"
-            delta.tool_calls = None
-            chunk.choices = [MagicMock(delta=delta, finish_reason=None)]
-
-            chunk2 = MagicMock()
-            delta2 = MagicMock()
-            delta2.content = None
-            delta2.tool_calls = None
-            chunk2.choices = [MagicMock(delta=delta2, finish_reason="stop")]
-
-            for c in [chunk, chunk2]:
-                yield c
-
-        mock_client.chat.completions.create = AsyncMock(return_value=mock_stream())
-        mock_client_factory.return_value = mock_client
-
-        # Mock для _save_assistant_message (свежее соединение из пула)
-        mock_conn = AsyncMock()
-        mock_conn.fetchrow = AsyncMock(return_value={
-            "id": "msg-saved",
-            "conversation_id": "conv-1",
-            "role": "assistant",
-            "content": [{"type": "text", "content": "Ответ"}],
-            "model": "gpt-4o",
-            "token_usage": None,
-            "created_at": "2025-01-01T00:00:00",
-        })
-        mock_conn.transaction = MagicMock(return_value=AsyncMock())
-        ctx = AsyncMock()
-        ctx.__aenter__ = AsyncMock(return_value=mock_conn)
-        ctx.__aexit__ = AsyncMock(return_value=False)
-        mock_adapter = MagicMock(get_table_name=lambda n: n)
-
-        # Потребляем стрим
-        events = []
-        with (
-            patch("app.db.connection.get_db", return_value=ctx) as mock_get_db,
-            patch("app.db.repositories.base.get_adapter", return_value=mock_adapter),
-        ):
-            async for event in orchestrator.run_stream(
-                message_id="test-msg-id",
-                conversation_id="conv-1",
-                user_message="Привет",
-            ):
-                events.append(event)
-
-            # Проверяем, что get_db вызывался (свежее соединение для сохранения)
-            mock_get_db.assert_called()
-
-    @patch("app.domains.chat.services.orchestrator.Orchestrator._get_openai_client")
-    async def test_stream_tool_validation_error_emits_neutral_tool_error(
-        self, mock_client_factory, orchestrator,
-    ):
-        """1.3: При вызове tool'а без required параметра — SSE tool_error
-        с нейтральным сообщением; сырой текст ошибки не утекает.
-        """
-        tool = ChatTool(
-            name="strict_tool",
-            domain="test",
-            description="Требует параметр",
-            parameters=[
-                ChatToolParam(
-                    name="needed",
-                    type="string",
-                    description="Должен быть",
-                    required=True,
-                ),
-            ],
-            handler=AsyncMock(return_value="ok"),
-        )
-        register_tools([tool])
-
-        mock_client = AsyncMock()
-
-        # Стрим: LLM зовёт инструмент БЕЗ required-параметра.
-        async def stream_with_bad_tool():
-            chunk = MagicMock()
-            delta = MagicMock()
-            delta.content = None
-            tc_delta = MagicMock()
-            tc_delta.index = 0
-            tc_delta.id = "tc-bad"
-            tc_delta.function = MagicMock()
-            tc_delta.function.name = "strict_tool"
-            tc_delta.function.arguments = "{}"  # пустые args
-            delta.tool_calls = [tc_delta]
-            chunk.choices = [MagicMock(delta=delta, finish_reason=None)]
-            yield chunk
-
-            chunk2 = MagicMock()
-            delta2 = MagicMock()
-            delta2.content = None
-            delta2.tool_calls = None
-            chunk2.choices = [MagicMock(delta=delta2, finish_reason="tool_calls")]
-            yield chunk2
-
-        # Финальный ответ после ошибки tool'а
-        response_final = _make_mock_response(content="ok-final")
-        mock_client.chat.completions.create = AsyncMock(
-            side_effect=[stream_with_bad_tool(), response_final],
-        )
-        mock_client_factory.return_value = mock_client
-        orchestrator._save_assistant_message = AsyncMock()
-
-        events = []
-        async for ev in orchestrator.run_stream(
-            message_id="test-msg-id",
-            conversation_id="conv-1",
-            user_message="без параметра",
-        ):
-            events.append(ev)
-
-        event_types = [e.split("\n")[0].replace("event: ", "") for e in events]
-        # Должно быть tool_error, не tool_result для этого вызова
-        assert "tool_error" in event_types, f"events={event_types}"
-
-        # Сырой текст ошибки (имя параметра в технической формулировке) НЕ должен
-        # утекать наружу — в payload tool_error содержится нейтральное сообщение.
-        joined = "\n".join(events)
-        assert "Не удалось выполнить инструмент" in joined
-        assert "Попробуйте переформулировать" in joined
-        # "отсутствует обязательный параметр" (сырое сообщение исключения) —
-        # только в логах; в SSE его быть не должно.
-        assert "отсутствует обязательный параметр" not in joined
-
-    async def test_stream_openai_not_installed(self, orchestrator):
-        """При отсутствии openai пакета — fallback с сообщением."""
-        # Патчим import openai чтобы он выбрасывал ImportError
-        import builtins
-        original_import = builtins.__import__
-
-        def mock_import(name, *args, **kwargs):
-            if name == "openai":
-                raise ImportError("No module named 'openai'")
-            return original_import(name, *args, **kwargs)
-
-        events = []
-        with patch("builtins.__import__", side_effect=mock_import):
-            async for event in orchestrator.run_stream(
-                message_id="test-msg-id",
-                conversation_id="conv-1",
-                user_message="Привет",
-            ):
-                events.append(event)
-
-        all_text = "".join(events)
-        assert "message_end" in all_text
-
-
-# -------------------------------------------------------------------------
 # _get_history_messages
 # -------------------------------------------------------------------------
 
@@ -1592,13 +1191,11 @@ async def test_orchestrator_disables_streaming_for_gigachat_profile():
         with patch.object(
             orch, "_save_assistant_message", new=AsyncMock(),
         ):
-            chunks = []
-            async for chunk in orch.run_stream(
+            await orch.run(
                 message_id="test-msg-id",
                 conversation_id="c1",
                 user_message="привет",
-            ):
-                chunks.append(chunk)
+            )
 
     # Проверяем: ни одного вызова с stream=True
     for call in fake_client.chat.completions.create.await_args_list:
@@ -1903,65 +1500,6 @@ class TestToolLoopExit:
         assert result.get("status") == "error" or "strict" in result.get("response", "")
 
     @patch("app.domains.chat.services.orchestrator.Orchestrator._get_openai_client")
-    async def test_run_stream_exits_on_repeated_validation_error(
-        self, mock_client_factory,
-    ):
-        """run_stream() (non-streaming branch) прерывает цикл на 2 одинаковых ошибках."""
-        from pydantic import SecretStr
-
-        settings = ChatDomainSettings(
-            api_base="http://test:8000/v1",
-            api_key=SecretStr("t"),
-            max_tool_rounds=10,
-            streaming_enabled=False,  # Используем non-streaming для предсказуемости
-        )
-        tool = ChatTool(
-            name="strict2",
-            domain="test",
-            description="Строгий2",
-            parameters=[
-                ChatToolParam(
-                    name="must2", type="string", description="Обязательный2", required=True,
-                ),
-            ],
-            handler=AsyncMock(return_value="ok"),
-        )
-        register_tools([tool])
-
-        msg_svc = AsyncMock()
-        msg_svc.load_history_for_llm = AsyncMock(return_value=[])
-        orch = Orchestrator(
-            msg_service=msg_svc, conv_service=AsyncMock(), settings=settings,
-        )
-        orch._save_assistant_message = AsyncMock()
-
-        tc_bad = _make_tool_call(name="strict2", arguments="{}", tc_id="tc-bad2")
-        resp_bad = _make_mock_response(tool_calls=[tc_bad])
-
-        mock_client = AsyncMock()
-        mock_client.chat.completions.create = AsyncMock(
-            side_effect=[resp_bad] * 10,
-        )
-        mock_client_factory.return_value = mock_client
-
-        events: list[str] = []
-        async for ev in orch.run_stream(
-            message_id="test-msg-id",
-            conversation_id="conv-1",
-            user_message="вызови strict2 без параметра",
-        ):
-            events.append(ev)
-
-        # LLM вызван не 10 раз — loop exit отработал
-        assert mock_client.chat.completions.create.call_count < 10
-        # SSE содержит error или tool_error
-        event_types = [e.split("\n")[0].replace("event: ", "") for e in events]
-        has_error = "error" in event_types or "tool_error" in event_types
-        assert has_error, f"Ожидался error/tool_error, получили: {event_types}"
-        # message_end должен быть в конце
-        assert event_types[-1] == "message_end"
-
-    @patch("app.domains.chat.services.orchestrator.Orchestrator._get_openai_client")
     async def test_different_errors_do_not_trigger_early_exit(
         self, mock_client_factory, orchestrator,
     ):
@@ -2014,3 +1552,213 @@ class TestToolLoopExit:
         )
         # Не упал раньше max_tool_rounds из-за разных ошибок
         assert mock_client.chat.completions.create.call_count >= 3
+
+
+# -------------------------------------------------------------------------
+# agent_mode: фильтрация forward-тула и bus-форвард в adaptive-режиме
+# -------------------------------------------------------------------------
+
+
+class TestAgentModeForward:
+    """Тесты adaptive-форварда через bus-канал в non-streaming agent_loop."""
+
+    @patch("app.domains.chat.services.orchestrator.Orchestrator._get_openai_client")
+    async def test_off_mode_filters_forward_tool(
+        self, mock_client_factory, orchestrator,
+    ):
+        """В режиме off forward-тул не передаётся LLM."""
+        from app.core.chat.names import TOOL_FORWARD_TO_KNOWLEDGE_AGENT
+
+        # Регистрируем forward-тул
+        forward_tool = ChatTool(
+            name=TOOL_FORWARD_TO_KNOWLEDGE_AGENT,
+            domain="chat",
+            description="Форвард к агенту знаний",
+            handler=AsyncMock(return_value="forwarded"),
+        )
+        register_tools([forward_tool])
+
+        mock_client = AsyncMock()
+        response = _make_mock_response(content="Ответ без форварда")
+        mock_client.chat.completions.create = AsyncMock(return_value=response)
+        mock_client_factory.return_value = mock_client
+        orchestrator._save_assistant_message = AsyncMock()
+
+        # Перехватываем вызов LLM, чтобы проверить переданные tools
+        captured_tools: list = []
+
+        original_create = mock_client.chat.completions.create
+
+        async def capturing_create(**kwargs):
+            captured_tools.extend(kwargs.get("tools", []))
+            return await original_create(**kwargs)
+
+        mock_client.chat.completions.create = capturing_create
+
+        await orchestrator.run(
+            message_id="msg-1",
+            conversation_id="conv-1",
+            user_message="Привет",
+            agent_mode="off",
+        )
+
+        # Forward-тул НЕ должен быть в списке, переданном LLM
+        tool_names = [t["function"]["name"] for t in captured_tools]
+        assert TOOL_FORWARD_TO_KNOWLEDGE_AGENT not in tool_names
+
+    @patch("app.domains.chat.services.orchestrator.Orchestrator._get_openai_client")
+    async def test_adaptive_mode_calls_channel_submit_and_poller(
+        self, mock_client_factory, orchestrator,
+    ):
+        """В adaptive-режиме при tool_call forward → submit + poller.subscribe,
+        _save_assistant_message НЕ вызван, результат содержит forwarded=True."""
+        from app.core.chat.names import TOOL_FORWARD_TO_KNOWLEDGE_AGENT
+
+        forward_tool = ChatTool(
+            name=TOOL_FORWARD_TO_KNOWLEDGE_AGENT,
+            domain="chat",
+            description="Форвард к агенту знаний",
+            handler=AsyncMock(return_value="forwarded"),
+        )
+        register_tools([forward_tool])
+
+        mock_client = AsyncMock()
+        tool_call = _make_tool_call(
+            name=TOOL_FORWARD_TO_KNOWLEDGE_AGENT,
+            arguments='{"question": "Что такое аудит?"}',
+        )
+        response_with_forward = _make_mock_response(
+            content=None, tool_calls=[tool_call],
+        )
+        mock_client.chat.completions.create = AsyncMock(
+            return_value=response_with_forward,
+        )
+        mock_client_factory.return_value = mock_client
+        orchestrator._save_assistant_message = AsyncMock()
+
+        mock_poller = MagicMock()
+        mock_poller.subscribe = MagicMock()
+
+        mock_channel = AsyncMock()
+        mock_channel.submit = AsyncMock(return_value="question-uid-123")
+
+        # Мокаем context-manager get_db и AgentChannelService.
+        # Импорты в _handle_forward_terminal ленивые (внутри функции),
+        # поэтому патчим источники, а не agent_loop.* атрибуты.
+        mock_conn = AsyncMock()
+        mock_db_ctx = AsyncMock()
+        mock_db_ctx.__aenter__ = AsyncMock(return_value=mock_conn)
+        mock_db_ctx.__aexit__ = AsyncMock(return_value=False)
+
+        with (
+            patch(
+                "app.db.connection.get_db",
+                return_value=mock_db_ctx,
+            ),
+            patch(
+                "app.domains.chat.services.agent_channel.AgentChannelService",
+                return_value=mock_channel,
+            ),
+            patch(
+                "app.domains.chat.deps.get_agent_channel_poller",
+                return_value=mock_poller,
+            ),
+        ):
+            result = await orchestrator.run(
+                message_id="msg-forward-1",
+                conversation_id="conv-1",
+                user_message="Что такое аудит?",
+                agent_mode="adaptive",
+            )
+
+        # submit вызван с правильными аргументами
+        mock_channel.submit.assert_awaited_once()
+        submit_kwargs = mock_channel.submit.await_args.kwargs
+        assert submit_kwargs["assistant_message_id"] == "msg-forward-1"
+        assert submit_kwargs["conversation_id"] == "conv-1"
+        assert submit_kwargs["mode"] == "adaptive"
+        assert submit_kwargs["text"] == "Что такое аудит?"
+
+        # poller.subscribe вызван
+        mock_poller.subscribe.assert_called_once_with(
+            assistant_message_id="msg-forward-1",
+            question_uid="question-uid-123",
+        )
+
+        # _save_assistant_message НЕ должен быть вызван (draft создан submit'ом)
+        orchestrator._save_assistant_message.assert_not_awaited()
+
+        # Результат содержит forwarded=True
+        assert result.get("forwarded") is True
+        assert result["response"] == ""
+        assert TOOL_FORWARD_TO_KNOWLEDGE_AGENT in result["sources"]
+
+    @patch("app.domains.chat.services.orchestrator.Orchestrator._get_openai_client")
+    async def test_adaptive_mode_poller_none_logs_warning(
+        self, mock_client_factory, orchestrator, caplog,
+    ):
+        """Если poller не инициализирован — логируется warning, форвард не падает."""
+        import logging as _logging
+        from app.core.chat.names import TOOL_FORWARD_TO_KNOWLEDGE_AGENT
+
+        forward_tool = ChatTool(
+            name=TOOL_FORWARD_TO_KNOWLEDGE_AGENT,
+            domain="chat",
+            description="Форвард к агенту знаний",
+            handler=AsyncMock(return_value="forwarded"),
+        )
+        register_tools([forward_tool])
+
+        mock_client = AsyncMock()
+        tool_call = _make_tool_call(
+            name=TOOL_FORWARD_TO_KNOWLEDGE_AGENT,
+            arguments="{}",
+        )
+        response_with_forward = _make_mock_response(
+            content=None, tool_calls=[tool_call],
+        )
+        mock_client.chat.completions.create = AsyncMock(
+            return_value=response_with_forward,
+        )
+        mock_client_factory.return_value = mock_client
+        orchestrator._save_assistant_message = AsyncMock()
+
+        mock_channel = AsyncMock()
+        mock_channel.submit = AsyncMock(return_value="q-uid-456")
+
+        mock_conn = AsyncMock()
+        mock_db_ctx = AsyncMock()
+        mock_db_ctx.__aenter__ = AsyncMock(return_value=mock_conn)
+        mock_db_ctx.__aexit__ = AsyncMock(return_value=False)
+
+        with (
+            patch(
+                "app.db.connection.get_db",
+                return_value=mock_db_ctx,
+            ),
+            patch(
+                "app.domains.chat.services.agent_channel.AgentChannelService",
+                return_value=mock_channel,
+            ),
+            patch(
+                "app.domains.chat.deps.get_agent_channel_poller",
+                return_value=None,
+            ),
+            caplog.at_level(_logging.WARNING),
+        ):
+            result = await orchestrator.run(
+                message_id="msg-no-poller",
+                conversation_id="conv-1",
+                user_message="Вопрос",
+                agent_mode="adaptive",
+            )
+
+        assert result.get("forwarded") is True
+        # Даже при poller=None draft создан submit'ом — двойного сохранения нет.
+        orchestrator._save_assistant_message.assert_not_awaited()
+        # Warning залогирован
+        assert any(
+            "не инициализирован" in r.getMessage()
+            for r in caplog.records
+            if r.levelname == "WARNING"
+        )

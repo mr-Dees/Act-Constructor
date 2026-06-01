@@ -45,18 +45,9 @@ async def _health_check() -> dict:
 
 
 async def _on_chat_shutdown(app) -> None:
-    """Graceful shutdown polling-задач forward'а к внешнему агенту и
-    закрытие кэшированных LLM-клиентов (httpx connection pools).
-
-    Без этого SIGTERM рубит ``agent_bridge_runner._running`` посреди
-    polling-цикла, ``agent_requests`` могут зависнуть в промежуточном
-    статусе. Reconcile при следующем старте подхватит, но мы хотим
-    дать задачам ~5с дописать ассистент-сообщение в БД.
-    """
-    from app.domains.chat.services.agent_bridge_runner import shutdown_running
+    """Закрытие кэшированных LLM-клиентов (httpx connection pools) при shutdown."""
     from app.domains.chat.services.llm_client import close_cached_clients
 
-    await shutdown_running(timeout_sec=5.0)
     await close_cached_clients()
 
 
@@ -70,10 +61,11 @@ def _register_lifespan_hooks() -> None:
       (записи времени исполнения tool'ов).
     * ``chat.audit_log_batcher`` — батчер audit-лога чата (перенесён
       из ``main.py`` во второй волне рефакторинга).
+    * ``chat.agent_channel_poller`` — фоновый поллер ответов из bus-таблицы
+      ``agent_messages`` (дозаполнение черновиков-форвардов).
 
     Сам ``_on_chat_shutdown`` остаётся на ``DomainDescriptor.on_shutdown`` —
-    он работает с polling-задачами форварда, а не с инфраструктурными
-    батчерами.
+    он закрывает кэшированные LLM-клиенты, а не инфраструктурные батчеры.
     """
     from fastapi import FastAPI
 
@@ -87,8 +79,8 @@ def _register_lifespan_hooks() -> None:
     )
     from app.db.connection import get_db
     from app.domains.chat.deps import (
+        set_agent_channel_poller,
         set_audit_log_batcher,
-        set_poll_coordinator,
         set_tool_metrics_batcher,
     )
     from app.domains.chat.repositories.chat_audit_log_repository import (
@@ -178,120 +170,51 @@ def _register_lifespan_hooks() -> None:
             except Exception:
                 logger.exception("Ошибка при остановке батчера audit-лога чата")
 
-    async def _start_poll_coordinator(app: FastAPI) -> None:
-        """Поднимает PollCoordinator — единый фоновый цикл polling событий
-        внешнего ИИ-агента.
-
-        Координатор подписывается на полный список активных ``request_id``
-        и выполняет один SELECT за тик; раннеры читают события из
-        ``asyncio.Queue``. Без координатора каждый раннер делал бы
-        собственный SELECT/сек на свой ``request_id``.
-        """
+    async def _start_agent_channel_poller(app: FastAPI) -> None:
+        """Поднимает AgentChannelPoller — поллер ответов из bus-таблицы agent_messages."""
         from app.core.settings_registry import get as get_domain_settings
-        from app.db.connection import get_db
-        from app.domains.chat.services.agent_bridge import AgentBridgeService
-        from app.domains.chat.services.poll_coordinator import PollCoordinator
+        from app.domains.chat.services.agent_channel_poller import AgentChannelPoller
         from app.domains.chat.settings import ChatDomainSettings
 
         chat_settings = get_domain_settings("chat", ChatDomainSettings)
-        bridge_settings = chat_settings.agent_bridge
 
-        async def _poll_batch_fn(
-            request_ids: list[str],
-            since_seqs: dict[str, int | None],
-        ) -> dict[str, list[dict]]:
-            """Один SELECT по всем активным request_id (новый коннект на тик)."""
-            async with get_db() as conn:
-                bridge = AgentBridgeService(conn)
-                return await bridge.poll_events_batch(
-                    request_ids, since_seqs=since_seqs,
-                )
-
-        coordinator = PollCoordinator(
-            poll_batch_fn=_poll_batch_fn,
-            poll_min_interval_sec=bridge_settings.poll_min_interval_sec,
-            poll_max_interval_sec=bridge_settings.poll_max_interval_sec,
-            poll_backoff_multiplier=bridge_settings.poll_backoff_multiplier,
-        )
-        await coordinator.start()
-        set_poll_coordinator(coordinator)
-        app.state.chat_poll_coordinator = coordinator
+        poller = AgentChannelPoller(chat_settings)
+        set_agent_channel_poller(poller)
+        app.state.chat_agent_channel_poller = poller
+        await poller.reconcile()
+        poller.start()
         register_background_task(
-            "chat.poll_coordinator", coordinator.get_status,
+            "chat.agent_channel_poller", poller.get_status,
         )
 
-    async def _stop_poll_coordinator(app: FastAPI) -> None:
-        """Останавливает PollCoordinator и сбрасывает ссылку в deps."""
+    async def _stop_agent_channel_poller(app: FastAPI) -> None:
+        """Останавливает AgentChannelPoller и сбрасывает ссылку в deps."""
         import logging
 
         logger = logging.getLogger("audit_workstation.domains.chat.lifecycle")
-        coordinator = getattr(app.state, "chat_poll_coordinator", None)
-        unregister_background_task("chat.poll_coordinator")
+        poller = getattr(app.state, "chat_agent_channel_poller", None)
+        unregister_background_task("chat.agent_channel_poller")
         try:
-            set_poll_coordinator(None)
+            set_agent_channel_poller(None)
         except Exception:
-            logger.exception("Не удалось сбросить ссылку на PollCoordinator")
-        if coordinator is not None:
+            logger.exception("Не удалось сбросить ссылку на AgentChannelPoller")
+        if poller is not None:
             try:
-                await coordinator.stop()
+                await poller.stop()
             except Exception:
-                logger.exception("Ошибка при остановке PollCoordinator")
-
-    async def _start_agent_events_cleanup(app: FastAPI) -> None:
-        """Поднимает фоновую очистку устаревших agent_response_events.
-
-        Без задачи таблица растёт безгранично: каждый forward пишет
-        десятки reasoning-событий, после done они не нужны (финальный
-        response в chat_messages, Phase 1 «D»).
-        """
-        from app.core.settings_registry import get as get_domain_settings
-        from app.domains.chat.services.agent_events_cleanup import (
-            AgentEventsCleanupTask,
-        )
-        from app.domains.chat.settings import ChatDomainSettings
-
-        chat_settings = get_domain_settings("chat", ChatDomainSettings)
-        bridge_settings = chat_settings.agent_bridge
-
-        task = AgentEventsCleanupTask(
-            interval_sec=bridge_settings.agent_events_cleanup_interval_sec,
-            ttl_hours=bridge_settings.agent_events_cleanup_ttl_hours,
-        )
-        await task.start()
-        app.state.chat_agent_events_cleanup = task
-        register_background_task(
-            "chat.agent_events_cleanup", task.get_status,
-        )
-
-    async def _stop_agent_events_cleanup(app: FastAPI) -> None:
-        """Останавливает фоновую очистку agent_response_events."""
-        import logging
-
-        logger = logging.getLogger("audit_workstation.domains.chat.lifecycle")
-        task = getattr(app.state, "chat_agent_events_cleanup", None)
-        unregister_background_task("chat.agent_events_cleanup")
-        if task is not None:
-            try:
-                await task.stop()
-            except Exception:
-                logger.exception(
-                    "Ошибка при остановке cleanup agent_response_events",
-                )
+                logger.exception("Ошибка при остановке AgentChannelPoller")
 
     register_startup_hook("chat.tool_metrics_batcher", _start_tool_metrics_batcher)
     register_shutdown_hook("chat.tool_metrics_batcher", _stop_tool_metrics_batcher)
-
-    register_startup_hook("chat.poll_coordinator", _start_poll_coordinator)
-    register_shutdown_hook("chat.poll_coordinator", _stop_poll_coordinator)
 
     register_startup_hook("chat.audit_log_batcher", _start_audit_log_batcher)
     register_shutdown_hook("chat.audit_log_batcher", _stop_audit_log_batcher)
 
     register_startup_hook(
-        "chat.agent_events_cleanup", _start_agent_events_cleanup,
+        "chat.agent_channel_poller", _start_agent_channel_poller,
     )
     register_shutdown_hook(
-        "chat.agent_events_cleanup", _stop_agent_events_cleanup,
+        "chat.agent_channel_poller", _stop_agent_channel_poller,
     )
 
 

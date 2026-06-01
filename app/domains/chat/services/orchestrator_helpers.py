@@ -1,7 +1,7 @@
 """Хелперы оркестратора чата.
 
-Module-level функции и константы, общие для всех веток ``Orchestrator``
-(run / run_stream / non-streaming GigaChat / forward bridge). Жили в
+Module-level функции и константы, общие для веток ``Orchestrator``
+(run / non-streaming GigaChat). Жили в
 ``orchestrator.py`` — вынесены сюда, чтобы:
 
 * уменьшить размер оркестратора (~2.4 тыс. строк → ~2.1 тыс.);
@@ -30,7 +30,7 @@ TOOL_VALIDATION_NEUTRAL_MESSAGE = (
 
 # Порог выхода из tool-loop'а: столько одинаковых ChatToolValidationError'ов
 # подряд для одного tool'а → прерываем цикл и финализируем сообщение
-# ошибкой. Жил локально в agent_loop/stream_loop как «магическая» 2.
+# ошибкой. Жил локально в agent_loop как «магическая» 2.
 TOOL_VALIDATION_LOOP_THRESHOLD = 2
 
 
@@ -42,9 +42,9 @@ class ToolValidationTracker:
     ошибки + имя параметра + имя инструмента. При двух подряд одинаковых
     ошибках ``should_exit`` становится True — оркестратор финализирует
     сообщение ошибкой и завершает цикл (см. зеркальные ветки в
-    ``agent_loop.run_agent_loop`` и ``stream_loop.run_stream_loop``).
+    ``agent_loop.run_agent_loop``).
 
-    Инстанс на одну итерацию ``run``/``run_stream``: создаётся локально,
+    Инстанс на одну итерацию ``run``: создаётся локально,
     не шарится между запросами.
     """
 
@@ -88,10 +88,9 @@ def unpack_pending_tool_call(tc: Any) -> tuple[str, str, Any]:
 
     Очередь GigaChat-ветки может содержать три формы tool_call:
 
-    * dict ``{"name", "id", "arguments"}`` — кладёт ``stream_loop`` после
-      сборки tool_calls из стрима;
-    * Pydantic ``ChatCompletionMessageToolCall`` — кладёт ``stream_loop``
-      из non-streaming-ветки и ``agent_loop`` (имя/args через ``.function``);
+    * dict ``{"name", "id", "arguments"}`` — собранный из стрима tool_call;
+    * Pydantic ``ChatCompletionMessageToolCall`` — кладёт ``agent_loop``
+      (имя/args через ``.function``);
     * плоский ``FinalizedToolCall`` из ``ToolCallAccumulator`` (на случай
       повторной перекладки) — поля ``.name`` / ``.id`` / ``.arguments``.
 

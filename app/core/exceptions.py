@@ -51,9 +51,9 @@ CHECK_CONSTRAINT_MESSAGES: dict[str, str] = {
         "Служебная записка и дата должны быть указаны вместе или отсутствовать вместе"
     ),
     # ── acts: audit_team_members ─────────────────────────────────────────────
-    # Общее PG/GP-имя (с миграции docs/migrations/audit-team-role-appendix-ref-gp.sql
-    # GP-схема тоже использует это имя; AppendixRef — служебное значение для строки-
-    # маркера приложения, в user-facing сообщении не упоминаем).
+    # Общее PG/GP-имя констрейнта (GP-схема тоже использует это имя; AppendixRef —
+    # служебное значение для строки-маркера приложения, в user-facing сообщении
+    # не упоминаем).
     "check_audit_team_role_values": (
         "Недопустимая роль участника аудиторской группы. "
         "Допустимые значения: Куратор, Руководитель, Редактор, Участник"
@@ -114,20 +114,14 @@ CHECK_CONSTRAINT_MESSAGES: dict[str, str] = {
         "Недопустимый статус сообщения. "
         "Допустимые значения: streaming, complete, failed"
     ),
-    # ── chat: agent_requests ─────────────────────────────────────────────────
-    "check_agent_requests_status_values": (
-        "Недопустимый статус запроса к ИИ-агенту. "
-        "Допустимые значения: pending, dispatched, in_progress, done, error, timeout"
+    # ── chat: agent_messages ─────────────────────────────────────────────────
+    "check_agent_messages_status_values": (
+        "Недопустимый статус сообщения агента. "
+        "Допустимые значения: pending, in_progress, complete, error, timeout."
     ),
-    # ── chat: agent_response_events ──────────────────────────────────────────
-    "check_agent_response_events_event_type_values": (
-        "Недопустимый тип события агента. "
-        "Допустимые значения: reasoning, status, error, final"
-    ),
-    # ── chat: agent_responses ────────────────────────────────────────────────
-    "check_agent_responses_finish_reason_values": (
-        "Недопустимый код завершения ответа агента. "
-        "Допустимые значения: stop, length, content_filter, error"
+    "check_agent_messages_role_values": (
+        "Недопустимая роль сообщения агента. "
+        "Допустимые значения: user, assistant, tool."
     ),
     # ── chat: chat_tool_metrics ──────────────────────────────────────────────
     "check_chat_tool_metrics_status_values": (

@@ -11,7 +11,7 @@ export const handlers = {};
 
 // Ключ sessionStorage для уже исполненных block_id.
 // Идемпотентность нужна, чтобы перезагрузка страницы или повторный
-// приём SSE-события не приводили к повторному redirect/notify.
+// рендер того же ответа не приводили к повторному redirect/notify.
 export const EXECUTED_STORAGE_KEY = 'chat:executedActions';
 // Soft cap, чтобы Set не рос бесконечно.
 export const EXECUTED_MAX_SIZE = 500;

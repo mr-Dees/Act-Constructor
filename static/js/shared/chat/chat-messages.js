@@ -1,25 +1,21 @@
 /**
  * Менеджер сообщений чата
  *
- * Отправка сообщений через SSE, обработка событий стриминга,
- * рендеринг user/bot сообщений в DOM.
+ * Отправка сообщений через poll-клиент, рендеринг user/bot сообщений в DOM.
+ * При получении готового ответа применяет декоративный эффект печати.
  */
 
 import { ChatContext } from './chat-context.js';
 import { ChatEventBus } from './chat-event-bus.js';
 import { ChatFiles } from './chat-files.js';
 import { ChatRenderer } from './chat-renderer.js';
-import { ChatRateLimitedError, ChatStream } from './chat-stream.js';
+import { ChatStream } from './chat-stream.js';
 import { Notifications } from '../notifications.js';
 
 /**
  * Whitelist известных типов блоков сообщений.
- * Если бэк добавит новый тип, а фронт ещё не обновлён, _handleSSEEvent
- * и ChatRenderer.renderBlock падают на default-ветку с fallback-блоком
- * («⚠ Блок неизвестного типа …»), а не ломают сообщение целиком.
- *
  * Синхронизировать с `MessageBlock` union из `app/core/chat/blocks.py`
- * И с `_DiscriminatedBlock` из `app/core/chat/schemas.py`.
+ * и с `_DiscriminatedBlock` из `app/core/chat/schemas.py`.
  */
 export const KNOWN_BLOCK_TYPES = new Set([
     'text',
@@ -38,27 +34,20 @@ export const ChatMessages = {
     /** @type {Set<string>} */
     KNOWN_BLOCK_TYPES,
 
-
     /** @type {boolean} */
     _initialized: false,
     /** @type {HTMLElement|null} */
     _messagesContainer: null,
 
-    /** @type {Object<number, {element: HTMLElement, appendText: function, finalize: function}>} */
-    _streamingBlocks: {},
-
     /** @type {HTMLElement|null} DOM-узел welcome-сообщения для восстановления при очистке */
     _welcomeNode: null,
 
     /**
-     * @type {Object<string, Promise<void>>}
-     * Promise-lock per conversation_id для `_maybeResumeActiveForward`.
-     * Без него rapid navigation (A → B → A) приводит к двум параллельным
-     * `checkActiveForward(A)` → двум `_addBotMessageStreaming()` → двум
-     * bot-bubble в DOM до того, как сработает idempotency-чек в
-     * `ChatStream.resume` по `_resumeRequestId`.
+     * AbortController текущего polling. Отменяется при переключении беседы
+     * или явной очистке, чтобы typing-bubble не зависал при навигации.
+     * @type {AbortController|null}
      */
-    _activeResumePromises: {},
+    _pollController: null,
 
     /**
      * Инициализация: кеширование DOM, подписка на события
@@ -70,36 +59,27 @@ export const ChatMessages = {
         if (this._initialized) return;
         this._messagesContainer = messagesContainer;
 
-        // Кэшируем welcome-сообщение как DOM-узел (не строку!) — иначе innerHTML
-        // даст путь для XSS, если в шаблоне когда-нибудь окажется untrusted-контент.
+        // Кэшируем welcome-сообщение как DOM-узел
         const welcomeEl = this._messagesContainer.querySelector('.chat-message-bot');
         if (welcomeEl) {
             this._welcomeNode = welcomeEl.cloneNode(true);
         }
 
-        // Сохраняем именованные ссылки на обработчики — нужно для destroy().
         this._onSendRequest = (data) => this._send(data);
         this._onConversationSwitched = (data) => {
-            ChatStream.abort();
+            this._abortPoll();
             if (!data.conversationId) {
                 this._restoreWelcome();
                 return;
             }
             this._renderConversationMessages(data);
-            // После рендера истории проверяем, не идёт ли в этой беседе
-            // forward к внешнему агенту (refresh-сценарий) — если да,
-            // подключаемся к уже работающему SSE-стриму.
-            // Fire-and-forget: ошибки checkActiveForward уже проглатываются
-            // там, проверка не блокирует UI.
-            this._maybeResumeActiveForward(data.conversationId);
         };
         this._onConversationCleared = () => {
-            ChatStream.abort();
+            this._abortPoll();
             this._restoreWelcome();
         };
         this._onChatClear = () => {
-            ChatStream.abort();
-            this._streamingBlocks = {};
+            this._abortPoll();
             this._restoreWelcome();
         };
 
@@ -116,6 +96,7 @@ export const ChatMessages = {
      */
     destroy() {
         if (!this._initialized) return;
+        this._abortPoll();
         if (this._onSendRequest) {
             ChatEventBus.off('chat:send-request', this._onSendRequest);
             this._onSendRequest = null;
@@ -136,7 +117,18 @@ export const ChatMessages = {
     },
 
     /**
-     * Отправляет сообщение пользователя
+     * Отменяет текущий polling, если он активен.
+     * @private
+     */
+    _abortPoll() {
+        if (this._pollController) {
+            this._pollController.abort();
+            this._pollController = null;
+        }
+    },
+
+    /**
+     * Отправляет сообщение пользователя и запускает poll-цикл.
      *
      * @param {Object} data
      * @param {string} data.text — текст сообщения
@@ -161,21 +153,31 @@ export const ChatMessages = {
 
             ChatFiles.clear();
 
-            // Bot-bubble виден сразу: внутри живёт typing-плейсхолдер с тремя
-            // анимированными точками. При первом блоке ответа плейсхолдер удаляется.
+            // Показываем typing-bubble сразу
             const botContainer = this._addBotMessageStreaming();
 
-            await ChatStream.send(conversationId, text, files, {
+            // Режим агента: читает localStorage['assistant_oarb_mode'] через ChatContext
+            const agentMode = (window.ChatContext
+                && typeof ChatContext.getAgentMode === 'function'
+                && ChatContext.getAgentMode()) || 'off';
+
+            // Создаём AbortController для этого polling-цикла
+            this._abortPoll();
+            const controller = new AbortController();
+            this._pollController = controller;
+
+            await ChatStream.sendAndPoll(conversationId, text, files, {
+                agentMode,
                 domains: ChatContext.detectDomains(),
-                onEvent: (event) => {
-                    this._handleSSEEvent(event, botContainer);
-                },
-                onError: (err) => {
-                    this._onStreamError(err, botContainer);
-                },
-                onDone: () => {
+                onReady: (msg) => {
+                    this._renderReadyMessage(botContainer, msg);
                     ChatEventBus.emit('ui:scroll-bottom');
                 },
+                onError: (err) => {
+                    this._renderError(botContainer, err);
+                    ChatEventBus.emit('ui:scroll-bottom');
+                },
+                signal: controller.signal,
             });
         } catch (err) {
             console.error('ChatMessages: ошибка отправки', err);
@@ -186,371 +188,72 @@ export const ChatMessages = {
     },
 
     /**
-     * Обработчик ошибки стрима: различает дружелюбный 429 (ChatRateLimitedError)
-     * и прочие сбои. В обоих случаях заменяет typing-плейсхолдер на error-блок,
-     * чтобы пользователь увидел проблему прямо в bot-bubble.
+     * Рендерит готовый ответ бота с декоративным эффектом печати.
      *
-     * @param {Error} err — ошибка стрима
-     * @param {HTMLElement} botContainer — контейнер bot-сообщения
+     * @param {HTMLElement} botContainer — контейнер .chat-message-content
+     * @param {Object} msg — {id, status, content}
      * @private
      */
-    _onStreamError(err, botContainer) {
-        const isRateLimited = typeof ChatRateLimitedError !== 'undefined'
-            && err instanceof ChatRateLimitedError;
-
-        if (isRateLimited) {
-            console.warn('ChatMessages: лимит параллельных стримов', err.userMessage, err.code);
-            ChatRenderer.removeTypingPlaceholder(botContainer);
-            // err.code из envelope: 'chat-stream-already-active' либо 'chat-rate-limit'.
-            // Для UI оставляем локальный код 'rate_limited' (legacy ключ для error-блока).
-            const errBlock = ChatRenderer.renderBlock({
-                type: 'error',
-                message: err.userMessage,
-                code: 'rate_limited',
-            });
-            if (errBlock) ChatRenderer.appendBlock(botContainer, errBlock);
-
-            // Дополнительно — тост, чтобы пользователь увидел уведомление
-            // даже если переключился в другую беседу.
-            if (typeof window !== 'undefined'
-                && window.Notifications
-                && typeof window.Notifications.warning === 'function') {
-                try {
-                    window.Notifications.warning(err.userMessage);
-                } catch { /* notification subsystem не критична */ }
-            }
-            return;
-        }
-
-        console.error('ChatMessages: ошибка стриминга', err);
+    _renderReadyMessage(botContainer, msg) {
         ChatRenderer.removeTypingPlaceholder(botContainer);
+        const msgEl = botContainer.parentElement;
+        if (msgEl) msgEl.classList.remove('chat-message-bot--streaming');
+
+        if (msg.status === 'failed') {
+            if (msgEl) msgEl.classList.add('chat-message--failed');
+            // Блоки из failed-сообщения (обычно error-блок) — без анимации
+            const blocks = Array.isArray(msg.content) ? msg.content : [];
+            ChatRenderer.renderBlocks(botContainer, blocks, { execute: false });
+        } else {
+            const blocks = Array.isArray(msg.content) ? msg.content : [];
+            ChatRenderer.typeOutBlocks(botContainer, blocks);
+        }
+    },
+
+    /**
+     * Показывает ошибку получения ответа в typing-bubble.
+     *
+     * @param {HTMLElement} botContainer
+     * @param {Error} err
+     * @private
+     */
+    _renderError(botContainer, err) {
+        if (err && err.name === 'AbortError') return; // отмена — молча
+
+        ChatRenderer.removeTypingPlaceholder(botContainer);
+        const msgEl = botContainer.parentElement;
+        if (msgEl) msgEl.classList.remove('chat-message-bot--streaming');
+
+        // Показываем реальный текст ошибки (бэк уже отдаёт дружелюбное сообщение,
+        // напр. про лимит одновременных запросов), а не общую заглушку.
+        const text = (err && err.message)
+            ? err.message
+            : 'Не удалось получить ответ. Попробуйте ещё раз.';
+
+        // Штатное клиентское отклонение (4xx, напр. лимит запросов) уже показано
+        // пользователю — это не сбой, логируем warn'ом, а не красным error'ом.
+        const status = err && err.status;
+        if (typeof status === 'number' && status >= 400 && status < 500) {
+            console.warn('ChatMessages: запрос отклонён —', text);
+        } else {
+            console.error('ChatMessages: ошибка получения ответа', err);
+        }
         const errDiv = document.createElement('div');
         errDiv.className = 'chat-error';
-        errDiv.textContent = 'Произошла ошибка. Попробуйте ещё раз.';
+        errDiv.textContent = text;
         botContainer.appendChild(errDiv);
-    },
 
-    /**
-     * Обрабатывает SSE-событие и маршрутизирует к ChatRenderer
-     *
-     * @param {{type: string, data: *}} event — SSE-событие
-     * @param {HTMLElement} container — контейнер бот-сообщения
-     * @private
-     */
-    _handleSSEEvent(event, container) {
-        // Любой блок видимого ответа должен скрыть «три точки».
-        // Reasoning — это «бот всё ещё думает», не финальный ответ:
-        // блоки reasoning рендерятся выше точек, а точки остаются внизу
-        // bot-bubble. Только text/code/buttons/file/image/plan/client_action/error
-        // — финальный контент, при их появлении плейсхолдер убирается.
-        const isReasoningBlock = (
-            (event.type === 'block_start' && event.data?.type === 'reasoning')
-            || (event.type === 'block_complete' && event.data?.block?.type === 'reasoning')
-        );
-        const isContentEvent = !isReasoningBlock && (
-            event.type === 'block_start'
-            || event.type === 'block_complete'
-            || event.type === 'buttons'
-            || event.type === 'client_action'
-            || event.type === 'error'
-        );
-        if (isContentEvent) {
-            ChatRenderer.removeTypingPlaceholder(container);
-            // Снимаем streaming-маркер: bubble больше не пустой,
-            // следующий Resume SSE не должен в него попасть как в активный.
-            container.parentElement?.classList.remove('chat-message-bot--streaming');
-        }
-
-        switch (event.type) {
-            case 'message_start':
-                this._streamingBlocks = {};
-                break;
-
-            case 'block_start': {
-                if (event.data.type === 'client_action') {
-                    // client_action приходит как отдельное событие — игнорируем block_start
-                    break;
-                }
-                const startType = event.data.type;
-                // Дедуп по data-block-id в DOM: если блок с тем же id
-                // уже отрисован (история из GET /messages или предыдущий
-                // SSE), не создаём streamingBlock — соответствующие
-                // block_delta и block_end станут no-op в ветках ниже
-                // (там стоит `if (block)` / `if (endBlock)`). Используется
-                // в первую очередь для reasoning при Resume SSE, но
-                // безопасно для любого блока с block_id.
-                const incomingBlockId = event.data.block_id;
-                if (typeof incomingBlockId === 'string' && incomingBlockId) {
-                    const existing = container.querySelector(
-                        `[data-block-id="${CSS.escape(incomingBlockId)}"]`,
-                    );
-                    if (existing) {
-                        break;
-                    }
-                }
-                if (!KNOWN_BLOCK_TYPES.has(startType)) {
-                    // Бэк прислал блок неизвестного типа — рендерим fallback
-                    // вместо обычного streaming-контейнера, чтобы старый фронт
-                    // не падал на новых типах блоков.
-                    console.warn(
-                        'ChatMessages: unknown block type',
-                        startType,
-                        event.data,
-                    );
-                    const sb = this._createUnknownStreamingBlock(startType);
-                    this._streamingBlocks[event.data.index] = sb;
-                    ChatRenderer.appendBlock(container, sb.element);
-                    break;
-                }
-                const sb = ChatRenderer.createStreamingBlock(
-                    startType,
-                    startType === 'reasoning' ? incomingBlockId : undefined,
-                );
-                this._streamingBlocks[event.data.index] = sb;
-                ChatRenderer.appendBlock(container, sb.element);
-                break;
-            }
-
-            case 'block_delta': {
-                const block = this._streamingBlocks[event.data.index];
-                if (block) block.appendText(event.data.delta || event.data.content || '');
-                break;
-            }
-
-            case 'block_end': {
-                const endBlock = this._streamingBlocks[event.data.index];
-                if (endBlock) endBlock.finalize();
-                break;
-            }
-
-            case 'block_complete': {
-                // Нестримуемые блоки (file, image, plan, error, ...) приходят
-                // одним событием с полной нагрузкой. Рендерим сразу — иначе
-                // блок появился бы только после перезагрузки истории.
-                const block = event.data.block;
-                if (block) {
-                    if (block.type && !KNOWN_BLOCK_TYPES.has(block.type)) {
-                        console.warn(
-                            'ChatMessages: unknown block type',
-                            block.type,
-                            block,
-                        );
-                        const el = this._renderUnknownBlock(block);
-                        ChatRenderer.appendBlock(container, el);
-                    } else {
-                        const el = ChatRenderer.renderBlock(block);
-                        if (el) ChatRenderer.appendBlock(container, el);
-                    }
-                }
-                break;
-            }
-
-            case 'tool_call':
-                break;
-
-            case 'tool_result':
-                break;
-
-            case 'buttons': {
-                const btnBlock = ChatRenderer.renderBlock({ type: 'buttons', ...event.data });
-                if (btnBlock) ChatRenderer.appendBlock(container, btnBlock);
-                break;
-            }
-
-            case 'client_action': {
-                // Команда выполняется немедленно (live-стрим).
-                const ca = event.data.block || {};
-                const el = ChatRenderer.renderBlock(
-                    { type: 'client_action', ...ca },
-                    { execute: true },
-                );
-                if (el) ChatRenderer.appendBlock(container, el);
-                break;
-            }
-
-            case 'error': {
-                // Рендерим как ErrorBlock, чтобы стримовое и сохранённое
-                // отображение ошибки выглядело одинаково.
-                const message =
-                    event.data.error || event.data.message || 'Произошла ошибка';
-                const errBlock = ChatRenderer.renderBlock({
-                    type: 'error',
-                    message,
-                    code: event.data.code || null,
-                });
-                if (errBlock) ChatRenderer.appendBlock(container, errBlock);
-                break;
-            }
-
-            case 'message_end':
-                this._streamingBlocks = {};
-                break;
-
-            case 'agent_request_started':
-                // Forward к внешнему агенту зарегистрирован. Typing-плейсхолдер
-                // уже внутри bot-bubble, ничего дополнительно показывать не нужно.
-                break;
-        }
-
-        ChatEventBus.emit('ui:scroll-bottom');
-    },
-
-    /**
-     * Создаёт fallback-блок для стриминга неизвестного типа.
-     *
-     * Совместим по интерфейсу с ChatRenderer.createStreamingBlock:
-     * возвращает { element, appendText, finalize }. Delta-чанки склеиваются
-     * как plain-text (формат payload неизвестен — пытаемся вытащить
-     * `text`/`content`, иначе JSON.stringify).
-     *
-     * @param {string} unknownType — пришедший с бэка тип
-     * @returns {{element: HTMLElement, appendText: function(*): void, finalize: function(): void}}
-     * @private
-     */
-    _createUnknownStreamingBlock(unknownType) {
-        const wrapper = document.createElement('div');
-        wrapper.className = 'chat-block chat-block-unknown';
-
-        const notice = document.createElement('div');
-        notice.className = 'chat-block-unknown-notice';
-        notice.textContent = `⚠ Блок неизвестного типа: ${unknownType}. Обновите страницу.`;
-        wrapper.appendChild(notice);
-
-        const pre = document.createElement('pre');
-        pre.className = 'chat-block-unknown-payload';
-        wrapper.appendChild(pre);
-
-        let accumulated = '';
-        return {
-            element: wrapper,
-            appendText(delta) {
-                let chunk;
-                if (delta == null) {
-                    chunk = '';
-                } else if (typeof delta === 'string') {
-                    chunk = delta;
-                } else if (typeof delta === 'object' && typeof delta.text === 'string') {
-                    chunk = delta.text;
-                } else {
-                    try {
-                        chunk = JSON.stringify(delta);
-                    } catch {
-                        chunk = String(delta);
-                    }
-                }
-                accumulated += chunk;
-                pre.textContent = accumulated;
-            },
-            finalize() {
-                pre.textContent = accumulated;
-            },
-        };
-    },
-
-    /**
-     * Рендерит fallback-блок для нестримуемого блока неизвестного типа.
-     * Полный payload показывается в <pre> для отладки.
-     *
-     * @param {Object} block — блок с неизвестным `type`
-     * @returns {HTMLElement}
-     * @private
-     */
-    _renderUnknownBlock(block) {
-        const wrapper = document.createElement('div');
-        wrapper.className = 'chat-block chat-block-unknown';
-
-        const notice = document.createElement('div');
-        notice.className = 'chat-block-unknown-notice';
-        notice.textContent = `⚠ Блок неизвестного типа: ${block && block.type}. Обновите страницу.`;
-        wrapper.appendChild(notice);
-
-        const pre = document.createElement('pre');
-        pre.className = 'chat-block-unknown-payload';
-        try {
-            pre.textContent = JSON.stringify(block, null, 2);
-        } catch {
-            pre.textContent = String(block);
-        }
-        wrapper.appendChild(pre);
-
-        return wrapper;
-    },
-
-    /**
-     * Проверяет, есть ли в беседе активный forward к внешнему агенту,
-     * и если есть — открывает resume-SSE и привязывает события к новому
-     * bot-bubble с typing-плейсхолдером. Используется при загрузке беседы,
-     * чтобы после перезагрузки страницы пользователь увидел продолжение
-     * ответа без потери reasoning-чанков.
-     *
-     * Идемпотентность обеспечивается на уровне `ChatStream.resume(...)` —
-     * повторный вызов для того же request_id будет no-op.
-     *
-     * @param {string} conversationId
-     * @private
-     */
-    async _maybeResumeActiveForward(conversationId) {
-        // Уже идёт resume для этой беседы — переиспользуем promise.
-        // Защищает от двух bot-bubble при rapid switch'ах между чатами.
-        if (this._activeResumePromises[conversationId]) {
-            return this._activeResumePromises[conversationId];
-        }
-
-        const promise = (async () => {
-            const active = await ChatContext.checkActiveForward(conversationId);
-            if (!active || !active.request_id) return;
-
-            // Беседа могла смениться, пока шёл запрос — не открываем resume
-            // для устаревшей беседы.
-            if (ChatContext.getCurrentConversationId() !== conversationId) return;
-
-            // Переиспользуем streaming-bubble, если он уже отрисован
-            // (например, `_renderConversationMessages` поставил его из
-            // БД для msg.status='streaming', или `_send()` создал
-            // оптимистический). Без этого Resume SSE плодит новые
-            // пустые bubble'ы при каждом switch'е беседы.
-            const existingStreaming = this._messagesContainer.querySelector(
-                '.chat-message-bot--streaming:last-of-type .chat-message-content',
-            );
-            const botContainer = existingStreaming
-                || this._addBotMessageStreaming();
-
-            // Resume SSE без курсора: backend всегда стримит с начала
-            // open-стороны queue (live-push для real-time), а уже
-            // отрендеренные блоки из истории дедупаются в DOM по
-            // data-block-id в `_handleSSEEvent::block_start`.
-            await ChatStream.resume(conversationId, active.request_id, {
-                onEvent: (event) => {
-                    this._handleSSEEvent(event, botContainer);
-                },
-                onError: (err) => {
-                    this._onStreamError(err, botContainer);
-                },
-                onDone: () => {
-                    ChatEventBus.emit('ui:scroll-bottom');
-                },
-            });
-        })();
-
-        this._activeResumePromises[conversationId] = promise;
-        try {
-            await promise;
-        } finally {
-            // Освобождаем lock на случай повторного forward'а в той же беседе.
-            delete this._activeResumePromises[conversationId];
+        // Тост — пусть пользователь увидит даже при переключении беседы
+        if (typeof Notifications !== 'undefined' && typeof Notifications.error === 'function') {
+            try { Notifications.error(text); } catch { /* некритично */ }
         }
     },
 
     /**
      * Создаёт DOM бот-сообщения для стриминга.
      *
-     * Контейнер виден сразу и содержит typing-плейсхолдер с тремя анимированными
-     * точками. Первое же содержимое (block_start / block_delta / block_complete и т.п.)
-     * приведёт к удалению плейсхолдера в `_handleSSEEvent`.
-     *
      * @param {Object} [options]
-     * @param {boolean} [options.withPlaceholder=true] — добавить ли typing-плейсхолдер.
-     *   Для рендера сохранённой истории передаём false — там сразу идут готовые блоки.
+     * @param {boolean} [options.withPlaceholder=true]
      * @returns {HTMLElement} — контейнер .chat-message-content
      * @private
      */
@@ -558,8 +261,6 @@ export const ChatMessages = {
         const msg = document.createElement('div');
         msg.className = 'chat-message chat-message-bot';
         if (withPlaceholder) {
-            // Маркер для `_maybeResumeActiveForward`: чтобы Resume SSE
-            // переиспользовал уже созданный typing-bubble, а не плодил дубли.
             msg.classList.add('chat-message-bot--streaming');
         }
 
@@ -680,7 +381,9 @@ export const ChatMessages = {
     },
 
     /**
-     * Рендерит все сообщения загруженной беседы
+     * Рендерит все сообщения загруженной беседы.
+     * Для assistant-сообщений со status==='streaming' ставит typing-bubble
+     * и возобновляет polling, чтобы закрыть сценарий reload/switch в процессе ожидания.
      *
      * @param {Object} data
      * @param {string} data.conversationId
@@ -689,9 +392,6 @@ export const ChatMessages = {
      */
     _renderConversationMessages({ conversationId, messages }) {
         this._messagesContainer.replaceChildren();
-        // Дедуп блоков работает по data-block-id в DOM: Resume SSE при
-        // получении block_start с уже отрисованным id молча скипает
-        // (см. `_handleSSEEvent::block_start`). Никаких внешних Set/курсоров.
 
         for (const msg of messages) {
             const blocks = Array.isArray(msg.content) ? msg.content : [];
@@ -699,7 +399,6 @@ export const ChatMessages = {
             if (msg.role === 'user') {
                 const textBlock = blocks.find(b => b.type === 'text');
                 const text = textBlock ? (textBlock.content || '') : '';
-
                 const fileBlocks = blocks.filter(b => b.type === 'file');
                 this._renderUserMessageWithFiles(text, fileBlocks);
             } else if (msg.role === 'assistant') {
@@ -707,17 +406,32 @@ export const ChatMessages = {
                 const isFailed = msg.status === 'failed';
 
                 if (blocks.length > 0 || isStreaming) {
-                    // withPlaceholder=true для streaming-сообщений: typing-точки
-                    // живут в bot-bubble, пока Resume SSE (если активен) не
-                    // приедет с content-блоком. После него removeTypingPlaceholder
-                    // в `_handleSSEEvent` уберёт их.
                     const container = this._addBotMessageStreaming({
                         withPlaceholder: isStreaming,
                     });
-                    ChatRenderer.renderBlocks(container, blocks, { execute: false });
+                    if (!isStreaming) {
+                        ChatRenderer.renderBlocks(container, blocks, { execute: false });
+                    }
                     if (isFailed) {
                         const msgEl = container.parentElement;
                         if (msgEl) msgEl.classList.add('chat-message--failed');
+                    }
+                    // Если сообщение ещё в статусе streaming — возобновляем polling
+                    if (isStreaming && msg.id) {
+                        this._abortPoll();
+                        const controller = new AbortController();
+                        this._pollController = controller;
+                        ChatStream.pollMessage(conversationId, msg.id, {
+                            onReady: (m) => {
+                                this._renderReadyMessage(container, m);
+                                ChatEventBus.emit('ui:scroll-bottom');
+                            },
+                            onError: (e) => {
+                                this._renderError(container, e);
+                                ChatEventBus.emit('ui:scroll-bottom');
+                            },
+                            signal: controller.signal,
+                        });
                     }
                 } else {
                     this.renderMessage('bot', '');
@@ -735,7 +449,6 @@ export const ChatMessages = {
     _restoreWelcome() {
         this._messagesContainer.replaceChildren();
         if (this._welcomeNode) {
-            // Клонируем повторно — оригинал нужен для следующих восстановлений.
             this._messagesContainer.appendChild(this._welcomeNode.cloneNode(true));
         }
     },

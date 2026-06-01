@@ -20,6 +20,12 @@ export class SettingsMenuManager {
     /** Общий ключ localStorage для баз знаний (синхронизация с порталом) */
     static _kbStorageKey = 'assistant_knowledge_bases';
 
+    /** Ключ localStorage для режима ОАРБ */
+    static _oarbModeKey = 'assistant_oarb_mode';
+
+    /** Допустимые значения режима ОАРБ */
+    static _validOarbModes = ['off', 'adaptive', 'always'];
+
     /** @type {string[]} Ключи баз знаний (загружаются из DOM) */
     static _kbKeys = [];
 
@@ -112,6 +118,8 @@ export class SettingsMenuManager {
         this._loadKbState();
         this._applyKbState();
         this._setupKbToggles();
+        this._applyOarbMode();
+        this._setupOarbModeSelect();
     }
 
     /**
@@ -199,7 +207,8 @@ export class SettingsMenuManager {
     }
 
     /**
-     * Загружает ключи баз знаний из data-атрибутов DOM-элементов
+     * Загружает ключи баз знаний из data-атрибутов DOM-элементов.
+     * Пропускает ОАРБ (управляется отдельным селектом) и задизейбленные опции.
      * @private
      */
     static _loadKbKeysFromDOM() {
@@ -209,10 +218,54 @@ export class SettingsMenuManager {
         const options = document.querySelectorAll('.settings-option[data-kb-key]');
         for (const opt of options) {
             const key = opt.dataset.kbKey;
-            if (key) {
+            // ОАРБ — режимный контрол, не чекбокс; задизейбленные — read-only
+            if (key && key !== 'knowledge_base_oarb' && !opt.classList.contains('settings-option--disabled')) {
                 this._kbKeys.push(key);
                 this._kbState[key] = false;
             }
+        }
+    }
+
+    /**
+     * Читает режим ОАРБ из localStorage
+     * @returns {'off'|'adaptive'|'always'}
+     * @private
+     */
+    static _getOarbMode() {
+        const val = localStorage.getItem(this._oarbModeKey);
+        return this._validOarbModes.includes(val) ? val : 'off';
+    }
+
+    /**
+     * Синхронизирует сегмент-контрол режима ОАРБ с localStorage
+     * @private
+     */
+    static _applyOarbMode() {
+        const mode = this._getOarbMode();
+        const btns = document.querySelectorAll('[data-oarb-mode] [data-oarb-mode-option]');
+        for (const btn of btns) {
+            btn.setAttribute('aria-pressed', String(btn.dataset.oarbModeOption === mode));
+        }
+    }
+
+    /**
+     * Обработчики клика по кнопкам сегмент-контрола режима ОАРБ
+     * @private
+     */
+    static _setupOarbModeSelect() {
+        const btns = document.querySelectorAll('[data-oarb-mode] [data-oarb-mode-option]');
+        for (const btn of btns) {
+            btn.addEventListener('click', () => {
+                const val = this._validOarbModes.includes(btn.dataset.oarbModeOption)
+                    ? btn.dataset.oarbModeOption
+                    : 'off';
+                try {
+                    localStorage.setItem(this._oarbModeKey, val);
+                } catch (e) {
+                    console.warn('SettingsMenuManager: не удалось сохранить режим ОАРБ', e);
+                }
+                this._applyOarbMode();
+            });
         }
     }
 

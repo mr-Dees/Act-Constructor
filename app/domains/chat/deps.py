@@ -25,7 +25,8 @@ from app.domains.chat.services.chat_audit_service import ChatAuditService
 from app.domains.chat.services.conversation_service import ConversationService
 from app.domains.chat.services.file_service import FileService
 from app.domains.chat.services.message_service import MessageService
-from app.domains.chat.services.poll_coordinator import PollCoordinator
+from app.domains.chat.services.agent_channel import AgentChannelService
+from app.domains.chat.services.agent_channel_poller import AgentChannelPoller
 from app.domains.chat.services.user_rate_limiter import UserRateLimiter
 from app.domains.chat.settings import ChatDomainSettings
 
@@ -66,21 +67,19 @@ def get_audit_log_batcher() -> MetricsBatcher[ChatAuditLogRecord] | None:
     return _audit_log_batcher
 
 
-# Singleton координатора polling событий внешнего ИИ-агента.
-# Инициализируется в lifespan (см. _register_lifespan_hooks); раннеры и
-# оркестратор подхватывают его через get_poll_coordinator().
-_poll_coordinator: PollCoordinator | None = None
+# Singleton поллера канала agent_messages — инициализируется в lifespan.
+_agent_channel_poller: AgentChannelPoller | None = None
 
 
-def set_poll_coordinator(coordinator: PollCoordinator | None) -> None:
-    """Устанавливает (или сбрасывает) общий PollCoordinator. Зовётся из lifespan."""
-    global _poll_coordinator
-    _poll_coordinator = coordinator
+def set_agent_channel_poller(poller: AgentChannelPoller | None) -> None:
+    """Устанавливает (или сбрасывает) AgentChannelPoller. Зовётся из lifespan."""
+    global _agent_channel_poller
+    _agent_channel_poller = poller
 
 
-def get_poll_coordinator() -> PollCoordinator | None:
-    """Возвращает активный PollCoordinator (или None, если не инициализирован)."""
-    return _poll_coordinator
+def get_agent_channel_poller() -> AgentChannelPoller | None:
+    """Возвращает активный AgentChannelPoller (или None, если не инициализирован)."""
+    return _agent_channel_poller
 
 
 def _get_chat_settings() -> ChatDomainSettings:
@@ -152,6 +151,12 @@ async def get_file_service() -> AsyncGenerator[FileService, None]:
             settings=_get_chat_settings(),
             audit_service=audit,
         )
+
+
+async def get_agent_channel_service() -> AsyncGenerator[AgentChannelService, None]:
+    """Создаёт AgentChannelService с подключением из пула."""
+    async with get_db() as conn:
+        yield AgentChannelService(conn, _get_chat_settings())
 
 
 async def get_tool_metrics_repository() -> AsyncGenerator[

@@ -10,7 +10,7 @@
  *   ChatUI        — typing, processing, scroll, resize
  *   ChatFiles     — валидация, drag-drop, превью файлов
  *   ChatContext   — KB, домены, conversation management
- *   ChatMessages  — отправка, SSE-роутинг, рендеринг сообщений
+ *   ChatMessages  — отправка, polling ответа, рендеринг сообщений
  */
 import { ChatContext } from './chat-context.js';
 import { ChatEventBus } from './chat-event-bus.js';

@@ -1,435 +1,147 @@
 /**
- * Ошибка дружелюбного 429: бэк отдал лимит параллельных стримов на пользователя
- * (envelope `chat-stream-already-active`) либо per-user rate-limit
- * (envelope `chat-rate-limit`, extra.retry_after_sec).
- * `userMessage` — человеко-читаемый текст из поля `detail` тела ответа.
- * `code`/`extra` — поля error envelope (см. AppError.to_envelope), могут быть null
- * для старых ответов без envelope.
- * ChatMessages._onStreamError различает этот класс и заменяет typing-плейсхолдер
- * на красивый error-блок «лимит достигнут», без сырого «HTTP 429».
+ * Poll-клиент для получения ответов чата.
+ *
+ * Отправляет сообщение через FormData (POST → JSON {message_id}),
+ * затем опрашивает GET /{message_id} до статуса complete/failed.
+ * Декоративный эффект печати — на стороне ChatRenderer.
  */
 import { AppConfig } from '../app-config.js';
 import { AuthManager } from '../auth.js';
 
-export class ChatRateLimitedError extends Error {
-    constructor(userMessage, code = null, extra = null) {
-        super(userMessage);
-        this.name = 'ChatRateLimitedError';
-        this.userMessage = userMessage;
-        this.code = code;
-        this.extra = extra;
-    }
-}
-
-window.ChatRateLimitedError = ChatRateLimitedError;
-
-/**
- * SSE-клиент для стриминга сообщений чата
- *
- * Отправляет сообщения через FormData и обрабатывает Server-Sent Events
- * от бэкенда. Поддерживает два режима: стриминг (SSE) и полный JSON-ответ.
- */
 export const ChatStream = {
 
-    /** @type {AbortController|null} Контроллер для отмены текущего стрима */
-    _abortController: null,
-
     /**
-     * @type {AbortController|null} Отдельный контроллер resume-стрима (refresh-сценарий).
-     * Живёт параллельно с `_abortController` (основной стрим), отменяется тем же `abort()`.
-     */
-    _resumeAbortController: null,
-
-    /**
-     * @type {string|null} request_id активного resume-стрима. Используется как
-     * idempotency-ключ — повторный `resume(...)` для того же request_id отбрасывается.
-     */
-    _resumeRequestId: null,
-
-    /**
-     * @type {string|null} Идентификатор agent_request, который сейчас обрабатывает
-     * внешний агент. Приходит из SSE-события `agent_request_started`. Используется
-     * для авто-переоткрытия resume-стрима при разрыве соединения.
-     */
-    _pendingAgentRequestId: null,
-
-    /** @type {string|null} ID беседы, для которой активен _pendingAgentRequestId. */
-    _pendingConversationId: null,
-
-    /**
-     * Отправляет сообщение и читает SSE-поток ответа
+     * Отправляет сообщение и опрашивает бэк до готовности ответа.
      *
      * @param {string} conversationId — ID беседы
      * @param {string} message — текст сообщения
      * @param {File[]} files — прикреплённые файлы
-     * @param {Object} options — параметры
-     * @param {string[]} [options.domains] — фильтр доменов
-     * @param {function({type: string, data: *}): void} [options.onEvent] — обработчик SSE-событий
-     * @param {function(Error): void} [options.onError] — обработчик ошибок
-     * @param {function(): void} [options.onDone] — вызывается при завершении потока
+     * @param {Object} options
+     * @param {string} [options.agentMode='off'] — режим агента (off/adaptive/always)
+     * @param {string[]|null} [options.domains=null] — фильтр доменов
+     * @param {function(Object): void} [options.onReady] — вызывается с {id, status, content}
+     * @param {function(Error): void} [options.onError] — вызывается при ошибке
+     * @param {AbortSignal} [options.signal] — внешний сигнал отмены
      */
-    async send(conversationId, message, files = [], options = {}) {
-        const { domains, onEvent, onError, onDone } = options;
+    async sendAndPoll(conversationId, message, files = [], options = {}) {
+        const { agentMode = 'off', domains = null, onReady, onError, signal } = options;
 
-        // Отменяем предыдущий стрим, если есть
-        this.abort();
+        const fd = this._buildFormData(message, files, domains);
+        fd.append('agent_mode', agentMode);
 
-        // Сбрасываем состояние forward'а — новое сообщение начинает с чистого листа.
-        this._pendingAgentRequestId = null;
-        this._pendingConversationId = conversationId;
-
-        const controller = new AbortController();
-        this._abortController = controller;
-
-        // Перехватываем onEvent, чтобы поймать agent_request_started.
-        const wrappedOnEvent = (event) => {
-            this._trackAgentEvent(event);
-            if (onEvent) onEvent(event);
-        };
-
+        let res;
         try {
-            const formData = this._buildFormData(message, files, domains);
-            const url = this._buildUrl(conversationId);
-            const headers = this._buildHeaders('text/event-stream');
-
-            const response = await fetch(url, {
-                method: 'POST',
-                headers,
-                body: formData,
-                signal: controller.signal,
-            });
-
-            if (!response.ok) {
-                if (response.status === 429) {
-                    throw await this._buildRateLimitError(response);
-                }
-                throw new Error(`HTTP ${response.status}: ${response.statusText}`);
-            }
-
-            await this._readSSE(response, controller, wrappedOnEvent);
-
-            // Если внутри стрима пришёл agent_request_started — POST SSE
-            // штатно закрылся короткой парой `agent_request_started`,
-            // дальше реальный ответ агента стримит Resume SSE. Открываем
-            // его прямо здесь — с тем же onEvent — чтобы UI не остался
-            // в режиме «typing» без событий.
-            // Делаем это ДО onDone(): для вызывающего кода forward — это
-            // один логический стрим, completion = «агент дописал ответ».
-            if (this._pendingAgentRequestId) {
-                const requestId = this._pendingAgentRequestId;
-                const convId = this._pendingConversationId;
-                // Освобождаем основной контроллер: POST SSE завершён.
-                // Resume использует _resumeAbortController.
-                if (this._abortController === controller) {
-                    this._abortController = null;
-                }
-                // Сбрасываем pending до resume, иначе catch ниже
-                // (на случай разрыва Resume) попытается переоткрыть
-                // ещё раз и устроит гонку.
-                this._clearPending();
-                await this.resume(convId, requestId, {
-                    onEvent: wrappedOnEvent,
-                });
-            }
-
-            if (onDone) onDone();
-            this._clearPending();
-        } catch (err) {
-            if (err.name === 'AbortError') {
-                // Стрим отменён явно — не сообщаем об ошибке
-                if (onDone) onDone();
-                this._clearPending();
-                return;
-            }
-            // Если соединение оборвалось во время forward'а к внешнему агенту,
-            // backend всё равно продолжит polling в фоне (см. agent_bridge_runner).
-            // Здесь пробуем переоткрыть resume-стрим, чтобы дотянуть ответ
-            // в текущем UI без перезагрузки страницы.
-            if (this._pendingAgentRequestId) {
-                const requestId = this._pendingAgentRequestId;
-                const convId = this._pendingConversationId;
-                console.warn(
-                    'ChatStream: разрыв соединения, переоткрываем resume для',
-                    requestId,
-                );
-                this._clearPending();
-                try {
-                    await this.resume(convId, requestId, {
-                        onEvent: wrappedOnEvent,
-                    });
-                    if (onDone) onDone();
-                    return;
-                } catch (resumeErr) {
-                    console.error('ChatStream: resume не удался', resumeErr);
-                }
-            }
-            console.error('ChatStream: ошибка стриминга', err);
-            this._clearPending();
-            if (onError) onError(err);
-        } finally {
-            if (this._abortController === controller) {
-                this._abortController = null;
-            }
+            res = await fetch(
+                AppConfig.api.getUrl(AppConfig.chatEndpoints.messages(conversationId)),
+                { method: 'POST', body: fd, headers: this._buildHeaders(), signal },
+            );
+        } catch (e) {
+            if (onError) onError(e);
+            return;
         }
+
+        if (!res.ok) {
+            if (onError) onError(await this._errorFromResponse(res));
+            return;
+        }
+
+        let body;
+        try {
+            body = await res.json();
+        } catch (e) {
+            if (onError) onError(new Error('Неверный ответ сервера'));
+            return;
+        }
+
+        const messageId = body.message_id;
+        if (!messageId) {
+            if (onError) onError(new Error('Сервер не вернул message_id'));
+            return;
+        }
+
+        return this.pollMessage(conversationId, messageId, { onReady, onError, signal });
     },
 
     /**
-     * Перехватчик SSE: запоминает request_id из agent_request_started, чтобы
-     * `send()` мог переключиться в `resume()` после нормального завершения
-     * POST SSE или из catch-блока при разрыве.
-     * @private
-     */
-    _trackAgentEvent(event) {
-        if (event.type === 'agent_request_started' && event.data) {
-            this._pendingAgentRequestId = event.data.request_id || null;
-        }
-    },
-
-    /**
-     * Строит ChatRateLimitedError из тела 429-ответа.
-     * Пытаемся прочитать поле `detail` или `error` из JSON; если тело пустое
-     * или не парсится — используем fallback-текст.
+     * Опрашивает бэк до статуса complete/failed.
+     * Используется также для resume при reload/switch посреди ожидания.
      *
-     * @param {Response} response — 429-ответ
-     * @returns {Promise<ChatRateLimitedError>}
-     * @private
+     * @param {string} conversationId
+     * @param {string} messageId
+     * @param {Object} options
+     * @param {function(Object): void} [options.onReady]
+     * @param {function(Error): void} [options.onError]
+     * @param {AbortSignal} [options.signal]
      */
-    async _buildRateLimitError(response) {
-        const fallback = 'Достигнут лимит одновременных запросов. Дождитесь окончания одного из них.';
-        let userMessage = fallback;
-        let code = null;
-        let extra = null;
-        try {
-            const body = await response.json();
-            if (body && typeof body === 'object') {
-                userMessage = body.detail || body.error || fallback;
-                if (typeof body.code === 'string') code = body.code;
-                if (body.extra && typeof body.extra === 'object') extra = body.extra;
-            }
-        } catch { /* тело пустое или не JSON — fallback */ }
-        return new ChatRateLimitedError(userMessage, code, extra);
-    },
+    pollMessage(conversationId, messageId, options = {}) {
+        const { onReady, onError, signal } = options;
+        const url = AppConfig.api.getUrl(
+            `/api/v1/chat/conversations/${conversationId}/messages/${messageId}`,
+        );
+        const started = Date.now();
+        const TIMEOUT_MS = 11 * 60 * 1000; // чуть больше серверного answer_timeout (10 мин)
+        const INTERVAL = 1500;
 
-    /** @private */
-    _clearPending() {
-        this._pendingAgentRequestId = null;
-        this._pendingConversationId = null;
-    },
+        // Возвращаем Promise, который резолвится в КАЖДОМ терминальном исходе:
+        // complete/failed, таймаут, сетевая ошибка, отмена через signal.
+        // Без этого `await sendAndPoll(...)` разблокировал бы ui:processing
+        // сразу после POST, пока polling ещё идёт.
+        return new Promise((resolve) => {
+            const tick = async () => {
+                if (signal && signal.aborted) {
+                    resolve();
+                    return;
+                }
 
-    /** @private */
-    async _readSSE(response, controller, onEvent) {
-        const reader = response.body.getReader();
-        const decoder = new TextDecoder('utf-8');
-        let buffer = '';
-
-        try {
-            while (true) {
-                const { done, value } = await reader.read();
-                if (done) {
-                    if (buffer.trim()) {
-                        const { parsed } = this._parseSSE(buffer + '\n\n');
-                        for (const event of parsed) {
-                            if (onEvent) onEvent(event);
-                        }
+                let msg;
+                try {
+                    const r = await fetch(url, { headers: this._buildHeaders(), signal });
+                    if (!r.ok) {
+                        if (onError) onError(await this._errorFromResponse(r));
+                        resolve();
+                        return;
                     }
-                    break;
+                    msg = await r.json();
+                } catch (e) {
+                    if (onError) onError(e);
+                    resolve();
+                    return;
                 }
 
-                buffer += decoder.decode(value, { stream: true });
-                const { parsed, remaining } = this._parseSSE(buffer);
-                buffer = remaining;
-                for (const event of parsed) {
-                    if (onEvent) onEvent(event);
+                if (msg.status === 'complete' || msg.status === 'failed') {
+                    if (onReady) onReady(msg);
+                    resolve();
+                    return;
                 }
-            }
-        } finally {
-            // Освобождаем reader: при abort() контроллера поток остаётся
-            // не освобождённым, и следующий fetch на тот же origin может
-            // зависнуть. Сначала cancel() (флашит underlying stream),
-            // затем releaseLock(). Оба вызова идемпотентны и завёрнуты
-            // в try, потому что на уже отменённом/освобождённом reader
-            // они бросают.
-            try { await reader.cancel(); } catch { /* ignore */ }
-            try { reader.releaseLock(); } catch { /* ignore */ }
-        }
+
+                if (Date.now() - started > TIMEOUT_MS) {
+                    if (onError) onError(new Error('Превышено время ожидания ответа.'));
+                    resolve();
+                    return;
+                }
+
+                setTimeout(tick, INTERVAL);
+            };
+
+            tick();
+        });
     },
 
     /**
-     * Отменяет текущий SSE-стрим, если он активен. Покрывает и основной
-     * (`send`), и resume-стрим (`resume`) — оба используются параллельно
-     * в режиме refresh во время forward'а.
+     * Прерывает текущий polling (через переданный AbortController).
+     * Метод оставлен для совместимости с вызовами в chat-messages.js —
+     * реальная отмена идёт через AbortSignal, хранимый в ChatMessages.
      */
     abort() {
-        if (this._abortController) {
-            this._abortController.abort();
-            this._abortController = null;
-        }
-        if (this._resumeAbortController) {
-            this._resumeAbortController.abort();
-            this._resumeAbortController = null;
-        }
-        this._resumeRequestId = null;
+        // no-op: отмена производится через AbortSignal в ChatMessages._pollController
     },
 
     /**
-     * Подключается к активному forward'у (внешний агент) после перезагрузки
-     * страницы. Открывает read-only SSE-стрим на `/forward-stream/{request_id}`
-     * и маршрутизирует события через переданный `onEvent` — формат SSE
-     * идентичен основному POST /messages-стриму.
+     * Формирует FormData для отправки сообщения.
      *
-     * Идемпотентен по request_id: если для того же `requestId` уже открыт
-     * resume-стрим — повторный вызов отбрасывается (no-op). Это защита
-     * от двойного открытия при гонке `_renderConversationMessages` /
-     * `_onConversationSwitched`.
-     *
-     * @param {string} conversationId — ID беседы
-     * @param {string} requestId — agent_requests.id активного forward'а
-     * @param {Object} options
-     * @param {function({type: string, data: *}): void} [options.onEvent]
-     * @param {function(Error): void} [options.onError]
-     * @param {function(): void} [options.onDone]
-     */
-    async resume(conversationId, requestId, options = {}) {
-        const { onEvent, onError, onDone } = options;
-
-        if (!conversationId || !requestId) {
-            if (onDone) onDone();
-            return;
-        }
-
-        // Idempotency: тот же request_id уже стримится — не открываем второй.
-        if (this._resumeRequestId === requestId && this._resumeAbortController) {
-            console.warn('ChatStream: resume для', requestId, 'уже активен — игнорируем');
-            return;
-        }
-
-        // Если активен другой resume-стрим — отменяем его, новый перебивает.
-        if (this._resumeAbortController) {
-            this._resumeAbortController.abort();
-            this._resumeAbortController = null;
-        }
-
-        const controller = new AbortController();
-        this._resumeAbortController = controller;
-        this._resumeRequestId = requestId;
-
-        try {
-            const endpoint = AppConfig.chatEndpoints.forwardStream(conversationId, requestId);
-            const url = (typeof AppConfig !== 'undefined')
-                ? AppConfig.api.getUrl(endpoint)
-                : endpoint;
-            const headers = this._buildHeaders('text/event-stream');
-
-            const response = await fetch(url, {
-                method: 'GET',
-                headers,
-                signal: controller.signal,
-            });
-
-            if (!response.ok) {
-                if (response.status === 429) {
-                    throw await this._buildRateLimitError(response);
-                }
-                throw new Error(`HTTP ${response.status}: ${response.statusText}`);
-            }
-
-            await this._readSSE(response, controller, onEvent);
-
-            if (onDone) onDone();
-        } catch (err) {
-            if (err.name === 'AbortError') {
-                if (onDone) onDone();
-                return;
-            }
-            console.error('ChatStream: ошибка resume-стрима', err);
-            if (onError) onError(err);
-        } finally {
-            if (this._resumeAbortController === controller) {
-                this._resumeAbortController = null;
-                this._resumeRequestId = null;
-            }
-        }
-    },
-
-    /**
-     * Отправляет сообщение и получает полный JSON-ответ (без стриминга)
-     *
-     * @param {string} conversationId — ID беседы
-     * @param {string} message — текст сообщения
-     * @param {File[]} files — прикреплённые файлы
-     * @param {Object} options — параметры
-     * @param {string[]} [options.domains] — фильтр доменов
-     * @returns {Promise<Object>} — полный ответ от сервера
-     */
-    async sendJson(conversationId, message, files = [], options = {}) {
-        const { domains } = options;
-
-        const formData = this._buildFormData(message, files, domains);
-        const url = this._buildUrl(conversationId);
-        const headers = this._buildHeaders('application/json');
-
-        const response = await fetch(url, {
-            method: 'POST',
-            headers,
-            body: formData,
-        });
-
-        if (!response.ok) {
-            throw new Error(`HTTP ${response.status}: ${response.statusText}`);
-        }
-
-        return await response.json();
-    },
-
-    /**
-     * Парсит буфер SSE-данных на отдельные события
-     *
-     * @param {string} buffer — накопленный текст из потока
-     * @returns {{ parsed: Array<{type: string, data: *}>, remaining: string }}
-     * @private
-     */
-    _parseSSE(buffer) {
-        const parsed = [];
-        const parts = buffer.split('\n\n');
-
-        // Последняя часть может быть неполным событием — сохраняем
-        const remaining = parts.pop() || '';
-
-        for (const part of parts) {
-            const trimmed = part.trim();
-            if (!trimmed) continue;
-
-            let eventType = 'message';
-            let eventData = null;
-
-            const lines = trimmed.split('\n');
-            for (const line of lines) {
-                if (line.startsWith('event:')) {
-                    eventType = line.slice(6).trim();
-                } else if (line.startsWith('data:')) {
-                    const raw = line.slice(5).trim();
-                    try {
-                        eventData = JSON.parse(raw);
-                    } catch {
-                        eventData = raw;
-                    }
-                }
-            }
-
-            if (eventData !== null) {
-                parsed.push({ type: eventType, data: eventData });
-            }
-        }
-
-        return { parsed, remaining };
-    },
-
-    /**
-     * Формирует FormData для отправки
-     *
-     * @param {string} message — текст сообщения
-     * @param {File[]} files — файлы
-     * @param {string[]} [domains] — домены
+     * @param {string} message
+     * @param {File[]} files
+     * @param {string[]|null} [domains]
      * @returns {FormData}
      * @private
      */
@@ -449,36 +161,42 @@ export const ChatStream = {
     },
 
     /**
-     * Формирует URL эндпоинта сообщений
+     * Формирует заголовки запроса (только auth, если пользователь известен).
      *
-     * @param {string} conversationId — ID беседы
-     * @returns {string}
-     * @private
-     */
-    _buildUrl(conversationId) {
-        if (typeof AppConfig === 'undefined') {
-            return `/api/v1/chat/conversations/${conversationId}/messages`;
-        }
-        return AppConfig.api.getUrl(AppConfig.chatEndpoints.messages(conversationId));
-    },
-
-    /**
-     * Формирует заголовки запроса
-     *
-     * @param {string} accept — значение Accept (text/event-stream или application/json)
      * @returns {Object}
      * @private
      */
-    _buildHeaders(accept) {
-        const headers = {
-            'Accept': accept,
-        };
+    _buildHeaders() {
+        const headers = {};
 
         if (typeof AuthManager !== 'undefined' && AuthManager.getCurrentUser()) {
             Object.assign(headers, AuthManager.getAuthHeaders());
         }
 
         return headers;
+    },
+
+    /**
+     * Строит Error из не-ok ответа. Пытается прочитать detail из JSON.
+     *
+     * @param {Response} response
+     * @returns {Promise<Error>}
+     * @private
+     */
+    async _errorFromResponse(response) {
+        const fallback = `HTTP ${response.status}: ${response.statusText}`;
+        let err;
+        try {
+            const body = await response.json();
+            if (body && typeof body === 'object') {
+                err = new Error(body.detail || body.error || fallback);
+            }
+        } catch { /* тело пустое или не JSON */ }
+        if (!err) err = new Error(fallback);
+        // Статус нужен вызывающему, чтобы отличить штатное клиентское
+        // отклонение (4xx, напр. лимит запросов) от реального сбоя (5xx/сеть).
+        err.status = response.status;
+        return err;
     },
 };
 

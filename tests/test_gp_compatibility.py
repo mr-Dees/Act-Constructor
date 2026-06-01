@@ -269,36 +269,109 @@ class TestGreenplumSchemaCompatibility:
                     f"{db_type}/schema.sql: значение '{v}' отсутствует в CHECK"
                 )
 
-    def test_chat_gp_schema_has_agent_bridge_tables(self):
-        """Новые agent_* таблицы добавлены в GP-схему чата и используют {SCHEMA}.{PREFIX}."""
+    def test_chat_messages_has_agent_ref_column(self):
+        """chat_messages в обеих схемах содержит колонку agent_ref VARCHAR(36)
+        (Phase 1: ссылка draft-сообщения на строку-вопрос в agent_messages)."""
+        base = Path(__file__).parent.parent / "app" / "domains" / "chat" / "migrations"
+        for db_type in ("postgresql", "greenplum"):
+            schema_path = base / db_type / "schema.sql"
+            content = schema_path.read_text(encoding="utf-8")
+            assert "agent_ref" in content, (
+                f"{db_type}/schema.sql: колонка agent_ref не найдена — "
+                f"ожидается ADD COLUMN agent_ref VARCHAR(36) для chat_messages"
+            )
+            assert "agent_ref VARCHAR(36)" in content, (
+                f"{db_type}/schema.sql: agent_ref VARCHAR(36) не найдено — "
+                f"проверь тип колонки"
+            )
+
+    def test_chat_schemas_have_no_legacy_agent_bridge_tables(self):
+        """Старые 3-табличные artefact'ы моста удалены из обеих схем чата.
+
+        Канал к внешнему агенту теперь — единственная bus-таблица
+        agent_messages; старые agent_requests / agent_response_events /
+        agent_responses (+ их sequence) не должны создаваться.
+        """
+        for db_type in ("postgresql", "greenplum"):
+            schema_path = (
+                Path(__file__).parent.parent
+                / "app" / "domains" / "chat" / "migrations" / db_type / "schema.sql"
+            )
+            content = schema_path.read_text(encoding="utf-8")
+
+            for table in ("agent_requests", "agent_response_events", "agent_responses"):
+                assert f"{{PREFIX}}{table}" not in content, (
+                    f"{db_type}/schema.sql: легаси-таблица {table} всё ещё в схеме"
+                )
+
+            assert "agent_response_events_id_seq" not in content, (
+                f"{db_type}/schema.sql: легаси-sequence agent_response_events_id_seq "
+                f"всё ещё в схеме"
+            )
+
+    def test_agent_messages_gp_distribution_and_pk(self):
+        """agent_messages в GP-схеме имеет DISTRIBUTED BY (chat_id) ⊆ PRIMARY KEY (id, chat_id)."""
         schema_path = (
             Path(__file__).parent.parent
             / "app" / "domains" / "chat" / "migrations" / "greenplum" / "schema.sql"
         )
         content = schema_path.read_text(encoding="utf-8")
+        stmts = DatabaseAdapter._split_sql_statements(content)
 
-        # Все 3 таблицы должны присутствовать с placeholder'ами схемы и префикса
-        for table in ("agent_requests", "agent_response_events", "agent_responses"):
-            assert f"CREATE TABLE IF NOT EXISTS {{SCHEMA}}.{{PREFIX}}{table}" in content, \
-                f"Таблица {table} не найдена с {{SCHEMA}}.{{PREFIX}}-префиксом в GP-схеме"
+        create_stmt = None
+        for raw in stmts:
+            cleaned = re.sub(r'--[^\n]*', '', raw)
+            if (
+                re.search(r'\bCREATE\s+TABLE\b', cleaned, re.IGNORECASE)
+                and "{PREFIX}agent_messages" in cleaned
+            ):
+                create_stmt = cleaned
+                break
 
-        # Sequence для events
-        assert "CREATE SEQUENCE {SCHEMA}.{PREFIX}agent_response_events_id_seq" in content
+        assert create_stmt is not None, (
+            "GP-схема chat: CREATE TABLE agent_messages не найдено"
+        )
 
-        # Все индексы используют idx_{PREFIX}*.
-        # idx_{PREFIX}agent_responses_request не нужен: UNIQUE(request_id) уже создаёт индекс.
-        # idx_{PREFIX}agent_response_events_request тоже больше не нужен:
-        # UNIQUE(request_id, seq) сам создаёт нужный btree-индекс.
-        for idx_name in (
-            "idx_{PREFIX}agent_requests_status_created",
-            "idx_{PREFIX}agent_requests_message",
-        ):
-            assert idx_name in content, f"Индекс {idx_name} не найден в GP-схеме"
+        # DISTRIBUTED BY (chat_id) присутствует
+        assert re.search(
+            r'DISTRIBUTED\s+BY\s*\(\s*chat_id\s*\)', create_stmt, re.IGNORECASE
+        ), "DISTRIBUTED BY (chat_id) не найден в CREATE TABLE agent_messages"
 
-        # UNIQUE(request_id, seq) на agent_response_events — гарантия от дублей
-        # при сетевом retry внешнего агента.
-        assert "UNIQUE (request_id, seq)" in content, (
-            "UNIQUE(request_id, seq) на agent_response_events не найден в GP-схеме"
+        # PRIMARY KEY содержит и id, и chat_id
+        pk_match = re.search(r'PRIMARY\s+KEY\s*\(([^)]+)\)', create_stmt, re.IGNORECASE)
+        assert pk_match is not None, (
+            "PRIMARY KEY не найден в CREATE TABLE agent_messages"
+        )
+        pk_cols = {c.strip().lower() for c in pk_match.group(1).split(',')}
+        assert 'chat_id' in pk_cols, (
+            f"chat_id отсутствует в PRIMARY KEY agent_messages: {pk_cols}"
+        )
+        assert 'id' in pk_cols, (
+            f"id отсутствует в PRIMARY KEY agent_messages: {pk_cols}"
+        )
+
+    def test_gp_schema_no_forbidden_constructs(self):
+        """GP-схема chat не содержит конструкций, запрещённых в GP 6.x / PG 9.4."""
+        schema_path = (
+            Path(__file__).parent.parent
+            / "app" / "domains" / "chat" / "migrations" / "greenplum" / "schema.sql"
+        )
+        content = schema_path.read_text(encoding="utf-8")
+        # Вырезаем line-комментарии перед проверкой
+        stripped = re.sub(r'--[^\n]*', '', content)
+
+        forbidden = {
+            'SKIP LOCKED': re.compile(r'\bSKIP\s+LOCKED\b', re.IGNORECASE),
+            'jsonb_set()': re.compile(r'\bjsonb_set\s*\(', re.IGNORECASE),
+            'ON CONFLICT': re.compile(r'\bON\s+CONFLICT\b', re.IGNORECASE),
+            'gen_random_uuid()': re.compile(r'\bgen_random_uuid\s*\(', re.IGNORECASE),
+        }
+        violations = [
+            name for name, pat in forbidden.items() if pat.search(stripped)
+        ]
+        assert not violations, (
+            f"GP-схема chat содержит конструкции, запрещённые в GP 6.x: "
+            + ", ".join(violations)
         )
 
 

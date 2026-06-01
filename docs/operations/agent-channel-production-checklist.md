@@ -1,0 +1,256 @@
+# Канал к внешнему ИИ-агенту: production-checklist
+
+Чек-лист для эксплуатации канала к внешнему ИИ-агенту через единую
+bus-таблицу `agent_messages` в Greenplum. Покрывает: ручную
+retention-чистку, мониторинг, ёмкости, troubleshooting.
+
+Транспорт между фронтом и бэком — **polling по HTTP, без SSE**: POST
+`/api/v1/chat/conversations/{cid}/messages` возвращает `{message_id}`,
+фронт затем поллит GET
+`/api/v1/chat/conversations/{cid}/messages/{message_id}` до терминального
+статуса и рендерит ответ целиком (декоративный «эффект печати», без
+токен-стриминга). Форвард в агента: оркестратор/прямой проброс создаёт
+черновик `chat_messages` (status='streaming') + вопрос в шине
+`agent_messages`; фоновый `AgentChannelPoller` поллит шину;
+`AgentChannelService.try_finalize` мапит ответ→блоки и финализирует
+черновик (`complete`/`failed`).
+
+См. также `app/domains/chat/services/agent_channel.py`,
+`agent_channel_poller.py` и `docs/integrations/external-agent-imitation.sql`
+(SQL-стенд имитации внешнего агента под единую таблицу).
+
+---
+
+## 1. Retention: ручная чистка (раз в N дней)
+
+`agent_messages` хранит и вопросы (`role='user'`), и ответы агента
+(`role='assistant'`). После финализации (`status` в
+`complete`/`error`/`timeout`) строки остаются вечно. На интенсивном
+использовании таблица растёт и через несколько месяцев упрётся в диск.
+
+**Решение:** периодический ручной (или scheduled через cron / Datalab job)
+DELETE по `created_at`.
+
+### 1.1. PostgreSQL (dev-инсталляция)
+
+```sql
+-- Чистим сообщения шины старше 30 дней.
+-- На большой таблице желательно сначала добавить индекс по created_at:
+--   CREATE INDEX IF NOT EXISTS idx_t_db_oarb_audit_act_agent_messages_created_at
+--       ON t_db_oarb_audit_act_agent_messages(created_at);
+-- (требуется один раз, выполнение DELETE без индекса = полный скан).
+
+BEGIN;
+DELETE FROM t_db_oarb_audit_act_agent_messages
+WHERE created_at < now() - interval '30 days';
+COMMIT;
+```
+
+### 1.2. Greenplum (прод-инсталляция)
+
+```sql
+-- Подставить актуальную схему (DATABASE__GP__SCHEMA, дефолт audit_workstation).
+
+-- 1. (один раз) Индекс на created_at — без него DELETE на multi-segment таблице будет долгим.
+CREATE INDEX idx_t_db_oarb_audit_act_agent_messages_created_at
+    ON audit_workstation.t_db_oarb_audit_act_agent_messages(created_at);
+
+-- 2. DELETE раз в N дней.
+DELETE FROM audit_workstation.t_db_oarb_audit_act_agent_messages
+WHERE created_at < now() - interval '30 days';
+```
+
+### 1.3. Контрольные запросы (сколько съело места)
+
+```sql
+-- PG
+SELECT
+    pg_size_pretty(pg_total_relation_size('t_db_oarb_audit_act_agent_messages')) AS messages_size,
+    (SELECT count(*) FROM t_db_oarb_audit_act_agent_messages) AS messages_rows;
+
+-- GP — то же, но с указанием схемы:
+SELECT
+    pg_size_pretty(pg_total_relation_size('audit_workstation.t_db_oarb_audit_act_agent_messages')) AS messages_size,
+    (SELECT count(*) FROM audit_workstation.t_db_oarb_audit_act_agent_messages) AS messages_rows;
+```
+
+**Ориентир:** при 100 forward'ов в день — вопрос + ответ на каждый,
+~200 строк/день в `agent_messages`. За месяц — ~6K строк (с учётом
+payload-JSON в `media`/`metadata`). Чистка раз в месяц — комфортно.
+
+---
+
+## 2. Sizing
+
+### 2.1. asyncpg-пул (`DATABASE__POOL_*`)
+
+| Параметр | Дефолт | Объяснение |
+|---|---|---|
+| `POOL_MIN_SIZE` | 5 | Минимум коннектов в простое. При повышении не упирается в холодный старт |
+| `POOL_MAX_SIZE` | 20 | Потолок. Расчёт: батчеры + `AgentChannelPoller` + синхронные POST-обработчики + запас |
+
+**Не увеличивай `POOL_MAX_SIZE` без необходимости.** Сейчас 20 — с запасом
+для 6 параллельных пользователей. Сначала retention для `agent_messages`
+(п. 1), потом профилирование под нагрузкой, и только потом — увеличение.
+
+`AgentChannelPoller` **не держит коннект** во время `sleep`/backoff — conn
+берётся только на время SELECT'а шины и финализирующей транзакции.
+
+### 2.2. Таймауты и polling канала (`CHAT__AGENT_CHANNEL__*`)
+
+| Параметр | Дефолт | Что значит |
+|---|---|---|
+| `TABLE_NAME` | `agent_messages` | Имя bus-таблицы |
+| `ANSWER_TIMEOUT_SEC` | 600 (10 мин) | Сколько ждать ответ агента. После — `mark_timeout`, черновик финализируется error-блоком |
+| `POLL_MIN_INTERVAL_SEC` | 2.0 | Минимум между SELECT'ами поллера (старт adaptive backoff) |
+| `POLL_MAX_INTERVAL_SEC` | 10.0 | Максимум после backoff'а на пустых тиках |
+| `POLL_BACKOFF_MULTIPLIER` | 1.5 | Множитель backoff'а |
+| `MAX_BLOCK_TEXT_SIZE` | 262144 | Потолок размера текста блока при маппинге ответа |
+
+Worst case: 10 минут от форварда до timeout. На практике — секунды для
+коротких ответов, до нескольких минут для длинных reasoning-chain'ов
+вроде RAG-агента.
+
+### 2.3. Per-user лимиты
+
+- `CHAT__MAX_PARALLEL_STREAMS_PER_USER` (default 3) — одновременных активных
+  запросов на пользователя. `AgentMessageRepository.count_active_for_user`
+  при `>= max_parallel_streams_per_user` бросает `ChatLimitError` **до**
+  записей → HTTP 422 с дружелюбным сообщением.
+- `UserRateLimiter` — скользящее окно 60с на POST `/messages`.
+
+---
+
+## 3. Мониторинг
+
+### 3.1. Метрики, которые уже пишутся в БД
+
+| Таблица | Что мониторить |
+|---|---|
+| `chat_tool_metrics` | Latency / status / username вызовов ChatTool — медленные tools, спайки validation_error |
+| `admin_http_metrics` | Latency / status HTTP-запросов — медленные эндпоинты, спайки 5xx |
+| `chat_audit_log` | Жизненный цикл бесед: created / deleted / message_sent и т.п. |
+| `agent_messages.status` | Распределение `pending`/`in_progress`/`complete`/`error`/`timeout` — алёрт на залипшие |
+
+### 3.2. Алерты (рекомендации)
+
+| Сигнал | Запрос | Когда дёргать |
+|---|---|---|
+| Зависшие запросы | `SELECT count(*) FROM agent_messages WHERE role='user' AND status IN ('pending','in_progress') AND updated_at < now() - interval '15 minutes'` | > 0 |
+| Спайки timeout'ов | `SELECT count(*) FROM agent_messages WHERE status='timeout' AND created_at > now() - interval '1 hour'` | > 5/час |
+| Рост шины | `SELECT count(*) FROM agent_messages` | резкий рост без retention (п. 1) |
+| Orphan файлов | `SELECT count(*) FROM chat_files WHERE conversation_id NOT IN (SELECT id FROM chat_conversations)` | > 0 |
+| Зависшие черновики | `SELECT count(*) FROM chat_messages WHERE status='streaming' AND created_at < now() - interval '15 minutes'` | > 0 |
+
+### 3.3. WARNING'и по приближению к лимиту пула
+
+`DbPoolMonitor` (admin-домен, lifespan-hook `admin.db_pool_monitor`) раз
+в 30 секунд проверяет `pool.get_size()` / `pool.get_idle_size()`.
+Когда `acquired/max_size >= warn_ratio` (default 0.9) — WARNING в лог:
+
+```
+db_pool_monitor: пул близок к лимиту — acquired=18/20 (size=20, idle=2, ratio=0.90)
+```
+
+Throttle: один WARNING на серию подряд идущих high-usage замеров; при
+возврате к норме — INFO «нагрузка на пул нормализована». Логи доступны
+для агрегатора (Loki/syslog), там и строится алёрт.
+
+Конфиг (`.env`):
+
+```
+ADMIN__DB_POOL_MONITOR__ENABLED=true
+ADMIN__DB_POOL_MONITOR__CHECK_INTERVAL_SEC=30.0
+ADMIN__DB_POOL_MONITOR__WARN_RATIO=0.9
+```
+
+### 3.4. Логи, на которые смотреть
+
+```
+# Канал к агенту:
+audit_workstation.domains.chat.services.agent_channel_poller   # цикл polling шины
+audit_workstation.domains.chat.services.agent_channel          # submit / try_finalize / mark_timeout
+
+# Ошибки LLM (локальная LLM/GigaChat в синхронном POST):
+audit_workstation.domains.chat.agent_loop          # exception в петле оркестратора
+```
+
+---
+
+## 4. Фоновые задачи (хуки в lifespan)
+
+При старте `uvicorn` поднимаются (в порядке регистрации):
+
+1. `acts.audit_log_batcher` — батч-INSERT в `audit_log` (50 шт / 30 сек)
+2. `acts.expired_locks_cleanup` — UPDATE expired locks раз в 60 сек
+3. `admin.http_metrics_batcher` — батч-INSERT в `admin_http_metrics`
+4. `chat.tool_metrics_batcher` — батч-INSERT в `chat_tool_metrics`
+5. `chat.audit_log_batcher` — батч-INSERT в `chat_audit_log`
+6. `chat.agent_channel_poller` — `AgentChannelPoller`: поллит шину
+   `agent_messages` по активным запросам с adaptive backoff (без удержания
+   conn в sleep), при старте reconcile подхватывает зависшие
+   streaming-черновики `chat_messages`
+
+**Shutdown** — в обратном порядке. Если что-то не остановилось за 5с —
+warning в лог.
+
+---
+
+## 5. Troubleshooting
+
+### 5.1. «Чат завис, никто не отвечает» (форвард в агента)
+
+1. Проверь `app_singleton_lock` — есть ли активный воркер:
+   ```sql
+   SELECT * FROM t_db_oarb_audit_act_app_singleton_lock;
+   ```
+2. Проверь поллер в логах: ищи старт
+   `audit_workstation.domains.chat.services.agent_channel_poller` и его
+   `get_status`. Зависание тиков — симптом сетевой проблемы к GP.
+3. Проверь статус вопроса в шине:
+   ```sql
+   SELECT id, status, updated_at FROM agent_messages
+   WHERE role='user' ORDER BY created_at DESC LIMIT 5;
+   ```
+   Если `pending`/`in_progress` дольше `ANSWER_TIMEOUT_SEC` — агент не
+   отвечает, дальше сработает `mark_timeout`.
+4. Проверь пул: количество `acquire`-таймаутов в логах asyncpg.
+
+### 5.2. «Юзер видит ошибку при любом сообщении» (локальная LLM)
+
+1. Логи: `audit_workstation.domains.chat.agent_loop` уровня
+   `exception` — там реальная причина (timeout LLM, 5xx от провайдера, etc).
+2. Проверь circuit breaker (`CHAT__CIRCUIT_BREAKER_*`). Если он в `open`
+   — fallback-провайдер тоже недоступен.
+
+### 5.3. «Черновик ответа агента завис в status='streaming'»
+
+1. Проверь, что поллер жив (п. 5.1) и есть соответствующий вопрос в
+   `agent_messages` (связь через `chat_messages.agent_ref` → uid вопроса
+   в шине).
+2. Если вопрос в шине финализирован (`complete`/`error`/`timeout`), а
+   черновик всё ещё `streaming` — `try_finalize`/`mark_timeout` не
+   отработал; смотри exception в логах `agent_channel`. Reconcile при
+   рестарте `uvicorn` подхватывает такие черновики.
+
+### 5.4. «Чат тормозит при N+ пользователях»
+
+1. Pool exhausted: смотри в логах `asyncpg.pool` warning'и.
+2. Если pool в порядке, проверь `chat_tool_metrics` — нет ли tool'а с
+   аномально большим `latency_ms`.
+
+---
+
+## 6. Контракты, которые НЕ ломать
+
+- **Транспорт — polling, не SSE.** POST `/messages` отдаёт `{message_id}`;
+  ответ забирается GET-поллингом по терминальному статусу. Не добавляй SSE.
+- **`AgentChannelService` — единственный writer финализации черновика**
+  ассистент-сообщения (`try_finalize` / `mark_timeout`). Не добавляй
+  save/финализацию в другие места.
+- **Поллер не держит conn в sleep/backoff.** Conn берётся только на SELECT
+  шины и финализирующую транзакцию — не объединять обратно «для простоты».
+- **`CHAT__MAX_PARALLEL_STREAMS_PER_USER`** проверяется через
+  `count_active_for_user` ДО записей в шину → 422 при превышении.
+- **`chat_messages.agent_ref`** связывает ассистент-черновик с uid вопроса
+  в `agent_messages` — не убирать, на нём держится финализация.

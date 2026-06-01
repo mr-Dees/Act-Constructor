@@ -9,6 +9,8 @@ import { EscapeStack } from '../shared/escape-stack.js';
 
 export class LandingSettingsManager {
     static _storageKey = 'assistant_knowledge_bases';
+    static _oarbModeKey = 'assistant_oarb_mode';
+    static _validOarbModes = ['off', 'adaptive', 'always'];
 
     /** @type {Object<string, {key: string, label: string}>} Загружается из DOM */
     static _assistants = {};
@@ -23,17 +25,20 @@ export class LandingSettingsManager {
         this._loadAssistantsFromDOM();
         this._loadState();
         this._applyState();
+        this._applyOarbMode();
 
         this._setupToggleButton();
         this._setupCloseButton();
         this._setupOutsideClick();
         this._setupAssistantToggles();
+        this._setupOarbModeSelect();
 
         console.log('LandingSettingsManager: инициализация завершена');
     }
 
     /**
-     * Загружает маппинг баз знаний из data-атрибутов DOM-элементов
+     * Загружает маппинг баз знаний из data-атрибутов DOM-элементов.
+     * Пропускает ОАРБ (управляется отдельным селектом) и задизейбленные опции.
      * @private
      */
     static _loadAssistantsFromDOM() {
@@ -44,10 +49,54 @@ export class LandingSettingsManager {
         for (const opt of options) {
             const key = opt.dataset.kbKey;
             const label = opt.dataset.kbLabel;
-            if (key && label) {
+            // ОАРБ — режимный контрол, не чекбокс; задизейбленные — read-only
+            if (key && label && key !== 'knowledge_base_oarb' && !opt.classList.contains('settings-option--disabled')) {
                 this._assistants[key] = { key, label };
                 this._state[key] = false;
             }
+        }
+    }
+
+    /**
+     * Читает режим ОАРБ из localStorage
+     * @returns {'off'|'adaptive'|'always'}
+     * @private
+     */
+    static _getOarbMode() {
+        const val = localStorage.getItem(this._oarbModeKey);
+        return this._validOarbModes.includes(val) ? val : 'off';
+    }
+
+    /**
+     * Синхронизирует сегмент-контрол режима ОАРБ с localStorage
+     * @private
+     */
+    static _applyOarbMode() {
+        const mode = this._getOarbMode();
+        const btns = document.querySelectorAll('[data-oarb-mode] [data-oarb-mode-option]');
+        for (const btn of btns) {
+            btn.setAttribute('aria-pressed', String(btn.dataset.oarbModeOption === mode));
+        }
+    }
+
+    /**
+     * Обработчики клика по кнопкам сегмент-контрола режима ОАРБ
+     * @private
+     */
+    static _setupOarbModeSelect() {
+        const btns = document.querySelectorAll('[data-oarb-mode] [data-oarb-mode-option]');
+        for (const btn of btns) {
+            btn.addEventListener('click', () => {
+                const val = this._validOarbModes.includes(btn.dataset.oarbModeOption)
+                    ? btn.dataset.oarbModeOption
+                    : 'off';
+                try {
+                    localStorage.setItem(this._oarbModeKey, val);
+                } catch (e) {
+                    console.warn('LandingSettingsManager: не удалось сохранить режим ОАРБ', e);
+                }
+                this._applyOarbMode();
+            });
         }
     }
 

@@ -2,7 +2,6 @@
 Оркестратор agent loop для AI-чата.
 
 Управляет циклом: LLM → tool calls → результат → LLM → ... → финальный ответ.
-Поддерживает полный (run) и стриминговый (run_stream) режимы.
 """
 
 from __future__ import annotations
@@ -11,7 +10,6 @@ import asyncio
 import json
 import logging
 import time
-from collections.abc import AsyncGenerator
 from typing import Any
 
 from app.core.chat.block_id_generator import BlockIdGenerator
@@ -62,7 +60,7 @@ class Orchestrator:
             max_attempts=self.settings.retry.max_attempts,
             backoff_base=self.settings.retry.backoff_base_sec,
         )
-        # Контекст для метрик: устанавливается в run/run_stream перед
+        # Контекст для метрик: устанавливается в run перед
         # agent loop и читается в _execute_tool_call. Так избегаем менять
         # сигнатуру _execute_tool_call и передачу параметров через все
         # 5 callsite'ов внутри agent loop.
@@ -637,6 +635,7 @@ class Orchestrator:
         domains: list[str] | None = None,
         file_blocks: list[dict] | None = None,
         user_id: str | None = None,
+        agent_mode: str = "off",
     ) -> dict[str, Any]:
         """Полный (не стриминговый) agent loop.
 
@@ -648,8 +647,14 @@ class Orchestrator:
         через ``_save_assistant_message``: на нём строится детерминированный
         ``block_id`` ClientActionBlock (``f"{message_id}:client_action:{i}"``).
 
+        ``agent_mode`` управляет поведением forward-тула:
+        - "adaptive" — forward-тул доступен LLM; при вызове форвард идёт через
+          bus-канал (AgentChannelService), ответ дозаполняется поллером;
+        - "off" и любое другое — forward-тул скрыт от LLM.
+
         Возвращает dict с полями: response, sources, model, token_usage; на
-        ошибку — dict с ``status="error"``.
+        ошибку — dict с ``status="error"``; при форварде — дополнительно
+        ``forwarded=True``.
         """
         from app.domains.chat.services.agent_loop import run_agent_loop
 
@@ -665,50 +670,8 @@ class Orchestrator:
             domains=domains,
             file_blocks=file_blocks,
             user_id=user_id,
+            agent_mode=agent_mode,
         )
-
-    async def run_stream(
-        self,
-        *,
-        conversation_id: str,
-        user_message: str,
-        message_id: str,
-        domains: list[str] | None = None,
-        file_blocks: list[dict] | None = None,
-        user_id: str | None = None,
-        knowledge_bases: list[str] | None = None,
-    ) -> AsyncGenerator[str, None]:
-        """Стриминговый agent loop — генерирует SSE-события.
-
-        Тонкий wrapper-генератор над ``stream_loop.run_stream_loop`` —
-        фиксирует контекст для метрик (``_current_conversation_id`` /
-        ``_current_user_id``, читается в ``_record_tool_metric``) и
-        делегирует модульной функции. Подробная логика в ``stream_loop.py``.
-
-        Если streaming_enabled, использует stream=True с автофолбеком.
-        Всегда yield-ит message_start/message_end.
-
-        ``message_id`` обязателен — тот же id, что попадёт в БД через
-        ``_save_assistant_message`` (используется для детерминированного
-        ``block_id`` и для контекста forward'а к внешнему агенту).
-        """
-        from app.domains.chat.services.stream_loop import run_stream_loop
-
-        # Фиксируем контекст для метрик; читается из _execute_tool_call.
-        self._current_conversation_id = conversation_id
-        self._current_user_id = user_id
-
-        async for evt in run_stream_loop(
-            self,
-            conversation_id=conversation_id,
-            user_message=user_message,
-            message_id=message_id,
-            domains=domains,
-            file_blocks=file_blocks,
-            user_id=user_id,
-            knowledge_bases=knowledge_bases,
-        ):
-            yield evt
 
     def _fallback_response(self, user_message: str) -> dict[str, Any]:
         """Заглушка при отсутствии настроек LLM API."""

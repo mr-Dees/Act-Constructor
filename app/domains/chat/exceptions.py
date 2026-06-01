@@ -11,6 +11,12 @@ class ConversationNotFoundError(AppError):
     code: ClassVar[str] = "conversation-not-found"
 
 
+class ChatMessageNotFoundError(AppError):
+    """Сообщение чата не найдено."""
+    status_code = 404
+    code: ClassVar[str] = "chat-message-not-found"
+
+
 class ChatFileNotFoundError(AppError):
     """Файл чата не найден."""
     status_code = 404
@@ -36,34 +42,22 @@ class ChatToolValidationError(AppError):
     code: ClassVar[str] = "chat-tool-validation"
 
 
-class ChatStreamAlreadyActiveError(AppError):
-    """У пользователя уже идёт активный SSE-стрим в чате.
-
-    Защита от ситуации, когда фронт по ошибке открывает несколько
-    одновременных стримов и забивает пул соединений к LLM.
-    """
-    status_code = 429
-    code: ClassVar[str] = "chat-stream-already-active"
-
-
 class ConversationLockedError(AppError):
-    """Беседа заблокирована активным SSE-стримом и не может быть изменена.
+    """Беседа заблокирована активной генерацией ответа и не может быть изменена.
 
     Бросается при попытке удалить беседу пользователя, у которого
-    в данный момент идёт активный стрим — иначе генератор продолжит
-    писать сообщения в уже удалённую беседу.
+    в данный момент идёт генерация ответа ассистента — иначе фоновая
+    задача продолжит писать сообщения в уже удалённую беседу.
     """
     status_code = 409
     code: ClassVar[str] = "conversation-locked"
 
 
 class OptimisticLockFailed(AppError):
-    """Optimistic locking конфликт при финализации agent_request.
+    """Optimistic locking конфликт при финализации записи под версионным апдейтом.
 
-    Бросается внутри транзакции в agent_bridge_runner._run, когда
-    finalize обнаруживает, что версия строки уже изменена другим
-    воркером. Транзакция откатывается, assistant-message НЕ сохраняется,
-    статус остаётся in_progress — reconcile подхватит при следующем старте.
+    Бросается, когда finalize обнаруживает, что версия строки уже изменена
+    другим воркером. Транзакция откатывается, статус не меняется.
     """
     status_code = 409
     code: ClassVar[str] = "chat-optimistic-lock-failed"

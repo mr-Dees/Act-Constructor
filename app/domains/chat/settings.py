@@ -14,46 +14,14 @@ class RetryPolicy(BaseModel):
     backoff_base_sec: float = Field(default=2.0, ge=0.0)
 
 
-class AgentBridgeSettings(BaseModel):
-    """Настройки моста к внешнему ИИ-агенту через таблицы БД.
+class AgentChannelSettings(BaseModel):
+    """Параметры канала к внешнему агенту через bus-таблицу agent_messages."""
 
-    Polling выполняется единым координатором (:class:`PollCoordinator`),
-    который батчит SELECT для всех активных `request_id` в один запрос и
-    адаптивно меняет интервал по exponential backoff: при активности —
-    `poll_min_interval_sec`, при тишине растёт до `poll_max_interval_sec`
-    с шагом `poll_backoff_multiplier`.
-    """
-
-    # Минимальный интервал polling (используется и как стартовый
-    # интервал координатора, и как floor при exponential backoff).
-    # 5 сек — компромисс между отзывчивостью чата и нагрузкой на GP
-    # (SELECT раз в секунду = 60 запросов/мин на каждый активный forward).
-    poll_min_interval_sec: float = Field(default=5.0, gt=0.0)
-    # Максимальный интервал polling при отсутствии событий от агента.
+    table_name: str = Field(default="agent_messages")
+    poll_min_interval_sec: float = Field(default=2.0, gt=0.0)
     poll_max_interval_sec: float = Field(default=10.0, gt=0.0)
-    # Множитель роста интервала между пустыми тиками polling.
     poll_backoff_multiplier: float = Field(default=1.5, gt=1.0)
-    initial_response_timeout_sec: int = Field(default=300, gt=0)
-    event_timeout_sec: int = Field(default=120, gt=0)
-    max_total_duration_sec: int = Field(default=1800, gt=0)
-    history_limit: int = Field(default=30, gt=0)
-
-    # Фоновая очистка устаревших agent_response_events для done-запросов.
-    # Без неё таблица растёт безгранично: каждый forward пишет N reasoning'ов
-    # (часто десятки), а исторических данных нужны только пока runner ещё
-    # дочитывает их. После done — события можно удалять с задержкой
-    # (Resume SSE подхватывает финальный response из chat_messages, не из
-    # agent_response_events).
-    agent_events_cleanup_interval_sec: int = Field(default=3600, gt=0)
-    agent_events_cleanup_ttl_hours: int = Field(default=24, gt=0)
-
-    # Лимит размера текста одного блока от внешнего агента (UTF-8 байт).
-    # Защищает от malicious / broken payload'ов: bloated reasoning может
-    # раздуть chat_messages.content до сотен MB, нагрузить SSE-канал,
-    # сорвать рендер фронта. Превышение → блок обрезается с маркером
-    # "…[обрезано]" + WARNING в лог. 256 KB — компромисс: укладывается в
-    # одно SSE-сообщение без deflate, достаточный для нормального
-    # reasoning'а (50-100 KB обычно).
+    answer_timeout_sec: int = Field(default=600, gt=0)  # 10 минут
     max_block_text_size: int = Field(default=262144, gt=0)
 
 
@@ -109,9 +77,9 @@ class ChatDomainSettings(BaseModel):
     # Поведение small-talk
     smalltalk_mode: Literal["local", "forward"] = "local"
 
-    # Retry-политика и мост к внешнему агенту
+    # Retry-политика и канал к внешнему агенту через bus-таблицу
     retry: RetryPolicy = Field(default_factory=RetryPolicy)
-    agent_bridge: AgentBridgeSettings = Field(default_factory=AgentBridgeSettings)
+    agent_channel: AgentChannelSettings = Field(default_factory=AgentChannelSettings)
 
     # Оркестрация
     system_prompt: str = (
@@ -168,16 +136,14 @@ class ChatDomainSettings(BaseModel):
     # Per-user rate limit на отправку сообщений
     rate_limit_messages_per_minute_per_user: int = Field(default=10, ge=1)
 
-    # Максимум параллельных SSE-стримов на одного пользователя.
-    # При превышении новый запрос с Accept: text/event-stream получает 429.
+    # Максимум одновременных активных запросов к агенту на одного
+    # пользователя. При превышении submit бросает ChatLimitError → HTTP 422.
     max_parallel_streams_per_user: int = Field(default=3, ge=1, le=20)
 
-    # Лимиты размера SSE delta-блоков (защита от self-DoS при гигантских
-    # чанках LLM, особенно reasoning). delta_chunk_flush_bytes — порог,
-    # при превышении которого накопленный буфер немедленно эмитится
-    # отдельным block_delta; delta_block_max_bytes — общий лимит на
-    # блок (от block_start до block_end), при превышении блок усекается
-    # маркером и закрывается, последующие deltas игнорируются.
+    # Лимиты размера текстовых блоков (защита от self-DoS при гигантских
+    # ответах LLM, особенно reasoning). delta_chunk_flush_bytes — порог
+    # накопления буфера; delta_block_max_bytes — общий лимит на блок,
+    # при превышении блок усекается маркером.
     delta_chunk_flush_bytes: int = Field(default=65536, ge=1024)
     delta_block_max_bytes: int = Field(default=5242880, ge=65536)
 
