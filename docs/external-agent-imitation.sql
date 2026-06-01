@@ -51,8 +51,14 @@
 -- 0. ПОДГОТОВКА: посмотреть свежие вопросы от AW (ещё не обработаны)
 -- ────────────────────────────────────────────────────────────────────────────
 
--- Активные вопросы, ждущие ответа от агента:
-SELECT id, chat_id, user_id, conversation_id,
+-- Активные вопросы, ждущие ответа от агента.
+-- ┌────────────────────────────────────────────────────────────────────────┐
+-- │ СКОПИРУЙ значение колонки `conversation_id` строки с role='user'.        │
+-- │ Именно его (и ТОЛЬКО его) нужно подставить в <QUESTION_CONV_ID> ниже     │
+-- │ во всех сценариях 1–5. Это uid сообщения-вопроса, НЕ колонка `id` (PK)!  │
+-- └────────────────────────────────────────────────────────────────────────┘
+SELECT conversation_id,   -- ← ЭТО копируем в <QUESTION_CONV_ID>
+       id, chat_id, user_id,
        content, metadata, status, created_at
 FROM t_db_oarb_audit_act_agent_messages
 WHERE role = 'user'
@@ -78,66 +84,51 @@ LIMIT 20;
 -- Полная строка одного вопроса (metadata содержит mode и kb):
 SELECT id, chat_id, user_id, conversation_id, content, metadata, status, created_at
 FROM t_db_oarb_audit_act_agent_messages
-WHERE id = '<question_id>';
+WHERE conversation_id = '<QUESTION_CONV_ID>';
 
 
 -- ────────────────────────────────────────────────────────────────────────────
 -- 1. СЦЕНАРИЙ "успешный ответ агента" (нормальный поток)
 -- ────────────────────────────────────────────────────────────────────────────
-
--- Шаг 1.1 — агент берёт вопрос в работу.
--- Атомарно занять строку и пометить «в работе»:
-UPDATE t_db_oarb_audit_act_agent_messages
-SET status = 'in_progress',
-    updated_at = now()
-WHERE id = '<question_id>'
-  AND status = 'pending';
-
--- Если UPDATE затронул 0 строк — вопрос уже взял другой агент или он закрыт.
-
--- Шаг 1.2 — вставить строку-ответ и закрыть строку-вопрос (одна транзакция).
--- ОБА действия в BEGIN/COMMIT — AW увидит reply_to только после COMMIT,
--- что гарантирует атомарность: либо оба видны, либо ни один.
-BEGIN;
-
--- Генерируем uid ответа заранее (подставь конкретное значение вместо переменной;
--- в psql можно использовать \set, в Python — str(uuid.uuid4())).
--- Для примера используем md5-генерацию, совместимую с GP:
--- \set answer_uid '''$(md5(random()::text || clock_timestamp()::text))'''
 --
--- Ниже uid ответа задан явно — замени '<answer_uid>' на реальное значение.
+-- Единый самодостаточный блок. Замени ТОЛЬКО <QUESTION_CONV_ID>
+-- (значение conversation_id строки-вопроса из запроса 0). Всё остальное —
+-- uid строки-ответа, её conversation_id, chat_id, user_id — вычисляется
+-- автоматически и связывается внутри блока.
+--
+-- PL/pgSQL DO-блок работает и в PostgreSQL, и в Greenplum 6.x.
 
-INSERT INTO t_db_oarb_audit_act_agent_messages
-    (id, chat_id, user_id, conversation_id, role,
-     content, metadata, status, created_at, updated_at)
-SELECT
-    md5(random()::text || clock_timestamp()::text),       -- id строки-ответа
-    am.chat_id,
-    am.user_id,
-    md5(random()::text || clock_timestamp()::text),       -- conversation_id ответа
-    'assistant',
-    'КСО — корпоративная социальная ответственность. По регламенту 2024 года...',
-    '{"thinking":"Понимаю вопрос про КСО. Нашёл 3 релевантных документа, формирую ответ."}'::jsonb,
-    'complete',
-    now(),
-    now()
-FROM t_db_oarb_audit_act_agent_messages am
-WHERE am.id = '<question_id>'
-RETURNING id AS answer_row_id, conversation_id AS answer_conv_id;
+DO $$
+DECLARE
+    q_conv  text := '<QUESTION_CONV_ID>';                           -- ← подставь сюда
+    a_conv  text := md5(random()::text || clock_timestamp()::text); -- conversation_id ответа (авто)
+    a_id    text := md5(random()::text || clock_timestamp()::text); -- id строки-ответа (авто)
+    v_chat  text;
+    v_user  text;
+BEGIN
+    -- Берём chat_id/user_id из строки-вопроса по её conversation_id:
+    SELECT chat_id, user_id INTO v_chat, v_user
+    FROM t_db_oarb_audit_act_agent_messages
+    WHERE conversation_id = q_conv;
 
--- Затем на строке-вопросе проставляем reply_to = conversation_id строки-ответа.
--- Так как RETURNING в GP не всегда удобно использовать в цепочке,
--- при ручном запуске: сначала выполни INSERT выше, запомни answer_conv_id
--- из результата RETURNING, и вставь его ниже вручную:
-UPDATE t_db_oarb_audit_act_agent_messages
-SET reply_to   = '<answer_conv_id>',   -- conversation_id только что вставленной строки-ответа
-    status     = 'complete',
-    updated_at = now()
-WHERE id = '<question_id>';
+    -- Строка-ответ ассистента:
+    INSERT INTO t_db_oarb_audit_act_agent_messages
+        (id, chat_id, user_id, conversation_id, role,
+         content, metadata, status, created_at, updated_at)
+    VALUES (a_id, v_chat, v_user, a_conv, 'assistant',
+            'КСО — корпоративная социальная ответственность. По регламенту 2024 года...',
+            '{"thinking": "Понимаю вопрос про КСО. Нашёл 3 релевантных документа, формирую ответ."}'::jsonb,
+            'complete', now(), now());
 
-COMMIT;
+    -- Закрываем строку-вопрос: reply_to = conversation_id ответа, status='complete':
+    UPDATE t_db_oarb_audit_act_agent_messages
+    SET reply_to   = a_conv,
+        status     = 'complete',
+        updated_at = now()
+    WHERE conversation_id = q_conv;
+END$$;
 
--- После COMMIT: AW увидит reply_to на вопросе → загрузит строку-ответ
+-- После блока: AW увидит reply_to на вопросе → загрузит строку-ответ
 -- по conversation_id и отрендерит content + metadata.thinking.
 
 
@@ -148,42 +139,36 @@ COMMIT;
 -- buttons — массив [{action_id, label, params}]. Сейчас поддерживается
 -- action_id 'acts.open_act_page' (открывает страницу акта по km_number).
 -- Кнопки рендерятся под текстом ответа как интерактивные элементы.
+--
+-- Замени ТОЛЬКО <QUESTION_CONV_ID> (conversation_id строки-вопроса из запроса 0).
 
-BEGIN;
+DO $$
+DECLARE
+    q_conv  text := '<QUESTION_CONV_ID>';                           -- ← подставь сюда
+    a_conv  text := md5(random()::text || clock_timestamp()::text); -- conversation_id ответа (авто)
+    a_id    text := md5(random()::text || clock_timestamp()::text); -- id строки-ответа (авто)
+    v_chat  text;
+    v_user  text;
+BEGIN
+    SELECT chat_id, user_id INTO v_chat, v_user
+    FROM t_db_oarb_audit_act_agent_messages
+    WHERE conversation_id = q_conv;
 
-INSERT INTO t_db_oarb_audit_act_agent_messages
-    (id, chat_id, user_id, conversation_id, role,
-     content, metadata, buttons, status, created_at, updated_at)
-SELECT
-    md5(random()::text || clock_timestamp()::text),
-    am.chat_id,
-    am.user_id,
-    md5(random()::text || clock_timestamp()::text),
-    'assistant',
-    'Найдены 3 связанных акта:',
-    '{"thinking":"Нашёл акты, формирую кнопки для навигации."}'::jsonb,
-    '[
-        {"action_id":"acts.open_act_page","label":"Открыть КМ-23-001",
-         "params":{"km_number":"КМ-23-001"}},
-        {"action_id":"acts.open_act_page","label":"Открыть КМ-23-002",
-         "params":{"km_number":"КМ-23-002"}},
-        {"action_id":"acts.open_act_page","label":"Открыть КМ-23-003",
-         "params":{"km_number":"КМ-23-003"}}
-    ]'::jsonb,
-    'complete',
-    now(),
-    now()
-FROM t_db_oarb_audit_act_agent_messages am
-WHERE am.id = '<question_id>'
-RETURNING conversation_id AS answer_conv_id;
+    INSERT INTO t_db_oarb_audit_act_agent_messages
+        (id, chat_id, user_id, conversation_id, role,
+         content, metadata, buttons, status, created_at, updated_at)
+    VALUES (a_id, v_chat, v_user, a_conv, 'assistant',
+            'Найдены 2 связанных акта:',
+            '{"thinking": "Нашёл акты, формирую кнопки для навигации."}'::jsonb,
+            '[{"action_id":"acts.open_act_page","label":"Открыть 11-11111","params":{"km_number":"11-11111"}},{"action_id":"acts.open_act_page","label":"Открыть 22-22222","params":{"km_number":"22-22222"}}]'::jsonb,
+            'complete', now(), now());
 
-UPDATE t_db_oarb_audit_act_agent_messages
-SET reply_to   = '<answer_conv_id>',
-    status     = 'complete',
-    updated_at = now()
-WHERE id = '<question_id>';
-
-COMMIT;
+    UPDATE t_db_oarb_audit_act_agent_messages
+    SET reply_to   = a_conv,
+        status     = 'complete',
+        updated_at = now()
+    WHERE conversation_id = q_conv;
+END$$;
 
 
 -- ────────────────────────────────────────────────────────────────────────────
@@ -192,74 +177,67 @@ COMMIT;
 --
 -- media — массив [{file_id, filename, mime_type, file_size}].
 -- file_id ДОЛЖЕН указывать на реально существующую строку в chat_files
--- (с корректным chat_id/conversation_id), иначе GET /api/v1/chat/files/{file_id}
--- вернёт 404. AW определяет превью по mime_type:
+-- (с корректным conversation_id = chat_id треда), иначе
+-- GET /api/v1/chat/files/{file_id} вернёт 404. AW определяет превью по mime_type:
 --   image/* — встроенное изображение; остальные — иконка + кнопка «Скачать».
 --
--- Шаг 3.1 — залить файл в chat_files:
-WITH new_file AS (
+-- Замени ТОЛЬКО <QUESTION_CONV_ID> (conversation_id строки-вопроса из запроса 0).
+-- Блок сам заливает реально скачиваемый TXT-файл в chat_files и связывает его
+-- с ответом через media.
+
+DO $$
+DECLARE
+    q_conv   text := '<QUESTION_CONV_ID>';                           -- ← подставь сюда
+    a_conv   text := md5(random()::text || clock_timestamp()::text); -- conversation_id ответа (авто)
+    a_id     text := md5(random()::text || clock_timestamp()::text); -- id строки-ответа (авто)
+    f_id     text := md5(random()::text || clock_timestamp()::text); -- file_id (авто)
+    f_name   text := 'отчёт.txt';
+    f_mime   text := 'text/plain; charset=utf-8';
+    f_body   bytea := convert_to(
+                  'Сводный отчёт по КМ-12-32141.' || E'\n' ||
+                  'Документ сформирован агентом базы знаний.', 'UTF8');
+    v_chat   text;
+    v_user   text;
+BEGIN
+    SELECT chat_id, user_id INTO v_chat, v_user
+    FROM t_db_oarb_audit_act_agent_messages
+    WHERE conversation_id = q_conv;
+
+    -- Файл в chat_files (conversation_id в chat_files = chat_id треда;
+    -- message_id NULL: у ответа агента ещё нет id chat-сообщения):
     INSERT INTO t_db_oarb_audit_act_chat_files
         (id, conversation_id, message_id, filename,
          mime_type, file_size, file_data, created_at)
-    SELECT
-        md5(random()::text || clock_timestamp()::text),  -- file_id
-        am.chat_id,    -- conversation_id в chat_files = chat_id треда
-        NULL,          -- message_id NULL: у ответа агента ещё нет id chat-сообщения
-        'отчёт.txt',
-        'text/plain; charset=utf-8',
-        octet_length(convert_to(
-            'Сводный отчёт по КМ-12-32141.' || E'\n' ||
-            'Документ сформирован агентом базы знаний.', 'UTF8'
-        )),
-        convert_to(
-            'Сводный отчёт по КМ-12-32141.' || E'\n' ||
-            'Документ сформирован агентом базы знаний.', 'UTF8'
-        ),
-        now()
-    FROM t_db_oarb_audit_act_agent_messages am
-    WHERE am.id = '<question_id>'
-    RETURNING id AS file_id, filename, mime_type, file_size
-)
--- Шаг 3.2 — вставить строку-ответ с media:
-INSERT INTO t_db_oarb_audit_act_agent_messages
-    (id, chat_id, user_id, conversation_id, role,
-     content, media, status, created_at, updated_at)
-SELECT
-    md5(random()::text || clock_timestamp()::text),
-    am.chat_id,
-    am.user_id,
-    md5(random()::text || clock_timestamp()::text),
-    'assistant',
-    'Сформировал отчёт, прикладываю файл:',
-    jsonb_build_array(
-        jsonb_build_object(
-            'file_id',   nf.file_id,
-            'filename',  nf.filename,
-            'mime_type', nf.mime_type,
-            'file_size', nf.file_size
-        )
-    ),
-    'complete',
-    now(),
-    now()
-FROM t_db_oarb_audit_act_agent_messages am
-CROSS JOIN new_file nf
-WHERE am.id = '<question_id>'
-RETURNING conversation_id AS answer_conv_id;
+    VALUES (f_id, v_chat, NULL, f_name, f_mime,
+            octet_length(f_body), f_body, now());
 
--- Шаг 3.3 — закрыть вопрос:
-UPDATE t_db_oarb_audit_act_agent_messages
-SET reply_to   = '<answer_conv_id>',
-    status     = 'complete',
-    updated_at = now()
-WHERE id = '<question_id>';
+    -- Строка-ответ с media, ссылающимся на свежий file_id:
+    INSERT INTO t_db_oarb_audit_act_agent_messages
+        (id, chat_id, user_id, conversation_id, role,
+         content, media, status, created_at, updated_at)
+    VALUES (a_id, v_chat, v_user, a_conv, 'assistant',
+            'Сформировал отчёт, прикладываю файл:',
+            jsonb_build_array(
+                jsonb_build_object(
+                    'file_id',   f_id,
+                    'filename',  f_name,
+                    'mime_type', f_mime,
+                    'file_size', octet_length(f_body)
+                )
+            ),
+            'complete', now(), now());
 
--- PDF — подставить сигнатуру; для скачивания достаточно, для открытия нужен
--- полный файл:
--- decode('255044462D312E340A25E2E3CFD30A', 'hex')  -- "%PDF-1.4\n%...\n"
---
--- XLSX — ZIP-сигнатура; иконка рендерится, открытие в Excel требует полного файла:
--- decode('504B0304140000000000', 'hex')  -- "PK\x03\x04..."
+    UPDATE t_db_oarb_audit_act_agent_messages
+    SET reply_to   = a_conv,
+        status     = 'complete',
+        updated_at = now()
+    WHERE conversation_id = q_conv;
+END$$;
+
+-- Другие типы файлов — замени f_mime/f_name и f_body на decode(...):
+-- PDF:  f_body := decode('255044462D312E340A25E2E3CFD30A', 'hex'); -- "%PDF-1.4\n%...\n"
+-- XLSX: f_body := decode('504B0304140000000000', 'hex');          -- "PK\x03\x04..." (ZIP)
+-- (сигнатуры достаточно для иконки и скачивания; для открытия нужен полный файл).
 
 
 -- ────────────────────────────────────────────────────────────────────────────
@@ -268,40 +246,40 @@ WHERE id = '<question_id>';
 --
 -- Можно вставить строку-ответ с описанием ошибки и/или просто закрыть вопрос
 -- со status='error'. AW рендерит статусный блок на основе статуса вопроса.
+-- Замени ТОЛЬКО <QUESTION_CONV_ID> (conversation_id строки-вопроса из запроса 0).
 
 -- Вариант А — только закрыть вопрос (AW покажет стандартное сообщение об ошибке):
 UPDATE t_db_oarb_audit_act_agent_messages
 SET status     = 'error',
     updated_at = now()
-WHERE id = '<question_id>';
+WHERE conversation_id = '<QUESTION_CONV_ID>';
 
 -- Вариант Б — вставить строку-ответ с текстом ошибки + закрыть вопрос:
-BEGIN;
+DO $$
+DECLARE
+    q_conv  text := '<QUESTION_CONV_ID>';                           -- ← подставь сюда
+    a_conv  text := md5(random()::text || clock_timestamp()::text); -- conversation_id ответа (авто)
+    a_id    text := md5(random()::text || clock_timestamp()::text); -- id строки-ответа (авто)
+    v_chat  text;
+    v_user  text;
+BEGIN
+    SELECT chat_id, user_id INTO v_chat, v_user
+    FROM t_db_oarb_audit_act_agent_messages
+    WHERE conversation_id = q_conv;
 
-INSERT INTO t_db_oarb_audit_act_agent_messages
-    (id, chat_id, user_id, conversation_id, role,
-     content, status, created_at, updated_at)
-SELECT
-    md5(random()::text || clock_timestamp()::text),
-    am.chat_id,
-    am.user_id,
-    md5(random()::text || clock_timestamp()::text),
-    'assistant',
-    'Не удалось получить ответ: база знаний acts_default недоступна. Попробуйте позже.',
-    'complete',
-    now(),
-    now()
-FROM t_db_oarb_audit_act_agent_messages am
-WHERE am.id = '<question_id>'
-RETURNING conversation_id AS answer_conv_id;
+    INSERT INTO t_db_oarb_audit_act_agent_messages
+        (id, chat_id, user_id, conversation_id, role,
+         content, status, created_at, updated_at)
+    VALUES (a_id, v_chat, v_user, a_conv, 'assistant',
+            'Не удалось получить ответ: база знаний acts_default недоступна. Попробуйте позже.',
+            'complete', now(), now());
 
-UPDATE t_db_oarb_audit_act_agent_messages
-SET reply_to   = '<answer_conv_id>',
-    status     = 'error',
-    updated_at = now()
-WHERE id = '<question_id>';
-
-COMMIT;
+    UPDATE t_db_oarb_audit_act_agent_messages
+    SET reply_to   = a_conv,
+        status     = 'error',
+        updated_at = now()
+    WHERE conversation_id = q_conv;
+END$$;
 
 
 -- ────────────────────────────────────────────────────────────────────────────
@@ -310,11 +288,12 @@ COMMIT;
 --
 -- Если хочется увидеть индикатор «думает...» в UI — просто поставь in_progress.
 -- AW показывает typing-индикатор, пока reply_to = NULL и status = 'in_progress'.
+-- Замени ТОЛЬКО <QUESTION_CONV_ID> (conversation_id строки-вопроса из запроса 0).
 
 UPDATE t_db_oarb_audit_act_agent_messages
 SET status     = 'in_progress',
     updated_at = now()
-WHERE id = '<question_id>'
+WHERE conversation_id = '<QUESTION_CONV_ID>'
   AND status = 'pending';
 
 -- Затем в любой момент завершить через сценарии 1, 2, 3 или 4.
@@ -340,7 +319,7 @@ WHERE role = 'user'
 ORDER BY created_at ASC
 LIMIT 20;
 
--- Полная пара вопрос–ответ по question_id:
+-- Полная пара вопрос–ответ по conversation_id вопроса (<QUESTION_CONV_ID>):
 SELECT am.id, am.role, am.status, am.reply_to,
        am.content,
        am.metadata,
@@ -348,11 +327,11 @@ SELECT am.id, am.role, am.status, am.reply_to,
        am.media,
        am.created_at
 FROM t_db_oarb_audit_act_agent_messages am
-WHERE am.id = '<question_id>'
+WHERE am.conversation_id = '<QUESTION_CONV_ID>'
    OR am.conversation_id = (
        SELECT reply_to
        FROM t_db_oarb_audit_act_agent_messages
-       WHERE id = '<question_id>'
+       WHERE conversation_id = '<QUESTION_CONV_ID>'
    )
 ORDER BY am.created_at;
 
