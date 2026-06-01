@@ -19,6 +19,7 @@ import json
 import logging
 from typing import TYPE_CHECKING, Any
 
+from app.core.chat.names import TOOL_FORWARD_TO_KNOWLEDGE_AGENT
 from app.domains.chat.exceptions import ChatToolValidationError
 from app.domains.chat.services.orchestrator_helpers import (
     TOOL_VALIDATION_NEUTRAL_MESSAGE,
@@ -34,6 +35,59 @@ if TYPE_CHECKING:
 logger = logging.getLogger("audit_workstation.domains.chat.agent_loop")
 
 
+async def _handle_forward_terminal(
+    *,
+    orch: "Orchestrator",
+    conversation_id: str,
+    user_message: str,
+    message_id: str,
+    user_id: str | None,
+    file_blocks: list[dict] | None,
+    arguments: dict,
+    sources: list[str],
+    token_usage: dict[str, Any],
+) -> dict[str, Any]:
+    """Терминальная обработка tool_call forward_to_knowledge_agent в bus-режиме.
+
+    submit() создаёт draft-сообщение (create_streaming с message_id) и кладёт
+    вопрос в bus-таблицу. Поллер подхватывает дальнейшее заполнение.
+    _save_assistant_message НЕ вызывается — draft уже создан в submit().
+    """
+    question = arguments.get("question") or user_message
+
+    from app.db.connection import get_db
+    from app.domains.chat.deps import get_agent_channel_poller
+    from app.domains.chat.services.agent_channel import AgentChannelService
+
+    async with get_db() as conn:
+        channel = AgentChannelService(conn, orch.settings)
+        question_uid = await channel.submit(
+            conversation_id=conversation_id,
+            user_id=user_id or "",
+            assistant_message_id=message_id,
+            text=question,
+            mode="adaptive",
+            media=file_blocks or None,
+        )
+
+    poller = get_agent_channel_poller()
+    if poller is not None:
+        poller.subscribe(assistant_message_id=message_id, question_uid=question_uid)
+    else:
+        logger.warning(
+            "agent_channel_poller не инициализирован — форвард %s не будет дозаполнен",
+            message_id,
+        )
+
+    return {
+        "response": "",
+        "sources": list(dict.fromkeys(sources + [TOOL_FORWARD_TO_KNOWLEDGE_AGENT])),
+        "model": orch.settings.model,
+        "token_usage": token_usage,
+        "forwarded": True,
+    }
+
+
 async def run_agent_loop(
     orch: "Orchestrator",
     *,
@@ -43,6 +97,7 @@ async def run_agent_loop(
     domains: list[str] | None = None,
     file_blocks: list[dict] | None = None,
     user_id: str | None = None,
+    agent_mode: str = "off",
 ) -> dict[str, Any]:
     """Полный (не стриминговый) agent loop.
 
@@ -52,6 +107,10 @@ async def run_agent_loop(
     ``message_id`` обязателен и должен быть тем же id, что попадёт в БД
     через ``_save_assistant_message``: на нём строится детерминированный
     ``block_id`` ClientActionBlock (``f"{message_id}:client_action:{i}"``).
+
+    ``agent_mode`` управляет доступностью forward-тула:
+    - "adaptive" — forward-тул включён (LLM может его вызвать);
+    - "off" и любое другое — forward-тул скрыт от LLM.
     """
     # Fallback при отсутствии настроек API
     if (
@@ -68,6 +127,13 @@ async def run_agent_loop(
 
     client = orch._get_openai_client()
     tools = orch._get_tools(domains)
+
+    # В режимах, отличных от "adaptive", forward-тул скрыт от LLM.
+    if agent_mode != "adaptive":
+        tools = [
+            t for t in tools
+            if t.get("function", {}).get("name") != TOOL_FORWARD_TO_KNOWLEDGE_AGENT
+        ]
 
     # Собираем messages: system + history + текущее сообщение
     messages = orch._build_system_messages(domains)
@@ -118,6 +184,18 @@ async def run_agent_loop(
                     "GigaChat queue tool call #%d: %s(%s)", rounds, tool_name,
                     ", ".join(f"{k}={v!r}" for k, v in arguments.items()),
                 )
+                if tool_name == TOOL_FORWARD_TO_KNOWLEDGE_AGENT:
+                    return await _handle_forward_terminal(
+                        orch=orch,
+                        conversation_id=conversation_id,
+                        user_message=user_message,
+                        message_id=message_id,
+                        user_id=user_id,
+                        file_blocks=file_blocks,
+                        arguments=arguments,
+                        sources=sources,
+                        token_usage=token_usage,
+                    )
                 try:
                     result = await orch._execute_tool_call(
                         tool_name, arguments,
@@ -195,6 +273,18 @@ async def run_agent_loop(
                     "Tool call #%d: %s(%s)", rounds, tool_name,
                     ", ".join(f"{k}={v!r}" for k, v in arguments.items()),
                 )
+                if tool_name == TOOL_FORWARD_TO_KNOWLEDGE_AGENT:
+                    return await _handle_forward_terminal(
+                        orch=orch,
+                        conversation_id=conversation_id,
+                        user_message=user_message,
+                        message_id=message_id,
+                        user_id=user_id,
+                        file_blocks=file_blocks,
+                        arguments=arguments,
+                        sources=sources,
+                        token_usage=token_usage,
+                    )
                 try:
                     result = await orch._execute_tool_call(
                         tool_name, arguments,

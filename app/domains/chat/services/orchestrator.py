@@ -637,6 +637,7 @@ class Orchestrator:
         domains: list[str] | None = None,
         file_blocks: list[dict] | None = None,
         user_id: str | None = None,
+        agent_mode: str = "off",
     ) -> dict[str, Any]:
         """Полный (не стриминговый) agent loop.
 
@@ -648,8 +649,14 @@ class Orchestrator:
         через ``_save_assistant_message``: на нём строится детерминированный
         ``block_id`` ClientActionBlock (``f"{message_id}:client_action:{i}"``).
 
+        ``agent_mode`` управляет поведением forward-тула:
+        - "adaptive" — forward-тул доступен LLM; при вызове форвард идёт через
+          bus-канал (AgentChannelService), ответ дозаполняется поллером;
+        - "off" и любое другое — forward-тул скрыт от LLM.
+
         Возвращает dict с полями: response, sources, model, token_usage; на
-        ошибку — dict с ``status="error"``.
+        ошибку — dict с ``status="error"``; при форварде — дополнительно
+        ``forwarded=True``.
         """
         from app.domains.chat.services.agent_loop import run_agent_loop
 
@@ -665,6 +672,7 @@ class Orchestrator:
             domains=domains,
             file_blocks=file_blocks,
             user_id=user_id,
+            agent_mode=agent_mode,
         )
 
     async def run_stream(

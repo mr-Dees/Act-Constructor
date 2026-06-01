@@ -201,6 +201,7 @@ async def send_message(
             domains=domains_list,
             file_blocks=file_blocks if file_blocks else None,
             user_id=username,
+            agent_mode=agent_mode,
         )
     except Exception:
         logger.exception(

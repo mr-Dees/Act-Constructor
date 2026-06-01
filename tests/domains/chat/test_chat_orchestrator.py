@@ -2014,3 +2014,211 @@ class TestToolLoopExit:
         )
         # Не упал раньше max_tool_rounds из-за разных ошибок
         assert mock_client.chat.completions.create.call_count >= 3
+
+
+# -------------------------------------------------------------------------
+# agent_mode: фильтрация forward-тула и bus-форвард в adaptive-режиме
+# -------------------------------------------------------------------------
+
+
+class TestAgentModeForward:
+    """Тесты adaptive-форварда через bus-канал в non-streaming agent_loop."""
+
+    @patch("app.domains.chat.services.orchestrator.Orchestrator._get_openai_client")
+    async def test_off_mode_filters_forward_tool(
+        self, mock_client_factory, orchestrator,
+    ):
+        """В режиме off forward-тул не передаётся LLM."""
+        from app.core.chat.names import TOOL_FORWARD_TO_KNOWLEDGE_AGENT
+
+        # Регистрируем forward-тул
+        forward_tool = ChatTool(
+            name=TOOL_FORWARD_TO_KNOWLEDGE_AGENT,
+            domain="chat",
+            description="Форвард к агенту знаний",
+            handler=AsyncMock(return_value="forwarded"),
+        )
+        register_tools([forward_tool])
+
+        mock_client = AsyncMock()
+        response = _make_mock_response(content="Ответ без форварда")
+        mock_client.chat.completions.create = AsyncMock(return_value=response)
+        mock_client_factory.return_value = mock_client
+        orchestrator._save_assistant_message = AsyncMock()
+
+        # Перехватываем вызов LLM, чтобы проверить переданные tools
+        captured_tools: list = []
+
+        original_create = mock_client.chat.completions.create
+
+        async def capturing_create(**kwargs):
+            captured_tools.extend(kwargs.get("tools", []))
+            return await original_create(**kwargs)
+
+        mock_client.chat.completions.create = capturing_create
+
+        await orchestrator.run(
+            message_id="msg-1",
+            conversation_id="conv-1",
+            user_message="Привет",
+            agent_mode="off",
+        )
+
+        # Forward-тул НЕ должен быть в списке, переданном LLM
+        tool_names = [t["function"]["name"] for t in captured_tools]
+        assert TOOL_FORWARD_TO_KNOWLEDGE_AGENT not in tool_names
+
+    @patch("app.domains.chat.services.orchestrator.Orchestrator._get_openai_client")
+    async def test_adaptive_mode_calls_channel_submit_and_poller(
+        self, mock_client_factory, orchestrator,
+    ):
+        """В adaptive-режиме при tool_call forward → submit + poller.subscribe,
+        _save_assistant_message НЕ вызван, результат содержит forwarded=True."""
+        from app.core.chat.names import TOOL_FORWARD_TO_KNOWLEDGE_AGENT
+
+        forward_tool = ChatTool(
+            name=TOOL_FORWARD_TO_KNOWLEDGE_AGENT,
+            domain="chat",
+            description="Форвард к агенту знаний",
+            handler=AsyncMock(return_value="forwarded"),
+        )
+        register_tools([forward_tool])
+
+        mock_client = AsyncMock()
+        tool_call = _make_tool_call(
+            name=TOOL_FORWARD_TO_KNOWLEDGE_AGENT,
+            arguments='{"question": "Что такое аудит?"}',
+        )
+        response_with_forward = _make_mock_response(
+            content=None, tool_calls=[tool_call],
+        )
+        mock_client.chat.completions.create = AsyncMock(
+            return_value=response_with_forward,
+        )
+        mock_client_factory.return_value = mock_client
+        orchestrator._save_assistant_message = AsyncMock()
+
+        mock_poller = MagicMock()
+        mock_poller.subscribe = MagicMock()
+
+        mock_channel = AsyncMock()
+        mock_channel.submit = AsyncMock(return_value="question-uid-123")
+
+        # Мокаем context-manager get_db и AgentChannelService.
+        # Импорты в _handle_forward_terminal ленивые (внутри функции),
+        # поэтому патчим источники, а не agent_loop.* атрибуты.
+        mock_conn = AsyncMock()
+        mock_db_ctx = AsyncMock()
+        mock_db_ctx.__aenter__ = AsyncMock(return_value=mock_conn)
+        mock_db_ctx.__aexit__ = AsyncMock(return_value=False)
+
+        with (
+            patch(
+                "app.db.connection.get_db",
+                return_value=mock_db_ctx,
+            ),
+            patch(
+                "app.domains.chat.services.agent_channel.AgentChannelService",
+                return_value=mock_channel,
+            ),
+            patch(
+                "app.domains.chat.deps.get_agent_channel_poller",
+                return_value=mock_poller,
+            ),
+        ):
+            result = await orchestrator.run(
+                message_id="msg-forward-1",
+                conversation_id="conv-1",
+                user_message="Что такое аудит?",
+                agent_mode="adaptive",
+            )
+
+        # submit вызван с правильными аргументами
+        mock_channel.submit.assert_awaited_once()
+        submit_kwargs = mock_channel.submit.await_args.kwargs
+        assert submit_kwargs["assistant_message_id"] == "msg-forward-1"
+        assert submit_kwargs["conversation_id"] == "conv-1"
+        assert submit_kwargs["mode"] == "adaptive"
+        assert submit_kwargs["text"] == "Что такое аудит?"
+
+        # poller.subscribe вызван
+        mock_poller.subscribe.assert_called_once_with(
+            assistant_message_id="msg-forward-1",
+            question_uid="question-uid-123",
+        )
+
+        # _save_assistant_message НЕ должен быть вызван (draft создан submit'ом)
+        orchestrator._save_assistant_message.assert_not_awaited()
+
+        # Результат содержит forwarded=True
+        assert result.get("forwarded") is True
+        assert result["response"] == ""
+        assert TOOL_FORWARD_TO_KNOWLEDGE_AGENT in result["sources"]
+
+    @patch("app.domains.chat.services.orchestrator.Orchestrator._get_openai_client")
+    async def test_adaptive_mode_poller_none_logs_warning(
+        self, mock_client_factory, orchestrator, caplog,
+    ):
+        """Если poller не инициализирован — логируется warning, форвард не падает."""
+        import logging as _logging
+        from app.core.chat.names import TOOL_FORWARD_TO_KNOWLEDGE_AGENT
+
+        forward_tool = ChatTool(
+            name=TOOL_FORWARD_TO_KNOWLEDGE_AGENT,
+            domain="chat",
+            description="Форвард к агенту знаний",
+            handler=AsyncMock(return_value="forwarded"),
+        )
+        register_tools([forward_tool])
+
+        mock_client = AsyncMock()
+        tool_call = _make_tool_call(
+            name=TOOL_FORWARD_TO_KNOWLEDGE_AGENT,
+            arguments="{}",
+        )
+        response_with_forward = _make_mock_response(
+            content=None, tool_calls=[tool_call],
+        )
+        mock_client.chat.completions.create = AsyncMock(
+            return_value=response_with_forward,
+        )
+        mock_client_factory.return_value = mock_client
+        orchestrator._save_assistant_message = AsyncMock()
+
+        mock_channel = AsyncMock()
+        mock_channel.submit = AsyncMock(return_value="q-uid-456")
+
+        mock_conn = AsyncMock()
+        mock_db_ctx = AsyncMock()
+        mock_db_ctx.__aenter__ = AsyncMock(return_value=mock_conn)
+        mock_db_ctx.__aexit__ = AsyncMock(return_value=False)
+
+        with (
+            patch(
+                "app.db.connection.get_db",
+                return_value=mock_db_ctx,
+            ),
+            patch(
+                "app.domains.chat.services.agent_channel.AgentChannelService",
+                return_value=mock_channel,
+            ),
+            patch(
+                "app.domains.chat.deps.get_agent_channel_poller",
+                return_value=None,
+            ),
+            caplog.at_level(_logging.WARNING),
+        ):
+            result = await orchestrator.run(
+                message_id="msg-no-poller",
+                conversation_id="conv-1",
+                user_message="Вопрос",
+                agent_mode="adaptive",
+            )
+
+        assert result.get("forwarded") is True
+        # Warning залогирован
+        assert any(
+            "не инициализирован" in r.getMessage()
+            for r in caplog.records
+            if r.levelname == "WARNING"
+        )
