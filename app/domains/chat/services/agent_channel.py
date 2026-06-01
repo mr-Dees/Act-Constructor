@@ -217,6 +217,27 @@ class AgentChannelService:
         )
         return question_uid
 
+    async def mark_timeout(
+        self,
+        *,
+        assistant_message_id: str,
+        question_uid: str,
+    ) -> None:
+        """Помечает draft как failed (error-блок таймаута) и ставит вопросу status='timeout'."""
+        await self._message_repo().mark_failed(
+            message_id=assistant_message_id,
+            error_block=build_timeout_error_block(),
+        )
+        await self._agent_repo().set_status(
+            conversation_id=question_uid,
+            status="timeout",
+        )
+        logger.info(
+            "agent_channel: таймаут — message_id=%s, question_uid=%s",
+            assistant_message_id,
+            question_uid,
+        )
+
     async def try_finalize(
         self,
         *,

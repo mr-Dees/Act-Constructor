@@ -87,6 +87,7 @@ def _register_lifespan_hooks() -> None:
     )
     from app.db.connection import get_db
     from app.domains.chat.deps import (
+        set_agent_channel_poller,
         set_audit_log_batcher,
         set_poll_coordinator,
         set_tool_metrics_batcher,
@@ -278,6 +279,36 @@ def _register_lifespan_hooks() -> None:
                     "Ошибка при остановке cleanup agent_response_events",
                 )
 
+    async def _start_agent_channel_poller(app: FastAPI) -> None:
+        """Поднимает AgentChannelPoller — поллер ответов из bus-таблицы agent_messages."""
+        from app.core.settings_registry import get as get_domain_settings
+        from app.domains.chat.services.agent_channel_poller import AgentChannelPoller
+        from app.domains.chat.settings import ChatDomainSettings
+
+        chat_settings = get_domain_settings("chat", ChatDomainSettings)
+
+        poller = AgentChannelPoller(chat_settings)
+        set_agent_channel_poller(poller)
+        app.state.chat_agent_channel_poller = poller
+        await poller.reconcile()
+        poller.start()
+
+    async def _stop_agent_channel_poller(app: FastAPI) -> None:
+        """Останавливает AgentChannelPoller и сбрасывает ссылку в deps."""
+        import logging
+
+        logger = logging.getLogger("audit_workstation.domains.chat.lifecycle")
+        poller = getattr(app.state, "chat_agent_channel_poller", None)
+        try:
+            set_agent_channel_poller(None)
+        except Exception:
+            logger.exception("Не удалось сбросить ссылку на AgentChannelPoller")
+        if poller is not None:
+            try:
+                await poller.stop()
+            except Exception:
+                logger.exception("Ошибка при остановке AgentChannelPoller")
+
     register_startup_hook("chat.tool_metrics_batcher", _start_tool_metrics_batcher)
     register_shutdown_hook("chat.tool_metrics_batcher", _stop_tool_metrics_batcher)
 
@@ -292,6 +323,13 @@ def _register_lifespan_hooks() -> None:
     )
     register_shutdown_hook(
         "chat.agent_events_cleanup", _stop_agent_events_cleanup,
+    )
+
+    register_startup_hook(
+        "chat.agent_channel_poller", _start_agent_channel_poller,
+    )
+    register_shutdown_hook(
+        "chat.agent_channel_poller", _stop_agent_channel_poller,
     )
 
 
