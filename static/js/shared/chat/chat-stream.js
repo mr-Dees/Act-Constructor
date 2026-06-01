@@ -236,14 +236,18 @@ export const ChatStream = {
      */
     async _errorFromResponse(response) {
         const fallback = `HTTP ${response.status}: ${response.statusText}`;
+        let err;
         try {
             const body = await response.json();
             if (body && typeof body === 'object') {
-                const msg = body.detail || body.error || fallback;
-                return new Error(msg);
+                err = new Error(body.detail || body.error || fallback);
             }
         } catch { /* тело пустое или не JSON */ }
-        return new Error(fallback);
+        if (!err) err = new Error(fallback);
+        // Статус нужен вызывающему, чтобы отличить штатное клиентское
+        // отклонение (4xx, напр. лимит запросов) от реального сбоя (5xx/сеть).
+        err.status = response.status;
+        return err;
     },
 };
 

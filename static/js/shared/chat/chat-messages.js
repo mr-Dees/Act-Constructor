@@ -224,12 +224,20 @@ export const ChatMessages = {
         const msgEl = botContainer.parentElement;
         if (msgEl) msgEl.classList.remove('chat-message-bot--streaming');
 
-        console.error('ChatMessages: ошибка получения ответа', err);
         // Показываем реальный текст ошибки (бэк уже отдаёт дружелюбное сообщение,
         // напр. про лимит одновременных запросов), а не общую заглушку.
         const text = (err && err.message)
             ? err.message
             : 'Не удалось получить ответ. Попробуйте ещё раз.';
+
+        // Штатное клиентское отклонение (4xx, напр. лимит запросов) уже показано
+        // пользователю — это не сбой, логируем warn'ом, а не красным error'ом.
+        const status = err && err.status;
+        if (typeof status === 'number' && status >= 400 && status < 500) {
+            console.warn('ChatMessages: запрос отклонён —', text);
+        } else {
+            console.error('ChatMessages: ошибка получения ответа', err);
+        }
         const errDiv = document.createElement('div');
         errDiv.className = 'chat-error';
         errDiv.textContent = text;
