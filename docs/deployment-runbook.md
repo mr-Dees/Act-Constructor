@@ -17,11 +17,11 @@
   ```powershell
   Compare-Object (Get-Content .env.example) (Get-Content .env)
   ```
-  Особо проверить: `CHAT__*`, `ACTS__*`, `OBSERVABILITY__*`, `SECURITY__*`. Wave 1 добавил `CHAT__AGENT_BRIDGE__MAX_BLOCK_TEXT_SIZE=262144` (см. dev-guide §9.5).
+  Особо проверить: `CHAT__*`, `ACTS__*`, `OBSERVABILITY__*`, `SECURITY__*`. Канал к внешнему ИИ-агенту настраивается префиксом `CHAT__AGENT_CHANNEL__*` (`TABLE_NAME=agent_messages`, `POLL_MIN_INTERVAL_SEC=2.0`, `POLL_MAX_INTERVAL_SEC=10.0`, `POLL_BACKOFF_MULTIPLIER=1.5`, `ANSWER_TIMEOUT_SEC=600`, `MAX_BLOCK_TEXT_SIZE=262144`); лимит одновременных запросов — `CHAT__MAX_PARALLEL_STREAMS_PER_USER` (default 3).
 - [ ] **`DATABASE__TABLE_PREFIX`** соответствует БД. Дефолт `t_db_oarb_audit_act_`. При смене окружения проверить, что таблицы существуют под тем же префиксом — иначе `create_tables_if_not_exist` поднимет новый набор пустых таблиц и фактические данные «исчезнут».
 - [ ] **Свободен ли singleton-lock**. См. `troubleshooting.md` №20: если предыдущий процесс упал по kill -9, строка в `app_singleton_lock` живёт до `SECURITY__SINGLETON_LOCK_STALE_TTL_SEC` сек (default 60). В пределах окна старт упадёт.
 - [ ] **Версия миграций**. Все одноразовые SQL из `docs/migrations/` для апгрейда с предыдущей версии применены (см. §3).
-- [ ] **Внешний ИИ-агент жив**. Если деплой завязан на forward'ы — убедиться, что внешний worker подхватывает `agent_requests`. Без него все forward'ы будут зависать по `INITIAL_RESPONSE_TIMEOUT_SEC` (5 мин default).
+- [ ] **Внешний ИИ-агент жив**. Если деплой завязан на форварды в «Базу знаний ОАРБ» — убедиться, что внешний worker читает bus-таблицу `agent_messages` (вопросы со `status='pending'`/`role='user'`) и пишет ответы туда же. Без него форварды будут висеть до `CHAT__AGENT_CHANNEL__ANSWER_TIMEOUT_SEC` (600 сек default) и финализироваться как ошибка таймаута.
 
 ---
 
@@ -42,7 +42,7 @@ uvicorn app.main:create_app --factory --host 0.0.0.0 --port 8005
    - `Database pool ready: ...` (`app/db/connection.py:252`) — пул асинкпг поднят.
    - `Схема базы данных проверена` — `create_tables_if_not_exist` отработала.
    - Сообщение о захвате singleton-lock без ошибок (`Не удалось захватить singleton-lock` → стоп, см. troubleshooting №20).
-   - Каждый startup-hook — `poll_coordinator: запущен (...)`, `audit_log_batcher: started`, и аналогичные. Полный набор для Wave 1:
+   - Каждый startup-hook — `agent_channel_poller: запущен (...)`, `audit_log_batcher: started`, и аналогичные. Полный набор:
 
      | Hook | Что |
      |---|---|
@@ -53,8 +53,7 @@ uvicorn app.main:create_app --factory --host 0.0.0.0 --port 8005
      | `admin.db_pool_monitor` | Мониторинг asyncpg-пула |
      | `chat.tool_metrics_batcher` | `MetricsBatcher` метрик tool-вызовов |
      | `chat.audit_log_batcher` | `MetricsBatcher` chat-аудита |
-     | `chat.poll_coordinator` | Единый цикл polling событий внешнего агента |
-     | `chat.agent_events_cleanup` | TTL-cleanup `agent_response_events` |
+     | `chat.agent_channel_poller` | Polling bus-таблицы `agent_messages`, финализация форвард-черновиков (adaptive-backoff) |
 
 2. **Базовый health.**
    ```bash
@@ -90,7 +89,7 @@ uvicorn app.main:create_app --factory --host 0.0.0.0 --port 8005
 |---|---|
 | `drop-all-tables.md` | Тотальная очистка под пересоздание схемы (только dev) |
 
-**Wave 1 backend-hardening** не требует ALTER на существующих БД: таблица `access_denied_audit` создаётся `schema.sql` через стандартный `IF NOT EXISTS`, новый Setting `CHAT__AGENT_BRIDGE__MAX_BLOCK_TEXT_SIZE` живёт только в коде. Если БД пустая или таблица `access_denied_audit` уже создана прошлой версией — никаких ручных действий не нужно.
+**Канал к внешнему ИИ-агенту** при апгрейде с версий со старой шиной (3 таблицы `agent_requests` / `agent_response_events` / `agent_responses`) требует ручных шагов: единая bus-таблица `agent_messages` создаётся `create_tables_if_not_exist` автоматически, но в `chat_messages` добавилась колонка `agent_ref VARCHAR(36)` — её нужно дописать ALTER'ом на существующей БД. Старые 3 таблицы можно дропнуть после миграции. Настройки канала живут только в коде (`CHAT__AGENT_CHANNEL__*`). Для имитации внешнего агента см. [`external-agent-imitation.sql`](external-agent-imitation.sql).
 
 **Если таблица не создалась автоматически** (старая версия create_tables, специфичные права):
 
@@ -114,7 +113,7 @@ sed 's/{SCHEMA}/<gp_schema>/g; s/{PREFIX}/t_db_oarb_audit_act_/g' \
 2. **`git checkout <previous-tag>`** в рабочем каталоге.
 3. **Проверить совместимость БД-схемы.** Если в новой версии были `ALTER TABLE` / новые колонки, и старая версия их не ждёт — это OK (старая версия читает подмножество колонок). Если же старая версия пишет в колонку, которой в новой версии нет — деплой нельзя откатывать без backup'а.
 4. **Старт по §2.**
-5. **Проверить zombie streaming-сообщения.** Подробный recovery для зависших streaming-сообщений — см. [operations-recovery.md §1](operations-recovery.md#1-зависший-forward-runner). Здесь — только проверка факта: `SELECT count(*) FROM t_db_oarb_audit_act_chat_messages WHERE status='streaming' AND created_at < now() - interval '5 minutes';`. Если ненулевое — открыть operations-recovery §1.
+5. **Проверить zombie streaming-сообщения.** Форвард в «Базу знаний ОАРБ» создаёт черновик `chat_messages` со `status='streaming'`, который финализирует `AgentChannelPoller`; после рестарта зависшие черновики подхватываются reconcile при старте поллера. Здесь — только проверка факта: `SELECT count(*) FROM t_db_oarb_audit_act_chat_messages WHERE status='streaming' AND created_at < now() - interval '5 minutes';`. Если ненулевое — открыть [operations-recovery.md §1](operations-recovery.md).
 
 ---
 

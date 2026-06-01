@@ -876,8 +876,8 @@ export class APIClient {
      * (комбинировать AbortSignal в браузере пока нельзя без полифилла,
      * пользовательский abort приоритетнее).
      *
-     * SSE-вызовы (chat-stream.js, forward-resume) НЕ должны использовать
-     * этот wrapper — у них свой жизненный цикл с долгим body-стримом.
+     * Polling-вызовы чата (chat-stream.js) НЕ должны использовать
+     * этот wrapper — у них свой жизненный цикл ожидания ответа.
      *
      * @param {string} url
      * @param {RequestInit} [opts={}]

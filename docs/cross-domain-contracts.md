@@ -64,14 +64,14 @@ $ grep -rn "from app.domains.acts" app/domains/admin
 синхронное изменение во всех потребителях**, иначе runtime-warning
 «ChatTool не зарегистрирован» (силент failure: LLM просто не получит tool).
 
-### 3.1. `chat.forward_to_knowledge_agent` — терминальный tool с переключением в bridge
+### 3.1. `chat.forward_to_knowledge_agent` — tool форварда в адаптивном режиме
 
 | Аспект | Значение |
 |---|---|
 | **Константа** | `TOOL_FORWARD_TO_KNOWLEDGE_AGENT` |
-| **Создаётся в** | `app/domains/chat/services/forward_tool_factory.py` (per-request handler через замыкание) |
-| **Перехватывается в** | `stream_loop.py` и `agent_loop.py` — особый case-bypass: возврат sentinel `<<forwarded_request:UUID>>` → переключение в `forward_bridge.handle_forward_call` |
-| **Контракт** | Имя tool'а должно совпадать с константой в обоих местах. Если переименовать — оркестратор перестанет распознавать tool и forward не сработает |
+| **Создаётся в** | `app/domains/chat/services/forward_tool_factory.py` (`build_forward_tool_descriptor()`) |
+| **Когда доступен LLM** | Только в `agent_mode='adaptive'` — оркестратор сам решает форвардить вопрос внешнему агенту. В `agent_mode='always'` LLM минуется: вопрос пишется в шину `agent_messages` напрямую (`AgentChannelService.submit`). В `agent_mode='off'` tool скрыт |
+| **Контракт** | Имя tool'а должно совпадать с константой во всех потребителях. Если переименовать — оркестратор перестанет распознавать tool, адаптивный форвард не сработает |
 
 ### 3.2. `acts.open_act_page` (и аналогичные `open_*_page` tools)
 
@@ -103,7 +103,7 @@ $ grep -rn "from app.domains.acts" app/domains/admin
 
 | Что сломается | Симптом |
 |---|---|
-| Action добавлен в Python whitelist, но забыт во фронте | SSE-событие `client_action` пройдёт, но handler'а нет → `console.warn('ClientActionsRegistry: неизвестная команда X')` |
+| Action добавлен в Python whitelist, но забыт во фронте | блок придёт в ответе сообщения, но handler'а нет → `console.warn('ClientActionsRegistry: неизвестная команда X')` |
 | Action добавлен во фронт, но забыт в Python whitelist | Pydantic-валидация `ClientActionBlock` отвергнет блок на парсинге → exception в orchestrator |
 
 ---
@@ -117,33 +117,43 @@ $ grep -rn "from app.domains.acts" app/domains/admin
 | **Используется на фронте** | `chat-client-actions.js::executeBlock` — Set исполненных id в `sessionStorage` под ключом `chat:executedActions` |
 | **Что сломается, если изменить формат** | Фронт перестанет распознавать «уже исполненный» при reload вкладки → бесконечный redirect-цикл (action `open_url` будет каждый раз заново переходить по URL). Подробнее — [`developer-guide.md §7.9`](developer-guide.md#79-action-handlers-и-clientactionblock) |
 
-**Симметрично для `block_id` reasoning-блоков** (форвард):
-- Формат: `f"{message_id}:reasoning:{seq}"`
-- Используется: (a) `MessageRepository.append_block` для server-side дедупа повторных reasoning-событий; (b) `ChatRenderer.appendBlock` для DOM-дедупа через `data-block-id` (replaceWith вместо append при коллизии).
-- Что сломается: невозможность восстановить reasoning-блоки при reload/switch чатов из `GET /messages`; дубликаты в DOM при повторных Resume SSE (см. `docs/developer-guide.md §11.7`).
+**`block_id` блоков из ответа внешнего агента** (форвард через шину `agent_messages`):
+- Формат задаётся в `AgentChannelService.map_answer_to_blocks` (`agent_channel.py`): кнопки — `f"{row['id']}:btn:0"`, reasoning — `f"{row['id']}:reasoning:0"`, где `row['id']` — uid строки-ответа в шине.
+- `map_answer_to_blocks` мапит ответ агента в блоки в порядке: reasoning (из `metadata.thinking`) → text → buttons → media (image/file) → error.
+- Используется: `ClientActionsRegistry.executeBlock` дедупит исполнённые client-action по `block_id` (см. §5 выше). Стабильность формата важна, чтобы повторный поллинг GET /messages не создавал дублей кнопок.
 
 ---
 
-## 6. Контракты SSE-событий (backend → frontend)
+## 6. Транспортный контракт (POST + poll, без SSE)
 
-| Событие | Поле / payload | Где используется |
-|---|---|---|
-| `message_start` | `{conversation_id, message_id}` | `chat-messages.js::_handleSSEEvent::case 'message_start'` — сброс `_streamingBlocks` |
-| `block_start` | `{index, type, [block_id]}` | `chat-messages.js::_handleSSEEvent::case 'block_start'` — создание DOM-узла |
-| `block_delta` | `{index, delta}` | то же — `block.appendText(delta)` |
-| `block_end` | `{index}` | то же — `block.finalize()` |
-| `block_complete` | `{index, block}` | те же типы блоков, но одним событием (file/image/plan/error) |
-| `client_action` | `{block}` | `chat-messages.js::case 'client_action'` — `ClientActionsRegistry.executeBlock(block)` |
-| `buttons` | `{buttons: [...]}` | `chat-messages.js::case 'buttons'` — рендер группы кнопок |
-| `tool_call` / `tool_result` / `tool_error` | `{tool_name, tool_call_id, ...}` | сейчас не используется фронтом (диагностические события) |
-| `agent_request_started` | `{request_id, conversation_id}` | `chat-stream.js::_trackAgentEvent` — переход в Resume SSE |
-| `message_end` | `{message_id, model, token_usage}` | `chat-messages.js::case 'message_end'` — сброс `_streamingBlocks` |
-| `error` | `{error, code?}` | `chat-messages.js::case 'error'` — рендер ErrorBlock |
+SSE в чате нет. Транспорт единый для всех режимов:
 
-**Что сломается, если добавить новое событие на бэке без правки фронта**:
-фронт пропустит его в `switch` без handler'а, ошибки не будет, но
-функционал не отработает (дополнение: рассмотреть warning в default-ветке
-`_handleSSEEvent`).
+1. **POST** `/api/v1/chat/conversations/{cid}/messages` (FormData: `message`,
+   `domains`, `agent_mode`, `files`) — всегда отдаёт JSON `{"message_id": ...}`.
+2. Фронт **поллит** **GET** `/api/v1/chat/conversations/{cid}/messages/{message_id}`
+   до терминального статуса сообщения и рендерит ответ **целиком** с
+   декоративным «эффектом печати» (токен-стриминга нет).
+
+| `agent_mode` | Поведение бэка |
+|---|---|
+| `off` | Локальная LLM/GigaChat исполняется синхронно в POST через `orchestrator.run(...)`; forward-tool скрыт от LLM |
+| `adaptive` | `orchestrator.run(...)` синхронно; forward-tool доступен LLM, оркестратор сам решает форвардить через шину `agent_messages` |
+| `always` | Прямой проброс в агента: `AgentChannelService.submit` пишет вопрос в шину + черновик `chat_messages` (status='streaming'), LLM минуется |
+
+**Форвард-путь (adaptive/always)**: `AgentChannelService.submit` создаёт
+черновик ассистент-сообщения (`status='streaming'`, `agent_ref` = uid вопроса
+в шине) и запись вопроса в `agent_messages`; фоновый `AgentChannelPoller`
+(`agent_channel_poller.py`) поллит шину adaptive-backoff'ом без удержания
+коннекта в sleep; `AgentChannelService.try_finalize` мапит ответ агента в
+блоки (`map_answer_to_blocks`) и финализирует черновик (`complete`/`failed`),
+`mark_timeout` закрывает зависший запрос (`build_timeout_error_block`).
+
+| Контракт | Где |
+|---|---|
+| Шина агента | таблица `agent_messages` (см. §10) |
+| Лимит параллельных запросов | `AgentMessageRepository.count_active_for_user` ≥ `CHAT__MAX_PARALLEL_STREAMS_PER_USER` (default 3) → `ChatLimitError` (HTTP 422) до записей в БД |
+| Фоновый хук поллера | `chat.agent_channel_poller` (наряду с `chat.tool_metrics_batcher`, `chat.audit_log_batcher`) |
+| Настройки канала | `AgentChannelSettings`, env-префикс `CHAT__AGENT_CHANNEL__` (`TABLE_NAME=agent_messages`, `POLL_MIN_INTERVAL_SEC=2.0`, `POLL_MAX_INTERVAL_SEC=10.0`, `POLL_BACKOFF_MULTIPLIER=1.5`, `ANSWER_TIMEOUT_SEC=600`, `MAX_BLOCK_TEXT_SIZE=262144`) |
 
 ---
 
@@ -166,10 +176,10 @@ $ grep -rn "from app.domains.acts" app/domains/admin
 | Контракт | Тест |
 |---|---|
 | `block_id` детерминизм для ClientAction | `tests/domains/chat/test_block_id_determinism.py` |
-| `block_id` для reasoning + дедуп | `tests/domains/chat/test_agent_bridge_runner.py::test_run_saves_assistant_message_with_collected_blocks` |
+| Мапинг ответа агента в блоки, finalize/timeout | `tests/domains/chat/test_agent_channel.py` |
+| Поллер шины (subscribe/tick/reconcile) | `tests/domains/chat/test_agent_channel_poller.py` |
+| Лимит параллельных запросов в шину | `tests/domains/chat/test_agent_message_repository.py` |
 | GP UNIQUE / PK правило | `tests/test_gp_compatibility.py::test_distributed_by_subset_of_primary_key` |
-| Watchdog PollCoordinator | `tests/domains/chat/test_poll_coordinator.py::test_watchdog_restarts_dead_poll_loop` |
-| Terminal-tool контракт | `tests/domains/chat/test_chat_streaming.py::TestTerminalToolContract::test_client_action_terminates_loop` |
 | Whitelist client-actions | `tests/core/test_chat_blocks.py` |
 
 ---
@@ -188,3 +198,33 @@ $ grep -rn "from app.domains.acts" app/domains/admin
    - LLM может вызвать переименованный tool (если description совместимо)
    - Кнопки от внешнего агента не сломались (`button_translator`)
    - Client-action откликается на новом имени
+
+---
+
+## 10. Контракт шины `agent_messages` (приложение ↔ внешний ИИ-агент)
+
+Единая bus-таблица — единственный канал к внешнему агенту (заменила прежние
+`agent_requests` / `agent_response_events` / `agent_responses`). Polling-only,
+постоянных соединений нет. SQL-стенд имитации агента — [`docs/external-agent-imitation.sql`](external-agent-imitation.sql).
+
+| Колонка | Тип | Назначение |
+|---|---|---|
+| `id` | VARCHAR(36) | uid строки шины (вопрос/ответ) |
+| `chat_id`, `user_id`, `conversation_id` | — | привязка к чату |
+| `role` | CHECK(`user`/`assistant`/`tool`) | роль; `tool` разрешена схемой, но приложением не обрабатывается |
+| `content` | TEXT | текст |
+| `media`, `metadata`, `buttons` | JSONB | вложения, служебные данные (`metadata.thinking` → reasoning), кнопки |
+| `reply_to` | VARCHAR(36) | uid вопроса, на который это ответ |
+| `status` | CHECK(`pending`/`in_progress`/`complete`/`error`/`timeout`) | статус обработки |
+| `created_at`, `updated_at` | — | таймстемпы |
+
+**GP**: PK `(id, chat_id)`, `DISTRIBUTED BY (chat_id)` (DISTRIBUTED BY ⊆ PK).
+
+**Связь с `chat_messages`**: `chat_messages.agent_ref` VARCHAR(36) — ссылка из
+черновика ассистент-сообщения на uid вопроса в шине. Поток submit → poller →
+`try_finalize` описан в §6.
+
+| Что сломается | Симптом |
+|---|---|
+| Переименование таблицы без правки `CHAT__AGENT_CHANNEL__TABLE_NAME` | поллер и `AgentChannelService` не найдут шину |
+| Несовпадение значений `status` CHECK с кодом сервиса | агент не сможет записать ответ; см. `CHECK_CONSTRAINT_MESSAGES` |

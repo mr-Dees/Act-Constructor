@@ -79,5 +79,6 @@ async def test_retries_on_5xx_then_succeeds():
 
 - Тесты, где провайдер возвращает 200 с пустым телом / битым JSON — это
   не retry-зона, а парсинг-логика оркестратора.
-- `agent_bridge` polling — у него собственный retry-механизм через
-  таймауты, см. `app/domains/chat/services/agent_bridge.py`.
+- Поллинг канала к внешнему агенту (`AgentChannelPoller`) — у него собственный
+  механизм adaptive-backoff и таймаута ответа (`ANSWER_TIMEOUT_SEC`), а не
+  `retry_on_transient`, см. `app/domains/chat/services/agent_channel_poller.py`.

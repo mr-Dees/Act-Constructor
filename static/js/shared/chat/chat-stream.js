@@ -138,7 +138,7 @@ export const ChatStream = {
 
     /**
      * Отправляет сообщение и получает полный JSON-ответ (без polling).
-     * Используется там, где SSE/polling не нужны.
+     * Используется там, где ожидание готовности ответа не нужно.
      *
      * @param {string} conversationId
      * @param {string} message

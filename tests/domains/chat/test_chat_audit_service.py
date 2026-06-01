@@ -10,9 +10,6 @@ from app.core.chat.names import (
     AUDIT_FILE_DELETED,
     AUDIT_FILE_UPLOADED,
     AUDIT_MESSAGE_SENT,
-    AUDIT_STREAM_ABORTED,
-    AUDIT_STREAM_COMPLETED,
-    AUDIT_STREAM_STARTED,
 )
 from app.domains.chat.services.chat_audit_service import ChatAuditService
 
@@ -115,44 +112,6 @@ async def test_log_file_deleted(service, repo):
     assert kwargs["details"] == {"file_id": "f-1", "filename": "doc.pdf"}
 
 
-async def test_log_stream_started(service, repo):
-    await service.log_stream_started(
-        username="user1",
-        conversation_id="conv-1",
-    )
-    kwargs = repo.log.call_args.kwargs
-    assert kwargs["action"] == AUDIT_STREAM_STARTED
-    assert kwargs["conversation_id"] == "conv-1"
-    assert kwargs["details"] is None
-
-
-async def test_log_stream_completed_rounds_duration(service, repo):
-    """duration_sec округляется до 3 знаков для компактности JSONB."""
-    await service.log_stream_completed(
-        username="user1",
-        conversation_id="conv-1",
-        duration_sec=1.234567,
-    )
-    kwargs = repo.log.call_args.kwargs
-    assert kwargs["action"] == AUDIT_STREAM_COMPLETED
-    assert kwargs["details"] == {"duration_sec": 1.235}
-
-
-async def test_log_stream_aborted_with_reason(service, repo):
-    await service.log_stream_aborted(
-        username="user1",
-        conversation_id="conv-1",
-        reason="client_disconnected",
-        duration_sec=2.5,
-    )
-    kwargs = repo.log.call_args.kwargs
-    assert kwargs["action"] == AUDIT_STREAM_ABORTED
-    assert kwargs["details"] == {
-        "reason": "client_disconnected",
-        "duration_sec": 2.5,
-    }
-
-
 async def test_repo_exception_is_swallowed(service, repo, caplog):
     """Сбой записи audit-лога НЕ должен пробрасываться наружу."""
     repo.log = AsyncMock(side_effect=RuntimeError("БД недоступна"))
@@ -178,11 +137,8 @@ async def test_repo_exception_swallowed_on_all_methods(service, repo):
     await service.log_message_sent(username="u", conversation_id="c")
     await service.log_file_uploaded(username="u", conversation_id="c")
     await service.log_file_deleted(username="u")
-    await service.log_stream_started(username="u", conversation_id="c")
-    await service.log_stream_completed(username="u", conversation_id="c")
-    await service.log_stream_aborted(username="u", conversation_id="c")
-    # Все 8 вызовов прошли, всё проглотилось
-    assert repo.log.await_count == 8
+    # Все 5 вызовов прошли, всё проглотилось
+    assert repo.log.await_count == 5
 
 
 async def test_details_with_unicode_passed_through(service, repo):

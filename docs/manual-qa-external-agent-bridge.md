@@ -1,13 +1,24 @@
-# Manual QA — feature/external-agent-bridge
+# Manual QA — канал к внешнему ИИ-агенту (agent_messages)
 
-Чек-лист ручной проверки моста к внешнему ИИ-агенту перед merge'ом ветки.
+Чек-лист ручной проверки канала к внешнему ИИ-агенту (база знаний ОАРБ) перед merge'ом ветки.
 
-> В тексте ниже имена `agent_requests`, `agent_response_events`, `agent_responses`, `chat_files` упоминаются без префикса для краткости. В БД они хранятся с префиксом `DATABASE__TABLE_PREFIX` (по умолчанию `t_db_oarb_audit_act_`).
+> В тексте ниже имена таблиц (`agent_messages`, `chat_messages`, `chat_files`) упоминаются без префикса для краткости. В БД они хранятся с префиксом `DATABASE__TABLE_PREFIX` (по умолчанию `t_db_oarb_audit_act_`).
+
+## Архитектура (кратко)
+
+- Канал к агенту — единая bus-таблица `agent_messages` (вопрос от AW = строка `role='user'`, ответ агента = строка `role='assistant'`). Подробная семантика колонок и сценарии имитации — `docs/external-agent-imitation.sql`.
+- Транспорта SSE нет. POST сообщения возвращает `{message_id}`; фронт затем поллит `GET /api/v1/chat/conversations/{cid}/messages/{message_id}` до терминального статуса и рендерит ответ целиком с декоративным «эффектом печати» (токен-стриминга нет).
+- Режим работы задаётся form-параметром `agent_mode`:
+  - `off` / `adaptive` — локальная LLM (или GigaChat) исполняется синхронно в POST через `orchestrator.run(...)`. В `adaptive` оркестратор сам решает форвардить (forward-tool в наборе).
+  - `always` — прямой проброс вопроса в агента, минуя LLM.
+- Форвард создаёт черновик `chat_messages` (`status='streaming'`) + строку-вопрос в `agent_messages`; фоновый `AgentChannelPoller` поллит шину; `AgentChannelService.try_finalize` мапит ответ агента в блоки и финализирует черновик (`complete`/`failed`).
+- Тумблер «База знаний ОАРБ» в UI — 3 позиции: Выключен / Адаптивный / Всегда (localStorage-ключ `assistant_oarb_mode`). Две другие БЗ («источников», «инструментов») в UI выключены.
 
 ## Подготовка
 
 1. Поднять PostgreSQL и применить миграцию (`app/domains/chat/migrations/postgresql/schema.sql`):
-   - Должны появиться таблицы `t_db_oarb_audit_act_agent_requests`, `t_db_oarb_audit_act_agent_response_events`, `t_db_oarb_audit_act_agent_responses` и sequence `t_db_oarb_audit_act_agent_response_events_id_seq` (префикс из `DATABASE__TABLE_PREFIX`).
+   - Должна появиться таблица `t_db_oarb_audit_act_agent_messages` (префикс из `DATABASE__TABLE_PREFIX`).
+   - В `chat_messages` должна быть колонка `agent_ref VARCHAR(36)`.
 
 2. Заполнить `.env.local` (dev на OpenRouter):
    ```
@@ -15,137 +26,65 @@
    CHAT__API_BASE=https://openrouter.ai/api/v1
    CHAT__API_KEY=<твой ключ>
    CHAT__MODEL=minimax/minimax-m2:free
-   CHAT__SMALLTALK_MODE=local
    CHAT__RETRY__ON_429=true
    CHAT__RETRY__ON_5XX=true
-   CHAT__AGENT_BRIDGE__POLL_MIN_INTERVAL_SEC=5.0
-   CHAT__AGENT_BRIDGE__POLL_MAX_INTERVAL_SEC=10.0
-   CHAT__AGENT_BRIDGE__POLL_BACKOFF_MULTIPLIER=1.5
-   CHAT__AGENT_BRIDGE__INITIAL_RESPONSE_TIMEOUT_SEC=300
-   CHAT__AGENT_BRIDGE__EVENT_TIMEOUT_SEC=120
-   CHAT__AGENT_BRIDGE__MAX_TOTAL_DURATION_SEC=1800
+   CHAT__MAX_PARALLEL_STREAMS_PER_USER=3
+   CHAT__AGENT_CHANNEL__TABLE_NAME=agent_messages
+   CHAT__AGENT_CHANNEL__POLL_MIN_INTERVAL_SEC=2.0
+   CHAT__AGENT_CHANNEL__POLL_MAX_INTERVAL_SEC=10.0
+   CHAT__AGENT_CHANNEL__POLL_BACKOFF_MULTIPLIER=1.5
+   CHAT__AGENT_CHANNEL__ANSWER_TIMEOUT_SEC=600
+   CHAT__AGENT_CHANNEL__MAX_BLOCK_TEXT_SIZE=262144
    ```
 
 3. Запустить `uvicorn app.main:app --reload`, открыть портал в браузере.
 
 ## Чек-лист
 
-### 1. Small-talk локально
+### 1. Локальный ответ (тумблер «Выключен»)
+- Тумблер «База знаний ОАРБ» — в позиции «Выключен».
 - Написать в чат: «Привет, как дела?»
-- Ожидаемо: LLM отвечает локально (без записи в `agent_requests`).
-- Проверить: `SELECT count(*) FROM t_db_oarb_audit_act_agent_requests` — не должно увеличиться.
+- Ожидаемо: LLM отвечает синхронно (форварда нет, строк в `agent_messages` не появляется).
+- Проверить: `SELECT count(*) FROM t_db_oarb_audit_act_agent_messages` — не должно увеличиться.
 
-### 2. Forward на внешнего агента
+### 2. Прямой форвард на внешнего агента (тумблер «Всегда»)
+- Перевести тумблер в позицию «Всегда».
 - Написать: «Расскажи про регламент 2024 года».
-- Ожидаемо: появилась строка `pending` в `agent_requests`.
-- Через DBeaver выполнить сценарий §1 из `external-agent-imitation.sql`:
-  имитировать reasoning + финальный ответ агента.
-- Ожидаемо: в чате появились блоки reasoning и финальный текст.
+- Ожидаемо: появилась строка `role='user'`, `status='pending'` в `agent_messages`; в чате — облако-черновик с эффектом печати.
+- В DBeaver выполнить сценарий §1 из `external-agent-imitation.sql` (вставить ответ агента + закрыть вопрос: `reply_to`, `status='complete'`).
+- Ожидаемо: после ближайшего poll-тика (≤ `POLL_MAX_INTERVAL_SEC`) в чате появился финальный текст ответа; рассуждения из `metadata.thinking` отрисованы reasoning-блоком.
 
-### 3. Action-tool — открыть акт
-- Написать: «Открой акт КМ-23-00001».
-- Ожидаемо: LLM вызывает `acts.open_act_page`, фронт переходит на `/constructor?act_id={id}` (где `id` — INTEGER из `acts.id`).
+### 3. Адаптивный форвард (тумблер «Адаптивный»)
+- Перевести тумблер в позицию «Адаптивный».
+- Написать вопрос, требующий знаний базы: «Что в регламенте 2024 года про КСО?».
+- Ожидаемо: оркестратор вызывает forward-tool, появляется строка-вопрос в `agent_messages`.
+- Завершить ответ агента (§1 имитации) — ответ отрисуется в чате.
+- Контрольный кейс: тривиальный вопрос («2+2?») в «Адаптивном» оркестратор отвечает локально без записи в шину.
 
-### 4. Action-tool — уведомление
-- Написать: «Покажи уведомление "Готово"».
-- Ожидаемо: появляется toast «Готово» через `window.Notifications.show`.
+### 4. Ответ с кнопками
+- Форварднуть вопрос, ответ агента вставить по сценарию §2 из `external-agent-imitation.sql` (с `buttons`).
+- Ожидаемо: под текстом ответа отрисованы кнопки. Нажатие на кнопку `acts.open_act_page` переводит на `/constructor?act_id={id}` (где `id` — INTEGER из `acts.id`).
+- Под капотом: `button_translator.translate_buttons` мапит `action_id` ChatTool → client-action `open_url`.
 
-### 5. Файлы
-- Прикрепить PDF (≤1 МБ) и спросить про его содержимое.
-- Ожидаемо: в `agent_requests.files[0].extracted_text` — извлечённый текст PDF; `extracted_text` для PNG равен `null`.
+### 5. Ответ с файлом/медиа
+- Форварднуть вопрос, ответ агента вставить по сценарию §3 из `external-agent-imitation.sql` (с `media`).
+- Ожидаемо: `image/*` рендерится встроенным изображением; прочие mime — иконка + кнопка «Скачать» (через `GET /api/v1/chat/files/{file_id}`).
 
 ### 6. Таймаут агента
-- Forward'нуть вопрос, но НЕ имитировать ответ агента дольше `EVENT_TIMEOUT_SEC` (по умолчанию 120с — гейт 2 «heartbeat между событиями»).
-- Ожидаемо: SSE содержит ошибку «Внешний агент не ответил вовремя»; `agent_requests.status='timeout'`.
-- Можно проверить остальные гейты отдельно: `INITIAL_RESPONSE_TIMEOUT_SEC` (нет первого события) и `MAX_TOTAL_DURATION_SEC` (общая длительность). Подробнее — `docs/developer-guide.md` §7.8.
+- Форварднуть вопрос, но НЕ имитировать ответ агента дольше `ANSWER_TIMEOUT_SEC` (по умолчанию 600с).
+- Ожидаемо: `AgentChannelService.mark_timeout` проставляет `status='timeout'` строке-вопросу; черновик `chat_messages` финализируется error-блоком («Внешний агент не ответил вовремя» — `build_timeout_error_block`).
 
-### 7. Восстановление SSE
-- Forward'нуть вопрос, во время ожидания перезагрузить страницу.
-- В DevTools / curl выполнить:
-  ```
-  GET /api/v1/chat/conversations/<id>/forward-stream/<rid>
-  ```
-- Ожидаемо: стрим возобновляется, видны live-события + финал. Накопленные reasoning'и до момента reload отображаются из истории беседы (`chat_messages.content` со `status='streaming'`), Resume SSE идёт без cursor'а.
+### 7. Восстановление после reload
+- Форварднуть вопрос, во время ожидания перезагрузить страницу.
+- Ожидаемо: облако-черновик восстанавливается из истории беседы — `GET /messages` отдаёт streaming-сообщение (`chat_messages.status='streaming'`) как обычную запись. После завершения ответа агента poll финализирует черновик, ответ виден в истории.
+- Под капотом: после рестарта uvicorn `AgentChannelPoller` реконсайлит активные форварды из streaming-черновиков (`start`/`subscribe`) — зависших облаков печати не остаётся.
 
-### 7a. Регрессия: задержка save после финала
-Сценарий проверяет, что ассистент-сообщение появляется в БД сразу после
-получения финального ответа от агента — не через `event_timeout` секунд
-после последнего reasoning-события. До фикса runner спал в `queue.get()`
-до срабатывания таймаута, и при reload в этом окне история была пустой.
+### 8. Лимит одновременных запросов
+- Открыть несколько бесед и форварднуть запросы, не завершая их, до достижения `CHAT__MAX_PARALLEL_STREAMS_PER_USER` (по умолчанию 3).
+- Следующий форвард: `AgentMessageRepository.count_active_for_user` возвращает `>= max`, бросается `ChatLimitError` ДО записей → HTTP 422 с дружелюбным сообщением.
+- Завершить один из активных форвардов — лимит освобождается, новый запрос проходит.
 
-- Forward'нуть вопрос («Расскажи про регламент 2024 года»).
-- В DBeaver выполнить §1 из `external-agent-imitation.sql`:
-  reasoning-события, затем **одна транзакция** INSERT в `agent_responses`
-  + INSERT `event_type='final'` в `agent_response_events` (см. шаг 1.4
-  имитации).
-- **Сразу после COMMIT** проверить:
-  ```sql
-  SELECT created_at, role, jsonb_array_length(content) AS blocks
-  FROM t_db_oarb_audit_act_chat_messages
-  WHERE conversation_id = '<id>' AND role = 'assistant'
-  ORDER BY created_at DESC LIMIT 1;
-  ```
-  Ассистент-сообщение должно появиться в течение ≤ 2 секунд после
-  COMMIT'а (а не через `event_timeout` секунд).
-- Реload страницы сразу же — ответ должен быть виден в истории.
-
-### 7b. Fallback poll без 'final'-события
-Эмулирует старую версию агента, не вставляющую `event_type='final'`.
-Проверяет, что runner всё равно подхватывает финал через периодический
-`poll_response` (защита от потери push-сигнала).
-
-- Forward'нуть вопрос.
-- Имитировать reasoning + INSERT в `agent_responses` **БЕЗ** INSERT
-  'final' (закомментировать вторую часть транзакции в §1.4).
-- Ассистент-сообщение должно появиться в течение ≤ `poll_min_interval_sec`
-  × N тиков (≤ 5 секунд при дефолтных настройках), а не через
-  `event_timeout`.
-
-### 7c. Регрессия: switching между чатами с активными forward'ами
-
-Проверяет, что reasoning-блоки внешнего агента не «пропадают» при переключении
-между беседами с параллельными forward'ами. До рефактора Phase 1 (Variant D)
-фронт держал глобальный `_lastReasoningSeq`, который мог дать seq-перекос
-между разными forward'ами — после switch'а Resume SSE открывался с неверным
-курсором и UI терял рассуждения. Теперь streaming-сообщения видны через
-`GET /messages` независимо от SSE — switch гарантированно показывает накопленный
-state.
-
-Шаги:
-1. Открыть беседу A, задать вопрос → forward в полёте.
-2. В DBeaver вставить 2 reasoning-события (§1.1–1.3 из `external-agent-imitation.sql`).
-3. **БЕЗ INSERT в `agent_responses`**, открыть НОВУЮ беседу B, задать другой
-   вопрос → второй forward в полёте.
-4. В DBeaver вставить 1 reasoning-событие для B.
-5. Переключиться на A: ОЖИДАЕТСЯ 2 reasoning-блока + индикатор печати.
-6. Переключиться на B: ОЖИДАЕТСЯ 1 reasoning-блок + индикатор печати.
-7. Переключаться туда-обратно — данные не пропадают.
-8. Завершить оба forward'а (§1.4) — в обоих чатах появятся финальные ответы.
-9. Reload страницы — оба чата показывают полную историю.
-
-Под капотом: `agent_bridge_runner` инкрементально дописывает блоки в
-`chat_messages.content` через `MessageRepository.append_block`
-(status='streaming'). `GET /messages` отдаёт streaming-сообщения как обычные
-записи, фронт идемпотентно мерджит по `data-block-id` поверх того, что уже
-есть в DOM.
-
-### 8. Profile-switch на SGLang
+### 9. Profile-switch на SGLang
 - Сменить `.env` на профиль `sglang` (внутренний адрес), перезапустить.
-- Повторить сценарии 1–4.
+- Повторить сценарии 1–3.
 - Ожидаемо: всё работает без правки кода.
-
-### 9. Сценарий: `CHAT__SMALLTALK_MODE=forward`
-
-Установить `CHAT__SMALLTALK_MODE=forward` в `.env`. Перезапустить uvicorn. Любое сообщение в чат должно идти через `forward_to_knowledge_agent` без обращения к LLM. Проверить:
-
-- Запрос с простым «привет» → запись в `agent_requests`, видна в QA-инструкции `docs/external-agent-imitation.sql`.
-- LLM-моки/`chat completions` НЕ вызываются.
-- SSE-стрим закрывается корректно после ответа агента.
-
-### 10. Сценарий: комбинация таймаутов
-
-Параметры: `INITIAL_RESPONSE_TIMEOUT_SEC`, `MAX_TOTAL_DURATION_SEC`, `max_tool_rounds`. Тест-кейсы:
-
-- `INITIAL_RESPONSE_TIMEOUT_SEC=5`, агент не отвечает → request в `error/timeout`, SSE отдаёт нейтральное сообщение.
-- `MAX_TOTAL_DURATION_SEC=10`, агент стримит долго → принудительный stop, ассистент-message сохраняется с накопленным текстом.
-- `max_tool_rounds=3`, LLM зацикливается в tool_call → ровно 3 раунда, потом fallback.

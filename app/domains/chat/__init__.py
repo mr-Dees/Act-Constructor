@@ -61,10 +61,11 @@ def _register_lifespan_hooks() -> None:
       (записи времени исполнения tool'ов).
     * ``chat.audit_log_batcher`` — батчер audit-лога чата (перенесён
       из ``main.py`` во второй волне рефакторинга).
+    * ``chat.agent_channel_poller`` — фоновый поллер ответов из bus-таблицы
+      ``agent_messages`` (дозаполнение черновиков-форвардов).
 
     Сам ``_on_chat_shutdown`` остаётся на ``DomainDescriptor.on_shutdown`` —
-    он работает с polling-задачами форварда, а не с инфраструктурными
-    батчерами.
+    он закрывает кэшированные LLM-клиенты, а не инфраструктурные батчеры.
     """
     from fastapi import FastAPI
 

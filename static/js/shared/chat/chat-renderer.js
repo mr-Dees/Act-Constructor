@@ -227,9 +227,8 @@ export const ChatRenderer = {
         if (!container || !el) return;
 
         // Идемпотентный merge по data-block-id: если блок с тем же id
-        // уже есть в контейнере, заменяем его. Это нужно для случая
-        // «при reload пришёл финал с тем же block_id, что был streaming-
-        // партиал, — заменить полным телом».
+        // уже есть в контейнере, заменяем его. Защищает от дублей при
+        // повторном рендере того же ответа (например, после reload).
         if (el.dataset && el.dataset.blockId) {
             const existing = container.querySelector(
                 `[data-block-id="${CSS.escape(el.dataset.blockId)}"]`,
@@ -392,7 +391,7 @@ export const ChatRenderer = {
     },
 
     /**
-     * Создаёт стриминговый блок для инкрементального отображения SSE-данных
+     * Создаёт блок для посимвольного проявления (декоративный эффект печати)
      *
      * Для reasoning-блока: каждый вызов создаёт НОВЫЙ <details>-элемент
      * (изначально раскрытый), чтобы каждый reasoning-чанк отображался

@@ -136,16 +136,14 @@ class ChatDomainSettings(BaseModel):
     # Per-user rate limit на отправку сообщений
     rate_limit_messages_per_minute_per_user: int = Field(default=10, ge=1)
 
-    # Максимум параллельных SSE-стримов на одного пользователя.
-    # При превышении новый запрос с Accept: text/event-stream получает 429.
+    # Максимум одновременных активных запросов к агенту на одного
+    # пользователя. При превышении submit бросает ChatLimitError → HTTP 422.
     max_parallel_streams_per_user: int = Field(default=3, ge=1, le=20)
 
-    # Лимиты размера SSE delta-блоков (защита от self-DoS при гигантских
-    # чанках LLM, особенно reasoning). delta_chunk_flush_bytes — порог,
-    # при превышении которого накопленный буфер немедленно эмитится
-    # отдельным block_delta; delta_block_max_bytes — общий лимит на
-    # блок (от block_start до block_end), при превышении блок усекается
-    # маркером и закрывается, последующие deltas игнорируются.
+    # Лимиты размера текстовых блоков (защита от self-DoS при гигантских
+    # ответах LLM, особенно reasoning). delta_chunk_flush_bytes — порог
+    # накопления буфера; delta_block_max_bytes — общий лимит на блок,
+    # при превышении блок усекается маркером.
     delta_chunk_flush_bytes: int = Field(default=65536, ge=1024)
     delta_block_max_bytes: int = Field(default=5242880, ge=65536)
 

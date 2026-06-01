@@ -6,7 +6,7 @@
 
 **Кэш клиентов**: каждый клиент несёт под капотом httpx.AsyncClient
 с собственным connection pool. Если создавать клиент per-request,
-сокеты копятся (особенно при долгих SSE-сессиях). Чтобы этого избежать,
+сокеты копятся (особенно при долгих запросах к LLM). Чтобы этого избежать,
 ``build_llm_client`` кэширует клиентов по ключу (profile, api_base,
 api_key, headers, timeout); ``close_cached_clients()`` зовётся из
 ``on_shutdown`` chat-домена и закрывает httpx-клиентов.

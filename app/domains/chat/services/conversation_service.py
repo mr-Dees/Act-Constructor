@@ -136,9 +136,9 @@ class ConversationService:
     async def delete(self, conversation_id: str, user_id: str) -> bool:
         """Удаляет беседу.
 
-        Бросает ConversationLockedError, если у пользователя есть активный
-        SSE-стрим — иначе генератор продолжит писать сообщения в уже
-        удалённую беседу (BUG #15). Импорт is_user_streaming сделан
+        Бросает ConversationLockedError, если у пользователя идёт
+        генерация ответа — иначе фоновая задача продолжит писать сообщения
+        в уже удалённую беседу (BUG #15). Импорт is_user_streaming сделан
         внутри функции, чтобы избежать циклов и позволить патчить в тестах.
         """
         # Ленивая загрузка — api.messages импортирует наш модуль (через deps),
@@ -148,7 +148,7 @@ class ConversationService:
         if is_user_streaming(user_id):
             raise ConversationLockedError(
                 "Невозможно удалить беседу: идёт генерация ответа ассистента. "
-                "Дождитесь окончания стрима и повторите."
+                "Дождитесь окончания и повторите."
             )
         deleted = await self.conv_repo.delete(conversation_id, user_id)
         if deleted and self.audit_service is not None:

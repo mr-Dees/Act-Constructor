@@ -4,8 +4,8 @@
 agent_ref IS NOT NULL) и финализирует их, когда внешний агент заполнит reply_to
 на строке-вопросе.
 
-Adaptive backoff аналогичен PollCoordinator: при активности сбрасывается в
-min_interval; при пустом тике растёт × multiplier до max_interval.
+Adaptive backoff: при активности интервал сбрасывается в min_interval;
+при пустом тике растёт × multiplier до max_interval.
 
 Коннект держится только во время _tick — перед sleep освобождается.
 """

@@ -6,64 +6,56 @@
 
 ---
 
-## 1. Зависший forward-runner
+## 1. Зависший forward к внешнему агенту
 
-**Симптом.** Пользователь жалуется: «Ассистент завис на печати». В UI крутится typing-индикатор, ответа нет > 5 минут. В чате стоит forward к внешнему ИИ-агенту (`chat.forward_to_knowledge_agent`).
+**Симптом.** Пользователь жалуется: «Ассистент завис на печати». В UI крутится typing-индикатор, ответа нет > 5 минут. В чате включён тумблер «База знаний ОАРБ» (режим «Адаптивный» или «Всегда»), вопрос ушёл в шину к внешнему ИИ-агенту.
+
+**Как это работает.** Форвард создаёт черновик ассистент-сообщения в `chat_messages` (`status='streaming'`, `agent_ref` = uid вопроса) и пишет вопрос в единую bus-таблицу `agent_messages` (`role='user'`, `status='pending'`). Фоновый `AgentChannelPoller` поллит шину; когда приходит ответ агента (`role='assistant'`, `status='complete'`), `AgentChannelService.try_finalize` мапит ответ в блоки и финализирует черновик (`complete`/`failed`).
 
 **Диагностика.**
 
 ```sql
--- 1. Активные runner'ы, которые давно не двигались.
-SELECT id, conversation_id, user_id, status, worker_token,
-       created_at, updated_at, version
-FROM {SCHEMA}.{PREFIX}agent_requests
-WHERE status IN ('pending', 'dispatched', 'in_progress')
-  AND updated_at < now() - interval '5 minutes'
-ORDER BY updated_at;
-
--- 2. Streaming-сообщения, которые так и не дошли до финала.
-SELECT id, conversation_id, status, created_at
+-- 1. Streaming-черновики, которые так и не дошли до финала.
+SELECT id, conversation_id, agent_ref, status, created_at
 FROM {SCHEMA}.{PREFIX}chat_messages
 WHERE status = 'streaming'
   AND created_at < now() - interval '5 minutes';
 
--- 3. Сколько вообще событий прилетело от агента — может быть просто долгий reasoning.
-SELECT request_id, count(*) AS events, max(seq) AS max_seq, max(created_at)
-FROM {SCHEMA}.{PREFIX}agent_response_events
-WHERE request_id IN (... id из шага 1 ...)
-GROUP BY request_id;
+-- 2. Состояние соответствующих записей в шине (agent_ref → agent_messages.id).
+SELECT id, chat_id, conversation_id, role, status, created_at, updated_at
+FROM {SCHEMA}.{PREFIX}agent_messages
+WHERE id IN (... agent_ref из шага 1 ...)
+ORDER BY created_at;
+
+-- 3. Есть ли вообще ответ агента (reply_to ссылается на uid вопроса).
+SELECT id, role, status, reply_to, created_at
+FROM {SCHEMA}.{PREFIX}agent_messages
+WHERE reply_to IN (... agent_ref из шага 1 ...);
 ```
+
+Если по шагу 3 ответа нет — внешний агент ещё не ответил (или не работает). Если ответ есть, а черновик висит в `streaming` — не сработала финализация (проверить, что `chat.agent_channel_poller` запущен в `/admin/diagnostics`).
 
 **Recovery.**
 
-1. **Не торопиться.** Если процесс жив и `chat.poll_coordinator` запущен (см. `/admin/diagnostics`), а внешний агент ещё работает — runner может догнать. Гейты таймаутов: `INITIAL_RESPONSE_TIMEOUT_SEC=300`, `EVENT_TIMEOUT_SEC=120`, `MAX_TOTAL_DURATION_SEC=1800` (dev-guide §9.5). Дать им сработать.
-2. **Если рестартовали uvicorn** — `schedule_pending(older_than_sec=30)` в lifespan автоматически подхватит зависшие `pending`/`dispatched` запросы (`app/domains/chat/services/agent_bridge_runner.py:755`). Дождаться 30 сек после старта.
-3. **Forcibly закрыть.** Если runner точно мёртв и автоматика не помогает:
+1. **Не торопиться.** Если процесс жив и `chat.agent_channel_poller` запущен (`/admin/diagnostics`), а внешний агент ещё работает — поллер догонит ответ. Гейт таймаута ожидания ответа: `CHAT__AGENT_CHANNEL__ANSWER_TIMEOUT_SEC` (default 600 = 10 мин). По истечении `try_finalize`/`mark_timeout` сам пометит черновик `failed`. Дать сработать.
+2. **Если рестартовали uvicorn** — `AgentChannelPoller.reconcile()` в startup-hook восстанавливает подписки из всех `streaming`-черновиков с непустым `agent_ref` (`app/domains/chat/services/agent_channel_poller.py:163`). Дождаться, пока поллер сделает первые тики.
+3. **Forcibly закрыть.** Если ответа от агента нет и автоматика не помогает — пометить черновик и вопрос вручную:
    ```sql
-   -- PostgreSQL (поддерживает || для jsonb):
+   -- Черновик ассистент-сообщения → failed (на GP 6.x / PG 9.4 без jsonb-||,
+   -- блоки оставляем как есть; финализирующий error-блок дописывает только
+   -- Python-путь try_finalize/mark_timeout):
    UPDATE {SCHEMA}.{PREFIX}chat_messages
-   SET status = 'failed',
-       content = COALESCE(content, '[]'::jsonb) ||
-                 '[{"type":"error","message":"runner timeout (manual recovery)","block_id":"recovery:1"}]'::jsonb
+   SET status = 'failed', updated_at = CURRENT_TIMESTAMP
    WHERE id = '<message_id>';
 
-   -- Greenplum 6.x (PG 9.4, без ||):
-   -- jsonb-конкатенация не поддерживается. Простейший вариант — пометить status,
-   -- блоки оставить как есть; финализирующий блок добавит lifespan reconcile при следующем рестарте:
-   UPDATE {SCHEMA}.{PREFIX}chat_messages
-   SET status = 'failed'
-   WHERE id = '<message_id>';
-
-   -- Перевести запрос в timeout.
-   UPDATE {SCHEMA}.{PREFIX}agent_requests
-   SET status = 'timeout', finished_at = now()
-   WHERE id = '<request_id>';
+   -- Вопрос в шине → timeout.
+   UPDATE {SCHEMA}.{PREFIX}agent_messages
+   SET status = 'timeout', updated_at = CURRENT_TIMESTAMP
+   WHERE id = '<agent_ref>';
    ```
-   На GP блок с error-сообщением не дописывается inline. Если нужен — выполнить Python-recovery через `MessageRepository.append_block(..., type='error', ...)` или дождаться рестарта приложения (lifespan reconcile подхватит зависшие через `schedule_pending(older_than_sec=30)`).
+   После этого фронт при reload/повторном поллинге увидит ErrorBlock вместо typing-индикатора. Чтобы добавить читаемый error-блок в content, лучше дождаться рестарта приложения (reconcile подхватит черновик) либо вызвать `AgentChannelService.mark_timeout(...)` из Python.
 
-   После этого фронт при reload увидит ErrorBlock вместо typing-индикатора.
-
-**См. также:** dev-guide §11.6, §11.7 (`chat_messages.status` state machine), `docs/forward-sequence.md`.
+**См. также:** dev-guide §11 (Chat domain), `docs/external-agent-imitation.sql` (имитация внешнего агента под единую таблицу).
 
 ---
 
@@ -80,35 +72,36 @@ WHERE service_name = 'act_constructor';
 
 ---
 
-## 3. `agent_response_events` распух
+## 3. `agent_messages` распухла
 
-**Симптом.** GP-таблица `agent_response_events` стала большой, SELECT-запросы `PollCoordinator`'а заметно медленнее (видно по `last_flush_ago_sec` в `/admin/diagnostics` для `chat.poll_coordinator`, и по росту нагрузки на GP).
+**Симптом.** GP-таблица `agent_messages` (единая шина к внешнему агенту) стала большой, тики `AgentChannelPoller` заметно медленнее (видно по росту нагрузки на GP и по `/admin/diagnostics` для `chat.agent_channel_poller`).
 
 **Диагностика.**
 
 ```sql
 -- Размер таблицы.
 SELECT count(*) AS rows,
-       pg_size_pretty(pg_total_relation_size('{SCHEMA}.{PREFIX}agent_response_events')) AS size
-FROM {SCHEMA}.{PREFIX}agent_response_events;
+       pg_size_pretty(pg_total_relation_size('{SCHEMA}.{PREFIX}agent_messages')) AS size
+FROM {SCHEMA}.{PREFIX}agent_messages;
 
--- Распределение по статусам родителя.
-SELECT r.status, count(e.*) AS events
-FROM {SCHEMA}.{PREFIX}agent_response_events e
-JOIN {SCHEMA}.{PREFIX}agent_requests r ON e.request_id = r.id
-GROUP BY r.status;
+-- Распределение по статусам.
+SELECT status, count(*) AS messages
+FROM {SCHEMA}.{PREFIX}agent_messages
+GROUP BY status;
 ```
 
 **Recovery.**
 
-1. **Автоматический cleanup.** Фоновая задача `chat.agent_events_cleanup` (hook `app/domains/chat/__init__.py:262`) каждые `CHAT__AGENT_BRIDGE__AGENT_EVENTS_CLEANUP_INTERVAL_SEC` сек (default 3600 = 1 час) удаляет события старше `CHAT__AGENT_BRIDGE__AGENT_EVENTS_CLEANUP_TTL_HOURS` (default 24). Проверить в `/admin/diagnostics`, что задача `running: true` и `last_run_ago_sec` разумный.
-2. **Ручная очистка** (если задача не справляется или была остановлена):
+> Автоматического фонового cleanup для `agent_messages` сейчас нет — чистка ручная/кроновая.
+
+1. **Ручная очистка** старых терминальных сообщений (`complete`/`error`/`timeout`). Не трогать `pending`/`in_progress` — это ещё живые запросы:
    ```sql
-   DELETE FROM {SCHEMA}.{PREFIX}agent_response_events
-   WHERE created_at < now() - interval '24 hours';
+   DELETE FROM {SCHEMA}.{PREFIX}agent_messages
+   WHERE status IN ('complete', 'error', 'timeout')
+     AND created_at < now() - interval '7 days';
    ```
-3. **Глубокая чистка с retention** — отдельный SQL [`docs/agent-bridge-cleanup.sql`](agent-bridge-cleanup.sql), TTL 30 дней, чистит все три таблицы в правильном порядке (events → responses → requests). Запускать кроном раз в неделю.
-4. **VACUUM ANALYZE** после массовой чистки (для PG; на GP лучше партиционирование, см. dev-guide §7.8.6).
+2. **Кроном** — тот же DELETE раз в неделю с подходящим retention.
+3. **VACUUM ANALYZE** после массовой чистки (для PG; на GP лучше партиционирование, см. dev-guide §7.8.6).
 
 ---
 
@@ -133,20 +126,19 @@ GROUP BY r.status;
 
 **Что автоматически:**
 
-- `agent_bridge_runner.schedule_pending(older_than_sec=30)` в lifespan подхватывает зависшие forward'ы. Запускается через 30 сек после старта.
-- `chat_messages.status='streaming'` старше 30 сек — runner либо дописывает финал и `finalize`, либо `mark_failed` по таймауту.
+- `AgentChannelPoller.reconcile()` в startup-hook восстанавливает подписки из всех `streaming`-черновиков с непустым `agent_ref` (`app/domains/chat/services/agent_channel_poller.py:163`). Поллер продолжит ждать ответы из шины.
+- `chat_messages.status='streaming'` с уже пришедшим ответом агента — поллер финализирует через `try_finalize`; без ответа дольше `CHAT__AGENT_CHANNEL__ANSWER_TIMEOUT_SEC` (default 600) → `mark_timeout` пометит `failed`.
 - Singleton-lock освобождается мягко в shutdown-hook (`app/main.py:266-280`).
 
 **Что НЕ автоматически:**
 
 - Записи, дропнутые батчерами при shutdown'е без graceful drain — ушли в /dev/null. `stop()` каждого батчера делает финальный flush (`app/core/metrics_batcher.py:118-138`), но если процесс получил SIGKILL, до stop() не дошло.
-- Если рестарт занял > `INITIAL_RESPONSE_TIMEOUT_SEC` (5 мин), активные forward'ы уже превысили гейт 1; они уйдут в `failed` сразу при возобновлении runner'а.
 
 **Что проверить после рестарта:**
 
 1. По §2 чек-листа из `deployment-runbook.md` — все hook'и запустились, `/admin/diagnostics` чистый.
 2. SQL по §1 из этого playbook'а — нет ли «зомби» streaming-сообщений.
-3. Логи на WARNING/ERROR за первые 5 минут — особо `metrics_batcher` overflow, `poll_coordinator` ошибки, Kerberos.
+3. Логи на WARNING/ERROR за первые 5 минут — особо `metrics_batcher` overflow, `agent_channel_poller` ошибки, Kerberos.
 
 ---
 
@@ -187,7 +179,7 @@ ORDER BY denied DESC;
 
 Если процесс висит и не реагирует на нормальный shutdown.
 
-**Сначала gracefully — `SIGTERM`.** Uvicorn ждёт ≤5 сек для graceful drain (закрытие SSE-стримов, финальный flush батчеров, release singleton-lock). Большинство сценариев обрабатываются.
+**Сначала gracefully — `SIGTERM`.** Uvicorn ждёт ≤5 сек для graceful drain (остановка фоновых задач, финальный flush батчеров, release singleton-lock). Большинство сценариев обрабатываются.
 
 **Forcibly — `SIGKILL`.** Если SIGTERM не сработал за 30 сек:
 
@@ -200,10 +192,10 @@ kill -9 <pid>
 После SIGKILL:
 
 - **Singleton-lock**: строка в `app_singleton_lock` останется. Следующий старт через `SECURITY__SINGLETON_LOCK_STALE_TTL_SEC` сек (default 60) перезапишет её автоматически. Если нужно стартовать раньше — DELETE вручную (см. §2).
-- **Активные forward'ы**: соответствующие `chat_messages` останутся в `status='streaming'`. При следующем старте `schedule_pending` подхватит их в течение 30 сек.
+- **Активные forward'ы**: соответствующие `chat_messages` останутся в `status='streaming'`. При следующем старте `AgentChannelPoller.reconcile()` восстановит подписки по `agent_ref`.
 - **Дропнутые метрики**: всё, что было в буферах батчеров — потеряно.
 
 **Не делать SIGKILL когда:**
 
 - Активный сохранение акта в `acts.audit_log_batcher` (потеряется аудит). Подождать ~30 сек после последней пользовательской активности.
-- Активный долгий forward с reasoning (`chat_messages.status='streaming'` с заполняющимся content). После SIGKILL уже накопленные блоки сохранены, но `mark_failed` не отработает — состояние подвиснет до lifespan reconcile следующего старта.
+- Активный forward к внешнему агенту (`chat_messages.status='streaming'` с непустым `agent_ref`). После SIGKILL черновик остаётся в `streaming`; финализация/таймаут не отработают — состояние подвиснет до reconcile следующего старта.

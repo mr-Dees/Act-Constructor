@@ -4,6 +4,14 @@
 новый тип блока (например `chart`, `table_advanced`), которого ещё нет в
 whitelist'е `KNOWN_BLOCK_TYPES` в `static/js/shared/chat/chat-messages.js`.
 
+Транспорт чата — POST + polling (SSE нигде нет): фронт шлёт сообщение через
+`POST /api/v1/chat/conversations/{cid}/messages`, получает `{message_id}` и
+поллит `GET /api/v1/chat/conversations/{cid}/messages/{message_id}` до
+терминального статуса, после чего рендерит ответ **целиком** с декоративным
+эффектом печати (потокового стриминга токенов нет). Любой блок проходит
+через `ChatRenderer.renderBlock`; неизвестный `type` уходит в default-ветку
+`_renderUnknown`. Тот же путь работает и при загрузке истории.
+
 Ожидание: вместо падения или пропажи блока пользователь видит плашку
 «⚠ Блок неизвестного типа: <type>. Обновите страницу.» и полный payload
 блока в `<pre>` для отладки. Сообщение чата остаётся читаемым.
@@ -21,15 +29,10 @@ whitelist'е `KNOWN_BLOCK_TYPES` в `static/js/shared/chat/chat-messages.js`.
    ChatMessages.KNOWN_BLOCK_TYPES  // Set из 9 типов
    ```
 
-## Сценарий 1 — нестримуемый блок (`block_complete`)
+## Сценарий 1 — одиночный блок через `renderBlock`
 
-Имитируем приход одного `block_complete` с неизвестным `type`. Для
-выполнения нужен открытый контейнер сообщения — можно отправить любое
-безобидное сообщение в чат и сразу выполнить snippet ниже **до** того,
-как стрим закроется, либо использовать сценарий 3.
-
-Простейший способ — вручную дёрнуть `ChatRenderer.renderBlock` и вставить
-результат в DOM:
+Имитируем приход одного блока с неизвестным `type`. Простейший способ —
+вручную дёрнуть `ChatRenderer.renderBlock` и вставить результат в DOM:
 
 ```js
 const block = {
@@ -49,64 +52,39 @@ document.querySelector('.chat-message-content:last-of-type').appendChild(el);
 - Стилизация: жёлтый warning-фон (`--warning-subtle`), `border-left`
   толщиной `--border-width-thick` цвета `--warning`, текст плашки курсивом.
 
-## Сценарий 2 — стримовый блок (`block_start` + `block_delta` + `block_end`)
+## Сценарий 2 — целое сообщение через `renderBlocks` (имитация ответа после poll)
 
-Имитируем приход триплета SSE-событий для блока неизвестного типа.
+Бэк отдаёт ответ ассистента целиком после завершения polling'а; фронт
+рендерит его через `ChatRenderer.renderBlocks` / `typeOutBlocks`. Имитируем
+несколько блоков подряд, среди которых один неизвестного типа.
 
 ```js
-// Нужно поймать живой контейнер бот-сообщения; самый простой способ —
-// отправить «привет» в чат, дождаться появления нового message и
-// выполнить вызовы ниже до завершения стрима.
+// Нужен живой контейнер бот-сообщения; самый простой способ —
+// отправить «привет» в чат и дождаться появления нового message,
+// либо взять последний контейнер.
 const container = document.querySelector(
   '.chat-message-bot:last-of-type .chat-message-content'
 );
 
-// 1) block_start: создаём fallback-streaming-блок
-ChatMessages._handleSSEEvent(
-  { type: 'block_start', data: { type: 'table_advanced', index: 99 } },
+ChatRenderer.renderBlocks(
   container,
-);
-
-// 2) block_delta: дописываем кусок payload'а
-ChatMessages._handleSSEEvent(
-  { type: 'block_delta', data: { index: 99, delta: '{"rows":' } },
-  container,
-);
-ChatMessages._handleSSEEvent(
-  { type: 'block_delta', data: { index: 99, delta: ' [1,2,3]}' } },
-  container,
-);
-
-// 3) block_end: финализируем
-ChatMessages._handleSSEEvent(
-  { type: 'block_end', data: { index: 99 } },
-  container,
+  [
+    { type: 'text', content: 'Текст до неизвестного блока.', block_id: 'qa-t1' },
+    { type: 'table_advanced', block_id: 'qa-unknown-2', payload: { rows: [1, 2, 3] } },
+    { type: 'text', content: 'И ещё текст после.', block_id: 'qa-t2' },
+  ],
+  { execute: false },
 );
 ```
 
 **Ожидание:**
-- В консоли: `ChatMessages: unknown block type table_advanced {...}`.
-- В DOM — блок `.chat-block-unknown` с плашкой
+- В консоли: `ChatRenderer: неизвестный тип блока table_advanced {...}`.
+- В DOM — текстовые блоки `chat-block-text`, а между ними блок
+  `.chat-block-unknown` с плашкой
   `⚠ Блок неизвестного типа: table_advanced. Обновите страницу.`
-- В `<pre>` накапливается delta: `{"rows": [1,2,3]}`.
-
-Проверить, что delta-чанк нестандартной формы (`object` без `text`)
-не валит handler:
-
-```js
-ChatMessages._handleSSEEvent(
-  { type: 'block_start', data: { type: 'widget_x', index: 100 } },
-  container,
-);
-ChatMessages._handleSSEEvent(
-  { type: 'block_delta', data: { index: 100, delta: { foo: 'bar' } } },
-  container,
-);
-```
-
-В `<pre>` должен появиться `[object Object]` — нет, JSON-stringify:
-`{"foo":"bar"}` (хелпер `_createUnknownStreamingBlock.appendText` пытается
-вытащить `.text`, иначе JSON.stringify).
+- В `<pre>` неизвестного блока — pretty-printed JSON всего блока,
+  включая `payload`.
+- Известные text-блоки рендерятся штатно, не уходят в fallback.
 
 ## Сценарий 3 — рендер истории с неизвестным типом
 
@@ -141,9 +119,8 @@ ChatEventBus.emit('context:conversation-switched', {
 ## Регресс — известные типы не сломаны
 
 Отправить обычное сообщение в чат, убедиться, что:
-- text-блоки приходят через `block_start`+`block_delta`+`block_end` и
-  рендерятся в `chat-block-text` (НЕ в `chat-block-unknown`).
-- `file`/`image`/`plan`/`error` приходят через `block_complete` и
-  рендерятся в свои классы.
+- Ответ бота приходит целиком после polling'а и рендерится с эффектом
+  печати; text-блоки попадают в `chat-block-text` (НЕ в `chat-block-unknown`).
+- `file`/`image`/`plan`/`error` рендерятся в свои классы.
 - `buttons` и `client_action` отображаются как раньше.
 - В консоли НЕТ warning'ов про unknown block type.

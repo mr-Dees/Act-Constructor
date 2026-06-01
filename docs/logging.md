@@ -152,8 +152,7 @@ WARNING:     [2026-05-19 14:23:11] [a3f9c1d2] audit_workstation.domains.chat.ser
 
 `request_id` — короткий идентификатор, который сопровождает все логи и
 метрики одного HTTP-запроса. Это единственный надёжный способ связать
-строку из `logs/app.log`, запись в `admin_http_metrics` и (для форвардов
-к внешнему агенту) логи фоновой задачи `agent_bridge_runner`.
+строку из `logs/app.log` с записью в `admin_http_metrics`.
 
 **Где живёт значение.** `request_id_var` — `contextvars.ContextVar[str]`
 с дефолтом `"-"` (`app/core/logging.py`). `asyncio.Task` копирует контекст
@@ -185,14 +184,15 @@ handler гарантированно отрабатывает перед `emit()
 (... request_id) VALUES (...)`. Поэтому SQL-запрос по `admin_http_metrics`
 даёт список `request_id` под фильтром по пути / статусу / латентности.
 
-**Форвард к внешнему агенту.** `AgentBridgeService.send`
-(`app/domains/chat/services/agent_bridge.py`) при создании `agent_request`
-пишет текущий `request_id_var.get()` в `parent_request_id` записи. Когда
-`agent_bridge_runner` стартует фоновую задачу (вне HTTP-контекста), он
-восстанавливает значение из БД и ставит обратно в ContextVar — все логи
-раннера несут тот же `request_id`, что и исходный HTTP-запрос. Это
-единственный нетривиальный кейс пробрасывания id через границу процесса
-(через БД).
+**Форвард к внешнему агенту.** Запрос к базе знаний ОАРБ исполняется не
+синхронно в рамках HTTP-запроса, а через шину `agent_messages`: POST создаёт
+черновик ассистент-сообщения (`chat_messages.status='streaming'`) и кладёт
+вопрос в шину, а фоновая задача `chat.agent_channel_poller`
+(`app/domains/chat/services/agent_channel_poller.py`, `AgentChannelPoller`)
+поллит шину уже вне HTTP-контекста. Логи поллера пишутся под `request_id = "-"`
+(фоновая задача не восстанавливает id исходного запроса). Связать вопрос
+форварда с ответом можно по `chat_messages.agent_ref` (ссылка на uid вопроса
+в шине), а не по `request_id`.
 
 ## 6. Поиск по `request_id`
 
@@ -273,8 +273,10 @@ grep -E '^(ERROR|CRITICAL):' logs/app.log | grep "$(date '+%Y-%m-%d %H')"
 jq -c 'select(.request_id == "a3f9c1d2")' logs/app.log
 ```
 
-Если запрос форвардился на внешнего агента — раннер тоже логирует под этим
-же `request_id` (см. раздел 5, шаг 6).
+Если запрос форвардился на внешнего агента — фоновый поллер
+(`chat.agent_channel_poller`) логирует уже вне HTTP-контекста под
+`request_id = "-"`; связь с исходным вопросом — через
+`chat_messages.agent_ref` → uid в шине `agent_messages` (см. раздел 5).
 
 ### Найти медленные запросы
 
@@ -325,7 +327,8 @@ LIMIT 100;
 - **WARNING** — ожидаемые, но потенциально проблемные события: rate-limit
   превышен, запрос отклонён по размеру, Kerberos-токен протух во время
   запроса, `UniqueViolationError` / `CheckViolationError` из БД, LLM
-  timeout (в agent_loop / stream_loop / agent_bridge), SSE-блок усечён.
+  timeout (в agent_loop / stream_loop), таймаут ответа из шины
+  `agent_messages`, блок ответа усечён по `MAX_BLOCK_TEXT_SIZE`.
 - **ERROR / `logger.exception`** — `logger.exception(...)` пишет traceback
   автоматически. Используется для всех необработанных исключений в
   request-обработчике, откатов lifespan-hooks и доменов, ошибок
