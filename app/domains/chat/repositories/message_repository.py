@@ -289,3 +289,17 @@ class MessageRepository(BaseRepository):
             f"SELECT * FROM {self.table} WHERE status = 'streaming' AND agent_ref IS NOT NULL"
         )
         return [self._parse_row(r) for r in rows]
+
+    async def has_streaming_message(self, conversation_id: str) -> bool:
+        """True, если в беседе есть сообщение со status='streaming'.
+
+        Используется ConversationService.delete для защиты от удаления беседы,
+        пока фоновый поллер ещё дозаполняет ответ ассистента (BUG #15). Запрос
+        опирается на составной индекс (conversation_id, status).
+        """
+        val = await self.conn.fetchval(
+            f"SELECT 1 FROM {self.table} "
+            f"WHERE conversation_id = $1 AND status = 'streaming' LIMIT 1",
+            conversation_id,
+        )
+        return val is not None

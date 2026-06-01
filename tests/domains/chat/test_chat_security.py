@@ -122,7 +122,11 @@ class TestConversationAccessControl:
         """Удаление чужой беседы — repo фильтрует по user_id."""
         conv_repo.delete.return_value = False  # ничего не удалено
 
-        result = await conv_service.delete("conv-1", "wrong_user")
+        with patch(
+            "app.domains.chat.repositories.message_repository.MessageRepository",
+        ) as MockRepo:
+            MockRepo.return_value.has_streaming_message = AsyncMock(return_value=False)
+            result = await conv_service.delete("conv-1", "wrong_user")
         assert result is False
 
     async def test_update_title_wrong_user(self, conv_service, conv_repo):

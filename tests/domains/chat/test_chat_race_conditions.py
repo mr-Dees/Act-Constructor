@@ -4,7 +4,7 @@
 удаление во время стриминга.
 
 Критические секции защищены per-user asyncio.Lock в сервисах, delete
-блокируется при активном SSE-стриме (ConversationLockedError, 409).
+блокируется при наличии streaming-сообщения в беседе (ConversationLockedError, 409).
 Дедупликация бесед по title в сервисе намеренно отсутствует — title
 это пользовательский текст, защита от случайных дублей при
 конкурентных ensureConversation лежит на фронте.
@@ -369,19 +369,19 @@ class TestNoTitleDedup:
 
 
 class TestConversationSwitchDuringStreaming:
-    """ConversationService.delete проверяет is_user_streaming(user_id) —
-    при активном SSE-стриме бросает ConversationLockedError (409),
+    """ConversationService.delete проверяет has_streaming_message(conversation_id) —
+    при наличии streaming-сообщения в беседе бросает ConversationLockedError (409),
     иначе delete отрабатывает штатно.
     """
 
     async def test_delete_blocked_during_active_stream(
         self, conv_service, conv_repo,
     ):
-        """Удаление невозможно при активном SSE-стриме пользователя."""
+        """Удаление невозможно, пока в беседе есть streaming-сообщение."""
         with patch(
-            "app.domains.chat.api.messages.is_user_streaming",
-            return_value=True,
-        ):
+            "app.domains.chat.repositories.message_repository.MessageRepository",
+        ) as MockRepo:
+            MockRepo.return_value.has_streaming_message = AsyncMock(return_value=True)
             with pytest.raises(ConversationLockedError):
                 await conv_service.delete("conv-1", "user1")
 
@@ -391,12 +391,12 @@ class TestConversationSwitchDuringStreaming:
     async def test_delete_allowed_without_active_stream(
         self, conv_service, conv_repo,
     ):
-        """Без активного стрима delete отрабатывает штатно."""
+        """Без streaming-сообщения в беседе delete отрабатывает штатно."""
         conv_repo.delete.return_value = True
         with patch(
-            "app.domains.chat.api.messages.is_user_streaming",
-            return_value=False,
-        ):
+            "app.domains.chat.repositories.message_repository.MessageRepository",
+        ) as MockRepo:
+            MockRepo.return_value.has_streaming_message = AsyncMock(return_value=False)
             result = await conv_service.delete("conv-1", "user1")
         assert result is True
 

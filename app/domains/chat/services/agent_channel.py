@@ -200,6 +200,9 @@ class AgentChannelService:
         Вызывающий может сразу передать его поллеру без дополнительного SELECT;
         draft в chat_messages хранит тот же uid в поле ``agent_ref``.
         """
+        # Мягкий лимит: count-then-insert не атомарен, два конкурентных запроса
+        # могут оба пройти проверку на границе. Это защита от злоупотребления,
+        # а не строгий инвариант — небольшое превышение допустимо.
         limit = self._settings.max_parallel_streams_per_user
         active = await self._agent_repo().count_active_for_user(user_id)
         if active >= limit:

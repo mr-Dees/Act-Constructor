@@ -137,37 +137,6 @@ export const ChatStream = {
     },
 
     /**
-     * Отправляет сообщение и получает полный JSON-ответ (без polling).
-     * Используется там, где ожидание готовности ответа не нужно.
-     *
-     * @param {string} conversationId
-     * @param {string} message
-     * @param {File[]} files
-     * @param {Object} options
-     * @param {string[]|null} [options.domains]
-     * @returns {Promise<Object>}
-     */
-    async sendJson(conversationId, message, files = [], options = {}) {
-        const { domains } = options;
-
-        const formData = this._buildFormData(message, files, domains);
-        const url = this._buildUrl(conversationId);
-        const headers = this._buildHeaders('application/json');
-
-        const response = await fetch(url, {
-            method: 'POST',
-            headers,
-            body: formData,
-        });
-
-        if (!response.ok) {
-            throw new Error(`HTTP ${response.status}: ${response.statusText}`);
-        }
-
-        return await response.json();
-    },
-
-    /**
      * Формирует FormData для отправки сообщения.
      *
      * @param {string} message
@@ -192,33 +161,13 @@ export const ChatStream = {
     },
 
     /**
-     * Формирует URL эндпоинта сообщений беседы.
+     * Формирует заголовки запроса (только auth, если пользователь известен).
      *
-     * @param {string} conversationId
-     * @returns {string}
-     * @private
-     */
-    _buildUrl(conversationId) {
-        // Голый путь под JupyterHub-proxy уходит на /hub/... → 404,
-        // поэтому только через AppConfig.api.getUrl, без fallback'а.
-        if (typeof AppConfig === 'undefined') {
-            throw new Error('AppConfig недоступен');
-        }
-        return AppConfig.api.getUrl(AppConfig.chatEndpoints.messages(conversationId));
-    },
-
-    /**
-     * Формирует заголовки запроса.
-     * Параметр accept больше не используется (POST возвращает JSON),
-     * но сохранён для совместимости с sendJson.
-     *
-     * @param {string} [accept]
      * @returns {Object}
      * @private
      */
-    _buildHeaders(accept) {
+    _buildHeaders() {
         const headers = {};
-        if (accept) headers['Accept'] = accept;
 
         if (typeof AuthManager !== 'undefined' && AuthManager.getCurrentUser()) {
             Object.assign(headers, AuthManager.getAuthHeaders());

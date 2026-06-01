@@ -99,10 +99,15 @@ class AgentMessageRepository(BaseRepository):
         )
 
     async def count_active_for_user(self, user_id: str) -> int:
-        """Считает активные (pending / in_progress) запросы пользователя в bus-таблице."""
+        """Считает активные (pending / in_progress) вопросы пользователя в bus-таблице.
+
+        Фильтр role='user' оставляет в счёте только строки-вопросы от AW: ответы
+        агента (role='assistant') не должны влиять на лимит параллельных запросов.
+        """
         val = await self.conn.fetchval(
             f"SELECT COUNT(*) FROM {self.table} "
-            f"WHERE user_id = $1 AND status IN ('pending', 'in_progress')",
+            f"WHERE user_id = $1 AND role = 'user' "
+            f"AND status IN ('pending', 'in_progress')",
             user_id,
         )
         return int(val or 0)

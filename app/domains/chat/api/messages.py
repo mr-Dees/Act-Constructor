@@ -29,24 +29,6 @@ from app.domains.chat.services.message_service import MessageService
 
 logger = logging.getLogger("audit_workstation.domains.chat.api.messages")
 
-# Per-user счётчик активных SSE-стримов. Больше не инкрементируется
-# (SSE-путь удалён в B1), но дикт и is_user_streaming оставлены, чтобы
-# не ломать импорты других модулей, которые обращаются к ним.
-# CONCERN: is_user_streaming всегда возвращает False — если где-то снаружи
-# ожидалась защита «не удалять беседу пока идёт стрим», её нужно заменить
-# на другую проверку (например, по наличию streaming-сообщений в БД).
-_active_streams_per_user: dict[str, int] = {}
-
-
-def is_user_streaming(user_id: str) -> bool:
-    """Возвращает True, если у пользователя есть хотя бы один активный SSE-стрим.
-
-    После удаления SSE-пути (B1) всегда возвращает False — дикт не обновляется.
-    Сохранён для обратной совместимости импортов.
-    """
-    return _active_streams_per_user.get(user_id, 0) > 0
-
-
 # Защита роли крепится явно на роутер (defense in depth) — см. конфигурацию
 # в conversations.py.
 router = APIRouter(dependencies=[Depends(require_domain_access("chat"))])
@@ -188,7 +170,9 @@ async def send_message(
         return JSONResponse({"message_id": assistant_message_id})
 
     # Режим «Выключен» или «Адаптивный» (off / adaptive / любое другое):
-    # оркестратор работает синхронно; adaptive ≡ off до Phase 2.
+    # оркестратор работает синхронно. В adaptive forward-тул доступен LLM —
+    # при его вызове agent_loop форвардит вопрос в bus-канал agent_messages
+    # (см. _handle_forward_terminal), draft дозаполняет поллер.
     from app.domains.chat.services.orchestrator import Orchestrator
 
     orchestrator = Orchestrator(

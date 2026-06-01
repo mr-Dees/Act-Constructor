@@ -136,16 +136,15 @@ class ConversationService:
     async def delete(self, conversation_id: str, user_id: str) -> bool:
         """Удаляет беседу.
 
-        Бросает ConversationLockedError, если у пользователя идёт
-        генерация ответа — иначе фоновая задача продолжит писать сообщения
-        в уже удалённую беседу (BUG #15). Импорт is_user_streaming сделан
-        внутри функции, чтобы избежать циклов и позволить патчить в тестах.
+        Бросает ConversationLockedError, если в беседе есть сообщение в статусе
+        'streaming' — иначе фоновый поллер продолжит дозаполнять ответ в уже
+        удалённую беседу (BUG #15). Импорт MessageRepository сделан внутри
+        функции, чтобы избежать цикла импортов.
         """
-        # Ленивая загрузка — api.messages импортирует наш модуль (через deps),
-        # потому module-level import создал бы цикл.
-        from app.domains.chat.api.messages import is_user_streaming
+        from app.domains.chat.repositories.message_repository import MessageRepository
 
-        if is_user_streaming(user_id):
+        msg_repo = MessageRepository(self.conv_repo.conn)
+        if await msg_repo.has_streaming_message(conversation_id):
             raise ConversationLockedError(
                 "Невозможно удалить беседу: идёт генерация ответа ассистента. "
                 "Дождитесь окончания и повторите."

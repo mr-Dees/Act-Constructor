@@ -218,7 +218,7 @@ async def test_set_status_executes_update(mock_conn):
 
 
 async def test_count_active_for_user_returns_count(mock_conn):
-    """count_active_for_user делает SELECT COUNT по user_id и статусам pending/in_progress."""
+    """count_active_for_user делает SELECT COUNT по user_id, role='user' и статусам pending/in_progress."""
     mock_conn.fetchval.return_value = 2
     repo = AgentMessageRepository(mock_conn)
     result = await repo.count_active_for_user("user1")
@@ -227,6 +227,7 @@ async def test_count_active_for_user_returns_count(mock_conn):
     assert "SELECT COUNT(*)" in sql
     assert "agent_messages" in sql
     assert "user_id = $1" in sql
+    assert "role = 'user'" in sql
     assert "'pending'" in sql
     assert "'in_progress'" in sql
     assert user_id == "user1"

@@ -165,6 +165,13 @@ class AgentChannelPoller:
 
         Защищает от потери подписок после рестарта uvicorn: все 'streaming'
         сообщения с непустым agent_ref снова попадают в реестр.
+
+        Таймаут восстановленной подписки отсчитывается заново от момента
+        reconcile (subscribe ставит started=now()): монотонные часы не
+        переживают рестарт, а wall-clock created_at draft'а к ним не привести.
+        Уже отвеченные за время простоя draft'ы финализируются на первом же
+        тике (try_finalize видит reply_to), так что лишнее ожидание касается
+        только реально зависших запросов.
         """
         from app.domains.chat.repositories.message_repository import MessageRepository
 
