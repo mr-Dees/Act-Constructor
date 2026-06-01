@@ -212,3 +212,30 @@ async def test_set_status_executes_update(mock_conn):
     assert "WHERE conversation_id = $2" in sql
     assert status == "in_progress"
     assert conv_id == "conv-1"
+
+
+# ── count_active_for_user ────────────────────────────────────────────────
+
+
+async def test_count_active_for_user_returns_count(mock_conn):
+    """count_active_for_user делает SELECT COUNT по user_id и статусам pending/in_progress."""
+    mock_conn.fetchval.return_value = 2
+    repo = AgentMessageRepository(mock_conn)
+    result = await repo.count_active_for_user("user1")
+
+    sql, user_id = mock_conn.fetchval.call_args.args
+    assert "SELECT COUNT(*)" in sql
+    assert "agent_messages" in sql
+    assert "user_id = $1" in sql
+    assert "'pending'" in sql
+    assert "'in_progress'" in sql
+    assert user_id == "user1"
+    assert result == 2
+
+
+async def test_count_active_for_user_returns_zero_on_none(mock_conn):
+    """count_active_for_user возвращает 0 если fetchval вернул None."""
+    mock_conn.fetchval.return_value = None
+    repo = AgentMessageRepository(mock_conn)
+    result = await repo.count_active_for_user("user-empty")
+    assert result == 0

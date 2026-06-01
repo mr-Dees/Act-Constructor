@@ -97,3 +97,12 @@ class AgentMessageRepository(BaseRepository):
             status,
             conversation_id,
         )
+
+    async def count_active_for_user(self, user_id: str) -> int:
+        """Считает активные (pending / in_progress) запросы пользователя в bus-таблице."""
+        val = await self.conn.fetchval(
+            f"SELECT COUNT(*) FROM {self.table} "
+            f"WHERE user_id = $1 AND status IN ('pending', 'in_progress')",
+            user_id,
+        )
+        return int(val or 0)

@@ -12,8 +12,10 @@ import uuid
 
 import asyncpg
 
+from app.domains.chat.exceptions import ChatLimitError
 from app.domains.chat.repositories.agent_message_repository import AgentMessageRepository
 from app.domains.chat.repositories.message_repository import MessageRepository
+from app.domains.chat.services.button_translator import translate_buttons
 from app.domains.chat.settings import ChatDomainSettings
 
 logger = logging.getLogger("audit_workstation.domains.chat.service.agent_channel")
@@ -198,6 +200,14 @@ class AgentChannelService:
         Вызывающий может сразу передать его поллеру без дополнительного SELECT;
         draft в chat_messages хранит тот же uid в поле ``agent_ref``.
         """
+        limit = self._settings.max_parallel_streams_per_user
+        active = await self._agent_repo().count_active_for_user(user_id)
+        if active >= limit:
+            raise ChatLimitError(
+                f"Достигнут лимит одновременных запросов к агенту ({limit}). "
+                "Дождитесь ответа на предыдущие."
+            )
+
         question_uid = str(uuid.uuid4())
         question_id = str(uuid.uuid4())
 
@@ -290,6 +300,10 @@ class AgentChannelService:
                 error_block=error_block,
             )
             return "done"
+
+        # Транслируем кнопки (acts.open_act_page → open_url) перед маппингом в блоки.
+        if answer.get("buttons"):
+            answer["buttons"] = await translate_buttons(answer["buttons"])
 
         blocks = map_answer_to_blocks(
             answer,

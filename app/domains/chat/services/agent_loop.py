@@ -20,7 +20,7 @@ import logging
 from typing import TYPE_CHECKING, Any
 
 from app.core.chat.names import TOOL_FORWARD_TO_KNOWLEDGE_AGENT
-from app.domains.chat.exceptions import ChatToolValidationError
+from app.domains.chat.exceptions import ChatLimitError, ChatToolValidationError
 from app.domains.chat.services.orchestrator_helpers import (
     TOOL_VALIDATION_NEUTRAL_MESSAGE,
     ToolValidationTracker,
@@ -59,16 +59,40 @@ async def _handle_forward_terminal(
     from app.domains.chat.deps import get_agent_channel_poller
     from app.domains.chat.services.agent_channel import AgentChannelService
 
-    async with get_db() as conn:
-        channel = AgentChannelService(conn, orch.settings)
-        question_uid = await channel.submit(
-            conversation_id=conversation_id,
-            user_id=user_id or "",
-            assistant_message_id=message_id,
-            text=question,
-            mode="adaptive",
-            media=file_blocks or None,
+    try:
+        async with get_db() as conn:
+            channel = AgentChannelService(conn, orch.settings)
+            question_uid = await channel.submit(
+                conversation_id=conversation_id,
+                user_id=user_id or "",
+                assistant_message_id=message_id,
+                text=question,
+                mode="adaptive",
+                media=file_blocks or None,
+            )
+    except ChatLimitError as exc:
+        logger.warning(
+            "agent_channel: лимит параллельных запросов для user=%s, message_id=%s: %s",
+            user_id,
+            message_id,
+            exc.message,
         )
+        await orch._save_assistant_message(
+            conversation_id=conversation_id,
+            content_blocks=[{
+                "type": "error",
+                "message": exc.message,
+                "code": "agent_limit",
+            }],
+            token_usage=None,
+            message_id=message_id,
+        )
+        return {
+            "response": exc.message,
+            "sources": list(dict.fromkeys(sources)),
+            "model": orch.settings.model,
+            "token_usage": token_usage,
+        }
 
     poller = get_agent_channel_poller()
     if poller is not None:

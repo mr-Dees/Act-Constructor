@@ -7,6 +7,7 @@ AgentChannelService.submit, AgentChannelService.try_finalize.
 import pytest
 from unittest.mock import AsyncMock, MagicMock, patch
 
+from app.domains.chat.exceptions import ChatLimitError
 from app.domains.chat.services.agent_channel import (
     AgentChannelService,
     build_timeout_error_block,
@@ -236,6 +237,7 @@ class TestAgentChannelServiceSubmit:
         """submit вызывает insert_question с pending-семантикой и create_streaming с agent_ref."""
         fake_agent_repo = AsyncMock()
         fake_agent_repo.insert_question = AsyncMock(return_value={"id": "q-1"})
+        fake_agent_repo.count_active_for_user = AsyncMock(return_value=0)
 
         fake_msg_repo = AsyncMock()
         fake_msg_repo.create_streaming = AsyncMock(return_value={"id": "msg-1", "status": "streaming"})
@@ -276,6 +278,7 @@ class TestAgentChannelServiceSubmit:
         """submit возвращает question_uid (строку UUID)."""
         fake_agent_repo = AsyncMock()
         fake_agent_repo.insert_question = AsyncMock(return_value={"id": "q-1"})
+        fake_agent_repo.count_active_for_user = AsyncMock(return_value=0)
         fake_msg_repo = AsyncMock()
         fake_msg_repo.create_streaming = AsyncMock(return_value={"id": "m-1"})
 
@@ -422,3 +425,166 @@ class TestAgentChannelServiceTryFinalize:
         assert call_kwargs["error_block"]["code"] == "agent_error"
         # finalize НЕ вызывался
         fake_msg_repo.finalize.assert_not_called()
+
+    async def test_try_finalize_calls_translate_buttons_when_answer_has_buttons(
+        self, mock_conn, settings
+    ):
+        """try_finalize вызывает translate_buttons для ответа с кнопками."""
+        question = {
+            "id": "q-3",
+            "conversation_id": "q-uid",
+            "status": "complete",
+            "reply_to": "a-uid",
+        }
+        answer = {
+            "id": "a-3",
+            "conversation_id": "a-uid",
+            "role": "assistant",
+            "content": "Нашёл",
+            "metadata": {},
+            "buttons": [{"action_id": "acts.open_act_page", "label": "Открыть", "params": {"km_number": "КМ-23-001"}}],
+            "media": None,
+            "status": "complete",
+        }
+
+        fake_agent_repo = AsyncMock()
+        fake_agent_repo.get_by_uid = AsyncMock(side_effect=lambda uid: {
+            "q-uid": question,
+            "a-uid": answer,
+        }.get(uid))
+
+        fake_msg_repo = AsyncMock()
+        fake_msg_repo.finalize = AsyncMock(return_value=True)
+
+        svc = AgentChannelService(mock_conn, settings)
+        svc._agent_repo = lambda: fake_agent_repo
+        svc._message_repo = lambda: fake_msg_repo
+
+        original_buttons = answer["buttons"].copy()
+        translated = [{"action_id": "open_url", "label": "Открыть", "params": {"url": "/constructor?act_id=1"}}]
+        with patch(
+            "app.domains.chat.services.agent_channel.translate_buttons",
+            new=AsyncMock(return_value=translated),
+        ) as mock_translate:
+            result = await svc.try_finalize(
+                assistant_message_id="msg-3",
+                question_uid="q-uid",
+            )
+
+        assert result == "done"
+        mock_translate.assert_called_once_with(original_buttons)
+        # Финальные блоки содержат кнопки с action_id="open_url"
+        call_kwargs = fake_msg_repo.finalize.call_args.kwargs
+        btn_blocks = [b for b in call_kwargs["final_blocks"] if b["type"] == "buttons"]
+        assert len(btn_blocks) == 1
+        assert btn_blocks[0]["buttons"][0]["action_id"] == "open_url"
+
+    async def test_try_finalize_skips_translate_buttons_when_no_buttons(
+        self, mock_conn, settings
+    ):
+        """try_finalize НЕ вызывает translate_buttons если кнопок нет."""
+        question = {
+            "id": "q-4",
+            "conversation_id": "q-uid",
+            "status": "complete",
+            "reply_to": "a-uid",
+        }
+        answer = {
+            "id": "a-4",
+            "conversation_id": "a-uid",
+            "role": "assistant",
+            "content": "Ответ без кнопок",
+            "metadata": {},
+            "buttons": None,
+            "media": None,
+            "status": "complete",
+        }
+
+        fake_agent_repo = AsyncMock()
+        fake_agent_repo.get_by_uid = AsyncMock(side_effect=lambda uid: {
+            "q-uid": question,
+            "a-uid": answer,
+        }.get(uid))
+
+        fake_msg_repo = AsyncMock()
+        fake_msg_repo.finalize = AsyncMock(return_value=True)
+
+        svc = AgentChannelService(mock_conn, settings)
+        svc._agent_repo = lambda: fake_agent_repo
+        svc._message_repo = lambda: fake_msg_repo
+
+        with patch(
+            "app.domains.chat.services.agent_channel.translate_buttons",
+            new=AsyncMock(),
+        ) as mock_translate:
+            await svc.try_finalize(
+                assistant_message_id="msg-4",
+                question_uid="q-uid",
+            )
+
+        mock_translate.assert_not_called()
+
+
+# ── AgentChannelService.submit — лимит ───────────────────────────────────────
+
+
+class TestAgentChannelServiceSubmitLimit:
+
+    async def test_submit_raises_chat_limit_error_when_active_at_limit(
+        self, mock_conn, settings
+    ):
+        """submit кидает ChatLimitError если active >= max_parallel_streams_per_user."""
+        fake_agent_repo = AsyncMock()
+        fake_agent_repo.count_active_for_user = AsyncMock(
+            return_value=settings.max_parallel_streams_per_user
+        )
+        fake_agent_repo.insert_question = AsyncMock()
+        fake_msg_repo = AsyncMock()
+        fake_msg_repo.create_streaming = AsyncMock()
+
+        svc = AgentChannelService(mock_conn, settings)
+        svc._agent_repo = lambda: fake_agent_repo
+        svc._message_repo = lambda: fake_msg_repo
+
+        with pytest.raises(ChatLimitError) as exc_info:
+            await svc.submit(
+                conversation_id="conv-1",
+                user_id="user1",
+                assistant_message_id="msg-1",
+                text="Вопрос",
+                mode="always",
+            )
+
+        assert "лимит" in str(exc_info.value).lower()
+        # insert_question НЕ вызывался
+        fake_agent_repo.insert_question.assert_not_called()
+        fake_msg_repo.create_streaming.assert_not_called()
+
+    async def test_submit_proceeds_when_active_below_limit(
+        self, mock_conn, settings
+    ):
+        """submit работает как раньше если active < max_parallel_streams_per_user."""
+        fake_agent_repo = AsyncMock()
+        fake_agent_repo.count_active_for_user = AsyncMock(
+            return_value=settings.max_parallel_streams_per_user - 1
+        )
+        fake_agent_repo.insert_question = AsyncMock(return_value={"id": "q-1"})
+        fake_msg_repo = AsyncMock()
+        fake_msg_repo.create_streaming = AsyncMock(return_value={"id": "m-1"})
+
+        svc = AgentChannelService(mock_conn, settings)
+        svc._agent_repo = lambda: fake_agent_repo
+        svc._message_repo = lambda: fake_msg_repo
+
+        result = await svc.submit(
+            conversation_id="conv-1",
+            user_id="user1",
+            assistant_message_id="msg-1",
+            text="Вопрос",
+            mode="always",
+        )
+
+        import uuid
+        uuid.UUID(result)  # корректный UUID
+        fake_agent_repo.insert_question.assert_called_once()
+        fake_msg_repo.create_streaming.assert_called_once()
