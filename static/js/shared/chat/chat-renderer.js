@@ -81,6 +81,119 @@ export const ChatRenderer = {
     },
 
     /**
+     * Последовательно проявляет блоки с декоративным эффектом печати.
+     *
+     * Для блоков text/reasoning — посимвольная анимация через createStreamingBlock.
+     * Для остальных типов (code, file, image, plan, buttons, client_action, error) —
+     * мгновенный рендер через renderBlock.
+     *
+     * При (prefers-reduced-motion: reduce) или отсутствии блоков — рендерит мгновенно.
+     *
+     * @param {HTMLElement} container — контейнер бот-сообщения
+     * @param {Array<Object>} blocks — массив блоков из {content}
+     * @param {Object} [options]
+     * @param {number} [options.speed=8] — символов за кадр (16 мс)
+     * @param {AbortSignal} [options.signal] — сигнал досрочного завершения
+     */
+    typeOutBlocks(container, blocks, options = {}) {
+        const { speed = 8, signal } = options;
+
+        if (!Array.isArray(blocks) || blocks.length === 0) return;
+
+        // Respect prefers-reduced-motion
+        if (window.matchMedia && matchMedia('(prefers-reduced-motion: reduce)').matches) {
+            this.renderBlocks(container, blocks, { execute: true });
+            return;
+        }
+
+        // Запускаем асинхронную очередь
+        this._typeOutQueue(container, blocks, speed, signal);
+    },
+
+    /**
+     * Асинхронная очередь анимации блоков.
+     * @private
+     */
+    async _typeOutQueue(container, blocks, speed, signal) {
+        for (const block of blocks) {
+            if (signal && signal.aborted) {
+                // Дорисовываем оставшиеся блоки мгновенно
+                const idx = blocks.indexOf(block);
+                const remaining = blocks.slice(idx);
+                this.renderBlocks(container, remaining, { execute: true });
+                return;
+            }
+
+            const type = block && block.type;
+
+            if (type === 'text' || type === 'reasoning') {
+                const text = block.content || '';
+                if (!text) {
+                    // Пустой блок — рендерим мгновенно
+                    const el = this.renderBlock(block, { execute: false });
+                    if (el) this.appendBlock(container, el);
+                    continue;
+                }
+
+                const sb = this.createStreamingBlock(
+                    type,
+                    typeof block.block_id === 'string' ? block.block_id : undefined,
+                );
+                this.appendBlock(container, sb.element);
+
+                // Посимвольная анимация
+                await this._animateText(sb, text, speed, signal);
+                sb.finalize();
+
+                if (signal && signal.aborted) {
+                    // Дорисовываем остаток
+                    const idx = blocks.indexOf(block);
+                    const remaining = blocks.slice(idx + 1);
+                    this.renderBlocks(container, remaining, { execute: true });
+                    return;
+                }
+            } else {
+                // Нестримуемые блоки — мгновенно
+                const el = this.renderBlock(block, { execute: true });
+                if (el) this.appendBlock(container, el);
+            }
+
+        }
+    },
+
+    /**
+     * Анимирует текст по speed символов каждые 16 мс.
+     * Возвращает Promise, который резолвится по завершении или при abort.
+     * @private
+     */
+    _animateText(sb, text, speed, signal) {
+        return new Promise((resolve) => {
+            let pos = 0;
+
+            const step = () => {
+                if (signal && signal.aborted) {
+                    sb.appendText(text.slice(pos));
+                    resolve();
+                    return;
+                }
+
+                if (pos >= text.length) {
+                    resolve();
+                    return;
+                }
+
+                const chunk = text.slice(pos, pos + speed);
+                sb.appendText(chunk);
+                pos += speed;
+
+                requestAnimationFrame(step);
+            };
+
+            requestAnimationFrame(step);
+        });
+    },
+
+    /**
      * Рендерит массив блоков в DOM-контейнер
      *
      * @param {HTMLElement} container — контейнер для отрисовки
