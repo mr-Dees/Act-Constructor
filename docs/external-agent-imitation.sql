@@ -1,381 +1,210 @@
 -- ============================================================================
 --  external-agent-imitation.sql
---  Хелпер-сниппеты для ручной имитации внешнего ИИ-агента в AuditWorkstation
---  (используется при разработке/тестировании моста запросов/событий/ответов)
+--  Хелпер-сниппеты для ручной имитации внешнего ИИ-агента (nanobot) в AuditWorkstation
+--  (используется при разработке/тестировании канала agent_messages)
 --
 --  Место: docs/external-agent-imitation.sql (НЕ часть продакшен-кода)
 --  Целевая БД: PostgreSQL (dev) и Greenplum (prod) — все запросы GP-совместимы
---  Связанная документация: docs/developer-guide.md §7.8 (Мост к внешнему агенту)
+--  Связанная документация: docs/developer-guide.md (Chat domain deep-dive §11)
 --
 --  ВАЖНО — имена таблиц:
 --    Все таблицы приложения используют общий префикс `t_db_oarb_audit_act_`,
 --    задаваемый через env-переменную `DATABASE__TABLE_PREFIX`. Префикс одинаков
 --    для PG и GP. В сниппетах ниже имена указаны в полном виде, как они
 --    выглядят в базе при дефолтном префиксе:
---      • t_db_oarb_audit_act_agent_requests
---      • t_db_oarb_audit_act_agent_response_events
---      • t_db_oarb_audit_act_agent_responses
+--      • t_db_oarb_audit_act_agent_messages
 --      • t_db_oarb_audit_act_chat_files
---      • t_db_oarb_audit_act_agent_response_events_id_seq  (sequence)
 --    Если в .env задан другой префикс — замени глобально.
 --    На GP к имени дополнительно прибавляется схема: `{SCHEMA}.<table>`.
 --
---  ВАЖНО — различие форматов:
---    • Поле `payload` в `agent_response_events` (тип `reasoning`/`status`/`error`/`final`)
---      использует поля свободной формы: `text`, `is_chunk`, `stage`, `code`, `message`.
---      Эти события стримятся фронту как промежуточные delta/heartbeat.
---    • Поле `blocks` в `agent_responses` — это массив pydantic-моделей из
---      `app/core/chat/blocks.py`. Каноническое поле для `text`/`code`/`reasoning`
---      блоков — `content` (НЕ `text`/`code`).
+--  ВАЖНО — семантика колонок agent_messages:
+--    • chat_id         = uid треда (= chat_conversations.id, он же chat_messages.conversation_id)
+--    • conversation_id = uid одного СООБЩЕНИЯ (уникальный строковый идентификатор
+--                        данной строки в рамках диалога)
+--    • reply_to        = conversation_id строки-ОТВЕТА; проставляется агентом
+--                        на строке-вопросе — это сигнал «ответ готов»
+--    • role            = 'user' (вопрос от AW) | 'assistant' (ответ агента) | 'tool'
+--    • metadata        = JSONB: у вопроса ключи {mode, kb}; у ответа ключ
+--                        {thinking} — все рассуждения агента
+--    • buttons         = JSONB: массив [{action_id, label, params}]
+--    • media           = JSONB: [{file_id, filename, mime_type, file_size}]
 --
---  ВАЖНО — событие `final`:
---    После INSERT в `agent_responses` ОБЯЗАТЕЛЬНО вставить событие
---    `event_type='final'` в `agent_response_events` той же транзакцией
---    (см. сценарий 1 ниже). Это push-сигнал для фонового раннера
---    Act Constructor — он мгновенно подхватывает финальный ответ и
---    финализирует ассистент-сообщение (UPDATE status='complete'), не
---    дожидаясь срабатывания fallback-таймера. Без `final`-события раннер
---    всё равно завершит сообщение (через периодический poll раз в
---    poll_min_interval_sec), но с задержкой до ~event_timeout. payload
---    может быть пустым `{}`.
+--  ВАЖНО — поток данных:
+--    1. AW INSERT'ит строку-вопрос (role='user', status='pending').
+--    2. Агент UPDATE SET status='in_progress' на строке-вопросе.
+--    3. Агент INSERT'ит строку-ответа (role='assistant', новый conversation_id,
+--       content, metadata.thinking, опц. buttons/media, status='complete').
+--    4. Агент UPDATE строки-вопроса: SET reply_to=<uid ответа>, status='complete'.
+--    5. AW поллит reply_to строки-вопроса (или status='complete'/'error'/'timeout')
+--       и рисует ответ + рассуждения.
+--    Таймаут 10 минут — AW сам ставит 'timeout'/'error' на зависших строках.
+--    Шаги 2 и 3+4 можно объединить в одну транзакцию.
 --
---  ВАЖНО — реактивное наполнение chat_messages.content:
---    После рефактора Phase 1 «D» раннер не накапливает блоки в памяти, а
---    инкрементально дописывает каждое reasoning-событие в
---    `chat_messages.content` (status='streaming') через
---    `MessageRepository.append_block`. Поэтому уже после INSERT'ов 1.2/1.3
---    содержимое будущего ассистент-сообщения видно через
---    `GET /api/v1/chat/conversations/{id}/messages` — фронт может
---    переключиться на другой чат и вернуться, не теряя накопленные
---    рассуждения. После шага 1.4 раннер делает `finalize_assistant_message`:
---    мержит финальные блоки агента с уже накопленными (дедуп по `block_id`)
---    и переводит сообщение в status='complete'.
+--  ВАЖНО — GP-ограничения (Greenplum 6.x = PostgreSQL 9.4):
+--    БЕЗ ON CONFLICT DO UPDATE, БЕЗ gen_random_uuid(), БЕЗ jsonb_set,
+--    БЕЗ CREATE INDEX IF NOT EXISTS. UUID генерируем через
+--    md5(random()::text || clock_timestamp()::text).
 -- ============================================================================
 
 
 -- ────────────────────────────────────────────────────────────────────────────
--- 0. ПОДГОТОВКА: посмотреть свежие запросы от AW
+-- 0. ПОДГОТОВКА: посмотреть свежие вопросы от AW (ещё не обработаны)
 -- ────────────────────────────────────────────────────────────────────────────
 
--- Что AW уже отправила, но ещё не обработано.
---
--- СТАДИИ status в agent_requests:
---   pending     — INSERT от AW, фоновый раннер ещё не подхватил (~миллисекунды,
---                 почти не наблюдается на dev).
---   dispatched  — раннер запустил polling, ждёт первого события от внешнего
---                 агента. Эта стадия видна пока ты ещё не вставил INSERT в
---                 agent_response_events.
---   in_progress — пришло первое событие от агента (raw reasoning или status).
---                 Здесь видно «агент пишет».
---   done        — финальный ответ сохранён, ассистент-сообщение записано.
---   error       — раннер или агент сообщили об ошибке (error_message заполнен).
---   timeout     — сработал один из трёх гейтов wait_for_completion.
---
--- Для наблюдения «всё, что в работе» выбирай pending/dispatched/in_progress.
-SELECT id, conversation_id, message_id, user_id, domain_name,
-       last_user_message, status, started_at, created_at
-FROM t_db_oarb_audit_act_agent_requests
-WHERE status IN ('pending', 'dispatched', 'in_progress')
+-- Активные вопросы, ждущие ответа от агента:
+SELECT id, chat_id, user_id, conversation_id,
+       content, metadata, status, created_at
+FROM t_db_oarb_audit_act_agent_messages
+WHERE role = 'user'
+  AND status = 'pending'
 ORDER BY created_at DESC
 LIMIT 20;
 
--- Полный payload одного запроса (история, файлы, knowledge_bases):
-SELECT id, knowledge_bases, history, files, last_user_message
-FROM t_db_oarb_audit_act_agent_requests
-WHERE id = '<request_id>';
+-- СТАДИИ status на строке-вопросе:
+--   pending     — вопрос вставлен AW, агент ещё не взял.
+--   in_progress — агент взял (UPDATE после SELECT FOR UPDATE или просто UPDATE).
+--   complete    — агент проставил reply_to и закончил ответ.
+--   error       — агент зафиксировал ошибку.
+--   timeout     — AW сам закрыл по таймауту (10 мин без ответа).
+--
+-- Для наблюдения «всё, что в работе»:
+SELECT id, chat_id, conversation_id, content, status, created_at
+FROM t_db_oarb_audit_act_agent_messages
+WHERE role = 'user'
+  AND status IN ('pending', 'in_progress')
+ORDER BY created_at DESC
+LIMIT 20;
+
+-- Полная строка одного вопроса (metadata содержит mode и kb):
+SELECT id, chat_id, user_id, conversation_id, content, metadata, status, created_at
+FROM t_db_oarb_audit_act_agent_messages
+WHERE id = '<question_id>';
 
 
 -- ────────────────────────────────────────────────────────────────────────────
 -- 1. СЦЕНАРИЙ "успешный ответ агента" (нормальный поток)
 -- ────────────────────────────────────────────────────────────────────────────
 
--- Шаг 1.1 — НЕ нужен при ручной имитации.
--- AW сама проходит pending → dispatched → in_progress:
---   * pending → dispatched ставит фоновый раннер при подхвате запроса
---     (заполняет started_at).
---   * dispatched → in_progress ставит раннер при получении первого
---     INSERT в agent_response_events (то есть после шага 1.2 ниже).
--- Вручную трогать status не нужно. Если очень хочется — UPDATE безопасен
--- (идемпотентен), но не отражает реальный поток.
+-- Шаг 1.1 — агент берёт вопрос в работу.
+-- Атомарно занять строку и пометить «в работе»:
+UPDATE t_db_oarb_audit_act_agent_messages
+SET status = 'in_progress',
+    updated_at = now()
+WHERE id = '<question_id>'
+  AND status = 'pending';
 
--- Шаг 1.2 — стрим reasoning (несколько порций).
--- ВАЖНО: id берётся из sequence; seq монотонно растёт в рамках request_id.
-INSERT INTO t_db_oarb_audit_act_agent_response_events (id, request_id, seq, event_type, payload, created_at)
-VALUES (
-    nextval('t_db_oarb_audit_act_agent_response_events_id_seq'),
-    '<request_id>',
-    1,
-    'reasoning',
-    '{"text":"Понимаю вопрос пользователя про КСО. Ищу в acts_default.","is_chunk":true}'::jsonb,
-    now()
-);
+-- Если UPDATE затронул 0 строк — вопрос уже взял другой агент или он закрыт.
 
-INSERT INTO t_db_oarb_audit_act_agent_response_events (id, request_id, seq, event_type, payload, created_at)
-VALUES (
-    nextval('t_db_oarb_audit_act_agent_response_events_id_seq'),
-    '<request_id>',
-    2,
-    'reasoning',
-    '{"text":"Найдено 3 релевантных документа, формирую ответ.","is_chunk":true}'::jsonb,
-    now()
-);
-
--- Шаг 1.3 (опц.) — статус-event для прогресс-баннера в UI:
-INSERT INTO t_db_oarb_audit_act_agent_response_events (id, request_id, seq, event_type, payload, created_at)
-VALUES (
-    nextval('t_db_oarb_audit_act_agent_response_events_id_seq'),
-    '<request_id>',
-    3,
-    'status',
-    '{"stage":"composing_answer"}'::jsonb,
-    now()
-);
-
--- Шаг 1.4 — ФИНАЛЬНЫЙ ответ + 'final'-событие (push-сигнал раннеру).
--- ОБЕ вставки в ОДНОЙ транзакции — раннер мгновенно увидит финал
--- через очередь PollCoordinator и сохранит ассистент-сообщение без
--- задержки. Без 'final'-события раннер всё равно подхватит ответ
--- через периодический poll (fallback), но с лагом до event_timeout.
+-- Шаг 1.2 — вставить строку-ответ и закрыть строку-вопрос (одна транзакция).
+-- ОБА действия в BEGIN/COMMIT — AW увидит reply_to только после COMMIT,
+-- что гарантирует атомарность: либо оба видны, либо ни один.
 BEGIN;
 
-INSERT INTO t_db_oarb_audit_act_agent_responses
-    (id, request_id, blocks, finish_reason, model, token_usage, created_at)
-VALUES (
-    md5(random()::text || clock_timestamp()::text),
-    '<request_id>',
-    '[
-        {"type":"text","content":"КСО — корпоративная социальная ответственность. По регламенту 2024 года..."}
-    ]'::jsonb,
-    'stop',
-    'imitated-agent',
-    '{"prompt_tokens":120,"completion_tokens":80}'::jsonb,
-    now()
-);
+-- Генерируем uid ответа заранее (подставь конкретное значение вместо переменной;
+-- в psql можно использовать \set, в Python — str(uuid.uuid4())).
+-- Для примера используем md5-генерацию, совместимую с GP:
+-- \set answer_uid '''$(md5(random()::text || clock_timestamp()::text))'''
+--
+-- Ниже uid ответа задан явно — замени '<answer_uid>' на реальное значение.
 
--- 'final' — служебное событие, не рендерится фронту. seq продолжает
--- общую нумерацию в рамках request_id; payload пустой.
-INSERT INTO t_db_oarb_audit_act_agent_response_events
-    (id, request_id, seq, event_type, payload, created_at)
+INSERT INTO t_db_oarb_audit_act_agent_messages
+    (id, chat_id, user_id, conversation_id, role,
+     content, metadata, status, created_at, updated_at)
 SELECT
-    nextval('t_db_oarb_audit_act_agent_response_events_id_seq'),
-    '<request_id>',
-    COALESCE(MAX(seq), 0) + 1,
-    'final',
-    '{}'::jsonb,
+    md5(random()::text || clock_timestamp()::text),       -- id строки-ответа
+    am.chat_id,
+    am.user_id,
+    md5(random()::text || clock_timestamp()::text),       -- conversation_id ответа
+    'assistant',
+    'КСО — корпоративная социальная ответственность. По регламенту 2024 года...',
+    '{"thinking":"Понимаю вопрос про КСО. Нашёл 3 релевантных документа, формирую ответ."}'::jsonb,
+    'complete',
+    now(),
     now()
-FROM t_db_oarb_audit_act_agent_response_events
-WHERE request_id = '<request_id>';
+FROM t_db_oarb_audit_act_agent_messages am
+WHERE am.id = '<question_id>'
+RETURNING id AS answer_row_id, conversation_id AS answer_conv_id;
+
+-- Затем на строке-вопросе проставляем reply_to = conversation_id строки-ответа.
+-- Так как RETURNING в GP не всегда удобно использовать в цепочке,
+-- при ручном запуске: сначала выполни INSERT выше, запомни answer_conv_id
+-- из результата RETURNING, и вставь его ниже вручную:
+UPDATE t_db_oarb_audit_act_agent_messages
+SET reply_to   = '<answer_conv_id>',   -- conversation_id только что вставленной строки-ответа
+    status     = 'complete',
+    updated_at = now()
+WHERE id = '<question_id>';
 
 COMMIT;
 
--- Шаг 1.5 — закрыть запрос. status='done' раннер выставит сам внутри
--- одной транзакции с finalize_assistant_message (UPDATE chat_messages
--- SET status='complete' + MERGE финальных блоков с накопленными
--- reasoning'ами, дедуп по block_id).
--- Этот UPDATE — резервный путь для имитации, если по какой-то причине
--- раннер не подхватил (например, отключён).
--- UPDATE t_db_oarb_audit_act_agent_requests
--- SET status = 'done', finished_at = now()
--- WHERE id = '<request_id>';
+-- После COMMIT: AW увидит reply_to на вопросе → загрузит строку-ответ
+-- по conversation_id и отрендерит content + metadata.thinking.
 
 
 -- ────────────────────────────────────────────────────────────────────────────
--- 2. СЦЕНАРИЙ "ответ с кнопками" (агент возвращает ButtonGroup в blocks)
+-- 2. СЦЕНАРИЙ "ответ с кнопками"
 -- ────────────────────────────────────────────────────────────────────────────
+--
+-- buttons — массив [{action_id, label, params}]. Сейчас поддерживается
+-- action_id 'acts.open_act_page' (открывает страницу акта по km_number).
+-- Кнопки рендерятся под текстом ответа как интерактивные элементы.
 
-INSERT INTO t_db_oarb_audit_act_agent_responses
-    (id, request_id, blocks, finish_reason, model, token_usage, created_at)
-VALUES (
+BEGIN;
+
+INSERT INTO t_db_oarb_audit_act_agent_messages
+    (id, chat_id, user_id, conversation_id, role,
+     content, metadata, buttons, status, created_at, updated_at)
+SELECT
     md5(random()::text || clock_timestamp()::text),
-    '<request_id>',
+    am.chat_id,
+    am.user_id,
+    md5(random()::text || clock_timestamp()::text),
+    'assistant',
+    'Найдены 3 связанных акта:',
+    '{"thinking":"Нашёл акты, формирую кнопки для навигации."}'::jsonb,
     '[
-        {"type":"text","content":"Найдены 3 связанных акта:"},
-        {"type":"buttons","buttons":[
-            {"action_id":"acts.open_act_page","label":"Открыть КМ-23-001",
-             "params":{"km_number":"КМ-23-001"}},
-            {"action_id":"acts.open_act_page","label":"Открыть КМ-23-002",
-             "params":{"km_number":"КМ-23-002"}}
-        ]}
+        {"action_id":"acts.open_act_page","label":"Открыть КМ-23-001",
+         "params":{"km_number":"КМ-23-001"}},
+        {"action_id":"acts.open_act_page","label":"Открыть КМ-23-002",
+         "params":{"km_number":"КМ-23-002"}},
+        {"action_id":"acts.open_act_page","label":"Открыть КМ-23-003",
+         "params":{"km_number":"КМ-23-003"}}
     ]'::jsonb,
-    'stop',
-    'imitated-agent',
-    '{"prompt_tokens":80,"completion_tokens":40}'::jsonb,
+    'complete',
+    now(),
     now()
-);
+FROM t_db_oarb_audit_act_agent_messages am
+WHERE am.id = '<question_id>'
+RETURNING conversation_id AS answer_conv_id;
 
-UPDATE t_db_oarb_audit_act_agent_requests SET status = 'done', finished_at = now()
-WHERE id = '<request_id>';
+UPDATE t_db_oarb_audit_act_agent_messages
+SET reply_to   = '<answer_conv_id>',
+    status     = 'complete',
+    updated_at = now()
+WHERE id = '<question_id>';
 
-
--- ────────────────────────────────────────────────────────────────────────────
--- 3. СЦЕНАРИЙ "ошибка" (агент не смог получить ответ)
--- ────────────────────────────────────────────────────────────────────────────
-
-INSERT INTO t_db_oarb_audit_act_agent_response_events (id, request_id, seq, event_type, payload, created_at)
-VALUES (
-    nextval('t_db_oarb_audit_act_agent_response_events_id_seq'),
-    '<request_id>',
-    1,
-    'error',
-    '{"code":"kb_unavailable","message":"База знаний acts_default недоступна"}'::jsonb,
-    now()
-);
-
-INSERT INTO t_db_oarb_audit_act_agent_responses
-    (id, request_id, blocks, finish_reason, model, created_at)
-VALUES (
-    md5(random()::text || clock_timestamp()::text),
-    '<request_id>',
-    '[{"type":"text","content":"Не удалось получить ответ от баз знаний. Попробуйте позже."}]'::jsonb,
-    'error',
-    'imitated-agent',
-    now()
-);
-
-UPDATE t_db_oarb_audit_act_agent_requests
-SET status = 'error',
-    error_message = 'kb_unavailable',
-    finished_at = now()
-WHERE id = '<request_id>';
+COMMIT;
 
 
 -- ────────────────────────────────────────────────────────────────────────────
--- 3a. СЦЕНАРИИ TIMEOUT (три гейта wait_for_completion)
+-- 3. СЦЕНАРИЙ "ответ с файлом/медиа"
 -- ────────────────────────────────────────────────────────────────────────────
 --
--- wait_for_completion отсчитывает таймауты от monotonic-времени старта раннера,
--- НЕ от created_at в БД. Поэтому "состарить" запись UPDATE'ом нельзя — нужно
--- либо физически ждать N секунд, либо временно уменьшить настройки в .env
--- и перезапустить uvicorn:
+-- media — массив [{file_id, filename, mime_type, file_size}].
+-- file_id ДОЛЖЕН указывать на реально существующую строку в chat_files
+-- (с корректным chat_id/conversation_id), иначе GET /api/v1/chat/files/{file_id}
+-- вернёт 404. AW определяет превью по mime_type:
+--   image/* — встроенное изображение; остальные — иконка + кнопка «Скачать».
 --
---   CHAT__AGENT_BRIDGE__INITIAL_RESPONSE_TIMEOUT_SEC=10
---   CHAT__AGENT_BRIDGE__EVENT_TIMEOUT_SEC=10
---   CHAT__AGENT_BRIDGE__MAX_TOTAL_DURATION_SEC=20
---
--- После этого имитация:
-
--- 3a.1 — Гейт "initial_response" (агент не ответил вовсе).
--- Просто отправь запрос из AW и НЕ вставляй ничего в agent_response_events
--- и agent_responses. Через initial_response_timeout_sec секунд раннер сам
--- проставит status='timeout', error_message='агент не начал отвечать за …с'
--- и сохранит ассистент-сообщение с error-блоком "Внешний агент не ответил
--- вовремя".
---
--- Контроль:
-SELECT id, status, error_message, finished_at - created_at AS duration
-FROM t_db_oarb_audit_act_agent_requests
-WHERE id = '<request_id>';
-
--- Ожидаемое: status='timeout', error_message LIKE '%не начал отвечать%'.
-
-
--- 3a.2 — Гейт "event_timeout" (агент замолчал между событиями).
--- Вставь одно reasoning-событие сразу, потом подожди event_timeout_sec секунд
--- и НЕ вставляй больше ничего.
-INSERT INTO t_db_oarb_audit_act_agent_response_events
-    (id, request_id, seq, event_type, payload, created_at)
-VALUES (
-    nextval('t_db_oarb_audit_act_agent_response_events_id_seq'),
-    '<request_id>',
-    1,
-    'reasoning',
-    '{"text":"Начинаю обработку...","is_chunk":true}'::jsonb,
-    now()
-);
--- ... больше ничего не вставляешь. Через event_timeout_sec секунд раннер
--- проставит status='timeout', error_message='нет событий от агента …с
--- (heartbeat потерян)'.
-
-
--- 3a.3 — Гейт "max_total_duration" (агент стримит, но слишком долго).
--- Вставляй reasoning-события каждые ~5 секунд (чтобы не сработал event_timeout),
--- но НЕ вставляй финальный agent_responses. Через max_total_duration_sec
--- секунд раннер проставит status='timeout', error_message='превышена
--- максимальная длительность запроса (…с)'.
---
--- Минимальный keep-alive (запускай руками каждые 5с, или скриптом):
-INSERT INTO t_db_oarb_audit_act_agent_response_events
-    (id, request_id, seq, event_type, payload, created_at)
-SELECT
-    nextval('t_db_oarb_audit_act_agent_response_events_id_seq'),
-    '<request_id>',
-    COALESCE(MAX(seq), 0) + 1,
-    'reasoning',
-    '{"text":"...ещё думаю...","is_chunk":true}'::jsonb,
-    now()
-FROM t_db_oarb_audit_act_agent_response_events
-WHERE request_id = '<request_id>';
-
-
--- 3a.4 — Что увидит пользователь во всех трёх случаях.
--- В чат сохраняется ассистент-сообщение с единственным error-блоком:
---   {"type":"error","message":"Внешний агент не ответил вовремя. Попробуйте
---    позже.","code":"agent_timeout"}
--- Можно проверить через:
-SELECT id, role, content
-FROM t_db_oarb_audit_act_chat_messages
-WHERE conversation_id = (
-    SELECT conversation_id FROM t_db_oarb_audit_act_agent_requests
-    WHERE id = '<request_id>'
-)
-ORDER BY created_at DESC
-LIMIT 2;
-
-
--- ────────────────────────────────────────────────────────────────────────────
--- 4. РАБОТА С ФАЙЛАМИ
--- ────────────────────────────────────────────────────────────────────────────
-
--- Посмотреть, какие файлы пришли от пользователя (с уже извлечённым текстом):
-SELECT
-    file ->> 'file_id'        AS file_id,
-    file ->> 'filename'       AS filename,
-    file ->> 'mime_type'      AS mime,
-    (file ->> 'size')::bigint AS size,
-    length(file ->> 'extracted_text') AS extracted_text_len
-FROM t_db_oarb_audit_act_agent_requests, jsonb_array_elements(files) AS file
-WHERE t_db_oarb_audit_act_agent_requests.id = '<request_id>';
-
--- Прочитать BYTEA бинарного файла (изображение и т.п.):
-SELECT filename, mime_type, length(file_data) AS bytes
-FROM t_db_oarb_audit_act_chat_files
-WHERE id = '<file_uuid_из_files_jsonb>';
-
-
--- ────────────────────────────────────────────────────────────────────────────
--- 4a. СЦЕНАРИЙ "агент отправляет пользователю файл"
--- ────────────────────────────────────────────────────────────────────────────
---
--- Идея: агент кладёт BYTEA в chat_files (в ту же conversation_id, что в
--- agent_requests) и в agent_responses.blocks возвращает FileBlock со ссылкой
--- на свежий file_id. AW отдаёт файл через GET /api/v1/chat/files/{file_id},
--- проверяя что conversation принадлежит текущему пользователю.
---
--- Требования к строке chat_files:
---   - id              VARCHAR(36): UUID/строка; должна совпасть с FileBlock.file_id
---   - conversation_id: ОБЯЗАТЕЛЬНО взять из agent_requests того же request_id
---                      (иначе скачивание упрётся в проверку user_id)
---   - message_id      NULL — у ответа агента ещё нет id чат-сообщения
---   - filename        до 500 символов; UI берёт расширение для иконки
---   - mime_type       до 200 символов; превью на фронте работает по mime
---   - file_size       > 0; INTEGER (PG/GP: до 2 ГБ; на практике лимитируется
---                     настройками chat upload)
---   - file_data       BYTEA — само содержимое
---
--- Чтобы упростить ручную имитацию, ниже используются короткие inline-данные
--- (TXT — literal, PDF/XLSX — заголовок файла). Для реальной отдачи замени
--- bytea-значение на полноценное содержимое (pg_read_binary_file и т.п.).
-
-
--- 4a.1 — TXT: простейший случай, тело — utf8 в convert_to():
+-- Шаг 3.1 — залить файл в chat_files:
 WITH new_file AS (
     INSERT INTO t_db_oarb_audit_act_chat_files
         (id, conversation_id, message_id, filename,
          mime_type, file_size, file_data, created_at)
     SELECT
-        md5(random()::text || clock_timestamp()::text),
-        r.conversation_id,
-        NULL,
+        md5(random()::text || clock_timestamp()::text),  -- file_id
+        am.chat_id,    -- conversation_id в chat_files = chat_id треда
+        NULL,          -- message_id NULL: у ответа агента ещё нет id chat-сообщения
         'отчёт.txt',
         'text/plain; charset=utf-8',
         octet_length(convert_to(
@@ -387,175 +216,186 @@ WITH new_file AS (
             'Документ сформирован агентом базы знаний.', 'UTF8'
         ),
         now()
-    FROM t_db_oarb_audit_act_agent_requests r
-    WHERE r.id = '<request_id>'
-    RETURNING id, filename, mime_type, file_size
+    FROM t_db_oarb_audit_act_agent_messages am
+    WHERE am.id = '<question_id>'
+    RETURNING id AS file_id, filename, mime_type, file_size
 )
-INSERT INTO t_db_oarb_audit_act_agent_responses
-    (id, request_id, blocks, finish_reason, model, created_at)
+-- Шаг 3.2 — вставить строку-ответ с media:
+INSERT INTO t_db_oarb_audit_act_agent_messages
+    (id, chat_id, user_id, conversation_id, role,
+     content, media, status, created_at, updated_at)
 SELECT
     md5(random()::text || clock_timestamp()::text),
-    '<request_id>',
+    am.chat_id,
+    am.user_id,
+    md5(random()::text || clock_timestamp()::text),
+    'assistant',
+    'Сформировал отчёт, прикладываю файл:',
     jsonb_build_array(
-        jsonb_build_object('type', 'text',
-            'content', 'Сформировал отчёт, прикладываю файл:'),
         jsonb_build_object(
-            'type',      'file',
-            'file_id',   nf.id,
+            'file_id',   nf.file_id,
             'filename',  nf.filename,
             'mime_type', nf.mime_type,
             'file_size', nf.file_size
         )
     ),
-    'stop', 'imitated-agent', now()
-FROM new_file nf;
+    'complete',
+    now(),
+    now()
+FROM t_db_oarb_audit_act_agent_messages am
+CROSS JOIN new_file nf
+WHERE am.id = '<question_id>'
+RETURNING conversation_id AS answer_conv_id;
 
-UPDATE t_db_oarb_audit_act_agent_requests SET status = 'done', finished_at = now()
-WHERE id = '<request_id>';
+-- Шаг 3.3 — закрыть вопрос:
+UPDATE t_db_oarb_audit_act_agent_messages
+SET reply_to   = '<answer_conv_id>',
+    status     = 'complete',
+    updated_at = now()
+WHERE id = '<question_id>';
 
-
--- 4a.2 — PDF: подкладываем только сигнатуру (для UI достаточно, чтобы
--- определить mime; полноценное содержимое подставь сам).
-WITH new_file AS (
-    INSERT INTO t_db_oarb_audit_act_chat_files
-        (id, conversation_id, message_id, filename,
-         mime_type, file_size, file_data, created_at)
-    SELECT
-        md5(random()::text || clock_timestamp()::text),
-        r.conversation_id,
-        NULL,
-        'регламент-2024.pdf',
-        'application/pdf',
-        octet_length(decode('255044462D312E340A25E2E3CFD30A', 'hex')),
-        decode('255044462D312E340A25E2E3CFD30A', 'hex'),  -- "%PDF-1.4\n%...\n"
-        now()
-    FROM t_db_oarb_audit_act_agent_requests r
-    WHERE r.id = '<request_id>'
-    RETURNING id, filename, mime_type, file_size
-)
-INSERT INTO t_db_oarb_audit_act_agent_responses
-    (id, request_id, blocks, finish_reason, model, created_at)
-SELECT
-    md5(random()::text || clock_timestamp()::text),
-    '<request_id>',
-    jsonb_build_array(
-        jsonb_build_object('type', 'text',
-            'content', 'Нашёл регламент в базе знаний:'),
-        jsonb_build_object(
-            'type',      'file',
-            'file_id',   nf.id,
-            'filename',  nf.filename,
-            'mime_type', nf.mime_type,
-            'file_size', nf.file_size
-        )
-    ),
-    'stop', 'imitated-agent', now()
-FROM new_file nf;
-
-UPDATE t_db_oarb_audit_act_agent_requests SET status = 'done', finished_at = now()
-WHERE id = '<request_id>';
-
-
--- 4a.3 — XLSX: подкладываем сигнатуру ZIP (xlsx — это ZIP-контейнер).
--- Excel сам файл не откроет, но в чате он отрендерится с иконкой и
--- кнопкой "Скачать". Для боевого сценария подставь реальные bytes.
-WITH new_file AS (
-    INSERT INTO t_db_oarb_audit_act_chat_files
-        (id, conversation_id, message_id, filename,
-         mime_type, file_size, file_data, created_at)
-    SELECT
-        md5(random()::text || clock_timestamp()::text),
-        r.conversation_id,
-        NULL,
-        'метрики-КМ-12-32141.xlsx',
-        'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
-        octet_length(decode('504B0304140000000000', 'hex')),
-        decode('504B0304140000000000', 'hex'),  -- "PK\x03\x04..." — ZIP header
-        now()
-    FROM t_db_oarb_audit_act_agent_requests r
-    WHERE r.id = '<request_id>'
-    RETURNING id, filename, mime_type, file_size
-)
-INSERT INTO t_db_oarb_audit_act_agent_responses
-    (id, request_id, blocks, finish_reason, model, created_at)
-SELECT
-    md5(random()::text || clock_timestamp()::text),
-    '<request_id>',
-    jsonb_build_array(
-        jsonb_build_object('type', 'text',
-            'content', 'Подготовил выгрузку метрик в xlsx:'),
-        jsonb_build_object(
-            'type',      'file',
-            'file_id',   nf.id,
-            'filename',  nf.filename,
-            'mime_type', nf.mime_type,
-            'file_size', nf.file_size
-        )
-    ),
-    'stop', 'imitated-agent', now()
-FROM new_file nf;
-
-UPDATE t_db_oarb_audit_act_agent_requests SET status = 'done', finished_at = now()
-WHERE id = '<request_id>';
+-- PDF — подставить сигнатуру; для скачивания достаточно, для открытия нужен
+-- полный файл:
+-- decode('255044462D312E340A25E2E3CFD30A', 'hex')  -- "%PDF-1.4\n%...\n"
+--
+-- XLSX — ZIP-сигнатура; иконка рендерится, открытие в Excel требует полного файла:
+-- decode('504B0304140000000000', 'hex')  -- "PK\x03\x04..."
 
 
 -- ────────────────────────────────────────────────────────────────────────────
--- 5. ОЧИСТКА (для админов; в коде приложения retention НЕ реализован)
---    Полная политика и обоснование сроков — developer-guide.md §7.8.6.
---    Кратко: events — 30д, requests/responses со статусом done/error/timeout — 180д.
---    pending/dispatched/in_progress НЕ ТРОГАТЬ — это активные форварды.
+-- 4. СЦЕНАРИЙ "ошибка" (агент не смог получить ответ)
 -- ────────────────────────────────────────────────────────────────────────────
+--
+-- Можно вставить строку-ответ с описанием ошибки и/или просто закрыть вопрос
+-- со status='error'. AW рендерит статусный блок на основе статуса вопроса.
 
--- 5.1 — Удалить события старше 30 дней:
-DELETE FROM t_db_oarb_audit_act_agent_response_events
-WHERE created_at < now() - INTERVAL '30 days';
+-- Вариант А — только закрыть вопрос (AW покажет стандартное сообщение об ошибке):
+UPDATE t_db_oarb_audit_act_agent_messages
+SET status     = 'error',
+    updated_at = now()
+WHERE id = '<question_id>';
 
--- 5.2 — Удалить старые завершённые запросы и их финальные ответы (180 дней):
-DELETE FROM t_db_oarb_audit_act_agent_responses
-WHERE created_at < now() - INTERVAL '180 days';
+-- Вариант Б — вставить строку-ответ с текстом ошибки + закрыть вопрос:
+BEGIN;
 
-DELETE FROM t_db_oarb_audit_act_agent_requests
-WHERE created_at < now() - INTERVAL '180 days'
-  AND status IN ('done', 'error', 'timeout');
+INSERT INTO t_db_oarb_audit_act_agent_messages
+    (id, chat_id, user_id, conversation_id, role,
+     content, status, created_at, updated_at)
+SELECT
+    md5(random()::text || clock_timestamp()::text),
+    am.chat_id,
+    am.user_id,
+    md5(random()::text || clock_timestamp()::text),
+    'assistant',
+    'Не удалось получить ответ: база знаний acts_default недоступна. Попробуйте позже.',
+    'complete',
+    now(),
+    now()
+FROM t_db_oarb_audit_act_agent_messages am
+WHERE am.id = '<question_id>'
+RETURNING conversation_id AS answer_conv_id;
 
--- 5.3 — На Greenplum после массивных DELETE'ов запустить vacuum
---       (PG он тоже не помешает, но обычно автовакуум справится):
-VACUUM ANALYZE t_db_oarb_audit_act_agent_response_events;
-VACUUM ANALYZE t_db_oarb_audit_act_agent_responses;
-VACUUM ANALYZE t_db_oarb_audit_act_agent_requests;
+UPDATE t_db_oarb_audit_act_agent_messages
+SET reply_to   = '<answer_conv_id>',
+    status     = 'error',
+    updated_at = now()
+WHERE id = '<question_id>';
 
--- 5.4 — Иногда нужно "зависшие" pending дольше N часов перевести в timeout:
-UPDATE t_db_oarb_audit_act_agent_requests
-SET status = 'timeout',
-    error_message = 'manual cleanup: stuck in pending',
-    finished_at = now()
-WHERE status IN ('pending', 'in_progress')
-  AND created_at < now() - INTERVAL '1 hour';
+COMMIT;
+
+
+-- ────────────────────────────────────────────────────────────────────────────
+-- 5. СЦЕНАРИЙ "агент думает" (промежуточный статус)
+-- ────────────────────────────────────────────────────────────────────────────
+--
+-- Если хочется увидеть индикатор «думает...» в UI — просто поставь in_progress.
+-- AW показывает typing-индикатор, пока reply_to = NULL и status = 'in_progress'.
+
+UPDATE t_db_oarb_audit_act_agent_messages
+SET status     = 'in_progress',
+    updated_at = now()
+WHERE id = '<question_id>'
+  AND status = 'pending';
+
+-- Затем в любой момент завершить через сценарии 1, 2, 3 или 4.
 
 
 -- ────────────────────────────────────────────────────────────────────────────
 -- 6. ДИАГНОСТИКА
 -- ────────────────────────────────────────────────────────────────────────────
 
--- Сколько запросов в каком статусе:
-SELECT status, COUNT(*) FROM t_db_oarb_audit_act_agent_requests
-GROUP BY status ORDER BY status;
+-- Счётчики по role + status:
+SELECT role, status, COUNT(*)
+FROM t_db_oarb_audit_act_agent_messages
+GROUP BY role, status
+ORDER BY role, status;
 
--- Самые медленные завершённые запросы (top 20):
-SELECT id, last_user_message,
-       finished_at - created_at AS duration,
-       status
-FROM t_db_oarb_audit_act_agent_requests
-WHERE finished_at IS NOT NULL
-ORDER BY duration DESC
+-- Самые старые pending (потенциально зависшие):
+SELECT id, chat_id, user_id, content,
+       now() - created_at AS age,
+       created_at
+FROM t_db_oarb_audit_act_agent_messages
+WHERE role = 'user'
+  AND status IN ('pending', 'in_progress')
+ORDER BY created_at ASC
 LIMIT 20;
 
--- Сколько событий в среднем на запрос:
-SELECT
-    AVG(cnt)::numeric(10,2) AS avg_events_per_request,
-    MAX(cnt)                AS max_events
-FROM (
-    SELECT request_id, COUNT(*) AS cnt
-    FROM t_db_oarb_audit_act_agent_response_events
-    GROUP BY request_id
-) t;
+-- Полная пара вопрос–ответ по question_id:
+SELECT am.id, am.role, am.status, am.reply_to,
+       am.content,
+       am.metadata,
+       am.buttons,
+       am.media,
+       am.created_at
+FROM t_db_oarb_audit_act_agent_messages am
+WHERE am.id = '<question_id>'
+   OR am.conversation_id = (
+       SELECT reply_to
+       FROM t_db_oarb_audit_act_agent_messages
+       WHERE id = '<question_id>'
+   )
+ORDER BY am.created_at;
+
+-- Все сообщения одного треда (chat_id):
+SELECT id, role, status, conversation_id, reply_to,
+       content, created_at
+FROM t_db_oarb_audit_act_agent_messages
+WHERE chat_id = '<chat_id>'
+ORDER BY created_at;
+
+-- Проверить, что chat_files принадлежит нужному треду:
+SELECT id, conversation_id, filename, mime_type, file_size, created_at
+FROM t_db_oarb_audit_act_chat_files
+WHERE conversation_id = '<chat_id>'
+ORDER BY created_at DESC
+LIMIT 10;
+
+
+-- ────────────────────────────────────────────────────────────────────────────
+-- 7. ОЧИСТКА ПО TTL (для админов)
+-- ────────────────────────────────────────────────────────────────────────────
+--
+-- Удаляем только завершённые строки: complete / error / timeout.
+-- pending и in_progress НЕ ТРОГАТЬ — это активные диалоги.
+-- Видимая пользователю история чата живёт в chat_messages и НЕ затрагивается.
+--
+-- Рекомендуемые сроки хранения:
+--   complete / error / timeout  — 180 дней
+-- Подстройте под свои аудит-требования.
+
+DELETE FROM t_db_oarb_audit_act_agent_messages
+WHERE status IN ('complete', 'error', 'timeout')
+  AND updated_at < now() - INTERVAL '180 days';
+
+-- На Greenplum после массивных DELETE'ов полезен VACUUM ANALYZE
+-- (PG обычно справляется автовакуумом, но не помешает):
+-- VACUUM ANALYZE t_db_oarb_audit_act_agent_messages;
+
+-- Зависшие in_progress/pending дольше 2 часов — ручное закрытие:
+-- (AW обычно закрывает сам через 10 мин, но при рестарте uvicorn может остаться)
+UPDATE t_db_oarb_audit_act_agent_messages
+SET status     = 'timeout',
+    updated_at = now()
+WHERE role = 'user'
+  AND status IN ('pending', 'in_progress')
+  AND created_at < now() - INTERVAL '2 hours';

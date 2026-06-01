@@ -1,25 +1,20 @@
 -- ============================================================================
--- agent-bridge-cleanup.sql — очистка hot-таблиц моста к внешнему ИИ-агенту
+-- agent-bridge-cleanup.sql — очистка bus-таблицы канала к внешнему ИИ-агенту
 -- ============================================================================
 -- Назначение
---   Удаляет старые строки из трёх таблиц моста:
---     {PREFIX}agent_response_events  — лента событий стрима (reasoning/status/error)
---     {PREFIX}agent_responses        — финальные ответы агента
---     {PREFIX}agent_requests         — очередь запросов AW → агент
+--   Удаляет старые завершённые строки из bus-таблицы:
+--     {PREFIX}agent_messages — единый канал «вопрос ↔ ответ» между AW и агентом
 --
---   Удаляются ТОЛЬКО завершённые запросы (status IN ('done','error','timeout'));
---   активные (pending/dispatched/in_progress) НИКОГДА не трогаются — даже
---   если они «зависли», их разрулит сам раннер по таймауту (см. §7.8 в
---   docs/developer-guide.md) или lifespan reconcile при рестарте uvicorn.
+--   Удаляются ТОЛЬКО завершённые строки (status IN ('complete','error','timeout'));
+--   активные (pending/in_progress) НИКОГДА не трогаются — даже если «зависли»:
+--   AW сам закроет их по таймауту (10 мин), а при рестарте uvicorn lifespan
+--   reconcile подхватит оставшиеся.
 --
---   Видимая пользователю история ЧАТА живёт в {PREFIX}chat_messages
---   (поле content::jsonb). Раннер агрегирует reasoning + текст + ошибки
---   и сохраняет туда финальные блоки ассистент-сообщения
---   (см. app/domains/chat/services/agent_bridge_runner.py:120-206).
---   Эта чистка таблицы chat_messages НЕ трогает.
+--   Видимая пользователю история ЧАТА живёт в {PREFIX}chat_messages.
+--   Эта чистка chat_messages НЕ трогает.
 --
 -- Совместимость
---   Скрипт совместим И с PostgreSQL И с Greenplum 6.x (= PG 9.4):
+--   Скрипт совместим И с PostgreSQL, И с Greenplum 6.x (= PG 9.4):
 --     БЕЗ ON CONFLICT, БЕЗ gen_random_uuid(), БЕЗ jsonb_set,
 --     БЕЗ CREATE INDEX IF NOT EXISTS и других «удобств» PG 9.5+.
 --
@@ -36,63 +31,42 @@
 --   Или, если префикс и схема стабильны, скопировать файл и заменить один раз.
 --
 -- Срок хранения
---   Дефолты соответствуют рекомендациям в developer-guide.md §7.8.6:
---     agent_response_events  — 30 дней  (reasoning-чанки, объёмные, ценность падает быстро)
---     agent_responses        — 180 дней (финальные ответы; «исходник» для разбора инцидентов)
---     agent_requests         — 180 дней (входы агента — history/files/knowledge_bases)
---   Подстройте интервалы ниже под свои аудит-требования.
---
--- Порядок удаления (важно)
---   Между таблицами agent_response_events / agent_responses / agent_requests
---   формальных FK нет, но логическая зависимость такая:
---     agent_response_events.request_id  ──┐
---     agent_responses.request_id        ──┤──► agent_requests.id
---   Поэтому удаляем сверху вниз: сначала события, затем финальные ответы,
---   и только в конце — сами запросы. Если поменять порядок — orphan-строки
---   в events/responses сохранятся и продолжат занимать место.
+--   Дефолт: 180 дней для всех завершённых строк (complete/error/timeout).
+--   Подстройте интервал под свои аудит-требования.
+--   Критерий удаления — updated_at (момент последнего изменения строки),
+--   а не created_at, чтобы не трогать строки, закрытые позднее создания.
 --
 -- Периодичность
 --   Рекомендуется cron раз в неделю в окне низкой нагрузки. После массивной
---   чистки полезно VACUUM ANALYZE (PG) — раскомментируйте в конце.
+--   чистки полезно VACUUM ANALYZE (Greenplum — раскомментируйте в конце).
 -- ============================================================================
 
 BEGIN;
 
--- ── 1. События стрима (самая объёмная таблица: ~10–20 KB на запрос) ──────────
-DELETE FROM {SCHEMA}.{PREFIX}agent_response_events
-WHERE request_id IN (
-    SELECT id
-    FROM {SCHEMA}.{PREFIX}agent_requests
-    WHERE status IN ('done', 'error', 'timeout')
-      AND finished_at IS NOT NULL
-      AND finished_at < CURRENT_TIMESTAMP - INTERVAL '30 days'
-);
-
--- ── 2. Финальные ответы агента (180 дней — хранятся дольше как «исходник») ──
-DELETE FROM {SCHEMA}.{PREFIX}agent_responses
-WHERE request_id IN (
-    SELECT id
-    FROM {SCHEMA}.{PREFIX}agent_requests
-    WHERE status IN ('done', 'error', 'timeout')
-      AND finished_at IS NOT NULL
-      AND finished_at < CURRENT_TIMESTAMP - INTERVAL '180 days'
-);
-
--- ── 3. Сами запросы (после events/responses; 180 дней) ──────────────────────
-DELETE FROM {SCHEMA}.{PREFIX}agent_requests
-WHERE status IN ('done', 'error', 'timeout')
-  AND finished_at IS NOT NULL
-  AND finished_at < CURRENT_TIMESTAMP - INTERVAL '180 days';
+-- ── Завершённые строки старше 180 дней ──────────────────────────────────────
+-- role охватывает и вопросы ('user'), и ответы ('assistant'), и 'tool':
+-- все они закрываются через status, поэтому один DELETE покрывает всё.
+DELETE FROM {SCHEMA}.{PREFIX}agent_messages
+WHERE status IN ('complete', 'error', 'timeout')
+  AND updated_at IS NOT NULL
+  AND updated_at < CURRENT_TIMESTAMP - INTERVAL '180 days';
 
 COMMIT;
 
 -- ── Опционально: дефрагментация после массовой чистки ───────────────────────
 -- PostgreSQL (autovacuum обычно справится сам, но при больших объёмах):
---   VACUUM ANALYZE {SCHEMA}.{PREFIX}agent_response_events;
---   VACUUM ANALYZE {SCHEMA}.{PREFIX}agent_responses;
---   VACUUM ANALYZE {SCHEMA}.{PREFIX}agent_requests;
+--   VACUUM ANALYZE {SCHEMA}.{PREFIX}agent_messages;
 --
 -- Greenplum (VACUUM FULL — только при заметной фрагментации, требует exclusive lock):
---   VACUUM ANALYZE {SCHEMA}.{PREFIX}agent_response_events;
---   VACUUM ANALYZE {SCHEMA}.{PREFIX}agent_responses;
---   VACUUM ANALYZE {SCHEMA}.{PREFIX}agent_requests;
+--   VACUUM ANALYZE {SCHEMA}.{PREFIX}agent_messages;
+
+-- ── Опционально: закрыть зависшие pending/in_progress старше 2 часов ────────
+-- AW закрывает сам через 10 мин, но при долгом даунтайме uvicorn могут остаться.
+-- Запускать ОТДЕЛЬНО (не в основной транзакции выше), только осознанно:
+--
+-- UPDATE {SCHEMA}.{PREFIX}agent_messages
+-- SET status     = 'timeout',
+--     updated_at = CURRENT_TIMESTAMP
+-- WHERE role = 'user'
+--   AND status IN ('pending', 'in_progress')
+--   AND created_at < CURRENT_TIMESTAMP - INTERVAL '2 hours';
