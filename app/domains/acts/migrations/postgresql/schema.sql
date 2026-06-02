@@ -237,37 +237,20 @@ CREATE TABLE IF NOT EXISTS {SCHEMA}.{PREFIX}act_violations (
     CONSTRAINT check_additional_content_is_object_or_null
         CHECK (additional_content IS NULL OR jsonb_typeof(additional_content) = 'object'),
 
+    -- Проверяем только тип (object|null), как в GP-схеме: оператор '?' на GP
+    -- недоступен, а форму {enabled, content} гарантирует Pydantic
+    -- (ViolationOptionalFieldSchema). «Прод = контракт» — dev не строже прода.
     CONSTRAINT check_reasons_is_object_or_null
-        CHECK (
-            reasons IS NULL OR
-            (jsonb_typeof(reasons) = 'object' AND
-             reasons ? 'enabled' AND
-             reasons ? 'content')
-        ),
+        CHECK (reasons IS NULL OR jsonb_typeof(reasons) = 'object'),
 
     CONSTRAINT check_consequences_is_object_or_null
-        CHECK (
-            consequences IS NULL OR
-            (jsonb_typeof(consequences) = 'object' AND
-             consequences ? 'enabled' AND
-             consequences ? 'content')
-        ),
+        CHECK (consequences IS NULL OR jsonb_typeof(consequences) = 'object'),
 
     CONSTRAINT check_responsible_is_object_or_null
-        CHECK (
-            responsible IS NULL OR
-            (jsonb_typeof(responsible) = 'object' AND
-             responsible ? 'enabled' AND
-             responsible ? 'content')
-        ),
+        CHECK (responsible IS NULL OR jsonb_typeof(responsible) = 'object'),
 
     CONSTRAINT check_recommendations_is_object_or_null
-        CHECK (
-            recommendations IS NULL OR
-            (jsonb_typeof(recommendations) = 'object' AND
-             recommendations ? 'enabled' AND
-             recommendations ? 'content')
-        ),
+        CHECK (recommendations IS NULL OR jsonb_typeof(recommendations) = 'object'),
 
     UNIQUE(act_id, violation_id)
 );
