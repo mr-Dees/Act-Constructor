@@ -40,15 +40,6 @@ export class AdminRoles {
     }
 
     /**
-     * Фильтрует видимые строки по тексту (fullname, username, email)
-     * @param {string} query - Строка поиска
-     */
-    static filterByText(query) {
-        this._textFilter = query.toLowerCase();
-        this._applyFilters();
-    }
-
-    /**
      * Фильтрует по роли (toggle)
      * @param {number|null} roleId - ID роли или null для сброса
      */

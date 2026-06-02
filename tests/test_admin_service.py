@@ -36,13 +36,24 @@ class TestGetUserDirectory:
         mock_repo.count_users_with_roles.return_value = 0
         items, total = await service.get_user_directory()
         mock_repo.get_users_with_roles.assert_called_once_with(
-            "Отдел аудита розничного бизнеса", limit=50, offset=0,
+            "Отдел аудита розничного бизнеса", limit=50, offset=0, query=None,
         )
         mock_repo.count_users_with_roles.assert_called_once_with(
-            "Отдел аудита розничного бизнеса",
+            "Отдел аудита розничного бизнеса", query=None,
         )
         assert items == []
         assert total == 0
+
+    async def test_passes_search_query(self, service, mock_repo):
+        mock_repo.get_users_with_roles.return_value = []
+        mock_repo.count_users_with_roles.return_value = 0
+        await service.get_user_directory(query="Иванов")
+        mock_repo.get_users_with_roles.assert_called_once_with(
+            "Отдел аудита розничного бизнеса", limit=50, offset=0, query="Иванов",
+        )
+        mock_repo.count_users_with_roles.assert_called_once_with(
+            "Отдел аудита розничного бизнеса", query="Иванов",
+        )
 
     async def test_returns_users(self, service, mock_repo):
         mock_repo.get_users_with_roles.return_value = [
@@ -104,3 +115,31 @@ class TestAssignRoleValidation:
         mock_repo.get_role_by_id.return_value = None
         with pytest.raises(RoleNotFoundError):
             await service.assign_role("22501010", 999, "admin")
+
+
+class TestSeedInitialRoles:
+
+    async def test_assigns_all_default_roles(self, service, mock_repo):
+        # Обе дефолтные роли ("Цифровой акт" и "Чат-ассистент") должны
+        # назначаться каждому пользователю — иначе чат недоступен не-админам.
+        roles = {
+            "Админ": {"id": 1, "name": "Админ"},
+            "Цифровой акт": {"id": 2, "name": "Цифровой акт"},
+            "Чат-ассистент": {"id": 3, "name": "Чат-ассистент"},
+        }
+        mock_repo.count_user_roles.return_value = 0
+        mock_repo.get_role_by_name.side_effect = lambda name: roles.get(name)
+        mock_repo.get_users_from_directory.return_value = ["22494524", "22501010"]
+        mock_repo.bulk_assign_roles.return_value = 4
+
+        await service.seed_initial_roles("branch1", default_admin="00000000")
+
+        assignments = mock_repo.bulk_assign_roles.call_args.args[0]
+        role_ids = {role_id for _, role_id, _ in assignments}
+        assert role_ids == {2, 3}
+        assert len(assignments) == 4  # по две дефолтные роли на двух пользователей
+
+    async def test_skips_when_user_roles_not_empty(self, service, mock_repo):
+        mock_repo.count_user_roles.return_value = 5
+        await service.seed_initial_roles("branch1", default_admin="00000000")
+        mock_repo.bulk_assign_roles.assert_not_called()

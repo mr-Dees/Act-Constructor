@@ -1108,11 +1108,14 @@ export class APIClient {
      * подгрузку «Загрузить ещё» по total/offset.
      * @param {number} [limit=50] - размер страницы
      * @param {number} [offset=0] - смещение
+     * @param {string} [q=''] - поиск по ФИО/логину/email (фильтр на стороне БД)
      * @returns {Promise<{items: Array, total: number, limit: number, offset: number}>}
      */
-    static async loadUserDirectory(limit = 50, offset = 0) {
+    static async loadUserDirectory(limit = 50, offset = 0, q = '') {
+        const params = new URLSearchParams({ limit, offset });
+        if (q) params.set('q', q);
         const url = AppConfig.api.getUrl(
-            `/api/v1/admin/users/directory?limit=${limit}&offset=${offset}`
+            `/api/v1/admin/users/directory?${params.toString()}`
         );
         const response = await this._fetchWithTimeout(url, { headers: {} });
         if (!response.ok) throw this._createError(response.status, 'Ошибка загрузки справочника');

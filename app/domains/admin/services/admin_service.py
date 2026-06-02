@@ -4,6 +4,7 @@ import logging
 
 import asyncpg
 
+from app.api.v1.deps.role_deps import DEFAULT_ROLE_NAMES
 from app.domains.admin.exceptions import LastAdminError, RoleNotFoundError, UserNotFoundError
 from app.domains.admin.repositories.admin_audit_log import AdminAuditLogRepository
 from app.domains.admin.repositories.admin_repository import AdminRepository
@@ -110,14 +111,18 @@ class AdminService:
         return await self.audit_log.get_log(**filters)
 
     async def get_user_directory(
-        self, *, limit: int = 50, offset: int = 0,
+        self, *, limit: int = 50, offset: int = 0, query: str | None = None,
     ) -> tuple[list[dict], int]:
-        """Возвращает страницу пользователей отдела + пользователей с ролями."""
+        """Возвращает страницу пользователей отдела + пользователей с ролями.
+
+        При непустом ``query`` справочник фильтруется по подстроке
+        (ФИО/логин/email) на стороне БД.
+        """
         branch = self.settings.user_directory.branch_filter
         items = await self.repo.get_users_with_roles(
-            branch, limit=limit, offset=offset,
+            branch, limit=limit, offset=offset, query=query,
         )
-        total = await self.repo.count_users_with_roles(branch)
+        total = await self.repo.count_users_with_roles(branch, query=query)
         return items, total
 
     async def search_users(
@@ -143,14 +148,22 @@ class AdminService:
             )
             return
 
-        digital_act_role = await self.repo.get_role_by_name("Цифровой акт")
         admin_role = await self.repo.get_role_by_name("Админ")
-
-        if not digital_act_role:
-            logger.warning("Роль 'Цифровой акт' не найдена, заполнение пропущено")
-            return
         if not admin_role:
             logger.warning("Роль 'Админ' не найдена, заполнение пропущено")
+            return
+
+        # Дефолтные роли — тот же набор, что auto-assign при первом обращении
+        # пользователя (DEFAULT_ROLE_NAMES), чтобы поведение не расходилось.
+        default_roles = []
+        for role_name in DEFAULT_ROLE_NAMES:
+            role = await self.repo.get_role_by_name(role_name)
+            if role:
+                default_roles.append(role)
+            else:
+                logger.warning("Роль '%s' не найдена при начальном заполнении", role_name)
+        if not default_roles:
+            logger.warning("Дефолтные роли не найдены, заполнение пропущено")
             return
 
         usernames = await self.repo.get_users_from_directory(branch_filter)
@@ -162,8 +175,9 @@ class AdminService:
             return
 
         assignments: list[tuple[str, int, str]] = [
-            (u, digital_act_role["id"], "system")
+            (u, role["id"], "system")
             for u in usernames
+            for role in default_roles
         ]
 
         if default_admin in usernames:

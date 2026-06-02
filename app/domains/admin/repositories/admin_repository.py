@@ -176,14 +176,39 @@ class AdminRepository(BaseRepository):
         logger.info("Массовое назначение ролей: %s из %s успешно", count, len(assignments))
         return count
 
+    @staticmethod
+    def _like_pattern(query: str) -> str:
+        """Экранирует спецсимволы LIKE и оборачивает в %…% для подстроки."""
+        escaped = query.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
+        return f"%{escaped}%"
+
     async def get_users_with_roles(
         self, branch: str, *, limit: int = 50, offset: int = 0,
+        query: str | None = None,
     ) -> list[dict]:
         """
         Возвращает пользователей отдела + пользователей с ролями.
 
-        Один SQL-запрос с UNION + LEFT JOIN + json_agg.
+        Один SQL-запрос с UNION + LEFT JOIN + json_agg. При непустом ``query``
+        результат фильтруется по подстроке (ФИО/логин/email) на стороне БД.
         """
+        params: list = [branch]
+        where_sql = ""
+        if query:
+            pattern = self._like_pattern(query)
+            # Три отдельных плейсхолдера под один паттерн — GP (PG 9.4) выводит
+            # типы по контексту; одинаковый параметр в разных местах ILIKE может
+            # дать AmbiguousParameterError (см. assign_role/search_users).
+            params.extend([pattern, pattern, pattern])
+            where_sql = (
+                "WHERE (COALESCE(d.fullname, '') ILIKE $2 "
+                "OR base.username ILIKE $3 "
+                "OR COALESCE(d.email, '') ILIKE $4)"
+            )
+        limit_idx = len(params) + 1
+        offset_idx = len(params) + 2
+        params.extend([limit, offset])
+
         rows = await self.conn.fetch(
             f"""
             SELECT
@@ -213,13 +238,12 @@ class AdminRepository(BaseRepository):
             ) d ON d.username = base.username
             LEFT JOIN {self.user_roles} ur ON ur.username = base.username
             LEFT JOIN {self.roles} r ON r.id = ur.role_id
+            {where_sql}
             GROUP BY base.username, d.fullname, d.job, d.tn, d.email, d.branch
             ORDER BY COALESCE(d.fullname, base.username)
-            LIMIT $2 OFFSET $3
+            LIMIT ${limit_idx} OFFSET ${offset_idx}
             """,
-            branch,
-            limit,
-            offset,
+            *params,
         )
         result = []
         for row in rows:
@@ -231,18 +255,48 @@ class AdminRepository(BaseRepository):
             result.append(d)
         return result
 
-    async def count_users_with_roles(self, branch: str) -> int:
+    async def count_users_with_roles(
+        self, branch: str, query: str | None = None,
+    ) -> int:
         """Считает общее количество пользователей в справочнике
-        (DISTINCT username отдела + с ролями)."""
+        (DISTINCT username отдела + с ролями). При непустом ``query`` —
+        количество совпадений по подстроке (ФИО/логин/email)."""
+        if not query:
+            return await self.conn.fetchval(
+                f"""
+                SELECT COUNT(*) FROM (
+                    SELECT username FROM {self.user_table} WHERE branch = $1
+                    UNION
+                    SELECT DISTINCT username FROM {self.user_roles}
+                ) base
+                """,
+                branch,
+            )
+
+        pattern = self._like_pattern(query)
         return await self.conn.fetchval(
             f"""
             SELECT COUNT(*) FROM (
-                SELECT username FROM {self.user_table} WHERE branch = $1
-                UNION
-                SELECT DISTINCT username FROM {self.user_roles}
-            ) base
+                SELECT base.username
+                FROM (
+                    SELECT username FROM {self.user_table} WHERE branch = $1
+                    UNION
+                    SELECT DISTINCT username FROM {self.user_roles}
+                ) base
+                LEFT JOIN (
+                    SELECT DISTINCT ON (username) username, fullname, email
+                    FROM {self.user_table}
+                    ORDER BY username
+                ) d ON d.username = base.username
+                WHERE (COALESCE(d.fullname, '') ILIKE $2
+                    OR base.username ILIKE $3
+                    OR COALESCE(d.email, '') ILIKE $4)
+            ) sub
             """,
             branch,
+            pattern,
+            pattern,
+            pattern,
         )
 
     async def search_users(

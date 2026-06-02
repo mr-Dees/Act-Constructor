@@ -27,6 +27,8 @@ export class AdminPage {
     static _dirOffset = 0;
     static _dirTotal = 0;
     static _dirLoadingMore = false;
+    static _searchActive = false;
+    static _searchSeq = 0;
 
     static async init() {
         try {
@@ -39,7 +41,7 @@ export class AdminPage {
             this._dirOffset = directory.items.length;
             this._allRoles = roles;
 
-            AdminSearch.init();
+            AdminSearch.init((q) => this.searchDirectory(q));
             AdminRoles.init(this._allRoles);
             AdminRoles.setUsers(this._usersDirectory);
             this._initAddUserButton();
@@ -92,6 +94,39 @@ export class AdminPage {
     }
 
     /**
+     * Поиск по справочнику. При непустом запросе тянет совпадения с сервера
+     * (по всему справочнику) и показывает их без кнопки «Загрузить ещё».
+     * При пустом — возвращает ранее загруженный пагинированный список.
+     * @param {string} query - Строка поиска
+     */
+    static async searchDirectory(query) {
+        const q = (query || '').trim();
+        const seq = ++this._searchSeq;
+
+        if (!q) {
+            // Сброс поиска — восстанавливаем накопленный справочник и пагинацию.
+            this._searchActive = false;
+            AdminRoles.setUsers(this._usersDirectory);
+            this._renderLoadMore();
+            return;
+        }
+
+        this._searchActive = true;
+        let page;
+        try {
+            page = await APIClient.loadUserDirectory(this._pageSize, 0, q);
+        } catch (error) {
+            if (seq !== this._searchSeq) return;  // ответ устарел — игнор
+            console.error('AdminPage: ошибка поиска по справочнику:', error);
+            Notifications.error('Не удалось выполнить поиск');
+            return;
+        }
+        if (seq !== this._searchSeq) return;  // пока ждали — запрос сменился
+        AdminRoles.setUsers(page.items);
+        this._renderLoadMore();
+    }
+
+    /**
      * Создаёт/обновляет/убирает кнопку «Загрузить ещё» под таблицей ролей.
      * @private
      */
@@ -101,7 +136,7 @@ export class AdminPage {
 
         let btn = document.getElementById('adminDirLoadMoreBtn');
 
-        if (this._dirOffset >= this._dirTotal) {
+        if (this._searchActive || this._dirOffset >= this._dirTotal) {
             if (btn) btn.remove();
             return;
         }

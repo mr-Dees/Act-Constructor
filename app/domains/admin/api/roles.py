@@ -47,10 +47,18 @@ async def list_roles(
 async def get_user_directory(
     limit: int = Query(50, ge=1, le=200),
     offset: int = Query(0, ge=0),
+    q: str = Query("", description="Поиск по ФИО, логину, email"),
     service: AdminService = Depends(get_admin_service),
 ):
-    """Возвращает справочник пользователей с назначенными ролями."""
-    items, total = await service.get_user_directory(limit=limit, offset=offset)
+    """Возвращает справочник пользователей с назначенными ролями.
+
+    При непустом ``q`` фильтрует справочник по подстроке (ФИО/логин/email)
+    на стороне БД — поиск охватывает весь справочник, а не только загруженную
+    страницу.
+    """
+    items, total = await service.get_user_directory(
+        limit=limit, offset=offset, query=q or None,
+    )
     return PaginatedResponse[UserDirectoryItem](
         items=items, total=total, limit=limit, offset=offset,
     )
