@@ -266,14 +266,15 @@ class CSValidationRepository(BaseRepository):
         """
         Мягкое удаление записи CS-валидации.
 
-        Устанавливает is_actual=false, deleted_at=now(), updated_by=username.
-        Возвращает True если запись была деактивирована.
+        Устанавливает is_actual=false, deleted_at=now(), updated_at=now(),
+        updated_by=username. Возвращает True если запись была деактивирована.
         """
         result = await self.conn.execute(
             f"""
             UPDATE {self.table}
             SET is_actual = false,
                 deleted_at = now(),
+                updated_at = now(),
                 updated_by = $1
             WHERE id = $2 AND is_actual = true
             """,
