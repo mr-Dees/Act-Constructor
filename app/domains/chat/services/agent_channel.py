@@ -1,4 +1,4 @@
-"""Сервис канала к внешнему агенту через bus-таблицу agent_messages.
+"""Сервис канала к внешнему агенту через bus-таблицу chat_agent_messages_bus.
 
 Поток:
   AW → submit() → INSERT вопрос (role='user', status='pending')
@@ -72,7 +72,7 @@ def _normalize_button(btn: dict, idx: int) -> dict:
 
 
 def map_answer_to_blocks(row: dict, max_block_text_size: int = 262144) -> list[dict]:
-    """Маппит строку-ответ agent_messages в блоки чата.
+    """Маппит строку-ответ chat_agent_messages_bus в блоки чата.
 
     Порядок: reasoning (metadata.thinking) → text (content) → buttons → media.
     block_id кнопок и reasoning: ``f"{row['id']}:btn:0"`` / ``f"{row['id']}:reasoning:0"``.
@@ -163,7 +163,7 @@ def build_timeout_error_block() -> dict:
 
 
 class AgentChannelService:
-    """Сервис канала к внешнему агенту через bus-таблицу agent_messages.
+    """Сервис канала к внешнему агенту через bus-таблицу chat_agent_messages_bus.
 
     Принимает ``conn`` (asyncpg.Connection) и ``settings`` (ChatDomainSettings).
     Паттерн получения settings идентичен MessageService / ConversationService:
@@ -194,7 +194,7 @@ class AgentChannelService:
         kb: str = "oarb",
         media: list | None = None,
     ) -> str:
-        """Кладёт вопрос в agent_messages и создаёт draft-сообщение в chat_messages.
+        """Кладёт вопрос в chat_agent_messages_bus и создаёт draft-сообщение в chat_messages.
 
         Возвращает ``question_uid`` — conversation_id строки-вопроса в bus-таблице.
         Вызывающий может сразу передать его поллеру без дополнительного SELECT;
@@ -242,7 +242,7 @@ class AgentChannelService:
     ) -> None:
         """Помечает draft как failed (error-блок таймаута) и ставит вопросу status='timeout'."""
         # Best-effort без общей транзакции: если set_status упадёт после
-        # mark_failed, строка в agent_messages останется в pending — побочных
+        # mark_failed, строка в chat_agent_messages_bus останется в pending — побочных
         # эффектов нет, reconcile её не подхватит (chat_message уже failed, а
         # get_streaming_drafts отбирает только status='streaming').
         await self._message_repo().mark_failed(

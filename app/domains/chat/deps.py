@@ -67,7 +67,7 @@ def get_audit_log_batcher() -> MetricsBatcher[ChatAuditLogRecord] | None:
     return _audit_log_batcher
 
 
-# Singleton поллера канала agent_messages — инициализируется в lifespan.
+# Singleton поллера канала chat_agent_messages_bus — инициализируется в lifespan.
 _agent_channel_poller: AgentChannelPoller | None = None
 
 

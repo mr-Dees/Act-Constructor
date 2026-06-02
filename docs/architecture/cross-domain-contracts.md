@@ -70,7 +70,7 @@ $ grep -rn "from app.domains.acts" app/domains/admin
 |---|---|
 | **Константа** | `TOOL_FORWARD_TO_KNOWLEDGE_AGENT` |
 | **Создаётся в** | `app/domains/chat/services/forward_tool_factory.py` (`build_forward_tool_descriptor()`) |
-| **Когда доступен LLM** | Только в `agent_mode='adaptive'` — оркестратор сам решает форвардить вопрос внешнему агенту. В `agent_mode='always'` LLM минуется: вопрос пишется в шину `agent_messages` напрямую (`AgentChannelService.submit`). В `agent_mode='off'` tool скрыт |
+| **Когда доступен LLM** | Только в `agent_mode='adaptive'` — оркестратор сам решает форвардить вопрос внешнему агенту. В `agent_mode='always'` LLM минуется: вопрос пишется в шину `chat_agent_messages_bus` напрямую (`AgentChannelService.submit`). В `agent_mode='off'` tool скрыт |
 | **Контракт** | Имя tool'а должно совпадать с константой во всех потребителях. Если переименовать — оркестратор перестанет распознавать tool, адаптивный форвард не сработает |
 
 ### 3.2. `acts.open_act_page` (и аналогичные `open_*_page` tools)
@@ -117,7 +117,7 @@ $ grep -rn "from app.domains.acts" app/domains/admin
 | **Используется на фронте** | `chat-client-actions.js::executeBlock` — Set исполненных id в `sessionStorage` под ключом `chat:executedActions` |
 | **Что сломается, если изменить формат** | Фронт перестанет распознавать «уже исполненный» при reload вкладки → бесконечный redirect-цикл (action `open_url` будет каждый раз заново переходить по URL). Подробнее — [`developer-guide.md §7.9`](../guides/developer-guide.md#79-action-handlers-и-clientactionblock) |
 
-**`block_id` блоков из ответа внешнего агента** (форвард через шину `agent_messages`):
+**`block_id` блоков из ответа внешнего агента** (форвард через шину `chat_agent_messages_bus`):
 - Формат задаётся в `AgentChannelService.map_answer_to_blocks` (`agent_channel.py`): кнопки — `f"{row['id']}:btn:0"`, reasoning — `f"{row['id']}:reasoning:0"`, где `row['id']` — uid строки-ответа в шине.
 - `map_answer_to_blocks` мапит ответ агента в блоки в порядке: reasoning (из `metadata.thinking`) → text → buttons → media (image/file) → error.
 - Используется: `ClientActionsRegistry.executeBlock` дедупит исполнённые client-action по `block_id` (см. §5 выше). Стабильность формата важна, чтобы повторный поллинг GET /messages не создавал дублей кнопок.
@@ -137,12 +137,12 @@ SSE в чате нет. Транспорт единый для всех режи
 | `agent_mode` | Поведение бэка |
 |---|---|
 | `off` | Локальная LLM/GigaChat исполняется синхронно в POST через `orchestrator.run(...)`; forward-tool скрыт от LLM |
-| `adaptive` | `orchestrator.run(...)` синхронно; forward-tool доступен LLM, оркестратор сам решает форвардить через шину `agent_messages` |
+| `adaptive` | `orchestrator.run(...)` синхронно; forward-tool доступен LLM, оркестратор сам решает форвардить через шину `chat_agent_messages_bus` |
 | `always` | Прямой проброс в агента: `AgentChannelService.submit` пишет вопрос в шину + черновик `chat_messages` (status='streaming'), LLM минуется |
 
 **Форвард-путь (adaptive/always)**: `AgentChannelService.submit` создаёт
 черновик ассистент-сообщения (`status='streaming'`, `agent_ref` = uid вопроса
-в шине) и запись вопроса в `agent_messages`; фоновый `AgentChannelPoller`
+в шине) и запись вопроса в `chat_agent_messages_bus`; фоновый `AgentChannelPoller`
 (`agent_channel_poller.py`) поллит шину adaptive-backoff'ом без удержания
 коннекта в sleep; `AgentChannelService.try_finalize` мапит ответ агента в
 блоки (`map_answer_to_blocks`) и финализирует черновик (`complete`/`failed`),
@@ -150,10 +150,10 @@ SSE в чате нет. Транспорт единый для всех режи
 
 | Контракт | Где |
 |---|---|
-| Шина агента | таблица `agent_messages` (см. §10) |
+| Шина агента | таблица `chat_agent_messages_bus` (см. §10) |
 | Лимит параллельных запросов | `AgentMessageRepository.count_active_for_user` ≥ `CHAT__MAX_PARALLEL_STREAMS_PER_USER` (default 3) → `ChatLimitError` (HTTP 422) до записей в БД |
 | Фоновый хук поллера | `chat.agent_channel_poller` (наряду с `chat.tool_metrics_batcher`, `chat.audit_log_batcher`) |
-| Настройки канала | `AgentChannelSettings`, env-префикс `CHAT__AGENT_CHANNEL__` (`TABLE_NAME=agent_messages`, `POLL_MIN_INTERVAL_SEC=2.0`, `POLL_MAX_INTERVAL_SEC=10.0`, `POLL_BACKOFF_MULTIPLIER=1.5`, `ANSWER_TIMEOUT_SEC=600`, `MAX_BLOCK_TEXT_SIZE=262144`) |
+| Настройки канала | `AgentChannelSettings`, env-префикс `CHAT__AGENT_CHANNEL__` (`TABLE_NAME=chat_agent_messages_bus`, `POLL_MIN_INTERVAL_SEC=2.0`, `POLL_MAX_INTERVAL_SEC=10.0`, `POLL_BACKOFF_MULTIPLIER=1.5`, `ANSWER_TIMEOUT_SEC=600`, `MAX_BLOCK_TEXT_SIZE=262144`) |
 
 ---
 
@@ -201,7 +201,7 @@ SSE в чате нет. Транспорт единый для всех режи
 
 ---
 
-## 10. Контракт шины `agent_messages` (приложение ↔ внешний ИИ-агент)
+## 10. Контракт шины `chat_agent_messages_bus` (приложение ↔ внешний ИИ-агент)
 
 Единая bus-таблица — единственный канал к внешнему агенту (заменила прежние
 `agent_requests` / `agent_response_events` / `agent_responses`). Polling-only,

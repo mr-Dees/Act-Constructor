@@ -1,7 +1,7 @@
 # Forward к внешнему ИИ-агенту — sequence-диаграмма
 
 Документ описывает полный путь от пользовательского сообщения до ответа
-внешнего ИИ-агента через единую bus-таблицу `agent_messages`. Транспорт —
+внешнего ИИ-агента через единую bus-таблицу `chat_agent_messages_bus`. Транспорт —
 **poll-only, без SSE**: POST на отправку сообщения отдаёт `message_id`, а фронт
 затем поллит готовность ответа GET-запросом до терминального статуса и рендерит
 ответ целиком с декоративным «эффектом печати» (token-стриминга нет).
@@ -15,7 +15,7 @@
 
 ## 0. Модель данных и режимы
 
-**Bus-таблица `agent_messages`** (единая, заменяет прежние три таблицы):
+**Bus-таблица `chat_agent_messages_bus`** (единая, заменяет прежние три таблицы):
 `id` (VARCHAR(36)), `chat_id`, `user_id`, `conversation_id`,
 `role` CHECK(`user`/`assistant`/`tool`), `content` TEXT, `media` JSONB,
 `metadata` JSONB, `reply_to`, `buttons` JSONB,
@@ -49,14 +49,14 @@ sequenceDiagram
     participant F as Frontend<br/>(chat-stream.js)
     participant API as POST /messages<br/>(api/messages.py)
     participant CS as AgentChannelService<br/>(agent_channel.py)
-    participant DB as БД<br/>(agent_messages + chat_messages)
+    participant DB as БД<br/>(chat_agent_messages_bus + chat_messages)
     participant POLL as AgentChannelPoller<br/>(одна задача на процесс)
     participant EXT as Внешний ИИ-агент<br/>(другой процесс)
 
     U->>F: «расскажи про X» (agent_mode=always)
     F->>API: POST /messages (FormData)
     API->>CS: submit(conversation_id, user_id,<br/>assistant_message_id, text, mode='always', media)
-    CS->>DB: INSERT agent_messages<br/>(role='user', status='pending') → question_uid
+    CS->>DB: INSERT chat_agent_messages_bus<br/>(role='user', status='pending') → question_uid
     CS->>DB: create_streaming chat_messages<br/>(status='streaming', agent_ref=question_uid)
     CS-->>API: question_uid
     API->>POLL: subscribe(assistant_message_id, question_uid)
@@ -71,8 +71,8 @@ sequenceDiagram
         end
         Note over F: при status='complete'/'failed'<br/>рендер ответа целиком + «эффект печати»
     and внешний агент
-        EXT->>DB: UPDATE agent_messages вопроса<br/>status='in_progress'
-        EXT->>DB: INSERT agent_messages ответа<br/>(role='assistant', status='complete')<br/>+ UPDATE reply_to на вопросе
+        EXT->>DB: UPDATE chat_agent_messages_bus вопроса<br/>status='in_progress'
+        EXT->>DB: INSERT chat_agent_messages_bus ответа<br/>(role='assistant', status='complete')<br/>+ UPDATE reply_to на вопросе
     and поллер шины
         loop adaptive backoff (без удержания conn в sleep)
             POLL->>CS: try_finalize(assistant_message_id, question_uid)
@@ -196,7 +196,7 @@ sequenceDiagram
 - chat_messages streaming-методы — `app/domains/chat/repositories/message_repository.py`
   (`create_streaming`/`finalize`/`mark_failed`/`get_streaming_drafts`)
 - настройки — `AgentChannelSettings` (`app/domains/chat/settings.py`),
-  env-префикс `CHAT__AGENT_CHANNEL__`: `TABLE_NAME=agent_messages`,
+  env-префикс `CHAT__AGENT_CHANNEL__`: `TABLE_NAME=chat_agent_messages_bus`,
   `POLL_MIN_INTERVAL_SEC=2.0`, `POLL_MAX_INTERVAL_SEC=10.0`,
   `POLL_BACKOFF_MULTIPLIER=1.5`, `ANSWER_TIMEOUT_SEC=600`, `MAX_BLOCK_TEXT_SIZE=262144`
 - фоновый хук — `chat.agent_channel_poller`

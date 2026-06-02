@@ -30,7 +30,7 @@ DROP VIEW IF EXISTS v_db_oarb_ck_cs_validation;
 -- ╚══════════════════════════════════════════════════════════════════════╝
 DROP TABLE IF EXISTS t_db_oarb_audit_act_chat_audit_log;
 DROP TABLE IF EXISTS t_db_oarb_audit_act_chat_tool_metrics;
-DROP TABLE IF EXISTS t_db_oarb_audit_act_agent_messages;
+DROP TABLE IF EXISTS t_db_oarb_audit_act_chat_agent_messages_bus;
 DROP TABLE IF EXISTS t_db_oarb_audit_act_chat_files;
 DROP TABLE IF EXISTS t_db_oarb_audit_act_chat_messages;
 DROP TABLE IF EXISTS t_db_oarb_audit_act_chat_conversations;
@@ -61,6 +61,9 @@ DROP TABLE IF EXISTS t_db_oarb_audit_act_access_denied_audit;
 DROP TABLE IF EXISTS t_db_oarb_audit_act_app_singleton_lock;
 DROP TABLE IF EXISTS t_db_oarb_audit_act_user_roles;
 DROP TABLE IF EXISTS t_db_oarb_audit_act_roles;
+
+-- Standalone sequence admin-домена (не owned через BIGSERIAL → DROP TABLE её не удаляет)
+DROP SEQUENCE IF EXISTS t_db_oarb_audit_act_access_denied_audit_id_seq;
 
 -- Справочник пользователей (PG-реплика; на GP управляется ETL)
 DROP TABLE IF EXISTS t_db_oarb_ua_user;
@@ -112,7 +115,7 @@ DROP TABLE IF EXISTS t_db_oarb_ua_process_dict;
 -- ╚══════════════════════════════════════════════════════════════════════╝
 DROP TABLE IF EXISTS audit_workstation.t_db_oarb_audit_act_chat_audit_log;
 DROP TABLE IF EXISTS audit_workstation.t_db_oarb_audit_act_chat_tool_metrics;
-DROP TABLE IF EXISTS audit_workstation.t_db_oarb_audit_act_agent_messages;
+DROP TABLE IF EXISTS audit_workstation.t_db_oarb_audit_act_chat_agent_messages_bus;
 DROP TABLE IF EXISTS audit_workstation.t_db_oarb_audit_act_chat_files;
 DROP TABLE IF EXISTS audit_workstation.t_db_oarb_audit_act_chat_messages;
 DROP TABLE IF EXISTS audit_workstation.t_db_oarb_audit_act_chat_conversations;
@@ -145,8 +148,9 @@ DROP TABLE IF EXISTS audit_workstation.t_db_oarb_audit_act_app_singleton_lock;
 DROP TABLE IF EXISTS audit_workstation.t_db_oarb_audit_act_user_roles;
 DROP TABLE IF EXISTS audit_workstation.t_db_oarb_audit_act_roles;
 
--- Sequence admin-домена
+-- Sequences admin-домена (standalone: PK+DISTRIBUTED BY (id) не допускает BIGSERIAL)
 DROP SEQUENCE IF EXISTS audit_workstation.t_db_oarb_audit_act_admin_http_metrics_id_seq;
+DROP SEQUENCE IF EXISTS audit_workstation.t_db_oarb_audit_act_access_denied_audit_id_seq;
 ```
 
 ---

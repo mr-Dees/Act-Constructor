@@ -17,11 +17,11 @@
   ```powershell
   Compare-Object (Get-Content .env.example) (Get-Content .env)
   ```
-  Особо проверить: `CHAT__*`, `ACTS__*`, `OBSERVABILITY__*`, `SECURITY__*`. Канал к внешнему ИИ-агенту настраивается префиксом `CHAT__AGENT_CHANNEL__*` (`TABLE_NAME=agent_messages`, `POLL_MIN_INTERVAL_SEC=2.0`, `POLL_MAX_INTERVAL_SEC=10.0`, `POLL_BACKOFF_MULTIPLIER=1.5`, `ANSWER_TIMEOUT_SEC=600`, `MAX_BLOCK_TEXT_SIZE=262144`); лимит одновременных запросов — `CHAT__MAX_PARALLEL_STREAMS_PER_USER` (default 3).
+  Особо проверить: `CHAT__*`, `ACTS__*`, `OBSERVABILITY__*`, `SECURITY__*`. Канал к внешнему ИИ-агенту настраивается префиксом `CHAT__AGENT_CHANNEL__*` (`TABLE_NAME=chat_agent_messages_bus`, `POLL_MIN_INTERVAL_SEC=2.0`, `POLL_MAX_INTERVAL_SEC=10.0`, `POLL_BACKOFF_MULTIPLIER=1.5`, `ANSWER_TIMEOUT_SEC=600`, `MAX_BLOCK_TEXT_SIZE=262144`); лимит одновременных запросов — `CHAT__MAX_PARALLEL_STREAMS_PER_USER` (default 3).
 - [ ] **`DATABASE__TABLE_PREFIX`** соответствует БД. Дефолт `t_db_oarb_audit_act_`. При смене окружения проверить, что таблицы существуют под тем же префиксом — иначе `create_tables_if_not_exist` поднимет новый набор пустых таблиц и фактические данные «исчезнут».
 - [ ] **Свободен ли singleton-lock**. См. `troubleshooting.md` №20: если предыдущий процесс упал по kill -9, строка в `app_singleton_lock` живёт до `SECURITY__SINGLETON_LOCK_STALE_TTL_SEC` сек (default 60). В пределах окна старт упадёт.
 - [ ] **Версия миграций**. Все одноразовые SQL из `docs/migrations/` для апгрейда с предыдущей версии применены (см. §3).
-- [ ] **Внешний ИИ-агент жив**. Если деплой завязан на форварды в «Базу знаний ОАРБ» — убедиться, что внешний worker читает bus-таблицу `agent_messages` (вопросы со `status='pending'`/`role='user'`) и пишет ответы туда же. Без него форварды будут висеть до `CHAT__AGENT_CHANNEL__ANSWER_TIMEOUT_SEC` (600 сек default) и финализироваться как ошибка таймаута.
+- [ ] **Внешний ИИ-агент жив**. Если деплой завязан на форварды в «Базу знаний ОАРБ» — убедиться, что внешний worker читает bus-таблицу `chat_agent_messages_bus` (вопросы со `status='pending'`/`role='user'`) и пишет ответы туда же. Без него форварды будут висеть до `CHAT__AGENT_CHANNEL__ANSWER_TIMEOUT_SEC` (600 сек default) и финализироваться как ошибка таймаута.
 
 ---
 
@@ -53,7 +53,7 @@ uvicorn app.main:create_app --factory --host 0.0.0.0 --port 8005
      | `admin.db_pool_monitor` | Мониторинг asyncpg-пула |
      | `chat.tool_metrics_batcher` | `MetricsBatcher` метрик tool-вызовов |
      | `chat.audit_log_batcher` | `MetricsBatcher` chat-аудита |
-     | `chat.agent_channel_poller` | Polling bus-таблицы `agent_messages`, финализация форвард-черновиков (adaptive-backoff) |
+     | `chat.agent_channel_poller` | Polling bus-таблицы `chat_agent_messages_bus`, финализация форвард-черновиков (adaptive-backoff) |
 
 2. **Базовый health.**
    ```bash
@@ -89,7 +89,7 @@ uvicorn app.main:create_app --factory --host 0.0.0.0 --port 8005
 |---|---|
 | `drop-all-tables.md` | Тотальная очистка под пересоздание схемы (только dev) |
 
-**Канал к внешнему ИИ-агенту** при апгрейде с версий со старой шиной (3 таблицы `agent_requests` / `agent_response_events` / `agent_responses`) требует ручных шагов: единая bus-таблица `agent_messages` создаётся `create_tables_if_not_exist` автоматически, но в `chat_messages` добавилась колонка `agent_ref VARCHAR(36)` — её нужно дописать ALTER'ом на существующей БД. Старые 3 таблицы можно дропнуть после миграции. Настройки канала живут только в коде (`CHAT__AGENT_CHANNEL__*`). Для имитации внешнего агента см. [`external-agent-imitation.sql`](../integrations/external-agent-imitation.sql).
+**Канал к внешнему ИИ-агенту** при апгрейде с версий со старой шиной (3 таблицы `agent_requests` / `agent_response_events` / `agent_responses`) требует ручных шагов: единая bus-таблица `chat_agent_messages_bus` создаётся `create_tables_if_not_exist` автоматически, но в `chat_messages` добавилась колонка `agent_ref VARCHAR(36)` — её нужно дописать ALTER'ом на существующей БД. Старые 3 таблицы можно дропнуть после миграции. Настройки канала живут только в коде (`CHAT__AGENT_CHANNEL__*`). Для имитации внешнего агента см. [`external-agent-imitation.sql`](../integrations/external-agent-imitation.sql).
 
 **Если таблица не создалась автоматически** (старая версия create_tables, специфичные права):
 

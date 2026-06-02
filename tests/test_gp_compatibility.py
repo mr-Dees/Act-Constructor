@@ -271,7 +271,7 @@ class TestGreenplumSchemaCompatibility:
 
     def test_chat_messages_has_agent_ref_column(self):
         """chat_messages в обеих схемах содержит колонку agent_ref VARCHAR(36)
-        (Phase 1: ссылка draft-сообщения на строку-вопрос в agent_messages)."""
+        (Phase 1: ссылка draft-сообщения на строку-вопрос в chat_agent_messages_bus)."""
         base = Path(__file__).parent.parent / "app" / "domains" / "chat" / "migrations"
         for db_type in ("postgresql", "greenplum"):
             schema_path = base / db_type / "schema.sql"
@@ -289,7 +289,7 @@ class TestGreenplumSchemaCompatibility:
         """Старые 3-табличные artefact'ы моста удалены из обеих схем чата.
 
         Канал к внешнему агенту теперь — единственная bus-таблица
-        agent_messages; старые agent_requests / agent_response_events /
+        chat_agent_messages_bus; старые agent_requests / agent_response_events /
         agent_responses (+ их sequence) не должны создаваться.
         """
         for db_type in ("postgresql", "greenplum"):
@@ -309,8 +309,8 @@ class TestGreenplumSchemaCompatibility:
                 f"всё ещё в схеме"
             )
 
-    def test_agent_messages_gp_distribution_and_pk(self):
-        """agent_messages в GP-схеме имеет DISTRIBUTED BY (chat_id) ⊆ PRIMARY KEY (id, chat_id)."""
+    def test_chat_agent_messages_bus_gp_distribution_and_pk(self):
+        """chat_agent_messages_bus в GP-схеме имеет DISTRIBUTED BY (chat_id) ⊆ PRIMARY KEY (id, chat_id)."""
         schema_path = (
             Path(__file__).parent.parent
             / "app" / "domains" / "chat" / "migrations" / "greenplum" / "schema.sql"
@@ -323,31 +323,31 @@ class TestGreenplumSchemaCompatibility:
             cleaned = re.sub(r'--[^\n]*', '', raw)
             if (
                 re.search(r'\bCREATE\s+TABLE\b', cleaned, re.IGNORECASE)
-                and "{PREFIX}agent_messages" in cleaned
+                and "{PREFIX}chat_agent_messages_bus" in cleaned
             ):
                 create_stmt = cleaned
                 break
 
         assert create_stmt is not None, (
-            "GP-схема chat: CREATE TABLE agent_messages не найдено"
+            "GP-схема chat: CREATE TABLE chat_agent_messages_bus не найдено"
         )
 
         # DISTRIBUTED BY (chat_id) присутствует
         assert re.search(
             r'DISTRIBUTED\s+BY\s*\(\s*chat_id\s*\)', create_stmt, re.IGNORECASE
-        ), "DISTRIBUTED BY (chat_id) не найден в CREATE TABLE agent_messages"
+        ), "DISTRIBUTED BY (chat_id) не найден в CREATE TABLE chat_agent_messages_bus"
 
         # PRIMARY KEY содержит и id, и chat_id
         pk_match = re.search(r'PRIMARY\s+KEY\s*\(([^)]+)\)', create_stmt, re.IGNORECASE)
         assert pk_match is not None, (
-            "PRIMARY KEY не найден в CREATE TABLE agent_messages"
+            "PRIMARY KEY не найден в CREATE TABLE chat_agent_messages_bus"
         )
         pk_cols = {c.strip().lower() for c in pk_match.group(1).split(',')}
         assert 'chat_id' in pk_cols, (
-            f"chat_id отсутствует в PRIMARY KEY agent_messages: {pk_cols}"
+            f"chat_id отсутствует в PRIMARY KEY chat_agent_messages_bus: {pk_cols}"
         )
         assert 'id' in pk_cols, (
-            f"id отсутствует в PRIMARY KEY agent_messages: {pk_cols}"
+            f"id отсутствует в PRIMARY KEY chat_agent_messages_bus: {pk_cols}"
         )
 
     def test_gp_schema_no_forbidden_constructs(self):

@@ -1,4 +1,4 @@
-"""Тесты репозитория agent_messages (bus-таблица канала к внешнему агенту).
+"""Тесты репозитория chat_agent_messages_bus (bus-таблица канала к внешнему агенту).
 
 Покрывают: insert_question, get_by_uid, get_questions (пустой и непустой
 списки), set_status. Стратегия: mock_conn + autouse-патч get_adapter —
@@ -54,7 +54,7 @@ async def test_insert_question_returns_parsed_row(mock_conn):
     # Проверяем SQL-запрос
     sql, *params = mock_conn.fetchrow.call_args.args
     assert "INSERT INTO" in sql
-    assert "agent_messages" in sql
+    assert "chat_agent_messages_bus" in sql
     assert "'user'" in sql
     assert "'pending'" in sql
     assert "RETURNING *" in sql
@@ -206,7 +206,7 @@ async def test_set_status_executes_update(mock_conn):
 
     sql, status, conv_id = mock_conn.execute.call_args.args
     assert "UPDATE" in sql
-    assert "agent_messages" in sql
+    assert "chat_agent_messages_bus" in sql
     assert "status = $1" in sql
     assert "updated_at = CURRENT_TIMESTAMP" in sql
     assert "WHERE conversation_id = $2" in sql
@@ -225,7 +225,7 @@ async def test_count_active_for_user_returns_count(mock_conn):
 
     sql, user_id = mock_conn.fetchval.call_args.args
     assert "SELECT COUNT(*)" in sql
-    assert "agent_messages" in sql
+    assert "chat_agent_messages_bus" in sql
     assert "user_id = $1" in sql
     assert "role = 'user'" in sql
     assert "'pending'" in sql

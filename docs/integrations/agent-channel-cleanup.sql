@@ -3,7 +3,7 @@
 -- ============================================================================
 -- Назначение
 --   Удаляет старые завершённые строки из bus-таблицы:
---     {PREFIX}agent_messages — единый канал «вопрос ↔ ответ» между AW и агентом
+--     {PREFIX}chat_agent_messages_bus — единый канал «вопрос ↔ ответ» между AW и агентом
 --
 --   Удаляются ТОЛЬКО завершённые строки (status IN ('complete','error','timeout'));
 --   активные (pending/in_progress) НИКОГДА не трогаются — даже если «зависли»:
@@ -46,7 +46,7 @@ BEGIN;
 -- ── Завершённые строки старше 180 дней ──────────────────────────────────────
 -- role охватывает и вопросы ('user'), и ответы ('assistant'), и 'tool':
 -- все они закрываются через status, поэтому один DELETE покрывает всё.
-DELETE FROM {SCHEMA}.{PREFIX}agent_messages
+DELETE FROM {SCHEMA}.{PREFIX}chat_agent_messages_bus
 WHERE status IN ('complete', 'error', 'timeout')
   AND updated_at IS NOT NULL
   AND updated_at < CURRENT_TIMESTAMP - INTERVAL '180 days';
@@ -55,16 +55,16 @@ COMMIT;
 
 -- ── Опционально: дефрагментация после массовой чистки ───────────────────────
 -- PostgreSQL (autovacuum обычно справится сам, но при больших объёмах):
---   VACUUM ANALYZE {SCHEMA}.{PREFIX}agent_messages;
+--   VACUUM ANALYZE {SCHEMA}.{PREFIX}chat_agent_messages_bus;
 --
 -- Greenplum (VACUUM FULL — только при заметной фрагментации, требует exclusive lock):
---   VACUUM ANALYZE {SCHEMA}.{PREFIX}agent_messages;
+--   VACUUM ANALYZE {SCHEMA}.{PREFIX}chat_agent_messages_bus;
 
 -- ── Опционально: закрыть зависшие pending/in_progress старше 2 часов ────────
 -- AW закрывает сам через 10 мин, но при долгом даунтайме uvicorn могут остаться.
 -- Запускать ОТДЕЛЬНО (не в основной транзакции выше), только осознанно:
 --
--- UPDATE {SCHEMA}.{PREFIX}agent_messages
+-- UPDATE {SCHEMA}.{PREFIX}chat_agent_messages_bus
 -- SET status     = 'timeout',
 --     updated_at = CURRENT_TIMESTAMP
 -- WHERE role = 'user'

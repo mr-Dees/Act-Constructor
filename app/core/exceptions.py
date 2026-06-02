@@ -125,12 +125,12 @@ CHECK_CONSTRAINT_MESSAGES: dict[str, str] = {
         "Недопустимый статус сообщения. "
         "Допустимые значения: streaming, complete, failed"
     ),
-    # ── chat: agent_messages ─────────────────────────────────────────────────
-    "check_agent_messages_status_values": (
+    # ── chat: chat_agent_messages_bus ─────────────────────────────────────────────────
+    "check_chat_agent_messages_bus_status_values": (
         "Недопустимый статус сообщения агента. "
         "Допустимые значения: pending, in_progress, complete, error, timeout."
     ),
-    "check_agent_messages_role_values": (
+    "check_chat_agent_messages_bus_role_values": (
         "Недопустимая роль сообщения агента. "
         "Допустимые значения: user, assistant, tool."
     ),

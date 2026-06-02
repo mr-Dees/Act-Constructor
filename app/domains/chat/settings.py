@@ -15,9 +15,9 @@ class RetryPolicy(BaseModel):
 
 
 class AgentChannelSettings(BaseModel):
-    """Параметры канала к внешнему агенту через bus-таблицу agent_messages."""
+    """Параметры канала к внешнему агенту через bus-таблицу chat_agent_messages_bus."""
 
-    table_name: str = Field(default="agent_messages")
+    table_name: str = Field(default="chat_agent_messages_bus")
     poll_min_interval_sec: float = Field(default=2.0, gt=0.0)
     poll_max_interval_sec: float = Field(default=10.0, gt=0.0)
     poll_backoff_multiplier: float = Field(default=1.5, gt=1.0)

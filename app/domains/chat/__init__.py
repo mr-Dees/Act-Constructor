@@ -62,7 +62,7 @@ def _register_lifespan_hooks() -> None:
     * ``chat.audit_log_batcher`` — батчер audit-лога чата (перенесён
       из ``main.py`` во второй волне рефакторинга).
     * ``chat.agent_channel_poller`` — фоновый поллер ответов из bus-таблицы
-      ``agent_messages`` (дозаполнение черновиков-форвардов).
+      ``chat_agent_messages_bus`` (дозаполнение черновиков-форвардов).
 
     Сам ``_on_chat_shutdown`` остаётся на ``DomainDescriptor.on_shutdown`` —
     он закрывает кэшированные LLM-клиенты, а не инфраструктурные батчеры.
@@ -171,7 +171,7 @@ def _register_lifespan_hooks() -> None:
                 logger.exception("Ошибка при остановке батчера audit-лога чата")
 
     async def _start_agent_channel_poller(app: FastAPI) -> None:
-        """Поднимает AgentChannelPoller — поллер ответов из bus-таблицы agent_messages."""
+        """Поднимает AgentChannelPoller — поллер ответов из bus-таблицы chat_agent_messages_bus."""
         from app.core.settings_registry import get as get_domain_settings
         from app.domains.chat.services.agent_channel_poller import AgentChannelPoller
         from app.domains.chat.settings import ChatDomainSettings

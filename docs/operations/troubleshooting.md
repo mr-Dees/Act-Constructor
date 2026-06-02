@@ -84,13 +84,13 @@
 
 **Симптом:** После форварда в «Базу знаний ОАРБ» сообщение ассистента остаётся в статусе «печатает…» и через ~10 минут сменяется блоком ошибки о таймауте.
 
-**Причина:** канал к внешнему ИИ-агенту — это единая bus-таблица `agent_messages`. При форварде создаётся черновик `chat_messages` (status='streaming') и вопрос в шине; фоновый `AgentChannelPoller` поллит шину до терминального статуса записи (`complete`/`error`/`timeout`). Если агент не отвечает дольше `CHAT__AGENT_CHANNEL__ANSWER_TIMEOUT_SEC` (дефолт 600 = 10 мин) — `AgentChannelService.mark_timeout` финализирует черновик блоком ошибки (`build_timeout_error_block`).
+**Причина:** канал к внешнему ИИ-агенту — это единая bus-таблица `chat_agent_messages_bus`. При форварде создаётся черновик `chat_messages` (status='streaming') и вопрос в шине; фоновый `AgentChannelPoller` поллит шину до терминального статуса записи (`complete`/`error`/`timeout`). Если агент не отвечает дольше `CHAT__AGENT_CHANNEL__ANSWER_TIMEOUT_SEC` (дефолт 600 = 10 мин) — `AgentChannelService.mark_timeout` финализирует черновик блоком ошибки (`build_timeout_error_block`).
 
 **Решение:**
-1. Проверь таблицу `agent_messages`: есть ли запись-вопрос (`role='user'`) и появился ли ответ (`role='assistant'`). Статус ответа должен дойти до `complete`. Если ответа нет — внешний агент не подхватил вопрос.
+1. Проверь таблицу `chat_agent_messages_bus`: есть ли запись-вопрос (`role='user'`) и появился ли ответ (`role='assistant'`). Статус ответа должен дойти до `complete`. Если ответа нет — внешний агент не подхватил вопрос.
 2. Если агент действительно отвечает медленнее — поднять `CHAT__AGENT_CHANNEL__ANSWER_TIMEOUT_SEC` в `.env`.
 3. **Параметры polling** — `CHAT__AGENT_CHANNEL__POLL_MIN_INTERVAL_SEC` (2.0), `POLL_MAX_INTERVAL_SEC` (10.0), `POLL_BACKOFF_MULTIPLIER` (1.5). Интервал растёт от min к max при пустых тиках и сбрасывается при появлении ответа.
-4. Имя bus-таблицы настраивается через `CHAT__AGENT_CHANNEL__TABLE_NAME` (дефолт `agent_messages`).
+4. Имя bus-таблицы настраивается через `CHAT__AGENT_CHANNEL__TABLE_NAME` (дефолт `chat_agent_messages_bus`).
 
 **См. также:** `app/domains/chat/services/agent_channel.py`, `agent_channel_poller.py`, `docs/integrations/external-agent-imitation.sql`.
 
@@ -98,7 +98,7 @@
 
 ### 4a. Форвард в «Базу знаний ОАРБ» не срабатывает
 
-**Симптом:** Тумблер «База знаний ОАРБ» включён, но вопрос не уходит во внешний агент — ответ генерирует локальная LLM, либо в шине `agent_messages` не появляется запись-вопрос.
+**Симптом:** Тумблер «База знаний ОАРБ» включён, но вопрос не уходит во внешний агент — ответ генерирует локальная LLM, либо в шине `chat_agent_messages_bus` не появляется запись-вопрос.
 
 **Причина:** режим тумблера передаётся form-параметром `agent_mode` (`off` | `adaptive` | `always`; фронт хранит позицию в localStorage `assistant_oarb_mode`):
 - `off` / `adaptive` — локальная LLM/GigaChat исполняется синхронно в POST через `orchestrator.run(...)`. В режиме `adaptive` форвард-tool есть в наборе, и оркестратор сам решает, форвардить ли вопрос.

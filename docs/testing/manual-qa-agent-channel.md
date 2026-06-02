@@ -1,23 +1,23 @@
-# Manual QA — канал к внешнему ИИ-агенту (agent_messages)
+# Manual QA — канал к внешнему ИИ-агенту (chat_agent_messages_bus)
 
 Чек-лист ручной проверки канала к внешнему ИИ-агенту (база знаний ОАРБ) перед merge'ом ветки.
 
-> В тексте ниже имена таблиц (`agent_messages`, `chat_messages`, `chat_files`) упоминаются без префикса для краткости. В БД они хранятся с префиксом `DATABASE__TABLE_PREFIX` (по умолчанию `t_db_oarb_audit_act_`).
+> В тексте ниже имена таблиц (`chat_agent_messages_bus`, `chat_messages`, `chat_files`) упоминаются без префикса для краткости. В БД они хранятся с префиксом `DATABASE__TABLE_PREFIX` (по умолчанию `t_db_oarb_audit_act_`).
 
 ## Архитектура (кратко)
 
-- Канал к агенту — единая bus-таблица `agent_messages` (вопрос от AW = строка `role='user'`, ответ агента = строка `role='assistant'`). Подробная семантика колонок и сценарии имитации — `docs/integrations/external-agent-imitation.sql`.
+- Канал к агенту — единая bus-таблица `chat_agent_messages_bus` (вопрос от AW = строка `role='user'`, ответ агента = строка `role='assistant'`). Подробная семантика колонок и сценарии имитации — `docs/integrations/external-agent-imitation.sql`.
 - Транспорта SSE нет. POST сообщения возвращает `{message_id}`; фронт затем поллит `GET /api/v1/chat/conversations/{cid}/messages/{message_id}` до терминального статуса и рендерит ответ целиком с декоративным «эффектом печати» (токен-стриминга нет).
 - Режим работы задаётся form-параметром `agent_mode`:
   - `off` / `adaptive` — локальная LLM (или GigaChat) исполняется синхронно в POST через `orchestrator.run(...)`. В `adaptive` оркестратор сам решает форвардить (forward-tool в наборе).
   - `always` — прямой проброс вопроса в агента, минуя LLM.
-- Форвард создаёт черновик `chat_messages` (`status='streaming'`) + строку-вопрос в `agent_messages`; фоновый `AgentChannelPoller` поллит шину; `AgentChannelService.try_finalize` мапит ответ агента в блоки и финализирует черновик (`complete`/`failed`).
+- Форвард создаёт черновик `chat_messages` (`status='streaming'`) + строку-вопрос в `chat_agent_messages_bus`; фоновый `AgentChannelPoller` поллит шину; `AgentChannelService.try_finalize` мапит ответ агента в блоки и финализирует черновик (`complete`/`failed`).
 - Тумблер «База знаний ОАРБ» в UI — 3 позиции: Выключен / Адаптивный / Всегда (localStorage-ключ `assistant_oarb_mode`). Две другие БЗ («источников», «инструментов») в UI выключены.
 
 ## Подготовка
 
 1. Поднять PostgreSQL и применить миграцию (`app/domains/chat/migrations/postgresql/schema.sql`):
-   - Должна появиться таблица `t_db_oarb_audit_act_agent_messages` (префикс из `DATABASE__TABLE_PREFIX`).
+   - Должна появиться таблица `t_db_oarb_audit_act_chat_agent_messages_bus` (префикс из `DATABASE__TABLE_PREFIX`).
    - В `chat_messages` должна быть колонка `agent_ref VARCHAR(36)`.
 
 2. Заполнить `.env.local` (dev на OpenRouter):
@@ -29,7 +29,7 @@
    CHAT__RETRY__ON_429=true
    CHAT__RETRY__ON_5XX=true
    CHAT__MAX_PARALLEL_STREAMS_PER_USER=3
-   CHAT__AGENT_CHANNEL__TABLE_NAME=agent_messages
+   CHAT__AGENT_CHANNEL__TABLE_NAME=chat_agent_messages_bus
    CHAT__AGENT_CHANNEL__POLL_MIN_INTERVAL_SEC=2.0
    CHAT__AGENT_CHANNEL__POLL_MAX_INTERVAL_SEC=10.0
    CHAT__AGENT_CHANNEL__POLL_BACKOFF_MULTIPLIER=1.5
@@ -44,20 +44,20 @@
 ### 1. Локальный ответ (тумблер «Выключен»)
 - Тумблер «База знаний ОАРБ» — в позиции «Выключен».
 - Написать в чат: «Привет, как дела?»
-- Ожидаемо: LLM отвечает синхронно (форварда нет, строк в `agent_messages` не появляется).
-- Проверить: `SELECT count(*) FROM t_db_oarb_audit_act_agent_messages` — не должно увеличиться.
+- Ожидаемо: LLM отвечает синхронно (форварда нет, строк в `chat_agent_messages_bus` не появляется).
+- Проверить: `SELECT count(*) FROM t_db_oarb_audit_act_chat_agent_messages_bus` — не должно увеличиться.
 
 ### 2. Прямой форвард на внешнего агента (тумблер «Всегда»)
 - Перевести тумблер в позицию «Всегда».
 - Написать: «Расскажи про регламент 2024 года».
-- Ожидаемо: появилась строка `role='user'`, `status='pending'` в `agent_messages`; в чате — облако-черновик с эффектом печати.
+- Ожидаемо: появилась строка `role='user'`, `status='pending'` в `chat_agent_messages_bus`; в чате — облако-черновик с эффектом печати.
 - В DBeaver выполнить сценарий §1 из `external-agent-imitation.sql` (вставить ответ агента + закрыть вопрос: `reply_to`, `status='complete'`).
 - Ожидаемо: после ближайшего poll-тика (≤ `POLL_MAX_INTERVAL_SEC`) в чате появился финальный текст ответа; рассуждения из `metadata.thinking` отрисованы reasoning-блоком.
 
 ### 3. Адаптивный форвард (тумблер «Адаптивный»)
 - Перевести тумблер в позицию «Адаптивный».
 - Написать вопрос, требующий знаний базы: «Что в регламенте 2024 года про КСО?».
-- Ожидаемо: оркестратор вызывает forward-tool, появляется строка-вопрос в `agent_messages`.
+- Ожидаемо: оркестратор вызывает forward-tool, появляется строка-вопрос в `chat_agent_messages_bus`.
 - Завершить ответ агента (§1 имитации) — ответ отрисуется в чате.
 - Контрольный кейс: тривиальный вопрос («2+2?») в «Адаптивном» оркестратор отвечает локально без записи в шину.
 

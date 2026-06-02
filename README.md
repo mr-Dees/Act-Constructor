@@ -97,7 +97,7 @@ uvicorn app.main:app --host 0.0.0.0 --port 8005
 | [frontend-architecture.md](docs/architecture/frontend-architecture.md) | Фронт-архитектура: 3 зоны (shared/portal/constructor), ES-модули без бандлера, entry-модули, CSS. |
 | [chat-frontend-architecture.md](docs/architecture/chat-frontend-architecture.md) | Deep-dive по фронту чата: ядерные модули, шина событий, транспорт POST + polling, режимы inline/modal/popup, client actions. |
 | [cross-domain-contracts.md](docs/architecture/cross-domain-contracts.md) | Межсервисные контракты: factory-registry, ChatTool, канал к внешнему агенту, URL-контракты. |
-| [agent-channel-sequence.md](docs/architecture/agent-channel-sequence.md) | Sequence-диаграммы канала к внешнему ИИ-агенту: единая bus-таблица `agent_messages`, режимы `agent_mode`, poll-транспорт. |
+| [agent-channel-sequence.md](docs/architecture/agent-channel-sequence.md) | Sequence-диаграммы канала к внешнему ИИ-агенту: единая bus-таблица `chat_agent_messages_bus`, режимы `agent_mode`, poll-транспорт. |
 | [data-model-acts.md](docs/architecture/data-model-acts.md) | Модель данных домена актов: таблицы, связи, дерево содержимого. |
 
 ### ⚙️ Operations — эксплуатация и деплой
@@ -108,7 +108,7 @@ uvicorn app.main:app --host 0.0.0.0 --port 8005
 | [troubleshooting.md](docs/operations/troubleshooting.md) | Типовые проблемы и решения (Kerberos, GP-pool, JupyterHub-proxy, 413, LLM, тесты, чат). |
 | [operations-recovery.md](docs/operations/operations-recovery.md) | Восстановление после сбоев: зависшие forward-запросы, singleton-lock, батчеры. |
 | [logging.md](docs/operations/logging.md) | Логирование: логгеры, `request_id`, JSON/text форматы, PII, файловый handler. |
-| [agent-channel-production-checklist.md](docs/operations/agent-channel-production-checklist.md) | Прод-чек-лист канала к внешнему агенту: retention, sizing, мониторинг по `agent_messages.status`. |
+| [agent-channel-production-checklist.md](docs/operations/agent-channel-production-checklist.md) | Прод-чек-лист канала к внешнему агенту: retention, sizing, мониторинг по `chat_agent_messages_bus.status`. |
 
 ### ✅ Testing — тестирование и ручной QA
 
@@ -123,7 +123,7 @@ uvicorn app.main:app --host 0.0.0.0 --port 8005
 
 | Документ | О чём |
 |---|---|
-| [integrations/external-agent-imitation.sql](docs/integrations/external-agent-imitation.sql) | SQL-стенд для имитации внешнего ИИ-агента (ответы в bus-таблицу `agent_messages`). |
+| [integrations/external-agent-imitation.sql](docs/integrations/external-agent-imitation.sql) | SQL-стенд для имитации внешнего ИИ-агента (ответы в bus-таблицу `chat_agent_messages_bus`). |
 | [integrations/agent-channel-cleanup.sql](docs/integrations/agent-channel-cleanup.sql) | Очистка завершённых строк bus-таблицы канала. |
 | [migrations/drop-all-tables.md](docs/migrations/drop-all-tables.md) | DROP всех таблиц приложения для пересоздания схемы (только dev). |
 

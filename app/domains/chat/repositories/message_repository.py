@@ -114,7 +114,7 @@ class MessageRepository(BaseRepository):
         существующей записи и возвращает её — runner продолжит
         материализацию того же message_id, а не создаст новый.
 
-        agent_ref — conversation_id строки-вопроса в agent_messages (uid
+        agent_ref — conversation_id строки-вопроса в chat_agent_messages_bus (uid
         сообщения); если передан, связывает draft-сообщение с bus-таблицей.
         """
         try:

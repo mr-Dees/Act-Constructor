@@ -95,7 +95,7 @@ CSS повторяет тройное разделение — см. главу 
 
 ### 1.4 Связанные документы
 
-- [`docs/architecture/chat-frontend-architecture.md`](chat-frontend-architecture.md) — чат-фронт (12 модулей, транспорт polling по шине `agent_messages`).
+- [`docs/architecture/chat-frontend-architecture.md`](chat-frontend-architecture.md) — чат-фронт (12 модулей, транспорт polling по шине `chat_agent_messages_bus`).
 - [`docs/guides/developer-guide.md`](../guides/developer-guide.md) §4 — высокоуровневый обзор фронта.
 - [`docs/guides/developer-guide.md`](../guides/developer-guide.md) §10 — UX/persistence/lock.
 - [`docs/architecture/agent-channel-sequence.md`](agent-channel-sequence.md) — sequence-диаграммы forward'а к внешнему агенту.

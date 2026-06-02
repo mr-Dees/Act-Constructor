@@ -187,7 +187,7 @@ async def send_message(
 
     # Режим «Выключен» или «Адаптивный» (off / adaptive / любое другое):
     # оркестратор работает синхронно. В adaptive forward-тул доступен LLM —
-    # при его вызове agent_loop форвардит вопрос в bus-канал agent_messages
+    # при его вызове agent_loop форвардит вопрос в bus-канал chat_agent_messages_bus
     # (см. _handle_forward_terminal), draft дозаполняет поллер.
     from app.domains.chat.services.orchestrator import Orchestrator
 

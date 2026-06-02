@@ -1,4 +1,4 @@
-"""Фоновый поллер ответов из bus-таблицы agent_messages.
+"""Фоновый поллер ответов из bus-таблицы chat_agent_messages_bus.
 
 Один asyncio-task на процесс. Следит за draft-сообщениями (status='streaming',
 agent_ref IS NOT NULL) и финализирует их, когда внешний агент заполнит reply_to
@@ -23,7 +23,7 @@ logger = logging.getLogger("audit_workstation.domains.chat.services.agent_channe
 
 
 class AgentChannelPoller:
-    """Process-level поллер ответов агента через bus-таблицу agent_messages.
+    """Process-level поллер ответов агента через bus-таблицу chat_agent_messages_bus.
 
     Инжектируемые зависимости ``now`` и ``db`` упрощают тестирование
     без реального event loop и без реальной БД.

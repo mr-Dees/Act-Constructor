@@ -8,7 +8,7 @@
 - [`docs/architecture/frontend-architecture.md`](../architecture/frontend-architecture.md) — **единый deep-dive по фронту** (constructor + portal + shared): ES-модули и entry-файлы, AppState/StorageManager/LockManager, per-node render API, диалоги, безопасность, a11y, CSS. Чат — отдельным документом ниже.
 - [`docs/architecture/chat-frontend-architecture.md`](../architecture/chat-frontend-architecture.md) — deep-dive по фронт-архитектуре чата: 11 ядерных модулей, polling сообщений, режимы inline/modal/popup.
 - [`docs/integrations/external-agent-imitation.sql`](../integrations/external-agent-imitation.sql) — SQL-сниппеты для имитации внешнего ИИ-агента (см. §7.8).
-- Retention bus-таблицы `agent_messages` — см. §9.6 (кода ретеншена в приложении нет, очистка — задача DBA).
+- Retention bus-таблицы `chat_agent_messages_bus` — см. §9.6 (кода ретеншена в приложении нет, очистка — задача DBA).
 - [`docs/testing/manual-qa-agent-channel.md`](../testing/manual-qa-agent-channel.md) — чек-лист ручного QA моста к внешнему агенту.
 - [`docs/architecture/data-model-acts.md`](../architecture/data-model-acts.md) — модель данных дерева актов.
 - [`docs/operations/logging.md`](../operations/logging.md) — формат логов и `request_id`-трассировка.
@@ -106,7 +106,7 @@
   - [11.2 Orchestrator: итерации agent loop](#112-orchestrator-итерации-agent-loop)
   - [11.3 ToolCallAccumulator: сборка стрим-fragments](#113-toolcallaccumulator-сборка-стрим-fragments)
   - [11.4 GigaChat-адаптер: native functions[] под капотом](#114-gigachat-адаптер-native-functions-под-капотом)
-  - [11.5 Канал к внешнему ИИ-агенту: bus-таблица agent_messages](#115-канал-к-внешнему-ии-агенту-bus-таблица-agent_messages)
+  - [11.5 Канал к внешнему ИИ-агенту: bus-таблица chat_agent_messages_bus](#115-канал-к-внешнему-ии-агенту-bus-таблица-chat_agent_messages_bus)
   - [11.6 AgentChannelPoller и AgentChannelService: фоновое сохранение ассистент-сообщений](#116-agentchannelpoller-и-agentchannelservice-фоновое-сохранение-ассистент-сообщений)
   - [11.7 Форвард и статусы chat_messages](#117-форвард-и-статусы-chat_messages)
 - (§12 и §13 — зарезервированы)
@@ -1350,7 +1350,7 @@ sequenceDiagram
     participant API as POST /messages (FastAPI)
     participant S as AgentChannelService
     participant P as AgentChannelPoller (фоновая task)
-    participant BUS as agent_messages (шина)
+    participant BUS as chat_agent_messages_bus (шина)
 
     U->>API: POST /conversations/{id}/messages (agent_mode=always|adaptive)
     API->>S: submit(...)
@@ -1410,7 +1410,7 @@ class ActCrudRepository(BaseRepository):
 - Плейсхолдеры в SQL: `{SCHEMA}.` (префикс схемы), `{PREFIX}` (`DATABASE__TABLE_PREFIX`), `{REF_*}` (ссылки на внешние таблицы из `migration_substitutions`). Bare-имена без `{PREFIX}` — баг: имена разойдутся PG/GP.
 - UUID-id хранятся как `VARCHAR(36)`, не как PG-тип `UUID`. Python шлёт `str(uuid.uuid4())` строкой; одно правило для PG и GP.
 - В Greenplum 6.x (= PG 9.4) НЕЛЬЗЯ: `CREATE INDEX/SEQUENCE IF NOT EXISTS`, `ON CONFLICT DO UPDATE`, `ADD COLUMN IF NOT EXISTS`, `jsonb_set/jsonb_pretty`, `gen_random_uuid()`, `EXECUTE FUNCTION` в триггерах, `BIGSERIAL` вместе с `DISTRIBUTED BY`. GP-адаптер исполняет SQL по одному statement и глотает `DuplicateTableError`/`DuplicateObjectError`. Регрессии — `tests/test_gp_compatibility.py`.
-- В Greenplum `DISTRIBUTED BY (col)` должен быть подмножеством каждого `PRIMARY KEY` и `UNIQUE`. Для co-location по foreign-key используют составной PK `(id, foreign_id)` с `id` ведущим и `DISTRIBUTED BY (foreign_id)`. Пример — `agent_messages` (PK `(id, chat_id)`, `DISTRIBUTED BY (chat_id)`) в `app/domains/chat/migrations/greenplum/schema.sql`. Регрессия — `test_distributed_by_subset_of_primary_key`.
+- В Greenplum `DISTRIBUTED BY (col)` должен быть подмножеством каждого `PRIMARY KEY` и `UNIQUE`. Для co-location по foreign-key используют составной PK `(id, foreign_id)` с `id` ведущим и `DISTRIBUTED BY (foreign_id)`. Пример — `chat_agent_messages_bus` (PK `(id, chat_id)`, `DISTRIBUTED BY (chat_id)`) в `app/domains/chat/migrations/greenplum/schema.sql`. Регрессия — `test_distributed_by_subset_of_primary_key`.
 - Имена: таблицы `{PREFIX}<name>`, индексы `idx_{PREFIX}<table>_<purpose>`, sequence (только GP) `seq_<table>_id`, CHECK `check_<table>_<purpose>` (без `{PREFIX}`, см. §6.5a).
 
 #### 6.5.2 Как `discover_domains` подставляет значения
@@ -1682,10 +1682,10 @@ agent_mode == "off" | "adaptive":
    └─→ adaptive + forward-tool вызван → _handle_forward_terminal → AgentChannelService.submit
 
 agent_mode == "always":
-   AgentChannelService.submit — прямой проброс в шину agent_messages
+   AgentChannelService.submit — прямой проброс в шину chat_agent_messages_bus
 
 forward (always / adaptive-решение):
-   submit → INSERT вопрос в agent_messages + черновик chat_messages (status='streaming', agent_ref)
+   submit → INSERT вопрос в chat_agent_messages_bus + черновик chat_messages (status='streaming', agent_ref)
             + subscribe в AgentChannelPoller (фоновый poll → try_finalize → status='complete')
    ▼
 Browser: GET /messages/{message_id} (polling до терминального статуса) → рендер целиком
@@ -1733,7 +1733,7 @@ always / forward: submit вопроса в шину + черновик (status='
 | `agent_loop` | `agent_loop.py` | Pure-функция `run_agent_loop` — тело цикла чата (LLM-раунды + tool calls). `_handle_forward_terminal` обрабатывает терминальный tool_call `forward_to_knowledge_agent` (вызов `AgentChannelService.submit`) |
 | `llm_call` | `llm_call.py` | `call_llm_with_fallback`: retry + circuit breaker + переключение primary/fallback |
 | `tool_executor` | `tool_executor.py` | `execute_tool_call`: валидация args, конвертация типов, `asyncio.wait_for(TOOL_EXECUTION_TIMEOUT)`, запись `tool_metric` через `MetricsBatcher`. Враппер `Orchestrator._execute_tool_call` оставлен для совместимости с тестами, патчащими его на инстансе |
-| `AgentChannelService` | `agent_channel.py` | Канал к внешнему агенту через bus-таблицу `agent_messages`: `submit`, `try_finalize`, `mark_timeout`; `map_answer_to_blocks` (ответ → блоки), `build_timeout_error_block` (см. §11.5–§11.6) |
+| `AgentChannelService` | `agent_channel.py` | Канал к внешнему агенту через bus-таблицу `chat_agent_messages_bus`: `submit`, `try_finalize`, `mark_timeout`; `map_answer_to_blocks` (ответ → блоки), `build_timeout_error_block` (см. §11.5–§11.6) |
 | `AgentChannelPoller` | `agent_channel_poller.py` | Фоновый poll шины: `subscribe`/`unsubscribe`/`_tick`/`_run` (adaptive-backoff без удержания conn в sleep)/`reconcile`/`start`/`stop`/`get_status` |
 | `button_translator` | `button_translator.py` | `translate_buttons`: кнопка с `action_id` зарегистрированного `ChatTool` → client-action `open_url` |
 | `forward_tool_factory` | `forward_tool_factory.py` | `build_forward_tool_descriptor()` — статический ChatTool `forward_to_knowledge_agent` для режима `adaptive` |
@@ -1742,7 +1742,7 @@ always / forward: submit вопроса в шину + черновик (status='
 | `UserRateLimiter` | `user_rate_limiter.py` | Per-user скользящее окно 60 сек на POST `/messages` (лимит — `CHAT__RATE_LIMIT_MESSAGES_PER_MINUTE_PER_USER`). При превышении — `ChatLimitError(429)` |
 | `ChatAuditService` | `chat_audit_service.py` | Метрики использования tool'ов: `tool_name`, `user`, `latency_ms`, `success`. Пишет через общий `MetricsBatcher` (см. §9.5a) — не блокирует горячий путь |
 
-**Persistence:** `chat_conversations`, `chat_messages` (+ колонка `agent_ref`), `chat_files`, bus-таблица `agent_messages` (см. §11.5).
+**Persistence:** `chat_conversations`, `chat_messages` (+ колонка `agent_ref`), `chat_files`, bus-таблица `chat_agent_messages_bus` (см. §11.5).
 
 **Транспорт.** SSE нигде нет. POST `/messages` возвращает `{message_id}`; фронт поллит `GET /messages/{message_id}` до терминального статуса (`complete`/`failed`) и рендерит сообщение целиком (декоративный «эффект печати», без токен-стриминга).
 
@@ -1888,7 +1888,7 @@ orchestrator = Orchestrator(msg_service, conv_service, settings)
 assistant_message_id = str(uuid.uuid4())
 
 # run() исполняется СИНХРОННО в POST (SSE нет). Внутри делегирует в agent_loop.run_agent_loop(...).
-# В режиме agent_mode='adaptive' доступен forward-tool; терминальный forward уходит в шину agent_messages.
+# В режиме agent_mode='adaptive' доступен forward-tool; терминальный forward уходит в шину chat_agent_messages_bus.
 await orchestrator.run(
     conversation_id, message, files, domains,
     message_id=assistant_message_id, agent_mode=agent_mode,
@@ -1993,7 +1993,7 @@ WHERE lock_expires_at <= CURRENT_TIMESTAMP AND locked_by IS NOT NULL
 
 > Это **подстраховка** — основной путь снятия блокировок остаётся через `ActLockService.unlock()` и автопродление через `inactivity_check`. Cleanup-таск ловит сценарии: kill -9 во время редактирования, обрыв сети с lock'ом на сервере, баг в логике inactivity-watcher'а.
 
-**3. `AgentChannelPoller`** (`app/domains/chat/services/agent_channel_poller.py`). Один asyncio-task на процесс, поллит bus-таблицу `agent_messages` по подписанным `question_uid` (см. §6.3 sequence-diagram, §11.6). Adaptive backoff:
+**3. `AgentChannelPoller`** (`app/domains/chat/services/agent_channel_poller.py`). Один asyncio-task на процесс, поллит bus-таблицу `chat_agent_messages_bus` по подписанным `question_uid` (см. §6.3 sequence-diagram, §11.6). Adaptive backoff:
 
 ```
 interval = poll_min_interval_sec  # при наличии ответов или без подписок
@@ -2186,20 +2186,20 @@ chat-modal.js / chat-popup.js
 - **DOM API в `chat-history`**: список бесед рендерится через `document.createElement`/`textContent`/`dataset`, не через `innerHTML` — защита от XSS через title беседы (= первое сообщение пользователя)
 - **Whitelist в `chat-client-actions`**: `open_url` принимает только `http:/https:/mailto:/relative`; `trigger_sdk` — только методы из `ALLOWED_SDK_METHODS` (по умолчанию пустой)
 
-### 7.8 Внешний ИИ-агент через bus-таблицу agent_messages
+### 7.8 Внешний ИИ-агент через bus-таблицу chat_agent_messages_bus
 
-Для запросов про **данные/контент** (БЗ актов, регламенты, нормативы) запрос форвардится внешнему ИИ-агенту коллег через **единую bus-таблицу** `agent_messages` в основной БД. Агент-сервис разрабатывается отдельной командой; AW не делает HTTP-запросов к нему — взаимодействие исключительно через эту таблицу. Полная картина транспорта — §11.5–§11.7.
+Для запросов про **данные/контент** (БЗ актов, регламенты, нормативы) запрос форвардится внешнему ИИ-агенту коллег через **единую bus-таблицу** `chat_agent_messages_bus` в основной БД. Агент-сервис разрабатывается отдельной командой; AW не делает HTTP-запросов к нему — взаимодействие исключительно через эту таблицу. Полная картина транспорта — §11.5–§11.7.
 
-> Имена `agent_messages`, `chat_messages`, `chat_files` далее даны без префикса. В БД они хранятся с префиксом `DATABASE__TABLE_PREFIX` (по умолчанию `t_db_oarb_audit_act_`); полные SQL-сниппеты для копи-пасты — в `docs/integrations/external-agent-imitation.sql`.
+> Имена `chat_agent_messages_bus`, `chat_messages`, `chat_files` далее даны без префикса. В БД они хранятся с префиксом `DATABASE__TABLE_PREFIX` (по умолчанию `t_db_oarb_audit_act_`); полные SQL-сниппеты для копи-пасты — в `docs/integrations/external-agent-imitation.sql`.
 
 **Поток** (SSE нигде нет):
 
 1. Клиент POST `/messages` с form-параметром `agent_mode` (`off`/`adaptive`/`always`). В `off`/`adaptive` оркестратор исполняется синхронно (`orchestrator.run`); в `always` — прямой проброс.
-2. Форвард (`always` либо решение оркестратора в `adaptive`): `AgentChannelService.submit` **в одной транзакции** INSERT'ит вопрос в `agent_messages` (`role='user'`, `status='pending'`) + создаёт черновик `chat_messages` (`status='streaming'`, `agent_ref=<uid вопроса>`), затем подписывает его в `AgentChannelPoller`. Транзакция обязательна: вопрос без draft'а (или наоборот) оставил бы осиротевшую строку, вечно занимающую слот лимита. Если поллер не инициализирован — форвард **не выполняется**, сразу пишется error-сообщение (осиротевший streaming-draft не создаётся, иначе беседу нельзя было бы удалить).
+2. Форвард (`always` либо решение оркестратора в `adaptive`): `AgentChannelService.submit` **в одной транзакции** INSERT'ит вопрос в `chat_agent_messages_bus` (`role='user'`, `status='pending'`) + создаёт черновик `chat_messages` (`status='streaming'`, `agent_ref=<uid вопроса>`), затем подписывает его в `AgentChannelPoller`. Транзакция обязательна: вопрос без draft'а (или наоборот) оставил бы осиротевшую строку, вечно занимающую слот лимита. Если поллер не инициализирован — форвард **не выполняется**, сразу пишется error-сообщение (осиротевший streaming-draft не создаётся, иначе беседу нельзя было бы удалить).
 3. POST отдаёт `{message_id}`. Фронт поллит `GET /messages/{message_id}` до терминального статуса.
 4. Фоновый `AgentChannelPoller` поллит шину; на ответ агента `AgentChannelService.try_finalize` маппит ответ в блоки (`map_answer_to_blocks`), финализирует черновик (`status='complete'`) **и сам закрывает вопрос в шине** (`set_status(..., 'complete'|'error')`) — AW source-of-truth освобождения слота лимита, не полагается на то, что внешний агент проставил терминальный `status` (он мог выставить только `reply_to`). По истечении `ANSWER_TIMEOUT_SEC` — `mark_timeout` (`status='failed'`).
 
-**Bus-таблица `agent_messages`** (`app/domains/chat/migrations/{postgresql,greenplum}/schema.sql`):
+**Bus-таблица `chat_agent_messages_bus`** (`app/domains/chat/migrations/{postgresql,greenplum}/schema.sql`):
 
 | Колонка | Назначение |
 |---|---|
@@ -2234,11 +2234,11 @@ chat-modal.js / chat-popup.js
 
 #### Шпаргалка по имитации агента
 
-Полный SQL — в `docs/integrations/external-agent-imitation.sql` (DBeaver/psql), уже обновлён под единую таблицу `agent_messages`. Минимум: найти черновик-вопрос пользователя в `agent_messages` (`role='user'`, `status='pending'`), затем вставить ответ агента (`role='assistant'`, `reply_to=<uid вопроса>`, `content`/`metadata.thinking`/`buttons`/`media` по необходимости) и перевести вопрос в `status='complete'`. `AgentChannelPoller` подхватит ответ и финализирует черновик `chat_messages`.
+Полный SQL — в `docs/integrations/external-agent-imitation.sql` (DBeaver/psql), уже обновлён под единую таблицу `chat_agent_messages_bus`. Минимум: найти черновик-вопрос пользователя в `chat_agent_messages_bus` (`role='user'`, `status='pending'`), затем вставить ответ агента (`role='assistant'`, `reply_to=<uid вопроса>`, `content`/`metadata.thinking`/`buttons`/`media` по необходимости) и перевести вопрос в `status='complete'`. `AgentChannelPoller` подхватит ответ и финализирует черновик `chat_messages`.
 
 #### Когда «у меня не работает»
 
-- В чате тишина после вопроса → нет вопроса в `agent_messages` ⇒ форвард не произошёл (тумблер «База знаний ОАРБ» = Выключен, либо `adaptive` и LLM не вызвал forward-tool, либо tool не зарегистрирован для домена).
+- В чате тишина после вопроса → нет вопроса в `chat_agent_messages_bus` ⇒ форвард не произошёл (тумблер «База знаний ОАРБ» = Выключен, либо `adaptive` и LLM не вызвал forward-tool, либо tool не зарегистрирован для домена).
 - Ответ не появляется → проверь, что `AgentChannelPoller` стартовал (`chat.agent_channel_poller` hook в логах startup) и подписка прошла. Параметры цикла — `CHAT__AGENT_CHANNEL__POLL_MIN_INTERVAL_SEC` / `POLL_MAX_INTERVAL_SEC` / `POLL_BACKOFF_MULTIPLIER`.
 - Сообщение «зависло» в статусе `streaming` дольше `CHAT__AGENT_CHANNEL__ANSWER_TIMEOUT_SEC` → `mark_timeout` переведёт его в `failed` с error-блоком.
 - HTTP 422 при отправке → достигнут `CHAT__MAX_PARALLEL_STREAMS_PER_USER` активных запросов пользователя.
@@ -2248,7 +2248,7 @@ chat-modal.js / chat-popup.js
 Внешний агент возвращает кнопки в **семантическом** виде — с `action_id`, равным имени серверного `ChatTool` (например, `acts.open_act_page`). Фронт такой `action_id` не понимает: его реестр (`window.ClientActionsRegistry`) знает только клиентские примитивы — `open_url`, `notify`, `trigger_sdk`. Между ними должен встать **резолвер**, который умеет ходить в БД и превращать «открой акт КМ-23-001» в `open_url` с готовым `/constructor?act_id=42`. Этим занимается `button_translator`.
 
 **Где применяется** (`app/domains/chat/services/button_translator.py`):
-- В `AgentChannelService.map_answer_to_blocks` при финализации ответа агента — кнопки из `agent_messages.buttons` транслируются перед записью в `chat_messages.content`.
+- В `AgentChannelService.map_answer_to_blocks` при финализации ответа агента — кнопки из `chat_agent_messages_bus.buttons` транслируются перед записью в `chat_messages.content`.
 - На локальном LLM-пути, когда ассистент эмитит `buttons`-блок.
 
 `translate_buttons` резолвит `action_id` через реестр ChatTool (`get_tool`) и зовёт зарегистрированный `button_translator` тула.
@@ -3105,11 +3105,11 @@ def test_chat_settings_defaults():
 
 #### Chat: agent_channel (внешний ИИ-агент)
 
-Канал к внешнему агенту через bus-таблицу `agent_messages` (env-префикс `CHAT__AGENT_CHANNEL__`). См. §7.8, §11.5–§11.7.
+Канал к внешнему агенту через bus-таблицу `chat_agent_messages_bus` (env-префикс `CHAT__AGENT_CHANNEL__`). См. §7.8, §11.5–§11.7.
 
 | Переменная | Тип | По умолчанию | Описание |
 |-----------|-----|-------------|----------|
-| `CHAT__AGENT_CHANNEL__TABLE_NAME` | str | `agent_messages` | Имя bus-таблицы |
+| `CHAT__AGENT_CHANNEL__TABLE_NAME` | str | `chat_agent_messages_bus` | Имя bus-таблицы |
 | `CHAT__AGENT_CHANNEL__POLL_MIN_INTERVAL_SEC` | float | `2.0` | Минимальный интервал polling `AgentChannelPoller` (при активности). Снизить можно ради отзывчивости чата, цена — больше SELECT'ов к GP |
 | `CHAT__AGENT_CHANNEL__POLL_MAX_INTERVAL_SEC` | float | `10.0` | Максимальный интервал polling (при тишине от агента) |
 | `CHAT__AGENT_CHANNEL__POLL_BACKOFF_MULTIPLIER` | float | `1.5` | Шаг роста интервала при пустом тике (> 1.0) |
@@ -3342,11 +3342,11 @@ ORDER BY denied_count DESC
 LIMIT 20;
 ```
 
-### 9.6 Retention bus-таблицы agent_messages
+### 9.6 Retention bus-таблицы chat_agent_messages_bus
 
-Канал к внешнему ИИ-агенту использует **одну** bus-таблицу `agent_messages` (см. §7.8, §11.5) в основной БД. Кода ретеншена в приложении НЕТ — очистка задача администратора БД (сознательное решение: на проде GP таблицы партиционируются, а DELETE под нагрузкой дороже `DROP PARTITION`).
+Канал к внешнему ИИ-агенту использует **одну** bus-таблицу `chat_agent_messages_bus` (см. §7.8, §11.5) в основной БД. Кода ретеншена в приложении НЕТ — очистка задача администратора БД (сознательное решение: на проде GP таблицы партиционируются, а DELETE под нагрузкой дороже `DROP PARTITION`).
 
-**Ключевое утверждение**: ответы внешнего агента маппятся в блоки (`map_answer_to_blocks`) и сохраняются в `chat_messages.content` (JSONB). Очистка `agent_messages` **НЕ удаляет** видимую пользователю историю чата: пользователь читает `chat_messages`. `agent_messages` нужна только во время обработки запроса + изредка для разбора инцидентов.
+**Ключевое утверждение**: ответы внешнего агента маппятся в блоки (`map_answer_to_blocks`) и сохраняются в `chat_messages.content` (JSONB). Очистка `chat_agent_messages_bus` **НЕ удаляет** видимую пользователю историю чата: пользователь читает `chat_messages`. `chat_agent_messages_bus` нужна только во время обработки запроса + изредка для разбора инцидентов.
 
 **Правила безопасной очистки:**
 
@@ -3354,7 +3354,7 @@ LIMIT 20;
 2. И только старше N дней (`created_at < now() - INTERVAL 'N days'`, рекомендация: 30 дней).
 3. **Не трогать** `pending` / `in_progress` — это активные запросы; `AgentChannelPoller` подхватит их (или переведёт в `failed` по `ANSWER_TIMEOUT_SEC`).
 
-**Рекомендация по частоте**: cron раз в неделю в окне низкой нагрузки; после массовой чистки — `VACUUM ANALYZE` (PG). На GP `agent_messages` имеет смысл партиционировать по `created_at` (RANGE month) — `DROP PARTITION` на порядок быстрее DELETE и не лочит таблицу. Плейсхолдеры `{SCHEMA}`/`{PREFIX}` подставляются вручную перед запуском.
+**Рекомендация по частоте**: cron раз в неделю в окне низкой нагрузки; после массовой чистки — `VACUUM ANALYZE` (PG). На GP `chat_agent_messages_bus` имеет смысл партиционировать по `created_at` (RANGE month) — `DROP PARTITION` на порядок быстрее DELETE и не лочит таблицу. Плейсхолдеры `{SCHEMA}`/`{PREFIX}` подставляются вручную перед запуском.
 
 ---
 
@@ -3516,7 +3516,7 @@ Deep-dive — [`docs/architecture/frontend-architecture.md`](../architecture/fro
 | Сервис | Роль | Зависимости |
 |---|---|---|
 | `Orchestrator` | Фасад agent loop'а: DI, history, system prompt, делегирование в `agent_loop.run_agent_loop`. Wrapper-методы `_execute_tool_call`, `_llm_call_with_fallback` оставлены для совместимости с тестами | `MessageService`, `ConversationService`, settings, LLM client |
-| `agent_loop` | Pure-функция `run_agent_loop` — тело цикла чата (синхронное в POST). `_handle_forward_terminal` обрабатывает терминальный forward в шину `agent_messages` | `llm_call`, `tool_executor`, `AgentChannelService` |
+| `agent_loop` | Pure-функция `run_agent_loop` — тело цикла чата (синхронное в POST). `_handle_forward_terminal` обрабатывает терминальный forward в шину `chat_agent_messages_bus` | `llm_call`, `tool_executor`, `AgentChannelService` |
 | `llm_call` | `call_llm_with_fallback`: оборачивает primary-вызов в retry + circuit breaker, при `open` переключает на fallback-провайдера | `retry`, `circuit_breaker`, settings |
 | `tool_executor` | `execute_tool_call`: валидация args, конвертация типов через `convert_param`, `asyncio.wait_for(TOOL_EXECUTION_TIMEOUT)`, запись `tool_metric` через `MetricsBatcher` | `orchestrator_helpers`, реестр ChatTool |
 | `orchestrator_helpers` | Чистые функции и константы: `safe_args`, `convert_param`, `unpack_pending_tool_call`, `ToolValidationTracker` (счётчик повторяющихся `ChatToolValidationError`'ов, выход из tool-loop'а при `consecutive >= TOOL_VALIDATION_LOOP_THRESHOLD`), `build_tool_loop_exit_answer`, `BASE_SYSTEM_PROMPT`, `TOOL_VALIDATION_NEUTRAL_MESSAGE` | — |
@@ -3524,7 +3524,7 @@ Deep-dive — [`docs/architecture/frontend-architecture.md`](../architecture/fro
 | `gigachat_adapter` | Duck-typed wrapper над `AsyncOpenAI` для GigaChat-proxy: tools↔functions, function_call↔tool_calls | — |
 | `retry` | Экспоненциальный backoff на 429/5xx/timeout | settings |
 | `circuit_breaker` | FSM closed/open/half-open для primary↔fallback (см. §7.4a) | settings |
-| `AgentChannelService` | Канал к внешнему агенту через `agent_messages`: `submit`, `try_finalize`, `mark_timeout`, `map_answer_to_blocks` | `AgentMessageRepository`, `MessageRepository` |
+| `AgentChannelService` | Канал к внешнему агенту через `chat_agent_messages_bus`: `submit`, `try_finalize`, `mark_timeout`, `map_answer_to_blocks` | `AgentMessageRepository`, `MessageRepository` |
 | `AgentChannelPoller` | Один фоновый asyncio-task: поллит шину по подписанным `question_uid`, adaptive-backoff без удержания conn, `reconcile` | `AgentChannelService` |
 | `forward_tool_factory` | `build_forward_tool_descriptor()` — статический ChatTool `forward_to_knowledge_agent` для режима `adaptive` | реестр ChatTool |
 | `button_translator` | `translate_buttons`: `action_id` (имя ChatTool) → клиентский action для UI-кнопок | реестр ChatTool |
@@ -3559,7 +3559,7 @@ Deep-dive — [`docs/architecture/frontend-architecture.md`](../architecture/fro
 - `max_tool_rounds` — защита от бесконечной рекурсии LLM ↔ tool. При исчерпании эмитится `error` с пояснением.
 - Tool timeout — `CHAT__TOOL_EXECUTION_TIMEOUT` (default 30 сек) через `asyncio.wait_for` внутри `tool_executor.execute_tool_call`. Превышение → `tool_result` с `error: "timeout"`.
 
-**Terminal-tool контракт (`agent_loop.py`).** Терминальный tool `forward_to_knowledge_agent` (в режиме `adaptive`) обрабатывается через `_handle_forward_terminal`: вместо повторного вызова LLM создаётся вопрос в шине `agent_messages` + черновик `chat_messages` (`status='streaming'`), и `run_agent_loop` возвращается сразу (`return`). Обычные tool'ы append'ят `{"role": "tool", ...}` в `messages` и цикл продолжается до `max_tool_rounds` или пока LLM не перестанет звать tool'ы.
+**Terminal-tool контракт (`agent_loop.py`).** Терминальный tool `forward_to_knowledge_agent` (в режиме `adaptive`) обрабатывается через `_handle_forward_terminal`: вместо повторного вызова LLM создаётся вопрос в шине `chat_agent_messages_bus` + черновик `chat_messages` (`status='streaming'`), и `run_agent_loop` возвращается сразу (`return`). Обычные tool'ы append'ят `{"role": "tool", ...}` в `messages` и цикл продолжается до `max_tool_rounds` или пока LLM не перестанет звать tool'ы.
 
 **Сохранение ErrorBlock при сбое (`agent_loop.py`).** Если LLM-вызов упал (`asyncio.TimeoutError` или произвольный `Exception`), `run_agent_loop` сохраняет в БД pseudo-ассистент-message с `ErrorBlock`. Это нужно, чтобы при reload юзер увидел красный блок «Временная ошибка AI-сервиса», а не молчаливо висящий user-message без ответа.
 
@@ -3603,11 +3603,11 @@ class ToolCallAccumulator:
 
 Тесты — `tests/domains/chat/test_gigachat_adapter.py`, особо обращай внимание на roundtrip-тест: ответ через `_translate_response` затем прогоняется через `_translate_messages` обратно, должен дать dict args.
 
-### 11.5 Канал к внешнему ИИ-агенту: bus-таблица agent_messages
+### 11.5 Канал к внешнему ИИ-агенту: bus-таблица chat_agent_messages_bus
 
-Канал к внешнему ИИ-агенту («База знаний ОАРБ») построен на **одной bus-таблице** `agent_messages` (заменила прежние три — `agent_requests`/`agent_response_events`/`agent_responses`). Транспорта SSE нигде нет: приложение пишет вопрос в шину и поллит её до терминального статуса.
+Канал к внешнему ИИ-агенту («База знаний ОАРБ») построен на **одной bus-таблице** `chat_agent_messages_bus` (заменила прежние три — `agent_requests`/`agent_response_events`/`agent_responses`). Транспорта SSE нигде нет: приложение пишет вопрос в шину и поллит её до терминального статуса.
 
-**Структура `agent_messages`** (`app/domains/chat/migrations/{postgresql,greenplum}/schema.sql`):
+**Структура `chat_agent_messages_bus`** (`app/domains/chat/migrations/{postgresql,greenplum}/schema.sql`):
 
 | Колонка | Тип | Назначение |
 |---|---|---|
@@ -3624,7 +3624,7 @@ class ToolCallAccumulator:
 | `status` | VARCHAR | `CHECK (status IN ('pending','in_progress','complete','error','timeout'))` |
 | `created_at` / `updated_at` | TIMESTAMP | — |
 
-Связь чат → шина: ассистент-черновик в `chat_messages` хранит колонку `agent_ref VARCHAR(36)` — uid вопроса в `agent_messages`. По нему `AgentChannelPoller`/`try_finalize` находят ответ и финализируют черновик.
+Связь чат → шина: ассистент-черновик в `chat_messages` хранит колонку `agent_ref VARCHAR(36)` — uid вопроса в `chat_agent_messages_bus`. По нему `AgentChannelPoller`/`try_finalize` находят ответ и финализируют черновик.
 
 **`map_answer_to_blocks`** (`agent_channel.py`) превращает строку-ответ шины в блоки сообщения в фиксированном порядке:
 
@@ -3646,7 +3646,7 @@ class ToolCallAccumulator:
 
 | Кто | Что делает |
 |---|---|
-| `AgentChannelService.submit` | **В одной транзакции** INSERT вопроса (`role='user'`, `status='pending'`) в `agent_messages` + создание черновика `chat_messages` (`status='streaming'`, `agent_ref=<uid вопроса>`) — атомарность исключает осиротевшую строку, занимающую слот лимита |
+| `AgentChannelService.submit` | **В одной транзакции** INSERT вопроса (`role='user'`, `status='pending'`) в `chat_agent_messages_bus` + создание черновика `chat_messages` (`status='streaming'`, `agent_ref=<uid вопроса>`) — атомарность исключает осиротевшую строку, занимающую слот лимита |
 | `AgentChannelPoller` (один asyncio-task на процесс) | Поллит шину по подписанным `question_uid`, adaptive-backoff, **не держит conn в sleep**. На каждый ответ зовёт `try_finalize` |
 | `AgentChannelService.try_finalize` | Маппит ответ агента (`map_answer_to_blocks`) в блоки, финализирует черновик `chat_messages` (`status='complete'`) **и закрывает вопрос в шине** (`set_status(..., 'complete'|'error')`) — AW сам освобождает слот лимита, не полагаясь на терминальный `status` от внешнего агента |
 | `AgentChannelService.mark_timeout` | По истечении `ANSWER_TIMEOUT_SEC` дописывает error-блок (`build_timeout_error_block`) и переводит черновик в `failed`, вопрос в шине — в `timeout` |
@@ -3668,7 +3668,7 @@ Form-параметр `agent_mode` определяет, как POST `/messages`
 | `adaptive` | То же синхронное исполнение, но в наборе tool'ов есть forward-tool — оркестратор сам решает, форвардить ли вопрос в агента |
 | `always` | Прямой проброс вопроса в агента (без локального LLM-раунда) |
 
-Форвард (`always`, либо `adaptive` + решение оркестратора) создаёт черновик `chat_messages` (`status='streaming'`) и вопрос в шине `agent_messages`. Дальше его подхватывает `AgentChannelPoller` → `try_finalize` (см. §11.6).
+Форвард (`always`, либо `adaptive` + решение оркестратора) создаёт черновик `chat_messages` (`status='streaming'`) и вопрос в шине `chat_agent_messages_bus`. Дальше его подхватывает `AgentChannelPoller` → `try_finalize` (см. §11.6).
 
 **Статусы `chat_messages.status`** (`streaming` | `complete` | `failed`):
 

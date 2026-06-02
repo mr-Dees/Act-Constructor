@@ -10,7 +10,7 @@
 
 **Симптом.** Пользователь жалуется: «Ассистент завис на печати». В UI крутится typing-индикатор, ответа нет > 5 минут. В чате включён тумблер «База знаний ОАРБ» (режим «Адаптивный» или «Всегда»), вопрос ушёл в шину к внешнему ИИ-агенту.
 
-**Как это работает.** Форвард создаёт черновик ассистент-сообщения в `chat_messages` (`status='streaming'`, `agent_ref` = uid вопроса) и пишет вопрос в единую bus-таблицу `agent_messages` (`role='user'`, `status='pending'`). Фоновый `AgentChannelPoller` поллит шину; когда приходит ответ агента (`role='assistant'`, `status='complete'`), `AgentChannelService.try_finalize` мапит ответ в блоки и финализирует черновик (`complete`/`failed`).
+**Как это работает.** Форвард создаёт черновик ассистент-сообщения в `chat_messages` (`status='streaming'`, `agent_ref` = uid вопроса) и пишет вопрос в единую bus-таблицу `chat_agent_messages_bus` (`role='user'`, `status='pending'`). Фоновый `AgentChannelPoller` поллит шину; когда приходит ответ агента (`role='assistant'`, `status='complete'`), `AgentChannelService.try_finalize` мапит ответ в блоки и финализирует черновик (`complete`/`failed`).
 
 **Диагностика.**
 
@@ -21,15 +21,15 @@ FROM {SCHEMA}.{PREFIX}chat_messages
 WHERE status = 'streaming'
   AND created_at < now() - interval '5 minutes';
 
--- 2. Состояние соответствующих записей в шине (agent_ref → agent_messages.id).
+-- 2. Состояние соответствующих записей в шине (agent_ref → chat_agent_messages_bus.id).
 SELECT id, chat_id, conversation_id, role, status, created_at, updated_at
-FROM {SCHEMA}.{PREFIX}agent_messages
+FROM {SCHEMA}.{PREFIX}chat_agent_messages_bus
 WHERE id IN (... agent_ref из шага 1 ...)
 ORDER BY created_at;
 
 -- 3. Есть ли вообще ответ агента (reply_to ссылается на uid вопроса).
 SELECT id, role, status, reply_to, created_at
-FROM {SCHEMA}.{PREFIX}agent_messages
+FROM {SCHEMA}.{PREFIX}chat_agent_messages_bus
 WHERE reply_to IN (... agent_ref из шага 1 ...);
 ```
 
@@ -49,7 +49,7 @@ WHERE reply_to IN (... agent_ref из шага 1 ...);
    WHERE id = '<message_id>';
 
    -- Вопрос в шине → timeout.
-   UPDATE {SCHEMA}.{PREFIX}agent_messages
+   UPDATE {SCHEMA}.{PREFIX}chat_agent_messages_bus
    SET status = 'timeout', updated_at = CURRENT_TIMESTAMP
    WHERE id = '<agent_ref>';
    ```
@@ -72,31 +72,31 @@ WHERE service_name = 'act_constructor';
 
 ---
 
-## 3. `agent_messages` распухла
+## 3. `chat_agent_messages_bus` распухла
 
-**Симптом.** GP-таблица `agent_messages` (единая шина к внешнему агенту) стала большой, тики `AgentChannelPoller` заметно медленнее (видно по росту нагрузки на GP и по `/admin/diagnostics` для `chat.agent_channel_poller`).
+**Симптом.** GP-таблица `chat_agent_messages_bus` (единая шина к внешнему агенту) стала большой, тики `AgentChannelPoller` заметно медленнее (видно по росту нагрузки на GP и по `/admin/diagnostics` для `chat.agent_channel_poller`).
 
 **Диагностика.**
 
 ```sql
 -- Размер таблицы.
 SELECT count(*) AS rows,
-       pg_size_pretty(pg_total_relation_size('{SCHEMA}.{PREFIX}agent_messages')) AS size
-FROM {SCHEMA}.{PREFIX}agent_messages;
+       pg_size_pretty(pg_total_relation_size('{SCHEMA}.{PREFIX}chat_agent_messages_bus')) AS size
+FROM {SCHEMA}.{PREFIX}chat_agent_messages_bus;
 
 -- Распределение по статусам.
 SELECT status, count(*) AS messages
-FROM {SCHEMA}.{PREFIX}agent_messages
+FROM {SCHEMA}.{PREFIX}chat_agent_messages_bus
 GROUP BY status;
 ```
 
 **Recovery.**
 
-> Автоматического фонового cleanup для `agent_messages` сейчас нет — чистка ручная/кроновая.
+> Автоматического фонового cleanup для `chat_agent_messages_bus` сейчас нет — чистка ручная/кроновая.
 
 1. **Ручная очистка** старых терминальных сообщений (`complete`/`error`/`timeout`). Не трогать `pending`/`in_progress` — это ещё живые запросы:
    ```sql
-   DELETE FROM {SCHEMA}.{PREFIX}agent_messages
+   DELETE FROM {SCHEMA}.{PREFIX}chat_agent_messages_bus
    WHERE status IN ('complete', 'error', 'timeout')
      AND created_at < now() - interval '7 days';
    ```

@@ -1,4 +1,4 @@
-"""Репозиторий bus-таблицы agent_messages (канал к внешнему агенту)."""
+"""Репозиторий bus-таблицы chat_agent_messages_bus (канал к внешнему агенту)."""
 
 import json
 import logging
@@ -14,9 +14,9 @@ _JSONB_FIELDS = ("media", "metadata", "buttons")
 
 
 class AgentMessageRepository(BaseRepository):
-    """CRUD-операции с bus-таблицей agent_messages."""
+    """CRUD-операции с bus-таблицей chat_agent_messages_bus."""
 
-    def __init__(self, conn: asyncpg.Connection, table_name: str = "agent_messages"):
+    def __init__(self, conn: asyncpg.Connection, table_name: str = "chat_agent_messages_bus"):
         super().__init__(conn)
         self.table = self.adapter.get_table_name(table_name)
 

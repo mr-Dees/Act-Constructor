@@ -6,7 +6,7 @@
 
 Forward-тул регистрируется без handler'а через
 :func:`build_forward_tool_descriptor`; реальный перехват вызова делает
-``agent_loop`` по имени тула (bus-канал ``agent_messages``).
+``agent_loop`` по имени тула (bus-канал ``chat_agent_messages_bus``).
 """
 from __future__ import annotations
 

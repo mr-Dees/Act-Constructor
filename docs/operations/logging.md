@@ -185,7 +185,7 @@ handler гарантированно отрабатывает перед `emit()
 даёт список `request_id` под фильтром по пути / статусу / латентности.
 
 **Форвард к внешнему агенту.** Запрос к базе знаний ОАРБ исполняется не
-синхронно в рамках HTTP-запроса, а через шину `agent_messages`: POST создаёт
+синхронно в рамках HTTP-запроса, а через шину `chat_agent_messages_bus`: POST создаёт
 черновик ассистент-сообщения (`chat_messages.status='streaming'`) и кладёт
 вопрос в шину, а фоновая задача `chat.agent_channel_poller`
 (`app/domains/chat/services/agent_channel_poller.py`, `AgentChannelPoller`)
@@ -276,7 +276,7 @@ jq -c 'select(.request_id == "a3f9c1d2")' logs/app.log
 Если запрос форвардился на внешнего агента — фоновый поллер
 (`chat.agent_channel_poller`) логирует уже вне HTTP-контекста под
 `request_id = "-"`; связь с исходным вопросом — через
-`chat_messages.agent_ref` → uid в шине `agent_messages` (см. раздел 5).
+`chat_messages.agent_ref` → uid в шине `chat_agent_messages_bus` (см. раздел 5).
 
 ### Найти медленные запросы
 
@@ -328,7 +328,7 @@ LIMIT 100;
   превышен, запрос отклонён по размеру, Kerberos-токен протух во время
   запроса, `UniqueViolationError` / `CheckViolationError` из БД, LLM
   timeout (в `agent_loop`), таймаут ответа из шины
-  `agent_messages`, блок ответа усечён по `MAX_BLOCK_TEXT_SIZE`.
+  `chat_agent_messages_bus`, блок ответа усечён по `MAX_BLOCK_TEXT_SIZE`.
 - **ERROR / `logger.exception`** — `logger.exception(...)` пишет traceback
   автоматически. Используется для всех необработанных исключений в
   request-обработчике, откатов lifespan-hooks и доменов, ошибок

@@ -2,7 +2,7 @@
 
 Descriptor регистрируется при discover_domains() со ``handler=None`` и
 ``per_request_handler=True``; реальный перехват forward'а делает agent_loop
-по имени тула (bus-канал ``agent_messages``).
+по имени тула (bus-канал ``chat_agent_messages_bus``).
 """
 from __future__ import annotations
 

@@ -2,7 +2,7 @@
 
 Регистрирует СХЕМУ forward-тула, которую LLM видит в режиме ``adaptive``.
 Реальный перехват вызова делает ``agent_loop`` по имени тула — он пишет
-запрос в bus-канал ``agent_messages`` и дозаполняет ответ через poller.
+запрос в bus-канал ``chat_agent_messages_bus`` и дозаполняет ответ через poller.
 Сам этот модуль отвечает только за объявление tool'а (handler=None,
 ``per_request_handler=True``).
 """
@@ -38,7 +38,7 @@ def build_forward_tool_descriptor() -> ChatTool:
 
     Регистрируется при discover_domains() со ``handler=None`` и
     ``per_request_handler=True``: реальный перехват forward'а делает
-    ``agent_loop`` по имени тула (bus-канал ``agent_messages``).
+    ``agent_loop`` по имени тула (bus-канал ``chat_agent_messages_bus``).
     """
     return ChatTool(
         name=TOOL_FORWARD_TO_KNOWLEDGE_AGENT,
