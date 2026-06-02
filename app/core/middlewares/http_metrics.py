@@ -1,7 +1,7 @@
 """Middleware записи HTTP-метрик в БД.
 
-Raw ASGI (без BaseHTTPMiddleware) — чтобы не буферизовать тело ответа и
-не ломать SSE-стриминг. См. остальные middleware в ``app/core/middleware.py``.
+Raw ASGI (без BaseHTTPMiddleware) — чтобы не буферизовать тело ответа
+(длинные/потоковые ответы). См. остальные middleware в ``app/core/middleware.py``.
 
 Если service=None (фабрика отключена настройкой) — middleware вырождается
 в ``time.perf_counter()`` без записи в БД, накладные расходы минимальны.
@@ -11,12 +11,31 @@ from __future__ import annotations
 
 import logging
 import time
+from typing import Protocol
 
 from app.api.v1.endpoints.auth import get_current_user_from_env
 from app.core.config import request_id_var
-from app.domains.admin.services.http_metrics_service import HttpMetricsService
 
 logger = logging.getLogger("audit_workstation.middleware.http_metrics")
+
+
+class HttpMetricsSink(Protocol):
+    """Контракт приёмника HTTP-метрик, от которого зависит middleware.
+
+    Реализацию (``admin.HttpMetricsService``) инжектирует composition root
+    (``create_app``). Объявляем контракт в core, чтобы middleware не тянул домен
+    ``admin`` в граф импорта на уровне модуля (плагин-симметрия доменов)."""
+
+    async def record(
+        self,
+        *,
+        method: str,
+        path: str,
+        status_code: int,
+        latency_ms: int,
+        username: str | None,
+        request_id: str | None,
+    ) -> None: ...
 
 # Пути, для которых метрики не пишутся (мусор в журнале).
 _SKIP_PREFIXES: tuple[str, ...] = ("/static/", "/health")
@@ -33,7 +52,7 @@ def _should_skip(path: str) -> bool:
 class HttpMetricsMiddleware:
     """Записывает latency / status каждого HTTP-запроса в БД."""
 
-    def __init__(self, app, service: HttpMetricsService | None = None):
+    def __init__(self, app, service: HttpMetricsSink | None = None):
         self.app = app
         self._service = service
 
