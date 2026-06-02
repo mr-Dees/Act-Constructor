@@ -26,7 +26,6 @@ from app.domains.chat.api.conversations import router as conv_router
 from app.domains.chat.api.files import router as files_router
 from app.domains.chat.api.messages import router as msg_router
 from app.domains.chat.deps import (
-    get_agent_channel_service,
     get_conversation_service,
     get_file_service,
     get_message_service,
@@ -77,12 +76,22 @@ def _make_channel_service() -> MagicMock:
     return svc
 
 
+def _channel_service_gen(channel_svc: object):
+    """Async-генератор-фабрика для patch'а messages.get_agent_channel_service.
+
+    Эндпоинт строит channel_service лениво через ``aclosing(get_agent_channel_service())``
+    (а не через Depends), поэтому в тестах подменяем саму функцию-генератор.
+    """
+    async def _gen():
+        yield channel_svc
+    return _gen
+
+
 def _build_app(
     *,
     conv_service: object,
     msg_service: object,
     file_service: object,
-    channel_service: object | None = None,
     username: str = USERNAME,
 ) -> FastAPI:
     """Собирает минимальный FastAPI с тремя chat-роутерами и оверрайдами DI."""
@@ -108,9 +117,8 @@ def _build_app(
     app.dependency_overrides[get_conversation_service] = lambda: conv_service
     app.dependency_overrides[get_message_service] = lambda: msg_service
     app.dependency_overrides[get_file_service] = lambda: file_service
-    app.dependency_overrides[get_agent_channel_service] = (
-        lambda: (channel_service if channel_service is not None else _make_channel_service())
-    )
+    # channel_service эндпоинт строит лениво (не Depends) — инъекция в always-тестах
+    # идёт через patch messages.get_agent_channel_service, а не dependency_overrides.
 
     return app
 
@@ -132,6 +140,7 @@ def _make_msg_service(settings: ChatDomainSettings) -> MagicMock:
     svc = MagicMock()
     svc.settings = settings
     svc.save_user_message = AsyncMock()
+    svc.save_assistant_message = AsyncMock(return_value={"id": "m-asst"})
     svc.get_history = AsyncMock(return_value=([], 0))
     svc.get_message = AsyncMock()
     return svc
@@ -411,12 +420,17 @@ class TestSendMessageB1:
             conv_service=conv,
             msg_service=msg,
             file_service=_make_file_service(settings),
-            channel_service=channel_svc,
         )
 
-        with patch(
-            "app.domains.chat.api.messages.get_agent_channel_poller",
-            return_value=mock_poller,
+        with (
+            patch(
+                "app.domains.chat.api.messages.get_agent_channel_service",
+                _channel_service_gen(channel_svc),
+            ),
+            patch(
+                "app.domains.chat.api.messages.get_agent_channel_poller",
+                return_value=mock_poller,
+            ),
         ):
             with TestClient(app) as client:
                 resp = client.post(
@@ -448,8 +462,9 @@ class TestSendMessageB1:
         # единственное подтверждение, что выбрана ветка «always», а не orchestrator.run.
         # (save_assistant_message — plain MagicMock, не AsyncMock → нет assert_not_awaited)
 
-    def test_send_message_always_mode_works_without_poller(self):
-        """agent_mode=always: poller=None — только WARNING, 200 всё равно."""
+    def test_send_message_always_mode_without_poller_saves_error_no_submit(self):
+        """agent_mode=always + poller=None: вопрос НЕ кладётся в шину (нет
+        осиротевшего draft'а), сохраняется финализированное error-сообщение, 200."""
         settings = _make_settings()
         conv = self._conv_with_get(settings)
         msg = _make_msg_service(settings)
@@ -461,12 +476,17 @@ class TestSendMessageB1:
             conv_service=conv,
             msg_service=msg,
             file_service=_make_file_service(settings),
-            channel_service=channel_svc,
         )
 
-        with patch(
-            "app.domains.chat.api.messages.get_agent_channel_poller",
-            return_value=None,
+        with (
+            patch(
+                "app.domains.chat.api.messages.get_agent_channel_service",
+                _channel_service_gen(channel_svc),
+            ),
+            patch(
+                "app.domains.chat.api.messages.get_agent_channel_poller",
+                return_value=None,
+            ),
         ):
             with TestClient(app) as client:
                 resp = client.post(
@@ -476,6 +496,12 @@ class TestSendMessageB1:
 
         assert resp.status_code == 200, resp.text
         assert "message_id" in resp.json()
+        # Осиротевший draft не создаётся: submit в шину не вызывается.
+        channel_svc.submit.assert_not_awaited()
+        # Вместо этого сохранено финализированное error-сообщение.
+        msg.save_assistant_message.assert_awaited_once()
+        saved_blocks = msg.save_assistant_message.await_args.kwargs["content"]
+        assert saved_blocks[0]["code"] == "agent_unavailable"
 
     def test_send_message_adaptive_mode_uses_orchestrator(self):
         """agent_mode=adaptive: ведёт себя как off (оркестратор), не как always."""
@@ -484,13 +510,10 @@ class TestSendMessageB1:
         msg = _make_msg_service(settings)
         msg.save_user_message.return_value = {"id": "m-1", "role": "user", "content": []}
 
-        channel_svc = _make_channel_service()
-
         app = _build_app(
             conv_service=conv,
             msg_service=msg,
             file_service=_make_file_service(settings),
-            channel_service=channel_svc,
         )
 
         with patch(
@@ -505,8 +528,6 @@ class TestSendMessageB1:
 
         assert resp.status_code == 200, resp.text
         assert "message_id" in resp.json()
-        # channel_svc.submit НЕ вызывался
-        channel_svc.submit.assert_not_awaited()
 
 
 # -------------------------------------------------------------------------

@@ -59,6 +59,33 @@ async def _handle_forward_terminal(
     from app.domains.chat.deps import get_agent_channel_poller
     from app.domains.chat.services.agent_channel import AgentChannelService
 
+    # Проверяем поллер ДО submit: без него draft завис бы в 'streaming' навсегда
+    # (беседу нельзя было бы удалить). Не создаём осиротевший draft — отдаём
+    # обычное error-сообщение через _save_assistant_message.
+    poller = get_agent_channel_poller()
+    if poller is None:
+        logger.error(
+            "agent_channel_poller не инициализирован — форвард недоступен "
+            "(message_id=%s)",
+            message_id,
+        )
+        await orch._save_assistant_message(
+            conversation_id=conversation_id,
+            content_blocks=[{
+                "type": "error",
+                "message": "Канал внешнего агента недоступен. Обратитесь к администратору.",
+                "code": "agent_unavailable",
+            }],
+            token_usage=None,
+            message_id=message_id,
+        )
+        return {
+            "response": "",
+            "sources": list(dict.fromkeys(sources)),
+            "model": orch.settings.model,
+            "token_usage": token_usage,
+        }
+
     try:
         async with get_db() as conn:
             channel = AgentChannelService(conn, orch.settings)
@@ -94,14 +121,7 @@ async def _handle_forward_terminal(
             "token_usage": token_usage,
         }
 
-    poller = get_agent_channel_poller()
-    if poller is not None:
-        poller.subscribe(assistant_message_id=message_id, question_uid=question_uid)
-    else:
-        logger.warning(
-            "agent_channel_poller не инициализирован — форвард %s не будет дозаполнен",
-            message_id,
-        )
+    poller.subscribe(assistant_message_id=message_id, question_uid=question_uid)
 
     return {
         "response": "",
