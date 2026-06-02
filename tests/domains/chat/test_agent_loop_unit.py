@@ -14,6 +14,7 @@
 """
 from __future__ import annotations
 
+import json
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
@@ -184,3 +185,152 @@ async def test_non_gigachat_executes_all_tool_calls_in_single_round():
     assert len(handler_calls) == 3
     # LLM вызван ровно 2 раза (первая выдача + финал), как и у gigachat
     assert primary.chat.completions.create.await_count == 2
+
+
+def _saved_blocks(orch) -> list[dict]:
+    """Возвращает content_blocks, переданные в _save_assistant_message."""
+    assert orch._save_assistant_message.await_count >= 1
+    return orch._save_assistant_message.await_args.kwargs["content_blocks"]
+
+
+async def test_tool_client_action_block_reaches_final_message():
+    """Tool вернул client_action — блок обязан попасть в сообщение ассистента.
+
+    Регрессия: после удаления SSE-стека non-streaming agent_loop перестал
+    собирать презентационные блоки из tool-результатов — фронт получал
+    только текст LLM, а open_url/notify молча терялись.
+    """
+    async def handler(**_kw):
+        return json.dumps({
+            "type": "client_action",
+            "action": "open_url",
+            "params": {"url": "/constructor?act_id=1"},
+            "label": "Открываю акт…",
+            "block_id": "handler-uuid",  # должен быть переписан детерминированно
+        }, ensure_ascii=False)
+
+    register_tools([
+        ChatTool(name="acts.open_act_page", domain="acts", description="d",
+                 handler=handler),
+    ])
+
+    orch = Orchestrator(
+        msg_service=AsyncMock(load_history_for_llm=AsyncMock(return_value=[])),
+        conv_service=AsyncMock(),
+        settings=_gigachat_settings(profile="sglang"),
+    )
+    orch._save_assistant_message = AsyncMock()
+
+    first = _make_response(
+        content=None, tool_calls=[_make_tc("acts.open_act_page", "id-1")],
+    )
+    final = _make_response(content="Акт открыт.")
+    primary = AsyncMock()
+    primary.chat.completions.create = AsyncMock(side_effect=[first, final])
+
+    with patch.object(orch, "_get_openai_client", return_value=primary):
+        await orch.run(
+            message_id="m-1", conversation_id="c-1", user_message="Открой акт",
+        )
+
+    blocks = _saved_blocks(orch)
+    ca = [b for b in blocks if b.get("type") == "client_action"]
+    assert len(ca) == 1, f"client_action не попал в сообщение: {blocks}"
+    assert ca[0]["action"] == "open_url"
+    assert ca[0]["params"]["url"] == "/constructor?act_id=1"
+    # block_id переписан детерминированно (для идемпотентного реплея)
+    assert ca[0]["block_id"] == "m-1:client_action:0"
+
+
+async def test_tool_blocks_list_reaches_final_message_with_buttons():
+    """Tool вернул [text, buttons] (как chat.list_pages) — оба блока обязаны
+    попасть в сообщение; кнопки уже клиентские (open_url) → pass-through."""
+    async def handler(**_kw):
+        return json.dumps([
+            {"type": "text", "content": "Я ассистент. Доступные разделы:"},
+            {"type": "buttons", "buttons": [
+                {"action_id": "open_url", "label": "Админ-панель",
+                 "params": {"url": "/admin"}},
+            ]},
+        ], ensure_ascii=False)
+
+    register_tools([
+        ChatTool(name="chat.list_pages", domain="chat", description="d",
+                 handler=handler),
+    ])
+
+    orch = Orchestrator(
+        msg_service=AsyncMock(load_history_for_llm=AsyncMock(return_value=[])),
+        conv_service=AsyncMock(),
+        settings=_gigachat_settings(profile="sglang"),
+    )
+    orch._save_assistant_message = AsyncMock()
+
+    first = _make_response(
+        content=None, tool_calls=[_make_tc("chat.list_pages", "id-1")],
+    )
+    final = _make_response(content="Готов помочь!")
+    primary = AsyncMock()
+    primary.chat.completions.create = AsyncMock(side_effect=[first, final])
+
+    with patch.object(orch, "_get_openai_client", return_value=primary):
+        await orch.run(
+            message_id="m-1", conversation_id="c-1", user_message="Что умеешь?",
+        )
+
+    blocks = _saved_blocks(orch)
+    types = [b.get("type") for b in blocks]
+    assert "buttons" in types, f"buttons-блок потерян: {blocks}"
+    btn_block = next(b for b in blocks if b["type"] == "buttons")
+    assert btn_block["buttons"][0]["action_id"] == "open_url"
+    assert btn_block["buttons"][0]["params"]["url"] == "/admin"
+    # text-блок из tool тоже должен присутствовать
+    assert any(
+        b.get("type") == "text"
+        and "Доступные разделы" in (b.get("content") or "")
+        for b in blocks
+    ), f"text-блок из list_pages потерян: {blocks}"
+
+
+async def test_tool_block_feeds_summary_to_llm_not_raw_json():
+    """В историю LLM после блок-эмитящего tool'а должен уйти краткий
+    '<выполнено: tool>', а не сырой JSON-блок — иначе модель пересказывает
+    содержимое блока обычным текстом (баг с 'тегами' в ответе)."""
+    async def handler(**_kw):
+        return json.dumps({
+            "type": "client_action", "action": "notify",
+            "params": {"message": "Готово"}, "label": "Готово",
+        }, ensure_ascii=False)
+
+    register_tools([
+        ChatTool(name="chat.notify", domain="chat", description="d",
+                 handler=handler),
+    ])
+
+    orch = Orchestrator(
+        msg_service=AsyncMock(load_history_for_llm=AsyncMock(return_value=[])),
+        conv_service=AsyncMock(),
+        settings=_gigachat_settings(profile="sglang"),
+    )
+    orch._save_assistant_message = AsyncMock()
+
+    first = _make_response(
+        content=None, tool_calls=[_make_tc("chat.notify", "id-1")],
+    )
+    final = _make_response(content="ok")
+    primary = AsyncMock()
+    primary.chat.completions.create = AsyncMock(side_effect=[first, final])
+
+    with patch.object(orch, "_get_openai_client", return_value=primary):
+        await orch.run(
+            message_id="m-1", conversation_id="c-1", user_message="уведоми",
+        )
+
+    # Второй вызов LLM — финальный; смотрим messages, переданные в него.
+    final_call = primary.chat.completions.create.await_args_list[1]
+    sent_messages = final_call.kwargs["messages"]
+    tool_msgs = [m for m in sent_messages if m.get("role") == "tool"]
+    assert tool_msgs, "tool-сообщение не попало в историю LLM"
+    assert tool_msgs[-1]["content"] == "<выполнено: chat.notify>", (
+        f"в LLM ушёл сырой результат вместо summary: {tool_msgs[-1]['content']}"
+    )

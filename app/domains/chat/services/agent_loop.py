@@ -19,6 +19,7 @@ import json
 import logging
 from typing import TYPE_CHECKING, Any
 
+from app.core.chat.block_id_generator import BlockIdGenerator
 from app.core.chat.names import TOOL_FORWARD_TO_KNOWLEDGE_AGENT
 from app.domains.chat.exceptions import ChatLimitError, ChatToolValidationError
 from app.domains.chat.services.orchestrator_helpers import (
@@ -132,6 +133,64 @@ async def _handle_forward_terminal(
     }
 
 
+async def _collect_tool_blocks(
+    orch: "Orchestrator",
+    result: str,
+    *,
+    tool_name: str,
+    block_id_gen: BlockIdGenerator,
+    emitted_blocks: list[dict],
+) -> str:
+    """Извлекает презентационные блоки из результата tool'а.
+
+    Если ``result`` — JSON client_action / buttons / список блоков, добавляет
+    соответствующие блоки в ``emitted_blocks`` (они попадут в финальное
+    сообщение ассистента) и возвращает краткий summary ``<выполнено: {tool}>``
+    для скармливания LLM — иначе модель пересказывает содержимое блока обычным
+    текстом (кнопки превращаются в «теги», client_action не исполняется).
+
+    Если ``result`` — обычный текст, возвращает его без изменений.
+
+    ``buttons``-блоки прогоняются через ``_translate_buttons``: серверные
+    ``action_id`` (имена ChatTool, как в кнопках внешнего агента) переписываются
+    в клиентские; уже-клиентские (``open_url`` из ``list_pages``) проходят
+    как есть.
+    """
+    client_action = orch._parse_client_action_result(
+        result, block_id_gen=block_id_gen,
+    )
+    blocks_list = (
+        None if client_action is not None
+        else orch._parse_blocks_list_result(result, block_id_gen=block_id_gen)
+    )
+    buttons_block = (
+        None if (client_action is not None or blocks_list is not None)
+        else orch._parse_buttons_result(result)
+    )
+
+    if client_action is not None:
+        emitted_blocks.append(client_action)
+    elif blocks_list is not None:
+        for raw_block in blocks_list:
+            if raw_block.get("type") == "buttons":
+                translated = await orch._translate_buttons(
+                    raw_block.get("buttons", []),
+                )
+                emitted_blocks.append(
+                    {"type": "buttons", "buttons": translated},
+                )
+            else:
+                emitted_blocks.append(raw_block)
+    elif buttons_block is not None:
+        translated = await orch._translate_buttons(
+            buttons_block.get("buttons", []),
+        )
+        emitted_blocks.append({"type": "buttons", "buttons": translated})
+    else:
+        return result
+    return f"<выполнено: {tool_name}>"
+
+
 async def run_agent_loop(
     orch: "Orchestrator",
     *,
@@ -200,6 +259,10 @@ async def run_agent_loop(
     pending_tool_calls: list[Any] = []
     is_gigachat = orch.settings.profile == "gigachat"
     validation_tracker = ToolValidationTracker()
+    # Презентационные блоки (client_action / buttons / список), эмитнутые
+    # tool'ами по ходу цикла — попадут в финальное сообщение ассистента.
+    emitted_blocks: list[dict] = []
+    block_id_gen = BlockIdGenerator(message_id)
 
     try:
         response, _fb_used, client = await orch._llm_call_with_fallback(
@@ -248,10 +311,14 @@ async def run_agent_loop(
                     logger.warning("Tool validation error: %s", exc.message)
                     result = TOOL_VALIDATION_NEUTRAL_MESSAGE
                 sources.append(tool_name)
+                llm_content = await _collect_tool_blocks(
+                    orch, result, tool_name=tool_name,
+                    block_id_gen=block_id_gen, emitted_blocks=emitted_blocks,
+                )
                 messages.append({
                     "role": "tool",
                     "tool_call_id": tc_id,
-                    "content": result,
+                    "content": llm_content,
                 })
                 rounds += 1
                 if pending_tool_calls:
@@ -355,11 +422,14 @@ async def run_agent_loop(
                         error_answer = build_tool_loop_exit_answer(tool_name)
                         await orch._save_assistant_message(
                             conversation_id=conversation_id,
-                            content_blocks=[{
-                                "type": "error",
-                                "message": error_answer,
-                                "code": "tool_validation_loop",
-                            }],
+                            content_blocks=[
+                                *emitted_blocks,
+                                {
+                                    "type": "error",
+                                    "message": error_answer,
+                                    "code": "tool_validation_loop",
+                                },
+                            ],
                             token_usage=None,
                             message_id=message_id,
                         )
@@ -372,10 +442,14 @@ async def run_agent_loop(
                     result = TOOL_VALIDATION_NEUTRAL_MESSAGE
                 sources.append(tool_name)
 
+                llm_content = await _collect_tool_blocks(
+                    orch, result, tool_name=tool_name,
+                    block_id_gen=block_id_gen, emitted_blocks=emitted_blocks,
+                )
                 messages.append({
                     "role": "tool",
                     "tool_call_id": tc.id,
-                    "content": result,
+                    "content": llm_content,
                 })
 
             rounds += 1
@@ -403,8 +477,13 @@ async def run_agent_loop(
             }
 
         # Сохраняем сообщение ассистента через свежее соединение из пула
-        # (DI-соединение может быть закрыто при StreamingResponse)
-        content_blocks = [{"type": "text", "content": answer}]
+        # (DI-соединение может быть закрыто при StreamingResponse).
+        # Финал = презентационные блоки от tool'ов + финальный текст модели.
+        # Текст добавляем, если он непустой ИЛИ блоков нет вовсе (не сохраняем
+        # пустое сообщение).
+        content_blocks = list(emitted_blocks)
+        if answer or not content_blocks:
+            content_blocks.append({"type": "text", "content": answer})
         await orch._save_assistant_message(
             conversation_id=conversation_id,
             content_blocks=content_blocks,
