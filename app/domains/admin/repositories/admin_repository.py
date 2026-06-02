@@ -111,10 +111,10 @@ class AdminRepository(BaseRepository):
             return result == "INSERT 0 1"
         else:
             # GreenPlum: UNIQUE(username, role_id) отсутствует (distribution key —
-            # id), поэтому except UniqueViolationError тут никогда не сработал бы,
-            # а раздельные SELECT+INSERT оставляли окно гонки на дубль. Делаем
-            # атомарный idempotent-insert одним statement'ом — тот же идиом, что
-            # у seed-ролей в greenplum/schema.sql.
+            # id), поэтому except UniqueViolationError тут никогда не сработал бы.
+            # INSERT ... WHERE NOT EXISTS одним statement'ом сужает окно гонки на
+            # дубль по сравнению с раздельными SELECT+INSERT (без UNIQUE полностью
+            # его не закрыть) — тот же идиом, что у seed-ролей в greenplum/schema.sql.
             result = await self.conn.execute(
                 f"""
                 INSERT INTO {self.user_roles} (username, role_id, assigned_by)

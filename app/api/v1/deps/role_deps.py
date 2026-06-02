@@ -89,8 +89,10 @@ async def _auto_assign_default_roles(conn, username, roles_table, user_roles_tab
                 username, role_id,
             )
         else:
-            # GreenPlum: UNIQUE отсутствует — атомарный idempotent-insert вместо
-            # INSERT + except (который на GP никогда не срабатывал бы).
+            # GreenPlum: UNIQUE отсутствует — INSERT ... WHERE NOT EXISTS вместо
+            # INSERT + except (который на GP никогда не срабатывал бы). Одним
+            # statement'ом сужает окно гонки на дубль (без UNIQUE не закрывает
+            # полностью), но раздельные SELECT+INSERT были бы ещё шире.
             await conn.execute(
                 f"""
                 INSERT INTO {user_roles_table} (username, role_id, assigned_by)

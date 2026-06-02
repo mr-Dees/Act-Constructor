@@ -308,7 +308,10 @@ class AgentChannelService:
             )
             # Закрываем вопрос: AW — source-of-truth освобождения слота лимита,
             # не полагаемся на то, что внешний агент проставит терминальный
-            # status (он мог выставить только reply_to). Best-effort.
+            # status (он мог выставить только reply_to). Не best-effort: при
+            # сбое set_status исключение поднимется в _tick, подписка останется
+            # и поллер повторит try_finalize на следующем тике (mark_failed
+            # идемпотентен — вернёт False на уже не-streaming сообщении).
             await agent_repo.set_status(conversation_id=question_uid, status="error")
             return "done"
 
@@ -326,6 +329,8 @@ class AgentChannelService:
         )
         # Закрываем вопрос в шине: освобождаем слот лимита независимо от того,
         # проставил ли внешний агент терминальный status (мог выставить только
-        # reply_to). AW — source-of-truth. Best-effort, вне общей транзакции.
+        # reply_to). AW — source-of-truth. Вне общей транзакции: при сбое
+        # set_status поллер повторит try_finalize на следующем тике (finalize
+        # идемпотентен — вернёт False на уже complete-сообщении).
         await agent_repo.set_status(conversation_id=question_uid, status="complete")
         return "done"

@@ -699,7 +699,7 @@ class TestUploadFileInMessage:
             return_value=settings,
         ):
             with TestClient(app) as client:
-                # JSON-режим, не SSE — без Accept: text/event-stream
+                # JSON-режим: POST отдаёт {message_id}, ответ читается отдельным GET
                 resp = client.post(
                     "/api/v1/chat/conversations/conv-1/messages",
                     data={"message": "вот файл"},
@@ -1037,13 +1037,13 @@ class TestMultiChatSwitchingStreamingState:
     Сценарий: открыты ДВЕ беседы (A, B) с активными forward'ами; reasoning-блоки
     лежат в ``chat_messages.content`` со ``status='streaming'``. Переключение
     между чатами не теряет накопленный state, потому что фронт получает блоки
-    через GET /messages, а не из SSE-курсора. После прихода нового reasoning'а
-    в A повторный GET возвращает обновлённый список.
+    через GET /messages — поллинг по шине, единый источник истины. После прихода
+    нового reasoning'а в A повторный GET возвращает обновлённый список.
 
-    До рефактора (Variant D) фронт держал глобальный ``_lastReasoningSeq``,
-    который мог дать seq-перекос между разными forward'ами — после switch'а
-    Resume SSE открывался с неверным курсором и UI терял рассуждения. Теперь
-    GET /messages — единственный источник истины для streaming-state.
+    Исторический контекст: до рефактора (Variant D) фронт держал глобальный
+    per-transport seq-курсор, который мог дать перекос между разными forward'ами
+    — после switch'а резюм открывался с неверным значением и UI терял
+    рассуждения. Теперь GET /messages — единственный источник streaming-state.
     """
 
     def test_two_active_streaming_messages_visible_via_get_messages(self):
@@ -1127,7 +1127,7 @@ class TestMultiChatSwitchingStreamingState:
             )
 
             # 4. Повторный GET для A — теперь 3 блока. **Это ядро теста**:
-            #    до рефактора фронт зависел от seq-курсора в SSE и не
+            #    до рефактора фронт зависел от транспортного seq-курсора и не
             #    переиспользовал GET /messages как источник правды.
             resp_a2 = client.get("/api/v1/chat/conversations/conv-A/messages")
             assert resp_a2.status_code == 200, resp_a2.text
