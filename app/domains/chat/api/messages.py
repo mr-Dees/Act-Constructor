@@ -3,6 +3,7 @@
 import json
 import logging
 import uuid
+from contextlib import aclosing
 
 from fastapi import APIRouter, Depends, File, Form, Query, UploadFile
 from fastapi.responses import JSONResponse
@@ -22,7 +23,6 @@ from app.domains.chat.exceptions import (
     ChatFileValidationError,
 )
 from app.domains.chat.schemas.responses import FileUploadResponse, MessageResponse
-from app.domains.chat.services.agent_channel import AgentChannelService
 from app.domains.chat.services.conversation_service import ConversationService
 from app.domains.chat.services.file_service import FileService
 from app.domains.chat.services.message_service import MessageService
@@ -48,7 +48,6 @@ async def send_message(
     conv_service: ConversationService = Depends(get_conversation_service),
     msg_service: MessageService = Depends(get_message_service),
     file_service: FileService = Depends(get_file_service),
-    channel_service: AgentChannelService = Depends(get_agent_channel_service),
 ):
     """
     Отправляет сообщение в беседу.
@@ -147,26 +146,43 @@ async def send_message(
     # Оркестратор не запускается — ответ придёт асинхронно.
     if agent_mode == "always":
         poller = get_agent_channel_poller()
-        question_uid = await channel_service.submit(
-            conversation_id=conversation_id,
-            user_id=username,
-            assistant_message_id=assistant_message_id,
-            text=message,
-            mode="always",
-            media=file_blocks if file_blocks else None,
-        )
-        if poller is not None:
-            poller.subscribe(
+        if poller is None:
+            # Без поллера draft никто не дозаполнит и не затаймаутит — он завис
+            # бы в status='streaming' навсегда (беседу нельзя было бы удалить).
+            # Поэтому НЕ кладём вопрос в шину и не создаём draft, а сразу пишем
+            # финализированное error-сообщение (фронт получит его обычным GET).
+            logger.error(
+                "AgentChannelPoller не инициализирован — режим 'always' недоступен "
+                "(conversation=%s, message_id=%s)",
+                conversation_id, assistant_message_id,
+            )
+            await msg_service.save_assistant_message(
+                conversation_id=conversation_id,
+                content=[{
+                    "type": "error",
+                    "code": "agent_unavailable",
+                    "message": "Канал внешнего агента недоступен. Обратитесь к администратору.",
+                }],
+                message_id=assistant_message_id,
+            )
+            return JSONResponse({"message_id": assistant_message_id})
+
+        # channel_service строим лениво: в off/adaptive он не нужен, а как
+        # request-зависимость держал бы соединение пула всё время LLM-вызова.
+        async with aclosing(get_agent_channel_service()) as agen:
+            channel_service = await anext(agen)
+            question_uid = await channel_service.submit(
+                conversation_id=conversation_id,
+                user_id=username,
                 assistant_message_id=assistant_message_id,
-                question_uid=question_uid,
+                text=message,
+                mode="always",
+                media=file_blocks if file_blocks else None,
             )
-        else:
-            logger.warning(
-                "AgentChannelPoller не инициализирован — подписка не зарегистрирована "
-                "(assistant_message_id=%s, question_uid=%s)",
-                assistant_message_id,
-                question_uid,
-            )
+        poller.subscribe(
+            assistant_message_id=assistant_message_id,
+            question_uid=question_uid,
+        )
         return JSONResponse({"message_id": assistant_message_id})
 
     # Режим «Выключен» или «Адаптивный» (off / adaptive / любое другое):

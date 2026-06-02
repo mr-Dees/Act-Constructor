@@ -8,7 +8,6 @@
 import logging
 from typing import Callable
 
-import asyncpg
 from cachetools import TTLCache
 from fastapi import Depends, HTTPException, Request
 
@@ -90,16 +89,21 @@ async def _auto_assign_default_roles(conn, username, roles_table, user_roles_tab
                 username, role_id,
             )
         else:
-            try:
-                await conn.execute(
-                    f"""
-                    INSERT INTO {user_roles_table} (username, role_id, assigned_by)
-                    VALUES ($1, $2, 'auto')
-                    """,
-                    username, role_id,
+            # GreenPlum: UNIQUE отсутствует — INSERT ... WHERE NOT EXISTS вместо
+            # INSERT + except (который на GP никогда не срабатывал бы). Одним
+            # statement'ом сужает окно гонки на дубль (без UNIQUE не закрывает
+            # полностью), но раздельные SELECT+INSERT были бы ещё шире.
+            await conn.execute(
+                f"""
+                INSERT INTO {user_roles_table} (username, role_id, assigned_by)
+                SELECT $1, $2, 'auto'
+                WHERE NOT EXISTS (
+                    SELECT 1 FROM {user_roles_table}
+                    WHERE username = $1 AND role_id = $2
                 )
-            except asyncpg.UniqueViolationError:
-                pass  # Already assigned by concurrent request
+                """,
+                username, role_id,
+            )
 
     assigned_names = ", ".join(sorted(found_names))
     logger.info(f"Auto-assign: роли [{assigned_names}] назначены пользователю {username}")

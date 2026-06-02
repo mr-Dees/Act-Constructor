@@ -214,20 +214,24 @@ class AgentChannelService:
         question_uid = str(uuid.uuid4())
         question_id = str(uuid.uuid4())
 
-        await self._agent_repo().insert_question(
-            id=question_id,
-            chat_id=conversation_id,
-            user_id=user_id,
-            conversation_id=question_uid,
-            content=text,
-            metadata={"mode": mode, "kb": kb},
-            media=media,
-        )
-        await self._message_repo().create_streaming(
-            message_id=assistant_message_id,
-            conversation_id=conversation_id,
-            agent_ref=question_uid,
-        )
+        # Оба INSERT'а — в одной транзакции: вопрос в шине без draft'а (или
+        # наоборот) оставил бы осиротевшую строку, которая вечно входит в
+        # count_active_for_user и съедает слот лимита параллельных запросов.
+        async with self._conn.transaction():
+            await self._agent_repo().insert_question(
+                id=question_id,
+                chat_id=conversation_id,
+                user_id=user_id,
+                conversation_id=question_uid,
+                content=text,
+                metadata={"mode": mode, "kb": kb},
+                media=media,
+            )
+            await self._message_repo().create_streaming(
+                message_id=assistant_message_id,
+                conversation_id=conversation_id,
+                agent_ref=question_uid,
+            )
         return question_uid
 
     async def mark_timeout(
@@ -302,6 +306,13 @@ class AgentChannelService:
                 message_id=assistant_message_id,
                 error_block=error_block,
             )
+            # Закрываем вопрос: AW — source-of-truth освобождения слота лимита,
+            # не полагаемся на то, что внешний агент проставит терминальный
+            # status (он мог выставить только reply_to). Не best-effort: при
+            # сбое set_status исключение поднимется в _tick, подписка останется
+            # и поллер повторит try_finalize на следующем тике (mark_failed
+            # идемпотентен — вернёт False на уже не-streaming сообщении).
+            await agent_repo.set_status(conversation_id=question_uid, status="error")
             return "done"
 
         # Транслируем кнопки (acts.open_act_page → open_url) перед маппингом в блоки.
@@ -316,4 +327,10 @@ class AgentChannelService:
             message_id=assistant_message_id,
             final_blocks=blocks,
         )
+        # Закрываем вопрос в шине: освобождаем слот лимита независимо от того,
+        # проставил ли внешний агент терминальный status (мог выставить только
+        # reply_to). AW — source-of-truth. Вне общей транзакции: при сбое
+        # set_status поллер повторит try_finalize на следующем тике (finalize
+        # идемпотентен — вернёт False на уже complete-сообщении).
+        await agent_repo.set_status(conversation_id=question_uid, status="complete")
         return "done"

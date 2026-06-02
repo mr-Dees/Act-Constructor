@@ -273,11 +273,6 @@ class ActCrudService:
 
             km_digit = KMUtils.extract_km_digits(act.km_number)
 
-            await self._audit.log("delete", username, act_id, {
-                "km_number": act.km_number,
-                "part_number": act.part_number,
-            })
-
             await self._crud.delete_by_id(act_id)
             await self._crud.update_total_parts_for_km(km_digit)
 
@@ -285,6 +280,14 @@ class ActCrudService:
                 f"Удален акт ID={act_id} (КМ={act.km_number}, "
                 f"часть {act.part_number}) пользователем {username}"
             )
+
+        # Аудит — ПОСЛЕ коммита: батчер пишет вне нашей транзакции, поэтому при
+        # rollback запись об удалении не попала бы в лог для несостоявшейся
+        # операции (phantom). Логируем только реально выполненное удаление.
+        await self._audit.log("delete", username, act_id, {
+            "km_number": act.km_number,
+            "part_number": act.part_number,
+        })
 
         return {"success": True, "message": "Акт успешно удален"}
 
@@ -399,12 +402,16 @@ class ActCrudService:
                 f"часть {part_number}/{total_parts}, СЗ={act_data.service_note}"
             )
 
-            await self._audit.log("create", username, act_id, {
-                "km_number": act_data.km_number,
-                "part_number": part_number,
-            })
+            result = await self._crud.get_act_by_id(act_id)
 
-            return await self._crud.get_act_by_id(act_id)
+        # Аудит — ПОСЛЕ коммита (батчер пишет вне нашей транзакции): при откате
+        # транзакции не остаётся записи о создании несостоявшегося акта.
+        await self._audit.log("create", username, act_id, {
+            "km_number": act_data.km_number,
+            "part_number": part_number,
+        })
+
+        return result
 
     # -------------------------------------------------------------------------
     # UPDATE METADATA
@@ -897,9 +904,13 @@ class ActCrudService:
                 f"название='{new_inspection_name}'"
             )
 
-            await self._audit.log("duplicate", username, new_act_id, {
-                "source_act_id": act_id,
-                "km_number": original.km_number,
-            })
+            result = await self._crud.get_act_by_id(new_act_id)
 
-            return await self._crud.get_act_by_id(new_act_id)
+        # Аудит — ПОСЛЕ коммита (батчер пишет вне нашей транзакции): при откате
+        # не остаётся записи о дубликате несостоявшегося акта.
+        await self._audit.log("duplicate", username, new_act_id, {
+            "source_act_id": act_id,
+            "km_number": original.km_number,
+        })
+
+        return result

@@ -34,6 +34,17 @@ class AppError(Exception):
         return envelope
 
 
+class ServiceUnavailableError(AppError):
+    """Сервис временно недоступен (например, исчерпан пул соединений к БД).
+
+    Отдаётся при таймауте ожидания свободного соединения из пула: вместо
+    бессрочного зависания запроса клиент получает 503 и может повторить позже.
+    """
+
+    status_code: int = 503
+    code: ClassVar[str] = "service-unavailable"
+
+
 # Маппинг имён CHECK-ограничений БД → понятные сообщения для пользователя.
 # Используется глобальным обработчиком CheckViolationError в main.py.
 # ВАЖНО: при добавлении нового CHECK constraint в schema.sql — обязательно

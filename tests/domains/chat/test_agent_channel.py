@@ -274,6 +274,10 @@ class TestAgentChannelServiceSubmit:
         assert streaming_kwargs["conversation_id"] == "conv-1"
         assert streaming_kwargs["agent_ref"] == question_uid
 
+        # R2: оба INSERT'а обёрнуты в одну транзакцию (атомарность — иначе
+        # осиротевшая bus-строка вечно съедала бы слот лимита).
+        mock_conn.transaction.assert_called_once()
+
     async def test_submit_returns_question_uid(self, mock_conn, settings):
         """submit возвращает question_uid (строку UUID)."""
         fake_agent_repo = AsyncMock()
@@ -376,6 +380,11 @@ class TestAgentChannelServiceTryFinalize:
         text_blocks = [b for b in blocks if b["type"] == "text"]
         assert len(text_blocks) == 1
         assert text_blocks[0]["content"] == "Ответ от агента"
+        # R3: после отрисовки вопрос закрывается (status='complete') — AW сам
+        # освобождает слот лимита, не полагаясь на терминальный статус от агента.
+        fake_agent_repo.set_status.assert_awaited_once_with(
+            conversation_id="q-uid", status="complete",
+        )
 
     async def test_answer_status_error_calls_mark_failed_and_returns_done(
         self, mock_conn, settings
@@ -425,6 +434,10 @@ class TestAgentChannelServiceTryFinalize:
         assert call_kwargs["error_block"]["code"] == "agent_error"
         # finalize НЕ вызывался
         fake_msg_repo.finalize.assert_not_called()
+        # R3: вопрос закрывается со статусом 'error' — слот лимита освобождён.
+        fake_agent_repo.set_status.assert_awaited_once_with(
+            conversation_id="q-uid", status="error",
+        )
 
     async def test_try_finalize_calls_translate_buttons_when_answer_has_buttons(
         self, mock_conn, settings

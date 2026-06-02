@@ -113,7 +113,7 @@ $ grep -rn "from app.domains.acts" app/domains/admin
 | Аспект | Значение |
 |---|---|
 | **Формат** | `f"{message_id}:client_action:{i}"` (детерминированный, нумерация через `BlockIdGenerator`) |
-| **Генерируется в** | `Orchestrator._parse_client_action_result` (`stream_loop.py` для streaming, `agent_loop.py` для non-streaming) и `block_emitter.emit_response_blocks` (forward-путь). Per-message экземпляр `BlockIdGenerator` (`app/core/chat/block_id_generator.py`) — единый счётчик для всех источников эмиссии |
+| **Генерируется в** | `Orchestrator._parse_client_action_result` (`agent_loop.py`, non-streaming) и `AgentChannelService.map_answer_to_blocks` (`agent_channel.py`, forward-путь). Per-message экземпляр `BlockIdGenerator` (`app/core/chat/block_id_generator.py`) — единый счётчик для всех источников эмиссии |
 | **Используется на фронте** | `chat-client-actions.js::executeBlock` — Set исполненных id в `sessionStorage` под ключом `chat:executedActions` |
 | **Что сломается, если изменить формат** | Фронт перестанет распознавать «уже исполненный» при reload вкладки → бесконечный redirect-цикл (action `open_url` будет каждый раз заново переходить по URL). Подробнее — [`developer-guide.md §7.9`](../guides/developer-guide.md#79-action-handlers-и-clientactionblock) |
 

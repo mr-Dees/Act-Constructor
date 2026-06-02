@@ -1694,10 +1694,11 @@ class TestAgentModeForward:
         assert TOOL_FORWARD_TO_KNOWLEDGE_AGENT in result["sources"]
 
     @patch("app.domains.chat.services.orchestrator.Orchestrator._get_openai_client")
-    async def test_adaptive_mode_poller_none_logs_warning(
+    async def test_adaptive_mode_poller_none_saves_error_no_forward(
         self, mock_client_factory, orchestrator, caplog,
     ):
-        """Если poller не инициализирован — логируется warning, форвард не падает."""
+        """Если poller не инициализирован — НЕ создаём осиротевший draft: форвард
+        не выполняется, сохраняется error-сообщение, логируется ERROR."""
         import logging as _logging
         from app.core.chat.names import TOOL_FORWARD_TO_KNOWLEDGE_AGENT
 
@@ -1744,7 +1745,7 @@ class TestAgentModeForward:
                 "app.domains.chat.deps.get_agent_channel_poller",
                 return_value=None,
             ),
-            caplog.at_level(_logging.WARNING),
+            caplog.at_level(_logging.ERROR),
         ):
             result = await orchestrator.run(
                 message_id="msg-no-poller",
@@ -1753,12 +1754,14 @@ class TestAgentModeForward:
                 agent_mode="adaptive",
             )
 
-        assert result.get("forwarded") is True
-        # Даже при poller=None draft создан submit'ом — двойного сохранения нет.
-        orchestrator._save_assistant_message.assert_not_awaited()
-        # Warning залогирован
+        # Форвард НЕ выполнен (нет осиротевшего draft'а в bus/streaming).
+        assert result.get("forwarded") is not True
+        assert mock_channel.submit.await_count == 0
+        # Вместо форварда сохранено финализированное error-сообщение.
+        orchestrator._save_assistant_message.assert_awaited()
+        # ERROR залогирован.
         assert any(
             "не инициализирован" in r.getMessage()
             for r in caplog.records
-            if r.levelname == "WARNING"
+            if r.levelname == "ERROR"
         )

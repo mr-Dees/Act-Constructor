@@ -14,6 +14,7 @@ import asyncpg
 from asyncpg import Pool
 
 from app.core.config import Settings
+from app.core.exceptions import ServiceUnavailableError
 from app.db.adapters.base import DatabaseAdapter
 from app.db.adapters.greenplum import GreenplumAdapter
 from app.db.adapters.postgresql import PostgreSQLAdapter
@@ -22,6 +23,9 @@ logger = logging.getLogger("audit_workstation.db.connect")
 
 _pool: Pool | None = None
 _adapter: DatabaseAdapter | None = None
+# Таймаут ожидания свободного соединения из пула (сек), берётся из настроек при
+# init_db. None → asyncpg ждёт бесконечно (поведение до инициализации/в тестах).
+_acquire_timeout: float | None = None
 
 
 class KerberosTokenExpiredError(Exception):
@@ -271,7 +275,7 @@ async def init_db(settings: Settings) -> None:
         ValueError: Если неверный тип БД или параметры
         RuntimeError: При других ошибках подключения
     """
-    global _pool, _adapter
+    global _pool, _adapter, _acquire_timeout
 
     if _pool is not None:
         logger.warning("Database pool уже инициализирован")
@@ -282,6 +286,7 @@ async def init_db(settings: Settings) -> None:
 
     _adapter = adapter
     _pool = pool
+    _acquire_timeout = settings.database.acquire_timeout
 
 
 async def warmup_pool(pool: Pool, count: int) -> None:
@@ -312,12 +317,13 @@ async def warmup_pool(pool: Pool, count: int) -> None:
 
 async def close_db() -> None:
     """Закрывает пул подключений к БД."""
-    global _pool, _adapter
+    global _pool, _adapter, _acquire_timeout
 
     if _pool is not None:
         await _pool.close()
         _pool = None
         _adapter = None
+        _acquire_timeout = None
         logger.info("Database pool закрыт")
 
 
@@ -335,9 +341,34 @@ async def get_db() -> AsyncGenerator[asyncpg.Connection, None]:
     """
     pool = get_pool()
 
+    # Получаем соединение отдельно от тела: таймаут acquire (исчерпан пул) ловим
+    # ТОЛЬКО здесь, чтобы не спутать с asyncio.TimeoutError из самого запроса.
     try:
-        async with pool.acquire() as connection:
-            yield connection
+        connection = await pool.acquire(timeout=_acquire_timeout)
+    except asyncio.TimeoutError as e:
+        logger.error(
+            "Пул соединений исчерпан: свободное соединение не получено за %s с — "
+            "отдаём 503. Проверьте занятость пула (см. /admin/diagnostics).",
+            _acquire_timeout,
+        )
+        raise ServiceUnavailableError(
+            "Сервис временно перегружен. Повторите запрос через несколько секунд."
+        ) from e
+    except asyncpg.PostgresError as e:
+        # Ошибка установления нового соединения при росте пула (например,
+        # протухший Kerberos-билет на Greenplum).
+        if _is_kerberos_token_expired(str(e)):
+            logger.error(
+                "Kerberos токен протух при получении соединения. "
+                "Выполните 'kinit' для обновления."
+            )
+            raise KerberosTokenExpiredError(
+                "Kerberos токен протух. Выполните 'kinit' для обновления."
+            ) from e
+        raise
+
+    try:
+        yield connection
     except asyncpg.PostgresError as e:
         error_message = str(e)
 
@@ -352,6 +383,8 @@ async def get_db() -> AsyncGenerator[asyncpg.Connection, None]:
 
         # Прокидываем другие ошибки дальше
         raise
+    finally:
+        await pool.release(connection)
 
 
 async def create_tables_if_not_exist(domains=None) -> None:

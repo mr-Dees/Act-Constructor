@@ -95,7 +95,7 @@ CSS повторяет тройное разделение — см. главу 
 
 ### 1.4 Связанные документы
 
-- [`docs/architecture/chat-frontend-architecture.md`](chat-frontend-architecture.md) — чат-фронт (565 строк, 12 модулей, SSE).
+- [`docs/architecture/chat-frontend-architecture.md`](chat-frontend-architecture.md) — чат-фронт (12 модулей, транспорт polling по шине `agent_messages`).
 - [`docs/guides/developer-guide.md`](../guides/developer-guide.md) §4 — высокоуровневый обзор фронта.
 - [`docs/guides/developer-guide.md`](../guides/developer-guide.md) §10 — UX/persistence/lock.
 - [`docs/architecture/agent-channel-sequence.md`](agent-channel-sequence.md) — sequence-диаграммы forward'а к внешнему агенту.
@@ -901,7 +901,7 @@ try {
 } finally { clearTimeout(timer); }
 ```
 
-Default 30s; уважает пользовательский `signal` (если уже передан — не оборачивает). **SSE-вызовы** (chat-stream, forward-resume) **не должны** использовать этот wrapper — у них свой жизненный цикл с долгим body-стримом.
+Default 30s; уважает пользовательский `signal` (если уже передан — не оборачивает). **Поллинг-вызовы с долгим горизонтом ожидания** (опрос готовности ответа из шины) **не должны** использовать этот wrapper — у них свой `AbortController` с более длинным таймаутом.
 
 ### 11.6 Envelope `{detail, code, extra}`
 
@@ -1073,7 +1073,7 @@ Jinja-фильтр `versioned` (применяется ко всем `url_for('s
 
 ## 14. Чат
 
-Полный гайд по чат-фронту — [`docs/architecture/chat-frontend-architecture.md`](chat-frontend-architecture.md) (565 строк, 12 модулей, SSE-маршрутизация, режимы inline/modal/popup, forward к внешнему агенту, типы блоков, ClientActionsRegistry, BlockEmitter, status state machine).
+Полный гайд по чат-фронту — [`docs/architecture/chat-frontend-architecture.md`](chat-frontend-architecture.md) (12 модулей, транспорт polling по шине, режимы inline/modal/popup, forward к внешнему агенту, типы блоков, ClientActionsRegistry, status state machine).
 
 Здесь — только load-bearing **точки сцепки** с остальным фронтом:
 
@@ -1093,7 +1093,7 @@ Jinja-фильтр `versioned` (применяется ко всем `url_for('s
 2. `_DiscriminatedBlock` в `app/core/chat/schemas.py` (Python).
 3. `KNOWN_BLOCK_TYPES` Set во фронте `static/js/shared/chat/chat-messages.js:17-27`.
 
-Без бэка — `parse_message_blocks` не распознает. Без фронта — `_handleSSEEvent` / `ChatRenderer.renderBlock` упадут на default-ветку с fallback-блоком («⚠ Блок неизвестного типа …»).
+Без бэка — `parse_message_blocks` не распознает. Без фронта — `ChatRenderer.renderBlock` упадёт на default-ветку с fallback-блоком («⚠ Блок неизвестного типа …»).
 
 ### 14.4 `ChatPopupManager` в конструкторе
 

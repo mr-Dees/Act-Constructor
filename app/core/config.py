@@ -80,6 +80,10 @@ class DatabaseSettings(BaseModel):
     pool_min_size: int = Field(default=5, ge=1)
     pool_max_size: int = Field(default=20, ge=2)
     command_timeout: int = Field(default=60, gt=0)
+    # Таймаут ожидания свободного соединения из пула (сек). При исчерпании пула
+    # acquire() ждёт не бесконечно, а отдаёт 503 — иначе запрос виснет до
+    # освобождения соседнего соединения без какой-либо диагностики.
+    acquire_timeout: float = Field(default=10.0, gt=0)
     # При старте — выполнить count=pool_min_size холостых acquire() параллельно,
     # чтобы первые запросы пользователя не платили TCP-handshake.
     pool_warmup_enabled: bool = Field(default=True)

@@ -26,7 +26,13 @@ def _load_from_env(name: str, cls: type[BaseModel]) -> BaseModel:
         f"_{name}_Loader",
         (BaseSettings,),
         {
-            "__annotations__": cls.__annotations__.copy(),
+            # model_fields (не cls.__annotations__) — чтобы подхватились и
+            # унаследованные поля: __annotations__ видит только объявленные
+            # прямо на классе, и при иерархии Settings поля базы потерялись бы.
+            "__annotations__": {
+                field_name: field_info.annotation
+                for field_name, field_info in cls.model_fields.items()
+            },
             "model_config": SettingsConfigDict(
                 env_prefix=f"{name.upper()}__",
                 env_nested_delimiter="__",

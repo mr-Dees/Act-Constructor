@@ -110,28 +110,23 @@ class AdminRepository(BaseRepository):
             )
             return result == "INSERT 0 1"
         else:
-            # GreenPlum: проверяем существование, затем вставляем
-            existing = await self.conn.fetchval(
+            # GreenPlum: UNIQUE(username, role_id) отсутствует (distribution key —
+            # id), поэтому except UniqueViolationError тут никогда не сработал бы.
+            # INSERT ... WHERE NOT EXISTS одним statement'ом сужает окно гонки на
+            # дубль по сравнению с раздельными SELECT+INSERT (без UNIQUE полностью
+            # его не закрыть) — тот же идиом, что у seed-ролей в greenplum/schema.sql.
+            result = await self.conn.execute(
                 f"""
-                SELECT 1 FROM {self.user_roles}
-                WHERE username = $1 AND role_id = $2
-                """,
-                username, role_id,
-            )
-            if existing:
-                return False
-            try:
-                await self.conn.execute(
-                    f"""
-                    INSERT INTO {self.user_roles} (username, role_id, assigned_by)
-                    VALUES ($1, $2, $3)
-                    """,
-                    username, role_id, assigned_by,
+                INSERT INTO {self.user_roles} (username, role_id, assigned_by)
+                SELECT $1, $2, $3
+                WHERE NOT EXISTS (
+                    SELECT 1 FROM {self.user_roles}
+                    WHERE username = $1 AND role_id = $2
                 )
-                return True
-            except asyncpg.UniqueViolationError:
-                logger.debug("Роль role_id=%s уже назначена пользователю %s (race condition)", role_id, username)
-                return False
+                """,
+                username, role_id, assigned_by,
+            )
+            return result == "INSERT 0 1"
 
     async def remove_role(self, username: str, role_id: int) -> bool:
         """Снимает роль с пользователя. Возвращает True если запись была удалена."""
