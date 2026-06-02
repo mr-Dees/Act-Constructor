@@ -111,6 +111,18 @@ async def lifespan(app: FastAPI):
     # Список успешно стартовавших доменов — используется и в startup-откате, и в shutdown
     started: list = []
 
+    async def _close_pool_on_failed_startup() -> None:
+        """Закрывает пул при провале старта после успешного init_db.
+
+        Иначе открытый пул утечёт: процесс при провале lifespan-startup не
+        дойдёт до shutdown-секции, а на GP это N висящих сессий до рестарта.
+        ``close_db`` идемпотентен (no-op, если пул не открыт).
+        """
+        try:
+            await close_db()
+        except Exception:
+            logger.exception("Не удалось закрыть пул при провале старта")
+
     # ИНИЦИАЛИЗАЦИЯ БД
     try:
         await init_db(settings)
@@ -207,15 +219,18 @@ async def lifespan(app: FastAPI):
                                          "4. Перезапустите приложение\n"
                                          "=" * 80
         )
+        await _close_pool_on_failed_startup()
         raise RuntimeError(
             "Приложение не может запуститься без валидного Kerberos токена. "
             "Выполните 'kinit' в терминале."
         ) from e
     except asyncpg.PostgresError as e:
         logger.critical(f"Ошибка PostgreSQL при запуске приложения: {e}")
+        await _close_pool_on_failed_startup()
         raise RuntimeError(f"Не удалось инициализировать БД при старте: {e}") from e
     except Exception as e:
         logger.critical(f"Критическая ошибка при запуске приложения: {e}")
+        await _close_pool_on_failed_startup()
         raise
 
     yield

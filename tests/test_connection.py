@@ -25,6 +25,7 @@ def reset_connection_globals():
     yield
     connection._pool = None
     connection._adapter = None
+    connection._acquire_timeout = None
 
 
 # ---------------------------------------------------------------------------
@@ -332,20 +333,41 @@ class TestGetDb:
     async def test_успешное_получение_соединения(self):
         mock_conn = AsyncMock()
         mock_pool = MagicMock()
-        # pool.acquire() возвращает async context manager
-        mock_pool.acquire.return_value.__aenter__ = AsyncMock(return_value=mock_conn)
-        mock_pool.acquire.return_value.__aexit__ = AsyncMock(return_value=False)
+        # acquire/release теперь вызываются раздельно (не как контекст-менеджер):
+        # таймаут acquire ловится отдельно от ошибок тела запроса.
+        mock_pool.acquire = AsyncMock(return_value=mock_conn)
+        mock_pool.release = AsyncMock()
         connection._pool = mock_pool
 
         async with get_db() as conn:
             assert conn is mock_conn
+        # Соединение возвращается в пул в finally.
+        mock_pool.release.assert_awaited_once_with(mock_conn)
+
+    async def test_acquire_timeout_отдаёт_503(self):
+        """При исчерпании пула (TimeoutError на acquire) — ServiceUnavailableError."""
+        import asyncio
+        from app.core.exceptions import ServiceUnavailableError
+
+        mock_pool = MagicMock()
+        mock_pool.acquire = AsyncMock(side_effect=asyncio.TimeoutError())
+        mock_pool.release = AsyncMock()
+        connection._pool = mock_pool
+
+        with pytest.raises(ServiceUnavailableError) as exc_info:
+            async with get_db():
+                pass
+        assert exc_info.value.status_code == 503
+        # release не вызывается — соединение не было получено.
+        mock_pool.release.assert_not_awaited()
 
     async def test_kerberos_ошибка_при_acquire(self):
+        # Kerberos-ошибка при установлении соединения (рост пула) → понятная ошибка.
         mock_pool = MagicMock()
-        mock_pool.acquire.return_value.__aenter__ = AsyncMock(
+        mock_pool.acquire = AsyncMock(
             side_effect=asyncpg.PostgresError("gss failure during auth")
         )
-        mock_pool.acquire.return_value.__aexit__ = AsyncMock(return_value=False)
+        mock_pool.release = AsyncMock()
         connection._pool = mock_pool
 
         with pytest.raises(KerberosTokenExpiredError):
@@ -353,16 +375,18 @@ class TestGetDb:
                 pass
 
     async def test_postgres_error_без_kerberos(self):
+        # Не-Kerberos PostgresError из тела запроса пробрасывается как есть;
+        # соединение при этом всё равно возвращается в пул.
+        mock_conn = AsyncMock()
         mock_pool = MagicMock()
-        mock_pool.acquire.return_value.__aenter__ = AsyncMock(
-            side_effect=asyncpg.PostgresError("relation does not exist")
-        )
-        mock_pool.acquire.return_value.__aexit__ = AsyncMock(return_value=False)
+        mock_pool.acquire = AsyncMock(return_value=mock_conn)
+        mock_pool.release = AsyncMock()
         connection._pool = mock_pool
 
         with pytest.raises(asyncpg.PostgresError, match="relation does not exist"):
             async with get_db():
-                pass
+                raise asyncpg.PostgresError("relation does not exist")
+        mock_pool.release.assert_awaited_once_with(mock_conn)
 
 
 # ===========================================================================
