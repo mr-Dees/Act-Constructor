@@ -150,25 +150,27 @@ class TestAssignRoleGP:
         repo.adapter.supports_on_conflict.return_value = False
 
     async def test_assigned(self, repo, mock_conn):
-        """Возвращает True при новом назначении в GP."""
-        mock_conn.fetchval.return_value = None
+        """Возвращает True при новом назначении в GP (idempotent-insert вставил строку)."""
+        mock_conn.execute.return_value = "INSERT 0 1"
         result = await repo.assign_role("testuser", 1, "admin")
 
         assert result is True
+        # Одним атомарным statement'ом, без отдельного pre-check SELECT.
         mock_conn.execute.assert_called_once()
+        mock_conn.fetchval.assert_not_called()
+        sql = mock_conn.execute.call_args.args[0]
+        assert "WHERE NOT EXISTS" in sql
 
     async def test_already_exists(self, repo, mock_conn):
-        """Возвращает False, если роль уже назначена в GP."""
-        mock_conn.fetchval.return_value = 1
+        """Возвращает False, если роль уже назначена в GP (WHERE NOT EXISTS → 0 строк)."""
+        mock_conn.execute.return_value = "INSERT 0 0"
         result = await repo.assign_role("testuser", 1, "admin")
 
         assert result is False
-        mock_conn.execute.assert_not_called()
 
-    async def test_unique_violation_handled(self, repo, mock_conn):
-        """Перехватывает UniqueViolationError при race condition."""
-        mock_conn.fetchval.return_value = None
-        mock_conn.execute.side_effect = asyncpg.UniqueViolationError("")
+    async def test_concurrent_duplicate_no_insert(self, repo, mock_conn):
+        """Конкурентный дубль не создаётся: idempotent-insert возвращает 0 строк → False."""
+        mock_conn.execute.return_value = "INSERT 0 0"
         result = await repo.assign_role("testuser", 1, "admin")
 
         assert result is False
