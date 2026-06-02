@@ -160,6 +160,11 @@ class TestAssignRoleGP:
         mock_conn.fetchval.assert_not_called()
         sql = mock_conn.execute.call_args.args[0]
         assert "WHERE NOT EXISTS" in sql
+        # GP (PG 9.4) выводит тип $1/$2 в SELECT-листе (text) иначе, чем в WHERE
+        # (varchar/bigint) → AmbiguousParameterError. Явные касты в SELECT-листе
+        # фиксируют единый тип параметра.
+        assert "$1::varchar" in sql
+        assert "$2::bigint" in sql
 
     async def test_already_exists(self, repo, mock_conn):
         """Возвращает False, если роль уже назначена в GP (WHERE NOT EXISTS → 0 строк)."""

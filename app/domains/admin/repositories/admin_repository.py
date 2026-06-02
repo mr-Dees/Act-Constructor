@@ -115,10 +115,13 @@ class AdminRepository(BaseRepository):
             # INSERT ... WHERE NOT EXISTS одним statement'ом сужает окно гонки на
             # дубль по сравнению с раздельными SELECT+INSERT (без UNIQUE полностью
             # его не закрыть) — тот же идиом, что у seed-ролей в greenplum/schema.sql.
+            # Касты $1::varchar/$2::bigint ОБЯЗАТЕЛЬНЫ: $1/$2 встречаются и в
+            # SELECT-листе, и в WHERE; GP (PG 9.4) выводит для них разные типы
+            # (text vs varchar) → AmbiguousParameterError. Каст фиксирует тип.
             result = await self.conn.execute(
                 f"""
                 INSERT INTO {self.user_roles} (username, role_id, assigned_by)
-                SELECT $1, $2, $3
+                SELECT $1::varchar, $2::bigint, $3::varchar
                 WHERE NOT EXISTS (
                     SELECT 1 FROM {self.user_roles}
                     WHERE username = $1 AND role_id = $2

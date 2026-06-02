@@ -96,7 +96,7 @@ async def _auto_assign_default_roles(conn, username, roles_table, user_roles_tab
             await conn.execute(
                 f"""
                 INSERT INTO {user_roles_table} (username, role_id, assigned_by)
-                SELECT $1, $2, 'auto'
+                SELECT $1::varchar, $2::bigint, 'auto'
                 WHERE NOT EXISTS (
                     SELECT 1 FROM {user_roles_table}
                     WHERE username = $1 AND role_id = $2

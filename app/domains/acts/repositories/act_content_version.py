@@ -58,7 +58,7 @@ class ActContentVersionRepository(BaseRepository):
                 INSERT INTO {self.versions_table}
                     (act_id, version_number, save_type, username,
                      tree_data, tables_data, textblocks_data, violations_data)
-                SELECT $1, COALESCE(MAX(version_number), 0) + 1, $2, $3,
+                SELECT $1::bigint, COALESCE(MAX(version_number), 0) + 1, $2, $3,
                        $4::jsonb, $5::jsonb, $6::jsonb, $7::jsonb
                 FROM {self.versions_table}
                 WHERE act_id = $1
