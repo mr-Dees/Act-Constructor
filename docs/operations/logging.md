@@ -327,7 +327,7 @@ LIMIT 100;
 - **WARNING** — ожидаемые, но потенциально проблемные события: rate-limit
   превышен, запрос отклонён по размеру, Kerberos-токен протух во время
   запроса, `UniqueViolationError` / `CheckViolationError` из БД, LLM
-  timeout (в agent_loop / stream_loop), таймаут ответа из шины
+  timeout (в `agent_loop`), таймаут ответа из шины
   `agent_messages`, блок ответа усечён по `MAX_BLOCK_TEXT_SIZE`.
 - **ERROR / `logger.exception`** — `logger.exception(...)` пишет traceback
   автоматически. Используется для всех необработанных исключений в
@@ -344,8 +344,8 @@ LIMIT 100;
 - **Содержимое сообщений пользователя в чате.** В `messages.py:82`
   логируется только превью (`message=%r, domains=%r`) с пометкой
   `truncated`. Полный текст в логи не идёт.
-- **Tool-аргументы при стриминге.** В `stream_loop.py` (две точки эмита)
-  `args_str` обрезается до 200 символов перед эмитом в лог:
+- **Tool-аргументы.** В `agent_loop.py` `args_str` обрезается до 200 символов
+  перед эмитом в лог:
   `args_str[:200] + "..." if len(args_str) > 200 else args_str`.
 - **Tool-вывод.** В `tool_executor.py` превью аналогично режется до 200
   символов.
