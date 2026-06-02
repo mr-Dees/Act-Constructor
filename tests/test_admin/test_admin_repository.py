@@ -19,7 +19,7 @@ def settings():
 def repo(mock_conn, settings):
     """Создаёт AdminRepository с замоканным адаптером и соединением."""
     mock_adapter = MagicMock()
-    mock_adapter.get_table_name = lambda name: name
+    mock_adapter.get_table_name = lambda name, schema='': name
     mock_adapter.qualify_table_name = lambda name, schema="": name
     mock_adapter.supports_on_conflict = MagicMock(return_value=True)
     with patch(

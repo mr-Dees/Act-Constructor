@@ -64,7 +64,7 @@ def test_health_acts_returns_ok():
     conn.fetchval = AsyncMock(return_value=1)
 
     adapter = MagicMock()
-    adapter.get_table_name = lambda name: name
+    adapter.get_table_name = lambda name, schema='': name
     adapter._get_existing_tables = AsyncMock(return_value={"acts"})
 
     with patch("app.db.connection.get_adapter", return_value=adapter), \
@@ -93,7 +93,7 @@ def test_health_acts_missing_table_returns_error():
     conn.fetchval = AsyncMock(return_value=1)
 
     adapter = MagicMock()
-    adapter.get_table_name = lambda name: name
+    adapter.get_table_name = lambda name, schema='': name
     adapter._get_existing_tables = AsyncMock(return_value=set())
 
     with patch("app.db.connection.get_adapter", return_value=adapter), \
@@ -197,7 +197,7 @@ def test_health_admin_returns_ok():
     conn.fetchval = AsyncMock(return_value=1)
 
     adapter = MagicMock()
-    adapter.get_table_name = lambda name: name
+    adapter.get_table_name = lambda name, schema='': name
     adapter._get_existing_tables = AsyncMock(return_value={"roles"})
 
     with patch("app.db.connection.get_adapter", return_value=adapter), \

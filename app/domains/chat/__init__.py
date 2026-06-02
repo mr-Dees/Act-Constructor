@@ -223,7 +223,12 @@ def _build_domain():
     from app.core.domain import DomainDescriptor
     from app.domains.chat.api import get_api_routers
     from app.domains.chat.integrations.chat_tools import get_chat_tools
-    from app.domains.chat.settings import ChatDomainSettings
+    from app.domains.chat.settings import (
+        ChatDomainSettings,
+        resolve_bus_schema,
+        resolve_chat_schema,
+        schema_qualifier,
+    )
 
     _register_lifespan_hooks()
 
@@ -236,4 +241,11 @@ def _build_domain():
         chat_tools=get_chat_tools(),
         on_shutdown=_on_chat_shutdown,
         health_check=_health_check,
+        # Квалификатор схемы подставляется в schema.sql при создании таблиц:
+        # {CHAT_SCHEMA_Q} — собственные таблицы чата, {BUS_SCHEMA_Q} — bus-таблица.
+        # Ленивые (callable) — резолвятся в момент create_tables, когда адаптер готов.
+        migration_substitutions={
+            "{CHAT_SCHEMA_Q}": lambda: schema_qualifier(resolve_chat_schema()),
+            "{BUS_SCHEMA_Q}": lambda: schema_qualifier(resolve_bus_schema()),
+        },
     )

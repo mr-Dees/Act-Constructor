@@ -3067,6 +3067,7 @@ def test_chat_settings_defaults():
 
 | Переменная | Тип | По умолчанию | Описание |
 |-----------|-----|-------------|----------|
+| `CHAT__SCHEMA_NAME` | str | `""` | Схема БД для собственных таблиц чата (conversations, messages, files, tool_metrics, audit_log). Пусто → основная схема GP / без квалификатора PG. Учитывается при создании (миграции через `{CHAT_SCHEMA_Q}`) и доступе (`get_table_name(schema=…)`). Bus-таблица — отдельным `CHAT__AGENT_CHANNEL__SCHEMA_NAME` |
 | `CHAT__PROFILE` | str | `sglang` | Профиль LLM: `sglang` (прод), `openrouter`/`openai` (dev), `gigachat` (corp proxy, non-streaming). См. §7.1a |
 | `CHAT__API_BASE` | str | (пусто) | Базовый URL LLM API (без `/chat/completions` — SDK добавит сам) |
 | `CHAT__API_KEY` | SecretStr | (пусто) | API-ключ |
@@ -3110,6 +3111,7 @@ def test_chat_settings_defaults():
 | Переменная | Тип | По умолчанию | Описание |
 |-----------|-----|-------------|----------|
 | `CHAT__AGENT_CHANNEL__TABLE_NAME` | str | `chat_agent_messages_bus` | Имя bus-таблицы |
+| `CHAT__AGENT_CHANNEL__SCHEMA_NAME` | str | `""` | Схема bus-таблицы. Пусто → fallback на `CHAT__SCHEMA_NAME`, затем на основную схему адаптера. Учитывается при создании и доступе. Позволяет вынести шину в общую integration-схему с внешним агентом независимо от остальных таблиц чата |
 | `CHAT__AGENT_CHANNEL__POLL_MIN_INTERVAL_SEC` | float | `2.0` | Минимальный интервал polling `AgentChannelPoller` (при активности). Снизить можно ради отзывчивости чата, цена — больше SELECT'ов к GP |
 | `CHAT__AGENT_CHANNEL__POLL_MAX_INTERVAL_SEC` | float | `10.0` | Максимальный интервал polling (при тишине от агента) |
 | `CHAT__AGENT_CHANNEL__POLL_BACKOFF_MULTIPLIER` | float | `1.5` | Шаг роста интервала при пустом тике (> 1.0) |

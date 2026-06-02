@@ -18,6 +18,10 @@ class AgentChannelSettings(BaseModel):
     """Параметры канала к внешнему агенту через bus-таблицу chat_agent_messages_bus."""
 
     table_name: str = Field(default="chat_agent_messages_bus")
+    # Схема БД bus-таблицы. Пусто → fallback на схему домена чата
+    # (ChatDomainSettings.schema_name), затем на основную схему адаптера.
+    # Позволяет вынести шину в общую integration-схему с внешним агентом.
+    schema_name: str = Field(default="")
     poll_min_interval_sec: float = Field(default=2.0, gt=0.0)
     poll_max_interval_sec: float = Field(default=10.0, gt=0.0)
     poll_backoff_multiplier: float = Field(default=1.5, gt=1.0)
@@ -76,6 +80,11 @@ class ChatDomainSettings(BaseModel):
 
     # Поведение small-talk
     smalltalk_mode: Literal["local", "forward"] = "local"
+
+    # Схема БД для собственных таблиц чата (conversations, messages, files,
+    # tool_metrics, audit_log). Пусто → основная схема адаптера (GP) /
+    # без квалификатора (PG). Учитывается и при создании, и при доступе.
+    schema_name: str = ""
 
     # Retry-политика и канал к внешнему агенту через bus-таблицу
     retry: RetryPolicy = Field(default_factory=RetryPolicy)
@@ -150,3 +159,41 @@ class ChatDomainSettings(BaseModel):
     # Хранение
     max_conversations_per_user: int = Field(default=100, gt=0)
     max_messages_per_conversation: int = Field(default=500, gt=0)
+
+
+def resolve_chat_schema() -> str:
+    """Схема собственных таблиц чата. Пусто → основная схема адаптера.
+
+    Безопасно при незарегистрированном домене (юнит-тесты): вернёт "".
+    """
+    from app.core.settings_registry import get
+
+    try:
+        return get("chat", ChatDomainSettings).schema_name
+    except KeyError:
+        return ""
+
+
+def resolve_bus_schema() -> str:
+    """Схема bus-таблицы: agent_channel.schema_name → схема чата → основная."""
+    from app.core.settings_registry import get
+
+    try:
+        s = get("chat", ChatDomainSettings)
+    except KeyError:
+        return ""
+    return s.agent_channel.schema_name or s.schema_name
+
+
+def schema_qualifier(domain_schema: str) -> str:
+    """Квалификатор '<schema>.' для подстановки в миграции.
+
+    Пустая доменная схема воспроизводит дефолтное поведение адаптера:
+    основная схема GP (`<main>.`) либо без квалификатора на PG (``).
+    """
+    if domain_schema:
+        return f"{domain_schema}."
+    from app.db.connection import get_adapter
+
+    main = getattr(get_adapter(), "schema", "")
+    return f"{main}." if main else ""

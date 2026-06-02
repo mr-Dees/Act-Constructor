@@ -1,8 +1,12 @@
 -- Схема базы данных для домена чата (PostgreSQL)
--- Использует те же плейсхолдеры {SCHEMA}.{PREFIX}, что и GP-вариант:
--- адаптер подменяет {SCHEMA}. на "" и {PREFIX} на DATABASE__TABLE_PREFIX.
+-- Плейсхолдеры (подставляются перед выполнением):
+--   {CHAT_SCHEMA_Q} — квалификатор схемы таблиц чата ("<schema>." или "");
+--                     из CHAT__SCHEMA_NAME (пусто → без квалификатора на PG).
+--   {BUS_SCHEMA_Q}  — квалификатор схемы bus-таблицы; из
+--                     CHAT__AGENT_CHANNEL__SCHEMA_NAME (fallback на схему чата).
+--   {PREFIX}        — DATABASE__TABLE_PREFIX.
 
-CREATE TABLE IF NOT EXISTS {SCHEMA}.{PREFIX}chat_conversations (
+CREATE TABLE IF NOT EXISTS {CHAT_SCHEMA_Q}{PREFIX}chat_conversations (
     id              VARCHAR(36) PRIMARY KEY,
     user_id         VARCHAR(50) NOT NULL,
     title           VARCHAR(500),
@@ -11,15 +15,15 @@ CREATE TABLE IF NOT EXISTS {SCHEMA}.{PREFIX}chat_conversations (
     created_at      TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
     updated_at      TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
-CREATE INDEX IF NOT EXISTS idx_{PREFIX}chat_conversations_user ON {SCHEMA}.{PREFIX}chat_conversations(user_id);
+CREATE INDEX IF NOT EXISTS idx_{PREFIX}chat_conversations_user ON {CHAT_SCHEMA_Q}{PREFIX}chat_conversations(user_id);
 -- Составной индекс под список бесед: get_by_user сортирует по updated_at DESC.
 -- Без него — seq-scan + sort при росте таблицы.
 CREATE INDEX IF NOT EXISTS idx_{PREFIX}chat_conversations_user_updated
-    ON {SCHEMA}.{PREFIX}chat_conversations(user_id, updated_at DESC);
+    ON {CHAT_SCHEMA_Q}{PREFIX}chat_conversations(user_id, updated_at DESC);
 
-CREATE TABLE IF NOT EXISTS {SCHEMA}.{PREFIX}chat_messages (
+CREATE TABLE IF NOT EXISTS {CHAT_SCHEMA_Q}{PREFIX}chat_messages (
     id              VARCHAR(36) PRIMARY KEY,
-    conversation_id VARCHAR(36) NOT NULL REFERENCES {SCHEMA}.{PREFIX}chat_conversations(id) ON DELETE CASCADE,
+    conversation_id VARCHAR(36) NOT NULL REFERENCES {CHAT_SCHEMA_Q}{PREFIX}chat_conversations(id) ON DELETE CASCADE,
     role            VARCHAR(20) NOT NULL,
     content         JSONB NOT NULL,
     model           VARCHAR(100),
@@ -33,12 +37,12 @@ CREATE TABLE IF NOT EXISTS {SCHEMA}.{PREFIX}chat_messages (
                     CHECK (status IN ('streaming','complete','failed')),
     created_at      TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
-CREATE INDEX IF NOT EXISTS idx_{PREFIX}chat_messages_conversation ON {SCHEMA}.{PREFIX}chat_messages(conversation_id);
-CREATE INDEX IF NOT EXISTS idx_{PREFIX}chat_messages_created ON {SCHEMA}.{PREFIX}chat_messages(conversation_id, created_at);
+CREATE INDEX IF NOT EXISTS idx_{PREFIX}chat_messages_conversation ON {CHAT_SCHEMA_Q}{PREFIX}chat_messages(conversation_id);
+CREATE INDEX IF NOT EXISTS idx_{PREFIX}chat_messages_created ON {CHAT_SCHEMA_Q}{PREFIX}chat_messages(conversation_id, created_at);
 -- Partial-индекс под выборку «висящих» streaming-сообщений беседы при
 -- ресанье/восстановлении. Поддерживается с PG 9.4.
 CREATE INDEX IF NOT EXISTS idx_{PREFIX}chat_messages_streaming
-    ON {SCHEMA}.{PREFIX}chat_messages(conversation_id, status)
+    ON {CHAT_SCHEMA_Q}{PREFIX}chat_messages(conversation_id, status)
     WHERE status = 'streaming';
 
 -- Идемпотентная миграция status-колонки для уже существующих БД, где
@@ -48,45 +52,45 @@ DO $$
 BEGIN
     IF NOT EXISTS (
         SELECT 1 FROM pg_attribute
-        WHERE attrelid = '{SCHEMA}.{PREFIX}chat_messages'::regclass
+        WHERE attrelid = '{CHAT_SCHEMA_Q}{PREFIX}chat_messages'::regclass
           AND attname = 'status'
           AND NOT attisdropped
     ) THEN
-        ALTER TABLE {SCHEMA}.{PREFIX}chat_messages
+        ALTER TABLE {CHAT_SCHEMA_Q}{PREFIX}chat_messages
             ADD COLUMN status VARCHAR(20) NOT NULL DEFAULT 'complete';
     END IF;
     IF NOT EXISTS (
         SELECT 1 FROM pg_constraint
-        WHERE conrelid = '{SCHEMA}.{PREFIX}chat_messages'::regclass
+        WHERE conrelid = '{CHAT_SCHEMA_Q}{PREFIX}chat_messages'::regclass
           AND conname = 'check_chat_messages_status_values'
     ) THEN
-        ALTER TABLE {SCHEMA}.{PREFIX}chat_messages
+        ALTER TABLE {CHAT_SCHEMA_Q}{PREFIX}chat_messages
             ADD CONSTRAINT check_chat_messages_status_values
             CHECK (status IN ('streaming','complete','failed'));
     END IF;
 END$$;
 
-CREATE TABLE IF NOT EXISTS {SCHEMA}.{PREFIX}chat_files (
+CREATE TABLE IF NOT EXISTS {CHAT_SCHEMA_Q}{PREFIX}chat_files (
     id              VARCHAR(36) PRIMARY KEY,
-    conversation_id VARCHAR(36) NOT NULL REFERENCES {SCHEMA}.{PREFIX}chat_conversations(id) ON DELETE CASCADE,
-    message_id      VARCHAR(36) REFERENCES {SCHEMA}.{PREFIX}chat_messages(id) ON DELETE SET NULL,
+    conversation_id VARCHAR(36) NOT NULL REFERENCES {CHAT_SCHEMA_Q}{PREFIX}chat_conversations(id) ON DELETE CASCADE,
+    message_id      VARCHAR(36) REFERENCES {CHAT_SCHEMA_Q}{PREFIX}chat_messages(id) ON DELETE SET NULL,
     filename        VARCHAR(500) NOT NULL,
     mime_type       VARCHAR(200) NOT NULL,
     file_size       INTEGER NOT NULL CONSTRAINT check_chat_files_file_size_positive CHECK (file_size > 0),
     file_data       BYTEA NOT NULL,
     created_at      TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
-CREATE INDEX IF NOT EXISTS idx_{PREFIX}chat_files_conversation ON {SCHEMA}.{PREFIX}chat_files(conversation_id);
+CREATE INDEX IF NOT EXISTS idx_{PREFIX}chat_files_conversation ON {CHAT_SCHEMA_Q}{PREFIX}chat_files(conversation_id);
 
 -- Ссылка draft-сообщения на строку-вопрос в chat_agent_messages_bus (conversation_id вопроса).
 DO $$
 BEGIN
     IF NOT EXISTS (
         SELECT 1 FROM pg_attribute
-        WHERE attrelid = '{SCHEMA}.{PREFIX}chat_messages'::regclass
+        WHERE attrelid = '{CHAT_SCHEMA_Q}{PREFIX}chat_messages'::regclass
           AND attname = 'agent_ref' AND NOT attisdropped
     ) THEN
-        ALTER TABLE {SCHEMA}.{PREFIX}chat_messages ADD COLUMN agent_ref VARCHAR(36);
+        ALTER TABLE {CHAT_SCHEMA_Q}{PREFIX}chat_messages ADD COLUMN agent_ref VARCHAR(36);
     END IF;
 END$$;
 
@@ -96,7 +100,7 @@ END$$;
 -- одного сообщения (на него ссылается reply_to). role 'tool' разрешён, но AW
 -- его пока не обрабатывает. Если таблица уже создана стороной агента —
 -- CREATE TABLE IF NOT EXISTS / адаптер делают это безопасно.
-CREATE TABLE IF NOT EXISTS {SCHEMA}.{PREFIX}chat_agent_messages_bus (
+CREATE TABLE IF NOT EXISTS {BUS_SCHEMA_Q}{PREFIX}chat_agent_messages_bus (
     id              VARCHAR(36) PRIMARY KEY,
     chat_id         VARCHAR(36) NOT NULL,
     user_id         VARCHAR(50) NOT NULL,
@@ -116,13 +120,13 @@ CREATE TABLE IF NOT EXISTS {SCHEMA}.{PREFIX}chat_agent_messages_bus (
     updated_at      TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
 CREATE INDEX IF NOT EXISTS idx_{PREFIX}chat_agent_messages_bus_chat
-    ON {SCHEMA}.{PREFIX}chat_agent_messages_bus(chat_id, created_at);
+    ON {BUS_SCHEMA_Q}{PREFIX}chat_agent_messages_bus(chat_id, created_at);
 CREATE INDEX IF NOT EXISTS idx_{PREFIX}chat_agent_messages_bus_conversation
-    ON {SCHEMA}.{PREFIX}chat_agent_messages_bus(conversation_id);
+    ON {BUS_SCHEMA_Q}{PREFIX}chat_agent_messages_bus(conversation_id);
 CREATE INDEX IF NOT EXISTS idx_{PREFIX}chat_agent_messages_bus_status
-    ON {SCHEMA}.{PREFIX}chat_agent_messages_bus(status, created_at);
+    ON {BUS_SCHEMA_Q}{PREFIX}chat_agent_messages_bus(status, created_at);
 CREATE INDEX IF NOT EXISTS idx_{PREFIX}chat_agent_messages_bus_reply_to
-    ON {SCHEMA}.{PREFIX}chat_agent_messages_bus(reply_to);
+    ON {BUS_SCHEMA_Q}{PREFIX}chat_agent_messages_bus(reply_to);
 
 -- ── Метрики выполнения ChatTool'ов ────────────────────────────────────
 -- Append-only журнал latency / status / ошибок для каждого вызова tool'а
@@ -131,7 +135,7 @@ CREATE INDEX IF NOT EXISTS idx_{PREFIX}chat_agent_messages_bus_reply_to
 -- conversation_id хранится как VARCHAR(36) БЕЗ FK: метрики переживают
 -- удаление беседы, чтобы не было каскадного исчезновения исторических
 -- данных при cleanup'е чатов.
-CREATE TABLE IF NOT EXISTS {SCHEMA}.{PREFIX}chat_tool_metrics (
+CREATE TABLE IF NOT EXISTS {CHAT_SCHEMA_Q}{PREFIX}chat_tool_metrics (
     id              BIGSERIAL PRIMARY KEY,
     tool_name       VARCHAR(128) NOT NULL,
     status          VARCHAR(32) NOT NULL
@@ -146,16 +150,16 @@ CREATE TABLE IF NOT EXISTS {SCHEMA}.{PREFIX}chat_tool_metrics (
     created_at      TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
 CREATE INDEX IF NOT EXISTS idx_{PREFIX}chat_tool_metrics_tool_created
-    ON {SCHEMA}.{PREFIX}chat_tool_metrics(tool_name, created_at);
+    ON {CHAT_SCHEMA_Q}{PREFIX}chat_tool_metrics(tool_name, created_at);
 CREATE INDEX IF NOT EXISTS idx_{PREFIX}chat_tool_metrics_status_created
-    ON {SCHEMA}.{PREFIX}chat_tool_metrics(status, created_at);
+    ON {CHAT_SCHEMA_Q}{PREFIX}chat_tool_metrics(status, created_at);
 
 -- ── Audit-лог жизненного цикла беседы/файлов/стримов ──────────────────
 -- Append-only журнал действий пользователя. Пишется глушащим сервисом:
 -- сбой записи не должен ломать основную операцию (см. AuditService).
 -- conversation_id хранится как VARCHAR(36) БЕЗ FK: записи о DELETE
 -- беседы остаются после её удаления (forensic-trail).
-CREATE TABLE IF NOT EXISTS {SCHEMA}.{PREFIX}chat_audit_log (
+CREATE TABLE IF NOT EXISTS {CHAT_SCHEMA_Q}{PREFIX}chat_audit_log (
     id              BIGSERIAL PRIMARY KEY,
     username        VARCHAR(64) NOT NULL,
     action          VARCHAR(64) NOT NULL,
@@ -164,8 +168,8 @@ CREATE TABLE IF NOT EXISTS {SCHEMA}.{PREFIX}chat_audit_log (
     created_at      TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
 CREATE INDEX IF NOT EXISTS idx_{PREFIX}chat_audit_log_username_created
-    ON {SCHEMA}.{PREFIX}chat_audit_log(username, created_at);
+    ON {CHAT_SCHEMA_Q}{PREFIX}chat_audit_log(username, created_at);
 CREATE INDEX IF NOT EXISTS idx_{PREFIX}chat_audit_log_action_created
-    ON {SCHEMA}.{PREFIX}chat_audit_log(action, created_at);
+    ON {CHAT_SCHEMA_Q}{PREFIX}chat_audit_log(action, created_at);
 CREATE INDEX IF NOT EXISTS idx_{PREFIX}chat_audit_log_conversation_created
-    ON {SCHEMA}.{PREFIX}chat_audit_log(conversation_id, created_at);
+    ON {CHAT_SCHEMA_Q}{PREFIX}chat_audit_log(conversation_id, created_at);

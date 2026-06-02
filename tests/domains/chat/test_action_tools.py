@@ -35,7 +35,7 @@ def _patch_get_db(mock_conn):
     async def _fake_get_db():
         yield mock_conn
     fake_adapter = MagicMock()
-    fake_adapter.get_table_name = lambda name: name
+    fake_adapter.get_table_name = lambda name, schema='': name
     return patch.multiple(
         "app.db.connection",
         get_db=_fake_get_db,

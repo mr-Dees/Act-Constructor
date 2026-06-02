@@ -24,7 +24,7 @@ from app.domains.admin.repositories.access_denied_audit import (
 def _patch_adapter():
     """Подменяет get_adapter, чтобы BaseRepository работал без init_db()."""
     adapter = MagicMock()
-    adapter.get_table_name = lambda name: name
+    adapter.get_table_name = lambda name, schema='': name
     adapter.qualify_table_name = lambda name, schema="": name
     with patch("app.db.repositories.base.get_adapter", return_value=adapter):
         yield

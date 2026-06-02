@@ -6,6 +6,7 @@ import logging
 import asyncpg
 
 from app.db.repositories.base import BaseRepository
+from app.domains.chat.settings import resolve_chat_schema
 
 logger = logging.getLogger("audit_workstation.domains.chat.repo.conversation")
 
@@ -15,7 +16,8 @@ class ConversationRepository(BaseRepository):
 
     def __init__(self, conn: asyncpg.Connection):
         super().__init__(conn)
-        self.table = self.adapter.get_table_name("chat_conversations")
+        self._schema = resolve_chat_schema()
+        self.table = self.adapter.get_table_name("chat_conversations", schema=self._schema)
 
     @staticmethod
     def _parse_row(row: dict) -> dict:
@@ -139,8 +141,8 @@ class ConversationRepository(BaseRepository):
             return result == "DELETE 1"
 
         # Greenplum: явное удаление дочерних записей
-        files_table = self.adapter.get_table_name("chat_files")
-        messages_table = self.adapter.get_table_name("chat_messages")
+        files_table = self.adapter.get_table_name("chat_files", schema=self._schema)
+        messages_table = self.adapter.get_table_name("chat_messages", schema=self._schema)
         async with self.conn.transaction():
             await self.conn.execute(
                 f"DELETE FROM {files_table} WHERE conversation_id = $1",

@@ -6,6 +6,7 @@ import logging
 import asyncpg
 
 from app.db.repositories.base import BaseRepository
+from app.domains.chat.settings import resolve_bus_schema
 
 logger = logging.getLogger("audit_workstation.domains.chat.repo.agent_message")
 
@@ -16,9 +17,16 @@ _JSONB_FIELDS = ("media", "metadata", "buttons")
 class AgentMessageRepository(BaseRepository):
     """CRUD-операции с bus-таблицей chat_agent_messages_bus."""
 
-    def __init__(self, conn: asyncpg.Connection, table_name: str = "chat_agent_messages_bus"):
+    def __init__(
+        self,
+        conn: asyncpg.Connection,
+        table_name: str = "chat_agent_messages_bus",
+        schema: str | None = None,
+    ):
         super().__init__(conn)
-        self.table = self.adapter.get_table_name(table_name)
+        # schema=None → резолвим из настроек (agent_channel → chat → основная).
+        bus_schema = resolve_bus_schema() if schema is None else schema
+        self.table = self.adapter.get_table_name(table_name, schema=bus_schema)
 
     @staticmethod
     def _parse_row(row) -> dict | None:

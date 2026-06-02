@@ -471,7 +471,7 @@ class TestOrchestratorFileAccess:
         ctx.__aenter__ = AsyncMock(return_value=mock_conn)
         ctx.__aexit__ = AsyncMock(return_value=False)
 
-        mock_adapter = MagicMock(get_table_name=lambda n: n)
+        mock_adapter = MagicMock(get_table_name=lambda n, schema='': n)
 
         settings = ChatDomainSettings()
         orchestrator = Orchestrator(

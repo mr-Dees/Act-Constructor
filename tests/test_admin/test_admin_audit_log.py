@@ -10,7 +10,7 @@ from app.domains.admin.repositories.admin_audit_log import AdminAuditLogReposito
 def repo(mock_conn):
     """Создаёт AdminAuditLogRepository с замоканным адаптером."""
     mock_adapter = MagicMock()
-    mock_adapter.get_table_name = lambda name: name
+    mock_adapter.get_table_name = lambda name, schema='': name
     mock_adapter.qualify_table_name = lambda name, schema="": name
     with patch(
         "app.db.repositories.base.get_adapter", return_value=mock_adapter

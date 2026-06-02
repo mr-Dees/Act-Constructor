@@ -13,7 +13,7 @@ from app.domains.chat.repositories.chat_tool_metrics_repository import (
 def _patch_adapter():
     """Подменяет get_adapter, чтобы BaseRepository работал вне init_db()."""
     adapter = MagicMock()
-    adapter.get_table_name = lambda name: name
+    adapter.get_table_name = lambda name, schema='': name
     adapter.qualify_table_name = lambda name, schema="": name
     with patch("app.db.repositories.base.get_adapter", return_value=adapter):
         yield

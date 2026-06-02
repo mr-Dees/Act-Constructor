@@ -70,7 +70,7 @@ class DatabaseAdapter(ABC):
         pass
 
     @abstractmethod
-    def get_table_name(self, base_name: str) -> str:
+    def get_table_name(self, base_name: str, schema: str = "") -> str:
         """
         Возвращает полное имя таблицы с учетом схемы/префикса.
 
@@ -79,6 +79,9 @@ class DatabaseAdapter(ABC):
 
         Args:
             base_name: Базовое имя таблицы (acts, audit_team_members, etc.)
+            schema: Явная схема-override. Пусто → основная схема (GP) /
+                без квалификатора (PG). Позволяет домену разместить
+                свои таблицы в отдельной схеме.
 
         Returns:
             Полное имя таблицы для использования в SQL

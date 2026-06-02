@@ -324,7 +324,7 @@ class TestBuildUserContent:
         ctx = AsyncMock()
         ctx.__aenter__ = AsyncMock(return_value=mock_conn)
         ctx.__aexit__ = AsyncMock(return_value=False)
-        mock_adapter = MagicMock(get_table_name=lambda name: name)
+        mock_adapter = MagicMock(get_table_name=lambda name, schema='': name)
 
         file_blocks = [{"file_id": "file-1", "filename": "test.txt"}]
 
@@ -344,7 +344,7 @@ class TestBuildUserContent:
         ctx = AsyncMock()
         ctx.__aenter__ = AsyncMock(return_value=mock_conn)
         ctx.__aexit__ = AsyncMock(return_value=False)
-        mock_adapter = MagicMock(get_table_name=lambda name: name)
+        mock_adapter = MagicMock(get_table_name=lambda name, schema='': name)
 
         file_blocks = [{"file_id": "nonexistent"}]
 
@@ -363,7 +363,7 @@ class TestBuildUserContent:
         ctx = AsyncMock()
         ctx.__aenter__ = AsyncMock(return_value=mock_conn)
         ctx.__aexit__ = AsyncMock(return_value=False)
-        mock_adapter = MagicMock(get_table_name=lambda name: name)
+        mock_adapter = MagicMock(get_table_name=lambda name, schema='': name)
 
         with (
             patch("app.db.connection.get_db", return_value=ctx),
@@ -386,7 +386,7 @@ class TestBuildUserContent:
         ctx = AsyncMock()
         ctx.__aenter__ = AsyncMock(return_value=mock_conn)
         ctx.__aexit__ = AsyncMock(return_value=False)
-        mock_adapter = MagicMock(get_table_name=lambda name: name)
+        mock_adapter = MagicMock(get_table_name=lambda name, schema='': name)
 
         file_blocks = [{"file_id": "file-id-1"}]
 

@@ -6,6 +6,7 @@ import logging
 import asyncpg
 
 from app.db.repositories.base import BaseRepository
+from app.domains.chat.settings import resolve_chat_schema
 
 logger = logging.getLogger("audit_workstation.domains.chat.repo.message")
 
@@ -15,7 +16,7 @@ class MessageRepository(BaseRepository):
 
     def __init__(self, conn: asyncpg.Connection):
         super().__init__(conn)
-        self.table = self.adapter.get_table_name("chat_messages")
+        self.table = self.adapter.get_table_name("chat_messages", schema=resolve_chat_schema())
 
     @staticmethod
     def _parse_row(row: dict) -> dict:

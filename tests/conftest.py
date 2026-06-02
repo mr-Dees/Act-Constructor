@@ -27,7 +27,7 @@ def mock_conn():
 def mock_adapter():
     """Mock DatabaseAdapter для unit-тестов."""
     adapter = MagicMock()
-    adapter.get_table_name = lambda name: name
+    adapter.get_table_name = lambda name, schema="": name
     adapter.qualify_table_name = lambda name, schema="": name
     adapter.supports_on_conflict = MagicMock(return_value=True)
     return adapter

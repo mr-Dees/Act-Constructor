@@ -5,6 +5,7 @@ import logging
 import asyncpg
 
 from app.db.repositories.base import BaseRepository
+from app.domains.chat.settings import resolve_chat_schema
 
 logger = logging.getLogger("audit_workstation.domains.chat.repo.file")
 
@@ -14,8 +15,9 @@ class FileRepository(BaseRepository):
 
     def __init__(self, conn: asyncpg.Connection):
         super().__init__(conn)
-        self.table = self.adapter.get_table_name("chat_files")
-        self.conversations_table = self.adapter.get_table_name("chat_conversations")
+        schema = resolve_chat_schema()
+        self.table = self.adapter.get_table_name("chat_files", schema=schema)
+        self.conversations_table = self.adapter.get_table_name("chat_conversations", schema=schema)
 
     async def create(
         self,

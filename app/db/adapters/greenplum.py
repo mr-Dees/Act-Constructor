@@ -148,13 +148,15 @@ class GreenplumAdapter(DatabaseAdapter):
                 f"({len(expected)} таблиц)"
             )
 
-    def get_table_name(self, base_name: str) -> str:
+    def get_table_name(self, base_name: str, schema: str = "") -> str:
         """
         Возвращает полное имя таблицы с схемой и префиксом.
 
         Пример: s_grnplm_ld_audit_da_project_4.t_db_oarb_audit_act_acts
+
+        schema — override основной схемы (пусто → self.schema).
         """
-        return f"{self.schema}.{self.table_prefix}{base_name}"
+        return f"{schema or self.schema}.{self.table_prefix}{base_name}"
 
     def qualify_table_name(self, full_name: str, schema: str = "") -> str:
         """

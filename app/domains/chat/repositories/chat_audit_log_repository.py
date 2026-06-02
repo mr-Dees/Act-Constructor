@@ -7,6 +7,7 @@ from dataclasses import dataclass
 import asyncpg
 
 from app.db.repositories.base import BaseRepository
+from app.domains.chat.settings import resolve_chat_schema
 
 logger = logging.getLogger(
     "audit_workstation.domains.chat.repo.audit_log"
@@ -27,7 +28,7 @@ class ChatAuditLogRepository(BaseRepository):
 
     def __init__(self, conn: asyncpg.Connection):
         super().__init__(conn)
-        self.table = self.adapter.get_table_name("chat_audit_log")
+        self.table = self.adapter.get_table_name("chat_audit_log", schema=resolve_chat_schema())
 
     async def log(
         self,

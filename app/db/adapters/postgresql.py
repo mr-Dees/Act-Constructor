@@ -118,11 +118,16 @@ class PostgreSQLAdapter(DatabaseAdapter):
                 f"({len(expected)} таблиц)"
             )
 
-    def get_table_name(self, base_name: str) -> str:
+    def get_table_name(self, base_name: str, schema: str = "") -> str:
         """Возвращает имя таблицы с префиксом приложения.
 
         Пример: t_db_oarb_audit_act_acts
+
+        schema — необязательный override: при заданном значении имя
+        квалифицируется схемой, иначе остаётся неквалифицированным.
         """
+        if schema:
+            return f"{schema}.{self.table_prefix}{base_name}"
         return f"{self.table_prefix}{base_name}"
 
     def qualify_table_name(self, full_name: str, schema: str = "") -> str:
