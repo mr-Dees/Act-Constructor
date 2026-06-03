@@ -39,25 +39,14 @@ class GreenplumAdapter(DatabaseAdapter):
         conn: asyncpg.Connection,
         expected_names: list[str],
     ) -> set[str]:
-        """Проверяет существование таблиц в схеме Greenplum."""
-        if not expected_names:
-            return set()
+        """Проверяет существование таблиц с учётом схемы каждого имени.
 
-        # expected_names могут быть квалифицированными: schema.table_name
-        name_map: dict[str, str] = {}
-        for name in expected_names:
-            parts = name.split('.')
-            simple_name = parts[-1] if len(parts) > 1 else name
-            name_map[simple_name] = name
-
-        simple_names = list(name_map.keys())
-        rows = await conn.fetch(
-            "SELECT tablename FROM pg_tables "
-            "WHERE schemaname = $1 AND tablename = ANY($2::text[])",
-            self.schema, simple_names,
+        Неквалифицированные имена относятся к основной схеме адаптера
+        (``self.schema``); квалифицированные проверяются в своей схеме.
+        """
+        return await self._existing_tables_by_schema(
+            conn, expected_names, default_schema=self.schema,
         )
-        existing_simple = {r['tablename'] for r in rows}
-        return {name_map[s] for s in existing_simple if s in name_map}
 
     async def create_tables(self, conn: asyncpg.Connection, schema_paths: list[Path] | None = None, substitutions: dict[str, str | Callable[[], str]] | None = None) -> None:
         """Создает таблицы из списка schema.sql для Greenplum с проверкой целостности."""

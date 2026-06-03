@@ -340,6 +340,63 @@ class TestPostgreSQLBatchExecute:
 # 6. Контракт capabilities (sanity): расхождение между адаптерами.
 # ---------------------------------------------------------------------------
 
+# ---------------------------------------------------------------------------
+# 7. _get_existing_tables учитывает схему имени, а не одну фиксированную.
+#    Регрессия: при CHAT__SCHEMA_NAME / CHAT__AGENT_CHANNEL__SCHEMA_NAME
+#    таблицы создаются в иной схеме; existence-check обязан проверять её,
+#    иначе post-verify в create_tables ложно падает с RuntimeError.
+# ---------------------------------------------------------------------------
+
+class TestExistingTablesSchemaAware:
+
+    async def test_gp_qualified_name_checks_declared_schema(self, mock_conn):
+        a = GreenplumAdapter(schema="main_s", table_prefix="t_")
+        mock_conn.fetch.return_value = [{"tablename": "t_bus"}]
+
+        found = await a._get_existing_tables(mock_conn, ["integ.t_bus"])
+
+        assert found == {"integ.t_bus"}
+        # Запрос ушёл по схеме 'integ', а не по основной 'main_s'.
+        args = mock_conn.fetch.call_args.args
+        assert args[1] == "integ"
+        assert args[2] == ["t_bus"]
+
+    async def test_pg_qualified_name_checks_declared_schema(self, mock_conn):
+        a = PostgreSQLAdapter(table_prefix="t_")
+        mock_conn.fetch.return_value = [{"tablename": "t_bus"}]
+
+        found = await a._get_existing_tables(mock_conn, ["integ.t_bus"])
+
+        assert found == {"integ.t_bus"}
+        args = mock_conn.fetch.call_args.args
+        assert args[1] == "integ"
+        assert args[2] == ["t_bus"]
+
+    async def test_gp_unqualified_name_uses_main_schema(self, mock_conn):
+        a = GreenplumAdapter(schema="main_s", table_prefix="t_")
+        mock_conn.fetch.return_value = [{"tablename": "t_foo"}]
+
+        found = await a._get_existing_tables(mock_conn, ["main_s.t_foo"])
+
+        assert found == {"main_s.t_foo"}
+        assert mock_conn.fetch.call_args.args[1] == "main_s"
+
+    async def test_pg_unqualified_name_uses_public(self, mock_conn):
+        a = PostgreSQLAdapter(table_prefix="t_")
+        mock_conn.fetch.return_value = [{"tablename": "t_foo"}]
+
+        found = await a._get_existing_tables(mock_conn, ["t_foo"])
+
+        assert found == {"t_foo"}
+        assert mock_conn.fetch.call_args.args[1] == "public"
+
+    async def test_empty_input_no_query(self, mock_conn):
+        a = PostgreSQLAdapter(table_prefix="t_")
+        found = await a._get_existing_tables(mock_conn, [])
+        assert found == set()
+        mock_conn.fetch.assert_not_called()
+
+
 def test_capabilities_diverge():
     pg = PostgreSQLAdapter(table_prefix="")
     gp = GreenplumAdapter(schema="s", table_prefix="p_")

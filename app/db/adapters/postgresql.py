@@ -33,15 +33,14 @@ class PostgreSQLAdapter(DatabaseAdapter):
         conn: asyncpg.Connection,
         expected_names: list[str],
     ) -> set[str]:
-        """Проверяет существование таблиц в схеме public."""
-        if not expected_names:
-            return set()
-        rows = await conn.fetch(
-            "SELECT tablename FROM pg_tables "
-            "WHERE schemaname = 'public' AND tablename = ANY($1::text[])",
-            expected_names,
+        """Проверяет существование таблиц с учётом схемы каждого имени.
+
+        Неквалифицированные имена относятся к схеме ``public``;
+        квалифицированные (``schema.table``) проверяются в своей схеме.
+        """
+        return await self._existing_tables_by_schema(
+            conn, expected_names, default_schema="public",
         )
-        return {r['tablename'] for r in rows}
 
     async def create_tables(self, conn: asyncpg.Connection, schema_paths: list[Path] | None = None, substitutions: dict[str, str | Callable[[], str]] | None = None) -> None:
         """Создает таблицы из списка schema.sql для PostgreSQL с проверкой целостности."""

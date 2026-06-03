@@ -34,6 +34,50 @@ class DatabaseAdapter(ABC):
         pattern = r'CREATE\s+TABLE\s+(?:IF\s+NOT\s+EXISTS\s+)?(\S+)\s*\('
         return re.findall(pattern, sql, re.IGNORECASE)
 
+    @staticmethod
+    async def _existing_tables_by_schema(
+        conn: asyncpg.Connection,
+        expected_names: list[str],
+        *,
+        default_schema: str,
+    ) -> set[str]:
+        """Проверяет существование таблиц в той схеме, где они объявлены.
+
+        Имена из ``_extract_table_names_from_sql`` могут быть квалифицированы
+        (``schema.table``) — например, когда домен размещает свои таблицы в
+        отдельной схеме (``CHAT__SCHEMA_NAME`` / ``CHAT__AGENT_CHANNEL__SCHEMA_NAME``).
+        Группируем по схеме и делаем по запросу на схему, проверяя таблицу именно
+        там, где она создаётся, а не только в одной фиксированной схеме (иначе
+        post-verify в ``create_tables`` ложно падал бы с RuntimeError на любой
+        нестандартной схеме). Неквалифицированные имена относятся к
+        ``default_schema``.
+        """
+        if not expected_names:
+            return set()
+
+        # schema -> {tablename: полное_ожидаемое_имя}
+        by_schema: dict[str, dict[str, str]] = {}
+        for name in expected_names:
+            parts = name.split(".")
+            if len(parts) > 1:
+                schema, simple = parts[-2], parts[-1]
+            else:
+                schema, simple = default_schema, name
+            by_schema.setdefault(schema, {})[simple] = name
+
+        found: set[str] = set()
+        for schema, name_map in by_schema.items():
+            rows = await conn.fetch(
+                "SELECT tablename FROM pg_tables "
+                "WHERE schemaname = $1 AND tablename = ANY($2::text[])",
+                schema, list(name_map.keys()),
+            )
+            for r in rows:
+                full = name_map.get(r["tablename"])
+                if full is not None:
+                    found.add(full)
+        return found
+
     @abstractmethod
     async def _get_existing_tables(
         self,
