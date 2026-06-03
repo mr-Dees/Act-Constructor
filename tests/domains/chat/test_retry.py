@@ -2,7 +2,16 @@
 import pytest
 from openai import APIStatusError
 
-from app.domains.chat.services.retry import retry_on_transient
+from app.domains.chat.services.retry import retry_on_transient as _retry_on_transient
+
+
+# По умолчанию в тестах connect_max_attempts достаточно большой, чтобы НЕ влиять
+# на старые сценарии (там лимит определяется max_attempts). Тесты connect-класса
+# передают свой connect_max_attempts явно.
+def retry_on_transient(*, connect_max_attempts: int = 10, **kwargs):
+    """Тестовый враппер: даёт дефолт connect_max_attempts, чтобы не плодить шум
+    в старых вызовах. Сама production-функция дефолта НЕ имеет."""
+    return _retry_on_transient(connect_max_attempts=connect_max_attempts, **kwargs)
 
 
 def _fake_status_error(code: int) -> APIStatusError:
@@ -324,3 +333,174 @@ async def test_status_error_with_none_code_does_not_retry():
     with pytest.raises(APIStatusError):
         await fn()
     assert calls["n"] == 1
+
+
+# ===== Раздельный лимит для connect-класса (fast-fail) =====
+
+
+async def test_connect_class_uses_connect_max_attempts(monkeypatch):
+    """connect-class ошибка (httpx.ConnectError) ретраится РОВНО
+    connect_max_attempts раз, затем пробрасывается — даже если max_attempts больше."""
+    import httpx as _httpx
+
+    async def fake_sleep(sec):
+        pass
+
+    monkeypatch.setattr("app.domains.chat.services.retry.asyncio.sleep", fake_sleep)
+    calls = {"n": 0}
+
+    @retry_on_transient(
+        on_429=True, on_5xx=True, max_attempts=5, connect_max_attempts=2,
+        backoff_base=0.0,
+    )
+    async def fn():
+        calls["n"] += 1
+        raise _httpx.ConnectError("server down")
+
+    with pytest.raises(_httpx.ConnectError):
+        await fn()
+    # Лимит connect-класса = 2, значит ровно 2 вызова (а не 5).
+    assert calls["n"] == 2
+
+
+async def test_connect_class_pool_timeout_uses_connect_max_attempts(monkeypatch):
+    """httpx.PoolTimeout — тоже connect-класс, лимит connect_max_attempts."""
+    import httpx as _httpx
+
+    async def fake_sleep(sec):
+        pass
+
+    monkeypatch.setattr("app.domains.chat.services.retry.asyncio.sleep", fake_sleep)
+    calls = {"n": 0}
+
+    @retry_on_transient(
+        on_429=True, on_5xx=True, max_attempts=5, connect_max_attempts=3,
+        backoff_base=0.0,
+    )
+    async def fn():
+        calls["n"] += 1
+        raise _httpx.PoolTimeout("pool exhausted")
+
+    with pytest.raises(_httpx.PoolTimeout):
+        await fn()
+    assert calls["n"] == 3
+
+
+async def test_openai_api_connection_error_uses_connect_max_attempts(monkeypatch):
+    """«Чистый» openai.APIConnectionError — connect-класс (лимит connect_max_attempts)."""
+    from openai import APIConnectionError
+    import httpx as _httpx
+
+    async def fake_sleep(sec):
+        pass
+
+    monkeypatch.setattr("app.domains.chat.services.retry.asyncio.sleep", fake_sleep)
+    calls = {"n": 0}
+
+    @retry_on_transient(
+        on_429=True, on_5xx=True, max_attempts=5, connect_max_attempts=2,
+        backoff_base=0.0,
+    )
+    async def fn():
+        calls["n"] += 1
+        raise APIConnectionError(request=_httpx.Request("POST", "http://x"))
+
+    with pytest.raises(APIConnectionError):
+        await fn()
+    assert calls["n"] == 2
+
+
+async def test_transient_class_5xx_uses_max_attempts(monkeypatch):
+    """transient-class (HTTP 503) ретраится max_attempts раз, НЕ урезается до
+    connect_max_attempts."""
+    async def fake_sleep(sec):
+        pass
+
+    monkeypatch.setattr("app.domains.chat.services.retry.asyncio.sleep", fake_sleep)
+    calls = {"n": 0}
+
+    @retry_on_transient(
+        on_429=False, on_5xx=True, max_attempts=5, connect_max_attempts=2,
+        backoff_base=0.0,
+    )
+    async def fn():
+        calls["n"] += 1
+        raise _fake_status_error(503)
+
+    with pytest.raises(APIStatusError):
+        await fn()
+    assert calls["n"] == 5
+
+
+async def test_transient_class_read_timeout_uses_max_attempts(monkeypatch):
+    """httpx.ReadTimeout — transient-класс, лимит max_attempts (не connect)."""
+    import httpx as _httpx
+
+    async def fake_sleep(sec):
+        pass
+
+    monkeypatch.setattr("app.domains.chat.services.retry.asyncio.sleep", fake_sleep)
+    calls = {"n": 0}
+
+    @retry_on_transient(
+        on_429=True, on_5xx=True, max_attempts=4, connect_max_attempts=2,
+        backoff_base=0.0,
+    )
+    async def fn():
+        calls["n"] += 1
+        raise _httpx.ReadTimeout("slow")
+
+    with pytest.raises(_httpx.ReadTimeout):
+        await fn()
+    assert calls["n"] == 4
+
+
+async def test_api_timeout_error_goes_transient_path_not_connect(monkeypatch):
+    """КЛЮЧЕВОЙ регресс: openai.APITimeoutError — подкласс APIConnectionError,
+    но это «сервер медленный», поэтому идёт по transient-пути (лимит max_attempts),
+    а НЕ урезается до connect_max_attempts."""
+    from openai import APITimeoutError
+    import httpx as _httpx
+
+    async def fake_sleep(sec):
+        pass
+
+    monkeypatch.setattr("app.domains.chat.services.retry.asyncio.sleep", fake_sleep)
+    calls = {"n": 0}
+
+    @retry_on_transient(
+        on_429=True, on_5xx=True, max_attempts=5, connect_max_attempts=2,
+        backoff_base=0.0,
+    )
+    async def fn():
+        calls["n"] += 1
+        raise APITimeoutError(request=_httpx.Request("POST", "http://x"))
+
+    with pytest.raises(APITimeoutError):
+        await fn()
+    # Если бы ловился как connect-класс — было бы 2. Должно быть 5.
+    assert calls["n"] == 5
+
+
+async def test_mixed_connect_then_success(monkeypatch):
+    """Смешанный сценарий: 1 connect-ошибка, затем успех — возвращает результат."""
+    import httpx as _httpx
+
+    async def fake_sleep(sec):
+        pass
+
+    monkeypatch.setattr("app.domains.chat.services.retry.asyncio.sleep", fake_sleep)
+    calls = {"n": 0}
+
+    @retry_on_transient(
+        on_429=True, on_5xx=True, max_attempts=5, connect_max_attempts=3,
+        backoff_base=0.0,
+    )
+    async def fn():
+        calls["n"] += 1
+        if calls["n"] < 2:
+            raise _httpx.ConnectError("transient down")
+        return "ok"
+
+    assert await fn() == "ok"
+    assert calls["n"] == 2

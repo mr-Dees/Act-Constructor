@@ -38,12 +38,14 @@ def _make_breaker(
     *,
     failure_threshold: int = 3,
     recovery_timeout_sec: int = 30,
+    external_recovery: bool = False,
     clock: FakeClock | None = None,
 ) -> tuple[CircuitBreaker, FakeClock]:
     clk = clock or FakeClock()
     cb = CircuitBreaker(
         failure_threshold=failure_threshold,
         recovery_timeout_sec=recovery_timeout_sec,
+        external_recovery=external_recovery,
         clock=clk,
     )
     return cb, clk
@@ -147,6 +149,92 @@ async def test_half_open_failure_reopens_circuit():
     assert await cb.is_open() is True
     clock.advance(2)  # 11с от reopen
     assert await cb.is_open() is False  # half_open снова
+
+
+# ---------------------------------------------------------------------------
+# Внешнее восстановление (external_recovery)
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_external_recovery_no_auto_half_open_after_timeout():
+    """С external_recovery=True is_open() остаётся True после таймаута.
+
+    Таймерного перехода open → half_open нет — восстановлением
+    занимается фоновый probe.
+    """
+    cb, clock = _make_breaker(
+        failure_threshold=2, recovery_timeout_sec=30, external_recovery=True
+    )
+    await cb.record_failure(RuntimeError("x"))
+    await cb.record_failure(RuntimeError("x"))
+    assert cb.state == STATE_OPEN
+
+    # Истёк recovery_timeout — но автоперехода нет, всё ещё open
+    clock.advance(100)
+    assert await cb.is_open() is True
+    assert cb.state == STATE_OPEN
+
+
+@pytest.mark.asyncio
+async def test_external_recovery_false_keeps_auto_half_open():
+    """Контраст: с external_recovery=False после таймаута → half_open."""
+    cb, clock = _make_breaker(
+        failure_threshold=2, recovery_timeout_sec=30, external_recovery=False
+    )
+    await cb.record_failure(RuntimeError("x"))
+    await cb.record_failure(RuntimeError("x"))
+    assert cb.state == STATE_OPEN
+
+    clock.advance(31)
+    assert await cb.is_open() is False
+    assert cb.state == STATE_HALF_OPEN
+
+
+@pytest.mark.asyncio
+async def test_probe_succeeded_from_open_closes_circuit():
+    """probe_succeeded() из open закрывает circuit."""
+    cb, _ = _make_breaker(
+        failure_threshold=2, recovery_timeout_sec=30, external_recovery=True
+    )
+    await cb.record_failure(RuntimeError("x"))
+    await cb.record_failure(RuntimeError("x"))
+    assert cb.state == STATE_OPEN
+
+    await cb.probe_succeeded()
+    assert cb.state == STATE_CLOSED
+    assert cb.failure_count == 0
+    assert await cb.is_open() is False
+
+
+@pytest.mark.asyncio
+async def test_probe_failed_from_open_stays_open():
+    """probe_failed() из open оставляет open, обновляя opened_at."""
+    cb, clock = _make_breaker(
+        failure_threshold=2, recovery_timeout_sec=30, external_recovery=True
+    )
+    await cb.record_failure(RuntimeError("x"))
+    await cb.record_failure(RuntimeError("x"))
+    assert cb.state == STATE_OPEN
+    opened_at_before = cb._opened_at
+
+    clock.advance(50)
+    await cb.probe_failed()
+    assert cb.state == STATE_OPEN
+    assert await cb.is_open() is True
+    # opened_at обновился на текущее время clock
+    assert cb._opened_at == clock.t
+    assert cb._opened_at != opened_at_before
+
+
+@pytest.mark.asyncio
+async def test_default_threshold_opens_after_two_failures():
+    """Порог по умолчанию (threshold=2) размыкает circuit за 2 сбоя."""
+    cb, _ = _make_breaker(failure_threshold=2)
+    await cb.record_failure(RuntimeError("x"))
+    assert cb.state == STATE_CLOSED
+    await cb.record_failure(RuntimeError("x"))
+    assert cb.state == STATE_OPEN
 
 
 # ---------------------------------------------------------------------------

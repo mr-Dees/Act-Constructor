@@ -12,6 +12,11 @@ class RetryPolicy(BaseModel):
     on_5xx: bool = True   # server errors (transient)
     max_attempts: int = Field(default=5, ge=1)
     backoff_base_sec: float = Field(default=2.0, ge=0.0)
+    # Отдельный кап для обрывов соединения (ConnectError/APIConnectionError/
+    # PoolTimeout): сервер лёг — нет смысла ждать полный цикл из max_attempts,
+    # быстро падаем на fallback. APITimeoutError («сервер медленный»)
+    # сюда НЕ относится — он идёт по обычному max_attempts.
+    connect_max_attempts: int = Field(default=2, ge=1)
 
 
 class AgentChannelSettings(BaseModel):
@@ -27,6 +32,22 @@ class AgentChannelSettings(BaseModel):
     poll_backoff_multiplier: float = Field(default=1.5, gt=1.0)
     answer_timeout_sec: int = Field(default=600, gt=0)  # 10 минут
     max_block_text_size: int = Field(default=262144, gt=0)
+
+
+class LLMHealthProbeSettings(BaseModel):
+    """Фоновая перепроверка доступности primary-LLM при открытом circuit breaker.
+
+    Убирает «пробу живым запросом» из пути пользователя: пока primary лежит,
+    все запросы мгновенно идут на fallback, а отдельная фоновая задача
+    пингует primary с adaptive-backoff и закрывает breaker, как только
+    primary отвечает (best-practice: Azure Architecture Center).
+    """
+
+    enabled: bool = True
+    poll_min_interval_sec: float = Field(default=2.0, gt=0.0)
+    poll_max_interval_sec: float = Field(default=30.0, gt=0.0)
+    poll_backoff_multiplier: float = Field(default=1.5, gt=1.0)
+    timeout_sec: float = Field(default=5.0, gt=0.0)
 
 
 class ChatDomainSettings(BaseModel):
@@ -63,7 +84,7 @@ class ChatDomainSettings(BaseModel):
     fallback_extra_headers: dict[str, str] = Field(default_factory=dict)
 
     circuit_breaker_failure_threshold: int = Field(
-        default=5,
+        default=2,
         ge=1,
         description=(
             "Подряд ошибок primary, после которого circuit размыкается"
@@ -89,6 +110,9 @@ class ChatDomainSettings(BaseModel):
     # Retry-политика и канал к внешнему агенту через bus-таблицу
     retry: RetryPolicy = Field(default_factory=RetryPolicy)
     agent_channel: AgentChannelSettings = Field(default_factory=AgentChannelSettings)
+    health_probe: LLMHealthProbeSettings = Field(
+        default_factory=LLMHealthProbeSettings,
+    )
 
     # Оркестрация
     system_prompt: str = (

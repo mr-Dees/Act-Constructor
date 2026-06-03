@@ -44,10 +44,12 @@ class CircuitBreaker:
         *,
         failure_threshold: int = 5,
         recovery_timeout_sec: int = 60,
+        external_recovery: bool = False,
         clock: Callable[[], float] = time.monotonic,
     ) -> None:
         self._failure_threshold = failure_threshold
         self._recovery_timeout_sec = recovery_timeout_sec
+        self._external_recovery = external_recovery
         self._clock = clock
         self._state: str = STATE_CLOSED
         self._failure_count: int = 0
@@ -72,21 +74,32 @@ class CircuitBreaker:
         *,
         failure_threshold: int | None = None,
         recovery_timeout_sec: int | None = None,
+        external_recovery: bool | None = None,
     ) -> None:
         """Обновляет параметры breaker'а (без сброса состояния)."""
         if failure_threshold is not None:
             self._failure_threshold = failure_threshold
         if recovery_timeout_sec is not None:
             self._recovery_timeout_sec = recovery_timeout_sec
+        if external_recovery is not None:
+            self._external_recovery = external_recovery
 
     async def is_open(self) -> bool:
         """Возвращает True если primary НЕЛЬЗЯ вызывать сейчас.
 
         В состоянии ``open``, если истёк ``recovery_timeout``, переводит
         в ``half_open`` и возвращает False (разрешая probe-вызов).
+
+        Если включён ``external_recovery``, таймерное восстановление
+        выключено: в ``open`` всегда возвращается True, а закрывать
+        circuit будет фоновый probe через ``probe_succeeded()`` —
+        авто-перехода open → half_open по таймеру не происходит.
         """
         async with self._lock:
             if self._state == STATE_OPEN:
+                if self._external_recovery:
+                    # Восстановлением занимается фоновый probe, не таймер.
+                    return True
                 if self._opened_at is None:
                     # invariant defensive
                     self._opened_at = self._clock()
@@ -156,6 +169,42 @@ class CircuitBreaker:
                 self._state = STATE_OPEN
                 self._opened_at = self._clock()
 
+    async def probe_succeeded(self) -> None:
+        """Фиксирует успешную фоновую пробу primary (внешнее восстановление).
+
+        Из ``open``/``half_open`` закрывает circuit. В ``closed`` — no-op.
+        В отличие от ``record_success()`` закрывает circuit и из ``open``
+        (таймерного перехода в half_open при external_recovery нет).
+        """
+        async with self._lock:
+            if self._state in (STATE_OPEN, STATE_HALF_OPEN):
+                logger.info(
+                    "Circuit breaker: %s → closed (probe успешен)",
+                    self._state,
+                )
+                self._state = STATE_CLOSED
+                self._failure_count = 0
+                self._opened_at = None
+
+    async def probe_failed(self) -> None:
+        """Фиксирует неудачную фоновую пробу primary (внешнее восстановление).
+
+        В ``open`` остаётся open, обновляя ``opened_at`` (для diagnostics).
+        В ``half_open`` возвращает в open. В ``closed`` — no-op.
+        """
+        async with self._lock:
+            if self._state == STATE_OPEN:
+                self._opened_at = self._clock()
+                logger.warning(
+                    "Circuit breaker: open остаётся open (probe упал)",
+                )
+            elif self._state == STATE_HALF_OPEN:
+                self._state = STATE_OPEN
+                self._opened_at = self._clock()
+                logger.warning(
+                    "Circuit breaker: half_open → open (probe упал)",
+                )
+
 
 # ---------------------------------------------------------------------------
 # Singleton
@@ -166,8 +215,9 @@ _instance: CircuitBreaker | None = None
 
 def get_breaker(
     *,
-    failure_threshold: int = 5,
+    failure_threshold: int = 2,
     recovery_timeout_sec: int = 60,
+    external_recovery: bool = False,
 ) -> CircuitBreaker:
     """Возвращает process-local breaker, создавая при первом обращении.
 
@@ -179,11 +229,13 @@ def get_breaker(
         _instance = CircuitBreaker(
             failure_threshold=failure_threshold,
             recovery_timeout_sec=recovery_timeout_sec,
+            external_recovery=external_recovery,
         )
     else:
         _instance.configure(
             failure_threshold=failure_threshold,
             recovery_timeout_sec=recovery_timeout_sec,
+            external_recovery=external_recovery,
         )
     return _instance
 

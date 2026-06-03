@@ -8,6 +8,20 @@
     чата (ChatLimitError, ChatFileValidationError, ChatRateLimitError и т.п.),
     любые иные исключения.
 
+Два класса ретраябельных ошибок с разными лимитами попыток:
+  - **connect-class** (сервер недоступен, обрыв соединения) — fast-fail с
+    лимитом `connect_max_attempts` (обычно меньше), чтобы при лежащем primary-LLM
+    быстро упасть на fallback, а не выжидать полный цикл. Сюда входят:
+    httpx.ConnectError, httpx.PoolTimeout, openai.APIConnectionError (только
+    «чистый», без таймаута).
+  - **transient-class** (сервер жив, но занят/медленный) — лимит `max_attempts`.
+    Сюда входят: HTTP 408/429/5xx, httpx.ReadTimeout, httpx.WriteTimeout,
+    httpx.RemoteProtocolError, openai.APITimeoutError.
+
+ВАЖНО: openai.APITimeoutError — подкласс openai.APIConnectionError, но это
+«сервер медленный», а не «лёг», поэтому относится к transient-классу и ловится
+раньше APIConnectionError.
+
 Backoff: экспоненциальный с джиттером —
   delay_n = min(backoff_base * 2 ** (n-1) + random.uniform(0, 0.5), 60.0).
 """
@@ -36,13 +50,19 @@ F = TypeVar("F", bound=Callable[..., Any])
 # 408 Request Timeout — сервер сам говорит, что не уложился, повтор уместен.
 _ALWAYS_RETRY_STATUS = frozenset({408})
 
-# Сетевые ошибки httpx, для которых имеет смысл повторить запрос.
-_RETRYABLE_NETWORK_EXC: tuple[type[BaseException], ...] = (
+# Сетевые ошибки httpx «сервер недоступен / обрыв соединения» — connect-класс
+# (fast-fail с лимитом connect_max_attempts).
+_CONNECT_NETWORK_EXC: tuple[type[BaseException], ...] = (
     httpx.ConnectError,
+    httpx.PoolTimeout,
+)
+
+# Сетевые ошибки httpx «сервер жив, но медленный / оборвал ответ» —
+# transient-класс (лимит max_attempts).
+_TRANSIENT_NETWORK_EXC: tuple[type[BaseException], ...] = (
     httpx.ReadTimeout,
     httpx.WriteTimeout,
     httpx.RemoteProtocolError,
-    httpx.PoolTimeout,
 )
 
 # Доменные исключения чата, которые НЕ должны ретраиться — это
@@ -59,23 +79,34 @@ def retry_on_transient(
     on_429: bool,
     on_5xx: bool,
     max_attempts: int,
+    connect_max_attempts: int,
     backoff_base: float,
 ) -> Callable[[F], F]:
     """Повторяет async-вызов на transient-ошибках провайдера LLM.
 
-    Какие ошибки повторяются:
-      - HTTP 408 (request timeout) — всегда
-      - HTTP 429 (rate limit) — если on_429=True
-      - HTTP 500..599 (server errors, включая 503 Service Unavailable) —
-        если on_5xx=True
-      - Сетевые исключения httpx (ConnectError, ReadTimeout, WriteTimeout,
-        RemoteProtocolError, PoolTimeout) — всегда
-      - openai.APITimeoutError / APIConnectionError — всегда (это обёртки
-        над httpx-таймаутами/обрывами соединения)
+    Какие ошибки повторяются и с каким лимитом попыток:
+      - **transient-класс** (лимит max_attempts) — сервер жив, но занят/медленный:
+        - HTTP 408 (request timeout) — всегда
+        - HTTP 429 (rate limit) — если on_429=True
+        - HTTP 500..599 (server errors, включая 503 Service Unavailable) —
+          если on_5xx=True
+        - httpx.ReadTimeout / WriteTimeout / RemoteProtocolError
+        - openai.APITimeoutError (обёртка над httpx.ReadTimeout)
+      - **connect-класс** (лимит connect_max_attempts, fast-fail) — сервер
+        недоступен / обрыв соединения:
+        - httpx.ConnectError / httpx.PoolTimeout
+        - openai.APIConnectionError (только «чистый», без таймаута)
       - Прочие 4xx (400, 401, 403, 404, 422 и т.п.) — НЕ повторяются;
         это клиентские ошибки, повтор не поможет.
       - Доменные исключения чата (ChatLimitError, ChatFileValidationError,
         ChatRateLimitError) — НЕ повторяются, это бизнес-ошибки.
+
+    ВАЖНО: openai.APITimeoutError — подкласс openai.APIConnectionError, но это
+    «сервер медленный», поэтому ловится ПЕРВЫМ и идёт по transient-классу
+    (лимит max_attempts), а не по connect-классу.
+
+    Меньший connect_max_attempts позволяет при лежащем primary-LLM быстро упасть
+    на fallback, не выжидая полный transient-цикл.
 
     Между попытками: exponential backoff с небольшим джиттером,
     delay_n = backoff_base * 2 ** (n-1) + random.uniform(0, 0.5), не больше 60с.
@@ -84,7 +115,10 @@ def retry_on_transient(
         @wraps(func)
         async def wrapper(*args: Any, **kwargs: Any) -> Any:
             last_exc: BaseException | None = None
-            for attempt in range(1, max_attempts + 1):
+            upper_bound = max(max_attempts, connect_max_attempts)
+            for attempt in range(1, upper_bound + 1):
+                # is_connect_class определяет лимит попыток для пойманной ошибки.
+                is_connect_class = False
                 try:
                     return await func(*args, **kwargs)
                 except _NEVER_RETRY_EXC:
@@ -97,21 +131,34 @@ def retry_on_transient(
                         raise
                     last_exc = exc
                     reason = f"HTTP {code}"
-                except (APITimeoutError, APIConnectionError) as exc:
-                    # Обёртки OpenAI SDK над httpx-таймаутами/обрывами.
+                except APITimeoutError as exc:
+                    # APITimeoutError — подкласс APIConnectionError, но это
+                    # «сервер медленный» → transient-класс. Ловим ПЕРВЫМ.
                     last_exc = exc
                     reason = type(exc).__name__
-                except _RETRYABLE_NETWORK_EXC as exc:
+                except APIConnectionError as exc:
+                    # «Чистый» обрыв соединения (без таймаута) → connect-класс.
                     last_exc = exc
                     reason = type(exc).__name__
+                    is_connect_class = True
+                except _TRANSIENT_NETWORK_EXC as exc:
+                    last_exc = exc
+                    reason = type(exc).__name__
+                except _CONNECT_NETWORK_EXC as exc:
+                    last_exc = exc
+                    reason = type(exc).__name__
+                    is_connect_class = True
 
-                if attempt >= max_attempts:
+                limit = connect_max_attempts if is_connect_class else max_attempts
+                if attempt >= limit:
                     break
                 delay = backoff_base * (2 ** (attempt - 1)) + random.uniform(0, 0.5)
                 delay = min(delay, 60.0)
                 logger.warning(
-                    "Временная ошибка LLM (%s), попытка %d/%d, пауза %.2fс",
-                    reason, attempt, max_attempts, delay,
+                    "Временная ошибка LLM (%s, класс=%s), попытка %d/%d, пауза %.2fс",
+                    reason,
+                    "connect" if is_connect_class else "transient",
+                    attempt, limit, delay,
                 )
                 await asyncio.sleep(delay)
             assert last_exc is not None

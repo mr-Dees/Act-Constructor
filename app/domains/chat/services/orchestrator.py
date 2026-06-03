@@ -59,6 +59,7 @@ class Orchestrator:
             on_5xx=self.settings.retry.on_5xx,
             max_attempts=self.settings.retry.max_attempts,
             backoff_base=self.settings.retry.backoff_base_sec,
+            connect_max_attempts=self.settings.retry.connect_max_attempts,
         )
         # Контекст для метрик: устанавливается в run перед
         # agent loop и читается в _execute_tool_call. Так избегаем менять
@@ -381,11 +382,20 @@ class Orchestrator:
         return False
 
     def _get_circuit_breaker(self):
-        """Возвращает singleton-breaker с актуальной конфигурацией."""
+        """Возвращает singleton-breaker с актуальной конфигурацией.
+
+        ``external_recovery`` включается, когда настроен fallback и активен
+        фоновый health-probe: тогда breaker не делает таймерный переход
+        open→half_open (живой запрос не становится пробой), а восстановление
+        primary берёт на себя ``LLMHealthProbe`` через ``probe_succeeded()``.
+        """
         return get_breaker(
             failure_threshold=self.settings.circuit_breaker_failure_threshold,
             recovery_timeout_sec=(
                 self.settings.circuit_breaker_recovery_timeout_sec
+            ),
+            external_recovery=(
+                self.settings.health_probe.enabled and self._has_fallback()
             ),
         )
 

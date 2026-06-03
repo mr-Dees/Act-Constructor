@@ -204,6 +204,42 @@ def _register_lifespan_hooks() -> None:
             except Exception:
                 logger.exception("Ошибка при остановке AgentChannelPoller")
 
+    async def _start_llm_health_probe(app: FastAPI) -> None:
+        """Поднимает LLMHealthProbe — фоновую перепроверку primary-LLM при open circuit."""
+        from app.core.settings_registry import get as get_domain_settings
+        from app.domains.chat.services.llm_client import build_fallback_client
+        from app.domains.chat.services.llm_health_probe import LLMHealthProbe
+        from app.domains.chat.settings import ChatDomainSettings
+
+        chat_settings = get_domain_settings("chat", ChatDomainSettings)
+
+        # Probe имеет смысл только если есть fallback (без него circuit и не
+        # размыкается — нечего восстанавливать) и если он не выключен настройками.
+        if build_fallback_client(chat_settings) is None:
+            return
+        if not chat_settings.health_probe.enabled:
+            return
+
+        probe = LLMHealthProbe(chat_settings)
+        probe.start()
+        app.state.chat_llm_health_probe = probe
+        register_background_task(
+            "chat.llm_health_probe", probe.get_status,
+        )
+
+    async def _stop_llm_health_probe(app: FastAPI) -> None:
+        """Останавливает LLMHealthProbe."""
+        import logging
+
+        logger = logging.getLogger("audit_workstation.domains.chat.lifecycle")
+        probe = getattr(app.state, "chat_llm_health_probe", None)
+        unregister_background_task("chat.llm_health_probe")
+        if probe is not None:
+            try:
+                await probe.stop()
+            except Exception:
+                logger.exception("Ошибка при остановке LLMHealthProbe")
+
     register_startup_hook("chat.tool_metrics_batcher", _start_tool_metrics_batcher)
     register_shutdown_hook("chat.tool_metrics_batcher", _stop_tool_metrics_batcher)
 
@@ -215,6 +251,13 @@ def _register_lifespan_hooks() -> None:
     )
     register_shutdown_hook(
         "chat.agent_channel_poller", _stop_agent_channel_poller,
+    )
+
+    register_startup_hook(
+        "chat.llm_health_probe", _start_llm_health_probe,
+    )
+    register_shutdown_hook(
+        "chat.llm_health_probe", _stop_llm_health_probe,
     )
 
 
