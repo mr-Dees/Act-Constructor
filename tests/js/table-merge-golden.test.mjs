@@ -21,6 +21,7 @@ import {
   unmergeAt,
   autoUnmergeRow,
 } from '../../static/js/constructor/table/table-merge-core.js';
+import { gridToMerges } from '../../static/js/constructor/table/grid-merges.js';
 
 /**
  * Сетка данных rows×cols с буквенным content (A, B, …) и заданным isHeader.
@@ -190,4 +191,49 @@ test('GOLDEN autoUnmergeRow: разъединяет origin внутри удал
       { content: '', isHeader: false, colSpan: 1, rowSpan: 1, originRow: 1, originCol: 1 },
     ],
   ]);
+});
+
+// ──────────────────────────────────────────────────────────────────────────
+// T4b.5: adversarial self-check — round-trip safety + no range-list leak
+// ──────────────────────────────────────────────────────────────────────────
+
+test('SELF-CHECK round-trip: merge→unmerge восстанавливает структуру (origin-only content)', () => {
+  // Регион, где непустой content только в ведущей ячейке: склейка — no-op,
+  // поэтому полный цикл merge→unmerge даёт байт-идентичную исходную сетку.
+  const original = [
+    [
+      { content: 'Шапка', isHeader: true, colSpan: 1, rowSpan: 1, originRow: 0, originCol: 0 },
+      { content: '', isHeader: true, colSpan: 1, rowSpan: 1, originRow: 0, originCol: 1 },
+    ],
+    [
+      { content: '', isHeader: true, colSpan: 1, rowSpan: 1, originRow: 1, originCol: 0 },
+      { content: '', isHeader: true, colSpan: 1, rowSpan: 1, originRow: 1, originCol: 1 },
+    ],
+  ];
+  const cycled = unmergeAt(mergeRange(original, 0, 0, 1, 1), 0, 0);
+  assert.deepEqual(cycled, original);
+});
+
+test('SELF-CHECK: range-list НЕ просачивается в хранимый grid (ячейки — dense, не {rowspan,colspan})', () => {
+  // merge/unmerge возвращают dense-grid; ни одна ячейка не должна нести
+  // range-list-форму {row,col,rowspan,colspan} (lowercase span-ключи).
+  const merged = mergeRange(dataGrid(2, 2), 0, 0, 1, 1);
+  const grids = [merged, unmergeAt(merged, 0, 0), autoUnmergeRow(mergeRange(dataGrid(2, 2), 0, 0, 1, 0), 1)];
+  for (const grid of grids) {
+    for (const row of grid) {
+      for (const cell of row) {
+        assert.ok(!('rowspan' in cell), `утечка range-list rowspan: ${JSON.stringify(cell)}`);
+        assert.ok(!('colspan' in cell), `утечка range-list colspan: ${JSON.stringify(cell)}`);
+        // Поглощённые несут isSpanned/spanOrigin; ведущие/одиночные — colSpan/rowSpan.
+        const isDense = cell.isSpanned === true
+          ? 'spanOrigin' in cell
+          : ('colSpan' in cell && 'rowSpan' in cell);
+        assert.ok(isDense, `ячейка не в dense-формате: ${JSON.stringify(cell)}`);
+      }
+    }
+  }
+  // gridToMerges возвращает ИМЕННО range-list (внутреннее представление) —
+  // подтверждаем, что это отдельная структура, а не часть grid.
+  const merges = gridToMerges(merged);
+  assert.ok(merges.every((m) => 'rowspan' in m && 'colspan' in m));
 });
