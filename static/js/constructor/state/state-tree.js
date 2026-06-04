@@ -305,7 +305,6 @@ Object.assign(AppState, {
         const {TABLE, TEXTBLOCK, VIOLATION} = AppConfig.nodeTypes;
         if (node.type === TABLE && node.tableId) {
             delete this.tables[node.tableId];
-            delete this.tableUISizes?.[node.tableId];
         } else if (node.type === TEXTBLOCK && node.textBlockId) {
             delete this.textBlocks[node.textBlockId];
         } else if (node.type === VIOLATION && node.violationId) {

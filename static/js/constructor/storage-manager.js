@@ -414,7 +414,6 @@ export class StorageManager {
             tables: AppState.tables,
             textBlocks: AppState.textBlocks,
             violations: AppState.violations,
-            tableUISizes: AppState.tableUISizes,
             currentStep: AppState.currentStep,
             selectedNodeId: AppState.selectedNode?.id || null,
             selectedFormats: this._getSelectedFormats(),

@@ -3,7 +3,6 @@
  * Управляет операциями с ячейками: объединение, разъединение, вставка/удаление строк и колонок.
  */
 import { ContextMenuManager } from './context-menu-core.js';
-import { PreviewManager } from '../preview/preview.js';
 import { AppState } from '../state/state-core.js';
 import { Notifications } from '../../shared/notifications.js';
 
@@ -246,47 +245,38 @@ export class CellContextMenu {
                 break;
         }
 
-        // Сохраняем размеры и выполняем действие
-        const columnsChanging = ['insert-col-left', 'insert-col-right', 'delete-col'].includes(action);
-        const tableSizes = columnsChanging ? null : this.saveTableSizes();
-
+        // Ширины колонок — единый источник истины table.colWidths; операции сами
+        // зовут ItemsRenderer.updateTable, который пересобирает colgroup из весов.
+        // Высоты строк — auto. Снапшот/восстановление DOM-размеров больше не нужны.
         switch (action) {
             case 'merge-cells':
                 tableManager.mergeCells();
-                this.restoreTableSizes(tableSizes);
                 break;
             case 'unmerge-cell':
                 tableManager.unmergeCells();
-                this.restoreTableSizes(tableSizes);
                 break;
             case 'insert-row-above':
                 tableManager.cellsOps.insertRowAbove();
-                this.restoreTableSizes(tableSizes);
                 Notifications.success('Строка добавлена');
                 break;
             case 'insert-row-below':
                 tableManager.cellsOps.insertRowBelow();
-                this.restoreTableSizes(tableSizes);
                 Notifications.success('Строка добавлена');
                 break;
             case 'insert-col-left':
                 tableManager.cellsOps.insertColumnLeft();
-                this.restoreTableSizes(null);
                 Notifications.success('Колонка добавлена');
                 break;
             case 'insert-col-right':
                 tableManager.cellsOps.insertColumnRight();
-                this.restoreTableSizes(null);
                 Notifications.success('Колонка добавлена');
                 break;
             case 'delete-row':
                 tableManager.cellsOps.deleteRow();
-                this.restoreTableSizes(tableSizes);
                 Notifications.success('Строка удалена');
                 break;
             case 'delete-col':
                 tableManager.cellsOps.deleteColumn();
-                this.restoreTableSizes(null);
                 Notifications.success('Колонка удалена');
                 break;
         }
@@ -763,58 +753,6 @@ export class CellContextMenu {
         return !(hasHeader && hasData);
     }
 
-    /**
-     * Сохраняет размеры ВСЕХ таблиц перед операцией.
-     * @returns {Object} Объект с размерами всех таблиц
-     */
-    saveTableSizes() {
-        const allTableSizes = {};
-
-        document.querySelectorAll('.table-section').forEach(section => {
-            const tableId = section.dataset.tableId;
-            const tableEl = section.querySelector('.editable-table');
-            if (tableEl && tableId) {
-                allTableSizes[tableId] = tableManager.preserveTableSizes(tableEl);
-            }
-        });
-
-        return allTableSizes;
-    }
-
-    /**
-     * Восстанавливает размеры ВСЕХ таблиц после операции.
-     *
-     * После миграции на per-node API (updateTable) сами cellsOps.* уже перерисовали затронутую
-     * таблицу и применили persisted-размеры. Здесь дополнительно накатываем снапшот размеров,
-     * захваченный saveTableSizes() ДО мутации — это нужно для операций без изменения колонок,
-     * чтобы пользовательские resize'ы не сбрасывались к дефолту из AppState.
-     * @param {Object|null} allTableSizes - Сохраненные размеры (null = не восстанавливать из снапшота)
-     */
-    restoreTableSizes(allTableSizes) {
-        if (AppState.currentStep === 2) {
-            // updateTable, вызванный из cellsOps, уже асинхронно (через setTimeout 0) применил
-            // applyPersistedSizes. Чтобы наш снапшот лёг ПОВЕРХ — ждём следующий кадр.
-            requestAnimationFrame(() => {
-                document.querySelectorAll('.table-section').forEach(section => {
-                    const tableId = section.dataset.tableId;
-                    const tableEl = section.querySelector('.editable-table');
-
-                    if (tableEl && tableId) {
-                        if (allTableSizes && allTableSizes[tableId]) {
-                            // Применяем размеры из снапшота (для операций без изменения колонок)
-                            tableManager.applyTableSizes(tableEl, allTableSizes[tableId]);
-                            tableManager.persistTableSizes(tableId, tableEl);
-                        }
-                        // Для операций с изменением колонок (allTableSizes=null) ничего не делаем —
-                        // applyPersistedSizes внутри updateTable уже отработал.
-                    }
-                });
-            });
-        } else {
-            tableManager.renderAll();
-            PreviewManager.update('previewTrim', 30);
-        }
-    }
 }
 
 // Window-globals для совместимости с inline-скриптами в шаблонах.

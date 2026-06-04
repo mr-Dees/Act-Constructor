@@ -116,7 +116,7 @@ Pydantic-описание узла дерева — `ActItemSchema` (`app/domain
 | `id`                      | str (обяз.)                  | ID таблицы (ключ в `tables`)                                                                            |
 | `nodeId`                  | str (обяз.)                  | ID узла-носителя                                                                                        |
 | `grid`                    | `list[list[TableCellSchema]]`, max 64 строк, ≤ 16 колонок в каждой | матрица ячеек; ограничение защищает от исчерпания памяти |
-| `colWidths`               | `list[int]`, max 16, все > 0 | ширины колонок в пикселях                                                                               |
+| `colWidths`               | `list[int]`, max 16, все > 0 | относительные веса ширины колонок (DOCX-билдер нормирует по сумме; редактор рендерит colgroup в %)        |
 | `protected`               | bool, default false          | защита от изменения структуры (добавление/удаление строк/колонок)                                       |
 | `deletable`               | bool, default true           | можно ли удалить таблицу                                                                                |
 | `isMetricsTable`          | bool, default false          | таблица метрик пункта `5.X`                                                                             |

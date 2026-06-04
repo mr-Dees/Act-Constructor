@@ -7,6 +7,7 @@ import { ContextMenuManager } from '../context-menu/context-menu-core.js';
 import { AppState } from '../state/state-core.js';
 import { TableCellsOperations } from './table-cells-operations.js';
 import { TableSizes } from './table-sizes.js';
+import { colWidthsToPercents } from './col-widths.js';
 import { Notifications } from '../../shared/notifications.js';
 
 export class TableManager {
@@ -34,8 +35,7 @@ export class TableManager {
             // Проверяем, что клик НЕ по ячейке таблицы и НЕ по контекстному меню
             const isTableCell = e.target.closest('td, th');
             const isContextMenu = e.target.closest('.context-menu, #cellContextMenu');
-            const isResizeHandle = e.target.classList.contains('resize-handle') ||
-                e.target.classList.contains('row-resize-handle');
+            const isResizeHandle = e.target.classList.contains('resize-handle');
 
             if (!isTableCell && !isContextMenu && !isResizeHandle) {
                 // Клик вне таблицы - снимаем выделение
@@ -93,8 +93,7 @@ export class TableManager {
         container.querySelectorAll('td, th').forEach(cell => {
             // Одинарный клик - выделение ячейки (с Ctrl - множественное)
             cell.addEventListener('click', (e) => {
-                if (e.target.classList.contains('resize-handle') ||
-                    e.target.classList.contains('row-resize-handle')) {
+                if (e.target.classList.contains('resize-handle')) {
                     return;
                 }
 
@@ -127,8 +126,7 @@ export class TableManager {
 
             // Правая кнопка мыши - контекстное меню
             cell.addEventListener('contextmenu', (e) => {
-                if (e.target.classList.contains('resize-handle') ||
-                    e.target.classList.contains('row-resize-handle')) {
+                if (e.target.classList.contains('resize-handle')) {
                     return;
                 }
 
@@ -152,16 +150,6 @@ export class TableManager {
                 e.stopPropagation();
                 // Делегируем к модулю sizes
                 this.sizes.startColumnResize(e);
-            });
-        });
-
-        // Обработка ручек изменения высоты строк
-        container.querySelectorAll('.row-resize-handle').forEach(handle => {
-            handle.addEventListener('mousedown', (e) => {
-                e.preventDefault();
-                e.stopPropagation();
-                // Делегируем к модулю sizes
-                this.sizes.startRowResize(e);
             });
         });
     }
@@ -202,6 +190,23 @@ export class TableManager {
     createTableElement(table) {
         const tableEl = document.createElement('table');
         tableEl.className = 'editable-table';
+        tableEl.style.tableLayout = 'fixed';
+
+        // colgroup из colWidths (единый источник ширины колонок).
+        const numColsForGroup = table.grid?.[0]?.length || 0;
+        const widths = Array.isArray(table.colWidths) && table.colWidths.length === numColsForGroup
+            ? table.colWidths
+            : new Array(numColsForGroup).fill(100);
+        const percents = colWidthsToPercents(widths);
+        if (percents.length > 0) {
+            const colgroup = document.createElement('colgroup');
+            percents.forEach(pct => {
+                const col = document.createElement('col');
+                col.style.width = `${pct}%`;
+                colgroup.appendChild(col);
+            });
+            tableEl.appendChild(colgroup);
+        }
 
         table.grid.forEach((rowData, rowIndex) => {
             const tr = document.createElement('tr');
@@ -243,10 +248,7 @@ export class TableManager {
                     cellEl.appendChild(resizeHandle);
                 }
 
-                // Ручка изменения высоты строки
-                const rowResizeHandle = document.createElement('div');
-                rowResizeHandle.className = 'row-resize-handle';
-                cellEl.appendChild(rowResizeHandle);
+                // Высота строк — auto (как в Word); ручки высоты строк убраны.
 
                 tr.appendChild(cellEl);
             });
@@ -290,55 +292,6 @@ export class TableManager {
      */
     startColumnResize(e) {
         this.sizes.startColumnResize(e);
-    }
-
-    /**
-     * Начинает интерактивное изменение высоты строки.
-     * Делегирует выполнение в TableSizes.
-     * @param {MouseEvent} e - событие mousedown на ручке изменения размера
-     */
-    startRowResize(e) {
-        this.sizes.startRowResize(e);
-    }
-
-    /**
-     * Сохраняет размеры ячеек таблицы в AppState после изменения.
-     * Делегирует выполнение в TableSizes.
-     * @param {string} tableId - ID таблицы
-     * @param {HTMLElement} tableElement - DOM-элемент таблицы
-     */
-    persistTableSizes(tableId, tableElement) {
-        this.sizes.persistTableSizes(tableId, tableElement);
-    }
-
-    /**
-     * Применяет сохраненные размеры из AppState после перерисовки.
-     * Делегирует выполнение в TableSizes.
-     * @param {string} tableId - ID таблицы
-     * @param {HTMLElement} tableElement - DOM-элемент таблицы
-     */
-    applyPersistedSizes(tableId, tableElement) {
-        this.sizes.applyPersistedSizes(tableId, tableElement);
-    }
-
-    /**
-     * Сохраняет размеры таблицы во временный объект перед операциями.
-     * Делегирует выполнение в TableSizes.
-     * @param {HTMLElement} tableElement - DOM-элемент таблицы
-     * @returns {Object} Объект с размерами ячеек
-     */
-    preserveTableSizes(tableElement) {
-        return this.sizes.preserveTableSizes(tableElement);
-    }
-
-    /**
-     * Применяет размеры из временного объекта после операций.
-     * Делегирует выполнение в TableSizes.
-     * @param {HTMLElement} tableElement - DOM-элемент таблицы
-     * @param {Object} sizes - Объект с размерами ячеек
-     */
-    applyTableSizes(tableElement, sizes) {
-        this.sizes.applyTableSizes(tableElement, sizes);
     }
 }
 

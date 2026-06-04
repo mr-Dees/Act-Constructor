@@ -45,7 +45,7 @@ class TableSchema(BaseModel):
         id: Уникальный идентификатор таблицы
         nodeId: ID узла дерева
         grid: Матрица ячеек (двумерный массив, макс 64×16)
-        colWidths: Массив ширин колонок в пикселях
+        colWidths: Массив относительных весов ширины колонок (целые > 0; нормируются по сумме)
         protected: Защищена ли таблица от перемещения и изменения структуры
         deletable: Можно ли удалить таблицу (работает независимо от protected)
         isMetricsTable: Является ли таблицей метрик для пункта под разделом 5
@@ -64,7 +64,7 @@ class TableSchema(BaseModel):
     )
     colWidths: list[int] = Field(
         default_factory=list,
-        description="Ширины колонок в пикселях",
+        description="Относительные веса ширины колонок (целые > 0; нормируются по сумме)",
         max_length=16
     )
     protected: bool = Field(

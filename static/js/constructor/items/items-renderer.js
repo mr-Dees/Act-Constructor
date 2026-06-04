@@ -10,6 +10,7 @@ import { TreeUtils } from '../tree/tree-utils.js';
 import { AppConfig } from '../../shared/app-config.js';
 import { ChatEventBus } from '../../shared/chat/chat-event-bus.js';
 import { Notifications } from '../../shared/notifications.js';
+import { colWidthsToPercents } from '../table/col-widths.js';
 
 export class ItemsRenderer {
     /**
@@ -42,7 +43,6 @@ export class ItemsRenderer {
         }
 
         tableManager.attachEventListeners();
-        this._restoreTableSizes();
     }
 
     /**
@@ -72,9 +72,9 @@ export class ItemsRenderer {
         const newEl = this.renderItem(node, level);
         oldEl.parentNode.replaceChild(newEl, oldEl);
 
-        // Восстанавливаем listeners и размеры таблиц только в новом поддереве
+        // Восстанавливаем listeners только в новом поддереве; ширины колонок
+        // рендерятся из colWidths через colgroup, отдельное восстановление не нужно.
         tableManager.attachEventListenersToContainer(newEl);
-        this._restoreTableSizesInContainer(newEl);
     }
 
     /**
@@ -95,14 +95,11 @@ export class ItemsRenderer {
         const tableNode = this._findNodeById(table.nodeId);
         if (!tableNode) return this.renderAll();
 
-        const savedSizes = tableManager.preserveTableSizes(oldSection.querySelector('.editable-table'));
-
         const newSection = this.renderTable(table, tableNode);
         oldSection.parentNode.replaceChild(newSection, oldSection);
         this._domIndex.set(`table:${tableId}`, newSection);
 
         tableManager.attachEventListenersToContainer(newSection);
-        this._restoreSingleTableSizes(tableId, savedSizes);
     }
 
     /**
@@ -203,39 +200,6 @@ export class ItemsRenderer {
             const id = el.dataset.violationId;
             if (id) this._domIndex.delete(`violation:${id}`);
         });
-    }
-
-    /**
-     * Восстанавливает размеры колонок/строк для всех таблиц внутри контейнера.
-     * Вызывается после updateItem на поддереве с таблицами.
-     * @param {HTMLElement} container
-     * @private
-     */
-    static _restoreTableSizesInContainer(container) {
-        setTimeout(() => {
-            container.querySelectorAll('.table-section').forEach(section => {
-                const tableId = section.dataset.tableId;
-                const tableEl = section.querySelector('.editable-table');
-                if (tableId && tableEl) {
-                    tableManager.applyPersistedSizes(tableId, tableEl);
-                }
-            });
-        }, 0);
-    }
-
-    /**
-     * Восстанавливает персистентные размеры ячеек таблиц после рендеринга DOM.
-     * Выполняется асинхронно для гарантии завершения отрисовки.
-     * @private
-     */
-    static _restoreTableSizes() {
-        setTimeout(() => {
-            document.querySelectorAll('.table-section').forEach(section => {
-                const tableId = section.dataset.tableId;
-                const tableEl = section.querySelector('.editable-table');
-                tableManager.applyPersistedSizes(tableId, tableEl);
-            });
-        }, 0);
     }
 
     /**
@@ -718,12 +682,39 @@ export class ItemsRenderer {
 
         const numCols = table.grid[0]?.length || 0;
 
+        // colgroup задаёт ширину колонок из colWidths (единый источник истины) —
+        // веса → проценты, при table-layout:fixed Word-подобная раскладка.
+        tableEl.style.tableLayout = 'fixed';
+        tableEl.appendChild(this._createColgroup(table.colWidths, numCols));
+
         table.grid.forEach((rowData, rowIndex) => {
             const tr = this._createTableRow(rowData, rowIndex, table.id, numCols);
             tableEl.appendChild(tr);
         });
 
         return tableEl;
+    }
+
+    /**
+     * Строит <colgroup> с шириной каждой колонки в процентах из colWidths.
+     * При рассинхроне длины (нет/неверный colWidths) делит ширину поровну.
+     * @param {number[]} colWidths - Веса колонок таблицы
+     * @param {number} numCols - Фактическое число колонок по grid
+     * @returns {HTMLElement} Элемент <colgroup>
+     * @private
+     */
+    static _createColgroup(colWidths, numCols) {
+        const colgroup = document.createElement('colgroup');
+        const widths = Array.isArray(colWidths) && colWidths.length === numCols
+            ? colWidths
+            : new Array(numCols).fill(100);
+        const percents = colWidthsToPercents(widths);
+        percents.forEach(pct => {
+            const col = document.createElement('col');
+            col.style.width = `${pct}%`;
+            colgroup.appendChild(col);
+        });
+        return colgroup;
     }
 
     /**
@@ -786,17 +777,15 @@ export class ItemsRenderer {
             cellEl.appendChild(resizeHandle);
         }
 
-        // Добавляем хендл изменения высоты строки
-        const rowResizeHandle = document.createElement('div');
-        rowResizeHandle.className = 'row-resize-handle';
-        cellEl.appendChild(rowResizeHandle);
+        // Высота строк — auto (как в Word); ручки изменения высоты убраны.
 
         return cellEl;
     }
 
     /**
      * Перерисовка только конкретной таблицы (оптимизация).
-     * Сохраняет и восстанавливает размеры ячеек при перерисовке.
+     * Ширины колонок рендерятся из colWidths через colgroup — отдельное
+     * сохранение/восстановление размеров не требуется.
      * @param {string} tableId - ID таблицы для перерисовки
      */
     static renderSingleTable(tableId) {
@@ -813,15 +802,11 @@ export class ItemsRenderer {
         const tableNode = this._findNodeById(table.nodeId);
         if (!tableNode) return;
 
-        // Сохраняем размеры перед перерисовкой
-        const savedSizes = tableManager.preserveTableSizes(section.querySelector('.editable-table'));
-
         // Перерисовываем таблицу
         const newTableSection = this.renderTable(table, tableNode);
         section.replaceWith(newTableSection);
 
         tableManager.attachEventListeners();
-        this._restoreSingleTableSizes(tableId, savedSizes);
     }
 
     /**
@@ -842,24 +827,6 @@ export class ItemsRenderer {
         }
 
         return null;
-    }
-
-    /**
-     * Восстанавливает размеры для конкретной таблицы после перерисовки.
-     * Выполняется асинхронно для гарантии завершения отрисовки.
-     * @param {string} tableId - ID таблицы
-     * @param {Object} savedSizes - Сохраненные размеры ячеек
-     * @private
-     */
-    static _restoreSingleTableSizes(tableId, savedSizes) {
-        setTimeout(() => {
-            const newSection = document.querySelector(`.table-section[data-table-id="${tableId}"]`);
-            if (newSection) {
-                const tableEl = newSection.querySelector('.editable-table');
-                tableManager.applyTableSizes(tableEl, savedSizes);
-                tableManager.persistTableSizes(tableId, tableEl);
-            }
-        }, 0);
     }
 
     /**

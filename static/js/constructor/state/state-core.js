@@ -621,7 +621,6 @@ export function _wrapStateWithProxy() {
         'tables',
         'textBlocks',
         'violations',
-        'tableUISizes',
         'currentStep',
         'selectedNode',
         'selectedCells'

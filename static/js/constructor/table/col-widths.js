@@ -76,6 +76,19 @@ export function colWidthsToPercents(colWidths) {
 }
 
 /**
+ * Переводит массив пиксельных ширин колонок в целые относительные веса.
+ * Используется интерактивным ресайзом: после живого перетаскивания границы
+ * берём фактические пиксели колонок и фиксируем их как целые веса colWidths
+ * (которые потом нормируются по сумме при рендере colgroup и в DOCX).
+ * Нулевые/отрицательные ширины клампятся к весу 1 (валидно для list[int]).
+ * @param {number[]} pixels Пиксельные ширины колонок.
+ * @returns {number[]} Целые веса ≥ 1 той же длины.
+ */
+export function pixelWidthsToWeights(pixels) {
+    return pixels.map((px) => Math.max(1, Math.round(px)));
+}
+
+/**
  * Возвращает текущее число колонок таблицы по grid (длина первой строки).
  * @param {Object} table Объект таблицы из AppState.
  * @returns {number} Число колонок (0, если grid пуст).
@@ -102,8 +115,7 @@ function ensureColWidths(table, expectedLen) {
 
 /**
  * Структурная операция: вставка колонки. Поддерживает целые веса table.colWidths,
- * вставляя вес на позицию `index` через insertColumnWeight. НЕ трогает grid и
- * НЕ пишет в tableUISizes.
+ * вставляя вес на позицию `index` через insertColumnWeight. НЕ трогает grid.
  * Длину базы берём из текущей table.colWidths, а при рассинхроне — из grid минус 1
  * (grid уже расширен вызывающим кодом на момент вызова).
  * @param {Object} table Объект таблицы из AppState (grid уже содержит новую колонку).
@@ -117,7 +129,7 @@ export function applyInsertColumnWidth(table, index) {
 
 /**
  * Структурная операция: удаление колонки. Убирает вес по индексу через
- * removeColumnWeight. НЕ трогает grid и НЕ пишет в tableUISizes.
+ * removeColumnWeight. НЕ трогает grid.
  * Длину базы берём из grid плюс 1 (grid уже сжат вызывающим кодом).
  * @param {Object} table Объект таблицы из AppState (grid уже без удалённой колонки).
  * @param {number} index Индекс удалённой колонки.
@@ -137,4 +149,5 @@ if (typeof window !== 'undefined') {
     window.colWidthsToPercents = colWidthsToPercents;
     window.applyInsertColumnWidth = applyInsertColumnWidth;
     window.applyRemoveColumnWidth = applyRemoveColumnWidth;
+    window.pixelWidthsToWeights = pixelWidthsToWeights;
 }

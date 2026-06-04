@@ -1,6 +1,6 @@
 /*
  * Хендлы изменения размеров таблицы
- * Элементы для изменения ширины колонок и высоты строк
+ * Элемент для изменения ширины колонок (высота строк — auto, как в Word)
  */
 
 /* Хендл изменения ширины колонки */
@@ -26,50 +26,10 @@
     opacity: 1;
 }
 
-/* Хендл изменения высоты строки */
-.row-resize-handle {
-    position: absolute;
-    bottom: var(--table-resize-handle-offset);
-    left: 0;
-    width: 100%;
-    height: var(--table-resize-handle-width);
-    cursor: row-resize;
-    background: transparent;
-    z-index: var(--z-sticky-elevated);
-    opacity: 0;
-    transition: opacity var(--transition-fast), background var(--transition-fast);
-    border-bottom: var(--table-resize-handle-border-width) solid transparent;
-    pointer-events: auto;
-}
-
-/* Подсветка хендла строки при наведении */
-.row-resize-handle:hover {
-    background: var(--resize-handle-bg);
-    border-bottom-color: var(--primary);
-    opacity: 1;
-}
-
-/* Видимость хендлов при наведении на ячейку */
-.editable-table td:hover .resize-handle,
-.editable-table th:hover .resize-handle,
-.editable-table td:hover .row-resize-handle,
-.editable-table th:hover .row-resize-handle {
-    opacity: var(--opacity-resize-handle);
-    background: var(--resize-handle-bg-subtle);
-}
-
+/* Видимость хендла при наведении на ячейку */
 .editable-table td:hover .resize-handle,
 .editable-table th:hover .resize-handle {
+    opacity: var(--opacity-resize-handle);
+    background: var(--resize-handle-bg-subtle);
     border-right-color: var(--resize-handle-border);
-}
-
-.editable-table td:hover .row-resize-handle,
-.editable-table th:hover .row-resize-handle {
-    border-bottom-color: var(--resize-handle-border);
-}
-
-/* Полная видимость хендлов при прямом наведении */
-.resize-handle:hover,
-.row-resize-handle:hover {
-    opacity: 1;
 }

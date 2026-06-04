@@ -16,6 +16,7 @@ import {
   removeColumnWeight,
   splitColumnWeight,
   colWidthsToPercents,
+  pixelWidthsToWeights,
 } from '../../static/js/constructor/table/col-widths.js';
 
 const isInt = (n) => Number.isInteger(n);
@@ -147,6 +148,43 @@ test('property: insert/remove/split сохраняют целые веса >=1',
           weights.reduce((a, b) => a + b, 0)
         );
       }
+    })
+  );
+});
+
+test('pixelWidthsToWeights переводит пиксели в целые веса с сохранением пропорций', () => {
+  // Колонки 100px, 200px, 100px → пропорции 1:2:1.
+  const weights = pixelWidthsToWeights([100, 200, 100]);
+  assert.ok(weights.every((w) => Number.isInteger(w) && w >= 1), JSON.stringify(weights));
+  assert.equal(weights.length, 3);
+  // Пропорции сохранены: средняя колонка вдвое шире крайних.
+  assert.equal(weights[1], weights[0] * 2);
+  assert.equal(weights[0], weights[2]);
+});
+
+test('pixelWidthsToWeights округляет дробные пиксели до целых весов', () => {
+  const weights = pixelWidthsToWeights([133.33, 66.67]);
+  assert.ok(weights.every((w) => Number.isInteger(w) && w >= 1));
+  assert.equal(weights.length, 2);
+});
+
+test('pixelWidthsToWeights клампит нулевую/отрицательную ширину к весу 1', () => {
+  const weights = pixelWidthsToWeights([0, 100, -5]);
+  assert.ok(weights.every((w) => Number.isInteger(w) && w >= 1));
+  assert.equal(weights[0], 1);
+  assert.equal(weights[2], 1);
+});
+
+test('property: pixelWidthsToWeights всегда даёт целые веса >=1', () => {
+  const arbPixels = fc.array(fc.float({ min: 0, max: 2000, noNaN: true }), {
+    minLength: 1,
+    maxLength: 12,
+  });
+  fc.assert(
+    fc.property(arbPixels, (pixels) => {
+      const weights = pixelWidthsToWeights(pixels);
+      assert.equal(weights.length, pixels.length);
+      assert.ok(weights.every((w) => Number.isInteger(w) && w >= 1));
     })
   );
 });

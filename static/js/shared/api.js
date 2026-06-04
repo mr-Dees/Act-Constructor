@@ -397,7 +397,6 @@ export class APIClient {
                 AppState.tables = {};
                 AppState.textBlocks = {};
                 AppState.violations = {};
-                AppState.tableUISizes = {};
 
                 // Инициализируем дерево и таблицы с учетом типа проверки
                 AppState.initializeTree(isProcessBased);
@@ -423,7 +422,6 @@ export class APIClient {
                 AppState.tables = content.tables || {};
                 AppState.textBlocks = content.textBlocks || {};
                 AppState.violations = content.violations || {};
-                AppState.tableUISizes = {};
 
                 // Миграция: strip числового префикса из label для item-узлов
                 this._migrateStripNumberFromLabels(AppState.treeData);

@@ -75,11 +75,9 @@
     max-height: none;
 }
 
-/* Скрытие хендлов изменения размера при редактировании */
+/* Скрытие хендла изменения размера при редактировании */
 .editable-table td.editing .resize-handle,
-.editable-table td.editing .row-resize-handle,
-.editable-table th.editing .resize-handle,
-.editable-table th.editing .row-resize-handle {
+.editable-table th.editing .resize-handle {
     display: none;
 }
 
@@ -93,9 +91,8 @@
     pointer-events: none;
 }
 
-/* Хендлы остаются активными при изменении размеров */
-.editable-table.resizing .resize-handle,
-.editable-table.resizing .row-resize-handle {
+/* Хендл остаётся активным при изменении размеров */
+.editable-table.resizing .resize-handle {
     pointer-events: auto;
 }
 

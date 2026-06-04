@@ -281,7 +281,6 @@ static timings = {
 | `tables` | `{[tableId]: TableData}` | ✅ |
 | `textBlocks` | `{[blockId]: TextBlockData}` | ✅ |
 | `violations` | `{[violationId]: ViolationData}` | ✅ |
-| `tableUISizes` | `{[tableId]: {colWidths, rowHeights}}` | ✅ |
 | `currentStep` | `1` или `2` | ✅ |
 | `selectedNode` | текущий выбранный узел | ✅ |
 | `selectedCells` | выделенные ячейки таблицы | ✅ |
