@@ -2,8 +2,9 @@
  * Тесты сериализации 6 флагов подвидов таблиц.
  *
  * Проверяют чистый хелпер pickTableFlags(node) и константу TABLE_FLAG_NAMES,
- * экспортируемые из state-core.js. Хелпер выделен из _serializeTree/_serializeTables,
- * чтобы тестировать сериализацию флагов без DOM-зависимостей модуля.
+ * экспортируемые из flags.js. Хелпер выделен из _serializeTree/_serializeTables
+ * (state-core.js делегирует ему), чтобы тестировать сериализацию флагов без
+ * DOM-зависимостей модуля.
  */
 import { test } from 'node:test';
 import assert from 'node:assert/strict';

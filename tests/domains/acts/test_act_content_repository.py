@@ -198,7 +198,12 @@ class TestInsertTableDenormalizationAndFlags:
             assert col in sql, f"insert_table SQL не содержит колонку {col}"
 
     async def test_insert_table_passes_denorm_and_flag_values(self, mock_conn):
-        """Значения денормализации и флага пробрасываются в параметры execute."""
+        """Значения денормализации и флагов стоят на правильных позициях execute.
+
+        Сверяем КОНКРЕТНЫЕ индексы параметров $1..$15 — порядок зафиксирован
+        INSERT-ом insert_table. Перестановка или инверсия любого флага ломает
+        тест (только is_regular_risk_table=True, остальные 5 флагов=False).
+        """
         repo = ActContentRepository(mock_conn)
         await repo.insert_table(
             act_id=1,
@@ -212,11 +217,21 @@ class TestInsertTableDenormalizationAndFlags:
             table_label="Оценка качества",
             is_regular_risk_table=True,
         )
+        # args[0] — SQL-строка; позиционные параметры $1..$15 идут с args[1].
         args = mock_conn.execute.call_args.args
-        assert "3.1" in args
-        assert "Оценка качества" in args
-        # Флаг регулярных рисков пробрасывается True
-        assert True in args[1:]
+        assert args[1] == 1                  # $1  act_id
+        assert args[2] == "t1"               # $2  table_id
+        assert args[3] == "n1"               # $3  node_id
+        assert args[4] == "3.1"              # $4  node_number
+        assert args[5] == "Оценка качества"  # $5  table_label
+        assert args[8] is False              # $8  is_protected
+        assert args[9] is True               # $9  is_deletable
+        assert args[10] is False             # $10 is_metrics_table
+        assert args[11] is False             # $11 is_main_metrics_table
+        assert args[12] is True              # $12 is_regular_risk_table
+        assert args[13] is False             # $13 is_operational_risk_table
+        assert args[14] is False             # $14 is_tax_risk_table
+        assert args[15] is False             # $15 is_other_risk_table
 
     async def test_insert_table_defaults_flags_false(self, mock_conn):
         """Без явных флагов insert_table вставляет дефолты (системная таблица)."""
