@@ -96,7 +96,20 @@ export class TableSizes {
         if (!colgroup) return;
 
         const cols = Array.from(colgroup.querySelectorAll('col'));
-        const pixels = cols.map(col => col.offsetWidth);
+        const prevWeights = Array.isArray(table.colWidths) ? table.colWidths : [];
+
+        // Ширина колонки: offsetWidth <col>, иначе bounding-width заголовочной
+        // ячейки этой колонки, иначе текущий вес. Не даём 0 уйти в веса (иначе
+        // pixelWidthsToWeights схлопнет всё в 1 при детаче/ре-рендере).
+        const pixels = cols.map((col, i) => {
+            const headerCell = tableElement.querySelector(`th[data-col="${i}"]`);
+            return (
+                col.offsetWidth ||
+                headerCell?.getBoundingClientRect().width ||
+                prevWeights[i] ||
+                0
+            );
+        });
         table.colWidths = pixelWidthsToWeights(pixels);
 
         if (typeof StorageManager !== 'undefined' && StorageManager.markAsUnsaved) {

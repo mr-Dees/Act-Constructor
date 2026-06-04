@@ -44,22 +44,6 @@ export function removeColumnWeight(colWidths, index) {
 }
 
 /**
- * Разделяет вес колонки `index` на два целых, в сумме равных исходному.
- * Делит как floor(w/2) и w-floor(w/2); каждый результат ≥ 1.
- * @param {number[]} colWidths Текущие веса колонок.
- * @param {number} index Индекс разделяемой колонки.
- * @returns {number[]} Новый массив весов длиной +1 (целые ≥ 1).
- */
-export function splitColumnWeight(colWidths, index) {
-    const widths = colWidths.slice();
-    const original = Math.max(2, widths[index] || 2);
-    const first = Math.max(1, Math.floor(original / 2));
-    const second = Math.max(1, original - first);
-    widths.splice(index, 1, first, second);
-    return widths;
-}
-
-/**
  * Пересчитывает веса в проценты (weight/sum*100) для colgroup редактора.
  * При пустом массиве — пустой массив; при нулевой сумме — делит поровну.
  * @param {number[]} colWidths Веса колонок.
@@ -145,7 +129,6 @@ export function applyRemoveColumnWidth(table, index) {
 if (typeof window !== 'undefined') {
     window.insertColumnWeight = insertColumnWeight;
     window.removeColumnWeight = removeColumnWeight;
-    window.splitColumnWeight = splitColumnWeight;
     window.colWidthsToPercents = colWidthsToPercents;
     window.applyInsertColumnWidth = applyInsertColumnWidth;
     window.applyRemoveColumnWidth = applyRemoveColumnWidth;
