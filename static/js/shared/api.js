@@ -11,6 +11,7 @@ import { AuthManager } from './auth.js';
 import { DialogManager } from './dialog/dialog-confirm.js';
 import { Notifications } from './notifications.js';
 import { reconcileTableFlags } from '../constructor/state/flags.js';
+import { normalizePinnedOrder } from '../constructor/table/table-kind.js';
 
 // Constructor-зона: lazy-доступ через window.
 // Прямые import'ы из ../constructor/* тянули весь constructor граф
@@ -431,6 +432,12 @@ export class APIClient {
                 // только в tables[id]) поднимаются на узел, объект таблицы
                 // синхронизируется с узлом.
                 reconcileTableFlags(AppState.treeData, AppState.tables);
+
+                // Нормализация порядка: закреплённые таблицы (метрики/риски) —
+                // в начало children. Чинит старые акты, где pinned-таблица
+                // оказалась не первой. Делается после reconcileTableFlags
+                // (флаги уже подняты на узлы) и до нумерации.
+                normalizePinnedOrder(AppState.treeData);
 
                 AppState.generateNumbering();
 

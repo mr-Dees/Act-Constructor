@@ -101,10 +101,56 @@ export function isMetricsKind(node) {
     return !!(node.isMetricsTable || node.isMainMetricsTable);
 }
 
+/**
+ * Нормализует порядок детей: закреплённые таблицы (pinned) — в начало.
+ *
+ * Стабильная партиция: pinned-узлы становятся первыми с сохранением их
+ * взаимного порядка, затем все остальные с сохранением их порядка. Среди
+ * non-pinned ничего не переставляется. Консервативно: если порядок уже
+ * корректен — массив children не пересоздаётся (защита от лишних markAsUnsaved
+ * на Proxy-AppState). Рекурсивно обходит всё поддерево.
+ *
+ * Применяется при загрузке акта (api.js::loadActContent) для старых актов,
+ * где pinned-таблица могла оказаться не первой среди children.
+ *
+ * @param {Object|null|undefined} parent - Узел дерева.
+ */
+export function normalizePinnedOrder(parent) {
+    if (!parent || !Array.isArray(parent.children)) return;
+
+    const children = parent.children;
+    // Проверяем, есть ли non-pinned перед pinned (т.е. нужна ли перестановка).
+    let seenNonPinned = false;
+    let needsReorder = false;
+    for (const child of children) {
+        if (isPinnedTable(child)) {
+            if (seenNonPinned) { needsReorder = true; break; }
+        } else {
+            seenNonPinned = true;
+        }
+    }
+
+    if (needsReorder) {
+        const pinnedItems = [];
+        const rest = [];
+        for (const child of children) {
+            (isPinnedTable(child) ? pinnedItems : rest).push(child);
+        }
+        // Мутируем тот же массив (in-place), чтобы не плодить новый children.
+        children.splice(0, children.length, ...pinnedItems, ...rest);
+    }
+
+    // Рекурсия по всем детям.
+    for (const child of children) {
+        normalizePinnedOrder(child);
+    }
+}
+
 // Дублируем в window ради inline-скриптов в шаблонах (см. CLAUDE.md).
 if (typeof window !== 'undefined') {
     window.getTableKind = getTableKind;
     window.isPinnedTable = isPinnedTable;
     window.isRiskTable = isRiskTable;
     window.isMetricsKind = isMetricsKind;
+    window.normalizePinnedOrder = normalizePinnedOrder;
 }
