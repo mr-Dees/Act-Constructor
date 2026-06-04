@@ -33,3 +33,35 @@ export function pickTableFlags(node) {
     }
     return flags;
 }
+
+/**
+ * Реконсайлер 6 флагов подвидов таблиц при загрузке акта.
+ *
+ * Синхронизирует флаги node↔table: узел — источник истины; если флаг есть
+ * только на объекте таблицы (legacy-акты до миграции на node) — поднимает его
+ * на узел; объект таблицы всегда приводится в соответствие с узлом. Рекурсивно
+ * обходит детей. Идемпотентен.
+ *
+ * @param {Object|null|undefined} node - Узел дерева.
+ * @param {Object<string, Object>} tables - Словарь таблиц AppState.tables.
+ */
+export function reconcileTableFlags(node, tables) {
+    if (!node) return;
+    if (node.type === 'table' && node.tableId) {
+        const table = tables ? tables[node.tableId] : null;
+        if (table) {
+            for (const name of TABLE_FLAG_NAMES) {
+                // Любая сторона выставила флаг → обе стороны его получают.
+                if (node[name] || table[name]) {
+                    node[name] = true;
+                    table[name] = true;
+                }
+            }
+        }
+    }
+    if (node.children) {
+        for (const child of node.children) {
+            reconcileTableFlags(child, tables);
+        }
+    }
+}

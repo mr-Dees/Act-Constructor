@@ -10,6 +10,7 @@ import { AppConfig } from './app-config.js';
 import { AuthManager } from './auth.js';
 import { DialogManager } from './dialog/dialog-confirm.js';
 import { Notifications } from './notifications.js';
+import { reconcileTableFlags } from '../constructor/state/flags.js';
 
 // Constructor-зона: lazy-доступ через window.
 // Прямые import'ы из ../constructor/* тянули весь constructor граф
@@ -427,10 +428,11 @@ export class APIClient {
                 // Миграция: strip числового префикса из label для item-узлов
                 this._migrateStripNumberFromLabels(AppState.treeData);
 
-                // E-2 миграция: переносим isRegularRiskTable/isOperationalRiskTable
-                // с table-объекта на table-node (унифицировано с metrics-флагами).
-                // Для актов, сохранённых до E-2, флаги лежали только в tables[id].
-                this._migrateRiskFlagsToNode(AppState.treeData, AppState.tables);
+                // Реконсайлер 6 флагов подвидов таблиц node↔table. Узел —
+                // источник истины; legacy-флаги (старые акты, где флаг лежал
+                // только в tables[id]) поднимаются на узел, объект таблицы
+                // синхронизируется с узлом.
+                reconcileTableFlags(AppState.treeData, AppState.tables);
 
                 AppState.generateNumbering();
 
@@ -662,35 +664,6 @@ export class APIClient {
                     }
                 }
                 this._migrateStripNumberFromLabels(child);
-            }
-        }
-    }
-
-    /**
-     * E-2 миграция: для старых актов risk-флаги (isRegularRiskTable /
-     * isOperationalRiskTable) лежали только в tables[id]. Унификация требует
-     * флаг на node — пробрасываем для table-нод по tableId.
-     * Idempotent: если флаги уже на node, no-op.
-     * @private
-     * @param {Object} node - Узел дерева
-     * @param {Object} tables - AppState.tables словарь
-     */
-    static _migrateRiskFlagsToNode(node, tables) {
-        if (!node) return;
-        if (node.type === AppConfig.nodeTypes.TABLE && node.tableId) {
-            const table = tables[node.tableId];
-            if (table) {
-                if (table.isRegularRiskTable && !node.isRegularRiskTable) {
-                    node.isRegularRiskTable = true;
-                }
-                if (table.isOperationalRiskTable && !node.isOperationalRiskTable) {
-                    node.isOperationalRiskTable = true;
-                }
-            }
-        }
-        if (node.children) {
-            for (const child of node.children) {
-                this._migrateRiskFlagsToNode(child, tables);
             }
         }
     }
