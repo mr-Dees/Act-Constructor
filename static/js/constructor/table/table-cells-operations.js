@@ -10,6 +10,7 @@ import { AppState } from '../state/state-core.js';
 import { AppConfig } from '../../shared/app-config.js';
 import { Notifications } from '../../shared/notifications.js';
 import { applyInsertColumnWidth, applyRemoveColumnWidth } from './col-widths.js';
+import { mergeRange, unmergeAt, autoUnmergeRow } from './table-merge-core.js';
 
 export class TableCellsOperations {
     constructor(tableManager) {
@@ -748,31 +749,9 @@ export class TableCellsOperations {
             return;
         }
 
-        let mergedContent = [];
-        for (let r = minRow; r <= maxRow; r++) {
-            for (let c = minCol; c <= maxCol; c++) {
-                const content = table.grid[r][c].content;
-                if (content && content.trim()) {
-                    mergedContent.push(content);
-                }
-            }
-        }
-
-        const originCell = table.grid[minRow][minCol];
-        originCell.content = mergedContent.join(' ');
-        originCell.colSpan = colspan;
-        originCell.rowSpan = rowspan;
-
-        for (let r = minRow; r <= maxRow; r++) {
-            for (let c = minCol; c <= maxCol; c++) {
-                if (r !== minRow || c !== minCol) {
-                    table.grid[r][c] = {
-                        isSpanned: true,
-                        spanOrigin: {row: minRow, col: minCol}
-                    };
-                }
-            }
-        }
+        // Грид-математика — в чистом ядре поверх range-list; хранимый формат
+        // (ведущая colSpan/rowSpan; поглощённые {isSpanned, spanOrigin}) не меняется.
+        table.grid = mergeRange(table.grid, minRow, minCol, maxRow, maxCol);
 
         this.clearSelection();
         ItemsRenderer.updateTable(tableId);
@@ -820,55 +799,22 @@ export class TableCellsOperations {
     /**
      * Разъединяет ячейку, заданную координатами origin'а: сбрасывает rowSpan/colSpan
      * и создаёт пустые ячейки на месте spanned.
+     * Грид-математика — в чистом ядре (table-merge-core.unmergeAt); здесь только
+     * запись новой сетки в table.grid.
      * @private
      */
     _unmergeAtOrigin(table, row, col) {
-        const cellData = table.grid[row][col];
-        const rowspan = cellData.rowSpan || 1;
-        const colspan = cellData.colSpan || 1;
-        const isHeaderCell = cellData.isHeader || false;
-
-        for (let r = row; r < row + rowspan; r++) {
-            for (let c = col; c < col + colspan; c++) {
-                if (!table.grid[r] || !table.grid[r][c]) continue;
-                if (r === row && c === col) {
-                    table.grid[r][c].colSpan = 1;
-                    table.grid[r][c].rowSpan = 1;
-                } else {
-                    table.grid[r][c] = {
-                        content: '',
-                        isHeader: isHeaderCell,
-                        colSpan: 1,
-                        rowSpan: 1,
-                        originRow: r,
-                        originCol: c
-                    };
-                }
-            }
-        }
+        table.grid = unmergeAt(table.grid, row, col);
     }
 
     /**
      * Перед удалением строки разъединяет все ячейки, чьи объединения покрывают
      * эту строку — origin внутри строки или spanned-в-неё из строк выше.
+     * Грид-математика — в чистом ядре (table-merge-core.autoUnmergeRow).
      * @private
      */
     _autoUnmergeRow(table, rowIndex) {
-        const originsToUnmerge = new Set();
-        for (let c = 0; c < table.grid[rowIndex].length; c++) {
-            const cellData = table.grid[rowIndex][c];
-            if (cellData.isSpanned) {
-                const oR = cellData.originRow;
-                const oC = cellData.originCol;
-                if (oR != null && oC != null) originsToUnmerge.add(`${oR}:${oC}`);
-            } else if ((cellData.rowSpan || 1) > 1 || (cellData.colSpan || 1) > 1) {
-                originsToUnmerge.add(`${rowIndex}:${c}`);
-            }
-        }
-        for (const key of originsToUnmerge) {
-            const [r, c] = key.split(':').map(Number);
-            this._unmergeAtOrigin(table, r, c);
-        }
+        table.grid = autoUnmergeRow(table.grid, rowIndex);
     }
 }
 
