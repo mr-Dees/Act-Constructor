@@ -249,7 +249,7 @@ isPinnedTable(node) {
 - `isMetricsTable: true` — таблица метрик одного пункта `5.X`. Создаётся, когда в потомках узла `5.X` (т.е. на уровне `5.X.X+`) появляется хотя бы одна risk-таблица (`_updateMetricsTablesAfterRiskTableCreated`, `state-content.js:490-519`). Удаляется автоматически, когда последняя глубокая risk-таблица исчезает (`_cleanupMetricsTablesAfterRiskTableDeleted`, `state-content.js:526-576`).
 - `isMainMetricsTable: true` — главная сводная для всего раздела 5. Создаётся при появлении ЛЮБОЙ risk-таблицы в дереве 5, удаляется при их полном отсутствии (та же функция).
 
-**Структура `grid`.** Сетка 4×7 с двумя строками заголовков и двумя строками данных. Заголовки используют объединения (`colSpan`/`rowSpan`/`isSpanned`/`spanOrigin`) для группировки «Количество клиентов / элементов» (ФЛ/ЮЛ под общей шапкой) и «Сумма, руб.» / «Код БП» / «Пункт акта». Полный шаблон — `_createMetricsGrid` (`state-content.js:319-413`).
+**Структура `grid`.** Сетка 4×7 с двумя строками заголовков и двумя строками данных. Заголовки используют объединения (`colSpan`/`rowSpan`/`isSpanned`/`spanOrigin`) для группировки «Количество клиентов / элементов» (ФЛ/ЮЛ под общей шапкой) и «Сумма, руб.» / «Код БП» / «Пункт акта». Полный шаблон — `_createMetricsHeaderGrid` (`state-content.js`).
 
 Схематично (rowSpan=2 — вертикальное объединение через две header-строки; colSpan=2 — горизонтальное в row 0):
 
@@ -267,7 +267,7 @@ isPinnedTable(node) {
    col 0        col 1          col 2           col 3           col 4       col 5         col 6
 ```
 
-В коде ячейки-«дырки» под объединениями явно описаны как `isSpanned: true` с `spanOrigin: {row, col}` — это нужно для корректной отрисовки и редактирования (cм. `headerRow2` в `_createMetricsGrid`).
+В коде ячейки-«дырки» под объединениями явно описаны как `isSpanned: true` с `spanOrigin: {row, col}` — это нужно для корректной отрисовки и редактирования (cм. `headerRow2` в `_createMetricsHeaderGrid`).
 
 **Имя таблицы (`label`).** `"Объем выявленных отклонений (В метриках) по {nodeNumber}"` для `isMetricsTable` и `"Объем выявленных отклонений"` для `isMainMetricsTable`. При перенумерации узла `5.X` фронт обновляет label автоматически — `updateMetricsTableLabel` (`state-tree.js:102-115`).
 
@@ -435,7 +435,7 @@ isPinnedTable(node) {
     "table_1717000000000_abc": {
       "id": "table_1717000000000_abc",
       "nodeId": "5_table_1717000000000_abc",
-      "grid": [ /* 4×7 шаблон метрик из _createMetricsGrid */ ],
+      "grid": [ /* 4×7 шаблон метрик из _createMetricsHeaderGrid */ ],
       "colWidths": [120, 200, 80, 80, 100, 80, 120],
       "protected": true, "deletable": true,
       "isMainMetricsTable": true

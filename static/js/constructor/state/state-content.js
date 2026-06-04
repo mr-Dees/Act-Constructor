@@ -306,7 +306,7 @@ Object.assign(AppState, {
 
         node.children.unshift(tableNode);
 
-        const grid = this._createMetricsGrid();
+        const grid = this._createMetricsHeaderGrid();
         const preset = AppConfig.content.tablePresets.metrics;
 
         const table = {
@@ -324,11 +324,15 @@ Object.assign(AppState, {
     },
 
     /**
-     * Создает сетку таблицы метрик с объединенными ячейками
+     * Общая фабрика шапки сводной сетки (двухстрочный заголовок метрик +
+     * пустые строки данных). Намеренно ОБЩАЯ для двух подвидов таблиц:
+     *  - сводные метрики (`_createMetricsTable` / `_createMainMetricsTable`);
+     *  - «Прочие риски» (`_createOtherRiskTable`) — шапка 1:1 со сводной.
+     * Любая правка структуры шапки затрагивает оба подвида — это by design.
      * @private
      * @returns {Array<Array>} Сетка ячеек
      */
-    _createMetricsGrid() {
+    _createMetricsHeaderGrid() {
         const grid = [];
 
         // Первая строка заголовков с объединением
@@ -454,7 +458,7 @@ Object.assign(AppState, {
 
         node5.children.unshift(tableNode);
 
-        const grid = this._createMetricsGrid();
+        const grid = this._createMetricsHeaderGrid();
         const preset = AppConfig.content.tablePresets.metrics;
 
         const table = {
@@ -840,7 +844,7 @@ Object.assign(AppState, {
 
     /**
      * Создаёт таблицу «Прочие риски». Шапка и сетка 1:1 со сводной таблицей метрик
-     * (использует общий конструктор `_createMetricsGrid`), но НЕ автогенерируется
+     * (использует общий конструктор `_createMetricsHeaderGrid`), но НЕ автогенерируется
      * `metrics-risk-coordinator`-ом, НЕ агрегирует данные дочерних метрик и НЕ
      * влияет на иерархию пунктов под разделом 5.
      * @private
@@ -863,7 +867,9 @@ Object.assign(AppState, {
         const insertIdx = this._getFirstNonPinnedIndex(node);
         node.children.splice(insertIdx, 0, tableNode);
 
-        const grid = this._createMetricsGrid();
+        // Явно переиспользуем общую шапку метрик: «прочие риски» намеренно
+        // имеют ту же сводную сетку (см. docstring _createMetricsHeaderGrid).
+        const grid = this._createMetricsHeaderGrid();
 
         const table = {
             id: tableId,

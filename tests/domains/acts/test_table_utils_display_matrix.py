@@ -11,7 +11,7 @@ from app.domains.acts.formatters.utils.table_utils import TableUtils
 
 def _metrics_style_grid() -> list[list[dict]]:
     """
-    7-колоночная таблица-метрика с ДВУХСТРОЧНОЙ шапкой (зеркало _createMetricsGrid).
+    7-колоночная таблица-метрика с ДВУХСТРОЧНОЙ шапкой (зеркало _createMetricsHeaderGrid).
 
     row 0: col0 rowSpan=2, col1 rowSpan=2, col2 colSpan=2 ("Кол-во"),
            col3 isSpanned(origin row0col2), col4/col5/col6 rowSpan=2.
