@@ -183,6 +183,38 @@ class TestGreenplumSchemaCompatibility:
         assert 'is_other_risk_table' in sql, \
             f"GP-схема {acts_gp} не содержит is_other_risk_table"
 
+    def test_act_tables_unique_act_id_node_id_both_schemas(self):
+        """act_tables в обеих схемах объявляет UNIQUE(act_id, node_id).
+
+        Гарантирует не более одной активной таблицы на узел дерева. На GP
+        DISTRIBUTED BY (act_id) ⊆ {act_id, node_id} — правило подмножества
+        соблюдено, констрейнт валиден.
+        """
+        base = Path(__file__).parent.parent / "app" / "domains" / "acts" / "migrations"
+        uq_pattern = re.compile(r'\bUNIQUE\s*\(([^)]+)\)', re.IGNORECASE)
+        for db_type in ("postgresql", "greenplum"):
+            content = (base / db_type / "schema.sql").read_text(encoding="utf-8")
+            create_stmt = None
+            for raw in DatabaseAdapter._split_sql_statements(content):
+                cleaned = re.sub(r'--[^\n]*', '', raw)
+                if (
+                    re.search(r'\bCREATE\s+TABLE\b', cleaned, re.IGNORECASE)
+                    and "{PREFIX}act_tables" in cleaned
+                ):
+                    create_stmt = cleaned
+                    break
+            assert create_stmt is not None, (
+                f"{db_type}/schema.sql: CREATE TABLE act_tables не найдено"
+            )
+            uniques = [
+                {c.strip().lower() for c in m.group(1).split(',') if c.strip()}
+                for m in uq_pattern.finditer(create_stmt)
+            ]
+            assert {"act_id", "node_id"} in uniques, (
+                f"{db_type}/schema.sql: act_tables не объявляет "
+                f"UNIQUE(act_id, node_id). Найдено: {uniques}"
+            )
+
     def test_no_pl_pgsql_triggers(self, gp_schema_files):
         """В GP 6 PL/pgSQL-триггеры исполняются только на координаторе → каждый
         UPDATE превращается в RPC на мастер. Для метки ``updated_at`` это лишний
