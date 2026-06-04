@@ -307,9 +307,16 @@ class ActItemSchema(BaseModel):
         number: Номер узла в иерархии
         isMetricsTable: Является ли узел таблицей метрик
         isMainMetricsTable: Является ли узел главной таблицей метрик
+        isRegularRiskTable: Является ли узел таблицей регулярных рисков
+        isOperationalRiskTable: Является ли узел таблицей операционных рисков
+        isTaxRiskTable: Является ли узел таблицей налоговых рисков
+        isOtherRiskTable: Является ли узел таблицей прочих рисков
     """
     id: str
-    label: str
+    # label у корневого узла исторически мог отсутствовать (снимки версий до
+    # введения метки). Поле опционально, чтобы валидатор дерева (C4) не
+    # отбраковывал легитимные сохранённые снимки; id остаётся обязательным.
+    label: str | None = ""
     type: Literal["item", "textblock", "violation", "table"] = "item"
     content: str | None = ""
     protected: bool | None = False
@@ -322,6 +329,10 @@ class ActItemSchema(BaseModel):
     number: str | None = None
     isMetricsTable: bool | None = False
     isMainMetricsTable: bool | None = False
+    isRegularRiskTable: bool | None = False
+    isOperationalRiskTable: bool | None = False
+    isTaxRiskTable: bool | None = False
+    isOtherRiskTable: bool | None = False
     tb: list[str] | None = None
     auditPointId: str | None = None
 
@@ -366,6 +377,22 @@ class ActDataSchema(BaseModel):
         pattern=r"^(manual|periodic|auto)$",
         description="Тип сохранения: manual (Ctrl+S), periodic (2мин), auto (debounced)"
     )
+
+    @field_validator("tree")
+    @classmethod
+    def validate_tree_structure(cls, v: dict) -> dict:
+        """
+        Валидирует структуру дерева через ActItemSchema, не меняя хранимый тип.
+
+        C4: downstream-консьюмеры (build_audit_point_map, _build_node_map,
+        json.dumps(tree), extract_node_number, sanitize_tree_nodes, аудит-лог)
+        читают дерево как dict. Поэтому tree остаётся dict для хранения, а
+        валидатор лишь конструирует ActItemSchema.model_validate(v) для проверки
+        формы (поднимает ValueError на битой структуре, в т.ч. на узлах без
+        id/label). Так risk-флаги получают схему-описание, не ломая контракт.
+        """
+        ActItemSchema.model_validate(v)
+        return v
 
 
 class ActSaveResponse(BaseModel):

@@ -332,17 +332,25 @@ class TestTextBlockFormatting:
 
 class TestActDataSchema:
 
+    # C4: tree теперь валидируется через ActItemSchema — узел обязан иметь id.
+    _VALID_TREE = {"id": "root", "label": "Акт", "children": []}
+
     def test_valid_save_types(self):
         for st in ("manual", "periodic", "auto"):
-            d = ActDataSchema(tree={}, saveType=st)
+            d = ActDataSchema(tree=dict(self._VALID_TREE), saveType=st)
             assert d.saveType == st
 
     def test_invalid_save_type(self):
         with pytest.raises(ValidationError):
-            ActDataSchema(tree={}, saveType="unknown")
+            ActDataSchema(tree=dict(self._VALID_TREE), saveType="unknown")
+
+    def test_invalid_tree_rejected(self):
+        # Дерево без id отбраковывается валидатором структуры (C4).
+        with pytest.raises(ValidationError):
+            ActDataSchema(tree={})
 
     def test_default_collections(self):
-        d = ActDataSchema(tree={})
+        d = ActDataSchema(tree=dict(self._VALID_TREE))
         assert d.tables == {}
         assert d.textBlocks == {}
         assert d.violations == {}
