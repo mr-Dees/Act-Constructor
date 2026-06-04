@@ -9,6 +9,7 @@ import { PreviewManager } from '../preview/preview.js';
 import { AppState } from '../state/state-core.js';
 import { AppConfig } from '../../shared/app-config.js';
 import { Notifications } from '../../shared/notifications.js';
+import { applyInsertColumnWidth, applyRemoveColumnWidth } from './col-widths.js';
 
 export class TableCellsOperations {
     constructor(tableManager) {
@@ -275,55 +276,6 @@ export class TableCellsOperations {
     }
 
     /**
-     * Перераспределяет ширину колонок равномерно после изменения структуры.
-     * Полностью пересоздает размеры при изменении количества колонок.
-     * @param {Object} table - Объект таблицы из AppState
-     */
-    _redistributeColumnWidths(table) {
-        if (!table || !table.grid || !table.grid[0]) return;
-
-        const numCols = table.grid[0].length;
-        const equalWidthPercent = 100 / numCols;
-
-        if (table.colWidths) {
-            table.colWidths = new Array(numCols).fill(equalWidthPercent);
-        }
-
-        if (!AppState.tableUISizes) {
-            AppState.tableUISizes = {};
-        }
-
-        // Удаляем старые размеры полностью
-        delete AppState.tableUISizes[table.id];
-
-        const sizes = {};
-
-        for (let r = 0; r < table.grid.length; r++) {
-            for (let c = 0; c < table.grid[r].length; c++) {
-                const cellData = table.grid[r][c];
-                if (cellData.isSpanned) continue;
-
-                const key = `${r}-${c}`;
-                const colspan = cellData.colSpan || 1;
-                const widthPercent = equalWidthPercent * colspan;
-
-                sizes[key] = {
-                    width: `${widthPercent}%`,
-                    height: '',
-                    minWidth: '80px',
-                    minHeight: '28px',
-                    wordBreak: 'normal',
-                    overflowWrap: 'anywhere'
-                };
-            }
-        }
-
-        AppState.tableUISizes[table.id] = {
-            cellSizes: sizes
-        };
-    }
-
-    /**
      * Вставляет новую колонку слева от выбранной ячейки.
      * Учитывает объединенные ячейки и сохраняет флаг заголовка для новых ячеек.
      */
@@ -385,7 +337,7 @@ export class TableCellsOperations {
             }
         }
 
-        this._redistributeColumnWidths(table);
+        applyInsertColumnWidth(table, colIndex);
         this.clearSelection();
         ItemsRenderer.updateTable(tableId);
         PreviewManager.update();
@@ -472,7 +424,7 @@ export class TableCellsOperations {
             }
         }
 
-        this._redistributeColumnWidths(table);
+        applyInsertColumnWidth(table, insertColIndex);
         this.clearSelection();
         ItemsRenderer.updateTable(tableId);
         PreviewManager.update();
@@ -596,7 +548,7 @@ export class TableCellsOperations {
             }
         }
 
-        this._redistributeColumnWidths(table);
+        applyRemoveColumnWidth(table, colIndex);
         this.clearSelection();
         ItemsRenderer.updateTable(tableId);
         PreviewManager.update();
@@ -705,14 +657,6 @@ export class TableCellsOperations {
         }
 
         return !(hasHeader && hasData);
-    }
-
-    /**
-     * Пересчитывает ширину колонок (алиас для _redistributeColumnWidths)
-     * @param {Object} table - Объект таблицы
-     */
-    _recalculateColumnWidths(table) {
-        this._redistributeColumnWidths(table);
     }
 
     /**

@@ -138,11 +138,15 @@ test('property: insert/remove/split сохраняют целые веса >=1',
       const spl = splitColumnWeight(weights, idx);
       assert.ok(allInts(spl) && spl.every((w) => w >= 1));
       assert.equal(spl.length, weights.length + 1);
-      // Сумма после split не меняется (вес index поделён, остальные те же).
-      assert.equal(
-        spl.reduce((a, b) => a + b, 0),
-        weights.reduce((a, b) => a + b, 0)
-      );
+      // Сумма после split не меняется, КОГДА исходный вес делим (>=2).
+      // Для веса 1 split даёт [1,1] (каждый >=1) — это сознательный пол, при
+      // котором сумма растёт на 1; иначе одна из колонок была бы 0 (невалидно).
+      if (weights[idx] >= 2) {
+        assert.equal(
+          spl.reduce((a, b) => a + b, 0),
+          weights.reduce((a, b) => a + b, 0)
+        );
+      }
     })
   );
 });
