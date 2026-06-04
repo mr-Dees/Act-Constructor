@@ -1,19 +1,17 @@
 /**
- * Управление таблицами с матричной структурой данных.
- * Координирует рендеринг, редактирование и взаимодействие с ячейками.
+ * Координатор событий таблиц с матричной структурой данных.
+ * Навешивает обработчики на ячейки/ручки (рендер выполняет ItemsRenderer),
+ * управляет выделением и взаимодействием с ячейками.
  * Делегирует операции с ячейками в TableCellsOperations и изменение размеров в TableSizes.
  */
 import { ContextMenuManager } from '../context-menu/context-menu-core.js';
 import { AppState } from '../state/state-core.js';
 import { TableCellsOperations } from './table-cells-operations.js';
 import { TableSizes } from './table-sizes.js';
-import { colWidthsToPercents } from './col-widths.js';
 import { Notifications } from '../../shared/notifications.js';
 
 export class TableManager {
-    constructor(containerId) {
-        // DOM-контейнер для отображения всех таблиц
-        this.container = document.getElementById(containerId);
+    constructor() {
         // Список выбранных ячеек для групповых операций (объединение/разделение)
         this.selectedCells = [];
         // Модуль операций с ячейками (выделение, редактирование, объединение)
@@ -56,19 +54,6 @@ export class TableManager {
         });
     }
 
-    /**
-     * Полный перерисовка всех таблиц из AppState.
-     * Очищает контейнер и создает DOM для каждой таблицы.
-     */
-    renderAll() {
-        this.container.innerHTML = '';
-        Object.values(AppState.tables).forEach(table => {
-            const section = this.createTableSection(table);
-            this.container.appendChild(section);
-        });
-        this.attachEventListeners();
-    }
-    
     /**
      * Привязка обработчиков событий к ячейкам и ручкам изменения размеров.
      * Обрабатывает клики, двойные клики, контекстное меню и начало resize-операций.
@@ -154,111 +139,6 @@ export class TableManager {
         });
     }
 
-    /**
-     * Создание секции таблицы с заголовком и скроллируемым контейнером.
-     * @param {Object} table - Объект таблицы из AppState с grid-структурой
-     * @returns {HTMLElement} DOM-элемент секции с таблицей
-     */
-    createTableSection(table) {
-        const section = document.createElement('div');
-        section.className = 'table-section';
-        section.dataset.tableId = table.id;
-
-        // Заголовок берется из связанного узла дерева
-        const node = AppState.findNodeById(table.nodeId);
-        const title = document.createElement('h3');
-        title.textContent = node ? (node.customLabel || node.number || node.label || 'Таблица') : 'Таблица';
-        section.appendChild(title);
-
-        // Контейнер с горизонтальной прокруткой
-        const scroll = document.createElement('div');
-        scroll.className = 'table-scroll';
-
-        const tableEl = this.createTableElement(table);
-        scroll.appendChild(tableEl);
-        section.appendChild(scroll);
-
-        return section;
-    }
-
-    /**
-     * Создание HTML-таблицы из матричной grid-структуры.
-     * Обрабатывает объединенные ячейки (colspan/rowspan) и добавляет ручки изменения размеров.
-     * @param {Object} table - Объект таблицы с grid-матрицей
-     * @returns {HTMLTableElement} Готовая HTML-таблица
-     */
-    createTableElement(table) {
-        const tableEl = document.createElement('table');
-        tableEl.className = 'editable-table';
-        tableEl.style.tableLayout = 'fixed';
-
-        // colgroup из colWidths (единый источник ширины колонок).
-        const numColsForGroup = table.grid?.[0]?.length || 0;
-        const widths = Array.isArray(table.colWidths) && table.colWidths.length === numColsForGroup
-            ? table.colWidths
-            : new Array(numColsForGroup).fill(100);
-        const percents = colWidthsToPercents(widths);
-        if (percents.length > 0) {
-            const colgroup = document.createElement('colgroup');
-            percents.forEach(pct => {
-                const col = document.createElement('col');
-                col.style.width = `${pct}%`;
-                colgroup.appendChild(col);
-            });
-            tableEl.appendChild(colgroup);
-        }
-
-        table.grid.forEach((rowData, rowIndex) => {
-            const tr = document.createElement('tr');
-
-            rowData.forEach((cellData, colIndex) => {
-                // Пропускаем ячейки, поглощенные объединением
-                if (cellData.isSpanned) return;
-
-                const cellEl = document.createElement(cellData.isHeader ? 'th' : 'td');
-
-                // Отображение многострочного текста с сохранением переносов
-                if (cellData.content) {
-                    const lines = cellData.content.split('\n');
-                    lines.forEach((line, index) => {
-                        const textNode = document.createTextNode(line);
-                        cellEl.appendChild(textNode);
-                        if (index < lines.length - 1) {
-                            cellEl.appendChild(document.createElement('br'));
-                        }
-                    });
-                }
-
-                // Атрибуты для объединенных ячеек
-                if (cellData.colSpan > 1) cellEl.colSpan = cellData.colSpan;
-                if (cellData.rowSpan > 1) cellEl.rowSpan = cellData.rowSpan;
-
-                // Координаты для идентификации ячейки при операциях
-                cellEl.dataset.row = rowIndex;
-                cellEl.dataset.col = colIndex;
-                cellEl.dataset.tableId = table.id;
-
-                // Ручка изменения ширины (кроме последней колонки)
-                const numCols = table.grid[0].length;
-                const isLastColumn = colIndex + (cellData.colSpan || 1) >= numCols;
-
-                if (!isLastColumn) {
-                    const resizeHandle = document.createElement('div');
-                    resizeHandle.className = 'resize-handle';
-                    cellEl.appendChild(resizeHandle);
-                }
-
-                // Высота строк — auto (как в Word); ручки высоты строк убраны.
-
-                tr.appendChild(cellEl);
-            });
-
-            tableEl.appendChild(tr);
-        });
-
-        return tableEl;
-    }
-
     // Делегирующие методы для операций с ячейками
     /**
      * Снимает выделение со всех ячеек.
@@ -296,7 +176,7 @@ export class TableManager {
 }
 
 // Глобальный экземпляр для управления всеми таблицами в приложении
-export const tableManager = new TableManager('tablesContainer');
+export const tableManager = new TableManager();
 
 // Window-globals для совместимости с inline-скриптами в шаблонах.
 window.TableManager = TableManager;
