@@ -5,6 +5,7 @@
  * и обработкой заголовков.
  */
 import { AppConfig } from '../../shared/app-config.js';
+import { iterateVisibleCells } from '../table/grid-merges.js';
 
 export class PreviewTableRenderer {
     /**
@@ -89,9 +90,8 @@ export class PreviewTableRenderer {
     static _createRow(rowData, previewTrim) {
         const row = document.createElement('tr');
 
-        rowData.forEach(cellData => {
-            if (cellData.isSpanned) return;
-
+        // Единый обход видимых (не поглощённых) ячеек — общий helper.
+        iterateVisibleCells([rowData], (cellData) => {
             const cell = this._createCell(cellData, previewTrim);
             row.appendChild(cell);
         });

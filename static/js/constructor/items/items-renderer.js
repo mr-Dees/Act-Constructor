@@ -11,6 +11,7 @@ import { AppConfig } from '../../shared/app-config.js';
 import { ChatEventBus } from '../../shared/chat/chat-event-bus.js';
 import { Notifications } from '../../shared/notifications.js';
 import { colWidthsToPercents } from '../table/col-widths.js';
+import { iterateVisibleCells } from '../table/grid-merges.js';
 
 export class ItemsRenderer {
     /**
@@ -730,9 +731,9 @@ export class ItemsRenderer {
     static _createTableRow(rowData, rowIndex, tableId, numCols) {
         const tr = document.createElement('tr');
 
-        rowData.forEach((cellData, colIndex) => {
-            if (cellData.isSpanned) return;
-
+        // Единый обход видимых (не поглощённых) ячеек — общий helper для всех
+        // рендереров. Обходим строку как одно-строчную сетку.
+        iterateVisibleCells([rowData], (cellData, _r, colIndex) => {
             const cellEl = this._createTableCell(cellData, rowIndex, colIndex, tableId, numCols);
             tr.appendChild(cellEl);
         });
