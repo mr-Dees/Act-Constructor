@@ -32,6 +32,65 @@ def register_factories() -> None:
 
     register_factory("admin.user_directory", _user_directory_factory)
 
+    def _http_metrics_service_factory():
+        """Возвращает HttpMetricsService, если HTTP-метрики включены, иначе None.
+
+        Инкапсулирует проверку ``admin.http_metrics_enabled``, чтобы core
+        (``app/main.py``) не импортировал ``AdminSettings``/``admin.deps``
+        напрямую — связь идёт через реестр фабрик.
+        """
+        from app.core.settings_registry import get as get_domain_settings
+        from app.domains.admin.deps import get_http_metrics_service
+        from app.domains.admin.settings import AdminSettings
+
+        admin_settings = get_domain_settings("admin", AdminSettings)
+        if not admin_settings.http_metrics_enabled:
+            return None
+        return get_http_metrics_service()
+
+    register_factory("admin.http_metrics_service", _http_metrics_service_factory)
+
+    def _access_denied_audit_factory():
+        """Возвращает async-функцию записи отказа доступа в аудит admin.
+
+        Инкапсулирует доступ к батчеру и тип ``AccessDeniedRecord``, чтобы core
+        (``role_deps``) не импортировал admin напрямую. Функция возвращает
+        ``True``, если запись передана батчеру (или попытка была), и ``False``,
+        если батчер ещё не поднят — тогда core залогирует warning. Исключения
+        самого батчера поглощаются: цель — не помешать 403-ответу.
+        """
+        from app.domains.admin.deps import get_access_denied_audit_batcher
+        from app.domains.admin.repositories.access_denied_audit import (
+            AccessDeniedRecord,
+        )
+
+        async def _record(
+            *, username: str, domain: str, path: str, method: str, reason: str,
+        ) -> bool:
+            batcher = get_access_denied_audit_batcher()
+            if batcher is None:
+                return False
+            try:
+                await batcher.add(
+                    AccessDeniedRecord(
+                        username=username,
+                        domain=domain,
+                        path=path,
+                        method=method,
+                        reason=reason,
+                    )
+                )
+            except Exception:
+                logger.exception(
+                    "Не удалось записать отказ доступа в аудит: username=%s domain=%s",
+                    username, domain,
+                )
+            return True
+
+        return _record
+
+    register_factory("admin.access_denied_audit", _access_denied_audit_factory)
+
 
 def register_lifespan_hooks() -> None:
     """

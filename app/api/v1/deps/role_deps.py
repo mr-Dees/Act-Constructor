@@ -152,44 +152,39 @@ async def _log_access_denied(
     domain: str,
     roles: list[dict],
 ) -> None:
-    """Кладёт запись об отказе доступа в батчер.
+    """Кладёт запись об отказе доступа в аудит admin-домена через реестр фабрик.
 
-    Поглощает любые исключения батчера: цель — не помешать 403-ответу.
+    Связь с admin — через ``domain_registry.get_factory`` без прямого импорта:
+    admin-домен инкапсулирует батчер и тип записи (``AccessDeniedRecord``).
+    Если запись не удалось положить — фабрика не зарегистрирована (admin-домен
+    не поднят, например в изолированных тестах) либо батчер ещё не поднят
+    (recorder вернул ``False``) — отказ логируется в warning. Цель — не
+    помешать 403-ответу.
     """
+    from app.core.domain_registry import get_factory, has_factory
+
     role_names = sorted({r.get("name", "") for r in roles if r.get("name")})
     reason = (
         f"roles=[{', '.join(role_names) or '<none>'}], "
         f"missing domain_name='{domain}'"
     )
 
-    from app.domains.admin.deps import get_access_denied_audit_batcher
-    from app.domains.admin.repositories.access_denied_audit import (
-        AccessDeniedRecord,
-    )
+    recorded = False
+    if has_factory("admin.access_denied_audit"):
+        record_denied = get_factory("admin.access_denied_audit")()
+        recorded = await record_denied(
+            username=username,
+            domain=domain,
+            path=str(request.url.path),
+            method=request.method,
+            reason=reason,
+        )
 
-    batcher = get_access_denied_audit_batcher()
-    if batcher is None:
+    if not recorded:
         logger.warning(
             "Отказ доступа username=%s domain=%s path=%s method=%s reason=%s "
-            "(батчер аудита не поднят — запись пропущена)",
+            "(аудит не записан — батчер не поднят)",
             username, domain, request.url.path, request.method, reason,
-        )
-        return
-
-    try:
-        await batcher.add(
-            AccessDeniedRecord(
-                username=username,
-                domain=domain,
-                path=str(request.url.path),
-                method=request.method,
-                reason=reason,
-            )
-        )
-    except Exception:
-        logger.exception(
-            "Не удалось записать отказ доступа в аудит: username=%s domain=%s",
-            username, domain,
         )
 
 

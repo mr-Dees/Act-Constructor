@@ -32,12 +32,23 @@ def _patch_adapter():
 
 @pytest.fixture(autouse=True)
 def _reset_batcher():
-    """Сбрасывает singleton-ссылку на батчер аудита между тестами."""
+    """Сбрасывает батчер аудита, кеш ролей и реестр фабрик между тестами.
+
+    Регистрирует admin-фабрики (как реальный app в discover_domains), чтобы
+    путь ``require_domain_access → _log_access_denied`` находил фабрику
+    ``admin.access_denied_audit`` и доходил до батчера.
+    """
+    from app.core import domain_registry
+    from app.domains.admin._lifecycle import register_factories
+
+    domain_registry.reset_registry()
+    register_factories()
     admin_deps.set_access_denied_audit_batcher(None)
     _roles_cache.clear()
     yield
     admin_deps.set_access_denied_audit_batcher(None)
     _roles_cache.clear()
+    domain_registry.reset_registry()
 
 
 # ---------------------------------------------------------------------------
