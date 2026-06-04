@@ -65,6 +65,12 @@ class TestSaveContentUsesTransaction:
         table_data.isOperationalRiskTable = False
 
         data = _make_act_data(tables={"tbl_1": table_data})
+        # Узел-владелец таблицы должен быть в дереве (иначе orphan-фильтр её срежет).
+        data.tree = {
+            "id": "root", "label": "Акт",
+            "children": [{"id": "node_1", "label": "Таблица", "type": "table",
+                          "tableId": "tbl_1", "children": []}],
+        }
         await repo.save_content(act_id=1, data=data, username="user1")
 
         mock_conn.executemany.assert_called()
@@ -114,6 +120,13 @@ class TestSaveContentUsesTransaction:
             textblocks={"tb_1": tb_data},
             violations={"v_1": v_data},
         )
+        # Узел-владелец таблицы (n1) должен быть в дереве, иначе orphan-фильтр
+        # _save_tables срежет её и executemany для act_tables не вызовется.
+        data.tree = {
+            "id": "root", "label": "Акт",
+            "children": [{"id": "n1", "label": "Таблица", "type": "table",
+                          "tableId": "tbl_1", "children": []}],
+        }
         await repo.save_content(act_id=1, data=data, username="user1")
 
         assert mock_conn.executemany.call_count == 3
@@ -155,3 +168,133 @@ class TestSaveContentUsesTransaction:
 
         # transaction() вызван ровно 1 раз — нет вложенной транзакции
         assert mock_conn.transaction.call_count == 1
+
+
+class TestInsertTableDenormalizationAndFlags:
+    """insert_table сохраняет денормализацию (node_number/table_label) и 6 флагов."""
+
+    async def test_insert_table_includes_flag_and_denorm_columns(self, mock_conn):
+        """SQL insert_table содержит колонки денормализации и все 6 флагов."""
+        repo = ActContentRepository(mock_conn)
+        await repo.insert_table(
+            act_id=1,
+            table_id="t1",
+            node_id="n1",
+            grid_data=[],
+            col_widths=[],
+            is_protected=True,
+            is_deletable=False,
+            node_number="3.1",
+            table_label="Оценка качества",
+            is_metrics_table=True,
+        )
+        sql = mock_conn.execute.call_args.args[0]
+        for col in (
+            "node_number", "table_label",
+            "is_metrics_table", "is_main_metrics_table",
+            "is_regular_risk_table", "is_operational_risk_table",
+            "is_tax_risk_table", "is_other_risk_table",
+        ):
+            assert col in sql, f"insert_table SQL не содержит колонку {col}"
+
+    async def test_insert_table_passes_denorm_and_flag_values(self, mock_conn):
+        """Значения денормализации и флага пробрасываются в параметры execute."""
+        repo = ActContentRepository(mock_conn)
+        await repo.insert_table(
+            act_id=1,
+            table_id="t1",
+            node_id="n1",
+            grid_data=[],
+            col_widths=[],
+            is_protected=False,
+            is_deletable=True,
+            node_number="3.1",
+            table_label="Оценка качества",
+            is_regular_risk_table=True,
+        )
+        args = mock_conn.execute.call_args.args
+        assert "3.1" in args
+        assert "Оценка качества" in args
+        # Флаг регулярных рисков пробрасывается True
+        assert True in args[1:]
+
+    async def test_insert_table_defaults_flags_false(self, mock_conn):
+        """Без явных флагов insert_table вставляет дефолты (системная таблица)."""
+        repo = ActContentRepository(mock_conn)
+        await repo.insert_table(
+            act_id=1,
+            table_id="t1",
+            node_id="n1",
+            grid_data=[],
+            col_widths=[],
+            is_protected=True,
+            is_deletable=False,
+            table_label="Таблица",
+        )
+        # Не падает; SQL по-прежнему содержит флаги-колонки
+        sql = mock_conn.execute.call_args.args[0]
+        assert "is_metrics_table" in sql
+
+
+class TestSaveTablesOrphanFilter:
+    """_save_tables пропускает таблицы, чей nodeId отсутствует в дереве."""
+
+    async def test_orphan_table_not_inserted(self, mock_conn):
+        """Таблица с nodeId не из дерева не попадает в executemany."""
+        repo = ActContentRepository(mock_conn)
+        mock_conn.fetchval.return_value = None
+        mock_conn.fetch.return_value = []
+
+        # Таблица привязана к узлу, которого нет в дереве (root без детей).
+        orphan = MagicMock()
+        orphan.nodeId = "ghost"
+        orphan.grid = []
+        orphan.colWidths = []
+        orphan.protected = False
+        orphan.deletable = True
+        for f in ("isMetricsTable", "isMainMetricsTable",
+                  "isRegularRiskTable", "isOperationalRiskTable",
+                  "isTaxRiskTable", "isOtherRiskTable"):
+            setattr(orphan, f, False)
+
+        data = _make_act_data(tables={"orphan_tbl": orphan})
+        await repo.save_content(act_id=1, data=data, username="user1")
+
+        # Orphan не должен вставляться — executemany для таблиц не вызывается
+        # (нет валидных таблиц).
+        for c in mock_conn.executemany.call_args_list:
+            sql = c.args[0]
+            if "act_tables" in sql:
+                pytest.fail("orphan-таблица попала в INSERT act_tables")
+
+    async def test_valid_table_inserted(self, mock_conn):
+        """Таблица с nodeId, присутствующим в дереве, вставляется."""
+        repo = ActContentRepository(mock_conn)
+        mock_conn.fetchval.return_value = None
+        mock_conn.fetch.return_value = []
+
+        valid = MagicMock()
+        valid.nodeId = "node_1"
+        valid.grid = []
+        valid.colWidths = []
+        valid.protected = False
+        valid.deletable = True
+        for f in ("isMetricsTable", "isMainMetricsTable",
+                  "isRegularRiskTable", "isOperationalRiskTable",
+                  "isTaxRiskTable", "isOtherRiskTable"):
+            setattr(valid, f, False)
+
+        data = _make_act_data(tables={"valid_tbl": valid})
+        # Дерево содержит узел node_1
+        data.tree = {
+            "id": "root", "label": "Акт",
+            "children": [{"id": "node_1", "label": "Таблица", "type": "table",
+                          "tableId": "valid_tbl", "children": []}],
+        }
+        await repo.save_content(act_id=1, data=data, username="user1")
+
+        table_inserts = [
+            c for c in mock_conn.executemany.call_args_list
+            if "act_tables" in c.args[0]
+        ]
+        assert table_inserts, "валидная таблица не вставлена"

@@ -11,6 +11,13 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import pytest
 
 from app.domains.acts.schemas.act_content import ActItemSchema, ActDataSchema
+from app.domains.acts.repositories.act_crud import ActCrudRepository
+
+
+@pytest.fixture(autouse=True)
+def _patch_adapter(mock_adapter):
+    with patch("app.db.repositories.base.get_adapter", return_value=mock_adapter):
+        yield
 
 
 class TestActItemSchemaRiskFlags:
@@ -98,3 +105,23 @@ class TestActDataSchemaTreeValidation:
         }
         with pytest.raises(Exception):
             ActDataSchema.model_validate(payload)
+
+
+class TestCopyTablesAllFlags:
+    """copy_tables копирует все 6 флагов подвидов таблиц."""
+
+    async def test_copy_tables_sql_lists_all_six_flags(self, mock_conn):
+        """SQL copy_tables перечисляет все 6 флаговых колонок и в INSERT, и в SELECT."""
+        repo = ActCrudRepository(mock_conn)
+        await repo.copy_tables(from_id=1, to_id=2)
+
+        sql = mock_conn.execute.call_args.args[0]
+        for col in (
+            "is_metrics_table", "is_main_metrics_table",
+            "is_regular_risk_table", "is_operational_risk_table",
+            "is_tax_risk_table", "is_other_risk_table",
+        ):
+            # Колонка должна встречаться дважды: в списке INSERT и в SELECT
+            assert sql.count(col) >= 2, (
+                f"copy_tables не копирует {col} (встречается {sql.count(col)} раз)"
+            )
