@@ -11,6 +11,7 @@ import { MetricsRiskCoordinator } from './metrics-risk-coordinator.js';
 import { AppState } from './state-core.js';
 import { StorageManager } from '../storage-manager.js';
 import { TreeUtils } from '../tree/tree-utils.js';
+import { isPinnedTable as kindIsPinnedTable, isRiskTable as kindIsRiskTable } from '../table/table-kind.js';
 import { ValidationCore } from '../validation/validation-core.js';
 import { ValidationTree } from '../validation/validation-tree.js';
 import { AppConfig } from '../../shared/app-config.js';
@@ -290,10 +291,8 @@ Object.assign(AppState, {
      * @returns {boolean} true если это таблица риска
      */
     _isRiskTable(node) {
-        if (node.type !== AppConfig.nodeTypes.TABLE) return false;
-        // E-2: pinned-флаги читаем с node. Все 4 типа — полноправные риски,
-        // их удаление триггерит metrics-coordinator.
-        return !!(node.isRegularRiskTable || node.isOperationalRiskTable || node.isTaxRiskTable || node.isOtherRiskTable);
+        // Делегируем единому дискриминатору (table-kind) — один источник истины.
+        return kindIsRiskTable(node);
     },
 
     /**

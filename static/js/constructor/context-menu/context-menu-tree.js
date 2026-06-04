@@ -8,6 +8,7 @@ import { PreviewManager } from '../preview/preview.js';
 import { MetricsRiskCoordinator } from '../state/metrics-risk-coordinator.js';
 import { AppState } from '../state/state-core.js';
 import { TreeUtils } from '../tree/tree-utils.js';
+import { isRiskTable as kindIsRiskTable } from '../table/table-kind.js';
 import { AppConfig } from '../../shared/app-config.js';
 import { DialogManager } from '../../shared/dialog/dialog-confirm.js';
 import { Notifications } from '../../shared/notifications.js';
@@ -146,10 +147,8 @@ export class TreeContextMenu {
      */
     _hasAnyRiskTable(node) {
         if (!node.children) return false;
-        return node.children.some(child => {
-            if (child.type !== AppConfig.nodeTypes.TABLE) return false;
-            return !!(child.isRegularRiskTable || child.isOperationalRiskTable || child.isTaxRiskTable || child.isOtherRiskTable);
-        });
+        // Дискриминатор сам проверяет type === table.
+        return node.children.some(child => kindIsRiskTable(child));
     }
 
     /** Проверяет, есть ли таблицы рисков в дочерних item-узлах */
@@ -449,8 +448,7 @@ export class TreeContextMenu {
         // Удаление таблицы рисков триггерит _cleanupMetricsTablesAfterRiskTableDeleted,
         // которая может удалить метрики-таблицы из ДРУГИХ узлов раздела 5 → fallback на renderAll.
         // Все 4 типа — полноправные риски, удаление любого перерисовывает дерево.
-        const isRiskTableDelete = node.type === AppConfig.nodeTypes.TABLE &&
-            !!(node.isRegularRiskTable || node.isOperationalRiskTable || node.isTaxRiskTable || node.isOtherRiskTable);
+        const isRiskTableDelete = kindIsRiskTable(node);
 
         // Свод-предупреждение: если это последний риск на уровне, каскад удалит
         // соответствующие сводные таблицы — честно сообщаем об этом в диалоге.
@@ -509,9 +507,9 @@ export class TreeContextMenu {
      */
     _predictSvodRemoval(node) {
         const empty = {mainSvod: false, perPoint: null};
-        const isRisk = !!(node.isRegularRiskTable || node.isOperationalRiskTable
-            || node.isTaxRiskTable || node.isOtherRiskTable);
-        if (!isRisk) return empty;
+        // Узел предполагается риск-таблицей (вызывается только из handleDelete
+        // при isRiskTableDelete). Дискриминатор — один источник истины.
+        if (!kindIsRiskTable(node)) return empty;
 
         const node5 = AppState.findNodeById('5');
         if (!node5) return empty;

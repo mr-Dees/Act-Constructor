@@ -6,6 +6,7 @@
  */
 import { AppState } from '../state/state-core.js';
 import { AppConfig } from '../../shared/app-config.js';
+import { isPinnedTable as kindIsPinnedTable, isRiskTable as kindIsRiskTable } from '../table/table-kind.js';
 
 export const TreeUtils = {
     /**
@@ -310,18 +311,8 @@ export const TreeUtils = {
      * @returns {boolean} true если это закреплённая таблица
      */
     isPinnedTable(node) {
-        if (node.type !== AppConfig.nodeTypes.TABLE) return false;
-        // E-2: все pinned-флаги читаем с node (унифицировано с metrics).
-        // Risk-флаги мигрируются на node в api.js::loadActContent для старых актов.
-        // Tax и Other — новые типы (acts-features-bundle): оба тоже pinned.
-        return !!(
-            node.isMetricsTable ||
-            node.isMainMetricsTable ||
-            node.isRegularRiskTable ||
-            node.isOperationalRiskTable ||
-            node.isTaxRiskTable ||
-            node.isOtherRiskTable
-        );
+        // Делегируем единому дискриминатору (table-kind) — один источник истины.
+        return kindIsPinnedTable(node);
     },
 
     /**
@@ -339,12 +330,11 @@ export const TreeUtils = {
     findRiskTables(node, opts = {}) {
         const result = [];
         const firstOnly = !!opts.firstOnly;
-        const TABLE = AppConfig.nodeTypes.TABLE;
 
         const walk = (n) => {
             if (!n) return false;
-            // Все 4 типа риск-таблиц учитываются (включая «прочий»).
-            if (n.type === TABLE && (n.isRegularRiskTable || n.isOperationalRiskTable || n.isTaxRiskTable || n.isOtherRiskTable)) {
+            // Все 4 типа риск-таблиц учитываются (включая «прочий») — через дискриминатор.
+            if (kindIsRiskTable(n)) {
                 result.push(n);
                 if (firstOnly) return true;
             }

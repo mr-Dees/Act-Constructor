@@ -10,6 +10,7 @@ import { ChangelogTracker } from '../changelog-tracker.js';
 import { MetricsRiskCoordinator } from './metrics-risk-coordinator.js';
 import { AppState } from './state-core.js';
 import { TreeUtils } from '../tree/tree-utils.js';
+import { isRiskTable as kindIsRiskTable } from '../table/table-kind.js';
 import { ValidationCore } from '../validation/validation-core.js';
 import { ValidationTree } from '../validation/validation-tree.js';
 import { AppConfig } from '../../shared/app-config.js';
@@ -89,9 +90,8 @@ Object.assign(AppState, {
             return ValidationCore.failure(AppConfig.tree.validation.parentNotFound);
         }
 
-        // E-2: pinned-флаги читаем с node, не с table-объекта.
-        // Все 4 типа — риск (триггерит metrics-coordinator при удалении).
-        const isRiskTable = !!(tableNode.isRegularRiskTable || tableNode.isOperationalRiskTable || tableNode.isTaxRiskTable || tableNode.isOtherRiskTable);
+        // Все 4 типа — риск (триггерит metrics-coordinator при удалении). Через дискриминатор.
+        const isRiskTable = kindIsRiskTable(tableNode);
 
         if (typeof ChangelogTracker !== 'undefined') {
             ChangelogTracker.record('delete_table', tableNode.tableId, tableNode.label || 'Таблица', {nodeId: tableNode.parentId});
