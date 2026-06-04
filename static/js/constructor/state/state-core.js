@@ -9,6 +9,7 @@ import { StorageManager } from '../storage-manager.js';
 import { ValidationCore } from '../validation/validation-core.js';
 import { ValidationTree } from '../validation/validation-tree.js';
 import { AppConfig } from '../../shared/app-config.js';
+import { TABLE_FLAG_NAMES, pickTableFlags } from './flags.js';
 
 export const AppState = {
     /** @type {number} Текущий шаг приложения (1 или 2) */
@@ -391,6 +392,12 @@ export const AppState = {
         if (node.tb?.length) serialized.tb = node.tb;
         if (node.auditPointId) serialized.auditPointId = node.auditPointId;
 
+        // Флаги подвидов таблиц (источник истины — узел). Без них после
+        // reload спецтаблицы деградируют до обычных (закрепление/каскад/защита).
+        for (const f of TABLE_FLAG_NAMES) {
+            if (node[f]) serialized[f] = true;
+        }
+
         // Рекурсивная сериализация детей
         serialized.children = node.children?.map(child => this._serializeTree(child)) || [];
 
@@ -423,6 +430,13 @@ export const AppState = {
                 protected: table.protected || false,
                 deletable: table.deletable !== undefined ? table.deletable : true
             };
+
+            // Флаги подвидов: источник истины — узел таблицы. Если узел не
+            // найден (рассинхрон) — fallback на флаги самого объекта таблицы,
+            // чтобы рантайм-флаги пережили round-trip.
+            const node = this.findNodeById?.(table.nodeId);
+            const flags = node ? pickTableFlags(node) : pickTableFlags(table);
+            Object.assign(serialized[tableId], flags);
         }
 
         return serialized;
