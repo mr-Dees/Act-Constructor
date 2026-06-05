@@ -163,7 +163,9 @@
     outline-offset: var(--focus-outline-offset);
 }
 
-/* Тело меню с прокруткой */
+/* Тело меню — холст-канва вокруг листа A4 (как inline-панель #preview).
+   Лист/sizer/индикатор берутся из preview-page.css (class-based, грузится в том
+   же бандле), здесь только оформление самого холста. */
 .preview-menu-body {
     flex: 1;
     overflow-y: auto;
@@ -175,7 +177,9 @@
     font-size: var(--font-size-sm);
     line-height: var(--line-height-relaxed);
     color: var(--text-primary);
-    background: var(--bg-primary);
+    /* Светлый холст и якорь для абсолютного индикатора зума. */
+    background: #f0f0f2;
+    position: relative;
 }
 
 /* Стилизация scrollbar */

@@ -11,14 +11,18 @@
  * интерфейсное оформление #preview и таблиц предпросмотра на Word-подобное.
  */
 
-/* #preview — серый холст вокруг листа */
+/* #preview — светлый холст вокруг листа */
 #preview.preview {
-    background: #52525b;
+    background: #f0f0f2;
     padding: var(--spacing-xl);
     border: none;
     border-radius: 0;
     box-shadow: none;
-    overflow: auto;
+    /* Горизонтального скролла нет: лист fit-to-width масштабируется под ширину. */
+    overflow-y: auto;
+    overflow-x: hidden;
+    /* Якорь для абсолютного индикатора зума. */
+    position: relative;
     /* Холст не имитирует документ — сбрасываем интерфейсную типографику. */
     font-size: initial;
     line-height: initial;
@@ -28,8 +32,19 @@
     box-shadow: none;
 }
 
+/* Обёртка-sizer: занимает масштабированный footprint листа (см. preview-fit.js). */
+.preview-sheet-sizer {
+    position: relative;
+    margin: 0 auto; /* центрирование листа в холсте */
+}
+
 /* Белый лист A4 с полями эталона */
 .preview-sheet {
+    /* Лежит внутри sizer'а и масштабируется fit-скейлером от верхнего-левого угла. */
+    position: absolute;
+    top: 0;
+    left: 0;
+    transform-origin: top left;
     width: 210mm;
     min-height: 297mm;
     box-sizing: border-box;
@@ -37,11 +52,27 @@
     padding: 10mm 12.51mm 10mm 15.01mm;
     margin: 0 auto;
     background: #fff;
-    box-shadow: 0 2px 12px rgba(0, 0, 0, 0.3);
+    box-shadow: 0 1px 8px rgba(0, 0, 0, 0.18);
     font-family: "Times New Roman", serif;
     font-size: 12pt;
     line-height: 1.15;
     color: #000;
+}
+
+/* Индикатор текущего масштаба поверх холста */
+.preview-zoom-indicator {
+    position: absolute;
+    right: 10px;
+    bottom: 10px;
+    padding: 2px 8px;
+    font-size: 12px;
+    font-family: var(--font-family-base, sans-serif);
+    color: #fff;
+    background: rgba(0, 0, 0, 0.45);
+    border-radius: 10px;
+    pointer-events: none;
+    user-select: none;
+    z-index: 2;
 }
 
 /* Таблицы на листе — Word-типографика, ширины из colgroup (colWidths). */
@@ -85,4 +116,12 @@
     overflow-x: visible;
     margin: 6pt 0;
     border-radius: 0;
+}
+
+/* Печать: убираем масштаб/холст/индикатор — лист печатается в натуральную величину. */
+@media print {
+    #preview.preview { overflow: visible; background: #fff; padding: 0; }
+    .preview-sheet-sizer { width: auto !important; height: auto !important; }
+    .preview-sheet { position: static; transform: none !important; box-shadow: none; }
+    .preview-zoom-indicator { display: none; }
 }

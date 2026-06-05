@@ -11,6 +11,7 @@ import { PreviewViolationRenderer } from './preview-violation-renderer.js';
 import { AppState } from '../state/state-core.js';
 import { AppConfig } from '../../shared/app-config.js';
 import { ValidationTable } from '../validation/validation-table.js';
+import { PreviewFitScaler } from './preview-fit.js';
 
 export class PreviewManager {
     /**
@@ -19,6 +20,13 @@ export class PreviewManager {
      */
     static _pendingUpdate = false;
     static _pendingOptions = null;
+
+    /**
+     * Единый скейлер fit-to-width для inline-панели предпросмотра (#preview).
+     * Лениво создаётся в _performUpdate. У модального меню — свой экземпляр.
+     * @private
+     */
+    static _fitScaler = null;
 
     /**
      * Обновляет содержимое панели предпросмотра.
@@ -95,19 +103,57 @@ export class PreviewManager {
 
         // E3: неблокирующие предупреждения контентной валидации над листом.
         // Информируют («где и что не так»), но НИКОГДА не блокируют редактирование
-        // и не мешают рендеру самого документа ниже.
+        // и не мешают рендеру самого документа ниже. Рендерятся над sizer'ом
+        // (только inline-панель).
         this._renderContentWarnings(preview);
 
-        // #preview — серый «холст»; содержимое акта рендерится на белый лист A4
-        // (.preview-sheet) с полями и типографикой Word. Лист непрерывный
-        // (растёт по высоте, без разрывов страниц — решение владельца).
+        // Единая сборка документа (лист + sizer + индикатор зума) — общая для
+        // inline-панели и модального меню, исключает расхождение их рендера.
+        this.renderDocumentInto(preview, { previewTrim });
+
+        // Fit-to-width: масштабирует лист под ширину панели. attach идемпотентен —
+        // на перерендере наблюдаем ту же #preview и просто перепланируем расчёт.
+        if (!this._fitScaler) this._fitScaler = new PreviewFitScaler();
+        this._fitScaler.attach(preview);
+    }
+
+    /**
+     * Собирает единую структуру документа предпросмотра в указанный контейнер.
+     *
+     * ЕДИНЫЙ источник рендера и для inline-панели (#preview), и для модального
+     * меню (#previewMenuBody) — благодаря этому оба предпросмотра выглядят
+     * идентично (устраняет прежнее расхождение, когда меню строило документ
+     * вручную). Структура: sizer-обёртка → лист A4 (.preview-sheet) с заголовком,
+     * деревом и tooltip'ами, плюс индикатор зума поверх холста.
+     *
+     * @param {HTMLElement} container - Холст (#preview или #previewMenuBody).
+     * @param {Object} opts
+     * @param {number} opts.previewTrim - Максимальная длина текста.
+     * @returns {{sheet: HTMLElement, sizer: HTMLElement, indicator: HTMLElement}}
+     */
+    static renderDocumentInto(container, { previewTrim }) {
+        // Sizer занимает масштабированный footprint листа (см. preview-fit.js).
+        const sizer = document.createElement('div');
+        sizer.className = 'preview-sheet-sizer';
+
+        // Белый лист A4 с полями и типографикой Word; масштабируется fit-скейлером.
         const sheet = document.createElement('div');
         sheet.className = 'preview-sheet';
-        preview.appendChild(sheet);
+
+        sizer.appendChild(sheet);
+        container.appendChild(sizer);
 
         this._renderTitle(sheet);
         this._renderTree(sheet, previewTrim);
         this._attachPreviewTooltips(sheet);
+
+        // Индикатор текущего масштаба (обновляется скейлером).
+        const indicator = document.createElement('div');
+        indicator.className = 'preview-zoom-indicator';
+        indicator.textContent = '100%';
+        container.appendChild(indicator);
+
+        return { sheet, sizer, indicator };
     }
 
     /**
