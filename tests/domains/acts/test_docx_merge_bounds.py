@@ -22,6 +22,41 @@ def _ts(grid_data, **kw):
     return TableSchema.model_construct(id="t1", nodeId="n1", grid=grid, **kw)
 
 
+# ── T6a.3: защита _merge_cells от выхода за границы ──
+
+
+def test_merge_out_of_bounds_does_not_raise():
+    """Объединение с colSpan/rowSpan за пределами матрицы не роняет builder.
+
+    Инвариант guard'а (T6a.3): builder зажимает конец объединения в границы
+    матрицы и НЕ падает IndexError'ом. Конкретный текст итоговой ячейки при
+    схлопывании всей таблицы в одно объединение не специфицируется.
+    """
+    doc = Document()
+    # colSpan=5 при 2 колонках, rowSpan=4 при 2 строках — out-of-bounds.
+    schema = _ts([
+        [{"content": "Шапка", "isHeader": True, "colSpan": 5, "rowSpan": 4},
+         {"content": "B"}],
+        [{"content": "1"}, {"content": "2"}],
+    ])
+    # Не должно бросить IndexError; документ собирается с таблицей 2×2.
+    build_table(doc, schema)
+    assert len(doc.tables) == 1
+    assert len(doc.tables[0].rows) == 2
+
+
+def test_normal_merge_still_works():
+    """Корректное объединение (в пределах) по-прежнему работает после guard'а."""
+    doc = Document()
+    schema = _ts([
+        [{"content": "Объединено", "isHeader": True, "colSpan": 2},
+         {"content": "", "isSpanned": True}],
+        [{"content": "1"}, {"content": "2"}],
+    ])
+    build_table(doc, schema)
+    assert "Объединено" in doc.tables[0].rows[0].cells[0].text
+
+
 # ── T6a.4: бизнес-строка вынесена в явный конфиг styles ──
 
 

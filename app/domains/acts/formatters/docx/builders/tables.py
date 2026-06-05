@@ -170,8 +170,11 @@ def _apply_borders(table) -> None:
 
 
 def _merge_cells(table, r, c, col_span: int, row_span: int) -> None:
-    end_r = r + row_span - 1
-    end_c = c + col_span - 1
+    # Зажимаем конец объединения в границы матрицы: схема уже отбраковывает
+    # выходящие за пределы span'ы (TableSchema.validate_structure), но это
+    # defense-in-depth — битый span никогда не должен ронять builder IndexError'ом.
+    end_r = min(r + row_span - 1, len(table.rows) - 1)
+    end_c = min(c + col_span - 1, len(table.rows[r].cells) - 1)
     start_cell = table.rows[r].cells[c]
     end_cell = table.rows[end_r].cells[end_c]
     start_cell.merge(end_cell)
