@@ -84,7 +84,8 @@ function findRiskTables(node) {
   const out = [];
   const walk = (n) => {
     if (!n) return;
-    if (n.type === 'table' && (n.isRegularRiskTable || n.isOperationalRiskTable)) out.push(n);
+    if (n.type === 'table' && (n.isRegularRiskTable || n.isOperationalRiskTable
+      || n.isTaxRiskTable || n.isOtherRiskTable)) out.push(n);
     for (const c of n.children || []) walk(c);
   };
   walk(node);
@@ -141,14 +142,20 @@ function makeOps(state, opts = {}) {
   };
 }
 
-/** Добавляет риск-таблицу в указанный item-узел и реконсилит. */
-function addRisk(state, hostId) {
+/** Все 4 флага подвидов риск-таблиц (зеркало RISK_FLAG_NAMES в table-kind.js). */
+const RISK_FLAGS = ['isRegularRiskTable', 'isOperationalRiskTable', 'isTaxRiskTable', 'isOtherRiskTable'];
+
+/**
+ * Добавляет риск-таблицу указанного типа в item-узел и реконсилит.
+ * @param {string} [riskFlag='isRegularRiskTable'] - Один из 4 флагов подвидов.
+ */
+function addRisk(state, hostId, riskFlag = 'isRegularRiskTable') {
   const host = findNodeById(state.treeData, hostId);
   if (!host) return;
   const tableId = nextId('table');
-  const tn = { id: nextId('rt'), type: 'table', tableId, isRegularRiskTable: true, children: [] };
+  const tn = { id: nextId('rt'), type: 'table', tableId, [riskFlag]: true, children: [] };
   host.children.push(tn);
-  state.tables[tableId] = { id: tableId, nodeId: tn.id, isRegularRiskTable: true };
+  state.tables[tableId] = { id: tableId, nodeId: tn.id, [riskFlag]: true };
   reconcileAfterRiskAdded(tn.id, makeOps(state));
 }
 
@@ -217,13 +224,13 @@ function assertInvariants(state) {
 const HOSTS = ['n_511', 'n_521', 'n_51', 'n_52'];
 
 class AddRiskCommand {
-  constructor(hostId) { this.hostId = hostId; }
+  constructor(hostId, riskFlag) { this.hostId = hostId; this.riskFlag = riskFlag; }
   check() { return true; }
   run(model, real) {
-    addRisk(real, this.hostId);
+    addRisk(real, this.hostId, this.riskFlag);
     assertInvariants(real);
   }
-  toString() { return `AddRisk(${this.hostId})`; }
+  toString() { return `AddRisk(${this.hostId}, ${this.riskFlag})`; }
 }
 
 class RemoveRiskCommand {
@@ -256,7 +263,9 @@ class ReconcileIdempotentCommand {
 
 test('каскад: инварианты при случайных add/remove/reconcile (model-based)', () => {
   const allCommands = [
-    ...HOSTS.map((h) => fc.constant(new AddRiskCommand(h))),
+    // AddRisk по каждому host × каждому из 4 типов риска — чтобы в прогоне
+    // реально появлялись tax/other-риски, а не только regular/operational.
+    ...HOSTS.flatMap((h) => RISK_FLAGS.map((f) => fc.constant(new AddRiskCommand(h, f)))),
     ...[0, 1, 2].map((i) => fc.constant(new RemoveRiskCommand(i))),
     fc.constant(new ReconcileIdempotentCommand()),
   ];
