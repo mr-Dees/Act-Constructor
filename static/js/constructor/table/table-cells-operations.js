@@ -156,8 +156,6 @@ export class TableCellsOperations {
             return;
         }
 
-        const snapshot = this._snapshotGrid(table);
-
         // Новая строка с пустыми ячейками
         const newRow = [];
         const numCols = table.grid[0].length;
@@ -197,8 +195,6 @@ export class TableCellsOperations {
                 }
             }
         }
-
-        if (!this._ensureGridIntegrity(table, snapshot)) return;
 
         this.clearSelection();
         ItemsRenderer.updateTable(tableId);
@@ -240,8 +236,6 @@ export class TableCellsOperations {
             }
         }
 
-        const snapshot = this._snapshotGrid(table);
-
         const newRow = [];
         const numCols = table.grid[0].length;
 
@@ -278,8 +272,6 @@ export class TableCellsOperations {
             }
         }
 
-        if (!this._ensureGridIntegrity(table, snapshot)) return;
-
         this.clearSelection();
         ItemsRenderer.updateTable(tableId);
         PreviewManager.update();
@@ -306,8 +298,6 @@ export class TableCellsOperations {
         }
 
         colIndex = this._findColumnStartOfSpan(table, colIndex);
-
-        const snapshot = this._snapshotGrid(table);
 
         let headerRowIndex = -1;
         for (let r = 0; r < table.grid.length; r++) {
@@ -348,8 +338,6 @@ export class TableCellsOperations {
                 }
             }
         }
-
-        if (!this._ensureGridIntegrity(table, snapshot)) return;
 
         applyInsertColumnWidth(table, colIndex);
         this.clearSelection();
@@ -398,8 +386,6 @@ export class TableCellsOperations {
             }
         }
 
-        const snapshot = this._snapshotGrid(table);
-
         let headerRowIndex = -1;
         for (let r = 0; r < table.grid.length; r++) {
             if (table.grid[r].some(c => c.isHeader === true)) {
@@ -440,8 +426,6 @@ export class TableCellsOperations {
             }
         }
 
-        if (!this._ensureGridIntegrity(table, snapshot)) return;
-
         applyInsertColumnWidth(table, insertColIndex);
         this.clearSelection();
         ItemsRenderer.updateTable(tableId);
@@ -475,8 +459,6 @@ export class TableCellsOperations {
             return;
         }
 
-        const snapshot = this._snapshotGrid(table);
-
         // Smart auto-unmerge: разъединяем все ячейки, которые покрывают удаляемую строку.
         this._autoUnmergeRow(table, rowIndex);
 
@@ -504,8 +486,6 @@ export class TableCellsOperations {
                 }
             }
         }
-
-        if (!this._ensureGridIntegrity(table, snapshot)) return;
 
         this.clearSelection();
         ItemsRenderer.updateTable(tableId);
@@ -543,8 +523,6 @@ export class TableCellsOperations {
             return;
         }
 
-        const snapshot = this._snapshotGrid(table);
-
         // Уменьшаем colSpan для ячеек, которые охватывают удаляемую колонку
         for (let r = 0; r < table.grid.length; r++) {
             for (let c = 0; c < colIndex; c++) {
@@ -572,8 +550,6 @@ export class TableCellsOperations {
             }
         }
 
-        if (!this._ensureGridIntegrity(table, snapshot)) return;
-
         applyRemoveColumnWidth(table, colIndex);
         this.clearSelection();
         ItemsRenderer.updateTable(tableId);
@@ -595,9 +571,17 @@ export class TableCellsOperations {
      * проверяет table.grid через validateGrid. Если сетка повреждена —
      * откатывает её на снимок, показывает первую ошибку и возвращает false.
      *
-     * Операции P4 корректны by-construction, поэтому в штатном потоке это
-     * НИКОГДА не срабатывает — страховка ловит будущие регрессии ДО того, как
-     * битая сетка уйдёт на сервер и вернёт 422.
+     * Навешана ТОЛЬКО на чистые merge/unmerge (table-merge-core.js), где
+     * результат пересобирается из range-list и spanOrigin всегда согласован —
+     * там guard корректен и в штатном потоке НЕ срабатывает by-construction.
+     *
+     * НЕ применяется к in-place insert/delete строк/колонок: они оставляют
+     * инертный устаревший spanOrigin у поглощённых ячеек при сдвиге объединения
+     * (вставка/удаление ПЕРЕД origin'ом). Это давнее tolerated-состояние:
+     * рендерер spanOrigin игнорирует (рисует по isSpanned/colSpan/rowSpan), и
+     * серверный валидатор P6a его НЕ проверяет — то есть 422 такие сетки не
+     * вызывают. validateGrid строже серверного контракта (правило spanOrigin),
+     * поэтому его откат там был бы ложным.
      *
      * @private
      * @param {Object} table - Объект таблицы (table.grid уже изменён операцией)
