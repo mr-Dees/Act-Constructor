@@ -11,6 +11,7 @@ import { AppConfig } from '../../shared/app-config.js';
 import { Notifications } from '../../shared/notifications.js';
 import { applyInsertColumnWidth, applyRemoveColumnWidth } from './col-widths.js';
 import { mergeRange, unmergeAt, autoUnmergeRow } from './table-merge-core.js';
+import { validateGrid } from './grid-merges.js';
 
 export class TableCellsOperations {
     constructor(tableManager) {
@@ -155,6 +156,8 @@ export class TableCellsOperations {
             return;
         }
 
+        const snapshot = this._snapshotGrid(table);
+
         // Новая строка с пустыми ячейками
         const newRow = [];
         const numCols = table.grid[0].length;
@@ -194,6 +197,8 @@ export class TableCellsOperations {
                 }
             }
         }
+
+        if (!this._ensureGridIntegrity(table, snapshot)) return;
 
         this.clearSelection();
         ItemsRenderer.updateTable(tableId);
@@ -235,6 +240,8 @@ export class TableCellsOperations {
             }
         }
 
+        const snapshot = this._snapshotGrid(table);
+
         const newRow = [];
         const numCols = table.grid[0].length;
 
@@ -271,6 +278,8 @@ export class TableCellsOperations {
             }
         }
 
+        if (!this._ensureGridIntegrity(table, snapshot)) return;
+
         this.clearSelection();
         ItemsRenderer.updateTable(tableId);
         PreviewManager.update();
@@ -297,6 +306,8 @@ export class TableCellsOperations {
         }
 
         colIndex = this._findColumnStartOfSpan(table, colIndex);
+
+        const snapshot = this._snapshotGrid(table);
 
         let headerRowIndex = -1;
         for (let r = 0; r < table.grid.length; r++) {
@@ -337,6 +348,8 @@ export class TableCellsOperations {
                 }
             }
         }
+
+        if (!this._ensureGridIntegrity(table, snapshot)) return;
 
         applyInsertColumnWidth(table, colIndex);
         this.clearSelection();
@@ -385,6 +398,8 @@ export class TableCellsOperations {
             }
         }
 
+        const snapshot = this._snapshotGrid(table);
+
         let headerRowIndex = -1;
         for (let r = 0; r < table.grid.length; r++) {
             if (table.grid[r].some(c => c.isHeader === true)) {
@@ -425,6 +440,8 @@ export class TableCellsOperations {
             }
         }
 
+        if (!this._ensureGridIntegrity(table, snapshot)) return;
+
         applyInsertColumnWidth(table, insertColIndex);
         this.clearSelection();
         ItemsRenderer.updateTable(tableId);
@@ -458,6 +475,8 @@ export class TableCellsOperations {
             return;
         }
 
+        const snapshot = this._snapshotGrid(table);
+
         // Smart auto-unmerge: разъединяем все ячейки, которые покрывают удаляемую строку.
         this._autoUnmergeRow(table, rowIndex);
 
@@ -485,6 +504,8 @@ export class TableCellsOperations {
                 }
             }
         }
+
+        if (!this._ensureGridIntegrity(table, snapshot)) return;
 
         this.clearSelection();
         ItemsRenderer.updateTable(tableId);
@@ -522,6 +543,8 @@ export class TableCellsOperations {
             return;
         }
 
+        const snapshot = this._snapshotGrid(table);
+
         // Уменьшаем colSpan для ячеек, которые охватывают удаляемую колонку
         for (let r = 0; r < table.grid.length; r++) {
             for (let c = 0; c < colIndex; c++) {
@@ -549,10 +572,48 @@ export class TableCellsOperations {
             }
         }
 
+        if (!this._ensureGridIntegrity(table, snapshot)) return;
+
         applyRemoveColumnWidth(table, colIndex);
         this.clearSelection();
         ItemsRenderer.updateTable(tableId);
         PreviewManager.update();
+    }
+
+    /**
+     * Снимок текущей сетки таблицы (deep clone) для отката структурной операции.
+     * @private
+     * @param {Object} table - Объект таблицы
+     * @returns {Object[][]} Глубокая копия table.grid
+     */
+    _snapshotGrid(table) {
+        return JSON.parse(JSON.stringify(table.grid));
+    }
+
+    /**
+     * Клиентская защита целостности (T6b.6): после структурной операции
+     * проверяет table.grid через validateGrid. Если сетка повреждена —
+     * откатывает её на снимок, показывает первую ошибку и возвращает false.
+     *
+     * Операции P4 корректны by-construction, поэтому в штатном потоке это
+     * НИКОГДА не срабатывает — страховка ловит будущие регрессии ДО того, как
+     * битая сетка уйдёт на сервер и вернёт 422.
+     *
+     * @private
+     * @param {Object} table - Объект таблицы (table.grid уже изменён операцией)
+     * @param {Object[][]} snapshot - Снимок сетки ДО операции (для отката)
+     * @returns {boolean} true — сетка валидна и можно перерисовывать
+     */
+    _ensureGridIntegrity(table, snapshot) {
+        const result = validateGrid(table.grid);
+        if (!result.valid) {
+            table.grid = snapshot;
+            Notifications.error(
+                `Операция отменена: нарушена целостность таблицы — ${result.errors[0]}`
+            );
+            return false;
+        }
+        return true;
     }
 
     /**
@@ -751,7 +812,17 @@ export class TableCellsOperations {
 
         // Грид-математика — в чистом ядре поверх range-list; хранимый формат
         // (ведущая colSpan/rowSpan; поглощённые {isSpanned, spanOrigin}) не меняется.
-        table.grid = mergeRange(table.grid, minRow, minCol, maxRow, maxCol);
+        const nextGrid = mergeRange(table.grid, minRow, minCol, maxRow, maxCol);
+
+        // Клиентская защита целостности (T6b.6): не коммитим повреждённую сетку.
+        const integrity = validateGrid(nextGrid);
+        if (!integrity.valid) {
+            Notifications.error(
+                `Объединение отменено: нарушена целостность таблицы — ${integrity.errors[0]}`
+            );
+            return;
+        }
+        table.grid = nextGrid;
 
         this.clearSelection();
         ItemsRenderer.updateTable(tableId);
@@ -788,7 +859,11 @@ export class TableCellsOperations {
             return;
         }
 
+        const snapshot = this._snapshotGrid(table);
+
         this._unmergeAtOrigin(table, row, col);
+
+        if (!this._ensureGridIntegrity(table, snapshot)) return;
 
         this.clearSelection();
         ItemsRenderer.updateTable(tableId);
