@@ -108,6 +108,7 @@ import '../constructor/violation/violation-init.js';
 import '../constructor/validation/validation.js';
 import '../constructor/validation/validation-act.js';
 import '../constructor/validation/validation-core.js';
+import '../constructor/validation/validation-table-core.js';
 import '../constructor/validation/validation-table.js';
 import '../constructor/validation/validation-tree.js';
 
