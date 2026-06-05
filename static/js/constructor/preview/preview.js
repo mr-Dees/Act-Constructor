@@ -10,6 +10,7 @@ import { PreviewTextBlockRenderer } from './preview-textblock-renderer.js';
 import { PreviewViolationRenderer } from './preview-violation-renderer.js';
 import { AppState } from '../state/state-core.js';
 import { AppConfig } from '../../shared/app-config.js';
+import { ValidationTable } from '../validation/validation-table.js';
 
 export class PreviewManager {
     /**
@@ -92,6 +93,11 @@ export class PreviewManager {
         this._hidePreviewTooltip();
         preview.innerHTML = '';
 
+        // E3: неблокирующие предупреждения контентной валидации над листом.
+        // Информируют («где и что не так»), но НИКОГДА не блокируют редактирование
+        // и не мешают рендеру самого документа ниже.
+        this._renderContentWarnings(preview);
+
         // #preview — серый «холст»; содержимое акта рендерится на белый лист A4
         // (.preview-sheet) с полями и типографикой Word. Лист непрерывный
         // (растёт по высоте, без разрывов страниц — решение владельца).
@@ -102,6 +108,51 @@ export class PreviewManager {
         this._renderTitle(sheet);
         this._renderTree(sheet, previewTrim);
         this._attachPreviewTooltips(sheet);
+    }
+
+    /**
+     * Рендерит неблокирующие предупреждения контентной валидации (E3).
+     *
+     * Собирает проблемы таблиц (нет шапки / пустые заголовки / нет данных) через
+     * ValidationTable.collectContentWarnings и показывает их компактным списком
+     * над листом предпросмотра. Это лишь подсказка пользователю — редактирование,
+     * Ctrl+S и автосохранение не блокируются.
+     *
+     * @private
+     * @param {HTMLElement} container - Контейнер #preview (над листом).
+     */
+    static _renderContentWarnings(container) {
+        let warnings = [];
+        try {
+            warnings = ValidationTable.collectContentWarnings();
+        } catch (e) {
+            // Предупреждения — вспомогательная функция; их сбой не должен ломать
+            // рендер предпросмотра.
+            console.warn('Не удалось собрать предупреждения предпросмотра:', e);
+            return;
+        }
+
+        if (!warnings.length) return;
+
+        const box = document.createElement('div');
+        box.className = 'preview-warnings';
+        box.setAttribute('role', 'status');
+
+        const title = document.createElement('div');
+        title.className = 'preview-warnings-title';
+        title.textContent = '⚠ Замечания по таблицам (не мешают сохранению, но блокируют экспорт):';
+        box.appendChild(title);
+
+        const list = document.createElement('ul');
+        list.className = 'preview-warnings-list';
+        warnings.forEach(({ tableName, issue }) => {
+            const li = document.createElement('li');
+            li.textContent = `${tableName}: ${issue}`;
+            list.appendChild(li);
+        });
+        box.appendChild(list);
+
+        container.appendChild(box);
     }
 
     /**

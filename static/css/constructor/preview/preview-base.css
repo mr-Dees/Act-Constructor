@@ -42,6 +42,31 @@
     margin-bottom: 0;
 }
 
+/* Неблокирующие предупреждения контентной валидации (E3) над листом */
+.preview-warnings {
+    background: var(--warning-bg, #fff8e1);
+    border: var(--border-width-thin) solid var(--warning, #e6a700);
+    border-radius: var(--radius);
+    padding: var(--spacing-sm) var(--spacing-md);
+    margin-bottom: var(--spacing-lg);
+    color: var(--text-primary);
+    font-size: var(--font-size-sm);
+}
+
+.preview-warnings-title {
+    font-weight: var(--font-weight-bold, 600);
+    margin-bottom: var(--spacing-xs);
+}
+
+.preview-warnings-list {
+    margin: 0;
+    padding-left: var(--spacing-lg);
+}
+
+.preview-warnings-list li {
+    margin: var(--spacing-2xs, 2px) 0;
+}
+
 /* Разделитель между секциями */
 .preview-divider {
     height: var(--border-width-thin);

@@ -89,6 +89,44 @@ export const ValidationTable = {
     },
 
     /**
+     * Собирает контентные предупреждения по всем таблицам для предпросмотра (E3).
+     *
+     * Возвращает плоский список проблем без блокировки: нет шапки (E6), пустые
+     * заголовки, нет данных (E5). Источник истины — то же чистое ядро, что и
+     * блокирующие validateHeaders/validateData; здесь только агрегация в форму,
+     * удобную для рендера предупреждений.
+     *
+     * @returns {Array<{tableName:string, issue:string}>} Список проблем.
+     */
+    collectContentWarnings() {
+        const warnings = [];
+
+        for (const tableId in AppState.tables) {
+            const table = AppState.tables[tableId];
+
+            if (!this._hasValidGrid(table)) continue;
+
+            const tableName = this._getTableName(tableId);
+
+            if (countHeaderRows(table.grid) === 0) {
+                warnings.push({ tableName, issue: 'нет строки заголовка' });
+                // Без шапки проверки заголовков/данных теряют смысл — переходим дальше.
+                continue;
+            }
+
+            if (hasEmptyHeaders(table.grid)) {
+                warnings.push({ tableName, issue: 'не заполнены заголовки' });
+            }
+
+            if (!hasDataRows(table.grid)) {
+                warnings.push({ tableName, issue: 'нет данных' });
+            }
+        }
+
+        return warnings;
+    },
+
+    /**
      * Проверяет наличие валидной grid-структуры
      * @private
      * @param {Object} table - Объект таблицы
