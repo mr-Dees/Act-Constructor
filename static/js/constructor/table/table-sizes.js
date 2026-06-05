@@ -12,6 +12,7 @@
 import { AppState } from '../state/state-core.js';
 import { ItemsRenderer } from '../items/items-renderer.js';
 import { pixelWidthsToWeights } from './col-widths.js';
+import { makeIdempotentTeardown } from './resize-teardown.js';
 
 export class TableSizes {
     constructor(tableManager) {
@@ -68,17 +69,35 @@ export class TableSizes {
             cols[rightIdx].style.width = `${newRight}%`;
         };
 
-        const onMouseUp = () => {
+        // Единая разборка: снимаем все слушатели, восстанавливаем курсор и
+        // фиксируем текущие веса. Идемпотентна — выполнится ровно один раз,
+        // на каком бы из событий завершения/прерывания ни сработала.
+        const teardown = makeIdempotentTeardown(() => {
             document.body.style.cursor = '';
             document.body.style.userSelect = '';
             table.classList.remove('resizing');
             document.removeEventListener('mousemove', onMouseMove);
             document.removeEventListener('mouseup', onMouseUp);
+            window.removeEventListener('blur', onInterrupt);
+            document.removeEventListener('pointercancel', onInterrupt);
+            document.removeEventListener('lostpointercapture', onInterrupt);
+            // Прерывание (потеря mouseup при alt-tab/отмене указателя) трактуем
+            // как обычное завершение: фиксируем веса, чтобы начатый ресайз
+            // не пропал.
             this._commitColWidths(tableId, table);
-        };
+        });
+
+        const onMouseUp = () => teardown();
+        // window blur (alt-tab/смена окна) и отмена указателя — те же ветки
+        // завершения. Без них слушатели mousemove/mouseup утекали бы при
+        // потерянном mouseup, и следующее взаимодействие вело бы себя неверно.
+        const onInterrupt = () => teardown();
 
         document.addEventListener('mousemove', onMouseMove);
         document.addEventListener('mouseup', onMouseUp);
+        window.addEventListener('blur', onInterrupt);
+        document.addEventListener('pointercancel', onInterrupt);
+        document.addEventListener('lostpointercapture', onInterrupt);
     }
 
     /**
