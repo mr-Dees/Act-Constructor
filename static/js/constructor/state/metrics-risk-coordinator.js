@@ -36,7 +36,6 @@
  */
 import { ContextMenuManager } from '../context-menu/context-menu-core.js';
 import { AppState } from './state-core.js';
-import { AppConfig } from '../../shared/app-config.js';
 import { Notifications } from '../../shared/notifications.js';
 
 export const MetricsRiskCoordinator = {
@@ -148,32 +147,6 @@ export const MetricsRiskCoordinator = {
         return this._withSnapshot('onSubtreeMoved', () => {
             AppState._reconcileMetricsTablesAfterMove(draggedNode, oldAncestor5x);
         });
-    },
-
-    /**
-     * Проверка: можно ли добавить риск-таблицу в указанный узел.
-     * Возвращает {allowed: bool, reason?: string}.
-     *
-     * Делегирует на TreeContextMenu-инстанс (логика 6 предикатов уровней 5.X/5.X.Y
-     * исторически живёт там). Если меню ещё не инициализировано — fallback на
-     * базовую проверку «узел под §5 и item».
-     *
-     * @param {Object} node - Узел-кандидат.
-     * @returns {{allowed: boolean, reason?: string}}
-     */
-    validateAddRiskTable(node) {
-        const menu = window.ContextMenuManager?.treeMenu;
-        if (menu && typeof menu._isRiskTableAllowedForNode === 'function') {
-            const allowed = menu._isRiskTableAllowedForNode(node);
-            if (!allowed && typeof menu._getRiskTableBlockReason === 'function') {
-                return {allowed: false, reason: menu._getRiskTableBlockReason(node)};
-            }
-            return {allowed};
-        }
-        // Fallback (минимальная проверка)
-        const isItem = !node.type || node.type === AppConfig.nodeTypes.ITEM;
-        const under5 = node.number && /^5\.\d+/.test(node.number);
-        return {allowed: !!(isItem && under5)};
     }
 };
 

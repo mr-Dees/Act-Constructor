@@ -289,7 +289,7 @@ static timings = {
 Методы CRUD добавлены через `Object.assign`:
 
 - `state-tree.js:8` — `generateNumbering`, `addNode`, `deleteNode`, `moveNode`, `setNodeTb`, `setNodeInvoice`, и др.
-- `state-content.js:9` — `addTableToNode`, `removeTable`, `addTextBlockToNode`, `addViolationToNode`, `_updateMetricsTablesAfterRiskTableCreated`, и др.
+- `state-content.js:9` — `addTableToNode`, `addTextBlockToNode`, `addViolationToNode`, `_updateMetricsTablesAfterRiskTableCreated`, и др.
 
 Порядок загрузки `state-core → state-tree → state-content` обязателен (см. §2.4).
 
@@ -353,7 +353,7 @@ API:
 | `onRiskTableAdded(nodeId)` | Добавлена risk-таблица — создаёт metrics на 5.X (если risk на 5.X.Y+) и main metrics в §5 |
 | `onRiskTableRemoved()` | Risk-таблица удалена — реконсилит metrics во всём §5 |
 | `onSubtreeMoved(draggedNode, oldAncestor5x)` | Поддерево перемещено внутри §5 — пересчитывает metrics для старого и нового предка 5.X |
-| `validateAddRiskTable(node)` | Возвращает `{allowed, reason?}`. Делегирует на `TreeContextMenu._isRiskTableAllowedForNode` |
+| `onRiskTableRemovedWithDeletion(deleteFn)` | Удаление риск-узла под единым snapshot'ом: snapshot §5 снимается ДО `deleteFn()`, поэтому откат при сбое reconcile восстанавливает и сам риск-узел (D1) |
 
 Все callsite'ы каскада (`state-tree.deleteNode`, `state-tree.moveNode`, context-menu, drag-drop) обязаны идти через coordinator — раньше часть кода звала `AppState._...AfterRiskTableDeleted` напрямую, что порождало partial-state при exception'е.
 

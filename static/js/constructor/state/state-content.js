@@ -7,10 +7,8 @@
  */
 
 import { ChangelogTracker } from '../changelog-tracker.js';
-import { MetricsRiskCoordinator } from './metrics-risk-coordinator.js';
 import { AppState } from './state-core.js';
 import { TreeUtils } from '../tree/tree-utils.js';
-import { isRiskTable as kindIsRiskTable } from '../table/table-kind.js';
 import { shouldHaveMetricsTable, shouldHaveMainMetrics } from './metrics-risk-core.js';
 import { ValidationCore } from '../validation/validation-core.js';
 import { ValidationTree } from '../validation/validation-tree.js';
@@ -59,62 +57,6 @@ Object.assign(AppState, {
      */
     _generateDefaultHeaders(cols) {
         return Array.from({length: cols}, (_, i) => `Колонка ${i + 1}`);
-    },
-
-    /**
-     * Удаляет таблицу из узла дерева
-     * @param {string} tableNodeId - ID узла таблицы
-     * @returns {Object} Результат удаления с полями valid, message
-     */
-    removeTable(tableNodeId) {
-        const tableNode = this.findNodeById(tableNodeId);
-        if (!tableNode || tableNode.type !== AppConfig.nodeTypes.TABLE) {
-            return ValidationCore.failure(AppConfig.content.errors.notFound('Таблица'));
-        }
-
-        // tableNode.deletable === true — явное разрешение поверх protected
-        // (риск-таблицы). Override гейтим ИМЕННО по узлу: table-объекты сводных
-        // metrics-таблиц тоже имеют deletable:true, но их узлы — нет, поэтому
-        // сводные остаются неудаляемыми. protected продолжает блокировать
-        // редактирование структуры ячеек.
-        if (tableNode.protected && tableNode.deletable !== true) {
-            return ValidationCore.failure(AppConfig.content.errors.protectedFromDeletion);
-        }
-
-        const table = this.tables[tableNode.tableId];
-        if (table?.protected && tableNode.deletable !== true) {
-            return ValidationCore.failure(AppConfig.content.errors.protectedFromDeletion);
-        }
-
-        const parent = this.findParentNode(tableNodeId);
-        if (!parent) {
-            return ValidationCore.failure(AppConfig.tree.validation.parentNotFound);
-        }
-
-        // Все 4 типа — риск (триггерит metrics-coordinator при удалении). Через дискриминатор.
-        const isRiskTable = kindIsRiskTable(tableNode);
-
-        if (typeof ChangelogTracker !== 'undefined') {
-            ChangelogTracker.record('delete_table', tableNode.tableId, tableNode.label || 'Таблица', {nodeId: tableNode.parentId});
-        }
-
-        // Удаляем узел из дерева
-        parent.children = parent.children.filter(child => child.id !== tableNodeId);
-
-        // Удаляем данные таблицы
-        if (tableNode.tableId && this.tables[tableNode.tableId]) {
-            delete this.tables[tableNode.tableId];
-        }
-
-        this.generateNumbering();
-
-        // Обновляем таблицы метрик если удалили таблицу рисков
-        if (isRiskTable) {
-            // Через coordinator: snapshot/rollback safety.
-            MetricsRiskCoordinator.onRiskTableRemoved();
-        }
-
-        return ValidationCore.success();
     },
 
     /**
