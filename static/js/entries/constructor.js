@@ -105,7 +105,6 @@ import '../constructor/violation/violation-file-upload.js';
 import '../constructor/violation/violation-init.js';
 
 // Validation
-import '../constructor/validation/validation.js';
 import '../constructor/validation/validation-act.js';
 import '../constructor/validation/validation-core.js';
 import '../constructor/validation/validation-table-core.js';
