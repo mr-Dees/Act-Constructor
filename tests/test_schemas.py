@@ -290,13 +290,23 @@ class TestTableSchema:
         assert t.grid == []
 
     def test_special_table_flags(self):
+        # Одного флага подвида достаточно; два одновременно запрещены (A3).
         t = TableSchema(
             id="table_1711270400456_3x2m8p1",
             nodeId="node_1711270400123_7a4k9b2",
-            isMetricsTable=True, isRegularRiskTable=True,
+            isMetricsTable=True,
         )
         assert t.isMetricsTable is True
-        assert t.isRegularRiskTable is True
+        assert t.isRegularRiskTable is False
+
+    def test_mutually_exclusive_type_flags(self):
+        # Два флага подвида одновременно — взаимоисключение (A3) → ValidationError.
+        with pytest.raises(ValidationError, match="несколько типов"):
+            TableSchema(
+                id="table_1711270400456_3x2m8p1",
+                nodeId="node_1711270400123_7a4k9b2",
+                isMetricsTable=True, isRegularRiskTable=True,
+            )
 
 
 # ── TextBlockFormattingSchema ──

@@ -7,7 +7,7 @@ Pydantic схемы для валидации данных актов.
 
 from typing import Literal
 
-from pydantic import BaseModel, Field, field_validator
+from pydantic import BaseModel, Field, field_validator, model_validator
 
 
 class TableCellSchema(BaseModel):
@@ -26,8 +26,14 @@ class TableCellSchema(BaseModel):
     """
     content: str = Field(default="", description="Содержимое ячейки")
     isHeader: bool = Field(default=False, description="Заголовок")
-    colSpan: int = Field(default=1, ge=1, description="Colspan")
-    rowSpan: int = Field(default=1, ge=1, description="Rowspan")
+    colSpan: int = Field(
+        default=1, ge=1, le=16,
+        description="Число объединённых колонок (1..16, по лимиту колонок таблицы)"
+    )
+    rowSpan: int = Field(
+        default=1, ge=1, le=64,
+        description="Число объединённых строк (1..64, по лимиту строк таблицы)"
+    )
     isSpanned: bool = Field(default=False, description="Часть объединения")
     spanOrigin: dict[str, int] | None = Field(default=None, description="Координаты главной ячейки")
     originRow: int | None = Field(default=None, ge=0, description="Исходная строка")
@@ -147,6 +153,71 @@ class TableSchema(BaseModel):
         if any(width <= 0 for width in v):
             raise ValueError("Ширины колонок должны быть положительными")
         return v
+
+    @model_validator(mode="after")
+    def validate_structure(self) -> "TableSchema":
+        """
+        Проверяет структурную целостность таблицы (A2, A3, R6).
+
+        Сообщения на русском и указывают КУДА смотреть пользователю:
+        1. прямоугольность матрицы (все строки одной длины);
+        2. совпадение числа ширин колонок с числом колонок;
+        3. объединения ячеек не выходят за границы матрицы (закрывает
+           IndexError в DOCX-builder'е);
+        4. взаимоисключение флагов подвида таблицы (не более одного типа).
+
+        Returns:
+            Сам объект (валидация after-режима).
+
+        Raises:
+            ValueError: При нарушении любого инварианта (→ HTTP 422).
+        """
+        rows = len(self.grid)
+        cols = len(self.grid[0]) if rows else 0
+
+        # 1. Прямоугольность: все строки одной длины (пустую матрицу пропускаем).
+        if rows:
+            for i, row in enumerate(self.grid):
+                if len(row) != cols:
+                    raise ValueError(
+                        f"Строки таблицы имеют разную длину: строка {i} содержит "
+                        f"{len(row)} ячеек вместо {cols}"
+                    )
+
+        # 2. Число ширин = число колонок (пустой colWidths допустим — DOCX делит
+        #    ширину поровну).
+        if self.colWidths and rows and len(self.colWidths) != cols:
+            raise ValueError(
+                f"Число ширин колонок ({len(self.colWidths)}) не совпадает с "
+                f"числом колонок таблицы ({cols})"
+            )
+
+        # 3. Объединения в пределах границ матрицы.
+        for r, row in enumerate(self.grid):
+            for c, cell in enumerate(row):
+                if cell.colSpan > 1 or cell.rowSpan > 1:
+                    if r + cell.rowSpan > rows or c + cell.colSpan > cols:
+                        raise ValueError(
+                            f"Объединение ячейки ({r},{c}) выходит за границы таблицы"
+                        )
+
+        # 4. Взаимоисключение флагов подвида таблицы.
+        type_flags = {
+            "isMetricsTable": self.isMetricsTable,
+            "isMainMetricsTable": self.isMainMetricsTable,
+            "isRegularRiskTable": self.isRegularRiskTable,
+            "isOperationalRiskTable": self.isOperationalRiskTable,
+            "isTaxRiskTable": self.isTaxRiskTable,
+            "isOtherRiskTable": self.isOtherRiskTable,
+        }
+        active = [name for name, value in type_flags.items() if value]
+        if len(active) > 1:
+            raise ValueError(
+                f"Таблица не может одновременно иметь несколько типов: "
+                f"{', '.join(active)}"
+            )
+
+        return self
 
 
 class TextBlockFormattingSchema(BaseModel):
