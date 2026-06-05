@@ -1,0 +1,88 @@
+/*
+ * Лист A4 в предпросмотре (Word-точная геометрия)
+ *
+ * #preview становится серым «холстом», на котором лежит белый лист A4
+ * (.preview-sheet) с полями и типографикой эталонного акта (Times New Roman).
+ * Геометрия повторяет DOCX (app/domains/acts/formatters/docx/styles.py):
+ *   страница A4 210×297 мм; поля left 15.01мм, right 12.51мм, top/bottom 10мм.
+ * Лист непрерывный (растёт по высоте, без разрывов страниц) — решение владельца.
+ *
+ * Грузится ПОСЛЕ preview-base.css / preview-table.css, поэтому переопределяет
+ * интерфейсное оформление #preview и таблиц предпросмотра на Word-подобное.
+ */
+
+/* #preview — серый холст вокруг листа */
+#preview.preview {
+    background: #52525b;
+    padding: var(--spacing-xl);
+    border: none;
+    border-radius: 0;
+    box-shadow: none;
+    overflow: auto;
+    /* Холст не имитирует документ — сбрасываем интерфейсную типографику. */
+    font-size: initial;
+    line-height: initial;
+}
+
+#preview.preview:hover {
+    box-shadow: none;
+}
+
+/* Белый лист A4 с полями эталона */
+.preview-sheet {
+    width: 210mm;
+    min-height: 297mm;
+    box-sizing: border-box;
+    /* top right bottom left — поля эталонного DOCX. */
+    padding: 10mm 12.51mm 10mm 15.01mm;
+    margin: 0 auto;
+    background: #fff;
+    box-shadow: 0 2px 12px rgba(0, 0, 0, 0.3);
+    font-family: "Times New Roman", serif;
+    font-size: 12pt;
+    line-height: 1.15;
+    color: #000;
+}
+
+/* Таблицы на листе — Word-типографика, ширины из colgroup (colWidths). */
+.preview-sheet .preview-table {
+    width: 100%;
+    border-collapse: collapse;
+    table-layout: fixed;
+    border: 0.5pt solid #000;
+    background: #fff;
+    font-size: 9pt;
+    color: #000;
+}
+
+.preview-sheet .preview-table th,
+.preview-sheet .preview-table td {
+    border: 0.5pt solid #000;
+    padding: 2pt 4pt;
+    text-align: left;
+    vertical-align: middle;
+    /* Высота строки — авто, по содержимому (как auto-height в Word). */
+    /* Сохраняем \n из ячеек: переносы строк рендерятся как есть (F4). */
+    white-space: pre-wrap;
+    word-wrap: break-word;
+    overflow-wrap: break-word;
+    font-family: "Times New Roman", serif;
+    font-size: 9pt;
+    color: #000;
+}
+
+/* Заголовочные ячейки — серая заливка эталона + жирный шрифт */
+.preview-sheet .preview-table-header,
+.preview-sheet .preview-table th {
+    background: #D9D9D9;
+    font-weight: bold;
+    color: #000;
+    text-align: center;
+}
+
+/* Обёртка таблицы на листе не скроллится: таблица всегда влезает в колонку. */
+.preview-sheet .preview-table-wrapper {
+    overflow-x: visible;
+    margin: 6pt 0;
+    border-radius: 0;
+}

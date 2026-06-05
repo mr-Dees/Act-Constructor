@@ -38,6 +38,8 @@
 @import '../constructor/preview/preview-table.css';
 @import '../constructor/preview/preview-violation.css';
 @import '../constructor/preview/preview-menu.css';
+/* Лист A4 — грузится последним, переопределяет base/table на Word-геометрию. */
+@import '../constructor/preview/preview-page.css';
 
 /* Help */
 @import '../constructor/help/help-button.css';

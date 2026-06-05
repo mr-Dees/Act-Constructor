@@ -55,26 +55,12 @@
     background: var(--table-header-bg);
     font-weight: var(--font-weight-semibold);
     color: var(--table-header-text);
-    position: sticky;
-    top: 0;
-    z-index: var(--z-sticky);
 }
 
 /* Выравнивание текста в ячейках заголовка */
 .preview-table th {
     text-align: center;
     font-family: var(--font-family-base);
-}
-
-/* Альтернативные строки для лучшей читаемости */
-.preview-table tbody tr:nth-child(even) {
-    background: var(--bg-secondary);
-}
-
-/* Hover эффект для строк */
-.preview-table tbody tr:hover {
-    background: var(--table-row-hover);
-    transition: background var(--transition-fast);
 }
 
 /* Название таблицы */

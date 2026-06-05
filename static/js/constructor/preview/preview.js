@@ -92,9 +92,16 @@ export class PreviewManager {
         this._hidePreviewTooltip();
         preview.innerHTML = '';
 
-        this._renderTitle(preview);
-        this._renderTree(preview, previewTrim);
-        this._attachPreviewTooltips(preview);
+        // #preview — серый «холст»; содержимое акта рендерится на белый лист A4
+        // (.preview-sheet) с полями и типографикой Word. Лист непрерывный
+        // (растёт по высоте, без разрывов страниц — решение владельца).
+        const sheet = document.createElement('div');
+        sheet.className = 'preview-sheet';
+        preview.appendChild(sheet);
+
+        this._renderTitle(sheet);
+        this._renderTree(sheet, previewTrim);
+        this._attachPreviewTooltips(sheet);
     }
 
     /**
