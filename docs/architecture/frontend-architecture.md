@@ -523,11 +523,13 @@ static async _initiateExit(action) {
 - **Fallback на `window.currentActId`**: страхует, если `_actId` уже сброшен после `destroy()` (`:662`).
 - **Save идёт с `ChangelogTracker.flush()`** — одной транзакцией на сервере (`:682-687`).
 - **Редирект жёсткий, без `confirmNavigation`** — сессия закрывается принудительно. Если save упал (409 при чужом локе), `confirmNavigation` показал бы «Несохранённые изменения. Уйти?» и заблокировал бы выход. `allowUnload()` снимает страж явно (`:751`).
-- **`messageFlag`**: `'sessionAutoExited'` или `'sessionExitedWithSave'` пишется в sessionStorage; `acts-manager-page.js` показывает toast на следующей загрузке.
+- **`messageFlag`**: `'sessionAutoExited'` или `'sessionExitedWithSave'` пишется в sessionStorage; `acts-manager-page.js` показывает toast на следующей загрузке. Отдельный флаг `'sessionLockLost'` (см. §6.8) — для случая, когда лок снят и save вернул 409: плашка честно сообщает, что изменения НЕ в БД (только в локальном черновике), приоритет выбора `pickSessionExitNotice` — lockLost > autoExited > exitedWithSave.
 
 ### 6.8 NavigationManager и LockLostError
 
-`constructor/navigation-manager.js` (223 строки) — только step-кнопки + save+export pipeline. `_handleSaveAndExport` ловит `LockLostError` из `APIClient.saveActContent` (409 → custom Error subclass из `shared/api.js`) → ставит `sessionStorage['sessionAutoExited']` и делает жёсткий редирект на `/acts` (`navigation-manager.js:112-126`).
+`constructor/navigation-manager.js` (223 строки) — только step-кнопки + save+export pipeline. `_handleSaveAndExport` ловит `LockLostError` из `APIClient.saveActContent` (409 → custom Error subclass из `shared/api.js`) → ставит **`sessionStorage['sessionLockLost']`** (НЕ `sessionAutoExited`: save вернул 409, изменения в БД не записаны — плашка autoExit'а врала бы «сохранено») и делает жёсткий редирект на `/acts`. Локальный черновик при этом НЕ чистится (`allowUnload()` лишь снимает beforeunload-страж). Honest-плашку выбирает чистый `pickSessionExitNotice` (`portal/acts-manager/session-exit-notice.js`).
+
+**Восстановление черновика на повторном входе:** `APIClient.loadActContent` всегда грузит контент из БД и перезаписывает локальный черновик через `saveState(true)` — автоматического prompt'а «восстановить локальные правки» нет. Поэтому при потере лока правки физически остаются в `localStorage` до следующего открытия акта, но не восстанавливаются автоматически; honest-плашка сообщает именно это (не обещает авто-восстановление).
 
 `beforeunload` и `confirmNavigation` — у `StorageManager`, не у NavigationManager.
 

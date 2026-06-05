@@ -9,6 +9,7 @@ import { LockManager } from '../../constructor/lock-manager.js';
 import { ActsBroadcast } from './acts-broadcast.js';
 import { AuditLogDialog } from './dialog-audit-log.js';
 import { CreateActDialog } from './dialog-create-act.js';
+import { pickSessionExitNotice } from './session-exit-notice.js';
 import { AppConfig } from '../../shared/app-config.js';
 import { AuthManager } from '../../shared/auth.js';
 import { DialogManager } from '../../shared/dialog/dialog-confirm.js';
@@ -856,30 +857,23 @@ export class ActsManagerPage {
      * @private
      */
     static async _checkSessionExit() {
-        const autoExited = sessionStorage.getItem('sessionAutoExited');
-        const exitedWithSave = sessionStorage.getItem('sessionExitedWithSave');
+        const notice = pickSessionExitNotice({
+            lockLost: !!sessionStorage.getItem('sessionLockLost'),
+            autoExited: !!sessionStorage.getItem('sessionAutoExited'),
+            exitedWithSave: !!sessionStorage.getItem('sessionExitedWithSave'),
+        });
+        if (!notice) return;
 
-        if (autoExited) {
-            sessionStorage.removeItem('sessionAutoExited');
+        // Снимаем флаг до показа плашки — повторный заход не покажет её снова.
+        sessionStorage.removeItem(notice.flag);
 
-            await DialogManager.alert({
-                title: 'Сессия завершена',
-                message: 'Редактирование было автоматически прекращено из-за длительного бездействия. Изменения сохранены.',
-                icon: '⏱️',
-                type: 'info',
-                confirmText: 'Понятно'
-            });
-        } else if (exitedWithSave) {
-            sessionStorage.removeItem('sessionExitedWithSave');
-
-            await DialogManager.alert({
-                title: 'Данные сохранены',
-                message: 'Редактирование завершено. Все изменения сохранены.',
-                icon: '✅',
-                type: 'success',
-                confirmText: 'OK'
-            });
-        }
+        await DialogManager.alert({
+            title: notice.title,
+            message: notice.message,
+            icon: notice.icon,
+            type: notice.type,
+            confirmText: notice.confirmText,
+        });
     }
 }
 
