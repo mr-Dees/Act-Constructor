@@ -43,8 +43,41 @@ test.describe('Preview как лист A4 (Word-геометрия)', () => {
     await expect(sheet).toBeVisible({ timeout: 5000 });
 
     // (a) Лист A4 ≈ 210мм. При 96dpi: 210мм = 210/25.4*96 ≈ 793.7px.
-    const sheetWidth = await sheet.evaluate((el) => el.getBoundingClientRect().width);
-    expect(Math.abs(sheetWidth - 793.7)).toBeLessThan(8);
+    // Лист масштабируется через transform: scale(k) (fit-to-width), поэтому
+    // getBoundingClientRect() вернёт МАСШТАБИРОВАННУЮ ширину. Натуральную
+    // (неискажённую transform'ом) ширину даёт offsetWidth.
+    const naturalWidth = await sheet.evaluate((el) => el.offsetWidth);
+    expect(Math.abs(naturalWidth - 793.7)).toBeLessThan(8);
+
+    // (a+) Fit-to-width: лист вписан в холст без горизонтального скролла.
+    // Масштабированная ширина листа (rect) ≤ внутренней ширины #preview;
+    // у самого #preview нет горизонтального переполнения.
+    const fit = await page.evaluate(() => {
+      const pane = document.getElementById('preview')!;
+      const sheetEl = pane.querySelector('.preview-sheet') as HTMLElement;
+      const cs = getComputedStyle(pane);
+      const padX = parseFloat(cs.paddingLeft || '0') + parseFloat(cs.paddingRight || '0');
+      const inner = pane.clientWidth - padX;
+      const visibleSheet = sheetEl.getBoundingClientRect().width;
+      return {
+        inner,
+        visibleSheet,
+        overflow: pane.scrollWidth - pane.clientWidth,
+      };
+    });
+    expect(fit.visibleSheet).toBeLessThanOrEqual(fit.inner + 1);
+    expect(fit.overflow).toBeLessThanOrEqual(1);
+
+    // (a++) Индикатор зума виден и показывает целочисленный процент («78%»).
+    const zoom = page.locator('#preview .preview-zoom-indicator');
+    await expect(zoom).toBeVisible();
+    expect((await zoom.textContent())?.trim()).toMatch(/^\d+%$/);
+
+    // (a+++) Холст вокруг листа — светлый #f0f0f2 = rgb(240, 240, 242).
+    const canvasBg = await page.evaluate(
+      () => getComputedStyle(document.getElementById('preview')!).backgroundColor
+    );
+    expect(canvasBg).toBe('rgb(240, 240, 242)');
 
     const table = page.locator('#preview .preview-sheet table.preview-table').first();
     await expect(table).toBeVisible();
