@@ -11,6 +11,7 @@ import { MetricsRiskCoordinator } from './metrics-risk-coordinator.js';
 import { AppState } from './state-core.js';
 import { TreeUtils } from '../tree/tree-utils.js';
 import { isRiskTable as kindIsRiskTable } from '../table/table-kind.js';
+import { shouldHaveMetricsTable, shouldHaveMainMetrics } from './metrics-risk-core.js';
 import { ValidationCore } from '../validation/validation-core.js';
 import { ValidationTree } from '../validation/validation-tree.js';
 import { AppConfig } from '../../shared/app-config.js';
@@ -506,16 +507,15 @@ Object.assign(AppState, {
             parentNode = this.findParentNode(ancestorNode.id);
         }
 
-        // Создаём таблицу метрик на 5.* ТОЛЬКО если таблица рисков на более глубоком уровне
-        if (parentNode?.id === '5' && ancestorNode.number?.match(/^5\.\d+$/)) {
-            if (nodeId !== ancestorNode.id) {
-                const hasMetricsTable = ancestorNode.children?.some(
-                    child => child.type === AppConfig.nodeTypes.TABLE && child.isMetricsTable === true
-                );
+        // Создаём таблицу метрик на 5.X ТОЛЬКО если риск на глубоком уровне (5.X.Y+).
+        // Единый предикат (metrics-risk-core.shouldHaveMetricsTable).
+        if (parentNode?.id === '5' && shouldHaveMetricsTable(ancestorNode, n => this._findRiskTablesInSubtree(n))) {
+            const hasMetricsTable = ancestorNode.children?.some(
+                child => child.type === AppConfig.nodeTypes.TABLE && child.isMetricsTable === true
+            );
 
-                if (!hasMetricsTable) {
-                    this._createMetricsTable(ancestorNode.id, ancestorNode.number);
-                }
+            if (!hasMetricsTable) {
+                this._createMetricsTable(ancestorNode.id, ancestorNode.number);
             }
         }
 
@@ -535,22 +535,14 @@ Object.assign(AppState, {
         if (!node5?.children) return;
 
         const {TABLE, ITEM} = AppConfig.nodeTypes;
+        const findRisks = n => this._findRiskTablesInSubtree(n);
         const firstLevelNodes = node5.children.filter(child =>
             child.type === ITEM && child.number?.match(/^5\.\d+$/)
         );
 
-        // Проверяем каждый узел первого уровня
+        // Проверяем каждый узел первого уровня (единый предикат необходимости сводной).
         for (const firstLevelNode of firstLevelNodes) {
-            // Считаем только таблицы рисков в дочерних item-узлах (5.*.* и глубже)
-            let deepRiskTables = [];
-            for (const child of firstLevelNode.children || []) {
-                if (child.type === ITEM) {
-                    deepRiskTables = deepRiskTables.concat(this._findRiskTablesInSubtree(child));
-                }
-            }
-
-            // Если нет глубоких таблиц рисков, удаляем таблицу метрик
-            if (deepRiskTables.length === 0) {
+            if (!shouldHaveMetricsTable(firstLevelNode, findRisks)) {
                 const metricsTableNode = firstLevelNode.children?.find(
                     child => child.type === TABLE && child.isMetricsTable === true
                 );
@@ -564,10 +556,8 @@ Object.assign(AppState, {
             }
         }
 
-        // Проверяем необходимость главной таблицы метрик
-        const allRiskTables = this._findRiskTablesInSubtree(node5);
-
-        if (allRiskTables.length === 0) {
+        // Проверяем необходимость главной таблицы метрик (единый предикат).
+        if (!shouldHaveMainMetrics(node5, findRisks)) {
             const mainMetricsTableNode = node5.children?.find(
                 child => child.type === TABLE && child.isMainMetricsTable === true
             );

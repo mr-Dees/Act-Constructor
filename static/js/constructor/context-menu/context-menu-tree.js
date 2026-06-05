@@ -9,6 +9,7 @@ import { MetricsRiskCoordinator } from '../state/metrics-risk-coordinator.js';
 import { AppState } from '../state/state-core.js';
 import { TreeUtils } from '../tree/tree-utils.js';
 import { isRiskTable as kindIsRiskTable } from '../table/table-kind.js';
+import { shouldHaveMetricsTable, shouldHaveMainMetrics } from '../state/metrics-risk-core.js';
 import { AppConfig } from '../../shared/app-config.js';
 import { DialogManager } from '../../shared/dialog/dialog-confirm.js';
 import { Notifications } from '../../shared/notifications.js';
@@ -413,28 +414,21 @@ export class TreeContextMenu {
         if (node.type === AppConfig.nodeTypes.TABLE && node.tableId) {
             const table = AppState.tables[node.tableId];
 
-            // Проверка под узлом 5.*
+            const findRisks = n => AppState._findRiskTablesInSubtree(n);
+
+            // Проверка под узлом 5.* (единый предикат необходимости сводной).
             if (table?.isMetricsTable) {
                 const parentUnder5 = this._findParentFirstLevelUnderPoint5(node);
-                if (parentUnder5) {
-                    let hasDeepRisks = false;
-                    for (const child of parentUnder5.children || []) {
-                        if (child.type === AppConfig.nodeTypes.ITEM && AppState._findRiskTablesInSubtree(child).length > 0) {
-                            hasDeepRisks = true;
-                            break;
-                        }
-                    }
-                    if (hasDeepRisks) {
-                        Notifications.error('Нельзя удалить таблицу метрик, пока есть таблицы рисков');
-                        return;
-                    }
+                if (parentUnder5 && shouldHaveMetricsTable(parentUnder5, findRisks)) {
+                    Notifications.error('Нельзя удалить таблицу метрик, пока есть таблицы рисков');
+                    return;
                 }
             }
 
-            // Проверка главной таблицы метрик
+            // Проверка главной таблицы метрик (единый предикат).
             if (table?.isMainMetricsTable) {
                 const node5 = AppState.findNodeById('5');
-                if (node5 && AppState._findRiskTablesInSubtree(node5).length > 0) {
+                if (shouldHaveMainMetrics(node5, findRisks)) {
                     Notifications.error('Нельзя удалить общую таблицу метрик, пока в пункте 5 есть таблицы рисков');
                     return;
                 }

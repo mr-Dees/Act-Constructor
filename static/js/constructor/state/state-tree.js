@@ -12,6 +12,7 @@ import { AppState } from './state-core.js';
 import { StorageManager } from '../storage-manager.js';
 import { TreeUtils } from '../tree/tree-utils.js';
 import { isPinnedTable as kindIsPinnedTable, isRiskTable as kindIsRiskTable } from '../table/table-kind.js';
+import { shouldHaveMetricsTable, shouldHaveMainMetrics } from './metrics-risk-core.js';
 import { ValidationCore } from '../validation/validation-core.js';
 import { ValidationTree } from '../validation/validation-tree.js';
 import { AppConfig } from '../../shared/app-config.js';
@@ -770,15 +771,11 @@ Object.assign(AppState, {
      * @param {Object} node - Узел для обработки
      */
     _handleMetricsTableForNode(node) {
-        // Сводная таблица на 5.X нужна только при наличии рисков на глубоком уровне (5.X.X+)
-        if (!node.number?.match(/^5\.\d+$/)) return;
+        // Сводная таблица на 5.X нужна только при наличии рисков на глубоком уровне (5.X.X+).
+        // Единый предикат (см. metrics-risk-core.shouldHaveMetricsTable).
+        if (!shouldHaveMetricsTable(node, n => this._findRiskTablesInSubtree(n))) return;
 
-        const {TABLE, ITEM} = AppConfig.nodeTypes;
-        const hasDeepRisks = (node.children || []).some(child =>
-            child.type === ITEM && this._findRiskTablesInSubtree(child).length > 0
-        );
-        if (!hasDeepRisks) return;
-
+        const {TABLE} = AppConfig.nodeTypes;
         const hasTable = node.children?.some(
             child => child.type === TABLE && child.isMetricsTable === true
         );
@@ -848,23 +845,17 @@ Object.assign(AppState, {
         // Очистка старого: удаляет сводные таблицы у всех 5.X, где нет глубоких рисков
         this._cleanupMetricsTablesAfterRiskTableDeleted();
 
-        // Создание сводной для нового предка 5.X, только если риски на глубоком уровне (5.X.X+)
-        if (newAncestor5x) {
-            const hasDeepRisks = (newAncestor5x.children || []).some(child =>
-                child.type === AppConfig.nodeTypes.ITEM && this._findRiskTablesInSubtree(child).length > 0
-            );
-            if (hasDeepRisks) {
-                this._handleMetricsTableForNode(newAncestor5x);
-            }
+        // Создание сводной для нового предка 5.X, только если риски на глубоком уровне (5.X.X+).
+        // Единый предикат; _handleMetricsTableForNode сам перепроверит его.
+        const findRisks = n => this._findRiskTablesInSubtree(n);
+        if (newAncestor5x && shouldHaveMetricsTable(newAncestor5x, findRisks)) {
+            this._handleMetricsTableForNode(newAncestor5x);
         }
 
-        // Главная сводная таблица: создаём/удаляем по наличию рисков в разделе 5
+        // Главная сводная таблица: создаём по наличию рисков в разделе 5 (единый предикат).
         const node5 = this.findNodeById('5');
-        if (node5) {
-            const allRiskTables = this._findRiskTablesInSubtree(node5);
-            if (allRiskTables.length > 0) {
-                this._createMainMetricsTable();
-            }
+        if (shouldHaveMainMetrics(node5, findRisks)) {
+            this._createMainMetricsTable();
         }
 
         this.generateNumbering();
