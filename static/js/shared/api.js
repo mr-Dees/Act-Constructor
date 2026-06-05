@@ -10,6 +10,7 @@ import { AppConfig } from './app-config.js';
 import { AuthManager } from './auth.js';
 import { DialogManager } from './dialog/dialog-confirm.js';
 import { Notifications } from './notifications.js';
+import { formatValidationDetail } from './api-errors.js';
 import { reconcileTableFlags } from '../constructor/state/flags.js';
 import { normalizePinnedOrder } from '../constructor/table/table-kind.js';
 
@@ -581,6 +582,20 @@ export class APIClient {
                     // вызывающая сторона (navigation-manager) делает редирект на список
                     // с тем же sessionStorage-флагом, что и autoExit.
                     throw new LockLostError();
+                } else if (resp.status === 422) {
+                    // Серверная структурная валидация таблиц (P6a): рваная сетка,
+                    // несовпадение числа ширин, объединение за границами,
+                    // взаимоисключение флагов. detail приходит массивом
+                    // {loc, msg} с русским msg — показываем пользователю «где и
+                    // что не так», а не глотаем под общую «Ошибка сохранения».
+                    let detail = null;
+                    try {
+                        const body = await resp.json();
+                        detail = formatValidationDetail(body.detail);
+                    } catch {
+                        // не-JSON ответ — оставляем fallback ниже
+                    }
+                    throw new Error(detail || 'Данные акта не прошли проверку структуры таблиц');
                 }
                 throw new Error('Ошибка сохранения');
             }
@@ -916,11 +931,7 @@ export class APIClient {
             // [{loc, msg, type, ...}, ...]. Без форматирования в UI прилетал
             // "[object Object]". Сворачиваем в человекочитаемую строку, msg
             // у pydantic-валидаторов уже на русском.
-            if (Array.isArray(detail)) {
-                detail = detail
-                    .map(d => d?.msg || JSON.stringify(d))
-                    .join('; ');
-            }
+            detail = formatValidationDetail(detail);
         } catch {
             // Сервер вернул не-JSON ответ
         }
