@@ -184,15 +184,15 @@ def _fill_cell(cell, text: str, *, is_header: bool, col_span: int = 1) -> None:
     if is_header:
         _set_cell_shade(cell, Palette.table_header_shade)
     # Выравнивание: по высоте всегда по центру. По ширине — объединённые по
-    # горизонтали ячейки (colSpan>1) прижимаются влево (по ширине), одиночные —
-    # по центру.
+    # горизонтали ячейки (colSpan>1) прижимаются влево (явный LEFT, не JUSTIFY —
+    # чтобы предпросмотр совпадал с .docx WYSIWYG), одиночные — по центру.
     cell.vertical_alignment = WD_CELL_VERTICAL_ALIGNMENT.CENTER
     para = cell.paragraphs[0]
     # Исключение: шапки из CENTERED_MERGED_HEADER_TEXTS (например «Количество
     # клиентов / элементов, ед.») всегда по центру, даже когда склеены по
     # горизонтали (встречается в шапках риск-таблиц). Конфиг — в styles.py.
     if col_span > 1 and _normalize_text(text) not in CENTERED_MERGED_HEADER_TEXTS:
-        para.alignment = WD_ALIGN_PARAGRAPH.JUSTIFY
+        para.alignment = WD_ALIGN_PARAGRAPH.LEFT
     else:
         para.alignment = WD_ALIGN_PARAGRAPH.CENTER
     # Удаляем все существующие runs из XML-параграфа перед добавлением своего

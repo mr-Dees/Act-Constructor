@@ -78,8 +78,8 @@ def test_merged_header_in_config_is_centered():
     assert cell.paragraphs[0].alignment == WD_ALIGN_PARAGRAPH.CENTER
 
 
-def test_merged_header_not_in_config_is_justified():
-    """Объединённая шапка, чей текст НЕ в конфиге, выравнивается по ширине."""
+def test_merged_header_not_in_config_is_left_aligned():
+    """Объединённая шапка, чей текст НЕ в конфиге, прижата влево (LEFT)."""
     doc = Document()
     schema = _ts([
         [{"content": "Прочие отклонения", "isHeader": True, "colSpan": 2},
@@ -88,4 +88,4 @@ def test_merged_header_not_in_config_is_justified():
     ])
     build_table(doc, schema)
     cell = doc.tables[0].rows[0].cells[0]
-    assert cell.paragraphs[0].alignment == WD_ALIGN_PARAGRAPH.JUSTIFY
+    assert cell.paragraphs[0].alignment == WD_ALIGN_PARAGRAPH.LEFT

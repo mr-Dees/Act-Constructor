@@ -6,6 +6,7 @@
  */
 import { iterateVisibleCells } from '../table/grid-merges.js';
 import { colWidthsToPercents } from '../table/col-widths.js';
+import { mergedHeaderAlign } from '../table/header-align.js';
 
 export class PreviewTableRenderer {
     /**
@@ -149,6 +150,10 @@ export class PreviewTableRenderer {
 
         if (cellData.isHeader) {
             cell.className = 'preview-table-header';
+            // Объединённые шапки прижимаются влево (как в .docx), кроме centered-набора.
+            if (mergedHeaderAlign(cellData.content, cellData.colSpan || 1, true) === 'left') {
+                cell.classList.add('preview-th-left');
+            }
         }
 
         this._applyCellSpan(cell, cellData);

@@ -111,6 +111,12 @@
     text-align: center;
 }
 
+/* Объединённые шапки, прижатые влево (совпадение с .docx) — выше специфичность,
+   чем у центрирующего правила выше, поэтому left побеждает и на листе. */
+.preview-sheet .preview-table th.preview-th-left {
+    text-align: left;
+}
+
 /* Обёртка таблицы на листе не скроллится: таблица всегда влезает в колонку. */
 .preview-sheet .preview-table-wrapper {
     overflow-x: visible;

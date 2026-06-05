@@ -63,6 +63,11 @@
     font-family: var(--font-family-base);
 }
 
+/* Объединённые шапки, прижатые влево (совпадение с .docx). */
+.preview-table th.preview-th-left {
+    text-align: left;
+}
+
 /* Название таблицы */
 .preview-table-title {
     font-weight: var(--font-weight-normal);
