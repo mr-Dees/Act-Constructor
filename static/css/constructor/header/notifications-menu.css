@@ -1,0 +1,162 @@
+/*
+ * Колокольчик «Замечания по таблицам»: счётчик-бейдж + выпадающий список.
+ */
+
+.notifications-menu-container {
+    position: relative;
+}
+
+/*
+ * Счётчик-бейдж. Вынесен из кнопки в шаблоне (у .header-action-btn
+ * overflow:hidden ради ripple — внутри он бы обрезался) и позиционируется
+ * абсолютно относительно .header-action-container (position:relative).
+ * Кнопка 2.5rem центрирована в колонке-контейнере; смещаем бейдж к её
+ * правому-верхнему углу.
+ */
+.notif-badge {
+    position: absolute;
+    top: -4px;
+    right: calc(50% - 1.25rem - 4px);
+    min-width: 16px;
+    height: 16px;
+    padding: 0 4px;
+    border-radius: 8px;
+    font-size: 11px;
+    line-height: 16px;
+    font-weight: var(--font-weight-semibold, 600);
+    color: #fff;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    pointer-events: none;
+    box-shadow: 0 0 0 1px rgb(0 0 0 / 25%);
+    z-index: 3;
+}
+
+.notif-badge.hidden {
+    display: none;
+}
+
+.notif-badge--error {
+    background: var(--error, #d33);
+}
+
+.notif-badge--warning {
+    background: #e6a700;
+}
+
+/* Выпадающее меню под колокольчиком */
+.notifications-menu {
+    position: absolute;
+    top: calc(100% + var(--spacing-lg));
+    right: 0;
+    width: 340px;
+    max-height: 50vh;
+    overflow-y: auto;
+    background: var(--modal-bg, var(--bg-primary));
+    border: var(--border-width-thin) solid var(--modal-border, var(--border));
+    border-radius: var(--radius-xl);
+    box-shadow: var(--modal-shadow, var(--shadow));
+    z-index: var(--z-dropdown);
+    display: flex;
+    flex-direction: column;
+    animation: scaleIn var(--transition-base) cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+.notifications-menu.hidden {
+    display: none;
+}
+
+/* Шапка меню */
+.notifications-menu-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: var(--spacing-xl) var(--spacing-2xl);
+    background: var(--gradient-header);
+    color: var(--text-on-primary);
+    border-bottom: var(--border-width-thin) solid var(--border-light);
+    border-radius: var(--radius-xl) var(--radius-xl) 0 0;
+    flex-shrink: 0;
+}
+
+.notifications-menu-header h4 {
+    margin: 0;
+    font-size: var(--font-size-xl);
+    font-weight: var(--font-weight-semibold);
+    line-height: var(--line-height-tight);
+}
+
+/* Кнопка закрытия */
+.notifications-menu-close {
+    background: none;
+    border: none;
+    font-size: var(--font-size-3xl);
+    cursor: pointer;
+    color: var(--text-on-primary);
+    line-height: 1;
+    padding: 0;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    border-radius: var(--radius);
+    transition: var(--transition-all);
+}
+
+.notifications-menu-close:hover {
+    background: var(--help-close-hover);
+    transform: rotate(var(--rotate-close-button));
+}
+
+/* Тело меню */
+.notifications-menu-body {
+    padding: var(--spacing-sm) var(--spacing-md);
+    overflow-y: auto;
+}
+
+/* Строка замечания */
+.notification-item {
+    display: flex;
+    align-items: flex-start;
+    gap: var(--spacing-sm);
+    padding: var(--spacing-sm) var(--spacing-md);
+    cursor: pointer;
+    border-radius: var(--radius-sm);
+    color: var(--text-primary);
+    font-size: var(--font-size-sm);
+    line-height: var(--line-height-relaxed);
+    transition: background var(--transition-fast);
+}
+
+.notification-item:hover {
+    background: var(--primary-subtle, var(--bg-secondary));
+}
+
+.notification-item-text {
+    flex: 1;
+}
+
+/* Цветная точка-индикатор критичности */
+.notif-dot {
+    width: 8px;
+    height: 8px;
+    border-radius: 50%;
+    flex: 0 0 auto;
+    margin-top: 6px;
+}
+
+.notif-dot--error {
+    background: var(--error, #d33);
+}
+
+.notif-dot--warning {
+    background: #e6a700;
+}
+
+/* Пустое состояние */
+.notifications-empty {
+    padding: var(--spacing-lg);
+    text-align: center;
+    color: var(--text-secondary);
+    font-size: var(--font-size-sm);
+}

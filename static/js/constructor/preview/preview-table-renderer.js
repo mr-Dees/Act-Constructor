@@ -15,10 +15,14 @@ export class PreviewTableRenderer {
      * @param {number} [_previewTrim] - Не используется: содержимое ячеек
      *   показывается целиком, как в .docx (F1). Параметр сохранён в сигнатуре
      *   ради обратной совместимости вызовов (preview.js, version-preview.js).
+     * @param {Object} [opts] - Дополнительные опции рендера.
+     * @param {string|number} [opts.tableId] - id таблицы; проставляется на
+     *   обёртку как data-table-id для рамок-замечаний и навигации из колокольчика.
      * @returns {HTMLElement} Контейнер с таблицей
      */
-    static create(tableData, _previewTrim) {
+    static create(tableData, _previewTrim, opts = {}) {
         const wrapper = this._createWrapper();
+        if (opts && opts.tableId != null) wrapper.dataset.tableId = String(opts.tableId);
         const table = this._createTable(tableData);
 
         wrapper.appendChild(table);

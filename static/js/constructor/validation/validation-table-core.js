@@ -120,6 +120,88 @@ export function validateTableContent(grid) {
   };
 }
 
+/**
+ * Структурный дефект сетки уровня «сервер отклонит сохранение/экспорт».
+ *
+ * Зеркалит проверки серверной TableSchema: прямоугольность, границы span,
+ * длина colWidths. СОЗНАТЕЛЬНО НЕ проверяет когерентность spanOrigin/isSpanned
+ * (в отличие от validateGrid): легаси-операции вставки/удаления колонок и строк
+ * оставляют ИНЕРТНЫЙ устаревший spanOrigin, который и рендер (`iterateVisibleCells`
+ * смотрит только на isSpanned), и сервер игнорируют. Красить такую таблицу
+ * красным — ложная тревога. Красный = только то, что реально сломает экспорт.
+ *
+ * @param {Object[][]} grid Dense-сетка.
+ * @param {number[]} [colWidths] Веса колонок (если заданы — длина должна совпасть с числом колонок).
+ * @returns {boolean} true, если есть структурный дефект.
+ */
+export function hasStructuralDefect(grid, colWidths) {
+  if (!Array.isArray(grid) || grid.length === 0) return false;
+
+  const width = grid[0].length;
+  // Прямоугольность: все строки одной длины.
+  for (const row of grid) {
+    if (!Array.isArray(row) || row.length !== width) return true;
+  }
+  // Границы объединений: ведущая ячейка со span не должна выходить за сетку.
+  for (let r = 0; r < grid.length; r++) {
+    for (let c = 0; c < width; c++) {
+      const cell = grid[r][c];
+      if (!cell) return true;
+      const rs = cell.rowSpan || 1;
+      const cs = cell.colSpan || 1;
+      if (r + rs - 1 >= grid.length || c + cs - 1 >= width) return true;
+    }
+  }
+  // colWidths (если заданы) должны совпадать по длине с числом колонок.
+  if (Array.isArray(colWidths) && colWidths.length !== width) return true;
+
+  return false;
+}
+
+/**
+ * Собирает контентные/структурные замечания по всем таблицам (чистое ядро).
+ *
+ * Тип определяет критичность:
+ *   - 'error' (красный) — структурный дефект, который сервер отклонит при
+ *     сохранении/экспорте (hasStructuralDefect). Контентные проверки пропускаем.
+ *   - 'warning' (оранжевый) — неполнота: нет строки заголовка (E6),
+ *     не заполнены заголовки, нет данных (E5).
+ *
+ * @param {Object<string,{grid?:Object[][], colWidths?:number[]}>} tables Словарь таблиц (tableId → таблица).
+ * @param {(tableId:string)=>string} getTableName Резолвер имени таблицы по id.
+ * @returns {Array<{tableId:string, tableName:string, issue:string, severity:'error'|'warning'}>}
+ */
+export function collectTableWarnings(tables, getTableName) {
+  const warnings = [];
+  if (!tables) return warnings;
+
+  for (const tableId in tables) {
+    const table = tables[tableId];
+    const grid = table && table.grid;
+    if (!Array.isArray(grid) || grid.length === 0) continue;
+
+    const tableName = getTableName(tableId);
+
+    if (hasStructuralDefect(grid, table.colWidths)) {
+      warnings.push({ tableId, tableName, issue: 'нарушена структура таблицы', severity: 'error' });
+      continue; // сетка ненадёжна — контентные проверки пропускаем
+    }
+
+    if (countHeaderRows(grid) === 0) {
+      warnings.push({ tableId, tableName, issue: 'нет строки заголовка', severity: 'warning' });
+      continue;
+    }
+    if (hasEmptyHeaders(grid)) {
+      warnings.push({ tableId, tableName, issue: 'не заполнены заголовки', severity: 'warning' });
+    }
+    if (!hasDataRows(grid)) {
+      warnings.push({ tableId, tableName, issue: 'нет данных', severity: 'warning' });
+    }
+  }
+
+  return warnings;
+}
+
 // Дублируем в window ради inline-скриптов в шаблонах (см. CLAUDE.md).
 // Guard: модуль также импортируется в node:test, где window отсутствует.
 if (typeof window !== 'undefined') {
@@ -127,4 +209,6 @@ if (typeof window !== 'undefined') {
   window.hasEmptyHeaders = hasEmptyHeaders;
   window.hasDataRows = hasDataRows;
   window.validateTableContent = validateTableContent;
+  window.hasStructuralDefect = hasStructuralDefect;
+  window.collectTableWarnings = collectTableWarnings;
 }

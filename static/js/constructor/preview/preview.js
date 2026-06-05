@@ -57,7 +57,15 @@ export class PreviewManager {
             this._pendingOptions = null;
             const {previewTrim = AppConfig.preview.defaultTrimLength} = opts || {};
             this._performUpdate(previewTrim);
+            this._emitContentChanged();
         });
+    }
+
+    /** @private Уведомляет подписчиков (колокольчик) об изменении содержимого. */
+    static _emitContentChanged() {
+        if (typeof document !== 'undefined') {
+            document.dispatchEvent(new CustomEvent('preview:content-changed'));
+        }
     }
 
     /**
@@ -101,12 +109,6 @@ export class PreviewManager {
         this._hidePreviewTooltip();
         preview.innerHTML = '';
 
-        // E3: неблокирующие предупреждения контентной валидации над листом.
-        // Информируют («где и что не так»), но НИКОГДА не блокируют редактирование
-        // и не мешают рендеру самого документа ниже. Рендерятся над sizer'ом
-        // (только inline-панель).
-        this._renderContentWarnings(preview);
-
         // Единая сборка документа (лист + sizer + индикатор зума) — общая для
         // inline-панели и модального меню, исключает расхождение их рендера.
         this.renderDocumentInto(preview, { previewTrim });
@@ -147,6 +149,11 @@ export class PreviewManager {
         this._renderTree(sheet, previewTrim);
         this._attachPreviewTooltips(sheet);
 
+        // Цветные рамки проблемных таблиц на листе (источник — те же замечания,
+        // что и колокольчик). Внутри renderDocumentInto, поэтому работает и для
+        // inline-панели, и для модального меню.
+        this._applyTableOutlines(sheet);
+
         // Индикатор текущего масштаба (обновляется скейлером).
         const indicator = document.createElement('div');
         indicator.className = 'preview-zoom-indicator';
@@ -157,48 +164,27 @@ export class PreviewManager {
     }
 
     /**
-     * Рендерит неблокирующие предупреждения контентной валидации (E3).
-     *
-     * Собирает проблемы таблиц (нет шапки / пустые заголовки / нет данных) через
-     * ValidationTable.collectContentWarnings и показывает их компактным списком
-     * над листом предпросмотра. Это лишь подсказка пользователю — редактирование,
-     * Ctrl+S и автосохранение не блокируются.
-     *
-     * @private
-     * @param {HTMLElement} container - Контейнер #preview (над листом).
+     * Навешивает на проблемные таблицы листа цветную рамку по критичности
+     * (error→красная, warning→оранжевая). Источник — те же замечания, что и
+     * колокольчик. Для одной таблицы error важнее warning.
+     * @param {HTMLElement} sheet Контейнер с .preview-table-wrapper[data-table-id].
      */
-    static _renderContentWarnings(container) {
+    static _applyTableOutlines(sheet) {
         let warnings = [];
-        try {
-            warnings = ValidationTable.collectContentWarnings();
-        } catch (e) {
-            // Предупреждения — вспомогательная функция; их сбой не должен ломать
-            // рендер предпросмотра.
-            console.warn('Не удалось собрать предупреждения предпросмотра:', e);
-            return;
+        try { warnings = ValidationTable.collectContentWarnings(); } catch (e) { return; }
+        const sev = new Map();
+        for (const w of warnings) {
+            if (w.tableId == null) continue;
+            const key = String(w.tableId);
+            if (sev.get(key) === 'error') continue;
+            sev.set(key, w.severity === 'error' ? 'error' : (sev.get(key) || 'warning'));
         }
-
-        if (!warnings.length) return;
-
-        const box = document.createElement('div');
-        box.className = 'preview-warnings';
-        box.setAttribute('role', 'status');
-
-        const title = document.createElement('div');
-        title.className = 'preview-warnings-title';
-        title.textContent = '⚠ Замечания по таблицам (не мешают сохранению, но блокируют экспорт):';
-        box.appendChild(title);
-
-        const list = document.createElement('ul');
-        list.className = 'preview-warnings-list';
-        warnings.forEach(({ tableName, issue }) => {
-            const li = document.createElement('li');
-            li.textContent = `${tableName}: ${issue}`;
-            list.appendChild(li);
+        sheet.querySelectorAll('.preview-table-wrapper[data-table-id]').forEach((el) => {
+            el.classList.remove('preview-table-wrapper--error', 'preview-table-wrapper--warning');
+            const s = sev.get(el.dataset.tableId);
+            if (s === 'error') el.classList.add('preview-table-wrapper--error');
+            else if (s === 'warning') el.classList.add('preview-table-wrapper--warning');
         });
-        box.appendChild(list);
-
-        container.appendChild(box);
     }
 
     /**
@@ -270,7 +256,7 @@ export class PreviewManager {
 
         const tableData = AppState.tables[child.tableId];
         if (tableData) {
-            const table = PreviewTableRenderer.create(tableData, previewTrim);
+            const table = PreviewTableRenderer.create(tableData, previewTrim, { tableId: child.tableId });
             container.appendChild(table);
         }
     }
@@ -374,6 +360,7 @@ export class PreviewManager {
      */
     static forceUpdate() {
         this._performUpdate(AppConfig.preview.defaultTrimLength);
+        this._emitContentChanged();
     }
 
     /**

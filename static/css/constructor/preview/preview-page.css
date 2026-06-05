@@ -118,6 +118,26 @@
     border-radius: 0;
 }
 
+/* Рамки проблемных таблиц (источник — колокольчик «Замечания»). */
+.preview-sheet .preview-table-wrapper--warning {
+    outline: 2px solid #e6a700;
+    outline-offset: 2px;
+    border-radius: 2px;
+}
+.preview-sheet .preview-table-wrapper--error {
+    outline: 2px solid var(--error, #d33);
+    outline-offset: 2px;
+    border-radius: 2px;
+}
+/* Подсветка при переходе по замечанию из колокольчика. */
+@keyframes notif-flash {
+    0%   { box-shadow: 0 0 0 0 rgba(230, 167, 0, 0.55); }
+    100% { box-shadow: 0 0 0 12px rgba(230, 167, 0, 0); }
+}
+.preview-sheet .preview-table-wrapper--flash {
+    animation: notif-flash 1.3s ease-out;
+}
+
 /* Печать: убираем масштаб/холст/индикатор — лист печатается в натуральную величину. */
 @media print {
     #preview.preview { overflow: visible; background: #fff; padding: 0; }

@@ -116,6 +116,7 @@ import '../constructor/lock-manager.js';
 import '../portal/acts-manager/acts-broadcast.js';
 import '../constructor/header/acts-menu.js';
 import '../constructor/header/preview-menu.js';
+import '../constructor/header/notifications-menu.js';
 
 // Bootstrap конструктора. Раньше app.js и state-core.js сами вешали
 // DOMContentLoaded на module-level, но shared/api.js косвенно тянет
