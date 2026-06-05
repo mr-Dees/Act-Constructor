@@ -4,7 +4,6 @@
  * Создает HTML-представление таблиц с поддержкой объединения ячеек
  * и обработкой заголовков.
  */
-import { AppConfig } from '../../shared/app-config.js';
 import { iterateVisibleCells } from '../table/grid-merges.js';
 import { colWidthsToPercents } from '../table/col-widths.js';
 
@@ -13,12 +12,14 @@ export class PreviewTableRenderer {
      * Создает элемент таблицы для предпросмотра
      *
      * @param {Object} tableData - Данные таблицы из состояния
-     * @param {number} [previewTrim] - Максимальная длина текста (по умолчанию из конфига)
+     * @param {number} [_previewTrim] - Не используется: содержимое ячеек
+     *   показывается целиком, как в .docx (F1). Параметр сохранён в сигнатуре
+     *   ради обратной совместимости вызовов (preview.js, version-preview.js).
      * @returns {HTMLElement} Контейнер с таблицей
      */
-    static create(tableData, previewTrim = AppConfig.preview.defaultTrimLength) {
+    static create(tableData, _previewTrim) {
         const wrapper = this._createWrapper();
-        const table = this._createTable(tableData, previewTrim);
+        const table = this._createTable(tableData);
 
         wrapper.appendChild(table);
         return wrapper;
@@ -38,7 +39,7 @@ export class PreviewTableRenderer {
      * Создает элемент таблицы
      * @private
      */
-    static _createTable(tableData, previewTrim) {
+    static _createTable(tableData) {
         const table = document.createElement('table');
         table.className = 'preview-table';
 
@@ -55,7 +56,7 @@ export class PreviewTableRenderer {
         table.style.tableLayout = 'fixed';
         table.appendChild(this._createColgroup(tableData.colWidths, numCols));
 
-        this._renderRows(table, grid, previewTrim);
+        this._renderRows(table, grid);
         return table;
     }
 
@@ -105,9 +106,9 @@ export class PreviewTableRenderer {
      * Рендерит все строки таблицы
      * @private
      */
-    static _renderRows(table, grid, previewTrim) {
+    static _renderRows(table, grid) {
         grid.forEach(rowData => {
-            const row = this._createRow(rowData, previewTrim);
+            const row = this._createRow(rowData);
             if (row.children.length > 0) {
                 table.appendChild(row);
             }
@@ -118,12 +119,12 @@ export class PreviewTableRenderer {
      * Создает строку таблицы
      * @private
      */
-    static _createRow(rowData, previewTrim) {
+    static _createRow(rowData) {
         const row = document.createElement('tr');
 
         // Единый обход видимых (не поглощённых) ячеек — общий helper.
         iterateVisibleCells([rowData], (cellData) => {
-            const cell = this._createCell(cellData, previewTrim);
+            const cell = this._createCell(cellData);
             row.appendChild(cell);
         });
 
@@ -134,12 +135,13 @@ export class PreviewTableRenderer {
      * Создает ячейку таблицы
      * @private
      */
-    static _createCell(cellData, previewTrim) {
+    static _createCell(cellData) {
         const cell = document.createElement(cellData.isHeader ? 'th' : 'td');
 
-        // textContent (XSS-safe) сохраняет \n как есть; переносы рендерятся
-        // за счёт white-space: pre-wrap в CSS листа (F4).
-        cell.textContent = this._trimText(cellData.content || '', previewTrim);
+        // Содержимое ячейки — целиком, без обрезки: предпросмотр повторяет .docx,
+        // где текст не урезается (F1). textContent (XSS-safe) сохраняет \n как
+        // есть; переносы рендерятся за счёт white-space: pre-wrap в CSS листа (F4).
+        cell.textContent = cellData.content || '';
 
         if (cellData.isHeader) {
             cell.className = 'preview-table-header';
@@ -161,18 +163,6 @@ export class PreviewTableRenderer {
         if (cellData.rowSpan > 1) {
             cell.rowSpan = cellData.rowSpan;
         }
-    }
-
-    /**
-     * Обрезает текст до указанной длины
-     * @private
-     * @param {string} text - Исходный текст
-     * @param {number} maxLength - Максимальная длина
-     * @returns {string} Обрезанный текст
-     */
-    static _trimText(text, maxLength) {
-        const str = text.toString();
-        return str.length > maxLength ? str.slice(0, maxLength) + '…' : str;
     }
 }
 
