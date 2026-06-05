@@ -6,6 +6,7 @@
  */
 import { AppConfig } from '../../shared/app-config.js';
 import { iterateVisibleCells } from '../table/grid-merges.js';
+import { colWidthsToPercents } from '../table/col-widths.js';
 
 export class PreviewTableRenderer {
     /**
@@ -47,8 +48,38 @@ export class PreviewTableRenderer {
             return this._createEmptyTable();
         }
 
+        // Колонки рендерятся из colWidths через colgroup — единый источник истины
+        // ширин (тот же, что у редактора и DOCX-билдера). При table-layout:fixed
+        // даёт Word-подобную раскладку пропорционально весам.
+        const numCols = grid[0]?.length || 0;
+        table.style.tableLayout = 'fixed';
+        table.appendChild(this._createColgroup(tableData.colWidths, numCols));
+
         this._renderRows(table, grid, previewTrim);
         return table;
+    }
+
+    /**
+     * Строит <colgroup> с шириной каждой колонки в процентах из colWidths.
+     * При рассинхроне длины (нет/неверный colWidths) делит ширину поровну.
+     * Пропорции совпадают с DOCX-билдером (`_compute_col_widths`: weight/sum).
+     * @param {number[]} colWidths - Веса колонок таблицы
+     * @param {number} numCols - Фактическое число колонок по grid
+     * @returns {HTMLElement} Элемент <colgroup>
+     * @private
+     */
+    static _createColgroup(colWidths, numCols) {
+        const colgroup = document.createElement('colgroup');
+        const widths = Array.isArray(colWidths) && colWidths.length === numCols
+            ? colWidths
+            : new Array(numCols).fill(100);
+        const percents = colWidthsToPercents(widths);
+        percents.forEach(pct => {
+            const col = document.createElement('col');
+            col.style.width = `${pct}%`;
+            colgroup.appendChild(col);
+        });
+        return colgroup;
     }
 
     /**
@@ -106,6 +137,8 @@ export class PreviewTableRenderer {
     static _createCell(cellData, previewTrim) {
         const cell = document.createElement(cellData.isHeader ? 'th' : 'td');
 
+        // textContent (XSS-safe) сохраняет \n как есть; переносы рендерятся
+        // за счёт white-space: pre-wrap в CSS листа (F4).
         cell.textContent = this._trimText(cellData.content || '', previewTrim);
 
         if (cellData.isHeader) {
