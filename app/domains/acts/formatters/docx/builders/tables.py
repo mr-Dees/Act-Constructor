@@ -9,6 +9,7 @@ from docx.oxml.ns import qn
 from docx.shared import Pt
 
 from app.domains.acts.formatters.docx.styles import (
+    CENTERED_MERGED_HEADER_TEXTS,
     Borders,
     Fonts,
     Margins,
@@ -25,9 +26,6 @@ USABLE_WIDTH_DXA = Page.width_twips - Margins.left - Margins.right  # 10346
 
 # w:tblW в процентах: 5000 = 100% (единица измерения pct — 1/50 процента).
 _TBLW_PCT_FULL = "5000"
-
-# Ячейка-исключение: по центру даже в склеенном виде (colSpan>1).
-_CENTERED_MERGED_TEXT = "Количество клиентов / элементов, ед."
 
 
 def _normalize_text(text: str) -> str:
@@ -187,9 +185,10 @@ def _fill_cell(cell, text: str, *, is_header: bool, col_span: int = 1) -> None:
     # по центру.
     cell.vertical_alignment = WD_CELL_VERTICAL_ALIGNMENT.CENTER
     para = cell.paragraphs[0]
-    # Исключение: «Количество клиентов / элементов, ед.» всегда по центру,
-    # даже когда склеена по горизонтали (встречается в шапках риск-таблиц).
-    if col_span > 1 and _normalize_text(text) != _CENTERED_MERGED_TEXT:
+    # Исключение: шапки из CENTERED_MERGED_HEADER_TEXTS (например «Количество
+    # клиентов / элементов, ед.») всегда по центру, даже когда склеены по
+    # горизонтали (встречается в шапках риск-таблиц). Конфиг — в styles.py.
+    if col_span > 1 and _normalize_text(text) not in CENTERED_MERGED_HEADER_TEXTS:
         para.alignment = WD_ALIGN_PARAGRAPH.JUSTIFY
     else:
         para.alignment = WD_ALIGN_PARAGRAPH.CENTER
