@@ -271,13 +271,18 @@ Object.assign(AppState, {
             ChangelogTracker.record('delete_node', nodeId, node.label, {parentId: parent?.id});
         }
 
-        this._deleteNodeData(node);
-        this._deleteChildren(node);
-        this._removeFromParent(nodeId);
+        const doDelete = () => {
+            this._deleteNodeData(node);
+            this._deleteChildren(node);
+            this._removeFromParent(nodeId);
+        };
 
         if (isRiskTable) {
-            // Единая точка входа в каскад metrics↔risk: snapshot/rollback safety.
-            MetricsRiskCoordinator.onRiskTableRemoved();
+            // D1: snapshot снимается ДО удаления риск-узла — откат при сбое
+            // reconcile восстанавливает и сам узел (нет partial-state).
+            MetricsRiskCoordinator.onRiskTableRemovedWithDeletion(doDelete);
+        } else {
+            doDelete();
         }
 
         this.generateNumbering();

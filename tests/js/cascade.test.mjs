@@ -38,7 +38,7 @@ import {
  *  - 'fixed' использует боевое ядро removeRiskTableNode (snapshot ДО удаления).
  * После фикса D1 (T5.2) прод переходит на removeRiskTableNode, и тест зелёный.
  */
-const DELETE_PATH = 'legacy';
+const DELETE_PATH = 'fixed';
 
 // ---------------------------------------------------------------------------
 // Минимальная боевая модель состояния {treeData, tables}.
