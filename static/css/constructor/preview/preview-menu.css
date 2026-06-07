@@ -170,7 +170,9 @@
     flex: 1;
     overflow-y: auto;
     overflow-x: hidden;
-    padding: var(--spacing-2xl);
+    /* Без gutter: лист занимает всю ширину тела модалки (паритет с inline #preview);
+       границу отмечает пунктир по краю листа. */
+    padding: 0;
     scrollbar-width: thin;
     scrollbar-color: var(--scrollbar-thumb) var(--scrollbar-bg);
     font-family: var(--font-family-serif);

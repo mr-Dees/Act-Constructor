@@ -14,10 +14,10 @@
 /* #preview — светлый холст вокруг листа */
 #preview.preview {
     background: #f0f0f2;
-    /* Равномерный gutter вокруг листа: лист заполняет ширину панели (sizer width =
-       clientWidth - padding), а padding остаётся видимой полоской фона со всех
-       сторон — «видно где фон, где лист». */
-    padding: var(--spacing-xl);
+    /* Лист занимает всю ширину контейнера (без gutter и без тени) — максимум
+       пространства под документ; границу листа отмечает только пунктир по краю
+       (см. .preview-sheet ниже). */
+    padding: 0;
     border: none;
     border-radius: 0;
     box-shadow: none;
@@ -55,11 +55,12 @@
     padding: 10mm 12.51mm 10mm 15.01mm;
     margin: 0 auto;
     background: #fff;
-    /* Граница листа A4 отделена от холста тенью + ненавязчивой пунктирной рамкой
-       ровно по краю. outline (НЕ border): не входит в box-sizing/padding листа,
-       геометрия A4 не сдвигается. */
-    outline: 1px dashed rgba(0, 0, 0, 0.28);
-    box-shadow: 0 6px 20px rgba(0, 0, 0, 0.22);
+    /* Граница листа A4 — только ненавязчивый пунктир (без тени, чтобы лист занимал
+       всю ширину контейнера, а не выглядел рамочкой). outline-offset: -1px рисует
+       пунктир сразу внутри края листа — при padding:0 у холста он не обрезается
+       overflow-x:hidden. outline (НЕ border) не входит в box-sizing/padding листа. */
+    outline: 1px dashed rgba(0, 0, 0, 0.30);
+    outline-offset: -1px;
     font-family: "Times New Roman", serif;
     font-size: 12pt;
     line-height: 1.15;
