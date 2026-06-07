@@ -49,9 +49,9 @@ test.describe('Preview как лист A4 (Word-геометрия)', () => {
     const naturalWidth = await sheet.evaluate((el) => el.offsetWidth);
     expect(Math.abs(naturalWidth - 793.7)).toBeLessThan(8);
 
-    // (a+) Fit-to-width: лист вписан в холст без горизонтального скролла.
-    // Масштабированная ширина листа (rect) ≤ внутренней ширины #preview;
-    // у самого #preview нет горизонтального переполнения.
+    // (a+) Fit-to-width: лист ЗАПОЛНЯЕТ ширину холста (масштаб может быть >100%)
+    // без горизонтального скролла. Масштабированная ширина листа (rect) ≈ внутренней
+    // ширине #preview; у самого #preview нет горизонтального переполнения.
     const fit = await page.evaluate(() => {
       const pane = document.getElementById('preview')!;
       const sheetEl = pane.querySelector('.preview-sheet') as HTMLElement;
@@ -65,10 +65,13 @@ test.describe('Preview как лист A4 (Word-геометрия)', () => {
         overflow: pane.scrollWidth - pane.clientWidth,
       };
     });
+    // Заполнение: масштабированный лист точно вписан в inner (без переполнения).
     expect(fit.visibleSheet).toBeLessThanOrEqual(fit.inner + 1);
+    expect(Math.abs(fit.visibleSheet - fit.inner)).toBeLessThanOrEqual(1);
     expect(fit.overflow).toBeLessThanOrEqual(1);
 
-    // (a++) Индикатор зума виден и показывает целочисленный процент («78%»).
+    // (a++) Индикатор зума виден и показывает целочисленный процент (заполнение
+    // ширины → может быть >100%, напр. «120%»).
     const zoom = page.locator('#preview .preview-zoom-indicator');
     await expect(zoom).toBeVisible();
     expect((await zoom.textContent())?.trim()).toMatch(/^\d+%$/);

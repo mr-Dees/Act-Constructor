@@ -1,27 +1,28 @@
 /**
  * Масштабирование листа предпросмотра под ширину панели (fit-to-width).
  *
- * Лист A4 имеет фиксированную ширину 210mm. Когда панель уже листа, вместо
- * горизонтальной прокрутки лист масштабируется вниз через CSS transform:scale,
- * сохраняя точные пропорции A4 (главная WYSIWYG-фича). Масштаб капится на 100%
- * (лист никогда не увеличивается крупнее натурального).
+ * Лист A4 имеет фиксированную ширину 210mm. Лист масштабируется через CSS
+ * transform:scale так, чтобы ЗАПОЛНИТЬ ширину панели (может быть >100% на
+ * широкой панели шага 1), сохраняя точные пропорции A4 (главная WYSIWYG-фича).
  *
  * Паттерн: sizer-обёртка занимает МАСШТАБИРОВАННЫЙ footprint (иначе transform,
- * будучи paint-only, оставил бы пустоту под уменьшенным листом и сломал бы
+ * будучи paint-only, оставил бы пустоту под масштабированным листом и сломал бы
  * вертикальную прокрутку). Пересчёт — на ResizeObserver панели + RAF-коалесинг.
  */
 
 /**
- * Чистый расчёт масштаба: доля ширины панели к натуральной ширине листа,
- * но не больше 1 (не увеличиваем). Безопасен к нулю/NaN.
+ * Чистый расчёт масштаба: доля ширины панели к натуральной ширине листа.
+ * По умолчанию лист заполняет ширину панели (масштаб может быть >1). Опциональный
+ * maxScale ограничивает рост сверху. Безопасен к нулю/NaN.
  * @param {number} innerWidth Внутренняя (content-box) ширина панели, px.
  * @param {number} naturalWidth Натуральная ширина листа, px.
- * @returns {number} Коэффициент масштаба в (0, 1].
+ * @param {number} [maxScale=Infinity] Верхний предел масштаба (необязательный кап).
+ * @returns {number} Коэффициент масштаба (>0).
  */
-export function computeFitScale(innerWidth, naturalWidth) {
+export function computeFitScale(innerWidth, naturalWidth, maxScale = Infinity) {
     if (!naturalWidth || naturalWidth <= 0) return 1;
     if (!Number.isFinite(innerWidth) || innerWidth <= 0) return 1;
-    return Math.min(innerWidth / naturalWidth, 1);
+    return Math.min(innerWidth / naturalWidth, maxScale);
 }
 
 export class PreviewFitScaler {

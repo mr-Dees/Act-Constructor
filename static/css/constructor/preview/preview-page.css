@@ -14,6 +14,9 @@
 /* #preview — светлый холст вокруг листа */
 #preview.preview {
     background: #f0f0f2;
+    /* Равномерный gutter вокруг листа: лист заполняет ширину панели (sizer width =
+       clientWidth - padding), а padding остаётся видимой полоской фона со всех
+       сторон — «видно где фон, где лист». */
     padding: var(--spacing-xl);
     border: none;
     border-radius: 0;
@@ -52,7 +55,11 @@
     padding: 10mm 12.51mm 10mm 15.01mm;
     margin: 0 auto;
     background: #fff;
-    box-shadow: 0 1px 8px rgba(0, 0, 0, 0.18);
+    /* Граница листа A4 отделена от холста тенью + ненавязчивой пунктирной рамкой
+       ровно по краю. outline (НЕ border): не входит в box-sizing/padding листа,
+       геометрия A4 не сдвигается. */
+    outline: 1px dashed rgba(0, 0, 0, 0.28);
+    box-shadow: 0 6px 20px rgba(0, 0, 0, 0.22);
     font-family: "Times New Roman", serif;
     font-size: 12pt;
     line-height: 1.15;
@@ -144,10 +151,10 @@
     animation: notif-flash 1.3s ease-out;
 }
 
-/* Печать: убираем масштаб/холст/индикатор — лист печатается в натуральную величину. */
+/* Печать: убираем масштаб/холст/рамку/индикатор — лист печатается чисто. */
 @media print {
     #preview.preview { overflow: visible; background: #fff; padding: 0; }
     .preview-sheet-sizer { width: auto !important; height: auto !important; }
-    .preview-sheet { position: static; transform: none !important; box-shadow: none; }
+    .preview-sheet { position: static; transform: none !important; box-shadow: none; outline: none; }
     .preview-zoom-indicator { display: none; }
 }

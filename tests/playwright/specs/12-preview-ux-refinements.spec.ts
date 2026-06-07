@@ -148,7 +148,8 @@ test.describe('Предпросмотр: UX-доработки (колоколь
     );
     expect(modalBg).toBe('rgb(240, 240, 242)');
 
-    // Натуральная ширина листа ≈ 793.7px (A4 @96dpi), масштабированная — в холст.
+    // Натуральная ширина листа ≈ 793.7px (A4 @96dpi); масштабированная ЗАПОЛНЯЕТ
+    // ширину холста модалки (fit-to-width, паритет с inline).
     const m = await page.evaluate(() => {
       const pane = document.getElementById('previewMenuBody')!;
       const sheetEl = pane.querySelector('.preview-sheet') as HTMLElement;
@@ -161,7 +162,9 @@ test.describe('Предпросмотр: UX-доработки (колоколь
       };
     });
     expect(Math.abs(m.natural - 793.7)).toBeLessThan(8);
+    // Заполнение: масштабированный лист точно вписан в inner модалки.
     expect(m.visible).toBeLessThanOrEqual(m.inner + 1);
+    expect(Math.abs(m.visible - m.inner)).toBeLessThanOrEqual(1);
 
     // Скриншот модального предпросмотра — паритет с inline.
     await page.locator('#previewMenu').screenshot({
