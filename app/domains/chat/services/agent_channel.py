@@ -259,6 +259,59 @@ class AgentChannelService:
             question_uid,
         )
 
+    async def _emit_answer_notification(
+        self,
+        *,
+        question: dict | None,
+        title: str,
+        severity: str,
+    ) -> None:
+        """Эмитит персистентное уведомление о готовности/ошибке ответа агента.
+
+        Best-effort: вся эмиссия обёрнута в try/except — сбой или отсутствие
+        домена notifications НЕ должны ломать финализацию ответа (она уже
+        успешно записана в БД к моменту вызова). Фабрика разрешается мягко
+        через ``has_factory``/``get_factory`` (импорт локальный, чтобы не
+        плодить import-циклы и чтобы тесты могли патчить domain_registry).
+
+        Получатель — автор вопроса (``question.user_id``). Если строки-вопроса
+        нет или у неё нет user_id — уведомление не эмитим (broadcast здесь не
+        нужен, а адресовать ответ некому).
+
+        Ссылка: чат — это popup без собственного URL, а в метаданных вопроса
+        (``{"mode", "kb"}``) надёжного ``act_id`` нет. Поэтому ``link=None``
+        (переход из уведомления не предусмотрен — допустимо по спеке). Не
+        выдумываем несуществующий URL чата.
+        """
+        if not question:
+            return
+        recipient_user_id = question.get("user_id")
+        if not recipient_user_id:
+            return
+
+        try:
+            from app.core.domain_registry import get_factory, has_factory
+
+            if not has_factory("notifications.push"):
+                return
+            factory = get_factory("notifications.push")
+            async for svc in factory():
+                await svc.push(
+                    source="chat",
+                    title=title,
+                    severity=severity,
+                    recipient_user_id=recipient_user_id,
+                    link=None,
+                    created_by="system",
+                )
+        except Exception:
+            logger.warning(
+                "agent_channel: не удалось эмитировать уведомление о ответе "
+                "агента (получатель=%s) — финализация не затронута",
+                recipient_user_id,
+                exc_info=True,
+            )
+
     async def try_finalize(
         self,
         *,
@@ -313,6 +366,13 @@ class AgentChannelService:
             # и поллер повторит try_finalize на следующем тике (mark_failed
             # идемпотентен — вернёт False на уже не-streaming сообщении).
             await agent_repo.set_status(conversation_id=question_uid, status="error")
+            # Уведомление об ошибке ответа — после успешного mark_failed/set_status,
+            # best-effort (см. _emit_answer_notification).
+            await self._emit_answer_notification(
+                question=question,
+                title="Ошибка ответа базы знаний",
+                severity="error",
+            )
             return "done"
 
         # Транслируем кнопки (acts.open_act_page → open_url) перед маппингом в блоки.
@@ -333,4 +393,11 @@ class AgentChannelService:
         # set_status поллер повторит try_finalize на следующем тике (finalize
         # идемпотентен — вернёт False на уже complete-сообщении).
         await agent_repo.set_status(conversation_id=question_uid, status="complete")
+        # Уведомление о готовности ответа — ТОЛЬКО после успешной финализации
+        # ответа, best-effort (см. _emit_answer_notification).
+        await self._emit_answer_notification(
+            question=question,
+            title="Готов ответ базы знаний",
+            severity="info",
+        )
         return "done"
