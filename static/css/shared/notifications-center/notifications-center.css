@@ -1,5 +1,6 @@
 /*
- * Колокольчик «Замечания по таблицам»: счётчик-бейдж + выпадающий список.
+ * Shared-центр уведомлений (колокольчик): счётчик-бейдж + выпадающий список.
+ * Используется и порталом, и конструктором (entry/portal.css, entry/constructor.css).
  */
 
 .notifications-menu-container {
@@ -7,7 +8,7 @@
 }
 
 /*
- * Счётчик-бейдж. Вынесен из кнопки в шаблоне (у .header-action-btn
+ * Счётчик-бейдж. В конструкторе вынесен из кнопки в шаблоне (у .header-action-btn
  * overflow:hidden ради ripple — внутри он бы обрезался) и позиционируется
  * абсолютно относительно .header-action-container (position:relative).
  * Кнопка 2.5rem центрирована в колонке-контейнере; смещаем бейдж к её
@@ -33,6 +34,16 @@
     z-index: 3;
 }
 
+/*
+ * На портале колокольчик — это сама кнопка (.landing-topbar-btn, 34px) внутри
+ * .notifications-menu-container, без колонки-обёртки конструктора. Смещаем бейдж
+ * к правому-верхнему углу самой кнопки.
+ */
+.landing-topbar-actions .notifications-menu-container .notif-badge {
+    top: -4px;
+    right: -4px;
+}
+
 .notif-badge.hidden {
     display: none;
 }
@@ -43,6 +54,10 @@
 
 .notif-badge--warning {
     background: #e6a700;
+}
+
+.notif-badge--info {
+    background: var(--primary, #2563eb);
 }
 
 /* Выпадающее меню под колокольчиком */
@@ -72,6 +87,7 @@
     display: flex;
     justify-content: space-between;
     align-items: center;
+    gap: var(--spacing-md);
     padding: var(--spacing-xl) var(--spacing-2xl);
     background: var(--gradient-header);
     color: var(--text-on-primary);
@@ -85,6 +101,34 @@
     font-size: var(--font-size-xl);
     font-weight: var(--font-weight-semibold);
     line-height: var(--line-height-tight);
+}
+
+/* Группа действий справа в шапке (Прочитать все + крестик) */
+.notifications-menu-actions {
+    display: flex;
+    align-items: center;
+    gap: var(--spacing-sm);
+    margin-left: auto;
+}
+
+/* Кнопка «Прочитать все» */
+.notifications-read-all {
+    background: none;
+    border: none;
+    cursor: pointer;
+    color: var(--text-on-primary);
+    font-size: var(--font-size-sm);
+    line-height: 1;
+    padding: var(--spacing-xs) var(--spacing-sm);
+    border-radius: var(--radius-sm);
+    opacity: 0.85;
+    transition: var(--transition-all);
+    white-space: nowrap;
+}
+
+.notifications-read-all:hover {
+    opacity: 1;
+    background: var(--help-close-hover);
 }
 
 /* Кнопка закрытия */
@@ -114,7 +158,7 @@
     overflow-y: auto;
 }
 
-/* Строка замечания */
+/* Строка уведомления */
 .notification-item {
     display: flex;
     align-items: flex-start;
@@ -132,8 +176,48 @@
     background: var(--primary-subtle, var(--bg-secondary));
 }
 
+/* Прочитанное персистентное — приглушённое */
+.notification-item--read {
+    opacity: 0.6;
+}
+
+/* Текстовый блок записи (заголовок + тело) */
 .notification-item-text {
     flex: 1;
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+    min-width: 0;
+}
+
+.notification-item-title {
+    font-weight: var(--font-weight-medium, 500);
+    word-break: break-word;
+}
+
+.notification-item-body {
+    color: var(--text-secondary);
+    word-break: break-word;
+}
+
+/* Крестик скрытия (только у персистентных) */
+.notification-item-dismiss {
+    background: none;
+    border: none;
+    cursor: pointer;
+    color: var(--text-secondary);
+    font-size: var(--font-size-lg);
+    line-height: 1;
+    padding: 0 2px;
+    flex: 0 0 auto;
+    border-radius: var(--radius-sm);
+    opacity: 0.6;
+    transition: var(--transition-all);
+}
+
+.notification-item-dismiss:hover {
+    opacity: 1;
+    color: var(--error, #d33);
 }
 
 /* Цветная точка-индикатор критичности */
@@ -151,6 +235,10 @@
 
 .notif-dot--warning {
     background: #e6a700;
+}
+
+.notif-dot--info {
+    background: var(--primary, #2563eb);
 }
 
 /* Пустое состояние */

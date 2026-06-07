@@ -1,0 +1,157 @@
+/**
+ * Тесты чистого ядра центра уведомлений (notification-center-core.js).
+ *
+ * Покрывают:
+ *   - pickBadgeSeverity — приоритет error > warning > info; пусто → info;
+ *     учёт и живых, и персистентных; нормализация неизвестных severity.
+ *   - computeBadge — скрытие при сумме 0, суммирование непрочитанных + живых.
+ *   - mergeFeed — порядок (живые сверху), нормализация формы и kind.
+ *   - countPersistedUnread — подсчёт непрочитанных.
+ */
+import { test } from 'node:test';
+import assert from 'node:assert/strict';
+import {
+  normalizeSeverity,
+  pickBadgeSeverity,
+  computeBadge,
+  mergeFeed,
+  countPersistedUnread,
+} from '../../static/js/shared/notifications-center/notification-center-core.js';
+
+// ── normalizeSeverity ───────────────────────────────────────────────────────
+
+test('normalizeSeverity: известные уровни проходят как есть', () => {
+  assert.equal(normalizeSeverity('error'), 'error');
+  assert.equal(normalizeSeverity('warning'), 'warning');
+  assert.equal(normalizeSeverity('info'), 'info');
+});
+
+test('normalizeSeverity: success/неизвестное/пустое → info', () => {
+  assert.equal(normalizeSeverity('success'), 'info');
+  assert.equal(normalizeSeverity('whatever'), 'info');
+  assert.equal(normalizeSeverity(undefined), 'info');
+  assert.equal(normalizeSeverity(null), 'info');
+});
+
+// ── pickBadgeSeverity ───────────────────────────────────────────────────────
+
+test('pickBadgeSeverity: пустой/невалидный вход → info', () => {
+  assert.equal(pickBadgeSeverity([]), 'info');
+  assert.equal(pickBadgeSeverity(null), 'info');
+  assert.equal(pickBadgeSeverity(undefined), 'info');
+});
+
+test('pickBadgeSeverity: error важнее warning важнее info', () => {
+  assert.equal(pickBadgeSeverity([{ severity: 'info' }, { severity: 'warning' }]), 'warning');
+  assert.equal(pickBadgeSeverity([{ severity: 'warning' }, { severity: 'error' }]), 'error');
+  assert.equal(pickBadgeSeverity([{ severity: 'info' }, { severity: 'info' }]), 'info');
+});
+
+test('pickBadgeSeverity: учитывает и живые, и персистентные вместе', () => {
+  const live = [{ severity: 'warning' }];
+  const persisted = [{ severity: 'error' }];
+  assert.equal(pickBadgeSeverity([...live, ...persisted]), 'error');
+});
+
+test('pickBadgeSeverity: неизвестный severity трактуется как info', () => {
+  assert.equal(pickBadgeSeverity([{ severity: 'success' }]), 'info');
+  // success среди warning не повышает критичность
+  assert.equal(pickBadgeSeverity([{ severity: 'success' }, { severity: 'warning' }]), 'warning');
+});
+
+// ── computeBadge ────────────────────────────────────────────────────────────
+
+test('computeBadge: 0+0 → скрыт, count 0', () => {
+  assert.deepEqual(computeBadge(0, 0), { count: 0, hidden: true });
+});
+
+test('computeBadge: суммирует непрочитанные персистентные и живые', () => {
+  assert.deepEqual(computeBadge(3, 2), { count: 5, hidden: false });
+  assert.deepEqual(computeBadge(0, 4), { count: 4, hidden: false });
+  assert.deepEqual(computeBadge(2, 0), { count: 2, hidden: false });
+});
+
+test('computeBadge: отрицательные/нечисловые нормализуются к 0', () => {
+  assert.deepEqual(computeBadge(-5, 3), { count: 3, hidden: false });
+  assert.deepEqual(computeBadge(NaN, NaN), { count: 0, hidden: true });
+  assert.deepEqual(computeBadge(undefined, 1), { count: 1, hidden: false });
+});
+
+// ── mergeFeed ───────────────────────────────────────────────────────────────
+
+test('mergeFeed: живые идут сверху, затем персистентные', () => {
+  const live = [{ id: 'L1', title: 'live', severity: 'warning' }];
+  const persisted = [{ id: 'P1', title: 'persisted', severity: 'info', is_read: false }];
+  const feed = mergeFeed(live, persisted);
+  assert.equal(feed.length, 2);
+  assert.equal(feed[0].kind, 'live');
+  assert.equal(feed[0].id, 'L1');
+  assert.equal(feed[1].kind, 'persisted');
+  assert.equal(feed[1].id, 'P1');
+});
+
+test('mergeFeed: сохраняет порядок внутри каждой группы', () => {
+  const live = [{ id: 'L1' }, { id: 'L2' }];
+  const persisted = [{ id: 'P1' }, { id: 'P2' }];
+  const feed = mergeFeed(live, persisted);
+  assert.deepEqual(feed.map((x) => x.id), ['L1', 'L2', 'P1', 'P2']);
+});
+
+test('mergeFeed: нормализует severity и заполняет дефолты', () => {
+  const feed = mergeFeed(
+    [{ id: 'L1', severity: 'success' }],
+    [{ id: 'P1', severity: undefined, title: 'T', body: 'B', link: '/x', element_ref: 'e', is_read: true }],
+  );
+  // живой success → info, source по умолчанию 'tables'
+  assert.equal(feed[0].severity, 'info');
+  assert.equal(feed[0].source, 'tables');
+  assert.equal(feed[0].title, '');
+  // персистентный: severity → info, поля проброшены, is_read булев
+  assert.equal(feed[1].severity, 'info');
+  assert.equal(feed[1].title, 'T');
+  assert.equal(feed[1].body, 'B');
+  assert.equal(feed[1].link, '/x');
+  assert.equal(feed[1].element_ref, 'e');
+  assert.equal(feed[1].is_read, true);
+});
+
+test('mergeFeed: живые не получают link/element_ref/is_read, персистентные не получают onClick', () => {
+  const feed = mergeFeed(
+    [{ id: 'L1', onClick: () => {} }],
+    [{ id: 'P1' }],
+  );
+  assert.equal('link' in feed[0], false);
+  assert.equal('element_ref' in feed[0], false);
+  assert.equal('is_read' in feed[0], false);
+  assert.equal(typeof feed[0].onClick, 'function');
+  assert.equal('onClick' in feed[1], false);
+  assert.equal(feed[1].is_read, false);
+});
+
+test('mergeFeed: пустые/невалидные входы → []', () => {
+  assert.deepEqual(mergeFeed([], []), []);
+  assert.deepEqual(mergeFeed(null, null), []);
+  assert.deepEqual(mergeFeed(undefined, undefined), []);
+});
+
+test('mergeFeed: пропускает falsy-элементы', () => {
+  const feed = mergeFeed([null, { id: 'L1' }], [undefined, { id: 'P1' }]);
+  assert.deepEqual(feed.map((x) => x.id), ['L1', 'P1']);
+});
+
+// ── countPersistedUnread ────────────────────────────────────────────────────
+
+test('countPersistedUnread: считает все с is_read !== true', () => {
+  const items = [
+    { id: '1', is_read: false },
+    { id: '2', is_read: true },
+    { id: '3' }, // нет is_read → непрочитано
+  ];
+  assert.equal(countPersistedUnread(items), 2);
+});
+
+test('countPersistedUnread: пусто/невалидно → 0', () => {
+  assert.equal(countPersistedUnread([]), 0);
+  assert.equal(countPersistedUnread(null), 0);
+  assert.equal(countPersistedUnread(undefined), 0);
+});

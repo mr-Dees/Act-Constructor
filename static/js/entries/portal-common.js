@@ -18,6 +18,9 @@ import '../shared/dialog/dialog-confirm.js';
 import '../portal/portal-sidebar.js';
 import '../portal/portal-settings.js';
 
+// Shared-центр уведомлений (без живых источников на портале).
+import { NotificationCenter } from '../shared/notifications-center/notification-center.js';
+
 // Чат — 12 модулей. chat-event-bus.js первым (остальные подписываются на module-level).
 import '../shared/chat/chat-event-bus.js';
 import '../shared/chat/chat-renderer.js';
@@ -31,3 +34,20 @@ import '../shared/chat/chat-context.js';
 import '../shared/chat/chat-messages.js';
 import '../shared/chat/chat-manager.js';
 import '../shared/chat/chat-modal.js';
+
+/**
+ * Инициализирует shared-центр уведомлений на портале (только персистентные;
+ * живых источников на portal-страницах нет). Если разметки колокольчика на
+ * странице нет — init() тихо выходит.
+ */
+function _initNotificationCenter() {
+    const center = new NotificationCenter({ enablePersisted: true });
+    center.init();
+    window.notificationCenter = center;
+}
+
+if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', _initNotificationCenter);
+} else {
+    _initNotificationCenter();
+}

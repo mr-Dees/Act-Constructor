@@ -1,7 +1,7 @@
-<!-- Колокольчик замечаний по документу -->
+<!-- Колокольчик уведомлений -->
 <div class="notifications-menu-container">
     <div class="header-action-container">
-        <button id="notificationsBtn" class="header-action-btn" title="Замечания по документу" aria-label="Открыть замечания">
+        <button id="notificationsBtn" class="header-action-btn" title="Уведомления" aria-label="Открыть уведомления">
             <svg width="20" height="20" viewBox="0 0 24 24" fill="none">
                 <path d="M18 8C18 6.4087 17.3679 4.88258 16.2426 3.75736C15.1174 2.63214 13.5913 2 12 2C10.4087 2 8.88258 2.63214 7.75736 3.75736C6.63214 4.88258 6 6.4087 6 8C6 15 3 17 3 17H21C21 17 18 15 18 8Z"
                       stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
@@ -12,13 +12,16 @@
         <!-- Бейдж вынесен из кнопки: у .header-action-btn overflow:hidden (ripple)
              обрезал бы его. Позиционируется абсолютно относительно контейнера. -->
         <span id="notificationsBadge" class="notif-badge hidden">0</span>
-        <span class="header-action-label">Замечания</span>
+        <span class="header-action-label">Уведомления</span>
     </div>
 
     <div id="notificationsMenu" class="notifications-menu hidden">
         <div class="notifications-menu-header">
-            <h4><span aria-hidden="true">⚠</span> Замечания по таблицам</h4>
-            <button id="closeNotificationsBtn" class="notifications-menu-close" aria-label="Закрыть">&times;</button>
+            <h4><span aria-hidden="true">⚠</span> Уведомления</h4>
+            <div class="notifications-menu-actions">
+                <button id="notificationsReadAllBtn" class="notifications-read-all" type="button">Прочитать все</button>
+                <button id="closeNotificationsBtn" class="notifications-menu-close" aria-label="Закрыть">&times;</button>
+            </div>
         </div>
         <div class="notifications-menu-body" id="notificationsBody"></div>
     </div>
