@@ -248,3 +248,35 @@
     color: var(--text-secondary);
     font-size: var(--font-size-sm);
 }
+
+/* ============================================================================
+ * Портал/лендинг: своя стилистика дропдауна.
+ * Topbar портала светлый (.landing-topbar: белый фон, серый текст), поэтому
+ * фиолетовая шапка конструктора (--gradient-header + белый текст) на нём
+ * выглядит чужеродно. Под .landing-topbar-actions делаем светлую шапку в тон
+ * портала и прижимаем меню ближе к topbar. В конструкторе остаётся градиент.
+ * ============================================================================ */
+
+/* Чуть плотнее к topbar (у портала шапка ниже, чем у конструктора). */
+.landing-topbar-actions .notifications-menu {
+    top: calc(100% + var(--spacing-sm));
+}
+
+/* Светлая шапка вместо градиента конструктора. */
+.landing-topbar-actions .notifications-menu-header {
+    background: var(--bg-primary);
+    color: var(--text-primary);
+    border-bottom: var(--border-width-thin) solid var(--border-light);
+}
+
+/* На светлой шапке белые «Прочитать все»/крестик невидимы — перекрашиваем. */
+.landing-topbar-actions .notifications-read-all,
+.landing-topbar-actions .notifications-menu-close {
+    color: var(--text-secondary);
+}
+
+.landing-topbar-actions .notifications-read-all:hover,
+.landing-topbar-actions .notifications-menu-close:hover {
+    background: var(--gray-100);
+    color: var(--primary);
+}
