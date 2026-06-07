@@ -125,10 +125,6 @@
     --invoice-warning-padding: var(--spacing-lg);
     --invoice-warning-border-width: var(--border-width-thick);
 
-    /* Кнопки действий в шапке: фиксированная равная ширина колонки
-       (иконка + подпись), чтобы смена текста подписи и бейджи не дёргали раскладку */
-    --header-action-column-min-width: 6.5rem;
-
     /* Tree */
     --tree-count-size: 1.25rem;
     --tree-drop-indicator-height: 0.375rem;

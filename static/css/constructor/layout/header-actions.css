@@ -2,7 +2,11 @@
  * Стили для кнопок действий в правой части шапки
  */
 
-/* Блок действий слева */
+/* Блок действий слева.
+ * gap = --spacing-3xl: колонки равны ширине кнопки (подпись не влияет на ширину,
+ * см. .header-action-label), а подписи центрируются под кнопкой и «вытекают» за
+ * края. Такого зазора достаточно, чтобы соседние подписи (вкл. самые длинные —
+ * «Уведомления»/«Просмотр» и «Только локально») не накладывались. */
 .header-actions-left {
     position: absolute;
     left: var(--spacing-2xl);
@@ -10,11 +14,11 @@
     transform: translateY(calc(-50% + var(--translate-sm)));
     display: flex;
     align-items: flex-start;
-    gap: var(--spacing-xl);
+    gap: var(--spacing-3xl);
     z-index: var(--z-sticky);
 }
 
-/* Блок действий справа */
+/* Блок действий справа (см. комментарий к gap у .header-actions-left). */
 .header-actions-right {
     position: absolute;
     right: var(--spacing-2xl);
@@ -22,14 +26,14 @@
     transform: translateY(calc(-50% + var(--translate-sm)));
     display: flex;
     align-items: flex-start;
-    gap: var(--spacing-xl);
+    gap: var(--spacing-3xl);
     z-index: var(--z-sticky);
 }
 
-/* Контейнер иконки + подпись. Ширина колонки — по содержимому (подписи),
- * чтобы кнопки в группах стояли плотно у своего края, а не растягивались по
- * всей ширине. Отдельно фиксируется только колонка индикатора сохранности
- * (см. save-indicator.css): её подпись меняется и иначе дёргала бы раскладку. */
+/* Контейнер иконки + подпись. Ширина колонки = ширине кнопки (2.5rem): подпись
+ * вынесена из расчёта ширины (см. .header-action-label ниже), поэтому все колонки
+ * одинаковы и кнопки в группе стоят на равном расстоянии (gap), независимо от
+ * длины подписей. */
 .header-action-container {
     display: flex;
     flex-direction: column;
@@ -102,8 +106,12 @@
     color: var(--primary-hover);
 }
 
-/* Подпись */
+/* Подпись. width:0 + overflow:visible исключают подпись из расчёта ширины колонки:
+ * текст центрируется по центру кнопки и симметрично «вытекает» за края, не растягивая
+ * колонку. За счёт этого все колонки = ширине кнопки, а кнопки в группе равноудалены. */
 .header-action-label {
+    width: 0;
+    overflow: visible;
     font-size: var(--font-size-xs);
     font-weight: var(--font-weight-semibold);
     color: var(--text-on-primary);
