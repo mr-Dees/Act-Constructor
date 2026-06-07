@@ -167,6 +167,9 @@ async def test_mark_all_read_update_then_insert(mock_conn):
     assert "INSERT INTO notification_state" in insert_sql
     assert "NOT EXISTS" in insert_sql
     assert "recipient_user_id = $1 OR n.recipient_user_id IS NULL" in insert_sql
+    # Регрессия: голый $1 в списке SELECT и $1 в сравнениях ниже выводят разные
+    # типы (text vs varchar) → AmbiguousParameterError. Параметр приведён явно.
+    assert "$1::varchar" in insert_sql
     assert insert_uid == "user1"
 
 

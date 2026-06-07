@@ -102,11 +102,15 @@ class NotificationRepository(BaseRepository):
             user_id,
         )
         # 2. Создаём state для видимых уведомлений, у которых его ещё нет.
+        #    $1::varchar обязателен: в списке SELECT голый $1 выводится как text,
+        #    а в сравнениях ниже (recipient_user_id = $1, s.user_id = $1) — как
+        #    varchar из колонок; без явного приведения типы параметра конфликтуют
+        #    (AmbiguousParameterError: text и character varying).
         await self.conn.execute(
             f"""
             INSERT INTO {self.state}
                 (notification_id, user_id, is_read, is_dismissed)
-            SELECT n.id, $1, TRUE, FALSE
+            SELECT n.id, $1::varchar, TRUE, FALSE
             FROM {self.notifications} n
             WHERE (n.recipient_user_id = $1 OR n.recipient_user_id IS NULL)
               AND NOT EXISTS (
