@@ -4,30 +4,17 @@
  * Три состояния: saved (белый), local-only (желтый), unsaved (красный)
  */
 
-.save-indicator {
-    position: relative;
-    display: flex;
-    flex-direction: column;
-    align-items: center;
-    gap: var(--spacing-xs);
-}
+/* Контейнер и базовая геометрия кнопки (размер 2.5rem, рамка, скругление,
+ * базовый фон, hover-сдвиг) берутся от .header-action-container /
+ * .header-action-btn — единый вид шапки. Здесь оставлены только специфичные для
+ * индикатора цвета состояний сохранности, свечения, пульс и поведение disabled. */
 
-/* Кнопка индикатора */
+/* Кнопка индикатора: дефолтные цвета поверх единой геометрии */
 .save-indicator-button {
-    width: var(--button-size-sm);
-    height: var(--button-size-sm);
-    border: var(--border-width-thin) solid var(--save-button-border);
-    border-radius: var(--radius-sm);
     background: var(--save-button-bg);
-    cursor: pointer;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    transition: var(--transition-all);
-    position: relative;
+    border-color: var(--save-button-border);
     color: var(--save-button-text);
-    padding: 0;
-    overflow: hidden;
+    cursor: pointer;
 }
 
 /* Эффект ripple при нажатии */
@@ -61,8 +48,12 @@
     box-shadow: var(--shadow-glow-sm) var(--save-saved-glow);
 }
 
+/* Сохранённое состояние неактивно (disabled): при наведении кнопка не должна
+ * сдвигаться и менять рамку/фон, как это делает базовый .header-action-btn:hover.
+ * Полностью нейтрализуем единый hover, удерживая «белый» вид. */
 .save-indicator-button.saved:hover {
     background: var(--save-saved-white-bg);
+    border-color: var(--save-saved-white-border);
     transform: none;
     box-shadow: var(--shadow-glow-sm) var(--save-saved-glow);
 }
