@@ -203,7 +203,11 @@ def register_domains(
 
     for d in domains:
         # Определяем зависимости проверки ролей для домена
-        if d.name == "admin":
+        if d.public_api:
+            # Общий кросс-доменный API без доменного гейта (центр уведомлений):
+            # доступен всем авторизованным, проверка роли на роутер не вешается.
+            role_deps = []
+        elif d.name == "admin":
             role_deps = [Depends(require_admin())]
         else:
             role_deps = [Depends(require_domain_access(d.name))]

@@ -67,3 +67,7 @@ class DomainDescriptor:
     chat_system_prompt: str = ""
     migration_substitutions: dict[str, str | Callable[[], str]] = field(default_factory=dict)
     health_check: Callable[[], Awaitable[dict]] | None = None
+    # Если True — register_domains НЕ вешает доменный гейт require_domain_access
+    # на роутеры домена (остаётся только эндпоинтная авторизация get_username).
+    # Для кросс-доменных «общих» API, доступных всем ролям (центр уведомлений).
+    public_api: bool = False

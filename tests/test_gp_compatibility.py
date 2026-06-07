@@ -260,6 +260,84 @@ class TestGreenplumSchemaCompatibility:
             f"Обнаруженные домены: {sorted(domain_names)}"
         )
 
+    def test_notifications_domain_migration_discovered(self, gp_schema_files):
+        """GP-миграция домена notifications обнаруживается автоматически."""
+        domain_names = {s.parent.parent.parent.name for s in gp_schema_files}
+        assert "notifications" in domain_names, (
+            f"Миграция notifications не найдена среди GP-схем. "
+            f"Обнаруженные домены: {sorted(domain_names)}"
+        )
+
+    def test_notifications_gp_distribution_and_pk(self):
+        """Обе таблицы notifications в GP-схеме: DISTRIBUTED BY ⊆ PRIMARY KEY.
+
+        notifications: PK (id), DISTRIBUTED BY (id).
+        notification_state: PK (notification_id, user_id), DISTRIBUTED BY
+        (notification_id) — co-location с notifications по id для join.
+        """
+        schema_path = (
+            Path(__file__).parent.parent
+            / "app" / "domains" / "notifications" / "migrations"
+            / "greenplum" / "schema.sql"
+        )
+        content = schema_path.read_text(encoding="utf-8")
+        stmts = DatabaseAdapter._split_sql_statements(content)
+
+        expected = {
+            "{PREFIX}notifications": ("id", {"id"}),
+            "{PREFIX}notification_state": (
+                "notification_id", {"notification_id", "user_id"},
+            ),
+        }
+
+        for table_marker, (dist_col, pk_cols) in expected.items():
+            create_stmt = None
+            for raw in stmts:
+                cleaned = re.sub(r'--[^\n]*', '', raw)
+                if (
+                    re.search(r'\bCREATE\s+TABLE\b', cleaned, re.IGNORECASE)
+                    and table_marker in cleaned
+                    # notification_state содержит подстроку "notifications"? нет —
+                    # маркеры различны, но notifications-маркер шире: отсекаем
+                    # state через явную проверку distribution-колонки ниже.
+                ):
+                    create_stmt = cleaned
+                    # Берём первый CREATE TABLE с точным distribution-clause.
+                    if re.search(
+                        rf'DISTRIBUTED\s+BY\s*\(\s*{dist_col}\s*\)',
+                        cleaned, re.IGNORECASE,
+                    ):
+                        break
+            assert create_stmt is not None, (
+                f"GP-схема notifications: CREATE TABLE {table_marker} не найдено"
+            )
+            assert re.search(
+                rf'DISTRIBUTED\s+BY\s*\(\s*{dist_col}\s*\)',
+                create_stmt, re.IGNORECASE,
+            ), f"{table_marker}: DISTRIBUTED BY ({dist_col}) не найден"
+
+            pk_match = re.search(
+                r'PRIMARY\s+KEY\s*\(([^)]+)\)', create_stmt, re.IGNORECASE,
+            )
+            if pk_match:
+                found_pk = {c.strip().lower() for c in pk_match.group(1).split(',')}
+            else:
+                # inline "id VARCHAR(36) PRIMARY KEY" — одноколоночный PK.
+                inline = re.search(
+                    r'(\w+)\s+[^\n,]*\bPRIMARY\s+KEY\b', create_stmt, re.IGNORECASE,
+                )
+                assert inline is not None, (
+                    f"{table_marker}: PRIMARY KEY не найден"
+                )
+                found_pk = {inline.group(1).strip().lower()}
+            assert found_pk == pk_cols, (
+                f"{table_marker}: PK {sorted(found_pk)} != ожидаемого "
+                f"{sorted(pk_cols)}"
+            )
+            assert {dist_col}.issubset(found_pk), (
+                f"{table_marker}: DIST {dist_col} ⊄ PK {sorted(found_pk)}"
+            )
+
     def test_chat_messages_has_status_column(self):
         """chat_messages в обеих схемах содержит колонку status с CHECK-констрейнтом
         check_chat_messages_status_values (Phase 0 «D»: server-authoritative state)."""
