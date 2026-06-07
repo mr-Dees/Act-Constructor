@@ -14,6 +14,7 @@ import { AppConfig } from '../../shared/app-config.js';
 import { AuthManager } from '../../shared/auth.js';
 import { DialogManager } from '../../shared/dialog/dialog-confirm.js';
 import { Notifications } from '../../shared/notifications.js';
+import { registerActsSource } from './notifications-source-acts.js';
 
 export class ActsManagerPage {
     /* --- Состояние пагинации (load-more) --- */
@@ -21,6 +22,10 @@ export class ActsManagerPage {
     static _offset = 0;
     static _total = 0;
     static _loadingMore = false;
+
+    /* Последний загруженный список актов — источник живых уведомлений
+     * колокольчика (см. notifications-source-acts.js). */
+    static _acts = [];
 
     /* --- Утилиты форматирования --- */
 
@@ -251,17 +256,35 @@ export class ActsManagerPage {
             this._offset = acts.length;
 
             if (!acts.length) {
+                this._setActsForNotifications([]);
                 this._showEmptyState(container);
                 return;
             }
 
+            this._setActsForNotifications(acts);
             this._renderActsGrid(acts, container);
             this._renderLoadMore(container);
 
         } catch (error) {
             console.error('Ошибка загрузки актов:', error);
+            this._setActsForNotifications([]);
             this._showErrorState(container);
             Notifications.error('Ошибка загрузки списка актов');
+        }
+    }
+
+    /**
+     * Сохраняет текущий список актов и обновляет живой источник «acts»
+     * shared-колокольчика. Источник pull-based: при refresh() он перечитает
+     * this._acts. Если колокольчика на странице нет — тихо пропускаем.
+     * @private
+     * @param {Array<Object>} acts
+     */
+    static _setActsForNotifications(acts) {
+        this._acts = Array.isArray(acts) ? acts : [];
+        const center = window.notificationCenter;
+        if (center && typeof center.refresh === 'function') {
+            center.refresh();
         }
     }
 
@@ -304,6 +327,7 @@ export class ActsManagerPage {
                 if (card) grid.appendChild(card);
             });
 
+            this._setActsForNotifications(this._acts.concat(acts));
             this._renderLoadMore(container);
         } catch (error) {
             console.error('Ошибка подгрузки актов:', error);
@@ -801,6 +825,16 @@ export class ActsManagerPage {
      */
     static async init() {
         console.log('ActsManagerPage.init() вызван');
+
+        // Живой источник уведомлений «acts»: акты с незакрытыми требованиями
+        // (фактура/СЗ/дата/поручения) попадают в shared-колокольчик. Центр
+        // создаётся в portal-common.js; collect — pull-based по this._acts.
+        if (window.notificationCenter) {
+            registerActsSource(window.notificationCenter, {
+                getActs: () => this._acts,
+                onOpen: (actId) => this.openAct(actId),
+            });
+        }
 
         // Проверяем флаги из sessionStorage и показываем диалоги
         await this._checkSessionExit();
