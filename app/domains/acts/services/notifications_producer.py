@@ -1,0 +1,61 @@
+"""Эмиссия персистентных уведомлений из домена актов.
+
+Домен acts — продьюсер событий для центра уведомлений (домен notifications).
+Связь — через реестр фабрик (``notifications.push``), БЕЗ прямого импорта
+notifications-домена: так acts не зависит от наличия notifications в сборке.
+
+Контракт:
+- эмитим ТОЛЬКО после успеха основной операции (экспорт/создание акта);
+- любой сбой или отсутствие фабрики НЕ должен ломать основную операцию —
+  вся эмиссия обёрнута в try/except с логированием;
+- ``has_factory``-guard: если домен notifications не зарегистрирован,
+  эмиссия молча пропускается (важно для юнит-тестов acts, где notifications
+  не поднимается — никакой регрессии).
+"""
+
+import logging
+
+logger = logging.getLogger("audit_workstation.service.acts.notifications")
+
+
+async def emit_act_notification(
+    *,
+    title: str,
+    severity: str = "info",
+    link: str | None = None,
+    recipient_user_id: str | None = None,
+) -> None:
+    """Мягко эмитит уведомление о событии акта через фабрику notifications.
+
+    Импорт ``has_factory``/``get_factory`` — локальный (внутри функции), чтобы
+    не плодить import-циклы и чтобы тесты могли патчить реестр фабрик.
+
+    Args:
+        title: заголовок уведомления (пользовательский текст).
+        severity: важность ('info'/'success'/'warning'/'error').
+        link: proxy-safe относительный путь к акту (например
+            ``/constructor?act_id=42``).
+        recipient_user_id: адресат; ``None`` — broadcast всем (использовать
+            осознанно).
+    """
+    # Локальный импорт: не создаёт жёсткой зависимости acts → core на
+    # module-level и позволяет тестам патчить реестр фабрик.
+    from app.core.domain_registry import get_factory, has_factory
+
+    try:
+        if not has_factory("notifications.push"):
+            # Домен notifications не зарегистрирован — тихо пропускаем.
+            return
+        factory = get_factory("notifications.push")
+        async for svc in factory():
+            await svc.push(
+                source="acts",
+                title=title,
+                severity=severity,
+                link=link,
+                recipient_user_id=recipient_user_id,
+                created_by="system",
+            )
+    except Exception:
+        # Сбой уведомления НЕ должен ломать основную операцию.
+        logger.exception("Не удалось эмитировать уведомление акта")

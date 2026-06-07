@@ -32,6 +32,7 @@ from app.domains.acts.repositories.act_lock import ActLockRepository
 from app.domains.acts.repositories.act_access import ActAccessRepository
 from app.domains.acts.repositories.act_audit_log import ActAuditLogRepository
 from app.domains.acts.services.access_guard import AccessGuard
+from app.domains.acts.services.notifications_producer import emit_act_notification
 
 logger = logging.getLogger("audit_workstation.service.acts.crud")
 
@@ -411,6 +412,16 @@ class ActCrudService:
             "km_number": act_data.km_number,
             "part_number": part_number,
         })
+
+        # Уведомление о создании акта — после успешного коммита, адресно
+        # инициатору (создателю). Сбой/отсутствие notifications не ломает
+        # создание акта (логика обёрнута в try/except внутри хелпера).
+        await emit_act_notification(
+            title=f"Создан акт {act_data.km_number}",
+            severity="success",
+            link=f"/constructor?act_id={act_id}",
+            recipient_user_id=username,
+        )
 
         return result
 
