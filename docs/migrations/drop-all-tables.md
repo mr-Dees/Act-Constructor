@@ -37,6 +37,12 @@ DROP TABLE IF EXISTS t_db_oarb_audit_act_chat_messages;
 DROP TABLE IF EXISTS t_db_oarb_audit_act_chat_conversations;
 
 -- ╔══════════════════════════════════════════════════════════════════════╗
+-- ║  Домен NOTIFICATIONS (центр уведомлений)                            ║
+-- ╚══════════════════════════════════════════════════════════════════════╝
+DROP TABLE IF EXISTS t_db_oarb_audit_act_notification_state;
+DROP TABLE IF EXISTS t_db_oarb_audit_act_notifications;
+
+-- ╔══════════════════════════════════════════════════════════════════════╗
 -- ║  Домен ACTS (зависимые → родительские)                              ║
 -- ╚══════════════════════════════════════════════════════════════════════╝
 DROP TABLE IF EXISTS t_db_oarb_audit_act_audit_log;
@@ -124,6 +130,12 @@ DROP TABLE IF EXISTS audit_workstation.t_db_oarb_audit_act_chat_conversations;
 -- Sequences chat-домена
 DROP SEQUENCE IF EXISTS audit_workstation.t_db_oarb_audit_act_chat_tool_metrics_id_seq;
 DROP SEQUENCE IF EXISTS audit_workstation.t_db_oarb_audit_act_chat_audit_log_id_seq;
+
+-- ╔══════════════════════════════════════════════════════════════════════╗
+-- ║  Домен NOTIFICATIONS (центр уведомлений)                            ║
+-- ╚══════════════════════════════════════════════════════════════════════╝
+DROP TABLE IF EXISTS audit_workstation.t_db_oarb_audit_act_notification_state;
+DROP TABLE IF EXISTS audit_workstation.t_db_oarb_audit_act_notifications;
 
 -- ╔══════════════════════════════════════════════════════════════════════╗
 -- ║  Домен ACTS (зависимые → родительские)                              ║
