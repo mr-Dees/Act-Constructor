@@ -3,10 +3,10 @@
  */
 
 /* Блок действий слева.
- * gap = --spacing-3xl: колонки равны ширине кнопки (подпись не влияет на ширину,
- * см. .header-action-label), а подписи центрируются под кнопкой и «вытекают» за
- * края. Такого зазора достаточно, чтобы соседние подписи (вкл. самые длинные —
- * «Уведомления»/«Просмотр» и «Только локально») не накладывались. */
+ * Колонки кнопок равноширокие (--header-action-column-width), поэтому кнопки
+ * стоят на равном расстоянии. Подписи помещаются внутри своих колонок (см.
+ * .header-action-label) — разделение между ними обеспечивает ширина колонки,
+ * поэтому gap нужен лишь небольшой. */
 .header-actions-left {
     position: absolute;
     left: var(--spacing-2xl);
@@ -14,7 +14,7 @@
     transform: translateY(calc(-50% + var(--translate-sm)));
     display: flex;
     align-items: flex-start;
-    gap: var(--spacing-3xl);
+    gap: var(--spacing-xs);
     z-index: var(--z-sticky);
 }
 
@@ -26,20 +26,21 @@
     transform: translateY(calc(-50% + var(--translate-sm)));
     display: flex;
     align-items: flex-start;
-    gap: var(--spacing-3xl);
+    gap: var(--spacing-xs);
     z-index: var(--z-sticky);
 }
 
-/* Контейнер иконки + подпись. Ширина колонки = ширине кнопки (2.5rem): подпись
- * вынесена из расчёта ширины (см. .header-action-label ниже), поэтому все колонки
- * одинаковы и кнопки в группе стоят на равном расстоянии (gap), независимо от
- * длины подписей. */
+/* Контейнер иконки + подпись. Ширина колонки единая для всех кнопок
+ * (--header-action-column-width), поэтому кнопки в группе стоят на равном
+ * расстоянии независимо от длины подписей. Кнопка и подпись центрированы в
+ * колонке — подпись оказывается ровно под своей кнопкой. */
 .header-action-container {
     display: flex;
     flex-direction: column;
     align-items: center;
     gap: var(--spacing-xs);
     position: relative;
+    width: var(--header-action-column-width);
 }
 
 /* Кнопка */
@@ -106,12 +107,14 @@
     color: var(--primary-hover);
 }
 
-/* Подпись. width:0 + overflow:visible исключают подпись из расчёта ширины колонки:
- * текст центрируется по центру кнопки и симметрично «вытекает» за края, не растягивая
- * колонку. За счёт этого все колонки = ширине кнопки, а кнопки в группе равноудалены. */
+/* Подпись содержится внутри колонки (max-width:100%) и центрируется под кнопкой,
+ * поэтому визуально «привязана» к своей кнопке. Колонка подобрана под самую
+ * длинную подпись, так что обрезки в норме не происходит; text-overflow:ellipsis
+ * — лишь страховка на случай нестандартного шрифта/масштаба. */
 .header-action-label {
-    width: 0;
-    overflow: visible;
+    max-width: 100%;
+    overflow: hidden;
+    text-overflow: ellipsis;
     font-size: var(--font-size-xs);
     font-weight: var(--font-weight-semibold);
     color: var(--text-on-primary);
