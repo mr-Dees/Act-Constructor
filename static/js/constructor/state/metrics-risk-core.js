@@ -141,62 +141,6 @@ export function reconcileAfterRiskRemoved(ops) {
 }
 
 /**
- * Хук «поддерево перемещено внутри §5»: пересчитывает сводные для старого и
- * нового 5.X-предка перемещённого поддерева.
- *
- * @param {Object} draggedNode - Перемещённый узел.
- * @param {Object|null} oldAncestor5x - 5.X-предок до перемещения.
- * @param {Object} ops - Инъекция операций.
- */
-export function reconcileAfterMove(draggedNode, oldAncestor5x, ops) {
-    if (ops.findRiskTables(draggedNode).length === 0) return;
-
-    const newAncestor5x = findFirstLevelAncestorUnder5(draggedNode.id, ops);
-
-    // Предок 5.X не изменился — пересчитывать нечего.
-    if (oldAncestor5x && newAncestor5x && oldAncestor5x.id === newAncestor5x.id) return;
-
-    // Снимаем сводные у 5.X, где глубоких рисков больше нет.
-    reconcileAfterRiskRemoved(ops);
-
-    // Создаём сводную для нового 5.X-предка (если глубокие риски есть).
-    if (newAncestor5x && shouldHaveMetricsTable(newAncestor5x, ops.findRiskTables)) {
-        if (!findMetricsTableNode(newAncestor5x)) {
-            ops.createMetricsTable(newAncestor5x);
-        } else if (ops.updateMetricsTableLabel) {
-            ops.updateMetricsTableLabel(newAncestor5x.id);
-        }
-    }
-
-    // Главная сводная §5.
-    const node5 = ops.findNodeById('5');
-    if (node5 && shouldHaveMainMetrics(node5, ops.findRiskTables)) {
-        if (!findMainMetricsTableNode(node5)) ops.createMainMetricsTable();
-    }
-}
-
-/**
- * Находит узел 5.X (первого уровня под §5), являющийся предком данного узла.
- *
- * @param {string} nodeId - ID узла.
- * @param {Object} ops - Инъекция операций (findNodeById/findParentNode).
- * @returns {Object|null}
- */
-export function findFirstLevelAncestorUnder5(nodeId, ops) {
-    let node = ops.findNodeById(nodeId);
-    if (!node) return null;
-
-    let parent = ops.findParentNode(nodeId);
-    while (parent && parent.id !== '5') {
-        node = parent;
-        parent = ops.findParentNode(node.id);
-    }
-
-    if (parent?.id === '5' && is5xNode(node)) return node;
-    return null;
-}
-
-/**
  * D1: удаление риск-узла под ЕДИНЫМ snapshot'ом.
  *
  * Snapshot снимается ДО удаления узла, поэтому при исключении в reconcile

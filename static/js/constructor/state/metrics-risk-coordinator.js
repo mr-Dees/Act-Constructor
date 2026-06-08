@@ -34,7 +34,6 @@
  * 3) Seam для будущей экстракции / юнит-тестов: тесты могут заменять методы
  *    AppState mock'ами и проверять coordinator в изоляции.
  */
-import { ContextMenuManager } from '../context-menu/context-menu-core.js';
 import { AppState } from './state-core.js';
 import { Notifications } from '../../shared/notifications.js';
 
