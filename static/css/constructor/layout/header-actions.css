@@ -4,9 +4,9 @@
 
 /* Блок действий слева.
  * Колонки кнопок равноширокие (--header-action-column-width), поэтому кнопки
- * стоят на равном расстоянии. Подписи помещаются внутри своих колонок (см.
- * .header-action-label) — разделение между ними обеспечивает ширина колонки,
- * поэтому gap нужен лишь небольшой. */
+ * стоят на равном расстоянии, а шаг между ними = ширине колонки. Разделение
+ * подписей даёт сама колонка, отдельный gap не нужен (он лишь раздвинул бы
+ * группу и приблизил её к центральным «шагам»). */
 .header-actions-left {
     position: absolute;
     left: var(--spacing-2xl);
@@ -14,7 +14,7 @@
     transform: translateY(calc(-50% + var(--translate-sm)));
     display: flex;
     align-items: flex-start;
-    gap: var(--spacing-xs);
+    gap: 0;
     z-index: var(--z-sticky);
 }
 
@@ -26,7 +26,7 @@
     transform: translateY(calc(-50% + var(--translate-sm)));
     display: flex;
     align-items: flex-start;
-    gap: var(--spacing-xs);
+    gap: 0;
     z-index: var(--z-sticky);
 }
 
@@ -107,14 +107,13 @@
     color: var(--primary-hover);
 }
 
-/* Подпись содержится внутри колонки (max-width:100%) и центрируется под кнопкой,
- * поэтому визуально «привязана» к своей кнопке. Колонка подобрана под самую
- * длинную подпись, так что обрезки в норме не происходит; text-overflow:ellipsis
- * — лишь страховка на случай нестандартного шрифта/масштаба. */
+/* Подпись центрируется под своей кнопкой (align-items:center у контейнера),
+ * поэтому визуально «привязана» к ней. overflow:visible — подпись не обрезается:
+ * если она шире компактной колонки (самая длинная — «Только локально»), то
+ * симметрично «вытекает» за края, оставаясь по центру кнопки. Шаг колонки (76px)
+ * подобран так, чтобы соседние подписи при этом не накладывались. */
 .header-action-label {
-    max-width: 100%;
-    overflow: hidden;
-    text-overflow: ellipsis;
+    overflow: visible;
     font-size: var(--font-size-xs);
     font-weight: var(--font-weight-semibold);
     color: var(--text-on-primary);
