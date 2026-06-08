@@ -19,7 +19,11 @@ from app.core.domain_registry import reset_registry
 from app.core.exceptions import AppError
 from app.core.settings_registry import reset as reset_settings
 from app.domains.notifications.api.notifications import router as notif_router
-from app.domains.notifications.deps import get_notification_service
+from app.domains.notifications.deps import (
+    get_notification_service,
+    get_notifications_settings,
+)
+from app.domains.notifications.settings import NotificationsSettings
 
 USERNAME = "12345"
 
@@ -112,6 +116,27 @@ def test_unread_count():
     assert resp.status_code == 200, resp.text
     assert resp.json() == {"count": 7}
     assert svc.unread_count.await_args.args[0] == USERNAME
+
+
+# ── GET /notifications/config ────────────────────────────────────────────────
+
+
+def test_config_returns_poll_interval():
+    """GET /config отдаёт частоту опроса из настроек домена (camelCase)."""
+    svc = _make_service()
+    app = _build_app(svc)
+    app.dependency_overrides[get_notifications_settings] = (
+        lambda: NotificationsSettings(poll_interval_seconds=15)
+    )
+    with TestClient(app) as client:
+        resp = client.get("/api/v1/notifications/config")
+    assert resp.status_code == 200, resp.text
+    assert resp.json() == {"pollIntervalSeconds": 15}
+
+
+def test_settings_default_poll_interval():
+    """Дефолт частоты опроса = 30 секунд (модель инстанцируется напрямую)."""
+    assert NotificationsSettings().poll_interval_seconds == 30
 
 
 # ── POST /notifications/{id}/read ────────────────────────────────────────────

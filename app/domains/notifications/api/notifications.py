@@ -10,15 +10,20 @@ import logging
 from fastapi import APIRouter, Depends, Query
 
 from app.api.v1.deps.auth_deps import get_username
-from app.domains.notifications.deps import get_notification_service
+from app.domains.notifications.deps import (
+    get_notification_service,
+    get_notifications_settings,
+)
 from app.domains.notifications.schemas import (
     NotificationCreate,
     NotificationOut,
+    NotificationsConfigResponse,
     UnreadCount,
 )
 from app.domains.notifications.services.notification_service import (
     NotificationService,
 )
+from app.domains.notifications.settings import NotificationsSettings
 
 logger = logging.getLogger("audit_workstation.domains.notifications.api")
 
@@ -50,6 +55,21 @@ async def get_unread_count(
     """Возвращает число непрочитанных видимых уведомлений пользователя."""
     count = await service.unread_count(username)
     return UnreadCount(count=count)
+
+
+@router.get(
+    "/config",
+    response_model=NotificationsConfigResponse,
+    summary="Настройки центра для фронтенда",
+)
+async def get_config(
+    _username: str = Depends(get_username),
+    settings: NotificationsSettings = Depends(get_notifications_settings),
+):
+    """Отдаёт фронту настройки центра уведомлений (частота опроса по таймеру)."""
+    return NotificationsConfigResponse(
+        pollIntervalSeconds=settings.poll_interval_seconds,
+    )
 
 
 @router.post("/{notification_id}/read", summary="Пометить прочитанным")

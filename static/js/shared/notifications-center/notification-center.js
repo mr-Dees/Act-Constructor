@@ -21,10 +21,13 @@ import {
   computeBadge,
   mergeFeed,
   countPersistedUnread,
+  resolvePollIntervalMs,
 } from './notification-center-core.js';
 
-/** Интервал поллинга персистентных уведомлений (мс). */
-const POLL_INTERVAL_MS = 30000;
+/** Интервал поллинга по умолчанию (мс) — фолбэк, если конфиг недоступен. */
+const DEFAULT_POLL_INTERVAL_MS = 30000;
+/** Нижняя граница интервала поллинга (мс) — защита от слишком частого опроса. */
+const MIN_POLL_INTERVAL_MS = 5000;
 
 export class NotificationCenter {
   /**
@@ -45,6 +48,9 @@ export class NotificationCenter {
     this.isOpen = false;
     this._escapeUnsub = null;
     this._pollTimer = null;
+    // Интервал поллинга (мс). Фолбэк до загрузки конфига с бэкенда
+    // (GET /config отдаёт значение из NOTIFICATIONS__POLL_INTERVAL_SECONDS).
+    this._pollIntervalMs = DEFAULT_POLL_INTERVAL_MS;
 
     /** @type {Map<string, {collect: Function, onItemClick?: Function}>} */
     this._sources = new Map();
@@ -85,7 +91,9 @@ export class NotificationCenter {
     document.addEventListener('notifications:refresh', this._onRefreshEvent);
 
     if (this.enablePersisted) {
-      this._startPolling();
+      // Сначала тянем интервал из конфига, затем запускаем поллинг. Сбой
+      // загрузки конфига → остаётся фолбэк-интервал.
+      this._loadConfig().then(() => this._startPolling());
     }
 
     this.refresh();
@@ -227,13 +235,35 @@ export class NotificationCenter {
 
   // ── Персистентный источник (API) ────────────────────────────────────────
 
+  /**
+   * Загружает конфиг центра уведомлений с API и применяет интервал поллинга.
+   * Сетевой/парс-сбой не критичен — остаётся фолбэк-интервал.
+   * @private
+   * @returns {Promise<void>}
+   */
+  async _loadConfig() {
+    try {
+      const resp = await fetch(AppConfig.api.getUrl('/api/v1/notifications/config'), {
+        headers: { Accept: 'application/json' },
+      });
+      if (!resp.ok) return;
+      const data = await resp.json();
+      this._pollIntervalMs = resolvePollIntervalMs(data && data.pollIntervalSeconds, {
+        defaultMs: DEFAULT_POLL_INTERVAL_MS,
+        minMs: MIN_POLL_INTERVAL_MS,
+      });
+    } catch (e) {
+      // тихо — оставляем фолбэк-интервал
+    }
+  }
+
   /** @private Запускает фоновый поллинг (пауза при скрытой вкладке). */
   _startPolling() {
     this._stopPolling();
     this._pollTimer = setInterval(() => {
       if (document.hidden) return;
       this._loadPersisted().then(() => this.refresh());
-    }, POLL_INTERVAL_MS);
+    }, this._pollIntervalMs);
   }
 
   /** @private */

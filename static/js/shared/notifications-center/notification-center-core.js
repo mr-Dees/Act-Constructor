@@ -151,6 +151,26 @@ export function countPersistedUnread(persistedItems) {
   return n;
 }
 
+/**
+ * Резолвит интервал поллинга персистентных уведомлений (мс) из настройки в
+ * секундах (приходит с бэкенда через GET /config).
+ *
+ * Невалидное/неположительное/отсутствующее значение → defaultMs. Результат
+ * ограничен снизу minMs, чтобы случайно заданный слишком частый опрос не бил
+ * по бэкенду.
+ *
+ * @param {number|string} seconds Интервал в секундах (из конфига).
+ * @param {{defaultMs?: number, minMs?: number}} [opts]
+ * @returns {number} Интервал в миллисекундах.
+ */
+export function resolvePollIntervalMs(seconds, opts = {}) {
+  const defaultMs = Number.isFinite(opts.defaultMs) ? opts.defaultMs : 30000;
+  const minMs = Number.isFinite(opts.minMs) ? opts.minMs : 5000;
+  const n = Number(seconds);
+  if (!Number.isFinite(n) || n <= 0) return defaultMs;
+  return Math.max(minMs, Math.round(n * 1000));
+}
+
 // Дублируем в window ради inline-скриптов; guard — модуль импортируется в node:test.
 if (typeof window !== 'undefined') {
   window.NotificationCenterCore = {
@@ -159,5 +179,6 @@ if (typeof window !== 'undefined') {
     computeBadge,
     mergeFeed,
     countPersistedUnread,
+    resolvePollIntervalMs,
   };
 }

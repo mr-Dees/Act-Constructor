@@ -39,3 +39,13 @@ class UnreadCount(BaseModel):
     """Число непрочитанных уведомлений (GET /api/v1/notifications/unread-count)."""
 
     count: int = Field(ge=0)
+
+
+class NotificationsConfigResponse(BaseModel):
+    """Настройки центра уведомлений для фронтенда (GET /api/v1/notifications/config).
+
+    ``pollIntervalSeconds`` — частота периодического опроса персистентных
+    уведомлений. camelCase под фронт (как у acts /config/lock).
+    """
+
+    pollIntervalSeconds: int

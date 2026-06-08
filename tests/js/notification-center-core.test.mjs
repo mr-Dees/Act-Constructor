@@ -7,6 +7,7 @@
  *   - computeBadge — скрытие при сумме 0, суммирование непрочитанных + живых.
  *   - mergeFeed — порядок (живые сверху), нормализация формы и kind.
  *   - countPersistedUnread — подсчёт непрочитанных.
+ *   - resolvePollIntervalMs — секунды→мс, фолбэк и нижняя граница.
  */
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
@@ -16,6 +17,7 @@ import {
   computeBadge,
   mergeFeed,
   countPersistedUnread,
+  resolvePollIntervalMs,
 } from '../../static/js/shared/notifications-center/notification-center-core.js';
 
 // ── normalizeSeverity ───────────────────────────────────────────────────────
@@ -154,4 +156,31 @@ test('countPersistedUnread: пусто/невалидно → 0', () => {
   assert.equal(countPersistedUnread([]), 0);
   assert.equal(countPersistedUnread(null), 0);
   assert.equal(countPersistedUnread(undefined), 0);
+});
+
+// ── resolvePollIntervalMs ─────────────────────────────────────────────────────
+
+test('resolvePollIntervalMs: валидные секунды → миллисекунды', () => {
+  assert.equal(resolvePollIntervalMs(30), 30000);
+  assert.equal(resolvePollIntervalMs(60), 60000);
+  assert.equal(resolvePollIntervalMs('45'), 45000);
+});
+
+test('resolvePollIntervalMs: невалидное/неположительное → дефолт', () => {
+  assert.equal(resolvePollIntervalMs(undefined), 30000);
+  assert.equal(resolvePollIntervalMs(null), 30000);
+  assert.equal(resolvePollIntervalMs('x'), 30000);
+  assert.equal(resolvePollIntervalMs(0), 30000);
+  assert.equal(resolvePollIntervalMs(-5), 30000);
+});
+
+test('resolvePollIntervalMs: ниже минимума поднимается до minMs', () => {
+  // 2с < 5с (минимум по умолчанию)
+  assert.equal(resolvePollIntervalMs(2), 5000);
+});
+
+test('resolvePollIntervalMs: кастомные defaultMs/minMs', () => {
+  assert.equal(resolvePollIntervalMs(undefined, { defaultMs: 10000 }), 10000);
+  assert.equal(resolvePollIntervalMs(1, { minMs: 3000 }), 3000);
+  assert.equal(resolvePollIntervalMs(120, { minMs: 3000, defaultMs: 10000 }), 120000);
 });
