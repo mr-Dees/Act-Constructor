@@ -152,8 +152,10 @@ export function hasStructuralDefect(grid, colWidths) {
       if (r + rs - 1 >= grid.length || c + cs - 1 >= width) return true;
     }
   }
-  // colWidths (если заданы) должны совпадать по длине с числом колонок.
-  if (Array.isArray(colWidths) && colWidths.length !== width) return true;
+  // colWidths (если непусты) должны совпадать по длине с числом колонок.
+  // Пустой массив = «не заданы» (сервер: `if self.colWidths and ...`), DOCX
+  // делит ширину поровну — такую таблицу красить красным нельзя (ложная тревога).
+  if (Array.isArray(colWidths) && colWidths.length > 0 && colWidths.length !== width) return true;
 
   return false;
 }

@@ -140,6 +140,20 @@ test('collectTableWarnings: рассинхрон colWidths → error (серве
   assert.equal(warnings[0].severity, 'error');
 });
 
+test('collectTableWarnings: пустой colWidths НЕ структурный дефект (паритет с сервером)', () => {
+  // Сервер допускает пустой colWidths (`if self.colWidths and ...`, DOCX делит
+  // ширину поровну); insert_table(col_widths=[]) даёт ровно такой случай.
+  // Клиент не должен быть строже сервера — красить такую таблицу красным нельзя.
+  const grid = [
+    row([{ content: 'A', isHeader: true }, { content: 'B', isHeader: true }]),
+    row([{ content: '1' }, { content: '2' }]),
+  ];
+  assert.equal(hasStructuralDefect(grid, []), false);
+
+  const warnings = collectTableWarnings({ t1: { grid, colWidths: [] } }, nameById);
+  assert.equal(warnings.some((w) => w.severity === 'error'), false);
+});
+
 test('collectTableWarnings: инертный устаревший spanOrigin НЕ красит красным (инвариант)', () => {
   // Сетка прямоугольна, span в границах, но у поглощённой ячейки spanOrigin
   // указывает «не туда» (как после legacy-операции с колонками). validateGrid
