@@ -51,6 +51,10 @@ export class NotificationCenter {
     // Интервал поллинга (мс). Фолбэк до загрузки конфига с бэкенда
     // (GET /config отдаёт значение из NOTIFICATIONS__POLL_INTERVAL_SECONDS).
     this._pollIntervalMs = DEFAULT_POLL_INTERVAL_MS;
+    // Флаг teardown: поллинг стартует асинхронно (после _loadConfig), а destroy()
+    // может успеть раньше резолва — тогда отложенный _startPolling не должен
+    // создать «осиротевший» таймер.
+    this._destroyed = false;
 
     /** @type {Map<string, {collect: Function, onItemClick?: Function}>} */
     this._sources = new Map();
@@ -82,6 +86,8 @@ export class NotificationCenter {
       return; // страница без колокольчика — ничего не делаем
     }
 
+    this._destroyed = false; // на случай повторной инициализации после destroy()
+
     this.btn.addEventListener('click', this._onBtnClick);
     if (this.closeBtn) this.closeBtn.addEventListener('click', this._onCloseClick);
     if (this.readAllBtn) this.readAllBtn.addEventListener('click', this._onReadAllClick);
@@ -92,8 +98,11 @@ export class NotificationCenter {
 
     if (this.enablePersisted) {
       // Сначала тянем интервал из конфига, затем запускаем поллинг. Сбой
-      // загрузки конфига → остаётся фолбэк-интервал.
-      this._loadConfig().then(() => this._startPolling());
+      // загрузки конфига → остаётся фолбэк-интервал. Guard _destroyed: если
+      // destroy() успел отработать до резолва — таймер не создаём.
+      this._loadConfig().then(() => {
+        if (!this._destroyed) this._startPolling();
+      });
     }
 
     this.refresh();
@@ -220,6 +229,7 @@ export class NotificationCenter {
    * Снимает все обработчики и таймеры (для тестов / переинициализации).
    */
   destroy() {
+    this._destroyed = true;
     this._stopPolling();
     if (this.btn) this.btn.removeEventListener('click', this._onBtnClick);
     if (this.closeBtn) this.closeBtn.removeEventListener('click', this._onCloseClick);
