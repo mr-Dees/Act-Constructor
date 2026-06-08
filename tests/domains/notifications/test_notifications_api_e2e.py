@@ -226,6 +226,32 @@ def test_create_broadcast_default_severity():
     assert kwargs["severity"] == "info"
 
 
+def test_create_rejects_overlong_title():
+    """Слишком длинный title отвергается на входе (422), а не падает 500 в БД."""
+    svc = _make_service()
+    app = _build_app(svc)
+    with TestClient(app) as client:
+        resp = client.post(
+            "/api/v1/notifications",
+            json={"source": "manual", "title": "A" * 301},
+        )
+    assert resp.status_code == 422, resp.text
+    svc.push.assert_not_awaited()
+
+
+def test_create_rejects_invalid_severity():
+    """severity вне набора Literal отвергается на входе (422)."""
+    svc = _make_service()
+    app = _build_app(svc)
+    with TestClient(app) as client:
+        resp = client.post(
+            "/api/v1/notifications",
+            json={"source": "manual", "title": "Ок", "severity": "critical"},
+        )
+    assert resp.status_code == 422, resp.text
+    svc.push.assert_not_awaited()
+
+
 # ── Общий колокольчик: НЕТ доменного гейта (public_api) ───────────────────────
 
 
