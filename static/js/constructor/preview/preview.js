@@ -10,7 +10,7 @@ import { PreviewTextBlockRenderer } from './preview-textblock-renderer.js';
 import { PreviewViolationRenderer } from './preview-violation-renderer.js';
 import { AppState } from '../state/state-core.js';
 import { AppConfig } from '../../shared/app-config.js';
-import { ValidationTable } from '../validation/validation-table.js';
+import { invalidateTableWarningsCache, getCachedTableWarnings } from '../header/notifications-source-tables.js';
 import { PreviewFitScaler } from './preview-fit.js';
 
 export class PreviewManager {
@@ -56,6 +56,12 @@ export class PreviewManager {
             this._pendingUpdate = false;
             this._pendingOptions = null;
             const {previewTrim = AppConfig.preview.defaultTrimLength} = opts || {};
+            // Сбрасываем кеш замечаний ДО рендера: _applyTableOutlines (рамки) и
+            // collectTableItems (колокольчик) пересчитают снимок один раз и
+            // переиспользуют его. Инвалидация здесь, а не на content-changed,
+            // потому что событие летит ПОСЛЕ outlines — иначе рамки читали бы
+            // устаревший кеш.
+            invalidateTableWarningsCache();
             this._performUpdate(previewTrim);
             this._emitContentChanged();
         });
@@ -170,8 +176,9 @@ export class PreviewManager {
      * @param {HTMLElement} sheet Контейнер с .preview-table-wrapper[data-table-id].
      */
     static _applyTableOutlines(sheet) {
-        let warnings = [];
-        try { warnings = ValidationTable.collectContentWarnings(); } catch (e) { return; }
+        // Закешированный снимок замечаний (тот же, что и у колокольчика). Геттер
+        // сам глотает исключения сборки и отдаёт [] — отдельный try/catch не нужен.
+        const warnings = getCachedTableWarnings();
         const sev = new Map();
         for (const w of warnings) {
             if (w.tableId == null) continue;
@@ -359,6 +366,8 @@ export class PreviewManager {
      * Используется после загрузки акта или изменения структуры
      */
     static forceUpdate() {
+        // Та же инвалидация кеша замечаний перед рендером, что и в update().
+        invalidateTableWarningsCache();
         this._performUpdate(AppConfig.preview.defaultTrimLength);
         this._emitContentChanged();
     }

@@ -10,7 +10,7 @@ import { TreeUtils } from '../tree/tree-utils.js';
 import { AppConfig } from '../../shared/app-config.js';
 import { ChatEventBus } from '../../shared/chat/chat-event-bus.js';
 import { Notifications } from '../../shared/notifications.js';
-import { colWidthsToPercents } from '../table/col-widths.js';
+import { buildColgroup } from '../table/colgroup.js';
 import { iterateVisibleCells } from '../table/grid-merges.js';
 
 export class ItemsRenderer {
@@ -686,7 +686,7 @@ export class ItemsRenderer {
         // colgroup задаёт ширину колонок из colWidths (единый источник истины) —
         // веса → проценты, при table-layout:fixed Word-подобная раскладка.
         tableEl.style.tableLayout = 'fixed';
-        tableEl.appendChild(this._createColgroup(table.colWidths, numCols));
+        tableEl.appendChild(buildColgroup(table.colWidths, numCols));
 
         table.grid.forEach((rowData, rowIndex) => {
             const tr = this._createTableRow(rowData, rowIndex, table.id, numCols);
@@ -694,28 +694,6 @@ export class ItemsRenderer {
         });
 
         return tableEl;
-    }
-
-    /**
-     * Строит <colgroup> с шириной каждой колонки в процентах из colWidths.
-     * При рассинхроне длины (нет/неверный colWidths) делит ширину поровну.
-     * @param {number[]} colWidths - Веса колонок таблицы
-     * @param {number} numCols - Фактическое число колонок по grid
-     * @returns {HTMLElement} Элемент <colgroup>
-     * @private
-     */
-    static _createColgroup(colWidths, numCols) {
-        const colgroup = document.createElement('colgroup');
-        const widths = Array.isArray(colWidths) && colWidths.length === numCols
-            ? colWidths
-            : new Array(numCols).fill(100);
-        const percents = colWidthsToPercents(widths);
-        percents.forEach(pct => {
-            const col = document.createElement('col');
-            col.style.width = `${pct}%`;
-            colgroup.appendChild(col);
-        });
-        return colgroup;
     }
 
     /**

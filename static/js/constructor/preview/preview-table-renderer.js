@@ -5,7 +5,7 @@
  * и обработкой заголовков.
  */
 import { iterateVisibleCells } from '../table/grid-merges.js';
-import { colWidthsToPercents } from '../table/col-widths.js';
+import { buildColgroup } from '../table/colgroup.js';
 import { mergedHeaderAlign } from '../table/header-align.js';
 
 export class PreviewTableRenderer {
@@ -59,33 +59,10 @@ export class PreviewTableRenderer {
         // даёт Word-подобную раскладку пропорционально весам.
         const numCols = grid[0]?.length || 0;
         table.style.tableLayout = 'fixed';
-        table.appendChild(this._createColgroup(tableData.colWidths, numCols));
+        table.appendChild(buildColgroup(tableData.colWidths, numCols));
 
         this._renderRows(table, grid);
         return table;
-    }
-
-    /**
-     * Строит <colgroup> с шириной каждой колонки в процентах из colWidths.
-     * При рассинхроне длины (нет/неверный colWidths) делит ширину поровну.
-     * Пропорции совпадают с DOCX-билдером (`_compute_col_widths`: weight/sum).
-     * @param {number[]} colWidths - Веса колонок таблицы
-     * @param {number} numCols - Фактическое число колонок по grid
-     * @returns {HTMLElement} Элемент <colgroup>
-     * @private
-     */
-    static _createColgroup(colWidths, numCols) {
-        const colgroup = document.createElement('colgroup');
-        const widths = Array.isArray(colWidths) && colWidths.length === numCols
-            ? colWidths
-            : new Array(numCols).fill(100);
-        const percents = colWidthsToPercents(widths);
-        percents.forEach(pct => {
-            const col = document.createElement('col');
-            col.style.width = `${pct}%`;
-            colgroup.appendChild(col);
-        });
-        return colgroup;
     }
 
     /**

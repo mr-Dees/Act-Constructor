@@ -11,6 +11,28 @@
  * Рефреш центра — по событию `preview:content-changed` (живое обновление).
  */
 import { ValidationTable } from '../validation/validation-table.js';
+import { makeWarningsCache } from './notifications-warnings-cache.js';
+
+/** Модульный кеш замечаний по таблицам (один на конструктор). */
+const _warningsCache = makeWarningsCache(() => ValidationTable.collectContentWarnings());
+
+/**
+ * Возвращает закешированные замечания по таблицам.
+ *
+ * Первый вызов после инвалидации обходит дерево; последующие до следующей
+ * инвалидации отдают тот же снимок. Инвалидацию дёргает предпросмотр в начале
+ * каждого тика обновления (см. preview.js).
+ *
+ * @returns {Array}
+ */
+export function getCachedTableWarnings() {
+  return _warningsCache.get();
+}
+
+/** Сбрасывает кеш замечаний (вызывается предпросмотром перед перерасчётом). */
+export function invalidateTableWarningsCache() {
+  _warningsCache.invalidate();
+}
 
 /**
  * Скроллит к элементу предпросмотра и кратко подсвечивает его рамкой.
@@ -64,12 +86,9 @@ function navigateToTable(tableId, center) {
  * @returns {Array<{id:string,title:string,body:string,severity:string,onClick:Function}>}
  */
 function collectTableItems(center) {
-  let warnings = [];
-  try {
-    warnings = ValidationTable.collectContentWarnings();
-  } catch (e) {
-    return [];
-  }
+  // Тот же снимок, что и рамки таблиц в предпросмотре — без повторного обхода
+  // дерева (кеш инвалидируется предпросмотром в начале тика обновления).
+  const warnings = getCachedTableWarnings();
 
   return warnings.map((w, i) => ({
     id: `tables:${w.tableId}:${i}`,
