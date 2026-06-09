@@ -129,84 +129,17 @@ export function applyMergesToGrid(grid, merges) {
  * @returns {{valid:boolean, errors:string[]}} Результат с сообщениями (рус.).
  */
 export function validateGrid(grid) {
-    const errors = [];
-
     if (!Array.isArray(grid) || grid.length === 0) {
         return { valid: true, errors: [] };
     }
 
-    // 1. Прямоугольность.
-    const width = grid[0].length;
-    let rectangular = true;
-    for (let r = 0; r < grid.length; r++) {
-        if (grid[r].length !== width) {
-            rectangular = false;
-            errors.push(
-                `Строка ${r} имеет длину ${grid[r].length}, ожидалось ${width} (сетка не прямоугольная)`,
-            );
-        }
-    }
-    if (!rectangular) {
-        // Дальнейшие индексные проверки небезопасны на рваной сетке.
-        return { valid: false, errors };
-    }
-
-    const rows = grid.length;
-    const cols = width;
-
-    // Карта покрытия: для каждой ячейки — ведущая координата объединения,
-    // её покрывающего (или null). Используется для проверки пересечений.
-    const coverage = Array.from({ length: rows }, () => new Array(cols).fill(null));
-
-    const merges = gridToMerges(grid);
-
-    // 2. Границы + 3. Пересечения.
-    for (const m of merges) {
-        const endRow = m.row + m.rowspan - 1;
-        const endCol = m.col + m.colspan - 1;
-        if (endRow >= rows || endCol >= cols) {
-            errors.push(
-                `Объединение в (${m.row},${m.col}) ${m.rowspan}×${m.colspan} выходит за границы сетки ${rows}×${cols}`,
-            );
-            continue;
-        }
-        for (let r = m.row; r <= endRow; r++) {
-            for (let c = m.col; c <= endCol; c++) {
-                if (coverage[r][c] !== null) {
-                    errors.push(
-                        `Объединения пересекаются в ячейке (${r},${c}): (${m.row},${m.col}) и (${coverage[r][c].row},${coverage[r][c].col})`,
-                    );
-                } else {
-                    coverage[r][c] = { row: m.row, col: m.col };
-                }
-            }
-        }
-    }
-
-    // 4 + 5. Поглощённые ячейки: spanOrigin ведёт на реальную ведущую, которая
-    // её покрывает; нет «висячих» isSpanned.
-    for (let r = 0; r < rows; r++) {
-        for (let c = 0; c < cols; c++) {
-            const cell = grid[r][c];
-            if (!cell.isSpanned) continue;
-
-            const cover = coverage[r][c];
-            if (!cover) {
-                errors.push(
-                    `Ячейка (${r},${c}) помечена isSpanned, но не покрыта ни одним объединением (висячий isSpanned)`,
-                );
-                continue;
-            }
-            const so = cell.spanOrigin;
-            if (!so || so.row !== cover.row || so.col !== cover.col) {
-                errors.push(
-                    `spanOrigin ячейки (${r},${c}) указывает на (${so ? so.row : '∅'},${so ? so.col : '∅'}), а покрывающее объединение ведёт из (${cover.row},${cover.col})`,
-                );
-            }
-        }
-    }
-
-    return { valid: errors.length === 0, errors };
+    // Полная строгая проверка — это региональная проверка по всей сетке:
+    // регион [0..rows-1] × [0..cols-1] охватывает все объединения и все
+    // поглощённые ячейки, поэтому правила границ/пересечений/spanOrigin
+    // применяются глобально (как и раньше). Тело продублированной логики
+    // вынесено в validateGridRegion — единый источник истины.
+    const cols = grid[0] ? grid[0].length : 1;
+    return validateGridRegion(grid, 0, 0, grid.length - 1, cols - 1);
 }
 
 /**

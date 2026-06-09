@@ -131,10 +131,10 @@ export function validateTableContent(grid) {
  * красным — ложная тревога. Красный = только то, что реально сломает экспорт.
  *
  * Длина colWidths СОЗНАТЕЛЬНО НЕ проверяется: сервер при несовпадении длины с
- * числом колонок молча ОЧИЩАЕТ веса (DOCX делит ширину поровну), а не отклоняет
- * сохранение. Клиент не должен быть строже сервера и предупреждать о состоянии,
- * которое сервер сам нормализует. Параметр сохранён в сигнатуре для совместимости
- * с вызовом из collectTableWarnings.
+ * числом колонок молча НОРМАЛИЗУЕТ веса (усечение/добивка под число колонок),
+ * а не отклоняет сохранение. Клиент не должен быть строже сервера и предупреждать
+ * о состоянии, которое сервер сам нормализует. Параметр сохранён в сигнатуре для
+ * совместимости с вызовом из collectTableWarnings.
  *
  * @param {Object[][]} grid Dense-сетка.
  * @param {number[]} [colWidths] Веса колонок (на дефект не влияют — см. описание).
@@ -156,6 +156,28 @@ export function hasStructuralDefect(grid, colWidths) {
       const rs = cell.rowSpan || 1;
       const cs = cell.colSpan || 1;
       if (r + rs - 1 >= grid.length || c + cs - 1 >= width) return true;
+    }
+  }
+
+  // Пересечение объединений — точное зеркало серверного шага 4
+  // (act_content.py:210-228). Строим coverage-матрицу из покрытий origin-ячеек,
+  // ПРОПУСКАЯ isSpanned и синглтоны (colSpan==1 && rowSpan==1). Если покрытие
+  // двух ведущих накладывается — DOCX-builder ломается, сервер отклоняет (422).
+  // Когерентность spanOrigin/isSpanned СОЗНАТЕЛЬНО не проверяем (см. описание).
+  const coverage = Array.from({ length: grid.length }, () => new Array(width).fill(false));
+  for (let r = 0; r < grid.length; r++) {
+    for (let c = 0; c < width; c++) {
+      const cell = grid[r][c];
+      if (cell.isSpanned) continue;
+      const rs = cell.rowSpan || 1;
+      const cs = cell.colSpan || 1;
+      if (rs === 1 && cs === 1) continue;
+      for (let rr = r; rr < r + rs; rr++) {
+        for (let cc = c; cc < c + cs; cc++) {
+          if (coverage[rr][cc]) return true;
+          coverage[rr][cc] = true;
+        }
+      }
     }
   }
 

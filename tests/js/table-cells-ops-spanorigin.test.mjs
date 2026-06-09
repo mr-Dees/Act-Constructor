@@ -18,7 +18,11 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { makeCell } from './_setup.mjs';
-import { validateGrid } from '../../static/js/constructor/table/grid-merges.js';
+import {
+  validateGrid,
+  gridToMerges,
+  applyMergesToGrid,
+} from '../../static/js/constructor/table/grid-merges.js';
 
 // ──────────────────────────────────────────────────────────────────────────
 // Реплики структурных операций (зеркало прод-арифметики, включая ROOT-сдвиг).
@@ -263,5 +267,152 @@ test('metrics: insertColumn перед «Кол-во» сдвигает spanOrig
   assert.equal(validateGrid(grid).valid, true, JSON.stringify(validateGrid(grid).errors));
   // «Кол-во» теперь ведущая на (0,2), поглощённая на (0,3) spanOrigin {0,2}.
   assert.equal(grid[0][2].colSpan, 2);
+  assert.deepEqual(grid[0][3].spanOrigin, { row: 0, col: 2 });
+});
+
+// ──────────────────────────────────────────────────────────────────────────
+// Баг #5: вставка колонки внутрь объединения в соседней строке роняет НЕ-spanned
+// синглтон ВНУТРЬ покрытия более широкого объединения. validateGrid его НЕ ловит
+// (coverage пропускает синглтоны) → молча битый экспорт. Фикс — нормализация
+// поглощённых флагов из range-list в КОНЦЕ операции (applyMergesToGrid ∘
+// gridToMerges). Реплики ниже зеркалят прод insertColumnLeft: тот же выбор точки
+// вставки (_findColumnStartOfSpan), та же арифметика span/originCol/_shiftSpanOrigins,
+// и тот же завершающий вызов реальных applyMergesToGrid/gridToMerges.
+// ──────────────────────────────────────────────────────────────────────────
+
+/** Зеркало TableCellsOperations._findColumnStartOfSpan: ПЕРВЫЙ row-major старт
+ * объединения, чьё покрытие включает colIndex. Именно этот выбор и роняет
+ * синглтон при двух объединениях в разных строках. */
+function findColumnStartOfSpan(grid, colIndex) {
+  for (let r = 0; r < grid.length; r++) {
+    for (let c = 0; c < colIndex; c++) {
+      const cd = grid[r][c];
+      if (!cd.isSpanned && (cd.colSpan || 1) > 1) {
+        if (c + cd.colSpan > colIndex) return c;
+      }
+    }
+  }
+  return colIndex;
+}
+
+/** Полная реплика insertColumnLeft, включая ROOT-сдвиг spanOrigin. Параметр
+ * `withNormalize` управляет завершающей нормализацией (прод-фикс): true — как в
+ * проде сейчас, false — поведение ДО фикса (для доказательства, что нормализация
+ * load-bearing). selectedCol — кликнутая колонка; точка вставки резолвится через
+ * findColumnStartOfSpan (как в проде). */
+function insertColumnLeftReplica(grid, selectedCol, withNormalize) {
+  const colIndex = findColumnStartOfSpan(grid, selectedCol);
+  for (let r = 0; r < grid.length; r++) {
+    grid[r].splice(colIndex, 0, makeCell({ originRow: r, originCol: colIndex }));
+  }
+  for (let r = 0; r < grid.length; r++) {
+    for (let c = colIndex + 1; c < grid[r].length; c++) {
+      if (grid[r][c].originCol !== undefined) grid[r][c].originCol = c;
+    }
+  }
+  for (let r = 0; r < grid.length; r++) {
+    for (let c = 0; c < colIndex; c++) {
+      const cd = grid[r][c];
+      if (!cd.isSpanned) {
+        const end = c + (cd.colSpan || 1);
+        if (end > colIndex) cd.colSpan = (cd.colSpan || 1) + 1;
+      }
+    }
+  }
+  for (let r = 0; r < grid.length; r++) {
+    for (let c = 0; c < grid[r].length; c++) {
+      const cd = grid[r][c];
+      if (cd.isSpanned && cd.spanOrigin && cd.spanOrigin.col >= colIndex) {
+        cd.spanOrigin.col += 1;
+      }
+    }
+  }
+  // Прод-фикс #5: нормализация поглощённых флагов из range-list.
+  if (withNormalize) grid = applyMergesToGrid(grid, gridToMerges(grid));
+  return grid;
+}
+
+/**
+ * Оракул (2): для КАЖДОЙ ведущей ячейки (не isSpanned, colSpan>1 или rowSpan>1)
+ * каждая покрытая ею ячейка (кроме самой ведущей) обязана быть isSpanned. Возвращает
+ * координаты первого НЕ-spanned синглтона внутри покрытия или null.
+ */
+function findNonSpannedInCoverage(grid) {
+  for (let r = 0; r < grid.length; r++) {
+    for (let c = 0; c < grid[r].length; c++) {
+      const cell = grid[r][c];
+      if (cell.isSpanned) continue;
+      const rs = cell.rowSpan || 1;
+      const cs = cell.colSpan || 1;
+      if (rs <= 1 && cs <= 1) continue;
+      for (let rr = r; rr < r + rs; rr++) {
+        for (let cc = c; cc < c + cs; cc++) {
+          if (rr === r && cc === c) continue;
+          if (!grid[rr][cc].isSpanned) return { row: rr, col: cc, leaderRow: r, leaderCol: c };
+        }
+      }
+    }
+  }
+  return null;
+}
+
+/**
+ * Сценарий бага: 2 строки, 7 колонок. row0 — объединение колонок [4..6]
+ * (origin col4 colSpan3). row1 — объединение [2..6] (origin col2 colSpan5).
+ * Колонки 4,5,6 покрыты ОБОИМИ объединениями (в разных строках) — это и есть
+ * условие, при котором _findColumnStartOfSpan(col5) вернёт row0/col4 и разрежет
+ * row0-объединение, оставив синглтон в покрытии row1-объединения.
+ */
+function gridTwoRowOverlap() {
+  const g = [0, 1].map((r) =>
+    Array.from({ length: 7 }, (_, c) => makeCell({ content: `${r}${c}`, originRow: r, originCol: c })),
+  );
+  // row0: объединение [4..6].
+  g[0][4].colSpan = 3;
+  g[0][5] = { isSpanned: true, spanOrigin: { row: 0, col: 4 }, originRow: 0, originCol: 5 };
+  g[0][6] = { isSpanned: true, spanOrigin: { row: 0, col: 4 }, originRow: 0, originCol: 6 };
+  // row1: объединение [2..6].
+  g[1][2].colSpan = 5;
+  g[1][3] = { isSpanned: true, spanOrigin: { row: 1, col: 2 }, originRow: 1, originCol: 3 };
+  g[1][4] = { isSpanned: true, spanOrigin: { row: 1, col: 2 }, originRow: 1, originCol: 4 };
+  g[1][5] = { isSpanned: true, spanOrigin: { row: 1, col: 2 }, originRow: 1, originCol: 5 };
+  g[1][6] = { isSpanned: true, spanOrigin: { row: 1, col: 2 }, originRow: 1, originCol: 6 };
+  return g;
+}
+
+test('#5: insertColumnLeft внутри пересекающихся объединений соседних строк — нормализация поглощает синглтон, сетка валидна', () => {
+  // Кликнута внутренняя колонка 5 (покрыта обоими объединениями).
+  const grid = insertColumnLeftReplica(gridTwoRowOverlap(), 5, true);
+  // Оракул (1): сетка валидна.
+  assert.equal(validateGrid(grid).valid, true, JSON.stringify(validateGrid(grid).errors));
+  // Оракул (2): ни одного НЕ-spanned синглтона внутри покрытия любой ведущей.
+  assert.equal(findNonSpannedInCoverage(grid), null, JSON.stringify(findNonSpannedInCoverage(grid)));
+});
+
+test('#5: БЕЗ нормализации тот же сценарий оставляет НЕ-spanned синглтон в покрытии (доказательство, что фикс load-bearing)', () => {
+  // Поведение ДО фикса: validateGrid всё равно «зелёный» (coverage пропускает
+  // синглтоны), НО внутри покрытия row1-объединения сидит НЕ-spanned синглтон →
+  // молча битый экспорт. Именно это и чинит нормализация в тесте выше.
+  const grid = insertColumnLeftReplica(gridTwoRowOverlap(), 5, false);
+  assert.equal(validateGrid(grid).valid, true); // валидатор НЕ ловит — суть бага
+  const bad = findNonSpannedInCoverage(grid);
+  assert.notEqual(bad, null, 'ожидался НЕ-spanned синглтон в покрытии (баг #5 до фикса)');
+});
+
+test('#5 golden: обычная вставка с ОДНИМ объединением не регрессировала', () => {
+  // Сетка 2×3 с горизонтальным объединением [1..2] в row0; row1 — синглтоны.
+  // Вставка слева перед колонкой 0 (вне объединения) не должна ничего ломать.
+  const g = [0, 1].map((r) =>
+    [0, 1, 2].map((c) => makeCell({ content: `${r}${c}`, originRow: r, originCol: c })),
+  );
+  g[0][1].colSpan = 2;
+  g[0][2] = { isSpanned: true, spanOrigin: { row: 0, col: 1 }, originRow: 0, originCol: 2 };
+  const grid = insertColumnLeftReplica(g, 0, true);
+  assert.equal(validateGrid(grid).valid, true, JSON.stringify(validateGrid(grid).errors));
+  assert.equal(findNonSpannedInCoverage(grid), null);
+  // Объединение целиком сдвинулось на одну колонку вправо: ведущая (0,2) colSpan2,
+  // поглощённая (0,3) с обновлённым spanOrigin.
+  assert.equal(grid[0][2].colSpan, 2);
+  assert.equal(grid[0][3].isSpanned, true);
   assert.deepEqual(grid[0][3].spanOrigin, { row: 0, col: 2 });
 });

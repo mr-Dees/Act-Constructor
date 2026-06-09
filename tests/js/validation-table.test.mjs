@@ -17,6 +17,7 @@ import {
   hasEmptyHeaders,
   hasDataRows,
   validateTableContent,
+  hasStructuralDefect,
 } from '../../static/js/constructor/validation/validation-table-core.js';
 
 /**
@@ -180,4 +181,61 @@ test('validateTableContent: корректная таблица (шапка + д
 test('validateTableContent: пустая/невалидная сетка → все флаги false (нечего проверять)', () => {
   assert.deepEqual(validateTableContent([]), { noHeader: false, emptyHeaders: false, noData: false });
   assert.deepEqual(validateTableContent(null), { noHeader: false, emptyHeaders: false, noData: false });
+});
+
+// ──────────────────────────────────────────────────────────────────────────
+// hasStructuralDefect — клиентское зеркало серверной TableSchema (#3).
+// Прямоугольность + границы span + ПЕРЕСЕЧЕНИЕ объединений (шаг 4 сервера).
+// Когерентность spanOrigin/isSpanned СОЗНАТЕЛЬНО НЕ проверяется (инертный stale
+// spanOrigin без реального пересечения — не дефект, толерантность сохранена).
+// ──────────────────────────────────────────────────────────────────────────
+
+test('hasStructuralDefect: два пересекающихся объединения → true (зеркало серверного 422)', () => {
+  // Ведущая (0,0) rowSpan=2 покрывает (0,0),(1,0). Ведущая (1,0) тоже со span
+  // (colSpan=2) — её покрытие (1,0),(1,1) пересекается с первым в (1,0).
+  // Обе НЕ isSpanned и НЕ синглтоны → попадают в coverage и конфликтуют.
+  const grid = [
+    [makeCell({ rowSpan: 2 }), makeCell()],
+    [makeCell({ colSpan: 2 }), makeCell()],
+  ];
+  assert.equal(hasStructuralDefect(grid, null), true);
+});
+
+test('hasStructuralDefect: инертный stale spanOrigin БЕЗ реального пересечения → false (толерантность)', () => {
+  // 2×2 без единого объединения (все синглтоны), но у (0,1) висит устаревший
+  // spanOrigin от прошлой операции. Реального пересечения покрытий нет — coverage
+  // пропускает синглтоны, поэтому stale spanOrigin не красится дефектом.
+  const grid = [
+    [makeCell(), makeCell({ spanOrigin: { row: 0, col: 0 } })],
+    [makeCell(), makeCell()],
+  ];
+  assert.equal(hasStructuralDefect(grid, null), false);
+});
+
+test('hasStructuralDefect: прямоугольная сетка без объединений → false', () => {
+  const grid = [
+    [makeCell(), makeCell(), makeCell()],
+    [makeCell(), makeCell(), makeCell()],
+  ];
+  assert.equal(hasStructuralDefect(grid, null), false);
+});
+
+test('hasStructuralDefect: корректные непересекающиеся объединения (metrics-шапка) → false', () => {
+  // Регресс-якорь: валидная metrics-сетка с тремя объединениями НЕ должна
+  // ложно срабатывать на новой coverage-проверке.
+  const grid = [
+    [
+      makeCell({ content: 'Код', isHeader: true, rowSpan: 2 }),
+      makeCell({ content: 'Кол-во', isHeader: true, colSpan: 2 }),
+      makeCell({ content: '', isHeader: true, isSpanned: true, spanOrigin: { row: 0, col: 1 } }),
+      makeCell({ content: 'Сумма', isHeader: true, rowSpan: 2 }),
+    ],
+    [
+      makeCell({ content: '', isHeader: true, isSpanned: true, spanOrigin: { row: 0, col: 0 } }),
+      makeCell({ content: 'ФЛ', isHeader: true }),
+      makeCell({ content: 'ЮЛ', isHeader: true }),
+      makeCell({ content: '', isHeader: true, isSpanned: true, spanOrigin: { row: 0, col: 3 } }),
+    ],
+  ];
+  assert.equal(hasStructuralDefect(grid, null), false);
 });

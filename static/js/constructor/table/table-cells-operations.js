@@ -11,7 +11,7 @@ import { AppConfig } from '../../shared/app-config.js';
 import { Notifications } from '../../shared/notifications.js';
 import { applyInsertColumnWidth, applyRemoveColumnWidth } from './col-widths.js';
 import { mergeRange, unmergeAt, autoUnmergeRow } from './table-merge-core.js';
-import { validateGridRegion } from './grid-merges.js';
+import { validateGridRegion, gridToMerges, applyMergesToGrid } from './grid-merges.js';
 
 export class TableCellsOperations {
     constructor(tableManager) {
@@ -201,6 +201,12 @@ export class TableCellsOperations {
         // сдвинувшуюся ведущую ячейку (иначе spanOrigin устаревает).
         this._shiftSpanOriginsForRowInsert(table, rowIndex);
 
+        // Нормализуем поглощённые флаги из геометрии origin-спанов: вставка внутрь
+        // объединения в соседней строке могла оставить НЕ-spanned синглтон внутри
+        // покрытия (валидаторы его не ловят → молча битый экспорт). Перестроение из
+        // range-list поглощает такой синглтон в объемлющее объединение.
+        table.grid = applyMergesToGrid(table.grid, gridToMerges(table.grid));
+
         this.clearSelection();
         ItemsRenderer.updateTable(tableId);
         PreviewManager.update();
@@ -280,6 +286,12 @@ export class TableCellsOperations {
         // Сдвигаем spanOrigin поглощённых ячеек объединений на/ниже insertRowIndex.
         this._shiftSpanOriginsForRowInsert(table, insertRowIndex);
 
+        // Нормализуем поглощённые флаги из геометрии origin-спанов: вставка внутрь
+        // объединения в соседней строке могла оставить НЕ-spanned синглтон внутри
+        // покрытия (валидаторы его не ловят → молча битый экспорт). Перестроение из
+        // range-list поглощает такой синглтон в объемлющее объединение.
+        table.grid = applyMergesToGrid(table.grid, gridToMerges(table.grid));
+
         this.clearSelection();
         ItemsRenderer.updateTable(tableId);
         PreviewManager.update();
@@ -349,6 +361,12 @@ export class TableCellsOperations {
 
         // Сдвигаем spanOrigin поглощённых ячеек объединений на/правее colIndex.
         this._shiftSpanOriginsForColInsert(table, colIndex);
+
+        // Нормализуем поглощённые флаги из геометрии origin-спанов: вставка внутрь
+        // объединения в соседней строке могла оставить НЕ-spanned синглтон внутри
+        // покрытия (валидаторы его не ловят → молча битый экспорт). Перестроение из
+        // range-list поглощает такой синглтон в объемлющее объединение.
+        table.grid = applyMergesToGrid(table.grid, gridToMerges(table.grid));
 
         applyInsertColumnWidth(table, colIndex);
         this.clearSelection();
@@ -439,6 +457,12 @@ export class TableCellsOperations {
 
         // Сдвигаем spanOrigin поглощённых ячеек объединений на/правее insertColIndex.
         this._shiftSpanOriginsForColInsert(table, insertColIndex);
+
+        // Нормализуем поглощённые флаги из геометрии origin-спанов: вставка внутрь
+        // объединения в соседней строке могла оставить НЕ-spanned синглтон внутри
+        // покрытия (валидаторы его не ловят → молча битый экспорт). Перестроение из
+        // range-list поглощает такой синглтон в объемлющее объединение.
+        table.grid = applyMergesToGrid(table.grid, gridToMerges(table.grid));
 
         applyInsertColumnWidth(table, insertColIndex);
         this.clearSelection();
