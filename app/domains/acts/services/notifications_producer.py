@@ -13,11 +13,6 @@ notifications-домена: так acts не зависит от наличия 
   не поднимается — никакой регрессии).
 """
 
-import logging
-
-logger = logging.getLogger("audit_workstation.service.acts.notifications")
-
-
 async def emit_act_notification(
     *,
     title: str,
@@ -38,24 +33,14 @@ async def emit_act_notification(
         recipient_user_id: адресат; ``None`` — broadcast всем (использовать
             осознанно).
     """
-    # Локальный импорт: не создаёт жёсткой зависимости acts → core на
-    # module-level и позволяет тестам патчить реестр фабрик.
-    from app.core.domain_registry import get_factory, has_factory
+    # Делегируем единому ядерному хелперу (резолв фабрики + мягкий try/except).
+    # Локальный импорт — без жёсткой зависимости на module-level.
+    from app.core.notifications_emit import push_notification
 
-    try:
-        if not has_factory("notifications.push"):
-            # Домен notifications не зарегистрирован — тихо пропускаем.
-            return
-        factory = get_factory("notifications.push")
-        async for svc in factory():
-            await svc.push(
-                source="acts",
-                title=title,
-                severity=severity,
-                link=link,
-                recipient_user_id=recipient_user_id,
-                created_by="system",
-            )
-    except Exception:
-        # Сбой уведомления НЕ должен ломать основную операцию.
-        logger.exception("Не удалось эмитировать уведомление акта")
+    await push_notification(
+        source="acts",
+        title=title,
+        severity=severity,
+        link=link,
+        recipient_user_id=recipient_user_id,
+    )

@@ -289,28 +289,18 @@ class AgentChannelService:
         if not recipient_user_id:
             return
 
-        try:
-            from app.core.domain_registry import get_factory, has_factory
+        # Делегируем единому ядерному хелперу (резолв фабрики + мягкий
+        # try/except). Локальный импорт — без жёсткой зависимости на
+        # module-level и для патчинга реестра в тестах.
+        from app.core.notifications_emit import push_notification
 
-            if not has_factory("notifications.push"):
-                return
-            factory = get_factory("notifications.push")
-            async for svc in factory():
-                await svc.push(
-                    source="chat",
-                    title=title,
-                    severity=severity,
-                    recipient_user_id=recipient_user_id,
-                    link=None,
-                    created_by="system",
-                )
-        except Exception:
-            logger.warning(
-                "agent_channel: не удалось эмитировать уведомление о ответе "
-                "агента (получатель=%s) — финализация не затронута",
-                recipient_user_id,
-                exc_info=True,
-            )
+        await push_notification(
+            source="chat",
+            title=title,
+            severity=severity,
+            link=None,
+            recipient_user_id=recipient_user_id,
+        )
 
     async def try_finalize(
         self,
