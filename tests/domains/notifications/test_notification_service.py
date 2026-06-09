@@ -21,7 +21,9 @@ def service():
     ) as RepoCls:
         repo = MagicMock()
         repo.list_for_user = AsyncMock(return_value=[{"id": "n1"}])
-        repo.unread_count = AsyncMock(return_value=5)
+        repo.unread_summary = AsyncMock(
+            return_value={"count": 5, "severity": "warning"}
+        )
         repo.mark_read = AsyncMock()
         repo.mark_all_read = AsyncMock()
         repo.dismiss = AsyncMock()
@@ -39,10 +41,13 @@ async def test_list_for_user_delegates(service):
     service._repo_mock.list_for_user.assert_awaited_once_with("user1", limit=20)
 
 
-async def test_unread_count_delegates(service):
-    """unread_count делегирует в repo."""
-    assert await service.unread_count("user1") == 5
-    service._repo_mock.unread_count.assert_awaited_once_with("user1")
+async def test_unread_summary_delegates(service):
+    """unread_summary делегирует в repo (count + severity)."""
+    assert await service.unread_summary("user1") == {
+        "count": 5,
+        "severity": "warning",
+    }
+    service._repo_mock.unread_summary.assert_awaited_once_with("user1")
 
 
 async def test_mark_read_delegates(service):

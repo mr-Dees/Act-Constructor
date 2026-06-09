@@ -56,9 +56,13 @@ async def get_unread_count(
     username: str = Depends(get_username),
     service: NotificationService = Depends(get_notification_service),
 ):
-    """Возвращает число непрочитанных видимых уведомлений пользователя."""
-    count = await service.unread_count(username)
-    return UnreadCount(count=count)
+    """Число непрочитанных видимых уведомлений и их максимальная критичность.
+
+    ``severity`` (для окраски бейджа) = максимальная критичность среди
+    непрочитанных видимых уведомлений, или None, если непрочитанных нет.
+    """
+    summary = await service.unread_summary(username)
+    return UnreadCount(count=summary["count"], severity=summary["severity"])
 
 
 @router.get(

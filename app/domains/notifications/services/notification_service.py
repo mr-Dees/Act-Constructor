@@ -24,9 +24,12 @@ class NotificationService:
         """Возвращает видимые пользователю уведомления (адресные + broadcast)."""
         return await self.repo.list_for_user(user_id, limit=limit)
 
-    async def unread_count(self, user_id: str) -> int:
-        """Возвращает число непрочитанных видимых уведомлений пользователя."""
-        return await self.repo.unread_count(user_id)
+    async def unread_summary(self, user_id: str) -> dict:
+        """Число непрочитанных видимых уведомлений и их максимальная критичность.
+
+        Возвращает ``{"count": int, "severity": "error"|"warning"|"info"|None}``.
+        """
+        return await self.repo.unread_summary(user_id)
 
     async def mark_read(self, notification_id: str, user_id: str) -> None:
         """Помечает уведомление прочитанным."""

@@ -21,6 +21,18 @@ class NotificationRepository(BaseRepository):
         self.notifications = self.adapter.get_table_name("notifications")
         self.state = self.adapter.get_table_name("notification_state")
 
+    @staticmethod
+    def _visible_clause(param: int, *, alias: str = "", cast: str = "") -> str:
+        """Единый предикат видимости: адресное пользователю ИЛИ broadcast.
+
+        Broadcast — ``recipient_user_id IS NULL``. ``alias`` — префикс таблицы
+        (``"n"`` в list/count/mark_all_read; пусто в ``_is_visible_to_user``),
+        ``param`` — номер позиционного параметра ($1 vs $2), ``cast`` —
+        приведение типа (``"::varchar"`` в ``_is_visible_to_user``).
+        """
+        col = f"{alias}.recipient_user_id" if alias else "recipient_user_id"
+        return f"({col} = ${param}{cast} OR {col} IS NULL)"
+
     async def list_for_user(self, user_id: str, *, limit: int = 50) -> list[dict]:
         """Возвращает видимые пользователю уведомления (адресные + broadcast).
 
@@ -35,7 +47,7 @@ class NotificationRepository(BaseRepository):
             FROM {self.notifications} n
             LEFT JOIN {self.state} s
                 ON s.notification_id = n.id AND s.user_id = $1
-            WHERE (n.recipient_user_id = $1 OR n.recipient_user_id IS NULL)
+            WHERE {self._visible_clause(1, alias="n")}
               AND COALESCE(s.is_dismissed, FALSE) = FALSE
             ORDER BY n.created_at DESC
             LIMIT $2
@@ -45,24 +57,43 @@ class NotificationRepository(BaseRepository):
         )
         return [dict(r) for r in rows]
 
-    async def unread_count(self, user_id: str) -> int:
-        """Возвращает число непрочитанных видимых уведомлений пользователя.
+    # Ранжир критичности для max-severity бейджа: error самый высокий, далее
+    # warning, info; success (и прочее) — низший (0/None), чтобы не красить
+    # бейдж ложно. Набор severity — из CHECK check_notifications_severity.
+    _SEV_RANK_TO_STR = {3: "error", 2: "warning", 1: "info"}
+
+    async def unread_summary(self, user_id: str) -> dict:
+        """Число непрочитанных видимых уведомлений и их максимальная критичность.
 
         Непрочитанные = state нет ИЛИ is_read=FALSE, и при этом не скрытые.
+        Возвращает ``{"count": int, "severity": "error"|"warning"|"info"|None}``;
+        ``severity`` = максимальная критичность среди непрочитанных (или None,
+        если непрочитанных нет / только success). Считается одним запросом.
         """
-        count = await self.conn.fetchval(
+        row = await self.conn.fetchrow(
             f"""
-            SELECT COUNT(*)
+            SELECT COUNT(*) AS count,
+                   MAX(CASE n.severity
+                           WHEN 'error' THEN 3
+                           WHEN 'warning' THEN 2
+                           WHEN 'info' THEN 1
+                           ELSE 0
+                       END) AS sev_rank
             FROM {self.notifications} n
             LEFT JOIN {self.state} s
                 ON s.notification_id = n.id AND s.user_id = $1
-            WHERE (n.recipient_user_id = $1 OR n.recipient_user_id IS NULL)
+            WHERE {self._visible_clause(1, alias="n")}
               AND COALESCE(s.is_dismissed, FALSE) = FALSE
               AND COALESCE(s.is_read, FALSE) = FALSE
             """,
             user_id,
         )
-        return count or 0
+        count = (row["count"] if row else 0) or 0
+        sev_rank = row["sev_rank"] if row else None
+        return {
+            "count": count,
+            "severity": self._SEV_RANK_TO_STR.get(sev_rank),
+        }
 
     async def _is_visible_to_user(self, notification_id: str, user_id: str) -> bool:
         """Существует ли видимое пользователю уведомление с таким id.
@@ -76,7 +107,7 @@ class NotificationRepository(BaseRepository):
             SELECT EXISTS(
                 SELECT 1 FROM {self.notifications}
                 WHERE id = $1
-                  AND (recipient_user_id = $2::varchar OR recipient_user_id IS NULL)
+                  AND {self._visible_clause(2, cast="::varchar")}
             )
             """,
             notification_id,
@@ -134,7 +165,7 @@ class NotificationRepository(BaseRepository):
                 (notification_id, user_id, is_read, is_dismissed)
             SELECT n.id, $1::varchar, TRUE, FALSE
             FROM {self.notifications} n
-            WHERE (n.recipient_user_id = $1 OR n.recipient_user_id IS NULL)
+            WHERE {self._visible_clause(1, alias="n")}
               AND NOT EXISTS (
                   SELECT 1 FROM {self.state} s
                   WHERE s.notification_id = n.id AND s.user_id = $1

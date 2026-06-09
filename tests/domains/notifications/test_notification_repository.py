@@ -1,9 +1,10 @@
 """Тесты репозитория центра уведомлений.
 
 Покрывают: list_for_user (LEFT JOIN state, broadcast-видимость, скрытие
-dismissed, COALESCE is_read), unread_count, mark_read/dismiss (lazy upsert:
-UPDATE; если 0 строк — INSERT), mark_all_read, create. Стратегия: mock_conn
-+ autouse-патч get_adapter — как в tests/domains/chat/test_message_repository.py.
+dismissed, COALESCE is_read), unread_summary (count + max-severity), _visible_clause,
+mark_read/dismiss (lazy upsert: UPDATE; если 0 строк — INSERT), mark_all_read,
+create. Стратегия: mock_conn + autouse-патч get_adapter — как в
+tests/domains/chat/test_message_repository.py.
 """
 
 from unittest.mock import MagicMock, patch
@@ -23,6 +24,23 @@ def _patch_adapter():
     adapter.get_table_name = lambda name, schema="": name
     with patch("app.db.repositories.base.get_adapter", return_value=adapter):
         yield
+
+
+# ── _visible_clause (единый предикат видимости) ──────────────────────────────
+
+
+def test_visible_clause_equivalent_to_inlined_predicates():
+    """_visible_clause воспроизводит прежние 4 инлайн-предиката (без дрейфа SQL)."""
+    # list/count/mark_all_read: алиас n, $1, без приведения
+    assert (
+        NotificationRepository._visible_clause(1, alias="n")
+        == "(n.recipient_user_id = $1 OR n.recipient_user_id IS NULL)"
+    )
+    # _is_visible_to_user: без алиаса, $2, приведение ::varchar
+    assert (
+        NotificationRepository._visible_clause(2, cast="::varchar")
+        == "(recipient_user_id = $2::varchar OR recipient_user_id IS NULL)"
+    )
 
 
 # ── list_for_user ──────────────────────────────────────────────────────────
@@ -64,28 +82,49 @@ async def test_list_for_user_returns_dicts(mock_conn):
     ]
 
 
-# ── unread_count ────────────────────────────────────────────────────────────
+# ── unread_summary ──────────────────────────────────────────────────────────
 
 
-async def test_unread_count_query_and_value(mock_conn):
-    """unread_count считает непрочитанные видимые (нет state ИЛИ is_read=FALSE)."""
-    mock_conn.fetchval.return_value = 3
+async def test_unread_summary_query_and_value(mock_conn):
+    """unread_summary считает непрочитанные видимые и их max-severity одним запросом."""
+    mock_conn.fetchrow.return_value = {"count": 3, "sev_rank": 3}
     repo = NotificationRepository(mock_conn)
-    result = await repo.unread_count("user1")
+    result = await repo.unread_summary("user1")
 
-    sql, user_id = mock_conn.fetchval.call_args.args
-    assert "SELECT COUNT(*)" in sql
+    sql, user_id = mock_conn.fetchrow.call_args.args
+    assert "COUNT(*) AS count" in sql
+    assert "AS sev_rank" in sql
+    # max-severity через CASE-ранжир (error>warning>info>прочее)
+    assert "WHEN 'error' THEN 3" in sql
+    assert "WHEN 'warning' THEN 2" in sql
+    assert "WHEN 'info' THEN 1" in sql
     assert "COALESCE(s.is_read, FALSE) = FALSE" in sql
     assert "COALESCE(s.is_dismissed, FALSE) = FALSE" in sql
     assert user_id == "user1"
-    assert result == 3
+    assert result == {"count": 3, "severity": "error"}
 
 
-async def test_unread_count_none_returns_zero(mock_conn):
-    """unread_count возвращает 0, если fetchval вернул None."""
-    mock_conn.fetchval.return_value = None
+async def test_unread_summary_max_severity_mapping(mock_conn):
+    """sev_rank → строка: 3→error, 2→warning, 1→info, 0→None."""
     repo = NotificationRepository(mock_conn)
-    assert await repo.unread_count("user1") == 0
+    for rank, expected in [(3, "error"), (2, "warning"), (1, "info"), (0, None)]:
+        mock_conn.fetchrow.return_value = {"count": 2, "sev_rank": rank}
+        result = await repo.unread_summary("user1")
+        assert result == {"count": 2, "severity": expected}
+
+
+async def test_unread_summary_no_unread_severity_none(mock_conn):
+    """Непрочитанных нет: count=0, sev_rank=NULL → severity None."""
+    mock_conn.fetchrow.return_value = {"count": 0, "sev_rank": None}
+    repo = NotificationRepository(mock_conn)
+    assert await repo.unread_summary("user1") == {"count": 0, "severity": None}
+
+
+async def test_unread_summary_none_row_returns_zero(mock_conn):
+    """unread_summary устойчив к None-строке: count=0, severity None."""
+    mock_conn.fetchrow.return_value = None
+    repo = NotificationRepository(mock_conn)
+    assert await repo.unread_summary("user1") == {"count": 0, "severity": None}
 
 
 # ── mark_read (lazy upsert) ─────────────────────────────────────────────────

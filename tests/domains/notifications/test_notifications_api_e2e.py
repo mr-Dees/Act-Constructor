@@ -76,7 +76,7 @@ def _make_service() -> MagicMock:
     """Mock NotificationService с async-методами."""
     svc = MagicMock()
     svc.list_for_user = AsyncMock(return_value=[])
-    svc.unread_count = AsyncMock(return_value=0)
+    svc.unread_summary = AsyncMock(return_value={"count": 0, "severity": None})
     svc.mark_read = AsyncMock()
     svc.mark_all_read = AsyncMock()
     svc.dismiss = AsyncMock()
@@ -139,16 +139,30 @@ def test_list_without_limit_uses_settings_default():
 # ── GET /notifications/unread-count ──────────────────────────────────────────
 
 
-def test_unread_count():
-    """GET /notifications/unread-count возвращает {count}."""
+def test_unread_count_with_severity():
+    """GET /notifications/unread-count возвращает {count, severity}.
+
+    severity = максимальная критичность среди непрочитанных (для бейджа).
+    """
     svc = _make_service()
-    svc.unread_count.return_value = 7
+    svc.unread_summary.return_value = {"count": 7, "severity": "error"}
     app = _build_app(svc)
     with TestClient(app) as client:
         resp = client.get("/api/v1/notifications/unread-count")
     assert resp.status_code == 200, resp.text
-    assert resp.json() == {"count": 7}
-    assert svc.unread_count.await_args.args[0] == USERNAME
+    assert resp.json() == {"count": 7, "severity": "error"}
+    assert svc.unread_summary.await_args.args[0] == USERNAME
+
+
+def test_unread_count_severity_null_when_no_unread():
+    """Непрочитанных нет → count=0, severity=null (бейдж не красится)."""
+    svc = _make_service()
+    svc.unread_summary.return_value = {"count": 0, "severity": None}
+    app = _build_app(svc)
+    with TestClient(app) as client:
+        resp = client.get("/api/v1/notifications/unread-count")
+    assert resp.status_code == 200, resp.text
+    assert resp.json() == {"count": 0, "severity": None}
 
 
 # ── GET /notifications/config ────────────────────────────────────────────────
@@ -349,7 +363,7 @@ def test_public_api_skips_domain_gate():
     from app.domains.notifications import _build_domain
 
     svc = _make_service()
-    svc.unread_count.return_value = 3
+    svc.unread_summary.return_value = {"count": 3, "severity": "info"}
 
     app = FastAPI()
 
@@ -367,4 +381,4 @@ def test_public_api_skips_domain_gate():
         resp = client.get("/api/v1/notifications/unread-count")
 
     assert resp.status_code == 200, resp.text
-    assert resp.json() == {"count": 3}
+    assert resp.json() == {"count": 3, "severity": "info"}

@@ -41,9 +41,14 @@ class NotificationCreate(BaseModel):
 
 
 class UnreadCount(BaseModel):
-    """Число непрочитанных уведомлений (GET /api/v1/notifications/unread-count)."""
+    """Сводка непрочитанных уведомлений (GET /api/v1/notifications/unread-count).
+
+    ``severity`` — максимальная критичность среди непрочитанных видимых
+    уведомлений (для окраски бейджа), или None, если непрочитанных нет.
+    """
 
     count: int = Field(ge=0)
+    severity: Literal["error", "warning", "info"] | None = None
 
 
 class NotificationsConfigResponse(BaseModel):
