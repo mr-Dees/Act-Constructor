@@ -351,7 +351,6 @@ API:
 | Метод | Когда вызывается |
 |---|---|
 | `onRiskTableAdded(nodeId)` | Добавлена risk-таблица — создаёт metrics на 5.X (если risk на 5.X.Y+) и main metrics в §5 |
-| `onRiskTableRemoved()` | Risk-таблица удалена — реконсилит metrics во всём §5 |
 | `onSubtreeMoved(draggedNode, oldAncestor5x)` | Поддерево перемещено внутри §5 — пересчитывает metrics для старого и нового предка 5.X |
 | `onRiskTableRemovedWithDeletion(deleteFn)` | Удаление риск-узла под единым snapshot'ом: snapshot §5 снимается ДО `deleteFn()`, поэтому откат при сбое reconcile восстанавливает и сам риск-узел (D1) |
 

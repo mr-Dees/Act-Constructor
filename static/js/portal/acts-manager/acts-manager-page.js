@@ -898,8 +898,8 @@ export class ActsManagerPage {
         });
         if (!notice) return;
 
-        // Снимаем флаг до показа плашки — повторный заход не покажет её снова.
-        sessionStorage.removeItem(notice.flag);
+        // Снимаем ВСЕ exit-флаги: показали максимум по приоритету, прочие — устаревшие.
+        ['sessionLockLost', 'sessionAutoExited', 'sessionExitedWithSave'].forEach((k) => sessionStorage.removeItem(k));
 
         await DialogManager.alert({
             title: notice.title,

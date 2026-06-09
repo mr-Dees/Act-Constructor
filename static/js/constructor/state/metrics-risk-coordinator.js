@@ -101,22 +101,6 @@ export const MetricsRiskCoordinator = {
     },
 
     /**
-     * Хук «риск-таблица удалена». Реконсилит metrics во всём §5 (функция работает
-     * глобально, удалённый nodeId уже не нужен — см. M7).
-     *
-     * Используется для путей, где риск-узел уже удалён ДО входа в хук
-     * (например, каскадное удаление потомков). Snapshot покрывает только §5 и
-     * tables. Для удаления самого риск-узла используй
-     * onRiskTableRemovedWithDeletion — оно покрывает и удаление узла (D1).
-     * @returns {boolean} true при успехе, false если был rollback.
-     */
-    onRiskTableRemoved() {
-        return this._withSnapshot('onRiskTableRemoved', () => {
-            AppState._cleanupMetricsTablesAfterRiskTableDeleted();
-        });
-    },
-
-    /**
      * D1: удаление риск-узла под ЕДИНЫМ snapshot'ом.
      *
      * Snapshot §5 снимается ДО deleteFn() (фактического удаления риск-узла),
