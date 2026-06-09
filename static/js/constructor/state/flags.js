@@ -50,12 +50,18 @@ export function reconcileTableFlags(node, tables) {
     if (node.type === 'table' && node.tableId) {
         const table = tables ? tables[node.tableId] : null;
         if (table) {
+            // Узел — источник истины. Берём активный флаг узла; если на узле его нет, но
+            // есть на таблице (legacy-акт) — поднимаем. Флаги ВЗАИМОИСКЛЮЧАЮЩИЕ: выставляем
+            // ровно один (или ни одного), прочие гасим. Пишем ТОЛЬКО при реальном изменении —
+            // иначе чистая загрузка пометит акт несохранённым (AppState — Proxy).
+            const source =
+                TABLE_FLAG_NAMES.find((n) => node[n]) ||
+                TABLE_FLAG_NAMES.find((n) => table[n]) ||
+                null;
             for (const name of TABLE_FLAG_NAMES) {
-                // Любая сторона выставила флаг → обе стороны его получают.
-                if (node[name] || table[name]) {
-                    node[name] = true;
-                    table[name] = true;
-                }
+                const on = name === source;
+                if (!!node[name] !== on) node[name] = on;
+                if (!!table[name] !== on) table[name] = on;
             }
         }
     }
