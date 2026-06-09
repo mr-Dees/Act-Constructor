@@ -82,6 +82,22 @@ export function computeBadge(persistedUnread, liveCount) {
 }
 
 /**
+ * Форматирует число для текста бейджа с клампингом «много» к виду "max+".
+ *
+ * Точное число (включая трёхзначные) показывается как есть до порога max;
+ * выше — "99+" (по умолчанию), чтобы бейдж не распирало. Дробное усекается,
+ * отрицательное и нечисловое (NaN/Infinity) → "0".
+ *
+ * @param {number} count Итоговое число (persisted + live).
+ * @param {number} [max=99] Порог, выше которого показывается "max+".
+ * @returns {string} Текст для `badge.textContent`.
+ */
+export function formatBadgeCount(count, max = 99) {
+  const n = Number.isFinite(count) ? Math.max(0, Math.trunc(count)) : 0;
+  return n > max ? max + '+' : String(n);
+}
+
+/**
  * Сливает живые и персистентные уведомления в единый упорядоченный список.
  *
  * Решение по порядку: ЖИВЫЕ идут сверху. Это замечания, которые пользователь
@@ -177,6 +193,7 @@ if (typeof window !== 'undefined') {
     normalizeSeverity,
     pickBadgeSeverity,
     computeBadge,
+    formatBadgeCount,
     mergeFeed,
     countPersistedUnread,
     resolvePollIntervalMs,

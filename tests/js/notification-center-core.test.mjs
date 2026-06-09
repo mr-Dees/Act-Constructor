@@ -8,6 +8,7 @@
  *   - mergeFeed — порядок (живые сверху), нормализация формы и kind.
  *   - countPersistedUnread — подсчёт непрочитанных.
  *   - resolvePollIntervalMs — секунды→мс, фолбэк и нижняя граница.
+ *   - formatBadgeCount — клампинг к "max+" и нормализация мусора к "0".
  */
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
@@ -18,6 +19,7 @@ import {
   mergeFeed,
   countPersistedUnread,
   resolvePollIntervalMs,
+  formatBadgeCount,
 } from '../../static/js/shared/notifications-center/notification-center-core.js';
 
 // ── normalizeSeverity ───────────────────────────────────────────────────────
@@ -183,4 +185,22 @@ test('resolvePollIntervalMs: кастомные defaultMs/minMs', () => {
   assert.equal(resolvePollIntervalMs(undefined, { defaultMs: 10000 }), 10000);
   assert.equal(resolvePollIntervalMs(1, { minMs: 3000 }), 3000);
   assert.equal(resolvePollIntervalMs(120, { minMs: 3000, defaultMs: 10000 }), 120000);
+});
+
+// ── formatBadgeCount ──────────────────────────────────────────────────────────
+
+test('formatBadgeCount: значения в пределах max возвращаются как есть', () => {
+  assert.equal(formatBadgeCount(0), '0');
+  assert.equal(formatBadgeCount(99), '99');
+});
+
+test('formatBadgeCount: превышение max клампится к "99+"', () => {
+  assert.equal(formatBadgeCount(100), '99+');
+  assert.equal(formatBadgeCount(150), '99+');
+});
+
+test('formatBadgeCount: отрицательное → "0", дробное усечается, NaN → "0"', () => {
+  assert.equal(formatBadgeCount(-3), '0');
+  assert.equal(formatBadgeCount(5.7), '5');
+  assert.equal(formatBadgeCount(NaN), '0');
 });

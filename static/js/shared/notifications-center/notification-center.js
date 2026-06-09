@@ -19,6 +19,7 @@ import { AppConfig } from '../app-config.js';
 import {
   pickBadgeSeverity,
   computeBadge,
+  formatBadgeCount,
   mergeFeed,
   countPersistedUnread,
   resolvePollIntervalMs,
@@ -56,10 +57,15 @@ export class NotificationCenter {
     // создать «осиротевший» таймер.
     this._destroyed = false;
 
-    /** @type {Map<string, {collect: Function, onItemClick?: Function}>} */
+    /** @type {Map<string, {collect: Function}>} */
     this._sources = new Map();
     /** Последний снимок персистентных уведомлений (форма NotificationOut). */
     this._persisted = [];
+    // Точное число непрочитанных персистентных с сервера (GET .../unread-count).
+    // Снимок /notifications ограничен limit=50, поэтому подсчёт по списку врёт
+    // при большом хвосте — для бейджа используем это точное число, когда оно
+    // загружено. null до первой удачной загрузки (тогда fallback на подсчёт).
+    this._persistedUnreadCount = null;
 
     // Стабильные ссылки на обработчики — нужны для destroy().
     this._onBtnClick = (e) => { e.stopPropagation(); this.toggle(); };
@@ -111,9 +117,8 @@ export class NotificationCenter {
   /**
    * Регистрирует живой источник уведомлений.
    * @param {string} key Уникальный ключ источника (например 'tables').
-   * @param {{collect: () => Array, onItemClick?: (item:Object)=>void}} handlers
-   *   collect — собирает живые элементы (форма {id,title,body,severity,source?});
-   *   onItemClick — обработчик клика по живому элементу.
+   * @param {{collect: () => Array}} handlers
+   *   collect — собирает живые элементы (форма {id,title,body,severity,source?}).
    */
   registerSource(key, handlers) {
     if (!key || !handlers || typeof handlers.collect !== 'function') return;
@@ -171,7 +176,11 @@ export class NotificationCenter {
    * @param {Array} persisted
    */
   _renderBadge(live, persisted) {
-    const persistedUnread = countPersistedUnread(persisted);
+    // Точное серверное число непрочитанных приоритетнее подсчёта по снимку
+    // (снимок ограничен limit=50). До первой удачной загрузки — fallback на снимок.
+    const persistedUnread = (this._persistedUnreadCount != null)
+      ? this._persistedUnreadCount
+      : countPersistedUnread(persisted);
     const { count, hidden } = computeBadge(persistedUnread, live.length);
 
     if (hidden) {
@@ -181,7 +190,7 @@ export class NotificationCenter {
     }
 
     this.badge.classList.remove('hidden');
-    this.badge.textContent = String(count);
+    this.badge.textContent = formatBadgeCount(count);
 
     // Цвет — по непрочитанным персистентным + живым (прочитанные персистентные
     // в окраску бейджа не входят, они уже не «требуют внимания»).
@@ -306,6 +315,15 @@ export class NotificationCenter {
       if (!resp.ok) return;
       const data = await resp.json();
       if (Array.isArray(data)) this._persisted = data;
+      // Точное число непрочитанных — отдельным запросом (снимок выше ограничен
+      // limit=50). Сбой не критичен: остаётся прежнее значение _persistedUnreadCount.
+      const cr = await fetch(AppConfig.api.getUrl('/api/v1/notifications/unread-count'), {
+        headers: { Accept: 'application/json' },
+      });
+      if (cr.ok) {
+        const cd = await cr.json();
+        if (Number.isFinite(cd && cd.count)) this._persistedUnreadCount = cd.count;
+      }
     } catch (e) {
       // тихо — оставляем прежний снимок
     }
@@ -318,6 +336,11 @@ export class NotificationCenter {
    */
   async _markRead(id) {
     const item = this._persisted.find((n) => n && n.id === id);
+    // Оптимистично уменьшаем серверный счётчик только при реальном переходе
+    // непрочитано→прочитано (повторный клик по прочитанному не должен врать).
+    if (item && item.is_read !== true && this._persistedUnreadCount != null && this._persistedUnreadCount > 0) {
+      this._persistedUnreadCount -= 1;
+    }
     if (item) item.is_read = true; // оптимистично
     this.refresh();
     try {
@@ -335,6 +358,11 @@ export class NotificationCenter {
    * @param {string} id
    */
   async _dismiss(id) {
+    // Если скрываемое уведомление было непрочитано — уменьшаем серверный счётчик.
+    const dismissed = this._persisted.find((n) => n && n.id === id);
+    if (dismissed && dismissed.is_read !== true && this._persistedUnreadCount != null && this._persistedUnreadCount > 0) {
+      this._persistedUnreadCount -= 1;
+    }
     this._persisted = this._persisted.filter((n) => !(n && n.id === id));
     this.refresh();
     try {
@@ -351,6 +379,7 @@ export class NotificationCenter {
     for (const n of this._persisted) {
       if (n) n.is_read = true;
     }
+    this._persistedUnreadCount = 0; // оптимистично: всё прочитано
     this.refresh();
     try {
       await fetch(AppConfig.api.getUrl('/api/v1/notifications/read-all'), { method: 'POST' });
@@ -456,8 +485,10 @@ export class NotificationCenter {
     if (item.link) {
       let url = AppConfig.api.getUrl(item.link);
       if (item.element_ref) {
-        // best-effort: добавляем якорь на элемент.
-        url += (url.includes('#') ? '' : '#') + encodeURIComponent(item.element_ref);
+        // Якорь строим из чистой базы (отбрасываем существующий фрагмент),
+        // иначе ссылка с готовым '#...' не получит element_ref.
+        const base = url.split('#')[0];
+        url = base + '#' + encodeURIComponent(item.element_ref);
       }
       this.close();
       window.location.href = url;
