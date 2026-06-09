@@ -24,6 +24,7 @@ from app.domains.chat.repositories.chat_message_feedback_repository import (
 from app.domains.chat.repositories.conversation_repository import ConversationRepository
 from app.domains.chat.repositories.file_repository import FileRepository
 from app.domains.chat.repositories.message_repository import MessageRepository
+from app.domains.chat.services.chat_analytics_service import ChatAnalyticsService
 from app.domains.chat.services.chat_audit_service import ChatAuditService
 from app.domains.chat.services.chat_feedback_service import ChatFeedbackService
 from app.domains.chat.services.conversation_service import ConversationService
@@ -171,6 +172,15 @@ async def get_feedback_service() -> AsyncGenerator[ChatFeedbackService, None]:
         yield ChatFeedbackService(
             repo=ChatMessageFeedbackRepository(conn),
             audit_service=audit,
+        )
+
+
+async def get_analytics_service() -> AsyncGenerator[ChatAnalyticsService, None]:
+    """Создаёт ChatAnalyticsService (admin-аналитика чата) с подключением из пула."""
+    async with get_db() as conn:
+        yield ChatAnalyticsService(
+            feedback_repo=ChatMessageFeedbackRepository(conn),
+            msg_repo=MessageRepository(conn),
         )
 
 

@@ -22,9 +22,46 @@ class ChatMessageFeedbackRepository(BaseRepository):
 
     def __init__(self, conn: asyncpg.Connection):
         super().__init__(conn)
+        schema = resolve_chat_schema()
         self.table = self.adapter.get_table_name(
-            "chat_message_feedback", schema=resolve_chat_schema(),
+            "chat_message_feedback", schema=schema,
         )
+        # Для join'а с текстом ответа в аналитике (list_feedback).
+        self.msg_table = self.adapter.get_table_name(
+            "chat_messages", schema=schema,
+        )
+
+    @staticmethod
+    def _filters(
+        *,
+        prefix: str = "",
+        rating: str | None = None,
+        route_type: str | None = None,
+        agent_mode: str | None = None,
+        date_from: str | None = None,
+        date_to: str | None = None,
+        start_idx: int = 1,
+    ) -> tuple[str, list, int]:
+        """Строит WHERE-клаузу и параметры для аналитических выборок.
+
+        ``prefix`` (например ``"f."``) квалифицирует колонки при join'е, где
+        ``created_at`` неоднозначен. Даты кастуются ``::timestamp`` (принимаем
+        строку YYYY-MM-DD). Возвращает (where_sql, params, next_idx)."""
+        conds: list[str] = []
+        params: list = []
+        i = start_idx
+        if rating is not None:
+            conds.append(f"{prefix}rating = ${i}"); params.append(rating); i += 1
+        if route_type is not None:
+            conds.append(f"{prefix}route_type = ${i}"); params.append(route_type); i += 1
+        if agent_mode is not None:
+            conds.append(f"{prefix}agent_mode = ${i}"); params.append(agent_mode); i += 1
+        if date_from is not None:
+            conds.append(f"{prefix}created_at >= ${i}::timestamp"); params.append(date_from); i += 1
+        if date_to is not None:
+            conds.append(f"{prefix}created_at <= ${i}::timestamp"); params.append(date_to); i += 1
+        where = ("WHERE " + " AND ".join(conds)) if conds else ""
+        return where, params, i
 
     @staticmethod
     def _parse_row(row) -> dict:
@@ -157,3 +194,151 @@ class ChatMessageFeedbackRepository(BaseRepository):
             user_id,
         )
         return {r["message_id"]: self._parse_row(r) for r in rows}
+
+    # ── Аналитика (admin) ───────────────────────────────────────────────────
+
+    async def get_all_for_conversation(
+        self, conversation_id: str,
+    ) -> dict[str, list[dict]]:
+        """Все оценки беседы (всех пользователей), сгруппированные по message_id.
+
+        Для инспектора диалога: админ видит оценки всех пользователей.
+        """
+        rows = await self.conn.fetch(
+            f"SELECT * FROM {self.table} WHERE conversation_id = $1 "
+            f"ORDER BY created_at",
+            conversation_id,
+        )
+        out: dict[str, list[dict]] = {}
+        for r in rows:
+            out.setdefault(r["message_id"], []).append(self._parse_row(r))
+        return out
+
+    async def get_stats(
+        self,
+        *,
+        route_type: str | None = None,
+        agent_mode: str | None = None,
+        date_from: str | None = None,
+        date_to: str | None = None,
+        reasons_sample_limit: int = 5000,
+    ) -> dict:
+        """Агрегаты обратной связи: всего/up/down/like_rate, срезы по маршруту,
+        модели и причинам дизлайка.
+
+        Каждый агрегат — отдельный простой GROUP BY (GP-совместимо). Причины
+        (JSONB-массив) считаются в Python по ограниченной выборке дизлайков,
+        чтобы не зависеть от set-returning функций в FROM на GP."""
+        where, params, _ = self._filters(
+            route_type=route_type, agent_mode=agent_mode,
+            date_from=date_from, date_to=date_to,
+        )
+
+        rating_rows = await self.conn.fetch(
+            f"SELECT rating, COUNT(*) AS cnt FROM {self.table} {where} "
+            f"GROUP BY rating",
+            *params,
+        )
+        by_rating = {r["rating"]: int(r["cnt"]) for r in rating_rows}
+        up = by_rating.get("up", 0)
+        down = by_rating.get("down", 0)
+        total = up + down
+
+        route_rows = await self.conn.fetch(
+            f"SELECT route_type, rating, COUNT(*) AS cnt FROM {self.table} {where} "
+            f"GROUP BY route_type, rating",
+            *params,
+        )
+        by_route: dict[str, dict[str, int]] = {}
+        for r in route_rows:
+            key = r["route_type"] or "unknown"
+            by_route.setdefault(key, {"up": 0, "down": 0})
+            by_route[key][r["rating"]] = int(r["cnt"])
+
+        model_rows = await self.conn.fetch(
+            f"SELECT model, rating, COUNT(*) AS cnt FROM {self.table} {where} "
+            f"GROUP BY model, rating",
+            *params,
+        )
+        by_model: dict[str, dict[str, int]] = {}
+        for r in model_rows:
+            key = r["model"] or "unknown"
+            by_model.setdefault(key, {"up": 0, "down": 0})
+            by_model[key][r["rating"]] = int(r["cnt"])
+
+        # Причины дизлайка — по ограниченной выборке (JSONB-массив, считаем в Python).
+        rwhere, rparams, ridx = self._filters(
+            rating="down", route_type=route_type, agent_mode=agent_mode,
+            date_from=date_from, date_to=date_to,
+        )
+        reason_rows = await self.conn.fetch(
+            f"SELECT reasons FROM {self.table} {rwhere} AND reasons IS NOT NULL "
+            f"LIMIT ${ridx}",
+            *rparams, int(reasons_sample_limit),
+        )
+        by_reason: dict[str, int] = {}
+        for r in reason_rows:
+            parsed = self._parse_row(r).get("reasons") or []
+            if isinstance(parsed, list):
+                for code in parsed:
+                    by_reason[code] = by_reason.get(code, 0) + 1
+
+        like_rate = round(up / total, 4) if total else None
+        return {
+            "total": total,
+            "up": up,
+            "down": down,
+            "like_rate": like_rate,
+            "by_route": by_route,
+            "by_model": by_model,
+            "by_reason": by_reason,
+        }
+
+    async def list_feedback(
+        self,
+        *,
+        rating: str | None = None,
+        route_type: str | None = None,
+        agent_mode: str | None = None,
+        date_from: str | None = None,
+        date_to: str | None = None,
+        limit: int = 50,
+        offset: int = 0,
+    ) -> tuple[list[dict], int]:
+        """Пагинированный список оценок с контентом оцененного ответа.
+
+        join к chat_messages даёт content ответа (для предпросмотра «что
+        ответили»). Возвращает (items, total)."""
+        where, params, idx = self._filters(
+            prefix="f.", rating=rating, route_type=route_type,
+            agent_mode=agent_mode, date_from=date_from, date_to=date_to,
+        )
+        total = await self.conn.fetchval(
+            f"SELECT COUNT(*) FROM {self.table} f {where}",
+            *params,
+        )
+        rows = await self.conn.fetch(
+            f"""
+            SELECT f.message_id, f.conversation_id, f.user_id, f.rating,
+                   f.reasons, f.comment, f.route_type, f.agent_mode, f.model,
+                   f.created_at, f.updated_at,
+                   m.content AS message_content, m.status AS message_status
+            FROM {self.table} f
+            LEFT JOIN {self.msg_table} m ON m.id = f.message_id
+            {where}
+            ORDER BY f.created_at DESC
+            LIMIT ${idx} OFFSET ${idx + 1}
+            """,
+            *params, int(limit), int(offset),
+        )
+        items = []
+        for r in rows:
+            item = self._parse_row(r)
+            mc = item.get("message_content")
+            if isinstance(mc, str):
+                try:
+                    item["message_content"] = json.loads(mc)
+                except json.JSONDecodeError:
+                    item["message_content"] = None
+            items.append(item)
+        return items, int(total or 0)

@@ -146,3 +146,84 @@ async def test_get_map_for_conversation(mock_conn):
     # фильтр по conversation_id и user_id
     sql, *params = mock_conn.fetch.call_args.args
     assert params == ["c1", "u1"]
+
+
+# ── Аналитика ────────────────────────────────────────────────────────────
+
+
+async def test_get_stats_aggregates_counts_routes_models_reasons(mock_conn):
+    """get_stats считает total/up/down/like_rate и срезы по route/model/reason."""
+    repo = ChatMessageFeedbackRepository(mock_conn)
+    mock_conn.fetch.side_effect = [
+        # rating
+        [{"rating": "up", "cnt": 7}, {"rating": "down", "cnt": 3}],
+        # route_type x rating
+        [
+            {"route_type": "kb_agent", "rating": "up", "cnt": 4},
+            {"route_type": "kb_agent", "rating": "down", "cnt": 2},
+            {"route_type": "smalltalk", "rating": "up", "cnt": 3},
+            {"route_type": "smalltalk", "rating": "down", "cnt": 1},
+        ],
+        # model x rating
+        [{"model": "gpt-4o", "rating": "up", "cnt": 7},
+         {"model": "gpt-4o", "rating": "down", "cnt": 3}],
+        # reasons sample (down)
+        [{"reasons": json.dumps(["inaccurate", "other"])},
+         {"reasons": json.dumps(["inaccurate"])}],
+    ]
+
+    stats = await repo.get_stats()
+
+    assert stats["total"] == 10
+    assert stats["up"] == 7
+    assert stats["down"] == 3
+    assert stats["like_rate"] == 0.7
+    assert stats["by_route"]["kb_agent"] == {"up": 4, "down": 2}
+    assert stats["by_model"]["gpt-4o"] == {"up": 7, "down": 3}
+    assert stats["by_reason"] == {"inaccurate": 2, "other": 1}
+
+
+async def test_get_stats_empty_like_rate_none(mock_conn):
+    """Нет оценок → like_rate=None, без деления на ноль."""
+    repo = ChatMessageFeedbackRepository(mock_conn)
+    mock_conn.fetch.side_effect = [[], [], [], []]
+    stats = await repo.get_stats()
+    assert stats["total"] == 0
+    assert stats["like_rate"] is None
+
+
+async def test_list_feedback_returns_items_and_total(mock_conn):
+    """list_feedback: COUNT + выборка с join'ом контента ответа."""
+    repo = ChatMessageFeedbackRepository(mock_conn)
+    mock_conn.fetchval.return_value = 2
+    mock_conn.fetch.return_value = [
+        {
+            "message_id": "m1", "conversation_id": "c1", "user_id": "u1",
+            "rating": "down", "reasons": json.dumps(["inaccurate"]),
+            "comment": "плохо", "route_type": "kb_agent", "agent_mode": "always",
+            "model": "gpt-4o", "created_at": None, "updated_at": None,
+            "message_content": json.dumps([{"type": "text", "content": "Ответ"}]),
+            "message_status": "complete",
+        },
+    ]
+    items, total = await repo.list_feedback(rating="down", limit=10, offset=0)
+    assert total == 2
+    assert len(items) == 1
+    assert items[0]["reasons"] == ["inaccurate"]
+    # message_content десериализован в список блоков
+    assert items[0]["message_content"] == [{"type": "text", "content": "Ответ"}]
+
+
+async def test_get_all_for_conversation_groups_by_message(mock_conn):
+    """get_all_for_conversation группирует оценки всех пользователей по message_id."""
+    repo = ChatMessageFeedbackRepository(mock_conn)
+    mock_conn.fetch.return_value = [
+        {"message_id": "a1", "user_id": "u1", "rating": "up", "reasons": None},
+        {"message_id": "a1", "user_id": "u2", "rating": "down",
+         "reasons": json.dumps(["other"])},
+        {"message_id": "a2", "user_id": "u1", "rating": "up", "reasons": None},
+    ]
+    grouped = await repo.get_all_for_conversation("c1")
+    assert set(grouped.keys()) == {"a1", "a2"}
+    assert len(grouped["a1"]) == 2
+    assert grouped["a1"][1]["reasons"] == ["other"]
