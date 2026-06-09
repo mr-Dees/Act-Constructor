@@ -7,6 +7,7 @@
 
 import { ChatContext } from './chat-context.js';
 import { ChatEventBus } from './chat-event-bus.js';
+import { ChatFeedback } from './chat-feedback.js';
 import { ChatFiles } from './chat-files.js';
 import { ChatRenderer } from './chat-renderer.js';
 import { ChatStream } from './chat-stream.js';
@@ -207,6 +208,16 @@ export const ChatMessages = {
         } else {
             const blocks = Array.isArray(msg.content) ? msg.content : [];
             ChatRenderer.typeOutBlocks(botContainer, blocks);
+            // Панель обратной связи под завершённым ответом ассистента.
+            // Свежий ответ оценок ещё не имеет (initial=null); conversationId
+            // берём из активного контекста (poll-ответ его не содержит).
+            if (msg.id) {
+                ChatFeedback.attach(botContainer, {
+                    conversationId: ChatContext.getCurrentConversationId(),
+                    messageId: msg.id,
+                    initial: msg.feedback || null,
+                });
+            }
         }
     },
 
@@ -415,6 +426,15 @@ export const ChatMessages = {
                     if (isFailed) {
                         const msgEl = container.parentElement;
                         if (msgEl) msgEl.classList.add('chat-message--failed');
+                    }
+                    // Панель обратной связи + восстановление ранее выставленной
+                    // оценки текущего пользователя (msg.feedback из GET истории).
+                    if (!isStreaming && !isFailed && msg.id) {
+                        ChatFeedback.attach(container, {
+                            conversationId: msg.conversation_id || conversationId,
+                            messageId: msg.id,
+                            initial: msg.feedback || null,
+                        });
                     }
                     // Если сообщение ещё в статусе streaming — возобновляем polling
                     if (isStreaming && msg.id) {
