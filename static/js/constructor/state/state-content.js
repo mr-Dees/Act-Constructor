@@ -144,7 +144,7 @@ Object.assign(AppState, {
         };
 
         const node = {
-            id: `${parentId}_${type}_${Date.now()}`,
+            id: `${parentId}_${type}_${Date.now()}_${Math.random().toString(36).substring(2, 9)}`,
             label: label || defaultLabels[type],
             type,
             [idProps[type]]: contentId,
