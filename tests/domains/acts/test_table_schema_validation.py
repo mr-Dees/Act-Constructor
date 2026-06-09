@@ -4,12 +4,15 @@
 Проверяют, что схема таблицы отбраковывает заведомо битые данные (→ 422):
 - верхние границы colSpan / rowSpan (R6);
 - прямоугольность матрицы (A2);
-- совпадение числа ширин с числом колонок (A2);
 - объединения в пределах границ таблицы (R6, закрывает IndexError в DOCX);
+- объединения не пересекаются (покрытия origin-ов не накладываются);
 - взаимоисключение флагов подвида таблицы (A3).
 
-Отдельно — что реальные сетки (двухстрочная шапка метрик, обычная 3×3)
-проходят валидацию без ложных отказов.
+Отдельно:
+- несовпадение числа ширин с числом колонок НЕ отбраковывается, а
+  нормализует colWidths в пустой список (билдер делит ширину поровну);
+- реальные сетки (двухстрочная шапка метрик, обычная 3×3) проходят
+  валидацию без ложных отказов.
 """
 import pytest
 from pydantic import ValidationError
@@ -77,12 +80,26 @@ class TestRectangularity:
 
 class TestColWidthsMatchColumns:
 
-    def test_widths_mismatch_rejected(self):
-        with pytest.raises(ValidationError, match="ширин колонок"):
-            _table(
-                [[{"content": "A"}, {"content": "B"}, {"content": "C"}]],
-                colWidths=[100, 100],  # 2 ширины на 3 колонки
-            )
+    def test_widths_mismatch_cleared(self):
+        """colWidths не совпадает по длине → очищается, таблица создаётся.
+
+        Несовпадение ширин — не структурный дефект: билдер делит ширину
+        поровну при пустом colWidths. Поэтому валидатор нормализует поле в
+        пустой список, а не отклоняет таблицу.
+        """
+        t = _table(
+            [[{"content": "A"}, {"content": "B"}, {"content": "C"}]],
+            colWidths=[100, 100],  # 2 ширины на 3 колонки
+        )
+        assert t.colWidths == []
+
+    def test_widths_too_long_cleared(self):
+        """colWidths длиннее числа колонок → тоже очищается."""
+        t = _table(
+            [[{"content": "A"}, {"content": "B"}, {"content": "C"}]],
+            colWidths=[100, 100, 100, 100],  # 4 веса на 3 колонки
+        )
+        assert t.colWidths == []
 
     def test_widths_match_allowed(self):
         t = _table(
@@ -122,6 +139,63 @@ class TestSpanWithinBounds:
             [{"content": "C"}, {"content": "D"}],
         ])
         assert t.grid[0][0].colSpan == 2
+
+
+# ── Пересечения объединений (origin-ы накладываются → крэш билдера) ──
+
+
+class TestSpanIntersections:
+    """Проверяет, что пересекающиеся origin-объединения отклоняются (→ 422).
+
+    КРИТИЧНО: проверяется ТОЛЬКО пересечение покрытий origin-ов. Когерентность
+    spanOrigin / пометка поглощённых isSpanned СОЗНАТЕЛЬНО не валидируется —
+    легаси-операции вставки колонок/строк оставляют инертный устаревший
+    spanOrigin, который и билдер, и сервер игнорируют (см. находку #2).
+    """
+
+    def test_overlapping_origins_rejected(self):
+        """Два origin-а перекрывают одну колонку → пересечение.
+
+        (0,0) colSpan=2 покрывает (0,0)+(0,1); (0,1) colSpan=2 покрывает
+        (0,1)+(0,2). Ячейка (0,1) — НЕ isSpanned (это второй origin), её
+        покрытие пересекается с покрытием первого origin'а.
+        """
+        with pytest.raises(ValidationError, match="пересека"):
+            _table([
+                [{"content": "A", "colSpan": 2},
+                 {"content": "B", "colSpan": 2},
+                 {"content": "C"}],
+                [{"content": "1"}, {"content": "2"}, {"content": "3"}],
+            ])
+
+    def test_adjacent_spans_allowed(self):
+        """Корректные смежные (не пересекающиеся) объединения проходят."""
+        t = _table([
+            [{"content": "A", "colSpan": 2},
+             {"content": "", "isSpanned": True},
+             {"content": "C", "rowSpan": 2}],
+            [{"content": "1"}, {"content": "2"},
+             {"content": "", "isSpanned": True}],
+        ])
+        assert t.grid[0][0].colSpan == 2
+        assert t.grid[0][2].rowSpan == 2
+
+    def test_inert_stale_span_origin_passes(self):
+        """РЕГРЕССИЯ-ГАРД #2: инертный устаревший spanOrigin не ломает валидацию.
+
+        Ячейка (1,1) помечена isSpanned со spanOrigin, указывающим НЕ на
+        покрывающий её origin (легаси-остаток после вставки/удаления колонки).
+        Реального пересечения origin-ов нет, поэтому таблица обязана пройти —
+        фиксирует, что spanOrigin-coherence НЕ портирована из фронта.
+        """
+        t = _table([
+            [{"content": "A"}, {"content": "B"}, {"content": "C"}],
+            [{"content": "1"},
+             {"content": "", "isSpanned": True,
+              "spanOrigin": {"row": 0, "col": 0}},
+             {"content": "3"}],
+        ])
+        assert len(t.grid) == 2
 
 
 # ── T6a.2 (4): взаимоисключение флагов подвида (A3) ──

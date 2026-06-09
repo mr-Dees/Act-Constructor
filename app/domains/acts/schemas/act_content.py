@@ -161,13 +161,22 @@ class TableSchema(BaseModel):
 
         Сообщения на русском и указывают КУДА смотреть пользователю:
         1. прямоугольность матрицы (все строки одной длины);
-        2. совпадение числа ширин колонок с числом колонок;
+        2. число ширин колонок: при несовпадении с числом колонок colWidths
+           ОЧИЩАЕТСЯ (а не отклоняется) — билдер делит ширину поровну;
         3. объединения ячеек не выходят за границы матрицы (закрывает
            IndexError в DOCX-builder'е);
-        4. взаимоисключение флагов подвида таблицы (не более одного типа).
+        4. объединения не пересекаются — покрытия двух origin-ячеек не
+           накладываются (закрывает крэш DOCX-builder'а на наложении merge);
+        5. взаимоисключение флагов подвида таблицы (не более одного типа).
+
+        СОЗНАТЕЛЬНО НЕ проверяется когерентность spanOrigin и пометка
+        поглощённых ячеек isSpanned: легаси-операции вставки/удаления колонок
+        и строк оставляют инертный устаревший spanOrigin, который и билдер
+        (читает только isSpanned), и сервер игнорируют. Проверять его — ложная
+        тревога.
 
         Returns:
-            Сам объект (валидация after-режима).
+            Сам объект (валидация after-режима; colWidths может быть очищен).
 
         Raises:
             ValueError: При нарушении любого инварианта (→ HTTP 422).
@@ -184,13 +193,10 @@ class TableSchema(BaseModel):
                         f"{len(row)} ячеек вместо {cols}"
                     )
 
-        # 2. Число ширин = число колонок (пустой colWidths допустим — DOCX делит
-        #    ширину поровну).
+        # 2. Число ширин = число колонок. При несовпадении colWidths очищается
+        #    (билдер делит ширину поровну при пустом списке) — это не дефект.
         if self.colWidths and rows and len(self.colWidths) != cols:
-            raise ValueError(
-                f"Число ширин колонок ({len(self.colWidths)}) не совпадает с "
-                f"числом колонок таблицы ({cols})"
-            )
+            self.colWidths = []
 
         # 3. Объединения в пределах границ матрицы.
         for r, row in enumerate(self.grid):
@@ -201,7 +207,27 @@ class TableSchema(BaseModel):
                             f"Объединение ячейки ({r},{c}) выходит за границы таблицы"
                         )
 
-        # 4. Взаимоисключение флагов подвида таблицы.
+        # 4. Объединения не пересекаются. Строим coverage-матрицу из покрытий
+        #    origin-ячеек (не isSpanned, со span>1); пересечение покрытий двух
+        #    origin-ов роняет DOCX-builder. spanOrigin поглощённых НЕ читаем.
+        coverage: list[list[tuple[int, int] | None]] = [
+            [None] * cols for _ in range(rows)
+        ]
+        for r, row in enumerate(self.grid):
+            for c, cell in enumerate(row):
+                if cell.isSpanned:
+                    continue
+                if cell.colSpan == 1 and cell.rowSpan == 1:
+                    continue
+                for rr in range(r, r + cell.rowSpan):
+                    for cc in range(c, c + cell.colSpan):
+                        if coverage[rr][cc] is not None:
+                            raise ValueError(
+                                f"Объединения пересекаются в ячейке ({rr},{cc})"
+                            )
+                        coverage[rr][cc] = (r, c)
+
+        # 5. Взаимоисключение флагов подвида таблицы.
         type_flags = {
             "isMetricsTable": self.isMetricsTable,
             "isMainMetricsTable": self.isMainMetricsTable,
