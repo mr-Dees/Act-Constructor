@@ -113,6 +113,13 @@ async def test_clear_returns_false_when_absent(mock_conn):
     assert await repo.clear(message_id="m1", user_id="u1") is False
 
 
+async def test_clear_handles_unexpected_status_format(mock_conn):
+    """Неожиданный формат статуса (без числа) → False, без исключения."""
+    repo = ChatMessageFeedbackRepository(mock_conn)
+    mock_conn.execute.return_value = "DELETE"
+    assert await repo.clear(message_id="m1", user_id="u1") is False
+
+
 async def test_get_for_message_parses_reasons(mock_conn):
     """reasons из JSON-строки парсится в список."""
     repo = ChatMessageFeedbackRepository(mock_conn)

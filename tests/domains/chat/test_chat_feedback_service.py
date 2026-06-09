@@ -5,12 +5,25 @@ from unittest.mock import AsyncMock, MagicMock
 import pytest
 
 from app.domains.chat.exceptions import ChatFeedbackValidationError
+from app.domains.chat.services import conversation_service as _conv_svc
 from app.domains.chat.services import route_classifier as rc
 from app.domains.chat.services.chat_feedback_service import (
     MAX_COMMENT_LENGTH,
     ChatFeedbackService,
     feedback_public_dict,
 )
+
+
+@pytest.fixture(autouse=True)
+def _clean_user_locks():
+    """Сброс глобального кэша per-user lock'ов между тестами.
+
+    submit/clear используют _get_user_lock из conversation_service. Без сброса
+    asyncio.Lock из закрытого event loop переиспользуется в новом → flaky
+    «got Future attached to a different loop» (правило CLAUDE.md)."""
+    _conv_svc._user_locks.clear()
+    yield
+    _conv_svc._user_locks.clear()
 
 
 def _msg(**kw):
@@ -122,6 +135,34 @@ async def test_submit_passes_agent_mode_snapshot():
     svc, repo, _ = _service()
     await svc.submit(message=_msg(), user_id="u1", rating="up", agent_mode="adaptive")
     assert repo.upsert.await_args.kwargs["agent_mode"] == "adaptive"
+
+
+async def test_submit_down_after_up_overwrites_rating():
+    """Переключение up→down: вторая оценка перезаписывает первую с причинами."""
+    svc, repo, _ = _service()
+    await svc.submit(message=_msg(), user_id="u1", rating="up")
+    await svc.submit(
+        message=_msg(), user_id="u1", rating="down", reasons=["inaccurate"],
+    )
+    calls = repo.upsert.await_args_list
+    assert len(calls) == 2
+    assert calls[0].kwargs["rating"] == "up"
+    assert calls[1].kwargs["rating"] == "down"
+    assert calls[1].kwargs["reasons"] == ["inaccurate"]
+
+
+async def test_submit_up_after_down_drops_reasons():
+    """Переключение down→up: лайк сбрасывает причины/комментарий."""
+    svc, repo, _ = _service()
+    await svc.submit(
+        message=_msg(), user_id="u1", rating="down",
+        reasons=["inaccurate"], comment="плохо",
+    )
+    await svc.submit(message=_msg(), user_id="u1", rating="up")
+    calls = repo.upsert.await_args_list
+    assert calls[1].kwargs["rating"] == "up"
+    assert calls[1].kwargs["reasons"] is None
+    assert calls[1].kwargs["comment"] is None
 
 
 async def test_clear_calls_repo_and_audits():
