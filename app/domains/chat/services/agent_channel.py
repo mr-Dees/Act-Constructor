@@ -345,10 +345,21 @@ class AgentChannelService:
                 "code": "agent_error",
                 "message": error_message,
             }
-            await message_repo.mark_failed(
+            failed = await message_repo.mark_failed(
                 message_id=assistant_message_id,
                 error_block=error_block,
             )
+            if failed:
+                # Уведомление об ошибке — ровно один раз, на тике, который
+                # реально перевёл сообщение в терминал, и ДО set_status: при
+                # сбое set_status поллер повторит try_finalize, но mark_failed
+                # вернёт False — уведомление не задвоится и не потеряется.
+                # best-effort (см. _emit_answer_notification).
+                await self._emit_answer_notification(
+                    question=question,
+                    title="Ошибка ответа базы знаний",
+                    severity="error",
+                )
             # Закрываем вопрос: AW — source-of-truth освобождения слота лимита,
             # не полагаемся на то, что внешний агент проставит терминальный
             # status (он мог выставить только reply_to). Не best-effort: при
@@ -356,13 +367,6 @@ class AgentChannelService:
             # и поллер повторит try_finalize на следующем тике (mark_failed
             # идемпотентен — вернёт False на уже не-streaming сообщении).
             await agent_repo.set_status(conversation_id=question_uid, status="error")
-            # Уведомление об ошибке ответа — после успешного mark_failed/set_status,
-            # best-effort (см. _emit_answer_notification).
-            await self._emit_answer_notification(
-                question=question,
-                title="Ошибка ответа базы знаний",
-                severity="error",
-            )
             return "done"
 
         # Транслируем кнопки (acts.open_act_page → open_url) перед маппингом в блоки.
@@ -373,21 +377,25 @@ class AgentChannelService:
             answer,
             max_block_text_size=self._settings.agent_channel.max_block_text_size,
         )
-        await message_repo.finalize(
+        finalized = await message_repo.finalize(
             message_id=assistant_message_id,
             final_blocks=blocks,
         )
+        if finalized:
+            # Уведомление о готовности — ровно один раз, на тике, который
+            # реально финализировал черновик, и ДО set_status: при сбое
+            # set_status поллер повторит try_finalize, но finalize вернёт False
+            # — уведомление не задвоится и не потеряется. best-effort
+            # (см. _emit_answer_notification).
+            await self._emit_answer_notification(
+                question=question,
+                title="Готов ответ базы знаний",
+                severity="info",
+            )
         # Закрываем вопрос в шине: освобождаем слот лимита независимо от того,
         # проставил ли внешний агент терминальный status (мог выставить только
         # reply_to). AW — source-of-truth. Вне общей транзакции: при сбое
         # set_status поллер повторит try_finalize на следующем тике (finalize
         # идемпотентен — вернёт False на уже complete-сообщении).
         await agent_repo.set_status(conversation_id=question_uid, status="complete")
-        # Уведомление о готовности ответа — ТОЛЬКО после успешной финализации
-        # ответа, best-effort (см. _emit_answer_notification).
-        await self._emit_answer_notification(
-            question=question,
-            title="Готов ответ базы знаний",
-            severity="info",
-        )
         return "done"
