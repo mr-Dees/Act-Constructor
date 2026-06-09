@@ -4,6 +4,8 @@
  * Покрывают:
  *   - pickBadgeSeverity — приоритет error > warning > info; пусто → info;
  *     учёт и живых, и персистентных; нормализация неизвестных severity.
+ *   - pickBadgeSeverityWithServer — свёртка серверной severity (хвост за снимком
+ *     limit=50) в общий расчёт цвета; null/пусто не влияют.
  *   - computeBadge — скрытие при сумме 0, суммирование непрочитанных + живых.
  *   - mergeFeed — порядок (живые сверху), нормализация формы и kind.
  *   - countPersistedUnread — подсчёт непрочитанных.
@@ -15,6 +17,7 @@ import assert from 'node:assert/strict';
 import {
   normalizeSeverity,
   pickBadgeSeverity,
+  pickBadgeSeverityWithServer,
   computeBadge,
   mergeFeed,
   countPersistedUnread,
@@ -61,6 +64,33 @@ test('pickBadgeSeverity: неизвестный severity трактуется к
   assert.equal(pickBadgeSeverity([{ severity: 'success' }]), 'info');
   // success среди warning не повышает критичность
   assert.equal(pickBadgeSeverity([{ severity: 'success' }, { severity: 'warning' }]), 'warning');
+});
+
+// ── pickBadgeSeverityWithServer ───────────────────────────────────────────────
+
+test('pickBadgeSeverityWithServer: error в хвосте за снимком (только серверная severity) → error', () => {
+  // Снимок (limit=50) не содержит непрочитанного error — он за позицией 50.
+  // Локальные элементы максимум warning, но сервер сообщает error.
+  const live = [{ severity: 'info' }];
+  const unreadPersisted = [{ severity: 'warning' }];
+  assert.equal(pickBadgeSeverityWithServer(live, unreadPersisted, 'error'), 'error');
+});
+
+test('pickBadgeSeverityWithServer: серверная severity не понижает локальный максимум', () => {
+  // Сервер говорит info, но в снимке есть непрочитанный error — итог error.
+  assert.equal(pickBadgeSeverityWithServer([], [{ severity: 'error' }], 'info'), 'error');
+});
+
+test('pickBadgeSeverityWithServer: null/пустая серверная severity → учитываются только локальные', () => {
+  assert.equal(pickBadgeSeverityWithServer([{ severity: 'warning' }], [], null), 'warning');
+  assert.equal(pickBadgeSeverityWithServer([{ severity: 'warning' }], [], undefined), 'warning');
+  // совсем пусто и нет серверной → info
+  assert.equal(pickBadgeSeverityWithServer([], [], null), 'info');
+});
+
+test('pickBadgeSeverityWithServer: невалидные массивы не падают', () => {
+  assert.equal(pickBadgeSeverityWithServer(null, null, 'warning'), 'warning');
+  assert.equal(pickBadgeSeverityWithServer(undefined, undefined, null), 'info');
 });
 
 // ── computeBadge ────────────────────────────────────────────────────────────

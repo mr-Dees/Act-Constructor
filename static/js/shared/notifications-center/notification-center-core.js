@@ -66,6 +66,30 @@ export function pickBadgeSeverity(items) {
 }
 
 /**
+ * Выбирает цвет бейджа с учётом серверной severity непрочитанных.
+ *
+ * Снимок /notifications ограничен limit=50, поэтому критичный элемент в хвосте
+ * (за позицией 50) не попадёт в `liveItems`/`unreadPersisted` и не покрасит
+ * бейдж. Бэкенд отдаёт `serverSeverity` = максимальную критичность непрочитанных
+ * видимых уведомлений (GET .../unread-count); она сворачивается в общий расчёт
+ * наравне с локальными элементами (итог — максимум критичности). `serverSeverity`
+ * null/пустое — учитываются только локальные элементы.
+ *
+ * @param {Array<{severity?: string}>} liveItems Живые элементы.
+ * @param {Array<{severity?: string}>} unreadPersisted Непрочитанные из снимка.
+ * @param {string|null} [serverSeverity] Серверная severity ('error'|'warning'|'info'|null).
+ * @returns {'error'|'warning'|'info'}
+ */
+export function pickBadgeSeverityWithServer(liveItems, unreadPersisted, serverSeverity) {
+  const colorItems = [
+    ...(Array.isArray(liveItems) ? liveItems : []),
+    ...(Array.isArray(unreadPersisted) ? unreadPersisted : []),
+  ];
+  if (serverSeverity) colorItems.push({ severity: serverSeverity });
+  return pickBadgeSeverity(colorItems);
+}
+
+/**
  * Считает значение и видимость бейджа.
  *
  * Бейдж = непрочитанные персистентные + число живых. Скрыт, когда сумма 0.
@@ -192,6 +216,7 @@ if (typeof window !== 'undefined') {
   window.NotificationCenterCore = {
     normalizeSeverity,
     pickBadgeSeverity,
+    pickBadgeSeverityWithServer,
     computeBadge,
     formatBadgeCount,
     mergeFeed,

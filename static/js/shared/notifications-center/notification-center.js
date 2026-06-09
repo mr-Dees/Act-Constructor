@@ -17,7 +17,7 @@
 import { EscapeStack } from '../escape-stack.js';
 import { AppConfig } from '../app-config.js';
 import {
-  pickBadgeSeverity,
+  pickBadgeSeverityWithServer,
   computeBadge,
   formatBadgeCount,
   mergeFeed,
@@ -66,6 +66,11 @@ export class NotificationCenter {
     // при большом хвосте — для бейджа используем это точное число, когда оно
     // загружено. null до первой удачной загрузки (тогда fallback на подсчёт).
     this._persistedUnreadCount = null;
+    // Максимальная критичность непрочитанных видимых уведомлений с сервера
+    // ('error'|'warning'|'info'|null). Снимок /notifications ограничен limit=50,
+    // поэтому error в хвосте за позицией 50 не попал бы в окраску бейджа — эта
+    // серверная severity сворачивается в расчёт цвета. null до первой загрузки.
+    this._persistedUnreadSeverity = null;
 
     // Стабильные ссылки на обработчики — нужны для destroy().
     this._onBtnClick = (e) => { e.stopPropagation(); this.toggle(); };
@@ -108,6 +113,11 @@ export class NotificationCenter {
       // destroy() успел отработать до резолва — таймер не создаём.
       this._loadConfig().then(() => {
         if (!this._destroyed) this._startPolling();
+      });
+      // Стартовая загрузка персистентных: иначе бейдж пуст до первого
+      // поллинг-тика (~30с). Guard _destroyed — destroy() мог успеть раньше.
+      this._loadPersisted().then(() => {
+        if (!this._destroyed) this.refresh();
       });
     }
 
@@ -193,9 +203,11 @@ export class NotificationCenter {
     this.badge.textContent = formatBadgeCount(count);
 
     // Цвет — по непрочитанным персистентным + живым (прочитанные персистентные
-    // в окраску бейджа не входят, они уже не «требуют внимания»).
+    // в окраску бейджа не входят, они уже не «требуют внимания»). Плюс серверная
+    // severity непрочитанных видимых: критичный элемент в хвосте за снимком
+    // (limit=50) иначе не покрасил бы бейдж.
     const unreadPersisted = persisted.filter((n) => n && n.is_read !== true);
-    const sev = pickBadgeSeverity([...live, ...unreadPersisted]);
+    const sev = pickBadgeSeverityWithServer(live, unreadPersisted, this._persistedUnreadSeverity);
     this.badge.classList.toggle('notif-badge--error', sev === 'error');
     this.badge.classList.toggle('notif-badge--warning', sev === 'warning');
     this.badge.classList.toggle('notif-badge--info', sev === 'info');
@@ -309,20 +321,24 @@ export class NotificationCenter {
   async _loadPersisted() {
     if (!this.enablePersisted) return;
     try {
-      const resp = await fetch(AppConfig.api.getUrl('/api/v1/notifications?limit=50'), {
-        headers: { Accept: 'application/json' },
-      });
-      if (!resp.ok) return;
-      const data = await resp.json();
-      if (Array.isArray(data)) this._persisted = data;
-      // Точное число непрочитанных — отдельным запросом (снимок выше ограничен
-      // limit=50). Сбой не критичен: остаётся прежнее значение _persistedUnreadCount.
-      const cr = await fetch(AppConfig.api.getUrl('/api/v1/notifications/unread-count'), {
-        headers: { Accept: 'application/json' },
-      });
-      if (cr.ok) {
+      // Два независимых запроса параллельно: снимок списка (limit=50) и точный
+      // счётчик непрочитанных + их максимальная severity. Каждый со своим
+      // .catch(()=>null), чтобы сбой одного не топил другой.
+      const [resp, cr] = await Promise.all([
+        fetch(AppConfig.api.getUrl('/api/v1/notifications?limit=50'), { headers: { Accept: 'application/json' } }).catch(() => null),
+        fetch(AppConfig.api.getUrl('/api/v1/notifications/unread-count'), { headers: { Accept: 'application/json' } }).catch(() => null),
+      ]);
+      if (resp && resp.ok) {
+        const data = await resp.json();
+        if (Array.isArray(data)) this._persisted = data;
+      }
+      // Точное число непрочитанных + severity — отдельным запросом (снимок выше
+      // ограничен limit=50). Сбой не критичен: остаются прежние значения.
+      if (cr && cr.ok) {
         const cd = await cr.json();
         if (Number.isFinite(cd && cd.count)) this._persistedUnreadCount = cd.count;
+        if (typeof cd.severity === 'string') this._persistedUnreadSeverity = cd.severity;
+        else if (cd && cd.severity === null) this._persistedUnreadSeverity = null;
       }
     } catch (e) {
       // тихо — оставляем прежний снимок
@@ -376,6 +392,7 @@ export class NotificationCenter {
 
   /** @private POST read-all + обновление. */
   async _markAllRead() {
+    const prevCount = this._persistedUnreadCount;
     for (const n of this._persisted) {
       if (n) n.is_read = true;
     }
@@ -386,7 +403,10 @@ export class NotificationCenter {
       await this._loadPersisted();
       this.refresh();
     } catch (e) {
-      // не критично
+      // Откат оптимистичного зануления: сервер read-all атомарен, при сбое состояние
+      // на сервере не изменилось. is_read-флаги самовосстановятся ближайшим поллингом.
+      this._persistedUnreadCount = prevCount;
+      this.refresh();
     }
   }
 
