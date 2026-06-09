@@ -11,7 +11,7 @@ import { AppConfig } from '../../shared/app-config.js';
 import { Notifications } from '../../shared/notifications.js';
 import { applyInsertColumnWidth, applyRemoveColumnWidth } from './col-widths.js';
 import { mergeRange, unmergeAt, autoUnmergeRow } from './table-merge-core.js';
-import { validateGrid } from './grid-merges.js';
+import { validateGridRegion } from './grid-merges.js';
 
 export class TableCellsOperations {
     constructor(tableManager) {
@@ -196,6 +196,11 @@ export class TableCellsOperations {
             }
         }
 
+        // Сдвигаем spanOrigin поглощённых ячеек, чьё объединение начинается на
+        // вставленной строке или ниже — чтобы spanOrigin продолжал указывать на
+        // сдвинувшуюся ведущую ячейку (иначе spanOrigin устаревает).
+        this._shiftSpanOriginsForRowInsert(table, rowIndex);
+
         this.clearSelection();
         ItemsRenderer.updateTable(tableId);
         PreviewManager.update();
@@ -272,6 +277,9 @@ export class TableCellsOperations {
             }
         }
 
+        // Сдвигаем spanOrigin поглощённых ячеек объединений на/ниже insertRowIndex.
+        this._shiftSpanOriginsForRowInsert(table, insertRowIndex);
+
         this.clearSelection();
         ItemsRenderer.updateTable(tableId);
         PreviewManager.update();
@@ -338,6 +346,9 @@ export class TableCellsOperations {
                 }
             }
         }
+
+        // Сдвигаем spanOrigin поглощённых ячеек объединений на/правее colIndex.
+        this._shiftSpanOriginsForColInsert(table, colIndex);
 
         applyInsertColumnWidth(table, colIndex);
         this.clearSelection();
@@ -426,6 +437,9 @@ export class TableCellsOperations {
             }
         }
 
+        // Сдвигаем spanOrigin поглощённых ячеек объединений на/правее insertColIndex.
+        this._shiftSpanOriginsForColInsert(table, insertColIndex);
+
         applyInsertColumnWidth(table, insertColIndex);
         this.clearSelection();
         ItemsRenderer.updateTable(tableId);
@@ -486,6 +500,10 @@ export class TableCellsOperations {
                 }
             }
         }
+
+        // Сдвигаем spanOrigin поглощённых ячеек объединений ниже удалённой строки
+        // (объединения, покрывавшие rowIndex, уже разъединены _autoUnmergeRow).
+        this._shiftSpanOriginsForRowDelete(table, rowIndex);
 
         this.clearSelection();
         ItemsRenderer.updateTable(tableId);
@@ -550,6 +568,10 @@ export class TableCellsOperations {
             }
         }
 
+        // Сдвигаем spanOrigin поглощённых ячеек объединений правее удалённой колонки
+        // (колонки с объединениями отсекаются проверкой _columnHasAnyMergedCells выше).
+        this._shiftSpanOriginsForColDelete(table, colIndex);
+
         applyRemoveColumnWidth(table, colIndex);
         this.clearSelection();
         ItemsRenderer.updateTable(tableId);
@@ -557,47 +579,89 @@ export class TableCellsOperations {
     }
 
     /**
-     * Снимок текущей сетки таблицы (deep clone) для отката структурной операции.
+     * Сдвигает spanOrigin поглощённых ячеек при ВСТАВКЕ колонки на insertIndex.
+     * Полный обход грида; гейт — только {isSpanned, spanOrigin}: user-merge ячейки
+     * несут лишь эти два поля (без originCol), поэтому гейтить на originCol нельзя.
+     * Если ведущая ячейка объединения находилась на/правее insertIndex, она
+     * сдвинулась на +1 колонку — обновляем spanOrigin.col синхронно.
      * @private
-     * @param {Object} table - Объект таблицы
-     * @returns {Object[][]} Глубокая копия table.grid
+     * @param {Object} table - Объект таблицы (grid уже изменён вставкой)
+     * @param {number} insertIndex - Индекс вставленной колонки
      */
-    _snapshotGrid(table) {
-        return JSON.parse(JSON.stringify(table.grid));
+    _shiftSpanOriginsForColInsert(table, insertIndex) {
+        for (let r = 0; r < table.grid.length; r++) {
+            for (let c = 0; c < table.grid[r].length; c++) {
+                const cellData = table.grid[r][c];
+                if (cellData.isSpanned && cellData.spanOrigin) {
+                    if (cellData.spanOrigin.col >= insertIndex) {
+                        cellData.spanOrigin.col += 1;
+                    }
+                }
+            }
+        }
     }
 
     /**
-     * Клиентская защита целостности (T6b.6): после структурной операции
-     * проверяет table.grid через validateGrid. Если сетка повреждена —
-     * откатывает её на снимок, показывает первую ошибку и возвращает false.
-     *
-     * Навешана ТОЛЬКО на чистые merge/unmerge (table-merge-core.js), где
-     * результат пересобирается из range-list и spanOrigin всегда согласован —
-     * там guard корректен и в штатном потоке НЕ срабатывает by-construction.
-     *
-     * НЕ применяется к in-place insert/delete строк/колонок: они оставляют
-     * инертный устаревший spanOrigin у поглощённых ячеек при сдвиге объединения
-     * (вставка/удаление ПЕРЕД origin'ом). Это давнее tolerated-состояние:
-     * рендерер spanOrigin игнорирует (рисует по isSpanned/colSpan/rowSpan), и
-     * серверный валидатор P6a его НЕ проверяет — то есть 422 такие сетки не
-     * вызывают. validateGrid строже серверного контракта (правило spanOrigin),
-     * поэтому его откат там был бы ложным.
-     *
+     * Сдвигает spanOrigin поглощённых ячеек при УДАЛЕНИИ колонки colIndex.
+     * Полный обход грида; гейт — только {isSpanned, spanOrigin}. Если ведущая
+     * ячейка объединения была правее colIndex, она сдвинулась на -1 колонку.
      * @private
-     * @param {Object} table - Объект таблицы (table.grid уже изменён операцией)
-     * @param {Object[][]} snapshot - Снимок сетки ДО операции (для отката)
-     * @returns {boolean} true — сетка валидна и можно перерисовывать
+     * @param {Object} table - Объект таблицы (grid уже изменён удалением)
+     * @param {number} colIndex - Индекс удалённой колонки
      */
-    _ensureGridIntegrity(table, snapshot) {
-        const result = validateGrid(table.grid);
-        if (!result.valid) {
-            table.grid = snapshot;
-            Notifications.error(
-                `Операция отменена: нарушена целостность таблицы — ${result.errors[0]}`
-            );
-            return false;
+    _shiftSpanOriginsForColDelete(table, colIndex) {
+        for (let r = 0; r < table.grid.length; r++) {
+            for (let c = 0; c < table.grid[r].length; c++) {
+                const cellData = table.grid[r][c];
+                if (cellData.isSpanned && cellData.spanOrigin) {
+                    if (cellData.spanOrigin.col > colIndex) {
+                        cellData.spanOrigin.col -= 1;
+                    }
+                }
+            }
         }
-        return true;
+    }
+
+    /**
+     * Сдвигает spanOrigin поглощённых ячеек при ВСТАВКЕ строки на insertIndex.
+     * Полный обход грида; гейт — только {isSpanned, spanOrigin}. Если ведущая
+     * ячейка объединения находилась на/ниже insertIndex, она сдвинулась на +1 строку.
+     * @private
+     * @param {Object} table - Объект таблицы (grid уже изменён вставкой)
+     * @param {number} insertIndex - Индекс вставленной строки
+     */
+    _shiftSpanOriginsForRowInsert(table, insertIndex) {
+        for (let r = 0; r < table.grid.length; r++) {
+            for (let c = 0; c < table.grid[r].length; c++) {
+                const cellData = table.grid[r][c];
+                if (cellData.isSpanned && cellData.spanOrigin) {
+                    if (cellData.spanOrigin.row >= insertIndex) {
+                        cellData.spanOrigin.row += 1;
+                    }
+                }
+            }
+        }
+    }
+
+    /**
+     * Сдвигает spanOrigin поглощённых ячеек при УДАЛЕНИИ строки rowIndex.
+     * Полный обход грида; гейт — только {isSpanned, spanOrigin}. Если ведущая
+     * ячейка объединения была ниже rowIndex, она сдвинулась на -1 строку.
+     * @private
+     * @param {Object} table - Объект таблицы (grid уже изменён удалением)
+     * @param {number} rowIndex - Индекс удалённой строки
+     */
+    _shiftSpanOriginsForRowDelete(table, rowIndex) {
+        for (let r = 0; r < table.grid.length; r++) {
+            for (let c = 0; c < table.grid[r].length; c++) {
+                const cellData = table.grid[r][c];
+                if (cellData.isSpanned && cellData.spanOrigin) {
+                    if (cellData.spanOrigin.row > rowIndex) {
+                        cellData.spanOrigin.row -= 1;
+                    }
+                }
+            }
+        }
     }
 
     /**
@@ -799,7 +863,9 @@ export class TableCellsOperations {
         const nextGrid = mergeRange(table.grid, minRow, minCol, maxRow, maxCol);
 
         // Клиентская защита целостности (T6b.6): не коммитим повреждённую сетку.
-        const integrity = validateGrid(nextGrid);
+        // Региональная проверка — окрестность нового объединения, чтобы устаревший
+        // spanOrigin-мусор в других частях таблицы не давал ложного отказа.
+        const integrity = validateGridRegion(nextGrid, minRow, minCol, maxRow, maxCol);
         if (!integrity.valid) {
             Notifications.error(
                 `Объединение отменено: нарушена целостность таблицы — ${integrity.errors[0]}`
@@ -843,27 +909,29 @@ export class TableCellsOperations {
             return;
         }
 
-        const snapshot = this._snapshotGrid(table);
+        // Размер разъединяемого прямоугольника — для региональной проверки.
+        const rs = cellData.rowSpan || 1;
+        const cs = cellData.colSpan || 1;
 
-        this._unmergeAtOrigin(table, row, col);
+        // Грид-математика — в чистом ядре поверх range-list; здесь только запись
+        // новой сетки в table.grid (симметрично mergeCells).
+        const nextGrid = unmergeAt(table.grid, row, col);
 
-        if (!this._ensureGridIntegrity(table, snapshot)) return;
+        // Клиентская защита целостности (T6b.6): не коммитим повреждённую сетку.
+        // Региональная проверка — окрестность разъединённого прямоугольника.
+        const integrity = validateGridRegion(nextGrid, row, col, row + rs - 1, col + cs - 1);
+        if (!integrity.valid) {
+            Notifications.error(
+                `Разъединение отменено: нарушена целостность таблицы — ${integrity.errors[0]}`
+            );
+            return;
+        }
+        table.grid = nextGrid;
 
         this.clearSelection();
         ItemsRenderer.updateTable(tableId);
         PreviewManager.update();
         Notifications.success('Ячейка разъединена');
-    }
-
-    /**
-     * Разъединяет ячейку, заданную координатами origin'а: сбрасывает rowSpan/colSpan
-     * и создаёт пустые ячейки на месте spanned.
-     * Грид-математика — в чистом ядре (table-merge-core.unmergeAt); здесь только
-     * запись новой сетки в table.grid.
-     * @private
-     */
-    _unmergeAtOrigin(table, row, col) {
-        table.grid = unmergeAt(table.grid, row, col);
     }
 
     /**

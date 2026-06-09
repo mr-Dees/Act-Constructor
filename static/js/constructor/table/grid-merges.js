@@ -210,18 +210,116 @@ export function validateGrid(grid) {
 }
 
 /**
- * Чинит производные поля сетки: пересчитывает `isSpanned`/`spanOrigin`/
- * `originRow`/`originCol` из набора объединений (ведущих ячеек). Идемпотентна.
+ * Региональная проверка целостности dense-сетки.
  *
- * Множество объединений берётся из текущих ведущих ячеек (`gridToMerges`),
- * после чего сетка перестраивается через `applyMergesToGrid`. Тем самым
- * поломанные spanOrigin/originRow/originCol поглощённых ячеек восстанавливаются.
+ * В отличие от `validateGrid` (глобальная строгая проверка), валидирует только
+ * окрестность локальной операции: всегда дёшево проверяет глобальную
+ * прямоугольность (равная длина строк), а правила границ/пересечений/spanOrigin
+ * применяет ТОЛЬКО к объединениям, чьи прямоугольники пересекают регион
+ * `[minRow..maxRow] × [minCol..maxCol]`. Так локальный merge/unmerge не зависит
+ * от устаревшего spanOrigin-мусора в других частях таблицы (например, инертного
+ * stale spanOrigin после in-place вставки/удаления строк/колонок).
  *
- * @param {Object[][]} grid Dense-сетка (не мутируется).
- * @returns {Object[][]} Самосогласованная dense-сетка.
+ * Объединение «пересекает регион», если его прямоугольник перекрывается с
+ * регионом хотя бы одной ячейкой. Поглощённые ячейки проверяются только внутри
+ * региона; покрывающее их объединение по определению пересекает регион.
+ *
+ * @param {Object[][]} grid Dense-сетка.
+ * @param {number} minRow Верхняя граница региона (включительно).
+ * @param {number} minCol Левая граница региона (включительно).
+ * @param {number} maxRow Нижняя граница региона (включительно).
+ * @param {number} maxCol Правая граница региона (включительно).
+ * @returns {{valid:boolean, errors:string[]}} Результат с сообщениями (рус.).
  */
-export function normalizeGrid(grid) {
-    return applyMergesToGrid(grid, gridToMerges(grid));
+export function validateGridRegion(grid, minRow, minCol, maxRow, maxCol) {
+    const errors = [];
+
+    if (!Array.isArray(grid) || grid.length === 0) {
+        return { valid: true, errors: [] };
+    }
+
+    // 1. Прямоугольность — всегда глобально и дёшево.
+    const width = grid[0].length;
+    let rectangular = true;
+    for (let r = 0; r < grid.length; r++) {
+        if (grid[r].length !== width) {
+            rectangular = false;
+            errors.push(
+                `Строка ${r} имеет длину ${grid[r].length}, ожидалось ${width} (сетка не прямоугольная)`,
+            );
+        }
+    }
+    if (!rectangular) {
+        // Дальнейшие индексные проверки небезопасны на рваной сетке.
+        return { valid: false, errors };
+    }
+
+    const rows = grid.length;
+    const cols = width;
+
+    // Объединения, чьи прямоугольники пересекают регион. Остальные (вместе с их
+    // возможным устаревшим spanOrigin) игнорируем — они вне зоны операции.
+    const intersecting = gridToMerges(grid).filter((m) => {
+        const endRow = m.row + m.rowspan - 1;
+        const endCol = m.col + m.colspan - 1;
+        return (
+            m.row <= maxRow && endRow >= minRow && m.col <= maxCol && endCol >= minCol
+        );
+    });
+
+    const coverage = Array.from({ length: rows }, () => new Array(cols).fill(null));
+
+    // 2. Границы + 3. Пересечения — только по пересекающим регион объединениям.
+    for (const m of intersecting) {
+        const endRow = m.row + m.rowspan - 1;
+        const endCol = m.col + m.colspan - 1;
+        if (endRow >= rows || endCol >= cols) {
+            errors.push(
+                `Объединение в (${m.row},${m.col}) ${m.rowspan}×${m.colspan} выходит за границы сетки ${rows}×${cols}`,
+            );
+            continue;
+        }
+        for (let r = m.row; r <= endRow; r++) {
+            for (let c = m.col; c <= endCol; c++) {
+                if (coverage[r][c] !== null) {
+                    errors.push(
+                        `Объединения пересекаются в ячейке (${r},${c}): (${m.row},${m.col}) и (${coverage[r][c].row},${coverage[r][c].col})`,
+                    );
+                } else {
+                    coverage[r][c] = { row: m.row, col: m.col };
+                }
+            }
+        }
+    }
+
+    // 4 + 5. Поглощённые ячейки — только ВНУТРИ региона (покрывающее их
+    // объединение по определению пересекает регион).
+    const r0 = Math.max(0, minRow);
+    const r1 = Math.min(rows - 1, maxRow);
+    const c0 = Math.max(0, minCol);
+    const c1 = Math.min(cols - 1, maxCol);
+    for (let r = r0; r <= r1; r++) {
+        for (let c = c0; c <= c1; c++) {
+            const cell = grid[r][c];
+            if (!cell.isSpanned) continue;
+
+            const cover = coverage[r][c];
+            if (!cover) {
+                errors.push(
+                    `Ячейка (${r},${c}) помечена isSpanned, но не покрыта ни одним объединением (висячий isSpanned)`,
+                );
+                continue;
+            }
+            const so = cell.spanOrigin;
+            if (!so || so.row !== cover.row || so.col !== cover.col) {
+                errors.push(
+                    `spanOrigin ячейки (${r},${c}) указывает на (${so ? so.row : '∅'},${so ? so.col : '∅'}), а покрывающее объединение ведёт из (${cover.row},${cover.col})`,
+                );
+            }
+        }
+    }
+
+    return { valid: errors.length === 0, errors };
 }
 
 /**
@@ -249,6 +347,5 @@ if (typeof window !== 'undefined') {
     window.gridToMerges = gridToMerges;
     window.applyMergesToGrid = applyMergesToGrid;
     window.validateGrid = validateGrid;
-    window.normalizeGrid = normalizeGrid;
     window.iterateVisibleCells = iterateVisibleCells;
 }

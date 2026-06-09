@@ -74,7 +74,7 @@ export function mergeRange(grid, minRow, minCol, maxRow, maxCol) {
  * ячейка сбрасывает colSpan/rowSpan в 1 (content/isHeader сохраняет); на месте
  * поглощённых создаются пустые ячейки, наследующие isHeader ведущей.
  *
- * Семантика идентична TableCellsOperations._unmergeAtOrigin.
+ * Семантика идентична разъединению в TableCellsOperations.unmergeCells.
  *
  * @param {Object[][]} grid Исходная сетка (не мутируется).
  * @param {number} row Строка ведущей ячейки.

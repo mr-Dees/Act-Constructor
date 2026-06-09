@@ -1,20 +1,19 @@
 /**
  * Тесты контракта клиентской защиты целостности grid (T6b.6).
  *
- * TableCellsOperations прогоняет table.grid через validateGrid ТОЛЬКО после
- * чистых merge/unmerge (table-merge-core.js) — там результат пересобирается из
- * range-list и spanOrigin всегда согласован, страховка by-construction не
- * срабатывает. Фиксируем этот контракт (блок 1-2 ниже).
+ * TableCellsOperations прогоняет результат чистых merge/unmerge
+ * (table-merge-core.js) через региональную проверку целостности — там сетка
+ * пересобирается из range-list и spanOrigin всегда согласован, страховка
+ * by-construction не срабатывает. Фиксируем этот контракт (блок 1-2 ниже).
  *
- * Блок 3 — регрессия на ложный откат: in-place insert/delete строк/колонок
- * НЕ должны прогоняться через validateGrid, потому что при сдвиге объединения
- * (вставка/удаление ПЕРЕД origin'ом) они оставляют ИНЕРТНЫЙ устаревший
- * spanOrigin у поглощённых ячеек. validateGrid (правило spanOrigin) строже
- * серверного контракта P6a (который spanOrigin не проверяет) → guard там
- * откатил бы операцию, работавшую до P6b. Эти тесты воспроизводят 5 кейсов и
- * утверждают: (а) операция даёт ожидаемую tolerated-форму (не откатывается на
- * исходную сетку), (б) такая сетка действительно режется validateGrid — то
- * есть именно поэтому guard на in-place операции вешать нельзя.
+ * Блок 3 — ROOT-фикс stale spanOrigin: in-place insert/delete строк/колонок
+ * ТЕПЕРЬ синхронно сдвигают spanOrigin поглощённых ячеек вслед за сдвигом
+ * ведущей (при вставке/удалении ПЕРЕД origin'ом). Раньше spanOrigin оставался
+ * устаревшим, и сетка не проходила validateGrid; после фикса spanOrigin
+ * указывает на актуальную ведущую и сетка валидна. Эти тесты воспроизводят
+ * 5 кейсов и утверждают: (а) операция сдвигает spanOrigin на новую позицию
+ * ведущей, (б) итоговая сетка проходит validateGrid (полная согласованность).
+ * Инлайн-реплики операций зеркалят прод-сдвиг spanOrigin.
  */
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
@@ -37,8 +36,10 @@ function grid3x3() {
 
 // ──────────────────────────────────────────────────────────────────────────
 // Точные реплики in-place мутаций TableCellsOperations (без DOM/AppState).
-// Зеркалят splice + правку originRow/originCol/colSpan/rowSpan ведущих ячеек.
-// spanOrigin поглощённых ячеек НЕ трогают — ровно как реальные операции.
+// Зеркалят splice + правку originRow/originCol/colSpan/rowSpan ведущих ячеек
+// И ROOT-фикс: сдвиг spanOrigin поглощённых ячеек вслед за ведущей. Гейт сдвига —
+// {isSpanned && spanOrigin} (НЕ originCol/originRow: user-merge ячейки несут лишь
+// эти два поля). Арифметика зеркалит _shiftSpanOriginsFor* в проде.
 // ──────────────────────────────────────────────────────────────────────────
 
 /** insertColumnLeft / insertColumnRight: вставка пустой колонки на colIndex. */
@@ -57,6 +58,15 @@ function inPlaceInsertColumn(grid, colIndex) {
       if (!cd.isSpanned) {
         const end = c + (cd.colSpan || 1);
         if (end > colIndex) cd.colSpan = (cd.colSpan || 1) + 1;
+      }
+    }
+  }
+  // ROOT-фикс: сдвиг spanOrigin поглощённых вслед за ведущей.
+  for (let r = 0; r < grid.length; r++) {
+    for (let c = 0; c < grid[r].length; c++) {
+      const cd = grid[r][c];
+      if (cd.isSpanned && cd.spanOrigin && cd.spanOrigin.col >= colIndex) {
+        cd.spanOrigin.col += 1;
       }
     }
   }
@@ -83,6 +93,15 @@ function inPlaceInsertRow(grid, rowIndex) {
       }
     }
   }
+  // ROOT-фикс: сдвиг spanOrigin поглощённых вслед за ведущей.
+  for (let r = 0; r < grid.length; r++) {
+    for (let c = 0; c < grid[r].length; c++) {
+      const cd = grid[r][c];
+      if (cd.isSpanned && cd.spanOrigin && cd.spanOrigin.row >= rowIndex) {
+        cd.spanOrigin.row += 1;
+      }
+    }
+  }
   return grid;
 }
 
@@ -103,6 +122,15 @@ function inPlaceDeleteColumn(grid, colIndex) {
       if (grid[r][c].originCol !== undefined) grid[r][c].originCol = c;
     }
   }
+  // ROOT-фикс: сдвиг spanOrigin поглощённых вслед за ведущей.
+  for (let r = 0; r < grid.length; r++) {
+    for (let c = 0; c < grid[r].length; c++) {
+      const cd = grid[r][c];
+      if (cd.isSpanned && cd.spanOrigin && cd.spanOrigin.col > colIndex) {
+        cd.spanOrigin.col -= 1;
+      }
+    }
+  }
   return grid;
 }
 
@@ -121,6 +149,15 @@ function inPlaceDeleteRow(grid, rowIndex) {
   for (let r = rowIndex; r < grid.length; r++) {
     for (let c = 0; c < grid[r].length; c++) {
       if (grid[r][c].originRow !== undefined) grid[r][c].originRow = r;
+    }
+  }
+  // ROOT-фикс: сдвиг spanOrigin поглощённых вслед за ведущей.
+  for (let r = 0; r < grid.length; r++) {
+    for (let c = 0; c < grid[r].length; c++) {
+      const cd = grid[r][c];
+      if (cd.isSpanned && cd.spanOrigin && cd.spanOrigin.row > rowIndex) {
+        cd.spanOrigin.row -= 1;
+      }
     }
   }
   return grid;
@@ -186,65 +223,66 @@ test('защита: повреждённая сетка (объединение 
 });
 
 // ──────────────────────────────────────────────────────────────────────────
-// Регрессия: in-place insert/delete НЕ должны откатываться guard'ом.
-// До удаления guard'а с этих операций каждый из кейсов молча откатывался.
+// ROOT-фикс: in-place insert/delete синхронно сдвигают spanOrigin поглощённых
+// ячеек, и итоговая сетка остаётся полностью согласованной (validateGrid==true).
+// До фикса каждый из кейсов оставлял устаревший spanOrigin → невалидную сетку.
 // ──────────────────────────────────────────────────────────────────────────
 
-test('регрессия: insertColumnLeft перед гориз-объединением не откатывается (tolerated stale spanOrigin)', () => {
+test('ROOT: insertColumnLeft перед гориз-объединением сдвигает spanOrigin, сетка валидна', () => {
   const grid = inPlaceInsertColumn(gridHMerge(), 0); // вставка ПЕРЕД origin (col 1)
   // Операция выполнена: добавлена колонка, объединение сдвинулось вправо.
   assert.equal(grid[0].length, 4);
   // Ведущая объединения теперь на (0,2), её colSpan сохранён.
   assert.equal(grid[0][2].colSpan, 2);
-  // Поглощённая на (0,3) осталась isSpanned, но spanOrigin УСТАРЕЛ ({0,1}).
+  // Поглощённая на (0,3) осталась isSpanned, spanOrigin СДВИНУТ на новую ведущую.
   assert.equal(grid[0][3].isSpanned, true);
-  assert.deepEqual(grid[0][3].spanOrigin, { row: 0, col: 1 });
-  // Именно поэтому validateGrid режет эту сетку — guard здесь дал бы ложный откат.
-  assert.equal(validateGrid(grid).valid, false);
+  assert.deepEqual(grid[0][3].spanOrigin, { row: 0, col: 2 });
+  // spanOrigin согласован с ведущей → validateGrid принимает сетку.
+  assert.equal(validateGrid(grid).valid, true);
 });
 
-test('регрессия: insertColumnRight в позицию origin объединения не откатывается', () => {
+test('ROOT: insertColumnRight в позицию origin объединения сдвигает spanOrigin, сетка валидна', () => {
   // insertColumnRight при выборе col 0 даёт insertColIndex=1 — ровно индекс
   // origin'а объединения (вставка АТ origin сдвигает его вправо).
   const grid = inPlaceInsertColumn(gridHMerge(), 1);
   assert.equal(grid[0].length, 4);
   // Ведущая объединения сдвинулась с (0,1) на (0,2), colSpan сохранён.
   assert.equal(grid[0][2].colSpan, 2);
-  // Поглощённая теперь на (0,3), spanOrigin УСТАРЕЛ ({0,1}).
+  // Поглощённая теперь на (0,3), spanOrigin СДВИНУТ на (0,2).
   assert.equal(grid[0][3].isSpanned, true);
-  assert.deepEqual(grid[0][3].spanOrigin, { row: 0, col: 1 });
-  assert.equal(validateGrid(grid).valid, false);
+  assert.deepEqual(grid[0][3].spanOrigin, { row: 0, col: 2 });
+  assert.equal(validateGrid(grid).valid, true);
 });
 
-test('регрессия: insertRowAbove перед верт-объединением не откатывается', () => {
+test('ROOT: insertRowAbove перед верт-объединением сдвигает spanOrigin, сетка валидна', () => {
   const grid = inPlaceInsertRow(gridVMerge(), 0); // вставка ПЕРЕД origin (row 1)
   assert.equal(grid.length, 4);
   // Ведущая объединения теперь на (2,0), rowSpan сохранён.
   assert.equal(grid[2][0].rowSpan, 2);
-  // Поглощённая на (3,0) — isSpanned, spanOrigin устарел ({1,0}).
+  // Поглощённая на (3,0) — isSpanned, spanOrigin СДВИНУТ на (2,0).
   assert.equal(grid[3][0].isSpanned, true);
-  assert.deepEqual(grid[3][0].spanOrigin, { row: 1, col: 0 });
-  assert.equal(validateGrid(grid).valid, false);
+  assert.deepEqual(grid[3][0].spanOrigin, { row: 2, col: 0 });
+  assert.equal(validateGrid(grid).valid, true);
 });
 
-test('регрессия: deleteColumn перед гориз-объединением не откатывается', () => {
+test('ROOT: deleteColumn перед гориз-объединением сдвигает spanOrigin, сетка валидна', () => {
   const grid = inPlaceDeleteColumn(gridHMerge(), 0); // удаление ПЕРЕД origin (col 1)
   assert.equal(grid[0].length, 2);
   // Ведущая объединения сдвинулась на (0,0), colSpan сохранён.
   assert.equal(grid[0][0].colSpan, 2);
-  // Поглощённая на (0,1) — isSpanned, spanOrigin устарел ({0,1}).
+  // Поглощённая на (0,1) — isSpanned, spanOrigin СДВИНУТ на (0,0).
   assert.equal(grid[0][1].isSpanned, true);
-  assert.deepEqual(grid[0][1].spanOrigin, { row: 0, col: 1 });
-  assert.equal(validateGrid(grid).valid, false);
+  assert.deepEqual(grid[0][1].spanOrigin, { row: 0, col: 0 });
+  assert.equal(validateGrid(grid).valid, true);
 });
 
-test('регрессия: deleteRow перед верт-объединением не откатывается', () => {
+test('ROOT: deleteRow перед верт-объединением сдвигает spanOrigin, сетка валидна', () => {
   const grid = inPlaceDeleteRow(gridVMerge(), 0); // удаление строки ПЕРЕД origin (row 1)
   assert.equal(grid.length, 2);
   // Ведущая объединения сдвинулась на (0,0), rowSpan сохранён.
   assert.equal(grid[0][0].rowSpan, 2);
-  // Поглощённая на (1,0) — isSpanned, spanOrigin устарел ({1,0}).
+  // Поглощённая на (1,0) — isSpanned, spanOrigin СДВИНУТ на (0,0).
   assert.equal(grid[1][0].isSpanned, true);
-  assert.deepEqual(grid[1][0].spanOrigin, { row: 1, col: 0 });
-  assert.equal(validateGrid(grid).valid, false);
+  assert.deepEqual(grid[1][0].spanOrigin, { row: 0, col: 0 });
+  assert.equal(validateGrid(grid).valid, true);
 });

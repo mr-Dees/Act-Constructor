@@ -17,7 +17,7 @@ import {
   gridToMerges,
   applyMergesToGrid,
   validateGrid,
-  normalizeGrid,
+  validateGridRegion,
   iterateVisibleCells,
 } from '../../static/js/constructor/table/grid-merges.js';
 
@@ -187,23 +187,52 @@ test('validateGrid: висячий isSpanned без покрывающего ori
 });
 
 // ──────────────────────────────────────────────────────────────────────────
-// normalizeGrid — починка производных полей + идемпотентность
+// validateGridRegion — региональная проверка целостности
 // ──────────────────────────────────────────────────────────────────────────
 
-test('normalizeGrid: чинит неверный spanOrigin поглощённой ячейки', () => {
+test('validateGridRegion: корректная metrics-сетка валидна в полном регионе', () => {
   const grid = buildMetricsGrid();
-  // Ломаем spanOrigin поглощённой ячейки (0,2) — должна указывать на (0,1).
-  grid[0][2].spanOrigin = { row: 5, col: 5 };
-  const fixed = normalizeGrid(grid);
-  assert.deepEqual(fixed[0][2].spanOrigin, { row: 0, col: 1 });
-  assert.equal(validateGrid(fixed).valid, true);
+  const res = validateGridRegion(grid, 0, 0, grid.length - 1, grid[0].length - 1);
+  assert.equal(res.valid, true, JSON.stringify(res.errors));
 });
 
-test('normalizeGrid идемпотентен на уже нормализованной сетке', () => {
+test('validateGridRegion: устаревший spanOrigin ВНЕ региона игнорируется', () => {
+  // metrics-объединение «Кол-во, ед.» (0,1)-(0,2): ведущая (0,1), поглощённая (0,2).
+  // Портим spanOrigin поглощённой так, будто она указывает в никуда —
+  // validateGrid (глобальный) такую сетку бы зарезал.
   const grid = buildMetricsGrid();
-  const once = normalizeGrid(grid);
-  const twice = normalizeGrid(once);
-  assert.deepEqual(twice, once);
+  grid[0][2].spanOrigin = { row: 9, col: 9 };
+  assert.equal(validateGrid(grid).valid, false);
+  // Регион вокруг НЕзатронутой ячейки (1,0) — объединение (0,1)-(0,2) его не
+  // пересекает, поэтому устаревший spanOrigin не проверяется.
+  const res = validateGridRegion(grid, 1, 0, 1, 0);
+  assert.equal(res.valid, true, JSON.stringify(res.errors));
+});
+
+test('validateGridRegion: дефект spanOrigin ВНУТРИ региона ловится', () => {
+  const grid = buildMetricsGrid();
+  grid[0][2].spanOrigin = { row: 9, col: 9 };
+  // Регион охватывает объединение (0,1)-(0,2) — дефект должен быть пойман.
+  const res = validateGridRegion(grid, 0, 0, 0, 3);
+  assert.equal(res.valid, false);
+  assert.ok(res.errors.some((e) => /spanOrigin/i.test(e)));
+});
+
+test('validateGridRegion: рваная строка ловится всегда (глобальная прямоугольность)', () => {
+  const grid = buildMetricsGrid();
+  grid[1].pop(); // одна строка короче — глобальная проверка дёшево ловит
+  // Даже регион в нетронутой части невалиден из-за рваной сетки.
+  const res = validateGridRegion(grid, 0, 0, 0, 0);
+  assert.equal(res.valid, false);
+  assert.ok(res.errors.some((e) => /прямоуголь|длин/i.test(e)));
+});
+
+test('validateGridRegion: объединение за границей, пересекающее регион, ловится', () => {
+  const grid = stripSpans([[makeCell(), makeCell()]]);
+  grid[0][0].colSpan = 5; // выходит за 2 колонки, пересекает регион (0,0)
+  const res = validateGridRegion(grid, 0, 0, 0, 1);
+  assert.equal(res.valid, false);
+  assert.ok(res.errors.some((e) => /границ/i.test(e)));
 });
 
 // ──────────────────────────────────────────────────────────────────────────
@@ -298,14 +327,15 @@ test('property: validateGrid проходит на корректно постр
   );
 });
 
-test('property: normalizeGrid — no-op на уже нормализованной сетке', () => {
+test('property: validateGridRegion на полном регионе совпадает с validateGrid (корректные сетки)', () => {
   fc.assert(
     fc.property(arbGridWithMerges, ({ rows, cols, merges }) => {
       const base = stripSpans(
         Array.from({ length: rows }, () => Array.from({ length: cols }, () => makeCell())),
       );
       const grid = applyMergesToGrid(base, merges);
-      assert.deepEqual(normalizeGrid(grid), grid);
+      const res = validateGridRegion(grid, 0, 0, rows - 1, cols - 1);
+      assert.equal(res.valid, true, JSON.stringify(res.errors));
     }),
     { numRuns: 300 },
   );
