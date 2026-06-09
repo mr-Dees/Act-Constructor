@@ -117,6 +117,10 @@ export class AppConfig {
         // Сообщения беседы
         messages: (cid) => `/api/v1/chat/conversations/${cid}/messages`,
 
+        // Обратная связь по сообщению ассистента (PUT — оценить, DELETE — снять)
+        feedback: (cid, mid) =>
+            `/api/v1/chat/conversations/${cid}/messages/${mid}/feedback`,
+
         // Активный forward к внешнему агенту (чтобы продолжить polling после reload)
         activeForward: (cid) =>
             `/api/v1/chat/conversations/${cid}/active-forward`,
