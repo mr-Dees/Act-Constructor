@@ -1,31 +1,17 @@
 /**
- * Чистое ядро каскада metrics ↔ risk — БЕЗ DOM, БЕЗ AppConfig, БЕЗ window.
+ * Чистое ядро решений metrics ↔ risk — БЕЗ DOM, БЕЗ AppConfig, БЕЗ window.
  *
- * Здесь живёт только логика ПРИНЯТИЯ РЕШЕНИЙ о наличии сводных таблиц метрик:
- *  - единый предикат «нужна ли сводная таблица» (D2);
- *  - три reconcile-перехода (added / removed / moved) над структурой
- *    {treeData, tables};
- *  - удаление риск-узла под единым snapshot'ом (D1).
+ * Здесь живут только канонические предикаты «нужна ли сводная таблица метрик» (D2):
+ *  - shouldHaveMetricsTable — per-section сводная на 5.X;
+ *  - shouldHaveMainMetrics — главная сводная §5.
  *
- * Построение самих объектов таблиц (сетка, id, label, нумерация) и побочные
- * эффекты (changelog, render, Notifications) ОСТАЮТСЯ в AppState и передаются
- * сюда инъекцией через объект `ops`. Это делает ядро тестируемым в node:test
- * (см. tests/js/cascade.test.mjs) и сохраняет поведение существующего кода:
- * AppState-методы — тонкие делегаты поверх этих функций.
- *
- * Контракт `ops` (все обязательны):
- *   findNodeById(id)               -> node|null   (поиск по treeData)
- *   findParentNode(id)             -> node|null
- *   findRiskTables(node)           -> Array<node> (риск-таблицы в поддереве)
- *   createMetricsTable(node5x)     -> void        (создаёт per-section сводную)
- *   createMainMetricsTable()       -> void        (создаёт главную сводную §5)
- *   removeMetricsTable(parent, tableNode) -> void (снимает сводную + её table)
- *   updateMetricsTableLabel(node5xId)     -> void  (опц.: обновить подпись)
- *   snapshot()                     -> {rollback()} (snapshot §5 + tables)
- *   deleteNode()                   -> void        (фактическое удаление узла)
+ * Предикаты — чистые функции над treeData: поиск риск-таблиц инъектируется
+ * параметром findRiskTables. Это делает их тестируемыми в node:test
+ * (см. tests/js/metrics-predicate.test.mjs). Сам каскад (создание/снятие сводных,
+ * нумерация, побочные эффекты) живёт в AppState (state-content.js / state-tree.js)
+ * и metrics-risk-coordinator.js, которые зовут эти предикаты напрямую.
  */
 
-const TYPE_TABLE = 'table';
 const TYPE_ITEM = 'item';
 
 /** node — узел первого уровня под §5 (5.X). */
@@ -70,95 +56,4 @@ export function shouldHaveMetricsTable(node5x, findRiskTables) {
 export function shouldHaveMainMetrics(section5, findRiskTables) {
     if (!section5) return false;
     return findRiskTables(section5).length > 0;
-}
-
-/** Per-section сводная-узел среди детей 5.X (isMetricsTable). */
-function findMetricsTableNode(node5x) {
-    return (node5x?.children || []).find(
-        c => c.type === TYPE_TABLE && c.isMetricsTable === true
-    ) || null;
-}
-
-/** Главная сводная-узел среди детей §5 (isMainMetricsTable). */
-function findMainMetricsTableNode(section5) {
-    return (section5?.children || []).find(
-        c => c.type === TYPE_TABLE && c.isMainMetricsTable === true
-    ) || null;
-}
-
-/**
- * Хук «риск-таблица добавлена»: создаёт per-section сводную на 5.X-предке
- * (если риск на глубоком уровне) и главную сводную §5.
- *
- * @param {string} nodeId - ID узла, в который добавлена риск-таблица.
- * @param {Object} ops - Инъекция операций (см. контракт в шапке модуля).
- */
-export function reconcileAfterRiskAdded(nodeId, ops) {
-    const node = ops.findNodeById(nodeId);
-    if (!node) return;
-
-    // Поднимаемся до узла первого уровня под §5.
-    let ancestor = node;
-    let parent = ops.findParentNode(ancestor.id);
-    while (parent && parent.id !== '5') {
-        ancestor = parent;
-        parent = ops.findParentNode(ancestor.id);
-    }
-
-    // Per-section сводная — только если риск на уровне 5.X.Y+ (не на самом 5.X).
-    if (parent?.id === '5' && is5xNode(ancestor) && nodeId !== ancestor.id) {
-        if (shouldHaveMetricsTable(ancestor, ops.findRiskTables) && !findMetricsTableNode(ancestor)) {
-            ops.createMetricsTable(ancestor);
-        }
-    }
-
-    // Главная сводная §5.
-    ops.createMainMetricsTable();
-}
-
-/**
- * Хук «риск-таблица удалена»: реконсилит сводные во всём §5 — снимает per-section
- * сводные у 5.X без глубоких рисков и главную сводную, если рисков в §5 не осталось.
- *
- * @param {Object} ops - Инъекция операций.
- */
-export function reconcileAfterRiskRemoved(ops) {
-    const node5 = ops.findNodeById('5');
-    if (!node5?.children) return;
-
-    const firstLevel = node5.children.filter(c => isItem(c) && is5xNode(c));
-    for (const node5x of firstLevel) {
-        if (!shouldHaveMetricsTable(node5x, ops.findRiskTables)) {
-            const metricsNode = findMetricsTableNode(node5x);
-            if (metricsNode) ops.removeMetricsTable(node5x, metricsNode);
-        }
-    }
-
-    if (!shouldHaveMainMetrics(node5, ops.findRiskTables)) {
-        const mainNode = findMainMetricsTableNode(node5);
-        if (mainNode) ops.removeMetricsTable(node5, mainNode);
-    }
-}
-
-/**
- * D1: удаление риск-узла под ЕДИНЫМ snapshot'ом.
- *
- * Snapshot снимается ДО удаления узла, поэтому при исключении в reconcile
- * откат восстанавливает ПОЛНОЕ состояние §5, включая удалённый риск-узел —
- * частичное состояние (сводная без своего риска) невозможно.
- *
- * @param {Object} ops - Инъекция операций (включая snapshot() и deleteNode()).
- * @returns {boolean} true при успехе, false если был откат.
- */
-export function removeRiskTableNode(ops) {
-    const snap = ops.snapshot();
-    try {
-        ops.deleteNode();
-        reconcileAfterRiskRemoved(ops);
-        return true;
-    } catch (err) {
-        snap.rollback();
-        if (ops.onError) ops.onError(err);
-        return false;
-    }
 }
