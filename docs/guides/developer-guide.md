@@ -2193,7 +2193,7 @@ chat-modal.js / chat-popup.js
 
 Для запросов про **данные/контент** (БЗ актов, регламенты, нормативы) запрос форвардится внешнему ИИ-агенту коллег через **единую bus-таблицу** `chat_agent_messages_bus` в основной БД. Агент-сервис разрабатывается отдельной командой; AW не делает HTTP-запросов к нему — взаимодействие исключительно через эту таблицу. Полная картина транспорта — §11.5–§11.7.
 
-> Имена `chat_agent_messages_bus`, `chat_messages`, `chat_files` далее даны без префикса. В БД они хранятся с префиксом `DATABASE__TABLE_PREFIX` (по умолчанию `t_db_oarb_audit_act_`); полные SQL-сниппеты для копи-пасты — в `docs/integrations/external-agent-imitation.sql`.
+> Bus-таблица `chat_agent_messages_bus` хранится в БД **без app-префикса** — её имя задаётся `CHAT__AGENT_CHANNEL__TABLE_NAME` целиком (дефолт `chat_agent_messages_bus`, `DATABASE__TABLE_PREFIX` к ней не добавляется). `chat_messages`/`chat_files` далее тоже даны без префикса для краткости, но в БД хранятся **с** префиксом `DATABASE__TABLE_PREFIX` (по умолчанию `t_db_oarb_audit_act_`). Полные SQL-сниппеты для копи-пасты — в `docs/integrations/external-agent-imitation.sql`.
 
 **Поток** (SSE нигде нет):
 
@@ -3114,7 +3114,7 @@ def test_chat_settings_defaults():
 
 | Переменная | Тип | По умолчанию | Описание |
 |-----------|-----|-------------|----------|
-| `CHAT__AGENT_CHANNEL__TABLE_NAME` | str | `chat_agent_messages_bus` | Имя bus-таблицы |
+| `CHAT__AGENT_CHANNEL__TABLE_NAME` | str | `chat_agent_messages_bus` | Имя bus-таблицы **целиком**, без `DATABASE__TABLE_PREFIX` (шина общая с внешним агентом — app-префикс к ней не клеится). Нужен префикс — вписать его прямо в значение. В миграцию подставляется как `{BUS_TABLE}`; репозиторий квалифицирует через `qualify_table_name` (схема без префикса) |
 | `CHAT__AGENT_CHANNEL__SCHEMA_NAME` | str | `""` | Схема bus-таблицы. Пусто → fallback на `CHAT__SCHEMA_NAME`, затем на основную схему адаптера. Учитывается при создании и доступе. Позволяет вынести шину в общую integration-схему с внешним агентом независимо от остальных таблиц чата |
 | `CHAT__AGENT_CHANNEL__POLL_MIN_INTERVAL_SEC` | float | `2.0` | Минимальный интервал polling `AgentChannelPoller` (при активности). Снизить можно ради отзывчивости чата, цена — больше SELECT'ов к GP |
 | `CHAT__AGENT_CHANNEL__POLL_MAX_INTERVAL_SEC` | float | `10.0` | Максимальный интервал polling (при тишине от агента) |
@@ -3612,6 +3612,8 @@ class ToolCallAccumulator:
 ### 11.5 Канал к внешнему ИИ-агенту: bus-таблица chat_agent_messages_bus
 
 Канал к внешнему ИИ-агенту («База знаний ОАРБ») построен на **одной bus-таблице** `chat_agent_messages_bus` (заменила прежние три — `agent_requests`/`agent_response_events`/`agent_responses`). Транспорта SSE нигде нет: приложение пишет вопрос в шину и поллит её до терминального статуса.
+
+**Именование (важно).** Имя bus-таблицы задаётся `CHAT__AGENT_CHANNEL__TABLE_NAME` (дефолт `chat_agent_messages_bus`), схема — `CHAT__AGENT_CHANNEL__SCHEMA_NAME`. В отличие от прочих таблиц приложения, к шине **не** клеится `DATABASE__TABLE_PREFIX`: имя задаётся настройкой **целиком**. В миграции шина именуется плейсхолдером `{BUS_TABLE}` (без `{PREFIX}`), а `AgentMessageRepository` квалифицирует имя через `qualify_table_name` (схема без префикса), не `get_table_name`. Причина — шина общая с внешним агентом, её именование вне префикс-схемы AW. Нужен префикс — вписать его прямо в `CHAT__AGENT_CHANNEL__TABLE_NAME` (например, `t_db_oarb_audit_act_chat_agent_messages_bus`, чтобы сохранить старое имя при апгрейде с версии, где префикс клеился).
 
 **Структура `chat_agent_messages_bus`** (`app/domains/chat/migrations/{postgresql,greenplum}/schema.sql`):
 

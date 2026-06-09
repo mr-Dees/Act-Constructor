@@ -3,7 +3,7 @@
 -- ============================================================================
 -- Назначение
 --   Удаляет старые завершённые строки из bus-таблицы:
---     {PREFIX}chat_agent_messages_bus — единый канал «вопрос ↔ ответ» между AW и агентом
+--     {BUS_TABLE} — единый канал «вопрос ↔ ответ» между AW и агентом
 --
 --   Удаляются ТОЛЬКО завершённые строки (status IN ('complete','error','timeout'));
 --   активные (pending/in_progress) НИКОГДА не трогаются — даже если «зависли»:
@@ -19,12 +19,17 @@
 --     БЕЗ CREATE INDEX IF NOT EXISTS и других «удобств» PG 9.5+.
 --
 -- Подстановка плейсхолдеров
---   В миграциях проекта используются плейсхолдеры {SCHEMA}. и {PREFIX},
+--   В миграциях проекта используются плейсхолдеры {SCHEMA}., {PREFIX} и {BUS_TABLE},
 --   которые подменяются адаптерами при старте приложения. Этот скрипт
 --   запускается ВНЕ приложения (cron/Datalab/ручной psql) — плейсхолдеры
 --   нужно подставить вручную, например через sed:
 --
+--   ВАЖНО: {BUS_TABLE} — имя bus-таблицы ЦЕЛИКОМ из CHAT__AGENT_CHANNEL__TABLE_NAME
+--   (по умолчанию chat_agent_messages_bus, БЕЗ app-префикса). Если для обратной
+--   совместимости задано полное префиксованное имя — подставь именно его.
+--
 --     sed 's/{SCHEMA}/s_grnplm_ld_audit_da_project_4/g; \
+--          s/{BUS_TABLE}/chat_agent_messages_bus/g; \
 --          s/{PREFIX}/t_db_oarb_audit_act_/g' \
 --          docs/integrations/agent-channel-cleanup.sql | psql ...
 --
@@ -46,7 +51,7 @@ BEGIN;
 -- ── Завершённые строки старше 180 дней ──────────────────────────────────────
 -- role охватывает и вопросы ('user'), и ответы ('assistant'), и 'tool':
 -- все они закрываются через status, поэтому один DELETE покрывает всё.
-DELETE FROM {SCHEMA}.{PREFIX}chat_agent_messages_bus
+DELETE FROM {SCHEMA}.{BUS_TABLE}
 WHERE status IN ('complete', 'error', 'timeout')
   AND updated_at IS NOT NULL
   AND updated_at < CURRENT_TIMESTAMP - INTERVAL '180 days';
@@ -55,16 +60,16 @@ COMMIT;
 
 -- ── Опционально: дефрагментация после массовой чистки ───────────────────────
 -- PostgreSQL (autovacuum обычно справится сам, но при больших объёмах):
---   VACUUM ANALYZE {SCHEMA}.{PREFIX}chat_agent_messages_bus;
+--   VACUUM ANALYZE {SCHEMA}.{BUS_TABLE};
 --
 -- Greenplum (VACUUM FULL — только при заметной фрагментации, требует exclusive lock):
---   VACUUM ANALYZE {SCHEMA}.{PREFIX}chat_agent_messages_bus;
+--   VACUUM ANALYZE {SCHEMA}.{BUS_TABLE};
 
 -- ── Опционально: закрыть зависшие pending/in_progress старше 2 часов ────────
 -- AW закрывает сам через 10 мин, но при долгом даунтайме uvicorn могут остаться.
 -- Запускать ОТДЕЛЬНО (не в основной транзакции выше), только осознанно:
 --
--- UPDATE {SCHEMA}.{PREFIX}chat_agent_messages_bus
+-- UPDATE {SCHEMA}.{BUS_TABLE}
 -- SET status     = 'timeout',
 --     updated_at = CURRENT_TIMESTAMP
 -- WHERE role = 'user'

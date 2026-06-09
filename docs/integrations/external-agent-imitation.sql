@@ -8,13 +8,15 @@
 --  Связанная документация: docs/guides/developer-guide.md (Chat domain deep-dive §11)
 --
 --  ВАЖНО — имена таблиц:
---    Все таблицы приложения используют общий префикс `t_db_oarb_audit_act_`,
---    задаваемый через env-переменную `DATABASE__TABLE_PREFIX`. Префикс одинаков
---    для PG и GP. В сниппетах ниже имена указаны в полном виде, как они
---    выглядят в базе при дефолтном префиксе:
---      • t_db_oarb_audit_act_chat_agent_messages_bus
---      • t_db_oarb_audit_act_chat_files
---    Если в .env задан другой префикс — замени глобально.
+--    Bus-таблица канала — БЕЗ app-префикса: её имя задаётся настройкой
+--    `CHAT__AGENT_CHANNEL__TABLE_NAME` целиком (дефолт `chat_agent_messages_bus`,
+--    `DATABASE__TABLE_PREFIX` к ней НЕ приклеивается — шина общая с внешним
+--    агентом). Остальные таблицы приложения (chat_files и др.) используют общий
+--    префикс `t_db_oarb_audit_act_` (env `DATABASE__TABLE_PREFIX`, одинаков для
+--    PG и GP). В сниппетах ниже:
+--      • chat_agent_messages_bus            (шина — без префикса)
+--      • t_db_oarb_audit_act_chat_files     (обычная таблица — с префиксом)
+--    Если имя шины / префикс в .env другие — замени глобально.
 --    На GP к имени дополнительно прибавляется схема: `{SCHEMA}.<table>`.
 --
 --  ВАЖНО — семантика колонок chat_agent_messages_bus:
@@ -60,7 +62,7 @@
 SELECT conversation_id,   -- ← ЭТО копируем в <QUESTION_CONV_ID>
        id, chat_id, user_id,
        content, metadata, status, created_at
-FROM t_db_oarb_audit_act_chat_agent_messages_bus
+FROM chat_agent_messages_bus
 WHERE role = 'user'
   AND status = 'pending'
 ORDER BY created_at DESC
@@ -75,7 +77,7 @@ LIMIT 20;
 --
 -- Для наблюдения «всё, что в работе»:
 SELECT id, chat_id, conversation_id, content, status, created_at
-FROM t_db_oarb_audit_act_chat_agent_messages_bus
+FROM chat_agent_messages_bus
 WHERE role = 'user'
   AND status IN ('pending', 'in_progress')
 ORDER BY created_at DESC
@@ -83,7 +85,7 @@ LIMIT 20;
 
 -- Полная строка одного вопроса (metadata содержит mode и kb):
 SELECT id, chat_id, user_id, conversation_id, content, metadata, status, created_at
-FROM t_db_oarb_audit_act_chat_agent_messages_bus
+FROM chat_agent_messages_bus
 WHERE conversation_id = '<QUESTION_CONV_ID>';
 
 
@@ -108,11 +110,11 @@ DECLARE
 BEGIN
     -- Берём chat_id/user_id из строки-вопроса по её conversation_id:
     SELECT chat_id, user_id INTO v_chat, v_user
-    FROM t_db_oarb_audit_act_chat_agent_messages_bus
+    FROM chat_agent_messages_bus
     WHERE conversation_id = q_conv;
 
     -- Строка-ответ ассистента:
-    INSERT INTO t_db_oarb_audit_act_chat_agent_messages_bus
+    INSERT INTO chat_agent_messages_bus
         (id, chat_id, user_id, conversation_id, role,
          content, metadata, status, created_at, updated_at)
     VALUES (a_id, v_chat, v_user, a_conv, 'assistant',
@@ -121,7 +123,7 @@ BEGIN
             'complete', now(), now());
 
     -- Закрываем строку-вопрос: reply_to = conversation_id ответа, status='complete':
-    UPDATE t_db_oarb_audit_act_chat_agent_messages_bus
+    UPDATE chat_agent_messages_bus
     SET reply_to   = a_conv,
         status     = 'complete',
         updated_at = now()
@@ -151,10 +153,10 @@ DECLARE
     v_user  text;
 BEGIN
     SELECT chat_id, user_id INTO v_chat, v_user
-    FROM t_db_oarb_audit_act_chat_agent_messages_bus
+    FROM chat_agent_messages_bus
     WHERE conversation_id = q_conv;
 
-    INSERT INTO t_db_oarb_audit_act_chat_agent_messages_bus
+    INSERT INTO chat_agent_messages_bus
         (id, chat_id, user_id, conversation_id, role,
          content, metadata, buttons, status, created_at, updated_at)
     VALUES (a_id, v_chat, v_user, a_conv, 'assistant',
@@ -163,7 +165,7 @@ BEGIN
             '[{"action_id":"acts.open_act_page","label":"Открыть 11-11111","params":{"km_number":"11-11111"}},{"action_id":"acts.open_act_page","label":"Открыть 22-22222","params":{"km_number":"22-22222"}}]'::jsonb,
             'complete', now(), now());
 
-    UPDATE t_db_oarb_audit_act_chat_agent_messages_bus
+    UPDATE chat_agent_messages_bus
     SET reply_to   = a_conv,
         status     = 'complete',
         updated_at = now()
@@ -200,7 +202,7 @@ DECLARE
     v_user   text;
 BEGIN
     SELECT chat_id, user_id INTO v_chat, v_user
-    FROM t_db_oarb_audit_act_chat_agent_messages_bus
+    FROM chat_agent_messages_bus
     WHERE conversation_id = q_conv;
 
     -- Файл в chat_files (conversation_id в chat_files = chat_id треда;
@@ -212,7 +214,7 @@ BEGIN
             octet_length(f_body), f_body, now());
 
     -- Строка-ответ с media, ссылающимся на свежий file_id:
-    INSERT INTO t_db_oarb_audit_act_chat_agent_messages_bus
+    INSERT INTO chat_agent_messages_bus
         (id, chat_id, user_id, conversation_id, role,
          content, media, status, created_at, updated_at)
     VALUES (a_id, v_chat, v_user, a_conv, 'assistant',
@@ -227,7 +229,7 @@ BEGIN
             ),
             'complete', now(), now());
 
-    UPDATE t_db_oarb_audit_act_chat_agent_messages_bus
+    UPDATE chat_agent_messages_bus
     SET reply_to   = a_conv,
         status     = 'complete',
         updated_at = now()
@@ -249,7 +251,7 @@ END$$;
 -- Замени ТОЛЬКО <QUESTION_CONV_ID> (conversation_id строки-вопроса из запроса 0).
 
 -- Вариант А — только закрыть вопрос (AW покажет стандартное сообщение об ошибке):
-UPDATE t_db_oarb_audit_act_chat_agent_messages_bus
+UPDATE chat_agent_messages_bus
 SET status     = 'error',
     updated_at = now()
 WHERE conversation_id = '<QUESTION_CONV_ID>';
@@ -264,17 +266,17 @@ DECLARE
     v_user  text;
 BEGIN
     SELECT chat_id, user_id INTO v_chat, v_user
-    FROM t_db_oarb_audit_act_chat_agent_messages_bus
+    FROM chat_agent_messages_bus
     WHERE conversation_id = q_conv;
 
-    INSERT INTO t_db_oarb_audit_act_chat_agent_messages_bus
+    INSERT INTO chat_agent_messages_bus
         (id, chat_id, user_id, conversation_id, role,
          content, status, created_at, updated_at)
     VALUES (a_id, v_chat, v_user, a_conv, 'assistant',
             'Не удалось получить ответ: база знаний acts_default недоступна. Попробуйте позже.',
             'complete', now(), now());
 
-    UPDATE t_db_oarb_audit_act_chat_agent_messages_bus
+    UPDATE chat_agent_messages_bus
     SET reply_to   = a_conv,
         status     = 'error',
         updated_at = now()
@@ -290,7 +292,7 @@ END$$;
 -- AW показывает typing-индикатор, пока reply_to = NULL и status = 'in_progress'.
 -- Замени ТОЛЬКО <QUESTION_CONV_ID> (conversation_id строки-вопроса из запроса 0).
 
-UPDATE t_db_oarb_audit_act_chat_agent_messages_bus
+UPDATE chat_agent_messages_bus
 SET status     = 'in_progress',
     updated_at = now()
 WHERE conversation_id = '<QUESTION_CONV_ID>'
@@ -305,7 +307,7 @@ WHERE conversation_id = '<QUESTION_CONV_ID>'
 
 -- Счётчики по role + status:
 SELECT role, status, COUNT(*)
-FROM t_db_oarb_audit_act_chat_agent_messages_bus
+FROM chat_agent_messages_bus
 GROUP BY role, status
 ORDER BY role, status;
 
@@ -313,7 +315,7 @@ ORDER BY role, status;
 SELECT id, chat_id, user_id, content,
        now() - created_at AS age,
        created_at
-FROM t_db_oarb_audit_act_chat_agent_messages_bus
+FROM chat_agent_messages_bus
 WHERE role = 'user'
   AND status IN ('pending', 'in_progress')
 ORDER BY created_at ASC
@@ -326,11 +328,11 @@ SELECT am.id, am.role, am.status, am.reply_to,
        am.buttons,
        am.media,
        am.created_at
-FROM t_db_oarb_audit_act_chat_agent_messages_bus am
+FROM chat_agent_messages_bus am
 WHERE am.conversation_id = '<QUESTION_CONV_ID>'
    OR am.conversation_id = (
        SELECT reply_to
-       FROM t_db_oarb_audit_act_chat_agent_messages_bus
+       FROM chat_agent_messages_bus
        WHERE conversation_id = '<QUESTION_CONV_ID>'
    )
 ORDER BY am.created_at;
@@ -338,7 +340,7 @@ ORDER BY am.created_at;
 -- Все сообщения одного треда (chat_id):
 SELECT id, role, status, conversation_id, reply_to,
        content, created_at
-FROM t_db_oarb_audit_act_chat_agent_messages_bus
+FROM chat_agent_messages_bus
 WHERE chat_id = '<chat_id>'
 ORDER BY created_at;
 
@@ -362,17 +364,17 @@ LIMIT 10;
 --   complete / error / timeout  — 180 дней
 -- Подстройте под свои аудит-требования.
 
-DELETE FROM t_db_oarb_audit_act_chat_agent_messages_bus
+DELETE FROM chat_agent_messages_bus
 WHERE status IN ('complete', 'error', 'timeout')
   AND updated_at < now() - INTERVAL '180 days';
 
 -- На Greenplum после массивных DELETE'ов полезен VACUUM ANALYZE
 -- (PG обычно справляется автовакуумом, но не помешает):
--- VACUUM ANALYZE t_db_oarb_audit_act_chat_agent_messages_bus;
+-- VACUUM ANALYZE chat_agent_messages_bus;
 
 -- Зависшие in_progress/pending дольше 2 часов — ручное закрытие:
 -- (AW обычно закрывает сам через 10 мин, но при рестарте uvicorn может остаться)
-UPDATE t_db_oarb_audit_act_chat_agent_messages_bus
+UPDATE chat_agent_messages_bus
 SET status     = 'timeout',
     updated_at = now()
 WHERE role = 'user'

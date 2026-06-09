@@ -2,7 +2,7 @@
 
 Чек-лист ручной проверки канала к внешнему ИИ-агенту (база знаний ОАРБ) перед merge'ом ветки.
 
-> В тексте ниже имена таблиц (`chat_agent_messages_bus`, `chat_messages`, `chat_files`) упоминаются без префикса для краткости. В БД они хранятся с префиксом `DATABASE__TABLE_PREFIX` (по умолчанию `t_db_oarb_audit_act_`).
+> Bus-таблица `chat_agent_messages_bus` хранится в БД **без app-префикса** — её имя задаётся `CHAT__AGENT_CHANNEL__TABLE_NAME` целиком (дефолт `chat_agent_messages_bus`). Остальные таблицы чата (`chat_messages`, `chat_files`) в тексте упоминаются без префикса для краткости, но в БД хранятся с префиксом `DATABASE__TABLE_PREFIX` (по умолчанию `t_db_oarb_audit_act_`).
 
 ## Архитектура (кратко)
 
@@ -17,7 +17,7 @@
 ## Подготовка
 
 1. Поднять PostgreSQL и применить миграцию (`app/domains/chat/migrations/postgresql/schema.sql`):
-   - Должна появиться таблица `t_db_oarb_audit_act_chat_agent_messages_bus` (префикс из `DATABASE__TABLE_PREFIX`).
+   - Должна появиться таблица `chat_agent_messages_bus` (без app-префикса — имя из `CHAT__AGENT_CHANNEL__TABLE_NAME`).
    - В `chat_messages` должна быть колонка `agent_ref VARCHAR(36)`.
 
 2. Заполнить `.env.local` (dev на OpenRouter):
@@ -45,7 +45,7 @@
 - Тумблер «База знаний ОАРБ» — в позиции «Выключен».
 - Написать в чат: «Привет, как дела?»
 - Ожидаемо: LLM отвечает синхронно (форварда нет, строк в `chat_agent_messages_bus` не появляется).
-- Проверить: `SELECT count(*) FROM t_db_oarb_audit_act_chat_agent_messages_bus` — не должно увеличиться.
+- Проверить: `SELECT count(*) FROM chat_agent_messages_bus` — не должно увеличиться.
 
 ### 2. Прямой форвард на внешнего агента (тумблер «Всегда»)
 - Перевести тумблер в позицию «Всегда».

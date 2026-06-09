@@ -12,6 +12,7 @@
 **Внимание**:
 - В GP-разделе таблицы доменов `ck_fin_res`, `ck_client_exp`, `ua_data` **НЕ перечислены** — это внешние данные, управляемые ETL. На PG-инсталляции (dev-режим) они есть в виде реплики и присутствуют в PG-разделе ниже.
 - Если задан `CHAT__SCHEMA_NAME` и/или `CHAT__AGENT_CHANNEL__SCHEMA_NAME`, таблицы чата / bus-таблица создаются в указанной схеме — дропать их в ней, а не в основной.
+- **Bus-таблица — без app-префикса**: её имя задаётся `CHAT__AGENT_CHANNEL__TABLE_NAME` целиком (дефолт `chat_agent_messages_bus`, **без** `DATABASE__TABLE_PREFIX`). Поэтому ниже строка дропа шины — единственная без префикса; это не опечатка. Если задано другое имя — подставить его.
 - VIEW дропаются ДО таблиц, на которые они ссылаются.
 - Sequences дропаются ПОСЛЕ таблиц, у которых они в DEFAULT.
 
@@ -31,7 +32,7 @@ DROP VIEW IF EXISTS v_db_oarb_ck_cs_validation;
 -- ╚══════════════════════════════════════════════════════════════════════╝
 DROP TABLE IF EXISTS t_db_oarb_audit_act_chat_audit_log;
 DROP TABLE IF EXISTS t_db_oarb_audit_act_chat_tool_metrics;
-DROP TABLE IF EXISTS t_db_oarb_audit_act_chat_agent_messages_bus;
+DROP TABLE IF EXISTS chat_agent_messages_bus;
 DROP TABLE IF EXISTS t_db_oarb_audit_act_chat_files;
 DROP TABLE IF EXISTS t_db_oarb_audit_act_chat_messages;
 DROP TABLE IF EXISTS t_db_oarb_audit_act_chat_conversations;
@@ -122,7 +123,7 @@ DROP TABLE IF EXISTS t_db_oarb_ua_process_dict;
 -- ╚══════════════════════════════════════════════════════════════════════╝
 DROP TABLE IF EXISTS audit_workstation.t_db_oarb_audit_act_chat_audit_log;
 DROP TABLE IF EXISTS audit_workstation.t_db_oarb_audit_act_chat_tool_metrics;
-DROP TABLE IF EXISTS audit_workstation.t_db_oarb_audit_act_chat_agent_messages_bus;
+DROP TABLE IF EXISTS audit_workstation.chat_agent_messages_bus;
 DROP TABLE IF EXISTS audit_workstation.t_db_oarb_audit_act_chat_files;
 DROP TABLE IF EXISTS audit_workstation.t_db_oarb_audit_act_chat_messages;
 DROP TABLE IF EXISTS audit_workstation.t_db_oarb_audit_act_chat_conversations;

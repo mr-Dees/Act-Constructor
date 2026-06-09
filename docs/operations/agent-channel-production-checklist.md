@@ -19,6 +19,11 @@ retention-чистку, мониторинг, ёмкости, troubleshooting.
 `agent_channel_poller.py` и `docs/integrations/external-agent-imitation.sql`
 (SQL-стенд имитации внешнего агента под единую таблицу).
 
+> **Имя bus-таблицы — без app-префикса**: задаётся `CHAT__AGENT_CHANNEL__TABLE_NAME`
+> целиком (дефолт `chat_agent_messages_bus`, **без** `DATABASE__TABLE_PREFIX`). В SQL
+> ниже подставь актуальное имя, если оно переопределено; на GP добавляется схема
+> `DATABASE__GP__SCHEMA`.
+
 ---
 
 ## 1. Retention: ручная чистка (раз в N дней)
@@ -36,12 +41,12 @@ DELETE по `created_at`.
 ```sql
 -- Чистим сообщения шины старше 30 дней.
 -- На большой таблице желательно сначала добавить индекс по created_at:
---   CREATE INDEX IF NOT EXISTS idx_t_db_oarb_audit_act_chat_agent_messages_bus_created_at
---       ON t_db_oarb_audit_act_chat_agent_messages_bus(created_at);
+--   CREATE INDEX IF NOT EXISTS idx_chat_agent_messages_bus_created_at
+--       ON chat_agent_messages_bus(created_at);
 -- (требуется один раз, выполнение DELETE без индекса = полный скан).
 
 BEGIN;
-DELETE FROM t_db_oarb_audit_act_chat_agent_messages_bus
+DELETE FROM chat_agent_messages_bus
 WHERE created_at < now() - interval '30 days';
 COMMIT;
 ```
@@ -52,11 +57,11 @@ COMMIT;
 -- Подставить актуальную схему (DATABASE__GP__SCHEMA, дефолт audit_workstation).
 
 -- 1. (один раз) Индекс на created_at — без него DELETE на multi-segment таблице будет долгим.
-CREATE INDEX idx_t_db_oarb_audit_act_chat_agent_messages_bus_created_at
-    ON audit_workstation.t_db_oarb_audit_act_chat_agent_messages_bus(created_at);
+CREATE INDEX idx_chat_agent_messages_bus_created_at
+    ON audit_workstation.chat_agent_messages_bus(created_at);
 
 -- 2. DELETE раз в N дней.
-DELETE FROM audit_workstation.t_db_oarb_audit_act_chat_agent_messages_bus
+DELETE FROM audit_workstation.chat_agent_messages_bus
 WHERE created_at < now() - interval '30 days';
 ```
 
@@ -65,13 +70,13 @@ WHERE created_at < now() - interval '30 days';
 ```sql
 -- PG
 SELECT
-    pg_size_pretty(pg_total_relation_size('t_db_oarb_audit_act_chat_agent_messages_bus')) AS messages_size,
-    (SELECT count(*) FROM t_db_oarb_audit_act_chat_agent_messages_bus) AS messages_rows;
+    pg_size_pretty(pg_total_relation_size('chat_agent_messages_bus')) AS messages_size,
+    (SELECT count(*) FROM chat_agent_messages_bus) AS messages_rows;
 
 -- GP — то же, но с указанием схемы:
 SELECT
-    pg_size_pretty(pg_total_relation_size('audit_workstation.t_db_oarb_audit_act_chat_agent_messages_bus')) AS messages_size,
-    (SELECT count(*) FROM audit_workstation.t_db_oarb_audit_act_chat_agent_messages_bus) AS messages_rows;
+    pg_size_pretty(pg_total_relation_size('audit_workstation.chat_agent_messages_bus')) AS messages_size,
+    (SELECT count(*) FROM audit_workstation.chat_agent_messages_bus) AS messages_rows;
 ```
 
 **Ориентир:** при 100 forward'ов в день — вопрос + ответ на каждый,

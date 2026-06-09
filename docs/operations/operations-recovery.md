@@ -2,7 +2,7 @@
 
 > Реальные сценарии «что-то не так в проде». У каждого: **симптом**, **как диагностировать**, **как починить**.
 > Документ — для оператора, не для разработчика. Глубокая архитектура — [`developer-guide.md`](../guides/developer-guide.md). Симптомы со стандартным фиксом — [`troubleshooting.md`](troubleshooting.md).
-> Плейсхолдеры в SQL: `{SCHEMA}` — `DATABASE__GP__SCHEMA` (например `s_grnplm_ld_audit_da_project_4`); `{PREFIX}` — `DATABASE__TABLE_PREFIX` (default `t_db_oarb_audit_act_`).
+> Плейсхолдеры в SQL: `{SCHEMA}` — `DATABASE__GP__SCHEMA` (например `s_grnplm_ld_audit_da_project_4`); `{PREFIX}` — `DATABASE__TABLE_PREFIX` (default `t_db_oarb_audit_act_`); `{BUS_TABLE}` — имя bus-таблицы целиком из `CHAT__AGENT_CHANNEL__TABLE_NAME` (по умолчанию `chat_agent_messages_bus`, без app-префикса).
 
 ---
 
@@ -23,13 +23,13 @@ WHERE status = 'streaming'
 
 -- 2. Состояние соответствующих записей в шине (agent_ref → chat_agent_messages_bus.id).
 SELECT id, chat_id, conversation_id, role, status, created_at, updated_at
-FROM {SCHEMA}.{PREFIX}chat_agent_messages_bus
+FROM {SCHEMA}.{BUS_TABLE}
 WHERE id IN (... agent_ref из шага 1 ...)
 ORDER BY created_at;
 
 -- 3. Есть ли вообще ответ агента (reply_to ссылается на uid вопроса).
 SELECT id, role, status, reply_to, created_at
-FROM {SCHEMA}.{PREFIX}chat_agent_messages_bus
+FROM {SCHEMA}.{BUS_TABLE}
 WHERE reply_to IN (... agent_ref из шага 1 ...);
 ```
 
@@ -49,7 +49,7 @@ WHERE reply_to IN (... agent_ref из шага 1 ...);
    WHERE id = '<message_id>';
 
    -- Вопрос в шине → timeout.
-   UPDATE {SCHEMA}.{PREFIX}chat_agent_messages_bus
+   UPDATE {SCHEMA}.{BUS_TABLE}
    SET status = 'timeout', updated_at = CURRENT_TIMESTAMP
    WHERE id = '<agent_ref>';
    ```
@@ -81,12 +81,12 @@ WHERE service_name = 'act_constructor';
 ```sql
 -- Размер таблицы.
 SELECT count(*) AS rows,
-       pg_size_pretty(pg_total_relation_size('{SCHEMA}.{PREFIX}chat_agent_messages_bus')) AS size
-FROM {SCHEMA}.{PREFIX}chat_agent_messages_bus;
+       pg_size_pretty(pg_total_relation_size('{SCHEMA}.{BUS_TABLE}')) AS size
+FROM {SCHEMA}.{BUS_TABLE};
 
 -- Распределение по статусам.
 SELECT status, count(*) AS messages
-FROM {SCHEMA}.{PREFIX}chat_agent_messages_bus
+FROM {SCHEMA}.{BUS_TABLE}
 GROUP BY status;
 ```
 
@@ -96,7 +96,7 @@ GROUP BY status;
 
 1. **Ручная очистка** старых терминальных сообщений (`complete`/`error`/`timeout`). Не трогать `pending`/`in_progress` — это ещё живые запросы:
    ```sql
-   DELETE FROM {SCHEMA}.{PREFIX}chat_agent_messages_bus
+   DELETE FROM {SCHEMA}.{BUS_TABLE}
    WHERE status IN ('complete', 'error', 'timeout')
      AND created_at < now() - interval '7 days';
    ```
