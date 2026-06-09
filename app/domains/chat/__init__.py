@@ -269,6 +269,7 @@ def _build_domain():
     from app.domains.chat.settings import (
         ChatDomainSettings,
         resolve_bus_schema,
+        resolve_bus_table,
         resolve_chat_schema,
         schema_qualifier,
     )
@@ -286,9 +287,11 @@ def _build_domain():
         health_check=_health_check,
         # Квалификатор схемы подставляется в schema.sql при создании таблиц:
         # {CHAT_SCHEMA_Q} — собственные таблицы чата, {BUS_SCHEMA_Q} — bus-таблица.
+        # {BUS_TABLE} — имя bus-таблицы целиком (без префикса приложения).
         # Ленивые (callable) — резолвятся в момент create_tables, когда адаптер готов.
         migration_substitutions={
             "{CHAT_SCHEMA_Q}": lambda: schema_qualifier(resolve_chat_schema()),
             "{BUS_SCHEMA_Q}": lambda: schema_qualifier(resolve_bus_schema()),
+            "{BUS_TABLE}": lambda: resolve_bus_table(),
         },
     )

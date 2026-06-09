@@ -20,8 +20,31 @@ def _patch_adapter():
     """Подменяет get_adapter, чтобы BaseRepository работал вне init_db()."""
     adapter = MagicMock()
     adapter.get_table_name = lambda name, schema='': name
+    adapter.qualify_table_name = lambda name, schema='': (
+        f"{schema}.{name}" if schema else name
+    )
     with patch("app.db.repositories.base.get_adapter", return_value=adapter):
         yield
+
+
+def test_bus_table_name_is_not_prefixed():
+    """Имя bus-таблицы НЕ префиксуется DATABASE__TABLE_PREFIX.
+
+    Шина — интеграционный «провод» к внешнему агенту: репозиторий квалифицирует
+    имя только схемой (qualify_table_name), без префикса приложения. Имя задаётся
+    настройкой CHAT__AGENT_CHANNEL__TABLE_NAME целиком.
+    """
+    adapter = MagicMock()
+    # get_table_name приклеил бы префикс — если бы его позвали, тест бы упал.
+    adapter.get_table_name = lambda name, schema='': f"t_db_oarb_audit_act_{name}"
+    adapter.qualify_table_name = lambda name, schema='': (
+        f"{schema}.{name}" if schema else name
+    )
+    with patch("app.db.repositories.base.get_adapter", return_value=adapter):
+        repo = AgentMessageRepository(
+            MagicMock(), "chat_agent_messages_bus", schema="",
+        )
+    assert repo.table == "chat_agent_messages_bus"
 
 
 # ── insert_question ──────────────────────────────────────────────────────

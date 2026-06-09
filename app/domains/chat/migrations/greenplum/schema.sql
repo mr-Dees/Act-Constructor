@@ -102,10 +102,12 @@ CREATE INDEX idx_{PREFIX}chat_files_conversation
 -- ============================================================================
 
 -- «Провод» между AW и агентом. Имена колонок согласованы со стороной nanobot.
+-- Имя таблицы — плейсхолдер {BUS_TABLE} (= CHAT__AGENT_CHANNEL__TABLE_NAME),
+-- БЕЗ {PREFIX}: app-префикс к шине не клеится, имя задаётся настройкой целиком.
 -- chat_id = uid треда (= chat_messages.conversation_id); conversation_id = uid
 -- одного сообщения (на него ссылается reply_to). role 'tool' разрешён, но AW
 -- его пока не обрабатывает.
-CREATE TABLE IF NOT EXISTS {BUS_SCHEMA_Q}{PREFIX}chat_agent_messages_bus (
+CREATE TABLE IF NOT EXISTS {BUS_SCHEMA_Q}{BUS_TABLE} (
     id              VARCHAR(36) NOT NULL,
     chat_id         VARCHAR(36) NOT NULL,
     user_id         VARCHAR(50) NOT NULL,
@@ -129,14 +131,14 @@ CREATE TABLE IF NOT EXISTS {BUS_SCHEMA_Q}{PREFIX}chat_agent_messages_bus (
 WITH (appendonly=false)
 DISTRIBUTED BY (chat_id);
 
-CREATE INDEX idx_{PREFIX}chat_agent_messages_bus_chat
-    ON {BUS_SCHEMA_Q}{PREFIX}chat_agent_messages_bus(chat_id, created_at);
-CREATE INDEX idx_{PREFIX}chat_agent_messages_bus_conversation
-    ON {BUS_SCHEMA_Q}{PREFIX}chat_agent_messages_bus(conversation_id);
-CREATE INDEX idx_{PREFIX}chat_agent_messages_bus_status
-    ON {BUS_SCHEMA_Q}{PREFIX}chat_agent_messages_bus(status, created_at);
-CREATE INDEX idx_{PREFIX}chat_agent_messages_bus_reply_to
-    ON {BUS_SCHEMA_Q}{PREFIX}chat_agent_messages_bus(reply_to);
+CREATE INDEX idx_{BUS_TABLE}_chat
+    ON {BUS_SCHEMA_Q}{BUS_TABLE}(chat_id, created_at);
+CREATE INDEX idx_{BUS_TABLE}_conversation
+    ON {BUS_SCHEMA_Q}{BUS_TABLE}(conversation_id);
+CREATE INDEX idx_{BUS_TABLE}_status
+    ON {BUS_SCHEMA_Q}{BUS_TABLE}(status, created_at);
+CREATE INDEX idx_{BUS_TABLE}_reply_to
+    ON {BUS_SCHEMA_Q}{BUS_TABLE}(reply_to);
 
 -- ============================================================================
 -- МЕТРИКИ ВЫПОЛНЕНИЯ CHATTOOL'ОВ

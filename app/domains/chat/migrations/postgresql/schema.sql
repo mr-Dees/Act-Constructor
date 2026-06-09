@@ -96,11 +96,13 @@ END$$;
 
 -- ── Bus-таблица канала к внешнему агенту (nanobot) ─────────────────────
 -- «Провод» между AW и агентом. Имена колонок согласованы со стороной nanobot.
+-- Имя таблицы — плейсхолдер {BUS_TABLE} (= CHAT__AGENT_CHANNEL__TABLE_NAME),
+-- БЕЗ {PREFIX}: app-префикс к шине не клеится, имя задаётся настройкой целиком.
 -- chat_id = uid треда (= chat_messages.conversation_id); conversation_id = uid
 -- одного сообщения (на него ссылается reply_to). role 'tool' разрешён, но AW
 -- его пока не обрабатывает. Если таблица уже создана стороной агента —
 -- CREATE TABLE IF NOT EXISTS / адаптер делают это безопасно.
-CREATE TABLE IF NOT EXISTS {BUS_SCHEMA_Q}{PREFIX}chat_agent_messages_bus (
+CREATE TABLE IF NOT EXISTS {BUS_SCHEMA_Q}{BUS_TABLE} (
     id              VARCHAR(36) PRIMARY KEY,
     chat_id         VARCHAR(36) NOT NULL,
     user_id         VARCHAR(50) NOT NULL,
@@ -119,14 +121,14 @@ CREATE TABLE IF NOT EXISTS {BUS_SCHEMA_Q}{PREFIX}chat_agent_messages_bus (
     created_at      TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
     updated_at      TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
-CREATE INDEX IF NOT EXISTS idx_{PREFIX}chat_agent_messages_bus_chat
-    ON {BUS_SCHEMA_Q}{PREFIX}chat_agent_messages_bus(chat_id, created_at);
-CREATE INDEX IF NOT EXISTS idx_{PREFIX}chat_agent_messages_bus_conversation
-    ON {BUS_SCHEMA_Q}{PREFIX}chat_agent_messages_bus(conversation_id);
-CREATE INDEX IF NOT EXISTS idx_{PREFIX}chat_agent_messages_bus_status
-    ON {BUS_SCHEMA_Q}{PREFIX}chat_agent_messages_bus(status, created_at);
-CREATE INDEX IF NOT EXISTS idx_{PREFIX}chat_agent_messages_bus_reply_to
-    ON {BUS_SCHEMA_Q}{PREFIX}chat_agent_messages_bus(reply_to);
+CREATE INDEX IF NOT EXISTS idx_{BUS_TABLE}_chat
+    ON {BUS_SCHEMA_Q}{BUS_TABLE}(chat_id, created_at);
+CREATE INDEX IF NOT EXISTS idx_{BUS_TABLE}_conversation
+    ON {BUS_SCHEMA_Q}{BUS_TABLE}(conversation_id);
+CREATE INDEX IF NOT EXISTS idx_{BUS_TABLE}_status
+    ON {BUS_SCHEMA_Q}{BUS_TABLE}(status, created_at);
+CREATE INDEX IF NOT EXISTS idx_{BUS_TABLE}_reply_to
+    ON {BUS_SCHEMA_Q}{BUS_TABLE}(reply_to);
 
 -- ── Метрики выполнения ChatTool'ов ────────────────────────────────────
 -- Append-only журнал latency / status / ошибок для каждого вызова tool'а

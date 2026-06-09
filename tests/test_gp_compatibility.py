@@ -433,7 +433,7 @@ class TestGreenplumSchemaCompatibility:
             cleaned = re.sub(r'--[^\n]*', '', raw)
             if (
                 re.search(r'\bCREATE\s+TABLE\b', cleaned, re.IGNORECASE)
-                and "{PREFIX}chat_agent_messages_bus" in cleaned
+                and "{BUS_TABLE}" in cleaned
             ):
                 create_stmt = cleaned
                 break
@@ -459,6 +459,27 @@ class TestGreenplumSchemaCompatibility:
         assert 'id' in pk_cols, (
             f"id отсутствует в PRIMARY KEY chat_agent_messages_bus: {pk_cols}"
         )
+
+    def test_chat_agent_messages_bus_name_is_prefix_free_placeholder(self):
+        """Bus-таблица именуется плейсхолдером {BUS_TABLE} без {PREFIX}.
+
+        Шина — интеграционный «провод» к внешнему агенту: её имя задаётся
+        настройкой CHAT__AGENT_CHANNEL__TABLE_NAME целиком, префикс приложения
+        (DATABASE__TABLE_PREFIX) к ней НЕ клеится. Регрессия на случай возврата
+        {PREFIX} перед именем bus-таблицы.
+        """
+        base = (
+            Path(__file__).parent.parent
+            / "app" / "domains" / "chat" / "migrations"
+        )
+        for db_type in ("postgresql", "greenplum"):
+            content = (base / db_type / "schema.sql").read_text(encoding="utf-8")
+            assert "{BUS_TABLE}" in content, (
+                f"{db_type}/schema.sql: плейсхолдер {{BUS_TABLE}} не найден"
+            )
+            assert "{PREFIX}chat_agent_messages_bus" not in content, (
+                f"{db_type}/schema.sql: bus-таблица всё ещё префиксуется {{PREFIX}}"
+            )
 
     def test_gp_schema_no_forbidden_constructs(self):
         """GP-схема chat не содержит конструкций, запрещённых в GP 6.x / PG 9.4."""

@@ -209,6 +209,22 @@ def resolve_bus_schema() -> str:
     return s.agent_channel.schema_name or s.schema_name
 
 
+def resolve_bus_table() -> str:
+    """Имя bus-таблицы из настройки agent_channel.table_name.
+
+    Подставляется в миграции как {BUS_TABLE}. К имени НЕ добавляется префикс
+    приложения — шина общая с внешним агентом, её имя задаётся настройкой
+    целиком. Безопасно при незарегистрированном домене (юнит-тесты): вернёт
+    дефолтное имя.
+    """
+    from app.core.settings_registry import get
+
+    try:
+        return get("chat", ChatDomainSettings).agent_channel.table_name
+    except KeyError:
+        return "chat_agent_messages_bus"
+
+
 def schema_qualifier(domain_schema: str) -> str:
     """Квалификатор '<schema>.' для подстановки в миграции.
 

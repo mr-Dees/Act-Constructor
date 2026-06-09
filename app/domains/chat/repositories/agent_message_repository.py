@@ -26,7 +26,11 @@ class AgentMessageRepository(BaseRepository):
         super().__init__(conn)
         # schema=None → резолвим из настроек (agent_channel → chat → основная).
         bus_schema = resolve_bus_schema() if schema is None else schema
-        self.table = self.adapter.get_table_name(table_name, schema=bus_schema)
+        # qualify_table_name (НЕ get_table_name): к bus-таблице НЕ клеится
+        # префикс приложения (DATABASE__TABLE_PREFIX). Имя задаётся настройкой
+        # table_name целиком — шина общая с внешним агентом, её именование вне
+        # префикс-схемы AW. Нужен префикс → вписать его в table_name руками.
+        self.table = self.adapter.qualify_table_name(table_name, schema=bus_schema)
 
     @staticmethod
     def _parse_row(row) -> dict | None:
