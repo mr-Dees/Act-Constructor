@@ -15,6 +15,7 @@ from fastapi.responses import JSONResponse
 from fastapi.testclient import TestClient
 
 from app.api.v1.deps.auth_deps import get_username
+from app.api.v1.deps.role_deps import get_user_roles
 from app.core.domain_registry import reset_registry
 from app.core.exceptions import AppError
 from app.core.settings_registry import reset as reset_settings
@@ -26,6 +27,7 @@ from app.domains.notifications.deps import (
 from app.domains.notifications.settings import NotificationsSettings
 
 USERNAME = "12345"
+ADMIN_ROLES = [{"id": 1, "name": "Админ", "domain_name": None}]
 
 
 @pytest.fixture(autouse=True)
@@ -38,8 +40,18 @@ def clean_registries():
     reset_settings()
 
 
-def _build_app(service: object, *, username: str = USERNAME) -> FastAPI:
-    """Собирает минимальный FastAPI с роутером уведомлений и оверрайдами DI."""
+def _build_app(
+    service: object,
+    *,
+    username: str = USERNAME,
+    roles: list[dict] | None = None,
+) -> FastAPI:
+    """Собирает минимальный FastAPI с роутером уведомлений и оверрайдами DI.
+
+    По умолчанию пользователь — администратор: создание уведомлений
+    (POST /notifications) защищено require_admin, остальные эндпоинты —
+    общий колокольчик и гейтом не покрыты.
+    """
     app = FastAPI()
 
     @app.exception_handler(AppError)
@@ -48,7 +60,15 @@ def _build_app(service: object, *, username: str = USERNAME) -> FastAPI:
 
     app.include_router(notif_router, prefix="/api/v1/notifications")
     app.dependency_overrides[get_username] = lambda: username
+    app.dependency_overrides[get_user_roles] = lambda: (
+        ADMIN_ROLES if roles is None else roles
+    )
     app.dependency_overrides[get_notification_service] = lambda: service
+    # Дефолтные настройки домена (реестр настроек в E2E пуст). Тесты, которым
+    # важно конкретное значение, перекрывают этот оверрайд явно.
+    app.dependency_overrides[get_notifications_settings] = (
+        lambda: NotificationsSettings()
+    )
     return app
 
 
@@ -101,6 +121,19 @@ def test_list_respects_limit_query():
         resp = client.get("/api/v1/notifications?limit=10")
     assert resp.status_code == 200, resp.text
     assert svc.list_for_user.await_args.kwargs["limit"] == 10
+
+
+def test_list_without_limit_uses_settings_default():
+    """GET /notifications без ?limit берёт NOTIFICATIONS__LIST_LIMIT из настроек."""
+    svc = _make_service()
+    app = _build_app(svc)
+    app.dependency_overrides[get_notifications_settings] = (
+        lambda: NotificationsSettings(list_limit=7)
+    )
+    with TestClient(app) as client:
+        resp = client.get("/api/v1/notifications")
+    assert resp.status_code == 200, resp.text
+    assert svc.list_for_user.await_args.kwargs["limit"] == 7
 
 
 # ── GET /notifications/unread-count ──────────────────────────────────────────
@@ -250,6 +283,56 @@ def test_create_rejects_invalid_severity():
         )
     assert resp.status_code == 422, resp.text
     svc.push.assert_not_awaited()
+
+
+# ── POST /notifications: гейт require_admin ──────────────────────────────────
+
+
+def test_create_allowed_for_admin():
+    """Администратор создаёт уведомление (200), svc.push выполнен."""
+    svc = _make_service()
+    svc.push.return_value = "admin-id"
+    app = _build_app(svc, roles=ADMIN_ROLES)
+    with TestClient(app) as client:
+        resp = client.post(
+            "/api/v1/notifications",
+            json={"source": "manual", "title": "От админа"},
+        )
+    assert resp.status_code == 200, resp.text
+    assert resp.json() == {"id": "admin-id"}
+    svc.push.assert_awaited_once()
+
+
+def test_create_forbidden_for_non_admin():
+    """Не-админ получает 403 на создание; svc.push не вызывается."""
+    svc = _make_service()
+    app = _build_app(
+        svc,
+        roles=[{"id": 1, "name": "Цифровой акт", "domain_name": "acts"}],
+    )
+    with TestClient(app) as client:
+        resp = client.post(
+            "/api/v1/notifications",
+            json={"source": "manual", "title": "Запрещено"},
+        )
+    assert resp.status_code == 403, resp.text
+    svc.push.assert_not_awaited()
+
+
+def test_read_and_dismiss_available_to_non_admin():
+    """Общий колокольчик: read/dismiss доступны не-админу (гейтом не покрыты)."""
+    svc = _make_service()
+    app = _build_app(
+        svc,
+        roles=[{"id": 1, "name": "Цифровой акт", "domain_name": "acts"}],
+    )
+    with TestClient(app) as client:
+        read_resp = client.post("/api/v1/notifications/n1/read")
+        dismiss_resp = client.post("/api/v1/notifications/n1/dismiss")
+    assert read_resp.status_code == 200, read_resp.text
+    assert dismiss_resp.status_code == 200, dismiss_resp.text
+    svc.mark_read.assert_awaited_once_with("n1", USERNAME)
+    svc.dismiss.assert_awaited_once_with("n1", USERNAME)
 
 
 # ── Общий колокольчик: НЕТ доменного гейта (public_api) ───────────────────────

@@ -10,6 +10,7 @@ import logging
 from fastapi import APIRouter, Depends, Query
 
 from app.api.v1.deps.auth_deps import get_username
+from app.api.v1.deps.role_deps import require_admin
 from app.domains.notifications.deps import (
     get_notification_service,
     get_notifications_settings,
@@ -32,15 +33,18 @@ router = APIRouter()
 
 @router.get("", response_model=list[NotificationOut], summary="Список уведомлений")
 async def list_notifications(
-    limit: int = Query(50, ge=1, le=200),
+    limit: int | None = Query(None, ge=1, le=200),
     username: str = Depends(get_username),
     service: NotificationService = Depends(get_notification_service),
+    settings: NotificationsSettings = Depends(get_notifications_settings),
 ):
     """Возвращает видимые пользователю уведомления (адресные + broadcast).
 
-    Скрытые исключены, сортировка по дате создания DESC.
+    Без параметра ``limit`` берётся ``NOTIFICATIONS__LIST_LIMIT`` (с верхней
+    границей 200). Скрытые исключены, сортировка по дате создания DESC.
     """
-    return await service.list_for_user(username, limit=limit)
+    effective_limit = limit if limit is not None else min(settings.list_limit, 200)
+    return await service.list_for_user(username, limit=effective_limit)
 
 
 @router.get(
@@ -104,7 +108,11 @@ async def dismiss(
     return {"ok": True}
 
 
-@router.post("", summary="Создать уведомление")
+@router.post(
+    "",
+    summary="Создать уведомление",
+    dependencies=[Depends(require_admin())],
+)
 async def create_notification(
     payload: NotificationCreate,
     username: str = Depends(get_username),
@@ -112,8 +120,8 @@ async def create_notification(
 ):
     """Создаёт уведомление. ``created_by`` = текущий username.
 
-    ``recipient_user_id=None`` → broadcast всем. Любой авторизованный может
-    создать уведомление (адресное себе/другому или broadcast).
+    ``recipient_user_id=None`` → broadcast всем. Создание доступно только
+    администратору (require_admin); остальные эндпоинты — общий колокольчик.
     """
     notification_id = await service.push(
         source=payload.source,

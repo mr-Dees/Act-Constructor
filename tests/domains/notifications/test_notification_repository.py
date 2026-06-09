@@ -10,6 +10,7 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
+from app.domains.notifications.exceptions import NotificationNotFoundError
 from app.domains.notifications.repositories.notification_repository import (
     NotificationRepository,
 )
@@ -106,8 +107,13 @@ async def test_mark_read_updates_existing_state(mock_conn):
 
 
 async def test_mark_read_inserts_when_no_state(mock_conn):
-    """mark_read: если UPDATE затронул 0 строк — лениво создаётся state INSERT'ом."""
+    """mark_read: если UPDATE затронул 0 строк — лениво создаётся state INSERT'ом.
+
+    Перед INSERT идёт fetchval(EXISTS) — проверка видимости уведомления; для
+    видимого она возвращает True и INSERT выполняется.
+    """
     mock_conn.execute.side_effect = ["UPDATE 0", "INSERT 0 1"]
+    mock_conn.fetchval.return_value = True
     repo = NotificationRepository(mock_conn)
     await repo.mark_read("n1", "user1")
 
@@ -116,6 +122,25 @@ async def test_mark_read_inserts_when_no_state(mock_conn):
     assert "INSERT INTO notification_state" in insert_sql
     assert "TRUE, FALSE" in insert_sql  # is_read=TRUE, is_dismissed=FALSE
     assert insert_params == ["n1", "user1"]
+
+
+async def test_mark_read_raises_404_when_not_visible(mock_conn):
+    """mark_read: UPDATE 0 и невидимое уведомление → NotificationNotFoundError, без INSERT."""
+    mock_conn.execute.side_effect = ["UPDATE 0"]
+    mock_conn.fetchval.return_value = False
+    repo = NotificationRepository(mock_conn)
+
+    with pytest.raises(NotificationNotFoundError) as exc_info:
+        await repo.mark_read("ghost", "user1")
+
+    assert exc_info.value.status_code == 404
+    # INSERT не выполнен — был только UPDATE (1 вызов execute).
+    assert mock_conn.execute.call_count == 1
+    # Проверка видимости: EXISTS с приведением ::varchar (как в mark_all_read).
+    exists_sql, *exists_params = mock_conn.fetchval.call_args.args
+    assert "EXISTS" in exists_sql
+    assert "recipient_user_id = $2::varchar OR recipient_user_id IS NULL" in exists_sql
+    assert exists_params == ["ghost", "user1"]
 
 
 # ── dismiss (lazy upsert) ───────────────────────────────────────────────────
@@ -135,8 +160,9 @@ async def test_dismiss_updates_existing_state(mock_conn):
 
 
 async def test_dismiss_inserts_when_no_state(mock_conn):
-    """dismiss: UPDATE 0 → INSERT с is_dismissed=TRUE."""
+    """dismiss: UPDATE 0 → fetchval(EXISTS)=True → INSERT с is_dismissed=TRUE."""
     mock_conn.execute.side_effect = ["UPDATE 0", "INSERT 0 1"]
+    mock_conn.fetchval.return_value = True
     repo = NotificationRepository(mock_conn)
     await repo.dismiss("n1", "user1")
 
@@ -145,6 +171,35 @@ async def test_dismiss_inserts_when_no_state(mock_conn):
     assert "INSERT INTO notification_state" in insert_sql
     assert "FALSE, TRUE" in insert_sql  # is_read=FALSE, is_dismissed=TRUE
     assert insert_params == ["n1", "user1"]
+
+
+async def test_dismiss_raises_404_when_not_visible(mock_conn):
+    """dismiss: UPDATE 0 и невидимое уведомление → NotificationNotFoundError, без INSERT."""
+    mock_conn.execute.side_effect = ["UPDATE 0"]
+    mock_conn.fetchval.return_value = False
+    repo = NotificationRepository(mock_conn)
+
+    with pytest.raises(NotificationNotFoundError) as exc_info:
+        await repo.dismiss("ghost", "user1")
+
+    assert exc_info.value.status_code == 404
+    assert mock_conn.execute.call_count == 1
+
+
+async def test_dismiss_broadcast_visible_inserts(mock_conn):
+    """dismiss: broadcast (recipient NULL) видим → fetchval=True → INSERT происходит.
+
+    Видимость через EXISTS покрывает и broadcast (recipient_user_id IS NULL),
+    поэтому скрытие broadcast-уведомления создаёт state, а не падает 404.
+    """
+    mock_conn.execute.side_effect = ["UPDATE 0", "INSERT 0 1"]
+    mock_conn.fetchval.return_value = True
+    repo = NotificationRepository(mock_conn)
+    await repo.dismiss("broadcast-id", "user1")
+
+    assert mock_conn.execute.call_count == 2
+    insert_sql, *_ = mock_conn.execute.call_args_list[1].args
+    assert "INSERT INTO notification_state" in insert_sql
 
 
 # ── mark_all_read ───────────────────────────────────────────────────────────

@@ -3,6 +3,7 @@
 import asyncpg
 
 from app.db.repositories.base import BaseRepository
+from app.domains.notifications.exceptions import NotificationNotFoundError
 
 
 class NotificationRepository(BaseRepository):
@@ -63,6 +64,25 @@ class NotificationRepository(BaseRepository):
         )
         return count or 0
 
+    async def _is_visible_to_user(self, notification_id: str, user_id: str) -> bool:
+        """Существует ли видимое пользователю уведомление с таким id.
+
+        Видимое = адресное пользователю ИЛИ broadcast (``recipient_user_id
+        IS NULL``). Приведение ``$2::varchar`` — превентивно от
+        ``AmbiguousParameterError`` на GP (как в ``mark_all_read``).
+        """
+        return await self.conn.fetchval(
+            f"""
+            SELECT EXISTS(
+                SELECT 1 FROM {self.notifications}
+                WHERE id = $1
+                  AND (recipient_user_id = $2::varchar OR recipient_user_id IS NULL)
+            )
+            """,
+            notification_id,
+            user_id,
+        )
+
     async def mark_read(self, notification_id: str, user_id: str) -> None:
         """Помечает уведомление прочитанным (lazy upsert state)."""
         result = await self.conn.execute(
@@ -75,6 +95,8 @@ class NotificationRepository(BaseRepository):
             user_id,
         )
         if result == "UPDATE 0":
+            if not await self._is_visible_to_user(notification_id, user_id):
+                raise NotificationNotFoundError("Уведомление не найдено")
             await self.conn.execute(
                 f"""
                 INSERT INTO {self.state}
@@ -133,6 +155,8 @@ class NotificationRepository(BaseRepository):
             user_id,
         )
         if result == "UPDATE 0":
+            if not await self._is_visible_to_user(notification_id, user_id):
+                raise NotificationNotFoundError("Уведомление не найдено")
             await self.conn.execute(
                 f"""
                 INSERT INTO {self.state}
