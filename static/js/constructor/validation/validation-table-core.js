@@ -123,15 +123,21 @@ export function validateTableContent(grid) {
 /**
  * Структурный дефект сетки уровня «сервер отклонит сохранение/экспорт».
  *
- * Зеркалит проверки серверной TableSchema: прямоугольность, границы span,
- * длина colWidths. СОЗНАТЕЛЬНО НЕ проверяет когерентность spanOrigin/isSpanned
+ * Зеркалит проверки серверной TableSchema: прямоугольность, границы span.
+ * СОЗНАТЕЛЬНО НЕ проверяет когерентность spanOrigin/isSpanned
  * (в отличие от validateGrid): легаси-операции вставки/удаления колонок и строк
  * оставляют ИНЕРТНЫЙ устаревший spanOrigin, который и рендер (`iterateVisibleCells`
  * смотрит только на isSpanned), и сервер игнорируют. Красить такую таблицу
  * красным — ложная тревога. Красный = только то, что реально сломает экспорт.
  *
+ * Длина colWidths СОЗНАТЕЛЬНО НЕ проверяется: сервер при несовпадении длины с
+ * числом колонок молча ОЧИЩАЕТ веса (DOCX делит ширину поровну), а не отклоняет
+ * сохранение. Клиент не должен быть строже сервера и предупреждать о состоянии,
+ * которое сервер сам нормализует. Параметр сохранён в сигнатуре для совместимости
+ * с вызовом из collectTableWarnings.
+ *
  * @param {Object[][]} grid Dense-сетка.
- * @param {number[]} [colWidths] Веса колонок (если заданы — длина должна совпасть с числом колонок).
+ * @param {number[]} [colWidths] Веса колонок (на дефект не влияют — см. описание).
  * @returns {boolean} true, если есть структурный дефект.
  */
 export function hasStructuralDefect(grid, colWidths) {
@@ -152,10 +158,6 @@ export function hasStructuralDefect(grid, colWidths) {
       if (r + rs - 1 >= grid.length || c + cs - 1 >= width) return true;
     }
   }
-  // colWidths (если непусты) должны совпадать по длине с числом колонок.
-  // Пустой массив = «не заданы» (сервер: `if self.colWidths and ...`), DOCX
-  // делит ширину поровну — такую таблицу красить красным нельзя (ложная тревога).
-  if (Array.isArray(colWidths) && colWidths.length > 0 && colWidths.length !== width) return true;
 
   return false;
 }
@@ -182,22 +184,27 @@ export function collectTableWarnings(tables, getTableName) {
     const grid = table && table.grid;
     if (!Array.isArray(grid) || grid.length === 0) continue;
 
-    const tableName = getTableName(tableId);
+    // Ленивое разрешение имени: getTableName делает DFS по дереву, а валидные
+    // таблицы (большинство) не дают ни одного замечания. Резолвим имя только при
+    // первом push-сайте; мемо гарантирует максимум один DFS на проблемную
+    // таблицу (ветки hasEmptyHeaders и !hasDataRows могут сработать обе).
+    let resolvedName;
+    const nameOf = () => (resolvedName ??= getTableName(tableId));
 
     if (hasStructuralDefect(grid, table.colWidths)) {
-      warnings.push({ tableId, tableName, issue: 'нарушена структура таблицы', severity: 'error' });
+      warnings.push({ tableId, tableName: nameOf(), issue: 'нарушена структура таблицы', severity: 'error' });
       continue; // сетка ненадёжна — контентные проверки пропускаем
     }
 
     if (countHeaderRows(grid) === 0) {
-      warnings.push({ tableId, tableName, issue: 'нет строки заголовка', severity: 'warning' });
+      warnings.push({ tableId, tableName: nameOf(), issue: 'нет строки заголовка', severity: 'warning' });
       continue;
     }
     if (hasEmptyHeaders(grid)) {
-      warnings.push({ tableId, tableName, issue: 'не заполнены заголовки', severity: 'warning' });
+      warnings.push({ tableId, tableName: nameOf(), issue: 'не заполнены заголовки', severity: 'warning' });
     }
     if (!hasDataRows(grid)) {
-      warnings.push({ tableId, tableName, issue: 'нет данных', severity: 'warning' });
+      warnings.push({ tableId, tableName: nameOf(), issue: 'нет данных', severity: 'warning' });
     }
   }
 
