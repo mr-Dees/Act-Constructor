@@ -35,6 +35,17 @@ class ChatFileValidationError(AppError):
     code: ClassVar[str] = "chat-file-validation"
 
 
+class ChatFeedbackValidationError(AppError):
+    """Оценка сообщения не проходит валидацию.
+
+    Например: rating не из набора ('up'/'down'), неизвестный код причины
+    дизлайка, слишком длинный комментарий, или сообщение нельзя оценивать
+    (не assistant-роль).
+    """
+    status_code = 422
+    code: ClassVar[str] = "chat-feedback-validation"
+
+
 class ChatToolValidationError(AppError):
     """Вызов ChatTool не прошёл валидацию (например, отсутствует
     обязательный параметр)."""

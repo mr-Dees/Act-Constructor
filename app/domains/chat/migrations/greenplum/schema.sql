@@ -204,3 +204,43 @@ CREATE INDEX idx_{PREFIX}chat_audit_log_action_created
     ON {CHAT_SCHEMA_Q}{PREFIX}chat_audit_log(action, created_at);
 CREATE INDEX idx_{PREFIX}chat_audit_log_conversation_created
     ON {CHAT_SCHEMA_Q}{PREFIX}chat_audit_log(conversation_id, created_at);
+
+-- ============================================================================
+-- ОБРАТНАЯ СВЯЗЬ ПО СООБЩЕНИЯМ АССИСТЕНТА (ЛАЙК/ДИЗЛАЙК)
+-- ============================================================================
+
+-- Идемпотентна по паре (message_id, user_id): одна активная оценка пользователя
+-- на сообщение. Составной PK (message_id, user_id) служит ключом идемпотентности
+-- (UPSERT = read-modify-write в транзакции; upsert-синтаксис в GP 6.x недоступен).
+-- DISTRIBUTED BY (message_id) ⊆ PK — co-location по сообщению, message_id ведущий
+-- (lookup WHERE message_id=$1 по PK-индексу). БЕЗ FK на chat_messages — оценка
+-- переживает удаление беседы. reasons — JSONB-массив кодов причин дизлайка
+-- (валидируется в сервисе).
+CREATE TABLE IF NOT EXISTS {CHAT_SCHEMA_Q}{PREFIX}chat_message_feedback (
+    conversation_id VARCHAR(36) NOT NULL,
+    message_id      VARCHAR(36) NOT NULL,
+    user_id         VARCHAR(50) NOT NULL,
+    rating          VARCHAR(8) NOT NULL
+                    CONSTRAINT check_chat_message_feedback_rating_values
+                    CHECK (rating IN ('up','down')),
+    reasons         JSONB,
+    comment         TEXT,
+    source          VARCHAR(16) NOT NULL DEFAULT 'user'
+                    CONSTRAINT check_chat_message_feedback_source_values
+                    CHECK (source IN ('user','auto','llm')),
+    route_type      VARCHAR(16),
+    agent_mode      VARCHAR(16),
+    model           VARCHAR(100),
+    created_at      TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at      TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    PRIMARY KEY (message_id, user_id)
+)
+WITH (appendonly=false)
+DISTRIBUTED BY (message_id);
+
+CREATE INDEX idx_{PREFIX}chat_message_feedback_conversation
+    ON {CHAT_SCHEMA_Q}{PREFIX}chat_message_feedback(conversation_id);
+CREATE INDEX idx_{PREFIX}chat_message_feedback_rating_created
+    ON {CHAT_SCHEMA_Q}{PREFIX}chat_message_feedback(rating, created_at);
+CREATE INDEX idx_{PREFIX}chat_message_feedback_user_created
+    ON {CHAT_SCHEMA_Q}{PREFIX}chat_message_feedback(user_id, created_at);

@@ -505,6 +505,60 @@ class TestGreenplumSchemaCompatibility:
             + ", ".join(violations)
         )
 
+    def test_chat_message_feedback_present_in_both_schemas(self):
+        """chat_message_feedback есть в обеих схемах с CHECK на rating (up/down)."""
+        base = Path(__file__).parent.parent / "app" / "domains" / "chat" / "migrations"
+        for db_type in ("postgresql", "greenplum"):
+            content = (base / db_type / "schema.sql").read_text(encoding="utf-8")
+            assert "{PREFIX}chat_message_feedback" in content, (
+                f"{db_type}/schema.sql: таблица chat_message_feedback не найдена"
+            )
+            assert "check_chat_message_feedback_rating_values" in content, (
+                f"{db_type}/schema.sql: CHECK rating не найден"
+            )
+            for v in ("'up'", "'down'"):
+                assert v in content, f"{db_type}/schema.sql: значение {v} не найдено"
+
+    def test_chat_message_feedback_gp_distribution_and_pk(self):
+        """GP: chat_message_feedback DISTRIBUTED BY (message_id) ⊆ PK (message_id, user_id).
+
+        message_id ведущий в PK (lookup WHERE message_id=$1 по PK-индексу),
+        co-location по сообщению, идемпотентность даёт сам составной PK.
+        """
+        schema_path = (
+            Path(__file__).parent.parent
+            / "app" / "domains" / "chat" / "migrations" / "greenplum" / "schema.sql"
+        )
+        content = schema_path.read_text(encoding="utf-8")
+        stmts = DatabaseAdapter._split_sql_statements(content)
+
+        create_stmt = None
+        for raw in stmts:
+            cleaned = re.sub(r'--[^\n]*', '', raw)
+            if (
+                re.search(r'\bCREATE\s+TABLE\b', cleaned, re.IGNORECASE)
+                and "{PREFIX}chat_message_feedback" in cleaned
+            ):
+                create_stmt = cleaned
+                break
+
+        assert create_stmt is not None, (
+            "GP-схема chat: CREATE TABLE chat_message_feedback не найдено"
+        )
+        assert re.search(
+            r'DISTRIBUTED\s+BY\s*\(\s*message_id\s*\)', create_stmt, re.IGNORECASE
+        ), "DISTRIBUTED BY (message_id) не найден в chat_message_feedback"
+
+        pk_match = re.search(
+            r'PRIMARY\s+KEY\s*\(([^)]+)\)', create_stmt, re.IGNORECASE,
+        )
+        assert pk_match is not None, "PRIMARY KEY не найден в chat_message_feedback"
+        pk_cols = {c.strip().lower() for c in pk_match.group(1).split(',')}
+        assert pk_cols == {"message_id", "user_id"}, (
+            f"chat_message_feedback PK {sorted(pk_cols)} != "
+            f"{{message_id, user_id}}"
+        )
+
 
 # ---------------------------------------------------------------------------
 # 2. SQL Statement Splitter (_split_sql_statements)

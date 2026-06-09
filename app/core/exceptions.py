@@ -142,6 +142,13 @@ CHECK_CONSTRAINT_MESSAGES: dict[str, str] = {
     "check_chat_tool_metrics_latency_nonneg": (
         "Длительность выполнения tool'а не может быть отрицательной"
     ),
+    # ── chat: chat_message_feedback ──────────────────────────────────────────
+    "check_chat_message_feedback_rating_values": (
+        "Недопустимая оценка сообщения. Допустимые значения: up, down"
+    ),
+    "check_chat_message_feedback_source_values": (
+        "Недопустимый источник оценки. Допустимые значения: user, auto, llm"
+    ),
     # ── notifications: notifications ──────────────────────────────────────────
     "check_notifications_severity": (
         "Недопустимая критичность уведомления. "
