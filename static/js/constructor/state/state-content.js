@@ -7,9 +7,9 @@
  */
 
 import { ChangelogTracker } from '../changelog-tracker.js';
-import { MetricsRiskCoordinator } from './metrics-risk-coordinator.js';
 import { AppState } from './state-core.js';
 import { TreeUtils } from '../tree/tree-utils.js';
+import { shouldHaveMetricsTable, shouldHaveMainMetrics } from './metrics-risk-core.js';
 import { ValidationCore } from '../validation/validation-core.js';
 import { ValidationTree } from '../validation/validation-tree.js';
 import { AppConfig } from '../../shared/app-config.js';
@@ -57,63 +57,6 @@ Object.assign(AppState, {
      */
     _generateDefaultHeaders(cols) {
         return Array.from({length: cols}, (_, i) => `Колонка ${i + 1}`);
-    },
-
-    /**
-     * Удаляет таблицу из узла дерева
-     * @param {string} tableNodeId - ID узла таблицы
-     * @returns {Object} Результат удаления с полями valid, message
-     */
-    removeTable(tableNodeId) {
-        const tableNode = this.findNodeById(tableNodeId);
-        if (!tableNode || tableNode.type !== AppConfig.nodeTypes.TABLE) {
-            return ValidationCore.failure(AppConfig.content.errors.notFound('Таблица'));
-        }
-
-        // tableNode.deletable === true — явное разрешение поверх protected
-        // (риск-таблицы). Override гейтим ИМЕННО по узлу: table-объекты сводных
-        // metrics-таблиц тоже имеют deletable:true, но их узлы — нет, поэтому
-        // сводные остаются неудаляемыми. protected продолжает блокировать
-        // редактирование структуры ячеек.
-        if (tableNode.protected && tableNode.deletable !== true) {
-            return ValidationCore.failure(AppConfig.content.errors.protectedFromDeletion);
-        }
-
-        const table = this.tables[tableNode.tableId];
-        if (table?.protected && tableNode.deletable !== true) {
-            return ValidationCore.failure(AppConfig.content.errors.protectedFromDeletion);
-        }
-
-        const parent = this.findParentNode(tableNodeId);
-        if (!parent) {
-            return ValidationCore.failure(AppConfig.tree.validation.parentNotFound);
-        }
-
-        // E-2: pinned-флаги читаем с node, не с table-объекта.
-        // Все 4 типа — риск (триггерит metrics-coordinator при удалении).
-        const isRiskTable = !!(tableNode.isRegularRiskTable || tableNode.isOperationalRiskTable || tableNode.isTaxRiskTable || tableNode.isOtherRiskTable);
-
-        if (typeof ChangelogTracker !== 'undefined') {
-            ChangelogTracker.record('delete_table', tableNode.tableId, tableNode.label || 'Таблица', {nodeId: tableNode.parentId});
-        }
-
-        // Удаляем узел из дерева
-        parent.children = parent.children.filter(child => child.id !== tableNodeId);
-
-        // Удаляем данные таблицы
-        if (tableNode.tableId && this.tables[tableNode.tableId]) {
-            delete this.tables[tableNode.tableId];
-        }
-
-        this.generateNumbering();
-
-        // Обновляем таблицы метрик если удалили таблицу рисков
-        if (isRiskTable) {
-            // Через coordinator: snapshot/rollback safety.
-            MetricsRiskCoordinator.onRiskTableRemoved();
-        }
-
-        return ValidationCore.success();
     },
 
     /**
@@ -201,7 +144,7 @@ Object.assign(AppState, {
         };
 
         const node = {
-            id: `${parentId}_${type}_${Date.now()}`,
+            id: `${parentId}_${type}_${Date.now()}_${Math.random().toString(36).substring(2, 9)}`,
             label: label || defaultLabels[type],
             type,
             [idProps[type]]: contentId,
@@ -306,7 +249,7 @@ Object.assign(AppState, {
 
         node.children.unshift(tableNode);
 
-        const grid = this._createMetricsGrid();
+        const grid = this._createMetricsHeaderGrid();
         const preset = AppConfig.content.tablePresets.metrics;
 
         const table = {
@@ -324,11 +267,15 @@ Object.assign(AppState, {
     },
 
     /**
-     * Создает сетку таблицы метрик с объединенными ячейками
+     * Общая фабрика шапки сводной сетки (двухстрочный заголовок метрик +
+     * пустые строки данных). Намеренно ОБЩАЯ для двух подвидов таблиц:
+     *  - сводные метрики (`_createMetricsTable` / `_createMainMetricsTable`);
+     *  - «Прочие риски» (`_createOtherRiskTable`) — шапка 1:1 со сводной.
+     * Любая правка структуры шапки затрагивает оба подвида — это by design.
      * @private
      * @returns {Array<Array>} Сетка ячеек
      */
-    _createMetricsGrid() {
+    _createMetricsHeaderGrid() {
         const grid = [];
 
         // Первая строка заголовков с объединением
@@ -454,7 +401,7 @@ Object.assign(AppState, {
 
         node5.children.unshift(tableNode);
 
-        const grid = this._createMetricsGrid();
+        const grid = this._createMetricsHeaderGrid();
         const preset = AppConfig.content.tablePresets.metrics;
 
         const table = {
@@ -502,16 +449,15 @@ Object.assign(AppState, {
             parentNode = this.findParentNode(ancestorNode.id);
         }
 
-        // Создаём таблицу метрик на 5.* ТОЛЬКО если таблица рисков на более глубоком уровне
-        if (parentNode?.id === '5' && ancestorNode.number?.match(/^5\.\d+$/)) {
-            if (nodeId !== ancestorNode.id) {
-                const hasMetricsTable = ancestorNode.children?.some(
-                    child => child.type === AppConfig.nodeTypes.TABLE && child.isMetricsTable === true
-                );
+        // Создаём таблицу метрик на 5.X ТОЛЬКО если риск на глубоком уровне (5.X.Y+).
+        // Единый предикат (metrics-risk-core.shouldHaveMetricsTable).
+        if (parentNode?.id === '5' && shouldHaveMetricsTable(ancestorNode, n => this._findRiskTablesInSubtree(n))) {
+            const hasMetricsTable = ancestorNode.children?.some(
+                child => child.type === AppConfig.nodeTypes.TABLE && child.isMetricsTable === true
+            );
 
-                if (!hasMetricsTable) {
-                    this._createMetricsTable(ancestorNode.id, ancestorNode.number);
-                }
+            if (!hasMetricsTable) {
+                this._createMetricsTable(ancestorNode.id, ancestorNode.number);
             }
         }
 
@@ -531,22 +477,14 @@ Object.assign(AppState, {
         if (!node5?.children) return;
 
         const {TABLE, ITEM} = AppConfig.nodeTypes;
+        const findRisks = n => this._findRiskTablesInSubtree(n);
         const firstLevelNodes = node5.children.filter(child =>
             child.type === ITEM && child.number?.match(/^5\.\d+$/)
         );
 
-        // Проверяем каждый узел первого уровня
+        // Проверяем каждый узел первого уровня (единый предикат необходимости сводной).
         for (const firstLevelNode of firstLevelNodes) {
-            // Считаем только таблицы рисков в дочерних item-узлах (5.*.* и глубже)
-            let deepRiskTables = [];
-            for (const child of firstLevelNode.children || []) {
-                if (child.type === ITEM) {
-                    deepRiskTables = deepRiskTables.concat(this._findRiskTablesInSubtree(child));
-                }
-            }
-
-            // Если нет глубоких таблиц рисков, удаляем таблицу метрик
-            if (deepRiskTables.length === 0) {
+            if (!shouldHaveMetricsTable(firstLevelNode, findRisks)) {
                 const metricsTableNode = firstLevelNode.children?.find(
                     child => child.type === TABLE && child.isMetricsTable === true
                 );
@@ -560,10 +498,8 @@ Object.assign(AppState, {
             }
         }
 
-        // Проверяем необходимость главной таблицы метрик
-        const allRiskTables = this._findRiskTablesInSubtree(node5);
-
-        if (allRiskTables.length === 0) {
+        // Проверяем необходимость главной таблицы метрик (единый предикат).
+        if (!shouldHaveMainMetrics(node5, findRisks)) {
             const mainMetricsTableNode = node5.children?.find(
                 child => child.type === TABLE && child.isMainMetricsTable === true
             );
@@ -840,7 +776,7 @@ Object.assign(AppState, {
 
     /**
      * Создаёт таблицу «Прочие риски». Шапка и сетка 1:1 со сводной таблицей метрик
-     * (использует общий конструктор `_createMetricsGrid`), но НЕ автогенерируется
+     * (использует общий конструктор `_createMetricsHeaderGrid`), но НЕ автогенерируется
      * `metrics-risk-coordinator`-ом, НЕ агрегирует данные дочерних метрик и НЕ
      * влияет на иерархию пунктов под разделом 5.
      * @private
@@ -863,7 +799,9 @@ Object.assign(AppState, {
         const insertIdx = this._getFirstNonPinnedIndex(node);
         node.children.splice(insertIdx, 0, tableNode);
 
-        const grid = this._createMetricsGrid();
+        // Явно переиспользуем общую шапку метрик: «прочие риски» намеренно
+        // имеют ту же сводную сетку (см. docstring _createMetricsHeaderGrid).
+        const grid = this._createMetricsHeaderGrid();
 
         const table = {
             id: tableId,

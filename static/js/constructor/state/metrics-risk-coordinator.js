@@ -34,9 +34,7 @@
  * 3) Seam для будущей экстракции / юнит-тестов: тесты могут заменять методы
  *    AppState mock'ами и проверять coordinator в изоляции.
  */
-import { ContextMenuManager } from '../context-menu/context-menu-core.js';
 import { AppState } from './state-core.js';
-import { AppConfig } from '../../shared/app-config.js';
 import { Notifications } from '../../shared/notifications.js';
 
 export const MetricsRiskCoordinator = {
@@ -103,12 +101,20 @@ export const MetricsRiskCoordinator = {
     },
 
     /**
-     * Хук «риск-таблица удалена». Реконсилит metrics во всём §5 (функция работает
-     * глобально, удалённый nodeId уже не нужен — см. M7).
+     * D1: удаление риск-узла под ЕДИНЫМ snapshot'ом.
+     *
+     * Snapshot §5 снимается ДО deleteFn() (фактического удаления риск-узла),
+     * поэтому при исключении в reconcile откат восстанавливает ПОЛНОЕ состояние,
+     * включая удалённый риск-узел. Это закрывает дыру partial-state, когда
+     * snapshot снимался уже после удаления узла (rollback не возвращал риск-узел,
+     * а сводная без своего риска становилась неудаляемой).
+     *
+     * @param {Function} deleteFn - Фактическое удаление риск-узла из дерева/tables.
      * @returns {boolean} true при успехе, false если был rollback.
      */
-    onRiskTableRemoved() {
-        return this._withSnapshot('onRiskTableRemoved', () => {
+    onRiskTableRemovedWithDeletion(deleteFn) {
+        return this._withSnapshot('onRiskTableRemovedWithDeletion', () => {
+            deleteFn();
             AppState._cleanupMetricsTablesAfterRiskTableDeleted();
         });
     },
@@ -124,32 +130,6 @@ export const MetricsRiskCoordinator = {
         return this._withSnapshot('onSubtreeMoved', () => {
             AppState._reconcileMetricsTablesAfterMove(draggedNode, oldAncestor5x);
         });
-    },
-
-    /**
-     * Проверка: можно ли добавить риск-таблицу в указанный узел.
-     * Возвращает {allowed: bool, reason?: string}.
-     *
-     * Делегирует на TreeContextMenu-инстанс (логика 6 предикатов уровней 5.X/5.X.Y
-     * исторически живёт там). Если меню ещё не инициализировано — fallback на
-     * базовую проверку «узел под §5 и item».
-     *
-     * @param {Object} node - Узел-кандидат.
-     * @returns {{allowed: boolean, reason?: string}}
-     */
-    validateAddRiskTable(node) {
-        const menu = window.ContextMenuManager?.treeMenu;
-        if (menu && typeof menu._isRiskTableAllowedForNode === 'function') {
-            const allowed = menu._isRiskTableAllowedForNode(node);
-            if (!allowed && typeof menu._getRiskTableBlockReason === 'function') {
-                return {allowed: false, reason: menu._getRiskTableBlockReason(node)};
-            }
-            return {allowed};
-        }
-        // Fallback (минимальная проверка)
-        const isItem = !node.type || node.type === AppConfig.nodeTypes.ITEM;
-        const under5 = node.number && /^5\.\d+/.test(node.number);
-        return {allowed: !!(isItem && under5)};
     }
 };
 

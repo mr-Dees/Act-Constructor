@@ -188,3 +188,26 @@ async def test_app_error_from_formatter_propagates():
         with pytest.raises(AppError) as exc_info:
             await svc.save_act(42, "testuser", fmt="md")
         assert exc_info.value is original
+
+
+@pytest.mark.asyncio
+async def test_invalid_span_error_maps_to_export_validation():
+    """InvalidSpanError из DOCX-форматера → ActExportValidationError (400), не 500.
+
+    InvalidSpanError не наследник ValueError, поэтому без явного except он
+    попал бы в catch-all и дал AppError(500). Маппим в доменную ошибку данных.
+    """
+    from docx.exceptions import InvalidSpanError
+
+    svc = _make_export_service()
+    svc._formatters["docx"] = MagicMock()
+    svc._formatters["docx"].format.side_effect = InvalidSpanError(
+        "requested span not rectangular"
+    )
+    svc.act_crud_service.get_act = AsyncMock(return_value=_make_mock_metadata())
+    svc.act_content_service.get_content = AsyncMock(return_value=_minimal_content_dict())
+
+    with patch("app.domains.acts.services.export_service.get_executor", return_value=None):
+        with pytest.raises(ActExportValidationError) as exc_info:
+            await svc.save_act(42, "testuser", fmt="docx")
+        assert exc_info.value.status_code == 400

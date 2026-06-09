@@ -259,6 +259,49 @@ class AgentChannelService:
             question_uid,
         )
 
+    async def _emit_answer_notification(
+        self,
+        *,
+        question: dict | None,
+        title: str,
+        severity: str,
+    ) -> None:
+        """Эмитит персистентное уведомление о готовности/ошибке ответа агента.
+
+        Best-effort: вся эмиссия обёрнута в try/except — сбой или отсутствие
+        домена notifications НЕ должны ломать финализацию ответа (она уже
+        успешно записана в БД к моменту вызова). Фабрика разрешается мягко
+        через ``has_factory``/``get_factory`` (импорт локальный, чтобы не
+        плодить import-циклы и чтобы тесты могли патчить domain_registry).
+
+        Получатель — автор вопроса (``question.user_id``). Если строки-вопроса
+        нет или у неё нет user_id — уведомление не эмитим (broadcast здесь не
+        нужен, а адресовать ответ некому).
+
+        Ссылка: чат — это popup без собственного URL, а в метаданных вопроса
+        (``{"mode", "kb"}``) надёжного ``act_id`` нет. Поэтому ``link=None``
+        (переход из уведомления не предусмотрен — допустимо по спеке). Не
+        выдумываем несуществующий URL чата.
+        """
+        if not question:
+            return
+        recipient_user_id = question.get("user_id")
+        if not recipient_user_id:
+            return
+
+        # Делегируем единому ядерному хелперу (резолв фабрики + мягкий
+        # try/except). Локальный импорт — без жёсткой зависимости на
+        # module-level и для патчинга реестра в тестах.
+        from app.core.notifications_emit import push_notification
+
+        await push_notification(
+            source="chat",
+            title=title,
+            severity=severity,
+            link=None,
+            recipient_user_id=recipient_user_id,
+        )
+
     async def try_finalize(
         self,
         *,
@@ -302,10 +345,21 @@ class AgentChannelService:
                 "code": "agent_error",
                 "message": error_message,
             }
-            await message_repo.mark_failed(
+            failed = await message_repo.mark_failed(
                 message_id=assistant_message_id,
                 error_block=error_block,
             )
+            if failed:
+                # Уведомление об ошибке — ровно один раз, на тике, который
+                # реально перевёл сообщение в терминал, и ДО set_status: при
+                # сбое set_status поллер повторит try_finalize, но mark_failed
+                # вернёт False — уведомление не задвоится и не потеряется.
+                # best-effort (см. _emit_answer_notification).
+                await self._emit_answer_notification(
+                    question=question,
+                    title="Ошибка ответа базы знаний",
+                    severity="error",
+                )
             # Закрываем вопрос: AW — source-of-truth освобождения слота лимита,
             # не полагаемся на то, что внешний агент проставит терминальный
             # status (он мог выставить только reply_to). Не best-effort: при
@@ -323,10 +377,21 @@ class AgentChannelService:
             answer,
             max_block_text_size=self._settings.agent_channel.max_block_text_size,
         )
-        await message_repo.finalize(
+        finalized = await message_repo.finalize(
             message_id=assistant_message_id,
             final_blocks=blocks,
         )
+        if finalized:
+            # Уведомление о готовности — ровно один раз, на тике, который
+            # реально финализировал черновик, и ДО set_status: при сбое
+            # set_status поллер повторит try_finalize, но finalize вернёт False
+            # — уведомление не задвоится и не потеряется. best-effort
+            # (см. _emit_answer_notification).
+            await self._emit_answer_notification(
+                question=question,
+                title="Готов ответ базы знаний",
+                severity="info",
+            )
         # Закрываем вопрос в шине: освобождаем слот лимита независимо от того,
         # проставил ли внешний агент терминальный status (мог выставить только
         # reply_to). AW — source-of-truth. Вне общей транзакции: при сбое

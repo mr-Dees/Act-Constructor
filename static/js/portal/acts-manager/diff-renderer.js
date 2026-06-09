@@ -3,6 +3,7 @@
  * Работает на основе результатов DiffEngine.compute().
  */
 import { SafeHTML } from '../../shared/sanitize.js';
+import { iterateVisibleCells } from '../../constructor/table/grid-merges.js';
 
 export class DiffRenderer {
     /**
@@ -147,10 +148,8 @@ export class DiffRenderer {
 
         for (let r = 0; r < data.grid.length; r++) {
             const tr = document.createElement('tr');
-            for (let c = 0; c < data.grid[r].length; c++) {
-                const cell = data.grid[r][c];
-                if (cell.isSpanned) continue;
-
+            // Единый обход видимых (не поглощённых) ячеек строки — общий helper.
+            iterateVisibleCells([data.grid[r]], (cell, _r, c) => {
                 const isHeader = cell.isHeader;
                 const td = document.createElement(isHeader ? 'th' : 'td');
                 if (cell.colSpan > 1) td.colSpan = cell.colSpan;
@@ -181,7 +180,7 @@ export class DiffRenderer {
                 }
 
                 tr.appendChild(td);
-            }
+            });
             table.appendChild(tr);
         }
 

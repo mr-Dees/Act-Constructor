@@ -1,0 +1,174 @@
+/*
+ * Лист A4 в предпросмотре (Word-точная геометрия)
+ *
+ * #preview — скруглённая белая подложка документа (единая по стилю с подложкой
+ * дерева), на которой лежит белый лист A4 (.preview-sheet) с полями и типографикой
+ * эталонного акта (Times New Roman). Модалка предпросмотра (#previewMenuBody)
+ * сохраняет серый «холст» с пунктиром по краю листа.
+ * Геометрия повторяет DOCX (app/domains/acts/formatters/docx/styles.py):
+ *   страница A4 210×297 мм; поля left 15.01мм, right 12.51мм, top/bottom 10мм.
+ * Лист непрерывный (растёт по высоте, без разрывов страниц) — решение владельца.
+ *
+ * Грузится ПОСЛЕ preview-base.css / preview-table.css, поэтому переопределяет
+ * интерфейсное оформление #preview и таблиц предпросмотра на Word-подобное.
+ */
+
+/* #preview — скруглённая «подложка» документа, единая по стилю с подложкой дерева
+   (.tree-container): белый фон, тонкая рамка, мягкая тень --shadow-sm. Тень
+   рисуется в отступе колонки (.column padding), как у дерева. Лист по-прежнему
+   занимает всю ширину подложки (padding:0), а скругление обрезает его углы
+   (overflow + border-radius) — поэтому отдельный пунктир по краю листа не нужен. */
+#preview.preview {
+    background: var(--bg-primary);
+    padding: 0;
+    border: var(--border-width-thin) solid var(--border);
+    border-radius: var(--radius-md);
+    box-shadow: var(--shadow-sm);
+    /* Горизонтального скролла нет: лист fit-to-width масштабируется под ширину. */
+    overflow-y: auto;
+    overflow-x: hidden;
+    /* Якорь для абсолютного индикатора зума. */
+    position: relative;
+    /* Холст не имитирует документ — сбрасываем интерфейсную типографику. */
+    font-size: initial;
+    line-height: initial;
+}
+
+/* Тень статична (как у .tree-container) — не растёт при наведении. */
+#preview.preview:hover {
+    box-shadow: var(--shadow-sm);
+}
+
+/* Обёртка-sizer: занимает масштабированный footprint листа (см. preview-fit.js). */
+.preview-sheet-sizer {
+    position: relative;
+    margin: 0 auto; /* центрирование листа в холсте */
+}
+
+/* Белый лист A4 с полями эталона */
+.preview-sheet {
+    /* Лежит внутри sizer'а и масштабируется fit-скейлером от верхнего-левого угла. */
+    position: absolute;
+    top: 0;
+    left: 0;
+    transform-origin: top left;
+    width: 210mm;
+    min-height: 297mm;
+    box-sizing: border-box;
+    /* top right bottom left — поля эталонного DOCX. */
+    padding: 10mm 12.51mm 10mm 15.01mm;
+    margin: 0 auto;
+    background: #fff;
+    /* Граница листа A4 — ненавязчивый пунктир. Актуален для модалки предпросмотра
+       (#previewMenuBody), где холст — серая канва без рамки. На inline-панели шага 1
+       (#preview) пунктир отключён (см. override ниже): там границу рисует скруглённая
+       подложка #preview (рамка + тень). outline-offset: -1px рисует пунктир сразу
+       внутри края листа — при padding:0 у холста он не обрезается overflow-x:hidden.
+       outline (НЕ border) не входит в box-sizing/padding листа. */
+    outline: 1px dashed rgba(0, 0, 0, 0.30);
+    outline-offset: -1px;
+    font-family: "Times New Roman", serif;
+    font-size: 12pt;
+    line-height: 1.15;
+    color: #000;
+}
+
+/* Inline-лист (шаг 1): границу документа задаёт скруглённая подложка #preview
+   (рамка + мягкая тень, единый стиль с подложкой дерева), поэтому пунктир по краю
+   листа здесь лишний. Углы листа обрезаются скруглением #preview (overflow). */
+#preview .preview-sheet {
+    outline: none;
+}
+
+/* Индикатор текущего масштаба поверх холста */
+.preview-zoom-indicator {
+    position: absolute;
+    right: 10px;
+    bottom: 10px;
+    padding: 2px 8px;
+    font-size: 12px;
+    font-family: var(--font-family-base, sans-serif);
+    color: #fff;
+    background: rgba(0, 0, 0, 0.45);
+    border-radius: 10px;
+    pointer-events: none;
+    user-select: none;
+    z-index: 2;
+}
+
+/* Таблицы на листе — Word-типографика, ширины из colgroup (colWidths). */
+.preview-sheet .preview-table {
+    width: 100%;
+    border-collapse: collapse;
+    table-layout: fixed;
+    border: 0.5pt solid #000;
+    background: #fff;
+    font-size: 9pt;
+    color: #000;
+}
+
+.preview-sheet .preview-table th,
+.preview-sheet .preview-table td {
+    border: 0.5pt solid #000;
+    padding: 2pt 4pt;
+    text-align: left;
+    vertical-align: middle;
+    /* Высота строки — авто, по содержимому (как auto-height в Word). */
+    /* Сохраняем \n из ячеек: переносы строк рендерятся как есть (F4). */
+    white-space: pre-wrap;
+    word-wrap: break-word;
+    overflow-wrap: break-word;
+    font-family: "Times New Roman", serif;
+    font-size: 9pt;
+    color: #000;
+}
+
+/* Заголовочные ячейки — серая заливка эталона + жирный шрифт */
+.preview-sheet .preview-table-header,
+.preview-sheet .preview-table th {
+    background: #D9D9D9;
+    font-weight: bold;
+    color: #000;
+    text-align: center;
+}
+
+/* Объединённые шапки, прижатые влево (совпадение с .docx) — выше специфичность,
+   чем у центрирующего правила выше, поэтому left побеждает и на листе. */
+.preview-sheet .preview-table th.preview-th-left {
+    text-align: left;
+}
+
+/* Обёртка таблицы на листе не скроллится: таблица всегда влезает в колонку. */
+.preview-sheet .preview-table-wrapper {
+    overflow-x: visible;
+    margin: 6pt 0;
+    border-radius: 0;
+}
+
+/* Рамки проблемных таблиц (источник — колокольчик «Замечания»). */
+.preview-sheet .preview-table-wrapper--warning {
+    outline: 2px solid #e6a700;
+    outline-offset: 2px;
+    border-radius: 2px;
+}
+.preview-sheet .preview-table-wrapper--error {
+    outline: 2px solid var(--error, #d33);
+    outline-offset: 2px;
+    border-radius: 2px;
+}
+/* Подсветка при переходе по замечанию из колокольчика. */
+@keyframes notif-flash {
+    0%   { box-shadow: 0 0 0 0 rgba(230, 167, 0, 0.55); }
+    100% { box-shadow: 0 0 0 12px rgba(230, 167, 0, 0); }
+}
+.preview-sheet .preview-table-wrapper--flash {
+    animation: notif-flash 1.3s ease-out;
+}
+
+/* Печать: убираем масштаб/холст/рамку/индикатор — лист печатается чисто. */
+@media print {
+    #preview.preview { overflow: visible; background: #fff; padding: 0; border: none; border-radius: 0; box-shadow: none; }
+    .preview-sheet-sizer { width: auto !important; height: auto !important; }
+    .preview-sheet { position: static; transform: none !important; box-shadow: none; outline: none; }
+    .preview-zoom-indicator { display: none; }
+}

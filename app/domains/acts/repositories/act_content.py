@@ -264,8 +264,14 @@ class ActContentRepository(BaseRepository):
         )
 
         args: list[tuple] = []
+        dropped = 0
         for table_id, table_data in data.tables.items():
             node_id = table_data.nodeId
+            # Orphan-фильтр: таблица, чей nodeId отсутствует в дереве, не пишется
+            # (иначе в act_tables копятся записи без узла-владельца).
+            if node_id not in node_map:
+                dropped += 1
+                continue
             info = node_map.get(node_id, {})
             parent_node_id = info.get("parent_item_node_id")
             audit_point_id = audit_point_map.get(parent_node_id) if parent_node_id else None
@@ -292,6 +298,12 @@ class ActContentRepository(BaseRepository):
                 getattr(table_data, 'isTaxRiskTable', False),
                 getattr(table_data, 'isOtherRiskTable', False),
             ))
+
+        if dropped:
+            logger.warning(
+                "Пропущено %d таблиц(ы) без узла-владельца в дереве (act_id=%s)",
+                dropped, act_id,
+            )
 
         if args:
             await self.conn.executemany(
@@ -527,26 +539,49 @@ class ActContentRepository(BaseRepository):
         col_widths: list | dict,
         is_protected: bool,
         is_deletable: bool,
+        node_number: str | None = None,
+        table_label: str | None = None,
+        is_metrics_table: bool = False,
+        is_main_metrics_table: bool = False,
+        is_regular_risk_table: bool = False,
+        is_operational_risk_table: bool = False,
+        is_tax_risk_table: bool = False,
+        is_other_risk_table: bool = False,
     ) -> None:
         """Вставляет одну системную таблицу (qualityAssessment и т.п.).
 
         Используется при перестройке разделов 1-2: при переходе на процессный
         тип проверки добавляются специальные таблицы оценки качества.
+
+        Заполняет денормализацию (node_number/table_label) и все 6 флагов
+        подвидов — чтобы вставленная системная таблица была согласована с теми,
+        что пишет _save_tables, и не теряла классификацию.
         """
         await self.conn.execute(
             f"""
             INSERT INTO {self.tables}
-                (act_id, table_id, node_id, grid_data, col_widths,
-                 is_protected, is_deletable)
-            VALUES ($1, $2, $3, $4, $5, $6, $7)
+                (act_id, table_id, node_id, node_number, table_label,
+                 grid_data, col_widths, is_protected, is_deletable,
+                 is_metrics_table, is_main_metrics_table,
+                 is_regular_risk_table, is_operational_risk_table,
+                 is_tax_risk_table, is_other_risk_table)
+            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15)
             """,
             act_id,
             table_id,
             node_id,
+            node_number,
+            table_label,
             json.dumps(grid_data),
             json.dumps(col_widths),
             is_protected,
             is_deletable,
+            is_metrics_table,
+            is_main_metrics_table,
+            is_regular_risk_table,
+            is_operational_risk_table,
+            is_tax_risk_table,
+            is_other_risk_table,
         )
 
     async def _update_edit_timestamp(self, act_id: int, username: str) -> None:

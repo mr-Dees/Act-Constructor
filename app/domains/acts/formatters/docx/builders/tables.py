@@ -9,6 +9,7 @@ from docx.oxml.ns import qn
 from docx.shared import Pt
 
 from app.domains.acts.formatters.docx.styles import (
+    CENTERED_MERGED_HEADER_TEXTS,
     Borders,
     Fonts,
     Margins,
@@ -25,9 +26,6 @@ USABLE_WIDTH_DXA = Page.width_twips - Margins.left - Margins.right  # 10346
 
 # w:tblW в процентах: 5000 = 100% (единица измерения pct — 1/50 процента).
 _TBLW_PCT_FULL = "5000"
-
-# Ячейка-исключение: по центру даже в склеенном виде (colSpan>1).
-_CENTERED_MERGED_TEXT = "Количество клиентов / элементов, ед."
 
 
 def _normalize_text(text: str) -> str:
@@ -172,8 +170,11 @@ def _apply_borders(table) -> None:
 
 
 def _merge_cells(table, r, c, col_span: int, row_span: int) -> None:
-    end_r = r + row_span - 1
-    end_c = c + col_span - 1
+    # Зажимаем конец объединения в границы матрицы: схема уже отбраковывает
+    # выходящие за пределы span'ы (TableSchema.validate_structure), но это
+    # defense-in-depth — битый span никогда не должен ронять builder IndexError'ом.
+    end_r = min(r + row_span - 1, len(table.rows) - 1)
+    end_c = min(c + col_span - 1, len(table.rows[r].cells) - 1)
     start_cell = table.rows[r].cells[c]
     end_cell = table.rows[end_r].cells[end_c]
     start_cell.merge(end_cell)
@@ -183,14 +184,15 @@ def _fill_cell(cell, text: str, *, is_header: bool, col_span: int = 1) -> None:
     if is_header:
         _set_cell_shade(cell, Palette.table_header_shade)
     # Выравнивание: по высоте всегда по центру. По ширине — объединённые по
-    # горизонтали ячейки (colSpan>1) прижимаются влево (по ширине), одиночные —
-    # по центру.
+    # горизонтали ячейки (colSpan>1) прижимаются влево (явный LEFT, не JUSTIFY —
+    # чтобы предпросмотр совпадал с .docx WYSIWYG), одиночные — по центру.
     cell.vertical_alignment = WD_CELL_VERTICAL_ALIGNMENT.CENTER
     para = cell.paragraphs[0]
-    # Исключение: «Количество клиентов / элементов, ед.» всегда по центру,
-    # даже когда склеена по горизонтали (встречается в шапках риск-таблиц).
-    if col_span > 1 and _normalize_text(text) != _CENTERED_MERGED_TEXT:
-        para.alignment = WD_ALIGN_PARAGRAPH.JUSTIFY
+    # Исключение: шапки из CENTERED_MERGED_HEADER_TEXTS (например «Количество
+    # клиентов / элементов, ед.») всегда по центру, даже когда склеены по
+    # горизонтали (встречается в шапках риск-таблиц). Конфиг — в styles.py.
+    if col_span > 1 and _normalize_text(text) not in CENTERED_MERGED_HEADER_TEXTS:
+        para.alignment = WD_ALIGN_PARAGRAPH.LEFT
     else:
         para.alignment = WD_ALIGN_PARAGRAPH.CENTER
     # Удаляем все существующие runs из XML-параграфа перед добавлением своего

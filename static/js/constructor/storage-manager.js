@@ -168,6 +168,14 @@ export class StorageManager {
 
         // Периодическое сохранение в БД (каждые 2 минуты при наличии несинхронизированных данных)
         // E-6: та же защита от race с drag'ом.
+        //
+        // E2 (by-design): авто/периодическое сохранение НЕ запускает контентную
+        // валидацию (пустые заголовки/нет данных/нет шапки). Это сознательно —
+        // черновик обязан сохраняться всегда, а каскад метрик/рисков легитимно
+        // создаёт пустые сводные таблицы, которые контентная проверка пометила
+        // бы как неполные. Контентная валидация — только перед ЭКСПОРТОМ
+        // (navigation-manager). Структурная целостность остаётся защищённой
+        // сервером (HTTP 422) на каждом PUT /content независимо от saveType.
         this._periodicDbSaveInterval = setInterval(async () => {
             if (AppState._dragInProgress) return;
             if (this.hasUnsyncedChanges() && window.currentActId) {
@@ -414,7 +422,6 @@ export class StorageManager {
             tables: AppState.tables,
             textBlocks: AppState.textBlocks,
             violations: AppState.violations,
-            tableUISizes: AppState.tableUISizes,
             currentStep: AppState.currentStep,
             selectedNodeId: AppState.selectedNode?.id || null,
             selectedFormats: this._getSelectedFormats(),

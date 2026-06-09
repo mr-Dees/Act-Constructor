@@ -10,9 +10,15 @@ import gc
 import logging
 from typing import TYPE_CHECKING, Literal
 
+from docx.exceptions import InvalidSpanError
+
 from app.core.config import Settings
 from app.core.exceptions import AppError
-from app.domains.acts.exceptions import ActNotFoundError, UnsupportedFormatError
+from app.domains.acts.exceptions import (
+    ActExportValidationError,
+    ActNotFoundError,
+    UnsupportedFormatError,
+)
 from app.domains.acts.formatters.docx import DocxFormatter, ExportContext
 from app.domains.acts.formatters.markdown_formatter import MarkdownFormatter
 from app.domains.acts.formatters.text_formatter import TextFormatter
@@ -123,6 +129,16 @@ class ExportService:
                     )
             except AppError:
                 raise
+            except InvalidSpanError as e:
+                # Пересекающиеся / непрямоугольные объединения ячеек в таблице —
+                # ошибка данных, а не баг. InvalidSpanError НЕ наследник
+                # ValueError, поэтому ловим явно ПЕРЕД catch-all (иначе 500).
+                logger.warning(f"Некорректные объединения ячеек при экспорте акта: {e}")
+                raise ActExportValidationError(
+                    "Не удалось экспортировать акт: в одной из таблиц объединения "
+                    "ячеек пересекаются или образуют непрямоугольную область. "
+                    "Исправьте структуру таблицы."
+                ) from e
             except (MemoryError, ValueError, AttributeError, KeyError, TypeError) as e:
                 logger.exception(f"Ошибка форматирования акта в формат {fmt}: {e}")
                 raise AppError(f"Не удалось отформатировать акт в формат {fmt.upper()}") from e

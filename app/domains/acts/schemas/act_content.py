@@ -7,7 +7,7 @@ Pydantic схемы для валидации данных актов.
 
 from typing import Literal
 
-from pydantic import BaseModel, Field, field_validator
+from pydantic import BaseModel, Field, field_validator, model_validator
 
 
 class TableCellSchema(BaseModel):
@@ -26,8 +26,14 @@ class TableCellSchema(BaseModel):
     """
     content: str = Field(default="", description="Содержимое ячейки")
     isHeader: bool = Field(default=False, description="Заголовок")
-    colSpan: int = Field(default=1, ge=1, description="Colspan")
-    rowSpan: int = Field(default=1, ge=1, description="Rowspan")
+    colSpan: int = Field(
+        default=1, ge=1, le=16,
+        description="Число объединённых колонок (1..16, по лимиту колонок таблицы)"
+    )
+    rowSpan: int = Field(
+        default=1, ge=1, le=64,
+        description="Число объединённых строк (1..64, по лимиту строк таблицы)"
+    )
     isSpanned: bool = Field(default=False, description="Часть объединения")
     spanOrigin: dict[str, int] | None = Field(default=None, description="Координаты главной ячейки")
     originRow: int | None = Field(default=None, ge=0, description="Исходная строка")
@@ -45,7 +51,7 @@ class TableSchema(BaseModel):
         id: Уникальный идентификатор таблицы
         nodeId: ID узла дерева
         grid: Матрица ячеек (двумерный массив, макс 64×16)
-        colWidths: Массив ширин колонок в пикселях
+        colWidths: Массив относительных весов ширины колонок (целые > 0; нормируются по сумме)
         protected: Защищена ли таблица от перемещения и изменения структуры
         deletable: Можно ли удалить таблицу (работает независимо от protected)
         isMetricsTable: Является ли таблицей метрик для пункта под разделом 5
@@ -64,7 +70,7 @@ class TableSchema(BaseModel):
     )
     colWidths: list[int] = Field(
         default_factory=list,
-        description="Ширины колонок в пикселях",
+        description="Относительные веса ширины колонок (целые > 0; нормируются по сумме)",
         max_length=16
     )
     protected: bool = Field(
@@ -147,6 +153,103 @@ class TableSchema(BaseModel):
         if any(width <= 0 for width in v):
             raise ValueError("Ширины колонок должны быть положительными")
         return v
+
+    @model_validator(mode="after")
+    def validate_structure(self) -> "TableSchema":
+        """
+        Проверяет структурную целостность таблицы (A2, A3, R6).
+
+        Сообщения на русском и указывают КУДА смотреть пользователю:
+        1. прямоугольность матрицы (все строки одной длины);
+        2. число ширин колонок: при несовпадении с числом колонок длина
+           colWidths НОРМАЛИЗУЕТСЯ (усечение/добивка весом 100, а не
+           отклоняется) — билдер делит ширину по весам;
+        3. объединения ячеек не выходят за границы матрицы (закрывает
+           IndexError в DOCX-builder'е);
+        4. объединения не пересекаются — покрытия двух origin-ячеек не
+           накладываются (закрывает крэш DOCX-builder'а на наложении merge);
+        5. взаимоисключение флагов подвида таблицы (не более одного типа).
+
+        СОЗНАТЕЛЬНО НЕ проверяется когерентность spanOrigin и пометка
+        поглощённых ячеек isSpanned: легаси-операции вставки/удаления колонок
+        и строк оставляют инертный устаревший spanOrigin, который и билдер
+        (читает только isSpanned), и сервер игнорируют. Проверять его — ложная
+        тревога.
+
+        Returns:
+            Сам объект (валидация after-режима; длина colWidths может быть
+            нормализована под число колонок).
+
+        Raises:
+            ValueError: При нарушении любого инварианта (→ HTTP 422).
+        """
+        rows = len(self.grid)
+        cols = len(self.grid[0]) if rows else 0
+
+        # 1. Прямоугольность: все строки одной длины (пустую матрицу пропускаем).
+        if rows:
+            for i, row in enumerate(self.grid):
+                if len(row) != cols:
+                    raise ValueError(
+                        f"Строки таблицы имеют разную длину: строка {i} содержит "
+                        f"{len(row)} ячеек вместо {cols}"
+                    )
+
+        # 2. Число ширин = число колонок. При несовпадении нормализуем длину
+        #    (усечение/добивка дефолтным весом 100), сохраняя префикс заданных
+        #    пользователем пропорций; билдер делит ширину по весам.
+        if self.colWidths and rows and len(self.colWidths) != cols:
+            if len(self.colWidths) > cols:
+                self.colWidths = self.colWidths[:cols]
+            else:
+                self.colWidths = self.colWidths + [100] * (cols - len(self.colWidths))
+
+        # 3. Объединения в пределах границ матрицы.
+        for r, row in enumerate(self.grid):
+            for c, cell in enumerate(row):
+                if cell.colSpan > 1 or cell.rowSpan > 1:
+                    if r + cell.rowSpan > rows or c + cell.colSpan > cols:
+                        raise ValueError(
+                            f"Объединение ячейки ({r},{c}) выходит за границы таблицы"
+                        )
+
+        # 4. Объединения не пересекаются. Строим coverage-матрицу из покрытий
+        #    origin-ячеек (не isSpanned, со span>1); пересечение покрытий двух
+        #    origin-ов роняет DOCX-builder. spanOrigin поглощённых НЕ читаем.
+        coverage: list[list[tuple[int, int] | None]] = [
+            [None] * cols for _ in range(rows)
+        ]
+        for r, row in enumerate(self.grid):
+            for c, cell in enumerate(row):
+                if cell.isSpanned:
+                    continue
+                if cell.colSpan == 1 and cell.rowSpan == 1:
+                    continue
+                for rr in range(r, r + cell.rowSpan):
+                    for cc in range(c, c + cell.colSpan):
+                        if coverage[rr][cc] is not None:
+                            raise ValueError(
+                                f"Объединения пересекаются в ячейке ({rr},{cc})"
+                            )
+                        coverage[rr][cc] = (r, c)
+
+        # 5. Взаимоисключение флагов подвида таблицы.
+        type_flags = {
+            "isMetricsTable": self.isMetricsTable,
+            "isMainMetricsTable": self.isMainMetricsTable,
+            "isRegularRiskTable": self.isRegularRiskTable,
+            "isOperationalRiskTable": self.isOperationalRiskTable,
+            "isTaxRiskTable": self.isTaxRiskTable,
+            "isOtherRiskTable": self.isOtherRiskTable,
+        }
+        active = [name for name, value in type_flags.items() if value]
+        if len(active) > 1:
+            raise ValueError(
+                f"Таблица не может одновременно иметь несколько типов: "
+                f"{', '.join(active)}"
+            )
+
+        return self
 
 
 class TextBlockFormattingSchema(BaseModel):
@@ -307,9 +410,16 @@ class ActItemSchema(BaseModel):
         number: Номер узла в иерархии
         isMetricsTable: Является ли узел таблицей метрик
         isMainMetricsTable: Является ли узел главной таблицей метрик
+        isRegularRiskTable: Является ли узел таблицей регулярных рисков
+        isOperationalRiskTable: Является ли узел таблицей операционных рисков
+        isTaxRiskTable: Является ли узел таблицей налоговых рисков
+        isOtherRiskTable: Является ли узел таблицей прочих рисков
     """
     id: str
-    label: str
+    # label у корневого узла исторически мог отсутствовать (снимки версий до
+    # введения метки). Поле опционально, чтобы валидатор дерева (C4) не
+    # отбраковывал легитимные сохранённые снимки; id остаётся обязательным.
+    label: str | None = ""
     type: Literal["item", "textblock", "violation", "table"] = "item"
     content: str | None = ""
     protected: bool | None = False
@@ -322,6 +432,10 @@ class ActItemSchema(BaseModel):
     number: str | None = None
     isMetricsTable: bool | None = False
     isMainMetricsTable: bool | None = False
+    isRegularRiskTable: bool | None = False
+    isOperationalRiskTable: bool | None = False
+    isTaxRiskTable: bool | None = False
+    isOtherRiskTable: bool | None = False
     tb: list[str] | None = None
     auditPointId: str | None = None
 
@@ -366,6 +480,22 @@ class ActDataSchema(BaseModel):
         pattern=r"^(manual|periodic|auto)$",
         description="Тип сохранения: manual (Ctrl+S), periodic (2мин), auto (debounced)"
     )
+
+    @field_validator("tree")
+    @classmethod
+    def validate_tree_structure(cls, v: dict) -> dict:
+        """
+        Валидирует структуру дерева через ActItemSchema, не меняя хранимый тип.
+
+        C4: downstream-консьюмеры (build_audit_point_map, _build_node_map,
+        json.dumps(tree), extract_node_number, sanitize_tree_nodes, аудит-лог)
+        читают дерево как dict. Поэтому tree остаётся dict для хранения, а
+        валидатор лишь конструирует ActItemSchema.model_validate(v) для проверки
+        формы (поднимает ValueError на битой структуре, в т.ч. на узлах без
+        id/label). Так risk-флаги получают схему-описание, не ломая контракт.
+        """
+        ActItemSchema.model_validate(v)
+        return v
 
 
 class ActSaveResponse(BaseModel):

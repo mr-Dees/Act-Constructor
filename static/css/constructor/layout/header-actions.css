@@ -2,7 +2,11 @@
  * Стили для кнопок действий в правой части шапки
  */
 
-/* Блок действий слева */
+/* Блок действий слева.
+ * Колонки кнопок равноширокие (--header-action-column-width), поэтому кнопки
+ * стоят на равном расстоянии, а шаг между ними = ширине колонки. Разделение
+ * подписей даёт сама колонка, отдельный gap не нужен (он лишь раздвинул бы
+ * группу и приблизил её к центральным «шагам»). */
 .header-actions-left {
     position: absolute;
     left: var(--spacing-2xl);
@@ -10,11 +14,11 @@
     transform: translateY(calc(-50% + var(--translate-sm)));
     display: flex;
     align-items: flex-start;
-    gap: var(--spacing-xl);
+    gap: 0;
     z-index: var(--z-sticky);
 }
 
-/* Блок действий справа */
+/* Блок действий справа (см. комментарий к gap у .header-actions-left). */
 .header-actions-right {
     position: absolute;
     right: var(--spacing-2xl);
@@ -22,17 +26,21 @@
     transform: translateY(calc(-50% + var(--translate-sm)));
     display: flex;
     align-items: flex-start;
-    gap: var(--spacing-xl);
+    gap: 0;
     z-index: var(--z-sticky);
 }
 
-/* Контейнер иконки + подпись */
+/* Контейнер иконки + подпись. Ширина колонки единая для всех кнопок
+ * (--header-action-column-width), поэтому кнопки в группе стоят на равном
+ * расстоянии независимо от длины подписей. Кнопка и подпись центрированы в
+ * колонке — подпись оказывается ровно под своей кнопкой. */
 .header-action-container {
     display: flex;
     flex-direction: column;
     align-items: center;
     gap: var(--spacing-xs);
     position: relative;
+    width: var(--header-action-column-width);
 }
 
 /* Кнопка */
@@ -99,12 +107,18 @@
     color: var(--primary-hover);
 }
 
-/* Подпись */
+/* Подпись центрируется под своей кнопкой (align-items:center у контейнера),
+ * поэтому визуально «привязана» к ней. overflow:visible — подпись не обрезается:
+ * если она шире компактной колонки (самая длинная — «Только локально»), то
+ * симметрично «вытекает» за края, оставаясь по центру кнопки. Шаг колонки (76px)
+ * подобран так, чтобы соседние подписи при этом не накладывались. */
 .header-action-label {
+    overflow: visible;
     font-size: var(--font-size-xs);
     font-weight: var(--font-weight-semibold);
     color: var(--text-on-primary);
     white-space: nowrap;
+    text-align: center;
     user-select: none;
     line-height: var(--line-height-tight);
     text-shadow: 0 1px 2px rgb(0 0 0 / 30%);

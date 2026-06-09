@@ -10,6 +10,9 @@ import { AppConfig } from './app-config.js';
 import { AuthManager } from './auth.js';
 import { DialogManager } from './dialog/dialog-confirm.js';
 import { Notifications } from './notifications.js';
+import { formatValidationDetail } from './api-errors.js';
+import { reconcileTableFlags } from '../constructor/state/flags.js';
+import { normalizePinnedOrder } from '../constructor/table/table-kind.js';
 
 // Constructor-зона: lazy-доступ через window.
 // Прямые import'ы из ../constructor/* тянули весь constructor граф
@@ -396,7 +399,6 @@ export class APIClient {
                 AppState.tables = {};
                 AppState.textBlocks = {};
                 AppState.violations = {};
-                AppState.tableUISizes = {};
 
                 // Инициализируем дерево и таблицы с учетом типа проверки
                 AppState.initializeTree(isProcessBased);
@@ -422,15 +424,21 @@ export class APIClient {
                 AppState.tables = content.tables || {};
                 AppState.textBlocks = content.textBlocks || {};
                 AppState.violations = content.violations || {};
-                AppState.tableUISizes = {};
 
                 // Миграция: strip числового префикса из label для item-узлов
                 this._migrateStripNumberFromLabels(AppState.treeData);
 
-                // E-2 миграция: переносим isRegularRiskTable/isOperationalRiskTable
-                // с table-объекта на table-node (унифицировано с metrics-флагами).
-                // Для актов, сохранённых до E-2, флаги лежали только в tables[id].
-                this._migrateRiskFlagsToNode(AppState.treeData, AppState.tables);
+                // Реконсайлер 6 флагов подвидов таблиц node↔table. Узел —
+                // источник истины; legacy-флаги (старые акты, где флаг лежал
+                // только в tables[id]) поднимаются на узел, объект таблицы
+                // синхронизируется с узлом.
+                reconcileTableFlags(AppState.treeData, AppState.tables);
+
+                // Нормализация порядка: закреплённые таблицы (метрики/риски) —
+                // в начало children. Чинит старые акты, где pinned-таблица
+                // оказалась не первой. Делается после reconcileTableFlags
+                // (флаги уже подняты на узлы) и до нумерации.
+                normalizePinnedOrder(AppState.treeData);
 
                 AppState.generateNumbering();
 
@@ -574,6 +582,20 @@ export class APIClient {
                     // вызывающая сторона (navigation-manager) делает редирект на список
                     // с тем же sessionStorage-флагом, что и autoExit.
                     throw new LockLostError();
+                } else if (resp.status === 422) {
+                    // Серверная структурная валидация таблиц (P6a): рваная сетка,
+                    // несовпадение числа ширин, объединение за границами,
+                    // взаимоисключение флагов. detail приходит массивом
+                    // {loc, msg} с русским msg — показываем пользователю «где и
+                    // что не так», а не глотаем под общую «Ошибка сохранения».
+                    let detail = null;
+                    try {
+                        const body = await resp.json();
+                        detail = formatValidationDetail(body.detail);
+                    } catch {
+                        // не-JSON ответ — оставляем fallback ниже
+                    }
+                    throw new Error(detail || 'Данные акта не прошли проверку структуры таблиц');
                 }
                 throw new Error('Ошибка сохранения');
             }
@@ -662,35 +684,6 @@ export class APIClient {
                     }
                 }
                 this._migrateStripNumberFromLabels(child);
-            }
-        }
-    }
-
-    /**
-     * E-2 миграция: для старых актов risk-флаги (isRegularRiskTable /
-     * isOperationalRiskTable) лежали только в tables[id]. Унификация требует
-     * флаг на node — пробрасываем для table-нод по tableId.
-     * Idempotent: если флаги уже на node, no-op.
-     * @private
-     * @param {Object} node - Узел дерева
-     * @param {Object} tables - AppState.tables словарь
-     */
-    static _migrateRiskFlagsToNode(node, tables) {
-        if (!node) return;
-        if (node.type === AppConfig.nodeTypes.TABLE && node.tableId) {
-            const table = tables[node.tableId];
-            if (table) {
-                if (table.isRegularRiskTable && !node.isRegularRiskTable) {
-                    node.isRegularRiskTable = true;
-                }
-                if (table.isOperationalRiskTable && !node.isOperationalRiskTable) {
-                    node.isOperationalRiskTable = true;
-                }
-            }
-        }
-        if (node.children) {
-            for (const child of node.children) {
-                this._migrateRiskFlagsToNode(child, tables);
             }
         }
     }
@@ -938,11 +931,7 @@ export class APIClient {
             // [{loc, msg, type, ...}, ...]. Без форматирования в UI прилетал
             // "[object Object]". Сворачиваем в человекочитаемую строку, msg
             // у pydantic-валидаторов уже на русском.
-            if (Array.isArray(detail)) {
-                detail = detail
-                    .map(d => d?.msg || JSON.stringify(d))
-                    .join('; ');
-            }
+            detail = formatValidationDetail(detail);
         } catch {
             // Сервер вернул не-JSON ответ
         }

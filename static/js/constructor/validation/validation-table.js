@@ -7,31 +7,50 @@
 import { AppState } from '../state/state-core.js';
 import { TreeUtils } from '../tree/tree-utils.js';
 import { ValidationCore } from './validation-core.js';
+import { hasEmptyHeaders, hasDataRows, countHeaderRows, collectTableWarnings } from './validation-table-core.js';
 
 export const ValidationTable = {
     /**
-     * Проверяет заполненность заголовков всех таблиц
+     * Проверяет заполненность и наличие заголовков всех таблиц.
+     *
+     * Блокирующая контентная проверка: ловит таблицы с пустыми ячейками шапки
+     * И таблицы вовсе без строки заголовка (E6). Подсчёт шапки — через чистое
+     * ядро (учитывает многострочную шапку).
+     *
      * @returns {Object} Результат валидации с полями valid, message, isWarning
      */
     validateHeaders() {
         const emptyHeaders = [];
+        const noHeaderTables = [];
 
         for (const tableId in AppState.tables) {
             const table = AppState.tables[tableId];
 
             if (!this._hasValidGrid(table)) continue;
 
-            const headerRow = this._findHeaderRow(table.grid);
-            if (!headerRow) continue;
+            const tableName = this._getTableName(tableId);
 
-            if (this._hasEmptyHeaders(headerRow)) {
-                const tableName = this._getTableName(tableId);
+            // E6: таблица без единой строки заголовка.
+            if (countHeaderRows(table.grid) === 0) {
+                noHeaderTables.push(`- ${tableName}`);
+                continue;
+            }
+
+            if (hasEmptyHeaders(table.grid)) {
                 emptyHeaders.push(`- ${tableName}`);
             }
         }
 
+        const parts = [];
+        if (noHeaderTables.length > 0) {
+            parts.push(`Таблицы без строки заголовка:\n${noHeaderTables.join('\n')}`);
+        }
         if (emptyHeaders.length > 0) {
-            const message = `Не заполнены заголовки таблиц:\n${emptyHeaders.join('\n')}\nЗаполните все заголовки перед сохранением.`;
+            parts.push(`Не заполнены заголовки таблиц:\n${emptyHeaders.join('\n')}`);
+        }
+
+        if (parts.length > 0) {
+            const message = `${parts.join('\n')}\nЗаполните заголовки таблиц перед экспортом.`;
             return ValidationCore.failure(message);
         }
 
@@ -39,7 +58,12 @@ export const ValidationTable = {
     },
 
     /**
-     * Проверяет наличие данных в таблицах
+     * Проверяет наличие данных в таблицах.
+     *
+     * Учитывает многострочную шапку (E5): данными считается всё ниже всех
+     * подряд идущих сверху строк-заголовков, поэтому вторая строка двухстрочной
+     * шапки больше не засчитывается как данные.
+     *
      * @returns {Object} Результат проверки (предупреждение)
      */
     validateData() {
@@ -50,12 +74,7 @@ export const ValidationTable = {
 
             if (!this._hasValidGrid(table)) continue;
 
-            const headerRowIndex = this._findHeaderRowIndex(table.grid);
-            const dataStartIndex = headerRowIndex >= 0 ? headerRowIndex + 1 : 0;
-
-            if (dataStartIndex >= table.grid.length) continue;
-
-            if (!this._hasDataInRows(table.grid, dataStartIndex)) {
+            if (!hasDataRows(table.grid)) {
                 const tableName = this._getTableName(tableId);
                 emptyDataTables.push(`- ${tableName}`);
             }
@@ -70,6 +89,22 @@ export const ValidationTable = {
     },
 
     /**
+     * Собирает контентные/структурные замечания по всем таблицам (E3).
+     *
+     * Возвращает плоский список проблем без блокировки. Критичность — в поле
+     * severity: 'error' (нарушена структура сетки) или 'warning' (нет шапки E6,
+     * пустые заголовки, нет данных E5). Делегирует чистому ядру
+     * collectTableWarnings; здесь только подстановка AppState.tables и резолвера
+     * имени таблицы.
+     *
+     * @returns {Array<{tableId:string, tableName:string, issue:string, severity:'error'|'warning'}>}
+     *   Список проблем.
+     */
+    collectContentWarnings() {
+        return collectTableWarnings(AppState.tables, (id) => this._getTableName(id));
+    },
+
+    /**
      * Проверяет наличие валидной grid-структуры
      * @private
      * @param {Object} table - Объект таблицы
@@ -77,58 +112,6 @@ export const ValidationTable = {
      */
     _hasValidGrid(table) {
         return table.grid && Array.isArray(table.grid) && table.grid.length > 0;
-    },
-
-    /**
-     * Находит строку с заголовками
-     * @private
-     * @param {Array<Array>} grid - Матрица таблицы
-     * @returns {Array|null} Строка заголовков или null
-     */
-    _findHeaderRow(grid) {
-        return grid.find(row => row.some(cell => cell.isHeader === true));
-    },
-
-    /**
-     * Находит индекс строки с заголовками
-     * @private
-     * @param {Array<Array>} grid - Матрица таблицы
-     * @returns {number} Индекс строки или -1
-     */
-    _findHeaderRowIndex(grid) {
-        return grid.findIndex(row => row.some(cell => cell.isHeader === true));
-    },
-
-    /**
-     * Проверяет наличие пустых заголовков
-     * @private
-     * @param {Array} headerRow - Строка заголовков
-     * @returns {boolean} Есть ли пустые заголовки
-     */
-    _hasEmptyHeaders(headerRow) {
-        return headerRow.some(cell =>
-            !cell.isSpanned &&
-            cell.isHeader &&
-            (!cell.content || !cell.content.trim())
-        );
-    },
-
-    /**
-     * Проверяет наличие данных в строках
-     * @private
-     * @param {Array<Array>} grid - Матрица таблицы
-     * @param {number} startIndex - Индекс начала данных
-     * @returns {boolean} Есть ли данные
-     */
-    _hasDataInRows(grid, startIndex) {
-        for (let i = startIndex; i < grid.length; i++) {
-            for (const cell of grid[i]) {
-                if (!cell.isSpanned && cell.content?.trim()) {
-                    return true;
-                }
-            }
-        }
-        return false;
     },
 
     /**

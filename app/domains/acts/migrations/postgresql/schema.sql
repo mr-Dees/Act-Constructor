@@ -178,7 +178,9 @@ CREATE TABLE IF NOT EXISTS {SCHEMA}.{PREFIX}act_tables (
     CONSTRAINT check_col_widths_is_array
         CHECK (jsonb_typeof(col_widths) = 'array'),
 
-    UNIQUE(act_id, table_id)
+    UNIQUE(act_id, table_id),
+    -- Не более одной активной таблицы на узел дерева.
+    UNIQUE(act_id, node_id)
 );
 
 COMMENT ON TABLE {SCHEMA}.{PREFIX}act_tables IS 'Таблицы внутри актов (денормализованное хранение для быстрого доступа)';

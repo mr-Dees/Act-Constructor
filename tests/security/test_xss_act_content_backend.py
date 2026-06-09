@@ -18,6 +18,8 @@ import pytest
 
 from app.domains.acts.schemas.act_content import (
     ActDataSchema,
+    TableCellSchema,
+    TableSchema,
     TextBlockSchema,
     ViolationSchema,
     ViolationOptionalFieldSchema,
@@ -337,3 +339,79 @@ class TestSaveContentSanitizesTreeNodes:
         data = ActDataSchema(tree=tree, saveType="auto")
         await svc.save_content(act_id=1, data=data, username="12345")
         # Не упало — достаточно
+
+
+# ── Инвариант: ячейки таблицы НЕ санитизируются (хранятся как инертный текст) ─
+
+
+def _data_with_table_cell(cell_content: str) -> ActDataSchema:
+    """ActDataSchema с одной таблицей 2×1; payload в ячейке тела grid[1][0]."""
+    table = TableSchema(
+        id="t1",
+        nodeId="n1",
+        grid=[
+            [TableCellSchema(content="Заголовок", isHeader=True)],
+            [TableCellSchema(content=cell_content)],
+        ],
+        colWidths=[100],
+    )
+    return ActDataSchema(
+        tree={"id": "root", "label": "Акт", "children": []},
+        tables={"t1": table},
+        saveType="auto",
+    )
+
+
+class TestSaveContentTableCellsStoredVerbatim:
+    """
+    Инвариант ячеек таблицы (B8): содержимое ячеек НЕ прогоняется через
+    sanitize_html — оно сохраняется в БД дословно, как инертный текст.
+
+    ПОЧЕМУ ЭТО БЕЗОПАСНО: все потребители содержимого ячеек рендерят его как
+    ТЕКСТ, а не как HTML, поэтому payload никогда не интерпретируется:
+      - редактор: items-renderer._createTableCell → cell.textContent
+      - предпросмотр: preview-table-renderer → cell.textContent
+      - DOCX-экспорт: run.add_run(text) (текстовый run, не HTML)
+      - TXT/MD-экспорт: plain text
+    Санитизация ячеек была бы вредна: она искажала бы легитимные значения
+    (например, «a < b», «<тэг> в кавычках» как данные). Инвариант
+    «всё на текст» сильнее, чем точечная санитизация одного из путей.
+
+    Эти тесты фиксируют, что save_content НЕ трогает ячейки таблицы.
+    """
+
+    async def test_script_payload_in_cell_preserved_verbatim(self):
+        svc, content_repo = _make_service()
+        payload = "<script>window.__xss=1</script>"
+        data = _data_with_table_cell(payload)
+
+        await svc.save_content(act_id=1, data=data, username="12345")
+
+        content_repo.save_content.assert_awaited_once()
+        saved_data = content_repo.save_content.await_args.kwargs.get("data") \
+            or content_repo.save_content.await_args.args[1]
+        stored = saved_data.tables["t1"].grid[1][0].content
+        # Содержимое сохранено дословно — не вырезано и не экранировано.
+        # Безопасность обеспечивают потребители (textContent / add_run), не БД.
+        assert stored == payload
+
+    async def test_img_onerror_payload_in_cell_preserved_verbatim(self):
+        svc, _ = _make_service()
+        payload = '<img src=x onerror="window.__xss=1">'
+        data = _data_with_table_cell(payload)
+
+        await svc.save_content(act_id=1, data=data, username="12345")
+
+        stored = data.tables["t1"].grid[1][0].content
+        assert stored == payload
+
+    async def test_legitimate_angle_brackets_in_cell_not_mangled(self):
+        """Легитимный текст с угловыми скобками не должен искажаться."""
+        svc, _ = _make_service()
+        payload = "Условие: a < b и c > d"
+        data = _data_with_table_cell(payload)
+
+        await svc.save_content(act_id=1, data=data, username="12345")
+
+        stored = data.tables["t1"].grid[1][0].content
+        assert stored == payload

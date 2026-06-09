@@ -32,20 +32,19 @@ class TableUtils:
             display_row = []
 
             for cell_data in row_data:
-                # Пропускаем поглощенные ячейки
+                # Поглощённая ячейка (isSpanned) резервирует свою позицию пустой
+                # строкой, а не пропускается. В модели приложения поглощённые
+                # ячейки colSpan-объединения тоже помечены isSpanned, поэтому
+                # каждая занимает РОВНО одну колонку: ячейка-ориджин печатает
+                # только своё содержимое (без раскрытия colSpan), а лишние
+                # позиции уже зарезервированы её isSpanned-ячейками. Так каждая
+                # строка получает ровно len(grid[r]) колонок, без сдвигов от
+                # rowSpan-«дырок» в двухстрочной шапке.
                 if cell_data.get("isSpanned", False):
+                    display_row.append("")
                     continue
 
-                # Извлекаем содержимое и colspan
-                content = str(cell_data.get("content", ""))
-                colspan = cell_data.get("colSpan", 1)
-
-                # Первая ячейка получает содержимое
-                display_row.append(content)
-
-                # Остальные ячейки в colspan - пустые
-                for _ in range(colspan - 1):
-                    display_row.append("")
+                display_row.append(str(cell_data.get("content", "")))
 
             if display_row:
                 display_matrix.append(display_row)

@@ -290,13 +290,23 @@ class TestTableSchema:
         assert t.grid == []
 
     def test_special_table_flags(self):
+        # Одного флага подвида достаточно; два одновременно запрещены (A3).
         t = TableSchema(
             id="table_1711270400456_3x2m8p1",
             nodeId="node_1711270400123_7a4k9b2",
-            isMetricsTable=True, isRegularRiskTable=True,
+            isMetricsTable=True,
         )
         assert t.isMetricsTable is True
-        assert t.isRegularRiskTable is True
+        assert t.isRegularRiskTable is False
+
+    def test_mutually_exclusive_type_flags(self):
+        # Два флага подвида одновременно — взаимоисключение (A3) → ValidationError.
+        with pytest.raises(ValidationError, match="несколько типов"):
+            TableSchema(
+                id="table_1711270400456_3x2m8p1",
+                nodeId="node_1711270400123_7a4k9b2",
+                isMetricsTable=True, isRegularRiskTable=True,
+            )
 
 
 # ── TextBlockFormattingSchema ──
@@ -332,17 +342,25 @@ class TestTextBlockFormatting:
 
 class TestActDataSchema:
 
+    # C4: tree теперь валидируется через ActItemSchema — узел обязан иметь id.
+    _VALID_TREE = {"id": "root", "label": "Акт", "children": []}
+
     def test_valid_save_types(self):
         for st in ("manual", "periodic", "auto"):
-            d = ActDataSchema(tree={}, saveType=st)
+            d = ActDataSchema(tree=dict(self._VALID_TREE), saveType=st)
             assert d.saveType == st
 
     def test_invalid_save_type(self):
         with pytest.raises(ValidationError):
-            ActDataSchema(tree={}, saveType="unknown")
+            ActDataSchema(tree=dict(self._VALID_TREE), saveType="unknown")
+
+    def test_invalid_tree_rejected(self):
+        # Дерево без id отбраковывается валидатором структуры (C4).
+        with pytest.raises(ValidationError):
+            ActDataSchema(tree={})
 
     def test_default_collections(self):
-        d = ActDataSchema(tree={})
+        d = ActDataSchema(tree=dict(self._VALID_TREE))
         assert d.tables == {}
         assert d.textBlocks == {}
         assert d.violations == {}

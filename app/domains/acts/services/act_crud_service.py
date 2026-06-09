@@ -32,6 +32,7 @@ from app.domains.acts.repositories.act_lock import ActLockRepository
 from app.domains.acts.repositories.act_access import ActAccessRepository
 from app.domains.acts.repositories.act_audit_log import ActAuditLogRepository
 from app.domains.acts.services.access_guard import AccessGuard
+from app.domains.acts.services.notifications_producer import emit_act_notification
 
 logger = logging.getLogger("audit_workstation.service.acts.crud")
 
@@ -216,6 +217,7 @@ class ActCrudService:
         table_data = {
             "table_id": table_id,
             "node_id": node_id,
+            "label": tree_node["label"],
             "grid": grid,
             "col_widths": preset["col_widths"],
             "protected": True,
@@ -410,6 +412,16 @@ class ActCrudService:
             "km_number": act_data.km_number,
             "part_number": part_number,
         })
+
+        # Уведомление о создании акта — после успешного коммита, адресно
+        # инициатору (создателю). Сбой/отсутствие notifications не ломает
+        # создание акта (логика обёрнута в try/except внутри хелпера).
+        await emit_act_notification(
+            title=f"Создан акт {act_data.km_number}",
+            severity="success",
+            link=f"/constructor?act_id={act_id}",
+            recipient_user_id=username,
+        )
 
         return result
 
@@ -766,6 +778,13 @@ class ActCrudService:
                 col_widths=table["col_widths"],
                 is_protected=table["protected"],
                 is_deletable=table["deletable"],
+                table_label=table.get("label"),
+                is_metrics_table=table.get("isMetricsTable", False),
+                is_main_metrics_table=table.get("isMainMetricsTable", False),
+                is_regular_risk_table=table.get("isRegularRiskTable", False),
+                is_operational_risk_table=table.get("isOperationalRiskTable", False),
+                is_tax_risk_table=table.get("isTaxRiskTable", False),
+                is_other_risk_table=table.get("isOtherRiskTable", False),
             )
 
         logger.info(

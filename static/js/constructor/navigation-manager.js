@@ -115,14 +115,19 @@ export class NavigationManager {
             }
 
         } catch (error) {
-            // 409 Conflict на save: лок был снят фоновым autoExit'ом (вкладка была в фоне).
-            // Делаем то же что и LockManager._initiateExit('autoExit'): ставим тот же
-            // sessionStorage-флаг (`sessionAutoExited` — читается acts-manager-page._checkSessionExit)
-            // и редиректим на список. Юзер увидит ту же плашку "сессия завершена, изменения сохранены".
+            // 409 Conflict на save: лок акта был снят (фоновый autoExit по
+            // неактивности — вкладка была в фоне). В отличие от обычного
+            // autoExit'а, тут save НЕ прошёл (markAsSyncedWithDB не вызвался) —
+            // изменения НЕ записаны в БД. Ставим ОТДЕЛЬНЫЙ флаг `sessionLockLost`
+            // (не `sessionAutoExited`, у которого плашка лжёт «изменения
+            // сохранены») и редиректим на список. Черновик в localStorage НЕ
+            // трогаем — он остаётся последним носителем несохранённых правок.
             if (typeof LockLostError !== 'undefined' && error instanceof LockLostError) {
-                console.warn('[NavigationManager] LockLostError на save → редирект на список актов');
-                sessionStorage.setItem('sessionAutoExited', 'true');
-                // Снимаем браузерный beforeunload-warning.
+                console.warn('[NavigationManager] LockLostError на save → редирект на список актов (изменения НЕ в БД)');
+                sessionStorage.setItem('sessionLockLost', 'true');
+                // Снимаем браузерный beforeunload-warning. allowUnload() НЕ
+                // чистит localStorage — только ставит флаг программного выхода,
+                // так что локальный черновик сохраняется.
                 if (typeof StorageManager !== 'undefined' && typeof StorageManager.allowUnload === 'function') {
                     StorageManager.allowUnload();
                 }

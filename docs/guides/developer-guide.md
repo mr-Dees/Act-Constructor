@@ -402,6 +402,9 @@ DatabaseAdapter (абстрактный)
 | `ck_fin_res` | Активный | ЦК Финансовый результат — верификация метрик FR |
 | `ck_client_exp` | Активный | ЦК Клиентский опыт — верификация метрик CS |
 | `ua_data` | Активный | Справочные данные УА — словари процессов, ТБ, подразделений, метрик нарушений. Зависит от `admin` |
+| `notifications` | Активный | Центр уведомлений: персистентные (адресные + broadcast) со статусами прочитано/скрыто + живые замечания. Общий колокольчик на портале и в конструкторе. API без доменного гейта (`public_api=True`); продьюсеры (acts, chat) пушат через фабрику `notifications.push`. См. отчёт `docs/reports/2026-06-07-notifications-center.md` |
+
+> **`public_api`** — флаг `DomainDescriptor`. По умолчанию `register_domains()` вешает на роутеры домена `require_domain_access(<домен>)`. Для кросс-доменного «общего» API, доступного всем авторизованным ролям (центр уведомлений), выставь `public_api=True` — гейт не вешается, остаётся только `get_username`.
 
 ### 2.5 Middleware stack
 
@@ -2972,6 +2975,7 @@ chat_settings.api_key.get_secret_value()  # для SecretStr
 | `ck_fin_res` | `CkFinResSettings` | `CK_FIN_RES__` |
 | `ck_client_exp` | `CkClientExpSettings` | `CK_CLIENT_EXP__` |
 | `ua_data` | `UaDataSettings` | `UA_DATA__` |
+| `notifications` | `NotificationsSettings` | `NOTIFICATIONS__` |
 
 ##### Особые случаи
 

@@ -113,10 +113,6 @@ export class App {
             // При загрузке акта из БД структура будет перезаписана
             AppState.initializeTree(true);
             AppState.generateNumbering();
-
-            if (!AppState.tableUISizes) {
-                AppState.tableUISizes = {};
-            }
         } catch (err) {
             console.error('Ошибка инициализации состояния:', err);
             Notifications.error(`Ошибка инициализации состояния: ${err.message}`);

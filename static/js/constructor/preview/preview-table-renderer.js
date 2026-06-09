@@ -4,19 +4,27 @@
  * Создает HTML-представление таблиц с поддержкой объединения ячеек
  * и обработкой заголовков.
  */
-import { AppConfig } from '../../shared/app-config.js';
+import { iterateVisibleCells } from '../table/grid-merges.js';
+import { buildColgroup } from '../table/colgroup.js';
+import { mergedHeaderAlign } from '../table/header-align.js';
 
 export class PreviewTableRenderer {
     /**
      * Создает элемент таблицы для предпросмотра
      *
      * @param {Object} tableData - Данные таблицы из состояния
-     * @param {number} [previewTrim] - Максимальная длина текста (по умолчанию из конфига)
+     * @param {number} [_previewTrim] - Не используется: содержимое ячеек
+     *   показывается целиком, как в .docx (F1). Параметр сохранён в сигнатуре
+     *   ради обратной совместимости вызовов (preview.js, version-preview.js).
+     * @param {Object} [opts] - Дополнительные опции рендера.
+     * @param {string|number} [opts.tableId] - id таблицы; проставляется на
+     *   обёртку как data-table-id для рамок-замечаний и навигации из колокольчика.
      * @returns {HTMLElement} Контейнер с таблицей
      */
-    static create(tableData, previewTrim = AppConfig.preview.defaultTrimLength) {
+    static create(tableData, _previewTrim, opts = {}) {
         const wrapper = this._createWrapper();
-        const table = this._createTable(tableData, previewTrim);
+        if (opts && opts.tableId != null) wrapper.dataset.tableId = String(opts.tableId);
+        const table = this._createTable(tableData);
 
         wrapper.appendChild(table);
         return wrapper;
@@ -36,7 +44,7 @@ export class PreviewTableRenderer {
      * Создает элемент таблицы
      * @private
      */
-    static _createTable(tableData, previewTrim) {
+    static _createTable(tableData) {
         const table = document.createElement('table');
         table.className = 'preview-table';
 
@@ -46,7 +54,14 @@ export class PreviewTableRenderer {
             return this._createEmptyTable();
         }
 
-        this._renderRows(table, grid, previewTrim);
+        // Колонки рендерятся из colWidths через colgroup — единый источник истины
+        // ширин (тот же, что у редактора и DOCX-билдера). При table-layout:fixed
+        // даёт Word-подобную раскладку пропорционально весам.
+        const numCols = grid[0]?.length || 0;
+        table.style.tableLayout = 'fixed';
+        table.appendChild(buildColgroup(tableData.colWidths, numCols));
+
+        this._renderRows(table, grid);
         return table;
     }
 
@@ -73,9 +88,9 @@ export class PreviewTableRenderer {
      * Рендерит все строки таблицы
      * @private
      */
-    static _renderRows(table, grid, previewTrim) {
+    static _renderRows(table, grid) {
         grid.forEach(rowData => {
-            const row = this._createRow(rowData, previewTrim);
+            const row = this._createRow(rowData);
             if (row.children.length > 0) {
                 table.appendChild(row);
             }
@@ -86,13 +101,12 @@ export class PreviewTableRenderer {
      * Создает строку таблицы
      * @private
      */
-    static _createRow(rowData, previewTrim) {
+    static _createRow(rowData) {
         const row = document.createElement('tr');
 
-        rowData.forEach(cellData => {
-            if (cellData.isSpanned) return;
-
-            const cell = this._createCell(cellData, previewTrim);
+        // Единый обход видимых (не поглощённых) ячеек — общий helper.
+        iterateVisibleCells([rowData], (cellData) => {
+            const cell = this._createCell(cellData);
             row.appendChild(cell);
         });
 
@@ -103,13 +117,20 @@ export class PreviewTableRenderer {
      * Создает ячейку таблицы
      * @private
      */
-    static _createCell(cellData, previewTrim) {
+    static _createCell(cellData) {
         const cell = document.createElement(cellData.isHeader ? 'th' : 'td');
 
-        cell.textContent = this._trimText(cellData.content || '', previewTrim);
+        // Содержимое ячейки — целиком, без обрезки: предпросмотр повторяет .docx,
+        // где текст не урезается (F1). textContent (XSS-safe) сохраняет \n как
+        // есть; переносы рендерятся за счёт white-space: pre-wrap в CSS листа (F4).
+        cell.textContent = cellData.content || '';
 
         if (cellData.isHeader) {
             cell.className = 'preview-table-header';
+            // Объединённые шапки прижимаются влево (как в .docx), кроме centered-набора.
+            if (mergedHeaderAlign(cellData.content, cellData.colSpan || 1, true) === 'left') {
+                cell.classList.add('preview-th-left');
+            }
         }
 
         this._applyCellSpan(cell, cellData);
@@ -128,18 +149,6 @@ export class PreviewTableRenderer {
         if (cellData.rowSpan > 1) {
             cell.rowSpan = cellData.rowSpan;
         }
-    }
-
-    /**
-     * Обрезает текст до указанной длины
-     * @private
-     * @param {string} text - Исходный текст
-     * @param {number} maxLength - Максимальная длина
-     * @returns {string} Обрезанный текст
-     */
-    static _trimText(text, maxLength) {
-        const str = text.toString();
-        return str.length > maxLength ? str.slice(0, maxLength) + '…' : str;
     }
 }
 

@@ -105,9 +105,9 @@ import '../constructor/violation/violation-file-upload.js';
 import '../constructor/violation/violation-init.js';
 
 // Validation
-import '../constructor/validation/validation.js';
 import '../constructor/validation/validation-act.js';
 import '../constructor/validation/validation-core.js';
+import '../constructor/validation/validation-table-core.js';
 import '../constructor/validation/validation-table.js';
 import '../constructor/validation/validation-tree.js';
 
@@ -117,6 +117,10 @@ import '../portal/acts-manager/acts-broadcast.js';
 import '../constructor/header/acts-menu.js';
 import '../constructor/header/preview-menu.js';
 
+// Центр уведомлений (shared) + живой источник замечаний по таблицам.
+import { NotificationCenter } from '../shared/notifications-center/notification-center.js';
+import { registerTablesSource } from '../constructor/header/notifications-source-tables.js';
+
 // Bootstrap конструктора. Раньше app.js и state-core.js сами вешали
 // DOMContentLoaded на module-level, но shared/api.js косвенно тянет
 // constructor/* на portal-страницы — App.init там стрелял по AppState
@@ -124,12 +128,25 @@ import '../constructor/header/preview-menu.js';
 import { App } from '../constructor/app.js';
 import { _initStateTracking } from '../constructor/state/state-core.js';
 
+/**
+ * Инициализирует shared-центр уведомлений в конструкторе и регистрирует
+ * живой источник замечаний по таблицам.
+ */
+function _initNotificationCenter() {
+    const center = new NotificationCenter({ enablePersisted: true });
+    center.init();
+    registerTablesSource(center);
+    window.notificationCenter = center;
+}
+
 if (document.readyState === 'loading') {
     document.addEventListener('DOMContentLoaded', () => {
         App.init();
         setTimeout(_initStateTracking, 0);
+        _initNotificationCenter();
     });
 } else {
     App.init();
     setTimeout(_initStateTracking, 0);
+    _initNotificationCenter();
 }

@@ -382,20 +382,26 @@ class ActCrudRepository(BaseRepository):
             )
 
     async def copy_tables(self, from_id: int, to_id: int) -> None:
-        """Копирует таблицы из одного акта в другой (1 запрос)."""
+        """Копирует таблицы из одного акта в другой (1 запрос).
+
+        Копирует все 6 флагов подвидов таблиц — иначе у дубликата спецтаблицы
+        (риск/налоговые/прочие/сводные) деградируют до обычных.
+        """
         await self.conn.execute(
             f"""
             INSERT INTO {self.tables} (
                 act_id, table_id, node_id, node_number, table_label,
                 grid_data, col_widths, is_protected, is_deletable,
                 is_metrics_table, is_main_metrics_table,
-                is_regular_risk_table, is_operational_risk_table
+                is_regular_risk_table, is_operational_risk_table,
+                is_tax_risk_table, is_other_risk_table
             )
             SELECT
                 $2, table_id, node_id, node_number, table_label,
                 grid_data, col_widths, is_protected, is_deletable,
                 is_metrics_table, is_main_metrics_table,
-                is_regular_risk_table, is_operational_risk_table
+                is_regular_risk_table, is_operational_risk_table,
+                is_tax_risk_table, is_other_risk_table
             FROM {self.tables}
             WHERE act_id = $1
             """,

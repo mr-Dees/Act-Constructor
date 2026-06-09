@@ -91,9 +91,9 @@ def test_cells_centered_horizontally_and_vertically(doc):
             assert cell.paragraphs[0].alignment == WD_ALIGN_PARAGRAPH.CENTER
 
 
-def test_merged_header_cell_is_left_justified(doc):
-    """Объединённая по горизонтали ячейка (colSpan>1) выровнена влево (justify),
-    одиночная — по центру."""
+def test_merged_header_cell_is_left_aligned(doc):
+    """Объединённая по горизонтали ячейка (colSpan>1) выровнена влево (LEFT,
+    не JUSTIFY — предпросмотр совпадает с .docx), одиночная — по центру."""
     schema = _ts([
         [
             {"content": "ОР", "isHeader": True},
@@ -107,7 +107,31 @@ def test_merged_header_cell_is_left_justified(doc):
     single = table.rows[0].cells[0]
     merged = table.rows[0].cells[1]
     assert single.paragraphs[0].alignment == WD_ALIGN_PARAGRAPH.CENTER
-    assert merged.paragraphs[0].alignment == WD_ALIGN_PARAGRAPH.JUSTIFY
+    assert merged.paragraphs[0].alignment == WD_ALIGN_PARAGRAPH.LEFT
+
+
+def test_risk_title_phrases_are_left_aligned(doc):
+    """Заголовки риск-таблиц «Выявлены налоговые риски» (colSpan=6) и
+    «Отклонения с признаками операционного риска (далее - ОР)» (colSpan=5)
+    прижаты влево — должны совпадать с предпросмотром."""
+    tax = _ts([
+        [{"content": "Выявлены налоговые риски", "isHeader": True, "colSpan": 6}]
+        + [{"content": "", "isSpanned": True}] * 5,
+        [{"content": str(i)} for i in range(6)],
+    ])
+    build_table(doc, tax)
+    assert doc.tables[0].rows[0].cells[0].paragraphs[0].alignment == \
+        WD_ALIGN_PARAGRAPH.LEFT
+
+    op = _ts([
+        [{"content": "Отклонения с признаками операционного риска (далее - ОР)",
+          "isHeader": True, "colSpan": 5}]
+        + [{"content": "", "isSpanned": True}] * 4,
+        [{"content": str(i)} for i in range(5)],
+    ])
+    build_table(doc, op)
+    assert doc.tables[1].rows[0].cells[0].paragraphs[0].alignment == \
+        WD_ALIGN_PARAGRAPH.LEFT
 
 
 def test_table_has_no_left_indent(doc):
@@ -159,7 +183,7 @@ def test_table_width_equal_split_when_colwidths_empty(doc):
 
 def test_count_clients_cell_centered_even_when_merged(doc):
     """(8) «Количество клиентов / элементов, ед.» при colSpan>1 → CENTER,
-    другая склеенная ячейка остаётся JUSTIFY."""
+    другая склеенная ячейка прижата влево (LEFT)."""
     schema = _ts([
         [
             {"content": "Количество клиентов  / элементов, ед.",
@@ -177,7 +201,7 @@ def test_count_clients_cell_centered_even_when_merged(doc):
     clients = table.rows[0].cells[0]
     other = table.rows[0].cells[2]
     assert clients.paragraphs[0].alignment == WD_ALIGN_PARAGRAPH.CENTER
-    assert other.paragraphs[0].alignment == WD_ALIGN_PARAGRAPH.JUSTIFY
+    assert other.paragraphs[0].alignment == WD_ALIGN_PARAGRAPH.LEFT
 
 
 def test_pagination_cant_split_all_rows(doc):

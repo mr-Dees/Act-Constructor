@@ -10,6 +10,8 @@ import { PreviewTextBlockRenderer } from './preview-textblock-renderer.js';
 import { PreviewViolationRenderer } from './preview-violation-renderer.js';
 import { AppState } from '../state/state-core.js';
 import { AppConfig } from '../../shared/app-config.js';
+import { invalidateTableWarningsCache, getCachedTableWarnings } from '../header/notifications-source-tables.js';
+import { PreviewFitScaler } from './preview-fit.js';
 
 export class PreviewManager {
     /**
@@ -18,6 +20,13 @@ export class PreviewManager {
      */
     static _pendingUpdate = false;
     static _pendingOptions = null;
+
+    /**
+     * Единый скейлер fit-to-width для inline-панели предпросмотра (#preview).
+     * Лениво создаётся в _performUpdate. У модального меню — свой экземпляр.
+     * @private
+     */
+    static _fitScaler = null;
 
     /**
      * Обновляет содержимое панели предпросмотра.
@@ -47,8 +56,22 @@ export class PreviewManager {
             this._pendingUpdate = false;
             this._pendingOptions = null;
             const {previewTrim = AppConfig.preview.defaultTrimLength} = opts || {};
+            // Сбрасываем кеш замечаний ДО рендера: _applyTableOutlines (рамки) и
+            // collectTableItems (колокольчик) пересчитают снимок один раз и
+            // переиспользуют его. Инвалидация здесь, а не на content-changed,
+            // потому что событие летит ПОСЛЕ outlines — иначе рамки читали бы
+            // устаревший кеш.
+            invalidateTableWarningsCache();
             this._performUpdate(previewTrim);
+            this._emitContentChanged();
         });
+    }
+
+    /** @private Уведомляет подписчиков (колокольчик) об изменении содержимого. */
+    static _emitContentChanged() {
+        if (typeof document !== 'undefined') {
+            document.dispatchEvent(new CustomEvent('preview:content-changed'));
+        }
     }
 
     /**
@@ -92,9 +115,83 @@ export class PreviewManager {
         this._hidePreviewTooltip();
         preview.innerHTML = '';
 
-        this._renderTitle(preview);
-        this._renderTree(preview, previewTrim);
-        this._attachPreviewTooltips(preview);
+        // Единая сборка документа (лист + sizer + индикатор зума) — общая для
+        // inline-панели и модального меню, исключает расхождение их рендера.
+        this.renderDocumentInto(preview, { previewTrim });
+
+        // Fit-to-width: масштабирует лист под ширину панели. attach идемпотентен —
+        // на перерендере наблюдаем ту же #preview и просто перепланируем расчёт.
+        if (!this._fitScaler) this._fitScaler = new PreviewFitScaler();
+        this._fitScaler.attach(preview);
+    }
+
+    /**
+     * Собирает единую структуру документа предпросмотра в указанный контейнер.
+     *
+     * ЕДИНЫЙ источник рендера и для inline-панели (#preview), и для модального
+     * меню (#previewMenuBody) — благодаря этому оба предпросмотра выглядят
+     * идентично (устраняет прежнее расхождение, когда меню строило документ
+     * вручную). Структура: sizer-обёртка → лист A4 (.preview-sheet) с заголовком,
+     * деревом и tooltip'ами, плюс индикатор зума поверх холста.
+     *
+     * @param {HTMLElement} container - Холст (#preview или #previewMenuBody).
+     * @param {Object} opts
+     * @param {number} opts.previewTrim - Максимальная длина текста.
+     * @returns {{sheet: HTMLElement, sizer: HTMLElement, indicator: HTMLElement}}
+     */
+    static renderDocumentInto(container, { previewTrim }) {
+        // Sizer занимает масштабированный footprint листа (см. preview-fit.js).
+        const sizer = document.createElement('div');
+        sizer.className = 'preview-sheet-sizer';
+
+        // Белый лист A4 с полями и типографикой Word; масштабируется fit-скейлером.
+        const sheet = document.createElement('div');
+        sheet.className = 'preview-sheet';
+
+        sizer.appendChild(sheet);
+        container.appendChild(sizer);
+
+        this._renderTitle(sheet);
+        this._renderTree(sheet, previewTrim);
+        this._attachPreviewTooltips(sheet);
+
+        // Цветные рамки проблемных таблиц на листе (источник — те же замечания,
+        // что и колокольчик). Внутри renderDocumentInto, поэтому работает и для
+        // inline-панели, и для модального меню.
+        this._applyTableOutlines(sheet);
+
+        // Индикатор текущего масштаба (обновляется скейлером).
+        const indicator = document.createElement('div');
+        indicator.className = 'preview-zoom-indicator';
+        indicator.textContent = '100%';
+        container.appendChild(indicator);
+
+        return { sheet, sizer, indicator };
+    }
+
+    /**
+     * Навешивает на проблемные таблицы листа цветную рамку по критичности
+     * (error→красная, warning→оранжевая). Источник — те же замечания, что и
+     * колокольчик. Для одной таблицы error важнее warning.
+     * @param {HTMLElement} sheet Контейнер с .preview-table-wrapper[data-table-id].
+     */
+    static _applyTableOutlines(sheet) {
+        // Закешированный снимок замечаний (тот же, что и у колокольчика). Геттер
+        // сам глотает исключения сборки и отдаёт [] — отдельный try/catch не нужен.
+        const warnings = getCachedTableWarnings();
+        const sev = new Map();
+        for (const w of warnings) {
+            if (w.tableId == null) continue;
+            const key = String(w.tableId);
+            if (sev.get(key) === 'error') continue;
+            sev.set(key, w.severity === 'error' ? 'error' : (sev.get(key) || 'warning'));
+        }
+        sheet.querySelectorAll('.preview-table-wrapper[data-table-id]').forEach((el) => {
+            el.classList.remove('preview-table-wrapper--error', 'preview-table-wrapper--warning');
+            const s = sev.get(el.dataset.tableId);
+            if (s === 'error') el.classList.add('preview-table-wrapper--error');
+            else if (s === 'warning') el.classList.add('preview-table-wrapper--warning');
+        });
     }
 
     /**
@@ -166,7 +263,7 @@ export class PreviewManager {
 
         const tableData = AppState.tables[child.tableId];
         if (tableData) {
-            const table = PreviewTableRenderer.create(tableData, previewTrim);
+            const table = PreviewTableRenderer.create(tableData, previewTrim, { tableId: child.tableId });
             container.appendChild(table);
         }
     }
@@ -269,7 +366,10 @@ export class PreviewManager {
      * Используется после загрузки акта или изменения структуры
      */
     static forceUpdate() {
+        // Та же инвалидация кеша замечаний перед рендером, что и в update().
+        invalidateTableWarningsCache();
         this._performUpdate(AppConfig.preview.defaultTrimLength);
+        this._emitContentChanged();
     }
 
     /**

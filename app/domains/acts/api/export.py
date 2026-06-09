@@ -25,6 +25,7 @@ from app.domains.acts.schemas.act_content import ActSaveResponse
 from app.domains.acts.services.act_content_service import ActContentService
 from app.domains.acts.services.act_crud_service import ActCrudService
 from app.domains.acts.services.export_service import ExportService
+from app.domains.acts.services.notifications_producer import emit_act_notification
 from app.domains.acts.services.storage_service import StorageService
 from app.schemas.errors import ErrorDetail
 
@@ -136,6 +137,16 @@ async def save_act(
                 })
         except Exception:
             logger.exception("Не удалось записать аудит-лог экспорта")
+
+        # Уведомление о завершённом экспорте — адресно текущему пользователю.
+        # Эмитим только после успеха; сбой/отсутствие notifications не ломает
+        # экспорт (вся логика в emit_act_notification обёрнута в try/except).
+        await emit_act_notification(
+            title=f"Акт сохранён в формате {fmt.upper()}",
+            severity="success",
+            link=f"/constructor?act_id={act_id}",
+            recipient_user_id=username,
+        )
 
         return result
 

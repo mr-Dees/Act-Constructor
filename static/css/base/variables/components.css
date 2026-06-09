@@ -125,9 +125,6 @@
     --invoice-warning-padding: var(--spacing-lg);
     --invoice-warning-border-width: var(--border-width-thick);
 
-    /* Save indicator */
-    --save-indicator-label-min-width: 6.5rem;
-
     /* Tree */
     --tree-count-size: 1.25rem;
     --tree-drop-indicator-height: 0.375rem;
@@ -188,6 +185,14 @@
     --header-min-height: 5rem;
     --body-padding-top: calc(max(var(--header-height), var(--header-min-height)) + 2.5vh);
     --content-height: calc(100vh - var(--body-padding-top));
+
+    /* Ширина колонки кнопки шапки (иконка + подпись). Единая для всех колонок —
+     * кнопки стоят на равном расстоянии; подпись центрируется под своей кнопкой.
+     * Компактная (76px): шире сделало бы боковые группы слишком широкими, и при
+     * абсолютном позиционировании они залезали бы на центральные «шаги». Подписи
+     * не обрезаются (overflow:visible), а самая длинная — «Только локально» —
+     * слегка «вытекает» за колонку, оставаясь под кнопкой индикатора. */
+    --header-action-column-width: 4.75rem;
 
     /* Размеры для контекстного меню и диалогов */
     --context-menu-min-width: 13rem;

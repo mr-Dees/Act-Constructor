@@ -8,6 +8,7 @@ import { PreviewManager } from '../preview/preview.js';
 import { AppState } from '../state/state-core.js';
 import { AppConfig } from '../../shared/app-config.js';
 import { EscapeStack } from '../../shared/escape-stack.js';
+import { PreviewFitScaler } from '../preview/preview-fit.js';
 
 export class PreviewMenuManager {
     constructor() {
@@ -28,6 +29,10 @@ export class PreviewMenuManager {
 
         // Оптимизация: throttle для resize
         this.resizeRAF = null;
+
+        // Скейлер fit-to-width для модального тела (свой экземпляр; inline-панель
+        // использует собственный в PreviewManager).
+        this.fitScaler = null;
 
         this.init();
     }
@@ -270,6 +275,11 @@ export class PreviewMenuManager {
             this._escapeUnsub = null;
         }
 
+        // Освобождаем ResizeObserver скейлера при закрытии модального меню.
+        if (this.fitScaler) {
+            this.fitScaler.detach();
+        }
+
         // Уведомляем о событии
         this._dispatchEvent('preview-menu:closed');
     }
@@ -303,22 +313,14 @@ export class PreviewMenuManager {
 
         this.menuBody.classList.remove('empty');
 
-        // Создаем заголовок
-        const title = document.createElement('h1');
-        title.textContent = 'АКТ';
-        this.menuBody.appendChild(title);
-
-        // Рендерим дерево через PreviewManager
+        // Единая сборка документа — та же структура, что и в inline-панели
+        // (лист A4 + sizer + индикатор зума, заголовок «АКТ» и tooltip'ы внутри).
         const previewTrim = AppConfig.preview.defaultTrimLength;
-        PreviewManager.renderNode(
-            AppState.treeData,
-            this.menuBody,
-            1,
-            previewTrim
-        );
+        PreviewManager.renderDocumentInto(this.menuBody, { previewTrim });
 
-        // Привязываем tooltip к ссылкам и сноскам
-        PreviewManager._attachPreviewTooltips(this.menuBody);
+        // Fit-to-width для модального тела (attach идемпотентен на перерендере).
+        if (!this.fitScaler) this.fitScaler = new PreviewFitScaler();
+        this.fitScaler.attach(this.menuBody);
     }
 
     /**
