@@ -17,6 +17,9 @@ import hljs from '../../../vendor/highlightjs/highlight.min.js';
 // Переопределения: код подсвечивается hljs (вывод — спаны class="hljs-*",
 // проходит DOMPurify с разрешённым class); чекбоксы task-list — символами,
 // чтобы не разрешать <input> в санитайзере.
+// ВАЖНО: use() конфигурирует ГЛОБАЛЬНЫЙ инстанс vendored-marked. Если
+// понадобится второй контекст рендеринга (не-чат) — использовать
+// new marked.Marked() со своими опциями, а не менять эти.
 marked.use({
     gfm: true,
     breaks: true,
@@ -42,6 +45,33 @@ marked.use({
         },
     },
 });
+
+/**
+ * Замыкание прогрессивного markdown-рендера для streaming-блока:
+ * аккумулирует текст и перерисовывает targetEl с троттлингом.
+ * finalize всегда рендерит финальное состояние — потерянных хвостов нет.
+ *
+ * @param {HTMLElement} targetEl — элемент, в который пишется HTML
+ * @returns {{ appendText: function(string): void, finalize: function(): void }}
+ */
+function makeStreamingClosure(targetEl) {
+    let accumulated = '';
+    let lastRender = 0;
+    const RENDER_EVERY_MS = 80; // re-parse не чаще ~12 раз/сек — глазу неотличимо
+
+    return {
+        appendText(text) {
+            accumulated += text;
+            const now = performance.now();
+            if (now - lastRender < RENDER_EVERY_MS) return;
+            lastRender = now;
+            ChatRenderer._safeSetHtml(targetEl, ChatRenderer._markdownToHtml(accumulated));
+        },
+        finalize() {
+            ChatRenderer._safeSetHtml(targetEl, ChatRenderer._markdownToHtml(accumulated));
+        },
+    };
+}
 
 export const ChatRenderer = {
 
@@ -211,6 +241,7 @@ export const ChatRenderer = {
     /**
      * Допечатывает текст в существующий streaming-блок с анимацией и финализирует.
      * Используется инкрементальным рендером рассуждений агента (chat-messages.js).
+     * При прерывании сигналом текст допечатывается мгновенно; finalize вызывается в любом случае.
      *
      * @param {{appendText: function, finalize: function}} sb — streaming-блок
      * @param {string} text — допечатываемый фрагмент
@@ -486,46 +517,14 @@ export const ChatRenderer = {
             content.className = 'chat-block-reasoning-content chat-md';
             details.appendChild(content);
 
-            let accumulated = '';
-            let lastRender = 0;
-            const RENDER_EVERY_MS = 80; // re-parse не чаще ~12 раз/сек — глазу неотличимо
-
-            return {
-                element: details,
-                appendText(text) {
-                    accumulated += text;
-                    const now = performance.now();
-                    if (now - lastRender < RENDER_EVERY_MS) return;
-                    lastRender = now;
-                    ChatRenderer._safeSetHtml(content, ChatRenderer._markdownToHtml(accumulated));
-                },
-                finalize() {
-                    ChatRenderer._safeSetHtml(content, ChatRenderer._markdownToHtml(accumulated));
-                },
-            };
+            return { element: details, ...makeStreamingClosure(content) };
         }
 
         // По умолчанию — текстовый блок
         const div = document.createElement('div');
         div.className = 'chat-block chat-block-text chat-md';
 
-        let accumulated = '';
-        let lastRender = 0;
-        const RENDER_EVERY_MS = 80; // re-parse не чаще ~12 раз/сек — глазу неотличимо
-
-        return {
-            element: div,
-            appendText(text) {
-                accumulated += text;
-                const now = performance.now();
-                if (now - lastRender < RENDER_EVERY_MS) return;
-                lastRender = now;
-                ChatRenderer._safeSetHtml(div, ChatRenderer._markdownToHtml(accumulated));
-            },
-            finalize() {
-                ChatRenderer._safeSetHtml(div, ChatRenderer._markdownToHtml(accumulated));
-            },
-        };
+        return { element: div, ...makeStreamingClosure(div) };
     },
 
     /**
@@ -1094,7 +1093,10 @@ export const ChatRenderer = {
      * @private
      */
     _closeDanglingFences(text) {
-        const fences = (text.match(/^\s{0,3}(```|~~~)/gm) || []).length;
+        // Отступ ≤ 3 пробелов — по CommonMark; фенс с большим отступом блок не
+        // открывает, и для частичного текста ложное «закрытие» даёт лишь
+        // безвредный пустой код-блок в самом хвосте.
+        const fences = (text.match(/^\s{0,3}(`{3,}|~{3,})/gm) || []).length;
         return (fences % 2 === 1) ? text + '\n```' : text;
     },
 
