@@ -192,7 +192,7 @@ export class ItemsRenderer {
             const id = el.dataset.tableId;
             if (id) this._domIndex.delete(`table:${id}`);
         });
-        // textblock-editor / text-block-section
+        // textblock-section / textblock-editor (ищем по data-атрибуту: он есть у обоих)
         rootEl.querySelectorAll('[data-text-block-id]').forEach(el => {
             const id = el.dataset.textBlockId;
             if (id) this._domIndex.delete(`textblock:${id}`);
@@ -811,14 +811,12 @@ export class ItemsRenderer {
 
     /**
      * Синхронизация данных из DOM обратно в глобальное состояние AppState.
-     * Извлекает актуальные значения из редактируемых элементов (таблицы, текстовые блоки,
-     * нарушения) и обновляет соответствующие объекты в состоянии.
+     * Источник истины — AppState: текстблоки и нарушения пишут в состояние
+     * live-обработчиками (input/blur), здесь дочитываются только таблицы.
      * Вызывается перед сохранением или экспортом документа.
      */
     static syncDataToState() {
         this._syncTables();
-        this._syncTextBlocks();
-        this._syncViolations();
     }
 
     /**
@@ -847,85 +845,6 @@ export class ItemsRenderer {
                     }
                 });
             });
-        });
-    }
-
-    /**
-     * Синхронизация содержимого всех текстовых блоков из DOM в AppState.
-     * Сохраняет HTML-контент для поддержки форматирования.
-     * @private
-     */
-    static _syncTextBlocks() {
-        document.querySelectorAll('.text-block-section').forEach(section => {
-            const textBlockId = section.dataset.textBlockId;
-            const textBlock = AppState.textBlocks[textBlockId];
-            if (!textBlock) return;
-
-            const editor = section.querySelector('.text-block-editor');
-            if (editor) {
-                textBlock.content = editor.innerHTML;
-            }
-        });
-    }
-
-    /**
-     * Синхронизация данных всех нарушений из DOM в AppState.
-     * Обновляет поля ввода, списки описаний и опциональные поля.
-     * @private
-     */
-    static _syncViolations() {
-        document.querySelectorAll('.violation-section').forEach(section => {
-            const violationId = section.dataset.violationId;
-            const violation = AppState.violations[violationId];
-            if (!violation) return;
-
-            this._syncViolationFields(section, violation);
-        });
-    }
-
-    /**
-     * Синхронизация полей конкретного нарушения.
-     * Обновляет основные поля, список описаний и опциональные блоки.
-     * @param {HTMLElement} section - Секция нарушения
-     * @param {Object} violation - Объект нарушения из AppState
-     * @private
-     */
-    static _syncViolationFields(section, violation) {
-        // Синхронизация основных полей
-        const violatedInput = section.querySelector('input[data-field="violated"]');
-        if (violatedInput) {
-            violation.violated = violatedInput.value;
-        }
-
-        const establishedInput = section.querySelector('textarea[data-field="established"]');
-        if (establishedInput) {
-            violation.established = establishedInput.value;
-        }
-
-        // Синхронизация списка описаний (метрик)
-        const descItems = section.querySelectorAll('.violation-desc-item');
-        if (descItems.length > 0) {
-            violation.descriptionList.items = Array.from(descItems, item => item.value);
-        }
-
-        // Синхронизация опциональных полей
-        this._syncOptionalViolationFields(section, violation);
-    }
-
-    /**
-     * Синхронизация опциональных полей нарушения (причины, последствия, ответственные).
-     * @param {HTMLElement} section - Секция нарушения
-     * @param {Object} violation - Объект нарушения из AppState
-     * @private
-     */
-    static _syncOptionalViolationFields(section, violation) {
-        const optionalFields = ['reasons', 'consequences', 'responsible'];
-
-        optionalFields.forEach(field => {
-            const textarea = section.querySelector(`textarea[data-field="${field}"]`);
-            if (textarea && violation[field]) {
-                violation[field].content = textarea.value;
-            }
         });
     }
 }
