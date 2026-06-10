@@ -25,7 +25,7 @@
 **API между фронтом и бэком.**
 
 - На загрузку: `ActContentRepository.get_content(act_id)` возвращает `{tree, tables, textBlocks, violations}` (`app/domains/acts/repositories/act_content.py:41-61`). Фактуры подмешиваются в `node.invoice` фронт-кодом `APIClient._attachInvoicesToTree` (`static/js/shared/api.js:602-626`).
-- На сохранение: фронт отдаёт `ActDataSchema` (`app/domains/acts/schemas/act_content.py:319-358`) — те же четыре раздела + `invoiceNodeIds`, `changelog`, `saveType`. Сохранение оборачивается в транзакцию: `_save_tree` UPDATE-ит JSONB, остальные секции делают `DELETE … WHERE act_id` + `executemany INSERT` (`act_content.py:252-394`).
+- На сохранение: фронт отдаёт `ActDataSchema` (`app/domains/acts/schemas/act_content.py`) — те же четыре раздела + `invoiceNodeIds`, `changelog`, `saveType`. Единую плоскую транзакцию (контент + diff аудита + снимок версии) держит сервис `ActContentService.save_content`; репозиторий собственную транзакцию не открывает (контракт в его докстринге). `_save_tree` UPDATE-ит JSONB, остальные секции делают `DELETE … WHERE act_id` + `executemany INSERT`.
 
 Денормализация (дублирование `node_number`, `audit_point_id`, `audit_act_id` в `act_tables`/`act_textblocks`/`act_violations`/`act_invoices`) нужна для BI/выгрузок и поиска. Источник истины — `tree_data`; при сохранении бэк рассчитывает `node_map` и `audit_point_map` единым обходом дерева (`act_content.py:197-238`) и проставляет денормализованные поля.
 
@@ -51,9 +51,9 @@ Pydantic-описание: `ActDataSchema` (`app/domains/acts/schemas/act_conten
 
 **Ссылочная целостность (на app-уровне).** Жёсткой FK между узлами и `act_tables`/`act_textblocks`/`act_violations` нет (всё перезаписывается одной транзакцией). Связь идёт по `id` контейнера и `nodeId` узла:
 
-- Узел `type=table` имеет `tableId`, соответствующая запись в `tables[tableId]` обязательна, `tables[tableId].nodeId === node.id`.
+- Узел `type=table` имеет `tableId`, соответствующая запись в `tables[tableId]` обязательна (кросс-валидатор `ActDataSchema` отклоняет висячую ссылку 422), `tables[tableId].nodeId === node.id`.
 - Аналогично для `type=textblock` (`textBlockId` ↔ `textBlocks[id]`) и `type=violation` (`violationId` ↔ `violations[id]`).
-- Записи в `tables`/`textBlocks`/`violations` без соответствующего узла-носителя сохранятся в БД (бэк не валидирует обратную связь), но окажутся «бесхозными» — фронт их не отрисует. Чистка таких сирот — обязанность фронта (`_deleteNodeData` в `state-tree.js:264-273`).
+- Записи в `tables`/`textBlocks`/`violations` без соответствующего узла-носителя в БД не попадают: orphan-фильтр репозитория отбрасывает их при сохранении (с warning-логом) для всех трёх словарей. Фронт дополнительно чистит сирот при удалении узлов (`_deleteNodeData` в `state-tree.js`).
 - `invoiceNodeIds` — плоский список ID узлов, у которых на фронте проставлено `node.invoice`. По нему бэк синхронизирует `act_invoices`: всё, чего нет в списке, удаляется (`act_content.py:396-433`).
 
 ---
@@ -506,14 +506,14 @@ isPinnedTable(node) {
 - Поле `version` или аналог в `tree_data` отсутствует — ни Pydantic-схема (`ActDataSchema`, `ActItemSchema`), ни таблица `act_tree` не содержат такого поля.
 - Эволюция структуры идёт через:
   1. SQL-миграции — изменения схемы таблиц (`migrations/postgresql/schema.sql`, `migrations/greenplum/schema.sql`); схема исполняется при старте через `create_tables_if_not_exist` (см. [`developer-guide.md §6.5`](../guides/developer-guide.md#65-миграции)).
-  2. Pydantic-валидаторы — `ActItemSchema.model_rebuild()` после декларации (`act_content.py:376`) и `field_validator`'ы на `TableSchema.grid`/`colWidths`. При несовместимом изменении схемы валидация старых документов упадёт с `ValidationError` — обратная совместимость держится на том, что новые поля добавляются как опциональные с `default=`.
+  2. Pydantic-валидаторы — `ActItemSchema.model_rebuild()` после декларации и `field_validator`'ы на `TableSchema.grid`/`colWidths`. Политика незнакомых полей задана явно: словарные схемы и `ActDataSchema` — `extra="forbid"` (незадекларированное поле → 422), узлы дерева (`ActItemSchema`) — явный `extra="ignore"` с нормализацией через `model_dump` (дерево хранится нормализованным). При несовместимом изменении схемы валидация старых документов упадёт с `ValidationError` — новые поля добавляются опциональными с `default=` и обязательно декларируются в схеме.
   3. Денормализация — если меняется набор флагов в `act_tables` (например, новый тип спец-таблицы), нужно одновременно обновить SQL-миграции (новая колонка, индекс при необходимости) и `ActContentRepository._load_tables`/`_save_tables`.
 
 **Снапшоты содержимого.** Есть таблица `act_content_versions` (`schema.sql:354-368`) — снэпшоты `tree_data`/`tables_data`/`textblocks_data`/`violations_data` по номерам версий, для просмотра истории и восстановления. Это версионирование данных конкретного акта, а не схемы.
 
 **Рекомендации при изменении модели.**
 
-- Новые поля узлов или контейнеров добавлять с `default=` (обратная совместимость старых документов).
+- Новые поля узлов или контейнеров добавлять с `default=` и явной декларацией в схеме: для словарных схем действует `extra="forbid"` — незадекларированное поле от фронта отклоняется 422.
 - Удаление полей делать в два шага: сначала перевод в опциональные, миграция данных, потом удаление.
 - При добавлении нового `node.type` — обновлять `Literal[...]` в `ActItemSchema.type`, фронтовый `AppConfig.nodeTypes`, проверки `_isInformationalNode` / `canAcceptAsChild` и сериализатор `_serializeTree`.
 - При добавлении нового флага спец-таблицы — добавлять колонку в `act_tables` (миграции PG + GP), маппинг в `_load_tables`/`_save_tables`, поле в `TableSchema` и учёт в `TreeUtils.isPinnedTable`, если таблица должна быть pinned.

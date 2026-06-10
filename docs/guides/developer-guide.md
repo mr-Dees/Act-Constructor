@@ -2792,7 +2792,8 @@ ActsSettings (BaseModel) — префикс ACTS__
 ├── formatting: FormattingSettings
 ├── resource: ResourceSettings
 ├── invoice: InvoiceSettings
-└── audit_log: AuditLogSettings
+├── audit_log: AuditLogSettings
+└── images: ImagesSettings (ACTS__IMAGES__* — лимиты картинок нарушений; фронт читает их через GET /api/v1/acts/limits вместе с границами таблиц/текстблоков)
 ```
 
 **Правила:**
@@ -3170,6 +3171,13 @@ def test_chat_settings_defaults():
 | `ACTS__AUDIT_LOG__MAX_CONTENT_VERSIONS` | int | `50` | Макс. версий содержимого |
 | `ACTS__AUDIT_LOG__MAX_DIFF_ELEMENTS` | int | `20` | Макс. элементов в diff |
 | `ACTS__AUDIT_LOG__MAX_DIFF_CELLS_PER_TABLE` | int | `50` | Макс. ячеек diff на таблицу |
+| `ACTS__IMAGES__MAX_FILE_SIZE` | int | `10485760` | Макс. размер картинки нарушения (байт) |
+| `ACTS__IMAGES__MAX_TOTAL_SIZE_PER_ACT` | int | `31457280` | Суммарный размер картинок на акт (байт) |
+| `ACTS__IMAGES__ALLOWED_MIME_TYPES` | list | `jpeg/png/gif/webp` | Whitelist MIME картинок (без SVG) |
+| `ACTS__IMAGES__MAX_ITEMS_PER_VIOLATION` | int | `50` | Макс. элементов additionalContent на нарушение |
+| `ACTS__IMAGES__PREVIEW_MAX_HEIGHT_PERCENT` | int | `40` | Макс. высота картинки в превью (% листа A4) |
+
+Лимиты картинок и жёсткие границы таблиц/текстблоков фронт получает через `GET /api/v1/acts/limits` (образец — chat `GET /limits`).
 
 #### Admin и Observability
 
