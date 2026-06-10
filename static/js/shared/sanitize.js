@@ -28,6 +28,27 @@ const DEFAULT_CONFIG = {
     ],
 };
 
+/**
+ * Строгий whitelist для markdown-вывода LLM в чате.
+ *
+ * ВАЖНО: USE_PROFILES: false нейтрализует USE_PROFILES из DEFAULT_CONFIG при
+ * shallow-merge (Object.assign) — иначе профиль перекрыл бы ALLOWED_TAGS.
+ * img/svg/math/input запрещены сознательно: markdown-injection в LLM-чатах —
+ * известный вектор эксфильтрации (автозагрузка картинок) и mXSS; картинки
+ * приходят отдельным типизированным блоком 'image'.
+ * class разрешён для подсветки кода (span.hljs-*).
+ */
+const CHAT_MD_CONFIG = {
+    USE_PROFILES: false,
+    ALLOWED_TAGS: [
+        'p', 'br', 'hr', 'blockquote', 'ul', 'ol', 'li',
+        'strong', 'em', 'del', 'code', 'pre', 'a', 'span',
+        'h1', 'h2', 'h3', 'h4', 'h5', 'h6',
+        'table', 'thead', 'tbody', 'tr', 'th', 'td',
+    ],
+    ALLOWED_ATTR: ['href', 'title', 'target', 'rel', 'class', 'start', 'align'],
+};
+
 let fallbackWarned = false;
 
 function warnFallbackOnce() {
@@ -77,3 +98,4 @@ function escapeHtml(str) {
 
 export const SafeHTML = { set, sanitize, escapeHtml };
 window.SafeHTML = SafeHTML;
+export { CHAT_MD_CONFIG };
