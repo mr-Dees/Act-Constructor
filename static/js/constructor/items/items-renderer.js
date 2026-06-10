@@ -37,6 +37,9 @@ export class ItemsRenderer {
         const container = document.getElementById('itemsContainer');
         if (!container) return;
 
+        // Дропдаун ТБ живёт в document.body и переживает innerHTML='' —
+        // закрываем явно, иначе утекает он сам и его document-слушатель.
+        this._closeTbDropdownInItems();
         this._domIndex.clear();
         container.innerHTML = '';
         tableManager.clearSelection();
@@ -66,6 +69,10 @@ export class ItemsRenderer {
             console.warn('[ItemsRenderer.updateItem] узел не найден в _domIndex или AppState, fallback на renderAll:', nodeId);
             return this.renderAll();
         }
+
+        // Заменяемое поддерево может содержать бейдж-якорь открытого дропдауна ТБ —
+        // закрываем дропдаун (он в document.body) вместе с его document-слушателем.
+        this._closeTbDropdownInItems();
 
         // Чистим индекс по всему поддереву старого DOM перед заменой
         this._purgeSubtreeFromIndex(oldEl);
