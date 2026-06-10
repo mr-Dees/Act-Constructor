@@ -128,6 +128,40 @@ export class TableCellsOperations {
     }
 
     /**
+     * H8: проверяет лимит строк таблицы перед вставкой строки.
+     * Зеркалит серверную схему (TableSchema.grid max_length) — без фронт-гейта
+     * превышение уехало бы на бэк и вернулось 422 при сохранении.
+     * @private
+     * @param {Object} table - Объект таблицы
+     * @returns {boolean} true если вставка разрешена; false — показан warning
+     */
+    _checkRowLimit(table) {
+        const maxRows = AppConfig.limits.table.maxRows;
+        if (table.grid.length >= maxRows) {
+            Notifications.warning(`Достигнут максимум строк таблицы (${maxRows}). Добавить новую строку нельзя.`);
+            return false;
+        }
+        return true;
+    }
+
+    /**
+     * H8: проверяет лимит колонок таблицы перед вставкой колонки.
+     * Зеркалит серверную схему (validate_grid_dimensions) — без фронт-гейта
+     * превышение уехало бы на бэк и вернулось 422 при сохранении.
+     * @private
+     * @param {Object} table - Объект таблицы
+     * @returns {boolean} true если вставка разрешена; false — показан warning
+     */
+    _checkColumnLimit(table) {
+        const maxCols = AppConfig.limits.table.maxCols;
+        if (table.grid[0].length >= maxCols) {
+            Notifications.warning(`Достигнут максимум колонок таблицы (${maxCols}). Добавить новую колонку нельзя.`);
+            return false;
+        }
+        return true;
+    }
+
+    /**
      * Вставляет новую строку выше выбранной ячейки.
      * Учитывает объединенные ячейки и запрещает вставку выше заголовка.
      */
@@ -140,6 +174,9 @@ export class TableCellsOperations {
         const table = AppState.tables[tableId];
 
         if (!table || !table.grid) return;
+
+        // Лимит размера таблицы (H8)
+        if (!this._checkRowLimit(table)) return;
 
         // КРИТИЧЕСКАЯ ПРОВЕРКА: запрещаем вставку выше заголовка
         const isHeaderRow = table.grid[rowIndex].some(c => c.isHeader === true);
@@ -225,6 +262,9 @@ export class TableCellsOperations {
         const table = AppState.tables[tableId];
 
         if (!table || !table.grid) return;
+
+        // Лимит размера таблицы (H8)
+        if (!this._checkRowLimit(table)) return;
 
         let insertRowIndex = rowIndex + 1;
         for (let c = 0; c < table.grid[rowIndex].length; c++) {
@@ -317,6 +357,9 @@ export class TableCellsOperations {
             return;
         }
 
+        // Лимит размера таблицы (H8)
+        if (!this._checkColumnLimit(table)) return;
+
         colIndex = this._findColumnStartOfSpan(table, colIndex);
 
         let headerRowIndex = -1;
@@ -393,6 +436,9 @@ export class TableCellsOperations {
             Notifications.error('Структуру этой таблицы нельзя изменять');
             return;
         }
+
+        // Лимит размера таблицы (H8)
+        if (!this._checkColumnLimit(table)) return;
 
         let insertColIndex = colIndex + 1;
         for (let r = 0; r < table.grid.length; r++) {
