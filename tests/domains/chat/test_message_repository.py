@@ -187,8 +187,8 @@ async def test_finalize_happy_path_with_merge(mock_conn):
     assert msg_id == "msg-1"
 
 
-async def test_finalize_dedupes_by_block_id(mock_conn):
-    """Final блок с block_id, который уже в existing, не дублируется."""
+async def test_finalize_does_not_duplicate_block_with_same_block_id(mock_conn):
+    """Повторно присланный финальный блок с тем же block_id не дублируется — замещает накопленный на его месте."""
     mock_conn.fetchrow.return_value = {
         "content": [
             {"type": "reasoning", "block_id": "r1", "content": "th"},
@@ -197,7 +197,7 @@ async def test_finalize_dedupes_by_block_id(mock_conn):
         "status": "streaming",
     }
     repo = MessageRepository(mock_conn)
-    # Final присылает тот же t1 заново — фронт уже его видел через append.
+    # Final присылает t1 заново — блок замещается на месте, дубля нет.
     final_blocks = [
         {"type": "text", "block_id": "t1", "content": "partial"},
         {"type": "buttons", "block_id": "b1", "items": []},
