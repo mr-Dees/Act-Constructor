@@ -224,17 +224,6 @@ class TestDeleteFeedback:
 # --------------------------------------------------------------------------
 
 
-def _feedback_service_gen(fb_svc):
-    """Async-генератор-фабрика для patch'а messages.get_feedback_service.
-
-    get_messages строит feedback-сервис лениво (aclosing(get_feedback_service())),
-    а не через Depends — поэтому подменяем саму функцию-генератор.
-    """
-    async def _gen():
-        yield fb_svc
-    return _gen
-
-
 class TestHistoryEnrichment:
     def _history(self):
         now = dt.datetime(2026, 1, 1, 12, 0, 0)
@@ -259,15 +248,17 @@ class TestHistoryEnrichment:
         msg.get_history = AsyncMock(return_value=(self._history(), 2))
         fb = _feedback()
 
-        fb_svc = MagicMock()
-        fb_svc.get_conversation_feedback_map = AsyncMock(return_value={
+        fb_repo = MagicMock()
+        fb_repo.get_map_for_conversation = AsyncMock(return_value={
             "a-1": {"rating": "up", "reasons": None, "comment": None, "updated_at": None},
         })
 
         app = _build_app(conv=conv, msg=msg, feedback=fb)
+        # Репозиторий строится на соединении msg_service (без второго
+        # соединения пула) — подменяем класс целиком.
         with patch(
-            "app.domains.chat.api.messages.get_feedback_service",
-            _feedback_service_gen(fb_svc),
+            "app.domains.chat.api.messages.ChatMessageFeedbackRepository",
+            return_value=fb_repo,
         ):
             with TestClient(app) as client:
                 resp = client.get("/api/v1/chat/conversations/conv-1/messages")
@@ -285,15 +276,12 @@ class TestHistoryEnrichment:
         msg.get_history = AsyncMock(return_value=(self._history(), 2))
         fb = _feedback()
 
-        def _boom():
-            raise RuntimeError("Database pool не инициализирован")
-
         app = _build_app(conv=conv, msg=msg, feedback=fb)
-        # get_feedback_service вызывается лениво; подменяем на бросающую — как
-        # реальный get_db() без инициализированного пула.
+        # Конструктор репозитория падает — как реальный get_adapter() без
+        # инициализированной БД.
         with patch(
-            "app.domains.chat.api.messages.get_feedback_service",
-            side_effect=_boom,
+            "app.domains.chat.api.messages.ChatMessageFeedbackRepository",
+            side_effect=RuntimeError("Database pool не инициализирован"),
         ):
             with TestClient(app) as client:
                 resp = client.get("/api/v1/chat/conversations/conv-1/messages")

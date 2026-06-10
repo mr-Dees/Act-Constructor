@@ -200,24 +200,25 @@ export const ChatMessages = {
         const msgEl = botContainer.parentElement;
         if (msgEl) msgEl.classList.remove('chat-message-bot--streaming');
 
+        const blocks = Array.isArray(msg.content) ? msg.content : [];
         if (msg.status === 'failed') {
             if (msgEl) msgEl.classList.add('chat-message--failed');
             // Блоки из failed-сообщения (обычно error-блок) — без анимации
-            const blocks = Array.isArray(msg.content) ? msg.content : [];
             ChatRenderer.renderBlocks(botContainer, blocks, { execute: false });
         } else {
-            const blocks = Array.isArray(msg.content) ? msg.content : [];
             ChatRenderer.typeOutBlocks(botContainer, blocks);
-            // Панель обратной связи под завершённым ответом ассистента.
-            // Свежий ответ оценок ещё не имеет (initial=null); conversationId
-            // берём из активного контекста (poll-ответ его не содержит).
-            if (msg.id) {
-                ChatFeedback.attach(botContainer, {
-                    conversationId: ChatContext.getCurrentConversationId(),
-                    messageId: msg.id,
-                    initial: msg.feedback || null,
-                });
-            }
+        }
+        // Панель обратной связи под ответом ассистента — включая failed:
+        // дизлайк на ошибочном ответе — первичный сигнал «почему ошибка»
+        // (см. docs/guides/chat-observability-and-feedback.md).
+        // Свежий ответ оценок ещё не имеет (initial=null); conversationId
+        // берём из активного контекста (poll-ответ его не содержит).
+        if (msg.id) {
+            ChatFeedback.attach(botContainer, {
+                conversationId: ChatContext.getCurrentConversationId(),
+                messageId: msg.id,
+                initial: msg.feedback || null,
+            });
         }
     },
 
@@ -429,7 +430,8 @@ export const ChatMessages = {
                     }
                     // Панель обратной связи + восстановление ранее выставленной
                     // оценки текущего пользователя (msg.feedback из GET истории).
-                    if (!isStreaming && !isFailed && msg.id) {
+                    // failed-сообщения тоже оцениваются («почему ошибка»).
+                    if (!isStreaming && msg.id) {
                         ChatFeedback.attach(container, {
                             conversationId: msg.conversation_id || conversationId,
                             messageId: msg.id,

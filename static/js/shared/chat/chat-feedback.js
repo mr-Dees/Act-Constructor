@@ -82,7 +82,7 @@ export const ChatFeedback = {
 
         const ctx = {
             conversationId, messageId, rating: null, busy: false,
-            panel, upBtn, downBtn, form, ack,
+            upBtn, downBtn, form, ack,
         };
 
         // Восстановление ранее выставленной оценки (из истории).

@@ -28,6 +28,13 @@ ROUTE_UNKNOWN = "unknown"          # не assistant-сообщение
 OUTCOME_OK = "ok"
 OUTCOME_ERROR = "error"
 
+# Типы блоков, означающие вызов локального action-tool'а.
+# IMPORTANT: при добавлении нового tool-invoking типа блока (чек-лист
+# «новый тип блока» в CLAUDE.md / dev-guide) дополни это множество —
+# иначе ответы с ним молча классифицируются как smalltalk и аналитика
+# by_route искажается.
+_TOOL_BLOCK_TYPES = frozenset({"client_action", "buttons"})
+
 
 def _block_types(message: dict) -> set[str]:
     """Множество типов блоков из content сообщения (устойчиво к мусору)."""
@@ -53,8 +60,7 @@ def classify_route(message: dict) -> str:
         return ROUTE_UNKNOWN
     if message.get("agent_ref"):
         return ROUTE_KB_AGENT
-    types = _block_types(message)
-    if "client_action" in types or "buttons" in types:
+    if _block_types(message) & _TOOL_BLOCK_TYPES:
         return ROUTE_NON_KB_LLM
     return ROUTE_SMALLTALK
 

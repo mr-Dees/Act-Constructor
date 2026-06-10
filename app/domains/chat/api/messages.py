@@ -15,13 +15,15 @@ from app.domains.chat.deps import (
     get_agent_channel_poller,
     get_agent_channel_service,
     get_conversation_service,
-    get_feedback_service,
     get_file_service,
     get_message_service,
     get_rate_limiter,
 )
 from app.domains.chat.exceptions import (
     ChatFileValidationError,
+)
+from app.domains.chat.repositories.chat_message_feedback_repository import (
+    ChatMessageFeedbackRepository,
 )
 from app.domains.chat.schemas.responses import FileUploadResponse, MessageResponse
 from app.domains.chat.services.chat_feedback_service import feedback_public_dict
@@ -281,15 +283,14 @@ async def get_messages(
     )
 
     # Обогащаем сообщения оценками текущего пользователя (best-effort): сбой
-    # обогащения НЕ должен ломать загрузку истории. feedback-сервис строим
-    # лениво (как agent_channel_service) — не держим соединение пула как
-    # request-зависимость на всё время выборки.
+    # обогащения НЕ должен ломать загрузку истории. Репозиторий строим на
+    # соединении msg_service — второе соединение пула на горячем пути
+    # истории не берём (pool 5/20 выедается вдвое быстрее, troubleshooting №17).
     try:
-        async with aclosing(get_feedback_service()) as agen:
-            feedback_service = await anext(agen)
-            fb_map = await feedback_service.get_conversation_feedback_map(
-                conversation_id=conversation_id, user_id=username,
-            )
+        feedback_repo = ChatMessageFeedbackRepository(msg_service.msg_repo.conn)
+        fb_map = await feedback_repo.get_map_for_conversation(
+            conversation_id=conversation_id, user_id=username,
+        )
         for item in items:
             fb = fb_map.get(item.get("id"))
             if fb is not None:

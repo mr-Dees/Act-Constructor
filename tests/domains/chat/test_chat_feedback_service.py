@@ -1,5 +1,7 @@
 """Тесты ChatFeedbackService (валидация, derive route_type, аудит)."""
 
+import re
+from pathlib import Path
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
@@ -8,6 +10,7 @@ from app.domains.chat.exceptions import ChatFeedbackValidationError
 from app.domains.chat.services import conversation_service as _conv_svc
 from app.domains.chat.services import route_classifier as rc
 from app.domains.chat.services.chat_feedback_service import (
+    FEEDBACK_REASON_CODES,
     MAX_COMMENT_LENGTH,
     ChatFeedbackService,
     feedback_public_dict,
@@ -201,3 +204,23 @@ def test_feedback_public_dict_minimal_no_internal_leak():
 
 def test_feedback_public_dict_none():
     assert feedback_public_dict(None) is None
+
+
+def test_feedback_reason_codes_synced_with_frontend():
+    """Коды причин дизлайка фронта (REASONS в chat-feedback.js) совпадают
+    с FEEDBACK_REASON_CODES бэкенда.
+
+    Синхронизация ручная (импорт из Python во фронт невозможен, как
+    names.py ↔ chat-client-actions.js); тест ловит дрейф: новый код на
+    бэке без фронта — пользователю не предложат, на фронте без бэка — 422.
+    """
+    js_path = (
+        Path(__file__).resolve().parents[3]
+        / "static" / "js" / "shared" / "chat" / "chat-feedback.js"
+    )
+    text = js_path.read_text(encoding="utf-8")
+    m = re.search(r"const REASONS = \[(.*?)\];", text, re.DOTALL)
+    assert m, "Блок REASONS не найден в chat-feedback.js"
+    js_codes = re.findall(r"code:\s*'([^']+)'", m.group(1))
+    assert js_codes, "В REASONS не распознано ни одного кода"
+    assert set(js_codes) == set(FEEDBACK_REASON_CODES)
