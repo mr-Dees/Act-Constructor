@@ -14,6 +14,7 @@ from app.core.responses import PaginatedResponse
 from app.domains.chat.deps import (
     get_agent_channel_poller,
     get_agent_channel_service,
+    get_chat_settings,
     get_conversation_service,
     get_file_service,
     get_message_service,
@@ -256,13 +257,11 @@ async def get_message(
     # второе соединение пула на горячем пути поллинга не берём (pool 5/20).
     agent_ref = message.get("agent_ref")
     if result["status"] == "streaming" and agent_ref:
+        from app.domains.chat.services.agent_channel import AgentChannelService
         try:
-            from app.domains.chat.deps import _get_chat_settings
-            from app.domains.chat.services.agent_channel import AgentChannelService
-
             channel_service = AgentChannelService(
                 msg_service.msg_repo.conn,
-                _get_chat_settings(),
+                get_chat_settings(),
             )
             details = await channel_service.get_queue_details(agent_ref)
             if details:

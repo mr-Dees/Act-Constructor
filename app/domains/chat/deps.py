@@ -87,7 +87,7 @@ def get_agent_channel_poller() -> AgentChannelPoller | None:
     return _agent_channel_poller
 
 
-def _get_chat_settings() -> ChatDomainSettings:
+def get_chat_settings() -> ChatDomainSettings:
     """Возвращает настройки домена чата из реестра."""
     return get_domain_settings("chat", ChatDomainSettings)
 
@@ -101,7 +101,7 @@ def get_rate_limiter() -> UserRateLimiter:
     global _rate_limiter
     if _rate_limiter is None:
         try:
-            settings = _get_chat_settings()
+            settings = get_chat_settings()
         except KeyError:
             settings = ChatDomainSettings()
         _rate_limiter = UserRateLimiter(
@@ -123,7 +123,7 @@ async def get_conversation_service() -> AsyncGenerator[ConversationService, None
         )
         yield ConversationService(
             conv_repo=ConversationRepository(conn),
-            settings=_get_chat_settings(),
+            settings=get_chat_settings(),
             audit_service=audit,
         )
 
@@ -138,7 +138,7 @@ async def get_message_service() -> AsyncGenerator[MessageService, None]:
         yield MessageService(
             msg_repo=MessageRepository(conn),
             conv_repo=ConversationRepository(conn),
-            settings=_get_chat_settings(),
+            settings=get_chat_settings(),
             audit_service=audit,
         )
 
@@ -153,7 +153,7 @@ async def get_file_service() -> AsyncGenerator[FileService, None]:
         yield FileService(
             file_repo=FileRepository(conn),
             conv_repo=ConversationRepository(conn),
-            settings=_get_chat_settings(),
+            settings=get_chat_settings(),
             audit_service=audit,
         )
 
@@ -187,7 +187,7 @@ async def get_analytics_service() -> AsyncGenerator[ChatAnalyticsService, None]:
 async def get_agent_channel_service() -> AsyncGenerator[AgentChannelService, None]:
     """Создаёт AgentChannelService с подключением из пула."""
     async with get_db() as conn:
-        yield AgentChannelService(conn, _get_chat_settings())
+        yield AgentChannelService(conn, get_chat_settings())
 
 
 async def get_tool_metrics_repository() -> AsyncGenerator[

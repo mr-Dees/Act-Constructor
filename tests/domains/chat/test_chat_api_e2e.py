@@ -666,7 +666,7 @@ class TestGetSingleMessage:
 
         with (
             patch(
-                "app.domains.chat.deps._get_chat_settings",
+                "app.domains.chat.api.messages.get_chat_settings",
                 return_value=settings,
             ),
             patch(
@@ -679,6 +679,7 @@ class TestGetSingleMessage:
 
         assert resp.status_code == 200, resp.text
         body = resp.json()
+        assert body["id"] == "m1"
         assert body["status"] == "streaming"
         assert body["status_details"] == {"bus_status": "pending", "queue_ahead": 2}
 
@@ -752,7 +753,7 @@ class TestGetSingleMessage:
 
         with (
             patch(
-                "app.domains.chat.deps._get_chat_settings",
+                "app.domains.chat.api.messages.get_chat_settings",
                 return_value=settings,
             ),
             patch(
