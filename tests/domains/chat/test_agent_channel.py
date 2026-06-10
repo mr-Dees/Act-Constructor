@@ -264,8 +264,8 @@ class TestAgentChannelServiceSubmit:
         assert call_kwargs["metadata"]["mode"] == "qa"
         assert call_kwargs["metadata"]["kb"] == "oarb"
 
-        # question_uid — это conversation_id вопроса
-        assert call_kwargs["conversation_id"] == question_uid
+        # question_uid — это id строки-вопроса в шине
+        assert call_kwargs["id"] == question_uid
 
         # create_streaming вызван с agent_ref = question_uid
         fake_msg_repo.create_streaming.assert_called_once()
@@ -310,8 +310,7 @@ class TestAgentChannelServiceTryFinalize:
     async def test_no_reply_to_returns_pending(self, mock_conn, settings):
         """Если reply_to ещё нет — возвращает 'pending'."""
         question = {
-            "id": "q-1",
-            "conversation_id": "q-uid",
+            "id": "q-uid",
             "role": "user",
             "status": "pending",
             "reply_to": None,
@@ -336,14 +335,12 @@ class TestAgentChannelServiceTryFinalize:
     ):
         """Если reply_to есть и ответ не error → finalize + 'done'."""
         question = {
-            "id": "q-1",
-            "conversation_id": "q-uid",
+            "id": "q-uid",
             "status": "complete",
             "reply_to": "a-uid",
         }
         answer = {
-            "id": "a-1",
-            "conversation_id": "a-uid",
+            "id": "a-uid",
             "role": "assistant",
             "content": "Ответ от агента",
             "metadata": {},
@@ -383,7 +380,7 @@ class TestAgentChannelServiceTryFinalize:
         # R3: после отрисовки вопрос закрывается (status='complete') — AW сам
         # освобождает слот лимита, не полагаясь на терминальный статус от агента.
         fake_agent_repo.set_status.assert_awaited_once_with(
-            conversation_id="q-uid", status="complete",
+            uid="q-uid", status="complete",
         )
 
     async def test_answer_status_error_calls_mark_failed_and_returns_done(
@@ -391,14 +388,12 @@ class TestAgentChannelServiceTryFinalize:
     ):
         """Если answer.status == 'error' → mark_failed + 'done'."""
         question = {
-            "id": "q-2",
-            "conversation_id": "q-uid",
+            "id": "q-uid",
             "status": "complete",
             "reply_to": "a-uid",
         }
         answer = {
-            "id": "a-2",
-            "conversation_id": "a-uid",
+            "id": "a-uid",
             "role": "assistant",
             "content": "Ошибка в агенте",
             "metadata": {},
@@ -436,7 +431,7 @@ class TestAgentChannelServiceTryFinalize:
         fake_msg_repo.finalize.assert_not_called()
         # R3: вопрос закрывается со статусом 'error' — слот лимита освобождён.
         fake_agent_repo.set_status.assert_awaited_once_with(
-            conversation_id="q-uid", status="error",
+            uid="q-uid", status="error",
         )
 
     async def test_try_finalize_calls_translate_buttons_when_answer_has_buttons(
@@ -444,14 +439,12 @@ class TestAgentChannelServiceTryFinalize:
     ):
         """try_finalize вызывает translate_buttons для ответа с кнопками."""
         question = {
-            "id": "q-3",
-            "conversation_id": "q-uid",
+            "id": "q-uid",
             "status": "complete",
             "reply_to": "a-uid",
         }
         answer = {
-            "id": "a-3",
-            "conversation_id": "a-uid",
+            "id": "a-uid",
             "role": "assistant",
             "content": "Нашёл",
             "metadata": {},
@@ -497,14 +490,12 @@ class TestAgentChannelServiceTryFinalize:
     ):
         """try_finalize НЕ вызывает translate_buttons если кнопок нет."""
         question = {
-            "id": "q-4",
-            "conversation_id": "q-uid",
+            "id": "q-uid",
             "status": "complete",
             "reply_to": "a-uid",
         }
         answer = {
-            "id": "a-4",
-            "conversation_id": "a-uid",
+            "id": "a-uid",
             "role": "assistant",
             "content": "Ответ без кнопок",
             "metadata": {},

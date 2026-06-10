@@ -101,44 +101,37 @@ CREATE INDEX idx_{PREFIX}chat_files_conversation
 -- BUS-ТАБЛИЦА КАНАЛА К ВНЕШНЕМУ АГЕНТУ (nanobot)
 -- ============================================================================
 
--- «Провод» между AW и агентом. Имена колонок согласованы со стороной nanobot.
+-- «Провод» между AW и агентом. Таблицу на проде создаёт и ВЛАДЕЕТ ею сторона
+-- агента — блок ниже лишь dev-имитация её фактической структуры. Типы
+-- uuid/text/timestamptz — как у владельца (наша конвенция VARCHAR(36) здесь
+-- сознательно не применяется, чтобы dev ловил те же type-ошибки, что и прод).
 -- Имя таблицы — плейсхолдер {BUS_TABLE} (= CHAT__AGENT_CHANNEL__TABLE_NAME),
 -- БЕЗ {PREFIX}: app-префикс к шине не клеится, имя задаётся настройкой целиком.
--- chat_id = uid треда (= chat_messages.conversation_id); conversation_id = uid
--- одного сообщения (на него ссылается reply_to). role 'tool' разрешён, но AW
--- его пока не обрабатывает.
+-- id = uid одного сообщения шины (на него ссылается reply_to, его же хранит
+-- chat_messages.agent_ref); chat_id = uid треда (= chat_messages.conversation_id).
+-- Отдельной колонки conversation_id в шине НЕТ. role 'tool' разрешён
+-- протоколом, но AW его пока не обрабатывает. PRIMARY KEY отсутствует
+-- (у владельца id nullable) — DISTRIBUTED BY задаём явно. DEFAULT'ов нет —
+-- приложение передаёт status/created_at/updated_at явно.
 CREATE TABLE IF NOT EXISTS {BUS_SCHEMA_Q}{BUS_TABLE} (
-    id              VARCHAR(36) NOT NULL,
-    chat_id         VARCHAR(36) NOT NULL,
-    user_id         VARCHAR(50) NOT NULL,
-    conversation_id VARCHAR(36) NOT NULL,
-    role            VARCHAR(20) NOT NULL
-                    CONSTRAINT check_chat_agent_messages_bus_role_values
-                    CHECK (role IN ('user','assistant','tool')),
-    content         TEXT,
-    media           JSONB,
-    metadata        JSONB,
-    reply_to        VARCHAR(36),
-    buttons         JSONB,
-    status          VARCHAR(20) NOT NULL DEFAULT 'pending'
-                    CONSTRAINT check_chat_agent_messages_bus_status_values
-                    CHECK (status IN ('pending','in_progress','complete','error','timeout')),
-    created_at      TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    updated_at      TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    -- GP-требование: DISTRIBUTED BY ⊆ PK. id ведущий (lookup WHERE id=$1 по PK).
-    PRIMARY KEY (id, chat_id)
+    id          UUID,
+    chat_id     TEXT,
+    user_id     TEXT,
+    role        TEXT NOT NULL,
+    content     TEXT NOT NULL,
+    media       JSONB,
+    metadata    JSONB,
+    reply_to    UUID,
+    buttons     JSONB,
+    status      TEXT NOT NULL,
+    created_at  TIMESTAMP WITH TIME ZONE NOT NULL,
+    updated_at  TIMESTAMP WITH TIME ZONE NOT NULL
 )
 WITH (appendonly=false)
 DISTRIBUTED BY (chat_id);
 
-CREATE INDEX idx_{BUS_TABLE}_chat
-    ON {BUS_SCHEMA_Q}{BUS_TABLE}(chat_id, created_at);
-CREATE INDEX idx_{BUS_TABLE}_conversation
-    ON {BUS_SCHEMA_Q}{BUS_TABLE}(conversation_id);
-CREATE INDEX idx_{BUS_TABLE}_status
-    ON {BUS_SCHEMA_Q}{BUS_TABLE}(status, created_at);
-CREATE INDEX idx_{BUS_TABLE}_reply_to
-    ON {BUS_SCHEMA_Q}{BUS_TABLE}(reply_to);
+CREATE INDEX idx_{BUS_TABLE}_id
+    ON {BUS_SCHEMA_Q}{BUS_TABLE}(id);
 
 -- ============================================================================
 -- МЕТРИКИ ВЫПОЛНЕНИЯ CHATTOOL'ОВ

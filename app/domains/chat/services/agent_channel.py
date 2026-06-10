@@ -196,7 +196,7 @@ class AgentChannelService:
     ) -> str:
         """Кладёт вопрос в chat_agent_messages_bus и создаёт draft-сообщение в chat_messages.
 
-        Возвращает ``question_uid`` — conversation_id строки-вопроса в bus-таблице.
+        Возвращает ``question_uid`` — id строки-вопроса в bus-таблице.
         Вызывающий может сразу передать его поллеру без дополнительного SELECT;
         draft в chat_messages хранит тот же uid в поле ``agent_ref``.
         """
@@ -212,17 +212,15 @@ class AgentChannelService:
             )
 
         question_uid = str(uuid.uuid4())
-        question_id = str(uuid.uuid4())
 
         # Оба INSERT'а — в одной транзакции: вопрос в шине без draft'а (или
         # наоборот) оставил бы осиротевшую строку, которая вечно входит в
         # count_active_for_user и съедает слот лимита параллельных запросов.
         async with self._conn.transaction():
             await self._agent_repo().insert_question(
-                id=question_id,
+                id=question_uid,
                 chat_id=conversation_id,
                 user_id=user_id,
-                conversation_id=question_uid,
                 content=text,
                 metadata={"mode": mode, "kb": kb},
                 media=media,
@@ -250,7 +248,7 @@ class AgentChannelService:
             error_block=build_timeout_error_block(),
         )
         await self._agent_repo().set_status(
-            conversation_id=question_uid,
+            uid=question_uid,
             status="timeout",
         )
         logger.info(
@@ -312,7 +310,7 @@ class AgentChannelService:
 
         Читает строку-вопрос по ``question_uid``. Если ``reply_to`` не выставлен —
         возвращает ``'pending'``. Если агент проставил ``reply_to``:
-        - читает строку-ответ (по reply_to как conversation_id);
+        - читает строку-ответ (по reply_to как id);
         - если answer.status == 'error' → mark_failed(error-блок);
         - иначе → finalize(map_answer_to_blocks(answer)).
         Возвращает ``'done'`` после финализации, ``'pending'`` если ответа ещё нет.
@@ -366,7 +364,7 @@ class AgentChannelService:
             # сбое set_status исключение поднимется в _tick, подписка останется
             # и поллер повторит try_finalize на следующем тике (mark_failed
             # идемпотентен — вернёт False на уже не-streaming сообщении).
-            await agent_repo.set_status(conversation_id=question_uid, status="error")
+            await agent_repo.set_status(uid=question_uid, status="error")
             return "done"
 
         # Транслируем кнопки (acts.open_act_page → open_url) перед маппингом в блоки.
@@ -397,5 +395,5 @@ class AgentChannelService:
         # reply_to). AW — source-of-truth. Вне общей транзакции: при сбое
         # set_status поллер повторит try_finalize на следующем тике (finalize
         # идемпотентен — вернёт False на уже complete-сообщении).
-        await agent_repo.set_status(conversation_id=question_uid, status="complete")
+        await agent_repo.set_status(uid=question_uid, status="complete")
         return "done"

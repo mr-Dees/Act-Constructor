@@ -1413,7 +1413,7 @@ class ActCrudRepository(BaseRepository):
 - Плейсхолдеры в SQL: `{SCHEMA}.` (префикс схемы), `{PREFIX}` (`DATABASE__TABLE_PREFIX`), `{REF_*}` (ссылки на внешние таблицы из `migration_substitutions`). Bare-имена без `{PREFIX}` — баг: имена разойдутся PG/GP.
 - UUID-id хранятся как `VARCHAR(36)`, не как PG-тип `UUID`. Python шлёт `str(uuid.uuid4())` строкой; одно правило для PG и GP.
 - В Greenplum 6.x (= PG 9.4) НЕЛЬЗЯ: `CREATE INDEX/SEQUENCE IF NOT EXISTS`, `ON CONFLICT DO UPDATE`, `ADD COLUMN IF NOT EXISTS`, `jsonb_set/jsonb_pretty`, `gen_random_uuid()`, `EXECUTE FUNCTION` в триггерах, `BIGSERIAL` вместе с `DISTRIBUTED BY`. GP-адаптер исполняет SQL по одному statement и глотает `DuplicateTableError`/`DuplicateObjectError`. Регрессии — `tests/test_gp_compatibility.py`.
-- В Greenplum `DISTRIBUTED BY (col)` должен быть подмножеством каждого `PRIMARY KEY` и `UNIQUE`. Для co-location по foreign-key используют составной PK `(id, foreign_id)` с `id` ведущим и `DISTRIBUTED BY (foreign_id)`. Пример — `chat_agent_messages_bus` (PK `(id, chat_id)`, `DISTRIBUTED BY (chat_id)`) в `app/domains/chat/migrations/greenplum/schema.sql`. Регрессия — `test_distributed_by_subset_of_primary_key`.
+- В Greenplum `DISTRIBUTED BY (col)` должен быть подмножеством каждого `PRIMARY KEY` и `UNIQUE`. Для co-location по foreign-key используют составной PK с ключом распределения внутри. Пример — `chat_message_feedback` (PK `(message_id, user_id)`, `DISTRIBUTED BY (message_id)`) в `app/domains/chat/migrations/greenplum/schema.sql`. Регрессия — `test_distributed_by_subset_of_primary_key`.
 - Имена: таблицы `{PREFIX}<name>`, индексы `idx_{PREFIX}<table>_<purpose>`, sequence (только GP) `seq_<table>_id`, CHECK `check_<table>_<purpose>` (без `{PREFIX}`, см. §6.5a).
 
 #### 6.5.2 Как `discover_domains` подставляет значения
@@ -2202,26 +2202,26 @@ chat-modal.js / chat-popup.js
 3. POST отдаёт `{message_id}`. Фронт поллит `GET /messages/{message_id}` до терминального статуса.
 4. Фоновый `AgentChannelPoller` поллит шину; на ответ агента `AgentChannelService.try_finalize` маппит ответ в блоки (`map_answer_to_blocks`), финализирует черновик (`status='complete'`) **и сам закрывает вопрос в шине** (`set_status(..., 'complete'|'error')`) — AW source-of-truth освобождения слота лимита, не полагается на то, что внешний агент проставил терминальный `status` (он мог выставить только `reply_to`). По истечении `ANSWER_TIMEOUT_SEC` — `mark_timeout` (`status='failed'`).
 
-**Bus-таблица `chat_agent_messages_bus`** (`app/domains/chat/migrations/{postgresql,greenplum}/schema.sql`):
+**Bus-таблица `chat_agent_messages_bus`** — структуру задаёт и таблицей владеет сторона внешнего агента; блок в `app/domains/chat/migrations/{postgresql,greenplum}/schema.sql` — лишь dev-имитация её фактической структуры. Отдельной колонки `conversation_id` в шине НЕТ:
 
 | Колонка | Назначение |
 |---|---|
-| `id` | uid сообщения шины (VARCHAR(36)) |
-| `chat_id` | ключ распределения; GP: PK `(id, chat_id)`, `DISTRIBUTED BY (chat_id)` |
-| `user_id` / `conversation_id` | автор / беседа |
-| `role` | `CHECK (role IN ('user','assistant','tool'))`. `tool` разрешена схемой, приложением не обрабатывается |
+| `id` | UUID, uid одного сообщения шины (его же хранит `chat_messages.agent_ref`); GP-имитация: PK нет, `DISTRIBUTED BY (chat_id)` |
+| `chat_id` | TEXT, uid треда (= `chat_messages.conversation_id`) |
+| `user_id` | TEXT, автор |
+| `role` | `user` / `assistant` / `tool` (`tool` разрешена протоколом, приложением не обрабатывается; CHECK'ов у таблицы нет) |
 | `content` | текст |
 | `media` / `metadata` / `buttons` | JSONB; `metadata.thinking` → reasoning-блок |
-| `reply_to` | uid вопроса, на который отвечает агент |
-| `status` | `CHECK (status IN ('pending','in_progress','complete','error','timeout'))` |
-| `created_at` / `updated_at` | — |
+| `reply_to` | UUID, id строки-ответа; агент проставляет его на строке-вопросе — сигнал «ответ готов» |
+| `status` | `pending` / `in_progress` / `complete` / `error` / `timeout` |
+| `created_at` / `updated_at` | timestamptz NOT NULL; DEFAULT'ов нет — AW передаёт явно |
 
-Связь чат → шина: `chat_messages.agent_ref VARCHAR(36)` хранит uid вопроса в шине.
+Связь чат → шина: `chat_messages.agent_ref VARCHAR(36)` хранит id вопроса в шине. `AgentMessageRepository._parse_row` нормализует uuid-значения `id`/`reply_to` в `str`.
 
 **Архитектурные ограничения:**
 
 - **Polling-only**, без LISTEN/NOTIFY и постоянных соединений (между AW и агент-сервисом нет прямой сети — оба общаются только через БД).
-- **Greenplum-first**: схема DDL построена под GP (VARCHAR(36) для id, `{SCHEMA}.{PREFIX}` placeholders, `DISTRIBUTED BY (chat_id)`).
+- **Структура шины — внешний контракт**: типы uuid/text/timestamptz задаёт владелец-агент; наша конвенция VARCHAR(36) к шине не применяется (dev-имитация зеркалит прод, чтобы ловить те же type-ошибки).
 - **Poller не держит conn в sleep**: коннект берётся только на время `_tick`. `reconcile()` восстанавливает подписки из streaming-черновиков после рестарта uvicorn.
 - **Лимит параллельных запросов**: `AgentMessageRepository.count_active_for_user` ≥ `CHAT__MAX_PARALLEL_STREAMS_PER_USER` (default 3) → `submit` бросает `ChatLimitError` до записей → HTTP 422.
 - **Retention** — задача администратора (в приложении НЕ реализован).
@@ -2237,7 +2237,7 @@ chat-modal.js / chat-popup.js
 
 #### Шпаргалка по имитации агента
 
-Полный SQL — в `docs/integrations/external-agent-imitation.sql` (DBeaver/psql), уже обновлён под единую таблицу `chat_agent_messages_bus`. Минимум: найти черновик-вопрос пользователя в `chat_agent_messages_bus` (`role='user'`, `status='pending'`), затем вставить ответ агента (`role='assistant'`, `reply_to=<uid вопроса>`, `content`/`metadata.thinking`/`buttons`/`media` по необходимости) и перевести вопрос в `status='complete'`. `AgentChannelPoller` подхватит ответ и финализирует черновик `chat_messages`.
+Полный SQL — в `docs/integrations/external-agent-imitation.sql` (DBeaver/psql), уже обновлён под фактическую структуру шины (uid сообщения — колонка `id`). Минимум: найти строку-вопрос пользователя в `chat_agent_messages_bus` (`role='user'`, `status='pending'`), вставить ответ агента (`role='assistant'`, новый `id`, `content`/`metadata.thinking`/`buttons`/`media` по необходимости), затем на строке-вопросе выставить `reply_to=<id ответа>` и `status='complete'`. `AgentChannelPoller` подхватит ответ и финализирует черновик `chat_messages`.
 
 #### Когда «у меня не работает»
 
@@ -3615,24 +3615,23 @@ class ToolCallAccumulator:
 
 **Именование (важно).** Имя bus-таблицы задаётся `CHAT__AGENT_CHANNEL__TABLE_NAME` (дефолт `chat_agent_messages_bus`), схема — `CHAT__AGENT_CHANNEL__SCHEMA_NAME`. В отличие от прочих таблиц приложения, к шине **не** клеится `DATABASE__TABLE_PREFIX`: имя задаётся настройкой **целиком**. В миграции шина именуется плейсхолдером `{BUS_TABLE}` (без `{PREFIX}`), а `AgentMessageRepository` квалифицирует имя через `qualify_table_name` (схема без префикса), не `get_table_name`. Причина — шина общая с внешним агентом, её именование вне префикс-схемы AW. Нужен префикс — вписать его прямо в `CHAT__AGENT_CHANNEL__TABLE_NAME` (например, `t_db_oarb_audit_act_chat_agent_messages_bus`, чтобы сохранить старое имя при апгрейде с версии, где префикс клеился).
 
-**Структура `chat_agent_messages_bus`** (`app/domains/chat/migrations/{postgresql,greenplum}/schema.sql`):
+**Структура `chat_agent_messages_bus`.** Таблицей владеет и её структуру задаёт сторона внешнего агента; блок в `app/domains/chat/migrations/{postgresql,greenplum}/schema.sql` — dev-имитация фактической структуры (типы — как у владельца, наша конвенция VARCHAR(36) сознательно не применяется). CHECK'ов и DEFAULT'ов у таблицы нет; отдельной колонки `conversation_id` — тоже:
 
 | Колонка | Тип | Назначение |
 |---|---|---|
-| `id` | VARCHAR(36) | uid сообщения шины |
-| `chat_id` | VARCHAR(36) | ключ распределения; GP: `DISTRIBUTED BY (chat_id)`, PK `(id, chat_id)` |
-| `user_id` | VARCHAR | автор |
-| `conversation_id` | VARCHAR(36) | беседа чата |
-| `role` | VARCHAR | `CHECK (role IN ('user','assistant','tool'))`. Роль `tool` разрешена схемой, но приложением не обрабатывается |
-| `content` | TEXT | текст сообщения |
+| `id` | UUID | uid одного сообщения шины (его же хранит `chat_messages.agent_ref`); GP-имитация: PK нет, `DISTRIBUTED BY (chat_id)` |
+| `chat_id` | TEXT | uid треда (= `chat_messages.conversation_id`) |
+| `user_id` | TEXT | автор |
+| `role` | TEXT | `user` / `assistant` / `tool`. Роль `tool` разрешена протоколом, но приложением не обрабатывается |
+| `content` | TEXT | текст сообщения (NOT NULL) |
 | `media` | JSONB | вложения (image/file) |
 | `metadata` | JSONB | служебные поля; `metadata.thinking` → reasoning-блок |
-| `reply_to` | VARCHAR(36) | ссылка на вопрос, на который отвечает агент |
+| `reply_to` | UUID | id строки-ответа; агент проставляет его на строке-вопросе — сигнал «ответ готов» |
 | `buttons` | JSONB | кнопки (`action_id` → client-action) |
-| `status` | VARCHAR | `CHECK (status IN ('pending','in_progress','complete','error','timeout'))` |
-| `created_at` / `updated_at` | TIMESTAMP | — |
+| `status` | TEXT | `pending` / `in_progress` / `complete` / `error` / `timeout` |
+| `created_at` / `updated_at` | TIMESTAMPTZ | NOT NULL; DEFAULT'ов нет — AW передаёт явно в INSERT/UPDATE |
 
-Связь чат → шина: ассистент-черновик в `chat_messages` хранит колонку `agent_ref VARCHAR(36)` — uid вопроса в `chat_agent_messages_bus`. По нему `AgentChannelPoller`/`try_finalize` находят ответ и финализируют черновик.
+Связь чат → шина: ассистент-черновик в `chat_messages` хранит колонку `agent_ref VARCHAR(36)` — id вопроса в `chat_agent_messages_bus`. По нему `AgentChannelPoller`/`try_finalize` находят ответ и финализируют черновик. `AgentMessageRepository._parse_row` нормализует uuid-значения `id`/`reply_to` в `str` — остальной код работает со строками.
 
 **`map_answer_to_blocks`** (`agent_channel.py`) превращает строку-ответ шины в блоки сообщения в фиксированном порядке:
 

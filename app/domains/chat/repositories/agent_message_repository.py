@@ -2,6 +2,7 @@
 
 import json
 import logging
+import uuid
 
 import asyncpg
 
@@ -13,9 +14,21 @@ logger = logging.getLogger("audit_workstation.domains.chat.repo.agent_message")
 # Поля, хранящиеся как JSONB и требующие десериализации при чтении.
 _JSONB_FIELDS = ("media", "metadata", "buttons")
 
+# Поля типа UUID на стороне владельца таблицы (внешний агент). asyncpg отдаёт
+# их объектами uuid.UUID — нормализуем в str, чтобы остальной код (agent_ref,
+# block_id, сравнения с question_uid) работал со строками.
+_UUID_FIELDS = ("id", "reply_to")
+
 
 class AgentMessageRepository(BaseRepository):
-    """CRUD-операции с bus-таблицей chat_agent_messages_bus."""
+    """CRUD-операции с bus-таблицей chat_agent_messages_bus.
+
+    Структуру таблицы задаёт сторона внешнего агента (владелец):
+    ``id`` (UUID) — uid одного сообщения шины (на него ссылается ``reply_to``
+    и его же хранит ``chat_messages.agent_ref``); ``chat_id`` — uid треда
+    (= ``chat_messages.conversation_id``). Отдельной колонки ``conversation_id``
+    в шине НЕТ.
+    """
 
     def __init__(
         self,
@@ -34,7 +47,7 @@ class AgentMessageRepository(BaseRepository):
 
     @staticmethod
     def _parse_row(row) -> dict | None:
-        """Парсит JSONB-поля из строк в Python-объекты."""
+        """Парсит JSONB-поля в Python-объекты, UUID-поля — в str."""
         if row is None:
             return None
         result = dict(row)
@@ -45,6 +58,10 @@ class AgentMessageRepository(BaseRepository):
                     result[key] = json.loads(val)
                 except json.JSONDecodeError:
                     result[key] = None
+        for key in _UUID_FIELDS:
+            val = result.get(key)
+            if isinstance(val, uuid.UUID):
+                result[key] = str(val)
         return result
 
     async def insert_question(
@@ -53,61 +70,66 @@ class AgentMessageRepository(BaseRepository):
         id: str,
         chat_id: str,
         user_id: str,
-        conversation_id: str,
         content: str,
         metadata: dict | None = None,
         media: list | None = None,
     ) -> dict:
         """Вставляет строку-вопрос от AW к агенту со статусом 'pending'.
 
+        ``id`` — uid сообщения-вопроса (его же хранит ``chat_messages.agent_ref``).
+        created_at/updated_at передаются явно: таблица чужая, DEFAULT'ы на её
+        стороне не гарантированы, а колонки NOT NULL.
+
         Возвращает вставленную запись со всеми колонками.
         """
         row = await self.conn.fetchrow(
             f"""
             INSERT INTO {self.table}
-                (id, chat_id, user_id, conversation_id, role, content,
-                 media, metadata, status)
-            VALUES ($1, $2, $3, $4, 'user', $5, $6::jsonb, $7::jsonb, 'pending')
+                (id, chat_id, user_id, role, content, media, metadata,
+                 status, created_at, updated_at)
+            VALUES ($1, $2, $3, 'user', $4, $5::jsonb, $6::jsonb,
+                    'pending', CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
             RETURNING *
             """,
             id,
             chat_id,
             user_id,
-            conversation_id,
             content,
             json.dumps(media, ensure_ascii=False) if media is not None else None,
             json.dumps(metadata or {}, ensure_ascii=False),
         )
         return self._parse_row(row)
 
-    async def get_by_uid(self, conversation_id: str) -> dict | None:
-        """Возвращает строку по conversation_id (uid одного сообщения)."""
+    async def get_by_uid(self, uid: str) -> dict | None:
+        """Возвращает строку по id (uid одного сообщения шины)."""
         row = await self.conn.fetchrow(
-            f"SELECT * FROM {self.table} WHERE conversation_id = $1",
-            conversation_id,
+            f"SELECT * FROM {self.table} WHERE id = $1",
+            uid,
         )
         return self._parse_row(row)
 
     async def get_questions(self, uids: list[str]) -> list[dict]:
-        """Возвращает строки по списку conversation_id (uid сообщений).
+        """Возвращает строки по списку id (uid сообщений).
 
         Пустой список uids → возвращает [] без обращения к БД.
+        ``ANY($1)`` без явного каста: тип элементов массива Postgres выводит
+        из типа колонки ``id`` (uuid на проде, что угодно на dev-стенде).
         """
         if not uids:
             return []
         rows = await self.conn.fetch(
-            f"SELECT * FROM {self.table} WHERE conversation_id = ANY($1::varchar[])",
+            f"SELECT * FROM {self.table} WHERE id = ANY($1)",
             uids,
         )
         return [self._parse_row(r) for r in rows]
 
-    async def set_status(self, *, conversation_id: str, status: str) -> None:
-        """Обновляет статус строки по conversation_id."""
+    async def set_status(self, *, uid: str, status: str) -> None:
+        """Обновляет статус строки по id (uid сообщения)."""
         await self.conn.execute(
             f"UPDATE {self.table} SET status = $1, updated_at = CURRENT_TIMESTAMP "
-            f"WHERE conversation_id = $2",
+            f"WHERE id = $2",
             status,
-            conversation_id,
+            uid,
         )
 
     async def count_active_for_user(self, user_id: str) -> int:

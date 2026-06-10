@@ -62,15 +62,13 @@ def _make_finalizable_service(mock_conn, settings, *, question_user_id="user1"):
     """Возвращает (svc, fake_agent_repo, fake_msg_repo) с готовым к финализации
     ответом агента (status='complete', без ошибки)."""
     question = {
-        "id": "q-1",
-        "conversation_id": "q-uid",
+        "id": "q-uid",
         "user_id": question_user_id,
         "status": "complete",
         "reply_to": "a-uid",
     }
     answer = {
-        "id": "a-1",
-        "conversation_id": "a-uid",
+        "id": "a-uid",
         "role": "assistant",
         "content": "Ответ от агента",
         "metadata": {},
@@ -158,7 +156,7 @@ class TestChatNotificationsProducer:
         assert result == "done"
         fake_msg_repo.finalize.assert_called_once()
         fake_agent_repo.set_status.assert_awaited_once_with(
-            conversation_id="q-uid", status="complete",
+            uid="q-uid", status="complete",
         )
 
     async def test_push_failure_does_not_break_finalize(
@@ -187,15 +185,13 @@ class TestChatNotificationsProducer:
         """Ветка ошибки: после mark_failed эмитится уведомление severity='error'
         с заголовком «Ошибка ответа базы знаний»."""
         question = {
-            "id": "q-2",
-            "conversation_id": "q-uid",
+            "id": "q-uid",
             "user_id": "asker-7",
             "status": "complete",
             "reply_to": "a-uid",
         }
         answer = {
-            "id": "a-2",
-            "conversation_id": "a-uid",
+            "id": "a-uid",
             "role": "assistant",
             "content": "Ошибка в агенте",
             "metadata": {},
@@ -277,7 +273,7 @@ class TestChatNotificationsProducer:
         push_mock.assert_not_awaited()
         # set_status всё равно вызывается (закрытие вопроса идемпотентно).
         fake_agent_repo.set_status.assert_awaited_once_with(
-            conversation_id="q-uid", status="complete",
+            uid="q-uid", status="complete",
         )
 
     async def test_no_push_when_mark_failed_idempotent_noop(
@@ -287,15 +283,13 @@ class TestChatNotificationsProducer:
         уведомление об ошибке НЕ эмитим: эмиссия в ветке ошибки тоже гейтится
         возвратом mark_failed."""
         question = {
-            "id": "q-9",
-            "conversation_id": "q-uid",
+            "id": "q-uid",
             "user_id": "asker-9",
             "status": "complete",
             "reply_to": "a-uid",
         }
         answer = {
-            "id": "a-9",
-            "conversation_id": "a-uid",
+            "id": "a-uid",
             "role": "assistant",
             "content": "Ошибка в агенте",
             "metadata": {},
@@ -328,5 +322,5 @@ class TestChatNotificationsProducer:
         fake_msg_repo.mark_failed.assert_called_once()
         push_mock.assert_not_awaited()
         fake_agent_repo.set_status.assert_awaited_once_with(
-            conversation_id="q-uid", status="error",
+            uid="q-uid", status="error",
         )

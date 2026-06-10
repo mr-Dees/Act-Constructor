@@ -419,46 +419,54 @@ class TestGreenplumSchemaCompatibility:
                 f"всё ещё в схеме"
             )
 
-    def test_chat_agent_messages_bus_gp_distribution_and_pk(self):
-        """chat_agent_messages_bus в GP-схеме имеет DISTRIBUTED BY (chat_id) ⊆ PRIMARY KEY (id, chat_id)."""
-        schema_path = (
-            Path(__file__).parent.parent
-            / "app" / "domains" / "chat" / "migrations" / "greenplum" / "schema.sql"
-        )
-        content = schema_path.read_text(encoding="utf-8")
-        stmts = DatabaseAdapter._split_sql_statements(content)
+    def test_chat_agent_messages_bus_mirrors_external_owner_structure(self):
+        """Bus-таблица в обеих схемах зеркалит фактическую структуру владельца (агента).
 
-        create_stmt = None
-        for raw in stmts:
-            cleaned = re.sub(r'--[^\n]*', '', raw)
-            if (
-                re.search(r'\bCREATE\s+TABLE\b', cleaned, re.IGNORECASE)
-                and "{BUS_TABLE}" in cleaned
-            ):
-                create_stmt = cleaned
-                break
+        Колонки conversation_id в шине НЕТ (uid сообщения — колонка id типа
+        uuid); GP-имитация — DISTRIBUTED BY (chat_id) без PRIMARY KEY
+        (у владельца id nullable). Регрессия на возврат старой структуры,
+        ронявшей запросы «column id does not exist» на проде.
+        """
+        base = Path(__file__).parent.parent / "app" / "domains" / "chat" / "migrations"
+        for db_type in ("postgresql", "greenplum"):
+            content = (base / db_type / "schema.sql").read_text(encoding="utf-8")
+            stmts = DatabaseAdapter._split_sql_statements(content)
 
-        assert create_stmt is not None, (
-            "GP-схема chat: CREATE TABLE chat_agent_messages_bus не найдено"
-        )
+            create_stmt = None
+            for raw in stmts:
+                cleaned = re.sub(r'--[^\n]*', '', raw)
+                if (
+                    re.search(r'\bCREATE\s+TABLE\b', cleaned, re.IGNORECASE)
+                    and "{BUS_TABLE}" in cleaned
+                ):
+                    create_stmt = cleaned
+                    break
 
-        # DISTRIBUTED BY (chat_id) присутствует
-        assert re.search(
-            r'DISTRIBUTED\s+BY\s*\(\s*chat_id\s*\)', create_stmt, re.IGNORECASE
-        ), "DISTRIBUTED BY (chat_id) не найден в CREATE TABLE chat_agent_messages_bus"
+            assert create_stmt is not None, (
+                f"{db_type}-схема chat: CREATE TABLE chat_agent_messages_bus не найдено"
+            )
 
-        # PRIMARY KEY содержит и id, и chat_id
-        pk_match = re.search(r'PRIMARY\s+KEY\s*\(([^)]+)\)', create_stmt, re.IGNORECASE)
-        assert pk_match is not None, (
-            "PRIMARY KEY не найден в CREATE TABLE chat_agent_messages_bus"
-        )
-        pk_cols = {c.strip().lower() for c in pk_match.group(1).split(',')}
-        assert 'chat_id' in pk_cols, (
-            f"chat_id отсутствует в PRIMARY KEY chat_agent_messages_bus: {pk_cols}"
-        )
-        assert 'id' in pk_cols, (
-            f"id отсутствует в PRIMARY KEY chat_agent_messages_bus: {pk_cols}"
-        )
+            assert "conversation_id" not in create_stmt, (
+                f"{db_type}/schema.sql: в bus-таблице не должно быть conversation_id "
+                f"(uid сообщения — колонка id; структуру задаёт владелец-агент)"
+            )
+            assert re.search(r'\bid\s+UUID\b', create_stmt, re.IGNORECASE), (
+                f"{db_type}/schema.sql: колонка id UUID не найдена в bus-таблице"
+            )
+            assert re.search(r'\breply_to\s+UUID\b', create_stmt, re.IGNORECASE), (
+                f"{db_type}/schema.sql: колонка reply_to UUID не найдена в bus-таблице"
+            )
+            assert re.search(
+                r'PRIMARY\s+KEY', create_stmt, re.IGNORECASE
+            ) is None, (
+                f"{db_type}/schema.sql: у bus-таблицы не должно быть PRIMARY KEY "
+                f"(у владельца id nullable)"
+            )
+
+            if db_type == "greenplum":
+                assert re.search(
+                    r'DISTRIBUTED\s+BY\s*\(\s*chat_id\s*\)', create_stmt, re.IGNORECASE
+                ), "DISTRIBUTED BY (chat_id) не найден в CREATE TABLE chat_agent_messages_bus"
 
     def test_chat_agent_messages_bus_name_is_prefix_free_placeholder(self):
         """Bus-таблица именуется плейсхолдером {BUS_TABLE} без {PREFIX}.
