@@ -566,6 +566,86 @@ class TestTreeNormalization:
         assert "garbage" in raw
 
 
+# ── M.13: кросс-валидатор дерево ↔ словари ──
+
+
+class TestTreeDictCrossValidation:
+    """Висячая ссылка из дерева на отсутствующую запись словаря → 422."""
+
+    @staticmethod
+    def _tree_with_ref(ref_field: str, ref_value: str, node_type: str) -> dict:
+        return {
+            "id": "root", "label": "Акт",
+            "children": [
+                {"id": "n1", "label": "Узел", "type": node_type,
+                 ref_field: ref_value, "children": []},
+            ],
+        }
+
+    def test_dangling_table_ref_rejected(self):
+        with pytest.raises(ValidationError, match="несуществующую таблицу"):
+            ActDataSchema(tree=self._tree_with_ref("tableId", "t_ghost", "table"))
+
+    def test_dangling_textblock_ref_rejected(self):
+        with pytest.raises(ValidationError, match="несуществующий текстовый блок"):
+            ActDataSchema(
+                tree=self._tree_with_ref("textBlockId", "tb_ghost", "textblock"),
+            )
+
+    def test_dangling_violation_ref_rejected(self):
+        with pytest.raises(ValidationError, match="несуществующее нарушение"):
+            ActDataSchema(
+                tree=self._tree_with_ref("violationId", "v_ghost", "violation"),
+            )
+
+    def test_error_message_names_node_and_target(self):
+        """Сообщение называет и узел, и недостающую запись."""
+        with pytest.raises(ValidationError, match=r"n1.+t_ghost"):
+            ActDataSchema(tree=self._tree_with_ref("tableId", "t_ghost", "table"))
+
+    def test_valid_refs_pass(self):
+        d = ActDataSchema(
+            tree={
+                "id": "root", "label": "Акт",
+                "children": [
+                    {"id": "n1", "label": "Таблица", "type": "table",
+                     "tableId": "t1", "children": []},
+                    {"id": "n2", "label": "ТБ", "type": "textblock",
+                     "textBlockId": "tb1", "children": []},
+                ],
+            },
+            tables={"t1": TableSchema(id="t1", nodeId="n1")},
+            textBlocks={"tb1": TextBlockSchema(id="tb1", nodeId="n2")},
+        )
+        assert d.tree["children"][0]["tableId"] == "t1"
+
+    def test_orphan_dict_entry_allowed(self):
+        """Обратное направление — запись словаря без узла — НЕ ошибка.
+
+        Такие записи отбрасывает orphan-фильтр репозитория при сохранении
+        (pbe-4); отклонять весь PUT из-за них нельзя.
+        """
+        d = ActDataSchema(
+            tree={"id": "root", "label": "Акт", "children": []},
+            tables={"t_orphan": TableSchema(id="t_orphan", nodeId="ghost")},
+        )
+        assert "t_orphan" in d.tables
+
+    def test_dangling_ref_in_nested_node_rejected(self):
+        """Валидатор обходит дерево рекурсивно, а не только верхний уровень."""
+        tree = {
+            "id": "root", "label": "Акт",
+            "children": [
+                {"id": "s1", "label": "Раздел", "type": "item", "children": [
+                    {"id": "n9", "label": "Нарушение", "type": "violation",
+                     "violationId": "v_missing", "children": []},
+                ]},
+            ],
+        }
+        with pytest.raises(ValidationError, match="v_missing"):
+            ActDataSchema(tree=tree)
+
+
 # ── MetricItem ──
 
 

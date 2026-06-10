@@ -79,7 +79,9 @@ class TestActDataSchemaTreeValidation:
                     }
                 ],
             },
-            "tables": {},
+            # Запись словаря обязана существовать: кросс-валидатор M.13
+            # отбивает висячие ссылки tableId из дерева.
+            "tables": {"t1": {"id": "t1", "nodeId": "n1"}},
         }
         data = ActDataSchema.model_validate(payload)
         # Дерево по-прежнему доступно (тип не сломан для downstream-консьюмеров)

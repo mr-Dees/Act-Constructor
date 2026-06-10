@@ -578,6 +578,36 @@ class ActDataSchema(BaseModel):
         """
         return ActItemSchema.model_validate(v).model_dump()
 
+    @model_validator(mode="after")
+    def validate_tree_dict_refs(self) -> "ActDataSchema":
+        """
+        Кросс-валидатор дерево ↔ словари (M.13).
+
+        Каждая ссылка узла (tableId/textBlockId/violationId) обязана указывать
+        на существующую запись словаря — висячая ссылка означает потерянный
+        контент и отбивается 422 с указанием узла и недостающей записи.
+
+        Обратное направление НЕ проверяется: запись словаря без узла в дереве —
+        не ошибка запроса, такие сироты отбрасывает orphan-фильтр репозитория
+        при сохранении (pbe-4).
+        """
+        ref_checks = (
+            ("tableId", self.tables, "несуществующую таблицу"),
+            ("textBlockId", self.textBlocks, "несуществующий текстовый блок"),
+            ("violationId", self.violations, "несуществующее нарушение"),
+        )
+        stack = [self.tree] if self.tree else []
+        while stack:
+            node = stack.pop()
+            for ref_field, registry, target_name in ref_checks:
+                ref = node.get(ref_field)
+                if ref and ref not in registry:
+                    raise ValueError(
+                        f"Узел {node.get('id')} ссылается на {target_name} {ref}"
+                    )
+            stack.extend(node.get("children") or [])
+        return self
+
 
 class ActSaveResponse(BaseModel):
     """

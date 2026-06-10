@@ -282,6 +282,25 @@ class TestSaveActContent:
         assert resp.status_code == 422
         svc.save_content.assert_not_awaited()
 
+    def test_save_content_dangling_tree_ref_returns_422(self):
+        """M.13: узел дерева ссылается на отсутствующую таблицу → 422."""
+        svc = _make_content_service()
+        app = _build_app(content_service=svc)
+
+        payload = _valid_save_payload()
+        payload["tree"]["children"] = [
+            {"id": "n1", "label": "Таблица", "type": "table",
+             "tableId": "t_ghost", "children": []},
+        ]
+        # tables пуст — ссылка висячая
+
+        with TestClient(app) as client:
+            resp = client.put("/api/v1/acts/42/content", json=payload)
+
+        assert resp.status_code == 422
+        assert "t_ghost" in resp.text
+        svc.save_content.assert_not_awaited()
+
     def test_save_content_business_validation_error_returns_400(self):
         """ActValidationError из сервиса (например, глубина дерева) → 400."""
         svc = _make_content_service()
