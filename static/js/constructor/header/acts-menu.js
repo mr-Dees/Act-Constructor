@@ -418,7 +418,6 @@ export class ActsMenuManager {
             });
             if (confirmed) {
                 try {
-                    ItemsRenderer?.syncDataToState();
                     await APIClient.saveActContent(window.currentActId, { saveType: 'manual' });
                     Notifications.success('Изменения сохранены');
                 } catch (err) {

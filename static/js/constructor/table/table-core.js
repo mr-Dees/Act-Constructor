@@ -6,6 +6,7 @@
  */
 import { ContextMenuManager } from '../context-menu/context-menu-core.js';
 import { AppState } from '../state/state-core.js';
+import { applyCellInput, cancelCellInput } from './cell-write-through.js';
 import { TableCellsOperations } from './table-cells-operations.js';
 import { TableSizes } from './table-sizes.js';
 import { Notifications } from '../../shared/notifications.js';
@@ -18,6 +19,9 @@ export class TableManager {
         this.cellsOps = new TableCellsOperations(this);
         // Модуль изменения размеров (ширина колонок, высота строк)
         this.sizes = new TableSizes(this);
+        // Исходные значения активных сессий редактирования ячеек —
+        // для отката состояния при отмене (Escape). Ключ — элемент textarea.
+        this._cellEditOriginals = new WeakMap();
 
         // Инициализация глобальных обработчиков
         this.initGlobalHandlers();
@@ -126,6 +130,41 @@ export class TableManager {
 
                 ContextMenuManager.show(e.clientX, e.clientY, null, 'cell');
             });
+
+            // Write-through ввода: каждое изменение в textarea редактируемой
+            // ячейки сразу пишется в состояние (Proxy пометит акт несохранённым).
+            // Коммит по blur/Enter (finishEditing) поверх запишет то же значение с trim.
+            cell.addEventListener('input', (e) => {
+                const textarea = e.target;
+                if (!textarea || textarea.tagName !== 'TEXTAREA') return;
+                applyCellInput(
+                    AppState.tables,
+                    cell.dataset.tableId,
+                    parseInt(cell.dataset.row, 10),
+                    parseInt(cell.dataset.col, 10),
+                    textarea.value,
+                    this._cellEditOriginals,
+                    textarea
+                );
+            });
+
+            // Отмена редактирования (Escape): откатываем состояние к значению
+            // на момент начала ввода. Capture-фаза — штатный keydown-обработчик
+            // textarea гасит Escape (stopPropagation) после отката DOM, поэтому
+            // ловим событие раньше него.
+            cell.addEventListener('keydown', (e) => {
+                if (e.key !== 'Escape') return;
+                const textarea = e.target;
+                if (!textarea || textarea.tagName !== 'TEXTAREA') return;
+                cancelCellInput(
+                    AppState.tables,
+                    cell.dataset.tableId,
+                    parseInt(cell.dataset.row, 10),
+                    parseInt(cell.dataset.col, 10),
+                    this._cellEditOriginals,
+                    textarea
+                );
+            }, true);
         });
 
         // Обработка ручек изменения ширины колонок

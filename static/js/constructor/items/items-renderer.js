@@ -785,44 +785,6 @@ export class ItemsRenderer {
         return null;
     }
 
-    /**
-     * Синхронизация данных из DOM обратно в глобальное состояние AppState.
-     * Источник истины — AppState: текстблоки и нарушения пишут в состояние
-     * live-обработчиками (input/blur), здесь дочитываются только таблицы.
-     * Вызывается перед сохранением или экспортом документа.
-     */
-    static syncDataToState() {
-        this._syncTables();
-    }
-
-    /**
-     * Синхронизация содержимого всех таблиц из DOM в AppState.
-     * Обновляет текст ячеек в матричной структуре grid.
-     * @private
-     */
-    static _syncTables() {
-        document.querySelectorAll('.table-section').forEach(section => {
-            const tableId = section.dataset.tableId;
-            const table = AppState.tables[tableId];
-            if (!table) return;
-
-            const tableEl = section.querySelector('.editable-table');
-            if (!tableEl) return;
-
-            // Обновляем содержимое ячеек
-            tableEl.querySelectorAll('tr').forEach(tr => {
-                tr.querySelectorAll('td, th').forEach(cell => {
-                    const row = parseInt(cell.dataset.row);
-                    const col = parseInt(cell.dataset.col);
-
-                    const cellData = table.grid?.[row]?.[col];
-                    if (cellData && !cellData.isSpanned) {
-                        cellData.content = cell.textContent.trim();
-                    }
-                });
-            });
-        });
-    }
 }
 
 // Подписчик на 'node:tb-changed' — обновляет бейджи ТБ на шаге 2 без полного
