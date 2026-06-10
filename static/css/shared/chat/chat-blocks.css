@@ -27,6 +27,44 @@
     font-size: var(--font-size-xs);
 }
 
+/* ── Типографика markdown внутри сообщений (.chat-md) ─────────────────── */
+.chat-md { overflow-wrap: break-word; min-width: 0; }
+.chat-md > :first-child { margin-top: 0; }
+.chat-md > :last-child { margin-bottom: 0; }
+.chat-md p { margin: 0.5em 0; }
+.chat-md ul, .chat-md ol { margin: 0.5em 0; padding-left: 1.5em; }
+.chat-md li + li { margin-top: 0.25em; }
+.chat-md h1, .chat-md h2 { font-size: 1.15em; margin: 0.75em 0 0.4em; }
+.chat-md h3, .chat-md h4, .chat-md h5, .chat-md h6 { font-size: 1.05em; margin: 0.6em 0 0.3em; }
+.chat-md blockquote {
+    margin: 0.5em 0; padding-left: 0.75em;
+    border-left: 3px solid var(--border-light);
+    color: var(--text-secondary);
+}
+.chat-md hr { border: none; border-top: 1px solid var(--border-light); margin: 0.75em 0; }
+.chat-md a { overflow-wrap: anywhere; }
+.chat-md pre {
+    max-width: 100%; overflow-x: auto;
+    white-space: pre; tab-size: 4;
+    background: var(--bg-tertiary);
+    border: 1px solid var(--border-light);
+    border-radius: var(--radius-sm);
+    padding: 0.75em; margin: 0.5em 0;
+    font-family: var(--font-family-mono);
+    font-size: var(--font-size-xs);
+}
+.chat-md pre code { background: none; padding: 0; border-radius: 0; }
+.chat-md table {
+    display: block; max-width: 100%; overflow-x: auto;
+    border-collapse: collapse; margin: 0.5em 0;
+}
+.chat-md th, .chat-md td {
+    border: 1px solid var(--border-light);
+    padding: 0.3em 0.6em;
+    overflow-wrap: anywhere;
+}
+.chat-md th { background: var(--bg-tertiary); }
+
 /* ============================================
    Блок кода
    ============================================ */
