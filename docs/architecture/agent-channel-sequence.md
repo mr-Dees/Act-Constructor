@@ -18,13 +18,15 @@
 **Bus-таблица `chat_agent_messages_bus`** (структуру задаёт и таблицей владеет
 сторона внешнего агента; отдельной колонки `conversation_id` нет):
 `id` UUID — uid одного сообщения шины, `chat_id` TEXT — uid треда, `user_id` TEXT,
-`role` (`user`/`assistant`/`tool`), `content` TEXT NOT NULL, `media` JSONB,
-`metadata` JSONB, `reply_to` UUID — **на строке-ответе**, ссылается на id вопроса,
-`buttons` JSONB, `status` (`pending`/`in_progress`/`completed`/`error`; на
-ПРОМ-таблице CHECK владельца с неизвестным полным списком — записи статуса от AW
-best-effort), `created_at`/`updated_at` TIMESTAMPTZ NOT NULL (DEFAULT'ов нет).
-GP-имитация: без PK, `DISTRIBUTED BY (chat_id)`. Роль `tool` разрешена
-протоколом, но приложением пока не обрабатывается.
+`role` (`user`/`assistant`/`system`, CHECK владельца), `content` TEXT NOT NULL,
+`media` JSONB, `metadata` JSONB (`metadata.reasoning` — стримящиеся рассуждения
+агента), `reply_to` UUID — **на строке-ответе**, ссылается на id вопроса,
+`buttons` JSONB, `status` (`pending`/`processing`/`completed`/`failed` — CHECK
+владельца, подтверждённая спека; записи статуса от AW best-effort),
+`created_at`/`updated_at` TIMESTAMPTZ NOT NULL (у владельца есть DEFAULT'ы,
+AW не полагается). GP-имитация: без PK, `DISTRIBUTED BY (chat_id)`. Роль
+`system` приложением не обрабатывается. Сообщения одного `chat_id` агент
+не обрабатывает параллельно.
 
 **Связь с чатом**: `chat_messages.agent_ref VARCHAR(36)` — ссылка из
 ассистент-сообщения (draft) на `id` строки-вопроса в шине.
@@ -73,8 +75,8 @@ sequenceDiagram
         end
         Note over F: при status='complete'/'failed'<br/>рендер ответа целиком + «эффект печати»
     and внешний агент
-        EXT->>DB: UPDATE chat_agent_messages_bus вопроса<br/>status='in_progress'
-        EXT->>DB: INSERT chat_agent_messages_bus ответа<br/>(role='assistant', reply_to=question_uid,<br/>status='completed') + UPDATE вопроса status='completed'
+        EXT->>DB: UPDATE chat_agent_messages_bus вопроса<br/>status='processing' (claim)
+        EXT->>DB: INSERT chat_agent_messages_bus ответа<br/>(role='assistant', reply_to=question_uid),<br/>стримит reasoning-дельты в metadata.reasoning,<br/>пишет content и status='completed' + UPDATE вопроса status='completed'
     and поллер шины
         loop adaptive backoff (без удержания conn в sleep)
             POLL->>CS: try_finalize(assistant_message_id, question_uid)
@@ -101,9 +103,9 @@ sequenceDiagram
   опрашивает готовность.
 - **Таймаут**: при превышении `ANSWER_TIMEOUT_SEC` (600) поллер вызывает
   `mark_timeout` → draft → `failed` с error-блоком (`build_timeout_error_block`);
-  запись `status='timeout'` в шину best-effort (CHECK владельца может отклонить —
-  тогда строка остаётся `pending`, слот лимита освобождает отсечка по возрасту
-  в `count_active_for_user`).
+  вопрос в шине best-effort закрывается `status='failed'` (если CHECK владельца
+  отклонит — строка останется `pending`, слот лимита освобождает отсечка по
+  возрасту в `count_active_for_user`).
 - **Reconcile после рестарта**: поллер при старте поднимает подписки из
   streaming-черновиков `chat_messages` (`get_streaming_drafts`).
 
@@ -153,7 +155,7 @@ sequenceDiagram
 `AgentChannelService.map_answer_to_blocks(row)` собирает список блоков из
 строки-ответа в порядке:
 
-1. **reasoning** — из `metadata.thinking` (если есть);
+1. **reasoning** — из `metadata.reasoning`, legacy `metadata.thinking` (если есть);
 2. **text** — `content` (обрезается до `MAX_BLOCK_TEXT_SIZE` = 262144);
 3. **buttons** — из `buttons` JSONB, `block_id` шаблоном `{id}:btn:0`;
    `button_translator.translate_buttons` переводит `action_id` ChatTool в
@@ -180,12 +182,12 @@ sequenceDiagram
 | Случай | Что произойдёт |
 |---|---|
 | Поллер ещё не дошёл до `try_finalize`, агент уже ответил | GET вернёт `status='streaming'` (draft не финализирован); следующий тик поллера выполнит `finalize`, фронт увидит `complete` на очередном опросе |
-| Строка-ответ есть, но статус нетерминальный (`pending`/`in_progress`) | `try_finalize` возвращает `'pending'` — агент ещё пишет |
-| Ответ агента со `status='error'` | `try_finalize` → `mark_failed` с error-блоком из ответа + best-effort закрывает вопрос (`status='error'`), фронт показывает крестик |
-| Агент закрыл вопрос `status='error'` без строки-ответа | `try_finalize` → `mark_failed` со стандартным текстом «Внешний агент вернул ошибку» |
+| Строка-ответ есть, но статус нетерминальный (`pending`/`processing`) | `try_finalize` возвращает `'pending'` — агент ещё стримит ответ |
+| Ответ агента со `status='failed'` | `try_finalize` → `mark_failed` с error-блоком из ответа + best-effort закрывает вопрос (`status='failed'`), фронт показывает крестик |
+| Агент закрыл вопрос `status='failed'` без строки-ответа | `try_finalize` → `mark_failed` со стандартным текстом «Внешний агент вернул ошибку» |
 | Агент вставил ответ, но не закрыл вопрос терминальным `status` | `try_finalize` сам закрывает вопрос (`status='completed'`, best-effort) после финализации |
 | CHECK владельца отклонил наш статус (`CheckViolationError`) | `_set_status_safe` глотает с warning'ом — финализация/таймаут не ломаются, поллер не зацикливается |
-| Превышен `ANSWER_TIMEOUT_SEC` | `mark_timeout`: draft → `failed` (error-блок таймаута), запись `timeout` в шину best-effort |
+| Превышен `ANSWER_TIMEOUT_SEC` | `mark_timeout`: draft → `failed` (error-блок таймаута), вопрос в шине best-effort закрывается `failed` |
 | Поллер не инициализирован (lifespan-сбой) | Форвард **не выполняется**: вопрос в шину не пишется, draft не создаётся, сразу финализируется error-сообщение (`agent_unavailable`). Беседа остаётся удаляемой |
 | Рестарт uvicorn посреди ожидания | Поллер при старте поднимает подписки из streaming-черновиков `chat_messages` и продолжает опрос; draft остаётся виден в истории как `streaming` |
 | Пользователь отправил N форвардов параллельно | Каждый получает свой `message_id`/вопрос; при `>= max_parallel_streams_per_user` активных — `ChatLimitError` (422) до записей |

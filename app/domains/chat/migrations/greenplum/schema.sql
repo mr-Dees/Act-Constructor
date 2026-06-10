@@ -107,23 +107,28 @@ CREATE INDEX idx_{PREFIX}chat_files_conversation
 -- сознательно не применяется, чтобы dev ловил те же type-ошибки, что и прод).
 -- Имя таблицы — плейсхолдер {BUS_TABLE} (= CHAT__AGENT_CHANNEL__TABLE_NAME),
 -- БЕЗ {PREFIX}: app-префикс к шине не клеится, имя задаётся настройкой целиком.
--- id = uid одного сообщения шины (на него ссылается reply_to, его же хранит
--- chat_messages.agent_ref); chat_id = uid треда (= chat_messages.conversation_id).
--- Отдельной колонки conversation_id в шине НЕТ. role 'tool' разрешён
--- протоколом, но AW его пока не обрабатывает. PRIMARY KEY отсутствует
--- (у владельца id nullable) — DISTRIBUTED BY задаём явно. DEFAULT'ов нет —
--- приложение передаёт status/created_at/updated_at явно.
+-- id = uid одного сообщения шины (его же хранит chat_messages.agent_ref);
+-- chat_id = uid треда (= chat_messages.conversation_id). Отдельной колонки
+-- conversation_id в шине НЕТ. reply_to агент проставляет НА СТРОКЕ-ОТВЕТЕ —
+-- ссылка на id вопроса. PRIMARY KEY отсутствует (фактическая ПРОМ-таблица
+-- без PK) — DISTRIBUTED BY задаём явно. CHECK'и по role/status зеркалят
+-- подтверждённую спеку владельца (у него DEFAULT'ы тоже есть, но AW на них
+-- не полагается и передаёт status/created_at/updated_at явно).
 CREATE TABLE IF NOT EXISTS {BUS_SCHEMA_Q}{BUS_TABLE} (
     id          UUID,
     chat_id     TEXT,
     user_id     TEXT,
-    role        TEXT NOT NULL,
+    role        TEXT NOT NULL
+                CONSTRAINT check_chat_agent_messages_bus_role_values
+                CHECK (role IN ('user','assistant','system')),
     content     TEXT NOT NULL,
     media       JSONB,
     metadata    JSONB,
     reply_to    UUID,
     buttons     JSONB,
-    status      TEXT NOT NULL,
+    status      TEXT NOT NULL
+                CONSTRAINT check_chat_agent_messages_bus_status_values
+                CHECK (status IN ('pending','processing','completed','failed')),
     created_at  TIMESTAMP WITH TIME ZONE NOT NULL,
     updated_at  TIMESTAMP WITH TIME ZONE NOT NULL
 )

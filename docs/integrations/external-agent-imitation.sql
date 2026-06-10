@@ -29,29 +29,33 @@
 --    • reply_to (uuid) = ссылка на id ВОПРОСА; проставляется агентом
 --                        НА СТРОКЕ-ОТВЕТЕ — наличие ответа с
 --                        reply_to=<id вопроса> и есть сигнал «ответ готов»
---    • role            = 'user' (вопрос от AW) | 'assistant' (ответ агента) | 'tool'
+--    • role            = 'user' (вопрос от AW) | 'assistant' (ответ агента)
+--                        | 'system'; CHECK владельца роль 'tool' НЕ допускает
 --    • metadata        = JSONB: у вопроса ключи {mode, kb}; у ответа ключ
---                        {thinking} — все рассуждения агента
+--                        {reasoning} — рассуждения агента (стримятся дельтами,
+--                        пока пишется ответ; legacy-ключ {thinking} AW тоже
+--                        понимает)
 --    • buttons         = JSONB: массив [{action_id, label, params}]
 --    • media           = JSONB: [{file_id, filename, mime_type, file_size}]
---    • status          = pending | in_progress | completed | error
---    На ПРОМ-таблице владельца есть CHECK по status (полный список значений
---    у владельца; наблюдаемо разрешены 'pending'/'completed', ЗАПРЕЩЁН
---    'timeout') — записи статуса со стороны AW best-effort. DEFAULT'ов нет —
---    created_at/updated_at/status обе стороны передают явно.
+--    • status          = pending | processing | completed | failed
+--                        (CHECK владельца, подтверждённая спека; 'timeout'
+--                        и 'error' ЗАПРЕЩЕНЫ — записи статуса от AW best-effort)
+--    У владельца на колонках есть DEFAULT'ы (id, status, таймстемпы, JSONB),
+--    но AW на них не полагается и передаёт значения явно.
 --
---  ВАЖНО — поток данных:
+--  ВАЖНО — поток данных (подтверждённая спека агента):
 --    1. AW INSERT'ит строку-вопрос (role='user', status='pending').
---    2. Агент UPDATE SET status='in_progress' на строке-вопросе (опционально).
+--    2. Агент claim'ит вопрос: UPDATE SET status='processing'.
 --    3. Агент INSERT'ит строку-ответа (role='assistant', новый id,
---       reply_to=<id вопроса>, content, metadata.thinking,
---       опц. buttons/media, status='completed').
---    4. Агент UPDATE строки-вопроса: SET status='completed'.
---    5. AW поллит строку-ответ по reply_to=<id вопроса> (role='assistant')
---       и рисует ответ + рассуждения.
---    Таймаут 10 минут — AW сам закрывает зависший draft в chat_messages;
---    запись 'timeout' в шину best-effort (CHECK владельца может отклонить).
---    Шаги 3+4 можно объединить в одну транзакцию.
+--       reply_to=<id вопроса>) и стримит reasoning-дельты в metadata.reasoning,
+--       затем пишет финальный content и status='completed' (или 'failed').
+--    4. Агент UPDATE строки-вопроса: SET status='completed' (или 'failed').
+--    5. AW поллит строку-ответ по reply_to=<id вопроса> (role='assistant');
+--       финализирует, когда статус ответа терминальный.
+--    Сообщения одного chat_id агент НЕ обрабатывает параллельно — ждёт
+--    завершения активного, затем берёт следующее из той же беседы.
+--    Таймаут 10 минут — AW сам закрывает зависший draft в chat_messages
+--    и best-effort ставит вопросу status='failed'.
 --
 --  ВАЖНО — GP-ограничения (Greenplum 6.x = PostgreSQL 9.4):
 --    БЕЗ ON CONFLICT DO UPDATE, БЕЗ gen_random_uuid(), БЕЗ jsonb_set,
@@ -80,19 +84,19 @@ WHERE role = 'user'
 ORDER BY created_at DESC
 LIMIT 20;
 
--- СТАДИИ status на строке-вопросе:
+-- СТАДИИ status на строке-вопросе (CHECK владельца):
 --   pending     — вопрос вставлен AW, агент ещё не взял.
---   in_progress — агент взял (UPDATE после SELECT FOR UPDATE или просто UPDATE).
+--   processing  — агент claim'ит вопрос и работает над ответом.
 --   completed   — агент вставил ответ (reply_to=<id вопроса> НА ОТВЕТЕ) и закрыл вопрос.
---   error       — агент зафиксировал ошибку.
---   (timeout AW пишет best-effort — CHECK владельца на ПРОМе его отклоняет,
---    тогда строка остаётся в pending; слот лимита освобождает отсечка по возрасту).
+--   failed      — агент зафиксировал ошибку; этим же статусом AW best-effort
+--                 закрывает вопрос по таймауту (слот лимита дополнительно
+--                 страхует отсечка по возрасту в count_active_for_user).
 --
 -- Для наблюдения «всё, что в работе»:
 SELECT id, chat_id, content, status, created_at
 FROM chat_agent_messages_bus
 WHERE role = 'user'
-  AND status IN ('pending', 'in_progress')
+  AND status IN ('pending', 'processing')
 ORDER BY created_at DESC
 LIMIT 20;
 
@@ -131,7 +135,7 @@ BEGIN
          content, metadata, reply_to, status, created_at, updated_at)
     VALUES (a_id, v_chat, v_user, 'assistant',
             'КСО — корпоративная социальная ответственность. По регламенту 2024 года...',
-            '{"thinking": "Понимаю вопрос про КСО. Нашёл 3 релевантных документа, формирую ответ."}'::jsonb,
+            '{"reasoning": "Понимаю вопрос про КСО. Нашёл 3 релевантных документа, формирую ответ."}'::jsonb,
             q_id, 'completed', now(), now());
 
     -- Закрываем строку-вопрос:
@@ -142,7 +146,7 @@ BEGIN
 END$$;
 
 -- После блока: AW найдёт строку-ответ по reply_to = id вопроса
--- и отрендерит content + metadata.thinking.
+-- и отрендерит content + metadata.reasoning.
 
 
 -- ────────────────────────────────────────────────────────────────────────────
@@ -171,7 +175,7 @@ BEGIN
          content, metadata, buttons, reply_to, status, created_at, updated_at)
     VALUES (a_id, v_chat, v_user, 'assistant',
             'Найдены 2 связанных акта:',
-            '{"thinking": "Нашёл акты, формирую кнопки для навигации."}'::jsonb,
+            '{"reasoning": "Нашёл акты, формирую кнопки для навигации."}'::jsonb,
             '[{"action_id":"acts.open_act_page","label":"Открыть 11-11111","params":{"km_number":"11-11111"}},{"action_id":"acts.open_act_page","label":"Открыть 22-22222","params":{"km_number":"22-22222"}}]'::jsonb,
             q_id, 'completed', now(), now());
 
@@ -253,18 +257,18 @@ END$$;
 -- 4. СЦЕНАРИЙ "ошибка" (агент не смог получить ответ)
 -- ────────────────────────────────────────────────────────────────────────────
 --
--- Можно вставить строку-ответ со status='error' и текстом ошибки, либо просто
--- закрыть вопрос со status='error' без ответа — AW в обоих случаях покажет
+-- Можно вставить строку-ответ со status='failed' и текстом ошибки, либо просто
+-- закрыть вопрос со status='failed' без ответа — AW в обоих случаях покажет
 -- error-блок (во втором — стандартный текст «Внешний агент вернул ошибку»).
 -- Замени ТОЛЬКО <QUESTION_ID> (id строки-вопроса из запроса 0).
 
 -- Вариант А — только закрыть вопрос (AW покажет стандартное сообщение об ошибке):
 UPDATE chat_agent_messages_bus
-SET status     = 'error',
+SET status     = 'failed',
     updated_at = now()
 WHERE id = '<QUESTION_ID>';
 
--- Вариант Б — вставить строку-ответ со status='error' и текстом ошибки:
+-- Вариант Б — вставить строку-ответ со status='failed' и текстом ошибки:
 DO $$
 DECLARE
     q_id    uuid := '<QUESTION_ID>';                                       -- ← подставь сюда
@@ -281,10 +285,10 @@ BEGIN
          content, reply_to, status, created_at, updated_at)
     VALUES (a_id, v_chat, v_user, 'assistant',
             'Не удалось получить ответ: база знаний acts_default недоступна. Попробуйте позже.',
-            q_id, 'error', now(), now());
+            q_id, 'failed', now(), now());
 
     UPDATE chat_agent_messages_bus
-    SET status     = 'error',
+    SET status     = 'failed',
         updated_at = now()
     WHERE id = q_id;
 END$$;
@@ -294,13 +298,14 @@ END$$;
 -- 5. СЦЕНАРИЙ "агент думает" (промежуточный статус)
 -- ────────────────────────────────────────────────────────────────────────────
 --
--- Если хочется увидеть индикатор «думает...» в UI — просто поставь in_progress.
--- AW показывает typing-индикатор, пока нет строки-ответа (role='assistant'
--- с reply_to = id вопроса) с терминальным статусом.
+-- Если хочется увидеть индикатор «думает...» в UI — просто поставь processing
+-- (агент claim'ит вопрос этим статусом). AW показывает typing-индикатор, пока
+-- нет строки-ответа (role='assistant' с reply_to = id вопроса) с терминальным
+-- статусом.
 -- Замени ТОЛЬКО <QUESTION_ID> (id строки-вопроса из запроса 0).
 
 UPDATE chat_agent_messages_bus
-SET status     = 'in_progress',
+SET status     = 'processing',
     updated_at = now()
 WHERE id = '<QUESTION_ID>'
   AND status = 'pending';
@@ -324,7 +329,7 @@ SELECT id, chat_id, user_id, content,
        created_at
 FROM chat_agent_messages_bus
 WHERE role = 'user'
-  AND status IN ('pending', 'in_progress')
+  AND status IN ('pending', 'processing')
 ORDER BY created_at ASC
 LIMIT 20;
 
@@ -360,29 +365,29 @@ LIMIT 10;
 -- 7. ОЧИСТКА ПО TTL (для админов)
 -- ────────────────────────────────────────────────────────────────────────────
 --
--- Удаляем только завершённые строки: completed / error / timeout.
--- pending и in_progress НЕ ТРОГАТЬ — это активные диалоги.
+-- Удаляем только завершённые строки: completed / failed.
+-- pending и processing НЕ ТРОГАТЬ — это активные диалоги.
 -- Видимая пользователю история чата живёт в chat_messages и НЕ затрагивается.
 --
 -- Рекомендуемые сроки хранения:
---   completed / error / timeout  — 180 дней
+--   completed / failed  — 180 дней
 -- Подстройте под свои аудит-требования.
 
 DELETE FROM chat_agent_messages_bus
-WHERE status IN ('completed', 'complete', 'error', 'timeout')
+WHERE status IN ('completed', 'failed')
   AND updated_at < now() - INTERVAL '180 days';
 
 -- На Greenplum после массивных DELETE'ов полезен VACUUM ANALYZE
 -- (PG обычно справляется автовакуумом, но не помешает):
 -- VACUUM ANALYZE chat_agent_messages_bus;
 
--- Зависшие in_progress/pending дольше 2 часов — ручное закрытие:
--- (AW закрывает draft в chat_messages сам через 10 мин; статус в шине он пишет
--- best-effort, и на ПРОМе CHECK владельца отклоняет 'timeout' — тогда строки
--- остаются в pending. Если CHECK не пропускает 'timeout' — ставь 'error'.)
+-- Зависшие processing/pending дольше 2 часов — ручное закрытие:
+-- (AW закрывает draft в chat_messages сам через 10 мин и best-effort ставит
+-- вопросу 'failed'; если запись не прошла, строки остаются в pending —
+-- закрываем вручную тем же 'failed' из словаря CHECK'а владельца.)
 UPDATE chat_agent_messages_bus
-SET status     = 'timeout',
+SET status     = 'failed',
     updated_at = now()
 WHERE role = 'user'
-  AND status IN ('pending', 'in_progress')
+  AND status IN ('pending', 'processing')
   AND created_at < now() - INTERVAL '2 hours';

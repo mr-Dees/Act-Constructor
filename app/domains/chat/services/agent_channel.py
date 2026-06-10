@@ -1,16 +1,18 @@
 """Сервис канала к внешнему агенту через bus-таблицу chat_agent_messages_bus.
 
-Поток (протокол владельца шины — стороны агента):
+Поток (подтверждённая спека владельца шины — стороны агента):
   AW → submit() → INSERT вопрос (role='user', status='pending')
                  + create_streaming draft (status='streaming', agent_ref=uid)
-  Агент → INSERT ответ (role='assistant', reply_to = id ВОПРОСА,
-          status='completed') + ставит вопросу status='completed'
-  AW → try_finalize() → ищет ответ по reply_to = id вопроса → финализирует draft.
+  Агент → claim вопроса (status='processing') → INSERT ответ (role='assistant',
+          reply_to = id ВОПРОСА) → стримит reasoning-дельты в metadata.reasoning
+          → пишет финальный content и терминальный status ('completed'/'failed')
+  AW → try_finalize() → ищет ответ по reply_to = id вопроса; финализирует draft,
+       когда статус ответа терминальный.
 
-На таблице владельца есть CHECK по status с неизвестным нам полным списком
-значений (наблюдаемо разрешены 'pending' и 'completed', запрещён 'timeout') —
-поэтому записи статуса от AW best-effort: CheckViolation логируется и
-глотается, финализацию/таймаут это не ломает.
+Словарь status владельца (CHECK на его таблице): pending | processing |
+completed | failed; role: user | assistant | system. Записи статуса от AW —
+best-effort: CheckViolation логируется и глотается, финализацию/таймаут это
+не ломает (защита от смены словаря владельцем).
 """
 
 import logging
@@ -31,10 +33,14 @@ _TRIM_MARKER = " …[обрезано]"
 _TRIM_MARKER_BYTES = len(_TRIM_MARKER.encode("utf-8"))
 
 # Нетерминальные статусы строки шины: ответ с таким статусом ещё пишется
-# агентом — финализировать рано. Любой другой статус (включая неизвестный нам)
-# при наличии строки-ответа считаем терминальным: наличие связанного ответа —
-# основной сигнал готовности, словарь статусов контролирует владелец таблицы.
-_BUS_PENDING_STATUSES = ("pending", "in_progress")
+# агентом — финализировать рано. Словарь владельца: 'processing' (агент создаёт
+# строку-ответ сразу при claim'е и стримит reasoning-дельты в metadata, пока не
+# запишет финальный content); 'in_progress' — legacy-синоним для старых dev-строк.
+# Любой другой статус при наличии строки-ответа считаем терминальным.
+_BUS_PENDING_STATUSES = ("pending", "processing", "in_progress")
+
+# Терминальные статусы ошибки: 'failed' — словарь владельца, 'error' — legacy.
+_BUS_ERROR_STATUSES = ("failed", "error")
 
 
 # ── Pure-функции ─────────────────────────────────────────────────────────────
@@ -87,17 +93,19 @@ def _normalize_button(btn: dict, idx: int) -> dict:
 def map_answer_to_blocks(row: dict, max_block_text_size: int = 262144) -> list[dict]:
     """Маппит строку-ответ chat_agent_messages_bus в блоки чата.
 
-    Порядок: reasoning (metadata.thinking) → text (content) → buttons → media.
+    Порядок: reasoning (metadata.reasoning, legacy metadata.thinking) →
+    text (content) → buttons → media.
     block_id кнопок и reasoning: ``f"{row['id']}:btn:0"`` / ``f"{row['id']}:reasoning:0"``.
     Тексты обрезаются через _trim_text_if_oversized.
     """
     row_id = row.get("id", "unknown")
     blocks: list[dict] = []
 
-    # 1. reasoning из metadata.thinking
+    # 1. reasoning из metadata.reasoning (ключ по спеке владельца шины;
+    #    'thinking' — legacy-fallback для старых строк и dev-имитаций)
     metadata = row.get("metadata") or {}
     if isinstance(metadata, dict):
-        thinking = metadata.get("thinking")
+        thinking = metadata.get("reasoning") or metadata.get("thinking")
         if thinking and isinstance(thinking, str) and thinking.strip():
             trimmed = _trim_text_if_oversized(
                 text=thinking.strip(),
@@ -277,18 +285,18 @@ class AgentChannelService:
         assistant_message_id: str,
         question_uid: str,
     ) -> None:
-        """Помечает draft как failed (error-блок таймаута) и ставит вопросу status='timeout'."""
-        # Запись 'timeout' в шину — best-effort: CHECK владельца может не
-        # включать это значение (наблюдалось на ПРОМе) — тогда строка останется
-        # в pending, побочных эффектов нет: reconcile её не подхватит
-        # (chat_message уже failed, get_streaming_drafts отбирает только
-        # status='streaming'), а слот лимита освобождает отсечка по возрасту
-        # в count_active_for_user.
+        """Помечает draft как failed (error-блок таймаута) и закрывает вопрос в шине."""
+        # Закрываем вопрос статусом 'failed' — он есть в словаре CHECK'а
+        # владельца ('timeout' там запрещён). Запись всё равно best-effort:
+        # если CHECK отклонит, строка останется в pending — побочных эффектов
+        # нет: reconcile её не подхватит (chat_message уже failed,
+        # get_streaming_drafts отбирает только status='streaming'), а слот
+        # лимита освобождает отсечка по возрасту в count_active_for_user.
         await self._message_repo().mark_failed(
             message_id=assistant_message_id,
             error_block=build_timeout_error_block(),
         )
-        await self._set_status_safe(uid=question_uid, status="timeout")
+        await self._set_status_safe(uid=question_uid, status="failed")
         logger.info(
             "agent_channel: таймаут — message_id=%s, question_uid=%s",
             assistant_message_id,
@@ -376,8 +384,8 @@ class AgentChannelService:
         if not answer:
             answer = await agent_repo.get_answer_for_question(question_uid)
         if not answer:
-            # Агент мог закрыть вопрос со status='error' без строки-ответа.
-            if question.get("status") == "error":
+            # Агент мог закрыть вопрос со status='failed' без строки-ответа.
+            if question.get("status") in _BUS_ERROR_STATUSES:
                 failed = await message_repo.mark_failed(
                     message_id=assistant_message_id,
                     error_block={
@@ -400,7 +408,7 @@ class AgentChannelService:
         if answer.get("status") in _BUS_PENDING_STATUSES:
             return "pending"
 
-        if answer.get("status") == "error":
+        if answer.get("status") in _BUS_ERROR_STATUSES:
             error_message = answer.get("content") or "Внешний агент вернул ошибку."
             error_block = {
                 "type": "error",
@@ -422,13 +430,13 @@ class AgentChannelService:
                     title="Ошибка ответа базы знаний",
                     severity="error",
                 )
-            # Закрываем вопрос: не полагаемся на то, что внешний агент
-            # проставит терминальный status. CheckViolation глотается
-            # (_set_status_safe); транзиентный сбой поднимется в _tick,
-            # подписка останется и поллер повторит try_finalize на следующем
-            # тике (mark_failed идемпотентен — вернёт False на уже
-            # не-streaming сообщении).
-            await self._set_status_safe(uid=question_uid, status="error")
+            # Закрываем вопрос ('failed' — словарь владельца): не полагаемся
+            # на то, что внешний агент проставит терминальный status.
+            # CheckViolation глотается (_set_status_safe); транзиентный сбой
+            # поднимется в _tick, подписка останется и поллер повторит
+            # try_finalize на следующем тике (mark_failed идемпотентен —
+            # вернёт False на уже не-streaming сообщении).
+            await self._set_status_safe(uid=question_uid, status="failed")
             return "done"
 
         # Транслируем кнопки (acts.open_act_page → open_url) перед маппингом в блоки.

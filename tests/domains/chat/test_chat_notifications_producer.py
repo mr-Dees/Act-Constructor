@@ -197,7 +197,7 @@ class TestChatNotificationsProducer:
             "metadata": {},
             "buttons": None,
             "media": None,
-            "status": "error",
+            "status": "failed",
         }
         fake_agent_repo = AsyncMock()
         fake_agent_repo.get_by_uid = AsyncMock(side_effect=lambda uid: {
@@ -295,7 +295,7 @@ class TestChatNotificationsProducer:
             "metadata": {},
             "buttons": None,
             "media": None,
-            "status": "error",
+            "status": "failed",
         }
         fake_agent_repo = AsyncMock()
         fake_agent_repo.get_by_uid = AsyncMock(side_effect=lambda uid: {
@@ -322,5 +322,5 @@ class TestChatNotificationsProducer:
         fake_msg_repo.mark_failed.assert_called_once()
         push_mock.assert_not_awaited()
         fake_agent_repo.set_status.assert_awaited_once_with(
-            uid="q-uid", status="error",
+            uid="q-uid", status="failed",
         )

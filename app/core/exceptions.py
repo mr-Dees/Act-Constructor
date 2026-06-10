@@ -133,6 +133,16 @@ CHECK_CONSTRAINT_MESSAGES: dict[str, str] = {
     "check_chat_tool_metrics_latency_nonneg": (
         "Длительность выполнения tool'а не может быть отрицательной"
     ),
+    # ── chat: chat_agent_messages_bus (dev-имитация шины внешнего агента;
+    #    словари — подтверждённая спека владельца таблицы) ───────────────────
+    "check_chat_agent_messages_bus_role_values": (
+        "Недопустимая роль сообщения шины агента. "
+        "Допустимые значения: user, assistant, system"
+    ),
+    "check_chat_agent_messages_bus_status_values": (
+        "Недопустимый статус сообщения шины агента. "
+        "Допустимые значения: pending, processing, completed, failed"
+    ),
     # ── chat: chat_message_feedback ──────────────────────────────────────────
     "check_chat_message_feedback_rating_values": (
         "Недопустимая оценка сообщения. Допустимые значения: up, down"

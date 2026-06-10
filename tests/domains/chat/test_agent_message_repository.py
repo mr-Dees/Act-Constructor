@@ -317,7 +317,11 @@ async def test_set_status_executes_update(mock_conn):
 
 
 async def test_count_active_for_user_returns_count(mock_conn):
-    """count_active_for_user делает SELECT COUNT по user_id, role='user' и статусам pending/in_progress."""
+    """count_active_for_user делает SELECT COUNT по user_id, role='user' и активным статусам.
+
+    'processing' — словарь владельца шины (агент claim'ит вопрос этим статусом);
+    без него вопросы в работе у агента не считались бы активными.
+    """
     mock_conn.fetchval.return_value = 2
     repo = AgentMessageRepository(mock_conn)
     result = await repo.count_active_for_user("user1")
@@ -328,7 +332,7 @@ async def test_count_active_for_user_returns_count(mock_conn):
     assert "user_id = $1" in sql
     assert "role = 'user'" in sql
     assert "'pending'" in sql
-    assert "'in_progress'" in sql
+    assert "'processing'" in sql
     assert user_id == "user1"
     assert result == 2
 

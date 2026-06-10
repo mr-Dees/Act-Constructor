@@ -76,6 +76,32 @@ class TestMapAnswerToBlocks:
         assert blocks[1]["type"] == "text"
         assert blocks[1]["content"] == "Ответ агента"
 
+    def test_reasoning_key_from_owner_spec(self):
+        """Рассуждения читаются из metadata.reasoning (ключ по спеке владельца
+        шины); metadata.thinking — legacy-fallback."""
+        row = {
+            "id": "a1",
+            "content": "Ответ",
+            "metadata": {"reasoning": "Стримленные рассуждения агента"},
+            "buttons": None,
+            "media": None,
+        }
+        blocks = map_answer_to_blocks(row)
+        assert blocks[0]["type"] == "reasoning"
+        assert blocks[0]["content"] == "Стримленные рассуждения агента"
+
+    def test_reasoning_key_takes_precedence_over_thinking(self):
+        """При обоих ключах приоритет у reasoning (актуальная спека)."""
+        row = {
+            "id": "a1",
+            "content": "",
+            "metadata": {"reasoning": "новый ключ", "thinking": "старый ключ"},
+            "buttons": None,
+            "media": None,
+        }
+        blocks = map_answer_to_blocks(row)
+        assert blocks[0]["content"] == "новый ключ"
+
     def test_buttons_get_block_id(self):
         """Кнопки получают block_id вида «{id}:btn:0» и нормализуются."""
         row = {
@@ -382,12 +408,12 @@ class TestAgentChannelServiceTryFinalize:
         text_blocks = [b for b in blocks if b["type"] == "text"]
         assert text_blocks[0]["content"] == "Ответ от агента"
 
-    async def test_question_error_without_answer_marks_failed(
+    async def test_question_failed_without_answer_marks_failed(
         self, mock_conn, settings
     ):
-        """Агент закрыл вопрос status='error' без строки-ответа →
-        mark_failed со стандартным текстом + 'done'."""
-        question = {"id": "q-uid", "role": "user", "status": "error", "reply_to": None}
+        """Агент закрыл вопрос status='failed' (словарь владельца) без
+        строки-ответа → mark_failed со стандартным текстом + 'done'."""
+        question = {"id": "q-uid", "role": "user", "status": "failed", "reply_to": None}
 
         fake_agent_repo = AsyncMock()
         fake_agent_repo.get_by_uid = AsyncMock(return_value=question)
@@ -413,9 +439,10 @@ class TestAgentChannelServiceTryFinalize:
     async def test_answer_with_non_terminal_status_returns_pending(
         self, mock_conn, settings
     ):
-        """Строка-ответ есть, но статус нетерминальный (in_progress) —
-        агент ещё пишет, финализировать рано."""
-        question = {"id": "q-uid", "role": "user", "status": "pending", "reply_to": None}
+        """Строка-ответ есть, но статус нетерминальный (processing) —
+        агент создаёт её сразу при claim'е и стримит reasoning-дельты в
+        metadata; финализировать до терминального статуса рано."""
+        question = {"id": "q-uid", "role": "user", "status": "processing", "reply_to": None}
         answer = {
             "id": "a-uid",
             "role": "assistant",
@@ -424,7 +451,7 @@ class TestAgentChannelServiceTryFinalize:
             "buttons": None,
             "media": None,
             "reply_to": "q-uid",
-            "status": "in_progress",
+            "status": "processing",
         }
 
         fake_agent_repo = AsyncMock()
@@ -497,13 +524,13 @@ class TestAgentChannelServiceTryFinalize:
             uid="q-uid", status="completed",
         )
 
-    async def test_answer_status_error_calls_mark_failed_and_returns_done(
+    async def test_answer_status_failed_calls_mark_failed_and_returns_done(
         self, mock_conn, settings
     ):
-        """Если answer.status == 'error' → mark_failed + 'done'."""
+        """Если answer.status == 'failed' (словарь владельца) → mark_failed + 'done'."""
         question = {
             "id": "q-uid",
-            "status": "complete",
+            "status": "completed",
             "reply_to": "a-uid",
         }
         answer = {
@@ -513,7 +540,7 @@ class TestAgentChannelServiceTryFinalize:
             "metadata": {},
             "buttons": None,
             "media": None,
-            "status": "error",
+            "status": "failed",
         }
 
         fake_agent_repo = AsyncMock()
@@ -543,9 +570,10 @@ class TestAgentChannelServiceTryFinalize:
         assert call_kwargs["error_block"]["code"] == "agent_error"
         # finalize НЕ вызывался
         fake_msg_repo.finalize.assert_not_called()
-        # R3: вопрос закрывается со статусом 'error' — слот лимита освобождён.
+        # R3: вопрос закрывается со статусом 'failed' (словарь владельца) —
+        # слот лимита освобождён.
         fake_agent_repo.set_status.assert_awaited_once_with(
-            uid="q-uid", status="error",
+            uid="q-uid", status="failed",
         )
 
     async def test_try_finalize_calls_translate_buttons_when_answer_has_buttons(
@@ -695,10 +723,11 @@ class TestSetStatusBestEffort:
     async def test_mark_timeout_completes_even_if_check_constraint_rejects_status(
         self, mock_conn, settings
     ):
-        """CHECK владельца не включает 'timeout' → mark_timeout не падает.
+        """CHECK владельца отклонил статус → mark_timeout не падает.
 
-        Регрессия ПРОМа: исключение из set_status('timeout') поднималось в
-        поллер каждый тик → бесконечный цикл ошибок, подписка не снималась.
+        Регрессия ПРОМа: исключение из set_status поднималось в поллер каждый
+        тик → бесконечный цикл ошибок, подписка не снималась. Закрываем вопрос
+        статусом 'failed' (есть в словаре владельца; 'timeout' там запрещён).
         """
         import asyncpg
 
@@ -722,7 +751,7 @@ class TestSetStatusBestEffort:
 
         fake_msg_repo.mark_failed.assert_called_once()
         fake_agent_repo.set_status.assert_awaited_once_with(
-            uid="q-uid", status="timeout",
+            uid="q-uid", status="failed",
         )
 
     async def test_transient_db_error_in_set_status_propagates(

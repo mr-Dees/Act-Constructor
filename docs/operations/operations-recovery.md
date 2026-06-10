@@ -10,7 +10,7 @@
 
 **Симптом.** Пользователь жалуется: «Ассистент завис на печати». В UI крутится typing-индикатор, ответа нет > 5 минут. В чате включён тумблер «База знаний ОАРБ» (режим «Адаптивный» или «Всегда»), вопрос ушёл в шину к внешнему ИИ-агенту.
 
-**Как это работает.** Форвард создаёт черновик ассистент-сообщения в `chat_messages` (`status='streaming'`, `agent_ref` = uid вопроса) и пишет вопрос в единую bus-таблицу `chat_agent_messages_bus` (`role='user'`, `status='pending'`). Фоновый `AgentChannelPoller` поллит шину; когда приходит ответ агента (`role='assistant'`, `status='complete'`), `AgentChannelService.try_finalize` мапит ответ в блоки и финализирует черновик (`complete`/`failed`).
+**Как это работает.** Форвард создаёт черновик ассистент-сообщения в `chat_messages` (`status='streaming'`, `agent_ref` = uid вопроса) и пишет вопрос в единую bus-таблицу `chat_agent_messages_bus` (`role='user'`, `status='pending'`). Фоновый `AgentChannelPoller` поллит шину; когда приходит ответ агента (`role='assistant'`, `reply_to` = id вопроса, `status='completed'`), `AgentChannelService.try_finalize` мапит ответ в блоки и финализирует черновик (`complete`/`failed`).
 
 **Диагностика.**
 
@@ -22,7 +22,7 @@ WHERE status = 'streaming'
   AND created_at < now() - interval '5 minutes';
 
 -- 2. Состояние соответствующих записей в шине (agent_ref → chat_agent_messages_bus.id).
-SELECT id, chat_id, conversation_id, role, status, created_at, updated_at
+SELECT id, chat_id, role, status, created_at, updated_at
 FROM {SCHEMA}.{BUS_TABLE}
 WHERE id IN (... agent_ref из шага 1 ...)
 ORDER BY created_at;
@@ -48,9 +48,9 @@ WHERE reply_to IN (... agent_ref из шага 1 ...);
    SET status = 'failed', updated_at = CURRENT_TIMESTAMP
    WHERE id = '<message_id>';
 
-   -- Вопрос в шине → timeout.
+   -- Вопрос в шине → failed ('timeout' CHECK'ом владельца таблицы запрещён).
    UPDATE {SCHEMA}.{BUS_TABLE}
-   SET status = 'timeout', updated_at = CURRENT_TIMESTAMP
+   SET status = 'failed', updated_at = CURRENT_TIMESTAMP
    WHERE id = '<agent_ref>';
    ```
    После этого фронт при reload/повторном поллинге увидит ErrorBlock вместо typing-индикатора. Чтобы добавить читаемый error-блок в content, лучше дождаться рестарта приложения (reconcile подхватит черновик) либо вызвать `AgentChannelService.mark_timeout(...)` из Python.
@@ -94,10 +94,10 @@ GROUP BY status;
 
 > Автоматического фонового cleanup для `chat_agent_messages_bus` сейчас нет — чистка ручная/кроновая.
 
-1. **Ручная очистка** старых терминальных сообщений (`complete`/`error`/`timeout`). Не трогать `pending`/`in_progress` — это ещё живые запросы:
+1. **Ручная очистка** старых терминальных сообщений (`completed`/`failed`). Не трогать `pending`/`processing` — это ещё живые запросы:
    ```sql
    DELETE FROM {SCHEMA}.{BUS_TABLE}
-   WHERE status IN ('complete', 'error', 'timeout')
+   WHERE status IN ('completed', 'failed')
      AND created_at < now() - interval '7 days';
    ```
 2. **Кроном** — тот же DELETE раз в неделю с подходящим retention.

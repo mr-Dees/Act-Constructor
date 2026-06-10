@@ -148,10 +148,12 @@ class AgentMessageRepository(BaseRepository):
         )
 
     async def count_active_for_user(self, user_id: str, *, created_after=None) -> int:
-        """Считает активные (pending / in_progress) вопросы пользователя в bus-таблице.
+        """Считает активные вопросы пользователя в bus-таблице.
 
-        Фильтр role='user' оставляет в счёте только строки-вопросы от AW: ответы
-        агента (role='assistant') не должны влиять на лимит параллельных запросов.
+        Активные статусы: 'pending' / 'processing' (словарь владельца таблицы;
+        'in_progress' — legacy-синоним для старых dev-строк). Фильтр role='user'
+        оставляет в счёте только строки-вопросы от AW: ответы агента
+        (role='assistant') не должны влиять на лимит параллельных запросов.
 
         ``created_after`` (tz-aware datetime) отсекает старые зависшие строки:
         терминальный статус на чужой таблице может не записаться (CHECK
@@ -161,7 +163,7 @@ class AgentMessageRepository(BaseRepository):
             val = await self.conn.fetchval(
                 f"SELECT COUNT(*) FROM {self.table} "
                 f"WHERE user_id = $1 AND role = 'user' "
-                f"AND status IN ('pending', 'in_progress') "
+                f"AND status IN ('pending', 'processing', 'in_progress') "
                 f"AND created_at > $2",
                 user_id,
                 created_after,
@@ -170,7 +172,7 @@ class AgentMessageRepository(BaseRepository):
             val = await self.conn.fetchval(
                 f"SELECT COUNT(*) FROM {self.table} "
                 f"WHERE user_id = $1 AND role = 'user' "
-                f"AND status IN ('pending', 'in_progress')",
+                f"AND status IN ('pending', 'processing', 'in_progress')",
                 user_id,
             )
         return int(val or 0)

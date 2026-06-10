@@ -2200,7 +2200,7 @@ chat-modal.js / chat-popup.js
 1. Клиент POST `/messages` с form-параметром `agent_mode` (`off`/`adaptive`/`always`). В `off`/`adaptive` оркестратор исполняется синхронно (`orchestrator.run`); в `always` — прямой проброс.
 2. Форвард (`always` либо решение оркестратора в `adaptive`): `AgentChannelService.submit` **в одной транзакции** INSERT'ит вопрос в `chat_agent_messages_bus` (`role='user'`, `status='pending'`) + создаёт черновик `chat_messages` (`status='streaming'`, `agent_ref=<uid вопроса>`), затем подписывает его в `AgentChannelPoller`. Транзакция обязательна: вопрос без draft'а (или наоборот) оставил бы осиротевшую строку, вечно занимающую слот лимита. Если поллер не инициализирован — форвард **не выполняется**, сразу пишется error-сообщение (осиротевший streaming-draft не создаётся, иначе беседу нельзя было бы удалить).
 3. POST отдаёт `{message_id}`. Фронт поллит `GET /messages/{message_id}` до терминального статуса.
-4. Фоновый `AgentChannelPoller` поллит шину; `AgentChannelService.try_finalize` ищет строку-ответ агента **обратным lookup'ом** (`get_answer_for_question`: `reply_to = <id вопроса> AND role='assistant'` — протокол владельца: агент ставит `reply_to` НА ОТВЕТЕ), маппит её в блоки (`map_answer_to_blocks`), финализирует черновик (`status='complete'`) и best-effort закрывает вопрос в шине (`set_status(..., 'completed'|'error')` — словарь статусов владельца; CheckViolation от CHECK'а владельца глотается с warning'ом). По истечении `ANSWER_TIMEOUT_SEC` — `mark_timeout` (draft → `failed`; запись `'timeout'` в шину тоже best-effort).
+4. Фоновый `AgentChannelPoller` поллит шину; `AgentChannelService.try_finalize` ищет строку-ответ агента **обратным lookup'ом** (`get_answer_for_question`: `reply_to = <id вопроса> AND role='assistant'` — протокол владельца: агент ставит `reply_to` НА ОТВЕТЕ), маппит её в блоки (`map_answer_to_blocks`), финализирует черновик (`status='complete'`) и best-effort закрывает вопрос в шине (`set_status(..., 'completed'|'failed')` — словарь статусов владельца; CheckViolation от CHECK'а владельца глотается с warning'ом). По истечении `ANSWER_TIMEOUT_SEC` — `mark_timeout` (draft → `failed`; вопрос в шине best-effort закрывается `'failed'`).
 
 **Bus-таблица `chat_agent_messages_bus`** — структуру задаёт и таблицей владеет сторона внешнего агента; блок в `app/domains/chat/migrations/{postgresql,greenplum}/schema.sql` — лишь dev-имитация её фактической структуры. Отдельной колонки `conversation_id` в шине НЕТ:
 
@@ -2209,11 +2209,11 @@ chat-modal.js / chat-popup.js
 | `id` | UUID, uid одного сообщения шины (его же хранит `chat_messages.agent_ref`); GP-имитация: PK нет, `DISTRIBUTED BY (chat_id)` |
 | `chat_id` | TEXT, uid треда (= `chat_messages.conversation_id`) |
 | `user_id` | TEXT, автор |
-| `role` | `user` / `assistant` / `tool` (`tool` разрешена протоколом, приложением не обрабатывается) |
+| `role` | `user` / `assistant` / `system` (CHECK владельца; `system` приложением не обрабатывается) |
 | `content` | текст |
-| `media` / `metadata` / `buttons` | JSONB; `metadata.thinking` → reasoning-блок |
+| `media` / `metadata` / `buttons` | JSONB; `metadata.reasoning` → reasoning-блок (агент стримит туда дельты рассуждений; legacy-ключ `thinking` тоже понимается) |
 | `reply_to` | UUID, ссылка на id вопроса; агент проставляет его **на строке-ответе** — наличие ответа с `reply_to=<id вопроса>` и есть сигнал «ответ готов» |
-| `status` | `pending` / `in_progress` / `completed` / `error`; на ПРОМ-таблице есть CHECK с неизвестным нам полным списком (наблюдаемо разрешены `pending`/`completed`, запрещён `timeout`) — записи статуса от AW best-effort (`_set_status_safe`) |
+| `status` | `pending` / `processing` / `completed` / `failed` (CHECK владельца, подтверждённая спека; `timeout`/`error`/`complete` запрещены) — записи статуса от AW best-effort (`_set_status_safe`) |
 | `created_at` / `updated_at` | timestamptz NOT NULL; DEFAULT'ов нет — AW передаёт явно |
 
 Связь чат → шина: `chat_messages.agent_ref VARCHAR(36)` хранит id вопроса в шине. `AgentMessageRepository._parse_row` нормализует uuid-значения `id`/`reply_to` в `str`.
@@ -2227,7 +2227,7 @@ chat-modal.js / chat-popup.js
 - **Retention** — задача администратора (в приложении НЕ реализован).
 
 **Ключевые модули:**
-- `app/domains/chat/services/agent_channel.py` — `AgentChannelService` (`submit`, `try_finalize`, `mark_timeout`); `map_answer_to_blocks` (порядок: reasoning из `metadata.thinking` → text → buttons (block_id `{id}:btn:0`) → media image/file → error), `build_timeout_error_block`.
+- `app/domains/chat/services/agent_channel.py` — `AgentChannelService` (`submit`, `try_finalize`, `mark_timeout`); `map_answer_to_blocks` (порядок: reasoning из `metadata.reasoning` (legacy `thinking`) → text → buttons (block_id `{id}:btn:0`) → media image/file → error), `build_timeout_error_block`.
 - `app/domains/chat/services/agent_channel_poller.py` — `AgentChannelPoller` (`subscribe`/`unsubscribe`/`_tick`/`_run` с adaptive-backoff без удержания conn/`reconcile`/`start`/`stop`/`get_status`).
 - `app/domains/chat/services/button_translator.py` — `translate_buttons`: кнопка с `action_id` зарегистрированного `ChatTool` → client-action `open_url`.
 - `app/domains/chat/services/forward_tool_factory.py` — `build_forward_tool_descriptor()`: статический ChatTool `chat.forward_to_knowledge_agent` для режима `adaptive` (LLM может его вызвать).
@@ -2237,7 +2237,7 @@ chat-modal.js / chat-popup.js
 
 #### Шпаргалка по имитации агента
 
-Полный SQL — в `docs/integrations/external-agent-imitation.sql` (DBeaver/psql), уже обновлён под фактический протокол владельца шины. Минимум: найти строку-вопрос пользователя в `chat_agent_messages_bus` (`role='user'`, `status='pending'`), вставить ответ агента (`role='assistant'`, новый `id`, **`reply_to=<id вопроса>`**, `status='completed'`, `content`/`metadata.thinking`/`buttons`/`media` по необходимости), затем на строке-вопросе выставить `status='completed'`. `AgentChannelPoller` найдёт ответ по `reply_to` и финализирует черновик `chat_messages`.
+Полный SQL — в `docs/integrations/external-agent-imitation.sql` (DBeaver/psql), уже обновлён под фактический протокол владельца шины. Минимум: найти строку-вопрос пользователя в `chat_agent_messages_bus` (`role='user'`, `status='pending'`), вставить ответ агента (`role='assistant'`, новый `id`, **`reply_to=<id вопроса>`**, `status='completed'`, `content`/`metadata.reasoning`/`buttons`/`media` по необходимости), затем на строке-вопросе выставить `status='completed'`. `AgentChannelPoller` найдёт ответ по `reply_to` и финализирует черновик `chat_messages`.
 
 #### Когда «у меня не работает»
 
@@ -3356,9 +3356,9 @@ LIMIT 20;
 
 **Правила безопасной очистки:**
 
-1. Удалять только записи в терминальном статусе (`status IN ('complete', 'error', 'timeout')`).
+1. Удалять только записи в терминальном статусе (`status IN ('completed', 'failed')`).
 2. И только старше N дней (`created_at < now() - INTERVAL 'N days'`, рекомендация: 30 дней).
-3. **Не трогать** `pending` / `in_progress` — это активные запросы; `AgentChannelPoller` подхватит их (или переведёт в `failed` по `ANSWER_TIMEOUT_SEC`).
+3. **Не трогать** `pending` / `processing` — это активные запросы; `AgentChannelPoller` подхватит их (или переведёт draft в `failed` по `ANSWER_TIMEOUT_SEC`).
 
 **Рекомендация по частоте**: cron раз в неделю в окне низкой нагрузки; после массовой чистки — `VACUUM ANALYZE` (PG). На GP `chat_agent_messages_bus` имеет смысл партиционировать по `created_at` (RANGE month) — `DROP PARTITION` на порядок быстрее DELETE и не лочит таблицу. Плейсхолдеры `{SCHEMA}`/`{PREFIX}` подставляются вручную перед запуском.
 
@@ -3622,20 +3622,20 @@ class ToolCallAccumulator:
 | `id` | UUID | uid одного сообщения шины (его же хранит `chat_messages.agent_ref`); GP-имитация: PK нет, `DISTRIBUTED BY (chat_id)` |
 | `chat_id` | TEXT | uid треда (= `chat_messages.conversation_id`) |
 | `user_id` | TEXT | автор |
-| `role` | TEXT | `user` / `assistant` / `tool`. Роль `tool` разрешена протоколом, но приложением не обрабатывается |
+| `role` | TEXT | `user` / `assistant` / `system` (CHECK владельца). Роль `system` приложением не обрабатывается |
 | `content` | TEXT | текст сообщения (NOT NULL) |
 | `media` | JSONB | вложения (image/file) |
-| `metadata` | JSONB | служебные поля; `metadata.thinking` → reasoning-блок |
+| `metadata` | JSONB | служебные поля; `metadata.reasoning` → reasoning-блок (агент стримит туда дельты; legacy-ключ `thinking` тоже понимается) |
 | `reply_to` | UUID | ссылка на id вопроса; агент проставляет его **на строке-ответе** — наличие ответа с `reply_to=<id вопроса>` и есть сигнал «ответ готов» |
 | `buttons` | JSONB | кнопки (`action_id` → client-action) |
-| `status` | TEXT | `pending` / `in_progress` / `completed` / `error` (словарь владельца; `timeout` его CHECK'ом наблюдаемо запрещён) |
+| `status` | TEXT | `pending` / `processing` / `completed` / `failed` (CHECK владельца, подтверждённая спека; `timeout`/`error`/`complete` запрещены) |
 | `created_at` / `updated_at` | TIMESTAMPTZ | NOT NULL; DEFAULT'ов нет — AW передаёт явно в INSERT/UPDATE |
 
 Связь чат → шина: ассистент-черновик в `chat_messages` хранит колонку `agent_ref VARCHAR(36)` — id вопроса в `chat_agent_messages_bus`. По нему `AgentChannelPoller`/`try_finalize` находят ответ (обратный lookup `get_answer_for_question`: `reply_to = <id вопроса> AND role='assistant'`) и финализируют черновик. `AgentMessageRepository._parse_row` нормализует uuid-значения `id`/`reply_to` в `str` — остальной код работает со строками.
 
 **`map_answer_to_blocks`** (`agent_channel.py`) превращает строку-ответ шины в блоки сообщения в фиксированном порядке:
 
-1. `reasoning` — из `metadata.thinking` (block_id `f"{id}:reasoning:0"`);
+1. `reasoning` — из `metadata.reasoning`, legacy `metadata.thinking` (block_id `f"{id}:reasoning:0"`);
 2. `text` — из `content`;
 3. `buttons` — из `buttons` (block_id `f"{id}:btn:0"`);
 4. `media` — image/file из `media`;
@@ -3655,8 +3655,8 @@ class ToolCallAccumulator:
 |---|---|
 | `AgentChannelService.submit` | **В одной транзакции** INSERT вопроса (`role='user'`, `status='pending'`) в `chat_agent_messages_bus` + создание черновика `chat_messages` (`status='streaming'`, `agent_ref=<uid вопроса>`) — атомарность исключает осиротевшую строку, занимающую слот лимита |
 | `AgentChannelPoller` (один asyncio-task на процесс) | Поллит шину по подписанным `question_uid`, adaptive-backoff, **не держит conn в sleep**. На каждый ответ зовёт `try_finalize` |
-| `AgentChannelService.try_finalize` | Маппит ответ агента (`map_answer_to_blocks`) в блоки, финализирует черновик `chat_messages` (`status='complete'`) **и закрывает вопрос в шине** (`set_status(..., 'complete'|'error')`) — AW сам освобождает слот лимита, не полагаясь на терминальный `status` от внешнего агента |
-| `AgentChannelService.mark_timeout` | По истечении `ANSWER_TIMEOUT_SEC` дописывает error-блок (`build_timeout_error_block`) и переводит черновик в `failed`, вопрос в шине — в `timeout` |
+| `AgentChannelService.try_finalize` | Находит ответ агента обратным lookup'ом (`get_answer_for_question`), маппит в блоки (`map_answer_to_blocks`), финализирует черновик `chat_messages` (`status='complete'`) и best-effort закрывает вопрос в шине (`_set_status_safe(..., 'completed'|'failed')` — словарь владельца) — AW сам освобождает слот лимита, не полагаясь на терминальный `status` от внешнего агента |
+| `AgentChannelService.mark_timeout` | По истечении `ANSWER_TIMEOUT_SEC` дописывает error-блок (`build_timeout_error_block`) и переводит черновик в `failed`; вопрос в шине best-effort закрывается `failed` |
 | `AgentChannelPoller.reconcile` (lifespan) | Восстанавливает подписки из streaming-черновиков после рестарта uvicorn |
 
 **Adaptive backoff poller'а.** Интервал тика растёт от `POLL_MIN_INTERVAL_SEC` (2.0 c) до `POLL_MAX_INTERVAL_SEC` (10.0 c) с шагом `POLL_BACKOFF_MULTIPLIER` (1.5) при пустых тиках и сбрасывается в минимум при активности. Коннект из пула берётся только на время `_tick`, перед `sleep` освобождается — иначе фоновая задача держала бы пул-коннект всё время простоя.

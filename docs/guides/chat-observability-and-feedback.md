@@ -13,11 +13,11 @@
 | `<prefix>chat_message_feedback` | **оценки лайк/дизлайк** | `(message_id, user_id)` PK, `rating` (up/down), `reasons` JSONB, `comment`, `source`, `route_type`, `agent_mode`, `model`, `created_at`, `updated_at` |
 | `<prefix>chat_audit_log` | lifecycle-события | `username`, `action` (`message_sent`/`feedback_submitted`/…), `conversation_id`, `details_json`, `created_at` |
 | `<prefix>chat_tool_metrics` | latency/ошибки вызовов ChatTool | `tool_name`, `status` (success/error/validation_error), `latency_ms`, `username`, `conversation_id`, `error_message` |
-| `<bus>` (`CHAT__AGENT_CHANNEL__TABLE_NAME`) | обмен с внешним БЗ-агентом | `conversation_id` (=uid вопроса), `chat_id` (=тред), `role`, `content`, `metadata`, `status` (pending/in_progress/complete/error/timeout), `created_at`, `updated_at` |
+| `<bus>` (`CHAT__AGENT_CHANNEL__TABLE_NAME`) | обмен с внешним БЗ-агентом (таблицей владеет сторона агента) | `id` (=uid сообщения шины), `chat_id` (=тред), `role`, `content`, `metadata`, `reply_to` (на ответе → id вопроса), `status` (pending/processing/completed/failed), `created_at`, `updated_at` |
 
 **Связи для анализа:**
 - Ответ ассистента → его оценки: `chat_message_feedback.message_id = chat_messages.id`.
-- Ответ-форвард → обмен с агентом: `chat_messages.agent_ref` = `<bus>.conversation_id` (uid вопроса в шине).
+- Ответ-форвард → обмен с агентом: `chat_messages.agent_ref` = `<bus>.id` (uid вопроса в шине); ответ агента — строка с `reply_to` = этому id.
 - Все журналы режут по `conversation_id` (беседа) и `username`/`user_id` (пользователь).
 
 ## 2. Обратная связь: как работает
@@ -119,8 +119,8 @@ ORDER BY created_at;
 SELECT COUNT(*) FILTER (WHERE status='failed')::numeric / NULLIF(COUNT(*),0) AS fail_rate
 FROM <prefix>chat_messages WHERE role='assistant';
 
--- ошибки/таймауты внешнего БЗ-агента
-SELECT status, COUNT(*) FROM <bus> WHERE status IN ('error','timeout') GROUP BY status;
+-- ошибки внешнего БЗ-агента
+SELECT status, COUNT(*) FROM <bus> WHERE status = 'failed' GROUP BY status;
 
 -- ошибки tool'ов
 SELECT tool_name, status, COUNT(*), AVG(latency_ms)
@@ -133,7 +133,7 @@ GROUP BY tool_name, status ORDER BY 3 DESC;
 ```sql
 SELECT PERCENTILE_CONT(0.5) WITHIN GROUP (ORDER BY EXTRACT(EPOCH FROM (updated_at-created_at))) AS p50_sec,
        PERCENTILE_CONT(0.95) WITHIN GROUP (ORDER BY EXTRACT(EPOCH FROM (updated_at-created_at))) AS p95_sec
-FROM <bus> WHERE status='complete';
+FROM <bus> WHERE status='completed';
 ```
 > `PERCENTILE_CONT` есть в PG 9.4+/GP 6. Иначе считайте перцентили на стороне приложения.
 

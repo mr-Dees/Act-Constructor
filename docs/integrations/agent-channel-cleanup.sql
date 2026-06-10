@@ -5,10 +5,10 @@
 --   Удаляет старые завершённые строки из bus-таблицы:
 --     {BUS_TABLE} — единый канал «вопрос ↔ ответ» между AW и агентом
 --
---   Удаляются ТОЛЬКО завершённые строки (status IN ('complete','error','timeout'));
---   активные (pending/in_progress) НИКОГДА не трогаются — даже если «зависли»:
---   AW сам закроет их по таймауту (10 мин), а при рестарте uvicorn lifespan
---   reconcile подхватит оставшиеся.
+--   Удаляются ТОЛЬКО завершённые строки (status IN ('completed','failed') —
+--   словарь CHECK'а владельца таблицы); активные (pending/processing) НИКОГДА
+--   не трогаются — даже если «зависли»: AW сам закроет draft по таймауту
+--   (10 мин), а при рестарте uvicorn lifespan reconcile подхватит оставшиеся.
 --
 --   Видимая пользователю история ЧАТА живёт в {PREFIX}chat_messages.
 --   Эта чистка chat_messages НЕ трогает.
@@ -36,7 +36,7 @@
 --   Или, если префикс и схема стабильны, скопировать файл и заменить один раз.
 --
 -- Срок хранения
---   Дефолт: 180 дней для всех завершённых строк (complete/error/timeout).
+--   Дефолт: 180 дней для всех завершённых строк (completed/failed).
 --   Подстройте интервал под свои аудит-требования.
 --   Критерий удаления — updated_at (момент последнего изменения строки),
 --   а не created_at, чтобы не трогать строки, закрытые позднее создания.
@@ -49,10 +49,10 @@
 BEGIN;
 
 -- ── Завершённые строки старше 180 дней ──────────────────────────────────────
--- role охватывает и вопросы ('user'), и ответы ('assistant'), и 'tool':
+-- role охватывает и вопросы ('user'), и ответы ('assistant'), и 'system':
 -- все они закрываются через status, поэтому один DELETE покрывает всё.
 DELETE FROM {SCHEMA}.{BUS_TABLE}
-WHERE status IN ('complete', 'error', 'timeout')
+WHERE status IN ('completed', 'failed')
   AND updated_at IS NOT NULL
   AND updated_at < CURRENT_TIMESTAMP - INTERVAL '180 days';
 
@@ -65,13 +65,14 @@ COMMIT;
 -- Greenplum (VACUUM FULL — только при заметной фрагментации, требует exclusive lock):
 --   VACUUM ANALYZE {SCHEMA}.{BUS_TABLE};
 
--- ── Опционально: закрыть зависшие pending/in_progress старше 2 часов ────────
--- AW закрывает сам через 10 мин, но при долгом даунтайме uvicorn могут остаться.
+-- ── Опционально: закрыть зависшие pending/processing старше 2 часов ─────────
+-- AW закрывает draft сам через 10 мин (и best-effort ставит вопросу 'failed'),
+-- но при долгом даунтайме uvicorn строки могут остаться.
 -- Запускать ОТДЕЛЬНО (не в основной транзакции выше), только осознанно:
 --
 -- UPDATE {SCHEMA}.{BUS_TABLE}
--- SET status     = 'timeout',
+-- SET status     = 'failed',
 --     updated_at = CURRENT_TIMESTAMP
 -- WHERE role = 'user'
---   AND status IN ('pending', 'in_progress')
+--   AND status IN ('pending', 'processing')
 --   AND created_at < CURRENT_TIMESTAMP - INTERVAL '2 hours';
