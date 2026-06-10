@@ -81,6 +81,32 @@ def test_br_with_closing_tag_preserves_formatting(doc):
     assert all(r.bold for r in bold_runs)
 
 
+def test_br_void_does_not_break_bold_balance(doc):
+    """H7: void-<br> внутри <b> не ломает баланс стека.
+
+    Раньше <br> пушил лишний кадр, </b> снимал его вместо bold-фрейма —
+    и текст ПОСЛЕ </b> оставался жирным.
+    """
+    p = _add_p(doc)
+    apply_inline_html(p, "<b>x<br>y</b> z", base_size_pt=12)
+    runs = [(r.text, bool(r.bold)) for r in p.runs]
+    # Текст внутри <b> жирный, перевод строки тоже внутри <b>
+    assert ("x", True) in runs
+    assert ("y", True) in runs
+    # Текст после </b> НЕ жирный — баланс стека восстановлен
+    assert (" z", False) in runs
+
+
+def test_double_br_void_does_not_break_bold_balance(doc):
+    """H7: два подряд void-<br> тоже не сдвигают баланс."""
+    p = _add_p(doc)
+    apply_inline_html(p, "<b>a<br><br>b</b> tail", base_size_pt=12)
+    runs = [(r.text, bool(r.bold)) for r in p.runs]
+    assert ("a", True) in runs
+    assert ("b", True) in runs
+    assert (" tail", False) in runs
+
+
 def test_empty_html(doc):
     p = _add_p(doc)
     apply_inline_html(p, "", base_size_pt=12)

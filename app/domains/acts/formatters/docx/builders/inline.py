@@ -87,8 +87,11 @@ class _InlineParser(HTMLParser):
         elif tag == "span":
             self._open_span(dict(attrs), current)
         elif tag == "br":
+            # Void-тег: кадр НЕ пушим (как в handle_startendtag), иначе
+            # закрывающий </b> снял бы лишний кадр вместо bold-фрейма и
+            # текст после </b> остался бы жирным (H7). </br>, если придёт,
+            # игнорируется в handle_endtag.
             self._add_run("\n")
-            self.stack.append(current)  # поглощает </br>, если придёт
         else:
             self.stack.append(current)
 
@@ -118,6 +121,9 @@ class _InlineParser(HTMLParser):
         self.stack.append(replace(current, size_pt=size) if size else current)
 
     def handle_endtag(self, tag):
+        if tag == "br":
+            # Void-тег: handle_starttag кадр не пушил — снимать нечего.
+            return
         if tag == "a" and self._hyperlink is not None:
             self._close_hyperlink()
         if tag == "span" and self._span_kinds:
