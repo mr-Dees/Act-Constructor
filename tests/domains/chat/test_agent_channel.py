@@ -464,6 +464,30 @@ class TestPollOnce:
         assert res["queue_ahead"] is None
         fake_agent_repo.count_pending_before.assert_not_called()
 
+    async def test_processing_question_no_answer_queue_ahead_none(
+        self, mock_conn, settings
+    ):
+        """Вопрос со status='processing', ответа нет, want_queue_position=True →
+        queue_ahead is None и count_pending_before НЕ вызван
+        (queue_ahead имеет смысл только в pending)."""
+        question = {"id": "q-uid", "status": "processing", "created_at": None}
+
+        svc, fake_agent_repo, fake_msg_repo = _make_poll_svc(
+            mock_conn, settings,
+            question=question,
+            answer=None,
+        )
+
+        res = await svc.poll_once(
+            assistant_message_id="msg-1",
+            question_uid="q-uid",
+            want_queue_position=True,
+        )
+
+        assert res["outcome"] == "pending"
+        assert res["queue_ahead"] is None
+        fake_agent_repo.count_pending_before.assert_not_called()
+
     async def test_answer_processing_reasoning_grows_upserts_block(
         self, mock_conn, settings
     ):

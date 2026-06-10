@@ -1,7 +1,7 @@
 """Тесты репозитория chat_messages (mock_conn).
 
 Покрывают streaming-методы Phase 0 «D»: create_streaming, append_block,
-finalize, mark_failed. RMW-стратегия (read-modify-write под FOR UPDATE)
+upsert_block, finalize, mark_failed. RMW-стратегия (read-modify-write под FOR UPDATE)
 проверяется через ассерты на SELECT … FOR UPDATE и последующий UPDATE.
 """
 

@@ -261,6 +261,7 @@ class MessageRepository(BaseRepository):
             # MERGE: финальные блоки с уже встречавшимся block_id ЗАМЕЩАЮТ
             # накопленные (финальная версия reasoning полнее инкрементальной),
             # остальные — дописываются в конец.
+            # Предполагается, что existing не содержит дублей по block_id (инвариант upsert_block/append_block).
             existing_by_id = {
                 b["block_id"]: i
                 for i, b in enumerate(existing)

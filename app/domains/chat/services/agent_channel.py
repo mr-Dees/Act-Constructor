@@ -396,13 +396,14 @@ class AgentChannelService:
         queue_ahead считается только для 'pending' — после взятия в работу
         позиция в очереди не имеет смысла.
         """
-        question = await self._agent_repo().get_by_uid(question_uid)
+        agent_repo = self._agent_repo()
+        question = await agent_repo.get_by_uid(question_uid)
         if not question:
             return None
         status = question.get("status")
         queue_ahead = None
         if status == "pending":
-            queue_ahead = await self._agent_repo().count_pending_before(
+            queue_ahead = await agent_repo.count_pending_before(
                 question["created_at"]
             )
         return {"bus_status": status, "queue_ahead": queue_ahead}
@@ -422,7 +423,7 @@ class AgentChannelService:
           outcome           — 'done' (подписку снять) | 'pending' (ждать дальше);
           question_status   — статус строки-вопроса (None, если строки нет);
           answer_exists     — появилась ли строка-ответ;
-          reasoning_len     — длина текста рассуждений на строке-ответе (0 если нет);
+          reasoning_len     — длина (в символах) текста рассуждений на строке-ответе (0 если нет);
           queue_ahead       — pending-вопросов впереди (None вне фазы pending
                               или при want_queue_position=False);
           answer_updated_at — updated_at строки-ответа (liveness-сигнал).
