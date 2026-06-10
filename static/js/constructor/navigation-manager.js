@@ -86,11 +86,10 @@ export class NavigationManager {
             return;
         }
 
-        // Валидация структуры акта (только для экспорта)
-        if (exportFormats.length > 0) {
-            if (!this._validateStructure()) return;
-            if (!this._validateTables()) return;
-        }
+        // Валидация структуры акта — всегда, перед любым действием:
+        // сохранение «только в БД» проходит те же проверки, что и экспорт.
+        if (!this._validateStructure()) return;
+        if (!this._validateTables()) return;
 
         // Блокируем кнопку
         generateBtn.disabled = true;
