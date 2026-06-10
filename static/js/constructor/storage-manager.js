@@ -258,11 +258,6 @@ export class StorageManager {
 
                 if (confirmed) {
                     try {
-                        // Синхронизируем и сохраняем
-                        if (typeof ItemsRenderer !== 'undefined') {
-                            ItemsRenderer.syncDataToState();
-                        }
-
                         await APIClient.saveActContent(window.currentActId, { saveType: 'manual' });
                         Notifications.success('Изменения сохранены');
                     } catch (err) {

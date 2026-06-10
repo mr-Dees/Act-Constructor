@@ -1,10 +1,12 @@
 /**
  * Менеджер отрисовки элементов.
  * Координирует рендеринг всех типов элементов документа: обычных пунктов,
- * таблиц, текстовых блоков и нарушений. Обеспечивает синхронизацию данных
- * между DOM и глобальным состоянием приложения.
+ * таблиц, текстовых блоков и нарушений. DOM строится из AppState; обратной
+ * синхронизации DOM→state нет — данные пишут live-обработчики ввода
+ * (write-through ячеек, input/blur текстблоков и нарушений).
  */
 import { ItemsTitleEditing } from './items-title-editing.js';
+import { RENDER_CLASSES } from '../render-classes.js';
 import { AppState } from '../state/state-core.js';
 import { TreeUtils } from '../tree/tree-utils.js';
 import { AppConfig } from '../../shared/app-config.js';
@@ -12,6 +14,9 @@ import { ChatEventBus } from '../../shared/chat/chat-event-bus.js';
 import { Notifications } from '../../shared/notifications.js';
 import { buildColgroup } from '../table/colgroup.js';
 import { iterateVisibleCells } from '../table/grid-merges.js';
+import { tableManager } from '../table/table-core.js';
+import { textBlockManager } from '../textblock/textblock-core.js';
+import { violationManager } from '../violation/violation-init.js';
 
 export class ItemsRenderer {
     /**
@@ -33,6 +38,9 @@ export class ItemsRenderer {
         const container = document.getElementById('itemsContainer');
         if (!container) return;
 
+        // Дропдаун ТБ живёт в document.body и переживает innerHTML='' —
+        // закрываем явно, иначе утекает он сам и его document-слушатель.
+        this._closeTbDropdownInItems();
         this._domIndex.clear();
         container.innerHTML = '';
         tableManager.clearSelection();
@@ -62,6 +70,10 @@ export class ItemsRenderer {
             console.warn('[ItemsRenderer.updateItem] узел не найден в _domIndex или AppState, fallback на renderAll:', nodeId);
             return this.renderAll();
         }
+
+        // Заменяемое поддерево может содержать бейдж-якорь открытого дропдауна ТБ —
+        // закрываем дропдаун (он в document.body) вместе с его document-слушателем.
+        this._closeTbDropdownInItems();
 
         // Чистим индекс по всему поддереву старого DOM перед заменой
         this._purgeSubtreeFromIndex(oldEl);
@@ -191,13 +203,13 @@ export class ItemsRenderer {
             const id = el.dataset.tableId;
             if (id) this._domIndex.delete(`table:${id}`);
         });
-        // textblock-editor / text-block-section
+        // textblock-section / textblock-editor (ищем по data-атрибуту: он есть у обоих)
         rootEl.querySelectorAll('[data-text-block-id]').forEach(el => {
             const id = el.dataset.textBlockId;
             if (id) this._domIndex.delete(`textblock:${id}`);
         });
         // violation-section
-        rootEl.querySelectorAll('.violation-section').forEach(el => {
+        rootEl.querySelectorAll(`.${RENDER_CLASSES.VIOLATION_SECTION}`).forEach(el => {
             const id = el.dataset.violationId;
             if (id) this._domIndex.delete(`violation:${id}`);
         });
@@ -762,33 +774,6 @@ export class ItemsRenderer {
     }
 
     /**
-     * Перерисовка только конкретной таблицы (оптимизация).
-     * Ширины колонок рендерятся из colWidths через colgroup — отдельное
-     * сохранение/восстановление размеров не требуется.
-     * @param {string} tableId - ID таблицы для перерисовки
-     */
-    static renderSingleTable(tableId) {
-        const section = document.querySelector(`.table-section[data-table-id="${tableId}"]`);
-        if (!section) {
-            // Если секция не найдена, делаем полную перерисовку
-            this.renderAll();
-            return;
-        }
-
-        const table = AppState.tables[tableId];
-        if (!table) return;
-
-        const tableNode = this._findNodeById(table.nodeId);
-        if (!tableNode) return;
-
-        // Перерисовываем таблицу
-        const newTableSection = this.renderTable(table, tableNode);
-        section.replaceWith(newTableSection);
-
-        tableManager.attachEventListeners();
-    }
-
-    /**
      * Поиск узла в дереве по ID (рекурсивный обход).
      * @param {string} id - ID узла для поиска
      * @param {Object} [node=AppState.treeData] - Узел, с которого начинать поиск
@@ -808,125 +793,6 @@ export class ItemsRenderer {
         return null;
     }
 
-    /**
-     * Синхронизация данных из DOM обратно в глобальное состояние AppState.
-     * Извлекает актуальные значения из редактируемых элементов (таблицы, текстовые блоки,
-     * нарушения) и обновляет соответствующие объекты в состоянии.
-     * Вызывается перед сохранением или экспортом документа.
-     */
-    static syncDataToState() {
-        this._syncTables();
-        this._syncTextBlocks();
-        this._syncViolations();
-    }
-
-    /**
-     * Синхронизация содержимого всех таблиц из DOM в AppState.
-     * Обновляет текст ячеек в матричной структуре grid.
-     * @private
-     */
-    static _syncTables() {
-        document.querySelectorAll('.table-section').forEach(section => {
-            const tableId = section.dataset.tableId;
-            const table = AppState.tables[tableId];
-            if (!table) return;
-
-            const tableEl = section.querySelector('.editable-table');
-            if (!tableEl) return;
-
-            // Обновляем содержимое ячеек
-            tableEl.querySelectorAll('tr').forEach(tr => {
-                tr.querySelectorAll('td, th').forEach(cell => {
-                    const row = parseInt(cell.dataset.row);
-                    const col = parseInt(cell.dataset.col);
-
-                    const cellData = table.grid?.[row]?.[col];
-                    if (cellData && !cellData.isSpanned) {
-                        cellData.content = cell.textContent.trim();
-                    }
-                });
-            });
-        });
-    }
-
-    /**
-     * Синхронизация содержимого всех текстовых блоков из DOM в AppState.
-     * Сохраняет HTML-контент для поддержки форматирования.
-     * @private
-     */
-    static _syncTextBlocks() {
-        document.querySelectorAll('.text-block-section').forEach(section => {
-            const textBlockId = section.dataset.textBlockId;
-            const textBlock = AppState.textBlocks[textBlockId];
-            if (!textBlock) return;
-
-            const editor = section.querySelector('.text-block-editor');
-            if (editor) {
-                textBlock.content = editor.innerHTML;
-            }
-        });
-    }
-
-    /**
-     * Синхронизация данных всех нарушений из DOM в AppState.
-     * Обновляет поля ввода, списки описаний и опциональные поля.
-     * @private
-     */
-    static _syncViolations() {
-        document.querySelectorAll('.violation-section').forEach(section => {
-            const violationId = section.dataset.violationId;
-            const violation = AppState.violations[violationId];
-            if (!violation) return;
-
-            this._syncViolationFields(section, violation);
-        });
-    }
-
-    /**
-     * Синхронизация полей конкретного нарушения.
-     * Обновляет основные поля, список описаний и опциональные блоки.
-     * @param {HTMLElement} section - Секция нарушения
-     * @param {Object} violation - Объект нарушения из AppState
-     * @private
-     */
-    static _syncViolationFields(section, violation) {
-        // Синхронизация основных полей
-        const violatedInput = section.querySelector('input[data-field="violated"]');
-        if (violatedInput) {
-            violation.violated = violatedInput.value;
-        }
-
-        const establishedInput = section.querySelector('textarea[data-field="established"]');
-        if (establishedInput) {
-            violation.established = establishedInput.value;
-        }
-
-        // Синхронизация списка описаний (метрик)
-        const descItems = section.querySelectorAll('.violation-desc-item');
-        if (descItems.length > 0) {
-            violation.descriptionList.items = Array.from(descItems, item => item.value);
-        }
-
-        // Синхронизация опциональных полей
-        this._syncOptionalViolationFields(section, violation);
-    }
-
-    /**
-     * Синхронизация опциональных полей нарушения (причины, последствия, ответственные).
-     * @param {HTMLElement} section - Секция нарушения
-     * @param {Object} violation - Объект нарушения из AppState
-     * @private
-     */
-    static _syncOptionalViolationFields(section, violation) {
-        const optionalFields = ['reasons', 'consequences', 'responsible'];
-
-        optionalFields.forEach(field => {
-            const textarea = section.querySelector(`textarea[data-field="${field}"]`);
-            if (textarea && violation[field]) {
-                violation[field].content = textarea.value;
-            }
-        });
-    }
 }
 
 // Подписчик на 'node:tb-changed' — обновляет бейджи ТБ на шаге 2 без полного

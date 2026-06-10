@@ -6,7 +6,6 @@
  */
 import { App } from './app.js';
 import { FormatMenuManager } from './header/format-menu-manager.js';
-import { ItemsRenderer } from './items/items-renderer.js';
 import { StorageManager } from './storage-manager.js';
 import { ValidationAct } from './validation/validation-act.js';
 import { ValidationTable } from './validation/validation-table.js';
@@ -87,16 +86,10 @@ export class NavigationManager {
             return;
         }
 
-        // Валидация структуры акта (только для экспорта)
-        if (exportFormats.length > 0) {
-            if (!this._validateStructure()) return;
-            if (!this._validateTables()) return;
-        }
-
-        // Синхронизация данных из DOM в AppState
-        if (typeof ItemsRenderer !== 'undefined') {
-            ItemsRenderer.syncDataToState();
-        }
+        // Валидация структуры акта — всегда, перед любым действием:
+        // сохранение «только в БД» проходит те же проверки, что и экспорт.
+        if (!this._validateStructure()) return;
+        if (!this._validateTables()) return;
 
         // Блокируем кнопку
         generateBtn.disabled = true;

@@ -4,6 +4,10 @@
 
 import { LinkFootnoteContextMenu } from '../context-menu/context-menu-links-footnotes.js';
 import { TextBlockManager } from './textblock-core.js';
+// Ниже на module-level оборачивается handleEditorFocus — базовый метод должен
+// быть уже навешен на прототип (textblock-editor.js), независимо от того,
+// кто импортировал этот модуль первым (entry или, например, acts-menu).
+import './textblock-editor.js';
 
 // Создаем глобальный экземпляр менеджера контекстного меню
 export const linkFootnoteContextMenu = new LinkFootnoteContextMenu();

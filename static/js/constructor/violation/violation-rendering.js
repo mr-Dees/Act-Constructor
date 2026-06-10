@@ -5,6 +5,7 @@
 
 import { PreviewManager } from '../preview/preview.js';
 import { ViolationManager } from './violation-core.js';
+import { RENDER_CLASSES } from '../render-classes.js';
 import { AppConfig } from '../../shared/app-config.js';
 
 // Расширение ViolationManager
@@ -121,7 +122,7 @@ Object.assign(ViolationManager.prototype, {
         itemDiv.className = 'content-item';
 
         const textarea = document.createElement('textarea');
-        textarea.className = 'violation-textarea';
+        textarea.className = RENDER_CLASSES.VIOLATION_TEXTAREA;
         textarea.placeholder = 'Описание кейса';
         textarea.value = item.content;
         textarea.rows = 3;
@@ -179,7 +180,7 @@ Object.assign(ViolationManager.prototype, {
 
         const captionInput = document.createElement('input');
         captionInput.type = 'text';
-        captionInput.className = 'violation-list-input';
+        captionInput.className = RENDER_CLASSES.VIOLATION_LIST_INPUT;
         captionInput.placeholder = 'Подпись к изображению';
         captionInput.value = item.caption;
 
@@ -218,7 +219,7 @@ Object.assign(ViolationManager.prototype, {
         itemDiv.className = 'content-item';
 
         const textarea = document.createElement('textarea');
-        textarea.className = 'violation-textarea';
+        textarea.className = RENDER_CLASSES.VIOLATION_TEXTAREA;
         textarea.placeholder = 'Произвольный текст';
         textarea.value = item.content;
         textarea.rows = 4;

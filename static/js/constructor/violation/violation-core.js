@@ -4,6 +4,7 @@
  */
 import { ChangelogTracker } from '../changelog-tracker.js';
 import { PreviewManager } from '../preview/preview.js';
+import { RENDER_CLASSES } from '../render-classes.js';
 import { AppConfig } from '../../shared/app-config.js';
 
 export class ViolationManager {
@@ -16,6 +17,11 @@ export class ViolationManager {
         // удаляется через removeViolation при разрушении узла дерева — без этого Map
         // рос бесконтрольно при switch'е между актами / удалении нарушений.
         this.activeViolations = new Map();
+        // AbortController'ы document-слушателей drop по violation.id
+        // (см. setupFileDragAndDrop): abort при повторной установке поля,
+        // удалении нарушения и destroy() — иначе слушатели копились
+        // на каждый ре-рендер поля дополнительных материалов.
+        this._fileDropControllers = new Map();
         // Текущий активный контейнер для paste (только когда мышь внутри)
         this.currentActiveContainer = null;
         // Позиция курсора для вставки (null означает конец списка)
@@ -41,6 +47,11 @@ export class ViolationManager {
     removeViolation(violationId) {
         if (!violationId) return;
         this.activeViolations.delete(violationId);
+        const controller = this._fileDropControllers.get(violationId);
+        if (controller) {
+            controller.abort();
+            this._fileDropControllers.delete(violationId);
+        }
     }
 
     /**
@@ -49,6 +60,8 @@ export class ViolationManager {
      */
     destroy() {
         this.activeViolations.clear();
+        this._fileDropControllers.forEach(controller => controller.abort());
+        this._fileDropControllers.clear();
         this.currentActiveContainer = null;
         this.cursorInsertPosition = null;
         this.selectedViolation = null;
@@ -63,7 +76,7 @@ export class ViolationManager {
      */
     createViolationElement(violation, node) {
         const section = document.createElement('div');
-        section.className = 'violation-section';
+        section.className = RENDER_CLASSES.VIOLATION_SECTION;
         section.dataset.violationId = violation.id;
 
         const columnsContainer = document.createElement('div');
@@ -79,7 +92,7 @@ export class ViolationManager {
         violatedColumn.appendChild(violatedLabel);
 
         const violatedTextarea = document.createElement('textarea');
-        violatedTextarea.className = 'violation-textarea';
+        violatedTextarea.className = RENDER_CLASSES.VIOLATION_TEXTAREA;
         violatedTextarea.placeholder = 'Опишите нарушение...';
         violatedTextarea.value = violation.violated || '';
         violatedTextarea.rows = 4;
@@ -112,7 +125,7 @@ export class ViolationManager {
         establishedColumn.appendChild(establishedLabel);
 
         const establishedTextarea = document.createElement('textarea');
-        establishedTextarea.className = 'violation-textarea';
+        establishedTextarea.className = RENDER_CLASSES.VIOLATION_TEXTAREA;
         establishedTextarea.placeholder = 'Опишите установленное...';
         establishedTextarea.value = violation.established || '';
         establishedTextarea.rows = 4;
@@ -275,7 +288,7 @@ export class ViolationManager {
 
         } else if (type === 'text') {
             const textarea = document.createElement('textarea');
-            textarea.className = 'violation-textarea';
+            textarea.className = RENDER_CLASSES.VIOLATION_TEXTAREA;
             textarea.placeholder = label ? `Введите ${label.toLowerCase()}...` : '...';
             textarea.value = violation[fieldName].content || '';
             textarea.rows = 3;
@@ -308,7 +321,7 @@ export class ViolationManager {
 
             const input = document.createElement('input');
             input.type = 'text';
-            input.className = 'violation-list-input';
+            input.className = RENDER_CLASSES.VIOLATION_LIST_INPUT;
             input.value = item;
             input.placeholder = `Пункт ${index + 1}`;
 
