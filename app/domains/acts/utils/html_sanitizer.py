@@ -146,3 +146,50 @@ def sanitize_act_data(data) -> None:
             field.content = sanitize_html(field.content)
 
     sanitize_tree_nodes(data.tree)
+
+
+def sanitize_act_content_dict(content: dict) -> None:
+    """
+    Чистит HTML/plain-поля контента в dict-форме {tree, textBlocks, violations}.
+
+    Зеркало sanitize_act_data для контента, загруженного из БД как plain-dict
+    (pre-snapshot в AuditLogService.restore_version, pbe-6): состав очищаемых
+    полей тот же. Таблицы НЕ трогаются — ячейки хранятся дословно (инвариант
+    «всё на текст», см. TestSaveContentTableCellsStoredVerbatim). Изменяет
+    dict на месте; отсутствующие ключи пропускает, новых не добавляет.
+    """
+    if not isinstance(content, dict):
+        return
+
+    for block in (content.get("textBlocks") or {}).values():
+        if isinstance(block, dict) and "content" in block:
+            block["content"] = sanitize_html(block["content"])
+
+    for violation in (content.get("violations") or {}).values():
+        if not isinstance(violation, dict):
+            continue
+        for html_field in ("violated", "established"):
+            if html_field in violation:
+                violation[html_field] = sanitize_html(violation[html_field])
+        dl = violation.get("descriptionList")
+        if isinstance(dl, dict) and isinstance(dl.get("items"), list):
+            dl["items"] = [sanitize_plain_text(item) for item in dl["items"]]
+        ac = violation.get("additionalContent")
+        if isinstance(ac, dict) and isinstance(ac.get("items"), list):
+            for item in ac["items"]:
+                if not isinstance(item, dict):
+                    continue
+                if "content" in item:
+                    item["content"] = sanitize_html(item["content"])
+                if "caption" in item:
+                    item["caption"] = sanitize_plain_text(item["caption"])
+                if "filename" in item:
+                    item["filename"] = sanitize_plain_text(item["filename"])
+        for field_name in ("reasons", "consequences", "responsible", "recommendations"):
+            field = violation.get(field_name)
+            if isinstance(field, dict) and "content" in field:
+                field["content"] = sanitize_html(field["content"])
+
+    tree = content.get("tree")
+    if isinstance(tree, dict):
+        sanitize_tree_nodes(tree)

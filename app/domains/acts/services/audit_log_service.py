@@ -4,7 +4,7 @@ import logging
 
 from app.domains.acts.schemas.act_content import ActDataSchema
 from app.domains.acts.repositories.act_content import ActContentRepository
-from app.domains.acts.utils.html_sanitizer import sanitize_act_data
+from app.domains.acts.utils.html_sanitizer import sanitize_act_content_dict, sanitize_act_data
 
 logger = logging.getLogger("audit_workstation.service.acts.audit_log")
 
@@ -64,6 +64,10 @@ class AuditLogService:
             # редактора (см. saveType в ActDataSchema).
             current = await content_repo.get_content(act_id)
             if current:
+                # pbe-6: pre-snapshot симметричен post-snapshot'у — HTML-поля
+                # чистятся той же санитизацией (dict-форма), иначе restore
+                # такого снимка вернул бы в БД несанитизированный HTML.
+                sanitize_act_content_dict(current)
                 await self.versions_repo.create_version(
                     act_id=act_id,
                     username=username,
