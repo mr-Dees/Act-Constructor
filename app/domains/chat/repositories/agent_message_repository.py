@@ -3,6 +3,7 @@
 import json
 import logging
 import uuid
+from datetime import datetime
 
 import asyncpg
 
@@ -147,7 +148,7 @@ class AgentMessageRepository(BaseRepository):
             uid,
         )
 
-    async def count_pending_before(self, created_at) -> int:
+    async def count_pending_before(self, created_at: datetime) -> int:
         """Число pending-вопросов в очереди агента, созданных раньше ``created_at``.
 
         Очередь глобальная (агент один на всех пользователей), поэтому фильтра
@@ -165,8 +166,8 @@ class AgentMessageRepository(BaseRepository):
         self,
         user_id: str,
         *,
-        pending_created_after,
-        processing_updated_after,
+        pending_created_after: datetime,
+        processing_updated_after: datetime,
     ) -> int:
         """Считает активные вопросы пользователя в bus-таблице с двухфазными отсечками.
 

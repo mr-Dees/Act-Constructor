@@ -318,7 +318,6 @@ async def test_set_status_executes_update(mock_conn):
 # ── count_pending_before ─────────────────────────────────────────────────
 
 
-@pytest.mark.asyncio
 async def test_count_pending_before_filters_role_status_and_time(mock_conn):
     """count_pending_before считает глобальную очередь pending-вопросов до отметки времени."""
     repo = AgentMessageRepository(mock_conn)
@@ -333,7 +332,6 @@ async def test_count_pending_before_filters_role_status_and_time(mock_conn):
 # ── count_active_for_user ────────────────────────────────────────────────
 
 
-@pytest.mark.asyncio
 async def test_count_active_for_user_two_phase_cutoffs(mock_conn):
     """count_active_for_user принимает раздельные отсечки для pending и processing."""
     repo = AgentMessageRepository(mock_conn)
