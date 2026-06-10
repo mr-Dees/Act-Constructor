@@ -190,10 +190,12 @@ class AgentChannelPoller:
                 if res["reasoning_len"] > entry["last_reasoning_len"]:
                     entry["last_reasoning_len"] = res["reasoning_len"]
                     alive = True
-                if entry["last_answer_updated_at"] is not None:
-                    if res["answer_updated_at"] != entry["last_answer_updated_at"]:
-                        alive = True  # первое наблюдение — baseline, не активность
                 if res["answer_updated_at"] is not None:
+                    # Первое наблюдение — baseline, не активность; исчезновение
+                    # строки-ответа (None) активностью тем более не считается.
+                    if (entry["last_answer_updated_at"] is not None
+                            and res["answer_updated_at"] != entry["last_answer_updated_at"]):
+                        alive = True
                     entry["last_answer_updated_at"] = res["answer_updated_at"]
                 qa = res["queue_ahead"]
                 if entry["phase"] == "pending" and qa is not None:
