@@ -120,12 +120,18 @@ class TestSaveContentUsesTransaction:
             textblocks={"tb_1": tb_data},
             violations={"v_1": v_data},
         )
-        # Узел-владелец таблицы (n1) должен быть в дереве, иначе orphan-фильтр
-        # _save_tables срежет её и executemany для act_tables не вызовется.
+        # Узлы-владельцы (n1/n2/n3) должны быть в дереве, иначе orphan-фильтр
+        # отбросит записи и executemany для них не вызовется.
         data.tree = {
             "id": "root", "label": "Акт",
-            "children": [{"id": "n1", "label": "Таблица", "type": "table",
-                          "tableId": "tbl_1", "children": []}],
+            "children": [
+                {"id": "n1", "label": "Таблица", "type": "table",
+                 "tableId": "tbl_1", "children": []},
+                {"id": "n2", "label": "ТБ", "type": "textblock",
+                 "textBlockId": "tb_1", "children": []},
+                {"id": "n3", "label": "Нарушение", "type": "violation",
+                 "violationId": "v_1", "children": []},
+            ],
         }
         await repo.save_content(act_id=1, data=data, username="user1")
 
@@ -313,3 +319,111 @@ class TestSaveTablesOrphanFilter:
             if "act_tables" in c.args[0]
         ]
         assert table_inserts, "валидная таблица не вставлена"
+
+
+def _make_textblock(node_id: str) -> MagicMock:
+    tb = MagicMock()
+    tb.nodeId = node_id
+    tb.content = "текст"
+    tb.formatting = MagicMock()
+    tb.formatting.model_dump.return_value = {}
+    return tb
+
+
+def _make_violation(node_id: str) -> MagicMock:
+    v = MagicMock()
+    v.nodeId = node_id
+    v.violated = "нарушено"
+    v.established = "установлено"
+    for attr in ("descriptionList", "additionalContent", "reasons",
+                 "consequences", "responsible", "recommendations"):
+        m = MagicMock()
+        m.model_dump.return_value = {}
+        setattr(v, attr, m)
+    return v
+
+
+class TestSaveTextblocksViolationsOrphanFilter:
+    """pbe-4 / §6 п.11: orphan-фильтр единообразен для всех словарей.
+
+    Записи textBlocks/violations, чей nodeId отсутствует в дереве,
+    отбрасываются при сохранении — как уже сделано для tables.
+    """
+
+    _TREE_WITH_NODES = {
+        "id": "root", "label": "Акт",
+        "children": [
+            {"id": "n_tb", "label": "ТБ", "type": "textblock",
+             "textBlockId": "tb_ok", "children": []},
+            {"id": "n_v", "label": "Нарушение", "type": "violation",
+             "violationId": "v_ok", "children": []},
+        ],
+    }
+
+    async def test_orphan_textblock_not_inserted(self, mock_conn):
+        """Текстблок с nodeId не из дерева не попадает в INSERT."""
+        repo = ActContentRepository(mock_conn)
+        mock_conn.fetchval.return_value = None
+        mock_conn.fetch.return_value = []
+
+        data = _make_act_data(textblocks={"tb_ghost": _make_textblock("ghost")})
+        await repo.save_content(act_id=1, data=data, username="user1")
+
+        for c in mock_conn.executemany.call_args_list:
+            if "act_textblocks" in c.args[0]:
+                pytest.fail("orphan-текстблок попал в INSERT act_textblocks")
+
+    async def test_orphan_violation_not_inserted(self, mock_conn):
+        """Нарушение с nodeId не из дерева не попадает в INSERT."""
+        repo = ActContentRepository(mock_conn)
+        mock_conn.fetchval.return_value = None
+        mock_conn.fetch.return_value = []
+
+        data = _make_act_data(violations={"v_ghost": _make_violation("ghost")})
+        await repo.save_content(act_id=1, data=data, username="user1")
+
+        for c in mock_conn.executemany.call_args_list:
+            if "act_violations" in c.args[0]:
+                pytest.fail("orphan-нарушение попало в INSERT act_violations")
+
+    async def test_valid_textblock_and_violation_inserted(self, mock_conn):
+        """Записи с узлом-владельцем в дереве сохраняются (фильтр не сверх-агрессивен)."""
+        repo = ActContentRepository(mock_conn)
+        mock_conn.fetchval.return_value = None
+        mock_conn.fetch.return_value = []
+
+        data = _make_act_data(
+            textblocks={"tb_ok": _make_textblock("n_tb")},
+            violations={"v_ok": _make_violation("n_v")},
+        )
+        data.tree = dict(self._TREE_WITH_NODES)
+        await repo.save_content(act_id=1, data=data, username="user1")
+
+        sqls = [c.args[0] for c in mock_conn.executemany.call_args_list]
+        assert any("act_textblocks" in s for s in sqls), "валидный текстблок не вставлен"
+        assert any("act_violations" in s for s in sqls), "валидное нарушение не вставлено"
+
+    async def test_mixed_orphans_dropped_valid_kept(self, mock_conn):
+        """Смешанный словарь: orphan отброшен, валидная запись вставлена."""
+        repo = ActContentRepository(mock_conn)
+        mock_conn.fetchval.return_value = None
+        mock_conn.fetch.return_value = []
+
+        data = _make_act_data(
+            textblocks={
+                "tb_ok": _make_textblock("n_tb"),
+                "tb_ghost": _make_textblock("ghost"),
+            },
+        )
+        data.tree = dict(self._TREE_WITH_NODES)
+        await repo.save_content(act_id=1, data=data, username="user1")
+
+        tb_inserts = [
+            c for c in mock_conn.executemany.call_args_list
+            if "act_textblocks" in c.args[0]
+        ]
+        assert len(tb_inserts) == 1
+        rows = tb_inserts[0].args[1]
+        # Вставлена ровно одна запись — валидная
+        assert len(rows) == 1
+        assert rows[0][3] == "tb_ok"  # $4 — textblock_id

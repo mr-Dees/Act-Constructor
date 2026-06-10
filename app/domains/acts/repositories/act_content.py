@@ -333,8 +333,14 @@ class ActContentRepository(BaseRepository):
         )
 
         args: list[tuple] = []
+        dropped = 0
         for tb_id, tb_data in data.textBlocks.items():
             node_id = tb_data.nodeId
+            # Orphan-фильтр: текстблок без узла-владельца в дереве не пишется
+            # (единообразно с _save_tables, см. pbe-4).
+            if node_id not in node_map:
+                dropped += 1
+                continue
             info = node_map.get(node_id, {})
             parent_node_id = info.get("parent_item_node_id")
             audit_point_id = audit_point_map.get(parent_node_id) if parent_node_id else None
@@ -349,6 +355,12 @@ class ActContentRepository(BaseRepository):
                 tb_data.content,
                 json.dumps(tb_data.formatting.model_dump()),
             ))
+
+        if dropped:
+            logger.warning(
+                "Пропущено %d текстблок(ов) без узла-владельца в дереве (act_id=%s)",
+                dropped, act_id,
+            )
 
         if args:
             await self.conn.executemany(
@@ -374,8 +386,14 @@ class ActContentRepository(BaseRepository):
         )
 
         args: list[tuple] = []
+        dropped = 0
         for v_id, v_data in data.violations.items():
             node_id = v_data.nodeId
+            # Orphan-фильтр: нарушение без узла-владельца в дереве не пишется
+            # (единообразно с _save_tables, см. pbe-4).
+            if node_id not in node_map:
+                dropped += 1
+                continue
             info = node_map.get(node_id, {})
             parent_node_id = info.get("parent_item_node_id")
             audit_point_id = audit_point_map.get(parent_node_id) if parent_node_id else None
@@ -396,6 +414,12 @@ class ActContentRepository(BaseRepository):
                 json.dumps(v_data.responsible.model_dump()),
                 json.dumps(v_data.recommendations.model_dump()),
             ))
+
+        if dropped:
+            logger.warning(
+                "Пропущено %d нарушение(й) без узла-владельца в дереве (act_id=%s)",
+                dropped, act_id,
+            )
 
         if args:
             await self.conn.executemany(
