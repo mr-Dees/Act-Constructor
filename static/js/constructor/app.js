@@ -12,6 +12,7 @@ import { ItemsRenderer } from './items/items-renderer.js';
 import { LifecycleHelper } from './lifecycle-helper.js';
 import { NavigationManager } from './navigation-manager.js';
 import { PreviewManager } from './preview/preview.js';
+import { RENDER_CLASSES } from './render-classes.js';
 import { AppState } from './state/state-core.js';
 import { StorageManager } from './storage-manager.js';
 import { AppConfig } from '../shared/app-config.js';
@@ -226,7 +227,7 @@ export class App {
                 // Аналогично для активного textblock-редактора (его blur синхронит innerHTML
                 // в textBlock.content через handleEditorBlur).
                 const activeEl = document.activeElement;
-                if (activeEl && activeEl.classList?.contains('textblock-editor')) {
+                if (activeEl && activeEl.classList?.contains(RENDER_CLASSES.TEXTBLOCK_EDITOR)) {
                     activeEl.blur();
                 }
 

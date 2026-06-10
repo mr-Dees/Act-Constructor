@@ -4,6 +4,7 @@
 import { ChangelogTracker } from '../changelog-tracker.js';
 import { PreviewManager } from '../preview/preview.js';
 import { TextBlockManager } from './textblock-core.js';
+import { RENDER_CLASSES } from '../render-classes.js';
 import { AppConfig } from '../../shared/app-config.js';
 import { SafeHTML } from '../../shared/sanitize.js';
 
@@ -13,7 +14,7 @@ Object.assign(TextBlockManager.prototype, {
      */
     createTextBlockElement(textBlock, node) {
         const section = document.createElement('div');
-        section.className = 'textblock-section';
+        section.className = RENDER_CLASSES.TEXTBLOCK_SECTION;
         section.dataset.textBlockId = textBlock.id;
 
         const editor = this.createEditor(textBlock);
@@ -27,7 +28,7 @@ Object.assign(TextBlockManager.prototype, {
      */
     createEditor(textBlock) {
         const editor = document.createElement('div');
-        editor.className = 'textblock-editor';
+        editor.className = RENDER_CLASSES.TEXTBLOCK_EDITOR;
         editor.dataset.textBlockId = textBlock.id;
         editor.dataset.placeholder = 'Введите текст...';
         // Sanitize: textBlock.content приходит из БД, мог быть сохранён до того,

@@ -5,6 +5,7 @@
  * между DOM и глобальным состоянием приложения.
  */
 import { ItemsTitleEditing } from './items-title-editing.js';
+import { RENDER_CLASSES } from '../render-classes.js';
 import { AppState } from '../state/state-core.js';
 import { TreeUtils } from '../tree/tree-utils.js';
 import { AppConfig } from '../../shared/app-config.js';
@@ -197,7 +198,7 @@ export class ItemsRenderer {
             if (id) this._domIndex.delete(`textblock:${id}`);
         });
         // violation-section
-        rootEl.querySelectorAll('.violation-section').forEach(el => {
+        rootEl.querySelectorAll(`.${RENDER_CLASSES.VIOLATION_SECTION}`).forEach(el => {
             const id = el.dataset.violationId;
             if (id) this._domIndex.delete(`violation:${id}`);
         });
