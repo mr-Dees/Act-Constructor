@@ -15,6 +15,15 @@ Object.assign(ViolationManager.prototype, {
      * @param {HTMLElement} contentContainer - Родительский контейнер
      */
     setupFileDragAndDrop(itemsContainer, violation, contentContainer) {
+        // Повторная установка поля для того же нарушения снимает прежний
+        // document-слушатель drop — иначе он накапливался на каждый ре-рендер
+        // и удерживал отсоединённые контейнеры. Abort также дергают
+        // removeViolation (удаление узла) и destroy() (switch акта).
+        const prevController = this._fileDropControllers.get(violation.id);
+        if (prevController) prevController.abort();
+        const dropController = new AbortController();
+        this._fileDropControllers.set(violation.id, dropController);
+
         // Счетчик для отслеживания входов/выходов (для вложенных элементов)
         let dragCounter = 0;
         // Флаг активного файлового drag
@@ -176,12 +185,13 @@ Object.assign(ViolationManager.prototype, {
 
         itemsContainer.addEventListener('dragend', resetDragState);
 
-        // Сброс при потере фокуса или других событиях
+        // Сброс при потере фокуса или других событиях.
+        // Слушатель живёт до abort'а контроллера (см. начало метода).
         document.addEventListener('drop', (e) => {
             // Если drop произошел вне нашего контейнера
             if (!itemsContainer.contains(e.target)) {
                 resetDragState();
             }
-        });
+        }, { signal: dropController.signal });
     }
 });

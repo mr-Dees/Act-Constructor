@@ -17,6 +17,11 @@ export class ViolationManager {
         // удаляется через removeViolation при разрушении узла дерева — без этого Map
         // рос бесконтрольно при switch'е между актами / удалении нарушений.
         this.activeViolations = new Map();
+        // AbortController'ы document-слушателей drop по violation.id
+        // (см. setupFileDragAndDrop): abort при повторной установке поля,
+        // удалении нарушения и destroy() — иначе слушатели копились
+        // на каждый ре-рендер поля дополнительных материалов.
+        this._fileDropControllers = new Map();
         // Текущий активный контейнер для paste (только когда мышь внутри)
         this.currentActiveContainer = null;
         // Позиция курсора для вставки (null означает конец списка)
@@ -42,6 +47,11 @@ export class ViolationManager {
     removeViolation(violationId) {
         if (!violationId) return;
         this.activeViolations.delete(violationId);
+        const controller = this._fileDropControllers.get(violationId);
+        if (controller) {
+            controller.abort();
+            this._fileDropControllers.delete(violationId);
+        }
     }
 
     /**
@@ -50,6 +60,8 @@ export class ViolationManager {
      */
     destroy() {
         this.activeViolations.clear();
+        this._fileDropControllers.forEach(controller => controller.abort());
+        this._fileDropControllers.clear();
         this.currentActiveContainer = null;
         this.cursorInsertPosition = null;
         this.selectedViolation = null;
