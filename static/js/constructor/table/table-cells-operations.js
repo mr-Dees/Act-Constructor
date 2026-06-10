@@ -840,12 +840,21 @@ export class TableCellsOperations {
     }
 
     /**
-     * Выделяет ячейку
+     * Выделяет ячейку; повторный вызов по уже выбранной — снимает выделение (toggle).
+     * Дублей в selectedCells не бывает: раньше безусловный push при повторном
+     * Ctrl+клике клал ту же ячейку дважды и ломал счётчик mergeCells (M.14).
      * @param {HTMLElement} cell - DOM-элемент ячейки
      */
     selectCell(cell) {
-        cell.classList.add('selected');
-        this.tableManager.selectedCells.push(cell);
+        const idx = this.tableManager.selectedCells.indexOf(cell);
+        if (idx !== -1) {
+            // Повторный клик по выбранной ячейке — снимаем выделение и подсветку.
+            cell.classList.remove('selected');
+            this.tableManager.selectedCells.splice(idx, 1);
+        } else {
+            cell.classList.add('selected');
+            this.tableManager.selectedCells.push(cell);
+        }
         AppState.selectedCells = this.tableManager.selectedCells;
     }
 
