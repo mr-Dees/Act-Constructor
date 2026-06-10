@@ -10,14 +10,25 @@ from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
+# Жёсткие границы таблиц и шрифта текстблоков — единый источник для
+# Field-констрейнтов схем ниже и эндпоинта GET /acts/limits (api/limits.py).
+TABLE_MAX_ROWS = 64
+TABLE_MAX_COLS = 16
+FONT_SIZE_MIN = 8
+FONT_SIZE_MAX = 72
+
 # Лимиты картинок нарушений (4.3.M.2 + 5.2.2). Лимит длины url — константа:
-# схема статична и не может читать настройки; 15 млн символов base64
-# ≈ 11 МБ бинарных данных — заведомо выше пользовательского лимита
-# ACTS__IMAGES__MAX_FILE_SIZE, но отсекает DoS-payload.
+# схема статична и не может читать настройки. Инвариант согласованности:
+# константа обязана быть заведомо выше ACTS__IMAGES__MAX_FILE_SIZE с учётом
+# base64-оверхеда (×4/3 + префикс data:image/...;base64,): 10 МБ файла
+# ≈ 14 млн символов data-URL < 15 млн. Пин — тест
+# test_url_max_length_covers_max_file_size_in_base64.
 VIOLATION_IMAGE_URL_MAX_LENGTH = 15_000_000
 VIOLATION_CONTENT_ITEMS_MAX = 50
 
 # Whitelist data-URL картинок: только растровые форматы (без SVG — XSS).
+# Согласован с ACTS__IMAGES__ALLOWED_MIME_TYPES (пин — тест
+# test_mime_whitelist_matches_schema_url_whitelist).
 _IMAGE_DATA_URL_RE = re.compile(r"^data:image/(png|jpe?g|gif|webp);base64,")
 
 
@@ -44,11 +55,11 @@ class TableCellSchema(BaseModel):
     content: str = Field(default="", description="Содержимое ячейки")
     isHeader: bool = Field(default=False, description="Заголовок")
     colSpan: int = Field(
-        default=1, ge=1, le=16,
+        default=1, ge=1, le=TABLE_MAX_COLS,
         description="Число объединённых колонок (1..16, по лимиту колонок таблицы)"
     )
     rowSpan: int = Field(
-        default=1, ge=1, le=64,
+        default=1, ge=1, le=TABLE_MAX_ROWS,
         description="Число объединённых строк (1..64, по лимиту строк таблицы)"
     )
     isSpanned: bool = Field(default=False, description="Часть объединения")
@@ -85,12 +96,12 @@ class TableSchema(BaseModel):
     grid: list[list[TableCellSchema]] = Field(
         default_factory=list,
         description="Матрица ячеек",
-        max_length=64
+        max_length=TABLE_MAX_ROWS
     )
     colWidths: list[int] = Field(
         default_factory=list,
         description="Относительные веса ширины колонок (целые > 0; нормируются по сумме)",
-        max_length=16
+        max_length=TABLE_MAX_COLS
     )
     protected: bool = Field(
         default=False,
@@ -146,10 +157,10 @@ class TableSchema(BaseModel):
             return v
 
         for row_idx, row in enumerate(v):
-            if len(row) > 16:
+            if len(row) > TABLE_MAX_COLS:
                 raise ValueError(
                     f"Строка {row_idx} содержит {len(row)} колонок, "
-                    f"максимум допустимо 16"
+                    f"максимум допустимо {TABLE_MAX_COLS}"
                 )
 
         return v
@@ -286,8 +297,8 @@ class TextBlockFormattingSchema(BaseModel):
 
     fontSize: int = Field(
         default=14,
-        ge=8,
-        le=72,
+        ge=FONT_SIZE_MIN,
+        le=FONT_SIZE_MAX,
         description="Базовый размер шрифта"
     )
     alignment: Literal["left", "center", "right", "justify"] = Field(
