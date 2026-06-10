@@ -203,22 +203,24 @@ SSE в чате нет. Транспорт единый для всех режи
 
 ## 10. Контракт шины `chat_agent_messages_bus` (приложение ↔ внешний ИИ-агент)
 
-Единая bus-таблица — единственный канал к внешнему агенту (заменила прежние
-`agent_requests` / `agent_response_events` / `agent_responses`). Polling-only,
-постоянных соединений нет. SQL-стенд имитации агента — [`docs/integrations/external-agent-imitation.sql`](../integrations/external-agent-imitation.sql).
+Единая bus-таблица — единственный канал к внешнему агенту. **Структуру задаёт
+и таблицей владеет сторона агента**; наша миграция — dev-имитация её фактической
+структуры. Polling-only, постоянных соединений нет. SQL-стенд имитации агента —
+[`docs/integrations/external-agent-imitation.sql`](../integrations/external-agent-imitation.sql).
 
 | Колонка | Тип | Назначение |
 |---|---|---|
-| `id` | VARCHAR(36) | uid строки шины (вопрос/ответ) |
-| `chat_id`, `user_id`, `conversation_id` | — | привязка к чату |
-| `role` | CHECK(`user`/`assistant`/`tool`) | роль; `tool` разрешена схемой, но приложением не обрабатывается |
-| `content` | TEXT | текст |
+| `id` | UUID | uid одного сообщения шины (его же хранит `chat_messages.agent_ref`) |
+| `chat_id` | TEXT | uid треда (= `chat_messages.conversation_id`); отдельной `conversation_id` в шине НЕТ |
+| `user_id` | TEXT | автор |
+| `role` | TEXT | `user`/`assistant`/`tool`; `tool` разрешена протоколом, но приложением не обрабатывается |
+| `content` | TEXT | текст (NOT NULL) |
 | `media`, `metadata`, `buttons` | JSONB | вложения, служебные данные (`metadata.thinking` → reasoning), кнопки |
-| `reply_to` | VARCHAR(36) | uid вопроса, на который это ответ |
-| `status` | CHECK(`pending`/`in_progress`/`complete`/`error`/`timeout`) | статус обработки |
-| `created_at`, `updated_at` | — | таймстемпы |
+| `reply_to` | UUID | ссылка на id вопроса; агент проставляет его **на строке-ответе** — сигнал «ответ готов» |
+| `status` | TEXT | `pending`/`in_progress`/`completed`/`error`; на ПРОМ-таблице CHECK владельца (полный список у него) — записи статуса от AW best-effort |
+| `created_at`, `updated_at` | TIMESTAMPTZ | NOT NULL; DEFAULT'ов нет — обе стороны передают явно |
 
-**GP**: PK `(id, chat_id)`, `DISTRIBUTED BY (chat_id)` (DISTRIBUTED BY ⊆ PK).
+**GP**: без PK (у владельца `id` nullable), `DISTRIBUTED BY (chat_id)`.
 
 **Связь с `chat_messages`**: `chat_messages.agent_ref` VARCHAR(36) — ссылка из
 черновика ассистент-сообщения на uid вопроса в шине. Поток submit → poller →
@@ -227,4 +229,4 @@ SSE в чате нет. Транспорт единый для всех режи
 | Что сломается | Симптом |
 |---|---|
 | Переименование таблицы без правки `CHAT__AGENT_CHANNEL__TABLE_NAME` | поллер и `AgentChannelService` не найдут шину |
-| Несовпадение значений `status` CHECK с кодом сервиса | агент не сможет записать ответ; см. `CHECK_CONSTRAINT_MESSAGES` |
+| Владелец сменил словарь `status` CHECK | запись статуса от AW отклонится — `_set_status_safe` залогирует warning и пропустит; финализация не пострадает |

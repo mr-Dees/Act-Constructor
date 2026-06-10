@@ -15,14 +15,16 @@
 
 ## 0. Модель данных и режимы
 
-**Bus-таблица `chat_agent_messages_bus`** (единая, заменяет прежние три таблицы):
-`id` (VARCHAR(36)), `chat_id`, `user_id`, `conversation_id`,
-`role` CHECK(`user`/`assistant`/`tool`), `content` TEXT, `media` JSONB,
-`metadata` JSONB, `reply_to`, `buttons` JSONB,
-`status` CHECK(`pending`/`in_progress`/`complete`/`error`/`timeout`),
-`created_at`, `updated_at`. На Greenplum: PK `(id, chat_id)`,
-`DISTRIBUTED BY (chat_id)`. Роль `tool` разрешена схемой, но приложением пока не
-обрабатывается.
+**Bus-таблица `chat_agent_messages_bus`** (структуру задаёт и таблицей владеет
+сторона внешнего агента; отдельной колонки `conversation_id` нет):
+`id` UUID — uid одного сообщения шины, `chat_id` TEXT — uid треда, `user_id` TEXT,
+`role` (`user`/`assistant`/`tool`), `content` TEXT NOT NULL, `media` JSONB,
+`metadata` JSONB, `reply_to` UUID — **на строке-ответе**, ссылается на id вопроса,
+`buttons` JSONB, `status` (`pending`/`in_progress`/`completed`/`error`; на
+ПРОМ-таблице CHECK владельца с неизвестным полным списком — записи статуса от AW
+best-effort), `created_at`/`updated_at` TIMESTAMPTZ NOT NULL (DEFAULT'ов нет).
+GP-имитация: без PK, `DISTRIBUTED BY (chat_id)`. Роль `tool` разрешена
+протоколом, но приложением пока не обрабатывается.
 
 **Связь с чатом**: `chat_messages.agent_ref VARCHAR(36)` — ссылка из
 ассистент-сообщения (draft) на `id` строки-вопроса в шине.
@@ -72,15 +74,15 @@ sequenceDiagram
         Note over F: при status='complete'/'failed'<br/>рендер ответа целиком + «эффект печати»
     and внешний агент
         EXT->>DB: UPDATE chat_agent_messages_bus вопроса<br/>status='in_progress'
-        EXT->>DB: INSERT chat_agent_messages_bus ответа<br/>(role='assistant', status='complete')<br/>+ UPDATE reply_to на вопросе
+        EXT->>DB: INSERT chat_agent_messages_bus ответа<br/>(role='assistant', reply_to=question_uid,<br/>status='completed') + UPDATE вопроса status='completed'
     and поллер шины
         loop adaptive backoff (без удержания conn в sleep)
             POLL->>CS: try_finalize(assistant_message_id, question_uid)
             CS->>DB: SELECT вопрос по question_uid
-            alt reply_to не выставлен
+            alt строки-ответа ещё нет
                 CS-->>POLL: 'pending'
             else агент ответил
-                CS->>DB: SELECT ответ по reply_to
+                CS->>DB: SELECT ответ WHERE reply_to=question_uid<br/>AND role='assistant'
                 alt answer.status == 'error'
                     CS->>DB: mark_failed (error-блок)
                 else
@@ -98,8 +100,10 @@ sequenceDiagram
   на старте, `finalize`/`mark_failed` по результату `try_finalize`. Фронт лишь
   опрашивает готовность.
 - **Таймаут**: при превышении `ANSWER_TIMEOUT_SEC` (600) поллер вызывает
-  `mark_timeout` → draft → `failed` с error-блоком (`build_timeout_error_block`),
-  вопросу в шине ставится `status='timeout'`.
+  `mark_timeout` → draft → `failed` с error-блоком (`build_timeout_error_block`);
+  запись `status='timeout'` в шину best-effort (CHECK владельца может отклонить —
+  тогда строка остаётся `pending`, слот лимита освобождает отсечка по возрасту
+  в `count_active_for_user`).
 - **Reconcile после рестарта**: поллер при старте поднимает подписки из
   streaming-черновиков `chat_messages` (`get_streaming_drafts`).
 
@@ -165,6 +169,9 @@ sequenceDiagram
 Если активных запросов пользователя `>= max_parallel_streams_per_user`
 (`CHAT__MAX_PARALLEL_STREAMS_PER_USER`, default 3) — бросается `ChatLimitError`
 → HTTP 422 с дружелюбным сообщением, ни вопрос, ни draft не создаются.
+Счёт идёт с отсечкой по возрасту (`created_after = now − ANSWER_TIMEOUT_SEC`):
+вопрос, которому не удалось записать терминальный статус (CHECK владельца шины),
+не занимает слот навсегда.
 
 ---
 
@@ -173,10 +180,12 @@ sequenceDiagram
 | Случай | Что произойдёт |
 |---|---|
 | Поллер ещё не дошёл до `try_finalize`, агент уже ответил | GET вернёт `status='streaming'` (draft не финализирован); следующий тик поллера выполнит `finalize`, фронт увидит `complete` на очередном опросе |
-| Агент проставил `reply_to`, но строка-ответ не найдена | `try_finalize` логирует предупреждение и оставляет draft в `streaming` до таймаута |
-| Ответ агента со `status='error'` | `try_finalize` → `mark_failed` с error-блоком из ответа + закрывает вопрос (`status='error'`), фронт показывает крестик |
-| Агент проставил `reply_to`, но не выставил терминальный `status` | `try_finalize` сам закрывает вопрос (`status='complete'`) после финализации — слот лимита освобождается, не зависая в `pending` |
-| Превышен `ANSWER_TIMEOUT_SEC` | `mark_timeout`: draft → `failed` (error-блок таймаута), вопрос в шине → `timeout` |
+| Строка-ответ есть, но статус нетерминальный (`pending`/`in_progress`) | `try_finalize` возвращает `'pending'` — агент ещё пишет |
+| Ответ агента со `status='error'` | `try_finalize` → `mark_failed` с error-блоком из ответа + best-effort закрывает вопрос (`status='error'`), фронт показывает крестик |
+| Агент закрыл вопрос `status='error'` без строки-ответа | `try_finalize` → `mark_failed` со стандартным текстом «Внешний агент вернул ошибку» |
+| Агент вставил ответ, но не закрыл вопрос терминальным `status` | `try_finalize` сам закрывает вопрос (`status='completed'`, best-effort) после финализации |
+| CHECK владельца отклонил наш статус (`CheckViolationError`) | `_set_status_safe` глотает с warning'ом — финализация/таймаут не ломаются, поллер не зацикливается |
+| Превышен `ANSWER_TIMEOUT_SEC` | `mark_timeout`: draft → `failed` (error-блок таймаута), запись `timeout` в шину best-effort |
 | Поллер не инициализирован (lifespan-сбой) | Форвард **не выполняется**: вопрос в шину не пишется, draft не создаётся, сразу финализируется error-сообщение (`agent_unavailable`). Беседа остаётся удаляемой |
 | Рестарт uvicorn посреди ожидания | Поллер при старте поднимает подписки из streaming-черновиков `chat_messages` и продолжает опрос; draft остаётся виден в истории как `streaming` |
 | Пользователь отправил N форвардов параллельно | Каждый получает свой `message_id`/вопрос; при `>= max_parallel_streams_per_user` активных — `ChatLimitError` (422) до записей |
@@ -192,7 +201,7 @@ sequenceDiagram
   (`subscribe`/`unsubscribe`/`_tick`/`_run` adaptive-backoff, reconcile из streaming-черновиков, `start`/`stop`/`get_status`)
 - button_translator — `app/domains/chat/services/button_translator.py` (`translate_buttons`)
 - forward-tool (adaptive) — `app/domains/chat/services/forward_tool_factory.py`
-- bus-репозиторий — `app/domains/chat/repositories/agent_message_repository.py` (`count_active_for_user`, `get_by_uid`)
+- bus-репозиторий — `app/domains/chat/repositories/agent_message_repository.py` (`count_active_for_user`, `get_by_uid`, `get_answer_for_question`)
 - chat_messages streaming-методы — `app/domains/chat/repositories/message_repository.py`
   (`create_streaming`/`finalize`/`mark_failed`/`get_streaming_drafts`)
 - настройки — `AgentChannelSettings` (`app/domains/chat/settings.py`),

@@ -209,6 +209,47 @@ async def test_parse_row_normalizes_uuid_fields(mock_conn):
     assert isinstance(result["reply_to"], str)
 
 
+# ── get_answer_for_question ──────────────────────────────────────────────
+
+
+async def test_get_answer_for_question_reverse_lookup(mock_conn):
+    """Ответ ищется обратным lookup'ом: reply_to стоит НА ОТВЕТЕ агента.
+
+    Протокол владельца шины: агент вставляет строку-ответ (role='assistant')
+    с reply_to = id вопроса. Регрессия «вечной печати»: поиск по reply_to
+    вопроса не находил ответ.
+    """
+    mock_conn.fetchrow.return_value = {
+        "id": "a-uid",
+        "chat_id": "c1",
+        "user_id": None,
+        "role": "assistant",
+        "content": "Ответ",
+        "media": None,
+        "metadata": "{}",
+        "buttons": None,
+        "reply_to": "q-uid",
+        "status": "completed",
+    }
+    repo = AgentMessageRepository(mock_conn)
+    result = await repo.get_answer_for_question("q-uid")
+
+    sql, q_uid = mock_conn.fetchrow.call_args.args
+    assert "WHERE reply_to = $1" in sql
+    assert "role = 'assistant'" in sql
+    assert "ORDER BY created_at DESC" in sql
+    assert "LIMIT 1" in sql
+    assert q_uid == "q-uid"
+    assert result["id"] == "a-uid"
+
+
+async def test_get_answer_for_question_not_found(mock_conn):
+    """Нет строки-ответа → None."""
+    mock_conn.fetchrow.return_value = None
+    repo = AgentMessageRepository(mock_conn)
+    assert await repo.get_answer_for_question("q-uid") is None
+
+
 # ── get_questions ────────────────────────────────────────────────────────
 
 
@@ -298,3 +339,24 @@ async def test_count_active_for_user_returns_zero_on_none(mock_conn):
     repo = AgentMessageRepository(mock_conn)
     result = await repo.count_active_for_user("user-empty")
     assert result == 0
+
+
+async def test_count_active_for_user_with_created_after_cutoff(mock_conn):
+    """created_after добавляет отсечку created_at > $2.
+
+    Защита от утечки слотов лимита: терминальный статус на чужой таблице
+    может не записаться (CHECK владельца) — старые pending-строки не должны
+    вечно занимать слот.
+    """
+    from datetime import datetime, timezone
+
+    mock_conn.fetchval.return_value = 1
+    cutoff = datetime(2026, 6, 10, tzinfo=timezone.utc)
+    repo = AgentMessageRepository(mock_conn)
+    result = await repo.count_active_for_user("user1", created_after=cutoff)
+
+    sql, user_id, created_after = mock_conn.fetchval.call_args.args
+    assert "created_at > $2" in sql
+    assert user_id == "user1"
+    assert created_after == cutoff
+    assert result == 1

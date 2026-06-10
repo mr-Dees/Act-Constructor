@@ -156,7 +156,7 @@ class TestChatNotificationsProducer:
         assert result == "done"
         fake_msg_repo.finalize.assert_called_once()
         fake_agent_repo.set_status.assert_awaited_once_with(
-            uid="q-uid", status="complete",
+            uid="q-uid", status="completed",
         )
 
     async def test_push_failure_does_not_break_finalize(
@@ -273,7 +273,7 @@ class TestChatNotificationsProducer:
         push_mock.assert_not_awaited()
         # set_status всё равно вызывается (закрытие вопроса идемпотентно).
         fake_agent_repo.set_status.assert_awaited_once_with(
-            uid="q-uid", status="complete",
+            uid="q-uid", status="completed",
         )
 
     async def test_no_push_when_mark_failed_idempotent_noop(

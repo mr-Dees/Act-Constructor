@@ -26,27 +26,32 @@
 --                        данной строки. Его же хранит chat_messages.agent_ref
 --    • chat_id  (text) = uid треда (= chat_conversations.id,
 --                        он же chat_messages.conversation_id)
---    • reply_to (uuid) = id строки-ОТВЕТА; проставляется агентом
---                        на строке-вопросе — это сигнал «ответ готов»
+--    • reply_to (uuid) = ссылка на id ВОПРОСА; проставляется агентом
+--                        НА СТРОКЕ-ОТВЕТЕ — наличие ответа с
+--                        reply_to=<id вопроса> и есть сигнал «ответ готов»
 --    • role            = 'user' (вопрос от AW) | 'assistant' (ответ агента) | 'tool'
 --    • metadata        = JSONB: у вопроса ключи {mode, kb}; у ответа ключ
 --                        {thinking} — все рассуждения агента
 --    • buttons         = JSONB: массив [{action_id, label, params}]
 --    • media           = JSONB: [{file_id, filename, mime_type, file_size}]
---    • status          = pending | in_progress | complete | error | timeout
---    DEFAULT'ов и CHECK'ов у таблицы нет — created_at/updated_at/status
---    обе стороны передают явно.
+--    • status          = pending | in_progress | completed | error
+--    На ПРОМ-таблице владельца есть CHECK по status (полный список значений
+--    у владельца; наблюдаемо разрешены 'pending'/'completed', ЗАПРЕЩЁН
+--    'timeout') — записи статуса со стороны AW best-effort. DEFAULT'ов нет —
+--    created_at/updated_at/status обе стороны передают явно.
 --
 --  ВАЖНО — поток данных:
 --    1. AW INSERT'ит строку-вопрос (role='user', status='pending').
---    2. Агент UPDATE SET status='in_progress' на строке-вопросе.
+--    2. Агент UPDATE SET status='in_progress' на строке-вопросе (опционально).
 --    3. Агент INSERT'ит строку-ответа (role='assistant', новый id,
---       content, metadata.thinking, опц. buttons/media, status='complete').
---    4. Агент UPDATE строки-вопроса: SET reply_to=<id ответа>, status='complete'.
---    5. AW поллит reply_to строки-вопроса (или status='complete'/'error'/'timeout')
+--       reply_to=<id вопроса>, content, metadata.thinking,
+--       опц. buttons/media, status='completed').
+--    4. Агент UPDATE строки-вопроса: SET status='completed'.
+--    5. AW поллит строку-ответ по reply_to=<id вопроса> (role='assistant')
 --       и рисует ответ + рассуждения.
---    Таймаут 10 минут — AW сам ставит 'timeout'/'error' на зависших строках.
---    Шаги 2 и 3+4 можно объединить в одну транзакцию.
+--    Таймаут 10 минут — AW сам закрывает зависший draft в chat_messages;
+--    запись 'timeout' в шину best-effort (CHECK владельца может отклонить).
+--    Шаги 3+4 можно объединить в одну транзакцию.
 --
 --  ВАЖНО — GP-ограничения (Greenplum 6.x = PostgreSQL 9.4):
 --    БЕЗ ON CONFLICT DO UPDATE, БЕЗ gen_random_uuid(), БЕЗ jsonb_set,
@@ -78,9 +83,10 @@ LIMIT 20;
 -- СТАДИИ status на строке-вопросе:
 --   pending     — вопрос вставлен AW, агент ещё не взял.
 --   in_progress — агент взял (UPDATE после SELECT FOR UPDATE или просто UPDATE).
---   complete    — агент проставил reply_to и закончил ответ.
+--   completed   — агент вставил ответ (reply_to=<id вопроса> НА ОТВЕТЕ) и закрыл вопрос.
 --   error       — агент зафиксировал ошибку.
---   timeout     — AW сам закрыл по таймауту (10 мин без ответа).
+--   (timeout AW пишет best-effort — CHECK владельца на ПРОМе его отклоняет,
+--    тогда строка остаётся в pending; слот лимита освобождает отсечка по возрасту).
 --
 -- Для наблюдения «всё, что в работе»:
 SELECT id, chat_id, content, status, created_at
@@ -119,25 +125,24 @@ BEGIN
     FROM chat_agent_messages_bus
     WHERE id = q_id;
 
-    -- Строка-ответ ассистента:
+    -- Строка-ответ ассистента (reply_to = id ВОПРОСА — на ответе):
     INSERT INTO chat_agent_messages_bus
         (id, chat_id, user_id, role,
-         content, metadata, status, created_at, updated_at)
+         content, metadata, reply_to, status, created_at, updated_at)
     VALUES (a_id, v_chat, v_user, 'assistant',
             'КСО — корпоративная социальная ответственность. По регламенту 2024 года...',
             '{"thinking": "Понимаю вопрос про КСО. Нашёл 3 релевантных документа, формирую ответ."}'::jsonb,
-            'complete', now(), now());
+            q_id, 'completed', now(), now());
 
-    -- Закрываем строку-вопрос: reply_to = id ответа, status='complete':
+    -- Закрываем строку-вопрос:
     UPDATE chat_agent_messages_bus
-    SET reply_to   = a_id,
-        status     = 'complete',
+    SET status     = 'completed',
         updated_at = now()
     WHERE id = q_id;
 END$$;
 
--- После блока: AW увидит reply_to на вопросе → загрузит строку-ответ
--- по id и отрендерит content + metadata.thinking.
+-- После блока: AW найдёт строку-ответ по reply_to = id вопроса
+-- и отрендерит content + metadata.thinking.
 
 
 -- ────────────────────────────────────────────────────────────────────────────
@@ -163,16 +168,15 @@ BEGIN
 
     INSERT INTO chat_agent_messages_bus
         (id, chat_id, user_id, role,
-         content, metadata, buttons, status, created_at, updated_at)
+         content, metadata, buttons, reply_to, status, created_at, updated_at)
     VALUES (a_id, v_chat, v_user, 'assistant',
             'Найдены 2 связанных акта:',
             '{"thinking": "Нашёл акты, формирую кнопки для навигации."}'::jsonb,
             '[{"action_id":"acts.open_act_page","label":"Открыть 11-11111","params":{"km_number":"11-11111"}},{"action_id":"acts.open_act_page","label":"Открыть 22-22222","params":{"km_number":"22-22222"}}]'::jsonb,
-            'complete', now(), now());
+            q_id, 'completed', now(), now());
 
     UPDATE chat_agent_messages_bus
-    SET reply_to   = a_id,
-        status     = 'complete',
+    SET status     = 'completed',
         updated_at = now()
     WHERE id = q_id;
 END$$;
@@ -220,7 +224,7 @@ BEGIN
     -- Строка-ответ с media, ссылающимся на свежий file_id:
     INSERT INTO chat_agent_messages_bus
         (id, chat_id, user_id, role,
-         content, media, status, created_at, updated_at)
+         content, media, reply_to, status, created_at, updated_at)
     VALUES (a_id, v_chat, v_user, 'assistant',
             'Сформировал отчёт, прикладываю файл:',
             jsonb_build_array(
@@ -231,11 +235,10 @@ BEGIN
                     'file_size', octet_length(f_body)
                 )
             ),
-            'complete', now(), now());
+            q_id, 'completed', now(), now());
 
     UPDATE chat_agent_messages_bus
-    SET reply_to   = a_id,
-        status     = 'complete',
+    SET status     = 'completed',
         updated_at = now()
     WHERE id = q_id;
 END$$;
@@ -250,8 +253,9 @@ END$$;
 -- 4. СЦЕНАРИЙ "ошибка" (агент не смог получить ответ)
 -- ────────────────────────────────────────────────────────────────────────────
 --
--- Можно вставить строку-ответ с описанием ошибки и/или просто закрыть вопрос
--- со status='error'. AW рендерит статусный блок на основе статуса вопроса.
+-- Можно вставить строку-ответ со status='error' и текстом ошибки, либо просто
+-- закрыть вопрос со status='error' без ответа — AW в обоих случаях покажет
+-- error-блок (во втором — стандартный текст «Внешний агент вернул ошибку»).
 -- Замени ТОЛЬКО <QUESTION_ID> (id строки-вопроса из запроса 0).
 
 -- Вариант А — только закрыть вопрос (AW покажет стандартное сообщение об ошибке):
@@ -260,7 +264,7 @@ SET status     = 'error',
     updated_at = now()
 WHERE id = '<QUESTION_ID>';
 
--- Вариант Б — вставить строку-ответ с текстом ошибки + закрыть вопрос:
+-- Вариант Б — вставить строку-ответ со status='error' и текстом ошибки:
 DO $$
 DECLARE
     q_id    uuid := '<QUESTION_ID>';                                       -- ← подставь сюда
@@ -274,14 +278,13 @@ BEGIN
 
     INSERT INTO chat_agent_messages_bus
         (id, chat_id, user_id, role,
-         content, status, created_at, updated_at)
+         content, reply_to, status, created_at, updated_at)
     VALUES (a_id, v_chat, v_user, 'assistant',
             'Не удалось получить ответ: база знаний acts_default недоступна. Попробуйте позже.',
-            'complete', now(), now());
+            q_id, 'error', now(), now());
 
     UPDATE chat_agent_messages_bus
-    SET reply_to   = a_id,
-        status     = 'error',
+    SET status     = 'error',
         updated_at = now()
     WHERE id = q_id;
 END$$;
@@ -292,7 +295,8 @@ END$$;
 -- ────────────────────────────────────────────────────────────────────────────
 --
 -- Если хочется увидеть индикатор «думает...» в UI — просто поставь in_progress.
--- AW показывает typing-индикатор, пока reply_to = NULL и status = 'in_progress'.
+-- AW показывает typing-индикатор, пока нет строки-ответа (role='assistant'
+-- с reply_to = id вопроса) с терминальным статусом.
 -- Замени ТОЛЬКО <QUESTION_ID> (id строки-вопроса из запроса 0).
 
 UPDATE chat_agent_messages_bus
@@ -325,6 +329,7 @@ ORDER BY created_at ASC
 LIMIT 20;
 
 -- Полная пара вопрос–ответ по id вопроса (<QUESTION_ID>):
+-- (ответ ищется по reply_to НА ОТВЕТЕ — он ссылается на id вопроса)
 SELECT am.id, am.role, am.status, am.reply_to,
        am.content,
        am.metadata,
@@ -333,11 +338,7 @@ SELECT am.id, am.role, am.status, am.reply_to,
        am.created_at
 FROM chat_agent_messages_bus am
 WHERE am.id = '<QUESTION_ID>'
-   OR am.id = (
-       SELECT reply_to
-       FROM chat_agent_messages_bus
-       WHERE id = '<QUESTION_ID>'
-   )
+   OR am.reply_to = '<QUESTION_ID>'
 ORDER BY am.created_at;
 
 -- Все сообщения одного треда (chat_id):
@@ -359,16 +360,16 @@ LIMIT 10;
 -- 7. ОЧИСТКА ПО TTL (для админов)
 -- ────────────────────────────────────────────────────────────────────────────
 --
--- Удаляем только завершённые строки: complete / error / timeout.
+-- Удаляем только завершённые строки: completed / error / timeout.
 -- pending и in_progress НЕ ТРОГАТЬ — это активные диалоги.
 -- Видимая пользователю история чата живёт в chat_messages и НЕ затрагивается.
 --
 -- Рекомендуемые сроки хранения:
---   complete / error / timeout  — 180 дней
+--   completed / error / timeout  — 180 дней
 -- Подстройте под свои аудит-требования.
 
 DELETE FROM chat_agent_messages_bus
-WHERE status IN ('complete', 'error', 'timeout')
+WHERE status IN ('completed', 'complete', 'error', 'timeout')
   AND updated_at < now() - INTERVAL '180 days';
 
 -- На Greenplum после массивных DELETE'ов полезен VACUUM ANALYZE
@@ -376,7 +377,9 @@ WHERE status IN ('complete', 'error', 'timeout')
 -- VACUUM ANALYZE chat_agent_messages_bus;
 
 -- Зависшие in_progress/pending дольше 2 часов — ручное закрытие:
--- (AW обычно закрывает сам через 10 мин, но при рестарте uvicorn может остаться)
+-- (AW закрывает draft в chat_messages сам через 10 мин; статус в шине он пишет
+-- best-effort, и на ПРОМе CHECK владельца отклоняет 'timeout' — тогда строки
+-- остаются в pending. Если CHECK не пропускает 'timeout' — ставь 'error'.)
 UPDATE chat_agent_messages_bus
 SET status     = 'timeout',
     updated_at = now()

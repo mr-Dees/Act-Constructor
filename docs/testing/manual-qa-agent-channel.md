@@ -51,7 +51,7 @@
 - Перевести тумблер в позицию «Всегда».
 - Написать: «Расскажи про регламент 2024 года».
 - Ожидаемо: появилась строка `role='user'`, `status='pending'` в `chat_agent_messages_bus`; в чате — облако-черновик с эффектом печати.
-- В DBeaver выполнить сценарий §1 из `external-agent-imitation.sql` (вставить ответ агента + закрыть вопрос: `reply_to`, `status='complete'`).
+- В DBeaver выполнить сценарий §1 из `external-agent-imitation.sql` (вставить ответ агента с `reply_to=<id вопроса>` и `status='completed'` + закрыть вопрос `status='completed'`).
 - Ожидаемо: после ближайшего poll-тика (≤ `POLL_MAX_INTERVAL_SEC`) в чате появился финальный текст ответа; рассуждения из `metadata.thinking` отрисованы reasoning-блоком.
 
 ### 3. Адаптивный форвард (тумблер «Адаптивный»)

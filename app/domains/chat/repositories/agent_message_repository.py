@@ -108,6 +108,21 @@ class AgentMessageRepository(BaseRepository):
         )
         return self._parse_row(row)
 
+    async def get_answer_for_question(self, question_uid: str) -> dict | None:
+        """Возвращает строку-ответ агента на вопрос ``question_uid``.
+
+        Протокол владельца шины: агент вставляет строку-ответ
+        (role='assistant') и проставляет ``reply_to`` НА ОТВЕТЕ, указывая на
+        id вопроса. Берём самый свежий ответ (агент может ретраить).
+        """
+        row = await self.conn.fetchrow(
+            f"SELECT * FROM {self.table} "
+            f"WHERE reply_to = $1 AND role = 'assistant' "
+            f"ORDER BY created_at DESC LIMIT 1",
+            question_uid,
+        )
+        return self._parse_row(row)
+
     async def get_questions(self, uids: list[str]) -> list[dict]:
         """Возвращает строки по списку id (uid сообщений).
 
@@ -132,16 +147,30 @@ class AgentMessageRepository(BaseRepository):
             uid,
         )
 
-    async def count_active_for_user(self, user_id: str) -> int:
+    async def count_active_for_user(self, user_id: str, *, created_after=None) -> int:
         """Считает активные (pending / in_progress) вопросы пользователя в bus-таблице.
 
         Фильтр role='user' оставляет в счёте только строки-вопросы от AW: ответы
         агента (role='assistant') не должны влиять на лимит параллельных запросов.
+
+        ``created_after`` (tz-aware datetime) отсекает старые зависшие строки:
+        терминальный статус на чужой таблице может не записаться (CHECK
+        владельца), и без отсечки мёртвый вопрос навсегда съедал бы слот лимита.
         """
-        val = await self.conn.fetchval(
-            f"SELECT COUNT(*) FROM {self.table} "
-            f"WHERE user_id = $1 AND role = 'user' "
-            f"AND status IN ('pending', 'in_progress')",
-            user_id,
-        )
+        if created_after is not None:
+            val = await self.conn.fetchval(
+                f"SELECT COUNT(*) FROM {self.table} "
+                f"WHERE user_id = $1 AND role = 'user' "
+                f"AND status IN ('pending', 'in_progress') "
+                f"AND created_at > $2",
+                user_id,
+                created_after,
+            )
+        else:
+            val = await self.conn.fetchval(
+                f"SELECT COUNT(*) FROM {self.table} "
+                f"WHERE user_id = $1 AND role = 'user' "
+                f"AND status IN ('pending', 'in_progress')",
+                user_id,
+            )
         return int(val or 0)
