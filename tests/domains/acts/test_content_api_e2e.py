@@ -258,6 +258,30 @@ class TestSaveActContent:
         # save_content не вызван — отсёк FastAPI на валидации
         svc.save_content.assert_not_awaited()
 
+    def test_save_content_unknown_table_field_returns_422(self):
+        """M.20: неизвестное поле в таблице → 422 (extra='forbid'), не молчаливая потеря."""
+        svc = _make_content_service()
+        app = _build_app(content_service=svc)
+
+        payload = _valid_save_payload()
+        payload["tables"] = {
+            "t1": {
+                "id": "t1", "nodeId": "n1",
+                "grid": [], "colWidths": [],
+                "totallyUnknownField": 123,
+            },
+        }
+        payload["tree"]["children"] = [
+            {"id": "n1", "label": "Таблица", "type": "table",
+             "tableId": "t1", "children": []},
+        ]
+
+        with TestClient(app) as client:
+            resp = client.put("/api/v1/acts/42/content", json=payload)
+
+        assert resp.status_code == 422
+        svc.save_content.assert_not_awaited()
+
     def test_save_content_business_validation_error_returns_400(self):
         """ActValidationError из сервиса (например, глубина дерева) → 400."""
         svc = _make_content_service()

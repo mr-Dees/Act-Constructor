@@ -450,6 +450,122 @@ class TestActDataSchema:
         assert d.changelog == []
 
 
+# ── M.20: явная политика extra='forbid' для схем словарей ──
+
+
+class TestExtraForbidPolicy:
+    """Неизвестные поля в схемах словарей отклоняются (раньше молча терялись)."""
+
+    _TABLE_KW = dict(
+        id="t1", nodeId="n1",
+        grid=[[TableCellSchema(content="A")]], colWidths=[100],
+    )
+
+    def test_unknown_field_in_table_rejected(self):
+        with pytest.raises(ValidationError, match="unknown_field"):
+            TableSchema(**self._TABLE_KW, unknown_field="x")
+
+    def test_unknown_field_in_cell_rejected(self):
+        with pytest.raises(ValidationError, match="surprise"):
+            TableCellSchema(content="A", surprise=True)
+
+    def test_unknown_field_in_textblock_rejected(self):
+        with pytest.raises(ValidationError, match="junk"):
+            TextBlockSchema(id="tb1", nodeId="n1", junk=1)
+
+    def test_unknown_field_in_formatting_rejected(self):
+        with pytest.raises(ValidationError, match="lineHeight"):
+            TextBlockFormattingSchema(lineHeight=1.5)
+
+    def test_unknown_field_in_violation_item_rejected(self):
+        with pytest.raises(ValidationError, match="position"):
+            ViolationContentItemSchema(id="i1", type="case", position=3)
+
+    def test_unknown_top_level_field_rejected(self):
+        with pytest.raises(ValidationError, match="metadata"):
+            ActDataSchema(
+                tree=dict(TestActDataSchema._VALID_TREE),
+                metadata={"km_number": "КМ-01-0000001"},
+            )
+
+    def test_known_table_fields_round_trip(self):
+        """Round-trip: все объявленные поля переживают validate → dump → validate."""
+        t = TableSchema(
+            id="t1", nodeId="n1",
+            grid=[[TableCellSchema(
+                content="A", isHeader=True, colSpan=1, rowSpan=1,
+                isSpanned=False, spanOrigin=None, originRow=0, originCol=0,
+            )]],
+            colWidths=[100],
+            protected=True, deletable=False, isMetricsTable=True,
+        )
+        dumped = t.model_dump()
+        restored = TableSchema.model_validate(dumped)
+        assert restored.model_dump() == dumped
+
+
+# ── M.21: дерево хранится нормализованным через ActItemSchema ──
+
+
+class TestTreeNormalization:
+    """tree сохраняется как model_dump() от ActItemSchema, а не сырой dict."""
+
+    def test_unknown_node_field_dropped_on_normalization(self):
+        """Незадекларированное поле узла (например parentId) не персистится."""
+        tree = {
+            "id": "root", "label": "Акт",
+            "children": [
+                {"id": "n1", "label": "Таблица", "type": "table",
+                 "tableId": "t1", "parentId": "root", "children": []},
+            ],
+        }
+        d = ActDataSchema(tree=tree, tables={
+            "t1": TableSchema(id="t1", nodeId="n1"),
+        })
+        child = d.tree["children"][0]
+        assert "parentId" not in child
+        assert child["tableId"] == "t1"
+
+    def test_known_node_fields_preserved(self):
+        """Все поля, которые шлёт фронтовый exportData, переживают нормализацию."""
+        tree = {
+            "id": "root", "label": "Акт",
+            "children": [
+                {
+                    "id": "n1", "label": "5.1 Пункт", "type": "item",
+                    "content": "текст", "protected": True, "deletable": False,
+                    "customLabel": "Своя метка", "number": "5.1",
+                    "tb": ["ВВБ", "СЗБ"], "auditPointId": "AP-1",
+                    "isMetricsTable": True,
+                    "children": [],
+                },
+            ],
+        }
+        d = ActDataSchema(tree=tree)
+        child = d.tree["children"][0]
+        assert child["id"] == "n1"
+        assert child["label"] == "5.1 Пункт"
+        assert child["type"] == "item"
+        assert child["content"] == "текст"
+        assert child["protected"] is True
+        assert child["deletable"] is False
+        assert child["customLabel"] == "Своя метка"
+        assert child["number"] == "5.1"
+        assert child["tb"] == ["ВВБ", "СЗБ"]
+        assert child["auditPointId"] == "AP-1"
+        assert child["isMetricsTable"] is True
+        assert child["children"] == []
+
+    def test_tree_is_normalized_dict_not_raw_reference(self):
+        """Хранимое дерево — новый нормализованный dict, не исходная ссылка."""
+        raw = {"id": "root", "label": "Акт", "children": [], "garbage": 1}
+        d = ActDataSchema(tree=raw)
+        assert d.tree is not raw
+        assert "garbage" not in d.tree
+        # Исходный dict не мутирован
+        assert "garbage" in raw
+
+
 # ── MetricItem ──
 
 

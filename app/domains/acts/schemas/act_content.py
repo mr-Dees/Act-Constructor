@@ -8,7 +8,7 @@ Pydantic схемы для валидации данных актов.
 import re
 from typing import Literal
 
-from pydantic import BaseModel, Field, field_validator, model_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 # Лимиты картинок нарушений (4.3.M.2 + 5.2.2). Лимит длины url — константа:
 # схема статична и не может читать настройки; 15 млн символов base64
@@ -25,6 +25,10 @@ class TableCellSchema(BaseModel):
     """
     Схема ячейки таблицы с матричной структурой.
 
+    M.20: extra='forbid' — состав полей зеркалит фронтовый
+    _serializeTables (state-core.js); неизвестное поле = рассинхрон
+    контракта и отбивается 422, а не теряется молча.
+
     Attributes:
         content: Содержимое ячейки
         isHeader: Является ли ячейка заголовком
@@ -35,6 +39,8 @@ class TableCellSchema(BaseModel):
         originRow: Исходная строка ячейки
         originCol: Исходная колонка ячейки
     """
+    model_config = ConfigDict(extra="forbid")
+
     content: str = Field(default="", description="Содержимое ячейки")
     isHeader: bool = Field(default=False, description="Заголовок")
     colSpan: int = Field(
@@ -72,6 +78,8 @@ class TableSchema(BaseModel):
         isTaxRiskTable: Является ли таблицей налоговых рисков
         isOtherRiskTable: Является ли таблицей прочих рисков
     """
+    model_config = ConfigDict(extra="forbid")
+
     id: str = Field(description="ID таблицы")
     nodeId: str = Field(description="ID узла дерева")
     grid: list[list[TableCellSchema]] = Field(
@@ -274,6 +282,8 @@ class TextBlockFormattingSchema(BaseModel):
         italic: Курсив
         underline: Подчеркивание
     """
+    model_config = ConfigDict(extra="forbid")
+
     fontSize: int = Field(
         default=14,
         ge=8,
@@ -299,6 +309,8 @@ class TextBlockSchema(BaseModel):
         content: HTML-содержимое блока с inline-форматированием
         formatting: Базовые параметры форматирования текста
     """
+    model_config = ConfigDict(extra="forbid")
+
     id: str = Field(description="ID текстового блока")
     nodeId: str = Field(description="ID узла дерева")
     content: str = Field(default="", description="HTML-содержимое")
@@ -310,6 +322,8 @@ class TextBlockSchema(BaseModel):
 
 class ViolationDescriptionListSchema(BaseModel):
     """Схема списка описаний нарушения."""
+    model_config = ConfigDict(extra="forbid")
+
     enabled: bool = False
     items: list[str] = Field(default_factory=list)
 
@@ -321,6 +335,8 @@ class ViolationOptionalFieldSchema(BaseModel):
     Используется для причин, последствий, рекомендаций,
     ответственных лиц и др.
     """
+    model_config = ConfigDict(extra="forbid")
+
     enabled: bool = False
     content: str = ""
 
@@ -338,6 +354,8 @@ class ViolationContentItemSchema(BaseModel):
         filename: Имя файла (для image)
         order: Порядок отображения
     """
+    model_config = ConfigDict(extra="forbid")
+
     id: str = Field(description="ID элемента")
     type: Literal["case", "image", "freeText"] = Field(description="Тип элемента")
     content: str = Field(default="", description="Текстовое содержимое")
@@ -373,6 +391,8 @@ class ViolationContentItemSchema(BaseModel):
 
 class ViolationAdditionalContentSchema(BaseModel):
     """Коллекция дополнительного контента нарушения."""
+    model_config = ConfigDict(extra="forbid")
+
     enabled: bool = False
     items: list[ViolationContentItemSchema] = Field(default_factory=list)
 
@@ -406,6 +426,8 @@ class ViolationSchema(BaseModel):
         responsible: Ответственные лица
         recommendations: Рекомендации по устранению
     """
+    model_config = ConfigDict(extra="forbid")
+
     id: str = Field(description="ID нарушения")
     nodeId: str = Field(description="ID узла дерева")
     violated: str = Field(default="", description="Текст для 'Нарушено'")
@@ -463,6 +485,14 @@ class ActItemSchema(BaseModel):
         isTaxRiskTable: Является ли узел таблицей налоговых рисков
         isOtherRiskTable: Является ли узел таблицей прочих рисков
     """
+    # M.21: политика extra='ignore' задана ЯВНО и сознательно (не forbid):
+    # незадекларированные поля узла отбрасываются нормализацией
+    # (validate_tree_structure хранит model_dump()), а не отбиваются 422.
+    # Forbid ломал бы restore исторических снимков и серверные узлы
+    # перестройки разделов (qa-узел несёт runtime-поле parentId,
+    # которое фронтовый exportData не сериализует — известный мусор).
+    model_config = ConfigDict(extra="ignore")
+
     id: str
     # label у корневого узла исторически мог отсутствовать (снимки версий до
     # введения метки). Поле опционально, чтобы валидатор дерева (C4) не
@@ -502,6 +532,8 @@ class ActDataSchema(BaseModel):
         violations: Словарь нарушений (ключ: ID нарушения)
         saveType: Тип сохранения (manual, periodic, auto)
     """
+    model_config = ConfigDict(extra="forbid")
+
     tree: dict = Field(description="Дерево структуры акта")
     tables: dict[str, TableSchema] = Field(
         default_factory=dict,
@@ -533,17 +565,18 @@ class ActDataSchema(BaseModel):
     @classmethod
     def validate_tree_structure(cls, v: dict) -> dict:
         """
-        Валидирует структуру дерева через ActItemSchema, не меняя хранимый тип.
+        Валидирует дерево через ActItemSchema и хранит НОРМАЛИЗОВАННЫЙ результат.
 
-        C4: downstream-консьюмеры (build_audit_point_map, _build_node_map,
+        C4/M.21: downstream-консьюмеры (build_audit_point_map, _build_node_map,
         json.dumps(tree), extract_node_number, sanitize_tree_nodes, аудит-лог)
-        читают дерево как dict. Поэтому tree остаётся dict для хранения, а
-        валидатор лишь конструирует ActItemSchema.model_validate(v) для проверки
-        формы (поднимает ValueError на битой структуре, в т.ч. на узлах без
-        id/label). Так risk-флаги получают схему-описание, не ломая контракт.
+        читают дерево как dict — поэтому тип хранения остаётся dict, но это
+        model_dump() от провалидированной ActItemSchema, а не исходный сырой
+        dict. Незадекларированные поля узлов при этом отбрасываются (политика
+        extra='ignore' схемы узла) — устранена асимметрия со словарями, где
+        неизвестные поля терялись через model_dump, а в дереве персистились.
+        Битая структура (узел без id и т.п.) поднимает ValueError → HTTP 422.
         """
-        ActItemSchema.model_validate(v)
-        return v
+        return ActItemSchema.model_validate(v).model_dump()
 
 
 class ActSaveResponse(BaseModel):
