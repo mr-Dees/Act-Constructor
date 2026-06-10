@@ -184,6 +184,48 @@ class MessageRepository(BaseRepository):
             )
         return True
 
+    async def upsert_block(self, *, message_id: str, block: dict) -> bool:
+        """Обновляет блок с тем же block_id в content streaming-сообщения
+        (или дописывает, если такого ещё нет).
+
+        Используется поллером агент-канала для инкрементального reasoning:
+        агент НАКАПЛИВАЕТ текст в metadata.reasoning, поэтому блок надо
+        заменять целиком, а не дописывать вторым экземпляром.
+
+        Возвращает False, если сообщение не в 'streaming' (гонка с
+        finalize/mark_failed) или у блока нет block_id.
+        """
+        block_id = block.get("block_id") if isinstance(block, dict) else None
+        if not block_id:
+            return False
+        async with self.conn.transaction():
+            row = await self.conn.fetchrow(
+                f"SELECT content, status FROM {self.table} WHERE id = $1 FOR UPDATE",
+                message_id,
+            )
+            if not row or row["status"] != "streaming":
+                return False
+            raw_content = row["content"]
+            if isinstance(raw_content, str):
+                try:
+                    content = json.loads(raw_content)
+                except json.JSONDecodeError:
+                    content = []
+            else:
+                content = list(raw_content or [])
+            for i, b in enumerate(content):
+                if isinstance(b, dict) and b.get("block_id") == block_id:
+                    content[i] = block
+                    break
+            else:
+                content.append(block)
+            await self.conn.execute(
+                f"UPDATE {self.table} SET content = $1::jsonb WHERE id = $2",
+                json.dumps(content, ensure_ascii=False),
+                message_id,
+            )
+        return True
+
     async def finalize(
         self,
         *,
@@ -194,9 +236,9 @@ class MessageRepository(BaseRepository):
     ) -> bool:
         """Переводит сообщение из 'streaming' в 'complete' и мержит финальные блоки.
 
-        MERGE-логика: накопленные через append_block блоки (reasoning'и и пр.)
-        сохраняются, к ним дописываются финальные блоки агента. Дедуп по
-        block_id — если final-блок с тем же id уже в existing, не дублируем.
+        MERGE-логика: накопленные через upsert_block/append_block блоки
+        сохраняются. Финальный блок с тем же block_id замещает накопленный
+        на его позиции (финальная версия полнее), новые дописываются в конец.
 
         Возвращает False если сообщение уже не 'streaming' (повторный вызов —
         idempotent no-op).
@@ -216,21 +258,21 @@ class MessageRepository(BaseRepository):
                     existing = []
             else:
                 existing = list(raw_content or [])
-            existing_ids = {
-                b.get("block_id")
-                for b in existing
+            # MERGE: финальные блоки с уже встречавшимся block_id ЗАМЕЩАЮТ
+            # накопленные (финальная версия reasoning полнее инкрементальной),
+            # остальные — дописываются в конец.
+            existing_by_id = {
+                b["block_id"]: i
+                for i, b in enumerate(existing)
                 if isinstance(b, dict) and b.get("block_id")
             }
-            to_append = [
-                b
-                for b in (final_blocks or [])
-                if not (
-                    isinstance(b, dict)
-                    and b.get("block_id")
-                    and b["block_id"] in existing_ids
-                )
-            ]
-            merged = existing + to_append
+            merged = list(existing)
+            for b in final_blocks or []:
+                bid = b.get("block_id") if isinstance(b, dict) else None
+                if bid and bid in existing_by_id:
+                    merged[existing_by_id[bid]] = b
+                else:
+                    merged.append(b)
             await self.conn.execute(
                 f"""
                 UPDATE {self.table}
