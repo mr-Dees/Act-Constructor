@@ -144,8 +144,8 @@ SSE в чате нет. Транспорт единый для всех режи
 черновик ассистент-сообщения (`status='streaming'`, `agent_ref` = uid вопроса
 в шине) и запись вопроса в `chat_agent_messages_bus`; фоновый `AgentChannelPoller`
 (`agent_channel_poller.py`) поллит шину adaptive-backoff'ом без удержания
-коннекта в sleep; `AgentChannelService.try_finalize` мапит ответ агента в
-блоки (`map_answer_to_blocks`) и финализирует черновик (`complete`/`failed`),
+коннекта в sleep; `AgentChannelService.poll_once` дозаполняет reasoning-блок
+инкрементально и финализирует черновик (`complete`/`failed`),
 `mark_timeout` закрывает зависший запрос (`build_timeout_error_block`).
 
 | Контракт | Где |
@@ -224,7 +224,7 @@ SSE в чате нет. Транспорт единый для всех режи
 
 **Связь с `chat_messages`**: `chat_messages.agent_ref` VARCHAR(36) — ссылка из
 черновика ассистент-сообщения на uid вопроса в шине. Поток submit → poller →
-`try_finalize` описан в §6.
+`poll_once` описан в §6.
 
 | Что сломается | Симптом |
 |---|---|

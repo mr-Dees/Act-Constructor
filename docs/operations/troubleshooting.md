@@ -105,7 +105,7 @@
 - `off` / `adaptive` — локальная LLM/GigaChat исполняется синхронно в POST через `orchestrator.run(...)`. В режиме `adaptive` форвард-tool есть в наборе, и оркестратор сам решает, форвардить ли вопрос.
 - `always` — прямой проброс в агента без локального оркестратора.
 
-Форвард создаёт черновик `chat_messages` (status='streaming') + вопрос в шине, после чего `AgentChannelPoller` поллит шину, а `AgentChannelService.try_finalize` маппит ответ в блоки и финализирует черновик. Ссылка из ассистент-сообщения на вопрос в шине — колонка `chat_messages.agent_ref`.
+Форвард создаёт черновик `chat_messages` (status='streaming') + вопрос в шине, после чего `AgentChannelPoller` поллит шину, а `AgentChannelService.poll_once` дозаполняет reasoning и финализирует черновик. Ссылка из ассистент-сообщения на вопрос в шине — колонка `chat_messages.agent_ref`.
 
 **Решение:**
 1. Проверь, что фронт реально шлёт `agent_mode` (DevTools → Network → form-data POST `/messages`). Позиция тумблера — в localStorage `assistant_oarb_mode`.

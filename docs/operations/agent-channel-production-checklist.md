@@ -12,7 +12,7 @@ retention-чистку, мониторинг, ёмкости, troubleshooting.
 токен-стриминга). Форвард в агента: оркестратор/прямой проброс создаёт
 черновик `chat_messages` (status='streaming') + вопрос в шине
 `chat_agent_messages_bus`; фоновый `AgentChannelPoller` поллит шину;
-`AgentChannelService.try_finalize` мапит ответ→блоки и финализирует
+`AgentChannelService.poll_once` дозаполняет reasoning и финализирует
 черновик (`complete`/`failed`).
 
 См. также `app/domains/chat/services/agent_channel.py`,
@@ -174,7 +174,7 @@ ADMIN__DB_POOL_MONITOR__WARN_RATIO=0.9
 ```
 # Канал к агенту:
 audit_workstation.domains.chat.services.agent_channel_poller   # цикл polling шины
-audit_workstation.domains.chat.services.agent_channel          # submit / try_finalize / mark_timeout
+audit_workstation.domains.chat.services.agent_channel          # submit / poll_once / mark_timeout
 
 # Ошибки LLM (локальная LLM/GigaChat в синхронном POST):
 audit_workstation.domains.chat.agent_loop          # exception в петле оркестратора
@@ -234,7 +234,7 @@ warning в лог.
    `chat_agent_messages_bus` (связь через `chat_messages.agent_ref` → uid вопроса
    в шине).
 2. Если вопрос в шине финализирован (`completed`/`failed`), а
-   черновик всё ещё `streaming` — `try_finalize`/`mark_timeout` не
+   черновик всё ещё `streaming` — `poll_once`/`mark_timeout` не
    отработал; смотри exception в логах `agent_channel`. Reconcile при
    рестарте `uvicorn` подхватывает такие черновики.
 
@@ -251,7 +251,7 @@ warning в лог.
 - **Транспорт — polling, не SSE.** POST `/messages` отдаёт `{message_id}`;
   ответ забирается GET-поллингом по терминальному статусу. Не добавляй SSE.
 - **`AgentChannelService` — единственный writer финализации черновика**
-  ассистент-сообщения (`try_finalize` / `mark_timeout`). Не добавляй
+  ассистент-сообщения (`poll_once` / `mark_timeout`). Не добавляй
   save/финализацию в другие места.
 - **Поллер не держит conn в sleep/backoff.** Conn берётся только на SELECT
   шины и финализирующую транзакцию — не объединять обратно «для простоты».

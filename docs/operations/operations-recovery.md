@@ -10,7 +10,7 @@
 
 **Симптом.** Пользователь жалуется: «Ассистент завис на печати». В UI крутится typing-индикатор, ответа нет > 5 минут. В чате включён тумблер «База знаний ОАРБ» (режим «Адаптивный» или «Всегда»), вопрос ушёл в шину к внешнему ИИ-агенту.
 
-**Как это работает.** Форвард создаёт черновик ассистент-сообщения в `chat_messages` (`status='streaming'`, `agent_ref` = uid вопроса) и пишет вопрос в единую bus-таблицу `chat_agent_messages_bus` (`role='user'`, `status='pending'`). Фоновый `AgentChannelPoller` поллит шину; когда приходит ответ агента (`role='assistant'`, `reply_to` = id вопроса, `status='completed'`), `AgentChannelService.try_finalize` мапит ответ в блоки и финализирует черновик (`complete`/`failed`).
+**Как это работает.** Форвард создаёт черновик ассистент-сообщения в `chat_messages` (`status='streaming'`, `agent_ref` = uid вопроса) и пишет вопрос в единую bus-таблицу `chat_agent_messages_bus` (`role='user'`, `status='pending'`). Фоновый `AgentChannelPoller` поллит шину; `AgentChannelService.poll_once` дозаполняет reasoning-блок по дельтам, а когда ответ готов — финализирует черновик (`complete`/`failed`).
 
 **Диагностика.**
 
@@ -37,13 +37,13 @@ WHERE reply_to IN (... agent_ref из шага 1 ...);
 
 **Recovery.**
 
-1. **Не торопиться.** Если процесс жив и `chat.agent_channel_poller` запущен (`/admin/diagnostics`), а внешний агент ещё работает — поллер догонит ответ. Гейт таймаута ожидания ответа: `CHAT__AGENT_CHANNEL__ANSWER_TIMEOUT_SEC` (default 600 = 10 мин). По истечении `try_finalize`/`mark_timeout` сам пометит черновик `failed`. Дать сработать.
+1. **Не торопиться.** Если процесс жив и `chat.agent_channel_poller` запущен (`/admin/diagnostics`), а внешний агент ещё работает — поллер догонит ответ. Двухфазные таймауты: `CLAIM_TIMEOUT_SEC` (1800 = 30 мин, фаза `pending`) и `ANSWER_TIMEOUT_SEC` (600 = 10 мин, фаза `processing`). По истечении `mark_timeout` сам пометит черновик `failed`. Дать сработать.
 2. **Если рестартовали uvicorn** — `AgentChannelPoller.reconcile()` в startup-hook восстанавливает подписки из всех `streaming`-черновиков с непустым `agent_ref` (`app/domains/chat/services/agent_channel_poller.py:163`). Дождаться, пока поллер сделает первые тики.
 3. **Forcibly закрыть.** Если ответа от агента нет и автоматика не помогает — пометить черновик и вопрос вручную:
    ```sql
    -- Черновик ассистент-сообщения → failed (на GP 6.x / PG 9.4 без jsonb-||,
    -- блоки оставляем как есть; финализирующий error-блок дописывает только
-   -- Python-путь try_finalize/mark_timeout):
+   -- Python-путь poll_once/mark_timeout):
    UPDATE {SCHEMA}.{PREFIX}chat_messages
    SET status = 'failed', updated_at = CURRENT_TIMESTAMP
    WHERE id = '<message_id>';
@@ -127,7 +127,7 @@ GROUP BY status;
 **Что автоматически:**
 
 - `AgentChannelPoller.reconcile()` в startup-hook восстанавливает подписки из всех `streaming`-черновиков с непустым `agent_ref` (`app/domains/chat/services/agent_channel_poller.py:163`). Поллер продолжит ждать ответы из шины.
-- `chat_messages.status='streaming'` с уже пришедшим ответом агента — поллер финализирует через `try_finalize`; без ответа дольше `CHAT__AGENT_CHANNEL__ANSWER_TIMEOUT_SEC` (default 600) → `mark_timeout` пометит `failed`.
+- `chat_messages.status='streaming'` с уже пришедшим ответом агента — поллер финализирует через `poll_once`; без ответа дольше `CLAIM_TIMEOUT_SEC`/`ANSWER_TIMEOUT_SEC` → `mark_timeout` пометит `failed`.
 - Singleton-lock освобождается мягко в shutdown-hook (`app/main.py:266-280`).
 
 **Что НЕ автоматически:**

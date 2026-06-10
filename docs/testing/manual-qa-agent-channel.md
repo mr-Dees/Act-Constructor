@@ -11,7 +11,7 @@
 - Режим работы задаётся form-параметром `agent_mode`:
   - `off` / `adaptive` — локальная LLM (или GigaChat) исполняется синхронно в POST через `orchestrator.run(...)`. В `adaptive` оркестратор сам решает форвардить (forward-tool в наборе).
   - `always` — прямой проброс вопроса в агента, минуя LLM.
-- Форвард создаёт черновик `chat_messages` (`status='streaming'`) + строку-вопрос в `chat_agent_messages_bus`; фоновый `AgentChannelPoller` поллит шину; `AgentChannelService.try_finalize` мапит ответ агента в блоки и финализирует черновик (`complete`/`failed`).
+- Форвард создаёт черновик `chat_messages` (`status='streaming'`) + строку-вопрос в `chat_agent_messages_bus`; фоновый `AgentChannelPoller` поллит шину; `AgentChannelService.poll_once` дозаполняет reasoning инкрементально и финализирует черновик (`complete`/`failed`).
 - Тумблер «База знаний ОАРБ» в UI — 3 позиции: Выключен / Адаптивный / Всегда (localStorage-ключ `assistant_oarb_mode`). Две другие БЗ («источников», «инструментов») в UI выключены.
 
 ## Подготовка

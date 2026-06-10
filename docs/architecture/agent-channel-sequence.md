@@ -79,7 +79,7 @@ sequenceDiagram
         EXT->>DB: INSERT chat_agent_messages_bus ответа<br/>(role='assistant', reply_to=question_uid),<br/>стримит reasoning-дельты в metadata.reasoning,<br/>пишет content и status='completed' + UPDATE вопроса status='completed'
     and поллер шины
         loop adaptive backoff (без удержания conn в sleep)
-            POLL->>CS: try_finalize(assistant_message_id, question_uid)
+            POLL->>CS: poll_once(assistant_message_id, question_uid, ...)
             CS->>DB: SELECT вопрос по question_uid
             alt строки-ответа ещё нет
                 CS-->>POLL: 'pending'
@@ -99,12 +99,12 @@ sequenceDiagram
 **Ключевые контракты:**
 
 - **Поллер — единственный writer** в `chat_messages` для draft'а: `create_streaming`
-  на старте, `finalize`/`mark_failed` по результату `try_finalize`. Фронт лишь
+  на старте, `finalize`/`mark_failed` по результату `poll_once`. Фронт лишь
   опрашивает готовность.
-- **Таймаут**: при превышении `ANSWER_TIMEOUT_SEC` (600) поллер вызывает
-  `mark_timeout` → draft → `failed` с error-блоком (`build_timeout_error_block`);
+- **Таймаут**: двухфазный — `CLAIM_TIMEOUT_SEC` (1800) пока `pending`, `ANSWER_TIMEOUT_SEC` (600) пока `processing`. Поллер вызывает
+  `mark_timeout(reason='claim'|'answer')` → draft → `failed` с error-блоком (`build_timeout_error_block`);
   вопрос в шине best-effort закрывается `status='failed'` (если CHECK владельца
-  отклонит — строка останется `pending`, слот лимита освобождает отсечка по
+  отклонит — строка останется, слот лимита освобождает двойная отсечка
   возрасту в `count_active_for_user`).
 - **Reconcile после рестарта**: поллер при старте поднимает подписки из
   streaming-черновиков `chat_messages` (`get_streaming_drafts`).
@@ -135,7 +135,7 @@ sequenceDiagram
         ORCH->>FT: tool_call
         FT->>CS: submit(mode='adaptive', ...)
         CS->>DB: INSERT вопрос (pending)<br/>+ create_streaming draft (status='streaming')
-        Note over POLL: поллер подхватит draft и<br/>финализирует через try_finalize<br/>(см. диаграмму §1)
+        Note over POLL: поллер подхватит draft и<br/>финализирует через poll_once<br/>(см. диаграмму §1)
     end
     API-->>F: 200 {"message_id": assistant_message_id}
     loop пока status == 'streaming'
@@ -171,8 +171,9 @@ sequenceDiagram
 Если активных запросов пользователя `>= max_parallel_streams_per_user`
 (`CHAT__MAX_PARALLEL_STREAMS_PER_USER`, default 3) — бросается `ChatLimitError`
 → HTTP 422 с дружелюбным сообщением, ни вопрос, ни draft не создаются.
-Счёт идёт с отсечкой по возрасту (`created_after = now − ANSWER_TIMEOUT_SEC`):
-вопрос, которому не удалось записать терминальный статус (CHECK владельца шины),
+Счёт идёт с двойной отсечкой: `pending`-строки — по `created_at` (окно `CLAIM_TIMEOUT_SEC`),
+`processing`-строки — по `updated_at` (окно `ANSWER_TIMEOUT_SEC`): вопрос,
+которому не удалось записать терминальный статус (CHECK владельца шины),
 не занимает слот навсегда.
 
 ---
@@ -181,13 +182,13 @@ sequenceDiagram
 
 | Случай | Что произойдёт |
 |---|---|
-| Поллер ещё не дошёл до `try_finalize`, агент уже ответил | GET вернёт `status='streaming'` (draft не финализирован); следующий тик поллера выполнит `finalize`, фронт увидит `complete` на очередном опросе |
-| Строка-ответ есть, но статус нетерминальный (`pending`/`processing`) | `try_finalize` возвращает `'pending'` — агент ещё стримит ответ |
-| Ответ агента со `status='failed'` | `try_finalize` → `mark_failed` с error-блоком из ответа + best-effort закрывает вопрос (`status='failed'`), фронт показывает крестик |
-| Агент закрыл вопрос `status='failed'` без строки-ответа | `try_finalize` → `mark_failed` со стандартным текстом «Внешний агент вернул ошибку» |
-| Агент вставил ответ, но не закрыл вопрос терминальным `status` | `try_finalize` сам закрывает вопрос (`status='completed'`, best-effort) после финализации |
+| Поллер ещё не дошёл до финализации, агент уже ответил | GET вернёт `status='streaming'` (draft не финализирован); следующий тик `poll_once` выполнит `finalize`, фронт увидит `complete` на очередном опросе |
+| Строка-ответ есть, но статус нетерминальный (`pending`/`processing`) | `poll_once` → `outcome='pending'` — агент ещё стримит ответ; reasoning-блок черновика дозаполняется инкрементально |
+| Ответ агента со `status='failed'` | `poll_once` → `mark_failed` с error-блоком из ответа + best-effort закрывает вопрос (`status='failed'`), фронт показывает крестик |
+| Агент закрыл вопрос `status='failed'` без строки-ответа | `poll_once` → `mark_failed` со стандартным текстом «Внешний агент вернул ошибку» |
+| Агент вставил ответ, но не закрыл вопрос терминальным `status` | `poll_once` сам закрывает вопрос (`status='completed'`, best-effort) после финализации |
 | CHECK владельца отклонил наш статус (`CheckViolationError`) | `_set_status_safe` глотает с warning'ом — финализация/таймаут не ломаются, поллер не зацикливается |
-| Превышен `ANSWER_TIMEOUT_SEC` | `mark_timeout`: draft → `failed` (error-блок таймаута), вопрос в шине best-effort закрывается `failed` |
+| Превышен idle-таймаут (claim или answer) | `mark_timeout(reason)`: draft → `failed` (error-блок `agent_claim_timeout` / `agent_answer_timeout`), вопрос в шине best-effort закрывается `failed` |
 | Поллер не инициализирован (lifespan-сбой) | Форвард **не выполняется**: вопрос в шину не пишется, draft не создаётся, сразу финализируется error-сообщение (`agent_unavailable`). Беседа остаётся удаляемой |
 | Рестарт uvicorn посреди ожидания | Поллер при старте поднимает подписки из streaming-черновиков `chat_messages` и продолжает опрос; draft остаётся виден в истории как `streaming` |
 | Пользователь отправил N форвардов параллельно | Каждый получает свой `message_id`/вопрос; при `>= max_parallel_streams_per_user` активных — `ChatLimitError` (422) до записей |
@@ -198,7 +199,7 @@ sequenceDiagram
 
 - POST/GET messages — `app/domains/chat/api/messages.py` (`send_message`, `get_message`)
 - AgentChannelService — `app/domains/chat/services/agent_channel.py`
-  (`submit`, `try_finalize`, `mark_timeout`, `map_answer_to_blocks`, `build_timeout_error_block`)
+  (`submit`, `poll_once`, `mark_timeout`, `get_queue_details`, `map_answer_to_blocks`, `build_timeout_error_block`)
 - AgentChannelPoller — `app/domains/chat/services/agent_channel_poller.py`
   (`subscribe`/`unsubscribe`/`_tick`/`_run` adaptive-backoff, reconcile из streaming-черновиков, `start`/`stop`/`get_status`)
 - button_translator — `app/domains/chat/services/button_translator.py` (`translate_buttons`)
