@@ -242,15 +242,19 @@ class AgentChannelService:
         # Мягкий лимит: count-then-insert не атомарен, два конкурентных запроса
         # могут оба пройти проверку на границе. Это защита от злоупотребления,
         # а не строгий инвариант — небольшое превышение допустимо.
-        # Отсечка по возрасту: вопрос старше answer_timeout_sec считаем мёртвым
-        # и слот не занимает — терминальный статус на чужой таблице мог не
-        # записаться (CHECK владельца), без отсечки слот утекал бы навсегда.
+        # Двухфазные отсечки: pending живёт в окне claim_timeout_sec по
+        # created_at; processing — в окне answer_timeout_sec по updated_at
+        # (агент обновляет updated_at, стримя reasoning).
         limit = self._settings.max_parallel_streams_per_user
-        cutoff = datetime.now(timezone.utc) - timedelta(
-            seconds=self._settings.agent_channel.answer_timeout_sec
-        )
+        now = datetime.now(timezone.utc)
         active = await self._agent_repo().count_active_for_user(
-            user_id, created_after=cutoff
+            user_id,
+            pending_created_after=now - timedelta(
+                seconds=self._settings.agent_channel.claim_timeout_sec
+            ),
+            processing_updated_after=now - timedelta(
+                seconds=self._settings.agent_channel.answer_timeout_sec
+            ),
         )
         if active >= limit:
             raise ChatLimitError(

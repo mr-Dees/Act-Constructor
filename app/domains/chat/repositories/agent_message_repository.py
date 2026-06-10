@@ -147,29 +147,50 @@ class AgentMessageRepository(BaseRepository):
             uid,
         )
 
-    async def count_active_for_user(self, user_id: str, *, created_after=None) -> int:
-        """Считает активные вопросы пользователя в bus-таблице.
+    async def count_pending_before(self, created_at) -> int:
+        """Число pending-вопросов в очереди агента, созданных раньше ``created_at``.
 
-        Активные статусы: 'pending' / 'processing' (словарь владельца таблицы;
-        'in_progress' — legacy-синоним для старых dev-строк). Фильтр role='user'
-        оставляет в счёте только строки-вопросы от AW: ответы агента
-        (role='assistant') не должны влиять на лимит параллельных запросов.
-
-        ``created_after`` (tz-aware datetime) отсекает старые зависшие строки:
-        терминальный статус на чужой таблице может не записаться (CHECK
-        владельца), и без отсечки мёртвый вопрос навсегда съедал бы слот лимита.
+        Очередь глобальная (агент один на всех пользователей), поэтому фильтра
+        по user_id нет. Используется для отображения позиции в очереди и для
+        liveness-сигнала «очередь движется» в поллере.
         """
-        conds = [
-            "user_id = $1",
-            "role = 'user'",
-            "status IN ('pending', 'processing', 'in_progress')",
-        ]
-        params: list = [user_id]
-        if created_after is not None:
-            params.append(created_after)
-            conds.append(f"created_at > ${len(params)}")
         val = await self.conn.fetchval(
-            f"SELECT COUNT(*) FROM {self.table} WHERE {' AND '.join(conds)}",
-            *params,
+            f"SELECT COUNT(*) FROM {self.table} "
+            f"WHERE role = 'user' AND status = 'pending' AND created_at < $1",
+            created_at,
+        )
+        return int(val or 0)
+
+    async def count_active_for_user(
+        self,
+        user_id: str,
+        *,
+        pending_created_after,
+        processing_updated_after,
+    ) -> int:
+        """Считает активные вопросы пользователя в bus-таблице с двухфазными отсечками.
+
+        Двухфазная семантика:
+        - pending живёт в окне claim_timeout_sec по created_at: агент ещё не
+          взял вопрос в работу, и если окно истекло — вопрос считается мёртвым.
+        - processing (и legacy-синоним in_progress) живёт в окне
+          answer_timeout_sec по updated_at: агент стримит reasoning, обновляя
+          updated_at; если updated_at не менялся дольше answer_timeout_sec —
+          агент завис, слот освобождаем.
+
+        role='user' — только строки-вопросы от AW (ответы агента не занимают
+        слот лимита параллельных запросов). Отсечки защищают от утечки слотов:
+        терминальный статус на чужой таблице может не записаться (CHECK
+        владельца шины), без них мёртвый вопрос занимал бы слот навсегда.
+        """
+        val = await self.conn.fetchval(
+            f"""
+            SELECT COUNT(*) FROM {self.table}
+            WHERE user_id = $1 AND role = 'user' AND (
+                (status = 'pending' AND created_at > $2)
+                OR (status IN ('processing', 'in_progress') AND updated_at > $3)
+            )
+            """,
+            user_id, pending_created_after, processing_updated_after,
         )
         return int(val or 0)

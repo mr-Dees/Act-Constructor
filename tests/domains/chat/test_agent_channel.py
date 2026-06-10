@@ -875,10 +875,9 @@ class TestAgentChannelServiceSubmitLimit:
         fake_agent_repo.insert_question.assert_called_once()
         fake_msg_repo.create_streaming.assert_called_once()
 
-    async def test_submit_counts_active_with_age_cutoff(self, mock_conn, settings):
-        """Лимит считается с отсечкой по возрасту (created_after ≈ now − timeout):
-        зависшие вопросы, которым не удалось записать терминальный статус
-        (CHECK владельца шины), не съедают слот навсегда."""
+    async def test_submit_counts_active_with_two_phase_cutoffs(self, mock_conn, settings):
+        """Лимит считается с двухфазными отсечками: pending по created_at
+        (claim_timeout_sec), processing по updated_at (answer_timeout_sec)."""
         from datetime import datetime, timedelta, timezone
 
         fake_agent_repo = AsyncMock()
@@ -901,6 +900,8 @@ class TestAgentChannelServiceSubmitLimit:
         )
         after = datetime.now(timezone.utc)
 
-        cutoff = fake_agent_repo.count_active_for_user.call_args.kwargs["created_after"]
-        timeout = timedelta(seconds=settings.agent_channel.answer_timeout_sec)
-        assert before - timeout <= cutoff <= after - timeout
+        kwargs = fake_agent_repo.count_active_for_user.call_args.kwargs
+        claim_timeout = timedelta(seconds=settings.agent_channel.claim_timeout_sec)
+        answer_timeout = timedelta(seconds=settings.agent_channel.answer_timeout_sec)
+        assert before - claim_timeout <= kwargs["pending_created_after"] <= after - claim_timeout
+        assert before - answer_timeout <= kwargs["processing_updated_after"] <= after - answer_timeout

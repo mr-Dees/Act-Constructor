@@ -1,12 +1,14 @@
 """Тесты репозитория chat_agent_messages_bus (bus-таблица канала к внешнему агенту).
 
 Покрывают: insert_question, get_by_uid, get_questions (пустой и непустой
-списки), set_status. Стратегия: mock_conn + autouse-патч get_adapter —
-идентична test_message_repository.py.
+списки), set_status, count_pending_before, count_active_for_user.
+Стратегия: mock_conn + autouse-патч get_adapter — идентична
+test_message_repository.py.
 """
 
 import json
 import uuid
+from datetime import datetime, timezone
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -313,7 +315,37 @@ async def test_set_status_executes_update(mock_conn):
     assert uid == "msg-1"
 
 
+# ── count_pending_before ─────────────────────────────────────────────────
+
+
+@pytest.mark.asyncio
+async def test_count_pending_before_filters_role_status_and_time(mock_conn):
+    """count_pending_before считает глобальную очередь pending-вопросов до отметки времени."""
+    repo = AgentMessageRepository(mock_conn)
+    mock_conn.fetchval.return_value = 3
+    ts = datetime(2026, 6, 10, 12, 0, tzinfo=timezone.utc)
+    n = await repo.count_pending_before(ts)
+    assert n == 3
+    sql = mock_conn.fetchval.call_args.args[0]
+    assert "role = 'user'" in sql and "status = 'pending'" in sql and "created_at < $1" in sql
+
+
 # ── count_active_for_user ────────────────────────────────────────────────
+
+
+@pytest.mark.asyncio
+async def test_count_active_for_user_two_phase_cutoffs(mock_conn):
+    """count_active_for_user принимает раздельные отсечки для pending и processing."""
+    repo = AgentMessageRepository(mock_conn)
+    mock_conn.fetchval.return_value = 1
+    now = datetime.now(timezone.utc)
+    n = await repo.count_active_for_user(
+        "77123", pending_created_after=now, processing_updated_after=now,
+    )
+    assert n == 1
+    sql = mock_conn.fetchval.call_args.args[0]
+    assert "status = 'pending' AND created_at > $2" in sql
+    assert "status IN ('processing', 'in_progress') AND updated_at > $3" in sql
 
 
 async def test_count_active_for_user_returns_count(mock_conn):
@@ -323,10 +355,15 @@ async def test_count_active_for_user_returns_count(mock_conn):
     без него вопросы в работе у агента не считались бы активными.
     """
     mock_conn.fetchval.return_value = 2
+    now = datetime.now(timezone.utc)
     repo = AgentMessageRepository(mock_conn)
-    result = await repo.count_active_for_user("user1")
+    result = await repo.count_active_for_user(
+        "user1",
+        pending_created_after=now,
+        processing_updated_after=now,
+    )
 
-    sql, user_id = mock_conn.fetchval.call_args.args
+    sql, user_id, *_ = mock_conn.fetchval.call_args.args
     assert "SELECT COUNT(*)" in sql
     assert "chat_agent_messages_bus" in sql
     assert "user_id = $1" in sql
@@ -340,27 +377,30 @@ async def test_count_active_for_user_returns_count(mock_conn):
 async def test_count_active_for_user_returns_zero_on_none(mock_conn):
     """count_active_for_user возвращает 0 если fetchval вернул None."""
     mock_conn.fetchval.return_value = None
+    now = datetime.now(timezone.utc)
     repo = AgentMessageRepository(mock_conn)
-    result = await repo.count_active_for_user("user-empty")
+    result = await repo.count_active_for_user(
+        "user-empty",
+        pending_created_after=now,
+        processing_updated_after=now,
+    )
     assert result == 0
 
 
-async def test_count_active_for_user_with_created_after_cutoff(mock_conn):
-    """created_after добавляет отсечку created_at > $2.
-
-    Защита от утечки слотов лимита: терминальный статус на чужой таблице
-    может не записаться (CHECK владельца) — старые pending-строки не должны
-    вечно занимать слот.
-    """
-    from datetime import datetime, timezone
-
+async def test_count_active_for_user_passes_both_cutoffs(mock_conn):
+    """Обе отсечки передаются в запрос как $2 и $3 соответственно."""
     mock_conn.fetchval.return_value = 1
-    cutoff = datetime(2026, 6, 10, tzinfo=timezone.utc)
+    pending_cutoff = datetime(2026, 6, 10, 10, 0, tzinfo=timezone.utc)
+    processing_cutoff = datetime(2026, 6, 10, 11, 0, tzinfo=timezone.utc)
     repo = AgentMessageRepository(mock_conn)
-    result = await repo.count_active_for_user("user1", created_after=cutoff)
+    result = await repo.count_active_for_user(
+        "user1",
+        pending_created_after=pending_cutoff,
+        processing_updated_after=processing_cutoff,
+    )
 
-    sql, user_id, created_after = mock_conn.fetchval.call_args.args
-    assert "created_at > $2" in sql
+    sql, user_id, p_after, pr_after = mock_conn.fetchval.call_args.args
     assert user_id == "user1"
-    assert created_after == cutoff
+    assert p_after == pending_cutoff
+    assert pr_after == processing_cutoff
     assert result == 1
