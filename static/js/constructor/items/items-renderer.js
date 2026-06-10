@@ -13,6 +13,9 @@ import { ChatEventBus } from '../../shared/chat/chat-event-bus.js';
 import { Notifications } from '../../shared/notifications.js';
 import { buildColgroup } from '../table/colgroup.js';
 import { iterateVisibleCells } from '../table/grid-merges.js';
+import { tableManager } from '../table/table-core.js';
+import { textBlockManager } from '../textblock/textblock-core.js';
+import { violationManager } from '../violation/violation-init.js';
 
 export class ItemsRenderer {
     /**
