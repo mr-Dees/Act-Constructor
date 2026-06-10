@@ -35,6 +35,42 @@ class DatabaseAdapter(ABC):
         return re.findall(pattern, sql, re.IGNORECASE)
 
     @staticmethod
+    def _companion_target_table(stmt: str) -> str | None:
+        """Целевая таблица оператора-«спутника» создания таблицы.
+
+        «Спутники» — ``CREATE INDEX`` и ``COMMENT ON``: они нужны только
+        вместе с созданием своей таблицы. На уже существующей таблице они
+        избыточны, а если таблица создана внешней стороной (например,
+        bus-таблица канала агента подготовлена командой агента), падают с
+        ``InsufficientPrivilegeError`` («must be owner of relation ...») —
+        даже ``CREATE INDEX IF NOT EXISTS``, когда индекса ещё нет.
+
+        Возвращает имя таблицы (как записано в SQL) для
+        ``CREATE [UNIQUE] INDEX ... ON <t>`` и ``COMMENT ON TABLE <t>`` /
+        ``COMMENT ON COLUMN <t>.<col>``. Для остальных операторов — None:
+        их исполняем всегда (в частности ``ALTER TABLE`` — путь эволюции
+        уже существующих собственных таблиц).
+        """
+        s = re.sub(r'/\*.*?\*/', '', stmt, flags=re.DOTALL)
+        s = re.sub(r'--[^\n]*', '', s)
+        m = re.match(
+            r'\s*CREATE\s+(?:UNIQUE\s+)?INDEX\s+(?:IF\s+NOT\s+EXISTS\s+)?'
+            r'\S+\s+ON\s+([^\s(]+)',
+            s, re.IGNORECASE,
+        )
+        if m:
+            return m.group(1)
+        m = re.match(r'\s*COMMENT\s+ON\s+TABLE\s+(\S+)\s+IS\b', s, re.IGNORECASE)
+        if m:
+            return m.group(1)
+        m = re.match(
+            r'\s*COMMENT\s+ON\s+COLUMN\s+(\S+)\.[^\s.]+\s+IS\b', s, re.IGNORECASE,
+        )
+        if m:
+            return m.group(1)
+        return None
+
+    @staticmethod
     async def _existing_tables_by_schema(
         conn: asyncpg.Connection,
         expected_names: list[str],

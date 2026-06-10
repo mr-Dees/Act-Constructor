@@ -93,8 +93,24 @@ class PostgreSQLAdapter(DatabaseAdapter):
                 f"отсутствуют {len(missing)} из {len(expected)}: {', '.join(missing)}"
             )
 
+            # «Спутники» (CREATE INDEX / COMMENT ON) уже существующих таблиц
+            # пропускаем: таблица могла быть создана внешней стороной (например,
+            # bus-таблица канала агента) — даже CREATE INDEX IF NOT EXISTS на
+            # чужой таблице падает с «must be owner of relation», если индекса нет.
+            statements = []
+            for stmt in self._split_sql_statements(schema_sql):
+                target = self._companion_target_table(stmt)
+                if target is not None and target in existing:
+                    logger.debug(
+                        f"PostgreSQL: таблица {target} уже существует, "
+                        f"пропускаем сопутствующий оператор"
+                    )
+                    continue
+                statements.append(stmt)
+
             try:
-                await conn.execute(schema_sql)
+                if statements:
+                    await conn.execute("\n".join(statements))
                 logger.info(f"PostgreSQL схема выполнена: {domain_name}")
             except asyncpg.DuplicateObjectError:
                 logger.info(f"PostgreSQL: некоторые объекты уже существуют ({domain_name})")

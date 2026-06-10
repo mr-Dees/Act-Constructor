@@ -26,6 +26,7 @@
 19. [Settings залипают между тестами (один тест видит env другого)](#19-settings-залипают-между-тестами-один-тест-видит-env-другого)
 20. [Singleton-lock — приложение не стартует / зависший процесс](#20-singleton-lock--приложение-не-стартует--зависший-процесс)
 21. [Записи в audit_log / metrics пропадают — что проверить](#21-записи-в-audit_log--metrics-пропадают--что-проверить)
+22. [Старт падает: `must be owner of relation <bus-таблица>`](#22-старт-падает-must-be-owner-of-relation-bus-таблица)
 
 ---
 
@@ -419,3 +420,15 @@
    - При `last_error` — устранить корневую причину (например, CHECK constraint без mapping в `CHECK_CONSTRAINT_MESSAGES`).
 
 **См. также:** `app/core/metrics_batcher.py::get_status`, `app/core/observability_registry.py`, `app/api/v1/endpoints/admin_diagnostics.py`, `docs/guides/developer-guide.md` §9.5a / §9.5b.
+
+---
+
+### 22. Старт падает: `must be owner of relation <bus-таблица>`
+
+**Симптом:** при запуске приложения `RuntimeError: Не удалось инициализировать БД при старте: must be owner of relation <имя bus-таблицы>`. Воспроизводится, когда bus-таблица канала агента (`CHAT__AGENT_CHANNEL__TABLE_NAME`, схема `CHAT__AGENT_CHANNEL__SCHEMA_NAME`) уже создана внешней стороной (командой агента), а владелец — не учётка приложения.
+
+**Причина:** `create_tables_if_not_exist` при наличии хотя бы одной отсутствующей таблицы домена исполнял **весь** schema.sql, включая `CREATE INDEX` (и `COMMENT ON`) на уже существующей чужой таблице. Эти операторы требуют владения таблицей — даже `CREATE INDEX IF NOT EXISTS` падает, если индекса ещё нет.
+
+**Решение:** исправлено в адаптерах (`app/db/adapters/{base,greenplum,postgresql}.py`): операторы-«спутники» (`CREATE INDEX`, `COMMENT ON`) исполняются только для таблиц, отсутствовавших на pre-check; уже существующие (в т.ч. созданные внешней стороной) не трогаются. `ALTER TABLE` по-прежнему исполняется всегда (путь эволюции собственных таблиц). На старых версиях — митигация: попросить владельца создать индексы из schema.sql либо выдать ownership учётке приложения.
+
+**См. также:** `DatabaseAdapter._companion_target_table`, `tests/db/test_adapters.py::TestSkipCompanionsForExistingTables`.

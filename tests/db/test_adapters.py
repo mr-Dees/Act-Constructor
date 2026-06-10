@@ -337,11 +337,153 @@ class TestPostgreSQLBatchExecute:
 
 
 # ---------------------------------------------------------------------------
-# 6. Контракт capabilities (sanity): расхождение между адаптерами.
+# 6. _companion_target_table: распознавание операторов-«спутников» создания
+#    таблицы (CREATE INDEX / COMMENT ON) и их целевой таблицы.
+# ---------------------------------------------------------------------------
+
+class TestCompanionTargetTable:
+
+    def test_create_index_simple(self):
+        assert DatabaseAdapter._companion_target_table(
+            "CREATE INDEX idx_x ON tab(id);"
+        ) == "tab"
+
+    def test_create_index_qualified_unique_if_not_exists(self):
+        assert DatabaseAdapter._companion_target_table(
+            "CREATE UNIQUE INDEX IF NOT EXISTS idx_x\n    ON s.tab (id, name);"
+        ) == "s.tab"
+
+    def test_create_index_with_leading_comment(self):
+        assert DatabaseAdapter._companion_target_table(
+            "-- индекс под выборку\nCREATE INDEX idx_x ON s.tab(id);"
+        ) == "s.tab"
+
+    def test_comment_on_table(self):
+        assert DatabaseAdapter._companion_target_table(
+            "COMMENT ON TABLE s.tab IS 'описание';"
+        ) == "s.tab"
+
+    def test_comment_on_column(self):
+        assert DatabaseAdapter._companion_target_table(
+            "COMMENT ON COLUMN s.tab.col IS 'описание';"
+        ) == "s.tab"
+
+    def test_comment_on_column_unqualified(self):
+        assert DatabaseAdapter._companion_target_table(
+            "COMMENT ON COLUMN tab.col IS 'описание';"
+        ) == "tab"
+
+    @pytest.mark.parametrize("stmt", [
+        "CREATE TABLE IF NOT EXISTS s.tab (id INT);",
+        "ALTER TABLE s.tab ADD COLUMN x INT;",
+        "CREATE SEQUENCE s.tab_id_seq;",
+        "INSERT INTO s.tab VALUES (1);",
+        "DO $$ BEGIN PERFORM 1; END$$;",
+    ])
+    def test_non_companion_statements_return_none(self, stmt):
+        """CREATE TABLE / ALTER / SEQUENCE / INSERT / DO — не «спутники»."""
+        assert DatabaseAdapter._companion_target_table(stmt) is None
+
+
+# ---------------------------------------------------------------------------
+# 7. Пропуск «спутников» уже существующих таблиц. Регрессия ПРОМ-инцидента:
+#    bus-таблица канала агента создана внешней стороной (мы не владелец) —
+#    CREATE INDEX / COMMENT ON на ней падали с «must be owner of relation»
+#    и валили старт приложения, когда любая другая таблица домена отсутствовала.
+# ---------------------------------------------------------------------------
+
+class TestSkipCompanionsForExistingTables:
+
+    async def test_gp_skips_index_and_comments_on_foreign_existing_table(
+        self, mock_conn, tmp_path,
+    ):
+        a = GreenplumAdapter(schema=GP_SCHEMA, table_prefix=GP_PREFIX)
+        f = tmp_path / "dom" / "migrations" / "greenplum" / "schema.sql"
+        f.parent.mkdir(parents=True)
+        f.write_text(
+            "CREATE TABLE IF NOT EXISTS {SCHEMA}.{PREFIX}own (id INT);\n"
+            "CREATE INDEX idx_own ON {SCHEMA}.{PREFIX}own (id);\n"
+            "CREATE TABLE IF NOT EXISTS integ.bus (id INT);\n"
+            "CREATE INDEX idx_bus ON integ.bus(id);\n"
+            "COMMENT ON TABLE integ.bus IS 'чужая таблица';\n"
+            "COMMENT ON COLUMN integ.bus.id IS 'uid';",
+            encoding="utf-8",
+        )
+        # bus существует (создана внешней стороной), own отсутствует.
+        # pre-check/post-verify идут по запросу на схему (public_test, integ).
+        mock_conn.fetch.side_effect = [
+            [],                            # pre-check public_test
+            [{"tablename": "bus"}],        # pre-check integ
+            [{"tablename": "test_own"}],   # post-verify public_test
+            [{"tablename": "bus"}],        # post-verify integ
+        ]
+
+        await a.create_tables(mock_conn, [f])
+
+        executed = [c.args[0] for c in mock_conn.execute.call_args_list]
+        assert any("idx_own" in s for s in executed)
+        # «Спутники» чужой существующей таблицы не исполнялись.
+        assert not any("idx_bus" in s for s in executed)
+        assert not any("COMMENT ON" in s for s in executed)
+
+    async def test_pg_skips_index_on_foreign_existing_table(
+        self, mock_conn, tmp_path,
+    ):
+        a = PostgreSQLAdapter(table_prefix=PG_PREFIX)
+        f = tmp_path / "dom" / "migrations" / "postgresql" / "schema.sql"
+        f.parent.mkdir(parents=True)
+        f.write_text(
+            "CREATE TABLE IF NOT EXISTS {PREFIX}own (id INT);\n"
+            "CREATE INDEX IF NOT EXISTS idx_own ON {PREFIX}own (id);\n"
+            "CREATE TABLE IF NOT EXISTS bus (id INT);\n"
+            "CREATE INDEX IF NOT EXISTS idx_bus ON bus(id);",
+            encoding="utf-8",
+        )
+        mock_conn.fetch.side_effect = [
+            [{"tablename": "bus"}],                              # pre-check
+            [{"tablename": "test_own"}, {"tablename": "bus"}],   # post-verify
+        ]
+
+        await a.create_tables(mock_conn, [f])
+
+        assert mock_conn.execute.call_count == 1
+        executed_sql = mock_conn.execute.call_args.args[0]
+        assert "idx_own" in executed_sql
+        # Даже CREATE INDEX IF NOT EXISTS на чужой таблице требует владения,
+        # если индекса нет — оператор должен быть отфильтрован.
+        assert "idx_bus" not in executed_sql
+
+    async def test_gp_alter_table_still_executes_for_existing_table(
+        self, mock_conn, tmp_path,
+    ):
+        """ALTER TABLE — путь эволюции существующих таблиц, не пропускается."""
+        a = GreenplumAdapter(schema=GP_SCHEMA, table_prefix=GP_PREFIX)
+        f = tmp_path / "dom" / "migrations" / "greenplum" / "schema.sql"
+        f.parent.mkdir(parents=True)
+        f.write_text(
+            "CREATE TABLE IF NOT EXISTS {SCHEMA}.{PREFIX}own (id INT);\n"
+            "ALTER TABLE {SCHEMA}.{PREFIX}msgs ADD COLUMN agent_ref VARCHAR(36);\n"
+            "CREATE TABLE IF NOT EXISTS {SCHEMA}.{PREFIX}msgs (id INT);",
+            encoding="utf-8",
+        )
+        # msgs существует (эволюция), own отсутствует.
+        mock_conn.fetch.side_effect = [
+            [{"tablename": "test_msgs"}],                            # pre-check
+            [{"tablename": "test_own"}, {"tablename": "test_msgs"}],  # post-verify
+        ]
+
+        await a.create_tables(mock_conn, [f])
+
+        executed = [c.args[0] for c in mock_conn.execute.call_args_list]
+        assert any("ALTER TABLE" in s for s in executed)
+
+
+# ---------------------------------------------------------------------------
+# 8. Контракт capabilities (sanity): расхождение между адаптерами.
 # ---------------------------------------------------------------------------
 
 # ---------------------------------------------------------------------------
-# 7. _get_existing_tables учитывает схему имени, а не одну фиксированную.
+# 9. _get_existing_tables учитывает схему имени, а не одну фиксированную.
 #    Регрессия: при CHAT__SCHEMA_NAME / CHAT__AGENT_CHANNEL__SCHEMA_NAME
 #    таблицы создаются в иной схеме; existence-check обязан проверять её,
 #    иначе post-verify в create_tables ложно падает с RuntimeError.

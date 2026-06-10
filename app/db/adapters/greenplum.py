@@ -104,6 +104,17 @@ class GreenplumAdapter(DatabaseAdapter):
             statements = self._split_sql_statements(schema_sql)
 
             for stmt in statements:
+                # «Спутники» (CREATE INDEX / COMMENT ON) уже существующей
+                # таблицы пропускаем: она могла быть создана внешней стороной
+                # (например, bus-таблица канала агента) — на чужой таблице
+                # такие операторы падают с «must be owner of relation».
+                target = self._companion_target_table(stmt)
+                if target is not None and target in existing:
+                    logger.debug(
+                        f"Greenplum: таблица {target} уже существует, "
+                        f"пропускаем сопутствующий оператор"
+                    )
+                    continue
                 try:
                     await conn.execute(stmt)
                 except asyncpg.DuplicateTableError:
