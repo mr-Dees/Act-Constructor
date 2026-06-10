@@ -51,6 +51,13 @@ export const ChatMessages = {
     _pollController: null,
 
     /**
+     * Реестр инкрементально отрисованных блоков: контейнер → Map
+     * (block_id → {sb, renderedLen, queue}). WeakMap — контейнеры умирают
+     * при перерисовке беседы, реестр уходит с ними.
+     */
+    _incrementalRegistry: new WeakMap(),
+
+    /**
      * Инициализация: кеширование DOM, подписка на события
      *
      * @param {Object} data
@@ -174,6 +181,9 @@ export const ChatMessages = {
                     this._renderReadyMessage(botContainer, msg);
                     ChatEventBus.emit('ui:scroll-bottom');
                 },
+                onProgress: (msg) => {
+                    this._renderProgress(botContainer, msg);
+                },
                 onError: (err) => {
                     this._renderError(botContainer, err);
                     ChatEventBus.emit('ui:scroll-bottom');
@@ -197,17 +207,28 @@ export const ChatMessages = {
      */
     _renderReadyMessage(botContainer, msg) {
         ChatRenderer.removeTypingPlaceholder(botContainer);
+        this._updateQueueStatus(botContainer, null); // снять строку статуса очереди
         const msgEl = botContainer.parentElement;
         if (msgEl) msgEl.classList.remove('chat-message-bot--streaming');
 
         const blocks = Array.isArray(msg.content) ? msg.content : [];
+        const reg = this._incrementalRegistry.get(botContainer);
+
         if (msg.status === 'failed') {
             if (msgEl) msgEl.classList.add('chat-message--failed');
-            // Блоки из failed-сообщения (обычно error-блок) — без анимации
-            ChatRenderer.renderBlocks(botContainer, blocks, { execute: false });
-        } else {
+            // Уже допечатанные блоки не перерисовываем; новые (включая error) —
+            // мгновенно, без анимации.
+            const fresh = reg
+                ? blocks.filter((b) => !(b && b.block_id && reg.has(b.block_id)))
+                : blocks;
+            ChatRenderer.renderBlocks(botContainer, fresh, { execute: false });
+        } else if (!reg || reg.size === 0) {
+            // Инкрементального рендера не было (обычный LLM-ответ) — как раньше.
             ChatRenderer.typeOutBlocks(botContainer, blocks);
+        } else {
+            this._typeOutRemaining(botContainer, blocks, reg);
         }
+        this._incrementalRegistry.delete(botContainer);
         // Панель обратной связи под ответом ассистента — включая failed:
         // дизлайк на ошибочном ответе — первичный сигнал «почему ошибка»
         // (см. docs/guides/chat-observability-and-feedback.md).
@@ -223,6 +244,143 @@ export const ChatMessages = {
     },
 
     /**
+     * Прогресс ожидания ответа: строка статуса очереди + допечатывание
+     * частичных блоков (reasoning агента) по мере роста.
+     *
+     * @param {HTMLElement} botContainer
+     * @param {Object} msg — {id, status, content, status_details?}
+     * @private
+     */
+    _renderProgress(botContainer, msg) {
+        this._updateQueueStatus(botContainer, msg.status_details || null);
+        const blocks = Array.isArray(msg.content) ? msg.content : [];
+        if (blocks.length) this._renderIncrementalBlocks(botContainer, blocks);
+    },
+
+    /**
+     * Создаёт/обновляет/удаляет строку статуса очереди над typing-индикатором.
+     * details=null или неизвестный bus_status → строка удаляется.
+     * @private
+     */
+    _updateQueueStatus(botContainer, details) {
+        const text = this._queueStatusText(details);
+        let label = botContainer.querySelector(':scope > .chat-typing-status');
+        if (!text) {
+            if (label) label.remove();
+            return;
+        }
+        if (!label) {
+            label = document.createElement('div');
+            label.className = 'chat-typing-status';
+            const placeholder = botContainer.querySelector(':scope > .chat-typing-placeholder');
+            if (placeholder) {
+                botContainer.insertBefore(label, placeholder);
+            } else {
+                botContainer.appendChild(label);
+            }
+        }
+        if (label.textContent !== text) label.textContent = text;
+    },
+
+    /**
+     * Текст статуса по status_details из GET-ответа.
+     * @private
+     */
+    _queueStatusText(details) {
+        if (!details || !details.bus_status) return '';
+        if (details.bus_status === 'pending') {
+            const n = details.queue_ahead;
+            if (typeof n === 'number' && n > 0) {
+                return `В очереди: впереди ${n} ${this._pluralizeRequests(n)}`;
+            }
+            return 'В очереди: вы следующий';
+        }
+        if (details.bus_status === 'processing' || details.bus_status === 'in_progress') {
+            return 'Агент работает над ответом…';
+        }
+        return '';
+    },
+
+    /**
+     * Русская плюрализация слова «запрос».
+     * @private
+     */
+    _pluralizeRequests(n) {
+        const mod10 = n % 10;
+        const mod100 = n % 100;
+        if (mod10 === 1 && mod100 !== 11) return 'запрос';
+        if (mod10 >= 2 && mod10 <= 4 && (mod100 < 12 || mod100 > 14)) return 'запроса';
+        return 'запросов';
+    },
+
+    /**
+     * Допечатывает дельты частичных блоков (по block_id). Накопление без
+     * дублей: рендерим только text.slice(renderedLen); анимации на один блок
+     * выстраиваются в очередь promise'ов, чтобы дельты не перемешивались.
+     * @private
+     */
+    _renderIncrementalBlocks(botContainer, blocks) {
+        let reg = this._incrementalRegistry.get(botContainer);
+        if (!reg) {
+            reg = new Map();
+            this._incrementalRegistry.set(botContainer, reg);
+        }
+        const signal = this._pollController && this._pollController.signal;
+        let appended = false;
+
+        for (const block of blocks) {
+            if (!block || typeof block.block_id !== 'string' || !block.block_id) continue;
+            if (block.type !== 'reasoning' && block.type !== 'text') continue;
+            const text = block.content || '';
+            let entry = reg.get(block.block_id);
+            if (!entry) {
+                const sb = ChatRenderer.createStreamingBlock(block.type, block.block_id);
+                ChatRenderer.appendBlock(botContainer, sb.element);
+                entry = { sb, renderedLen: 0, queue: Promise.resolve() };
+                reg.set(block.block_id, entry);
+                appended = true;
+            }
+            if (text.length > entry.renderedLen) {
+                const delta = text.slice(entry.renderedLen);
+                entry.renderedLen = text.length;
+                entry.queue = entry.queue.then(
+                    () => ChatRenderer.appendTextAnimated(entry.sb, delta, { signal }),
+                );
+            }
+        }
+        if (appended) ChatEventBus.emit('ui:scroll-bottom');
+    },
+
+    /**
+     * Финальный рендер после инкрементального: уже допечатанные блоки получают
+     * только недостающий хвост, новые — печатаются как обычно.
+     * @private
+     */
+    async _typeOutRemaining(botContainer, blocks, reg) {
+        const signal = this._pollController && this._pollController.signal;
+        for (const block of blocks) {
+            const bid = (block && typeof block.block_id === 'string') ? block.block_id : null;
+            const entry = bid ? reg.get(bid) : null;
+            if (entry && (block.type === 'reasoning' || block.type === 'text')) {
+                const text = block.content || '';
+                if (text.length > entry.renderedLen) {
+                    const delta = text.slice(entry.renderedLen);
+                    entry.renderedLen = text.length;
+                    entry.queue = entry.queue.then(
+                        () => ChatRenderer.appendTextAnimated(entry.sb, delta, { signal }),
+                    );
+                }
+                await entry.queue;
+            } else if (entry) {
+                // Нетекстовый блок уже в DOM (отрисован инкрементально) — пропускаем.
+            } else {
+                await ChatRenderer.typeOutSingleBlock(botContainer, block, { signal });
+            }
+        }
+        ChatEventBus.emit('ui:scroll-bottom');
+    },
+
+    /**
      * Показывает ошибку получения ответа в typing-bubble.
      *
      * @param {HTMLElement} botContainer
@@ -233,6 +391,7 @@ export const ChatMessages = {
         if (err && err.name === 'AbortError') return; // отмена — молча
 
         ChatRenderer.removeTypingPlaceholder(botContainer);
+        this._updateQueueStatus(botContainer, null); // снять строку статуса очереди
         const msgEl = botContainer.parentElement;
         if (msgEl) msgEl.classList.remove('chat-message-bot--streaming');
 
@@ -448,6 +607,11 @@ export const ChatMessages = {
                                 this._renderReadyMessage(container, m);
                                 ChatEventBus.emit('ui:scroll-bottom');
                             },
+                            // Resume после reload: блоки черновика уже могли быть отрисованы
+                            // историей (с data-block-id) — appendBlock заменит их по id, и
+                            // реестр допечатает текст заново целиком (однократная
+                            // перепечатка вместо риска дублирования).
+                            onProgress: (m) => this._renderProgress(container, m),
                             onError: (e) => {
                                 this._renderError(container, e);
                                 ChatEventBus.emit('ui:scroll-bottom');
