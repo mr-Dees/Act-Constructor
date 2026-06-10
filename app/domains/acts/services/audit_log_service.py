@@ -26,6 +26,11 @@ class AuditLogService:
         свой state до restore, его последняя сохранённая версия остаётся
         в истории как отдельная запись и доступна для последующего
         восстановления.
+
+        Все 4 шага (pre-snapshot, перезапись, аудит-лог, post-snapshot)
+        идут в ОДНОЙ плоской транзакции (§9 зона 4): частичный сбой
+        откатывает всё, история и контент не рассогласуются. Репозитории
+        работают на этом же соединении без собственных транзакций.
         """
         await self.guard.require_management_role(act_id, username)
         await self.guard.require_lock_owner(act_id, username)
@@ -36,23 +41,6 @@ class AuditLogService:
             raise ActNotFoundError(f"Версия {version_id} не найдена")
 
         content_repo = ActContentRepository(self.conn)
-
-        # Pre-snapshot текущего содержимого ДО перезаписи.
-        # get_content вернёт dict {tree, tables, textBlocks, violations, ...};
-        # сохраняем как auto-снимок — это не пользовательский save,
-        # значения manual/periodic зарезервированы за явными действиями
-        # редактора (см. saveType в ActDataSchema).
-        current = await content_repo.get_content(act_id)
-        if current:
-            await self.versions_repo.create_version(
-                act_id=act_id,
-                username=username,
-                save_type="auto",
-                tree=current.get("tree", {}),
-                tables=current.get("tables", {}),
-                textblocks=current.get("textBlocks", {}),
-                violations=current.get("violations", {}),
-            )
 
         restore_data = ActDataSchema(
             tree=version["tree_data"],
@@ -68,26 +56,44 @@ class AuditLogService:
         # несанитизированный HTML в БД (stored XSS).
         sanitize_act_data(restore_data)
 
-        await content_repo.save_content(act_id, restore_data, username)
+        async with self.conn.transaction():
+            # Pre-snapshot текущего содержимого ДО перезаписи.
+            # get_content вернёт dict {tree, tables, textBlocks, violations, ...};
+            # сохраняем как auto-снимок — это не пользовательский save,
+            # значения manual/periodic зарезервированы за явными действиями
+            # редактора (см. saveType в ActDataSchema).
+            current = await content_repo.get_content(act_id)
+            if current:
+                await self.versions_repo.create_version(
+                    act_id=act_id,
+                    username=username,
+                    save_type="auto",
+                    tree=current.get("tree", {}),
+                    tables=current.get("tables", {}),
+                    textblocks=current.get("textBlocks", {}),
+                    violations=current.get("violations", {}),
+                )
 
-        await self.audit_repo.log("restore", username, act_id, {
-            "from_version": version["version_number"],
-            "version_id": version_id,
-        })
+            await content_repo.save_content(act_id, restore_data, username)
 
-        # Снимок после восстановления берём из уже санитизированного
-        # restore_data, а не из сырых данных версии — иначе в историю
-        # попал бы несанитизированный HTML, который при повторном restore
-        # вернул бы stored XSS.
-        await self.versions_repo.create_version(
-            act_id=act_id,
-            username=username,
-            save_type="manual",
-            tree=restore_data.tree,
-            tables={tid: t.model_dump(mode="json") for tid, t in restore_data.tables.items()},
-            textblocks={tid: t.model_dump(mode="json") for tid, t in restore_data.textBlocks.items()},
-            violations={vid: v.model_dump(mode="json") for vid, v in restore_data.violations.items()},
-        )
+            await self.audit_repo.log("restore", username, act_id, {
+                "from_version": version["version_number"],
+                "version_id": version_id,
+            })
+
+            # Снимок после восстановления берём из уже санитизированного
+            # restore_data, а не из сырых данных версии — иначе в историю
+            # попал бы несанитизированный HTML, который при повторном restore
+            # вернул бы stored XSS.
+            await self.versions_repo.create_version(
+                act_id=act_id,
+                username=username,
+                save_type="manual",
+                tree=restore_data.tree,
+                tables={tid: t.model_dump(mode="json") for tid, t in restore_data.tables.items()},
+                textblocks={tid: t.model_dump(mode="json") for tid, t in restore_data.textBlocks.items()},
+                violations={vid: v.model_dump(mode="json") for vid, v in restore_data.violations.items()},
+            )
 
         logger.info(
             f"Восстановлено содержимое акта ID={act_id} из версии "

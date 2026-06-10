@@ -25,6 +25,20 @@ def _patch_adapter(mock_adapter):
         yield
 
 
+def _make_tx_conn() -> AsyncMock:
+    """Mock-соединение с поддержкой async with conn.transaction().
+
+    restore_version держит все шаги в одной плоской транзакции —
+    mock-у нужен синхронный transaction(), возвращающий async-CM.
+    """
+    conn = AsyncMock()
+    tx = AsyncMock()
+    tx.__aenter__ = AsyncMock(return_value=tx)
+    tx.__aexit__ = AsyncMock(return_value=False)
+    conn.transaction = MagicMock(return_value=tx)
+    return conn
+
+
 # ── ActAuditLogRepository.log: запись и обработка ошибок ────────────────────
 
 
@@ -221,7 +235,7 @@ class TestAuditLogServiceRestore:
         versions_repo.get_version = AsyncMock()
         versions_repo.create_version = AsyncMock(return_value=2)
 
-        conn = AsyncMock()
+        conn = _make_tx_conn()
         return AuditLogService(guard, audit_repo, versions_repo, conn), guard, audit_repo, versions_repo
 
     async def test_restore_version_unknown_raises_not_found(self):
@@ -331,7 +345,7 @@ class TestRestoreVersionPreSnapshot:
         versions_repo = MagicMock()
         versions_repo.get_version = AsyncMock()
         versions_repo.create_version = AsyncMock(return_value=2)
-        conn = AsyncMock()
+        conn = _make_tx_conn()
         return AuditLogService(guard, audit_repo, versions_repo, conn), versions_repo
 
     async def test_pre_snapshot_created_from_current_content(self):

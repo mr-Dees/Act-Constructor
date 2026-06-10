@@ -86,7 +86,17 @@ class ActContentService:
         }
 
     async def save_content(self, act_id: int, data: ActDataSchema, username: str) -> dict:
-        """Сохраняет содержимое акта."""
+        """Сохраняет содержимое акта.
+
+        Запись контента, diff, аудит-лог и снимок версии идут в ОДНОЙ плоской
+        транзакции (§9 зона 4): сбой на любом шаге откатывает всё — контент
+        не записывается частично, история версий не рассогласуется.
+        Вложенных transaction()/savepoint'ов нет (Greenplum): репозитории
+        работают на этом же соединении и собственных транзакций не открывают.
+        Аудит-лог через активный батчер пишется его собственным соединением
+        и в транзакцию по определению не входит (fire-and-forget by design);
+        fallback-INSERT одиночного пути попадает в общую транзакцию.
+        """
         await self.guard.require_edit_permission(act_id, username)
         await self.guard.require_lock_owner(act_id, username)
 
@@ -97,39 +107,40 @@ class ActContentService:
         # перед записью в БД. Whitelist в utils/html_sanitizer.py.
         self._sanitize_html_fields(data)
 
-        # Вычисляем diff ДО сохранения
-        diff = await self._audit.compute_content_diff(act_id, data)
-        diff["save_type"] = data.saveType
+        async with self.conn.transaction():
+            # Вычисляем diff ДО сохранения
+            diff = await self._audit.compute_content_diff(act_id, data)
+            diff["save_type"] = data.saveType
 
-        # Вычисляем field-level diff для изменённых элементов
-        audit_log_cfg = self.acts_settings.audit_log
-        field_changes = await self._audit.compute_field_diffs(
-            act_id,
-            data,
-            max_elements=audit_log_cfg.max_diff_elements,
-            max_cells_per_table=audit_log_cfg.max_diff_cells_per_table,
-        )
-        if field_changes:
-            diff["field_changes"] = field_changes
-
-        # Сохраняем содержимое
-        result = await self._content.save_content(act_id, data, username)
-
-        # Записываем в аудит-лог (fire-and-forget)
-        await self._audit.log("content_save", username, act_id, diff, changelog=data.changelog)
-
-        # Создаём снэпшот версии только для manual/periodic
-        if data.saveType in ("manual", "periodic"):
-            await self._versions.create_version(
-                act_id=act_id,
-                username=username,
-                save_type=data.saveType,
-                tree=data.tree,
-                tables={tid: t.model_dump(mode="json") for tid, t in data.tables.items()},
-                textblocks={tid: t.model_dump(mode="json") for tid, t in data.textBlocks.items()},
-                violations={vid: v.model_dump(mode="json") for vid, v in data.violations.items()},
-                max_versions=self.acts_settings.audit_log.max_content_versions,
+            # Вычисляем field-level diff для изменённых элементов
+            audit_log_cfg = self.acts_settings.audit_log
+            field_changes = await self._audit.compute_field_diffs(
+                act_id,
+                data,
+                max_elements=audit_log_cfg.max_diff_elements,
+                max_cells_per_table=audit_log_cfg.max_diff_cells_per_table,
             )
+            if field_changes:
+                diff["field_changes"] = field_changes
+
+            # Сохраняем содержимое
+            result = await self._content.save_content(act_id, data, username)
+
+            # Записываем в аудит-лог
+            await self._audit.log("content_save", username, act_id, diff, changelog=data.changelog)
+
+            # Создаём снэпшот версии только для manual/periodic
+            if data.saveType in ("manual", "periodic"):
+                await self._versions.create_version(
+                    act_id=act_id,
+                    username=username,
+                    save_type=data.saveType,
+                    tree=data.tree,
+                    tables={tid: t.model_dump(mode="json") for tid, t in data.tables.items()},
+                    textblocks={tid: t.model_dump(mode="json") for tid, t in data.textBlocks.items()},
+                    violations={vid: v.model_dump(mode="json") for vid, v in data.violations.items()},
+                    max_versions=self.acts_settings.audit_log.max_content_versions,
+                )
 
         return result
 

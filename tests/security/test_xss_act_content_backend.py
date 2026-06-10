@@ -109,6 +109,13 @@ class TestSanitizeHtmlDirect:
 def _make_service():
     """ActContentService с замоканными guard/репозиториями."""
     conn = AsyncMock()
+    # save_content открывает плоскую транзакцию на соединении —
+    # mock-у нужен синхронный transaction(), возвращающий async-CM
+    # (как в conftest.mock_conn).
+    tx = AsyncMock()
+    tx.__aenter__ = AsyncMock(return_value=tx)
+    tx.__aexit__ = AsyncMock(return_value=False)
+    conn.transaction = MagicMock(return_value=tx)
     settings = MagicMock()
     acts_settings = MagicMock()
     acts_settings.resource.max_tree_depth = 20

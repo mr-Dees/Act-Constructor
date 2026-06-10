@@ -62,10 +62,16 @@ class ActContentRepository(BaseRepository):
 
     async def save_content(self, act_id: int, data: ActDataSchema, username: str) -> dict:
         """
-        Сохраняет содержимое акта в транзакции.
+        Сохраняет содержимое акта.
 
         Обновляет дерево, пересоздаёт таблицы/текстовые блоки/нарушения,
         синхронизирует фактуры и поручения, обновляет метку редактирования.
+
+        КОНТРАКТ: вызывается внутри УЖЕ ОТКРЫТОЙ транзакции вызывающего
+        сервиса (ActContentService.save_content / AuditLogService.
+        restore_version) — собственную транзакцию метод не открывает,
+        чтобы не плодить savepoint'ы (вложенный conn.transaction()
+        в asyncpg = SAVEPOINT, на Greenplum вложенность не используем).
 
         Args:
             act_id: ID акта
@@ -75,30 +81,29 @@ class ActContentRepository(BaseRepository):
         Returns:
             Словарь {status, message}
         """
-        async with self.conn.transaction():
-            # Получаем audit_act_id из таблицы acts
-            audit_act_id = await self.conn.fetchval(
-                f"SELECT audit_act_id FROM {self.acts} WHERE id = $1",
-                act_id
-            )
+        # Получаем audit_act_id из таблицы acts
+        audit_act_id = await self.conn.fetchval(
+            f"SELECT audit_act_id FROM {self.acts} WHERE id = $1",
+            act_id
+        )
 
-            # Маппинг {node_id -> audit_point_id} обходом дерева
-            audit_point_map = ActDirectivesValidator.build_audit_point_map(data.tree)
+        # Маппинг {node_id -> audit_point_id} обходом дерева
+        audit_point_map = ActDirectivesValidator.build_audit_point_map(data.tree)
 
-            # Маппинг {node_id -> {number, label, parent_item_node_id}} за один обход
-            node_map = self._build_node_map(data.tree)
+        # Маппинг {node_id -> {number, label, parent_item_node_id}} за один обход
+        node_map = self._build_node_map(data.tree)
 
-            await self._save_tree(act_id, data.tree)
-            await self._save_tables(act_id, audit_act_id, data, audit_point_map, node_map)
-            await self._save_textblocks(act_id, audit_act_id, data, audit_point_map, node_map)
-            await self._save_violations(act_id, audit_act_id, data, audit_point_map, node_map)
-            await self._sync_invoices(act_id, audit_act_id, data, audit_point_map)
-            await self._sync_directives(act_id, audit_act_id, data, audit_point_map)
-            await self._update_edit_timestamp(act_id, username)
+        await self._save_tree(act_id, data.tree)
+        await self._save_tables(act_id, audit_act_id, data, audit_point_map, node_map)
+        await self._save_textblocks(act_id, audit_act_id, data, audit_point_map, node_map)
+        await self._save_violations(act_id, audit_act_id, data, audit_point_map, node_map)
+        await self._sync_invoices(act_id, audit_act_id, data, audit_point_map)
+        await self._sync_directives(act_id, audit_act_id, data, audit_point_map)
+        await self._update_edit_timestamp(act_id, username)
 
-            logger.info(f"Сохранено содержимое акта ID={act_id} пользователем {username}")
+        logger.info(f"Сохранено содержимое акта ID={act_id} пользователем {username}")
 
-            return {"status": "success", "message": "Содержимое акта сохранено"}
+        return {"status": "success", "message": "Содержимое акта сохранено"}
 
     # -------------------------------------------------------------------------
     # ЗАГРУЗКА

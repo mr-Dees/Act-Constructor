@@ -29,10 +29,16 @@ def _make_act_data(tables=None, textblocks=None, violations=None):
 
 
 class TestSaveContentUsesTransaction:
-    """save_content выполняет все операции в рамках одной транзакции."""
+    """save_content работает в транзакции ВЫЗЫВАЮЩЕГО сервиса (§9 зона 4).
 
-    async def test_transaction_entered_on_save(self, mock_conn):
-        """Транзакция открывается при save_content."""
+    Репозиторий собственную транзакцию НЕ открывает: плоскую транзакцию
+    вокруг контента + diff + аудит-лога + снимка версии держит
+    ActContentService.save_content (вложенный conn.transaction() в asyncpg
+    создал бы SAVEPOINT — на Greenplum вложенность не используем).
+    """
+
+    async def test_repo_does_not_open_own_transaction(self, mock_conn):
+        """Репозиторий не открывает собственную транзакцию (контракт)."""
         repo = ActContentRepository(mock_conn)
         mock_conn.fetchval.return_value = None   # audit_act_id
         mock_conn.fetch.return_value = []         # directives query
@@ -40,14 +46,10 @@ class TestSaveContentUsesTransaction:
         data = _make_act_data()
         await repo.save_content(act_id=1, data=data, username="user1")
 
-        # transaction() должен был быть вызван
-        mock_conn.transaction.assert_called_once()
-        tx = mock_conn.transaction.return_value
-        tx.__aenter__.assert_called_once()
-        tx.__aexit__.assert_called_once()
+        mock_conn.transaction.assert_not_called()
 
-    async def test_executemany_called_inside_transaction_tables(self, mock_conn):
-        """executemany для таблиц вызывается внутри уже открытой транзакции."""
+    async def test_executemany_called_for_tables(self, mock_conn):
+        """executemany для таблиц вызывается при сохранении."""
         repo = ActContentRepository(mock_conn)
         mock_conn.fetchval.return_value = None
         mock_conn.fetch.return_value = []
@@ -148,11 +150,11 @@ class TestSaveContentUsesTransaction:
 
         mock_conn.executemany.assert_not_called()
 
-    async def test_executemany_not_wrapped_in_nested_transaction(self, mock_conn):
-        """executemany уже в транзакции save_content — вложенная транзакция не создаётся.
+    async def test_save_helpers_do_not_open_nested_transactions(self, mock_conn):
+        """_save_tables/_save_textblocks/_save_violations не открывают транзакций.
 
-        save_content вызывает transaction() ровно один раз (внешняя транзакция).
-        _save_tables/_save_textblocks/_save_violations не открывают свои транзакции.
+        Любой conn.transaction() внутри save_content был бы вложенным
+        относительно транзакции сервиса (= SAVEPOINT) — запрещено.
         """
         repo = ActContentRepository(mock_conn)
         mock_conn.fetchval.return_value = None
@@ -172,8 +174,8 @@ class TestSaveContentUsesTransaction:
         data = _make_act_data(tables={"tbl_1": table_data})
         await repo.save_content(act_id=1, data=data, username="user1")
 
-        # transaction() вызван ровно 1 раз — нет вложенной транзакции
-        assert mock_conn.transaction.call_count == 1
+        # Ни одной собственной транзакции
+        assert mock_conn.transaction.call_count == 0
 
 
 class TestInsertTableDenormalizationAndFlags:
