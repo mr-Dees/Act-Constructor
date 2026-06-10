@@ -607,10 +607,10 @@ export const ChatMessages = {
                                 this._renderReadyMessage(container, m);
                                 ChatEventBus.emit('ui:scroll-bottom');
                             },
-                            // Resume после reload: блоки черновика уже могли быть отрисованы
-                            // историей (с data-block-id) — appendBlock заменит их по id, и
-                            // реестр допечатает текст заново целиком (однократная
-                            // перепечатка вместо риска дублирования).
+                            // Resume после reload: история не рендерит блоки streaming-черновика
+                            // (guard if (!isStreaming)), контейнер пуст — первый же progress-тик
+                            // допечатает накопленный текст с нуля; идемпотентность по
+                            // data-block-id в appendBlock — страховка от дублей.
                             onProgress: (m) => this._renderProgress(container, m),
                             onError: (e) => {
                                 this._renderError(container, e);

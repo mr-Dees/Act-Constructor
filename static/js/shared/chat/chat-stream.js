@@ -152,6 +152,7 @@ export const ChatStream = {
 
                 // Idle-детект: «изменилось что-нибудь?» — статус, статус очереди
                 // или длины текстов блоков (рост reasoning агента).
+                // Ожидаемые поля status_details от бэка: {bus_status: str, queue_ahead: int|null}.
                 const fingerprint = JSON.stringify({
                     s: msg.status,
                     d: msg.status_details || null,
