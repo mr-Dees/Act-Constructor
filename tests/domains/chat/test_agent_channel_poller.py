@@ -172,14 +172,21 @@ class TestGetStatus:
 class TestTick:
 
     async def test_tick_done_removes_subscription(self, settings, mock_conn):
-        """Если try_finalize возвращает 'done' — подписка снимается."""
+        """Если poll_once возвращает outcome='done' — подписка снимается."""
         poller = _make_poller(settings, mock_conn=mock_conn)
         poller.subscribe(assistant_message_id="m1", question_uid="Q1")
 
         with patch(
-            "app.domains.chat.services.agent_channel.AgentChannelService.try_finalize",
+            "app.domains.chat.services.agent_channel.AgentChannelService.poll_once",
             new_callable=AsyncMock,
-            return_value="done",
+            return_value={
+                "outcome": "done",
+                "question_status": "completed",
+                "answer_exists": True,
+                "reasoning_len": 0,
+                "queue_ahead": None,
+                "answer_updated_at": None,
+            },
         ):
             n = await poller._tick(mock_conn)
 
@@ -187,14 +194,21 @@ class TestTick:
         assert "Q1" not in poller._subscriptions
 
     async def test_tick_pending_keeps_subscription(self, settings, mock_conn):
-        """Если try_finalize возвращает 'pending' — подписка остаётся."""
+        """Если poll_once возвращает outcome='pending' — подписка остаётся."""
         poller = _make_poller(settings, mock_conn=mock_conn)
         poller.subscribe(assistant_message_id="m1", question_uid="Q1")
 
         with patch(
-            "app.domains.chat.services.agent_channel.AgentChannelService.try_finalize",
+            "app.domains.chat.services.agent_channel.AgentChannelService.poll_once",
             new_callable=AsyncMock,
-            return_value="pending",
+            return_value={
+                "outcome": "pending",
+                "question_status": "pending",
+                "answer_exists": False,
+                "reasoning_len": 0,
+                "queue_ahead": None,
+                "answer_updated_at": None,
+            },
         ):
             n = await poller._tick(mock_conn)
 
@@ -243,16 +257,25 @@ class TestTick:
 
         call_count = [0]
 
-        async def _try_finalize_side_effect(**kwargs):
+        _done_result = {
+            "outcome": "done",
+            "question_status": "completed",
+            "answer_exists": True,
+            "reasoning_len": 0,
+            "queue_ahead": None,
+            "answer_updated_at": None,
+        }
+
+        async def _poll_once_side_effect(**kwargs):
             call_count[0] += 1
             if kwargs.get("question_uid") == "Q1":
                 raise RuntimeError("симулируем ошибку")
-            return "done"
+            return _done_result
 
         with patch(
-            "app.domains.chat.services.agent_channel.AgentChannelService.try_finalize",
+            "app.domains.chat.services.agent_channel.AgentChannelService.poll_once",
             new_callable=AsyncMock,
-            side_effect=_try_finalize_side_effect,
+            side_effect=_poll_once_side_effect,
         ):
             n = await poller._tick(mock_conn)
 

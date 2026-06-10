@@ -138,11 +138,11 @@ class AgentChannelPoller:
                         assistant_message_id,
                     )
                 else:
-                    result = await svc.try_finalize(
+                    res = await svc.poll_once(
                         assistant_message_id=assistant_message_id,
                         question_uid=question_uid,
                     )
-                    if result == "done":
+                    if res["outcome"] == "done":
                         self.unsubscribe(question_uid)
                         done_count += 1
                         logger.info(
@@ -170,7 +170,7 @@ class AgentChannelPoller:
         reconcile (subscribe ставит started=now()): монотонные часы не
         переживают рестарт, а wall-clock created_at draft'а к ним не привести.
         Уже отвеченные за время простоя draft'ы финализируются на первом же
-        тике (try_finalize видит reply_to), так что лишнее ожидание касается
+        тике (poll_once видит reply_to), так что лишнее ожидание касается
         только реально зависших запросов.
         """
         from app.domains.chat.repositories.message_repository import MessageRepository

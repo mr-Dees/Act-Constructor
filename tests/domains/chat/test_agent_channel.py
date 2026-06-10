@@ -1,7 +1,8 @@
 """Тесты сервиса agent_channel.py.
 
 Покрывают: map_answer_to_blocks, build_timeout_error_block,
-AgentChannelService.submit, AgentChannelService.try_finalize.
+AgentChannelService.submit, AgentChannelService.poll_once,
+AgentChannelService.get_queue_details.
 """
 
 import pytest
@@ -244,11 +245,18 @@ class TestMapAnswerToBlocks:
 
 class TestBuildTimeoutErrorBlock:
 
-    def test_structure(self):
+    def test_default_reason_answer(self):
+        """Без аргумента (reason='answer') — код agent_timeout (старое поведение)."""
         block = build_timeout_error_block()
         assert block["type"] == "error"
         assert block["code"] == "agent_timeout"
-        assert "message" in block
+        assert isinstance(block["message"], str)
+
+    def test_reason_claim(self):
+        """reason='claim' — код agent_claim_timeout."""
+        block = build_timeout_error_block(reason="claim")
+        assert block["type"] == "error"
+        assert block["code"] == "agent_claim_timeout"
         assert isinstance(block["message"], str)
 
 
@@ -363,53 +371,201 @@ class TestAgentChannelServiceSubmit:
         assert exc_info.value.status_code == 502
 
 
-# ── AgentChannelService.try_finalize ─────────────────────────────────────────
+# ── AgentChannelService.poll_once ────────────────────────────────────────────
 
 
-class TestAgentChannelServiceTryFinalize:
+def _make_poll_svc(mock_conn, settings, *, question, answer,
+                   count_pending_before=0, upsert_block_return=True):
+    """Вспомогательный хелпер: собирает сервис с инжектированными репо."""
+    fake_agent_repo = AsyncMock()
+    fake_agent_repo.get_by_uid = AsyncMock(return_value=question)
+    fake_agent_repo.get_answer_for_question = AsyncMock(return_value=answer)
+    fake_agent_repo.count_pending_before = AsyncMock(return_value=count_pending_before)
 
-    async def test_no_answer_returns_pending(self, mock_conn, settings):
-        """Если ответа ещё нет (ни reply_to на вопросе, ни строки-ответа
-        с reply_to = id вопроса) — возвращает 'pending'."""
-        question = {
-            "id": "q-uid",
-            "role": "user",
-            "status": "pending",
-            "reply_to": None,
-        }
+    fake_msg_repo = AsyncMock()
+    fake_msg_repo.finalize = AsyncMock(return_value=True)
+    fake_msg_repo.mark_failed = AsyncMock(return_value=True)
+    fake_msg_repo.upsert_block = AsyncMock(return_value=upsert_block_return)
 
+    svc = AgentChannelService(mock_conn, settings)
+    svc._agent_repo = lambda: fake_agent_repo
+    svc._message_repo = lambda: fake_msg_repo
+    return svc, fake_agent_repo, fake_msg_repo
+
+
+class TestPollOnce:
+
+    async def test_question_not_found_returns_pending_with_none_status(
+        self, mock_conn, settings
+    ):
+        """Вопроса нет → outcome 'pending', question_status None; ничего не записано."""
         fake_agent_repo = AsyncMock()
-        fake_agent_repo.get_by_uid = AsyncMock(return_value=question)
-        fake_agent_repo.get_answer_for_question = AsyncMock(return_value=None)
+        fake_agent_repo.get_by_uid = AsyncMock(return_value=None)
+
+        fake_msg_repo = AsyncMock()
 
         svc = AgentChannelService(mock_conn, settings)
         svc._agent_repo = lambda: fake_agent_repo
+        svc._message_repo = lambda: fake_msg_repo
 
-        result = await svc.try_finalize(
-            assistant_message_id="msg-1",
-            question_uid="q-uid",
-        )
+        res = await svc.poll_once(assistant_message_id="msg-1", question_uid="q-uid")
 
-        assert result == "pending"
-        fake_agent_repo.get_by_uid.assert_called_once_with("q-uid")
-        fake_agent_repo.get_answer_for_question.assert_awaited_once_with("q-uid")
+        assert res["outcome"] == "pending"
+        assert res["question_status"] is None
+        assert res["answer_exists"] is False
+        fake_msg_repo.upsert_block.assert_not_called()
+        fake_msg_repo.finalize.assert_not_called()
+        fake_msg_repo.mark_failed.assert_not_called()
 
-    async def test_answer_found_by_reverse_lookup_finalizes(
+    async def test_pending_question_no_answer_want_queue_true(
         self, mock_conn, settings
     ):
-        """Протокол владельца шины: reply_to стоит НА ОТВЕТЕ, на вопросе пуст.
+        """Вопрос pending, ответа нет, want_queue_position=True → queue_ahead из count_pending_before."""
+        import datetime
+        created = datetime.datetime(2024, 1, 1, 12, 0, 0)
+        question = {"id": "q-uid", "status": "pending", "created_at": created}
 
-        Регрессия «вечной печати» на ПРОМе: try_finalize ждал reply_to на
-        вопросе и не видел готовый ответ. Ответ должен находиться обратным
-        lookup'ом (get_answer_for_question), статус 'completed' (словарь
-        агента) — терминальный успех.
-        """
-        question = {
-            "id": "q-uid",
-            "role": "user",
-            "status": "completed",
-            "reply_to": None,
+        svc, fake_agent_repo, fake_msg_repo = _make_poll_svc(
+            mock_conn, settings,
+            question=question,
+            answer=None,
+            count_pending_before=3,
+        )
+
+        res = await svc.poll_once(
+            assistant_message_id="msg-1",
+            question_uid="q-uid",
+            want_queue_position=True,
+        )
+
+        assert res["outcome"] == "pending"
+        assert res["queue_ahead"] == 3
+        fake_agent_repo.count_pending_before.assert_awaited_once_with(created)
+
+    async def test_pending_question_no_answer_want_queue_false(
+        self, mock_conn, settings
+    ):
+        """want_queue_position=False → queue_ahead None и count_pending_before НЕ вызван."""
+        question = {"id": "q-uid", "status": "pending", "created_at": None}
+
+        svc, fake_agent_repo, fake_msg_repo = _make_poll_svc(
+            mock_conn, settings,
+            question=question,
+            answer=None,
+        )
+
+        res = await svc.poll_once(
+            assistant_message_id="msg-1",
+            question_uid="q-uid",
+            want_queue_position=False,
+        )
+
+        assert res["outcome"] == "pending"
+        assert res["queue_ahead"] is None
+        fake_agent_repo.count_pending_before.assert_not_called()
+
+    async def test_answer_processing_reasoning_grows_upserts_block(
+        self, mock_conn, settings
+    ):
+        """Ответ status='processing', reasoning длиннее last_reasoning_len →
+        upsert_block вызван с block_id от id ОТВЕТА; outcome 'pending'; reasoning_len корректен."""
+        import datetime
+        upd = datetime.datetime(2024, 1, 1, 12, 5, 0)
+        question = {"id": "q-uid", "status": "processing"}
+        answer = {
+            "id": "a-uid",
+            "status": "processing",
+            "metadata": {"reasoning": "Думаю..."},
+            "content": None,
+            "buttons": None,
+            "media": None,
+            "updated_at": upd,
         }
+
+        svc, fake_agent_repo, fake_msg_repo = _make_poll_svc(
+            mock_conn, settings, question=question, answer=answer
+        )
+
+        res = await svc.poll_once(
+            assistant_message_id="msg-1",
+            question_uid="q-uid",
+            last_reasoning_len=0,
+        )
+
+        assert res["outcome"] == "pending"
+        assert res["answer_exists"] is True
+        assert res["reasoning_len"] == len("Думаю...")
+        assert res["answer_updated_at"] == upd
+        fake_msg_repo.upsert_block.assert_called_once()
+        block_kwargs = fake_msg_repo.upsert_block.call_args.kwargs
+        assert block_kwargs["message_id"] == "msg-1"
+        assert block_kwargs["block"]["type"] == "reasoning"
+        assert block_kwargs["block"]["block_id"] == "a-uid:reasoning:0"
+        assert "Думаю..." in block_kwargs["block"]["content"]
+
+    async def test_answer_processing_reasoning_not_grown_no_upsert(
+        self, mock_conn, settings
+    ):
+        """reasoning НЕ вырос (len == last_reasoning_len) → upsert_block НЕ вызван."""
+        question = {"id": "q-uid", "status": "processing"}
+        text = "Думаю..."
+        answer = {
+            "id": "a-uid",
+            "status": "processing",
+            "metadata": {"reasoning": text},
+            "content": None,
+            "buttons": None,
+            "media": None,
+            "updated_at": None,
+        }
+
+        svc, _, fake_msg_repo = _make_poll_svc(
+            mock_conn, settings, question=question, answer=answer
+        )
+
+        await svc.poll_once(
+            assistant_message_id="msg-1",
+            question_uid="q-uid",
+            last_reasoning_len=len(text),  # равно текущей длине — не растёт
+        )
+
+        fake_msg_repo.upsert_block.assert_not_called()
+
+    async def test_answer_processing_legacy_thinking_key(
+        self, mock_conn, settings
+    ):
+        """metadata.thinking (legacy) тоже читается как reasoning."""
+        question = {"id": "q-uid", "status": "processing"}
+        answer = {
+            "id": "a-uid",
+            "status": "processing",
+            "metadata": {"thinking": "legacy рассуждение"},
+            "content": None,
+            "buttons": None,
+            "media": None,
+            "updated_at": None,
+        }
+
+        svc, _, fake_msg_repo = _make_poll_svc(
+            mock_conn, settings, question=question, answer=answer
+        )
+
+        res = await svc.poll_once(
+            assistant_message_id="msg-1",
+            question_uid="q-uid",
+            last_reasoning_len=0,
+        )
+
+        assert res["reasoning_len"] == len("legacy рассуждение")
+        fake_msg_repo.upsert_block.assert_called_once()
+        block = fake_msg_repo.upsert_block.call_args.kwargs["block"]
+        assert "legacy рассуждение" in block["content"]
+
+    async def test_answer_completed_finalizes_and_returns_done(
+        self, mock_conn, settings
+    ):
+        """Ответ терминальный успех → finalize + set_status('completed'), outcome 'done'."""
+        question = {"id": "q-uid", "status": "completed", "reply_to": None}
         answer = {
             "id": "a-uid",
             "role": "assistant",
@@ -421,153 +577,29 @@ class TestAgentChannelServiceTryFinalize:
             "status": "completed",
         }
 
-        fake_agent_repo = AsyncMock()
-        fake_agent_repo.get_by_uid = AsyncMock(return_value=question)
-        fake_agent_repo.get_answer_for_question = AsyncMock(return_value=answer)
+        svc, fake_agent_repo, fake_msg_repo = _make_poll_svc(
+            mock_conn, settings, question=question, answer=answer
+        )
 
-        fake_msg_repo = AsyncMock()
-        fake_msg_repo.finalize = AsyncMock(return_value=True)
-
-        svc = AgentChannelService(mock_conn, settings)
-        svc._agent_repo = lambda: fake_agent_repo
-        svc._message_repo = lambda: fake_msg_repo
-
-        result = await svc.try_finalize(
+        res = await svc.poll_once(
             assistant_message_id="msg-1",
             question_uid="q-uid",
         )
 
-        assert result == "done"
-        fake_agent_repo.get_answer_for_question.assert_awaited_once_with("q-uid")
+        assert res["outcome"] == "done"
+        fake_msg_repo.finalize.assert_called_once()
         blocks = fake_msg_repo.finalize.call_args.kwargs["final_blocks"]
         text_blocks = [b for b in blocks if b["type"] == "text"]
         assert text_blocks[0]["content"] == "Ответ от агента"
-
-    async def test_question_failed_without_answer_marks_failed(
-        self, mock_conn, settings
-    ):
-        """Агент закрыл вопрос status='failed' (словарь владельца) без
-        строки-ответа → mark_failed со стандартным текстом + 'done'."""
-        question = {"id": "q-uid", "role": "user", "status": "failed", "reply_to": None}
-
-        fake_agent_repo = AsyncMock()
-        fake_agent_repo.get_by_uid = AsyncMock(return_value=question)
-        fake_agent_repo.get_answer_for_question = AsyncMock(return_value=None)
-        fake_msg_repo = AsyncMock()
-        fake_msg_repo.mark_failed = AsyncMock(return_value=True)
-
-        svc = AgentChannelService(mock_conn, settings)
-        svc._agent_repo = lambda: fake_agent_repo
-        svc._message_repo = lambda: fake_msg_repo
-
-        result = await svc.try_finalize(
-            assistant_message_id="msg-1",
-            question_uid="q-uid",
-        )
-
-        assert result == "done"
-        fake_msg_repo.mark_failed.assert_called_once()
-        error_block = fake_msg_repo.mark_failed.call_args.kwargs["error_block"]
-        assert error_block["code"] == "agent_error"
-        fake_msg_repo.finalize.assert_not_called()
-
-    async def test_answer_with_non_terminal_status_returns_pending(
-        self, mock_conn, settings
-    ):
-        """Строка-ответ есть, но статус нетерминальный (processing) —
-        агент создаёт её сразу при claim'е и стримит reasoning-дельты в
-        metadata; финализировать до терминального статуса рано."""
-        question = {"id": "q-uid", "role": "user", "status": "processing", "reply_to": None}
-        answer = {
-            "id": "a-uid",
-            "role": "assistant",
-            "content": "частичный",
-            "metadata": {},
-            "buttons": None,
-            "media": None,
-            "reply_to": "q-uid",
-            "status": "processing",
-        }
-
-        fake_agent_repo = AsyncMock()
-        fake_agent_repo.get_by_uid = AsyncMock(return_value=question)
-        fake_agent_repo.get_answer_for_question = AsyncMock(return_value=answer)
-        fake_msg_repo = AsyncMock()
-
-        svc = AgentChannelService(mock_conn, settings)
-        svc._agent_repo = lambda: fake_agent_repo
-        svc._message_repo = lambda: fake_msg_repo
-
-        result = await svc.try_finalize(
-            assistant_message_id="msg-1",
-            question_uid="q-uid",
-        )
-
-        assert result == "pending"
-        fake_msg_repo.finalize.assert_not_called()
-
-    async def test_answer_legacy_terminal_status_finalizes_and_returns_done(
-        self, mock_conn, settings
-    ):
-        """Legacy-терминальный статус ответа ('complete') тоже финализирует:
-        терминальным считается любой статус вне явно нетерминальных."""
-        question = {
-            "id": "q-uid",
-            "status": "complete",
-            "reply_to": None,
-        }
-        answer = {
-            "id": "a-uid",
-            "role": "assistant",
-            "content": "Ответ от агента",
-            "metadata": {},
-            "buttons": None,
-            "media": None,
-            "reply_to": "q-uid",
-            "status": "complete",
-        }
-
-        fake_agent_repo = AsyncMock()
-        fake_agent_repo.get_by_uid = AsyncMock(return_value=question)
-        fake_agent_repo.get_answer_for_question = AsyncMock(return_value=answer)
-
-        fake_msg_repo = AsyncMock()
-        fake_msg_repo.finalize = AsyncMock(return_value=True)
-        fake_msg_repo.mark_failed = AsyncMock(return_value=True)
-
-        svc = AgentChannelService(mock_conn, settings)
-        svc._agent_repo = lambda: fake_agent_repo
-        svc._message_repo = lambda: fake_msg_repo
-
-        result = await svc.try_finalize(
-            assistant_message_id="msg-1",
-            question_uid="q-uid",
-        )
-
-        assert result == "done"
-        fake_msg_repo.finalize.assert_called_once()
-        call_kwargs = fake_msg_repo.finalize.call_args.kwargs
-        assert call_kwargs["message_id"] == "msg-1"
-        # Убеждаемся что blocks содержат text-блок с ответом
-        blocks = call_kwargs["final_blocks"]
-        text_blocks = [b for b in blocks if b["type"] == "text"]
-        assert len(text_blocks) == 1
-        assert text_blocks[0]["content"] == "Ответ от агента"
-        # R3: после отрисовки вопрос закрывается — словарь статусов владельца
-        # шины: 'completed', не 'complete' (CHECK на их таблице).
         fake_agent_repo.set_status.assert_awaited_once_with(
             uid="q-uid", status="completed",
         )
 
-    async def test_answer_status_failed_calls_mark_failed_and_returns_done(
+    async def test_answer_failed_marks_failed_and_returns_done(
         self, mock_conn, settings
     ):
-        """Если answer.status == 'failed' (словарь владельца) → mark_failed + 'done'."""
-        question = {
-            "id": "q-uid",
-            "status": "completed",
-            "reply_to": None,
-        }
+        """Ответ status='failed' → mark_failed + set_status('failed'), outcome 'done'."""
+        question = {"id": "q-uid", "status": "completed", "reply_to": None}
         answer = {
             "id": "a-uid",
             "role": "assistant",
@@ -579,46 +611,51 @@ class TestAgentChannelServiceTryFinalize:
             "status": "failed",
         }
 
-        fake_agent_repo = AsyncMock()
-        fake_agent_repo.get_by_uid = AsyncMock(return_value=question)
-        fake_agent_repo.get_answer_for_question = AsyncMock(return_value=answer)
+        svc, fake_agent_repo, fake_msg_repo = _make_poll_svc(
+            mock_conn, settings, question=question, answer=answer
+        )
 
-        fake_msg_repo = AsyncMock()
-        fake_msg_repo.finalize = AsyncMock(return_value=True)
-        fake_msg_repo.mark_failed = AsyncMock(return_value=True)
-
-        svc = AgentChannelService(mock_conn, settings)
-        svc._agent_repo = lambda: fake_agent_repo
-        svc._message_repo = lambda: fake_msg_repo
-
-        result = await svc.try_finalize(
+        res = await svc.poll_once(
             assistant_message_id="msg-2",
             question_uid="q-uid",
         )
 
-        assert result == "done"
+        assert res["outcome"] == "done"
         fake_msg_repo.mark_failed.assert_called_once()
         call_kwargs = fake_msg_repo.mark_failed.call_args.kwargs
         assert call_kwargs["message_id"] == "msg-2"
-        assert call_kwargs["error_block"]["type"] == "error"
         assert call_kwargs["error_block"]["code"] == "agent_error"
-        # finalize НЕ вызывался
         fake_msg_repo.finalize.assert_not_called()
-        # R3: вопрос закрывается со статусом 'failed' (словарь владельца) —
-        # слот лимита освобождён.
         fake_agent_repo.set_status.assert_awaited_once_with(
             uid="q-uid", status="failed",
         )
 
-    async def test_try_finalize_calls_translate_buttons_when_answer_has_buttons(
+    async def test_question_failed_no_answer_marks_failed_and_returns_done(
         self, mock_conn, settings
     ):
-        """try_finalize вызывает translate_buttons для ответа с кнопками."""
-        question = {
-            "id": "q-uid",
-            "status": "completed",
-            "reply_to": None,
-        }
+        """Вопрос status='failed', строки-ответа нет → mark_failed, outcome 'done'."""
+        question = {"id": "q-uid", "role": "user", "status": "failed"}
+
+        svc, fake_agent_repo, fake_msg_repo = _make_poll_svc(
+            mock_conn, settings, question=question, answer=None
+        )
+
+        res = await svc.poll_once(
+            assistant_message_id="msg-1",
+            question_uid="q-uid",
+        )
+
+        assert res["outcome"] == "done"
+        fake_msg_repo.mark_failed.assert_called_once()
+        error_block = fake_msg_repo.mark_failed.call_args.kwargs["error_block"]
+        assert error_block["code"] == "agent_error"
+        fake_msg_repo.finalize.assert_not_called()
+
+    async def test_poll_once_calls_translate_buttons_when_answer_has_buttons(
+        self, mock_conn, settings
+    ):
+        """poll_once вызывает translate_buttons для ответа с кнопками."""
+        question = {"id": "q-uid", "status": "completed", "reply_to": None}
         answer = {
             "id": "a-uid",
             "role": "assistant",
@@ -630,16 +667,9 @@ class TestAgentChannelServiceTryFinalize:
             "status": "completed",
         }
 
-        fake_agent_repo = AsyncMock()
-        fake_agent_repo.get_by_uid = AsyncMock(return_value=question)
-        fake_agent_repo.get_answer_for_question = AsyncMock(return_value=answer)
-
-        fake_msg_repo = AsyncMock()
-        fake_msg_repo.finalize = AsyncMock(return_value=True)
-
-        svc = AgentChannelService(mock_conn, settings)
-        svc._agent_repo = lambda: fake_agent_repo
-        svc._message_repo = lambda: fake_msg_repo
+        svc, _, fake_msg_repo = _make_poll_svc(
+            mock_conn, settings, question=question, answer=answer
+        )
 
         original_buttons = answer["buttons"].copy()
         translated = [{"action_id": "open_url", "label": "Открыть", "params": {"url": "/constructor?act_id=1"}}]
@@ -647,28 +677,23 @@ class TestAgentChannelServiceTryFinalize:
             "app.domains.chat.services.agent_channel.translate_buttons",
             new=AsyncMock(return_value=translated),
         ) as mock_translate:
-            result = await svc.try_finalize(
+            res = await svc.poll_once(
                 assistant_message_id="msg-3",
                 question_uid="q-uid",
             )
 
-        assert result == "done"
+        assert res["outcome"] == "done"
         mock_translate.assert_called_once_with(original_buttons)
-        # Финальные блоки содержат кнопки с action_id="open_url"
         call_kwargs = fake_msg_repo.finalize.call_args.kwargs
         btn_blocks = [b for b in call_kwargs["final_blocks"] if b["type"] == "buttons"]
         assert len(btn_blocks) == 1
         assert btn_blocks[0]["buttons"][0]["action_id"] == "open_url"
 
-    async def test_try_finalize_skips_translate_buttons_when_no_buttons(
+    async def test_poll_once_skips_translate_buttons_when_no_buttons(
         self, mock_conn, settings
     ):
-        """try_finalize НЕ вызывает translate_buttons если кнопок нет."""
-        question = {
-            "id": "q-uid",
-            "status": "completed",
-            "reply_to": None,
-        }
+        """poll_once НЕ вызывает translate_buttons если кнопок нет."""
+        question = {"id": "q-uid", "status": "completed", "reply_to": None}
         answer = {
             "id": "a-uid",
             "role": "assistant",
@@ -680,38 +705,149 @@ class TestAgentChannelServiceTryFinalize:
             "status": "completed",
         }
 
-        fake_agent_repo = AsyncMock()
-        fake_agent_repo.get_by_uid = AsyncMock(return_value=question)
-        fake_agent_repo.get_answer_for_question = AsyncMock(return_value=answer)
-
-        fake_msg_repo = AsyncMock()
-        fake_msg_repo.finalize = AsyncMock(return_value=True)
-
-        svc = AgentChannelService(mock_conn, settings)
-        svc._agent_repo = lambda: fake_agent_repo
-        svc._message_repo = lambda: fake_msg_repo
+        svc, _, fake_msg_repo = _make_poll_svc(
+            mock_conn, settings, question=question, answer=answer
+        )
 
         with patch(
             "app.domains.chat.services.agent_channel.translate_buttons",
             new=AsyncMock(),
         ) as mock_translate:
-            await svc.try_finalize(
+            await svc.poll_once(
                 assistant_message_id="msg-4",
                 question_uid="q-uid",
             )
 
         mock_translate.assert_not_called()
 
-
-# ── Best-effort запись статуса в чужую таблицу ───────────────────────────────
-
-
-class TestSetStatusBestEffort:
-
-    async def test_try_finalize_done_even_if_check_constraint_rejects_status(
+    async def test_answer_legacy_terminal_status_finalizes(
         self, mock_conn, settings
     ):
-        """CHECK владельца отклонил наш статус → try_finalize всё равно 'done'.
+        """Legacy-терминальный статус ответа ('complete') тоже финализирует:
+        терминальным считается любой статус вне явно нетерминальных."""
+        question = {"id": "q-uid", "status": "complete", "reply_to": None}
+        answer = {
+            "id": "a-uid",
+            "role": "assistant",
+            "content": "Ответ от агента",
+            "metadata": {},
+            "buttons": None,
+            "media": None,
+            "reply_to": "q-uid",
+            "status": "complete",
+        }
+
+        svc, fake_agent_repo, fake_msg_repo = _make_poll_svc(
+            mock_conn, settings, question=question, answer=answer
+        )
+
+        res = await svc.poll_once(
+            assistant_message_id="msg-1",
+            question_uid="q-uid",
+        )
+
+        assert res["outcome"] == "done"
+        fake_msg_repo.finalize.assert_called_once()
+        call_kwargs = fake_msg_repo.finalize.call_args.kwargs
+        assert call_kwargs["message_id"] == "msg-1"
+        blocks = call_kwargs["final_blocks"]
+        text_blocks = [b for b in blocks if b["type"] == "text"]
+        assert len(text_blocks) == 1
+        assert text_blocks[0]["content"] == "Ответ от агента"
+        fake_agent_repo.set_status.assert_awaited_once_with(
+            uid="q-uid", status="completed",
+        )
+
+
+# ── AgentChannelService.mark_timeout ─────────────────────────────────────────
+
+
+class TestMarkTimeout:
+
+    async def test_mark_timeout_reason_claim_uses_claim_block(
+        self, mock_conn, settings
+    ):
+        """mark_timeout(reason='claim') → mark_failed получил claim-блок."""
+        fake_agent_repo = AsyncMock()
+        fake_msg_repo = AsyncMock()
+        fake_msg_repo.mark_failed = AsyncMock(return_value=True)
+
+        svc = AgentChannelService(mock_conn, settings)
+        svc._agent_repo = lambda: fake_agent_repo
+        svc._message_repo = lambda: fake_msg_repo
+
+        await svc.mark_timeout(
+            assistant_message_id="msg-1",
+            question_uid="q-uid",
+            reason="claim",
+        )
+
+        fake_msg_repo.mark_failed.assert_called_once()
+        error_block = fake_msg_repo.mark_failed.call_args.kwargs["error_block"]
+        assert error_block["code"] == "agent_claim_timeout"
+
+    async def test_mark_timeout_completes_even_if_check_constraint_rejects_status(
+        self, mock_conn, settings
+    ):
+        """CHECK владельца отклонил статус → mark_timeout не падает."""
+        import asyncpg
+
+        fake_agent_repo = AsyncMock()
+        fake_agent_repo.set_status = AsyncMock(
+            side_effect=asyncpg.exceptions.CheckViolationError(
+                "violates check constraint"
+            )
+        )
+        fake_msg_repo = AsyncMock()
+        fake_msg_repo.mark_failed = AsyncMock(return_value=True)
+
+        svc = AgentChannelService(mock_conn, settings)
+        svc._agent_repo = lambda: fake_agent_repo
+        svc._message_repo = lambda: fake_msg_repo
+
+        await svc.mark_timeout(
+            assistant_message_id="msg-1",
+            question_uid="q-uid",
+        )
+
+        fake_msg_repo.mark_failed.assert_called_once()
+        fake_agent_repo.set_status.assert_awaited_once_with(
+            uid="q-uid", status="failed",
+        )
+
+    async def test_transient_db_error_in_set_status_propagates(
+        self, mock_conn, settings
+    ):
+        """Транзиентная ошибка БД (не CheckViolation) пробрасывается."""
+        import asyncpg
+
+        fake_agent_repo = AsyncMock()
+        fake_agent_repo.set_status = AsyncMock(
+            side_effect=asyncpg.PostgresConnectionError("connection lost")
+        )
+        fake_msg_repo = AsyncMock()
+        fake_msg_repo.mark_failed = AsyncMock(return_value=True)
+
+        svc = AgentChannelService(mock_conn, settings)
+        svc._agent_repo = lambda: fake_agent_repo
+        svc._message_repo = lambda: fake_msg_repo
+
+        with pytest.raises(asyncpg.PostgresConnectionError):
+            await svc.mark_timeout(
+                assistant_message_id="msg-1",
+                question_uid="q-uid",
+            )
+
+
+# ── Best-effort запись статуса — poll_once ────────────────────────────────────
+
+
+class TestSetStatusBestEffortPollOnce:
+
+    async def test_poll_once_done_even_if_check_constraint_rejects_status(
+        self, mock_conn, settings
+    ):
+        """CHECK владельца отклонил наш статус → poll_once всё равно outcome='done'.
 
         Регрессия ПРОМа: CheckViolationError из set_status поднимался в
         поллер, подписка не снималась, ответ не отрисовывался.
@@ -744,71 +880,65 @@ class TestSetStatusBestEffort:
         svc._agent_repo = lambda: fake_agent_repo
         svc._message_repo = lambda: fake_msg_repo
 
-        result = await svc.try_finalize(
+        res = await svc.poll_once(
             assistant_message_id="msg-1",
             question_uid="q-uid",
         )
 
-        assert result == "done"
+        assert res["outcome"] == "done"
         fake_msg_repo.finalize.assert_called_once()
 
-    async def test_mark_timeout_completes_even_if_check_constraint_rejects_status(
-        self, mock_conn, settings
-    ):
-        """CHECK владельца отклонил статус → mark_timeout не падает.
 
-        Регрессия ПРОМа: исключение из set_status поднималось в поллер каждый
-        тик → бесконечный цикл ошибок, подписка не снималась. Закрываем вопрос
-        статусом 'failed' (есть в словаре владельца; 'timeout' там запрещён).
-        """
-        import asyncpg
+# ── AgentChannelService.get_queue_details ─────────────────────────────────────
+
+
+class TestGetQueueDetails:
+
+    async def test_pending_with_queue_position(self, mock_conn, settings):
+        """Статус pending → queue_ahead из count_pending_before."""
+        import datetime
+        created = datetime.datetime(2024, 1, 1, 12, 0, 0)
+        question = {"id": "q-uid", "status": "pending", "created_at": created}
 
         fake_agent_repo = AsyncMock()
-        fake_agent_repo.set_status = AsyncMock(
-            side_effect=asyncpg.exceptions.CheckViolationError(
-                "violates check constraint"
-            )
-        )
-        fake_msg_repo = AsyncMock()
-        fake_msg_repo.mark_failed = AsyncMock(return_value=True)
+        fake_agent_repo.get_by_uid = AsyncMock(return_value=question)
+        fake_agent_repo.count_pending_before = AsyncMock(return_value=2)
 
         svc = AgentChannelService(mock_conn, settings)
         svc._agent_repo = lambda: fake_agent_repo
-        svc._message_repo = lambda: fake_msg_repo
 
-        await svc.mark_timeout(
-            assistant_message_id="msg-1",
-            question_uid="q-uid",
-        )
+        result = await svc.get_queue_details("q-uid")
 
-        fake_msg_repo.mark_failed.assert_called_once()
-        fake_agent_repo.set_status.assert_awaited_once_with(
-            uid="q-uid", status="failed",
-        )
+        assert result == {"bus_status": "pending", "queue_ahead": 2}
+        fake_agent_repo.count_pending_before.assert_awaited_once_with(created)
 
-    async def test_transient_db_error_in_set_status_propagates(
-        self, mock_conn, settings
-    ):
-        """Транзиентная ошибка БД (не CheckViolation) пробрасывается —
-        поллер повторит операцию на следующем тике."""
-        import asyncpg
+    async def test_processing_queue_ahead_is_none(self, mock_conn, settings):
+        """Статус processing → queue_ahead None (позиция в очереди не имеет смысла)."""
+        question = {"id": "q-uid", "status": "processing", "created_at": None}
 
         fake_agent_repo = AsyncMock()
-        fake_agent_repo.set_status = AsyncMock(
-            side_effect=asyncpg.PostgresConnectionError("connection lost")
-        )
-        fake_msg_repo = AsyncMock()
-        fake_msg_repo.mark_failed = AsyncMock(return_value=True)
+        fake_agent_repo.get_by_uid = AsyncMock(return_value=question)
+        fake_agent_repo.count_pending_before = AsyncMock(return_value=0)
 
         svc = AgentChannelService(mock_conn, settings)
         svc._agent_repo = lambda: fake_agent_repo
-        svc._message_repo = lambda: fake_msg_repo
 
-        with pytest.raises(asyncpg.PostgresConnectionError):
-            await svc.mark_timeout(
-                assistant_message_id="msg-1",
-                question_uid="q-uid",
-            )
+        result = await svc.get_queue_details("q-uid")
+
+        assert result == {"bus_status": "processing", "queue_ahead": None}
+        fake_agent_repo.count_pending_before.assert_not_called()
+
+    async def test_question_not_found_returns_none(self, mock_conn, settings):
+        """Строки-вопроса нет → None."""
+        fake_agent_repo = AsyncMock()
+        fake_agent_repo.get_by_uid = AsyncMock(return_value=None)
+
+        svc = AgentChannelService(mock_conn, settings)
+        svc._agent_repo = lambda: fake_agent_repo
+
+        result = await svc.get_queue_details("q-uid")
+
+        assert result is None
 
 
 # ── AgentChannelService.submit — лимит ───────────────────────────────────────
