@@ -5,9 +5,20 @@ Pydantic схемы для валидации данных актов.
 таблицы, текстовые блоки, нарушения и древовидную структуру.
 """
 
+import re
 from typing import Literal
 
 from pydantic import BaseModel, Field, field_validator, model_validator
+
+# Лимиты картинок нарушений (4.3.M.2 + 5.2.2). Лимит длины url — константа:
+# схема статична и не может читать настройки; 15 млн символов base64
+# ≈ 11 МБ бинарных данных — заведомо выше пользовательского лимита
+# ACTS__IMAGES__MAX_FILE_SIZE, но отсекает DoS-payload.
+VIOLATION_IMAGE_URL_MAX_LENGTH = 15_000_000
+VIOLATION_CONTENT_ITEMS_MAX = 50
+
+# Whitelist data-URL картинок: только растровые форматы (без SVG — XSS).
+_IMAGE_DATA_URL_RE = re.compile(r"^data:image/(png|jpe?g|gif|webp);base64,")
 
 
 class TableCellSchema(BaseModel):
@@ -335,11 +346,48 @@ class ViolationContentItemSchema(BaseModel):
     filename: str = Field(default="", description="Имя файла")
     order: int = Field(default=0, ge=0, description="Порядок")
 
+    @model_validator(mode="after")
+    def validate_image_url(self) -> "ViolationContentItemSchema":
+        """
+        Валидирует url картинки (4.3.M.2 + 5.2.2).
+
+        Для type='image' непустой url обязан быть data:image-URL разрешённого
+        растрового формата (png/jpeg/gif/webp, base64) — отсекает
+        javascript:/data:text-схемы (XSS) и не-картинки. Пустая строка
+        допустима (черновик без содержимого). Лимит длины защищает БД и
+        снимки версий от многомегабайтных payload'ов.
+        """
+        if len(self.url) > VIOLATION_IMAGE_URL_MAX_LENGTH:
+            raise ValueError(
+                f"Размер изображения превышает допустимый лимит "
+                f"({VIOLATION_IMAGE_URL_MAX_LENGTH} символов data-URL). "
+                f"Уменьшите изображение."
+            )
+        if self.type == "image" and self.url and not _IMAGE_DATA_URL_RE.match(self.url):
+            raise ValueError(
+                "Изображение нарушения должно быть встроенным data:image-URL "
+                "формата png, jpeg, gif или webp (base64)."
+            )
+        return self
+
 
 class ViolationAdditionalContentSchema(BaseModel):
     """Коллекция дополнительного контента нарушения."""
     enabled: bool = False
     items: list[ViolationContentItemSchema] = Field(default_factory=list)
+
+    @field_validator("items")
+    @classmethod
+    def validate_items_count(
+        cls, v: list[ViolationContentItemSchema],
+    ) -> list[ViolationContentItemSchema]:
+        """Ограничивает число элементов дополнительного контента."""
+        if len(v) > VIOLATION_CONTENT_ITEMS_MAX:
+            raise ValueError(
+                f"Слишком много элементов дополнительного контента: {len(v)}. "
+                f"Максимум — {VIOLATION_CONTENT_ITEMS_MAX} элементов на нарушение."
+            )
+        return v
 
 
 class ViolationSchema(BaseModel):

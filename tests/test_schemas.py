@@ -12,11 +12,15 @@ from app.domains.acts.schemas.act_metadata import (
     AuditTeamMember,
 )
 from app.domains.acts.schemas.act_content import (
+    VIOLATION_CONTENT_ITEMS_MAX,
+    VIOLATION_IMAGE_URL_MAX_LENGTH,
     ActDataSchema,
     TableCellSchema,
     TableSchema,
     TextBlockFormattingSchema,
     TextBlockSchema,
+    ViolationAdditionalContentSchema,
+    ViolationContentItemSchema,
 )
 from app.domains.acts.schemas.act_invoice import InvoiceSave, MetricItem
 
@@ -306,6 +310,84 @@ class TestTableSchema:
                 id="table_1711270400456_3x2m8p1",
                 nodeId="node_1711270400123_7a4k9b2",
                 isMetricsTable=True, isRegularRiskTable=True,
+            )
+
+
+# ── ViolationContentItemSchema: валидация url картинок (4.3.M.2 + 5.2.2) ──
+
+
+class TestViolationContentItemUrl:
+    """url элемента image: только data:image-URL разрешённых форматов."""
+
+    def test_valid_data_image_png_passes(self):
+        item = ViolationContentItemSchema(
+            id="i1", type="image",
+            url="data:image/png;base64,iVBORw0KGgoAAAANSUhEUg==",
+        )
+        assert item.url.startswith("data:image/png")
+
+    def test_valid_data_image_jpeg_webp_gif_pass(self):
+        for mime in ("jpeg", "jpg", "gif", "webp"):
+            item = ViolationContentItemSchema(
+                id="i1", type="image", url=f"data:image/{mime};base64,AAAA",
+            )
+            assert item.url
+
+    def test_empty_url_allowed_for_image(self):
+        # Картинка без содержимого (черновик) — допустима.
+        item = ViolationContentItemSchema(id="i1", type="image", url="")
+        assert item.url == ""
+
+    def test_javascript_url_rejected(self):
+        with pytest.raises(ValidationError, match="data:image"):
+            ViolationContentItemSchema(
+                id="i1", type="image", url="javascript:alert(1)",
+            )
+
+    def test_data_text_html_rejected(self):
+        with pytest.raises(ValidationError, match="data:image"):
+            ViolationContentItemSchema(
+                id="i1", type="image",
+                url="data:text/html,<script>alert(1)</script>",
+            )
+
+    def test_data_image_svg_rejected(self):
+        # SVG может содержать скрипты — не входит в whitelist форматов.
+        with pytest.raises(ValidationError, match="data:image"):
+            ViolationContentItemSchema(
+                id="i1", type="image", url="data:image/svg+xml;base64,AAAA",
+            )
+
+    def test_oversized_url_rejected(self):
+        too_long = "data:image/png;base64," + "A" * VIOLATION_IMAGE_URL_MAX_LENGTH
+        with pytest.raises(ValidationError, match="превышает"):
+            ViolationContentItemSchema(id="i1", type="image", url=too_long)
+
+    def test_non_image_types_do_not_require_image_url(self):
+        # Для case/freeText url не проверяется на data:image-префикс.
+        item = ViolationContentItemSchema(id="i1", type="case", content="текст")
+        assert item.url == ""
+
+
+class TestViolationAdditionalContentItemsLimit:
+    """Число items дополнительного контента ограничено."""
+
+    def _items(self, n: int) -> list[ViolationContentItemSchema]:
+        return [
+            ViolationContentItemSchema(id=f"i{i}", type="case", content="x")
+            for i in range(n)
+        ]
+
+    def test_items_at_limit_pass(self):
+        ac = ViolationAdditionalContentSchema(
+            enabled=True, items=self._items(VIOLATION_CONTENT_ITEMS_MAX),
+        )
+        assert len(ac.items) == VIOLATION_CONTENT_ITEMS_MAX
+
+    def test_items_over_limit_rejected(self):
+        with pytest.raises(ValidationError, match="лемент"):
+            ViolationAdditionalContentSchema(
+                enabled=True, items=self._items(VIOLATION_CONTENT_ITEMS_MAX + 1),
             )
 
 
