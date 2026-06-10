@@ -589,7 +589,7 @@ Per-node API (вместо полного `renderAll()`):
 
 - `_updateTbBadgeInItems(badge, node)` (`:553-567`) — апдейт чекбокса TB в шаге 2.
 - `_updateParentTbInItems(node)` (`:574-...`) — каскад вверх.
-- `syncDataToState()` — обратная синхронизация DOM → AppState (после inline-редактирования).
+- Обратной синхронизации DOM → AppState нет: ввод в ячейку таблицы пишется в состояние сразу (write-through, `table/cell-write-through.js`), текстблоки/нарушения — через live-обработчики blur/input.
 
 ### 7.5 `renderAll` — оставшиеся call-sites
 
