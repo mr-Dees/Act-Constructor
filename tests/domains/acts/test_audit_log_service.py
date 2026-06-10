@@ -25,6 +25,20 @@ def _patch_adapter(mock_adapter):
         yield
 
 
+def _make_tx_conn() -> AsyncMock:
+    """Mock-соединение с поддержкой async with conn.transaction().
+
+    restore_version держит все шаги в одной плоской транзакции —
+    mock-у нужен синхронный transaction(), возвращающий async-CM.
+    """
+    conn = AsyncMock()
+    tx = AsyncMock()
+    tx.__aenter__ = AsyncMock(return_value=tx)
+    tx.__aexit__ = AsyncMock(return_value=False)
+    conn.transaction = MagicMock(return_value=tx)
+    return conn
+
+
 # ── ActAuditLogRepository.log: запись и обработка ошибок ────────────────────
 
 
@@ -221,7 +235,7 @@ class TestAuditLogServiceRestore:
         versions_repo.get_version = AsyncMock()
         versions_repo.create_version = AsyncMock(return_value=2)
 
-        conn = AsyncMock()
+        conn = _make_tx_conn()
         return AuditLogService(guard, audit_repo, versions_repo, conn), guard, audit_repo, versions_repo
 
     async def test_restore_version_unknown_raises_not_found(self):
@@ -331,7 +345,7 @@ class TestRestoreVersionPreSnapshot:
         versions_repo = MagicMock()
         versions_repo.get_version = AsyncMock()
         versions_repo.create_version = AsyncMock(return_value=2)
-        conn = AsyncMock()
+        conn = _make_tx_conn()
         return AuditLogService(guard, audit_repo, versions_repo, conn), versions_repo
 
     async def test_pre_snapshot_created_from_current_content(self):
@@ -383,6 +397,90 @@ class TestRestoreVersionPreSnapshot:
         second_call = versions_repo.create_version.await_args_list[1]
         assert second_call.kwargs["save_type"] == "manual"
         assert second_call.kwargs["tree"]["label"] == "v1"
+
+    async def test_pre_snapshot_sanitized_before_write(self):
+        """pbe-6: pre-snapshot чистится той же санитизацией, что и post.
+
+        Иначе несанитизированный HTML из текущего контента (записанного
+        в обход save_content или до ужесточения) лёг бы в историю и при
+        повторном restore такого снимка вернулся бы в БД (stored XSS).
+        Ячейки таблиц при этом НЕ трогаются (инвариант «всё на текст»).
+        """
+        svc, versions_repo = self._make_service()
+        versions_repo.get_version.return_value = {
+            "version_number": 1,
+            "tree_data": {"id": "root", "label": "v1", "children": []},
+            "tables_data": {},
+            "textblocks_data": {},
+            "violations_data": {},
+        }
+        current_content = {
+            "tree": {
+                "id": "root", "label": "Акт",
+                "content": "<p>ok</p><script>alert(1)</script>",
+                "children": [],
+            },
+            "tables": {
+                "t1": {"id": "t1", "nodeId": "n1", "grid": [[
+                    {"content": "<script>в ячейке — дословно</script>"},
+                ]]},
+            },
+            "textBlocks": {
+                "tb1": {"id": "tb1", "nodeId": "n2",
+                        "content": '<b>жирный</b><iframe srcdoc="x"></iframe>'},
+            },
+            "violations": {
+                "v1": {
+                    "id": "v1", "nodeId": "n3",
+                    "violated": '<img src=x onerror="alert(1)">текст',
+                    "established": "",
+                    "descriptionList": {"enabled": True,
+                                        "items": ["<script>x</script>пункт"]},
+                    "additionalContent": {"enabled": True, "items": [
+                        {"id": "i1", "type": "image", "url": "data:image/png;base64,AAAA",
+                         "content": "", "caption": "<b>подпись</b>",
+                         "filename": "<script>f</script>имя.png", "order": 0},
+                    ]},
+                    "reasons": {"enabled": True, "content": "<svg onload=x></svg>причина"},
+                },
+            },
+        }
+
+        with patch(
+            "app.domains.acts.services.audit_log_service.ActContentRepository"
+        ) as content_cls:
+            instance = content_cls.return_value
+            instance.save_content = AsyncMock()
+            instance.get_content = AsyncMock(return_value=current_content)
+
+            await svc.restore_version(act_id=42, version_id=1, username="12345")
+
+        pre = versions_repo.create_version.await_args_list[0].kwargs
+        assert pre["save_type"] == "auto"
+        # Дерево: script вырезан, безопасный HTML остался
+        assert "<script" not in pre["tree"]["content"]
+        assert "ok" in pre["tree"]["content"]
+        # Текстблок: iframe вырезан, whitelist-тег остался
+        tb = pre["textblocks"]["tb1"]
+        assert "<iframe" not in tb["content"]
+        assert "<b>жирный</b>" in tb["content"]
+        # Нарушение: HTML-поля чищены, plain-поля без тегов, url не тронут
+        v = pre["violations"]["v1"]
+        assert "onerror" not in v["violated"]
+        assert "текст" in v["violated"]
+        assert "<script" not in v["descriptionList"]["items"][0]
+        assert "пункт" in v["descriptionList"]["items"][0]
+        item = v["additionalContent"]["items"][0]
+        assert "<b>" not in item["caption"]
+        assert "подпись" in item["caption"]
+        assert "<script" not in item["filename"]
+        assert "имя.png" in item["filename"]
+        assert item["url"] == "data:image/png;base64,AAAA"
+        assert "<svg" not in v["reasons"]["content"]
+        assert "причина" in v["reasons"]["content"]
+        # Ячейки таблиц — дословно (инвариант B8)
+        cell = pre["tables"]["t1"]["grid"][0][0]
+        assert cell["content"] == "<script>в ячейке — дословно</script>"
 
     async def test_pre_snapshot_skipped_when_no_current_content(self):
         """get_content вернул None/{} → pre-snapshot не создаётся."""

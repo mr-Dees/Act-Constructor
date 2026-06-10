@@ -12,11 +12,15 @@ from app.domains.acts.schemas.act_metadata import (
     AuditTeamMember,
 )
 from app.domains.acts.schemas.act_content import (
+    VIOLATION_CONTENT_ITEMS_MAX,
+    VIOLATION_IMAGE_URL_MAX_LENGTH,
     ActDataSchema,
     TableCellSchema,
     TableSchema,
     TextBlockFormattingSchema,
     TextBlockSchema,
+    ViolationAdditionalContentSchema,
+    ViolationContentItemSchema,
 )
 from app.domains.acts.schemas.act_invoice import InvoiceSave, MetricItem
 
@@ -309,6 +313,84 @@ class TestTableSchema:
             )
 
 
+# ── ViolationContentItemSchema: валидация url картинок (4.3.M.2 + 5.2.2) ──
+
+
+class TestViolationContentItemUrl:
+    """url элемента image: только data:image-URL разрешённых форматов."""
+
+    def test_valid_data_image_png_passes(self):
+        item = ViolationContentItemSchema(
+            id="i1", type="image",
+            url="data:image/png;base64,iVBORw0KGgoAAAANSUhEUg==",
+        )
+        assert item.url.startswith("data:image/png")
+
+    def test_valid_data_image_jpeg_webp_gif_pass(self):
+        for mime in ("jpeg", "jpg", "gif", "webp"):
+            item = ViolationContentItemSchema(
+                id="i1", type="image", url=f"data:image/{mime};base64,AAAA",
+            )
+            assert item.url
+
+    def test_empty_url_allowed_for_image(self):
+        # Картинка без содержимого (черновик) — допустима.
+        item = ViolationContentItemSchema(id="i1", type="image", url="")
+        assert item.url == ""
+
+    def test_javascript_url_rejected(self):
+        with pytest.raises(ValidationError, match="data:image"):
+            ViolationContentItemSchema(
+                id="i1", type="image", url="javascript:alert(1)",
+            )
+
+    def test_data_text_html_rejected(self):
+        with pytest.raises(ValidationError, match="data:image"):
+            ViolationContentItemSchema(
+                id="i1", type="image",
+                url="data:text/html,<script>alert(1)</script>",
+            )
+
+    def test_data_image_svg_rejected(self):
+        # SVG может содержать скрипты — не входит в whitelist форматов.
+        with pytest.raises(ValidationError, match="data:image"):
+            ViolationContentItemSchema(
+                id="i1", type="image", url="data:image/svg+xml;base64,AAAA",
+            )
+
+    def test_oversized_url_rejected(self):
+        too_long = "data:image/png;base64," + "A" * VIOLATION_IMAGE_URL_MAX_LENGTH
+        with pytest.raises(ValidationError, match="превышает"):
+            ViolationContentItemSchema(id="i1", type="image", url=too_long)
+
+    def test_non_image_types_do_not_require_image_url(self):
+        # Для case/freeText url не проверяется на data:image-префикс.
+        item = ViolationContentItemSchema(id="i1", type="case", content="текст")
+        assert item.url == ""
+
+
+class TestViolationAdditionalContentItemsLimit:
+    """Число items дополнительного контента ограничено."""
+
+    def _items(self, n: int) -> list[ViolationContentItemSchema]:
+        return [
+            ViolationContentItemSchema(id=f"i{i}", type="case", content="x")
+            for i in range(n)
+        ]
+
+    def test_items_at_limit_pass(self):
+        ac = ViolationAdditionalContentSchema(
+            enabled=True, items=self._items(VIOLATION_CONTENT_ITEMS_MAX),
+        )
+        assert len(ac.items) == VIOLATION_CONTENT_ITEMS_MAX
+
+    def test_items_over_limit_rejected(self):
+        with pytest.raises(ValidationError, match="лемент"):
+            ViolationAdditionalContentSchema(
+                enabled=True, items=self._items(VIOLATION_CONTENT_ITEMS_MAX + 1),
+            )
+
+
 # ── TextBlockFormattingSchema ──
 
 
@@ -366,6 +448,202 @@ class TestActDataSchema:
         assert d.violations == {}
         assert d.invoiceNodeIds == []
         assert d.changelog == []
+
+
+# ── M.20: явная политика extra='forbid' для схем словарей ──
+
+
+class TestExtraForbidPolicy:
+    """Неизвестные поля в схемах словарей отклоняются (раньше молча терялись)."""
+
+    _TABLE_KW = dict(
+        id="t1", nodeId="n1",
+        grid=[[TableCellSchema(content="A")]], colWidths=[100],
+    )
+
+    def test_unknown_field_in_table_rejected(self):
+        with pytest.raises(ValidationError, match="unknown_field"):
+            TableSchema(**self._TABLE_KW, unknown_field="x")
+
+    def test_unknown_field_in_cell_rejected(self):
+        with pytest.raises(ValidationError, match="surprise"):
+            TableCellSchema(content="A", surprise=True)
+
+    def test_unknown_field_in_textblock_rejected(self):
+        with pytest.raises(ValidationError, match="junk"):
+            TextBlockSchema(id="tb1", nodeId="n1", junk=1)
+
+    def test_unknown_field_in_formatting_rejected(self):
+        with pytest.raises(ValidationError, match="lineHeight"):
+            TextBlockFormattingSchema(lineHeight=1.5)
+
+    def test_unknown_field_in_violation_item_rejected(self):
+        with pytest.raises(ValidationError, match="position"):
+            ViolationContentItemSchema(id="i1", type="case", position=3)
+
+    def test_unknown_top_level_field_rejected(self):
+        with pytest.raises(ValidationError, match="metadata"):
+            ActDataSchema(
+                tree=dict(TestActDataSchema._VALID_TREE),
+                metadata={"km_number": "КМ-01-0000001"},
+            )
+
+    def test_known_table_fields_round_trip(self):
+        """Round-trip: все объявленные поля переживают validate → dump → validate."""
+        t = TableSchema(
+            id="t1", nodeId="n1",
+            grid=[[TableCellSchema(
+                content="A", isHeader=True, colSpan=1, rowSpan=1,
+                isSpanned=False, spanOrigin=None, originRow=0, originCol=0,
+            )]],
+            colWidths=[100],
+            protected=True, deletable=False, isMetricsTable=True,
+        )
+        dumped = t.model_dump()
+        restored = TableSchema.model_validate(dumped)
+        assert restored.model_dump() == dumped
+
+
+# ── M.21: дерево хранится нормализованным через ActItemSchema ──
+
+
+class TestTreeNormalization:
+    """tree сохраняется как model_dump() от ActItemSchema, а не сырой dict."""
+
+    def test_unknown_node_field_dropped_on_normalization(self):
+        """Незадекларированное поле узла (например parentId) не персистится."""
+        tree = {
+            "id": "root", "label": "Акт",
+            "children": [
+                {"id": "n1", "label": "Таблица", "type": "table",
+                 "tableId": "t1", "parentId": "root", "children": []},
+            ],
+        }
+        d = ActDataSchema(tree=tree, tables={
+            "t1": TableSchema(id="t1", nodeId="n1"),
+        })
+        child = d.tree["children"][0]
+        assert "parentId" not in child
+        assert child["tableId"] == "t1"
+
+    def test_known_node_fields_preserved(self):
+        """Все поля, которые шлёт фронтовый exportData, переживают нормализацию."""
+        tree = {
+            "id": "root", "label": "Акт",
+            "children": [
+                {
+                    "id": "n1", "label": "5.1 Пункт", "type": "item",
+                    "content": "текст", "protected": True, "deletable": False,
+                    "customLabel": "Своя метка", "number": "5.1",
+                    "tb": ["ВВБ", "СЗБ"], "auditPointId": "AP-1",
+                    "isMetricsTable": True,
+                    "children": [],
+                },
+            ],
+        }
+        d = ActDataSchema(tree=tree)
+        child = d.tree["children"][0]
+        assert child["id"] == "n1"
+        assert child["label"] == "5.1 Пункт"
+        assert child["type"] == "item"
+        assert child["content"] == "текст"
+        assert child["protected"] is True
+        assert child["deletable"] is False
+        assert child["customLabel"] == "Своя метка"
+        assert child["number"] == "5.1"
+        assert child["tb"] == ["ВВБ", "СЗБ"]
+        assert child["auditPointId"] == "AP-1"
+        assert child["isMetricsTable"] is True
+        assert child["children"] == []
+
+    def test_tree_is_normalized_dict_not_raw_reference(self):
+        """Хранимое дерево — новый нормализованный dict, не исходная ссылка."""
+        raw = {"id": "root", "label": "Акт", "children": [], "garbage": 1}
+        d = ActDataSchema(tree=raw)
+        assert d.tree is not raw
+        assert "garbage" not in d.tree
+        # Исходный dict не мутирован
+        assert "garbage" in raw
+
+
+# ── M.13: кросс-валидатор дерево ↔ словари ──
+
+
+class TestTreeDictCrossValidation:
+    """Висячая ссылка из дерева на отсутствующую запись словаря → 422."""
+
+    @staticmethod
+    def _tree_with_ref(ref_field: str, ref_value: str, node_type: str) -> dict:
+        return {
+            "id": "root", "label": "Акт",
+            "children": [
+                {"id": "n1", "label": "Узел", "type": node_type,
+                 ref_field: ref_value, "children": []},
+            ],
+        }
+
+    def test_dangling_table_ref_rejected(self):
+        with pytest.raises(ValidationError, match="несуществующую таблицу"):
+            ActDataSchema(tree=self._tree_with_ref("tableId", "t_ghost", "table"))
+
+    def test_dangling_textblock_ref_rejected(self):
+        with pytest.raises(ValidationError, match="несуществующий текстовый блок"):
+            ActDataSchema(
+                tree=self._tree_with_ref("textBlockId", "tb_ghost", "textblock"),
+            )
+
+    def test_dangling_violation_ref_rejected(self):
+        with pytest.raises(ValidationError, match="несуществующее нарушение"):
+            ActDataSchema(
+                tree=self._tree_with_ref("violationId", "v_ghost", "violation"),
+            )
+
+    def test_error_message_names_node_and_target(self):
+        """Сообщение называет и узел, и недостающую запись."""
+        with pytest.raises(ValidationError, match=r"n1.+t_ghost"):
+            ActDataSchema(tree=self._tree_with_ref("tableId", "t_ghost", "table"))
+
+    def test_valid_refs_pass(self):
+        d = ActDataSchema(
+            tree={
+                "id": "root", "label": "Акт",
+                "children": [
+                    {"id": "n1", "label": "Таблица", "type": "table",
+                     "tableId": "t1", "children": []},
+                    {"id": "n2", "label": "ТБ", "type": "textblock",
+                     "textBlockId": "tb1", "children": []},
+                ],
+            },
+            tables={"t1": TableSchema(id="t1", nodeId="n1")},
+            textBlocks={"tb1": TextBlockSchema(id="tb1", nodeId="n2")},
+        )
+        assert d.tree["children"][0]["tableId"] == "t1"
+
+    def test_orphan_dict_entry_allowed(self):
+        """Обратное направление — запись словаря без узла — НЕ ошибка.
+
+        Такие записи отбрасывает orphan-фильтр репозитория при сохранении
+        (pbe-4); отклонять весь PUT из-за них нельзя.
+        """
+        d = ActDataSchema(
+            tree={"id": "root", "label": "Акт", "children": []},
+            tables={"t_orphan": TableSchema(id="t_orphan", nodeId="ghost")},
+        )
+        assert "t_orphan" in d.tables
+
+    def test_dangling_ref_in_nested_node_rejected(self):
+        """Валидатор обходит дерево рекурсивно, а не только верхний уровень."""
+        tree = {
+            "id": "root", "label": "Акт",
+            "children": [
+                {"id": "s1", "label": "Раздел", "type": "item", "children": [
+                    {"id": "n9", "label": "Нарушение", "type": "violation",
+                     "violationId": "v_missing", "children": []},
+                ]},
+            ],
+        }
+        with pytest.raises(ValidationError, match="v_missing"):
+            ActDataSchema(tree=tree)
 
 
 # ── MetricItem ──

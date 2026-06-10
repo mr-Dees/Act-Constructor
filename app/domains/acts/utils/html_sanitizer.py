@@ -2,7 +2,8 @@
 Санитизация HTML-контента пользовательских полей акта.
 
 Защищает от XSS: textBlock.content, violation.violated/established,
-violation.additionalContent.items[].content, violation.{reasons,
+violation.descriptionList.items[], violation.additionalContent.items[]
+(.content как HTML; .caption/.filename как plain), violation.{reasons,
 consequences, responsible, recommendations}.content и узлы дерева.
 
 Whitelist тегов/атрибутов согласован с фронтовым рендерингом через
@@ -81,6 +82,23 @@ def sanitize_html(html: str | None) -> str:
     )
 
 
+def sanitize_plain_text(text: str | None) -> str:
+    """
+    Чистит plain-текстовое поле: вырезает ВСЕ теги (пустой whitelist).
+
+    Для полей, которые по контракту — просто текст (строки descriptionList,
+    подпись/имя файла картинки): HTML-теги в них не легитимны, поэтому
+    выкусываются целиком, остаточные спецсимволы bleach экранирует.
+    """
+    if text is None:
+        return ""
+    if not isinstance(text, str):
+        text = str(text)
+    if not text:
+        return ""
+    return bleach.clean(text, tags=[], attributes={}, strip=True)
+
+
 def sanitize_tree_nodes(node: dict) -> None:
     """Рекурсивно чистит content в узлах дерева (узлы хранятся как dict)."""
     if not isinstance(node, dict):
@@ -100,9 +118,15 @@ def sanitize_act_data(data) -> None:
     Изменяет объект на месте. Покрывает:
     - textBlocks[*].content
     - violations[*].violated / established
+    - violations[*].descriptionList.items[*] (plain: теги выкусываются)
     - violations[*].additionalContent.items[*].content
+    - violations[*].additionalContent.items[*].caption / filename (plain)
     - violations[*].{reasons, consequences, responsible, recommendations}.content
     - tree nodes[*].content (рекурсивно — узлы могут содержать HTML)
+
+    url элементов additionalContent СОЗНАТЕЛЬНО не чистится bleach'ем:
+    его формат (data:image-whitelist + лимит длины) валидирует
+    ViolationContentItemSchema, а bleach исказил бы base64-данные.
     """
     for block in data.textBlocks.values():
         block.content = sanitize_html(block.content)
@@ -110,10 +134,62 @@ def sanitize_act_data(data) -> None:
     for violation in data.violations.values():
         violation.violated = sanitize_html(violation.violated)
         violation.established = sanitize_html(violation.established)
+        violation.descriptionList.items = [
+            sanitize_plain_text(item) for item in violation.descriptionList.items
+        ]
         for item in violation.additionalContent.items:
             item.content = sanitize_html(item.content)
+            item.caption = sanitize_plain_text(item.caption)
+            item.filename = sanitize_plain_text(item.filename)
         for field_name in ("reasons", "consequences", "responsible", "recommendations"):
             field = getattr(violation, field_name)
             field.content = sanitize_html(field.content)
 
     sanitize_tree_nodes(data.tree)
+
+
+def sanitize_act_content_dict(content: dict) -> None:
+    """
+    Чистит HTML/plain-поля контента в dict-форме {tree, textBlocks, violations}.
+
+    Зеркало sanitize_act_data для контента, загруженного из БД как plain-dict
+    (pre-snapshot в AuditLogService.restore_version, pbe-6): состав очищаемых
+    полей тот же. Таблицы НЕ трогаются — ячейки хранятся дословно (инвариант
+    «всё на текст», см. TestSaveContentTableCellsStoredVerbatim). Изменяет
+    dict на месте; отсутствующие ключи пропускает, новых не добавляет.
+    """
+    if not isinstance(content, dict):
+        return
+
+    for block in (content.get("textBlocks") or {}).values():
+        if isinstance(block, dict) and "content" in block:
+            block["content"] = sanitize_html(block["content"])
+
+    for violation in (content.get("violations") or {}).values():
+        if not isinstance(violation, dict):
+            continue
+        for html_field in ("violated", "established"):
+            if html_field in violation:
+                violation[html_field] = sanitize_html(violation[html_field])
+        dl = violation.get("descriptionList")
+        if isinstance(dl, dict) and isinstance(dl.get("items"), list):
+            dl["items"] = [sanitize_plain_text(item) for item in dl["items"]]
+        ac = violation.get("additionalContent")
+        if isinstance(ac, dict) and isinstance(ac.get("items"), list):
+            for item in ac["items"]:
+                if not isinstance(item, dict):
+                    continue
+                if "content" in item:
+                    item["content"] = sanitize_html(item["content"])
+                if "caption" in item:
+                    item["caption"] = sanitize_plain_text(item["caption"])
+                if "filename" in item:
+                    item["filename"] = sanitize_plain_text(item["filename"])
+        for field_name in ("reasons", "consequences", "responsible", "recommendations"):
+            field = violation.get(field_name)
+            if isinstance(field, dict) and "content" in field:
+                field["content"] = sanitize_html(field["content"])
+
+    tree = content.get("tree")
+    if isinstance(tree, dict):
+        sanitize_tree_nodes(tree)

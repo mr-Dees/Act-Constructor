@@ -329,3 +329,34 @@ class TestExtendLock:
             await service.extend_lock(ACT_ID, USERNAME)
 
         service._lock.atomic_extend_lock.assert_not_awaited()
+
+
+# -------------------------------------------------------------------------
+# ActLockRepository.get_lock_info
+# -------------------------------------------------------------------------
+
+
+class TestGetLockInfoSql:
+    """get_lock_info вычисляет признак истечения на стороне БД (H9).
+
+    Конвенция репозитория: все временные сравнения — через CURRENT_TIMESTAMP
+    (серверное время), а не часы приложения. Поэтому lock_expired считается
+    в SELECT, а не в Python.
+    """
+
+    async def test_get_lock_info_computes_lock_expired_server_side(self, mock_conn):
+        from app.domains.acts.repositories.act_lock import ActLockRepository
+
+        mock_conn.fetchrow.return_value = {
+            "locked_by": USERNAME,
+            "lock_expires_at": dt.datetime(2026, 5, 18, 12, 0),
+            "lock_expired": False,
+        }
+        repo = ActLockRepository(mock_conn)
+
+        info = await repo.get_lock_info(ACT_ID)
+
+        sql = mock_conn.fetchrow.await_args.args[0]
+        assert "lock_expired" in sql
+        assert "CURRENT_TIMESTAMP" in sql
+        assert info["lock_expired"] is False

@@ -29,10 +29,16 @@ def _make_act_data(tables=None, textblocks=None, violations=None):
 
 
 class TestSaveContentUsesTransaction:
-    """save_content выполняет все операции в рамках одной транзакции."""
+    """save_content работает в транзакции ВЫЗЫВАЮЩЕГО сервиса (§9 зона 4).
 
-    async def test_transaction_entered_on_save(self, mock_conn):
-        """Транзакция открывается при save_content."""
+    Репозиторий собственную транзакцию НЕ открывает: плоскую транзакцию
+    вокруг контента + diff + аудит-лога + снимка версии держит
+    ActContentService.save_content (вложенный conn.transaction() в asyncpg
+    создал бы SAVEPOINT — на Greenplum вложенность не используем).
+    """
+
+    async def test_repo_does_not_open_own_transaction(self, mock_conn):
+        """Репозиторий не открывает собственную транзакцию (контракт)."""
         repo = ActContentRepository(mock_conn)
         mock_conn.fetchval.return_value = None   # audit_act_id
         mock_conn.fetch.return_value = []         # directives query
@@ -40,14 +46,10 @@ class TestSaveContentUsesTransaction:
         data = _make_act_data()
         await repo.save_content(act_id=1, data=data, username="user1")
 
-        # transaction() должен был быть вызван
-        mock_conn.transaction.assert_called_once()
-        tx = mock_conn.transaction.return_value
-        tx.__aenter__.assert_called_once()
-        tx.__aexit__.assert_called_once()
+        mock_conn.transaction.assert_not_called()
 
-    async def test_executemany_called_inside_transaction_tables(self, mock_conn):
-        """executemany для таблиц вызывается внутри уже открытой транзакции."""
+    async def test_executemany_called_for_tables(self, mock_conn):
+        """executemany для таблиц вызывается при сохранении."""
         repo = ActContentRepository(mock_conn)
         mock_conn.fetchval.return_value = None
         mock_conn.fetch.return_value = []
@@ -120,12 +122,18 @@ class TestSaveContentUsesTransaction:
             textblocks={"tb_1": tb_data},
             violations={"v_1": v_data},
         )
-        # Узел-владелец таблицы (n1) должен быть в дереве, иначе orphan-фильтр
-        # _save_tables срежет её и executemany для act_tables не вызовется.
+        # Узлы-владельцы (n1/n2/n3) должны быть в дереве, иначе orphan-фильтр
+        # отбросит записи и executemany для них не вызовется.
         data.tree = {
             "id": "root", "label": "Акт",
-            "children": [{"id": "n1", "label": "Таблица", "type": "table",
-                          "tableId": "tbl_1", "children": []}],
+            "children": [
+                {"id": "n1", "label": "Таблица", "type": "table",
+                 "tableId": "tbl_1", "children": []},
+                {"id": "n2", "label": "ТБ", "type": "textblock",
+                 "textBlockId": "tb_1", "children": []},
+                {"id": "n3", "label": "Нарушение", "type": "violation",
+                 "violationId": "v_1", "children": []},
+            ],
         }
         await repo.save_content(act_id=1, data=data, username="user1")
 
@@ -142,11 +150,11 @@ class TestSaveContentUsesTransaction:
 
         mock_conn.executemany.assert_not_called()
 
-    async def test_executemany_not_wrapped_in_nested_transaction(self, mock_conn):
-        """executemany уже в транзакции save_content — вложенная транзакция не создаётся.
+    async def test_save_helpers_do_not_open_nested_transactions(self, mock_conn):
+        """_save_tables/_save_textblocks/_save_violations не открывают транзакций.
 
-        save_content вызывает transaction() ровно один раз (внешняя транзакция).
-        _save_tables/_save_textblocks/_save_violations не открывают свои транзакции.
+        Любой conn.transaction() внутри save_content был бы вложенным
+        относительно транзакции сервиса (= SAVEPOINT) — запрещено.
         """
         repo = ActContentRepository(mock_conn)
         mock_conn.fetchval.return_value = None
@@ -166,8 +174,8 @@ class TestSaveContentUsesTransaction:
         data = _make_act_data(tables={"tbl_1": table_data})
         await repo.save_content(act_id=1, data=data, username="user1")
 
-        # transaction() вызван ровно 1 раз — нет вложенной транзакции
-        assert mock_conn.transaction.call_count == 1
+        # Ни одной собственной транзакции
+        assert mock_conn.transaction.call_count == 0
 
 
 class TestInsertTableDenormalizationAndFlags:
@@ -313,3 +321,111 @@ class TestSaveTablesOrphanFilter:
             if "act_tables" in c.args[0]
         ]
         assert table_inserts, "валидная таблица не вставлена"
+
+
+def _make_textblock(node_id: str) -> MagicMock:
+    tb = MagicMock()
+    tb.nodeId = node_id
+    tb.content = "текст"
+    tb.formatting = MagicMock()
+    tb.formatting.model_dump.return_value = {}
+    return tb
+
+
+def _make_violation(node_id: str) -> MagicMock:
+    v = MagicMock()
+    v.nodeId = node_id
+    v.violated = "нарушено"
+    v.established = "установлено"
+    for attr in ("descriptionList", "additionalContent", "reasons",
+                 "consequences", "responsible", "recommendations"):
+        m = MagicMock()
+        m.model_dump.return_value = {}
+        setattr(v, attr, m)
+    return v
+
+
+class TestSaveTextblocksViolationsOrphanFilter:
+    """pbe-4 / §6 п.11: orphan-фильтр единообразен для всех словарей.
+
+    Записи textBlocks/violations, чей nodeId отсутствует в дереве,
+    отбрасываются при сохранении — как уже сделано для tables.
+    """
+
+    _TREE_WITH_NODES = {
+        "id": "root", "label": "Акт",
+        "children": [
+            {"id": "n_tb", "label": "ТБ", "type": "textblock",
+             "textBlockId": "tb_ok", "children": []},
+            {"id": "n_v", "label": "Нарушение", "type": "violation",
+             "violationId": "v_ok", "children": []},
+        ],
+    }
+
+    async def test_orphan_textblock_not_inserted(self, mock_conn):
+        """Текстблок с nodeId не из дерева не попадает в INSERT."""
+        repo = ActContentRepository(mock_conn)
+        mock_conn.fetchval.return_value = None
+        mock_conn.fetch.return_value = []
+
+        data = _make_act_data(textblocks={"tb_ghost": _make_textblock("ghost")})
+        await repo.save_content(act_id=1, data=data, username="user1")
+
+        for c in mock_conn.executemany.call_args_list:
+            if "act_textblocks" in c.args[0]:
+                pytest.fail("orphan-текстблок попал в INSERT act_textblocks")
+
+    async def test_orphan_violation_not_inserted(self, mock_conn):
+        """Нарушение с nodeId не из дерева не попадает в INSERT."""
+        repo = ActContentRepository(mock_conn)
+        mock_conn.fetchval.return_value = None
+        mock_conn.fetch.return_value = []
+
+        data = _make_act_data(violations={"v_ghost": _make_violation("ghost")})
+        await repo.save_content(act_id=1, data=data, username="user1")
+
+        for c in mock_conn.executemany.call_args_list:
+            if "act_violations" in c.args[0]:
+                pytest.fail("orphan-нарушение попало в INSERT act_violations")
+
+    async def test_valid_textblock_and_violation_inserted(self, mock_conn):
+        """Записи с узлом-владельцем в дереве сохраняются (фильтр не сверх-агрессивен)."""
+        repo = ActContentRepository(mock_conn)
+        mock_conn.fetchval.return_value = None
+        mock_conn.fetch.return_value = []
+
+        data = _make_act_data(
+            textblocks={"tb_ok": _make_textblock("n_tb")},
+            violations={"v_ok": _make_violation("n_v")},
+        )
+        data.tree = dict(self._TREE_WITH_NODES)
+        await repo.save_content(act_id=1, data=data, username="user1")
+
+        sqls = [c.args[0] for c in mock_conn.executemany.call_args_list]
+        assert any("act_textblocks" in s for s in sqls), "валидный текстблок не вставлен"
+        assert any("act_violations" in s for s in sqls), "валидное нарушение не вставлено"
+
+    async def test_mixed_orphans_dropped_valid_kept(self, mock_conn):
+        """Смешанный словарь: orphan отброшен, валидная запись вставлена."""
+        repo = ActContentRepository(mock_conn)
+        mock_conn.fetchval.return_value = None
+        mock_conn.fetch.return_value = []
+
+        data = _make_act_data(
+            textblocks={
+                "tb_ok": _make_textblock("n_tb"),
+                "tb_ghost": _make_textblock("ghost"),
+            },
+        )
+        data.tree = dict(self._TREE_WITH_NODES)
+        await repo.save_content(act_id=1, data=data, username="user1")
+
+        tb_inserts = [
+            c for c in mock_conn.executemany.call_args_list
+            if "act_textblocks" in c.args[0]
+        ]
+        assert len(tb_inserts) == 1
+        rows = tb_inserts[0].args[1]
+        # Вставлена ровно одна запись — валидная
+        assert len(rows) == 1
+        assert rows[0][3] == "tb_ok"  # $4 — textblock_id

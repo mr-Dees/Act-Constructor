@@ -92,6 +92,25 @@ class AuditLogSettings(BaseModel):
     max_diff_cells_per_table: int = Field(default=50, gt=0)
 
 
+class ImagesSettings(BaseModel):
+    """
+    Лимиты картинок нарушений (inline data-URL в дополнительном контенте).
+
+    Фронт читает их через GET /acts/limits и валидирует файлы ДО
+    кодирования в base64. Жёсткий серверный потолок длины data-URL —
+    константа VIOLATION_IMAGE_URL_MAX_LENGTH в schemas/act_content.py;
+    она обязана быть заведомо выше max_file_size с учётом
+    base64-оверхеда (×4/3 + префикс).
+    """
+    max_file_size: int = Field(default=10 * 1024 * 1024, gt=0)
+    max_total_size_per_act: int = Field(default=30 * 1024 * 1024, gt=0)
+    allowed_mime_types: list[str] = Field(
+        default=["image/jpeg", "image/png", "image/gif", "image/webp"]
+    )
+    max_items_per_violation: int = Field(default=50, gt=0)
+    preview_max_height_percent: int = Field(default=40, gt=0, le=100)
+
+
 class ActsSettings(BaseModel):
     """Корневая модель настроек домена актов."""
     lock: LockSettings = LockSettings()
@@ -99,3 +118,4 @@ class ActsSettings(BaseModel):
     resource: ResourceSettings = ResourceSettings()
     invoice: InvoiceSettings = InvoiceSettings()
     audit_log: AuditLogSettings = AuditLogSettings()
+    images: ImagesSettings = ImagesSettings()

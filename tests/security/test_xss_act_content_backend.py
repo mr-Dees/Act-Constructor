@@ -26,8 +26,9 @@ from app.domains.acts.schemas.act_content import (
     ViolationAdditionalContentSchema,
     ViolationContentItemSchema,
 )
+from app.domains.acts.schemas.act_content import ViolationDescriptionListSchema
 from app.domains.acts.services.act_content_service import ActContentService
-from app.domains.acts.utils.html_sanitizer import sanitize_html
+from app.domains.acts.utils.html_sanitizer import sanitize_html, sanitize_plain_text
 
 
 @pytest.fixture(autouse=True)
@@ -108,6 +109,13 @@ class TestSanitizeHtmlDirect:
 def _make_service():
     """ActContentService с замоканными guard/репозиториями."""
     conn = AsyncMock()
+    # save_content открывает плоскую транзакцию на соединении —
+    # mock-у нужен синхронный transaction(), возвращающий async-CM
+    # (как в conftest.mock_conn).
+    tx = AsyncMock()
+    tx.__aenter__ = AsyncMock(return_value=tx)
+    tx.__aexit__ = AsyncMock(return_value=False)
+    conn.transaction = MagicMock(return_value=tx)
     settings = MagicMock()
     acts_settings = MagicMock()
     acts_settings.resource.max_tree_depth = 20
@@ -291,6 +299,81 @@ class TestSaveContentSanitizesViolations:
             assert "<svg" not in content
             assert "onload" not in content
             assert "r" in content
+
+    async def test_description_list_items_sanitized(self):
+        """5.2.3: строки descriptionList.items чистятся как plain (теги выкусываются)."""
+        svc, _ = _make_service()
+        data = _data_with_violation()
+        data.violations["v1"].descriptionList = ViolationDescriptionListSchema(
+            enabled=True,
+            items=[
+                "обычный пункт",
+                "<script>alert(1)</script>опасный",
+                '<b>жирный</b> уходит как текст',
+            ],
+        )
+
+        await svc.save_content(act_id=1, data=data, username="12345")
+
+        items = data.violations["v1"].descriptionList.items
+        assert items[0] == "обычный пункт"
+        assert "<script" not in items[1]
+        assert "опасный" in items[1]
+        # plain-поле: даже whitelist-теги вычищаются
+        assert "<b>" not in items[2]
+        assert "жирный" in items[2]
+
+    async def test_caption_and_filename_sanitized_as_plain(self):
+        """5.2.3: caption/filename элементов additionalContent чистятся как plain."""
+        svc, _ = _make_service()
+        data = _data_with_violation()
+        item = data.violations["v1"].additionalContent.items[0]
+        item.caption = '<img src=x onerror="alert(1)">подпись'
+        item.filename = "<script>x</script>файл.png"
+
+        await svc.save_content(act_id=1, data=data, username="12345")
+
+        item = data.violations["v1"].additionalContent.items[0]
+        assert "<img" not in item.caption
+        assert "onerror" not in item.caption
+        assert "подпись" in item.caption
+        assert "<script" not in item.filename
+        assert "файл.png" in item.filename
+
+    async def test_image_url_not_bleached(self):
+        """url НЕ прогоняется через bleach — его валидирует схема (data:image-whitelist).
+
+        bleach исказил бы base64-данные (например, экранированием), а
+        корректность формата уже гарантирована ViolationContentItemSchema.
+        """
+        svc, _ = _make_service()
+        data = _data_with_violation()
+        url = "data:image/png;base64,iVBORw0KGgoAAAANSUhEUg=="
+        item = data.violations["v1"].additionalContent.items[0]
+        item.url = url
+
+        await svc.save_content(act_id=1, data=data, username="12345")
+
+        assert data.violations["v1"].additionalContent.items[0].url == url
+
+
+class TestSanitizePlainTextDirect:
+    """sanitize_plain_text: plain-поля — без тегов вовсе (пустой whitelist)."""
+
+    def test_strips_all_tags_including_whitelisted(self):
+        out = sanitize_plain_text("<p>a</p><b>b</b><script>alert(1)</script>c")
+        assert "<" not in out
+        assert "a" in out and "b" in out and "c" in out
+
+    def test_plain_text_passes_through(self):
+        assert sanitize_plain_text("просто текст 123") == "просто текст 123"
+
+    def test_empty_and_none_inputs(self):
+        assert sanitize_plain_text("") == ""
+        assert sanitize_plain_text(None) == ""
+
+    def test_non_string_falls_back_to_str(self):
+        assert sanitize_plain_text(42) == "42"
 
 
 class TestSaveContentSanitizesTreeNodes:
