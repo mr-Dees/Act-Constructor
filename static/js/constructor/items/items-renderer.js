@@ -763,33 +763,6 @@ export class ItemsRenderer {
     }
 
     /**
-     * Перерисовка только конкретной таблицы (оптимизация).
-     * Ширины колонок рендерятся из colWidths через colgroup — отдельное
-     * сохранение/восстановление размеров не требуется.
-     * @param {string} tableId - ID таблицы для перерисовки
-     */
-    static renderSingleTable(tableId) {
-        const section = document.querySelector(`.table-section[data-table-id="${tableId}"]`);
-        if (!section) {
-            // Если секция не найдена, делаем полную перерисовку
-            this.renderAll();
-            return;
-        }
-
-        const table = AppState.tables[tableId];
-        if (!table) return;
-
-        const tableNode = this._findNodeById(table.nodeId);
-        if (!tableNode) return;
-
-        // Перерисовываем таблицу
-        const newTableSection = this.renderTable(table, tableNode);
-        section.replaceWith(newTableSection);
-
-        tableManager.attachEventListeners();
-    }
-
-    /**
      * Поиск узла в дереве по ID (рекурсивный обход).
      * @param {string} id - ID узла для поиска
      * @param {Object} [node=AppState.treeData] - Узел, с которого начинать поиск
