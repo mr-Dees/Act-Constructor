@@ -7,6 +7,7 @@
 """
 
 import pytest
+from datetime import datetime, timezone
 from unittest.mock import AsyncMock, MagicMock, patch
 
 from app.domains.chat.services.agent_channel_poller import AgentChannelPoller
@@ -452,10 +453,8 @@ class TestTick:
         self, settings, mock_conn
     ):
         """Первое ненулевое answer_updated_at — baseline (не activity); второе изменение — activity."""
-        import datetime
-
-        dt1 = datetime.datetime(2024, 1, 1, 12, 0, 0)
-        dt2 = datetime.datetime(2024, 1, 1, 12, 0, 5)
+        dt1 = datetime(2024, 1, 1, 12, 0, 0, tzinfo=timezone.utc)
+        dt2 = datetime(2024, 1, 1, 12, 0, 5, tzinfo=timezone.utc)
 
         times = [0.0, 10.0, 20.0]
         idx = [0]
@@ -488,6 +487,61 @@ class TestTick:
             )
             await poller._tick(mock_conn)
             assert poller._subscriptions["Q1"]["last_activity"] == 20.0
+
+    async def test_tick_phase_does_not_roll_back_to_pending(self, settings, mock_conn):
+        """Фаза монотонна: откат шины (ответ исчез / статус вернулся pending)
+        НЕ откатывает phase processing → pending, НЕ обновляет last_activity,
+        и по истечении answer_timeout_sec наступает mark_timeout(reason='answer').
+        """
+        answer_timeout = settings.agent_channel.answer_timeout_sec
+        # subscribe=0, тик1=5 (answer_exists → processing), тик2=10 (шина «откатилась»),
+        # тик3=10+answer_timeout+1 (нет признаков жизни → answer-таймаут)
+        t1, t2, t3 = 5.0, 10.0, float(10 + answer_timeout + 1)
+        times = [0.0, t1, t2, t3]
+        idx = [0]
+
+        def fake_now():
+            val = times[idx[0]]
+            idx[0] = min(idx[0] + 1, len(times) - 1)
+            return val
+
+        poller = _make_poller(settings, now=fake_now, mock_conn=mock_conn)
+        poller.subscribe(assistant_message_id="m1", question_uid="Q1")
+
+        with (
+            patch(
+                "app.domains.chat.services.agent_channel.AgentChannelService.poll_once",
+                new_callable=AsyncMock,
+            ) as mock_poll,
+            patch(
+                "app.domains.chat.services.agent_channel.AgentChannelService.mark_timeout",
+                new_callable=AsyncMock,
+            ) as mock_mark,
+        ):
+            # Тик 1: answer_exists=True → phase становится processing, activity=t1
+            mock_poll.return_value = _poll_res(answer_exists=True, question_status="processing")
+            await poller._tick(mock_conn)
+            assert poller._subscriptions["Q1"]["phase"] == "processing"
+            assert poller._subscriptions["Q1"]["last_activity"] == t1
+
+            # Тик 2: шина «откатилась» — answer_exists=False, question_status="pending";
+            # phase НЕ должна вернуться к pending, last_activity НЕ должна обновиться
+            mock_poll.return_value = _poll_res(answer_exists=False, question_status="pending")
+            await poller._tick(mock_conn)
+            assert poller._subscriptions["Q1"]["phase"] == "processing"
+            assert poller._subscriptions["Q1"]["last_activity"] == t1  # не изменилась
+
+            # Тик 3: now=t3, от last_activity=t1 прошло answer_timeout+1 → answer-таймаут
+            mock_poll.return_value = _poll_res(answer_exists=False, question_status="pending")
+            n = await poller._tick(mock_conn)
+
+        mock_mark.assert_called_once_with(
+            assistant_message_id="m1",
+            question_uid="Q1",
+            reason="answer",
+        )
+        assert n == 1
+        assert "Q1" not in poller._subscriptions
 
     async def test_tick_exception_in_one_subscription_does_not_abort(
         self, settings, mock_conn

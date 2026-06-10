@@ -176,24 +176,27 @@ class AgentChannelPoller:
 
                 # ── Признаки жизни агента ──
                 alive = False
-                phase = (
-                    "processing"
-                    if res["answer_exists"] or res["question_status"] not in (None, "pending")
-                    else "pending"
+                # Фаза монотонна: только pending → processing. Откат строки
+                # шины назад (владелец удалил ответ / вернул pending) НЕ
+                # возвращает claim-окно и НЕ считается признаком жизни —
+                # иначе флаппинг чужой таблицы продлевал бы ожидание вечно.
+                observed_processing = (
+                    res["answer_exists"]
+                    or res["question_status"] not in (None, "pending")
                 )
-                if phase != entry["phase"]:
-                    entry["phase"] = phase
+                if entry["phase"] == "pending" and observed_processing:
+                    entry["phase"] = "processing"
                     alive = True
                 if res["reasoning_len"] > entry["last_reasoning_len"]:
                     entry["last_reasoning_len"] = res["reasoning_len"]
                     alive = True
-                if (res["answer_updated_at"] is not None
-                        and res["answer_updated_at"] != entry["last_answer_updated_at"]):
-                    if entry["last_answer_updated_at"] is not None:
+                if entry["last_answer_updated_at"] is not None:
+                    if res["answer_updated_at"] != entry["last_answer_updated_at"]:
                         alive = True  # первое наблюдение — baseline, не активность
+                if res["answer_updated_at"] is not None:
                     entry["last_answer_updated_at"] = res["answer_updated_at"]
                 qa = res["queue_ahead"]
-                if phase == "pending" and qa is not None:
+                if entry["phase"] == "pending" and qa is not None:
                     if entry["last_queue_ahead"] is not None and qa < entry["last_queue_ahead"]:
                         alive = True  # очередь движется — агент жив
                     entry["last_queue_ahead"] = qa
@@ -239,6 +242,9 @@ class AgentChannelPoller:
         с момента reconcile. Уже отвеченные за время простоя draft'ы
         финализируются на первом же тике (poll_once видит reply_to), так что
         лишнее idle-ожидание касается только реально зависших запросов.
+        Фаза после reconcile — 'pending', но первый же тик re-derive'ит её из
+        poll_once (строка-ответ существует → сразу 'processing' с answer-лимитом),
+        поэтому транзиентная классификация безвредна.
         """
         from app.domains.chat.repositories.message_repository import MessageRepository
 
