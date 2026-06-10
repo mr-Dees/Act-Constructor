@@ -120,3 +120,16 @@ def test_agent_channel_settings_defaults():
     assert s.poll_max_interval_sec == 10.0
     assert s.poll_backoff_multiplier == 1.5
     assert s.max_block_text_size == 262144
+
+
+def test_agent_channel_claim_timeout_default():
+    from app.domains.chat.settings import AgentChannelSettings
+    s = AgentChannelSettings()
+    assert s.claim_timeout_sec == 1800
+
+
+def test_agent_channel_claim_timeout_must_be_positive():
+    import pydantic
+    from app.domains.chat.settings import AgentChannelSettings
+    with pytest.raises(pydantic.ValidationError):
+        AgentChannelSettings(claim_timeout_sec=0)
