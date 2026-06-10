@@ -10,8 +10,15 @@ import { AppState } from '../state/state-core.js';
 import { AppConfig } from '../../shared/app-config.js';
 import { Notifications } from '../../shared/notifications.js';
 import { applyInsertColumnWidth, applyRemoveColumnWidth } from './col-widths.js';
-import { mergeRange, unmergeAt, autoUnmergeRow } from './table-merge-core.js';
+import { mergeRange, unmergeAt } from './table-merge-core.js';
 import { validateGridRegion, gridToMerges, applyMergesToGrid } from './grid-merges.js';
+
+/**
+ * Единое сообщение отказа удаления строки с объединениями (M.22).
+ * Семантика «сначала разделить, потом удалять»: тот же текст показывает
+ * контекстное меню (context-menu-cells.js) и ядро deleteRow.
+ */
+export const MSG_ROW_HAS_MERGED_CELLS = 'Строка содержит объединенные ячейки. Сначала разъедините их.';
 
 export class TableCellsOperations {
     constructor(tableManager) {
@@ -128,6 +135,40 @@ export class TableCellsOperations {
     }
 
     /**
+     * H8: проверяет лимит строк таблицы перед вставкой строки.
+     * Зеркалит серверную схему (TableSchema.grid max_length) — без фронт-гейта
+     * превышение уехало бы на бэк и вернулось 422 при сохранении.
+     * @private
+     * @param {Object} table - Объект таблицы
+     * @returns {boolean} true если вставка разрешена; false — показан warning
+     */
+    _checkRowLimit(table) {
+        const maxRows = AppConfig.limits.table.maxRows;
+        if (table.grid.length >= maxRows) {
+            Notifications.warning(`Достигнут максимум строк таблицы (${maxRows}). Добавить новую строку нельзя.`);
+            return false;
+        }
+        return true;
+    }
+
+    /**
+     * H8: проверяет лимит колонок таблицы перед вставкой колонки.
+     * Зеркалит серверную схему (validate_grid_dimensions) — без фронт-гейта
+     * превышение уехало бы на бэк и вернулось 422 при сохранении.
+     * @private
+     * @param {Object} table - Объект таблицы
+     * @returns {boolean} true если вставка разрешена; false — показан warning
+     */
+    _checkColumnLimit(table) {
+        const maxCols = AppConfig.limits.table.maxCols;
+        if (table.grid[0].length >= maxCols) {
+            Notifications.warning(`Достигнут максимум колонок таблицы (${maxCols}). Добавить новую колонку нельзя.`);
+            return false;
+        }
+        return true;
+    }
+
+    /**
      * Вставляет новую строку выше выбранной ячейки.
      * Учитывает объединенные ячейки и запрещает вставку выше заголовка.
      */
@@ -140,6 +181,9 @@ export class TableCellsOperations {
         const table = AppState.tables[tableId];
 
         if (!table || !table.grid) return;
+
+        // Лимит размера таблицы (H8)
+        if (!this._checkRowLimit(table)) return;
 
         // КРИТИЧЕСКАЯ ПРОВЕРКА: запрещаем вставку выше заголовка
         const isHeaderRow = table.grid[rowIndex].some(c => c.isHeader === true);
@@ -225,6 +269,9 @@ export class TableCellsOperations {
         const table = AppState.tables[tableId];
 
         if (!table || !table.grid) return;
+
+        // Лимит размера таблицы (H8)
+        if (!this._checkRowLimit(table)) return;
 
         let insertRowIndex = rowIndex + 1;
         for (let c = 0; c < table.grid[rowIndex].length; c++) {
@@ -317,6 +364,9 @@ export class TableCellsOperations {
             return;
         }
 
+        // Лимит размера таблицы (H8)
+        if (!this._checkColumnLimit(table)) return;
+
         colIndex = this._findColumnStartOfSpan(table, colIndex);
 
         let headerRowIndex = -1;
@@ -393,6 +443,9 @@ export class TableCellsOperations {
             Notifications.error('Структуру этой таблицы нельзя изменять');
             return;
         }
+
+        // Лимит размера таблицы (H8)
+        if (!this._checkColumnLimit(table)) return;
 
         let insertColIndex = colIndex + 1;
         for (let r = 0; r < table.grid.length; r++) {
@@ -472,8 +525,9 @@ export class TableCellsOperations {
 
     /**
      * Удаляет выбранную строку из таблицы.
-     * Если строка содержит объединённые ячейки (origin или spanned-в-неё),
-     * сначала автоматически разъединяет их, потом удаляет строку.
+     * Строку, участвующую в объединении (origin внутри строки или
+     * spanned-в-неё), НЕ удаляет — возвращает отказ с тем же сообщением,
+     * что контекстное меню (семантика «сначала разделить, потом удалять», M.22).
      */
     deleteRow() {
         if (this.tableManager.selectedCells.length === 0) return;
@@ -497,8 +551,12 @@ export class TableCellsOperations {
             return;
         }
 
-        // Smart auto-unmerge: разъединяем все ячейки, которые покрывают удаляемую строку.
-        this._autoUnmergeRow(table, rowIndex);
+        // M.22: строку, участвующую в объединении, не удаляем — семантика
+        // «сначала разделить, потом удалять» (то же сообщение, что в меню).
+        if (this._rowHasAnyMergedCellsStrict(table, rowIndex)) {
+            Notifications.error(MSG_ROW_HAS_MERGED_CELLS);
+            return;
+        }
 
         // Уменьшаем rowSpan для ячеек, которые охватывают удаляемую строку
         for (let r = 0; r < rowIndex; r++) {
@@ -526,7 +584,8 @@ export class TableCellsOperations {
         }
 
         // Сдвигаем spanOrigin поглощённых ячеек объединений ниже удалённой строки
-        // (объединения, покрывавшие rowIndex, уже разъединены _autoUnmergeRow).
+        // (объединения, покрывавшие rowIndex, отклонены проверкой
+        // _rowHasAnyMergedCellsStrict выше).
         this._shiftSpanOriginsForRowDelete(table, rowIndex);
 
         this.clearSelection();
@@ -748,6 +807,36 @@ export class TableCellsOperations {
     }
 
     /**
+     * Проверяет участие строки в любом объединении (строгая проверка, M.22):
+     * поглощённая ячейка в строке, ведущая со span>1 в строке либо вертикальное
+     * объединение из строк выше, доходящее до неё. Зеркало
+     * CellContextMenu._rowHasAnyMergedCellsStrict — ядро и меню отказывают
+     * по одному и тому же предикату.
+     * @param {Object} table - Объект таблицы
+     * @param {number} rowIndex - Индекс строки
+     * @returns {boolean} true если строка участвует в объединении
+     */
+    _rowHasAnyMergedCellsStrict(table, rowIndex) {
+        for (let c = 0; c < table.grid[rowIndex].length; c++) {
+            const cellData = table.grid[rowIndex][c];
+            if (cellData.isSpanned) return true;
+            if ((cellData.rowSpan || 1) > 1 || (cellData.colSpan || 1) > 1) return true;
+        }
+
+        for (let r = 0; r < rowIndex; r++) {
+            for (let c = 0; c < table.grid[r].length; c++) {
+                const cellData = table.grid[r][c];
+                if (!cellData.isSpanned && cellData.rowSpan > 1) {
+                    const cellEndRow = r + cellData.rowSpan;
+                    if (cellEndRow > rowIndex) return true;
+                }
+            }
+        }
+
+        return false;
+    }
+
+    /**
      * Проверяет наличие объединенных ячеек в колонке
      * @param {Object} table - Объект таблицы
      * @param {number} colIndex - Индекс колонки
@@ -794,12 +883,21 @@ export class TableCellsOperations {
     }
 
     /**
-     * Выделяет ячейку
+     * Выделяет ячейку; повторный вызов по уже выбранной — снимает выделение (toggle).
+     * Дублей в selectedCells не бывает: раньше безусловный push при повторном
+     * Ctrl+клике клал ту же ячейку дважды и ломал счётчик mergeCells (M.14).
      * @param {HTMLElement} cell - DOM-элемент ячейки
      */
     selectCell(cell) {
-        cell.classList.add('selected');
-        this.tableManager.selectedCells.push(cell);
+        const idx = this.tableManager.selectedCells.indexOf(cell);
+        if (idx !== -1) {
+            // Повторный клик по выбранной ячейке — снимаем выделение и подсветку.
+            cell.classList.remove('selected');
+            this.tableManager.selectedCells.splice(idx, 1);
+        } else {
+            cell.classList.add('selected');
+            this.tableManager.selectedCells.push(cell);
+        }
         AppState.selectedCells = this.tableManager.selectedCells;
     }
 
@@ -956,16 +1054,6 @@ export class TableCellsOperations {
         ItemsRenderer.updateTable(tableId);
         PreviewManager.update();
         Notifications.success('Ячейка разъединена');
-    }
-
-    /**
-     * Перед удалением строки разъединяет все ячейки, чьи объединения покрывают
-     * эту строку — origin внутри строки или spanned-в-неё из строк выше.
-     * Грид-математика — в чистом ядре (table-merge-core.autoUnmergeRow).
-     * @private
-     */
-    _autoUnmergeRow(table, rowIndex) {
-        table.grid = autoUnmergeRow(table.grid, rowIndex);
     }
 }
 

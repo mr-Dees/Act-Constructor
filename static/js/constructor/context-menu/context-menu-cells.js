@@ -5,6 +5,7 @@
 import { ContextMenuManager } from './context-menu-core.js';
 import { AppState } from '../state/state-core.js';
 import { Notifications } from '../../shared/notifications.js';
+import { MSG_ROW_HAS_MERGED_CELLS } from '../table/table-cells-operations.js';
 
 export class CellContextMenu {
     constructor(menu) {
@@ -218,7 +219,7 @@ export class CellContextMenu {
                 }
                 const rowHasMerged = this._rowHasAnyMergedCellsStrict(table, rowIndex);
                 if (rowHasMerged) {
-                    Notifications.error('Строка содержит объединенные ячейки. Сначала разъедините их.');
+                    Notifications.error(MSG_ROW_HAS_MERGED_CELLS);
                     return;
                 }
                 const headerRowCount = table.grid.filter(row => row.some(c => c.isHeader === true)).length;

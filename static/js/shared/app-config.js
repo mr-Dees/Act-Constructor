@@ -580,6 +580,35 @@ export class AppConfig {
     };
 
     /**
+     * Лимиты структуры контента — единый источник для фронт-гейтов.
+     *
+     * Числа зеркалят серверную схему app/domains/acts/schemas/act_content.py
+     * (TableSchema: grid максимум 64 строки × 16 колонок;
+     * TextBlockFormattingSchema: fontSize 8-72). Контракт фронт↔бэк закреплён
+     * стражами: tests/js/table-cells-limits.test.mjs и
+     * tests/test_act_content_roundtrip.py — при изменении менять синхронно.
+     */
+    static limits = {
+        table: {
+            // Максимум строк grid (бэк: TableSchema.grid max_length=64)
+            maxRows: 64,
+
+            // Максимум колонок grid (бэк: validate_grid_dimensions ≤ 16)
+            maxCols: 16,
+
+            // Минимальная ширина колонки при интерактивном ресайзе, px
+            // (table-sizes.js переводит в проценты от ширины таблицы)
+            minColWidthPx: 80
+        },
+
+        textblock: {
+            // Размер шрифта (бэк: TextBlockFormattingSchema.fontSize ge=8 le=72)
+            fontSizeMin: 8,
+            fontSizeMax: 72
+        }
+    };
+
+    /**
      * Настройки таблиц
      * TODO: Добавить настройки таблиц при работе с модулем
      */
