@@ -159,20 +159,17 @@ class AgentMessageRepository(BaseRepository):
         терминальный статус на чужой таблице может не записаться (CHECK
         владельца), и без отсечки мёртвый вопрос навсегда съедал бы слот лимита.
         """
+        conds = [
+            "user_id = $1",
+            "role = 'user'",
+            "status IN ('pending', 'processing', 'in_progress')",
+        ]
+        params: list = [user_id]
         if created_after is not None:
-            val = await self.conn.fetchval(
-                f"SELECT COUNT(*) FROM {self.table} "
-                f"WHERE user_id = $1 AND role = 'user' "
-                f"AND status IN ('pending', 'processing', 'in_progress') "
-                f"AND created_at > $2",
-                user_id,
-                created_after,
-            )
-        else:
-            val = await self.conn.fetchval(
-                f"SELECT COUNT(*) FROM {self.table} "
-                f"WHERE user_id = $1 AND role = 'user' "
-                f"AND status IN ('pending', 'processing', 'in_progress')",
-                user_id,
-            )
+            params.append(created_after)
+            conds.append(f"created_at > ${len(params)}")
+        val = await self.conn.fetchval(
+            f"SELECT COUNT(*) FROM {self.table} WHERE {' AND '.join(conds)}",
+            *params,
+        )
         return int(val or 0)

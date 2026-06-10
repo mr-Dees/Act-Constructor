@@ -140,6 +140,22 @@ async def test_submit_passes_agent_mode_snapshot():
     assert repo.upsert.await_args.kwargs["agent_mode"] == "adaptive"
 
 
+async def test_submit_unknown_agent_mode_raises():
+    """Произвольная строка в agent_mode не должна попадать в аналитический срез."""
+    svc, repo, _ = _service()
+    with pytest.raises(ChatFeedbackValidationError):
+        await svc.submit(
+            message=_msg(), user_id="u1", rating="up", agent_mode="что-угодно",
+        )
+    repo.upsert.assert_not_awaited()
+
+
+async def test_submit_empty_agent_mode_normalized_to_none():
+    svc, repo, _ = _service()
+    await svc.submit(message=_msg(), user_id="u1", rating="up", agent_mode="  ")
+    assert repo.upsert.await_args.kwargs["agent_mode"] is None
+
+
 async def test_submit_down_after_up_overwrites_rating():
     """Переключение up→down: вторая оценка перезаписывает первую с причинами."""
     svc, repo, _ = _service()

@@ -107,6 +107,9 @@ END$$;
 -- ссылка на id вопроса. CHECK'и по role/status зеркалят подтверждённую спеку
 -- владельца (у него DEFAULT'ы тоже есть, но AW на них не полагается и передаёт
 -- status/created_at/updated_at явно).
+-- Директива адаптеру: таблица внешняя — если она уже существует (создана
+-- владельцем), её «спутники» (CREATE INDEX / COMMENT ON) пропускаются.
+-- @external-table: {BUS_SCHEMA_Q}{BUS_TABLE}
 CREATE TABLE IF NOT EXISTS {BUS_SCHEMA_Q}{BUS_TABLE} (
     id          UUID,
     chat_id     TEXT,

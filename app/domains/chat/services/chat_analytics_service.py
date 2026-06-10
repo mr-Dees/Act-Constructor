@@ -25,6 +25,19 @@ _FEEDBACK_FIELDS = (
     "route_type", "agent_mode", "model", "created_at", "updated_at",
 )
 
+# Максимум сообщений в инспекторе диалога. Запас над лимитом создания
+# (CHAT__MAX_MESSAGES_PER_CONVERSATION, default 500); диалог длиннее —
+# усекается с явным флагом messages_truncated в ответе, не молча.
+_INSPECT_MESSAGES_LIMIT = 10000
+
+# Максимум символов текстового содержимого одного блока в выдаче инспектора:
+# один блок может достигать delta_block_max_bytes (5 МБ) — без усечения ответ
+# admin-API раздувается до мегабайт. Усечённый блок помечается
+# content_truncated=true.
+_INSPECT_BLOCK_TEXT_LIMIT = 20000
+
+_TRUNCATED_MARKER = " …[обрезано]"
+
 
 class ChatAnalyticsService:
     """Аналитика чата для админ-просмотра. Только чтение."""
@@ -84,7 +97,7 @@ class ChatAnalyticsService:
         каким маршрутом и как оценено.
         """
         messages = await self.msg_repo.get_by_conversation(
-            conversation_id, limit=10000, offset=0,
+            conversation_id, limit=_INSPECT_MESSAGES_LIMIT, offset=0,
         )
         fb_by_msg = await self.feedback_repo.get_all_for_conversation(conversation_id)
 
@@ -98,7 +111,7 @@ class ChatAnalyticsService:
                 "token_usage": m.get("token_usage"),
                 "created_at": m.get("created_at"),
                 "agent_ref": m.get("agent_ref"),
-                "content": m.get("content"),
+                "content": self._shape_content(m.get("content")),
             }
             if m.get("role") == "assistant":
                 entry["route_type"] = route_classifier.classify_route(m)
@@ -108,7 +121,37 @@ class ChatAnalyticsService:
                     for f in fb_by_msg.get(m.get("id"), [])
                 ]
             out.append(entry)
-        return {"conversation_id": conversation_id, "messages": out}
+        return {
+            "conversation_id": conversation_id,
+            "messages": out,
+            # Явный признак усечения: молчаливая потеря хвоста длинного
+            # диалога вводила бы админа в заблуждение.
+            "messages_truncated": len(messages) >= _INSPECT_MESSAGES_LIMIT,
+        }
+
+    @staticmethod
+    def _shape_content(content):
+        """Копия content с усечением длинных текстовых блоков (только в выдаче).
+
+        Исходные блоки не мутируются; усечённый блок получает
+        ``content_truncated=True`` и маркер «…[обрезано]» в тексте.
+        """
+        if not isinstance(content, list):
+            return content
+        shaped = []
+        for b in content:
+            if (
+                isinstance(b, dict)
+                and isinstance(b.get("content"), str)
+                and len(b["content"]) > _INSPECT_BLOCK_TEXT_LIMIT
+            ):
+                b = {
+                    **b,
+                    "content": b["content"][:_INSPECT_BLOCK_TEXT_LIMIT] + _TRUNCATED_MARKER,
+                    "content_truncated": True,
+                }
+            shaped.append(b)
+        return shaped
 
     @staticmethod
     def _extract_text(content) -> str:

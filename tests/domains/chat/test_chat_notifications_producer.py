@@ -64,8 +64,8 @@ def _make_finalizable_service(mock_conn, settings, *, question_user_id="user1"):
     question = {
         "id": "q-uid",
         "user_id": question_user_id,
-        "status": "complete",
-        "reply_to": "a-uid",
+        "status": "completed",
+        "reply_to": None,
     }
     answer = {
         "id": "a-uid",
@@ -74,13 +74,12 @@ def _make_finalizable_service(mock_conn, settings, *, question_user_id="user1"):
         "metadata": {},
         "buttons": None,
         "media": None,
-        "status": "complete",
+        "reply_to": "q-uid",
+        "status": "completed",
     }
     fake_agent_repo = AsyncMock()
-    fake_agent_repo.get_by_uid = AsyncMock(side_effect=lambda uid: {
-        "q-uid": question,
-        "a-uid": answer,
-    }.get(uid))
+    fake_agent_repo.get_by_uid = AsyncMock(return_value=question)
+    fake_agent_repo.get_answer_for_question = AsyncMock(return_value=answer)
 
     fake_msg_repo = AsyncMock()
     fake_msg_repo.finalize = AsyncMock(return_value=True)
@@ -187,8 +186,8 @@ class TestChatNotificationsProducer:
         question = {
             "id": "q-uid",
             "user_id": "asker-7",
-            "status": "complete",
-            "reply_to": "a-uid",
+            "status": "completed",
+            "reply_to": None,
         }
         answer = {
             "id": "a-uid",
@@ -197,13 +196,12 @@ class TestChatNotificationsProducer:
             "metadata": {},
             "buttons": None,
             "media": None,
+            "reply_to": "q-uid",
             "status": "failed",
         }
         fake_agent_repo = AsyncMock()
-        fake_agent_repo.get_by_uid = AsyncMock(side_effect=lambda uid: {
-            "q-uid": question,
-            "a-uid": answer,
-        }.get(uid))
+        fake_agent_repo.get_by_uid = AsyncMock(return_value=question)
+        fake_agent_repo.get_answer_for_question = AsyncMock(return_value=answer)
         fake_msg_repo = AsyncMock()
         fake_msg_repo.finalize = AsyncMock(return_value=True)
         fake_msg_repo.mark_failed = AsyncMock(return_value=True)
@@ -285,8 +283,8 @@ class TestChatNotificationsProducer:
         question = {
             "id": "q-uid",
             "user_id": "asker-9",
-            "status": "complete",
-            "reply_to": "a-uid",
+            "status": "completed",
+            "reply_to": None,
         }
         answer = {
             "id": "a-uid",
@@ -295,13 +293,12 @@ class TestChatNotificationsProducer:
             "metadata": {},
             "buttons": None,
             "media": None,
+            "reply_to": "q-uid",
             "status": "failed",
         }
         fake_agent_repo = AsyncMock()
-        fake_agent_repo.get_by_uid = AsyncMock(side_effect=lambda uid: {
-            "q-uid": question,
-            "a-uid": answer,
-        }.get(uid))
+        fake_agent_repo.get_by_uid = AsyncMock(return_value=question)
+        fake_agent_repo.get_answer_for_question = AsyncMock(return_value=answer)
         fake_msg_repo = AsyncMock()
         fake_msg_repo.finalize = AsyncMock(return_value=True)
         fake_msg_repo.mark_failed = AsyncMock(return_value=False)

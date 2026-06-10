@@ -30,7 +30,7 @@
 - **Аудит:** факт оценки пишется в `chat_audit_log` (`feedback_submitted`/`feedback_cleared`, best-effort, без текста комментария — PII).
 
 ### API обратной связи (для пользователя)
-- `PUT /api/v1/chat/conversations/{cid}/messages/{mid}/feedback` — тело `{rating: "up"|"down", reasons?: [код], comment?: str, agent_mode?: str}`.
+- `PUT /api/v1/chat/conversations/{cid}/messages/{mid}/feedback` — тело `{rating: "up"|"down", reasons?: [код], comment?: str, agent_mode?: "off"|"adaptive"|"always"}`. Словарь `agent_mode` валидируется сервисом (`VALID_AGENT_MODES`), иное значение → 422; пустая строка нормализуется в null.
 - `DELETE /api/v1/chat/conversations/{cid}/messages/{mid}/feedback` — снять оценку.
 
 Коды причин дизлайка (словарь — `FEEDBACK_REASON_CODES` в `chat_feedback_service.py`, дублируется на фронте):
@@ -62,7 +62,7 @@
 - **`GET /api/v1/chat/admin/feedback`** `?rating&route_type&agent_mode&from&to&limit&offset`
   → список оценок с предпросмотром текста ответа (`answer_text`), причинами и комментарием. По умолчанию полезно фильтровать `rating=down` — самый actionable-сигнал.
 - **`GET /api/v1/chat/admin/conversations/{cid}/inspect`**
-  → полный диалог: каждое сообщение с `content` (что спрашивали/получали, включая error-блоки → «почему ошибка»), для ответов — `route_type`/`outcome`/`token_usage`/`model` и `feedback` всех пользователей.
+  → полный диалог: каждое сообщение с `content` (что спрашивали/получали, включая error-блоки → «почему ошибка»), для ответов — `route_type`/`outcome`/`token_usage`/`model` и `feedback` всех пользователей. Длинные текстовые блоки усекаются (`content_truncated: true`, маркер «…[обрезано]»); диалог длиннее лимита инспектора — флаг `messages_truncated: true` в корне ответа.
 
 ## 5. Готовые SQL-запросы
 

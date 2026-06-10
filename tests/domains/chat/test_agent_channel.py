@@ -327,6 +327,41 @@ class TestAgentChannelServiceSubmit:
         import uuid
         uuid.UUID(result)  # выброс ValueError если неверный формат
 
+    async def test_submit_check_violation_raises_friendly_domain_error(
+        self, mock_conn, settings
+    ):
+        """CHECK владельца шины отклонил INSERT вопроса → доменная ошибка.
+
+        Имя констрейнта владельца на ПРОМе чужое (нет в
+        CHECK_CONSTRAINT_MESSAGES) — без конвертации пользователь увидел бы
+        технический fallback вместо понятного сообщения."""
+        import asyncpg
+
+        from app.domains.chat.exceptions import AgentChannelUnavailableError
+
+        fake_agent_repo = AsyncMock()
+        fake_agent_repo.count_active_for_user = AsyncMock(return_value=0)
+        fake_agent_repo.insert_question = AsyncMock(
+            side_effect=asyncpg.exceptions.CheckViolationError(
+                'violates check constraint "42_alexe_conversation_messages_status_check"'
+            )
+        )
+        fake_msg_repo = AsyncMock()
+
+        svc = AgentChannelService(mock_conn, settings)
+        svc._agent_repo = lambda: fake_agent_repo
+        svc._message_repo = lambda: fake_msg_repo
+
+        with pytest.raises(AgentChannelUnavailableError) as exc_info:
+            await svc.submit(
+                conversation_id="c",
+                user_id="u",
+                assistant_message_id="m",
+                text="q",
+                mode="qa",
+            )
+        assert exc_info.value.status_code == 502
+
 
 # ── AgentChannelService.try_finalize ─────────────────────────────────────────
 
@@ -471,14 +506,15 @@ class TestAgentChannelServiceTryFinalize:
         assert result == "pending"
         fake_msg_repo.finalize.assert_not_called()
 
-    async def test_reply_to_present_answer_ok_finalizes_and_returns_done(
+    async def test_answer_legacy_terminal_status_finalizes_and_returns_done(
         self, mock_conn, settings
     ):
-        """Если reply_to есть и ответ не error → finalize + 'done'."""
+        """Legacy-терминальный статус ответа ('complete') тоже финализирует:
+        терминальным считается любой статус вне явно нетерминальных."""
         question = {
             "id": "q-uid",
             "status": "complete",
-            "reply_to": "a-uid",
+            "reply_to": None,
         }
         answer = {
             "id": "a-uid",
@@ -487,14 +523,13 @@ class TestAgentChannelServiceTryFinalize:
             "metadata": {},
             "buttons": None,
             "media": None,
+            "reply_to": "q-uid",
             "status": "complete",
         }
 
         fake_agent_repo = AsyncMock()
-        fake_agent_repo.get_by_uid = AsyncMock(side_effect=lambda uid: {
-            "q-uid": question,
-            "a-uid": answer,
-        }.get(uid))
+        fake_agent_repo.get_by_uid = AsyncMock(return_value=question)
+        fake_agent_repo.get_answer_for_question = AsyncMock(return_value=answer)
 
         fake_msg_repo = AsyncMock()
         fake_msg_repo.finalize = AsyncMock(return_value=True)
@@ -531,7 +566,7 @@ class TestAgentChannelServiceTryFinalize:
         question = {
             "id": "q-uid",
             "status": "completed",
-            "reply_to": "a-uid",
+            "reply_to": None,
         }
         answer = {
             "id": "a-uid",
@@ -540,14 +575,13 @@ class TestAgentChannelServiceTryFinalize:
             "metadata": {},
             "buttons": None,
             "media": None,
+            "reply_to": "q-uid",
             "status": "failed",
         }
 
         fake_agent_repo = AsyncMock()
-        fake_agent_repo.get_by_uid = AsyncMock(side_effect=lambda uid: {
-            "q-uid": question,
-            "a-uid": answer,
-        }.get(uid))
+        fake_agent_repo.get_by_uid = AsyncMock(return_value=question)
+        fake_agent_repo.get_answer_for_question = AsyncMock(return_value=answer)
 
         fake_msg_repo = AsyncMock()
         fake_msg_repo.finalize = AsyncMock(return_value=True)
@@ -582,8 +616,8 @@ class TestAgentChannelServiceTryFinalize:
         """try_finalize вызывает translate_buttons для ответа с кнопками."""
         question = {
             "id": "q-uid",
-            "status": "complete",
-            "reply_to": "a-uid",
+            "status": "completed",
+            "reply_to": None,
         }
         answer = {
             "id": "a-uid",
@@ -592,14 +626,13 @@ class TestAgentChannelServiceTryFinalize:
             "metadata": {},
             "buttons": [{"action_id": "acts.open_act_page", "label": "Открыть", "params": {"km_number": "КМ-23-001"}}],
             "media": None,
-            "status": "complete",
+            "reply_to": "q-uid",
+            "status": "completed",
         }
 
         fake_agent_repo = AsyncMock()
-        fake_agent_repo.get_by_uid = AsyncMock(side_effect=lambda uid: {
-            "q-uid": question,
-            "a-uid": answer,
-        }.get(uid))
+        fake_agent_repo.get_by_uid = AsyncMock(return_value=question)
+        fake_agent_repo.get_answer_for_question = AsyncMock(return_value=answer)
 
         fake_msg_repo = AsyncMock()
         fake_msg_repo.finalize = AsyncMock(return_value=True)
@@ -633,8 +666,8 @@ class TestAgentChannelServiceTryFinalize:
         """try_finalize НЕ вызывает translate_buttons если кнопок нет."""
         question = {
             "id": "q-uid",
-            "status": "complete",
-            "reply_to": "a-uid",
+            "status": "completed",
+            "reply_to": None,
         }
         answer = {
             "id": "a-uid",
@@ -643,14 +676,13 @@ class TestAgentChannelServiceTryFinalize:
             "metadata": {},
             "buttons": None,
             "media": None,
-            "status": "complete",
+            "reply_to": "q-uid",
+            "status": "completed",
         }
 
         fake_agent_repo = AsyncMock()
-        fake_agent_repo.get_by_uid = AsyncMock(side_effect=lambda uid: {
-            "q-uid": question,
-            "a-uid": answer,
-        }.get(uid))
+        fake_agent_repo.get_by_uid = AsyncMock(return_value=question)
+        fake_agent_repo.get_answer_for_question = AsyncMock(return_value=answer)
 
         fake_msg_repo = AsyncMock()
         fake_msg_repo.finalize = AsyncMock(return_value=True)

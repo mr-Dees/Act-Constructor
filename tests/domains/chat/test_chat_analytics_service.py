@@ -83,6 +83,57 @@ async def test_inspect_conversation_composes_route_outcome_feedback():
     assert msgs["a2"]["outcome"] == rc.OUTCOME_ERROR
     assert msgs["a2"]["feedback"] == []
 
+    # диалог короче лимита → усечения нет
+    assert res["messages_truncated"] is False
+
+
+async def test_inspect_conversation_flags_truncation_at_limit():
+    """Диалог длиной ровно в лимит → messages_truncated=True (хвост мог
+    быть отброшен), а не молчаливое усечение."""
+    from app.domains.chat.services import chat_analytics_service as mod
+
+    msg_repo = MagicMock()
+    msg_repo.get_by_conversation = AsyncMock(return_value=[
+        {"id": f"m{i}", "role": "user", "status": "complete",
+         "content": [], "agent_ref": None}
+        for i in range(mod._INSPECT_MESSAGES_LIMIT)
+    ])
+    fb = MagicMock()
+    fb.get_all_for_conversation = AsyncMock(return_value={})
+    svc = _svc(feedback_repo=fb, msg_repo=msg_repo)
+
+    res = await svc.inspect_conversation("c1")
+    assert res["messages_truncated"] is True
+    # limit прокинут в репозиторий
+    assert msg_repo.get_by_conversation.await_args.kwargs["limit"] == mod._INSPECT_MESSAGES_LIMIT
+
+
+async def test_inspect_conversation_truncates_huge_block_text():
+    """Текст блока длиннее _INSPECT_BLOCK_TEXT_LIMIT усечён с маркером и
+    флагом content_truncated; исходный dict сообщения не мутируется."""
+    from app.domains.chat.services import chat_analytics_service as mod
+
+    huge = "х" * (mod._INSPECT_BLOCK_TEXT_LIMIT + 100)
+    original_block = {"type": "text", "content": huge}
+    msg_repo = MagicMock()
+    msg_repo.get_by_conversation = AsyncMock(return_value=[
+        {"id": "a1", "role": "assistant", "status": "complete",
+         "content": [original_block, {"type": "text", "content": "короткий"}],
+         "agent_ref": None},
+    ])
+    fb = MagicMock()
+    fb.get_all_for_conversation = AsyncMock(return_value={})
+    svc = _svc(feedback_repo=fb, msg_repo=msg_repo)
+
+    res = await svc.inspect_conversation("c1")
+    blocks = res["messages"][0]["content"]
+    assert blocks[0]["content_truncated"] is True
+    assert blocks[0]["content"].endswith("…[обрезано]")
+    assert len(blocks[0]["content"]) < len(huge)
+    # короткий блок не тронут, исходный блок не мутирован
+    assert "content_truncated" not in blocks[1]
+    assert original_block["content"] == huge
+
 
 def test_extract_text_handles_garbage():
     assert ChatAnalyticsService._extract_text(None) == ""

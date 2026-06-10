@@ -386,10 +386,13 @@ class TestCompanionTargetTable:
 
 
 # ---------------------------------------------------------------------------
-# 7. Пропуск «спутников» уже существующих таблиц. Регрессия ПРОМ-инцидента:
-#    bus-таблица канала агента создана внешней стороной (мы не владелец) —
-#    CREATE INDEX / COMMENT ON на ней падали с «must be owner of relation»
-#    и валили старт приложения, когда любая другая таблица домена отсутствовала.
+# 7. Пропуск «спутников» уже существующих ВНЕШНИХ таблиц (директива
+#    -- @external-table:). Регрессия ПРОМ-инцидента: bus-таблица канала агента
+#    создана внешней стороной (мы не владелец) — CREATE INDEX / COMMENT ON на
+#    ней падали с «must be owner of relation» и валили старт приложения, когда
+#    любая другая таблица домена отсутствовала. Спутники СОБСТВЕННЫХ
+#    существующих таблиц исполняются — иначе новый индекс из релиза молча не
+#    доезжал бы до развёрнутых стендов.
 # ---------------------------------------------------------------------------
 
 class TestSkipCompanionsForExistingTables:
@@ -403,6 +406,7 @@ class TestSkipCompanionsForExistingTables:
         f.write_text(
             "CREATE TABLE IF NOT EXISTS {SCHEMA}.{PREFIX}own (id INT);\n"
             "CREATE INDEX idx_own ON {SCHEMA}.{PREFIX}own (id);\n"
+            "-- @external-table: integ.bus\n"
             "CREATE TABLE IF NOT EXISTS integ.bus (id INT);\n"
             "CREATE INDEX idx_bus ON integ.bus(id);\n"
             "COMMENT ON TABLE integ.bus IS 'чужая таблица';\n"
@@ -435,6 +439,7 @@ class TestSkipCompanionsForExistingTables:
         f.write_text(
             "CREATE TABLE IF NOT EXISTS {PREFIX}own (id INT);\n"
             "CREATE INDEX IF NOT EXISTS idx_own ON {PREFIX}own (id);\n"
+            "-- @external-table: bus\n"
             "CREATE TABLE IF NOT EXISTS bus (id INT);\n"
             "CREATE INDEX IF NOT EXISTS idx_bus ON bus(id);",
             encoding="utf-8",
@@ -452,6 +457,61 @@ class TestSkipCompanionsForExistingTables:
         # Даже CREATE INDEX IF NOT EXISTS на чужой таблице требует владения,
         # если индекса нет — оператор должен быть отфильтрован.
         assert "idx_bus" not in executed_sql
+
+    async def test_gp_executes_new_index_on_own_existing_table(
+        self, mock_conn, tmp_path,
+    ):
+        """Новый CREATE INDEX на СВОЕЙ уже существующей таблице исполняется.
+
+        Регрессия механизма миграций: пропуск спутников по одному лишь
+        «таблица существует» молча терял бы новые индексы релиза N+1 на
+        развёрнутых стендах. Пропуск действует только для таблиц, объявленных
+        директивой -- @external-table:.
+        """
+        a = GreenplumAdapter(schema=GP_SCHEMA, table_prefix=GP_PREFIX)
+        f = tmp_path / "dom" / "migrations" / "greenplum" / "schema.sql"
+        f.parent.mkdir(parents=True)
+        f.write_text(
+            "CREATE TABLE IF NOT EXISTS {SCHEMA}.{PREFIX}msgs (id INT);\n"
+            "CREATE INDEX idx_msgs_new ON {SCHEMA}.{PREFIX}msgs (id);\n"
+            "COMMENT ON TABLE {SCHEMA}.{PREFIX}msgs IS 'своя таблица';\n"
+            "CREATE TABLE IF NOT EXISTS {SCHEMA}.{PREFIX}own (id INT);",
+            encoding="utf-8",
+        )
+        # msgs существует (развёрнутый стенд), own — новая таблица релиза.
+        mock_conn.fetch.side_effect = [
+            [{"tablename": "test_msgs"}],                             # pre-check
+            [{"tablename": "test_msgs"}, {"tablename": "test_own"}],  # post-verify
+        ]
+
+        await a.create_tables(mock_conn, [f])
+
+        executed = [c.args[0] for c in mock_conn.execute.call_args_list]
+        assert any("idx_msgs_new" in s for s in executed)
+        assert any("COMMENT ON" in s for s in executed)
+
+    async def test_pg_executes_new_index_on_own_existing_table(
+        self, mock_conn, tmp_path,
+    ):
+        """PG: новый CREATE INDEX на своей существующей таблице попадает в batch."""
+        a = PostgreSQLAdapter(table_prefix=PG_PREFIX)
+        f = tmp_path / "dom" / "migrations" / "postgresql" / "schema.sql"
+        f.parent.mkdir(parents=True)
+        f.write_text(
+            "CREATE TABLE IF NOT EXISTS {PREFIX}msgs (id INT);\n"
+            "CREATE INDEX IF NOT EXISTS idx_msgs_new ON {PREFIX}msgs (id);\n"
+            "CREATE TABLE IF NOT EXISTS {PREFIX}own (id INT);",
+            encoding="utf-8",
+        )
+        mock_conn.fetch.side_effect = [
+            [{"tablename": "test_msgs"}],                             # pre-check
+            [{"tablename": "test_msgs"}, {"tablename": "test_own"}],  # post-verify
+        ]
+
+        await a.create_tables(mock_conn, [f])
+
+        executed_sql = mock_conn.execute.call_args.args[0]
+        assert "idx_msgs_new" in executed_sql
 
     async def test_gp_alter_table_still_executes_for_existing_table(
         self, mock_conn, tmp_path,

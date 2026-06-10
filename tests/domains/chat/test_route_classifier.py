@@ -73,3 +73,24 @@ def test_outcome_error_on_error_block():
 
 def test_outcome_ok_on_complete_text():
     assert rc.outcome(_msg()) == rc.OUTCOME_OK
+
+
+def test_tool_block_types_synced_with_block_registry():
+    """Guard состава _TOOL_BLOCK_TYPES: ловит переименование и случайное
+    удаление (пропущенный тип молча классифицируется как smalltalk и
+    искажает аналитику by_route).
+
+    «Tool-invoking» — семантическое свойство, автоматически из MessageBlock
+    union его не вывести, поэтому при добавлении нового tool-invoking блока
+    (чек-лист «новый тип блока» в CLAUDE.md / dev-guide) обнови И
+    _TOOL_BLOCK_TYPES, И этот тест. Заодно проверяем, что каждое имя из
+    множества — реальный тип из реестра блоков (опечатка не пройдёт).
+    """
+    from app.core.chat.blocks import ButtonGroup, ClientActionBlock
+
+    assert rc._TOOL_BLOCK_TYPES == {"client_action", "buttons"}
+    registered_types = {
+        ButtonGroup.model_fields["type"].default,
+        ClientActionBlock.model_fields["type"].default,
+    }
+    assert rc._TOOL_BLOCK_TYPES == registered_types

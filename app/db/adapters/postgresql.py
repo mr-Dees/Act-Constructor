@@ -93,16 +93,19 @@ class PostgreSQLAdapter(DatabaseAdapter):
                 f"отсутствуют {len(missing)} из {len(expected)}: {', '.join(missing)}"
             )
 
-            # «Спутники» (CREATE INDEX / COMMENT ON) уже существующих таблиц
-            # пропускаем: таблица могла быть создана внешней стороной (например,
-            # bus-таблица канала агента) — даже CREATE INDEX IF NOT EXISTS на
-            # чужой таблице падает с «must be owner of relation», если индекса нет.
+            # «Спутники» (CREATE INDEX / COMMENT ON) пропускаем только для
+            # уже существующих ВНЕШНИХ таблиц (директива -- @external-table:,
+            # например bus-таблица канала агента): на чужой таблице даже
+            # CREATE INDEX IF NOT EXISTS падает с «must be owner of relation».
+            # Спутники собственных существующих таблиц исполняются — иначе
+            # новый индекс из релиза молча не доехал бы до развёрнутых стендов.
+            external = self._external_tables_from_sql(schema_sql)
             statements = []
             for stmt in self._split_sql_statements(schema_sql):
                 target = self._companion_target_table(stmt)
-                if target is not None and target in existing:
+                if target is not None and target in existing and target in external:
                     logger.debug(
-                        f"PostgreSQL: таблица {target} уже существует, "
+                        f"PostgreSQL: внешняя таблица {target} уже существует, "
                         f"пропускаем сопутствующий оператор"
                     )
                     continue

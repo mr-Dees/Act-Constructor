@@ -34,16 +34,36 @@ class DatabaseAdapter(ABC):
         pattern = r'CREATE\s+TABLE\s+(?:IF\s+NOT\s+EXISTS\s+)?(\S+)\s*\('
         return re.findall(pattern, sql, re.IGNORECASE)
 
+    # Директива объявления внешней таблицы в schema.sql (см. _external_tables_from_sql).
+    _EXTERNAL_TABLE_DIRECTIVE = re.compile(
+        r'^\s*--\s*@external-table:\s*(\S+)\s*$', re.MULTILINE,
+    )
+
+    @classmethod
+    def _external_tables_from_sql(cls, sql: str) -> set[str]:
+        """Таблицы, объявленные в схеме внешними (создаёт и владеет другая сторона).
+
+        Директива в schema.sql: ``-- @external-table: <имя как в DDL>``
+        (парсится ПОСЛЕ подстановки плейсхолдеров). Для такой таблицы
+        операторы-«спутники» (CREATE INDEX / COMMENT ON) пропускаются, если
+        она уже существует: на чужой таблице они падают с
+        ``InsufficientPrivilegeError`` («must be owner of relation ...») —
+        даже ``CREATE INDEX IF NOT EXISTS``, когда индекса ещё нет.
+        Спутники СОБСТВЕННЫХ уже существующих таблиц исполняются как раньше —
+        иначе новый индекс из будущего релиза молча не доехал бы до
+        развёрнутых стендов (дубликаты идемпотентны: IF NOT EXISTS на PG,
+        перехват DuplicateObjectError на GP).
+        """
+        return set(cls._EXTERNAL_TABLE_DIRECTIVE.findall(sql))
+
     @staticmethod
     def _companion_target_table(stmt: str) -> str | None:
         """Целевая таблица оператора-«спутника» создания таблицы.
 
-        «Спутники» — ``CREATE INDEX`` и ``COMMENT ON``: они нужны только
-        вместе с созданием своей таблицы. На уже существующей таблице они
-        избыточны, а если таблица создана внешней стороной (например,
-        bus-таблица канала агента подготовлена командой агента), падают с
-        ``InsufficientPrivilegeError`` («must be owner of relation ...») —
-        даже ``CREATE INDEX IF NOT EXISTS``, когда индекса ещё нет.
+        «Спутники» — ``CREATE INDEX`` и ``COMMENT ON``. На уже существующей
+        ВНЕШНЕЙ таблице (объявленной директивой ``-- @external-table:``, см.
+        ``_external_tables_from_sql``) они пропускаются — мы не владелец и
+        трогать её нельзя.
 
         Возвращает имя таблицы (как записано в SQL) для
         ``CREATE [UNIQUE] INDEX ... ON <t>`` и ``COMMENT ON TABLE <t>`` /

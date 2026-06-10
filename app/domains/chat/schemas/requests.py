@@ -20,8 +20,9 @@ class MessageFeedbackRequest(BaseModel):
     """Тело PUT-запроса оценки сообщения ассистента.
 
     ``reasons`` и ``comment`` имеют смысл только для ``rating='down'``
-    (для лайка игнорируются сервисом). Коды причин и длина комментария
-    валидируются в ChatFeedbackService (дружелюбные 422-сообщения).
+    (для лайка игнорируются сервисом). Коды причин, длина комментария и
+    словарь ``agent_mode`` (off/adaptive/always) валидируются в
+    ChatFeedbackService (дружелюбные 422-сообщения).
     """
     rating: Literal["up", "down"]
     reasons: list[str] | None = None

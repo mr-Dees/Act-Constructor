@@ -21,7 +21,7 @@ from datetime import datetime, timedelta, timezone
 
 import asyncpg
 
-from app.domains.chat.exceptions import ChatLimitError
+from app.domains.chat.exceptions import AgentChannelUnavailableError, ChatLimitError
 from app.domains.chat.repositories.agent_message_repository import AgentMessageRepository
 from app.domains.chat.repositories.message_repository import MessageRepository
 from app.domains.chat.services.button_translator import translate_buttons
@@ -263,20 +263,35 @@ class AgentChannelService:
         # Оба INSERT'а — в одной транзакции: вопрос в шине без draft'а (или
         # наоборот) оставил бы осиротевшую строку, которая вечно входит в
         # count_active_for_user и съедает слот лимита параллельных запросов.
-        async with self._conn.transaction():
-            await self._agent_repo().insert_question(
-                id=question_uid,
-                chat_id=conversation_id,
-                user_id=user_id,
-                content=text,
-                metadata={"mode": mode, "kb": kb},
-                media=media,
+        try:
+            async with self._conn.transaction():
+                await self._agent_repo().insert_question(
+                    id=question_uid,
+                    chat_id=conversation_id,
+                    user_id=user_id,
+                    content=text,
+                    metadata={"mode": mode, "kb": kb},
+                    media=media,
+                )
+                await self._message_repo().create_streaming(
+                    message_id=assistant_message_id,
+                    conversation_id=conversation_id,
+                    agent_ref=question_uid,
+                )
+        except asyncpg.exceptions.CheckViolationError as exc:
+            # CHECK владельца шины отклонил наш вопрос (например, после смены
+            # словаря на его стороне). Имя его констрейнта на ПРОМе чужое —
+            # глобальный обработчик CheckViolationError не найдёт маппинг в
+            # CHECK_CONSTRAINT_MESSAGES, поэтому конвертируем в доменную ошибку
+            # с понятным сообщением. Транзакция уже откатила draft.
+            logger.error(
+                "agent_channel: CHECK владельца шины отклонил вопрос uid=%s: %s",
+                question_uid,
+                exc,
             )
-            await self._message_repo().create_streaming(
-                message_id=assistant_message_id,
-                conversation_id=conversation_id,
-                agent_ref=question_uid,
-            )
+            raise AgentChannelUnavailableError(
+                "Не удалось передать вопрос внешнему агенту. Попробуйте позже."
+            ) from exc
         return question_uid
 
     async def mark_timeout(
@@ -356,10 +371,9 @@ class AgentChannelService:
 
         Протокол владельца шины: агент вставляет строку-ответ с
         ``reply_to = id вопроса`` — ответ ищется обратным lookup'ом
-        (``get_answer_for_question``). Для совместимости поддержан и прямой
-        вариант (``reply_to`` на строке-вопросе → ответ по этому id).
+        (``get_answer_for_question``); у строки-вопроса ``reply_to`` всегда NULL.
         - ответа нет или его статус нетерминальный → ``'pending'``;
-        - answer.status == 'error' → mark_failed(error-блок) → ``'done'``;
+        - answer.status == 'failed'/'error' → mark_failed(error-блок) → ``'done'``;
         - иначе → finalize(map_answer_to_blocks(answer)) → ``'done'``.
         """
         agent_repo = self._agent_repo()
@@ -372,17 +386,7 @@ class AgentChannelService:
             )
             return "pending"
 
-        answer = None
-        reply_to = question.get("reply_to")
-        if reply_to:
-            answer = await agent_repo.get_by_uid(reply_to)
-            if not answer:
-                logger.warning(
-                    "try_finalize: ответ %s (reply_to вопроса) не найден в bus-таблице",
-                    reply_to,
-                )
-        if not answer:
-            answer = await agent_repo.get_answer_for_question(question_uid)
+        answer = await agent_repo.get_answer_for_question(question_uid)
         if not answer:
             # Агент мог закрыть вопрос со status='failed' без строки-ответа.
             if question.get("status") in _BUS_ERROR_STATUSES:

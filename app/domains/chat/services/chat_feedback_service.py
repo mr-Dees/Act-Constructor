@@ -39,6 +39,10 @@ FEEDBACK_REASON_CODES: frozenset[str] = frozenset({
 # Максимальная длина свободного комментария.
 MAX_COMMENT_LENGTH = 2000
 
+# Допустимые значения снимка режима тумблера «База знаний ОАРБ» на оценке.
+# Совпадают со значениями agent_mode в POST /messages (off/adaptive/always).
+VALID_AGENT_MODES: frozenset[str] = frozenset({"off", "adaptive", "always"})
+
 
 def feedback_public_dict(row: dict | None) -> dict | None:
     """Приводит строку обратной связи к минимальной форме для фронта.
@@ -99,6 +103,27 @@ class ChatFeedbackService:
         return deduped or None
 
     @staticmethod
+    def _validate_agent_mode(agent_mode: str | None) -> str | None:
+        """Проверяет снимок режима БЗ. None/пусто → None.
+
+        Без валидации произвольная строка клиента сохранялась бы в
+        ``chat_message_feedback.agent_mode`` и замусоривала срез by_agent_mode
+        в админ-аналитике.
+        """
+        if agent_mode is None:
+            return None
+        if not isinstance(agent_mode, str):
+            raise ChatFeedbackValidationError("Режим БЗ должен быть строкой.")
+        agent_mode = agent_mode.strip()
+        if not agent_mode:
+            return None
+        if agent_mode not in VALID_AGENT_MODES:
+            raise ChatFeedbackValidationError(
+                "Недопустимый режим БЗ. Допустимые значения: off, adaptive, always."
+            )
+        return agent_mode
+
+    @staticmethod
     def _validate_comment(comment: str | None) -> str | None:
         if comment is None:
             return None
@@ -131,6 +156,7 @@ class ChatFeedbackService:
         :returns: сохранённая строка обратной связи.
         """
         rating = self._validate_rating(rating)
+        agent_mode = self._validate_agent_mode(agent_mode)
 
         if message.get("role") != "assistant":
             raise ChatFeedbackValidationError(

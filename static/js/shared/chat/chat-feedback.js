@@ -164,70 +164,83 @@ export const ChatFeedback = {
         }
     },
 
-    /** Обработчик клика по 👍/👎: ставит/снимает/меняет оценку. @private */
-    async _onVote(ctx, rating) {
+    /**
+     * Оборачивает действие in-flight guard'ом: busy-флаг + блокировка кнопок
+     * на время запроса, гарантированное снятие в finally. @private
+     */
+    async _withBusy(ctx, action) {
         if (ctx.busy) return;
         ctx.busy = true;
         this._setBusy(ctx, true);
-        const prev = ctx.rating;
         try {
-            if (ctx.rating === rating) {
-                // Повторный клик по активной — снятие оценки.
-                await this._request('DELETE', ctx.conversationId, ctx.messageId);
-                this._setActive(ctx, null);
-                this._hideForm(ctx);
-                ChatEventBus.emit('feedback:cleared', { messageId: ctx.messageId });
-            } else {
-                await this._request('PUT', ctx.conversationId, ctx.messageId, {
-                    rating, agent_mode: this._agentMode(),
-                });
-                this._setActive(ctx, rating);
-                if (rating === 'down') {
-                    this._showForm(ctx);
-                } else {
-                    this._hideForm(ctx);
-                }
-                ChatEventBus.emit('feedback:submitted', {
-                    messageId: ctx.messageId, rating,
-                });
-            }
-        } catch (err) {
-            this._setActive(ctx, prev);  // откат оптимистичного состояния
-            this._notifyError(err);
+            await action();
         } finally {
             ctx.busy = false;
             this._setBusy(ctx, false);
         }
     },
 
+    /** PUT оценки: тело всегда дополняется снимком режима БЗ. @private */
+    _putFeedback(ctx, body) {
+        return this._request('PUT', ctx.conversationId, ctx.messageId, {
+            agent_mode: this._agentMode(),
+            ...body,
+        });
+    },
+
+    /** Обработчик клика по 👍/👎: ставит/снимает/меняет оценку. @private */
+    async _onVote(ctx, rating) {
+        await this._withBusy(ctx, async () => {
+            const prev = ctx.rating;
+            try {
+                if (ctx.rating === rating) {
+                    // Повторный клик по активной — снятие оценки.
+                    await this._request('DELETE', ctx.conversationId, ctx.messageId);
+                    this._setActive(ctx, null);
+                    this._hideForm(ctx);
+                    ChatEventBus.emit('feedback:cleared', { messageId: ctx.messageId });
+                } else {
+                    await this._putFeedback(ctx, { rating });
+                    this._setActive(ctx, rating);
+                    if (rating === 'down') {
+                        this._showForm(ctx);
+                    } else {
+                        this._hideForm(ctx);
+                    }
+                    ChatEventBus.emit('feedback:submitted', {
+                        messageId: ctx.messageId, rating,
+                    });
+                }
+            } catch (err) {
+                this._setActive(ctx, prev);  // откат оптимистичного состояния
+                this._notifyError(err);
+            }
+        });
+    },
+
     /** Отправляет уточнение дизлайка (причины + комментарий). @private */
     async _submitDetails(ctx) {
-        if (ctx.busy) return;
-        ctx.busy = true;
-        this._setBusy(ctx, true);
-        const reasons = Array.from(
-            ctx.form.querySelectorAll('.chat-feedback-reason input:checked'),
-        ).map((i) => i.value);
-        const comment = ctx.form.querySelector('.chat-feedback-comment').value.trim();
-        try {
-            await this._request('PUT', ctx.conversationId, ctx.messageId, {
-                rating: 'down',
-                reasons: reasons.length ? reasons : undefined,
-                comment: comment || undefined,
-                agent_mode: this._agentMode(),
-            });
-            this._setActive(ctx, 'down');
-            this._hideForm(ctx);
-            this._ack(ctx, 'Спасибо за отзыв');
-            ChatEventBus.emit('feedback:submitted', {
-                messageId: ctx.messageId, rating: 'down', reasons,
-            });
-        } catch (err) {
-            this._notifyError(err);
-        } finally {
-            ctx.busy = false;
-            this._setBusy(ctx, false);
-        }
+        await this._withBusy(ctx, async () => {
+            const reasons = Array.from(
+                ctx.form.querySelectorAll('.chat-feedback-reason input:checked'),
+            ).map((i) => i.value);
+            const comment = ctx.form.querySelector('.chat-feedback-comment').value.trim();
+            try {
+                await this._putFeedback(ctx, {
+                    rating: 'down',
+                    reasons: reasons.length ? reasons : undefined,
+                    comment: comment || undefined,
+                });
+                this._setActive(ctx, 'down');
+                this._hideForm(ctx);
+                this._ack(ctx, 'Спасибо за отзыв');
+                ChatEventBus.emit('feedback:submitted', {
+                    messageId: ctx.messageId, rating: 'down', reasons,
+                });
+            } catch (err) {
+                this._notifyError(err);
+            }
+        });
     },
 
     /** Применяет визуальное/aria-состояние выбранной оценки. @private */
