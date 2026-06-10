@@ -73,11 +73,13 @@ def test_nested_agent_channel_overrides(monkeypatch):
               CHAT__AGENT_CHANNEL__POLL_MAX_INTERVAL_SEC="5.0",
               CHAT__AGENT_CHANNEL__POLL_BACKOFF_MULTIPLIER="2.0",
               CHAT__AGENT_CHANNEL__ANSWER_TIMEOUT_SEC="900",
+              CHAT__AGENT_CHANNEL__CLAIM_TIMEOUT_SEC="300",
               CHAT__AGENT_CHANNEL__MAX_BLOCK_TEXT_SIZE="1024")
     assert s.agent_channel.poll_min_interval_sec == 0.25
     assert s.agent_channel.poll_max_interval_sec == 5.0
     assert s.agent_channel.poll_backoff_multiplier == 2.0
     assert s.agent_channel.answer_timeout_sec == 900
+    assert s.agent_channel.claim_timeout_sec == 300
     assert s.agent_channel.max_block_text_size == 1024
 
 
@@ -116,16 +118,11 @@ def test_agent_channel_settings_defaults():
     s = AgentChannelSettings()
     assert s.table_name == "chat_agent_messages_bus"
     assert s.answer_timeout_sec == 600
+    assert s.claim_timeout_sec == 1800
     assert s.poll_min_interval_sec == 2.0
     assert s.poll_max_interval_sec == 10.0
     assert s.poll_backoff_multiplier == 1.5
     assert s.max_block_text_size == 262144
-
-
-def test_agent_channel_claim_timeout_default():
-    from app.domains.chat.settings import AgentChannelSettings
-    s = AgentChannelSettings()
-    assert s.claim_timeout_sec == 1800
 
 
 def test_agent_channel_claim_timeout_must_be_positive():
