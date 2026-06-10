@@ -236,18 +236,44 @@ async def get_message(
     клиент периодически запрашивает сообщение по message_id и ждёт
     перехода status из 'streaming' в 'complete' или 'failed'.
 
-    Возвращает {"id", "status", "content"}.
+    Возвращает {"id", "status", "content"} и, для streaming-черновиков
+    агента, "status_details": {"bus_status", "queue_ahead"}.
     Отвечает 404 если сообщение не найдено или принадлежит другой беседе.
     """
     # Проверяем принадлежность беседы пользователю
     await conv_service.get(conversation_id, username)
 
     message = await msg_service.get_message(conversation_id, message_id)
-    return {
+    result = {
         "id": message["id"],
         "status": message.get("status", "complete"),
         "content": message.get("content") or [],
     }
+
+    # Промежуточный статус очереди агента — только для streaming-черновиков,
+    # привязанных к шине (agent_ref). Best-effort: сбой чтения шины не должен
+    # ломать поллинг готовности. Сервис строим на соединении msg_service —
+    # второе соединение пула на горячем пути поллинга не берём (pool 5/20).
+    agent_ref = message.get("agent_ref")
+    if result["status"] == "streaming" and agent_ref:
+        try:
+            from app.domains.chat.deps import _get_chat_settings
+            from app.domains.chat.services.agent_channel import AgentChannelService
+
+            channel_service = AgentChannelService(
+                msg_service.msg_repo.conn,
+                _get_chat_settings(),
+            )
+            details = await channel_service.get_queue_details(agent_ref)
+            if details:
+                result["status_details"] = details
+        except Exception:
+            logger.warning(
+                "Не удалось получить статус очереди агента: message_id=%s",
+                message_id, exc_info=True,
+            )
+
+    return result
 
 
 @router.get(
