@@ -7,6 +7,7 @@
 
 import asyncio
 import logging
+import threading
 from typing import Literal
 
 from fastapi import APIRouter, Query, HTTPException, Depends
@@ -33,14 +34,22 @@ logger = logging.getLogger("audit_workstation.api.export")
 router = APIRouter()
 
 _download_semaphore: asyncio.Semaphore | None = None
+# Лок первой инициализации семафора: в одном event loop'е между проверкой и
+# присваиванием нет await, но двойная проверка под локом исключает создание
+# двух семафоров и при обращении из других потоков (ebe-6).
+_download_semaphore_init_lock = threading.Lock()
 
 
 def _get_download_semaphore(acts_cfg: ActsSettings) -> asyncio.Semaphore:
     """Возвращает per-worker семафор для ограничения файловых операций."""
     global _download_semaphore
     if _download_semaphore is None:
-        _download_semaphore = asyncio.Semaphore(acts_cfg.resource.max_concurrent_file_operations)
-        logger.info(f"File semaphore создан для worker: {acts_cfg.resource.max_concurrent_file_operations}")
+        with _download_semaphore_init_lock:
+            if _download_semaphore is None:
+                _download_semaphore = asyncio.Semaphore(
+                    acts_cfg.resource.max_concurrent_file_operations
+                )
+                logger.info(f"File semaphore создан для worker: {acts_cfg.resource.max_concurrent_file_operations}")
     return _download_semaphore
 
 
