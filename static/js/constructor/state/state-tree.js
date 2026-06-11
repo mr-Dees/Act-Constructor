@@ -8,7 +8,7 @@
 import { ChangelogTracker } from '../changelog-tracker.js';
 import { AuditIdService } from '../services/id-generator.js';
 import { MetricsRiskCoordinator } from './metrics-risk-coordinator.js';
-import { AppState } from './state-core.js';
+import { AppState, _unwrap } from './state-core.js';
 import { StorageManager } from '../storage-manager.js';
 import { TreeUtils } from '../tree/tree-utils.js';
 import { KIND_METRICS, isPinnedTable as kindIsPinnedTable, isRiskTable as kindIsRiskTable } from '../table/table-kind.js';
@@ -27,7 +27,13 @@ Object.assign(AppState, {
      * @param {string} [prefix=''] - Префикс нумерации
      */
     generateNumbering(node = this.treeData, prefix = '') {
-        if (!node.children) return;
+        // Горячий read-путь: обход по raw-узлам (без Proxy get-трапов).
+        // Записываются только производные поля (number; метки сводных — через
+        // updateMetricsTableLabel → findNodeById, т.е. через tracked-узел).
+        // Каждый вызов сопровождает структурную мутацию, уже пометившую
+        // состояние dirty, поэтому raw-запись number трекинг не теряет.
+        node = _unwrap(node);
+        if (!node?.children) return;
 
         // Один проход с локальными счётчиками по типам — вместо
         // filter().indexOf() на каждом ребёнке (квадратичная стоимость).

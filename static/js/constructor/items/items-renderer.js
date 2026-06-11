@@ -7,7 +7,7 @@
  */
 import { ItemsTitleEditing } from './items-title-editing.js';
 import { RENDER_CLASSES } from '../render-classes.js';
-import { AppState } from '../state/state-core.js';
+import { AppState, _unwrap } from '../state/state-core.js';
 import { TreeUtils } from '../tree/tree-utils.js';
 import { AppConfig } from '../../shared/app-config.js';
 import { getBlockType, isLeafBlockType } from '../block-types.js';
@@ -46,8 +46,11 @@ export class ItemsRenderer {
         container.innerHTML = '';
         tableManager.clearSelection();
 
-        if (AppState.treeData?.children) {
-            AppState.treeData.children.forEach(item => {
+        // Read-only обход — по raw-дереву (renderItem сам unwrap'ает узлы);
+        // write-замыкания получают tracked-узлы точечно.
+        const rawTree = _unwrap(AppState.treeData);
+        if (rawTree?.children) {
+            rawTree.children.forEach(item => {
                 container.appendChild(this.renderItem(item, 1));
             });
         }
@@ -239,6 +242,8 @@ export class ItemsRenderer {
      * @returns {HTMLElement} Созданный DOM-элемент с содержимым узла
      */
     static renderItem(node, level) {
+        // Горячий read-путь: обход по raw-узлу (updateItem может передать proxy).
+        node = _unwrap(node);
         const itemDiv = this._createItemContainer(node, level);
 
         const spec = getBlockType(node.type);
@@ -318,7 +323,9 @@ export class ItemsRenderer {
         title.appendChild(textSpan);
 
         if (!node.protected) {
-            this._setupTitleEditing(textSpan, node);
+            // Tracked-узел: замыкание редактирования пишет node.label,
+            // запись обязана ловиться markAsUnsaved.
+            this._setupTitleEditing(textSpan, AppState._trackedNode(node));
         }
 
         header.appendChild(title);
@@ -620,7 +627,8 @@ export class ItemsRenderer {
         });
 
         if (!table.protected) {
-            this._setupTableTitleEditing(tableTitle, node);
+            // Tracked-узел: замыкание пишет node.customLabel.
+            this._setupTableTitleEditing(tableTitle, AppState._trackedNode(node));
         } else {
             tableTitle.addEventListener('click', () => {
                 Notifications.info('Название защищенной таблицы нельзя редактировать');

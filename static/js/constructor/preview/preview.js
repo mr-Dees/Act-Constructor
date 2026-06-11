@@ -8,7 +8,7 @@
 import { PreviewTableRenderer } from './preview-table-renderer.js';
 import { PreviewTextBlockRenderer } from './preview-textblock-renderer.js';
 import { PreviewViolationRenderer } from './preview-violation-renderer.js';
-import { AppState } from '../state/state-core.js';
+import { AppState, _unwrap } from '../state/state-core.js';
 import { AppConfig } from '../../shared/app-config.js';
 import { invalidateTableWarningsCache, getCachedTableWarnings } from '../header/notifications-source-tables.js';
 import { PreviewFitScaler } from './preview-fit.js';
@@ -212,7 +212,8 @@ export class PreviewManager {
      * @param {number} previewTrim - Максимальная длина текста
      */
     static _renderTree(container, previewTrim) {
-        this.renderNode(AppState.treeData, container, 1, previewTrim);
+        // Read-only обход — по raw-дереву (без Proxy get-трапов).
+        this.renderNode(_unwrap(AppState.treeData), container, 1, previewTrim);
     }
 
     /**
@@ -261,7 +262,8 @@ export class PreviewManager {
             container.appendChild(tableTitle);
         }
 
-        const tableData = AppState.tables[child.tableId];
+        // Read-only: raw-таблица (рендерер ячеек только читает grid).
+        const tableData = _unwrap(AppState.tables)[child.tableId];
         if (tableData) {
             const table = PreviewTableRenderer.create(tableData, previewTrim, { tableId: child.tableId });
             container.appendChild(table);
@@ -273,7 +275,7 @@ export class PreviewManager {
      * @private
      */
     static _renderTextBlockNode(child, container, level, previewTrim) {
-        const textBlock = AppState.textBlocks[child.textBlockId];
+        const textBlock = _unwrap(AppState.textBlocks)[child.textBlockId];
 
         if (this._hasContent(textBlock)) {
             const element = PreviewTextBlockRenderer.create(textBlock);
@@ -286,7 +288,7 @@ export class PreviewManager {
      * @private
      */
     static _renderViolationNode(child, container, level, previewTrim) {
-        const violation = AppState.violations[child.violationId];
+        const violation = _unwrap(AppState.violations)[child.violationId];
 
         if (violation) {
             const element = PreviewViolationRenderer.create(violation, previewTrim);

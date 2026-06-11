@@ -7,7 +7,7 @@
  */
 import { ContextMenuManager } from '../context-menu/context-menu-core.js';
 import { ItemsTitleEditing } from '../items/items-title-editing.js';
-import { AppState } from '../state/state-core.js';
+import { AppState, _unwrap } from '../state/state-core.js';
 import { TreeUtils } from './tree-utils.js';
 import { AppConfig } from '../../shared/app-config.js';
 import { ChatEventBus } from '../../shared/chat/chat-event-bus.js';
@@ -44,6 +44,10 @@ export class TreeRenderer {
      * @param {Object} [node=AppState.treeData] - Корневой узел для отрисовки
      */
     render(node = AppState.treeData) {
+        // Read-only обход — по raw-дереву (без Proxy get-трапов). Узлы,
+        // попадающие в write-замыкания обработчиков, оборачиваются точечно
+        // в _setupNodeEventHandlers через AppState._trackedNode.
+        node = _unwrap(node);
         this.manager.container.innerHTML = '';
         // Корневой #tree уже играет role="tree" (шаблон); рендерим прямо в него.
         // node.children — секции 1-го уровня (aria-level=1).
@@ -96,8 +100,10 @@ export class TreeRenderer {
         li.appendChild(this._createLabel(node));
         this._addNodeTypeIcon(li, node.type);
 
-        // Настраиваем обработчики
-        this._setupNodeEventHandlers(li, node);
+        // Настраиваем обработчики. Узел оборачивается в tracking-Proxy:
+        // замыкания обработчиков пишут в него (rename через ItemsTitleEditing),
+        // и эти записи обязаны ловиться markAsUnsaved.
+        this._setupNodeEventHandlers(li, AppState._trackedNode(node));
 
         // Рекурсивно создаем дочерние элементы
         if (node.children?.length) {

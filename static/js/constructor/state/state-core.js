@@ -423,11 +423,23 @@ export const AppState = {
         if (node !== undefined) {
             return this._findNodeWalk(id, node);
         }
+        return this._trackedNode(this._findNodeRaw(id));
+    },
+
+    /**
+     * Внутренний raw-поиск узла по индексу (без оборачивания в Proxy).
+     * Использовать ТОЛЬКО для read-only путей (сериализация, рендер) —
+     * мутации raw-узла обходят dirty-tracking.
+     * @private
+     * @param {string} id - ID искомого узла
+     * @returns {Object|null} Raw-узел или null
+     */
+    _findNodeRaw(id) {
         if (!this.treeData) return null;
 
         this._ensureNodeIndex();
         const hit = this._nodeIndex.get(id);
-        if (hit) return this._trackedNode(hit);
+        if (hit) return hit;
 
         // Промах индекса: страховочный полный обход. Найденный обходом узел —
         // сигнал пропущенной инвалидации (warn), индекс перестраивается.
@@ -435,7 +447,7 @@ export const AppState = {
         if (found) {
             console.warn(`[AppState] findNodeById('${id}'): промах индекса — найден полным обходом, индекс перестроен (пропущенная инвалидация)`);
             this._rebuildNodeIndex();
-            return this._trackedNode(found);
+            return found;
         }
         return null;
     },
@@ -471,11 +483,21 @@ export const AppState = {
         if (parent !== undefined) {
             return this._findParentWalk(nodeId, parent);
         }
+        return this._trackedNode(this._findParentRaw(nodeId));
+    },
+
+    /**
+     * Внутренний raw-поиск родителя по индексу (без оборачивания в Proxy).
+     * @private
+     * @param {string} nodeId - ID дочернего узла
+     * @returns {Object|null} Raw-родитель или null
+     */
+    _findParentRaw(nodeId) {
         if (!this.treeData) return null;
 
         this._ensureNodeIndex();
         const hit = this._parentIndex.get(nodeId);
-        if (hit) return this._trackedNode(hit);
+        if (hit) return hit;
         // Узел известен индексу, но родителя нет — это корень.
         if (this._nodeIndex.has(nodeId)) return null;
 
@@ -483,7 +505,7 @@ export const AppState = {
         if (found) {
             console.warn(`[AppState] findParentNode('${nodeId}'): промах индекса — найден полным обходом, индекс перестроен (пропущенная инвалидация)`);
             this._rebuildNodeIndex();
-            return this._trackedNode(found);
+            return found;
         }
         return null;
     },
@@ -509,12 +531,14 @@ export const AppState = {
     },
 
     /**
-     * Экспортирует состояние для отправки на бэкенд
+     * Экспортирует состояние для отправки на бэкенд.
+     * Read-only путь: обходы идут по raw-данным (без Proxy get-трапов),
+     * результат — новые plain-объекты, исходное состояние не мутируется.
      * @returns {Object} Сериализованное состояние
      */
     exportData() {
         return {
-            tree: this._serializeTree(this.treeData),
+            tree: this._serializeTree(_unwrap(this.treeData)),
             tables: this._serializeTables(),
             textBlocks: this._serializeTextBlocks(),
             violations: this._serializeViolations(),
@@ -533,7 +557,8 @@ export const AppState = {
             if (node.invoice) ids.push(node.id);
             if (node.children) node.children.forEach(walk);
         };
-        if (this.treeData) walk(this.treeData);
+        const rawTree = _unwrap(this.treeData);
+        if (rawTree) walk(rawTree);
         return ids;
     },
 
@@ -590,7 +615,7 @@ export const AppState = {
     _serializeTables() {
         const serialized = {};
 
-        for (const [tableId, table] of Object.entries(this.tables)) {
+        for (const [tableId, table] of Object.entries(_unwrap(this.tables))) {
             serialized[tableId] = {
                 id: table.id,
                 nodeId: table.nodeId,
@@ -612,7 +637,8 @@ export const AppState = {
             // Подвид kind: источник истины — узел таблицы. Если узел не
             // найден (рассинхрон) — fallback на kind самого объекта таблицы,
             // чтобы рантайм-подвид пережил round-trip. 'regular' не пишем.
-            const node = this.findNodeById?.(table.nodeId);
+            // Read-only lookup → raw-индекс, O(1) без Proxy.
+            const node = this._findNodeRaw?.(table.nodeId);
             const tableKind = node ? getTableKind(node) : getTableKind(table);
             if (tableKind !== KIND_REGULAR) serialized[tableId].kind = tableKind;
         }
@@ -629,7 +655,7 @@ export const AppState = {
         const serialized = {};
         const defaults = AppConfig.content.defaults;
 
-        for (const [blockId, block] of Object.entries(this.textBlocks)) {
+        for (const [blockId, block] of Object.entries(_unwrap(this.textBlocks))) {
             serialized[blockId] = {
                 id: block.id,
                 nodeId: block.nodeId,
@@ -655,7 +681,7 @@ export const AppState = {
     _serializeViolations() {
         const serialized = {};
 
-        for (const [violationId, violation] of Object.entries(this.violations)) {
+        for (const [violationId, violation] of Object.entries(_unwrap(this.violations))) {
             serialized[violationId] = {
                 id: violation.id,
                 nodeId: violation.nodeId,
