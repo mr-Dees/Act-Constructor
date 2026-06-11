@@ -165,23 +165,30 @@ class TestGreenplumSchemaCompatibility:
             "и каждого UNIQUE-констрейнта.\n" + "\n".join(violations)
         )
 
-    def test_gp_act_tables_has_tax_and_other_risk_flags(self, gp_schema_files):
-        """Регрессия: GP-схема act_tables объявляет is_tax_risk_table и is_other_risk_table.
+    def test_act_tables_kind_column_and_check_both_schemas(self):
+        """act_tables в обеих схемах объявляет колонку kind и CHECK по всем подвидам.
 
-        Эти флаги обязаны быть в GP-схеме acts, иначе репозиторий, который пишет/читает
-        их через INSERT/SELECT, упадёт на старте.
+        Колонка kind обязана быть в схемах PG и GP (репозиторий пишет/читает её
+        через INSERT/SELECT), а CHECK check_table_kind_values — перечислять
+        ровно значения TABLE_KINDS (ручная синхронизация схема ↔ код).
         """
-        acts_gp = next(
-            (s for s in gp_schema_files if 'acts' in s.parent.parent.parent.name),
-            None,
-        )
-        assert acts_gp is not None, "GP-схема acts не найдена среди gp_schema_files"
+        from app.domains.acts.schemas.act_content import TABLE_KINDS
 
-        sql = acts_gp.read_text(encoding='utf-8')
-        assert 'is_tax_risk_table' in sql, \
-            f"GP-схема {acts_gp} не содержит is_tax_risk_table"
-        assert 'is_other_risk_table' in sql, \
-            f"GP-схема {acts_gp} не содержит is_other_risk_table"
+        base = Path(__file__).parent.parent / "app" / "domains" / "acts" / "migrations"
+        for db_type in ("postgresql", "greenplum"):
+            sql = (base / db_type / "schema.sql").read_text(encoding="utf-8")
+            assert "kind VARCHAR(20) DEFAULT 'regular' NOT NULL" in sql, \
+                f"{db_type}: act_tables не содержит колонку kind"
+            check_match = re.search(
+                r"CONSTRAINT\s+check_table_kind_values\s+CHECK\s*\(kind\s+IN\s*\(([^)]+)\)\)",
+                sql,
+            )
+            assert check_match, f"{db_type}: нет CHECK check_table_kind_values"
+            values = set(re.findall(r"'([^']+)'", check_match.group(1)))
+            assert values == set(TABLE_KINDS), (
+                f"{db_type}: CHECK перечисляет {sorted(values)}, "
+                f"а TABLE_KINDS = {sorted(TABLE_KINDS)}"
+            )
 
     def test_act_tables_unique_act_id_node_id_both_schemas(self):
         """act_tables в обеих схемах объявляет UNIQUE(act_id, node_id).

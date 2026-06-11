@@ -779,12 +779,7 @@ class ActCrudService:
                 is_protected=table["protected"],
                 is_deletable=table["deletable"],
                 table_label=table.get("label"),
-                is_metrics_table=table.get("isMetricsTable", False),
-                is_main_metrics_table=table.get("isMainMetricsTable", False),
-                is_regular_risk_table=table.get("isRegularRiskTable", False),
-                is_operational_risk_table=table.get("isOperationalRiskTable", False),
-                is_tax_risk_table=table.get("isTaxRiskTable", False),
-                is_other_risk_table=table.get("isOtherRiskTable", False),
+                kind=table.get("kind", "regular"),
             )
 
         logger.info(

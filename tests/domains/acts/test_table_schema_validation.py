@@ -199,33 +199,23 @@ class TestSpanIntersections:
         assert len(t.grid) == 2
 
 
-# ── T6a.2 (4): взаимоисключение флагов подвида (A3) ──
+# ── T6a.2 (4): подвид таблицы — единое поле kind (A3) ──
 
 
-class TestMutuallyExclusiveFlags:
+class TestTableKindField:
+    """kind — enum подвида: взаимоисключение по построению, неизвестное → 422."""
 
-    def test_two_type_flags_rejected(self):
-        with pytest.raises(ValidationError, match="несколько типов"):
-            TableSchema(
-                id="t1", nodeId="n1",
-                isMetricsTable=True, isRegularRiskTable=True,
-            )
+    def test_unknown_kind_rejected(self):
+        with pytest.raises(ValidationError):
+            TableSchema(id="t1", nodeId="n1", kind="superRisk")
 
-    def test_metrics_pair_also_rejected(self):
-        """isMetricsTable и isMainMetricsTable одновременно — тоже запрещено."""
-        with pytest.raises(ValidationError, match="несколько типов"):
-            TableSchema(
-                id="t1", nodeId="n1",
-                isMetricsTable=True, isMainMetricsTable=True,
-            )
+    def test_single_kind_allowed(self):
+        t = TableSchema(id="t1", nodeId="n1", kind="metrics")
+        assert t.kind == "metrics"
 
-    def test_single_flag_allowed(self):
-        t = TableSchema(id="t1", nodeId="n1", isMetricsTable=True)
-        assert t.isMetricsTable is True
-
-    def test_no_flags_allowed(self):
+    def test_kind_defaults_to_regular(self):
         t = TableSchema(id="t1", nodeId="n1")
-        assert t.isMetricsTable is False
+        assert t.kind == "regular"
 
 
 # ── Анти-ложные-отказы: реальные сетки проходят ──
@@ -270,7 +260,7 @@ class TestNoFalseRejections:
             [{"content": ""} for _ in range(7)],
         ]
         t = _table(grid, colWidths=[80, 200, 100, 100, 120, 80, 120],
-                   isMetricsTable=True)
+                   kind="metrics")
         assert len(t.grid) == 4
         assert all(len(row) == 7 for row in t.grid)
 

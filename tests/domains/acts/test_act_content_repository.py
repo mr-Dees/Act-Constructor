@@ -61,10 +61,7 @@ class TestSaveContentUsesTransaction:
         table_data.colWidths = []
         table_data.protected = False
         table_data.deletable = True
-        table_data.isMetricsTable = False
-        table_data.isMainMetricsTable = False
-        table_data.isRegularRiskTable = False
-        table_data.isOperationalRiskTable = False
+        table_data.kind = "regular"
 
         data = _make_act_data(tables={"tbl_1": table_data})
         # Узел-владелец таблицы должен быть в дереве (иначе orphan-фильтр её срежет).
@@ -94,10 +91,7 @@ class TestSaveContentUsesTransaction:
         table_data.colWidths = []
         table_data.protected = False
         table_data.deletable = True
-        table_data.isMetricsTable = False
-        table_data.isMainMetricsTable = False
-        table_data.isRegularRiskTable = False
-        table_data.isOperationalRiskTable = False
+        table_data.kind = "regular"
 
         # Текстблок
         tb_data = MagicMock()
@@ -166,10 +160,7 @@ class TestSaveContentUsesTransaction:
         table_data.colWidths = []
         table_data.protected = False
         table_data.deletable = True
-        table_data.isMetricsTable = False
-        table_data.isMainMetricsTable = False
-        table_data.isRegularRiskTable = False
-        table_data.isOperationalRiskTable = False
+        table_data.kind = "regular"
 
         data = _make_act_data(tables={"tbl_1": table_data})
         await repo.save_content(act_id=1, data=data, username="user1")
@@ -202,11 +193,11 @@ class TestSaveContentUsesTransaction:
         assert "SELECT" in select_sql
 
 
-class TestInsertTableDenormalizationAndFlags:
-    """insert_table сохраняет денормализацию (node_number/table_label) и 6 флагов."""
+class TestInsertTableDenormalizationAndKind:
+    """insert_table сохраняет денормализацию (node_number/table_label) и подвид kind."""
 
-    async def test_insert_table_includes_flag_and_denorm_columns(self, mock_conn):
-        """SQL insert_table содержит колонки денормализации и все 6 флагов."""
+    async def test_insert_table_includes_kind_and_denorm_columns(self, mock_conn):
+        """SQL insert_table содержит колонки денормализации и kind."""
         repo = ActContentRepository(mock_conn)
         await repo.insert_table(
             act_id=1,
@@ -218,23 +209,17 @@ class TestInsertTableDenormalizationAndFlags:
             is_deletable=False,
             node_number="3.1",
             table_label="Оценка качества",
-            is_metrics_table=True,
+            kind="metrics",
         )
         sql = mock_conn.execute.call_args.args[0]
-        for col in (
-            "node_number", "table_label",
-            "is_metrics_table", "is_main_metrics_table",
-            "is_regular_risk_table", "is_operational_risk_table",
-            "is_tax_risk_table", "is_other_risk_table",
-        ):
+        for col in ("node_number", "table_label", "kind"):
             assert col in sql, f"insert_table SQL не содержит колонку {col}"
 
-    async def test_insert_table_passes_denorm_and_flag_values(self, mock_conn):
-        """Значения денормализации и флагов стоят на правильных позициях execute.
+    async def test_insert_table_passes_denorm_and_kind_values(self, mock_conn):
+        """Значения денормализации и kind стоят на правильных позициях execute.
 
-        Сверяем КОНКРЕТНЫЕ индексы параметров $1..$15 — порядок зафиксирован
-        INSERT-ом insert_table. Перестановка или инверсия любого флага ломает
-        тест (только is_regular_risk_table=True, остальные 5 флагов=False).
+        Сверяем КОНКРЕТНЫЕ индексы параметров $1..$10 — порядок зафиксирован
+        INSERT-ом insert_table.
         """
         repo = ActContentRepository(mock_conn)
         await repo.insert_table(
@@ -247,9 +232,9 @@ class TestInsertTableDenormalizationAndFlags:
             is_deletable=True,
             node_number="3.1",
             table_label="Оценка качества",
-            is_regular_risk_table=True,
+            kind="regularRisk",
         )
-        # args[0] — SQL-строка; позиционные параметры $1..$15 идут с args[1].
+        # args[0] — SQL-строка; позиционные параметры $1..$10 идут с args[1].
         args = mock_conn.execute.call_args.args
         assert args[1] == 1                  # $1  act_id
         assert args[2] == "t1"               # $2  table_id
@@ -258,15 +243,10 @@ class TestInsertTableDenormalizationAndFlags:
         assert args[5] == "Оценка качества"  # $5  table_label
         assert args[8] is False              # $8  is_protected
         assert args[9] is True               # $9  is_deletable
-        assert args[10] is False             # $10 is_metrics_table
-        assert args[11] is False             # $11 is_main_metrics_table
-        assert args[12] is True              # $12 is_regular_risk_table
-        assert args[13] is False             # $13 is_operational_risk_table
-        assert args[14] is False             # $14 is_tax_risk_table
-        assert args[15] is False             # $15 is_other_risk_table
+        assert args[10] == "regularRisk"     # $10 kind
 
-    async def test_insert_table_defaults_flags_false(self, mock_conn):
-        """Без явных флагов insert_table вставляет дефолты (системная таблица)."""
+    async def test_insert_table_defaults_kind_regular(self, mock_conn):
+        """Без явного kind insert_table вставляет 'regular' (системная таблица)."""
         repo = ActContentRepository(mock_conn)
         await repo.insert_table(
             act_id=1,
@@ -278,9 +258,10 @@ class TestInsertTableDenormalizationAndFlags:
             is_deletable=False,
             table_label="Таблица",
         )
-        # Не падает; SQL по-прежнему содержит флаги-колонки
-        sql = mock_conn.execute.call_args.args[0]
-        assert "is_metrics_table" in sql
+        # Не падает; SQL по-прежнему содержит колонку kind, значение — дефолт
+        args = mock_conn.execute.call_args.args
+        assert "kind" in args[0]
+        assert args[10] == "regular"
 
 
 class TestSaveTablesOrphanFilter:
@@ -299,10 +280,7 @@ class TestSaveTablesOrphanFilter:
         orphan.colWidths = []
         orphan.protected = False
         orphan.deletable = True
-        for f in ("isMetricsTable", "isMainMetricsTable",
-                  "isRegularRiskTable", "isOperationalRiskTable",
-                  "isTaxRiskTable", "isOtherRiskTable"):
-            setattr(orphan, f, False)
+        orphan.kind = "regular"
 
         data = _make_act_data(tables={"orphan_tbl": orphan})
         await repo.save_content(act_id=1, data=data, username="user1")
@@ -326,10 +304,7 @@ class TestSaveTablesOrphanFilter:
         valid.colWidths = []
         valid.protected = False
         valid.deletable = True
-        for f in ("isMetricsTable", "isMainMetricsTable",
-                  "isRegularRiskTable", "isOperationalRiskTable",
-                  "isTaxRiskTable", "isOtherRiskTable"):
-            setattr(valid, f, False)
+        valid.kind = "regular"
 
         data = _make_act_data(tables={"valid_tbl": valid})
         # Дерево содержит узел node_1
