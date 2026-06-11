@@ -10,6 +10,7 @@ import { RENDER_CLASSES } from '../render-classes.js';
 import { AppState } from '../state/state-core.js';
 import { TreeUtils } from '../tree/tree-utils.js';
 import { AppConfig } from '../../shared/app-config.js';
+import { getBlockType, isLeafBlockType } from '../block-types.js';
 import { ChatEventBus } from '../../shared/chat/chat-event-bus.js';
 import { Notifications } from '../../shared/notifications.js';
 import { buildColgroup } from '../table/colgroup.js';
@@ -216,9 +217,23 @@ export class ItemsRenderer {
     }
 
     /**
+     * Render-обработчики листовых блоков: тип из реестра → создание DOM-элемента.
+     * Сами render-методы живут в своих модулях (renderTable / textBlockManager /
+     * violationManager) — здесь только маппинг для диспетча renderItem.
+     * Полнота покрытия leaf-типов реестра закреплена tests/js/block-types.test.mjs.
+     * @type {Object<string, function(Object, Object): HTMLElement>}
+     */
+    static _leafRenderers = {
+        [AppConfig.nodeTypes.TABLE]: (data, node) => ItemsRenderer.renderTable(data, node),
+        [AppConfig.nodeTypes.TEXTBLOCK]: (data, node) => textBlockManager.createTextBlockElement(data, node),
+        [AppConfig.nodeTypes.VIOLATION]: (data, node) => violationManager.createViolationElement(data, node),
+    };
+
+    /**
      * Рекурсивная отрисовка элемента дерева с обработкой различных типов узлов.
-     * Создает соответствующий DOM-элемент в зависимости от типа: обычный пункт,
-     * таблица, текстовый блок или нарушение.
+     * Листовые блоки (таблица, текстовый блок, нарушение) диспетчатся через
+     * реестр типов (block-types.js): словарь, поле-ссылка и префикс _domIndex
+     * берутся из описания типа, создание элемента — из _leafRenderers.
      * @param {Object} node - Узел дерева для отрисовки
      * @param {number} level - Уровень вложенности (определяет размер заголовка)
      * @returns {HTMLElement} Созданный DOM-элемент с содержимым узла
@@ -226,34 +241,13 @@ export class ItemsRenderer {
     static renderItem(node, level) {
         const itemDiv = this._createItemContainer(node, level);
 
-        // Проверяем специальные типы узлов
-        const {TABLE, TEXTBLOCK, VIOLATION} = AppConfig.nodeTypes;
-        if (node.type === TABLE) {
-            const table = AppState.tables[node.tableId];
-            if (table) {
-                const section = this.renderTable(table, node);
-                itemDiv.appendChild(section);
-                this._domIndex.set(`table:${table.id}`, section);
-            }
-            return itemDiv;
-        }
-
-        if (node.type === TEXTBLOCK) {
-            const textBlock = AppState.textBlocks[node.textBlockId];
-            if (textBlock) {
-                const tbEl = textBlockManager.createTextBlockElement(textBlock, node);
-                itemDiv.appendChild(tbEl);
-                this._domIndex.set(`textblock:${textBlock.id}`, tbEl);
-            }
-            return itemDiv;
-        }
-
-        if (node.type === VIOLATION) {
-            const violation = AppState.violations[node.violationId];
-            if (violation) {
-                const vEl = violationManager.createViolationElement(violation, node);
-                itemDiv.appendChild(vEl);
-                this._domIndex.set(`violation:${violation.id}`, vEl);
+        const spec = getBlockType(node.type);
+        if (spec && spec.idProp) {
+            const data = AppState[spec.dictName][node[spec.idProp]];
+            if (data) {
+                const el = this._leafRenderers[spec.type](data, node);
+                itemDiv.appendChild(el);
+                this._domIndex.set(`${spec.domIndexPrefix}:${data.id}`, el);
             }
             return itemDiv;
         }
@@ -574,11 +568,8 @@ export class ItemsRenderer {
         const childrenDiv = document.createElement('div');
         childrenDiv.className = 'item-children';
 
-        const {TABLE, TEXTBLOCK, VIOLATION} = AppConfig.nodeTypes;
-        const specialTypes = new Set([TABLE, TEXTBLOCK, VIOLATION]);
-
         children.forEach(child => {
-            const childLevel = specialTypes.has(child.type) ? parentLevel : parentLevel + 1;
+            const childLevel = isLeafBlockType(child.type) ? parentLevel : parentLevel + 1;
             childrenDiv.appendChild(this.renderItem(child, childLevel));
         });
 
