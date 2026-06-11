@@ -6,6 +6,7 @@
  * Гарантирует одиночный unlock: предотвращает дублирующее снятие блокировки через sendBeacon.
  */
 import { ChangelogTracker } from './changelog-tracker.js';
+import { InactivityWatchdog } from './inactivity-watchdog.js';
 import { LifecycleHelper } from './lifecycle-helper.js';
 import { AppState } from './state/state-core.js';
 import { StorageManager } from './storage-manager.js';
@@ -17,25 +18,22 @@ import { Notifications } from '../shared/notifications.js';
 export class LockManager {
     static _actId = null;
     static _config = null;
-    static _inactivityCheckInterval = null;
     static _extensionInterval = null;
     static _countdownInterval = null;
-    static _lastActivity = Date.now();
     static _lastExtensionAt = Date.now();
     static _warningShown = false;
     static _isExiting = false;
     static _exitPromise = null;
     static _manualUnlockTriggered = false;
     static _beforeUnloadHandler = null;
-    static _activityHandler = null;
-    static _activityEvents = ['mousedown', 'keydown', 'scroll', 'touchstart'];
+    // Слежение за бездействием (activity-листенеры, idle-таймер, visibilitychange)
+    // вынесено в InactivityWatchdog; LockManager использует его композицией.
+    static _watchdog = null;
     // Дедлайн диалога неактивности (Date.now() + timeoutSeconds*1000). null = диалог не показан.
     // Хранится статически, чтобы _handleVisibilityChange мог решить — пора ли выкидывать.
     static _inactivityDialogDeadline = null;
     // Программный close активного диалога неактивности (получаем из DialogManager.onMount).
     static _inactivityDialogClose = null;
-    // Bound-обработчик visibilitychange (для корректного removeEventListener в destroy).
-    static _visibilityHandler = null;
 
     /**
      * Инициализирует менеджер для конкретного акта
@@ -61,11 +59,18 @@ export class LockManager {
             await this._loadConfig();
             await this._lockAct();
 
-            this._setupActivityTracking();
-            this._startInactivityCheck();
+            // Повторный init после destroy: старый watchdog останавливаем,
+            // иначе его listeners остались бы висеть на document.
+            if (this._watchdog) this._watchdog.stop();
+            this._watchdog = new InactivityWatchdog({
+                checkIntervalSeconds: this._config.inactivityCheckIntervalSeconds,
+                idleTimeoutMinutes: this._config.inactivityTimeoutMinutes,
+                onIdle: (minutesIdle) => this._handleInactivity(minutesIdle),
+                onVisibilityChange: () => this._handleVisibilityChange()
+            });
+            this._watchdog.start();
             this._startAutoExtension();
             this._setupBeforeUnload();
-            this._setupVisibilityHandling();
 
             console.log('[LockManager] init OK для actId=', actId);
             console.log('Настройки блокировок:', this._config);
@@ -155,7 +160,6 @@ export class LockManager {
      * @private
      */
     static _resetState() {
-        this._lastActivity = Date.now();
         this._lastExtensionAt = Date.now();
         this._warningShown = false;
         this._isExiting = false;
@@ -322,52 +326,6 @@ export class LockManager {
     }
 
     /**
-     * Отслеживание активности пользователя.
-     * Один handler reuse-ится для 4 событий и сохраняется в _activityHandler,
-     * чтобы destroy() мог снять listeners через removeEventListener.
-     * @private
-     */
-    static _setupActivityTracking() {
-        // На случай повторной инициализации (init после destroy) — снять старые сначала.
-        this._teardownActivityTracking();
-        this._activityHandler = () => {
-            this._lastActivity = Date.now();
-        };
-        this._activityEvents.forEach(event =>
-            document.addEventListener(event, this._activityHandler, {passive: true})
-        );
-    }
-
-    /**
-     * Снимает activity-listeners. Идемпотентен.
-     * @private
-     */
-    static _teardownActivityTracking() {
-        if (!this._activityHandler) return;
-        this._activityEvents.forEach(event =>
-            document.removeEventListener(event, this._activityHandler)
-        );
-        this._activityHandler = null;
-    }
-
-    /**
-     * Периодическая проверка бездействия.
-     * @private
-     */
-    static _startInactivityCheck() {
-        const intervalMs = this._config.inactivityCheckIntervalSeconds * 1000;
-        this._inactivityCheckInterval = setInterval(() => {
-            const now = Date.now();
-            const minutesIdle = (now - this._lastActivity) / 1000 / 60;
-            if (minutesIdle >= this._config.inactivityTimeoutMinutes) {
-                clearInterval(this._inactivityCheckInterval);
-                this._inactivityCheckInterval = null;
-                this._handleInactivity(Math.floor(minutesIdle));
-            }
-        }, intervalMs);
-    }
-
-    /**
      * Автоматическое продление блокировки.
      * @private
      */
@@ -375,7 +333,7 @@ export class LockManager {
         const intervalMs = this._config.inactivityCheckIntervalSeconds * 1000;
         this._extensionInterval = setInterval(async () => {
             const now = Date.now();
-            const sinceActivity = (now - this._lastActivity) / 1000 / 60;
+            const sinceActivity = this._watchdog.getIdleMs() / 1000 / 60;
             const sinceExtension = (now - this._lastExtensionAt) / 1000 / 60;
             if (
                 sinceActivity < this._config.inactivityTimeoutMinutes &&
@@ -440,14 +398,11 @@ export class LockManager {
     }
 
     /**
-     * Завершает все интервалы, таймеры и снимает activity-listeners на document.
+     * Завершает все интервалы, таймеры и останавливает watchdog
+     * (снимает activity- и visibilitychange-listeners на document).
      * Идемпотентен; безопасно вызывать повторно.
      */
     static destroy() {
-        if (this._inactivityCheckInterval) {
-            clearInterval(this._inactivityCheckInterval);
-            this._inactivityCheckInterval = null;
-        }
         if (this._extensionInterval) {
             clearInterval(this._extensionInterval);
             this._extensionInterval = null;
@@ -458,29 +413,7 @@ export class LockManager {
         }
         this._inactivityDialogDeadline = null;
         this._inactivityDialogClose = null;
-        this._teardownVisibilityHandling();
-        this._teardownActivityTracking();
-    }
-
-    /**
-     * Подписка на visibilitychange. Когда вкладка возвращается из фона, throttle браузера
-     * мог "сдвинуть" таймеры — пересчитываем по реальному времени без обращений к бэку.
-     * @private
-     */
-    static _setupVisibilityHandling() {
-        this._teardownVisibilityHandling();
-        this._visibilityHandler = () => this._handleVisibilityChange();
-        document.addEventListener('visibilitychange', this._visibilityHandler);
-    }
-
-    /**
-     * Снимает visibilitychange-listener. Идемпотентен.
-     * @private
-     */
-    static _teardownVisibilityHandling() {
-        if (!this._visibilityHandler) return;
-        document.removeEventListener('visibilitychange', this._visibilityHandler);
-        this._visibilityHandler = null;
+        if (this._watchdog) this._watchdog.stop();
     }
 
     /**
@@ -512,14 +445,11 @@ export class LockManager {
         // expired_locks_cleanup (TTL lockDurationMinutes). Спрашивать «остаться?»
         // бессмысленно: extend всё равно упадёт 4xx → fatal → _initiateExit.
         if (this._inactivityDialogDeadline === null) {
-            const idleMs = Date.now() - this._lastActivity;
+            const idleMs = this._watchdog.getIdleMs();
             const idleThresholdMs = this._config.inactivityTimeoutMinutes * 60 * 1000;
             if (idleMs >= idleThresholdMs) {
                 console.log('[LockManager] visibilitychange: порог неактивности превышен, autoExit');
-                if (this._inactivityCheckInterval) {
-                    clearInterval(this._inactivityCheckInterval);
-                    this._inactivityCheckInterval = null;
-                }
+                this._watchdog.stopIdleCheck();
                 this._initiateExit('autoExit');
             }
         }
@@ -634,9 +564,9 @@ export class LockManager {
             // shouldExit учитывает оба варианта: fatal-4xx или исчерпан лимит retry.
             const result = await this._extendLockSafely();
             if (result.ok) {
-                this._lastActivity = Date.now();
+                this._watchdog?.touch();
                 if (Notifications) Notifications.success(cfg.messages.sessionExtended);
-                this._startInactivityCheck();
+                this._watchdog?.startIdleCheck();
             } else {
                 if (Notifications) Notifications.error(cfg.messages.cannotExtend);
                 await this._initiateExit('extensionFailed');
