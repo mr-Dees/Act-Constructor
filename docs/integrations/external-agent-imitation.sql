@@ -54,7 +54,7 @@
 --    5. AW поллит строку-ответ по reply_to=<id вопроса> (role='assistant');
 --       финализирует, когда статус ответа терминальный.
 --    Пока вопрос pending AW показывает позицию очереди:
---       «В очереди: впереди N запросов» — N = число чужих pending с created_at раньше.
+--       «В очереди: впереди N запросов» — N = число pending-вопросов всех пользователей (включая свои) с created_at раньше.
 --    Признаки жизни, продлевающие claim-таймер (30 мин idle для pending):
 --       уменьшение N, переход pending→processing.
 --    Признаки жизни, продлевающие answer-таймер (10 мин idle для processing):
@@ -422,8 +422,9 @@ WHERE role = 'user'
 -- Цель: фронт AW должен показать «В очереди: впереди 1 запрос» рядом с
 -- индикатором ожидания ответа на ВАШ вопрос (<QUESTION_ID>).
 --
--- Механика: позиция = число ЧУЖИХ строк (role='user', status='pending')
--- с created_at РАНЬШЕ, чем у вашего вопроса. Поллер продлевает claim-таймер
+-- Механика: позиция = число pending-вопросов всех пользователей (включая свои,
+-- role='user', status='pending') с created_at РАНЬШЕ, чем у вашего вопроса.
+-- Поллер продлевает claim-таймер
 -- (30 мин idle) при уменьшении этого числа — движение очереди тоже считается
 -- «признаком жизни».
 --
@@ -465,7 +466,6 @@ SELECT COUNT(*) AS ahead_count
 FROM chat_agent_messages_bus
 WHERE role = 'user'
   AND status = 'pending'
-  AND user_id <> (SELECT user_id FROM chat_agent_messages_bus WHERE id = '<QUESTION_ID>')
   AND created_at < (SELECT created_at FROM chat_agent_messages_bus WHERE id = '<QUESTION_ID>');
 
 -- ── Фронт должен показать «В очереди: впереди 1 запрос». ──

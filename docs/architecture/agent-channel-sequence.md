@@ -188,7 +188,7 @@ sequenceDiagram
 | Агент закрыл вопрос `status='failed'` без строки-ответа | `poll_once` → `mark_failed` со стандартным текстом «Внешний агент вернул ошибку» |
 | Агент вставил ответ, но не закрыл вопрос терминальным `status` | `poll_once` сам закрывает вопрос (`status='completed'`, best-effort) после финализации |
 | CHECK владельца отклонил наш статус (`CheckViolationError`) | `_set_status_safe` глотает с warning'ом — финализация/таймаут не ломаются, поллер не зацикливается |
-| Превышен idle-таймаут (claim или answer) | `mark_timeout(reason)`: draft → `failed` (error-блок `agent_claim_timeout` / `agent_answer_timeout`), вопрос в шине best-effort закрывается `failed` |
+| Превышен idle-таймаут (claim или answer) | `mark_timeout(reason)`: draft → `failed` (error-блок `agent_claim_timeout` / `agent_timeout`), вопрос в шине best-effort закрывается `failed` |
 | Поллер не инициализирован (lifespan-сбой) | Форвард **не выполняется**: вопрос в шину не пишется, draft не создаётся, сразу финализируется error-сообщение (`agent_unavailable`). Беседа остаётся удаляемой |
 | Рестарт uvicorn посреди ожидания | Поллер при старте поднимает подписки из streaming-черновиков `chat_messages` и продолжает опрос; draft остаётся виден в истории как `streaming` |
 | Пользователь отправил N форвардов параллельно | Каждый получает свой `message_id`/вопрос; при `>= max_parallel_streams_per_user` активных — `ChatLimitError` (422) до записей |
