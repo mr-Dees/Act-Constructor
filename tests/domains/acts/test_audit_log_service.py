@@ -10,6 +10,7 @@ Unit-тесты сервиса/репозитория аудит-лога.
 но даём один регрессионный кейс на интеграцию (фильтр доходит до SQL).
 """
 
+import json
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
@@ -549,3 +550,127 @@ class TestRestoreVersionPreSnapshot:
             "save_content",           # перезапись восстановленным контентом
             "create_version:manual",  # post-restore snapshot
         ]
+
+
+# ── ActAuditLogRepository.compute_field_diffs: поля нарушений ────────────────
+
+
+# Маленькая, но валидная data:image-картинка (payload-маркер для проверки,
+# что base64 не утекает в diff).
+_IMG_BASE64_PAYLOAD = "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJ"
+_IMG_DATA_URL = f"data:image/png;base64,{_IMG_BASE64_PAYLOAD}"
+
+
+def _make_act_data(violations: dict) -> "ActDataSchema":
+    """ActDataSchema с пустым деревом и заданными нарушениями."""
+    from app.domains.acts.schemas.act_content import ActDataSchema
+    return ActDataSchema(
+        tree={"id": "root", "label": "Акт", "children": []},
+        violations=violations,
+    )
+
+
+def _db_violation_row(**overrides) -> dict:
+    """Строка нарушения из БД, как её отдаёт SELECT в compute_field_diffs."""
+    row = {
+        "violation_id": "v1",
+        "violated": "нарушено",
+        "established": "установлено",
+        "reasons": '{"enabled": false, "content": ""}',
+        "consequences": '{"enabled": false, "content": ""}',
+        "responsible": '{"enabled": false, "content": ""}',
+        "recommendations": '{"enabled": false, "content": ""}',
+        "description_list": '{"enabled": false, "items": []}',
+        "additional_content": '{"enabled": false, "items": []}',
+    }
+    row.update(overrides)
+    return row
+
+
+class TestComputeFieldDiffsViolationCollections:
+    """compute_field_diffs учитывает descriptionList/additionalContent (pbe-10).
+
+    В diff пишется только компактная сводка (enabled + число элементов):
+    additionalContent может содержать base64-картинки на мегабайты —
+    их содержимое в аудит-лог попадать не должно.
+    """
+
+    def _make_violation(self, **kwargs):
+        from app.domains.acts.schemas.act_content import ViolationSchema
+        defaults = {
+            "id": "v1", "nodeId": "n1",
+            "violated": "нарушено", "established": "установлено",
+        }
+        defaults.update(kwargs)
+        return ViolationSchema(**defaults)
+
+    async def test_description_list_change_detected(self, mock_conn):
+        """Изменение items списка описаний попадает в diff нарушения."""
+        repo = ActAuditLogRepository(mock_conn)
+        mock_conn.fetch.side_effect = [
+            [],  # таблицы
+            [],  # текстблоки
+            [_db_violation_row(
+                description_list='{"enabled": true, "items": ["старый пункт"]}',
+            )],
+        ]
+        data = _make_act_data({"v1": self._make_violation(
+            descriptionList={"enabled": True, "items": ["старый пункт", "новый пункт"]},
+        )})
+
+        result = await repo.compute_field_diffs(1, data)
+
+        assert "v1" in result
+        diff = result["v1"]["fields"]["descriptionList"]
+        assert diff["changed"] is True
+        assert diff["old_items"] == 1
+        assert diff["new_items"] == 2
+
+    async def test_additional_content_change_detected_without_base64_leak(self, mock_conn):
+        """Изменение доп. контента фиксируется компактно — без base64 в diff."""
+        repo = ActAuditLogRepository(mock_conn)
+        mock_conn.fetch.side_effect = [
+            [], [],
+            [_db_violation_row()],
+        ]
+        data = _make_act_data({"v1": self._make_violation(
+            additionalContent={"enabled": True, "items": [
+                {"id": "c1", "type": "image", "url": _IMG_DATA_URL},
+            ]},
+        )})
+
+        result = await repo.compute_field_diffs(1, data)
+
+        assert "v1" in result
+        diff = result["v1"]["fields"]["additionalContent"]
+        assert diff["changed"] is True
+        assert diff["old_items"] == 0
+        assert diff["new_items"] == 1
+        # base64-payload картинки не должен утекать в аудит-лог
+        assert _IMG_BASE64_PAYLOAD not in json.dumps(result)
+
+    async def test_unchanged_collections_not_reported(self, mock_conn):
+        """Совпадающие коллекции (включая NULL в БД ↔ схемный дефолт) — не diff."""
+        repo = ActAuditLogRepository(mock_conn)
+        mock_conn.fetch.side_effect = [
+            [], [],
+            [_db_violation_row(description_list=None, additional_content=None)],
+        ]
+        data = _make_act_data({"v1": self._make_violation()})
+
+        result = await repo.compute_field_diffs(1, data)
+
+        assert result == {}
+
+    async def test_scalar_field_diff_still_works(self, mock_conn):
+        """Регрессия: прежние поля (violated и пр.) diff'ятся как раньше."""
+        repo = ActAuditLogRepository(mock_conn)
+        mock_conn.fetch.side_effect = [
+            [], [],
+            [_db_violation_row(violated="старый текст")],
+        ]
+        data = _make_act_data({"v1": self._make_violation(violated="новый текст")})
+
+        result = await repo.compute_field_diffs(1, data)
+
+        assert result["v1"]["fields"] == {"violated": {"changed": True}}
