@@ -7,6 +7,20 @@
 import html
 import re
 
+# Спец-разметка редактора текстблоков (см. docx/builders/inline.py):
+# <span class="text-link" data-link-url="...">текст</span> — ссылка,
+# <span class="text-footnote" data-footnote-text="...">якорь</span> — сноска.
+# Данные живут в атрибутах: вырезание тегов «как есть» их теряет, поэтому
+# такие span'ы разворачиваются в текстовый вид ДО общего вырезания тегов.
+_LINK_SPAN_RE = re.compile(
+    r'<span\b[^>]*\bdata-link-url="([^"]*)"[^>]*>(.*?)</span>',
+    re.IGNORECASE | re.DOTALL,
+)
+_FOOTNOTE_SPAN_RE = re.compile(
+    r'<span\b[^>]*\bdata-footnote-text="([^"]*)"[^>]*>(.*?)</span>',
+    re.IGNORECASE | re.DOTALL,
+)
+
 
 class HTMLUtils:
     """
@@ -28,6 +42,11 @@ class HTMLUtils:
         """
         # Замена <br> на переносы строк
         clean = re.sub(r"<br\s*/?>", "\n", content, flags=re.IGNORECASE)
+
+        # Спец-span'ы редактора: ссылка → «текст (url)», сноска →
+        # «якорь (сноска: текст)» — иначе данные атрибутов теряются.
+        clean = _LINK_SPAN_RE.sub(r"\2 (\1)", clean)
+        clean = _FOOTNOTE_SPAN_RE.sub(r"\2 (сноска: \1)", clean)
 
         # Удаление всех HTML-тегов
         clean = re.sub(r"<[^>]+>", "", clean)
@@ -54,6 +73,12 @@ class HTMLUtils:
         """
         # <br> -> Markdown hard break
         result = re.sub(r"<br\s*/?>", "  \n", content, flags=re.IGNORECASE)
+
+        # Спец-span'ы редактора: ссылка → [текст](url), сноска —
+        # inline «якорь (сноска: текст)» (без блока сносок: конвертер
+        # работает с фрагментом и не знает контекста документа).
+        result = _LINK_SPAN_RE.sub(r"[\2](\1)", result)
+        result = _FOOTNOTE_SPAN_RE.sub(r"\2 (сноска: \1)", result)
 
         # <b>, <strong> -> **текст**
         result = re.sub(
