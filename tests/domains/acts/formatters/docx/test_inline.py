@@ -111,3 +111,46 @@ def test_empty_html(doc):
     p = _add_p(doc)
     apply_inline_html(p, "", base_size_pt=12)
     assert len(p.runs) == 0
+
+
+def test_strike_tags_render_strikethrough(doc):
+    """M.19: <s>/<strike>/<del> → run.font.strike (тег-форма Chromium)."""
+    for tag in ("s", "strike", "del"):
+        p = _add_p(doc)
+        apply_inline_html(p, f"до <{tag}>зачёркнуто</{tag}> после", base_size_pt=12)
+        runs = [(r.text, bool(r.font.strike)) for r in p.runs]
+        assert ("зачёркнуто", True) in runs, f"<{tag}> не дал зачёркивание"
+        assert ("до ", False) in runs
+        assert (" после", False) in runs
+
+
+def test_strike_via_span_style_line_through(doc):
+    """M.19: span style="text-decoration: line-through" → зачёркивание (CSS-форма)."""
+    p = _add_p(doc)
+    apply_inline_html(
+        p,
+        '<span style="text-decoration: line-through;">зач</span> обычный',
+        base_size_pt=12,
+    )
+    runs = [(r.text, bool(r.font.strike)) for r in p.runs]
+    assert ("зач", True) in runs
+    assert (" обычный", False) in runs
+
+
+def test_strike_via_span_style_text_decoration_line(doc):
+    """M.19: вариант свойства text-decoration-line тоже распознаётся."""
+    p = _add_p(doc)
+    apply_inline_html(
+        p,
+        '<span style="text-decoration-line: line-through;">зач</span>',
+        base_size_pt=12,
+    )
+    assert p.runs[0].font.strike is True
+
+
+def test_strike_nested_with_bold(doc):
+    """Зачёркивание комбинируется с другими начертаниями."""
+    p = _add_p(doc)
+    apply_inline_html(p, "<b><s>жирно-зачёркнуто</s></b>", base_size_pt=12)
+    assert p.runs[0].bold is True
+    assert p.runs[0].font.strike is True

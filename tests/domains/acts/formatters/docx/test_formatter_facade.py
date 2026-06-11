@@ -143,6 +143,102 @@ def test_table_title_keeps_with_next():
     assert p_pr.find(qn("w:keepLines")) is not None
 
 
+def test_textblock_default_formatting_keeps_legacy_defaults():
+    """formatting по умолчанию (нетронутый юзером) → JUSTIFY + body_pt (M.1)."""
+    from docx.enum.text import WD_ALIGN_PARAGRAPH
+    from docx.shared import Pt
+    from app.domains.acts.formatters.docx.styles import Sizes
+    fmt = DocxFormatter()
+    section = {
+        "id": "1", "label": "Раздел 1",
+        "children": [
+            {"id": "1.1", "type": "textblock", "textBlockId": "tb1", "label": "X"},
+        ],
+    }
+    content = ActDataSchema(
+        tree={"id": "root", "label": "Акт", "children": [section]},
+        textBlocks={"tb1": TextBlockSchema(id="tb1", nodeId="1.1", content="Дефолтный блок")},
+    )
+    doc = fmt.format(ExportContext(metadata=_Meta(), content=content))
+    para = next(p for p in doc.paragraphs if "Дефолтный блок" in p.text)
+    assert para.alignment == WD_ALIGN_PARAGRAPH.JUSTIFY
+    assert para.runs[0].font.size == Pt(Sizes.body_pt)
+    assert not para.runs[0].bold
+    assert not para.runs[0].italic
+    assert not para.runs[0].underline
+
+
+def test_textblock_custom_formatting_applied():
+    """Заданный юзером formatting применяется: alignment, fontSize px→pt, b/i/u (M.1)."""
+    from docx.enum.text import WD_ALIGN_PARAGRAPH
+    from docx.shared import Pt
+    fmt = DocxFormatter()
+    section = {
+        "id": "1", "label": "Раздел 1",
+        "children": [
+            {"id": "1.1", "type": "textblock", "textBlockId": "tb1", "label": "X"},
+        ],
+    }
+    content = ActDataSchema(
+        tree={"id": "root", "label": "Акт", "children": [section]},
+        textBlocks={"tb1": TextBlockSchema(
+            id="tb1", nodeId="1.1", content="Форматированный блок",
+            formatting={
+                "fontSize": 16, "alignment": "center",
+                "bold": True, "italic": True, "underline": True,
+            },
+        )},
+    )
+    doc = fmt.format(ExportContext(metadata=_Meta(), content=content))
+    para = next(p for p in doc.paragraphs if "Форматированный блок" in p.text)
+    assert para.alignment == WD_ALIGN_PARAGRAPH.CENTER
+    run = para.runs[0]
+    assert run.font.size == Pt(12)  # 16px × 0.75
+    assert run.bold is True
+    assert run.italic is True
+    assert run.underline is True
+
+
+def test_textblock_partial_formatting_left_alignment_applied():
+    """Изменённый formatting с alignment=left применяется буквально (LEFT, не JUSTIFY)."""
+    from docx.enum.text import WD_ALIGN_PARAGRAPH
+    fmt = DocxFormatter()
+    section = {
+        "id": "1", "label": "Раздел 1",
+        "children": [
+            {"id": "1.1", "type": "textblock", "textBlockId": "tb1", "label": "X"},
+        ],
+    }
+    content = ActDataSchema(
+        tree={"id": "root", "label": "Акт", "children": [section]},
+        textBlocks={"tb1": TextBlockSchema(
+            id="tb1", nodeId="1.1", content="Левый блок",
+            formatting={"fontSize": 14, "alignment": "left", "bold": True,
+                        "italic": False, "underline": False},
+        )},
+    )
+    doc = fmt.format(ExportContext(metadata=_Meta(), content=content))
+    para = next(p for p in doc.paragraphs if "Левый блок" in p.text)
+    assert para.alignment == WD_ALIGN_PARAGRAPH.LEFT
+    assert para.runs[0].bold is True
+
+
+def test_item_content_rendered_as_plain_text():
+    """item.content — plain-текст из textarea: <b> и & выводятся дословно (M.4)."""
+    fmt = DocxFormatter()
+    section = {
+        "id": "1", "label": "Раздел 1",
+        "children": [
+            {"id": "1.1", "type": "item", "label": "Пункт",
+             "content": "Сравнение: a<b>c & d"},
+        ],
+    }
+    content = ActDataSchema(tree={"id": "root", "label": "Акт", "children": [section]})
+    doc = fmt.format(ExportContext(metadata=_Meta(), content=content))
+    text = "\n".join(p.text for p in doc.paragraphs)
+    assert "Сравнение: a<b>c & d" in text
+
+
 def test_update_fields_enabled():
     """#8: документ помечен на пересчёт полей (NUMPAGES/PAGE) при открытии."""
     fmt = DocxFormatter()

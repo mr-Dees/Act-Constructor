@@ -141,8 +141,13 @@ Object.assign(ViolationManager.prototype, {
                 return;
             }
 
+            // Валидация ДО readAsDataURL (H6): MIME/размер/суммарный лимит/число
+            // элементов; отказники отсеяны с Notifications.warning.
+            const acceptedFiles = this.filterAcceptedImageFiles(imageFiles, violation);
+            if (acceptedFiles.length === 0) return;
+
             // Теперь обрабатываем все изображения
-            imageFiles.forEach((file, idx) => {
+            acceptedFiles.forEach((file, idx) => {
                 const reader = new FileReader();
 
                 reader.onload = (event) => {
@@ -155,7 +160,7 @@ Object.assign(ViolationManager.prototype, {
                     addedCount++;
 
                     // Показываем уведомление для последнего файла
-                    if (addedCount === imageFiles.length) {
+                    if (addedCount === acceptedFiles.length) {
                         const message = addedCount === 1
                             ? 'Изображение добавлено'
                             : `Добавлено изображений: ${addedCount}`;

@@ -8,6 +8,18 @@ import { ViolationManager } from './violation-core.js';
 import { RENDER_CLASSES } from '../render-classes.js';
 import { AppConfig } from '../../shared/app-config.js';
 
+/**
+ * Опции селекта ширины картинки (Б-1.4): [значение item.width, подпись].
+ * 0 — «Авто»: натуральный размер с потолком по полезной ширине листа.
+ */
+export const IMAGE_WIDTH_OPTIONS = [
+    [0, 'Авто'],
+    [25, '25%'],
+    [50, '50%'],
+    [75, '75%'],
+    [100, '100%'],
+];
+
 // Расширение ViolationManager
 Object.assign(ViolationManager.prototype, {
     /**
@@ -189,9 +201,39 @@ Object.assign(ViolationManager.prototype, {
             PreviewManager.update();
         });
 
+        // Селект ширины картинки (Б-1.4): % полезной ширины листа, 0 — авто
+        // (натуральный размер с потолком по ширине). Пишет item.width —
+        // Proxy пометит unsaved, превью и DOCX применят значение.
+        const widthControl = document.createElement('div');
+        widthControl.className = 'image-width-control';
+
+        const widthLabel = document.createElement('label');
+        widthLabel.className = 'image-width-label';
+        widthLabel.textContent = 'Ширина:';
+
+        const widthSelect = document.createElement('select');
+        widthSelect.className = 'image-width-select';
+        for (const [value, text] of IMAGE_WIDTH_OPTIONS) {
+            const option = document.createElement('option');
+            option.value = String(value);
+            option.textContent = text;
+            widthSelect.appendChild(option);
+        }
+        widthSelect.value = String(item.width || 0);
+        widthLabel.htmlFor = widthSelect.id = `${item.id}-width`;
+
+        widthSelect.addEventListener('change', () => {
+            item.width = parseInt(widthSelect.value, 10) || 0;
+            PreviewManager.update();
+        });
+
+        widthControl.appendChild(widthLabel);
+        widthControl.appendChild(widthSelect);
+
         itemDiv.appendChild(imgContainer);
         itemDiv.appendChild(filenameDiv);
         itemDiv.appendChild(captionInput);
+        itemDiv.appendChild(widthControl);
 
         wrapper.appendChild(label);
         wrapper.appendChild(itemDiv);

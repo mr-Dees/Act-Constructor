@@ -170,6 +170,7 @@ def _make_export_fixture() -> dict:
                             "caption": "",
                             "filename": "",
                             "order": 0,
+                            "width": 0,
                         },
                         {
                             "id": "ac-2",
@@ -179,6 +180,7 @@ def _make_export_fixture() -> dict:
                             "caption": "Скриншот",
                             "filename": "screen.png",
                             "order": 1,
+                            "width": 50,
                         },
                     ],
                 },

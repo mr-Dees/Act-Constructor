@@ -88,6 +88,10 @@ Object.assign(ViolationManager.prototype, {
                 const file = imageItem.getAsFile();
 
                 if (file) {
+                    // Валидация ДО readAsDataURL (H6) — warning с причиной отказа.
+                    const accepted = this.filterAcceptedImageFiles([file], violation);
+                    if (accepted.length === 0) return;
+
                     const reader = new FileReader();
 
                     reader.onload = (event) => {

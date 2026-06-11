@@ -371,6 +371,7 @@ class ViolationContentItemSchema(BaseModel):
         caption: Подпись изображения (для image)
         filename: Имя файла (для image)
         order: Порядок отображения
+        width: Ширина изображения в процентах полезной ширины страницы
     """
     model_config = ConfigDict(extra="forbid")
 
@@ -381,6 +382,10 @@ class ViolationContentItemSchema(BaseModel):
     caption: str = Field(default="", description="Подпись изображения")
     filename: str = Field(default="", description="Имя файла")
     order: int = Field(default=0, ge=0, description="Порядок")
+    width: int = Field(
+        default=0, ge=0, le=100,
+        description="Ширина изображения, % полезной ширины страницы (0 — авто)",
+    )
 
     @model_validator(mode="after")
     def validate_image_url(self) -> "ViolationContentItemSchema":
