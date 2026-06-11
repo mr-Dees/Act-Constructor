@@ -162,6 +162,8 @@ export const ChatRenderer = {
      * @param {Object} [options]
      * @param {number} [options.speed=8] — символов за кадр (16 мс)
      * @param {AbortSignal} [options.signal] — сигнал досрочного завершения
+     * @returns {Promise<void>|undefined} — promise завершения анимации
+     *          (мгновенные ветки возвращают undefined; await безопасен)
      */
     typeOutBlocks(container, blocks, options = {}) {
         const { speed = 8, signal } = options;
@@ -175,7 +177,7 @@ export const ChatRenderer = {
         }
 
         // Запускаем асинхронную очередь
-        this._typeOutQueue(container, blocks, speed, signal);
+        return this._typeOutQueue(container, blocks, speed, signal);
     },
 
     /**

@@ -205,7 +205,7 @@ export const ChatMessages = {
      * @param {Object} msg — {id, status, content}
      * @private
      */
-    _renderReadyMessage(botContainer, msg) {
+    async _renderReadyMessage(botContainer, msg) {
         ChatRenderer.removeTypingPlaceholder(botContainer);
         this._updateQueueStatus(botContainer, null); // снять строку статуса очереди
         const msgEl = botContainer.parentElement;
@@ -224,9 +224,10 @@ export const ChatMessages = {
             ChatRenderer.renderBlocks(botContainer, fresh, { execute: false });
         } else if (!reg || reg.size === 0) {
             // Инкрементального рендера не было (обычный LLM-ответ) — как раньше.
-            ChatRenderer.typeOutBlocks(botContainer, blocks);
+            // Дожидаемся конца анимации, чтобы панель реакций встала ПОД ответом.
+            await ChatRenderer.typeOutBlocks(botContainer, blocks);
         } else {
-            this._typeOutRemaining(botContainer, blocks, reg);
+            await this._typeOutRemaining(botContainer, blocks, reg);
         }
         this._incrementalRegistry.delete(botContainer);
         // Панель обратной связи под ответом ассистента — включая failed:
@@ -240,6 +241,7 @@ export const ChatMessages = {
                 messageId: msg.id,
                 initial: msg.feedback || null,
             });
+            ChatEventBus.emit('ui:scroll-bottom');
         }
     },
 
@@ -349,6 +351,32 @@ export const ChatMessages = {
             }
         }
         if (appended) ChatEventBus.emit('ui:scroll-bottom');
+    },
+
+    /**
+     * Посев инкрементального рендера при resume (reload/переключение беседы
+     * во время ожидания ответа): накопленные text/reasoning-блоки черновика
+     * рендерятся МГНОВЕННО, а реестр запоминает их длину — последующий
+     * поллинг допечатает только новые дельты, не переанимируя всё с нуля.
+     * @private
+     */
+    _seedIncrementalBlocks(botContainer, blocks) {
+        let reg = this._incrementalRegistry.get(botContainer);
+        if (!reg) {
+            reg = new Map();
+            this._incrementalRegistry.set(botContainer, reg);
+        }
+        for (const block of blocks) {
+            if (!block || typeof block.block_id !== 'string' || !block.block_id) continue;
+            if (block.type !== 'reasoning' && block.type !== 'text') continue;
+            if (reg.has(block.block_id)) continue;
+            const text = block.content || '';
+            const sb = ChatRenderer.createStreamingBlock(block.type, block.block_id);
+            ChatRenderer.appendBlock(botContainer, sb.element);
+            sb.appendText(text);
+            sb.finalize();
+            reg.set(block.block_id, { sb, renderedLen: text.length, queue: Promise.resolve() });
+        }
     },
 
     /**
@@ -582,6 +610,11 @@ export const ChatMessages = {
                     });
                     if (!isStreaming) {
                         ChatRenderer.renderBlocks(container, blocks, { execute: false });
+                    } else if (blocks.length > 0) {
+                        // Resume: накопленный черновик показываем сразу (без
+                        // анимации) и seed'им реестр — поллинг допечатает
+                        // только новые дельты.
+                        this._seedIncrementalBlocks(container, blocks);
                     }
                     if (isFailed) {
                         const msgEl = container.parentElement;
@@ -607,10 +640,9 @@ export const ChatMessages = {
                                 this._renderReadyMessage(container, m);
                                 ChatEventBus.emit('ui:scroll-bottom');
                             },
-                            // Resume после reload: история не рендерит блоки streaming-черновика
-                            // (guard if (!isStreaming)), контейнер пуст — первый же progress-тик
-                            // допечатает накопленный текст с нуля; идемпотентность по
-                            // data-block-id в appendBlock — страховка от дублей.
+                            // Resume после reload: накопленный черновик уже отрисован
+                            // мгновенно через _seedIncrementalBlocks, реестр знает
+                            // renderedLen — progress-тики допечатывают только дельты.
                             onProgress: (m) => this._renderProgress(container, m),
                             onError: (e) => {
                                 this._renderError(container, e);
