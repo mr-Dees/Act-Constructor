@@ -159,13 +159,8 @@ def test_docx_footnote_text_preserved(golden_docx):
 # Известные потери данных (НЕ чиним — фиксируем xfail strict)
 # ---------------------------------------------------------------------------
 
-@pytest.mark.xfail(
-    strict=True,
-    reason="Узел type='item' с tableId: DOCX игнорирует таблицу "
-    "(formatter._render_children рендерит таблицу только у type='table'), "
-    "MD/TXT её выводят — потеря данных только в DOCX",
-)
 def test_docx_item_node_attached_table_rendered(golden_docx):
+    """Узел type='item' с tableId: DOCX рендерит и пункт, и таблицу (как MD/TXT)."""
     assert MARKER_ATTACHED_TBL_CELL in _docx_body_text(golden_docx)
 
 

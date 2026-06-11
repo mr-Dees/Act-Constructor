@@ -81,6 +81,14 @@ class DocxFormatter:
             if node_type == "item":
                 # Пункты: выводятся и название, и нумерация уровня.
                 self._render_item(doc, node, num_id=num_id, ilvl=ilvl)
+                if node.get("tableId"):
+                    # Пункт с прикреплённой таблицей: таблица выводится после
+                    # заголовка/текста пункта (паритет с MD/TXT, без отдельного
+                    # заголовка таблицы — им служит сам пункт).
+                    schema = ctx.content.tables.get(node["tableId"])
+                    if schema:
+                        build_table(doc, schema)
+                        add_blank_line(doc)
                 self._render_children(
                     doc, node.get("children", []),
                     ctx=ctx, num_id=num_id, ilvl=ilvl + 1,
