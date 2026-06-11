@@ -1935,7 +1935,7 @@ await orchestrator.run(
 | `open` | Primary размкнут, все запросы идут в fallback (если настроен) | Через `recovery_timeout_sec` → `half_open` |
 | `half_open` | Пробный запрос в primary | Успех → `closed`; ошибка → `open` |
 
-Настройки: `CHAT__CIRCUIT_BREAKER_FAILURE_THRESHOLD` (5 ошибок подряд), `CHAT__CIRCUIT_BREAKER_RECOVERY_TIMEOUT_SEC` (60 сек). Состояние — process-local (нет общей памяти между воркерами; для проекта single-worker этого достаточно).
+Настройки: `CHAT__CIRCUIT_BREAKER_FAILURE_THRESHOLD` (2 ошибки подряд), `CHAT__CIRCUIT_BREAKER_RECOVERY_TIMEOUT_SEC` (60 сек). Состояние — process-local (нет общей памяти между воркерами; для проекта single-worker этого достаточно).
 
 **3. Fallback-провайдер.** Если в `.env` заполнена группа `CHAT__FALLBACK_*` (профиль, base URL, ключ, модель) — при `open`-состоянии circuit breaker оркестратор переключается на него. Поддерживаются все профили (`sglang`/`openrouter`/`openai`/`gigachat`) — fallback может быть другого типа, чем primary. Если fallback не настроен, при `open` запрос падает с явной ошибкой пользователю.
 
@@ -3105,7 +3105,7 @@ def test_chat_settings_defaults():
 | `CHAT__FALLBACK_API_KEY` | SecretStr | (пусто) | API-ключ fallback-провайдера |
 | `CHAT__FALLBACK_MODEL` | str | (пусто) | Модель fallback |
 | `CHAT__FALLBACK_EXTRA_HEADERS` | JSON | `{}` | Доп. заголовки для fallback |
-| `CHAT__CIRCUIT_BREAKER_FAILURE_THRESHOLD` | int | `5` | Подряд ошибок primary до размыкания circuit |
+| `CHAT__CIRCUIT_BREAKER_FAILURE_THRESHOLD` | int | `2` | Подряд ошибок primary до размыкания circuit |
 | `CHAT__CIRCUIT_BREAKER_RECOVERY_TIMEOUT_SEC` | int | `60` | Сек до пробного запроса в primary (half-open) |
 
 #### Chat: agent_channel (внешний ИИ-агент)
