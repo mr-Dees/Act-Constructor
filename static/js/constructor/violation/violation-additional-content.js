@@ -7,6 +7,12 @@ import { ContextMenuManager } from '../context-menu/context-menu-core.js';
 import { PreviewManager } from '../preview/preview.js';
 import { ViolationManager } from './violation-core.js';
 import { Notifications } from '../../shared/notifications.js';
+import { AppState } from '../state/state-core.js';
+import {
+    estimateActImageBytes,
+    loadImageLimits,
+    validateImageFile,
+} from './violation-image-validator.js';
 
 // Расширение ViolationManager
 Object.assign(ViolationManager.prototype, {
@@ -21,6 +27,10 @@ Object.assign(ViolationManager.prototype, {
 
         // Регистрируем violation в хранилище для быстрого доступа
         this.activeViolations.set(violation.id, violation);
+
+        // Лимиты картинок подтягиваются один раз заранее (fire-and-forget):
+        // к моменту приёма первого файла валидатор уже знает серверные значения.
+        loadImageLimits();
 
         // Чекбокс для включения секции
         const checkboxContainer = document.createElement('div');
@@ -219,7 +229,9 @@ Object.assign(ViolationManager.prototype, {
             url: extraData.url || '',
             caption: '',
             filename: extraData.filename || '',
-            order: insertIndex
+            order: insertIndex,
+            // Ширина картинки, % полезной ширины листа (0 — авто, Б-1.4).
+            width: extraData.width || 0
         };
 
         // Вставляем элемент в нужную позицию
@@ -246,6 +258,40 @@ Object.assign(ViolationManager.prototype, {
     },
 
     /**
+     * Валидирует пачку файлов картинок ДО чтения в base64 (H6).
+     *
+     * Общая точка для всех трёх способов приёма (выбор файлов, drag&drop,
+     * Ctrl+V). Лимиты (MIME/размер/суммарный по акту/число элементов) —
+     * с GET /acts/limits, см. violation-image-validator.js. Отказ каждого
+     * файла сопровождается Notifications.warning с причиной.
+     *
+     * @param {File[]} files - Файлы-кандидаты
+     * @param {Object} violation - Нарушение, в которое добавляются картинки
+     * @returns {File[]} Прошедшие валидацию файлы
+     */
+    filterAcceptedImageFiles(files, violation) {
+        let runningBytes = estimateActImageBytes(AppState.violations);
+        let runningCount = (violation.additionalContent?.items || []).length;
+        const accepted = [];
+
+        for (const file of files) {
+            const result = validateImageFile(file, {
+                existingTotalBytes: runningBytes,
+                itemsCount: runningCount,
+            });
+            if (!result.ok) {
+                Notifications.warning(result.reason);
+                continue;
+            }
+            accepted.push(file);
+            runningBytes += file.size;
+            runningCount += 1;
+        }
+
+        return accepted;
+    },
+
+    /**
      * Инициирует выбор файлов изображений с указанием позиции
      * @param {Object} violation - Объект нарушения
      * @param {HTMLElement} container - Контейнер содержимого
@@ -259,13 +305,16 @@ Object.assign(ViolationManager.prototype, {
         fileInput.style.display = 'none';
 
         fileInput.addEventListener('change', (e) => {
-            const files = e.target.files;
-            if (!files || files.length === 0) return;
+            if (!e.target.files || e.target.files.length === 0) return;
+
+            // Валидация ДО readAsDataURL (H6) — отказники отсеяны с warning'ом.
+            const files = this.filterAcceptedImageFiles(Array.from(e.target.files), violation);
+            if (files.length === 0) return;
 
             let addedCount = 0;
 
             // Обрабатываем каждый файл
-            Array.from(files).forEach((file, idx) => {
+            files.forEach((file, idx) => {
                 const reader = new FileReader();
 
                 reader.onload = (event) => {

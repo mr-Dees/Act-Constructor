@@ -265,6 +265,40 @@
     color: var(--input-placeholder);
 }
 
+/* Компактный контрол ширины картинки (Б-1.4): «Ширина: Авто/25/50/75/100%» */
+.image-width-control {
+    display: flex;
+    align-items: center;
+    gap: var(--spacing-sm);
+}
+
+.image-width-label {
+    font-size: var(--font-size-xs);
+    color: var(--text-secondary);
+    flex-shrink: 0;
+}
+
+.image-width-select {
+    padding: var(--spacing-xs) var(--spacing-sm);
+    border: var(--border-width-thin) solid var(--border);
+    border-radius: var(--radius);
+    font-family: var(--font-family-base);
+    font-size: var(--font-size-xs);
+    background-color: var(--input-bg);
+    color: var(--input-text);
+    transition: all var(--transition-base);
+}
+
+.image-width-select:hover {
+    border-color: var(--input-border-hover);
+}
+
+.image-width-select:focus {
+    outline: none;
+    border-color: var(--input-border-focus);
+    box-shadow: var(--input-shadow-focus);
+}
+
 /* Кнопка удаления элемента контента */
 .content-item-delete {
     position: absolute;
