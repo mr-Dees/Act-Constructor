@@ -5,8 +5,10 @@
 """
 
 from app.core.config import Settings
+from app.domains.acts.block_types import NODE_TYPE_TABLE
 from app.domains.acts.settings import ActsSettings
 from .base_formatter import BaseFormatter
+from .tree_walker import WalkContext, collect_blocks, walk
 from .utils import HTMLUtils, TableUtils, FormattingUtils
 
 
@@ -42,102 +44,18 @@ class TextFormatter(BaseFormatter):
         """
         result = []
 
-        # Извлекаем данные
-        violations = data.get('violations', {})
-        textBlocks = data.get('textBlocks', {})
-        tables = data.get('tables', {})
-
         # Декоративный заголовок
         result.append("=" * self.HEADER_WIDTH)
         result.append("АКТ".center(self.HEADER_WIDTH))
         result.append("=" * self.HEADER_WIDTH)
         result.append("")
 
-        # Обработка дерева
-        tree = data.get('tree', {})
-        root_children = tree.get('children', [])
-
-        for item in root_children:
-            result.append(
-                self._format_item(item, violations, textBlocks, tables, level=0)
-            )
+        # Обход дерева — единый walker, представление — в визиторе.
+        visitor = _TextTreeVisitor(self)
+        walk(data.get('tree', {}), visitor, collect_blocks(data))
+        result.extend(visitor.lines)
 
         return "\n".join(result)
-
-    def _format_item(
-            self,
-            item: dict,
-            violations: dict,
-            textBlocks: dict,
-            tables: dict,
-            level: int = 0
-    ) -> str:
-        """
-        Рекурсивно форматирует пункт с отступами.
-
-        Args:
-            item: Узел дерева акта
-            violations: Словарь нарушений
-            textBlocks: Словарь текстовых блоков
-            tables: Словарь таблиц
-            level: Уровень вложенности (для отступов)
-
-        Returns:
-            Текстовое представление пункта
-        """
-        lines = []
-        indent = " " * (self.INDENT_SIZE * level)
-
-        label = item.get('label', '')
-        number = item.get('number', '')
-        item_type = item.get('type', 'item')
-
-        # Для item-узлов собираем полный заголовок из номера и текста
-        if item_type not in ['table', 'textblock', 'violation']:
-            full_label = f"{number}. {label}" if number and label else (label or number)
-        else:
-            full_label = item.get('customLabel') or number or label
-
-        # Заголовок с подчеркиванием
-        if full_label and item_type not in ['textblock', 'violation']:
-            lines.append(f"{indent}{full_label}")
-            lines.append(f"{indent}{'-' * len(full_label)}")
-
-        # Текстовое содержание
-        content = item.get('content', '')
-        if content:
-            lines.append(f"{indent}{content}")
-            lines.append("")
-
-        # Таблица
-        table_id = item.get('tableId')
-        if table_id and table_id in tables:
-            lines.append(self._format_table(tables[table_id], level))
-            lines.append("")
-
-        # Текстовый блок
-        textblock_id = item.get('textBlockId')
-        if textblock_id and textblock_id in textBlocks:
-            lines.append(self._format_textblock(textBlocks[textblock_id], level))
-            lines.append("")
-
-        # Нарушение
-        violation_id = item.get('violationId')
-        if violation_id and violation_id in violations:
-            formatted_violation = self._format_violation(violations[violation_id])
-            # Применяем отступ к каждой строке
-            for line in formatted_violation.split('\n'):
-                lines.append(f"{indent}{line}")
-            lines.append("")
-
-        # Рекурсия для дочерних элементов
-        children = item.get('children', [])
-        for child in children:
-            lines.append(
-                self._format_item(child, violations, textBlocks, tables, level + 1)
-            )
-
-        return "\n".join(lines)
 
     def _format_table(self, table_data: dict, level: int = 0) -> str:
         """
@@ -387,3 +305,64 @@ class TextFormatter(BaseFormatter):
         if content:
             lines.append(content)
             lines.append("")
+
+
+class _TextTreeVisitor:
+    """Визитор tree-walker'а для plain text: представление узлов дерева.
+
+    Отступ строится от глубины обхода (ctx.depth); рендеринг таблиц,
+    текстблоков и нарушений делегируется методам TextFormatter.
+    """
+
+    def __init__(self, formatter: TextFormatter):
+        self._fmt = formatter
+        self.lines: list[str] = []
+
+    def _indent(self, depth: int) -> str:
+        return " " * (self._fmt.INDENT_SIZE * depth)
+
+    def on_item_enter(self, node: dict, ctx: WalkContext) -> None:
+        indent = self._indent(ctx.depth)
+        label = node.get('label', '')
+        number = node.get('number', '')
+
+        # Полный заголовок пункта из номера и текста, с подчёркиванием.
+        full_label = f"{number}. {label}" if number and label else (label or number)
+        if full_label:
+            self.lines.append(f"{indent}{full_label}")
+            self.lines.append(f"{indent}{'-' * len(full_label)}")
+
+        content = node.get('content', '')
+        if content:
+            self.lines.append(f"{indent}{content}")
+            self.lines.append("")
+
+    def on_item_exit(self, node: dict, ctx: WalkContext) -> None:
+        pass
+
+    def on_table(self, node: dict, schema: dict | None, ctx: WalkContext) -> None:
+        indent = self._indent(ctx.depth)
+        if node.get('type') == NODE_TYPE_TABLE:
+            # Заголовок узла-таблицы с подчёркиванием (выводится и без данных);
+            # прикреплённой к пункту таблице заголовком служит сам пункт.
+            title = node.get('customLabel') or node.get('number') or node.get('label', '')
+            if title:
+                self.lines.append(f"{indent}{title}")
+                self.lines.append(f"{indent}{'-' * len(title)}")
+        if schema is not None:
+            self.lines.append(self._fmt._format_table(schema, ctx.depth))
+            self.lines.append("")
+
+    def on_textblock(self, node: dict, schema: dict | None, ctx: WalkContext) -> None:
+        if schema is not None:
+            self.lines.append(self._fmt._format_textblock(schema, ctx.depth))
+            self.lines.append("")
+
+    def on_violation(self, node: dict, schema: dict | None, ctx: WalkContext) -> None:
+        if schema is None:
+            return
+        indent = self._indent(ctx.depth)
+        # Отступ применяется к каждой строке нарушения.
+        for line in self._fmt._format_violation(schema).split('\n'):
+            self.lines.append(f"{indent}{line}")
+        self.lines.append("")

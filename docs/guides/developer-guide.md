@@ -3541,7 +3541,7 @@ Deep-dive — [`docs/architecture/frontend-architecture.md`](../architecture/fro
 4. Pydantic-схема: `"chart"` в `Literal` `ActItemSchema.type`, поле `chartId` на `ActItemSchema`, класс `ChartSchema`, словарь `charts: dict[str, ChartSchema]` в `ActDataSchema` (`schemas/act_content.py`).
 5. Метод создания `addChartToNode()` в `state-content.js` + render-метод и запись в `ItemsRenderer._leafRenderers` (`items-renderer.js`).
 6. Preview-рендерер: `preview-chart-renderer.js` + диспетч в `preview.js`.
-7. Три форматтера экспорта: ветка/`_format_chart` в `text_formatter.py`, `markdown_formatter.py` и `docx/formatter.py._render_children` (+ builder).
+7. Три форматтера экспорта: обход у всех общий — `formatters/tree_walker.py` (`walk(tree, visitor, blocks)` сам диспетчит leaf-типы по `LEAF_BLOCK_REFS`, включая «item с прикреплённой таблицей»), поэтому достаточно по **одному визитор-методу `on_chart` на формат**: `_TextTreeVisitor` (`text_formatter.py`), `_MarkdownTreeVisitor` (`markdown_formatter.py`), `_DocxTreeVisitor` (`docx/formatter.py`, + builder).
 8. Санитайзер: если у блока есть HTML-поля — обработка в `sanitize_act_data` И `sanitize_act_content_dict` (`utils/html_sanitizer.py`). Пропуск = молчаливая XSS-дыра.
 9. Фикстура типа в `_BLOCK_PAYLOADS` тест-стража (`test_block_types_guard.py`) — параметризация по `LEAF_BLOCK_TYPES` сама потребует её.
 10. Иконка типа в `AppConfig.tree.icons` и, при необходимости, названия в `typeNames` / `limitNames` (`app-config.js`).
