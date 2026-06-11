@@ -31,6 +31,22 @@ class MessageRepository(BaseRepository):
                     result[key] = None
         return result
 
+    @staticmethod
+    def _content_list(raw_content) -> list:
+        """Колонка content из строки БД → список блоков.
+
+        JSONB может прийти как str (без codec'а) или как уже распарсенный
+        список. Битый JSON → пустой список (streaming-методы начинают
+        накопление заново). Общий хелпер append_block/upsert_block/
+        finalize/mark_failed.
+        """
+        if isinstance(raw_content, str):
+            try:
+                return json.loads(raw_content)
+            except json.JSONDecodeError:
+                return []
+        return list(raw_content or [])
+
     async def create(
         self,
         *,
@@ -161,14 +177,7 @@ class MessageRepository(BaseRepository):
             )
             if not row or row["status"] != "streaming":
                 return False
-            raw_content = row["content"]
-            if isinstance(raw_content, str):
-                try:
-                    content = json.loads(raw_content)
-                except json.JSONDecodeError:
-                    content = []
-            else:
-                content = list(raw_content or [])
+            content = self._content_list(row["content"])
             # Дедуп по block_id: повторный append того же блока — no-op.
             block_id = block.get("block_id") if isinstance(block, dict) else None
             if block_id and any(
@@ -205,14 +214,7 @@ class MessageRepository(BaseRepository):
             )
             if not row or row["status"] != "streaming":
                 return False
-            raw_content = row["content"]
-            if isinstance(raw_content, str):
-                try:
-                    content = json.loads(raw_content)
-                except json.JSONDecodeError:
-                    content = []
-            else:
-                content = list(raw_content or [])
+            content = self._content_list(row["content"])
             for i, b in enumerate(content):
                 if isinstance(b, dict) and b.get("block_id") == block_id:
                     content[i] = block
@@ -250,14 +252,7 @@ class MessageRepository(BaseRepository):
             )
             if not row or row["status"] != "streaming":
                 return False
-            raw_content = row["content"]
-            if isinstance(raw_content, str):
-                try:
-                    existing = json.loads(raw_content)
-                except json.JSONDecodeError:
-                    existing = []
-            else:
-                existing = list(raw_content or [])
+            existing = self._content_list(row["content"])
             # MERGE: финальные блоки с уже встречавшимся block_id ЗАМЕЩАЮТ
             # накопленные (финальная версия reasoning полнее инкрементальной),
             # остальные — дописываются в конец.
@@ -303,14 +298,7 @@ class MessageRepository(BaseRepository):
             )
             if not row or row["status"] != "streaming":
                 return False
-            raw_content = row["content"]
-            if isinstance(raw_content, str):
-                try:
-                    content = json.loads(raw_content)
-                except json.JSONDecodeError:
-                    content = []
-            else:
-                content = list(raw_content or [])
+            content = self._content_list(row["content"])
             content.append(error_block)
             await self.conn.execute(
                 f"""

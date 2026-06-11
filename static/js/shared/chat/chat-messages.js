@@ -332,7 +332,7 @@ export const ChatMessages = {
 
         for (const block of blocks) {
             if (!block || typeof block.block_id !== 'string' || !block.block_id) continue;
-            if (block.type !== 'reasoning' && block.type !== 'text') continue;
+            if (!ChatRenderer.isStreamingBlockType(block.type)) continue;
             const text = block.content || '';
             let entry = reg.get(block.block_id);
             if (!entry) {
@@ -368,7 +368,7 @@ export const ChatMessages = {
         }
         for (const block of blocks) {
             if (!block || typeof block.block_id !== 'string' || !block.block_id) continue;
-            if (block.type !== 'reasoning' && block.type !== 'text') continue;
+            if (!ChatRenderer.isStreamingBlockType(block.type)) continue;
             if (reg.has(block.block_id)) continue;
             const text = block.content || '';
             const sb = ChatRenderer.createStreamingBlock(block.type, block.block_id);
@@ -389,7 +389,7 @@ export const ChatMessages = {
         for (const block of blocks) {
             const bid = (block && typeof block.block_id === 'string') ? block.block_id : null;
             const entry = bid ? reg.get(bid) : null;
-            if (entry && (block.type === 'reasoning' || block.type === 'text')) {
+            if (entry && ChatRenderer.isStreamingBlockType(block.type)) {
                 const text = block.content || '';
                 if (text.length > entry.renderedLen) {
                     const delta = text.slice(entry.renderedLen);

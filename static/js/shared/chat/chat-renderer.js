@@ -57,13 +57,19 @@ marked.use({
 function makeStreamingClosure(targetEl) {
     let accumulated = '';
     let lastRender = 0;
-    const RENDER_EVERY_MS = 80; // re-parse не чаще ~12 раз/сек — глазу неотличимо
+    // Re-parse — O(всего накопленного текста), поэтому интервал перерисовки
+    // растёт вместе с ним: до ~5 КБ — 80мс (~12 раз/сек, глазу неотличимо),
+    // дальше пропорционально длине с потолком 1000мс — иначе на длинных
+    // reasoning каждый тик парсил бы десятки КБ. Визуально безопасно: чем
+    // длиннее текст, тем незаметнее дискретность дорисовки, а finalize
+    // всегда рендерит точное финальное состояние.
+    const renderIntervalMs = () => Math.min(1000, Math.max(80, accumulated.length / 64));
 
     return {
         appendText(text) {
             accumulated += text;
             const now = performance.now();
-            if (now - lastRender < RENDER_EVERY_MS) return;
+            if (now - lastRender < renderIntervalMs()) return;
             lastRender = now;
             ChatRenderer._safeSetHtml(targetEl, ChatRenderer._markdownToHtml(accumulated));
         },
@@ -257,6 +263,19 @@ export const ChatRenderer = {
     },
 
     /**
+     * Стримящийся ли тип блока: text/reasoning печатаются посимвольно и
+     * допечатываются дельтами (инкрементальный рендер, посев при resume).
+     * Единая точка истины для chat-renderer и chat-messages — новый
+     * стримящийся тип добавляется только здесь.
+     *
+     * @param {string} type — block.type
+     * @returns {boolean}
+     */
+    isStreamingBlockType(type) {
+        return type === 'text' || type === 'reasoning';
+    },
+
+    /**
      * Печатает ОДИН блок: text/reasoning — посимвольно через streaming-блок,
      * прочие типы — мгновенный рендер. Вынесен из _typeOutQueue, чтобы
      * финальный рендер после инкрементального мог допечатывать выборочно.
@@ -269,7 +288,7 @@ export const ChatRenderer = {
      */
     async typeOutSingleBlock(container, block, { speed = 8, signal } = {}) {
         const type = block && block.type;
-        if (type === 'text' || type === 'reasoning') {
+        if (this.isStreamingBlockType(type)) {
             const text = block.content || '';
             if (!text) {
                 const el = this.renderBlock(block, { execute: false });

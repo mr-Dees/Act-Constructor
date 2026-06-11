@@ -226,45 +226,42 @@ class ChatMessageFeedbackRepository(BaseRepository):
         """Агрегаты обратной связи: всего/up/down/like_rate, срезы по маршруту,
         модели и причинам дизлайка.
 
-        Каждый агрегат — отдельный простой GROUP BY (GP-совместимо). Причины
-        (JSONB-массив) считаются в Python по ограниченной выборке дизлайков,
-        чтобы не зависеть от set-returning функций в FROM на GP."""
+        Все срезы — из ОДНОГО запроса с полным GROUP BY по (route_type, model,
+        rating): обычный GROUP BY (GP-совместимо, без GROUPING SETS), один скан
+        таблицы вместо трёх, агрегация в Python по ячейкам куба (кардинальность
+        мала: маршруты × модели × 2 оценки). Причины (JSONB-массив) считаются
+        в Python по ограниченной выборке дизлайков, чтобы не зависеть от
+        set-returning функций в FROM на GP."""
         where, params, _ = self._filters(
             route_type=route_type, agent_mode=agent_mode,
             date_from=date_from, date_to=date_to,
         )
 
-        rating_rows = await self.conn.fetch(
-            f"SELECT rating, COUNT(*) AS cnt FROM {self.table} {where} "
-            f"GROUP BY rating",
+        cube_rows = await self.conn.fetch(
+            f"SELECT route_type, model, rating, COUNT(*) AS cnt FROM {self.table} {where} "
+            f"GROUP BY route_type, model, rating",
             *params,
         )
-        by_rating = {r["rating"]: int(r["cnt"]) for r in rating_rows}
+        by_rating: dict[str, int] = {}
+        by_route: dict[str, dict[str, int]] = {}
+        by_model: dict[str, dict[str, int]] = {}
+        for r in cube_rows:
+            rating_key = r["rating"]
+            cnt = int(r["cnt"])
+            by_rating[rating_key] = by_rating.get(rating_key, 0) + cnt
+            route_key = r["route_type"] or "unknown"
+            by_route.setdefault(route_key, {"up": 0, "down": 0})
+            by_route[route_key][rating_key] = (
+                by_route[route_key].get(rating_key, 0) + cnt
+            )
+            model_key = r["model"] or "unknown"
+            by_model.setdefault(model_key, {"up": 0, "down": 0})
+            by_model[model_key][rating_key] = (
+                by_model[model_key].get(rating_key, 0) + cnt
+            )
         up = by_rating.get("up", 0)
         down = by_rating.get("down", 0)
         total = up + down
-
-        route_rows = await self.conn.fetch(
-            f"SELECT route_type, rating, COUNT(*) AS cnt FROM {self.table} {where} "
-            f"GROUP BY route_type, rating",
-            *params,
-        )
-        by_route: dict[str, dict[str, int]] = {}
-        for r in route_rows:
-            key = r["route_type"] or "unknown"
-            by_route.setdefault(key, {"up": 0, "down": 0})
-            by_route[key][r["rating"]] = int(r["cnt"])
-
-        model_rows = await self.conn.fetch(
-            f"SELECT model, rating, COUNT(*) AS cnt FROM {self.table} {where} "
-            f"GROUP BY model, rating",
-            *params,
-        )
-        by_model: dict[str, dict[str, int]] = {}
-        for r in model_rows:
-            key = r["model"] or "unknown"
-            by_model.setdefault(key, {"up": 0, "down": 0})
-            by_model[key][r["rating"]] = int(r["cnt"])
 
         # Причины дизлайка — по ограниченной выборке (JSONB-массив, считаем в Python).
         rwhere, rparams, ridx = self._filters(
@@ -313,16 +310,17 @@ class ChatMessageFeedbackRepository(BaseRepository):
             prefix="f.", rating=rating, route_type=route_type,
             agent_mode=agent_mode, date_from=date_from, date_to=date_to,
         )
-        total = await self.conn.fetchval(
-            f"SELECT COUNT(*) FROM {self.table} f {where}",
-            *params,
-        )
+        # COUNT(*) OVER () считается до LIMIT/OFFSET — общее количество едет
+        # вместе со страницей, без отдельного COUNT-запроса (оконные функции
+        # есть и в GP 6). Пустая страница (offset за концом / нет совпадений)
+        # окна не даёт — добираем количество отдельным COUNT ниже.
         rows = await self.conn.fetch(
             f"""
             SELECT f.message_id, f.conversation_id, f.user_id, f.rating,
                    f.reasons, f.comment, f.route_type, f.agent_mode, f.model,
                    f.created_at, f.updated_at,
-                   m.content AS message_content, m.status AS message_status
+                   m.content AS message_content, m.status AS message_status,
+                   COUNT(*) OVER () AS total_count
             FROM {self.table} f
             LEFT JOIN {self.msg_table} m ON m.id = f.message_id
             {where}
@@ -331,9 +329,17 @@ class ChatMessageFeedbackRepository(BaseRepository):
             """,
             *params, int(limit), int(offset),
         )
+        if rows:
+            total = int(rows[0]["total_count"])
+        else:
+            total = int(await self.conn.fetchval(
+                f"SELECT COUNT(*) FROM {self.table} f {where}",
+                *params,
+            ) or 0)
         items = []
         for r in rows:
             item = self._parse_row(r)
+            item.pop("total_count", None)
             mc = item.get("message_content")
             if isinstance(mc, str):
                 try:
@@ -341,4 +347,4 @@ class ChatMessageFeedbackRepository(BaseRepository):
                 except json.JSONDecodeError:
                     item["message_content"] = None
             items.append(item)
-        return items, int(total or 0)
+        return items, total

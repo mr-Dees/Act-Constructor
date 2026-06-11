@@ -181,10 +181,17 @@ def _extract_reasoning(answer: dict) -> str:
     return val.strip() if isinstance(val, str) else ""
 
 
-def build_timeout_error_block(reason: str = "answer") -> dict:
+# Коды причин таймаута агента. Единые константы для поллера (выбор reason
+# по фазе) и build_timeout_error_block (текст error-блока) — вместо строковых
+# литералов, расползающихся по двум файлам.
+TIMEOUT_REASON_CLAIM = "claim"
+TIMEOUT_REASON_ANSWER = "answer"
+
+
+def build_timeout_error_block(reason: str = TIMEOUT_REASON_ANSWER) -> dict:
     """Error-блок таймаута агента. reason: 'answer' — агент не дописал ответ;
     'claim' — агент не взял вопрос в работу (очередь не двигалась claim_timeout)."""
-    if reason == "claim":
+    if reason == TIMEOUT_REASON_CLAIM:
         return {
             "type": "error",
             "code": "agent_claim_timeout",
@@ -320,7 +327,7 @@ class AgentChannelService:
         *,
         assistant_message_id: str,
         question_uid: str,
-        reason: str = "answer",
+        reason: str = TIMEOUT_REASON_ANSWER,
     ) -> None:
         """Помечает draft как failed (error-блок таймаута) и закрывает вопрос в шине.
 

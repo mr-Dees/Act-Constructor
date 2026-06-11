@@ -3672,7 +3672,7 @@ class ToolCallAccumulator:
 
 **Adaptive backoff poллера.** Интервал тика растёт от `POLL_MIN_INTERVAL_SEC` (2.0 c) до `POLL_MAX_INTERVAL_SEC` (10.0 c) с шагом `POLL_BACKOFF_MULTIPLIER` (1.5) при пустых тиках и сбрасывается в минимум при активности. Коннект из пула берётся только на время `_tick`, перед `sleep` освобождается.
 
-**Подписки.** `subscribe(assistant_message_id, question_uid)` идемпотентен (повторная подписка — no-op с info-логом); `unsubscribe(question_uid)` снимает запись из реестра. `_run()` не падает от одиночных ошибок тика. `get_status()` отдаёт снимок для diagnostics-эндпоинта.
+**Подписки.** `subscribe(assistant_message_id, question_uid)` идемпотентен (повторная подписка — no-op с info-логом); `unsubscribe(question_uid)` снимает запись из реестра. `_run()` не падает от одиночных ошибок тика; ошибка обработки одной подписки внутри `_tick` ретраится, но после `_MAX_CONSECUTIVE_ENTRY_ERRORS` (30) ошибок подряд подписка снимается аварийно с best-effort финализацией draft'а через `mark_timeout` (защита от «отравленной» подписки, которая иначе держала бы draft в `streaming` до рестарта; счётчик сбрасывается успешным тиком). `get_status()` отдаёт снимок для diagnostics-эндпоинта.
 
 **GET /messages/{id} для streaming-черновика.** Ответ содержит опциональное поле `status_details: {bus_status: str, queue_ahead: int|null}` — позиция вопроса в очереди шины (best-effort, через `AgentChannelService.get_queue_details`; если сервис недоступен — поле отсутствует). Фронт использует его для строки статуса и для фазового idle-таймаута поллинга.
 

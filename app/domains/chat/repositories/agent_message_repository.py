@@ -15,11 +15,6 @@ logger = logging.getLogger("audit_workstation.domains.chat.repo.agent_message")
 # Поля, хранящиеся как JSONB и требующие десериализации при чтении.
 _JSONB_FIELDS = ("media", "metadata", "buttons")
 
-# Поля типа UUID на стороне владельца таблицы (внешний агент). asyncpg отдаёт
-# их объектами uuid.UUID — нормализуем в str, чтобы остальной код (agent_ref,
-# block_id, сравнения с question_uid) работал со строками.
-_UUID_FIELDS = ("id", "reply_to")
-
 
 class AgentMessageRepository(BaseRepository):
     """CRUD-операции с bus-таблицей chat_agent_messages_bus.
@@ -59,8 +54,11 @@ class AgentMessageRepository(BaseRepository):
                     result[key] = json.loads(val)
                 except json.JSONDecodeError:
                     result[key] = None
-        for key in _UUID_FIELDS:
-            val = result.get(key)
+        # UUID-колонки владельца (id, reply_to, возможные будущие) asyncpg
+        # отдаёт объектами uuid.UUID — нормализуем в str по типу значения,
+        # чтобы остальной код (agent_ref, block_id, сравнения с question_uid)
+        # работал со строками и новые колонки не требовали ручного списка.
+        for key, val in result.items():
             if isinstance(val, uuid.UUID):
                 result[key] = str(val)
         return result

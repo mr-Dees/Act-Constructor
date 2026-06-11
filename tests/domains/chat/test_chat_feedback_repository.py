@@ -162,18 +162,13 @@ async def test_get_stats_aggregates_counts_routes_models_reasons(mock_conn):
     """get_stats считает total/up/down/like_rate и срезы по route/model/reason."""
     repo = ChatMessageFeedbackRepository(mock_conn)
     mock_conn.fetch.side_effect = [
-        # rating
-        [{"rating": "up", "cnt": 7}, {"rating": "down", "cnt": 3}],
-        # route_type x rating
+        # один куб route_type × model × rating — все срезы суммируются из него
         [
-            {"route_type": "kb_agent", "rating": "up", "cnt": 4},
-            {"route_type": "kb_agent", "rating": "down", "cnt": 2},
-            {"route_type": "smalltalk", "rating": "up", "cnt": 3},
-            {"route_type": "smalltalk", "rating": "down", "cnt": 1},
+            {"route_type": "kb_agent", "model": "gpt-4o", "rating": "up", "cnt": 4},
+            {"route_type": "kb_agent", "model": "gpt-4o", "rating": "down", "cnt": 2},
+            {"route_type": "smalltalk", "model": "gpt-4o", "rating": "up", "cnt": 3},
+            {"route_type": "smalltalk", "model": "gpt-4o", "rating": "down", "cnt": 1},
         ],
-        # model x rating
-        [{"model": "gpt-4o", "rating": "up", "cnt": 7},
-         {"model": "gpt-4o", "rating": "down", "cnt": 3}],
         # reasons sample (down)
         [{"reasons": json.dumps(["inaccurate", "other"])},
          {"reasons": json.dumps(["inaccurate"])}],
@@ -186,6 +181,7 @@ async def test_get_stats_aggregates_counts_routes_models_reasons(mock_conn):
     assert stats["down"] == 3
     assert stats["like_rate"] == 0.7
     assert stats["by_route"]["kb_agent"] == {"up": 4, "down": 2}
+    # by_model суммируется через несколько route_type — проверяем суммирование
     assert stats["by_model"]["gpt-4o"] == {"up": 7, "down": 3}
     assert stats["by_reason"] == {"inaccurate": 2, "other": 1}
 
@@ -193,16 +189,15 @@ async def test_get_stats_aggregates_counts_routes_models_reasons(mock_conn):
 async def test_get_stats_empty_like_rate_none(mock_conn):
     """Нет оценок → like_rate=None, без деления на ноль."""
     repo = ChatMessageFeedbackRepository(mock_conn)
-    mock_conn.fetch.side_effect = [[], [], [], []]
+    mock_conn.fetch.side_effect = [[], []]
     stats = await repo.get_stats()
     assert stats["total"] == 0
     assert stats["like_rate"] is None
 
 
 async def test_list_feedback_returns_items_and_total(mock_conn):
-    """list_feedback: COUNT + выборка с join'ом контента ответа."""
+    """list_feedback: одна выборка с оконным COUNT и join'ом контента ответа."""
     repo = ChatMessageFeedbackRepository(mock_conn)
-    mock_conn.fetchval.return_value = 2
     mock_conn.fetch.return_value = [
         {
             "message_id": "m1", "conversation_id": "c1", "user_id": "u1",
@@ -211,6 +206,7 @@ async def test_list_feedback_returns_items_and_total(mock_conn):
             "model": "gpt-4o", "created_at": None, "updated_at": None,
             "message_content": json.dumps([{"type": "text", "content": "Ответ"}]),
             "message_status": "complete",
+            "total_count": 2,
         },
     ]
     items, total = await repo.list_feedback(rating="down", limit=10, offset=0)
@@ -219,6 +215,20 @@ async def test_list_feedback_returns_items_and_total(mock_conn):
     assert items[0]["reasons"] == ["inaccurate"]
     # message_content десериализован в список блоков
     assert items[0]["message_content"] == [{"type": "text", "content": "Ответ"}]
+    # служебная колонка окна не утекает наружу
+    assert "total_count" not in items[0]
+    # отдельный COUNT-запрос не понадобился — total приехал с окном
+    mock_conn.fetchval.assert_not_called()
+
+
+async def test_list_feedback_empty_page_falls_back_to_count(mock_conn):
+    """Пустая страница (offset за концом) → total добирается отдельным COUNT."""
+    repo = ChatMessageFeedbackRepository(mock_conn)
+    mock_conn.fetch.return_value = []
+    mock_conn.fetchval.return_value = 7
+    items, total = await repo.list_feedback(limit=10, offset=100)
+    assert items == []
+    assert total == 7
 
 
 async def test_get_all_for_conversation_groups_by_message(mock_conn):

@@ -28,6 +28,14 @@ from app.domains.chat.settings import ChatDomainSettings
 
 logger = logging.getLogger("audit_workstation.domains.chat.services.agent_channel_poller")
 
+# Подряд идущих ошибок обработки ОДНОЙ подписки, после которых она снимается
+# аварийно (с best-effort финализацией draft'а). Полный отказ БД сюда не
+# доходит — он ловится в _run ещё на получении коннекта, счётчики не растут.
+# Порог отлавливает «отравленные» подписки (например, сменившуюся структуру
+# bus-таблицы), которые иначе ретраились бы вечно, оставляя draft в
+# 'streaming' до рестарта. При backoff 2-10 сек порог ≈ 1-5 минут сбоев.
+_MAX_CONSECUTIVE_ENTRY_ERRORS = 30
+
 
 class AgentChannelPoller:
     """Process-level поллер ответов агента через bus-таблицу chat_agent_messages_bus.
@@ -117,6 +125,9 @@ class AgentChannelPoller:
             "last_reasoning_len": 0,
             "last_queue_ahead": None,
             "last_answer_updated_at": None,
+            # Ошибок обработки подряд; сбрасывается успешным тиком. По
+            # достижении _MAX_CONSECUTIVE_ENTRY_ERRORS подписка снимается.
+            "consecutive_errors": 0,
         }
         logger.info(
             "agent_channel_poller: подписан question_uid=%s, message_id=%s (всего=%d)",
@@ -145,7 +156,11 @@ class AgentChannelPoller:
           Пока фаза 'processing' — лимит cfg.answer_timeout_sec от last_activity.
           Таймаут: mark_timeout(reason='claim'|'answer'), unsubscribe.
         """
-        from app.domains.chat.services.agent_channel import AgentChannelService
+        from app.domains.chat.services.agent_channel import (
+            TIMEOUT_REASON_ANSWER,
+            TIMEOUT_REASON_CLAIM,
+            AgentChannelService,
+        )
 
         cfg = self._settings.agent_channel
         now = self._now()
@@ -210,7 +225,10 @@ class AgentChannelPoller:
                     else cfg.answer_timeout_sec
                 )
                 if now - entry["last_activity"] >= limit_sec:
-                    reason = "claim" if entry["phase"] == "pending" else "answer"
+                    reason = (
+                        TIMEOUT_REASON_CLAIM if entry["phase"] == "pending"
+                        else TIMEOUT_REASON_ANSWER
+                    )
                     await svc.mark_timeout(
                         assistant_message_id=assistant_message_id,
                         question_uid=question_uid,
@@ -222,13 +240,57 @@ class AgentChannelPoller:
                         "agent_channel_poller: таймаут (%s) question_uid=%s, message_id=%s",
                         reason, question_uid, assistant_message_id,
                     )
+                entry["consecutive_errors"] = 0
             except Exception:
-                logger.exception(
-                    "agent_channel_poller: ошибка при обработке question_uid=%s — пропускаем",
-                    question_uid,
-                )
+                entry["consecutive_errors"] += 1
+                if entry["consecutive_errors"] >= _MAX_CONSECUTIVE_ENTRY_ERRORS:
+                    logger.exception(
+                        "agent_channel_poller: %d ошибок подряд по question_uid=%s — "
+                        "снимаем подписку аварийно",
+                        entry["consecutive_errors"], question_uid,
+                    )
+                    await self._abandon_subscription(
+                        conn,
+                        question_uid=question_uid,
+                        assistant_message_id=assistant_message_id,
+                    )
+                    done_count += 1
+                else:
+                    logger.exception(
+                        "agent_channel_poller: ошибка при обработке question_uid=%s — пропускаем",
+                        question_uid,
+                    )
 
         return done_count
+
+    async def _abandon_subscription(
+        self, conn, *, question_uid: str, assistant_message_id: str,
+    ) -> None:
+        """Аварийно снимает подписку после серии ошибок подряд.
+
+        Best-effort финализирует draft через mark_timeout (error-блок + статус
+        в шине), чтобы сообщение не висело в 'streaming' до рестарта. Сбой
+        финализации глотается: подписку снимаем в любом случае — застрявший
+        draft подхватит reconcile при следующем старте.
+        """
+        from app.domains.chat.services.agent_channel import (
+            TIMEOUT_REASON_ANSWER,
+            AgentChannelService,
+        )
+
+        self.unsubscribe(question_uid)
+        try:
+            await AgentChannelService(conn, self._settings).mark_timeout(
+                assistant_message_id=assistant_message_id,
+                question_uid=question_uid,
+                reason=TIMEOUT_REASON_ANSWER,
+            )
+        except Exception:
+            logger.exception(
+                "agent_channel_poller: не удалось финализировать draft %s "
+                "при аварийном снятии подписки",
+                assistant_message_id,
+            )
 
     # ── Reconcile ─────────────────────────────────────────────────────────────
 

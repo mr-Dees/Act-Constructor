@@ -93,6 +93,7 @@ class TestSubscribe:
         assert entry["last_reasoning_len"] == 0
         assert entry["last_queue_ahead"] is None
         assert entry["last_answer_updated_at"] is None
+        assert entry["consecutive_errors"] == 0
 
     def test_subscribe_idempotent(self, settings):
         """Повторный вызов с тем же uid — реестр не дублируется."""
@@ -646,3 +647,88 @@ class TestTick:
         assert "Q2" not in poller._subscriptions
         # Q1 остался в реестре — не удалён при ошибке.
         assert "Q1" in poller._subscriptions
+
+    async def test_tick_repeated_exceptions_abandon_subscription(
+        self, settings, mock_conn
+    ):
+        """Серия ошибок подряд → аварийное снятие + best-effort финализация draft'а.
+
+        Транзиентные ошибки ретраятся (подписка живёт), но «отравленная»
+        подписка (например, сменилась структура bus-таблицы) не должна
+        ретраиться вечно, оставляя draft в 'streaming' до рестарта.
+        """
+        from app.domains.chat.services.agent_channel_poller import (
+            _MAX_CONSECUTIVE_ENTRY_ERRORS,
+        )
+
+        poller = _make_poller(settings, mock_conn=mock_conn)
+        poller.subscribe(assistant_message_id="m1", question_uid="Q1")
+
+        with patch(
+            "app.domains.chat.services.agent_channel.AgentChannelService.poll_once",
+            new_callable=AsyncMock,
+            side_effect=RuntimeError("шина сломана"),
+        ), patch(
+            "app.domains.chat.services.agent_channel.AgentChannelService.mark_timeout",
+            new_callable=AsyncMock,
+        ) as mock_mark:
+            for _ in range(_MAX_CONSECUTIVE_ENTRY_ERRORS - 1):
+                await poller._tick(mock_conn)
+            # До порога подписка живёт — ошибки считаются транзиентными.
+            assert "Q1" in poller._subscriptions
+            n = await poller._tick(mock_conn)
+
+        assert n == 1
+        assert "Q1" not in poller._subscriptions
+        mock_mark.assert_called_once_with(
+            assistant_message_id="m1",
+            question_uid="Q1",
+            reason="answer",
+        )
+
+    async def test_tick_abandon_swallows_finalize_failure(self, settings, mock_conn):
+        """Сбой финализации при аварийном снятии глотается — подписка всё равно снята."""
+        from app.domains.chat.services.agent_channel_poller import (
+            _MAX_CONSECUTIVE_ENTRY_ERRORS,
+        )
+
+        poller = _make_poller(settings, mock_conn=mock_conn)
+        poller.subscribe(assistant_message_id="m1", question_uid="Q1")
+
+        with patch(
+            "app.domains.chat.services.agent_channel.AgentChannelService.poll_once",
+            new_callable=AsyncMock,
+            side_effect=RuntimeError("шина сломана"),
+        ), patch(
+            "app.domains.chat.services.agent_channel.AgentChannelService.mark_timeout",
+            new_callable=AsyncMock,
+            side_effect=RuntimeError("и финализация сломана"),
+        ):
+            for _ in range(_MAX_CONSECUTIVE_ENTRY_ERRORS):
+                await poller._tick(mock_conn)
+
+        assert "Q1" not in poller._subscriptions
+
+    async def test_tick_success_resets_consecutive_errors(self, settings, mock_conn):
+        """Успешный тик сбрасывает счётчик ошибок — ошибки должны идти ПОДРЯД."""
+        poller = _make_poller(settings, mock_conn=mock_conn)
+        poller.subscribe(assistant_message_id="m1", question_uid="Q1")
+
+        calls = [RuntimeError("транзиентная ошибка"), _poll_res()]
+
+        async def _poll_once_side_effect(**kwargs):
+            res = calls.pop(0)
+            if isinstance(res, Exception):
+                raise res
+            return res
+
+        with patch(
+            "app.domains.chat.services.agent_channel.AgentChannelService.poll_once",
+            new_callable=AsyncMock,
+            side_effect=_poll_once_side_effect,
+        ):
+            await poller._tick(mock_conn)
+            assert poller._subscriptions["Q1"]["consecutive_errors"] == 1
+            await poller._tick(mock_conn)
+
+        assert poller._subscriptions["Q1"]["consecutive_errors"] == 0

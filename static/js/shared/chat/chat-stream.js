@@ -136,6 +136,13 @@ export const ChatStream = {
                     return;
                 }
 
+                // Отмена могла случиться, пока ответ был в полёте (между fetch
+                // и этим местом) — не рендерим в уже покинутый контейнер.
+                if (signal && signal.aborted) {
+                    resolve();
+                    return;
+                }
+
                 if (msg.status === 'complete' || msg.status === 'failed') {
                     if (onReady) onReady(msg);
                     resolve();
