@@ -225,6 +225,7 @@ class MarkdownFormatter(BaseFormatter):
         self._add_labeled_section(lines, "Причины", violation_data.get('reasons', {}))
         self._add_labeled_section(lines, "Последствия", violation_data.get('consequences', {}))
         self._add_labeled_section(lines, "Ответственные", violation_data.get('responsible', {}))
+        self._add_labeled_section(lines, "Рекомендации", violation_data.get('recommendations', {}))
 
         return "\n".join(lines)
 

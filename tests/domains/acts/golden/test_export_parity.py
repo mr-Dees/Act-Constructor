@@ -164,23 +164,13 @@ def test_docx_item_node_attached_table_rendered(golden_docx):
     assert MARKER_ATTACHED_TBL_CELL in _docx_body_text(golden_docx)
 
 
-@pytest.mark.xfail(
-    strict=True,
-    reason="ebe-8: «Рекомендации» нарушения не рендерятся в MD "
-    "(markdown_formatter._format_violation не имеет ветки recommendations; "
-    "DOCX рендерит)",
-)
 def test_md_recommendations_rendered(golden_md):
+    """«Рекомендации» нарушения рендерятся в MD (ebe-8 закрыт)."""
     assert MARKER_RECOMMENDATIONS in golden_md
 
 
-@pytest.mark.xfail(
-    strict=True,
-    reason="ebe-8: «Рекомендации» нарушения не рендерятся в TXT "
-    "(text_formatter._format_violation не имеет ветки recommendations; "
-    "DOCX рендерит)",
-)
 def test_txt_recommendations_rendered(golden_txt):
+    """«Рекомендации» нарушения рендерятся в TXT (ebe-8 закрыт)."""
     assert MARKER_RECOMMENDATIONS in golden_txt
 
 
