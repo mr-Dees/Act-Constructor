@@ -626,8 +626,9 @@ Object.assign(AppState, {
         if (draggedParent.id === 'root') return ValidationCore.success();
 
         // Проверяем, есть ли уже кастомный пункт 7
+        // (Number вместо parseInt: '7.1' не должен считаться пунктом 7)
         const hasCustomFirstLevel = targetParent.children.some(child => {
-            const num = child.number ? parseInt(child.number) : null;
+            const num = child.number ? Number(child.number) : null;
             return num === 7;
         });
 
@@ -636,7 +637,7 @@ Object.assign(AppState, {
         }
 
         // Проверяем, что добавляем только после пункта 6 или перед пунктом 7
-        const targetNumber = targetNode.number ? parseInt(targetNode.number) : null;
+        const targetNumber = targetNode.number ? Number(targetNode.number) : null;
         if (!targetNumber) return ValidationCore.success();
 
         if ((position === 'before' && targetNumber !== 7) ||

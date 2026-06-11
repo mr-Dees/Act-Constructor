@@ -19,6 +19,13 @@ export const ValidationTree = {
      */
     canAddChild(parentId) {
         const depth = TreeUtils.getNodeDepth(parentId);
+
+        // Неизвестный родитель: getNodeDepth даёт -1, что без guard'а
+        // проходило проверку maxDepth и давало ложный success
+        if (depth === -1) {
+            return ValidationCore.failure(AppConfig.tree.validation.parentNotFound);
+        }
+
         const maxDepth = AppConfig.tree.maxDepth;
 
         if (depth >= maxDepth) {
@@ -54,7 +61,8 @@ export const ValidationTree = {
      */
     _validateFirstLevelSiblingAddition(parent, nodeId) {
         const hasCustomFirstLevel = parent.children.some(child => {
-            const num = child.number ? parseInt(child.number) : null;
+            // Number вместо parseInt: '7.1' не должен считаться пунктом 7
+            const num = child.number ? Number(child.number) : null;
             return num === 7;
         });
 
